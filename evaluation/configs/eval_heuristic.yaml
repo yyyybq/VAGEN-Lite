@@ -1,0 +1,42 @@
+# Heuristic (Oracle) Baseline Evaluation Config
+eval_name: eval_heuristic_baseline
+output_dir: evaluation/outputs/eval_heuristic
+agent_type: heuristic
+max_steps_per_episode: 20
+num_eval_episodes: null
+seed_offset: 0
+use_wandb: false
+save_trajectories: true
+verbose: false
+
+env:
+  jsonl_path: /scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output/train_data_0267_840790_balanced.jsonl
+  render_backend: local
+  gs_root: /scratch/by2593/project/Active_Spatial/InteriorGS
+  gpu_device: 4
+  image_width: 512
+  image_height: 512
+  step_translation: 0.2
+  step_rotation_deg: 10.0
+  enable_potential_field: true
+  potential_field_position_weight: 0.7
+  potential_field_orientation_weight: 0.3
+  success_score_threshold: 0.85
+  enable_collision_detection: true
+  collision_camera_radius: 0.15
+  collision_floor_height: 0.3
+  collision_ceiling_height: 2.5
+  collision_penalty: -0.15
+  enable_visibility_check: true
+  fov_horizontal: 60.0
+  fov_vertical: 60.0
+  prompt_format: free_think
+  max_actions_per_step: 5
+  max_episode_steps: 50
+  format_reward: 0.05
+  success_reward: 1.0
+  max_distance: 5.0
+
+model:
+  provider: vllm
+  model_name: Qwen/Qwen2.5-VL-3B-Instruct

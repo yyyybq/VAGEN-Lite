@@ -1,0 +1,89 @@
+# =============================================================================
+# v18_absolute — Control / minimum-shaping baseline
+# =============================================================================
+# 在测什么 (control):
+#   去掉一切 delta / potential / per-channel decomposition / sigmoid 这些
+#   shaping 技巧, 只用最简的 absolute mode:
+#       r_t = potential_field_reward_scale · total_score_t
+#   即"你这一步当前对齐分数是多少, 就给你多少 dense reward (每步)".
+#   不需要前一帧记忆, 也不存在 telescoping 风险.
+#
+# 为什么需要这个 baseline:
+#   - 现在 4 个 active run (potential2/sigmoid2/andgate/dual2/sigmoid_dual)
+#     都假设 "形状好的 shaping 有用". 但缺一个 negative control 验证:
+#     **如果只是 dense per-step score 就能学到 reasonable policy,
+#       那 v17/v18 的 shaping 复杂度本身就过度工程化.**
+#   - 如果 v18_absolute 也能跑出 traj_success > 0, 说明问题不在 shaping,
+#     而在更基础的 (val determinism / success metric / episode length).
+#   - 如果 absolute 学不动, 反向证明 shaping 是必需的.
+#
+# 关键参数:
+#   ★ progress_mode = "absolute"          (每步 reward = scale·total_score)
+#   ★ potential_field_reward_scale = 0.3  (per-step ~0.0-0.15, 不至于淹没 step_penalty)
+#   ★ success_score_threshold = 0.45      (统一阈值)
+#   ★ success_reward = 20.0               (sigmoid 家族 cliff, 与 sigmoid2 一致)
+#   ★ near_success_mode = "constant" 0.2 @ 0.35  (留少量"接近"信号)
+#   ★ AND-gate OFF
+#   ★ position_reward_scale / orientation_reward_scale 在 absolute 模式被忽略
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # ★ E4
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── ★ v18_absolute: minimum-shaping baseline ───────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_progress_mode: "absolute"   # ★ no delta / no potential
+        potential_field_reward_scale: 0.3           # ★ per-step amplitude
+
+        success_score_threshold: 0.45
+        enable_auto_termination: true
+
+        # Near-success (留少量"接近"信号, 与 potential2 同档)
+        near_success_threshold: 0.35
+        near_success_bonus: 0.2
+        near_success_mode: "constant"
+
+        # AND-gate OFF
+        success_require_both: false
+        success_position_threshold: 0.5
+        success_orientation_threshold: 0.5
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 20.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

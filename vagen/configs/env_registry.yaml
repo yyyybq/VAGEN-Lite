@@ -4,5 +4,7 @@ env_registry:
   FrozenLake: vagen.envs.frozenlake.frozenlake_env.FrozenLake
   SpatialGym: vagen.envs.spatial_gym.spatial_gym_env.SpatialGym
   PrimitiveSkill: vagen.envs.primitive_skill.primitive_skill_env.PrimitiveSkillEnv
+  # Active Spatial Navigation (local, in-process)
+  ActiveSpatial: vagen.envs.active_spatial.active_spatial_env.ActiveSpatialGymEnv
   # Remote environment client (generic, reusable for any remote env)
   RemoteEnv: vagen.envs_remote.GymImageEnvClient

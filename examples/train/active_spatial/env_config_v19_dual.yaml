@@ -1,0 +1,100 @@
+# =============================================================================
+# v19_dual — score 系统消融: 在 v19_thr70_andgate 上把 progress_mode 换成 dual
+# =============================================================================
+# Motivation (score-system 唯一未消融维度):
+#   v19 全家四个跑 (clean / thr70_andgate / thr85_andgate / no_autoterm /
+#   thr85_no_autoterm) 全部用 progress_mode="potential" 单通道加权和
+#   r_t = scale · (γ · Φ_t − Φ_{t-1}),  Φ_t = 0.7·pos + 0.3·ori.
+#
+#   单通道的结构性缺陷 (v17/v18 反复观察):
+#     - turn_left / turn_right 使用率长期 0
+#     - ori_score 始终 ≈ 起点, 永不学会
+#     - 因为单一加权和里, "走路涨 pos" 的局部梯度比 "转向涨 ori" 大得多
+#       (pos 权重 0.7, 且 step_translation 对 pos_score 的影响远大于
+#        step_rotation_deg 对 ori_score), critic 没动力给旋转 advantage.
+#   v18_dual / v18_dual2 / v18_sigmoid_dual 曾用 progress_mode="dual" 给
+#   per-axis ΔΦ 单独 credit, 但当时跟 thr=0.45 + auto_term ON 绑在一起,
+#   AND-gate / threshold 都没拉到 v19 水准, 无法判断 dual 在 v19 stack 下是否有效.
+#
+#   本 yaml = v19_thr70_andgate 的单变量替换:
+#     ★ progress_mode: potential -> dual
+#     ★ α_pos = 0.3, α_ori = 0.7   (信号补偿, 不是反转重要性)
+#     ★ potential_field_reward_scale 在 dual 模式下被 env.py 忽略, 由 α_pos/α_ori
+#       直接控制 per-channel 幅度
+#   其余 (thr=0.70 AND-gate, auto_term ON, near_success constant 0.2@0.55,
+#        success_reward=50, format=0.05, step_penalty=-0.005) 与 v19_thr70_andgate
+#   完全一致, 形成 progress_mode 的 clean single-variable swap.
+#
+# 假设:
+#   - turn_left / turn_right 使用率 > 0 (vs v19_thr70_andgate 接近 0)
+#   - ori_score mean 显著抬升 (vs v19_thr70_andgate 几乎不动)
+#   - traj_success 是否上升取决于"先走到位再转向"还是"位姿耦合精修"哪个更好学,
+#     不预设方向; 关键指标是 ori 通道是否被激活, 这是 RL 学到旋转能力的前提.
+#
+# 相对 v19_thr70_andgate 的改动 (3 处, 同一 hypothesis):
+#   ★ potential_field_progress_mode : "potential" -> "dual"
+#   ★ position_reward_scale         : (new) 0.3
+#   ★ orientation_reward_scale      : (new) 0.7
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── ★ score 系统: dual progress (per-channel ΔΦ) ───────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7        # success gating 仍用, dual 不用
+        potential_field_orientation_weight: 0.3
+        potential_field_progress_mode: "dual"       # ★ "potential" -> "dual"
+        position_reward_scale: 0.3                  # ★ NEW (α_pos)
+        orientation_reward_scale: 0.7               # ★ NEW (α_ori, 补偿 ori 信号弱)
+        potential_field_reward_scale: 0.5           # dual 模式下被 env.py 忽略, 保留
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.65          # AND 模式忽略, 回滚保险
+        enable_auto_termination: true
+
+        near_success_threshold: 0.55
+        near_success_bonus: 0.2
+        near_success_mode: "constant"
+
+        # AND-gate 与 v19_thr70_andgate 对齐
+        success_require_both: true
+        success_position_threshold: 0.70
+        success_orientation_threshold: 0.70
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 50.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

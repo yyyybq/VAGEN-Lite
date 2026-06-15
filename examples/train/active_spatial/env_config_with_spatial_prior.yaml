@@ -1,0 +1,72 @@
+# =============================================================================
+# Active Spatial Environment with Multi-Frame Spatial Prior
+# =============================================================================
+# This configuration enables multi-frame spatial prior images to provide
+# the VLM with spatial context before starting the navigation task.
+#
+# The spatial prior images come from the DATASET - the training framework
+# simply reads whatever prior images are available in each data item.
+#
+# Dataset format:
+# - "spatial_prior_images": list of {image_path, view_name, pose} dicts
+# - "prior_image_paths": simple list of image paths (alternative format)
+#
+# INPUT FORMAT:
+# =============
+# Initial observation includes:
+# 1. Spatial Context: Multiple images from the dataset (any number)
+# 2. Current View: The agent's starting viewpoint image
+# 3. Task Description: What view to navigate to
+#
+# Example prompt structure:
+# ```
+# [Spatial Context]:
+# Below are 4 viewpoint images showing different perspectives of the scene.
+# <prior_images> <prior_images> <prior_images> <prior_images>
+# Views: [Front] | [Back] | [Left] | [Right]
+#
+# [Initial Observation]:
+# <image>
+# Current camera pose: [x, y, z, rx, ry, rz]
+# Task: Move the camera to the front view of the chair, about 2.0 meters away.
+# ```
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        # Dataset configuration - must contain spatial_prior_images or prior_image_paths
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data/interior_data_gen/interior_train_data_with_prior.jsonl"
+        
+        # Rendering: use pre-rendered images or local GPU rendering
+        render_backend: null  # null = use pre-rendered, "local" = GPU rendering
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        image_width: 512
+        image_height: 512
+        
+        # Camera control configuration
+        step_translation: 0.1  # meters per step
+        step_rotation_deg: 5.0  # degrees per step
+        
+        # Reward configuration
+        format_reward: 0.2
+        success_reward: 1.0
+        transition_distance: 2.0
+        max_distance: 5.0
+        
+        # Prompt configuration
+        prompt_format: free_think
+        max_actions_per_step: 5
+        action_sep: "|"
+        image_placeholder: "<image>"
+        
+        # ====== Multi-Frame Spatial Prior ======
+        # ENABLED: VLM will see prior images from the dataset
+        enable_spatial_prior: true
+        spatial_prior_placeholder: "<prior_images>"
+        
+        # Episode configuration
+        max_episode_steps: 50
+        
+    train_size: 1000
+    test_size: 100

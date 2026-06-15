@@ -1,0 +1,92 @@
+# =============================================================================
+# v19_thr85_no_autoterm — SFT 级门槛 + agent 自决 done (因子设计第 4 格)
+# =============================================================================
+# Motivation:
+#   填补 (auto_term × threshold) 2×2 因子的缺格:
+#       | auto_term ON  | auto_term OFF
+#   ----+---------------+---------------------------
+#   .70 | thr70_andgate | no_autoterm
+#   .85 | thr85_andgate | thr85_no_autoterm  (this)
+#
+#   假设: 把"何时停"还给 agent (no_autoterm) 与 "把目标设到 SFT 级" (thr=0.85)
+#   两个修复叠加, 能逼出最长 + 最精修的策略. 风险: 信号最稀, RL 起步最慢,
+#   可能必须配合 SFT cold-start.
+#
+# 相对 v19_no_autoterm 的改动:
+#   ★ success_position_threshold:    0.70 -> 0.85
+#   ★ success_orientation_threshold: 0.70 -> 0.80
+#   ★ near_success_threshold:        0.55 -> 0.70   (sigmoid)
+#   ★ near_success_bonus:            0.2  -> 0.5
+#   ★ near_success_mode:             constant -> sigmoid (steepness=10)
+#   ★ potential_field_reward_scale:  0.5  -> 0.8
+#
+# ─── 奖励系统三处结构性修复 (only this yaml, not the other 3 v19 runs) ───
+#   ☆ success_reward:  30.0  -> 10.0      # 治 cliff 失衡 (#1): +50/+30 vs ±0.5 shaping 100×
+#                                          # 不稳, 压到 10 让 critic 学得动
+#   ☆ format_reward:   0.02  -> 0.0       # 治 farm exploit (#2): 早期 traj_success≈0 但
+#                                          # 仍能通过永远输出合法 no-op 涨 mean_reward, 直接关
+#   ☆ step_penalty:    -0.01 -> -0.05     # 治磨蹭 (#3): step_penalty 必须 > format_reward 才
+#                                          # 真正鼓励短路径完成
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: true                 # agent 自决 done
+
+        # ─── γ-potential shaping (放大 scale 缓解稀疏) ──────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.8          # ★ 0.5 -> 0.8
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.80              # AND 模式忽略, 回滚保险
+        enable_auto_termination: false             # 不自动停
+
+        # sigmoid near_success 在 0.70 附近放大梯度
+        near_success_threshold: 0.70               # ★ 0.55 -> 0.70
+        near_success_bonus: 0.5                    # ★ 0.2 -> 0.5
+        near_success_mode: "sigmoid"               # ★ constant -> sigmoid
+        near_success_sigmoid_steepness: 10.0
+
+        # ─── ★ SFT 级 AND-gate ─────────────────────────────────────────────
+        success_require_both: true
+        success_position_threshold: 0.85           # ★ 0.70 -> 0.85
+        success_orientation_threshold: 0.80        # ★ 0.70 -> 0.80
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.0                         # ☆ 0.02 -> 0.0   (关掉, 防 farm)
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -2.0
+        step_penalty: -0.05                        # ☆ -0.01 -> -0.05 (压住磨蹭)
+        enable_step_penalty: true
+        success_reward: 10.0                       # ☆ 30.0 -> 10.0 (消 cliff)
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

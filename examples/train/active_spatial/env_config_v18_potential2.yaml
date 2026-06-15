@@ -1,0 +1,88 @@
+# =============================================================================
+# v18_potential2 — v18_potential 续作 (post-mortem 修正版)
+# =============================================================================
+# v18_potential run 1 问题:
+#   1. val_traj_success/mean@1 一直 0.000
+#      → 根因 (env.py info["task_success"] vs extract_success 查 "success"
+#        key 名不匹配). 已在 env.py 中修复.
+#   2. val_reward 卡常数 (verl val_kwargs 默认 greedy + 固定 val seeds).
+#      → run_experiment.sh 已注入 val_kwargs.{temperature,top_p,do_sample,n}.
+#   3. success_score_threshold=0.30 容易被 pos_score 单通道触发
+#      (total = 0.7·pos + 0.3·ori, pos=0.43 alone → total=0.301 即赢),
+#      auto-term 过早, episode 偏短.
+#      → 此版把 success_score_threshold 0.30 -> 0.40, 强制 episode 真正
+#        逼近目标才能 terminate. potential shaping (γ·Φ_t − Φ_{t-1}) 保持
+#        不变, 仍在整个 [0, 0.40] 区间提供 dense smooth 信号.
+#
+# 相对 v18_potential 的唯一 reward-landscape 改动:
+#   ★ success_score_threshold : 0.30 -> 0.40
+#   (potential 公式 / γ / scale / near_success 全部保留)
+#
+# AND-gate 字段 (新加, 默认 OFF, 留给下一版):
+#   success_require_both: false
+#   success_position_threshold: 0.5
+#   success_orientation_threshold: 0.5
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # ★ E4
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── v18_potential: Ng1999 γ-potential shaping (保留) ───────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.5
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        # ─── ★ v18_potential2: raised success threshold ─────────────────────
+        success_score_threshold: 0.40           # ★ v18_potential 0.30 -> 0.40
+        enable_auto_termination: true
+
+        # Near-success bonus (v17 constant mode, 保留)
+        near_success_threshold: 0.35
+        near_success_bonus: 0.2
+        near_success_mode: "constant"
+
+        # ─── AND-gate (default OFF, 留给下一版) ─────────────────────────────
+        success_require_both: false
+        success_position_threshold: 0.5
+        success_orientation_threshold: 0.5
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 50.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

@@ -1,0 +1,76 @@
+# =============================================================================
+# v19_succ10 — Winner base (v19_thr70_andgate) × success_reward 50 -> 10
+# =============================================================================
+# Hypothesis:
+#   v19_thr70_andgate 已经被验证为最稳的 winner (val_traj_succ ≈ 0.5,
+#   reward best@4 ≈ 46.6). 但 success_reward=50 形成巨大的悬崖, 一旦未触发
+#   终止条件就归零, 容易让策略坍塌到“只追形状奖励, 不敢按 done”这一局部.
+#   将 success_reward 降到 10:
+#     - 仍然显著大于单步 shape reward (~0.5)
+#     - 但 cliff/边际收益比从 ~100x 降到 ~20x, 减弱 “近成功 -> 远离” 的方差
+#   预期: 训练曲线更平滑, entropy 不再 spike, success rate 不必更高
+#         但 reward 方差会显著下降.
+#
+# 相对 v19_thr70_andgate 的唯一改动:
+#   ★ success_reward: 50.0 -> 10.0
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── γ-potential shaping ──────────────────────────────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.5
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.65
+        enable_auto_termination: true
+
+        near_success_threshold: 0.55
+        near_success_bonus: 0.2
+        near_success_mode: "constant"
+
+        # ─── AND-gate (thr=0.70) ──────────────────────────────────────────────
+        success_require_both: true
+        success_position_threshold: 0.70
+        success_orientation_threshold: 0.70
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 10.0                  # ★ 50.0 -> 10.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

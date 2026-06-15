@@ -1,0 +1,98 @@
+# =============================================================================
+# v18_sigmoid2 — v18_sigmoid 续作 (post-mortem 修正版)
+# =============================================================================
+# v18_sigmoid 出了什么问题:
+#   1. env_turns/avg ~1.6, episode 长度急剧坍缩
+#      → 根因: success_score_threshold=0.20 + sigmoid bonus 中心 0.20,
+#        policy 学会"先把 score 顶到 ~0.20 立刻拿 sigmoid bonus + auto-term
+#        success_reward 跑路", 没机会学真正的 fine-grained pose alignment.
+#      → 修复: success_score_threshold 0.20 -> 0.45 (强制 episode 必须真正
+#              收敛到目标才能 terminate, sigmoid 在 [0.20, 0.45] 区间继续提供
+#              dense shaping, 但不再"踩到 0.20 就赢").
+#   2. val_reward 一直卡常数 (sigmoid=26.0, dual=63.5 …)
+#      → 根因: verl val_kwargs 默认 greedy (do_sample=False, n=1) + 固定 val
+#              jsonl seeds → 每次评估产生完全相同的轨迹。
+#      → 修复: run_experiment.sh 现注入 val_kwargs.{temperature,top_p,
+#              do_sample,n} (默认 0.8 / 0.95 / True / 4).
+#   3. val_traj_success/mean@1 一直是 0.000
+#      → 根因: env.py 只写 info["task_success"], 但 extract_success() 在
+#              vagen/agent_loop/gym_agent_loop.py 只查 "success" / "is_success".
+#              key 名不匹配 → 永远 False, 与 reward 解耦.
+#      → 修复: env.py 同时写 info["success"] / info["is_success"] /
+#              info["task_success"] (backward compat).
+#
+# 相对 v18_sigmoid 的唯一 reward-landscape 改动:
+#   ★ success_score_threshold : 0.20 -> 0.45
+#   (sigmoid 中心保留 0.20 → 早期仍有 dense bonus, 阶跃悬崖仍消除)
+#
+# 其它 (新增字段, 默认关闭, 留给下一版 v18_andgate 用):
+#   success_require_both: false
+#   success_position_threshold: 0.5
+#   success_orientation_threshold: 0.5
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # ★ E4
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # Potential field
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.5
+        potential_field_progress_mode: "delta"
+
+        # ─── ★ v18_sigmoid2: raised success threshold ───────────────────────
+        # success_score_threshold 从 0.20 拉到 0.45.
+        # near_success_* 保持 v18_sigmoid 设定 → sigmoid bonus 仍以 0.20 为中心,
+        # 在 [0.20, 0.45] 区间提供连续 dense shaping, 同时不再"摸到 0.20 就赢".
+        success_score_threshold: 0.45           # ★ v18_sigmoid 0.20 -> 0.45
+        enable_auto_termination: true
+        near_success_threshold: 0.20            # 保留 (sigmoid 中心)
+        near_success_bonus: 0.5                 # 保留
+        near_success_mode: "sigmoid"            # 保留
+        near_success_sigmoid_steepness: 10.0    # 保留
+
+        # ─── AND-gate (default OFF, 留给下一版 v18_andgate 实验) ──────────
+        # success_require_both: true 时会改用 pos AND ori 双通道门控,
+        # 此时 success_score_threshold 不再起作用.
+        success_require_both: false
+        success_position_threshold: 0.5
+        success_orientation_threshold: 0.5
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 20.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

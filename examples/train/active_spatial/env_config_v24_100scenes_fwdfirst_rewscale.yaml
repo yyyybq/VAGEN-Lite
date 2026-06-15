@@ -1,0 +1,75 @@
+# =============================================================================
+# env_config_v24_100scenes_fwdfirst_rewscale — fwd-first 提示 + 低方差奖励结构
+# =============================================================================
+# 合并 env_config_v24_100scenes_fwdfirst.yaml (提示格式) 与
+#      env_config_v24_100scenes_rewscale.yaml  (奖励结构)
+#
+# 用途: c8_fwdfirst_rewscale (Cambrian-S 7B)
+#
+# 关键差异对比 env_config_v24_100scenes_fwdfirst.yaml:
+#   ★ potential_field_reward_scale: 0.5  → 1.0  (进度奖励提升 2x)
+#   ★ near_success_bonus:           0.2  → 0.5  (last-mile 增强)
+#   ★ success_reward:               50.0 → 5.0  (降低 10x，与进度奖励量级对齐)
+#   prompt_format 保持 free_think_fwd_first（沿用 c4 的 forward-first 提示）
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN-Lite/data_gen/active_spatial_pipeline/output_100scenes/train_100scenes_7types.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── γ-potential shaping ──────────────────────────────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 1.0       # ★ 0.5 → 1.0
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.65
+        enable_auto_termination: true
+
+        near_success_threshold: 0.55
+        near_success_bonus: 0.5                 # ★ 0.2 → 0.5
+        near_success_mode: "constant"
+
+        # ─── AND-gate (thr=0.70) ──────────────────────────────────────────────
+        success_require_both: true
+        success_position_threshold: 0.70
+        success_orientation_threshold: 0.70
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        # ─── no_farm reward ───────────────────────────────────────────────────
+        format_reward: 0.0
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.02
+        enable_step_penalty: true
+        success_reward: 5.0                     # ★ 50.0 → 5.0
+        max_distance: 5.0
+
+        prompt_format: free_think_fwd_first     # 保持 fwd-first 提示格式
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 11190
+    test_size: 21

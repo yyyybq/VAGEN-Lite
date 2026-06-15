@@ -1474,6 +1474,14 @@ class RayPPOTrainer:
                         if reward_extra_infos_dict:
                             batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
 
+                            # ── train-time task success rate (mirrors val-aux/.../traj_success) ──
+                            if "traj_success" in reward_extra_infos_dict and len(reward_extra_infos_dict["traj_success"]) > 0:
+                                _ts = np.asarray(reward_extra_infos_dict["traj_success"], dtype=np.float32)
+                                metrics["train/traj_success/mean"] = float(_ts.mean())
+                                metrics["train/traj_success/std"] = float(_ts.std())
+                                metrics["train/traj_success/sum"] = float(_ts.sum())
+                                metrics["train/traj_success/count"] = int(_ts.size)
+
                         # compute rewards. apply_kl_penalty if available
                         if self.config.algorithm.use_kl_in_reward:
                             batch, kl_metrics = apply_kl_penalty(
@@ -1513,7 +1521,7 @@ class RayPPOTrainer:
                             config=self.config.algorithm,
                         )
 
-                    if self.config.algorithm.adv_estimator in ["no_concat_gae_last", "no_concat_gae_first"]:
+                    if self.config.algorithm.adv_estimator in ["no_concat_gae_last", "no_concat_gae_first", "no_concat_gae"]:
                         batch.batch["value_mask"] = compute_value_mask(batch)
 
                     # compute custom metrics

@@ -1,0 +1,84 @@
+# =============================================================================
+# v19_no_farm_dual — Triple winner merger: thr70_andgate × no_farm × dual
+# =============================================================================
+# Hypothesis:
+#   v19 三路独立 winner 的组合性验证:
+#     1. v19_thr70_andgate: AND-gate + thr=0.70  (val best@4 peak 0.859)
+#     2. v19_no_farm:       format=0 + step_pen=-0.02  (val best@4 peak 0.880, 仅 2 ckpt)
+#     3. v19_dual:          progress_mode=dual + α_pos=0.3 / α_ori=0.7 (val best@4 peak 0.808, 仅 3 ckpt)
+#   它们各自单变量相对 thr70_andgate 验证, 现在合并三路 ⇒ 期望 val ≥ 0.88 且不塌.
+#   关键诊断指标:
+#     - response_length 应回落到 80-120 (no_farm 起作用)
+#     - turn_left/turn_right 使用率 > 0, ori_score 抬升 (dual 起作用)
+#     - val best@4 不出现 v19_thr70_andgate 在 step 70+ 之后的崩塌轨迹
+#
+# 相对 v19_thr70_andgate 的改动 (5 处, 来自三路合并):
+#   ★ progress_mode:   "potential" -> "dual"           # from v19_dual
+#   ★ position_reward_scale:    (new) 0.3              # from v19_dual
+#   ★ orientation_reward_scale: (new) 0.7              # from v19_dual
+#   ★ format_reward:   0.05  -> 0.0                    # from v19_no_farm
+#   ★ step_penalty:   -0.005 -> -0.02                  # from v19_no_farm
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── score 系统: dual progress (per-channel ΔΦ) ─────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7        # success gating 仍用, dual 不用
+        potential_field_orientation_weight: 0.3
+        potential_field_progress_mode: "dual"       # ★ "potential" -> "dual"
+        position_reward_scale: 0.3                  # ★ NEW (α_pos)
+        orientation_reward_scale: 0.7               # ★ NEW (α_ori, 补偿 ori 信号弱)
+        potential_field_reward_scale: 0.5           # dual 模式下被 env.py 忽略, 保留
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.65               # AND 模式忽略, 回滚保险
+        enable_auto_termination: true
+
+        near_success_threshold: 0.55
+        near_success_bonus: 0.2
+        near_success_mode: "constant"
+
+        # ─── AND-gate (thr=0.70) from v19_thr70_andgate ─────────────────────
+        success_require_both: true
+        success_position_threshold: 0.70
+        success_orientation_threshold: 0.70
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        # ─── kill format-farming from v19_no_farm ────────────────────────────
+        format_reward: 0.0                          # ★ 0.05 -> 0.0
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.02                         # ★ -0.005 -> -0.02
+        enable_step_penalty: true
+        success_reward: 50.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

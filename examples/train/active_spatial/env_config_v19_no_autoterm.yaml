@@ -1,0 +1,92 @@
+# =============================================================================
+# v19_no_autoterm — 关掉 auto_termination, 把"何时停"还给 agent
+# =============================================================================
+# Motivation:
+#   oracle replay 揭示: 0% trajectory 通过 done_action 自然结束, 全部靠
+#   auto_termination 在 score≈0.5 时强制截停. agent 永远没机会学到
+#   "继续精修到 0.95+ 再 done" 这种行为.
+#
+#   此 yaml 关掉 auto_termination + 打开 explicit_done. 现在只有两种结束:
+#       1) agent 主动发 done_action  → 由 env 检查双轴是否达标:
+#            - 达标 → +success_reward
+#            - 未达标 → +premature_done_penalty
+#       2) 撞到 max_episode_steps → 无 success_reward (只 shaping)
+#   预测: agent 学到的策略将明显更长 (多步精修), final_score 更高,
+#         done_action 使用率从 0% 上升.
+#
+# 假设:
+#   - oracle replay 的 SFT 轨迹本身没有 done_action, 所以 oracle 在此 yaml 下
+#     会全部 hit max_steps, final_score 取最后一步而非 best — 是合理 ceiling 信号
+#   - RL 训练时 traj_success 早期会接近 0 (agent 还没学到怎么 done), 过几百步
+#     critic 把 done_action 的 advantage 区分出来后才会上来
+#
+# 相对 v18_andgate 的改动:
+#   ★ enable_auto_termination: true -> false
+#   ★ enable_explicit_done: false -> true
+#   ★ premature_done_penalty: -0.3 -> -2.0    (惩罚 lazy-done 必须明显)
+#   ★ success_reward: 50.0 -> 30.0            (压低 cliff 防止暴炸)
+#   ★ success_position_threshold: 0.45 -> 0.70
+#   ★ success_orientation_threshold: 0.45 -> 0.70
+#   ★ step_penalty: -0.005 -> -0.01           (略放大鼓励 done)
+#   ★ format_reward: 0.05 -> 0.02             (相对压低 format, 让 done 决策更显著)
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: true                 # ★ false -> true
+
+        # ─── γ-potential shaping ────────────────────────────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.5
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.65
+        enable_auto_termination: false             # ★ true -> false
+
+        near_success_threshold: 0.55
+        near_success_bonus: 0.2
+        near_success_mode: "constant"
+
+        # AND-gate 仍开, done_action 触发时双轴必须达标才算成功
+        success_require_both: true
+        success_position_threshold: 0.70           # ★ 0.45 -> 0.70
+        success_orientation_threshold: 0.70        # ★ 0.45 -> 0.70
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.02                        # ★ 0.05 -> 0.02
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -2.0               # ★ -0.3 -> -2.0
+        step_penalty: -0.01                        # ★ -0.005 -> -0.01
+        enable_step_penalty: true
+        success_reward: 30.0                       # ★ 50.0 -> 30.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

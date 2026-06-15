@@ -1,0 +1,91 @@
+# =============================================================================
+# v18_sigmoid_dual — sigmoid near-bonus × dual-channel decomposition
+# =============================================================================
+# 在测什么 (激进组合):
+#   - dual progress mode 提供 per-axis credit (pos / ori 各自 ΔΦ → 旋转
+#     涨 ori 也直接拿奖励, 解决 v17 ori 永远学不会的问题)
+#   - sigmoid near-success bonus 提供 smooth dense shaping
+#     (避免 v17 那种 0.35 阶跃 cliff, 在 [0, 0.45] 全程有连续梯度)
+#   - 双管齐下 ↔ 假设两种 inductive bias 互补, 是 best-of-both
+#
+# 与已知 baseline 的关系:
+#   - 相对 v18_sigmoid2: 把 single-channel "delta" 换成 per-channel "dual"
+#   - 相对 v18_dual2:    把 constant near-bonus 换成 sigmoid, 关掉 AND-gate
+#                       (这次纯粹测 shaping 形状 + 多通道的组合效应)
+#   - success_reward 沿用 sigmoid 家族的 20 (小阶跃, 防 cliff)
+#
+# 关键参数 (混合):
+#   ★ progress_mode = "dual"                    (来自 v18_dual2)
+#   ★ α_pos = 0.4, α_ori = 0.6                  (来自 v18_dual2)
+#   ★ near_success_mode = "sigmoid"             (来自 v18_sigmoid2)
+#   ★ near_success_threshold = 0.20             (sigmoid 中心)
+#   ★ near_success_bonus = 0.5                  (sigmoid amplitude)
+#   ★ steepness = 10                            (smooth ramp)
+#   ★ success_score_threshold = 0.45            (统一阈值)
+#   ★ success_reward = 20.0                     (sigmoid 家族 cliff)
+#   ★ success_require_both = false              (本版不叠 AND-gate)
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # ★ E4
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── ★ v18_sigmoid_dual: dual progress + sigmoid near-bonus ─────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7        # success gating weights
+        potential_field_orientation_weight: 0.3
+        potential_field_progress_mode: "dual"       # ★ per-channel ΔΦ
+        position_reward_scale: 0.4                  # ★ α_pos
+        orientation_reward_scale: 0.6               # ★ α_ori
+        potential_field_reward_scale: 0.5           # ignored in dual mode
+
+        success_score_threshold: 0.45
+        enable_auto_termination: true
+
+        # ─── ★ Sigmoid near-success (来自 v18_sigmoid2) ─────────────────────
+        near_success_threshold: 0.20
+        near_success_bonus: 0.5
+        near_success_mode: "sigmoid"
+        near_success_sigmoid_steepness: 10.0
+
+        # AND-gate OFF (留作 v18_dual2 独占)
+        success_require_both: false
+        success_position_threshold: 0.5
+        success_orientation_threshold: 0.5
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 20.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

@@ -1,0 +1,52 @@
+# Active Spatial Navigation — Validation data config (local rendering, 8-GPU)
+
+envs:
+  - name: RemoteEnv
+    n_envs: 50              # small val set for quick evaluation
+    data_source: active_spatial
+    seed: [700, 750]
+    max_turns: 15
+    response_length_per_turn: 512
+    config:
+      base_urls: "http://localhost:8001"
+      timeout: 120
+      retries: 3
+
+      jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data/active_spatial_new/train_data_0267_840790.jsonl"
+      dataset_root: "/scratch/by2593/project/Active_Spatial/VAGEN/data/active_spatial_new"
+
+      render_backend: "local"
+      gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+      gpu_device: 0
+      image_width: 256
+      image_height: 256
+
+      step_translation: 0.2
+      step_rotation_deg: 10.0
+
+      max_actions_per_step: 1
+      action_sep: "|"
+
+      enable_potential_field: true
+      potential_field_position_weight: 0.7
+      potential_field_orientation_weight: 0.3
+      potential_field_reward_scale: 1.0
+      success_score_threshold: 0.85
+
+      enable_collision_detection: true
+      collision_camera_radius: 0.15
+      collision_floor_height: 0.3
+      collision_ceiling_height: 2.5
+      collision_penalty: -0.05
+
+      enable_visibility_check: true
+      fov_horizontal: 60.0
+      fov_vertical: 60.0
+
+      format_reward: 0.01
+      success_reward: 1.0
+      max_distance: 5.0
+
+      max_episode_steps: 50
+      prompt_format: free_think
+      image_placeholder: "<image>"

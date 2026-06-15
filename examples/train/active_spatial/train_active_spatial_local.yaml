@@ -1,0 +1,69 @@
+# Active Spatial Navigation — Training data config (local rendering, 8-GPU)
+#
+# Uses local Gaussian Splatting rendering via the env server.
+# The env server must be started on a separate GPU before training:
+#
+#   CUDA_VISIBLE_DEVICES=7 python -m vagen.envs.active_spatial.serve \
+#       --devices='[0]' --port=8001
+#
+# See launch_v12_8gpu_local.sh for the full launch procedure.
+
+envs:
+  - name: RemoteEnv
+    n_envs: 714             # total items in train_data_0267_840790.jsonl
+    data_source: active_spatial
+    seed: [0, 714]
+    max_turns: 15           # v12: 15 turns × 1 action/turn = 15 steps
+    response_length_per_turn: 512
+    config:
+      base_urls: "http://localhost:8001"
+      timeout: 120
+      retries: 3
+
+      # Dataset
+      jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data/active_spatial_new/train_data_0267_840790.jsonl"
+      dataset_root: "/scratch/by2593/project/Active_Spatial/VAGEN/data/active_spatial_new"
+
+      # Local rendering — env server renders on its own GPU (device 0 inside that process)
+      render_backend: "local"
+      gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+      gpu_device: 0          # device 0 inside env server (= physical GPU 7)
+      image_width: 256
+      image_height: 256
+
+      # Camera control
+      step_translation: 0.2
+      step_rotation_deg: 10.0
+
+      # Per-1-action mode (aligns with max_turns)
+      max_actions_per_step: 1
+      action_sep: "|"
+
+      # Spatial Potential Field
+      enable_potential_field: true
+      potential_field_position_weight: 0.7
+      potential_field_orientation_weight: 0.3
+      potential_field_reward_scale: 1.0
+      success_score_threshold: 0.85
+
+      # Collision detection
+      enable_collision_detection: true
+      collision_camera_radius: 0.15
+      collision_floor_height: 0.3
+      collision_ceiling_height: 2.5
+      collision_penalty: -0.05
+
+      # Visibility
+      enable_visibility_check: true
+      fov_horizontal: 60.0
+      fov_vertical: 60.0
+
+      # Rewards
+      format_reward: 0.01
+      success_reward: 1.0
+      max_distance: 5.0
+
+      # Episode
+      max_episode_steps: 50
+      prompt_format: free_think
+      image_placeholder: "<image>"

@@ -1,0 +1,60 @@
+# v17 ablation B: reward-shape fix ONLY (keep legacy action space).
+# Goal: isolate the contribution of reward redesign. Legacy action space
+# (move_forward/backward + turn_left/right + look_up/down + done) is kept,
+# but reward scaling, threshold, and near-success bonus follow v17.
+#
+# Caveat: model will still emit `move_left` hallucinations -> invalid action
+# count is expected to stay high. That is itself a useful signal — if this
+# variant trains anyway, action-space hallucination is *not* the blocker.
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.2
+        step_rotation_deg: 15.0
+
+        max_actions_per_step: 5
+
+        # === legacy action space (UNCHANGED from v16) ===
+        action_space: "legacy"
+        enable_explicit_done: true       # also restore explicit done to fully match v16 control
+
+        # === v17 reward redesign ===
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.5      # ★
+        potential_field_progress_mode: "delta"
+        success_score_threshold: 0.30          # ★
+        enable_auto_termination: true
+
+        near_success_threshold: 0.35           # ★
+        near_success_bonus: 0.2                # ★
+
+        # disable secondaries (same as v17 full)
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 50.0                   # ★
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

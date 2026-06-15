@@ -1,0 +1,92 @@
+# =============================================================================
+# v18_dual2 — v18_dual 修复版 (cliff 削平 + threshold 提高 + AND-gate)
+# =============================================================================
+# v18_dual 跑崩的 post-mortem:
+#   - actor/entropy 7.16 (爆), env_turns/mean 1.58 (塌), reward_var 0.0014
+#   - 输出全是多语言乱码 token (entropy collapse + token corruption)
+#
+# 三大根因 + 修复:
+#   1. success_score_threshold=0.30 + total = 0.7·pos + 0.3·ori
+#      → pos=0.43 alone → total=0.30 立刻 auto-term, episode 1-2 步就赢.
+#      ★ 提至 0.45.
+#   2. success_reward=50 阶跃 + α_pos+α_ori=1.0 dense reward → cliff 太陡,
+#      早期碰到 success 一次就把 advantage 拉到天上 → KL 爆 → policy 崩.
+#      ★ success_reward 50 -> 30; α_pos/α_ori 调整 0.3/0.7 -> 0.4/0.6
+#        (略向 pos 倾斜, 因为 pos 起点 advantage 也大, 减少不对称).
+#   3. 单 total_score 门控允许"pos 撑爆 ori 不动"形成奖励-能力错配.
+#      ★ 同时开 AND-gate, 强制 pos AND ori 双轴达标.
+#
+# 相对 v18_dual 的改动:
+#   ★ position_reward_scale       : 0.3  -> 0.4
+#   ★ orientation_reward_scale    : 0.7  -> 0.6
+#   ★ success_score_threshold     : 0.30 -> 0.45  (AND-gate ON 时被忽略, 留备份)
+#   ★ success_reward              : 50.0 -> 30.0  (削 cliff)
+#   ★ success_require_both        : false -> true (新加)
+#   ★ success_position_threshold  : (new) 0.45
+#   ★ success_orientation_threshold: (new) 0.45
+# 其它 (potential weights / step penalty / near_success / E4 / E5) 沿用 v18_dual.
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # ★ E4
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── ★ v18_dual2: decoupled pos/ori shaping (dual progress) ─────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7        # success gating weights
+        potential_field_orientation_weight: 0.3
+        potential_field_progress_mode: "dual"       # ★ per-channel ΔΦ
+        position_reward_scale: 0.4                  # ★ 0.3 -> 0.4
+        orientation_reward_scale: 0.6               # ★ 0.7 -> 0.6
+        potential_field_reward_scale: 0.5           # ignored in dual mode
+
+        # success_score_threshold 在 AND-gate ON 时被忽略, 保留备份.
+        success_score_threshold: 0.45               # ★ 0.30 -> 0.45
+        enable_auto_termination: true
+
+        # Near-success bonus (沿用 v18_dual constant 0.2 @ 0.35)
+        near_success_threshold: 0.35
+        near_success_bonus: 0.2
+        near_success_mode: "constant"
+
+        # ─── ★ v18_dual2: AND-gate ON ───────────────────────────────────────
+        success_require_both: true                  # ★ 新加, 强制双轴达标
+        success_position_threshold: 0.45
+        success_orientation_threshold: 0.45
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 30.0                        # ★ 50.0 -> 30.0 (削 cliff)
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

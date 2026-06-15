@@ -1,0 +1,53 @@
+{
+    "scenes_root": "/scratch/by2593/project/Active_Spatial/InteriorGS",
+    "output_dir": "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output",
+    "num_objects": 2,
+    "max_objects_per_scene": 50,
+    "save_intermediate": true,
+    "render_previews": false,
+    "object_selection": {
+        "min_dim_component": 0.1,
+        "max_dim_component": 3.0,
+        "min_volume": 0.1,
+        "min_aspect_ratio": 0.05,
+        "min_dist_to_wall": 0.0,
+        "min_pair_dist": 0.1,
+        "max_pair_dist": 3.0,
+        "max_pair_dim_ratio": 2.5,
+        "max_pair_dim_diff": 2.0,
+        "dyn_min_mult": 0.2,
+        "dyn_max_mult": 1.5
+    },
+    "camera_sampling": {
+        "num_cameras_per_item": 5,
+        "per_angle": 36,
+        "max_tries": 500,
+        "camera_heights": [1.0, 1.2, 1.35, 1.5, 1.65, 1.8],
+        "min_visibility_ratio": 0.05,
+        "max_occlusion_ratio": 0.7,
+        "min_visible_corners": 1,
+        "image_width": 640,
+        "image_height": 480,
+        "focal_length": 525.0
+    },
+    "task_config": {
+        "enabled_tasks": [
+            "absolute_positioning",
+            "delta_control",
+            "equidistance",
+            "projective_relations",
+            "centering",
+            "occlusion_alignment",
+            "fov_inclusion",
+            "size_distance_invariance",
+            "screen_occupancy"
+        ],
+        "absolute_positioning_distances": [1.0, 2.0, 3.0, 4.0, 5.0],
+        "delta_control_deltas": [0.5, 1.0, 1.5, 2.0],
+        "projective_relations": ["left", "right"],
+        "screen_occupancy_ratios": [0.2, 0.3, 0.5, 0.7],
+        "fov_horizontal": 90.0,
+        "fov_vertical": 60.0,
+        "agent_height": 1.5
+    }
+}

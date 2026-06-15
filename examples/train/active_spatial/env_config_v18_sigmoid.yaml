@@ -1,0 +1,95 @@
+# =============================================================================
+# v18_sigmoid (S2 真 sigmoid + E1 + E4 + E5): Smooth-ramp near-success bonus
+# =============================================================================
+# 在测什么 (真正的 S2):
+#   v17 的 success_reward=50 在 threshold=0.30 处是阶跃 (0.299->0, 0.30->+50)。
+#   v17 的 near_success_bonus 也是阶跃 (score >= 0.35 时 +0.2/step, 否则 0)。
+#   两个阶跃叠加 → reward landscape 全是悬崖 → advantage 方差爆 → 后期
+#   entropy 9.92 崩溃。
+#
+#   v18_sigmoid 用 env.py 新增的 near_success_mode="sigmoid" 模式：
+#       per-step bonus = near_success_bonus · σ(k · (score − near_success_threshold))
+#   即一条平滑 ramp：远低于 threshold 时 bonus≈0，threshold 附近过渡，
+#   远高于 threshold 时饱和到 near_success_bonus。无悬崖。
+#
+#   配合 success_reward 50 -> 20 降低终止时的阶跃峰值，整套 reward 都更平滑。
+#
+# 调参说明:
+#   near_success_threshold = 0.20       # sigmoid 中心拐点
+#   near_success_bonus     = 0.5        # 饱和峰值（每 step）
+#   near_success_sigmoid_steepness = 10 # 在 ±0.1 score 区间内完成大部分过渡
+#   success_score_threshold = 0.20      # 与 sigmoid 中心对齐 (一次性 success 触发)
+#   success_reward          = 20.0      # 降峰值减方差
+#
+# 与 v17 near_success_bonus 的关系:
+#   near_success_bonus 字段还在，但**含义升级为 sigmoid 的峰值 α**。
+#   通过 near_success_mode 开关在 "constant"(v17 行为) / "sigmoid"(v18) 间切换。
+#   v17 行为 100% 向后兼容。
+#
+# 相对 v17 的变化:
+#   ★ near_success_mode               : (new) "sigmoid"          (S2 核心)
+#   ★ near_success_threshold          : 0.35 -> 0.20             (S2: sigmoid 中心)
+#   ★ near_success_bonus              : 0.2  -> 0.5              (S2: 饱和峰值)
+#   ★ near_success_sigmoid_steepness  : (new) 10.0               (S2: 斜率)
+#   ★ success_score_threshold         : 0.30 -> 0.20             (与中心对齐)
+#   ★ success_reward                  : 50.0 -> 20.0             (降峰值方差)
+#   ★ step_translation : 0.20 -> 0.30 (E4)
+#   ★ step_rotation_deg: 15   -> 20   (E4)
+#   E5 (prompt.py) 已永久 fix
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # ★ E4
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # Potential field (sync with v17 weights & delta shaping)
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.5
+        potential_field_progress_mode: "delta"
+
+        # ─── ★ v18_sigmoid: smooth-ramp success bonus (S2) ──────────────────
+        success_score_threshold: 0.20           # ★ 0.30 -> 0.20  (与 sigmoid 中心对齐)
+        enable_auto_termination: true
+        near_success_threshold: 0.20            # ★ 0.35 -> 0.20  (sigmoid 中心)
+        near_success_bonus: 0.5                 # ★ 0.2  -> 0.5   (饱和峰值)
+        near_success_mode: "sigmoid"            # ★ (new) 切到 sigmoid 模式
+        near_success_sigmoid_steepness: 10.0    # ★ (new) σ 斜率 k
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 20.0                    # ★ 50.0 -> 20.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

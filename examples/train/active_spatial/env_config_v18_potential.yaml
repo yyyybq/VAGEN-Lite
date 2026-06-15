@@ -1,0 +1,84 @@
+# =============================================================================
+# v18_potential (S4 真 Ng1999 + E1 + E4 + E5): γ-discounted potential shaping
+# =============================================================================
+# 在测什么 (真正的 S4):
+#   v17 用 r_t = scale · (Φ_t − Φ_{t-1})，是无界 telescoping。模型可能学会
+#   "刷分循环"——绕远再回来反复拿正 Δ，配合稀疏 success_reward=50 容易诱导
+#   policy oscillation，正是 v17 后期 entropy 0.41 -> 9.92 崩溃的疑似根因。
+#
+#   v18_potential 用 env.py 新增的 progress_mode="potential" 模式，
+#   实现真正的 Ng1999 potential-based shaping:
+#       r_t = scale · (γ · Φ_t − Φ_{t-1})
+#   定理保证: 当 γ 与 MDP 折扣一致时，此 shaping 不改变最优策略 (policy-
+#   invariant)，但密集化了 reward。与 "delta" 的区别:
+#     - delta:     r_t = Φ_t − Φ_{t-1}         (γ=1，简单 telescoping，可被 cycle 刷)
+#     - potential: r_t = γΦ_t − Φ_{t-1} (γ<1) (oscillation 时累计 reward → 0)
+#
+#   γ 选 0.99 与训练侧 HIGH_LEVEL_GAMMA 一致 (实际 0.95，但 0.99 在 reward
+#   shaping 上更标准；细微 mismatch 在 60 步 episode 内的影响有限)。
+#
+# 相对 v17 的变化:
+#   ★ potential_field_progress_mode : "delta" -> "potential"     (S4 核心)
+#   ★ potential_field_gamma         : (new) 0.99                 (Ng1999 γ)
+#   ★ potential_field_reward_scale  : 0.5  -> 0.5                (无需补偿，量级与 delta 一致)
+#   ★ step_translation              : 0.20 -> 0.30               (E4)
+#   ★ step_rotation_deg             : 15   -> 20                 (E4)
+#   E5 (prompt.py) 已永久 fix
+#   其余 (success_reward=50, threshold=0.30, near-success 0.35/0.2 常数模式) 沿用 v17
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # ★ E4
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── ★ v18_potential: true Ng1999 γ-potential shaping (S4) ──────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.5
+        potential_field_progress_mode: "potential"   # ★ "delta" -> "potential"
+        potential_field_gamma: 0.99                  # ★ (new) Ng1999 γ
+        success_score_threshold: 0.30
+        enable_auto_termination: true
+
+        # Near-success bonus unchanged (v17 constant mode)
+        near_success_threshold: 0.35
+        near_success_bonus: 0.2
+        near_success_mode: "constant"
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 50.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

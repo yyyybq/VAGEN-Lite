@@ -1,0 +1,9 @@
+{
+  "total_input": 278,
+  "processed": 136,
+  "skipped": 118,
+  "failed": 24,
+  "successful_trajectories": 136,
+  "total_steps": 549,
+  "total_actions": 2387
+}

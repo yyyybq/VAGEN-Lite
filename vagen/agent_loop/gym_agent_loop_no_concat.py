@@ -260,11 +260,22 @@ class GymAgentLoop(AgentLoopBase):
         if self.env_max_turns is not None and agent_data.env_turns >= int(self.env_max_turns):
             last_turn = True
 
-        
-        if len(agent_data.turn_response_mask) >= self.response_length:
-            last_turn = True
-
         turn_images=agent_data.sys_images+agent_data.cur_images
+
+        # NFP: collect next-frame images (the observation rendered AFTER this action).
+        # These serve as the prediction target for the Next Frame Prediction head.
+        # For terminal turns (done=True), there is no genuine next frame; we use
+        # the current frame as a dummy so all batch samples always carry this key.
+        # The nfp_loss_mask will be all-zeros for terminal turns, so the dummy
+        # image contributes zero loss.
+        _raw_next_images = _normalize_images(obs.get("multi_modal_input", {}).get("<image>", []) or [])
+        if last_turn or not _raw_next_images:
+            # Terminal or empty observation: dummy = first current-frame image
+            nfp_target_images = agent_data.cur_images[:1] if agent_data.cur_images else []
+            nfp_valid = False
+        else:
+            nfp_target_images = _raw_next_images
+            nfp_valid = True
         
         resp_len = len(agent_data.turn_response_mask)
         response_ids = agent_data.turn_prompt_ids[-resp_len:] if resp_len else []
@@ -288,7 +299,9 @@ class GymAgentLoop(AgentLoopBase):
                 "group_idx": agent_data.group_idx,
                 "traj_idx": agent_data.traj_idx,
                 "turn_idx": agent_data.env_turns,
-                          
+                # NFP next-frame targets
+                "nfp_target_images": nfp_target_images,
+                "nfp_valid": nfp_valid,
             },
         )
         agent_data.outputs.append(output)

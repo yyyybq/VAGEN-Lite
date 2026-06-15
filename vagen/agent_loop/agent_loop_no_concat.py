@@ -281,6 +281,23 @@ class AgentLoopWorkerBase:
         self.tokenizer = hf_tokenizer(local_path, trust_remote_code=True)
         self.processor = hf_processor(local_path, trust_remote_code=True)
 
+        # If AutoProcessor failed (e.g. Cambrian-S has no HF processor config),
+        # check model_type by reading config.json directly (AutoConfig.from_pretrained
+        # fails for unregistered model types like cambrian_qwen).
+        if self.processor is None:
+            try:
+                import json as _json
+                import os as _os
+                _config_path = _os.path.join(local_path, "config.json")
+                with open(_config_path) as _f:
+                    _model_type = _json.load(_f).get("model_type", "")
+                if _model_type == "cambrian_qwen":
+                    from vagen.models.cambrian_processor import (
+                        CambrianProcessorWrapper)
+                    self.processor = CambrianProcessorWrapper(self.tokenizer)
+            except Exception:
+                pass  # keep self.processor = None
+
         agent_loop_config_path = config.actor_rollout_ref.rollout.agent.agent_loop_config_path
         if agent_loop_config_path:
             resolved_path = resolve_config_path(agent_loop_config_path)
@@ -499,6 +516,113 @@ class AgentLoopWorkerBase:
                     text_position_ids[0, valid_mask] = torch.arange(valid_mask.sum().item())
                     text_position_ids = text_position_ids.unsqueeze(0)
                     position_ids = torch.cat((text_position_ids, vision_position_ids), dim=1)  # (1, 4, seq_length)
+                elif (
+                    self.processor is not None
+                    and hasattr(self.processor, "image_processor")
+                    and "CambrianSiglipImageProcessor" in self.processor.image_processor.__class__.__name__
+                ):
+                    # Cambrian-S branch:
+                    #   1. Preprocess PIL images with SigLIP → pixel_values for FSDP actor
+                    #   2. Expand single <image> tokens (ID 151665) to IMAGE_TOKEN_INDEX=-200 blocks
+                    #   3. Compute standard 1-D position_ids
+
+                    IMAGE_TOKEN_INDEX = -200          # Cambrian's internal sentinel
+                    CAMBRIAN_TOKENS_PER_IMAGE = 756   # 27 * (27 + 1) newlines
+                    image_token_id = self.processor.image_token_id  # 151665
+
+                    images = getattr(output, "multi_modal_data", {}).get("image", None)
+                    if images is not None and len(images) > 0:
+                        # Get SigLIP pixel_values for FSDP training
+                        mm_result = self.processor.preprocess_images(images)
+                        multi_modal_inputs = dict(mm_result)
+                    else:
+                        multi_modal_inputs = None
+
+                    # Expand <image> tokens → IMAGE_TOKEN_INDEX blocks
+                    flat_ids = input_ids.squeeze(0).tolist()
+                    flat_mask = attention_mask.squeeze(0).tolist()
+                    expanded_ids: list = []
+                    expanded_mask: list = []
+                    for tid, m in zip(flat_ids, flat_mask):
+                        if tid == image_token_id:
+                            expanded_ids.extend([IMAGE_TOKEN_INDEX] * CAMBRIAN_TOKENS_PER_IMAGE)
+                            expanded_mask.extend([m] * CAMBRIAN_TOKENS_PER_IMAGE)
+                        else:
+                            expanded_ids.append(tid)
+                            expanded_mask.append(m)
+
+                    input_ids = torch.tensor(
+                        [expanded_ids], dtype=torch.long, device=input_ids.device
+                    )
+                    attention_mask = torch.tensor(
+                        [expanded_mask], dtype=torch.long, device=attention_mask.device
+                    )
+
+                    # Also expand response_mask (originally matches pre-expansion length)
+                    orig_prompt_len = prompt_output["input_ids"].shape[1]
+                    orig_resp_len = response_output["input_ids"].shape[1]
+                    flat_resp_mask = response_mask.squeeze(0).tolist()
+
+                    # For the response part, expand any <image> tokens in response as well
+                    # (typically response has no images, but handle safely)
+                    resp_ids_flat = response_output["input_ids"].squeeze(0).tolist()
+                    expanded_resp_mask: list = []
+                    r_idx = 0
+                    for tid in resp_ids_flat:
+                        if tid == image_token_id:
+                            expanded_resp_mask.extend([flat_resp_mask[r_idx]] * CAMBRIAN_TOKENS_PER_IMAGE)
+                        else:
+                            expanded_resp_mask.append(flat_resp_mask[r_idx])
+                        r_idx += 1
+
+                    # response_mask should only cover the response portion [bsz, response_length],
+                    # NOT the full sequence. The prompt portion is all-zero and is not needed here.
+                    response_mask = torch.tensor(
+                        [expanded_resp_mask],
+                        dtype=response_mask.dtype,
+                        device=response_mask.device,
+                    )
+
+                    position_ids = compute_position_id_with_mask(attention_mask)  # (1, seq_len)
+
+                    # NFP: preprocess next-frame images and compute nfp_loss_mask.
+                    # miv_token_len positions (first 64 of each 756-token image block) are the
+                    # NFP prediction positions, following the Cambrian-S MIV token convention.
+                    NFP_MIV_TOKEN_LEN = 64  # miv_token_len from config
+                    nfp_target_images = output.extra_fields.get("nfp_target_images", None)
+                    nfp_valid = output.extra_fields.get("nfp_valid", False)
+                    if (
+                        multi_modal_inputs is not None
+                        and nfp_target_images is not None
+                        and len(nfp_target_images) > 0
+                    ):
+                        # Preprocess next-frame image through SigLIP
+                        mm_nfp = self.processor.preprocess_images(nfp_target_images[:1])
+                        nfp_pixel_values = mm_nfp["pixel_values"]  # (1, C, H, W)
+
+                        # Build nfp_loss_mask (1, seq_len): 1 at first 64 tokens of each
+                        # IMAGE_TOKEN_INDEX block, 0 elsewhere.  All zeros if nfp_valid=False
+                        # (terminal turn uses a dummy image so loss contribution = 0).
+                        nfp_loss_mask_list = [0] * len(expanded_ids)
+                        if nfp_valid:
+                            idx = 0
+                            while idx < len(expanded_ids):
+                                if expanded_ids[idx] == IMAGE_TOKEN_INDEX:
+                                    for j in range(NFP_MIV_TOKEN_LEN):
+                                        if idx + j < len(nfp_loss_mask_list):
+                                            nfp_loss_mask_list[idx + j] = 1
+                                    idx += CAMBRIAN_TOKENS_PER_IMAGE
+                                else:
+                                    idx += 1
+                        nfp_loss_mask = torch.tensor(
+                            [nfp_loss_mask_list],
+                            dtype=torch.float32,
+                            device=input_ids.device,
+                        )  # (1, seq_len)
+
+                        multi_modal_inputs["nfp_pixel_values"] = nfp_pixel_values
+                        multi_modal_inputs["nfp_loss_mask"] = nfp_loss_mask
+
                 else:
                     position_ids = compute_position_id_with_mask(attention_mask)  # (1, seq_len)
                 enable_async_reward = (
@@ -576,7 +700,10 @@ class AgentLoopWorkerBase:
 
         scores = [input.reward_score for input in inputs]
         if all(score is not None for score in scores):
-            prompt_length = prompt_ids.size(1)
+            # Use expanded prompt length: input_ids may have been expanded (e.g. Cambrian image
+            # tokens replaced by IMAGE_TOKEN_INDEX blocks), so prompt_ids.size(1) may not match.
+            # The response portion always starts at input_ids.size(1) - response_ids.size(1).
+            prompt_length = input_ids.size(1) - response_ids.size(1)
             response_length = attention_mask[:, prompt_length:].sum(dim=1) - 1
             rm_scores = torch.zeros_like(response_mask, dtype=torch.float32)
             rm_scores[torch.arange(response_mask.size(0)), response_length] = torch.tensor(scores, dtype=torch.float32)
@@ -584,6 +711,16 @@ class AgentLoopWorkerBase:
 
         non_tensor_batch = {
             "__num_turns__": np.array([input.num_turns for input in inputs], dtype=np.int32),
+            # Per-sample env step index (the actual env_turns at the moment this
+            # sample was produced). For no_concat, __num_turns__ is always 1 and
+            # does NOT reflect episode length; __env_turns__ does.
+            "__env_turns__": np.array(
+                [int(input.extra_fields.get("turn_idx", 0)) for input in inputs], dtype=np.int32
+            ),
+            # Whether this sample is the final turn of its episode.
+            "__last_turn__": np.array(
+                [bool(input.extra_fields.get("last_turn", False)) for input in inputs], dtype=bool
+            ),
         }
 
         # add reward_extra_info to non_tensor_batch
@@ -762,9 +899,15 @@ class AgentLoopManager:
         Returns:
             DataProto: Output batch.
         """
+        import os, time
+        _dbg = "/scratch/by2593/project/Active_Spatial/VAGEN-Lite/agent_loop_nc_debug.log"
+        with open(_dbg, "a") as _f:
+            _f.write(f"[{time.time():.1f}] generate_sequences called pid={os.getpid()} replicas={len(self.rollout_replicas)}\n")
 
-        if self.config.actor_rollout_ref.rollout.free_cache_engine:
-            self.wake_up()
+        # Always wake_up to sync FSDP weights -> vLLM before each rollout (HYBRID mode
+        # uses load_format=dummy so weights must be synced every generation round).
+        # sleep/wake are no-ops in STANDALONE mode, so this is safe unconditionally.
+        self.wake_up()
         if self.reward_model_manager and self.config.reward_model.rollout.free_cache_engine:
             self.reward_model_manager.wake_up()
 
@@ -776,8 +919,7 @@ class AgentLoopManager:
             ]
         )
         output = DataProto.concat(outputs)
-        if self.config.actor_rollout_ref.rollout.free_cache_engine:
-            self.sleep()
+        self.sleep()
         if self.reward_model_manager and self.config.reward_model.rollout.free_cache_engine:
             self.reward_model_manager.sleep()
 
@@ -812,7 +954,13 @@ class AgentLoopManager:
 
     def wake_up(self):
         """Wake up all rollout replica instances."""
+        import os, time
+        _dbg = "/scratch/by2593/project/Active_Spatial/VAGEN-Lite/agent_loop_nc_debug.log"
+        with open(_dbg, "a") as _f:
+            _f.write(f"[{time.time():.1f}] wake_up called replicas={len(self.rollout_replicas)}\n")
         self._run_all([replica.wake_up() for replica in self.rollout_replicas])
+        with open(_dbg, "a") as _f:
+            _f.write(f"[{time.time():.1f}] wake_up done\n")
 
     def sleep(self):
         """Sleep all rollout replica instances."""
@@ -822,4 +970,15 @@ class AgentLoopManager:
         async def run_all():
             await asyncio.gather(*tasks)
 
-        asyncio.run(run_all())
+        import os, time, traceback
+        _dbg = "/scratch/by2593/project/Active_Spatial/VAGEN-Lite/agent_loop_nc_debug.log"
+        with open(_dbg, "a") as _f:
+            _f.write(f"[{time.time():.1f}] _run_all ntasks={len(tasks)}\n")
+        try:
+            asyncio.run(run_all())
+        except Exception as e:
+            with open(_dbg, "a") as _f:
+                _f.write(f"[{time.time():.1f}] _run_all ERROR: {e}\n{traceback.format_exc()}\n")
+            raise
+        with open(_dbg, "a") as _f:
+            _f.write(f"[{time.time():.1f}] _run_all done\n")

@@ -1,0 +1,115 @@
+# =============================================================================
+# Active Spatial Intelligence Environment Configuration
+# =============================================================================
+# This environment trains agents to navigate a camera in 3D scenes to reach
+# target poses (e.g., front/back/left/right view of objects).
+#
+# RENDERING MODES:
+# ================
+# 1. Pre-rendered images (render_backend: null)
+#    - Uses images from dataset, no real-time rendering
+#    - Dataset items need "image_path" field
+#
+# 2. Remote render server (render_backend: client)
+#    - Connects to GPU render server via WebSocket
+#    - Start server: python -m view_suite.interiorGS.service.gs_render_service
+#    - Set client_url to server address
+#
+# 3. Local GPU rendering (render_backend: local)
+#    - Renders locally using GPU + gsplat
+#    - Set gs_root to directory containing {scene_id}.ply files
+# =============================================================================
+
+# Example 1: Using local GPU rendering with Gaussian Splatting
+env1:
+    env_name: active_spatial
+    env_config:
+        # Dataset configuration
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data/interior_data_gen/interior_train_data.jsonl"
+        
+        # Rendering: local GPU with gsplat (real-time rendering)
+        render_backend: local
+        # render_backend: null
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"  # Directory containing {scene_id}.ply files
+        image_width: 512
+        image_height: 512
+        
+        # Camera control configuration
+        step_translation: 0.1  # meters per step
+        step_rotation_deg: 5.0  # degrees per step
+        
+        # Reward configuration
+        format_reward: 0.2
+        success_reward: 1.0
+        transition_distance: 2.0  # meters - weight transition threshold
+        max_distance: 5.0  # meters - maximum effective distance
+        
+        # Prompt configuration
+        prompt_format: free_think  # or "no_think", "grounding"
+        max_actions_per_step: 5
+        action_sep: "|"
+        image_placeholder: "<image>"
+        
+        # ====== Multi-Frame Spatial Prior Configuration ======
+        # When enabled, reads prior images from dataset fields:
+        # - "spatial_prior_images": list of {image_path, view_name, pose}
+        # - "prior_image_paths": simple list of image paths
+        # The number/type of prior images is determined by the dataset.
+        enable_spatial_prior: false  # Set to true to enable
+        spatial_prior_placeholder: "<prior_images>"
+        
+        # Episode configuration
+        max_episode_steps: 50
+        
+    train_size: 2000
+    test_size: 200
+
+
+# Example 2: Using remote render server (recommended for distributed training)
+# env2:
+#     env_name: active_spatial
+#     env_config:
+#         jsonl_path: "/path/to/your/data.jsonl"
+#         
+#         # Rendering: connect to remote GPU server
+#         render_backend: client
+#         client_url: "ws://gpu-node:8777/render/interiorgs"
+#         image_width: 512
+#         image_height: 512
+#         
+#         # Camera control
+#         step_translation: 0.1
+#         step_rotation_deg: 5.0
+#         
+#         # Prompt
+#         prompt_format: free_think
+#         max_actions_per_step: 5
+#         max_episode_steps: 50
+#         
+#     train_size: 5000
+#     test_size: 64
+
+
+# Example 3: Using local GPU rendering (for debugging/single-GPU setup)
+# env3:
+#     env_name: active_spatial
+#     env_config:
+#         jsonl_path: "/path/to/your/data.jsonl"
+#         
+#         # Rendering: local GPU with gsplat
+#         render_backend: local
+#         gs_root: "/path/to/gaussian_ply_files"  # Contains {scene_id}.ply
+#         image_width: 512
+#         image_height: 512
+#         
+#         # Camera control
+#         step_translation: 0.1
+#         step_rotation_deg: 5.0
+#         
+#         # Prompt
+#         prompt_format: free_think
+#         max_actions_per_step: 5
+#         max_episode_steps: 50
+#         
+#     train_size: 1000
+#     test_size: 32

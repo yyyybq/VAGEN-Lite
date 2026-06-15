@@ -1,0 +1,58 @@
+# Active Spatial Navigation — Training data config (no-concat mode)
+#
+# Uses the RemoteEnv client pointing to the active_spatial serve.py server.
+#
+# Before running training, start the Active Spatial env server:
+#   python -m vagen.envs.active_spatial.serve --devices='[4]' --port=8001
+#
+# Also ensure the Gaussian Splatting render server is running (if render_backend=client):
+#   bash start_gs_render_server.sh --gs-root /path/to/InteriorGS --port 8777
+#
+# Adjust the paths and URLs below to match your setup.
+
+envs:
+  - name: RemoteEnv
+    n_envs: 10000          # dataset size (use seed modulo to index)
+    data_source: active_spatial
+    seed: [0, 10000]       # seed range for training episodes
+    max_turns: 10          # max interaction turns per episode
+    response_length_per_turn: 512
+    config:
+      # Active Spatial serve.py URL — start with: python -m vagen.envs.active_spatial.serve
+      base_urls: "http://localhost:8001"
+      timeout: 120
+      retries: 3
+
+      # Dataset path (absolute or relative to CWD)
+      jsonl_path: "/path/to/active_spatial/train.jsonl"
+      dataset_root: "/path/to/active_spatial/"
+
+      # Rendering: "client" = remote GS render server, "local" = in-process GPU,
+      # "none" = pre-rendered images from dataset
+      render_backend: "client"
+      client_url: "ws://localhost:8777/render/interiorgs"
+
+      # Camera control
+      step_translation: 0.3
+      step_rotation_deg: 30.0
+
+      # Reward
+      enable_potential_field: true
+      success_score_threshold: 0.95
+      enable_auto_termination: true
+      format_reward: 0.2
+      success_reward: 1.0
+
+      # Collision detection
+      enable_collision_detection: true
+      collision_penalty: -0.15
+      enable_step_penalty: true
+      step_penalty: -0.01
+
+      # Per-step budget
+      max_episode_steps: 50
+      max_actions_per_step: 5
+      action_sep: "|"
+
+      # Prompt format
+      prompt_format: "free_think"

@@ -1,0 +1,92 @@
+# =============================================================================
+# v18_dual (S1 真双通道 + E1 + E4 + E5): Decoupled position/orientation reward
+# =============================================================================
+# 在测什么 (真正的 S1):
+#   v17 用 total_score = 0.7·pos + 0.3·ori 单通道 ΔΦ shaping → 模型只优化
+#   便宜的 position 一项，orientation 永远学不会，turn_left/turn_right 几乎
+#   不被使用 → val_success=0。
+#
+#   v18_dual 不再用 total_score 做 shaping，而是**双通道独立 delta**:
+#       r_pose = α_pos · Δpos_score + α_ori · Δori_score
+#   两项各有独立 advantage 信号，旋转涨 ori_score 也会拿到 reward。
+#   这是 env.py 新增 progress_mode="dual" 的真实现，**非"反转权重"近似**。
+#
+# 调参说明:
+#   α_pos = 0.3, α_ori = 0.7
+#       —— 不是反转！pos_score 已经普遍较高（rollout 显示模型靠平移能到
+#         ~0.4-0.6），其 Δ 也较大；ori_score 起点低、增长慢，需要更大的
+#         系数才能产生可比的 advantage 信号。这是补偿不对称的"学习信号"，
+#         不是补偿"重要性"。
+#       —— 0.3+0.7 = 1.0，与 v17 reward_scale=0.5 量级近似 (Δtotal·0.5 vs
+#         a_pos·Δpos+a_ori·Δori 的等效量级)。
+#
+#   success 判定仍用 total_score (weights 0.7/0.3 不变)，所以"成功"标准
+#   与 v17 完全一致，只是中间 shaping 的归因变了。
+#
+# 相对 v17 的变化:
+#   ★ potential_field_progress_mode  : "delta" -> "dual"        (S1)
+#   ★ position_reward_scale          : 0.0  -> 0.3              (S1)
+#   ★ orientation_reward_scale       : 0.0  -> 0.7              (S1)
+#   ★ potential_field_reward_scale 在 dual 模式被忽略 (留默认 0.5)
+#   ★ step_translation : 0.20 -> 0.30                            (E4)
+#   ★ step_rotation_deg: 15   -> 20                              (E4)
+#   E5 (prompt.py "先转向后平移" 提示) 已永久 fix
+#   其余 reward / threshold / near-success / weights 全部沿用 v17
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # ★ E4
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── ★ v18_dual: decoupled pos/ori shaping (S1) ─────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7        # weights for total_score (success gating only)
+        potential_field_orientation_weight: 0.3
+        potential_field_progress_mode: "dual"       # ★ "delta" -> "dual"
+        position_reward_scale: 0.3                  # ★ α_pos
+        orientation_reward_scale: 0.7               # ★ α_ori
+        potential_field_reward_scale: 0.5           # ignored in dual mode
+        success_score_threshold: 0.30
+        enable_auto_termination: true
+
+        # Near-success bonus (v17 constant mode, sync with v17)
+        near_success_threshold: 0.35
+        near_success_bonus: 0.2
+        near_success_mode: "constant"
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 50.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

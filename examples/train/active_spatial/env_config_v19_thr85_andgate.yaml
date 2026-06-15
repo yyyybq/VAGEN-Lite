@@ -1,0 +1,84 @@
+# =============================================================================
+# v19_thr85_andgate — AND-gate + SFT 级高门槛
+# =============================================================================
+# Motivation:
+#   SFT 数据 final_score 均值 0.98, 全部 ≥0.95. 要让 RL 学到 SFT 级精修, 必须
+#   把 success threshold 直接对齐到接近 SFT 质量. 此 yaml 把 pos_thr=0.85,
+#   ori_thr=0.80 (rotation 自由度比平移大, 略放低).
+#
+# 假设:
+#   - oracle replay final_score ≥ 0.92, episode_len ≥ 4
+#   - 早期 RL 训练 traj_success 会很低 (~10-30%) — 这是预期, 因为信号变稀
+#   - 配合 SFT cold-start 才能稳定起步 (单 RL from scratch 可能学不动)
+#
+# 相对 v18_andgate 的改动:
+#   ★ success_position_threshold: 0.45 -> 0.85
+#   ★ success_orientation_threshold: 0.45 -> 0.80
+#   ★ near_success_threshold: 0.35 -> 0.70     (sigmoid 模式)
+#   ★ near_success_bonus: 0.2 -> 0.5            (信号变稀, 加大 shaping)
+#   ★ near_success_mode: constant -> sigmoid
+#   ★ near_success_sigmoid_steepness: 10
+#   ★ potential_field_reward_scale: 0.5 -> 0.8  (放大 progress 信号)
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── γ-potential shaping ────────────────────────────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.8          # ★ 0.5 -> 0.8
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.80              # ★ 0.40 -> 0.80 (AND 模式忽略, 回滚保险)
+        enable_auto_termination: true
+
+        # Near-success: 用 sigmoid, 在阈值附近放大梯度
+        near_success_threshold: 0.70               # ★ 0.35 -> 0.70
+        near_success_bonus: 0.5                    # ★ 0.2 -> 0.5
+        near_success_mode: "sigmoid"               # ★ constant -> sigmoid
+        near_success_sigmoid_steepness: 10.0       # ★ NEW
+
+        # ─── ★ v19_thr85_andgate: SFT 级 AND-gate ───────────────────────────
+        success_require_both: true
+        success_position_threshold: 0.85           # ★ 0.45 -> 0.85
+        success_orientation_threshold: 0.80        # ★ 0.45 -> 0.80
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        format_reward: 0.05
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.005
+        enable_step_penalty: true
+        success_reward: 50.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+    train_size: 259
+    test_size: 19

@@ -1,0 +1,83 @@
+# =============================================================================
+# Active Spatial - Per-5-Action Config, 256×256 resolution (v15)
+# =============================================================================
+# 与 env_config_single_action_256.yaml 的区别：
+#   max_actions_per_step: 1 → 5
+#
+# 奖励尺度重新匹配 per-5-action（参考老 VAGEN env_config_balanced.yaml）：
+#   per-5-action 典型 Δscore ≈ 0.15-0.40（vs per-1-action ≈ 0.03-0.08）
+#   format_reward: 0.01 → 0.05   （与老 v9 一致）
+#   collision_penalty: -0.05 → -0.15  （与老 v9 一致）
+#   step_penalty: per-episode -0.01×5 = -0.05/turn（不变，相当于per-1-action的5x/turn）
+#
+# max_turns 对应关系：
+#   per-5-action + max_turns=10 → 10×5=50 总 action（与 per-1-action + max_turns=50 等效）
+#
+# 256×256：10 turns × ~342 patches/image = 3,420 patches → 完全可接受
+
+env1:
+    env_name: active_spatial
+    env_config:
+        # Dataset configuration
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        # Rendering: local GPU with gsplat (real-time rendering)
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # Camera control configuration
+        step_translation: 0.2    # meters per step
+        step_rotation_deg: 15.0  # degrees per step
+
+        # ─── Per-5-Action Core ────────────────────────────────────────────────
+        max_actions_per_step: 5   # Each LLM turn = 5 actions (like old v8/v9)
+        # ─────────────────────────────────────────────────────────────────────
+
+        # Spatial Potential Field (dense reward)
+        # NOTE: scale boosted 1.0 → 5.0 (mirrors single_action_256.yaml change)
+        # so per-turn Δpotential (~0.05-0.25 in 5-action mode) dominates
+        # visibility flips.
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 5.0
+        success_score_threshold: 0.50
+
+        # Collision Detection
+        enable_collision_detection: true
+        collision_camera_radius: 0.15
+        collision_floor_height: 0.3
+        collision_ceiling_height: 2.5
+        collision_penalty: -0.15  # per-5-action 尺度（与老 v9 一致）
+
+        # Visibility Check
+        # NOTE: visibility_reward_scale set explicitly to 0.05 (down from
+        # default 0.3) to keep visibility as a weak auxiliary signal rather
+        # than the dominant per-step reward.
+        enable_visibility_check: true
+        visibility_reward_scale: 0.05
+        fov_horizontal: 60.0
+        fov_vertical: 60.0
+
+        # Reward configuration（per-5-action 尺度）
+        # NOTE: success_reward 1.0 → 5.0 — sparse anchor (mirrors
+        # single_action_256.yaml change).
+        format_reward: 0.05       # per-5-action 尺度（与老 v9 一致）
+        step_penalty: -0.01       # 每个环境步 -0.01（5 action/turn → -0.05/turn）
+        premature_done_penalty: -0.3
+        success_reward: 5.0
+        max_distance: 5.0
+
+        # Prompt configuration
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        # Episode configuration
+        max_episode_steps: 60   # 10 turns × 5 actions/turn = 50 env steps
+
+    train_size: 259
+    test_size: 19

@@ -1,0 +1,263 @@
+{
+  "generated_at": "2026-05-19T09:16:28.896106",
+  "total_items": 231,
+  "num_scenes": 1,
+  "scene_stats": {
+    "0270_840784": 231
+  },
+  "scene_id": "0270_840784",
+  "statistics": {
+    "total_items": 231,
+    "task_type_distribution": {
+      "absolute_positioning": 29,
+      "screen_occupancy": 92,
+      "delta_control": 8,
+      "equidistance": 16,
+      "projective_relations": 39,
+      "occlusion_alignment": 21,
+      "fov_inclusion": 18,
+      "size_distance_invariance": 7,
+      "centering": 1
+    },
+    "object_label_distribution": {
+      "shower head": 13,
+      "smoke lampblack machine": 6,
+      "plant": 14,
+      "refrigerator": 14,
+      "toilet": 14,
+      "multi person sofa": 12,
+      "wardrobe": 8,
+      "storage rack": 8,
+      "teatable": 20,
+      "bed": 8,
+      "washing_machine": 12,
+      "plant+side table": 5,
+      "plant+teatable": 23,
+      "tv cabinet+multi person sofa": 24,
+      "multi person sofa+side table": 15,
+      "wardrobe+bed": 11,
+      "storage rack+teatable": 23,
+      "tv cabinet+multi person sofa+side table": 1
+    },
+    "preset_distribution": {
+      "right": 14,
+      "occupancy_20": 33,
+      "occupancy_30": 36,
+      "occupancy_50": 23,
+      "back": 13,
+      "front": 12,
+      "left": 8,
+      "closer": 8,
+      "equidistant": 16,
+      "left_of": 21,
+      "right_of": 18,
+      "occluded": 21,
+      "equal_size": 7,
+      "center": 1
+    },
+    "region_type_distribution": {
+      "circle": 121,
+      "point": 8,
+      "line": 16,
+      "half_plane": 39,
+      "ray": 22,
+      "annulus": 18,
+      "curve": 7
+    },
+    "distance_stats": {
+      "min": 0.897,
+      "max": 9.68,
+      "mean": 3.367
+    },
+    "task_preset_matrix": {
+      "absolute_positioning": {
+        "right": 10,
+        "back": 9,
+        "front": 7,
+        "left": 3
+      },
+      "screen_occupancy": {
+        "occupancy_20": 33,
+        "occupancy_30": 36,
+        "occupancy_50": 23
+      },
+      "delta_control": {
+        "closer": 8
+      },
+      "equidistance": {
+        "equidistant": 16
+      },
+      "projective_relations": {
+        "left_of": 21,
+        "right_of": 18
+      },
+      "occlusion_alignment": {
+        "occluded": 21
+      },
+      "fov_inclusion": {
+        "right": 4,
+        "left": 5,
+        "back": 4,
+        "front": 5
+      },
+      "size_distance_invariance": {
+        "equal_size": 7
+      },
+      "centering": {
+        "center": 1
+      }
+    }
+  },
+  "config": {
+    "scenes_root": "/scratch/by2593/project/Active_Spatial/InteriorGS",
+    "output_dir": "/scratch/by2593/project/Active_Spatial/VAGEN-Lite/data_gen/active_spatial_pipeline/output_100scenes",
+    "scene_list": [
+      "0270_840784"
+    ],
+    "object_selection": {
+      "blacklist": "{'medicine box', 'ceiling lamp', 'decorative pendant', 'medicine bottle', 'drinks', 'pen', 'carpet', 'bagged food', 'toiletries', 'fresh food', 'room', 'light', 'lamp', 'other', 'downlights', 'strip light', 'curtain', 'chocolate', 'wall lamp', 'cigar', 'boxed food', 'spotlight', 'book', 'bread', 'vegetable', 'track light', 'rug', 'linear lamp', 'fruit', 'wall', 'wine', 'floor', 'paper', 'ceiling', 'canned food', 'table lamp', 'chandelier'}",
+      "enable_dim_filter": true,
+      "enable_volume_filter": true,
+      "enable_aspect_ratio_filter": true,
+      "min_dim_component": 0.1,
+      "max_dim_component": 3.0,
+      "min_volume": 0.1,
+      "min_aspect_ratio": 0.1,
+      "min_dist_to_wall": 0.0,
+      "min_pair_dist": 0.1,
+      "max_pair_dist": 6.0,
+      "max_pair_dim_ratio": 5.0,
+      "max_pair_dim_diff": 4.0,
+      "require_same_room": true,
+      "dyn_min_mult": 0.1,
+      "dyn_max_mult": 5.0,
+      "pair_fov_deg": 90.0,
+      "pair_fov_margin_deg": 5.0,
+      "min_viewing_distance_mult": 0.8
+    },
+    "camera_sampling": {
+      "num_cameras_per_item": 5,
+      "move_pattern": "around",
+      "per_angle": 36,
+      "max_tries": 500,
+      "camera_heights": [
+        1.0,
+        1.2,
+        1.35,
+        1.5,
+        1.65,
+        1.8
+      ],
+      "max_camera_height": 1.6,
+      "min_camera_height": 0.8,
+      "camera_height_offset": 0.1,
+      "max_height_ratio": 2.0,
+      "min_visibility_ratio": 0.08,
+      "max_occlusion_ratio": 0.7,
+      "use_2d_occlusion": true,
+      "occlusion_depth_mode": "min",
+      "min_visible_corners": 1,
+      "check_corner_occlusion": false,
+      "rotation_interval": 5.0,
+      "rotation_camera_height": 1.5,
+      "linear_num_steps": 5,
+      "linear_move_distance": 0.5,
+      "image_width": 640,
+      "image_height": 480,
+      "focal_length": 300.0
+    },
+    "task_config": {
+      "enabled_tasks": [
+        "absolute_positioning",
+        "delta_control",
+        "equidistance",
+        "projective_relations",
+        "centering",
+        "occlusion_alignment",
+        "fov_inclusion",
+        "size_distance_invariance",
+        "screen_occupancy"
+      ],
+      "absolute_positioning_distances": [
+        0.8,
+        1.0,
+        1.2,
+        1.5
+      ],
+      "delta_control_deltas": [
+        0.5,
+        0.7,
+        1.0,
+        1.5
+      ],
+      "projective_relations": [
+        "left",
+        "right"
+      ],
+      "screen_occupancy_ratios": [
+        0.2,
+        0.3,
+        0.5,
+        0.7
+      ],
+      "min_distance_to_object": 0.5,
+      "fov_horizontal": 110.0,
+      "fov_vertical": 90.0,
+      "fov_margin": 5.0,
+      "occlusion_min_distance": 0.5,
+      "agent_height": 1.5
+    },
+    "initial_view": {
+      "task_min_distances": {
+        "absolute_positioning": 0.8,
+        "delta_control": 0.4,
+        "equidistance": 1.2,
+        "projective_relations": 1.2,
+        "centering": 1.5,
+        "occlusion_alignment": 1.0,
+        "fov_inclusion": 1.0,
+        "size_distance_invariance": 1.0,
+        "screen_occupancy": 0.8
+      },
+      "task_max_init_scores": {
+        "absolute_positioning": 0.6,
+        "delta_control": 0.7,
+        "equidistance": 0.55,
+        "projective_relations": 0.6,
+        "centering": 0.55,
+        "occlusion_alignment": 0.55,
+        "fov_inclusion": 0.6,
+        "size_distance_invariance": 0.6,
+        "screen_occupancy": 0.6
+      },
+      "task_min_yaw_offsets": {
+        "absolute_positioning": 15.0,
+        "delta_control": 0.0,
+        "equidistance": 20.0,
+        "projective_relations": 20.0,
+        "centering": 25.0,
+        "occlusion_alignment": 20.0,
+        "fov_inclusion": 15.0,
+        "size_distance_invariance": 15.0,
+        "screen_occupancy": 15.0
+      },
+      "task_min_total_steps": {
+        "absolute_positioning": 12,
+        "delta_control": 4,
+        "equidistance": 16,
+        "projective_relations": 16,
+        "centering": 20,
+        "occlusion_alignment": 14,
+        "fov_inclusion": 12,
+        "size_distance_invariance": 12,
+        "screen_occupancy": 10
+      },
+      "default_min_distance": 0.8,
+      "default_max_init_score": 0.6,
+      "default_min_yaw_offset": 15.0,
+      "default_min_total_steps": 10
+    },
+    "save_intermediate": true,
+    "render_previews": false
+  }
+}

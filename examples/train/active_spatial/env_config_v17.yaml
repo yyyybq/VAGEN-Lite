@@ -1,0 +1,118 @@
+# =============================================================================
+# Active Spatial - v17 strafe-action redesign (per-5-action, 256×256)
+# =============================================================================
+# 与 env_config_5action_suc50.yaml (v16) 的关键差异:
+#
+#   ★ action_space: strafe
+#       6 个移动动作: move_forward / move_backward / move_left / move_right /
+#                    turn_left / turn_right  (+ done, 但已被 enable_explicit_done
+#                    禁用 -> 实际只有 6 个动作 + 自动 success)
+#       删掉 look_up / look_down (pitch) - 室内导航任务用不到
+#       新增 move_left / move_right (lateral strafe) - 修复 v11..v16 模型
+#       幻觉输出 `move_left` 但环境不接受导致 75% action invalid 的根因
+#
+#   ★ enable_explicit_done: false
+#       去掉显式 done。模型只能靠 auto-termination 完成 episode。
+#       这消除了"显式 done 失败 -> -0.3 惩罚，自动成功 -> +50 奖励"的
+#       不对称鸿沟，避免模型学到"永远不要 done"。
+#
+#   ★ success_reward: 5.0 -> 50.0
+#       v16 的 success_reward=5 与 dense 累积上限(~5.0)同量级 -> 完成 vs 接近
+#       几乎无差异 -> 策略对完成漠不关心。
+#       新 ratio = 50 : (dense 累积 ~5) = 10:1，完成永远是严格优选。
+#
+#   ★ potential_field_reward_scale: 5.0 -> 0.5
+#       Δscore 典型 0.15-0.40 (per-5-action) -> 单步 dense 0.075-0.20。
+#       配合 success=50，完成 1 个 episode 的稀疏 anchor 仍是 dense 总量的 ~10x。
+#
+#   ★ success_score_threshold: 0.50 -> 0.30
+#       Curriculum 起点放低，先让模型有机会触发成功，再逐步收紧 (v17b/v17c)。
+#       v16 在 0.50 阈值 240 step 仍 0 成功 -> 起点过严，无 reward 信号灌入。
+#
+#   ★ near_success_threshold + near_success_bonus
+#       state-reward (非 telescoping): 当 score >= 0.35 时每步 +0.2。
+#       打破 delta-only shaping 的对称局部最优 (前进 +0.2 / 后退 -0.2 抵消)。
+#       为"停留在目标附近"提供绝对正奖励，鼓励 stabilize 而不是震荡。
+#
+#   ★ enable_collision_detection: false
+#       简化奖励结构，去掉 v16 的 collision_penalty 噪声。
+#       碰撞由 max_episode_steps 自然惩罚 (走废动作 = 浪费 budget)。
+#
+#   ★ enable_visibility_check: false
+#       同上简化。potential field 已隐含包含 orientation_score，无需另加。
+#
+#   ★ step_penalty: -0.01 -> -0.005
+#       per-5-action 下每 turn 累积 -0.025 远小于 Δscore，但仍鼓励效率。
+#
+#   ★ invalid_format_penalty: -0.1 -> -0.2
+#       MAX_RESPONSE_LENGTH 调到 384 阻断 100+ token 的 hallucinated repetition；
+#       同时 invalid penalty 加倍，让 PPO 更快收敛到合法 action 分布。
+#
+# ============================================================
+# 控制变量 (相对 v16)
+# ============================================================
+#   保留: per-5-action, 256x256, MAX_TURNS=12, max_episode_steps=60
+#   改变: action_space + done + reward scale + success_reward + thresholds
+# ============================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        # Dataset
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN/data_gen/active_spatial_pipeline/output_v2/train_data_0267_840790.jsonl"
+
+        # Rendering
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        # Camera control
+        step_translation: 0.2    # meters per step
+        step_rotation_deg: 15.0  # degrees per step
+
+        # ─── Per-5-action core (unchanged from v16) ─────────────────────────
+        max_actions_per_step: 5
+
+        # ─── ★ v17: action-space redesign ───────────────────────────────────
+        action_space: "strafe"        # forward/back + left/right + turn_left/right
+        enable_explicit_done: false   # auto-success only; explicit `done` rejected
+
+        # ─── ★ v17: reward redesign ─────────────────────────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 0.5     # ★ 5.0 -> 0.5
+        potential_field_progress_mode: "delta"
+        success_score_threshold: 0.30         # ★ 0.50 -> 0.30 (curriculum start)
+        enable_auto_termination: true
+
+        # ─── ★ v17: non-telescoping near-success bonus (state reward) ───────
+        near_success_threshold: 0.35   # when score >= 0.35 (just above threshold)
+        near_success_bonus: 0.2        # add +0.2 each step (breaks osc local optimum)
+
+        # ─── ★ v17: disable secondary signals to simplify reward ────────────
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        # Reward scalars
+        format_reward: 0.05
+        invalid_format_penalty: -0.2     # ★ -0.1 -> -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3      # only used if enable_explicit_done=true
+        step_penalty: -0.005              # ★ -0.01 -> -0.005
+        enable_step_penalty: true
+        success_reward: 50.0              # ★ 5.0 -> 50.0 (10x dense anchor)
+        max_distance: 5.0
+
+        # Prompt
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        # Episode
+        max_episode_steps: 60   # 12 turns * 5 actions/turn = 60 env steps
+
+    train_size: 259
+    test_size: 19
