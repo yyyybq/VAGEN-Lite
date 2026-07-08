@@ -784,6 +784,39 @@ class ActiveSpatialEnv(BaseEnv):
         # Try different possible keys for target pose
         if "target_pose" in item:
             return item["target_pose"]
+
+        # Some data pipelines store sampled target point directly.
+        # Prefer this when available because it reflects the task-specific goal.
+        if "sample_target" in item and item["sample_target"] is not None:
+            sample_target = item["sample_target"]
+            if len(sample_target) >= 3:
+                rx, ry, rz = 0.0, 0.0, 0.0
+                tr = item.get("target_region", {})
+                sample_forward = tr.get("sample_forward") if isinstance(tr, dict) else None
+                if isinstance(sample_forward, (list, tuple)) and len(sample_forward) >= 2:
+                    # Convert XY forward vector to yaw-only pose; keep pitch/roll as zero.
+                    yaw = np.degrees(np.arctan2(float(sample_forward[1]), float(sample_forward[0])))
+                    rz = float(yaw)
+                return [float(sample_target[0]), float(sample_target[1]), float(sample_target[2]), rx, ry, rz]
+
+        # Fallback: parse target region fields from generated datasets.
+        if "target_region" in item and isinstance(item["target_region"], dict):
+            region = item["target_region"]
+            if "sample_point" in region and region["sample_point"] is not None:
+                sp = region["sample_point"]
+                if len(sp) >= 3:
+                    rx, ry, rz = 0.0, 0.0, 0.0
+                    sf = region.get("sample_forward")
+                    if isinstance(sf, (list, tuple)) and len(sf) >= 2:
+                        yaw = np.degrees(np.arctan2(float(sf[1]), float(sf[0])))
+                        rz = float(yaw)
+                    return [float(sp[0]), float(sp[1]), float(sp[2]), rx, ry, rz]
+
+            params = region.get("params", {}) if isinstance(region.get("params", {}), dict) else {}
+            if "object_center" in params and params["object_center"] is not None:
+                oc = params["object_center"]
+                if len(oc) >= 3:
+                    return [float(oc[0]), float(oc[1]), float(oc[2]), 0.0, 0.0, 0.0]
         
         # Construct from position + orientation
         target_pos = item.get("target_position", None)
@@ -796,6 +829,19 @@ class ActiveSpatialEnv(BaseEnv):
             return [target_pos[0], target_pos[1], target_pos[2], rx, ry, rz]
         
         return None
+
+    def _build_distance_suffix(self, current_pose: np.ndarray) -> str:
+        """Build optional distance string for observation text."""
+        if not self.config.get("enable_distance_in_obs", False):
+            return ""
+        try:
+            target_pose = self._get_target_pose()
+            if target_pose is None:
+                return ""
+            dist_to_target = compute_translation_distance(current_pose, target_pose)
+            return f"\nDistance to target: {dist_to_target:.2f} m"
+        except Exception:
+            return ""
     
     def _calculate_current_score(self) -> float:
         """
@@ -1269,16 +1315,19 @@ class ActiveSpatialEnv(BaseEnv):
             if view_labels_text:
                 spatial_prior_text += f"\nViews: {view_labels_text}"
         
+        # Optionally compute distance-to-target for metric-distance tasks
+        dist_suffix = self._build_distance_suffix(current_pose)
+
         # Build observation string
         if init_obs:
             obs_str = init_observation_template(
-                observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}",
+                observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}{dist_suffix}",
                 task_prompt=task_prompt,
                 spatial_prior=spatial_prior_text,
             )
         else:
             obs_str = action_template(
-                observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}",
+                observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}{dist_suffix}",
                 env_feedback=env_feedback,
             )
         
@@ -1378,17 +1427,20 @@ class ActiveSpatialEnv(BaseEnv):
 {prior_images_text}"""
             if view_labels_text:
                 spatial_prior_text += f"\nViews: {view_labels_text}"
+
+        # Keep distance hint consistent with the normal _render path.
+        dist_suffix = self._build_distance_suffix(current_pose)
         
         # Build observation string
         if init_obs:
             obs_str = init_observation_template(
-                observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}",
+                observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}{dist_suffix}",
                 task_prompt=task_prompt,
                 spatial_prior=spatial_prior_text,
             )
         else:
             obs_str = action_template(
-                observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}",
+                observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}{dist_suffix}",
                 env_feedback=env_feedback if env_feedback else "Action executed.",
             )
         

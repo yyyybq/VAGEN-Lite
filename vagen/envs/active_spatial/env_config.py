@@ -181,7 +181,14 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # The number and type of prior images is determined by the dataset, not here.
     enable_spatial_prior: bool = False  # Enable reading spatial prior from dataset
     spatial_prior_placeholder: str = "<prior_images>"  # Placeholder for prior images in prompt
-    
+
+    # ── Distance-to-target in observation ─────────────────────────────────────
+    # When True, each observation includes "Distance to target: X.XX m".
+    # This gives the model explicit odometry for metric-distance tasks
+    # (e.g. delta_control: "move to 0.69 m away") where single-image depth
+    # estimation is not reliable and WINDOW_SIZE=1 provides no history.
+    enable_distance_in_obs: bool = False
+
     def __post_init__(self):
         """Post-initialization validation."""
         # Sync legacy render dimensions

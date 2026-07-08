@@ -66,6 +66,21 @@ class AgentData:
         # Env stats
         self.env_turns: int = 0
 
+        # Episode metadata – populated from env info during the episode.
+        # Written into every turn's reward_extra_info so concat_val_multi_turn
+        # can propagate them (it takes reward_extra_info from the last turn).
+        self.task_type: str = "unknown"
+        self.scene_id: str = "unknown"
+        self.object_label: str = "unknown"
+        self.preset: str = "unknown"
+        self.task_id: str = "unknown"        # f"{scene_id}/{object_label}/{preset}/{jsonl_idx}"
+        self.initial_score: float = 0.0        # potential-field score at reset
+        self.initial_distance: float = -1.0    # Euclidean dist to target at t=0
+        self.final_score: float = 0.0          # potential-field score at terminal
+        self.final_position_score: float = 0.0
+        self.final_orientation_score: float = 0.0
+        self.score_improvement: float = 0.0
+        self.n_primitive_steps: int = 0        # total primitive actions executed
 
         # Cached assistant text to step env
         self.last_assistant_text: Optional[str] = None
@@ -117,8 +132,16 @@ class GymAgentLoop(AgentLoopBase):
         init_obs, info = await env.reset(seed=seed)
         sys_obs = await env.system_prompt()
 
-       
-        
+        # Capture episode metadata from reset info
+        _scene_id     = info.get("scene_id",                "unknown") if info else "unknown"
+        _task_type    = info.get("task_type",               "unknown") if info else "unknown"
+        _object_label = info.get("object_label",            "unknown") if info else "unknown"
+        _preset       = info.get("preset",                  "unknown") if info else "unknown"
+        _jsonl_idx    = info.get("jsonl_idx",               -1)         if info else -1
+        _init_score   = float(info.get("initial_potential_score", 0.0)) if info else 0.0
+        _init_dist    = float(info.get("distance",          -1.0))      if info else -1.0
+        _task_id      = f"{_scene_id}/{_object_label}/{_preset}/{_jsonl_idx}"
+
         sys_msg={"role": "system", "content": convert_obs_to_content(sys_obs, **kwargs)}
         sys_images=_normalize_images(sys_obs.get("multi_modal_input", {}).get("<image>", []) or [])
         
@@ -143,6 +166,13 @@ class GymAgentLoop(AgentLoopBase):
             group_idx=kwargs["group_idx"],
             traj_idx=kwargs["traj_idx"],
         )
+        agent_data.task_type       = _task_type
+        agent_data.scene_id        = _scene_id
+        agent_data.object_label    = _object_label
+        agent_data.preset          = _preset
+        agent_data.task_id         = _task_id
+        agent_data.initial_score   = _init_score
+        agent_data.initial_distance = _init_dist
 
         # State machine: always GENERATE -> INTERACT, and decide termination inside INTERACT
         state = AgentState.PENDING
@@ -251,9 +281,19 @@ class GymAgentLoop(AgentLoopBase):
         traj_success = extract_success(info)
         agent_data.env_turns += 1
         last_turn=False
-        
-        
-        
+
+        # Capture terminal-step metrics (available when done=True or success)
+        if done or traj_success:
+            agent_data.final_score = float(
+                info.get("final_score",
+                info.get("current_potential_score", agent_data.initial_score))
+            )
+            _tm = (info.get("metrics") or {}).get("traj_metrics", {})
+            agent_data.final_position_score    = float(_tm.get("final_position_score",    0.0))
+            agent_data.final_orientation_score = float(_tm.get("final_orientation_score", 0.0))
+            agent_data.n_primitive_steps       = int(info.get("env_step", agent_data.env_turns))
+        agent_data.score_improvement = agent_data.final_score - agent_data.initial_score
+
         if done:
             last_turn = True
 
@@ -293,7 +333,20 @@ class GymAgentLoop(AgentLoopBase):
             num_turns=1,
             metrics=agent_data.metrics,
             extra_fields={"reward_extra_info": {
-                "traj_success": float(traj_success)},
+                "traj_success":             float(traj_success),
+                "task_type":                agent_data.task_type,
+                "scene_id":                 agent_data.scene_id,
+                "object_label":             agent_data.object_label,
+                "preset":                   agent_data.preset,
+                "task_id":                  agent_data.task_id,
+                "initial_score":            agent_data.initial_score,
+                "initial_distance":         agent_data.initial_distance,
+                "final_score":              agent_data.final_score,
+                "final_position_score":     agent_data.final_position_score,
+                "final_orientation_score":  agent_data.final_orientation_score,
+                "score_improvement":        agent_data.score_improvement,
+                "n_primitive_steps":        float(agent_data.n_primitive_steps),
+                },
                 "image_data": turn_images,
                 "last_turn": last_turn,
                 "group_idx": agent_data.group_idx,

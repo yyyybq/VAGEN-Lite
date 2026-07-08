@@ -37,6 +37,7 @@ cd /scratch/by2593/project/Active_Spatial/VAGEN-Lite && \
     > v31_grpo_rewscale.log 2>&1 &
 echo "PID: $!"
 RUN
+EXPERIMENT_NAME="v31_grpo_rewscale"      # ★ 显式命名，避免落到 unnamed_*
 ENV_CONFIG="env_config_v24_100scenes_rewscale.yaml"   # ★ success=5, scale=1.0, near_bonus=0.5
 NUM_TRAIN_GPUS=4
 RENDERING_GPU=4

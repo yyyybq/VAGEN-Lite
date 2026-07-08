@@ -89,6 +89,14 @@ class AgentData:
         self.traj_success: bool = False
         self.env_turns: int = 0
 
+        # Episode metadata – populated from env info during the episode
+        # These fields are written into reward_extra_info so they appear
+        # in the validation/rollout JSONL alongside traj_success.
+        self.task_type: str = "unknown"
+        self.scene_id: str = "unknown"
+        self.initial_score: float = 0.0    # potential-field score at reset
+        self.final_score: float = 0.0      # potential-field score at last step
+        self.n_primitive_steps: int = 0    # total primitive actions executed
 
         # Cached assistant text to step env
         self.last_assistant_text: Optional[str] = None
@@ -204,6 +212,10 @@ class GymAgentLoop(AgentLoopBase):
         # Bootstrap: reset -> system_prompt (message order: system, then initial user)
         init_obs, info = await env.reset(seed=seed)
         sys_obs = await env.system_prompt()
+        # ── capture episode-start metadata from reset info ──────────────────
+        _ep_task_type    = info.get("task_type", "unknown") if info else "unknown"
+        _ep_scene_id     = info.get("scene_id",  "unknown") if info else "unknown"
+        _ep_init_score   = float(info.get("initial_potential_score", 0.0)) if info else 0.0
 
         messages: List[Dict[str, Any]] = []
         image_data: List[Image.Image] = []
@@ -231,6 +243,9 @@ class GymAgentLoop(AgentLoopBase):
             response_limit=per_turn_response_limit,
             env_name=kwargs["env_name"],
         )
+        agent_data.task_type  = _ep_task_type
+        agent_data.scene_id   = _ep_scene_id
+        agent_data.initial_score = _ep_init_score
 
         # State machine: always GENERATE -> INTERACT, and decide termination inside INTERACT
         state = AgentState.PENDING
@@ -274,7 +289,19 @@ class GymAgentLoop(AgentLoopBase):
             reward_score=sum(agent_data.env_rewards) if agent_data.env_rewards else 0.0,
             num_turns=agent_data.env_turns,
             metrics=agent_data.metrics,
-            extra_fields={ "image_data": agent_data.image_data,"reward_extra_info": {"traj_success": float(agent_data.traj_success)}},
+            extra_fields={
+                "image_data": agent_data.image_data,
+                "reward_extra_info": {
+                    "traj_success":       float(agent_data.traj_success),
+                    "task_type":          agent_data.task_type,
+                    "scene_id":           agent_data.scene_id,
+                    "initial_score":      agent_data.initial_score,
+                    "final_score":        agent_data.final_score,
+                    "score_improvement":  agent_data.final_score - agent_data.initial_score,
+                    "n_primitive_steps":  agent_data.n_primitive_steps,
+                    "n_turns":            agent_data.env_turns,
+                },
+            },
         )
         return output
 
@@ -370,6 +397,14 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.env_rewards.append(float(reward))
         agent_data.traj_success = extract_success(info)
         agent_data.env_turns += 1
+        # ── update episode metadata from step info ───────────────────────────
+        if info:
+            agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))
+            # final_score: prefer explicit final_score field; fall back to current_potential_score
+            if "final_score" in info:
+                agent_data.final_score = float(info["final_score"])
+            elif "current_potential_score" in info:
+                agent_data.final_score = float(info["current_potential_score"])
         # Termination rule #3: env done or success
         if done or agent_data.traj_success:
             return AgentState.TERMINATED

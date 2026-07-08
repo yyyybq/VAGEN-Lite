@@ -5,21 +5,28 @@ probe_cambrian_qa.py — Cambrian-S backbone capability probe
 测试 Cambrian-S RL checkpoint 在空间推理 QA 上的能力是否退化（对比基础模型）。
 从 HuggingFace 格式 checkpoint 加载权重，使用 SigLIP 进行图像预处理。
 
+关键实现说明（图像 token 展开）:
+    CambrianProcessorWrapper.__call__() 将 <image> tokenize 为单个 special token (ID 151665)。
+    CambrianForCausalLMAdapter.generate() 检查 input_ids 中是否有 IMAGE_TOKEN_INDEX=-200，
+    只有存在时才触发 _embed_multimodal_batch()（视觉特征散射）。
+    因此推理前必须将每个 <image> token 手动展开为 TOKENS_PER_IMAGE(756) 个 -200 token，
+    否则 pixel_values 被静默忽略，退化为纯文字推理。
+
 用法:
-    # 对比 base model vs c4 step80
+    # 对比 base model vs c8 各 step checkpoint
     python3 scripts/probe_cambrian_qa.py \
-        --ckpts "base:/scratch/by2593/hf_cache/cambrian-s-7b,c4_s80:exps/vagen_active_spatial/c4_fwdfirst/checkpoints/global_step_80/actor/huggingface" \
-        --n_samples 200 --gpu 0
+        --ckpts "base:/scratch/by2593/hf_cache/cambrian-s-7b,c8_s50:exps/vagen_active_spatial/c8_fwdfirst_rewscale/checkpoints/global_step_50/actor/huggingface,c8_s100:exps/vagen_active_spatial/c8_fwdfirst_rewscale/checkpoints/global_step_100/actor/huggingface,c8_s150:exps/vagen_active_spatial/c8_fwdfirst_rewscale/checkpoints/global_step_150/actor/huggingface,c8_s200:exps/vagen_active_spatial/c8_fwdfirst_rewscale/checkpoints/global_step_200/actor/huggingface" \
+        --n_samples 200 --gpu 4
 
-    # 仅测试 RL checkpoint（自动添加 base 对比）
+    # 仅测试单个 checkpoint（自动添加 base 对比）
     python3 scripts/probe_cambrian_qa.py \
-        --ckpts "c4_s80:exps/vagen_active_spatial/c4_fwdfirst/checkpoints/global_step_80/actor/huggingface" \
-        --n_samples 200 --gpu 0 --include_base
+        --ckpts "c8_s150:exps/vagen_active_spatial/c8_fwdfirst_rewscale/checkpoints/global_step_150/actor/huggingface" \
+        --n_samples 200 --gpu 4 --include_base
 
-    # 多个 checkpoint 横向对比
+    # 仅做 sanity check（跳过图片，快速验证环境）
     python3 scripts/probe_cambrian_qa.py \
-        --ckpts "base:/scratch/by2593/hf_cache/cambrian-s-7b,c4_s80:exps/vagen_active_spatial/c4_fwdfirst/checkpoints/global_step_80/actor/huggingface,c7_s80:exps/vagen_active_spatial/c7_fwdfirst_ehi/checkpoints/global_step_80/actor/huggingface" \
-        --n_samples 200 --gpu 0
+        --ckpts "base:/scratch/by2593/hf_cache/cambrian-s-7b" \
+        --n_samples 50 --gpu 4 --no_images --verbose
 """
 
 import argparse
@@ -41,9 +48,11 @@ MINDCUBE_IMAGE_BASE = "/scratch/by2593/MindCube/data"
 BASE_MODEL_PATH     = "/scratch/by2593/hf_cache/cambrian-s-7b"
 
 # SigLIP 图像尺寸（与 cambrian_processor.py 一致）
-SIGLIP_MODEL  = "google/siglip2-so400m-patch14-384"
-SIGLIP_SIZE   = 384
-IMAGE_TOKEN   = "<image>"
+SIGLIP_MODEL       = "google/siglip2-so400m-patch14-384"
+SIGLIP_SIZE        = 384
+IMAGE_TOKEN        = "<image>"
+IMAGE_TOKEN_INDEX  = -200   # FSDP adapter 中 <image> 展开后的 sentinel value
+TOKENS_PER_IMAGE   = 756    # 27×28（SI tokens + newline tokens），与 cambrian_register.py 一致
 
 # 文字 sanity-check（不依赖图片）
 TEXT_SANITY = [
@@ -125,9 +134,8 @@ def unload(model):
 
 # ─────────────────────────── 推理 ───────────────────────────
 
-def _build_text_prompt(tokenizer, question: str) -> torch.Tensor:
-    """构建纯文字提示并 tokenize。"""
-    # Cambrian 沿用 Qwen2 chat template
+def _build_text_prompt(tokenizer, question: str) -> dict:
+    """构建纯文字提示并 tokenize，返回包含 input_ids/attention_mask 的 dict。"""
     messages = [{"role": "user", "content": question}]
     try:
         text = tokenizer.apply_chat_template(
@@ -136,6 +144,28 @@ def _build_text_prompt(tokenizer, question: str) -> torch.Tensor:
     except Exception:
         text = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
     return tokenizer(text, return_tensors="pt")
+
+
+def _expand_image_tokens(input_ids: torch.Tensor, image_token_id: int) -> torch.Tensor:
+    """
+    将 compact input_ids 中的每个 image_token_id（单个 <image> special token）
+    展开为 TOKENS_PER_IMAGE(756) 个 IMAGE_TOKEN_INDEX(-200)。
+
+    必须在调用 CambrianForCausalLMAdapter.generate() 之前执行，
+    否则 generate() 中的 (input_ids == IMAGE_TOKEN_INDEX).any() 判断为 False，
+    pixel_values 被静默忽略，退化为纯文字推理。
+
+    输入:  (1, seq_len)
+    输出:  (1, expanded_seq_len)，其中每个 image_token_id 被替换为 756 个 -200
+    """
+    flat = input_ids[0].tolist()
+    expanded = []
+    for tok in flat:
+        if tok == image_token_id:
+            expanded.extend([IMAGE_TOKEN_INDEX] * TOKENS_PER_IMAGE)
+        else:
+            expanded.append(tok)
+    return torch.tensor([expanded], dtype=torch.long)
 
 
 def run_text_inference(model, tokenizer, question: str, device: str) -> str:
@@ -159,13 +189,21 @@ def run_vqa_inference(
 ) -> str:
     """
     带图片的 VQA 推理。
-    将图片通过 SigLIP 编码为 pixel_values，再交给 Cambrian LLM 处理。
-    若无图片则退化为纯文字推理。
+
+    流程:
+      1. 加载 PIL 图像，用 SigLIP 生成 pixel_values
+      2. 构建含 <image> 占位符的 prompt，tokenize → compact input_ids
+      3. 展开 image tokens: 每个 <image>(单 token) → 756 × IMAGE_TOKEN_INDEX(-200)
+      4. 调用 model.generate(expanded_input_ids, pixel_values=pixel_values)
+
+    步骤 3 是关键：CambrianForCausalLMAdapter.generate() 检查
+    (input_ids == -200).any() 来决定是否调用 _embed_multimodal_batch()。
+    跳过展开会导致 pixel_values 被静默忽略。
     """
     if not image_paths or siglip_proc is None:
         return run_text_inference(model, tokenizer, question, device)
 
-    # ── 加载并预处理图片 ──
+    # ── 加载 PIL 图像 ──
     pil_imgs = []
     for p in image_paths:
         full = p if os.path.isabs(p) else os.path.join(MINDCUBE_IMAGE_BASE, p)
@@ -178,29 +216,37 @@ def run_vqa_inference(
     if not pil_imgs:
         return run_text_inference(model, tokenizer, question, device)
 
-    # SigLIP pixel_values: (N_images, 3, H, W)
+    # ── SigLIP pixel_values: (N_images, 3, 384, 384) ──
     pv_out = siglip_proc(images=pil_imgs, return_tensors="pt")
     pixel_values = pv_out["pixel_values"].to(device=device, dtype=torch.bfloat16)
 
-    # ── 构建带 <image> 占位符的提示 ──
+    # ── 构建含 <image> 占位符的提示 ──
     image_tokens = "\n".join([IMAGE_TOKEN] * len(pil_imgs))
     prompt_text = f"{image_tokens}\n{question}"
-    inputs = _build_text_prompt(tokenizer, prompt_text).to(device)
+    compact_inputs = _build_text_prompt(tokenizer, prompt_text)
+    compact_ids = compact_inputs["input_ids"]  # (1, seq_len)，<image> 为单 token
+
+    # ── 展开 image tokens → 756 × IMAGE_TOKEN_INDEX(-200) ──
+    image_token_id = tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
+    expanded_ids = _expand_image_tokens(compact_ids, image_token_id).to(device)
+    expanded_mask = torch.ones(1, expanded_ids.shape[1], dtype=torch.long, device=device)
 
     with torch.no_grad():
         try:
             out = model.generate(
-                **inputs,
+                input_ids=expanded_ids,
+                attention_mask=expanded_mask,
                 pixel_values=pixel_values,
                 max_new_tokens=256,
                 do_sample=False,
                 temperature=None,
                 top_p=None,
             )
-            trimmed = out[0][inputs.input_ids.shape[1]:]
+            # 跳过输入部分（按展开后长度）
+            trimmed = out[0][expanded_ids.shape[1]:]
             return tokenizer.decode(trimmed, skip_special_tokens=True)
-        except TypeError:
-            # 如果模型不接受 pixel_values 关键字（fallback）
+        except Exception as e:
+            print(f"    [WARN] VQA inference failed: {e}, falling back to text", file=sys.stderr)
             return run_text_inference(model, tokenizer, question, device)
 
 

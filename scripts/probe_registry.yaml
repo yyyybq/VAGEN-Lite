@@ -1,0 +1,247 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# probe_registry.yaml — Checkpoint & Benchmark Registry for easi_probe.py
+#
+# Used by: scripts/easi_probe.py
+# Backend: lmms-eval-revsi (contains all EASI spatial benchmarks)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Absolute path to the lmms-eval backend (already installed in vagen-lite env)
+lmms_eval_dir: "/scratch/by2593/project/Active_Spatial/lmms-eval-revsi"
+
+# Base directory for resolving relative checkpoint paths
+base_ckpt_dir: "/scratch/by2593/project/Active_Spatial/VAGEN-Lite"
+
+# ─────────────────────────── Checkpoints ─────────────────────────────────────
+# Keys are short names used with --ckpts flag.
+# path: absolute or relative-to-base_ckpt_dir HuggingFace directory.
+# desc: free-text description shown in the comparison table.
+# ─────────────────────────────────────────────────────────────────────────────
+checkpoints:
+  # ── Baseline ──────────────────────────────────────────────────────────────
+  base:
+    path: "Qwen/Qwen2.5-VL-3B-Instruct"
+    desc: "Base Qwen2.5-VL-3B (pre-training)"
+
+  # ── Historical peaks (reference) ──────────────────────────────────────────
+  v26_step160:
+    path: "exps/vagen_active_spatial/v26_klhi_lr5e7/checkpoints/global_step_160/actor/huggingface"
+    desc: "v26 PPO KL-hi LR=5e-7, step 160 — historical ID_m4 ceiling (0.607)"
+    training_id_m4: 0.607
+
+  v26_step240:
+    path: "exps/vagen_active_spatial/v26_klhi_lr5e7/checkpoints/global_step_240/actor/huggingface"
+    desc: "v26 PPO KL-hi LR=5e-7, step 240 — post-peak (decay from ID_m4=0.607)"
+
+  v28_step150:
+    path: "exps/vagen_active_spatial/v28_klhi_lr5e7_cosine/checkpoints/global_step_150/actor/huggingface"
+    desc: "v28 PPO KL-hi cosine decay, step 150"
+
+  v28_step400:
+    path: "exps/vagen_active_spatial/v28_klhi_lr5e7_cosine/checkpoints/global_step_400/actor/huggingface"
+    desc: "v28 PPO KL-hi cosine decay, step 400"
+
+  v29_step200:
+    path: "exps/vagen_active_spatial/v29_grpo/checkpoints/global_step_200/actor/huggingface"
+    desc: "v29 GRPO baseline, step 200"
+
+  v30_step150:
+    path: "exps/vagen_active_spatial/v30_rew_scale/checkpoints/global_step_150/actor/huggingface"
+    desc: "v30 GRPO rew-scale, step 150"
+
+  v30_step300:
+    path: "exps/vagen_active_spatial/v30_rew_scale/checkpoints/global_step_300/actor/huggingface"
+    desc: "v30 GRPO rew-scale, step 300"
+
+  # ── v31 (unnamed_0612_1457 — naming bug) ──────────────────────────────────
+  v31_step150:
+    path: "exps/vagen_active_spatial/unnamed_0612_1457/checkpoints/global_step_150/actor/huggingface"
+    desc: "v31 GRPO resume from v30, step 150 (dual-valley, ID_m4≈0.571)"
+    training_id_m4: 0.571
+
+  v31_step300:
+    path: "exps/vagen_active_spatial/unnamed_0612_1457/checkpoints/global_step_300/actor/huggingface"
+    desc: "v31 GRPO resume from v30, step 300 — entropy recovery after 2nd valley"
+
+  # ── Recent experiments ─────────────────────────────────────────────────────
+  v32_step200:
+    path: "exps/vagen_active_spatial/v32_grpo_rewscale_lr3e7/checkpoints/global_step_200/actor/huggingface"
+    desc: "v32 GRPO rew-scale LR=3e-7, step 200"
+
+  v33_step150:
+    path: "exps/vagen_active_spatial/v33_grpo_rewscale_klhi/checkpoints/global_step_150/actor/huggingface"
+    desc: "v33 GRPO rew-scale KL=0.30, step 150 — nav-val peak (ID_m4=0.560)"
+    training_id_m4: 0.560
+
+  v33_step300:
+    path: "exps/vagen_active_spatial/v33_grpo_rewscale_klhi/checkpoints/global_step_300/actor/huggingface"
+    desc: "v33 GRPO rew-scale KL=0.30, step 300 — post-collapse (entropy=1.03)"
+    training_id_m4: 0.417
+
+  v34_step150:
+    path: "exps/vagen_active_spatial/v34_grpo_rewscale_clip02/checkpoints/global_step_150/actor/huggingface"
+    desc: "v34 GRPO rew-scale clip=0.2, step 150 (ID_m4=0.548)"
+    training_id_m4: 0.548
+
+  v35_step200:
+    path: "exps/vagen_active_spatial/v35_masked_gae_rewscale_kl30/checkpoints/global_step_200/actor/huggingface"
+    desc: "v35 masked_gae PPO KL=0.30, step 200 (peak ID_m4≈0.583) — HF ckpt deleted"
+    training_id_m4: 0.583
+
+  v35_step250:
+    path: "exps/vagen_active_spatial/v35_masked_gae_rewscale_kl30/checkpoints/global_step_250/actor/huggingface"
+    desc: "v35 masked_gae PPO KL=0.30, step 250 (earliest available HF ckpt)"
+    training_id_m4: 0.583
+
+  v36_step50:
+    path: "exps/vagen_active_spatial/v36_masked_gae_rewscale_kl30_lr3e7/checkpoints/global_step_50/actor/huggingface"
+    desc: "v36 masked_gae PPO KL=0.30 LR=3e-7, step 50 — HF ckpt deleted"
+    training_id_m4: 0.524
+
+  v36_step300:
+    path: "exps/vagen_active_spatial/v36_masked_gae_rewscale_kl30_lr3e7/checkpoints/global_step_300/actor/huggingface"
+    desc: "v36 masked_gae PPO KL=0.30 LR=3e-7, step 300 (only available HF ckpt)"
+    training_id_m4: 0.524
+
+  # ── v38: 6-type training (centering removed, fixed val bug) ───────────────
+  v38_step150:
+    path: "exps/vagen_active_spatial/v38_masked_gae_6types_fastcosine/checkpoints/global_step_150/actor/huggingface"
+    desc: "v38 masked_gae 6types fastcosine, step 150 (KL=0.30, no centering)"
+    training_id_m4: 0.464
+
+  v38_step200:
+    path: "exps/vagen_active_spatial/v38_masked_gae_6types_fastcosine/checkpoints/global_step_200/actor/huggingface"
+    desc: "v38 masked_gae 6types fastcosine, step 200 (ID_m4=0.488)"
+    training_id_m4: 0.488
+
+  v38_step300:
+    path: "exps/vagen_active_spatial/v38_masked_gae_6types_fastcosine/checkpoints/global_step_300/actor/huggingface"
+    desc: "v38 masked_gae 6types fastcosine, step 300 (ID_m4=0.488, OOD recovery)"
+    training_id_m4: 0.488
+
+  v38_step350:
+    path: "exps/vagen_active_spatial/v38_masked_gae_6types_fastcosine/checkpoints/global_step_350/actor/huggingface"
+    desc: "v38 masked_gae 6types fastcosine, step 350 (latest, ID_m4=0.488, OOD_m4=0.368)"
+    training_id_m4: 0.488
+
+  # ── Cambrian-S ablations ───────────────────────────────────────────────────
+  c4_step80:
+    path: "exps/vagen_active_spatial/c4_fwdfirst/checkpoints/global_step_80/actor/huggingface"
+    desc: "Cambrian-S c4 fwdfirst, step 80"
+    model_type: "cambrians"
+
+  c7_step80:
+    path: "exps/vagen_active_spatial/c7_fwdfirst_ehi/checkpoints/global_step_80/actor/huggingface"
+    desc: "Cambrian-S c7 fwdfirst entropy-hi, step 80"
+    model_type: "cambrians"
+
+  c8_step200:
+    path: "exps/vagen_active_spatial/c8_fwdfirst_rewscale/checkpoints/global_step_200/actor/huggingface"
+    desc: "Cambrian-S c8 fwdfirst rew-scale, step 200"
+    model_type: "cambrians"
+
+  # c10: freeze SigLIP vision tower — HF checkpoints saved every 25 steps
+  # Completed training to step 200. Only step_125 and step_200 have HF format.
+  c10_step125:
+    path: "exps/vagen_active_spatial/c10_freeze_visiontower/checkpoints/global_step_125/actor/huggingface"
+    desc: "Cambrian-S c10 freeze-visiontower GRPO KL=0.30, step 125"
+    model_type: "cambrians"
+
+  c10_step200:
+    path: "exps/vagen_active_spatial/c10_freeze_visiontower/checkpoints/global_step_200/actor/huggingface"
+    desc: "Cambrian-S c10 freeze-visiontower GRPO KL=0.30, step 200 (final)"
+    model_type: "cambrians"
+
+
+# ─────────────────────────── Benchmark Groups ────────────────────────────────
+# Group names used with --benchmarks flag (e.g., --benchmarks default).
+# Task names must match lmms-eval task names in lmms-eval-revsi.
+#
+# Key benchmarks:
+#   mindcube_tiny      — MindCube Bench tiny (~300 items, image, rotation/around/among)
+#   sparbench_tiny     — SPAR-Bench tiny (spatial physical reasoning)
+#   mmsi_bench         — MMSI-Bench w/o circular (image spatial)
+#   viewspatial        — ViewSpatial Bench (perspective-taking)
+#   embspatial         — EmbSpatial-Bench (embodied spatial)
+# ─────────────────────────────────────────────────────────────────────────────
+benchmark_groups:
+  # Quick daily monitoring (2-3 min per checkpoint on 1 GPU)
+  default:
+    - mindcube_tiny
+
+  # Core EASI-8 image benchmarks (good for ablation comparisons)
+  core:
+    - mindcube_tiny
+    - sparbench_tiny
+    - mmsi_bench
+
+  # 5 diverse spatial benchmarks — standard comprehensive evaluation
+  # MindCube (rotation/around/among), SPAR-Bench (physical), MMSI (spatial QA),
+  # ViewSpatial (perspective-taking), EmbSpatial (embodied grounding)
+  core5:
+    - mindcube_tiny
+    - sparbench_tiny
+    - mmsi_bench
+    - viewspatial
+    - embspatial
+
+  # Extended spatial coverage (7 benches)
+  extended:
+    - mindcube_tiny
+    - sparbench_tiny
+    - mmsi_bench
+    - viewspatial
+    - embspatial
+    - blink
+    - cv_bench
+
+  # Full EASI image suite
+  full_image:
+    - mindcube_tiny
+    - sparbench_tiny
+    - mmsi_bench
+    - viewspatial
+    - embspatial
+    - blink
+    - cv_bench
+    - spatial457
+    - refspatial
+
+# ─────────────────────────── Checkpoint Shortlists ───────────────────────────
+# Named groups for --ckpts flag (e.g., --ckpts recent)
+# ─────────────────────────────────────────────────────────────────────────────
+checkpoint_groups:
+  # Most useful reference set for daily analysis
+  key:
+    - base
+    - v26_step160
+    - v33_step150
+    - v34_step150
+    - v35_step200
+    - v38_step350
+
+  # Recent experiments only
+  recent:
+    - base
+    - v35_step200
+    - v36_step300
+    - v38_step200
+    - v38_step300
+    - v38_step350
+
+  # Full history
+  all_main:
+    - base
+    - v26_step160
+    - v28_step150
+    - v29_step200
+    - v30_step150
+    - v31_step150
+    - v32_step200
+    - v33_step150
+    - v33_step300
+    - v34_step150
+    - v35_step200
+    - v36_step50
+    - v38_step200
+    - v38_step300
+    - v38_step350

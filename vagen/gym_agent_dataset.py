@@ -27,7 +27,7 @@ class EnvSpec:
     # 2-element list: for each env, uniformly random sample a seed in [min, max]
     # 3-element list: as above, but each seed occur at most 'limit' times
     seed: List[int] = field(default_factory=lambda: [0])
-    # Optional explicit per-instance seeds; must be longer than n_envs
+    # Optional explicit per-instance seeds; must contain at least n_envs values
     seed_list: Optional[List[int]] = None
     max_turns: int = 1
     response_length_per_turn: Optional[int] = None
@@ -142,9 +142,9 @@ def _generate_seeds_for_spec(
     """Generate `n_envs` seeds using either seed_list or seed directive rules."""
     explicit_list = _coerce_to_int_list(spec.seed_list)
     if explicit_list is not None:
-        if len(explicit_list) <= spec.n_envs:
+        if len(explicit_list) < spec.n_envs:
             raise ValueError(
-                f"seed_list for env '{spec.name}' must contain more than n_envs values"
+                f"seed_list for env '{spec.name}' must contain at least n_envs values"
             )
         return explicit_list[: spec.n_envs]
 

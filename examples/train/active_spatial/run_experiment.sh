@@ -241,7 +241,7 @@ else
 fi
 
 $PYTHON - <<PYEOF
-import yaml, sys
+import json, os, yaml, sys
 
 with open("${ENV_CONFIG_PATH}") as f:
     cfg = yaml.safe_load(f)
@@ -252,6 +252,107 @@ env_entry = cfg[env_key]
 env_config = dict(env_entry.get("env_config", {}))
 train_size = env_entry.get("train_size", 259)
 test_size = env_entry.get("test_size", 19)
+
+# Optional in-domain val override:
+# 1) ID_VAL_JSONL / ID_VAL_N_ENVS: use a custom ID val jsonl directly.
+# 2) ID_VAL_DELTA_BOOST_N: build an ID val jsonl with at least N delta_control tasks.
+id_val_jsonl = "${ID_VAL_JSONL:-}"
+id_val_n = int("${ID_VAL_N_ENVS:-0}")
+id_val_delta_boost_n = int("${ID_VAL_DELTA_BOOST_N:-0}")
+id_val_include_types = [t.strip() for t in "${ID_VAL_INCLUDE_TASK_TYPES:-}".split(",") if t.strip()]
+id_val_exclude_types = {t.strip() for t in "${ID_VAL_EXCLUDE_TASK_TYPES:-}".split(",") if t.strip()}
+
+def _task_type(entry: dict) -> str:
+    t = entry.get("task_type", "")
+    if t:
+        return str(t)
+    desc = str(entry.get("task_description", "")).lower()
+    if "closer" in desc or "farther" in desc:
+        return "delta_control"
+    return "unknown"
+
+def _allowed_task_type(entry: dict) -> bool:
+    t = _task_type(entry)
+    if id_val_include_types and t not in id_val_include_types:
+        return False
+    if id_val_exclude_types and t in id_val_exclude_types:
+        return False
+    return True
+
+if (id_val_delta_boost_n > 0 or id_val_include_types or id_val_exclude_types) and not id_val_jsonl:
+    src_jsonl = env_config.get("jsonl_path", "")
+    if src_jsonl and os.path.isfile(src_jsonl):
+        with open(src_jsonl) as f:
+            all_items = [json.loads(line) for line in f if line.strip()]
+
+        base_start = int(train_size)
+        base_end = min(len(all_items), int(train_size + test_size))
+        base_items = all_items[base_start:base_end]
+
+        if id_val_include_types or id_val_exclude_types:
+            kept_items = [e for e in base_items if _allowed_task_type(e)]
+            target_total = len(base_items)
+            need_fill = max(0, target_total - len(kept_items))
+            seen = {json.dumps(e, sort_keys=True, ensure_ascii=False) for e in kept_items}
+            extras = []
+            for e in all_items:
+                if not _allowed_task_type(e):
+                    continue
+                k = json.dumps(e, sort_keys=True, ensure_ascii=False)
+                if k in seen:
+                    continue
+                extras.append(e)
+                seen.add(k)
+                if len(extras) >= need_fill:
+                    break
+            base_items = kept_items + extras[:need_fill]
+            print(
+                f"[INFO] ID val task filter: include={id_val_include_types or 'ALL'} "
+                f"exclude={sorted(id_val_exclude_types) or 'NONE'} -> total={len(base_items)}"
+            )
+
+        delta_items = [e for e in base_items if _task_type(e) == "delta_control"]
+        non_delta_items = [e for e in base_items if _task_type(e) != "delta_control"]
+
+        need_extra = max(0, id_val_delta_boost_n - len(delta_items))
+        extra_delta = []
+        if need_extra > 0:
+            seen = {json.dumps(e, sort_keys=True, ensure_ascii=False) for e in base_items}
+            for e in all_items:
+                if _task_type(e) != "delta_control":
+                    continue
+                k = json.dumps(e, sort_keys=True, ensure_ascii=False)
+                if k in seen:
+                    continue
+                extra_delta.append(e)
+                seen.add(k)
+                if len(extra_delta) >= need_extra:
+                    break
+
+        # Keep total ID val size unchanged by replacing tail non-delta items.
+        final_delta = delta_items + extra_delta[:need_extra]
+        keep_non_delta_n = max(0, len(base_items) - len(final_delta))
+        boosted_items = non_delta_items[:keep_non_delta_n] + final_delta
+
+        id_val_jsonl = "${EXPERIMENT_DIR}/val_id_delta_boost.jsonl"
+        with open(id_val_jsonl, "w") as f:
+            for e in boosted_items:
+                f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        id_val_n = len(boosted_items)
+
+        final_delta_n = sum(1 for e in boosted_items if _task_type(e) == "delta_control")
+        if id_val_delta_boost_n > 0:
+            print(
+                f"[INFO] ID delta boost enabled: target={id_val_delta_boost_n}, "
+                f"actual={final_delta_n}, total_id_n={id_val_n}, file={id_val_jsonl}"
+            )
+        else:
+            print(f"[INFO] ID val override built: total_id_n={id_val_n}, file={id_val_jsonl}")
+    else:
+        print(f"[WARN] ID delta boost skipped: source jsonl not found: {src_jsonl}")
+
+if id_val_jsonl and id_val_n <= 0 and os.path.isfile(id_val_jsonl):
+    id_val_n = sum(1 for _ in open(id_val_jsonl) if _.strip())
 
 # 覆盖渲染配置
 env_config["gpu_device"] = ${RENDERING_GPU}
@@ -272,15 +373,33 @@ train_yaml = {
         "config": env_config,
     }]
 }
-val_envs = [{
+
+id_env_config = dict(env_config)
+id_env_n = test_size
+id_env_seed = [train_size, train_size + test_size]
+id_env_seed_list = None
+id_env_source = "active_spatial"
+if id_val_jsonl:
+    id_env_config["jsonl_path"] = id_val_jsonl
+    id_env_n = id_val_n if id_val_n > 0 else test_size
+    id_env_seed = [0, id_env_n]
+    id_env_seed_list = list(range(id_env_n))
+    id_env_source = "active_spatial_id_override"
+    print(f"[INFO] ID val override: {id_val_jsonl} (n_envs={id_env_n})")
+
+id_val_spec = {
     "name": "ActiveSpatial",
-    "n_envs": test_size,
-    "data_source": "active_spatial",
-    "seed": [train_size, train_size + test_size],
+    "n_envs": id_env_n,
+    "data_source": id_env_source,
+    "seed": id_env_seed,
     "max_turns": ${MAX_TURNS},
     "response_length_per_turn": ${MAX_RESPONSE_LENGTH},
-    "config": env_config,
-}]
+    "config": id_env_config,
+}
+if id_env_seed_list is not None:
+    id_val_spec["seed_list"] = id_env_seed_list
+
+val_envs = [id_val_spec]
 
 # Optional OOD val env (Plan A): if OOD_VAL_JSONL is set, add a second val env
 # that points to a different jsonl_path (different scenes).
@@ -301,6 +420,29 @@ if ood_val_jsonl and ood_val_n > 0:
         "config": ood_env_config,
     })
     print(f"[INFO] OOD val enabled: {ood_val_jsonl} (n_envs={ood_val_n})")
+
+# Multi-split OOD val: if OOD_SPLITS_DIR is set, add each ood_*.jsonl as a
+# separate val env with its own data_source tag (e.g. "active_spatial_ood_scene").
+import os as _os, glob as _glob
+ood_splits_dir = "${OOD_SPLITS_DIR:-}"
+ood_splits_n = int("${OOD_SPLITS_N_ENVS:-20}")
+if ood_splits_dir and _os.path.isdir(ood_splits_dir):
+    for ood_file in sorted(_glob.glob(_os.path.join(ood_splits_dir, "ood_*.jsonl"))):
+        split_name = _os.path.basename(ood_file).replace(".jsonl", "")  # e.g. "ood_scene"
+        n_items = sum(1 for _ in open(ood_file))
+        n_envs_this = min(n_items, ood_splits_n)
+        ood_cfg = dict(env_config)
+        ood_cfg["jsonl_path"] = ood_file
+        val_envs.append({
+            "name": "ActiveSpatial",
+            "n_envs": n_envs_this,
+            "data_source": f"active_spatial_{split_name}",
+            "seed": [0, n_envs_this],
+            "max_turns": ${MAX_TURNS},
+            "response_length_per_turn": ${MAX_RESPONSE_LENGTH},
+            "config": ood_cfg,
+        })
+        print(f"[INFO] OOD split: {split_name} ({n_envs_this}/{n_items} envs) <- {ood_file}")
 
 val_yaml = {"envs": val_envs}
 

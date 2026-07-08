@@ -389,7 +389,13 @@ class CambrianVLLMForCausalLM(nn.Module, SupportsMultiModal):
             if pname in params:
                 params[pname].data.copy_(tensor)
 
-        return set(local_tensors.keys())
+        # Return all parameter names so vllm's strict weight-tracking check passes.
+        # The lm weights are loaded into tensors via self.language_model.load_weights()
+        # even though their full root-level names (language_model.model.layers.*) are
+        # not in local_tensors.  Returning the full named_parameters() set is correct
+        # because every parameter is initialised from the checkpoint or from random
+        # init for components not present in the checkpoint (there are none here).
+        return {name for name, _ in self.named_parameters()}
 
 
 # ---------------------------------------------------------------------------

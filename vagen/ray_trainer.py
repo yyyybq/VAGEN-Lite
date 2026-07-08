@@ -909,6 +909,12 @@ class RayPPOTrainer:
             
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores, images=sample_images)
         # dump generations
+        # Write data_source into the JSONL dump so OOD splits can be
+        # distinguished in downstream analysis (analyze_experiments.py).
+        reward_extra_infos_dict["data_source"] = [
+            src for batch_srcs in data_source_lst for src in batch_srcs
+        ]
+
         val_data_dir = self.config.trainer.get("validation_data_dir", None)
         if val_data_dir:
             self._dump_generations(
