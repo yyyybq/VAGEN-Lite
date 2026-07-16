@@ -1,0 +1,82 @@
+# =============================================================================
+# v39_6types_distinfo — v38 基础上增加 distance-to-target 观测信息
+# =============================================================================
+# v38 → v39 的唯一变化：
+#   ★ enable_distance_in_obs: false → true
+#      每轮 observation 中新增 "Distance to target: X.XX m"
+#
+# 背景（v38 分析结论）：
+#   delta_control 任务全程 0% 成功率，两个并列根因：
+#   1. 单张 RGB 无法可靠估计公制距离（模型不知道"我现在距目标多远"）
+#   2. WINDOW_SIZE=1 无历史，no_concat 模式下每轮只看当前帧，无里程计意识
+#      且模型在 turn2+ 无法从 context 中读到任务要求的目标距离（仅 turn1 含 task_prompt）
+#   → 显式注入 distance-to-target 同时解决这两个问题：
+#      · 模型每轮都知道当前距目标多远
+#      · 对比 task_prompt 中的目标距离，可以判断是否需要继续前进/停止
+#
+# 其他超参与 v38 完全一致（6 types, rewscale, KL=0.30, fast cosine）
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/scratch/by2593/project/Active_Spatial/VAGEN-Lite/data_gen/active_spatial_pipeline/output_100scenes/train_100scenes_6types.jsonl"
+
+        render_backend: local
+        gs_root: "/scratch/by2593/project/Active_Spatial/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        # ─── γ-potential shaping ──────────────────────────────────────────────
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 1.0
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.65
+        enable_auto_termination: true
+
+        near_success_threshold: 0.55
+        near_success_bonus: 0.5
+        near_success_mode: "constant"
+
+        # ─── AND-gate (thr=0.70) ──────────────────────────────────────────────
+        success_require_both: true
+        success_position_threshold: 0.70
+        success_orientation_threshold: 0.70
+
+        enable_collision_detection: false
+        enable_visibility_check: false
+
+        # ─── reward ───────────────────────────────────────────────────────────
+        format_reward: 0.0
+        invalid_format_penalty: -0.2
+        max_consecutive_invalid_actions: 3
+        premature_done_penalty: -0.3
+        step_penalty: -0.02
+        enable_step_penalty: true
+        success_reward: 5.0
+        max_distance: 5.0
+
+        prompt_format: free_think
+        action_sep: "|"
+        image_placeholder: "<image>"
+
+        max_episode_steps: 60
+
+        # ─── ★ v39 新增：显式距离观测 ─────────────────────────────────────────
+        enable_distance_in_obs: true     # 每轮 obs 中加入 "Distance to target: X.XX m"
+
+    train_size: 11139
+    test_size: 18

@@ -354,6 +354,31 @@ if (id_val_delta_boost_n > 0 or id_val_include_types or id_val_exclude_types) an
 if id_val_jsonl and id_val_n <= 0 and os.path.isfile(id_val_jsonl):
     id_val_n = sum(1 for _ in open(id_val_jsonl) if _.strip())
 
+# Optional training data filter: TRAIN_EXCLUDE_TASK_TYPES
+# If set, load the training jsonl, strip out the excluded task types, write a
+# filtered copy into EXPERIMENT_DIR, and update env_config + train_size.
+train_exclude_types = {t.strip() for t in "${TRAIN_EXCLUDE_TASK_TYPES:-}".split(",") if t.strip()}
+if train_exclude_types:
+    src_train_jsonl = env_config.get("jsonl_path", "")
+    if src_train_jsonl and os.path.isfile(src_train_jsonl):
+        with open(src_train_jsonl) as f:
+            all_train = [json.loads(l) for l in f if l.strip()]
+        filtered_train = [e for e in all_train if _task_type(e) not in train_exclude_types]
+        filtered_path = "${EXPERIMENT_DIR}/train_filtered.jsonl"
+        with open(filtered_path, "w") as f:
+            for e in filtered_train:
+                f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        removed = len(all_train) - len(filtered_train)
+        print(
+            f"[INFO] TRAIN_EXCLUDE_TASK_TYPES={sorted(train_exclude_types)}: "
+            f"removed {removed} entries ({removed/len(all_train)*100:.1f}%), "
+            f"kept {len(filtered_train)}, writing to {filtered_path}"
+        )
+        env_config["jsonl_path"] = filtered_path
+        train_size = len(filtered_train)
+    else:
+        print(f"[WARN] TRAIN_EXCLUDE_TASK_TYPES set but source jsonl not found: {src_train_jsonl}")
+
 # 覆盖渲染配置
 env_config["gpu_device"] = ${RENDERING_GPU}
 if "${RENDER_BACKEND}" == "client":
