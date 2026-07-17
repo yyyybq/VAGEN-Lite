@@ -181,15 +181,17 @@ export WANDB_CONFIG_DIR="${WANDB_CACHE_ROOT}/config"
 export TMPDIR="/scratch/by2593/tmp"
 mkdir -p "${TMPDIR}"
 
-# Redirect ALL JIT / framework caches off $HOME (home has a tight quota).
-# Without this, flashinfer/triton/torch_extensions write to ~/.cache and
-# eventually hit "Disk quota exceeded" → vLLM EngineCore startup fails.
+# Redirect framework caches off $HOME (home has a tight quota). Keep heavyweight
+# HF/pip caches on /scratch, but put JIT build caches on node-local /tmp: flashinfer
+# uses file locks during vLLM startup, and shared scratch/NFS can produce stale
+# handles when multiple experiments compile kernels at the same time.
 export XDG_CACHE_HOME="/scratch/by2593/.cache"
 mkdir -p "${XDG_CACHE_HOME}"
-export FLASHINFER_WORKSPACE_BASE="${XDG_CACHE_HOME}/flashinfer"
-export TRITON_CACHE_DIR="${XDG_CACHE_HOME}/triton"
-export TORCHINDUCTOR_CACHE_DIR="${XDG_CACHE_HOME}/torchinductor"
-export TORCH_EXTENSIONS_DIR="${XDG_CACHE_HOME}/torch_extensions"
+JIT_CACHE_ROOT="/tmp/${USER}/vagen_jit/${EXPERIMENT_NAME}_$$"
+export FLASHINFER_WORKSPACE_BASE="${JIT_CACHE_ROOT}/flashinfer"
+export TRITON_CACHE_DIR="${JIT_CACHE_ROOT}/triton"
+export TORCHINDUCTOR_CACHE_DIR="${JIT_CACHE_ROOT}/torchinductor"
+export TORCH_EXTENSIONS_DIR="${JIT_CACHE_ROOT}/torch_extensions"
 export HF_HOME="${XDG_CACHE_HOME}/huggingface"
 export TRANSFORMERS_CACHE="${HF_HOME}/hub"
 export PIP_CACHE_DIR="${XDG_CACHE_HOME}/pip"
