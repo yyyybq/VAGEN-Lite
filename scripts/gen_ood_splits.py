@@ -36,8 +36,9 @@ from typing import List, Dict, Optional
 # ─── Constants ───────────────────────────────────────────────────────────────
 
 TRAIN_TASK_TYPES = {
-    'absolute_positioning', 'delta_control', 'equidistance',
-    'projective_relations', 'occlusion_alignment', 'fov_inclusion', 'centering'
+    'absolute_positioning', 'equidistance',
+    'projective_relations', 'occlusion_alignment', 'fov_inclusion', 'centering',
+    'apparent_size_ordering'
 }
 
 # P10/P90 thresholds per task (computed from train_100scenes_7types.jsonl)
@@ -45,7 +46,6 @@ TRAIN_TASK_TYPES = {
 GEOM_THRESHOLDS = {
     'absolute_positioning': (1.50, 2.58),
     'centering':            (5.63, 10.50),
-    'delta_control':        (0.59, 2.11),
     'equidistance':         (3.25, 9.32),
     'fov_inclusion':        (1.35, 3.45),
     'occlusion_alignment':  (2.13, 5.95),
@@ -119,14 +119,23 @@ def _rewrite_centering(desc: str) -> str:
     return desc
 
 
+def _rewrite_apparent_size_ordering(desc: str) -> str:
+    """'Position where {a} appears larger than {b}' -> alternative."""
+    m = re.match(r'Position where (.+) appears larger than (.+)', desc)
+    if m:
+        a, b = m.group(1), m.group(2)
+        return f'Find a viewpoint where {a} looks bigger than {b}'
+    return desc
+
+
 TEMPLATE_REWRITERS = {
     'absolute_positioning': _rewrite_absolute_positioning,
-    'delta_control':        _rewrite_delta_control,
     'equidistance':         _rewrite_equidistance,
     'projective_relations': _rewrite_projective_relations,
     'occlusion_alignment':  _rewrite_occlusion_alignment,
     'fov_inclusion':        _rewrite_fov_inclusion,
     'centering':            _rewrite_centering,
+    'apparent_size_ordering': _rewrite_apparent_size_ordering,
 }
 
 
@@ -292,12 +301,12 @@ def write_summary(summary_path: str, splits: dict, train_info: dict,
         '- Same task content, but `task_description` rewritten with **alternative phrasing**.',
         '- Rewrites per task type:',
         '  - `absolute_positioning`: "Move to any position {d}m from X" → "Navigate to a location {d} meters away from X"',
-        '  - `delta_control`: "Move {d}m toward X" → "Approach X and stop when you are {d}m closer to it"',
         '  - `equidistance`: "… equidistant from A and B" → "… equally far from both A and B"',
         '  - `projective_relations`: "A appears to the left of B" → "B appears to the right of A" (semantically equivalent)',
         '  - `occlusion_alignment`: "A is hidden behind B" → "B fully blocks your view of A"',
         '  - `fov_inclusion`: "both A and B are visible" → "you can see both A and B at the same time"',
         '  - `centering`: "A is centered between B and C" → "A appears midway between B and C"',
+        '  - `apparent_size_ordering`: "A appears larger than B" → "A looks bigger than B"',
         '- Original description stored in `task_description_original` field.',
         '- Tests: Does the model parse task instructions by template matching or semantic understanding?',
         '',

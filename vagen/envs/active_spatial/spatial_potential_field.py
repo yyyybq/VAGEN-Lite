@@ -22,14 +22,22 @@ Task Types and Their Scoring Logic:
 5. Centering (RAY): Score based on angular centering of A between B and C
 6. Occlusion Alignment (RAY): Score based on alignment with occlusion ray
 7. FoV Inclusion (ANNULUS): Score based on both objects being in field of view
-8. Size-Distance Invariance (CURVE): Score based on apparent size ratio
-9. Screen Occupancy (CIRCLE): Score based on object's screen coverage
+8. Size-Distance Invariance (CURVE): Score based on equal apparent size ratio
+9. Apparent Size Ordering (SAMPLED REGION): Score based on one object appearing larger
+10. Screen Occupancy (CIRCLE): Score based on object's screen coverage
 """
 
 import numpy as np
 from typing import Dict, Any, Tuple, Optional, List
 from dataclasses import dataclass
 from enum import Enum
+
+try:
+    from .region_metrics import compute_region_metrics
+    from .visual_bbox_metrics import compute_visual_bbox_metrics
+except ImportError:
+    from region_metrics import compute_region_metrics
+    from visual_bbox_metrics import compute_visual_bbox_metrics
 
 
 class TaskType(Enum):
@@ -42,6 +50,7 @@ class TaskType(Enum):
     OCCLUSION_ALIGNMENT = "occlusion_alignment"
     FOV_INCLUSION = "fov_inclusion"
     SIZE_DISTANCE_INVARIANCE = "size_distance_invariance"
+    APPARENT_SIZE_ORDERING = "apparent_size_ordering"
     SCREEN_OCCUPANCY = "screen_occupancy"
 
 
@@ -213,7 +222,8 @@ class SpatialPotentialField:
                  fov_penalty_weight: float = 0.5,
                  fov_penalty_softness: float = 0.2,
                  use_dynamic_weights: bool = True,
-                 dynamic_weight_threshold: float = 0.7):
+                 dynamic_weight_threshold: float = 0.7,
+                 use_visual_bbox_scoring: bool = True):
         """
         Initialize the potential field.
         
@@ -231,6 +241,8 @@ class SpatialPotentialField:
                                 based on how close to optimal position (default True)
             dynamic_weight_threshold: Position score threshold above which orientation
                                      weight starts increasing (default 0.7)
+            use_visual_bbox_scoring: If True, projected bbox metrics override the
+                                     reward score for visual-relation tasks.
         """
         self.base_position_weight = position_weight
         self.base_orientation_weight = orientation_weight
@@ -249,6 +261,7 @@ class SpatialPotentialField:
         # Dynamic weight parameters
         self.use_dynamic_weights = use_dynamic_weights
         self.dynamic_weight_threshold = dynamic_weight_threshold
+        self.use_visual_bbox_scoring = use_visual_bbox_scoring
         
         # Normalize weights
         total_weight = position_weight + orientation_weight
@@ -510,11 +523,84 @@ class SpatialPotentialField:
             TaskType.OCCLUSION_ALIGNMENT.value: self._score_occlusion_alignment,
             TaskType.FOV_INCLUSION.value: self._score_fov_inclusion,
             TaskType.SIZE_DISTANCE_INVARIANCE.value: self._score_size_distance_invariance,
+            TaskType.APPARENT_SIZE_ORDERING.value: self._score_apparent_size_ordering,
             TaskType.SCREEN_OCCUPANCY.value: self._score_screen_occupancy,
         }
         
         scorer = scorer_map.get(task_type, self._score_default)
-        return scorer(camera_position, camera_forward, task_params, target_region)
+        result = scorer(camera_position, camera_forward, task_params, target_region)
+
+        # Add standardized diagnostics without changing the reward/success
+        # semantics. For region-valued tasks this makes sample_point explicitly
+        # auxiliary and exposes distance to the whole valid region.
+        details = dict(result.details or {})
+        visual_metrics = compute_visual_bbox_metrics(
+            camera_position=camera_position,
+            camera_forward=camera_forward,
+            task_type=task_type,
+            task_params=task_params,
+            target_region=target_region,
+        )
+        details["visual_bbox_metrics"] = visual_metrics
+        region_metrics = compute_region_metrics(
+            camera_position=camera_position,
+            camera_forward=camera_forward,
+            task_type=task_type,
+            task_params=task_params,
+            target_region=target_region,
+        )
+        details["region_metrics"] = region_metrics
+        for key in (
+            "distance_to_region",
+            "region_score",
+            "region_target_point",
+            "sample_target_distance",
+            "sample_target_is_auxiliary",
+        ):
+            if key in region_metrics:
+                details.setdefault(key, region_metrics.get(key))
+
+        visual_tasks = {
+            TaskType.PROJECTIVE_RELATIONS.value,
+            TaskType.CENTERING.value,
+            TaskType.OCCLUSION_ALIGNMENT.value,
+            TaskType.FOV_INCLUSION.value,
+            TaskType.SIZE_DISTANCE_INVARIANCE.value,
+            TaskType.APPARENT_SIZE_ORDERING.value,
+            TaskType.SCREEN_OCCUPANCY.value,
+        }
+        if (
+            self.use_visual_bbox_scoring
+            and task_type in visual_tasks
+            and visual_metrics.get("available")
+            and visual_metrics.get("visual_score") is not None
+        ):
+            visual_position = float(visual_metrics.get("visual_position_score", visual_metrics["visual_score"]))
+            visual_orientation = float(visual_metrics.get("visual_orientation_score", visual_metrics["visual_score"]))
+            visual_position = float(np.clip(visual_position, 0.0, 1.0))
+            visual_orientation = float(np.clip(visual_orientation, 0.0, 1.0))
+            pos_weight, ori_weight = self._compute_dynamic_weights(visual_position)
+            total_score = pos_weight * visual_position + ori_weight * visual_orientation
+            details["visual_bbox_overrode_score"] = True
+            details["pre_visual_total_score"] = float(result.total_score)
+            details["pre_visual_position_score"] = float(result.position_score)
+            details["pre_visual_orientation_score"] = float(result.orientation_score)
+            details["dynamic_position_weight"] = pos_weight
+            details["dynamic_orientation_weight"] = ori_weight
+            details["visual_score"] = float(visual_metrics["visual_score"])
+            return ScoreResult(
+                total_score=float(np.clip(total_score, 0, 1)),
+                position_score=visual_position,
+                orientation_score=visual_orientation,
+                details=details,
+            )
+
+        return ScoreResult(
+            total_score=result.total_score,
+            position_score=result.position_score,
+            orientation_score=result.orientation_score,
+            details=details,
+        )
     
     def _compute_dynamic_weights(self, position_score: float) -> Tuple[float, float]:
         """
@@ -1058,6 +1144,20 @@ class SpatialPotentialField:
         
         # Position score: Exponential decay from ray
         position_score = exponential_decay_score(dist_to_ray, decay_rate=0.5)
+
+        # Respect finite ray bounds when the data generator constrains the
+        # useful occlusion segment (e.g. to keep the occluder's angular width
+        # above the discrete yaw resolution).
+        rel_to_origin = camera_position[:2] - ray_origin[:2]
+        ray_progress = float(np.dot(rel_to_origin, ray_direction[:2]))
+        min_ray_dist = float(params.get("min_distance", 0.0) or 0.0)
+        max_ray_dist = params.get("max_distance", None)
+        if ray_progress < min_ray_dist:
+            position_score *= exponential_decay_score(min_ray_dist - ray_progress, decay_rate=0.5)
+        if max_ray_dist is not None:
+            max_ray_dist = float(max_ray_dist)
+            if ray_progress > max_ray_dist:
+                position_score *= exponential_decay_score(ray_progress - max_ray_dist, decay_rate=0.5)
         
         # Check if B is between camera and A
         dist_to_a = distance_2d(camera_position, center_a)
@@ -1081,13 +1181,32 @@ class SpatialPotentialField:
         to_a = center_a[:2] - camera_position[:2]
         to_a_norm = normalize(to_a)
         alignment = abs(np.dot(to_a_norm, to_b_norm))  # Should be ~1 for alignment
+
+        # Optional angular-width gate for datasets generated with
+        # occlusion_min_angular_width_deg. Old datasets do not contain these
+        # fields, so their scoring remains unchanged.
+        angular_width_deg = None
+        min_angular_width_deg = params.get("min_occlusion_angular_width_deg", None)
+        occluder_width = params.get("occluder_width_for_angle", None)
+        if min_angular_width_deg is not None and occluder_width is not None:
+            min_angular_width_deg = float(min_angular_width_deg)
+            occluder_width = float(occluder_width)
+            angular_width_deg = float(
+                np.degrees(2.0 * np.arctan((occluder_width / 2.0) / max(dist_to_b, 1e-6)))
+            )
+            if min_angular_width_deg > 0.0 and angular_width_deg < min_angular_width_deg:
+                position_score *= max(0.1, angular_width_deg / min_angular_width_deg)
         
         details = {
             "distance_to_ray": dist_to_ray,
+            "ray_progress": ray_progress,
             "b_is_closer": b_is_closer,
             "collinearity": alignment,
             "facing_angle_cos": cos_angle,
         }
+        if angular_width_deg is not None:
+            details["occluder_angular_width_deg"] = angular_width_deg
+            details["min_occlusion_angular_width_deg"] = float(min_angular_width_deg)
         
         # Apply FoV constraint - B (occluder) must be in view
         # Note: A being hidden is the goal, so we only require B to be visible
@@ -1310,7 +1429,86 @@ class SpatialPotentialField:
         )
 
     # =========================================================================
-    # Task 3.3: Screen Occupancy (CIRCLE)
+    # Task 3.3: Apparent Size Ordering (SAMPLED REGION)
+    # Goal: The designated larger object appears larger than the other object
+    # Position Score: size_large/dist_large >= target_ratio * size_small/dist_small
+    # Orientation Score: Looking toward midpoint of objects
+    # FoV Constraint: Both objects must remain in view
+    # =========================================================================
+    def _score_apparent_size_ordering(self,
+                                      camera_position: np.ndarray,
+                                      camera_forward: np.ndarray,
+                                      task_params: Dict[str, Any],
+                                      target_region: Dict[str, Any]) -> ScoreResult:
+        """
+        Score for apparent-size ordering.
+
+        Perfect position score once the requested ordering is clearly satisfied.
+        Below the threshold, the score decays smoothly on a log-ratio scale.
+        """
+        params = target_region.get("params", {})
+
+        large_center = np.array(params.get(
+            "larger_object_center",
+            params.get("object_a_center", [0, 0, 0]),
+        ))
+        small_center = np.array(params.get(
+            "smaller_object_center",
+            params.get("object_b_center", [1, 0, 0]),
+        ))
+        large_size = max(float(params.get("larger_object_size", 1.0)), 0.05)
+        small_size = max(float(params.get("smaller_object_size", 1.0)), 0.05)
+        target_ratio = max(float(params.get("target_ratio", 1.25)), 1.01)
+
+        dist_large = max(distance_2d(camera_position, large_center), 0.1)
+        dist_small = max(distance_2d(camera_position, small_center), 0.1)
+        apparent_large = large_size / dist_large
+        apparent_small = small_size / dist_small
+        apparent_ratio = apparent_large / max(apparent_small, 1e-6)
+
+        log_ratio = np.log(max(apparent_ratio, 1e-6))
+        log_target = np.log(target_ratio)
+        if log_ratio >= log_target:
+            position_score = 1.0
+        else:
+            # Smoothly penalize violations. sigma=0.35 allows useful gradient
+            # when the objects are close to the decision boundary.
+            position_score = gaussian_score(log_ratio, log_target, sigma=0.35)
+
+        min_dist = float(params.get("min_distance", 0.5))
+        min_current_dist = min(dist_large, dist_small)
+        if min_current_dist < min_dist:
+            position_score *= max(0.0, min_current_dist / max(min_dist, 1e-6))
+
+        midpoint = (large_center + small_center) / 2
+        to_midpoint = midpoint - camera_position
+        to_midpoint[2] = 0
+        to_midpoint = normalize(to_midpoint)
+
+        camera_forward_2d = normalize(np.array([camera_forward[0], camera_forward[1], 0]))
+        cos_angle = cosine_similarity(camera_forward_2d, to_midpoint)
+        orientation_score = (cos_angle + 1) / 2
+
+        details = {
+            "distance_to_larger": dist_large,
+            "distance_to_smaller": dist_small,
+            "apparent_larger": apparent_large,
+            "apparent_smaller": apparent_small,
+            "apparent_ratio": apparent_ratio,
+            "target_ratio": target_ratio,
+            "ordering_satisfied": apparent_ratio >= target_ratio,
+            "facing_angle_cos": cos_angle,
+        }
+
+        return self._combine_scores(
+            position_score, orientation_score, details,
+            camera_position=camera_position,
+            camera_forward=camera_forward,
+            target_objects=[large_center, small_center],
+        )
+
+    # =========================================================================
+    # Task 3.4: Screen Occupancy (CIRCLE)
     # Goal: Object occupies k% of the vertical field of view
     # Position Score: Distance gives correct occupancy ratio
     # Orientation Score: Looking directly at object
@@ -1433,6 +1631,8 @@ def create_potential_field(config: Optional[Dict[str, Any]] = None) -> SpatialPo
             - fov_penalty_softness: Softness of FoV boundary in radians (default 0.2)
             - use_dynamic_weights: If True, dynamically adjust weights (default True)
             - dynamic_weight_threshold: Position score threshold for dynamic weights (default 0.7)
+            - use_visual_bbox_scoring: If True, visual-relation tasks use projected
+              3D bbox metrics as the primary score (default True)
     
     Returns:
         Configured SpatialPotentialField instance
@@ -1452,6 +1652,7 @@ def create_potential_field(config: Optional[Dict[str, Any]] = None) -> SpatialPo
         fov_penalty_softness=config.get("fov_penalty_softness", 0.2),
         use_dynamic_weights=config.get("use_dynamic_weights", True),
         dynamic_weight_threshold=config.get("dynamic_weight_threshold", 0.7),
+        use_visual_bbox_scoring=config.get("use_visual_bbox_scoring", True),
     )
 
 

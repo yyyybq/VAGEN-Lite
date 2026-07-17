@@ -51,13 +51,13 @@ DEFAULT_N_ID        = 21
 # Task-type → color for subplot title
 TASK_COLORS = {
     "absolute_positioning":      "#2196F3",
-    "delta_control":             "#FF9800",
     "equidistance":              "#9C27B0",
     "projective_relations":      "#F44336",
     "centering":                 "#009688",
     "occlusion_alignment":       "#795548",
     "fov_inclusion":             "#607D8B",
     "size_distance_invariance":  "#E91E63",
+    "apparent_size_ordering":    "#3F51B5",
     "screen_occupancy":          "#CDDC39",
     "unknown":                   "#9E9E9E",
 }
@@ -67,8 +67,8 @@ TASK_TYPE_RULES = [
     ("equidistance",             re.compile(r"equidistant view",                    re.I)),
     ("centering",                re.compile(r"center view",                         re.I)),
     ("occlusion_alignment",      re.compile(r"occluded view",                       re.I)),
-    ("delta_control",            re.compile(r"closer view|farther view",            re.I)),
     ("size_distance_invariance", re.compile(r"equal_size view",                     re.I)),
+    ("apparent_size_ordering",   re.compile(r"apparent_larger view|appears larger|looks bigger", re.I)),
     ("screen_occupancy",         re.compile(r"screen occupancy",                    re.I)),
     ("fov_inclusion",            re.compile(r"fov inclusion|field.of.view",         re.I)),
     ("absolute_positioning",     re.compile(r"\b(front|back|left|right|side)\s+view\b", re.I)),
@@ -565,8 +565,10 @@ def plot_task_type_summary(
         type_episodes[task_type].append((best, bool(successes)))
 
     all_types = [t for t in [
-        "absolute_positioning", "delta_control", "equidistance",
+        "absolute_positioning", "equidistance",
         "projective_relations", "centering", "occlusion_alignment",
+        "fov_inclusion", "size_distance_invariance",
+        "apparent_size_ordering", "screen_occupancy",
     ] if t in type_episodes]
 
     if not all_types:
@@ -600,11 +602,14 @@ def plot_task_type_summary(
 
     TASK_SHORT = {
         "absolute_positioning":   "Absolute\nPositioning",
-        "delta_control":          "Delta\nControl",
         "equidistance":           "Equi-\ndistance",
         "projective_relations":   "Projective\nRelations",
         "centering":              "Centering",
         "occlusion_alignment":    "Occlusion\nAlignment",
+        "fov_inclusion":          "FoV\nInclusion",
+        "size_distance_invariance": "Size\nInvariance",
+        "apparent_size_ordering": "Size\nOrdering",
+        "screen_occupancy":       "Screen\nOccupancy",
     }
 
     for row_i, task_type in enumerate(all_types):

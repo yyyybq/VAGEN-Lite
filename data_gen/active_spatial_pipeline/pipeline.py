@@ -179,6 +179,45 @@ def compute_init_position_score(
             obj_distance = np.linalg.norm(center_b - center_a)
             sigma = max(obj_distance * 0.2, 0.5)
             position_score = np.exp(-(distance_diff ** 2) / (2 * sigma ** 2))
+
+    elif task_type == "occlusion_alignment":
+        # For occlusion tasks, the valid region is a ray rather than one
+        # arbitrary sample point. Scoring only distance-to-sample misses
+        # "zero-action" starts that already lie on the occlusion ray but far
+        # away from the sampled target. Score the actual ray geometry instead.
+        origin = np.array(params.get("origin", [0, 0]), dtype=float)
+        direction = np.array(params.get("direction", [1, 0]), dtype=float)
+        direction_norm = np.linalg.norm(direction[:2])
+        if direction_norm > 1e-6:
+            direction = direction[:2] / direction_norm
+            init_xy = init_pos[:2]
+            rel = init_xy - origin[:2]
+            proj = float(np.dot(rel, direction))
+            closest = origin[:2] + max(proj, 0.0) * direction
+            dist_to_ray = float(np.linalg.norm(init_xy - closest))
+            position_score = np.exp(-(dist_to_ray ** 2) / (2 * 0.5 ** 2))
+
+            min_ray_dist = float(params.get("min_distance", 0.0) or 0.0)
+            max_ray_dist = params.get("max_distance", None)
+            if proj < min_ray_dist:
+                position_score *= np.exp(-((min_ray_dist - proj) ** 2) / (2 * 0.5 ** 2))
+            if max_ray_dist is not None:
+                max_ray_dist = float(max_ray_dist)
+                if proj > max_ray_dist:
+                    position_score *= np.exp(-((proj - max_ray_dist) ** 2) / (2 * 0.5 ** 2))
+
+            center_a = np.array(params.get("object_a_center", [0, 0, 0]), dtype=float)
+            center_b = np.array(params.get("object_b_center", [1, 0, 0]), dtype=float)
+            dist_to_a = np.linalg.norm(init_xy - center_a[:2])
+            dist_to_b = np.linalg.norm(init_xy - center_b[:2])
+            if dist_to_b >= dist_to_a:
+                position_score *= 0.3
+        elif sample_point is not None:
+            distance_to_target = np.linalg.norm(init_pos[:2] - sample_point[:2])
+            sigma = 1.0
+            position_score = np.exp(-(distance_to_target ** 2) / (2 * sigma ** 2))
+        else:
+            position_score = 0.5
         
     elif sample_point is not None:
         # For point-based tasks: score based on distance to sample point
@@ -593,15 +632,66 @@ class ActiveSpatialPipeline:
             task_description=task.description,
             target_object=target_object,
         )
+
+    def _validate_visual_sample_item(self, item: TrainingDataItem) -> Tuple[bool, str, float]:
+        """Validate the sampled target view for visual-relation tasks using projected bbox scoring."""
+        threshold = self.config.min_visual_sample_scores.get(item.task_type)
+        if not self.config.validate_visual_sample_score or threshold is None:
+            return True, "not_visual_task", 1.0
+
+        try:
+            from vagen.envs.active_spatial.spatial_potential_field import create_potential_field
+        except ImportError as exc:
+            import sys
+            repo_root = Path(__file__).resolve().parents[2]
+            if str(repo_root) not in sys.path:
+                sys.path.insert(0, str(repo_root))
+            try:
+                from vagen.envs.active_spatial.spatial_potential_field import create_potential_field
+            except ImportError:
+                return False, f"visual_scorer_import_failed:{exc}", 0.0
+
+        field = getattr(self, "_visual_validation_field", None)
+        if field is None:
+            field = create_potential_field({
+                "fov_horizontal": self.config.task_config.fov_horizontal,
+                "fov_vertical": self.config.task_config.fov_vertical,
+                "use_visual_bbox_scoring": True,
+            })
+            self._visual_validation_field = field
+
+        task_params = {
+            "_target_object": item.target_object,
+            "_camera_intrinsics": item.init_camera.get("intrinsics"),
+            "_image_width": self.config.camera_sampling.image_width,
+            "_image_height": self.config.camera_sampling.image_height,
+            "_fov_horizontal": self.config.task_config.fov_horizontal,
+            "_fov_vertical": self.config.task_config.fov_vertical,
+        }
+        score = field.compute_score(
+            camera_position=np.array(item.sample_target, dtype=np.float64),
+            camera_forward=np.array(item.camera_params.get("forward", [1, 0, 0]), dtype=np.float64),
+            task_type=item.task_type,
+            task_params=task_params,
+            target_region=item.target_region,
+        )
+        details = score.details or {}
+        visual_metrics = details.get("visual_bbox_metrics") or {}
+        if not visual_metrics.get("available"):
+            return False, "visual_bbox_unavailable", float(score.total_score)
+        if float(score.total_score) < float(threshold):
+            return False, f"visual_sample_score_too_low_{float(score.total_score):.2f}_min{float(threshold):.2f}", float(score.total_score)
+        return True, "ok", float(score.total_score)
     
     def process_scene(self, scene_name: str) -> List[TrainingDataItem]:
         """
         Process a single scene and generate dataset items.
         
         The pipeline automatically determines how many objects to use based on task type:
-        - 1 object: absolute_positioning, delta_control, screen_occupancy
+        - 1 object: absolute_positioning, screen_occupancy
         - 2 objects: equidistance, projective_relations, occlusion_alignment, 
-                     fov_inclusion, size_distance_invariance
+                     fov_inclusion, size_distance_invariance,
+                     apparent_size_ordering
         - 3 objects: centering
         
         Args:
@@ -621,9 +711,9 @@ class ActiveSpatialPipeline:
         # Categorize enabled tasks by number of objects required
         enabled = set(self.config.task_config.enabled_tasks)
         
-        single_object_tasks = {'absolute_positioning', 'delta_control', 'screen_occupancy'}
+        single_object_tasks = {'absolute_positioning', 'screen_occupancy'}
         two_object_tasks = {'equidistance', 'projective_relations', 'occlusion_alignment', 
-                           'fov_inclusion', 'size_distance_invariance'}
+                           'fov_inclusion', 'size_distance_invariance', 'apparent_size_ordering'}
         three_object_tasks = {'centering'}
         
         needs_single = bool(enabled & single_object_tasks)
@@ -645,6 +735,7 @@ class ActiveSpatialPipeline:
         
         # Process single-object tasks
         init_pos_rejection_stats = {}  # Track rejection reasons
+        visual_sample_rejection_stats = {}  # Track projected-bbox target-view failures
         
         if needs_single and single_objects:
             single_tasks = list(enabled & single_object_tasks)
@@ -660,7 +751,7 @@ class ActiveSpatialPipeline:
                         obj, camera_pose, single_tasks
                     )
                     for task in tasks:
-                        # Skip invalid tasks (e.g., delta_control that would be too close)
+                        # Skip invalid tasks (e.g., infeasible distance/visibility targets)
                         if not task.is_valid:
                             continue
                         
@@ -689,6 +780,10 @@ class ActiveSpatialPipeline:
                         data_item = self.create_training_item(
                             scene_name, camera_pose, task, [obj]
                         )
+                        is_visual_valid, reason, _ = self._validate_visual_sample_item(data_item)
+                        if not is_visual_valid:
+                            visual_sample_rejection_stats[reason] = visual_sample_rejection_stats.get(reason, 0) + 1
+                            continue
                         data_items.append(data_item)
         
         # Process two-object tasks
@@ -738,6 +833,10 @@ class ActiveSpatialPipeline:
                         data_item = self.create_training_item(
                             scene_name, camera_pose, task, [obj_a, obj_b]
                         )
+                        is_visual_valid, reason, _ = self._validate_visual_sample_item(data_item)
+                        if not is_visual_valid:
+                            visual_sample_rejection_stats[reason] = visual_sample_rejection_stats.get(reason, 0) + 1
+                            continue
                         data_items.append(data_item)
         
         # Process three-object tasks
@@ -787,6 +886,10 @@ class ActiveSpatialPipeline:
                         data_item = self.create_training_item(
                             scene_name, camera_pose, task, [obj_a, obj_b, obj_c]
                         )
+                        is_visual_valid, reason, _ = self._validate_visual_sample_item(data_item)
+                        if not is_visual_valid:
+                            visual_sample_rejection_stats[reason] = visual_sample_rejection_stats.get(reason, 0) + 1
+                            continue
                         data_items.append(data_item)
         
         # Log rejection stats
@@ -794,6 +897,8 @@ class ActiveSpatialPipeline:
             print(f"  Init position rejections: {init_pos_rejection_stats}")
         if reachability_rejection_count > 0:
             print(f"  Target reachability rejections: {reachability_rejection_count}")
+        if visual_sample_rejection_stats:
+            print(f"  Visual sample rejections: {visual_sample_rejection_stats}")
         
         print(f"  Generated {len(data_items)} data items")
         return data_items

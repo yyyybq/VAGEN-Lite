@@ -16,6 +16,8 @@ import yaml
 class EvalEnvConfig:
     """Environment configuration for evaluation."""
     jsonl_path: str = ""
+    include_task_types: Optional[List[str]] = None
+    exclude_task_types: List[str] = field(default_factory=lambda: ["delta_control"])
     render_backend: Optional[str] = "local"
     gs_root: str = ""
     gpu_device: Optional[int] = 4

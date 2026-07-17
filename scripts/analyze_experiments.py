@@ -326,8 +326,8 @@ _TASK_TYPE_RULES = [
     ("equidistance",             re.compile(r"equidistant view",           re.I)),
     ("centering",                re.compile(r"center view",                re.I)),
     ("occlusion_alignment",      re.compile(r"occluded view",              re.I)),
-    ("delta_control",            re.compile(r"closer view|farther view",   re.I)),
     ("size_distance_invariance", re.compile(r"equal_size view",            re.I)),
+    ("apparent_size_ordering",   re.compile(r"apparent_larger view|appears larger|looks bigger", re.I)),
     ("screen_occupancy",         re.compile(r"screen occupancy",           re.I)),
     ("fov_inclusion",            re.compile(r"fov inclusion|field.of.view inclusion", re.I)),
     # front/back/left/right view → absolute_positioning
@@ -336,25 +336,25 @@ _TASK_TYPE_RULES = [
 
 ALL_TASK_TYPES_ORDERED = [
     "absolute_positioning",
-    "delta_control",
     "equidistance",
     "projective_relations",
     "centering",
     "occlusion_alignment",
     "fov_inclusion",
     "size_distance_invariance",
+    "apparent_size_ordering",
     "screen_occupancy",
 ]
 
 TASK_SHORT = {
     "absolute_positioning":      "abs_pos",
-    "delta_control":             "delta",
     "equidistance":              "equidist",
     "projective_relations":      "proj_rel",
     "centering":                 "center",
     "occlusion_alignment":       "occlusion",
     "fov_inclusion":             "fov_incl",
     "size_distance_invariance":  "size_inv",
+    "apparent_size_ordering":    "size_ord",
     "screen_occupancy":          "scrn_occ",
 }
 

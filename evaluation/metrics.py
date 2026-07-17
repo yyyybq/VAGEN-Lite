@@ -16,23 +16,24 @@ from pathlib import Path
 import json
 
 
-# All 9 task types
+# Active task types. delta_control is intentionally omitted from default
+# evaluation aggregates; legacy result files may still contain it.
 ALL_TASK_TYPES = [
     "absolute_positioning",
-    "delta_control",
     "equidistance",
     "projective_relations",
     "centering",
     "occlusion_alignment",
     "fov_inclusion",
     "size_distance_invariance",
+    "apparent_size_ordering",
     "screen_occupancy",
 ]
 
 TASK_CATEGORIES = {
-    "metric_distance": ["absolute_positioning", "delta_control", "equidistance"],
+    "metric_distance": ["absolute_positioning", "equidistance"],
     "projective_relation": ["projective_relations", "centering", "occlusion_alignment"],
-    "view_perspective": ["fov_inclusion", "size_distance_invariance", "screen_occupancy"],
+    "view_perspective": ["fov_inclusion", "size_distance_invariance", "apparent_size_ordering", "screen_occupancy"],
 }
 
 

@@ -125,11 +125,12 @@ class CameraSamplingConfig:
 @dataclass
 class TaskConfig:
     """Configuration for task generation."""
-    # Which tasks to generate (from 9 task types)
+    # Which tasks to generate. delta_control is intentionally disabled by
+    # default because it requires precise metric odometry/stopping that the
+    # current action/observation setup does not support reliably.
     enabled_tasks: List[str] = field(default_factory=lambda: [
         # Metric Distance Tasks
         'absolute_positioning',
-        'delta_control', 
         'equidistance',
         # Relative Position Tasks
         'projective_relations',
@@ -138,6 +139,7 @@ class TaskConfig:
         # View Perspective Tasks
         'fov_inclusion',
         'size_distance_invariance',
+        'apparent_size_ordering',
         'screen_occupancy',
     ])
     
@@ -147,6 +149,8 @@ class TaskConfig:
     delta_control_deltas: List[float] = field(default_factory=lambda: [0.5, 0.7, 1.0, 1.5])
     projective_relations: List[str] = field(default_factory=lambda: ['left', 'right'])
     screen_occupancy_ratios: List[float] = field(default_factory=lambda: [0.2, 0.3, 0.5, 0.7])
+    apparent_size_ordering_relations: List[str] = field(default_factory=lambda: ['a_larger', 'b_larger'])
+    apparent_size_ordering_ratio: float = 1.25
     
     # Minimum distance to object for valid camera positions
     # This prevents camera from getting too close to objects
@@ -159,6 +163,9 @@ class TaskConfig:
     
     # Occlusion alignment parameters
     occlusion_min_distance: float = 0.5  # minimum distance for occlusion task (meters)
+    # Keep occlusion target rays wide enough for the default discrete yaw step
+    # (20 deg in the current active_spatial action space). Set <= 0 to disable.
+    occlusion_min_angular_width_deg: float = 25.0
     
     # Agent height
     agent_height: float = 1.5  # meters
@@ -178,24 +185,20 @@ class InitialViewConfig:
     - min_steps: Minimum estimated navigation steps (distance/0.1 + yaw_offset/5)
     
     Design rationale per task category:
-    - Metric Distance Tasks (absolute_positioning, delta_control, screen_occupancy):
+    - Metric Distance Tasks (absolute_positioning, screen_occupancy):
       Target is distance-based. Difficulty comes from being at wrong distance + yaw offset.
-      delta_control is special: target is inherently delta-away from init, so we rely on
-      yaw offset for difficulty (not distance).
     - Relative Position Tasks (equidistance, projective_relations, centering, occlusion):
       Target is geometric-relation-based. Difficulty comes from being in wrong geometric
       configuration + needing to navigate to the correct region.
-    - View Perspective Tasks (fov_inclusion, size_distance_invariance):
+    - View Perspective Tasks (fov_inclusion, size_distance_invariance,
+      apparent_size_ordering):
       Target is view-dependent. Difficulty comes from needing distance adjustment + orientation.
     """
     # ===== Per-task minimum distance from init to target (meters) =====
     # Key insight: step_size=0.1m, so 1.0m ≈ 10 forward steps
-    # NOTE: delta_control target is inherently delta-away from init (0.3-1.0m),
-    # so min_distance must be small. Difficulty for delta_control comes from yaw offset.
     task_min_distances: Dict[str, float] = field(default_factory=lambda: {
         # Metric Distance Tasks
         'absolute_positioning': 0.8,   # 8 forward steps; camera should not already be on target circle
-        'delta_control': 0.4,          # Moderate: target IS delta-away; larger deltas (0.5-1.5m) survive
         'equidistance': 1.2,           # 12 steps; should not start on perpendicular bisector
         # Relative Position Tasks  
         'projective_relations': 1.2,   # 12 steps; should start on wrong side
@@ -204,6 +207,7 @@ class InitialViewConfig:
         # View Perspective Tasks
         'fov_inclusion': 1.0,          # 10 steps; distance adjustment needed
         'size_distance_invariance': 1.0,  # 10 steps; distance adjustment needed
+        'apparent_size_ordering': 1.0,    # 10 steps; distance/bearing adjustment needed
         'screen_occupancy': 0.8,       # 8 steps; distance adjustment needed
     })
     
@@ -212,13 +216,13 @@ class InitialViewConfig:
     # Score=1.0 means "already at optimal", score=0.0 means "maximally far from optimal"
     task_max_init_scores: Dict[str, float] = field(default_factory=lambda: {
         'absolute_positioning': 0.6,   # Should not start near target circle
-        'delta_control': 0.7,          # Relaxed: delta is small; difficulty from yaw offset
         'equidistance': 0.55,          # Should not start near perpendicular bisector
         'projective_relations': 0.6,   # Should not start in correct half-plane
         'centering': 0.55,             # Should not start near centering ray
         'occlusion_alignment': 0.55,   # Should not start near occlusion ray
         'fov_inclusion': 0.6,          # Moderate
         'size_distance_invariance': 0.6,  # Moderate
+        'apparent_size_ordering': 0.6,    # Moderate
         'screen_occupancy': 0.6,       # Should not start at correct distance
     })
     
@@ -226,16 +230,15 @@ class InitialViewConfig:
     # Ensures the agent can't just walk straight forward to reach the target.
     # The agent must first turn, adding rotational complexity.
     # step_rotation=5°, so 15° ≈ 3 turn steps, 30° ≈ 6 turn steps
-    # delta_control relies HEAVILY on yaw offset since distance is inherently small
     task_min_yaw_offsets: Dict[str, float] = field(default_factory=lambda: {
         'absolute_positioning': 15.0,  # 3 turn steps
-        'delta_control': 0.0,          # NO yaw check: target is on the forward axis by definition
         'equidistance': 20.0,          # 4 turn steps
         'projective_relations': 20.0,  # 4 turn steps
         'centering': 25.0,             # 5 turn steps
         'occlusion_alignment': 20.0,   # 4 turn steps
         'fov_inclusion': 15.0,         # 3 turn steps
         'size_distance_invariance': 15.0,  # 3 turn steps
+        'apparent_size_ordering': 15.0,    # 3 turn steps
         'screen_occupancy': 15.0,      # 3 turn steps
     })
     
@@ -245,13 +248,13 @@ class InitialViewConfig:
     # This is a combined check to ensure enough overall navigation complexity
     task_min_total_steps: Dict[str, int] = field(default_factory=lambda: {
         'absolute_positioning': 12,    # ~8 walk + 3 turn
-        'delta_control': 4,            # delta IS the movement; 0.5m=5 steps minimum
         'equidistance': 16,            # ~12 walk + 4 turn
         'projective_relations': 16,    # ~12 walk + 4 turn
         'centering': 20,               # ~15 walk + 5 turn
         'occlusion_alignment': 14,     # ~10 walk + 4 turn
         'fov_inclusion': 12,           # ~10 walk + 3 turn
         'size_distance_invariance': 12,  # ~10 walk + 3 turn
+        'apparent_size_ordering': 12,    # ~10 walk + 3 turn
         'screen_occupancy': 10,        # ~8 walk + 3 turn
     })
     
@@ -292,6 +295,16 @@ class PipelineConfig:
     
     # Processing options
     save_intermediate: bool = True  # Save intermediate results
+    validate_visual_sample_score: bool = True  # Filter visual-relation tasks whose sampled target view fails projected-bbox scoring
+    min_visual_sample_scores: Dict[str, float] = field(default_factory=lambda: {
+        'projective_relations': 0.75,
+        'centering': 0.50,
+        'occlusion_alignment': 0.75,
+        'fov_inclusion': 0.75,
+        'size_distance_invariance': 0.75,
+        'apparent_size_ordering': 0.75,
+        'screen_occupancy': 0.75,
+    })
     
     # Rendering options
     render_previews: bool = False  # Whether to render preview images

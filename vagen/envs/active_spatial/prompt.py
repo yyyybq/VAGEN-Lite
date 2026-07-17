@@ -152,7 +152,7 @@ Hints:
 2. {hint2}
 3. Consider both position and orientation when navigating
 4. Look around if you're unsure of the target location
-5. Strategy: FIRST rotate (turn_left/turn_right) to face the target along the requested view direction, THEN translate (move_forward/strafe) to approach. Translation alone cannot reach a target whose orientation is misaligned.
+5. Strategy: For ordinary target-view tasks, rotate to face the relevant object or view direction before translating. For relation tasks such as occlusion, follow the task-specific relation: the correct viewpoint may require moving around an occluder rather than directly approaching the hidden target.
 """
 
     # Override hints for forward-first strategy (designed for models that over-rotate)
@@ -178,8 +178,8 @@ Hints:
 1. Pay attention to the target object and the requested view (front, back, left, right, etc.)
 2. {hint2}
 3. Consider both position and orientation when navigating
-4. Strategy: DEFAULT to move_forward to close the distance. Only use turn_left/turn_right when you need to change facing direction. After at most 2 consecutive turns, always attempt move_forward.
-5. AVOID spinning in circles: if the reward is not improving after repeated turns, switch to move_forward or move_left/move_right to explore a new position.
+4. Strategy: DEFAULT to move_forward for ordinary target-view tasks, but follow task-specific relation instructions for occlusion, centering, projective, and size tasks. After at most 2 consecutive turns, try a translation action unless the relation requires continued alignment.
+5. AVOID spinning in circles: if the reward is not improving after repeated turns, switch to move_forward, move_backward, or move_left/move_right to explore a new position.
 """
 
     return base_prompt

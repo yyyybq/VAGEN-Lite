@@ -40,8 +40,10 @@ from evaluation.metrics import (
 from evaluation.agents import BaseAgent, create_agent
 
 
-def load_test_episodes(jsonl_path: str, task_types: Optional[List[str]] = None, 
-                       max_episodes: Optional[int] = None) -> List[Dict]:
+def load_test_episodes(jsonl_path: str, task_types: Optional[List[str]] = None,
+                       max_episodes: Optional[int] = None,
+                       include_task_types: Optional[List[str]] = None,
+                       exclude_task_types: Optional[List[str]] = None) -> List[Dict]:
     """
     Load test episodes from JSONL file.
     
@@ -54,6 +56,8 @@ def load_test_episodes(jsonl_path: str, task_types: Optional[List[str]] = None,
         List of episode data dicts
     """
     episodes = []
+    include_set = set(include_task_types or [])
+    exclude_set = set(exclude_task_types or [])
     with open(jsonl_path, 'r') as f:
         for i, line in enumerate(f):
             line = line.strip()
@@ -62,12 +66,17 @@ def load_test_episodes(jsonl_path: str, task_types: Optional[List[str]] = None,
             item = json.loads(line)
             
             # Filter by task type if specified
+            item_task = item.get("task_type", "unknown")
             if task_types:
-                item_task = item.get("task_type", "unknown")
                 if item_task not in task_types:
                     continue
+            if include_set and item_task not in include_set:
+                continue
+            if exclude_set and item_task in exclude_set:
+                continue
             
             item["_line_index"] = i
+            item["_filtered_index"] = len(episodes)
             episodes.append(item)
             
             if max_episodes and len(episodes) >= max_episodes:
@@ -103,8 +112,11 @@ class EvalRunner:
         from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
         
         env_cfg = self.config.env
+        include_task_types = env_cfg.include_task_types or self.config.task_types
         env_config = ActiveSpatialEnvConfig(
             jsonl_path=env_cfg.jsonl_path,
+            include_task_types=include_task_types,
+            exclude_task_types=env_cfg.exclude_task_types,
             render_backend=env_cfg.render_backend,
             gs_root=env_cfg.gs_root,
             gpu_device=env_cfg.gpu_device,
@@ -185,6 +197,8 @@ class EvalRunner:
             self.config.env.jsonl_path,
             task_types=self.config.task_types,
             max_episodes=self.config.num_eval_episodes,
+            include_task_types=self.config.env.include_task_types,
+            exclude_task_types=self.config.env.exclude_task_types,
         )
         print(f"  Loaded {len(test_episodes)} episodes")
         
@@ -202,7 +216,7 @@ class EvalRunner:
         
         pbar = tqdm(enumerate(test_episodes), total=len(test_episodes), desc="Evaluating")
         for ep_idx, ep_data in pbar:
-            seed = ep_data["_line_index"] + self.config.seed_offset
+            seed = ep_data.get("_filtered_index", ep_idx) + self.config.seed_offset
             record = self._run_single_episode(ep_idx, ep_data, seed)
             self.episode_records.append(record)
             
@@ -260,6 +274,7 @@ class EvalRunner:
         agent_info = {
             "current_pose": info.get("current_pose"),
             "current_potential_score": info.get("initial_potential_score", 0.0),
+            "current_region_metrics": info.get("initial_region_metrics", {}),
             "current_pose_matrix": self.env.view_engine.get_pose() if hasattr(self.env, 'view_engine') else None,
             "task_info": {
                 "task_type": task_type,
@@ -315,6 +330,7 @@ class EvalRunner:
             # Track score
             current_score = step_info.get("current_potential_score", 
                              turn_metrics.get("potential_score", 0.0))
+            current_region_metrics = step_info.get("current_region_metrics", {})
             score_trajectory.append(current_score)
             
             # Track actions
@@ -331,6 +347,7 @@ class EvalRunner:
             agent_info.update({
                 "current_pose": step_info.get("current_pose"),
                 "current_potential_score": current_score,
+                "current_region_metrics": current_region_metrics,
                 "current_pose_matrix": getattr(self.env, 'view_engine', None) and self.env.view_engine.get_pose(),
             })
             
@@ -341,6 +358,7 @@ class EvalRunner:
                     "action_str": action_str,
                     "reward": reward,
                     "score": current_score,
+                    "region_metrics": current_region_metrics,
                     "done": done,
                     "collisions": collisions,
                 })

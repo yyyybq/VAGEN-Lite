@@ -283,6 +283,18 @@ class SFTDataGenerator:
             )
         return record
 
+    def _build_scoring_task_params(self, item: Dict[str, Any], K: np.ndarray) -> Dict[str, Any]:
+        """Attach bbox/camera metadata needed by projected-bbox potential scoring."""
+        cfg = self.cfg
+        params = dict(item.get("task_params", {}) or {})
+        params["_target_object"] = item.get("target_object")
+        params["_camera_intrinsics"] = np.asarray(K, dtype=np.float64).tolist()
+        params["_image_width"] = int(cfg.image_width)
+        params["_image_height"] = int(cfg.image_height)
+        params["_fov_horizontal"] = 90.0
+        params["_fov_vertical"] = 90.0
+        return params
+
     # ── Per-item processing ──────────────────────────────────────────────────
 
     def _process_item(
@@ -306,7 +318,7 @@ class SFTDataGenerator:
         E = np.array(init_cam.get("extrinsics", np.eye(4)), dtype=np.float64)
 
         task_type = item.get("task_type", "absolute_positioning")
-        task_params = item.get("task_params", {})
+        task_params = self._build_scoring_task_params(item, K)
         target_region = item.get("target_region", {})
 
         if not target_region:
@@ -492,7 +504,7 @@ class SFTDataGenerator:
                         init_cam = item.get("init_camera", {})
                         E = np.array(init_cam.get("extrinsics", np.eye(4)), dtype=np.float64)
                         task_type = item.get("task_type", "absolute_positioning")
-                        task_params = item.get("task_params", {})
+                        task_params = self._build_scoring_task_params(item, np.array(init_cam.get("intrinsics", _fallback_K()), dtype=np.float64))
                         target_region = item.get("target_region", {})
                         if target_region:
                             init_score, _, _ = score_c2w(E, pf, task_type, task_params, target_region)

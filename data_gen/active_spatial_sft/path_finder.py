@@ -166,10 +166,10 @@ def get_camera_pos_and_forward(c2w: np.ndarray) -> Tuple[np.ndarray, np.ndarray]
     """Extract position and forward vector from a c2w matrix.
 
     Convention (matches env.py):
-        camera_forward = -c2w[:3, 2]   (negative Z column)
+        camera_forward = c2w[:3, 2]   (local positive Z column)
     """
     cam_pos = c2w[:3, 3].copy()
-    cam_forward = -c2w[:3, 2].copy()
+    cam_forward = c2w[:3, 2].copy()
     return cam_pos, cam_forward
 
 
@@ -204,11 +204,13 @@ def score_c2w(
         (total_score_with_lookat_bias, position_score, orientation_score)
     """
     cam_pos, cam_forward = get_camera_pos_and_forward(c2w)
+    scoring_params = dict(task_params or {})
+    scoring_params["_camera_pose_c2w"] = np.asarray(c2w, dtype=np.float64).tolist()
     result = potential_field.compute_score(
         camera_position=cam_pos,
         camera_forward=cam_forward,
         task_type=task_type,
-        task_params=task_params,
+        task_params=scoring_params,
         target_region=target_region,
     )
 
@@ -492,19 +494,13 @@ def _plan_to_position(
     Convention note
     ---------------
     In this codebase the camera-to-world (c2w) matrix uses the convention where
-    ``move_forward`` translates along **+c2w[:3, 2]** (the +Z column), while the
-    *visual* forward direction used for orientation scoring is **-c2w[:3, 2]**
-    (negative Z column, OpenGL style).
-
-    Consequence: after aligning the VISUAL forward with the direction to target,
-    ``move_forward`` would move **away** from the target.  The correct primitive
-    to close the gap is ``move_backward``, which translates along **-c2w[:3, 2]**
-    = toward the visual forward = toward the target.
+    ``move_forward`` translates along **+c2w[:3, 2]** (the +Z column), which is
+    also the visual forward direction used by the env reward/scorer.
 
     Strategy: align-then-approach.
-      1. Align the visual forward (-c2w[:,2]) with the direction to target_pos.
+      1. Align the visual forward (+c2w[:,2]) with the direction to target_pos.
          (try turn_left vs turn_right, pick the one that reduces angular error)
-      2. Once roughly aligned, approach via ``move_backward``.
+      2. Once roughly aligned, approach via ``move_forward``.
       3. After each approach step, re-check alignment.
     """
     actions: List[str] = []
@@ -520,8 +516,8 @@ def _plan_to_position(
 
         to_target_norm = to_target / dist
 
-        # Visual forward in XY: -c2w[:,2] (robust to near-vertical tilt)
-        fwd3 = (-c2w[:3, 2]).copy()
+        # Visual forward in XY: +c2w[:,2] (robust to near-vertical tilt)
+        fwd3 = c2w[:3, 2].copy()
         fwd3[2] = 0.0
         f_len = float(np.linalg.norm(fwd3))
         if f_len < 1e-6:
@@ -535,12 +531,12 @@ def _plan_to_position(
 
         if ang > step_r * 0.45:
             # Rotation needed – pick the direction that reduces angular error on
-            # the VISUAL forward (-c2w[:,2]).
+            # the visual forward (+c2w[:,2]).
             cand_l = simulate_action(c2w, "turn_left", step_translation, step_rotation_deg)
             cand_r = simulate_action(c2w, "turn_right", step_translation, step_rotation_deg)
 
             def _err_after(cand: np.ndarray) -> float:
-                f = -cand[:3, 2]; f[2] = 0.0
+                f = cand[:3, 2].copy(); f[2] = 0.0
                 n = float(np.linalg.norm(f))
                 if n < 1e-6:
                     return float("inf")
@@ -550,10 +546,9 @@ def _plan_to_position(
             err_r = _err_after(cand_r)
             action = "turn_left" if err_l <= err_r else "turn_right"
         else:
-            # Visual forward is aligned with target.
-            # move_backward goes along -c2w[:,2] = same as visual forward = TOWARD target.
-            cand_bwd = simulate_action(c2w, "move_backward", step_translation, step_rotation_deg)
-            new_dist = float(np.linalg.norm(target_pos[:2] - cand_bwd[:3, 3][:2]))
+            # Visual forward is aligned with target, so move_forward approaches it.
+            cand_fwd = simulate_action(c2w, "move_forward", step_translation, step_rotation_deg)
+            new_dist = float(np.linalg.norm(target_pos[:2] - cand_fwd[:3, 3][:2]))
 
             if new_dist >= dist:
                 break  # Cannot reduce distance further (e.g. target behind a wall)
@@ -561,12 +556,12 @@ def _plan_to_position(
             # Collision check
             if collision_checker is not None:
                 try:
-                    col = collision_checker.check_collision(cand_bwd[:3, 3], c2w[:3, 3])
+                    col = collision_checker.check_collision(cand_fwd[:3, 3], c2w[:3, 3])
                     if col.has_collision:
                         break
                 except Exception:
                     pass
-            action = "move_backward"
+            action = "move_forward"
 
         c2w = simulate_action(c2w, action, step_translation, step_rotation_deg)
         actions.append(action)
@@ -597,7 +592,7 @@ def _plan_to_orientation(
     tf_norm = tf / (np.linalg.norm(tf) + 1e-9)
 
     for _ in range(max_actions):
-        fwd = (-c2w[:3, 2]).copy()
+        fwd = c2w[:3, 2].copy()
         fwd_norm = fwd / (np.linalg.norm(fwd) + 1e-9)
 
         # Total 3-D angular error
@@ -700,7 +695,7 @@ def _yaw_alignment_actions(
         if d < 1e-6:
             break
         to_obj_n = to_obj / d
-        fwd = (-c2w[:3, 2]).copy()
+        fwd = c2w[:3, 2].copy()
         fwd[2] = 0.0
         fn = float(np.linalg.norm(fwd))
         if fn < 1e-6:

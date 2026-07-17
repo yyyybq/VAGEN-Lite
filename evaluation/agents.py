@@ -104,6 +104,7 @@ class HeuristicAgent(BaseAgent):
         # Get current state
         current_pose = info.get("current_pose")
         current_score = info.get("current_potential_score", 0.0)
+        region_metrics = info.get("current_region_metrics", {}) or {}
         task_info = info.get("task_info", {})
         target_region = task_info.get("target_region", {})
         
@@ -113,14 +114,17 @@ class HeuristicAgent(BaseAgent):
         # Extract current position and forward direction
         current_pos = np.array(current_pose[:3]) if len(current_pose) >= 3 else np.zeros(3)
         
-        # Get sample target point from target region
+        # Prefer the nearest/representative point on the whole valid region.
+        # sample_point is only a fallback for point tasks and legacy rows.
+        region_target_point = region_metrics.get("region_target_point")
         sample_point = target_region.get("sample_point")
         sample_forward = target_region.get("sample_forward")
         
-        if sample_point is None:
+        target_point = region_target_point if region_target_point is not None else sample_point
+        if target_point is None:
             return self._random_fallback()
         
-        target_pos = np.array(sample_point)
+        target_pos = np.array(target_point)
         
         # Compute direction to target
         direction = target_pos - current_pos
@@ -149,7 +153,10 @@ class HeuristicAgent(BaseAgent):
             actions = ["move_forward"]
         
         action_str = "|".join(actions) + "|"
-        return f"<think>Heuristic: navigating toward target. Distance: {distance_to_target:.2f}m, Score: {current_score:.3f}</think><action>{action_str}</action>"
+        region_distance = region_metrics.get("distance_to_region")
+        if region_distance is None:
+            region_distance = distance_to_target
+        return f"<think>Heuristic: navigating toward task region. Region distance: {float(region_distance):.2f}m, Score: {current_score:.3f}</think><action>{action_str}</action>"
     
     def _compute_navigation_actions(
         self,
@@ -164,7 +171,7 @@ class HeuristicAgent(BaseAgent):
         # Get camera forward from current_pose (from extrinsics)
         current_pose_matrix = info.get("current_pose_matrix")
         if current_pose_matrix is not None:
-            cam_forward = -np.array(current_pose_matrix)[:3, 2]  # -Z is forward
+            cam_forward = np.array(current_pose_matrix)[:3, 2]  # ActiveSpatial local +Z is forward
         else:
             # Approximate from SE3 pose
             cam_forward = np.array([1, 0, 0])  # Default

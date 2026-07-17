@@ -33,6 +33,8 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     jsonl_path: str = ""  # Path to dataset JSONL file
     dataset_root: str = ""  # Root path for resolving relative image paths
     total_lines: int = -1  # Number of lines in JSONL (-1 = auto-count)
+    include_task_types: Optional[List[str]] = None  # Optional allow-list for JSONL task_type
+    exclude_task_types: List[str] = field(default_factory=lambda: ["delta_control"])
     
     # ====== Rendering Configuration ======
     # Choose one of: "client", "local", or None/empty
@@ -71,6 +73,7 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     potential_field_position_weight: float = 0.7  # Weight for position component (used by total_score blending)
     potential_field_orientation_weight: float = 0.3  # Weight for orientation component (used by total_score blending)
     potential_field_reward_scale: float = 1.0  # Scale factor for potential field reward (used by delta/absolute/potential modes)
+    use_visual_bbox_scoring: bool = True  # Use projected 3D bbox metrics as the main score for visual-relation tasks
     # ─── progress_mode ──────────────────────────────────────────────────────
     # "delta"     : r_t = scale·(Φ_t − Φ_{t-1})         (v17 default, telescoping ΔΦ shaping)
     # "absolute"  : r_t = scale·Φ_t·0.1                  (legacy "absolute" mode, NOT potential-based)
@@ -167,6 +170,9 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     max_actions_per_step: int = 5  # Maximum actions allowed per step
     action_sep: str = "|"  # Separator for multiple actions
     image_placeholder: str = "<image>"  # Placeholder for image in prompt
+    use_task_description: bool = True  # Prefer dataset task_description over generic preset text
+    enable_occlusion_task_guidance: bool = True  # Add occlusion-specific strategy text to the Task line
+    enable_occlusion_occluder_hint: bool = True  # Add occluder relative direction/distance when available
     special_token_list: Optional[List[str]] = field(
         default_factory=lambda: ["<think>", "</think>", "<action>", "</action>"]
     )

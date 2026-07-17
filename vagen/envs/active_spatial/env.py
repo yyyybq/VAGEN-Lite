@@ -26,6 +26,7 @@
 
 import time
 import asyncio
+import json
 import numpy as np
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -116,10 +117,37 @@ class ActiveSpatialEnv(BaseEnv):
         # Dataset setup
         self.jsonl_path = Path(config.jsonl_path) if config.jsonl_path else None
         self.dataset_root = config.dataset_root if config.dataset_root else None
+        self._line_indices: Optional[List[int]] = None
         
-        # Count dataset lines
+        include_task_types = set(config.include_task_types or [])
+        exclude_task_types = set(config.exclude_task_types or [])
+
+        # Count dataset lines, optionally filtering by task_type.
         if self.jsonl_path and self.jsonl_path.is_file():
-            if config.total_lines > 0:
+            if include_task_types or exclude_task_types:
+                self._line_indices = []
+                with self.jsonl_path.open("r", encoding="utf-8") as f:
+                    for line_idx, line in enumerate(f):
+                        if not line.strip():
+                            continue
+                        try:
+                            item = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        task_type = str(item.get("task_type", ""))
+                        if include_task_types and task_type not in include_task_types:
+                            continue
+                        if exclude_task_types and task_type in exclude_task_types:
+                            continue
+                        self._line_indices.append(line_idx)
+                self.total_lines = len(self._line_indices)
+                if self.VERBOSE:
+                    print(
+                        f"[ActiveSpatialEnv] Filtered dataset lines: {self.total_lines} "
+                        f"(include={sorted(include_task_types) or 'ALL'}, "
+                        f"exclude={sorted(exclude_task_types) or 'NONE'})"
+                    )
+            elif config.total_lines > 0:
                 self.total_lines = config.total_lines
             else:
                 self.total_lines = count_lines(self.jsonl_path)
@@ -157,11 +185,15 @@ class ActiveSpatialEnv(BaseEnv):
                 "position_weight": config.potential_field_position_weight,
                 "orientation_weight": config.potential_field_orientation_weight,
                 "max_distance": config.max_distance,
+                "fov_horizontal": config.fov_horizontal,
+                "fov_vertical": config.fov_vertical,
+                "use_visual_bbox_scoring": config.use_visual_bbox_scoring,
             })
         
         # Task information (loaded from dataset item)
         self.current_task: Optional[Dict[str, Any]] = None
         self.prev_potential_score: float = 0.0  # Previous score for delta reward
+        self.current_region_metrics: Dict[str, Any] = {}
         
         # Collision Detector for preventing camera from passing through objects
         self.collision_detector: Optional[CollisionDetector] = None
@@ -216,6 +248,26 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Get parse function
         self.parse_func = PARSE_FUNC_MAP.get(config.prompt_format, self._default_parse_func)
+
+    def _build_scoring_task_params(self, pose: Optional[np.ndarray] = None) -> Dict[str, Any]:
+        """Build task params with per-episode visual metadata for potential-field scoring."""
+        params: Dict[str, Any] = {}
+        if self.current_task and isinstance(self.current_task.get("task_params"), dict):
+            params.update(self.current_task.get("task_params") or {})
+        elif self.current_item and isinstance(self.current_item.get("task_params"), dict):
+            params.update(self.current_item.get("task_params") or {})
+
+        if self.current_item is not None:
+            params["_target_object"] = self.current_item.get("target_object")
+        if self.camera_intrinsics is not None:
+            params["_camera_intrinsics"] = np.asarray(self.camera_intrinsics, dtype=np.float64).tolist()
+        params["_image_width"] = int(getattr(self.config, "image_width", 512))
+        params["_image_height"] = int(getattr(self.config, "image_height", 512))
+        params["_fov_horizontal"] = float(getattr(self.config, "fov_horizontal", 90.0))
+        params["_fov_vertical"] = float(getattr(self.config, "fov_vertical", 90.0))
+        if pose is not None:
+            params["_camera_pose_c2w"] = np.asarray(pose, dtype=np.float64).tolist()
+        return params
     
     def _default_parse_func(self, response: str, **kwargs) -> Dict[str, Any]:
         """Default parse function for action parsing."""
@@ -337,10 +389,12 @@ class ActiveSpatialEnv(BaseEnv):
         self.prev_pos = None
         self.prev_distance = None  # Will be set after loading target pose
         self.prev_potential_score = 0.0  # Reset potential field score
+        self.current_region_metrics = {}
         
         # Load episode data
         if self.jsonl_path and self.total_lines > 0:
-            self.current_item = read_jsonl_line_by_index(self.jsonl_path, idx)
+            physical_idx = self._line_indices[idx] if self._line_indices is not None else idx
+            self.current_item = read_jsonl_line_by_index(self.jsonl_path, physical_idx)
         else:
             # Mock data for testing
             self.current_item = {
@@ -436,18 +490,19 @@ class ActiveSpatialEnv(BaseEnv):
         if self.potential_field is not None and self.current_task.get("target_region"):
             curr_pose = self.view_engine.get_pose()
             curr_pos = curr_pose[:3, 3]
-            curr_forward = -curr_pose[:3, 2]  # Camera -Z is forward
-            
+            curr_forward = curr_pose[:3, 2]  # ActiveSpatial movement/render convention: local +Z is forward
+
             initial_score = self.potential_field.compute_score(
                 camera_position=curr_pos,
                 camera_forward=curr_forward,
                 task_type=self.current_task["task_type"],
-                task_params=self.current_task["task_params"],
+                task_params=self._build_scoring_task_params(curr_pose),
                 target_region=self.current_task["target_region"],
             )
             self.prev_potential_score = initial_score.total_score
             self.prev_position_score = float(getattr(initial_score, "position_score", 0.0))    # ★ v18_dual
             self.prev_orientation_score = float(getattr(initial_score, "orientation_score", 0.0))  # ★ v18_dual
+            self.current_region_metrics = (initial_score.details or {}).get("region_metrics", {})
             self.best_score = initial_score.total_score
             self.final_score = initial_score.total_score
             self.final_position_score = float(getattr(initial_score, "position_score", 0.0))
@@ -469,14 +524,7 @@ class ActiveSpatialEnv(BaseEnv):
         object_label = item.get("object_label", "object")
         preset = item.get("preset", "front")
         distance = item.get("distance", None)
-        task_description = item.get("description", None)
-        
-        if task_description:
-            task_prompt = task_description
-        elif distance:
-            task_prompt = f"Move the camera to the {preset} view of the {object_label}, about {distance:.2f} meters away."
-        else:
-            task_prompt = f"Move the camera to the {preset} view of the {object_label}."
+        task_prompt = self._build_task_prompt(item)
         
         # Load spatial prior images if enabled
         self.spatial_prior_images = []
@@ -492,13 +540,117 @@ class ActiveSpatialEnv(BaseEnv):
             "object_label": object_label,
             "preset": preset,
             "distance": distance,
+            "task_prompt": task_prompt,
             "jsonl_idx": idx,
             "current_pose": c2w_extrinsic_to_se3(self.view_engine.get_pose()),
             "task_type": self.current_task["task_type"],
             "initial_potential_score": self.prev_potential_score,
+            "initial_region_metrics": self.current_region_metrics,
         }
         
         return obs, info
+
+    def _build_task_prompt(self, item: Dict[str, Any]) -> str:
+        object_label = item.get("object_label", "object")
+        preset = item.get("preset", "front")
+        distance = item.get("distance", None)
+
+        task_description = None
+        if self.config.get("use_task_description", True):
+            task_description = item.get("task_description") or item.get("description")
+
+        if task_description:
+            task_prompt = str(task_description)
+        elif distance:
+            task_prompt = f"Move the camera to the {preset} view of the {object_label}, about {float(distance):.2f} meters away."
+        else:
+            task_prompt = f"Move the camera to the {preset} view of the {object_label}."
+
+        if item.get("task_type") == "occlusion_alignment" and self.config.get("enable_occlusion_task_guidance", True):
+            guidance = self._build_occlusion_guidance(item)
+            if guidance:
+                task_prompt = f"{task_prompt}\n{guidance}"
+
+        return task_prompt
+
+    def _build_occlusion_guidance(self, item: Dict[str, Any]) -> str:
+        target_object = item.get("target_object", {})
+        objects = target_object.get("objects", []) if isinstance(target_object, dict) else []
+        region = item.get("target_region", {})
+        params = region.get("params", {}) if isinstance(region, dict) else {}
+
+        occluded_label = None
+        occluder_label = None
+        occluded_center = params.get("object_a_center")
+        occluder_center = params.get("object_b_center")
+
+        if isinstance(objects, list) and objects:
+            if len(objects) >= 1 and isinstance(objects[0], dict):
+                occluded_label = objects[0].get("label")
+                occluded_center = occluded_center or objects[0].get("center")
+            if len(objects) >= 2 and isinstance(objects[1], dict):
+                occluder_label = objects[1].get("label")
+                occluder_center = occluder_center or objects[1].get("center")
+
+        if not occluded_label or not occluder_label:
+            label = str(item.get("object_label", "target+occluder"))
+            parts = [p.strip() for p in label.split("+") if p.strip()]
+            if len(parts) >= 2:
+                occluded_label = occluded_label or parts[0]
+                occluder_label = occluder_label or parts[1]
+
+        occluded_label = occluded_label or "the hidden target"
+        occluder_label = occluder_label or "the occluder"
+
+        lines = [
+            (
+                f"Occlusion strategy: position the camera so that {occluder_label} is between "
+                f"you and {occluded_label}; do not simply move straight toward {occluded_label}."
+            ),
+            f"Navigate to the back side of {occluder_label} relative to {occluded_label}, then face along the occluder-target line.",
+        ]
+
+        if self.config.get("enable_occlusion_occluder_hint", True) and occluder_center is not None:
+            hint = self._relative_object_hint(occluder_center)
+            if hint:
+                lines.append(f"Occluder hint: {occluder_label} is {hint}.")
+
+        return "\n".join(lines)
+
+    def _relative_object_hint(self, object_center: Any) -> str:
+        try:
+            center = np.array(object_center, dtype=np.float64)
+            pose = self.view_engine.get_pose()
+            cam_pos = pose[:3, 3]
+            to_obj = center[:3] - cam_pos[:3]
+            dist_2d = float(np.linalg.norm(to_obj[:2]))
+            if dist_2d < 1e-6:
+                return f"at the current position, distance {dist_2d:.2f} m"
+
+            # Use the movement convention: move_forward translates along local +Z.
+            forward = pose[:3, 2].copy()
+            right = pose[:3, 0].copy()
+            forward[2] = 0.0
+            right[2] = 0.0
+            to_obj_2d = np.array([to_obj[0], to_obj[1], 0.0], dtype=np.float64)
+            forward_norm = np.linalg.norm(forward)
+            right_norm = np.linalg.norm(right)
+            obj_norm = np.linalg.norm(to_obj_2d)
+            if forward_norm < 1e-6 or right_norm < 1e-6 or obj_norm < 1e-6:
+                return f"distance {dist_2d:.2f} m"
+
+            forward = forward / forward_norm
+            right = right / right_norm
+            to_obj_2d = to_obj_2d / obj_norm
+            angle = np.degrees(np.arctan2(float(np.dot(to_obj_2d, right)), float(np.dot(to_obj_2d, forward))))
+            sectors = [
+                "front", "front-right", "right", "back-right",
+                "back", "back-left", "left", "front-left",
+            ]
+            idx = int(np.round((angle % 360.0) / 45.0)) % 8
+            return f"to your {sectors[idx]}, distance {dist_2d:.2f} m"
+        except Exception:
+            return ""
     
     def step(self, action_str: str) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
         """
@@ -717,6 +869,10 @@ class ActiveSpatialEnv(BaseEnv):
         # Add potential field metrics
         if self.config.enable_potential_field and self.potential_field is not None:
             metrics["turn_metrics"]["potential_score"] = self.prev_potential_score
+            for _metric_key in ("region_score", "distance_to_region", "sample_target_distance"):
+                _metric_value = self.current_region_metrics.get(_metric_key)
+                if _metric_value is not None:
+                    metrics["turn_metrics"][_metric_key] = _metric_value
             if self.current_task:
                 metrics["traj_metrics"]["task_type"] = self.current_task.get("task_type", "unknown")
 
@@ -753,6 +909,7 @@ class ActiveSpatialEnv(BaseEnv):
         info["task_success"] = _succ      # legacy alias (kept for backward compat)
         info["current_pose"] = c2w_extrinsic_to_se3(self.view_engine.get_pose())
         info["current_potential_score"] = self.prev_potential_score
+        info["current_region_metrics"] = self.current_region_metrics
         info["collision_count"] = self.collision_count
         
         # Build env_feedback with collision info
@@ -852,7 +1009,7 @@ class ActiveSpatialEnv(BaseEnv):
         """
         curr_E = self.view_engine.get_pose()
         curr_pos = curr_E[:3, 3]
-        curr_forward = -curr_E[:3, 2]  # Camera -Z is forward
+        curr_forward = curr_E[:3, 2]  # ActiveSpatial movement/render convention: local +Z is forward
         
         # Use potential field if available
         if self.config.enable_potential_field and self.potential_field is not None:
@@ -861,9 +1018,10 @@ class ActiveSpatialEnv(BaseEnv):
                     camera_position=curr_pos,
                     camera_forward=curr_forward,
                     task_type=self.current_task["task_type"],
-                    task_params=self.current_task["task_params"],
+                    task_params=self._build_scoring_task_params(curr_E),
                     target_region=self.current_task["target_region"],
                 )
+                self.current_region_metrics = (score_result.details or {}).get("region_metrics", {})
                 return score_result.total_score
         
         # Legacy scoring method
@@ -896,7 +1054,7 @@ class ActiveSpatialEnv(BaseEnv):
         """
         curr_E = self.view_engine.get_pose()
         curr_pos = curr_E[:3, 3]
-        curr_forward = -curr_E[:3, 2]  # Camera -Z is forward
+        curr_forward = curr_E[:3, 2]  # ActiveSpatial movement/render convention: local +Z is forward
         curr_up = curr_E[:3, 1]  # Camera Y is up (in OpenCV convention, down)
         
         total_reward = 0.0
@@ -908,13 +1066,14 @@ class ActiveSpatialEnv(BaseEnv):
                     camera_position=curr_pos,
                     camera_forward=curr_forward,
                     task_type=self.current_task["task_type"],
-                    task_params=self.current_task["task_params"],
+                    task_params=self._build_scoring_task_params(curr_E),
                     target_region=self.current_task["target_region"],
                 )
                 
                 current_score = score_result.total_score
                 cur_pos_score = float(getattr(score_result, "position_score", 0.0))
                 cur_ori_score = float(getattr(score_result, "orientation_score", 0.0))
+                self.current_region_metrics = (score_result.details or {}).get("region_metrics", {})
 
                 progress_mode = self.config.potential_field_progress_mode
                 scale = self.config.potential_field_reward_scale
@@ -1135,7 +1294,7 @@ class ActiveSpatialEnv(BaseEnv):
         
         curr_E = self.view_engine.get_pose()
         curr_pos = curr_E[:3, 3]
-        curr_forward = -curr_E[:3, 2]
+        curr_forward = curr_E[:3, 2]
         
         final_score, _, _, _, _ = calculate_pose_score_smooth(
             curr_pos, curr_forward, target_pos, target_dir,
@@ -1399,14 +1558,7 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Build task prompt if not provided
         if not task_prompt and init_obs and self.current_item:
-            object_label = self.current_item.get("object_label", "object")
-            preset = self.current_item.get("preset", "front")
-            distance = self.current_item.get("distance", None)
-            
-            if distance:
-                task_prompt = f"Move the camera to the {preset} view of the {object_label}, about {distance:.2f} meters away."
-            else:
-                task_prompt = f"Move the camera to the {preset} view of the {object_label}."
+            task_prompt = self._build_task_prompt(self.current_item)
         
         # Build spatial prior text for initial observation
         spatial_prior_text = ""

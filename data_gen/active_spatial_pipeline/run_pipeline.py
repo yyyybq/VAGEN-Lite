@@ -41,16 +41,16 @@ from config import PipelineConfig, ObjectSelectionConfig, CameraSamplingConfig, 
 from pipeline import ActiveSpatialPipeline
 
 
-# All 9 task types
+# Active task types. delta_control is intentionally omitted by default.
 ALL_TASK_TYPES = [
     'absolute_positioning',
-    'delta_control', 
     'equidistance',
     'projective_relations',
     'centering',
     'occlusion_alignment',
     'fov_inclusion',
     'size_distance_invariance',
+    'apparent_size_ordering',
     'screen_occupancy'
 ]
 
@@ -74,13 +74,13 @@ def generate_statistics_figure(data_items, output_path, scene_id=None):
     # Color scheme - different colors for different task categories
     colors = [
         '#2ecc71',  # absolute_positioning - green
-        '#3498db',  # delta_control - blue
         '#9b59b6',  # equidistance - purple
         '#e74c3c',  # projective_relations - red
         '#f39c12',  # centering - orange
         '#1abc9c',  # occlusion_alignment - teal
         '#e91e63',  # fov_inclusion - pink
         '#00bcd4',  # size_distance_invariance - cyan
+        '#3f51b5',  # apparent_size_ordering - indigo
         '#ff9800',  # screen_occupancy - amber
     ]
     
@@ -160,9 +160,10 @@ def parse_args():
     # Task selection
     parser.add_argument('--tasks', nargs='+', type=str, default=None,
                         help='Tasks to enable (default: all). Options: '
-                             'absolute_positioning, delta_control, equidistance, '
+                             'absolute_positioning, equidistance, '
                              'projective_relations, centering, occlusion_alignment, '
-                             'fov_inclusion, size_distance_invariance, screen_occupancy')
+                             'fov_inclusion, size_distance_invariance, '
+                             'apparent_size_ordering, screen_occupancy')
     
     # Processing options
     parser.add_argument('--no_intermediate', action='store_true',

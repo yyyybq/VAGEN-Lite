@@ -15,7 +15,8 @@ This module returns target_region representing the valid solution space:
 6. Occlusion Alignment: RAY (from A through B, extending beyond)
 7. FoV Inclusion: ANNULUS/REGION (distance constraints for visibility)
 8. Size-Distance Invariance: CURVE (iso-size positions)
-9. Screen Occupancy: CIRCLE (specific distance for occupancy ratio)
+9. Apparent Size Ordering: SAMPLED REGION (A appears larger than B)
+10. Screen Occupancy: CIRCLE (specific distance for occupancy ratio)
 """
 
 import json
@@ -628,13 +629,14 @@ class TaskGenerator:
         # Line from A to B defines the boundary
         ab_dir = normalize(center_b[:2] - center_a[:2])
         
-        # Normal perpendicular to AB line
-        # For "left": camera should be on the left side of the AB vector
-        # For "right": camera should be on the right side
+        # Normal perpendicular to AB line.
+        # With the project camera convention used by look_at_matrix
+        # (local X = forward x world_up), A appears left of B when the camera
+        # is on the right/clockwise side of the world-space A->B vector.
         if relation == 'left':
-            normal = np.array([-ab_dir[1], ab_dir[0]])  # 90° counterclockwise
-        else:  # right
             normal = np.array([ab_dir[1], -ab_dir[0]])  # 90° clockwise
+        else:  # right
+            normal = np.array([-ab_dir[1], ab_dir[0]])  # 90° counterclockwise
         
         # Boundary point is midpoint
         midpoint_2d = (center_a[:2] + center_b[:2]) / 2
@@ -736,6 +738,8 @@ class TaskGenerator:
                 "min_distance": 2.0,
                 "max_distance": 15.0,
                 "object_a_center": center_a,
+                "object_b_center": center_b,
+                "object_c_center": center_c,
                 "midpoint_bc": midpoint_bc,
                 "sample_distance": dist_to_a,
             },
@@ -783,9 +787,68 @@ class TaskGenerator:
         
         # Ray direction: continuing away from A
         ray_direction = dir_a_to_b
+
+        # Keep the sampled occlusion viewpoint wide enough for the discrete
+        # action space. The useful angular interval is governed by the
+        # occluder's horizontal width perpendicular to the target-occluder ray;
+        # if it is narrower than a yaw step, the policy can easily step over it.
+        ray_normal = np.array([-ray_direction[1], ray_direction[0]])
+        occluder_xy = object_b.vertices[:, :2]
+        projected_widths = occluder_xy @ ray_normal
+        occluder_width_for_angle = float(projected_widths.max() - projected_widths.min())
+        occluder_width_for_angle = max(occluder_width_for_angle, 0.05)
+
+        min_angle_deg = float(getattr(self.config, "occlusion_min_angular_width_deg", 0.0) or 0.0)
+        sample_t_max = 5.0
+        max_dist_for_angle = None
+        if min_angle_deg > 0.0:
+            max_dist_for_angle = (
+                (occluder_width_for_angle / 2.0)
+                / np.tan(np.radians(min_angle_deg) / 2.0)
+            )
+            origin_dist_to_b = distance_2d(ray_origin, center_b)
+            sample_t_max = min(sample_t_max, float(max_dist_for_angle - origin_dist_to_b))
+
+            if sample_t_max <= 1e-6:
+                return TaskResult(
+                    task_type='occlusion_alignment',
+                    task_params={
+                        'object_a': object_a.ins_id,
+                        'object_b': object_b.ins_id,
+                        'min_distance': min_distance,
+                    },
+                    target_region=TargetRegion(
+                        region_type=RegionType.RAY,
+                        params={
+                            "origin": ray_origin,
+                            "direction": ray_direction,
+                            "object_a_center": center_a,
+                            "object_b_center": center_b,
+                            "occluder": object_b.ins_id,
+                            "occluded": object_a.ins_id,
+                            "occluder_width_for_angle": occluder_width_for_angle,
+                            "min_occlusion_angular_width_deg": min_angle_deg,
+                            "max_dist_for_angular_width": float(max_dist_for_angle),
+                            "origin_dist_to_occluder_2d": float(origin_dist_to_b),
+                        },
+                        sample_point=np.array([ray_origin[0], ray_origin[1], agent_height]),
+                        sample_forward=compute_forward_direction(
+                            np.array([ray_origin[0], ray_origin[1], agent_height]),
+                            center_b
+                        ),
+                        height=agent_height
+                    ),
+                    preset='occluded',
+                    is_valid=False,
+                    description=(
+                        f"INFEASIBLE/NARROW: {object_b.label} angular width "
+                        f"cannot reach {min_angle_deg:.1f}deg from the safe occlusion ray"
+                    ),
+                    object_label=f"{object_a.label}+{object_b.label}"
+                )
         
         # Sample a point on the ray
-        t = np.random.uniform(0, 5)
+        t = np.random.uniform(0, sample_t_max)
         sample_pt = np.array([
             ray_origin[0] + t * ray_direction[0],
             ray_origin[1] + t * ray_direction[1],
@@ -796,6 +859,10 @@ class TaskGenerator:
         forward = compute_forward_direction(sample_pt, center_b)
         
         dist_to_b = distance(sample_pt, center_b)
+        occluder_angular_width_deg = float(
+            np.degrees(2.0 * np.arctan((occluder_width_for_angle / 2.0) / max(distance_2d(sample_pt, center_b), 1e-6)))
+        )
+        region_max_distance = float(sample_t_max if min_angle_deg > 0.0 else 10.0)
         
         # Create RAY region
         region = TargetRegion(
@@ -804,11 +871,17 @@ class TaskGenerator:
                 "origin": ray_origin,
                 "direction": ray_direction,
                 "min_distance": 0.0,  # Can start right at origin
-                "max_distance": 10.0,
+                "max_distance": region_max_distance,
                 "object_a_center": center_a,
                 "object_b_center": center_b,
                 "occluder": object_b.ins_id,
                 "occluded": object_a.ins_id,
+                "occluder_label": object_b.label,
+                "occluded_label": object_a.label,
+                "occluder_width_for_angle": occluder_width_for_angle,
+                "occluder_angular_width_deg": occluder_angular_width_deg,
+                "min_occlusion_angular_width_deg": min_angle_deg,
+                "max_dist_for_angular_width": float(max_dist_for_angle) if max_dist_for_angle is not None else None,
                 "sample_distance": dist_to_b,
             },
             sample_point=sample_pt,
@@ -852,7 +925,11 @@ class TaskGenerator:
         dist_ab = distance_2d(center_a, center_b)
         effective_span = dist_ab + object_a.max_dimension/2 + object_b.max_dimension/2
         
-        fov_rad = np.radians(fov_horizontal) * (1 - 2 * margin)
+        # `margin` is configured in degrees. The previous implementation
+        # multiplied the FoV by (1 - 2 * margin), which treats a 5 degree
+        # margin as a scalar 5.0 and can flip the effective FoV negative.
+        effective_fov_deg = max(float(fov_horizontal) - 2.0 * float(margin), 1.0)
+        fov_rad = np.radians(effective_fov_deg)
         min_radius = (effective_span / 2) / np.tan(fov_rad / 2)
         max_radius = min_radius * 2.5  # Allow some flexibility
         
@@ -1060,9 +1137,167 @@ class TaskGenerator:
             description=f"Position where {object_a.label} and {object_b.label} appear same size",
             object_label=f"{object_a.label}+{object_b.label}"
         )
+
+    # =========================================================================
+    # Task 3.3: Apparent Size Ordering
+    # Region Type: CURVE/SAMPLED REGION (positions where one object appears larger)
+    # =========================================================================
+    def generate_apparent_size_ordering(self, object_a: BoundingBox3D,
+                                        object_b: BoundingBox3D,
+                                        larger: str,
+                                        agent_height: float,
+                                        target_ratio: float = 1.25,
+                                        num_candidate_angles: int = 72,
+                                        num_candidate_radii: int = 12) -> TaskResult:
+        """
+        Generate positions where one object appears larger than the other.
+
+        Apparent size is approximated as object_height / horizontal_distance.
+        The valid region is an inequality, not a single curve:
+
+            size_large / dist_large >= target_ratio * size_small / dist_small
+
+        We store feasible sampled support points in the target region. The
+        potential field recomputes the inequality directly at training time.
+        """
+        if larger == 'b':
+            large_obj, small_obj = object_b, object_a
+        else:
+            large_obj, small_obj = object_a, object_b
+
+        large_center = large_obj.center
+        small_center = small_obj.center
+        large_size = max(float(large_obj.height), 0.05)
+        small_size = max(float(small_obj.height), 0.05)
+        min_dist = compute_min_distance_to_objects([object_a, object_b], absolute_min=0.5)
+
+        midpoint = (large_center + small_center) / 2
+        pair_span = max(distance_2d(large_center, small_center), 1.0)
+        max_radius = max(pair_span + 5.0, min_dist + 4.0)
+        fov_half = np.radians(max(self.config.fov_horizontal / 2 - self.config.fov_margin, 10.0))
+
+        def visible_when_facing_midpoint(pt: np.ndarray) -> bool:
+            forward = midpoint[:2] - pt[:2]
+            forward_norm = np.linalg.norm(forward)
+            if forward_norm < 1e-6:
+                return False
+            forward = forward / forward_norm
+            for center in (large_center, small_center):
+                to_obj = center[:2] - pt[:2]
+                to_norm = np.linalg.norm(to_obj)
+                if to_norm < 1e-6:
+                    return False
+                to_obj = to_obj / to_norm
+                angle = np.arccos(np.clip(np.dot(forward, to_obj), -1.0, 1.0))
+                if angle > fov_half:
+                    return False
+            return True
+
+        candidates = []
+        radii = np.linspace(min_dist, max_radius, num_candidate_radii)
+        angle_offset = np.random.uniform(0, 2 * np.pi)
+        for ai in range(num_candidate_angles):
+            theta = angle_offset + 2 * np.pi * ai / num_candidate_angles
+            direction = np.array([np.cos(theta), np.sin(theta)])
+            for radius in radii:
+                pt = np.array([
+                    large_center[0] + radius * direction[0],
+                    large_center[1] + radius * direction[1],
+                    agent_height,
+                ])
+                dist_large = max(distance_2d(pt, large_center), 0.1)
+                dist_small = max(distance_2d(pt, small_center), 0.1)
+                if dist_large < min_dist or dist_small < min_dist:
+                    continue
+                apparent_large = large_size / dist_large
+                apparent_small = small_size / dist_small
+                apparent_ratio = apparent_large / max(apparent_small, 1e-6)
+                if apparent_ratio < target_ratio:
+                    continue
+                if not visible_when_facing_midpoint(pt):
+                    continue
+                # Prefer clear ordering, but avoid extremely close viewpoints.
+                clarity = apparent_ratio / target_ratio
+                balance = min(dist_large, dist_small) / max(dist_large, dist_small)
+                candidates.append((clarity + 0.2 * balance, pt, apparent_ratio))
+
+        relation_text = f"{large_obj.label} appears larger than {small_obj.label}"
+        if not candidates:
+            return TaskResult(
+                task_type='apparent_size_ordering',
+                task_params={
+                    'larger_object': large_obj.ins_id,
+                    'smaller_object': small_obj.ins_id,
+                    'target_ratio': target_ratio,
+                },
+                target_region=TargetRegion(
+                    region_type=RegionType.CURVE,
+                    params={
+                        "curve_type": "apparent_size_ordering_region",
+                        "object_a_center": object_a.center,
+                        "object_b_center": object_b.center,
+                        "larger_object_center": large_center,
+                        "smaller_object_center": small_center,
+                        "larger_object_size": large_size,
+                        "smaller_object_size": small_size,
+                        "target_ratio": target_ratio,
+                        "points": [],
+                    },
+                    sample_point=midpoint.copy(),
+                    sample_forward=np.array([1, 0, 0]),
+                    height=agent_height,
+                ),
+                preset='apparent_larger',
+                is_valid=False,
+                description=f"INFEASIBLE: Could not find viewpoint where {relation_text}",
+                object_label=f"{large_obj.label}+{small_obj.label}",
+            )
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        top = candidates[:max(1, min(20, len(candidates)))]
+        _, sample_pt, sample_ratio = top[np.random.randint(len(top))]
+        forward = compute_forward_direction(sample_pt, midpoint)
+        support_points = [cand[1].tolist() for cand in candidates[: min(64, len(candidates))]]
+
+        region = TargetRegion(
+            region_type=RegionType.CURVE,
+            params={
+                "curve_type": "apparent_size_ordering_region",
+                "object_a_center": object_a.center,
+                "object_b_center": object_b.center,
+                "larger_object_center": large_center,
+                "smaller_object_center": small_center,
+                "larger_object_size": large_size,
+                "smaller_object_size": small_size,
+                "larger_object": large_obj.ins_id,
+                "smaller_object": small_obj.ins_id,
+                "target_ratio": target_ratio,
+                "sample_apparent_ratio": sample_ratio,
+                "sample_distance": distance_2d(sample_pt, large_center),
+                "min_distance": min_dist,
+                "points": support_points,
+            },
+            sample_point=sample_pt,
+            sample_forward=forward,
+            height=agent_height,
+        )
+
+        return TaskResult(
+            task_type='apparent_size_ordering',
+            task_params={
+                'larger_object': large_obj.ins_id,
+                'smaller_object': small_obj.ins_id,
+                'target_ratio': target_ratio,
+            },
+            target_region=region,
+            preset='apparent_larger',
+            is_valid=True,
+            description=f"Position where {relation_text}",
+            object_label=f"{large_obj.label}+{small_obj.label}",
+        )
     
     # =========================================================================
-    # Task 3.3: Screen Occupancy
+    # Task 3.4: Screen Occupancy
     # Region Type: CIRCLE (positions at distance where object occupies k% of FOV)
     # =========================================================================
     def generate_screen_occupancy(self, target: BoundingBox3D,
@@ -1246,6 +1481,18 @@ class TaskGenerator:
                     primary_obj, secondary_obj, agent_height
                 )
                 results.append(result)
+
+            if 'apparent_size_ordering' in enabled:
+                for relation in self.config.apparent_size_ordering_relations:
+                    larger = 'b' if relation == 'b_larger' else 'a'
+                    result = self.generate_apparent_size_ordering(
+                        primary_obj,
+                        secondary_obj,
+                        larger=larger,
+                        agent_height=agent_height,
+                        target_ratio=self.config.apparent_size_ordering_ratio,
+                    )
+                    results.append(result)
         
         # Three object tasks
         if tertiary_obj:
@@ -1266,7 +1513,8 @@ class TaskGenerator:
         """
         Generate tasks that require only one object.
         
-        Supported tasks: absolute_positioning, delta_control, screen_occupancy
+        Supported tasks: absolute_positioning, screen_occupancy.
+        delta_control remains available only when explicitly requested.
         
         Args:
             obj: SceneObject or dict with object info
@@ -1326,7 +1574,8 @@ class TaskGenerator:
         Generate tasks that require two objects.
         
         Supported tasks: equidistance, projective_relations, occlusion_alignment,
-                        fov_inclusion, size_distance_invariance
+                        fov_inclusion, size_distance_invariance,
+                        apparent_size_ordering
         
         Args:
             obj_a, obj_b: SceneObject or dict with object info
@@ -1388,6 +1637,18 @@ class TaskGenerator:
                 bbox_a, bbox_b, agent_height
             )
             results.append(result)
+
+        if 'apparent_size_ordering' in task_types:
+            for relation in self.config.apparent_size_ordering_relations:
+                larger = 'b' if relation == 'b_larger' else 'a'
+                result = self.generate_apparent_size_ordering(
+                    bbox_a,
+                    bbox_b,
+                    larger=larger,
+                    agent_height=agent_height,
+                    target_ratio=self.config.apparent_size_ordering_ratio,
+                )
+                results.append(result)
         
         return results
     

@@ -403,11 +403,19 @@ def main():
         ckpts.append((name, path, info.get("desc", "")))
 
     # Add on-the-fly checkpoints from --add
+    ad_hoc_model_types: Dict[str, str] = {}
     for entry in args.add:
         if ":" not in entry:
             print(f"[error] --add format must be 'name:path', got: {entry}")
             sys.exit(1)
-        name, path = entry.split(":", 1)
+        parts = entry.split(":")
+        if len(parts) >= 3:
+            name = parts[0]
+            model_type = parts[-1]
+            path = ":".join(parts[1:-1])
+            ad_hoc_model_types[name.strip()] = model_type.strip()
+        else:
+            name, path = entry.split(":", 1)
         path = resolve_ckpt_path(path, base_ckpt_dir)
         ckpts.append((name.strip(), path.strip(), "ad-hoc"))
         print(f"  [add] {name} → {path}")
@@ -481,6 +489,8 @@ def main():
             t0 = time.time()
             ckpt_info = ckpt_registry.get(ckpt_name, {})
             model_type = ckpt_info.get("model_type", "qwen2_5_vl")
+            if ckpt_name in ad_hoc_model_types:
+                model_type = ad_hoc_model_types[ckpt_name]
             success = run_lmms_eval(
                 ckpt_name=ckpt_name,
                 ckpt_path=ckpt_path,
