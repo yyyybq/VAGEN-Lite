@@ -182,16 +182,18 @@ export TMPDIR="/scratch/by2593/tmp"
 mkdir -p "${TMPDIR}"
 
 # Redirect framework caches off $HOME (home has a tight quota). Keep heavyweight
-# HF/pip caches on /scratch, but put JIT build caches on node-local /tmp: flashinfer
-# uses file locks during vLLM startup, and shared scratch/NFS can produce stale
-# handles when multiple experiments compile kernels at the same time.
+# HF/pip caches on /scratch. Put flashinfer/triton/inductor caches on node-local
+# /tmp because flashinfer uses file locks during vLLM startup and shared scratch
+# can produce stale handles. Keep torch_extensions on /scratch to reuse the
+# prebuilt gsplat CUDA extension; gsplat lazy-compilation is not safe under many
+# parallel AgentLoopWorker imports in a fresh per-run directory.
 export XDG_CACHE_HOME="/scratch/by2593/.cache"
 mkdir -p "${XDG_CACHE_HOME}"
 JIT_CACHE_ROOT="/tmp/${USER}/vagen_jit/${EXPERIMENT_NAME}_$$"
 export FLASHINFER_WORKSPACE_BASE="${JIT_CACHE_ROOT}/flashinfer"
 export TRITON_CACHE_DIR="${JIT_CACHE_ROOT}/triton"
 export TORCHINDUCTOR_CACHE_DIR="${JIT_CACHE_ROOT}/torchinductor"
-export TORCH_EXTENSIONS_DIR="${JIT_CACHE_ROOT}/torch_extensions"
+export TORCH_EXTENSIONS_DIR="${XDG_CACHE_HOME}/torch_extensions"
 export HF_HOME="${XDG_CACHE_HOME}/huggingface"
 export TRANSFORMERS_CACHE="${HF_HOME}/hub"
 export PIP_CACHE_DIR="${XDG_CACHE_HOME}/pip"
