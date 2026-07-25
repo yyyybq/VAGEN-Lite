@@ -26,7 +26,13 @@ set -x
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 BASEDIR="$( cd "$SCRIPT_DIR/../../.." && pwd )"   # VAGEN-Lite 根目录
-PYTHON=/scratch/by2593/miniconda3/envs/vagen-lite/bin/python
+PYTHON="${PYTHON:-/data/baiqiao/miniconda3/envs/vagen/bin/python}"
+if [ ! -x "$PYTHON" ]; then
+    echo "ERROR: PYTHON 不存在或不可执行: $PYTHON"
+    echo "请设置本机训练环境，例如: export PYTHON=/data/baiqiao/miniconda3/envs/vagen/bin/python"
+    exit 1
+fi
+VAGEN_ENV_BIN="$(dirname "$PYTHON")"
 # 在 run_experiment.sh 顶部加:
 export TMPDIR=/tmp
 export PYTHONMULTIPROCESSINGTEMPDIR=/tmp   # 双保险
@@ -164,7 +170,7 @@ export RAY_enable_metrics_collection=false
 export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
 export GS_RENDERER_VERBOSE=0
 export ACTIVE_SPATIAL_ENV_VERBOSE=0
-export PATH="/scratch/by2593/miniconda3/envs/vagen-lite/bin:$PATH"
+export PATH="${VAGEN_ENV_BIN}:$PATH"
 
 # ---------------------------------------------------------------------------
 # Redirect wandb / HuggingFace / tmp caches off $HOME to avoid "Disk quota
@@ -172,13 +178,13 @@ export PATH="/scratch/by2593/miniconda3/envs/vagen-lite/bin:$PATH"
 # This includes wandb artifact *staging* directory which is controlled by
 # WANDB_DATA_DIR (see wandb.env.get_data_dir -> get_staging_dir).
 # ---------------------------------------------------------------------------
-export WANDB_CACHE_ROOT="/scratch/by2593/.cache/wandb"
+export WANDB_CACHE_ROOT="${WANDB_CACHE_ROOT:-/nas/baiqiao/.cache/wandb}"
 mkdir -p "${WANDB_CACHE_ROOT}/data" "${WANDB_CACHE_ROOT}/cache" "${WANDB_CACHE_ROOT}/artifacts" "${WANDB_CACHE_ROOT}/config"
 export WANDB_DATA_DIR="${WANDB_CACHE_ROOT}/data"           # staging dir for artifact uploads
 export WANDB_CACHE_DIR="${WANDB_CACHE_ROOT}/cache"
 export WANDB_ARTIFACT_DIR="${WANDB_CACHE_ROOT}/artifacts"
 export WANDB_CONFIG_DIR="${WANDB_CACHE_ROOT}/config"
-export TMPDIR="/scratch/by2593/tmp"
+export TMPDIR="${TMPDIR:-/tmp}"
 mkdir -p "${TMPDIR}"
 
 # Redirect framework caches off $HOME (home has a tight quota). Keep heavyweight
@@ -187,7 +193,7 @@ mkdir -p "${TMPDIR}"
 # can produce stale handles. Keep torch_extensions on /scratch to reuse the
 # prebuilt gsplat CUDA extension; gsplat lazy-compilation is not safe under many
 # parallel AgentLoopWorker imports in a fresh per-run directory.
-export XDG_CACHE_HOME="/scratch/by2593/.cache"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/nas/baiqiao/.cache}"
 mkdir -p "${XDG_CACHE_HOME}"
 JIT_CACHE_ROOT="/tmp/${USER}/vagen_jit/${EXPERIMENT_NAME}_$$"
 export FLASHINFER_WORKSPACE_BASE="${JIT_CACHE_ROOT}/flashinfer"
@@ -250,10 +256,31 @@ import json, os, yaml, sys
 with open("${ENV_CONFIG_PATH}") as f:
     cfg = yaml.safe_load(f)
 
+def remap_local_path(value):
+    if not isinstance(value, str):
+        return value
+    old_prefix = "/scratch/by2593/project/Active_Spatial"
+    new_prefix = os.environ.get("ACTIVE_SPATIAL_ROOT", "/nas/baiqiao/active_spatial")
+    if value.startswith(old_prefix):
+        return value.replace(old_prefix, new_prefix, 1)
+    return value
+
+def remap_paths_inplace(obj):
+    if isinstance(obj, dict):
+        for k, v in list(obj.items()):
+            if isinstance(v, str):
+                obj[k] = remap_local_path(v)
+            else:
+                remap_paths_inplace(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            remap_paths_inplace(item)
+
 # 找到第一个 env 条目（旧格式：env1: {env_config: {...}, train_size: N, test_size: M}）
 env_key = list(cfg.keys())[0]
 env_entry = cfg[env_key]
 env_config = dict(env_entry.get("env_config", {}))
+remap_paths_inplace(env_config)
 train_size = env_entry.get("train_size", 259)
 test_size = env_entry.get("test_size", 19)
 

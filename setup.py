@@ -16,6 +16,7 @@ setup(
         # This ensures CambrianQwenForCausalLM is registered in EngineCore_DP* procs.
         "vllm.general_plugins": [
             "cambrian_vllm = vagen.models.cambrian_plugin:register",
+            "sensenova_u1 = vagen.models.sensenova_u1_plugin:register",
         ],
     },
 )

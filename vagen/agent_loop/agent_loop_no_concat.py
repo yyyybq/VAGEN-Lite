@@ -241,6 +241,79 @@ https://hydra.cc/docs/advanced/instantiate_objects/overview/
 _agent_loop_registry: dict[str, dict] = {}
 
 
+def _find_subsequence(values: list[int], needle: list[int]) -> int:
+    if not needle:
+        return -1
+    max_start = len(values) - len(needle)
+    for idx in range(max_start + 1):
+        if values[idx : idx + len(needle)] == needle:
+            return idx
+    return -1
+
+
+def _expand_sensenova_u1_ids_and_mask(
+    token_ids: list[int],
+    attention_mask: list[int],
+    *,
+    tokenizer,
+    grid_hw: torch.Tensor,
+    downsample_ratio: float,
+) -> tuple[list[int], list[int]]:
+    """Expand compact ``<image>`` placeholders to SenseNova-U1 image spans."""
+    from vagen.models.sensenova_u1_processor import (
+        IMAGE_TOKEN,
+        IMG_CONTEXT_TOKEN,
+        IMG_END_TOKEN,
+        IMG_START_TOKEN,
+    )
+
+    expanded_ids = list(token_ids)
+    expanded_mask = list(attention_mask)
+    image_token_id = tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
+    image_token_patterns = [
+        tokenizer.encode(IMAGE_TOKEN + "\n", add_special_tokens=False),
+        tokenizer.encode(IMAGE_TOKEN, add_special_tokens=False),
+    ]
+    start_id = tokenizer.convert_tokens_to_ids(IMG_START_TOKEN)
+    end_id = tokenizer.convert_tokens_to_ids(IMG_END_TOKEN)
+    context_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
+
+    for i in range(grid_hw.shape[0]):
+        num_patch_token = int(
+            grid_hw[i, 0].item()
+            * grid_hw[i, 1].item()
+            * (downsample_ratio ** 2)
+        )
+        replacement = [start_id] + [context_id] * num_patch_token + [end_id]
+
+        idx = -1
+        span_len = 0
+        if image_token_id is not None:
+            try:
+                idx = expanded_ids.index(image_token_id)
+                span_len = 1
+            except ValueError:
+                pass
+        if idx < 0:
+            for image_token_ids in image_token_patterns:
+                idx = _find_subsequence(expanded_ids, image_token_ids)
+                if idx >= 0:
+                    span_len = len(image_token_ids)
+                    break
+        if idx < 0:
+            break
+
+        mask_value = expanded_mask[idx] if idx < len(expanded_mask) else 1
+        expanded_ids = expanded_ids[:idx] + replacement + expanded_ids[idx + span_len :]
+        expanded_mask = (
+            expanded_mask[:idx]
+            + [mask_value] * len(replacement)
+            + expanded_mask[idx + span_len :]
+        )
+
+    return expanded_ids, expanded_mask
+
+
 def register(agent_name: str):
     """Register agent loop class."""
 
@@ -295,6 +368,11 @@ class AgentLoopWorkerBase:
                     from vagen.models.cambrian_processor import (
                         CambrianProcessorWrapper)
                     self.processor = CambrianProcessorWrapper(self.tokenizer)
+                elif _model_type == "neo_chat":
+                    from vagen.models.sensenova_u1_processor import (
+                        SenseNovaU1ProcessorWrapper)
+
+                    self.processor = SenseNovaU1ProcessorWrapper(self.tokenizer)
             except Exception:
                 pass  # keep self.processor = None
 
@@ -622,6 +700,51 @@ class AgentLoopWorkerBase:
 
                         multi_modal_inputs["nfp_pixel_values"] = nfp_pixel_values
                         multi_modal_inputs["nfp_loss_mask"] = nfp_loss_mask
+
+                elif (
+                    self.processor is not None
+                    and hasattr(self.processor, "image_processor")
+                    and "SenseNovaU1ImageProcessor" in self.processor.image_processor.__class__.__name__
+                ):
+                    images = getattr(output, "multi_modal_data", {}).get("image", None)
+                    if images is not None and len(images) > 0:
+                        mm_result = self.processor.preprocess_images(images)
+                        multi_modal_inputs = dict(mm_result)
+
+                        flat_ids = input_ids.squeeze(0).tolist()
+                        flat_mask = attention_mask.squeeze(0).tolist()
+                        expanded_ids, expanded_mask = _expand_sensenova_u1_ids_and_mask(
+                            flat_ids,
+                            flat_mask,
+                            tokenizer=self.tokenizer,
+                            grid_hw=multi_modal_inputs["grid_hw"],
+                            downsample_ratio=self.processor.downsample_ratio,
+                        )
+
+                        input_ids = torch.tensor(
+                            [expanded_ids], dtype=torch.long, device=input_ids.device
+                        )
+                        attention_mask = torch.tensor(
+                            [expanded_mask], dtype=torch.long, device=attention_mask.device
+                        )
+
+                        resp_ids_flat = response_output["input_ids"].squeeze(0).tolist()
+                        flat_resp_mask = response_mask.squeeze(0).tolist()
+                        expanded_resp_ids, expanded_resp_mask = _expand_sensenova_u1_ids_and_mask(
+                            resp_ids_flat,
+                            flat_resp_mask,
+                            tokenizer=self.tokenizer,
+                            grid_hw=torch.zeros(0, 2, dtype=torch.long),
+                            downsample_ratio=self.processor.downsample_ratio,
+                        )
+                        del expanded_resp_ids
+                        response_mask = torch.tensor(
+                            [expanded_resp_mask],
+                            dtype=response_mask.dtype,
+                            device=response_mask.device,
+                        )
+
+                    position_ids = compute_position_id_with_mask(attention_mask)  # adapter rebuilds U1 THW indexes
 
                 else:
                     position_ids = compute_position_id_with_mask(attention_mask)  # (1, seq_len)
