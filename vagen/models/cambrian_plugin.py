@@ -39,3 +39,16 @@ def register() -> None:
         "CambrianForCausalLMAdapter",
         "vagen.models.cambrian_vllm:CambrianVLLMForCausalLM",
     )
+
+    # SenseNova-U1 (NEOChat) — ensure architecture is registered in every vLLM
+    # subprocess. Kept here because the dedicated sensenova_u1 entry point may
+    # not be picked up by some worker launches.
+    ModelRegistry.register_model(
+        "NEOChatModel",
+        "vagen.models.sensenova_u1_vllm:SenseNovaU1VLLMForCausalLM",
+    )
+    ModelRegistry.register_model(
+        "SenseNovaU1ForCausalLMAdapter",
+        "vagen.models.sensenova_u1_vllm:SenseNovaU1VLLMForCausalLM",
+    )
+

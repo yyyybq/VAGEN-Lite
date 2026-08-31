@@ -452,7 +452,10 @@ def extract_result_row(
         return row
 
     data = read_json(result_path)
-    overall = data.get("overall", {})
+    # Current evaluation outputs nest aggregate metrics under
+    # ``metrics.overall``; retain compatibility with older result files that
+    # wrote ``overall`` at the top level.
+    overall = data.get("overall") or (data.get("metrics") or {}).get("overall") or {}
     row.update(
         {
             "status": "ok",
@@ -468,8 +471,13 @@ def extract_result_row(
             "test_monotonic_improvement_rate": overall.get("monotonic_improvement_rate"),
         }
     )
-    if "val/overall_success_mean" in row and "test_success_rate" in row:
-        row["test_minus_val_success_mean"] = row["test_success_rate"] - row["val/overall_success_mean"]
+    test_success = row.get("test_success_rate")
+    val_success = row.get("val/overall_success_mean")
+    if test_success is not None and val_success is not None:
+        try:
+            row["test_minus_val_success_mean"] = float(test_success) - float(val_success)
+        except (TypeError, ValueError):
+            pass
     return row
 
 

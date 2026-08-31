@@ -209,7 +209,15 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Collision tracking for episode
         self.collision_count: int = 0
+        self.consecutive_collision_count: int = 0
+        self.max_consecutive_collision_count: int = 0
         self.last_collision_result: Optional[CollisionResult] = None
+
+        # Low-information frame tracking for wall/inside-surface failure modes
+        self.low_info_frame_count: int = 0
+        self.consecutive_low_info_frame_count: int = 0
+        self.last_image_std: Optional[float] = None
+        self.last_low_info_frame: bool = False
         
         # Consecutive invalid action tracking
         self.consecutive_invalid_count: int = 0
@@ -271,44 +279,61 @@ class ActiveSpatialEnv(BaseEnv):
     
     def _default_parse_func(self, response: str, **kwargs) -> Dict[str, Any]:
         """Default parse function for action parsing."""
-        ft = parse_free_think(response)
-        if not ft["ok"]:
+        response_text = response or ""
+        response_lower = response_text.lower()
+        action_tag_count = response_lower.count("<action>")
+        has_action_tag = action_tag_count > 0
+        has_action_close = "</action>" in response_lower
+        truncated_before_action = bool(has_action_tag and not has_action_close)
+        multiple_action_tag = action_tag_count > 1
+
+        def _result(format_correct: bool, actions: list[str], think: str, parse_error: str) -> Dict[str, Any]:
+            has_tool_call = "<tool_call>" in response_lower
             return {
-                "format_correct": False,
-                "actions": [],
-                "think": "",
+                "format_correct": format_correct,
+                "actions": actions,
+                "think": think,
                 "llm_raw_response": response,
+                "parse_error": parse_error,
+                "missing_action_tag": not has_action_tag,
+                "empty_action_body": parse_error == "empty_action_body",
+                "unknown_action_name": parse_error == "unknown_action_name",
+                "truncated_before_action": truncated_before_action,
+                "multiple_action_tag": multiple_action_tag,
+                "has_tool_call": has_tool_call,
+                "has_strict_action_tag": bool(has_action_tag) and not has_tool_call,
+                "fallback_parse": bool(parse_error == "tool_call_protocol" or (has_tool_call and format_correct is False and len(actions) > 0)),
+                "strict_parse_success": bool(format_correct and has_action_tag and not has_tool_call and len(actions) > 0),
             }
+
+        ft = parse_free_think(response_text)
+        if not ft["ok"]:
+            parse_error = "truncated_before_action" if truncated_before_action else "missing_action_tag"
+            return _result(False, [], "", parse_error)
         
         sep = kwargs.get("action_sep", "|")
         max_actions = kwargs.get("max_actions", 5)
-        
-        ok, parsed_actions = parse_actions(ft["actions_blob"], sep=sep)
+        actions_blob = ft["actions_blob"]
+        ok, parsed_actions = parse_actions(actions_blob, sep=sep)
         if not ok:
-            return {
-                "format_correct": False,
-                "actions": [],
-                "think": ft["think"],
-                "llm_raw_response": response,
-            }
+            stripped_blob = (actions_blob or "").strip().strip(sep).strip()
+            parse_error = "empty_action_body" if not stripped_blob else "malformed_action_body"
+            return _result(False, [], ft["think"], parse_error)
         
         if not check_actions(parsed_actions, allowed=getattr(self, "_allowed_actions", None)):
-            return {
-                "format_correct": False,
-                "actions": [],
-                "think": ft["think"],
-                "llm_raw_response": response,
-            }
+            return _result(False, [], ft["think"], "unknown_action_name")
         
         # Extract action names
         actions = [a.name for a in parsed_actions[:max_actions]]
+
+        # Protocol unification: allow env to execute parsed actions for robustness,
+        # but do NOT mark <tool_call> outputs as format_correct (so they take
+        # invalid_format_penalty instead of silently matching <action> reward path).
+        has_tool_call = "<tool_call>" in response_lower
+        if has_tool_call:
+            return _result(False, actions, ft["think"], "tool_call_protocol")
         
-        return {
-            "format_correct": True,
-            "actions": actions,
-            "think": ft["think"],
-            "llm_raw_response": response,
-        }
+        return _result(True, actions, ft["think"], "")
     
     async def _init_renderer(self):
         """Initialize the rendering client if not already done."""
@@ -325,7 +350,7 @@ class ActiveSpatialEnv(BaseEnv):
                 print("[ActiveSpatialEnv] Using pre-rendered images from dataset (no real-time rendering)")
             return
         
-        if render_backend in ("client", "local"):
+        if render_backend in ("client", "http", "local"):
             try:
                 # Import local render module (adapted from ViewSuite)
                 from .render.unified_renderer import UnifiedRenderGS
@@ -353,12 +378,14 @@ class ActiveSpatialEnv(BaseEnv):
                             print(f"[ActiveSpatialEnv] GPU Device: cuda:{gpu_device}")
                     
             except ImportError as e:
+                if getattr(self.config, "render_fail_fast", True):
+                    raise
                 print(f"[ActiveSpatialEnv] Warning: Renderer not available: {e}")
                 print("[ActiveSpatialEnv] Falling back to pre-rendered images from dataset")
                 self.renderer = None
                 self._renderer_initialized = True
         else:
-            raise ValueError(f"Unknown render_backend: {render_backend}. Use 'client', 'local', or None.")
+            raise ValueError(f"Unknown render_backend: {render_backend}. Use 'client', 'http', 'local', or None.")
     
     def reset(self, seed: int = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
@@ -432,18 +459,28 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Load visibility checker data for this scene (cached - only reloads if scene changes)
         if self.visibility_checker is not None and scene_id and self.config.gs_root:
-            scene_path = Path(self.config.gs_root) / scene_id
-            self.visibility_checker.load_scene(scene_path, scene_id=scene_id)
+            self.visibility_checker.load_scene_from_gs_root(self.config.gs_root, scene_id)
         
         # Reset collision tracking
         self.collision_count = 0
+        self.consecutive_collision_count = 0
+        self.max_consecutive_collision_count = 0
         self.last_collision_result = None
+
+        # Reset low-information frame tracking
+        self.low_info_frame_count = 0
+        self.consecutive_low_info_frame_count = 0
+        self.last_image_std = None
+        self.last_low_info_frame = False
         
         # Reset consecutive invalid action tracking
         self.consecutive_invalid_count = 0
 
         # ==== v17: episode-level diagnostic counters ====
         self.invalid_action_count = 0      # total invalid-format turns
+        self.env_turn_count = 0            # total LLM turns passed to step()
+        self.empty_action_count = 0        # total turns with no parsed action
+        self.contradictory_action_count = 0  # turns containing cancelling action pairs
         self.disallowed_done_count = 0     # times agent emitted `done` while disabled
         self.best_score = 0.0              # max potential score seen in the episode
         self.final_score = 0.0             # potential score at terminal step
@@ -677,6 +714,19 @@ class ActiveSpatialEnv(BaseEnv):
         
         action_list = rst["actions"]
         format_correct = rst["format_correct"]
+        self.env_turn_count += 1
+        action_names = [str(a).lower() for a in action_list]
+        empty_action = len(action_names) == 0
+        contradictory_action = (
+            ("turn_left" in action_names and "turn_right" in action_names)
+            or ("look_up" in action_names and "look_down" in action_names)
+            or ("move_forward" in action_names and "move_backward" in action_names)
+            or ("move_left" in action_names and "move_right" in action_names)
+        )
+        if empty_action:
+            self.empty_action_count += 1
+        if contradictory_action:
+            self.contradictory_action_count += 1
         
         # --- Temporary logging: print model output for debugging ---
         import random as _rnd
@@ -687,10 +737,26 @@ class ActiveSpatialEnv(BaseEnv):
                   f"response_preview={_preview}", flush=True)
         
         # Metrics structure compatible with VAGEN BaseEnv expectations
+        # Executable if we parsed project actions; strict format requires <action> without <tool_call>.
+        action_executable = len(action_list) > 0
+        strict_format_correct = bool(format_correct)
         metrics = {
             "turn_metrics": {
-                "action_is_valid": len(action_list) > 0 and format_correct,
+                # Keep historical meaning for success-path logging: executable actions present.
+                "action_is_valid": action_executable,
                 "action_is_effective": False,
+                "strict_format_correct": strict_format_correct,
+                "strict_action_tag": bool(rst.get("has_strict_action_tag", False)),
+                "tool_call": bool(rst.get("has_tool_call", False)),
+                "fallback_parse": bool(rst.get("fallback_parse", False)),
+                "strict_parse_success": bool(rst.get("strict_parse_success", False)),
+                "empty_action": empty_action,
+                "contradictory_action": contradictory_action,
+                "missing_action_tag": bool(rst.get("missing_action_tag", False)),
+                "empty_action_body": bool(rst.get("empty_action_body", False)),
+                "unknown_action_name": bool(rst.get("unknown_action_name", False)),
+                "truncated_before_action": bool(rst.get("truncated_before_action", False)),
+                "multiple_action_tag": bool(rst.get("multiple_action_tag", False)),
             },
             "traj_metrics": {
                 "success": False,
@@ -701,6 +767,8 @@ class ActiveSpatialEnv(BaseEnv):
         done = False
         info = {}
         info.update(rst)
+        info["strict_format_correct"] = strict_format_correct
+        info["action_executable"] = action_executable
         
         prev_E = self.view_engine.get_pose()
         prev_pos = prev_E[:3, 3].copy()
@@ -709,9 +777,9 @@ class ActiveSpatialEnv(BaseEnv):
         step_collisions = []
         collision_feedback = ""
         
-        # Execute valid actions
-        if metrics["turn_metrics"]["action_is_valid"]:
-            self.consecutive_invalid_count = 0  # Reset on valid action
+        # Execute parsed actions (strict or fallback). Strictness only affects format reward.
+        if action_executable:
+            self.consecutive_invalid_count = 0  # Reset when actions can be executed
             for action in action_list:
                 action_lower = action.lower()
                 
@@ -764,6 +832,11 @@ class ActiveSpatialEnv(BaseEnv):
                         
                         if collision_result.has_collision:
                             self.collision_count += 1
+                            self.consecutive_collision_count += 1
+                            self.max_consecutive_collision_count = max(
+                                self.max_consecutive_collision_count,
+                                self.consecutive_collision_count,
+                            )
                             self.last_collision_result = collision_result
                             step_collisions.append(collision_result)
                             
@@ -780,6 +853,19 @@ class ActiveSpatialEnv(BaseEnv):
                                 if self.VERBOSE:
                                     print(f"[Collision] Action '{action_lower}' blocked by {collision_result.collision_type}"
                                           f" ({collision_result.collision_object or 'boundary'})")
+
+                            max_consecutive_collisions = int(getattr(self.config, "max_consecutive_collisions", 0) or 0)
+                            if max_consecutive_collisions > 0 and self.consecutive_collision_count >= max_consecutive_collisions:
+                                done = True
+                                self.episode_done = True
+                                self.reward += float(getattr(self.config, "consecutive_collision_penalty", 0.0) or 0.0)
+                                info["early_terminated_collision"] = True
+                                info["consecutive_collision_count"] = self.consecutive_collision_count
+                                break
+                        else:
+                            self.consecutive_collision_count = 0
+                    else:
+                        self.consecutive_collision_count = 0
                     
                     if self._current_step >= self._max_episode_steps:
                         done = True
@@ -794,15 +880,24 @@ class ActiveSpatialEnv(BaseEnv):
                         self.final_score = float(final_score)
                         break
             
-            # Add format reward
-            self.reward += self.config.format_reward
-            info["is_format_rewarded"] = True
+            # Format reward only for strict <think>/<action> protocol.
+            # tool_call fallback remains executable for env robustness, but is penalized.
+            if strict_format_correct:
+                self.reward += self.config.format_reward
+                info["is_format_rewarded"] = True
+                info["is_format_penalized"] = False
+            else:
+                self.reward += self.config.invalid_format_penalty
+                info["is_format_rewarded"] = False
+                info["is_format_penalized"] = True
+                info["format_penalty_reason"] = rst.get("parse_error") or "non_strict_protocol"
         else:
-            # Penalize invalid format and track consecutive failures
+            # No executable actions: hard invalid path (no task reward this turn)
             self.reward = self.config.invalid_format_penalty
             self.consecutive_invalid_count += 1
             self.invalid_action_count += 1
             info["is_format_rewarded"] = False
+            info["is_format_penalized"] = True
             
             # Early termination after too many consecutive invalid actions
             if self.consecutive_invalid_count >= self.config.max_consecutive_invalid_actions:
@@ -864,7 +959,9 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Add collision metrics
         metrics["turn_metrics"]["collision_count"] = len(step_collisions)
+        metrics["turn_metrics"]["consecutive_collision_count"] = self.consecutive_collision_count
         metrics["traj_metrics"]["total_collisions"] = self.collision_count
+        metrics["traj_metrics"]["max_consecutive_collisions"] = self.max_consecutive_collision_count
         
         # Add potential field metrics
         if self.config.enable_potential_field and self.potential_field is not None:
@@ -880,6 +977,10 @@ class ActiveSpatialEnv(BaseEnv):
         # These are emitted every step; on the terminal step they reflect
         # the full trajectory, which is what the trainer aggregator picks up.
         metrics["traj_metrics"]["invalid_action_count"] = int(self.invalid_action_count)
+        metrics["traj_metrics"]["empty_action_count"] = int(self.empty_action_count)
+        metrics["traj_metrics"]["contradictory_action_count"] = int(self.contradictory_action_count)
+        metrics["traj_metrics"]["empty_action_rate"] = float(self.empty_action_count / max(self.env_turn_count, 1))
+        metrics["traj_metrics"]["contradictory_action_rate"] = float(self.contradictory_action_count / max(self.env_turn_count, 1))
         metrics["traj_metrics"]["best_score"] = float(self.best_score)
         metrics["traj_metrics"]["final_score"] = float(self.final_score)
         metrics["traj_metrics"]["final_position_score"] = float(self.final_position_score)
@@ -911,6 +1012,7 @@ class ActiveSpatialEnv(BaseEnv):
         info["current_potential_score"] = self.prev_potential_score
         info["current_region_metrics"] = self.current_region_metrics
         info["collision_count"] = self.collision_count
+        info["consecutive_collision_count"] = self.consecutive_collision_count
         
         # Build env_feedback with collision info
         if metrics["turn_metrics"]["action_is_effective"]:
@@ -924,7 +1026,28 @@ class ActiveSpatialEnv(BaseEnv):
         self.total_reward += self.reward
         
         obs = self._render(init_obs=False, env_feedback=env_feedback)
-        
+
+        metrics["turn_metrics"]["image_std"] = self.last_image_std
+        metrics["turn_metrics"]["low_info_frame"] = self.last_low_info_frame
+        metrics["turn_metrics"]["consecutive_low_info_frames"] = self.consecutive_low_info_frame_count
+        metrics["traj_metrics"]["low_info_frame_count"] = self.low_info_frame_count
+        info["image_std"] = self.last_image_std
+        info["low_info_frame"] = self.last_low_info_frame
+        info["consecutive_low_info_frames"] = self.consecutive_low_info_frame_count
+
+        max_low_info = int(getattr(self.config, "max_consecutive_low_info_frames", 0) or 0)
+        if (
+            not done
+            and max_low_info > 0
+            and self.consecutive_low_info_frame_count >= max_low_info
+        ):
+            done = True
+            self.episode_done = True
+            low_info_penalty = float(getattr(self.config, "low_info_frame_penalty", 0.0) or 0.0)
+            self.reward += low_info_penalty
+            self.total_reward += low_info_penalty
+            info["early_terminated_low_info"] = True
+
         return obs, self.reward, done, info
     
     def _get_target_pose(self) -> Optional[List[float]]:
@@ -1429,9 +1552,34 @@ class ActiveSpatialEnv(BaseEnv):
             
         except Exception as e:
             import traceback as _tb
+            if getattr(self.config, "render_fail_fast", True):
+                raise RuntimeError(f"ActiveSpatial rendering failed: {e}") from e
             print(f"[ActiveSpatialEnv] Rendering error: {e}\n{_tb.format_exc()}")
             return None
     
+    def _record_image_quality(self, image: Optional[Image.Image]) -> None:
+        """Track low-information frames caused by wall/inside-surface views."""
+        if image is None or not getattr(self.config, "enable_low_info_frame_check", True):
+            self.last_image_std = None
+            self.last_low_info_frame = False
+            return
+        try:
+            arr = np.asarray(image.convert("RGB"), dtype=np.float32)
+            img_std = float(arr.std())
+        except Exception:
+            self.last_image_std = None
+            self.last_low_info_frame = False
+            return
+
+        threshold = float(getattr(self.config, "low_info_image_std_threshold", 8.0))
+        self.last_image_std = img_std
+        self.last_low_info_frame = img_std < threshold
+        if self.last_low_info_frame:
+            self.low_info_frame_count += 1
+            self.consecutive_low_info_frame_count += 1
+        else:
+            self.consecutive_low_info_frame_count = 0
+
     def _render(self, init_obs: bool = True, task_prompt: str = "", env_feedback: str = "") -> Dict[str, Any]:
         """
         Render the current observation.
@@ -1510,6 +1658,8 @@ class ActiveSpatialEnv(BaseEnv):
             h = getattr(self.config, "image_height", 512)
             from PIL import Image as _PILImage
             images.append(_PILImage.new("RGB", (w, h), color=(128, 128, 128)))
+
+        self._record_image_quality(images[0] if images else None)
 
         # Build multi-modal data
         multi_modal_data = {

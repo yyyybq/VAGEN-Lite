@@ -83,14 +83,14 @@ scripts/active_spatial_full_eval.py
 scripts/active_spatial_eval_sweep.py
 scripts/active_spatial_eval_report.py
 scripts/gen_ood_splits.py
-scripts/easi_probe.py
+scripts/easi_eval.py
 ```
 
 The intended evaluation has three layers:
 
 1. Embodied navigation tests: ID, OOD scene, OOD object/category, OOD template, OOD geometry, hard delta. Every checkpoint should run the same matrix.
 2. Training/validation alignment: compare validation and test at the same step; check whether best-val is also best-test and whether latest degrades.
-3. Capability probes: EASI, MindCube, SPAR, MMSI, ViewSpatial style static spatial QA to test whether RL improves general spatial reasoning or only task-local action behavior.
+3. Spatial intelligence: run the complete official EASI-8 for every evaluated checkpoint; MindCube-Tiny is included inside EASI-8 and is not evaluated separately.
 
 ### Region-Aware Metrics
 

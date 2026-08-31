@@ -1,0 +1,54 @@
+# =============================================================================
+# A2: v46 navigation recipe + arrival/stop as unique variable
+# Clone of env_config_h800_7b_6types.yaml with stop/arrival knobs from v19_no_autoterm.
+# Unique changes vs v46:
+#   ★ enable_auto_termination: true  -> false
+#   ★ enable_explicit_done:    false -> true
+#   ★ premature_done_penalty:  (default -0.3) -> -2.0
+#   ★ step_penalty enabled at -0.01 (encourage finishing with done)
+# Keep success_reward=5.0 (v46/v30 scale), not v19's 30.
+# =============================================================================
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/active_spatial_pipeline/output_100scenes/train_100scenes_6types.jsonl"
+
+        render_backend: local
+        gs_root: "/mnt/umm/users/yinbaiqiao/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: true                 # ★ A2
+
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 1.0
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.65
+        enable_auto_termination: false             # ★ A2
+        near_success_threshold: 0.55
+        near_success_bonus: 0.5
+        near_success_mode: "constant"
+
+        success_reward: 5.0
+        premature_done_penalty: -2.0               # ★ A2
+        enable_step_penalty: true
+        step_penalty: -0.01                        # ★ A2
+
+        enable_distance_in_obs: true
+
+        # keep v46 collision defaults (enabled via dataclass default)
+        # enable_collision_detection: true
+
+        train_size: 11135
+        test_size: 22

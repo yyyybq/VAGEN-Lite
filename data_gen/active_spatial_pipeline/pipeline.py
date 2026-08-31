@@ -18,11 +18,23 @@ try:
     from .object_selector import ObjectSelector
     from .camera_sampler import CameraSampler, CameraPose
     from .task_generator import TaskGenerator, TaskResult
+    from .layout_quality import (
+        LayoutGeometry,
+        compute_forward,
+        look_at_for_region,
+        repair_region_sample_to_layout,
+    )
 except ImportError:
     from config import PipelineConfig, InitialViewConfig
     from object_selector import ObjectSelector
     from camera_sampler import CameraSampler, CameraPose
     from task_generator import TaskGenerator, TaskResult
+    from layout_quality import (
+        LayoutGeometry,
+        compute_forward,
+        look_at_for_region,
+        repair_region_sample_to_layout,
+    )
 
 
 def validate_target_reachability(task: 'TaskResult', room_polys: List[List[List[float]]]) -> bool:
@@ -633,6 +645,35 @@ class ActiveSpatialPipeline:
             target_object=target_object,
         )
 
+    def _repair_task_sample_to_layout(self, task: TaskResult, layout: LayoutGeometry) -> Tuple[bool, str]:
+        """Ensure the serialized sample_point/sample_target is indoor and away from walls."""
+        if not self.config.enable_layout_target_filter or not layout.room_polys:
+            return True, "layout_filter_disabled"
+
+        repaired = repair_region_sample_to_layout(
+            task.target_region,
+            layout,
+            min_wall_clearance=self.config.layout_min_wall_clearance,
+            grid_spacing=self.config.layout_grid_spacing,
+            max_error=self.config.layout_max_region_error,
+        )
+        if repaired is None:
+            return False, "no_safe_layout_sample"
+
+        sample_point, sample_forward, metrics = repaired
+        task.target_region.sample_point = sample_point
+        task.target_region.sample_forward = sample_forward
+        params = task.target_region.params
+        params["layout_repaired"] = bool(metrics.get("layout_repaired", 0.0))
+        params["target_wall_distance"] = float(metrics.get("target_wall_distance", 0.0))
+        params["layout_region_error"] = float(metrics.get("region_error", 0.0))
+
+        look_at = look_at_for_region(task.target_region)
+        if look_at is not None:
+            params["sample_distance"] = float(np.linalg.norm(sample_point[:2] - look_at[:2]))
+
+        return True, "layout_repaired" if params["layout_repaired"] else "layout_ok"
+
     def _validate_visual_sample_item(self, item: TrainingDataItem) -> Tuple[bool, str, float]:
         """Validate the sampled target view for visual-relation tasks using projected bbox scoring."""
         threshold = self.config.min_visual_sample_scores.get(item.task_type)
@@ -722,9 +763,13 @@ class ActiveSpatialPipeline:
         
         data_items = []
         
-        # Load room polygons for reachability validation
-        room_polys = self.camera_sampler.load_room_polys(scene_path)
+        # Load room polygons and walls for reachability/layout validation
+        layout = LayoutGeometry.from_scene_path(scene_path)
+        room_polys = layout.room_polys or self.camera_sampler.load_room_polys(scene_path)
+        if not layout.room_polys and room_polys:
+            layout = LayoutGeometry(room_polys=room_polys, wall_segments=[])
         reachability_rejection_count = 0
+        layout_sample_rejection_stats = {}
         
         # Get all valid single objects
         if needs_single or needs_pair or needs_triple:
@@ -758,6 +803,11 @@ class ActiveSpatialPipeline:
                         # Validate target region is reachable from within a room
                         if not validate_target_reachability(task, room_polys):
                             reachability_rejection_count += 1
+                            continue
+
+                        is_layout_valid, layout_reason = self._repair_task_sample_to_layout(task, layout)
+                        if not is_layout_valid:
+                            layout_sample_rejection_stats[layout_reason] = layout_sample_rejection_stats.get(layout_reason, 0) + 1
                             continue
                         
                         # NEW: Validate initial position is not too close to target
@@ -812,6 +862,11 @@ class ActiveSpatialPipeline:
                         if not validate_target_reachability(task, room_polys):
                             reachability_rejection_count += 1
                             continue
+
+                        is_layout_valid, layout_reason = self._repair_task_sample_to_layout(task, layout)
+                        if not is_layout_valid:
+                            layout_sample_rejection_stats[layout_reason] = layout_sample_rejection_stats.get(layout_reason, 0) + 1
+                            continue
                         
                         # NEW: Validate initial position is not too close to target
                         target_region_dict = task.target_region.to_dict() if hasattr(task.target_region, 'to_dict') else task.target_region
@@ -865,6 +920,11 @@ class ActiveSpatialPipeline:
                         if not validate_target_reachability(task, room_polys):
                             reachability_rejection_count += 1
                             continue
+
+                        is_layout_valid, layout_reason = self._repair_task_sample_to_layout(task, layout)
+                        if not is_layout_valid:
+                            layout_sample_rejection_stats[layout_reason] = layout_sample_rejection_stats.get(layout_reason, 0) + 1
+                            continue
                         
                         # NEW: Validate initial position is not too close to target
                         target_region_dict = task.target_region.to_dict() if hasattr(task.target_region, 'to_dict') else task.target_region
@@ -897,6 +957,8 @@ class ActiveSpatialPipeline:
             print(f"  Init position rejections: {init_pos_rejection_stats}")
         if reachability_rejection_count > 0:
             print(f"  Target reachability rejections: {reachability_rejection_count}")
+        if layout_sample_rejection_stats:
+            print(f"  Layout sample rejections: {layout_sample_rejection_stats}")
         if visual_sample_rejection_stats:
             print(f"  Visual sample rejections: {visual_sample_rejection_stats}")
         

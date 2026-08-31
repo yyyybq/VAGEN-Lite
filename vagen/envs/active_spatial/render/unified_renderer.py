@@ -7,17 +7,20 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
+import os
 from typing import Any, Dict, List, Optional, Union
 from PIL import Image
 import numpy as np
 
+from .. import gs_io
 from .gs_render_client import GSRenderClient
+from .http_render_client import InteriorGSHTTPRenderClient
 
 
 @dataclass
 class RenderConfig:
     """Configuration for the unified renderer."""
-    render_backend: str                  # "local" | "client"
+    render_backend: str                  # "local" | "client" | "http"
     gs_root: Optional[str] = None        # Required for local rendering
     client_url: Optional[str] = None     # Required for client rendering
     client_origin: Optional[str] = None  # Optional origin header
@@ -54,7 +57,8 @@ class UnifiedRenderGS:
     
     Supports two backends:
     - "local": Direct GPU rendering (requires gsplat library)
-    - "client": Remote rendering via WebSocket server
+    - "client": Remote rendering via WebSocket or HTTP server
+    - "http": Remote rendering via HTTP multipart render service
     
     Usage:
         renderer = UnifiedRenderGS(
@@ -78,9 +82,9 @@ class UnifiedRenderGS:
         Initialize the unified renderer.
         
         Args:
-            render_backend: "local" or "client"
+            render_backend: "local", "client", or "http"
             gs_root: Root directory containing {scene_id}.ply files (for local)
-            client_url: WebSocket URL of render server (for client)
+            client_url: WebSocket or HTTP URL of render server (for client/http)
             client_origin: Optional origin header for WebSocket
             scene_id: Initial scene ID
             gpu_device: GPU device ID for local rendering (None = auto-detect)
@@ -113,36 +117,16 @@ class UnifiedRenderGS:
             self._gs_renderer = None
 
     def _ensure_ply(self) -> str:
-        """Get the .ply path for current scene."""
+        """Get a local .ply path for current scene (AOSS PLYs are disk-cached)."""
         if self._ply is None:
             if self.cfg.gs_root is None or self.cfg.scene_id is None:
                 raise ValueError("gs_root and scene_id are required for local rendering")
-            
-            # Try multiple possible PLY file locations
-            import os
-            
-            # Check for verbose logging
-            verbose = os.environ.get('GS_RENDERER_VERBOSE', '0') == '1'
-            
-            candidates = [
-                f"{self.cfg.gs_root}/{self.cfg.scene_id}/3dgs_compressed.ply",  # InteriorGS format
-                f"{self.cfg.gs_root}/{self.cfg.scene_id}.ply",                  # Flat format
-                f"{self.cfg.gs_root}/{self.cfg.scene_id}/gaussian.ply",         # Alternative name
-            ]
-            
-            for candidate in candidates:
-                if os.path.exists(candidate):
-                    self._ply = candidate
-                    if verbose:
-                        print(f"[UnifiedRenderGS] Found PLY file: {self._ply}")
-                    break
-            
-            if self._ply is None:
-                raise FileNotFoundError(
-                    f"Could not find PLY file for scene {self.cfg.scene_id}. "
-                    f"Tried: {candidates}"
-                )
-        
+
+            verbose = os.environ.get("GS_RENDERER_VERBOSE", "0") == "1"
+            self._ply = gs_io.resolve_ply(self.cfg.gs_root, self.cfg.scene_id)
+            if verbose:
+                print(f"[UnifiedRenderGS] Found PLY file: {self._ply}")
+
         return self._ply
 
     def _ensure_local(self):
@@ -206,25 +190,46 @@ class UnifiedRenderGS:
             )
             return self._to_pil(img)
 
-        elif self.cfg.render_backend == "client":
-            client = await self._ensure_client()
+        elif self.cfg.render_backend in ("client", "http"):
             K = _ensure_K3x3(np.asarray(camera_intrinsics, dtype=np.float32))
             E = np.asarray(camera_extrinsics, dtype=np.float32)
-
             tasks = [{
                 "mode": "cam_param",
                 "intrinsics": _to_jsonable(K),
                 "extrinsics": _to_jsonable(E),
                 "size": [int(width), int(height)]
             }]
-            imgs = await client.render(self.cfg.scene_id, tasks)
-            
+            imgs = await self._render_remote_tasks(tasks)
             if not imgs:
                 raise RuntimeError(f"Render server returned no images for scene {self.cfg.scene_id}")
             return imgs[0]
 
         else:
             raise ValueError(f"Unknown render_backend: {self.cfg.render_backend}")
+
+
+    async def _render_remote_tasks(self, tasks: List[Dict[str, Any]]) -> List[Image.Image]:
+        if not self.cfg.client_url:
+            raise ValueError("client_url is required for remote rendering")
+        if not self.cfg.scene_id:
+            raise ValueError("scene_id is required for remote rendering")
+
+        if self.cfg.render_backend == "http" or self.cfg.client_url.startswith(("http://", "https://")):
+            client = InteriorGSHTTPRenderClient(self.cfg.client_url)
+            return await client.render(self.cfg.scene_id, tasks)
+
+        # ActiveSpatialEnv calls through repeated asyncio.run() invocations from
+        # sync code. A cached WebSocket connection is bound to its event loop, so
+        # keep the legacy WS client short-lived per render request.
+        client = GSRenderClient(
+            url=self.cfg.client_url,
+            origin=self.cfg.client_origin,
+            session_id="unified-gs",
+        )
+        try:
+            return await client.render(self.cfg.scene_id, tasks)
+        finally:
+            await client.close()
 
     async def render_tasks(self, tasks: List[Dict[str, Any]]) -> List[Image.Image]:
         """
@@ -251,5 +256,4 @@ class UnifiedRenderGS:
                 )
             return out
         else:
-            client = await self._ensure_client()
-            return await client.render(self.cfg.scene_id, tasks)
+            return await self._render_remote_tasks(tasks)

@@ -241,6 +241,64 @@ https://hydra.cc/docs/advanced/instantiate_objects/overview/
 _agent_loop_registry: dict[str, dict] = {}
 
 
+def _find_subsequence(values: list[int], needle: list[int]) -> int:
+    if not needle:
+        return -1
+    max_start = len(values) - len(needle)
+    for idx in range(max_start + 1):
+        if values[idx : idx + len(needle)] == needle:
+            return idx
+    return -1
+
+
+def _expand_sensenova_u1_ids_and_mask(
+    token_ids: list[int],
+    attention_mask: list[int],
+    *,
+    tokenizer,
+    grid_hw: "torch.Tensor",
+    downsample_ratio: float,
+) -> tuple[list[int], list[int]]:
+    """Expand compact ``<image>`` placeholders to SenseNova-U1 image spans."""
+    from vagen.models.sensenova_u1_processor import (
+        IMG_CONTEXT_TOKEN,
+        IMG_END_TOKEN,
+        IMG_START_TOKEN,
+        locate_image_placeholder,
+    )
+
+    expanded_ids = list(token_ids)
+    expanded_mask = list(attention_mask)
+    start_id = tokenizer.convert_tokens_to_ids(IMG_START_TOKEN)
+    end_id = tokenizer.convert_tokens_to_ids(IMG_END_TOKEN)
+    context_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
+
+    for i in range(grid_hw.shape[0]):
+        num_patch_token = int(
+            grid_hw[i, 0].item()
+            * grid_hw[i, 1].item()
+            * (downsample_ratio ** 2)
+        )
+        replacement = [start_id] + [context_id] * num_patch_token + [end_id]
+
+        idx, span_len, prefix_keep, suffix_restore = locate_image_placeholder(
+            expanded_ids, tokenizer
+        )
+        if idx < 0:
+            break
+
+        mask_value = expanded_mask[idx] if idx < len(expanded_mask) else 1
+        full_replacement = prefix_keep + replacement + suffix_restore
+        expanded_ids = expanded_ids[:idx] + full_replacement + expanded_ids[idx + span_len :]
+        expanded_mask = (
+            expanded_mask[:idx]
+            + [mask_value] * len(full_replacement)
+            + expanded_mask[idx + span_len :]
+        )
+
+    return expanded_ids, expanded_mask
+
+
 def register(agent_name: str):
     """Register agent loop class."""
 
@@ -279,24 +337,37 @@ class AgentLoopWorkerBase:
         self.model_name = "/".join(model_path.split("/")[-2:])
         local_path = copy_to_local(config.actor_rollout_ref.model.path)
         self.tokenizer = hf_tokenizer(local_path, trust_remote_code=True)
-        self.processor = hf_processor(local_path, trust_remote_code=True)
+        self.processor = None
+        try:
+            import json as _json
+            import os as _os
 
-        # If AutoProcessor failed (e.g. Cambrian-S has no HF processor config),
-        # check model_type by reading config.json directly (AutoConfig.from_pretrained
-        # fails for unregistered model types like cambrian_qwen).
+            _config_path = _os.path.join(local_path, "config.json")
+            with open(_config_path) as _f:
+                _model_type = _json.load(_f).get("model_type", "")
+            if _model_type == "cambrian_qwen":
+                from vagen.models.cambrian_processor import CambrianProcessorWrapper
+
+                self.processor = CambrianProcessorWrapper(self.tokenizer)
+                logger.warning("Using CambrianProcessorWrapper for model_type=cambrian_qwen")
+            elif _model_type == "neo_chat":
+                from vagen.models.sensenova_u1_processor import SenseNovaU1ProcessorWrapper
+
+                self.processor = SenseNovaU1ProcessorWrapper(self.tokenizer)
+                logger.warning("Using SenseNovaU1ProcessorWrapper for model_type=neo_chat")
+        except Exception as exc:
+            logger.warning("Direct processor resolution failed; falling back to AutoProcessor: %s", exc)
+
         if self.processor is None:
-            try:
-                import json as _json
-                import os as _os
-                _config_path = _os.path.join(local_path, "config.json")
-                with open(_config_path) as _f:
-                    _model_type = _json.load(_f).get("model_type", "")
-                if _model_type == "cambrian_qwen":
-                    from vagen.models.cambrian_processor import (
-                        CambrianProcessorWrapper)
-                    self.processor = CambrianProcessorWrapper(self.tokenizer)
-            except Exception:
-                pass  # keep self.processor = None
+            self.processor = hf_processor(local_path, trust_remote_code=True)
+
+        if self.processor is None:
+            logger.warning("AgentLoopWorker processor is None for model path %s", model_path)
+        else:
+            logger.warning("AgentLoopWorker processor type: %s", type(self.processor).__name__)
+        self._vision_sanity_dir = os.getenv("VAGEN_VISION_SANITY_DIR", "")
+        self._vision_sanity_max = int(os.getenv("VAGEN_VISION_SANITY_MAX", "0") or 0)
+        self._vision_sanity_dump_count = 0
 
         agent_loop_config_path = config.actor_rollout_ref.rollout.agent.agent_loop_config_path
         if agent_loop_config_path:
@@ -623,6 +694,164 @@ class AgentLoopWorkerBase:
                         multi_modal_inputs["nfp_pixel_values"] = nfp_pixel_values
                         multi_modal_inputs["nfp_loss_mask"] = nfp_loss_mask
 
+                    if (
+                        self._vision_sanity_dir
+                        and self._vision_sanity_max > 0
+                        and self._vision_sanity_dump_count < self._vision_sanity_max
+                        and images is not None
+                        and len(images) > 0
+                        and multi_modal_inputs is not None
+                        and "pixel_values" in multi_modal_inputs
+                    ):
+                        try:
+                            import json as _json
+                            from PIL import Image as _Image
+
+                            os.makedirs(self._vision_sanity_dir, exist_ok=True)
+                            dump_idx = self._vision_sanity_dump_count
+                            dump_prefix = f"pid{os.getpid()}_sample_{dump_idx:03d}"
+                            self._vision_sanity_dump_count += 1
+                            raw_image = images[0]
+                            if isinstance(raw_image, _Image.Image):
+                                pil_image = raw_image.convert("RGB")
+                            else:
+                                pil_image = _Image.fromarray(np.asarray(raw_image).astype(np.uint8)).convert("RGB")
+                            image_np = np.asarray(pil_image)
+                            pre_path = os.path.join(self._vision_sanity_dir, f"{dump_prefix}_pre_processor.png")
+                            pil_image.save(pre_path)
+
+                            pixel_values = multi_modal_inputs["pixel_values"].detach().cpu()
+                            pv0 = pixel_values[0].float()
+                            pv_min = float(pv0.min().item())
+                            pv_max = float(pv0.max().item())
+                            pv_vis = (pv0 - pv0.min()) / (pv0.max() - pv0.min() + 1e-6)
+                            pv_vis = (pv_vis.clamp(0, 1).permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                            pv_path = os.path.join(self._vision_sanity_dir, f"{dump_prefix}_pixel_values.png")
+                            _Image.fromarray(pv_vis).save(pv_path)
+
+                            manifest_path = os.path.join(self._vision_sanity_dir, "manifest.jsonl")
+                            image_token_count = int(sum(1 for tid in flat_ids if tid == image_token_id))
+                            record = {
+                                "sample": dump_idx,
+                                "worker_pid": os.getpid(),
+                                "processor_type": type(self.processor).__name__,
+                                "image_shape": list(image_np.shape),
+                                "image_dtype": str(image_np.dtype),
+                                "image_min": int(image_np.min()),
+                                "image_max": int(image_np.max()),
+                                "image_std": float(image_np.std()),
+                                "pixel_values_shape": list(pixel_values.shape),
+                                "pixel_values_dtype": str(pixel_values.dtype),
+                                "pixel_values_min": pv_min,
+                                "pixel_values_max": pv_max,
+                                "pixel_values_std": float(pv0.std().item()),
+                                "pixel_values_finite": bool(torch.isfinite(pixel_values).all().item()),
+                                "image_token_count": image_token_count,
+                                "expanded_image_token_count": int(sum(1 for tid in expanded_ids if tid == IMAGE_TOKEN_INDEX)),
+                                "nfp_valid": bool(nfp_valid),
+                                "pre_processor_path": pre_path,
+                                "pixel_values_path": pv_path,
+                            }
+                            with open(manifest_path, "a", encoding="utf-8") as _f:
+                                _f.write(_json.dumps(record, ensure_ascii=False) + "\n")
+
+                            pre_paths = sorted(
+                                os.path.join(self._vision_sanity_dir, name)
+                                for name in os.listdir(self._vision_sanity_dir)
+                                if name.endswith("_pre_processor.png")
+                            )[:16]
+                            tiles = []
+                            for path in pre_paths:
+                                try:
+                                    tiles.append(_Image.open(path).convert("RGB").resize((160, 160)))
+                                except Exception:
+                                    continue
+                            if tiles:
+                                montage = _Image.new("RGB", (4 * 160, 4 * 160), (255, 255, 255))
+                                for tile_idx, tile in enumerate(tiles):
+                                    montage.paste(tile, ((tile_idx % 4) * 160, (tile_idx // 4) * 160))
+                                montage.save(os.path.join(self._vision_sanity_dir, "montage_pre_processor.png"))
+                            logger.warning("Cambrian vision sanity dump: %s", record)
+                        except Exception as exc:
+                            logger.warning("Cambrian vision sanity dump failed: %s", exc)
+
+                elif (
+                    self.processor is not None
+                    and hasattr(self.processor, "image_processor")
+                    and "SenseNovaU1ImageProcessor" in self.processor.image_processor.__class__.__name__
+                ):
+                    # SenseNova-U1 branch:
+                    #   1. Expand obs <image> -> <img><IMG_CONTEXT>*N</img>
+                    #   2. Phase-1 Plan B: teacher-force append <action>...<image> gen
+                    #      span for open-loop next-frame FM aux (response_mask=0 on gen).
+                    images = getattr(output, "multi_modal_data", {}).get("image", None)
+                    if images is not None and len(images) > 0:
+                        mm_result = self.processor.preprocess_images(images)
+                        multi_modal_inputs = dict(mm_result)
+
+                        flat_ids = input_ids.squeeze(0).tolist()
+                        flat_mask = attention_mask.squeeze(0).tolist()
+                        expanded_ids, expanded_mask = _expand_sensenova_u1_ids_and_mask(
+                            flat_ids,
+                            flat_mask,
+                            tokenizer=self.tokenizer,
+                            grid_hw=multi_modal_inputs["grid_hw"],
+                            downsample_ratio=self.processor.downsample_ratio,
+                        )
+
+                        input_ids = torch.tensor(
+                            [expanded_ids], dtype=torch.long, device=input_ids.device
+                        )
+                        attention_mask = torch.tensor(
+                            [expanded_mask], dtype=torch.long, device=attention_mask.device
+                        )
+
+                        resp_ids_flat = response_output["input_ids"].squeeze(0).tolist()
+                        flat_resp_mask = response_mask.squeeze(0).tolist()
+                        expanded_resp_ids, expanded_resp_mask = _expand_sensenova_u1_ids_and_mask(
+                            resp_ids_flat,
+                            flat_resp_mask,
+                            tokenizer=self.tokenizer,
+                            grid_hw=torch.zeros(0, 2, dtype=torch.long),
+                            downsample_ratio=self.processor.downsample_ratio,
+                        )
+                        response_mask = torch.tensor(
+                            [expanded_resp_mask],
+                            dtype=response_mask.dtype,
+                            device=response_mask.device,
+                        )
+                        response_output["input_ids"] = torch.tensor(
+                            [expanded_resp_ids],
+                            dtype=torch.long,
+                            device=input_ids.device,
+                        )
+
+                        # Open-loop next-frame FM target (Plan B phase-1):
+                        # keep rollout/train token sequence text-only; pass next-frame
+                        # pixels via multi_modal_inputs for a split prefix+gen FM aux.
+                        nfp_target_images = output.extra_fields.get("nfp_target_images", None)
+                        nfp_valid = bool(output.extra_fields.get("nfp_valid", False))
+                        if (
+                            nfp_target_images is not None
+                            and len(nfp_target_images) > 0
+                            and nfp_valid
+                        ):
+                            mm_gen = self.processor.preprocess_images(nfp_target_images[:1])
+                            multi_modal_inputs["u1_gen_pixel_values"] = mm_gen["pixel_values"]
+                            multi_modal_inputs["u1_gen_grid_hw"] = mm_gen["grid_hw"]
+                            multi_modal_inputs["u1_gen_valid"] = torch.tensor([1], dtype=torch.bool)
+                        else:
+                            # Always provide gen tensors so FSDP ranks share the same
+                            # forward module sequence; loss is masked via u1_gen_valid.
+                            dummy_imgs = images[:1] if images else []
+                            if dummy_imgs:
+                                mm_gen = self.processor.preprocess_images(dummy_imgs)
+                                multi_modal_inputs["u1_gen_pixel_values"] = mm_gen["pixel_values"]
+                                multi_modal_inputs["u1_gen_grid_hw"] = mm_gen["grid_hw"]
+                            multi_modal_inputs["u1_gen_valid"] = torch.tensor([0], dtype=torch.bool)
+
+                    position_ids = compute_position_id_with_mask(attention_mask)  # adapter rebuilds U1 THW indexes
+
                 else:
                     position_ids = compute_position_id_with_mask(attention_mask)  # (1, seq_len)
                 enable_async_reward = (
@@ -900,7 +1129,7 @@ class AgentLoopManager:
             DataProto: Output batch.
         """
         import os, time
-        _dbg = "/scratch/by2593/project/Active_Spatial/VAGEN-Lite/agent_loop_nc_debug.log"
+        _dbg = os.path.join(os.environ.get("VAGEN_LOG_DIR", "/tmp"), "agent_loop_nc_debug.log")
         with open(_dbg, "a") as _f:
             _f.write(f"[{time.time():.1f}] generate_sequences called pid={os.getpid()} replicas={len(self.rollout_replicas)}\n")
 
@@ -955,7 +1184,7 @@ class AgentLoopManager:
     def wake_up(self):
         """Wake up all rollout replica instances."""
         import os, time
-        _dbg = "/scratch/by2593/project/Active_Spatial/VAGEN-Lite/agent_loop_nc_debug.log"
+        _dbg = os.path.join(os.environ.get("VAGEN_LOG_DIR", "/tmp"), "agent_loop_nc_debug.log")
         with open(_dbg, "a") as _f:
             _f.write(f"[{time.time():.1f}] wake_up called replicas={len(self.rollout_replicas)}\n")
         self._run_all([replica.wake_up() for replica in self.rollout_replicas])
@@ -971,7 +1200,10 @@ class AgentLoopManager:
             await asyncio.gather(*tasks)
 
         import os, time, traceback
-        _dbg = "/scratch/by2593/project/Active_Spatial/VAGEN-Lite/agent_loop_nc_debug.log"
+        _dbg = os.path.join(
+            os.environ.get("VAGEN_LOG_DIR", "/tmp"),
+            "agent_loop_nc_debug.log"
+        )
         with open(_dbg, "a") as _f:
             _f.write(f"[{time.time():.1f}] _run_all ntasks={len(tasks)}\n")
         try:

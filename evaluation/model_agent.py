@@ -52,24 +52,68 @@ class ModelAgent(BaseAgent):
         else:
             raise ValueError(f"Unsupported provider: {provider}")
     
+    def _is_cambrian_checkpoint(self, model_path: str) -> bool:
+        """Detect Cambrian-S HF checkpoints by config.json."""
+        cfg_path = Path(model_path) / "config.json"
+        if not cfg_path.is_file():
+            name = (self.model_config.model_name or "").lower()
+            return "cambrian" in name
+        try:
+            import json
+            cfg = json.loads(cfg_path.read_text())
+        except Exception:
+            return "cambrian" in model_path.lower()
+        model_type = str(cfg.get("model_type", "")).lower()
+        arches = " ".join(str(a) for a in (cfg.get("architectures") or [])).lower()
+        return "cambrian" in model_type or "cambrian" in arches
+
     def _init_vllm(self):
         """Initialize vLLM for local inference."""
         try:
             from vllm import LLM, SamplingParams
             
             model_path = self.model_config.checkpoint_path or self.model_config.model_name
-            
+            self.is_cambrian = self._is_cambrian_checkpoint(model_path)
+
             print(f"Loading vLLM model: {model_path}")
             print(f"  TP size: {self.model_config.tensor_parallel_size}")
             print(f"  GPU mem: {self.model_config.gpu_memory_utilization}")
-            
+            print(f"  Cambrian: {self.is_cambrian}")
+
+            # Ensure Cambrian architectures are registered in this process and
+            # in vLLM worker subprocesses (also via vllm.general_plugins).
+            if self.is_cambrian:
+                try:
+                    from vagen.models.cambrian_plugin import register as register_cambrian
+                    register_cambrian()
+                except Exception as e:
+                    print(f"  Warning: cambrian_plugin.register failed: {e}")
+                try:
+                    import vagen.models.cambrian_vllm  # noqa: F401
+                except Exception as e:
+                    print(f"  Warning: import cambrian_vllm failed: {e}")
+
+            # Cambrian + SigLIP needs eager/SDPA-friendly settings on these nodes.
+            # Full 12-step eval can exceed 8 images / 8192 expanded tokens.
+            # B5 ablation: override with VAGEN_CAMBRIAN_MAX_MODEL_LEN / VAGEN_CAMBRIAN_LIMIT_IMAGES.
+            import os as _os
+            if self.is_cambrian:
+                max_model_len = int(_os.environ.get("VAGEN_CAMBRIAN_MAX_MODEL_LEN", "16384"))
+                limit_images = int(_os.environ.get("VAGEN_CAMBRIAN_LIMIT_IMAGES", "25"))
+            else:
+                max_model_len = int(_os.environ.get("VAGEN_QWEN_MAX_MODEL_LEN", "32768"))
+                limit_images = int(_os.environ.get("VAGEN_QWEN_LIMIT_IMAGES", "25"))
+            enforce_eager = bool(self.is_cambrian)
+            limit_mm = {"image": limit_images}
+
             self.model = LLM(
                 model=model_path,
                 tensor_parallel_size=self.model_config.tensor_parallel_size,
                 gpu_memory_utilization=self.model_config.gpu_memory_utilization,
                 trust_remote_code=True,
-                max_model_len=32768,
-                limit_mm_per_prompt={"image": 25},
+                max_model_len=max_model_len,
+                enforce_eager=enforce_eager,
+                limit_mm_per_prompt=limit_mm,
             )
             
             self.sampling_params = SamplingParams(
@@ -157,8 +201,10 @@ class ModelAgent(BaseAgent):
     
     def _generate_vllm(self, images: List) -> str:
         """Generate with vLLM (local model)."""
-        from vllm import SamplingParams
-        
+        # Cambrian expects compact <image> placeholders + multi_modal_data.
+        if getattr(self, "is_cambrian", False):
+            return self._generate_vllm_cambrian(images)
+
         # Build the full prompt for vLLM
         # For Qwen2.5-VL, we need to use the chat template
         messages = []
@@ -190,6 +236,55 @@ class ModelAgent(BaseAgent):
             sampling_params=self.sampling_params,
         )
         
+        if outputs and outputs[0].outputs:
+            return outputs[0].outputs[0].text
+        return "<think>Generation failed.</think><action>move_forward|</action>"
+
+    def _generate_vllm_cambrian(self, images: List) -> str:
+        """Cambrian plain-vLLM path: chat template text + multi_modal_data."""
+        from transformers import AutoTokenizer
+
+        if not hasattr(self, "_cambrian_tokenizer"):
+            model_path = self.model_config.checkpoint_path or self.model_config.model_name
+            self._cambrian_tokenizer = AutoTokenizer.from_pretrained(
+                model_path, trust_remote_code=True
+            )
+
+        messages = []
+        if self.system_prompt_text:
+            messages.append({"role": "system", "content": self.system_prompt_text})
+
+        all_images = []
+        for msg in self.conversation_history:
+            role = msg["role"]
+            content = msg["content"] or ""
+            msg_images = msg.get("images", []) or []
+            if role == "user" and msg_images:
+                # Ensure one <image> token per provided image exists in text.
+                n_existing = content.count("<image>")
+                if n_existing < len(msg_images):
+                    prefix = "<image>" * (len(msg_images) - n_existing)
+                    content = prefix + ("\n" if content else "") + content
+                all_images.extend(msg_images)
+            messages.append({"role": role, "content": content})
+
+        try:
+            prompt = self._cambrian_tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            # Fallback Qwen-style template
+            parts = []
+            for m in messages:
+                parts.append(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>")
+            parts.append("<|im_start|>assistant\n")
+            prompt = "\n".join(parts)
+
+        req = {"prompt": prompt}
+        if all_images:
+            req["multi_modal_data"] = {"image": all_images if len(all_images) > 1 else all_images[0]}
+
+        outputs = self.model.generate([req], sampling_params=self.sampling_params)
         if outputs and outputs[0].outputs:
             return outputs[0].outputs[0].text
         return "<think>Generation failed.</think><action>move_forward|</action>"

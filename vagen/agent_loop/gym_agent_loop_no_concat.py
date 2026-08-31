@@ -21,6 +21,17 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 from .gym_agent_loop import convert_obs_to_content, extract_success, _flatten_text_only_content, _normalize_images
 
+
+def _has_contradictory_actions(actions: Any) -> bool:
+    names = {str(a).lower() for a in (actions or [])}
+    contradictory_pairs = (
+        ("turn_left", "turn_right"),
+        ("look_up", "look_down"),
+        ("move_forward", "move_backward"),
+        ("move_left", "move_right"),
+    )
+    return any(a in names and b in names for a, b in contradictory_pairs)
+
 class AgentState(Enum):
     PENDING = "pending"
     GENERATING = "generating"
@@ -81,6 +92,7 @@ class AgentData:
         self.final_orientation_score: float = 0.0
         self.score_improvement: float = 0.0
         self.n_primitive_steps: int = 0        # total primitive actions executed
+        self.env_exception_count: int = 0
 
         # Cached assistant text to step env
         self.last_assistant_text: Optional[str] = None
@@ -204,8 +216,50 @@ class GymAgentLoop(AgentLoopBase):
                     **self.apply_chat_template_kwargs,
                 ),
             )
-            model_inputs = self.processor(text=[raw_prompt], images=image_data, return_tensors="pt")
-            agent_data.turn_prompt_ids = model_inputs.pop("input_ids").squeeze(0).tolist()
+            # SenseNova-U1: keep compact ``<image>`` for vLLM PromptReplacement.
+            # Pre-expanding here removes the placeholder and makes vLLM assert
+            # "Failed to apply prompt replacement". FSDP expand happens later in
+            # agent_loop_no_concat postprocess.
+            is_u1 = (
+                hasattr(self.processor, "image_processor")
+                and "SenseNovaU1ImageProcessor"
+                in self.processor.image_processor.__class__.__name__
+            )
+            if is_u1:
+                def _tokenize_u1_compact(prompt: str):
+                    from vagen.models.sensenova_u1_processor import (
+                        IMAGE_TOKEN,
+                        locate_image_placeholder,
+                    )
+
+                    ids = self.tokenizer.encode(prompt, add_special_tokens=False)
+                    bare = self.tokenizer.encode(IMAGE_TOKEN, add_special_tokens=False)
+                    # Normalize BPE-fused ``<image>\n\n`` -> bare ``<image>`` + rest
+                    # so vLLM string/token target ``<image>`` can match.
+                    out: list[int] = []
+                    rest = ids
+                    while True:
+                        idx, span, prefix, suffix = locate_image_placeholder(
+                            rest, self.tokenizer
+                        )
+                        if idx < 0:
+                            out.extend(rest)
+                            break
+                        out.extend(rest[:idx])
+                        out.extend(prefix)
+                        out.extend(bare)
+                        out.extend(suffix)
+                        rest = rest[idx + span :]
+                    return out
+
+                agent_data.turn_prompt_ids = await self.loop.run_in_executor(
+                    None, lambda: _tokenize_u1_compact(raw_prompt)
+                )
+            else:
+                model_inputs = self.processor(
+                    text=[raw_prompt], images=image_data, return_tensors="pt"
+                )
+                agent_data.turn_prompt_ids = model_inputs.pop("input_ids").squeeze(0).tolist()
         else:
             if image_data:
                 raise ValueError("Environment returned images but `processor` is None.")
@@ -221,8 +275,12 @@ class GymAgentLoop(AgentLoopBase):
                 ),
             )
         
-        if len(agent_data.turn_prompt_ids)>self.prompt_length:
-            logger.warning(f"In env:{agent_data.env_name}, initial prompt length {len(agent_data.turn_prompt_ids)} exceeds prompt_length {self.prompt_length}")
+        if len(agent_data.turn_prompt_ids) > self.prompt_length:
+            logger.warning(
+                f"In env:{agent_data.env_name}, initial prompt length "
+                f"{len(agent_data.turn_prompt_ids)} exceeds prompt_length {self.prompt_length}; truncating"
+            )
+            agent_data.turn_prompt_ids = agent_data.turn_prompt_ids[-self.prompt_length :]
         return AgentState.GENERATING
 
     
@@ -235,11 +293,14 @@ class GymAgentLoop(AgentLoopBase):
         max_new_tokens = min(max_new_tokens, agent_data.response_limit)
         sampling_params_for_turn["max_new_tokens"] = max_new_tokens
         image_data = agent_data.sys_images + agent_data.cur_images
+        prompt_ids = agent_data.turn_prompt_ids
+        if len(prompt_ids) > self.prompt_length:
+            prompt_ids = prompt_ids[-self.prompt_length :]
 
         with simple_timer("generate_sequences", agent_data.metrics):
             output = await self.server_manager.generate(
                 request_id = agent_data.request_id,
-                prompt_ids = agent_data.turn_prompt_ids,
+                prompt_ids = prompt_ids,
                 sampling_params = sampling_params_for_turn,
                 image_data = image_data,
             )
@@ -267,7 +328,6 @@ class GymAgentLoop(AgentLoopBase):
         action_str = agent_data.last_assistant_text or ""
         try:
             obs, reward, done, info = await agent_data.env.step(action_str)
-            # traceback
         except Exception as exc:
             logger.error(
                 "Environment step failed in '%s' with action %r: %s",
@@ -276,22 +336,40 @@ class GymAgentLoop(AgentLoopBase):
                 exc,
             )
             logger.error("Environment traceback:\n%s", traceback.format_exc())
-            obs, reward, done, info = {"obs_str":"Environment Error"}, 0.0, True, {"traj_success": False}
+            if kwargs.get("env_exception_fail_fast", True):
+                raise RuntimeError(
+                    f"Environment step failed in {agent_data.env_name}: {type(exc).__name__}: {exc}"
+                ) from exc
+            agent_data.env_exception_count += 1
+            obs, reward, done, info = {"obs_str": "Environment Error"}, 0.0, True, {
+                "traj_success": False,
+                "env_exception": True,
+                "env_exception_type": type(exc).__name__,
+            }
 
         traj_success = extract_success(info)
+        info = info or {}
+        env_metrics = info.get("metrics") or {}
+        turn_metrics = env_metrics.get("turn_metrics") or {}
+        traj_metrics = env_metrics.get("traj_metrics") or {}
+        action_list = info.get("actions") or []
+        action_valid = bool(turn_metrics.get("action_is_valid", bool(action_list)))
+        env_exception = bool(info.get("env_exception", False))
+        empty_action = len(action_list) == 0
+        contradictory_action = _has_contradictory_actions(action_list)
         agent_data.env_turns += 1
         last_turn=False
 
-        # Capture terminal-step metrics (available when done=True or success)
-        if done or traj_success:
-            agent_data.final_score = float(
-                info.get("final_score",
-                info.get("current_potential_score", agent_data.initial_score))
-            )
-            _tm = (info.get("metrics") or {}).get("traj_metrics", {})
-            agent_data.final_position_score    = float(_tm.get("final_position_score",    0.0))
-            agent_data.final_orientation_score = float(_tm.get("final_orientation_score", 0.0))
-            agent_data.n_primitive_steps       = int(info.get("env_step", agent_data.env_turns))
+        # Keep an episode-level snapshot on every turn. Validation concatenation
+        # takes reward_extra_info from the last emitted turn, which may be caused
+        # by max-turn truncation rather than env done=True.
+        agent_data.final_score = float(
+            info.get("final_score", info.get("current_potential_score", agent_data.final_score))
+        )
+        _tm = (info.get("metrics") or {}).get("traj_metrics", {})
+        agent_data.final_position_score = float(_tm.get("final_position_score", agent_data.final_position_score))
+        agent_data.final_orientation_score = float(_tm.get("final_orientation_score", agent_data.final_orientation_score))
+        agent_data.n_primitive_steps = int(info.get("env_step", agent_data.n_primitive_steps))
         agent_data.score_improvement = agent_data.final_score - agent_data.initial_score
 
         if done:
@@ -346,12 +424,45 @@ class GymAgentLoop(AgentLoopBase):
                 "final_orientation_score":  agent_data.final_orientation_score,
                 "score_improvement":        agent_data.score_improvement,
                 "n_primitive_steps":        float(agent_data.n_primitive_steps),
+                "env_exception":           float(env_exception),
+                "env_exception_count":     float(agent_data.env_exception_count),
+                "invalid_action":          float(not action_valid),
+                "empty_action":            float(empty_action),
+                "contradictory_action":    float(contradictory_action),
+                "missing_action_tag":      float(turn_metrics.get("missing_action_tag", 0.0)),
+                "empty_action_body":       float(turn_metrics.get("empty_action_body", 0.0)),
+                "unknown_action_name":     float(turn_metrics.get("unknown_action_name", 0.0)),
+                "truncated_before_action": float(turn_metrics.get("truncated_before_action", 0.0)),
+                "multiple_action_tag":     float(turn_metrics.get("multiple_action_tag", 0.0)),
+                "strict_action_tag_rate":  float(turn_metrics.get("strict_action_tag", 0.0)),
+                "tool_call_rate":          float(turn_metrics.get("tool_call", 0.0)),
+                "fallback_parse_rate":     float(turn_metrics.get("fallback_parse", 0.0)),
+                "strict_parse_success_rate": float(turn_metrics.get("strict_parse_success", 0.0)),
+                "strict_format_correct_rate": float(turn_metrics.get("strict_format_correct", 0.0)),
+                "format_penalty_rate":      float(not bool(turn_metrics.get("strict_format_correct", 0.0))),
+                "collision_termination":    float(bool(info.get("early_terminated_collision", False))),
+                "low_info_termination":     float(bool(info.get("early_terminated_low_info", False))),
+                "renderer_failure":         float(bool(info.get("renderer_failure", False))),
+                "episode_length":           float(agent_data.env_turns),
+                "action_move_forward":      float("move_forward" in action_list),
+                "action_move_backward":     float("move_backward" in action_list),
+                "action_move_left":         float("move_left" in action_list),
+                "action_move_right":        float("move_right" in action_list),
+                "action_turn_left":         float("turn_left" in action_list),
+                "action_turn_right":        float("turn_right" in action_list),
+                "invalid_action_count":    float(traj_metrics.get("invalid_action_count", 0.0)),
+                "episode_invalid_action_count": float(traj_metrics.get("invalid_action_count", 0.0)),
+                "episode_empty_action_count": float(traj_metrics.get("empty_action_count", 0.0)),
+                "episode_contradictory_action_count": float(traj_metrics.get("contradictory_action_count", 0.0)),
+                "episode_empty_action_rate": float(traj_metrics.get("empty_action_rate", 0.0)),
+                "episode_contradictory_action_rate": float(traj_metrics.get("contradictory_action_rate", 0.0)),
                 },
                 "image_data": turn_images,
                 "last_turn": last_turn,
                 "group_idx": agent_data.group_idx,
                 "traj_idx": agent_data.traj_idx,
                 "turn_idx": agent_data.env_turns,
+                "d0_4_request_id": agent_data.request_id,
                 # NFP next-frame targets
                 "nfp_target_images": nfp_target_images,
                 "nfp_valid": nfp_valid,

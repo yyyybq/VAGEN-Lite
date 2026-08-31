@@ -54,6 +54,19 @@ python scripts/active_spatial_full_eval.py \
   --run
 ```
 
+An evaluation is complete only when all three result families exist for every
+selected checkpoint:
+
+- ID navigation (`id_test`);
+- OOD navigation (all configured `ood_*` suites);
+- static spatial QA (the complete EASI-8 suite).
+
+For an 8-GPU SCO worker, `sco_active_spatial_eval_entry.sh` runs navigation
+with `active_spatial_eval_parallel.py` and then runs checkpoint-level QA with
+`active_spatial_qa_parallel.py`. Check both `parallel_completion.json` and
+`qa_parallel_completion.json`; a navigation-only completion is not a complete
+model evaluation.
+
 Outputs are written under `evaluation/sweeps/active_spatial/<matrix-name>/`,
 including generated eval configs, per-run `results_model.json`, `summary.csv`,
-`summary.md`, `manifest.jsonl`, `easi_probe_results/`, and `analysis_report.md`.
+`summary.md`, `manifest.jsonl`, `easi_results/`, and `analysis_report.md`.

@@ -1,0 +1,20 @@
+# =============================================================================
+# A1 SpatialMCQ aux env — single-turn SITE-style MCQ
+# Mixed into v46 navigation train.yaml via SPATIAL_AUX_RATIO.
+# Unique variable: aux mix ratio / answer reward scale (aux_coef).
+# =============================================================================
+env1:
+    env_name: SpatialMCQ
+    env_config:
+        jsonl_path: "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/active_spatial_pipeline/output_aux/spatial_aux_site_mcq.jsonl"
+        image_root: ""
+        answer_reward: 1.0
+        format_reward: 0.0
+        invalid_format_penalty: -0.1
+        aux_coef: 1.0
+        prompt_format: free_think
+        image_placeholder: "<image>"
+        max_images: 1
+        max_image_side: 784
+    train_size: 2000
+    test_size: 0

@@ -296,6 +296,15 @@ class PipelineConfig:
     # Processing options
     save_intermediate: bool = True  # Save intermediate results
     validate_visual_sample_score: bool = True  # Filter visual-relation tasks whose sampled target view fails projected-bbox scoring
+
+    # Layout-aware target sample repair/filtering. This clips analytic target
+    # regions (ray/line/half-plane/circle/annulus) to the actual room polygons
+    # before serializing sample_point/sample_target into JSONL.
+    enable_layout_target_filter: bool = True
+    layout_min_wall_clearance: float = 0.5
+    layout_grid_spacing: float = 0.25
+    layout_max_region_error: float = 0.35
+
     min_visual_sample_scores: Dict[str, float] = field(default_factory=lambda: {
         'projective_relations': 0.75,
         'centering': 0.50,

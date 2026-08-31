@@ -1,5 +1,7 @@
 #!/bin/bash
 set -x
+# Do not let the final `python ... | tee` pipeline hide a training failure.
+set -o pipefail
 
 # =============================================================================
 # VAGEN-Lite 通用 PPO 训练入口 - 通过实验配置文件驱动
@@ -26,7 +28,21 @@ set -x
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 BASEDIR="$( cd "$SCRIPT_DIR/../../.." && pwd )"   # VAGEN-Lite 根目录
-PYTHON=/scratch/by2593/miniconda3/envs/vagen-lite/bin/python
+
+# Hydra searchpath (file:../../verl/...) is resolved relative to cwd.
+cd "${BASEDIR}" || { echo "ERROR: cannot cd to BASEDIR=${BASEDIR}"; exit 1; }
+
+# Ray / vLLM open many fds; container default nofile=1024 causes raylet/dashboard timeouts.
+ulimit -n 1048576 2>/dev/null || ulimit -n 65536 2>/dev/null || true
+
+# ── Python 路径：优先共享 conda env，其次本地 scratch（向后兼容） ──
+if [ -f "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python" ]; then
+    PYTHON=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python
+elif [ -f "/mnt/umm/shared_env/miniconda3/envs/vagen-lite/bin/python" ]; then
+    PYTHON=/mnt/umm/shared_env/miniconda3/envs/vagen-lite/bin/python
+else
+    PYTHON=/scratch/by2593/miniconda3/envs/vagen-lite/bin/python
+fi
 # 在 run_experiment.sh 顶部加:
 export TMPDIR=/tmp
 export PYTHONMULTIPROCESSINGTEMPDIR=/tmp   # 双保险
@@ -38,11 +54,21 @@ EXPERIMENT_NAME="unnamed_$(date +%m%d_%H%M)"
 ENV_CONFIG="env_config_balanced.yaml"
 NUM_TRAIN_GPUS=4
 RENDERING_GPU=4
-USE_GPU_HOLDER=true
+USE_GPU_HOLDER="${USE_GPU_HOLDER:-true}"
 
 RENDER_MODE="local"   # "local" = 本机渲染GPU; "remote" = 远程渲染服务
 RENDER_HOST=""
-RENDER_PORT="8777"
+RENDER_PORT="8767"
+RENDER_PROTOCOL="${RENDER_PROTOCOL:-http}"  # "http" = HTTP worker-pool renderer, "ws" = legacy WebSocket
+
+# Optional: serve full ActiveSpatial envs over VAGEN RemoteEnv HTTP protocol.
+# When set, generated train/val YAML uses RemoteEnv and sends the ActiveSpatial
+# config to a remote GymService process (see start_active_spatial_env_server.sh).
+REMOTE_ENV_URLS="${REMOTE_ENV_URLS:-}"
+REMOTE_ENV_TIMEOUT="${REMOTE_ENV_TIMEOUT:-600}"
+REMOTE_ENV_RETRIES="${REMOTE_ENV_RETRIES:-3}"
+REMOTE_ENV_TOKEN="${REMOTE_ENV_TOKEN:-}"
+REMOTE_ENV_RENDERING_GPU="${REMOTE_ENV_RENDERING_GPU:-}"
 
 # 模型（与旧 VAGEN 默认一致：3B；7B 可在实验配置文件中 override）
 MODEL_PATH="Qwen/Qwen2.5-VL-3B-Instruct"
@@ -133,6 +159,13 @@ fi
 echo "Loading experiment config: $EXPERIMENT_CONFIG"
 source "$EXPERIMENT_CONFIG"
 
+# HTTP renderer is the default remote path. Preserve explicit legacy WS usage.
+if [ "$RENDER_MODE" = "remote" ] && [ "$RENDER_PROTOCOL" = "http" ] && [ "$RENDER_PORT" = "8777" ]; then
+    RENDER_PORT="8767"
+elif [ "$RENDER_MODE" = "remote" ] && [ "$RENDER_PROTOCOL" = "ws" ] && [ "$RENDER_PORT" = "8767" ]; then
+    RENDER_PORT="8777"
+fi
+
 # ========================= PARAMETER MAPPING =========================
 # masked_gae → no_concat_gae（VAGEN-Lite 的等效实现）
 if [ "$ADV_ESTIMATOR" = "masked_gae" ]; then
@@ -144,7 +177,14 @@ fi
 # ========================= ENVIRONMENT SETUP =========================
 GPU_LIST=$(seq -s, 0 $((NUM_TRAIN_GPUS - 1)))
 
-if [ "$RENDER_MODE" = "remote" ]; then
+if [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then
+    # CUDA_VISIBLE_DEVICES 已由启动器预设（用于非连续 GPU 映射）
+    # NUM_TRAIN_GPUS 和 RENDERING_GPU 视为 visible set 内的逻辑索引
+    echo "[INFO] CUDA_VISIBLE_DEVICES already set to: ${CUDA_VISIBLE_DEVICES}"
+    if [ "$RENDER_MODE" != "remote" ]; then
+        export RENDERING_GPU_ID=${RENDERING_GPU}
+    fi
+elif [ "$RENDER_MODE" = "remote" ]; then
     if [ -z "$RENDER_HOST" ]; then
         echo "ERROR: RENDER_MODE=remote 时必须设置 RENDER_HOST"
         exit 1
@@ -156,7 +196,10 @@ else
 fi
 
 export PYTHONUNBUFFERED=1
-export VLLM_ATTENTION_BACKEND=XFORMERS
+# Qwen2.5-VL only supports FLASH_ATTN / TORCH_SDPA / XFORMERS.
+# flash_attn wheel needs GLIBC_2.32 (nodes have 2.31); XFORMERS FA2 not built;
+# FLASHINFER rejected by Qwen2.5-VL. TORCH_SDPA is the working fallback.
+export VLLM_ATTENTION_BACKEND=TORCH_SDPA
 export PYTHONHASHSEED=0
 export TRANSFORMERS_ATTN_IMPLEMENTATION=eager
 export RAY_DEDUP_LOGS=0
@@ -164,39 +207,81 @@ export RAY_enable_metrics_collection=false
 export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
 export GS_RENDERER_VERBOSE=0
 export ACTIVE_SPATIAL_ENV_VERBOSE=0
-export PATH="/scratch/by2593/miniconda3/envs/vagen-lite/bin:$PATH"
+
+# 离线模式：节点无法访问 huggingface.co，使用本地缓存
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
+
+# flash_attn 2.8.1 需要 GLIBC_2.32，但节点系统为 GLIBC_2.31
+# 通过 FLASH_ATTENTION_SKIP_CUDA_BUILD=1 让 is_flash_attn_2_available() 在有需要时降级
+# verl/qwen2_vl.py 已有 try/except fallback，此变量仅用于额外保险
+
+# Triton/vllm/gsplat JIT 编译需要编译器；这些 pod 没有系统 gcc/nvcc，
+# 使用共享 conda env 中的 gcc/g++/CUDA toolkit。
+export VAGEN_ENV_ROOT=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
+export CC="${VAGEN_ENV_ROOT}/bin/x86_64-conda-linux-gnu-gcc"
+export CXX="${VAGEN_ENV_ROOT}/bin/x86_64-conda-linux-gnu-g++"
+export CUDA_HOME="${VAGEN_ENV_ROOT}"
+export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0}"
+export CPATH="${VAGEN_ENV_ROOT}/targets/x86_64-linux/include:${CPATH:-}"
+export CPLUS_INCLUDE_PATH="${VAGEN_ENV_ROOT}/targets/x86_64-linux/include:${CPLUS_INCLUDE_PATH:-}"
+export LIBRARY_PATH="${VAGEN_ENV_ROOT}/targets/x86_64-linux/lib:${LIBRARY_PATH:-}"
+
+# Keep vLLM torch.compile disabled even though nvcc is present for gsplat;
+# this avoids extra Triton/compile memory pressure during PPO.
+export VLLM_TORCH_COMPILE_LEVEL=0
+export TORCH_COMPILE_DISABLE=1
+# Disable FlashInfer/deep_gemm sampler paths to keep startup deterministic.
+export VLLM_USE_FLASHINFER_SAMPLER=0
+export VLLM_USE_DEEP_GEMM=0
+export VLLM_SKIP_DEEP_GEMM_WARMUP=1
+
+# ── PATH：优先用户 conda env，其次共享，最后本地 scratch ──
+if [ -d "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin" ]; then
+    export PATH="/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin:$PATH"
+elif [ -d "/mnt/umm/shared_env/miniconda3/envs/vagen-lite/bin" ]; then
+    export PATH="/mnt/umm/shared_env/miniconda3/envs/vagen-lite/bin:$PATH"
+else
+    export PATH="/scratch/by2593/miniconda3/envs/vagen-lite/bin:$PATH"
+fi
 
 # ---------------------------------------------------------------------------
-# Redirect wandb / HuggingFace / tmp caches off $HOME to avoid "Disk quota
-# exceeded" errors (home has a small per-user quota; /scratch has TBs).
-# This includes wandb artifact *staging* directory which is controlled by
-# WANDB_DATA_DIR (see wandb.env.get_data_dir -> get_staging_dir).
+# 缓存路径：使用共享存储 /mnt/umm，将 JIT/triton/flashinfer 放在节点本地 /tmp
+# 以避免 NFS 文件锁问题。gsplat CUDA 扩展缓存放共享存储以便跨实验复用。
 # ---------------------------------------------------------------------------
-export WANDB_CACHE_ROOT="/scratch/by2593/.cache/wandb"
-mkdir -p "${WANDB_CACHE_ROOT}/data" "${WANDB_CACHE_ROOT}/cache" "${WANDB_CACHE_ROOT}/artifacts" "${WANDB_CACHE_ROOT}/config"
-export WANDB_DATA_DIR="${WANDB_CACHE_ROOT}/data"           # staging dir for artifact uploads
+SHARED_CACHE_ROOT="/mnt/umm/users/yinbaiqiao/.cache"
+mkdir -p "${SHARED_CACHE_ROOT}/wandb/data" "${SHARED_CACHE_ROOT}/wandb/cache" \
+         "${SHARED_CACHE_ROOT}/wandb/artifacts" "${SHARED_CACHE_ROOT}/wandb/config"
+export WANDB_CACHE_ROOT="${SHARED_CACHE_ROOT}/wandb"
+export WANDB_DATA_DIR="${WANDB_CACHE_ROOT}/data"
 export WANDB_CACHE_DIR="${WANDB_CACHE_ROOT}/cache"
 export WANDB_ARTIFACT_DIR="${WANDB_CACHE_ROOT}/artifacts"
 export WANDB_CONFIG_DIR="${WANDB_CACHE_ROOT}/config"
-export TMPDIR="/scratch/by2593/tmp"
+# Run WandB in offline mode (nodes have no network access / no API key)
+export WANDB_MODE=offline
+export WANDB_SILENT=true
+export WANDB_DIR="${SHARED_CACHE_ROOT}/wandb/offline_runs"
+mkdir -p "${WANDB_DIR}"
+
+# TMPDIR: 使用节点本地 /tmp（NFS 上 tmpdir 性能差）
+export TMPDIR="/tmp/vagen_${USER:-root}"
 mkdir -p "${TMPDIR}"
 
-# Redirect framework caches off $HOME (home has a tight quota). Keep heavyweight
-# HF/pip caches on /scratch. Put flashinfer/triton/inductor caches on node-local
-# /tmp because flashinfer uses file locks during vLLM startup and shared scratch
-# can produce stale handles. Keep torch_extensions on /scratch to reuse the
-# prebuilt gsplat CUDA extension; gsplat lazy-compilation is not safe under many
-# parallel AgentLoopWorker imports in a fresh per-run directory.
-export XDG_CACHE_HOME="/scratch/by2593/.cache"
+export XDG_CACHE_HOME="${SHARED_CACHE_ROOT}"
 mkdir -p "${XDG_CACHE_HOME}"
-JIT_CACHE_ROOT="/tmp/${USER}/vagen_jit/${EXPERIMENT_NAME}_$$"
+
+# JIT 缓存放节点本地 /tmp（避免 NFS 文件锁 + 跨实验清空安全）
+JIT_CACHE_ROOT="/tmp/vagen_jit_${USER:-root}/${EXPERIMENT_NAME}_$$"
 export FLASHINFER_WORKSPACE_BASE="${JIT_CACHE_ROOT}/flashinfer"
 export TRITON_CACHE_DIR="${JIT_CACHE_ROOT}/triton"
 export TORCHINDUCTOR_CACHE_DIR="${JIT_CACHE_ROOT}/torchinductor"
-export TORCH_EXTENSIONS_DIR="${XDG_CACHE_HOME}/torch_extensions"
-export HF_HOME="${XDG_CACHE_HOME}/huggingface"
+# gsplat torch_extensions 放共享存储（编译慢，跨实验复用）。
+# 旧 torch_extensions 目录曾被 root/Ray 创建，使用专用可写目录避免权限问题。
+export TORCH_EXTENSIONS_DIR="${SHARED_CACHE_ROOT}/torch_extensions_yinbaiqiao"
+export HF_HOME="/mnt/umm/users/yinbaiqiao/.cache/huggingface"
 export TRANSFORMERS_CACHE="${HF_HOME}/hub"
-export PIP_CACHE_DIR="${XDG_CACHE_HOME}/pip"
+export PIP_CACHE_DIR="${SHARED_CACHE_ROOT}/pip"
 mkdir -p "${FLASHINFER_WORKSPACE_BASE}" "${TRITON_CACHE_DIR}" "${TORCHINDUCTOR_CACHE_DIR}" \
          "${TORCH_EXTENSIONS_DIR}" "${HF_HOME}" "${PIP_CACHE_DIR}"
 
@@ -212,9 +297,12 @@ echo "Experiment: $EXPERIMENT_NAME"
 echo "Config:     $(basename $EXPERIMENT_CONFIG)"
 echo "Model:      $MODEL_PATH"
 echo "Env:        $ENV_CONFIG"
+if [ -n "$REMOTE_ENV_URLS" ]; then
+    echo "RemoteEnv:  $REMOTE_ENV_URLS"
+fi
 echo "Train GPUs: $GPU_LIST ($NUM_TRAIN_GPUS GPUs)"
 if [ "$RENDER_MODE" = "remote" ]; then
-    echo "Render:     REMOTE  ${RENDER_HOST}:${RENDER_PORT}"
+    echo "Render:     REMOTE  ${RENDER_PROTOCOL}://${RENDER_HOST}:${RENDER_PORT}"
 else
     echo "Render GPU: $RENDERING_GPU (local)"
 fi
@@ -237,8 +325,13 @@ TRAIN_YAML="${EXPERIMENT_DIR}/train.yaml"
 VAL_YAML="${EXPERIMENT_DIR}/val.yaml"
 
 if [ "$RENDER_MODE" = "remote" ]; then
-    RENDER_BACKEND="client"
-    CLIENT_URL="ws://${RENDER_HOST}:${RENDER_PORT}/render/interiorgs"
+    if [ "$RENDER_PROTOCOL" = "http" ]; then
+        RENDER_BACKEND="http"
+        CLIENT_URL="http://${RENDER_HOST}:${RENDER_PORT}/render"
+    else
+        RENDER_BACKEND="client"
+        CLIENT_URL="ws://${RENDER_HOST}:${RENDER_PORT}/render/interiorgs"
+    fi
 else
     RENDER_BACKEND="local"
     CLIENT_URL=""
@@ -256,6 +349,12 @@ env_entry = cfg[env_key]
 env_config = dict(env_entry.get("env_config", {}))
 train_size = env_entry.get("train_size", 259)
 test_size = env_entry.get("test_size", 19)
+
+# ActiveSpatial silently falls back to a synthetic scene when its JSONL is
+# absent. That behavior is useful in unit tests but invalid for real training.
+train_jsonl = env_config.get("jsonl_path", "")
+if not train_jsonl or not os.path.isfile(train_jsonl):
+    raise FileNotFoundError(f"ActiveSpatial training JSONL not found: {train_jsonl}")
 
 # Optional in-domain val override:
 # 1) ID_VAL_JSONL / ID_VAL_N_ENVS: use a custom ID val jsonl directly.
@@ -384,22 +483,47 @@ if train_exclude_types:
         print(f"[WARN] TRAIN_EXCLUDE_TASK_TYPES set but source jsonl not found: {src_train_jsonl}")
 
 # 覆盖渲染配置
-env_config["gpu_device"] = ${RENDERING_GPU}
-if "${RENDER_BACKEND}" == "client":
-    env_config["render_backend"] = "client"
+remote_env_urls = """${REMOTE_ENV_URLS}""".strip()
+remote_env_timeout = float("${REMOTE_ENV_TIMEOUT}")
+remote_env_retries = int("${REMOTE_ENV_RETRIES}")
+remote_env_token = """${REMOTE_ENV_TOKEN}""".strip()
+remote_env_rendering_gpu = """${REMOTE_ENV_RENDERING_GPU}""".strip()
+
+if remote_env_urls:
+    # The service process owns rendering resources. Leave GPU auto-detection on
+    # unless explicitly pinned for the remote service.
+    env_config["gpu_device"] = int(remote_env_rendering_gpu) if remote_env_rendering_gpu else None
+else:
+    env_config["gpu_device"] = ${RENDERING_GPU}
+
+if "${RENDER_BACKEND}" in ("client", "http"):
+    env_config["render_backend"] = "${RENDER_BACKEND}"
     env_config["client_url"] = "${CLIENT_URL}"
 else:
     env_config["render_backend"] = "local"
 
+env_entry_name = "RemoteEnv" if remote_env_urls else "ActiveSpatial"
+
+def wrap_remote_config(cfg):
+    if not remote_env_urls:
+        return cfg
+    out = dict(cfg)
+    out["base_urls"] = remote_env_urls
+    out["timeout"] = remote_env_timeout
+    out["retries"] = remote_env_retries
+    if remote_env_token:
+        out["token"] = remote_env_token
+    return out
+
 train_yaml = {
     "envs": [{
-        "name": "ActiveSpatial",
+        "name": env_entry_name,
         "n_envs": train_size,
         "data_source": "active_spatial",
         "seed": [0, train_size],
         "max_turns": ${MAX_TURNS},
         "response_length_per_turn": ${MAX_RESPONSE_LENGTH},
-        "config": env_config,
+        "config": wrap_remote_config(env_config),
     }]
 }
 
@@ -417,13 +541,13 @@ if id_val_jsonl:
     print(f"[INFO] ID val override: {id_val_jsonl} (n_envs={id_env_n})")
 
 id_val_spec = {
-    "name": "ActiveSpatial",
+    "name": env_entry_name,
     "n_envs": id_env_n,
     "data_source": id_env_source,
     "seed": id_env_seed,
     "max_turns": ${MAX_TURNS},
     "response_length_per_turn": ${MAX_RESPONSE_LENGTH},
-    "config": id_env_config,
+    "config": wrap_remote_config(id_env_config),
 }
 if id_env_seed_list is not None:
     id_val_spec["seed_list"] = id_env_seed_list
@@ -437,16 +561,18 @@ val_envs = [id_val_spec]
 ood_val_jsonl = "${OOD_VAL_JSONL:-}"
 ood_val_n = ${OOD_VAL_N_ENVS:-0}
 if ood_val_jsonl and ood_val_n > 0:
+    if not os.path.isfile(ood_val_jsonl):
+        raise FileNotFoundError(f"ActiveSpatial OOD validation JSONL not found: {ood_val_jsonl}")
     ood_env_config = dict(env_config)
     ood_env_config["jsonl_path"] = ood_val_jsonl
     val_envs.append({
-        "name": "ActiveSpatial",
+        "name": env_entry_name,
         "n_envs": ood_val_n,
         "data_source": "active_spatial_ood",
         "seed": [0, ood_val_n],  # index 0..ood_val_n-1 in the OOD jsonl
         "max_turns": ${MAX_TURNS},
         "response_length_per_turn": ${MAX_RESPONSE_LENGTH},
-        "config": ood_env_config,
+        "config": wrap_remote_config(ood_env_config),
     })
     print(f"[INFO] OOD val enabled: {ood_val_jsonl} (n_envs={ood_val_n})")
 
@@ -463,13 +589,13 @@ if ood_splits_dir and _os.path.isdir(ood_splits_dir):
         ood_cfg = dict(env_config)
         ood_cfg["jsonl_path"] = ood_file
         val_envs.append({
-            "name": "ActiveSpatial",
+            "name": env_entry_name,
             "n_envs": n_envs_this,
             "data_source": f"active_spatial_{split_name}",
             "seed": [0, n_envs_this],
             "max_turns": ${MAX_TURNS},
             "response_length_per_turn": ${MAX_RESPONSE_LENGTH},
-            "config": ood_cfg,
+            "config": wrap_remote_config(ood_cfg),
         })
         print(f"[INFO] OOD split: {split_name} ({n_envs_this}/{n_items} envs) <- {ood_file}")
 
@@ -490,6 +616,59 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# ========================= OPTIONAL A1 SPATIAL AUX MIX =========================
+# If AUX_ENV_CONFIG + SPATIAL_AUX_RATIO are set, append a SpatialMCQ env to train.yaml.
+# Unique variable for A1: SPATIAL_AUX_RATIO ∈ {0.05, 0.10} (fraction of nav n_envs).
+if [ -n "${AUX_ENV_CONFIG:-}" ] && [ -n "${SPATIAL_AUX_RATIO:-}" ]; then
+  export TRAIN_YAML="${TRAIN_YAML}"
+  export SCRIPT_DIR="${SCRIPT_DIR}"
+  export MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH}"
+  export AUX_ENV_CONFIG="${AUX_ENV_CONFIG}"
+  export SPATIAL_AUX_RATIO="${SPATIAL_AUX_RATIO}"
+  export SPATIAL_AUX_COEF="${SPATIAL_AUX_COEF:-${SPATIAL_AUX_RATIO}}"
+  # Resolve relative AUX_ENV_CONFIG against examples/train/active_spatial
+  if [[ "${AUX_ENV_CONFIG}" != /* ]]; then AUX_ENV_CONFIG="${SCRIPT_DIR}/${AUX_ENV_CONFIG}"; export AUX_ENV_CONFIG; fi
+  "$PYTHON" - <<'PYAUX'
+import os, yaml
+from pathlib import Path
+
+train_yaml_path = Path(os.environ["TRAIN_YAML"])
+aux_cfg_path = Path(os.environ["AUX_ENV_CONFIG"])
+if not aux_cfg_path.is_absolute():
+    aux_cfg_path = Path(os.environ.get("SCRIPT_DIR", ".")) / aux_cfg_path
+ratio = float(os.environ["SPATIAL_AUX_RATIO"])
+aux_coef = float(os.environ.get("SPATIAL_AUX_COEF", os.environ["SPATIAL_AUX_RATIO"]))
+train = yaml.safe_load(train_yaml_path.read_text())
+nav = train["envs"][0]
+n_nav = int(nav["n_envs"])
+n_aux = max(1, int(round(n_nav * ratio)))
+raw = yaml.safe_load(aux_cfg_path.read_text())
+# support env1: {...} or flat
+if "env1" in raw:
+    entry = raw["env1"]
+    cfg = dict(entry.get("env_config", entry.get("config", {})))
+    name = entry.get("env_name", entry.get("name", "SpatialMCQ"))
+else:
+    cfg = dict(raw.get("env_config", raw.get("config", raw)))
+    name = raw.get("env_name", raw.get("name", "SpatialMCQ"))
+# registry key is SpatialMCQ
+name = "SpatialMCQ"
+cfg["aux_coef"] = aux_coef
+aux_spec = {
+    "name": name,
+    "n_envs": n_aux,
+    "data_source": "spatial_mcq_aux",
+    "seed": [0, n_aux],
+    "max_turns": 1,
+    "response_length_per_turn": int(os.environ.get("MAX_RESPONSE_LENGTH", "384")),
+    "config": cfg,
+}
+train["envs"].append(aux_spec)
+train_yaml_path.write_text(yaml.dump(train, default_flow_style=False))
+print(f"[INFO] A1 aux mix: +{n_aux} SpatialMCQ envs (ratio={ratio}, coef={aux_coef}) -> {train_yaml_path}")
+PYAUX
+fi
+
 # ========================= AGENT LOOP CONFIG =========================
 # 生成动态 agent loop config YAML（控制 max_turns 和 response_length_per_turn）
 AGENT_YAML="${BASEDIR}/vagen/configs/agent_no_concat_active_spatial.yaml"
@@ -498,14 +677,17 @@ AGENT_YAML="${BASEDIR}/vagen/configs/agent_no_concat_active_spatial.yaml"
 # ========================= CLEANUP =========================
 HOLDER_PIDS=()
 cleanup() {
-    echo "Cleaning up..."
+    status=$?
+    echo "Cleaning up... status=$status"
     for pid in "${HOLDER_PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
     pkill -P $$ -f "gpu_holder.py" 2>/dev/null || true
-    exit 0
+    exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ========================= GPU HOLDER (optional) =========================
 HOLDER_LOG_DIR="$EXPERIMENT_DIR/logs/gpu_holders"
@@ -599,8 +781,8 @@ $PYTHON -m vagen.main_ppo \
     actor_rollout_ref.rollout.val_kwargs.n=$VAL_N \
     actor_rollout_ref.rollout.max_num_batched_tokens=$MAX_TRAJECTORY_LENGTH \
     actor_rollout_ref.rollout.gpu_memory_utilization=$GPU_MEM_UTIL \
-    actor_rollout_ref.rollout.enforce_eager=False \
-    actor_rollout_ref.rollout.free_cache_engine=False \
+    actor_rollout_ref.rollout.enforce_eager=True \
+    actor_rollout_ref.rollout.free_cache_engine=True \
     actor_rollout_ref.rollout.tensor_model_parallel_size=$TP_SIZE \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.disable_log_stats=False \

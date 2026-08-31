@@ -61,10 +61,14 @@ def run_ppo(config, task_runner_class=None) -> None:
         default_runtime_env = get_ppo_ray_runtime_env()
         ray_init_kwargs = config.ray_kwargs.get("ray_init", {})
         runtime_env_kwargs = ray_init_kwargs.get("runtime_env", {})
+        runtime_env_vars = runtime_env_kwargs.get("env_vars", {})
+        for key, value in os.environ.items():
+            if key.startswith("VAGEN_D0_") or key.startswith("VAGEN_VISION_SANITY"):
+                runtime_env_vars.setdefault(key, value)
+        runtime_env_kwargs["env_vars"] = runtime_env_vars
 
         if config.transfer_queue.enable:
             # Add runtime environment variables for transfer queue
-            runtime_env_vars = runtime_env_kwargs.get("env_vars", {})
             runtime_env_vars["TRANSFER_QUEUE_ENABLE"] = "1"
             runtime_env_kwargs["env_vars"] = runtime_env_vars
 

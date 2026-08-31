@@ -14,6 +14,23 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 import json
+from . import gs_io
+
+def _read_json_path(path) -> object:
+    path_s = str(path)
+    if gs_io.is_remote(path_s):
+        return gs_io.read_json(path_s)
+    import json as _json
+    with open(path_s, 'r') as f:
+        return _json.load(f)
+
+def _path_exists(path) -> bool:
+    path_s = str(path)
+    if gs_io.is_remote(path_s):
+        return gs_io.exists(path_s)
+    from pathlib import Path as _Path
+    return _Path(path_s).exists()
+
 from pathlib import Path
 
 
@@ -84,6 +101,17 @@ class VisibilityChecker:
         self.scene_loaded = False
         self._current_scene_id: Optional[str] = None  # Track loaded scene to avoid reloading
     
+    def load_scene_from_gs_root(self, gs_root: str, scene_id: str) -> bool:
+        """Load from local or AOSS gs_root."""
+        if gs_io.is_remote(gs_root):
+            # Synthetic path strings that _path_exists/_read_json_path understand
+            class _RemoteScene:
+                def __truediv__(self2, name):
+                    return gs_io.scene_file(gs_root, scene_id, str(name))
+            return self.load_scene(_RemoteScene(), scene_id=scene_id)
+        from pathlib import Path as _Path
+        return self.load_scene(_Path(gs_root) / scene_id, scene_id=scene_id)
+
     def load_scene(self, scene_path: Path, scene_id: Optional[str] = None) -> bool:
         """Load scene objects and walls for occlusion checking.
         
@@ -101,10 +129,9 @@ class VisibilityChecker:
         success = False
         
         # Load objects from labels.json
-        if labels_path.exists():
+        if _path_exists(labels_path):
             try:
-                with open(labels_path, 'r') as f:
-                    labels_data = json.load(f)
+                labels_data = _read_json_path(labels_path)
                 
                 self.occluder_boxes = []
                 for obj in labels_data:
@@ -131,10 +158,9 @@ class VisibilityChecker:
                 print(f"[VisibilityChecker] Error loading labels.json: {e}")
         
         # Load walls from structure.json (CRITICAL for wall occlusion!)
-        if structure_path.exists():
+        if _path_exists(structure_path):
             try:
-                with open(structure_path, 'r') as f:
-                    structure_data = json.load(f)
+                structure_data = _read_json_path(structure_path)
                 
                 self.room_profiles = []
                 self.wall_segments = []

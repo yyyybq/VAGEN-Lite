@@ -1,0 +1,206 @@
+easi_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/EASI
+lmms_eval_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/lmms-eval
+base_ckpt_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite
+checkpoints:
+  base:
+    path: /mnt/umm/users/yinbaiqiao/models/Qwen2.5-VL-3B-Instruct
+    desc: Qwen2.5-VL-3B-Instruct pretrain baseline (local)
+    model_type: qwen2_5_vl
+  v26_step160:
+    path: exps/vagen_active_spatial/v26_klhi_lr5e7/checkpoints/global_step_160/actor/huggingface
+    desc: v26 PPO KL-hi LR=5e-7, step 160 — historical ID_m4 ceiling (0.607)
+    training_id_m4: 0.607
+  v26_step240:
+    path: exps/vagen_active_spatial/v26_klhi_lr5e7/checkpoints/global_step_240/actor/huggingface
+    desc: v26 PPO KL-hi LR=5e-7, step 240 — post-peak (decay from ID_m4=0.607)
+  v28_step150:
+    path: exps/vagen_active_spatial/v28_klhi_lr5e7_cosine/checkpoints/global_step_150/actor/huggingface
+    desc: v28 PPO KL-hi cosine decay, step 150
+  v28_step400:
+    path: exps/vagen_active_spatial/v28_klhi_lr5e7_cosine/checkpoints/global_step_400/actor/huggingface
+    desc: v28 PPO KL-hi cosine decay, step 400
+  v29_step200:
+    path: exps/vagen_active_spatial/v29_grpo/checkpoints/global_step_200/actor/huggingface
+    desc: v29 GRPO baseline, step 200
+  v30_step150:
+    path: exps/vagen_active_spatial/v30_rew_scale/checkpoints/global_step_150/actor/huggingface
+    desc: v30 GRPO rew-scale, step 150
+  v30_step300:
+    path: exps/vagen_active_spatial/v30_rew_scale/checkpoints/global_step_300/actor/huggingface
+    desc: v30 GRPO rew-scale, step 300
+  v31_step150:
+    path: exps/vagen_active_spatial/unnamed_0612_1457/checkpoints/global_step_150/actor/huggingface
+    desc: v31 GRPO resume from v30, step 150 (dual-valley, ID_m4≈0.571)
+    training_id_m4: 0.571
+  v31_step300:
+    path: exps/vagen_active_spatial/unnamed_0612_1457/checkpoints/global_step_300/actor/huggingface
+    desc: v31 GRPO resume from v30, step 300 — entropy recovery after 2nd valley
+  v32_step200:
+    path: exps/vagen_active_spatial/v32_grpo_rewscale_lr3e7/checkpoints/global_step_200/actor/huggingface
+    desc: v32 GRPO rew-scale LR=3e-7, step 200
+  v33_step150:
+    path: exps/vagen_active_spatial/v33_grpo_rewscale_klhi/checkpoints/global_step_150/actor/huggingface
+    desc: v33 GRPO rew-scale KL=0.30, step 150 — nav-val peak (ID_m4=0.560)
+    training_id_m4: 0.56
+  v33_step300:
+    path: exps/vagen_active_spatial/v33_grpo_rewscale_klhi/checkpoints/global_step_300/actor/huggingface
+    desc: v33 GRPO rew-scale KL=0.30, step 300 — post-collapse (entropy=1.03)
+    training_id_m4: 0.417
+  v34_step150:
+    path: exps/vagen_active_spatial/v34_grpo_rewscale_clip02/checkpoints/global_step_150/actor/huggingface
+    desc: v34 GRPO rew-scale clip=0.2, step 150 (ID_m4=0.548)
+    training_id_m4: 0.548
+  v35_step200:
+    path: exps/vagen_active_spatial/v35_masked_gae_rewscale_kl30/checkpoints/global_step_200/actor/huggingface
+    desc: v35 masked_gae PPO KL=0.30, step 200 (peak ID_m4≈0.583) — HF ckpt deleted
+    training_id_m4: 0.583
+  v35_step250:
+    path: exps/vagen_active_spatial/v35_masked_gae_rewscale_kl30/checkpoints/global_step_250/actor/huggingface
+    desc: v35 masked_gae PPO KL=0.30, step 250 (earliest available HF ckpt)
+    training_id_m4: 0.583
+  v36_step50:
+    path: exps/vagen_active_spatial/v36_masked_gae_rewscale_kl30_lr3e7/checkpoints/global_step_50/actor/huggingface
+    desc: v36 masked_gae PPO KL=0.30 LR=3e-7, step 50 — HF ckpt deleted
+    training_id_m4: 0.524
+  v36_step300:
+    path: exps/vagen_active_spatial/v36_masked_gae_rewscale_kl30_lr3e7/checkpoints/global_step_300/actor/huggingface
+    desc: v36 masked_gae PPO KL=0.30 LR=3e-7, step 300 (only available HF ckpt)
+    training_id_m4: 0.524
+  v38_step150:
+    path: exps/vagen_active_spatial/v38_masked_gae_6types_fastcosine/checkpoints/global_step_150/actor/huggingface
+    desc: v38 masked_gae 6types fastcosine, step 150 (KL=0.30, no centering)
+    training_id_m4: 0.464
+  v38_step200:
+    path: exps/vagen_active_spatial/v38_masked_gae_6types_fastcosine/checkpoints/global_step_200/actor/huggingface
+    desc: v38 masked_gae 6types fastcosine, step 200 (ID_m4=0.488)
+    training_id_m4: 0.488
+  v38_step300:
+    path: exps/vagen_active_spatial/v38_masked_gae_6types_fastcosine/checkpoints/global_step_300/actor/huggingface
+    desc: v38 masked_gae 6types fastcosine, step 300 (ID_m4=0.488, OOD recovery)
+    training_id_m4: 0.488
+  v38_step350:
+    path: exps/vagen_active_spatial/v38_masked_gae_6types_fastcosine/checkpoints/global_step_350/actor/huggingface
+    desc: v38 masked_gae 6types fastcosine, step 350 (latest, ID_m4=0.488, OOD_m4=0.368)
+    training_id_m4: 0.488
+  c4_step80:
+    path: exps/vagen_active_spatial/c4_fwdfirst/checkpoints/global_step_80/actor/huggingface
+    desc: Cambrian-S c4 fwdfirst, step 80
+    model_type: cambrians
+  c7_step80:
+    path: exps/vagen_active_spatial/c7_fwdfirst_ehi/checkpoints/global_step_80/actor/huggingface
+    desc: Cambrian-S c7 fwdfirst entropy-hi, step 80
+    model_type: cambrians
+  c8_step200:
+    path: exps/vagen_active_spatial/c8_fwdfirst_rewscale/checkpoints/global_step_200/actor/huggingface
+    desc: Cambrian-S c8 fwdfirst rew-scale, step 200
+    model_type: cambrians
+  c10_step125:
+    path: exps/vagen_active_spatial/c10_freeze_visiontower/checkpoints/global_step_125/actor/huggingface
+    desc: Cambrian-S c10 freeze-visiontower GRPO KL=0.30, step 125
+    model_type: cambrians
+  c10_step200:
+    path: exps/vagen_active_spatial/c10_freeze_visiontower/checkpoints/global_step_200/actor/huggingface
+    desc: Cambrian-S c10 freeze-visiontower GRPO KL=0.30, step 200 (final)
+    model_type: cambrians
+  qwen_pretrain_baseline:
+    path: /mnt/umm/users/yinbaiqiao/.cache/huggingface/hub/models--Qwen--Qwen2.5-VL-7B-Instruct/snapshots/cc594898137f460bfe9f0759e9844b3ce807cfb5
+    desc: Qwen2.5-VL-7B-Instruct pretrain baseline (v46/v50 init)
+    model_type: qwen2_5_vl
+  v46_step200:
+    path: exps/vagen_active_spatial/v46_7b_nodelta_w3_rerun/checkpoints/global_step_200/actor/huggingface
+    desc: v46@200
+    model_type: qwen2_5_vl
+  v50_step150:
+    path: exps/unified_eval_runs/frozen_ckpts/v50_step150
+    desc: v50@150
+    model_type: qwen2_5_vl
+  cambrian_pretrain_baseline:
+    path: /mnt/umm/users/yinbaiqiao/hf_cache/Cambrian-S-7B-LFP
+    desc: Cambrian-S-7B-LFP pretrain baseline (c8 init)
+    model_type: cambrians
+  c8_step300:
+    path: exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v19/checkpoints/global_step_300/actor/huggingface
+    desc: c8@300
+    model_type: cambrians
+  a1_step250:
+    path: exps/unified_eval_runs/a1a2b5_easi_results/a1_step250/actor__huggingface
+    desc: A1 spatial aux w005 step250 (HF snapshot from prior EASI; train ckpt deleted)
+    model_type: qwen2_5_vl
+  a2_step300:
+    path: exps/vagen_active_spatial/a2_v46_arrival_stop/checkpoints/global_step_300/actor/huggingface
+    desc: A2 arrival stop step300
+    model_type: qwen2_5_vl
+  b5_step100:
+    path: exps/vagen_active_spatial/b5_c8_wrapper_img25_actionvalid/checkpoints/global_step_100/actor/huggingface
+    desc: B5 c8 wrapper img25 step100
+    model_type: cambrians
+  qwen3b_pretrain_baseline:
+    path: /mnt/umm/users/yinbaiqiao/models/Qwen2.5-VL-3B-Instruct
+    desc: Qwen2.5-VL-3B-Instruct pretrain baseline
+    model_type: qwen2_5_vl
+  v46_3b_step100:
+    path: exps/vagen_active_spatial/v46_baseline_qwen25vl_3b/checkpoints/global_step_100/actor/huggingface
+    desc: v46 clean baseline Qwen2.5-VL-3B step100
+    model_type: qwen2_5_vl
+  v46_7b_step250:
+    path: exps/vagen_active_spatial/v46_baseline_qwen25vl_7b/checkpoints/global_step_250/actor/huggingface
+    desc: v46 clean baseline Qwen2.5-VL-7B step250
+    model_type: qwen2_5_vl
+benchmark_groups:
+  easi_8: &id001
+  - vsi_bench
+  - mmsi_bench
+  - mindcube_tiny
+  - viewspatial
+  - site
+  - blink
+  - 3dsrbench
+  - embspatial
+  default: *id001
+checkpoint_groups:
+  key:
+  - base
+  - v26_step160
+  - v33_step150
+  - v34_step150
+  - v35_step200
+  - v38_step350
+  recent:
+  - base
+  - v35_step200
+  - v36_step300
+  - v38_step200
+  - v38_step300
+  - v38_step350
+  all_main:
+  - base
+  - v26_step160
+  - v28_step150
+  - v29_step200
+  - v30_step150
+  - v31_step150
+  - v32_step200
+  - v33_step150
+  - v33_step300
+  - v34_step150
+  - v35_step200
+  - v36_step50
+  - v38_step200
+  - v38_step300
+  - v38_step350
+  current_main:
+  - qwen_pretrain_baseline
+  - v46_step200
+  - v50_step150
+  - cambrian_pretrain_baseline
+  - c8_step300
+  a1a2b5_latest:
+  - a1_step250
+  - a2_step300
+  - b5_step100
+  qwen_baselines:
+  - qwen3b_pretrain_baseline
+  - qwen_pretrain_baseline
+  v46_clean_latest:
+  - v46_3b_step100
+  - v46_7b_step250

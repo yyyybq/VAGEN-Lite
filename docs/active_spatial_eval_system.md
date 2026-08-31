@@ -46,8 +46,8 @@ sequence of training-system and analysis improvements:
   task-type curves, failure modes, and rollout behavior diversity.
 - SFT support was moved to LLaMA-Factory because the local VERL SFT path did
   not pass VL image tensors through the trainer.
-- `scripts/easi_probe.py` and `scripts/probe_registry.yaml` provide a separate
-  offline spatial-QA probe over selected checkpoints, complementing embodied
+- `scripts/easi_eval.py` delegates every selected checkpoint to the official
+  EASI runner with the complete EASI-8 suite, complementing embodied
   navigation evaluation.
 
 The missing piece was a systematic post-training evaluator: every saved
@@ -63,7 +63,7 @@ For production runs, use the top-level orchestrator
 
 1. embodied navigation test sweep;
 2. validation/test alignment through the navigation summary;
-3. EASI static spatial-QA probe;
+3. official EASI-8 spatial-intelligence evaluation;
 4. consolidated Markdown analysis report.
 
 It treats the experiment directory as the source of truth:
@@ -245,12 +245,12 @@ python scripts/active_spatial_full_eval.py \
   --exps v38_masked_gae_6types_fastcosine,v40_masked_gae_6types_distinfo_w3 \
   --steps best-val,latest \
   --nav-suites all \
-  --easi-benchmarks core5 \
+  --easi-benchmarks easi_8 \
   --run
 ```
 
 The command is restart-safe. If it is interrupted, run the exact same command
-again; completed navigation `results_<agent>.json` files and EASI result JSONs
+again; completed navigation `results_<agent>.json` files and official `easi_results.json` payloads
 are skipped unless `--rerun` is passed.
 
 Run the smoke suite for real:
@@ -306,7 +306,7 @@ evaluation/sweeps/active_spatial/<matrix-name>/
   summary.md
   full_eval_plan.json
   analysis_report.md
-  easi_probe_results/
+  easi_results/
   <experiment>/global_step_<N>/<suite>/model/
     eval_config.yaml
     results_model.json

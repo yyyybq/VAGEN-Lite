@@ -254,36 +254,13 @@ python3 scripts/analyze_experiments.py \
 
 输出指标：act_H (动作熵), 1st_H (首步动作熵), uniq3 (唯一3步前缀), dominant action 占比
 
-### 6.2 `scripts/probe_spatial_qa.py` — 离线 backbone 能力探测
+### 6.2 空间智能评测（统一 EASI-8）
 
-**用途**: 测试已有 checkpoint 的空间推理 QA 能力是否退化（**不影响训练**，独立在空闲 GPU 上运行）。
+独立 MindCube probe 已退役。所有 checkpoint 默认通过官方 EASI runner 评测完整 EASI-8；
+MindCube-Tiny 是其中一项，不再单独运行或写入独立 `probe` 指标。
 
-**使用方法**:
 ```bash
-# 测试 v25 step240 vs v26 step160 vs base model
-python3 scripts/probe_spatial_qa.py \
-    --ckpts "base:Qwen/Qwen2.5-VL-3B-Instruct,v25_step240:exps/vagen_active_spatial/v25_groupadv_100scenes_klhi/checkpoints/global_step_240/actor/huggingface,v26_step160:exps/vagen_active_spatial/v26_klhi_lr5e7/checkpoints/global_step_160/actor/huggingface" \
-    --n_samples 200 --gpu 4
-
-# 快速测试单个 checkpoint
-python3 scripts/probe_spatial_qa.py \
-    --ckpts "v26_step160:exps/vagen_active_spatial/v26_klhi_lr5e7/checkpoints/global_step_160/actor/huggingface" \
-    --n_samples 200 --gpu 4 --include_base
-```
-
-**评测内容**:
-- MindCube tinybench 200 samples（多选题，空间推理）
-- 5 条文字 sanity-check（检测通用能力退化：方向、逻辑、数学）
-- 对比基础模型 Qwen2.5-VL-3B-Instruct 的退化幅度
-- 按 type 细分 (1_frame/2_frame/3_frame/three_view/general)
-
-**不影响训练**: 直接从 `actor/huggingface/` 加载，standalone 运行，约 10-15 分钟。
-
-**新增**: `--show_examples N` 参数可打印前 N 条完整模型回答，用于观察输出格式：
-```bash
-python3 scripts/probe_spatial_qa.py \
-    --ckpts "v26_step160:exps/vagen_active_spatial/v26_klhi_lr5e7/checkpoints/global_step_160/actor/huggingface" \
-    --n_samples 200 --gpu 0 --include_base --show_examples 10
+python scripts/easi_eval.py --ckpts v26_step160 --benchmarks easi_8 --gpu 4
 ```
 
 ### 6.3 实际运行结果（2026-05-31, n=200, GPU 0, max_new_tokens=256）
@@ -523,7 +500,7 @@ v28 在 step 200 达到历史峰值：
 | **entropy 系数提升** | ★★ | — | entropy_coeff 0.005→0.01 是否能显著抑制熵爆炸？ |
 | KL 系数消融 | ★★ | v28 已完成 | KL=0.20 是否可提高（0.30/0.40）来增强锚定？ |
 | 更多 val seeds (N=8) | ★★ | GPU 空闲 | 当前 val 方差估计是否准确？ |
-| backbone probe 定期运行 | ★★ | probe_spatial_qa.py | RL 是否在损害通用空间推理能力？ |
+| backbone probe 定期运行 | ★★ | easi_eval.py (EASI-8) | RL 是否在损害通用空间推理能力？ |
 | Cambrian 修复实验 | ★ | 提示格式分析 | 换用适配 Cambrian 的提示是否解锁导航能力？ |
 
 ---
@@ -635,7 +612,7 @@ v30 结果分析：
 | **v31: GRPO + rew_scale** | ★★★ | 待 v29/v30 结果 | 组合修复是否能突破 v26 的 0.607 天花板？ |
 | **Cambrian c7_fwdfirst_ehi** | ★★ | ✅ 脚本已就绪 | entropy=0.01 是否降低 no_tag 率？ |
 | **SFT → RL 两阶段** | ★★ | 需生成数据 | SFT warmstart 是否彻底消除 entropy 爆炸？ |
-| backbone probe 定期运行 | ★ | probe_spatial_qa.py 已就绪 | RL 是否损害通用空间推理？ |
+| backbone probe 定期运行 | ★ | easi_eval.py (EASI-8) 已就绪 | RL 是否损害通用空间推理？ |
 
 ---
 

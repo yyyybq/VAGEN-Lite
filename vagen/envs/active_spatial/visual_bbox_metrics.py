@@ -28,7 +28,14 @@ def _normalize(vec: np.ndarray) -> np.ndarray:
 
 def _sigmoid(x: float, scale: float = 1.0) -> float:
     scale = max(float(scale), 1e-6)
-    return float(1.0 / (1.0 + math.exp(-x / scale)))
+    z = float(x) / scale
+    if not math.isfinite(z):
+        return 1.0 if z > 0.0 else 0.0
+    if z >= 0.0:
+        ez = math.exp(-z)
+        return float(1.0 / (1.0 + ez))
+    ez = math.exp(z)
+    return float(ez / (1.0 + ez))
 
 
 def _gaussian_error(error: float, sigma: float) -> float:

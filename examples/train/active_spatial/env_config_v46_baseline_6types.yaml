@@ -1,0 +1,45 @@
+# =============================================================================
+# env_config_v46_baseline_6types.yaml
+# Clean v46 comparison baseline env (no aux / no arrival-stop changes).
+# Data: current 100-scenes 6types train set (same source as A1/A2 base).
+# delta_control is excluded in the experiment script via TRAIN_EXCLUDE_TASK_TYPES.
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/active_spatial_pipeline/output_100scenes/train_100scenes_6types.jsonl"
+
+        render_backend: local
+        gs_root: "/mnt/umm/users/yinbaiqiao/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+
+        max_actions_per_step: 5
+
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 1.0
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.65
+        enable_auto_termination: true
+        near_success_threshold: 0.55
+
+        success_reward: 5.0
+        near_success_bonus: 0.5
+
+        enable_distance_in_obs: true
+
+        # jsonl has 11157 rows; reserve last 22 as ID val split
+        train_size: 11135
+        test_size: 22

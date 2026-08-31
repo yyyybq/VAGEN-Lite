@@ -35,9 +35,24 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import transformers
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForTokenClassification
 from transformers.generation.utils import GenerateOutput
 from transformers.modeling_outputs import CausalLMOutputWithPast, TokenClassifierOutput
+
+from vagen.models.cambrian_miv import build_cambrian_visual_features
+
+# Cambrian-S imports Qwen2 classes from the transformers package root. Some
+# Transformers builds expose them only from transformers.models.qwen2, so make
+# the root aliases explicit before importing Cambrian's source tree.
+try:  # pragma: no cover - import availability depends on transformers build
+    from transformers.models.qwen2 import Qwen2Config, Qwen2ForCausalLM, Qwen2Model
+
+    transformers.Qwen2Config = getattr(transformers, "Qwen2Config", Qwen2Config)
+    transformers.Qwen2ForCausalLM = getattr(transformers, "Qwen2ForCausalLM", Qwen2ForCausalLM)
+    transformers.Qwen2Model = getattr(transformers, "Qwen2Model", Qwen2Model)
+except Exception:
+    pass
 
 # ---------------------------------------------------------------------------
 # 1.  Make cambrian-s importable
@@ -89,6 +104,8 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
 
         # Force-load delay_load vision towers and convert list → nn.ModuleList
         if inner_model is not None:
+            self._patch_qwen2_decoder_layers(inner_model)
+
             vt_list = getattr(inner_model, "vision_tower_aux_list", None)
             if vt_list is not None:
                 for vt in vt_list:
@@ -102,6 +119,84 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
                 if not isinstance(vt_list, nn.ModuleList):
                     inner_model.vision_tower_aux_list = nn.ModuleList(vt_list)
                     print("[cambrian_register] Converted vision_tower_aux_list → nn.ModuleList")
+
+    @staticmethod
+    def _patch_qwen2_decoder_layers(inner_model) -> None:
+        """Bridge Cambrian's Qwen2 wrapper to newer Transformers decoder APIs."""
+        rotary_emb = getattr(inner_model, "rotary_emb", None)
+        layers = getattr(inner_model, "layers", None)
+        if rotary_emb is None or layers is None:
+            return
+
+        for layer in layers:
+            if getattr(layer, "_vagen_cambrian_qwen2_patched", False):
+                continue
+
+            original_forward = layer.forward
+
+            def patched_forward(
+                hidden_states,
+                attention_mask=None,
+                position_ids=None,
+                past_key_value=None,
+                output_attentions=False,
+                use_cache=False,
+                _original_forward=original_forward,
+                _rotary_emb=rotary_emb,
+                **kwargs,
+            ):
+                added_batch_dim = hidden_states.dim() == 2
+                if added_batch_dim:
+                    hidden_states = hidden_states.unsqueeze(0)
+
+                if kwargs.get("position_embeddings") is None:
+                    batch_size, seq_len = hidden_states.shape[:2]
+                    if position_ids is None:
+                        position_ids = torch.arange(
+                            seq_len,
+                            device=hidden_states.device,
+                            dtype=torch.long,
+                        ).unsqueeze(0).expand(batch_size, -1)
+                    else:
+                        position_ids = position_ids.to(device=hidden_states.device, dtype=torch.long)
+                        if position_ids.dim() == 1:
+                            position_ids = position_ids.unsqueeze(0)
+                        if position_ids.shape == (seq_len, batch_size):
+                            position_ids = position_ids.transpose(0, 1)
+                        if position_ids.numel() == seq_len:
+                            position_ids = position_ids.reshape(1, seq_len)
+                        else:
+                            position_ids = position_ids.reshape(-1, seq_len)
+                        if position_ids.shape[0] == 1 and batch_size != 1:
+                            position_ids = position_ids.expand(batch_size, -1)
+
+                    position_embeddings = _rotary_emb(hidden_states, position_ids)
+                    if not getattr(layer, "_vagen_cambrian_shape_logged", False):
+                        cos, sin = position_embeddings
+                        print(
+                            "[cambrian_register] qwen2 rope shim shapes "
+                            f"hidden={tuple(hidden_states.shape)} "
+                            f"position_ids={tuple(position_ids.shape)} "
+                            f"cos={tuple(cos.shape)} sin={tuple(sin.shape)}"
+                        )
+                        layer._vagen_cambrian_shape_logged = True
+                    kwargs["position_embeddings"] = position_embeddings
+
+                if past_key_value is not None and "past_key_values" not in kwargs:
+                    kwargs["past_key_values"] = past_key_value
+
+                output = _original_forward(
+                    hidden_states,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                    **kwargs,
+                )
+                return output
+
+            layer.forward = patched_forward
+            layer._vagen_cambrian_qwen2_patched = True
 
     # ------------------------------------------------------------------
     # Core image embedding
@@ -140,50 +235,18 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
             image_features.to(proj_dtype)
         ).to(pixel_values.dtype)  # (N, si_token_len, hidden_dim)
 
-        # 2b. MIV features (NFP-specific) ----------------------------------
-        # Cambrian-S projects images to 27×27 (SI), then also keeps a coarser
-        # 8×8 (miv_side_len × miv_side_len) view of the same projected features.
-        # These are injected at the first miv_token_len positions of each image
-        # block, giving the LM a spatial overview alongside the full-resolution
-        # SI tokens that follow.
-        miv_features = None
+        # 3. Newline + MIV tokens ------------------------------------------
+        # Shared with vagen.models.cambrian_vllm so rollout and training build
+        # identical visual embeddings before the language model sees them.
         miv_token_len: int = getattr(cfg, 'miv_token_len', 0)  # 64
-        if getattr(cfg, 'nfp_head', False) and miv_token_len > 0:
-            miv_side_len = int(miv_token_len ** 0.5)  # 8
-            total_n, _, _hidden = image_features.shape  # (N, 729, 3584)
-            # Reshape to (N, 3584, 27, 27) for bilinear interpolation
-            _feat_bchw = (
-                image_features
-                .view(total_n, si_side_len, si_side_len, _hidden)
-                .permute(0, 3, 1, 2)
-                .float()
-            )
-            _miv_bchw = F.interpolate(
-                _feat_bchw,
-                size=(miv_side_len, miv_side_len),
-                mode='bilinear',
-                align_corners=False,
-            )
-            miv_features = (
-                _miv_bchw
-                .permute(0, 2, 3, 1)
-                .reshape(total_n, miv_token_len, _hidden)
-                .to(image_features.dtype)
-            )  # (N, 64, hidden_dim)
-
-        # 3. Newline tokens ------------------------------------------------
-        if mm_use_newline:
-            total_imgs, _, hidden_dim = image_features.shape
-            image_features = image_features.view(
-                total_imgs, si_side_len, si_side_len, hidden_dim
-            )
-            newline = self.get_model().image_newline.to(image_features.dtype)
-            newline_exp = newline.view(1, 1, 1, hidden_dim).expand(
-                total_imgs, si_side_len, 1, hidden_dim
-            )
-            image_features = torch.cat([image_features, newline_exp], dim=2)
-            image_features = image_features.view(total_imgs, -1, hidden_dim)
-            # shape: (N, 756, hidden_dim)
+        image_features, _miv_features = build_cambrian_visual_features(
+            image_features,
+            self.get_model().image_newline if mm_use_newline else None,
+            si_token_len=si_token_len,
+            mm_use_newline=mm_use_newline,
+            nfp_head=bool(getattr(cfg, 'nfp_head', False)),
+            miv_token_len=miv_token_len,
+        )
 
         assert image_features.shape[1] == tokens_per_image, (
             f"image_features has {image_features.shape[1]} tokens/image but "
@@ -210,16 +273,12 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
             n_images = n_img_tokens // tokens_per_image
             for img_i in range(n_images):
                 start = positions[img_i * tokens_per_image].item()
-                # Write projected SI features (full 27×27+newlines = 756 tokens)
+                # Write projected SI features (full 27×27+newlines = 756 tokens).
+                # For LFP checkpoints this tensor already includes the first-64
+                # MIV overwrite from build_cambrian_visual_features().
                 token_embeds[b, start : start + tokens_per_image] = (
                     image_features[img_global_idx].to(token_embeds.dtype)
                 )
-                # MIV injection: overwrite first miv_token_len positions with the
-                # coarser 8×8 projected overview (faithfully following Cambrian-S).
-                if miv_features is not None and miv_token_len > 0:
-                    token_embeds[b, start : start + miv_token_len] = (
-                        miv_features[img_global_idx].to(token_embeds.dtype)
-                    )
                 img_global_idx += 1
 
         return token_embeds  # (bs, seq_len, hidden_dim)
@@ -300,7 +359,17 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
         nfp_mse, nfp_cos = self.nfp_loss(nfp_outputs, nfp_tgt_embeds, nfp_loss_mask)
         nfp_mse_w = getattr(cfg, 'nfp_mse_loss_weight', 0.1)
         nfp_cos_w = getattr(cfg, 'nfp_cosine_loss_weight', 0.1)
-        return nfp_mse_w * nfp_mse + nfp_cos_w * nfp_cos
+        nfp_loss = nfp_mse_w * nfp_mse + nfp_cos_w * nfp_cos
+        if not getattr(self, "_vagen_nfp_loss_logged", False):
+            print(
+                "[cambrian_register] nfp loss active "
+                f"hidden={tuple(hidden_states.shape)} "
+                f"target={tuple(nfp_tgt_embeds.shape)} "
+                f"mask_tokens={float(nfp_loss_mask.sum().detach().item())} "
+                f"loss={float(nfp_loss.detach().item())}"
+            )
+            self._vagen_nfp_loss_logged = True
+        return nfp_loss
 
     # ------------------------------------------------------------------
     # forward
@@ -365,6 +434,8 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
         )
 
         hidden_states = outputs[0]
+        if hidden_states.dim() == 2:
+            hidden_states = hidden_states.unsqueeze(0)
         logits = self.lm_head(hidden_states).float()
 
         lm_loss = None
@@ -485,6 +556,7 @@ class CambrianForTokenClassification(CambrianQwenForCausalLM):
 
     def __init__(self, config):
         super().__init__(config)
+        CambrianForCausalLMAdapter._patch_qwen2_decoder_layers(self.model)
 
         self.num_labels = getattr(config, "num_labels", 1)
 
@@ -572,6 +644,8 @@ class CambrianForTokenClassification(CambrianQwenForCausalLM):
 
         sequence_output = self.dropout(outputs[0])
         logits = self.score(sequence_output)
+        if logits.dim() == 2:
+            logits = logits.unsqueeze(0)
 
         loss = None
         if labels is not None:

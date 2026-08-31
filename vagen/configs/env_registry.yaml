@@ -6,5 +6,6 @@ env_registry:
   PrimitiveSkill: vagen.envs.primitive_skill.primitive_skill_env.PrimitiveSkillEnv
   # Active Spatial Navigation (local, in-process)
   ActiveSpatial: vagen.envs.active_spatial.active_spatial_env.ActiveSpatialGymEnv
+  SpatialMCQ: vagen.envs.spatial_mcq.spatial_mcq_env.SpatialMCQEnv
   # Remote environment client (generic, reusable for any remote env)
   RemoteEnv: vagen.envs_remote.GymImageEnvClient

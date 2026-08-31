@@ -42,6 +42,25 @@ SIGLIP_MODEL: str = "google/siglip2-so400m-patch14-384"
 SIGLIP_SIZE: int = 384
 
 
+def _default_siglip_cache() -> str:
+    env = os.environ.get("SIGLIP_CACHE")
+    if env:
+        return env
+    candidates = [
+        os.path.join(os.environ.get("HF_HOME", ""), "hub") if os.environ.get("HF_HOME") else "",
+        "/mnt/umm/users/yinbaiqiao/.cache/huggingface/hub",
+        "/mnt/umm/users/yinbaiqiao/hf_cache/hub",
+        os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub"),
+    ]
+    for c in candidates:
+        if c and os.path.isdir(c):
+            return c
+    return os.path.join(os.environ.get("HF_HOME", "/tmp/hf_cache"), "hub")
+
+
+SIGLIP_CACHE: str = _default_siglip_cache()
+
+
 # ---------------------------------------------------------------------------
 # Dummy image processor class (name is checked in agent_loop_no_concat.py)
 # ---------------------------------------------------------------------------
@@ -130,7 +149,9 @@ class CambrianProcessorWrapper:
     def _get_siglip_processor(self):
         if self._siglip_processor is None:
             self._siglip_processor = AutoImageProcessor.from_pretrained(
-                self._siglip_model_name
+                self._siglip_model_name,
+                cache_dir=SIGLIP_CACHE,
+                local_files_only=os.environ.get("VAGEN_ALLOW_HF_DOWNLOAD", "0") != "1",
             )
         return self._siglip_processor
 

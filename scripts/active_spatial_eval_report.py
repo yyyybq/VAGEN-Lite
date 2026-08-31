@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build a consolidated report from Active Spatial navigation sweep and EASI probe results.
+Build a consolidated report from navigation and official EASI-8 results.
 """
 
 from __future__ import annotations
@@ -214,46 +214,50 @@ def stability_rows(rows: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     return out
 
 
-def render_probe_summary(probe: Optional[Dict[str, Any]]) -> List[str]:
-    if not probe:
-        return ["No EASI probe summary found."]
-    benchmarks = probe.get("benchmarks", [])
-    results = probe.get("results", {})
+def render_easi_summary(easi: Optional[Dict[str, Any]]) -> List[str]:
+    if not easi:
+        return ["No EASI summary found."]
+    benchmarks = easi.get("benchmarks", [])
+    results = easi.get("results", {})
     lines = []
     lines.append(f"Benchmarks: {', '.join(benchmarks) if benchmarks else '—'}")
     lines.append("")
     lines.append("| checkpoint | " + " | ".join(benchmarks) + " |")
     lines.append("| --- | " + " | ".join(["---:"] * len(benchmarks)) + " |")
     for ckpt, bench_map in results.items():
+        bench_map = bench_map or {}
         vals = []
         for bench in benchmarks:
             metrics = bench_map.get(bench)
-            if not metrics:
+            if metrics is None:
                 vals.append("—")
                 continue
-            primary = None
-            for key, value in metrics.items():
-                if isinstance(value, (float, int)) and "stderr" not in key:
-                    primary = float(value)
-                    break
+            if isinstance(metrics, (float, int)):
+                primary = float(metrics)
+            else:
+                primary = None
+                for key, value in metrics.items():
+                    if isinstance(value, (float, int)) and "stderr" not in key:
+                        primary = float(value)
+                        break
             vals.append(pct(primary))
         lines.append(f"| {ckpt} | " + " | ".join(vals) + " |")
     return lines
 
 
-def build_report(nav_rows: List[Dict[str, str]], probe: Optional[Dict[str, Any]]) -> str:
+def build_report(nav_rows: List[Dict[str, str]], easi: Optional[Dict[str, Any]]) -> str:
     lines: List[str] = []
     lines.append("# Active Spatial Full Evaluation Report")
     lines.append("")
     lines.append("## Completion")
     lines.append("")
     lines.append(f"- Navigation sweep: {nav_completion(nav_rows)}")
-    if probe:
-        n_ckpt = len(probe.get("checkpoints", []))
-        n_bench = len(probe.get("benchmarks", []))
-        lines.append(f"- EASI probe: {n_ckpt} checkpoints x {n_bench} benchmarks in summary")
+    if easi:
+        n_ckpt = len(easi.get("checkpoints", []))
+        n_bench = len(easi.get("benchmarks", []))
+        lines.append(f"- EASI: {n_ckpt} checkpoints x {n_bench} benchmarks in summary")
     else:
-        lines.append("- EASI probe: no summary found")
+        lines.append("- EASI: no summary found")
     lines.append("")
 
     lines.append("## Best Navigation Checkpoints By Suite")
@@ -347,9 +351,9 @@ def build_report(nav_rows: List[Dict[str, str]], probe: Optional[Dict[str, Any]]
         lines.append("No completed per-task result files yet.")
     lines.append("")
 
-    lines.append("## EASI / Static Spatial QA Probe")
+    lines.append("## EASI-8 Spatial Intelligence Evaluation")
     lines.append("")
-    lines.extend(render_probe_summary(probe))
+    lines.extend(render_easi_summary(easi))
     lines.append("")
 
     lines.append("## Analysis Checklist")
@@ -367,13 +371,13 @@ def build_report(nav_rows: List[Dict[str, str]], probe: Optional[Dict[str, Any]]
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build Active Spatial full evaluation report.")
     parser.add_argument("--nav-summary", required=True, help="Path to navigation summary.csv.")
-    parser.add_argument("--probe-summary", default=None, help="Path to EASI probe_summary.json.")
+    parser.add_argument("--easi-summary", default=None, help="Path to official EASI easi_summary.json.")
     parser.add_argument("--out", required=True, help="Output Markdown report path.")
     args = parser.parse_args()
 
     nav_rows = load_csv(Path(args.nav_summary))
-    probe = load_json(Path(args.probe_summary)) if args.probe_summary else None
-    report = build_report(nav_rows, probe)
+    easi = load_json(Path(args.easi_summary)) if args.easi_summary else None
+    report = build_report(nav_rows, easi)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report)

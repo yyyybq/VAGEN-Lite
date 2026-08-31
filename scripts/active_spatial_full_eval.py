@@ -5,11 +5,11 @@ One-command Active Spatial evaluation.
 Runs three layers:
 1. embodied navigation test sweep;
 2. validation/test alignment through the navigation summary;
-3. EASI static spatial-QA capability probe;
+3. official EASI-8 spatial-intelligence evaluation;
 4. consolidated Markdown analysis report.
 
 The command is restart-safe: existing navigation result JSON files and EASI
-result JSON files are skipped unless --rerun is passed.
+EASI result files are skipped unless --rerun is passed.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run full Active Spatial evaluation stack.")
     parser.add_argument("--exp-root", default=str(DEFAULT_EXP_ROOT), help="Experiment root.")
     parser.add_argument("--exps", required=True, help="'all', comma list, or re:<regex>.")
-    parser.add_argument("--steps", default="best-val,latest", help="Checkpoint selector passed to sweep/probe.")
+    parser.add_argument("--steps", default="best-val,latest", help="Checkpoint selector passed to navigation and EASI.")
     parser.add_argument("--suite-config", default="examples/evaluate/active_spatial/test_suites.yaml")
     parser.add_argument("--sweep-name", default=None)
     parser.add_argument("--out-root", default=str(DEFAULT_OUT_ROOT))
@@ -79,11 +79,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-easi", dest="include_easi", action="store_false")
     parser.add_argument("--include-analysis", action="store_true", default=True)
     parser.add_argument("--no-analysis", dest="include_analysis", action="store_false")
-    parser.add_argument("--easi-registry", default="scripts/probe_registry.yaml")
-    parser.add_argument("--easi-benchmarks", default="core5")
+    parser.add_argument("--easi-registry", default="scripts/easi_registry.yaml")
+    parser.add_argument("--easi-benchmarks", default="easi_8")
     parser.add_argument("--easi-gpu", default="4")
     parser.add_argument("--easi-nproc", type=int, default=1)
-    parser.add_argument("--easi-batch-size", type=int, default=1)
     parser.add_argument("--easi-include-base", action="store_true", default=True)
     parser.add_argument("--no-easi-base", dest="easi_include_base", action="store_false")
     parser.add_argument("--run", action="store_true", help="Actually run evaluations.")
@@ -164,11 +163,11 @@ def main() -> int:
             nav_cmd.append("--dry-run")
         failed += int(run_cmd(nav_cmd, dry_run=False) != 0)
 
-    probe_summary = full_out_root / "easi_probe_results" / "probe_summary.json"
+    easi_summary = full_out_root / "easi_results" / "easi_summary.json"
     if args.include_easi:
         easi_cmd = [
             sys.executable,
-            str(SCRIPTS_DIR / "easi_probe.py"),
+            str(SCRIPTS_DIR / "easi_eval.py"),
             "--registry",
             args.easi_registry,
             "--ckpts",
@@ -176,13 +175,11 @@ def main() -> int:
             "--benchmarks",
             args.easi_benchmarks,
             "--output_dir",
-            str(full_out_root / "easi_probe_results"),
+            str(full_out_root / "easi_results"),
             "--gpu",
             args.easi_gpu,
             "--nproc",
             str(args.easi_nproc),
-            "--batch_size",
-            str(args.easi_batch_size),
         ]
         for name, path, model_type in ckpts:
             easi_cmd.extend(["--add", f"{name}:{path}:{model_type}"])
@@ -198,8 +195,8 @@ def main() -> int:
             str(SCRIPTS_DIR / "active_spatial_eval_report.py"),
             "--nav-summary",
             str(full_out_root / "summary.csv"),
-            "--probe-summary",
-            str(probe_summary),
+            "--easi-summary",
+            str(easi_summary),
             "--out",
             str(full_out_root / "analysis_report.md"),
         ]

@@ -138,6 +138,8 @@ class EvalRunner:
             fov_horizontal=env_cfg.fov_horizontal,
             fov_vertical=env_cfg.fov_vertical,
             prompt_format=env_cfg.prompt_format,
+            action_space=env_cfg.action_space,
+            enable_explicit_done=env_cfg.enable_explicit_done,
             max_actions_per_step=env_cfg.max_actions_per_step,
             action_sep=env_cfg.action_sep,
             image_placeholder=env_cfg.image_placeholder,

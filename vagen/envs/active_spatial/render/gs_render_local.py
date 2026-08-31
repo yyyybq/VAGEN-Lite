@@ -6,12 +6,34 @@ import numpy as np
 import torch
 from PIL import Image
 import os
+import sys
 import threading
 
 # Module-level lock to serialize the first CUDA call (torch.inverse lazy init)
 # to avoid "lazy wrapper should be called at most once" race in PyTorch 2.8.0
 _CUDA_PREWARM_LOCK = threading.Lock()
 _CUDA_PREWARM_DONE: set = set()  # tracks devices already pre-warmed
+
+
+def _register_prebuilt_gsplat_extension() -> None:
+    """Load a proven gsplat binary without invoking Ninja in every worker."""
+    if os.environ.get("VAGEN_GSPLAT_PREBUILT", "0") != "1":
+        return
+
+    import gsplat
+    from torch.utils.cpp_extension import _import_module_from_library
+
+    build_dir = os.path.join(
+        os.environ["TORCH_EXTENSIONS_DIR"], "gsplat_cuda"
+    )
+    extension_path = os.path.join(build_dir, "gsplat_cuda.so")
+    if not os.path.isfile(extension_path):
+        raise FileNotFoundError(
+            f"Prebuilt gsplat extension is missing: {extension_path}"
+        )
+    compiled = _import_module_from_library("gsplat_cuda", build_dir, True)
+    sys.modules["gsplat.csrc"] = compiled
+    setattr(gsplat, "csrc", compiled)
 
 
 def _prewarm_cuda_inverse(device: str) -> None:
@@ -104,6 +126,7 @@ class GaussianRenderer:
         """Load the Gaussian Splatting model from PLY file."""
         try:
             # Import required libraries
+            _register_prebuilt_gsplat_extension()
             from ply_gaussian_loader import PLYGaussianLoader
             from gsplat.rendering import rasterization
             
@@ -259,4 +282,3 @@ class GaussianRenderer:
         rendered_image_uint8 = (rendered_image * 255).astype(np.uint8)
         
         return rendered_image_uint8
-

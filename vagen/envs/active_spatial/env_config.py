@@ -16,8 +16,13 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     
     Rendering Modes:
     ----------------
-    - render_backend="client": Connect to remote GPU render server via WebSocket
-      Requires: client_url to be set (e.g., "ws://gpu-node:8777/render/interiorgs")
+    - render_backend="client": Connect to remote GPU render server.
+      Uses WebSocket for ws:// URLs and HTTP multipart for http:// URLs.
+      Requires: client_url to be set (e.g., "ws://gpu-node:8777/render/interiorgs"
+      or "http://gpu-node:8767/render")
+
+    - render_backend="http": Connect to HTTP multipart render server.
+      Requires: client_url to be set (e.g., "http://gpu-node:8767/render")
       
     - render_backend="local": Render locally using GPU
       Requires: gs_root pointing to directory containing {scene_id}.ply files
@@ -37,7 +42,7 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     exclude_task_types: List[str] = field(default_factory=lambda: ["delta_control"])
     
     # ====== Rendering Configuration ======
-    # Choose one of: "client", "local", or None/empty
+    # Choose one of: "client", "http", "local", or None/empty
     render_backend: Optional[str] = "local"  # None = use pre-rendered images
     gpu_device: Optional[int] = None  # GPU device ID for local rendering (None = auto-detect from environment)
     
@@ -45,8 +50,9 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     gs_root: str = ""  # Directory containing {scene_id}.ply files
     
     # For render_backend="client" - remote render server
-    client_url: str = "ws://127.0.0.1:8777/render/interiorgs"  # WebSocket URL
+    client_url: str = "ws://127.0.0.1:8777/render/interiorgs"  # WebSocket or HTTP render URL
     client_origin: Optional[str] = None  # Origin header for WebSocket connection
+    render_fail_fast: bool = True  # Raise render errors instead of returning gray placeholder images
     
     # Image dimensions for rendering
     image_width: int = 512
@@ -146,6 +152,14 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     collision_safety_margin: float = 0.05  # Additional safety margin around objects
     collision_penalty: float = -0.15  # Penalty for collision attempts
     collision_invalidate_action: bool = True  # If True, collision actions don't move camera
+    max_consecutive_collisions: int = 3  # Terminate only after repeated collision attempts
+    consecutive_collision_penalty: float = -0.5  # Extra penalty when repeated collisions terminate
+
+    # ====== Low-Information Frame Configuration ======
+    enable_low_info_frame_check: bool = True
+    low_info_image_std_threshold: float = 8.0
+    max_consecutive_low_info_frames: int = 3
+    low_info_frame_penalty: float = -0.2
     
     # ====== Invalid Action Configuration ======
     invalid_format_penalty: float = -0.1  # Penalty for invalid format/actions

@@ -20,6 +20,7 @@ This is better than just negative rewards because:
 """
 
 import json
+from . import gs_io
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -375,13 +376,91 @@ class CollisionDetector:
         return False, float('inf')
     
     def load_scene_from_gs_root(self, gs_root: str, scene_id: str) -> bool:
-        """Load scene from GS root directory."""
+        """Load scene from GS root directory (local path or fj:s3://...)."""
         # Skip reload if same scene is already loaded
         if scene_id == self._current_scene_id and self.scene_loaded:
             return True
-        
+
+        if gs_io.is_remote(gs_root):
+            return self._load_scene_remote(gs_root, scene_id)
+
         scene_path = Path(gs_root) / scene_id
         return self.load_scene(scene_path, scene_id=scene_id)
+
+    def _load_scene_remote(self, gs_root: str, scene_id: str) -> bool:
+        """Load labels/structure JSON from AOSS without requiring a local scene dir."""
+        success = False
+        labels_data = gs_io.load_scene_json(gs_root, scene_id, "labels.json")
+        if labels_data is not None:
+            try:
+                self.object_boxes = []
+                all_points = []
+                for obj in labels_data:
+                    label = obj.get("label", "").lower()
+                    ins_id = obj.get("ins_id", "")
+                    bbox = obj.get("bounding_box", [])
+                    if len(bbox) != 8:
+                        continue
+                    aabb = AABB.from_corners(bbox, label, ins_id)
+                    if any(ignored in label for ignored in self.IGNORED_LABELS):
+                        continue
+                    expanded = aabb.expand(self.camera_radius + self.safety_margin)
+                    self.object_boxes.append(expanded)
+                    for corner in bbox:
+                        all_points.append([corner["x"], corner["y"], corner["z"]])
+                if all_points:
+                    all_points = np.array(all_points)
+                    room_min = all_points.min(axis=0) - 0.5
+                    room_max = all_points.max(axis=0) + 0.5
+                    self.room_boundary = AABB(room_min, room_max, "room_boundary", "room")
+                    self.floor_height = max(self.floor_height, room_min[2] + self.camera_radius)
+                    self.ceiling_height = min(self.ceiling_height, room_max[2] - self.camera_radius)
+                print(f"[CollisionDetector] Loaded {len(self.object_boxes)} collision objects from AOSS labels.json")
+                success = True
+            except Exception as e:
+                print(f"[CollisionDetector] Error loading AOSS labels.json: {e}")
+
+        structure_data = gs_io.load_scene_json(gs_root, scene_id, "structure.json")
+        if structure_data is not None:
+            try:
+                self.room_profiles = []
+                self.wall_segments = []
+                door_segments = []
+                for room in structure_data.get("rooms", []):
+                    profile = room.get("profile", [])
+                    if profile and len(profile) >= 3:
+                        points = np.array([[p[0], -p[1]] for p in profile])
+                        self.room_profiles.append(points)
+                for hole in structure_data.get("holes", []):
+                    hole_profile = hole.get("profile", [])
+                    hole_type = hole.get("type", "")
+                    if hole_type == "DOOR" and len(hole_profile) >= 2:
+                        xs = [p[0] for p in hole_profile]
+                        ys = [-p[1] for p in hole_profile]
+                        min_x, max_x = min(xs), max(xs)
+                        min_y, max_y = min(ys), max(ys)
+                        if (max_x - min_x) > (max_y - min_y):
+                            center_y = (min_y + max_y) / 2
+                            door_segments.append((np.array([min_x, center_y]), np.array([max_x, center_y])))
+                        else:
+                            center_x = (min_x + max_x) / 2
+                            door_segments.append((np.array([center_x, min_y]), np.array([center_x, max_y])))
+                for room_profile in self.room_profiles:
+                    n = len(room_profile)
+                    for i in range(n):
+                        p1 = room_profile[i].copy()
+                        p2 = room_profile[(i + 1) % n].copy()
+                        if not self._segment_overlaps_door(p1, p2, door_segments):
+                            self.wall_segments.append((p1, p2))
+                print(f"[CollisionDetector] Loaded {len(self.room_profiles)} rooms, {len(self.wall_segments)} wall segments from AOSS structure.json")
+                success = True
+            except Exception as e:
+                print(f"[CollisionDetector] Error loading AOSS structure.json: {e}")
+
+        self.scene_loaded = success
+        if success:
+            self._current_scene_id = scene_id
+        return success
     
     def check_collision(
         self,

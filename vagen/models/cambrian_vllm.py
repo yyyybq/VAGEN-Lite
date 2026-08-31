@@ -6,8 +6,9 @@ vLLM V1 model wrapper for Cambrian-S (CambrianQwenForCausalLM).
 Loaded by vllm_async_server.py before run_server() via:
     actor_rollout_ref.rollout.model.external_lib = vagen.models.cambrian_vllm
 
-This file intentionally does NOT import from cambrian-s source to avoid the
-missing `ezcolorlog` dependency.  It uses SiglipVisionModel from transformers.
+The vision tower prefers Cambrian's native SigLIP implementation when
+`CAMBRIAN_SRC` is available.  D0.8 showed that Transformers SiglipVisionModel is
+not numerically identical to the training-side Cambrian tower for this checkpoint.
 
 Token convention
 ----------------
@@ -30,13 +31,33 @@ Weight remapping from Cambrian-S checkpoint
 from __future__ import annotations
 
 from functools import lru_cache
+import json
+import os
+from pathlib import Path
+import sys
+import time
 from typing import Iterable, Mapping, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
 from PIL import Image
-from transformers import Qwen2Config, SiglipConfig, SiglipVisionModel
+from transformers import Qwen2Config
+try:
+    _CAMBRIAN_SRC = os.environ.get("CAMBRIAN_SRC", "/mnt/umm/users/yinbaiqiao/cambrian-s")
+    if _CAMBRIAN_SRC and _CAMBRIAN_SRC not in sys.path:
+        sys.path.insert(0, _CAMBRIAN_SRC)
+    from cambrian.model.multimodal_encoder.llava_next_siglip_encoder import (  # type: ignore
+        SigLipVisionConfig as CambrianSiglipVisionConfig,
+        SigLipVisionModel as CambrianSiglipVisionModel,
+    )
+except Exception:
+    CambrianSiglipVisionConfig = None
+    CambrianSiglipVisionModel = None
+    from transformers import SiglipVisionConfig as TransformersSiglipVisionConfig
+    from transformers import SiglipVisionModel as TransformersSiglipVisionModel
 from transformers.feature_extraction_utils import BatchFeature
+
+from vagen.models.cambrian_miv import build_cambrian_visual_features
 
 from vllm import ModelRegistry
 from vllm.model_executor.models.interfaces import SupportsMultiModal
@@ -61,7 +82,634 @@ IMAGE_PAD_TOKEN_ID: int = 151655   # <|image_pad|> built-in Qwen2 token
 TOKENS_PER_IMAGE: int = 756        # 27 * (27 + 1) = 756
 SIGLIP_HIDDEN_DIM: int = 1152
 LM_HIDDEN_DIM: int = 3584
-SIGLIP_CACHE: str = "/scratch/by2593/hf_cache"
+TRAINING_SIGLIP_MODEL: str = os.environ.get(
+    "VAGEN_CAMBRIAN_SIGLIP_MODEL",
+    "google/siglip2-so400m-patch14-384",
+)
+
+
+def _default_siglip_cache() -> str:
+    """Prefer explicit SIGLIP_CACHE, then common local HF hubs."""
+    env = os.environ.get("SIGLIP_CACHE")
+    if env:
+        return env
+    candidates = [
+        os.path.join(os.environ.get("HF_HOME", ""), "hub") if os.environ.get("HF_HOME") else "",
+        "/mnt/umm/users/yinbaiqiao/.cache/huggingface/hub",
+        "/mnt/umm/users/yinbaiqiao/hf_cache/hub",
+        os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub"),
+    ]
+    for c in candidates:
+        if c and os.path.isdir(c):
+            return c
+    return os.path.join(os.environ.get("HF_HOME", "/tmp/hf_cache"), "hub")
+
+
+SIGLIP_CACHE: str = _default_siglip_cache()
+
+
+def _d0_8_float(x: torch.Tensor) -> float:
+    return float(x.detach().float().cpu().item())
+
+
+def _d0_8_tensor_stats(t: torch.Tensor) -> dict:
+    td = t.detach()
+    tf = td.float()
+    flat = tf.reshape(-1)
+    first = flat[:8].cpu().tolist()
+    checksum = _d0_8_float(flat[: min(flat.numel(), 4096)].sum()) if flat.numel() else 0.0
+    return {
+        "shape": list(td.shape),
+        "dtype": str(td.dtype),
+        "device": str(td.device),
+        "mean": _d0_8_float(tf.mean()) if flat.numel() else 0.0,
+        "std": _d0_8_float(tf.std(unbiased=False)) if flat.numel() else 0.0,
+        "min": _d0_8_float(tf.min()) if flat.numel() else 0.0,
+        "max": _d0_8_float(tf.max()) if flat.numel() else 0.0,
+        "checksum_first_4096_sum": checksum,
+        "first_values": [float(x) for x in first],
+    }
+
+
+def _d0_8_selected_vectors(
+    inputs_embeds: torch.Tensor,
+    positions: torch.Tensor,
+    target_positions: set[int],
+) -> list[dict]:
+    if inputs_embeds.dim() == 3:
+        embeds = inputs_embeds.reshape(-1, inputs_embeds.shape[-1])
+    else:
+        embeds = inputs_embeds
+    pos = positions.reshape(-1).detach().cpu().tolist()
+    out = []
+    for local_idx, p in enumerate(pos):
+        p_int = int(p)
+        if p_int in target_positions or p_int in {0, 469, 470, 501, 533, 534, 600, 1000, 1225, 1226, 1413, 1414, 1487, 1501}:
+            vec = embeds[local_idx]
+            record = {
+                "local_index": int(local_idx),
+                "absolute_position": p_int,
+                "summary": _d0_8_tensor_stats(vec),
+            }
+            if os.environ.get("D0_8_DUMP_VECTOR_VALUES", "0") == "1":
+                record["values"] = [float(x) for x in vec.detach().float().cpu().tolist()]
+            out.append(record)
+    return out
+
+
+def _d0_8_dump_forward(
+    *,
+    input_ids: Optional[torch.Tensor],
+    positions: torch.Tensor,
+    inputs_embeds: torch.Tensor,
+    kwargs: Mapping[str, object],
+) -> None:
+    capture_dir = os.environ.get("D0_8_CAPTURE_DIR")
+    if not capture_dir:
+        return
+
+    max_calls = int(os.environ.get("D0_8_MAX_CAPTURE_CALLS", "64"))
+    call_idx = int(getattr(_d0_8_dump_forward, "_call_idx", 0))
+    if call_idx >= max_calls:
+        return
+    setattr(_d0_8_dump_forward, "_call_idx", call_idx + 1)
+
+    target_positions = {
+        int(x)
+        for x in os.environ.get("D0_8_TARGET_POSITIONS", "").split(",")
+        if x.strip()
+    }
+    pos_flat = positions.reshape(-1).detach().cpu().tolist()
+    pos_int = [int(x) for x in pos_flat]
+    ids_int: list[int] = []
+    image_pad_positions: list[int] = []
+    if input_ids is not None:
+        ids_int = [int(x) for x in input_ids.reshape(-1).detach().cpu().tolist()]
+        image_pad_positions = [
+            int(pos_int[i])
+            for i, tok in enumerate(ids_int[: len(pos_int)])
+            if tok == IMAGE_PAD_TOKEN_ID
+        ]
+
+    spans = []
+    if image_pad_positions:
+        start = prev = image_pad_positions[0]
+        for p in image_pad_positions[1:]:
+            if p == prev + 1:
+                prev = p
+            else:
+                spans.append([start, prev + 1])
+                start = prev = p
+        spans.append([start, prev + 1])
+
+    payload = {
+        "pid": os.getpid(),
+        "time": time.time(),
+        "call_idx": call_idx,
+        "input_ids_shape": None if input_ids is None else list(input_ids.shape),
+        "positions_shape": list(positions.shape),
+        "inputs_embeds_shape": list(inputs_embeds.shape),
+        "inputs_embeds_dtype": str(inputs_embeds.dtype),
+        "num_tokens": len(pos_int),
+        "position_min": min(pos_int) if pos_int else None,
+        "position_max": max(pos_int) if pos_int else None,
+        "position_first_16": pos_int[:16],
+        "position_last_32": pos_int[-32:],
+        "image_pad_token_id": IMAGE_PAD_TOKEN_ID,
+        "image_pad_count_in_call": len(image_pad_positions),
+        "image_pad_position_spans_in_call": spans,
+        "contains_targets": sorted(set(pos_int).intersection(target_positions)),
+        "selected_vectors": _d0_8_selected_vectors(inputs_embeds, positions, target_positions),
+        "kwarg_keys": sorted(str(k) for k in kwargs.keys()),
+    }
+
+    out_dir = Path(capture_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"forward_pid{os.getpid()}_call{call_idx:04d}.json"
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def _d0_8_dump_logits(
+    *,
+    positions: Optional[torch.Tensor],
+    logits: Optional[torch.Tensor],
+) -> None:
+    capture_dir = os.environ.get("D0_8_CAPTURE_DIR")
+    if not capture_dir or logits is None or positions is None:
+        return
+
+    target_positions = [
+        int(x)
+        for x in os.environ.get("D0_8_TARGET_POSITIONS", "").split(",")
+        if x.strip()
+    ]
+    target_token_ids = [
+        int(x)
+        for x in os.environ.get("D0_8_TARGET_TOKEN_IDS", "").split(",")
+        if x.strip()
+    ]
+    if len(target_positions) != len(target_token_ids):
+        return
+
+    max_calls = int(os.environ.get("D0_8_MAX_LOGIT_CAPTURE_CALLS", "64"))
+    call_idx = int(getattr(_d0_8_dump_logits, "_call_idx", 0))
+    if call_idx >= max_calls:
+        return
+    setattr(_d0_8_dump_logits, "_call_idx", call_idx + 1)
+
+    pos = [int(x) for x in positions.reshape(-1).detach().cpu().tolist()]
+    logits_f = logits.detach().float()
+    if logits_f.dim() == 3:
+        logits_f = logits_f.reshape(-1, logits_f.shape[-1])
+
+    records = []
+    for target_pos, target_tok in zip(target_positions, target_token_ids, strict=True):
+        pred_pos = target_pos - 1
+        if pred_pos not in pos:
+            continue
+        local_idx = pos.index(pred_pos)
+        if local_idx >= logits_f.shape[0]:
+            continue
+        row = logits_f[local_idx].cpu()
+        logp = torch.log_softmax(row, dim=-1)
+        top_vals, top_ids = torch.topk(logp, k=min(20, logp.numel()))
+        target_raw = float(row[target_tok].item())
+        records.append({
+            "target_position": target_pos,
+            "prediction_position": pred_pos,
+            "local_index": int(local_idx),
+            "target_token_id": int(target_tok),
+            "target_raw_logit": target_raw,
+            "target_logprob": float(logp[target_tok].item()),
+            "target_rank": int((row > row[target_tok]).sum().item() + 1),
+            "logsumexp": float(torch.logsumexp(row, dim=-1).item()),
+            "top20": [
+                {
+                    "rank": int(i + 1),
+                    "token_id": int(tid),
+                    "raw_logit": float(row[int(tid)].item()),
+                    "logprob": float(top_vals[i].item()),
+                }
+                for i, tid in enumerate(top_ids.tolist())
+            ],
+        })
+    if not records:
+        return
+
+    out_dir = Path(capture_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"logits_pid{os.getpid()}_call{call_idx:04d}.json"
+    out_path.write_text(
+        json.dumps({
+            "pid": os.getpid(),
+            "time": time.time(),
+            "call_idx": call_idx,
+            "logits_shape": list(logits.shape),
+            "positions_shape": list(positions.shape),
+            "position_min": min(pos) if pos else None,
+            "position_max": max(pos) if pos else None,
+            "records": records,
+        }, indent=2, ensure_ascii=False) + "\n"
+    )
+
+
+def _d0_9_capture_dir() -> Optional[Path]:
+    raw = os.environ.get("D0_9_CAPTURE_DIR")
+    if not raw:
+        return None
+    path = Path(raw)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _d0_9_int_set(name: str) -> set[int]:
+    vals = os.environ.get(name, "")
+    out: set[int] = set()
+    for item in vals.split(","):
+        item = item.strip()
+        if item:
+            out.add(int(item))
+    return out
+
+
+def _d0_9_layer_set(num_layers: int) -> set[int]:
+    raw = os.environ.get("D0_9_CAPTURE_LAYERS", "all").strip().lower()
+    if raw in {"", "all"}:
+        return set(range(num_layers))
+    return {int(x.strip()) for x in raw.split(",") if x.strip()}
+
+
+def _d0_9_record_vectors(
+    *,
+    capture_dir: Optional[Path],
+    kind: str,
+    layer_idx: Optional[int],
+    name: str,
+    positions: torch.Tensor,
+    tensor: torch.Tensor,
+    extra: Optional[dict] = None,
+) -> None:
+    if capture_dir is None:
+        return
+    target_positions = _d0_9_int_set("D0_9_TARGET_POSITIONS")
+    if not target_positions:
+        return
+    pos = [int(x) for x in positions.reshape(-1).detach().cpu().tolist()]
+    vec = tensor
+    if vec.dim() == 3:
+        vec = vec.reshape(-1, vec.shape[-1])
+    elif vec.dim() > 3:
+        vec = vec.reshape(vec.shape[0], -1)
+    records = []
+    dump_values = os.environ.get("D0_9_DUMP_VALUES", "1") == "1"
+    for local_idx, abs_pos in enumerate(pos):
+        if abs_pos not in target_positions or local_idx >= vec.shape[0]:
+            continue
+        v = vec[local_idx].detach().float().cpu()
+        rec = {
+            "absolute_position": abs_pos,
+            "local_index": int(local_idx),
+            "summary": {
+                "shape": list(tensor.shape),
+                "vector_shape": list(v.shape),
+                "dtype": str(tensor.dtype),
+                "mean": float(v.mean().item()) if v.numel() else 0.0,
+                "std": float(v.std(unbiased=False).item()) if v.numel() else 0.0,
+                "min": float(v.min().item()) if v.numel() else 0.0,
+                "max": float(v.max().item()) if v.numel() else 0.0,
+                "l2": float(torch.linalg.vector_norm(v).item()) if v.numel() else 0.0,
+                "checksum": float(v[: min(4096, v.numel())].sum().item()) if v.numel() else 0.0,
+            },
+        }
+        if dump_values:
+            rec["values"] = [float(x) for x in v.tolist()]
+        records.append(rec)
+    if not records:
+        return
+    payload = {
+        "pid": os.getpid(),
+        "time": time.time(),
+        "kind": kind,
+        "layer_idx": layer_idx,
+        "name": name,
+        "records": records,
+    }
+    if extra:
+        payload["extra"] = extra
+    out_path = capture_dir / f"d0_9_pid{os.getpid()}.jsonl"
+    with out_path.open("a") as f:
+        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _d0_10_prefix_targets() -> set[int]:
+    vals = os.environ.get("D0_10_PREFIX_TARGET_POSITIONS", "")
+    out: set[int] = set()
+    for item in vals.split(","):
+        item = item.strip()
+        if item:
+            out.add(int(item))
+    return out
+
+
+def _d0_10_record_prefix_kv(
+    *,
+    capture_dir: Optional[Path],
+    layer_idx: int,
+    positions: torch.Tensor,
+    q_rope: torch.Tensor,
+    k_rope: torch.Tensor,
+    v: torch.Tensor,
+) -> None:
+    if capture_dir is None or os.environ.get("D0_10_PREFIX_CAPTURE", "0") != "1":
+        return
+    target_positions = _d0_10_prefix_targets()
+    if not target_positions:
+        return
+    prefix_layer = int(os.environ.get("D0_10_PREFIX_LAYER", "0"))
+    if layer_idx != prefix_layer:
+        return
+
+    pos = [int(x) for x in positions.reshape(-1).detach().cpu().tolist()]
+    if q_rope.dim() != 2 or k_rope.dim() != 2 or v.dim() != 2:
+        return
+
+    q_cpu = q_rope.detach().float().cpu()
+    k_cpu = k_rope.detach().float().cpu()
+    v_cpu = v.detach().float().cpu()
+    pos_to_local = {abs_pos: i for i, abs_pos in enumerate(pos)}
+    records = []
+    for query_pos in sorted(target_positions):
+        if query_pos not in pos_to_local:
+            continue
+        prefix_indices = [
+            i for i, abs_pos in enumerate(pos)
+            if 0 <= abs_pos <= query_pos and i < k_cpu.shape[0] and i < v_cpu.shape[0]
+        ]
+        q_idx = pos_to_local[query_pos]
+        records.append({
+            "query_position": int(query_pos),
+            "positions": [int(pos[i]) for i in prefix_indices],
+            "q_rope_values": [float(x) for x in q_cpu[q_idx].tolist()],
+            "k_rope_values": [[float(x) for x in k_cpu[i].tolist()] for i in prefix_indices],
+            "v_values": [[float(x) for x in v_cpu[i].tolist()] for i in prefix_indices],
+            "shapes": {
+                "q_rope": list(q_rope.shape),
+                "k_rope": list(k_rope.shape),
+                "v": list(v.shape),
+            },
+            "dtype": {
+                "q_rope": str(q_rope.dtype),
+                "k_rope": str(k_rope.dtype),
+                "v": str(v.dtype),
+            },
+        })
+    if not records:
+        return
+    out_path = capture_dir / f"d0_10_pid{os.getpid()}.jsonl"
+    with out_path.open("a") as f:
+        f.write(json.dumps({
+            "pid": os.getpid(),
+            "time": time.time(),
+            "kind": "d0_10_prefix_kv",
+            "layer_idx": layer_idx,
+            "records": records,
+        }, ensure_ascii=False) + "\n")
+
+
+def _d0_10_record_attention_pre_o(
+    *,
+    capture_dir: Optional[Path],
+    layer_idx: int,
+    positions: torch.Tensor,
+    attention_pre_o: torch.Tensor,
+) -> None:
+    if capture_dir is None or os.environ.get("D0_10_PREFIX_CAPTURE", "0") != "1":
+        return
+    target_positions = _d0_10_prefix_targets()
+    if not target_positions:
+        return
+    prefix_layer = int(os.environ.get("D0_10_PREFIX_LAYER", "0"))
+    if layer_idx != prefix_layer or attention_pre_o.dim() != 2:
+        return
+
+    pos = [int(x) for x in positions.reshape(-1).detach().cpu().tolist()]
+    attn_cpu = attention_pre_o.detach().float().cpu()
+    records = []
+    for local_idx, abs_pos in enumerate(pos):
+        if abs_pos not in target_positions or local_idx >= attn_cpu.shape[0]:
+            continue
+        records.append({
+            "query_position": int(abs_pos),
+            "values": [float(x) for x in attn_cpu[local_idx].tolist()],
+            "shape": list(attention_pre_o.shape),
+            "dtype": str(attention_pre_o.dtype),
+        })
+    if not records:
+        return
+    out_path = capture_dir / f"d0_10_pid{os.getpid()}.jsonl"
+    with out_path.open("a") as f:
+        f.write(json.dumps({
+            "pid": os.getpid(),
+            "time": time.time(),
+            "kind": "d0_10_attention_pre_o",
+            "layer_idx": layer_idx,
+            "records": records,
+        }, ensure_ascii=False) + "\n")
+
+
+def _d0_9_install_qwen_hooks(language_model: nn.Module) -> None:
+    capture_dir = _d0_9_capture_dir()
+    if capture_dir is None:
+        return
+    qwen_model = getattr(language_model, "model", None)
+    layers = list(getattr(qwen_model, "layers", []))
+    if not layers or getattr(qwen_model, "_d0_9_hooks_installed", False):
+        return
+    setattr(qwen_model, "_d0_9_hooks_installed", True)
+    capture_layers = _d0_9_layer_set(len(layers))
+    breakdown_layer_raw = os.environ.get("D0_9_BREAKDOWN_LAYER", "").strip()
+    breakdown_layer = int(breakdown_layer_raw) if breakdown_layer_raw else None
+
+    for layer_idx, layer in enumerate(layers):
+        if layer_idx not in capture_layers and layer_idx != breakdown_layer:
+            continue
+        original_forward = layer.forward
+
+        def wrapped_forward(
+            positions,
+            hidden_states,
+            residual,
+            *,
+            _layer=layer,
+            _layer_idx=layer_idx,
+            _original_forward=original_forward,
+        ):
+            del _original_forward
+            do_breakdown = breakdown_layer == _layer_idx
+            true_input = hidden_states if residual is None else hidden_states + residual
+            if _layer_idx == 0 or do_breakdown:
+                _d0_9_record_vectors(
+                    capture_dir=capture_dir,
+                    kind="stream",
+                    layer_idx=_layer_idx,
+                    name="layer_input",
+                    positions=positions,
+                    tensor=true_input,
+                )
+
+            if residual is None:
+                residual_local = hidden_states
+                normed = _layer.input_layernorm(hidden_states)
+            else:
+                normed, residual_local = _layer.input_layernorm(
+                    hidden_states, residual)
+            if do_breakdown:
+                _d0_9_record_vectors(
+                    capture_dir=capture_dir,
+                    kind="breakdown",
+                    layer_idx=_layer_idx,
+                    name="input_rmsnorm",
+                    positions=positions,
+                    tensor=normed,
+                )
+
+            qkv, _ = _layer.self_attn.qkv_proj(normed)
+            q, k, v = qkv.split([
+                _layer.self_attn.q_size,
+                _layer.self_attn.kv_size,
+                _layer.self_attn.kv_size,
+            ], dim=-1)
+            if do_breakdown:
+                for name, tensor in (("q", q), ("k", k), ("v", v)):
+                    _d0_9_record_vectors(
+                        capture_dir=capture_dir,
+                        kind="breakdown",
+                        layer_idx=_layer_idx,
+                        name=name,
+                        positions=positions,
+                        tensor=tensor,
+                    )
+            q_rope, k_rope = _layer.self_attn.rotary_emb(positions, q, k)
+            if do_breakdown:
+                for name, tensor in (("q_rope", q_rope), ("k_rope", k_rope)):
+                    _d0_9_record_vectors(
+                        capture_dir=capture_dir,
+                        kind="breakdown",
+                        layer_idx=_layer_idx,
+                        name=name,
+                        positions=positions,
+                        tensor=tensor,
+                    )
+            _d0_10_record_prefix_kv(
+                capture_dir=capture_dir,
+                layer_idx=_layer_idx,
+                positions=positions,
+                q_rope=q_rope,
+                k_rope=k_rope,
+                v=v,
+            )
+            attn_pre_o = _layer.self_attn.attn(q_rope, k_rope, v)
+            _d0_10_record_attention_pre_o(
+                capture_dir=capture_dir,
+                layer_idx=_layer_idx,
+                positions=positions,
+                attention_pre_o=attn_pre_o,
+            )
+            if do_breakdown:
+                _d0_9_record_vectors(
+                    capture_dir=capture_dir,
+                    kind="breakdown",
+                    layer_idx=_layer_idx,
+                    name="attention_pre_o",
+                    positions=positions,
+                    tensor=attn_pre_o,
+                )
+            attn_output, _ = _layer.self_attn.o_proj(attn_pre_o)
+            if do_breakdown:
+                _d0_9_record_vectors(
+                    capture_dir=capture_dir,
+                    kind="breakdown",
+                    layer_idx=_layer_idx,
+                    name="attention_output",
+                    positions=positions,
+                    tensor=attn_output,
+                )
+                _d0_9_record_vectors(
+                    capture_dir=capture_dir,
+                    kind="breakdown",
+                    layer_idx=_layer_idx,
+                    name="post_attention_residual",
+                    positions=positions,
+                    tensor=attn_output + residual_local,
+                )
+
+            mlp_input, residual_after_attn = _layer.post_attention_layernorm(
+                attn_output, residual_local)
+            if do_breakdown:
+                _d0_9_record_vectors(
+                    capture_dir=capture_dir,
+                    kind="breakdown",
+                    layer_idx=_layer_idx,
+                    name="post_attention_rmsnorm",
+                    positions=positions,
+                    tensor=mlp_input,
+                )
+            mlp_output = _layer.mlp(mlp_input)
+            if do_breakdown:
+                _d0_9_record_vectors(
+                    capture_dir=capture_dir,
+                    kind="breakdown",
+                    layer_idx=_layer_idx,
+                    name="mlp_output",
+                    positions=positions,
+                    tensor=mlp_output,
+                )
+                _d0_9_record_vectors(
+                    capture_dir=capture_dir,
+                    kind="breakdown",
+                    layer_idx=_layer_idx,
+                    name="post_mlp_residual",
+                    positions=positions,
+                    tensor=mlp_output + residual_after_attn,
+                )
+
+            if _layer_idx in capture_layers:
+                _d0_9_record_vectors(
+                    capture_dir=capture_dir,
+                    kind="stream",
+                    layer_idx=_layer_idx,
+                    name="layer_output",
+                    positions=positions,
+                    tensor=mlp_output + residual_after_attn,
+                )
+            return mlp_output, residual_after_attn
+
+        layer.forward = wrapped_forward
+
+
+
+def _build_siglip_vision_config() -> "SiglipVisionConfig":
+    """Return a SiglipVisionConfig usable by SiglipVisionModel.
+
+    The Cambrian-S-7B-LFP checkpoint stores 26 SigLIP vision encoder layers
+    (0..25) and no SigLIP pooling head.  Do not instantiate the full upstream
+    SigLIP/SigLIP2 config here, because that can create extra randomly
+    initialized layers/head parameters in the rollout policy.
+    """
+    config_cls = CambrianSiglipVisionConfig or TransformersSiglipVisionConfig
+    cfg = config_cls(
+        hidden_size=SIGLIP_HIDDEN_DIM,
+        num_hidden_layers=int(os.environ.get("VAGEN_CAMBRIAN_VISION_LAYERS", "26")),
+        num_attention_heads=16,
+        intermediate_size=4304,
+        image_size=384,
+        patch_size=14,
+        num_channels=3,
+        layer_norm_eps=1e-6,
+        hidden_act="gelu_pytorch_tanh",
+    )
+    cfg.vision_use_head = False
+    return cfg
 
 
 # ---------------------------------------------------------------------------
@@ -69,13 +717,16 @@ SIGLIP_CACHE: str = "/scratch/by2593/hf_cache"
 # ---------------------------------------------------------------------------
 @lru_cache(maxsize=1)
 def _get_siglip_image_processor():
-    from transformers import SiglipImageProcessor
+    from transformers import AutoImageProcessor, SiglipImageProcessor
     try:
-        return SiglipImageProcessor.from_pretrained(
-            "google/siglip-so400m-patch14-384",
+        return AutoImageProcessor.from_pretrained(
+            TRAINING_SIGLIP_MODEL,
             cache_dir=SIGLIP_CACHE,
+            local_files_only=os.environ.get("VAGEN_ALLOW_HF_DOWNLOAD", "0") != "1",
         )
     except Exception:
+        # Fallback preserves availability, but D0.2 should treat this as a
+        # preprocessing-parity failure if it occurs in the live probe.
         return SiglipImageProcessor(image_size=384, patch_size=14)
 
 
@@ -92,8 +743,9 @@ def _expand2square(img: Image.Image, bg=(122, 116, 104)) -> Image.Image:
 def _preprocess_images(images: list[Image.Image]) -> torch.Tensor:
     """Returns float32 tensor (N, 3, 384, 384)."""
     proc = _get_siglip_image_processor()
-    prepared = [_expand2square(img.convert("RGB")) for img in images]
-    return proc(images=prepared, return_tensors="pt").pixel_values
+    from vagen.models.cambrian_processor import preprocess_siglip_images
+
+    return preprocess_siglip_images(images, proc)
 
 
 # ---------------------------------------------------------------------------
@@ -231,25 +883,17 @@ class CambrianVLLMForCausalLM(nn.Module, SupportsMultiModal):
             architectures=["Qwen2ForCausalLM"],
             prefix=maybe_prefix(prefix, "language_model"),
         )
+        _d0_9_install_qwen_hooks(self.language_model)
 
         # ---- SigLIP vision encoder ----
-        try:
-            from transformers import AutoConfig
-            _cfg = AutoConfig.from_pretrained(
-                "google/siglip-so400m-patch14-384",
-                cache_dir=SIGLIP_CACHE,
-            )
-            siglip_cfg = _cfg.vision_config if hasattr(_cfg, "vision_config") else _cfg
-        except Exception:
-            siglip_cfg = SiglipConfig(
-                hidden_size=SIGLIP_HIDDEN_DIM,
-                num_hidden_layers=27,
-                num_attention_heads=16,
-                intermediate_size=4304,
-                image_size=384,
-                patch_size=14,
-            )
-        self.vision_tower = SiglipVisionModel(siglip_cfg)
+        # transformers>=4.50/5.x: SiglipConfig is a text+vision container and does
+        # NOT expose layer_norm_eps; SiglipVisionModel requires SiglipVisionConfig.
+        siglip_cfg = _build_siglip_vision_config()
+        vision_cls = CambrianSiglipVisionModel or TransformersSiglipVisionModel
+        self.vision_tower = vision_cls(siglip_cfg)
+        if hasattr(self.vision_tower, "vision_model") and hasattr(self.vision_tower.vision_model, "head"):
+            self.vision_tower.vision_model.head = nn.Identity()
+        self.hf_config = cfg
 
         # ---- MM projector ----
         self.mm_projector = nn.Sequential(
@@ -284,26 +928,40 @@ class CambrianVLLMForCausalLM(nn.Module, SupportsMultiModal):
         # vLLM batches items as (N, 1, C, H, W) when merge_by_field_config=False.
         # Flatten to (N, C, H, W) so SigLIP gets the expected 4-D input.
         if pixel_values.dim() == 5:
-            pixel_values = pixel_values.flatten(0, 1)  # (N,1,C,H,W) → (N,C,H,W)
+            pixel_values = pixel_values.flatten(0, 1)  # (N,1,C,H,W) -> (N,C,H,W)
 
-        # SigLIP encode: (N, 729, 1152)
+        # SigLIP encode: (N, 729, 1152).
+        #
+        # Cambrian-S uses LOVSiglipVisionTower on the FSDP side: it builds a
+        # 27-layer SigLIP config, deletes the final layer, and returns
+        # hidden_states[-1] from the remaining 26-layer tower. The checkpoint
+        # config still carries mm_vision_select_layer=-2 from the original
+        # 27-layer convention. Since this vLLM wrapper instantiates the already
+        # truncated 26-layer tower directly, the equivalent layer is -1.
         vt_dtype = next(self.vision_tower.parameters()).dtype
-        features = self.vision_tower(
-            pixel_values=pixel_values.to(vt_dtype)
-        ).last_hidden_state  # (N, 729, 1152)
+        vision_outputs = self.vision_tower(
+            pixel_values=pixel_values.to(vt_dtype),
+            output_hidden_states=True,
+        )
+        select_layer = int(getattr(self.hf_config, "mm_vision_select_layer", -1))
+        layer_count = len(self.vision_tower.vision_model.encoder.layers)
+        if select_layer == -2 and layer_count == 26:
+            select_layer = -1
+        features = vision_outputs.hidden_states[select_layer]  # (N, 729, 1152)
 
         # Project: (N, 729, 3584)
         proj_dtype = self.mm_projector[0].weight.dtype
         features = self.mm_projector(features.to(proj_dtype))
 
-        # Append newline column: (N, 27, 27, 3584) → (N, 27, 28, 3584) → (N, 756, 3584)
-        N, _, hidden = features.shape
-        features = features.view(N, 27, 27, hidden)
-        newline = (self.image_newline.to(features.dtype)
-                   .view(1, 1, 1, hidden)
-                   .expand(N, 27, 1, hidden))
-        features = torch.cat([features, newline], dim=2)   # (N, 27, 28, 3584)
-        features = features.view(N, TOKENS_PER_IMAGE, hidden)  # (N, 756, 3584)
+        # Append newline and apply the same MIV overwrite as the FSDP adapter.
+        features, _miv_features = build_cambrian_visual_features(
+            features,
+            self.image_newline,
+            si_token_len=int(getattr(self.hf_config, "si_token_len", 729)),
+            mm_use_newline=bool(getattr(self.hf_config, "mm_use_im_newline_token", True)),
+            nfp_head=bool(getattr(self.hf_config, "nfp_head", False)),
+            miv_token_len=int(getattr(self.hf_config, "miv_token_len", 0) or 0),
+        )
 
         return tuple(features.unbind(0))  # N × (756, 3584)
 
@@ -341,18 +999,47 @@ class CambrianVLLMForCausalLM(nn.Module, SupportsMultiModal):
         elif inputs_embeds is None:
             mm_embeds = self.get_multimodal_embeddings(**kwargs)
             inputs_embeds = self.get_input_embeddings(input_ids, mm_embeds)
+            _d0_8_dump_forward(
+                input_ids=input_ids,
+                positions=positions,
+                inputs_embeds=inputs_embeds,
+                kwargs=kwargs,
+            )
             input_ids = None
+        else:
+            _d0_8_dump_forward(
+                input_ids=input_ids,
+                positions=positions,
+                inputs_embeds=inputs_embeds,
+                kwargs=kwargs,
+            )
 
-        return self.language_model.model(
+        self._d0_8_last_positions = positions.detach().cpu()
+        outputs = self.language_model.model(
             input_ids, positions, intermediate_tensors,
             inputs_embeds=inputs_embeds,
         )
+        if torch.is_tensor(outputs):
+            _d0_9_record_vectors(
+                capture_dir=_d0_9_capture_dir(),
+                kind="stream",
+                layer_idx=None,
+                name="final_norm",
+                positions=positions,
+                tensor=outputs,
+            )
+        return outputs
 
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
     ) -> Optional[torch.Tensor]:
-        return self.language_model.compute_logits(hidden_states)
+        logits = self.language_model.compute_logits(hidden_states)
+        _d0_8_dump_logits(
+            positions=getattr(self, "_d0_8_last_positions", None),
+            logits=logits,
+        )
+        return logits
 
     # ------------------------------------------------------------------
     # Weight loading
@@ -385,9 +1072,30 @@ class CambrianVLLMForCausalLM(nn.Module, SupportsMultiModal):
 
         # Load local parameters
         params = dict(self.named_parameters())
+        loaded_local: set[str] = set()
+        unmatched_local: list[str] = []
         for pname, tensor in local_tensors.items():
             if pname in params:
                 params[pname].data.copy_(tensor)
+                loaded_local.add(pname)
+            else:
+                unmatched_local.append(pname)
+
+        local_prefixes = ("vision_tower.", "mm_projector.")
+        missing_local = [
+            name for name in params
+            if (
+                name.startswith(local_prefixes)
+                or name == "image_newline"
+            )
+            and name not in loaded_local
+        ]
+        if unmatched_local or missing_local:
+            raise RuntimeError(
+                "Cambrian vLLM local weight load mismatch: "
+                f"unmatched={unmatched_local[:8]} missing={missing_local[:8]} "
+                f"(counts: unmatched={len(unmatched_local)}, missing={len(missing_local)})"
+            )
 
         # Return all parameter names so vllm's strict weight-tracking check passes.
         # The lm weights are loaded into tensors via self.language_model.load_weights()

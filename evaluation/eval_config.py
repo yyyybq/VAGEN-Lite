@@ -47,6 +47,8 @@ class EvalEnvConfig:
     
     # Prompt
     prompt_format: str = "free_think"
+    action_space: str = "legacy"
+    enable_explicit_done: bool = True
     max_actions_per_step: int = 5
     action_sep: str = "|"
     image_placeholder: str = "<image>"
