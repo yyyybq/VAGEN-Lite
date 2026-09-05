@@ -54,15 +54,22 @@ class ModelAgent(BaseAgent):
     
     def _is_cambrian_checkpoint(self, model_path: str) -> bool:
         """Detect Cambrian-S HF checkpoints by config.json."""
+        # Check the requested path before inspecting config.json.  A partially
+        # restored checkpoint can be missing its config, but its experiment
+        # path still determines which vLLM registration path is required.
+        path_text = str(model_path).lower()
+        name = (self.model_config.model_name or "").lower()
+        if "cambrian" in path_text or "cambrian" in name:
+            return True
+
         cfg_path = Path(model_path) / "config.json"
         if not cfg_path.is_file():
-            name = (self.model_config.model_name or "").lower()
-            return "cambrian" in name
+            return False
         try:
             import json
             cfg = json.loads(cfg_path.read_text())
         except Exception:
-            return "cambrian" in model_path.lower()
+            return False
         model_type = str(cfg.get("model_type", "")).lower()
         arches = " ".join(str(a) for a in (cfg.get("architectures") or [])).lower()
         return "cambrian" in model_type or "cambrian" in arches

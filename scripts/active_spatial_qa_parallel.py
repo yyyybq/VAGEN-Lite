@@ -88,7 +88,22 @@ def run_shard(
     # The child sees one physical GPU remapped to cuda:0.
     env["CUDA_VISIBLE_DEVICES"] = gpu
     for shard_index, task in enumerate(tasks, start=1):
-        if task.result_path.exists() and not rerun:
+        existing_scores = load_scores(
+            task.result_path,
+            resolve_benchmarks(
+                benchmarks_arg, load_registry(registry).get("benchmark_groups", {})
+            ),
+        )
+        if (
+            task.result_path.exists()
+            and not rerun
+            and is_complete(
+                existing_scores,
+                resolve_benchmarks(
+                    benchmarks_arg, load_registry(registry).get("benchmark_groups", {})
+                ),
+            )
+        ):
             append_progress(
                 progress_path,
                 progress_lock,

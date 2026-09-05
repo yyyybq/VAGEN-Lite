@@ -26,4 +26,6 @@ EXTRA_OVERRIDES="${EXTRA_OVERRIDES} \
   algorithm.rollout_correction.rollout_is=token \
   algorithm.rollout_correction.rollout_is_threshold=2.0 \
   algorithm.rollout_correction.rollout_rs=null \
-  algorithm.rollout_correction.use_policy_gradient=False"
+  algorithm.rollout_correction.use_policy_gradient=False \
+  trainer.max_actor_ckpt_to_keep=20 \
+  trainer.max_critic_ckpt_to_keep=20"

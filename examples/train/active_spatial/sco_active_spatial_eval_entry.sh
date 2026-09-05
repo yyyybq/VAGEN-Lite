@@ -43,6 +43,13 @@ export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${HF_HOME}/hub}"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HF_HOME}/datasets_easi_shared}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}"
+# The navigation vLLM wrapper and the EASI ``cambrians`` backend both need
+# the native Cambrian-S source tree.  Keep this explicit in the SCO entry so
+# evaluation does not silently fall back to a Qwen-only import path.
+export CAMBRIAN_SRC="${CAMBRIAN_SRC:-/mnt/umm/users/yinbaiqiao/cambrian-s}"
+if [[ -d "${CAMBRIAN_SRC}" ]]; then
+  export PYTHONPATH="${CAMBRIAN_SRC}:${ROOT}:${PYTHONPATH:-}"
+fi
 # Match the proven H800 training launcher: vLLM/Triton must use the shared
 # conda compiler and avoid its runtime torch.compile path in SCO pods.
 export VAGEN_ENV_ROOT="/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite"

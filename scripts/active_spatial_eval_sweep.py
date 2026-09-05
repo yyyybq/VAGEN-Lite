@@ -78,18 +78,31 @@ def parse_step_name(path: Path) -> Optional[int]:
 
 
 def checkpoint_model_dir(global_step_dir: Path) -> Optional[Path]:
-    """Return the model-loadable directory for a VERL checkpoint."""
+    """Return a complete HF model directory for a VERL checkpoint.
+
+    Training creates the ``actor/huggingface`` directory before saving its
+    config and weights.  Treating that empty directory as a checkpoint makes
+    evaluation fail later inside vLLM or lmms-eval, and can make old results
+    look resumable even when their source model has been deleted.
+    """
     candidates = [
         global_step_dir / "actor" / "huggingface",
         global_step_dir / "actor" / "hf_model",
         global_step_dir / "actor",
     ]
     for cand in candidates:
-        if (cand / "config.json").exists():
-            return cand
-    # Some partially saved checkpoints still have tokenizer/config one level down.
-    for cand in candidates:
-        if cand.exists():
+        has_config = (cand / "config.json").is_file()
+        has_weights = any(cand.glob("*.safetensors")) or any(
+            (cand / filename).is_file()
+            for filename in (
+                "pytorch_model.bin",
+                "tf_model.h5",
+                "flax_model.msgpack",
+                "model.safetensors.index.json",
+                "pytorch_model.bin.index.json",
+            )
+        )
+        if has_config and has_weights:
             return cand
     return None
 

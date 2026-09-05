@@ -6,6 +6,11 @@ ROOT="${ROOT:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite}"
 AEC2="${AEC2:-h800}"
 DATE_TAG="${DATE_TAG:-20260828}"
 TARGET="${1:-all}"
+MODE="${EVAL_MODE:-full}"
+case "${MODE}" in
+  full|nav|qa) ;;
+  *) echo "[fatal] EVAL_MODE must be full, nav, or qa; got ${MODE}" >&2; exit 2 ;;
+esac
 CONTAINER_IMAGE_URL="registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"
 STORAGE_MOUNT="019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
 WORKER_SPEC="N4lS.Iq.I80.8"
@@ -62,8 +67,31 @@ submit_one() {
     *) echo "[fatal] unknown evaluation target: ${key}" >&2; exit 2 ;;
   esac
   job_name="${sweep_name}"
+
+  # An empty actor/huggingface directory is created before FSDP finishes the
+  # HF export.  Do not spend an H800 allocation discovering that a selected
+  # checkpoint is not loadable by vLLM or lmms-eval.
+  local step model_dir missing_exports=""
+  IFS=',' read -r -a step_list <<< "${steps}"
+  for step in "${step_list[@]}"; do
+    model_dir="${ROOT}/exps/vagen_active_spatial/${experiment}/checkpoints/global_step_${step}/actor/huggingface"
+    if [[ ! -f "${model_dir}/config.json" ]] || ! find "${model_dir}" -maxdepth 1 -type f \
+      \( -name '*.safetensors' -o -name 'pytorch_model.bin' -o -name 'tf_model.h5' \
+      -o -name 'flax_model.msgpack' -o -name 'model.safetensors.index.json' \
+      -o -name 'pytorch_model.bin.index.json' \) -print -quit | grep -q .; then
+      missing_exports+=" step${step}"
+    fi
+  done
+  if [[ -n "${missing_exports}" ]]; then
+    echo "[fatal] refusing to submit ${key}: incomplete HF exports:${missing_exports}" >&2
+    return 3
+  fi
+
   local command
-  command="cd ${ROOT} && EVAL_TARGET=${eval_target} EVAL_EXPERIMENT=${experiment} EVAL_STEPS=${steps} EVAL_SWEEP_NAME=${sweep_name} EVAL_MODE=full EVAL_PARALLEL_GPUS=0,1,2,3,4,5,6,7 EVAL_INCLUDE_EASI=1 EVAL_QA_BENCHMARKS=easi_8"
+  command="cd ${ROOT} && EVAL_TARGET=${eval_target} EVAL_EXPERIMENT=${experiment} EVAL_STEPS=${steps} EVAL_SWEEP_NAME=${sweep_name} EVAL_MODE=${MODE} EVAL_PARALLEL_GPUS=0,1,2,3,4,5,6,7 EVAL_INCLUDE_EASI=1 EVAL_QA_BENCHMARKS=easi_8"
+  if [[ "${EVAL_RERUN_QA:-0}" == 1 ]]; then
+    command+=" EVAL_RERUN_QA=1"
+  fi
   if [[ -n "${resume_from}" ]]; then
     command+=" EVAL_RESUME_FROM_SWEEP=${resume_from}"
   fi
