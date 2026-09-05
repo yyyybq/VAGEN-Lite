@@ -10,7 +10,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from r1_full_regeneration import TARGET_TASKS, atomic_json, atomic_jsonl, read_jsonl, sha256
+from r1_full_regeneration import (
+    TARGET_TASKS, atomic_json, atomic_jsonl, read_jsonl, sha256, tier_summary,
+)
 
 
 def source_index(row: dict[str, Any]) -> int:
@@ -47,6 +49,7 @@ def main() -> None:
     scene_status: dict[str, Counter[str]] = defaultdict(Counter)
     split_summaries: dict[str, Any] = {}
     expected_total = 0
+    all_reachability: list[dict[str, Any]] = []
 
     for split, source_path in sources.items():
         source_rows = read_jsonl(source_path)
@@ -60,12 +63,14 @@ def main() -> None:
         repaired: list[dict[str, Any]] = []
         mappings: list[dict[str, Any]] = []
         reachability: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         for scene in scenes:
             split_dir = args.shards_dir / scene / split
             accounting.extend(read_jsonl(split_dir / "accounting.jsonl"))
             repaired.extend(read_jsonl(split_dir / "trainable.jsonl"))
             mappings.extend(read_jsonl(split_dir / "mapping.jsonl"))
             reachability.extend(read_jsonl(split_dir / "reachability_manifest.jsonl"))
+            candidates.extend(read_jsonl(split_dir / "candidate_manifest.jsonl"))
 
         actual_indices = [source_index(row) for row in accounting]
         duplicates = sorted(index for index, count in Counter(actual_indices).items() if count != 1)
@@ -93,6 +98,8 @@ def main() -> None:
         repaired.sort(key=source_index)
         mappings.sort(key=source_index)
         reachability.sort(key=source_index)
+        candidates.sort(key=source_index)
+        all_reachability.extend(reachability)
         failures = [row for row in accounting if row.get("status") == "hard_failure"]
         unverified = [row for row in accounting if row.get("status") == "unverified"]
         output_dir = args.output_dir / split
@@ -100,6 +107,7 @@ def main() -> None:
         atomic_jsonl(output_dir / "trainable.jsonl", repaired)
         atomic_jsonl(output_dir / "mapping.jsonl", mappings)
         atomic_jsonl(output_dir / "reachability_manifest.jsonl", reachability)
+        atomic_jsonl(output_dir / "candidate_manifest.jsonl", candidates)
         atomic_jsonl(output_dir / "failure_manifest.jsonl", failures)
         atomic_jsonl(output_dir / "unverified_manifest.jsonl", unverified)
 
@@ -146,7 +154,8 @@ def main() -> None:
         "reachability_search": {
             "algorithm": "bounded_best_first_not_shortest",
             "max_steps": 12,
-            "max_expansions": 2000,
+            "expansion_tiers": [2000, 25000, 250000],
+            "tier_results": tier_summary(all_reachability, [2000, 25000, 250000]),
             "budget_exhaustion_semantics": "unverified_not_unreachable",
         },
         "gate_pass": total_counts.get("hard_failure", 0) == 0 and total_counts.get("unverified", 0) == 0,

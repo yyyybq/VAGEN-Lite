@@ -117,6 +117,11 @@ def main() -> None:
     detector._label_xy_centers = [np.array([1.5, 2.0])] * 20
     assert detector._select_structure_y_sign(convention_scene) == 1.0
     assert detector.structure_convention_status == "frozen"
+    overridden = CollisionDetector(structure_y_sign_overrides={"reviewed": 1.0})
+    overridden._label_xy_centers = [np.array([1.5, -2.0])] * 20
+    assert overridden._select_structure_y_sign(convention_scene, "reviewed") == 1.0
+    assert overridden.structure_convention_status == "frozen"
+    assert overridden.convention_record()["override_source"] == "explicit_versioned_override"
 
     # Only explicitly versioned R1 rows select the canonical backend. Legacy
     # rows and unknown future versions must retain historical scoring.
@@ -141,7 +146,16 @@ def main() -> None:
         engine.step(action)
     assert len(certificate) == 9 and np.allclose(engine.get_pose(), success_pose, atol=1e-7)
 
-    print(json.dumps({"passed": True, "tests": 16, "generator_version": PROJECTIVE_GENERATOR_VERSION}, indent=2))
+    # The tiered planner reuses one manipulator but resets it before every
+    # action.  This must be bit-equivalent to constructing a fresh instance.
+    reused = type(engine)(step_translation=0.3, step_rotation_deg=20.0, world_up_axis="Z")
+    for action in ("move_forward", "move_backward", "move_left", "move_right", "turn_left", "turn_right"):
+        fresh = type(engine)(step_translation=0.3, step_rotation_deg=20.0, world_up_axis="Z")
+        fresh.reset(initial_pose)
+        reused.reset(initial_pose)
+        assert np.array_equal(fresh.step(action), reused.step(action))
+
+    print(json.dumps({"passed": True, "tests": 18, "generator_version": PROJECTIVE_GENERATOR_VERSION}, indent=2))
 
 
 if __name__ == "__main__":

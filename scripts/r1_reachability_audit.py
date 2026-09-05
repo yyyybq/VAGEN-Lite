@@ -156,6 +156,11 @@ def search_one(
     collisions: Counter[str] = Counter()
     expansions = 0
     deepest = 0
+    engine = ViewManipulator(
+        step_translation=step_translation,
+        step_rotation_deg=step_rotation_deg,
+        world_up_axis="Z",
+    )
 
     while queue:
         _, _, depth, node_index = heapq.heappop(queue)
@@ -179,11 +184,6 @@ def search_one(
         pose = nodes[node_index][0]
         expansions += 1
         for action in ACTIONS:
-            engine = ViewManipulator(
-                step_translation=step_translation,
-                step_rotation_deg=step_rotation_deg,
-                world_up_axis="Z",
-            )
             engine.reset(pose)
             candidate = engine.step(action)
             if action in TRANSLATION_ACTIONS:
@@ -347,6 +347,7 @@ def main() -> None:
     parser.add_argument("--min-rgb-std", type=float, default=8.0)
     parser.add_argument("--max-consecutive-low-info", type=int, default=3)
     parser.add_argument("--source-indices", help="optional comma-separated source row indices")
+    parser.add_argument("--collision-convention-overrides", type=Path)
     args = parser.parse_args()
 
     repaired = read_jsonl(args.repaired)
@@ -356,6 +357,10 @@ def main() -> None:
         int(value) for value in (args.source_indices or "").split(",") if value.strip()
     }
     rows = []
+    overrides = {}
+    if args.collision_convention_overrides:
+        payload = json.loads(args.collision_convention_overrides.read_text())
+        overrides = payload.get("structure_y_sign_overrides", {})
     detector = create_collision_detector(
         {
             "camera_radius": 0.15,
@@ -364,6 +369,7 @@ def main() -> None:
             "safety_margin": 0.05,
             "enable_object_collision": True,
             "enable_boundary_collision": True,
+            "structure_y_sign_overrides": overrides,
         }
     )
     for mapping in mappings:

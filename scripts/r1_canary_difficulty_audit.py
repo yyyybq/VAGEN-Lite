@@ -81,6 +81,8 @@ def main() -> None:
     status_counts: Counter[str] = Counter()
     task_counts: Counter[str] = Counter()
     metric_failures: list[dict[str, Any]] = []
+    bucket_matches: dict[str, Counter[str]] = defaultdict(Counter)
+    paired_deltas: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
 
     for split, source_path in sources.items():
         source_rows = read_jsonl(source_path)
@@ -135,7 +137,23 @@ def main() -> None:
             bucket["old_target_bbox_area_ratio_min"].append(min(old_target_areas) if old_target_areas else 0.0)
             bucket["new_target_bbox_area_ratio_min"].append(min(new_target_areas) if new_target_areas else 0.0)
             bucket["planner_path_upper_bound"].append(float(mapping["found_path_length_upper_bound"]))
-            bucket["repair_attempt_count"].append(float(mapping.get("retry", {}).get("attempt_count", 0)))
+            retry = mapping.get("retry", {})
+            bucket["repair_attempt_count"].append(
+                float(retry.get("joint_states_evaluated", retry.get("attempt_count", 0)))
+            )
+            if group == "projective":
+                old_profile = mapping.get("source_difficulty") or {}
+                new_profile = mapping.get("repaired_difficulty") or {}
+                for name in (
+                    "translation_m", "yaw_deg", "bbox_area_ratio",
+                    "relation_margin_px", "planner_step_proxy",
+                ):
+                    if name in old_profile and name in new_profile:
+                        paired_deltas[group][name].append(
+                            float(new_profile[name]) - float(old_profile[name])
+                        )
+                        matched = old_profile.get("buckets", {}).get(name) == new_profile.get("buckets", {}).get(name)
+                        bucket_matches[name]["matched" if matched else "mismatched"] += 1
             if group == "projective":
                 for prefix, metric in (
                     ("old_initial", old_initial_metric), ("new_initial", new_initial_metric),
@@ -161,6 +179,13 @@ def main() -> None:
         "difficulty": {
             group: {metric: describe(series) for metric, series in sorted(metrics.items())}
             for group, metrics in sorted(values.items())
+        },
+        "paired_difficulty_delta_new_minus_old": {
+            group: {metric: describe(series) for metric, series in sorted(metrics.items())}
+            for group, metrics in sorted(paired_deltas.items())
+        },
+        "projective_bucket_match_counts": {
+            name: dict(counts) for name, counts in sorted(bucket_matches.items())
         },
         "scene_distribution": {group: dict(counts) for group, counts in sorted(scene_counts.items())},
         "category_distribution": {group: dict(counts) for group, counts in sorted(category_counts.items())},

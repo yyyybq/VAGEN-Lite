@@ -162,6 +162,7 @@ class CollisionDetector:
         safety_margin: float = 0.05,  # Additional safety margin
         enable_object_collision: bool = True,
         enable_boundary_collision: bool = True,
+        structure_y_sign_overrides: Optional[Dict[str, float]] = None,
     ):
         """
         Initialize collision detector.
@@ -182,6 +183,10 @@ class CollisionDetector:
         self.safety_margin = safety_margin
         self.enable_object_collision = enable_object_collision
         self.enable_boundary_collision = enable_boundary_collision
+        self.structure_y_sign_overrides = {
+            str(key): float(value) for key, value in (structure_y_sign_overrides or {}).items()
+        }
+        self.structure_convention_override_source: Optional[str] = None
         
         # Scene data
         self.object_boxes: List[AABB] = []
@@ -280,7 +285,7 @@ class CollisionDetector:
                 self.wall_segments = []
                 door_segments = []
                 
-                y_sign = self._select_structure_y_sign(structure_data)
+                y_sign = self._select_structure_y_sign(structure_data, scene_id)
 
                 # Extract room profiles using the convention best aligned with
                 # this scene's label coordinates.
@@ -374,7 +379,9 @@ class CollisionDetector:
             j = i
         return inside
 
-    def _select_structure_y_sign(self, structure_data: Dict[str, Any]) -> float:
+    def _select_structure_y_sign(
+        self, structure_data: Dict[str, Any], scene_id: Optional[str] = None
+    ) -> float:
         """Infer whether structure Y already shares label/world coordinates.
 
         InteriorGS exports in circulation contain both conventions.  The old
@@ -382,6 +389,7 @@ class CollisionDetector:
         walls for raw-coordinate scenes.  We choose the convention containing
         the most label-box centers; ties retain the historical ``-y`` behavior.
         """
+        self.structure_convention_override_source = None
         scores: Dict[str, int] = {}
         for sign in (1.0, -1.0):
             polygons = []
@@ -402,6 +410,14 @@ class CollisionDetector:
         self.structure_alignment_relative_margin = (
             abs(positive - negative) / max(best, 1)
         )
+        if scene_id is not None and str(scene_id) in self.structure_y_sign_overrides:
+            override = float(self.structure_y_sign_overrides[str(scene_id)])
+            if override not in (-1.0, 1.0):
+                raise ValueError(f"invalid structure Y-sign override for {scene_id}: {override}")
+            self.structure_convention_status = "frozen"
+            self.structure_y_sign = override
+            self.structure_convention_override_source = "explicit_versioned_override"
+            return override
         sufficiently_supported = (
             self.structure_alignment_evidence_count >= COLLISION_CONVENTION_MIN_EVIDENCE
             and positive != negative
@@ -424,6 +440,7 @@ class CollisionDetector:
             "relative_margin": self.structure_alignment_relative_margin,
             "min_evidence": COLLISION_CONVENTION_MIN_EVIDENCE,
             "min_relative_margin": COLLISION_CONVENTION_MIN_RELATIVE_MARGIN,
+            "override_source": self.structure_convention_override_source,
         }
     
     def _point_to_segment_distance_2d(self, point: np.ndarray, seg_start: np.ndarray, seg_end: np.ndarray) -> float:
@@ -521,7 +538,7 @@ class CollisionDetector:
                 self.room_profiles = []
                 self.wall_segments = []
                 door_segments = []
-                y_sign = self._select_structure_y_sign(structure_data)
+                y_sign = self._select_structure_y_sign(structure_data, scene_id)
                 for room in structure_data.get("rooms", []):
                     profile = room.get("profile", [])
                     if profile and len(profile) >= 3:
@@ -730,4 +747,5 @@ def create_collision_detector(config: Dict[str, Any]) -> CollisionDetector:
         safety_margin=config.get("safety_margin", 0.05),
         enable_object_collision=config.get("enable_object_collision", True),
         enable_boundary_collision=config.get("enable_boundary_collision", True),
+        structure_y_sign_overrides=config.get("structure_y_sign_overrides"),
     )

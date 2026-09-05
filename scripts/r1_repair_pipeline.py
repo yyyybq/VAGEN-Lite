@@ -34,7 +34,7 @@ from vagen.envs.active_spatial.collision_detector import CollisionDetector
 from vagen.envs.active_spatial.utils import ViewManipulator
 from data_gen.active_spatial_pipeline.layout_quality import LayoutGeometry, point_in_poly
 
-PROJECTIVE_GENERATOR_VERSION = "projective_canonical_h1_v4_runtime_collision_v2"
+PROJECTIVE_GENERATOR_VERSION = "projective_canonical_h1_v6_initial_observable_difficulty_v1"
 FOV_GENERATOR_VERSION = "fov_canonical_h1_v2_min4_runtime_collision_v2"
 MAX_ABS_PITCH_DEG = 30.0
 FOV_REVERSE_TURN_ACTIONS = 9
@@ -47,13 +47,22 @@ PLANNER_ACTIONS = (
 class SceneConstraints:
     """Load and enforce the existing indoor, wall, and object-collision gates."""
 
-    def __init__(self, gs_root: Path | None, min_wall_clearance: float = 0.5, object_margin: float = 0.2):
+    def __init__(
+        self,
+        gs_root: Path | None,
+        min_wall_clearance: float = 0.5,
+        object_margin: float = 0.2,
+        structure_y_sign_overrides: dict[str, float] | None = None,
+    ):
         self.gs_root = gs_root
         self.min_wall_clearance = float(min_wall_clearance)
         self.object_margin = float(object_margin)
+        self.structure_y_sign_overrides = dict(structure_y_sign_overrides or {})
         self._cache: dict[str, tuple[LayoutGeometry, list[tuple[np.ndarray, np.ndarray, str]]]] = {}
         self._collision_cache: dict[str, CollisionDetector] = {}
         self._base_safe_point_cache: dict[tuple[str, int | None, float], list[np.ndarray]] = {}
+        self._projective_point_cache: dict[tuple[Any, ...], list[np.ndarray]] = {}
+        self.cache_stats: Counter[str] = Counter()
 
     @property
     def available(self) -> bool:
@@ -74,6 +83,7 @@ class SceneConstraints:
             safety_margin=max(0.0, self.object_margin - 0.15),
             enable_object_collision=True,
             enable_boundary_collision=True,
+            structure_y_sign_overrides=self.structure_y_sign_overrides,
         )
         if not detector.load_scene(scene_path, scene_id=scene_id):
             result = (LayoutGeometry(room_polys=[], wall_segments=[]), [])
@@ -153,13 +163,25 @@ class SceneConstraints:
         if not layout.room_polys:
             return []
         params = item["target_region"]["params"]
+        object_ids = tuple(
+            str(row.get("id")) for row in item.get("target_object", {}).get("objects", [])
+        )
+        cache_key = (
+            str(item.get("scene_id") or ""), object_ids, params.get("relation"),
+            initial_room_index, tuple(round(float(value), 4) for value in item["sample_target"]),
+        )
+        cached = self._projective_point_cache.get(cache_key)
+        if cached is not None:
+            self.cache_stats["projective_point_hits"] += 1
+            return [point.copy() for point in cached[:limit]]
+        self.cache_stats["projective_point_misses"] += 1
         boundary = np.asarray(params["boundary_point"], dtype=float)[:2]
         normal = relation_normal(item)
         old = np.asarray(item["sample_target"], dtype=float)
         delta = old[:2] - boundary
         mirrored = boundary + delta - 2.0 * float(np.dot(delta, normal)) * normal
         ranked: list[tuple[float, np.ndarray]] = []
-        for xy in layout.candidate_points(grid_spacing=0.25):
+        for xy in layout.candidate_points(grid_spacing=0.20):
             if float(np.dot(xy - boundary, normal)) <= 0.0:
                 continue
             point = np.array([xy[0], xy[1], old[2]], dtype=float)
@@ -167,7 +189,9 @@ class SceneConstraints:
             if check["success"]:
                 ranked.append((float(np.linalg.norm(xy - mirrored)), point))
         ranked.sort(key=lambda row: row[0])
-        return [point for _, point in ranked[:limit]]
+        result = [point for _, point in ranked]
+        self._projective_point_cache[cache_key] = [point.copy() for point in result]
+        return result[:limit]
 
     def safe_layout_candidates(
         self,
@@ -185,8 +209,9 @@ class SceneConstraints:
         cache_key = (scene_id, room_index, round(height, 6))
         base_points = self._base_safe_point_cache.get(cache_key)
         if base_points is None:
+            self.cache_stats["free_space_misses"] += 1
             base_points = []
-            for xy in layout.candidate_points(grid_spacing=0.25):
+            for xy in layout.candidate_points(grid_spacing=0.20):
                 point = np.array([xy[0], xy[1], height], dtype=float)
                 check = self.validate(
                     item,
@@ -197,6 +222,8 @@ class SceneConstraints:
                 if check["success"]:
                     base_points.append(point)
             self._base_safe_point_cache[cache_key] = base_points
+        else:
+            self.cache_stats["free_space_hits"] += 1
         params = item.get("target_region", {}).get("params", {})
         centers = [
             np.asarray(params[key], dtype=float)[:2]
@@ -432,6 +459,201 @@ def relation_normal(item: dict[str, Any]) -> np.ndarray:
     return np.array([ab[1], -ab[0]]) if p.get("relation", "left") == "left" else np.array([-ab[1], ab[0]])
 
 
+DIFFICULTY_BUCKET_EDGES = {
+    "translation_m": (1.5, 3.0, 5.0, 7.0),
+    "yaw_deg": (30.0, 60.0, 100.0, 140.0),
+    "bbox_area_ratio": (0.005, 0.015, 0.04, 0.10),
+    "relation_margin_px": (20.0, 40.0, 80.0),
+    "planner_step_proxy": (3.0, 6.0, 9.0, 12.0),
+}
+
+
+def _difficulty_bucket(name: str, value: float) -> int:
+    return sum(float(value) >= edge for edge in DIFFICULTY_BUCKET_EDGES[name])
+
+
+def _yaw_delta_degrees(first: np.ndarray, second: np.ndarray) -> float:
+    a = horizontal_forward(np.asarray(first, dtype=float))
+    b = horizontal_forward(np.asarray(second, dtype=float))
+    cosine = float(np.clip(np.dot(a[:2], b[:2]), -1.0, 1.0))
+    return math.degrees(math.acos(cosine))
+
+
+def projective_difficulty_profile(
+    item: dict[str, Any],
+    initial_pose: np.ndarray,
+    target_pose: np.ndarray,
+    target_result: dict[str, Any],
+    target_metric: dict[str, Any],
+    planner_steps: int | None = None,
+) -> dict[str, Any]:
+    translation = float(np.linalg.norm(target_pose[:2, 3] - initial_pose[:2, 3]))
+    yaw_degrees = _yaw_delta_degrees(initial_pose[:3, 2], target_pose[:3, 2])
+    objects = target_result.get("visual_metrics", {}).get("objects") or []
+    bbox_area = min((float(row.get("area_ratio") or 0.0) for row in objects), default=0.0)
+    margin = abs(float(target_metric.get("relation_margin_px") or 0.0))
+    step_proxy = int(
+        planner_steps
+        if planner_steps is not None
+        else min(12, max(1, math.ceil(translation / 0.3) + math.ceil(yaw_degrees / 20.0)))
+    )
+    values = {
+        "translation_m": translation,
+        "yaw_deg": yaw_degrees,
+        "bbox_area_ratio": bbox_area,
+        "relation_margin_px": margin,
+        "planner_step_proxy": step_proxy,
+    }
+    return {
+        **values,
+        "buckets": {name: _difficulty_bucket(name, float(value)) for name, value in values.items()},
+        "bucket_edges": DIFFICULTY_BUCKET_EDGES,
+    }
+
+
+def _difficulty_rank(source: dict[str, Any], candidate: dict[str, Any]) -> tuple[float, ...]:
+    names = (
+        "translation_m", "yaw_deg", "bbox_area_ratio",
+        "relation_margin_px", "planner_step_proxy",
+    )
+    bucket_distance = sum(
+        abs(int(source["buckets"][name]) - int(candidate["buckets"][name])) for name in names
+    )
+    # Becoming easier is not forbidden, but receives an explicit extra penalty.
+    easier = max(0.0, float(source["planner_step_proxy"]) - float(candidate["planner_step_proxy"]))
+    numeric = (
+        abs(float(source["translation_m"]) - float(candidate["translation_m"])) / 3.0
+        + abs(float(source["yaw_deg"]) - float(candidate["yaw_deg"])) / 60.0
+        + abs(float(source["bbox_area_ratio"]) - float(candidate["bbox_area_ratio"])) / 0.03
+        + abs(float(source["relation_margin_px"]) - float(candidate["relation_margin_px"])) / 40.0
+    )
+    return (float(bucket_distance), easier, numeric)
+
+
+PROJECTIVE_INITIAL_OBSERVABILITY_GATES = (
+    "two_objects", "in_front", "visible", "min_area", "inside_frame",
+)
+
+
+def projective_initial_geometry_discernible(metric: dict[str, Any]) -> bool:
+    """Cheap pre-render guard for the initial Projective key frame.
+
+    RGB texture remains an official-render decision. This only prevents the
+    generator from proposing an initial state where canonical projection says
+    an object is absent, too small, or truncated.
+    """
+    gates = metric.get("gates") or {}
+    return all(bool(gates.get(name)) for name in PROJECTIVE_INITIAL_OBSERVABILITY_GATES)
+
+
+def _rotate_horizontal(direction: np.ndarray, degrees: float) -> np.ndarray:
+    radians = math.radians(degrees)
+    cosine, sine = math.cos(radians), math.sin(radians)
+    value = np.asarray(direction, dtype=float)
+    return normalize_vector(
+        np.array(
+            [cosine * value[0] - sine * value[1], sine * value[0] + cosine * value[1], value[2]],
+            dtype=float,
+        )
+    )
+
+
+def construct_projective_reachable_initial(
+    item: dict[str, Any],
+    success_pose: np.ndarray,
+    constraints: SceneConstraints | None,
+    room_index: int | None,
+    desired_steps: int,
+) -> tuple[np.ndarray, dict[str, Any], dict[str, Any], dict[str, Any]] | None:
+    """Reverse the formal action lattice from a canonical-success state.
+
+    The returned inverse sequence is a constructive upper bound, not a shortest
+    path claim.  Every translated intermediate state uses runtime collision plus
+    the frozen room/wall convention.
+    """
+    if constraints is None:
+        return None
+    detector = constraints._collision_cache.get(str(item.get("scene_id") or ""))
+    if detector is None or detector.structure_convention_status != "frozen":
+        return None
+    desired_steps = max(1, min(12, int(desired_steps)))
+    lengths = sorted(range(1, 13), key=lambda value: (abs(value - desired_steps), value))
+    inverse = {
+        "move_forward": "move_backward", "move_backward": "move_forward",
+        "move_left": "move_right", "move_right": "move_left",
+        "turn_left": "turn_right", "turn_right": "turn_left",
+    }
+    candidates: list[tuple[tuple[float, ...], np.ndarray, dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    for length in lengths:
+        sequences = [[action] * length for action in PLANNER_ACTIONS]
+        if length >= 2:
+            first = length // 2
+            second = length - first
+            sequences.extend(
+                [
+                    [move] * first + [turn] * second
+                    for move in ("move_left", "move_right", "move_backward")
+                    for turn in ("turn_left", "turn_right")
+                ]
+            )
+        for reverse_actions in sequences:
+            engine = ViewManipulator(step_translation=0.3, step_rotation_deg=20.0, world_up_axis="Z")
+            engine.reset(np.asarray(success_pose, dtype=float))
+            legal = True
+            for action in reverse_actions:
+                previous = engine.get_pose()
+                candidate_pose = engine.step(action)
+                if action.startswith("move_"):
+                    collision = detector.check_collision(
+                        candidate_pose[:3, 3], previous_position=previous[:3, 3]
+                    )
+                    layout_check = constraints.validate(
+                        item,
+                        candidate_pose[:3, 3],
+                        initial_room_index=room_index,
+                        check_pair_distance=False,
+                    )
+                    if collision.has_collision or not layout_check["success"]:
+                        legal = False
+                        break
+            if not legal:
+                continue
+            initial_pose = engine.get_pose()
+            if float(np.linalg.norm(initial_pose[:2, 3] - success_pose[:2, 3])) < 0.5:
+                continue
+            initial_constraints = constraints.validate(
+                item,
+                initial_pose[:3, 3],
+                initial_room_index=room_index,
+                check_pair_distance=False,
+            )
+            initial_metric = canonical_projective(score_observation(item, initial_pose))
+            if (
+                not initial_constraints["success"]
+                or initial_metric["success"]
+                or not projective_initial_geometry_discernible(initial_metric)
+                or absolute_pitch_degrees(initial_pose[:3, 2]) > MAX_ABS_PITCH_DEG
+            ):
+                continue
+            certificate_actions = [inverse[action] for action in reversed(reverse_actions)]
+            certificate = {
+                "construction": "projective_inverse_action_lattice_v1",
+                "reverse_construction_actions": reverse_actions,
+                "actions": certificate_actions,
+                "steps": len(certificate_actions),
+                "verified_path_upper_bound": len(certificate_actions),
+                "shortest_path_claim": False,
+            }
+            rank = (abs(length - desired_steps), float(np.linalg.norm(initial_pose[:2, 3] - success_pose[:2, 3])))
+            candidates.append((rank, initial_pose, initial_metric, initial_constraints, certificate))
+        if candidates and abs(length - desired_steps) >= 1:
+            break
+    if not candidates:
+        return None
+    _, pose, metric, layout, certificate = min(candidates, key=lambda row: row[0])
+    return pose, metric, layout, certificate
+
+
 def projective_candidates(
     item: dict[str, Any],
     constraints: SceneConstraints | None = None,
@@ -473,6 +695,7 @@ def repair_projective(
     source_index: int,
     item: dict[str, Any],
     constraints: SceneConstraints | None = None,
+    selection_offset: int = 0,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     old_pose = pose_from_item_target(item)
     old_result = score_observation(item, old_pose)
@@ -480,111 +703,208 @@ def repair_projective(
     old_initial_pose = np.asarray(item["init_camera"]["extrinsics"], dtype=float)
     old_initial_position = old_initial_pose[:3, 3]
     old_initial_metric = canonical_projective(score_observation(item, old_initial_pose))
-    old_initial_pitch = absolute_pitch_degrees(old_initial_pose[:3, 2])
-    initial_pose = old_initial_pose
-    initial_metric = old_initial_metric
-    initial_constraints = constraints.validate(item, old_initial_position, check_pair_distance=False) if constraints else None
+    source_difficulty = projective_difficulty_profile(
+        item, old_initial_pose, old_pose, old_result, old_metric
+    )
+    initial_constraints = (
+        constraints.validate(item, old_initial_position, check_pair_distance=False)
+        if constraints else None
+    )
     desired_room_index = initial_constraints.get("room_index") if initial_constraints else None
-    initial_pose_repaired = False
-    initial_position_repaired = False
-    initial_orientation_repaired = False
     if constraints is not None and constraints.available:
         layout, _ = constraints.scene(str(item.get("scene_id") or ""))
         desired_room_index = constraints.room_index(layout, pair_midpoint(item)[:2])
-        initial_constraints = constraints.validate(
+    fallback_initial = None
+    fallback_rank: tuple[float, ...] | None = None
+    if constraints is None:
+        fallback_initial = (old_initial_pose, old_initial_metric, initial_constraints)
+    else:
+        old_check = constraints.validate(
             item,
             old_initial_position,
             initial_room_index=desired_room_index,
             check_pair_distance=False,
         )
         if (
-            not initial_constraints["success"]
-            or initial_metric["success"]
-            or old_initial_pitch > MAX_ABS_PITCH_DEG
+            old_check["success"]
+            and not old_initial_metric["success"]
+            and projective_initial_geometry_discernible(old_initial_metric)
+            and absolute_pitch_degrees(old_initial_pose[:3, 2]) <= MAX_ABS_PITCH_DEG
         ):
-            replacement = None
-            initial_points = []
-            if initial_constraints["success"]:
-                initial_points.append(old_initial_position)
-            initial_points.extend(
-                constraints.safe_layout_candidates(
-                    item,
+            fallback_initial = (old_initial_pose, old_initial_metric, old_check)
+            fallback_rank = (0.0, 0.0, 0.0)
+        initial_points = [] if selection_offset == 0 and fallback_initial is not None else (
+            [old_initial_position] if old_check["success"] else []
+        )
+        initial_points.extend(
+            constraints.safe_layout_candidates(
+                item,
+                desired_room_index,
+                old_initial_position,
+                limit=256 if selection_offset else 512,
+                check_pair_distance=False,
+            ) if not (selection_offset == 0 and fallback_initial is not None) else []
+        )
+        for initial_point in initial_points:
+            check = constraints.validate(
+                item,
+                initial_point,
+                initial_room_index=desired_room_index,
+                check_pair_distance=False,
+            )
+            to_pair = horizontal_forward(pair_midpoint(item) - initial_point)
+            if selection_offset:
+                directions = (
+                    to_pair, _rotate_horizontal(to_pair, -10.0),
+                    _rotate_horizontal(to_pair, 10.0),
+                    horizontal_forward(old_initial_pose[:3, 2]),
+                    np.array([-to_pair[1], to_pair[0], 0.0], dtype=float),
+                    np.array([to_pair[1], -to_pair[0], 0.0], dtype=float), -to_pair,
+                )
+            else:
+                directions = (
+                    horizontal_forward(old_initial_pose[:3, 2]), to_pair,
+                    np.array([-to_pair[1], to_pair[0], 0.0], dtype=float),
+                    np.array([to_pair[1], -to_pair[0], 0.0], dtype=float), -to_pair,
+                )
+            for direction in directions:
+                candidate_pose = camera_pose_from_forward(initial_point, normalize_vector(direction))
+                candidate_metric = canonical_projective(score_observation(item, candidate_pose))
+                if candidate_metric["success"]:
+                    continue
+                meaningful = projective_initial_geometry_discernible(candidate_metric)
+                if selection_offset == 0:
+                    if meaningful:
+                        fallback_initial = (candidate_pose, candidate_metric, check)
+                        break
+                    continue
+                gates = candidate_metric["gates"]
+                gate_count = sum(
+                    bool(gates.get(name)) for name in PROJECTIVE_INITIAL_OBSERVABILITY_GATES
+                )
+                rank = (
+                    0.0 if meaningful else 1.0,
+                    -float(gate_count),
+                    float(np.linalg.norm(initial_point[:2] - old_initial_position[:2])),
+                )
+                if fallback_rank is None or rank < fallback_rank:
+                    fallback_rank = rank
+                    fallback_initial = (candidate_pose, candidate_metric, check)
+            if selection_offset == 0 and fallback_initial is not None:
+                break
+    attempted: list[dict[str, Any]] = []
+    failure_gates: Counter[str] = Counter()
+    layout_valid_positions = 0
+    canonical_success_candidates = 0
+    viable: list[tuple[tuple[float, ...], dict[str, Any], dict[str, Any]]] = []
+    points = projective_candidates(item, constraints, desired_room_index)
+    for point_index, point in enumerate(points, start=1):
+        target_constraints = (
+            constraints.validate(
+                item, point, initial_room_index=desired_room_index, check_pair_distance=True
+            )
+            if constraints else None
+        )
+        if target_constraints is not None and target_constraints["success"]:
+            layout_valid_positions += 1
+        base_forward = normalize_vector(pair_midpoint(item) - point)
+        # Position and orientation are searched jointly.  Small yaw offsets can
+        # preserve a source-like framing while retaining the frozen 12 px gate.
+        for yaw_offset in (0.0, -5.0, 5.0, -10.0, 10.0, -15.0, 15.0):
+            forward = _rotate_horizontal(base_forward, yaw_offset)
+            pose = camera_pose_from_forward(point, forward)
+            repaired = copy.deepcopy(item)
+            p = repaired["target_region"]["params"]
+            p["normal"] = relation_normal(repaired).tolist()
+            p["sample_distance"] = float(np.linalg.norm(point[:2] - np.asarray(p["boundary_point"], dtype=float)[:2]))
+            repaired["distance"] = p["sample_distance"]
+            repaired["target_region"]["sample_point"] = point.tolist()
+            repaired["target_region"]["sample_forward"] = forward.tolist()
+            repaired["sample_target"] = point.tolist()
+            repaired["camera_params"] = dict(repaired.get("camera_params") or {})
+            repaired["camera_params"]["forward"] = forward.tolist()
+            repaired["task_id"] = f"projective_canonical_h1_v5_{source_index:06d}"
+            repaired["camera_model_version"] = CANONICAL_CAMERA_H1_RESIZE_V1
+            repaired["canonical_task_metric_version"] = CANONICAL_TASK_METRIC_VERSION
+            repaired["generator_version"] = PROJECTIVE_GENERATOR_VERSION
+            repaired["repair_lineage"] = {"source_row_index": source_index, "old_task_id": item.get("task_id"), "repair_reason": "legacy_projective_target_pose_wrong_side"}
+            result = score_observation(repaired, pose)
+            metric = canonical_projective(result)
+            target_pitch = absolute_pitch_degrees(forward)
+            for name, passed in metric["gates"].items():
+                if not passed:
+                    failure_gates[name] += 1
+            target_success = bool(
+                metric["success"]
+                and target_pitch <= MAX_ABS_PITCH_DEG
+                and (target_constraints is None or bool(target_constraints["success"]))
+            )
+            if len(attempted) < 512:
+                attempted.append(
+                    {
+                        "point_index": point_index,
+                        "point": point.tolist(),
+                        "yaw_offset_deg": yaw_offset,
+                        "target_success": target_success,
+                        "gates": metric["gates"],
+                        "margin_px": metric["relation_margin_px"],
+                        "target_pitch_degrees": target_pitch,
+                        "target_constraints": target_constraints,
+                    }
+                )
+            if not target_success:
+                continue
+            canonical_success_candidates += 1
+            # Reverse construction is the expensive part.  Four distinct
+            # canonical-success states provide bounded coverage; remaining
+            # states reuse the validated source-like initial and are still
+            # checked by the tiered planner downstream.
+            construction = (
+                construct_projective_reachable_initial(
+                    repaired,
+                    pose,
+                    constraints,
                     desired_room_index,
-                    old_initial_position,
-                    limit=512,
-                    check_pair_distance=False,
+                    int(source_difficulty["planner_step_proxy"]),
+                )
+                if canonical_success_candidates <= 4
+                else None
+            )
+            if construction is not None:
+                initial_pose, initial_metric, candidate_initial_constraints, certificate = construction
+            elif fallback_initial is not None:
+                initial_pose, initial_metric, candidate_initial_constraints = fallback_initial
+                certificate = None
+            else:
+                continue
+            navigation_distance = float(np.linalg.norm(point[:2] - initial_pose[:2, 3]))
+            initial_valid = bool(
+                not initial_metric["success"]
+                and projective_initial_geometry_discernible(initial_metric)
+                and absolute_pitch_degrees(initial_pose[:3, 2]) <= MAX_ABS_PITCH_DEG
+                and navigation_distance >= 0.5
+                and (
+                    candidate_initial_constraints is None
+                    or candidate_initial_constraints["success"]
                 )
             )
-            for point in initial_points:
-                point_constraints = constraints.validate(
-                    item,
-                    point,
-                    initial_room_index=desired_room_index,
-                    check_pair_distance=False,
-                )
-                if not point_constraints["success"]:
-                    continue
-                to_pair = horizontal_forward(pair_midpoint(item) - point)
-                directions = [
-                    horizontal_forward(old_initial_pose[:3, 2]) if np.allclose(point, old_initial_position) else to_pair,
-                    to_pair,
-                    np.array([-to_pair[1], to_pair[0], 0.0], dtype=float),
-                    np.array([to_pair[1], -to_pair[0], 0.0], dtype=float),
-                    -to_pair,
-                ]
-                for direction in directions:
-                    pose = camera_pose_from_forward(point, normalize_vector(direction))
-                    metric = canonical_projective(score_observation(item, pose))
-                    if not metric["success"]:
-                        replacement = (pose, metric, point_constraints)
-                        break
-                if replacement is not None:
-                    break
-            if replacement is None:
-                return None, {
-                    "source_row_index": source_index,
-                    "old_task_id": item.get("task_id"),
-                    "scene_id": item.get("scene_id"),
-                    "relation": item["target_region"]["params"].get("relation"),
-                    "failure": "no_safe_unsuccessful_initial_pose",
-                    "old_initial_metric": old_initial_metric,
-                    "old_initial_constraints": initial_constraints,
-                    "attempts": [],
-                }
-            initial_pose, initial_metric, initial_constraints = replacement
-            initial_pose_repaired = not np.allclose(initial_pose, old_initial_pose)
-            initial_position_repaired = not np.allclose(initial_pose[:3, 3], old_initial_position)
-            initial_orientation_repaired = not np.allclose(initial_pose[:3, :3], old_initial_pose[:3, :3])
-    attempted: list[dict[str, Any]] = []
-    for attempt, point in enumerate(projective_candidates(item, constraints, desired_room_index), start=1):
-        repaired = copy.deepcopy(item)
-        forward = normalize_vector(pair_midpoint(repaired) - point)
-        pose = camera_pose_from_forward(point, forward)
-        p = repaired["target_region"]["params"]
-        p["normal"] = relation_normal(repaired).tolist()
-        p["sample_distance"] = float(np.linalg.norm(point[:2] - np.asarray(p["boundary_point"], dtype=float)[:2]))
-        repaired["distance"] = p["sample_distance"]
-        repaired["target_region"]["sample_point"] = point.tolist()
-        repaired["target_region"]["sample_forward"] = forward.tolist()
-        repaired["sample_target"] = point.tolist()
-        repaired["camera_params"] = dict(repaired.get("camera_params") or {})
-        repaired["camera_params"]["forward"] = forward.tolist()
-        repaired["task_id"] = f"projective_canonical_h1_v4_{source_index:06d}"
-        repaired["camera_model_version"] = CANONICAL_CAMERA_H1_RESIZE_V1
-        repaired["canonical_task_metric_version"] = CANONICAL_TASK_METRIC_VERSION
-        repaired["generator_version"] = PROJECTIVE_GENERATOR_VERSION
-        repaired["repair_lineage"] = {"source_row_index": source_index, "old_task_id": item.get("task_id"), "repair_reason": "legacy_projective_target_pose_wrong_side"}
-        if initial_pose_repaired:
+            if not initial_valid:
+                continue
             repaired["init_camera"] = dict(repaired["init_camera"])
             repaired["init_camera"]["extrinsics"] = initial_pose.tolist()
-        result = score_observation(repaired, pose)
-        metric = canonical_projective(result)
-        target_pitch = absolute_pitch_degrees(forward)
-        target_constraints = constraints.validate(repaired, point, initial_room_index=desired_room_index, check_pair_distance=True) if constraints else None
-        navigation_distance = float(np.linalg.norm(point[:2] - initial_pose[:2, 3]))
-        generation_success = bool(metric["success"]) and target_pitch <= MAX_ABS_PITCH_DEG and navigation_distance >= 0.5 and (target_constraints is None or bool(target_constraints["success"]))
-        attempted.append({"attempt": attempt, "point": point.tolist(), "success": generation_success, "gates": metric["gates"], "margin_px": metric["relation_margin_px"], "target_pitch_degrees": target_pitch, "target_constraints": target_constraints})
-        if generation_success:
+            if certificate is not None:
+                repaired["reachability_construction"] = certificate
+            difficulty = projective_difficulty_profile(
+                repaired,
+                initial_pose,
+                pose,
+                result,
+                metric,
+                planner_steps=certificate.get("steps") if certificate else None,
+            )
+            rank = _difficulty_rank(source_difficulty, difficulty) + (
+                abs(yaw_offset), float(point_index)
+            )
             collision_convention = (
                 target_constraints.get("collision_convention")
                 if target_constraints is not None
@@ -592,27 +912,85 @@ def repair_projective(
             )
             if collision_convention is not None:
                 repaired["collision_convention"] = collision_convention
-            return repaired, {
+            details = {
                 "source_row_index": source_index, "old_task_id": item.get("task_id"), "new_task_id": repaired["task_id"],
                 "scene_id": item.get("scene_id"), "relation": p.get("relation"), "old_sample_target": item.get("sample_target"),
                 "new_sample_target": repaired["sample_target"], "old_normal": item["target_region"]["params"].get("normal"),
                 "new_normal": p.get("normal"), "camera_model_version": CANONICAL_CAMERA_H1_RESIZE_V1,
                 "canonical_task_metric_version": CANONICAL_TASK_METRIC_VERSION, "generator_version": PROJECTIVE_GENERATOR_VERSION,
-                "retry": {"attempt_count": attempt, "attempts": attempted}, "old_metric": old_metric, "new_metric": metric,
-                "initial_constraints": initial_constraints, "target_constraints": target_constraints,
+                "old_metric": old_metric, "new_metric": metric,
+                "initial_constraints": candidate_initial_constraints, "target_constraints": target_constraints,
                 "old_result": old_result, "new_result": result, "old_initial_metric": old_initial_metric,
                 "new_initial_metric": initial_metric, "old_initial_pose_c2w": old_initial_pose.tolist(),
-                "new_initial_pose_c2w": initial_pose.tolist(), "initial_pose_repaired": initial_pose_repaired,
-                "initial_position_repaired": initial_position_repaired,
-                "initial_orientation_repaired": initial_orientation_repaired,
+                "new_initial_pose_c2w": initial_pose.tolist(),
+                "initial_pose_repaired": not np.allclose(initial_pose, old_initial_pose),
+                "initial_position_repaired": not np.allclose(initial_pose[:3, 3], old_initial_position),
+                "initial_orientation_repaired": not np.allclose(initial_pose[:3, :3], old_initial_pose[:3, :3]),
                 "initial_pitch_degrees": absolute_pitch_degrees(initial_pose[:3, 2]),
                 "target_pitch_degrees": target_pitch,
                 "navigation_distance": navigation_distance,
                 "collision_convention": collision_convention,
+                "reachability_construction": certificate,
+                "source_difficulty": source_difficulty,
+                "repaired_difficulty": difficulty,
+                "difficulty_rank": rank,
+                "selected_yaw_offset_deg": yaw_offset,
             }
-    metric_ready = [attempt for attempt in attempted if all(bool(attempt["gates"].get(key)) for key in ("two_objects", "in_front", "visible", "min_area", "inside_frame", "relation"))]
-    failure = "projective_margin_infeasible_for_source_pair" if metric_ready and all(not bool(attempt["gates"].get("margin")) for attempt in metric_ready) else "bounded_layout_candidates_exhausted"
-    return None, {"source_row_index": source_index, "old_task_id": item.get("task_id"), "scene_id": item.get("scene_id"), "relation": item["target_region"]["params"].get("relation"), "failure": failure, "initial_constraints": initial_constraints, "attempts": attempted}
+            viable.append((rank, repaired, details))
+            if len(viable) >= 96:
+                break
+        if len(viable) >= 96:
+            break
+    if viable:
+        ordered_viable = sorted(viable, key=lambda row: row[0])
+        selected_offset = min(max(0, int(selection_offset)), len(ordered_viable) - 1)
+        _, repaired, details = ordered_viable[selected_offset]
+        details["viable_selection_offset"] = selected_offset
+        details["retry"] = {
+            "joint_states_evaluated": sum(failure_gates.values()) + canonical_success_candidates,
+            "recorded_attempts": len(attempted),
+            "layout_valid_positions": layout_valid_positions,
+            "canonical_success_candidates": canonical_success_candidates,
+            "viable_candidates": len(viable),
+            "failure_gate_counts": dict(failure_gates),
+            "attempts": attempted,
+            "cache_stats": dict(constraints.cache_stats) if constraints else {},
+        }
+        return repaired, details
+    metric_ready = [
+        attempt for attempt in attempted
+        if all(bool(attempt["gates"].get(key)) for key in ("two_objects", "in_front", "visible", "min_area", "inside_frame", "relation"))
+    ]
+    if not points or layout_valid_positions == 0:
+        failure = "layout_collision_infeasible"
+        taxonomy = "layout/collision infeasible"
+    elif metric_ready and all(not bool(attempt["gates"].get("margin")) for attempt in metric_ready):
+        failure = "projective_margin_infeasible_for_source_pair"
+        taxonomy = "source object pair semantically infeasible"
+    elif canonical_success_candidates:
+        failure = "no_safe_reachable_unsuccessful_initial"
+        taxonomy = "12-step unreachable"
+    else:
+        failure = "joint_position_orientation_search_exhausted"
+        taxonomy = "search insufficient"
+    return None, {
+        "source_row_index": source_index,
+        "old_task_id": item.get("task_id"),
+        "scene_id": item.get("scene_id"),
+        "relation": item["target_region"]["params"].get("relation"),
+        "failure": failure,
+        "failure_taxonomy": taxonomy,
+        "initial_constraints": initial_constraints,
+        "source_difficulty": source_difficulty,
+        "search_stats": {
+            "positions": len(points),
+            "layout_valid_positions": layout_valid_positions,
+            "canonical_success_candidates": canonical_success_candidates,
+            "failure_gate_counts": dict(failure_gates),
+            "cache_stats": dict(constraints.cache_stats) if constraints else {},
+        },
+        "attempts": attempted,
+    }
 
 
 def fov_target_candidates(

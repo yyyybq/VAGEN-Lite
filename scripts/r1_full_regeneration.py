@@ -22,6 +22,7 @@ from r1_repair_pipeline import (
     SceneConstraints,
     repair_fov,
     repair_projective,
+    projective_difficulty_profile,
 )
 from vagen.envs.active_spatial.collision_detector import create_collision_detector
 
@@ -201,33 +202,95 @@ def repair_one_cached(
     if repaired.get("task_type") == "fov_inclusion":
         task_id = f"fov_canonical_h1_v2_{index:06d}"
     else:
-        task_id = f"projective_canonical_h1_v4_{index:06d}"
+        task_id = f"projective_canonical_h1_v5_{index:06d}"
     repaired["task_id"] = task_id
     repaired.setdefault("repair_lineage", {})["source_row_index"] = index
     details["new_task_id"] = task_id
     return repaired, details
 
 
-def audit_reachability(
+def select_final_tier(
+    split: str, index: int, source: dict[str, Any], details: dict[str, Any]
+) -> tuple[bool, str]:
+    if split == "validation_proxy":
+        return True, "validation_proxy_high_value"
+    digest = hashlib.sha256(
+        f"{split}:{index}:{source.get('scene_id')}:{source.get('task_type')}".encode()
+    ).digest()
+    return (digest[0] % 10 == 0), "deterministic_ten_percent_representative"
+
+
+def audit_reachability_tiered(
     repaired: dict[str, Any],
     detector: Any,
     gs_root: Path,
     max_steps: int,
-    max_expansions: int,
+    expansion_tiers: list[int],
+    final_tier_expansions: int,
+    run_final_tier: bool,
+    final_tier_reason: str,
 ) -> dict[str, Any]:
     scene_id = str(repaired["scene_id"])
     if not detector.load_scene_from_gs_root(str(gs_root), scene_id):
         return {"status": "reachability_unverified_asset_load", "reachability_verified": False}
     kind = "fov" if repaired.get("task_type") == "fov_inclusion" else "projective"
-    return search_one(
-        repaired,
-        detector,
-        kind=kind,
-        max_steps=max_steps,
-        max_expansions=max_expansions,
-        step_translation=0.3,
-        step_rotation_deg=20.0,
-    )
+    tiers = list(expansion_tiers)
+    if run_final_tier and final_tier_expansions not in tiers:
+        tiers.append(final_tier_expansions)
+    tier_rows = []
+    result = None
+    for budget in tiers:
+        result = search_one(
+            repaired,
+            detector,
+            kind=kind,
+            max_steps=max_steps,
+            max_expansions=budget,
+            step_translation=0.3,
+            step_rotation_deg=20.0,
+        )
+        tier_rows.append(
+            {
+                "max_expansions": budget,
+                "status": result.get("status"),
+                "expansions": result.get("expansions", 0),
+                "visited_states": result.get("visited_states"),
+                "steps": result.get("steps"),
+            }
+        )
+        if result.get("status") != "reachability_unverified_expansion_cap":
+            break
+    assert result is not None
+    result["reachability_tiers"] = tier_rows
+    result["final_250k_selected"] = bool(run_final_tier)
+    result["final_250k_selection_reason"] = final_tier_reason
+    return result
+
+
+def tier_summary(rows: list[dict[str, Any]], budgets: list[int]) -> dict[str, Any]:
+    resolved_at: Counter[int] = Counter()
+    attempted: Counter[int] = Counter()
+    costs: Counter[int] = Counter()
+    for row in rows:
+        for tier in row.get("reachability_tiers") or []:
+            budget = int(tier["max_expansions"])
+            attempted[budget] += 1
+            costs[budget] += int(tier.get("expansions") or 0)
+            if tier.get("status") != "reachability_unverified_expansion_cap":
+                resolved_at[budget] += 1
+                break
+    remaining = len(rows)
+    result = {}
+    for budget in budgets:
+        remaining -= resolved_at[budget]
+        result[str(budget)] = {
+            "attempted": attempted[budget],
+            "newly_resolved": resolved_at[budget],
+            "total_expansions": costs[budget],
+            "average_expansions": costs[budget] / attempted[budget] if attempted[budget] else None,
+            "planner_budget_unresolved_after_tier": remaining,
+        }
+    return result
 
 
 def main() -> None:
@@ -236,11 +299,30 @@ def main() -> None:
     parser.add_argument("--gs-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--scenes", help="optional comma-separated canary scene IDs")
+    parser.add_argument("--splits", help="optional comma-separated manifest split names")
+    parser.add_argument("--index-shard-count", type=int, default=1)
+    parser.add_argument("--index-shard-id", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=12)
-    parser.add_argument("--max-expansions", type=int, default=250000)
+    parser.add_argument(
+        "--reachability-tiers",
+        default="2000,25000",
+        help="comma-separated quick and escalation budgets; exhaustion remains unverified",
+    )
+    parser.add_argument("--final-tier-expansions", type=int, default=250000)
+    parser.add_argument("--collision-convention-overrides", type=Path)
     parser.add_argument("--max-replacement-candidates", type=int, default=64)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
+    expansion_tiers = [int(value) for value in args.reachability_tiers.split(",") if value]
+    if not expansion_tiers or expansion_tiers != sorted(set(expansion_tiers)):
+        raise ValueError("reachability tiers must be unique and increasing")
+    if args.index_shard_count < 1 or not 0 <= args.index_shard_id < args.index_shard_count:
+        raise ValueError("invalid index shard")
+    collision_overrides = {}
+    if args.collision_convention_overrides:
+        collision_overrides = json.loads(
+            args.collision_convention_overrides.read_text()
+        ).get("structure_y_sign_overrides", {})
 
     raw_sources = json.loads(args.sources.read_text())
     sources = {
@@ -248,6 +330,10 @@ def main() -> None:
         for split, value in raw_sources.items()
     }
     rows_by_split = {split: read_jsonl(path) for split, path in sources.items()}
+    requested_splits = {value for value in (args.splits or "").split(",") if value}
+    unknown_splits = requested_splits - set(rows_by_split)
+    if unknown_splits:
+        raise ValueError(f"unknown splits: {sorted(unknown_splits)}")
     train_rows = rows_by_split["train"]
     train_scenes = {str(row.get("scene_id")) for row in train_rows}
     train_labels = {str(row.get("object_label")) for row in train_rows}
@@ -258,7 +344,9 @@ def main() -> None:
         for index, row in enumerate(rows)
         if row.get("task_type") in TARGET_TASKS
     ]
-    constraints = SceneConstraints(args.gs_root)
+    constraints = SceneConstraints(
+        args.gs_root, structure_y_sign_overrides=collision_overrides
+    )
     detector = create_collision_detector(
         {
             "camera_radius": 0.15,
@@ -267,12 +355,15 @@ def main() -> None:
             "safety_margin": 0.05,
             "enable_object_collision": True,
             "enable_boundary_collision": True,
+            "structure_y_sign_overrides": collision_overrides,
         }
     )
     global_summary = {}
     repair_cache: dict[str, tuple[dict[str, Any] | None, dict[str, Any]]] = {}
 
     for split, source_rows in rows_by_split.items():
+        if requested_splits and split not in requested_splits:
+            continue
         split_dir = args.output_dir / split
         in_scope = {
             index
@@ -280,9 +371,14 @@ def main() -> None:
             if row.get("task_type") in TARGET_TASKS
             and (not requested_scenes or str(row.get("scene_id")) in requested_scenes)
         }
+        in_scope = {
+            index for position, index in enumerate(sorted(in_scope))
+            if position % args.index_shard_count == args.index_shard_id
+        }
         forbidden_pairs = {pair_key(source_rows[index]) for index in in_scope}
         used_replacement_pairs: set[tuple[str, ...]] = set()
         accepted_by_index: dict[int, dict[str, Any]] = {}
+        candidate_by_index: dict[int, dict[str, Any]] = {}
         mappings: list[dict[str, Any]] = []
         accounting: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
@@ -303,12 +399,17 @@ def main() -> None:
             "repaired": split_dir / "repaired_checkpoint.jsonl",
             "mapping": split_dir / "mapping_checkpoint.jsonl",
             "reachability": split_dir / "reachability_checkpoint.jsonl",
+            "candidates": split_dir / "candidate_checkpoint.jsonl",
         }
         if args.resume and all(path.is_file() for path in checkpoint_paths.values()):
             accounting = read_jsonl(checkpoint_paths["accounting"])
             wrappers = read_jsonl(checkpoint_paths["repaired"])
             accepted_by_index = {
                 int(wrapper["source_row_index"]): wrapper["row"] for wrapper in wrappers
+            }
+            candidate_by_index = {
+                int(wrapper["source_row_index"]): wrapper["row"]
+                for wrapper in read_jsonl(checkpoint_paths["candidates"])
             }
             mappings = read_jsonl(checkpoint_paths["mapping"])
             reachability_rows = read_jsonl(checkpoint_paths["reachability"])
@@ -396,6 +497,9 @@ def main() -> None:
                         "donor_source_row_index": donor_index,
                         "new_pair": pair_key(candidate),
                         "reason": original_failure.get("failure"),
+                        "old_source_difficulty": original_failure.get("source_difficulty"),
+                        "donor_source_difficulty": replacement_details.get("source_difficulty"),
+                        "new_repaired_difficulty": replacement_details.get("repaired_difficulty"),
                     }
                     replacement["repair_lineage"] = {
                         **replacement.get("repair_lineage", {}),
@@ -417,17 +521,35 @@ def main() -> None:
                     **base,
                     "status": "hard_failure",
                     "failure": details.get("failure"),
+                    "failure_taxonomy": details.get(
+                        "failure_taxonomy", "source object pair semantically infeasible"
+                    ),
                     "repair": details,
                 }
                 accounting.append(record)
                 failures.append(record)
             else:
-                reachability = audit_reachability(
-                    repaired, detector, args.gs_root, args.max_steps, args.max_expansions
+                candidate_by_index[index] = repaired
+                final_selected, final_reason = select_final_tier(split, index, source, details)
+                reachability = audit_reachability_tiered(
+                    repaired,
+                    detector,
+                    args.gs_root,
+                    args.max_steps,
+                    expansion_tiers,
+                    args.final_tier_expansions,
+                    final_selected,
+                    final_reason,
                 )
                 reachability["source_row_index"] = index
                 reachability_rows.append(reachability)
                 if reachability.get("status") == "reachable":
+                    if details.get("repaired_difficulty") is not None:
+                        steps = int(reachability.get("steps") or 0)
+                        details["repaired_difficulty"]["planner_steps_found"] = steps
+                        details["repaired_difficulty"]["actual_planner_step_bucket"] = sum(
+                            steps >= edge for edge in (3, 6, 9, 12)
+                        )
                     accepted_by_index[index] = repaired
                     mapping = {
                         **details,
@@ -449,6 +571,9 @@ def main() -> None:
                             "replacement_lineage": lineage,
                             "reachability_status": reachability["status"],
                             "found_path_length_upper_bound": reachability.get("steps"),
+                            "reachability_tiers": reachability.get("reachability_tiers"),
+                            "source_difficulty": details.get("source_difficulty"),
+                            "repaired_difficulty": details.get("repaired_difficulty"),
                         }
                     )
                 elif reachability.get("reachability_verified"):
@@ -457,6 +582,7 @@ def main() -> None:
                         "status": "hard_failure",
                         "repair_status_before_reachability": repair_status,
                         "failure": reachability.get("status"),
+                        "failure_taxonomy": "12-step unreachable",
                         "reachability": reachability,
                     }
                     accounting.append(record)
@@ -467,6 +593,11 @@ def main() -> None:
                         "status": "unverified",
                         "repair_status_before_reachability": repair_status,
                         "failure": reachability.get("status"),
+                        "failure_taxonomy": (
+                            "planner budget unverified"
+                            if reachability.get("status") == "reachability_unverified_expansion_cap"
+                            else "layout/collision infeasible"
+                        ),
                         "reachability": reachability,
                     }
                     accounting.append(record)
@@ -499,6 +630,13 @@ def main() -> None:
                 )
                 atomic_jsonl(split_dir / "mapping_checkpoint.jsonl", mappings)
                 atomic_jsonl(split_dir / "reachability_checkpoint.jsonl", reachability_rows)
+                atomic_jsonl(
+                    split_dir / "candidate_checkpoint.jsonl",
+                    [
+                        {"source_row_index": source_index, "row": row}
+                        for source_index, row in sorted(candidate_by_index.items())
+                    ],
+                )
                 print(
                     json.dumps(
                         {
@@ -530,12 +668,24 @@ def main() -> None:
         atomic_jsonl(split_dir / "failure_manifest.jsonl", failures)
         atomic_jsonl(split_dir / "unverified_manifest.jsonl", unverified)
         atomic_jsonl(split_dir / "reachability_manifest.jsonl", reachability_rows)
+        atomic_jsonl(
+            split_dir / "candidate_manifest.jsonl",
+            [
+                {"source_row_index": source_index, "row": row}
+                for source_index, row in sorted(candidate_by_index.items())
+            ],
+        )
         counts = Counter(row["status"] for row in accounting)
         path_lengths = [
             int(row["found_path_length_upper_bound"])
             for row in accounting
             if row.get("found_path_length_upper_bound") is not None
         ]
+        tier_budgets = expansion_tiers + (
+            [args.final_tier_expansions]
+            if args.final_tier_expansions not in expansion_tiers
+            else []
+        )
         summary = {
             "split": split,
             "source": str(sources[split]),
@@ -561,7 +711,9 @@ def main() -> None:
                 "distribution": dict(Counter(path_lengths)),
             },
             "reachability_max_steps": args.max_steps,
-            "reachability_max_expansions": args.max_expansions,
+            "reachability_expansion_tiers": expansion_tiers,
+            "reachability_final_tier_expansions": args.final_tier_expansions,
+            "reachability_tier_results": tier_summary(reachability_rows, tier_budgets),
             "output": str(output_path),
             "output_sha256": sha256(output_path),
             "output_rows": len(output_rows),
@@ -584,6 +736,8 @@ def main() -> None:
             summary["accounting_closed"] for summary in global_summary.values()
         ),
         "scene_filter": sorted(requested_scenes) if requested_scenes else None,
+        "split_filter": sorted(requested_splits) if requested_splits else None,
+        "index_shard": {"count": args.index_shard_count, "id": args.index_shard_id},
         "collision_height_bounds": [0.3, 2.5],
         "search_algorithm": "bounded_best_first_not_shortest",
     }
