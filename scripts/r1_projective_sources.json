@@ -1,0 +1,9 @@
+{
+  "train": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/v46_baseline_qwen25vl_7b/train_filtered.jsonl",
+  "val_id": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/a2_v46_arrival_stop/val_id_delta_boost.jsonl",
+  "ood_category": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/active_spatial_pipeline/ood_splits/ood_category.jsonl",
+  "ood_geometry": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/active_spatial_pipeline/ood_splits/ood_geometry.jsonl",
+  "ood_instance": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/active_spatial_pipeline/ood_splits/ood_instance.jsonl",
+  "ood_scene": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/active_spatial_pipeline/ood_splits/ood_scene.jsonl",
+  "ood_template": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/active_spatial_pipeline/ood_splits/ood_template.jsonl"
+}
