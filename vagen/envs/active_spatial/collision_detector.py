@@ -27,6 +27,11 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 
 
+COLLISION_CONVENTION_VERSION = "interiorgs_structure_label_alignment_v1"
+COLLISION_CONVENTION_MIN_EVIDENCE = 20
+COLLISION_CONVENTION_MIN_RELATIVE_MARGIN = 0.10
+
+
 @dataclass
 class CollisionResult:
     """Result of collision check."""
@@ -172,6 +177,8 @@ class CollisionDetector:
         self.camera_radius = camera_radius
         self.floor_height = floor_height
         self.ceiling_height = ceiling_height
+        self._configured_floor_height = float(floor_height)
+        self._configured_ceiling_height = float(ceiling_height)
         self.safety_margin = safety_margin
         self.enable_object_collision = enable_object_collision
         self.enable_boundary_collision = enable_boundary_collision
@@ -181,6 +188,13 @@ class CollisionDetector:
         self.room_boundary: Optional[AABB] = None
         self.room_profiles: List[np.ndarray] = []  # Room polygons from structure.json
         self.wall_segments: List[Tuple[np.ndarray, np.ndarray]] = []  # Wall line segments
+        self.structure_y_sign: float = -1.0
+        self.structure_alignment_scores: Dict[str, int] = {}
+        self.structure_convention_status: str = "unverified"
+        self.structure_convention_version: str = COLLISION_CONVENTION_VERSION
+        self.structure_alignment_evidence_count: int = 0
+        self.structure_alignment_relative_margin: float = 0.0
+        self._label_xy_centers: List[np.ndarray] = []
         self.scene_loaded = False
         self._current_scene_id: Optional[str] = None  # Track loaded scene to avoid reloading
     
@@ -198,6 +212,8 @@ class CollisionDetector:
         # Skip reload if same scene is already loaded
         if scene_id is not None and scene_id == self._current_scene_id and self.scene_loaded:
             return True
+        self.floor_height = self._configured_floor_height
+        self.ceiling_height = self._configured_ceiling_height
         
         labels_path = scene_path / 'labels.json'
         structure_path = scene_path / 'structure.json'
@@ -211,6 +227,7 @@ class CollisionDetector:
                     labels_data = json.load(f)
                 
                 self.object_boxes = []
+                self._label_xy_centers = []
                 all_points = []
                 
                 for obj in labels_data:
@@ -223,6 +240,7 @@ class CollisionDetector:
                     
                     # Create AABB from corners
                     aabb = AABB.from_corners(bbox, label, ins_id)
+                    self._label_xy_centers.append((aabb.min_point[:2] + aabb.max_point[:2]) / 2.0)
                     
                     # Skip ignored labels (floor, ceiling, lights)
                     if any(ignored in label for ignored in self.IGNORED_LABELS):
@@ -262,12 +280,14 @@ class CollisionDetector:
                 self.wall_segments = []
                 door_segments = []
                 
-                # Extract room profiles
+                y_sign = self._select_structure_y_sign(structure_data)
+
+                # Extract room profiles using the convention best aligned with
+                # this scene's label coordinates.
                 for room in structure_data.get('rooms', []):
                     profile = room.get('profile', [])
                     if profile and len(profile) >= 3:
-                        # structure.json uses (x, -y) coordinate system
-                        points = np.array([[p[0], -p[1]] for p in profile])
+                        points = np.array([[p[0], y_sign * p[1]] for p in profile])
                         self.room_profiles.append(points)
                 
                 # Extract doors (openings in walls - camera can pass through)
@@ -277,7 +297,7 @@ class CollisionDetector:
                     
                     if hole_type == 'DOOR' and len(hole_profile) >= 2:
                         xs = [p[0] for p in hole_profile]
-                        ys = [-p[1] for p in hole_profile]
+                        ys = [y_sign * p[1] for p in hole_profile]
                         min_x, max_x = min(xs), max(xs)
                         min_y, max_y = min(ys), max(ys)
                         
@@ -305,7 +325,12 @@ class CollisionDetector:
                         if not is_door:
                             self.wall_segments.append((p1, p2))
                 
-                print(f"[CollisionDetector] Loaded {len(self.room_profiles)} rooms, {len(self.wall_segments)} wall segments from structure.json")
+                print(
+                    f"[CollisionDetector] Loaded {len(self.room_profiles)} rooms, "
+                    f"{len(self.wall_segments)} wall segments from structure.json "
+                    f"(structure_y_sign={y_sign:+.0f}, status={self.structure_convention_status}, "
+                    f"alignment={self.structure_alignment_scores})"
+                )
                 success = True
                 
             except Exception as e:
@@ -334,6 +359,72 @@ class CollisionDetector:
                 if dot > 0.8:
                     return True
         return False
+
+    @staticmethod
+    def _point_in_polygon(point: np.ndarray, polygon: np.ndarray) -> bool:
+        """Dependency-free 2D point-in-polygon used for convention inference."""
+        x, y = float(point[0]), float(point[1])
+        inside = False
+        j = len(polygon) - 1
+        for i in range(len(polygon)):
+            xi, yi = float(polygon[i][0]), float(polygon[i][1])
+            xj, yj = float(polygon[j][0]), float(polygon[j][1])
+            if ((yi > y) != (yj > y)) and x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi:
+                inside = not inside
+            j = i
+        return inside
+
+    def _select_structure_y_sign(self, structure_data: Dict[str, Any]) -> float:
+        """Infer whether structure Y already shares label/world coordinates.
+
+        InteriorGS exports in circulation contain both conventions.  The old
+        unconditional ``-y`` transform puts valid cameras against mirrored
+        walls for raw-coordinate scenes.  We choose the convention containing
+        the most label-box centers; ties retain the historical ``-y`` behavior.
+        """
+        scores: Dict[str, int] = {}
+        for sign in (1.0, -1.0):
+            polygons = []
+            for room in structure_data.get("rooms", []):
+                profile = room.get("profile", [])
+                if len(profile) >= 3:
+                    polygons.append(np.asarray([[p[0], sign * p[1]] for p in profile], dtype=float))
+            score = sum(
+                any(self._point_in_polygon(center, polygon) for polygon in polygons)
+                for center in self._label_xy_centers
+            )
+            scores[f"{sign:+.0f}"] = int(score)
+        self.structure_alignment_scores = scores
+        positive = scores.get("+1", 0)
+        negative = scores.get("-1", 0)
+        best = max(positive, negative)
+        self.structure_alignment_evidence_count = len(self._label_xy_centers)
+        self.structure_alignment_relative_margin = (
+            abs(positive - negative) / max(best, 1)
+        )
+        sufficiently_supported = (
+            self.structure_alignment_evidence_count >= COLLISION_CONVENTION_MIN_EVIDENCE
+            and positive != negative
+            and self.structure_alignment_relative_margin >= COLLISION_CONVENTION_MIN_RELATIVE_MARGIN
+        )
+        self.structure_convention_status = "frozen" if sufficiently_supported else "ambiguous"
+        # A deterministic operational fallback is retained for historical rows;
+        # R1 callers must reject `ambiguous` rather than treating this sign as
+        # validated evidence.
+        self.structure_y_sign = 1.0 if positive > negative else -1.0
+        return self.structure_y_sign
+
+    def convention_record(self) -> Dict[str, Any]:
+        return {
+            "version": self.structure_convention_version,
+            "status": self.structure_convention_status,
+            "structure_y_sign": self.structure_y_sign,
+            "alignment_scores": dict(self.structure_alignment_scores),
+            "evidence_label_centers": self.structure_alignment_evidence_count,
+            "relative_margin": self.structure_alignment_relative_margin,
+            "min_evidence": COLLISION_CONVENTION_MIN_EVIDENCE,
+            "min_relative_margin": COLLISION_CONVENTION_MIN_RELATIVE_MARGIN,
+        }
     
     def _point_to_segment_distance_2d(self, point: np.ndarray, seg_start: np.ndarray, seg_end: np.ndarray) -> float:
         """Calculate the distance from a 2D point to a line segment."""
@@ -389,11 +480,14 @@ class CollisionDetector:
 
     def _load_scene_remote(self, gs_root: str, scene_id: str) -> bool:
         """Load labels/structure JSON from AOSS without requiring a local scene dir."""
+        self.floor_height = self._configured_floor_height
+        self.ceiling_height = self._configured_ceiling_height
         success = False
         labels_data = gs_io.load_scene_json(gs_root, scene_id, "labels.json")
         if labels_data is not None:
             try:
                 self.object_boxes = []
+                self._label_xy_centers = []
                 all_points = []
                 for obj in labels_data:
                     label = obj.get("label", "").lower()
@@ -402,6 +496,7 @@ class CollisionDetector:
                     if len(bbox) != 8:
                         continue
                     aabb = AABB.from_corners(bbox, label, ins_id)
+                    self._label_xy_centers.append((aabb.min_point[:2] + aabb.max_point[:2]) / 2.0)
                     if any(ignored in label for ignored in self.IGNORED_LABELS):
                         continue
                     expanded = aabb.expand(self.camera_radius + self.safety_margin)
@@ -426,17 +521,18 @@ class CollisionDetector:
                 self.room_profiles = []
                 self.wall_segments = []
                 door_segments = []
+                y_sign = self._select_structure_y_sign(structure_data)
                 for room in structure_data.get("rooms", []):
                     profile = room.get("profile", [])
                     if profile and len(profile) >= 3:
-                        points = np.array([[p[0], -p[1]] for p in profile])
+                        points = np.array([[p[0], y_sign * p[1]] for p in profile])
                         self.room_profiles.append(points)
                 for hole in structure_data.get("holes", []):
                     hole_profile = hole.get("profile", [])
                     hole_type = hole.get("type", "")
                     if hole_type == "DOOR" and len(hole_profile) >= 2:
                         xs = [p[0] for p in hole_profile]
-                        ys = [-p[1] for p in hole_profile]
+                        ys = [y_sign * p[1] for p in hole_profile]
                         min_x, max_x = min(xs), max(xs)
                         min_y, max_y = min(ys), max(ys)
                         if (max_x - min_x) > (max_y - min_y):
@@ -452,7 +548,12 @@ class CollisionDetector:
                         p2 = room_profile[(i + 1) % n].copy()
                         if not self._segment_overlaps_door(p1, p2, door_segments):
                             self.wall_segments.append((p1, p2))
-                print(f"[CollisionDetector] Loaded {len(self.room_profiles)} rooms, {len(self.wall_segments)} wall segments from AOSS structure.json")
+                print(
+                    f"[CollisionDetector] Loaded {len(self.room_profiles)} rooms, "
+                    f"{len(self.wall_segments)} wall segments from AOSS structure.json "
+                    f"(structure_y_sign={y_sign:+.0f}, status={self.structure_convention_status}, "
+                    f"alignment={self.structure_alignment_scores})"
+                )
                 success = True
             except Exception as e:
                 print(f"[CollisionDetector] Error loading AOSS structure.json: {e}")

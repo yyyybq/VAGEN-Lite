@@ -1,0 +1,11 @@
+{
+  "train": "exps/vagen_active_spatial/v46_baseline_qwen25vl_7b/train_filtered.jsonl",
+  "val_id": "exps/vagen_active_spatial/a2_v46_arrival_stop/val_id_delta_boost.jsonl",
+  "id_test": "data_gen/active_spatial_pipeline/output_100scenes/test.jsonl",
+  "validation_proxy": "data_gen/active_spatial_pipeline/output_v2/val_ood_v2_centering.jsonl",
+  "ood_scene": "data_gen/active_spatial_pipeline/ood_splits/ood_scene.jsonl",
+  "ood_instance": "data_gen/active_spatial_pipeline/ood_splits/ood_instance.jsonl",
+  "ood_category": "data_gen/active_spatial_pipeline/ood_splits/ood_category.jsonl",
+  "ood_template": "data_gen/active_spatial_pipeline/ood_splits/ood_template.jsonl",
+  "ood_geometry": "data_gen/active_spatial_pipeline/ood_splits/ood_geometry.jsonl"
+}

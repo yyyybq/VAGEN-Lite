@@ -9,8 +9,19 @@ from pathlib import Path
 
 import numpy as np
 
-from r1_repair_pipeline import SceneConstraints
+from r1_repair_pipeline import (
+    PROJECTIVE_GENERATOR_VERSION,
+    SceneConstraints,
+    absolute_pitch_degrees,
+    horizontal_forward,
+    reverse_turn_initial,
+)
 from vagen.envs.active_spatial.canonical_camera import build_canonical_camera
+from vagen.envs.active_spatial.collision_detector import CollisionDetector
+from vagen.envs.active_spatial.canonical_task_metrics import (
+    CANONICAL_TASK_METRIC_VERSION,
+    uses_canonical_backend,
+)
 
 
 def toy_item() -> dict:
@@ -41,22 +52,20 @@ def main() -> None:
                 }
             )
         )
-        (scene / "labels.json").write_text(
-            json.dumps(
-                [
-                    {
-                        "ins_id": "object_1",
-                        "label": "cabinet",
-                        "bounding_box": [
-                            {"x": x, "y": y, "z": z}
-                            for x in (1.0, 2.0)
-                            for y in (1.0, 2.0)
-                            for z in (0.0, 2.0)
-                        ],
-                    }
-                ]
-            )
-        )
+        toy_labels = [
+            {
+                "ins_id": f"object_{index}",
+                "label": "cabinet",
+                "bounding_box": [
+                    {"x": x, "y": y, "z": z}
+                    for x in (1.0, 2.0)
+                    for y in (1.0, 2.0)
+                    for z in (0.0, 2.0)
+                ],
+            }
+            for index in range(20)
+        ]
+        (scene / "labels.json").write_text(json.dumps(toy_labels))
 
         constraints = SceneConstraints(root, min_wall_clearance=0.5, object_margin=0.2)
         item = toy_item()
@@ -90,7 +99,49 @@ def main() -> None:
     else:
         raise AssertionError("camera_model_version must be a required explicit argument")
 
-    print(json.dumps({"passed": True, "tests": 7, "generator_version": "projective_canonical_h1_v4_layout_gated"}, indent=2))
+    horizontal = horizontal_forward(np.array([1.0, 2.0, 9.0]))
+    assert np.isclose(horizontal[2], 0.0) and np.isclose(np.linalg.norm(horizontal), 1.0)
+    assert np.isclose(absolute_pitch_degrees(np.array([1.0, 0.0, 1.0])), 45.0)
+
+    # InteriorGS structure files exist in both raw-Y and historical mirrored-Y
+    # conventions.  The runtime collision gate must follow label alignment.
+    detector = CollisionDetector()
+    detector._label_xy_centers = [np.array([1.0, 2.0]), np.array([2.0, 2.0])]
+    convention_scene = {
+        "rooms": [{"profile": [[0.0, 1.0], [3.0, 1.0], [3.0, 3.0], [0.0, 3.0]]}]
+    }
+    assert detector._select_structure_y_sign(convention_scene) == 1.0
+    assert detector.structure_convention_status == "ambiguous"
+    detector._label_xy_centers = [np.array([1.0, -2.0]), np.array([2.0, -2.0])]
+    assert detector._select_structure_y_sign(convention_scene) == -1.0
+    detector._label_xy_centers = [np.array([1.5, 2.0])] * 20
+    assert detector._select_structure_y_sign(convention_scene) == 1.0
+    assert detector.structure_convention_status == "frozen"
+
+    # Only explicitly versioned R1 rows select the canonical backend. Legacy
+    # rows and unknown future versions must retain historical scoring.
+    assert not uses_canonical_backend({"task_type": "fov_inclusion"})
+    assert uses_canonical_backend(
+        {
+            "task_type": "fov_inclusion",
+            "canonical_task_metric_version": CANONICAL_TASK_METRIC_VERSION,
+        }
+    )
+    assert not uses_canonical_backend(
+        {"task_type": "fov_inclusion", "canonical_task_metric_version": "unknown"}
+    )
+
+    success_pose = np.eye(4)
+    initial_pose, certificate = reverse_turn_initial(success_pose)
+    engine = __import__(
+        "vagen.envs.active_spatial.utils", fromlist=["ViewManipulator"]
+    ).ViewManipulator(step_translation=0.3, step_rotation_deg=20.0, world_up_axis="Z")
+    engine.reset(initial_pose)
+    for action in certificate:
+        engine.step(action)
+    assert len(certificate) == 9 and np.allclose(engine.get_pose(), success_pose, atol=1e-7)
+
+    print(json.dumps({"passed": True, "tests": 16, "generator_version": PROJECTIVE_GENERATOR_VERSION}, indent=2))
 
 
 if __name__ == "__main__":

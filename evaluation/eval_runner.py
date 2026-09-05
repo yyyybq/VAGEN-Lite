@@ -119,6 +119,7 @@ class EvalRunner:
             exclude_task_types=env_cfg.exclude_task_types,
             render_backend=env_cfg.render_backend,
             gs_root=env_cfg.gs_root,
+            client_url=env_cfg.client_url,
             gpu_device=env_cfg.gpu_device,
             image_width=env_cfg.image_width,
             image_height=env_cfg.image_height,

@@ -20,6 +20,7 @@ class EvalEnvConfig:
     exclude_task_types: List[str] = field(default_factory=lambda: ["delta_control"])
     render_backend: Optional[str] = "local"
     gs_root: str = ""
+    client_url: str = ""
     gpu_device: Optional[int] = 4
     image_width: int = 512
     image_height: int = 512

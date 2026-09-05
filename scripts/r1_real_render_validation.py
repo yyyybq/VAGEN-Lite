@@ -46,14 +46,18 @@ def overlay(image: Image.Image, result: dict[str, Any], title: str) -> Image.Ima
     for index, obj in enumerate(objects):
         color = colors[index % len(colors)]
         box = obj.get("bbox")
-        if box:
-            draw.rectangle(tuple(float(value) for value in box), outline=color, width=3)
+        normalized_box = None
+        if box and len(box) == 4 and all(math.isfinite(float(value)) for value in box):
+            x0, x1 = sorted((float(box[0]), float(box[2])))
+            y0, y1 = sorted((float(box[1]), float(box[3])))
+            normalized_box = (x0, y0, x1, y1)
+            draw.rectangle(normalized_box, outline=color, width=3)
         center = obj.get("center_uv")
-        if center:
+        if center and len(center) >= 2 and all(math.isfinite(float(value)) for value in center[:2]):
             u, v = float(center[0]), float(center[1])
             draw.ellipse((u - 4, v - 4, u + 4, v + 4), fill=color)
         label = str(obj.get("label") or obj.get("id") or f"object_{index}")
-        anchor = (float(box[0]), max(18.0, float(box[1]))) if box else (4.0, 22.0 + index * 14.0)
+        anchor = (normalized_box[0], max(18.0, normalized_box[1])) if normalized_box else (4.0, 22.0 + index * 14.0)
         draw.text(anchor, label, fill=color)
     draw.rectangle((0, 0, output.width - 1, output.height - 1), outline=(255, 255, 0), width=1)
     draw.rectangle((0, 0, output.width - 1, 18), fill=(0, 0, 0))
@@ -99,18 +103,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         source_index = int(mapping["source_row_index"])
         old = source_rows[source_index]
         new = repaired_by_id[mapping["new_task_id"]]
-        if args.kind == "fov":
-            poses = (
-                ("old_init", old, np.asarray(old["init_camera"]["extrinsics"], dtype=float)),
-                ("old_target", old, pose_from_item_target(old)),
-                ("new_init", new, np.asarray(new["init_camera"]["extrinsics"], dtype=float)),
-                ("new_target", new, pose_from_item_target(new)),
-            )
-        else:
-            poses = (
-                ("old_target", old, pose_from_item_target(old)),
-                ("new_target", new, pose_from_item_target(new)),
-            )
+        poses = (
+            ("old_init", old, np.asarray(old["init_camera"]["extrinsics"], dtype=float)),
+            ("new_init", new, np.asarray(new["init_camera"]["extrinsics"], dtype=float)),
+            ("old_target", old, pose_from_item_target(old)),
+            ("new_target", new, pose_from_item_target(new)),
+        )
         spec = []
         for label, item, pose in poses:
             result = score_observation(item, pose)
@@ -135,7 +133,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             image = images[image_cursor]
             image_cursor += 1
             stats = image_stats(image)
-            panel = overlay(image, result, f"{label} success={metric['success']}")
+            if args.kind == "projective":
+                detail = f"margin={metric.get('relation_margin_px')}"
+            else:
+                detail = f"inside={metric.get('inside_frame_fraction_min')}"
+            panel = overlay(image, result, f"{label} success={metric['success']} {detail}")
             panels.append(panel)
             manifest_panels.append(
                 {
@@ -164,6 +166,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "scene_id": args.scene_id,
                 "kind": args.kind,
                 "paired_image": image_name,
+                "initial_constraints": mapping.get("initial_constraints"),
+                "target_constraints": mapping.get("target_constraints"),
+                "navigation_distance": mapping.get("navigation_distance"),
                 "panels": manifest_panels,
             }
         )
@@ -201,6 +206,22 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "mapping": str(args.mapping),
         "render_resolution": [256, 256],
         "min_rgb_std": args.min_rgb_std,
+        "acceptance_gates": {
+            "new_initial_all_unsuccessful": panel_counts.get("new_init", {}).get("canonical_success", 0) == 0,
+            "new_target_all_successful": panel_counts.get("new_target", {}).get("canonical_success", 0) == len(render_results),
+            "new_panels_rgb_nonblank": all(
+                panel["rgb_nonblank"]
+                for row in render_results
+                for panel in row["panels"]
+                if panel["label"] in {"new_init", "new_target"}
+            ),
+            "historical_panels_rgb_nonblank_diagnostic_only": all(
+                panel["rgb_nonblank"]
+                for row in render_results
+                for panel in row["panels"]
+                if panel["label"] in {"old_init", "old_target"}
+            ),
+        },
     }
     (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))

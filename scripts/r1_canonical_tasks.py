@@ -117,7 +117,7 @@ def canonical_fov(result: dict[str, Any]) -> dict[str, Any]:
         )
     else:
         # Invalid projections are semantic failures, not an exception path.
-        center_margin = -float("inf")
+        center_margin = None
     fractions = [inside_fraction(o) for o in objs]
     gates = {
         "two_objects": len(objs) == 2,
@@ -125,11 +125,15 @@ def canonical_fov(result: dict[str, Any]) -> dict[str, Any]:
         "visible": len(objs) == 2 and all(bool(o.get("visible")) for o in objs),
         "min_area": len(objs) == 2 and all(float(o.get("area_ratio", 0.0) or 0.0) >= FOV_MIN_AREA_RATIO for o in objs),
         "full_bbox_in_frame": len(objs) == 2 and all(x >= FOV_MIN_INSIDE_FRACTION for x in fractions),
-        "center_margin": center_margin >= boundary,
+        "center_margin": center_margin is not None and center_margin >= boundary,
     }
     # A continuous diagnostic only; success always comes from the above gates.
     inclusion = min(fractions) if fractions else 0.0
-    normalized_margin = max(0.0, min(1.0, center_margin / max(boundary, 1.0)))
+    normalized_margin = (
+        max(0.0, min(1.0, center_margin / max(boundary, 1.0)))
+        if center_margin is not None
+        else 0.0
+    )
     return {
         "metric_version": CANONICAL_TASK_METRIC_VERSION,
         "task_metric": "fov_full_bbox_h1",
@@ -144,3 +148,19 @@ def canonical_fov(result: dict[str, Any]) -> dict[str, Any]:
 
 def pose_from_item_target(item: dict[str, Any]) -> np.ndarray:
     return camera_pose_from_forward(item["sample_target"], item["camera_params"]["forward"])
+
+
+# Runtime, generator, planner, and evaluation must resolve to one implementation.
+# Keep this script-level adapter for existing CLI imports while exporting the
+# package backend used by ActiveSpatialEnv.
+from vagen.envs.active_spatial.canonical_task_metrics import (  # noqa: E402,F401
+    CANONICAL_TASK_METRIC_VERSION as CANONICAL_TASK_METRIC_VERSION,
+    FOV_CENTER_MARGIN_FRACTION as FOV_CENTER_MARGIN_FRACTION,
+    FOV_MIN_AREA_RATIO as FOV_MIN_AREA_RATIO,
+    FOV_MIN_INSIDE_FRACTION as FOV_MIN_INSIDE_FRACTION,
+    PROJECTIVE_MIN_INSIDE_FRACTION as PROJECTIVE_MIN_INSIDE_FRACTION,
+    PROJECTIVE_MIN_MARGIN_PX as PROJECTIVE_MIN_MARGIN_PX,
+    canonical_fov as canonical_fov,
+    canonical_projective as canonical_projective,
+    score_observation as score_observation,
+)

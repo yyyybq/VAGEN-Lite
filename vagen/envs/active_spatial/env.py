@@ -62,6 +62,7 @@ from .utils import (
 from .spatial_potential_field import SpatialPotentialField, ScoreResult, create_potential_field
 from .collision_detector import CollisionDetector, CollisionResult, create_collision_detector
 from .visibility_checker import VisibilityChecker, VisibilityResult, create_visibility_checker, compute_visibility_reward
+from .canonical_task_metrics import score_canonical_task, uses_canonical_backend
 
 
 def _run_async(coro):
@@ -212,6 +213,7 @@ class ActiveSpatialEnv(BaseEnv):
         self.consecutive_collision_count: int = 0
         self.max_consecutive_collision_count: int = 0
         self.last_collision_result: Optional[CollisionResult] = None
+        self.current_collision_convention: Optional[Dict[str, Any]] = None
 
         # Low-information frame tracking for wall/inside-surface failure modes
         self.low_info_frame_count: int = 0
@@ -456,6 +458,26 @@ class ActiveSpatialEnv(BaseEnv):
         # Load collision detection data for this scene (cached - only reloads if scene changes)
         if self.collision_detector is not None and scene_id and self.config.gs_root:
             self.collision_detector.load_scene_from_gs_root(self.config.gs_root, scene_id)
+        self.current_collision_convention = None
+        if uses_canonical_backend(item):
+            if self.collision_detector is None or not self.collision_detector.scene_loaded:
+                raise RuntimeError("R1 canonical rows require loaded collision scene data")
+            convention = self.collision_detector.convention_record()
+            if convention.get("status") != "frozen":
+                raise RuntimeError(
+                    f"R1 collision convention is not frozen for scene {scene_id}: {convention}"
+                )
+            expected = item.get("collision_convention")
+            if expected is not None and (
+                expected.get("version") != convention.get("version")
+                or float(expected.get("structure_y_sign"))
+                != float(convention.get("structure_y_sign"))
+            ):
+                raise RuntimeError(
+                    f"R1 collision convention mismatch for scene {scene_id}: "
+                    f"expected={expected}, runtime={convention}"
+                )
+            self.current_collision_convention = convention
         
         # Load visibility checker data for this scene (cached - only reloads if scene changes)
         if self.visibility_checker is not None and scene_id and self.config.gs_root:
@@ -528,26 +550,38 @@ class ActiveSpatialEnv(BaseEnv):
             curr_pose = self.view_engine.get_pose()
             curr_pos = curr_pose[:3, 3]
             curr_forward = curr_pose[:3, 2]  # ActiveSpatial movement/render convention: local +Z is forward
-
-            initial_score = self.potential_field.compute_score(
-                camera_position=curr_pos,
-                camera_forward=curr_forward,
-                task_type=self.current_task["task_type"],
-                task_params=self._build_scoring_task_params(curr_pose),
-                target_region=self.current_task["target_region"],
-            )
-            self.prev_potential_score = initial_score.total_score
-            self.prev_position_score = float(getattr(initial_score, "position_score", 0.0))    # ★ v18_dual
-            self.prev_orientation_score = float(getattr(initial_score, "orientation_score", 0.0))  # ★ v18_dual
-            self.current_region_metrics = (initial_score.details or {}).get("region_metrics", {})
-            self.best_score = initial_score.total_score
-            self.final_score = initial_score.total_score
-            self.final_position_score = float(getattr(initial_score, "position_score", 0.0))
-            self.final_orientation_score = float(getattr(initial_score, "orientation_score", 0.0))
+            canonical_metric = self._calculate_canonical_metric()
+            if canonical_metric is not None:
+                initial_total = float(canonical_metric["score"])
+                initial_position = initial_total
+                initial_orientation = initial_total
+                self.current_region_metrics = {
+                    "backend": canonical_metric["metric_version"],
+                    **canonical_metric,
+                }
+            else:
+                initial_score = self.potential_field.compute_score(
+                    camera_position=curr_pos,
+                    camera_forward=curr_forward,
+                    task_type=self.current_task["task_type"],
+                    task_params=self._build_scoring_task_params(curr_pose),
+                    target_region=self.current_task["target_region"],
+                )
+                initial_total = float(initial_score.total_score)
+                initial_position = float(getattr(initial_score, "position_score", 0.0))
+                initial_orientation = float(getattr(initial_score, "orientation_score", 0.0))
+                self.current_region_metrics = (initial_score.details or {}).get("region_metrics", {})
+            self.prev_potential_score = initial_total
+            self.prev_position_score = initial_position
+            self.prev_orientation_score = initial_orientation
+            self.best_score = initial_total
+            self.final_score = initial_total
+            self.final_position_score = initial_position
+            self.final_orientation_score = initial_orientation
             
             if self.VERBOSE:
-                print(f"[ActiveSpatialEnv] Initial potential score: {initial_score.total_score:.4f}")
-                print(f"  Position: {initial_score.position_score:.4f}, Orientation: {initial_score.orientation_score:.4f}")
+                print(f"[ActiveSpatialEnv] Initial score: {initial_total:.4f}")
+                print(f"  Position: {initial_position:.4f}, Orientation: {initial_orientation:.4f}")
         
         # Initialize prev_distance for legacy progress reward
         target_pose = self._get_target_pose()
@@ -583,6 +617,7 @@ class ActiveSpatialEnv(BaseEnv):
             "task_type": self.current_task["task_type"],
             "initial_potential_score": self.prev_potential_score,
             "initial_region_metrics": self.current_region_metrics,
+            "collision_convention": self.current_collision_convention,
         }
         
         return obs, info
@@ -790,9 +825,19 @@ class ActiveSpatialEnv(BaseEnv):
                     
                     # Calculate final success based on potential field score
                     final_score = self._calculate_current_score()
-                    success_threshold = self.config.success_score_threshold if self.config.enable_potential_field else 0.8
+                    canonical_metric = self._calculate_canonical_metric()
+                    success_threshold = (
+                        "canonical_gates"
+                        if canonical_metric is not None
+                        else (self.config.success_score_threshold if self.config.enable_potential_field else 0.8)
+                    )
+                    success_hit = (
+                        bool(canonical_metric["success"])
+                        if canonical_metric is not None
+                        else final_score >= float(success_threshold)
+                    )
                     
-                    if final_score >= success_threshold:
+                    if success_hit:
                         self.reward += self.config.success_reward
                         metrics["traj_metrics"]["success"] = True
                         self.success_by_done = True
@@ -803,6 +848,8 @@ class ActiveSpatialEnv(BaseEnv):
                     # Store final score in info for logging
                     info["final_score"] = final_score
                     info["success_threshold"] = success_threshold
+                    if canonical_metric is not None:
+                        info["canonical_task_metric"] = canonical_metric
                     self.final_score = float(final_score)
                     break
                 
@@ -872,11 +919,19 @@ class ActiveSpatialEnv(BaseEnv):
                         self.episode_done = True
                         # Check success at natural termination
                         final_score = self._calculate_current_score()
-                        if final_score >= self.config.success_score_threshold:
+                        canonical_metric = self._calculate_canonical_metric()
+                        success_hit = (
+                            bool(canonical_metric["success"])
+                            if canonical_metric is not None
+                            else final_score >= self.config.success_score_threshold
+                        )
+                        if success_hit:
                             self.reward += self.config.success_reward
                             metrics["traj_metrics"]["success"] = True
                             self.success_by_max_steps = True
                             info["final_score"] = final_score
+                        if canonical_metric is not None:
+                            info["canonical_task_metric"] = canonical_metric
                         self.final_score = float(final_score)
                         break
             
@@ -930,7 +985,15 @@ class ActiveSpatialEnv(BaseEnv):
             # threshold. Total-score gate is not required in this mode. This forces the policy to learn BOTH
             # translation and rotation rather than satisfying total via one channel alone.
             if self.config.enable_auto_termination:
-                if getattr(self.config, "success_require_both", False):
+                canonical_metric = self._calculate_canonical_metric()
+                if canonical_metric is not None:
+                    success_hit = bool(canonical_metric["success"])
+                    gate_desc = (
+                        f"canonical={canonical_metric['metric_version']} "
+                        f"success={success_hit}"
+                    )
+                    info["canonical_task_metric"] = canonical_metric
+                elif getattr(self.config, "success_require_both", False):
                     pos_thr = float(getattr(self.config, "success_position_threshold", 0.5))
                     ori_thr = float(getattr(self.config, "success_orientation_threshold", 0.5))
                     success_hit = (
@@ -947,9 +1010,14 @@ class ActiveSpatialEnv(BaseEnv):
                     self.reward += self.config.success_reward
                     metrics["traj_metrics"]["success"] = True
                     self.success_by_auto = True
-                    info["final_score"] = self.prev_potential_score
+                    terminal_score = (
+                        float(canonical_metric["score"])
+                        if canonical_metric is not None
+                        else self.prev_potential_score
+                    )
+                    info["final_score"] = terminal_score
                     info["auto_terminated"] = True
-                    self.final_score = float(self.prev_potential_score)
+                    self.final_score = float(terminal_score)
                     if self.VERBOSE:
                         print(f"[AutoTerminate] {gate_desc}, granting success_reward={self.config.success_reward}")
         
@@ -1123,6 +1191,12 @@ class ActiveSpatialEnv(BaseEnv):
         except Exception:
             return ""
     
+    def _calculate_canonical_metric(self) -> Optional[Dict[str, Any]]:
+        """Return the strict R1 metric only for explicitly versioned rows."""
+        if not uses_canonical_backend(self.current_item):
+            return None
+        return score_canonical_task(self.current_item, self.view_engine.get_pose())
+
     def _calculate_current_score(self) -> float:
         """
         Calculate current pose score using potential field or legacy method.
@@ -1131,6 +1205,14 @@ class ActiveSpatialEnv(BaseEnv):
             Score in [0, 1] indicating how well the current pose satisfies the task.
         """
         curr_E = self.view_engine.get_pose()
+        canonical_metric = self._calculate_canonical_metric()
+        if canonical_metric is not None:
+            self.current_region_metrics = {
+                "backend": canonical_metric["metric_version"],
+                "canonical_success": bool(canonical_metric["success"]),
+                **canonical_metric,
+            }
+            return float(canonical_metric["score"])
         curr_pos = curr_E[:3, 3]
         curr_forward = curr_E[:3, 2]  # ActiveSpatial movement/render convention: local +Z is forward
         
@@ -1185,18 +1267,27 @@ class ActiveSpatialEnv(BaseEnv):
         # === 1. Spatial Potential Field Reward (Primary) ===
         if self.config.enable_potential_field and self.potential_field is not None:
             if self.current_task and self.current_task.get("target_region"):
-                score_result = self.potential_field.compute_score(
-                    camera_position=curr_pos,
-                    camera_forward=curr_forward,
-                    task_type=self.current_task["task_type"],
-                    task_params=self._build_scoring_task_params(curr_E),
-                    target_region=self.current_task["target_region"],
-                )
-                
-                current_score = score_result.total_score
-                cur_pos_score = float(getattr(score_result, "position_score", 0.0))
-                cur_ori_score = float(getattr(score_result, "orientation_score", 0.0))
-                self.current_region_metrics = (score_result.details or {}).get("region_metrics", {})
+                canonical_metric = self._calculate_canonical_metric()
+                if canonical_metric is not None:
+                    current_score = float(canonical_metric["score"])
+                    cur_pos_score = current_score
+                    cur_ori_score = current_score
+                    self.current_region_metrics = {
+                        "backend": canonical_metric["metric_version"],
+                        **canonical_metric,
+                    }
+                else:
+                    score_result = self.potential_field.compute_score(
+                        camera_position=curr_pos,
+                        camera_forward=curr_forward,
+                        task_type=self.current_task["task_type"],
+                        task_params=self._build_scoring_task_params(curr_E),
+                        target_region=self.current_task["target_region"],
+                    )
+                    current_score = score_result.total_score
+                    cur_pos_score = float(getattr(score_result, "position_score", 0.0))
+                    cur_ori_score = float(getattr(score_result, "orientation_score", 0.0))
+                    self.current_region_metrics = (score_result.details or {}).get("region_metrics", {})
 
                 progress_mode = self.config.potential_field_progress_mode
                 scale = self.config.potential_field_reward_scale
