@@ -8,6 +8,7 @@ import copy
 import hashlib
 import json
 import math
+import time
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,14 @@ def atomic_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
     temporary.replace(path)
+
+
+def append_stage_event(path: Path, payload: dict[str, Any]) -> None:
+    """Append a compact, resumable stage record before large manifests land."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"at": time.time(), **payload}, allow_nan=False) + "\n")
+        handle.flush()
 
 
 def pair_key(row: dict[str, Any]) -> tuple[str, ...]:
@@ -230,6 +239,7 @@ def audit_reachability_tiered(
     final_tier_expansions: int,
     run_final_tier: bool,
     final_tier_reason: str,
+    state_validator=None,
 ) -> dict[str, Any]:
     scene_id = str(repaired["scene_id"])
     if not detector.load_scene_from_gs_root(str(gs_root), scene_id):
@@ -249,6 +259,7 @@ def audit_reachability_tiered(
             max_expansions=budget,
             step_translation=0.3,
             step_rotation_deg=20.0,
+            state_validator=state_validator,
         )
         tier_rows.append(
             {
@@ -414,6 +425,7 @@ def main() -> None:
         failures: list[dict[str, Any]] = []
         unverified: list[dict[str, Any]] = []
         reachability_rows: list[dict[str, Any]] = []
+        stage_events_path = split_dir / "stage_events.jsonl"
 
         completed_summary = split_dir / "summary.json"
         if args.resume and completed_summary.is_file():
@@ -473,6 +485,10 @@ def main() -> None:
             if index in processed_indices:
                 continue
             source = source_rows[index]
+            append_stage_event(stage_events_path, {
+                "split": split, "source_row_index": index, "stage": "repair_start",
+                "task_type": source.get("task_type"),
+            })
             print(
                 json.dumps(
                     {
@@ -487,9 +503,22 @@ def main() -> None:
                 flush=True,
             )
             repaired, details = repair_one_cached(index, source, constraints, repair_cache)
+            search_details = details.get("retry") or details.get("search_stats") or {}
+            append_stage_event(stage_events_path, {
+                "split": split, "source_row_index": index, "stage": "generation_candidate_search_done",
+                "status": "candidate_found" if repaired is not None else "candidate_not_found",
+                "failure": details.get("failure"),
+                "failure_taxonomy": details.get("failure_taxonomy"),
+                "search_stats": {
+                    key: search_details.get(key)
+                    for key in ("positions", "layout_valid_positions", "canonical_success_candidates", "viable_candidates", "failure_gate_counts", "cache_stats", "search_budget")
+                    if key in search_details
+                },
+            })
             repair_status = "strict_same_pair_repair"
             lineage = None
             reserved_donor_key = None
+            donor_attempt = f"{split}:{index}:attempt1"
             constraint_reason = "not_run"
             if repaired is not None:
                 valid, constraint_reason = split_constraint(
@@ -501,6 +530,7 @@ def main() -> None:
 
             if repaired is None:
                 original_failure = details
+                donor_attempt_count = 0
                 for donor_split, donor_index, candidate in replacement_candidates(
                     source,
                     split,
@@ -510,6 +540,7 @@ def main() -> None:
                     train_scenes,
                     train_labels,
                 )[: args.max_replacement_candidates]:
+                    donor_attempt_count += 1
                     replacement, replacement_details = repair_one_cached(
                         index, candidate, constraints, repair_cache
                     )
@@ -519,12 +550,22 @@ def main() -> None:
                         split, source, replacement, train_scenes, train_labels
                     )
                     if not valid:
+                        append_stage_event(stage_events_path, {
+                            "split": split, "source_row_index": index, "stage": "donor_candidate_rejected",
+                            "donor_split": donor_split, "donor_source_row_index": donor_index,
+                            "reason": constraint_reason,
+                        })
                         continue
                     if donor_ledger:
                         reserved = donor_ledger.reserve(
-                            f"{split}:{index}", [pair_key(candidate)]
+                            f"{split}:{index}", [pair_key(candidate)], attempt=donor_attempt
                         )
                         if reserved is None:
+                            append_stage_event(stage_events_path, {
+                                "split": split, "source_row_index": index, "stage": "donor_candidate_rejected",
+                                "donor_split": donor_split, "donor_source_row_index": donor_index,
+                                "reason": "donor_reservation_conflict",
+                            })
                             continue
                         reserved_donor_key = reserved
                     repaired = replacement
@@ -548,6 +589,7 @@ def main() -> None:
                         "replacement": lineage,
                     }
                     details["replacement_lineage"] = lineage
+                    details["donor_attempt_count"] = donor_attempt_count
                     break
 
             base = {
@@ -575,6 +617,39 @@ def main() -> None:
                 final_selected, final_reason = select_final_tier(split, index, source, details)
                 if args.disable_final_tier:
                     final_selected, final_reason = False, "final_tier_disabled_for_small_sample"
+                if donor_ledger and reserved_donor_key is not None:
+                    donor_ledger.mark_validation_pending(
+                        f"{split}:{index}", reserved_donor_key, attempt=donor_attempt
+                    )
+                append_stage_event(stage_events_path, {
+                    "split": split, "source_row_index": index, "stage": "planner_start",
+                    "repair_status": repair_status,
+                })
+                state_validator = None
+                if constraints is not None and constraints.available:
+                    initial_pose_for_validation = np.asarray(
+                        repaired["init_camera"]["extrinsics"], dtype=float
+                    )
+                    initial_layout_check = constraints.validate(
+                        repaired,
+                        initial_pose_for_validation[:3, 3],
+                        check_pair_distance=False,
+                    )
+                    initial_room_index = initial_layout_check.get("room_index")
+
+                    def state_validator(candidate_pose, *, _item=repaired, _room=initial_room_index):
+                        check = constraints.validate(
+                            _item,
+                            np.asarray(candidate_pose, dtype=float)[:3, 3],
+                            initial_room_index=_room,
+                            check_pair_distance=False,
+                        )
+                        if check["success"]:
+                            return True, "ok"
+                        for gate in ("inside_room", "same_room_as_initial", "wall_clearance", "object_collision_free"):
+                            if not check["gates"].get(gate, True):
+                                return False, f"layout_{gate}"
+                        return False, "layout_quality_gate"
                 reachability = audit_reachability_tiered(
                     repaired,
                     detector,
@@ -584,9 +659,18 @@ def main() -> None:
                     args.final_tier_expansions,
                     final_selected,
                     final_reason,
+                    state_validator=state_validator,
                 )
                 reachability["source_row_index"] = index
                 reachability_rows.append(reachability)
+                append_stage_event(stage_events_path, {
+                    "split": split, "source_row_index": index, "stage": "planner_done",
+                    "status": reachability.get("status"),
+                    "expansions": reachability.get("expansions"),
+                    "steps": reachability.get("steps"),
+                    "state_quality_rejections": reachability.get("state_quality_rejections"),
+                    "reachability_tiers": reachability.get("reachability_tiers"),
+                })
                 if reachability.get("status") == "reachable":
                     if details.get("repaired_difficulty") is not None:
                         steps = int(reachability.get("steps") or 0)
@@ -622,7 +706,7 @@ def main() -> None:
                     )
                 elif reachability.get("reachability_verified"):
                     if donor_ledger and reserved_donor_key is not None:
-                        donor_ledger.release(f"{split}:{index}", reserved_donor_key)
+                        donor_ledger.release(f"{split}:{index}", reserved_donor_key, attempt=donor_attempt, reason="planner_verified_failure")
                     record = {
                         **base,
                         "status": "hard_failure",
@@ -635,7 +719,7 @@ def main() -> None:
                     failures.append(record)
                 else:
                     if donor_ledger and reserved_donor_key is not None:
-                        donor_ledger.release(f"{split}:{index}", reserved_donor_key)
+                        donor_ledger.release(f"{split}:{index}", reserved_donor_key, attempt=donor_attempt, reason="planner_unverified")
                     record = {
                         **base,
                         "status": "unverified",
@@ -666,6 +750,10 @@ def main() -> None:
                 ),
                 flush=True,
             )
+            append_stage_event(stage_events_path, {
+                "split": split, "source_row_index": index, "stage": "row_done",
+                "status": accounting[-1]["status"],
+            })
 
             if position % 10 == 0 or position == len(in_scope):
                 atomic_jsonl(split_dir / "accounting_checkpoint.jsonl", accounting)

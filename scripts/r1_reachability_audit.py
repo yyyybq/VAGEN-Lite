@@ -91,6 +91,7 @@ def search_one(
     max_expansions: int,
     step_translation: float,
     step_rotation_deg: float,
+    state_validator=None,
 ) -> dict[str, Any]:
     metric_fn = canonical_fov if kind == "fov" else canonical_projective
     start = np.asarray(item["init_camera"]["extrinsics"], dtype=float)
@@ -114,6 +115,8 @@ def search_one(
             "no_solution_lower_bound"
         ),
     }
+    quality_rejections: Counter[str] = Counter()
+    base["state_quality_rejections"] = quality_rejections
     if detector.structure_convention_status != "frozen":
         return {
             **base,
@@ -186,6 +189,15 @@ def search_one(
         for action in ACTIONS:
             engine.reset(pose)
             candidate = engine.step(action)
+            if state_validator is not None:
+                validation = state_validator(candidate)
+                if isinstance(validation, tuple):
+                    valid, reason = validation
+                else:
+                    valid, reason = bool(validation), "state_validator"
+                if not valid:
+                    quality_rejections[str(reason)] += 1
+                    continue
             if action in TRANSLATION_ACTIONS:
                 collision = detector.check_collision(candidate[:3, 3], previous_position=pose[:3, 3])
                 if collision.has_collision:

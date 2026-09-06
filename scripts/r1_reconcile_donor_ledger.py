@@ -23,9 +23,9 @@ def main() -> None:
         and row.get("generation_status") == "count_matched_replacement"
     }
     reservations = {
-        donor: owner
-        for donor, owner in ledger.get("reservations", {}).items()
-        if owner in owners
+        donor: value
+        for donor, value in ledger.get("reservations", {}).items()
+        if (value.get("owner") if isinstance(value, dict) else value) in owners
     }
     payload = {
         "version": "r1_donor_ledger_reconciled_v1",

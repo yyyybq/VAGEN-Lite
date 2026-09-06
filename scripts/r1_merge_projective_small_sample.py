@@ -120,7 +120,10 @@ def main() -> None:
         for key in ("same_pair_or_replacement", "canonical_target", "reachable_path", "runtime_consistent", "rgb_observability", "final_accepted")
     }
     ledger = json.loads(args.donor_ledger.read_text()) if args.donor_ledger.is_file() else {"reservations": {}}
-    owners = list(ledger.get("reservations", {}).values())
+    owners = [
+        value.get("owner") if isinstance(value, dict) else value
+        for value in ledger.get("reservations", {}).values()
+    ]
     donors = list(ledger.get("reservations", {}).keys())
     summary = {
         "version": "r1_projective_v6_small_sample_merged_v1",

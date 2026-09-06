@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import fcntl
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -100,7 +101,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 if args.renderer_lock:
                     args.renderer_lock.parent.mkdir(parents=True, exist_ok=True)
                     lock_handle = args.renderer_lock.open("a+")
-                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                    while True:
+                        try:
+                            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                            break
+                        except BlockingIOError:
+                            time.sleep(0.01)
                 renderer = UnifiedRenderGS(
                     render_backend="http", client_url=args.renderer_url, scene_id=scene_id
                 )

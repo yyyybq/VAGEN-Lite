@@ -39,6 +39,35 @@ class DonorAllocatorTests(unittest.TestCase):
             ledger.release(4, donor)
             self.assertEqual(ledger.reserve(5, [donor]), donor)
 
+    def test_lifecycle_attempt_state_and_rgb_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = AtomicDonorLedger(Path(directory) / "donors.json")
+            donor = ("id_test", "scene", "pair")
+            attempt = "id_test:4:attempt7"
+            self.assertEqual(ledger.reserve("id_test:4", [donor], attempt=attempt), donor)
+            self.assertEqual(ledger.states()["\u001f".join(donor)]["state"], "reserved")
+            ledger.mark_validation_pending("id_test:4", donor, attempt=attempt)
+            self.assertEqual(ledger.states()["\u001f".join(donor)]["state"], "validation_pending")
+            ledger.commit("id_test:4", donor, attempt=attempt)
+            self.assertEqual(ledger.states()["\u001f".join(donor)]["state"], "committed")
+            with self.assertRaises(ValueError):
+                ledger.release("id_test:4", donor, attempt="wrong", reason="stale_worker")
+            ledger.release("id_test:4", donor, attempt=attempt, reason="rgb_observability_rejected")
+            self.assertNotIn("\u001f".join(donor), ledger.states())
+
+    def test_scheduler_recovery_keeps_pending_evidence_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = AtomicDonorLedger(Path(directory) / "donors.json")
+            pending = ("train", "scene", "pending")
+            reserved = ("train", "scene", "reserved")
+            ledger.reserve("train:1", [pending], attempt="train:1:attempt1")
+            ledger.mark_validation_pending("train:1", pending, attempt="train:1:attempt1")
+            ledger.reserve("train:2", [reserved], attempt="train:2:attempt1")
+            released = ledger.recover_owner("train:2", "worker_timeout", keep_states={"validation_pending"})
+            self.assertEqual(released, [reserved])
+            self.assertIn("\u001f".join(pending), ledger.snapshot())
+            self.assertNotIn("\u001f".join(reserved), ledger.snapshot())
+
 
 if __name__ == "__main__":
     unittest.main()

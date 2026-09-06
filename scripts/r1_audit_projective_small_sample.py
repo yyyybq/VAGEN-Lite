@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from r1_donor_allocator import AtomicDonorLedger
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -19,8 +21,10 @@ def main() -> None:
     parser.add_argument("--renderer-url", required=True)
     parser.add_argument("--renderer-lock", type=Path, required=True)
     parser.add_argument("--collision-convention-overrides", type=Path, required=True)
+    parser.add_argument("--donor-ledger", type=Path)
     parser.add_argument("--max-workers", type=int, default=4)
     args = parser.parse_args()
+    donor_ledger = AtomicDonorLedger(args.donor_ledger) if args.donor_ledger else None
     records = json.loads(args.selection.read_text())["records"]
     jobs = []
     for record in records:
@@ -45,7 +49,9 @@ def main() -> None:
         if (output / "summary.json").is_file():
             summary = json.loads((output / "summary.json").read_text())
             if not any(reason == "renderer_error" for reason in summary.get("failure_reasons", {})):
-                return {"job": job.name, "status": "resume_existing"}
+                result = {"job": job.name, "status": "resume_existing"}
+                _finalize_donor(record, accounting, output, result)
+                return result
         repaired = job / "repair" / record["split"] / "trainable.jsonl"
         reachability = job / "repair" / record["split"] / "reachability_manifest.jsonl"
         output.mkdir(parents=True, exist_ok=True)
@@ -63,12 +69,51 @@ def main() -> None:
         ]
         with (output / "job.log").open("w") as handle:
             result = subprocess.run(command, stdout=handle, stderr=subprocess.STDOUT)
-        return {
+        result_row = {
             "job": job.name,
             "status": "completed" if result.returncode == 0 else "process_error",
             "returncode": result.returncode,
             "source_row_index": record["source_row_index"],
         }
+        _finalize_donor(record, accounting, output, result_row)
+        return result_row
+
+    def _finalize_donor(record, accounting, output, result_row):
+        if donor_ledger is None:
+            return
+        lineage = accounting.get("replacement_lineage") or {}
+        donor = lineage.get("new_pair")
+        if not donor:
+            return
+        owner = f"{record['split']}:{record['source_row_index']}"
+        states = donor_ledger.states()
+        donor_key = "\u001f".join(str(part) for part in donor)
+        if states.get(donor_key, {}).get("owner") != owner:
+            result_row["donor_transition"] = "not_owned"
+            return
+        # A subprocess/renderer implementation error is not an RGB verdict.
+        # Keep the reservation pending so a later resume can retry the same
+        # owner/attempt; never release a donor merely because no audit file
+        # was produced.
+        if result_row.get("status") == "process_error":
+            result_row["donor_transition"] = "kept_validation_pending_process_error"
+            return
+        manifest = output / "observability_manifest.jsonl"
+        if not manifest.is_file() or not manifest.read_text().strip():
+            result_row["donor_transition"] = "kept_validation_pending_missing_audit"
+            return
+        audit = json.loads(manifest.read_text().splitlines()[0])
+        if audit.get("renderer_error"):
+            # An implementation/service error is not an RGB quality verdict;
+            # keep validation_pending for a retry and never release a donor
+            # merely because the renderer was unavailable.
+            result_row["donor_transition"] = "kept_validation_pending_renderer_error"
+        elif audit.get("passed"):
+            donor_ledger.commit(owner, tuple(donor), attempt=f"{owner}:attempt1")
+            result_row["donor_transition"] = "committed"
+        else:
+            donor_ledger.release(owner, tuple(donor), attempt=f"{owner}:attempt1", reason="rgb_observability_rejected")
+            result_row["donor_transition"] = "released_rgb_rejection"
 
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as pool:

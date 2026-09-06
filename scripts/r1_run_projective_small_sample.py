@@ -11,6 +11,8 @@ import sys
 import time
 from pathlib import Path
 
+from r1_donor_allocator import AtomicDonorLedger
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -24,6 +26,7 @@ def main() -> None:
     parser.add_argument("--timeout-seconds", type=int, default=180)
     parser.add_argument("--max-workers", type=int, default=4)
     args = parser.parse_args()
+    donor_ledger = AtomicDonorLedger(args.donor_ledger)
     payload = json.loads(args.selection.read_text())
     records = payload["records"]
     jobs_root = args.output_root / "jobs"
@@ -73,6 +76,24 @@ def main() -> None:
                 "timeout_seconds": args.timeout_seconds,
             }
         result["elapsed_seconds"] = round(time.monotonic() - started, 3)
+        events_path = output / "repair" / split / "stage_events.jsonl"
+        if events_path.is_file():
+            events = [json.loads(line) for line in events_path.open() if line.strip()]
+            if events:
+                result["last_stage"] = events[-1].get("stage")
+                result["stage_event_count"] = len(events)
+        if result["status"] in {"unverified_generation_timeout", "process_error"}:
+            owner = f"{split}:{index}"
+            accounting_path = output / "repair" / split / "accounting.jsonl"
+            keep_states = set()
+            if accounting_path.is_file():
+                accounting_rows = [json.loads(line) for line in accounting_path.open() if line.strip()]
+                if accounting_rows and accounting_rows[0].get("status") in {"strict_same_pair_repair", "count_matched_replacement"} and accounting_rows[0].get("reachability_status") == "reachable":
+                    # A crash after reachability was written is recoverable:
+                    # retain validation_pending until official RGB decides.
+                    keep_states = {"validation_pending"}
+            released = donor_ledger.recover_owner(owner, result["status"], keep_states=keep_states)
+            result["released_donors"] = [list(donor) for donor in released]
         (output / "job_result.json").write_text(json.dumps(result, indent=2) + "\n")
         return result
 
