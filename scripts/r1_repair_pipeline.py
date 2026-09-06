@@ -37,6 +37,8 @@ from data_gen.active_spatial_pipeline.layout_quality import LayoutGeometry, poin
 PROJECTIVE_GENERATOR_VERSION = "projective_canonical_h1_v6_initial_observable_difficulty_v1"
 FOV_GENERATOR_VERSION = "fov_canonical_h1_v2_min4_runtime_collision_v2"
 MAX_ABS_PITCH_DEG = 30.0
+PROJECTIVE_INITIAL_POINT_BUDGET = 32
+PROJECTIVE_TARGET_POINT_BUDGET = 64
 FOV_REVERSE_TURN_ACTIONS = 9
 MIN_FOV_PLANNER_STEPS = 4
 PLANNER_ACTIONS = (
@@ -716,6 +718,8 @@ def repair_projective(
         desired_room_index = constraints.room_index(layout, pair_midpoint(item)[:2])
     fallback_initial = None
     fallback_rank: tuple[float, ...] | None = None
+    initial_states_evaluated = 0
+    initial_geometry_prefilter_passes = 0
     if constraints is None:
         fallback_initial = (old_initial_pose, old_initial_metric, initial_constraints)
     else:
@@ -745,6 +749,7 @@ def repair_projective(
                 check_pair_distance=False,
             ) if not (selection_offset == 0 and fallback_initial is not None) else []
         )
+        initial_points = initial_points[:PROJECTIVE_INITIAL_POINT_BUDGET]
         for initial_point in initial_points:
             check = constraints.validate(
                 item,
@@ -770,9 +775,12 @@ def repair_projective(
             for direction in directions:
                 candidate_pose = camera_pose_from_forward(initial_point, normalize_vector(direction))
                 candidate_metric = canonical_projective(score_observation(item, candidate_pose))
+                initial_states_evaluated += 1
                 if candidate_metric["success"]:
                     continue
                 meaningful = projective_initial_geometry_discernible(candidate_metric)
+                if meaningful:
+                    initial_geometry_prefilter_passes += 1
                 if selection_offset == 0:
                     if meaningful:
                         fallback_initial = (candidate_pose, candidate_metric, check)
@@ -797,7 +805,8 @@ def repair_projective(
     layout_valid_positions = 0
     canonical_success_candidates = 0
     viable: list[tuple[tuple[float, ...], dict[str, Any], dict[str, Any]]] = []
-    points = projective_candidates(item, constraints, desired_room_index)
+    all_points = projective_candidates(item, constraints, desired_room_index)
+    points = all_points[:PROJECTIVE_TARGET_POINT_BUDGET]
     for point_index, point in enumerate(points, start=1):
         target_constraints = (
             constraints.validate(
@@ -955,6 +964,15 @@ def repair_projective(
             "failure_gate_counts": dict(failure_gates),
             "attempts": attempted,
             "cache_stats": dict(constraints.cache_stats) if constraints else {},
+            "search_budget": {
+                "initial_states_evaluated": initial_states_evaluated,
+                "initial_geometry_prefilter_passes": initial_geometry_prefilter_passes,
+                "initial_points": PROJECTIVE_INITIAL_POINT_BUDGET,
+                "target_points": PROJECTIVE_TARGET_POINT_BUDGET,
+                "all_target_points_generated": len(all_points),
+                "target_points_evaluated": len(points),
+                "budget_exhausted": len(all_points) > len(points),
+            },
         }
         return repaired, details
     metric_ready = [
@@ -988,6 +1006,15 @@ def repair_projective(
             "canonical_success_candidates": canonical_success_candidates,
             "failure_gate_counts": dict(failure_gates),
             "cache_stats": dict(constraints.cache_stats) if constraints else {},
+            "search_budget": {
+                "initial_states_evaluated": initial_states_evaluated,
+                "initial_geometry_prefilter_passes": initial_geometry_prefilter_passes,
+                "initial_points": PROJECTIVE_INITIAL_POINT_BUDGET,
+                "target_points": PROJECTIVE_TARGET_POINT_BUDGET,
+                "all_target_points_generated": len(all_points),
+                "target_points_evaluated": len(points),
+                "budget_exhausted": len(all_points) > len(points),
+            },
         },
         "attempts": attempted,
     }

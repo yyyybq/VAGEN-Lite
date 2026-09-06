@@ -24,7 +24,11 @@ from vagen.envs.active_spatial.render.unified_renderer import UnifiedRenderGS
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
-    repaired = {row["task_id"]: row for row in read_jsonl(args.repaired)}
+    repaired = {
+        row["task_id"]: row
+        for row in read_jsonl(args.repaired)
+        if row.get("task_id")
+    }
     reachability = read_jsonl(args.reachability)
     selected_indices = {
         int(value) for value in (args.source_indices or "").split(",") if value.strip()

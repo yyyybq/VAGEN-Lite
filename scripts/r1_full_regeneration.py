@@ -24,6 +24,7 @@ from r1_repair_pipeline import (
     repair_projective,
     projective_difficulty_profile,
 )
+from r1_donor_allocator import AtomicDonorLedger
 from vagen.envs.active_spatial.collision_detector import create_collision_detector
 
 
@@ -309,8 +310,23 @@ def main() -> None:
         help="comma-separated quick and escalation budgets; exhaustion remains unverified",
     )
     parser.add_argument("--final-tier-expansions", type=int, default=250000)
+    parser.add_argument(
+        "--disable-final-tier",
+        action="store_true",
+        help="keep this run at the configured quick/escalation tiers",
+    )
     parser.add_argument("--collision-convention-overrides", type=Path)
     parser.add_argument("--max-replacement-candidates", type=int, default=64)
+    parser.add_argument(
+        "--donor-ledger",
+        type=Path,
+        help="optional cross-shard atomic donor reservation ledger",
+    )
+    parser.add_argument(
+        "--source-index-selection",
+        type=Path,
+        help="optional JSON object mapping split names to exact source indices",
+    )
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     expansion_tiers = [int(value) for value in args.reachability_tiers.split(",") if value]
@@ -338,6 +354,18 @@ def main() -> None:
     train_scenes = {str(row.get("scene_id")) for row in train_rows}
     train_labels = {str(row.get("object_label")) for row in train_rows}
     requested_scenes = {value for value in (args.scenes or "").split(",") if value}
+    selected_indices = {}
+    if args.source_index_selection:
+        selection_payload = json.loads(args.source_index_selection.read_text())
+        if "records" in selection_payload:
+            selected_indices = defaultdict(set)
+            for record in selection_payload["records"]:
+                selected_indices[record["split"]].add(int(record["source_row_index"]))
+        else:
+            selected_indices = {
+                split: {int(index) for index in indices}
+                for split, indices in selection_payload.items()
+            }
     universe = [
         (split, index, row)
         for split, rows in rows_by_split.items()
@@ -360,6 +388,7 @@ def main() -> None:
     )
     global_summary = {}
     repair_cache: dict[str, tuple[dict[str, Any] | None, dict[str, Any]]] = {}
+    donor_ledger = AtomicDonorLedger(args.donor_ledger) if args.donor_ledger else None
 
     for split, source_rows in rows_by_split.items():
         if requested_splits and split not in requested_splits:
@@ -370,6 +399,7 @@ def main() -> None:
             for index, row in enumerate(source_rows)
             if row.get("task_type") in TARGET_TASKS
             and (not requested_scenes or str(row.get("scene_id")) in requested_scenes)
+            and (not selected_indices or index in selected_indices.get(split, set()))
         }
         in_scope = {
             index for position, index in enumerate(sorted(in_scope))
@@ -419,6 +449,10 @@ def main() -> None:
                 new_pair = (row.get("replacement_lineage") or {}).get("new_pair")
                 if new_pair:
                     used_replacement_pairs.add(tuple(new_pair))
+                    if donor_ledger:
+                        donor_ledger.seed(
+                            f"{split}:{row['source_row_index']}", tuple(new_pair)
+                        )
             if any(int(row["source_row_index"]) not in in_scope for row in accounting):
                 raise RuntimeError(f"resume checkpoint scope mismatch for split {split}")
             print(
@@ -455,6 +489,7 @@ def main() -> None:
             repaired, details = repair_one_cached(index, source, constraints, repair_cache)
             repair_status = "strict_same_pair_repair"
             lineage = None
+            reserved_donor_key = None
             constraint_reason = "not_run"
             if repaired is not None:
                 valid, constraint_reason = split_constraint(
@@ -485,6 +520,13 @@ def main() -> None:
                     )
                     if not valid:
                         continue
+                    if donor_ledger:
+                        reserved = donor_ledger.reserve(
+                            f"{split}:{index}", [pair_key(candidate)]
+                        )
+                        if reserved is None:
+                            continue
+                        reserved_donor_key = reserved
                     repaired = replacement
                     details = replacement_details
                     repair_status = "count_matched_replacement"
@@ -531,6 +573,8 @@ def main() -> None:
             else:
                 candidate_by_index[index] = repaired
                 final_selected, final_reason = select_final_tier(split, index, source, details)
+                if args.disable_final_tier:
+                    final_selected, final_reason = False, "final_tier_disabled_for_small_sample"
                 reachability = audit_reachability_tiered(
                     repaired,
                     detector,
@@ -577,6 +621,8 @@ def main() -> None:
                         }
                     )
                 elif reachability.get("reachability_verified"):
+                    if donor_ledger and reserved_donor_key is not None:
+                        donor_ledger.release(f"{split}:{index}", reserved_donor_key)
                     record = {
                         **base,
                         "status": "hard_failure",
@@ -588,6 +634,8 @@ def main() -> None:
                     accounting.append(record)
                     failures.append(record)
                 else:
+                    if donor_ledger and reserved_donor_key is not None:
+                        donor_ledger.release(f"{split}:{index}", reserved_donor_key)
                     record = {
                         **base,
                         "status": "unverified",
@@ -721,6 +769,10 @@ def main() -> None:
             "projective_generator_version": PROJECTIVE_GENERATOR_VERSION,
             "fov_generator_version": FOV_GENERATOR_VERSION,
             "replacement_policy": "same scene/task/relation; preserve formal OOD predicate; no pair already present in current manifest; one use per donor pair",
+            "donor_ledger": str(args.donor_ledger) if args.donor_ledger else None,
+            "source_index_selection": (
+                sorted(selected_indices.get(split, set())) if selected_indices else None
+            ),
             "scene_filter": sorted(requested_scenes) if requested_scenes else None,
         }
         atomic_json(split_dir / "summary.json", summary)
@@ -738,6 +790,8 @@ def main() -> None:
         "scene_filter": sorted(requested_scenes) if requested_scenes else None,
         "split_filter": sorted(requested_splits) if requested_splits else None,
         "index_shard": {"count": args.index_shard_count, "id": args.index_shard_id},
+        "donor_ledger": str(args.donor_ledger) if args.donor_ledger else None,
+        "source_index_selection": str(args.source_index_selection) if args.source_index_selection else None,
         "collision_height_bounds": [0.3, 2.5],
         "search_algorithm": "bounded_best_first_not_shortest",
     }
