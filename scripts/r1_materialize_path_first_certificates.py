@@ -26,16 +26,18 @@ def main() -> None:
     args = parser.parse_args()
     repaired: list[dict] = []
     reachability: list[dict] = []
-    seen: set[int] = set()
+    seen: set[tuple[str | None, int]] = set()
     for artifact in args.prototype:
         payload = json.loads(artifact.read_text())
         for result in payload.get("rows", []):
             if result.get("status") != "candidate_found":
                 continue
             source_index = int(result["source_row_index"])
-            if source_index in seen:
-                raise ValueError(f"duplicate source row {source_index}")
-            seen.add(source_index)
+            split = result.get("split")
+            source_key = (split, source_index)
+            if source_key in seen:
+                raise ValueError(f"duplicate source row {source_key}")
+            seen.add(source_key)
             item = result["row"]
             reverse = result["details"]["reverse"]
             pose = np.asarray(item["init_camera"]["extrinsics"], dtype=float)
@@ -49,6 +51,7 @@ def main() -> None:
             reachability.append({
                 "version": "r1_path_first_certificate_materialization_v1",
                 "source_prototype": str(artifact),
+                "split": split,
                 "source_row_index": source_index,
                 "scene_id": item["scene_id"],
                 "task_id": item["task_id"],
@@ -67,7 +70,7 @@ def main() -> None:
     summary = {
         "version": "r1_path_first_certificate_materialization_v1",
         "candidate_count": len(repaired),
-        "source_row_indices": sorted(seen),
+        "source_keys": sorted([list(value) for value in seen]),
         "prototypes": [str(value) for value in args.prototype],
     }
     (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

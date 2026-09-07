@@ -197,6 +197,7 @@ def make_candidate(
     point: np.ndarray,
     target: np.ndarray,
     initial: dict[str, Any],
+    split: str | None = None,
 ) -> dict[str, Any]:
     repaired = copy.deepcopy(item)
     params = repaired["target_region"]["params"]
@@ -208,7 +209,8 @@ def make_candidate(
     repaired["camera_params"] = dict(repaired.get("camera_params") or {})
     repaired["camera_params"]["forward"] = forward.tolist()
     repaired["distance"] = float(np.linalg.norm(point[:2] - np.asarray(params["boundary_point"], dtype=float)[:2]))
-    repaired["task_id"] = f"projective_path_first_proto_{source_index:06d}"
+    task_key = f"{split}_{source_index:06d}" if split else f"{source_index:06d}"
+    repaired["task_id"] = f"projective_path_first_proto_{task_key}"
     repaired["generator_version"] = PATH_FIRST_GENERATOR_VERSION
     repaired["reachability_construction"] = {
         "construction": "projective_path_first_reverse_action_lattice_v1",
@@ -222,7 +224,7 @@ def make_candidate(
     return repaired
 
 
-def prototype_one(index: int, item: dict[str, Any], constraints: SceneConstraints, budgets: list[int], reverse_cap: int, baseline_item: dict[str, Any] | None = None, baseline_target_pose: np.ndarray | None = None) -> dict[str, Any]:
+def prototype_one(index: int, item: dict[str, Any], constraints: SceneConstraints, budgets: list[int], reverse_cap: int, baseline_item: dict[str, Any] | None = None, baseline_target_pose: np.ndarray | None = None, split: str | None = None) -> dict[str, Any]:
     started = time.time()
     search_item = baseline_item or item
     initial_pose = np.asarray(search_item["init_camera"]["extrinsics"], dtype=float)
@@ -324,7 +326,7 @@ def prototype_one(index: int, item: dict[str, Any], constraints: SceneConstraint
             for name in source_difficulty["buckets"]
         )
         rank = (float(bucket_distance), abs(result["steps"] - source_difficulty["planner_step_proxy"]), float(result["steps"]))
-        candidate = make_candidate(index, search_item, point, pose, result)
+        candidate = make_candidate(index, search_item, point, pose, result, split=split)
         candidate["camera_params"]["forward"] = pose[:3, 2].tolist()
         details = {
             "target_metric": target_info["metric"], "target_constraints": target_info["constraints"],
@@ -338,7 +340,7 @@ def prototype_one(index: int, item: dict[str, Any], constraints: SceneConstraint
         if rank[0] == 0:
             break
     output = {
-        "source_row_index": index, "scene_id": item.get("scene_id"), "task_type": item.get("task_type"),
+        "split": split, "source_row_index": index, "scene_id": item.get("scene_id"), "task_type": item.get("task_type"),
         "input_pair_kind": "baseline_replacement" if baseline_item is not None else "source_pair",
         "status": "candidate_found" if best else "no_candidate_within_budget",
         "target_candidates": target_candidates, "canonical_success_targets": target_success,
@@ -406,11 +408,12 @@ def main() -> None:
         try:
             row = prototype_one(
                 index, item, constraints, budgets, args.reverse_expansion_cap,
-                baseline_item, baseline_target_pose,
+                baseline_item, baseline_target_pose, split=split,
             )
         except Exception as error:  # Persist an implementation error; never silently drop a source row.
             row = {
                 "source_row_index": index,
+                "split": split,
                 "scene_id": item.get("scene_id"),
                 "task_type": item.get("task_type"),
                 "status": "implementation_error",
