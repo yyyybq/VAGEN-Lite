@@ -621,8 +621,6 @@ def construct_projective_reachable_initial(
             if not legal:
                 continue
             initial_pose = engine.get_pose()
-            if float(np.linalg.norm(initial_pose[:2, 3] - success_pose[:2, 3])) < 0.5:
-                continue
             initial_constraints = constraints.validate(
                 item,
                 initial_pose[:3, 3],
@@ -891,7 +889,6 @@ def repair_projective(
                 not initial_metric["success"]
                 and projective_initial_geometry_discernible(initial_metric)
                 and absolute_pitch_degrees(initial_pose[:3, 2]) <= MAX_ABS_PITCH_DEG
-                and navigation_distance >= 0.5
                 and (
                     candidate_initial_constraints is None
                     or candidate_initial_constraints["success"]

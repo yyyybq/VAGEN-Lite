@@ -24,10 +24,10 @@ from typing import Any
 import numpy as np
 
 from r1_canonical_tasks import canonical_projective, pose_from_item_target, score_observation
-from r1_reachability_audit import search_one, state_key
+from r1_action_graph import INVERSE_ACTION, forward_validated_predecessors
+from r1_reachability_audit import state_key
 from r1_repair_pipeline import (
     MAX_ABS_PITCH_DEG,
-    PLANNER_ACTIONS,
     SceneConstraints,
     absolute_pitch_degrees,
     camera_pose_from_forward,
@@ -39,18 +39,6 @@ from r1_repair_pipeline import (
     relation_normal,
     construct_projective_reachable_initial,
 )
-from vagen.envs.active_spatial.utils import ViewManipulator
-
-
-INVERSE = {
-    "move_forward": "move_backward",
-    "move_backward": "move_forward",
-    "move_left": "move_right",
-    "move_right": "move_left",
-    "turn_left": "turn_right",
-    "turn_right": "turn_left",
-}
-TRANSLATION = frozenset(PLANNER_ACTIONS[:4])
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -76,6 +64,51 @@ def target_pose(item: dict[str, Any], point: np.ndarray, yaw_offset: float) -> n
     return camera_pose_from_forward(point, forward)
 
 
+def success_region_points(
+    item: dict[str, Any], constraints: SceneConstraints, room_index: int | None
+) -> list[np.ndarray]:
+    """Deterministic mix of anchor and whole-room runtime-safe positions.
+
+    The historical generator's ``sample_target`` is an anchor, not the runtime
+    termination pose: known certificates can enter canonical success far from
+    it.  Reverse search therefore starts from a finite success *region* made
+    from both relation-anchor points and stratified room free-space points.
+    Pair-distance is retained as an anchor diagnostic, but is not incorrectly
+    imposed on a canonical-success terminal state.
+    """
+    anchor = projective_candidates(item, constraints, room_index)
+    free = constraints.safe_layout_candidates(
+        item,
+        room_index,
+        np.asarray(item["sample_target"], dtype=float),
+        limit=512,
+        check_pair_distance=False,
+    )
+    if len(free) > 64:
+        indices = np.linspace(0, len(free) - 1, 64, dtype=int)
+        free = [free[int(index)] for index in indices]
+    ordered = list(anchor[:64]) + list(free)
+    result: list[np.ndarray] = []
+    seen: set[tuple[float, ...]] = set()
+    for point in ordered:
+        key = tuple(round(float(value), 6) for value in point)
+        if key not in seen:
+            seen.add(key)
+            result.append(np.asarray(point, dtype=float))
+    return result
+
+
+def target_shortlist(
+    states: list[tuple[tuple[float, ...], np.ndarray, np.ndarray, dict[str, Any]]],
+    limit: int = 16,
+) -> list[tuple[tuple[float, ...], np.ndarray, np.ndarray, dict[str, Any]]]:
+    """Spread bounded reverse calls across the ordered success region."""
+    if len(states) <= limit:
+        return states
+    indices = np.linspace(0, len(states) - 1, limit, dtype=int)
+    return [states[int(index)] for index in indices]
+
+
 def reverse_search(
     item: dict[str, Any],
     target: np.ndarray,
@@ -90,38 +123,43 @@ def reverse_search(
     queue: list[tuple[int, int, np.ndarray, tuple[str, ...]]] = [(0, 0, target, tuple())]
     seen = {state_key(target)}
     expansions = 0
+    rejections: Counter[str] = Counter()
     while queue:
         depth, _, pose, reverse_actions = heapq.heappop(queue)
         if depth >= max_steps:
             continue
-        for action in PLANNER_ACTIONS:
-            inverse_action = INVERSE[action]
-            engine = ViewManipulator(step_translation=0.3, step_rotation_deg=20.0, world_up_axis="Z")
-            engine.reset(pose)
-            predecessor = engine.step(inverse_action)
-            if inverse_action in TRANSLATION:
-                collision = detector.check_collision(predecessor[:3, 3], previous_position=pose[:3, 3])
-                if collision.has_collision:
-                    continue
+        # The action graph is defined by the formal forward transition.  The
+        # inverse operation merely proposes a predecessor; it is admitted only
+        # after predecessor --forward action--> pose has been verified.
+        for edge in forward_validated_predecessors(pose, detector):
+            action = edge["forward_action"]
+            predecessor = edge["predecessor"]
+            if edge["rejection_reason"] is not None:
+                rejections[str(edge["rejection_reason"])] += 1
+                continue
             layout = constraints.validate(
                 item, predecessor[:3, 3], initial_room_index=room_index, check_pair_distance=False
             )
             if not layout.get("success"):
+                rejections["layout_reject"] += 1
                 continue
             key = state_key(predecessor)
             if key in seen:
+                rejections["quantization_mismatch"] += 1
                 continue
             seen.add(key)
             expansions += 1
-            new_reverse = reverse_actions + (inverse_action,)
+            new_reverse = reverse_actions + (edge["inverse_proposal_action"],)
             metric = canonical_projective(score_observation(item, predecessor))
             if (
                 not metric.get("success")
                 and projective_initial_geometry_discernible(metric)
                 and absolute_pitch_degrees(predecessor[:3, 2]) <= MAX_ABS_PITCH_DEG
-                and float(np.linalg.norm(predecessor[:2, 3] - target[:2, 3])) >= 0.5
             ):
-                actions = [INVERSE[value] for value in reversed(new_reverse)]
+                # The corresponding forward actions are already explicit on
+                # the reverse edges; recovering them via the fixed mapping is
+                # valid only after the per-edge forward replay above.
+                actions = [INVERSE_ACTION[value] for value in reversed(new_reverse)]
                 return {
                     "status": "candidate_found",
                     "pose": predecessor,
@@ -132,18 +170,21 @@ def reverse_search(
                     "steps": len(actions),
                     "expansions": expansions,
                     "visited_states": len(seen),
+                    "rejection_reasons": dict(rejections),
                 }
             if expansions >= max_expansions:
                 return {
                     "status": "unverified_expansion_cap",
                     "expansions": expansions,
                     "visited_states": len(seen),
+                    "rejection_reasons": dict(rejections),
                 }
             heapq.heappush(queue, (depth + 1, expansions, predecessor, new_reverse))
     return {
         "status": "exhaustive_no_predecessor_within_12_steps",
         "expansions": expansions,
         "visited_states": len(seen),
+        "rejection_reasons": dict(rejections),
     }
 
 
@@ -195,7 +236,7 @@ def prototype_one(index: int, item: dict[str, Any], constraints: SceneConstraint
     room_index = constraints.room_index(layout, midpoint[:2])
     if room_index is None:
         room_index = initial_check.get("room_index")
-    points = projective_candidates(search_item, constraints, room_index)[:64]
+    points = success_region_points(search_item, constraints, room_index)
     target_candidates = 0
     target_success = 0
     reverse_calls = 0
@@ -203,14 +244,14 @@ def prototype_one(index: int, item: dict[str, Any], constraints: SceneConstraint
     target_states: list[tuple[tuple[float, ...], np.ndarray, np.ndarray, dict[str, Any]]] = []
     if baseline_target_pose is not None:
         point = np.asarray(search_item.get("sample_target"), dtype=float)
-        target_constraints = constraints.validate(search_item, baseline_target_pose[:3, 3], initial_room_index=room_index, check_pair_distance=True)
+        target_constraints = constraints.validate(search_item, baseline_target_pose[:3, 3], initial_room_index=room_index, check_pair_distance=False)
         metric = canonical_projective(score_observation(search_item, baseline_target_pose))
         target_candidates += 1
         if metric.get("success") and target_constraints.get("success"):
             target_success += 1
             target_states.append(((-1.0, 0.0), point, baseline_target_pose, {"metric": metric, "constraints": target_constraints}))
     for point in points:
-        target_constraints = constraints.validate(search_item, point, initial_room_index=room_index, check_pair_distance=True)
+        target_constraints = constraints.validate(search_item, point, initial_room_index=room_index, check_pair_distance=False)
         if not target_constraints.get("success"):
             continue
         for yaw_offset in (0.0, -5.0, 5.0, -10.0, 10.0, -15.0, 15.0):
@@ -229,13 +270,22 @@ def prototype_one(index: int, item: dict[str, Any], constraints: SceneConstraint
     # this preserves tier semantics without multiplying cost by 448 states.
     target_states.sort(key=lambda row: row[0])
     best: tuple[tuple[float, ...], dict[str, Any], dict[str, Any]] | None = None
-    shortlist = target_states[:4]
+    shortlist = target_shortlist(target_states)
+    reverse_attempts = []
     for shortlist_index, (_, point, pose, target_info) in enumerate(shortlist):
         result = reverse_search(search_item, pose, constraints, room_index, 12, min(budgets[0], reverse_cap))
         reverse_calls += 1
         if result["status"] != "candidate_found" and shortlist_index == 0 and len(budgets) > 1:
             result = reverse_search(search_item, pose, constraints, room_index, 12, min(budgets[1], reverse_cap))
             reverse_calls += 1
+        reverse_attempts.append({
+            "target_position": pose[:3, 3].tolist(),
+            "target_rank": shortlist_index,
+            "status": result.get("status"),
+            "expansions": result.get("expansions"),
+            "visited_states": result.get("visited_states"),
+            "rejection_reasons": result.get("rejection_reasons", {}),
+        })
         if result["status"] != "candidate_found":
             # Keep a bounded action-lattice fallback for positive controls. It
             # is still target-first (the target was selected before this
@@ -278,7 +328,10 @@ def prototype_one(index: int, item: dict[str, Any], constraints: SceneConstraint
             "initial_metric": result["metric"], "initial_constraints": result["layout"],
             "source_difficulty": source_difficulty, "repaired_difficulty": difficulty, "reverse": result,
         }
-        best = min(best, (rank, candidate, details)) if best else (rank, candidate, details)
+        # Do not compare candidate/detail dictionaries when two difficulty
+        # ranks tie; deterministic first-seen tie breaking is sufficient.
+        if best is None or rank < best[0]:
+            best = (rank, candidate, details)
         if rank[0] == 0:
             break
     output = {
@@ -287,6 +340,7 @@ def prototype_one(index: int, item: dict[str, Any], constraints: SceneConstraint
         "status": "candidate_found" if best else "no_candidate_within_budget",
         "target_candidates": target_candidates, "canonical_success_targets": target_success,
         "reverse_calls": reverse_calls, "reverse_resolved": reverse_resolved,
+        "reverse_attempts": reverse_attempts,
         "elapsed_seconds": time.time() - started, "budgets": budgets,
         "source_difficulty": source_difficulty,
     }
@@ -305,20 +359,27 @@ def main() -> None:
     parser.add_argument("--budgets", default="2000,25000")
     parser.add_argument("--reverse-expansion-cap", type=int, default=256)
     parser.add_argument("--baseline-jobs-root", type=Path)
+    parser.add_argument("--source-indices", help="comma-separated frozen selection rows for a retry")
     args = parser.parse_args()
     sources = json.loads(args.sources.read_text())
     rows_by_split = {split: read_jsonl(Path(path)) for split, path in sources.items()}
     selection = json.loads(args.selection.read_text())["records"]
+    selected_indices = {
+        int(value) for value in (args.source_indices or "").split(",") if value.strip()
+    }
     overrides_path = args.output_dir / "collision_overrides.json"
     override_payload = {}
     if overrides_path.is_file():
         override_payload = json.loads(overrides_path.read_text()).get("structure_y_sign_overrides", {})
     constraints = SceneConstraints(args.gs_root, structure_y_sign_overrides=override_payload)
     budgets = [int(value) for value in args.budgets.split(",") if value]
+    args.output_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for record in selection:
         split = record["split"]
         index = int(record["source_row_index"])
+        if selected_indices and index not in selected_indices:
+            continue
         item = rows_by_split[split][index]
         if item.get("task_type") != "projective_relations":
             continue
@@ -339,11 +400,37 @@ def main() -> None:
                 reachability_rows = read_jsonl(reachability_path)
                 if reachability_rows and reachability_rows[0].get("path"):
                     baseline_target_pose = np.asarray(reachability_rows[0]["path"][-1]["c2w"], dtype=float)
-        rows.append(prototype_one(index, item, constraints, budgets, args.reverse_expansion_cap, baseline_item, baseline_target_pose))
-        print(json.dumps(rows[-1], default=lambda value: value.tolist() if isinstance(value, np.ndarray) else value), flush=True)
+        try:
+            row = prototype_one(
+                index, item, constraints, budgets, args.reverse_expansion_cap,
+                baseline_item, baseline_target_pose,
+            )
+        except Exception as error:  # Persist an implementation error; never silently drop a source row.
+            row = {
+                "source_row_index": index,
+                "scene_id": item.get("scene_id"),
+                "task_type": item.get("task_type"),
+                "status": "implementation_error",
+                "error": repr(error),
+                "target_candidates": 0,
+                "canonical_success_targets": 0,
+                "reverse_calls": 0,
+                "reverse_resolved": 0,
+            }
+        rows.append(row)
+        checkpoint = args.output_dir / "prototype_checkpoint.jsonl"
+        checkpoint.write_text("".join(
+            json.dumps(value, default=lambda item: item.tolist() if isinstance(item, np.ndarray) else item) + "\n"
+            for value in rows
+        ))
+        print(json.dumps({
+            key: row.get(key) for key in (
+                "source_row_index", "status", "target_candidates", "canonical_success_targets",
+                "reverse_calls", "reverse_resolved", "elapsed_seconds", "error",
+            )
+        }), flush=True)
     summary = Counter(row["status"] for row in rows)
     payload = {"version": "projective_path_first_prototype_v1", "selection": str(args.selection), "budgets": budgets, "reverse_expansion_cap": args.reverse_expansion_cap, "rows": rows, "status_counts": dict(summary)}
-    args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "prototype_results.json").write_text(json.dumps(payload, indent=2, default=lambda value: value.tolist() if isinstance(value, np.ndarray) else value) + "\n")
     print(json.dumps({"status_counts": dict(summary), "rows": len(rows)}, indent=2))
 
