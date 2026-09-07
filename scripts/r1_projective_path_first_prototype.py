@@ -41,6 +41,9 @@ from r1_repair_pipeline import (
 )
 
 
+PATH_FIRST_GENERATOR_VERSION = "projective_path_first_forward_validated_success_region_v2"
+
+
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.open() if line.strip()]
 
@@ -206,7 +209,7 @@ def make_candidate(
     repaired["camera_params"]["forward"] = forward.tolist()
     repaired["distance"] = float(np.linalg.norm(point[:2] - np.asarray(params["boundary_point"], dtype=float)[:2]))
     repaired["task_id"] = f"projective_path_first_proto_{source_index:06d}"
-    repaired["generator_version"] = "projective_path_first_prototype_v1"
+    repaired["generator_version"] = PATH_FIRST_GENERATOR_VERSION
     repaired["reachability_construction"] = {
         "construction": "projective_path_first_reverse_action_lattice_v1",
         "actions": initial["actions"],
@@ -430,7 +433,15 @@ def main() -> None:
             )
         }), flush=True)
     summary = Counter(row["status"] for row in rows)
-    payload = {"version": "projective_path_first_prototype_v1", "selection": str(args.selection), "budgets": budgets, "reverse_expansion_cap": args.reverse_expansion_cap, "rows": rows, "status_counts": dict(summary)}
+    payload = {
+        "version": PATH_FIRST_GENERATOR_VERSION,
+        "selection": str(args.selection),
+        "seed": "deterministic_no_rng",
+        "budgets": budgets,
+        "reverse_expansion_cap": args.reverse_expansion_cap,
+        "rows": rows,
+        "status_counts": dict(summary),
+    }
     (args.output_dir / "prototype_results.json").write_text(json.dumps(payload, indent=2, default=lambda value: value.tolist() if isinstance(value, np.ndarray) else value) + "\n")
     print(json.dumps({"status_counts": dict(summary), "rows": len(rows)}, indent=2))
 
