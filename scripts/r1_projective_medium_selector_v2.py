@@ -64,7 +64,9 @@ def one(item, rec, constraints, cfg):
     for p,target,metric,c in pool:
         upper=first_success(item,c)
         if upper is not None and 4<=upper<=6: eligible.append((abs(upper-5),tuple(state_key(c["pose"])),p,target,metric,{**c,"actions":c["actions"][:upper],"steps":upper}))
-    eligible.sort(); events=[]; accepted=None; unverified=False
+    # Never let Python compare ndarray payloads when two deterministic ranks
+    # tie; insertion order is deterministic after the scalar rank.
+    eligible.sort(key=lambda value: (value[0], value[1])); events=[]; accepted=None; unverified=False
     for _,_,p,target,metric,c in eligible:
         probe=shortcut_probe(item,c["pose"],detector,cfg.lower_expansions)
         event={"certificate_upper_bound":c["steps"],"initial_metric":c["metric"],"shortcut_probe":probe}
@@ -82,9 +84,11 @@ def one(item, rec, constraints, cfg):
     out["elapsed_seconds"]=time.time()-t; return out
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--selection',type=Path,required=True);p.add_argument('--sources',type=Path,required=True);p.add_argument('--gs-root',type=Path,required=True);p.add_argument('--output-dir',type=Path,required=True);p.add_argument('--seed-cap',type=int,default=12);p.add_argument('--per-seed-expansions',type=int,default=512);p.add_argument('--candidate-cap-per-seed',type=int,default=48);p.add_argument('--lower-expansions',type=int,default=100000);a=p.parse_args();
+ p=argparse.ArgumentParser();p.add_argument('--selection',type=Path,required=True);p.add_argument('--sources',type=Path,required=True);p.add_argument('--gs-root',type=Path,required=True);p.add_argument('--output-dir',type=Path,required=True);p.add_argument('--seed-cap',type=int,default=12);p.add_argument('--per-seed-expansions',type=int,default=512);p.add_argument('--candidate-cap-per-seed',type=int,default=48);p.add_argument('--lower-expansions',type=int,default=100000);p.add_argument('--source-keys',help='comma-separated split:index retry keys');a=p.parse_args();
  sel=json.loads(a.selection.read_text()); raw=json.loads(a.sources.read_text()); sm=raw.get('sources',raw); src={k:read_jsonl(Path(v['path'] if isinstance(v,dict) else v)) for k,v in sm.items()}; a.output_dir.mkdir(parents=True,exist_ok=True); cfg=type('Cfg',(),{'seed_cap':a.seed_cap,'per_seed_expansions':a.per_seed_expansions,'candidate_cap':a.candidate_cap_per_seed,'lower_expansions':a.lower_expansions})(); cons=SceneConstraints(a.gs_root); rows=[]
+ requested_keys={(part.rsplit(':',1)[0],int(part.rsplit(':',1)[1])) for part in (a.source_keys or '').split(',') if part}
  for rec in sel['records']:
+  if requested_keys and (rec['split'],int(rec['source_row_index'])) not in requested_keys: continue
   try:r=one(src[rec['split']][int(rec['source_row_index'])],rec,cons,cfg)
   except Exception as e:r={"version":VERSION,"split":rec['split'],"source_row_index":rec['source_row_index'],"scene_id":rec['scene_id'],"requested_bucket":"medium","status":"implementation_error","error":repr(e)}
   rows.append(r);write_json(a.output_dir/'checkpoint.json',{'version':VERSION,'results':rows});print(json.dumps({k:r.get(k) for k in ('split','source_row_index','status','eligible_medium_candidates','elapsed_seconds')}),flush=True)
