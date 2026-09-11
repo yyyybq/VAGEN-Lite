@@ -74,7 +74,10 @@ def one(item, rec, constraints, cfg):
         if not probe["complete"]: unverified=True; continue
         if probe["shortcut_found"]: continue
         accepted=(p,target,metric,c,probe); break
-    base={"version":VERSION,"split":rec["split"],"source_row_index":rec["source_row_index"],"scene_id":rec["scene_id"],"requested_bucket":"medium","same_pair_only":True,"success_region_seeds_considered":len(targets),"reverse_seed_cap":cfg.seed_cap,"per_seed_expansion_cap":cfg.per_seed_expansions,"candidate_cap_per_seed":cfg.candidate_cap,"reverse_attempts":rev,"initial_candidates_collected":len(pool),"eligible_medium_candidates":len(eligible),"pre_screen_events":events,"source_action_length":rec["source_action_length"],"baseline_certificate_upper_bound":rec["baseline_certificate_upper_bound"]}
+    # The frozen 788-row inventory predates the 60-source prototype's
+    # historical difficulty fields.  They are audit metadata only and must not
+    # change candidate generation, formal shortcut checks, or acceptance.
+    base={"version":VERSION,"split":rec["split"],"source_row_index":rec["source_row_index"],"scene_id":rec["scene_id"],"requested_bucket":"medium","same_pair_only":True,"success_region_seeds_considered":len(targets),"reverse_seed_cap":cfg.seed_cap,"per_seed_expansion_cap":cfg.per_seed_expansions,"candidate_cap_per_seed":cfg.candidate_cap,"reverse_attempts":rev,"initial_candidates_collected":len(pool),"eligible_medium_candidates":len(eligible),"pre_screen_events":events,"source_action_length":rec.get("source_action_length", "unknown"),"baseline_certificate_upper_bound":rec.get("baseline_certificate_upper_bound", "unknown")}
     if accepted:
         p,target,tm,c,probe=accepted; row=make_candidate(int(rec["source_row_index"]),item,p,target,c,split=str(rec["split"])); row["generator_version"]=VERSION; row["reachability_construction"].update({"requested_bucket":"medium","certificate_upper_bound":c["steps"],"certified_lower_bound":4,"lower_bound_complete":True,"first_success_step":c["steps"]})
         out={**base,"status":"difficulty_certified_candidate","certificate_upper_bound":c["steps"],"certified_lower_bound":4,"lower_bound_complete":True,"runtime_shortcut_found":False,"initial_metric":c["metric"],"target_metric":tm,"row":row,"certificate":c}
