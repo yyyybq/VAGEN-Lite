@@ -155,5 +155,10 @@ if [[ ! -f "${OUTPUT}/holdout_v2_screen/official_rgb/summary.json" || ! -f "${OU
   renderer_pid=''
 fi
 
+"${PYTHON}" scripts/r1_summarize_v3_holdout_reverse_diag.py \
+  --output-root "${OUTPUT}" \
+  --old-path-first-root "${BASE}/path_first_canary10_v1/merged_v2_unique_key" \
+  --output "${OUTPUT}/aggregate_summary.json"
+
 find "${OUTPUT}" -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > "${OUTPUT}/SHA256SUMS"
 echo "[complete] ${OUTPUT}"
