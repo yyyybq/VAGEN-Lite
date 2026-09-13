@@ -23,7 +23,7 @@ cd "${ROOT}"
 mkdir -p "${OUTPUT}"
 
 if [[ ! -f "${OUTPUT}/run_environment.json" ]]; then
-  "${PYTHON}" -c 'import json,os,platform,subprocess,sys; from pathlib import Path; out=Path(sys.argv[1]); payload={"version":"r1_v3_holdout_reverse_diag_environment_v1","hostname":platform.node(),"git_commit":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),"python":sys.executable,"python_version":sys.version,"gs_root":sys.argv[2],"renderer":{"port":int(sys.argv[3]),"requested_gpu_ids":[0],"max_workers":1,"max_inflight":2},"sco_resource":{"worker_spec":"N4lS.Iq.I80.8","allocated_gpus":8,"renderer_gpus_used":1,"reason":"current SCO template minimum"}}; out.write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n")' "${OUTPUT}/run_environment.json" "${GS_ROOT}" "${RENDER_PORT}"
+  "${PYTHON}" -c 'import json,os,platform,subprocess,sys; from pathlib import Path; out=Path(sys.argv[1]); payload={"version":"r1_v3_holdout_reverse_diag_environment_v1","hostname":platform.node(),"git_commit":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),"python":sys.executable,"python_version":sys.version,"gs_root":sys.argv[2],"renderer":{"port":int(sys.argv[3]),"requested_gpu_ids":[0],"max_workers":1,"max_inflight":2},"sco_resource":{"worker_spec":"N4lS.Iq.I80.8","allocated_gpus":8,"renderer_gpus_used":1,"reason":"established official-renderer submission template is 8xH800; service deliberately restricted to GPU 0"}}; out.write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n")' "${OUTPUT}/run_environment.json" "${GS_ROOT}" "${RENDER_PORT}"
 fi
 nvidia-smi > "${OUTPUT}/nvidia_smi.txt"
 
