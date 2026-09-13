@@ -70,34 +70,17 @@ if [[ ! -f "${OUTPUT}/holdout_v2_screen/selector_results.json" ]]; then
     --seed-cap 12 --per-seed-expansions 512 --candidate-cap-per-seed 48 --lower-expansions 100000
 fi
 
-AB_SELECTION="${OUTPUT}/holdout_v3_ab_frozen_selection.json"
-if [[ ! -f "${AB_SELECTION}" ]]; then
-  "${PYTHON}" scripts/r1_select_holdout_v3_ab.py \
-    --holdout-selection "${HOLDOUT}" \
-    --v2-selector "${OUTPUT}/holdout_v2_screen/selector_results.json" \
-    --output "${AB_SELECTION}" --shortcut-min 24 --shortcut-max 32 --positive-controls 5
+validation_dir="${OUTPUT}/holdout_v2_screen/independent_validation"
+if [[ ! -f "${validation_dir}/summary.json" ]]; then
+  "${PYTHON}" scripts/r1_materialize_difficulty_conditioned.py \
+    --selector "${OUTPUT}/holdout_v2_screen/selector_results.json" --output-dir "${validation_dir}"
 fi
-
-if [[ ! -f "${OUTPUT}/holdout_v3_ab/selector_results.json" ]]; then
-  "${PYTHON}" scripts/r1_run_medium_selector_scene_shards.py \
-    --selection "${AB_SELECTION}" --sources "${AB_SELECTION}" --gs-root "${GS_ROOT}" \
-    --output-dir "${OUTPUT}/holdout_v3_ab" --selector v3 --max-workers 5 \
-    --seed-cap 12 --per-seed-expansions 512 --candidate-cap-per-seed 48 --lower-expansions 100000
+if [[ ! -f "${validation_dir}/runtime_replay.json" ]]; then
+  "${PYTHON}" scripts/r1_replay_projective_certificates.py \
+    --rows "${validation_dir}/candidate_rows.jsonl" \
+    --reachability "${validation_dir}/reachability_manifest.jsonl" \
+    --gs-root "${GS_ROOT}" --output "${validation_dir}/runtime_replay.json"
 fi
-
-for selector_name in holdout_v2_screen holdout_v3_ab; do
-  validation_dir="${OUTPUT}/${selector_name}/independent_validation"
-  if [[ ! -f "${validation_dir}/summary.json" ]]; then
-    "${PYTHON}" scripts/r1_materialize_difficulty_conditioned.py \
-      --selector "${OUTPUT}/${selector_name}/selector_results.json" --output-dir "${validation_dir}"
-  fi
-  if [[ ! -f "${validation_dir}/runtime_replay.json" ]]; then
-    "${PYTHON}" scripts/r1_replay_projective_certificates.py \
-      --rows "${validation_dir}/candidate_rows.jsonl" \
-      --reachability "${validation_dir}/reachability_manifest.jsonl" \
-      --gs-root "${GS_ROOT}" --output "${validation_dir}/runtime_replay.json"
-  fi
-done
 
 renderer_pid=''
 cleanup() {
@@ -125,17 +108,48 @@ if [[ ! -f "${OUTPUT}/holdout_v2_screen/official_rgb/summary.json" || ! -f "${OU
   done
   [[ -s "${ENDPOINT_FILE}" ]] || { echo "renderer endpoint timeout" >&2; exit 4; }
   renderer_url="$(cat "${ENDPOINT_FILE}")/render"
-  for selector_name in holdout_v2_screen holdout_v3_ab; do
-    validation_dir="${OUTPUT}/${selector_name}/independent_validation"
-    rgb_dir="${OUTPUT}/${selector_name}/official_rgb"
-    if [[ ! -f "${rgb_dir}/summary.json" ]]; then
-      "${PYTHON}" scripts/r1_projective_observability_audit.py \
-        --repaired "${validation_dir}/candidate_rows.jsonl" \
-        --reachability "${validation_dir}/reachability_manifest.jsonl" \
-        --gs-root "${GS_ROOT}" --renderer-url "${renderer_url}" \
-        --renderer-lock "${LOCK_FILE}" --output-dir "${rgb_dir}"
-    fi
-  done
+  rgb_dir="${OUTPUT}/holdout_v2_screen/official_rgb"
+  if [[ ! -f "${rgb_dir}/summary.json" ]]; then
+    "${PYTHON}" scripts/r1_projective_observability_audit.py \
+      --repaired "${validation_dir}/candidate_rows.jsonl" \
+      --reachability "${validation_dir}/reachability_manifest.jsonl" \
+      --gs-root "${GS_ROOT}" --renderer-url "${renderer_url}" \
+      --renderer-lock "${LOCK_FILE}" --output-dir "${rgb_dir}"
+  fi
+
+  AB_SELECTION="${OUTPUT}/holdout_v3_ab_frozen_selection.json"
+  if [[ ! -f "${AB_SELECTION}" ]]; then
+    "${PYTHON}" scripts/r1_select_holdout_v3_ab.py \
+      --holdout-selection "${HOLDOUT}" \
+      --v2-selector "${OUTPUT}/holdout_v2_screen/selector_results.json" \
+      --v2-observability "${OUTPUT}/holdout_v2_screen/official_rgb/observability_manifest.jsonl" \
+      --output "${AB_SELECTION}" --shortcut-min 24 --shortcut-max 32 --positive-controls 5
+  fi
+  if [[ ! -f "${OUTPUT}/holdout_v3_ab/selector_results.json" ]]; then
+    "${PYTHON}" scripts/r1_run_medium_selector_scene_shards.py \
+      --selection "${AB_SELECTION}" --sources "${AB_SELECTION}" --gs-root "${GS_ROOT}" \
+      --output-dir "${OUTPUT}/holdout_v3_ab" --selector v3 --max-workers 5 \
+      --seed-cap 12 --per-seed-expansions 512 --candidate-cap-per-seed 48 --lower-expansions 100000
+  fi
+  validation_dir="${OUTPUT}/holdout_v3_ab/independent_validation"
+  if [[ ! -f "${validation_dir}/summary.json" ]]; then
+    "${PYTHON}" scripts/r1_materialize_difficulty_conditioned.py \
+      --selector "${OUTPUT}/holdout_v3_ab/selector_results.json" --output-dir "${validation_dir}"
+  fi
+  if [[ ! -f "${validation_dir}/runtime_replay.json" ]]; then
+    "${PYTHON}" scripts/r1_replay_projective_certificates.py \
+      --rows "${validation_dir}/candidate_rows.jsonl" \
+      --reachability "${validation_dir}/reachability_manifest.jsonl" \
+      --gs-root "${GS_ROOT}" --output "${validation_dir}/runtime_replay.json"
+  fi
+  rgb_dir="${OUTPUT}/holdout_v3_ab/official_rgb"
+  if [[ ! -f "${rgb_dir}/summary.json" ]]; then
+    "${PYTHON}" scripts/r1_projective_observability_audit.py \
+      --repaired "${validation_dir}/candidate_rows.jsonl" \
+      --reachability "${validation_dir}/reachability_manifest.jsonl" \
+      --gs-root "${GS_ROOT}" --renderer-url "${renderer_url}" \
+      --renderer-lock "${LOCK_FILE}" --output-dir "${rgb_dir}"
+  fi
   kill "${renderer_pid}" 2>/dev/null || true
   wait "${renderer_pid}" 2>/dev/null || true
   renderer_pid=''

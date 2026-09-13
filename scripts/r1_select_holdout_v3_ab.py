@@ -24,6 +24,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--holdout-selection", type=Path, required=True)
     parser.add_argument("--v2-selector", type=Path, required=True)
+    parser.add_argument("--v2-observability", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--shortcut-min", type=int, default=24)
     parser.add_argument("--shortcut-max", type=int, default=32)
@@ -31,11 +32,24 @@ def main() -> None:
     args = parser.parse_args()
     holdout = json.loads(args.holdout_selection.read_text())
     v2 = json.loads(args.v2_selector.read_text())
+    rgb_pass_task_ids = {
+        row["task_id"] for row in (
+            json.loads(line) for line in args.v2_observability.open() if line.strip()
+        ) if row.get("passed")
+    }
     source = {(row["split"], int(row["source_row_index"])): row for row in holdout["records"]}
     shortcuts = [row for row in v2["results"] if row.get("status") == "shortcut_rejected"]
     shortcuts.sort(key=lambda row: (digest(row, "v3-holdout-shortcut"), row["split"], int(row["source_row_index"])))
     shortcuts = shortcuts[:args.shortcut_max]
-    controls_pool = [row for row in v2["results"] if row.get("status") == "difficulty_certified_candidate"]
+    def materialized_task_id(row: dict) -> str:
+        task_id = (row.get("row") or {}).get("task_id") or (
+            f"projective_path_first_proto_{row['split']}_{int(row['source_row_index']):06d}"
+        )
+        return task_id if task_id.endswith("_medium") else task_id + "_medium"
+
+    controls_pool = [row for row in v2["results"]
+                     if row.get("status") == "difficulty_certified_candidate"
+                     and materialized_task_id(row) in rgb_pass_task_ids]
     controls_pool.sort(key=lambda row: (digest(row, "v3-holdout-positive"), row["split"], int(row["source_row_index"])))
     controls = []
     used_scenes = set()
@@ -64,9 +78,10 @@ def main() -> None:
         "version": VERSION, "selection_is_frozen": True,
         "holdout_selection": {"path": str(args.holdout_selection.resolve()), "sha256": sha256(args.holdout_selection)},
         "v2_selector": {"path": str(args.v2_selector.resolve()), "sha256": sha256(args.v2_selector)},
+        "v2_observability": {"path": str(args.v2_observability.resolve()), "sha256": sha256(args.v2_observability)},
         "rule": {
             "shortcut": f"stable digest, target {args.shortcut_min}-{args.shortcut_max}; use actual if fewer than minimum",
-            "positive_controls": f"stable digest, distinct scenes first, target {args.positive_controls}",
+            "positive_controls": f"v2 runtime/RGB-pass only; stable digest, distinct scenes first, target {args.positive_controls}",
             "no_screen_expansion": True,
         },
         "sources": holdout["sources"], "scenes": holdout["scenes"],
