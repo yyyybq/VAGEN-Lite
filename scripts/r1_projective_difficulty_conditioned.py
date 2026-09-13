@@ -123,9 +123,11 @@ def choose_frozen_sources(aggregate: dict[str, Any], count: int, hard_count: int
 
 def collect_reverse_candidates(
     item: dict[str, Any], target: np.ndarray, constraints: SceneConstraints, room_index: int | None,
-    *, max_steps: int, max_expansions: int, candidate_cap: int,
+    *, max_steps: int, max_expansions: int, candidate_cap: int, min_candidate_steps: int = 1,
 ) -> dict[str, Any]:
     """Collect, rather than first-return, forward-validated initial poses."""
+    if not 1 <= min_candidate_steps <= max_steps:
+        raise ValueError("min_candidate_steps must be within [1, max_steps]")
     detector = constraints._collision_cache.get(str(item.get("scene_id") or ""))
     if detector is None:
         return {"status": "asset_unavailable", "candidates": [], "expansions": 0, "visited_states": 0}
@@ -153,12 +155,17 @@ def collect_reverse_candidates(
             metric = canonical_projective(score_observation(item, predecessor))
             actions = [INVERSE_ACTION[value] for value in reversed(new_reverse)]
             if (not metric.get("success") and projective_initial_geometry_discernible(metric)
-                    and absolute_pitch_degrees(predecessor[:3, 2]) <= MAX_ABS_PITCH_DEG):
+                    and absolute_pitch_degrees(predecessor[:3, 2]) <= MAX_ABS_PITCH_DEG
+                    and len(actions) >= min_candidate_steps):
                 candidates.append({"pose": predecessor, "metric": metric, "layout": layout,
                                    "actions": actions, "reverse_actions": list(new_reverse), "steps": len(actions)})
                 if len(candidates) >= candidate_cap:
                     return {"status": "candidate_cap", "candidates": candidates, "expansions": expansions,
                             "visited_states": len(seen), "rejection_reasons": dict(rejected)}
+            if (not metric.get("success") and projective_initial_geometry_discernible(metric)
+                    and absolute_pitch_degrees(predecessor[:3, 2]) <= MAX_ABS_PITCH_DEG
+                    and len(actions) < min_candidate_steps):
+                rejected["below_min_candidate_steps"] += 1
             if expansions >= max_expansions:
                 return {"status": "unverified_expansion_cap", "candidates": candidates, "expansions": expansions,
                         "visited_states": len(seen), "rejection_reasons": dict(rejected)}
