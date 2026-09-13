@@ -49,7 +49,7 @@ def main() -> None:
                     collisions.append({"step": step, "action": action, "type": collision.collision_type})
                     break
             expected = certificate.get("path", [])[step] if step < len(certificate.get("path", [])) else None
-            expected_pose = expected.get("pose_c2w") if expected else None
+            expected_pose = expected.get("c2w") if expected else None
             if expected_pose is not None and not np.allclose(next_pose, np.asarray(expected_pose, dtype=float), atol=1e-7):
                 mismatches.append({"step": step, "action": action, "max_abs_error": float(np.max(np.abs(next_pose - np.asarray(expected_pose, dtype=float))) )})
             pose = next_pose
@@ -63,7 +63,7 @@ def main() -> None:
             "task_id": task_id, "source_row_index": certificate["source_row_index"], "status": status,
             "steps": first_success, "initial_success": initial["success"], "final_success": first_success is not None,
             "collisions": collisions, "pose_mismatches": mismatches,
-            "collision_convention": constraints.collision_convention(scene_id),
+            "collision_convention": detector.convention_record(),
         })
     payload = {"version": VERSION, "rows": len(results),
                "passed": sum(row["status"] == "pass" for row in results), "results": results}
