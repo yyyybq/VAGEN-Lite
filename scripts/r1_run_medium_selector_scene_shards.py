@@ -36,7 +36,7 @@ def main() -> None:
     parser.add_argument("--sources", type=Path, required=True)
     parser.add_argument("--gs-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--selector", choices=("v2", "v3"), required=True)
+    parser.add_argument("--selector", choices=("v2", "v3", "v4_projection_frontier"), required=True)
     parser.add_argument("--max-workers", type=int, default=5)
     parser.add_argument("--seed-cap", type=int, default=12)
     parser.add_argument("--per-seed-expansions", type=int, default=512)
@@ -47,10 +47,12 @@ def main() -> None:
     by_scene: dict[str, list[dict]] = defaultdict(list)
     for record in selection["records"]:
         by_scene[str(record["scene_id"])].append(record)
-    selector_script = Path(__file__).with_name(
-        "r1_projective_medium_selector_v2.py" if args.selector == "v2"
-        else "r1_projective_medium_selector_v3_depth_banded.py"
-    )
+    selector_scripts = {
+        "v2": "r1_projective_medium_selector_v2.py",
+        "v3": "r1_projective_medium_selector_v3_depth_banded.py",
+        "v4_projection_frontier": "r1_projective_medium_selector_v4_projection_frontier.py",
+    }
+    selector_script = Path(__file__).with_name(selector_scripts[args.selector])
     shards_dir = args.output_dir / "shards"
     shards_dir.mkdir(parents=True, exist_ok=True)
 
