@@ -1,0 +1,17 @@
+{
+  "version": "manual_rgb_review_v1_20260914",
+  "evidence_source": "official_renderer_contact_sheets",
+  "observability_version": "projective_observability_v1",
+  "thresholds_changed": false,
+  "reviewed_records": 8,
+  "records": [
+    {"source_key":"train:331","scene_id":"0012_840878","role":"positive_control","verdict":"pass","notes":"Both targets remain recognizable; no blank-wall run or extreme view.","contact_sheet":"holdout_v3_ab/official_rgb/path_rgb/projective_path_first_proto_train_000331_medium/observability_contact_sheet.png"},
+    {"source_key":"train:939","scene_id":"0015_840888","role":"positive_control","verdict":"pass","notes":"Initial and terminal targets are identifiable; the four-step trajectory is visually plausible.","contact_sheet":"holdout_v3_ab/official_rgb/path_rgb/projective_path_first_proto_train_000939_medium/observability_contact_sheet.png"},
+    {"source_key":"train:1191","scene_id":"0016_840873","role":"positive_control","verdict":"pass","notes":"Both objects are discernible with aligned boxes and no low-information path segment.","contact_sheet":"holdout_v3_ab/official_rgb/path_rgb/projective_path_first_proto_train_001191_medium/observability_contact_sheet.png"},
+    {"source_key":"train:1363","scene_id":"0019_840447","role":"positive_control","verdict":"pass","notes":"The smaller object remains recognizable and the relation change is visible without an extreme viewpoint.","contact_sheet":"holdout_v3_ab/official_rgb/path_rgb/projective_path_first_proto_train_001363_medium/observability_contact_sheet.png"},
+    {"source_key":"train:1532","scene_id":"0020_840256","role":"positive_control","verdict":"pass","notes":"The object pair is recognizable and the five-step trajectory is visually reasonable.","contact_sheet":"holdout_v3_ab/official_rgb/path_rgb/projective_path_first_proto_train_001532_medium/observability_contact_sheet.png"},
+    {"source_key":"train:1308","scene_id":"0019_840447","role":"new_shortcut_recovery","verdict":"pass","notes":"Wardrobe and stair/bunk-ladder are recognizable; the turn-and-translation path is natural and has no wall-like run.","contact_sheet":"holdout_v3_ab/official_rgb/path_rgb/projective_path_first_proto_train_001308_medium/observability_contact_sheet.png"},
+    {"source_key":"train:1085","scene_id":"0016_840873","role":"new_shortcut_candidate","verdict":"reject","reject_reason":"initial_dual_target_not_discernible","notes":"The initial frame is dominated by a low-information wall view.","contact_sheet":"holdout_v3_ab/official_rgb/path_rgb/projective_path_first_proto_train_001085_medium/observability_contact_sheet.png"},
+    {"source_key":"train:1120","scene_id":"0016_840873","role":"new_shortcut_candidate","verdict":"reject","reject_reason":"initial_dual_target_not_discernible","notes":"The initial doorway/room view does not make both requested targets reliably distinguishable.","contact_sheet":"holdout_v3_ab/official_rgb/path_rgb/projective_path_first_proto_train_001120_medium/observability_contact_sheet.png"}
+  ]
+}
