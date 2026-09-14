@@ -28,10 +28,10 @@ echo "[bootstrap] id=$(id)"
 echo "[bootstrap] pwd=$(pwd)"
 ls -l "${PYTHON}"
 "${PYTHON}" --version
-git -c safe.directory="${ROOT}" rev-parse HEAD
+echo "[bootstrap] code_commit=${R1_CODE_COMMIT:-unknown_not_injected}"
 
 if [[ ! -f "${OUTPUT}/run_environment.json" ]]; then
-  "${PYTHON}" -c 'import json,os,platform,subprocess,sys; from pathlib import Path; out=Path(sys.argv[1]); payload={"version":"r1_v3_holdout_reverse_diag_environment_v1","hostname":platform.node(),"git_commit":subprocess.check_output(["git","-c",f"safe.directory={sys.argv[4]}","rev-parse","HEAD"],text=True,cwd=sys.argv[4]).strip(),"python":sys.executable,"python_version":sys.version,"gs_root":sys.argv[2],"renderer":{"port":int(sys.argv[3]),"requested_gpu_ids":[0],"max_workers":1,"max_inflight":2},"sco_resource":{"worker_spec":"N4lS.Iq.I80.1","allocated_gpus":1,"allocated_vcpu":14,"allocated_memory_gib":240,"renderer_gpus_used":1,"reason":"minimum resource matching the single-GPU serial official renderer and five bounded CPU scene shards"}}; out.write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n")' "${OUTPUT}/run_environment.json" "${GS_ROOT}" "${RENDER_PORT}" "${ROOT}"
+  "${PYTHON}" -c 'import json,os,platform,sys; from pathlib import Path; out=Path(sys.argv[1]); payload={"version":"r1_v3_holdout_reverse_diag_environment_v1","hostname":platform.node(),"git_commit":os.environ.get("R1_CODE_COMMIT","unknown_not_injected"),"python":sys.executable,"python_version":sys.version,"gs_root":sys.argv[2],"renderer":{"port":int(sys.argv[3]),"requested_gpu_ids":[0],"max_workers":1,"max_inflight":2},"sco_resource":{"worker_spec":"N4lS.Iq.I80.1","allocated_gpus":1,"allocated_vcpu":14,"allocated_memory_gib":240,"renderer_gpus_used":1,"reason":"minimum resource matching the single-GPU serial official renderer and five bounded CPU scene shards"}}; out.write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n")' "${OUTPUT}/run_environment.json" "${GS_ROOT}" "${RENDER_PORT}"
 fi
 nvidia-smi > "${OUTPUT}/nvidia_smi.txt"
 
