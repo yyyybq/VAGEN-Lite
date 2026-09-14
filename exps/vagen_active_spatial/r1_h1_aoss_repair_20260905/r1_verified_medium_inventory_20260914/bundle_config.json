@@ -1,0 +1,21 @@
+{
+  "version": "r1_verified_medium_inventory_bundle_config_v1_20260914",
+  "bundles": [
+    {
+      "name": "independent_v2_screen",
+      "experiment_role": "independent_selector_validation_20260914_v2_screen",
+      "candidate": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/projective_medium_v3_independent_reverse_diag_20260914_zoetrope_r3/holdout_v2_screen/independent_validation/candidate_rows.jsonl",
+      "reachability": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/projective_medium_v3_independent_reverse_diag_20260914_zoetrope_r3/holdout_v2_screen/independent_validation/reachability_manifest.jsonl",
+      "runtime": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/projective_medium_v3_independent_reverse_diag_20260914_zoetrope_r3/holdout_v2_screen/independent_validation/runtime_replay.json",
+      "observability": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/projective_medium_v3_independent_reverse_diag_20260914_zoetrope_r3/holdout_v2_screen/official_rgb/observability_manifest.jsonl"
+    },
+    {
+      "name": "independent_v3_shortcut_ab",
+      "experiment_role": "independent_selector_validation_20260914_v3_ab",
+      "candidate": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/projective_medium_v3_independent_reverse_diag_20260914_zoetrope_r3/holdout_v3_ab/independent_validation/candidate_rows.jsonl",
+      "reachability": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/projective_medium_v3_independent_reverse_diag_20260914_zoetrope_r3/holdout_v3_ab/independent_validation/reachability_manifest.jsonl",
+      "runtime": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/projective_medium_v3_independent_reverse_diag_20260914_zoetrope_r3/holdout_v3_ab/independent_validation/runtime_replay.json",
+      "observability": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/projective_medium_v3_independent_reverse_diag_20260914_zoetrope_r3/holdout_v3_ab/official_rgb/observability_manifest.jsonl"
+    }
+  ]
+}

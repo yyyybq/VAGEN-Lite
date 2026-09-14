@@ -1,0 +1,72 @@
+{
+  "version": "r1_canonical_constraint_scope_v1_20260914",
+  "experiment_code_commit": "58636eb5fbf110221a1f5d5d5fca7577d1580a53",
+  "frontier_code_commit": "26af4280cea86e0f10ab8d663607b40a296ac6da",
+  "component_sha256": {
+    "canonical_camera.py": "ec38613908fd0d69726a2e1fbcccacf2a823d80e45193387fd9a3aab83c1da39",
+    "canonical_task_metrics.py": "7ae095045fe128f58c373084ad4228679760423c98a7d78d57c9693c860ee5bd",
+    "collision_detector.py": "262746cfe38a2d2af5cc154cc0f2786a85f7a5b48af33832dffdf50ea7f7f545",
+    "r1_action_graph.py": "603aadd5be39f9eafb1f7d07b87283252fdf8d4d040bdb506ffbe43e42574df6",
+    "r1_projective_observability.py": "7aa084e9ea61f8dc4ea2475b64066563ec73bee1fd0d259186e273640018df27",
+    "r1_repair_pipeline.py": "9fc6a73bbbdcf2f1552a4afae5157ea68b2fbbacae99231089d26cf3ce22a8d8"
+  },
+  "scopes": {
+    "all_formal_runtime_states": {
+      "actions": ["move_forward", "move_backward", "move_left", "move_right", "turn_left", "turn_right"],
+      "translation_step_m": 0.3,
+      "turn_step_deg": 20.0,
+      "max_episode_steps": 12,
+      "translation_collision": "camera radius 0.15 m plus safety margin 0.05 m; colliding translation is invalidated",
+      "success_evaluation": "canonical_spatial_task_h1_v1 is evaluated after each legal action",
+      "not_applied": ["RGB observability", "0.5 m visual-quality wall clearance", "source pair min_distance"]
+    },
+    "certificate_generator_state_subset": {
+      "relationship_to_runtime": "A stricter data-quality subset of formal runtime states; these gates do not redefine runtime transition legality.",
+      "requirements": ["frozen collision convention", "inside a labeled room", "same room as the source pair/initial", "wall clearance >= 0.5 m", "object collision free"],
+      "pair_min_distance_on_predecessor_or_intermediate": false,
+      "target_only_projective_constraints_on_predecessor_or_intermediate": false
+    },
+    "initial_only": {
+      "canonical_success": false,
+      "same_object_pair": true,
+      "absolute_pitch_max_deg": 30.0,
+      "cheap_projection_prefilter": {
+        "two_objects": true,
+        "centers_in_front": true,
+        "visible": true,
+        "minimum_area_ratio_each": 0.0001,
+        "minimum_inside_frame_fraction_each": 0.50
+      },
+      "official_rgb": "initial frame must pass projective_observability_v1_initial_keyframe dual-target observation"
+    },
+    "terminal_success": {
+      "metric": "canonical_spatial_task_h1_v1/projective_relation_h1",
+      "requirements": ["two objects", "centers in front", "visible", "area ratio >= 0.0001 each", "bbox inside fraction >= 0.50 each", "requested relation true", "relation margin >= 12 px"],
+      "success_region": "any canonical-success runtime state; no equality to sample_target or generator seed pose"
+    },
+    "path_observation_quality": {
+      "version": "projective_observability_v1_initial_keyframe",
+      "heuristic_not_occlusion_oracle": true,
+      "initial_and_terminal_dual_target": true,
+      "intermediate_dual_target_required": false,
+      "maximum_consecutive_wall_like_frames": 2,
+      "minimum_wall_clearance_m_every_pose": 0.5,
+      "rgb_bbox_inside_fraction_each": 0.25,
+      "rgb_bbox_area_px_each": 64
+    },
+    "medium_difficulty_certification": {
+      "lower_bound": "complete forward-runtime enumeration has no canonical success through depth 3",
+      "upper_bound": "independently replayed certificate reaches first canonical success at step 4, 5, or 6",
+      "intermediate_quality_filters_used_in_lower_bound": false,
+      "reverse_depth_is_difficulty_label": false
+    }
+  },
+  "inside_frame_audit": {
+    "projective_meaning": "clipped projected bbox area divided by raw projected bbox area, at least 0.50 for each object",
+    "not_center_only": true,
+    "not_full_bbox": true,
+    "fov_rule_is_distinct": "FOV uses 0.95 full-bbox fraction plus 5% center margin",
+    "fov_rule_misapplied_to_projective": false,
+    "observability_0.25_is_distinct": "The official RGB heuristic has a calibrated 0.25 patch-inside minimum; generator initial geometry remains the stricter frozen canonical 0.50 prefilter."
+  }
+}

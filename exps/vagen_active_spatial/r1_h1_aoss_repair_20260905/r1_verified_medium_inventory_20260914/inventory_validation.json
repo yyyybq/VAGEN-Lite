@@ -1,0 +1,31 @@
+{
+  "version": "r1_verified_medium_inventory_validation_v1_20260914",
+  "inventory_sha256": "3d048d1e7825a1656623d4203ae03d8f75dc6ea9af609c92a34c7a3ba0903cfd",
+  "validated_unique_sources": 96,
+  "validated_unique_episodes": 98,
+  "train_only_unique_sources": 64,
+  "train_only_unique_episodes": 65,
+  "evaluation_unique_sources": 32,
+  "evidence_references_checked": 392,
+  "unique_evidence_files_checked": 16,
+  "missing_evidence_files": 0,
+  "evidence_sha256_mismatches": 0,
+  "runtime_pass_episodes": 98,
+  "official_rgb_pass_episodes": 98,
+  "complete_lower_bound_4_episodes": 98,
+  "first_success_step_distribution": {
+    "4": 71,
+    "5": 27,
+    "6": 0
+  },
+  "frozen_versions": {
+    "camera": "canonical_h1_from_frozen_candidate_intrinsics_and_pose",
+    "canonical_metric": "canonical_spatial_task_h1_v1",
+    "observability": "projective_observability_v1_initial_keyframe"
+  },
+  "historical_one_step_evidence": {
+    "old_rgb_pass_first_success_step_1": 73,
+    "claim_183": "unknown_unsupported_by_formal_first_success_artifacts"
+  },
+  "development_exposure": "All seven evaluation scenes and all ten train scenes in this inventory have participated in R1 development; none is an untouched final generalization set."
+}

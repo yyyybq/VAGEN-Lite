@@ -1,0 +1,86 @@
+{
+  "version": "r1_projection_frontier_ab20_manual_rgb_review_v1_20260914",
+  "experiment": "projective_projection_frontier_ab20_20260914_zoetrope_r2",
+  "review_scope": "All seven official-render contact sheets produced by the frozen same-worker A/B.",
+  "review_criteria": [
+    "initial and terminal target objects are recognizable",
+    "path is not a consecutive near-wall or low-information sequence",
+    "camera view is not an extreme wall/ceiling orientation",
+    "motion is a natural formal-action trajectory"
+  ],
+  "baseline_v2": [
+    {
+      "source_key": "train:210",
+      "scene_id": "0011_840866",
+      "object_pair": ["225:stool", "228:teatable"],
+      "actions": ["move_left", "move_left", "move_left", "move_forward"],
+      "official_rgb_pass": true,
+      "manual_pass": true,
+      "notes": "Both furniture targets remain recognizable; lateral/forward motion is natural and no wall-like segment appears."
+    },
+    {
+      "source_key": "train:632",
+      "scene_id": "0014_841007",
+      "object_pair": ["115:multi person sofa", "482:dining table"],
+      "actions": ["move_left", "move_left", "move_left", "move_left", "move_backward"],
+      "official_rgb_pass": true,
+      "manual_pass": true,
+      "notes": "Foreground sofa and rear dining table are recognizable throughout; no near-wall or extreme-camera artifact."
+    },
+    {
+      "source_key": "id_test:1030",
+      "scene_id": "0226_840298",
+      "object_pair": ["98:person", "102:wall cabinet"],
+      "actions": ["move_right", "move_right", "move_forward", "move_forward"],
+      "official_rgb_pass": true,
+      "manual_pass": true,
+      "notes": "Person and cabinet remain visually distinct through a natural right/forward trajectory."
+    },
+    {
+      "source_key": "id_test:1285",
+      "scene_id": "0229_840306",
+      "object_pair": ["344:chair", "363:bed"],
+      "actions": ["move_left", "turn_right", "move_left", "move_left"],
+      "official_rgb_pass": true,
+      "manual_pass": true,
+      "notes": "Chair and bed are large and recognizable despite ordinary lower-frame truncation; the trajectory is informative and non-extreme."
+    }
+  ],
+  "projection_frontier_v4": [
+    {
+      "source_key": "train:210",
+      "scene_id": "0011_840866",
+      "object_pair": ["225:stool", "228:teatable"],
+      "actions": ["move_left", "move_left", "move_left", "move_left"],
+      "official_rgb_pass": true,
+      "manual_pass": true,
+      "notes": "Both targets remain recognizable and the four-step lateral trajectory contains no low-information wall segment."
+    },
+    {
+      "source_key": "train:632",
+      "scene_id": "0014_841007",
+      "object_pair": ["115:multi person sofa", "482:dining table"],
+      "actions": ["move_left", "move_left", "move_left", "move_left", "turn_right"],
+      "official_rgb_pass": true,
+      "manual_pass": true,
+      "notes": "Both targets remain recognizable; the final turn is modest and the path is not wall-dominated."
+    },
+    {
+      "source_key": "id_test:1285",
+      "scene_id": "0229_840306",
+      "object_pair": ["344:chair", "363:bed"],
+      "actions": ["move_left", "turn_right", "move_left", "move_left"],
+      "official_rgb_pass": true,
+      "manual_pass": true,
+      "notes": "Chair and bed remain recognizable; no near-wall, ceiling, or extreme-orientation construction is present."
+    }
+  ],
+  "summary": {
+    "contact_sheets_reviewed": 7,
+    "official_rgb_pass": 7,
+    "manual_pass": 7,
+    "manual_reject": 0,
+    "new_failure_source_recoveries": 0,
+    "note": "The RGB evidence is valid for generated candidates, but v4 still fails the algorithm gate because it recovered no failure source and regressed one generator control."
+  }
+}

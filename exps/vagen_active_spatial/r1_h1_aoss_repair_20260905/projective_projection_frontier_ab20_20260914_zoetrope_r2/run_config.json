@@ -1,0 +1,50 @@
+{
+  "budgets": {
+    "candidate_cap_per_seed": 48,
+    "lower_bound_expansions": 100000,
+    "per_seed_expansions": 512,
+    "success_seed_cap": 12
+  },
+  "code_commit": "26af4280cea86e0f10ab8d663607b40a296ac6da",
+  "component_sha256": {
+    "scripts/r1_action_graph.py": "603aadd5be39f9eafb1f7d07b87283252fdf8d4d040bdb506ffbe43e42574df6",
+    "scripts/r1_projective_medium_selector_v2.py": "9a35cd8573ed7d70aefe292119ed160f58bbef7656fbc30a13affec9f06d42db",
+    "scripts/r1_projective_medium_selector_v4_projection_frontier.py": "2801e13b626ea57ea5b44c4a0f76e203204479a7978d7c758963cee863677589",
+    "scripts/r1_projective_observability.py": "7aa084e9ea61f8dc4ea2475b64066563ec73bee1fd0d259186e273640018df27",
+    "vagen/envs/active_spatial/canonical_camera.py": "ec38613908fd0d69726a2e1fbcccacf2a823d80e45193387fd9a3aab83c1da39",
+    "vagen/envs/active_spatial/canonical_task_metrics.py": "7ae095045fe128f58c373084ad4228679760423c98a7d78d57c9693c860ee5bd",
+    "vagen/envs/active_spatial/collision_detector.py": "262746cfe38a2d2af5cc154cc0f2786a85f7a5b48af33832dffdf50ea7f7f545"
+  },
+  "frontier_order": [
+    "depth_ascending",
+    "object_count_descending",
+    "in_front_count_descending",
+    "visible_count_descending",
+    "min_inside_frame_fraction_descending",
+    "min_clipped_bbox_area_ratio_descending",
+    "pair_alignment_cosine_descending",
+    "state_key_ascending"
+  ],
+  "frozen_semantics": {
+    "canonical_metric": "canonical_spatial_task_h1_v1",
+    "fov_inside_frame_fraction": 0.95,
+    "medium": "complete no-success through depth 3 and first success by depth 6",
+    "observability": "projective_observability_v1_initial_keyframe",
+    "projective_inside_frame_fraction": 0.5,
+    "projective_margin_px": 12,
+    "same_pair_only": true
+  },
+  "hostname": "pt-6d3b9025e5b04c35a9337a4b2965521e-worker-0",
+  "python": "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python",
+  "python_version": "3.12.13 | packaged by Anaconda, Inc. | (main, Jul  9 2026, 14:38:16) [GCC 14.3.0]",
+  "resource": {
+    "allocated_gpu": 1,
+    "renderer_gpu": 0,
+    "worker_spec": "N4lS.Iq.I80.1"
+  },
+  "selection": {
+    "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/projective_medium_v3_independent_reverse_diag_20260914_zoetrope_r3/reverse_cap16_controls4_frozen_selection.json",
+    "sha256": "6ab42978b15695d12a30bfb5fc9f39e2df61ea0573e4ffb2df056bb428016673"
+  },
+  "version": "r1_projection_frontier_ab_run_config_v1"
+}
