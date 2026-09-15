@@ -21,7 +21,7 @@ import numpy as np
 from PIL import Image
 
 
-VERSION = "r1_canonical_dev_eval32_runner_v2"
+VERSION = "r1_canonical_dev_eval32_runner_v3"
 SMOKE_INDICES = (0, 10, 21, 31)
 
 
@@ -100,10 +100,68 @@ def model_file_inventory(model_path: Path) -> dict[str, Any]:
     weights = sorted(model_path.glob("*.safetensors"))
     if missing or not weights:
         raise RuntimeError(f"incomplete model export at {model_path}: missing={missing}, weights={len(weights)}")
+    index = json.loads((model_path / "model.safetensors.index.json").read_text())
+    indexed_weights = sorted(set(index.get("weight_map", {}).values()))
+    actual_weights = sorted(path.name for path in weights)
+    if indexed_weights != actual_weights:
+        raise RuntimeError(
+            f"weight index mismatch at {model_path}: indexed={indexed_weights}, actual={actual_weights}"
+        )
+    from safetensors import safe_open
+    tensor_dtypes: Counter[str] = Counter()
+    tensor_count = 0
+    for path in weights:
+        with safe_open(path, framework="pt", device="cpu") as handle:
+            for key in handle.keys():
+                tensor_dtypes[str(handle.get_slice(key).get_dtype())] += 1
+                tensor_count += 1
     files = []
     for path in sorted(p for p in model_path.iterdir() if p.is_file()):
         files.append({"name": path.name, "size": path.stat().st_size})
-    return {"path": str(model_path.resolve()), "files": files, "total_bytes": sum(x["size"] for x in files)}
+    return {
+        "path": str(model_path.resolve()),
+        "files": files,
+        "total_bytes": sum(x["size"] for x in files),
+        "indexed_weight_files": indexed_weights,
+        "tensor_count": tensor_count,
+        "tensor_dtypes": dict(sorted(tensor_dtypes.items())),
+    }
+
+
+def verify_model_sha256s(model_path: Path, manifest_path: Path) -> dict[str, Any]:
+    expected: dict[str, str] = {}
+    for line in manifest_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2 or len(parts[0]) != 64:
+            raise RuntimeError(f"malformed SHA256 line in {manifest_path}: {line!r}")
+        name = Path(parts[1].strip().lstrip("*")).name
+        if name in expected:
+            raise RuntimeError(f"duplicate filename in SHA256 manifest: {name}")
+        expected[name] = parts[0].lower()
+    actual_files = sorted(path for path in model_path.iterdir() if path.is_file())
+    actual_names = {path.name for path in actual_files}
+    if set(expected) != actual_names:
+        raise RuntimeError(
+            f"SHA256 manifest inventory mismatch: missing={sorted(actual_names - set(expected))}, "
+            f"unexpected={sorted(set(expected) - actual_names)}"
+        )
+    verified = []
+    started = time.time()
+    for path in actual_files:
+        actual = sha256(path)
+        if actual != expected[path.name]:
+            raise RuntimeError(f"SHA256 mismatch for {path.name}: {actual} != {expected[path.name]}")
+        verified.append({"name": path.name, "size": path.stat().st_size, "sha256": actual})
+    return {
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest_sha256": sha256(manifest_path),
+        "verified_file_count": len(verified),
+        "verified_total_bytes": sum(row["size"] for row in verified),
+        "verification_seconds": time.time() - started,
+        "files": verified,
+    }
 
 
 class VllmPolicy:
@@ -410,6 +468,10 @@ def main() -> None:
         raise RuntimeError("frozen evaluation must contain exactly 32 rows")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    if args.model_sha256s is None:
+        raise RuntimeError("--model-sha256s is required for the frozen evaluation")
+    hash_verification = verify_model_sha256s(args.model_path, args.model_sha256s)
+    atomic_json(args.output_dir / "model_hash_verification.json", hash_verification)
     run_fingerprint = stable_hash({
         "runner": VERSION,
         "protocol_sha256": sha256(args.protocol),
