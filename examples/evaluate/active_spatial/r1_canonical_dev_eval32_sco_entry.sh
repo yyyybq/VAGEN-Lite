@@ -43,6 +43,32 @@ export no_proxy='*'
 export TORCH_EXTENSIONS_DIR=/mnt/umm/users/yinbaiqiao/.cache/torch_extensions_jumpbox_renderer
 export CUDA_VISIBLE_DEVICES=0
 
+# Triton compiles a tiny CUDA driver helper during first vLLM initialization.
+# The SCO base image used by this evaluation may not include a host C compiler.
+# Keep this an explicit infrastructure preflight rather than allowing model
+# loading to fail after the full snapshot hash pass.
+if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y gcc g++
+fi
+if command -v gcc >/dev/null 2>&1; then
+  export CC
+  CC=$(command -v gcc)
+elif command -v clang >/dev/null 2>&1; then
+  export CC
+  CC=$(command -v clang)
+else
+  export CC
+  CC=$(command -v cc)
+fi
+if command -v g++ >/dev/null 2>&1; then
+  export CXX
+  CXX=$(command -v g++)
+elif command -v clang++ >/dev/null 2>&1; then
+  export CXX
+  CXX=$(command -v clang++)
+fi
+
 {
   echo "hostname=$(hostname)"
   echo "expected_commit=${EXPECTED_COMMIT}"
@@ -53,6 +79,12 @@ export CUDA_VISIBLE_DEVICES=0
   nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
   echo "gs_root=/mnt/umm/users/yinbaiqiao/InteriorGS"
   echo "render_port=${PORT}"
+  echo "cc=${CC}"
+  "${CC}" --version | head -1
+  if [[ -n "${CXX:-}" ]]; then
+    echo "cxx=${CXX}"
+    "${CXX}" --version | head -1
+  fi
   echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "${OUTPUT}/worker_environment.txt"
 
