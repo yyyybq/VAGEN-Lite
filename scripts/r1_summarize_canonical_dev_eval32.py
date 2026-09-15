@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-VERSION = "r1_canonical_dev_eval32_paired_summary_v1"
+VERSION = "r1_canonical_dev_eval32_paired_summary_v2"
 
 
 def sha256(path: Path) -> str:
@@ -92,6 +92,9 @@ def main() -> None:
                 raise ValueError(f"{name} fingerprint mismatch at {index}")
             if int(row.get("paired_seed")) != 2026091500 + index * 100:
                 raise ValueError(f"{name} seed mismatch at {index}")
+        p_initial_input = p["turns"][0]["input"]
+        v_initial_input = v["turns"][0]["input"]
+        lower_bound = int(audit["difficulty"]["certified_lower_bound"])
         paired.append({
             "eval_index": index,
             "source_key": audit["source_key"],
@@ -103,10 +106,20 @@ def main() -> None:
             "difficulty": audit["difficulty"],
             "episode_fingerprint": audit["episode_fingerprint"],
             "paired_seed": p["paired_seed"],
+            "initial_image_sha_match": p_initial_input["image_sha256"] == v_initial_input["image_sha256"],
+            "initial_prompt_fingerprint_match": (
+                p_initial_input["messages_fingerprint"] == v_initial_input["messages_fingerprint"]
+            ),
             "pretrained_success": bool(p.get("success")),
             "v46_success": bool(v.get("success")),
             "pretrained_first_success_step": p.get("first_success_step"),
             "v46_first_success_step": v.get("first_success_step"),
+            "pretrained_lower_bound_consistent": (
+                not p.get("success") or int(p["first_success_step"]) >= lower_bound
+            ),
+            "v46_lower_bound_consistent": (
+                not v.get("success") or int(v["first_success_step"]) >= lower_bound
+            ),
             "pretrained_done_reason": p.get("done_reason"),
             "v46_done_reason": v.get("done_reason"),
             "pretrained_collisions": p.get("collision_attempts", 0),
@@ -133,6 +146,12 @@ def main() -> None:
         "pretrained": {"success": p_success, "rate": p_success / 32},
         "v46_step250": {"success": v_success, "rate": v_success / 32},
         "paired_outcomes": dict(outcomes),
+        "paired_input_checks": {
+            "initial_image_sha_match": sum(row["initial_image_sha_match"] for row in paired),
+            "initial_prompt_fingerprint_match": sum(row["initial_prompt_fingerprint_match"] for row in paired),
+            "pretrained_lower_bound_consistent": sum(row["pretrained_lower_bound_consistent"] for row in paired),
+            "v46_lower_bound_consistent": sum(row["v46_lower_bound_consistent"] for row in paired),
+        },
         "by_split": grouped(paired, "split"),
         "by_scene": grouped(paired, "scene_id"),
         "by_category": grouped(paired, "category"),
@@ -151,6 +170,14 @@ def main() -> None:
         "invalid_turns": {
             "pretrained": sum(row["pretrained_invalid_turns"] for row in paired),
             "v46": sum(row["v46_invalid_turns"] for row in paired),
+        },
+        "first_success_step_distribution": {
+            "pretrained": dict(Counter(
+                str(row["pretrained_first_success_step"]) for row in paired if row["pretrained_success"]
+            )),
+            "v46": dict(Counter(
+                str(row["v46_first_success_step"]) for row in paired if row["v46_success"]
+            )),
         },
         "inputs": {
             "manifest": {"path": str(args.manifest.resolve()), "sha256": sha256(args.manifest)},
