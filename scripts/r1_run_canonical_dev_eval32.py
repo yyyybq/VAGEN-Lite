@@ -21,7 +21,7 @@ import numpy as np
 from PIL import Image
 
 
-VERSION = "r1_canonical_dev_eval32_runner_v4"
+VERSION = "r1_canonical_dev_eval32_runner_v5"
 SMOKE_INDICES = (0, 10, 21, 31)
 
 
@@ -326,6 +326,13 @@ def run_episode(
     actual_identity = (env.current_item or {}).get("source_identity", {})
     if actual_identity.get("episode_fingerprint") != audit["episode_fingerprint"]:
         raise RuntimeError(f"environment selected wrong episode at index {eval_index}")
+    actual_initial_pose = env.view_engine.get_pose().copy()
+    expected_initial_pose = np.asarray(audit["initial_pose_c2w"], dtype=np.float64)
+    initial_pose_max_abs_error = float(np.max(np.abs(actual_initial_pose - expected_initial_pose)))
+    if initial_pose_max_abs_error > 1e-8:
+        raise RuntimeError(
+            f"initial pose mismatch at index {eval_index}: max_abs_error={initial_pose_max_abs_error}"
+        )
     system_text = env.system_prompt()
     initial_metric = env._calculate_canonical_metric()
     if initial_metric is None or initial_metric.get("success"):
@@ -438,6 +445,7 @@ def run_episode(
         "invalid_turns": invalid_turns,
         "actions": all_actions,
         "initial_canonical_metric": jsonable(initial_metric),
+        "initial_pose_max_abs_error": initial_pose_max_abs_error,
         "final_canonical_metric": jsonable(final_metric),
         "elapsed_seconds": time.time() - started,
         "turns": turns,
@@ -558,12 +566,29 @@ def main() -> None:
         execute(index)
     smoke_rows = [ledger["episodes"].get(f"{i:03d}", {}) for i in smoke]
     smoke_infra_ok = all(row.get("status") == "complete" for row in smoke_rows)
+    smoke_initial_rgb_ok = all(
+        row.get("turns") and float(row["turns"][0]["input"].get("image_rgb_std", 0.0)) > 1e-6
+        for row in smoke_rows
+    )
+    smoke_difficulty_ok = all(
+        not row.get("success")
+        or int(row.get("first_success_step")) >= int(audit_rows[index]["difficulty"]["certified_lower_bound"])
+        for index, row in zip(smoke, smoke_rows)
+    )
+    smoke_pass = smoke_infra_ok and smoke_initial_rgb_ok and smoke_difficulty_ok
     atomic_json(args.output_dir / "smoke_summary.json", {
-        "indices": smoke, "infrastructure_pass": smoke_infra_ok,
-        "rows": [{k: row.get(k) for k in ("eval_index", "source_key", "status", "success", "primitive_steps", "done_reason")} for row in smoke_rows],
+        "indices": smoke,
+        "infrastructure_pass": smoke_infra_ok,
+        "initial_rgb_structural_pass": smoke_initial_rgb_ok,
+        "certified_lower_bound_consistency_pass": smoke_difficulty_ok,
+        "full_evaluation_allowed": smoke_pass,
+        "rows": [{k: row.get(k) for k in (
+            "eval_index", "source_key", "status", "success", "first_success_step",
+            "primitive_steps", "done_reason", "initial_pose_max_abs_error",
+        )} for row in smoke_rows],
     })
-    if not smoke_infra_ok:
-        raise RuntimeError("fixed four-episode smoke did not complete; full evaluation not started")
+    if not smoke_pass:
+        raise RuntimeError("fixed four-episode smoke gate failed; full evaluation not started")
     for index in range(32):
         execute(index)
     try:
