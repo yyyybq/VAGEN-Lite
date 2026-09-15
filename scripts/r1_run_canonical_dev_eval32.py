@@ -21,7 +21,7 @@ import numpy as np
 from PIL import Image
 
 
-VERSION = "r1_canonical_dev_eval32_runner_v1"
+VERSION = "r1_canonical_dev_eval32_runner_v2"
 SMOKE_INDICES = (0, 10, 21, 31)
 
 
@@ -124,11 +124,14 @@ class VllmPolicy:
             trust_remote_code=True,
             dtype="auto",
             max_model_len=args.max_model_len,
-            enforce_eager=False,
+            # Match the frozen v46 evaluation recipe. This also avoids a
+            # model-dependent CUDA-graph warmup path in the paired smoke.
+            enforce_eager=True,
             limit_mm_per_prompt={"image": 1},
         )
         self.load_seconds = time.time() - started
         config = json.loads((args.model_path / "config.json").read_text())
+        actual_dtype = str(self.llm.llm_engine.model_config.dtype)
         atomic_json(output_dir / "model_load.json", {
             "version": VERSION,
             "model_key": args.model_key,
@@ -138,6 +141,8 @@ class VllmPolicy:
             "config_model_type": config.get("model_type"),
             "config_dtype": config.get("dtype", config.get("torch_dtype")),
             "requested_dtype": "auto_no_downcast_override",
+            "actual_vllm_dtype": actual_dtype,
+            "enforce_eager": True,
             "tokenizer_class": self.tokenizer_class,
             "processor_class": self.processor_class,
             "tensor_parallel_size": args.tensor_parallel_size,
