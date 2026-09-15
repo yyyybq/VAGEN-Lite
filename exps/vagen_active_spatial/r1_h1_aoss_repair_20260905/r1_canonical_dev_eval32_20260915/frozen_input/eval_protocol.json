@@ -1,0 +1,82 @@
+{
+  "audit_manifest": {
+    "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/frozen_input/development_regression_manifest.jsonl",
+    "sha256": "78a7a8f2a7c94bd0f007e89271f33d6a84ffa607a65e895613b43f8825b06b1d"
+  },
+  "counts": {
+    "scenes": {
+      "0014_841007": 1,
+      "0226_840298": 8,
+      "0229_840306": 3,
+      "0240_840881": 11,
+      "0276_840780": 1,
+      "0361_840315": 3,
+      "0367_840260": 5
+    },
+    "sources": 32,
+    "splits": {
+      "id_test": 16,
+      "ood_geometry": 1,
+      "ood_instance": 5,
+      "ood_scene": 6,
+      "ood_template": 1,
+      "validation_proxy": 3
+    }
+  },
+  "decoding": {
+    "do_sample": true,
+    "include_stop_string": true,
+    "max_tokens_per_turn": 384,
+    "n": 1,
+    "paired_per_turn_seed": "paired_seed_base + eval_index*100 + turn_index",
+    "recipe_source": "v46 hydra actor_rollout_ref.rollout.val_kwargs",
+    "stop": [
+      "</action>"
+    ],
+    "temperature": 0.8,
+    "top_p": 0.95
+  },
+  "environment": {
+    "action_space": "strafe",
+    "auto_termination": true,
+    "camera": "canonical_h1_from_frozen_candidate_intrinsics_and_pose",
+    "canonical_metric": "canonical_spatial_task_h1_v1",
+    "collision": "frozen_per_scene_in_policy_rows",
+    "distance_to_sample_target_in_observation": false,
+    "explicit_done": false,
+    "max_actions_per_model_turn": 5,
+    "max_model_turns": 12,
+    "max_primitive_actions": 12,
+    "render_resolution": [
+      256,
+      256
+    ],
+    "step_rotation_deg": 20.0,
+    "step_translation_m": 0.3
+  },
+  "episode_selection": "one per non-train source; lexicographically smallest episode fingerprint",
+  "experiment_role": "development_regression",
+  "generalization_claim": "none_development_exposed_scenes",
+  "inventory": {
+    "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_verified_medium_inventory_20260914/verified_medium_inventory.json",
+    "sha256": "3d048d1e7825a1656623d4203ae03d8f75dc6ea9af609c92a34c7a3ba0903cfd"
+  },
+  "manifest_version": "r1_canonical_dev_eval32_manifest_v1",
+  "paired_seed_base": 2026091500,
+  "policy_contract": {
+    "audit_only_fields_not_visible": [
+      "certificate actions",
+      "terminal pose",
+      "planner output",
+      "evidence paths"
+    ],
+    "history": "no_concat_system_plus_current_observation_only",
+    "image_placeholder": "<image>",
+    "prompt_format": "free_think"
+  },
+  "policy_input": {
+    "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/frozen_input/policy_input_rows.jsonl",
+    "sha256": "bf87b320df448f4da2aa053b709f4b644c42b49781e4d2155eca812df54e1108"
+  },
+  "version": "r1_canonical_dev_eval32_protocol_v1"
+}
