@@ -21,7 +21,7 @@ import numpy as np
 from PIL import Image
 
 
-VERSION = "r1_canonical_dev_eval32_runner_v3"
+VERSION = "r1_canonical_dev_eval32_runner_v4"
 SMOKE_INDICES = (0, 10, 21, 31)
 
 
@@ -171,20 +171,21 @@ class VllmPolicy:
 
         self.args = args
         started = time.time()
-        tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
-        processor = AutoProcessor.from_pretrained(args.model_path, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=False)
+        processor = AutoProcessor.from_pretrained(args.model_path, trust_remote_code=False)
         self.tokenizer_class = type(tokenizer).__name__
         self.processor_class = type(processor).__name__
         self.llm = LLM(
             model=str(args.model_path),
             tensor_parallel_size=args.tensor_parallel_size,
             gpu_memory_utilization=args.gpu_memory_utilization,
-            trust_remote_code=True,
+            trust_remote_code=False,
             dtype="auto",
             max_model_len=args.max_model_len,
             # Match the frozen v46 evaluation recipe. This also avoids a
             # model-dependent CUDA-graph warmup path in the paired smoke.
             enforce_eager=True,
+            enable_prefix_caching=True,
             limit_mm_per_prompt={"image": 1},
         )
         self.load_seconds = time.time() - started
@@ -201,6 +202,8 @@ class VllmPolicy:
             "requested_dtype": "auto_no_downcast_override",
             "actual_vllm_dtype": actual_dtype,
             "enforce_eager": True,
+            "enable_prefix_caching": True,
+            "trust_remote_code": False,
             "tokenizer_class": self.tokenizer_class,
             "processor_class": self.processor_class,
             "tensor_parallel_size": args.tensor_parallel_size,
@@ -452,7 +455,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.72)
-    parser.add_argument("--max-model-len", type=int, default=32768)
+    parser.add_argument("--max-model-len", type=int, default=4480)
     parser.add_argument("--max-infrastructure-attempts", type=int, default=2)
     args = parser.parse_args()
 

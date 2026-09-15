@@ -79,7 +79,7 @@ common=(
   --gs-root /mnt/umm/users/yinbaiqiao/InteriorGS
   --tensor-parallel-size 1
   --gpu-memory-utilization 0.60
-  --max-model-len 32768
+  --max-model-len 4480
 )
 
 "${PY}" scripts/r1_run_canonical_dev_eval32.py "${common[@]}" \
