@@ -42,31 +42,49 @@ export NO_PROXY='*'
 export no_proxy='*'
 export TORCH_EXTENSIONS_DIR=/mnt/umm/users/yinbaiqiao/.cache/torch_extensions_jumpbox_renderer
 export CUDA_VISIBLE_DEVICES=0
+export CUDA_HOME=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
+export TORCH_CUDA_ARCH_LIST=9.0
+export CPATH="${CUDA_HOME}/targets/x86_64-linux/include:${CPATH:-}"
+export CPLUS_INCLUDE_PATH="${CUDA_HOME}/targets/x86_64-linux/include:${CPLUS_INCLUDE_PATH:-}"
+export LIBRARY_PATH="${CUDA_HOME}/targets/x86_64-linux/lib:${LIBRARY_PATH:-}"
+export VLLM_TORCH_COMPILE_LEVEL=0
+export TORCH_COMPILE_DISABLE=1
+export VLLM_USE_FLASHINFER_SAMPLER=0
+export VLLM_USE_DEEP_GEMM=0
+export VLLM_SKIP_DEEP_GEMM_WARMUP=1
+export VLLM_ATTENTION_BACKEND=TORCH_SDPA
 
 # Triton compiles a tiny CUDA driver helper during first vLLM initialization.
 # The SCO base image used by this evaluation may not include a host C compiler.
 # Keep this an explicit infrastructure preflight rather than allowing model
 # loading to fail after the full snapshot hash pass.
-if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y gcc g++
-fi
-if command -v gcc >/dev/null 2>&1; then
-  export CC
-  CC=$(command -v gcc)
-elif command -v clang >/dev/null 2>&1; then
-  export CC
-  CC=$(command -v clang)
+HISTORICAL_CC=${CUDA_HOME}/bin/x86_64-conda-linux-gnu-gcc
+HISTORICAL_CXX=${CUDA_HOME}/bin/x86_64-conda-linux-gnu-g++
+if [[ -x "${HISTORICAL_CC}" && -x "${HISTORICAL_CXX}" ]]; then
+  export CC=${HISTORICAL_CC}
+  export CXX=${HISTORICAL_CXX}
 else
-  export CC
-  CC=$(command -v cc)
-fi
-if command -v g++ >/dev/null 2>&1; then
-  export CXX
-  CXX=$(command -v g++)
-elif command -v clang++ >/dev/null 2>&1; then
-  export CXX
-  CXX=$(command -v clang++)
+  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y gcc g++
+  fi
+  if command -v gcc >/dev/null 2>&1; then
+    export CC
+    CC=$(command -v gcc)
+  elif command -v clang >/dev/null 2>&1; then
+    export CC
+    CC=$(command -v clang)
+  else
+    export CC
+    CC=$(command -v cc)
+  fi
+  if command -v g++ >/dev/null 2>&1; then
+    export CXX
+    CXX=$(command -v g++)
+  elif command -v clang++ >/dev/null 2>&1; then
+    export CXX
+    CXX=$(command -v clang++)
+  fi
 fi
 
 {
@@ -85,6 +103,10 @@ fi
     echo "cxx=${CXX}"
     "${CXX}" --version | head -1
   fi
+  echo "cuda_home=${CUDA_HOME}"
+  echo "vllm_use_flashinfer_sampler=${VLLM_USE_FLASHINFER_SAMPLER}"
+  echo "vllm_attention_backend=${VLLM_ATTENTION_BACKEND}"
+  echo "vllm_torch_compile_level=${VLLM_TORCH_COMPILE_LEVEL}"
   echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "${OUTPUT}/worker_environment.txt"
 
