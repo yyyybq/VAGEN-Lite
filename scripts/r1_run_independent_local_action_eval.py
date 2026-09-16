@@ -89,7 +89,9 @@ def run_one(
     if pose_error > 1e-8:
         raise RuntimeError(f"independent pose mismatch at {index}: {pose_error}")
     before = env._calculate_canonical_metric()
-    if before is None or before.get("success"):
+    if before is None:
+        raise RuntimeError(f"canonical backend is not enabled at {index}")
+    if before.get("success"):
         raise RuntimeError(f"independent state already successful at {index}")
     initial_camera = effective_camera(env)
     projection_before = projection_details(env.current_item, pose_before)

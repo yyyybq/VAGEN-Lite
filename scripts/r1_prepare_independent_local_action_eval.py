@@ -39,6 +39,8 @@ from vagen.envs.active_spatial.render.unified_renderer import UnifiedRenderGS
 
 
 VERSION = "r1_independent_local_action_freeze_v1"
+CANONICAL_METRIC_VERSION = "canonical_spatial_task_h1_v1"
+CAMERA_MODEL_VERSION = "canonical_h1_from_frozen_candidate_intrinsics_and_pose"
 
 
 def sha256(path: Path) -> str:
@@ -345,6 +347,10 @@ async def run(args: argparse.Namespace) -> None:
     audit_rows: list[dict[str, Any]] = []
     for parent_index, selected_row in enumerate(selected):
         item = source_rows[selected_row["split"]][int(selected_row["source_row_index"])]
+        constraints.scene(str(item["scene_id"]))
+        convention = constraints._collision_cache[str(item["scene_id"])].convention_record()
+        if convention.get("status") != "frozen":
+            raise RuntimeError(f"collision convention is not frozen for {item['scene_id']}")
         for distance in sorted(selected_row["accepted_distances"]):
             accepted = selected_row["states"][str(distance)]["accepted"]
             candidate = accepted["candidate"]
@@ -354,6 +360,12 @@ async def run(args: argparse.Namespace) -> None:
             derived["task_id"] = f"r1_independent_local_{parent_index:03d}_d{distance}"
             derived["init_camera"] = dict(derived["init_camera"])
             derived["init_camera"]["extrinsics"] = candidate["pose_c2w"]
+            derived["canonical_task_metric_version"] = CANONICAL_METRIC_VERSION
+            derived["camera_model_version"] = CAMERA_MODEL_VERSION
+            derived["collision_convention"] = {
+                "version": convention["version"],
+                "structure_y_sign": convention["structure_y_sign"],
+            }
             derived["source_identity"] = {
                 "experiment_role": "independent_scene_local_action_diagnostic",
                 "source_key": selected_row["source_key"],

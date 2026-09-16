@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT=/mnt/umm/users/yinbaiqiao/VAGEN-Lite
 PY=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python
 BASE=${ROOT}/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905
-RUN=${BASE}/r1_independent_local_action_eval60_v2_20260916
+RUN=${BASE}/r1_independent_local_action_eval60_v3_20260916
 SCOPE=${RUN}/frozen_scope.json
 MODELS=${BASE}/r1_canonical_dev_eval32_20260915/model_restore
 DEV=${BASE}/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916
