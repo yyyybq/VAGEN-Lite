@@ -1,0 +1,141 @@
+{
+  "version": "r1_canonical_dev_eval32_floor_diagnostics_final_v1",
+  "date": "2026-09-16",
+  "valid_baseline": {
+    "output": "r1_canonical_dev_eval32_20260915/policy_eval_h1_render_v2",
+    "camera_fix_commit": "d940372a5d710fddb6275ee2b91866777fbf138a",
+    "report_commit": "7cfa08dd",
+    "pretrained_success": "0/32",
+    "v46_step250_success": "0/32",
+    "infrastructure_errors": 0,
+    "rerun": false
+  },
+  "diagnostic_environment": {
+    "code_commit": "8d0d1dd9dfc3a0d710f2434d23e22ca6fa08a4e7",
+    "sco_job": "pt-zymond97",
+    "job_name": "r1-dev32-floor-diag-h800-r1-0916",
+    "resource_pool": "h800",
+    "resource": "N4lS.Iq.I80.1",
+    "worker": "pt-bf86937b3fc0401791c612eac951d06c-worker-0",
+    "gpu": "NVIDIA H800 80GB",
+    "python": "3.12.13",
+    "renderer_port": 8898,
+    "interiorgs_root": "/mnt/umm/users/yinbaiqiao/InteriorGS",
+    "started_utc": "2026-09-16T15:31:24Z",
+    "completed_utc": "2026-09-16T16:28:59Z",
+    "job_state": "SUCCEEDED",
+    "renderer_stopped": true,
+    "resource_released": true
+  },
+  "readonly_baseline_trajectory_analysis": {
+    "pretrained": {
+      "primitive_actions": 384,
+      "turn_actions": 283,
+      "turn_fraction": 0.7369791666666666,
+      "actual_multi_action_turns": 74,
+      "multi_action_turns_with_out_of_frame": 67,
+      "episodes_ever_out_of_frame": 32,
+      "first_out_of_frame_step_counts": {"1": 24, "2": 3, "3": 2, "4": 3},
+      "first_out_in_multi_action_turn": 9,
+      "first_out_with_later_actions_in_same_turn": 7,
+      "episodes_margin_improved_while_visibility_degraded": 24,
+      "episodes_ever_success_midprimitive": 0,
+      "repeated_adjacent_actions": 83,
+      "inverse_adjacent_actions": 102
+    },
+    "v46_step250": {
+      "primitive_actions": 384,
+      "turn_actions": 275,
+      "turn_fraction": 0.7161458333333334,
+      "actual_multi_action_turns": 66,
+      "multi_action_turns_with_out_of_frame": 62,
+      "episodes_ever_out_of_frame": 32,
+      "first_out_of_frame_step_counts": {"1": 21, "2": 5, "3": 4, "5": 1, "9": 1},
+      "first_out_in_multi_action_turn": 9,
+      "first_out_with_later_actions_in_same_turn": 7,
+      "episodes_margin_improved_while_visibility_degraded": 20,
+      "episodes_ever_success_midprimitive": 0,
+      "repeated_adjacent_actions": 100,
+      "inverse_adjacent_actions": 89
+    },
+    "interpretation": "Batching co-occurs with visibility degradation, but is not sufficient as a causal explanation and never overwrote an already achieved canonical success."
+  },
+  "diagnostic_a_local_action_selection": {
+    "parent_sources": 32,
+    "derived_states": 64,
+    "distance_proof": "formal exhaustive runtime enumeration through depth 2 to any canonical-success state; no RGB-quality filter",
+    "pretrained": {
+      "d1_optimal_first_action": "1/32",
+      "d2_optimal_first_action": "4/32",
+      "d1_success_after_action": "1/32",
+      "invalid_or_empty": 0,
+      "collision_attempts": 1
+    },
+    "v46_step250": {
+      "d1_optimal_first_action": "2/32",
+      "d2_optimal_first_action": "6/32",
+      "d1_success_after_action": "2/32",
+      "invalid_or_empty": 0,
+      "collision_attempts": 0
+    },
+    "paired_d1": {"both_hit": 0, "pretrained_only": 1, "v46_only": 2, "both_miss": 29},
+    "paired_d2": {"both_hit": 1, "pretrained_only": 3, "v46_only": 5, "both_miss": 23},
+    "initial_rgb_pixel_equal": {"pretrained": "64/64", "v46_step250": "64/64"},
+    "infrastructure_errors": 0,
+    "interpretation": "Local action selection is already weak; certificate agreement was not used as the criterion because every optimal first action to the entire success region was enumerated."
+  },
+  "diagnostic_b_first_action_only_replan": {
+    "pretrained": {
+      "success": "0/32",
+      "primitive_actions": 384,
+      "model_calls": 384,
+      "extra_calls_vs_batch": 77,
+      "raw_multi_action_outputs": 97,
+      "discarded_actions": 104,
+      "collision_attempts": 1,
+      "invalid_turns": 0,
+      "inference_seconds": 233.54392313957214
+    },
+    "v46_step250": {
+      "success": "0/32",
+      "primitive_actions": 382,
+      "model_calls": 384,
+      "extra_calls_vs_batch": 67,
+      "raw_multi_action_outputs": 76,
+      "discarded_actions": 80,
+      "collision_attempts": 2,
+      "invalid_turns": 2,
+      "inference_seconds": 245.25312662124634
+    },
+    "paired": {"both_success": 0, "pretrained_only": 0, "v46_only": 0, "both_fail": 32},
+    "initial_rgb_pixel_equal": {"pretrained": "32/32", "v46_step250": "32/32"},
+    "first_action_equal_to_valid_batch": {"pretrained": "32/32", "v46_step250": "32/32"},
+    "infrastructure_errors": 0,
+    "interpretation": "More frequent visual feedback is not sufficient to lift the floor under the frozen prompt/model/protocol."
+  },
+  "model_fingerprints": {
+    "pretrained_manifest_sha256": "46f05ffcc6127a4caa9a3e8c11ddf298b9a5263c8680afe6b5d017ea91702c8b",
+    "v46_step250_manifest_sha256": "1fae9d370ade47ed79970cddbb27edab38c513526a29508bd1d3e7796e23374f"
+  },
+  "artifact_fingerprints": {
+    "protocol_sha256": "33bb0b75d7517bfbd7b948f2f490c12623bb0a2a0f5b2b4e58b9f05897ad9c22",
+    "local_policy_rows_sha256": "1c1d8879748a64e2cc3ab3f6a66be672124683d1787121748d9f814bf46ed786",
+    "local_state_audit_sha256": "2d4eac27076639de106f470802fb6777807e629571fb34cf3c1ea83a7e5f5e70",
+    "paired_summary_sha256": "102b733e55fa2ecab02bcff94ed257f73c56ba90da3eb40cd5e5c65756d2a7f9",
+    "baseline_readonly_summary_sha256": "632405b0267806b69776edc46978d3b58581ee80cf496c6df309fe225d396d35",
+    "worker_sha256sums_sha256": "ed7248ccb80922e3c4e592aaa6d19f8f03554ffad9fbe74e7de8669536c67d4a",
+    "code_archive_sha256": "4a479434f76f3be4384aaf50181468d4fa57751886a828815fa0be107b2e93fd",
+    "contact_sheet_sha256": "9aeb9c4fd57015acbbfe271db270343868a6dad96b30849444299fd0d503fc17"
+  },
+  "conclusion": {
+    "primary_supported_failure_mode": "weak local spatial action selection",
+    "secondary_observation": "multi-action execution frequently accompanies visibility loss but first-action-only replanning does not improve success",
+    "not_supported": [
+      "renderer or initial-frame mismatch as the floor cause",
+      "collision as the dominant cause",
+      "v46 and pretrained are generally equivalent",
+      "batching alone causes the failures"
+    ],
+    "recommended_next_priority": "independent-scene local-action evaluation before collecting targeted training data"
+  }
+}

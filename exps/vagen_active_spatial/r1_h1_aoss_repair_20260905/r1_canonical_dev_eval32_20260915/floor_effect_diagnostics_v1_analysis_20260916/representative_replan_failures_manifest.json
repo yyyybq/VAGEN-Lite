@@ -1,0 +1,402 @@
+{
+  "version": "r1_floor_manual_review_v1",
+  "review_scope": "representative_failures_no_successes_exist",
+  "records": [
+    {
+      "model": "pretrained",
+      "source_key": "id_test:6597",
+      "eval_index": 12,
+      "success": false,
+      "frames": [
+        {
+          "role": "initial",
+          "turn_index": 0,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/pretrained/replan/012/attempt_00/frames/turn_00_step_00.png",
+          "sha256": "9b4f499eb27333ed2d6d62b709b922966d553d4123effae759a05d957cd4d939",
+          "score": 0.6424957599884831,
+          "margin_px": 7.4275705847437195,
+          "gates": {
+            "in_front": true,
+            "inside_frame": true,
+            "margin": false,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right",
+            "move_right"
+          ],
+          "executed": "turn_right",
+          "discarded": [
+            "move_right"
+          ]
+        },
+        {
+          "role": "first_out",
+          "turn_index": 2,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/pretrained/replan/012/attempt_00/frames/turn_02_step_02.png",
+          "sha256": "7ef66c623f37ce41e6103458e18d20902201c97f3c232895c86aa805814d37fe",
+          "score": 0.689135273456598,
+          "margin_px": 12.160781934318763,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": true,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        },
+        {
+          "role": "best_score",
+          "turn_index": 2,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/pretrained/replan/012/attempt_00/frames/turn_02_step_02.png",
+          "sha256": "7ef66c623f37ce41e6103458e18d20902201c97f3c232895c86aa805814d37fe",
+          "score": 0.689135273456598,
+          "margin_px": 12.160781934318763,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": true,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        },
+        {
+          "role": "final",
+          "turn_index": 11,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/pretrained/replan/012/attempt_00/frames/turn_11_step_11.png",
+          "sha256": "7761d377fcff935c39a1309b87f30220eb3caf3224fcb1493ab12a1567b1db89",
+          "score": 0.0,
+          "margin_px": null,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": false,
+            "min_area": false,
+            "relation": false,
+            "two_objects": true,
+            "visible": false
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        }
+      ]
+    },
+    {
+      "model": "v46_step250",
+      "source_key": "id_test:6597",
+      "eval_index": 12,
+      "success": false,
+      "frames": [
+        {
+          "role": "initial",
+          "turn_index": 0,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/v46_step250/replan/012/attempt_00/frames/turn_00_step_00.png",
+          "sha256": "9b4f499eb27333ed2d6d62b709b922966d553d4123effae759a05d957cd4d939",
+          "score": 0.6424957599884831,
+          "margin_px": 7.4275705847437195,
+          "gates": {
+            "in_front": true,
+            "inside_frame": true,
+            "margin": false,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right",
+            "move_right"
+          ],
+          "executed": "turn_right",
+          "discarded": [
+            "move_right"
+          ]
+        },
+        {
+          "role": "first_out",
+          "turn_index": 0,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/v46_step250/replan/012/attempt_00/frames/turn_00_step_00.png",
+          "sha256": "9b4f499eb27333ed2d6d62b709b922966d553d4123effae759a05d957cd4d939",
+          "score": 0.6424957599884831,
+          "margin_px": 7.4275705847437195,
+          "gates": {
+            "in_front": true,
+            "inside_frame": true,
+            "margin": false,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right",
+            "move_right"
+          ],
+          "executed": "turn_right",
+          "discarded": [
+            "move_right"
+          ]
+        },
+        {
+          "role": "best_score",
+          "turn_index": 0,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/v46_step250/replan/012/attempt_00/frames/turn_00_step_00.png",
+          "sha256": "9b4f499eb27333ed2d6d62b709b922966d553d4123effae759a05d957cd4d939",
+          "score": 0.6424957599884831,
+          "margin_px": 7.4275705847437195,
+          "gates": {
+            "in_front": true,
+            "inside_frame": true,
+            "margin": false,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right",
+            "move_right"
+          ],
+          "executed": "turn_right",
+          "discarded": [
+            "move_right"
+          ]
+        },
+        {
+          "role": "final",
+          "turn_index": 11,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/v46_step250/replan/012/attempt_00/frames/turn_11_step_11.png",
+          "sha256": "1b8ef6a91bdb066d1578e68eea4361c81b24ee80aad7224399f2f6158ab8e298",
+          "score": 0.3099077369493927,
+          "margin_px": -9.896151744041859,
+          "gates": {
+            "in_front": true,
+            "inside_frame": true,
+            "margin": false,
+            "min_area": true,
+            "relation": false,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        }
+      ]
+    },
+    {
+      "model": "pretrained",
+      "source_key": "id_test:1095",
+      "eval_index": 4,
+      "success": false,
+      "frames": [
+        {
+          "role": "initial",
+          "turn_index": 0,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/pretrained/replan/004/attempt_00/frames/turn_00_step_00.png",
+          "sha256": "dba3812779d3a9b60258b9115709947c26ad19dcd2682f2c5e0f3d54d5138218",
+          "score": 0.6056531255840003,
+          "margin_px": 6.8866879833420285,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": false,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        },
+        {
+          "role": "first_out",
+          "turn_index": 0,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/pretrained/replan/004/attempt_00/frames/turn_00_step_00.png",
+          "sha256": "dba3812779d3a9b60258b9115709947c26ad19dcd2682f2c5e0f3d54d5138218",
+          "score": 0.6056531255840003,
+          "margin_px": 6.8866879833420285,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": false,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        },
+        {
+          "role": "best_score",
+          "turn_index": 0,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/pretrained/replan/004/attempt_00/frames/turn_00_step_00.png",
+          "sha256": "dba3812779d3a9b60258b9115709947c26ad19dcd2682f2c5e0f3d54d5138218",
+          "score": 0.6056531255840003,
+          "margin_px": 6.8866879833420285,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": false,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        },
+        {
+          "role": "final",
+          "turn_index": 11,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/pretrained/replan/004/attempt_00/frames/turn_11_step_11.png",
+          "sha256": "3d987ab8f00a34e87fdfbb760044c777c84c589e8735a225cdf10424ff9a2695",
+          "score": 0.0,
+          "margin_px": null,
+          "gates": {
+            "in_front": false,
+            "inside_frame": false,
+            "margin": false,
+            "min_area": false,
+            "relation": false,
+            "two_objects": true,
+            "visible": false
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        }
+      ]
+    },
+    {
+      "model": "v46_step250",
+      "source_key": "id_test:1095",
+      "eval_index": 4,
+      "success": false,
+      "frames": [
+        {
+          "role": "initial",
+          "turn_index": 0,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/v46_step250/replan/004/attempt_00/frames/turn_00_step_00.png",
+          "sha256": "dba3812779d3a9b60258b9115709947c26ad19dcd2682f2c5e0f3d54d5138218",
+          "score": 0.6056531255840003,
+          "margin_px": 6.8866879833420285,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": false,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        },
+        {
+          "role": "first_out",
+          "turn_index": 0,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/v46_step250/replan/004/attempt_00/frames/turn_00_step_00.png",
+          "sha256": "dba3812779d3a9b60258b9115709947c26ad19dcd2682f2c5e0f3d54d5138218",
+          "score": 0.6056531255840003,
+          "margin_px": 6.8866879833420285,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": false,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        },
+        {
+          "role": "best_score",
+          "turn_index": 11,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/v46_step250/replan/004/attempt_00/frames/turn_11_step_11.png",
+          "sha256": "d410c32a48e479273cbf6ec545650c40f8785d8763e50aa8c481110e242915df",
+          "score": 0.6651419224867902,
+          "margin_px": 12.25288342123099,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": true,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        },
+        {
+          "role": "final",
+          "turn_index": 11,
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/floor_effect_diagnostics_v1_20260916/v46_step250/replan/004/attempt_00/frames/turn_11_step_11.png",
+          "sha256": "d410c32a48e479273cbf6ec545650c40f8785d8763e50aa8c481110e242915df",
+          "score": 0.6651419224867902,
+          "margin_px": 12.25288342123099,
+          "gates": {
+            "in_front": true,
+            "inside_frame": false,
+            "margin": true,
+            "min_area": true,
+            "relation": true,
+            "two_objects": true,
+            "visible": true
+          },
+          "raw_actions": [
+            "turn_right"
+          ],
+          "executed": "turn_right",
+          "discarded": []
+        }
+      ]
+    }
+  ]
+}
