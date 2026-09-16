@@ -34,6 +34,11 @@ def main() -> None:
     forbidden = {"actions", "certificate", "reachability_construction", "terminal_pose_c2w", "planner", "evidence"}
     assert all(not (set(row) & forbidden) for row in policy)
     assert all(row["canonical_task_metric_version"] == "canonical_spatial_task_h1_v1" for row in policy)
+    assert all(
+        row["camera_model_version"]
+        == "canonical_h1_from_frozen_candidate_intrinsics_and_pose"
+        for row in policy
+    )
     assert all(row.get("collision_convention", {}).get("version") for row in policy)
     assert all(row["init_camera"]["extrinsics"] == audit[i]["initial_pose_c2w"] for i, row in enumerate(policy))
     assert protocol["environment"]["max_primitive_actions"] == 12

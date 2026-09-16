@@ -62,6 +62,7 @@ from .utils import (
 from .spatial_potential_field import SpatialPotentialField, ScoreResult, create_potential_field
 from .collision_detector import CollisionDetector, CollisionResult, create_collision_detector
 from .visibility_checker import VisibilityChecker, VisibilityResult, create_visibility_checker, compute_visibility_reward
+from .canonical_camera import CANONICAL_CAMERA_H1_RESIZE_V1, build_canonical_camera
 from .canonical_task_metrics import score_canonical_task, uses_canonical_backend
 
 
@@ -80,6 +81,51 @@ def _run_async(coro):
             return future.result()
     else:
         return asyncio.run(coro)
+
+
+def runtime_render_camera_parameters(
+    item: Optional[Dict[str, Any]],
+    c2w: np.ndarray,
+    native_intrinsics: np.ndarray,
+    render_size: Tuple[int, int],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return the K and w2c that must be sent to the runtime renderer.
+
+    Historical rows retain the legacy unscaled environment intrinsics.  R1
+    canonical rows instead reconstruct H1 from the immutable native K stored
+    in the dataset row.  Rebuilding from that native K on every call prevents
+    an already-resized matrix from being scaled repeatedly across steps.
+    """
+    pose = np.asarray(c2w, dtype=np.float64)
+    if uses_canonical_backend(item):
+        camera_version = item.get("camera_model_version")
+        accepted_h1_versions = {
+            CANONICAL_CAMERA_H1_RESIZE_V1,
+            "canonical_h1_from_frozen_candidate_intrinsics_and_pose",
+        }
+        if camera_version not in accepted_h1_versions:
+            raise ValueError(
+                "R1 canonical runtime render requires "
+                f"an H1 camera_model_version in {sorted(accepted_h1_versions)!r}, "
+                f"got {camera_version!r}"
+            )
+        camera = build_canonical_camera(
+            K_native=item["init_camera"]["intrinsics"],
+            render_size=render_size,
+            transform="resize",
+            c2w=pose,
+            item=item,
+            camera_model_version=CANONICAL_CAMERA_H1_RESIZE_V1,
+        )
+        return (
+            np.asarray(camera.K_effective, dtype=np.float64),
+            np.asarray(camera.w2c, dtype=np.float64),
+        )
+
+    K = np.asarray(native_intrinsics, dtype=np.float64)
+    if K.shape == (4, 4):
+        K = K[:3, :3]
+    return K, np.linalg.inv(pose)
 
 
 class ActiveSpatialEnv(BaseEnv):
@@ -1619,17 +1665,19 @@ class ActiveSpatialEnv(BaseEnv):
         try:
             # Get current camera extrinsics (camera-to-world)
             c2w = self.view_engine.get_pose()
-            # Renderer expects world-to-camera (w2c) extrinsics
-            w2c = np.linalg.inv(c2w)
-            
-            # Get camera intrinsics (ensure 3x3)
-            K = self.camera_intrinsics
-            if K.shape == (4, 4):
-                K = K[:3, :3]
-            
             # Get image size from config
             width = self.config.image_width
             height = self.config.image_height
+
+            # The formal renderer must use the same versioned camera as the
+            # canonical scorer.  Legacy rows intentionally keep their old
+            # unscaled K; only explicitly versioned R1 rows select H1.
+            K, w2c = runtime_render_camera_parameters(
+                self.current_item,
+                c2w,
+                self.camera_intrinsics,
+                (width, height),
+            )
             
             # Render (async call)
             image = _run_async(self.renderer.render_image_from_cam_param(

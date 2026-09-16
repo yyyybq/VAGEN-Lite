@@ -6,7 +6,7 @@ PY=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python
 RUN_ROOT=${ROOT}/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915
 FROZEN=${RUN_ROOT}/frozen_input
 MODELS=${RUN_ROOT}/model_restore
-OUTPUT=${RUN_ROOT}/policy_eval
+OUTPUT=${RUN_ROOT}/policy_eval_h1_render_v2
 ARCHIVE=${R1_EVAL_CODE_ARCHIVE:?R1_EVAL_CODE_ARCHIVE is required}
 EXPECTED_ARCHIVE_SHA=${R1_EVAL_CODE_ARCHIVE_SHA256:?R1_EVAL_CODE_ARCHIVE_SHA256 is required}
 EXPECTED_COMMIT=${R1_EVAL_COMMIT:?R1_EVAL_COMMIT is required}
@@ -157,4 +157,11 @@ common=(
   --output-dir "${OUTPUT}/paired" \
   > "${OUTPUT}/paired_summary.log" 2>&1
 
+# Stop the official renderer before freezing output hashes so its final log
+# flush cannot invalidate the manifest after it has been written.
+kill "${renderer_pid}" 2>/dev/null || true
+wait "${renderer_pid}" 2>/dev/null || true
+renderer_pid=
+printf '{"exit_status":0,"stopped_utc":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${OUTPUT}/worker_exit.json"
+trap - EXIT INT TERM
 find "${OUTPUT}" -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > "${OUTPUT}/SHA256SUMS"

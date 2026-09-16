@@ -21,8 +21,10 @@ import numpy as np
 from PIL import Image
 
 
-VERSION = "r1_canonical_dev_eval32_runner_v5"
+VERSION = "r1_canonical_dev_eval32_runner_v6_h1_render_camera"
 SMOKE_INDICES = (0, 10, 21, 31)
+FROZEN_RGB_MAX_MAE = 0.5
+FROZEN_RGB_MAX_P99_ABS_ERROR = 2.0
 
 
 def sha256(path: Path) -> str:
@@ -89,6 +91,62 @@ def save_observation_image(obs: dict[str, Any], path: Path) -> dict[str, Any]:
         "rgb_std": float(arr.std()),
         "image": images[0],
     }
+
+
+def resolve_frozen_path(path: str, repository_root: Path) -> Path:
+    value = Path(path)
+    return value if value.is_absolute() else repository_root / value
+
+
+def compare_frozen_initial_rgb(
+    current: Image.Image,
+    audit: dict[str, Any],
+    repository_root: Path,
+) -> dict[str, Any]:
+    """Compare a policy first frame with its already-frozen official RGB evidence."""
+    evidence = audit["evidence_audit_only"]["observability"]
+    manifest_path = resolve_frozen_path(evidence["path"], repository_root)
+    actual_manifest_sha = sha256(manifest_path)
+    if actual_manifest_sha != evidence["sha256"]:
+        raise RuntimeError(
+            f"frozen observability manifest SHA mismatch: {actual_manifest_sha} "
+            f"!= {evidence['sha256']}"
+        )
+    records = read_jsonl(manifest_path)
+    record = records[int(evidence["record_index"])]
+    if int(record["source_row_index"]) != int(audit["source_row_index"]):
+        raise RuntimeError("frozen observability evidence points to a different source row")
+    prior_path = resolve_frozen_path(record["frame_images"][0], repository_root)
+    prior = np.asarray(Image.open(prior_path).convert("RGB"), dtype=np.int16)
+    actual = np.asarray(current.convert("RGB"), dtype=np.int16)
+    if prior.shape != actual.shape:
+        raise RuntimeError(
+            f"frozen initial RGB shape mismatch: current={actual.shape}, prior={prior.shape}"
+        )
+    absolute_error = np.abs(actual - prior)
+    mae = float(absolute_error.mean())
+    p99 = float(np.quantile(absolute_error, 0.99))
+    passed = mae <= FROZEN_RGB_MAX_MAE and p99 <= FROZEN_RGB_MAX_P99_ABS_ERROR
+    comparison = {
+        "passed": passed,
+        "prior_path": str(prior_path),
+        "prior_sha256": sha256(prior_path),
+        "pixel_equal": bool(np.array_equal(actual, prior)),
+        "mean_absolute_error": mae,
+        "p99_absolute_error": p99,
+        "maximum_absolute_error": int(absolute_error.max()),
+        "maximum_allowed_mae": FROZEN_RGB_MAX_MAE,
+        "maximum_allowed_p99_absolute_error": FROZEN_RGB_MAX_P99_ABS_ERROR,
+        "observability_manifest": str(manifest_path),
+        "observability_manifest_sha256": actual_manifest_sha,
+        "observability_record_index": int(evidence["record_index"]),
+    }
+    if not passed:
+        raise RuntimeError(
+            "current initial RGB does not match frozen official evidence: "
+            f"mae={mae:.6f}, p99={p99:.6f}, prior={prior_path}"
+        )
+    return comparison
 
 
 def model_file_inventory(model_path: Path) -> dict[str, Any]:
@@ -321,6 +379,7 @@ def run_episode(
     eval_index: int,
     paired_seed_base: int,
     attempt_dir: Path,
+    repository_root: Path,
 ) -> dict[str, Any]:
     obs, reset_info = env.reset(seed=eval_index)
     actual_identity = (env.current_item or {}).get("source_identity", {})
@@ -344,12 +403,17 @@ def run_episode(
     first_success_step = None
     done = False
     final_info: dict[str, Any] = reset_info or {}
+    initial_rgb_evidence: dict[str, Any] | None = None
     started = time.time()
     for turn_index in range(12):
         if done or env._current_step >= 12:
             break
         frame_path = attempt_dir / "frames" / f"turn_{turn_index:02d}_step_{env._current_step:02d}.png"
         frame = save_observation_image(obs, frame_path)
+        if turn_index == 0:
+            initial_rgb_evidence = compare_frozen_initial_rgb(
+                frame["image"], audit, repository_root
+            )
         pre_pose = env.view_engine.get_pose().copy()
         model_seed = paired_seed_base + eval_index * 100 + turn_index
         input_record = {
@@ -445,6 +509,7 @@ def run_episode(
         "invalid_turns": invalid_turns,
         "actions": all_actions,
         "initial_canonical_metric": jsonable(initial_metric),
+        "initial_rgb_evidence": initial_rgb_evidence,
         "initial_pose_max_abs_error": initial_pose_max_abs_error,
         "final_canonical_metric": jsonable(final_metric),
         "elapsed_seconds": time.time() - started,
@@ -468,6 +533,16 @@ def main() -> None:
     args = parser.parse_args()
 
     protocol = json.loads(args.protocol.read_text())
+    repository_root = next(
+        (
+            parent
+            for parent in args.protocol.resolve().parents
+            if (parent / "vagen").is_dir() and (parent / "exps").is_dir()
+        ),
+        None,
+    )
+    if repository_root is None:
+        raise RuntimeError(f"cannot resolve repository root from protocol path: {args.protocol}")
     policy_path = Path(protocol["policy_input"]["path"])
     audit_path = Path(protocol["audit_manifest"]["path"])
     if sha256(policy_path) != protocol["policy_input"]["sha256"]:
@@ -528,8 +603,10 @@ def main() -> None:
         for attempt in range(len(attempts), args.max_infrastructure_attempts):
             attempt_dir = args.output_dir / "episodes" / key / f"attempt_{attempt:02d}"
             try:
-                result = run_episode(env, policy, policy_rows[index], audit_rows[index], index,
-                                     int(protocol["paired_seed_base"]), attempt_dir)
+                result = run_episode(
+                    env, policy, policy_rows[index], audit_rows[index], index,
+                    int(protocol["paired_seed_base"]), attempt_dir, repository_root,
+                )
                 atomic_json(attempt_dir / "episode.json", result)
                 attempts.append({"attempt": attempt, "status": "complete", "path": str(attempt_dir / "episode.json")})
                 final = result
@@ -575,11 +652,21 @@ def main() -> None:
         or int(row.get("first_success_step")) >= int(audit_rows[index]["difficulty"]["certified_lower_bound"])
         for index, row in zip(smoke, smoke_rows)
     )
-    smoke_pass = smoke_infra_ok and smoke_initial_rgb_ok and smoke_difficulty_ok
+    smoke_frozen_rgb_ok = all(
+        bool((row.get("initial_rgb_evidence") or {}).get("passed")) for row in smoke_rows
+    )
+    smoke_pass = (
+        smoke_infra_ok and smoke_initial_rgb_ok and smoke_frozen_rgb_ok and smoke_difficulty_ok
+    )
     atomic_json(args.output_dir / "smoke_summary.json", {
         "indices": smoke,
         "infrastructure_pass": smoke_infra_ok,
         "initial_rgb_structural_pass": smoke_initial_rgb_ok,
+        "frozen_official_initial_rgb_consistency_pass": smoke_frozen_rgb_ok,
+        "frozen_rgb_thresholds": {
+            "maximum_mae": FROZEN_RGB_MAX_MAE,
+            "maximum_p99_absolute_error": FROZEN_RGB_MAX_P99_ABS_ERROR,
+        },
         "certified_lower_bound_consistency_pass": smoke_difficulty_ok,
         "full_evaluation_allowed": smoke_pass,
         "rows": [{k: row.get(k) for k in (

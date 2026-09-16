@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-VERSION = "r1_canonical_dev_eval32_paired_summary_v2"
+VERSION = "r1_canonical_dev_eval32_paired_summary_v3_h1_rgb_checked"
 
 
 def sha256(path: Path) -> str:
@@ -33,6 +33,9 @@ def load_ledger(path: Path) -> dict[int, dict[str, Any]]:
     rows = {int(key): value for key, value in payload["episodes"].items()}
     if set(rows) != set(range(32)):
         raise ValueError(f"ledger is not closed 32/32: {path}, keys={sorted(rows)}")
+    incomplete = [index for index, row in rows.items() if row.get("status") != "complete"]
+    if incomplete:
+        raise ValueError(f"ledger contains incomplete episodes: {path}, indices={incomplete}")
     return rows
 
 
@@ -110,6 +113,12 @@ def main() -> None:
             "initial_prompt_fingerprint_match": (
                 p_initial_input["messages_fingerprint"] == v_initial_input["messages_fingerprint"]
             ),
+            "pretrained_frozen_initial_rgb_consistent": bool(
+                (p.get("initial_rgb_evidence") or {}).get("passed")
+            ),
+            "v46_frozen_initial_rgb_consistent": bool(
+                (v.get("initial_rgb_evidence") or {}).get("passed")
+            ),
             "pretrained_success": bool(p.get("success")),
             "v46_success": bool(v.get("success")),
             "pretrained_first_success_step": p.get("first_success_step"),
@@ -149,6 +158,12 @@ def main() -> None:
         "paired_input_checks": {
             "initial_image_sha_match": sum(row["initial_image_sha_match"] for row in paired),
             "initial_prompt_fingerprint_match": sum(row["initial_prompt_fingerprint_match"] for row in paired),
+            "pretrained_frozen_initial_rgb_consistent": sum(
+                row["pretrained_frozen_initial_rgb_consistent"] for row in paired
+            ),
+            "v46_frozen_initial_rgb_consistent": sum(
+                row["v46_frozen_initial_rgb_consistent"] for row in paired
+            ),
             "pretrained_lower_bound_consistent": sum(row["pretrained_lower_bound_consistent"] for row in paired),
             "v46_lower_bound_consistent": sum(row["v46_lower_bound_consistent"] for row in paired),
         },
