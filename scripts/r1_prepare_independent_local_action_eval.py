@@ -88,8 +88,10 @@ def path_from_actions(
 
 def local_candidates(
     item: dict[str, Any], constraints: SceneConstraints,
-    seed_cap: int, state_cap: int,
+    seed_cap: int, state_cap: int, reverse_depth_cap: int,
 ) -> tuple[dict[int, list[dict[str, Any]]], dict[str, Any]]:
+    if reverse_depth_cap != 2:
+        raise ValueError("independent local-state v1 implements the frozen reverse depth 2")
     scene = str(item["scene_id"])
     layout, _ = constraints.scene(scene)
     detector = constraints._collision_cache.get(scene)
@@ -148,6 +150,9 @@ def local_candidates(
                 rejection["not_exact_d1_or_d2"] += 1
                 continue
             distance = int(distance)
+            if len(candidates[distance]) >= state_cap:
+                rejection[f"d{distance}_candidate_cap_reached"] += 1
+                continue
             key = state_key(pose)
             if key in seen[distance]:
                 rejection["duplicate_state"] += 1
@@ -178,8 +183,6 @@ def local_candidates(
                 "terminal_metric": target_metric,
                 "terminal_layout": target_layout,
             })
-            if len(candidates[distance]) >= state_cap:
-                rejection[f"d{distance}_candidate_cap_reached"] += 1
         if all(len(candidates[d]) >= state_cap for d in (1, 2)):
             break
     return candidates, {
@@ -235,6 +238,7 @@ async def run(args: argparse.Namespace) -> None:
     budgets = scope["state_construction_budget"]
     seed_cap = int(budgets["success_seed_cap_per_source"])
     state_cap = int(budgets["candidate_state_cap_per_distance_per_source"])
+    reverse_depth_cap = int(budgets["reverse_predecessor_max_depth"])
     parent_target = int(scope["selection_rule"]["parent_target"])
     source_rows = {}
     for split, info in scope["sources"].items():
@@ -253,7 +257,9 @@ async def run(args: argparse.Namespace) -> None:
             continue
         item = source_rows[record["split"]][int(record["source_row_index"])]
         try:
-            candidates, details = local_candidates(item, constraints, seed_cap, state_cap)
+            candidates, details = local_candidates(
+                item, constraints, seed_cap, state_cap, reverse_depth_cap,
+            )
             row = {**record, "status": "geometry_complete", "details": details, "candidates": candidates}
         except Exception as error:
             row = {**record, "status": "implementation_error", "error": repr(error), "candidates": {"1": [], "2": []}}

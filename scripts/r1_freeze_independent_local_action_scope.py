@@ -163,6 +163,7 @@ def main() -> None:
         },
         "state_construction_budget": {
             "success_seed_cap_per_source": 12,
+            "reverse_predecessor_max_depth": 2,
             "candidate_state_cap_per_distance_per_source": 4,
             "formal_distance_complete_through_depth": 2,
             "target_yaw_offsets_deg": [0, -5, 5, -10, 10, -15, 15],
