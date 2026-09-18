@@ -1,0 +1,5342 @@
+{
+  "records": [
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2575,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2579,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2580,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2584,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2585,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2586,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2589,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2592,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2593,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2596,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2597,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2601,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2602,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2605,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2606,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2610,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2611,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2615,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2616,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2619,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2623,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2624,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2628,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2630,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2634,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2635,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2639,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2642,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2643,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2647,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2650,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2651,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2654,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2655,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2659,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2660,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2663,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2666,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2667,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2669,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2670,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2674,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2675,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2678,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2679,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2683,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2684,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2687,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2688,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2691,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2692,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2696,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2697,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2700,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2701,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2704,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2705,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2708,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2709,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2712,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2713,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2717,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2718,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2721,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2724,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2725,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2729,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2730,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2732,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2733,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2737,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2741,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2742,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2745,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2746,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2750,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2751,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2755,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2757,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2760,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2763,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2764,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2766,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2767,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2771,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2772,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2775,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2776,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2777,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2780,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2783,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2784,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2787,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2788,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2792,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0228_840300",
+      "source_row_index": 2793,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3019,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3020,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3024,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3028,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3029,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3033,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3034,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3038,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3039,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3043,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3044,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3048,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3049,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3052,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3056,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3057,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3060,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3064,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3067,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3068,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3071,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3072,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3076,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3077,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3081,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3084,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3085,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3089,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3093,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3094,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3096,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3097,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3099,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3100,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3103,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3104,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3107,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3108,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3111,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3112,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3114,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3115,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3117,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3118,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3121,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3125,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3128,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3132,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3133,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3135,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3139,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3141,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0238_840875",
+      "source_row_index": 3142,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3173,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3174,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3176,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3177,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3181,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3185,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3186,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3190,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3191,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3195,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3196,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3199,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3203,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3204,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3209,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3213,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3214,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3217,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3218,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3221,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3222,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3225,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3226,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3229,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3230,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3233,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3234,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3237,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3238,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3241,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3245,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3246,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3249,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3253,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3255,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3259,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3260,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3263,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3266,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3269,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3270,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3273,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3277,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0241_840879",
+      "source_row_index": 3278,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3640,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3641,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3644,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3646,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3649,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3652,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3653,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3657,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3658,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3662,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3663,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3666,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3670,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3674,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3678,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3679,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3683,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3684,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3687,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3688,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3691,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3692,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3696,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3697,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3700,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3704,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3708,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3709,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3712,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3713,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3716,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3719,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3720,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3723,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3724,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3728,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3729,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3732,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3733,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3736,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3737,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3739,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3740,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3743,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3746,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3747,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3750,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3753,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3754,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3757,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3758,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3762,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3763,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3766,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3767,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3769,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3772,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3773,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3776,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3777,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3780,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3781,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3785,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3789,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3792,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3796,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3799,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3802,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3806,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3807,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3809,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3810,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3813,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3816,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0245_841008",
+      "source_row_index": 3817,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4025,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4026,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4031,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4032,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4035,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4040,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4044,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4051,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4052,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4056,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4059,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4063,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4065,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4069,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4072,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4073,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4077,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4078,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4080,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4081,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4085,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4086,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4089,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4092,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4094,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4095,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4098,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4099,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4103,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4104,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4107,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4108,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4111,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4112,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4114,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4118,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4119,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4123,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4126,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4127,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4131,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4134,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4135,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4139,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4144,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4145,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4150,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4154,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4155,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4158,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4159,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4163,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4167,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4170,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4171,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4174,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4175,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4177,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4180,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4184,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4185,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4189,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4190,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4194,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4197,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4198,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4200,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4204,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4205,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0251_840828",
+      "source_row_index": 4208,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5005,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5008,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5012,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5013,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5017,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5020,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5024,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5025,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5028,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5029,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5033,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5034,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5038,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5039,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5043,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5044,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5047,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5048,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5052,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5055,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5059,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5063,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5064,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5068,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5069,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5072,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5073,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5077,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5081,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5084,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5088,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5089,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5092,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5093,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5096,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5099,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5102,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5106,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5107,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5110,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5111,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5115,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5116,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5120,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0263_840792",
+      "source_row_index": 5121,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6147,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6148,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6152,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6153,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6156,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6157,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6161,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6162,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6166,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6167,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6171,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6172,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6176,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6180,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6181,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6184,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6185,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6188,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6189,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6193,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6197,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6198,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6201,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6202,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6205,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6209,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6210,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6214,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6215,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6219,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6220,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6224,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6225,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6228,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6231,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6235,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6239,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6240,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6243,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6244,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6248,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6249,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6253,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6254,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6257,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6258,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6261,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6262,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6264,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6265,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6268,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6271,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6274,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6275,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6278,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6279,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6282,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0297_840578",
+      "source_row_index": 6283,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6579,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6584,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6589,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6594,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6595,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6599,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6600,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6605,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6606,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6610,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6611,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6616,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6617,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6620,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6621,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6626,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6627,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6631,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6632,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6635,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6636,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6640,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6641,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6645,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6646,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6649,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6653,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6655,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6658,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6660,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6667,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6668,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6672,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6673,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6677,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6678,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6682,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6683,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6686,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6687,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6691,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0303_840566",
+      "source_row_index": 6692,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6696,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6697,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6701,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6702,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6706,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6707,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6711,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6712,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6714,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6715,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6718,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6719,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6723,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6724,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6727,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6728,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6732,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6733,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6736,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6737,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6741,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6746,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6747,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6752,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6753,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6757,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6758,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6762,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6763,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6768,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6769,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6773,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6774,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6777,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6778,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6782,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6786,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6787,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6791,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6792,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6796,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6800,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6801,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6804,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6805,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6808,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6810,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6813,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6814,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0305_840555",
+      "source_row_index": 6818,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6903,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6907,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6908,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6912,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6913,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6915,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6918,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6919,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6921,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6924,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6925,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6929,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6933,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6936,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6940,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6941,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6944,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6947,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6949,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6953,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6954,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6958,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6959,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6963,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6965,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6966,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6970,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6974,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6978,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6979,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6983,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6984,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6987,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6988,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6992,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6993,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6997,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 6998,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7002,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7006,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7007,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7011,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7012,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7015,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7018,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7019,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7022,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7023,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7026,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7027,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7031,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7032,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7034,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7035,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7038,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7039,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7042,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7043,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "left",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7046,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    },
+    {
+      "relation": "right",
+      "requested_bucket": "medium",
+      "scene_id": "0309_840544",
+      "source_row_index": 7047,
+      "split": "train",
+      "task_id": null,
+      "task_type": "projective_relations"
+    }
+  ],
+  "version": "r1_clean_training_expansion_scope_v1"
+}

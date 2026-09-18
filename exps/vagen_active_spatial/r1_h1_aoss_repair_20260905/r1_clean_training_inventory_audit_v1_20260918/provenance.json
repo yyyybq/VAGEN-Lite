@@ -1,0 +1,23 @@
+{
+  "inputs": {
+    "canonical_eval_manifest": {
+      "path": "exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/frozen_input/development_regression_manifest.jsonl",
+      "sha256": "78a7a8f2a7c94bd0f007e89271f33d6a84ffa607a65e895613b43f8825b06b1d"
+    },
+    "local_action_parents": {
+      "path": "exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_independent_local_action_eval60_v3_20260916/frozen_input/parent_sources.jsonl",
+      "sha256": "4ab22b95f0e7dd8401eef1cdb1ad148cefaefe4bc7e876c795b0f2924c05dd6c"
+    },
+    "medium_inventory": {
+      "path": "exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_verified_medium_inventory_20260914/verified_medium_inventory.json",
+      "sha256": "3d048d1e7825a1656623d4203ae03d8f75dc6ea9af609c92a34c7a3ba0903cfd"
+    },
+    "path_first_aggregate": {
+      "path": "exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/path_first_canary10_v1/canary_aggregate.json",
+      "sha256": "8118beb0e4c54cb3b35ca8dc017240faf0725857d06c6d604992b9383cedcf47"
+    }
+  },
+  "local_action_policy": "evaluation_only; never a candidate input",
+  "selection": "one episode per source; certified Medium first, then episode fingerprint",
+  "version": "r1_clean_training_inventory_audit_v1"
+}

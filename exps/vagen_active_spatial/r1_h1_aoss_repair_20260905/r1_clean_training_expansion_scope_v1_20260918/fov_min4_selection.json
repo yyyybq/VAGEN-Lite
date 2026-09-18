@@ -1,0 +1,2300 @@
+{
+  "records": [
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2577,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2582,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2591,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2599,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2608,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2613,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2618,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2621,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2626,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2632,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2637,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2645,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2657,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2661,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2664,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2672,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2681,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2686,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2694,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2702,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2710,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2715,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2720,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2727,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2735,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2739,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2748,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2753,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2769,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2773,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2779,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2782,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2786,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0228_840300",
+      "source_row_index": 2790,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3022,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3026,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3031,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3036,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3041,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3046,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3054,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3059,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3062,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3074,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3079,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3087,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3091,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3101,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3105,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3123,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3127,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3130,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3134,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3137,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0238_840875",
+      "source_row_index": 3144,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3179,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3183,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3188,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3193,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3206,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3211,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3219,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3223,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3227,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3239,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3243,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3251,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3257,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3262,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3265,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3272,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3275,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0241_840879",
+      "source_row_index": 3280,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3643,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3655,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3660,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3665,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3668,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3672,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3676,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3681,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3685,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3694,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3698,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3702,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3706,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3715,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3722,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3726,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3730,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3734,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3741,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3755,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3760,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3765,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3771,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3783,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3787,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3791,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3794,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3801,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3804,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3812,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3815,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0245_841008",
+      "source_row_index": 3819,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4028,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4037,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4046,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4049,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4054,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4061,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4067,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4071,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4075,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4083,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4087,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4091,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4101,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4105,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4109,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4116,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4121,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4129,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4137,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4141,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4147,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4161,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4165,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4182,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4187,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4192,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4202,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0251_840828",
+      "source_row_index": 4207,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5007,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5010,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5015,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5019,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5022,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5026,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5031,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5036,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5041,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5046,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5050,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5057,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5061,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5066,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5075,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5079,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5083,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5086,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5090,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5104,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5113,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5118,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0263_840792",
+      "source_row_index": 5123,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6150,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6154,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6159,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6164,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6169,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6174,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6178,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6191,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6195,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6204,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6207,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6212,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6217,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6222,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6233,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6237,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6246,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6251,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6260,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6270,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6273,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6277,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6281,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0297_840578",
+      "source_row_index": 6285,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6581,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6586,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6591,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6602,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6613,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6623,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6629,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6638,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6643,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6648,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6651,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6657,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6662,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6665,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6670,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6675,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6680,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6689,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0303_840566",
+      "source_row_index": 6694,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6699,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6704,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6709,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6716,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6721,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6725,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6730,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6739,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6743,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6749,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6754,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6759,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6765,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6771,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6775,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6780,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6784,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6789,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6794,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6798,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6807,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6816,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0305_840555",
+      "source_row_index": 6820,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6905,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6910,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6917,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6927,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6931,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6938,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6946,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6951,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6956,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6961,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6968,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6972,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6976,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6981,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6985,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6990,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 6995,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7000,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7004,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7009,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7014,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7021,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7029,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7036,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7040,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7044,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7051,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7053,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7063,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7066,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7068,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7071,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    },
+    {
+      "relation": null,
+      "requested_bucket": "fov_min4",
+      "scene_id": "0309_840544",
+      "source_row_index": 7076,
+      "split": "train",
+      "task_id": null,
+      "task_type": "fov_inclusion"
+    }
+  ],
+  "version": "r1_clean_training_expansion_scope_v1"
+}

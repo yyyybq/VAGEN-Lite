@@ -1,0 +1,101 @@
+{
+  "counts": {
+    "fov_inclusion": 255,
+    "projective_relations": 593,
+    "scene_task": {
+      "0228_840300:fov_inclusion": 34,
+      "0228_840300:projective_relations": 96,
+      "0238_840875:fov_inclusion": 21,
+      "0238_840875:projective_relations": 53,
+      "0241_840879:fov_inclusion": 18,
+      "0241_840879:projective_relations": 44,
+      "0245_841008:fov_inclusion": 32,
+      "0245_841008:projective_relations": 75,
+      "0251_840828:fov_inclusion": 28,
+      "0251_840828:projective_relations": 70,
+      "0263_840792:fov_inclusion": 23,
+      "0263_840792:projective_relations": 45,
+      "0297_840578:fov_inclusion": 24,
+      "0297_840578:projective_relations": 58,
+      "0303_840566:fov_inclusion": 19,
+      "0303_840566:projective_relations": 42,
+      "0305_840555:fov_inclusion": 23,
+      "0305_840555:projective_relations": 50,
+      "0309_840544:fov_inclusion": 33,
+      "0309_840544:projective_relations": 60
+    },
+    "total": 848
+  },
+  "exclusions": {
+    "ambiguous_collision_scenes": [
+      "0059_839917",
+      "0265_840795",
+      "0270_840784",
+      "0314_840535",
+      "0328_840489",
+      "0349_840373"
+    ],
+    "existing_verified_train_scenes": [
+      "0011_840866",
+      "0012_840878",
+      "0014_841007",
+      "0015_840888",
+      "0016_840873",
+      "0019_840447",
+      "0020_840256",
+      "0226_840298",
+      "0267_840790",
+      "0300_840573",
+      "0361_840315"
+    ],
+    "permanent_local_action_eval_scenes": [
+      "0057_839904",
+      "0244_841000",
+      "0248_840834",
+      "0257_840812",
+      "0260_840805",
+      "0306_840556",
+      "0308_840552",
+      "0323_840504",
+      "0325_840494",
+      "0333_840470"
+    ]
+  },
+  "inputs": {
+    "development_eval": {
+      "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/frozen_input/development_regression_manifest.jsonl",
+      "sha256": "78a7a8f2a7c94bd0f007e89271f33d6a84ffa607a65e895613b43f8825b06b1d"
+    },
+    "local_action_parents": {
+      "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_independent_local_action_eval60_v3_20260916/frozen_input/parent_sources.jsonl",
+      "sha256": "4ab22b95f0e7dd8401eef1cdb1ad148cefaefe4bc7e876c795b0f2924c05dd6c"
+    },
+    "train": {
+      "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/v46_baseline_qwen25vl_7b/train_filtered.jsonl",
+      "sha256": "3421a21ee9ac9c7489f672c3baa82d4c41df7e60adaf400fdef3409e30d45e20"
+    },
+    "verified_train": {
+      "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_clean_training_inventory_audit_v1_20260918/verified_train_source_inventory.jsonl",
+      "sha256": "22d121f3d397295fd59a0bd83d80b600c273be91e4997d55403d23f40834678a"
+    }
+  },
+  "policy": {
+    "local_action_evaluation": "permanent_evaluation_only_exclusion",
+    "replacement_projective": false,
+    "same_pair_projective_only": true,
+    "scene_selection": "top deterministic train Projective+FOV counts after frozen exclusions"
+  },
+  "scenes": [
+    "0228_840300",
+    "0245_841008",
+    "0251_840828",
+    "0309_840544",
+    "0297_840578",
+    "0238_840875",
+    "0305_840555",
+    "0263_840792",
+    "0241_840879",
+    "0303_840566"
+  ],
+  "version": "r1_clean_training_expansion_scope_v1"
+}

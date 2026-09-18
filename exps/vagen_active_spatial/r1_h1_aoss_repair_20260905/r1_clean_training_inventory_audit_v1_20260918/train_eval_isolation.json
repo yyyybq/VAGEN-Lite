@@ -1,0 +1,20 @@
+{
+  "canonical_development_eval": {
+    "scene_overlap": [
+      "0014_841007",
+      "0226_840298",
+      "0361_840315"
+    ],
+    "scenes": 7,
+    "source_overlap": [],
+    "sources": 32
+  },
+  "independent_local_action_evaluation": {
+    "policy": "permanent_evaluation_only_exclusion",
+    "scene_overlap": [],
+    "scenes": 10,
+    "source_overlap": [],
+    "sources": 60
+  },
+  "version": "r1_clean_training_inventory_audit_v1"
+}

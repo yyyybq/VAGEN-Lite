@@ -1,0 +1,24 @@
+{
+  "criteria_version": "r1_canonical_eval_train_pilot_design_20260914",
+  "observed": {
+    "left_sources": 74,
+    "max_category_pair_fraction": 0.375886524822695,
+    "right_sources": 67,
+    "scenes": 11,
+    "step4_episodes": 63,
+    "step5_episodes": 21,
+    "step6_episodes": 1,
+    "unique_train_sources": 141
+  },
+  "passed": false,
+  "required": {
+    "left_sources": 80,
+    "max_category_pair_fraction": 0.35,
+    "right_sources": 80,
+    "scenes": 20,
+    "step4_episodes": 40,
+    "step5_episodes": 40,
+    "step6_episodes": 40,
+    "unique_train_sources": 200
+  }
+}

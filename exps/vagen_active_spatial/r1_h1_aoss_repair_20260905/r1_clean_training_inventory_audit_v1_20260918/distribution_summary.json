@@ -1,0 +1,89 @@
+{
+  "category_pairs": {
+    "armchair--placemat": 3,
+    "armchair--teatable": 2,
+    "bar counter--person": 3,
+    "bar counter--wall cabinet": 7,
+    "bed--bookshelf": 4,
+    "bed--dresser": 3,
+    "bed--storage cabinet": 3,
+    "bed--wardrobe": 53,
+    "blanket--teatable": 2,
+    "blanket--wardrobe": 4,
+    "chair--display cabinet": 5,
+    "decorative painting--massage chair": 3,
+    "dining table--multi person sofa": 3,
+    "flowers--plant": 1,
+    "flowers--table": 2,
+    "massage chair--tv cabinet": 7,
+    "multi person sofa--person": 1,
+    "multi person sofa--sideboards": 3,
+    "multi person sofa--teatable": 2,
+    "niche--shower head": 1,
+    "person--storage rack": 1,
+    "person--vertical air conditioning": 5,
+    "plant--storage cabinet": 1,
+    "plant--vertical air conditioning": 1,
+    "quilt--wardrobe": 3,
+    "sofa--teatable": 3,
+    "sofa--wardrobe": 2,
+    "stairs--wardrobe": 1,
+    "stool--teatable": 3,
+    "teatable--tv cabinet": 8,
+    "tv cabinet--wardrobe": 1
+  },
+  "certificate_upper_bounds": {
+    "1": 18,
+    "2": 13,
+    "3": 13,
+    "4": 63,
+    "5": 21,
+    "6": 1,
+    "7": 2,
+    "8": 2,
+    "9": 2,
+    "10": 1,
+    "11": 1,
+    "12": 4
+  },
+  "episodes": 141,
+  "evidence_classes": {
+    "medium_lower_bound_runtime_rgb_verified": 64,
+    "path_first_runtime_rgb_verified": 77
+  },
+  "first_success_steps": {
+    "1": 18,
+    "2": 13,
+    "3": 13,
+    "4": 63,
+    "5": 21,
+    "6": 1,
+    "7": 2,
+    "8": 2,
+    "9": 2,
+    "10": 1,
+    "11": 1,
+    "12": 4
+  },
+  "relations": {
+    "left": 74,
+    "right": 67
+  },
+  "scenes": {
+    "0011_840866": 5,
+    "0012_840878": 7,
+    "0014_841007": 27,
+    "0015_840888": 2,
+    "0016_840873": 3,
+    "0019_840447": 6,
+    "0020_840256": 3,
+    "0226_840298": 45,
+    "0267_840790": 27,
+    "0300_840573": 15,
+    "0361_840315": 1
+  },
+  "sources": 141,
+  "tasks": {
+    "projective_relations": 141
+  }
+}
