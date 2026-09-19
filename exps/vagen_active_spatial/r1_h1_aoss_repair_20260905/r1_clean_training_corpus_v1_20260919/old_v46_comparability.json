@@ -1,0 +1,28 @@
+{
+  "clean_rows": 5889,
+  "clean_task_counts": {
+    "absolute_positioning": 2003,
+    "equidistance": 1770,
+    "fov_inclusion": 12,
+    "occlusion_alignment": 1875,
+    "projective_relations": 229
+  },
+  "old_task_counts": {
+    "absolute_positioning": 2003,
+    "equidistance": 1770,
+    "fov_inclusion": 1503,
+    "occlusion_alignment": 1875,
+    "projective_relations": 2003
+  },
+  "old_v46_rows": 9154,
+  "target_task_retention_fraction": {
+    "fov_inclusion": 0.007984031936127744,
+    "projective_relations": 0.11432850723914129
+  },
+  "unchanged_noncanonical_rows": 5648,
+  "verified_repaired_task_counts": {
+    "fov_inclusion": 12,
+    "projective_relations": 229
+  },
+  "warning": "Minimal-pilot PASS does not prove old-v46 task-mixture parity; no duplicated rows or reweighting are used."
+}

@@ -1,0 +1,22 @@
+{
+  "inputs": {
+    "base_audit": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_clean_training_inventory_audit_v1_20260918",
+    "canonical_eval": {
+      "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/frozen_input/development_regression_manifest.jsonl",
+      "sha256": "78a7a8f2a7c94bd0f007e89271f33d6a84ffa607a65e895613b43f8825b06b1d"
+    },
+    "expansion": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_clean_training_expansion_v1_20260918",
+    "local_action_parents": {
+      "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_independent_local_action_eval60_v3_20260916/frozen_input/parent_sources.jsonl",
+      "sha256": "4ab22b95f0e7dd8401eef1cdb1ad148cefaefe4bc7e876c795b0f2924c05dd6c"
+    },
+    "old_v46_train": {
+      "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/v46_baseline_qwen25vl_7b/train_filtered.jsonl",
+      "sha256": "3421a21ee9ac9c7489f672c3baa82d4c41df7e60adaf400fdef3409e30d45e20"
+    }
+  },
+  "local_action_policy": "permanent evaluation-only exclusion",
+  "non_target_policy": "copied byte-semantic rows from old v46 train manifest; original target rows excluded",
+  "selection": "one independently runtime/RGB-verified episode per original train source",
+  "version": "r1_clean_training_corpus_v1"
+}
