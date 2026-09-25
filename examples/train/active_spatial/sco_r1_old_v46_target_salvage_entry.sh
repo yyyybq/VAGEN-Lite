@@ -93,12 +93,15 @@ for scene in sorted(by_scene):
     projective = [str(r['source_row_index']) for r in by_scene[scene] if r['task_type'] == 'projective_relations']
     fov_count = sum(r['task_type'] == 'fov_inclusion' for r in by_scene[scene])
     smoke_index = min(int(r['source_row_index']) for r in by_scene[scene])
-    print(f"{scene}\t{','.join(projective)}\t{fov_count}\t{smoke_index}")
+    # A scene can be FOV-only.  Do not use a whitespace IFS delimiter here:
+    # Bash coalesces adjacent whitespace delimiters and would shift fov_count
+    # into projective_indices, leaving smoke_index empty for such a scene.
+    print(f"{scene}|{','.join(projective)}|{fov_count}|{smoke_index}")
 PY
 )
 
 for scene_row in "${scene_rows[@]}"; do
-  IFS=$'\t' read -r scene projective_indices fov_count smoke_index <<< "${scene_row}"
+  IFS='|' read -r scene projective_indices fov_count smoke_index <<< "${scene_row}"
   scene_evidence="${RUN}/scene_evidence/${scene}.json"
   # Evidence is written before cleanup.  A resumed job therefore does not
   # redownload a safely completed scene merely to rediscover the same shard.
