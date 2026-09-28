@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -128,6 +129,8 @@ def main() -> None:
             atomic_json(args.ledger, ledger)
             print(json.dumps({"position": position, "total": len(train_scenes), "scene_id": scene, "status": "resume_ready"}), flush=True)
             continue
+        if ready.exists():
+            raise RuntimeError(f"existing metadata cache is invalid; refusing overwrite: {ready}")
         staging = Path(tempfile.mkdtemp(prefix=f"{scene}.", dir=staging_root))
         try:
             for name in FILES:
@@ -148,9 +151,7 @@ def main() -> None:
             raise
         finally:
             if staging.exists():
-                for path in staging.iterdir():
-                    path.unlink()
-                staging.rmdir()
+                shutil.rmtree(staging)
         atomic_json(args.ledger, ledger)
         print(json.dumps({"position": position, "total": len(train_scenes), "scene_id": scene, "status": "ready"}), flush=True)
     ledger["completed_utc"] = datetime.now(timezone.utc).isoformat()
