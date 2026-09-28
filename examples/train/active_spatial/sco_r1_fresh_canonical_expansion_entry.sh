@@ -6,8 +6,8 @@ set -euo pipefail
 ROOT=/mnt/umm/users/yinbaiqiao/VAGEN-Lite
 PY=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python
 BASE=${ROOT}/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905
-SCOPE=${BASE}/r1_fullscale_canonical_expansion_scope_v1_20260928
-RUN=${BASE}/r1_fullscale_canonical_expansion_phase_a_v1_20260928
+SCOPE=${R1_FRESH_EXPANSION_SCOPE:-${BASE}/r1_fullscale_canonical_expansion_scope_v1_20260928}
+RUN=${R1_FRESH_EXPANSION_RUN:-${BASE}/r1_fullscale_canonical_expansion_phase_a_v1_20260928}
 ARCHIVE=${R1_FRESH_EXPANSION_CODE_ARCHIVE:?required}
 EXPECTED_ARCHIVE_SHA=${R1_FRESH_EXPANSION_CODE_ARCHIVE_SHA256:?required}
 EXPECTED_COMMIT=${R1_FRESH_EXPANSION_COMMIT:?required}
