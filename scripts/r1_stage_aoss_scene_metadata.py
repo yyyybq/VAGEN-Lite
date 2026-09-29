@@ -24,6 +24,7 @@ from typing import Any
 VERSION = "r1_aoss_scene_metadata_stage_v1_20260928"
 AMBIGUOUS = {"0059_839917", "0265_840795", "0270_840784", "0314_840535", "0328_840489", "0349_840373"}
 FILES = ("labels.json", "structure.json")
+METADATA_INCLUDE_PATTERN = r"(labels\.json|structure\.json)$"
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -60,6 +61,39 @@ def credentials(path: Path) -> tuple[str, str]:
 def redact(value: str, access: str, secret: str) -> str:
     value = value.replace(access, "<redacted>").replace(secret, "<redacted>")
     return re.sub(r"s3://[^/@:\s]+:[^/@\s]+@", "s3://<redacted>@", value)
+
+
+def metadata_sync_command(
+    ads_cli: Path,
+    source_dir: str,
+    destination_dir: Path,
+    *,
+    threads: int = 2,
+    listers: int = 1,
+) -> list[str]:
+    """Build the metadata-only ads-cli sync command.
+
+    ads-cli v1.9 requires directory copies to use trailing slashes on both
+    operands.  The include regex keeps this operation metadata-only instead of
+    staging the complete InteriorGS scene.
+    """
+    return [
+        str(ads_cli),
+        "--quiet",
+        "--threads",
+        str(threads),
+        "--listers",
+        str(listers),
+        "--conntimeout",
+        "60",
+        "--timeout",
+        "300",
+        "--include",
+        METADATA_INCLUDE_PATTERN,
+        "sync",
+        source_dir.rstrip("/") + "/",
+        str(destination_dir).rstrip("/") + "/",
+    ]
 
 
 def validate(scene_dir: Path) -> dict[str, Any]:
@@ -133,13 +167,12 @@ def main() -> None:
             raise RuntimeError(f"existing metadata cache is invalid; refusing overwrite: {ready}")
         staging = Path(tempfile.mkdtemp(prefix=f"{scene}.", dir=staging_root))
         try:
-            for name in FILES:
-                source = f"s3://{access}:{secret}@{args.bucket}.{args.endpoint}/{args.prefix.strip('/')}/{scene}/{name}"
-                command = [str(args.ads_cli), "--quiet", "--threads", "2", "--listers", "1", "--conntimeout", "60", "--timeout", "300", "cp", source, str(staging / name)]
-                completed = subprocess.run(command, capture_output=True, text=True, timeout=args.process_timeout, check=False)
-                if completed.returncode:
-                    safe = redact(completed.stdout + completed.stderr, access, secret)[-2000:]
-                    raise RuntimeError(f"AOSS copy failed for {scene}/{name}: rc={completed.returncode}: {safe}")
+            source = f"s3://{access}:{secret}@{args.bucket}.{args.endpoint}/{args.prefix.strip('/')}/{scene}/"
+            command = metadata_sync_command(args.ads_cli, source, staging)
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=args.process_timeout, check=False)
+            if completed.returncode:
+                safe = redact(completed.stdout + completed.stderr, access, secret)[-2000:]
+                raise RuntimeError(f"AOSS metadata sync failed for {scene}: rc={completed.returncode}: {safe}")
             result = validate(staging)
             if result["status"] != "valid":
                 raise RuntimeError(f"metadata validation failed for {scene}: {result['errors']}")
