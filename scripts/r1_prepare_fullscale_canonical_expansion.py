@@ -10,6 +10,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from r1_projective_request_schema import half_plane_geometry, validate_projective_params
+
 VERSION="r1_fullscale_canonical_expansion_scope_v1_20260928"
 TARGETS={"projective_relations","fov_inclusion"}
 AMBIGUOUS={"0059_839917","0265_840795","0270_840784","0314_840535","0328_840489","0349_840373"}
@@ -36,7 +38,9 @@ def rank(x): return hashlib.sha256('|'.join(map(str,x)).encode()).hexdigest()
 def template(parent:dict, index:int, task:str, relation:str|None):
  ob=[dict(o) for o in parent['target_object']['objects'][:2]]; a,b=center(ob[0]),center(ob[1]); mid=[(a[i]+b[i])/2 for i in range(3)]
  params={'object_a_center':a,'object_b_center':b,'min_distance':0.5,'sample_distance':max(1.,math.dist(a,b))}
- if task=='projective_relations': params['relation']=relation
+ if task=='projective_relations':
+  params.update({'relation':relation, **half_plane_geometry(a,b,str(relation))})
+  validate_projective_params(params)
  else: params.update({'fov_horizontal':110.0,'fov_margin':0.05,'min_radius':0.5,'max_radius':8.0})
  out={'task_id':f'r1_fresh_{task}_{index:06d}', 'task_type':task,'scene_id':parent['scene_id'],'init_camera':parent['init_camera'],
       'target_object':{'objects':ob,'primary':ob[0]},'target_region':{'type':'half_plane' if task=='projective_relations' else 'annulus','params':params,'sample_point':[mid[0],mid[1],1.5],'sample_forward':[0.,1.,0.],'height':1.5},

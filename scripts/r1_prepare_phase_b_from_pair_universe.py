@@ -11,6 +11,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from r1_projective_request_schema import half_plane_geometry, validate_projective_params
+
 
 VERSION = "r1_fullscale_canonical_expansion_phase_b_scope_v1_20260928"
 
@@ -56,6 +58,8 @@ def template(pair: dict[str, Any], camera: dict[str, Any], task: str, index: int
                               "sample_distance": max(1.0, math.dist(a, b))}
     if task == "projective_relations":
         params["relation"] = relation
+        params.update(half_plane_geometry(a, b, str(relation)))
+        validate_projective_params(params)
     else:
         params.update({"fov_horizontal": 110.0, "fov_margin": 0.05, "min_radius": 0.5, "max_radius": 8.0})
     return {
