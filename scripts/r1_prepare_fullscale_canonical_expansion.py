@@ -12,7 +12,7 @@ from typing import Any
 
 from r1_projective_request_schema import half_plane_geometry, validate_projective_params
 
-VERSION="r1_fullscale_canonical_expansion_scope_v1_20260928"
+VERSION="r1_fullscale_canonical_expansion_scope_v2_schema_20260930"
 TARGETS={"projective_relations","fov_inclusion"}
 AMBIGUOUS={"0059_839917","0265_840795","0270_840784","0314_840535","0328_840489","0349_840373"}
 

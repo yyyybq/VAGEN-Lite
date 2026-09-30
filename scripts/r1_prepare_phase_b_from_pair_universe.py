@@ -14,7 +14,7 @@ from typing import Any
 from r1_projective_request_schema import half_plane_geometry, validate_projective_params
 
 
-VERSION = "r1_fullscale_canonical_expansion_phase_b_scope_v1_20260928"
+VERSION = "r1_fullscale_canonical_expansion_phase_b_scope_v2_schema_20260930"
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
