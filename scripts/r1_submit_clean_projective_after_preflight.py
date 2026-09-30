@@ -17,7 +17,7 @@ from pathlib import Path
 SCO='/mnt/umm/users/yinbaiqiao/.sco/bin/sco'
 RUN=Path('/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0')
 FROZEN=RUN/'frozen_v1'
-PACKAGE=RUN/'package_v2'
+PACKAGE=RUN/'package_v3'
 def now():return datetime.now(timezone.utc).isoformat()
 def save(p,r):
     tmp=p.with_suffix('.tmp');tmp.write_text(json.dumps(r,indent=2)+'\n');tmp.replace(p)

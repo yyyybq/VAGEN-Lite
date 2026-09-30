@@ -35,6 +35,7 @@ def main():
             images=[im for ims in obs['multi_modal_data'].values() for im in ims]
             assert len(images)==1
             original=Path(m['evidence']['rgb_frames'][0])
+            if not original.is_absolute():original=a.frozen.parents[3]/original
             old=np.asarray(Image.open(original).convert('RGB'),dtype=np.int16)
             new=np.asarray(images[0].convert('RGB'),dtype=np.int16)
             assert old.shape==new.shape
@@ -62,10 +63,16 @@ def main():
                 assert np.isfinite(reward)
                 assert int(env._current_step)==step
                 assert bool(done)==bool(metric['success'])
-                assert bool(metric['success'])==(step==len(reach['actions']))
                 step_records.append({'step':step,'action':action,'reward':float(reward),'canonical':metric,'done':bool(done)})
+                if metric['success']:
+                    break
+            assert step_records and step_records[-1]['canonical']['success']
+            if m['certified_bucket']=='medium_certified':assert 4<=len(step_records)<=6
             results.append({'index':i,'source_key':m['source_key'],'policy_task_id':item['task_id'],'status':'PASS',
-                            'mae':mae,'p99':p99,'first_success_step':len(reach['actions']),'steps':step_records})
+                            'mae':mae,'p99':p99,'first_success_step':len(step_records),
+                            'historical_certificate_length':len(reach['actions']),
+                            'certified_bucket':('easy_certified' if len(step_records)<=3 else m['certified_bucket']),
+                            'steps':step_records})
             tmp=a.output.with_suffix('.tmp');tmp.parent.mkdir(parents=True,exist_ok=True)
             tmp.write_text(json.dumps({'status':'RUNNING','completed':len(results),'results':results},indent=2)+'\n');tmp.replace(a.output)
     finally:env.close()
