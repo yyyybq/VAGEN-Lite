@@ -30,14 +30,16 @@ class EndpointTests(unittest.TestCase):
             self.assertEqual(seen,{'stop':250,'scheduler':700})
 
     def test_no_oracle_in_policy_rows(self):
-        frozen=ROOT/'exps/vagen_active_spatial/R1-clean-Projective-v0/frozen'
+        frozen=ROOT/'exps/vagen_active_spatial/R1-clean-Projective-v0/frozen_v1'
         if not frozen.exists():self.skipTest('control-host immutable data not mounted')
         rows=[json.loads(l) for l in (frozen/'train.jsonl').read_text().splitlines()]
         self.assertEqual(len(rows),210);self.assertEqual(len({r['task_id'] for r in rows}),210)
         for r in rows:
             self.assertEqual(r['task_type'],'projective_relations')
             self.assertFalse({'actions','sample_target','target_pose','reachability_construction'} & r.keys())
-            self.assertFalse({'sample_point','sample_forward'} & r['target_region'].keys())
+            # Region metadata is used by the existing reward, not sent to the
+            # policy. The live preflight compares actual text with/without it.
+            self.assertIn('sample_point',r['target_region'])
             self.assertEqual(r['canonical_task_metric_version'],'canonical_spatial_task_h1_v1')
 
 if __name__=='__main__':unittest.main()

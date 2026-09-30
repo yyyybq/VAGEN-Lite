@@ -2,14 +2,17 @@
 """Replay audit certificates through the exact policy manifest and PPO env."""
 import argparse
 import json
+import copy
+import os
+from dataclasses import fields
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image
+from omegaconf import OmegaConf
 from r1_reconcile_expansion_inventory import read, evidence, digest
-from r1_run_canonical_dev_eval32 import env_config
 from vagen.envs.active_spatial.env import ActiveSpatialEnv
+from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
 
 
 def main():
@@ -17,7 +20,11 @@ def main():
     p.add_argument('--gs-root',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
     items=read(a.frozen/'train.jsonl');audits=read(a.frozen/'audit_only.jsonl')
     assert len(items)==len(audits)==210
-    config=env_config(SimpleNamespace(renderer_url=a.renderer_url,gs_root=a.gs_root),a.frozen/'train.jsonl')
+    os.environ['R1_RENDER_URL']=a.renderer_url
+    raw=OmegaConf.to_container(OmegaConf.load(a.frozen/'train.yaml'),resolve=True)['envs'][0]['config']
+    assert raw['gs_root']==str(a.gs_root) and raw['jsonl_path']==str(a.frozen/'train.jsonl')
+    keys={f.name for f in fields(ActiveSpatialEnvConfig)}
+    config=ActiveSpatialEnvConfig(**{k:v for k,v in raw.items() if k in keys})
     env=ActiveSpatialEnv(config);results=[]
     try:
         for i in sorted(range(len(items)),key=lambda n:(items[n]['scene_id'],n)):
@@ -34,6 +41,16 @@ def main():
             error=np.abs(old-new);mae=float(error.mean());p99=float(np.quantile(error,.99))
             assert mae<=.5 and p99<=2,(i,'initial RGB mismatch',mae,p99)
             assert 'Distance to target:' not in str(obs)
+            # Prove environment-only sampled terminal metadata does not alter
+            # the actual policy text. Preserve it for the original reward.
+            original_item=env.current_item
+            sanitized=copy.deepcopy(original_item)
+            for key in ('sample_point','sample_forward','height'):
+                sanitized['target_region'].pop(key,None)
+            env.current_item=sanitized
+            stripped_obs=env._build_observation_from_image(images[0],init_obs=True,task_prompt=env._build_task_prompt(sanitized))
+            env.current_item=original_item
+            assert stripped_obs['obs_str']==obs['obs_str'],(i,'terminal metadata leaked into policy text')
             reach,_=evidence(m['evidence']['reachability'],m['task_id'])
             step_records=[]
             for step,action in enumerate(reach['actions'],1):

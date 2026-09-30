@@ -16,6 +16,8 @@ from pathlib import Path
 
 SCO='/mnt/umm/users/yinbaiqiao/.sco/bin/sco'
 RUN=Path('/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0')
+FROZEN=RUN/'frozen_v1'
+PACKAGE=RUN/'package_v2'
 def now():return datetime.now(timezone.utc).isoformat()
 def save(p,r):
     tmp=p.with_suffix('.tmp');tmp.write_text(json.dumps(r,indent=2)+'\n');tmp.replace(p)
@@ -45,15 +47,15 @@ def main():
             save(out/'status.json',{'status':'WAITING_FOR_RUNTIME_PREFLIGHT','utc':now(),'renderer_job':a.renderer_job,'job_state':job['state']})
             time.sleep(30)
         else:raise TimeoutError('bounded control wait expired; no training submitted')
-        assert report['manifest_sha256']==hashlib.sha256((RUN/'frozen/train.jsonl').read_bytes()).hexdigest()
-        subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=RUN/'frozen',check=True)
-        subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=RUN/'package',check=True)
+        assert report['manifest_sha256']==hashlib.sha256((FROZEN/'train.jsonl').read_bytes()).hexdigest()
+        subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=FROZEN,check=True)
+        subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=PACKAGE,check=True)
         command=[SCO,'acp','jobs','create','--workspace-name=aigc','--aec2-name=zoetrope',
           '--job-name=R1-clean-Projective-v0-250','--priority=HIGHEST','--quota-type=reserved',
           '--container-image-url=registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617',
           '--storage-mount=019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm',
           '--training-framework=pytorch','--worker-nodes=1','--worker-spec=N4lS.Iq.I80.8',
-          '--command=bash '+str(RUN/'package/launch_training.sh')]
+          '--command=bash '+str(PACKAGE/'launch_training.sh')]
         intent={'utc':now(),'command':command,'renderer_job':a.renderer_job,
                 'runtime_preflight_sha256':hashlib.sha256(gate.read_bytes()).hexdigest(),
                 'formal_requires':'PPO smoke actual update + checkpoint load PASS; fresh pretrained process',

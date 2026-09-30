@@ -7,8 +7,8 @@ import re
 from pathlib import Path
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--run',type=Path,required=True);a=p.parse_args()
-    smoke=a.run/'smoke';cfg=json.loads((a.run/'frozen/data_gate.json').read_text())
+    p=argparse.ArgumentParser();p.add_argument('--run',type=Path,required=True);p.add_argument('--frozen',type=Path,required=True);a=p.parse_args()
+    smoke=a.run/'smoke';cfg=json.loads((a.frozen/'data_gate.json').read_text())
     reload=json.loads((smoke/'checkpoint_reload.json').read_text())
     assert reload['checkpoint_save_and_load']=='PASS'
     text=(smoke/'train.log').read_text(errors='replace')

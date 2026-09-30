@@ -15,11 +15,12 @@ from r1_reconcile_expansion_inventory import digest, evidence, fingerprint, read
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--root', type=Path, required=True)
+    p.add_argument('--freeze-name', default='frozen_v1')
     a = p.parse_args()
     root = a.root.resolve()
     b = root/'exps/vagen_active_spatial/r1_h1_aoss_repair_20260905'
     run = root/'exps/vagen_active_spatial/R1-clean-Projective-v0'
-    final = run/'frozen'
+    final = run/a.freeze_name
     assert not final.exists(), 'v0 is immutable; refuse to refreeze'
     inventory = b/'r1_reconciled_inventory_v2_20260930'
     manifest = inventory/'projective_train_ready_inventory.jsonl'
@@ -51,12 +52,12 @@ def main():
         assert differing <= {'collision_convention','source_identity','reachability_construction','camera_model_version','canonical_task_metric_version'}, differing
         assert candidate['init_camera']['extrinsics']==reach['path'][0]['c2w']
         assert len(reach['actions'])==runtime['steps'] and 1<=runtime['steps']<=12
-        # Sampled terminal and certificates are audit-only. The formal scorer
-        # needs the region definition and object geometry, not a chosen target.
+        # Preserve the historical environment-internal region metadata:
+        # visibility reward reads sample_point. It is NOT policy input; the
+        # observation interface exposes current RGB/task/pose only, with the
+        # terminal distance hint disabled. Actions/planner remain audit-only.
         keep=('task_type','scene_id','init_camera','target_object','target_region','task_description','preset','object_label','canonical_task_metric_version')
         row={k:copy.deepcopy(candidate[k]) for k in keep if k in candidate}
-        for k in ('sample_point','sample_forward','height'):
-            row['target_region'].pop(k,None)
         row['camera_model_version']='canonical_h1_from_frozen_candidate_intrinsics_and_pose'
         assert rgb['frames'][0]['canonical_metric']['metric_version']=='canonical_spatial_task_h1_v1'
         row['canonical_task_metric_version']='canonical_spatial_task_h1_v1'
@@ -125,6 +126,7 @@ def main():
     js('recipe_differences.json',{'resolved_config_changes':changes,
        'environment_changes':{'data':'Projective-only 210 immutable unique episodes','distance_hint':False,'primitive_action_cap':12,
          'camera_metric':'frozen canonical H1 runtime','sampling':'explicit one seed per unique row; shuffled across epochs; n=4 trajectories unchanged'},
+       'internal_region_metadata':'sample_point/sample_forward/height retained to preserve old reward inputs; never serialized as new policy observation',
        'loop_stop_step':250,'scheduler_horizon':700,'smoke_only_changes':{'critic_warmup':0,'stop_step':1,'save_freq':1,'evaluation':False},
        'formal_actor_updates_expected':191,'interpretation':'support-subset system/data repair experiment, not size-matched multitask v46 reproduction'})
     summary={'experiment':'R1-clean-Projective-v0','episodes':210,'retained_source_lineages':len({r['source_key'] for r in records}),

@@ -4,10 +4,12 @@ set -euo pipefail
 [[ $(id -u) == 20325 && $(id -g) == 20325 ]] || { echo incorrect_artifact_owner; exit 3; }
 MODE=${1:?renderer or training}
 RUN=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0
+FROZEN=${R1_FROZEN_DIR:?required}
+PACKAGE=${R1_PACKAGE_DIR:?required}
 ENV=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
 PY=${ENV}/bin/python
 WORK=$(mktemp -d /tmp/r1_clean_projective.XXXXXXXX)
-cd "${RUN}/package"
+cd "${PACKAGE}"
 sha256sum -c SHA256SUMS
 tar -xzf source.tar.gz -C "${WORK}"
 cd "${WORK}"
@@ -35,16 +37,16 @@ trap cleanup EXIT
   hostname; id; date -u +%FT%TZ; "${PY}" --version
   nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
   echo cluster=zoetrope; echo pool=zoetrope; echo "code_dir=${WORK}"
-  sha256sum "${RUN}/package/source.tar.gz" "${RUN}/frozen/SHA256SUMS"
+  sha256sum "${PACKAGE}/source.tar.gz" "${FROZEN}/SHA256SUMS"
 } > "${OUT}/environment.txt"
-(cd "${RUN}/frozen" && sha256sum -c SHA256SUMS)
+(cd "${FROZEN}" && sha256sum -c SHA256SUMS)
 "${PY}" -m pip freeze > "${OUT}/pip_freeze.txt"
 if [[ ${MODE} == renderer ]]; then
   export CUDA_VISIBLE_DEVICES=0
   LEDGER=${RUN}/assets/ledger.json
   mkdir -p "${RUN}/assets"
-  [[ -f ${LEDGER} ]] || "${PY}" scripts/r1_aoss_scene_pipeline.py build-ledger --sources "${RUN}/frozen/asset_sources.json" --output "${LEDGER}"
-  mapfile -t scenes < <("${PY}" -c 'import json,sys;print("\n".join(sorted({json.loads(l)["scene_id"] for f in sys.argv[1:] for l in open(f) if l.strip()})))' "${RUN}/frozen/train.jsonl" "${RUN}/frozen/eval_policy_rows.jsonl")
+  [[ -f ${LEDGER} ]] || "${PY}" scripts/r1_aoss_scene_pipeline.py build-ledger --sources "${FROZEN}/asset_sources.json" --output "${LEDGER}"
+  mapfile -t scenes < <("${PY}" -c 'import json,sys;print("\n".join(sorted({json.loads(l)["scene_id"] for f in sys.argv[1:] for l in open(f) if l.strip()})))' "${FROZEN}/train.jsonl" "${FROZEN}/eval_policy_rows.jsonl")
   for scene in "${scenes[@]}"; do
     "${PY}" scripts/r1_aoss_scene_pipeline.py stage-one --ledger "${LEDGER}" --scene-id "${scene}" --cache-root "${RUN}/assets" --log-dir "${RUN}/assets/logs"
   done
@@ -55,7 +57,7 @@ if [[ ${MODE} == renderer ]]; then
     kill -0 "${renderer_pid}"; sleep 2
   done
   curl --noproxy '*' -fsS http://127.0.0.1:8914/health > "${OUT}/health.json"
-  "${PY}" scripts/r1_clean_projective_runtime_preflight.py --frozen "${RUN}/frozen" --renderer-url http://127.0.0.1:8914/render --gs-root "${RUN}/assets/ready" --output "${RUN}/runtime_preflight.json"
+  "${PY}" scripts/r1_clean_projective_runtime_preflight.py --frozen "${FROZEN}" --renderer-url http://127.0.0.1:8914/render --gs-root "${RUN}/assets/ready" --output "${RUN}/runtime_preflight.json"
   worker_ip=$(hostname -I | awk '{print $1}')
   printf 'http://%s:8914/render\n' "${worker_ip}" > "${RUN}/renderer_endpoint.tmp"
   mv "${RUN}/renderer_endpoint.tmp" "${RUN}/renderer_endpoint.txt"
@@ -73,13 +75,13 @@ elif [[ ${MODE} == training ]]; then
   export R1_RENDER_URL
   R1_RENDER_URL=$(<"${RUN}/renderer_endpoint.txt")
   curl --noproxy '*' -fsS "${R1_RENDER_URL%/render}/health" > "${OUT}/health.json"
-  MODEL=$("${PY}" -c 'import json,sys; print(json.load(open(sys.argv[1]))["model"]["path"])' "${RUN}/frozen/data_gate.json")
+  MODEL=$("${PY}" -c 'import json,sys; print(json.load(open(sys.argv[1]))["model"]["path"])' "${FROZEN}/data_gate.json")
   (cd "${MODEL}" && sha256sum -c "${MODEL}_SHA256SUMS") > "${OUT}/model_hash_check.txt"
   mkdir -p "${RUN}/smoke" "${RUN}/formal"
-  "${PY}" -m vagen.r1_clean_projective_ppo --config "${RUN}/frozen/smoke.yaml" --endpoint 1 2>&1 | tee "${RUN}/smoke/train.log"
-  "${PY}" scripts/r1_clean_projective_smoke_gate.py --run "${RUN}"
+  "${PY}" -m vagen.r1_clean_projective_ppo --config "${FROZEN}/smoke.yaml" --endpoint 1 2>&1 | tee "${RUN}/smoke/train.log"
+  "${PY}" scripts/r1_clean_projective_smoke_gate.py --run "${RUN}" --frozen "${FROZEN}"
   # Entirely new process; never load smoke weights or optimizer state.
-  "${PY}" -m vagen.r1_clean_projective_ppo --config "${RUN}/frozen/formal.yaml" --endpoint 250 2>&1 | tee "${RUN}/formal/train.log"
+  "${PY}" -m vagen.r1_clean_projective_ppo --config "${FROZEN}/formal.yaml" --endpoint 250 2>&1 | tee "${RUN}/formal/train.log"
 else
   echo unknown_mode; exit 2
 fi

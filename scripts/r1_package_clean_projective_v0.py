@@ -14,8 +14,10 @@ def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def git(root,*args):return subprocess.check_output(['git','-C',str(root),*args])
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True);a=p.parse_args();root=a.root
-    run=root/'exps/vagen_active_spatial/R1-clean-Projective-v0';final=run/'package'
+    p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True)
+    p.add_argument('--package-name',default='package_v2');p.add_argument('--freeze-name',default='frozen_v1')
+    a=p.parse_args();root=a.root
+    run=root/'exps/vagen_active_spatial/R1-clean-Projective-v0';final=run/a.package_name
     assert not final.exists(),'immutable package already published'
     commit=git(root,'rev-parse','HEAD').decode().strip()
     dependency_commit=git(root/'verl','rev-parse','HEAD').decode().strip()
@@ -41,7 +43,7 @@ def main():
     (stage/'source_files_sha256.json').write_text(json.dumps(file_hashes,indent=2,sort_keys=True)+'\n')
     (stage/'provenance.json').write_text(json.dumps({'commit':commit,'verl_commit':dependency_commit,
         'archive_sha256':sha(stage/'source.tar.gz'),'pipeline_archive_sha256':sha(historic),
-        'unrelated_worktree_edits_included':False,'frozen_input_sha256':sha(run/'frozen/SHA256SUMS'),
+        'unrelated_worktree_edits_included':False,'frozen_input_sha256':sha(run/a.freeze_name/'SHA256SUMS'),
         'cluster':'zoetrope','pool':'zoetrope','renderer_gpus':1,'training_gpus':8,
         'artifact_owner':{'uid':20325,'gid':20325},'scheduler_horizon':700,'formal_stop_step':250},indent=2)+'\n')
     for mode in ('renderer','training'):
@@ -49,12 +51,14 @@ def main():
 set -euo pipefail
 ROOT={root}
 RUN={run}
+export R1_PACKAGE_DIR={final}
+export R1_FROZEN_DIR={run/a.freeze_name}
 if [[ $(id -u) == 0 ]]; then
   exec bash "${{ROOT}}/examples/train/active_spatial/sco_run_as_artifact_owner.sh" bash "$0" owner
 fi
 [[ $(id -u) == 20325 && $(id -g) == 20325 ]] || exit 3
 umask 022
-cd "${{RUN}}/package"
+cd "${{R1_PACKAGE_DIR}}"
 sha256sum -c SHA256SUMS
 LAUNCH=$(mktemp -d /tmp/r1_clean_launch.XXXXXXXX)
 tar -xzf source.tar.gz -C "${{LAUNCH}}" examples/train/active_spatial/sco_r1_clean_projective_entry.sh
