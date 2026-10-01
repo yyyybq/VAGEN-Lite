@@ -83,7 +83,21 @@ if [[ ${MODE} == renderer ]]; then
   done
   health_check http://127.0.0.1:8914/health
   "${PY}" -c 'import json,sys,urllib.request; json.dump(json.load(urllib.request.urlopen(sys.argv[1],timeout=10)),open(sys.argv[2],"w"),indent=2)' http://127.0.0.1:8914/health "${OUT}/health.json"
-  "${PY}" scripts/r1_clean_projective_runtime_preflight.py --frozen "${FROZEN}" --renderer-url http://127.0.0.1:8914/render --gs-root "${RUN}/assets/ready" --output "${RUN}/runtime_preflight.json"
+  if [[ ${R1_REUSE_VERIFIED_RUNTIME_PREFLIGHT:-0} == 1 ]]; then
+    # A replacement renderer may be needed after an execution-only failure in
+    # the training job.  Reuse is allowed only for the immutable 210-row
+    # manifest and a previously completed PASS; service health above is still
+    # checked on the newly allocated renderer.
+    "${PY}" - "${RUN}/runtime_preflight.json" "${FROZEN}/train.jsonl" <<'PY'
+import hashlib, json, pathlib, sys
+report=json.load(open(sys.argv[1]))
+manifest=pathlib.Path(sys.argv[2]).read_bytes()
+assert report['status']=='PASS' and report['completed']==210
+assert report['manifest_sha256']==hashlib.sha256(manifest).hexdigest()
+PY
+  else
+    "${PY}" scripts/r1_clean_projective_runtime_preflight.py --frozen "${FROZEN}" --renderer-url http://127.0.0.1:8914/render --gs-root "${RUN}/assets/ready" --output "${RUN}/runtime_preflight.json"
+  fi
   worker_ip=$(hostname -I | awk '{print $1}')
   printf 'http://%s:8914/render\n' "${worker_ip}" > "${RUN}/renderer_endpoint.tmp"
   mv "${RUN}/renderer_endpoint.tmp" "${RUN}/renderer_endpoint.txt"
@@ -105,7 +119,9 @@ elif [[ ${MODE} == training ]]; then
   MODEL=$("${PY}" -c 'import json,sys; print(json.load(open(sys.argv[1]))["model"]["path"])' "${FROZEN}/data_gate.json")
   (cd "${MODEL}" && sha256sum -c "${MODEL}_SHA256SUMS") > "${OUT}/model_hash_check.txt"
   mkdir -p "${RUN}/smoke" "${RUN}/formal"
-  "${PY}" -m vagen.r1_clean_projective_ppo --config "${FROZEN}/smoke.yaml" --endpoint 1 2>&1 | tee "${RUN}/smoke/train.log"
+  if [[ ${R1_REUSE_VERIFIED_SMOKE:-0} != 1 ]]; then
+    "${PY}" -m vagen.r1_clean_projective_ppo --config "${FROZEN}/smoke.yaml" --endpoint 1 2>&1 | tee "${RUN}/smoke/train.log"
+  fi
   "${PY}" scripts/r1_clean_projective_smoke_gate.py --run "${RUN}" --frozen "${FROZEN}"
   # Entirely new process; never load smoke weights or optimizer state.
   "${PY}" -m vagen.r1_clean_projective_ppo --config "${FROZEN}/formal.yaml" --endpoint 250 2>&1 | tee "${RUN}/formal/train.log"

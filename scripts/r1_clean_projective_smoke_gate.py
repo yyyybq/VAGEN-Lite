@@ -13,7 +13,13 @@ def main():
     assert reload['checkpoint_save_and_load']=='PASS'
     text=(smoke/'train.log').read_text(errors='replace')
     metrics={}
-    for key,value in re.findall(r'([A-Za-z_][A-Za-z0-9_./-]+):\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?|nan|inf)',text):
+    # verl formats scalar metrics through ``np.float64(...)`` in this runtime.
+    # Accept both that representation and ordinary numeric scalars; the old
+    # expression silently skipped every wrapped actor/critic metric and made a
+    # completed PPO smoke fail only at the post-run evidence gate.
+    number=r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|[-+]?(?:nan|inf)'
+    pattern=rf'([A-Za-z_][A-Za-z0-9_./-]+):\s*(?:np\.float(?:32|64)\()?({number})(?:\))?'
+    for key,value in re.findall(pattern,text,re.IGNORECASE):
         metrics[key]=float(value)
     required=('trainer/actor_update_performed','actor/grad_norm','actor/pg_loss','critic/grad_norm')
     for key in required:

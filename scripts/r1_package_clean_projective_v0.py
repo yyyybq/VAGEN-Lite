@@ -17,6 +17,8 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True)
     p.add_argument('--package-name',default='package_v2');p.add_argument('--freeze-name',default='frozen_v1')
     p.add_argument('--renderer-gpus',type=int,default=1)
+    p.add_argument('--reuse-verified-runtime-preflight',action='store_true')
+    p.add_argument('--reuse-verified-smoke',action='store_true')
     a=p.parse_args();root=a.root
     run=root/'exps/vagen_active_spatial/R1-clean-Projective-v0';final=run/a.package_name
     assert not final.exists(),'immutable package already published'
@@ -46,6 +48,8 @@ def main():
         'archive_sha256':sha(stage/'source.tar.gz'),'pipeline_archive_sha256':sha(historic),
         'unrelated_worktree_edits_included':False,'frozen_input_sha256':sha(run/a.freeze_name/'SHA256SUMS'),
         'cluster':'h800','pool':'h800','renderer_gpus':a.renderer_gpus,'training_gpus':8,
+        'reuse_verified_runtime_preflight':a.reuse_verified_runtime_preflight,
+        'reuse_verified_smoke':a.reuse_verified_smoke,
         'artifact_owner':{'uid':20325,'gid':20325},'scheduler_horizon':700,'formal_stop_step':250},indent=2)+'\n')
     for mode in ('renderer','training'):
         text=f'''#!/usr/bin/env bash
@@ -55,6 +59,8 @@ RUN={run}
 export R1_PACKAGE_DIR={final}
 export R1_FROZEN_DIR={run/a.freeze_name}
 export R1_STOP_RENDERER_FILE={run}/STOP_RENDERER.{a.package_name}
+export R1_REUSE_VERIFIED_RUNTIME_PREFLIGHT={int(a.reuse_verified_runtime_preflight)}
+export R1_REUSE_VERIFIED_SMOKE={int(a.reuse_verified_smoke)}
 if [[ $(id -u) == 0 ]]; then
   exec bash "${{ROOT}}/examples/train/active_spatial/sco_run_as_artifact_owner.sh" bash "$0" owner
 fi
