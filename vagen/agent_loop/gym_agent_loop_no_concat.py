@@ -151,7 +151,12 @@ class GymAgentLoop(AgentLoopBase):
         _preset       = info.get("preset",                  "unknown") if info else "unknown"
         _jsonl_idx    = info.get("jsonl_idx",               -1)         if info else -1
         _init_score   = float(info.get("initial_potential_score", 0.0)) if info else 0.0
-        _init_dist    = float(info.get("distance",          -1.0))      if info else -1.0
+        # Canonical Active Spatial intentionally withholds target distance to
+        # avoid leaking oracle information to the policy.  Keep the legacy
+        # diagnostic field numeric without requiring the environment to expose
+        # that value.
+        _distance_value = info.get("distance") if info else None
+        _init_dist = float(_distance_value) if _distance_value is not None else -1.0
         _task_id      = f"{_scene_id}/{_object_label}/{_preset}/{_jsonl_idx}"
 
         sys_msg={"role": "system", "content": convert_obs_to_content(sys_obs, **kwargs)}
