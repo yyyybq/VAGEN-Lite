@@ -6,6 +6,7 @@ MODE=${1:?renderer or training}
 RUN=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0
 FROZEN=${R1_FROZEN_DIR:?required}
 PACKAGE=${R1_PACKAGE_DIR:?required}
+STOP_RENDERER_FILE=${R1_STOP_RENDERER_FILE:-${RUN}/STOP_RENDERER}
 ENV=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
 PY=${ENV}/bin/python
 WORK=$(mktemp -d /tmp/r1_clean_projective.XXXXXXXX)
@@ -40,7 +41,7 @@ PY
 cleanup() {
   status=$?
   if [[ -n ${renderer_pid} ]]; then kill "${renderer_pid}" 2>/dev/null || true; wait "${renderer_pid}" 2>/dev/null || true; fi
-  if [[ ${MODE} == training ]]; then touch "${RUN}/STOP_RENDERER"; fi
+  if [[ ${MODE} == training ]]; then touch "${STOP_RENDERER_FILE}"; fi
   printf '{"exit_status":%s,"ended_utc":"%s"}\n' "${status}" "$(date -u +%FT%TZ)" > "${OUT}/exit.json"
 }
 trap cleanup EXIT
@@ -75,7 +76,7 @@ if [[ ${MODE} == renderer ]]; then
   mv "${RUN}/renderer_endpoint.tmp" "${RUN}/renderer_endpoint.txt"
   # Bounded lease; another task's services are never stopped.
   for _ in $(seq 1 17280); do
-    [[ -e ${RUN}/STOP_RENDERER ]] && exit 0
+    [[ -e ${STOP_RENDERER_FILE} ]] && exit 0
     kill -0 "${renderer_pid}"; sleep 10
   done
   echo renderer_48h_lease_expired; exit 6

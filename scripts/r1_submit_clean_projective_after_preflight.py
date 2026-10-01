@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Control-host gate: one Zoetrope training job, only after live data PASS.
+"""Control-host gate: one H800 training job, only after live data PASS.
 
 Uses the established SCO CLI, not a new API client. A durable submission intent
 prevents duplicate jobs after a control-process crash or ambiguous CLI response.
@@ -17,14 +17,16 @@ from pathlib import Path
 SCO='/mnt/umm/users/yinbaiqiao/.sco/bin/sco'
 RUN=Path('/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0')
 FROZEN=RUN/'frozen_v1'
-PACKAGE=RUN/'package_v4'
 def now():return datetime.now(timezone.utc).isoformat()
 def save(p,r):
     tmp=p.with_suffix('.tmp');tmp.write_text(json.dumps(r,indent=2)+'\n');tmp.replace(p)
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--renderer-job',required=True);p.add_argument('--timeout-hours',type=float,default=24);a=p.parse_args()
-    out=RUN/'control';out.mkdir(exist_ok=True)
+    p=argparse.ArgumentParser();p.add_argument('--renderer-job',required=True);p.add_argument('--timeout-hours',type=float,default=24)
+    p.add_argument('--package-name',default='package_v4');p.add_argument('--control-name',default='control')
+    p.add_argument('--job-name',default='R1-clean-Projective-v0-250');a=p.parse_args()
+    package=RUN/a.package_name
+    out=RUN/a.control_name;out.mkdir(exist_ok=True)
     with (out/'submit.lock').open('a+') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         if (out/'training_submission.json').exists():print('already submitted; no duplicate');return
@@ -47,13 +49,13 @@ def main():
         else:raise TimeoutError('bounded control wait expired; no training submitted')
         assert report['manifest_sha256']==hashlib.sha256((FROZEN/'train.jsonl').read_bytes()).hexdigest()
         subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=FROZEN,check=True)
-        subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=PACKAGE,check=True)
+        subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=package,check=True)
         command=[SCO,'acp','jobs','create','--workspace-name=aigc','--aec2-name=h800',
-          '--job-name=R1-clean-Projective-v0-250','--priority=HIGHEST','--quota-type=reserved',
+          '--job-name='+a.job_name,'--priority=HIGHEST','--quota-type=reserved',
           '--container-image-url=registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617',
           '--storage-mount=019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm',
           '--training-framework=pytorch','--worker-nodes=1','--worker-spec=N4lS.Iq.I80.8',
-          '--command=bash '+str(PACKAGE/'launch_training.sh')]
+          '--command=bash '+str(package/'launch_training.sh')]
         intent={'utc':now(),'command':command,'renderer_job':a.renderer_job,
                 'runtime_preflight_sha256':hashlib.sha256(gate.read_bytes()).hexdigest(),
                 'formal_requires':'PPO smoke actual update + checkpoint load PASS; fresh pretrained process',

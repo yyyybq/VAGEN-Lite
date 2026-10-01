@@ -53,6 +53,7 @@ ROOT={root}
 RUN={run}
 export R1_PACKAGE_DIR={final}
 export R1_FROZEN_DIR={run/a.freeze_name}
+export R1_STOP_RENDERER_FILE={run}/STOP_RENDERER.{a.package_name}
 if [[ $(id -u) == 0 ]]; then
   exec bash "${{ROOT}}/examples/train/active_spatial/sco_run_as_artifact_owner.sh" bash "$0" owner
 fi
