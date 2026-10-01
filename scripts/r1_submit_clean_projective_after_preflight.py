@@ -17,7 +17,7 @@ from pathlib import Path
 SCO='/mnt/umm/users/yinbaiqiao/.sco/bin/sco'
 RUN=Path('/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0')
 FROZEN=RUN/'frozen_v1'
-PACKAGE=RUN/'package_v3'
+PACKAGE=RUN/'package_v4'
 def now():return datetime.now(timezone.utc).isoformat()
 def save(p,r):
     tmp=p.with_suffix('.tmp');tmp.write_text(json.dumps(r,indent=2)+'\n');tmp.replace(p)
@@ -34,10 +34,8 @@ def main():
             result=subprocess.run([SCO,'acp','jobs','describe','--workspace-name=aigc','-o','json',a.renderer_job],capture_output=True,text=True)
             if result.returncode:
                 save(out/'status.json',{'status':'CONTROL_QUERY_ERROR','utc':now(),'renderer_job':a.renderer_job});time.sleep(30);continue
-            job=json.loads(result.stdout);assert job['resource_pool']['name']=='zoetrope'
+            job=json.loads(result.stdout);assert job['resource_pool']['name']=='h800'
             save(out/'renderer_job.json',job)
-            if (RUN/'renderer_worker/exit.json').exists():
-                raise RuntimeError('renderer worker exited before training submission; inspect its explicit exit evidence')
             if job['state'] in ('FAILED','SUCCEEDED','STOPPED','DELETED','CANCELED','CANCELLED'):
                 raise RuntimeError('renderer job ended: '+job['state'])
             gate=RUN/'runtime_preflight.json';endpoint=RUN/'renderer_endpoint.txt'
@@ -50,7 +48,7 @@ def main():
         assert report['manifest_sha256']==hashlib.sha256((FROZEN/'train.jsonl').read_bytes()).hexdigest()
         subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=FROZEN,check=True)
         subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=PACKAGE,check=True)
-        command=[SCO,'acp','jobs','create','--workspace-name=aigc','--aec2-name=zoetrope',
+        command=[SCO,'acp','jobs','create','--workspace-name=aigc','--aec2-name=h800',
           '--job-name=R1-clean-Projective-v0-250','--priority=HIGHEST','--quota-type=reserved',
           '--container-image-url=registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617',
           '--storage-mount=019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm',

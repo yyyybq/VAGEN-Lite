@@ -44,7 +44,7 @@ def main():
     (stage/'provenance.json').write_text(json.dumps({'commit':commit,'verl_commit':dependency_commit,
         'archive_sha256':sha(stage/'source.tar.gz'),'pipeline_archive_sha256':sha(historic),
         'unrelated_worktree_edits_included':False,'frozen_input_sha256':sha(run/a.freeze_name/'SHA256SUMS'),
-        'cluster':'zoetrope','pool':'zoetrope','renderer_gpus':1,'training_gpus':8,
+        'cluster':'h800','pool':'h800','renderer_gpus':1,'training_gpus':8,
         'artifact_owner':{'uid':20325,'gid':20325},'scheduler_horizon':700,'formal_stop_step':250},indent=2)+'\n')
     for mode in ('renderer','training'):
         text=f'''#!/usr/bin/env bash

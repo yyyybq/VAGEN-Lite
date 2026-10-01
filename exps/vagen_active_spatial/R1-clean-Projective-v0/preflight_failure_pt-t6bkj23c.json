@@ -1,0 +1,20 @@
+{
+  "job_id": "pt-t6bkj23c",
+  "pool": "zoetrope",
+  "worker": "pt-d6f5c0f147cf472dad9af43ddd4bb297-worker-0",
+  "worker_started_utc": "2026-09-30T21:40:29Z",
+  "job_completed_utc": "2026-09-30T22:05:00Z",
+  "status": "FAILED_INFRASTRUCTURE_LAUNCHER_HEALTH_CHECK",
+  "data_requests_started": 0,
+  "runtime_preflight_completed": 0,
+  "training_job_submitted": false,
+  "root_cause": "The official renderer started and listened on port 8914, but the launcher invoked system curl with the Conda LD_LIBRARY_PATH. curl failed to load system libp11-kit because it resolved an incompatible libffi from the Conda environment, so the bounded health loop expired.",
+  "evidence": {
+    "renderer_log": "renderer_worker/renderer.log",
+    "worker_log": "renderer_worker/worker.log",
+    "job_state": "FAILED",
+    "assets_staged": 52
+  },
+  "repair": "Use Python stdlib urllib from the already selected Python environment for health checks; preserve all canonical data/runtime/generator definitions.",
+  "replacement_pool": "h800"
+}

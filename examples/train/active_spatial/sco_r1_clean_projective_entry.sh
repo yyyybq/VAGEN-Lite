@@ -22,10 +22,21 @@ export LIBRARY_PATH=${ENV}/targets/x86_64-linux/lib:${LIBRARY_PATH:-}
 export LD_LIBRARY_PATH=${ENV}/lib:${ENV}/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}
 export TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export TORCH_EXTENSIONS_DIR=${RUN}/torch_extensions
-OUT=${RUN}/${MODE}_worker
+ATTEMPT=$(date -u +%Y%m%dT%H%M%SZ)-$(hostname)
+OUT=${RUN}/${MODE}_worker/attempts/${ATTEMPT}
 mkdir -p "${OUT}"
 exec > >(tee -a "${OUT}/worker.log") 2>&1
 renderer_pid=
+health_check() {
+  "${PY}" - "$1" <<'PY'
+import json, sys, urllib.request
+with urllib.request.urlopen(sys.argv[1], timeout=10) as response:
+    assert response.status == 200
+    body = response.read()
+    if body:
+        json.loads(body)
+PY
+}
 cleanup() {
   status=$?
   if [[ -n ${renderer_pid} ]]; then kill "${renderer_pid}" 2>/dev/null || true; wait "${renderer_pid}" 2>/dev/null || true; fi
@@ -36,7 +47,7 @@ trap cleanup EXIT
 {
   hostname; id; date -u +%FT%TZ; "${PY}" --version
   nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
-  echo cluster=zoetrope; echo pool=zoetrope; echo "code_dir=${WORK}"
+  echo cluster=h800; echo pool=h800; echo "code_dir=${WORK}"
   sha256sum "${PACKAGE}/source.tar.gz" "${FROZEN}/SHA256SUMS"
 } > "${OUT}/environment.txt"
 (cd "${FROZEN}" && sha256sum -c SHA256SUMS)
@@ -53,10 +64,11 @@ if [[ ${MODE} == renderer ]]; then
   bash examples/train/active_spatial/start_gs_render_http_service.sh --gs-root "${RUN}/assets/ready" --host 0.0.0.0 --port 8914 --gpus 0 --max-workers 1 --max-inflight 1 --admit-timeout 300 --conda-env "${ENV}" > "${OUT}/renderer.log" 2>&1 &
   renderer_pid=$!; echo "${renderer_pid}" > "${OUT}/renderer.pid"
   for _ in $(seq 1 180); do
-    curl --noproxy '*' -fsS http://127.0.0.1:8914/health > "${OUT}/health.json" && break
+    health_check http://127.0.0.1:8914/health && break
     kill -0 "${renderer_pid}"; sleep 2
   done
-  curl --noproxy '*' -fsS http://127.0.0.1:8914/health > "${OUT}/health.json"
+  health_check http://127.0.0.1:8914/health
+  "${PY}" -c 'import json,sys,urllib.request; json.dump(json.load(urllib.request.urlopen(sys.argv[1],timeout=10)),open(sys.argv[2],"w"),indent=2)' http://127.0.0.1:8914/health "${OUT}/health.json"
   "${PY}" scripts/r1_clean_projective_runtime_preflight.py --frozen "${FROZEN}" --renderer-url http://127.0.0.1:8914/render --gs-root "${RUN}/assets/ready" --output "${RUN}/runtime_preflight.json"
   worker_ip=$(hostname -I | awk '{print $1}')
   printf 'http://%s:8914/render\n' "${worker_ip}" > "${RUN}/renderer_endpoint.tmp"
@@ -74,7 +86,8 @@ elif [[ ${MODE} == training ]]; then
   "${PY}" -c 'import json,sys; r=json.load(open(sys.argv[1]));assert r["status"]=="PASS" and r["completed"]==210' "${RUN}/runtime_preflight.json"
   export R1_RENDER_URL
   R1_RENDER_URL=$(<"${RUN}/renderer_endpoint.txt")
-  curl --noproxy '*' -fsS "${R1_RENDER_URL%/render}/health" > "${OUT}/health.json"
+  health_check "${R1_RENDER_URL%/render}/health"
+  "${PY}" -c 'import json,sys,urllib.request; json.dump(json.load(urllib.request.urlopen(sys.argv[1],timeout=10)),open(sys.argv[2],"w"),indent=2)' "${R1_RENDER_URL%/render}/health" "${OUT}/health.json"
   MODEL=$("${PY}" -c 'import json,sys; print(json.load(open(sys.argv[1]))["model"]["path"])' "${FROZEN}/data_gate.json")
   (cd "${MODEL}" && sha256sum -c "${MODEL}_SHA256SUMS") > "${OUT}/model_hash_check.txt"
   mkdir -p "${RUN}/smoke" "${RUN}/formal"
