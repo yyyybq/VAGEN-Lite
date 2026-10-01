@@ -23,6 +23,15 @@ export LIBRARY_PATH=${ENV}/targets/x86_64-linux/lib:${LIBRARY_PATH:-}
 export LD_LIBRARY_PATH=${ENV}/lib:${ENV}/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}
 export TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export TORCH_EXTENSIONS_DIR=${RUN}/torch_extensions
+# A scene load can exceed five minutes on the shared asset mount.  PPO has 48
+# concurrent rollouts, so admission and client timeouts must cover both a slow
+# load and a bounded queue.  This changes only transport/lifecycle behavior;
+# the renderer implementation, camera, observations, and task semantics remain
+# frozen.
+export INTERIORGS_HTTP_TIMEOUT=1800
+export INTERIORGS_HTTP_RETRIES=7
+export INTERIORGS_HTTP_BACKOFF=1
+export INTERIORGS_HTTP_MAX_BACKOFF=30
 ATTEMPT=$(date -u +%Y%m%dT%H%M%SZ)-$(hostname)
 OUT=${RUN}/${MODE}_worker/attempts/${ATTEMPT}
 mkdir -p "${OUT}"
@@ -54,7 +63,8 @@ trap cleanup EXIT
 (cd "${FROZEN}" && sha256sum -c SHA256SUMS)
 "${PY}" -m pip freeze > "${OUT}/pip_freeze.txt"
 if [[ ${MODE} == renderer ]]; then
-  export CUDA_VISIBLE_DEVICES=0
+  export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+  [[ $(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l) -eq 8 ]]
   LEDGER=${RUN}/assets/ledger.json
   mkdir -p "${RUN}/assets"
   [[ -f ${LEDGER} ]] || "${PY}" scripts/r1_aoss_scene_pipeline.py build-ledger --sources "${FROZEN}/asset_sources.json" --output "${LEDGER}"
@@ -62,7 +72,10 @@ if [[ ${MODE} == renderer ]]; then
   for scene in "${scenes[@]}"; do
     "${PY}" scripts/r1_aoss_scene_pipeline.py stage-one --ledger "${LEDGER}" --scene-id "${scene}" --cache-root "${RUN}/assets" --log-dir "${RUN}/assets/logs"
   done
-  bash examples/train/active_spatial/start_gs_render_http_service.sh --gs-root "${RUN}/assets/ready" --host 0.0.0.0 --port 8914 --gpus 0 --max-workers 1 --max-inflight 1 --admit-timeout 300 --conda-env "${ENV}" > "${OUT}/renderer.log" 2>&1 &
+  # One isolated renderer process per H800.  Each process still serializes its
+  # own scene switch + render operations; the eight independent GPUs provide
+  # enough admission capacity for the frozen 12x4 PPO rollout batch.
+  bash examples/train/active_spatial/start_gs_render_http_service.sh --gs-root "${RUN}/assets/ready" --host 0.0.0.0 --port 8914 --gpus 0,1,2,3,4,5,6,7 --max-workers 8 --max-inflight 8 --admit-timeout 1800 --conda-env "${ENV}" > "${OUT}/renderer.log" 2>&1 &
   renderer_pid=$!; echo "${renderer_pid}" > "${OUT}/renderer.pid"
   for _ in $(seq 1 180); do
     health_check http://127.0.0.1:8914/health && break

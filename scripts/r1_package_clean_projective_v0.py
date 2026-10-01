@@ -16,6 +16,7 @@ def git(root,*args):return subprocess.check_output(['git','-C',str(root),*args])
 def main():
     p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True)
     p.add_argument('--package-name',default='package_v2');p.add_argument('--freeze-name',default='frozen_v1')
+    p.add_argument('--renderer-gpus',type=int,default=1)
     a=p.parse_args();root=a.root
     run=root/'exps/vagen_active_spatial/R1-clean-Projective-v0';final=run/a.package_name
     assert not final.exists(),'immutable package already published'
@@ -44,7 +45,7 @@ def main():
     (stage/'provenance.json').write_text(json.dumps({'commit':commit,'verl_commit':dependency_commit,
         'archive_sha256':sha(stage/'source.tar.gz'),'pipeline_archive_sha256':sha(historic),
         'unrelated_worktree_edits_included':False,'frozen_input_sha256':sha(run/a.freeze_name/'SHA256SUMS'),
-        'cluster':'h800','pool':'h800','renderer_gpus':1,'training_gpus':8,
+        'cluster':'h800','pool':'h800','renderer_gpus':a.renderer_gpus,'training_gpus':8,
         'artifact_owner':{'uid':20325,'gid':20325},'scheduler_horizon':700,'formal_stop_step':250},indent=2)+'\n')
     for mode in ('renderer','training'):
         text=f'''#!/usr/bin/env bash
