@@ -1,0 +1,34 @@
+# One-batch diagnostic only: S1 reward, frozen R1 task semantics.
+env1:
+  env_name: active_spatial
+  env_config:
+    jsonl_path: "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/docs/diagnosis/active_spatial_dense_score_diagnostic_real_batch_20260916/policy_input_rows.jsonl"
+    render_backend: http
+    client_url: "http://127.0.0.1:8898/render"
+    gs_root: "/mnt/umm/users/yinbaiqiao/InteriorGS"
+    image_width: 256
+    image_height: 256
+    step_translation: 0.3
+    step_rotation_deg: 20.0
+    action_space: strafe
+    enable_explicit_done: false
+    max_actions_per_step: 5
+    max_episode_steps: 12
+    turn_budget: 12
+    enable_potential_field: true
+    potential_field_progress_mode: potential
+    potential_field_gamma: 0.95
+    potential_field_reward_scale: 1.0
+    enable_potential_shaping_reward: true
+    enable_near_success_reward: false
+    enable_visibility_shaping_reward: false
+    success_score_threshold: 0.65
+    enable_auto_termination: true
+    success_reward: 5.0
+    format_reward: 0.01
+    invalid_format_penalty: -0.2
+    enable_collision_detection: true
+    collision_camera_radius: 0.15
+    collision_safety_margin: 0.05
+    collision_invalidate_action: true
+    render_fail_fast: true

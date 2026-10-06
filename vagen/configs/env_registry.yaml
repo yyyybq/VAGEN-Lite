@@ -9,3 +9,4 @@ env_registry:
   SpatialMCQ: vagen.envs.spatial_mcq.spatial_mcq_env.SpatialMCQEnv
   # Remote environment client (generic, reusable for any remote env)
   RemoteEnv: vagen.envs_remote.GymImageEnvClient
+  RoboCasa: vagen.envs.robocasa.robocasa_env.RoboCasaEnv

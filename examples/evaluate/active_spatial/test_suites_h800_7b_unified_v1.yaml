@@ -21,6 +21,9 @@ defaults:
     image_width: 256
     image_height: 256
     success_score_threshold: 0.65
+    step_translation: 0.3
+    step_rotation_deg: 20.0
+    history_window_size: 1
     action_space: strafe
     enable_explicit_done: false
     max_actions_per_step: 5
@@ -38,27 +41,27 @@ suites:
 - name: id_test
   description: Canonical in-domain held-out active-spatial test split, delta_control
     excluded by defaults.
-  jsonl_path: data_gen/active_spatial_pipeline/output_100scenes/test.jsonl
+  jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/id_test.jsonl
 - name: ood_v2_centering
   description: Existing small OOD split used by V46/V50 online validation.
   jsonl_path: data_gen/active_spatial_pipeline/output_v2/val_ood_v2_centering.jsonl
 - name: ood_scene
   description: Generated OOD scene/layout split.
-  jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_scene.jsonl
+  jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_scene.jsonl
 - name: ood_instance
-  description: 'Generated OOD instance split: seen object labels in held-out scenes.'
-  jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_instance.jsonl
+  description: 'Generated OOD instance split: seen atomic categories, new instances within training scenes.'
+  jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_instance.jsonl
 - name: ood_category
   description: Generated OOD category/object-label split.
-  jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_category.jsonl
+  jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_category.jsonl
 - name: ood_template
   description: Generated OOD instruction-template paraphrase split.
-  jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_template.jsonl
+  jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_template.jsonl
 - name: ood_geometry
   description: Generated OOD geometry/distance split.
-  jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_geometry.jsonl
+  jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_geometry.jsonl
 - name: smoke
   description: Three-episode smoke slice from ID test.
-  jsonl_path: data_gen/active_spatial_pipeline/output_100scenes/test.jsonl
+  jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/id_test.jsonl
   max_episodes: 3
   save_trajectories: false

@@ -1,0 +1,40 @@
+# SaPaVe dataset / benchmark registry (InteriorGS analogue)
+# Paper: https://arxiv.org/abs/2603.12193
+# Project: https://lmzpai.github.io/SaPaVe/
+#
+# Official ActiveViewPose-200K and Isaac Sim ActiveManip-Bench are not
+# released. Paths below are the local remapped splits.
+
+paper:
+  title: "SaPaVe: Towards Active Perception and Manipulation in Vision-Language-Action Models for Robotics"
+  arxiv: "2603.12193"
+  project: "https://lmzpai.github.io/SaPaVe/"
+
+activeviewpose:
+  description: Stage-1 semantic camera control dataset (paper Train/Val/Test1/Test2).
+  modalities:
+    - visual_centering
+    - spatial_directive
+    - commonsense
+    - conditional_reasoning
+    - container_interaction
+  splits:
+    train: data_gen/sapave/output/activeviewpose_train.jsonl
+    val: data_gen/sapave/output/activeviewpose_val.jsonl
+    test1: data_gen/sapave/output/activeviewpose_test1.jsonl
+    test2: data_gen/sapave/output/activeviewpose_test2.jsonl
+  env_config: examples/train/active_spatial/env_config_sapave.yaml
+  val_env_config: examples/train/active_spatial/env_config_sapave_val.yaml
+
+activemanip_bench:
+  description: >
+    Camera-control analogue of ActiveManip-Bench Table 2. Official 12-task
+    Isaac Sim suite (Pick/Reorient/Open-Close Drawer-Cabinet/Fetch/Pour) is
+    not released. Local suites use the same visibility x family grid.
+  visibility: [unoccluded, occluded, out_of_view]
+  families: [pick_and_place, articulated]
+  combined: data_gen/sapave/output/activemanip_bench.jsonl
+  eval_suites: examples/evaluate/active_spatial/test_suites_sapave.yaml
+
+rebuild:
+  command: python scripts/build_sapave_splits.py

@@ -15,17 +15,32 @@ from vagen.ray_trainer import RayPPOTrainer
 
 
 class FixedEndpointTrainer(RayPPOTrainer):
+    def _save_checkpoint(self):
+        endpoint = int(os.environ["R1_PPO_ENDPOINT"])
+        # The reward pilot needs only the three evaluation snapshots.  Avoid a
+        # fourth 7B checkpoint at step 6 when save_freq=2 fires normally.
+        if endpoint == 8 and self.global_steps not in (2, 4, 8):
+            return
+        return super()._save_checkpoint()
+
     def fit(self):
         endpoint=int(os.environ['R1_PPO_ENDPOINT'])
         assert self.total_training_steps==700
         assert self.config.actor_rollout_ref.actor.optim.total_training_steps==700
         assert self.config.critic.optim.total_training_steps==700
         assert self.config.trainer.resume_mode=='disable'
-        assert endpoint in (1,250)
+        assert endpoint in (1, 8, 250)
         self.total_training_steps=endpoint
         super().fit()
         checkpoint=Path(self.config.trainer.default_local_dir)/f'global_step_{endpoint}'
         assert (checkpoint/'COMPLETE').is_file(), 'checkpoint not atomically complete'
+        if endpoint == 8:
+            for step in (2, 4, 8):
+                assert (
+                    Path(self.config.trainer.default_local_dir)
+                    / f"global_step_{step}"
+                    / "COMPLETE"
+                ).is_file(), f"missing evaluation checkpoint at step {step}"
         if endpoint==1:
             # Exercise the actual distributed model/optimizer/dataloader loader.
             # These weights are discarded when this separate process exits.
@@ -47,7 +62,7 @@ class CleanTaskRunner(main_ppo.TaskRunner):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--endpoint',type=int,required=True)
-    a=p.parse_args();assert a.endpoint in (1,250)
+    a=p.parse_args();assert a.endpoint in (1,8,250)
     os.environ['R1_PPO_ENDPOINT']=str(a.endpoint)
     cfg=OmegaConf.load(a.config)
     assert cfg.algorithm.adv_estimator=='no_concat_gae' and not cfg.trainer.concat_multi_turn

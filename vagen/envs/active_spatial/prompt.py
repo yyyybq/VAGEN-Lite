@@ -110,7 +110,9 @@ def system_prompt(**kwargs):
     max_actions = int(kwargs.get("max_actions_per_step", 1))
     action_sep = kwargs.get("action_sep", "|")
     format_reward = float(kwargs.get("format_reward", 0.2))
+    invalid_format_penalty = float(kwargs.get("invalid_format_penalty", -0.1))
     success_reward = float(kwargs.get("success_reward", 1.0))
+    task_type = str(kwargs.get("task_type", "") or "")
     action_space = kwargs.get("action_space", "legacy")
     enable_done = bool(kwargs.get("enable_explicit_done", True))
 
@@ -131,6 +133,45 @@ def system_prompt(**kwargs):
             f"(separated by '{action_sep}'); feedback is provided after each step"
         )
 
+    if format_reward > 0.0:
+        format_reward_line = f"- Format correct: +{format_reward:g}"
+    else:
+        format_reward_line = (
+            "- Valid format is required but gives no positive reward; "
+            f"invalid format: {invalid_format_penalty:g}"
+        )
+
+    if task_type == "projective_relations":
+        task_strategy = (
+            "For projective left/right tasks, left and right describe horizontal ordering "
+            "in the rendered image; they do not map directly to turn_left/turn_right. "
+            "When both objects are already visible, first try lateral translation "
+            "(move_left/move_right), and rotate only as needed to keep both objects visible. "
+            "Do not alternate repeated inverse turns. If collision feedback says a translation "
+            "is blocked, do not repeat it; back off or rotate before choosing a different path."
+        )
+        progress_reward_line = (
+            "- Gate-aligned projective progress: reward follows bbox inside-frame fraction "
+            "and a smooth image-relation margin target centered at 12 px; an off-frame object "
+            "cannot receive high potential"
+        )
+        success_reward_line = (
+            f"- Canonical projective success (both objects visible and in frame, with the "
+            f"requested relation and margin): +{success_reward:g}"
+        )
+    else:
+        task_strategy = (
+            "For ordinary target-view tasks, rotate to face the relevant object or view "
+            "direction before translating. For relation tasks such as occlusion, follow the "
+            "task-specific relation: the correct viewpoint may require moving around an "
+            "occluder rather than directly approaching the hidden target."
+        )
+        progress_reward_line = (
+            "- Progress toward target pose: continuous reward based on distance and "
+            "orientation improvement"
+        )
+        success_reward_line = f"- Reaching target pose: +{success_reward:g}"
+
     base_prompt = f"""You are a spatial navigation agent in a 3D indoor environment. Your task is to navigate a camera to reach a specific target view of an object.
 {actions_block}
 Step sizes: translation = {step_translation:.2f} meters, rotation = {step_rotation_deg:.1f} degrees.
@@ -143,16 +184,16 @@ Example:
 {format_config['example']}
 
 Rewards:
-- Format correct: +{format_reward:g}
-- Progress toward target pose: continuous reward based on distance and orientation improvement
-- Reaching target pose: +{success_reward:g}
+{format_reward_line}
+{progress_reward_line}
+{success_reward_line}
 
 Hints:
 1. Pay attention to the target object and the requested view (front, back, left, right, etc.)
 2. {hint2}
 3. Consider both position and orientation when navigating
 4. Look around if you're unsure of the target location
-5. Strategy: For ordinary target-view tasks, rotate to face the relevant object or view direction before translating. For relation tasks such as occlusion, follow the task-specific relation: the correct viewpoint may require moving around an occluder rather than directly approaching the hidden target.
+5. Strategy: {task_strategy}
 """
 
     # Override hints for forward-first strategy (designed for models that over-rotate)
@@ -170,15 +211,15 @@ Example:
 {format_config['example']}
 
 Rewards:
-- Format correct: +{format_reward:g}
-- Progress toward target pose: continuous reward based on distance and orientation improvement
-- Reaching target pose: +{success_reward:g}
+{format_reward_line}
+{progress_reward_line}
+{success_reward_line}
 
 Hints:
 1. Pay attention to the target object and the requested view (front, back, left, right, etc.)
 2. {hint2}
 3. Consider both position and orientation when navigating
-4. Strategy: DEFAULT to move_forward for ordinary target-view tasks, but follow task-specific relation instructions for occlusion, centering, projective, and size tasks. After at most 2 consecutive turns, try a translation action unless the relation requires continued alignment.
+4. Strategy: {task_strategy}
 5. AVOID spinning in circles: if the reward is not improving after repeated turns, switch to move_forward, move_backward, or move_left/move_right to explore a new position.
 """
 
@@ -213,12 +254,15 @@ def action_template(**kwargs):
     """Generate the action observation template for subsequent steps."""
     observation = kwargs.get("observation", "")
     env_feedback = kwargs.get("env_feedback", "")
+    task_prompt = kwargs.get("task_prompt", "")
     
     template = f"""[Observation]:
 {observation}
 """
     if env_feedback:
         template += f"Environment Feedback: {env_feedback}\n"
+    if task_prompt:
+        template += f"Task: {task_prompt}\n"
     
     return template
 

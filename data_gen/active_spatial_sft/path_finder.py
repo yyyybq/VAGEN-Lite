@@ -126,40 +126,11 @@ def simulate_action(
     Returns:
         New 4x4 c2w matrix after the action.
     """
-    c2w = c2w.copy()
-    R_c2w = c2w[:3, :3].copy()
-    C_world = c2w[:3, 3].copy()
-    step_r = np.radians(step_rotation_deg)
-
-    if action == "move_forward":
-        # Forward = +Z column of c2w (ViewManipulator convention)
-        dir_world = R_c2w @ np.array([0.0, 0.0, 1.0])
-        c2w[:3, 3] = C_world + dir_world * step_translation
-
-    elif action == "move_backward":
-        dir_world = R_c2w @ np.array([0.0, 0.0, 1.0])
-        c2w[:3, 3] = C_world - dir_world * step_translation
-
-    elif action == "turn_left":
-        # Yaw around local Y axis (negative = left)
-        R_local = R_scipy.from_euler("y", -step_r, degrees=False).as_matrix()
-        c2w[:3, :3] = R_c2w @ R_local
-
-    elif action == "turn_right":
-        R_local = R_scipy.from_euler("y", +step_r, degrees=False).as_matrix()
-        c2w[:3, :3] = R_c2w @ R_local
-
-    elif action == "look_up":
-        ang = (+step_r) if image_y_down else (-step_r)
-        R_local = R_scipy.from_euler("x", ang, degrees=False).as_matrix()
-        c2w[:3, :3] = R_c2w @ R_local
-
-    elif action == "look_down":
-        ang = (-step_r) if image_y_down else (+step_r)
-        R_local = R_scipy.from_euler("x", ang, degrees=False).as_matrix()
-        c2w[:3, :3] = R_c2w @ R_local
-
-    return c2w
+    from vagen.envs.active_spatial.utils import ViewManipulator
+    view = ViewManipulator(step_translation=step_translation, step_rotation_deg=step_rotation_deg, world_up_axis="Z", image_y_down=image_y_down)
+    view.reset(c2w)
+    view.step(action)
+    return view.get_pose().copy()
 
 
 def get_camera_pos_and_forward(c2w: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -177,9 +148,6 @@ def get_camera_pos_and_forward(c2w: np.ndarray) -> Tuple[np.ndarray, np.ndarray]
 # Scoring helpers
 # ---------------------------------------------------------------------------
 
-_LOOKAT_TIEBREAKER_WEIGHT = 0.03  # SFT-only tie-breaker; not part of env reward
-
-
 def score_c2w(
     c2w: np.ndarray,
     potential_field,
@@ -187,22 +155,13 @@ def score_c2w(
     task_params: Dict[str, Any],
     target_region: Dict[str, Any],
 ) -> Tuple[float, float, float]:
-    """Evaluate the potential field score for a given camera pose.
-
-    AUDIT FIX (v20-prep): adds a small additive "look-at" tie-breaker
-    (+_LOOKAT_TIEBREAKER_WEIGHT if all target objects are in FoV) to the
-    returned total_score. This biases the SFT path-finder toward in-FoV
-    poses *as a tie-breaker only* — the env reward is unaffected because this
-    bonus lives in the SFT-side scoring wrapper, not in
-    SpatialPotentialField.compute_score itself.
-
-    The reported pos_score / ori_score are NOT modified, so downstream
-    statistics (initial_score / final_score logged in stats.json) stay
-    consistent with the env-side definition.
-
-    Returns:
-        (total_score_with_lookat_bias, position_score, orientation_score)
-    """
+    """Return the unmodified runtime metric, never a search-only bonus."""
+    item = (task_params or {}).get("_canonical_item")
+    if item is not None:
+        from vagen.envs.active_spatial.canonical_task_metrics import score_canonical_task
+        metric = score_canonical_task(item, c2w)
+        value = float(metric["score"])
+        return value, value, value
     cam_pos, cam_forward = get_camera_pos_and_forward(c2w)
     scoring_params = dict(task_params or {})
     scoring_params["_camera_pose_c2w"] = np.asarray(c2w, dtype=np.float64).tolist()
@@ -218,16 +177,22 @@ def score_c2w(
     pos = float(result.position_score)
     ori = float(result.orientation_score)
 
-    # Look-at tie-breaker: small bonus when all target objects are in FoV.
-    # The flag is set by SpatialPotentialField._combine_scores when target_objects
-    # is provided (which is true for every per-task scorer).
-    try:
-        if result.details.get("all_targets_in_fov", False):
-            total = min(1.0, total + _LOOKAT_TIEBREAKER_WEIGHT)
-    except AttributeError:
-        pass
-
+    # Never mix search preferences into the metric used for success labels.
     return total, pos, ori
+
+
+def task_success(c2w, score, task_params, threshold):
+    item = (task_params or {}).get("_canonical_item")
+    if item is not None:
+        from vagen.envs.active_spatial.canonical_task_metrics import score_canonical_task
+        return bool(score_canonical_task(item, c2w)["success"])
+    return score >= threshold
+
+
+def movement_actions(task_params):
+    if (task_params or {}).get("_action_space") == "strafe":
+        return ["move_forward", "move_backward", "move_left", "move_right", "turn_left", "turn_right"]
+    return MOVEMENT_ACTIONS
 
 
 # Minimum effective improvement floor (prevents threshold from collapsing to 0)
@@ -264,7 +229,7 @@ def _greedy_single_step(
     best_pos = current_pos
     best_ori = current_ori
 
-    for action in MOVEMENT_ACTIONS:
+    for action in movement_actions(task_params):
         candidate = simulate_action(c2w, action, step_translation, step_rotation_deg)
 
         # Collision check
@@ -339,7 +304,7 @@ def _beam_search_turn(
         candidates: List[Tuple[float, float, float, np.ndarray, List[str]]] = []
 
         for (_, _, _, state_c2w, actions_so_far) in beam:
-            for action in MOVEMENT_ACTIONS:
+            for action in movement_actions(task_params):
                 candidate_c2w = simulate_action(
                     state_c2w, action, step_translation, step_rotation_deg
                 )
@@ -818,7 +783,7 @@ def _actions_to_steps(
 
     i = 0
     while i < len(flat_actions):
-        if cur_total >= success_threshold:
+        if task_success(c2w, cur_total, task_params, success_threshold):
             break
 
         chunk = flat_actions[i: i + max_actions_per_turn]
@@ -834,7 +799,7 @@ def _actions_to_steps(
             accepted.append(act)
             # Stop this turn early if success already reached mid-chunk
             t, p, o = score_c2w(c2w, potential_field, task_type, task_params, target_region)
-            if t >= success_threshold:
+            if task_success(c2w, t, task_params, success_threshold):
                 cur_total, cur_pos, cur_ori = t, p, o
                 break
         else:
@@ -918,7 +883,7 @@ def find_trajectory_guided(
         task_type, task_params, target_region, init_c2w
     )
 
-    if target_pos is None:
+    if target_pos is None or (task_params or {}).get("_action_space") == "strafe":
         if verbose:
             print(f"[GuidedPathFinder] item={item_idx}: no target geometry, "
                   "falling back to beam search.")
@@ -1024,10 +989,10 @@ def find_trajectory_guided(
 
     if verbose:
         print(f"  After geometry phases: score={cur_total:.4f}, "
-              f"actions={total_actions}, success={cur_total >= success_threshold}")
+              f"actions={total_actions}, success={task_success(c2w, cur_total, task_params, success_threshold)}")
 
     # ── Phase 3: Beam-search fine-tune (handles discretization residual) ──────
-    if cur_total < success_threshold and total_actions < max_total_actions:
+    if not task_success(c2w, cur_total, task_params, success_threshold) and total_actions < max_total_actions:
         remaining = max_total_actions - total_actions
         if verbose:
             print(f"  Phase 3: beam search fine-tune (budget={remaining}, beam={beam_width})")
@@ -1072,7 +1037,7 @@ def find_trajectory_guided(
         final_c2w=c2w,
         initial_score=init_total,
         final_score=cur_total,
-        success=cur_total >= success_threshold,
+        success=task_success(c2w, cur_total, task_params, success_threshold),
         total_actions=total_actions,
         scene_id=scene_id,
         item_idx=item_idx,
@@ -1168,7 +1133,7 @@ def find_trajectory(
         print(f"[PathFinder] item={item_idx} scene={scene_id} task={task_type} mode={mode}")
         print(f"  Initial score: {current_total:.4f} (pos={current_pos:.4f}, ori={current_ori:.4f})")
 
-    while total_actions < max_total_actions and current_total < success_threshold:
+    while total_actions < max_total_actions and not task_success(c2w, current_total, task_params, success_threshold):
         # ── Adaptive min_improvement ─────────────────────────────────────────
         if adaptive_min_improvement:
             remaining = max(0.0, success_threshold - current_total)
@@ -1229,7 +1194,7 @@ def find_trajectory(
             for _ in range(max_actions_per_turn):
                 if total_actions >= max_total_actions:
                     break
-                if current_total >= success_threshold:
+                if task_success(c2w, current_total, task_params, success_threshold):
                     break
 
                 best_action, best_c2w, best_total, best_pos, best_ori = _greedy_single_step(
@@ -1263,7 +1228,7 @@ def find_trajectory(
                 # sweep (up to full 360°) as a last-resort escape before giving up.
                 MAX_ESCAPE_STEPS = 12  # 12 × 30° = 360°
                 escape_found = False
-                for action in ROTATION_ACTIONS:
+                for action in (a for a in movement_actions(task_params) if a in ROTATION_ACTIONS):
                     seq_c2w = c2w.copy()
                     for n in range(1, MAX_ESCAPE_STEPS + 1):
                         seq_c2w = simulate_action(seq_c2w, action, step_translation, step_rotation_deg)
@@ -1293,7 +1258,7 @@ def find_trajectory(
                 escape_pos_val = current_pos
                 escape_ori_val = current_ori
 
-                for action in ROTATION_ACTIONS:
+                for action in (a for a in movement_actions(task_params) if a in ROTATION_ACTIONS):
                     candidate = simulate_action(c2w, action, step_translation, step_rotation_deg)
                     cand_total, cand_pos, cand_ori = score_c2w(
                         candidate, potential_field, task_type, task_params, target_region
@@ -1321,7 +1286,7 @@ def find_trajectory(
                     escape_pos_val = current_pos
                     escape_ori_val = current_ori
 
-                    for action in ROTATION_ACTIONS:
+                    for action in (a for a in movement_actions(task_params) if a in ROTATION_ACTIONS):
                         seq_c2w = c2w.copy()
                         for n in range(2, MAX_ESCAPE_STEPS + 1):
                             seq_c2w = simulate_action(
@@ -1369,7 +1334,7 @@ def find_trajectory(
                   f"score {score_turn_start:.4f} → {current_total:.4f}")
 
     if verbose:
-        print(f"  Final score: {current_total:.4f}, success={current_total >= success_threshold}, "
+        print(f"  Final score: {current_total:.4f}, success={task_success(c2w, current_total, task_params, success_threshold)}, "
               f"steps={len(steps)}, total_actions={total_actions}")
 
     return Trajectory(
@@ -1377,7 +1342,7 @@ def find_trajectory(
         final_c2w=c2w,
         initial_score=init_total,
         final_score=current_total,
-        success=current_total >= success_threshold,
+        success=task_success(c2w, current_total, task_params, success_threshold),
         total_actions=total_actions,
         scene_id=scene_id,
         item_idx=item_idx,

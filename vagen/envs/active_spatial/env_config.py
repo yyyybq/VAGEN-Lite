@@ -36,6 +36,8 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     
     # ====== Dataset Configuration ======
     jsonl_path: str = ""  # Path to dataset JSONL file
+    require_verified_dataset: bool = False  # Frozen legacy runs retain their original contract.
+    dataset_contract_path: str = ""
     dataset_root: str = ""  # Root path for resolving relative image paths
     total_lines: int = -1  # Number of lines in JSONL (-1 = auto-count)
     include_task_types: Optional[List[str]] = None  # Optional allow-list for JSONL task_type
@@ -87,6 +89,12 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # "dual"      : r_t = α_p·(pos_t − pos_{t-1}) + α_o·(ori_t − ori_{t-1})  ★ v18_dual: decoupled channels
     potential_field_progress_mode: str = "delta"
     potential_field_gamma: float = 1.0   # ★ Ng1999 γ for "potential" mode. 1.0 ⇒ equivalent to "delta".
+    # Reward-only ablation switches.  These do not disable the potential-field
+    # scorer, canonical gate, success decision, or termination.  Defaults keep
+    # the historical behavior byte-for-byte at the formula level.
+    enable_potential_shaping_reward: bool = True
+    enable_near_success_reward: bool = True
+    enable_visibility_shaping_reward: bool = True
     # Per-channel reward scales for "dual" mode (S1 decoupled pos/ori shaping)
     position_reward_scale: float = 0.0     # ★ α_pos: scale for Δposition_score in "dual" mode
     orientation_reward_scale: float = 0.0  # ★ α_ori: scale for Δorientation_score in "dual" mode
@@ -181,6 +189,7 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     
     # ====== Prompt Configuration ======
     prompt_format: str = "free_think"  # "free_think", "no_think", "approach"
+    history_window_size: int = 1  # Observations retained, including the current frame
     max_actions_per_step: int = 5  # Maximum actions allowed per step
     action_sep: str = "|"  # Separator for multiple actions
     image_placeholder: str = "<image>"  # Placeholder for image in prompt
@@ -211,6 +220,8 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
 
     def __post_init__(self):
         """Post-initialization validation."""
+        if self.history_window_size < 1:
+            raise ValueError("history_window_size must be positive")
         # Sync legacy render dimensions
         if self.image_width == 512 and self.render_width != 512:
             self.image_width = self.render_width

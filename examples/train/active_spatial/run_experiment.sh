@@ -36,7 +36,9 @@ cd "${BASEDIR}" || { echo "ERROR: cannot cd to BASEDIR=${BASEDIR}"; exit 1; }
 ulimit -n 1048576 2>/dev/null || ulimit -n 65536 2>/dev/null || true
 
 # ── Python 路径：优先共享 conda env，其次本地 scratch（向后兼容） ──
-if [ -f "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python" ]; then
+if [ -n "${VAGEN_PYTHON:-}" ]; then
+    PYTHON="${VAGEN_PYTHON}"
+elif [ -f "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python" ]; then
     PYTHON=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python
 elif [ -f "/mnt/umm/shared_env/miniconda3/envs/vagen-lite/bin/python" ]; then
     PYTHON=/mnt/umm/shared_env/miniconda3/envs/vagen-lite/bin/python
@@ -110,7 +112,7 @@ MAX_RESPONSE_LENGTH=512
 # 轨迹参数（MAX_TRAJECTORY_LENGTH → rollout.max_num_batched_tokens）
 MAX_TRAJECTORY_LENGTH=16000   # 用于设置 max_num_batched_tokens
 MAX_TURNS=12
-WINDOW_SIZE=5    # 旧版 masked_gae window_size；VAGEN-Lite no_concat_gae 中不使用，保留兼容
+WINDOW_SIZE=1    # Number of observations retained in the policy history
 
 # PPO mini-batch
 MINI_BATCH_SIZE=8        # 旧版 rollout_manager.mini_batch_size；VAGEN-Lite 中不使用
@@ -158,6 +160,17 @@ fi
 
 echo "Loading experiment config: $EXPERIMENT_CONFIG"
 source "$EXPERIMENT_CONFIG"
+
+# Qwen3-VL uses a different multimodal processor/RoPE contract.  Fail early
+# with an actionable environment error instead of discovering this after Ray
+# has allocated all GPUs.  Set SKIP_QWEN3_ENV_CHECK=1 only for an already
+# validated vendor backport.
+if [[ "$MODEL_PATH" == *Qwen3-VL* && "${SKIP_QWEN3_ENV_CHECK:-0}" != "1" ]]; then
+    if ! "$PYTHON" "$BASEDIR/scripts/check_qwen3_vl_env.py"; then
+        echo "ERROR: Qwen3-VL environment check failed; see docs/active_spatial_qwen3vl_migration.md" >&2
+        exit 2
+    fi
+fi
 
 # HTTP renderer is the default remote path. Preserve explicit legacy WS usage.
 if [ "$RENDER_MODE" = "remote" ] && [ "$RENDER_PROTOCOL" = "http" ] && [ "$RENDER_PORT" = "8777" ]; then
@@ -320,7 +333,11 @@ echo "=============================================="
 
 # ========================= GENERATE ENV YAMLs =========================
 # 将旧格式 env_config_*.yaml 转换为 VAGEN-Lite 的 envs[] YAML 格式
-ENV_CONFIG_PATH="$SCRIPT_DIR/$ENV_CONFIG"
+if [[ "$ENV_CONFIG" = /* ]]; then
+    ENV_CONFIG_PATH="$ENV_CONFIG"
+else
+    ENV_CONFIG_PATH="$SCRIPT_DIR/$ENV_CONFIG"
+fi
 TRAIN_YAML="${EXPERIMENT_DIR}/train.yaml"
 VAL_YAML="${EXPERIMENT_DIR}/val.yaml"
 
@@ -343,144 +360,68 @@ import json, os, yaml, sys
 with open("${ENV_CONFIG_PATH}") as f:
     cfg = yaml.safe_load(f)
 
-# 找到第一个 env 条目（旧格式：env1: {env_config: {...}, train_size: N, test_size: M}）
-env_key = list(cfg.keys())[0]
-env_entry = cfg[env_key]
+from data_gen.active_spatial_pipeline.splits import (
+    read_rows, select_rows, split_training_rows, write_rows, assert_disjoint, id_candidates,
+)
+env_entry = cfg[next(iter(cfg))]
 env_config = dict(env_entry.get("env_config", {}))
-train_size = env_entry.get("train_size", 259)
-test_size = env_entry.get("test_size", 19)
 
-# ActiveSpatial silently falls back to a synthetic scene when its JSONL is
-# absent. That behavior is useful in unit tests but invalid for real training.
-train_jsonl = env_config.get("jsonl_path", "")
-if not train_jsonl or not os.path.isfile(train_jsonl):
-    raise FileNotFoundError(f"ActiveSpatial training JSONL not found: {train_jsonl}")
+def split_size(name, default):
+    nested = env_config.pop(name, None)
+    outer = env_entry.get(name)
+    if outer is not None and nested is not None and int(outer) != int(nested):
+        raise ValueError(f"conflicting {name} in env entry and env_config")
+    return int(outer if outer is not None else nested) if outer is not None or nested is not None else default
 
-# Optional in-domain val override:
-# 1) ID_VAL_JSONL / ID_VAL_N_ENVS: use a custom ID val jsonl directly.
-# 2) ID_VAL_DELTA_BOOST_N: build an ID val jsonl with at least N delta_control tasks.
+train_size = split_size("train_size", None)
+test_size = split_size("test_size", 19)
+source_jsonl = env_config["jsonl_path"]
+source_rows = read_rows(source_jsonl)
 id_val_jsonl = "${ID_VAL_JSONL:-}"
 id_val_n = int("${ID_VAL_N_ENVS:-0}")
-id_val_delta_boost_n = int("${ID_VAL_DELTA_BOOST_N:-0}")
-id_val_include_types = [t.strip() for t in "${ID_VAL_INCLUDE_TASK_TYPES:-}".split(",") if t.strip()]
-id_val_exclude_types = {t.strip() for t in "${ID_VAL_EXCLUDE_TASK_TYPES:-}".split(",") if t.strip()}
+validation = read_rows(id_val_jsonl) if id_val_jsonl else None
+validation_source = id_val_jsonl or source_jsonl
+if validation is not None and id_val_n > 0:
+    if id_val_n > len(validation):
+        raise ValueError("ID_VAL_N_ENVS exceeds available validation rows")
+    validation = validation[:id_val_n]
+csv = lambda value: [t.strip() for t in value.split(",") if t.strip()]
+train_exclude = set(env_config.get("exclude_task_types", ["delta_control"]))
+train_exclude.update(csv("${TRAIN_EXCLUDE_TASK_TYPES:-}"))
+val_exclude = set(env_config.get("exclude_task_types", ["delta_control"]))
+val_exclude.update(csv("${ID_VAL_EXCLUDE_TASK_TYPES:-}"))
+train_rows, val_rows = split_training_rows(
+    source_rows, train_size=train_size, test_size=test_size, validation=validation,
+    train_include=env_config.get("include_task_types"),
+    train_exclude=train_exclude,
+    val_include=csv("${ID_VAL_INCLUDE_TASK_TYPES:-}") or env_config.get("include_task_types"),
+    val_exclude=val_exclude, delta_min=int("${ID_VAL_DELTA_BOOST_N:-0}"),
+)
+if val_rows:
+    eligible_id = id_candidates(train_rows, val_rows)
+    if len(eligible_id) != len(val_rows):
+        raise ValueError("ID holdout contains unseen scenes/tasks/categories; supply a genuine ID_VAL_JSONL or classify it as OOD")
+env_config["jsonl_path"] = "${EXPERIMENT_DIR}/train_manifest_v2.jsonl"
+id_val_jsonl = "${EXPERIMENT_DIR}/val_manifest_v2.jsonl"
+write_rows(env_config["jsonl_path"], train_rows)
+write_rows(id_val_jsonl, val_rows)
+train_size, test_size, id_val_n = len(train_rows), len(val_rows), len(val_rows)
+# Filtering is materialized, so the environment cannot remap indices again.
+env_config["include_task_types"] = None
+env_config["exclude_task_types"] = []
+env_config["history_window_size"] = int("${WINDOW_SIZE}")
+print(f"[INFO] isolated manifests: train={train_size}, ID={test_size}")
 
-def _task_type(entry: dict) -> str:
-    t = entry.get("task_type", "")
-    if t:
-        return str(t)
-    desc = str(entry.get("task_description", "")).lower()
-    if "closer" in desc or "farther" in desc:
-        return "delta_control"
-    return "unknown"
-
-def _allowed_task_type(entry: dict) -> bool:
-    t = _task_type(entry)
-    if id_val_include_types and t not in id_val_include_types:
-        return False
-    if id_val_exclude_types and t in id_val_exclude_types:
-        return False
-    return True
-
-if (id_val_delta_boost_n > 0 or id_val_include_types or id_val_exclude_types) and not id_val_jsonl:
-    src_jsonl = env_config.get("jsonl_path", "")
-    if src_jsonl and os.path.isfile(src_jsonl):
-        with open(src_jsonl) as f:
-            all_items = [json.loads(line) for line in f if line.strip()]
-
-        base_start = int(train_size)
-        base_end = min(len(all_items), int(train_size + test_size))
-        base_items = all_items[base_start:base_end]
-
-        if id_val_include_types or id_val_exclude_types:
-            kept_items = [e for e in base_items if _allowed_task_type(e)]
-            target_total = len(base_items)
-            need_fill = max(0, target_total - len(kept_items))
-            seen = {json.dumps(e, sort_keys=True, ensure_ascii=False) for e in kept_items}
-            extras = []
-            for e in all_items:
-                if not _allowed_task_type(e):
-                    continue
-                k = json.dumps(e, sort_keys=True, ensure_ascii=False)
-                if k in seen:
-                    continue
-                extras.append(e)
-                seen.add(k)
-                if len(extras) >= need_fill:
-                    break
-            base_items = kept_items + extras[:need_fill]
-            print(
-                f"[INFO] ID val task filter: include={id_val_include_types or 'ALL'} "
-                f"exclude={sorted(id_val_exclude_types) or 'NONE'} -> total={len(base_items)}"
-            )
-
-        delta_items = [e for e in base_items if _task_type(e) == "delta_control"]
-        non_delta_items = [e for e in base_items if _task_type(e) != "delta_control"]
-
-        need_extra = max(0, id_val_delta_boost_n - len(delta_items))
-        extra_delta = []
-        if need_extra > 0:
-            seen = {json.dumps(e, sort_keys=True, ensure_ascii=False) for e in base_items}
-            for e in all_items:
-                if _task_type(e) != "delta_control":
-                    continue
-                k = json.dumps(e, sort_keys=True, ensure_ascii=False)
-                if k in seen:
-                    continue
-                extra_delta.append(e)
-                seen.add(k)
-                if len(extra_delta) >= need_extra:
-                    break
-
-        # Keep total ID val size unchanged by replacing tail non-delta items.
-        final_delta = delta_items + extra_delta[:need_extra]
-        keep_non_delta_n = max(0, len(base_items) - len(final_delta))
-        boosted_items = non_delta_items[:keep_non_delta_n] + final_delta
-
-        id_val_jsonl = "${EXPERIMENT_DIR}/val_id_delta_boost.jsonl"
-        with open(id_val_jsonl, "w") as f:
-            for e in boosted_items:
-                f.write(json.dumps(e, ensure_ascii=False) + "\n")
-        id_val_n = len(boosted_items)
-
-        final_delta_n = sum(1 for e in boosted_items if _task_type(e) == "delta_control")
-        if id_val_delta_boost_n > 0:
-            print(
-                f"[INFO] ID delta boost enabled: target={id_val_delta_boost_n}, "
-                f"actual={final_delta_n}, total_id_n={id_val_n}, file={id_val_jsonl}"
-            )
-        else:
-            print(f"[INFO] ID val override built: total_id_n={id_val_n}, file={id_val_jsonl}")
-    else:
-        print(f"[WARN] ID delta boost skipped: source jsonl not found: {src_jsonl}")
-
-if id_val_jsonl and id_val_n <= 0 and os.path.isfile(id_val_jsonl):
-    id_val_n = sum(1 for _ in open(id_val_jsonl) if _.strip())
-
-# Optional training data filter: TRAIN_EXCLUDE_TASK_TYPES
-# If set, load the training jsonl, strip out the excluded task types, write a
-# filtered copy into EXPERIMENT_DIR, and update env_config + train_size.
-train_exclude_types = {t.strip() for t in "${TRAIN_EXCLUDE_TASK_TYPES:-}".split(",") if t.strip()}
-if train_exclude_types:
-    src_train_jsonl = env_config.get("jsonl_path", "")
-    if src_train_jsonl and os.path.isfile(src_train_jsonl):
-        with open(src_train_jsonl) as f:
-            all_train = [json.loads(l) for l in f if l.strip()]
-        filtered_train = [e for e in all_train if _task_type(e) not in train_exclude_types]
-        filtered_path = "${EXPERIMENT_DIR}/train_filtered.jsonl"
-        with open(filtered_path, "w") as f:
-            for e in filtered_train:
-                f.write(json.dumps(e, ensure_ascii=False) + "\n")
-        removed = len(all_train) - len(filtered_train)
-        print(
-            f"[INFO] TRAIN_EXCLUDE_TASK_TYPES={sorted(train_exclude_types)}: "
-            f"removed {removed} entries ({removed/len(all_train)*100:.1f}%), "
-            f"kept {len(filtered_train)}, writing to {filtered_path}"
-        )
-        env_config["jsonl_path"] = filtered_path
-        train_size = len(filtered_train)
-    else:
-        print(f"[WARN] TRAIN_EXCLUDE_TASK_TYPES set but source jsonl not found: {src_train_jsonl}")
+def prepare_external_val(path, limit, name):
+    rows = select_rows(read_rows(path), exclude=val_exclude)
+    if limit > len(rows):
+        raise ValueError(f"{name}: requested {limit} rows but only {len(rows)} eligible")
+    rows = rows[:limit]
+    validate_dataset(rows, path, dict(env_config))
+    assert_disjoint(train_rows, rows)
+    destination = f"${EXPERIMENT_DIR}/{name}_manifest_v2.jsonl"
+    write_rows(destination, rows)
+    return destination, len(rows)
 
 # 覆盖渲染配置
 remote_env_urls = """${REMOTE_ENV_URLS}""".strip()
@@ -515,12 +456,29 @@ def wrap_remote_config(cfg):
         out["token"] = remote_env_token
     return out
 
+def validate_dataset(rows, source, runtime):
+    from dataclasses import fields
+    from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+    from vagen.envs.active_spatial.dataset_contract import validate_contract
+    legacy = "${ALLOW_LEGACY_ACTIVE_SPATIAL:-0}" == "1"
+    runtime["require_verified_dataset"] = not legacy
+    runtime["dataset_contract_path"] = str(source) + ".contract.json"
+    if not legacy:
+        keys = {f.name for f in fields(ActiveSpatialEnvConfig)}
+        config = ActiveSpatialEnvConfig(**{k:v for k,v in runtime.items() if k in keys})
+        validate_contract(rows, config, runtime["dataset_contract_path"])
+    else:
+        print("[WARNING] explicit legacy reproduction: dataset has NOT passed canonical runtime admission")
+    return runtime
+
+validate_dataset(train_rows, source_jsonl, env_config)
+
 train_yaml = {
     "envs": [{
         "name": env_entry_name,
         "n_envs": train_size,
         "data_source": "active_spatial",
-        "seed": [0, train_size],
+        "seed_list": list(range(train_size)),
         "max_turns": ${MAX_TURNS},
         "response_length_per_turn": ${MAX_RESPONSE_LENGTH},
         "config": wrap_remote_config(env_config),
@@ -528,8 +486,10 @@ train_yaml = {
 }
 
 id_env_config = dict(env_config)
+if val_rows:
+    validate_dataset(val_rows, validation_source, id_env_config)
 id_env_n = test_size
-id_env_seed = [train_size, train_size + test_size]
+id_env_seed = [0, max(0, test_size - 1)]
 id_env_seed_list = None
 id_env_source = "active_spatial"
 if id_val_jsonl:
@@ -552,7 +512,7 @@ id_val_spec = {
 if id_env_seed_list is not None:
     id_val_spec["seed_list"] = id_env_seed_list
 
-val_envs = [id_val_spec]
+val_envs = [id_val_spec] if id_env_n else []
 
 # Optional OOD val env (Plan A): if OOD_VAL_JSONL is set, add a second val env
 # that points to a different jsonl_path (different scenes).
@@ -563,13 +523,15 @@ ood_val_n = ${OOD_VAL_N_ENVS:-0}
 if ood_val_jsonl and ood_val_n > 0:
     if not os.path.isfile(ood_val_jsonl):
         raise FileNotFoundError(f"ActiveSpatial OOD validation JSONL not found: {ood_val_jsonl}")
+    ood_val_jsonl, ood_val_n = prepare_external_val(ood_val_jsonl, ood_val_n, "ood")
     ood_env_config = dict(env_config)
     ood_env_config["jsonl_path"] = ood_val_jsonl
+    ood_env_config["dataset_contract_path"] = "${OOD_VAL_JSONL:-}" + ".contract.json"
     val_envs.append({
         "name": env_entry_name,
         "n_envs": ood_val_n,
         "data_source": "active_spatial_ood",
-        "seed": [0, ood_val_n],  # index 0..ood_val_n-1 in the OOD jsonl
+        "seed_list": list(range(ood_val_n)),
         "max_turns": ${MAX_TURNS},
         "response_length_per_turn": ${MAX_RESPONSE_LENGTH},
         "config": wrap_remote_config(ood_env_config),
@@ -586,13 +548,16 @@ if ood_splits_dir and _os.path.isdir(ood_splits_dir):
         split_name = _os.path.basename(ood_file).replace(".jsonl", "")  # e.g. "ood_scene"
         n_items = sum(1 for _ in open(ood_file))
         n_envs_this = min(n_items, ood_splits_n)
+        ood_contract = ood_file + ".contract.json"
+        ood_file, n_envs_this = prepare_external_val(ood_file, n_envs_this, split_name)
         ood_cfg = dict(env_config)
         ood_cfg["jsonl_path"] = ood_file
+        ood_cfg["dataset_contract_path"] = ood_contract
         val_envs.append({
             "name": env_entry_name,
             "n_envs": n_envs_this,
             "data_source": f"active_spatial_{split_name}",
-            "seed": [0, n_envs_this],
+            "seed_list": list(range(n_envs_this)),
             "max_turns": ${MAX_TURNS},
             "response_length_per_turn": ${MAX_RESPONSE_LENGTH},
             "config": wrap_remote_config(ood_cfg),

@@ -16,6 +16,7 @@ import heapq
 import logging
 import os
 import random
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
@@ -47,6 +48,20 @@ from verl.workers.rollout.replica import TokenOutput, get_rollout_replica_class
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+
+
+def _collapse_qwen3_vl_image_tokens(text: str) -> str:
+    """Collapse processor-expanded Qwen3-VL image pads before reprocessing.
+
+    Qwen3-VL expands one image placeholder into many ``<|image_pad|>`` tokens
+    in ``input_ids``.  Decoding those ids and passing the text back to the
+    processor would make it interpret every pad as a separate image.
+    """
+    return re.sub(
+        r"(<\|vision_start\|>)(?:<\|image_pad\|>)+(<\|vision_end\|>)",
+        r"\1<|image_pad|>\2",
+        text,
+    )
 
 
 class AsyncLLMServerManager:
@@ -556,6 +571,7 @@ class AgentLoopWorkerBase:
                 if (
                     self.processor is not None
                     and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__
+                    and "Qwen3VL" not in type(self.processor).__name__
                 ):
                     from verl.models.transformers.qwen2_vl import get_rope_index
 
@@ -852,6 +868,36 @@ class AgentLoopWorkerBase:
 
                     position_ids = compute_position_id_with_mask(attention_mask)  # adapter rebuilds U1 THW indexes
 
+                elif (
+                    self.processor is not None
+                    and "Qwen3VL" in type(self.processor).__name__
+                ):
+                    # Qwen3-VL changed the multimodal RoPE contract from Qwen2-VL:
+                    # the processor emits ``mm_token_type_ids`` and the model computes
+                    # the 4-way M-RoPE internally.  Do not call the Qwen2 helper (it
+                    # has a different signature and silently produces wrong indices).
+                    # Keep all processor-produced multimodal metadata, while using a
+                    # regular 1-D mask here; Qwen3's forward promotes it to M-RoPE.
+                    images = getattr(output, "multi_modal_data", {}).get("image", None)
+                    if images is not None and len(images) > 0:
+                        # Preserve Qwen3's vision sentinel tokens, but collapse
+                        # the expanded image-pad run produced by the first
+                        # processor pass.  Reprocessing the expanded run makes
+                        # Qwen3 index one image grid per pad and raises an
+                        # out-of-bounds error for every normal image.
+                        decoded_text = _collapse_qwen3_vl_image_tokens(
+                            self.tokenizer.decode(input_ids.squeeze(0), skip_special_tokens=False)
+                        )
+                        mm = self.processor(
+                            text=[decoded_text],
+                            images=images,
+                            return_tensors="pt",
+                        )
+                        mm.pop("input_ids", None)
+                        mm.pop("attention_mask", None)
+                        multi_modal_inputs = dict(mm)
+                    position_ids = compute_position_id_with_mask(attention_mask)
+
                 else:
                     position_ids = compute_position_id_with_mask(attention_mask)  # (1, seq_len)
                 enable_async_reward = (
@@ -954,7 +1000,14 @@ class AgentLoopWorkerBase:
 
         # add reward_extra_info to non_tensor_batch
         reward_extra_infos = [input.extra_fields.get("reward_extra_info", {}) for input in inputs]
-        reward_extra_keys = list(reward_extra_infos[0].keys())
+        # Reward instrumentation may be environment-specific, and an exception
+        # turn can legitimately omit fields.  Keep only fields defined for every
+        # sample so downstream validation metrics never receive synthetic None.
+        reward_extra_keys = (
+            set.intersection(*(set(info.keys()) for info in reward_extra_infos))
+            if reward_extra_infos
+            else set()
+        )
         for key in reward_extra_keys:
             non_tensor_batch[key] = np.array([info[key] for info in reward_extra_infos])
 

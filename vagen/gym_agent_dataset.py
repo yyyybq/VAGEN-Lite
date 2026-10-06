@@ -158,8 +158,21 @@ def _generate_seeds_for_spec(
     rng = random.Random(rng_seed)
 
     if length == 1:
+        if spec.name in ("ActiveSpatial", "active_spatial") or (spec.name == "RemoteEnv" and spec.config.get("jsonl_path")):
+            if directive[0] < 0:
+                raise ValueError("Active Spatial start index must be nonnegative")
+            return list(range(directive[0], directive[0] + spec.n_envs))
         return _generate_from_len_one(rng, spec.n_envs)
     if length == 2:
+        if spec.name in ("ActiveSpatial", "active_spatial") or (
+            spec.name == "RemoteEnv" and spec.config.get("jsonl_path")
+        ):
+            # Active Spatial uses seeds as row indices, not simulator RNG seeds.
+            # Interpret [start, stop] as a half-open dataset range.
+            start, stop = directive
+            if start < 0 or stop - start < spec.n_envs:
+                raise ValueError("Active Spatial index range cannot supply n_envs unique rows")
+            return list(range(start, start + spec.n_envs))
         return _generate_from_len_two(rng, spec.n_envs, directive[0], directive[1])
     if length == 3:
         return _generate_from_len_three(rng, spec.n_envs, directive[0], directive[1], directive[2])
@@ -183,7 +196,7 @@ class AgenticDataset(Dataset):
     ):
         # load yaml
         env_specs = load_envspecs(data_files).specs
-        base_seed = config.get("base_seed", 0)
+        base_seed = config.get("base_seed", config.get("seed", 0))
         self.items = []
 
         for spec_idx, spec in enumerate(env_specs):

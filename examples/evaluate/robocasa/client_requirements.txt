@@ -1,0 +1,3 @@
+# Match the StarVLA server's wire protocol; install into a project-local target.
+websockets==16.1.1
+msgpack==1.2.3

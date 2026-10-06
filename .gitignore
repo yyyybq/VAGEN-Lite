@@ -32,6 +32,8 @@ data/
 exps/
 wandb/
 outputs/
+/playground/Runtime/
+/playground/Experiments/
 room_data/
 rollouts/
 
@@ -44,6 +46,10 @@ rollouts/
 # Runtime junk
 *.pid
 *.bak
+
+# Isolated local Qwen3-VL runtimes (keep on disk, never vendor environments)
+/.venv-qwen3vl/
+/.venv-qwen3vl-runtime/
 
 # Nested checkouts that have their own GitHub remotes
 cjepa/
@@ -78,3 +84,32 @@ data_gen/**/*_render_audit.jsonl
 /v15_per5action_*
 data_gen/**/*_summary.json
 data_gen/**/*clean_layout*.jsonl
+# Nested checkouts / huge local worktrees
+ele/
+playground/
+
+# Model weights / checkpoints
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+**/checkpoints/
+**/global_step_*/
+**/huggingface/*.safetensors
+**/actor/huggingface/
+**/critic/huggingface/
+
+# Generated datasets and pipeline dumps
+data_gen/**/artifacts/
+data_gen/**/output/
+data_gen/**/output_*/
+data_gen/**/ood_splits_v2/
+data_gen/sapave/output/
+data_gen/active_spatial_pipeline/output_v2/*.jsonl
+data_gen/active_spatial_sft/output_*/
+
+# Diagnosis run dumps (keep markdown reports)
+docs/diagnosis/**/*.json
+docs/diagnosis/**/*.jsonl
+docs/diagnosis/**/*.png
+docs/diagnosis/**/*.csv

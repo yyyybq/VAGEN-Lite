@@ -2,6 +2,10 @@
 
 Date: 2026-08-18
 
+> The validity findings below remain useful, but job/launch status is an August
+> snapshot. Later D0-corrected runs and the separate R1 support-subset experiment
+> are reconciled in the [2026-10-02 takeover audit](active_spatial_takeover_20261002/REPORT.md).
+
 Gate: **INCONCLUSIVE — clean restart partially launched; Cambrian anchor still pending**
 
 Reason: Qwen v46 real-batch impact is now established, both canonical clean acceptance smokes passed with real rollout and actor update, and the Qwen clean anchor has been launched on `10.119.31.101` using the jumpbox-local renderer. The Cambrian clean anchor was not launched because only one 8-GPU training node was reachable during this run.

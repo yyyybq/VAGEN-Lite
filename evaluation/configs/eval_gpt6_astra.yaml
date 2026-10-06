@@ -1,0 +1,47 @@
+# GPT-6 Astra zero-shot Active Spatial config.
+# Prefer scripts/run_gpt6_id_ood_eval.py for the full ID/OOD matrix.
+eval_name: eval_gpt6_astra
+output_dir: evaluation/outputs/eval_gpt6_astra
+agent_type: model
+max_steps_per_episode: 12
+num_eval_episodes: 3
+seed_offset: 0
+use_wandb: false
+save_trajectories: true
+verbose: false
+
+env:
+  jsonl_path: data_gen/active_spatial_pipeline/output_100scenes/test.jsonl
+  render_backend: local
+  gs_root: /mnt/umm/users/yinbaiqiao/InteriorGS
+  gpu_device: 0
+  image_width: 256
+  image_height: 256
+  success_score_threshold: 0.65
+  action_space: strafe
+  enable_explicit_done: false
+  max_actions_per_step: 5
+  exclude_task_types:
+    - delta_control
+
+model:
+  provider: openai_responses
+  model_name: gpt-6-astra
+  checkpoint_path: null
+  temperature: 0.1
+  top_p: 0.95
+  max_tokens: 1024
+  reasoning_effort: low
+  max_retries: 6
+  request_timeout: 180.0
+
+task_types:
+  - absolute_positioning
+  - equidistance
+  - projective_relations
+  - centering
+  - occlusion_alignment
+  - fov_inclusion
+  - size_distance_invariance
+  - apparent_size_ordering
+  - screen_occupancy

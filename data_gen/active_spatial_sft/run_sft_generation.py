@@ -69,6 +69,8 @@ def _parse_args() -> argparse.Namespace:
     # ── Camera ───────────────────────────────────────────────────────────────
     p.add_argument("--step_translation", type=float, default=0.3,
                    help="Camera translation step in metres (must match RL env).")
+    p.add_argument("--action_space", choices=["legacy", "strafe"], default="legacy")
+    p.add_argument("--no_explicit_done", action="store_true")
     p.add_argument("--step_rotation_deg", type=float, default=30.0,
                    help="Camera rotation step in degrees (must match RL env).")
 
@@ -149,6 +151,8 @@ def main():
         # Camera
         step_translation=args.step_translation,
         step_rotation_deg=args.step_rotation_deg,
+        action_space=args.action_space,
+        enable_explicit_done=not args.no_explicit_done,
         # Path finding
         success_threshold=args.success_threshold,
         max_total_actions=args.max_total_actions,

@@ -1,0 +1,51 @@
+defaults:
+  - ../../../vagen/configs/eval_default
+
+# In-process RoboCasa eval. Must run with the policy venv python
+# (Python 3.10 + robocasa + mujoco). Do not use the kitchen 3.13 venv.
+
+fileroot: ${oc.env:HOME}/projects/vagen
+
+envs:
+  - name: RoboCasa
+    n_envs: 2
+    tag_id: robocasa_pickplace_counter_to_cabinet_local
+    seed: [0, 2, 1]
+    max_turns: 64
+    concat_multi_turn: false
+    config:
+      env_id: PickPlaceCounterToCabinet
+      split: target
+      prompt_format: free_think
+      action_horizon: 8
+      max_actions_per_step: 8
+      max_steps: 400
+      include_wrist_image: false
+      render_mode: vision
+      format_reward: 0.1
+      success_reward: 10.0
+    chat_config:
+      temperature: 0
+      max_tokens: 1024
+      top_p: 1.0
+
+experiment:
+  dump_dir: ${fileroot}/rollouts/eval_robocasa_local
+  default_max_turns: 64
+
+run:
+  backend: "openai"
+  base_seed: 0
+  max_concurrent_jobs: 2
+  resume: skip_completed
+  live_summary: true
+
+backends:
+  openai:
+    api_key: ""
+    base_url: null
+    model: "gpt-4.1-mini"
+    max_concurrency: 2
+    max_retries: 6
+    min_backoff: 0.5
+    max_backoff: 8.0

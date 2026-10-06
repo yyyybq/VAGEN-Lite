@@ -61,9 +61,15 @@ from .utils import (
 )
 from .spatial_potential_field import SpatialPotentialField, ScoreResult, create_potential_field
 from .collision_detector import CollisionDetector, CollisionResult, create_collision_detector
-from .visibility_checker import VisibilityChecker, VisibilityResult, create_visibility_checker, compute_visibility_reward
+from .visibility_checker import VisibilityChecker, VisibilityResult, create_visibility_checker
 from .canonical_camera import CANONICAL_CAMERA_H1_RESIZE_V1, build_canonical_camera
 from .canonical_task_metrics import score_canonical_task, uses_canonical_backend
+from .reward_trace import (
+    TurnRewardTrace,
+    near_reward_values,
+    potential_reward_values,
+    visibility_reward_values,
+)
 
 
 def _run_async(coro):
@@ -81,6 +87,11 @@ def _run_async(coro):
             return future.result()
     else:
         return asyncio.run(coro)
+
+
+def _canonical_shaping_score(metric: Dict[str, Any]) -> float:
+    """Select the reward potential without changing canonical success."""
+    return float(metric.get("shaping_score", metric["score"]))
 
 
 def runtime_render_camera_parameters(
@@ -169,9 +180,17 @@ class ActiveSpatialEnv(BaseEnv):
         include_task_types = set(config.include_task_types or [])
         exclude_task_types = set(config.exclude_task_types or [])
 
+        if config.require_verified_dataset:
+            from .dataset_contract import validate_contract
+            with self.jsonl_path.open(encoding="utf-8") as handle:
+                rows = [json.loads(line) for line in handle if line.strip()]
+            rows = [row for row in rows if (not include_task_types or row.get("task_type") in include_task_types)
+                    and row.get("task_type") not in exclude_task_types]
+            validate_contract(rows, config, config.dataset_contract_path or str(self.jsonl_path) + ".contract.json")
+
         # Count dataset lines, optionally filtering by task_type.
         if self.jsonl_path and self.jsonl_path.is_file():
-            if include_task_types or exclude_task_types:
+            if include_task_types or exclude_task_types or config.total_lines <= 0:
                 self._line_indices = []
                 with self.jsonl_path.open("r", encoding="utf-8") as f:
                     for line_idx, line in enumerate(f):
@@ -179,8 +198,8 @@ class ActiveSpatialEnv(BaseEnv):
                             continue
                         try:
                             item = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
+                        except json.JSONDecodeError as exc:
+                            raise ValueError(f"malformed dataset row {line_idx + 1} in {self.jsonl_path}") from exc
                         task_type = str(item.get("task_type", ""))
                         if include_task_types and task_type not in include_task_types:
                             continue
@@ -221,6 +240,12 @@ class ActiveSpatialEnv(BaseEnv):
         self._episode_start_time = 0
         self.total_reward = 0
         self.reward = 0
+        self._episode_serial = 0
+        self.current_jsonl_idx = -1
+        self.current_task_id = "unknown"
+        self.current_episode_id = "unknown"
+        self._reward_trace: Optional[TurnRewardTrace] = None
+        self._last_score_snapshot: Dict[str, Any] = {}
         self.prev_score = 0.0
         self.prev_pos = None
         self.prev_distance = None  # For progress reward
@@ -452,7 +477,11 @@ class ActiveSpatialEnv(BaseEnv):
         if seed is None:
             seed = 0
         
-        idx = seed % max(1, self.total_lines)
+        if self.total_lines > 0 and not 0 <= seed < self.total_lines:
+            raise IndexError(f"Active Spatial episode index {seed} outside [0, {self.total_lines})")
+        idx = seed if self.total_lines > 0 else 0
+        self.current_jsonl_idx = int(idx)
+        self._episode_serial += 1
         
         # Reset episode state
         self.episode_done = False
@@ -465,6 +494,8 @@ class ActiveSpatialEnv(BaseEnv):
         self.prev_distance = None  # Will be set after loading target pose
         self.prev_potential_score = 0.0  # Reset potential field score
         self.current_region_metrics = {}
+        self._last_score_snapshot = {}
+        self._reward_trace = None
         
         # Load episode data
         if self.jsonl_path and self.total_lines > 0:
@@ -495,6 +526,12 @@ class ActiveSpatialEnv(BaseEnv):
             }
         
         item = self.current_item
+        self.current_task_id = str(
+            item.get("task_id")
+            or f"{item.get('scene_id', 'unknown')}/{item.get('object_label', 'unknown')}/"
+               f"{item.get('preset', 'unknown')}/{item.get('source_index', idx)}"
+        )
+        self.current_episode_id = f"{self.current_task_id}#reset={self._episode_serial}"
         
         # Set scene for renderer (important for Gaussian Splatting)
         scene_id = item.get("scene_id", None)
@@ -598,7 +635,7 @@ class ActiveSpatialEnv(BaseEnv):
             curr_forward = curr_pose[:3, 2]  # ActiveSpatial movement/render convention: local +Z is forward
             canonical_metric = self._calculate_canonical_metric()
             if canonical_metric is not None:
-                initial_total = float(canonical_metric["score"])
+                initial_total = _canonical_shaping_score(canonical_metric)
                 initial_position = initial_total
                 initial_orientation = initial_total
                 self.current_region_metrics = {
@@ -617,6 +654,19 @@ class ActiveSpatialEnv(BaseEnv):
                 initial_position = float(getattr(initial_score, "position_score", 0.0))
                 initial_orientation = float(getattr(initial_score, "orientation_score", 0.0))
                 self.current_region_metrics = (initial_score.details or {}).get("region_metrics", {})
+            initial_details = {} if canonical_metric is not None else (initial_score.details or {})
+            self._last_score_snapshot = {
+                "phi": initial_total,
+                "position_score": initial_position,
+                "orientation_score": initial_orientation,
+                "dynamic_position_weight": initial_details.get("dynamic_position_weight"),
+                "dynamic_orientation_weight": initial_details.get("dynamic_orientation_weight"),
+                "backend": (
+                    canonical_metric["metric_version"]
+                    if canonical_metric is not None
+                    else self.current_region_metrics.get("backend", "spatial_potential_field")
+                ),
+            }
             self.prev_potential_score = initial_total
             self.prev_position_score = initial_position
             self.prev_orientation_score = initial_orientation
@@ -659,6 +709,8 @@ class ActiveSpatialEnv(BaseEnv):
             "distance": distance,
             "task_prompt": task_prompt,
             "jsonl_idx": idx,
+            "task_id": self.current_task_id,
+            "episode_id": self.current_episode_id,
             "current_pose": c2w_extrinsic_to_se3(self.view_engine.get_pose()),
             "task_type": self.current_task["task_type"],
             "initial_potential_score": self.prev_potential_score,
@@ -850,6 +902,15 @@ class ActiveSpatialEnv(BaseEnv):
         info.update(rst)
         info["strict_format_correct"] = strict_format_correct
         info["action_executable"] = action_executable
+        self._reward_trace = TurnRewardTrace(
+            task_id=self.current_task_id,
+            episode_id=self.current_episode_id,
+            turn_id=self.env_turn_count,
+            task_family=str(item.get("task_type", "unknown")),
+            scene_id=str(item.get("scene_id", "unknown")),
+            primitive_step_start=int(self._current_step),
+            phi_prev=float(self.prev_potential_score),
+        )
         
         prev_E = self.view_engine.get_pose()
         prev_pos = prev_E[:3, 3].copy()
@@ -885,11 +946,17 @@ class ActiveSpatialEnv(BaseEnv):
                     
                     if success_hit:
                         self.reward += self.config.success_reward
+                        self._reward_trace.record(
+                            "success", raw=1.0, scale=self.config.success_reward
+                        )
                         metrics["traj_metrics"]["success"] = True
                         self.success_by_done = True
                     else:
                         # Penalize premature done (called without reaching target)
                         self.reward += self.config.premature_done_penalty
+                        self._reward_trace.record(
+                            "premature_done", raw=1.0, scale=self.config.premature_done_penalty
+                        )
                         
                     # Store final score in info for logging
                     info["final_score"] = final_score
@@ -935,6 +1002,12 @@ class ActiveSpatialEnv(BaseEnv):
                             
                             # Apply collision penalty
                             self.reward += self.config.collision_penalty
+                            self._reward_trace.record(
+                                "collision",
+                                raw=1.0,
+                                scale=self.config.collision_penalty,
+                                details={"last_collision_type": collision_result.collision_type},
+                            )
                             
                             # Invalidate action (revert to pre-action position)
                             if self.config.collision_invalidate_action:
@@ -952,6 +1025,11 @@ class ActiveSpatialEnv(BaseEnv):
                                 done = True
                                 self.episode_done = True
                                 self.reward += float(getattr(self.config, "consecutive_collision_penalty", 0.0) or 0.0)
+                                self._reward_trace.record(
+                                    "consecutive_collision",
+                                    raw=1.0,
+                                    scale=float(getattr(self.config, "consecutive_collision_penalty", 0.0) or 0.0),
+                                )
                                 info["early_terminated_collision"] = True
                                 info["consecutive_collision_count"] = self.consecutive_collision_count
                                 break
@@ -963,6 +1041,7 @@ class ActiveSpatialEnv(BaseEnv):
                     if self._current_step >= self._max_episode_steps:
                         done = True
                         self.episode_done = True
+                        info["truncated_max_primitive_steps"] = True
                         # Check success at natural termination
                         final_score = self._calculate_current_score()
                         canonical_metric = self._calculate_canonical_metric()
@@ -973,6 +1052,9 @@ class ActiveSpatialEnv(BaseEnv):
                         )
                         if success_hit:
                             self.reward += self.config.success_reward
+                            self._reward_trace.record(
+                                "success", raw=1.0, scale=self.config.success_reward
+                            )
                             metrics["traj_metrics"]["success"] = True
                             self.success_by_max_steps = True
                             info["final_score"] = final_score
@@ -985,16 +1067,24 @@ class ActiveSpatialEnv(BaseEnv):
             # tool_call fallback remains executable for env robustness, but is penalized.
             if strict_format_correct:
                 self.reward += self.config.format_reward
+                self._reward_trace.record("format", raw=1.0, scale=self.config.format_reward)
                 info["is_format_rewarded"] = True
                 info["is_format_penalized"] = False
             else:
                 self.reward += self.config.invalid_format_penalty
+                self._reward_trace.record("invalid", raw=1.0, scale=self.config.invalid_format_penalty)
                 info["is_format_rewarded"] = False
                 info["is_format_penalized"] = True
                 info["format_penalty_reason"] = rst.get("parse_error") or "non_strict_protocol"
         else:
             # No executable actions: hard invalid path (no task reward this turn)
+            self._reward_trace.add_override(
+                "hard_invalid_reward_assignment",
+                previous_reward=float(self.reward),
+                assigned_reward=float(self.config.invalid_format_penalty),
+            )
             self.reward = self.config.invalid_format_penalty
+            self._reward_trace.record("invalid", raw=1.0, scale=self.config.invalid_format_penalty)
             self.consecutive_invalid_count += 1
             self.invalid_action_count += 1
             info["is_format_rewarded"] = False
@@ -1054,10 +1144,13 @@ class ActiveSpatialEnv(BaseEnv):
                     done = True
                     self.episode_done = True
                     self.reward += self.config.success_reward
+                    self._reward_trace.record(
+                        "success", raw=1.0, scale=self.config.success_reward
+                    )
                     metrics["traj_metrics"]["success"] = True
                     self.success_by_auto = True
                     terminal_score = (
-                        float(canonical_metric["score"])
+                        _canonical_shaping_score(canonical_metric)
                         if canonical_metric is not None
                         else self.prev_potential_score
                     )
@@ -1160,7 +1253,55 @@ class ActiveSpatialEnv(BaseEnv):
             low_info_penalty = float(getattr(self.config, "low_info_frame_penalty", 0.0) or 0.0)
             self.reward += low_info_penalty
             self.total_reward += low_info_penalty
+            self._reward_trace.record("low_info", raw=1.0, scale=low_info_penalty)
             info["early_terminated_low_info"] = True
+
+        # Finalize the auditable turn ledger only after every environment-side
+        # adjustment (including post-render low-information termination).
+        if self._reward_trace.phi is None:
+            snapshot = self._last_score_snapshot or {
+                "phi": float(self.prev_potential_score),
+                "position_score": float(self.prev_position_score),
+                "orientation_score": float(self.prev_orientation_score),
+                "dynamic_position_weight": None,
+                "dynamic_orientation_weight": None,
+                "backend": "unknown",
+            }
+            self._reward_trace.set_score(**snapshot)
+
+        success = bool(metrics["traj_metrics"]["success"])
+        truncated = bool(info.get("truncated_max_primitive_steps", False))
+        terminated = bool(done and (success or not truncated))
+        if info.get("early_terminated_low_info"):
+            termination_reason = "low_info"
+        elif info.get("early_terminated_collision"):
+            termination_reason = "consecutive_collision"
+        elif info.get("early_terminated_invalid"):
+            termination_reason = "consecutive_invalid"
+        elif info.get("truncated_max_primitive_steps"):
+            termination_reason = "max_primitive_steps_success" if success else "max_primitive_steps"
+        elif info.get("auto_terminated"):
+            termination_reason = "success_auto"
+        elif self.success_by_done:
+            termination_reason = "success_explicit_done"
+        elif done:
+            termination_reason = "explicit_done_without_success"
+        else:
+            termination_reason = "continuing"
+
+        self._reward_trace.finalize(
+            actual_total_reward=float(self.reward),
+            primitive_step_end=int(self._current_step),
+            success=success,
+            terminated=terminated,
+            truncated=truncated,
+            termination_reason=termination_reason,
+        )
+        info["terminated"] = terminated
+        info["truncated"] = truncated
+        info["termination_reason"] = termination_reason
+        info["reward_trace"] = self._reward_trace.as_dict()
+        info["reward_trace_flat"] = self._reward_trace.flat()
 
         return obs, self.reward, done, info
     
@@ -1258,7 +1399,16 @@ class ActiveSpatialEnv(BaseEnv):
                 "canonical_success": bool(canonical_metric["success"]),
                 **canonical_metric,
             }
-            return float(canonical_metric["score"])
+            score = _canonical_shaping_score(canonical_metric)
+            self._last_score_snapshot = {
+                "phi": score,
+                "position_score": score,
+                "orientation_score": score,
+                "dynamic_position_weight": None,
+                "dynamic_orientation_weight": None,
+                "backend": canonical_metric["metric_version"],
+            }
+            return score
         curr_pos = curr_E[:3, 3]
         curr_forward = curr_E[:3, 2]  # ActiveSpatial movement/render convention: local +Z is forward
         
@@ -1273,6 +1423,15 @@ class ActiveSpatialEnv(BaseEnv):
                     target_region=self.current_task["target_region"],
                 )
                 self.current_region_metrics = (score_result.details or {}).get("region_metrics", {})
+                details = score_result.details or {}
+                self._last_score_snapshot = {
+                    "phi": float(score_result.total_score),
+                    "position_score": float(score_result.position_score),
+                    "orientation_score": float(score_result.orientation_score),
+                    "dynamic_position_weight": details.get("dynamic_position_weight"),
+                    "dynamic_orientation_weight": details.get("dynamic_orientation_weight"),
+                    "backend": self.current_region_metrics.get("backend", "spatial_potential_field"),
+                }
                 return score_result.total_score
         
         # Legacy scoring method
@@ -1280,12 +1439,19 @@ class ActiveSpatialEnv(BaseEnv):
         target_pos = np.array(item.get("target_position", [0, 0, 2]), dtype=np.float64)
         target_dir = np.array(item.get("camera_params", {}).get("forward", [0, 0, 1]), dtype=np.float64)
         
-        final_score, _, _, _, _ = calculate_pose_score_smooth(
+        final_score, position_score, orientation_score, position_weight, orientation_weight = calculate_pose_score_smooth(
             curr_pos, curr_forward, target_pos, target_dir,
             transition_distance=self.config.transition_distance,
             max_distance=self.config.max_distance,
         )
-        
+        self._last_score_snapshot = {
+            "phi": float(final_score),
+            "position_score": float(position_score),
+            "orientation_score": float(orientation_score),
+            "dynamic_position_weight": float(position_weight),
+            "dynamic_orientation_weight": float(orientation_weight),
+            "backend": "legacy_pose_score",
+        }
         return final_score
     
     def _calculate_pose_reward(self) -> float:
@@ -1315,7 +1481,7 @@ class ActiveSpatialEnv(BaseEnv):
             if self.current_task and self.current_task.get("target_region"):
                 canonical_metric = self._calculate_canonical_metric()
                 if canonical_metric is not None:
-                    current_score = float(canonical_metric["score"])
+                    current_score = _canonical_shaping_score(canonical_metric)
                     cur_pos_score = current_score
                     cur_ori_score = current_score
                     self.current_region_metrics = {
@@ -1333,38 +1499,59 @@ class ActiveSpatialEnv(BaseEnv):
                     current_score = score_result.total_score
                     cur_pos_score = float(getattr(score_result, "position_score", 0.0))
                     cur_ori_score = float(getattr(score_result, "orientation_score", 0.0))
-                    self.current_region_metrics = (score_result.details or {}).get("region_metrics", {})
+                    score_details = score_result.details or {}
+                    self.current_region_metrics = score_details.get("region_metrics", {})
+
+                if canonical_metric is not None:
+                    score_details = {}
+
+                self._last_score_snapshot = {
+                    "phi": float(current_score),
+                    "position_score": float(cur_pos_score),
+                    "orientation_score": float(cur_ori_score),
+                    "dynamic_position_weight": score_details.get("dynamic_position_weight"),
+                    "dynamic_orientation_weight": score_details.get("dynamic_orientation_weight"),
+                    "backend": (
+                        canonical_metric["metric_version"]
+                        if canonical_metric is not None
+                        else self.current_region_metrics.get("backend", "spatial_potential_field")
+                    ),
+                }
+                if self._reward_trace is not None:
+                    self._reward_trace.set_score(**self._last_score_snapshot)
 
                 progress_mode = self.config.potential_field_progress_mode
                 scale = self.config.potential_field_reward_scale
-                if progress_mode == "delta":
-                    # r_t = scale · (Φ_t − Φ_{t-1})   (v17 default, telescoping ΔΦ)
-                    delta_score = current_score - self.prev_potential_score
-                    potential_reward = delta_score * scale
-                elif progress_mode == "potential":
-                    # ★ v18_potential — true Ng1999 potential-based shaping:
-                    #   r_t = scale · (γ·Φ_t − Φ_{t-1})
-                    # Policy-invariant when γ matches MDP discount; eliminates
-                    # oscillation reward-cycling that pure delta admits.
-                    gamma = float(getattr(self.config, "potential_field_gamma", 1.0))
-                    potential_reward = scale * (gamma * current_score - self.prev_potential_score)
-                    delta_score = current_score - self.prev_potential_score  # for logging only
-                elif progress_mode == "dual":
-                    # ★ v18_dual — decoupled position / orientation channels (S1):
-                    #   r_t = α_pos · Δpos_score + α_ori · Δori_score
-                    # Replaces total_score-based shaping; the blended total_score
-                    # weights (position_weight/orientation_weight) are ignored
-                    # for reward purposes in this mode (they still affect
-                    # success_score_threshold gating via current_score).
-                    a_pos = float(getattr(self.config, "position_reward_scale", 0.0))
-                    a_ori = float(getattr(self.config, "orientation_reward_scale", 0.0))
-                    d_pos = cur_pos_score - self.prev_position_score
-                    d_ori = cur_ori_score - self.prev_orientation_score
-                    potential_reward = a_pos * d_pos + a_ori * d_ori
-                    delta_score = current_score - self.prev_potential_score  # for logging only
-                else:  # "absolute" (legacy)
-                    potential_reward = current_score * scale * 0.1
-                    delta_score = current_score - self.prev_potential_score  # for logging only
+                gamma = float(getattr(self.config, "potential_field_gamma", 1.0))
+                a_pos = float(getattr(self.config, "position_reward_scale", 0.0))
+                a_ori = float(getattr(self.config, "orientation_reward_scale", 0.0))
+                potential_raw, potential_scaled, potential_details = potential_reward_values(
+                    mode=progress_mode,
+                    phi_prev=self.prev_potential_score,
+                    phi=current_score,
+                    scale=scale,
+                    gamma=gamma,
+                    position_prev=self.prev_position_score,
+                    position=cur_pos_score,
+                    orientation_prev=self.prev_orientation_score,
+                    orientation=cur_ori_score,
+                    position_scale=a_pos,
+                    orientation_scale=a_ori,
+                )
+                potential_enabled = bool(
+                    getattr(self.config, "enable_potential_shaping_reward", True)
+                )
+                potential_reward = potential_scaled if potential_enabled else 0.0
+                delta_score = current_score - self.prev_potential_score
+                if self._reward_trace is not None:
+                    self._reward_trace.record(
+                        "potential",
+                        raw=potential_raw,
+                        scale=(1.0 if progress_mode == "dual" else scale),
+                        scaled=potential_scaled,
+                        enabled=potential_enabled,
+                        details={"mode": progress_mode, **potential_details},
+                    )
 
                 total_reward += potential_reward
 
@@ -1385,24 +1572,29 @@ class ActiveSpatialEnv(BaseEnv):
                 ns_bonus = float(getattr(self.config, "near_success_bonus", 0.0))
                 ns_mode = getattr(self.config, "near_success_mode", "constant")
                 if ns_bonus > 0.0:
-                    if ns_mode == "sigmoid":
-                        # ★ v18_sigmoid — smooth ramp replacing the v17 step:
-                        #   bonus = ns_bonus · σ(k · (score − ns_thr))
-                        # No hard cliff at ns_thr; bonus is small (~ns_bonus·σ(−k·δ))
-                        # well below threshold and saturates at ns_bonus far above.
-                        k = float(getattr(self.config, "near_success_sigmoid_steepness", 10.0))
-                        import math
-                        applied = ns_bonus / (1.0 + math.exp(-k * (current_score - ns_thr)))
-                        total_reward += applied
-                        # Count "near-success step" if we're past the threshold
-                        if current_score >= ns_thr:
-                            self.near_success_step_count += 1
-                        self.near_success_bonus_total += applied
-                    else:  # "constant" (v17 default)
-                        if ns_thr > 0.0 and current_score >= ns_thr:
-                            total_reward += ns_bonus
-                            self.near_success_step_count += 1
-                            self.near_success_bonus_total += ns_bonus
+                    k = float(getattr(self.config, "near_success_sigmoid_steepness", 10.0))
+                    near_raw, near_scaled, near_hit = near_reward_values(
+                        phi=current_score,
+                        threshold=ns_thr,
+                        bonus=ns_bonus,
+                        mode=ns_mode,
+                        steepness=k,
+                    )
+                    near_enabled = bool(getattr(self.config, "enable_near_success_reward", True))
+                    near_applied = near_scaled if near_enabled else 0.0
+                    total_reward += near_applied
+                    if near_hit:
+                        self.near_success_step_count += 1
+                    self.near_success_bonus_total += near_applied
+                    if self._reward_trace is not None:
+                        self._reward_trace.record(
+                            "near",
+                            raw=near_raw,
+                            scale=ns_bonus,
+                            scaled=near_scaled,
+                            enabled=near_enabled,
+                            details={"mode": ns_mode, "threshold": ns_thr, "threshold_hit": near_hit},
+                        )
 
                 if self.VERBOSE:
                     print(f"[Potential Field] score={current_score:.4f} "
@@ -1429,12 +1621,24 @@ class ActiveSpatialEnv(BaseEnv):
                     target_label=self.current_item.get("object_label", ""),
                 )
                 
-                visibility_reward = compute_visibility_reward(
-                    visibility,
-                    self.prev_visibility,
-                    reward_scale=self.config.visibility_reward_scale,
+                visibility_raw, visibility_details = visibility_reward_values(
+                    visibility, self.prev_visibility
                 )
+                visibility_scaled = visibility_raw * self.config.visibility_reward_scale
+                visibility_enabled = bool(
+                    getattr(self.config, "enable_visibility_shaping_reward", True)
+                )
+                visibility_reward = visibility_scaled if visibility_enabled else 0.0
                 total_reward += visibility_reward
+                if self._reward_trace is not None:
+                    self._reward_trace.record(
+                        "visibility",
+                        raw=visibility_raw,
+                        scale=self.config.visibility_reward_scale,
+                        scaled=visibility_scaled,
+                        enabled=visibility_enabled,
+                        details=visibility_details,
+                    )
                 
                 # Update previous visibility
                 self.prev_visibility = visibility
@@ -1448,10 +1652,15 @@ class ActiveSpatialEnv(BaseEnv):
         # === 3. Step Penalty (Efficiency) ===
         if self.config.enable_step_penalty:
             total_reward += self.config.step_penalty  # Small negative value
+            if self._reward_trace is not None:
+                self._reward_trace.record("step", raw=1.0, scale=self.config.step_penalty)
         
         # If potential field is disabled, use legacy reward
         if not self.config.enable_potential_field or self.potential_field is None:
-            total_reward += self._calculate_legacy_reward()
+            legacy_reward = self._calculate_legacy_reward()
+            total_reward += legacy_reward
+            if self._reward_trace is not None:
+                self._reward_trace.record("legacy", raw=legacy_reward, scale=1.0)
         
         return total_reward
     
@@ -1775,6 +1984,7 @@ class ActiveSpatialEnv(BaseEnv):
             obs_str = action_template(
                 observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}{dist_suffix}",
                 env_feedback=env_feedback,
+                task_prompt=self._build_task_prompt(self.current_item),
             )
         
         # Add format prompt
@@ -1883,6 +2093,7 @@ class ActiveSpatialEnv(BaseEnv):
             obs_str = action_template(
                 observation=f"{img_placeholder}\nCurrent camera pose: {pose_str}{dist_suffix}",
                 env_feedback=env_feedback if env_feedback else "Action executed.",
+                task_prompt=self._build_task_prompt(self.current_item),
             )
         
         # Add format prompt
@@ -1926,7 +2137,9 @@ class ActiveSpatialEnv(BaseEnv):
             max_actions_per_step=getattr(self.config, "max_actions_per_step", 1),
             action_sep=getattr(self.config, "action_sep", "|"),
             format_reward=getattr(self.config, "format_reward", 0.2),
+            invalid_format_penalty=getattr(self.config, "invalid_format_penalty", -0.1),
             success_reward=getattr(self.config, "success_reward", 1.0),
+            task_type=(self.current_item or {}).get("task_type", ""),
             # v17: action-space + done switch
             action_space=getattr(self.config, "action_space", "legacy"),
             enable_explicit_done=getattr(self.config, "enable_explicit_done", True),

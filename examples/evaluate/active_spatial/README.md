@@ -70,3 +70,53 @@ model evaluation.
 Outputs are written under `evaluation/sweeps/active_spatial/<matrix-name>/`,
 including generated eval configs, per-run `results_model.json`, `summary.csv`,
 `summary.md`, `manifest.jsonl`, `easi_results/`, and `analysis_report.md`.
+
+## GPT-6 Astra ID / OOD
+
+Use the API runner instead of the checkpoint sweep. It writes stratified
+slices, then calls `evaluation/run_eval.py` with `provider: openai_responses`.
+
+```bash
+export OPENAI_API_KEY=...
+
+# configs + slices only
+python scripts/run_gpt6_id_ood_eval.py --mode smoke --dry-run
+
+# 3 ID episodes
+python scripts/run_gpt6_id_ood_eval.py --mode smoke --run
+
+# small ID + every OOD axis
+python scripts/run_gpt6_id_ood_eval.py --mode canary --run
+
+# protocol-sized subsample (80 ID, 40 / OOD axis)
+python scripts/run_gpt6_id_ood_eval.py --mode standard --run
+```
+
+Suite file: `examples/evaluate/active_spatial/test_suites_gpt6.yaml`.
+
+### Audit v2 protocol
+
+Checkpoint sweeps inherit the complete runtime environment configuration, including
+action preset, done policy, movement sizes, image resolution, success gates and
+observation window. Suite-wide defaults no longer overwrite checkpoint settings.
+Declare intentional per-suite changes in `protocol_overrides`; differences are
+saved with results. Success comes exclusively from environment `traj_metrics.success`,
+never from a second scalar-score threshold in the evaluator.
+
+The supplied suites now use `ood_splits_v2` for corrected ID/OOD partitions. ID is
+restricted to seen scenes, tasks and atomic categories; instance OOD means new
+instances in seen scenes; unseen combinations are separate from unseen categories.
+Geometry thresholds are computed from the supplied training manifest. These new
+splits do not retroactively certify the legacy camera/metric protocol.
+
+Training and evaluation share bounded observation history (default 1). Evaluation
+offsets select rows once without changing their environment indices. Results carry
+a protocol/data fingerprint; old incompatible results require a new sweep directory
+or an explicit rerun. Old and corrected success rates are not directly comparable.
+
+QA accuracy and balanced accuracy include missing/invalid outputs as errors; ambiguous
+Yes/No outputs fail parsing. SaPaVe unwraps nested target objects and reports unknown
+visibility when projection evidence is unavailable.
+
+Runbook: `docs/gpt6_id_ood_eval.md`.
+Outputs: `evaluation/sweeps/active_spatial/gpt6_astra_id_ood_<mode>_<date>/`.

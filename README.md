@@ -1,4 +1,7 @@
 <h1 align="center">VAGEN: Reinforcing World Model Reasoning for Multi-Turn VLM Agents</h1>
+
+> **Active Spatial 工作区入口：** [项目主线与代码导航](docs/active_spatial.md) · [2026-10-02 接管核验与下一步](docs/diagnosis/active_spatial_takeover_20261002/REPORT.md)。下文保留上游 VAGEN 框架说明；Active Spatial 的当前协议、运行状态和证据边界以接管核验为准。
+
 <!-- <p align="center" style="font-size: 30px;">
   <b>Training VLM agents with multi-turn reinforcement learning</b>
 </p>

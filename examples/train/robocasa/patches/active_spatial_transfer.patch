@@ -1,0 +1,111 @@
+diff --git a/deployment/model_server/policy_norm_processor.py b/deployment/model_server/policy_norm_processor.py
+index e150b39..275b488 100644
+--- a/deployment/model_server/policy_norm_processor.py
++++ b/deployment/model_server/policy_norm_processor.py
+@@ -68,14 +68,15 @@ def _resolve_robot_type(
+             "cannot resolve training-time robot_type."
+         ) from e
+ 
+-    if data_mix not in DATASET_NAMED_MIXTURES:
++    explicit_mixture = model_cfg["datasets"]["vla_data"].get("mixture_spec")
++    if not explicit_mixture and data_mix not in DATASET_NAMED_MIXTURES:
+         raise KeyError(
+             f"data_mix={data_mix!r} not in DATASET_NAMED_MIXTURES "
+             f"(available: {sorted(DATASET_NAMED_MIXTURES.keys())[:20]} ...). "
+             "Did you forget to register the example under examples/<bench>/train_files/data_registry/?"
+         )
+ 
+-    mixture = DATASET_NAMED_MIXTURES[data_mix]
++    mixture = explicit_mixture or DATASET_NAMED_MIXTURES[data_mix]
+     robot_types = sorted({entry[2] for entry in mixture})
+ 
+     if len(robot_types) == 1:
+diff --git a/examples/simBenchmarks/Robocasa_365/eval_files/run_eval.sh b/examples/simBenchmarks/Robocasa_365/eval_files/run_eval.sh
+index 233bfd5..0a0698e 100755
+--- a/examples/simBenchmarks/Robocasa_365/eval_files/run_eval.sh
++++ b/examples/simBenchmarks/Robocasa_365/eval_files/run_eval.sh
+@@ -21,7 +21,7 @@ case "${1:-}" in
+     ;;
+   client)
+     # Run inside the `robocasa365` env
+-    exec python -m examples.Robocasa_365.eval_files.simulation_env \
++    exec python -m examples.simBenchmarks.Robocasa_365.eval_files.simulation_env \
+       --args.pretrained-path "${CKPT}" \
+       --args.env-name "${ENV_NAME}" \
+       --args.port "${PORT}" \
+diff --git a/starVLA/dataloader/lerobot_datasets.py b/starVLA/dataloader/lerobot_datasets.py
+index 9257717..98a60af 100644
+--- a/starVLA/dataloader/lerobot_datasets.py
++++ b/starVLA/dataloader/lerobot_datasets.py
+@@ -88,7 +88,8 @@ def get_vla_dataset(
+     data_root_dir = data_cfg.data_root_dir
+     data_mix = data_cfg.data_mix
+     delete_pause_frame = data_cfg.get("delete_pause_frame", False)
+-    mixture_spec = DATASET_NAMED_MIXTURES[data_mix]
++    # Save explicit dataset membership in the run config for reproducible transfer.
++    mixture_spec = data_cfg.get("mixture_spec") or DATASET_NAMED_MIXTURES[data_mix]
+     logger.info(f"[dataloader] Using mixture '{data_mix}': {[(d, w, r) for d, w, r in mixture_spec]}")
+     included_datasets, filtered_mixture_spec = set(), []
+     for d_name, d_weight, robot_type in mixture_spec:  
+@@ -159,4 +160,4 @@ if __name__ == "__main__":
+         if count > 3:
+             break
+         count += 1
+-        pass
+\ No newline at end of file
++        pass
+diff --git a/starVLA/model/modules/vlm/QWen3.py b/starVLA/model/modules/vlm/QWen3.py
+index b8f9b1a..b6342c4 100644
+--- a/starVLA/model/modules/vlm/QWen3.py
++++ b/starVLA/model/modules/vlm/QWen3.py
+@@ -50,7 +50,6 @@ class _QWen3_VL_Interface(nn.Module):
+         qwenvl_config = config.framework.get("qwenvl", {})
+         model_id = qwenvl_config.get("base_vlm", "Qwen/Qwen3-VL-4B-Instruct")
+         attn_implementation = qwenvl_config.get("attn_implementation", "sdpa")
+-        attn_implementation = "sdpa"
+         # Fallback to sdpa if flash_attention_2 is requested but flash_attn is not installed
+         if attn_implementation == "flash_attention_2":
+             if not has_flash_attn():
+@@ -61,7 +60,7 @@ class _QWen3_VL_Interface(nn.Module):
+             model_id,
+             attn_implementation=attn_implementation,
+             dtype=torch.bfloat16,
+-            ignore_mismatched_sizes=True, # resize image no longer needed? @TODO check bug
++            ignore_mismatched_sizes=False,
+         )
+         processor = AutoProcessor.from_pretrained(model_id)
+         processor.tokenizer.padding_side = "left"
+diff --git a/starVLA/model/modules/vlm/__init__.py b/starVLA/model/modules/vlm/__init__.py
+index ec2fcf5..2be894b 100644
+--- a/starVLA/model/modules/vlm/__init__.py
++++ b/starVLA/model/modules/vlm/__init__.py
+@@ -1,7 +1,29 @@
++import json
++from pathlib import Path
++
++
++def local_model_type(model_path):
++    """HF actor exports often have names such as actor/huggingface."""
++    path = Path(model_path) / "config.json"
++    if path.is_file():
++        return json.loads(path.read_text()).get("model_type")
++    return None
++
++
+ def get_vlm_model(config):
+ 
+     vlm_name = config.framework.qwenvl.base_vlm
+ 
++    model_type = local_model_type(vlm_name)
++    if model_type == "qwen2_5_vl":
++        from .QWen2_5 import _QWen_VL_Interface
++
++        return _QWen_VL_Interface(config)
++    if model_type == "qwen3_vl":
++        from .QWen3 import _QWen3_VL_Interface
++
++        return _QWen3_VL_Interface(config)
++
+     if "Qwen2.5-VL" in vlm_name or "nora" in vlm_name.lower():  # temp for some ckpt
+         from .QWen2_5 import _QWen_VL_Interface
+ 

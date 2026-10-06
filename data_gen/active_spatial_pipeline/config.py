@@ -182,7 +182,7 @@ class InitialViewConfig:
     - min_distance: Minimum 2D distance from init position to target sample_point (meters)
     - max_init_score: Maximum allowed initial score (lower = harder start)
     - min_yaw_offset_deg: Minimum angular offset between init forward and target direction (degrees)
-    - min_steps: Minimum estimated navigation steps (distance/0.1 + yaw_offset/5)
+    - min_steps: Minimum estimated navigation steps (distance/step_translation + yaw_offset/step_rotation_deg)
     
     Design rationale per task category:
     - Metric Distance Tasks (absolute_positioning, screen_occupancy):
@@ -194,8 +194,11 @@ class InitialViewConfig:
       apparent_size_ordering):
       Target is view-dependent. Difficulty comes from needing distance adjustment + orientation.
     """
+    step_translation: float = 0.3
+    step_rotation_deg: float = 20.0
+
     # ===== Per-task minimum distance from init to target (meters) =====
-    # Key insight: step_size=0.1m, so 1.0m ≈ 10 forward steps
+    # Key insight: step_size is configurable; these distances do not certify reachability
     task_min_distances: Dict[str, float] = field(default_factory=lambda: {
         # Metric Distance Tasks
         'absolute_positioning': 0.8,   # 8 forward steps; camera should not already be on target circle
@@ -244,7 +247,7 @@ class InitialViewConfig:
     
     # ===== Per-task minimum estimated total steps =====
     # Estimated as: distance_steps + turn_steps
-    # where distance_steps = distance / 0.1, turn_steps = yaw_offset / 5
+    # where distance_steps = distance / step_translation, turn_steps = yaw_offset / step_rotation_deg
     # This is a combined check to ensure enough overall navigation complexity
     task_min_total_steps: Dict[str, int] = field(default_factory=lambda: {
         'absolute_positioning': 12,    # ~8 walk + 3 turn
@@ -346,4 +349,6 @@ class PipelineConfig:
             raise ValueError("scenes_root must be specified")
         if not self.output_dir:
             raise ValueError("output_dir must be specified")
+        if self.initial_view.step_translation <= 0 or self.initial_view.step_rotation_deg <= 0:
+            raise ValueError("difficulty estimation requires positive action step sizes")
         return True

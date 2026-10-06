@@ -180,6 +180,11 @@ def format_trajectory(
     add_think: bool = True,
     include_scores: bool = False,
     force_no_done: bool = False,
+    step_translation: float = 0.3,
+    step_rotation_deg: float = 30.0,
+    action_space: str = "legacy",
+    enable_explicit_done: bool = True,
+    max_actions_per_step: int = 5,
 ) -> Dict[str, Any]:
     """Convert a Trajectory + image paths into an SFT conversation record.
 
@@ -220,8 +225,11 @@ def format_trajectory(
     # ── System message ───────────────────────────────────────────────────────
     sys_text = system_prompt(
         format=prompt_format,
-        step_translation=0.3,
-        step_rotation_deg=30.0,
+        step_translation=step_translation,
+        step_rotation_deg=step_rotation_deg,
+        action_space=action_space,
+        enable_explicit_done=enable_explicit_done,
+        max_actions_per_step=max_actions_per_step,
     )
     conversations.append({"role": "system", "content": sys_text})
 
@@ -236,7 +244,7 @@ def format_trajectory(
         observation=f"<image>\nCurrent camera pose: {init_pose_str}",
         task_prompt=task_description,
     )
-    init_obs += "\n" + fmt_fn(max_actions_per_step=5, action_sep="|", add_example=True)
+    init_obs += "\n" + fmt_fn(max_actions_per_step=max_actions_per_step, action_sep="|", add_example=True)
 
     init_turn: Dict[str, Any] = {"role": "user", "content": init_obs}
     if image_paths:
@@ -263,8 +271,9 @@ def format_trajectory(
         obs_text = action_template(
             observation=f"<image>\nCurrent camera pose: {pose_str}",
             env_feedback="Action executed.",
+            task_prompt=task_description,
         )
-        obs_text += "\n" + fmt_fn(max_actions_per_step=5, action_sep="|", add_example=False)
+        obs_text += "\n" + fmt_fn(max_actions_per_step=max_actions_per_step, action_sep="|", add_example=False)
 
         user_turn: Dict[str, Any] = {"role": "user", "content": obs_text}
         if img_idx < len(image_paths):
@@ -272,7 +281,7 @@ def format_trajectory(
         conversations.append(user_turn)
 
     # ── Final "done" assistant turn ──────────────────────────────────────────
-    if trajectory.success and not force_no_done:
+    if trajectory.success and not force_no_done and enable_explicit_done:
         if add_think and prompt_format in ("free_think", "grounding", "worldmodeling",
                                            "grounding_worldmodeling"):
             done_think = _make_done_think(trajectory, include_scores=include_scores)

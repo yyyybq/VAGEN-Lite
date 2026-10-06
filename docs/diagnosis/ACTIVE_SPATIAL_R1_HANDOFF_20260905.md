@@ -1,5 +1,19 @@
 # Active Spatial R1 Handoff (2026-09-05)
 
+> Historical repair snapshot. Later frozen Projective data and a support-subset
+> experiment now exist; see the [2026-10-02 takeover audit](active_spatial_takeover_20261002/REPORT.md).
+> This does not retroactively clear the full-corpus or dense-score pilot gates below.
+
+## 2026-10-03 task-context repair acceptance (in progress)
+
+- Historical R1 renderer `pt-t7bb75de` expired its 48-hour lease at 02:35 UTC; trainer `pt-kbvfmyih` failed on renderer connection errors at 02:36 UTC. Latest rollout: 213; latest complete checkpoint: 200. Preserve the original run as a **missing-task-context fault baseline**; do not resume or hot-patch it.
+- User authorized a new isolated repair, one-update acceptance, then paired evaluation. New run: `exps/vagen_active_spatial/R1-task-context-v1-acceptance-20261003`. Its package is derived from the frozen v7 archive with explicit minimal patches; unrelated dirty workspace changes, reward changes and VERL changes are excluded.
+- Both environment observation paths now repeat the public task each turn. The PPO inference boundary checks the exact image-expanded token IDs. Old full turns may be evicted; a current observation that cannot fit fails closed rather than slicing task/image tokens. Generic evaluation and the canonical dev runner enforce task retention too.
+- Final local regression: all 72 `tests/active_spatial` tests passed (23.51 seconds), including the real Qwen processor checking image expansion, whole-turn eviction and rejection of an undersized current-only prompt, SFT task retention, actual evaluation token checks and six paired-report failure tests.
+- Frozen acceptance: 12 train episodes from one existing train scene, no overlap with the fixed 32-task development evaluation's seven scenes. One actual actor/critic PPO update, finite gradients, changed tensors, complete export and real checkpoint reload must pass. Every actual rollout input must retain its task; action parsing and strict-format rates must each be at least 95%.
+- Renderer `pt-goa1zokk` uses one H800. Runtime replay passed 12/12 with pixel-identical initial RGB and task retention throughout certificate execution. Only after this PASS, one-update trainer `pt-uls7be48` was submitted. Worker leases are bounded; the training entry never launches formal 250-step training. Base/step-1 paired dev evaluation is gated on successful acceptance, and is not an independent generalization or training-benefit claim.
+- Latest evidence and status belong in the new run directory; GPU acceptance and paired results were **not yet complete at this entry's creation**. Do not infer PASS from submission or CPU tests.
+
 ## Recovered State
 
 - Source repository: `/mnt/umm/users/yinbaiqiao/VAGEN-Lite`; R1 was developed from HEAD `5c582b936c6422fdfc6c2d89172aaa34cf6cccd5` and integrated after the independent evaluation-recovery commit `fa55c439`.

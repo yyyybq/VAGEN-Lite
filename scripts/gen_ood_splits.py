@@ -29,6 +29,11 @@ import os
 import re
 import random
 import argparse
+import sys
+import math
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from data_gen.active_spatial_pipeline.splits import categories, instances, content_key, id_candidates, source_key
 from collections import Counter, defaultdict
 from typing import List, Dict, Optional
 
@@ -188,24 +193,40 @@ def make_ood_scene(test_items: List[dict], train_scenes: set,
     return _balanced_sample(candidates, max_total)
 
 
-def make_ood_instance(test_items: List[dict], train_scenes: set,
-                      train_obj_labels: set, max_total: int) -> List[dict]:
-    """Split-2: OOD scene + object_label seen in training (same category, new room)."""
-    ood_scene_ids = set(i['scene_id'] for i in test_items) - train_scenes
-    candidates = [i for i in test_items
-                  if i['scene_id'] in ood_scene_ids
-                  and i['task_type'] in TRAIN_TASK_TYPES
-                  and i['object_label'] in train_obj_labels]
+def make_ood_instance(test_items, train_scenes, train_obj_labels, max_total, train_instances=None):
+    """Unseen object instances in SEEN scenes, with every category seen."""
+    if train_instances is None:
+        raise ValueError("train_instances is required to certify instance holdout")
+    candidates = [r for r in test_items if r["scene_id"] in train_scenes
+                  and r["task_type"] in TRAIN_TASK_TYPES and categories(r)
+                  and categories(r) <= train_obj_labels and instances(r)
+                  and not (instances(r) & train_instances)]
     return _balanced_sample(candidates, max_total)
 
 
-def make_ood_category(test_items: List[dict], train_obj_labels: set,
-                      max_total: int) -> List[dict]:
-    """Split-3: object_label completely absent from training (any scene)."""
-    candidates = [i for i in test_items
-                  if i['task_type'] in TRAIN_TASK_TYPES
-                  and i['object_label'] not in train_obj_labels]
-    return _balanced_sample(candidates, max_total)
+def make_ood_category(test_items, train_obj_labels, max_total):
+    """At least one atomic object category must be absent from training."""
+    return _balanced_sample([r for r in test_items if r["task_type"] in TRAIN_TASK_TYPES
+                             and bool(categories(r) - train_obj_labels)], max_total)
+
+
+def make_ood_composition(test_items, train_items, max_total):
+    labels = set().union(*(categories(r) for r in train_items))
+    combinations = {tuple(sorted(categories(r))) for r in train_items}
+    scenes = {r["scene_id"] for r in train_items}
+    return _balanced_sample([r for r in test_items if r["scene_id"] in scenes
+                             and r["task_type"] in TRAIN_TASK_TYPES
+                             and len(categories(r)) > 1 and categories(r) <= labels
+                             and tuple(sorted(categories(r))) not in combinations], max_total)
+
+
+def geometry_thresholds(train_items):
+    values = defaultdict(list)
+    for row in train_items:
+        distance = row.get("distance")
+        if isinstance(distance, (float, int)) and math.isfinite(distance):
+            values[row["task_type"]].append(distance)
+    return {task: (_percentile(v, 10), _percentile(v, 90)) for task, v in values.items() if v}
 
 
 def make_ood_template(test_items: List[dict], max_total: int) -> List[dict]:
@@ -223,9 +244,11 @@ def make_ood_template(test_items: List[dict], max_total: int) -> List[dict]:
             new_desc = rewriter(original_desc)
             if new_desc == original_desc:
                 unchanged_count += 1
+                continue
         else:
             new_desc = original_desc
             unchanged_count += 1
+            continue
         item['task_description_original'] = original_desc
         item['task_description'] = new_desc
         result.append(item)
@@ -243,8 +266,8 @@ def make_ood_geometry(test_items: List[dict], thresholds: dict,
         if tt not in TRAIN_TASK_TYPES or tt not in thresholds:
             continue
         p10, p90 = thresholds[tt]
-        d = item.get('distance', 0.0)
-        if d < p10 or d > p90:
+        d = item.get('distance')
+        if isinstance(d, (float, int)) and math.isfinite(d) and (d < p10 or d > p90):
             candidates.append(item)
     return _balanced_sample(candidates, max_total)
 
@@ -282,18 +305,18 @@ def write_summary(summary_path: str, splits: dict, train_info: dict,
         '## Split Descriptions',
         '',
         '### Split-1: OOD Scene (`ood_scene.jsonl`)',
-        '- Items from the **8 held-out scenes** not present in training.',
+        '- Items from scenes absent from the supplied training manifest.',
         f"- Held-out scene IDs: {', '.join(sorted(train_info['ood_scene_ids']))}",
         '- Tests: Can the model navigate spatially in completely unseen room layouts?',
         '',
         '### Split-2: OOD Instance (`ood_instance.jsonl`)',
-        '- Items from OOD scenes where `object_label` **was seen in training**.',
-        '- Same category of object (e.g., "wardrobe") but in a different room.',
-        '- Subset of Split-1; isolates instance-level vs. scene-level generalization.',
+        '- Unseen individual objects in seen scenes, with all atomic categories seen.',
+        '- Object identity uses scene plus object ID (or annotated geometry).',
+        '- Separate from scene holdout; an empty split means the source pool cannot support it.',
         '- Tests: Does the model generalize to new instances of familiar object types?',
         '',
         '### Split-3: OOD Category (`ood_category.jsonl`)',
-        '- Items where `object_label` is **entirely absent from the training set**.',
+        '- At least one atomic object category is absent from training; unseen combinations are separate.',
         f"- Unique new labels: {len(set(i['object_label'] for i in splits.get('ood_category', [])))}",
         '- Tests: Can the model navigate to object types it has never seen during training?',
         '',
@@ -312,7 +335,7 @@ def write_summary(summary_path: str, splits: dict, train_info: dict,
         '',
         '### Split-5: OOD Geometry (`ood_geometry.jsonl`)',
         '- Items with `distance` **outside [p10, p90]** of training distribution per task type.',
-        '- Thresholds (computed from train_100scenes_7types.jsonl):',
+        '- Thresholds recomputed from the supplied training manifest:',
     ]
     for tt, (p10, p90) in sorted(geom_thresholds.items()):
         lines.append(f'  - `{tt}`: p10={p10:.2f}m, p90={p90:.2f}m')
@@ -345,7 +368,7 @@ def main():
         'data_gen/active_spatial_pipeline/output_100scenes/test.jsonl',
         help='Path to test JSONL (source for OOD items)')
     parser.add_argument('--out_dir', default=
-        'data_gen/active_spatial_pipeline/ood_splits',
+        'data_gen/active_spatial_pipeline/ood_splits_v2',
         help='Output directory for OOD split JSONL files')
     parser.add_argument('--max_per_split', type=int, default=400,
         help='Max items per split (0 = no limit; default: 400)')
@@ -353,6 +376,8 @@ def main():
         help='Random seed for balanced sampling')
     args = parser.parse_args()
 
+    if Path(args.out_dir).exists() and any(Path(args.out_dir).glob("*.jsonl")):
+        raise FileExistsError("output already contains manifests; choose a new versioned directory")
     random.seed(args.seed)
     max_items = args.max_per_split if args.max_per_split > 0 else 10_000_000
 
@@ -366,7 +391,17 @@ def main():
         test_items = [json.loads(l) for l in f if l.strip()]
 
     train_scenes = set(i['scene_id'] for i in train_items)
-    train_obj_labels = set(i['object_label'] for i in train_items)
+    global TRAIN_TASK_TYPES
+    TRAIN_TASK_TYPES = {r["task_type"] for r in train_items} - {"delta_control"}
+    train_items = [r for r in train_items if r["task_type"] in TRAIN_TASK_TYPES]
+    train_obj_labels = set().union(*(categories(r) for r in train_items))
+    train_instances = set().union(*(instances(r) for r in train_items))
+    thresholds = geometry_thresholds(train_items)
+    train_keys = {content_key(r) for r in train_items}
+    train_sources = {source_key(r) for r in train_items if source_key(r)}
+    test_items = [r for r in test_items if content_key(r) not in train_keys
+                  and (source_key(r) is None or source_key(r) not in train_sources)]
+    id_rows = id_candidates(train_items, test_items)
     ood_scene_ids = set(i['scene_id'] for i in test_items) - train_scenes
 
     print(f'\nTraining: {len(train_items)} items, {len(train_scenes)} scenes, '
@@ -382,7 +417,7 @@ def main():
     print(f'  → {len(split_scene)} items | Tasks: {_task_dist(split_scene)}')
 
     print('\n[Split-2] OOD Instance ...')
-    split_instance = make_ood_instance(test_items, train_scenes, train_obj_labels, max_items)
+    split_instance = make_ood_instance(test_items, train_scenes, train_obj_labels, max_items, train_instances)
     print(f'  → {len(split_instance)} items | Tasks: {_task_dist(split_instance)}')
 
     print('\n[Split-3] OOD Category ...')
@@ -392,7 +427,7 @@ def main():
     print(f'  Sample new labels: {sorted(new_labels)[:10]}')
 
     print('\n[Split-4] OOD Template ...')
-    split_template = make_ood_template(test_items, max_items)
+    split_template = make_ood_template(id_rows, max_items)
     # Verify rewriting quality
     unchanged = sum(1 for i in split_template
                     if i['task_description'] == i['task_description_original'])
@@ -409,17 +444,19 @@ def main():
                 print(f'  {tt}: "{orig}" → "{new}"')
 
     print('\n[Split-5] OOD Geometry ...')
-    split_geometry = make_ood_geometry(test_items, GEOM_THRESHOLDS, max_items)
+    split_geometry = make_ood_geometry(id_rows, thresholds, max_items)
     by_task_geom = defaultdict(list)
     for item in split_geometry:
         by_task_geom[item['task_type']].append(item['distance'])
     for tt, dists in sorted(by_task_geom.items()):
-        p10, p90 = GEOM_THRESHOLDS.get(tt, (0, 999))
+        p10, p90 = thresholds.get(tt, (0, 999))
         print(f'  {tt}: n={len(dists)}, dist=[{min(dists):.2f},{max(dists):.2f}] (train p10={p10:.2f}, p90={p90:.2f})')
 
     # ── Write outputs ──
     os.makedirs(args.out_dir, exist_ok=True)
     splits_map = {
+        'id_test': id_rows,
+        'ood_composition': make_ood_composition(test_items, train_items, max_items),
         'ood_scene':    split_scene,
         'ood_instance': split_instance,
         'ood_category': split_category,
@@ -431,6 +468,24 @@ def main():
         _write_jsonl(path, items)
         print(f'\nWrote {len(items):4d} items → {path}')
 
+    import hashlib
+    metadata = {
+        "version": "active_spatial_splits_v2", "seed": args.seed,
+        "training_jsonl": args.train_jsonl,
+        "source_jsonl": args.test_jsonl,
+        "dataset_status": "split_only_no_runtime_certification",
+        "training_sha256": hashlib.sha256(Path(args.train_jsonl).read_bytes()).hexdigest(),
+        "source_sha256": hashlib.sha256(Path(args.test_jsonl).read_bytes()).hexdigest(),
+        "geometry_thresholds": thresholds,
+        "counts": {k: len(v) for k, v in splits_map.items()},
+        "definitions": {"id_test": "seen scenes/tasks/categories, held-out episodes",
+                        "ood_instance": "seen scenes/categories, unseen individual objects",
+                        "ood_category": "at least one unseen atomic category",
+                        "ood_composition": "seen atomic categories, unseen category combination",
+                        "ood_geometry": "training distance tails; not disjoint training support",
+                        "ood_template": "changed paraphrases of ID episodes"},
+    }
+    Path(args.out_dir, "split_manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
     # ── Summary ──
     train_info = {
         'n_train': len(train_items),
@@ -439,7 +494,7 @@ def main():
         'ood_scene_ids': ood_scene_ids,
     }
     summary_path = os.path.join(args.out_dir, 'ood_splits_summary.md')
-    write_summary(summary_path, splits_map, train_info, GEOM_THRESHOLDS)
+    write_summary(summary_path, splits_map, train_info, thresholds)
     print(f'\nWrote summary → {summary_path}')
 
     # ── Print Markdown table ──

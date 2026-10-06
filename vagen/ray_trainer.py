@@ -66,6 +66,10 @@ from vagen.utils.upload_hugging_face import HFUploadManager
 from vagen.utils.image_validation_logger import ValidationGenerationsLogger
 from vagen.utils.concat_val_multi_turn import concat_val_multi_turn
 from vagen.utils.image_token_utils import replace_image_tokens_for_logging
+from vagen.utils.active_spatial_ppo_snapshot import (
+    directory_manifest_sha256,
+    maybe_write_pre_update_snapshot,
+)
 import vagen.custom_advantage
 from vagen.custom_metric.metric import METRIC_REGISTRY
 from vagen.custom_filter.filter import FILTER_REGISTRY
@@ -1517,7 +1521,13 @@ class RayPPOTrainer:
         lines = []
         for i in range(n):
             entry = {k: v[i] for k, v in base_data.items()}
-            lines.append(json.dumps(entry, ensure_ascii=False))
+            lines.append(
+                json.dumps(
+                    entry,
+                    ensure_ascii=False,
+                    default=lambda value: value.item() if isinstance(value, np.generic) else str(value),
+                )
+            )
 
         with open(filename, "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -2793,6 +2803,57 @@ class RayPPOTrainer:
                             batch, pad_size = pad_dataproto_to_divisor(batch, divisor_size)
                             print(f"After filtering: Pad {pad_size} samples to make batch size {batch_size} divisible by {divisor_size} dp_workers")
                             self._balance_batch(batch, metrics=metrics, logging_prefix="filtered_global_seqlen")
+
+                    # Opt-in exact post-GAE/post-filter boundary for offline PPO
+                    # diagnosis.  With the environment variable unset this does
+                    # nothing at all; when armed it runs before either optimizer.
+                    # A post-filter-only capture cannot faithfully replay GAE
+                    # whitening if the filter removed trajectory rows.  The
+                    # diagnostic contract therefore fails closed until a future
+                    # hook persists the complete pre-filter batch plus index map.
+                    if (
+                        os.environ.get("VAGEN_ACTIVE_SPATIAL_PPO_SNAPSHOT_DIR")
+                        and self.config.filter.get("enable", False)
+                    ):
+                        raise RuntimeError(
+                            "exact PPO snapshot refuses filter.enable=true: "
+                            "capture requires the complete pre-filter batch and mapping"
+                        )
+                    # A step-0 critic has a random value head.  When explicitly
+                    # requested, export its *current, pre-update* distributed
+                    # state and bind the snapshot to a content digest.  This is
+                    # a new immutable diagnostic artifact, never an update to
+                    # an existing checkpoint, and is intentionally unavailable
+                    # unless the snapshot hook itself is armed.
+                    critic_initial_export = os.environ.get(
+                        "VAGEN_ACTIVE_SPATIAL_PPO_SNAPSHOT_CRITIC_INITIAL_EXPORT_DIR"
+                    )
+                    if critic_initial_export:
+                        if os.path.exists(critic_initial_export):
+                            raise RuntimeError(
+                                "critic initial export target already exists; "
+                                "refusing to overwrite a diagnostic identity"
+                            )
+                        if not self.use_critic:
+                            raise RuntimeError("exact PPO snapshot requires an initialized critic")
+                        self.critic_wg.save_checkpoint(
+                            critic_initial_export, None, self.global_steps, max_ckpt_to_keep=None
+                        )
+                        os.environ["VAGEN_ACTIVE_SPATIAL_PPO_SNAPSHOT_CRITIC_CHECKPOINT_PATH"] = (
+                            critic_initial_export
+                        )
+                        os.environ["VAGEN_ACTIVE_SPATIAL_PPO_SNAPSHOT_CRITIC_CHECKPOINT_SHA256"] = (
+                            directory_manifest_sha256(critic_initial_export)
+                        )
+                    snapshot_path = maybe_write_pre_update_snapshot(
+                        batch, self.config, global_step=int(self.global_steps)
+                    )
+                    if snapshot_path is not None:
+                        print(f"[active_spatial_snapshot] wrote exact pre-update batch to {snapshot_path}")
+                        if os.environ.get("VAGEN_ACTIVE_SPATIAL_PPO_SNAPSHOT_STOP_AFTER_WRITE") == "1":
+                            print("[active_spatial_snapshot] stopping before critic/actor optimizer steps.")
+                            self._flush_image_dumps()
+                            return
 
                     d0_15_dir = os.environ.get("VAGEN_D0_15_DIR")
                     if d0_15_dir and "rollout_log_probs" in batch.batch:

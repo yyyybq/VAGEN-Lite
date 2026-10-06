@@ -1,0 +1,8 @@
+model,family,variant,run,expected_steps,max_train_step,max_validation_step,training_valid,validation_contract,offline_navigation_rows_ok,easi_benchmarks_max
+V46,Qwen2.5-VL-7B,"W3, KL=0.30",qwen_v46_clean_d0pass_20260822_sco_renderer_r1_full,700,700,700,True,"ID-19 + OOD-25, 4 samples/task",112,8
+V47,Qwen2.5-VL-7B,"W3, KL=0.40",qwen_v47_clean_d0pass_20260826_recovery_r1_full,700,700,700,True,"ID-19 + OOD-25, 4 samples/task",24,8
+V48,Qwen2.5-VL-7B,"W1, KL=0.30",qwen_v48_clean_d0pass_20260823_full,700,700,700,True,"ID-19 + OOD-25, 4 samples/task",24,8
+V49,Qwen2.5-VL-7B,"V26 replay, W1, KL=0.20",v49_7b_v26_repro_bad_render_20260723_010323,700,0,0,False,invalid: renderer failure at step 0,0,0
+V50,Qwen2.5-VL-7B,"W3, entropy=0.001, short response, format=0.01",qwen_v50_clean_d0pass_20260824_full,700,700,700,True,"ID-19 + OOD-25, 4 samples/task",24,2
+Cambrian-C8,Cambrian-S-7B,"scaled reward + action-valid, deterministic val",cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full,1000,1000,1000,True,"ID-19 + OOD-25, 1 sample/task",0,0
+Cambrian-C4,Cambrian-S-7B,"high-variance reward, 4-sample val",cambrian_c4_clean_d0pass_20260822_h800_r5_full,1000,1003,1000,True,"legacy ID-21 + OOD-19, 4 samples/task",0,0

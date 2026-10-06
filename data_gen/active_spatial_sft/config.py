@@ -69,6 +69,8 @@ class SFTGenerationConfig:
 
     step_rotation_deg: float = 30.0
     """Rotation step size in degrees. Must match the RL env's step_rotation_deg."""
+    action_space: str = "legacy"
+    enable_explicit_done: bool = True
 
     # ──────────────────────────── Path Finding ─────────────────────
     success_threshold: float = 0.95

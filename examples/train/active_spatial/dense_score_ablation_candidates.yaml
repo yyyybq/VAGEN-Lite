@@ -1,0 +1,78 @@
+schema_version: active_spatial_dense_score_ablation_v1
+status: CANDIDATE_ONLY_DO_NOT_TRAIN
+
+# Clean historical run used only to resolve all non-reward PPO/model settings.
+baseline_train_resolved_config: exps/vagen_active_spatial/qwen_v50_clean_d0pass_20260824_full/hydra_run/.hydra/config.yaml
+baseline_env_config: exps/vagen_active_spatial/qwen_v50_clean_d0pass_20260824_full/train.yaml
+
+# Formal manifests must be supplied explicitly to the preflight.  The legacy
+# train_size/test_size fields are intentionally removed from resolved candidates.
+required_split_roles:
+  - train
+  - id
+  - ood
+
+required_gates:
+  runtime_canary: exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/R1_RUNTIME_CANARY_GATE_REPORT_20260905.md
+  projective_observability: exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/R1_PROJECTIVE_OBSERVABILITY_GATE_REPORT_20260905.md
+
+# ID is allowed to share scenes with train.  Scene disjointness is required
+# only for splits whose definition is scene-OOD.
+scene_overlap_policy:
+  default: allow
+  forbidden_pairs:
+    - [train, ood]
+    - [train, ood_scene]
+    - [id, ood]
+    - [val_id, ood_scene]
+    - [id_test, ood_scene]
+
+# Exact task/content overlap is forbidden across train/eval and ID/OOD roles.
+# Overlap among separately reported OOD dimensions is reported but allowed,
+# because those manifests can be non-exclusive diagnostic slices by design.
+fingerprint_overlap_policy:
+  default: allow
+  forbidden_role_pairs:
+    - [train, id]
+    - [train, ood]
+    - [id, ood]
+
+invariants:
+  scorer_enabled: true
+  scorer_backend_selection_unchanged: true
+  success_gate_unchanged: true
+  termination_unchanged: true
+  success_reward_unchanged: true
+  ppo_gamma: 0.95
+
+variants:
+  S0:
+    label: sparse
+    interpretation: common sparse reward; scorer and success/termination remain enabled
+    reward_overrides:
+      enable_potential_shaping_reward: false
+      enable_near_success_reward: false
+      enable_visibility_shaping_reward: false
+      near_success_bonus: 0.0
+      format_reward: 0.0
+      potential_field_gamma: 0.95
+  S1:
+    label: potential_only
+    interpretation: S0 plus one potential-shaping variable
+    reward_overrides:
+      enable_potential_shaping_reward: true
+      enable_near_success_reward: false
+      enable_visibility_shaping_reward: false
+      near_success_bonus: 0.0
+      format_reward: 0.0
+      potential_field_gamma: 0.95
+  S5:
+    label: legacy_reward_reference
+    interpretation: old reward recipe reference only; not a historical-run reproduction on new scorer/splits
+    reward_overrides:
+      enable_potential_shaping_reward: true
+      enable_near_success_reward: true
+      enable_visibility_shaping_reward: true
+      near_success_bonus: 0.5
+      format_reward: 0.2
+      potential_field_gamma: 0.99

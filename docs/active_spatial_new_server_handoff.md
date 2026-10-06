@@ -2,6 +2,11 @@
 
 Date: 2026-07-17
 
+> Historical handoff. For the current workspace, running R1 experiment, evidence
+> limits and next steps, start at [Active Spatial](active_spatial.md) and the
+> [2026-10-02 takeover audit](diagnosis/active_spatial_takeover_20261002/REPORT.md).
+> The machine paths, task status and next-step instructions below are a July snapshot.
+
 This document is written for a new Codex/session with no prior context. The goal is to continue the VAGEN-Lite Active Spatial project on a new server without re-discovering the same engineering and experiment pitfalls.
 
 ## 0. Current Local State

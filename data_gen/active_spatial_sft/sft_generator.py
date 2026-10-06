@@ -36,7 +36,7 @@ import numpy as np
 from PIL import Image
 
 from .config import SFTGenerationConfig
-from .path_finder import find_trajectory, find_trajectory_guided, simulate_action, Trajectory, score_c2w
+from .path_finder import find_trajectory, find_trajectory_guided, simulate_action, Trajectory, score_c2w, task_success
 from .sft_formatter import format_trajectory
 
 # ── Ensure VAGEN is importable ───────────────────────────────────────────────
@@ -207,6 +207,71 @@ class SFTDataGenerator:
         self.renderer = _Renderer(cfg)
         self.collision_detector = _make_collision_detector(cfg)
         self._loaded_scene: Optional[str] = None
+        self._runtime = None
+
+    def _runtime_env(self):
+        """Use the RL environment as the final authority for published labels."""
+        if self._runtime is None:
+            from vagen.envs.active_spatial.env import ActiveSpatialEnv
+            from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+            cfg = self.cfg
+            self._runtime = ActiveSpatialEnv(ActiveSpatialEnvConfig(
+                jsonl_path=cfg.jsonl_path, exclude_task_types=[],
+                render_backend=cfg.render_backend, gs_root=cfg.gs_root,
+                client_url=cfg.client_url, client_origin=cfg.client_origin, gpu_device=cfg.gpu_device,
+                image_width=cfg.image_width, image_height=cfg.image_height,
+                step_translation=cfg.step_translation, step_rotation_deg=cfg.step_rotation_deg,
+                action_space=cfg.action_space, enable_explicit_done=cfg.enable_explicit_done,
+                enable_auto_termination=not cfg.enable_explicit_done,
+                max_actions_per_step=cfg.max_actions_per_turn,
+                max_episode_steps=cfg.max_total_actions + 1,
+                success_score_threshold=cfg.success_threshold,
+                potential_field_position_weight=cfg.position_weight,
+                potential_field_orientation_weight=cfg.orientation_weight,
+                max_distance=cfg.max_distance,
+                enable_collision_detection=cfg.enable_collision_detection,
+                collision_camera_radius=cfg.collision_camera_radius,
+                collision_floor_height=cfg.collision_floor_height,
+                collision_ceiling_height=cfg.collision_ceiling_height,
+                collision_safety_margin=cfg.collision_safety_margin,
+            ))
+        return self._runtime
+
+    def _replay(self, item, item_idx, trajectory):
+        """Return real runtime frames; reject pose drift and recompute terminal labels."""
+        if self.cfg.render_backend in (None, "none"):
+            raise ValueError("SFT publication requires a real renderer, not placeholder frames")
+        env = self._runtime_env()
+        obs, _ = env.reset(seed=item_idx)
+        if env.current_item != item:
+            raise ValueError("SFT replay selected a different source row")
+        def frame(observation):
+            images = [im for values in observation["multi_modal_data"].values() for im in values]
+            if len(images) != 1:
+                raise ValueError("SFT replay needs exactly one RGB observation")
+            return images[0]
+        images = [frame(obs)]
+        retained, metrics, done = [], {}, False
+        for step in trajectory.steps:
+            obs, _, done, info = env.step("<action>" + "|".join(step.actions) + "</action>")
+            if not np.allclose(env.view_engine.get_pose(), step.c2w_after, atol=1e-6, rtol=0):
+                raise ValueError("SFT search/runtime pose mismatch")
+            if env.collision_count or env.invalid_action_count:
+                raise ValueError("SFT replay collided or used an invalid action")
+            metrics = info.get("metrics", info).get("traj_metrics", {})
+            retained.append(step)
+            images.append(frame(obs))
+            if done:
+                break
+        if not done and self.cfg.enable_explicit_done:
+            _, _, _, info = env.step("<action>done</action>")
+            metrics = info.get("metrics", info).get("traj_metrics", {})
+        trajectory.steps = retained
+        trajectory.total_actions = sum(len(step.actions) for step in retained)
+        trajectory.final_c2w = env.view_engine.get_pose().copy()
+        trajectory.final_score = float(metrics.get("final_score", env.final_score))
+        trajectory.success = bool(metrics.get("success", False))
+        return images
 
     # ── Scene data loading ───────────────────────────────────────────────────
 
@@ -244,18 +309,13 @@ class SFTDataGenerator:
         """
         cfg = self.cfg
         scene_id = item.get("scene_id", "")
-        self.renderer.set_scene(scene_id)
 
         init_cam = item.get("init_camera", {})
-        K = np.array(init_cam.get("intrinsics", _fallback_K()), dtype=np.float64)
+        K = self._render_intrinsics(item)
         E = np.array(init_cam.get("extrinsics", np.eye(4)), dtype=np.float64)
 
         rel_path = f"images/{sft_id}_step00.{cfg.image_format}"
         abs_path = Path(cfg.output_dir) / rel_path
-        img = self.renderer.render(K, E, cfg.image_width, cfg.image_height)
-        if img is not None and cfg.save_images:
-            _save_image(img, abs_path, cfg.image_format, cfg.image_quality)
-        image_path = rel_path if cfg.save_images else _image_to_base64(img)
 
         traj = Trajectory(
             steps=[],
@@ -267,6 +327,12 @@ class SFTDataGenerator:
             scene_id=scene_id,
             item_idx=item_idx,
         )
+        img = self._replay(item, item_idx, traj)[0]
+        if not traj.success:
+            return None
+        if cfg.save_images and not _save_image(img, abs_path, cfg.image_format, cfg.image_quality):
+            return None
+        image_path = rel_path if cfg.save_images else _image_to_base64(img)
         record = format_trajectory(
             item=item,
             trajectory=traj,
@@ -275,6 +341,11 @@ class SFTDataGenerator:
             prompt_format=cfg.prompt_format,
             add_think=cfg.add_think,
             include_scores=cfg.include_score_in_think,
+            step_translation=cfg.step_translation,
+            step_rotation_deg=cfg.step_rotation_deg,
+            action_space=cfg.action_space,
+            enable_explicit_done=cfg.enable_explicit_done,
+            max_actions_per_step=cfg.max_actions_per_turn,
         )
         if cfg.verbose:
             print(
@@ -283,10 +354,25 @@ class SFTDataGenerator:
             )
         return record
 
+    def _render_intrinsics(self, item):
+        from vagen.envs.active_spatial.canonical_task_metrics import uses_canonical_backend
+        from vagen.envs.active_spatial.canonical_camera import build_canonical_camera, CANONICAL_CAMERA_H1_RESIZE_V1
+        native = np.asarray(item.get("init_camera", {}).get("intrinsics", _fallback_K()), dtype=float)
+        if uses_canonical_backend(item):
+            camera = build_canonical_camera(K_native=native, item=item,
+                render_size=(self.cfg.image_width, self.cfg.image_height), transform="resize",
+                c2w=item["init_camera"]["extrinsics"], camera_model_version=CANONICAL_CAMERA_H1_RESIZE_V1)
+            return np.asarray(camera.K_effective)
+        return native
+
     def _build_scoring_task_params(self, item: Dict[str, Any], K: np.ndarray) -> Dict[str, Any]:
         """Attach bbox/camera metadata needed by projected-bbox potential scoring."""
         cfg = self.cfg
         params = dict(item.get("task_params", {}) or {})
+        params["_action_space"] = cfg.action_space
+        from vagen.envs.active_spatial.canonical_task_metrics import uses_canonical_backend
+        if uses_canonical_backend(item):
+            params["_canonical_item"] = item
         params["_target_object"] = item.get("target_object")
         params["_camera_intrinsics"] = np.asarray(K, dtype=np.float64).tolist()
         params["_image_width"] = int(cfg.image_width)
@@ -309,12 +395,11 @@ class SFTDataGenerator:
         scene_id = item.get("scene_id", "")
 
         # ── Load scene ───────────────────────────────────────────────────────
-        self.renderer.set_scene(scene_id)
         self._load_scene_for_collision(scene_id)
 
         # ── Extract task data ────────────────────────────────────────────────
         init_cam = item.get("init_camera", {})
-        K = np.array(init_cam.get("intrinsics", _fallback_K()), dtype=np.float64)
+        K = self._render_intrinsics(item)
         E = np.array(init_cam.get("extrinsics", np.eye(4)), dtype=np.float64)
 
         task_type = item.get("task_type", "absolute_positioning")
@@ -353,30 +438,25 @@ class SFTDataGenerator:
         )
         t_find = time.time() - t0
 
-        # ── Validate trajectory ──────────────────────────────────────────────
-        n_steps = len(trajectory.steps)
-
-        if cfg.only_successful and not trajectory.success:
-            if cfg.verbose:
-                print(f"[Generator] Item {item_idx}: trajectory not successful "
-                      f"(score={trajectory.final_score:.4f}), skipping.")
-            return None
-
-        if not trajectory.success and trajectory.final_score < cfg.partial_success_min_score:
-            if cfg.verbose:
-                print(f"[Generator] Item {item_idx}: score {trajectory.final_score:.4f} below "
-                      f"partial_success_min_score={cfg.partial_success_min_score:.2f}, skipping.")
-            return None
-
-        if n_steps < cfg.min_trajectory_steps:
-            if cfg.verbose:
-                print(f"[Generator] Item {item_idx}: trajectory too short ({n_steps} steps), skipping.")
-            return None
-
-        if n_steps > cfg.max_trajectory_steps:
-            if cfg.verbose:
-                print(f"[Generator] Item {item_idx}: trajectory too long ({n_steps} steps), truncating.")
+        # Validate the actual retained trajectory, including runtime gates.
+        if len(trajectory.steps) > cfg.max_trajectory_steps:
             trajectory.steps = trajectory.steps[:cfg.max_trajectory_steps]
+        trajectory.final_c2w = trajectory.steps[-1].c2w_after if trajectory.steps else E
+        trajectory.total_actions = sum(len(step.actions) for step in trajectory.steps)
+        from vagen.envs.active_spatial.spatial_potential_field import create_potential_field
+        field = create_potential_field({"position_weight": cfg.position_weight,
+                                       "orientation_weight": cfg.orientation_weight,
+                                       "max_distance": cfg.max_distance})
+        trajectory.final_score = score_c2w(trajectory.final_c2w, field, task_type, task_params, target_region)[0]
+        trajectory.success = task_success(trajectory.final_c2w, trajectory.final_score, task_params, cfg.success_threshold)
+        replay_images = self._replay(item, item_idx, trajectory)
+        n_steps = len(trajectory.steps)
+        if cfg.only_successful and not trajectory.success:
+            return None
+        if not trajectory.success and trajectory.final_score < cfg.partial_success_min_score:
+            return None
+        if n_steps < cfg.min_trajectory_steps:
+            return None
 
         # ── Render images ────────────────────────────────────────────────────
         # We need one image per step PLUS the initial image.
@@ -394,7 +474,7 @@ class SFTDataGenerator:
             rel_path = f"images/{sft_id}_step{img_idx:02d}.{cfg.image_format}"
             abs_path = Path(cfg.output_dir) / rel_path
 
-            img = self.renderer.render(K, pose, cfg.image_width, cfg.image_height)
+            img = replay_images[img_idx]
 
             if img is not None and cfg.save_images:
                 ok = _save_image(img, abs_path, cfg.image_format, cfg.image_quality)
@@ -411,10 +491,10 @@ class SFTDataGenerator:
 
         t_render = time.time() - t1
 
-        if not rendered_ok and cfg.render_backend not in (None, "none"):
+        if not rendered_ok:
             if cfg.verbose:
                 print(f"[Generator] Item {item_idx}: some renders failed.")
-            # We continue – the image_paths list may contain partial results
+            return None  # Never publish an SFT conversation with missing frames
 
         # ── Format conversation ──────────────────────────────────────────────
         record = format_trajectory(
@@ -425,6 +505,11 @@ class SFTDataGenerator:
             prompt_format=cfg.prompt_format,
             add_think=cfg.add_think,
             include_scores=cfg.include_score_in_think,
+            step_translation=cfg.step_translation,
+            step_rotation_deg=cfg.step_rotation_deg,
+            action_space=cfg.action_space,
+            enable_explicit_done=cfg.enable_explicit_done,
+            max_actions_per_step=cfg.max_actions_per_turn,
             force_no_done=not trajectory.success,  # partial trajectories end without 'done'
         )
 
@@ -452,6 +537,8 @@ class SFTDataGenerator:
             raise ValueError("SFTGenerationConfig.jsonl_path must be set.")
         if not cfg.output_dir:
             raise ValueError("SFTGenerationConfig.output_dir must be set.")
+        if cfg.render_backend in (None, "none"):
+            raise ValueError("SFT publication requires a real renderer; use path_finder for geometry-only diagnostics")
 
         jsonl_path = Path(cfg.jsonl_path)
         output_dir = Path(cfg.output_dir)
@@ -459,6 +546,8 @@ class SFTDataGenerator:
         (output_dir / "images").mkdir(exist_ok=True)
 
         output_jsonl = output_dir / f"{cfg.output_name}.jsonl"
+        if output_jsonl.exists():
+            raise FileExistsError(f"refusing to overwrite SFT data: {output_jsonl}; use a new output directory/name")
 
         # ── Load source items ────────────────────────────────────────────────
         items = _load_jsonl(jsonl_path)
@@ -487,7 +576,7 @@ class SFTDataGenerator:
         }
 
         # ── Process ──────────────────────────────────────────────────────────
-        with open(output_jsonl, "w", encoding="utf-8") as fout:
+        with open(output_jsonl, "x", encoding="utf-8") as fout:
             for local_idx, item in enumerate(items):
                 global_idx = start + local_idx
                 sft_id = f"sft_{global_idx:06d}"
@@ -508,7 +597,7 @@ class SFTDataGenerator:
                         target_region = item.get("target_region", {})
                         if target_region:
                             init_score, _, _ = score_c2w(E, pf, task_type, task_params, target_region)
-                            if init_score >= cfg.success_threshold:
+                            if cfg.enable_explicit_done and task_success(E, init_score, task_params, cfg.success_threshold):
                                 gr_id = f"sft_{global_idx:06d}_gr"
                                 gr_record = self._process_goal_reached(
                                     item, global_idx, gr_id,
@@ -569,6 +658,8 @@ class SFTDataGenerator:
         print(f"  Output: {output_jsonl}")
         print("[Generator] ─────────────────────────────────────────────────\n")
 
+        if self._runtime is not None:
+            self._runtime.close()
         return stats
 
 

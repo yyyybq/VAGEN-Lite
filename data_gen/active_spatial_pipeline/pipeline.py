@@ -319,8 +319,8 @@ def validate_init_position(
     
     # Check 4: Estimated total navigation steps
     if effective_min_steps > 0 and sample_point is not None:
-        # Estimate steps: distance/0.1 + yaw_offset/5
-        distance_steps = distance_to_target / 0.1 if distance_to_target < float('inf') else 0
+        # This is a protocol-aware estimate, not a reachability certificate.
+        distance_steps = distance_to_target / init_view_config.step_translation if distance_to_target < float('inf') else 0
         
         dir_to_target = sample_point[:2] - init_pos[:2]
         dir_to_target_norm = np.linalg.norm(dir_to_target)
@@ -333,7 +333,7 @@ def validate_init_position(
                 init_fwd_2d = init_fwd_2d / init_fwd_2d_norm
                 cos_angle = np.clip(np.dot(init_fwd_2d, dir_to_target_unit), -1.0, 1.0)
                 yaw_offset_deg = float(np.degrees(np.arccos(cos_angle)))
-                yaw_steps = yaw_offset_deg / 5.0  # 5 degrees per turn step
+                yaw_steps = yaw_offset_deg / init_view_config.step_rotation_deg
         
         estimated_steps = distance_steps + yaw_steps
         if estimated_steps < effective_min_steps:
@@ -470,9 +470,14 @@ class TrainingDataItem:
     task_type: str = ""
     task_description: str = ""
     target_object: Optional[Dict[str, Any]] = None  # Target object with bbox for occlusion detection
+    generation_action_protocol: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
         result = {
+            'generator_version': 'active_spatial_candidates_v2',
+            'dataset_status': 'candidate_unverified',
+            'camera_model_version': 'legacy_native_intrinsics_v1',
+            'generation_action_protocol': self.generation_action_protocol,
             'scene_id': self.scene_id,
             'object_label': self.object_label,
             'preset': self.preset,
@@ -643,6 +648,11 @@ class ActiveSpatialPipeline:
             task_type=task.task_type,
             task_description=task.description,
             target_object=target_object,
+            generation_action_protocol={
+                'step_translation': self.config.initial_view.step_translation,
+                'step_rotation_deg': self.config.initial_view.step_rotation_deg,
+                'difficulty_estimate_only': True,
+            },
         )
 
     def _repair_task_sample_to_layout(self, task: TaskResult, layout: LayoutGeometry) -> Tuple[bool, str]:

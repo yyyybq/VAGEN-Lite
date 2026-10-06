@@ -2,6 +2,60 @@
 
 This pipeline generates training data for active spatial navigation tasks. It combines object selection, camera pose sampling, and task-based target position generation into a unified workflow.
 
+## Dataset admission (audit v2)
+
+`run_pipeline.py` produces **unverified candidates**, not automatically canonical
+training data. Rows record generator/camera versions and action sizes used for
+difficulty estimation. Use `--step_translation 0.3 --step_rotation_deg 20` (or the
+actual training protocol); a step estimate is not a reachability certificate.
+
+Formal canonical admission currently supports Projective and FOV. Start from a
+canonical manifest with correct native camera metadata; do not relabel legacy rows
+to bypass validation. Prepare private evidence JSONL, one entry per unique task:
+`{"task_id":"...","actions":["turn_left","move_forward"],"initial_rgb":"/path/to/audited.png"}`.
+Each string is an environment turn; join primitives with `|` for multi-action turns.
+
+```bash
+python scripts/verify_active_spatial_dataset.py \
+  --manifest /path/to/canonical.jsonl \
+  --evidence /path/to/private_evidence.jsonl \
+  --env-yaml /path/to/train.yaml \
+  --output /path/to/canonical.jsonl.contract.json
+```
+
+A real renderer is required. This checks canonical versions, nontrivial initial
+states, initial RGB agreement, collision/invalid-action-free reachability and
+canonical terminal success through the RL environment. No certificate is written
+unless every row passes; existing certificates are never overwritten. Full row
+contents and execution settings are bound to the certificate. Changed instructions
+or motion settings require revalidation. This certifies replay consistency,
+**not independent human semantic correctness**.
+
+The training launcher requires these sidecars for new formal runs. For explicitly
+historical, unverified reproduction only, set `ALLOW_LEGACY_ACTIVE_SPATIAL=1`.
+Other task families remain in that legacy workflow until canonical metrics exist.
+Existing frozen runs/configurations are unchanged. Separate validation sources
+need their own certificates. Private evidence stays outside policy-visible JSONL.
+
+Train/validation are reserved before filtering and written to separate immutable
+`*_manifest_v2.jsonl` files, checked for content/source overlap, then enumerated with
+`seed_list`. Nested and outer split sizes are accepted; conflicting sizes fail.
+There is no validation refill from training. `WINDOW_SIZE` now controls observation
+history in the no-concat loop, counting the current observation; unset means 1.
+
+Corrected evaluation partitions live in `ood_splits_v2`; input hashes and definitions
+are in `split_manifest.json`. They are **split-corrected legacy rows**, not newly
+RGB-certified data. The reference population is the V46 7B training manifest recorded
+there. For another population, regenerate into a new directory with
+`scripts/gen_ood_splits.py --train_jsonl ... --out_dir ...`. Category OOD requires an
+unseen atomic category but can also involve unseen scenes; axes need not be exclusive.
+
+SFT scores no longer include search bonuses. Retained trajectories are replayed in
+the RL environment before publication; missing frames, invalid actions, collisions
+and pose drift reject the sample. Prompts use configured movement sizes/presets.
+Explicit-done SFT uses explicit termination; no-done SFT uses automatic termination.
+Regenerate into a new output directory to preserve historical SFT data.
+
 ## Quick Start
 
 ### 1. Generate Training Data
@@ -1595,4 +1649,3 @@ This section provides a comprehensive, step-by-step explanation of how a single 
 4. **Modular Architecture**: Each step is encapsulated in a separate module (`object_selector.py`, `camera_sampler.py`, `camera_utils.py`, `task_generator.py`, `pipeline.py`) for maintainability and testing.
 
 5. **OpenCV/COLMAP Convention**: All camera matrices follow the standard computer vision convention (X=right, Y=down, Z=forward) for compatibility with rendering pipelines.
-

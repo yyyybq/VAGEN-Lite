@@ -113,42 +113,15 @@ class EvalRunner:
         
         env_cfg = self.config.env
         include_task_types = env_cfg.include_task_types or self.config.task_types
-        env_config = ActiveSpatialEnvConfig(
-            jsonl_path=env_cfg.jsonl_path,
-            include_task_types=include_task_types,
-            exclude_task_types=env_cfg.exclude_task_types,
-            render_backend=env_cfg.render_backend,
-            gs_root=env_cfg.gs_root,
-            client_url=env_cfg.client_url,
-            gpu_device=env_cfg.gpu_device,
-            image_width=env_cfg.image_width,
-            image_height=env_cfg.image_height,
-            step_translation=env_cfg.step_translation,
-            step_rotation_deg=env_cfg.step_rotation_deg,
-            enable_potential_field=env_cfg.enable_potential_field,
-            potential_field_position_weight=env_cfg.potential_field_position_weight,
-            potential_field_orientation_weight=env_cfg.potential_field_orientation_weight,
-            potential_field_reward_scale=env_cfg.potential_field_reward_scale,
-            success_score_threshold=env_cfg.success_score_threshold,
-            enable_collision_detection=env_cfg.enable_collision_detection,
-            collision_camera_radius=env_cfg.collision_camera_radius,
-            collision_floor_height=env_cfg.collision_floor_height,
-            collision_ceiling_height=env_cfg.collision_ceiling_height,
-            collision_penalty=env_cfg.collision_penalty,
-            enable_visibility_check=env_cfg.enable_visibility_check,
-            fov_horizontal=env_cfg.fov_horizontal,
-            fov_vertical=env_cfg.fov_vertical,
-            prompt_format=env_cfg.prompt_format,
-            action_space=env_cfg.action_space,
-            enable_explicit_done=env_cfg.enable_explicit_done,
-            max_actions_per_step=env_cfg.max_actions_per_step,
-            action_sep=env_cfg.action_sep,
-            image_placeholder=env_cfg.image_placeholder,
-            max_episode_steps=env_cfg.max_episode_steps,
-            format_reward=env_cfg.format_reward,
-            success_reward=env_cfg.success_reward,
-            max_distance=env_cfg.max_distance,
-        )
+        from dataclasses import asdict
+        values = asdict(env_cfg)
+        # Intersect the two filters identically in loader and environment.
+        if env_cfg.include_task_types and self.config.task_types:
+            include_task_types = sorted(set(env_cfg.include_task_types) & set(self.config.task_types))
+            if not include_task_types:
+                raise ValueError("task type filters have an empty intersection")
+        values["include_task_types"] = include_task_types
+        env_config = ActiveSpatialEnvConfig(**values)
         self.env = ActiveSpatialEnv(env_config)
     
     def _create_agent(self) -> BaseAgent:
@@ -173,7 +146,7 @@ class EvalRunner:
     def _create_model_agent(self) -> BaseAgent:
         """Create a VLM model agent for evaluation."""
         from evaluation.model_agent import ModelAgent
-        return ModelAgent(self.config.model)
+        return ModelAgent(self.config.model, history_window_size=self.config.env.history_window_size)
     
     def run(self) -> Dict[str, Any]:
         """
@@ -199,10 +172,25 @@ class EvalRunner:
         test_episodes = load_test_episodes(
             self.config.env.jsonl_path,
             task_types=self.config.task_types,
-            max_episodes=self.config.num_eval_episodes,
+            max_episodes=None,
             include_task_types=self.config.env.include_task_types,
             exclude_task_types=self.config.env.exclude_task_types,
         )
+        if self.config.training_jsonl_path:
+            from data_gen.active_spatial_pipeline.splits import read_rows, id_candidates, assert_disjoint
+            training = read_rows(self.config.training_jsonl_path)
+            if self.config.split_role == "id":
+                before = len(test_episodes)
+                test_episodes = id_candidates(training, test_episodes)
+                print(f"  ID protocol retained {len(test_episodes)}/{before} candidate episodes")
+            assert_disjoint(training, test_episodes)
+        if self.config.seed_offset < 0:
+            raise ValueError("seed_offset must be nonnegative")
+        test_episodes = test_episodes[self.config.seed_offset:]
+        if self.config.num_eval_episodes is not None:
+            test_episodes = test_episodes[:self.config.num_eval_episodes]
+        if not test_episodes:
+            raise ValueError("no eligible evaluation episodes")
         print(f"  Loaded {len(test_episodes)} episodes")
         
         # Show task distribution
@@ -219,7 +207,7 @@ class EvalRunner:
         
         pbar = tqdm(enumerate(test_episodes), total=len(test_episodes), desc="Evaluating")
         for ep_idx, ep_data in pbar:
-            seed = ep_data.get("_filtered_index", ep_idx) + self.config.seed_offset
+            seed = ep_data.get("_filtered_index", ep_idx)
             record = self._run_single_episode(ep_idx, ep_data, seed)
             self.episode_records.append(record)
             
@@ -235,6 +223,9 @@ class EvalRunner:
         # Compute metrics
         print("\nComputing metrics...")
         results = compute_all_metrics(self.episode_records)
+        from evaluation.eval_config import evaluation_fingerprint
+        results["protocol_fingerprint"] = evaluation_fingerprint(self.config.to_dict())
+        results["protocol_differences"] = self.config.protocol_differences
         
         # Display results
         print("\n" + "=" * 70)
@@ -275,6 +266,7 @@ class EvalRunner:
         
         # Build info for heuristic agent (with oracle geometry)
         agent_info = {
+            "task_prompt": info.get("task_prompt"),
             "current_pose": info.get("current_pose"),
             "current_potential_score": info.get("initial_potential_score", 0.0),
             "current_region_metrics": info.get("initial_region_metrics", {}),
@@ -298,6 +290,7 @@ class EvalRunner:
         all_actions = []
         trajectory = [] if self.config.save_trajectories else None
         
+        traj_metrics = {}
         done = False
         done_by_agent = False
         auto_terminated = False
@@ -371,7 +364,9 @@ class EvalRunner:
         # Determine final state
         final_score = score_trajectory[-1] if score_trajectory else 0.0
         max_score = max(score_trajectory) if score_trajectory else 0.0
-        success = traj_metrics.get("success", False) or auto_terminated or final_score >= self.config.env.success_score_threshold
+        # Scores are shaping/diagnostic values, not a second success predicate.
+        # In particular canonical FOV/Projective gates can fail at high scores.
+        success = bool(traj_metrics.get("success", False))
         timed_out = not done and num_turns >= self.config.max_steps_per_episode
         
         return EpisodeRecord(

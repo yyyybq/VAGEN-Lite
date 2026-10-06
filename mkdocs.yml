@@ -26,6 +26,7 @@ extra:
 
 nav:
   - Home: index.md
+  - Active Spatial: active_spatial.md
   - Quick Start: quickstart.md
   - Configuration: configuration.md
   - Customization:

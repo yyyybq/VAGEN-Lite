@@ -1,0 +1,82 @@
+name: gpt6_astra_id_ood_v1
+
+# GPT-6 Astra ID/OOD matrix. Env protocol matches the H800 7B unified eval
+# (256px, success 0.65, strafe, 12 turns) so numbers are comparable with
+# Qwen/Cambrian sweeps. Episode caps live in scripts/run_gpt6_id_ood_eval.py
+# budget modes; per-suite max_episodes here are only smoke defaults.
+
+defaults:
+  training_jsonl_path: exps/vagen_active_spatial/v46_baseline_qwen25vl_7b/train_filtered.jsonl
+  max_steps_per_episode: 12
+  num_eval_episodes: null
+  use_wandb: false
+  save_trajectories: true
+  task_types:
+    - absolute_positioning
+    - equidistance
+    - projective_relations
+    - centering
+    - occlusion_alignment
+    - fov_inclusion
+    - size_distance_invariance
+    - apparent_size_ordering
+    - screen_occupancy
+  env:
+    render_backend: local
+    gs_root: /mnt/umm/users/yinbaiqiao/InteriorGS
+    gpu_device: 0
+    image_width: 256
+    image_height: 256
+    success_score_threshold: 0.65
+    step_translation: 0.3
+    step_rotation_deg: 20.0
+    history_window_size: 1
+    action_space: strafe
+    enable_explicit_done: false
+    max_actions_per_step: 5
+    exclude_task_types:
+      - delta_control
+  model:
+    provider: openai_responses
+    model_name: gpt-6-astra
+    temperature: 0.1
+    top_p: 0.95
+    max_tokens: 1024
+    reasoning_effort: medium
+    max_retries: 6
+    request_timeout: 180.0
+
+suites:
+  - name: id_test
+    description: In-domain held-out test split (delta_control excluded by defaults).
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/id_test.jsonl
+
+  - name: ood_v2_centering
+    description: Small OOD split used by V46/V50 online validation.
+    jsonl_path: data_gen/active_spatial_pipeline/output_v2/val_ood_v2_centering.jsonl
+
+  - name: ood_scene
+    description: Held-out scenes / layouts.
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_scene.jsonl
+
+  - name: ood_instance
+    description: Seen atomic categories, new instances within training scenes.
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_instance.jsonl
+
+  - name: ood_category
+    description: Object categories absent from training.
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_category.jsonl
+
+  - name: ood_template
+    description: Same task semantics with paraphrased instructions.
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_template.jsonl
+
+  - name: ood_geometry
+    description: Distances/scales outside the central training range.
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_geometry.jsonl
+
+  - name: smoke
+    description: Three-episode smoke slice from ID test.
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/id_test.jsonl
+    max_episodes: 3
+    save_trajectories: false

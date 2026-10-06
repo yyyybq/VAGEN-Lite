@@ -38,27 +38,27 @@ suites:
   # Keep these names stable; they become output directory names and summary keys.
   - name: id_test
     description: In-domain held-out test set. Replace jsonl_path with the canonical ID test split.
-    jsonl_path: data_gen/active_spatial_pipeline/output_v2/test_id_v1.jsonl
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/id_test.jsonl
 
   - name: ood_scene
     description: Held-out scenes / layouts.
-    jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_scene.jsonl
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_scene.jsonl
 
   - name: ood_object
     description: Held-out target objects or object categories.
-    jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_instance.jsonl
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_instance.jsonl
 
   - name: ood_category
     description: Target object categories absent from training.
-    jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_category.jsonl
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_category.jsonl
 
   - name: ood_template
     description: Same task semantics with paraphrased instructions.
-    jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_template.jsonl
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_template.jsonl
 
   - name: ood_geometry
     description: Unusual metric distances/scales outside the central training range.
-    jsonl_path: data_gen/active_spatial_pipeline/ood_splits/ood_geometry.jsonl
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/ood_geometry.jsonl
 
   - name: ood_task_mix
     description: Shifted task-type mix; useful for detecting task farming.
@@ -66,6 +66,6 @@ suites:
 
   - name: smoke
     description: Tiny smoke suite for checking eval infrastructure before long runs.
-    jsonl_path: data_gen/active_spatial_pipeline/output_v2/test_id_v1.jsonl
+    jsonl_path: data_gen/active_spatial_pipeline/ood_splits_v2/id_test.jsonl
     max_episodes: 3
     save_trajectories: false

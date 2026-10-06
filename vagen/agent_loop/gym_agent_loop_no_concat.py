@@ -2,6 +2,7 @@
 # Licensed under the Apache License, Version 2.0
 
 import asyncio
+import copy
 import logging
 import os
 import re
@@ -15,6 +16,7 @@ from verl.utils.profiler import simple_timer
 from verl.utils.rollout_trace import rollout_trace_op
 from ..envs.gym_image_env import GymImageEnv
 from omegaconf import OmegaConf
+from vagen.utils.observation_history import ObservationHistory
 import traceback
 import importlib
 logger = logging.getLogger(__file__)
@@ -97,6 +99,7 @@ class AgentData:
         # Cached assistant text to step env
         self.last_assistant_text: Optional[str] = None
         self.outputs: List[AgentLoopOutput] = []
+        self.history = ObservationHistory(1)
 
 # -------------------- Gym Agent Loop --------------------
 
@@ -183,6 +186,11 @@ class GymAgentLoop(AgentLoopBase):
             group_idx=kwargs["group_idx"],
             traj_idx=kwargs["traj_idx"],
         )
+        agent_data.history = ObservationHistory(int(env_config.get("history_window_size", 1)))
+        agent_data.public_task = str((info or {}).get("task_prompt") or "")
+        if agent_data.env_name == "ActiveSpatial" and not agent_data.public_task:
+            raise ValueError("ActiveSpatial reset did not supply a public task")
+        agent_data.history.append(cur_msg, cur_images)
         agent_data.task_type       = _task_type
         agent_data.scene_id        = _scene_id
         agent_data.object_label    = _object_label
@@ -210,12 +218,12 @@ class GymAgentLoop(AgentLoopBase):
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:
         """Encode initial (system + first user) messages into prompt_ids."""
-        image_data = agent_data.sys_images + agent_data.cur_images
+        image_data = agent_data.sys_images + agent_data.history.images
         if self.processor is not None:
             raw_prompt = await self.loop.run_in_executor(
                 None,
                 lambda: self.processor.apply_chat_template(
-                    [agent_data.sys_msg, agent_data.cur_msg],
+                    [agent_data.sys_msg] + agent_data.history.messages,
                     add_generation_prompt=True,
                     tokenize=False,
                     **self.apply_chat_template_kwargs,
@@ -268,7 +276,7 @@ class GymAgentLoop(AgentLoopBase):
         else:
             if image_data:
                 raise ValueError("Environment returned images but `processor` is None.")
-            flat_messages = [_flatten_text_only_content(m) for m in [agent_data.sys_msg, agent_data.cur_msg]]
+            flat_messages = [_flatten_text_only_content(m) for m in [agent_data.sys_msg] + agent_data.history.messages]
             agent_data.turn_prompt_ids = await self.loop.run_in_executor(
                 None,
                 lambda: self.tokenizer.apply_chat_template(
@@ -281,11 +289,9 @@ class GymAgentLoop(AgentLoopBase):
             )
         
         if len(agent_data.turn_prompt_ids) > self.prompt_length:
-            logger.warning(
-                f"In env:{agent_data.env_name}, initial prompt length "
-                f"{len(agent_data.turn_prompt_ids)} exceeds prompt_length {self.prompt_length}; truncating"
-            )
-            agent_data.turn_prompt_ids = agent_data.turn_prompt_ids[-self.prompt_length :]
+            if agent_data.history.drop_oldest_turn():
+                return await self._handle_pending_state(agent_data, sampling_params)
+            raise ValueError("current observation exceeds prompt_length; increase it instead of truncating image tokens")
         return AgentState.GENERATING
 
     
@@ -297,10 +303,14 @@ class GymAgentLoop(AgentLoopBase):
         max_new_tokens=sampling_params_for_turn.get("max_new_tokens", None) or agent_data.response_limit
         max_new_tokens = min(max_new_tokens, agent_data.response_limit)
         sampling_params_for_turn["max_new_tokens"] = max_new_tokens
-        image_data = agent_data.sys_images + agent_data.cur_images
+        image_data = agent_data.sys_images + agent_data.history.images
         prompt_ids = agent_data.turn_prompt_ids
         if len(prompt_ids) > self.prompt_length:
-            prompt_ids = prompt_ids[-self.prompt_length :]
+            raise ValueError("policy prompt exceeds budget; refusing lossy truncation")
+        if getattr(agent_data, "public_task", ""):
+            from vagen.utils.task_context import check_policy_tokens
+            agent_data.task_context_check = check_policy_tokens(
+                self.tokenizer, prompt_ids, agent_data.public_task, self.prompt_length)
 
         with simple_timer("generate_sequences", agent_data.metrics):
             output = await self.server_manager.generate(
@@ -364,6 +374,7 @@ class GymAgentLoop(AgentLoopBase):
         contradictory_action = _has_contradictory_actions(action_list)
         agent_data.env_turns += 1
         last_turn=False
+        turn_limit_truncated = False
 
         # Keep an episode-level snapshot on every turn. Validation concatenation
         # takes reward_extra_info from the last emitted turn, which may be caused
@@ -382,8 +393,19 @@ class GymAgentLoop(AgentLoopBase):
 
         if self.env_max_turns is not None and agent_data.env_turns >= int(self.env_max_turns):
             last_turn = True
+            turn_limit_truncated = not bool(done)
 
-        turn_images=agent_data.sys_images+agent_data.cur_images
+        reward_trace = copy.deepcopy(info.get("reward_trace") or {})
+        reward_trace_flat = dict(info.get("reward_trace_flat") or {})
+        if turn_limit_truncated:
+            reward_trace.setdefault("outcome", {})["terminated"] = False
+            reward_trace["outcome"]["truncated"] = True
+            reward_trace["outcome"]["termination_reason"] = "max_llm_turns"
+            reward_trace_flat["reward_trace/terminated"] = 0.0
+            reward_trace_flat["reward_trace/truncated"] = 1.0
+            reward_trace_flat["reward_trace/termination_reason"] = "max_llm_turns"
+
+        turn_images = agent_data.sys_images + agent_data.history.images
 
         # NFP: collect next-frame images (the observation rendered AFTER this action).
         # These serve as the prediction target for the Next Frame Prediction head.
@@ -392,6 +414,33 @@ class GymAgentLoop(AgentLoopBase):
         # The nfp_loss_mask will be all-zeros for terminal turns, so the dummy
         # image contributes zero loss.
         _raw_next_images = _normalize_images(obs.get("multi_modal_input", {}).get("<image>", []) or [])
+        # Only when the snapshot hook is explicitly armed, retain an immutable
+        # next-observation source for the terminal-aware GAE *candidate*.  It is
+        # metadata, never used by rollout or PPO, and is deliberately absent in
+        # ordinary training to avoid carrying renderer frames through the batch.
+        snapshot_capture = bool(os.environ.get("VAGEN_ACTIVE_SPATIAL_PPO_SNAPSHOT_DIR"))
+        bootstrap_context = {
+            "capture_enabled": snapshot_capture,
+            "next_state_available": bool(_raw_next_images),
+            "next_observation_text": str(obs.get("obs_str", "")),
+            "next_images": [],
+        }
+        if snapshot_capture:
+            for image in _raw_next_images:
+                if not isinstance(image, Image.Image):
+                    continue
+                bootstrap_context["next_images"].append({
+                    "mode": image.mode,
+                    "size": list(image.size),
+                    "pixel_bytes": image.tobytes(),
+                })
+        snapshot_extra_fields = {}
+        if snapshot_capture:
+            snapshot_extra_fields = {
+                "action_text": action_str,
+                "parsed_primitive_actions": [str(action) for action in action_list],
+                "bootstrap_context": bootstrap_context,
+            }
         if last_turn or not _raw_next_images:
             # Terminal or empty observation: dummy = first current-frame image
             nfp_target_images = agent_data.cur_images[:1] if agent_data.cur_images else []
@@ -416,6 +465,7 @@ class GymAgentLoop(AgentLoopBase):
             num_turns=1,
             metrics=agent_data.metrics,
             extra_fields={"reward_extra_info": {
+                "task_context_present": float(bool(getattr(agent_data, "task_context_check", {}).get("task_present"))),
                 "traj_success":             float(traj_success),
                 "task_type":                agent_data.task_type,
                 "scene_id":                 agent_data.scene_id,
@@ -461,7 +511,16 @@ class GymAgentLoop(AgentLoopBase):
                 "episode_contradictory_action_count": float(traj_metrics.get("contradictory_action_count", 0.0)),
                 "episode_empty_action_rate": float(traj_metrics.get("empty_action_rate", 0.0)),
                 "episode_contradictory_action_rate": float(traj_metrics.get("contradictory_action_rate", 0.0)),
+                "terminated":               float(bool(info.get("terminated", done)) and not turn_limit_truncated),
+                "truncated":                float(bool(info.get("truncated", False)) or turn_limit_truncated),
+                "turn_limit_truncated":     float(turn_limit_truncated),
+                "termination_reason":       (
+                    "max_llm_turns" if turn_limit_truncated else str(info.get("termination_reason", "continuing"))
+                ),
+                **reward_trace_flat,
                 },
+                "reward_trace": reward_trace,
+                **snapshot_extra_fields,
                 "image_data": turn_images,
                 "last_turn": last_turn,
                 "group_idx": agent_data.group_idx,
@@ -480,6 +539,8 @@ class GymAgentLoop(AgentLoopBase):
         cur_images=_normalize_images(obs.get("multi_modal_input", {}).get("<image>", []) or [])
         agent_data.cur_msg = cur_msg
         agent_data.cur_images = cur_images
+        agent_data.history.append({"role": "assistant", "content": agent_data.last_assistant_text or ""})
+        agent_data.history.append(cur_msg, cur_images)
         if last_turn:
             return AgentState.TERMINATED
 

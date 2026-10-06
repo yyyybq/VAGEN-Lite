@@ -1,0 +1,37 @@
+# =============================================================================
+# env_config_sapave_val.yaml
+# Scene-held-out ActiveViewPose val split (no train-sample leakage).
+# =============================================================================
+
+env1:
+    env_name: active_spatial
+    env_config:
+        jsonl_path: "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/sapave/output/activeviewpose_val.jsonl"
+
+        render_backend: local
+        gs_root: "/mnt/umm/users/yinbaiqiao/InteriorGS"
+        gpu_device: 4
+        image_width: 256
+        image_height: 256
+
+        step_translation: 0.3
+        step_rotation_deg: 20.0
+        max_actions_per_step: 5
+        action_space: "strafe"
+        enable_explicit_done: false
+
+        enable_potential_field: true
+        potential_field_position_weight: 0.7
+        potential_field_orientation_weight: 0.3
+        potential_field_reward_scale: 1.0
+        potential_field_progress_mode: "potential"
+        potential_field_gamma: 0.99
+
+        success_score_threshold: 0.65
+        enable_auto_termination: true
+        near_success_threshold: 0.55
+        success_reward: 5.0
+        near_success_bonus: 0.5
+        enable_distance_in_obs: true
+        exclude_task_types:
+            - delta_control

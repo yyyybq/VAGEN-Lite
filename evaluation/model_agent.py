@@ -15,6 +15,7 @@ from typing import Dict, List, Any, Optional
 
 from evaluation.agents import BaseAgent
 from evaluation.eval_config import EvalModelConfig
+from vagen.utils.observation_history import ObservationHistory
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -31,13 +32,15 @@ class ModelAgent(BaseAgent):
     - OpenAI/Claude/Gemini API (for baseline comparison)
     """
     
-    def __init__(self, model_config: EvalModelConfig):
+    def __init__(self, model_config: EvalModelConfig, history_window_size: int = 1):
         super().__init__()
         self.name = f"model_{model_config.model_name}"
         self.model_config = model_config
         self.model = None
         self.conversation_history: List[Dict] = []
+        self.history = ObservationHistory(history_window_size)
         self.system_prompt_text: Optional[str] = None
+        self.public_task = None
         
         self._init_model()
     
@@ -47,7 +50,7 @@ class ModelAgent(BaseAgent):
         
         if provider == "vllm":
             self._init_vllm()
-        elif provider in ("openai", "claude", "gemini"):
+        elif provider in ("openai", "openai_responses", "claude", "gemini"):
             self._init_api_model()
         else:
             raise ValueError(f"Unsupported provider: {provider}")
@@ -140,13 +143,17 @@ class ModelAgent(BaseAgent):
         """Initialize API-based model (OpenAI, Claude, etc.)."""
         provider = self.model_config.provider
         
-        if provider == "openai":
+        if provider in ("openai", "openai_responses"):
             try:
                 from openai import OpenAI
-                self.model = OpenAI(
-                    api_key=self.model_config.api_key or os.environ.get("OPENAI_API_KEY"),
-                    base_url=self.model_config.api_base,
-                )
+                timeout = getattr(self.model_config, "request_timeout", 180.0) or 180.0
+                kwargs = {
+                    "api_key": self.model_config.api_key or os.environ.get("OPENAI_API_KEY"),
+                    "timeout": timeout,
+                }
+                if self.model_config.api_base:
+                    kwargs["base_url"] = self.model_config.api_base
+                self.model = OpenAI(**kwargs)
             except ImportError:
                 raise ImportError("openai package not installed.")
         
@@ -170,6 +177,13 @@ class ModelAgent(BaseAgent):
     def act(self, observation: Dict[str, Any], info: Dict[str, Any] = None) -> str:
         """Generate action from VLM given observation."""
         obs_str = observation.get("obs_str", "")
+        import re
+        from vagen.utils.task_context import assert_task_text
+        match = re.search(r"^Task: (.+)$", obs_str, re.MULTILINE)
+        if self.public_task is None:
+            self.public_task = (info or {}).get("task_prompt") or (match.group(1) if match else None)
+        if self.public_task:
+            assert_task_text(obs_str, self.public_task)
         multi_modal = observation.get("multi_modal_data", {})
         
         # Extract images
@@ -179,11 +193,12 @@ class ModelAgent(BaseAgent):
                 images.extend(values)
         
         # Build message
-        self.conversation_history.append({
+        self.history.append({
             "role": "user",
             "content": obs_str,
             "images": images,
-        })
+        }, images)
+        self.conversation_history = self.history.messages
         
         # Generate response
         provider = self.model_config.provider
@@ -191,6 +206,8 @@ class ModelAgent(BaseAgent):
             response = self._generate_vllm(images)
         elif provider == "openai":
             response = self._generate_openai(images)
+        elif provider == "openai_responses":
+            response = self._generate_openai_responses(images)
         elif provider == "claude":
             response = self._generate_claude(images)
         elif provider == "gemini":
@@ -199,10 +216,11 @@ class ModelAgent(BaseAgent):
             response = "<think>No model.</think><action>move_forward|</action>"
         
         # Add response to history
-        self.conversation_history.append({
+        self.history.append({
             "role": "assistant",
             "content": response,
         })
+        self.conversation_history = self.history.messages
         
         return response
     
@@ -244,6 +262,7 @@ class ModelAgent(BaseAgent):
         )
         
         if outputs and outputs[0].outputs:
+            self._validate_vllm_input(outputs[0])
             return outputs[0].outputs[0].text
         return "<think>Generation failed.</think><action>move_forward|</action>"
 
@@ -293,20 +312,109 @@ class ModelAgent(BaseAgent):
 
         outputs = self.model.generate([req], sampling_params=self.sampling_params)
         if outputs and outputs[0].outputs:
+            self._validate_vllm_input(outputs[0])
             return outputs[0].outputs[0].text
         return "<think>Generation failed.</think><action>move_forward|</action>"
+
+    def _validate_vllm_input(self, output):
+        """Check inference's actual input IDs, including image expansion."""
+        if self.public_task:
+            from vagen.utils.task_context import check_policy_tokens
+            limit = self.model.llm_engine.model_config.max_model_len - self.model_config.max_tokens
+            self.last_task_context_check = check_policy_tokens(
+                self.model.get_tokenizer(), output.prompt_token_ids, self.public_task, limit)
     
+    def _retryable_openai_call(self, fn):
+        """Retry transient OpenAI errors with exponential backoff."""
+        import time
+        retries = max(1, int(getattr(self.model_config, "max_retries", 6) or 6))
+        last_exc = None
+        for attempt in range(retries):
+            try:
+                return fn()
+            except Exception as exc:
+                last_exc = exc
+                name = type(exc).__name__
+                status = getattr(exc, "status_code", None)
+                retryable = name in {
+                    "RateLimitError",
+                    "APITimeoutError",
+                    "APIConnectionError",
+                    "InternalServerError",
+                    "APIStatusError",
+                } or status in {408, 409, 429, 500, 502, 503, 504}
+                if not retryable or attempt == retries - 1:
+                    raise
+                sleep_s = min(16.0, 0.5 * (2 ** attempt))
+                print(f"  OpenAI retry {attempt + 1}/{retries} after {name}: sleep {sleep_s:.1f}s")
+                time.sleep(sleep_s)
+        raise last_exc
+
     def _generate_openai(self, images: List) -> str:
-        """Generate with OpenAI API."""
+        """Generate with OpenAI Chat Completions API."""
         messages = self._build_openai_messages(images)
-        
-        response = self.model.chat.completions.create(
-            model=self.model_config.model_name,
-            messages=messages,
-            temperature=self.model_config.temperature,
-            max_tokens=self.model_config.max_tokens,
+        kwargs = {
+            "model": self.model_config.model_name,
+            "messages": messages,
+            "max_tokens": self.model_config.max_tokens,
+        }
+        effort = getattr(self.model_config, "reasoning_effort", None)
+        if effort:
+            kwargs["reasoning_effort"] = effort
+        else:
+            kwargs["temperature"] = self.model_config.temperature
+        response = self._retryable_openai_call(
+            lambda: self.model.chat.completions.create(**kwargs)
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
+
+    def _generate_openai_responses(self, images: List) -> str:
+        """Generate with OpenAI Responses API (required path for GPT-6 Astra)."""
+        messages = self._build_openai_responses_messages()
+        kwargs = {
+            "model": self.model_config.model_name,
+            "input": messages,
+            "max_output_tokens": self.model_config.max_tokens,
+        }
+        effort = getattr(self.model_config, "reasoning_effort", None)
+        if effort:
+            kwargs["reasoning"] = {"effort": effort}
+        service_tier = getattr(self.model_config, "service_tier", None)
+        if service_tier:
+            kwargs["service_tier"] = service_tier
+        response = self._retryable_openai_call(
+            lambda: self.model.responses.create(**kwargs)
+        )
+        return getattr(response, "output_text", None) or ""
+
+    def _build_openai_responses_messages(self) -> List[Dict]:
+        """Build Responses API input items from conversation history."""
+        messages = []
+        if self.system_prompt_text:
+            messages.append({
+                "role": "system",
+                "content": [{"type": "input_text", "text": self.system_prompt_text}],
+            })
+        for msg in self.conversation_history:
+            role = msg["role"]
+            content = msg["content"]
+            msg_images = msg.get("images", [])
+            if role == "assistant":
+                messages.append({
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": content or ""}],
+                })
+                continue
+            parts = []
+            for img in msg_images or []:
+                parts.append({
+                    "type": "input_image",
+                    "image_url": self._image_to_data_url(img),
+                })
+            if str(content or "").strip():
+                parts.append({"type": "input_text", "text": str(content)})
+            messages.append({"role": role, "content": parts})
+        return messages
     
     def _generate_claude(self, images: List) -> str:
         """Generate with Claude API."""
@@ -323,16 +431,11 @@ class ModelAgent(BaseAgent):
     
     def _generate_gemini(self, images: List) -> str:
         """Generate with Gemini API."""
-        # Build parts for latest message
-        parts = []
-        if images:
-            for img in images:
-                parts.append(img)  # PIL Image
-        
-        latest_text = self.conversation_history[-1]["content"] if self.conversation_history else ""
-        parts.append(latest_text)
-        
-        response = self.model.generate_content(parts)
+        contents = []
+        for message in self.conversation_history:
+            parts = list(message.get("images", [])) + [message["content"]]
+            contents.append({"role": "model" if message["role"] == "assistant" else "user", "parts": parts})
+        response = self.model.generate_content(contents)
         return response.text
     
     def _build_openai_messages(self, current_images: List) -> List[Dict]:
@@ -406,3 +509,5 @@ class ModelAgent(BaseAgent):
     def reset(self):
         """Reset conversation history for a new episode."""
         self.conversation_history = []
+        self.history.turns.clear()
+        self.public_task = None

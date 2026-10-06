@@ -21,7 +21,7 @@ import numpy as np
 from PIL import Image
 
 
-VERSION = "r1_canonical_dev_eval32_runner_v6_h1_render_camera"
+VERSION = "r1_canonical_dev_eval32_runner_v7_gate_aligned_reward_contract"
 SMOKE_INDICES = (0, 10, 21, 31)
 FROZEN_RGB_MAX_MAE = 0.5
 FROZEN_RGB_MAX_P99_ABS_ERROR = 2.0
@@ -231,6 +231,9 @@ class VllmPolicy:
         started = time.time()
         tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=False)
         processor = AutoProcessor.from_pretrained(args.model_path, trust_remote_code=False)
+        self.tokenizer = tokenizer
+        self.processor = processor
+        self.public_task = ""
         self.tokenizer_class = type(tokenizer).__name__
         self.processor_class = type(processor).__name__
         self.llm = LLM(
@@ -270,6 +273,16 @@ class VllmPolicy:
             "load_seconds": self.load_seconds,
         })
 
+    def close(self) -> None:
+        """Explicitly stop vLLM V1 child processes before the next model."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        engine = getattr(getattr(self, "llm", None), "llm_engine", None)
+        core = getattr(engine, "engine_core", None)
+        if core is not None:
+            core.shutdown()
+
     def generate(self, system_text: str, user_text: str, image: Image.Image, seed: int) -> tuple[str, float]:
         from vllm import SamplingParams
 
@@ -288,6 +301,17 @@ class VllmPolicy:
             {"role": "system", "content": system_text},
             {"role": "user", "content": user_content},
         ]
+        from vagen.utils.task_context import assert_task_text, check_policy_tokens
+        assert_task_text(user_text, self.public_task)
+        # Encode the image-expanded request before inference, then independently
+        # verify the actual IDs returned by vLLM. No text-only proxy check.
+        local_content = [{"type": "text", "text": segments[0]},
+                         {"type": "image", "image": image},
+                         {"type": "text", "text": segments[1]}]
+        local_messages = [messages[0], {"role": "user", "content": local_content}]
+        prompt = self.processor.apply_chat_template(local_messages, tokenize=False, add_generation_prompt=True)
+        ids = self.processor(text=[prompt], images=[image], return_tensors="pt")["input_ids"][0].tolist()
+        check_policy_tokens(self.tokenizer, ids, self.public_task, self.args.max_model_len - 384)
         params = SamplingParams(
             temperature=0.8,
             top_p=0.95,
@@ -301,6 +325,8 @@ class VllmPolicy:
         elapsed = time.time() - started
         if not outputs or not outputs[0].outputs:
             raise RuntimeError("vLLM returned no completion")
+        self.last_task_context_check = check_policy_tokens(
+            self.tokenizer, outputs[0].prompt_token_ids, self.public_task, self.args.max_model_len - 384)
         return outputs[0].outputs[0].text, elapsed
 
 
@@ -328,10 +354,15 @@ def env_config(args: argparse.Namespace, policy_path: Path) -> Any:
         potential_field_position_weight=0.7,
         potential_field_orientation_weight=0.3,
         potential_field_progress_mode="potential",
-        potential_field_gamma=0.99,
+        potential_field_gamma=0.95,
         potential_field_reward_scale=1.0,
+        enable_potential_shaping_reward=True,
+        enable_near_success_reward=False,
+        enable_visibility_shaping_reward=False,
         near_success_threshold=0.55,
-        near_success_bonus=0.5,
+        near_success_bonus=0.0,
+        format_reward=0.0,
+        invalid_format_penalty=-0.1,
         success_reward=5.0,
         success_score_threshold=0.65,
         enable_collision_detection=True,
@@ -382,6 +413,7 @@ def run_episode(
     repository_root: Path,
 ) -> dict[str, Any]:
     obs, reset_info = env.reset(seed=eval_index)
+    policy.public_task = str((reset_info or {}).get("task_prompt") or "")
     actual_identity = (env.current_item or {}).get("source_identity", {})
     if actual_identity.get("episode_fingerprint") != audit["episode_fingerprint"]:
         raise RuntimeError(f"environment selected wrong episode at index {eval_index}")
@@ -430,6 +462,7 @@ def run_episode(
             }),
         }
         raw_completion, inference_seconds = policy.generate(system_text, obs["obs_str"], frame["image"], model_seed)
+        input_record["task_context_check"] = policy.last_task_context_check
         primitive_before = int(env._current_step)
         obs, reward, done, step_info = env.step(raw_completion)
         primitive_after = int(env._current_step)
@@ -675,6 +708,7 @@ def main() -> None:
         )} for row in smoke_rows],
     })
     if not smoke_pass:
+        policy.close()
         raise RuntimeError("fixed four-episode smoke gate failed; full evaluation not started")
     for index in range(32):
         execute(index)
@@ -683,7 +717,11 @@ def main() -> None:
     finally:
         rows = [ledger["episodes"][k] for k in sorted(ledger["episodes"])]
         atomic_json(args.output_dir / "summary.json", summarize(rows))
-    print(json.dumps(summarize(rows), indent=2, sort_keys=True))
+    policy.close()
+    print(json.dumps(summarize(rows), indent=2, sort_keys=True), flush=True)
+    # Evidence and summaries are durable and the engine was explicitly closed.
+    # Avoid a known vLLM/torch non-daemon teardown hang between paired models.
+    os._exit(0)
 
 
 if __name__ == "__main__":

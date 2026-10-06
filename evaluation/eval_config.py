@@ -10,59 +10,40 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 import yaml
+import hashlib
+import json
+
+
+from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+
+
+def evaluation_fingerprint(raw):
+    """Invalidate old results when data, effective config or success protocol changes."""
+    values = dict(raw)
+    env = EvalEnvConfig(**values.pop("env", {}))
+    model = EvalModelConfig(**values.pop("model", {}))
+    normalized = EvalConfig(env=env, model=model, **values).to_dict()
+    for key in ("eval_name", "output_dir", "verbose", "use_wandb", "wandb_project", "wandb_entity"):
+        normalized.pop(key, None)
+    normalized["model"].pop("api_key", None)
+    hashes = {}
+    contract_path = env.dataset_contract_path if env.require_verified_dataset else None
+    for path in (env.jsonl_path, normalized.get("training_jsonl_path"), contract_path):
+        if path:
+            hashes[str(path)] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    payload = {"revision": "active_spatial_audit_v2", "config": normalized, "files": hashes}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 @dataclass
-class EvalEnvConfig:
-    """Environment configuration for evaluation."""
-    jsonl_path: str = ""
-    include_task_types: Optional[List[str]] = None
-    exclude_task_types: List[str] = field(default_factory=lambda: ["delta_control"])
-    render_backend: Optional[str] = "local"
-    gs_root: str = ""
-    client_url: str = ""
-    gpu_device: Optional[int] = 4
-    image_width: int = 512
-    image_height: int = 512
-    step_translation: float = 0.2
-    step_rotation_deg: float = 10.0
-    
-    # Potential field
-    enable_potential_field: bool = True
-    potential_field_position_weight: float = 0.7
-    potential_field_orientation_weight: float = 0.3
-    potential_field_reward_scale: float = 1.0
-    success_score_threshold: float = 0.85
-    
-    # Collision
-    enable_collision_detection: bool = True
-    collision_camera_radius: float = 0.15
-    collision_floor_height: float = 0.3
-    collision_ceiling_height: float = 2.5
-    collision_penalty: float = -0.15
-    
-    # Visibility
-    enable_visibility_check: bool = True
-    fov_horizontal: float = 60.0
-    fov_vertical: float = 60.0
-    
-    # Prompt
-    prompt_format: str = "free_think"
-    action_space: str = "legacy"
-    enable_explicit_done: bool = True
-    max_actions_per_step: int = 5
-    action_sep: str = "|"
-    image_placeholder: str = "<image>"
-    max_episode_steps: int = 50
-    format_reward: float = 0.05
-    success_reward: float = 1.0
-    max_distance: float = 5.0
+class EvalEnvConfig(ActiveSpatialEnvConfig):
+    """The runtime schema is also the evaluation schema; no duplicate defaults."""
 
 
 @dataclass
 class EvalModelConfig:
     """Model configuration for evaluation."""
-    provider: str = "vllm"                  # vllm, openai, claude, etc.
+    provider: str = "vllm"                  # vllm, openai, openai_responses, claude, gemini
     model_name: str = ""                     # HF model ID or API model name
     checkpoint_path: Optional[str] = None    # Path to trained checkpoint
     temperature: float = 0.1                 # Lower temp for eval (less random)
@@ -74,6 +55,10 @@ class EvalModelConfig:
     # For API models
     api_key: Optional[str] = None
     api_base: Optional[str] = None
+    reasoning_effort: Optional[str] = None  # low|medium|high|xhigh|max for GPT-5/GPT-6
+    max_retries: int = 6
+    request_timeout: float = 180.0
+    service_tier: Optional[str] = None  # flex|standard|priority
 
 
 @dataclass
@@ -85,6 +70,9 @@ class EvalConfig:
     max_steps_per_episode: int = 20          # Max LLM turns per episode
     num_eval_episodes: Optional[int] = None  # None = use all test data
     seed_offset: int = 0                     # Offset for seed selection
+    training_jsonl_path: Optional[str] = None
+    split_role: Optional[str] = None
+    protocol_differences: Dict[str, Any] = field(default_factory=dict)
     
     # Agent type
     agent_type: str = "model"                # "model", "random", "heuristic", "frozen"

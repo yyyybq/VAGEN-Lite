@@ -23,6 +23,12 @@ Usage:
     python evaluation/run_eval.py --agent model \
         --jsonl /path/to/test_data.jsonl \
         --provider openai --model-name gpt-4o
+
+    # Run GPT-6 Astra on an ID/OOD jsonl split
+    python evaluation/run_eval.py --agent model \
+        --jsonl /path/to/id_or_ood.jsonl \
+        --provider openai_responses --model-name gpt-6-astra \
+        --reasoning-effort medium
     
     # Filter specific task types
     python evaluation/run_eval.py --agent random \
@@ -82,7 +88,7 @@ def parse_args():
     
     # Model (if agent is model/frozen)
     parser.add_argument("--provider", type=str, default="vllm",
-                        help="Model provider (vllm, openai, claude, gemini)")
+                        help="Model provider (vllm, openai, openai_responses, claude, gemini)")
     parser.add_argument("--model-name", type=str, default="Qwen/Qwen2.5-VL-3B-Instruct",
                         help="Model name or HuggingFace ID")
     parser.add_argument("--checkpoint", type=str, default=None,
@@ -91,6 +97,9 @@ def parse_args():
                         help="Tensor parallel size for vLLM")
     parser.add_argument("--temperature", type=float, default=0.1,
                         help="Sampling temperature")
+    parser.add_argument("--reasoning-effort", type=str, default=None,
+                        choices=["low", "medium", "high", "xhigh", "max"],
+                        help="GPT-5/GPT-6 reasoning effort (Responses API)")
     
     # Evaluation
     parser.add_argument("--max-episodes", type=int, default=None,
@@ -143,6 +152,7 @@ def build_config_from_args(args) -> EvalConfig:
         checkpoint_path=args.checkpoint,
         temperature=args.temperature,
         tensor_parallel_size=args.tp,
+        reasoning_effort=args.reasoning_effort,
     )
     
     config = EvalConfig(

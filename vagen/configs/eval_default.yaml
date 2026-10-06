@@ -40,6 +40,15 @@ backends:
     min_backoff: 0.5
     max_backoff: 8.0
 
+  openai_responses:                 # GPT-5.4-pro / GPT-6 Astra Responses API
+    api_key: ""                     # or export OPENAI_API_KEY
+    base_url: null
+    model: "gpt-6-astra"
+    max_concurrency: 4
+    max_retries: 6
+    min_backoff: 0.5
+    max_backoff: 8.0
+
   azure:
     azure_endpoint: ""        # or export AZURE_OPENAI_ENDPOINT
     azure_api_key: ""         # or export AZURE_API_KEY

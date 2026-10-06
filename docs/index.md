@@ -11,6 +11,7 @@ A lightweight reimplementation built on [VERL](https://github.com/volcengine/ver
 
 ## Documentation
 
+- [Active Spatial 项目入口](active_spatial.md) - 研究主线、代码入口、CPU 检查与接管记录
 - [Quick Start](quickstart.md) - Installation and basic usage
 - [Configuration](configuration.md) - Training configuration reference
 - [Custom Environment](custom-environment.md) - Build your own environment

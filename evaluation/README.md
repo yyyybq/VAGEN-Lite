@@ -72,6 +72,17 @@ bash evaluation/scripts/run_trained_model.sh /path/to/checkpoint_step_200
 bash evaluation/scripts/run_full_eval.sh /path/to/checkpoint
 ```
 
+
+### GPT-6 Astra ID / OOD
+
+```bash
+python scripts/run_gpt6_id_ood_eval.py --mode smoke --dry-run
+python scripts/run_gpt6_id_ood_eval.py --mode canary --run
+```
+
+See `docs/gpt6_id_ood_eval.md` and `examples/evaluate/active_spatial/test_suites_gpt6.yaml`.
+The runner uses `--provider openai_responses --model-name gpt-6-astra`.
+
 ## CLI 参数
 
 ```
@@ -115,7 +126,7 @@ Output:
 
 | 指标 | 含义 |
 |------|------|
-| `success_rate` | 成功率（final score ≥ threshold） |
+| `success_rate` | 环境 `metrics.traj_metrics.success` 的比例；canonical gate 不能用 final score 阈值替代 |
 | `mean_final_score` | 最终得分均值 [0, 1] |
 | `mean_score_improvement` | 最终得分 − 初始得分（正值 = 在改善） |
 | `spl` | Success weighted by Path Length（效率） |

@@ -172,6 +172,10 @@ def parse_args():
                         help='Print verbose output')
     
     # Config file
+    parser.add_argument('--step_translation', type=float, default=None,
+                        help='Translation step used by difficulty estimation; must match training.')
+    parser.add_argument('--step_rotation_deg', type=float, default=None,
+                        help='Rotation step used by difficulty estimation; must match training.')
     parser.add_argument('--config', type=str, default=None,
                         help='Load configuration from JSON file')
     
@@ -222,6 +226,10 @@ def main():
         config.output_dir = args.output_dir
     
     # Print configuration
+    if args.step_translation is not None:
+        config.initial_view.step_translation = args.step_translation
+    if args.step_rotation_deg is not None:
+        config.initial_view.step_rotation_deg = args.step_rotation_deg
     print("=" * 60)
     print("Active Spatial Perception Dataset Generation")
     print("=" * 60)

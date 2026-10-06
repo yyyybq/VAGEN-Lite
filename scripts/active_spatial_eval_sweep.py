@@ -39,6 +39,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXP_ROOT = PROJECT_ROOT / "exps" / "vagen_active_spatial"
@@ -310,42 +312,10 @@ def env_defaults_from_exp(exp: Experiment) -> Dict[str, Any]:
         print(f"[warn] Could not load env defaults for {exp.name}: {exc}", file=sys.stderr)
         return defaults
 
-    allowed = {
-        "gs_root",
-        "include_task_types",
-        "exclude_task_types",
-        "render_backend",
-        "gpu_device",
-        "image_width",
-        "image_height",
-        "step_translation",
-        "step_rotation_deg",
-        "enable_potential_field",
-        "potential_field_position_weight",
-        "potential_field_orientation_weight",
-        "potential_field_reward_scale",
-        "success_score_threshold",
-        "enable_collision_detection",
-        "collision_camera_radius",
-        "collision_floor_height",
-        "collision_ceiling_height",
-        "collision_penalty",
-        "enable_visibility_check",
-        "fov_horizontal",
-        "fov_vertical",
-        "prompt_format",
-        "max_actions_per_step",
-        "action_sep",
-        "image_placeholder",
-        "max_episode_steps",
-        "format_reward",
-        "success_reward",
-        "max_distance",
-    }
-    for key in allowed:
-        if key in env_cfg:
-            defaults[key] = env_cfg[key]
-    return defaults
+    from dataclasses import asdict, fields
+    from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+    allowed = {f.name for f in fields(ActiveSpatialEnvConfig)}
+    return asdict(ActiveSpatialEnvConfig(**{k: v for k, v in env_cfg.items() if k in allowed}))
 
 
 def load_suites(path: Path) -> Dict[str, Any]:
@@ -383,19 +353,33 @@ def make_eval_config(
     env_defaults = env_defaults_from_exp(exp)
     suite_env = dict(suite.get("env", {}) or {})
 
-    env = {}
+    # Suite defaults fill missing configuration; training defines the protocol.
+    env = dict(global_defaults.get("env", {}) or {})
     env.update(env_defaults)
-    env.update(global_defaults.get("env", {}) or {})
-    env.update(suite_env)
-    env["jsonl_path"] = suite["jsonl_path"]
-    if "render_backend" in suite:
-        env["render_backend"] = suite["render_backend"]
-    if "gs_root" in suite:
-        env["gs_root"] = suite["gs_root"]
-    if "gpu_device" in suite:
-        env["gpu_device"] = suite["gpu_device"]
+    infrastructure = {"render_backend", "gs_root", "gpu_device", "client_url", "client_origin", "dataset_root"}
+    for key in infrastructure:
+        if key in (global_defaults.get("env") or {}):
+            env[key] = global_defaults["env"][key]
+    overrides = dict(suite_env)
+    for key in infrastructure:
+        if key in suite:
+            overrides[key] = suite[key]
     if "success_threshold" in suite:
-        env["success_score_threshold"] = suite["success_threshold"]
+        overrides["success_score_threshold"] = suite["success_threshold"]
+    permitted = set(global_defaults.get("protocol_overrides", [])) | set(suite.get("protocol_overrides", []))
+    differences = {key: {"train": env.get(key), "eval": value} for key, value in overrides.items()
+                   if key not in infrastructure and key != "jsonl_path" and key in env and env[key] != value}
+    undeclared = set(differences) - permitted
+    if undeclared:
+        raise ValueError(f"declare protocol_overrides for intentional eval changes: {sorted(undeclared)}")
+    env.update(overrides)
+    env["jsonl_path"] = suite["jsonl_path"]
+    if env.get("require_verified_dataset"):
+        env["dataset_contract_path"] = suite.get("dataset_contract_path", str(suite["jsonl_path"]) + ".contract.json")
+    train_turns = global_defaults.get("max_steps_per_episode", 20)
+    if exp.train_yaml:
+        train_spec = load_yaml(exp.train_yaml)["envs"][0]
+        train_turns = train_spec.get("max_turns", train_turns)
 
     model_defaults = dict(global_defaults.get("model", {}) or {})
     model = {
@@ -417,7 +401,10 @@ def make_eval_config(
         "eval_name": eval_name,
         "output_dir": str(output_dir),
         "agent_type": agent,
-        "max_steps_per_episode": suite.get("max_turns", global_defaults.get("max_steps_per_episode", 20)),
+        "max_steps_per_episode": suite.get("max_turns", train_turns),
+        "training_jsonl_path": env_defaults.get("jsonl_path"),
+        "split_role": suite.get("split_role", "id" if suite["name"] in ("id_test", "smoke") else suite["name"]),
+        "protocol_differences": differences,
         "num_eval_episodes": suite.get("max_episodes", global_defaults.get("num_eval_episodes")),
         "seed_offset": suite.get("seed_offset", 0),
         "use_wandb": bool(suite.get("use_wandb", global_defaults.get("use_wandb", False))),
@@ -630,6 +617,11 @@ def main() -> int:
 
                     if not args.summarize_only:
                         config = make_eval_config(exp, ckpt, suite, suite_cfg, output_dir, agent)
+                        if result_path.exists() and not args.rerun:
+                            from evaluation.eval_config import evaluation_fingerprint
+                            previous = read_json(result_path).get("metrics", {}).get("protocol_fingerprint")
+                            if previous != evaluation_fingerprint(config):
+                                raise ValueError(f"stale or incompatible result: {result_path}; choose a new sweep name or explicitly --rerun")
                         write_yaml(config_path, config)
                         append_manifest(
                             manifest_path,
