@@ -1,0 +1,16 @@
+{
+  "audit_sha256": "5babe080b793d1c29846d3aaaf00259eed81f4b157c338afe20abd03a1f3654d",
+  "certified_shortest_matches": 147,
+  "dashboards": 210,
+  "primitive_images": 976,
+  "qwen_no_think_parquet_sha256": "bc5b67ec512a23499a8130bf89e0335ebf2a13bd46343da1e5addc65ceb3e494",
+  "qwen_parquet_sha256": "b4bcca2f824abdc481e0187230fa434c2522ac8239de4026d961559b3eac20f3",
+  "records": 210,
+  "schema_version": "active_spatial_r1_sft_release_gate_v1",
+  "sft_jsonl_sha256": "3caec6cf5ae63824a4f087ad64c9eebf71017a0e8021c6e94f3cc3fb634f0aac",
+  "site_index_sha256": "dd12152f3b117f5d69703c5224b9a7c58cd37d5ae068ff9f0cec1d2d1548f666",
+  "source_sha256": "effcf449a5b3d07850b01a095606fc0d84563c2c920f05ba2be3ff1d9c213b82",
+  "status": "PASS",
+  "successful_trajectories": 210,
+  "turn_images": 420
+}

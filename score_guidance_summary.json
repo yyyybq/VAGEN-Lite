@@ -1,0 +1,27 @@
+{
+  "best_at_final_rate": 1.0,
+  "by_task": {
+    "projective_relations": {
+      "records": 210,
+      "success_rate": 1.0,
+      "successes": 210
+    }
+  },
+  "certified_shortest_comparison": {
+    "match_rate": 1.0,
+    "matches": 147,
+    "mean_extra_actions": 0,
+    "records": 147
+  },
+  "fully_monotonic_rate": 0.9238095238095239,
+  "interpretation": "Diagnostics measure whether discrete score-guided search improves the current R1 score and reaches canonical gates. Global shortest-length claims are made only for rows whose audit manifest has a complete, equal lower/upper certificate.",
+  "mean_actions": 3.6476190476190475,
+  "mean_monotonic_transition_fraction": 0.9766666666666667,
+  "mean_net_score_gain": 0.782051491896232,
+  "mean_path_directness": 0.9726135058719054,
+  "mean_runtime_reward_total": 5.7318544215678395,
+  "records": 210,
+  "schema_version": "active_spatial_score_guidance_summary_v1",
+  "success_rate": 1.0,
+  "successes": 210
+}
