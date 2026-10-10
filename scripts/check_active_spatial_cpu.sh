@@ -39,6 +39,7 @@ fi
 
 exec "$PYTHON" -m pytest -q -p no:cacheprovider \
     tests/active_spatial/test_pipeline_contracts.py \
+    tests/active_spatial/test_r1_sft_pipeline.py \
     tests/active_spatial/test_reward_trace.py \
     tests/active_spatial/test_ppo_snapshot_replay.py \
     tests/test_r1_clean_projective_v0.py \

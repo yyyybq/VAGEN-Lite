@@ -1,5 +1,8 @@
 <h1 align="center">VAGEN: Reinforcing World Model Reasoning for Multi-Turn VLM Agents</h1>
 
+> **完整训练流程：** [任务/轨迹/QA → 混合 SFT → Active Spatial RL → StarVLA → RLinf](docs/active_spatial_end_to_end.md)，含运行步骤、接口约定和修复审计。
+> **模型路径：** [Qwen / Cambrian-S 接入](docs/model_backbone_integration.md) · [SenseNova-U1](docs/sensenova_u1_active_spatial.md) · [Cambrian-S 新机器 smoke](docs/cambrian_s_new_server_smoke_handoff.md)
+
 > **Active Spatial 工作区入口：** [项目主线与代码导航](docs/active_spatial.md) · [2026-10-02 接管核验与下一步](docs/diagnosis/active_spatial_takeover_20261002/REPORT.md)。下文保留上游 VAGEN 框架说明；Active Spatial 的当前协议、运行状态和证据边界以接管核验为准。
 
 <!-- <p align="center" style="font-size: 30px;">

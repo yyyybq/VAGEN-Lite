@@ -216,6 +216,25 @@ def test_sft_actions_match_runtime(action):
     assert np.allclose(simulate_action(np.eye(4), action, .3, 20), engine.get_pose())
 
 
+def test_closed_action_tag_keeps_final_bundled_action():
+    from vagen.envs.active_spatial.env import ActiveSpatialEnv
+
+    response = "<action>move_left|turn_left|move_left|turn_right</action>"
+    parsed = ActiveSpatialEnv._default_parse_func(
+        SimpleNamespace(_allowed_actions=None),
+        response,
+        action_sep="|",
+        max_actions=5,
+    )
+    assert parsed["format_correct"]
+    assert parsed["actions"] == [
+        "move_left",
+        "turn_left",
+        "move_left",
+        "turn_right",
+    ]
+
+
 def test_sft_prompt_uses_configured_motion_and_actions():
     from data_gen.active_spatial_sft.path_finder import Trajectory
     from data_gen.active_spatial_sft.sft_formatter import format_trajectory

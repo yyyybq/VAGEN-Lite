@@ -124,7 +124,11 @@ elif [[ ${MODE} == training ]]; then
   fi
   "${PY}" scripts/r1_clean_projective_smoke_gate.py --run "${RUN}" --frozen "${FROZEN}"
   # Entirely new process; never load smoke weights or optimizer state.
-  "${PY}" -m vagen.r1_clean_projective_ppo --config "${FROZEN}/formal.yaml" --endpoint 250 2>&1 | tee "${RUN}/formal/train.log"
+  formal_log=${RUN}/formal/train.log
+  if [[ -n ${R1_PPO_RESUME_FROM:-} ]]; then
+    formal_log=${RUN}/formal/resume_from_200.log
+  fi
+  "${PY}" -m vagen.r1_clean_projective_ppo --config "${FROZEN}/formal.yaml" --endpoint 250 2>&1 | tee "${formal_log}"
 else
   echo unknown_mode; exit 2
 fi

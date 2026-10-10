@@ -1,5 +1,10 @@
 # Active Spatial paired Yes/No QA
 
+端到端训练说明见 [数据与混合 SFT](../../docs/active_spatial_pipeline_data.md)。
+生成训练 bank 时提供 `--scene-root` 和 `--env-yaml`：前者用于合法室内相机检查，
+后者绑定与轨迹/RL 一致的评分配置。缺少几何上下文时标签会被撤回。
+渲染后的 bank 可用 `scripts/prepare_active_spatial_sft.py` 与 R1 轨迹按场景共同划分。
+
 This adapter reuses `vagen.envs.active_spatial.canonical_task_metrics` and
 `SpatialPotentialField`; it does not define a second evaluator.  A parent goal
 is expanded into multiple pose states and each label is the exact Active

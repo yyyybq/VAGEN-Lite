@@ -52,7 +52,7 @@ def _parse_args() -> argparse.Namespace:
 
     # ── Rendering ────────────────────────────────────────────────────────────
     p.add_argument("--render_backend", default="local",
-                   choices=["local", "client", "none"],
+                   choices=["local", "client", "http", "none"],
                    help="Rendering backend.")
     p.add_argument("--client_url", default="ws://127.0.0.1:8777/render/interiorgs",
                    help="WebSocket URL for client rendering backend.")

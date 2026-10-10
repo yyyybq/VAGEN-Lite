@@ -191,14 +191,14 @@ rg -n "sensenova_u1_register|SenseNova-U1|neo_chat|unsupported|NotImplemented|IM
 
 ## 6. 从 smoke 到正式实验
 
-smoke 通过后，复制脚本：
+smoke 通过后，直接使用仓库里的 50-step 诊断脚本（已按下列超参写好）：
 
 ```bash
-cp examples/train/active_spatial/experiments/u1_fwdfirst_rewscale_smoke.sh \
-   examples/train/active_spatial/experiments/u1_fwdfirst_rewscale_50step.sh
+bash examples/train/active_spatial/run_experiment.sh \
+  examples/train/active_spatial/experiments/u1_fwdfirst_rewscale_50step.sh
 ```
 
-建议先改成：
+该脚本相对 smoke 的改动是：
 
 ```bash
 TOTAL_STEPS="50"

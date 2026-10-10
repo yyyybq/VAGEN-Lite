@@ -74,16 +74,12 @@ def parse_free_think(response: str) -> Dict[str, Any]:
                   response, re.DOTALL | re.IGNORECASE)
     if m:
         blob = m.group(2).strip()
-        if "|" in blob:
-            blob = blob[: blob.rfind("|") + 1]
         return {"ok": True, "think": m.group(1).strip(), "actions_blob": blob}
 
     # No think block: <action>...</action> or action>...</action>
     m = re.search(r"<?\s*action\s*>(.*?)<\s*/\s*action\s*>", response, re.DOTALL | re.IGNORECASE)
     if m:
         blob = m.group(1).strip()
-        if "|" in blob:
-            blob = blob[: blob.rfind("|") + 1]
         return {"ok": True, "think": "", "actions_blob": blob}
 
     # Fallback: bare actions after </think> (model omits <action> wrapper)

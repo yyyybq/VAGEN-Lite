@@ -1,5 +1,7 @@
 # Active Spatial 项目入口
 
+完整训练路线与接口审计见 [Active Spatial → RoboCasa 端到端流程](active_spatial_end_to_end.md)。
+
 Active Spatial 研究的是：VLM 能否根据当前图像、任务文本与相机状态，主动移动到满足空间关系的视角；这种交互训练能否迁移到静态空间问答。底座是 VAGEN-Lite 的多轮 agent loop 与 VERL PPO。主要实验使用 Qwen2.5-VL；Cambrian 与 Qwen3-VL 是另外的模型路径。
 
 当前应先收束 **R1 canonical 数据、运行中训练及固定评估集的证据链**。历史导航分数、PPO 管线通过、canonical 任务成功、静态 QA 迁移是四件不同的事。具体状态、缺陷与下一步见 [2026 年 10 月 2 日接管核验](diagnosis/active_spatial_takeover_20261002/REPORT.md)。运行状态只在报告记录的查询时刻有效。
@@ -27,7 +29,7 @@ Active Spatial 研究的是：VLM 能否根据当前图像、任务文本与相�
 | Active Spatial 离线评估 | [evaluation/run_eval.py](../evaluation/run_eval.py)、[eval_runner.py](../evaluation/eval_runner.py)、[sweep](../scripts/active_spatial_eval_sweep.py)、[suite README](../examples/evaluate/active_spatial/README.md) | 当前评估读取环境成功值，继承 checkpoint 协议；suite 改协议需显式声明。`vagen/evaluate/` 是框架通用入口，不能与此处混用。 |
 | 静态 QA 与迁移诊断 | [paired QA README](../data_gen/active_spatial_qa/README.md)、[contract.py](../data_gen/active_spatial_qa/contract.py)、[qa_eval.py](../data_gen/active_spatial_qa/qa_eval.py)、[easi_eval.py](../scripts/easi_eval.py) | paired QA 是同一任务谓词的局部诊断，EASI-8 是外部静态评估；两者分母与证据范围不同。invalid 答案留在分母中。 |
 | SFT | [SFT README](../data_gen/active_spatial_sft/README.md)、[sft_generator.py](../data_gen/active_spatial_sft/sft_generator.py) | 当前实现会在环境中重放轨迹；搜索分数、旧导出文件与新 runtime 验证不能混为一谈。 |
-| 模型适配与旁支 | [模型接入](model_backbone_integration.md)、[Qwen3-VL 迁移](active_spatial_qwen3vl_migration.md) | `data_gen/robocasa_sft`、`vagen/envs/robocasa`、`ele/`、`cjepa/`、`spatial-training-room/` 是相邻工作，暂不并入当前 canonical RL 主线。 |
+| 模型适配与旁支 | [模型接入](model_backbone_integration.md)、[Cambrian-S](model_backbone_integration.md#supported-with-custom-adapter-cambrian-s-7b)、[SenseNova-U1](sensenova_u1_active_spatial.md)、[Qwen3-VL 迁移](active_spatial_qwen3vl_migration.md) | Qwen2.5-VL 是主线；Cambrian-S / U1 走自定义 adapter，权重与外部源码不随仓库分发。`data_gen/robocasa_sft`、`vagen/envs/robocasa`、StarVLA / RLinf 见 [端到端流程](active_spatial_end_to_end.md)。 |
 
 `verl/` 是带本地改动的子模块；复现需要根仓库、子模块版本及实际 source archive，不能只记根仓库 commit。`exps/`、`evaluation/sweeps/`、`outputs/`、`wandb/` 是产物；`reports/*plus10pp*` 是明确标注的派生情景，不能当作实测成绩。
 

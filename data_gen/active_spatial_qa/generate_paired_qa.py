@@ -58,7 +58,7 @@ def _question(item: dict[str, Any]) -> str:
         "absolute_positioning": "including the requested distance, facing, and visibility conditions",
         "delta_control": "including the reference-relative target, facing, and visibility conditions",
         "equidistance": "including equal distances, midpoint facing, and visibility of both objects",
-        "projective_relations": "including the requested relation, in-frame visibility, and canonical margin gates",
+        "projective_relations": "including the requested relation, in-frame visibility, and minimum horizontal center separation",
         "centering": "including the requested centering relation and required visibility",
         "occlusion_alignment": "including the occlusion/alignment and visibility conditions",
         "fov_inclusion": "including full-bounding-box inclusion, safe center margins, and visibility",
@@ -155,19 +155,58 @@ def _state_variants_with_metadata(item: dict[str, Any]):
 
 
 def generate(args: argparse.Namespace) -> dict[str, Any]:
+    evaluation_config = {}
+    if getattr(args, "env_yaml", None):
+        import yaml
+        document = yaml.safe_load(Path(args.env_yaml).read_text())
+        env_config = document["envs"][0]["config"]
+        for key in ("image_width", "image_height", "fov_horizontal", "fov_vertical",
+                    "potential_field_position_weight", "potential_field_orientation_weight",
+                    "max_distance", "use_visual_bbox_scoring", "success_score_threshold"):
+            if key in env_config:
+                evaluation_config[key] = env_config[key]
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     manifest = out / "manifest.jsonl"
+    if manifest.exists():
+        for line in manifest.read_text().splitlines():
+            if line.strip() and json.loads(line).get("image_contract_version") != IMAGE_CONTRACT_VERSION:
+                raise ValueError("legacy pose bank cannot be resumed; use a separate versioned output directory")
+    binding = {"input_sha256": hashlib.sha256(Path(args.input).read_bytes()).hexdigest(),
+               "evaluation_config": evaluation_config, "split": args.split,
+               "scene_root": str(getattr(args, "scene_root", "")),
+               "split_scenes": getattr(args, "split_scenes", ""),
+               "states_from_sft_sha256": hashlib.sha256(Path(args.states_from_sft).read_bytes()).hexdigest() if getattr(args, "states_from_sft", None) else None,
+               "generator_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+    binding_path = out / "input_binding.json"
+    if binding_path.exists():
+        if json.loads(binding_path.read_text()) != binding:
+            raise ValueError("QA resume input/config/code hash mismatch")
+    elif manifest.exists() and manifest.stat().st_size:
+        raise ValueError("Unbound historical QA cannot be resumed; use a new directory")
+    else:
+        binding_path.write_text(json.dumps(binding, indent=2) + "\n")
     done_ids = set(); parent_splits: dict[str, str] = {}; split_conflicts = 0
     if manifest.exists():
         for line in manifest.read_text().splitlines():
             if json.loads(line).get('image_contract_version') != IMAGE_CONTRACT_VERSION:
                 raise ValueError('legacy pose bank cannot be resumed with v2; use a separate versioned output directory')
+            if json.loads(line).get("evaluation_config", {}) != evaluation_config:
+                raise ValueError("QA evaluation config changed; use a new output directory")
             try:
                 old = json.loads(line); done_ids.add(old["sample_id"])
                 parent_splits.setdefault(str(old.get("parent_goal_id")), str(old.get("split")))
             except Exception: pass
     split_scenes = {s.strip() for s in args.split_scenes.split(",") if s.strip()} if args.split_scenes else None
+    sft_states = {}
+    if getattr(args, "states_from_sft", None):
+        sft_path = Path(args.states_from_sft).resolve()
+        for line in sft_path.read_text().splitlines():
+            record = json.loads(line)
+            parent_id = record.get("source_task_id")
+            if not parent_id or parent_id in sft_states:
+                raise ValueError("SFT state bank requires unique parent task IDs")
+            sft_states[parent_id] = record
     contexts = {}
     written = 0; errors = 0; by_task: dict[str, int] = {}; label_counts = {"Yes": 0, "No": 0}
     with open(args.input, encoding="utf-8") as src, manifest.open("a", encoding="utf-8") as dst:
@@ -180,13 +219,35 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
                 if task not in ACTIVE_TASK_TYPES or (args.task_type and task != args.task_type): continue
                 scene = str(item.get("scene_id") or "")
                 if split_scenes is not None and scene not in split_scenes: continue
+                if item.get("split") is not None and item["split"] != args.split:
+                    raise ValueError("Raw task split disagrees with QA destination")
                 parent = _parent_id(item)
                 split = args.split or ("test" if split_scenes and scene in split_scenes else "train")
                 if parent in parent_splits and parent_splits[parent] != split:
                     split_conflicts += 1
                     continue
                 parent_splits[parent] = split
-                for state_id, pose, source, provenance, state_meta in _state_variants_with_metadata(item):
+                state_item = item
+                if getattr(args, "states_from_sft", None):
+                    record = sft_states.get(item.get("task_id"))
+                    if record is None:
+                        raise ValueError("SFT state bank missing raw parent task")
+                    expected = hashlib.sha256(json.dumps(item, sort_keys=True, allow_nan=False).encode()).hexdigest()
+                    if record.get("source_task_sha256") != expected or record.get("split") != split or record.get("scene_id") != scene:
+                        raise ValueError("SFT states disagree with raw parent hash/scene/split")
+                    trace, paths = record.get("primitive_trajectory_trace", []), record.get("primitive_image_paths", [])
+                    if not trace or len(trace) != len(paths):
+                        raise ValueError("SFT state pose/image count mismatch")
+                    states = []
+                    for i, (entry, image_path) in enumerate(zip(trace, paths)):
+                        image = Path(image_path)
+                        if not image.is_absolute():
+                            image = sft_path.parent / image
+                        states.append({"state_id": f"replayed_primitive_{i}", "c2w": entry["pose_c2w"],
+                            "image_path": str(image.resolve(strict=True)), "source": "real_sft_runtime_replay",
+                            "provenance": "actual_intermediate_observation", "observation_config": "single_image"})
+                    state_item = dict(item, states=states)
+                for state_id, pose, source, provenance, state_meta in _state_variants_with_metadata(state_item):
                     sid = hashlib.sha1(f"{parent}:{state_id}:{split}".encode()).hexdigest()[:20]
                     if sid in done_ids: continue
                     try:
@@ -203,11 +264,14 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
                                 geometry = classify_scene_pose(pose_arr[:3, 3], context[0], context[1]) if context else {"status": "coordinate_unconfirmed", "reasons": ["scene_context_unavailable"]}
                             else:
                                 geometry = {"status": "coordinate_unconfirmed", "reasons": ["scene_root_not_provided"]}
-                        result = evaluate_state(item, pose)
+                        result = evaluate_state(item, pose, evaluation_config)
                         answer = ("Yes" if result["success"] else "No") if geometry.get('status') == 'legal_indoor' else None
                         # Keep the predicate diagnostics outside model-visible fields.
                         record = {
                             "sample_id": sid, "parent_goal_id": parent, "scene_id": scene,
+                            "parent_task_id": item.get("task_id"),
+                            "source_task_sha256": hashlib.sha256(json.dumps(item, sort_keys=True, allow_nan=False).encode()).hexdigest(),
+                            "source_versions": {key: item.get(key) for key in ("camera_model_version", "canonical_task_metric_version", "action_protocol_version")},
                             "task_type": task, "split": split,
                             "public_observation": _public_observation(item, state_id, pose, state_meta),
                             "question": _question(item), "private_answer": answer,
@@ -227,9 +291,16 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
                             },
                             "source_manifest": str(args.input),
                             "source_task_metric_version": item.get("canonical_task_metric_version"),
+                            "source_camera_model_version": item.get("camera_model_version"),
+                            "source_init_camera": item.get("init_camera", {}),
+                            "source_camera_metadata": {key: item[key] for key in (
+                                "native_resolution", "source_resolution", "camera_native_resolution",
+                                "native_width", "native_height", "source_width", "source_height",
+                                "camera_native_width", "camera_native_height") if key in item},
+                            "evaluation_config": evaluation_config,
                             "camera": {
                                 "intrinsics": (item.get("init_camera") or {}).get("intrinsics"),
-                                "resolution": [512, 512],
+                                "resolution": [evaluation_config.get("image_width", 512), evaluation_config.get("image_height", 512)],
                                 "scene_resource_version": item.get("scene_resource_version") or item.get("renderer_version"),
                             },
                             "label_validity": ("valid" if geometry.get("status") == "legal_indoor" else "invalid_illegal_camera"),
@@ -282,6 +353,8 @@ def main() -> None:
     ap.add_argument("--task-type", default="")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--scene-root", default="")
+    ap.add_argument("--env-yaml", help="Use the same scoring/camera settings as trajectory generation and RL")
+    ap.add_argument("--states-from-sft", help="Use actual replayed primitive observations bound to raw task hashes")
     print(json.dumps(generate(ap.parse_args()), indent=2))
 
 

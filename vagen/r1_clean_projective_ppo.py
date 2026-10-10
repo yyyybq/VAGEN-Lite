@@ -25,11 +25,21 @@ class FixedEndpointTrainer(RayPPOTrainer):
 
     def fit(self):
         endpoint=int(os.environ['R1_PPO_ENDPOINT'])
+        resume_from=os.environ.get('R1_PPO_RESUME_FROM')
         assert self.total_training_steps==700
         assert self.config.actor_rollout_ref.actor.optim.total_training_steps==700
         assert self.config.critic.optim.total_training_steps==700
         assert self.config.trainer.resume_mode=='disable'
         assert endpoint in (1, 8, 250)
+        if resume_from:
+            checkpoint=Path(resume_from).resolve()
+            assert endpoint==250, 'infrastructure resume is only valid for the formal endpoint'
+            assert checkpoint.name.startswith('global_step_')
+            assert (checkpoint/'COMPLETE').is_file(), 'resume checkpoint is not atomically complete'
+            assert int((checkpoint/'COMPLETE').read_text().strip()) < endpoint
+            with open_dict(self.config):
+                self.config.trainer.resume_mode='resume_path'
+                self.config.trainer.resume_from_path=str(checkpoint)
         self.total_training_steps=endpoint
         super().fit()
         checkpoint=Path(self.config.trainer.default_local_dir)/f'global_step_{endpoint}'
@@ -72,6 +82,7 @@ def main():
         cfg.ray_kwargs.ray_init.include_dashboard=False
         cfg.ray_kwargs.ray_init.runtime_env={'env_vars':{
             'R1_PPO_ENDPOINT':str(a.endpoint),'R1_RENDER_URL':os.environ['R1_RENDER_URL'],
+            'R1_PPO_RESUME_FROM':os.environ.get('R1_PPO_RESUME_FROM',''),
             'PYTHONPATH':os.environ['PYTHONPATH'],'WANDB_MODE':os.environ.get('WANDB_MODE','offline'),
             'PYTHONDONTWRITEBYTECODE':'1','NO_PROXY':'*','no_proxy':'*',
             'LD_LIBRARY_PATH':os.environ.get('LD_LIBRARY_PATH','')}}
