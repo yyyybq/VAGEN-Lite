@@ -3,7 +3,7 @@ Configuration for SFT data generation from active spatial navigation tasks.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -37,7 +37,7 @@ class SFTGenerationConfig:
 
     # ──────────────────────────── Rendering ────────────────────────
     render_backend: str = "local"
-    """Rendering backend: 'local' (GPU direct), 'client' (WebSocket server), or 'none'."""
+    """Rendering backend: 'local', 'client' (WebSocket), 'http', or 'none'."""
 
     client_url: str = "ws://127.0.0.1:8777/render/interiorgs"
     """WebSocket URL for client rendering backend."""
@@ -57,6 +57,10 @@ class SFTGenerationConfig:
     save_images: bool = True
     """If True, save images to disk and reference by path. If False, embed as base64."""
 
+    save_primitive_images: bool = False
+    """Also save a rendered frame after every primitive action for trajectory
+    websites. These audit frames are not added to QwenVL messages."""
+
     image_format: str = "jpg"
     """Image file format: 'jpg' or 'png'."""
 
@@ -71,6 +75,10 @@ class SFTGenerationConfig:
     """Rotation step size in degrees. Must match the RL env's step_rotation_deg."""
     action_space: str = "legacy"
     enable_explicit_done: bool = True
+
+    max_episode_steps: Optional[int] = None
+    """Runtime primitive-action budget.  ``None`` uses ``max_total_actions``
+    (plus one terminal action when explicit ``done`` is enabled)."""
 
     # ──────────────────────────── Path Finding ─────────────────────
     success_threshold: float = 0.95
@@ -218,3 +226,20 @@ class SFTGenerationConfig:
 
     seed: int = 42
     """Random seed (currently unused, for future use)."""
+
+    runtime_env_overrides: Dict[str, Any] = field(default_factory=dict)
+    """Resolved ActiveSpatialEnvConfig values copied from an authoritative
+    environment YAML.  The R1 entry point uses this to replay trajectories with
+    exactly the same reward terms, collision policy, and termination budget as
+    the environment that supplied the labels."""
+
+    generation_profile: str = "legacy_cli"
+    """Human-readable protocol/profile name recorded in output provenance."""
+
+    env_config_source: str = ""
+    """Optional path to the YAML from which ``runtime_env_overrides`` came."""
+
+    audit_jsonl_path: str = ""
+    """Optional R1 audit-only manifest containing certified reference paths.
+    Only compact difficulty/path-length metadata is copied to SFT records; the
+    audit candidate payload is never exposed to policy messages."""

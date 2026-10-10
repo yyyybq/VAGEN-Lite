@@ -69,6 +69,7 @@ def verify(manifest, evidence, env_yaml, output):
             if mae > .5 or p99 > 2:
                 raise ValueError(f"audited/runtime RGB differs: MAE={mae}, P99={p99}")
             steps = 0
+            done = False
             for action in witness["actions"]:
                 _, reward, done, _ = env.step("<action>" + action + "</action>")
                 steps += 1
@@ -77,7 +78,7 @@ def verify(manifest, evidence, env_yaml, output):
                 if done:
                     break
             success = bool(env._calculate_canonical_metric()["success"])
-            if not steps or not success:
+            if not steps or not success or not done:
                 raise ValueError(f"no runtime-reachable successful terminal for {row['task_id']}")
             certified[row_digest(row)] = {"success": True, "rgb_match": True, "steps": steps,
                                           "mae": mae, "p99": p99,

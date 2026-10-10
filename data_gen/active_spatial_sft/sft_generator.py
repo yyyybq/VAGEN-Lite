@@ -25,10 +25,12 @@ Usage
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import sys
 import time
+from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -183,8 +185,7 @@ def _make_collision_detector(cfg: SFTGenerationConfig):
             "enable_boundary_collision": True,
         })
     except Exception as e:
-        print(f"[CollisionDetector] Could not create: {e}. Disabling collision detection.")
-        return None
+        raise RuntimeError("collision detection was requested but could not be created") from e
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +209,30 @@ class SFTDataGenerator:
         self.collision_detector = _make_collision_detector(cfg)
         self._loaded_scene: Optional[str] = None
         self._runtime = None
+        self._audit_by_task_id = self._load_audit_manifest(cfg.audit_jsonl_path)
+
+    @staticmethod
+    def _load_audit_manifest(path: str) -> Dict[str, Dict[str, Any]]:
+        if not path:
+            return {}
+        audit_path = Path(path)
+        rows = _load_jsonl(audit_path)
+        result: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            key = str(row.get("policy_task_id") or "")
+            if not key or key in result:
+                raise ValueError(f"invalid/duplicate policy_task_id in {audit_path}: {key!r}")
+            result[key] = row
+        return result
+
+    def _item_for_formatting(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        task_id = str(item.get("task_id") or "")
+        audit = self._audit_by_task_id.get(task_id)
+        if not audit:
+            return item
+        value = dict(item)
+        value["_sft_audit"] = audit
+        return value
 
     def _runtime_env(self):
         """Use the RL environment as the final authority for published labels."""
@@ -215,26 +240,65 @@ class SFTDataGenerator:
             from vagen.envs.active_spatial.env import ActiveSpatialEnv
             from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
             cfg = self.cfg
-            self._runtime = ActiveSpatialEnv(ActiveSpatialEnvConfig(
-                jsonl_path=cfg.jsonl_path, exclude_task_types=[],
-                render_backend=cfg.render_backend, gs_root=cfg.gs_root,
-                client_url=cfg.client_url, client_origin=cfg.client_origin, gpu_device=cfg.gpu_device,
-                image_width=cfg.image_width, image_height=cfg.image_height,
-                step_translation=cfg.step_translation, step_rotation_deg=cfg.step_rotation_deg,
-                action_space=cfg.action_space, enable_explicit_done=cfg.enable_explicit_done,
-                enable_auto_termination=not cfg.enable_explicit_done,
-                max_actions_per_step=cfg.max_actions_per_turn,
-                max_episode_steps=cfg.max_total_actions + 1,
-                success_score_threshold=cfg.success_threshold,
-                potential_field_position_weight=cfg.position_weight,
-                potential_field_orientation_weight=cfg.orientation_weight,
-                max_distance=cfg.max_distance,
-                enable_collision_detection=cfg.enable_collision_detection,
-                collision_camera_radius=cfg.collision_camera_radius,
-                collision_floor_height=cfg.collision_floor_height,
-                collision_ceiling_height=cfg.collision_ceiling_height,
-                collision_safety_margin=cfg.collision_safety_margin,
-            ))
+            episode_budget = cfg.max_episode_steps
+            if episode_budget is None:
+                episode_budget = cfg.max_total_actions + int(cfg.enable_explicit_done)
+            env_kwargs = {
+                "jsonl_path": cfg.jsonl_path,
+                "exclude_task_types": [],
+                "render_backend": cfg.render_backend,
+                "gs_root": cfg.gs_root,
+                "client_url": cfg.client_url,
+                "client_origin": cfg.client_origin,
+                "gpu_device": cfg.gpu_device,
+                "image_width": cfg.image_width,
+                "image_height": cfg.image_height,
+                "step_translation": cfg.step_translation,
+                "step_rotation_deg": cfg.step_rotation_deg,
+                "action_space": cfg.action_space,
+                "enable_explicit_done": cfg.enable_explicit_done,
+                "enable_auto_termination": not cfg.enable_explicit_done,
+                "max_actions_per_step": cfg.max_actions_per_turn,
+                "max_episode_steps": int(episode_budget),
+                "turn_budget": cfg.max_trajectory_steps,
+                "prompt_format": cfg.prompt_format,
+                "success_score_threshold": cfg.success_threshold,
+                "potential_field_position_weight": cfg.position_weight,
+                "potential_field_orientation_weight": cfg.orientation_weight,
+                "max_distance": cfg.max_distance,
+                "enable_collision_detection": cfg.enable_collision_detection,
+                "collision_camera_radius": cfg.collision_camera_radius,
+                "collision_floor_height": cfg.collision_floor_height,
+                "collision_ceiling_height": cfg.collision_ceiling_height,
+                "collision_safety_margin": cfg.collision_safety_margin,
+            }
+            allowed = {entry.name for entry in fields(ActiveSpatialEnvConfig)}
+            env_kwargs.update({
+                key: value for key, value in cfg.runtime_env_overrides.items()
+                if key in allowed
+            })
+            # I/O and trajectory geometry are selected explicitly by this run;
+            # a copied YAML must not silently point replay at another dataset.
+            env_kwargs.update({
+                "jsonl_path": cfg.jsonl_path,
+                "exclude_task_types": [],
+                "render_backend": cfg.render_backend,
+                "gs_root": cfg.gs_root,
+                "client_url": cfg.client_url,
+                "client_origin": cfg.client_origin,
+                "gpu_device": cfg.gpu_device,
+                "image_width": cfg.image_width,
+                "image_height": cfg.image_height,
+                "step_translation": cfg.step_translation,
+                "step_rotation_deg": cfg.step_rotation_deg,
+                "action_space": cfg.action_space,
+                "enable_explicit_done": cfg.enable_explicit_done,
+                "max_actions_per_step": cfg.max_actions_per_turn,
+                "max_episode_steps": int(episode_budget),
+                "turn_budget": cfg.max_trajectory_steps,
+                "prompt_format": cfg.prompt_format,
+            })
+            self._runtime = ActiveSpatialEnv(ActiveSpatialEnvConfig(**env_kwargs))
         return self._runtime
 
     def _replay(self, item, item_idx, trajectory):
@@ -252,6 +316,8 @@ class SFTDataGenerator:
             return images[0]
         images = [frame(obs)]
         retained, metrics, done = [], {}, False
+        trajectory.runtime_reward_traces = []
+        trajectory.terminal_reward_trace = None
         for step in trajectory.steps:
             obs, _, done, info = env.step("<action>" + "|".join(step.actions) + "</action>")
             if not np.allclose(env.view_engine.get_pose(), step.c2w_after, atol=1e-6, rtol=0):
@@ -260,18 +326,74 @@ class SFTDataGenerator:
                 raise ValueError("SFT replay collided or used an invalid action")
             metrics = info.get("metrics", info).get("traj_metrics", {})
             retained.append(step)
+            trajectory.runtime_reward_traces.append(info.get("reward_trace", {}))
             images.append(frame(obs))
             if done:
                 break
         if not done and self.cfg.enable_explicit_done:
             _, _, _, info = env.step("<action>done</action>")
             metrics = info.get("metrics", info).get("traj_metrics", {})
+            trajectory.terminal_reward_trace = info.get("reward_trace", {})
         trajectory.steps = retained
         trajectory.total_actions = sum(len(step.actions) for step in retained)
         trajectory.final_c2w = env.view_engine.get_pose().copy()
         trajectory.final_score = float(metrics.get("final_score", env.final_score))
         trajectory.success = bool(metrics.get("success", False))
         return images
+
+    def _render_primitive_frames(
+        self,
+        trajectory: Trajectory,
+        replay_images: List[Image.Image],
+    ) -> List[Image.Image]:
+        """Render every primitive pose with the already-loaded runtime renderer.
+
+        Frames at turn boundaries are reused from authoritative environment
+        replay. Only intermediate poses inside bundled action responses require
+        an extra render, and no reward/termination state is advanced.
+        """
+        if not trajectory.steps:
+            return replay_images[:1]
+        env = self._runtime_env()
+        initial_pose = np.asarray(trajectory.steps[0].c2w_before, dtype=np.float64)
+        primitive_poses = [initial_pose]
+        pose = initial_pose.copy()
+        for step in trajectory.steps:
+            for action in step.actions:
+                pose = simulate_action(
+                    pose,
+                    action,
+                    step_translation=self.cfg.step_translation,
+                    step_rotation_deg=self.cfg.step_rotation_deg,
+                )
+                primitive_poses.append(pose.copy())
+
+        known_frames = [(initial_pose, replay_images[0])]
+        known_frames.extend(
+            (np.asarray(step.c2w_after, dtype=np.float64), replay_images[index + 1])
+            for index, step in enumerate(trajectory.steps)
+        )
+        final_pose = env.view_engine.get_pose().copy()
+        frames: List[Image.Image] = []
+        try:
+            for primitive_pose in primitive_poses:
+                frame = next(
+                    (
+                        image
+                        for known_pose, image in known_frames
+                        if np.allclose(primitive_pose, known_pose, atol=1e-6, rtol=0.0)
+                    ),
+                    None,
+                )
+                if frame is None:
+                    env.view_engine.reset(primitive_pose)
+                    frame = env._render_image()
+                if frame is None:
+                    raise RuntimeError("primitive trajectory render returned no image")
+                frames.append(frame)
+        finally:
+            env.view_engine.reset(final_pose)
+        return frames
 
     # ── Scene data loading ───────────────────────────────────────────────────
 
@@ -282,12 +404,12 @@ class SFTDataGenerator:
         if self._loaded_scene == scene_id:
             return
         if not self.cfg.gs_root:
-            return
+            raise ValueError("collision detection requires gs_root scene metadata")
         try:
             self.collision_detector.load_scene_from_gs_root(self.cfg.gs_root, scene_id)
             self._loaded_scene = scene_id
         except Exception as e:
-            print(f"[CollisionDetector] Failed to load scene '{scene_id}': {e}")
+            raise RuntimeError(f"failed to load collision scene {scene_id!r}") from e
 
     # ── Per-item processing ──────────────────────────────────────────────────
 
@@ -334,7 +456,7 @@ class SFTDataGenerator:
             return None
         image_path = rel_path if cfg.save_images else _image_to_base64(img)
         record = format_trajectory(
-            item=item,
+            item=self._item_for_formatting(item),
             trajectory=traj,
             image_paths=[image_path],
             sft_id=sft_id,
@@ -347,6 +469,8 @@ class SFTDataGenerator:
             enable_explicit_done=cfg.enable_explicit_done,
             max_actions_per_step=cfg.max_actions_per_turn,
         )
+        if cfg.save_primitive_images:
+            record["primitive_image_paths"] = [image_path]
         if cfg.verbose:
             print(
                 f"[Generator] Item {item_idx} → {sft_id} (goal-reached-at-start): "
@@ -489,16 +613,37 @@ class SFTDataGenerator:
                 # Embed as base64
                 image_paths.append(_image_to_base64(img, cfg.image_format, cfg.image_quality))
 
-        t_render = time.time() - t1
-
         if not rendered_ok:
             if cfg.verbose:
                 print(f"[Generator] Item {item_idx}: some renders failed.")
             return None  # Never publish an SFT conversation with missing frames
 
+        primitive_image_paths: List[str] = []
+        if cfg.save_primitive_images:
+            primitive_frames = self._render_primitive_frames(trajectory, replay_images)
+            for primitive_idx, image in enumerate(primitive_frames):
+                rel_path = (
+                    f"primitive_images/{sft_id}_primitive{primitive_idx:02d}."
+                    f"{cfg.image_format}"
+                )
+                if cfg.save_images:
+                    if not _save_image(
+                        image,
+                        Path(cfg.output_dir) / rel_path,
+                        cfg.image_format,
+                        cfg.image_quality,
+                    ):
+                        return None
+                    primitive_image_paths.append(rel_path)
+                else:
+                    primitive_image_paths.append(
+                        _image_to_base64(image, cfg.image_format, cfg.image_quality)
+                    )
+        t_render = time.time() - t1
+
         # ── Format conversation ──────────────────────────────────────────────
         record = format_trajectory(
-            item=item,
+            item=self._item_for_formatting(item),
             trajectory=trajectory,
             image_paths=image_paths,
             sft_id=sft_id,
@@ -512,6 +657,10 @@ class SFTDataGenerator:
             max_actions_per_step=cfg.max_actions_per_turn,
             force_no_done=not trajectory.success,  # partial trajectories end without 'done'
         )
+        if cfg.save_primitive_images:
+            if len(primitive_image_paths) != trajectory.total_actions + 1:
+                raise ValueError("primitive image/action count mismatch")
+            record["primitive_image_paths"] = primitive_image_paths
 
         if cfg.verbose:
             print(
@@ -544,6 +693,8 @@ class SFTDataGenerator:
         output_dir = Path(cfg.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "images").mkdir(exist_ok=True)
+        if cfg.save_primitive_images:
+            (output_dir / "primitive_images").mkdir(exist_ok=True)
 
         output_jsonl = output_dir / f"{cfg.output_name}.jsonl"
         if output_jsonl.exists():
@@ -573,13 +724,21 @@ class SFTDataGenerator:
             "goal_reached_examples": 0,
             "total_steps": 0,
             "total_actions": 0,
+            "generation_profile": cfg.generation_profile,
+            "search_strategy": "geometry_guided" if cfg.use_guided_search else "score_only_beam",
         }
+
+        def attempt(item, index, status, reason=None):
+            with (output_dir / "attempts.jsonl").open("a") as log:
+                log.write(json.dumps({"source_task_id": item.get("task_id"),
+                    "source_index": index, "scene_id": item.get("scene_id"),
+                    "split": item.get("split"), "status": status, "reason": reason}) + "\n")
 
         # ── Process ──────────────────────────────────────────────────────────
         with open(output_jsonl, "x", encoding="utf-8") as fout:
             for local_idx, item in enumerate(items):
                 global_idx = start + local_idx
-                sft_id = f"sft_{global_idx:06d}"
+                sft_id = "sft_" + str(item["task_id"]) if item.get("action_protocol_version") else f"sft_{global_idx:06d}"
 
                 # ── Optional: goal-reached-at-start example ──────────────────
                 if cfg.include_goal_reached_examples:
@@ -622,14 +781,17 @@ class SFTDataGenerator:
                     if cfg.skip_failed:
                         print(f"[Generator] Item {global_idx}: error – {e} (skipping)")
                         stats["failed"] += 1
+                        attempt(item, global_idx, "failed", type(e).__name__ + ":" + str(e))
                         continue
                     else:
                         raise
 
                 if record is None:
                     stats["skipped"] += 1
+                    attempt(item, global_idx, "excluded", "no_path_or_generation_filter; see worker log")
                     continue
 
+                attempt(item, global_idx, "success" if record["success"] else "unsuccessful")
                 fout.write(json.dumps(record, ensure_ascii=False) + "\n")
                 stats["processed"] += 1
                 if record["success"]:
@@ -660,7 +822,68 @@ class SFTDataGenerator:
 
         if self._runtime is not None:
             self._runtime.close()
+        self._write_generation_manifest(output_jsonl, stats)
         return stats
+
+    def _write_generation_manifest(self, output_jsonl: Path, stats: Dict[str, Any]) -> None:
+        """Write enough provenance to distinguish data from different R1 rewards."""
+        from vagen.envs.active_spatial.canonical_task_metrics import (
+            CANONICAL_TASK_METRIC_VERSION,
+            GATE_ALIGNED_SHAPING_SCORE_VERSION,
+        )
+
+        def digest(path: Path) -> Optional[str]:
+            if not path.is_file():
+                return None
+            value = hashlib.sha256()
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    value.update(chunk)
+            return value.hexdigest()
+
+        source = Path(self.cfg.jsonl_path)
+        env_source = Path(self.cfg.env_config_source) if self.cfg.env_config_source else None
+        audit_source = Path(self.cfg.audit_jsonl_path) if self.cfg.audit_jsonl_path else None
+        resolved = asdict(self.cfg)
+
+        def redact(value: Any, key: str = "") -> Any:
+            if isinstance(value, dict):
+                return {name: redact(item, str(name)) for name, item in value.items()}
+            if isinstance(value, list):
+                return [redact(item, key) for item in value]
+            if isinstance(value, str) and ("url" in key.lower() or "endpoint" in key.lower()):
+                return value.split("?", 1)[0]
+            return value
+
+        # Avoid persisting query-string credentials from renderer endpoints.
+        resolved = redact(resolved)
+        manifest = {
+            "schema_version": "active_spatial_sft_generation_manifest_v1",
+            "generation_profile": self.cfg.generation_profile,
+            "score_contract": {
+                "canonical_task_metric_version": CANONICAL_TASK_METRIC_VERSION,
+                "search_score_version": GATE_ALIGNED_SHAPING_SCORE_VERSION,
+                "success_source": "canonical_gates_for_canonical_rows",
+            },
+            "search_strategy": "geometry_guided" if self.cfg.use_guided_search else "score_only_beam",
+            "source": {"path": str(source.resolve()), "sha256": digest(source)},
+            "environment_config": {
+                "path": str(env_source.resolve()) if env_source else None,
+                "sha256": digest(env_source) if env_source else None,
+            },
+            "audit_manifest": {
+                "path": str(audit_source.resolve()) if audit_source else None,
+                "sha256": digest(audit_source) if audit_source else None,
+                "audit_records": len(self._audit_by_task_id),
+            },
+            "output": {"path": str(output_jsonl.resolve()), "sha256": digest(output_jsonl)},
+            "resolved_generation_config": resolved,
+            "stats": stats,
+        }
+        target = Path(self.cfg.output_dir) / "generation_manifest.json"
+        with target.open("x", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2, sort_keys=True)
+            handle.write("\n")
 
 
 # ---------------------------------------------------------------------------

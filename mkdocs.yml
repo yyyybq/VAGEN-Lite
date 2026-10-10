@@ -27,6 +27,17 @@ extra:
 nav:
   - Home: index.md
   - Active Spatial: active_spatial.md
+  - Active Spatial Full Pipeline:
+    - Overview: active_spatial_end_to_end.md
+    - Data and Mixed SFT: active_spatial_pipeline_data.md
+    - Active Spatial RL: active_spatial_pipeline_rl.md
+    - StarVLA and RLinf: active_spatial_pipeline_robot.md
+    - Audit and Acceptance: active_spatial_pipeline_audit.md
+  - Model Backbones:
+    - Integration Guide: model_backbone_integration.md
+    - Cambrian-S Smoke: cambrian_s_new_server_smoke_handoff.md
+    - Cambrian-S Experiments: cambrian_iteration.md
+    - SenseNova-U1: sensenova_u1_active_spatial.md
   - Quick Start: quickstart.md
   - Configuration: configuration.md
   - Customization:

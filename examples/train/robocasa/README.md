@@ -1,5 +1,11 @@
 # Train a VLM on RoboCasa demos
 
+完整中文训练路线：[Active Spatial → 混合 SFT → 环境 RL → StarVLA → RLinf](../../../docs/active_spatial_end_to_end.md)。
+
+从训练后的 StarVLA policy 继续 RoboCasa365 RL，使用
+`scripts/prepare_rlinf_robocasa.py` 和 `run_rlinf_starvla.sh`；详细步骤见
+[StarVLA / RLinf 交接](../../../docs/active_spatial_pipeline_robot.md)。
+
 This is a thin wrapper around `data_gen/robocasa_sft/run_sft.sh`.
 
 ```bash

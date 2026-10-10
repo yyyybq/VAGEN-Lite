@@ -199,7 +199,11 @@ def initial_score_stats(rows: Iterable[dict[str, Any]], env_cfg: Mapping[str, An
     }
 
 
-def manifest_report(path: Path, env_cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, set[str]]]:
+def manifest_report(
+    path: Path,
+    env_cfg: Mapping[str, Any],
+    data_contract: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, set[str]]]:
     rows = load_jsonl(path)
     identities = []
     identity_methods: Counter[str] = Counter()
@@ -213,15 +217,22 @@ def manifest_report(path: Path, env_cfg: Mapping[str, Any]) -> tuple[dict[str, A
         content.append(canonical_hash(row))
 
     visual_rows = [row for row in rows if row.get("task_type") in SUPPORTED_TASK_TYPES]
+    contract = dict(data_contract or {})
+    expected_metric = contract.get("canonical_task_metric_version", CANONICAL_TASK_METRIC_VERSION)
+    expected_camera = contract.get("camera_model_version", CANONICAL_CAMERA_H1_RESIZE_V1)
+    expected_collision = contract.get("collision_convention")
     canonical_metric_ok = sum(
-        row.get("canonical_task_metric_version") == CANONICAL_TASK_METRIC_VERSION for row in visual_rows
+        row.get("canonical_task_metric_version") == expected_metric for row in visual_rows
     )
-    camera_ok = sum(row.get("camera_model_version") == CANONICAL_CAMERA_H1_RESIZE_V1 for row in visual_rows)
-    collision_ok = sum(
-        isinstance(row.get("collision_convention"), dict)
-        and row["collision_convention"].get("status") == "frozen"
-        for row in visual_rows
-    )
+    camera_ok = sum(row.get("camera_model_version") == expected_camera for row in visual_rows)
+    if expected_collision is None:
+        collision_ok = sum(
+            isinstance(row.get("collision_convention"), dict)
+            and row["collision_convention"].get("status") == "frozen"
+            for row in visual_rows
+        )
+    else:
+        collision_ok = sum(row.get("collision_convention") == expected_collision for row in visual_rows)
     duplicates = {
         "stable_identity": len(identities) - len(set(identities)),
         "semantic_fingerprint": len(semantic) - len(set(semantic)),
@@ -237,6 +248,11 @@ def manifest_report(path: Path, env_cfg: Mapping[str, Any]) -> tuple[dict[str, A
         "stable_identity_methods": dict(sorted(identity_methods.items())),
         "duplicates_within_split": duplicates,
         "canonical_gate": {
+            "expected_contract": {
+                "canonical_task_metric_version": expected_metric,
+                "camera_model_version": expected_camera,
+                "collision_convention": expected_collision or {"status": "frozen"},
+            },
             "visual_rows": len(visual_rows),
             "canonical_metric_version_ok": canonical_metric_ok,
             "camera_model_version_ok": camera_ok,
@@ -378,7 +394,11 @@ def main() -> int:
         if not path.is_file():
             missing_files.append(str(path))
             continue
-        report, sets = manifest_report(path, variants["S0"]["environment"])
+        report, sets = manifest_report(
+            path,
+            variants["S0"]["environment"],
+            matrix.get("required_data_contract"),
+        )
         manifest_reports[name] = report
         manifest_sets[name] = sets
 

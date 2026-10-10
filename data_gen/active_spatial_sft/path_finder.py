@@ -98,6 +98,8 @@ class Trajectory:
     total_actions: int              # Total individual actions taken
     scene_id: str = ""
     item_idx: int = -1
+    runtime_reward_traces: List[Dict[str, Any]] = field(default_factory=list)
+    terminal_reward_trace: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +162,10 @@ def score_c2w(
     if item is not None:
         from vagen.envs.active_spatial.canonical_task_metrics import score_canonical_task
         metric = score_canonical_task(item, c2w)
-        value = float(metric["score"])
+        # Keep trajectory search on the exact potential consumed by the current
+        # runtime reward.  ``score`` is retained in the canonical metric only
+        # for historical reports; R1 gate-aligned reward uses ``shaping_score``.
+        value = float(metric.get("shaping_score", metric["score"]))
         return value, value, value
     cam_pos, cam_forward = get_camera_pos_and_forward(c2w)
     scoring_params = dict(task_params or {})
@@ -271,6 +276,7 @@ def _beam_search_turn(
     step_rotation_deg: float,
     max_actions: int,
     beam_width: int,
+    success_threshold: float,
     collision_checker=None,
 ) -> Tuple[List[str], np.ndarray, float, float, float]:
     """Find the best action sequence for one LLM turn using beam search.
@@ -282,7 +288,10 @@ def _beam_search_turn(
     The beam is expanded depth-first up to max_actions steps. At each depth all
     6 actions are tried from every beam state; the top beam_width unique next
     states (by total score) are kept.  The path that reaches the highest total
-    score across ALL depths is returned.
+    score across all depths is returned.  If any candidate reaches the runtime
+    success gate, expansion stops at that depth and the highest-scoring success
+    is returned.  Continuing to add actions after success would create
+    needlessly long SFT demonstrations.
 
     Returns:
         (actions, final_c2w, final_total_score, final_pos_score, final_ori_score)
@@ -329,6 +338,15 @@ def _beam_search_turn(
 
         if not candidates:
             break
+
+        successes = [
+            item for item in candidates
+            if task_success(item[3], item[0], task_params, success_threshold)
+        ]
+        if successes:
+            successes.sort(key=lambda item: -item[0])
+            total, pos, ori, success_c2w, actions = successes[0]
+            return actions, success_c2w, total, pos, ori
 
         # Sort by total score descending; deduplicate by pose fingerprint
         candidates.sort(key=lambda x: -x[0])
@@ -1170,6 +1188,7 @@ def find_trajectory(
                 step_translation, step_rotation_deg,
                 max_actions=max_actions_per_turn,
                 beam_width=beam_width,
+                success_threshold=success_threshold,
                 collision_checker=collision_checker,
             )
             # Respect global action budget

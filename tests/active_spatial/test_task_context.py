@@ -138,9 +138,10 @@ def test_sft_subsequent_observations_retain_task():
     from data_gen.active_spatial_sft.sft_formatter import format_trajectory
     pose = np.eye(4)
     step = TrajStep(0, pose, ['turn_left'], pose, .1, .2, .1, .2, .1, .2)
-    trajectory = Trajectory([step], pose, .1, .2, False, 1)
+    step_2 = TrajStep(1, pose, ['turn_right'], pose, .2, .3, .2, .3, .2, .3)
+    trajectory = Trajectory([step, step_2], pose, .1, .3, False, 2)
     record = format_trajectory({'task_description': TASK, 'task_type': 'projective_relations'},
-                               trajectory, ['initial.png', 'next.png'], 'task-test', enable_explicit_done=False)
+                               trajectory, ['initial.png', 'next.png', 'final.png'], 'task-test', enable_explicit_done=False)
     users = [m['content'] for m in record['conversations'] if m['role'] == 'user']
     assert len(users) == 2
     for text in users:

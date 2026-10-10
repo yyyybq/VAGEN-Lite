@@ -1,0 +1,78 @@
+schema_version: active_spatial_dense_score_ablation_r1_v2
+status: PREFLIGHT_CANDIDATE
+
+# The PPO/model recipe is the last full 210-row R1 recipe.  Runtime source is
+# separately pinned to the task-context + gate-aligned package in the pilot
+# input ledger; this file only materializes config and reward-only diffs.
+baseline_train_resolved_config: exps/vagen_active_spatial/R1-clean-Projective-v0/frozen_v1/formal.yaml
+baseline_env_config: exps/vagen_active_spatial/R1-clean-Projective-v0/frozen_v1/train.yaml
+
+required_split_roles:
+  - train
+  - id
+
+required_gates:
+  r1_task_context_acceptance: exps/vagen_active_spatial/R1-task-context-v1-acceptance-20261003/acceptance_gate.json
+  r1_gate_aligned_training: exps/vagen_active_spatial/R1-gate-aligned-pilot8-v2-20261005/pilot_training_gate.json
+  r1_gate_aligned_dev32: exps/vagen_active_spatial/R1-gate-aligned-pilot8-v2-20261005/paired_eval/paired_report.json
+  r1_runtime_210: exps/vagen_active_spatial/R1-clean-Projective-v0/runtime_preflight.json
+
+scene_overlap_policy:
+  default: allow
+  forbidden_pairs:
+    - [train, dev]
+    - [train, id]
+
+fingerprint_overlap_policy:
+  default: allow
+  forbidden_role_pairs:
+    - [train, id]
+
+invariants:
+  scorer_enabled: true
+  scorer_backend_selection_unchanged: true
+  success_gate_unchanged: true
+  termination_unchanged: true
+  success_reward_unchanged: true
+  format_reward_unchanged: true
+  invalid_reward_unchanged: true
+  ppo_gamma: 0.95
+
+required_data_contract:
+  canonical_task_metric_version: canonical_spatial_task_h1_v1
+  camera_model_version: canonical_h1_from_frozen_candidate_intrinsics_and_pose
+  collision_convention:
+    version: interiorgs_structure_label_alignment_v1
+    structure_y_sign: 1.0
+
+variants:
+  S0:
+    label: sparse
+    interpretation: common sparse reward; scorer and success/termination remain enabled
+    reward_overrides:
+      enable_potential_shaping_reward: false
+      enable_near_success_reward: false
+      enable_visibility_shaping_reward: false
+      near_success_bonus: 0.0
+      format_reward: 0.0
+      potential_field_gamma: 0.95
+  S1:
+    label: potential_only
+    interpretation: S0 plus only the potential-shaping application switch
+    reward_overrides:
+      enable_potential_shaping_reward: true
+      enable_near_success_reward: false
+      enable_visibility_shaping_reward: false
+      near_success_bonus: 0.0
+      format_reward: 0.0
+      potential_field_gamma: 0.95
+  S5:
+    label: legacy_reward_reference
+    interpretation: aggregate legacy reward recipe reference on repaired R1; not historical reproduction
+    reward_overrides:
+      enable_potential_shaping_reward: true
+      enable_near_success_reward: true
+      enable_visibility_shaping_reward: true
+      near_success_bonus: 0.5
+      format_reward: 0.0
+      potential_field_gamma: 0.99

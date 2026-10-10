@@ -11,6 +11,7 @@ from PIL import Image
 from .generate_paired_qa import generate
 from .finalize_act2qa import freeze, _pose_close
 from .position_render_run import validate_outputs,effective_request, execute, main
+from . import position_render_run as position_worker
 from .build_position_requests import request_hash
 from .restore_diagnostic_scene import _sha256,_validate_scene
 from .test_qa_contract import _fixture
@@ -97,8 +98,8 @@ class PositionPipelineTests(unittest.TestCase):
 class WorkerAttemptTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_records_failure_and_propagates_exception(self):
         with tempfile.TemporaryDirectory() as td:
-            with patch('data_gen.active_spatial_qa.position_render_run.OUT', Path(td)), \
-                 patch('data_gen.active_spatial_qa.position_render_run._run',
+            with patch.object(position_worker, 'OUT', Path(td)), \
+                 patch.object(position_worker, '_run',
                        AsyncMock(side_effect=RuntimeError('early request failure'))):
                 with self.assertRaisesRegex(RuntimeError, 'early request failure'):
                     await main()
@@ -130,7 +131,7 @@ class WorkerAttemptTests(unittest.IsolatedAsyncioTestCase):
                         raise RuntimeError('injected renderer failure')
                     return Image.new('RGB', (8, 8), 'red')
 
-            with patch('data_gen.active_spatial_qa.position_render_run.SceneRenderer', FakeRenderer):
+            with patch.object(position_worker, 'SceneRenderer', FakeRenderer):
                 with self.assertRaisesRegex(RuntimeError, 'injected renderer failure'):
                     await execute(request, root, request['asset_identity'])
                 failed_path = next(root.glob('attempt_*/status.json'))

@@ -16,8 +16,11 @@ from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
 
 def compare(bank: str, output: str, limit: int = 0):
     rows = [json.loads(x) for x in Path(bank).read_text().splitlines() if x.strip()]
-    report = {"bank": bank, "rows": 0, "matches": 0, "mismatches": 0, "errors": 0, "details": []}
+    report = {"bank": bank, "rows": 0, "matches": 0, "mismatches": 0, "errors": 0, "skipped": 0, "details": []}
     for row in rows[:limit or None]:
+        if row.get("private_answer") not in {"Yes", "No"}:
+            report["skipped"] += 1
+            continue
         try:
             audit = row.get("_audit", {}).get("predicate", {})
             raw_pose = row.get("state_pose_c2w") or audit.get("pose") or row.get("pose")
@@ -26,17 +29,20 @@ def compare(bank: str, output: str, limit: int = 0):
                 # Older QA rows did not persist the pose. They remain useful for
                 # label audits but cannot satisfy the environment-side check.
                 raise ValueError("pose_not_serialized")
-            env = ActiveSpatialEnv(ActiveSpatialEnvConfig(
-                jsonl_path="", render_backend=None, enable_collision_detection=False,
-                enable_potential_field=True,
-            ))
+            config = dict(row.get("evaluation_config") or {})
+            config.update(jsonl_path="", render_backend=None, enable_collision_detection=False,
+                          enable_potential_field=True)
+            env = ActiveSpatialEnv(ActiveSpatialEnvConfig(**config))
             env.current_item = {
+                **row.get("source_camera_metadata", {}),
                 "task_type": row["task_type"],
                 "task_params": row.get("complete_goal", {}).get("task_params", {}),
                 "target_region": row.get("complete_goal", {}).get("target_region", {}),
                 "target_object": row.get("complete_goal", {}).get("target_object"),
-                "init_camera": {"intrinsics": row.get("camera", {}).get("intrinsics") or [[320,0,320],[0,320,240],[0,0,1]]},
+                "init_camera": row.get("source_init_camera") or {"intrinsics": row.get("camera", {}).get("intrinsics")},
                 "scene_id": row.get("scene_id"),
+                "canonical_task_metric_version": row.get("source_task_metric_version"),
+                "camera_model_version": row.get("source_camera_model_version"),
             }
             env.current_task = {"task_type": env.current_item["task_type"], "task_params": env.current_item["task_params"], "target_region": env.current_item["target_region"]}
             env.camera_intrinsics = np.asarray(env.current_item["init_camera"]["intrinsics"], dtype=float)
@@ -52,13 +58,17 @@ def compare(bank: str, output: str, limit: int = 0):
         except Exception as exc:
             report["errors"] += 1
             report["details"].append({"sample_id": row.get("sample_id"), "error": str(exc)})
+    report["status"] = "PASS" if report["rows"] > 0 and not report["errors"] and not report["mismatches"] else "FAIL"
     Path(output).write_text(json.dumps(report, indent=2) + "\n")
     return report
 
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--bank", required=True); ap.add_argument("--output", required=True); ap.add_argument("--limit", type=int, default=0)
-    print(json.dumps(compare(**vars(ap.parse_args())), indent=2))
+    report = compare(**vars(ap.parse_args()))
+    print(json.dumps(report, indent=2))
+    if report["status"] != "PASS":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__": main()

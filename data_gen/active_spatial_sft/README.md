@@ -1,8 +1,100 @@
 # active_spatial_sft — SFT Data Generator
 
 Generates **Supervised Fine-Tuning (SFT)** training data for the active-spatial
-camera-navigation task by finding optimal camera trajectories and rendering the
-corresponding image sequences.
+camera-navigation task by finding score-guided camera trajectories and rendering
+the corresponding image sequences.
+
+> **R1 note (2026-10):** use `run_r1_sft_pipeline.py` for canonical R1 data.
+> The older generic command below remains available for legacy multi-task data,
+> but its defaults are not the current R1 protocol.
+
+## Current R1 workflow
+
+The R1 entry point binds generation to an authoritative environment YAML and
+uses the same `canonical_gate_aligned_shaping_v1` potential as the runtime
+reward. It also replays every planned trajectory through the real environment,
+rejects collision/pose/render mismatches, validates the QwenVL multimodal
+record, and produces score/path dashboards.
+
+Example: apply the latest gate-aligned reward protocol to the complete frozen
+210-row clean Projective corpus (without modifying either frozen input):
+
+```bash
+export R1_RENDER_URL=http://RENDER_HOST:PORT/render
+
+python data_gen/active_spatial_sft/run_r1_sft_pipeline.py \
+  --env-yaml \
+    exps/vagen_active_spatial/R1-gate-aligned-pilot8-v2-20261005/frozen/train.yaml \
+  --jsonl-path \
+    exps/vagen_active_spatial/R1-clean-Projective-v0/frozen_v1/train.jsonl \
+  --output-dir outputs/active_spatial_sft_r1_gate_aligned_20261008 \
+  --qwen-format parquet \
+  --also-no-think \
+  --beam-width 16 \
+  --verbose
+```
+
+Use a new output directory for every run. The generator refuses to overwrite
+an existing SFT JSONL or report.
+
+The important outputs are:
+
+| Artifact | Purpose |
+| --- | --- |
+| `sft_data.jsonl` | Auditable internal records, conversations, frame paths, canonical gates, atomic pose/score trace, and runtime reward trace. |
+| `qwen_vl_sft.parquet` (or `.jsonl`) | Strictly validated `messages` + absolute `images` records for QwenVL SFT. Oracle scores and certificates are not placed in messages. |
+| `dataset_info.json` | LLaMA-Factory registration (`active_spatial_r1_sft`, plus the no-think variant when requested). |
+| `generation_manifest.json` | Input/YAML/output hashes, resolved generation settings, and score version. |
+| `primitive_images/` | Real renderer frames at the initial pose and after every primitive action; kept out of QwenVL messages. |
+| `visualization/index.html` | Per-trajectory primitive RGB frames, action-level score curve, and top-down camera path. |
+| `visualization/score_guidance_summary.json` | Success, score monotonicity, final-best rate, path directness, and certified shortest-length gap. |
+
+For auto-terminated R1 episodes, the last rendered frame is retained in the
+internal record and dashboards but is not appended as an unmatched final user
+turn in the QwenVL conversation. Thus every exported training conversation ends
+with a supervised assistant action.
+
+By default the R1 runner uses **score-only beam search**. This is intentional:
+it tests whether the current reward landscape itself can guide the camera from
+the supplied initial view. `--guided-search` additionally uses the hidden
+`sample_point`/`sample_forward`; use that only to maximize SFT yield, not to
+evaluate the score system.
+
+The audit manifest is auto-discovered beside the input as `audit_only.jsonl`.
+For rows with a complete and equal certified lower/upper bound, the dashboard
+can state whether the generated trajectory matches the certified shortest
+action count. For all other rows it reports score-guided success and path
+efficiency but does **not** claim global optimality.
+
+### QwenVL fine-tuning handoff
+
+For LLaMA-Factory, point `dataset_dir` to the output directory and select the
+generated dataset name:
+
+```yaml
+dataset_dir: outputs/active_spatial_sft_r1_gate_aligned_20261008
+dataset: active_spatial_r1_sft
+template: qwen2_vl
+```
+
+Set `model_name_or_path`, training output, batch size, and distributed strategy
+in the training config for the intended QwenVL checkpoint. Do not reuse the
+hard-coded historical paths in `lf_qwen25vl_3b_sft.yaml` without overriding
+them.
+
+### What is guaranteed
+
+- Search score equals the current canonical runtime shaping score.
+- Canonical success still comes from boolean gates, not a numeric score cutoff.
+- Published labels come from real environment replay, not search-only poses.
+- Every user image placeholder has exactly one existing image before QwenVL
+  export succeeds.
+- Atomic score/path traces are metadata only and are excluded from model
+  messages.
+
+The full SFT publication step requires a live GPU renderer. Geometry-only
+search can run on CPU, but it is evidence about the score landscape—not valid
+multimodal SFT data.
 
 ---
 
@@ -24,7 +116,7 @@ Pipeline JSONL item
   (init_camera + target_region + task_type)
          │
          ▼
-  GreedyPathFinder          ← greedy hill-climbing on SpatialPotentialField
+  Score-guided path finder  ← discrete beam search on the active score
   (path_finder.py)
          │  trajectory: [TrajStep, ...]
          ▼
@@ -49,10 +141,12 @@ environment uses (system → user/assistant alternation), ready for VLM SFT.
 active_spatial_sft/
 ├── __init__.py
 ├── config.py               # SFTGenerationConfig dataclass (all hyperparameters)
-├── path_finder.py          # Greedy trajectory search on potential field
+├── path_finder.py          # Score-guided trajectory search
 ├── sft_formatter.py        # Convert Trajectory → SFT conversation record
 ├── sft_generator.py        # Main generator class (orchestrates the pipeline)
 ├── run_sft_generation.py   # CLI entry point
+├── run_r1_sft_pipeline.py  # R1 YAML-bound generation + QwenVL export
+├── visualize_score_guidance.py # RGB/score/path dashboards
 ├── test_path_finder.py     # Sanity-check script (no rendering required)
 └── README.md               # This file
 ```
@@ -108,16 +202,16 @@ python run_sft_generation.py \
     --max_items   5000
 ```
 
-### 4. Path-finding only (skip rendering, no images)
+### 4. Legacy path-finding diagnostic (no rendering)
 
 ```bash
-python run_sft_generation.py \
+python test_path_finder.py \
     --jsonl_path /path/to/pipeline_output.jsonl \
-    --output_dir /path/to/sft_output \
-    --render_backend none \
-    --max_items 1000
+    --num_items 10
 ```
-*(Records will have empty `image_paths`. Useful for validating trajectories.)*
+
+This legacy diagnostic does not publish SFT records. The R1 runner deliberately
+requires real rendered frames before it will emit QwenVL training data.
 
 ---
 
