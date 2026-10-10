@@ -131,11 +131,11 @@ class PLYGaussianLoader:
         zq = (packed & 0x7FF).astype(np.float32) / 2047.0
         out = np.empty((packed.shape[0], 3), dtype=np.float32)
         cd = self.chunk_data
-        for c in np.unique(ci):
-            m = ci == c; c = int(c)
-            out[m,0] = cd.min_x[c] + xq[m] * (cd.max_x[c] - cd.min_x[c])
-            out[m,1] = cd.min_y[c] + yq[m] * (cd.max_y[c] - cd.min_y[c])
-            out[m,2] = cd.min_z[c] + zq[m] * (cd.max_z[c] - cd.min_z[c])
+        # One gather per vertex avoids rescanning all vertices for each chunk.
+        # Keep float32 subtract/multiply/add ordering identical to the scalar-chunk path.
+        out[:, 0] = cd.min_x[ci] + xq * (cd.max_x[ci] - cd.min_x[ci])
+        out[:, 1] = cd.min_y[ci] + yq * (cd.max_y[ci] - cd.min_y[ci])
+        out[:, 2] = cd.min_z[ci] + zq * (cd.max_z[ci] - cd.min_z[ci])
         return out
 
     def _unpack_scale_with_indices(self, packed: np.ndarray, ci: np.ndarray) -> np.ndarray:
@@ -144,11 +144,11 @@ class PLYGaussianLoader:
         szq = (packed & 0x7FF).astype(np.float32) / 2047.0
         out = np.empty((packed.shape[0], 3), dtype=np.float32)
         cd = self.chunk_data
-        for c in np.unique(ci):
-            m = ci == c; c = int(c)
-            out[m,0] = cd.min_scale_x[c] + sxq[m] * (cd.max_scale_x[c] - cd.min_scale_x[c])
-            out[m,1] = cd.min_scale_y[c] + syq[m] * (cd.max_scale_y[c] - cd.min_scale_y[c])
-            out[m,2] = cd.min_scale_z[c] + szq[m] * (cd.max_scale_z[c] - cd.min_scale_z[c])
+        # One gather per vertex avoids rescanning all vertices for each chunk.
+        # Keep float32 subtract/multiply/add ordering identical to the scalar-chunk path.
+        out[:, 0] = cd.min_scale_x[ci] + sxq * (cd.max_scale_x[ci] - cd.min_scale_x[ci])
+        out[:, 1] = cd.min_scale_y[ci] + syq * (cd.max_scale_y[ci] - cd.min_scale_y[ci])
+        out[:, 2] = cd.min_scale_z[ci] + szq * (cd.max_scale_z[ci] - cd.min_scale_z[ci])
         return out
 
     def _unpack_rotation_supersplat(self, packed: np.ndarray) -> np.ndarray:

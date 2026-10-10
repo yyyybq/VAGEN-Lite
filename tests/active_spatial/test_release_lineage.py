@@ -21,3 +21,26 @@ def test_task_hash_and_explicit_split_are_binding(tmp_path):
   with pytest.raises(ValueError):bind_derived(row|change,'qa',registry,lookup)
 def test_unverified_screen_occupancy_cannot_opt_in():
  assert qa_record({'split':'train','task_type':'screen_occupancy','qa_sft_allowed':True},Path('.'))==(None,'screen_occupancy_unverified')
+
+
+def test_release_sft_requires_observation_review(tmp_path):
+ from types import SimpleNamespace
+ from PIL import Image
+ from prepare_active_spatial_sft import prepare
+ image=tmp_path/'frame.png';Image.new('RGB',(8,8),'red').save(image)
+ model=tmp_path/'model';model.mkdir();(model/'config.json').write_text('{"model_type":"qwen2_5_vl"}')
+ versions={k:'fixture_v1' for k in ('camera_model_version','canonical_task_metric_version','action_protocol_version')}
+ records=[];registry=[]
+ for scene,split,review in [('a','train',True),('b','val',True),('c','train',False)]:
+  parent='task_'+scene;digest='fixture_hash_'+scene
+  registry.append({'task_id':parent,'source_task_sha256':digest,'scene_id':scene,'split':split,'versions':versions})
+  row={'id':'sft_'+parent,'source_task_id':parent,'source_task_sha256':digest,'source_versions':versions,'scene_id':scene,'split':split,'success':True,'score_contract':{'success_source':'canonical_gates'},'image_paths':[str(image)],'conversations':[{'role':'user','content':'<image> Move left','image_path':str(image)},{'role':'assistant','content':'<action>move_left|</action>'}]}
+  if review:row['semantic_review']={'status':'PASS'}
+  records.append(row)
+ source=tmp_path/'sft.jsonl';source.write_text(''.join(json.dumps(x)+'\n' for x in records))
+ reg=tmp_path/'registry.jsonl';reg.write_text(''.join(json.dumps(x)+'\n' for x in registry))
+ split=tmp_path/'split.json';split.write_text(json.dumps({'version':2,'train_scenes':['a','c'],'val_scenes':['b'],'test_scenes':[]}))
+ args=SimpleNamespace(out=str(tmp_path/'out'),model=str(model),trajectory=[str(source)],qa_bank=[],qa_probability=0, val_fraction=.1,seed=42,split_manifest=str(split),task_registry=str(reg),cutoff_len=2048)
+ result=prepare(args)
+ assert result['counts']['trajectory/train']==1 and result['counts']['trajectory/val']==1
+ assert result['excluded']['trajectory_semantic_review_missing']==1

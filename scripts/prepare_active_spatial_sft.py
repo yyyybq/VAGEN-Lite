@@ -137,6 +137,9 @@ def prepare(args):
                         excluded[reason] += 1
                         continue
                 else:
+                    if strict and row.get("semantic_review", {}).get("status") != "PASS":
+                        excluded["trajectory_semantic_review_missing"] += 1
+                        continue
                     if not strict and row.get("split", "train") != "train":
                         raise ValueError("Trajectory input includes held-out records")
                     if row.get("success") is not True:

@@ -77,7 +77,7 @@ QA 的正负标签取自实际状态下的成功判据；`positive_candidate` �
   --out "$RUN/mix_sft"
 ```
 
-输出包括 `trajectory_train/val.jsonl`、`qa_train/val.jsonl`、`dataset_info.json`、`train.yaml` 和 `split_manifest.json`。训练记录仅包含 `messages`、`images`；所有图片会检查存在性和可读性。无效 QA 被计入排除原因；已标为 test/val 的源 bank 会被拒绝。
+输出包括 `trajectory_train/val.jsonl`、`qa_train/val.jsonl`、`dataset_info.json`、`train.yaml` 和 `split_manifest.json`。训练记录仅包含 `messages`、`images`；所有图片会检查存在性和可读性。无效 QA 被计入排除原因；已标为 test/val 的源 bank 会被拒绝。若传入 version-2 `--split-manifest` 和 `--task-registry`，轨迹和 QA 还必须带 `semantic_review.status=PASS`，否则分别记为 `trajectory_semantic_review_missing` / `semantic_review_missing` 并排除，不进入训练。
 
 划分单位是 scene，因此同一场景的轨迹、QA parent 及其多个 pose 不会跨 train/val。至少需要两个场景，参与训练的每个分支在两侧都要有样本。对于单场景诊断，不应把相邻帧随机切成“独立验证集”。
 
