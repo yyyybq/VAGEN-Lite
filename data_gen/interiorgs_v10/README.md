@@ -85,6 +85,8 @@ python -m unittest discover -s data_gen/interiorgs_v10/tests -t .
   13,109 tasks**, d* 1–8. Calibration v2 freezes 987 scenes (13 ambiguous). Output in
   `exps/vagen_active_spatial/interiorgs_v10_gen_20261011c/output/`; details in
   `cluster_runs/REPORT_REAL_20261011.md`. Rendering + VLM review (GPU stage) has not run yet.
+* Pre-GPU diagnostics, the 100-scene comparison of reserve pool / family quotas / pitch -15, and the
+  open decisions: `cluster_runs/REPORT_DIAG_20261012.md`.
 * Real `structure.json` rooms carry only `profile` (no name/type), so room-based referring
   expressions never apply.
 * `fetch_interiorgs_metadata.py --source aoss` is tested on the cluster; the Hugging Face path is
