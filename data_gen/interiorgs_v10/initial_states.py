@@ -223,7 +223,8 @@ class ItemSearch:
                  max_states: int = 200000, max_certify: int = 48, diversity_m: float = 0.6,
                  diversity_deg: float = 30.0, require_terminal_identifiable: bool = True,
                  require_generator_safe_certificate: bool = False, funnel: Optional[Funnel] = None,
-                 item_key: Any = None, max_examined: int = 1500, max_terminal_checks: int = 24) -> None:
+                 item_key: Any = None, max_examined: int = 1500, max_terminal_checks: int = 24,
+                 terminal_roles: Optional[Sequence[int]] = None) -> None:
         self.scene, self.item = scene, item
         self.bands = [tuple(int(v) for v in b) for b in bands]
         self.d_max = max(hi for _, hi in self.bands)
@@ -243,6 +244,10 @@ class ItemSearch:
         self.funnel = funnel if funnel is not None else Funnel()
         self.item_key = item_key
         self.targets = item_targets(scene, item)
+        # targets that must be identifiable in the terminal frame (default: all of them)
+        self.terminal_targets = (self.targets if terminal_roles is None
+                                 else [self.targets[i] for i in terminal_roles if i < len(self.targets)])
+        self.reasons: Dict[str, int] = {}  # per-item STAGE_CANDIDATES counts (diagnostics only)
         self.geom = FastGeometry.for_scene(scene)
         self.layers: List[_Layer] = []
         self.accepted: List[Dict[str, Any]] = []
@@ -420,25 +425,28 @@ class ItemSearch:
             n_ok += bool(res.get("identifiable"))
         return {"source": self.obs_source, "targets": per, "n_identifiable": n_ok, "n_targets": len(self.targets)}
 
+    def _cand(self, reason: str) -> None:
+        self.funnel.add(STAGE_CANDIDATES, reason)
+        self.reasons[reason] = self.reasons.get(reason, 0) + 1
+
     def _examine(self, r: int, i: int, needs: Dict[Band, int]) -> Optional[Dict[str, Any]]:
-        f = self.funnel
         self.examined.add((r, i))
         layer = self.layers[r]
         c2w = to_c2w(layer.P[i:i + 1], layer.R[i:i + 1])[0]
         t0 = time.perf_counter()
         if bool(layer.success[i]):
-            f.add(STAGE_CANDIDATES, "already_success")
+            self._cand("already_success")
             return None
         if self._too_close(c2w):
-            f.add(STAGE_CANDIDATES, "diversity_too_close")
+            self._cand("diversity_too_close")
             return None
         if not bool(self.scene.is_pose_legal(c2w)[0]):
-            f.add(STAGE_CANDIDATES, "not_generator_legal")
+            self._cand("not_generator_legal")
             return None
         obs = self._observe(c2w)
         self.timing["filters_s"] += time.perf_counter() - t0
         if obs["n_identifiable"] < 1:
-            f.add(STAGE_CANDIDATES, "no_target_identifiable")
+            self._cand("no_target_identifiable")
             return None
         # explicit reverse path -> forward hint
         hint: List[str] = []
@@ -450,7 +458,7 @@ class ItemSearch:
 
         def terminal_ok(pose: np.ndarray) -> bool:
             try:
-                return all(bool(self.obs_fn(self.scene, pose, o).get("identifiable")) for o in self.targets)
+                return all(bool(self.obs_fn(self.scene, pose, o).get("identifiable")) for o in self.terminal_targets)
             except Exception:
                 return False
 
@@ -465,29 +473,29 @@ class ItemSearch:
                                    "reverse_depth": r, "source": cert["certificate_source"]})
         d = cert["d_star"]
         if cert["status"] == "state_cap":
-            f.add(STAGE_CANDIDATES, "certify_state_cap")
+            self._cand("certify_state_cap")
             return None
         if d is None:
-            f.add(STAGE_CANDIDATES, "d_star_above_max_band")
+            self._cand("d_star_above_max_band")
             return None
         if d == 0:
-            f.add(STAGE_CANDIDATES, "already_success")
+            self._cand("already_success")
             return None
         band = band_of(d, self.bands)
         if band is None:
-            f.add(STAGE_CANDIDATES, "d_star_outside_bands")
+            self._cand("d_star_outside_bands")
             return None
         if self.require_terminal and cert.get("terminal_ok") is False:
-            f.add(STAGE_CANDIDATES, "terminal_not_identifiable")
+            self._cand("terminal_not_identifiable")
             return None
         if self.require_safe_cert and not cert.get("certificate_generator_safe"):
-            f.add(STAGE_CANDIDATES, "certificate_not_generator_safe")
+            self._cand("certificate_not_generator_safe")
             return None
         t2 = time.perf_counter()
         rep = replay_certificate(self.scene, self.oracle, c2w, cert["certificate"], check_generator_safe=True)
         self.timing["replay_s"] += time.perf_counter() - t2
         if not rep["ok"]:
-            f.add(STAGE_CANDIDATES, "certificate_replay_failed")
+            self._cand("certificate_replay_failed")
             return None
         terminal = np.asarray(rep["poses"][-1])
         ep = {
@@ -518,21 +526,23 @@ class ItemSearch:
         if needs.get(band, 0) > 0:
             needs[band] -= 1
             self.accepted.append(ep)
-            f.add(STAGE_CANDIDATES, "accepted")
+            self._cand("accepted")
             return ep
         self.surplus.append(ep)
-        f.add(STAGE_CANDIDATES, "band_quota_full")
+        self._cand("band_quota_full")
         return None
 
     def summary(self) -> Dict[str, Any]:
         return {
             "item_key": self.item_key,
+            "task_type": self.item.get("task_type"),
             "endpoints": len(self.endpoints),
             "reverse_layer_sizes": [len(l) for l in self.layers],
             "certified": self.certified,
             "accepted": len(self.accepted),
             "surplus": len(self.surplus),
             "band_stop": {band_name(b): v for b, v in self.band_stop.items()},
+            "candidate_reasons": dict(sorted(self.reasons.items())),
             "timing": dict(self.timing),
             "observability_source": self.obs_source,
         }
@@ -603,11 +613,131 @@ def _unpack_item(entry: Any) -> Tuple[Dict[str, Any], Any, List[Any], Any]:
                      "or (item, endpoints) or (item, success_fn, endpoints)")
 
 
+FamilyQuotas = Dict[str, Tuple[int, Optional[int]]]
+
+
+def parse_family_quotas(spec: Any) -> Optional[FamilyQuotas]:
+    """``"fam:min:max,fam:min"`` (max empty / ``*`` / absent = unlimited) or a mapping
+    ``{fam: (min, max)}`` / ``{fam: {"min": .., "max": ..}}`` -> ``{fam: (min, max|None)}``."""
+    if spec is None or spec == "" or spec == {}:
+        return None
+    out: FamilyQuotas = {}
+    if isinstance(spec, str):
+        for part in spec.split(","):
+            bits = [b.strip() for b in part.split(":")]
+            if not bits[0]:
+                continue
+            lo = int(bits[1]) if len(bits) > 1 and bits[1] else 0
+            hi = int(bits[2]) if len(bits) > 2 and bits[2] not in ("", "*") else None
+            out[bits[0]] = (lo, hi)
+    else:
+        for fam, q in dict(spec).items():
+            if isinstance(q, dict):
+                lo, hi = int(q.get("min", 0) or 0), q.get("max")
+            else:
+                lo, hi = (int(q[0] or 0), q[1] if len(q) > 1 else None)
+            out[str(fam)] = (lo, None if hi is None else int(hi))
+    for fam, (lo, hi) in out.items():
+        if lo < 0 or (hi is not None and hi < lo):
+            raise ValueError(f"bad family quota for {fam}: min={lo} max={hi}")
+    return out
+
+
+def _scaled_quotas(quotas: FamilyQuotas, k: int, target: int) -> FamilyQuotas:
+    """Family quotas for a reserve pool of ``k`` next to a main set of ``target``."""
+    out: FamilyQuotas = {}
+    for fam, (lo, hi) in quotas.items():
+        out[fam] = (int(math.floor(lo * k / max(target, 1))),
+                    None if hi is None else int(math.ceil(hi * k / max(target, 1))))
+    return out
+
+
+def _quota_fill(searches: Sequence[ItemSearch], needs: Dict[Band, int], counts: List[int], cap: int,
+                quotas: FamilyQuotas, fam_count: Dict[str, int], out: List[Dict[str, Any]],
+                deadline: Optional[float]) -> bool:
+    """Fill ``needs`` round-robin under per-family [min, max] counts; returns timed_out.
+
+    Phase 1 serves the families still below their minimum (one item per family
+    per round, families in first-appearance order); phase 2 is the default
+    round-robin over all items, skipping items whose family reached its max.
+    """
+    fams = [str(s.item.get("task_type")) for s in searches]
+    active = set(range(len(searches)))
+
+    def at_max(f: str) -> bool:
+        hi = quotas.get(f, (0, None))[1]
+        return hi is not None and fam_count.get(f, 0) >= hi
+
+    def step(j: int) -> None:
+        if counts[j] >= cap or at_max(fams[j]):
+            active.discard(j)
+            return
+        got = searches[j].fill(needs, max_new=1)
+        if not got:
+            active.discard(j)
+            return
+        counts[j] += len(got)
+        fam_count[fams[j]] = fam_count.get(fams[j], 0) + len(got)
+        out.extend(got)
+
+    def late() -> bool:
+        return deadline is not None and time.perf_counter() > deadline
+
+    fam_order = list(dict.fromkeys(fams))
+    turn = {f: 0 for f in fam_order}
+    while sum(needs.values()) > 0:
+        wanting = [f for f in fam_order if fam_count.get(f, 0) < quotas.get(f, (0, None))[0]
+                   and any(fams[j] == f for j in active)]
+        if not wanting:
+            break
+        for f in wanting:
+            if sum(needs.values()) <= 0:
+                break
+            if late():
+                return True
+            members = [j for j in range(len(searches)) if fams[j] == f and j in active]
+            if members:
+                step(members[turn[f] % len(members)])
+                turn[f] += 1
+    order = [j for j in range(len(searches)) if j in active]
+    while order and sum(needs.values()) > 0:
+        for j in list(order):
+            if sum(needs.values()) <= 0:
+                break
+            if late():
+                return True
+            step(j)
+            if j not in active:
+                order.remove(j)
+    return False
+
+
+def _backfill(searches: Sequence[ItemSearch], out: List[Dict[str, Any]], counts: List[int], cap: int, total: int,
+              skip, on_take) -> None:
+    """Hardest-band-first backfill from surplus episodes not used yet."""
+    used = {id(e) for e in out}
+    pool = []
+    for j, s in enumerate(searches):
+        for ep in s.surplus:
+            pool.append((-ep["band"][0], -ep["d_star"], j, ep))
+    pool.sort(key=lambda t: t[:3])
+    for _, _, j, ep in pool:
+        if len(out) >= total:
+            break
+        if id(ep) in used or counts[j] >= cap or skip(j, ep):
+            continue
+        out.append(ep)
+        counts[j] += 1
+        on_take(j, ep)
+
+
 def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_per_scene: int = 12, *,
                        bands: Sequence[Band] = DEFAULT_BANDS,
                        band_weights: Sequence[float] = DEFAULT_BAND_WEIGHTS,
                        max_per_item: Optional[int] = None, seed: int = 0,
                        observability_fn: Optional[Callable] = None, time_budget_s: Optional[float] = None,
+                       family_quotas: Any = None, reserve_k: int = 0,
+                       terminal_identifiable: str = "all",
                        **search_kwargs: Any) -> Tuple[List[Dict[str, Any]], Funnel, Dict[str, Any]]:
     """Allocate ``target_per_scene`` episodes across items and bands.
 
@@ -618,11 +748,27 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
     kept as surplus and used to backfill (hardest first) when a band falls
     short.  Returns (episodes, funnel, report) where report['shortfall'] lists
     missing episodes per band with the reasons each item stopped.
+
+    Optional (all off by default; off reproduces the allocation above exactly):
+      family_quotas  {task_type: (min, max)} (see ``parse_family_quotas``): families
+                     below their min are served first, families at max stop.
+      reserve_k      after the main set, certify up to ``reserve_k`` more episodes
+                     (``report["reserve"]``) with the same band weights and, if
+                     quotas are set, the quotas scaled to ``reserve_k``; unused
+                     surplus is used first.  For backfilling after review rejections.
+      terminal_identifiable  "all" (every target identifiable at the terminal pose)
+                     or "family" (only the family's TERMINAL_IDENTIFIABLE_ROLES, e.g.
+                     the occluder of occlusion_alignment, whose target is hidden by definition).
     """
     t0 = time.perf_counter()
     funnel = Funnel()
     bands = [tuple(int(v) for v in b) for b in bands]
     targets = allocate_band_targets(int(target_per_scene), bands, band_weights)
+    quotas = parse_family_quotas(family_quotas)
+    if quotas and sum(lo for lo, _ in quotas.values()) > int(target_per_scene):
+        raise ValueError("family minimums exceed target_per_scene")
+    if terminal_identifiable not in ("all", "family"):
+        raise ValueError(f"terminal_identifiable must be 'all' or 'family', not {terminal_identifiable!r}")
     searches: List[ItemSearch] = []
     for k, entry in enumerate(items_with_endpoints):
         item, sfn, eps, key = _unpack_item(entry)
@@ -632,54 +778,70 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
             except Exception:
                 funnel.add(STAGE_SCENE, "item_without_success_fn")
                 continue
+        extra = {}
+        if terminal_identifiable == "family":
+            extra["terminal_roles"] = _family_terminal_roles(item)
         searches.append(ItemSearch(scene, item, sfn, eps, bands=bands, seed=seed + 1009 * k,
                                    observability_fn=observability_fn, funnel=funnel,
-                                   item_key=key if key is not None else k, **search_kwargs))
+                                   item_key=key if key is not None else k, **extra, **search_kwargs))
     n = max(1, len(searches))
     cap = int(max_per_item) if max_per_item is not None else -(-int(target_per_scene) // n) + 2
     needs = dict(targets)
     counts = [0] * len(searches)
-    active = list(range(len(searches)))
     out: List[Dict[str, Any]] = []
     timed_out = False
-    while active and sum(needs.values()) > 0:
-        for j in list(active):
-            if sum(needs.values()) <= 0:
+    fam_count: Dict[str, int] = {}
+    if quotas is None:
+        active = list(range(len(searches)))
+        while active and sum(needs.values()) > 0:
+            for j in list(active):
+                if sum(needs.values()) <= 0:
+                    break
+                if time_budget_s is not None and time.perf_counter() - t0 > time_budget_s:
+                    timed_out = True
+                    break
+                if counts[j] >= cap:
+                    active.remove(j)
+                    continue
+                got = searches[j].fill(needs, max_new=1)
+                if not got:
+                    active.remove(j)
+                    continue
+                counts[j] += len(got)
+                out.extend(got)
+            if timed_out:
                 break
-            if time_budget_s is not None and time.perf_counter() - t0 > time_budget_s:
-                timed_out = True
-                break
-            if counts[j] >= cap:
-                active.remove(j)
-                continue
-            got = searches[j].fill(needs, max_new=1)
-            if not got:
-                active.remove(j)
-                continue
-            counts[j] += len(got)
-            out.extend(got)
-        if timed_out:
-            break
-    # backfill from surplus (hardest band first, then larger d*)
-    if len(out) < target_per_scene:
-        pool = []
-        for j, s in enumerate(searches):
-            for ep in s.surplus:
-                pool.append((-ep["band"][0], -ep["d_star"], j, ep))
-        pool.sort(key=lambda t: t[:3])
-        for _, _, j, ep in pool:
-            if len(out) >= target_per_scene:
-                break
-            if counts[j] >= cap:
-                continue
-            out.append(ep)
-            counts[j] += 1
-            ep["backfilled"] = True
-            funnel.add(STAGE_SCENE, "backfilled_from_surplus")
-    used = {id(e) for e in out}
-    n_unused = sum(1 for s in searches for e in s.surplus if id(e) not in used)
-    if n_unused:
-        funnel.add(STAGE_SCENE, "surplus_unused", n_unused)
+        # backfill from surplus (hardest band first, then larger d*)
+        if len(out) < target_per_scene:
+            pool = []
+            for j, s in enumerate(searches):
+                for ep in s.surplus:
+                    pool.append((-ep["band"][0], -ep["d_star"], j, ep))
+            pool.sort(key=lambda t: t[:3])
+            for _, _, j, ep in pool:
+                if len(out) >= target_per_scene:
+                    break
+                if counts[j] >= cap:
+                    continue
+                out.append(ep)
+                counts[j] += 1
+                ep["backfilled"] = True
+                funnel.add(STAGE_SCENE, "backfilled_from_surplus")
+    else:
+        deadline = None if time_budget_s is None else t0 + time_budget_s
+        timed_out = _quota_fill(searches, needs, counts, cap, quotas, fam_count, out, deadline)
+        if len(out) < target_per_scene:
+            fams = [str(s.item.get("task_type")) for s in searches]
+
+            def _skip(j: int, ep: Dict[str, Any]) -> bool:
+                hi = quotas.get(fams[j], (0, None))[1]
+                return hi is not None and fam_count.get(fams[j], 0) >= hi
+
+            def _take(j: int, ep: Dict[str, Any]) -> None:
+                fam_count[fams[j]] = fam_count.get(fams[j], 0) + 1
+                ep["backfilled"] = True
+                funnel.add(STAGE_SCENE, "backfilled_from_surplus")
+            _backfill(searches, out, counts, cap, int(target_per_scene), _skip, _take)
     band_counts = {band_name(b): 0 for b in bands}
     for ep in out:
         band_counts[ep["band_name"]] += 1
@@ -696,6 +858,15 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
         if not searches:
             reasons["no_items"] = 1
         shortfall[band_name(b)] = {"missing": int(missing), "item_stop_reasons": reasons}
+    reserve: List[Dict[str, Any]] = []
+    reserve_report: Dict[str, Any] = {}
+    if reserve_k > 0:
+        reserve, reserve_report = _fill_reserve(searches, out, int(reserve_k), int(target_per_scene), bands,
+                                                band_weights, quotas, funnel, t0, time_budget_s, timed_out)
+    used = {id(e) for e in out} | {id(e) for e in reserve}
+    n_unused = sum(1 for s in searches for e in s.surplus if id(e) not in used)
+    if n_unused:
+        funnel.add(STAGE_SCENE, "surplus_unused", n_unused)
     total_missing = max(0, int(target_per_scene) - len(out))
     if total_missing:
         funnel.add(STAGE_SCENE, "scene_shortfall", total_missing)
@@ -712,4 +883,80 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
         "timed_out": timed_out,
         "seconds": time.perf_counter() - t0,
     }
+    if quotas is not None:
+        report["family_quotas"] = {f: list(q) for f, q in quotas.items()}
+        report["family_counts"] = dict(sorted(fam_count.items()))
+    if reserve_k > 0:
+        report["reserve"] = reserve
+        report.update(reserve_report)
     return out, funnel, report
+
+
+def _family_terminal_roles(item: Dict[str, Any]) -> Optional[Tuple[int, ...]]:
+    """TERMINAL_IDENTIFIABLE_ROLES of a v2 family (None = all targets, e.g. Projective / FOV)."""
+    try:
+        from .families.canonical_v2 import FAMILIES
+    except Exception:
+        return None
+    fam = FAMILIES.get(str(item.get("task_type")))
+    roles = getattr(fam, "TERMINAL_IDENTIFIABLE_ROLES", None) if fam is not None else None
+    return tuple(int(r) for r in roles) if roles is not None else None
+
+
+def _fill_reserve(searches: Sequence[ItemSearch], main: Sequence[Dict[str, Any]], k: int, target: int,
+                  bands: Sequence[Band], band_weights: Sequence[float], quotas: Optional[FamilyQuotas],
+                  funnel: Funnel, t0: float, time_budget_s: Optional[float],
+                  timed_out: bool) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Up to ``k`` reserve episodes with the main set's band weights (and scaled family quotas)."""
+    r_targets = allocate_band_targets(k, bands, band_weights)
+    r_needs = dict(r_targets)
+    n = max(1, len(searches))
+    r_cap = -(-k // n) + 2
+    r_counts = [0] * len(searches)
+    r_quotas = _scaled_quotas(quotas, k, target) if quotas else {}
+    r_fam: Dict[str, int] = {}
+    fams = [str(s.item.get("task_type")) for s in searches]
+    reserve: List[Dict[str, Any]] = []
+    main_ids = {id(e) for e in main}
+
+    def at_max(j: int) -> bool:
+        hi = r_quotas.get(fams[j], (0, None))[1]
+        return hi is not None and r_fam.get(fams[j], 0) >= hi
+
+    # 1) surplus that is already certified (cheap), hardest band first, only into open bands
+    pool = []
+    for j, s in enumerate(searches):
+        for ep in s.surplus:
+            if id(ep) not in main_ids:
+                pool.append((-ep["band"][0], -ep["d_star"], j, ep))
+    pool.sort(key=lambda t: t[:3])
+    for _, _, j, ep in pool:
+        if len(reserve) >= k:
+            break
+        band = tuple(ep["band"])
+        if r_needs.get(band, 0) <= 0 or r_counts[j] >= r_cap or at_max(j):
+            continue
+        r_needs[band] -= 1
+        r_counts[j] += 1
+        r_fam[fams[j]] = r_fam.get(fams[j], 0) + 1
+        reserve.append(ep)
+        funnel.add(STAGE_SCENE, "reserve_from_surplus")
+    # 2) certify more candidates for the bands still open
+    late = timed_out
+    if not late and sum(r_needs.values()) > 0:
+        deadline = None if time_budget_s is None else t0 + time_budget_s
+        before = len(reserve)
+        late = _quota_fill(searches, r_needs, r_counts, r_cap, r_quotas, r_fam, reserve, deadline)
+        if len(reserve) > before:
+            funnel.add(STAGE_SCENE, "reserve_certified", len(reserve) - before)
+    for ep in reserve:
+        ep["reserve"] = True
+    if len(reserve) < k:
+        funnel.add(STAGE_SCENE, "reserve_shortfall", k - len(reserve))
+    band_counts = {band_name(b): 0 for b in bands}
+    for ep in reserve:
+        band_counts[ep["band_name"]] += 1
+    return reserve, {"reserve_target": k, "reserve_band_targets": {band_name(b): v for b, v in r_targets.items()},
+                     "reserve_band_counts": band_counts, "reserve_family_counts": dict(sorted(r_fam.items())),
+                     "reserve_family_quotas": {f: list(q) for f, q in r_quotas.items()},
+                     "reserve_timed_out": bool(late)}

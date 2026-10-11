@@ -108,6 +108,7 @@ def aggregate(out: Path, *, target_per_scene: int = 11, total_target: int = 1000
     by_type: Dict[str, int] = {}
     by_d: Dict[str, int] = {}
     status_counts: Dict[str, int] = {}
+    reserve: List[Dict[str, Any]] = []
     with (out / "tasks.jsonl").open("w") as fh:
         for p in sorted((out / "scenes").glob("*.json")):
             res = json.loads(p.read_text())
@@ -121,6 +122,7 @@ def aggregate(out: Path, *, target_per_scene: int = 11, total_target: int = 1000
                 by_type[r["task_type"]] = by_type.get(r["task_type"], 0) + 1
                 d = str((r.get("difficulty") or {}).get("d_star"))
                 by_d[d] = by_d.get(d, 0) + 1
+            reserve.extend(res.get("reserve_rows") or [])
             conv = s.get("convention") or {}
             if conv.get("env_override_required"):
                 overrides[s["scene_id"]] = float(conv.get("sign"))
@@ -150,6 +152,19 @@ def aggregate(out: Path, *, target_per_scene: int = 11, total_target: int = 1000
         "env_structure_overrides": len(overrides),
         "funnel": funnel.to_dict(),
     }
+    if reserve:  # only runs with RunConfig.reserve_k > 0 produce reserve rows
+        with (out / "tasks_reserve.jsonl").open("w") as fh:
+            for r in reserve:
+                fh.write(json.dumps(r) + "\n")
+        r_type: Dict[str, int] = {}
+        r_d: Dict[str, int] = {}
+        for r in reserve:
+            r_type[r["task_type"]] = r_type.get(r["task_type"], 0) + 1
+            d = str((r.get("difficulty") or {}).get("d_star"))
+            r_d[d] = r_d.get(d, 0) + 1
+        summary["reserve_total"] = len(reserve)
+        summary["reserve_by_type"] = dict(sorted(r_type.items()))
+        summary["reserve_by_d_star"] = dict(sorted(r_d.items()))
     (out / "summary.json").write_text(json.dumps(summary, indent=1))
     (out / "env_structure_overrides.json").write_text(json.dumps(overrides, indent=1, sort_keys=True))
     with (out / "per_scene.csv").open("w", newline="") as fh:
@@ -176,6 +191,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--include-fov", action="store_true")
     ap.add_argument("--aggregate", action="store_true", help="only rebuild summary from scene files")
     ap.add_argument("--expected-scenes", type=int)
+    # optional features (defaults reproduce the default generation exactly)
+    ap.add_argument("--reserve-k", type=int, default=0, help="reserve episodes per scene -> tasks_reserve.jsonl")
+    ap.add_argument("--family-quotas", default=None, help='per-scene "family:min:max,..." (max * = unlimited)')
+    ap.add_argument("--terminal-identifiable", choices=("all", "family"), default="all")
+    ap.add_argument("--motion-model", choices=("r1", "horizon_locked"), default="r1",
+                    help="horizon_locked is generator-only; the RL env implements r1 only")
+    ap.add_argument("--pitch-deg", type=float, default=0.0)
+    ap.add_argument("--diagnostics", action="store_true", help="keep per-item search reports in scene summaries")
     args = ap.parse_args(argv)
     if not args.aggregate:
         if not args.scenes_root:
@@ -185,6 +208,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "scene_time_budget_s": args.scene_time_budget,
             "families": tuple(f for f in args.families.split(",") if f),
             "include_fov": bool(args.include_fov),
+            "reserve_k": args.reserve_k,
+            "family_quotas": args.family_quotas,
+            "terminal_identifiable": args.terminal_identifiable,
+            "motion_model": args.motion_model,
+            "pitch_deg": args.pitch_deg,
+            "diagnostics": bool(args.diagnostics),
         }
         run(Path(args.scenes_root), Path(args.out), workers=args.workers, shard=args.shard,
             num_shards=args.num_shards, limit=args.limit, only=args.only, cfg_kwargs=cfg_kwargs)

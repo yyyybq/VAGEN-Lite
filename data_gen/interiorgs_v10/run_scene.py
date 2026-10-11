@@ -50,6 +50,13 @@ class RunConfig:
     scene_time_budget_s: float = 600.0
     seed: int = 0
     require_usable_convention: bool = True
+    # Optional features; the defaults reproduce the 20261011c generation bit for bit.
+    reserve_k: int = 0                    # extra reserve episodes per scene (result["reserve_rows"])
+    family_quotas: Any = None             # {task_type: (min, max)} or "fam:min:max,..." per scene
+    terminal_identifiable: str = "all"    # "family": only the family's terminal roles must be identifiable
+    motion_model: str = "r1"              # "horizon_locked" is generator-only (the RL env lacks it)
+    pitch_deg: float = 0.0                # fixed pitch for horizon_locked
+    diagnostics: bool = False             # keep per-item search reports in the summary
 
 
 def _jsonable(x: Any) -> Any:
@@ -154,6 +161,11 @@ def _task_row(scene: Any, item: Dict[str, Any], ep: Dict[str, Any]) -> Dict[str,
         "requires_env_override": bool(conv.get("env_override_required", False)),
         "calibration_version": conv.get("version"),
     }
+    model, pitch = C.motion_model()
+    if model != "r1":
+        # not trainable as-is: the RL env only implements the r1 motion model
+        row["action_protocol_version"] = f"{C.ACTION_PROTOCOL_VERSION}+{model}_pitch{pitch:g}"
+        row["motion_model"] = {"model": model, "pitch_deg": pitch, "env_supported": False}
     row["task_id"] = "v10_" + stable_hash({k: row[k] for k in (
         "scene_id", "task_type", "target_object", "target_region", "init_camera")})[:24]
     return row
@@ -161,16 +173,36 @@ def _task_row(scene: Any, item: Dict[str, Any], ep: Dict[str, Any]) -> Dict[str,
 
 def generate_scene(scene_dir: Any, scene_id: Optional[str] = None, cfg: Optional[RunConfig] = None
                    ) -> Dict[str, Any]:
+    cfg = cfg or RunConfig()
+    previous = C.motion_model()
+    C.set_motion_model(cfg.motion_model, cfg.pitch_deg)
+    try:
+        return _generate_scene(scene_dir, scene_id, cfg)
+    finally:
+        C.set_motion_model(*previous)
+
+
+def _counts(rows: Sequence[Dict[str, Any]]) -> Tuple[Dict[str, int], Dict[str, int]]:
+    by_type: Dict[str, int] = {}
+    by_band: Dict[str, int] = {}
+    for r in rows:
+        by_type[r["task_type"]] = by_type.get(r["task_type"], 0) + 1
+        d = (r.get("difficulty") or {}).get("d_star")
+        by_band[str(d)] = by_band.get(str(d), 0) + 1
+    return by_type, by_band
+
+
+def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> Dict[str, Any]:
     from .initial_states import episodes_for_scene
     from .objects import candidate_objects, select_pairs, select_singles
     from .scene import load_scene
 
-    cfg = cfg or RunConfig()
     t0 = time.perf_counter()
     funnel = Funnel()
     timings: Dict[str, float] = {}
     summary: Dict[str, Any] = {"scene_id": scene_id or Path(scene_dir).name, "status": "started"}
     rows: List[Dict[str, Any]] = []
+    reserve_rows: List[Dict[str, Any]] = []
 
     def _tick(name: str, start: float) -> float:
         now = time.perf_counter()
@@ -241,7 +273,9 @@ def generate_scene(scene_dir: Any, scene_id: Optional[str] = None, cfg: Optional
 
         remaining = max(10.0, cfg.scene_time_budget_s - (time.perf_counter() - t0))
         episodes, f, report = episodes_for_scene(scene, entries, target_per_scene=cfg.target_tasks_per_scene,
-                                                 seed=cfg.seed, time_budget_s=remaining)
+                                                 seed=cfg.seed, time_budget_s=remaining,
+                                                 family_quotas=cfg.family_quotas, reserve_k=cfg.reserve_k,
+                                                 terminal_identifiable=cfg.terminal_identifiable)
         funnel.merge(f)
         t = _tick("episodes", t)
         by_key = {e["key"]: e["item"] for e in entries}
@@ -260,7 +294,26 @@ def generate_scene(scene_dir: Any, scene_id: Optional[str] = None, cfg: Optional
             seen.add(r["task_id"])
             uniq.append(r)
         rows = uniq
+        for rank, ep in enumerate(report.get("reserve") or []):
+            item = by_key.get(ep.get("item_key"))
+            if item is None:
+                continue
+            row = _task_row(scene, item, ep)
+            if row["task_id"] in seen:
+                funnel.add("rows", "duplicate_reserve_task_id")
+                continue
+            seen.add(row["task_id"])
+            row["reserve"] = True
+            row["reserve_rank"] = rank
+            reserve_rows.append(row)
         summary["shortfall"] = _jsonable(report.get("shortfall"))
+        if cfg.family_quotas:
+            summary["family_counts"] = report.get("family_counts")
+        if cfg.reserve_k > 0:
+            summary["reserve_band_counts"] = report.get("reserve_band_counts")
+        if cfg.diagnostics:
+            summary["band_counts"] = report.get("band_counts")
+            summary["per_item"] = _jsonable(report.get("per_item"))
         summary["status"] = "ok" if rows else "no_tasks"
     except Exception as exc:
         funnel.add("scene", f"error:{type(exc).__name__}")
@@ -268,16 +321,15 @@ def generate_scene(scene_dir: Any, scene_id: Optional[str] = None, cfg: Optional
         summary["error"] = "".join(traceback.format_exception_only(type(exc), exc)).strip()
         summary["traceback"] = traceback.format_exc()[-2000:]
     summary["n_tasks"] = len(rows)
-    by_type: Dict[str, int] = {}
-    by_band: Dict[str, int] = {}
-    for r in rows:
-        by_type[r["task_type"]] = by_type.get(r["task_type"], 0) + 1
-        d = (r.get("difficulty") or {}).get("d_star")
-        by_band[str(d)] = by_band.get(str(d), 0) + 1
-    summary["tasks_by_type"] = by_type
-    summary["tasks_by_d_star"] = by_band
+    summary["tasks_by_type"], summary["tasks_by_d_star"] = _counts(rows)
+    if cfg.reserve_k > 0:
+        summary["n_reserve"] = len(reserve_rows)
+        summary["reserve_by_type"], summary["reserve_by_d_star"] = _counts(reserve_rows)
     summary["seconds"] = round(time.perf_counter() - t0, 2)
-    return {"rows": rows, "funnel": funnel.to_dict(), "summary": summary, "timings": timings}
+    result = {"rows": rows, "funnel": funnel.to_dict(), "summary": summary, "timings": timings}
+    if cfg.reserve_k > 0:
+        result["reserve_rows"] = reserve_rows
+    return result
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:  # pragma: no cover - CLI
