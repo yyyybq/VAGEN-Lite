@@ -44,6 +44,19 @@ python -m data_gen.interiorgs_v10.objects     --scenes-root ROOT --out object_st
 python -m data_gen.interiorgs_v10.run_all --scenes-root ROOT --out OUT --workers 32 --expected-scenes 1000
 python -m data_gen.interiorgs_v10.run_all --out OUT --aggregate      # summary.json, per_scene.csv, tasks.jsonl
 
+# optional features (all off by default; off == the 20261011c generation)
+#   --reserve-k 16                       reserve episodes per scene -> tasks_reserve.jsonl
+#   --family-quotas "projective_relations:2:6,absolute_positioning:2:4,..."   per-scene family min:max
+#   --terminal-identifiable family       occlusion_alignment: only the occluder must be identifiable at the end
+#   --motion-model horizon_locked --pitch-deg -15   EXPERIMENT ONLY: the RL env implements r1 (pitch 0) only
+#   --diagnostics                        per-item initial-state search reports in the scene summaries
+
+# read-only diagnostics of a finished run, and run-vs-run comparison
+python -m data_gen.interiorgs_v10.diagnose_run --out OUT [--scenes-root ROOT --r1-frozen DIR --workers 10]
+python -m data_gen.interiorgs_v10.diagnose_run --compare base=OUT1 new=OUT2 --reference OUT1
+# Projective / FOV items with a success pose at fixed pitches (0, -10, -15, -20, -30)
+python -m data_gen.interiorgs_v10.pitch_audit --scenes-root ROOT --only S1 S2 --workers 10
+
 # cluster job (CPU generation; prepare does not submit)
 python data_gen/interiorgs_v10/sco_interiorgs_v10.py prepare --tag <tag>
 python data_gen/interiorgs_v10/sco_interiorgs_v10.py submit  --tag <tag>
