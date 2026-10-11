@@ -1,0 +1,696 @@
+"""Release assembly for InteriorGS v10 (workstream A).
+
+Turns admitted candidates into the files consumed by the existing release
+tooling:
+
+  * ``split_manifest.json``  - version-2 manifest (physical scene groups,
+    reserved scenes, aliases) accepted by ``scripts/active_spatial_release_contract.scene_partitions``;
+  * ``task_registry.jsonl``  - one row per parent task with
+    ``source_task_sha256 = dataset_contract.row_digest(raw_task_row)``;
+  * ``raw_tasks.jsonl`` / ``rl_tasks_<split>.jsonl`` - the raw rows (with
+    ``split``) that the registry hashes; RL files hold RL-admitted rows only;
+  * ``sft_trajectories.jsonl`` - internal multi-turn SFT records (actions only,
+    no oracle values) accepted by ``scripts/prepare_active_spatial_sft.py``;
+  * ``qa_bank.jsonl`` (Yes/No) and ``qa_bank_action_set.jsonl`` (multi-answer
+    Act items; need ``configs/prepare_active_spatial_sft.patch``);
+  * ``admission.json``, ``regeneration_plan.json``, ``release_summary.json``.
+
+RL, SFT and QA share task identity (task_id + raw-row hash), versions and the
+scene-level split; each is admitted by its own rule (admission.py).
+"""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import importlib.util
+import json
+import math
+import re
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+
+import numpy as np
+
+from .admission import (
+    ADMIT,
+    chunk_certificate,
+    load_policy,
+    merge_reviews,
+    normalize_renders,
+    normalize_reviews,
+    turn_boundaries,
+    admit,
+)
+from .contract import ACTIONS, CANONICAL_TASK_METRIC_V1, Funnel, _json_default
+from .qa_states import balance_yes_no, certificate, certificate_poses, lineage_fields, score_task
+
+RELEASE_VERSION = "interiorgs_v10_release_v2"
+SPLITS = ("train", "val", "test")
+VERSION_KEYS = ("camera_model_version", "canonical_task_metric_version", "action_protocol_version")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+# --------------------------------------------------------------------------
+# Physical scene groups and split assignment
+# --------------------------------------------------------------------------
+def groups_to_aliases(groups: Any) -> Dict[str, str]:
+    """Normalise same-source groups to ``{scene_id: physical_group_id}``.
+
+    Accepts ``{scene: group}``, ``{group: [scenes]}``, ``[[scenes], ...]`` or
+    ``{"aliases": {...}}`` / ``{"groups": [...]}``.
+    """
+    if not groups:
+        return {}
+    if isinstance(groups, Mapping) and ("aliases" in groups or "groups" in groups):
+        out = groups_to_aliases(groups.get("groups") or [])
+        out.update({str(k): str(v) for k, v in (groups.get("aliases") or {}).items()})
+        return out
+    out: Dict[str, str] = {}
+    if isinstance(groups, Mapping):
+        for k, v in groups.items():
+            if isinstance(v, (list, tuple, set)):
+                for s in v:
+                    out[str(s)] = str(k)
+            else:
+                out[str(k)] = str(v)
+        return out
+    for members in groups:
+        members = sorted(str(s) for s in members)
+        if members:
+            key = "group:" + hashlib.sha1("|".join(members).encode()).hexdigest()[:12]
+            for s in members:
+                out[s] = key
+    return out
+
+
+def same_source_groups(scene_ids: Iterable[str]) -> Dict[str, str]:
+    """Feature-detect workstream G's scene_identity module (optional)."""
+    try:
+        from . import scene_identity  # type: ignore
+    except Exception:
+        return {}
+    for name in ("same_source_groups", "physical_scene_groups", "scene_groups", "group_scenes"):
+        fn = getattr(scene_identity, name, None)
+        if callable(fn):
+            try:
+                return groups_to_aliases(fn(sorted(scene_ids)))
+            except Exception:
+                continue
+    return {}
+
+
+def _release_contract():
+    path = REPO_ROOT / "scripts" / "active_spatial_release_contract.py"
+    spec = importlib.util.spec_from_file_location("active_spatial_release_contract", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def assign_splits(scene_ids: Iterable[str], *, groups: Any = None, ratios: Optional[Mapping[str, float]] = None,
+                  seed: str = "interiorgs_v10", reserved: Optional[Mapping[str, str]] = None,
+                  frozen: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """Assign physical scene groups to train/val/test (version-2 manifest).
+
+    * same-source scenes (``groups`` or scene_identity) never cross splits;
+    * reserved scenes and every scene of a ``frozen`` previous manifest keep
+      their split (stable across regeneration rounds), and pin their group;
+    * remaining groups are visited in a seeded hash order and given to the
+      split with the largest deficit against ``ratios`` (scene counts).
+    """
+    ratios = dict(ratios or {"train": 0.8, "val": 0.1, "test": 0.1})
+    total_ratio = sum(float(ratios.get(s, 0.0)) for s in SPLITS)
+    reserved = {str(k): str(v) for k, v in (reserved or {}).items()}
+    scenes = {str(s) for s in scene_ids} | set(reserved)
+    pins: Dict[str, str] = dict(reserved)
+    frozen_aliases: Dict[str, str] = {}
+    if frozen:
+        for split in SPLITS:
+            for s in frozen.get(f"{split}_scenes", []) or []:
+                if str(s) in pins and pins[str(s)] != split:
+                    raise ValueError(f"reserved scene {s} conflicts with frozen manifest")
+                pins[str(s)] = split
+        scenes |= set(pins)
+        frozen_aliases = {str(k): str(v) for k, v in (frozen.get("aliases") or {}).items()}
+        for k, v in (frozen.get("reserved_scenes") or {}).items():
+            if reserved.get(str(k), v) != v:
+                raise ValueError(f"reserved scene {k} reassigned against frozen manifest")
+            reserved[str(k)] = str(v)
+    aliases = dict(frozen_aliases)
+    aliases.update(same_source_groups(scenes) if groups is None else groups_to_aliases(groups))
+    members: Dict[str, set] = defaultdict(set)
+    for s in scenes:
+        members[aliases.get(s, s)].add(s)
+    for s, g in aliases.items():  # aliased scenes outside this release still pin the group
+        if s in pins:
+            members[g].add(s)
+    group_split: Dict[str, str] = {}
+    for g, ss in members.items():
+        wanted = {pins[s] for s in ss if s in pins}
+        if len(wanted) > 1:
+            raise ValueError(f"physical scene group {g} pinned to several splits: {sorted(wanted)}")
+        if wanted:
+            group_split[g] = wanted.pop()
+    counts = Counter()
+    for g, sp in group_split.items():
+        counts[sp] += len(members[g])
+    n_total = sum(len(v) for v in members.values())
+    free = sorted((g for g in members if g not in group_split),
+                  key=lambda g: hashlib.sha256(f"{seed}:{g}".encode()).hexdigest())
+    for g in free:
+        def deficit(sp: str) -> float:
+            return float(ratios.get(sp, 0.0)) / total_ratio * n_total - counts[sp]
+        best = max(SPLITS, key=lambda sp: (deficit(sp), -SPLITS.index(sp)))
+        group_split[g] = best
+        counts[best] += len(members[g])
+    out_sets = {sp: sorted(s for g, ss in members.items() if group_split[g] == sp for s in ss) for sp in SPLITS}
+    manifest = {
+        "version": 2,
+        "release_version": RELEASE_VERSION,
+        "split_unit": "physical_scene_group",
+        "seed": seed,
+        "ratios": ratios,
+        "train_scenes": out_sets["train"],
+        "val_scenes": out_sets["val"],
+        "test_scenes": out_sets["test"],
+        "aliases": {s: g for s, g in sorted(aliases.items()) if s in scenes and (g != s or len(members[g]) > 1)},
+        "reserved_scenes": dict(sorted(reserved.items())),
+        "physical_groups": len(members),
+    }
+    _release_contract().scene_partitions(manifest)  # fail closed on leaks / reserved reassignment
+    return manifest
+
+
+def split_lookup(manifest: Mapping[str, Any]) -> Dict[str, str]:
+    return {str(s): sp for sp in SPLITS for s in manifest.get(f"{sp}_scenes", [])}
+
+
+# --------------------------------------------------------------------------
+# Raw rows and registry
+# --------------------------------------------------------------------------
+def finalize_task_row(task_row: Mapping[str, Any], split: str) -> Dict[str, Any]:
+    """Raw task row as published (JSON-normalised, private ``_*`` keys dropped, ``split`` set)."""
+    from vagen.envs.active_spatial.dataset_contract import row_digest
+
+    row = json.loads(json.dumps({k: v for k, v in task_row.items() if not str(k).startswith("_")},
+                                default=_json_default, allow_nan=False))
+    row["split"] = split
+    row_digest(row)  # raises on NaN / unserialisable content
+    return row
+
+
+def registry_row(raw_row: Mapping[str, Any], modalities: Mapping[str, Any]) -> Dict[str, Any]:
+    from vagen.envs.active_spatial.dataset_contract import row_digest
+
+    return {
+        "task_id": raw_row["task_id"],
+        "source_task_sha256": row_digest(dict(raw_row)),
+        "scene_id": str(raw_row["scene_id"]),
+        "split": raw_row["split"],
+        "versions": {k: raw_row.get(k) for k in VERSION_KEYS},
+        "task_type": raw_row.get("task_type"),
+        "generator_version": raw_row.get("generator_version"),
+        "d_star": (raw_row.get("difficulty") or {}).get("d_star"),
+        "modalities": dict(modalities),
+    }
+
+
+# --------------------------------------------------------------------------
+# SFT export
+# --------------------------------------------------------------------------
+_UNIT_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:°|%|(?:m|cm|mm|meters?|metres?|deg|degrees?|px|pixels?|rad|radians?)\b)",
+                      re.IGNORECASE)
+_DECIMAL_RE = re.compile(r"\d+\.\d+")
+_ORACLE_RE = re.compile(r"\b(?:scores?|rewards?|distances?|d\*|d_star|potential|margins?|thresholds?|optimal|"
+                        r"shortest|certificate|oracle|inside[_ ]fraction)\b", re.IGNORECASE)
+_ACTION_ONLY_RE = re.compile(r"<action>(?:(?:%s)\|)+</action>" % "|".join(ACTIONS))
+
+
+def _prompt_module():
+    from vagen.envs.active_spatial import prompt as P
+
+    return P
+
+
+def protocol_system_prompt(task_type: str, policy: Mapping[str, Any]) -> str:
+    """The runtime system prompt for this protocol (same text the RL env shows)."""
+    exp = policy["sft"]["export"]
+    kwargs = dict(exp["system_prompt"])
+    return _prompt_module().system_prompt(format=exp["prompt_format"], task_type=task_type, **kwargs)
+
+
+def _format_block(policy: Mapping[str, Any], first: bool) -> str:
+    exp = policy["sft"]["export"]
+    P = _prompt_module()
+    fn = P.format_prompt.get(exp["prompt_format"], P.format_prompt["no_think"])
+    return fn(max_actions_per_step=exp["max_actions_per_turn"], action_sep="|", add_example=first)
+
+
+def _user_turn(desc: str, first: bool, policy: Mapping[str, Any]) -> str:
+    P = _prompt_module()
+    exp = policy["sft"]["export"]
+    if exp.get("observation_pose", "none") != "none":
+        raise ValueError("only observation_pose='none' is supported (pose text would carry numeric values)")
+    if first:
+        text = P.init_observation_template(observation="<image>", task_prompt=desc)
+    else:
+        text = P.action_template(observation="<image>", env_feedback=exp.get("env_feedback", "Action executed."),
+                                 task_prompt=desc)
+    return text + "\n" + _format_block(policy, first)
+
+
+def scan_leakage(record: Mapping[str, Any], policy: Mapping[str, Any]) -> List[str]:
+    """Findings of oracle/number leakage in an SFT record (empty list = clean).
+
+    * system turn must be exactly the protocol prompt (no per-episode values);
+    * assistant turns must be action-only ``<action>a|b|</action>``;
+    * user turns (minus the public task description and the fixed format
+      block) must contain no digits-with-units, decimals or oracle words.
+    """
+    findings: List[str] = []
+    desc = str(record.get("task_description") or "")
+    fixed = {_format_block(policy, True), _format_block(policy, False)}
+    for i, turn in enumerate(record.get("conversations") or []):
+        role, content = turn.get("role"), str(turn.get("content", ""))
+        if role == "system":
+            if content != protocol_system_prompt(str(record.get("task_type")), policy):
+                findings.append(f"turn{i}:system_prompt_not_protocol")
+            continue
+        if role == "assistant":
+            if not _ACTION_ONLY_RE.fullmatch(content.strip()):
+                findings.append(f"turn{i}:assistant_not_action_only")
+            continue
+        text = content.replace(desc, " ") if desc else content
+        for block in fixed:
+            text = text.replace(block, " ")
+        for name, rx in (("unit", _UNIT_RE), ("decimal", _DECIMAL_RE), ("oracle_word", _ORACLE_RE)):
+            m = rx.search(text)
+            if m:
+                findings.append(f"turn{i}:{name}:{m.group(0)!r}")
+    return findings
+
+
+def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], policy: Mapping[str, Any], *,
+                     semantic_review: Optional[Mapping[str, Any]] = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """One multi-turn no-think SFT conversation from the certificate (actions only)."""
+    from vagen.envs.active_spatial.dataset_contract import row_digest
+
+    exp = policy["sft"]["export"]
+    tid = str(raw_row["task_id"])
+    cert = certificate(raw_row)
+    chunks = chunk_certificate(cert, exp["chunking"], exp["max_actions_per_turn"])
+    bounds = turn_boundaries(raw_row, policy)
+    d = len(cert)
+    if not chunks:
+        return None, "sft_empty_certificate"
+    frame = {k: images.get(f"{tid}:s{k}") for k in range(d + 1)}
+    if any(frame[b] is None for b in bounds):
+        return None, "sft_frame_missing_image"
+    poses = certificate_poses(raw_row)
+    terminal = score_task(raw_row, poses[-1])
+    if terminal is None or not bool(terminal.get("success")):
+        return None, "sft_terminal_not_successful"
+    desc = str(raw_row.get("task_description") or "").strip()
+    conv: List[Dict[str, Any]] = [{"role": "system", "content": protocol_system_prompt(str(raw_row["task_type"]), policy)}]
+    for t, chunk in enumerate(chunks):
+        conv.append({"role": "user", "content": _user_turn(desc, t == 0, policy), "image_path": frame[bounds[t]]})
+        conv.append({"role": "assistant", "content": "<action>" + "".join(a + "|" for a in chunk) + "</action>"})
+    if exp.get("explicit_done"):
+        conv.append({"role": "user", "content": _user_turn(desc, False, policy), "image_path": frame[d]})
+        conv.append({"role": "assistant", "content": "<action>done|</action>"})
+    turn_images = [str(t["image_path"]) for t in conv if t["role"] == "user"]
+    image_paths = list(turn_images)
+    if frame[d] not in image_paths:
+        image_paths.append(frame[d])
+    record: Dict[str, Any] = {
+        "id": f"sft_{tid}",
+        "source_task_id": tid,
+        "parent_task_id": tid,
+        "source_task_sha256": row_digest(dict(raw_row)),
+        "source_versions": {k: raw_row.get(k) for k in VERSION_KEYS},
+        "scene_id": str(raw_row["scene_id"]),
+        "split": raw_row["split"],
+        "task_type": raw_row.get("task_type"),
+        "task_description": desc,
+        "success": True,
+        "score_contract": {"success_source": "canonical_gates",
+                           "metric_version": raw_row.get("canonical_task_metric_version"),
+                           "terminal_checked_by": "release.build_sft_record"},
+        "prompt_format": exp["prompt_format"],
+        "chunking": exp["chunking"],
+        "trajectory_steps": len(chunks),
+        "total_actions": d,
+        "d_star": (raw_row.get("difficulty") or {}).get("d_star"),
+        "conversations": conv,
+        "conversation_image_paths": turn_images,
+        "image_paths": image_paths,
+        "primitive_trajectory_trace": [{"step": k, "action": cert[k - 1] if k else None,
+                                        "pose_c2w": np.asarray(p).tolist()} for k, p in enumerate(poses)],
+        "semantic_review": dict(semantic_review or {}),
+    }
+    if all(frame[k] is not None for k in range(d + 1)):
+        record["primitive_image_paths"] = [frame[k] for k in range(d + 1)]
+    findings = scan_leakage(record, policy)
+    if findings:
+        return None, "sft_text_leakage"
+    return record, None
+
+
+# --------------------------------------------------------------------------
+# QA stamping
+# --------------------------------------------------------------------------
+def stamp_qa(q: Mapping[str, Any], raw_row: Mapping[str, Any], image_path: str,
+             semantic_review: Mapping[str, Any]) -> Dict[str, Any]:
+    rec = copy.deepcopy(dict(q))
+    rec.update(lineage_fields(dict(raw_row)))
+    rec["public_observation"] = dict(rec.get("public_observation") or {}, image_path=str(image_path),
+                                     observation_config="single_image", history=[])
+    rec["observability_validity"] = "valid"
+    rec["render_status"] = "success"
+    rec["qa_sft_allowed"] = True
+    rec["semantic_review"] = dict(semantic_review)
+    return rec
+
+
+# --------------------------------------------------------------------------
+# Regeneration planning
+# --------------------------------------------------------------------------
+def _reason_action(reason: str, policy: Mapping[str, Any]) -> str:
+    spec = policy.get("reasons", {})
+    if reason in spec:
+        return spec[reason].get("regeneration", "none")
+    if reason.startswith("precheck:"):
+        return spec.get("precheck:*", {}).get("regeneration", "resample_episode")
+    return "none"
+
+
+def scene_stats(candidates: Iterable[Mapping[str, Any]], admission: Mapping[str, Any], policy: Mapping[str, Any],
+                generator_status: Optional[Mapping[str, Mapping[str, Any]]] = None) -> Dict[str, Dict[str, Any]]:
+    """Per-scene admitted counts, failure reasons, blacklists and generator state."""
+    stats: Dict[str, Dict[str, Any]] = {}
+
+    def entry(scene: str) -> Dict[str, Any]:
+        return stats.setdefault(scene, {"admitted_rl": 0, "attempted": 0, "hold": 0, "reject": 0, "reasons": Counter(),
+                                        "pending_rereview": 0, "blacklist_objects": set(), "blacklist_pairs": set(),
+                                        "rereview_task_ids": [], "exhausted": False, "rounds": 0,
+                                        "zero_admit_rounds": 0, "families": Counter()})
+
+    rl = admission["rl"]["decisions"]
+    for row in candidates:
+        tid, scene = str(row["task_id"]), str(row["scene_id"])
+        e = entry(scene)
+        e["attempted"] += 1
+        dec = rl.get(tid, {"status": "HOLD", "reasons": ["not_admitted"]})
+        if dec["status"] == ADMIT:
+            e["admitted_rl"] += 1
+            e["families"][str(row.get("task_type"))] += 1
+            continue
+        e["hold" if dec["status"] == "HOLD" else "reject"] += 1
+        e["reasons"].update(dec["reasons"][:1])
+        if dec["status"] == "HOLD" and _reason_action(dec["reasons"][0], policy) == "rereview":
+            e["pending_rereview"] += 1
+            e["rereview_task_ids"].append(tid)
+        ids = [str(o.get("id")) for o in ((row.get("target_object") or {}).get("objects") or [])]
+        for inv in admission.get("task_invalid", {}).get(tid, []):
+            act = _reason_action(inv["reason"], policy)
+            if act in ("blacklist_object", "blacklist_object_ref") and inv.get("object_id") is not None:
+                e["blacklist_objects"].add(str(inv["object_id"]))
+            elif act == "blacklist_pair":
+                e["blacklist_pairs"].add("|".join(sorted(ids)))
+    for scene, gs in (generator_status or {}).items():
+        e = entry(str(scene))
+        for key in ("exhausted", "rounds", "zero_admit_rounds"):
+            if key in gs:
+                e[key] = gs[key]
+        if "candidates_available" in gs:
+            e["candidates_available"] = gs["candidates_available"]
+    return stats
+
+
+def plan_regeneration(stats: Mapping[str, Mapping[str, Any]], policy: Mapping[str, Any],
+                      round_index: int = 0) -> Dict[str, Any]:
+    """Per-scene regeneration requests until the targets are met or scenes are exhausted.
+
+    Targets: >= ``min_tasks_per_scene`` RL tasks per scene, >= ``target_total_tasks``
+    in total and >= ``target_scenes`` scenes with at least one task.  Request
+    sizes divide the deficit by a Beta-smoothed per-scene admission rate.
+    """
+    cfg = policy["regeneration"]
+    min_t, cap_t = int(cfg["min_tasks_per_scene"]), int(cfg["max_tasks_per_scene"])
+    total = sum(int(s["admitted_rl"]) for s in stats.values())
+    covered = sum(1 for s in stats.values() if int(s["admitted_rl"]) > 0)
+    meeting = sum(1 for s in stats.values() if int(s["admitted_rl"]) >= min_t)
+
+    def exhausted(s: Mapping[str, Any]) -> bool:
+        return bool(s.get("exhausted")) or int(s.get("rounds", 0)) >= int(cfg["max_rounds"]) \
+            or int(s.get("zero_admit_rounds", 0)) >= int(cfg["exhaust_after_zero_admit_rounds"])
+
+    def rate(s: Mapping[str, Any]) -> float:
+        a, n = float(s["admitted_rl"]), float(s["attempted"])
+        k = float(cfg["prior_strength"])
+        return max(float(cfg["min_admit_rate"]), (a + k * float(cfg["prior_admit_rate"])) / (n + k))
+
+    eligible = {sc: s for sc, s in stats.items() if not exhausted(s)}
+    target = {sc: max(min_t, int(s["admitted_rl"])) for sc, s in eligible.items()}
+    projected = total + sum(target[sc] - int(s["admitted_rl"]) for sc, s in eligible.items())
+    extra = max(0, int(cfg["target_total_tasks"]) - projected)
+    order = sorted(eligible, key=lambda sc: (-rate(eligible[sc]), sc))
+    while extra > 0 and order:
+        progressed = False
+        for sc in order:
+            if extra <= 0:
+                break
+            if target[sc] < cap_t:
+                target[sc] += 1
+                extra -= 1
+                progressed = True
+        if not progressed:
+            break
+    requests = []
+    for sc in sorted(eligible):
+        s = eligible[sc]
+        deficit = target[sc] - int(s["admitted_rl"])
+        if deficit <= 0:
+            continue
+        r = rate(s)
+        expected_from_rereview = r * int(s.get("pending_rereview", 0))
+        n_new = int(math.ceil(max(0.0, deficit - expected_from_rereview) / r * float(cfg["oversample"])))
+        n_new = min(n_new, int(cfg["max_request_per_scene_round"]))
+        hints = Counter()
+        for reason, n in Counter(s.get("reasons", {})).items():
+            hints[_reason_action(reason, policy)] += int(n)
+        requests.append({
+            "scene_id": sc,
+            "round": int(round_index) + 1,
+            "priority": 0 if int(s["admitted_rl"]) == 0 else 1 if int(s["admitted_rl"]) < min_t else 2,
+            "admitted_rl": int(s["admitted_rl"]),
+            "target_rl": target[sc],
+            "deficit": deficit,
+            "estimated_admit_rate": round(r, 4),
+            "request_candidates": n_new,
+            "rereview_task_ids": sorted(s.get("rereview_task_ids", [])),
+            "blacklist_objects": sorted(s.get("blacklist_objects", [])),
+            "blacklist_pairs": sorted(s.get("blacklist_pairs", [])),
+            "hints": dict(sorted(hints.items())),
+        })
+    requests.sort(key=lambda r: (r["priority"], -r["deficit"], r["scene_id"]))
+    exhausted_scenes = sorted(sc for sc, s in stats.items() if exhausted(s))
+    met = total >= int(cfg["target_total_tasks"]) and covered >= int(cfg["target_scenes"]) and \
+        all(int(s["admitted_rl"]) >= min_t for s in eligible.values())
+    return {
+        "round": int(round_index),
+        "targets": {"min_tasks_per_scene": min_t, "target_total_tasks": int(cfg["target_total_tasks"]),
+                    "target_scenes": int(cfg["target_scenes"])},
+        "status": {"targets_met": met, "total_admitted_rl": total, "scenes_covered": covered,
+                   "scenes_meeting_min": meeting, "scenes_known": len(stats), "eligible_scenes": len(eligible),
+                   "exhausted_scenes": len(exhausted_scenes),
+                   "projected_total_if_all_requests_admit": total + sum(r["deficit"] for r in requests),
+                   "max_reachable_scenes": covered + sum(1 for r in requests if r["admitted_rl"] == 0)},
+        "requests": [] if met else requests,
+        "exhausted_scene_ids": exhausted_scenes,
+    }
+
+
+# --------------------------------------------------------------------------
+# Summary
+# --------------------------------------------------------------------------
+def d_star_band(d: Optional[int], bands: Sequence[Sequence[int]]) -> str:
+    if d is None:
+        return "unknown"
+    for lo, hi in bands:
+        if int(lo) <= int(d) <= int(hi):
+            return str(lo) if lo == hi else f"{lo}-{hi}"
+    return f">{bands[-1][1]}" if bands else str(d)
+
+
+def summarize(raw_rows: Mapping[str, Mapping[str, Any]], rl_ids: Sequence[str], sft_records: Sequence[Mapping[str, Any]],
+              qa_records: Sequence[Mapping[str, Any]], admission: Mapping[str, Any], manifest: Mapping[str, Any],
+              policy: Mapping[str, Any], plan: Mapping[str, Any], funnel: Funnel) -> Dict[str, Any]:
+    bands = policy["release"]["d_star_bands"]
+    cfg = policy["regeneration"]
+
+    def tally(rows: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
+        rows = list(rows)
+        out = {"total": len(rows), "by_family": Counter(), "by_split": Counter(), "by_d_star_band": Counter(),
+               "by_family_split": Counter()}
+        for r in rows:
+            fam, sp = str(r.get("task_type")), str(r.get("split"))
+            d = (r.get("difficulty") or {}).get("d_star") if "difficulty" in r else r.get("d_star")
+            out["by_family"][fam] += 1
+            out["by_split"][sp] += 1
+            out["by_d_star_band"][d_star_band(d, bands)] += 1
+            out["by_family_split"][f"{fam}/{sp}"] += 1
+        return {k: (dict(sorted(v.items())) if isinstance(v, Counter) else v) for k, v in out.items()}
+
+    rl_rows = [raw_rows[t] for t in rl_ids]
+    per_scene = Counter(str(r["scene_id"]) for r in rl_rows)
+    qa_kinds = Counter(f"{r.get('qa_kind')}/{r.get('private_answer') if r.get('answer_format') == 'yes_no' else 'set'}"
+                       for r in qa_records)
+    qa_split = Counter(str(r.get("split")) for r in qa_records)
+    scene_cov = {
+        "scenes_in_manifest": sum(len(manifest.get(f"{s}_scenes", [])) for s in SPLITS),
+        "scenes_with_rl": len(per_scene),
+        "scenes_with_min_tasks": sum(1 for n in per_scene.values() if n >= int(cfg["min_tasks_per_scene"])),
+        "scenes_with_any_modality": len({str(r["scene_id"]) for r in raw_rows.values()}),
+        "rl_tasks_per_scene_hist": dict(sorted(Counter(min(n, 30) for n in per_scene.values()).items())),
+    }
+    return {
+        "release_version": RELEASE_VERSION,
+        "policy_version": policy["policy_version"],
+        "targets": {
+            "rl_tasks": {"target": int(cfg["target_total_tasks"]), "actual": len(rl_rows),
+                         "met": len(rl_rows) >= int(cfg["target_total_tasks"])},
+            "scenes": {"target": int(cfg["target_scenes"]), "actual": len(per_scene),
+                       "met": len(per_scene) >= int(cfg["target_scenes"])},
+        },
+        "rl": tally(rl_rows),
+        "sft": tally(sft_records),
+        "qa": {"total": len(qa_records), "by_kind_label": dict(sorted(qa_kinds.items())),
+               "by_split": dict(sorted(qa_split.items()))},
+        "registered_tasks": tally(raw_rows.values()),
+        "scene_coverage": scene_cov,
+        "split_scene_counts": {s: len(manifest.get(f"{s}_scenes", [])) for s in SPLITS},
+        "admission_status": {m: admission[m]["status_counts"] for m in ("rl", "sft", "qa")},
+        "admission_primary_reasons": {m: admission[m]["primary_reason_counts"] for m in ("rl", "sft", "qa")},
+        "task_invalid_tasks": len(admission.get("task_invalid", {})),
+        "release_funnel": funnel.to_dict(),
+        "regeneration_status": plan.get("status"),
+    }
+
+
+# --------------------------------------------------------------------------
+# Orchestration
+# --------------------------------------------------------------------------
+def _write_jsonl(path: Path, rows: Iterable[Mapping[str, Any]]) -> int:
+    n = 0
+    with path.open("w", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r, sort_keys=True, default=_json_default, allow_nan=False) + "\n")
+            n += 1
+    return n
+
+
+def build_release(out_dir: Union[str, Path], candidates: Sequence[Mapping[str, Any]], reviews: Any,
+                  policy: Optional[Mapping[str, Any]] = None, *, qa_items: Sequence[Mapping[str, Any]] = (),
+                  renders: Any = None, replay: Optional[Mapping[str, Any]] = None,
+                  prechecks: Optional[Mapping[str, Any]] = None, groups: Any = None,
+                  reserved: Optional[Mapping[str, str]] = None, frozen_manifest: Optional[Mapping[str, Any]] = None,
+                  generator_status: Optional[Mapping[str, Mapping[str, Any]]] = None,
+                  round_index: int = 0) -> Dict[str, Any]:
+    """Admit, split, export and summarise one release round into a new directory."""
+    policy = dict(policy or load_policy())
+    out = Path(out_dir)
+    if out.exists() and any(out.iterdir()):
+        raise FileExistsError(f"release directory must be new or empty: {out}")
+    out.mkdir(parents=True, exist_ok=True)
+    funnel = Funnel()
+    candidates = [dict(c) for c in candidates]
+    rows = {str(r["task_id"]): r for r in candidates}
+    if len(rows) != len(candidates):
+        raise ValueError("duplicate task_id among candidates")
+    render_map = normalize_renders(renders) or {}
+    admission = admit(candidates, reviews, policy, qa_items=qa_items, renders=render_map, replay=replay,
+                      prechecks=prechecks)
+    merged_reviews = {tid: merge_reviews(lst, policy) for tid, lst in normalize_reviews(reviews).items()}
+
+    scenes = {str(r["scene_id"]) for r in candidates} | {str(s) for s in (generator_status or {})}
+    rel = policy["release"]
+    manifest = assign_splits(scenes, groups=groups, ratios=rel["ratios"], seed=str(rel["seed"]),
+                             reserved=reserved, frozen=frozen_manifest)
+    lookup = split_lookup(manifest)
+
+    def review_meta(tid: str, modality: str) -> Dict[str, Any]:
+        rv = merged_reviews.get(tid) or {}
+        return {"status": "PASS", "modality": modality, "policy_version": policy["policy_version"],
+                "review_schema_version": rv.get("review_schema_version"), "reviewer": rv.get("reviewer")}
+
+    # Raw rows: every task not task_invalid is finalised (hash binds split); only
+    # tasks with an admitted modality are registered below.
+    raw: Dict[str, Dict[str, Any]] = {}
+    for tid, row in rows.items():
+        if tid not in admission["task_invalid"]:
+            raw[tid] = finalize_task_row(row, lookup[str(row["scene_id"])])
+
+    # SFT
+    sft_records: List[Dict[str, Any]] = []
+    for tid in admission["sft"]["admitted"]:
+        rec, why = build_sft_record(raw[tid], render_map, policy, semantic_review=review_meta(tid, "sft"))
+        if rec is None:
+            funnel.add("sft_export", why or "unknown")
+            continue
+        funnel.add("sft_export", "exported")
+        sft_records.append(rec)
+
+    # QA (per state, independent of the parent RL decision)
+    qa_stamped: List[Dict[str, Any]] = []
+    qa_by_id = {str(q["sample_id"]): q for q in qa_items}
+    for sid in admission["qa"]["admitted"]:
+        q = qa_by_id[sid]
+        tid = str(q["parent_task_id"])
+        image = render_map.get(f"{tid}:{q['state_id']}")
+        if tid not in raw or image is None:
+            funnel.add("qa_export", "missing_parent_or_image")
+            continue
+        qa_stamped.append(stamp_qa(q, raw[tid], image, review_meta(tid, "qa")))
+    if policy["qa"].get("balance_yes_no", True):
+        qa_final = balance_yes_no(qa_stamped, seed=str(rel["seed"]), funnel=funnel,
+                                  max_majority_ratio=float(policy["qa"].get("max_majority_ratio", 1.0)))
+    else:
+        qa_final = qa_stamped
+    qa_yesno = [q for q in qa_final if q.get("answer_format", "yes_no") == "yes_no"]
+    qa_set = [q for q in qa_final if q.get("answer_format") == "action_set"]
+
+    # Registry: parents of every exported record
+    rl_ids = [t for t in admission["rl"]["admitted"] if t in raw]
+    modalities: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"rl": False, "sft": False, "qa": 0})
+    for t in rl_ids:
+        modalities[t]["rl"] = True
+    for r in sft_records:
+        modalities[r["source_task_id"]]["sft"] = True
+    for q in qa_final:
+        modalities[str(q["parent_task_id"])]["qa"] += 1
+    registered = {t: raw[t] for t in sorted(modalities)}
+    registry = [registry_row(registered[t], modalities[t]) for t in sorted(registered)]
+
+    plan = plan_regeneration(scene_stats(candidates, admission, policy, generator_status), policy, round_index)
+    summary = summarize(registered, rl_ids, sft_records, qa_final, admission, manifest, policy, plan, funnel)
+
+    (out / "split_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    _write_jsonl(out / "task_registry.jsonl", registry)
+    _write_jsonl(out / "raw_tasks.jsonl", (registered[t] for t in sorted(registered)))
+    files = {}
+    for sp in SPLITS:
+        files[f"rl_tasks_{sp}"] = _write_jsonl(out / f"rl_tasks_{sp}.jsonl",
+                                               (raw[t] for t in rl_ids if raw[t]["split"] == sp))
+    files["sft_trajectories"] = _write_jsonl(out / "sft_trajectories.jsonl", sft_records)
+    files["qa_bank"] = _write_jsonl(out / "qa_bank.jsonl", qa_yesno)
+    files["qa_bank_action_set"] = _write_jsonl(out / "qa_bank_action_set.jsonl", qa_set)
+    files["task_registry"] = len(registry)
+    (out / "admission.json").write_text(json.dumps(admission, indent=1, sort_keys=True, default=_json_default) + "\n")
+    (out / "regeneration_plan.json").write_text(json.dumps(plan, indent=1, sort_keys=True) + "\n")
+    summary["files"] = files
+    (out / "release_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    return summary

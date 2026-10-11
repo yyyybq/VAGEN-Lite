@@ -1,0 +1,23 @@
+--- a/vagen/envs/active_spatial/env.py	2026-10-10 21:21:38.212717145 -0400
++++ b/vagen/envs/active_spatial/env.py	2026-10-10 21:21:38.226200698 -0400
+@@ -540,6 +540,20 @@
+         
+         # Load collision detection data for this scene (cached - only reloads if scene changes)
+         if self.collision_detector is not None and scene_id and self.config.gs_root:
++            # InteriorGS v10 rows may carry a calibrated structure Y sign for scenes the
++            # v1 label-centre rule leaves "ambiguous" (data_gen/interiorgs_v10/coordinates.py).
++            row_convention = item.get("collision_convention") if isinstance(item, dict) else None
++            if isinstance(row_convention, dict) and row_convention.get("requires_env_override"):
++                sign = float(row_convention["structure_y_sign"])
++                if sign not in (-1.0, 1.0):
++                    raise RuntimeError(f"invalid structure_y_sign override for {scene_id}: {sign}")
++                previous = self.collision_detector.structure_y_sign_overrides.get(str(scene_id))
++                if previous is not None and previous != sign:
++                    raise RuntimeError(f"conflicting structure_y_sign overrides for {scene_id}")
++                if previous is None:
++                    self.collision_detector.structure_y_sign_overrides[str(scene_id)] = sign
++                    if getattr(self.collision_detector, "_current_scene_id", None) == scene_id:
++                        self.collision_detector._current_scene_id = None  # force reload with override
+             self.collision_detector.load_scene_from_gs_root(self.config.gs_root, scene_id)
+         self.current_collision_convention = None
+         if uses_canonical_backend(item):

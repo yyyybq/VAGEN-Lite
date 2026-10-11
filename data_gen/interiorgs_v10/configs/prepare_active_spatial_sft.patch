@@ -1,0 +1,24 @@
+--- a/scripts/prepare_active_spatial_sft.py	2026-10-10 21:12:46.589129308 -0400
++++ b/scripts/prepare_active_spatial_sft.py	2026-10-10 21:12:46.602093322 -0400
+@@ -64,7 +64,20 @@
+     obs = row.get("public_observation", {})
+     if row.get("qa_sft_allowed") is not True:
+         return None, "qa_sft_disallowed"
+-    if row.get("label_validity") != "valid" or row.get("private_answer") not in {
++    if row.get("answer_format", "yes_no") == "action_set":
++        # InteriorGS v10 Act items: the answer lists every primitive action that
++        # strictly decreases d* (canonical order, comma-separated).
++        actions = ("move_forward", "move_backward", "move_left", "move_right", "turn_left", "turn_right")
++        parts = [p.strip() for p in str(row.get("private_answer") or "").split(",")]
++        if (
++            row.get("label_validity") != "valid"
++            or not parts
++            or any(p not in actions for p in parts)
++            or parts != [a for a in actions if a in parts]
++            or parts != list(row.get("accepted_answers") or [])
++        ):
++            return None, "invalid_label"
++    elif row.get("label_validity") != "valid" or row.get("private_answer") not in {
+         "Yes",
+         "No",
+     }:
