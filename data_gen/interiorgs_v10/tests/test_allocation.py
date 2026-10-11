@@ -125,11 +125,22 @@ class AllocationTest(unittest.TestCase):
             def fill(self, needs, max_new=None):
                 return []
 
-        surplus = [{"band": [2, 3], "band_name": "2-3", "d_star": d, "item_key": 0} for d in (3, 3, 3, 3, 3, 2, 2, 2, 2, 2)]
-        res, rep = I._fill_reserve([_Fake(surplus)], [], 14, 14, list(I.DEFAULT_BANDS), I.DEFAULT_BAND_WEIGHTS,
-                                   None, I.Funnel(), 0.0, None, False)
+        def run(ds):
+            surplus = [{"band": [2, 3], "band_name": "2-3", "d_star": d, "item_key": 0} for d in ds]
+            funnel = I.Funnel()
+            res, rep = I._fill_reserve([_Fake(surplus)], [], 14, 14, list(I.DEFAULT_BANDS),
+                                       I.DEFAULT_BAND_WEIGHTS, None, funnel, 0.0, None, False)
+            return res, rep, funnel.to_dict()["init_scene_allocation"]
+
+        res, rep, f = run((3, 3, 3, 3, 3, 2, 2, 2, 2, 2))
         self.assertEqual(rep["reserve_band_targets"]["2-3"], 3)
         self.assertEqual(sorted(ep["d_star"] for ep in res), [2, 3, 3])  # not 3, 3, 3
+        # one episode per d*: the per-d* turn counter must not clip the pass or the accounting
+        res, rep, f = run((3, 2))
+        self.assertEqual(sorted(ep["d_star"] for ep in res), [2, 3])
+        self.assertEqual(rep["reserve_target"], 14)
+        self.assertEqual(f["reserve_from_surplus"], 2)
+        self.assertEqual(f["reserve_shortfall"], 12)
 
     def test_reserve_family_caps_scale_with_k(self):
         self.assertEqual(I._scaled_quotas({"a": (2, 4), "b": (1, None)}, 7, 14), {"a": (1, 2), "b": (0, None)})

@@ -930,9 +930,9 @@ def _fill_reserve(searches: Sequence[ItemSearch], main: Sequence[Dict[str, Any]]
     turn: Dict[int, int] = {}
     keyed = []
     for j, ep in pool:
-        k = turn.get(ep["d_star"], 0)
-        turn[ep["d_star"]] = k + 1
-        keyed.append(((-ep["band"][0], k, -ep["d_star"], j), j, ep))
+        nth = turn.get(ep["d_star"], 0)
+        turn[ep["d_star"]] = nth + 1
+        keyed.append(((-ep["band"][0], nth, -ep["d_star"], j), j, ep))
     keyed.sort(key=lambda t: t[0])
     for _, j, ep in keyed:
         if len(reserve) >= k:
