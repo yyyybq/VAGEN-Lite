@@ -73,7 +73,8 @@ from vagen.envs.active_spatial.canonical_task_metrics import (
 from vagen.envs.active_spatial.visual_bbox_metrics import _as_array, _match_object
 
 from . import sampling
-from .contract import CAMERA_HEIGHT_M, Funnel, Obj, pose_from_xy_yaw, stable_hash, state_key, yaw_of
+from .contract import (CAMERA_HEIGHT_M, Funnel, Obj, horizon_locked, motion_model, pose_from_xy_yaw, stable_hash,
+                       state_key, yaw_of)
 from .occlusion import (
     CX,
     CY,
@@ -167,6 +168,13 @@ def rotations(yaws: np.ndarray, pitch_rad: float = 0.0) -> np.ndarray:
 
 _NEAR = 1e-6
 _OCCL_MEMO_MAX = 200000  # cached ray-blocked rows per (scene, target) before the memo is reset
+# Horizon-locked experiments with pitch != 0: a camera looking down sees low, near objects at
+# horizontal bearings beyond the 45 deg half-HFOV, so the pitch-0 yaw window is widened.
+PITCHED_EXTRA_YAW_SLACK_DEG = 20.0
+
+
+def _pitched() -> bool:
+    return horizon_locked() and motion_model()[1] != 0.0
 
 
 def _project_batch(t: _Target, R: np.ndarray, C: np.ndarray) -> Dict[str, np.ndarray]:
@@ -278,11 +286,12 @@ def _blocked_rows(scene: Any, t: _Target, origins: np.ndarray, n: int, samples: 
 
 
 def batch_evaluate(scene: Any, item: Dict[str, Any], xs: Sequence[float], ys: Sequence[float],
-                   yaws: Sequence[float], *, pitch_deg: float = 0.0,
+                   yaws: Sequence[float], *, pitch_deg: Optional[float] = None,
                    min_visible: float = DEFAULT_MIN_VISIBLE_FRACTION, occlusion_n: int = 3,
                    z: float = CAMERA_HEIGHT_M, legal_reasons: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     """Vectorised canonical gates + occlusion for poses (x, y, yaw[rad], pitch).
 
+    ``pitch_deg`` defaults to the active motion model's pitch (0 under r1).
     Returns gate names, an (N, G) pass matrix (first column "legal" when
     ``legal_reasons`` is given, last column "occlusion"), canonical success,
     occlusion success, combined success, per-target inside / visible fractions,
@@ -290,6 +299,8 @@ def batch_evaluate(scene: Any, item: Dict[str, Any], xs: Sequence[float], ys: Se
     threshold).  Matches ``sampling.score`` up to float rounding; callers that
     keep a pose must still re-verify it exactly.
     """
+    if pitch_deg is None:
+        pitch_deg = motion_model()[1]
     xs = np.asarray(xs, float).reshape(-1)
     ys = np.asarray(ys, float).reshape(-1)
     yaws = np.asarray(yaws, float).reshape(-1)
@@ -547,15 +558,17 @@ def _v10_poses(scene: Any, item: Dict[str, Any], targets: Sequence[_Target], roo
     vA = a.center[None, :2] - P
     vB = b.center[None, :2] - P
     keep = np.ones(P.shape[0], dtype=bool)
+    # Both prefilters below are exact only at pitch 0 (image x order == bearing order, horizon row CY).
+    pitched = _pitched()
 
-    if task == "projective_relations":
+    if task == "projective_relations" and not pitched:
         relation = str(item["target_region"]["params"].get("relation", "left"))
         cross = vA[:, 0] * vB[:, 1] - vA[:, 1] * vB[:, 0]
         side_ok = cross < 0 if relation == "left" else cross > 0
         funnel.add("endpoint_position", "prefilter_relation_side", int((keep & ~side_ok).sum()))
         keep &= side_ok
 
-    if cfg.get("prune_distance", True):
+    if cfg.get("prune_distance", True) and not pitched:
         q = PROJECTIVE_MIN_INSIDE_FRACTION if task == "projective_relations" else FOV_MIN_INSIDE_FRACTION
         band_ok = np.ones(P.shape[0], dtype=bool)
         zc = CAMERA_HEIGHT_M
@@ -577,6 +590,8 @@ def _v10_poses(scene: Any, item: Dict[str, Any], targets: Sequence[_Target], roo
     mid = (a.center[:2] + b.center[:2]) / 2.0
     ref = np.arctan2(mid[1] - P[:, 1], mid[0] - P[:, 0])
     h = HALF_HFOV_RAD + math.radians(float(cfg["yaw_slack_deg"]))
+    if pitched:
+        h += math.radians(PITCHED_EXTRA_YAW_SLACK_DEG)
     if task == "projective_relations":
         phA = _wrap(np.arctan2(vA[:, 1], vA[:, 0]) - ref)
         phB = _wrap(np.arctan2(vB[:, 1], vB[:, 0]) - ref)
@@ -804,7 +819,7 @@ def _verify_and_pack(scene: Any, item: Dict[str, Any], targets: Sequence[_Target
         "c2w": c2w.tolist(),
         "position": [float(x), float(y), float(CAMERA_HEIGHT_M)],
         "yaw_deg": float(math.degrees(yaw_of(c2w))),
-        "pitch_deg": 0.0,
+        "pitch_deg": motion_model()[1],
         "state_key": list(state_key(c2w)),
         "room_index": scene.room_of(float(x), float(y)),
         "score": {

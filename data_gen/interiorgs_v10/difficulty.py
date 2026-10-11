@@ -62,6 +62,9 @@ from .contract import (
     STEP_TRANSLATION_M,
     YAW_QUANT_DEG,
     apply_action,
+    camera_forward_z,
+    heading_turn,
+    horizon_locked,
 )
 
 N_ACTIONS = len(ACTIONS)
@@ -91,6 +94,8 @@ _TURN_LOCAL = {a: _turn_local(a) for a in ("turn_left", "turn_right")}
 
 def apply_action_batch(P: np.ndarray, R: np.ndarray, action: str) -> Tuple[np.ndarray, np.ndarray]:
     """Vectorised ``contract.apply_action`` on positions (N,3) and rotations (N,3,3)."""
+    if horizon_locked():
+        return _apply_action_batch_horizon_locked(P, R, action)
     if action in ("move_forward", "move_backward"):
         sign = 1.0 if action == "move_forward" else -1.0
         return P + R[:, :, 2] * STEP_TRANSLATION_M * sign, R
@@ -99,6 +104,21 @@ def apply_action_batch(P: np.ndarray, R: np.ndarray, action: str) -> Tuple[np.nd
         return P + R[:, :, 0] * STEP_TRANSLATION_M * sign, R
     if action in _TURN_LOCAL:
         return P, np.matmul(R, _TURN_LOCAL[action])
+    raise ValueError(f"unknown action {action!r}")
+
+
+def _apply_action_batch_horizon_locked(P: np.ndarray, R: np.ndarray, action: str) -> Tuple[np.ndarray, np.ndarray]:
+    """Vectorised ``contract._apply_action_horizon_locked`` (EXPERIMENTAL motion model)."""
+    if action in ("move_forward", "move_backward"):
+        sign = 1.0 if action == "move_forward" else -1.0
+        h = np.zeros((len(R), 3))
+        h[:, :2] = R[:, :2, 2]
+        return P + h / np.linalg.norm(h, axis=1, keepdims=True) * STEP_TRANSLATION_M * sign, R
+    if action in ("move_right", "move_left"):
+        sign = 1.0 if action == "move_right" else -1.0
+        return P + R[:, :, 0] * STEP_TRANSLATION_M * sign, R
+    if action in ("turn_left", "turn_right"):
+        return P, np.matmul(heading_turn(STEP_ROTATION_DEG, action)[None], R)
     raise ValueError(f"unknown action {action!r}")
 
 
@@ -267,7 +287,7 @@ class _DetectorReplica:
 
     # -- baseline Scene.is_pose_legal ----------------------------------------
     def poses_legal(self, P: np.ndarray, R: np.ndarray) -> np.ndarray:
-        ok = (np.abs(P[:, 2] - CAMERA_HEIGHT_M) <= 1e-6) & (np.abs(R[:, 2, 2]) <= 1e-6)
+        ok = (np.abs(P[:, 2] - CAMERA_HEIGHT_M) <= 1e-6) & (np.abs(R[:, 2, 2] - camera_forward_z()) <= 1e-6)
         ok &= self._in_any_room(P[:, 0], P[:, 1])
         if len(self.swa):
             ok &= self._scene_wall_dist(P[:, :2]) >= self.min_wall
@@ -442,7 +462,7 @@ class FastGeometry:
 
             # workstream G API: legal_mask(xy (N,2)) == is_pose_legal of the pitch-0, z = 1.5 m pose
             def g_impl(Pq, R, fn=fn):
-                canon = (np.abs(Pq[:, 2] - CAMERA_HEIGHT_M) <= 1e-6) & (np.abs(R[:, 2, 2]) <= 1e-6)
+                canon = (np.abs(Pq[:, 2] - CAMERA_HEIGHT_M) <= 1e-6) & (np.abs(R[:, 2, 2] - camera_forward_z()) <= 1e-6)
                 out = np.zeros(len(Pq), dtype=bool)
                 if canon.any():
                     out[canon] = _as_bool_array(fn(Pq[canon, :2]), int(canon.sum()))

@@ -49,6 +49,7 @@ from .contract import (
     MIN_WALL_DISTANCE_M,
     SAFETY_MARGIN_M,
     Obj,
+    camera_forward_z,
 )
 
 
@@ -131,7 +132,7 @@ class Scene:
         x, y, z = (float(v) for v in c2w[:3, 3])
         if abs(z - CAMERA_HEIGHT_M) > 1e-6:
             return False, "height_not_canonical"
-        if abs(float(c2w[2, 2])) > 1e-6:
+        if abs(float(c2w[2, 2]) - camera_forward_z()) > 1e-6:
             return False, "pitch_not_zero"
         if self.room_of(x, y) is None:
             return False, "outside_rooms"

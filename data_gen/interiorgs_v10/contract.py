@@ -83,6 +83,39 @@ POS_QUANT_M = 0.01
 YAW_QUANT_DEG = 1.0
 
 
+# --------------------------------------------------------------------------
+# Motion model
+# --------------------------------------------------------------------------
+# "r1" is the protocol above (pitch 0) and the only one the RL env implements.
+# "horizon_locked" is EXPERIMENTAL and generator-side only: a constant pitch,
+# move_forward/backward along the horizontal heading, move_left/right along the
+# (horizontal) camera X axis, turns about world Z.  At pitch 0 it is the r1
+# motion up to float rounding, so r1 keeps its own code paths bit-for-bit.
+MOTION_MODELS = ("r1", "horizon_locked")
+_MOTION: Dict[str, Any] = {"model": "r1", "pitch_deg": 0.0}
+
+
+def set_motion_model(model: str = "r1", pitch_deg: float = 0.0) -> None:
+    if model not in MOTION_MODELS:
+        raise ValueError(f"unknown motion model {model!r}")
+    if model == "r1" and float(pitch_deg) != 0.0:
+        raise ValueError("the r1 motion model keeps pitch at 0")
+    _MOTION.update(model=model, pitch_deg=float(pitch_deg))
+
+
+def motion_model() -> Tuple[str, float]:
+    return str(_MOTION["model"]), float(_MOTION["pitch_deg"])
+
+
+def horizon_locked() -> bool:
+    return _MOTION["model"] == "horizon_locked"
+
+
+def camera_forward_z() -> float:
+    """c2w[2, 2] (forward z) of every legal pose under the active motion model."""
+    return math.sin(math.radians(float(_MOTION["pitch_deg"]))) if horizon_locked() else 0.0
+
+
 def yaw_of(c2w: np.ndarray) -> float:
     """Yaw (radians) of the camera forward axis projected on the XY plane."""
     f = np.asarray(c2w, dtype=float)[:3, 2]
@@ -90,7 +123,17 @@ def yaw_of(c2w: np.ndarray) -> float:
 
 
 def pose_from_xy_yaw(x: float, y: float, yaw: float, z: float = CAMERA_HEIGHT_M) -> np.ndarray:
-    """Pitch-0 c2w at (x, y, z) looking along world yaw (radians)."""
+    """c2w at (x, y, z) looking along world yaw (radians); pitch 0 unless a
+    horizon-locked motion model with a non-zero pitch is active."""
+    if horizon_locked() and float(_MOTION["pitch_deg"]) != 0.0:
+        p = math.radians(float(_MOTION["pitch_deg"]))
+        c, s, cp, sp = math.cos(yaw), math.sin(yaw), math.cos(p), math.sin(p)
+        c2w = np.eye(4)
+        c2w[:3, 0] = [s, -c, 0.0]               # right (horizontal)
+        c2w[:3, 1] = [sp * c, sp * s, -cp]      # down
+        c2w[:3, 2] = [cp * c, cp * s, sp]       # forward
+        c2w[:3, 3] = [x, y, z]
+        return c2w
     forward = np.array([math.cos(yaw), math.sin(yaw), 0.0])
     world_up = np.array([0.0, 0.0, 1.0])
     right = np.cross(forward, world_up)
@@ -116,6 +159,8 @@ def apply_action(c2w: np.ndarray, action: str,
     R = c2w[:3, :3]
     C = c2w[:3, 3]
     out = np.eye(4)
+    if horizon_locked():
+        return _apply_action_horizon_locked(R, C, action, step_t, step_r_deg)
     if action in ("move_forward", "move_backward"):
         sign = 1.0 if action == "move_forward" else -1.0
         out[:3, :3] = R
@@ -132,6 +177,34 @@ def apply_action(c2w: np.ndarray, action: str,
         # rotation about local Y (scipy from_euler('y', ang))
         R_local = np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
         out[:3, :3] = R @ R_local
+        out[:3, 3] = C
+        return out
+    raise ValueError(f"unknown action {action!r}")
+
+
+def heading_turn(step_r_deg: float, action: str) -> np.ndarray:
+    """World-Z rotation of a horizon-locked turn (turn_left increases yaw, as in r1)."""
+    ang = math.radians(step_r_deg) * (1.0 if action == "turn_left" else -1.0)
+    c, s = math.cos(ang), math.sin(ang)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def _apply_action_horizon_locked(R: np.ndarray, C: np.ndarray, action: str, step_t: float,
+                                 step_r_deg: float) -> np.ndarray:
+    out = np.eye(4)
+    if action in ("move_forward", "move_backward"):
+        sign = 1.0 if action == "move_forward" else -1.0
+        h = np.array([R[0, 2], R[1, 2], 0.0])
+        out[:3, :3] = R
+        out[:3, 3] = C + h / np.linalg.norm(h) * step_t * sign
+        return out
+    if action in ("move_right", "move_left"):
+        sign = 1.0 if action == "move_right" else -1.0
+        out[:3, :3] = R
+        out[:3, 3] = C + R[:, 0] * step_t * sign
+        return out
+    if action in ("turn_left", "turn_right"):
+        out[:3, :3] = heading_turn(step_r_deg, action) @ R
         out[:3, 3] = C
         return out
     raise ValueError(f"unknown action {action!r}")
