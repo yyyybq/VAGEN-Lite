@@ -923,14 +923,18 @@ def _fill_reserve(searches: Sequence[ItemSearch], main: Sequence[Dict[str, Any]]
         hi = r_quotas.get(fams[j], (0, None))[1]
         return hi is not None and r_fam.get(fams[j], 0) >= hi
 
-    # 1) surplus that is already certified (cheap), hardest band first, only into open bands
-    pool = []
-    for j, s in enumerate(searches):
-        for ep in s.surplus:
-            if id(ep) not in main_ids:
-                pool.append((-ep["band"][0], -ep["d_star"], j, ep))
-    pool.sort(key=lambda t: t[:3])
-    for _, _, j, ep in pool:
+    # 1) surplus that is already certified (cheap), hardest band first, only into open bands; inside a
+    #    band the d* values take turns, so the reserve covers the band instead of only its largest d*
+    pool = sorted(((j, ep) for j, s in enumerate(searches) for ep in s.surplus if id(ep) not in main_ids),
+                  key=lambda t: (-t[1]["band"][0], -t[1]["d_star"], t[0]))
+    turn: Dict[int, int] = {}
+    keyed = []
+    for j, ep in pool:
+        k = turn.get(ep["d_star"], 0)
+        turn[ep["d_star"]] = k + 1
+        keyed.append(((-ep["band"][0], k, -ep["d_star"], j), j, ep))
+    keyed.sort(key=lambda t: t[0])
+    for _, j, ep in keyed:
         if len(reserve) >= k:
             break
         band = tuple(ep["band"])

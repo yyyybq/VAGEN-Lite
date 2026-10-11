@@ -115,6 +115,22 @@ class AllocationTest(unittest.TestCase):
                 dyaw = abs((math.degrees(C.yaw_of(a) - C.yaw_of(b)) + 180.0) % 360.0 - 180.0)
                 self.assertFalse(close and dyaw < 30.0)
 
+    def test_reserve_from_surplus_interleaves_d_star_within_band(self):
+        class _Fake:
+            item = {"task_type": "fam_a"}
+
+            def __init__(self, surplus):
+                self.surplus = surplus
+
+            def fill(self, needs, max_new=None):
+                return []
+
+        surplus = [{"band": [2, 3], "band_name": "2-3", "d_star": d, "item_key": 0} for d in (3, 3, 3, 3, 3, 2, 2, 2, 2, 2)]
+        res, rep = I._fill_reserve([_Fake(surplus)], [], 14, 14, list(I.DEFAULT_BANDS), I.DEFAULT_BAND_WEIGHTS,
+                                   None, I.Funnel(), 0.0, None, False)
+        self.assertEqual(rep["reserve_band_targets"]["2-3"], 3)
+        self.assertEqual(sorted(ep["d_star"] for ep in res), [2, 3, 3])  # not 3, 3, 3
+
     def test_reserve_family_caps_scale_with_k(self):
         self.assertEqual(I._scaled_quotas({"a": (2, 4), "b": (1, None)}, 7, 14), {"a": (1, 2), "b": (0, None)})
         _, _, report = self._run(6, family_quotas="fam_a:0:2", reserve_k=6)
