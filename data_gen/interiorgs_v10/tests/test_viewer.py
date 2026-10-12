@@ -29,6 +29,17 @@ class ViewerTest(unittest.TestCase):
                 # the terminal pose is a success pose: its 0.2 m cell, or a neighbour, is in the region
                 self.assertLess(np.min(np.abs(region - end).max(axis=1)), MV.REGION_SPACING_M * 1.5, t["id"])
                 self.assertEqual(len(t["path"]), t["d"] + 1)
+                self.assertIn([round(end[0], 3), round(end[1], 3)], [list(map(float, p)) for p in region])
+            # the rooms a path crosses are searched too, and known final positions are always kept
+            from data_gen.interiorgs_v10.scene import load_scene
+
+            scene = load_scene(sdir, sdir.name)
+            for room in scene.rooms:
+                c = np.asarray(room.polygon, float).mean(0)
+                if room.contains(float(c[0]), float(c[1])):
+                    self.assertIn(int(room.index), MV.rooms_at(scene, [c]))
+            far = [123.0, -45.0]
+            self.assertIn(far, MV.success_region(scene, rows[0], known=[far]))
             run = tmp / "run"
             run.mkdir()
             (run / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))

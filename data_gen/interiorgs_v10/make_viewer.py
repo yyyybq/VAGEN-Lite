@@ -55,14 +55,28 @@ def scene_geometry(scene: Any, labels: Sequence[Dict[str, Any]], keep_ids: set) 
     }
 
 
+def rooms_at(scene: Any, xys: Sequence[Sequence[float]]) -> List[int]:
+    return sorted({int(r.index) for r in scene.rooms for x, y in xys if r.contains(float(x), float(y))})
+
+
 def success_region(scene: Any, item: Dict[str, Any], spacing: float = REGION_SPACING_M,
-                   yaw_step_deg: float = YAW_STEP_DEG) -> List[List[float]]:
-    """Centres of legal 0.2 m cells where at least one heading (every 10 deg) succeeds."""
+                   yaw_step_deg: float = YAW_STEP_DEG, extra_rooms: Sequence[int] = (),
+                   known: Sequence[Sequence[float]] = ()) -> List[List[float]]:
+    """Centres of legal 0.2 m cells where at least one heading (every 10 deg) succeeds.
+
+    Cells are searched in the targets' rooms and ``extra_rooms`` (the rooms the tasks' paths cross: the
+    camera often looks into the targets' room from the next one).  ``known`` successful camera
+    positions (the tasks' final poses) are always included, so a region narrower than the grid or
+    the heading step is never drawn empty."""
     from .families.common import cached_floor_grid, item_rooms
 
-    pts = cached_floor_grid(scene, spacing, item_rooms(scene, item))
+    rooms = item_rooms(scene, item)
+    if rooms is not None:
+        rooms = sorted(set(rooms) | {int(r) for r in extra_rooms})
+    known_out = [[round(float(x), 3), round(float(y), 3)] for x, y in known]
+    pts = cached_floor_grid(scene, spacing, rooms)
     if len(pts) == 0:
-        return []
+        return known_out
     yaws = np.radians(np.arange(0.0, 360.0, yaw_step_deg))
     task_type = item["task_type"]
     if task_type in ("projective_relations", "fov_inclusion"):
@@ -87,7 +101,7 @@ def success_region(scene: Any, item: Dict[str, Any], spacing: float = REGION_SPA
                 if fam.judge(item, pose_from_xy_yaw(float(x), float(y), float(yaw)))["success"]:
                     hit[i] = True
                     break
-    return [[round(float(x), 3), round(float(y), 3)] for x, y in pts[hit]]
+    return [[round(float(x), 3), round(float(y), 3)] for x, y in pts[hit]] + known_out
 
 
 def task_path(row: Dict[str, Any]) -> List[List[float]]:
@@ -117,22 +131,27 @@ def build_scene(args: tuple) -> Dict[str, Any]:
         scene = load_scene(Path(scene_dir), sid, ignored_ids=ignored_ids)
     labels = json.loads((Path(scene_dir) / "labels.json").read_text())
     keep = {str(e["id"]) for r in scene_rows for e in r["target_object"]["objects"]}
+    paths = {r["task_id"]: task_path(r) for r in scene_rows}
+    by_item: Dict[str, List[Dict[str, Any]]] = {}
+    for r in scene_rows:
+        by_item.setdefault(_item_key(r), []).append(r)
     regions: Dict[str, List[List[float]]] = {}
+    for key, rs in by_item.items():
+        known = sorted({(p[-1][0], p[-1][1]) for p in (paths[r["task_id"]] for r in rs)})
+        crossed = rooms_at(scene, [xy[:2] for r in rs for xy in paths[r["task_id"]]])
+        try:
+            regions[key] = success_region(scene, rs[0], extra_rooms=crossed, known=known)
+        except Exception as exc:  # keep the task visible even if its region cannot be drawn
+            regions[key] = [list(xy) for xy in known]
+            print(f"[viewer] {sid} {rs[0]['task_id']}: region failed: {exc!r}")
     tasks = []
     for r in scene_rows:
-        key = _item_key(r)
-        if key not in regions:
-            try:
-                regions[key] = success_region(scene, r)
-            except Exception as exc:  # keep the task visible even if its region cannot be drawn
-                regions[key] = []
-                print(f"[viewer] {sid} {r['task_id']}: region failed: {exc!r}")
         tasks.append({
             "id": r["task_id"], "family": r["task_type"], "d": int(r["difficulty"]["d_star"]),
             "text": r.get("task_description", ""), "reserve": bool(r.get("reserve")),
             "targets": [str(e["id"]) for e in r["target_object"]["objects"]],
             "target_labels": [e.get("ref") or e.get("label") for e in r["target_object"]["objects"]],
-            "path": task_path(r), "actions": list(r["difficulty"]["certificate"]), "region": key,
+            "path": paths[r["task_id"]], "actions": list(r["difficulty"]["certificate"]), "region": _item_key(r),
         })
     return {"id": sid, "geometry": scene_geometry(scene, labels, keep), "tasks": tasks, "regions": regions,
             "convention": (scene.convention_v2 or {}).get("status")}
