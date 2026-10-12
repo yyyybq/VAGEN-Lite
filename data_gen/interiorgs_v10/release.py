@@ -518,6 +518,55 @@ def plan_regeneration(stats: Mapping[str, Mapping[str, Any]], policy: Mapping[st
     }
 
 
+def take_from_reserve(plan: Mapping[str, Any], stats: Mapping[str, Mapping[str, Any]],
+                      reserve_rows: Iterable[Mapping[str, Any]], *, reviewed: Iterable[str] = (),
+                      quotas: Optional[Mapping[str, Sequence[Optional[int]]]] = None) -> Dict[str, Any]:
+    """Serve the plan's per-scene requests from the reserve pool (``tasks_reserve.jsonl``).
+
+    Only scenes with a request get reserve tasks rendered (on-demand reserve,
+    user decision 2026-10-12).  Per scene, up to ``request_candidates`` reserve
+    tasks are taken in stored order, skipping tasks already reviewed, tasks on
+    a blacklisted object and tasks whose object set is a blacklisted pair.
+    With ``quotas`` ({family: (min, max)}), families below their minimum
+    (counting admitted tasks plus the ones taken) go first and families at
+    their maximum last, so the maximum is soft as in generation.
+    """
+    reviewed = {str(t) for t in reviewed}
+    by_scene: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
+    for r in reserve_rows:
+        if str(r["task_id"]) not in reviewed:
+            by_scene[str(r["scene_id"])].append(r)
+    render: List[Mapping[str, Any]] = []
+    per_scene: Dict[str, Dict[str, Any]] = {}
+    for req in plan.get("requests", []):
+        sc = str(req["scene_id"])
+        bad_obj = set(req.get("blacklist_objects", []))
+        bad_pair = set(req.get("blacklist_pairs", []))
+        pool = []
+        for r in by_scene.get(sc, []):
+            ids = [str(o.get("id")) for o in ((r.get("target_object") or {}).get("objects") or [])]
+            if bad_obj & set(ids) or "|".join(sorted(ids)) in bad_pair:
+                continue
+            pool.append(r)
+        fam = Counter((stats.get(sc) or {}).get("families") or {})
+        want = min(int(req["request_candidates"]), len(pool))
+        taken: List[Mapping[str, Any]] = []
+        while len(taken) < want:
+            def tier(r: Mapping[str, Any]) -> int:
+                lo, hi = (quotas or {}).get(str(r["task_type"]), (None, None))
+                n = fam[str(r["task_type"])]
+                return 0 if lo is not None and n < int(lo) else 2 if hi is not None and n >= int(hi) else 1
+            pick = min(pool, key=tier)  # min() keeps the first of equal tiers, i.e. stored order
+            pool.remove(pick)
+            taken.append(pick)
+            fam[str(pick["task_type"])] += 1
+        render.extend(taken)
+        per_scene[sc] = {"requested": int(req["request_candidates"]), "taken": len(taken),
+                         "left_in_reserve": len(pool), "task_ids": [str(r["task_id"]) for r in taken]}
+    return {"render": render, "per_scene": per_scene,
+            "short_scenes": sorted(sc for sc, p in per_scene.items() if p["taken"] < p["requested"])}
+
+
 # --------------------------------------------------------------------------
 # Summary
 # --------------------------------------------------------------------------

@@ -341,6 +341,34 @@ class AdmissionTest(unittest.TestCase):
         self.assertTrue(done["status"]["targets_met"])
         self.assertEqual(done["requests"], [])
 
+    def test_take_from_reserve(self):
+        def row(tid, scene, fam, *ids):
+            return {"task_id": tid, "scene_id": scene, "task_type": fam,
+                    "target_object": {"objects": [{"id": i} for i in ids]}}
+
+        reserve = [row("r1", "s", "projective_relations", "1", "2"),  # blacklisted pair
+                   row("r2", "s", "projective_relations", "3", "9"),  # blacklisted object 9
+                   row("r3", "s", "projective_relations", "3", "4"),
+                   row("r4", "s", "projective_relations", "5", "6"),
+                   row("r5", "s", "equidistance", "5", "7"),
+                   row("r6", "s", "absolute_positioning", "8"),       # already reviewed
+                   row("r7", "full", "projective_relations", "1", "2")]
+        plan = {"requests": [{"scene_id": "s", "request_candidates": 3, "blacklist_objects": ["9"],
+                              "blacklist_pairs": ["1|2"]}]}
+        stats = {"s": {"families": {"projective_relations": 6}}, "full": {"families": {}}}
+        quotas = {"projective_relations": (2, 6), "equidistance": (1, 3)}
+        out = R.take_from_reserve(plan, stats, reserve, reviewed=["r6"], quotas=quotas)
+        # equidistance is below its minimum so it goes first; projective is at its maximum but may
+        # still fill the request (soft max); scenes without a request get nothing
+        self.assertEqual(out["per_scene"]["s"]["task_ids"], ["r5", "r3", "r4"])
+        self.assertEqual([r["task_id"] for r in out["render"]], ["r5", "r3", "r4"])
+        self.assertNotIn("full", out["per_scene"])
+        self.assertEqual(out["short_scenes"], [])
+        plan["requests"][0]["request_candidates"] = 5
+        out = R.take_from_reserve(plan, stats, reserve, reviewed=["r6"])
+        self.assertEqual(out["per_scene"]["s"]["task_ids"], ["r3", "r4", "r5"])
+        self.assertEqual(out["short_scenes"], ["s"])
+
     def test_tiny_release_passes_prepare_validation(self):
         from PIL import Image
 
