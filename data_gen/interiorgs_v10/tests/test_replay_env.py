@@ -20,6 +20,11 @@ class ReplayEnvTest(unittest.TestCase):
         self.assertIn("t7", ids)  # every row of a scene with ignored objects
         self.assertLessEqual(len(ids), 2 + 2 + 1 + 1)
         self.assertEqual(RE.select_rows(rows, 2, 1, seed=0), picked)
+        rows += [dict(r, task_id=f"u{i}", collision_convention={"ignored_object_ids": ["9"]})
+                 for i, r in enumerate(rows)]
+        capped = RE.select_rows(rows, per_family=0, per_group=0, seed=0, per_ignored=3)
+        self.assertEqual(len(capped), 3)
+        self.assertEqual(len(RE.select_rows(rows, 0, 0, seed=0)), 21)
 
     def test_generated_tasks_succeed_at_d_star_in_patched_env(self):
         if shutil.which("patch") is None:

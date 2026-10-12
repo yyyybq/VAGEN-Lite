@@ -91,10 +91,10 @@ def patched_env_copy(dst: Path) -> Path:
     return dst
 
 
-def select_rows(rows: Sequence[Dict[str, Any]], per_family: int, per_group: int, seed: int = 0
-                ) -> List[Dict[str, Any]]:
+def select_rows(rows: Sequence[Dict[str, Any]], per_family: int, per_group: int, seed: int = 0,
+                per_ignored: Optional[int] = None) -> List[Dict[str, Any]]:
     """Up to ``per_family`` rows per task family, plus ``per_group`` rows from scenes that need the
-    structure-sign override and every row from scenes with ignored objects."""
+    structure-sign override and ``per_ignored`` rows (default: every row) from scenes with ignored objects."""
     rng = random.Random(seed)
     by_family: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for r in rows:
@@ -106,9 +106,11 @@ def select_rows(rows: Sequence[Dict[str, Any]], per_family: int, per_group: int,
     override = [r for r in rows if (r.get("collision_convention") or {}).get("requires_env_override")]
     for r in rng.sample(override, min(per_group, len(override))):
         picked[r["task_id"]] = r
-    for r in rows:
-        if (r.get("collision_convention") or {}).get("ignored_object_ids"):
-            picked[r["task_id"]] = r
+    ignored = [r for r in rows if (r.get("collision_convention") or {}).get("ignored_object_ids")]
+    if per_ignored is not None:
+        ignored = rng.sample(ignored, min(per_ignored, len(ignored)))
+    for r in ignored:
+        picked[r["task_id"]] = r
     return sorted(picked.values(), key=lambda r: r["task_id"])
 
 
@@ -151,13 +153,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--scenes-root", required=True, type=Path)
     ap.add_argument("--per-family", type=int, default=40)
     ap.add_argument("--per-override", type=int, default=40)
+    ap.add_argument("--per-ignored", type=int, default=None,
+                    help="rows from scenes with ignored objects (default: all of them)")
     ap.add_argument("--include-reserve", action="store_true", help="also sample tasks_reserve.jsonl")
     ap.add_argument("--json", type=Path)
     args = ap.parse_args(argv)
     rows = [json.loads(l) for l in (args.run / "tasks.jsonl").read_text().splitlines() if l.strip()]
     if args.include_reserve and (args.run / "tasks_reserve.jsonl").exists():
         rows += [json.loads(l) for l in (args.run / "tasks_reserve.jsonl").read_text().splitlines() if l.strip()]
-    results = replay(select_rows(rows, args.per_family, args.per_override), args.scenes_root)
+    results = replay(select_rows(rows, args.per_family, args.per_override, per_ignored=args.per_ignored), args.scenes_root)
     rep = {"env_config": ENV_CONFIG, "patches": [p.name for p in PATCHES], "summary": summarize(results),
            "results": results}
     if args.json:
