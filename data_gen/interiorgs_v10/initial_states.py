@@ -40,7 +40,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from .contract import ACTIONS, INVERSE_ACTION, MAX_PRIMITIVE_STEPS, Funnel, Obj, yaw_of
+from .contract import ACTIONS, INVERSE_ACTION, MAX_PRIMITIVE_STEPS, WORK, Funnel, Obj, yaw_of
 from .difficulty import (
     ACTION_INDEX,
     DIFFICULTY_VERSION,
@@ -308,6 +308,7 @@ class ItemSearch:
             child = np.repeat(np.arange(n), len(ACTIONS))
             fwd = np.tile(np.arange(len(ACTIONS)), n)
             keys = make_keys(P, R)
+            WORK.add("reverse_candidates", len(keys))
             fresh = np.fromiter((k not in seen for k in keys.tolist()), dtype=bool, count=len(keys))
             f.add(STAGE_REVERSE, "pred_already_seen", int((~fresh).sum()))
             idx = np.flatnonzero(fresh)
@@ -431,6 +432,7 @@ class ItemSearch:
 
     def _examine(self, r: int, i: int, needs: Dict[Band, int]) -> Optional[Dict[str, Any]]:
         self.examined.add((r, i))
+        WORK.add("examined")
         layer = self.layers[r]
         c2w = to_c2w(layer.P[i:i + 1], layer.R[i:i + 1])[0]
         t0 = time.perf_counter()
@@ -468,6 +470,7 @@ class ItemSearch:
                               max_terminal_checks=self.max_terminal_checks)
         dt = time.perf_counter() - t1
         self.timing["certify_s"] += dt
+        WORK.add("certify_states", int(cert["states"]))
         self.certified += 1
         self.certify_stats.append({"d_star": cert["d_star"], "states": cert["states"], "seconds": dt,
                                    "reverse_depth": r, "source": cert["certificate_source"]})
@@ -492,6 +495,7 @@ class ItemSearch:
             self._cand("certificate_not_generator_safe")
             return None
         t2 = time.perf_counter()
+        WORK.add("replay")
         rep = replay_certificate(self.scene, self.oracle, c2w, cert["certificate"], check_generator_safe=True)
         self.timing["replay_s"] += time.perf_counter() - t2
         if not rep["ok"]:
@@ -654,7 +658,7 @@ def _scaled_quotas(quotas: FamilyQuotas, k: int, target: int) -> FamilyQuotas:
 
 def _quota_fill(searches: Sequence[ItemSearch], needs: Dict[Band, int], counts: List[int], cap: int,
                 quotas: FamilyQuotas, fam_count: Dict[str, int], out: List[Dict[str, Any]],
-                deadline: Optional[float], limit: Optional[int] = None) -> bool:
+                over: Callable[[], bool], limit: Optional[int] = None) -> bool:
     """Fill ``needs`` round-robin under per-family [min, max] counts; returns timed_out.
 
     Phase 1 serves the families still below their minimum (one item per family
@@ -684,7 +688,7 @@ def _quota_fill(searches: Sequence[ItemSearch], needs: Dict[Band, int], counts: 
         out.extend(got)
 
     def late() -> bool:
-        return deadline is not None and time.perf_counter() > deadline
+        return over()
 
     def done() -> bool:
         return sum(needs.values()) <= 0 or (limit is not None and len(out) >= limit)
@@ -744,6 +748,7 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
                        observability_fn: Optional[Callable] = None, time_budget_s: Optional[float] = None,
                        family_quotas: Any = None, reserve_k: int = 0,
                        terminal_identifiable: str = "all", soft_max: bool = False,
+                       work_budget: Optional[float] = None, work_weights: Optional[Dict[str, float]] = None,
                        **search_kwargs: Any) -> Tuple[List[Dict[str, Any]], Funnel, Dict[str, Any]]:
     """Allocate ``target_per_scene`` episodes across items and bands.
 
@@ -765,11 +770,23 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
                      (``report["reserve"]``) with the same band weights and, if
                      quotas are set, the quotas scaled to ``reserve_k``; unused
                      surplus is used first.  For backfilling after review rejections.
+      work_budget    stop allocating once this many work units (``contract.WORK`` counts times
+                     ``work_weights``) were spent here; replaces ``time_budget_s`` and makes the
+                     result independent of machine load.
       terminal_identifiable  "all" (every target identifiable at the terminal pose)
                      or "family" (only the family's TERMINAL_IDENTIFIABLE_ROLES, e.g.
                      the occluder of occlusion_alignment, whose target is hidden by definition).
     """
     t0 = time.perf_counter()
+    u0 = WORK.units(work_weights or {}) if work_budget is not None else 0.0
+
+    def over() -> bool:
+        """Budget exhausted: work units used since entry (deterministic) or, without a work
+        budget, wall-clock seconds (the 20261011c behaviour)."""
+        if work_budget is not None:
+            return WORK.units(work_weights or {}) - u0 > work_budget
+        return time_budget_s is not None and time.perf_counter() - t0 > time_budget_s
+
     funnel = Funnel()
     bands = [tuple(int(v) for v in b) for b in bands]
     targets = allocate_band_targets(int(target_per_scene), bands, band_weights)
@@ -806,7 +823,7 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
             for j in list(active):
                 if sum(needs.values()) <= 0:
                     break
-                if time_budget_s is not None and time.perf_counter() - t0 > time_budget_s:
+                if over():
                     timed_out = True
                     break
                 if counts[j] >= cap:
@@ -837,8 +854,7 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
                 ep["backfilled"] = True
                 funnel.add(STAGE_SCENE, "backfilled_from_surplus")
     else:
-        deadline = None if time_budget_s is None else t0 + time_budget_s
-        timed_out = _quota_fill(searches, needs, counts, cap, quotas, fam_count, out, deadline)
+        timed_out = _quota_fill(searches, needs, counts, cap, quotas, fam_count, out, over)
         fams = [str(s.item.get("task_type")) for s in searches]
 
         def _skip(j: int, ep: Dict[str, Any]) -> bool:
@@ -858,7 +874,7 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
             _backfill(searches, out, counts, cap, int(target_per_scene), lambda j, ep: False, _take)
             if len(out) < target_per_scene and not timed_out:
                 timed_out = _quota_fill(searches, needs, counts, cap, {f: (0, None) for f in quotas}, fam_count,
-                                        out, deadline, limit=int(target_per_scene))
+                                        out, over, limit=int(target_per_scene))
             if len(out) < target_per_scene:  # surplus certified by that fill (bands that ran dry)
                 _backfill(searches, out, counts, cap, int(target_per_scene), lambda j, ep: False, _take)
             if len(out) > before:
@@ -883,7 +899,7 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
     reserve_report: Dict[str, Any] = {}
     if reserve_k > 0:
         reserve, reserve_report = _fill_reserve(searches, out, int(reserve_k), int(target_per_scene), bands,
-                                                band_weights, quotas, funnel, t0, time_budget_s, timed_out,
+                                                band_weights, quotas, funnel, over, timed_out,
                                                 soft_max=soft_max)
     used = {id(e) for e in out} | {id(e) for e in reserve}
     n_unused = sum(1 for s in searches for e in s.surplus if id(e) not in used)
@@ -934,7 +950,7 @@ def _family_terminal_roles(item: Dict[str, Any]) -> Optional[Tuple[int, ...]]:
 
 def _fill_reserve(searches: Sequence[ItemSearch], main: Sequence[Dict[str, Any]], k: int, target: int,
                   bands: Sequence[Band], band_weights: Sequence[float], quotas: Optional[FamilyQuotas],
-                  funnel: Funnel, t0: float, time_budget_s: Optional[float],
+                  funnel: Funnel, over: Callable[[], bool],
                   timed_out: bool, soft_max: bool = False) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Up to ``k`` reserve episodes with the main set's band weights (and scaled family quotas;
     with ``soft_max`` a family may exceed its scaled max once no other family can supply more)."""
@@ -981,11 +997,10 @@ def _fill_reserve(searches: Sequence[ItemSearch], main: Sequence[Dict[str, Any]]
             funnel.add(STAGE_SCENE, "reserve_from_surplus")
 
     late = timed_out
-    deadline = None if time_budget_s is None else t0 + time_budget_s
 
     def certify(quotas_now: FamilyQuotas) -> bool:
         before = len(reserve)
-        timed = _quota_fill(searches, r_needs, r_counts, r_cap, quotas_now, r_fam, reserve, deadline)
+        timed = _quota_fill(searches, r_needs, r_counts, r_cap, quotas_now, r_fam, reserve, over)
         if len(reserve) > before:
             funnel.add(STAGE_SCENE, "reserve_certified", len(reserve) - before)
         return timed

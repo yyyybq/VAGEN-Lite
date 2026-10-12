@@ -153,7 +153,7 @@ class AllocationTest(unittest.TestCase):
             surplus = [{"band": [2, 3], "band_name": "2-3", "d_star": d, "item_key": 0} for d in ds]
             funnel = I.Funnel()
             res, rep = I._fill_reserve([_Fake(surplus)], [], 14, 14, list(I.DEFAULT_BANDS),
-                                       I.DEFAULT_BAND_WEIGHTS, None, funnel, 0.0, None, False)
+                                       I.DEFAULT_BAND_WEIGHTS, None, funnel, lambda: False, False)
             return res, rep, funnel.to_dict()["init_scene_allocation"]
 
         res, rep, f = run((3, 3, 3, 3, 3, 2, 2, 2, 2, 2))

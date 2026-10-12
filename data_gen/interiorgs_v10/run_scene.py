@@ -58,6 +58,27 @@ class RunConfig:
     motion_model: str = "r1"              # "horizon_locked" is generator-only (the RL env lacks it)
     pitch_deg: float = 0.0                # fixed pitch for horizon_locked
     diagnostics: bool = False             # keep per-item search reports in the summary
+    # Budget: "wall_clock" = scene_time_budget_s seconds (20261011c; output depends on machine load);
+    # "work" = budget_work_units of counted work (contract.WORK x work_weights), reproducible.
+    budget_mode: str = "wall_clock"
+    budget_work_units: float = 600.0
+    work_weights: Any = None              # {operation: weight}; None -> DEFAULT_WORK_WEIGHTS
+
+
+# Weight of one counted operation (contract.WORK kinds) in work units.  Fitted on the 100-scene
+# sample (cluster_runs/REPORT_FULLRUN_20261012.md) so that one unit is about one second of
+# single-core time on the fujian login pod under a normal load.
+DEFAULT_WORK_WEIGHTS: Dict[str, float] = {
+    "poses_scored": 1.0e-5,
+    "visible_fraction": 5.0e-4,
+    "family_judge": 2.0e-4,
+    "exact_judge": 1.0e-3,
+    "pose_verify": 2.0e-3,
+    "reverse_candidates": 2.0e-6,
+    "examined": 1.0e-3,
+    "certify_states": 5.0e-5,
+    "replay": 2.0e-3,
+}
 
 
 def _jsonable(x: Any) -> Any:
@@ -133,6 +154,7 @@ def _endpoints_for(scene: Any, item: Dict[str, Any], cfg: RunConfig, funnel: Fun
     cands = fam.success_pose_candidates(scene, item, cfg.seed, max_candidates=cfg.max_endpoints, funnel=funnel)
 
     def _sfn(c2w: Any, _item: Dict[str, Any] = item) -> bool:
+        C.WORK.add("family_judge")
         return bool(fam.judge(_item, np.asarray(c2w, float))["success"])
 
     return [np.asarray(c["c2w"], float) for c in cands], _sfn
@@ -204,6 +226,15 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
     summary: Dict[str, Any] = {"scene_id": scene_id or Path(scene_dir).name, "status": "started"}
     rows: List[Dict[str, Any]] = []
     reserve_rows: List[Dict[str, Any]] = []
+    if cfg.budget_mode not in ("wall_clock", "work"):
+        raise ValueError(f"budget_mode must be 'wall_clock' or 'work', not {cfg.budget_mode!r}")
+    work_mode = cfg.budget_mode == "work"
+    weights = dict(cfg.work_weights or DEFAULT_WORK_WEIGHTS)
+    budget = float(cfg.budget_work_units if work_mode else cfg.scene_time_budget_s)
+    C.WORK.reset()
+
+    def spent() -> float:
+        return C.WORK.units(weights) if work_mode else time.perf_counter() - t0
 
     def _tick(name: str, start: float) -> float:
         now = time.perf_counter()
@@ -248,7 +279,7 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
 
         entries = []
         for k, item in enumerate(items):
-            if time.perf_counter() - t0 > cfg.scene_time_budget_s * 0.5:
+            if spent() > budget * 0.5:
                 funnel.add("endpoints", "scene_time_budget_skip", len(items) - k)
                 break
             try:
@@ -272,14 +303,27 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
                     entries.append(q.pop(0))
         t = _tick("endpoints", t)
 
-        remaining = max(10.0, cfg.scene_time_budget_s - (time.perf_counter() - t0))
+        units_after_endpoints = spent()
+        counts_after_endpoints = C.WORK.snapshot()
+        remaining = max(10.0, budget - units_after_endpoints)
         episodes, f, report = episodes_for_scene(scene, entries, target_per_scene=cfg.target_tasks_per_scene,
-                                                 seed=cfg.seed, time_budget_s=remaining,
+                                                 seed=cfg.seed, time_budget_s=None if work_mode else remaining,
+                                                 work_budget=remaining if work_mode else None,
+                                                 work_weights=weights if work_mode else None,
                                                  family_quotas=cfg.family_quotas, reserve_k=cfg.reserve_k,
                                                  terminal_identifiable=cfg.terminal_identifiable,
                                                  soft_max=cfg.family_quota_soft_max)
         funnel.merge(f)
         t = _tick("episodes", t)
+        if work_mode:
+            summary["work"] = {
+                "budget_units": budget, "units_after_endpoints": round(units_after_endpoints, 3),
+                "units_total": round(spent(), 3),
+                "endpoint_stage_hit": bool(funnel.counts.get("endpoints", {}).get("scene_time_budget_skip")),
+                "initial_state_stage_hit": bool(report.get("timed_out")),
+                "reserve_hit": bool(report.get("reserve_timed_out")),
+                "counts_after_endpoints": counts_after_endpoints, "counts_total": C.WORK.snapshot(),
+            }
         by_key = {e["key"]: e["item"] for e in entries}
         for ep in episodes:
             item = by_key.get(ep.get("item_key"))

@@ -175,6 +175,49 @@ def aggregate(out: Path, *, target_per_scene: int = 11, total_target: int = 1000
     return summary
 
 
+# command-line option dest -> RunConfig field
+_CLI_FIELDS = {
+    "target_per_scene": "target_tasks_per_scene", "scene_time_budget": "scene_time_budget_s",
+    "families": "families", "include_fov": "include_fov", "reserve_k": "reserve_k",
+    "family_quotas": "family_quotas", "family_quota_soft_max": "family_quota_soft_max",
+    "terminal_identifiable": "terminal_identifiable", "motion_model": "motion_model", "pitch_deg": "pitch_deg",
+    "diagnostics": "diagnostics", "budget_mode": "budget_mode", "budget_work_units": "budget_work_units",
+}
+
+
+def load_config(path: Path) -> Dict[str, Any]:
+    """RunConfig fields from a configs/generation_*.json file ({"run_config": {...}})."""
+    from .run_scene import RunConfig
+
+    data = json.loads(Path(path).read_text())
+    fields = dict(data.get("run_config", data))
+    known = set(RunConfig.__dataclass_fields__)
+    unknown = sorted(set(fields) - known)
+    if unknown:
+        raise ValueError(f"{path}: unknown RunConfig fields {unknown}")
+    if "families" in fields:
+        fields["families"] = tuple(fields["families"])
+    return fields
+
+
+def explicit_dests(ap: argparse.ArgumentParser, argv: Optional[Sequence[str]]) -> set:
+    """Option dests that were given on the command line (not left at their default)."""
+    given = list(sys.argv[1:] if argv is None else argv)
+    out = set()
+    for action in ap._actions:
+        if any(opt in given or any(g.startswith(opt + "=") for g in given) for opt in action.option_strings):
+            out.add(action.dest)
+    return out
+
+
+def merge_config(file_fields: Dict[str, Any], cli_fields: Dict[str, Any], explicit: set) -> Dict[str, Any]:
+    out = dict(file_fields)
+    for dest, field in _CLI_FIELDS.items():
+        if dest in explicit:
+            out[field] = cli_fields[field]
+    return out
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scenes-root")
@@ -201,6 +244,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="horizon_locked is generator-only; the RL env implements r1 only")
     ap.add_argument("--pitch-deg", type=float, default=0.0)
     ap.add_argument("--diagnostics", action="store_true", help="keep per-item search reports in scene summaries")
+    ap.add_argument("--budget-mode", choices=("wall_clock", "work"), default="wall_clock",
+                    help="work: reproducible budget in counted work units instead of wall-clock seconds")
+    ap.add_argument("--budget-work-units", type=float, default=600.0)
+    ap.add_argument("--config", type=Path, help="JSON file of RunConfig fields (configs/generation_*.json); "
+                                                 "flags given explicitly on the command line override it")
     args = ap.parse_args(argv)
     if not args.aggregate:
         if not args.scenes_root:
@@ -217,7 +265,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "motion_model": args.motion_model,
             "pitch_deg": args.pitch_deg,
             "diagnostics": bool(args.diagnostics),
+            "budget_mode": args.budget_mode,
+            "budget_work_units": args.budget_work_units,
         }
+        if args.config:
+            cfg_kwargs = merge_config(load_config(args.config), cfg_kwargs, explicit_dests(ap, argv))
         run(Path(args.scenes_root), Path(args.out), workers=args.workers, shard=args.shard,
             num_shards=args.num_shards, limit=args.limit, only=args.only, cfg_kwargs=cfg_kwargs)
     summary = aggregate(Path(args.out), n_scenes_expected=args.expected_scenes)

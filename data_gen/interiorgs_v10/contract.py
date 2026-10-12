@@ -280,6 +280,34 @@ class Funnel:
         return {k: dict(sorted(v.items())) for k, v in sorted(self.counts.items())}
 
 
+class WorkMeter:
+    """Deterministic count of the expensive operations of one scene's generation.
+
+    Time budgets used to be wall-clock seconds, so a busy machine changed the
+    output.  A budget in work units (operation counts times fixed per-operation
+    weights, ``units``) gives the same result for the same input on any machine.
+    One meter per process (``WORK``); ``run_scene`` resets it at the start of a scene.
+    """
+
+    def __init__(self) -> None:
+        self.counts: Dict[str, int] = {}
+
+    def add(self, kind: str, n: int = 1) -> None:
+        self.counts[kind] = self.counts.get(kind, 0) + int(n)
+
+    def reset(self) -> None:
+        self.counts.clear()
+
+    def snapshot(self) -> Dict[str, int]:
+        return dict(sorted(self.counts.items()))
+
+    def units(self, weights: Dict[str, float]) -> float:
+        return float(sum(float(weights.get(k, 0.0)) * v for k, v in self.counts.items()))
+
+
+WORK = WorkMeter()
+
+
 def stable_hash(payload: Any) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=_json_default).encode()).hexdigest()
 

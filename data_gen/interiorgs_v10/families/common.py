@@ -36,6 +36,7 @@ from ..contract import (
     STEP_TRANSLATION_M,
     Funnel,
     Obj,
+    WORK,
     apply_action,
     pose_from_xy_yaw,
 )
@@ -190,6 +191,7 @@ def facing_pose(x: float, y: float, target_xy: Sequence[float], offset_deg: floa
 
 def probe_item_feasible(item: Dict[str, Any], judge: Callable, poses: Iterable[np.ndarray]) -> bool:
     for pose in poses:
+        WORK.add("family_judge")
         if judge(item, pose)["success"]:
             return True
     return False
@@ -214,6 +216,7 @@ def generic_probe_feasible(item: Dict[str, Any], family: Any, radius: float = 5.
     for i in rng.permutation(len(xy)):
         x, y = float(xy[i][0]), float(xy[i][1])
         for off in offsets_deg:
+            WORK.add("family_judge")
             if family.judge(item, facing_pose(x, y, (ax, ay), off))["success"]:
                 return True
     return False
@@ -295,6 +298,7 @@ def lattice_support(item: Dict[str, Any], judge: Callable, c2w: np.ndarray,
             ok, _ = scene.transition_legal(c2w, nxt)
             if not ok:
                 continue
+        WORK.add("family_judge")
         if judge(item, nxt)["success"]:
             n += 1
     return n
@@ -335,6 +339,7 @@ def sample_success_poses(scene: Any, item: Dict[str, Any], seed: int, family: An
         base = math.atan2(ay - y, ax - x)
         for off in rng.permutation(np.asarray(yaw_offsets_deg, float)):
             c2w = pose_from_xy_yaw(x, y, base + math.radians(float(off)))
+            WORK.add("family_judge")
             metric = family.judge(item, c2w)
             if not metric["success"]:
                 continue

@@ -60,7 +60,7 @@ from vagen.envs.active_spatial.canonical_camera import (
 )
 from vagen.envs.active_spatial.visual_bbox_metrics import _project_object
 
-from .contract import NATIVE_K, NATIVE_SIZE, RENDER_SIZE, Obj
+from .contract import NATIVE_K, NATIVE_SIZE, RENDER_SIZE, WORK, Obj
 
 OCCLUSION_MODEL_VERSION = "interiorgs_v10_aabb_wall_rays_v1"
 WALL_HEIGHT_M = 2.8
@@ -353,6 +353,7 @@ def visible_fraction(scene: Any, c2w: Any, obj: Any, occluders: Any = None,
     target entries (plus the scene's structure walls).  The target itself is
     always excluded by id.
     """
+    WORK.add("visible_fraction")
     occ = _resolve_occluders(scene, occluders)
     oid, _, bmin, bmax = box_of(obj)
     c2w = np.asarray(c2w, float)

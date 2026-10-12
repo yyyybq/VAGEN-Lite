@@ -73,8 +73,8 @@ from vagen.envs.active_spatial.canonical_task_metrics import (
 from vagen.envs.active_spatial.visual_bbox_metrics import _as_array, _match_object
 
 from . import sampling
-from .contract import (CAMERA_HEIGHT_M, Funnel, Obj, horizon_locked, motion_model, pose_from_xy_yaw, stable_hash,
-                       state_key, yaw_of)
+from .contract import (CAMERA_HEIGHT_M, WORK, Funnel, Obj, horizon_locked, motion_model, pose_from_xy_yaw,
+                       stable_hash, state_key, yaw_of)
 from .occlusion import (
     CX,
     CY,
@@ -324,6 +324,7 @@ def evaluate_poses(scene: Any, item: Dict[str, Any], R: np.ndarray, C: np.ndarra
     R = np.asarray(R, float).reshape(-1, 3, 3)
     C = np.asarray(C, float).reshape(-1, 3)
     n = C.shape[0]
+    WORK.add("poses_scored", n)
     pa, pb = (_project_batch(t, R, C) for t in targets)
     relation = str(((item.get("target_region") or {}).get("params") or {}).get("relation", "left"))
     names, gates, extra = _canonical_batch(item["task_type"], relation, pa, pb)
@@ -801,6 +802,7 @@ def _verify_and_pack(scene: Any, item: Dict[str, Any], targets: Sequence[_Target
                      yaw: float, ev: Dict[str, Any], i: int, cfg: Dict[str, Any], mode: str,
                      funnel: Funnel) -> Optional[Dict[str, Any]]:
     c2w = pose_from_xy_yaw(float(x), float(y), float(yaw))
+    WORK.add("pose_verify")
     ok, reason = scene.is_pose_legal(c2w)
     if not ok:
         funnel.add("endpoint_verify", "mismatch_legal")
@@ -970,6 +972,7 @@ def success_fn(item: Dict[str, Any], scene: Any = None, *, min_visible: float = 
 
     def _exact(c2w: Any) -> bool:
         c2w = np.asarray(c2w, float)
+        WORK.add("exact_judge")
         ok = bool(sampling.score(item, c2w).get("success"))
         if ok:
             ok = all(visible_fraction(scene, c2w, t.entry, occluders=occ, n=occlusion_n) >= min_visible
