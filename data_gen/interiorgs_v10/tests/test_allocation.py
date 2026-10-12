@@ -172,12 +172,12 @@ class AllocationTest(unittest.TestCase):
         self.assertLessEqual(report["reserve_family_counts"].get("fam_a", 0), 2)
 
     def test_family_terminal_roles(self):
-        from data_gen.interiorgs_v10.families import absolute_positioning
-
+        # occlusion_alignment is the only family whose terminal frame may hide a target
         self.assertIsNone(I._family_terminal_roles(self.entries[0]["item"]))
         self.assertEqual(I._family_terminal_roles({"task_type": "occlusion_alignment"}), (1,))
-        self.assertEqual(I._family_terminal_roles({"task_type": "absolute_positioning"}),
-                         tuple(absolute_positioning.TERMINAL_IDENTIFIABLE_ROLES))
+        for fam in ("absolute_positioning", "screen_occupancy", "equidistance", "projective_relations",
+                    "size_distance_invariance", "centering"):
+            self.assertIsNone(I._family_terminal_roles({"task_type": fam}), fam)
 
 
 class DefaultOutputTest(unittest.TestCase):

@@ -914,15 +914,22 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
     return out, funnel, report
 
 
+# Families allowed to leave a target unidentifiable in the terminal frame (user decision 2026-10-12):
+# occlusion_alignment hides its target behind the occluder by definition; its judge still requires
+# the target in front of the camera, >= 80% of its outline inside the frame and >= 85% of that hidden.
+TERMINAL_ROLE_EXCEPTIONS = frozenset({"occlusion_alignment"})
+
+
 def _family_terminal_roles(item: Dict[str, Any]) -> Optional[Tuple[int, ...]]:
-    """TERMINAL_IDENTIFIABLE_ROLES of a v2 family (None = all targets, e.g. Projective / FOV)."""
-    try:
-        from .families.canonical_v2 import FAMILIES
-    except Exception:
+    """Terminal roles that must be identifiable: the family's TERMINAL_IDENTIFIABLE_ROLES for the
+    families in TERMINAL_ROLE_EXCEPTIONS, None (= every target) for all others."""
+    task_type = str(item.get("task_type"))
+    if task_type not in TERMINAL_ROLE_EXCEPTIONS:
         return None
-    fam = FAMILIES.get(str(item.get("task_type")))
-    roles = getattr(fam, "TERMINAL_IDENTIFIABLE_ROLES", None) if fam is not None else None
-    return tuple(int(r) for r in roles) if roles is not None else None
+    from .families.canonical_v2 import FAMILIES
+
+    roles = getattr(FAMILIES[task_type], "TERMINAL_IDENTIFIABLE_ROLES")
+    return tuple(int(r) for r in roles)
 
 
 def _fill_reserve(searches: Sequence[ItemSearch], main: Sequence[Dict[str, Any]], k: int, target: int,

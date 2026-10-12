@@ -265,6 +265,33 @@ class FamiliesTest(unittest.TestCase):
         self.assertFalse(m["success"])
         self.assertFalse(m["gates"]["target_in_view_direction"] and m["gates"]["occluder_inside_frame"])
 
+    def test_occlusion_episodes_end_hidden_and_in_frame(self):
+        from data_gen.interiorgs_v10 import initial_states as IS
+        from data_gen.interiorgs_v10 import occlusion as O
+
+        item, cands = self._family_cases("occlusion_alignment")[0]
+        scene = self.scenes[item["scene_id"]]
+        fam = V.FAMILIES["occlusion_alignment"]
+        entry = {"item": item, "endpoints": [c["c2w"] for c in cands],
+                 "success_fn": lambda c2w: bool(fam.judge(item, c2w)["success"])}
+        eps_all, _, _ = IS.episodes_for_scene(scene, [entry], target_per_scene=4, seed=0)
+        self.assertEqual(eps_all, [])  # "every target identifiable" can never hold for a hidden target
+        eps, _, _ = IS.episodes_for_scene(scene, [entry], target_per_scene=4, seed=0,
+                                          terminal_identifiable="family")
+        self.assertGreater(len(eps), 0)
+        target, occluder = (C.scene_object(scene, C.role_entry(item, i)) for i in (0, 1))
+        for ep in eps:
+            pose = np.asarray(ep["init_c2w"])
+            for a in ep["certificate"]:
+                pose = K.apply_action(pose, a)
+            m = fam.judge(item, pose)
+            self.assertTrue(m["success"])
+            self.assertTrue(m["gates"]["target_in_front"])
+            self.assertGreaterEqual(m["target_in_frame_fraction"], 0.80)  # in the frame, not out of view
+            self.assertGreaterEqual(m["target_hidden_fraction"], 0.85)    # and behind the occluder
+            self.assertTrue(O.identifiable(scene, pose, occluder)["identifiable"])
+            self.assertFalse(O.identifiable(scene, pose, target)["identifiable"])
+
     def test_necessary_mask_and_yaw_window_are_sound(self):
         rng = np.random.default_rng(11)
         for task_type, fam in V.FAMILIES.items():
