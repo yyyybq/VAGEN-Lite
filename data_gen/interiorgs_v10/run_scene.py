@@ -74,25 +74,31 @@ def ignored_object_ids(path: Optional[str], scene_id: str) -> List[str]:
     if not path:
         return []
     if path not in _IGNORED_CACHE:
-        data = json.loads(Path(path).read_text())
+        p = Path(path)
+        if not p.is_absolute() and not p.exists():  # config files name it relative to the repository root
+            p = Path(__file__).resolve().parents[2] / p
+        data = json.loads(p.read_text())
         _IGNORED_CACHE[path] = {str(s): sorted(str(o["ins_id"]) for o in objs)
                                 for s, objs in (data.get("scenes") or {}).items()}
     return list(_IGNORED_CACHE[path].get(str(scene_id), []))
 
 
-# Weight of one counted operation (contract.WORK kinds) in work units.  Fitted on the 100-scene
-# sample (cluster_runs/REPORT_FULLRUN_20261012.md) so that one unit is about one second of
-# single-core time on the fujian login pod under a normal load.
+# Weight of one counted operation (contract.WORK kinds) in work units.  Fitted (non-negative least
+# squares on relative error) to the per-stage seconds of an unbudgeted run of the 100 sample scenes
+# with 10 workers on the 14-CPU fujian login pod, so that one unit is about one second of
+# single-core time there (cluster_runs/REPORT_FULLRUN_20261012.md).  Kinds fitted to zero are
+# still counted (summary["work"]) but do not spend budget.
 DEFAULT_WORK_WEIGHTS: Dict[str, float] = {
-    "poses_scored": 1.0e-5,
-    "visible_fraction": 5.0e-4,
-    "family_judge": 2.0e-4,
-    "exact_judge": 1.0e-3,
-    "pose_verify": 2.0e-3,
-    "reverse_candidates": 2.0e-6,
-    "examined": 1.0e-3,
-    "certify_states": 5.0e-5,
-    "replay": 2.0e-3,
+    "poses_scored": 3.15e-5,
+    "visible_fraction": 1.35e-3,
+    "family_judge": 2.04e-4,
+    "pose_verify": 3.81e-2,
+    "occlusion_ray_tests": 7.76e-9,
+    "exact_judge": 0.0,
+    "reverse_candidates": 0.0,
+    "examined": 0.0,
+    "certify_states": 0.0,
+    "replay": 0.0,
 }
 
 
@@ -342,6 +348,7 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
                 "units_total": round(spent(), 3),
                 "endpoint_stage_hit": bool(funnel.counts.get("endpoints", {}).get("scene_time_budget_skip")),
                 "initial_state_stage_hit": bool(report.get("timed_out")),
+                "main_set_units": round(units_after_endpoints + float(report.get("main_work_units") or 0.0), 3),
                 "reserve_hit": bool(report.get("reserve_timed_out")),
                 "counts_after_endpoints": counts_after_endpoints, "counts_total": C.WORK.snapshot(),
             }

@@ -99,6 +99,27 @@ class ConfigFileTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_config(path)
 
+    def test_config_files(self):
+        import dataclasses
+
+        root = Path(__file__).resolve().parents[1] / "configs"
+        old = RunConfig(**load_config(root / "generation_20261011c.json"))
+        # the 20261011c file spells out the defaults, so it reproduces that run
+        self.assertEqual(dataclasses.asdict(old), dataclasses.asdict(RunConfig()))
+        final_path = root / "generation_final_20261012.json"
+        if final_path.exists():
+            final = RunConfig(**load_config(final_path))
+            self.assertEqual(final.budget_mode, "work")
+            self.assertEqual(final.terminal_identifiable, "family")
+            self.assertTrue(final.family_quota_soft_max)
+            self.assertEqual(final.reserve_k, 16)
+            self.assertEqual(final.motion_model, "r1")
+            self.assertFalse(final.include_fov)
+            self.assertEqual(final.work_weights, DEFAULT_WORK_WEIGHTS)  # the defaults are the fitted weights
+            from data_gen.interiorgs_v10.run_scene import ignored_object_ids
+
+            self.assertIn("19", ignored_object_ids(final.ignored_objects, "0068_839928"))
+
     def test_explicit_dests(self):
         import argparse
 

@@ -1,0 +1,24 @@
+{
+  "description": "Configuration of the 2026-10-11 full run (exps/vagen_active_spatial/interiorgs_v10_gen_20261011c). These are the RunConfig defaults written out; the budget is wall-clock seconds, so scenes that hit it (4 of 1,000) can differ between machines and loads.",
+  "run_config": {
+    "object_preset": "v10_relaxed",
+    "families": ["projective_relations", "absolute_positioning", "screen_occupancy", "equidistance", "occlusion_alignment"],
+    "include_fov": false,
+    "target_tasks_per_scene": 14,
+    "max_projective_items": 40,
+    "max_items_per_new_family": 8,
+    "max_endpoints": 8,
+    "endpoint_mode": "v10",
+    "scene_time_budget_s": 600.0,
+    "seed": 0,
+    "require_usable_convention": true,
+    "reserve_k": 0,
+    "family_quotas": null,
+    "family_quota_soft_max": false,
+    "terminal_identifiable": "all",
+    "motion_model": "r1",
+    "pitch_deg": 0.0,
+    "budget_mode": "wall_clock",
+    "ignored_objects": null
+  }
+}

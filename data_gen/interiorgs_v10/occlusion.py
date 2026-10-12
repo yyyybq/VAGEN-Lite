@@ -276,6 +276,7 @@ def rays_occluded(occ: OccluderSet, origins: np.ndarray, points: np.ndarray,
     maxs_all = occ.maxs[keep]
 
     M = max(1, mins_all.shape[0] + occ.wall_a.shape[0])
+    WORK.add("occlusion_ray_tests", P * K * M)  # segment-box / segment-wall tests: the dominant cost
     step = max(1, int(_CHUNK_ELEMS // max(1, K * M * 3)))
     for s0 in range(0, P, step):
         o = O[s0:s0 + step]

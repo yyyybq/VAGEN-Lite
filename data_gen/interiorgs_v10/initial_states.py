@@ -895,6 +895,7 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
         if not searches:
             reasons["no_items"] = 1
         shortfall[band_name(b)] = {"missing": int(missing), "item_stop_reasons": reasons}
+    main_work_units = (WORK.units(work_weights or {}) - u0) if work_budget is not None else None
     reserve: List[Dict[str, Any]] = []
     reserve_report: Dict[str, Any] = {}
     if reserve_k > 0:
@@ -924,6 +925,8 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
     if quotas is not None:
         report["family_quotas"] = {f: list(q) for f, q in quotas.items()}
         report["family_counts"] = dict(sorted(fam_count.items()))
+    if main_work_units is not None:
+        report["main_work_units"] = main_work_units
     if reserve_k > 0:
         report["reserve"] = reserve
         report.update(reserve_report)
