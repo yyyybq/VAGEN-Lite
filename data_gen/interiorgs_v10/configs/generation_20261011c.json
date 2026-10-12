@@ -19,6 +19,7 @@
     "motion_model": "r1",
     "pitch_deg": 0.0,
     "budget_mode": "wall_clock",
-    "ignored_objects": null
+    "ignored_objects": null,
+    "runtime_success_check": false
   }
 }

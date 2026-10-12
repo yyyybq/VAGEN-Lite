@@ -182,7 +182,7 @@ _CLI_FIELDS = {
     "family_quotas": "family_quotas", "family_quota_soft_max": "family_quota_soft_max",
     "terminal_identifiable": "terminal_identifiable", "motion_model": "motion_model", "pitch_deg": "pitch_deg",
     "diagnostics": "diagnostics", "budget_mode": "budget_mode", "budget_work_units": "budget_work_units",
-    "ignored_objects": "ignored_objects",
+    "ignored_objects": "ignored_objects", "runtime_success_check": "runtime_success_check",
 }
 
 
@@ -250,6 +250,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--budget-work-units", type=float, default=600.0)
     ap.add_argument("--ignored-objects", default=None,
                     help="configs/ignored_objects_*.json: drop these labels.json instances (annotation errors)")
+    ap.add_argument("--runtime-success-check", action="store_true",
+                    help="Projective/FOV: reject initial states from which the env's own success rule "
+                         "(no occlusion gate) succeeds before d*")
     ap.add_argument("--config", type=Path, help="JSON file of RunConfig fields (configs/generation_*.json); "
                                                  "flags given explicitly on the command line override it")
     args = ap.parse_args(argv)
@@ -271,6 +274,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "budget_mode": args.budget_mode,
             "budget_work_units": args.budget_work_units,
             "ignored_objects": args.ignored_objects,
+            "runtime_success_check": bool(args.runtime_success_check),
         }
         if args.config:
             cfg_kwargs = merge_config(load_config(args.config), cfg_kwargs, explicit_dests(ap, argv))

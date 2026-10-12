@@ -1,5 +1,5 @@
 {
-  "description": "Final generation config of 2026-10-12 (cluster_runs/REPORT_FULLRUN_20261012.md). Horizontal pitch (r1 motion); family quotas with a soft maximum; up to 16 reserve tasks per scene; occlusion_alignment's final frame only needs the occluder identifiable; confirmed annotation errors ignored; FOV off; reproducible work-unit budget of 600 units (about 600 s of single-core time on the fujian login pod), chosen so that the same 1 of the 100 sample scenes hits it as with the old 600 s wall-clock budget.",
+  "description": "Final generation config of 2026-10-12 (cluster_runs/REPORT_FULLRUN_20261012.md). Horizontal pitch (r1 motion); family quotas with a soft maximum; up to 16 reserve tasks per scene; occlusion_alignment's final frame only needs the occluder identifiable; confirmed annotation errors ignored; FOV off; Projective start states are rejected when the env's own success rule (no occlusion gate) would fire before d*; reproducible work-unit budget of 600 units (about 600 s of single-core time on the fujian login pod), chosen so that the same 1 of the 100 sample scenes hits it as with the old 600 s wall-clock budget.",
   "run_config": {
     "object_preset": "v10_relaxed",
     "families": ["projective_relations", "absolute_positioning", "screen_occupancy", "equidistance", "occlusion_alignment"],
@@ -31,6 +31,7 @@
       "certify_states": 0.0,
       "replay": 0.0
     },
-    "ignored_objects": "data_gen/interiorgs_v10/configs/ignored_objects_20261012.json"
+    "ignored_objects": "data_gen/interiorgs_v10/configs/ignored_objects_20261012.json",
+    "runtime_success_check": true
   }
 }

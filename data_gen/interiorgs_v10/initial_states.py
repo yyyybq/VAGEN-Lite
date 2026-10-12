@@ -224,13 +224,17 @@ class ItemSearch:
                  diversity_deg: float = 30.0, require_terminal_identifiable: bool = True,
                  require_generator_safe_certificate: bool = False, funnel: Optional[Funnel] = None,
                  item_key: Any = None, max_examined: int = 1500, max_terminal_checks: int = 24,
-                 terminal_roles: Optional[Sequence[int]] = None) -> None:
+                 terminal_roles: Optional[Sequence[int]] = None, runtime_success_fn: Any = None) -> None:
         self.scene, self.item = scene, item
         self.bands = [tuple(int(v) for v in b) for b in bands]
         self.d_max = max(hi for _, hi in self.bands)
         if self.d_max > MAX_PRIMITIVE_STEPS:
             raise ValueError("bands exceed the runtime primitive step budget")
         self.oracle: SuccessOracle = as_oracle(success_fn if success_fn is not None else make_success_fn(item))
+        # The env's own success rule when it is looser than ``success_fn`` (Projective / FOV: the env has no
+        # occlusion gate).  A candidate is rejected if the env would report success in fewer than d* steps.
+        self.runtime_oracle: Optional[SuccessOracle] = (as_oracle(runtime_success_fn)
+                                                        if runtime_success_fn is not None else None)
         self.endpoints = list(endpoints)
         self.rng = np.random.default_rng(seed)
         self.obs_fn, self.obs_source = resolve_observability_fn(observability_fn)
@@ -494,6 +498,18 @@ class ItemSearch:
         if self.require_safe_cert and not cert.get("certificate_generator_safe"):
             self._cand("certificate_not_generator_safe")
             return None
+        if self.runtime_oracle is not None:
+            t3 = time.perf_counter()
+            rt = certify_d_star(self.scene, self.runtime_oracle, c2w, d_max=d - 1, max_states=self.max_states,
+                                geometry=self.geom, max_terminal_checks=0)
+            self.timing["certify_s"] += time.perf_counter() - t3
+            WORK.add("certify_states", int(rt["states"]))
+            if rt["d_star"] is not None:
+                self._cand("runtime_success_before_d_star")
+                return None
+            if rt["status"] == "state_cap" or not rt["lower_bound_complete"]:
+                self._cand("runtime_check_incomplete")
+                return None
         t2 = time.perf_counter()
         WORK.add("replay")
         rep = replay_certificate(self.scene, self.oracle, c2w, cert["certificate"], check_generator_safe=True)
@@ -749,6 +765,7 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
                        family_quotas: Any = None, reserve_k: int = 0,
                        terminal_identifiable: str = "all", soft_max: bool = False,
                        work_budget: Optional[float] = None, work_weights: Optional[Dict[str, float]] = None,
+                       runtime_success_check: bool = False,
                        **search_kwargs: Any) -> Tuple[List[Dict[str, Any]], Funnel, Dict[str, Any]]:
     """Allocate ``target_per_scene`` episodes across items and bands.
 
@@ -776,6 +793,11 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
       terminal_identifiable  "all" (every target identifiable at the terminal pose)
                      or "family" (only the family's TERMINAL_IDENTIFIABLE_ROLES, e.g.
                      the occluder of occlusion_alignment, whose target is hidden by definition).
+      runtime_success_check  for families whose generator success is stricter than the
+                     env's (RUNTIME_LOOSER_FAMILIES: Projective / FOV add an occlusion gate the
+                     env lacks), reject initial states from which the env's own rule
+                     (``difficulty.make_success_fn``) succeeds in fewer than d* steps, so the
+                     env's success fires exactly at d*.
     """
     t0 = time.perf_counter()
     u0 = WORK.units(work_weights or {}) if work_budget is not None else 0.0
@@ -807,6 +829,8 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
         extra = {}
         if terminal_identifiable == "family":
             extra["terminal_roles"] = _family_terminal_roles(item)
+        if runtime_success_check and str(item.get("task_type")) in RUNTIME_LOOSER_FAMILIES:
+            extra["runtime_success_fn"] = make_success_fn(item)
         searches.append(ItemSearch(scene, item, sfn, eps, bands=bands, seed=seed + 1009 * k,
                                    observability_fn=observability_fn, funnel=funnel,
                                    item_key=key if key is not None else k, **extra, **search_kwargs))
@@ -937,6 +961,9 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
 # occlusion_alignment hides its target behind the occluder by definition; its judge still requires
 # the target in front of the camera, >= 80% of its outline inside the frame and >= 85% of that hidden.
 TERMINAL_ROLE_EXCEPTIONS = frozenset({"occlusion_alignment"})
+# Families whose env success rule is looser than the generator's (no occlusion gate in
+# canonical_spatial_task_h1_v1); see episodes_for_scene(runtime_success_check=...).
+RUNTIME_LOOSER_FAMILIES = frozenset({"projective_relations", "fov_inclusion"})
 
 
 def _family_terminal_roles(item: Dict[str, Any]) -> Optional[Tuple[int, ...]]:

@@ -64,6 +64,7 @@ class RunConfig:
     budget_work_units: float = 600.0
     work_weights: Any = None              # {operation: weight}; None -> DEFAULT_WORK_WEIGHTS
     ignored_objects: Optional[str] = None  # configs/ignored_objects_*.json: confirmed annotation errors
+    runtime_success_check: bool = False   # Projective/FOV: reject starts where the env succeeds before d*
 
 
 _IGNORED_CACHE: Dict[str, Dict[str, List[str]]] = {}
@@ -339,7 +340,8 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
                                                  work_weights=weights if work_mode else None,
                                                  family_quotas=cfg.family_quotas, reserve_k=cfg.reserve_k,
                                                  terminal_identifiable=cfg.terminal_identifiable,
-                                                 soft_max=cfg.family_quota_soft_max)
+                                                 soft_max=cfg.family_quota_soft_max,
+                                                 runtime_success_check=cfg.runtime_success_check)
         funnel.merge(f)
         t = _tick("episodes", t)
         if work_mode:
