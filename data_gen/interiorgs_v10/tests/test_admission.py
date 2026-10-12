@@ -271,6 +271,20 @@ class AdmissionTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             R.assign_splits(["a", "b"], groups=[["a", "b"]], reserved={"a": "train", "b": "test"})
 
+    def test_split_requires_explicit_groups(self):
+        scenes = [f"s{i:02d}" for i in range(10)]
+        with self.assertRaises(ValueError):
+            R.same_source_groups(scenes)
+        with self.assertRaises(ValueError):
+            R.assign_splits(scenes)  # groups=None no longer means "no groups"
+        self.assertEqual(R.assign_splits(scenes, groups=[])["physical_groups"], 10)
+        path = self.root / "groups.json"
+        path.write_text(json.dumps({"version": "scene_identity_v1", "groups": [["s01", "s07"]], "edges": []}))
+        groups = R.load_groups(path)
+        self.assertEqual(groups, [["s01", "s07"]])
+        look = R.split_lookup(R.assign_splits(scenes, groups=groups))
+        self.assertEqual(look["s01"], look["s07"])
+
     def test_regeneration_planner(self):
         stats = {
             "full": {"admitted_rl": 12, "attempted": 20},
@@ -312,7 +326,7 @@ class AdmissionTest(unittest.TestCase):
         # one-target-cropped initial frame must not block anything
         reviews[0]["frames"]["s0"]["targets_identifiable"]["B"] = False
         out = self.root / "release"
-        summary = R.build_release(out, rows, reviews, self.policy, qa_items=qa, renders=renders,
+        summary = R.build_release(out, rows, reviews, self.policy, qa_items=qa, renders=renders, groups=[],
                                   reserved={"two_rooms": "train", "dense_duplicates": "val"})
         self.assertEqual(summary["rl"]["total"], 2)
         self.assertEqual(summary["sft"]["total"], 2)

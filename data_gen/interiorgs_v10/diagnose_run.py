@@ -246,7 +246,6 @@ def split_simulation(scenes: Sequence[Dict[str, Any]], scenes_root: Path,
                     sid = json.loads(line).get("scene_id")
                     if sid and sid in fps:
                         reserved[sid] = split
-    autodetected = release.same_source_groups(ids)
     manifest = release.assign_splits(ids, groups=groups, reserved=reserved)
     lookup = release.split_lookup(manifest)
     aliases = release.groups_to_aliases(groups)
@@ -267,7 +266,6 @@ def split_simulation(scenes: Sequence[Dict[str, Any]], scenes_root: Path,
         "same_source_groups": groups,
         "same_source_pairs": [[a, b, round(float(s), 3)] for a, b, s in pairs],
         "scenes_in_groups": sum(len(g) for g in groups),
-        "release_same_source_groups_autodetect": len(autodetected),
         "reserved_pins": Counter(reserved.values()),
         "physical_groups": manifest["physical_groups"],
         "splits": table,

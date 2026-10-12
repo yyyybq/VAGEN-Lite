@@ -86,19 +86,23 @@ def groups_to_aliases(groups: Any) -> Dict[str, str]:
 
 
 def same_source_groups(scene_ids: Iterable[str]) -> Dict[str, str]:
-    """Feature-detect workstream G's scene_identity module (optional)."""
-    try:
-        from . import scene_identity  # type: ignore
-    except Exception:
-        return {}
-    for name in ("same_source_groups", "physical_scene_groups", "scene_groups", "group_scenes"):
-        fn = getattr(scene_identity, name, None)
-        if callable(fn):
-            try:
-                return groups_to_aliases(fn(sorted(scene_ids)))
-            except Exception:
-                continue
-    return {}
+    """Same-source groups cannot be derived from scene ids alone: they need the scenes'
+    geometry (``scene_identity.group_same_source`` over fingerprints, e.g. the file
+    ``cluster_runs/same_source_groups_20261012.json``).  This used to feature-detect a
+    function that does not exist and silently return no groups, so that same-source
+    scenes could land in different splits; it now refuses."""
+    raise ValueError("same-source groups must be passed explicitly (groups=<list of scene-id lists> or a "
+                     "{'groups': [...]} file such as cluster_runs/same_source_groups_20261012.json); "
+                     "pass groups=[] only after checking that there are none")
+
+
+def load_groups(path: Union[str, Path]) -> List[List[str]]:
+    """Read a same-source groups file ({"groups": [[scene, ...], ...]} or a bare list)."""
+    data = json.loads(Path(path).read_text())
+    groups = data.get("groups") if isinstance(data, Mapping) else data
+    if not isinstance(groups, list) or not all(isinstance(g, list) for g in groups):
+        raise ValueError(f"{path}: expected a list of scene-id lists under 'groups'")
+    return [[str(s) for s in g] for g in groups]
 
 
 def _release_contract():
@@ -115,7 +119,7 @@ def assign_splits(scene_ids: Iterable[str], *, groups: Any = None, ratios: Optio
                   frozen: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """Assign physical scene groups to train/val/test (version-2 manifest).
 
-    * same-source scenes (``groups`` or scene_identity) never cross splits;
+    * same-source scenes (``groups``, required: ``[]`` means checked and none) never cross splits;
     * reserved scenes and every scene of a ``frozen`` previous manifest keep
       their split (stable across regeneration rounds), and pin their group;
     * remaining groups are visited in a seeded hash order and given to the
