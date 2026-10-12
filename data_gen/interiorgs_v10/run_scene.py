@@ -53,6 +53,7 @@ class RunConfig:
     # Optional features; the defaults reproduce the 20261011c generation bit for bit.
     reserve_k: int = 0                    # extra reserve episodes per scene (result["reserve_rows"])
     family_quotas: Any = None             # {task_type: (min, max)} or "fam:min:max,..." per scene
+    family_quota_soft_max: bool = False   # families may exceed their max when no other family can fill
     terminal_identifiable: str = "all"    # "family": only the family's terminal roles must be identifiable
     motion_model: str = "r1"              # "horizon_locked" is generator-only (the RL env lacks it)
     pitch_deg: float = 0.0                # fixed pitch for horizon_locked
@@ -275,7 +276,8 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
         episodes, f, report = episodes_for_scene(scene, entries, target_per_scene=cfg.target_tasks_per_scene,
                                                  seed=cfg.seed, time_budget_s=remaining,
                                                  family_quotas=cfg.family_quotas, reserve_k=cfg.reserve_k,
-                                                 terminal_identifiable=cfg.terminal_identifiable)
+                                                 terminal_identifiable=cfg.terminal_identifiable,
+                                                 soft_max=cfg.family_quota_soft_max)
         funnel.merge(f)
         t = _tick("episodes", t)
         by_key = {e["key"]: e["item"] for e in entries}

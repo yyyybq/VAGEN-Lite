@@ -194,6 +194,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # optional features (defaults reproduce the default generation exactly)
     ap.add_argument("--reserve-k", type=int, default=0, help="reserve episodes per scene -> tasks_reserve.jsonl")
     ap.add_argument("--family-quotas", default=None, help='per-scene "family:min:max,..." (max * = unlimited)')
+    ap.add_argument("--family-quota-soft-max", action="store_true",
+                    help="a family may exceed its max when no other family can fill the scene")
     ap.add_argument("--terminal-identifiable", choices=("all", "family"), default="all")
     ap.add_argument("--motion-model", choices=("r1", "horizon_locked"), default="r1",
                     help="horizon_locked is generator-only; the RL env implements r1 only")
@@ -210,6 +212,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "include_fov": bool(args.include_fov),
             "reserve_k": args.reserve_k,
             "family_quotas": args.family_quotas,
+            "family_quota_soft_max": bool(args.family_quota_soft_max),
             "terminal_identifiable": args.terminal_identifiable,
             "motion_model": args.motion_model,
             "pitch_deg": args.pitch_deg,

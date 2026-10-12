@@ -88,6 +88,30 @@ class AllocationTest(unittest.TestCase):
         self.assertLessEqual(counts.get("fam_b", 0), 2)
         self.assertEqual(report["family_counts"], dict(sorted(counts.items())))
 
+    def test_soft_max_fills_only_when_other_families_cannot(self):
+        fam_of = {k: e["item"]["task_type"] for k, e in enumerate(self.entries)}
+        alone, _, _ = I.episodes_for_scene(self.scene, self.entries[:1], target_per_scene=6, seed=3)
+        # one family only, max 2: the hard max leaves the scene short, the soft max fills it
+        hard, _, _ = I.episodes_for_scene(self.scene, self.entries[:1], target_per_scene=6, seed=3,
+                                          family_quotas="fam_a:0:2")
+        soft, f, rep = I.episodes_for_scene(self.scene, self.entries[:1], target_per_scene=6, seed=3,
+                                            family_quotas="fam_a:0:2", soft_max=True)
+        self.assertLessEqual(len(hard), 2)
+        self.assertEqual(len(soft), len(alone))
+        self.assertGreater(len(soft), len(hard))
+        self.assertEqual(f.to_dict()["init_scene_allocation"].get("family_soft_max_extra"), len(soft) - len(hard))
+        self.assertLessEqual(len(soft), 6)
+        # several families: when the others fill the target, the max still holds
+        hard3, _, _ = self._run(6, family_quotas="fam_a:0:1")
+        soft3, _, _ = self._run(6, family_quotas="fam_a:0:1", soft_max=True)
+        if len(hard3) == 6:
+            self.assertEqual(_sig(hard3), _sig(soft3))
+            self.assertLessEqual(sum(fam_of[e["item_key"]] == "fam_a" for e in soft3), 1)
+        # quotas off: soft_max changes nothing
+        a, _, _ = self._run(6)
+        b, _, _ = self._run(6, soft_max=True)
+        self.assertEqual(_sig(a), _sig(b))
+
     def test_reserve_is_disjoint_banded_and_keeps_main(self):
         main0, _, _ = self._run(6)
         main, _, report = self._run(6, reserve_k=6)
