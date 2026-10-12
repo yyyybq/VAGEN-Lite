@@ -24,6 +24,7 @@
     "runtime_replay_failed": {"status": "REJECT", "scope": "episode", "modalities": ["rl", "sft"], "regeneration": "resample_endpoint", "description": "Runtime replay of the certificate did not reach canonical success."},
     "initial_no_identifiable_target": {"status": "HOLD", "scope": "episode", "modalities": ["rl", "sft"], "regeneration": "resample_initial", "description": "No target identifiable in the initial frame."},
     "terminal_target_not_identifiable": {"status": "HOLD", "scope": "episode", "modalities": ["rl", "sft"], "regeneration": "resample_endpoint", "description": "A target is not identifiable in the terminal frame."},
+    "terminal_target_not_hidden": {"status": "REJECT", "scope": "episode", "modalities": ["rl", "sft"], "regeneration": "blacklist_pair", "description": "occlusion_alignment only: in the terminal frame the reviewer does not see the target hidden behind the occluder (the occluder's box over-states what it covers, e.g. open furniture), so this target/occluder pair is not usable."},
     "review_missing": {"status": "HOLD", "scope": "episode", "modalities": ["rl", "sft"], "regeneration": "rereview", "description": "Initial/terminal frame or task-level review absent."},
     "review_invalid": {"status": "HOLD", "scope": "episode", "modalities": ["rl", "sft", "qa"], "regeneration": "rereview", "description": "Review does not follow the review schema."},
     "review_uncertain": {"status": "HOLD", "scope": "episode", "modalities": ["rl", "sft", "qa"], "regeneration": "rereview", "description": "Reviewer left a required field null."},
@@ -151,5 +152,10 @@
     "  notes: optional.",
     "Important: it is EXPECTED that in the first frame one target is cropped, occluded or outside the view. Do not mark render_ok or box_alignment_ok false for that reason; just report targets_identifiable honestly.",
     "Answer with JSON only, exactly in this shape: {schema}"
+  ],
+  "hidden_target_rubric": [
+    "Special rule for this task: the goal is to hide target {hidden} behind target {occluder}. In the final frame ({terminal}) target {hidden} is EXPECTED to be hidden.",
+    "In frame {terminal} the {hidden_color} outline is drawn where target {hidden} is, behind target {occluder} ({occluder_color} outline). Report targets_identifiable[{hidden}] honestly there (false is expected) and do not mark box_alignment_ok[{hidden}] false just because the object inside the {hidden_color} outline is covered.",
+    "Also fill target_hidden_by_occluder for frame {terminal}: true if the area inside the {hidden_color} outline lies inside the image and shows target {occluder} (or nothing of target {hidden}) because {occluder} covers it; false if target {hidden} is clearly visible, if the {hidden_color} outline is outside the image, or if nothing in front of it covers it; null only if you cannot judge."
   ]
 }

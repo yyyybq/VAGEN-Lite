@@ -66,6 +66,21 @@ FRAME_SLOT_FIELDS = ("targets_identifiable", "box_alignment_ok")
 TASK_BOOL_FIELDS = ("task_possible",)
 TASK_SLOT_FIELDS = ("label_matches", "referring_unambiguous")
 OVERLAY_COLORS = {"A": "red", "B": "blue", "C": "green", "D": "yellow"}
+# Families whose terminal frame hides a target by design (user decision 2026-10-12, the only exception
+# to "every target identifiable at the end"): the hidden slot is not required to be identifiable there;
+# the reviewer instead confirms it is hidden behind the occluder (terminal-frame field
+# ``target_hidden_by_occluder``), with the hidden target's projected box drawn on the review copy.
+HIDDEN_TARGET_FAMILIES = {"occlusion_alignment": {"hidden": "A", "occluder": "B"}}
+
+
+def hidden_target_rule(task_row: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    return HIDDEN_TARGET_FAMILIES.get(str(task_row.get("task_type")))
+
+
+def terminal_identifiable_slots(task_row: Dict[str, Any]) -> List[str]:
+    """Slots that must be identifiable in the terminal frame."""
+    rule = hidden_target_rule(task_row)
+    return [s for s, _ in task_slots(task_row) if not rule or s != rule["hidden"]]
 
 
 # --------------------------------------------------------------------------
@@ -159,7 +174,7 @@ def _state_order(state_id: str) -> Tuple[int, str]:
 # --------------------------------------------------------------------------
 def review_template(task_row: Dict[str, Any], state_ids: Sequence[str]) -> Dict[str, Any]:
     slots = [s for s, _ in task_slots(task_row)]
-    return {
+    out = {
         "review_schema_version": REVIEW_SCHEMA_VERSION,
         "task_id": task_row.get("task_id"),
         "reviewer": {"kind": "vlm", "name": None, "prompt_version": None},
@@ -169,6 +184,10 @@ def review_template(task_row: Dict[str, Any], state_ids: Sequence[str]) -> Dict[
         "frames": {sid: {"render_ok": None, "targets_identifiable": {s: None for s in slots},
                          "box_alignment_ok": {s: None for s in slots}, "notes": ""} for sid in state_ids},
     }
+    terminal = f"s{len(certificate(task_row))}"
+    if hidden_target_rule(task_row) and terminal in out["frames"]:
+        out["frames"][terminal]["target_hidden_by_occluder"] = None
+    return out
 
 
 def reviewer_prompt(task_row: Dict[str, Any], state_ids: Sequence[str], policy: Optional[Dict[str, Any]] = None) -> str:
@@ -183,6 +202,13 @@ def reviewer_prompt(task_row: Dict[str, Any], state_ids: Sequence[str], policy: 
     for key, val in (("{targets}", targets), ("{goal}", str(task_row.get("task_description", ""))),
                      ("{categories}", cats), ("{schema}", schema)):
         text = text.replace(key, val)
+    rule = hidden_target_rule(task_row)
+    if rule:
+        h, o = rule["hidden"], rule["occluder"]
+        hc, oc = OVERLAY_COLORS.get(h, "white").upper(), OVERLAY_COLORS.get(o, "white").upper()
+        text += "\n" + "\n".join(policy.get("hidden_target_rubric") or []).format(
+            hidden=h, occluder=o, hidden_color=hc, occluder_color=oc,
+            terminal=f"s{len(certificate(task_row))}")
     return text + "\n" + frames
 
 
@@ -226,6 +252,8 @@ def validate_review(review: Dict[str, Any], task_row: Dict[str, Any]) -> List[st
         for f in FRAME_SLOT_FIELDS:
             if f in fr and not ok_slots(fr[f]):
                 problems.append(f"frames.{sid}.{f}")
+        if not ok_bool(fr.get("target_hidden_by_occluder")):
+            problems.append(f"frames.{sid}.target_hidden_by_occluder")
     return problems
 
 
@@ -358,8 +386,10 @@ def task_invalid_detail(review: Optional[Dict[str, Any]], task_row: Dict[str, An
     rule = policy.get("box_misaligned_rule", {})
     terminal = f"s{len(certificate(task_row))}"
     frames = review.get("frames") or {}
+    hidden = (hidden_target_rule(task_row) or {}).get("hidden")
     for slot, entry in slots.items():
-        bad = [sid for sid, fr in frames.items() if ((fr or {}).get("box_alignment_ok") or {}).get(slot) is False]
+        bad = [sid for sid, fr in frames.items() if ((fr or {}).get("box_alignment_ok") or {}).get(slot) is False
+               and not (slot == hidden and sid == terminal)]  # a hidden target cannot be seen to align
         if (rule.get("terminal_frame", True) and terminal in bad) or len(bad) >= int(rule.get("min_frames", 2)):
             out.append({"reason": "task_invalid:box_misaligned", "slot": slot, "object_id": entry.get("id"),
                         "frames": sorted(bad, key=_state_order)})
@@ -433,7 +463,9 @@ def precheck_task(task_row: Dict[str, Any], scene: Any = None, policy: Optional[
                "backend": backend}
     if sum(summary["initial_identifiable"].values()) < _need(cfg["initial_min_identifiable"], n_slots):
         return fail("precheck:initial_no_identifiable_target", **summary)
-    if sum(summary["terminal_identifiable"].values()) < _need(cfg["terminal_min_identifiable"], n_slots):
+    term_slots = terminal_identifiable_slots(task_row)  # occlusion_alignment: the hidden target is exempt
+    if sum(bool(summary["terminal_identifiable"].get(s)) for s in term_slots) < _need(
+            cfg["terminal_min_identifiable"], len(term_slots)):
         return fail("precheck:terminal_target_not_identifiable", **summary)
     funnel.add("precheck", "pass")
     return {"ok": True, "reason": "pass", "details": summary}
@@ -548,8 +580,16 @@ def _episode_decision(row: Dict[str, Any], review: Optional[Dict[str, Any]], inv
     d = len(certificate(row))
     tid = str(row["task_id"])
     frames = review.get("frames") or {}
+    term_slots = terminal_identifiable_slots(row)
     checks = [("initial", "s0", _need(cfg["initial_min_identifiable"], len(slots)), "initial_no_identifiable_target"),
-              ("terminal", f"s{d}", _need(cfg["terminal_min_identifiable"], len(slots)), "terminal_target_not_identifiable")]
+              ("terminal", f"s{d}", _need(cfg["terminal_min_identifiable"], len(term_slots)),
+               "terminal_target_not_identifiable")]
+    if hidden_target_rule(row):
+        hidden = (frames.get(f"s{d}") or {}).get("target_hidden_by_occluder")
+        if hidden is False:
+            rejects.append("terminal_target_not_hidden")
+        elif hidden is None and f"s{d}" in frames:
+            holds.append("review_uncertain")
     if modality == "rl" and cfg.get("intermediate_frames_required"):
         checks += [("intermediate", f"s{k}", _need(cfg["initial_min_identifiable"], len(slots)),
                     "intermediate_no_identifiable_target") for k in range(1, d)]
@@ -566,7 +606,7 @@ def _episode_decision(row: Dict[str, Any], review: Optional[Dict[str, Any]], inv
                 rejects.append("sft_render_artifact_turn_frame" if role == "turn" else f"render_artifact_{role}")
             elif fr.get("render_ok") is None:
                 holds.append("review_uncertain")
-        n_true, n_none = _count_ident(fr, slots)
+        n_true, n_none = _count_ident(fr, term_slots if role == "terminal" else slots)
         if n_true < need:
             holds.append("review_uncertain" if n_true + n_none >= need else why)
     if modality == "sft" and renders is not None:

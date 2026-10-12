@@ -115,6 +115,39 @@ class AdmissionTest(unittest.TestCase):
         self.assertEqual(res["rl"]["decisions"][row["task_id"]], {"status": "HOLD", "reasons": ["review_missing"],
                                                                    "scene_id": "two_rooms"})
 
+    def test_occlusion_alignment_terminal_rule(self):
+        base = self.rows["two_rooms"]
+        row = dict(copy.deepcopy(base), task_type="occlusion_alignment", task_id=base["task_id"] + "_occ")
+        d = len(row["difficulty"]["certificate"])
+        frames = self._frames(base)
+        tmpl = A.review_template(row, frames)
+        self.assertIn("target_hidden_by_occluder", tmpl["frames"][f"s{d}"])
+        self.assertNotIn("target_hidden_by_occluder", tmpl["frames"]["s0"])
+        self.assertNotIn("target_hidden_by_occluder", A.review_template(base, frames)["frames"][f"s{d}"])
+        prompt = A.reviewer_prompt(row, frames, self.policy)
+        self.assertIn("target_hidden_by_occluder", prompt)
+        self.assertIn("RED outline is drawn where target A is", prompt)
+        self.assertNotIn("target_hidden_by_occluder", A.reviewer_prompt(base, frames, self.policy))
+        self.assertEqual(A.terminal_identifiable_slots(row), ["B"])
+        self.assertEqual(A.terminal_identifiable_slots(base), ["A", "B"])
+
+        def decide(hidden, a_ident=False, a_box=None):
+            rv = _review(row, frames, frames={f"s{d}": {"targets_identifiable": {"A": a_ident, "B": True},
+                                                        "box_alignment_ok": {"A": a_box, "B": True},
+                                                        "target_hidden_by_occluder": hidden}})
+            self.assertEqual(A.validate_review(rv, row), [])
+            return A.admit([row], [rv], self.policy)["rl"]["decisions"][row["task_id"]]
+
+        self.assertEqual(decide(True)["status"], "ADMIT")              # target hidden, occluder identifiable
+        self.assertEqual(decide(True, a_box=False)["status"], "ADMIT")  # a covered box cannot be seen to align
+        rej = decide(False)
+        self.assertEqual((rej["status"], rej["reasons"]), ("REJECT", ["terminal_target_not_hidden"]))
+        self.assertEqual(decide(None)["status"], "HOLD")
+        # the other families keep "every target identifiable at the end"
+        rv = _review(base, frames, frames={f"s{d}": {"targets_identifiable": {"A": False, "B": True}}})
+        self.assertEqual(A.admit([base], [rv], self.policy)["rl"]["decisions"][base["task_id"]]["reasons"],
+                         ["terminal_target_not_identifiable"])
+
     def test_task_invalid_blocks_rl_sft_and_qa(self):
         row = self.rows["two_rooms"]
         rv = _review(row, self._frames(row), task_level={"referring_unambiguous": {"A": True, "B": False}})
