@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InteriorGS 任务俯视图</title>
+<style>
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --text: #1f2328; --muted: #6b7078; --line: #d9dcdf;
+  --room: #eef1ea; --room-line: #b9c2b0; --wall: #2f3337; --obj: #9aa1a8; --obj-fill: rgba(154,161,168,0.12);
+  --a: #c8364b; --b: #1f6fd1; --c: #1f9a7f; --ignored: #e07b00; --success: rgba(46,160,67,0.32);
+  --path: #7a3cc4; --start: #111111; --sel: #fff4cc;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --panel: #1d2024; --text: #e6e8eb; --muted: #9aa1a8; --line: #33373c;
+    --room: #23282c; --room-line: #46504a; --wall: #d6dadf; --obj: #7d858d; --obj-fill: rgba(125,133,141,0.14);
+    --a: #ff6b7d; --b: #6aa8ff; --c: #4fd1b0; --ignored: #ffa23a; --success: rgba(70,200,100,0.30);
+    --path: #c69bff; --start: #ffffff; --sel: #3a3420;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+.app { display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+.side { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.filters { padding: 12px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+.filters label { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; color: var(--muted); }
+select { width: 100%; padding: 4px 6px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
+.count { color: var(--muted); font-size: 12px; }
+.list { overflow: auto; flex: 1; }
+.task { padding: 8px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.task:hover { background: color-mix(in srgb, var(--sel) 50%, transparent); }
+.task.on { background: var(--sel); }
+.task .meta { color: var(--muted); font-size: 12px; }
+.main { display: grid; grid-template-rows: 1fr auto; min-width: 0; min-height: 0; }
+.canvas-wrap { position: relative; min-height: 0; }
+canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+.legend { position: absolute; top: 10px; right: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; display: grid; gap: 3px; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 6px; }
+.detail { background: var(--panel); border-top: 1px solid var(--line); padding: 10px 16px; max-height: 32vh; overflow: auto; }
+.detail h2 { font-size: 15px; margin: 0 0 4px; }
+.detail .kv { color: var(--muted); font-size: 12px; }
+.empty { color: var(--muted); padding: 16px; }
+@media (max-width: 760px) { .app { grid-template-columns: 1fr; grid-template-rows: 45vh 55vh; } .side { border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="side">
+    <div class="filters">
+      <label>场景 <select id="f-scene"></select></label>
+      <label>任务族 <select id="f-family"></select></label>
+      <label>最少步数 <select id="f-d"></select></label>
+      <label>题目 <select id="f-res"><option value="main">只看正式题</option><option value="reserve">只看后备题</option><option value="all">全部</option></select></label>
+      <div class="count" id="count"></div>
+    </div>
+    <div class="list" id="list"></div>
+  </div>
+  <div class="main">
+    <div class="canvas-wrap">
+      <canvas id="cv"></canvas>
+      <div class="legend">
+        <div><span class="sw" style="background:var(--room)"></span>房间</div>
+        <div><span class="sw" style="background:var(--wall)"></span>墙</div>
+        <div><span class="sw" style="border:1px solid var(--obj)"></span>物体（标注框）</div>
+        <div><span class="sw" style="background:var(--a)"></span>目标 A　<span class="sw" style="background:var(--b)"></span>目标 B　<span class="sw" style="background:var(--c)"></span>目标 C</div>
+        <div><span class="sw" style="border:2px dashed var(--ignored)"></span>已忽略的错误标注</div>
+        <div><span class="sw" style="background:var(--success)"></span>成功区域（某个朝向满足判据）</div>
+        <div><span class="sw" style="background:var(--path)"></span>最短动作路径　● 起点</div>
+      </div>
+    </div>
+    <div class="detail" id="detail"><div class="empty">在左侧选一道题。滚轮缩放，拖动平移。</div></div>
+  </div>
+</div>
+<script>
+const DATA = /*__DATA__*/null;
+const FAMILY_NAMES = {
+  projective_relations: "左右关系（projective）", absolute_positioning: "到物体的距离（absolute_positioning）",
+  screen_occupancy: "物体在画面中的高度（screen_occupancy）", equidistance: "到两物体等距（equidistance）",
+  occlusion_alignment: "让目标被遮挡（occlusion_alignment）", fov_inclusion: "两物体同框（FOV）",
+};
+const ACTION_NAMES = { move_forward: "前进", move_backward: "后退", move_left: "左移", move_right: "右移", turn_left: "左转", turn_right: "右转" };
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const scenes = DATA ? DATA.scenes : [];
+const byScene = Object.fromEntries(scenes.map((s) => [s.id, s]));
+const all = [];
+scenes.forEach((s) => s.tasks.forEach((t) => all.push({ ...t, scene: s.id })));
+let current = null, view = null;
+
+function option(sel, value, text) { const o = document.createElement("option"); o.value = value; o.textContent = text; sel.appendChild(o); }
+function setupFilters() {
+  option($("f-scene"), "", `全部场景（${scenes.length}）`);
+  scenes.forEach((s) => option($("f-scene"), s.id, `${s.id}（${s.tasks.filter((t) => !t.reserve).length} 道正式题）`));
+  option($("f-family"), "", "全部");
+  [...new Set(all.map((t) => t.family))].sort().forEach((f) => option($("f-family"), f, FAMILY_NAMES[f] || f));
+  option($("f-d"), "", "全部");
+  for (let d = 1; d <= 8; d++) option($("f-d"), String(d), `${d} 步`);
+  ["f-scene", "f-family", "f-d", "f-res"].forEach((id) => $(id).addEventListener("change", renderList));
+}
+function filtered() {
+  const sc = $("f-scene").value, fa = $("f-family").value, d = $("f-d").value, res = $("f-res").value;
+  return all.filter((t) => (!sc || t.scene === sc) && (!fa || t.family === fa) && (!d || t.d === +d)
+    && (res === "all" || (res === "reserve") === t.reserve));
+}
+function renderList() {
+  const items = filtered();
+  $("count").textContent = `符合条件的题：${items.length} 道`;
+  const list = $("list"); list.innerHTML = "";
+  if (!items.length) {
+    const sc = $("f-scene").value;
+    list.innerHTML = `<div class="empty">没有符合条件的题。${sc ? "该场景仍可查看俯视图。" : ""}</div>`;
+    if (sc) { current = null; draw(byScene[sc], null); showScene(byScene[sc]); }
+    return;
+  }
+  items.slice(0, 2000).forEach((t) => {
+    const div = document.createElement("div"); div.className = "task" + (current && current.id === t.id ? " on" : "");
+    div.innerHTML = `<div>${escapeHtml(t.text.slice(0, 80))}</div><div class="meta">${t.scene} · ${FAMILY_NAMES[t.family] || t.family} · ${t.d} 步${t.reserve ? " · 后备题" : ""}</div>`;
+    div.onclick = () => { current = t; view = null; renderList(); draw(byScene[t.scene], t); showTask(t); };
+    list.appendChild(div);
+  });
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function showTask(t) {
+  const s = byScene[t.scene];
+  $("detail").innerHTML = `<h2>${escapeHtml(t.text)}</h2>
+    <div class="kv">场景 ${t.scene} · ${FAMILY_NAMES[t.family] || t.family} · 最少步数 ${t.d}${t.reserve ? " · 后备题" : " · 正式题"} · 题号 ${t.id}</div>
+    <div class="kv">目标：${t.target_labels.map((x, i) => `${"ABC"[i]} = ${escapeHtml(x)}（${t.targets[i]}）`).join("，")}</div>
+    <div class="kv">最短动作：${t.actions.map((a) => ACTION_NAMES[a] || a).join(" → ")}</div>
+    <div class="kv">成功区域：${(s.regions[t.region] || []).length} 个 ${DATA.region_spacing_m} m 格子；已忽略物体：${s.geometry.ignored.map((o) => o[0] + " " + o[1]).join("，") || "无"}</div>`;
+}
+function showScene(s) {
+  $("detail").innerHTML = `<h2>${s.id}</h2><div class="kv">${s.tasks.filter((t) => !t.reserve).length} 道正式题，${s.tasks.filter((t) => t.reserve).length} 道后备题；物体框 ${s.geometry.objects.length} 个；已忽略物体：${s.geometry.ignored.map((o) => o[0] + " " + o[1]).join("，") || "无"}</div>`;
+}
+function bounds(s) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const add = (x, y) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
+  s.geometry.rooms.forEach((r) => r.forEach(([x, y]) => add(x, y)));
+  if (!isFinite(x0)) s.geometry.objects.forEach((o) => { add(o[2], o[3]); add(o[4], o[5]); });
+  return [x0 - 0.5, y0 - 0.5, x1 + 0.5, y1 + 0.5];
+}
+function draw(s, t) {
+  const cv = $("cv"), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight; cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  if (!s) return;
+  if (!view) { const [x0, y0, x1, y1] = bounds(s); const k = Math.min(W / (x1 - x0), H / (y1 - y0)) * 0.95;
+    view = { k, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 }; }
+  const X = (x) => W / 2 + (x - view.cx) * view.k, Y = (y) => H / 2 - (y - view.cy) * view.k;
+  g.lineJoin = "round";
+  s.geometry.rooms.forEach((r) => { g.beginPath(); r.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)))); g.closePath();
+    g.fillStyle = css("--room"); g.fill(); g.strokeStyle = css("--room-line"); g.lineWidth = 1; g.stroke(); });
+  if (t) { const cell = DATA.region_spacing_m * view.k; g.fillStyle = css("--success");
+    (s.regions[t.region] || []).forEach(([x, y]) => g.fillRect(X(x) - cell / 2, Y(y) - cell / 2, cell, cell)); }
+  g.strokeStyle = css("--wall"); g.lineWidth = 2;
+  s.geometry.walls.forEach(([ax, ay, bx, by]) => { g.beginPath(); g.moveTo(X(ax), Y(ay)); g.lineTo(X(bx), Y(by)); g.stroke(); });
+  const roles = t ? t.targets : [];
+  s.geometry.objects.forEach((o) => {
+    const [id, label, x0, y0, x1, y1] = o, r = roles.indexOf(id);
+    const w = (x1 - x0) * view.k, h = (y1 - y0) * view.k;
+    if (r >= 0) { const c = css(["--a", "--b", "--c"][r]); g.fillStyle = c + "55"; g.strokeStyle = c; g.lineWidth = 2;
+      g.fillRect(X(x0), Y(y1), w, h); g.strokeRect(X(x0), Y(y1), w, h);
+      g.fillStyle = c; g.font = "bold 12px system-ui"; g.fillText("ABC"[r] + " " + label, X(x0) + 3, Y(y1) - 4); }
+    else { g.fillStyle = css("--obj-fill"); g.strokeStyle = css("--obj"); g.lineWidth = 1; g.fillRect(X(x0), Y(y1), w, h); g.strokeRect(X(x0), Y(y1), w, h); }
+  });
+  g.setLineDash([6, 4]); g.strokeStyle = css("--ignored"); g.lineWidth = 2;
+  s.geometry.ignored.forEach(([id, label, x0, y0, x1, y1]) => { g.strokeRect(X(x0), Y(y1), (x1 - x0) * view.k, (y1 - y0) * view.k);
+    g.fillStyle = css("--ignored"); g.font = "12px system-ui"; g.fillText(`已忽略 ${id} ${label}`, X(x0) + 4, Y(y0) - 4); });
+  g.setLineDash([]);
+  if (t) {
+    const p = t.path; g.strokeStyle = css("--path"); g.lineWidth = 2.5; g.beginPath();
+    p.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)))); g.stroke();
+    p.forEach(([x, y, yaw], i) => arrow(g, X(x), Y(y), yaw, i === 0 ? css("--start") : css("--path"), i === 0 || i === p.length - 1 ? 26 : 14));
+    const [sx, sy] = p[0]; g.fillStyle = css("--start"); g.beginPath(); g.arc(X(sx), Y(sy), 5, 0, 2 * Math.PI); g.fill();
+  }
+}
+function arrow(g, x, y, yawDeg, color, len) {
+  const a = yawDeg * Math.PI / 180, ex = x + Math.cos(a) * len, ey = y - Math.sin(a) * len;
+  g.strokeStyle = color; g.fillStyle = color; g.lineWidth = 2; g.beginPath(); g.moveTo(x, y); g.lineTo(ex, ey); g.stroke();
+  const h = 6; g.beginPath(); g.moveTo(ex, ey);
+  g.lineTo(ex - h * Math.cos(a - 0.5), ey + h * Math.sin(a - 0.5)); g.lineTo(ex - h * Math.cos(a + 0.5), ey + h * Math.sin(a + 0.5)); g.closePath(); g.fill();
+}
+(function interact() {
+  const cv = $("cv"); let drag = null;
+  const scene = () => (current ? byScene[current.scene] : byScene[$("f-scene").value]);
+  cv.addEventListener("wheel", (e) => { if (!view) return; e.preventDefault(); view.k *= e.deltaY < 0 ? 1.15 : 1 / 1.15; draw(scene(), current); }, { passive: false });
+  cv.addEventListener("mousedown", (e) => { drag = [e.clientX, e.clientY]; cv.style.cursor = "grabbing"; });
+  window.addEventListener("mouseup", () => { drag = null; cv.style.cursor = "grab"; });
+  window.addEventListener("mousemove", (e) => { if (!drag || !view) return; view.cx -= (e.clientX - drag[0]) / view.k; view.cy += (e.clientY - drag[1]) / view.k;
+    drag = [e.clientX, e.clientY]; draw(scene(), current); });
+  window.addEventListener("resize", () => draw(scene(), current));
+})();
+if (!DATA) { document.body.innerHTML = '<div class="empty">没有数据：请用 make_viewer.py 生成此页面。</div>'; }
+else { setupFilters(); renderList(); }
+</script>
+</body>
+</html>
