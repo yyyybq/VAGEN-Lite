@@ -182,6 +182,7 @@ _CLI_FIELDS = {
     "family_quotas": "family_quotas", "family_quota_soft_max": "family_quota_soft_max",
     "terminal_identifiable": "terminal_identifiable", "motion_model": "motion_model", "pitch_deg": "pitch_deg",
     "diagnostics": "diagnostics", "budget_mode": "budget_mode", "budget_work_units": "budget_work_units",
+    "ignored_objects": "ignored_objects",
 }
 
 
@@ -247,6 +248,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--budget-mode", choices=("wall_clock", "work"), default="wall_clock",
                     help="work: reproducible budget in counted work units instead of wall-clock seconds")
     ap.add_argument("--budget-work-units", type=float, default=600.0)
+    ap.add_argument("--ignored-objects", default=None,
+                    help="configs/ignored_objects_*.json: drop these labels.json instances (annotation errors)")
     ap.add_argument("--config", type=Path, help="JSON file of RunConfig fields (configs/generation_*.json); "
                                                  "flags given explicitly on the command line override it")
     args = ap.parse_args(argv)
@@ -267,6 +270,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "diagnostics": bool(args.diagnostics),
             "budget_mode": args.budget_mode,
             "budget_work_units": args.budget_work_units,
+            "ignored_objects": args.ignored_objects,
         }
         if args.config:
             cfg_kwargs = merge_config(load_config(args.config), cfg_kwargs, explicit_dests(ap, argv))

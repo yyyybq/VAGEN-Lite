@@ -1,0 +1,111 @@
+--- a/vagen/envs/active_spatial/collision_detector.py
++++ b/vagen/envs/active_spatial/collision_detector.py
+@@ -163,6 +163,7 @@
+         enable_object_collision: bool = True,
+         enable_boundary_collision: bool = True,
+         structure_y_sign_overrides: Optional[Dict[str, float]] = None,
++        ignored_object_ids: Optional[Dict[str, List[str]]] = None,
+     ):
+         """
+         Initialize collision detector.
+@@ -187,6 +188,11 @@
+             str(key): float(value) for key, value in (structure_y_sign_overrides or {}).items()
+         }
+         self.structure_convention_override_source: Optional[str] = None
++        # Per scene: labels.json ins_id values that are annotation errors (InteriorGS v10
++        # configs/ignored_objects_*.json); no collision box is built for them.
++        self.ignored_object_ids: Dict[str, set] = {
++            str(key): {str(v) for v in values} for key, values in (ignored_object_ids or {}).items()
++        }
+         
+         # Scene data
+         self.object_boxes: List[AABB] = []
+@@ -234,6 +240,8 @@
+                 self.object_boxes = []
+                 self._label_xy_centers = []
+                 all_points = []
++                ignored_here = self.ignored_object_ids.get(
++                    str(scene_id) if scene_id is not None else scene_path.name, set())
+                 
+                 for obj in labels_data:
+                     label = obj.get('label', '').lower()
+@@ -253,7 +261,8 @@
+                     
+                     # Expand box by camera radius + safety margin
+                     expanded = aabb.expand(self.camera_radius + self.safety_margin)
+-                    self.object_boxes.append(expanded)
++                    if str(ins_id) not in ignored_here:
++                        self.object_boxes.append(expanded)
+                     
+                     # Collect all points for room boundary estimation
+                     for corner in bbox:
+@@ -506,6 +515,7 @@
+                 self.object_boxes = []
+                 self._label_xy_centers = []
+                 all_points = []
++                ignored_here = self.ignored_object_ids.get(str(scene_id), set())
+                 for obj in labels_data:
+                     label = obj.get("label", "").lower()
+                     ins_id = obj.get("ins_id", "")
+@@ -517,7 +527,8 @@
+                     if any(ignored in label for ignored in self.IGNORED_LABELS):
+                         continue
+                     expanded = aabb.expand(self.camera_radius + self.safety_margin)
+-                    self.object_boxes.append(expanded)
++                    if str(ins_id) not in ignored_here:
++                        self.object_boxes.append(expanded)
+                     for corner in bbox:
+                         all_points.append([corner["x"], corner["y"], corner["z"]])
+                 if all_points:
+--- a/vagen/envs/active_spatial/visibility_checker.py
++++ b/vagen/envs/active_spatial/visibility_checker.py
+@@ -96,6 +96,8 @@
+         
+         # Scene data for occlusion checking
+         self.occluder_boxes: List[Dict] = []
++        # Per scene: labels.json ins_id values that are annotation errors (not occluders).
++        self.ignored_object_ids: Dict[str, set] = {}
+         self.wall_segments: List[Tuple[np.ndarray, np.ndarray]] = []  # Wall line segments from structure.json
+         self.room_profiles: List[np.ndarray] = []  # Room polygons for containment check
+         self.scene_loaded = False
+@@ -134,11 +136,14 @@
+                 labels_data = _read_json_path(labels_path)
+                 
+                 self.occluder_boxes = []
++                ignored_here = self.ignored_object_ids.get(str(scene_id), set()) if scene_id is not None else set()
+                 for obj in labels_data:
+                     label = obj.get('label', '').lower()
+                     bbox = obj.get('bounding_box', [])
+                     
+                     if len(bbox) != 8:
++                        continue
++                    if str(obj.get('ins_id', '')) in ignored_here:
+                         continue
+                     
+                     # Skip non-occluding objects
+--- a/vagen/envs/active_spatial/env.py
++++ b/vagen/envs/active_spatial/env.py
+@@ -554,6 +554,23 @@
+                     self.collision_detector.structure_y_sign_overrides[str(scene_id)] = sign
+                     if getattr(self.collision_detector, "_current_scene_id", None) == scene_id:
+                         self.collision_detector._current_scene_id = None  # force reload with override
++            # InteriorGS v10 rows list labels.json instances that are annotation errors (e.g. one
++            # cabinet box covering a whole room); the generator ignored them, so must the env.
++            row_convention = item.get("collision_convention") if isinstance(item, dict) else None
++            ignored = row_convention.get("ignored_object_ids") if isinstance(row_convention, dict) else None
++            if ignored:
++                ids = {str(v) for v in ignored}
++                previous_ids = self.collision_detector.ignored_object_ids.get(str(scene_id))
++                if previous_ids is not None and previous_ids != ids:
++                    raise RuntimeError(f"conflicting ignored_object_ids for {scene_id}")
++                if previous_ids is None:
++                    self.collision_detector.ignored_object_ids[str(scene_id)] = ids
++                    if getattr(self.collision_detector, "_current_scene_id", None) == scene_id:
++                        self.collision_detector._current_scene_id = None  # force reload without them
++                    if self.visibility_checker is not None:
++                        self.visibility_checker.ignored_object_ids[str(scene_id)] = ids
++                        if getattr(self.visibility_checker, "_current_scene_id", None) == scene_id:
++                            self.visibility_checker._current_scene_id = None
+             self.collision_detector.load_scene_from_gs_root(self.config.gs_root, scene_id)
+         self.current_collision_convention = None
+         if uses_canonical_backend(item):

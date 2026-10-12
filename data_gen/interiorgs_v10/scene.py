@@ -108,6 +108,9 @@ class Scene:
     detector: Any  # vagen.envs.active_spatial.collision_detector.CollisionDetector
     min_wall_distance: float = MIN_WALL_DISTANCE_M
     convention_v2: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    # labels.json instances dropped as annotation errors (configs/ignored_objects_*.json): not in
+    # ``objects`` (no task, anchor or occluder) and not in the detector's collision boxes
+    ignored_object_ids: List[str] = dataclasses.field(default_factory=list)
     _kernel: Any = dataclasses.field(default=None, repr=False, compare=False)
     _kernel_key: Any = dataclasses.field(default=None, repr=False, compare=False)
 
@@ -210,13 +213,18 @@ class Scene:
 
 
 def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
-               y_sign_override: Optional[float] = None) -> Scene:
+               y_sign_override: Optional[float] = None, ignored_ids: Optional[Sequence[str]] = None) -> Scene:
     """Load a scene, calibrate the structure Y sign (v2) and build the detector.
 
     Sign selection: explicit ``y_sign_override`` > calibration v2 (passed to the
     detector as an override only when v1 would not freeze it) > v1 inside the
     detector.  ``scene.convention`` is the detector's record (what the env will
     report); ``scene.convention_v2`` the full calibration record.
+
+    ``ignored_ids``: labels.json ``ins_id`` values to drop (confirmed annotation
+    errors).  They leave ``objects`` and the detector's collision boxes, exactly
+    as ``patches/env_ignored_objects.patch`` drops them in the RL env; the
+    coordinate calibration still sees every label, as the env's does.
     """
     from vagen.envs.active_spatial.collision_detector import CollisionDetector
 
@@ -246,6 +254,9 @@ def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
 
     with contextlib.redirect_stdout(io.StringIO()):
         detector.load_scene(scene_dir, scene_id=scene_id)
+    ignored = {str(i) for i in (ignored_ids or ())}
+    if ignored:
+        detector.object_boxes = [b for b in detector.object_boxes if str(getattr(b, "ins_id", "")) not in ignored]
     sign = float(detector.structure_y_sign)
     calib["applied_sign"] = sign
     calib["applied_source"] = source
@@ -258,6 +269,9 @@ def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
         rooms.append(Room(index=len(rooms), name=name,
                           polygon=np.array([[float(p[0]), sign * float(p[1])] for p in prof], dtype=float)))
     objects = parse_labels(labels)
+    present = {o.id for o in objects}
+    if ignored:
+        objects = [o for o in objects if o.id not in ignored]
     for obj in objects:
         c = obj.center
         for room in rooms:
@@ -266,4 +280,5 @@ def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
                 break
     convention = detector.convention_record()
     return Scene(scene_id=scene_id, scene_dir=scene_dir, objects=objects, rooms=rooms,
-                 convention=convention, detector=detector, convention_v2=calib)
+                 convention=convention, detector=detector, convention_v2=calib,
+                 ignored_object_ids=sorted(ignored & present))

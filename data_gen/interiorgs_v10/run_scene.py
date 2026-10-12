@@ -63,6 +63,21 @@ class RunConfig:
     budget_mode: str = "wall_clock"
     budget_work_units: float = 600.0
     work_weights: Any = None              # {operation: weight}; None -> DEFAULT_WORK_WEIGHTS
+    ignored_objects: Optional[str] = None  # configs/ignored_objects_*.json: confirmed annotation errors
+
+
+_IGNORED_CACHE: Dict[str, Dict[str, List[str]]] = {}
+
+
+def ignored_object_ids(path: Optional[str], scene_id: str) -> List[str]:
+    """``ins_id`` values listed for ``scene_id`` under "scenes" (never the "uncertain" ones)."""
+    if not path:
+        return []
+    if path not in _IGNORED_CACHE:
+        data = json.loads(Path(path).read_text())
+        _IGNORED_CACHE[path] = {str(s): sorted(str(o["ins_id"]) for o in objs)
+                                for s, objs in (data.get("scenes") or {}).items()}
+    return list(_IGNORED_CACHE[path].get(str(scene_id), []))
 
 
 # Weight of one counted operation (contract.WORK kinds) in work units.  Fitted on the 100-scene
@@ -184,6 +199,9 @@ def _task_row(scene: Any, item: Dict[str, Any], ep: Dict[str, Any]) -> Dict[str,
         "requires_env_override": bool(conv.get("env_override_required", False)),
         "calibration_version": conv.get("version"),
     }
+    if getattr(scene, "ignored_object_ids", None):
+        # read by the env through patches/env_ignored_objects.patch: drop these boxes for this scene
+        row["collision_convention"]["ignored_object_ids"] = list(scene.ignored_object_ids)
     model, pitch = C.motion_model()
     if model != "r1":
         # not trainable as-is: the RL env only implements the r1 motion model
@@ -243,7 +261,10 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
 
     try:
         t = time.perf_counter()
-        scene = load_scene(Path(scene_dir), scene_id)
+        sid = scene_id or Path(scene_dir).name
+        scene = load_scene(Path(scene_dir), scene_id, ignored_ids=ignored_object_ids(cfg.ignored_objects, sid))
+        if scene.ignored_object_ids:
+            summary["ignored_object_ids"] = list(scene.ignored_object_ids)
         summary["scene_id"] = scene.scene_id
         conv = getattr(scene, "convention_v2", None) or scene.convention
         summary["convention"] = {k: _jsonable(v) for k, v in conv.items()
