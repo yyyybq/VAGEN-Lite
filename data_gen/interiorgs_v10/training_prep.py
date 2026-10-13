@@ -11,6 +11,8 @@ not used.  The conversations are built by ``release.build_sft_record`` (the RL e
     python data_gen/interiorgs_v10/pilot_sco.py prepare --pilot SFT --gs-root PLY_ROOT   (then submit / status / delete)
     # CPU: the conversations
     python -m data_gen.interiorgs_v10.training_prep sft-records --dir SFT
+    # CPU: RL env YAMLs (configs/rl_env_v10_S0.yaml) and the PPO config (dense-score S0 recipe)
+    python -m data_gen.interiorgs_v10.training_prep rl-config --rows SFT/rows.jsonl --ppo-template S0.yaml         --gs-root PLY_ROOT --model SFT_MODEL --name NAME --run-root RUN --out RL
     # CPU: LLaMA-Factory datasets and recipe (no QA; trajectories are not model-reviewed this round)
     python scripts/prepare_active_spatial_sft.py --trajectory SFT/sft_trajectories.jsonl \\
         --split-manifest SFT/split_manifest.json --task-registry SFT/task_registry.jsonl \\
@@ -125,6 +127,110 @@ def cmd_sft_records(args: argparse.Namespace) -> None:
     print(json.dumps(report, indent=1))
 
 
+# ---------------------------------------------------------------------------
+# RL: env YAMLs and the PPO config (dense-score S0 recipe)
+# ---------------------------------------------------------------------------
+# One card, a handful of updates: does the data load, does the env render, are rewards and success sane,
+# is a checkpoint written?  (The formal recipe needs 8 cards for the trainer plus one for the renderer.)
+TRIAL_PPO: Dict[str, Any] = {
+    "trainer.n_gpus_per_node": 1,
+    "trainer.save_freq": 1,
+    "trainer.test_freq": 2,
+    "trainer.critic_warmup": 0,
+    "trainer.ckpt_milestones": [1, 2],
+    "trainer.logger": ["console"],
+    "data.train_batch_size": 4,
+    "data.val_batch_size": 4,
+    "actor_rollout_ref.actor.ppo_mini_batch_size": 4,
+    "actor_rollout_ref.rollout.n": 2,
+    "actor_rollout_ref.rollout.tensor_model_parallel_size": 1,
+    "actor_rollout_ref.rollout.agent.num_workers": 4,
+}
+
+
+def _set(cfg: Dict[str, Any], dotted: str, value: Any) -> None:
+    node = cfg
+    keys = dotted.split(".")
+    for k in keys[:-1]:
+        node = node.setdefault(k, {})
+    node[keys[-1]] = value
+
+
+def env_system_prompt(env_cfg: Dict[str, Any], task_type: str) -> str:
+    """The system prompt the RL env shows for this env config (the arguments env.system_prompt passes)."""
+    from vagen.envs.active_spatial import prompt as P
+    from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+
+    keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
+    c = ActiveSpatialEnvConfig(**{k: v for k, v in env_cfg.items() if k in keys})
+    return P.system_prompt(format=c.prompt_format, step_translation=c.step_translation,
+                           step_rotation_deg=c.step_rotation_deg, max_actions_per_step=c.max_actions_per_step,
+                           action_sep=getattr(c, "action_sep", "|"), format_reward=c.format_reward,
+                           invalid_format_penalty=c.invalid_format_penalty, success_reward=c.success_reward,
+                           task_type=task_type, action_space=c.action_space,
+                           enable_explicit_done=c.enable_explicit_done)
+
+
+def prompt_mismatches(env_cfg: Dict[str, Any], task_types: Sequence[str], policy: Dict[str, Any]) -> List[str]:
+    """Task types whose RL system prompt differs from the SFT conversations' (release.protocol_system_prompt)."""
+    from .release import protocol_system_prompt
+
+    return [t for t in sorted(set(task_types)) if env_system_prompt(env_cfg, t) != protocol_system_prompt(t, policy)]
+
+
+def cmd_rl_config(args: argparse.Namespace) -> None:
+    import copy
+
+    import yaml
+
+    from .admission import load_policy
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    rows = _jsonl(Path(args.rows))
+    parts = {"train": [r for r in rows if r.get("split") == "train"],
+             "val": [r for r in rows if r.get("split") == "val"]}
+    if args.val_limit:
+        parts["val"] = parts["val"][: args.val_limit]
+    if not parts["train"] or not parts["val"]:
+        raise SystemExit("rl-config needs train and val rows (training_prep sft-frames rows.jsonl)")
+    template = yaml.safe_load(Path(args.env_template).read_text())
+    env_paths = {}
+    for split, selected in parts.items():
+        _write_jsonl(out / f"{split}.jsonl", selected)
+        env = copy.deepcopy(template)
+        entry = env["envs"][0]
+        entry.update(n_envs=len(selected), seed=[0, len(selected)], seed_list=list(range(len(selected))))
+        entry["config"].update(jsonl_path=str((out / f"{split}.jsonl").resolve()), gs_root=str(args.gs_root),
+                               train_size=len(selected))
+        env_paths[split] = out / f"{split}_env.yaml"
+        env_paths[split].write_text(yaml.safe_dump(env, sort_keys=False))
+    mismatches = prompt_mismatches(template["envs"][0]["config"], [r["task_type"] for r in rows], load_policy())
+    if mismatches:
+        raise SystemExit(f"RL and SFT system prompts differ for {mismatches}")
+    ppo = yaml.safe_load(Path(args.ppo_template).read_text())
+    run_root = Path(args.run_root).resolve()
+    for key, value in {
+        "data.train_files": str(env_paths["train"].resolve()), "data.val_files": str(env_paths["val"].resolve()),
+        "actor_rollout_ref.model.path": str(args.model), "critic.model.path": str(args.model),
+        "critic.model.tokenizer_path": str(args.model),
+        "trainer.experiment_name": args.name, "trainer.project_name": "vagen_interiorgs_v10",
+        "trainer.default_local_dir": str(run_root / "checkpoints"),
+        "trainer.rollout_data_dir": str(run_root / "rollout_data"),
+        "trainer.validation_data_dir": str(run_root / "validation"),
+    }.items():
+        _set(ppo, key, value)
+    if args.trial:
+        for key, value in TRIAL_PPO.items():
+            _set(ppo, key, value)
+    (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
+    report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
+              "model": str(args.model), "system_prompt_matches_sft": True,
+              "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
+    (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
+    print(json.dumps(report, indent=1))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -136,8 +242,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     f.add_argument("--out", required=True)
     r = sub.add_parser("sft-records")
     r.add_argument("--dir", required=True)
+    c = sub.add_parser("rl-config")
+    c.add_argument("--rows", required=True, help="published rows with split (sft-frames rows.jsonl)")
+    c.add_argument("--env-template", default=str(Path(__file__).with_name("configs") / "rl_env_v10_S0.yaml"))
+    c.add_argument("--ppo-template", required=True, help="a complete PPO config (dense-score S0)")
+    c.add_argument("--gs-root", required=True, help="scene folders with 3dgs_compressed.ply")
+    c.add_argument("--model", required=True)
+    c.add_argument("--name", required=True)
+    c.add_argument("--run-root", required=True, help="checkpoints, rollouts and validation go below it")
+    c.add_argument("--val-limit", type=int, default=0)
+    c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
+    c.add_argument("--out", required=True)
     args = ap.parse_args(argv)
-    {"sft-frames": cmd_sft_frames, "sft-records": cmd_sft_records}[args.cmd](args)
+    {"sft-frames": cmd_sft_frames, "sft-records": cmd_sft_records, "rl-config": cmd_rl_config}[args.cmd](args)
     return 0
 
 

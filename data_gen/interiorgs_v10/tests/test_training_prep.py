@@ -96,6 +96,44 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertIn("dataset: trajectory_train", cfg)
         self.assertNotIn("qa_train", cfg)
 
+    def test_rl_config_and_prompt_consistency(self):
+        import yaml
+
+        sft = self.root / "sft_rl"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        template = self.root / "ppo_template.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False},
+            "actor_rollout_ref": {"model": {"path": "old"}, "actor": {"ppo_mini_batch_size": 8},
+                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4, "agent": {"num_workers": 8}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+        out = self.root / "rl"
+        TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
+            Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
+            gs_root="/ply", model="/models/m", name="trial", run_root=str(self.root / "rl_run"), val_limit=1,
+            trial=True, out=str(out)))
+        env = yaml.safe_load((out / "train_env.yaml").read_text())["envs"][0]
+        self.assertEqual(env["n_envs"], self.n_train)
+        self.assertEqual(env["config"]["prompt_format"], "no_think")
+        self.assertIs(env["config"]["r1_legacy_success"], False)
+        self.assertEqual(env["config"]["gs_root"], "/ply")
+        self.assertEqual(len(TP._jsonl(Path(env["config"]["jsonl_path"]))), self.n_train)
+        self.assertEqual(yaml.safe_load((out / "val_env.yaml").read_text())["envs"][0]["n_envs"], 1)
+        ppo = yaml.safe_load((out / "ppo.yaml").read_text())
+        self.assertEqual(ppo["trainer"]["n_gpus_per_node"], 1)
+        self.assertEqual(ppo["actor_rollout_ref"]["rollout"]["tensor_model_parallel_size"], 1)
+        self.assertEqual(ppo["actor_rollout_ref"]["model"]["path"], "/models/m")
+        self.assertEqual(ppo["data"]["train_files"], str((out / "train_env.yaml").resolve()))
+        # the RL system prompt is the SFT one; a different reward in the env would show
+        policy = load_policy()
+        cfg = yaml.safe_load((Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml").read_text())
+        cfg = cfg["envs"][0]["config"]
+        types = ["projective_relations", "occlusion_alignment", "fov_inclusion"]
+        self.assertEqual(TP.prompt_mismatches(cfg, types, policy), [])
+        self.assertEqual(TP.prompt_mismatches(dict(cfg, format_reward=0.01), types, policy), sorted(types))
+
 
 if __name__ == "__main__":
     unittest.main()
