@@ -42,17 +42,9 @@ Fix: in `contract.py`, set `CAMERA_MODEL_VERSION = CANONICAL_CAMERA_H1_RESIZE_V1
 
 ## 3. env.py changes (`vagen/envs/active_spatial/env.py`)
 
-1. **Occlusion guidance (l.739-744, `_build_task_prompt`).** With the default `enable_occlusion_task_guidance=True`, every `occlusion_alignment` row gets two strategy lines appended. It also gets `"Occluder hint: <label> is to your front-left, distance 2.31 m"`, which is computed from the live pose. That is privileged information, it uses the raw label instead of the disambiguating `ref`, and it means the policy no longer sees the certified `task_description`. Make one of these changes:
-
-   ```python
-   if (item.get("task_type") == "occlusion_alignment"
-           and self.config.get("enable_occlusion_task_guidance", True)
-           and not uses_canonical_backend(item)):        # keep v2 rows' frozen instruction
-   ```
-
-   Alternatively, set `enable_occlusion_task_guidance: false` and `enable_occlusion_occluder_hint: false` in every v10 env config.
-
-   The role order matches what the guidance code assumes: `objects[0]` / `object_a_*` is the hidden target and `objects[1]` / `object_b_*` is the occluder. The rows also carry `params.occluded` / `params.occluder` ids.
+1. **Occlusion guidance.** `enable_occlusion_task_guidance` and `enable_occlusion_occluder_hint` now default to
+   `false` (2026-10-13). When on, they append strategy lines and an occluder direction/distance computed from
+   the live pose (privileged information) to `occlusion_alignment` prompts. Keep them off for v10 training.
 
 2. No other task-type-specific branch in `env.py` needs changing. `_get_target_pose`, `_get_target_center` and the legacy reward read `target_pose`, `sample_target`, `target_region.sample_point` and `params.object_center`. v2 rows deliberately carry none of these, so the legacy distance and visibility terms stay inert.
 

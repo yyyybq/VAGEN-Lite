@@ -750,7 +750,7 @@ class ActiveSpatialEnv(BaseEnv):
         else:
             task_prompt = f"Move the camera to the {preset} view of the {object_label}."
 
-        if item.get("task_type") == "occlusion_alignment" and self.config.get("enable_occlusion_task_guidance", True):
+        if item.get("task_type") == "occlusion_alignment" and self.config.get("enable_occlusion_task_guidance", False):
             guidance = self._build_occlusion_guidance(item)
             if guidance:
                 task_prompt = f"{task_prompt}\n{guidance}"
@@ -794,7 +794,7 @@ class ActiveSpatialEnv(BaseEnv):
             f"Navigate to the back side of {occluder_label} relative to {occluded_label}, then face along the occluder-target line.",
         ]
 
-        if self.config.get("enable_occlusion_occluder_hint", True) and occluder_center is not None:
+        if self.config.get("enable_occlusion_occluder_hint", False) and occluder_center is not None:
             hint = self._relative_object_hint(occluder_center)
             if hint:
                 lines.append(f"Occluder hint: {occluder_label} is {hint}.")

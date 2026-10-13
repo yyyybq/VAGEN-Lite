@@ -194,8 +194,8 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     action_sep: str = "|"  # Separator for multiple actions
     image_placeholder: str = "<image>"  # Placeholder for image in prompt
     use_task_description: bool = True  # Prefer dataset task_description over generic preset text
-    enable_occlusion_task_guidance: bool = True  # Add occlusion-specific strategy text to the Task line
-    enable_occlusion_occluder_hint: bool = True  # Add occluder relative direction/distance when available
+    enable_occlusion_task_guidance: bool = False  # Add occlusion-specific strategy text to the Task line (off: privileged hints)
+    enable_occlusion_occluder_hint: bool = False  # Add occluder relative direction/distance from the live pose (off: privileged)
     special_token_list: Optional[List[str]] = field(
         default_factory=lambda: ["<think>", "</think>", "<action>", "</action>"]
     )
