@@ -830,7 +830,9 @@ def episodes_for_scene(scene: Any, items_with_endpoints: Sequence[Any], target_p
         if terminal_identifiable == "family":
             extra["terminal_roles"] = _family_terminal_roles(item)
         if runtime_success_check and str(item.get("task_type")) in RUNTIME_LOOSER_FAMILIES:
-            extra["runtime_success_fn"] = make_success_fn(item)
+            rt = _runtime_success_fn(scene, item)
+            if rt is not None:
+                extra["runtime_success_fn"] = rt
         searches.append(ItemSearch(scene, item, sfn, eps, bands=bands, seed=seed + 1009 * k,
                                    observability_fn=observability_fn, funnel=funnel,
                                    item_key=key if key is not None else k, **extra, **search_kwargs))
@@ -964,6 +966,21 @@ TERMINAL_ROLE_EXCEPTIONS = frozenset({"occlusion_alignment"})
 # Families whose env success rule is looser than the generator's (no occlusion gate in
 # canonical_spatial_task_h1_v1); see episodes_for_scene(runtime_success_check=...).
 RUNTIME_LOOSER_FAMILIES = frozenset({"projective_relations", "fov_inclusion"})
+
+
+def _runtime_success_fn(scene: Any, item: Dict[str, Any]) -> Any:
+    """The env's success rule for the runtime_success_check, computed apart from the generator's predicate.
+
+    Projective: ``endpoints.runtime_success_fn`` (canonical v1, plus the env's visibility rule under "face_v1").
+    v1 FOV rows: the canonical v1 metric.  v2 families (fov_inclusion v2 included) need no check: their
+    success predicate already is the env's own function."""
+    if str(item.get("task_type")) == "projective_relations":
+        from .endpoints import runtime_success_fn
+
+        return runtime_success_fn(item, scene)
+    if item.get("canonical_task_metric_version") == "canonical_spatial_task_h1_v1":
+        return make_success_fn(item)
+    return None
 
 
 def _family_terminal_roles(item: Dict[str, Any]) -> Optional[Tuple[int, ...]]:

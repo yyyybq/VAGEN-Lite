@@ -196,6 +196,10 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     use_task_description: bool = True  # Prefer dataset task_description over generic preset text
     enable_occlusion_task_guidance: bool = False  # Add occlusion-specific strategy text to the Task line (off: privileged hints)
     enable_occlusion_occluder_hint: bool = False  # Add occluder relative direction/distance from the live pose (off: privileged)
+    # Success rule.  Default: the canonical metric AND every target the task needs is clearly visible
+    # (target_visibility.py: at least one face in frame, unhidden and large enough).  True: the R1 rule
+    # (canonical metric only), for evaluating R1 models exactly as they were trained.
+    r1_legacy_success: bool = False
     special_token_list: Optional[List[str]] = field(
         default_factory=lambda: ["<think>", "</think>", "<action>", "</action>"]
     )

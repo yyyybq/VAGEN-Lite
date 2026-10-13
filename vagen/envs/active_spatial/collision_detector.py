@@ -190,6 +190,9 @@ class CollisionDetector:
         
         # Scene data
         self.object_boxes: List[AABB] = []
+        # every labels.json box as annotated (id, label, min, max): the visibility rule's occluders
+        # (target_visibility.OccluderSet.from_detector); collision uses object_boxes
+        self.label_boxes: List[Tuple[str, str, np.ndarray, np.ndarray]] = []
         self.room_boundary: Optional[AABB] = None
         self.room_profiles: List[np.ndarray] = []  # Room polygons from structure.json
         self.wall_segments: List[Tuple[np.ndarray, np.ndarray]] = []  # Wall line segments
@@ -232,6 +235,7 @@ class CollisionDetector:
                     labels_data = json.load(f)
                 
                 self.object_boxes = []
+                self.label_boxes = []
                 self._label_xy_centers = []
                 all_points = []
                 
@@ -245,6 +249,7 @@ class CollisionDetector:
                     
                     # Create AABB from corners
                     aabb = AABB.from_corners(bbox, label, ins_id)
+                    self.label_boxes.append((str(ins_id), label, aabb.min_point.copy(), aabb.max_point.copy()))
                     self._label_xy_centers.append((aabb.min_point[:2] + aabb.max_point[:2]) / 2.0)
                     
                     # Skip ignored labels (floor, ceiling, lights)
@@ -504,6 +509,7 @@ class CollisionDetector:
         if labels_data is not None:
             try:
                 self.object_boxes = []
+                self.label_boxes = []
                 self._label_xy_centers = []
                 all_points = []
                 for obj in labels_data:
@@ -513,6 +519,7 @@ class CollisionDetector:
                     if len(bbox) != 8:
                         continue
                     aabb = AABB.from_corners(bbox, label, ins_id)
+                    self.label_boxes.append((str(ins_id), label, aabb.min_point.copy(), aabb.max_point.copy()))
                     self._label_xy_centers.append((aabb.min_point[:2] + aabb.max_point[:2]) / 2.0)
                     if any(ignored in label for ignored in self.IGNORED_LABELS):
                         continue

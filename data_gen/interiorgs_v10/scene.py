@@ -262,6 +262,7 @@ def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
     ignored = {str(i) for i in (ignored_ids or ())}
     if ignored:
         detector.object_boxes = [b for b in detector.object_boxes if str(getattr(b, "ins_id", "")) not in ignored]
+        detector.label_boxes = [b for b in getattr(detector, "label_boxes", []) if str(b[0]) not in ignored]
     sign = float(detector.structure_y_sign)
     calib["applied_sign"] = sign
     calib["applied_source"] = source

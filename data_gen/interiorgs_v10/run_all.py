@@ -183,7 +183,7 @@ _CLI_FIELDS = {
     "terminal_identifiable": "terminal_identifiable", "motion_model": "motion_model", "pitch_deg": "pitch_deg",
     "diagnostics": "diagnostics", "budget_mode": "budget_mode", "budget_work_units": "budget_work_units",
     "ignored_objects": "ignored_objects", "runtime_success_check": "runtime_success_check",
-    "no_task_objects": "no_task_objects",
+    "no_task_objects": "no_task_objects", "visibility_rule": "visibility_rule",
 }
 
 
@@ -254,6 +254,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--no-task-objects", default=None,
                     help="configs/no_task_objects_*.json: keep these boxes for collision/occlusion, never as "
                          "task targets or reference objects")
+    ap.add_argument("--visibility-rule", choices=("box_v1", "face_v1"), default="box_v1",
+                    help="face_v1: the env's rule (one face of each required target clearly visible)")
     ap.add_argument("--runtime-success-check", action="store_true",
                     help="Projective/FOV: reject initial states from which the env's own success rule "
                          "(no occlusion gate) succeeds before d*")
@@ -280,6 +282,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "ignored_objects": args.ignored_objects,
             "runtime_success_check": bool(args.runtime_success_check),
             "no_task_objects": args.no_task_objects,
+            "visibility_rule": args.visibility_rule,
         }
         if args.config:
             cfg_kwargs = merge_config(load_config(args.config), cfg_kwargs, explicit_dests(ap, argv))

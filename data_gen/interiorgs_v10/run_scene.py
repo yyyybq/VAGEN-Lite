@@ -66,6 +66,10 @@ class RunConfig:
     ignored_objects: Optional[str] = None  # configs/ignored_objects_*.json: drop these boxes (20261012 only)
     no_task_objects: Optional[str] = None  # configs/no_task_objects_*.json: keep the boxes, never target/reference
     runtime_success_check: bool = False   # Projective/FOV: reject starts where the env succeeds before d*
+    # "box_v1": half of each target's box unhidden (20261011c / 20261012); "face_v1": the env's rule, one face of
+    # each required target clearly visible (vagen/envs/active_spatial/target_visibility.py), for success,
+    # start-frame and final-frame checks alike.
+    visibility_rule: str = "box_v1"
 
 
 _IGNORED_CACHE: Dict[str, Dict[str, List[str]]] = {}
@@ -177,9 +181,22 @@ def _endpoints_for(scene: Any, item: Dict[str, Any], cfg: RunConfig, funnel: Fun
     fam = FAMILIES[task_type]
     cands = fam.success_pose_candidates(scene, item, cfg.seed, max_candidates=cfg.max_endpoints, funnel=funnel)
 
+    from . import occlusion
+
+    face_rule = occlusion.visibility_rule() == "face_v1"
+
     def _sfn(c2w: Any, _item: Dict[str, Any] = item) -> bool:
         C.WORK.add("family_judge")
-        return bool(fam.judge(_item, np.asarray(c2w, float))["success"])
+        c2w = np.asarray(c2w, float)
+        if not fam.judge(_item, c2w)["success"]:
+            return False
+        if not face_rule:
+            return True
+        # the env's rule: judge AND every required target clearly visible (target_visibility.py)
+        from vagen.envs.active_spatial.target_visibility import visibility_gates
+
+        C.WORK.add("visible_fraction")
+        return bool(visibility_gates(_item, c2w, occlusion.face_occluders_for(scene))["visible"])
 
     return [np.asarray(c["c2w"], float) for c in cands], _sfn
 
@@ -223,13 +240,18 @@ def _task_row(scene: Any, item: Dict[str, Any], ep: Dict[str, Any]) -> Dict[str,
 
 def generate_scene(scene_dir: Any, scene_id: Optional[str] = None, cfg: Optional[RunConfig] = None
                    ) -> Dict[str, Any]:
+    from . import occlusion
+
     cfg = cfg or RunConfig()
     previous = C.motion_model()
+    previous_rule = occlusion.visibility_rule()
     C.set_motion_model(cfg.motion_model, cfg.pitch_deg)
+    occlusion.set_visibility_rule(cfg.visibility_rule)
     try:
         return _generate_scene(scene_dir, scene_id, cfg)
     finally:
         C.set_motion_model(*previous)
+        occlusion.set_visibility_rule(previous_rule)
 
 
 def _counts(rows: Sequence[Dict[str, Any]]) -> Tuple[Dict[str, int], Dict[str, int]]:

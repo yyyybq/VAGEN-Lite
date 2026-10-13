@@ -64,6 +64,7 @@ from .collision_detector import CollisionDetector, CollisionResult, create_colli
 from .visibility_checker import VisibilityChecker, VisibilityResult, create_visibility_checker
 from .canonical_camera import CANONICAL_CAMERA_H1_RESIZE_V1, build_canonical_camera
 from .canonical_task_metrics import score_canonical_task, uses_canonical_backend
+from .target_visibility import OccluderSet, score_with_visibility
 from .reward_trace import (
     TurnRewardTrace,
     near_reward_values,
@@ -1393,10 +1394,31 @@ class ActiveSpatialEnv(BaseEnv):
             return ""
     
     def _calculate_canonical_metric(self) -> Optional[Dict[str, Any]]:
-        """Return the strict R1 metric only for explicitly versioned rows."""
+        """Return the canonical success metric only for explicitly versioned rows.
+
+        Default: the canonical metric plus the visibility rule (target_visibility.py), the same function the
+        InteriorGS v10 generator uses.  ``r1_legacy_success``: the R1 metric alone, unchanged."""
         if not uses_canonical_backend(self.current_item):
             return None
-        return score_canonical_task(self.current_item, self.view_engine.get_pose())
+        pose = self.view_engine.get_pose()
+        if self.config.get("r1_legacy_success", False):
+            return score_canonical_task(self.current_item, pose)
+        return score_with_visibility(self.current_item, pose, self._visibility_occluders())
+
+    def _visibility_occluders(self) -> OccluderSet:
+        """Occluders of the current scene (labels.json boxes + structure walls), cached per scene."""
+        scene_id = self.current_item.get("scene_id") if isinstance(self.current_item, dict) else None
+        cached = getattr(self, "_visibility_occluder_cache", None)
+        if cached is not None and cached[0] == scene_id:
+            return cached[1]
+        detector = self.collision_detector
+        if detector is None or getattr(detector, "_current_scene_id", None) != scene_id:
+            detector = CollisionDetector()  # occluders only: load this scene's labels and walls
+            if scene_id and self.config.gs_root:
+                detector.load_scene_from_gs_root(self.config.gs_root, scene_id)
+        occ = OccluderSet.from_detector(detector)
+        self._visibility_occluder_cache = (scene_id, occ)
+        return occ
 
     def _calculate_current_score(self) -> float:
         """

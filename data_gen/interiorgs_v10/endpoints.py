@@ -87,11 +87,14 @@ from .occlusion import (
     frustum_mask,
     is_non_occluding,
     is_wall_label,
+    face_occluders_for,
     occluders_for,
     rays_occluded,
     target_samples,
+    visibility_rule,
     visible_fraction,
 )
+from vagen.envs.active_spatial import target_visibility as TV
 
 ENDPOINT_SAMPLER_VERSION = "interiorgs_v10_endpoints_v1"
 SUPPORTED_TASK_TYPES = ("projective_relations", "fov_inclusion")
@@ -285,6 +288,75 @@ def _blocked_rows(scene: Any, t: _Target, origins: np.ndarray, n: int, samples: 
     return out
 
 
+_FACE_CHUNK = 4000
+
+
+def _item_camera(item: Dict[str, Any]) -> Tuple[np.ndarray, int, int]:
+    key = json.dumps((item.get("init_camera") or {}).get("intrinsics"))
+    hit = _ITEM_CAMERA.get(key)
+    if hit is None:
+        hit = _ITEM_CAMERA[key] = TV.item_camera(item)
+    return hit
+
+
+_ITEM_CAMERA: Dict[str, Tuple[np.ndarray, int, int]] = {}
+
+
+def _face_blocked_rows(scene: Any, t: _Target, origins: np.ndarray, geom: TV.FaceGeometry) -> np.ndarray:
+    """(P, 6 n^2) sight lines to the target's face samples hidden (env rule), cached per scene and position."""
+    tkey = ("face", t.id, tuple(t.bmin.tolist()), tuple(t.bmax.tolist()), geom.n)
+    memo: Dict[Tuple[float, float, float], np.ndarray] = _cache(scene)["occl"].setdefault(tkey, {})
+    pkeys = [(float(x), float(y), float(zz)) for x, y, zz in origins]
+    missing = [i for i, k in enumerate(pkeys) if k not in memo]
+    if missing:
+        occ = face_occluders_for(scene)
+        WORK.add("occlusion_ray_tests", len(missing) * geom.points.shape[0] * max(1, len(occ) + occ.wall_a.shape[0]))
+        rows = TV.blocked_mask(occ, origins[missing], geom.points, geom.lo, geom.hi, exclude_ids=(t.id,))
+        for r, i in zip(rows, missing):
+            memo[pkeys[i]] = r
+    if not pkeys:
+        return np.zeros((0, geom.points.shape[0]), dtype=bool)
+    out = np.stack([memo[k] for k in pkeys], axis=0)
+    if len(memo) > _OCCL_MEMO_MAX:
+        memo.clear()
+    return out
+
+
+def face_gate(scene: Any, item: Dict[str, Any], R: np.ndarray, C: np.ndarray,
+              todo: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
+    """The env's visibility rule for both targets at many poses: (ok (N,), best visible fraction (N, 2)).
+
+    Only poses with ``todo`` set are evaluated (others: False); identical to
+    target_visibility.visibility_gates at each pose (same functions, same camera)."""
+    R = np.asarray(R, float).reshape(-1, 3, 3)
+    C = np.asarray(C, float).reshape(-1, 3)
+    n = C.shape[0]
+    ok = np.zeros(n, dtype=bool)
+    vis = np.zeros((n, 2))
+    idx = np.flatnonzero(np.ones(n, bool) if todo is None else np.asarray(todo, bool))
+    if idx.size == 0:
+        return ok, vis
+    K, width, height = _item_camera(item)
+    WORK.add("visible_fraction", 2 * int(idx.size))
+    sub_ok = np.ones(idx.size, dtype=bool)
+    entries = TV.required_targets(item)
+    if len(entries) != len(TV.REQUIRED_VISIBLE_SLOTS.get(str(item.get("task_type")), (0,))):
+        return ok, vis
+    for j, (_, entry) in enumerate(entries):
+        t = _Target(entry)
+        geom = TV.FaceGeometry(entry["bbox_min"], entry["bbox_max"])
+        Rs, Cs = R[idx], C[idx]
+        uniq, inv = np.unique(Cs, axis=0, return_inverse=True)
+        blocked = _face_blocked_rows(scene, t, uniq, geom)[np.asarray(inv).reshape(-1)]
+        for c0 in range(0, idx.size, _FACE_CHUNK):
+            sl = slice(c0, c0 + _FACE_CHUNK)
+            st = TV.face_visibility(Rs[sl], Cs[sl], geom, blocked[sl], K, width, height)
+            sub_ok[sl] &= st["visible"]
+            vis[idx[sl], j] = st["visible_fraction"].max(axis=1)
+    ok[idx] = sub_ok
+    return ok, vis
+
+
 def batch_evaluate(scene: Any, item: Dict[str, Any], xs: Sequence[float], ys: Sequence[float],
                    yaws: Sequence[float], *, pitch_deg: Optional[float] = None,
                    min_visible: float = DEFAULT_MIN_VISIBLE_FRACTION, occlusion_n: int = 3,
@@ -329,11 +401,19 @@ def evaluate_poses(scene: Any, item: Dict[str, Any], R: np.ndarray, C: np.ndarra
     relation = str(((item.get("target_region") or {}).get("params") or {}).get("relation", "left"))
     names, gates, extra = _canonical_batch(item["task_type"], relation, pa, pb)
     canonical_success = gates.all(axis=1)
+    legal = np.ones(n, dtype=bool)
+    reasons = None
+    if legal_reasons is not None:
+        reasons = np.asarray(list(legal_reasons), dtype=object)
+        legal = reasons == "ok"
+    face_rule = visibility_rule() == "face_v1"
 
     # Occlusion: rays are yaw/pitch independent -> computed once per (target,
     # position) and cached per scene; only the frustum test is per pose.
     vis = np.zeros((n, 2))
-    if n:
+    if face_rule:  # the env's rule, only where everything else already passes
+        occl_ok, vis = face_gate(scene, item, R, C, canonical_success & legal)
+    elif n:
         uniq, inv = np.unique(C, axis=0, return_inverse=True)
         inv = np.asarray(inv).reshape(-1)
         for j, t in enumerate(targets):
@@ -343,15 +423,12 @@ def evaluate_poses(scene: Any, item: Dict[str, Any], R: np.ndarray, C: np.ndarra
             cnt = infr.sum(axis=1)
             free = (infr & ~blocked[inv]).sum(axis=1)
             vis[:, j] = np.where(cnt > 0, free / np.maximum(cnt, 1), 0.0)
-    occl_ok = (vis[:, 0] >= min_visible) & (vis[:, 1] >= min_visible)
+    if not face_rule:
+        occl_ok = (vis[:, 0] >= min_visible) & (vis[:, 1] >= min_visible)
 
-    all_names: List[str] = list(names) + ["occlusion"]
+    all_names: List[str] = list(names) + ["face_visible" if face_rule else "occlusion"]
     cols = [gates, occl_ok[:, None]]
-    legal = np.ones(n, dtype=bool)
-    reasons = None
     if legal_reasons is not None:
-        reasons = np.asarray(list(legal_reasons), dtype=object)
-        legal = reasons == "ok"
         all_names = ["legal"] + all_names
         cols = [legal[:, None]] + cols
     G = np.concatenate(cols, axis=1)
@@ -963,7 +1040,8 @@ def success_fn(item: Dict[str, Any], scene: Any = None, *, min_visible: float = 
     ikey = stable_hash({"scene_id": item.get("scene_id"), "task_type": item.get("task_type"),
                         "target_region": item.get("target_region"),
                         "targets": [[t.id, t.bmin, t.bmax] for t in targets]})
-    ckey = (id(scene), ikey, float(min_visible), int(occlusion_n))
+    rule = visibility_rule()
+    ckey = (id(scene), ikey, float(min_visible), int(occlusion_n), rule)
     fn = _SUCCESS_FN_CACHE.get(ckey)
     if fn is not None and getattr(fn, "_scene_ref")() is scene:
         return fn
@@ -973,6 +1051,8 @@ def success_fn(item: Dict[str, Any], scene: Any = None, *, min_visible: float = 
     def _exact(c2w: Any) -> bool:
         c2w = np.asarray(c2w, float)
         WORK.add("exact_judge")
+        if rule == "face_v1":  # the env's own success function
+            return bool(TV.score_with_visibility(item, c2w, face_occluders_for(scene))["success"])
         ok = bool(sampling.score(item, c2w).get("success"))
         if ok:
             ok = all(visible_fraction(scene, c2w, t.entry, occluders=occ, n=occlusion_n) >= min_visible
@@ -1008,6 +1088,30 @@ def success_fn(item: Dict[str, Any], scene: Any = None, *, min_visible: float = 
         for k in list(_SUCCESS_FN_CACHE)[:-2048]:
             _SUCCESS_FN_CACHE.pop(k, None)
     return _fn
+
+
+def runtime_success_fn(item: Dict[str, Any], scene: Any) -> Any:
+    """The env's success rule for a Projective item, computed independently of ``success_fn``.
+
+    Under "box_v1": the canonical v1 metric alone (``difficulty.make_success_fn``; the env has no occlusion
+    gate).  Under "face_v1": that metric AND the env's visibility rule.  Used by the runtime_success_check
+    of the start-state search."""
+    from .difficulty import SuccessOracle, make_success_fn
+
+    base = make_success_fn(item)
+    if visibility_rule() != "face_v1":
+        return base
+
+    def exact(c2w: Any) -> bool:
+        return bool(TV.score_with_visibility(item, np.asarray(c2w, float), face_occluders_for(scene))["success"])
+
+    def batch(c2ws: Any) -> np.ndarray:
+        c2ws = np.asarray(c2ws, float).reshape(-1, 4, 4)
+        ok = np.asarray(base.batch(c2ws), dtype=bool)
+        vis_ok, _ = face_gate(scene, item, c2ws[:, :3, :3], c2ws[:, :3, 3], ok)
+        return ok & vis_ok
+
+    return SuccessOracle(exact, batch_fn=batch, exact_fn=exact)
 
 
 # ==========================================================================

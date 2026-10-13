@@ -60,50 +60,22 @@ from vagen.envs.active_spatial.canonical_camera import (
 )
 from vagen.envs.active_spatial.visual_bbox_metrics import _project_object
 
+from vagen.envs.active_spatial import target_visibility as TV
+from vagen.envs.active_spatial.target_visibility import (  # single source of the occluder rules
+    NON_OCCLUDING_HEAD_NOUNS,
+    NON_OCCLUDING_LABELS,
+    WALL_BOX_MAX_THICKNESS_M,
+    WALL_HEIGHT_M,
+    WALL_LABEL_HEAD_NOUNS,
+    is_non_occluding,
+    is_wall_label,
+)
+
 from .contract import NATIVE_K, NATIVE_SIZE, RENDER_SIZE, WORK, Obj
 
 OCCLUSION_MODEL_VERSION = "interiorgs_v10_aabb_wall_rays_v1"
-WALL_HEIGHT_M = 2.8
-WALL_BOX_MAX_THICKNESS_M = 0.35
 DEFAULT_SAMPLES_PER_AXIS = 3
 DEFAULT_MIN_VISIBLE_FRACTION = 0.5
-
-# Exact labels that never occlude: floor coverings, structural shells handled
-# elsewhere (walls) or never between a 1.5 m camera and a target (ceiling,
-# overhead lighting), see-through or soft items.
-NON_OCCLUDING_LABELS = frozenset({
-    "rug", "carpet", "mat", "doormat", "floor mat", "bath mat",
-    "floor", "ceiling", "room", "niche", "floor mold", "skirting", "baseboard",
-    "light", "lights", "downlight", "downlights", "spotlight", "strip light",
-    "ceiling lamp", "ceiling light", "pendant", "pendant lamp", "pendant light", "chandelier",
-    "curtain", "curtains", "window", "window curtain",
-})
-# Head nouns (last word of the label) that never occlude, e.g. "ceiling light",
-# "living room rug", "sheer curtain".  "floor lamp" -> "lamp" still occludes.
-NON_OCCLUDING_HEAD_NOUNS = frozenset({
-    "rug", "carpet", "mat", "doormat", "floor", "ceiling",
-    "light", "lights", "downlight", "downlights", "spotlight", "chandelier",
-    "curtain", "curtains", "window",
-})
-WALL_LABEL_HEAD_NOUNS = frozenset({"wall"})
-
-
-def _norm_label(label: Any) -> str:
-    return " ".join(str(label or "").strip().lower().split())
-
-
-def is_non_occluding(label: Any) -> bool:
-    text = _norm_label(label)
-    if not text:
-        return False
-    if text in NON_OCCLUDING_LABELS:
-        return True
-    return text.split(" ")[-1] in NON_OCCLUDING_HEAD_NOUNS
-
-
-def is_wall_label(label: Any) -> bool:
-    text = _norm_label(label)
-    return bool(text) and (text in WALL_LABEL_HEAD_NOUNS or text.split(" ")[-1] in WALL_LABEL_HEAD_NOUNS)
 
 
 # --------------------------------------------------------------------------
@@ -162,55 +134,19 @@ def target_samples(bmin: np.ndarray, bmax: np.ndarray, n: int = DEFAULT_SAMPLES_
 # --------------------------------------------------------------------------
 # Occluder set
 # --------------------------------------------------------------------------
-class OccluderSet:
-    """Arrays of occluding AABBs plus extruded wall segments for one scene."""
-
-    def __init__(self, ids: Sequence[str], labels: Sequence[str], mins: np.ndarray, maxs: np.ndarray,
-                 wall_a: np.ndarray, wall_b: np.ndarray, wall_height: float = WALL_HEIGHT_M) -> None:
-        self.ids = np.asarray([str(i) for i in ids], dtype=object)
-        self.labels = list(labels)
-        self.mins = np.asarray(mins, float).reshape(-1, 3)
-        self.maxs = np.asarray(maxs, float).reshape(-1, 3)
-        self.wall_a = np.asarray(wall_a, float).reshape(-1, 2)
-        self.wall_b = np.asarray(wall_b, float).reshape(-1, 2)
-        self.wall_height = float(wall_height)
+class OccluderSet(TV.OccluderSet):
+    """The env's occluder arrays (target_visibility.OccluderSet) with generator-side constructors."""
 
     @classmethod
     def from_objects(cls, objects: Iterable[Any], wall_segments: Sequence[Tuple[Any, Any]] = (),
                      include_wall_boxes: bool = True) -> "OccluderSet":
-        ids: List[str] = []
-        labels: List[str] = []
-        mins: List[np.ndarray] = []
-        maxs: List[np.ndarray] = []
-        for obj in objects:
-            oid, label, bmin, bmax = box_of(obj)
-            if is_non_occluding(label):
-                continue
-            if is_wall_label(label):
-                if not include_wall_boxes:
-                    continue
-                dims = bmax - bmin
-                if min(float(dims[0]), float(dims[1])) > WALL_BOX_MAX_THICKNESS_M:
-                    continue
-            if not (np.all(np.isfinite(bmin)) and np.all(np.isfinite(bmax))):
-                continue
-            ids.append(oid)
-            labels.append(label)
-            mins.append(bmin)
-            maxs.append(bmax)
-        wa = [np.asarray(a, float)[:2] for a, _ in wall_segments]
-        wb = [np.asarray(b, float)[:2] for _, b in wall_segments]
-        return cls(ids, labels, np.asarray(mins, float).reshape(-1, 3), np.asarray(maxs, float).reshape(-1, 3),
-                   np.asarray(wa, float).reshape(-1, 2), np.asarray(wb, float).reshape(-1, 2))
+        return cls.from_boxes((box_of(o) for o in objects), wall_segments, include_wall_boxes=include_wall_boxes)
 
     @classmethod
     def from_scene(cls, scene: Any, include_wall_boxes: bool = True) -> "OccluderSet":
         detector = getattr(scene, "detector", None)
         walls = list(getattr(detector, "wall_segments", None) or []) if detector is not None else []
         return cls.from_objects(scene.objects, walls, include_wall_boxes=include_wall_boxes)
-
-    def __len__(self) -> int:
-        return int(self.mins.shape[0])
 
 
 _OCC_CACHE: Dict[int, Tuple[Any, OccluderSet]] = {}
@@ -380,7 +316,11 @@ def identifiable(scene: Any, c2w: Any, obj: Any, *, min_inside: float = 0.5,
     Uses the canonical H1 projection (``build_canonical_camera`` with
     contract.NATIVE_K / RENDER_SIZE and ``_project_object``) so the numbers
     match the runtime metric, plus the occlusion model of this module.
+    Under the "face_v1" rule (``set_visibility_rule``): the env's rule instead,
+    i.e. at least one face of the box clearly visible (``face_identifiable``).
     """
+    if _RULE["name"] == "face_v1":
+        return face_identifiable(scene, c2w, obj)
     c2w = np.asarray(c2w, float)
     camera = build_canonical_camera(
         K_native=NATIVE_K,
@@ -411,4 +351,69 @@ def identifiable(scene: Any, c2w: Any, obj: Any, *, min_inside: float = 0.5,
         "thresholds": {"min_inside": float(min_inside), "min_area_ratio": float(min_area_ratio),
                        "min_visible": float(min_visible)},
         "occlusion_model_version": OCCLUSION_MODEL_VERSION,
+    }
+
+
+# --------------------------------------------------------------------------
+# Visibility rule: "box_v1" (above: half of the box unhidden, the 20261011c / 20261012 generator) or
+# "face_v1" (the env's rule, vagen/envs/active_spatial/target_visibility.py: one face clearly visible).
+# run_scene sets it per scene from RunConfig.visibility_rule.
+# --------------------------------------------------------------------------
+VISIBILITY_RULES = ("box_v1", "face_v1")
+_RULE = {"name": "box_v1"}
+
+
+def set_visibility_rule(rule: str) -> None:
+    if rule not in VISIBILITY_RULES:
+        raise ValueError(f"visibility_rule must be one of {VISIBILITY_RULES}, not {rule!r}")
+    _RULE["name"] = rule
+
+
+def visibility_rule() -> str:
+    return _RULE["name"]
+
+
+_FACE_OCC_CACHE: Dict[int, Tuple[Any, TV.OccluderSet]] = {}
+
+
+def face_occluders_for(scene: Any) -> TV.OccluderSet:
+    """The env's occluders for ``scene`` (labels.json boxes + walls from its CollisionDetector), cached."""
+    key = id(scene)
+    hit = _FACE_OCC_CACHE.get(key)
+    if hit is not None and hit[0]() is scene:
+        return hit[1]
+    occ = TV.OccluderSet.from_detector(scene.detector)
+    try:
+        ref = weakref.ref(scene)
+    except TypeError:  # pragma: no cover
+        ref = (lambda s=scene: s)
+    _FACE_OCC_CACHE[key] = (ref, occ)
+    if len(_FACE_OCC_CACHE) > 64:
+        for k in list(_FACE_OCC_CACHE)[:-32]:
+            _FACE_OCC_CACHE.pop(k, None)
+    return occ
+
+
+def face_visibility(scene: Any, c2w: Any, obj: Any) -> Dict[str, Any]:
+    """The env's per-object visibility (target_visibility.object_visibility) with the generator's work count."""
+    WORK.add("visible_fraction")
+    occ = face_occluders_for(scene)
+    oid, label, bmin, bmax = box_of(obj)
+    WORK.add("occlusion_ray_tests", 6 * TV.FACE_SAMPLES_PER_AXIS ** 2 * max(1, len(occ) + occ.wall_a.shape[0]))
+    entry = {"id": oid, "label": label, "bbox_min": bmin.tolist(), "bbox_max": bmax.tolist()}
+    return TV.object_visibility(np.asarray(c2w, float), entry, occ, _K_EFF, IMG_W, IMG_H)
+
+
+def face_identifiable(scene: Any, c2w: Any, obj: Any) -> Dict[str, Any]:
+    """``identifiable`` under the face rule (same keys; fractions are those of the best face)."""
+    fv = face_visibility(scene, c2w, obj)
+    return {
+        "inside_frame_fraction": float(fv["visible_fraction"]),
+        "area_ratio": float(fv["area_fraction"]),
+        "visible_fraction": float(fv["visible_fraction"]),
+        "identifiable": bool(fv["visible"]),
+        "best_face": int(fv["face"]),
+        "visibility_rule": TV.VISIBILITY_RULE_VERSION,
+        "thresholds": {"min_face_visible_fraction": TV.MIN_FACE_VISIBLE_FRACTION,
+                       "min_face_area_fraction": TV.MIN_FACE_AREA_FRACTION},
     }
