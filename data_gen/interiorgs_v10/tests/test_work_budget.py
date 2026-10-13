@@ -119,6 +119,18 @@ class ConfigFileTest(unittest.TestCase):
             from data_gen.interiorgs_v10.run_scene import ignored_object_ids
 
             self.assertIn("19", ignored_object_ids(final.ignored_objects, "0068_839928"))
+        r4_path = root / "generation_r4_20261013.json"
+        if r4_path.exists():
+            r4 = RunConfig(**load_config(r4_path))
+            self.assertEqual(r4.visibility_rule, "face_v1")
+            self.assertIsNone(r4.ignored_objects)
+            self.assertIn("fov_inclusion", r4.families)
+            self.assertIn("fov_inclusion:1:3", r4.family_quotas)
+            self.assertTrue(r4.runtime_success_check)
+            from data_gen.interiorgs_v10.run_scene import ignored_object_ids
+
+            self.assertIn("19", ignored_object_ids(r4.no_task_objects, "0068_839928"))  # merged wardrobe
+            self.assertIn("29", ignored_object_ids(r4.no_task_objects, "0003_839989"))  # an uncertain box
 
     def test_explicit_dests(self):
         import argparse
