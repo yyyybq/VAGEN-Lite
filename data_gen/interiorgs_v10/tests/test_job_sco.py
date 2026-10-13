@@ -22,6 +22,12 @@ class JobScoTest(unittest.TestCase):
                 J.prepare(run, 2, ["sft"])
             with self.assertRaises(ValueError):
                 J.prepare(run, 1, [])
+            # the render service and the trainer of one PPO run: two job folders on one RUN
+            J.prepare(run, 1, ["renderer"], job_dir="job_renderer")
+            J.prepare(run, 8, ["rl", "/rl", "150"], job_dir="job_rl")
+            self.assertIn(f"rl {run} /rl 150", (run / "job_rl" / "launch.sh").read_text())
+            self.assertEqual(json.loads((run / "job_rl" / "prepared.json").read_text())["spec"], "N4lS.Iq.I80.8")
+            self.assertTrue((run / "job" / "launch.sh").exists())
 
 
 if __name__ == "__main__":

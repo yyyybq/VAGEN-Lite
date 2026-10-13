@@ -5,6 +5,9 @@
     python data_gen/interiorgs_v10/job_sco.py status  --run RUN
     python data_gen/interiorgs_v10/job_sco.py delete  --run RUN    # after it ends (or to cancel)
 
+A formal PPO run is two jobs on one RUN (the render service writes RUN/renderer_endpoint.txt, the trainer reads
+it): give each its own --job-dir, e.g. job_renderer and job_rl.
+
 Trials use one card (the user's rule for every job but the formal training); the formal SFT and PPO
 trainers use eight, the PPO render service one.
 """
@@ -34,12 +37,12 @@ def now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def prepare(run: Path, gpus: int, mode_args: List[str]) -> Path:
+def prepare(run: Path, gpus: int, mode_args: List[str], job_dir: str = "job") -> Path:
     if gpus not in SPECS:
         raise ValueError(f"gpus must be one of {sorted(SPECS)}")
     if not mode_args:
         raise ValueError("give the mode and its arguments after --")
-    job = run / "job"
+    job = run / job_dir
     job.mkdir(parents=True, exist_ok=True)
     launch = job / "launch.sh"
     args = " ".join(shlex.quote(a) for a in mode_args[1:])
@@ -50,8 +53,8 @@ def prepare(run: Path, gpus: int, mode_args: List[str]) -> Path:
     return launch
 
 
-def submit(run: Path) -> str:
-    job = run / "job"
+def submit(run: Path, job_dir: str = "job") -> str:
+    job = run / job_dir
     receipt = job / "submission.json"
     if receipt.exists():
         return json.loads(receipt.read_text())["job_id"]
@@ -77,14 +80,14 @@ def describe(job_id: str) -> dict:
     return json.loads(res.stdout) if res.returncode == 0 else {"state": "NOT_FOUND"}
 
 
-def status(run: Path) -> dict:
-    job_id = json.loads((run / "job" / "submission.json").read_text())["job_id"]
+def status(run: Path, job_dir: str = "job") -> dict:
+    job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
     d = describe(job_id)
     return {"job_id": job_id, "state": d.get("state"), "finished": d.get("state") in FINISHED}
 
 
-def delete(run: Path) -> dict:
-    receipt = run / "job" / "submission.json"
+def delete(run: Path, job_dir: str = "job") -> dict:
+    receipt = run / job_dir / "submission.json"
     job_id = json.loads(receipt.read_text())["job_id"]
     state = describe(job_id).get("state")
     rc = 0
@@ -103,17 +106,18 @@ def main() -> None:
     ap.add_argument("action", choices=("prepare", "submit", "status", "delete"))
     ap.add_argument("--run", required=True, type=Path)
     ap.add_argument("--gpus", type=int, default=1)
+    ap.add_argument("--job-dir", default="job", help="folder under RUN for this job")
     ap.add_argument("mode_args", nargs="*")
     args = ap.parse_args()
     run = args.run.resolve()
     if args.action == "prepare":
-        print(prepare(run, args.gpus, args.mode_args))
+        print(prepare(run, args.gpus, args.mode_args, args.job_dir))
     elif args.action == "submit":
-        print(submit(run))
+        print(submit(run, args.job_dir))
     elif args.action == "status":
-        print(json.dumps(status(run)))
+        print(json.dumps(status(run, args.job_dir)))
     else:
-        print(json.dumps(delete(run)))
+        print(json.dumps(delete(run, args.job_dir)))
 
 
 if __name__ == "__main__":

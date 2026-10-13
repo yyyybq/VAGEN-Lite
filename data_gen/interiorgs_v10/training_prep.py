@@ -148,6 +148,11 @@ TRIAL_PPO: Dict[str, Any] = {
     # one card holds vLLM, the render service and, during its optimizer step, the critic's fp32 weights,
     # gradients and Adam state (offloaded otherwise): vLLM gets 20% instead of 30% (12% leaves no KV cache)
     "actor_rollout_ref.rollout.gpu_memory_utilization": 0.2,
+    # the critic's update holds fp32 weights, gradients and Adam state (~60 GB for a 3.75B model): on one card
+    # the trial keeps weights in bf16 (the formal 8-card run keeps fp32 master weights)
+    "actor_rollout_ref.actor.fsdp_config.model_dtype": "bf16",
+    "actor_rollout_ref.ref.fsdp_config.model_dtype": "bf16",
+    "critic.model.fsdp_config.model_dtype": "bf16",
 }
 
 
