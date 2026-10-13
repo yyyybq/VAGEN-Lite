@@ -28,6 +28,28 @@ PROJECTIVE_MIN_MARGIN_PX = 12.0
 PROJECTIVE_MIN_INSIDE_FRACTION = 0.50
 SUPPORTED_TASK_TYPES = frozenset(("projective_relations", "fov_inclusion"))
 
+# canonical_spatial_task_h1_v2: projective_relations / fov_inclusion keep the
+# frozen v1 judges bit-identically; the new families are judged in
+# canonical_task_metrics_v2.py (generated from data_gen/interiorgs_v10/families).
+CANONICAL_TASK_METRIC_VERSION_V2 = "canonical_spatial_task_h1_v2"
+V2_FAMILY_TASK_TYPES = frozenset((
+    "absolute_positioning",
+    "centering",
+    "equidistance",
+    "occlusion_alignment",
+    "screen_occupancy",
+    "size_distance_invariance",
+))
+SUPPORTED_TASK_TYPES_V2 = SUPPORTED_TASK_TYPES | V2_FAMILY_TASK_TYPES
+_SUPPORTED_TASK_TYPES_BY_VERSION = {
+    CANONICAL_TASK_METRIC_VERSION: SUPPORTED_TASK_TYPES,
+    CANONICAL_TASK_METRIC_VERSION_V2: SUPPORTED_TASK_TYPES_V2,
+}
+
+
+def _supported_task_types(version: Any) -> frozenset[str] | None:
+    return _SUPPORTED_TASK_TYPES_BY_VERSION.get(version) if isinstance(version, str) else None
+
 
 def _area(box: Any) -> float:
     if not box:
@@ -204,9 +226,14 @@ def canonical_fov(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def score_canonical_task(item: dict[str, Any], c2w: np.ndarray) -> dict[str, Any]:
-    if item.get("canonical_task_metric_version") != CANONICAL_TASK_METRIC_VERSION:
+    version = item.get("canonical_task_metric_version")
+    if _supported_task_types(version) is None:
         raise ValueError("item does not request the R1 canonical metric backend")
     task_type = str(item.get("task_type") or "")
+    if version == CANONICAL_TASK_METRIC_VERSION_V2 and task_type in V2_FAMILY_TASK_TYPES:
+        from .canonical_task_metrics_v2 import score_v2_family
+
+        return score_v2_family(item, np.asarray(c2w, dtype=float))
     result = score_observation(item, np.asarray(c2w, dtype=float))
     if task_type == "projective_relations":
         return canonical_projective(result)
@@ -217,12 +244,12 @@ def score_canonical_task(item: dict[str, Any], c2w: np.ndarray) -> dict[str, Any
 
 def uses_canonical_backend(item: dict[str, Any] | None) -> bool:
     if item and item.get("canonical_task_metric_version"):
-        if item["canonical_task_metric_version"] != CANONICAL_TASK_METRIC_VERSION:
+        supported = _supported_task_types(item["canonical_task_metric_version"])
+        if supported is None:
             raise ValueError("unknown canonical_task_metric_version; refusing legacy fallback")
-        if item.get("task_type") not in SUPPORTED_TASK_TYPES:
+        if item.get("task_type") not in supported:
             raise ValueError("canonical metric version does not support this task type")
-    return bool(
-        item
-        and item.get("canonical_task_metric_version") == CANONICAL_TASK_METRIC_VERSION
-        and item.get("task_type") in SUPPORTED_TASK_TYPES
-    )
+    if not item:
+        return False
+    supported = _supported_task_types(item.get("canonical_task_metric_version"))
+    return bool(supported is not None and item.get("task_type") in supported)

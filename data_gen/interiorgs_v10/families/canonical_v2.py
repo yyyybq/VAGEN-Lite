@@ -10,8 +10,8 @@
         the judge *is* the v1 judge);
         new families -> ``judges_v2.score_v2_family``.
 
-The runtime env gets the same dispatch from ``canonical_task_metrics_v2.patch``
-(see ENV_INTEGRATION.md); tests check that both paths agree exactly.
+The runtime env has the same dispatch (``vagen/envs/active_spatial/canonical_task_metrics.py``,
+see ENV_INTEGRATION.md); tests check that both paths agree exactly.
 """
 
 from __future__ import annotations

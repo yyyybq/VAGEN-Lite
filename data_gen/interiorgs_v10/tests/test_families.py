@@ -5,10 +5,6 @@ Run: cd <repo> && python3 -m unittest discover -s data_gen/interiorgs_v10/tests 
 
 import json
 import math
-import os
-import shutil
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,7 +15,6 @@ from data_gen.interiorgs_v10 import contract as K
 from data_gen.interiorgs_v10.families import canonical_v2 as V
 from data_gen.interiorgs_v10.families import common as C
 from data_gen.interiorgs_v10.families import judges_v2 as J
-from data_gen.interiorgs_v10.families import make_patch
 from data_gen.interiorgs_v10.sampling import fov_item, projective_item
 from data_gen.interiorgs_v10.scene import load_scene
 from data_gen.interiorgs_v10.testing import synthetic_scene as S
@@ -316,78 +311,36 @@ class FamiliesTest(unittest.TestCase):
         self.assertNotIn({"distance_m": 1.0}, ap)
         self.assertIn({"distance_m": 2.0}, ap)
 
-    # ------------------------------------------------------------ patch
-    def test_patch_is_up_to_date(self):
-        current = make_patch.PATCH_PATH.read_text(encoding="utf-8")
-        self.assertEqual(current, make_patch.build_patch(REPO), "rerun families/make_patch.py")
+    # ------------------------------------------------------------ runtime
+    def test_env_runtime_scores_v2_rows_with_the_same_judges(self):
+        """The env's canonical metric dispatches v2 family rows to the module the generator uses."""
+        import vagen.envs.active_spatial.canonical_task_metrics as m
+        import vagen.envs.active_spatial.canonical_task_metrics_v2 as env_v2
 
-    def test_patch_applies_and_patched_runtime_matches(self):
-        if shutil.which("patch") is None:
-            self.skipTest("patch binary not available")
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            shutil.copytree(REPO / "vagen", tmp / "vagen", ignore=shutil.ignore_patterns("__pycache__"))
-            patch_text = make_patch.PATCH_PATH.read_bytes()
-            for extra in (["--dry-run"], []):
-                res = subprocess.run(["patch", "-p1", "--batch", "--forward"] + extra, cwd=tmp, input=patch_text,
-                                     capture_output=True)
-                self.assertEqual(res.returncode, 0, res.stdout.decode() + res.stderr.decode())
-            vendored = tmp / make_patch.V2_REL
-            self.assertEqual(vendored.read_bytes(), (Path(J.__file__)).read_bytes())
-
-            # items x poses -> expected metrics from this module (and unpatched v1)
-            from vagen.envs.active_spatial.canonical_task_metrics import score_canonical_task
-
-            rng = np.random.default_rng(5)
-            cases = []
-            for task_type in V.FAMILIES:
-                for item, cands in self._family_cases(task_type)[:1]:
-                    poses = _random_poses(self.scenes[item["scene_id"]], 15, rng) + [c["c2w"] for c in cands[:2]]
-                    for pose in poses:
-                        cases.append({"item": item, "pose": pose.tolist(),
-                                      "expected": V.score_canonical_task_v2(item, pose)})
-            scene = self.scenes["two_rooms"]
-            by_id = {o.id: o for o in scene.objects}
-            for v1_item in (projective_item("two_rooms", by_id["4"], by_id["2"], "left"),
-                            fov_item("two_rooms", by_id["6"], by_id["7"])):
-                for v in (K.CANONICAL_TASK_METRIC_V1, K.CANONICAL_TASK_METRIC_V2):
-                    it = dict(v1_item, canonical_task_metric_version=v)
-                    for pose in _random_poses(scene, 10, rng):
-                        cases.append({"item": it, "pose": pose.tolist(),
-                                      "expected": score_canonical_task(v1_item, pose)})
-            (tmp / "cases.json").write_text(json.dumps(cases, sort_keys=True))
-            script = (
-                "import json, sys, numpy as np\n"
-                "import vagen, vagen.envs.active_spatial.canonical_task_metrics as m\n"
-                "assert vagen.__file__.startswith(sys.argv[1]), vagen.__file__\n"
-                "cases = json.load(open(sys.argv[2]))\n"
-                "out = []\n"
-                "for c in cases:\n"
-                "    assert m.uses_canonical_backend(c['item'])\n"
-                "    out.append(m.score_canonical_task(c['item'], np.asarray(c['pose'])))\n"
-                "legacy = {'task_type': 'equidistance'}\n"
-                "assert not m.uses_canonical_backend(legacy)\n"
-                "for bad in ({'task_type': 'equidistance', 'canonical_task_metric_version': 'canonical_spatial_task_h1_v1'},\n"
-                "            {'task_type': 'fov_inclusion', 'canonical_task_metric_version': 'unknown'}):\n"
-                "    try:\n"
-                "        m.uses_canonical_backend(bad)\n"
-                "        raise SystemExit('accepted ' + repr(bad))\n"
-                "    except ValueError:\n"
-                "        pass\n"
-                "print(json.dumps(out, sort_keys=True))\n"
-            )
-            env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-            env["PYTHONPATH"] = str(tmp)
-            res = subprocess.run([sys.executable, "-c", script, str(tmp), str(tmp / "cases.json")], cwd=tmp,
-                                 env=env, capture_output=True, text=True)
-            self.assertEqual(res.returncode, 0, res.stderr[-3000:])
-            got = json.loads(res.stdout)
-            self.assertEqual(len(got), len(cases))
-            for case, metric in zip(cases, got):
-                self.assertEqual(json.dumps(metric, sort_keys=True),
-                                 json.dumps(_jsonable(case["expected"]), sort_keys=True),
-                                 case["item"]["task_type"])
-
+        self.assertIs(J, env_v2)  # one module, imported under two names
+        rng = np.random.default_rng(5)
+        n = 0
+        for task_type in V.FAMILIES:
+            for item, cands in self._family_cases(task_type)[:1]:
+                for pose in _random_poses(self.scenes[item["scene_id"]], 15, rng) + [c["c2w"] for c in cands[:2]]:
+                    self.assertTrue(m.uses_canonical_backend(item))
+                    self.assertEqual(json.dumps(_jsonable(m.score_canonical_task(item, pose)), sort_keys=True),
+                                     json.dumps(_jsonable(V.score_canonical_task_v2(item, pose)), sort_keys=True))
+                    n += 1
+        scene = self.scenes["two_rooms"]
+        by_id = {o.id: o for o in scene.objects}
+        for v1_item in (projective_item("two_rooms", by_id["4"], by_id["2"], "left"),
+                        fov_item("two_rooms", by_id["6"], by_id["7"])):
+            it = dict(v1_item, canonical_task_metric_version=K.CANONICAL_TASK_METRIC_V2)
+            for pose in _random_poses(scene, 10, rng):  # v2 projective / fov rows keep the v1 judges
+                self.assertEqual(json.dumps(_jsonable(m.score_canonical_task(it, pose)), sort_keys=True),
+                                 json.dumps(_jsonable(m.score_canonical_task(v1_item, pose)), sort_keys=True))
+        self.assertGreater(n, 0)
+        self.assertFalse(m.uses_canonical_backend({"task_type": "equidistance"}))
+        for bad in ({"task_type": "equidistance", "canonical_task_metric_version": "canonical_spatial_task_h1_v1"},
+                    {"task_type": "fov_inclusion", "canonical_task_metric_version": "unknown"}):
+            with self.assertRaises(ValueError):
+                m.uses_canonical_backend(bad)
 
 if __name__ == "__main__":
     unittest.main()

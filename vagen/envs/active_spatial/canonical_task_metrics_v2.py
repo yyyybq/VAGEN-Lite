@@ -1,0 +1,653 @@
+"""Canonical H1 judges for the v2 Active Spatial task families.
+
+Metric version: ``canonical_spatial_task_h1_v2``.
+
+This module is the single source of the v2 judges: the RL env scores rows with it
+(``canonical_task_metrics.score_canonical_task``) and the InteriorGS v10 generator
+imports it (``data_gen/interiorgs_v10/families/judges_v2.py`` is an alias of this
+module).  Once rows are released under this version string the judges below are
+frozen: any behavioural change needs a new version string.
+
+Only information that the runtime metric has is used: the canonical H1 camera
+(native K from ``item["init_camera"]["intrinsics"]`` resized to 256x256, the
+pose c2w) and the target objects' AABBs (``item["target_object"]["objects"]``).
+Projective / FOV rows never reach this module; they keep the frozen v1 judges.
+
+Conventions shared by every family
+----------------------------------
+* "visible" (per object, same thresholds as v1 projective):
+  - in_front:     all 8 AABB corners have camera depth > 0.05 m.  Stricter than
+                  v1's centre-in-front because ``_project_object`` silently drops
+                  corners behind the camera, which would corrupt the bbox.
+  - visible:      ``_project_object(...)["visible"]``.
+  - min_area:     clipped bbox area / image area >= 1e-4.
+  - inside_frame: clipped / raw projected bbox area >= 0.5.
+* "distance to an object" is the horizontal (XY) distance from the camera
+  centre to the object's AABB footprint rectangle (0 inside).  The camera
+  height is fixed at 1.5 m, so vertical offsets are not controllable, and the
+  nearest side is what "2 m from the bed" means for large objects.
+* Shaping: ``progress`` is the product of per-gate components in [0, 1]; a
+  component equals 1 only when its gate is comfortably passed.  Tolerance
+  components use ``1 / (1 + (err / tol)^2)`` which is exactly 0.5 on the gate
+  boundary and keeps a non-vanishing gradient far from it.  As in v1,
+  ``shaping_score = 0.5 * progress + 0.5 * success`` so the upper half
+  [0.5, 1] is reserved for states that pass every gate; failing states have
+  progress capped at 1 - 1e-6, so they are always < 0.5.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+
+from vagen.envs.active_spatial.canonical_camera import (
+    CANONICAL_CAMERA_H1_RESIZE_V1,
+    build_canonical_camera,
+)
+from vagen.envs.active_spatial.visual_bbox_metrics import (
+    _extract_objects,
+    _match_object,
+    _project_object,
+)
+
+CANONICAL_TASK_METRIC_VERSION_V2 = "canonical_spatial_task_h1_v2"
+GATE_ALIGNED_SHAPING_SCORE_VERSION_V2 = "canonical_gate_aligned_shaping_v2"
+RENDER_SIZE = (256, 256)
+
+# ----------------------------------------------------------------- shared gates
+MIN_AREA_RATIO = 1e-4          # = v1 FOV_MIN_AREA_RATIO
+MIN_INSIDE_FRACTION = 0.50     # = v1 PROJECTIVE_MIN_INSIDE_FRACTION
+MIN_CORNER_DEPTH_M = 0.05
+FAILING_PROGRESS_CAP = 1.0 - 1e-6
+
+# --------------------------------------------------------- absolute_positioning
+# |d_footprint - d| <= max(0.25 m, 10% d): 0.25 m is just under one 0.3 m step
+# (so the band is >= 0.5 m wide, i.e. at least one lattice point on any line
+# crossing it) and 10% matches human metric-distance judgement at 2.5-3 m.
+ABS_TOL_FLOOR_M = 0.25
+ABS_TOL_REL = 0.10
+
+# ------------------------------------------------------------------ equidistance
+# |d_A - d_B| <= max(0.25 m, 10% of their mean): same reasoning; the band
+# around the bisector curve is >= 0.25 / sin(phi/2) wide where phi <= 90 deg is
+# the angle between both objects seen from the camera (both must be in view).
+EQ_TOL_FLOOR_M = 0.25
+EQ_TOL_REL = 0.10
+
+# ----------------------------------------------------------- occlusion_alignment
+# The occluded target X counts as hidden when >= 85% of its in-frame silhouette
+# (camera-facing AABB faces, sampled on a 6x6 grid per face, weighted by
+# projected face area) is behind the occluder Y's AABB along the camera ray.
+# X must lie in the view direction (>= 80% of its silhouette inside the
+# frame, so "out of frame" is not "hidden") and Y must be visible.
+OCC_HIDDEN_MIN = 0.85
+OCC_TARGET_IN_FRAME_MIN = 0.80
+OCC_FACE_SAMPLES = 6
+OCC_ALIGN_SCALE_FRAC = 0.25    # shaping only: image-gap scale = 25% width
+
+# ---------------------------------------------------------------- screen_occupancy
+# occupancy = clipped projected bbox height / image height (legacy definition);
+# |occ - k| <= max(0.03, 15% k); object must be vertically contained
+# (clipped/raw height >= 0.95) so the measured height is the full object.
+SO_TOL_FLOOR = 0.03
+SO_TOL_REL = 0.15
+SO_VERTICAL_INSIDE_MIN = 0.95
+SO_VERTICAL_TOL = 0.05         # shaping scale for vertical containment
+
+# -------------------------------------------------------- size_distance_invariance
+# |ln(h_A / h_B)| <= ln(1.2) on clipped projected heights, both vertically
+# contained (>= 0.95) and visible.
+SDI_RATIO_TOL = 1.20
+SDI_VERTICAL_INSIDE_MIN = 0.95
+
+# -------------------------------------------------------------------- centering
+# u_A within max(6 px, 15% of |u_B - u_C|) of the midpoint of u_B, u_C (object
+# centre projections), flank separation |u_B - u_C| >= 15% of the width.
+CEN_MIN_SEPARATION_FRAC = 0.15
+CEN_TOL_REL = 0.15
+CEN_TOL_FLOOR_PX = 6.0
+
+NEW_TASK_TYPES = frozenset((
+    "absolute_positioning",
+    "equidistance",
+    "occlusion_alignment",
+    "screen_occupancy",
+    "size_distance_invariance",
+    "centering",
+))
+
+# Role letters per task type, in target_object.objects order.
+ROLES = {
+    "absolute_positioning": ("a",),
+    "screen_occupancy": ("a",),
+    "equidistance": ("a", "b"),
+    "occlusion_alignment": ("a", "b"),      # a = occluded target, b = occluder
+    "size_distance_invariance": ("a", "b"),
+    "centering": ("a", "b", "c"),           # a = centred object, b/c = flanks
+}
+
+
+# =============================================================================
+# helpers
+# =============================================================================
+def _num(value: Any) -> Optional[float]:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _clip01(value: float) -> float:
+    if not math.isfinite(value):
+        return 0.0
+    return float(min(1.0, max(0.0, value)))
+
+
+def tolerance_progress(err: float, tol: float) -> float:
+    """1 at err <= 0, exactly 0.5 at err == tol, heavy-tailed beyond."""
+    if err is None or not math.isfinite(float(err)):
+        return 0.0
+    err = float(err)
+    if err <= 0.0:
+        return 1.0
+    return float(1.0 / (1.0 + (err / max(float(tol), 1e-9)) ** 2))
+
+
+def _area(box: Any) -> float:
+    if not box:
+        return 0.0
+    return max(0.0, float(box[2]) - float(box[0])) * max(0.0, float(box[3]) - float(box[1]))
+
+
+def _bounds(obj: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
+    lo = np.asarray(obj["bbox_min"], dtype=np.float64)[:3]
+    hi = np.asarray(obj["bbox_max"], dtype=np.float64)[:3]
+    return np.minimum(lo, hi), np.maximum(lo, hi)
+
+
+def footprint_distance(x: float, y: float, obj: Dict[str, Any]) -> float:
+    """Horizontal distance from (x, y) to the object's AABB footprint."""
+    lo, hi = _bounds(obj)
+    dx = max(float(lo[0]) - x, 0.0, x - float(hi[0]))
+    dy = max(float(lo[1]) - y, 0.0, y - float(hi[1]))
+    return float(math.hypot(dx, dy))
+
+
+def _corners(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+    return np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])],
+                    dtype=np.float64)
+
+
+class _Context:
+    """Canonical H1 camera + target objects for one (item, pose)."""
+
+    def __init__(self, item: Dict[str, Any], c2w: Any) -> None:
+        camera = build_canonical_camera(
+            K_native=item["init_camera"]["intrinsics"],
+            render_size=RENDER_SIZE,
+            transform="resize",
+            c2w=np.asarray(c2w, dtype=np.float64),
+            item=item,
+            camera_model_version=CANONICAL_CAMERA_H1_RESIZE_V1,
+        )
+        self.c2w = np.asarray(camera.c2w, dtype=np.float64)
+        self.w2c = np.asarray(camera.w2c, dtype=np.float64)
+        self.K = np.asarray(camera.K_effective, dtype=np.float64)
+        self.width, self.height = (int(v) for v in camera.render_resolution)
+        self.position = self.c2w[:3, 3].copy()
+        region = item.get("target_region") or {}
+        self.params = dict(region.get("params") or {}) if isinstance(region, dict) else {}
+        self.objects = _extract_objects({"_target_object": item.get("target_object")})
+
+    def roles(self, letters: Sequence[str]) -> Optional[List[Dict[str, Any]]]:
+        picked: List[Dict[str, Any]] = []
+        for index, letter in enumerate(letters):
+            obj = _match_object(
+                self.objects,
+                object_id=self.params.get(f"object_{letter}_id"),
+                center=self.params.get(f"object_{letter}_center"),
+                fallback_index=index,
+            )
+            if obj is None or "bbox_min" not in obj or "bbox_max" not in obj:
+                return None
+            if any(obj is other for other in picked):
+                return None
+            picked.append(obj)
+        return picked
+
+    def project(self, obj: Dict[str, Any]) -> Dict[str, Any]:
+        proj = dict(_project_object(obj, self.c2w, self.K, self.width, self.height))
+        lo, hi = _bounds(obj)
+        pts = _corners(lo, hi)
+        depth = pts @ self.w2c[2, :3] + self.w2c[2, 3]
+        raw, clipped = proj.get("bbox_raw"), proj.get("bbox")
+        raw_area = _area(raw)
+        raw_h = (float(raw[3]) - float(raw[1])) if raw else 0.0
+        clip_h = (float(clipped[3]) - float(clipped[1])) if clipped else 0.0
+        proj["min_corner_depth"] = float(depth.min())
+        proj["all_corners_in_front"] = bool(float(depth.min()) > MIN_CORNER_DEPTH_M)
+        proj["inside_fraction"] = _area(clipped) / raw_area if raw_area > 1e-8 else 0.0
+        proj["raw_height_px"] = raw_h
+        proj["vertical_inside_fraction"] = clip_h / raw_h if raw_h > 1e-8 else 0.0
+        return proj
+
+    def to_camera(self, pts: np.ndarray) -> np.ndarray:
+        return pts @ self.w2c[:3, :3].T + self.w2c[:3, 3]
+
+    def uv(self, pc: np.ndarray) -> np.ndarray:
+        z = pc[..., 2]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            u = self.K[0, 0] * pc[..., 0] / z + self.K[0, 2]
+            v = self.K[1, 1] * pc[..., 1] / z + self.K[1, 2]
+        return np.stack([u, v], axis=-1)
+
+
+def _visibility(projs: Sequence[Dict[str, Any]], prefix: str = "") -> Tuple[Dict[str, bool], Dict[str, float]]:
+    ok = len(projs) > 0
+    areas = [float(p.get("area_ratio", 0.0) or 0.0) for p in projs] or [0.0]
+    inside = [float(p.get("inside_fraction", 0.0)) for p in projs] or [0.0]
+    in_front = ok and all(bool(p.get("all_corners_in_front")) for p in projs)
+    visible = ok and all(bool(p.get("visible")) for p in projs)
+    gates = {
+        prefix + "in_front": bool(in_front),
+        prefix + "visible": bool(visible),
+        prefix + "min_area": bool(ok and min(areas) >= MIN_AREA_RATIO),
+        prefix + "inside_frame": bool(ok and min(inside) >= MIN_INSIDE_FRACTION),
+    }
+    comps = {
+        prefix + "in_front": 1.0 if in_front else 0.0,
+        prefix + "visible": 1.0 if visible else 0.0,
+        prefix + "min_area": _clip01(min(areas) / MIN_AREA_RATIO),
+        prefix + "inside_frame": _clip01(min(inside)),
+    }
+    return gates, comps
+
+
+def _object_summary(obj: Dict[str, Any], proj: Dict[str, Any]) -> Dict[str, Any]:
+    center = proj.get("center_uv")
+    return {
+        "id": str(obj.get("id", obj.get("ins_id", ""))),
+        "label": obj.get("label"),
+        "center_uv": [_num(center[0]), _num(center[1])] if center else None,
+        "inside_frame_fraction": _num(proj.get("inside_fraction")),
+        "vertical_inside_fraction": _num(proj.get("vertical_inside_fraction")),
+        "area_ratio": _num(proj.get("area_ratio")),
+        "height_px": _num(proj.get("height_px")),
+        "all_corners_in_front": bool(proj.get("all_corners_in_front")),
+        "visible": bool(proj.get("visible")),
+    }
+
+
+def _finish(task_metric: str, gates: Dict[str, bool], comps: Dict[str, float],
+            measurements: Dict[str, Any]) -> Dict[str, Any]:
+    progress = 1.0
+    for value in comps.values():
+        progress *= _clip01(float(value))
+    success = bool(gates) and all(bool(v) for v in gates.values())
+    if not success:
+        progress = min(progress, FAILING_PROGRESS_CAP)
+    shaping = 0.5 * progress + 0.5 * float(success)
+    out: Dict[str, Any] = {
+        "metric_version": CANONICAL_TASK_METRIC_VERSION_V2,
+        "task_metric": task_metric,
+        "success": success,
+        "score": float(shaping),
+        "shaping_score_version": GATE_ALIGNED_SHAPING_SCORE_VERSION_V2,
+        "shaping_score": float(shaping),
+        "continuous_gate_progress": float(progress),
+        "shaping_components": {k: float(v) for k, v in comps.items()},
+        "gates": {k: bool(v) for k, v in gates.items()},
+    }
+    out.update(measurements)
+    return out
+
+
+def _missing(task_metric: str, extra_gates: Sequence[str]) -> Dict[str, Any]:
+    gates = {"objects_present": False}
+    gates.update({name: False for name in extra_gates})
+    return _finish(task_metric, gates, {"objects_present": 0.0}, {"objects": []})
+
+
+def _required_float(params: Dict[str, Any], key: str) -> float:
+    value = _num(params.get(key))
+    if value is None or value <= 0.0:
+        raise ValueError(f"target_region.params[{key!r}] must be a positive number")
+    return value
+
+
+# =============================================================================
+# absolute_positioning
+# =============================================================================
+def judge_absolute_positioning(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
+    name = "absolute_distance_h1"
+    ctx = _Context(item, c2w)
+    d = _required_float(ctx.params, "distance_m")
+    tol = max(ABS_TOL_FLOOR_M, ABS_TOL_REL * d)
+    objs = ctx.roles(ROLES["absolute_positioning"])
+    if objs is None:
+        return _missing(name, ("distance",))
+    (obj,) = objs
+    proj = ctx.project(obj)
+    vis_gates, vis_comps = _visibility([proj])
+    dist = footprint_distance(float(ctx.position[0]), float(ctx.position[1]), obj)
+    err = abs(dist - d)
+    gates = {"objects_present": True, **vis_gates, "distance": err <= tol}
+    comps = {"objects_present": 1.0, **vis_comps, "distance": tolerance_progress(err, tol)}
+    return _finish(name, gates, comps, {
+        "distance_m": dist,
+        "required_distance_m": d,
+        "distance_tolerance_m": tol,
+        "distance_error_m": err,
+        "inside_frame_fraction_min": float(proj["inside_fraction"]),
+        "objects": [_object_summary(obj, proj)],
+    })
+
+
+# =============================================================================
+# equidistance
+# =============================================================================
+def judge_equidistance(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
+    name = "equidistance_h1"
+    ctx = _Context(item, c2w)
+    objs = ctx.roles(ROLES["equidistance"])
+    if objs is None:
+        return _missing(name, ("equidistant",))
+    projs = [ctx.project(o) for o in objs]
+    vis_gates, vis_comps = _visibility(projs)
+    x, y = float(ctx.position[0]), float(ctx.position[1])
+    d_a, d_b = (footprint_distance(x, y, o) for o in objs)
+    err = abs(d_a - d_b)
+    tol = max(EQ_TOL_FLOOR_M, EQ_TOL_REL * 0.5 * (d_a + d_b))
+    gates = {"objects_present": True, **vis_gates, "equidistant": err <= tol}
+    comps = {"objects_present": 1.0, **vis_comps, "equidistant": tolerance_progress(err, tol)}
+    return _finish(name, gates, comps, {
+        "distance_a_m": d_a,
+        "distance_b_m": d_b,
+        "distance_difference_m": err,
+        "equidistance_tolerance_m": tol,
+        "inside_frame_fraction_min": float(min(p["inside_fraction"] for p in projs)),
+        "objects": [_object_summary(o, p) for o, p in zip(objs, projs)],
+    })
+
+
+# =============================================================================
+# occlusion_alignment
+# =============================================================================
+def _facing_faces(lo: np.ndarray, hi: np.ndarray, eye: np.ndarray) -> List[Tuple[int, float]]:
+    """(axis, plane value) of the AABB faces whose outer side contains ``eye``."""
+    faces: List[Tuple[int, float]] = []
+    for axis in range(3):
+        if eye[axis] < lo[axis]:
+            faces.append((axis, float(lo[axis])))
+        elif eye[axis] > hi[axis]:
+            faces.append((axis, float(hi[axis])))
+    return faces
+
+
+def _face_samples(lo: np.ndarray, hi: np.ndarray, axis: int, plane: float, n: int) -> Tuple[np.ndarray, np.ndarray]:
+    """(n*n, 3) cell-centre samples and the 4 corner points of one face."""
+    others = [a for a in range(3) if a != axis]
+    fr = (np.arange(n, dtype=np.float64) + 0.5) / n
+    s, t = np.meshgrid(fr, fr, indexing="ij")
+    pts = np.empty((n * n, 3), dtype=np.float64)
+    pts[:, axis] = plane
+    pts[:, others[0]] = lo[others[0]] + s.ravel() * (hi[others[0]] - lo[others[0]])
+    pts[:, others[1]] = lo[others[1]] + t.ravel() * (hi[others[1]] - lo[others[1]])
+    quad = np.empty((4, 3), dtype=np.float64)
+    quad[:, axis] = plane
+    a0, a1 = others
+    for k, (i, j) in enumerate(((0, 0), (1, 0), (1, 1), (0, 1))):
+        quad[k, a0] = (lo[a0], hi[a0])[i]
+        quad[k, a1] = (lo[a1], hi[a1])[j]
+    return pts, quad
+
+
+def _polygon_area(uv: np.ndarray) -> float:
+    x, y = uv[:, 0], uv[:, 1]
+    nxt = np.arange(1, len(x) + 1) % len(x)
+    return float(0.5 * abs(np.dot(x, y[nxt]) - np.dot(y, x[nxt])))
+
+
+def segments_hit_aabb(origin: np.ndarray, points: np.ndarray, lo: np.ndarray, hi: np.ndarray,
+                      t_end: float = 1.0 - 1e-6) -> np.ndarray:
+    """Slab test: does the segment origin -> point (t in (0, t_end)) hit [lo, hi]?"""
+    d = points - origin[None, :]
+    zero = np.abs(d) < 1e-12
+    with np.errstate(divide="ignore", invalid="ignore"):
+        inv = 1.0 / np.where(zero, 1.0, d)
+        t1 = (lo[None, :] - origin[None, :]) * inv
+        t2 = (hi[None, :] - origin[None, :]) * inv
+    t_lo = np.minimum(t1, t2)
+    t_hi = np.maximum(t1, t2)
+    in_slab = (origin >= lo) & (origin <= hi)
+    t_lo = np.where(zero, np.where(in_slab[None, :], -np.inf, np.inf), t_lo)
+    t_hi = np.where(zero, np.where(in_slab[None, :], np.inf, -np.inf), t_hi)
+    t_min = t_lo.max(axis=1)
+    t_max = t_hi.min(axis=1)
+    return (t_max >= t_min) & (t_max > 1e-9) & (t_min < t_end)
+
+
+def occlusion_silhouette(ctx: _Context, target: Dict[str, Any], occluder: Dict[str, Any],
+                         n: int = OCC_FACE_SAMPLES) -> Dict[str, float]:
+    """Area-weighted in-frame and hidden fractions of the target silhouette."""
+    lo, hi = _bounds(target)
+    olo, ohi = _bounds(occluder)
+    eye = ctx.position
+    samples: List[np.ndarray] = []
+    weights: List[np.ndarray] = []
+    for axis, plane in _facing_faces(lo, hi, eye):
+        pts, quad = _face_samples(lo, hi, axis, plane, n)
+        quad_c = ctx.to_camera(quad)
+        if float(quad_c[:, 2].min()) <= MIN_CORNER_DEPTH_M:
+            continue
+        face_area = _polygon_area(ctx.uv(quad_c))
+        if face_area <= 1e-9:
+            continue
+        samples.append(pts)
+        weights.append(np.full(len(pts), face_area / len(pts)))
+    if not weights:
+        return {"in_frame_fraction": 0.0, "hidden_fraction": 0.0, "silhouette_area_px": 0.0}
+    pts = np.concatenate(samples)
+    w = np.concatenate(weights)
+    pc = ctx.to_camera(pts)
+    uv = ctx.uv(pc)
+    f = ((pc[:, 2] > MIN_CORNER_DEPTH_M) & (uv[:, 0] >= 0.0) & (uv[:, 0] <= ctx.width - 1)
+         & (uv[:, 1] >= 0.0) & (uv[:, 1] <= ctx.height - 1))
+    h = segments_hit_aabb(eye, pts, olo, ohi)
+    total = float(w.sum())
+    framed = float(w[f].sum())
+    return {
+        "in_frame_fraction": framed / total if total > 0 else 0.0,
+        "hidden_fraction": float(w[f & h].sum()) / framed if framed > 0 else 0.0,
+        "silhouette_area_px": total,
+    }
+
+
+def _rect_gap(point: Optional[Sequence[float]], box: Optional[Sequence[float]]) -> float:
+    if point is None or not box:
+        return math.inf
+    u, v = float(point[0]), float(point[1])
+    du = max(float(box[0]) - u, 0.0, u - float(box[2]))
+    dv = max(float(box[1]) - v, 0.0, v - float(box[3]))
+    return float(math.hypot(du, dv))
+
+
+def judge_occlusion_alignment(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
+    name = "occlusion_alignment_h1"
+    ctx = _Context(item, c2w)
+    objs = ctx.roles(ROLES["occlusion_alignment"])
+    if objs is None:
+        return _missing(name, ("target_in_front", "target_in_view_direction", "target_hidden"))
+    target, occluder = objs
+    p_t = ctx.project(target)
+    p_o = ctx.project(occluder)
+    vis_gates, vis_comps = _visibility([p_o], prefix="occluder_")
+    sil = occlusion_silhouette(ctx, target, occluder)
+    in_frame = float(sil["in_frame_fraction"])
+    hidden = float(sil["hidden_fraction"])
+    target_front = bool(p_t.get("all_corners_in_front"))
+    gates = {
+        "objects_present": True,
+        **vis_gates,
+        "target_in_front": target_front,
+        "target_in_view_direction": target_front and in_frame >= OCC_TARGET_IN_FRAME_MIN,
+        "target_hidden": target_front and hidden >= OCC_HIDDEN_MIN,
+    }
+    # Shaping: hidden fraction (0.5 at the gate) blended with an image-space
+    # alignment term so that progress exists before any overlap.
+    hidden_progress = tolerance_progress(1.0 - hidden, 1.0 - OCC_HIDDEN_MIN) if target_front else 0.0
+    gap = _rect_gap(p_t.get("center_uv"), p_o.get("bbox_raw"))
+    centres = ctx.to_camera(np.stack([0.5 * np.add(*_bounds(target)), 0.5 * np.add(*_bounds(occluder))]))
+    occluder_nearer = bool(target_front and p_o.get("all_corners_in_front")
+                           and float(centres[1, 2]) < float(centres[0, 2]))
+    align = math.exp(-gap / (OCC_ALIGN_SCALE_FRAC * ctx.width)) if math.isfinite(gap) else 0.0
+    align *= 1.0 if occluder_nearer else 0.25
+    comps = {
+        "objects_present": 1.0,
+        **vis_comps,
+        "target_in_front": 1.0 if target_front else 0.0,
+        "target_in_view_direction": _clip01(in_frame / OCC_TARGET_IN_FRAME_MIN),
+        "target_hidden": 0.5 * hidden_progress + 0.5 * align,
+    }
+    return _finish(name, gates, comps, {
+        "target_in_frame_fraction": in_frame,
+        "target_hidden_fraction": hidden,
+        "required_hidden_fraction": OCC_HIDDEN_MIN,
+        "required_target_in_frame_fraction": OCC_TARGET_IN_FRAME_MIN,
+        "target_silhouette_area_px": float(sil["silhouette_area_px"]),
+        "occluder_nearer": occluder_nearer,
+        "image_gap_px": _num(gap),
+        "objects": [_object_summary(target, p_t), _object_summary(occluder, p_o)],
+    })
+
+
+# =============================================================================
+# screen_occupancy
+# =============================================================================
+def screen_occupancy_tolerance(k: float) -> float:
+    return max(SO_TOL_FLOOR, SO_TOL_REL * float(k))
+
+
+def judge_screen_occupancy(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
+    name = "screen_occupancy_h1"
+    ctx = _Context(item, c2w)
+    k = _required_float(ctx.params, "occupancy_ratio")
+    tol = screen_occupancy_tolerance(k)
+    objs = ctx.roles(ROLES["screen_occupancy"])
+    if objs is None:
+        return _missing(name, ("vertical_contained", "occupancy"))
+    (obj,) = objs
+    proj = ctx.project(obj)
+    vis_gates, vis_comps = _visibility([proj])
+    occ = float(proj.get("height_px", 0.0) or 0.0) / float(ctx.height)
+    vert = float(proj["vertical_inside_fraction"])
+    err = abs(occ - k)
+    gates = {"objects_present": True, **vis_gates,
+             "vertical_contained": vert >= SO_VERTICAL_INSIDE_MIN, "occupancy": err <= tol}
+    comps = {"objects_present": 1.0, **vis_comps,
+             "vertical_contained": tolerance_progress(1.0 - vert, SO_VERTICAL_TOL),
+             "occupancy": tolerance_progress(err, tol)}
+    return _finish(name, gates, comps, {
+        "occupancy": occ,
+        "required_occupancy": k,
+        "occupancy_tolerance": tol,
+        "vertical_inside_fraction": vert,
+        "inside_frame_fraction_min": float(proj["inside_fraction"]),
+        "objects": [_object_summary(obj, proj)],
+    })
+
+
+# =============================================================================
+# size_distance_invariance
+# =============================================================================
+def judge_size_distance_invariance(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
+    name = "apparent_height_equal_h1"
+    ctx = _Context(item, c2w)
+    objs = ctx.roles(ROLES["size_distance_invariance"])
+    if objs is None:
+        return _missing(name, ("vertical_contained", "equal_apparent_height"))
+    projs = [ctx.project(o) for o in objs]
+    vis_gates, vis_comps = _visibility(projs)
+    h_a, h_b = (float(p.get("height_px", 0.0) or 0.0) for p in projs)
+    vert = min(float(p["vertical_inside_fraction"]) for p in projs)
+    tol = math.log(SDI_RATIO_TOL)
+    if h_a > 1e-6 and h_b > 1e-6:
+        err = abs(math.log(h_a / h_b))
+    else:
+        err = math.inf
+    gates = {"objects_present": True, **vis_gates,
+             "vertical_contained": vert >= SDI_VERTICAL_INSIDE_MIN, "equal_apparent_height": err <= tol}
+    comps = {"objects_present": 1.0, **vis_comps,
+             "vertical_contained": tolerance_progress(1.0 - vert, SO_VERTICAL_TOL),
+             "equal_apparent_height": tolerance_progress(err, tol)}
+    return _finish(name, gates, comps, {
+        "height_a_px": h_a,
+        "height_b_px": h_b,
+        "log_height_ratio": _num(math.log(h_a / h_b)) if h_a > 1e-6 and h_b > 1e-6 else None,
+        "log_ratio_tolerance": tol,
+        "vertical_inside_fraction_min": vert,
+        "inside_frame_fraction_min": float(min(p["inside_fraction"] for p in projs)),
+        "objects": [_object_summary(o, p) for o, p in zip(objs, projs)],
+    })
+
+
+# =============================================================================
+# centering
+# =============================================================================
+def judge_centering(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
+    name = "image_centering_h1"
+    ctx = _Context(item, c2w)
+    objs = ctx.roles(ROLES["centering"])
+    if objs is None:
+        return _missing(name, ("flank_separation", "centered"))
+    projs = [ctx.project(o) for o in objs]
+    vis_gates, vis_comps = _visibility(projs)
+    us = [_num((p.get("center_uv") or [None])[0]) for p in projs]
+    min_sep = CEN_MIN_SEPARATION_FRAC * ctx.width
+    if all(u is not None for u in us) and all(p.get("center_in_front") for p in projs):
+        u_a, u_b, u_c = us
+        sep = abs(u_b - u_c)
+        mid = 0.5 * (u_b + u_c)
+        err = abs(u_a - mid)
+        tol = max(CEN_TOL_FLOOR_PX, CEN_TOL_REL * sep)
+    else:
+        sep, err, tol, mid = 0.0, math.inf, CEN_TOL_FLOOR_PX, None
+    gates = {"objects_present": True, **vis_gates,
+             "flank_separation": sep >= min_sep, "centered": err <= tol}
+    comps = {"objects_present": 1.0, **vis_comps,
+             "flank_separation": tolerance_progress(max(0.0, min_sep - sep), 0.5 * min_sep),
+             "centered": tolerance_progress(err, tol)}
+    return _finish(name, gates, comps, {
+        "flank_separation_px": float(sep),
+        "required_flank_separation_px": float(min_sep),
+        "center_error_px": _num(err),
+        "center_tolerance_px": float(tol),
+        "midpoint_u": _num(mid),
+        "inside_frame_fraction_min": float(min(p["inside_fraction"] for p in projs)),
+        "objects": [_object_summary(o, p) for o, p in zip(objs, projs)],
+    })
+
+
+JUDGES = {
+    "absolute_positioning": judge_absolute_positioning,
+    "equidistance": judge_equidistance,
+    "occlusion_alignment": judge_occlusion_alignment,
+    "screen_occupancy": judge_screen_occupancy,
+    "size_distance_invariance": judge_size_distance_invariance,
+    "centering": judge_centering,
+}
+assert frozenset(JUDGES) == NEW_TASK_TYPES
+
+
+def score_v2_family(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
+    """Score one v2 family row.  Projective / FOV are NOT handled here."""
+    if item.get("canonical_task_metric_version") != CANONICAL_TASK_METRIC_VERSION_V2:
+        raise ValueError("item does not request the canonical v2 metric backend")
+    task_type = str(item.get("task_type") or "")
+    judge = JUDGES.get(task_type)
+    if judge is None:
+        raise ValueError(f"canonical v2 family metric is not defined for task_type={task_type!r}")
+    return judge(item, np.asarray(c2w, dtype=np.float64))

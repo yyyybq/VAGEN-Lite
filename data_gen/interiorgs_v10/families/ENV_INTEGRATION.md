@@ -1,27 +1,25 @@
 # v2 task families: what the runtime needs (workstream F)
 
-Workstream F does not edit anything under `vagen/`. This file lists every change the integrator must make so that `canonical_spatial_task_h1_v2` rows train in RL with the same scoring as the generator.
+Since 2026-10-13 the v2 support is part of the env itself (the former `canonical_task_metrics_v2.patch` and
+`env_structure_override.patch` were merged into `vagen/envs/active_spatial/`). This file records what was
+merged and what an integrator still has to check.
 
-## 1. Apply the metric patch (required)
+## 1. The v2 metric in the env
 
-```bash
-python3 -m data_gen.interiorgs_v10.families.make_patch --check     # patch matches judges_v2.py
-patch -p1 --dry-run < data_gen/interiorgs_v10/families/canonical_task_metrics_v2.patch
-patch -p1          < data_gen/interiorgs_v10/families/canonical_task_metrics_v2.patch
-```
+* `vagen/envs/active_spatial/canonical_task_metrics_v2.py` holds the v2 judges. It is the single source:
+  the generator imports it (`families/judges_v2.py` is an alias of that module).
+* `vagen/envs/active_spatial/canonical_task_metrics.py`:
+  * **Constants.** `CANONICAL_TASK_METRIC_VERSION_V2`, `V2_FAMILY_TASK_TYPES`, `SUPPORTED_TASK_TYPES_V2` and a
+    version-to-types map. `SUPPORTED_TASK_TYPES` is unchanged and remains the v1 set.
+  * **`score_canonical_task`.** Accepts v1 and v2 rows: v1 rows run exactly the old code; v2
+    `projective_relations` / `fov_inclusion` rows run the v1 judges; v2 family rows go to `score_v2_family`.
+  * **`uses_canonical_backend`.** Accepts v2 rows for the families plus projective and fov. Unknown
+    versions still raise; a v1 version on a new family still raises; rows without a version return `False`.
+* `env.py` `reset`: rows whose `collision_convention.requires_env_override` is true load the scene with the
+  calibrated `structure_y_sign` (scenes the v1 label-centre rule leaves ambiguous).
+* `tests/test_families.py::test_env_runtime_scores_v2_rows_with_the_same_judges` checks the dispatch.
 
-What the patch does:
-
-* It adds `vagen/envs/active_spatial/canonical_task_metrics_v2.py`, a byte-identical copy of `families/judges_v2.py`. `test_patch_applies_and_patched_runtime_matches` checks this.
-* It changes `vagen/envs/active_spatial/canonical_task_metrics.py` in three places:
-  * **Constants.** Adds `CANONICAL_TASK_METRIC_VERSION_V2`, `V2_FAMILY_TASK_TYPES`, `SUPPORTED_TASK_TYPES_V2` and a version-to-types map. `SUPPORTED_TASK_TYPES` is unchanged and remains the v1 set.
-  * **`score_canonical_task`.** Accepts v1 and v2 rows:
-    * v1 rows run exactly the old code.
-    * v2 `projective_relations` and `fov_inclusion` rows run the same `canonical_projective` / `canonical_fov` on `score_observation`. The result dict is bit-identical, including `metric_version == "canonical_spatial_task_h1_v1"`, because the judge is the v1 judge.
-    * v2 family rows go to `score_v2_family`.
-  * **`uses_canonical_backend`.** Accepts v2 rows for the six families plus projective and fov. Unknown versions still raise. A v1 version on a new family still raises. Legacy rows that have no version still return `False`.
-
-After patching, every canonical consumer handles v2 rows with no further change, because they all route through `uses_canonical_backend` / `score_canonical_task`:
+Every canonical consumer handles v2 rows with no further change, because they all route through `uses_canonical_backend` / `score_canonical_task`:
 
 * `env.py`: reset (l.545, 636), `done` (l.935-944), max-step truncation (l.1047), auto-termination (l.1124), `_calculate_canonical_metric` (l.1381), `_calculate_current_score` (l.1395) and `_calculate_pose_reward` (l.1482).
 * `runtime_render_camera_parameters`.
@@ -85,7 +83,7 @@ Only `projective_relations` gets canonical wording. Every other task type gets "
 
 * `scripts/active_spatial_dense_score_preflight.py:219` filters "visual rows" with `SUPPORTED_TASK_TYPES`, which is v1 only, and checks a single expected metric version. Use `SUPPORTED_TASK_TYPES_V2` and accept a per-row version.
 * `data_gen/active_spatial_sft/sft_generator.py:861-866` writes `CANONICAL_TASK_METRIC_VERSION` and `GATE_ALIGNED_SHAPING_SCORE_VERSION` (v1) into the manifest `score_contract`. Record the row's version instead. Per-frame traces already use `metric["shaping_score_version"]`, which is `"canonical_gate_aligned_shaping_v2"` for family rows.
-* `scripts/r1_repair_pipeline_tests.py:135` already expects `uses_canonical_backend(... "unknown")` to return `False`, but the current runtime raises (pre-existing; unchanged by this patch).
+* `scripts/r1_repair_pipeline_tests.py:135` already expects `uses_canonical_backend(... "unknown")` to return `False`, but the current runtime raises (pre-existing; unchanged by the merge).
 
 ## 7. Admission notes (workstreams D and A)
 

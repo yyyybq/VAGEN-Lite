@@ -1,6 +1,5 @@
-"""replay_env.py: generated tasks replayed in a patched env copy succeed exactly at d*."""
+"""replay_env.py: generated tasks replayed in an env copy succeed exactly at d*."""
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,9 +25,7 @@ class ReplayEnvTest(unittest.TestCase):
         self.assertEqual(len(capped), 3)
         self.assertEqual(len(RE.select_rows(rows, 0, 0, seed=0)), 21)
 
-    def test_generated_tasks_succeed_at_d_star_in_patched_env(self):
-        if shutil.which("patch") is None:
-            self.skipTest("patch binary not available")
+    def test_generated_tasks_succeed_at_d_star_in_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = write_synthetic_scenes(Path(tmp))
             scene_dir = paths["two_rooms"]  # the env loads <gs_root>/<scene_id>

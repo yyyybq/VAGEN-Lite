@@ -67,15 +67,12 @@ python -m unittest discover -s data_gen/interiorgs_v10/tests -t .
 
 ## Before training on v10 rows
 
-1. Apply `families/canonical_task_metrics_v2.patch` (new families in the runtime metric) and
-   follow `families/ENV_INTEGRATION.md`.
-2. Apply `patches/env_structure_override.patch` so rows whose scene was resolved only by the
-   v2 coordinate calibration (`collision_convention.requires_env_override`) load with that sign.
-3. The env evaluates success at the end of each assistant turn (env.py 1113–1161), not after
-   every primitive; certificates end exactly at success and SFT turns are chunked so that the
-   last turn ends there.
-4. The SFT export omits the "Current camera pose" text the RL prompt shows; align one side
-   before mixing SFT and RL.
+The v10 support is part of the env since 2026-10-13 (no patches): the v2 metric and the
+structure-sign override. Remaining points:
+
+1. The env evaluates success at the end of each assistant turn, not after every primitive;
+   certificates end exactly at success and SFT turns are chunked so that the last turn ends there.
+2. See `STATUS.md` for the current list.
 
 ## Status
 

@@ -1,11 +1,9 @@
-"""Replay generated tasks in a patched copy of the RL env (CPU only, no rendering).
+"""Replay generated tasks in a copy of the RL env (CPU only, no rendering).
 
 The env decides success with the canonical metric (a geometric projection test)
 and collisions with its CollisionDetector, neither of which needs a renderer.
-This tool copies ``vagen/`` to a temporary directory, applies the three patches
-the v10 rows need (``families/canonical_task_metrics_v2.patch``,
-``patches/env_structure_override.patch``, ``patches/env_ignored_objects.patch``),
-and replays each sampled task: ``env.reset`` on the row, then one ``env.step``
+This tool copies ``vagen/`` to a temporary directory (the v10 support is part of
+the env itself, no patches) and replays each sampled task: ``env.reset`` on the row, then one ``env.step``
 per assistant turn of the generator's certificate (``turns_audit_only``),
 formatted as a model would answer.  It checks that the env declares success
 exactly when the d*-th primitive action completes and that no move collides.
@@ -29,9 +27,6 @@ from typing import Any, Dict, List, Optional, Sequence
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-PATCHES = (HERE / "families" / "canonical_task_metrics_v2.patch",
-           HERE / "patches" / "env_structure_override.patch",
-           HERE / "patches" / "env_ignored_objects.patch")
 
 ENV_CONFIG = {  # R1-clean-Projective-v0/frozen_v1/train.yaml, minus the renderer
     "render_backend": None, "action_space": "strafe", "enable_auto_termination": True,
@@ -80,14 +75,9 @@ json.dump(out, open(out_path, "w"))
 """
 
 
-def patched_env_copy(dst: Path) -> Path:
+def env_copy(dst: Path) -> Path:
+    """Snapshot of this repository's ``vagen`` package (the replay never touches the live tree)."""
     shutil.copytree(REPO / "vagen", dst / "vagen", ignore=shutil.ignore_patterns("__pycache__"))
-    for patch in PATCHES:
-        for extra in (["--dry-run"], []):
-            res = subprocess.run(["patch", "-p1", "--batch", "--forward"] + extra, cwd=dst,
-                                 input=patch.read_bytes(), capture_output=True)
-            if res.returncode != 0:
-                raise RuntimeError(f"{patch.name} does not apply: {res.stdout.decode()} {res.stderr.decode()}")
     return dst
 
 
@@ -117,7 +107,7 @@ def select_rows(rows: Sequence[Dict[str, Any]], per_family: int, per_group: int,
 def replay(rows: Sequence[Dict[str, Any]], scenes_root: Path) -> List[Dict[str, Any]]:
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        patched_env_copy(tmp / "env")
+        env_copy(tmp / "env")
         tasks = tmp / "tasks.jsonl"
         tasks.write_text("".join(json.dumps(r) + "\n" for r in rows))
         out = tmp / "out.json"
@@ -162,7 +152,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.include_reserve and (args.run / "tasks_reserve.jsonl").exists():
         rows += [json.loads(l) for l in (args.run / "tasks_reserve.jsonl").read_text().splitlines() if l.strip()]
     results = replay(select_rows(rows, args.per_family, args.per_override, per_ignored=args.per_ignored), args.scenes_root)
-    rep = {"env_config": ENV_CONFIG, "patches": [p.name for p in PATCHES], "summary": summarize(results),
+    rep = {"env_config": ENV_CONFIG, "summary": summarize(results),
            "results": results}
     if args.json:
         args.json.write_text(json.dumps(rep, indent=1))
