@@ -64,6 +64,7 @@ class FamiliesTest(unittest.TestCase):
             "screen_occupancy": ("two_rooms", "dense_duplicates"),
             "size_distance_invariance": ("two_rooms", "dense_duplicates"),
             "centering": ("two_rooms", "dense_duplicates"),
+            "fov_inclusion": ("two_rooms", "dense_duplicates"),
         }
         for task_type, scene_names in plan.items():
             fam = V.FAMILIES[task_type]
@@ -93,7 +94,7 @@ class FamiliesTest(unittest.TestCase):
         return out
 
     # ------------------------------------------------------------ v1 identity
-    def test_v1_projective_fov_bit_identical_through_v2_dispatcher(self):
+    def test_v1_rows_and_v2_projective_bit_identical_through_v2_dispatcher(self):
         from vagen.envs.active_spatial.canonical_task_metrics import score_canonical_task
 
         scene = self.scenes["two_rooms"]
@@ -109,10 +110,13 @@ class FamiliesTest(unittest.TestCase):
                 v2_item = dict(v1_item, canonical_task_metric_version=K.CANONICAL_TASK_METRIC_V2)
                 for pose in poses:
                     ref = score_canonical_task(v1_item, pose)
-                    got = V.score_canonical_task_v2(v2_item, pose)
                     via_v1 = V.score_canonical_task_v2(v1_item, pose)
-                    self.assertEqual(json.dumps(ref, sort_keys=True), json.dumps(got, sort_keys=True))
                     self.assertEqual(json.dumps(ref, sort_keys=True), json.dumps(via_v1, sort_keys=True))
+                    got = V.score_canonical_task_v2(v2_item, pose)
+                    if v1_item["task_type"] == "projective_relations":  # v2 projective keeps the v1 judge
+                        self.assertEqual(json.dumps(ref, sort_keys=True), json.dumps(got, sort_keys=True))
+                    else:  # v2 fov_inclusion has its own judge since 2026-10-13
+                        self.assertEqual(got["task_metric"], "fov_inclusion_h1_v2")
                     n_success += bool(ref["success"])
         self.assertGreater(n_success, 0)
 
@@ -329,12 +333,14 @@ class FamiliesTest(unittest.TestCase):
                     n += 1
         scene = self.scenes["two_rooms"]
         by_id = {o.id: o for o in scene.objects}
-        for v1_item in (projective_item("two_rooms", by_id["4"], by_id["2"], "left"),
-                        fov_item("two_rooms", by_id["6"], by_id["7"])):
-            it = dict(v1_item, canonical_task_metric_version=K.CANONICAL_TASK_METRIC_V2)
-            for pose in _random_poses(scene, 10, rng):  # v2 projective / fov rows keep the v1 judges
-                self.assertEqual(json.dumps(_jsonable(m.score_canonical_task(it, pose)), sort_keys=True),
-                                 json.dumps(_jsonable(m.score_canonical_task(v1_item, pose)), sort_keys=True))
+        v1_item = projective_item("two_rooms", by_id["4"], by_id["2"], "left")
+        it = dict(v1_item, canonical_task_metric_version=K.CANONICAL_TASK_METRIC_V2)
+        for pose in _random_poses(scene, 10, rng):  # v2 projective rows keep the v1 judge
+            self.assertEqual(json.dumps(_jsonable(m.score_canonical_task(it, pose)), sort_keys=True),
+                             json.dumps(_jsonable(m.score_canonical_task(v1_item, pose)), sort_keys=True))
+        fov = dict(fov_item("two_rooms", by_id["6"], by_id["7"]), canonical_task_metric_version=K.CANONICAL_TASK_METRIC_V2)
+        self.assertEqual(m.score_canonical_task(fov, _random_poses(scene, 1, rng)[0])["task_metric"],
+                         "fov_inclusion_h1_v2")
         self.assertGreater(n, 0)
         self.assertFalse(m.uses_canonical_backend({"task_type": "equidistance"}))
         for bad in ({"task_type": "equidistance", "canonical_task_metric_version": "canonical_spatial_task_h1_v1"},

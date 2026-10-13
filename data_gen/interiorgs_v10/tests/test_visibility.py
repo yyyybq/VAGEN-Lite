@@ -122,7 +122,8 @@ class VisibilityRuleTest(unittest.TestCase):
         scene = load_scene(self.paths["two_rooms"], "two_rooms")
         by_id = {o.id: o for o in scene.objects}
         items = [projective_item("two_rooms", by_id["4"], by_id["2"], "left"),
-                 FAMILIES["equidistance"].build_item("two_rooms", (by_id["4"], by_id["1"]), {}, None)]
+                 FAMILIES["equidistance"].build_item("two_rooms", (by_id["4"], by_id["1"]), {}, None),
+                 FAMILIES["fov_inclusion"].build_item("two_rooms", (by_id["4"], by_id["2"]), {}, None)]
         occ = O.face_occluders_for(scene)
         rng = np.random.default_rng(4)
         for item in items:
@@ -159,6 +160,16 @@ class VisibilityRuleTest(unittest.TestCase):
         self.assertEqual(new, TV.score_with_visibility(item, pose, occ))
         self.assertIn("visibility", new)
         self.assertEqual(new["success"], bool(legacy["success"]) and new["visibility"]["visible"])
+
+    def test_fov_v2_judge_through_the_env(self):
+        scene = load_scene(self.paths["two_rooms"], "two_rooms")
+        by_id = {o.id: o for o in scene.objects}
+        item = FAMILIES["fov_inclusion"].build_item("two_rooms", (by_id["4"], by_id["2"]), {}, None)
+        self.assertEqual(item["canonical_task_metric_version"], C.CANONICAL_TASK_METRIC_V2)
+        m = score_canonical_task(item, C.pose_from_xy_yaw(0.8, 2.5, 0.0))
+        self.assertEqual(m["task_metric"], "fov_inclusion_h1_v2")
+        self.assertIn("fully_in_frame", m["gates"])
+        self.assertIn("both", item["task_description"])
 
 
 if __name__ == "__main__":

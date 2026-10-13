@@ -148,7 +148,7 @@ def _family_items(scene: Any, family_name: str, objs: Sequence[Any], cfg: RunCon
     from .families.common import enumerate_tuples
 
     fam = FAMILIES[family_name]
-    symmetric = family_name in ("equidistance", "size_distance_invariance", "centering")
+    symmetric = family_name in ("equidistance", "size_distance_invariance", "centering", "fov_inclusion")
     tuples = enumerate_tuples(fam, objs, seed=cfg.seed, max_tuples=4 * cfg.max_items_per_new_family,
                               funnel=funnel, ordered=not symmetric)
     rng = np.random.default_rng(cfg.seed + 7)
@@ -169,7 +169,8 @@ def _endpoints_for(scene: Any, item: Dict[str, Any], cfg: RunConfig, funnel: Fun
                    ) -> Tuple[List[np.ndarray], Any]:
     """Success poses and a success predicate for one item."""
     task_type = item["task_type"]
-    if task_type in ("projective_relations", "fov_inclusion"):
+    if task_type == "projective_relations" or (task_type == "fov_inclusion"
+                                               and item.get("canonical_task_metric_version") == C.CANONICAL_TASK_METRIC_V1):
         from .endpoints import sample_endpoints, success_fn
 
         eps, f = sample_endpoints(scene, item, mode=cfg.endpoint_mode, max_endpoints=cfg.max_endpoints,

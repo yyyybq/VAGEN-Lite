@@ -109,6 +109,13 @@ CEN_MIN_SEPARATION_FRAC = 0.15
 CEN_TOL_REL = 0.15
 CEN_TOL_FLOOR_PX = 6.0
 
+# ---------------------------------------------------------------- fov_inclusion
+# Both objects fully in view: each projected AABB at least 95% inside the frame (as v1 FOV), all corners
+# in front, visible, min area.  Unlike v1 FOV (canonical_spatial_task_h1_v1) there is no centre-margin gate
+# and the score is gate-aligned; "can both be seen clearly" is the env's visibility rule
+# (target_visibility.py), not R1's FOV image gate (user decision 2026-10-13).
+FOV_FULL_INSIDE_MIN = 0.95
+
 NEW_TASK_TYPES = frozenset((
     "absolute_positioning",
     "equidistance",
@@ -116,6 +123,7 @@ NEW_TASK_TYPES = frozenset((
     "screen_occupancy",
     "size_distance_invariance",
     "centering",
+    "fov_inclusion",
 ))
 
 # Role letters per task type, in target_object.objects order.
@@ -126,6 +134,7 @@ ROLES = {
     "occlusion_alignment": ("a", "b"),      # a = occluded target, b = occluder
     "size_distance_invariance": ("a", "b"),
     "centering": ("a", "b", "c"),           # a = centred object, b/c = flanks
+    "fov_inclusion": ("a", "b"),
 }
 
 
@@ -631,6 +640,28 @@ def judge_centering(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
     })
 
 
+# =============================================================================
+# fov_inclusion (v2)
+# =============================================================================
+def judge_fov_inclusion(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
+    name = "fov_inclusion_h1_v2"
+    ctx = _Context(item, c2w)
+    objs = ctx.roles(ROLES["fov_inclusion"])
+    if objs is None:
+        return _missing(name, ("fully_in_frame",))
+    projs = [ctx.project(o) for o in objs]
+    vis_gates, vis_comps = _visibility(projs)
+    inside = min(float(p["inside_fraction"]) for p in projs)
+    gates = {"objects_present": True, **vis_gates, "fully_in_frame": inside >= FOV_FULL_INSIDE_MIN}
+    comps = {"objects_present": 1.0, **vis_comps,
+             "fully_in_frame": tolerance_progress(max(0.0, FOV_FULL_INSIDE_MIN - inside), 1.0 - FOV_FULL_INSIDE_MIN)}
+    return _finish(name, gates, comps, {
+        "inside_frame_fraction_min": inside,
+        "required_inside_frame_fraction": FOV_FULL_INSIDE_MIN,
+        "objects": [_object_summary(o, p) for o, p in zip(objs, projs)],
+    })
+
+
 JUDGES = {
     "absolute_positioning": judge_absolute_positioning,
     "equidistance": judge_equidistance,
@@ -638,12 +669,13 @@ JUDGES = {
     "screen_occupancy": judge_screen_occupancy,
     "size_distance_invariance": judge_size_distance_invariance,
     "centering": judge_centering,
+    "fov_inclusion": judge_fov_inclusion,
 }
 assert frozenset(JUDGES) == NEW_TASK_TYPES
 
 
 def score_v2_family(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
-    """Score one v2 family row.  Projective / FOV are NOT handled here."""
+    """Score one v2 family row (fov_inclusion included since 2026-10-13).  Projective is NOT handled here."""
     if item.get("canonical_task_metric_version") != CANONICAL_TASK_METRIC_VERSION_V2:
         raise ValueError("item does not request the canonical v2 metric backend")
     task_type = str(item.get("task_type") or "")

@@ -28,14 +28,15 @@ PROJECTIVE_MIN_MARGIN_PX = 12.0
 PROJECTIVE_MIN_INSIDE_FRACTION = 0.50
 SUPPORTED_TASK_TYPES = frozenset(("projective_relations", "fov_inclusion"))
 
-# canonical_spatial_task_h1_v2: projective_relations / fov_inclusion keep the
-# frozen v1 judges bit-identically; the new families are judged in
-# canonical_task_metrics_v2.py (generated from data_gen/interiorgs_v10/families).
+# canonical_spatial_task_h1_v2: projective_relations keeps the frozen v1 judge
+# bit-identically; the families (fov_inclusion included since 2026-10-13, with its
+# own gate-aligned v2 judge) are judged in canonical_task_metrics_v2.py.
 CANONICAL_TASK_METRIC_VERSION_V2 = "canonical_spatial_task_h1_v2"
 V2_FAMILY_TASK_TYPES = frozenset((
     "absolute_positioning",
     "centering",
     "equidistance",
+    "fov_inclusion",
     "occlusion_alignment",
     "screen_occupancy",
     "size_distance_invariance",
