@@ -24,6 +24,13 @@ class ReplayEnvTest(unittest.TestCase):
         capped = RE.select_rows(rows, per_family=0, per_group=0, seed=0, per_ignored=3)
         self.assertEqual(len(capped), 3)
         self.assertEqual(len(RE.select_rows(rows, 0, 0, seed=0)), 21)
+        # no-task list scenes are selected by scene id
+        listed = [{"task_id": f"v{i}", "task_type": "a", "scene_id": "s1" if i < 4 else "s2"} for i in range(8)]
+        got = RE.select_rows(listed, per_family=0, per_group=0, seed=0, listed_scenes={"s1"})
+        self.assertEqual(sorted(r["task_id"] for r in got), ["v0", "v1", "v2", "v3"])
+        summary = RE.summarize([dict(r, requires_env_override=False, ignored_object_ids=[], ok=True, d_star=1,
+                                     success_step=1) for r in got], listed_scenes={"s1"})
+        self.assertEqual(summary["groups"]["(scenes with no-task objects)"]["tasks"], 4)
 
     def test_generated_tasks_succeed_at_d_star_in_env(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -183,6 +183,7 @@ _CLI_FIELDS = {
     "terminal_identifiable": "terminal_identifiable", "motion_model": "motion_model", "pitch_deg": "pitch_deg",
     "diagnostics": "diagnostics", "budget_mode": "budget_mode", "budget_work_units": "budget_work_units",
     "ignored_objects": "ignored_objects", "runtime_success_check": "runtime_success_check",
+    "no_task_objects": "no_task_objects",
 }
 
 
@@ -250,6 +251,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--budget-work-units", type=float, default=600.0)
     ap.add_argument("--ignored-objects", default=None,
                     help="configs/ignored_objects_*.json: drop these labels.json instances (annotation errors)")
+    ap.add_argument("--no-task-objects", default=None,
+                    help="configs/no_task_objects_*.json: keep these boxes for collision/occlusion, never as "
+                         "task targets or reference objects")
     ap.add_argument("--runtime-success-check", action="store_true",
                     help="Projective/FOV: reject initial states from which the env's own success rule "
                          "(no occlusion gate) succeeds before d*")
@@ -275,6 +279,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "budget_work_units": args.budget_work_units,
             "ignored_objects": args.ignored_objects,
             "runtime_success_check": bool(args.runtime_success_check),
+            "no_task_objects": args.no_task_objects,
         }
         if args.config:
             cfg_kwargs = merge_config(load_config(args.config), cfg_kwargs, explicit_dests(ap, argv))

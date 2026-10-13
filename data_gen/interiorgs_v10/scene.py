@@ -108,9 +108,12 @@ class Scene:
     detector: Any  # vagen.envs.active_spatial.collision_detector.CollisionDetector
     min_wall_distance: float = MIN_WALL_DISTANCE_M
     convention_v2: Dict[str, Any] = dataclasses.field(default_factory=dict)
-    # labels.json instances dropped as annotation errors (configs/ignored_objects_*.json): not in
-    # ``objects`` (no task, anchor or occluder) and not in the detector's collision boxes
+    # labels.json instances dropped as annotation errors (configs/ignored_objects_*.json, the 20261012
+    # final config only): not in ``objects`` (no task, anchor or occluder) and not in the collision boxes
     ignored_object_ids: List[str] = dataclasses.field(default_factory=list)
+    # no-task list (configs/no_task_objects_*.json): kept in ``objects`` and the collision boxes (they
+    # still block and occlude) but never a task target or a reference object of a description
+    no_task_object_ids: List[str] = dataclasses.field(default_factory=list)
     _kernel: Any = dataclasses.field(default=None, repr=False, compare=False)
     _kernel_key: Any = dataclasses.field(default=None, repr=False, compare=False)
 
@@ -213,7 +216,8 @@ class Scene:
 
 
 def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
-               y_sign_override: Optional[float] = None, ignored_ids: Optional[Sequence[str]] = None) -> Scene:
+               y_sign_override: Optional[float] = None, ignored_ids: Optional[Sequence[str]] = None,
+               no_task_ids: Optional[Sequence[str]] = None) -> Scene:
     """Load a scene, calibrate the structure Y sign (v2) and build the detector.
 
     Sign selection: explicit ``y_sign_override`` > calibration v2 (passed to the
@@ -221,10 +225,11 @@ def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
     detector.  ``scene.convention`` is the detector's record (what the env will
     report); ``scene.convention_v2`` the full calibration record.
 
-    ``ignored_ids``: labels.json ``ins_id`` values to drop (confirmed annotation
-    errors).  They leave ``objects`` and the detector's collision boxes, exactly
-    as ``patches/env_ignored_objects.patch`` drops them in the RL env; the
-    coordinate calibration still sees every label, as the env's does.
+    ``ignored_ids`` (20261012 final config only): labels.json ``ins_id`` values
+    dropped from ``objects`` and the detector's collision boxes; the coordinate
+    calibration still sees every label.  The RL env no longer supports this.
+    ``no_task_ids``: instances that keep their box for collision and occlusion
+    but never serve as task targets or reference objects (``scene.no_task_object_ids``).
     """
     from vagen.envs.active_spatial.collision_detector import CollisionDetector
 
@@ -281,4 +286,5 @@ def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
     convention = detector.convention_record()
     return Scene(scene_id=scene_id, scene_dir=scene_dir, objects=objects, rooms=rooms,
                  convention=convention, detector=detector, convention_v2=calib,
-                 ignored_object_ids=sorted(ignored & present))
+                 ignored_object_ids=sorted(ignored & present),
+                 no_task_object_ids=sorted({str(i) for i in (no_task_ids or ())} & present))

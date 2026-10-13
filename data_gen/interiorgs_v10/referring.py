@@ -405,12 +405,16 @@ def default_anchor_ok(obj: Obj) -> bool:
 def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
                                  config: Optional[ReferringConfig] = None,
                                  pool: Optional[Sequence[Obj]] = None,
-                                 anchor_ok: Optional[Callable[[Obj], bool]] = None) -> Funnel:
+                                 anchor_ok: Optional[Callable[[Obj], bool]] = None,
+                                 reference_ok: Optional[Callable[[Obj], bool]] = None) -> Funnel:
     """Set ``obj.ref`` / ``obj.ref_method`` for every obj in ``objs``.
 
     ``pool`` defaults to ``scene.objects`` (ALL instances) and is the universe
     against which uniqueness is checked.  ``anchor_ok`` restricts which pool
     objects may serve as anchors (default: v10 semantic filter).
+    ``reference_ok`` (default: any) must hold for every object an expression
+    refers to besides the target: the anchor and the other object of a size
+    comparison (e.g. objects on the no-task list).
     Funnel stages: ``referring`` (method used, or ``no_ref``) and
     ``referring.no_ref_detail`` (``<method>:<why>`` for every method tried on
     an instance that ended without a ref).
@@ -421,12 +425,13 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
     id_index = _ensure_in_pool(pool, objs)
     idx = _SceneIndex(scene, pool, cfg)
     anchor_ok = anchor_ok or default_anchor_ok
+    reference_ok = reference_ok or (lambda _o: True)
 
     # Anchors: substantial, not ceiling-mounted, unambiguous on their own.
     anchors: List[int] = []
     for j, a in enumerate(pool):
         disp = idx.disp[j]
-        if not _label_usable(disp) or not anchor_ok(a):
+        if not _label_usable(disp) or not anchor_ok(a) or not reference_ok(a):
             continue
         if not np.all(np.isfinite(a.aabb_min)) or not np.all(np.isfinite(a.aabb_max)):
             continue
@@ -459,7 +464,7 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
             elif method == METHOD_ANCHOR:
                 ref = _try_anchor(idx, t, disp, members, anchors, details)
             elif method == METHOD_SIZE:
-                ref = _try_size(idx, t, disp, members, details)
+                ref = _try_size(idx, t, disp, members, details, reference_ok)
             else:
                 raise ValueError(f"unknown referring method {method!r}")
             if ref is not None:
@@ -527,12 +532,15 @@ def _try_anchor(idx: _SceneIndex, t: int, disp: str, members: Sequence[int],
 
 
 def _try_size(idx: _SceneIndex, t: int, disp: str, members: Sequence[int],
-              details: List[str]) -> Optional[Tuple[str, str]]:
+              details: List[str], reference_ok: Optional[Callable[[Obj], bool]] = None) -> Optional[Tuple[str, str]]:
     cfg = idx.cfg
     if len(members) != 2:
         details.append("size:not_exactly_two")
         return None
     other = members[0] if members[1] == t else members[1]
+    if reference_ok is not None and not reference_ok(idx.pool[other]):
+        details.append("size:other_not_referable")
+        return None
     if cfg.size_requires_same_room:
         rt, ro = idx.room_of(t), idx.room_of(other)
         if rt is None or ro is None or rt != ro:

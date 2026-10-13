@@ -64,7 +64,7 @@ canvas { width: 100%; height: 100%; display: block; cursor: grab; }
         <div><span class="sw" style="background:var(--wall)"></span>墙</div>
         <div><span class="sw" style="border:1px solid var(--obj)"></span>物体（标注框）</div>
         <div><span class="sw" style="background:var(--a)"></span>目标 A　<span class="sw" style="background:var(--b)"></span>目标 B　<span class="sw" style="background:var(--c)"></span>目标 C</div>
-        <div><span class="sw" style="border:2px dashed var(--ignored)"></span>已忽略的错误标注</div>
+        <div><span class="sw" style="border:2px dashed var(--ignored)"></span>不出题的物体（合并大框等）</div>
         <div><span class="sw" style="background:var(--success)"></span>成功区域（某个朝向满足判据）</div>
         <div><span class="sw" style="background:var(--path)"></span>最短动作路径　● 起点</div>
       </div>
@@ -127,10 +127,10 @@ function showTask(t) {
     <div class="kv">场景 ${t.scene} · ${FAMILY_NAMES[t.family] || t.family} · 最少步数 ${t.d}${t.reserve ? " · 后备题" : " · 正式题"} · 题号 ${t.id}</div>
     <div class="kv">目标：${t.target_labels.map((x, i) => `${"ABC"[i]} = ${escapeHtml(x)}（${t.targets[i]}）`).join("，")}</div>
     <div class="kv">最短动作：${t.actions.map((a) => ACTION_NAMES[a] || a).join(" → ")}</div>
-    <div class="kv">成功区域：${(s.regions[t.region] || []).length} 个 ${DATA.region_spacing_m} m 格子；已忽略物体：${s.geometry.ignored.map((o) => o[0] + " " + o[1]).join("，") || "无"}</div>`;
+    <div class="kv">成功区域：${(s.regions[t.region] || []).length} 个 ${DATA.region_spacing_m} m 格子；不出题物体：${s.geometry.ignored.map((o) => o[0] + " " + o[1]).join("，") || "无"}</div>`;
 }
 function showScene(s) {
-  $("detail").innerHTML = `<h2>${s.id}</h2><div class="kv">${s.tasks.filter((t) => !t.reserve).length} 道正式题，${s.tasks.filter((t) => t.reserve).length} 道后备题；物体框 ${s.geometry.objects.length} 个；已忽略物体：${s.geometry.ignored.map((o) => o[0] + " " + o[1]).join("，") || "无"}</div>`;
+  $("detail").innerHTML = `<h2>${s.id}</h2><div class="kv">${s.tasks.filter((t) => !t.reserve).length} 道正式题，${s.tasks.filter((t) => t.reserve).length} 道后备题；物体框 ${s.geometry.objects.length} 个；不出题物体：${s.geometry.ignored.map((o) => o[0] + " " + o[1]).join("，") || "无"}</div>`;
 }
 function bounds(s) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -165,7 +165,7 @@ function draw(s, t) {
   });
   g.setLineDash([6, 4]); g.strokeStyle = css("--ignored"); g.lineWidth = 2;
   s.geometry.ignored.forEach(([id, label, x0, y0, x1, y1]) => { g.strokeRect(X(x0), Y(y1), (x1 - x0) * view.k, (y1 - y0) * view.k);
-    g.fillStyle = css("--ignored"); g.font = "12px system-ui"; g.fillText(`已忽略 ${id} ${label}`, X(x0) + 4, Y(y0) - 4); });
+    g.fillStyle = css("--ignored"); g.font = "12px system-ui"; g.fillText(`不出题 ${id} ${label}`, X(x0) + 4, Y(y0) - 4); });
   g.setLineDash([]);
   if (t) {
     const p = t.path; g.strokeStyle = css("--path"); g.lineWidth = 2.5; g.beginPath();

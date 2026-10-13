@@ -63,7 +63,8 @@ class RunConfig:
     budget_mode: str = "wall_clock"
     budget_work_units: float = 600.0
     work_weights: Any = None              # {operation: weight}; None -> DEFAULT_WORK_WEIGHTS
-    ignored_objects: Optional[str] = None  # configs/ignored_objects_*.json: confirmed annotation errors
+    ignored_objects: Optional[str] = None  # configs/ignored_objects_*.json: drop these boxes (20261012 only)
+    no_task_objects: Optional[str] = None  # configs/no_task_objects_*.json: keep the boxes, never target/reference
     runtime_success_check: bool = False   # Projective/FOV: reject starts where the env succeeds before d*
 
 
@@ -71,7 +72,8 @@ _IGNORED_CACHE: Dict[str, Dict[str, List[str]]] = {}
 
 
 def ignored_object_ids(path: Optional[str], scene_id: str) -> List[str]:
-    """``ins_id`` values listed for ``scene_id`` under "scenes" (never the "uncertain" ones)."""
+    """``ins_id`` values listed for ``scene_id`` under "scenes" of an object-list file
+    (configs/ignored_objects_*.json or configs/no_task_objects_*.json; never the "uncertain" key)."""
     if not path:
         return []
     if path not in _IGNORED_CACHE:
@@ -207,7 +209,7 @@ def _task_row(scene: Any, item: Dict[str, Any], ep: Dict[str, Any]) -> Dict[str,
         "calibration_version": conv.get("version"),
     }
     if getattr(scene, "ignored_object_ids", None):
-        # read by the env through patches/env_ignored_objects.patch: drop these boxes for this scene
+        # 20261012 rows only (the env patch that read this was removed on 2026-10-13)
         row["collision_convention"]["ignored_object_ids"] = list(scene.ignored_object_ids)
     model, pitch = C.motion_model()
     if model != "r1":
@@ -269,9 +271,12 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
     try:
         t = time.perf_counter()
         sid = scene_id or Path(scene_dir).name
-        scene = load_scene(Path(scene_dir), scene_id, ignored_ids=ignored_object_ids(cfg.ignored_objects, sid))
+        scene = load_scene(Path(scene_dir), scene_id, ignored_ids=ignored_object_ids(cfg.ignored_objects, sid),
+                           no_task_ids=ignored_object_ids(cfg.no_task_objects, sid))
         if scene.ignored_object_ids:
             summary["ignored_object_ids"] = list(scene.ignored_object_ids)
+        if scene.no_task_object_ids:
+            summary["no_task_object_ids"] = list(scene.no_task_object_ids)
         summary["scene_id"] = scene.scene_id
         conv = getattr(scene, "convention_v2", None) or scene.convention
         summary["convention"] = {k: _jsonable(v) for k, v in conv.items()

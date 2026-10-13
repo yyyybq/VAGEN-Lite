@@ -414,9 +414,14 @@ def candidate_objects(scene: Any, preset: PresetLike = "v10_relaxed") -> Tuple[L
     rooms = list(getattr(scene, "rooms", []) or [])
     funnel.add(S, "input", len(all_objs))
     room_map = _room_map(scene, all_objs, cfg)
+    # no-task list (configs/no_task_objects_*.json): still collide and occlude, never a target or reference
+    no_task = {str(i) for i in (getattr(scene, "no_task_object_ids", None) or ())}
 
     passed: List[Obj] = []
     for o in all_objs:
+        if o.id in no_task:
+            funnel.add(S, "reject_no_task_list")
+            continue
         reason = single_object_rejection(o, cfg, room_map.get(o.id), bool(rooms))
         if reason is not None:
             funnel.add(S, "reject_" + reason)
@@ -456,7 +461,8 @@ def candidate_objects(scene: Any, preset: PresetLike = "v10_relaxed") -> Tuple[L
     elif cfg.ref_policy == "spatial":
         funnel.merge(assign_referring_expressions(
             scene, out, cfg.referring, pool=all_objs,
-            anchor_ok=lambda a: semantic_exclusion_reason(a.label, cfg) is None))
+            anchor_ok=lambda a: semantic_exclusion_reason(a.label, cfg) is None,
+            reference_ok=lambda a: a.id not in no_task))
     else:
         raise ValueError(f"unknown ref_policy {cfg.ref_policy!r}")
 

@@ -1,14 +1,14 @@
 """Static top-down task browser (one HTML file, no server) for spot-checking tasks.
 
 For each scene: room outlines, walls, object footprints (targets highlighted,
-ignored annotation errors in their own colour).  For each task: start pose and
+objects on the no-task list in their own colour).  For each task: start pose and
 heading, the generator's shortest action path, the success region (0.2 m cells
 of legal floor where some heading satisfies the env's success test for the
 task) and the task text, family and d*.  Filters by scene, family and d*.
 
     python -m data_gen.interiorgs_v10.make_viewer --run OUT --scenes-root ROOT \
         --scenes-file sample100.txt --extra-scenes 0068_839928 ... \
-        --ignored-objects configs/ignored_objects_20261012.json --workers 10 --out viewer.html
+        --no-task-objects configs/no_task_objects_20261013.json --workers 10 --out viewer.html
 """
 
 from __future__ import annotations
@@ -31,7 +31,8 @@ FAMILY_YAW_WINDOW_DEG = 70.0  # family judges need every target in the 90 deg vi
 
 
 def scene_geometry(scene: Any, labels: Sequence[Dict[str, Any]], keep_ids: set) -> Dict[str, Any]:
-    ignored = set(getattr(scene, "ignored_object_ids", []) or [])
+    # highlighted: objects on the no-task list (and, for 20261012 runs, ignored objects)
+    ignored = set(getattr(scene, "ignored_object_ids", []) or []) | set(getattr(scene, "no_task_object_ids", []) or [])
     objs = []
     for o in scene.objects:
         area = float((o.aabb_max[0] - o.aabb_min[0]) * (o.aabb_max[1] - o.aabb_min[1]))
@@ -123,12 +124,13 @@ def _item_key(row: Dict[str, Any]) -> str:
 
 
 def build_scene(args: tuple) -> Dict[str, Any]:
-    scene_dir, scene_rows, ignored_ids = args
+    scene_dir, scene_rows, ignored_ids = args[:3]
+    no_task_ids = args[3] if len(args) > 3 else ()
     from .scene import load_scene
 
     sid = Path(scene_dir).name
     with contextlib.redirect_stdout(io.StringIO()):
-        scene = load_scene(Path(scene_dir), sid, ignored_ids=ignored_ids)
+        scene = load_scene(Path(scene_dir), sid, ignored_ids=ignored_ids, no_task_ids=no_task_ids)
     labels = json.loads((Path(scene_dir) / "labels.json").read_text())
     keep = {str(e["id"]) for r in scene_rows for e in r["target_object"]["objects"]}
     paths = {r["task_id"]: task_path(r) for r in scene_rows}
@@ -163,7 +165,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--scenes-root", required=True, type=Path)
     ap.add_argument("--scenes-file", type=Path, help="one scene id per line")
     ap.add_argument("--extra-scenes", nargs="*", default=[])
-    ap.add_argument("--ignored-objects", default=None)
+    ap.add_argument("--ignored-objects", default=None, help="20261012 runs: boxes dropped from the scene")
+    ap.add_argument("--no-task-objects", default=None, help="configs/no_task_objects_*.json: highlighted")
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args(argv)
@@ -180,7 +183,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     r = json.loads(line)
                     if r["scene_id"] in rows:
                         rows[r["scene_id"]].append(r)
-    jobs = [(str(args.scenes_root / s), rows[s], ignored_object_ids(args.ignored_objects, s)) for s in ids]
+    jobs = [(str(args.scenes_root / s), rows[s], ignored_object_ids(args.ignored_objects, s),
+             ignored_object_ids(args.no_task_objects, s)) for s in ids]
     with ProcessPoolExecutor(max_workers=max(1, args.workers)) as pool:
         scenes = list(pool.map(build_scene, jobs))
     data = {"run": str(args.run), "region_spacing_m": REGION_SPACING_M, "scenes": scenes}

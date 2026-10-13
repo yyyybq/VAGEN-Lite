@@ -23,7 +23,7 @@ import sys
 import tempfile
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -81,10 +81,15 @@ def env_copy(dst: Path) -> Path:
     return dst
 
 
+def _listed(row: Dict[str, Any], listed_scenes: Iterable[str]) -> bool:
+    """Row of a scene with objects on the no-task list (or, for 20261012 rows, with ignored objects)."""
+    return row.get("scene_id") in set(listed_scenes) or bool((row.get("collision_convention") or {}).get("ignored_object_ids"))
+
+
 def select_rows(rows: Sequence[Dict[str, Any]], per_family: int, per_group: int, seed: int = 0,
-                per_ignored: Optional[int] = None) -> List[Dict[str, Any]]:
+                per_ignored: Optional[int] = None, listed_scenes: Iterable[str] = ()) -> List[Dict[str, Any]]:
     """Up to ``per_family`` rows per task family, plus ``per_group`` rows from scenes that need the
-    structure-sign override and ``per_ignored`` rows (default: every row) from scenes with ignored objects."""
+    structure-sign override and ``per_ignored`` rows (default: every row) from listed scenes (no-task list)."""
     rng = random.Random(seed)
     by_family: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for r in rows:
@@ -96,7 +101,8 @@ def select_rows(rows: Sequence[Dict[str, Any]], per_family: int, per_group: int,
     override = [r for r in rows if (r.get("collision_convention") or {}).get("requires_env_override")]
     for r in rng.sample(override, min(per_group, len(override))):
         picked[r["task_id"]] = r
-    ignored = [r for r in rows if (r.get("collision_convention") or {}).get("ignored_object_ids")]
+    listed_scenes = set(listed_scenes)
+    ignored = [r for r in rows if _listed(r, listed_scenes)]
     if per_ignored is not None:
         ignored = rng.sample(ignored, min(per_ignored, len(ignored)))
     for r in ignored:
@@ -104,7 +110,8 @@ def select_rows(rows: Sequence[Dict[str, Any]], per_family: int, per_group: int,
     return sorted(picked.values(), key=lambda r: r["task_id"])
 
 
-def replay(rows: Sequence[Dict[str, Any]], scenes_root: Path) -> List[Dict[str, Any]]:
+def replay(rows: Sequence[Dict[str, Any]], scenes_root: Path,
+           env_config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         env_copy(tmp / "env")
@@ -112,20 +119,22 @@ def replay(rows: Sequence[Dict[str, Any]], scenes_root: Path) -> List[Dict[str, 
         tasks.write_text("".join(json.dumps(r) + "\n" for r in rows))
         out = tmp / "out.json"
         res = subprocess.run([sys.executable, "-c", _WORKER, str(tmp / "env"), str(tasks), str(scenes_root),
-                              str(out), json.dumps(ENV_CONFIG)], capture_output=True, text=True, cwd=str(tmp))
+                              str(out), json.dumps({**ENV_CONFIG, **(env_config or {})})],
+                             capture_output=True, text=True, cwd=str(tmp))
         if res.returncode != 0 or not out.exists():
             raise RuntimeError(f"replay worker failed: {res.stderr[-3000:]}")
         return json.loads(out.read_text())
 
 
-def summarize(results: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+def summarize(results: Sequence[Dict[str, Any]], listed_scenes: Iterable[str] = ()) -> Dict[str, Any]:
+    listed_scenes = set(listed_scenes)
     groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for r in results:
         groups[r["task_type"]].append(r)
         if r["requires_env_override"]:
             groups["(scenes needing the structure-sign override)"].append(r)
-        if r["ignored_object_ids"]:
-            groups["(scenes with ignored objects)"].append(r)
+        if r["ignored_object_ids"] or r["scene_id"] in listed_scenes:
+            groups["(scenes with no-task objects)"].append(r)
     table = {}
     for g, rs in sorted(groups.items()):
         table[g] = {"tasks": len(rs), "success_exactly_at_d_star": sum(1 for r in rs if r.get("ok")),
@@ -143,17 +152,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--scenes-root", required=True, type=Path)
     ap.add_argument("--per-family", type=int, default=40)
     ap.add_argument("--per-override", type=int, default=40)
-    ap.add_argument("--per-ignored", type=int, default=None,
-                    help="rows from scenes with ignored objects (default: all of them)")
+    ap.add_argument("--per-ignored", "--per-listed", type=int, default=None, dest="per_ignored",
+                    help="rows from scenes with no-task objects (default: all of them)")
+    ap.add_argument("--no-task-objects", type=Path, default=None,
+                    help="configs/no_task_objects_*.json: which scenes form the no-task group")
+    ap.add_argument("--env-config", default="{}", help="JSON of extra ActiveSpatialEnvConfig fields")
     ap.add_argument("--include-reserve", action="store_true", help="also sample tasks_reserve.jsonl")
     ap.add_argument("--json", type=Path)
     args = ap.parse_args(argv)
     rows = [json.loads(l) for l in (args.run / "tasks.jsonl").read_text().splitlines() if l.strip()]
     if args.include_reserve and (args.run / "tasks_reserve.jsonl").exists():
         rows += [json.loads(l) for l in (args.run / "tasks_reserve.jsonl").read_text().splitlines() if l.strip()]
-    results = replay(select_rows(rows, args.per_family, args.per_override, per_ignored=args.per_ignored), args.scenes_root)
-    rep = {"env_config": ENV_CONFIG, "summary": summarize(results),
-           "results": results}
+    listed = set((json.loads(args.no_task_objects.read_text()).get("scenes") or {})) if args.no_task_objects else set()
+    extra = json.loads(args.env_config)
+    results = replay(select_rows(rows, args.per_family, args.per_override, per_ignored=args.per_ignored,
+                                 listed_scenes=listed), args.scenes_root, extra)
+    rep = {"env_config": {**ENV_CONFIG, **extra}, "summary": summarize(results, listed), "results": results}
     if args.json:
         args.json.write_text(json.dumps(rep, indent=1))
     print(json.dumps(rep["summary"], indent=1))
