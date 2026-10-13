@@ -1,6 +1,9 @@
 # accelerate + FSDP for LLaMA-Factory full fine-tuning of Qwen2.5-VL (InteriorGS v10 SFT, 2026-10-14).
 # The vagen-lite env has no DeepSpeed; the earlier Qwen2.5-VL SFT recipe also used FSDP through accelerate.
 # use_orig_params: the vision tower is frozen while the LLM trains, so FSDP must keep the original parameters.
+# Wrap units must hold one dtype: LLaMA-Factory upcasts trainable weights to fp32 and leaves the frozen vision
+# tower in bf16, so the vision blocks and the patch embedding get units of their own (the root unit then holds
+# only trainable fp32 weights: embeddings, merger, final norm, LM head).
 # num_processes is set on the command line (sco_interiorgs_v10_train.sh: 1 for the trial, 8 for the formal run).
 compute_environment: LOCAL_MACHINE
 distributed_type: FSDP
@@ -15,7 +18,7 @@ use_cpu: false
 fsdp_config:
   fsdp_version: 1
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
-  fsdp_transformer_layer_cls_to_wrap: Qwen2_5_VLDecoderLayer,Qwen2_5_VLVisionBlock
+  fsdp_transformer_layer_cls_to_wrap: Qwen2_5_VLDecoderLayer,Qwen2_5_VLVisionBlock,Qwen2_5_VisionPatchEmbed
   fsdp_sharding_strategy: FULL_SHARD
   fsdp_backward_prefetch: BACKWARD_PRE
   fsdp_forward_prefetch: false
