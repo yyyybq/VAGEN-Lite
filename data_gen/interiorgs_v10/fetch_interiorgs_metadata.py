@@ -129,6 +129,18 @@ def aoss_download(client, root: str, rel: str, out: Path, retries: int = 4) -> s
     return "error"
 
 
+def aoss_jobs(scenes: List[str], files: Optional[List[str]] = None,
+              only: Optional[List[str]] = None) -> List[str]:
+    """Relative paths to fetch: ``files`` (default AOSS_FILES) of every scene, or of ``only`` those scenes."""
+    if only is not None:
+        keep = set(only)
+        missing = sorted(keep - set(scenes))
+        if missing:
+            raise ValueError(f"scenes not on AOSS: {missing[:5]}")
+        scenes = [s for s in scenes if s in keep]
+    return [f"{s}/{name}" for s in scenes for name in (files or list(AOSS_FILES))]
+
+
 def main_aoss(args: argparse.Namespace) -> int:
     root = args.aoss_root.rstrip("/")
     out = Path(args.out)
@@ -137,11 +149,13 @@ def main_aoss(args: argparse.Namespace) -> int:
                     if n.endswith("/") and n[:4].isdigit())
     if args.limit_scenes:
         scenes = scenes[: args.limit_scenes]
-    print(json.dumps({"scenes": len(scenes), "example": scenes[:3], "files_per_scene": AOSS_FILES}),
-          flush=True)
+    files = [f for f in (args.files or "").split(",") if f] or list(AOSS_FILES)
+    only = Path(args.scenes_file).read_text().split() if args.scenes_file else None
+    jobs = aoss_jobs(scenes, files, only)
+    print(json.dumps({"scenes": len(scenes) if only is None else len(set(only)), "example": scenes[:3],
+                      "files_per_scene": files}), flush=True)
     if args.list_only:
         return 0
-    jobs = [f"{s}/{name}" for s in scenes for name in AOSS_FILES]
     counts: Dict[str, int] = {}
     missing_required: List[str] = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -169,6 +183,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--list-only", action="store_true")
     ap.add_argument("--limit-scenes", type=int)
+    ap.add_argument("--scenes-file", help="aoss: only these scene ids (one per line)")
+    ap.add_argument("--files", help="aoss: comma-separated file names per scene (default: the metadata files; "
+                                    "add 3dgs_compressed.ply for rendering)")
     args = ap.parse_args(argv)
     if args.source == "aoss":
         return main_aoss(args)
