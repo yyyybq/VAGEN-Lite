@@ -137,7 +137,8 @@ def prepare(args):
                         excluded[reason] += 1
                         continue
                 else:
-                    if strict and row.get("semantic_review", {}).get("status") != "PASS":
+                    if (strict and not getattr(args, "allow_unreviewed_trajectories", False)
+                            and row.get("semantic_review", {}).get("status") != "PASS"):
                         excluded["trajectory_semantic_review_missing"] += 1
                         continue
                     if not strict and row.get("split", "train") != "train":
@@ -276,6 +277,9 @@ def prepare(args):
         "val_scenes": sorted(val_scenes),
         "test_scenes": sorted(test_scenes),
         "qa_probability": args.qa_probability,
+        # explicit and recorded: trajectories admitted without a semantic (model or human) review
+        "trajectory_semantic_review": ("not_required" if getattr(args, "allow_unreviewed_trajectories", False)
+                                       else "required"),
         "sources": sources,
         "counts": {f"{k}/{s}": len(v) for (k, s), v in buckets.items()},
         "excluded": dict(excluded),
@@ -315,6 +319,9 @@ def main():
     p.add_argument("--task-registry", help="Required raw task registry for release-v2 splits")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--cutoff-len", type=int, default=16384)
+    p.add_argument("--allow-unreviewed-trajectories", action="store_true",
+                   help="Admit trajectories without a semantic review (InteriorGS v10 first SFT version, 2026-10-14); "
+                        "recorded in the output manifest")
     args = p.parse_args()
     if args.cutoff_len <= 0:
         p.error("cutoff-len must be positive")
