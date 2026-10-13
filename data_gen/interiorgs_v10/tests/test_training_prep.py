@@ -121,6 +121,15 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(env["config"]["gs_root"], "/ply")
         self.assertEqual(len(TP._jsonl(Path(env["config"]["jsonl_path"]))), self.n_train)
         self.assertEqual(yaml.safe_load((out / "val_env.yaml").read_text())["envs"][0]["n_envs"], 1)
+        # --val-limit keeps rows spread over the (scene-sorted) val rows, not the first ones
+        out2 = self.root / "rl2"
+        TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
+            Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
+            gs_root="/ply", model="/m", name="t", run_root=str(self.root / "rl_run2"), val_limit=2,
+            trial=False, out=str(out2)))
+        val_rows = [r for r in TP._jsonl(sft / "rows.jsonl") if r["split"] == "val"]
+        picked = [r["task_id"] for r in TP._jsonl(out2 / "val.jsonl")]
+        self.assertEqual(picked, [r["task_id"] for r in val_rows[:: max(1, len(val_rows) // 2)][:2]])
         ppo = yaml.safe_load((out / "ppo.yaml").read_text())
         self.assertEqual(ppo["trainer"]["n_gpus_per_node"], 1)
         self.assertEqual(ppo["actor_rollout_ref"]["rollout"]["tensor_model_parallel_size"], 1)

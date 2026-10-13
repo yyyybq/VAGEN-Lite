@@ -198,8 +198,9 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     rows = _jsonl(Path(args.rows))
     parts = {"train": [r for r in rows if r.get("split") == "train"],
              "val": [r for r in rows if r.get("split") == "val"]}
-    if args.val_limit:
-        parts["val"] = parts["val"][: args.val_limit]
+    if args.val_limit:  # evenly spread over the val rows (they come sorted by scene)
+        step = max(1, len(parts["val"]) // args.val_limit)
+        parts["val"] = parts["val"][::step][: args.val_limit]
     if not parts["train"] or not parts["val"]:
         raise SystemExit("rl-config needs train and val rows (training_prep sft-frames rows.jsonl)")
     template = yaml.safe_load(Path(args.env_template).read_text())
