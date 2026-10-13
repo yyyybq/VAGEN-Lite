@@ -48,8 +48,44 @@ def frame_role_zh(state_id: str, roles: Sequence[str], d: int) -> str:
     return f"中间关键帧（走了 {k} 步之后）"
 
 
+METHOD_ZH = {"unique_label": "只写名字", "room": "用房间区分", "anchor": "用参照物区分", "size": "用大小比较"}
+CHECK_GROUP_ZH = {
+    "lateral_near_45": "左右题，终点时 B 指向 A 的线和左右方向的夹角接近 45°",
+    "name_only": "所有目标都只写名字",
+    "room": "有目标用房间区分",
+    "reference": "有目标用参照物区分（参照物画绿框）",
+}
+
+
+def check_questions(t: Dict[str, Any], row: Dict[str, Any], d: int) -> List[Dict[str, Any]]:
+    """The check page's questions for one task (texts are HTML-escaped here)."""
+    from html import escape
+
+    refs = "、".join(f"「{escape(x['ref'])}」" for x in t["targets"])
+    qs = [{"key": "concise", "opts": "yes",
+           "text": f"描述 {refs} 是否刚好够用：没有多余的修饰，需要区分的地方也说清楚了？"},
+          {"key": "unique", "opts": "yes", "text": "按这些描述，能在整个场景里各自唯一找到目标吗？"}]
+    group = row.get("check_group")
+    end = f"s{d}"
+    if group == "lateral_near_45":
+        qs.append({"key": "lateral", "opts": "yes", "frame": end,
+                   "text": "【终点画面】A（红框）和 B（蓝框）是左右关系，而不是一前一后？"})
+    if group == "room":
+        qs.append({"key": "room_name", "opts": "yes",
+                   "text": "描述里的房间名（bedroom、kitchen 等）和俯视图、画面里这个房间的用途相符吗？"})
+    if group == "reference":
+        qs.append({"key": "ref_visible", "opts": "yes", "frame": end,
+                   "text": "【终点画面】参照物（绿框）容易看清吗？"})
+        qs.append({"key": "ref_apart", "opts": "yes",
+                   "text": "参照物不是目标的一部分，也没有压在目标上或被目标压着？"})
+    for x in t["targets"]:
+        qs.append({"key": f"{end}:ident_{x['slot']}", "opts": "can", "frame": end,
+                   "text": f"【终点画面】能认出{x['color']}（{x['slot']}）里的物体吗？"})
+    return qs
+
+
 def build_data(pilot: Path, no_task: Optional[Dict[str, Any]], uncertain_dir: Optional[Path],
-               seed: int = 13) -> Dict[str, Any]:
+               seed: int = 13, mode: str = "pilot") -> Dict[str, Any]:
     tasks = _jsonl(pilot / "pilot_tasks.jsonl")
     frames = {f["frame_id"]: f for f in _jsonl(pilot / "frames.jsonl")}
     rendered = set()
@@ -75,6 +111,18 @@ def build_data(pilot: Path, no_task: Optional[Dict[str, Any]], uncertain_dir: Op
                        for f in task_frames],
             "topdown": f"img/topdown/{r['task_id']}.png",
         })
+        if mode == "check":
+            t = out_tasks[-1]
+            methods = [METHOD_ZH.get(e.get("ref_method"), "旧规则") for e in r["target_object"]["objects"]]
+            info_targets = list(t["targets"])
+            if r["task_type"] == "occlusion_alignment":
+                t["targets"] = t["targets"][1:]  # the hidden target cannot be recognised at the end
+            t["questions"] = check_questions(t, r, d)
+            t["info"] = [f"检查重点：{CHECK_GROUP_ZH.get(r.get('check_group'), r.get('check_group'))}",
+                         "描述方式：" + "；".join(f"{x['slot']} {m}" for x, m in zip(info_targets, methods))]
+            angle = r.get("check_lateral_angle_deg")
+            if angle is not None:
+                t["info"].append(f"终点时 B→A 与左右方向的夹角：{angle:.1f}°（规则要求不超过 45°）")
     examples = _jsonl(pilot / "threshold_examples.jsonl")
     rng = random.Random(seed)
     general = [e for e in examples if e["group"] == "general"]
@@ -100,13 +148,13 @@ def build_data(pilot: Path, no_task: Optional[Dict[str, Any]], uncertain_dir: Op
                 dims = [round(b - a, 2) for a, b in zip(e.get("bbox_min") or [0, 0, 0], e.get("bbox_max") or [0, 0, 0])]
                 unc.append({"id": f"{sid}:{e['ins_id']}", "scene": sid, "ins_id": e["ins_id"], "label": e.get("label"),
                             "size": dims, "reason": e.get("reason") or "", "figure": f"img/uncertain/{fig}"})
-    return {"version": SITE_VERSION, "tasks": out_tasks, "visibility": vis, "uncertain": unc}
+    return {"version": SITE_VERSION, "mode": mode, "tasks": out_tasks, "visibility": vis, "uncertain": unc}
 
 
 def build_site(pilot: Path, out: Path, no_task_path: Optional[Path] = None,
-               uncertain_dir: Optional[Path] = None) -> Dict[str, Any]:
+               uncertain_dir: Optional[Path] = None, mode: str = "pilot") -> Dict[str, Any]:
     no_task = json.loads(no_task_path.read_text(encoding="utf-8")) if no_task_path else None
-    data = build_data(pilot, no_task, uncertain_dir)
+    data = build_data(pilot, no_task, uncertain_dir, mode=mode)
     out.mkdir(parents=True, exist_ok=True)
     for sub in ("plain", "boxes"):
         src = pilot / "frames" / sub
@@ -123,6 +171,8 @@ def build_site(pilot: Path, out: Path, no_task_path: Optional[Path] = None,
     template = (Path(__file__).with_name("pilot_site_template.html")).read_text(encoding="utf-8")
     html = (template.replace("/*__DATA__*/null", payload.replace("</", "<\\/"))
             .replace("__DATA_HASH__", data_hash))
+    if mode == "check":
+        html = html.replace("InteriorGS 试点标注", "InteriorGS 检查页")
     (out / "index.html").write_text(html, encoding="utf-8")
     summary = {"tasks": len(data["tasks"]), "task_frames": sum(len(t["frames"]) for t in data["tasks"]),
                "visibility_examples": len(data["visibility"]), "uncertain_boxes": len(data["uncertain"]),
@@ -137,8 +187,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--no-task-objects", type=Path, default=None)
     ap.add_argument("--uncertain-figures", type=Path, default=None)
+    ap.add_argument("--mode", choices=("pilot", "check"), default="pilot",
+                    help="check: the 2026-10-14 check page (pilot.py check), questions about the three fixes")
     args = ap.parse_args(argv)
-    print(json.dumps(build_site(args.pilot, args.out, args.no_task_objects, args.uncertain_figures), indent=1))
+    print(json.dumps(build_site(args.pilot, args.out, args.no_task_objects, args.uncertain_figures, args.mode),
+                     indent=1))
     return 0
 
 

@@ -60,6 +60,32 @@ class PilotSiteTest(unittest.TestCase):
         self.assertEqual(groups, sorted(groups, key=lambda g: g != groups[0]))  # general first, then embedded
         self.assertTrue((self.root / "site" / "img" / "uncertain" / "two_rooms_5.png").exists())
 
+    def test_check_mode(self):
+        pilot = self.root / "check"
+        (pilot / "frames" / "plain").mkdir(parents=True, exist_ok=True)
+        tasks = []
+        for i, r in enumerate(self.rows[:3]):
+            r = dict(r, pilot_pool="formal", check_group=("lateral_near_45", "room", "reference")[i],
+                     check_lateral_angle_deg=40.0 if i == 0 else None)
+            tasks.append(r)
+        frames = [f for r in tasks for f in P.check_frames(r)]
+        (pilot / "pilot_tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in tasks))
+        (pilot / "frames.jsonl").write_text("".join(json.dumps(f) + "\n" for f in frames))
+        (pilot / "threshold_examples.jsonl").write_text("")
+        data = PS.build_data(pilot, None, None, mode="check")
+        self.assertEqual(data["mode"], "check")
+        self.assertEqual(data["visibility"], [])
+        keys = [{q["key"] for q in t["questions"]} for t in data["tasks"]]
+        self.assertIn("lateral", keys[0])
+        self.assertIn("room_name", keys[1])
+        self.assertIn("ref_visible", keys[2])
+        self.assertTrue(any("40.0°" in line for line in data["tasks"][0]["info"]))
+        self.assertTrue(all(len(t["frames"]) == 2 for t in data["tasks"]))  # start and end only
+        PS.build_site(pilot, self.root / "check_site", mode="check")
+        html = (self.root / "check_site" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("InteriorGS 检查页", html)
+        self.assertNotIn("InteriorGS 试点标注", html)
+
 
 if __name__ == "__main__":
     unittest.main()

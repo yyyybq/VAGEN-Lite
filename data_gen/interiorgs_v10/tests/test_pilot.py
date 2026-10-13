@@ -74,6 +74,36 @@ class PilotTest(unittest.TestCase):
         P.draw_topdown(self.scene, labels, row, out)
         self.assertGreater(out.stat().st_size, 1000)
 
+    def test_check_page_selection_and_frames(self):
+        import copy
+
+        rows = []
+        for i, r in enumerate(self.rows):
+            r = copy.deepcopy(r)
+            objs = r["target_object"]["objects"]
+            methods = ("unique_label", "room", "anchor")[i % 3]
+            for e in objs:
+                e["ref_method"] = methods
+                e["ref_anchor"] = None
+            if methods == "anchor":
+                other = {o.id: o for o in self.scene.objects}["13"]
+                objs[0]["ref_anchor"] = {"id": other.id, "label": other.label, "bbox_min": other.aabb_min.tolist(),
+                                         "bbox_max": other.aabb_max.tolist()}
+            rows.append(("formal", r))
+        picked = P.select_check_tasks(rows, groups=(("lateral_near_45", 2), ("name_only", 1), ("room", 1),
+                                                     ("reference", 1)))
+        self.assertEqual(len({r["task_id"] for r in picked}), len(picked))  # no task twice
+        lateral = [r for r in picked if r["check_group"] == "lateral_near_45"]
+        self.assertTrue(lateral and all(r["task_type"] == "projective_relations" for r in lateral))
+        self.assertTrue(all(r["check_lateral_angle_deg"] is not None for r in lateral))
+        for r in picked:
+            if r["check_group"] == "reference":
+                self.assertIn("anchor", P.ref_methods(r))
+                frames = P.check_frames(r)
+                self.assertEqual([f["state_id"] for f in frames], ["s0", f"s{r['difficulty']['d_star']}"])
+                self.assertIn("RA", frames[0]["overlay"])
+                self.assertEqual(frames[0]["overlay"]["RA"]["color"], "lime")
+
 
 if __name__ == "__main__":
     unittest.main()

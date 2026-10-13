@@ -9,6 +9,8 @@ thresholds, the frames to render and the top-down views.  The labelling site is 
     # CPU: one top-down view per task
     python -m data_gen.interiorgs_v10.pilot topdown --pilot PILOT --scenes-root META \
         --no-task-objects configs/no_task_objects_20261013.json
+    # CPU: the 2026-10-14 check page instead (then render, topdown and pilot_site --mode check)
+    python -m data_gen.interiorgs_v10.pilot check --run OUT --out CHECK
 
 Selection
 ---------
@@ -329,7 +331,8 @@ async def _render_all(frames: List[Dict[str, Any]], gs_root: str, out: Path, gpu
                     raise ValueError(f"renderer returned {image.size}")
                 name = safe_name(f["frame_id"])
                 image.save(out / "plain" / name)
-                draw_overlay(image, f.get("overlay") or {}).save(out / "boxes" / name)
+                if f.get("overlay"):  # SFT frames have none: no boxed copy
+                    draw_overlay(image, f["overlay"]).save(out / "boxes" / name)
                 arr = np.asarray(image.convert("RGB"), dtype=float)
                 done.append({"frame_id": f["frame_id"], "file": name, "mean": float(arr.mean()),
                              "std": float(arr.std())})
@@ -387,6 +390,13 @@ def draw_topdown(scene: Any, labels: List[Dict[str, Any]], row: Dict[str, Any], 
             color = TARGET_COLORS[slot]
             ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor=color, alpha=0.25, edgecolor=color, lw=1.6))
             ax.text(x1, y1, f" {slot}", color=color, fontsize=10, weight="bold")
+    for slot, e in zip("ABC", row["target_object"]["objects"]):  # reference objects of the descriptions
+        ref = e.get("ref_anchor")
+        if ref:
+            (x0, y0), (x1, y1) = ref["bbox_min"][:2], ref["bbox_max"][:2]
+            ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor="#2fa84f", alpha=0.2, edgecolor="#2fa84f",
+                                   lw=1.4, ls="--"))
+            ax.text(x1, y0, f" ref {slot}", color="#2fa84f", fontsize=8, weight="bold")
     pts = np.asarray(task_path(row), float)
     ax.plot(pts[:, 0], pts[:, 1], color="#7a3cc4", lw=1.4, marker="o", ms=2.5)
     for (x, y, yaw), color in ((pts[0], "#111111"), (pts[-1], "#7a3cc4")):
@@ -423,9 +433,138 @@ def cmd_topdown(args: argparse.Namespace) -> None:
     print(json.dumps({"topdown": len(tasks)}))
 
 
+# ---------------------------------------------------------------------------
+# check page (2026-10-14): did the three fixes work?
+# ---------------------------------------------------------------------------
+# group -> number of tasks: left/right closest to the 45-degree limit, name only, room, reference object
+CHECK_GROUPS = (("lateral_near_45", 10), ("name_only", 10), ("room", 10), ("reference", 10))
+
+
+def ref_methods(row: Dict[str, Any]) -> List[Optional[str]]:
+    return [e.get("ref_method") for e in row["target_object"]["objects"]]
+
+
+def final_lateral_angle(row: Dict[str, Any]) -> Optional[float]:
+    from vagen.envs.active_spatial.target_visibility import lateral_gate
+
+    from .qa_states import certificate_poses
+
+    return lateral_gate(row, certificate_poses(row)[-1]).get("angle_deg")
+
+
+def select_check_tasks(rows: Sequence[Tuple[str, Dict[str, Any]]],
+                       groups: Sequence[Tuple[str, int]] = CHECK_GROUPS) -> List[Dict[str, Any]]:
+    """Formal tasks (reserve only if a group is short) for the check page, round-robin over scenes and
+    families inside a group, no task twice."""
+    from .referring import METHOD_ANCHOR, METHOD_ROOM, METHOD_UNIQUE
+
+    def member(group: str, r: Dict[str, Any]) -> Optional[float]:
+        """Sort key (smaller first) if ``r`` belongs to ``group``, else None."""
+        methods = ref_methods(r)
+        if group == "lateral_near_45":
+            if r["task_type"] != "projective_relations":
+                return None
+            angle = final_lateral_angle(r)
+            return None if angle is None else 45.0 - angle  # closest to the limit first
+        if group == "name_only":
+            return 0.0 if methods and all(m == METHOD_UNIQUE for m in methods) else None
+        if group == "room":
+            return 0.0 if METHOD_ROOM in methods else None
+        if group == "reference":
+            return 0.0 if METHOD_ANCHOR in methods else None
+        raise ValueError(group)
+
+    picked: List[Dict[str, Any]] = []
+    taken = set()
+    for group, n in groups:
+        chosen: List[Dict[str, Any]] = []
+        for pool in ("formal", "reserve"):
+            cands = []
+            for kind, r in rows:
+                if kind != pool or r["task_id"] in taken:
+                    continue
+                key = member(group, r)
+                if key is not None:
+                    cands.append((key, r["task_id"], r))
+            cands.sort(key=lambda c: (c[0], c[1]))
+            scenes_used: Counter = Counter()
+            fams_used: Counter = Counter()
+            while len(chosen) < n and cands:
+                # the best-ranked candidate among those from the least-used scene and family
+                best = min(range(len(cands)), key=lambda i: (scenes_used[cands[i][2]["scene_id"]],
+                                                             fams_used[cands[i][2]["task_type"]], i))
+                _, tid, r = cands.pop(best)
+                scenes_used[r["scene_id"]] += 1
+                fams_used[r["task_type"]] += 1
+                chosen.append(dict(r, check_group=group, pilot_pool=pool,
+                                   check_lateral_angle_deg=(final_lateral_angle(r)
+                                                            if r["task_type"] == "projective_relations" else None)))
+                taken.add(tid)
+            if len(chosen) >= n:
+                break
+        picked.extend(chosen)
+    return picked
+
+
+def reference_overlay(row: Dict[str, Any], c2w: Any) -> Dict[str, Dict[str, Any]]:
+    """Green boxes for the reference objects of the targets' descriptions ("RA": A's reference)."""
+    from vagen.envs.active_spatial.visual_bbox_metrics import _project_object
+
+    from .occlusion import canonical_intrinsics
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for slot, e in zip("ABCD", row["target_object"]["objects"]):
+        ref = e.get("ref_anchor")
+        if not ref:
+            continue
+        p = _project_object(ref, np.asarray(c2w, float), np.asarray(canonical_intrinsics(), float), *RENDER_SIZE)
+        out["R" + slot] = {"bbox": p.get("bbox") if p.get("visible") else None, "color": "lime",
+                           "ref": f"the {ref.get('label')}", "label": ref.get("label"),
+                           "image_size": list(RENDER_SIZE)}
+    return out
+
+
+def check_frames(row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Start and end frame of a check task, targets and reference objects boxed."""
+    from .admission import overlay_boxes
+    from .qa_states import certificate_poses
+
+    poses = certificate_poses(row)
+    d = len(poses) - 1
+    out = []
+    for k, role in ((0, "start"), (d, "terminal")):
+        overlay = dict(overlay_boxes(row, poses[k]))
+        overlay.update(reference_overlay(row, poses[k]))
+        out.append({"frame_id": f"{row['task_id']}__s{k}", "kind": "task", "task_id": row["task_id"],
+                    "scene_id": row["scene_id"], "state_id": f"s{k}", "roles": [role],
+                    "c2w": np.asarray(poses[k]).tolist(), "camera_item": camera_item(row), "overlay": overlay})
+    return out
+
+
+def cmd_check(args: argparse.Namespace) -> None:
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    tasks = select_check_tasks(_read_rows(Path(args.run)))
+    frames = [f for r in tasks for f in check_frames(r)]
+    (out / "pilot_tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in tasks))
+    (out / "threshold_examples.jsonl").write_text("")
+    (out / "frames.jsonl").write_text("".join(json.dumps(f) + "\n" for f in frames))
+    report = {"tasks": len(tasks), "by_group": dict(Counter(r["check_group"] for r in tasks)),
+              "by_family": dict(Counter(r["task_type"] for r in tasks)),
+              "by_pool": dict(Counter(r["pilot_pool"] for r in tasks)),
+              "scenes": len({r["scene_id"] for r in tasks}), "frames": len(frames),
+              "lateral_angles_deg": sorted(round(r["check_lateral_angle_deg"], 1) for r in tasks
+                                           if r["check_group"] == "lateral_near_45")}
+    (out / "selection_report.json").write_text(json.dumps(report, indent=1))
+    print(json.dumps(report, indent=1))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("check")
+    c.add_argument("--run", required=True)
+    c.add_argument("--out", required=True)
     s = sub.add_parser("select")
     s.add_argument("--run", required=True)
     s.add_argument("--scenes-root", required=True)
@@ -441,7 +580,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     t.add_argument("--scenes-root", required=True)
     t.add_argument("--no-task-objects", default=None)
     args = ap.parse_args(argv)
-    {"select": cmd_select, "render": cmd_render, "topdown": cmd_topdown}[args.cmd](args)
+    {"select": cmd_select, "render": cmd_render, "topdown": cmd_topdown, "check": cmd_check}[args.cmd](args)
     return 0
 
 

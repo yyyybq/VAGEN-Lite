@@ -92,7 +92,8 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4p
 <script>
 const DATA = /*__DATA__*/null;
 const DATA_HASH = "__DATA_HASH__";
-const STORE_KEY = "interiorgs_pilot_labels_v1";
+const MODE = (DATA && DATA.mode) || "pilot";
+const STORE_KEY = `interiorgs_${MODE}_labels_v1`;
 const OPT = {
   yes: ["是", "否", "不确定"], can: ["能", "不能", "不确定"], ok: ["正常", "不正常", "不确定"],
   kind: ["一件家具", "几件被合并", "看不出"],
@@ -101,7 +102,7 @@ const TABS = [
   {key: "tasks", name: "任务标注", items: DATA.tasks},
   {key: "visibility", name: "可见门槛", items: DATA.visibility},
   {key: "uncertain", name: "无法确定的框（选做）", items: DATA.uncertain},
-];
+].filter((t) => t.items.length);
 let state = load();
 let tab = state.tab || "tasks";
 let cur = 0;  // focused question index on the page
@@ -119,6 +120,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<"
 
 function questions(kind, it) {
   const qs = [];
+  if (kind === "tasks" && it.questions) {  // check page: the builder chose the questions
+    return it.questions.map((q) => ({key: q.key, opts: OPT[q.opts], text: q.text, frame: q.frame}));
+  }
   if (kind === "tasks") {
     it.targets.forEach((t) => qs.push({key: `label_${t.slot}`, opts: OPT.yes,
       text: `${t.color}（${t.slot}）里的物体是不是「${esc(t.ref)}」这一类？`}));
@@ -182,7 +186,8 @@ function render() {
   if (tab === "tasks") {
     html += `<span>场景 ${it.scene}</span><span>题型：${esc(it.family_zh)}</span></div>
       <div class="top"><div><div class="task-text">${esc(it.text)}</div>
-      <div class="targets">${it.targets.map((t) => `<span><i class="sw" style="border-color:${{A: "#d0233b", B: "#1f6fd1", C: "#1f9a7f"}[t.slot]}"></i>${t.color} ${t.slot}：${esc(t.ref)}</span>`).join("")}</div>`;
+      <div class="targets">${it.targets.map((t) => `<span><i class="sw" style="border-color:${{A: "#d0233b", B: "#1f6fd1", C: "#1f9a7f"}[t.slot]}"></i>${t.color} ${t.slot}：${esc(t.ref)}</span>`).join("")}</div>
+      ${(it.info || []).map((line) => `<div class="note">${esc(line)}</div>`).join("")}`;
     html += `<div class="card"><h3>整道题</h3>${qs.map((q, i) => q.frame ? "" : qHtml(q, i, a)).join("")}</div></div>
       <div class="card topdown"><h3>俯视图</h3><img src="${it.topdown}" alt="俯视图"><div class="note">灰色：房间；黑线：墙；红 / 蓝 / 绿：目标 A / B / C；橙色虚线：不出题的物体；
       黑色箭头：起点和朝向；紫色：题目给的最短走法和终点朝向。</div></div></div>`;
@@ -255,13 +260,13 @@ function nextOpen() {
 function zoom(src) { const lb = $("lightbox"); lb.querySelector("img").src = src; lb.style.display = "flex"; }
 $("lightbox").onclick = () => { $("lightbox").style.display = "none"; };
 function exportJson() {
-  const out = {version: "interiorgs_v10_pilot_labels_v1", site_version: DATA.version, data_hash: DATA_HASH,
+  const out = {version: `interiorgs_v10_${MODE}_labels_v1`, site_version: DATA.version, data_hash: DATA_HASH,
     exported_at: new Date().toISOString(), progress: progress(), answers: state.answers,
     option_codes: {"0": "第一个选项（是 / 能 / 正常 / 一件家具）", "1": "第二个选项（否 / 不能 / 不正常 / 几件被合并）", "2": "不确定 / 看不出"}};
   const blob = new Blob([JSON.stringify(out, null, 1)], {type: "application/json"});
   const d = new Date(), p = (x) => String(x).padStart(2, "0");
   const url = URL.createObjectURL(blob), link = document.createElement("a");
-  link.href = url; link.download = `interiorgs_pilot_labels_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`;
+  link.href = url; link.download = `interiorgs_${MODE}_labels_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`;
   document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 $("btnExport").onclick = exportJson;
