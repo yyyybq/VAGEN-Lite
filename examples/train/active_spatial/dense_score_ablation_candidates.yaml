@@ -7,6 +7,11 @@ baseline_env_config: exps/vagen_active_spatial/qwen_v50_clean_d0pass_20260824_fu
 
 # Formal manifests must be supplied explicitly to the preflight.  The legacy
 # train_size/test_size fields are intentionally removed from resolved candidates.
+# R1 keeps R1's success rule: the env's v10 rules (target_visibility.py) stay off for every variant
+# (vagen/envs/active_spatial/r1_legacy.py, decision of 2026-10-14).
+environment_overrides:
+  r1_legacy_success: true
+
 required_split_roles:
   - train
   - id

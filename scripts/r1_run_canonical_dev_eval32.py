@@ -372,6 +372,7 @@ def env_config(args: argparse.Namespace, policy_path: Path) -> Any:
         collision_safety_margin=0.05,
         collision_invalidate_action=True,
         render_fail_fast=True,
+        r1_legacy_success=True,  # R1 keeps R1's success rule (vagen/envs/active_spatial/r1_legacy.py)
     )
 
 

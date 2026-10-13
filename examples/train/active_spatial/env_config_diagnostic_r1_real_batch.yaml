@@ -32,3 +32,4 @@ env1:
     collision_safety_margin: 0.05
     collision_invalidate_action: true
     render_fail_fast: true
+    r1_legacy_success: true  # R1 keeps R1's success rule (vagen/envs/active_spatial/r1_legacy.py)

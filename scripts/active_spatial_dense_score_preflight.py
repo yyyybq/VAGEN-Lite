@@ -305,6 +305,17 @@ def parse_manifest(spec: str, root: Path) -> tuple[str, Path]:
     return name.strip(), path.resolve()
 
 
+def apply_environment_overrides(matrix: Mapping[str, Any], env_cfg: Mapping[str, Any]) -> dict[str, Any]:
+    """The matrix's ``environment_overrides`` applied to every variant's env config (e.g. R1 runs keep
+    R1's success rule: ``r1_legacy_success: true``); unknown keys are refused."""
+    overrides = dict(matrix.get("environment_overrides") or {})
+    known = {entry.name for entry in fields(ActiveSpatialEnvConfig)}
+    unknown = sorted(set(overrides) - known)
+    if unknown:
+        raise ValueError(f"unknown environment_overrides keys: {unknown}")
+    return {**dict(env_cfg), **overrides}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--matrix", required=True, type=Path)
@@ -333,6 +344,7 @@ def main() -> int:
     known_fields = {entry.name for entry in fields(ActiveSpatialEnvConfig)}
     unknown_env_keys = sorted(set(raw_env_cfg) - known_fields)
     typed_env_cfg = asdict(ActiveSpatialEnvConfig(**{k: v for k, v in raw_env_cfg.items() if k in known_fields}))
+    typed_env_cfg = apply_environment_overrides(matrix, typed_env_cfg)
     if "train" in manifests:
         typed_env_cfg["jsonl_path"] = str(manifests["train"])
 

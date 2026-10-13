@@ -38,6 +38,7 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def config(args: argparse.Namespace) -> ActiveSpatialEnvConfig:
     return ActiveSpatialEnvConfig(
+        r1_legacy_success=True,  # R1 keeps R1's success rule (vagen/envs/active_spatial/r1_legacy.py)
         jsonl_path=str(args.repaired),
         total_lines=-1,
         render_backend="http",

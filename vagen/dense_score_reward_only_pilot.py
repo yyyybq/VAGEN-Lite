@@ -17,6 +17,7 @@ import ray
 from omegaconf import OmegaConf, open_dict
 
 from vagen import main_ppo
+from vagen.envs.active_spatial.r1_legacy import force_r1_legacy
 from vagen.ray_trainer import RayPPOTrainer
 
 
@@ -80,6 +81,8 @@ def main() -> None:
         }
     run_root = Path(config.trainer.default_local_dir).parent
     run_root.mkdir(parents=True, exist_ok=True)
+    with open_dict(config):
+        force_r1_legacy(config, run_root / "env_r1_legacy")  # R1 keeps R1's success rule
     OmegaConf.save(config, run_root / "launch_resolved.yaml", resolve=True)
     observability_root_text = os.environ.get("DENSE_SCORE_OBSERVABILITY_ROOT")
     if observability_root_text:

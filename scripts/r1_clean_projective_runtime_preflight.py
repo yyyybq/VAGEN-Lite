@@ -12,6 +12,7 @@ from PIL import Image
 from omegaconf import OmegaConf
 from r1_reconcile_expansion_inventory import read, evidence, digest
 from vagen.envs.active_spatial.env import ActiveSpatialEnv
+from vagen.envs.active_spatial.r1_legacy import R1_ENV_OVERRIDES
 from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
 
 
@@ -24,6 +25,7 @@ def main():
     raw=OmegaConf.to_container(OmegaConf.load(a.frozen/'train.yaml'),resolve=True)['envs'][0]['config']
     assert raw['gs_root']==str(a.gs_root) and raw['jsonl_path']==str(a.frozen/'train.jsonl')
     keys={f.name for f in fields(ActiveSpatialEnvConfig)}
+    raw.update(R1_ENV_OVERRIDES)  # R1 keeps R1's success rule
     config=ActiveSpatialEnvConfig(**{k:v for k,v in raw.items() if k in keys})
     env=ActiveSpatialEnv(config);results=[]
     try:

@@ -11,6 +11,7 @@ from pathlib import Path
 import ray
 from omegaconf import OmegaConf, open_dict
 from vagen import main_ppo
+from vagen.envs.active_spatial.r1_legacy import force_r1_legacy
 from vagen.ray_trainer import RayPPOTrainer
 
 
@@ -87,6 +88,8 @@ def main():
             'PYTHONDONTWRITEBYTECODE':'1','NO_PROXY':'*','no_proxy':'*',
             'LD_LIBRARY_PATH':os.environ.get('LD_LIBRARY_PATH','')}}
     root=Path(cfg.trainer.default_local_dir).parent;root.mkdir(parents=True,exist_ok=True)
+    with open_dict(cfg):
+        force_r1_legacy(cfg, root/'env_r1_legacy')  # R1 keeps R1's success rule (env r1_legacy_success)
     OmegaConf.save(cfg,root/'launch_resolved.yaml',resolve=True)
     try:
         main_ppo.run_ppo(cfg, task_runner_class=ray.remote(num_cpus=1)(CleanTaskRunner))

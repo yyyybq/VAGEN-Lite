@@ -7,6 +7,11 @@ status: PREFLIGHT_CANDIDATE
 baseline_train_resolved_config: exps/vagen_active_spatial/R1-clean-Projective-v0/frozen_v1/formal.yaml
 baseline_env_config: exps/vagen_active_spatial/R1-clean-Projective-v0/frozen_v1/train.yaml
 
+# R1 keeps R1's success rule: the env's v10 rules (target_visibility.py) stay off for every variant
+# (vagen/envs/active_spatial/r1_legacy.py, decision of 2026-10-14).
+environment_overrides:
+  r1_legacy_success: true
+
 required_split_roles:
   - train
   - id
