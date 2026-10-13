@@ -4,8 +4,13 @@
     python data_gen/interiorgs_v10/pilot_sco.py submit  --pilot PILOT
     python data_gen/interiorgs_v10/pilot_sco.py status  --pilot PILOT
     python data_gen/interiorgs_v10/pilot_sco.py stop    --pilot PILOT     # only if it hangs
+    python data_gen/interiorgs_v10/pilot_sco.py delete  --pilot PILOT     # remove a stopped/suspended job
 
-``prepare`` freezes the code (data_gen/interiorgs_v10 + vagen) into PILOT/job/source.tar.gz and writes
+On this cluster a stopped job is SUSPENDED and could be resumed by the scheduler; ``delete`` removes it so
+nothing is left hanging.
+
+``prepare`` freezes the code (data_gen/interiorgs_v10, vagen, ply_gaussian_loader.py) into
+PILOT/job/source.tar.gz and writes
 launch.sh, which unpacks it, sets up the renderer exactly as the QA production job did, runs
 ``pilot render`` and hands every output back to the submitting user (sco jobs run as root).
 """
@@ -40,7 +45,9 @@ def prepare(pilot: Path, gs_root: str) -> None:
     job.mkdir(parents=True, exist_ok=True)
     archive = job / "source.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
-        for rel in ("data_gen/interiorgs_v10", "vagen"):
+        # ply_gaussian_loader.py: the renderer imports it top-level; the repo copy decodes packed PLYs ~60x
+        # faster than the older one installed in the conda env
+        for rel in ("data_gen/interiorgs_v10", "vagen", "ply_gaussian_loader.py"):
             tar.add(ROOT / rel, arcname=rel,
                     filter=lambda ti: None if "__pycache__" in ti.name or "figures_cabinet" in ti.name else ti)
     launch = job / "launch.sh"
@@ -118,9 +125,22 @@ def stop(pilot: Path) -> None:
     print(json.dumps({"job_id": job_id, "state_before": state, "stop_rc": res.returncode}))
 
 
+def delete(pilot: Path) -> None:
+    receipt = pilot / "job" / "submission.json"
+    job_id = json.loads(receipt.read_text())["job_id"]
+    state = describe(job_id).get("state")
+    if state not in FINISHED | {"SUSPENDED"}:
+        subprocess.run([SCO, "acp", "jobs", "stop", "--workspace-name=aigc", job_id], capture_output=True, text=True)
+    res = subprocess.run([SCO, "acp", "jobs", "delete", "--workspace-name=aigc", job_id], capture_output=True, text=True)
+    (pilot / "job" / "delete.log").write_text(res.stdout + "\n" + res.stderr)
+    if res.returncode == 0:  # a later submit creates a new job
+        receipt.rename(receipt.with_name(f"submission_{job_id}_deleted.json"))
+    print(json.dumps({"job_id": job_id, "state_before": state, "delete_rc": res.returncode}))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=("prepare", "submit", "status", "stop"))
+    ap.add_argument("action", choices=("prepare", "submit", "status", "stop", "delete"))
     ap.add_argument("--pilot", required=True, type=Path)
     ap.add_argument("--gs-root", default=None)
     args = ap.parse_args()
@@ -132,8 +152,10 @@ def main() -> None:
         submit(args.pilot.resolve())
     elif args.action == "status":
         status(args.pilot.resolve())
-    else:
+    elif args.action == "stop":
         stop(args.pilot.resolve())
+    else:
+        delete(args.pilot.resolve())
 
 
 if __name__ == "__main__":
