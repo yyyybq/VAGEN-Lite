@@ -62,7 +62,7 @@
       "chunking": "action_runs",
       "max_actions_per_turn": 5,
       "explicit_done": false,
-      "observation_pose": "none",
+      "observation_pose": "runtime",
       "env_feedback": "Action executed.",
       "system_prompt": {
         "step_translation": 0.3,

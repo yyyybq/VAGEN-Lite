@@ -283,10 +283,20 @@ class AdmissionTest(unittest.TestCase):
             if turn["role"] == "assistant":
                 self.assertRegex(turn["content"], r"^<action>([a-z_]+\|)+</action>$")
             if turn["role"] == "user":
-                text = turn["content"].replace(rec["task_description"], "")
+                text = R._POSE_LINE_RE.sub("", turn["content"].replace(rec["task_description"], ""))
                 self.assertNotRegex(text, r"\d+(\.\d+)?\s*(m|meters?|degrees?|°|px)\b")
                 self.assertNotRegex(text.lower(), r"score|reward|distance")
         self.assertEqual(sum(t["role"] == "user" for t in rec["conversations"]), rec["trajectory_steps"])
+        # each user turn shows the RL env's pose line for the frame it carries
+        poses = Q.certificate_poses(row)
+        bounds = A.turn_boundaries(row, self.policy)
+        users = [t for t in rec["conversations"] if t["role"] == "user"]
+        for t, turn in enumerate(users):
+            self.assertIn("<image>\n" + R.pose_line(poses[bounds[t]]) + "\n", turn["content"] + "\n")
+        no_pose = copy.deepcopy(self.policy)
+        no_pose["sft"]["export"]["observation_pose"] = "none"
+        rec_none, _ = R.build_sft_record(row, images, no_pose)
+        self.assertNotIn("Current camera pose", json.dumps(rec_none["conversations"]))
         leaked = copy.deepcopy(rec)
         leaked["conversations"][1]["content"] += "\nDistance to target: 1.25 m"
         self.assertTrue(R.scan_leakage(leaked, self.policy))

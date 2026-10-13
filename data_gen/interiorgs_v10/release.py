@@ -230,6 +230,10 @@ _UNIT_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:°|%|(?:m|cm|mm|meters?|metres?|deg|d
 _DECIMAL_RE = re.compile(r"\d+\.\d+")
 _ORACLE_RE = re.compile(r"\b(?:scores?|rewards?|distances?|d\*|d_star|potential|margins?|thresholds?|optimal|"
                         r"shortest|certificate|oracle|inside[_ ]fraction)\b", re.IGNORECASE)
+# The RL env's observation line (env.py: "Current camera pose: " + format_pose6_deg(...)); SFT turns carry the
+# same line (observation_pose = "runtime"), so it is not leakage.
+_POSE_LINE_RE = re.compile(r"Current camera pose: \[tx=-?\d+\.\d{4}, ty=-?\d+\.\d{4}, tz=-?\d+\.\d{4}, "
+                           r"rx=-?\d+\.\d{2}°, ry=-?\d+\.\d{2}°, rz=-?\d+\.\d{2}°\]")
 _ACTION_ONLY_RE = re.compile(r"<action>(?:(?:%s)\|)+</action>" % "|".join(ACTIONS))
 
 
@@ -253,15 +257,30 @@ def _format_block(policy: Mapping[str, Any], first: bool) -> str:
     return fn(max_actions_per_step=exp["max_actions_per_turn"], action_sep="|", add_example=first)
 
 
-def _user_turn(desc: str, first: bool, policy: Mapping[str, Any]) -> str:
+def pose_line(c2w: Any) -> str:
+    """The RL env's "Current camera pose" observation line for a camera-to-world pose."""
+    from vagen.envs.active_spatial.utils import c2w_extrinsic_to_se3, format_pose6_deg
+
+    return "Current camera pose: " + format_pose6_deg(c2w_extrinsic_to_se3(np.asarray(c2w, dtype=float)))
+
+
+def _user_turn(desc: str, first: bool, policy: Mapping[str, Any], pose: Any = None) -> str:
+    """One user turn; with observation_pose = "runtime" it shows the pose line exactly as the RL env does."""
     P = _prompt_module()
     exp = policy["sft"]["export"]
-    if exp.get("observation_pose", "none") != "none":
-        raise ValueError("only observation_pose='none' is supported (pose text would carry numeric values)")
-    if first:
-        text = P.init_observation_template(observation="<image>", task_prompt=desc)
+    mode = exp.get("observation_pose", "none")
+    if mode == "runtime":
+        if pose is None:
+            raise ValueError("observation_pose='runtime' needs the turn's camera pose")
+        observation = "<image>\n" + pose_line(pose)
+    elif mode == "none":
+        observation = "<image>"
     else:
-        text = P.action_template(observation="<image>", env_feedback=exp.get("env_feedback", "Action executed."),
+        raise ValueError(f"unknown observation_pose {mode!r} (use 'runtime' or 'none')")
+    if first:
+        text = P.init_observation_template(observation=observation, task_prompt=desc)
+    else:
+        text = P.action_template(observation=observation, env_feedback=exp.get("env_feedback", "Action executed."),
                                  task_prompt=desc)
     return text + "\n" + _format_block(policy, first)
 
@@ -272,7 +291,7 @@ def scan_leakage(record: Mapping[str, Any], policy: Mapping[str, Any]) -> List[s
     * system turn must be exactly the protocol prompt (no per-episode values);
     * assistant turns must be action-only ``<action>a|b|</action>``;
     * user turns (minus the public task description and the fixed format
-      block) must contain no digits-with-units, decimals or oracle words.
+      block and the env's pose line) must contain no digits-with-units, decimals or oracle words.
     """
     findings: List[str] = []
     desc = str(record.get("task_description") or "")
@@ -288,6 +307,7 @@ def scan_leakage(record: Mapping[str, Any], policy: Mapping[str, Any]) -> List[s
                 findings.append(f"turn{i}:assistant_not_action_only")
             continue
         text = content.replace(desc, " ") if desc else content
+        text = _POSE_LINE_RE.sub(" ", text)
         for block in fixed:
             text = text.replace(block, " ")
         for name, rx in (("unit", _UNIT_RE), ("decimal", _DECIMAL_RE), ("oracle_word", _ORACLE_RE)):
@@ -320,10 +340,11 @@ def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], poli
     desc = str(raw_row.get("task_description") or "").strip()
     conv: List[Dict[str, Any]] = [{"role": "system", "content": protocol_system_prompt(str(raw_row["task_type"]), policy)}]
     for t, chunk in enumerate(chunks):
-        conv.append({"role": "user", "content": _user_turn(desc, t == 0, policy), "image_path": frame[bounds[t]]})
+        conv.append({"role": "user", "content": _user_turn(desc, t == 0, policy, poses[bounds[t]]),
+                     "image_path": frame[bounds[t]]})
         conv.append({"role": "assistant", "content": "<action>" + "".join(a + "|" for a in chunk) + "</action>"})
     if exp.get("explicit_done"):
-        conv.append({"role": "user", "content": _user_turn(desc, False, policy), "image_path": frame[d]})
+        conv.append({"role": "user", "content": _user_turn(desc, False, policy, poses[d]), "image_path": frame[d]})
         conv.append({"role": "assistant", "content": "<action>done|</action>"})
     turn_images = [str(t["image_path"]) for t in conv if t["role"] == "user"]
     image_paths = list(turn_images)
