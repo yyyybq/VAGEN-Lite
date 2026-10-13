@@ -1,0 +1,79 @@
+"""pilot.py: stratified selection, frames, overlays, top-down views."""
+
+import json
+import tempfile
+import unittest
+from collections import Counter
+from pathlib import Path
+
+import numpy as np
+
+from data_gen.interiorgs_v10 import pilot as P
+from data_gen.interiorgs_v10.admission import load_policy
+from data_gen.interiorgs_v10.run_scene import RunConfig, _jsonable, generate_scene
+from data_gen.interiorgs_v10.scene import load_scene
+from data_gen.interiorgs_v10.testing.synthetic_scene import write_synthetic_scenes
+
+
+def _fake_rows():
+    rows = []
+    for fam in P.FAMILY_QUOTA:
+        for i in range(300):
+            d = 1 + i % 8
+            kind = "formal" if i % 3 else "reserve"
+            rows.append((kind, {"task_id": f"{fam}_{i}", "task_type": fam, "scene_id": f"s{i % 25:02d}",
+                                "difficulty": {"d_star": d}}))
+    return rows
+
+
+class PilotTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._tmp.name)
+        cls.paths = write_synthetic_scenes(cls.root / "scenes")
+        sdir = cls.paths["two_rooms"]
+        cls.rows = _jsonable(generate_scene(sdir, "two_rooms", RunConfig(target_tasks_per_scene=4)))["rows"]
+        cls.scene = load_scene(sdir, "two_rooms")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_select_tasks_is_stratified(self):
+        picked = P.select_tasks(_fake_rows())
+        self.assertEqual(Counter(r["task_type"] for r in picked), Counter(P.FAMILY_QUOTA))
+        self.assertEqual(len({r["task_id"] for r in picked}), len(picked))
+        for fam, n in P.FAMILY_QUOTA.items():
+            bands = Counter(P.band_of(r["difficulty"]["d_star"]) for r in picked if r["task_type"] == fam)
+            self.assertLessEqual(max(bands.values()) - min(bands.values()), 1)  # even over d* bands
+            per_band_scene = Counter((P.band_of(r["difficulty"]["d_star"]), r["scene_id"])
+                                     for r in picked if r["task_type"] == fam)
+            self.assertEqual(max(per_band_scene.values()), 1)  # round-robin over scenes inside a band
+        self.assertTrue(all(r["pilot_pool"] == "formal" for r in picked))  # formal first
+        self.assertEqual(picked, P.select_tasks(_fake_rows()))  # deterministic
+
+    def test_frames_overlay_and_topdown(self):
+        row = self.rows[0]
+        frames = P.task_frames(row, load_policy())
+        d = row["difficulty"]["d_star"]
+        sids = [f["state_id"] for f in frames]
+        self.assertEqual(sids[0], "s0")
+        self.assertEqual(sids[-1], f"s{d}")
+        self.assertIn("A", frames[0]["overlay"])
+        from PIL import Image
+
+        img = Image.new("RGB", (256, 256), (40, 40, 40))
+        drawn = P.draw_overlay(img, {"A": {"bbox": [20, 30, 120, 200], "color": "red", "image_size": [256, 256]}})
+        arr = np.asarray(drawn)
+        self.assertEqual(drawn.size, (256, 256))
+        self.assertTrue(((arr[..., 0] > 200) & (arr[..., 1] < 80)).any())
+        self.assertTrue((np.asarray(img) == 40).all())  # the original is untouched
+        labels = json.loads((self.paths["two_rooms"] / "labels.json").read_text())
+        out = self.root / "td.png"
+        P.draw_topdown(self.scene, labels, row, out)
+        self.assertGreater(out.stat().st_size, 1000)
+
+
+if __name__ == "__main__":
+    unittest.main()
