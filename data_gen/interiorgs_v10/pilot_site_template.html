@@ -189,7 +189,7 @@ function render() {
       <div class="targets">${it.targets.map((t) => `<span><i class="sw" style="border-color:${{A: "#d0233b", B: "#1f6fd1", C: "#1f9a7f"}[t.slot]}"></i>${t.color} ${t.slot}：${esc(t.ref)}</span>`).join("")}</div>
       ${(it.info || []).map((line) => `<div class="note">${esc(line)}</div>`).join("")}`;
     html += `<div class="card"><h3>整道题</h3>${qs.map((q, i) => q.frame ? "" : qHtml(q, i, a)).join("")}</div></div>
-      <div class="card topdown"><h3>俯视图</h3><img src="${it.topdown}" alt="俯视图"><div class="note">灰色：房间；黑线：墙；红 / 蓝 / 绿：目标 A / B / C；橙色虚线：不出题的物体；
+      <div class="card topdown"><h3>俯视图</h3><img src="${it.topdown}" alt="俯视图"><div class="note">灰色：房间；黑线：墙；红 / 蓝 / 绿：目标 A / B / C；绿色虚线：参照物（ref A 是 A 的描述用到的参照物）；橙色虚线：不出题的物体；
       黑色箭头：起点和朝向；紫色：题目给的最短走法和终点朝向。</div></div></div>`;
     it.frames.forEach((f) => {
       html += `<div class="card" id="f_${f.sid}"><h3>${f.role}</h3>${imgPair(f.plain, f.boxes, f.role)}
