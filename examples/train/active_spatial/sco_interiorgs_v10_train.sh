@@ -19,7 +19,8 @@ GS_ROOT=/mnt/umm/users/yinbaiqiao/InteriorGS_ply
 VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_20261007/torch_extensions/gsplat_cuda
 mkdir -p "${RUN}/logs"
 OWNER=$(stat -c %u:%g "${RUN}")
-trap 'status=$?; [[ -n ${renderer_pid:-} ]] && kill "${renderer_pid}" 2>/dev/null; chown -R "${OWNER}" "${RUN}" 2>/dev/null || true; printf "{\"mode\":\"%s\",\"exit_status\":%s,\"ended_utc\":\"%s\"}\n" "${MODE}" "${status}" "$(date -u +%FT%TZ)" > "${RUN}/logs/${MODE}_exit.json"; exit ${status}' EXIT
+# the exit record is written before ownership is handed back, so it is not left owned by root
+trap 'status=$?; [[ -n ${renderer_pid:-} ]] && kill "${renderer_pid}" 2>/dev/null; printf "{\"mode\":\"%s\",\"exit_status\":%s,\"ended_utc\":\"%s\"}\n" "${MODE}" "${status}" "$(date -u +%FT%TZ)" > "${RUN}/logs/${MODE}_exit.json"; chown -R "${OWNER}" "${RUN}" 2>/dev/null || true; exit ${status}' EXIT
 exec > >(tee -a "${RUN}/logs/${MODE}-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).log") 2>&1
 cd "${WORKTREE}"
 export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1
