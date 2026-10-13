@@ -112,7 +112,7 @@ class TrainingPrepTest(unittest.TestCase):
         out = self.root / "rl"
         TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
             Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
-            gs_root="/ply", model="/models/m", name="trial", run_root=str(self.root / "rl_run"), val_limit=1,
+            gs_root="/ply", model="/models/m/", name="trial", run_root=str(self.root / "rl_run"), val_limit=1,
             trial=True, out=str(out)))
         env = yaml.safe_load((out / "train_env.yaml").read_text())["envs"][0]
         self.assertEqual(env["n_envs"], self.n_train)

@@ -58,6 +58,9 @@ start_renderer() {  # $1 = gpu index; leaves renderer_pid and R1_RENDER_URL
 }
 
 lf_train() {  # $1 = LLaMA-Factory recipe, $2 = number of processes
+  # LLaMA-Factory 0.9.3 pins transformers <= 4.52.4; vagen-lite has 4.56.1 (needed by the RL stack). The
+  # trial checks that SFT runs anyway; the pin is LLaMA-Factory's own check, not a known incompatibility.
+  export DISABLE_VERSION_CHECK=1
   accelerate launch --config_file examples/train/active_spatial/accelerate_fsdp_qwen25vl.yaml \
     --num_processes "$2" -m llamafactory.launcher "$1"
 }

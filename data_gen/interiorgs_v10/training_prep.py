@@ -210,10 +210,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         raise SystemExit(f"RL and SFT system prompts differ for {mismatches}")
     ppo = yaml.safe_load(Path(args.ppo_template).read_text())
     run_root = Path(args.run_root).resolve()
+    model = str(Path(args.model))  # no trailing "/": verl's copy_to_local refuses one
     for key, value in {
         "data.train_files": str(env_paths["train"].resolve()), "data.val_files": str(env_paths["val"].resolve()),
-        "actor_rollout_ref.model.path": str(args.model), "critic.model.path": str(args.model),
-        "critic.model.tokenizer_path": str(args.model),
+        "actor_rollout_ref.model.path": model, "critic.model.path": model, "critic.model.tokenizer_path": model,
         "trainer.experiment_name": args.name, "trainer.project_name": "vagen_interiorgs_v10",
         "trainer.default_local_dir": str(run_root / "checkpoints"),
         "trainer.rollout_data_dir": str(run_root / "rollout_data"),
@@ -225,7 +225,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             _set(ppo, key, value)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
-              "model": str(args.model), "system_prompt_matches_sft": True,
+              "model": model, "system_prompt_matches_sft": True,
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
