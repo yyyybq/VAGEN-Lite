@@ -337,7 +337,8 @@ def face_gate(scene: Any, item: Dict[str, Any], R: np.ndarray, C: np.ndarray,
     if idx.size == 0:
         return ok, vis
     K, width, height = _item_camera(item)
-    WORK.add("visible_fraction", 2 * int(idx.size))
+    # vectorised per-pose work (like the canonical gates); the sight-line tests are counted per position
+    WORK.add("poses_scored", 2 * int(idx.size))
     sub_ok = np.ones(idx.size, dtype=bool)
     entries = TV.required_targets(item)
     if len(entries) != len(TV.REQUIRED_VISIBLE_SLOTS.get(str(item.get("task_type")), (0,))):
@@ -888,10 +889,17 @@ def _verify_and_pack(scene: Any, item: Dict[str, Any], targets: Sequence[_Target
     if not exact.get("success"):
         funnel.add("endpoint_verify", "mismatch_canonical")
         return None
-    vfs = {t.id: visible_fraction(scene, c2w, t.entry, n=int(cfg["occlusion_n"])) for t in targets}
-    if min(vfs.values()) < float(cfg["min_visible"]):
-        funnel.add("endpoint_verify", "mismatch_occlusion")
-        return None
+    if visibility_rule() == "face_v1":  # the env's rule, exactly as the env evaluates it
+        vis = TV.visibility_gates(item, c2w, face_occluders_for(scene))
+        vfs = {t["id"]: float(t["visible_fraction"]) for t in vis["targets"].values()}
+        if not vis["visible"]:
+            funnel.add("endpoint_verify", "mismatch_face_visible")
+            return None
+    else:
+        vfs = {t.id: visible_fraction(scene, c2w, t.entry, n=int(cfg["occlusion_n"])) for t in targets}
+        if min(vfs.values()) < float(cfg["min_visible"]):
+            funnel.add("endpoint_verify", "mismatch_occlusion")
+            return None
     funnel.add("endpoint_verify", "ok")
     margin = exact.get("relation_margin_px") if item["task_type"] == "projective_relations" else exact.get("center_margin_px")
     return {
@@ -913,7 +921,8 @@ def _verify_and_pack(scene: Any, item: Dict[str, Any], targets: Sequence[_Target
         "visible_fractions": {k: float(v) for k, v in vfs.items()},
         "visible_fraction_min": float(min(vfs.values())),
         "sampler": {"mode": mode, "version": ENDPOINT_SAMPLER_VERSION,
-                    "occlusion_model_version": OCCLUSION_MODEL_VERSION,
+                    "occlusion_model_version": (TV.VISIBILITY_RULE_VERSION if visibility_rule() == "face_v1"
+                                                else OCCLUSION_MODEL_VERSION),
                     "min_visible": float(cfg["min_visible"])},
     }
 

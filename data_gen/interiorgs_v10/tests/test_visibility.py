@@ -118,6 +118,23 @@ class VisibilityRuleTest(unittest.TestCase):
         self.assertGreater(sum(m["gates"].get("relation", False) and not m["success"] for m in env)
                            + sum(not g for g in gates), 0)
 
+    def test_endpoint_sampler_verifies_with_the_face_rule(self):
+        scene = load_scene(self.paths["two_rooms"], "two_rooms")
+        by_id = {o.id: o for o in scene.objects}
+        item = projective_item("two_rooms", by_id["4"], by_id["2"], "left")
+        previous = O.visibility_rule()
+        O.set_visibility_rule("face_v1")
+        try:
+            eps, funnel = E.sample_endpoints(scene, item, max_endpoints=4, seed=0)
+        finally:
+            O.set_visibility_rule(previous)
+        verify = funnel.counts.get("endpoint_verify", {})
+        self.assertNotIn("mismatch_occlusion", verify)  # the old box test must not run under face_v1
+        self.assertGreater(verify.get("ok", 0), 0)
+        occ = O.face_occluders_for(scene)
+        for ep in eps:
+            self.assertTrue(TV.score_with_visibility(item, np.asarray(ep["c2w"]), occ)["success"])
+
     def test_shaping_is_at_least_half_exactly_on_success(self):
         scene = load_scene(self.paths["two_rooms"], "two_rooms")
         by_id = {o.id: o for o in scene.objects}
