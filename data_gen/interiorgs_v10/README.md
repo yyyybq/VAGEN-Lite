@@ -77,7 +77,15 @@ python -m unittest discover -s data_gen/interiorgs_v10/tests -t .
 4. The SFT export omits the "Current camera pose" text the RL prompt shows; align one side
    before mixing SFT and RL.
 
-## Status (2026-10-11)
+## Status
+
+The current status, decisions, pre-training steps and open decisions live in **`STATUS.md`** (the
+single status document). Latest run: `exps/vagen_active_spatial/interiorgs_v10_gen_20261012_final/full/`
+(945 scenes with tasks, 13,200 tasks + 13,081 reserve, split 800/100/100 scenes); report
+`cluster_runs/REPORT_FULLRUN_20261012.md`. Do not train on 20261011c: about half of its Projective
+tasks have a d* larger than the env's own shortest path (see that report).
+
+History (2026-10-11):
 
 * All modules unit-tested on synthetic scenes (`tests/`), including exactness checks of the
   vectorised geometry against the runtime CollisionDetector and of d* against brute force.
