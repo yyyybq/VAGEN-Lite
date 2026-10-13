@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InteriorGS 试点标注</title>
+<style>
+:root {
+  --bg: #f5f5f2; --panel: #ffffff; --text: #1f2328; --muted: #6b7078; --line: #dcdfe2;
+  --accent: #2f6fd6; --done: #2e9a4b; --part: #d9a400; --none: #c9ced3; --focus: #fff4c2;
+  --yes: #2e9a4b; --no: #c8364b; --unsure: #8a6d1f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17191c; --panel: #202327; --text: #e8eaed; --muted: #9aa1a9; --line: #353a40;
+    --accent: #6aa8ff; --focus: #3a3420; --none: #4a4f55;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
+header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+.tabs button { border: 1px solid var(--line); background: var(--bg); color: var(--text); padding: 5px 12px; border-radius: 6px; cursor: pointer; }
+.tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.prog { color: var(--muted); font-size: 13px; }
+.bar { display: inline-block; width: 120px; height: 7px; background: var(--none); border-radius: 4px; vertical-align: middle; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--done); }
+header .right { margin-left: auto; display: flex; gap: 8px; }
+header .right button, .nav button { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 5px 10px; border-radius: 6px; cursor: pointer; }
+main { max-width: 1180px; margin: 0 auto; padding: 14px 16px 80px; }
+.item-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; color: var(--muted); font-size: 13px; }
+.task-text { font-size: 19px; font-weight: 600; margin: 6px 0 4px; }
+.targets { margin: 4px 0 10px; }
+.targets span { display: inline-block; margin-right: 14px; }
+.sw { display: inline-block; width: 11px; height: 11px; border: 2px solid; margin-right: 4px; vertical-align: -1px; }
+.top { display: grid; grid-template-columns: 1fr 360px; gap: 14px; }
+@media (max-width: 900px) { .top { grid-template-columns: 1fr; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.card h3 { margin: 0 0 6px; font-size: 15px; }
+.imgs { display: flex; gap: 10px; flex-wrap: wrap; }
+.imgs figure { margin: 0; }
+.imgs img { width: 320px; max-width: 100%; height: auto; border-radius: 6px; cursor: zoom-in; display: block; border: 1px solid var(--line); background: #000; }
+.imgs figcaption { font-size: 12px; color: var(--muted); }
+.topdown img { width: 100%; border-radius: 6px; cursor: zoom-in; border: 1px solid var(--line); background: #fff; }
+.q { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 5px 8px; border-radius: 6px; }
+.q.cur { background: var(--focus); outline: 1px solid var(--part); }
+.q .t { flex: 1 1 340px; }
+.q button { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 3px 10px; border-radius: 5px; cursor: pointer; min-width: 58px; }
+.q button .k { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.q button.sel[data-v="0"] { background: var(--yes); color: #fff; border-color: var(--yes); }
+.q button.sel[data-v="1"] { background: var(--no); color: #fff; border-color: var(--no); }
+.q button.sel[data-v="2"] { background: var(--unsure); color: #fff; border-color: var(--unsure); }
+.fill { margin: 4px 0 2px; font-size: 13px; }
+.fill button { border: 1px dashed var(--line); background: transparent; color: var(--accent); border-radius: 5px; padding: 2px 8px; cursor: pointer; }
+textarea { width: 100%; min-height: 60px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
+.nav { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.group-title { font-weight: 600; margin: 4px 0; }
+.reason { background: var(--bg); border-left: 3px solid var(--part); padding: 6px 10px; margin: 6px 0; }
+#lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 20; cursor: zoom-out; }
+#lightbox img { max-width: 94vw; max-height: 92vh; width: auto; height: auto; min-width: min(768px, 94vw); image-rendering: auto; }
+#help { display: none; }
+#help.on { display: block; }
+kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 12px; }
+.note { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>InteriorGS 试点标注</h1>
+  <div class="tabs" id="tabs"></div>
+  <div class="prog" id="prog"></div>
+  <div class="right">
+    <button id="btnHelp" title="快捷键说明（?）">说明</button>
+    <button id="btnImport" title="载入以前导出的结果文件">导入</button>
+    <button id="btnExport" title="下载结果文件（E）">导出结果</button>
+    <input type="file" id="fileImport" accept=".json,application/json" hidden>
+  </div>
+</header>
+<main>
+  <div class="card" id="help">
+    <h3>怎么用</h3>
+    <div>每一页是一个待标注的题目或例子。问题都用按钮回答，每个问题都有"不确定"。答案自动保存在这台电脑的浏览器里，关掉再打开会接着上次的位置；
+      但换浏览器或清理浏览器数据会丢，所以<b>标完请点右上角"导出结果"</b>，把下载的 JSON 文件交回。</div>
+    <div style="margin-top:6px">快捷键：<kbd>1</kbd> 第一个选项（是 / 能 / 正常 …），<kbd>2</kbd> 第二个选项，<kbd>3</kbd> 不确定（选完自动跳到下一个问题）；
+      <kbd>J</kbd>/<kbd>↓</kbd> 下一个问题，<kbd>K</kbd>/<kbd>↑</kbd> 上一个问题；<kbd>←</kbd>/<kbd>→</kbd> 上一项 / 下一项；
+      <kbd>N</kbd> 跳到下一个没标完的；<kbd>F</kbd> 当前这一帧"全部正常"；<kbd>E</kbd> 导出；点图片放大，<kbd>Esc</kbd> 关闭。</div>
+    <div class="note" style="margin-top:6px">页面不显示任何机器判断（没有最少步数、没有可见程度的数值、没有成功区域）。例子的顺序是随机打乱的。</div>
+  </div>
+  <div id="view"></div>
+</main>
+<div id="lightbox"><img alt=""></div>
+<script>
+const DATA = /*__DATA__*/null;
+const DATA_HASH = "__DATA_HASH__";
+const STORE_KEY = "interiorgs_pilot_labels_v1";
+const OPT = {
+  yes: ["是", "否", "不确定"], can: ["能", "不能", "不确定"], ok: ["正常", "不正常", "不确定"],
+  kind: ["一件家具", "几件被合并", "看不出"],
+};
+const TABS = [
+  {key: "tasks", name: "任务标注", items: DATA.tasks},
+  {key: "visibility", name: "可见门槛", items: DATA.visibility},
+  {key: "uncertain", name: "无法确定的框（选做）", items: DATA.uncertain},
+];
+let state = load();
+let tab = state.tab || "tasks";
+let cur = 0;  // focused question index on the page
+
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); if (s && s.answers) return s; } catch (e) {}
+  return {answers: {tasks: {}, visibility: {}, uncertain: {}}, pos: {tasks: 0, visibility: 0, uncertain: 0}, tab: "tasks"};
+}
+function save() {
+  state.tab = tab;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+function questions(kind, it) {
+  const qs = [];
+  if (kind === "tasks") {
+    it.targets.forEach((t) => qs.push({key: `label_${t.slot}`, opts: OPT.yes,
+      text: `${t.color}（${t.slot}）里的物体是不是「${esc(t.ref)}」这一类？`}));
+    it.targets.forEach((t) => qs.push({key: `unique_${t.slot}`, opts: OPT.yes,
+      text: `「${esc(t.ref)}」这个描述在场景里是否只能指这一个物体（不会和别的物体弄混）？`}));
+    qs.push({key: "possible", opts: OPT.can, text: "这道题能做到吗？（相机能否走到满足任务要求的位置）"});
+    it.frames.forEach((f) => {
+      qs.push({key: `${f.sid}:render`, opts: OPT.ok, frame: f.sid, text: `【${f.role}】渲染正常吗？（没有大片黑块、破碎或悬空的东西）`});
+      it.targets.forEach((t) => qs.push({key: `${f.sid}:ident_${t.slot}`, opts: OPT.can, frame: f.sid,
+        text: `【${f.role}】能认出${t.color}（${t.slot}）里的物体吗？`}));
+      it.targets.forEach((t) => qs.push({key: `${f.sid}:box_${t.slot}`, opts: OPT.yes, frame: f.sid,
+        text: `【${f.role}】${t.color}（${t.slot}）是否落在这个物体上？`}));
+      if (it.is_oa && f.terminal) qs.push({key: `${f.sid}:hidden`, opts: OPT.yes, frame: f.sid,
+        text: `【${f.role}】红框位置上的 A 是否被 B（蓝框）挡住了？`});
+    });
+  } else if (kind === "visibility") {
+    qs.push({key: "ident", opts: OPT.can, text: `红框里的「${esc(it.ref)}」能不能认出来？`});
+  } else {
+    qs.push({key: "kind", opts: OPT.kind, text: "这个框框住的是？"});
+  }
+  return qs;
+}
+function itemState(kind, it) {
+  const a = state.answers[kind][it.id] || {};
+  const qs = questions(kind, it);
+  const n = qs.filter((q) => a[q.key] !== undefined).length;
+  return n === 0 ? "none" : (n === qs.length ? "done" : "part");
+}
+function progress() {
+  return TABS.map((t) => {
+    const done = t.items.filter((it) => itemState(t.key, it) === "done").length;
+    return {key: t.key, name: t.name, done, total: t.items.length};
+  });
+}
+function renderHeader() {
+  $("tabs").innerHTML = TABS.map((t) => `<button data-tab="${t.key}" class="${t.key === tab ? "on" : ""}">${t.name}</button>`).join(" ");
+  const p = progress().find((x) => x.key === tab);
+  const pct = p.total ? Math.round(100 * p.done / p.total) : 0;
+  $("prog").innerHTML = `已完成 ${p.done} / ${p.total} <span class="bar"><i style="width:${pct}%"></i></span>`;
+  $("tabs").querySelectorAll("button").forEach((b) => b.onclick = () => { tab = b.dataset.tab; cur = 0; save(); render(); });
+}
+function imgPair(plain, boxes, caption) {
+  return `<div class="imgs"><figure><img src="${plain}" alt="" loading="lazy"><figcaption>${caption}：原图（模型看到的）</figcaption></figure>
+    <figure><img src="${boxes}" alt="" loading="lazy"><figcaption>${caption}：画了框的副本</figcaption></figure></div>`;
+}
+function qHtml(q, i, a) {
+  const btns = q.opts.map((o, v) => `<button data-q="${i}" data-v="${v}" class="${a[q.key] === v ? "sel" : ""}">${o}<span class="k">${v + 1}</span></button>`).join("");
+  return `<div class="q ${i === cur ? "cur" : ""}" id="q${i}"><div class="t">${q.text}</div>${btns}</div>`;
+}
+function render() {
+  renderHeader();
+  const T = TABS.find((t) => t.key === tab);
+  if (!T.items.length) { $("view").innerHTML = `<div class="card">这一部分没有内容。</div>`; return; }
+  const idx = Math.min(state.pos[tab] || 0, T.items.length - 1);
+  state.pos[tab] = idx;
+  const it = T.items[idx];
+  const a = state.answers[tab][it.id] || (state.answers[tab][it.id] = {});
+  const qs = questions(tab, it);
+  cur = Math.max(0, Math.min(cur, qs.length - 1));
+  let html = `<div class="item-head"><span>第 ${idx + 1} / ${T.items.length} 项</span>`;
+  if (tab === "tasks") {
+    html += `<span>场景 ${it.scene}</span><span>题型：${esc(it.family_zh)}</span></div>
+      <div class="top"><div><div class="task-text">${esc(it.text)}</div>
+      <div class="targets">${it.targets.map((t) => `<span><i class="sw" style="border-color:${{A: "#d0233b", B: "#1f6fd1", C: "#1f9a7f"}[t.slot]}"></i>${t.color} ${t.slot}：${esc(t.ref)}</span>`).join("")}</div>`;
+    html += `<div class="card"><h3>整道题</h3>${qs.map((q, i) => q.frame ? "" : qHtml(q, i, a)).join("")}</div></div>
+      <div class="card topdown"><h3>俯视图</h3><img src="${it.topdown}" alt="俯视图"><div class="note">灰色：房间；黑线：墙；红 / 蓝 / 绿：目标 A / B / C；橙色虚线：不出题的物体；
+      黑色箭头：起点和朝向；紫色：题目给的最短走法和终点朝向。</div></div></div>`;
+    it.frames.forEach((f) => {
+      html += `<div class="card" id="f_${f.sid}"><h3>${f.role}</h3>${imgPair(f.plain, f.boxes, f.role)}
+        <div class="fill"><button data-fill="${f.sid}">这一帧全部正常（F）</button></div>
+        ${qs.map((q, i) => q.frame === f.sid ? qHtml(q, i, a) : "").join("")}</div>`;
+    });
+  } else if (tab === "visibility") {
+    html += `<span>${esc(it.group)}</span></div><div class="task-text">目标：${esc(it.ref)}（类别：${esc(it.label)}）</div>
+      <div class="card">${imgPair(it.plain, it.boxes, "画面")}${qs.map((q, i) => qHtml(q, i, a)).join("")}</div>`;
+  } else {
+    html += `<span>场景 ${it.scene}</span><span>物体 ${esc(it.ins_id)}</span></div>
+      <div class="task-text">${esc(it.label)}（长宽高约 ${it.size.join(" × ")} 米）</div>
+      <div class="reason"><b>为什么无法确定：</b>${esc(it.reason)}</div>
+      <div class="card"><div class="imgs"><figure><img src="${it.figure}" alt="" style="width:640px"><figcaption>点云俯视图（审计时画的）</figcaption></figure></div>
+      ${qs.map((q, i) => qHtml(q, i, a)).join("")}</div>`;
+  }
+  html += `<div class="card"><h3>备注（可选）</h3><textarea id="note" placeholder="有什么想说明的写在这里">${esc(a.note || "")}</textarea></div>
+    <div class="nav"><button id="prev">← 上一项</button><button id="next">下一项 →</button><button id="nextOpen">下一个没标完的（N）</button></div>`;
+  $("view").innerHTML = html;
+  $("view").querySelectorAll("button[data-q]").forEach((b) => b.onclick = () => answer(+b.dataset.q, +b.dataset.v, false));
+  $("view").querySelectorAll("button[data-fill]").forEach((b) => b.onclick = () => fillFrame(b.dataset.fill));
+  $("view").querySelectorAll("img").forEach((im) => im.onclick = () => zoom(im.src));
+  $("note").oninput = (e) => { a.note = e.target.value; save(); };
+  $("prev").onclick = () => go(-1);
+  $("next").onclick = () => go(1);
+  $("nextOpen").onclick = nextOpen;
+}
+function answer(i, v, advance) {
+  const T = TABS.find((t) => t.key === tab);
+  const it = T.items[state.pos[tab]];
+  const qs = questions(tab, it);
+  const a = state.answers[tab][it.id] || (state.answers[tab][it.id] = {});
+  a[qs[i].key] = v;
+  a._t = new Date().toISOString();
+  save();
+  cur = advance ? Math.min(i + 1, qs.length - 1) : i;
+  render();
+  const el = $("q" + cur); if (advance && el) el.scrollIntoView({block: "center", behavior: "smooth"});
+}
+function fillFrame(sid) {
+  const T = TABS.find((t) => t.key === tab);
+  const it = T.items[state.pos[tab]];
+  const a = state.answers[tab][it.id] || (state.answers[tab][it.id] = {});
+  questions(tab, it).forEach((q) => {
+    if (q.frame !== sid) return;
+    if (q.key.endsWith(":hidden")) return;                               // occlusion question: answer it yourself
+    const f = it.frames.find((x) => x.sid === sid);
+    if (it.is_oa && f && f.terminal && q.key.endsWith("_A") && !q.key.includes(":render")) return;  // the hidden target
+    a[q.key] = 0;
+  });
+  a._t = new Date().toISOString();
+  save(); render();
+}
+function go(d) {
+  const T = TABS.find((t) => t.key === tab);
+  state.pos[tab] = Math.max(0, Math.min(T.items.length - 1, (state.pos[tab] || 0) + d));
+  cur = 0; save(); render(); window.scrollTo(0, 0);
+}
+function nextOpen() {
+  const T = TABS.find((t) => t.key === tab);
+  const n = T.items.length, start = state.pos[tab] || 0;
+  for (let k = 1; k <= n; k++) {
+    const j = (start + k) % n;
+    if (itemState(tab, T.items[j]) !== "done") { state.pos[tab] = j; cur = 0; save(); render(); window.scrollTo(0, 0); return; }
+  }
+  alert("这一部分已经全部标完了。");
+}
+function zoom(src) { const lb = $("lightbox"); lb.querySelector("img").src = src; lb.style.display = "flex"; }
+$("lightbox").onclick = () => { $("lightbox").style.display = "none"; };
+function exportJson() {
+  const out = {version: "interiorgs_v10_pilot_labels_v1", site_version: DATA.version, data_hash: DATA_HASH,
+    exported_at: new Date().toISOString(), progress: progress(), answers: state.answers,
+    option_codes: {"0": "第一个选项（是 / 能 / 正常 / 一件家具）", "1": "第二个选项（否 / 不能 / 不正常 / 几件被合并）", "2": "不确定 / 看不出"}};
+  const blob = new Blob([JSON.stringify(out, null, 1)], {type: "application/json"});
+  const d = new Date(), p = (x) => String(x).padStart(2, "0");
+  const url = URL.createObjectURL(blob), link = document.createElement("a");
+  link.href = url; link.download = `interiorgs_pilot_labels_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`;
+  document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$("btnExport").onclick = exportJson;
+$("btnImport").onclick = () => $("fileImport").click();
+$("fileImport").onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then((txt) => {
+    const d = JSON.parse(txt);
+    if (!d.answers) { alert("这不是本网站导出的结果文件。"); return; }
+    for (const k of ["tasks", "visibility", "uncertain"]) Object.assign(state.answers[k], d.answers[k] || {});
+    save(); render(); alert("已载入。");
+  }).catch(() => alert("读取失败。"));
+};
+$("btnHelp").onclick = () => $("help").classList.toggle("on");
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const T = TABS.find((t) => t.key === tab); if (!T.items.length) return;
+  const qs = questions(tab, T.items[state.pos[tab]]);
+  const k = e.key;
+  if (k === "1" || k === "2" || k === "3") { answer(cur, +k - 1, true); e.preventDefault(); }
+  else if (k === "j" || k === "ArrowDown") { cur = Math.min(cur + 1, qs.length - 1); render(); $("q" + cur)?.scrollIntoView({block: "center"}); e.preventDefault(); }
+  else if (k === "k" || k === "ArrowUp") { cur = Math.max(cur - 1, 0); render(); $("q" + cur)?.scrollIntoView({block: "center"}); e.preventDefault(); }
+  else if (k === "ArrowRight") { go(1); e.preventDefault(); }
+  else if (k === "ArrowLeft") { go(-1); e.preventDefault(); }
+  else if (k === "n" || k === "N") nextOpen();
+  else if ((k === "f" || k === "F") && tab === "tasks") {
+    const q = qs[cur]; const it = T.items[state.pos[tab]];
+    fillFrame(q && q.frame ? q.frame : it.frames[0].sid);
+  }
+  else if (k === "e" || k === "E") exportJson();
+  else if (k === "Escape") $("lightbox").style.display = "none";
+  else if (k === "?") $("help").classList.toggle("on");
+});
+try { if (!localStorage.getItem(STORE_KEY)) $("help").classList.add("on"); } catch (e) { $("help").classList.add("on"); }
+render();
+</script>
+</body>
+</html>
