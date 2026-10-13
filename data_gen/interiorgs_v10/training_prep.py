@@ -145,6 +145,9 @@ TRIAL_PPO: Dict[str, Any] = {
     "actor_rollout_ref.rollout.n": 2,
     "actor_rollout_ref.rollout.tensor_model_parallel_size": 1,
     "actor_rollout_ref.rollout.agent.num_workers": 4,
+    # one card holds vLLM, the render service and, during its optimizer step, the critic's fp32 weights,
+    # gradients and Adam state (offloaded otherwise): vLLM gets 20% instead of 30% (12% leaves no KV cache)
+    "actor_rollout_ref.rollout.gpu_memory_utilization": 0.2,
 }
 
 

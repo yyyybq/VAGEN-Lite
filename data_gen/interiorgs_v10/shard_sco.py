@@ -42,10 +42,12 @@ def now() -> str:
 
 
 def prepare(out: Path, config: str, num_shards: int, job_shards: List[int], workers: int = 13,
-            scenes_root: str = SCENES_ROOT) -> Dict[str, str]:
+            scenes_root: str = SCENES_ROOT, job_dir: str = "job") -> Dict[str, str]:
+    """``job_dir``: a second set of jobs into the same OUT/output gets its own folder (e.g. re-splitting a shard
+    that runs too slowly elsewhere: shards 0, 5, 10, 15 of 20 are exactly shard 0 of 5)."""
     if not job_shards or any(not 0 <= s < num_shards for s in job_shards):
         raise ValueError(f"job shards {job_shards} must lie in 0..{num_shards - 1}")
-    job = out / "job"
+    job = out / job_dir
     job.mkdir(parents=True, exist_ok=True)
     archive = job / "source.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
@@ -58,11 +60,11 @@ def prepare(out: Path, config: str, num_shards: int, job_shards: List[int], work
         launch.write_text(f"""#!/usr/bin/env bash
 set -uo pipefail
 OUT={out}
-OWNER=$(stat -c %u:%g "$OUT/job/source.tar.gz")
+OWNER=$(stat -c %u:%g "{archive}")
 trap 'chown -R "$OWNER" "$OUT" 2>/dev/null || true' EXIT
-SRC=$OUT/job/src_shard{shard}
-mkdir -p "$SRC" "$OUT/job/logs"
-exec > >(tee -a "$OUT/job/logs/shard{shard}-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).log") 2>&1
+SRC={job}/src_shard{shard}
+mkdir -p "$SRC" "{job}/logs"
+exec > >(tee -a "{job}/logs/shard{shard}-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).log") 2>&1
 cd "$SRC" && tar -xzf {archive}
 export PYTHONPATH="$SRC" PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1
 {RUNTIME_ENV}/bin/python -m data_gen.interiorgs_v10.run_all --scenes-root {scenes_root} --out "$OUT/output" \\
@@ -79,8 +81,8 @@ export PYTHONPATH="$SRC" PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1
     return scripts
 
 
-def submit(out: Path) -> Dict[str, str]:
-    job = out / "job"
+def submit(out: Path, job_dir: str = "job") -> Dict[str, str]:
+    job = out / job_dir
     receipt = job / "submission.json"
     if receipt.exists():
         return json.loads(receipt.read_text())["jobs"]
@@ -88,7 +90,7 @@ def submit(out: Path) -> Dict[str, str]:
     prepared = json.loads((job / "prepared.json").read_text())
     jobs: Dict[str, str] = {}
     for shard in prepared["job_shards"]:
-        name = f"interiorgs-v10-gen-{out.parent.name}-s{shard}".replace("_", "-")[-60:]
+        name = f"interiorgs-v10-gen-{out.name}-{job_dir}-s{shard}".replace("_", "-")[-60:]
         command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={POOL}",
                    f"--job-name={name}", "--priority=HIGHEST", "--quota-type=reserved",
                    f"--container-image-url={IMAGE}", f"--storage-mount={MOUNT}", "--training-framework=pytorch",
@@ -113,13 +115,13 @@ def describe(job_id: str) -> dict:
     return json.loads(res.stdout)
 
 
-def status(out: Path) -> Dict[str, str]:
-    jobs = json.loads((out / "job" / "submission.json").read_text())["jobs"]
+def status(out: Path, job_dir: str = "job") -> Dict[str, str]:
+    jobs = json.loads((out / job_dir / "submission.json").read_text())["jobs"]
     return {shard: f"{jid}:{describe(jid).get('state')}" for shard, jid in jobs.items()}
 
 
-def delete(out: Path) -> Dict[str, int]:
-    receipt = out / "job" / "submission.json"
+def delete(out: Path, job_dir: str = "job") -> Dict[str, int]:
+    receipt = out / job_dir / "submission.json"
     jobs = json.loads(receipt.read_text())["jobs"]
     codes = {}
     for shard, jid in jobs.items():
@@ -145,19 +147,21 @@ def main() -> None:
     ap.add_argument("--num-shards", type=int, default=0)
     ap.add_argument("--job-shards", default="", help="comma-separated shards to run as sco jobs")
     ap.add_argument("--workers", type=int, default=13)
+    ap.add_argument("--job-dir", default="job", help="folder under OUT for this set of jobs")
     args = ap.parse_args()
     out = args.out.resolve()
     if args.action == "prepare":
         if not args.config or args.num_shards <= 0:
             raise SystemExit("prepare needs --config and --num-shards")
         shards = [int(s) for s in args.job_shards.split(",") if s.strip()]
-        print(json.dumps(prepare(out, args.config, args.num_shards, shards, args.workers), indent=1))
+        print(json.dumps(prepare(out, args.config, args.num_shards, shards, args.workers,
+                                 job_dir=args.job_dir), indent=1))
     elif args.action == "submit":
-        print(json.dumps(submit(out)))
+        print(json.dumps(submit(out, args.job_dir)))
     elif args.action == "status":
-        print(json.dumps(status(out)))
+        print(json.dumps(status(out, args.job_dir)))
     else:
-        print(json.dumps(delete(out)))
+        print(json.dumps(delete(out, args.job_dir)))
 
 
 if __name__ == "__main__":

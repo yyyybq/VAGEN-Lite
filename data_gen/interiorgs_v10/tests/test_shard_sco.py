@@ -37,6 +37,14 @@ class ShardScoTest(unittest.TestCase):
             self.assertIn("data_gen/interiorgs_v10/run_all.py", tar.getnames())
         with self.assertRaises(ValueError):
             S.prepare(out, "cfg.json", 2, [2])
+        # a second set of jobs into the same output, in its own folder
+        with mock.patch.object(S, "ROOT", repo):
+            more = S.prepare(out, "cfg.json", 20, [0, 5], job_dir="job_s0")
+        text = Path(more["5"]).read_text()
+        self.assertIn("--shard 5 --num-shards 20", text)
+        self.assertIn('--out "$OUT/output"', text)
+        self.assertIn(f"{out / 'job_s0'}/src_shard5", text)
+        self.assertTrue((out / "job" / "launch_shard3.sh").exists())  # the first set is untouched
 
     def test_delete(self):
         out = self.tmp / "run"
