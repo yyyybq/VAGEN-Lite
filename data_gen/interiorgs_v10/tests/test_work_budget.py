@@ -131,6 +131,18 @@ class ConfigFileTest(unittest.TestCase):
 
             self.assertIn("19", ignored_object_ids(r4.no_task_objects, "0068_839928"))  # merged wardrobe
             self.assertIn("29", ignored_object_ids(r4.no_task_objects, "0003_839989"))  # an uncertain box
+        r5_path = root / "generation_r5_20261014.json"
+        if r5_path.exists():
+            r5 = RunConfig(**load_config(r5_path))
+            self.assertEqual(r5.visibility_rule, "env")
+            self.assertEqual(r5.object_preset, "v10_r5")
+            from data_gen.interiorgs_v10.objects import get_preset
+
+            self.assertEqual(get_preset(r5.object_preset).referring.rules, "v2")
+            # everything else as on 2026-10-13
+            r4_fields = dataclasses.asdict(RunConfig(**load_config(r4_path)))
+            diff = {k for k, v in dataclasses.asdict(r5).items() if r4_fields[k] != v}
+            self.assertEqual(diff, {"visibility_rule", "object_preset"})
 
     def test_explicit_dests(self):
         import argparse
