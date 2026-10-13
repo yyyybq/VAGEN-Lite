@@ -41,6 +41,22 @@ Expressions, tried in priority order for each instance:
                                     comparison is visible.
 
 Otherwise ``obj.ref = None`` and the reason is counted in the Funnel.
+
+Rules "v2" (``ReferringConfig.rules``; user decisions of 2026-10-14)
+-------------------------------------------------------------------
+Same order (name, room, reference, size), with these changes:
+
+* Room: InteriorGS structure.json rooms carry no name, so a room's type is inferred from what stands in
+  it (``infer_room_type``: a toilet or bathtub -> bathroom, a stove or range hood -> kitchen, a bed ->
+  bedroom; otherwise a sofa -> living room, a dining table -> dining room, a desk -> study; mixed or
+  empty rooms get no type).  "the X in the R" needs the target's room type known and every other X in
+  the scene in a room of a known, different type.
+* Reference ("next to the A"): A must be large enough to see (the product of its two largest box
+  dimensions at least ``anchor_min_face_m2``), the only one of its kind in its room, neither overlapping
+  the target nor resting on it nor carrying it (XY footprints may share at most
+  ``anchor_max_footprint_overlap`` of the smaller one), and the whole expression must still pick out
+  exactly one object of the scene (``resolve``).  The target entry records the reference
+  (``ref_anchor``) so the env can require it to be clearly visible in a success frame.
 """
 
 from __future__ import annotations
@@ -206,6 +222,10 @@ class ReferringConfig:
     """Thresholds of the referring-expression generator (all sweepable)."""
 
     methods: Tuple[str, ...] = (METHOD_UNIQUE, METHOD_ROOM, METHOD_ANCHOR, METHOD_SIZE)
+    rules: str = "v1"                    # "v1" (20261011c - 20261013) | "v2" (see module docstring)
+    # v2 only: reference objects ------------------------------------------------
+    anchor_min_face_m2: float = 0.25     # largest box face (two largest dims) of a reference
+    anchor_max_footprint_overlap: float = 0.10  # shared XY footprint / the smaller footprint
     # anchor ("next to") ------------------------------------------------------
     anchor_max_gap_m: float = 1.5        # target-anchor XY box gap ("within ~1.5 m")
     anchor_margin_ratio: float = 1.5     # 2nd-closest / closest same-category distance
@@ -273,6 +293,46 @@ def room_type(name: Optional[str]) -> Optional[str]:
         return None
     for key, rtype in ROOM_TYPE_KEYWORDS:
         if key in compact:
+            return rtype
+    return None
+
+
+# v2: room types inferred from what stands in a room (structure.json rooms have no names).  A "strong" item
+# names the room by itself; the others only when no strong item is present.
+ROOM_STRONG_ITEMS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("bathroom", ("closestool", "toilet", "squat toilet", "bathtub", "shower", "washbasin", "vanity cabinet")),
+    ("kitchen", ("gas stove", "range hood", "cooktop", "kitchen counter")),
+    ("bedroom", ("bed",)),
+)
+ROOM_WEAK_ITEMS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("living room", ("sofa",)),
+    ("dining room", ("dining table",)),
+    ("study", ("desk",)),
+)
+NOT_A_BED = frozenset({"pet bed", "sofa bed", "flower bed", "dog bed", "cat bed"})
+
+
+def _has_item(displays: Sequence[str], phrases: Sequence[str]) -> bool:
+    for d in displays:
+        low = d.strip().lower()
+        if low in NOT_A_BED:
+            continue
+        if any(category_matches(p, low) for p in phrases):
+            return True
+    return False
+
+
+def infer_room_type(displays: Sequence[str]) -> Optional[str]:
+    """Room type from the display labels of the objects in one room, or None (mixed or unknown)."""
+    strong = [rtype for rtype, items in ROOM_STRONG_ITEMS if _has_item(displays, items)]
+    if len(strong) > 1:
+        return None
+    if strong:
+        if strong[0] == "kitchen" and _has_item(displays, ("sofa",)):
+            return None  # open-plan kitchen and living room: a reader may call it either
+        return strong[0]
+    for rtype, items in ROOM_WEAK_ITEMS:
+        if _has_item(displays, items):
             return rtype
     return None
 
@@ -351,6 +411,7 @@ class _SceneIndex:
         self.rooms_by_index = {int(r.index): r for r in self.rooms}
         self._room_cache: Dict[int, Optional[int]] = {}
         self._match_cache: Dict[str, List[int]] = {}
+        self._inferred: Optional[Dict[int, Optional[str]]] = None
 
     def room_of(self, i: int) -> Optional[int]:
         """Effective room index of pool[i] (lazy, cached)."""
@@ -359,10 +420,23 @@ class _SceneIndex:
                                                        self.cfg.room_fallback_max_dist_m)
         return self._room_cache[i]
 
+    def inferred_room_types(self) -> Dict[int, Optional[str]]:
+        """v2: room index -> type inferred from the objects standing in it."""
+        if self._inferred is None:
+            shown: Dict[int, List[str]] = {int(r.index): [] for r in self.rooms}
+            for i in range(len(self.pool)):
+                r = self.room_of(i)
+                if r is not None:
+                    shown.setdefault(int(r), []).append(self.disp[i])
+            self._inferred = {r: infer_room_type(d) for r, d in shown.items()}
+        return self._inferred
+
     def rtype_of(self, i: int) -> Optional[str]:
         idx = self.room_of(i)
         if idx is None or idx not in self.rooms_by_index:
             return None
+        if self.cfg.rules == "v2":
+            return self.inferred_room_types().get(int(idx))
         return room_type(getattr(self.rooms_by_index[idx], "name", None))
 
     def matches(self, phrase: str) -> List[int]:
@@ -420,6 +494,8 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
     an instance that ended without a ref).
     """
     cfg = config or DEFAULT_REFERRING
+    if cfg.rules not in ("v1", "v2"):
+        raise ValueError(f"unknown referring rules {cfg.rules!r}")
     funnel = Funnel()
     pool = list(scene.objects if pool is None else pool)
     id_index = _ensure_in_pool(pool, objs)
@@ -427,7 +503,8 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
     anchor_ok = anchor_ok or default_anchor_ok
     reference_ok = reference_ok or (lambda _o: True)
 
-    # Anchors: substantial, not ceiling-mounted, unambiguous on their own.
+    # Anchors: substantial, not ceiling-mounted, unambiguous on their own (v1: in the scene; v2: in their
+    # room, the whole expression being checked for ambiguity when it is built).
     anchors: List[int] = []
     for j, a in enumerate(pool):
         disp = idx.disp[j]
@@ -439,11 +516,24 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
             continue
         if float(a.aabb_min[2]) > cfg.anchor_max_bottom_z_m:
             continue
+        if cfg.rules == "v2":
+            if _largest_face(a) < cfg.anchor_min_face_m2:
+                funnel.add("referring.anchor_pool", "too_small")
+                continue
+            room = idx.room_of(j)
+            same = [i for i in idx.matches(disp) if room is not None and idx.room_of(i) == room]
+            if (same if room is not None else idx.matches(disp)) == [j]:
+                anchors.append(j)
+            else:
+                funnel.add("referring.anchor_pool", "not_unique_in_room")
+            continue
         if idx.matches(disp) == [j]:
             anchors.append(j)
 
     for obj in objs:
         obj.ref, obj.ref_method = None, None
+        if cfg.rules == "v2":
+            obj.ref_extra = None
         t = id_index[obj.id]
         disp = idx.disp[t]
         if not _label_usable(disp):
@@ -460,9 +550,10 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
                 else:
                     details.append("unique:duplicate_category")
             elif method == METHOD_ROOM:
-                ref = _try_room(idx, t, disp, members, details)
+                ref = (_try_room_v2 if cfg.rules == "v2" else _try_room)(idx, t, disp, members, details)
             elif method == METHOD_ANCHOR:
-                ref = _try_anchor(idx, t, disp, members, anchors, details)
+                ref = (_try_anchor_v2 if cfg.rules == "v2" else _try_anchor)(idx, t, disp, members, anchors,
+                                                                             details)
             elif method == METHOD_SIZE:
                 ref = _try_size(idx, t, disp, members, details, reference_ok)
             else:
@@ -474,12 +565,117 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
             for d in details:
                 funnel.add("referring.no_ref_detail", d)
             continue
-        text, method_used = ref
+        text, method_used = ref[0], ref[1]
         if has_viewpoint_word(text):  # cannot happen: labels are pre-checked
             raise AssertionError(f"viewpoint word in referring expression {text!r}")
         obj.ref, obj.ref_method = text, method_used
+        if cfg.rules == "v2":
+            anchor = idx.pool[ref[2]] if len(ref) > 2 else None
+            obj.ref_extra = {"ref_method": method_used,
+                             "ref_anchor": _anchor_entry(anchor) if anchor is not None else None}
         funnel.add("referring", method_used)
     return funnel
+
+
+def _largest_face(o: Obj) -> float:
+    d = np.sort(np.maximum(np.asarray(o.dims, float), 0.0))[::-1]
+    return float(d[0] * d[1])
+
+
+def _anchor_entry(a: Obj) -> Dict[str, Any]:
+    """The reference object as the env reads it (target_visibility.required_references)."""
+    return {"id": a.id, "label": a.label, "bbox_min": [float(v) for v in a.aabb_min],
+            "bbox_max": [float(v) for v in a.aabb_max], "center": [float(v) for v in a.center]}
+
+
+def _footprint_overlap(a: Obj, b: Obj) -> float:
+    """Shared XY footprint area over the smaller footprint (0 = apart, 1 = one inside the other)."""
+    w = min(float(a.aabb_max[0]), float(b.aabb_max[0])) - max(float(a.aabb_min[0]), float(b.aabb_min[0]))
+    h = min(float(a.aabb_max[1]), float(b.aabb_max[1])) - max(float(a.aabb_min[1]), float(b.aabb_min[1]))
+    if w <= 0 or h <= 0:
+        return 0.0
+    fa = max(float(a.dims[0] * a.dims[1]), 1e-9)
+    fb = max(float(b.dims[0] * b.dims[1]), 1e-9)
+    return w * h / min(fa, fb)
+
+
+def _boxes_intersect(a: Obj, b: Obj, tol: float = 0.01) -> bool:
+    lo = np.maximum(a.aabb_min, b.aabb_min)
+    hi = np.minimum(a.aabb_max, b.aabb_max)
+    return bool(np.all(hi - lo > tol))
+
+
+def _anchor_resolution(idx: "_SceneIndex", members: Sequence[int], anchor_phrase: str) -> List[int]:
+    """Objects of ``members`` that "the X next to the <anchor_phrase>" may denote (``Resolver`` semantics:
+    for every instance the anchor phrase matches, the X nearest to it, plus any X almost as near)."""
+    cfg = idx.cfg
+    out: List[int] = []
+    members = list(members)
+    for j in idx.matches(anchor_phrase):
+        if not members:
+            break
+        dists = idx.anchor_distances(members, j)
+        k = int(np.argmin(dists))
+        if not xy_gap(idx.pool[members[k]], idx.pool[j]) <= cfg.anchor_max_gap_m:
+            continue
+        d_min = dists[k]
+        out.extend(i for i, d in zip(members, dists) if d < cfg.anchor_margin_ratio * d_min or i == members[k])
+    return sorted(set(out))
+
+
+def _try_room_v2(idx: "_SceneIndex", t: int, disp: str, members: Sequence[int],
+                 details: List[str]) -> Optional[Tuple[str, str]]:
+    if idx.room_of(t) is None:
+        details.append("room:outside_rooms")
+        return None
+    rtype = idx.rtype_of(t)
+    if rtype is None:
+        details.append("room:room_type_unknown")
+        return None
+    others = [i for i in members if i != t]
+    if any(idx.rtype_of(i) is None for i in others):
+        details.append("room:other_instance_room_type_unknown")
+        return None
+    if any(idx.rtype_of(i) == rtype for i in others):
+        details.append("room:not_unique_in_room_type")
+        return None
+    prep = ROOM_PREPOSITION.get(rtype, "in")
+    return (f"the {disp} {prep} the {rtype}", METHOD_ROOM)
+
+
+def _try_anchor_v2(idx: "_SceneIndex", t: int, disp: str, members: Sequence[int],
+                   anchors: Sequence[int], details: List[str]) -> Optional[Tuple[str, str, int]]:
+    cfg = idx.cfg
+    target = idx.pool[t]
+    cand = []
+    reasons: List[str] = []
+    for j in anchors:
+        a = idx.pool[j]
+        if j == t or same_category(a.label, target.label):
+            continue
+        gap = xy_gap(target, a)
+        if gap > cfg.anchor_max_gap_m:
+            continue
+        if _boxes_intersect(a, target) or _footprint_overlap(a, target) > cfg.anchor_max_footprint_overlap:
+            reasons.append("anchor:overlaps_or_on_target")
+            continue
+        cand.append((gap, j))
+    if not cand:
+        details.append(reasons[0] if reasons else "anchor:none_within_range")
+        return None
+    cand.sort(key=lambda gj: (gj[0], gj[1]))
+    reason = "anchor:ambiguous"
+    for _, j in cand:
+        if cfg.anchor_require_same_room:
+            rt, ra = idx.room_of(t), idx.room_of(j)
+            if rt is not None and ra is not None and rt != ra:
+                reason = "anchor:other_room"
+                continue
+        if _anchor_resolution(idx, members, idx.disp[j]) == [t]:
+            return (f"the {disp} next to the {idx.disp[j]}", METHOD_ANCHOR, j)
+        reason = "anchor:ambiguous"
+    details.append(reason)
+    return None
 
 
 def _try_room(idx: _SceneIndex, t: int, disp: str, members: Sequence[int],

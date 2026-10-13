@@ -237,6 +237,10 @@ class Obj:
     # Filled by referring.py; None means not (yet) uniquely describable.
     ref: Optional[str] = None
     ref_method: Optional[str] = None
+    # Referring rules "v2" only: {"ref_method", "ref_anchor"} copied into the target entry (the env requires
+    # the reference object "ref_anchor" to be clearly visible in a success frame).  None under "v1", whose
+    # entries (and task ids) stay as they were.
+    ref_extra: Optional[Dict[str, Any]] = None
 
     @property
     def center(self) -> np.ndarray:
@@ -248,7 +252,7 @@ class Obj:
 
     def target_object_entry(self) -> Dict[str, Any]:
         """Schema consumed by visual_bbox_metrics._extract_objects."""
-        return {
+        entry = {
             "id": self.id,
             "label": self.label,
             "bbox_min": [float(v) for v in self.aabb_min],
@@ -256,6 +260,9 @@ class Obj:
             "center": [float(v) for v in self.center],
             "ref": self.ref,
         }
+        if self.ref_extra is not None:
+            entry.update(self.ref_extra)
+        return entry
 
 
 # --------------------------------------------------------------------------

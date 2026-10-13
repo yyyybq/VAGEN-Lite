@@ -264,7 +264,15 @@ V9_STRICT = ObjectConfig(
 # Diagnostic only (refs are NOT unique): v9 with the uniqueness rule dropped.
 V9_NO_UNIQUE = dataclasses.replace(V9_STRICT, name="v9_no_unique", unique_scope="none")
 
-PRESETS: Dict[str, ObjectConfig] = {c.name: c for c in (V9_STRICT, V10_RELAXED, V9_NO_UNIQUE)}
+# 2026-10-14: referring rules v2 (names only when needed, rooms inferred from their furniture, references
+# large, unique in their room and apart from the target; referring.py) and two labels the pilot showed to be
+# unusable as targets or references: "wall panels" is part of the wall, "edge combination" names unrelated
+# objects (a plant, a sofa corner).
+V10_R5 = dataclasses.replace(
+    V10_RELAXED, name="v10_r5", referring=ReferringConfig(rules="v2"),
+    blacklist=LEGACY_BLACKLIST | frozenset({"wall panels", "wall panel", "edge combination"}))
+
+PRESETS: Dict[str, ObjectConfig] = {c.name: c for c in (V9_STRICT, V10_RELAXED, V9_NO_UNIQUE, V10_R5)}
 
 PresetLike = Union[str, ObjectConfig]
 
@@ -446,7 +454,7 @@ def candidate_objects(scene: Any, preset: PresetLike = "v10_relaxed") -> Tuple[L
     out: List[Obj] = []
     for o in passed:
         c = copy.copy(o)
-        c.ref, c.ref_method = None, None
+        c.ref, c.ref_method, c.ref_extra = None, None, None
         out.append(c)
 
     if cfg.ref_policy == "v9_label":
