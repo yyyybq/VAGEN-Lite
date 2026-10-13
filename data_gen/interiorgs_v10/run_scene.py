@@ -66,9 +66,10 @@ class RunConfig:
     ignored_objects: Optional[str] = None  # configs/ignored_objects_*.json: drop these boxes (20261012 only)
     no_task_objects: Optional[str] = None  # configs/no_task_objects_*.json: keep the boxes, never target/reference
     runtime_success_check: bool = False   # Projective/FOV: reject starts where the env succeeds before d*
-    # "box_v1": half of each target's box unhidden (20261011c / 20261012); "face_v1": the env's rule, one face of
-    # each required target clearly visible (vagen/envs/active_spatial/target_visibility.py), for success,
-    # start-frame and final-frame checks alike.
+    # "box_v1": half of each target's box unhidden (20261011c / 20261012); "env": the env's own rules
+    # (vagen/envs/active_spatial/target_visibility.py: one face of each required target and of its reference
+    # object clearly visible, the 45-degree left/right rule) for success, start-frame and final-frame checks
+    # alike.  "face_v1" is the 2026-10-13 name of "env" (that config no longer reproduces exactly).
     visibility_rule: str = "box_v1"
 
 
@@ -184,7 +185,7 @@ def _endpoints_for(scene: Any, item: Dict[str, Any], cfg: RunConfig, funnel: Fun
 
     from . import occlusion
 
-    face_rule = occlusion.visibility_rule() == "face_v1"
+    face_rule = occlusion.env_rule()
 
     def _sfn(c2w: Any, _item: Dict[str, Any] = item) -> bool:
         C.WORK.add("family_judge")
@@ -193,11 +194,11 @@ def _endpoints_for(scene: Any, item: Dict[str, Any], cfg: RunConfig, funnel: Fun
             return False
         if not face_rule:
             return True
-        # the env's rule: judge AND every required target clearly visible (target_visibility.py)
-        from vagen.envs.active_spatial.target_visibility import visibility_gates
+        # the env's rules: judge AND every required target and reference clearly visible (target_visibility.py)
+        from vagen.envs.active_spatial.target_visibility import rule_gates
 
         C.WORK.add("visible_fraction")
-        return bool(visibility_gates(_item, c2w, occlusion.face_occluders_for(scene))["visible"])
+        return bool(rule_gates(_item, c2w, occlusion.face_occluders_for(scene))["ok"])
 
     return [np.asarray(c["c2w"], float) for c in cands], _sfn
 

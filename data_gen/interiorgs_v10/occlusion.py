@@ -316,10 +316,10 @@ def identifiable(scene: Any, c2w: Any, obj: Any, *, min_inside: float = 0.5,
     Uses the canonical H1 projection (``build_canonical_camera`` with
     contract.NATIVE_K / RENDER_SIZE and ``_project_object``) so the numbers
     match the runtime metric, plus the occlusion model of this module.
-    Under the "face_v1" rule (``set_visibility_rule``): the env's rule instead,
+    Under the "env" rule (``set_visibility_rule``): the env's rule instead,
     i.e. at least one face of the box clearly visible (``face_identifiable``).
     """
-    if _RULE["name"] == "face_v1":
+    if env_rule():
         return face_identifiable(scene, c2w, obj)
     c2w = np.asarray(c2w, float)
     camera = build_canonical_camera(
@@ -356,14 +356,19 @@ def identifiable(scene: Any, c2w: Any, obj: Any, *, min_inside: float = 0.5,
 
 # --------------------------------------------------------------------------
 # Visibility rule: "box_v1" (above: half of the box unhidden, the 20261011c / 20261012 generator) or
-# "face_v1" (the env's rule, vagen/envs/active_spatial/target_visibility.py: one face clearly visible).
-# run_scene sets it per scene from RunConfig.visibility_rule.
+# "env" (the env's current rules, vagen/envs/active_spatial/target_visibility.py: one face of every
+# required target and reference clearly visible, the 45-degree left/right rule).  "face_v1" is the name
+# the 2026-10-13 config used for "env"; the env's rule has changed since (TV.VISIBILITY_RULE_VERSION), so
+# that config no longer reproduces its run exactly.  run_scene sets it per scene from
+# RunConfig.visibility_rule.
 # --------------------------------------------------------------------------
-VISIBILITY_RULES = ("box_v1", "face_v1")
+VISIBILITY_RULES = ("box_v1", "env")
+_RULE_ALIASES = {"face_v1": "env"}
 _RULE = {"name": "box_v1"}
 
 
 def set_visibility_rule(rule: str) -> None:
+    rule = _RULE_ALIASES.get(rule, rule)
     if rule not in VISIBILITY_RULES:
         raise ValueError(f"visibility_rule must be one of {VISIBILITY_RULES}, not {rule!r}")
     _RULE["name"] = rule
@@ -371,6 +376,11 @@ def set_visibility_rule(rule: str) -> None:
 
 def visibility_rule() -> str:
     return _RULE["name"]
+
+
+def env_rule() -> bool:
+    """True when the generator judges success, start and final frames with the env's own rules."""
+    return _RULE["name"] == "env"
 
 
 _FACE_OCC_CACHE: Dict[int, Tuple[Any, TV.OccluderSet]] = {}

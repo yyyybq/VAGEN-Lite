@@ -971,7 +971,7 @@ RUNTIME_LOOSER_FAMILIES = frozenset({"projective_relations", "fov_inclusion"})
 def _runtime_success_fn(scene: Any, item: Dict[str, Any]) -> Any:
     """The env's success rule for the runtime_success_check, computed apart from the generator's predicate.
 
-    Projective: ``endpoints.runtime_success_fn`` (canonical v1, plus the env's visibility rule under "face_v1").
+    Projective: ``endpoints.runtime_success_fn`` (canonical v1, plus the env's own rules under "env").
     v1 FOV rows: the canonical v1 metric.  v2 families (fov_inclusion v2 included) need no check: their
     success predicate already is the env's own function."""
     if str(item.get("task_type")) == "projective_relations":

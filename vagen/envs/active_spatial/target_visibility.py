@@ -1,7 +1,13 @@
-"""Target visibility shared by the RL env and the InteriorGS v10 generator ("one face clearly visible").
+"""Success rules shared by the RL env and the InteriorGS v10 generator, on top of the canonical metric.
 
-User decision of 2026-10-13: in a success frame every target that has to be recognised shows at least one
-face of its 3D box clearly.  A face is *clearly visible* when
+1. Visibility (user decision of 2026-10-13): in a success frame every target that has to be recognised
+   shows at least one face of its 3D box clearly, and so does the reference object its description uses
+   ("the chair next to the sofa": the sofa; decision of 2026-10-14).
+2. Left / right (decision of 2026-10-14): a projective "A left/right of B" frame also needs the ground-plane
+   line from B's centre to A's centre within ``LATERAL_MAX_ANGLE_DEG`` of the camera's left-right axis;
+   beyond that A and B are in front of / behind each other.
+
+A face is *clearly visible* when
 
 * it faces the camera,
 * enough of it is visible: the share of its sample points that lie in front of the camera, project
@@ -18,9 +24,9 @@ structure walls extruded to ``WALL_HEIGHT_M``.  Boxes of built-in objects overla
 cabinet; an overlap must not hide them, so an occluder only counts if the sight line enters it before the
 line comes within ``OVERLAP_MARGIN_M`` of the target's box.
 
-The thresholds are initial values (cluster_runs/REPORT_*_20261013.md explains them); the final values follow
-human labels of examples near them.  ``score_with_visibility`` is what the env's success check calls;
-the generator calls the same functions (vectorised over many poses) so both always agree.
+The thresholds were set on 207 human-labelled examples (data_gen/interiorgs_v10/cluster_runs/
+REPORT_R5_20261014.md).  ``score_with_visibility`` is what the env's success check calls (unless
+``r1_legacy_success``); the generator calls the same functions (vectorised over many poses) so both agree.
 """
 
 from __future__ import annotations
@@ -30,10 +36,13 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-VISIBILITY_RULE_VERSION = "face_visible_v1"
+VISIBILITY_RULE_VERSION = "face_visible_v2"
 FACE_SAMPLES_PER_AXIS = 5          # 5 x 5 sample points per face
-MIN_FACE_VISIBLE_FRACTION = 0.5    # initial value, to be calibrated on human labels
-MIN_FACE_AREA_FRACTION = 0.003     # initial value (~197 px of a 256 x 256 image), to be calibrated
+# Human labels (2026-10-13): recognised in ~70% of examples with 0.3-0.4 of the best face visible and in
+# ~96% at 0.4-0.5; in 50-63% below 0.3% of the image and 93% at 0.3-0.6%.
+MIN_FACE_VISIBLE_FRACTION = 0.4    # 10 of the 25 sample points
+MIN_FACE_AREA_FRACTION = 0.003     # ~197 px of a 256 x 256 image
+LATERAL_MAX_ANGLE_DEG = 45.0       # projective left/right: B->A within 45 deg of the camera's left-right axis
 OVERLAP_MARGIN_M = 0.10            # box overlaps with walls / neighbours within this distance never hide
 MIN_DEPTH_M = 0.05                 # sample points closer than this to the camera plane count as not visible
 WALL_HEIGHT_M = 2.8
@@ -328,6 +337,17 @@ def required_targets(item: Dict[str, Any]) -> List[Tuple[int, Dict[str, Any]]]:
     return out
 
 
+def required_references(item: Dict[str, Any]) -> List[Tuple[int, Dict[str, Any]]]:
+    """(slot, entry) of the reference object each required target's description uses ("the chair next to
+    the sofa": the sofa), from the target entry's ``ref_anchor``; rows without one need none."""
+    out = []
+    for slot, obj in required_targets(item):
+        ref = obj.get("ref_anchor")
+        if isinstance(ref, dict) and "bbox_min" in ref and "bbox_max" in ref:
+            out.append((slot, ref))
+    return out
+
+
 def object_visibility(c2w: Any, obj: Dict[str, Any], occ: OccluderSet, K: Any, width: int,
                       height: int) -> Dict[str, Any]:
     """Is ``obj`` (a target_object entry) clearly visible from ``c2w``?"""
@@ -340,46 +360,110 @@ def object_visibility(c2w: Any, obj: Dict[str, Any], occ: OccluderSet, K: Any, w
 
 
 def visibility_gates(item: Dict[str, Any], c2w: Any, occ: OccluderSet) -> Dict[str, Any]:
+    """Every required target, and the reference object of its description, clearly visible from ``c2w``."""
     K, width, height = item_camera(item)
     required = required_targets(item)
     targets = {}
     for slot, obj in required:
         targets[_SLOT_LETTERS[slot]] = dict(object_visibility(c2w, obj, occ, K, width, height),
                                             id=str(obj.get("id", obj.get("ins_id", ""))))
+    references = {}
+    for slot, ref in required_references(item):
+        references[_SLOT_LETTERS[slot] + "_ref"] = dict(object_visibility(c2w, ref, occ, K, width, height),
+                                                        id=str(ref.get("id", ref.get("ins_id", ""))))
     found = len(required) == len(REQUIRED_VISIBLE_SLOTS.get(str(item.get("task_type") or ""), (0,)))
-    ok = found and all(t["visible"] for t in targets.values())
-    progress = float(np.prod([t["progress"] for t in targets.values()])) if found else 0.0
+    seen = list(targets.values()) + list(references.values())
+    ok = found and all(t["visible"] for t in seen)
+    progress = float(np.prod([t["progress"] for t in seen])) if found else 0.0
     return {"rule": VISIBILITY_RULE_VERSION, "visible": bool(ok), "found": bool(found), "progress": progress,
-            "targets": targets}
+            "targets": targets, "references": references}
 
 
-def apply_visibility(metric: Dict[str, Any], vis: Dict[str, Any]) -> Dict[str, Any]:
-    """The canonical metric with the visibility gates added: success needs every required target clearly
-    visible; the shaping score keeps its meaning (>= 0.5 exactly on success)."""
+_LATERAL_TAN = math.tan(math.radians(LATERAL_MAX_ANGLE_DEG))
+
+
+def _lateral_terms(item: Dict[str, Any], R: np.ndarray) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """|B->A . camera right| and |B->A . camera forward| on the ground plane, or None if the rule does not
+    apply (not a projective item).  Elementwise, so one pose and a batch give identical bits."""
+    if str(item.get("task_type") or "") != "projective_relations":
+        return None
+    params = (item.get("target_region") or {}).get("params") or {}
+    a, b = params.get("object_a_center"), params.get("object_b_center")
+    R = np.asarray(R, float).reshape(-1, 3, 3)
+    if a is None or b is None:
+        return np.zeros(R.shape[0]), np.ones(R.shape[0])
+    vx, vy = float(a[0]) - float(b[0]), float(a[1]) - float(b[1])
+    lateral = np.abs(vx * R[:, 0, 0] + vy * R[:, 1, 0])
+    depth = np.abs(vx * R[:, 0, 2] + vy * R[:, 1, 2])
+    return lateral, depth
+
+
+def lateral_ok(item: Dict[str, Any], R: Any) -> np.ndarray:
+    """(N,) the left/right rule at N camera rotations (always True for non-projective items)."""
+    R = np.asarray(R, float).reshape(-1, 3, 3)
+    terms = _lateral_terms(item, R)
+    if terms is None:
+        return np.ones(R.shape[0], dtype=bool)
+    lateral, depth = terms
+    return depth <= lateral * _LATERAL_TAN
+
+
+def lateral_gate(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
+    """The left/right rule at one pose, with the angle and a smooth progress for shaping."""
+    terms = _lateral_terms(item, np.asarray(c2w, float)[None, :3, :3])
+    if terms is None:
+        return {"applies": False, "ok": True, "angle_deg": None, "progress": 1.0}
+    lateral, depth = float(terms[0][0]), float(terms[1][0])
+    ok = depth <= lateral * _LATERAL_TAN
+    progress = 1.0 if ok else float(np.clip(lateral * _LATERAL_TAN / max(depth, 1e-12), 0.0, 1.0))
+    return {"applies": True, "ok": bool(ok), "angle_deg": float(math.degrees(math.atan2(depth, lateral))),
+            "progress": progress, "max_angle_deg": LATERAL_MAX_ANGLE_DEG}
+
+
+def rule_gates(item: Dict[str, Any], c2w: Any, occ: OccluderSet) -> Dict[str, Any]:
+    """Everything this module adds to the canonical metric at one pose: visibility and the left/right rule."""
+    vis = visibility_gates(item, c2w, occ)
+    lat = lateral_gate(item, c2w)
+    return {"ok": bool(vis["visible"] and lat["ok"]), "visibility": vis, "lateral": lat}
+
+
+def apply_visibility(metric: Dict[str, Any], vis: Dict[str, Any],
+                     lateral: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The canonical metric with this module's gates added: success needs every required target (and its
+    reference object) clearly visible and, for left/right, the 45-degree rule; the shaping score keeps its
+    meaning (>= 0.5 exactly on success)."""
     from .canonical_task_metrics_v2 import FAILING_PROGRESS_CAP
 
     out = dict(metric)
     gates = dict(out.get("gates") or {})
     for letter, t in vis["targets"].items():
         gates[f"target_{letter}_clearly_visible"] = bool(t["visible"])
+    for key, r in (vis.get("references") or {}).items():
+        gates[f"reference_{key[0]}_clearly_visible"] = bool(r["visible"])
     gates["required_targets_found"] = bool(vis["found"])
-    success = bool(metric.get("success")) and bool(vis["visible"])
+    lat_ok, lat_progress = True, 1.0
+    if lateral is not None and lateral.get("applies"):
+        lat_ok, lat_progress = bool(lateral["ok"]), float(lateral["progress"])
+        gates["lateral_within_45deg"] = lat_ok
+    success = bool(metric.get("success")) and bool(vis["visible"]) and lat_ok
     base = metric.get("continuous_gate_progress")
     if base is None:  # metrics without a gate-aligned progress (v1 FOV): use the shaping score
         base = float(metric.get("shaping_score", 0.0) or 0.0)
-    progress = float(min(1.0, max(0.0, float(base)))) * float(vis["progress"])
+    progress = float(min(1.0, max(0.0, float(base)))) * float(vis["progress"]) * lat_progress
     if not success:
         progress = min(progress, FAILING_PROGRESS_CAP)
     out.update(success=success, gates=gates, continuous_gate_progress=progress,
                shaping_score=0.5 * progress + 0.5 * float(success), visibility=vis)
+    if lateral is not None and lateral.get("applies"):
+        out["lateral"] = lateral
     return out
 
 
 def score_with_visibility(item: Dict[str, Any], c2w: Any, occ: Optional[OccluderSet]) -> Dict[str, Any]:
-    """The env's success metric: the canonical metric plus, when ``occ`` is given, the visibility rule."""
+    """The env's success metric: the canonical metric plus, when ``occ`` is given, this module's rules."""
     from .canonical_task_metrics import score_canonical_task
 
     metric = score_canonical_task(item, np.asarray(c2w, float))
     if occ is None:
         return metric
-    return apply_visibility(metric, visibility_gates(item, c2w, occ))
+    return apply_visibility(metric, visibility_gates(item, c2w, occ), lateral_gate(item, c2w))

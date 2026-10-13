@@ -96,7 +96,7 @@ class VisibilityRuleTest(unittest.TestCase):
             poses.append(C.pose_from_xy_yaw(x, y, yaw))
         poses = np.stack(poses)
         previous = O.visibility_rule()
-        O.set_visibility_rule("face_v1")
+        O.set_visibility_rule("env")
         try:
             batch = E.evaluate_c2ws(scene, item, poses)
             vis_ok, _ = E.face_gate(scene, item, poses[:, :3, :3], poses[:, :3, 3])
@@ -106,7 +106,7 @@ class VisibilityRuleTest(unittest.TestCase):
         finally:
             O.set_visibility_rule(previous)
         env = [TV.score_with_visibility(item, p, occ) for p in poses]
-        gates = [TV.visibility_gates(item, p, occ)["visible"] for p in poses]
+        gates = [TV.rule_gates(item, p, occ)["ok"] for p in poses]  # visibility and the 45-degree rule
         self.assertEqual(vis_ok.tolist(), gates)
         exact = [bool(m["success"]) for m in env]
         self.assertEqual([bool(fn.exact(p)) for p in poses], exact)
@@ -123,13 +123,13 @@ class VisibilityRuleTest(unittest.TestCase):
         by_id = {o.id: o for o in scene.objects}
         item = projective_item("two_rooms", by_id["4"], by_id["2"], "left")
         previous = O.visibility_rule()
-        O.set_visibility_rule("face_v1")
+        O.set_visibility_rule("env")
         try:
             eps, funnel = E.sample_endpoints(scene, item, max_endpoints=4, seed=0)
         finally:
             O.set_visibility_rule(previous)
         verify = funnel.counts.get("endpoint_verify", {})
-        self.assertNotIn("mismatch_occlusion", verify)  # the old box test must not run under face_v1
+        self.assertNotIn("mismatch_occlusion", verify)  # the old box test must not run under the env rule
         self.assertGreater(verify.get("ok", 0), 0)
         occ = O.face_occluders_for(scene)
         for ep in eps:

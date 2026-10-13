@@ -254,8 +254,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--no-task-objects", default=None,
                     help="configs/no_task_objects_*.json: keep these boxes for collision/occlusion, never as "
                          "task targets or reference objects")
-    ap.add_argument("--visibility-rule", choices=("box_v1", "face_v1"), default="box_v1",
-                    help="face_v1: the env's rule (one face of each required target clearly visible)")
+    ap.add_argument("--visibility-rule", choices=("box_v1", "env", "face_v1"), default="box_v1",
+                    help="env: the env's own rules (target_visibility.py); face_v1: old name of env")
     ap.add_argument("--runtime-success-check", action="store_true",
                     help="Projective/FOV: reject initial states from which the env's own success rule "
                          "(no occlusion gate) succeeds before d*")

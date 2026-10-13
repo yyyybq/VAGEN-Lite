@@ -324,10 +324,12 @@ def _face_blocked_rows(scene: Any, t: _Target, origins: np.ndarray, geom: TV.Fac
 
 def face_gate(scene: Any, item: Dict[str, Any], R: np.ndarray, C: np.ndarray,
               todo: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
-    """The env's visibility rule for both targets at many poses: (ok (N,), best visible fraction (N, 2)).
+    """The env's rules beyond the canonical metric at many poses: every required target and its reference
+    object clearly visible, and the left/right 45-degree rule.  Returns (ok (N,), best visible fraction of
+    the two targets (N, 2)).
 
     Only poses with ``todo`` set are evaluated (others: False); identical to
-    target_visibility.visibility_gates at each pose (same functions, same camera)."""
+    target_visibility.rule_gates at each pose (same functions, same camera)."""
     R = np.asarray(R, float).reshape(-1, 3, 3)
     C = np.asarray(C, float).reshape(-1, 3)
     n = C.shape[0]
@@ -339,10 +341,12 @@ def face_gate(scene: Any, item: Dict[str, Any], R: np.ndarray, C: np.ndarray,
     K, width, height = _item_camera(item)
     # vectorised per-pose work (like the canonical gates); the sight-line tests are counted per position
     WORK.add("poses_scored", 2 * int(idx.size))
-    sub_ok = np.ones(idx.size, dtype=bool)
+    sub_ok = TV.lateral_ok(item, R[idx])
     entries = TV.required_targets(item)
     if len(entries) != len(TV.REQUIRED_VISIBLE_SLOTS.get(str(item.get("task_type")), (0,))):
         return ok, vis
+    n_targets = len(entries)
+    entries = entries + TV.required_references(item)
     for j, (_, entry) in enumerate(entries):
         t = _Target(entry)
         geom = TV.FaceGeometry(entry["bbox_min"], entry["bbox_max"])
@@ -353,7 +357,8 @@ def face_gate(scene: Any, item: Dict[str, Any], R: np.ndarray, C: np.ndarray,
             sl = slice(c0, c0 + _FACE_CHUNK)
             st = TV.face_visibility(Rs[sl], Cs[sl], geom, blocked[sl], K, width, height)
             sub_ok[sl] &= st["visible"]
-            vis[idx[sl], j] = st["visible_fraction"].max(axis=1)
+            if j < min(n_targets, 2):
+                vis[idx[sl], j] = st["visible_fraction"].max(axis=1)
     ok[idx] = sub_ok
     return ok, vis
 
@@ -407,7 +412,7 @@ def evaluate_poses(scene: Any, item: Dict[str, Any], R: np.ndarray, C: np.ndarra
     if legal_reasons is not None:
         reasons = np.asarray(list(legal_reasons), dtype=object)
         legal = reasons == "ok"
-    face_rule = visibility_rule() == "face_v1"
+    face_rule = visibility_rule() == "env"
 
     # Occlusion: rays are yaw/pitch independent -> computed once per (target,
     # position) and cached per scene; only the frustum test is per pose.
@@ -889,11 +894,15 @@ def _verify_and_pack(scene: Any, item: Dict[str, Any], targets: Sequence[_Target
     if not exact.get("success"):
         funnel.add("endpoint_verify", "mismatch_canonical")
         return None
-    if visibility_rule() == "face_v1":  # the env's rule, exactly as the env evaluates it
-        vis = TV.visibility_gates(item, c2w, face_occluders_for(scene))
+    if visibility_rule() == "env":  # the env's rules, exactly as the env evaluates them
+        gates = TV.rule_gates(item, c2w, face_occluders_for(scene))
+        vis = gates["visibility"]
         vfs = {t["id"]: float(t["visible_fraction"]) for t in vis["targets"].values()}
         if not vis["visible"]:
             funnel.add("endpoint_verify", "mismatch_face_visible")
+            return None
+        if not gates["lateral"]["ok"]:
+            funnel.add("endpoint_verify", "mismatch_lateral_45deg")
             return None
     else:
         vfs = {t.id: visible_fraction(scene, c2w, t.entry, n=int(cfg["occlusion_n"])) for t in targets}
@@ -921,7 +930,7 @@ def _verify_and_pack(scene: Any, item: Dict[str, Any], targets: Sequence[_Target
         "visible_fractions": {k: float(v) for k, v in vfs.items()},
         "visible_fraction_min": float(min(vfs.values())),
         "sampler": {"mode": mode, "version": ENDPOINT_SAMPLER_VERSION,
-                    "occlusion_model_version": (TV.VISIBILITY_RULE_VERSION if visibility_rule() == "face_v1"
+                    "occlusion_model_version": (TV.VISIBILITY_RULE_VERSION if visibility_rule() == "env"
                                                 else OCCLUSION_MODEL_VERSION),
                     "min_visible": float(cfg["min_visible"])},
     }
@@ -1060,7 +1069,7 @@ def success_fn(item: Dict[str, Any], scene: Any = None, *, min_visible: float = 
     def _exact(c2w: Any) -> bool:
         c2w = np.asarray(c2w, float)
         WORK.add("exact_judge")
-        if rule == "face_v1":  # the env's own success function
+        if rule == "env":  # the env's own success function
             return bool(TV.score_with_visibility(item, c2w, face_occluders_for(scene))["success"])
         ok = bool(sampling.score(item, c2w).get("success"))
         if ok:
@@ -1103,12 +1112,12 @@ def runtime_success_fn(item: Dict[str, Any], scene: Any) -> Any:
     """The env's success rule for a Projective item, computed independently of ``success_fn``.
 
     Under "box_v1": the canonical v1 metric alone (``difficulty.make_success_fn``; the env has no occlusion
-    gate).  Under "face_v1": that metric AND the env's visibility rule.  Used by the runtime_success_check
+    gate).  Under "env": that metric AND the env's own rules.  Used by the runtime_success_check
     of the start-state search."""
     from .difficulty import SuccessOracle, make_success_fn
 
     base = make_success_fn(item)
-    if visibility_rule() != "face_v1":
+    if visibility_rule() != "env":
         return base
 
     def exact(c2w: Any) -> bool:
