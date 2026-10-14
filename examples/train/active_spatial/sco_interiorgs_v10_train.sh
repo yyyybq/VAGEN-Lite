@@ -7,6 +7,9 @@
 #   rl-trial   RUN RL_DIR [ENDPOINT]    1 card : the 3DGS render service and PPO on the same card
 #   renderer   RUN                      1 card : the render service for a formal RL run (writes RUN/renderer_endpoint.txt)
 #   rl         RUN RL_DIR ENDPOINT      8 cards: PPO, waits for RUN/renderer_endpoint.txt
+#   rl-resume-check RUN RL_DIR          1 card : a trial config (rl-config --trial) run to update 2, then a second
+#                                        process that must resume from update 2 and stop after 3; checks that and
+#                                        the retention rule (kept: updates 2 and 3) in RUN/logs/resume_check.json
 #
 # Environment setup as in sco_dense_score_reward_only_parallel.sh. sco jobs run as root: outputs are handed
 # back to the owner of RUN on exit.
@@ -93,6 +96,27 @@ PY
     start_renderer 0
     export V10_RAY_TEMP_DIR=/tmp/v10_ray_$$
     "${PY}" -m vagen.interiorgs_v10_ppo --config "${RL}/ppo.yaml" --endpoint "${ENDPOINT}"
+    ;;
+  rl-resume-check)
+    RL=${3:?RL config directory}
+    export CUDA_VISIBLE_DEVICES=0
+    start_renderer 0
+    export V10_RAY_TEMP_DIR=/tmp/v10_ray_$$
+    "${PY}" -m vagen.interiorgs_v10_ppo --config "${RL}/ppo.yaml" --endpoint 2
+    "${PY}" -m vagen.interiorgs_v10_ppo --config "${RL}/ppo.yaml" --endpoint 3 2>&1 | tee "${RUN}/logs/resume_part2.log"
+    "${PY}" - "${RL}/ppo.yaml" "${RUN}/logs" <<'PY'
+import json, pathlib, sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1]))
+root = pathlib.Path(cfg["trainer"]["default_local_dir"])
+steps = sorted(int(p.name.split("global_step_")[-1]) for p in root.glob("global_step_*"))
+log = (pathlib.Path(sys.argv[2]) / "resume_part2.log").read_text(errors="ignore")
+result = {"checkpoints": steps, "resumed_from_update_2": "Setting global step to 2" in log,
+          "expected_checkpoints": [2, 3]}
+result["ok"] = result["resumed_from_update_2"] and steps == [2, 3]
+(pathlib.Path(sys.argv[2]) / "resume_check.json").write_text(json.dumps(result, indent=1))
+print(json.dumps(result))
+assert result["ok"], result
+PY
     ;;
   renderer)
     export CUDA_VISIBLE_DEVICES=0

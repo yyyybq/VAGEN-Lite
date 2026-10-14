@@ -257,6 +257,8 @@ def prepare(args):
         "flash_attn": "sdpa",
         "logging_steps": 5,
         "save_steps": 200,
+        **({"save_strategy": "epoch", "save_only_model": True}
+           if getattr(args, "save_per_epoch", False) else {}),
         "eval_strategy": "steps",
         "eval_steps": 200,
         "report_to": "none",
@@ -319,6 +321,9 @@ def main():
     p.add_argument("--task-registry", help="Required raw task registry for release-v2 splits")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--cutoff-len", type=int, default=16384)
+    p.add_argument("--save-per-epoch", action="store_true",
+                   help="save the model (weights only, no optimizer state) at the end of every epoch "
+                        "instead of every 200 steps (InteriorGS v10, decision of 2026-10-14)")
     p.add_argument("--allow-unreviewed-trajectories", action="store_true",
                    help="Admit trajectories without a semantic review (InteriorGS v10 first SFT version, 2026-10-14); "
                         "recorded in the output manifest")

@@ -137,7 +137,11 @@ TRIAL_PPO: Dict[str, Any] = {
     "trainer.save_freq": 1,
     "trainer.test_freq": 2,
     "trainer.critic_warmup": 0,
-    "trainer.ckpt_milestones": [1, 2],
+    "trainer.ckpt_milestones": [],
+    # retention at trial scale: every 2nd checkpoint kept, of the others the latest one
+    "trainer.ckpt_keep_every": 2,
+    "trainer.max_actor_ckpt_to_keep": 1,
+    "trainer.max_critic_ckpt_to_keep": 1,
     "trainer.logger": ["console"],
     "data.train_batch_size": 4,
     "data.val_batch_size": 4,
@@ -153,6 +157,20 @@ TRIAL_PPO: Dict[str, Any] = {
     "actor_rollout_ref.actor.fsdp_config.model_dtype": "bf16",
     "actor_rollout_ref.ref.fsdp_config.model_dtype": "bf16",
     "critic.model.fsdp_config.model_dtype": "bf16",
+}
+
+
+# The formal run (decisions of 2026-10-14): a checkpoint every 25 updates; every 50th is kept, of the others only
+# the latest 2 (vagen/interiorgs_v10_ppo.py retained_steps); validation at every checkpoint; a restart resumes
+# from the latest checkpoint.  The trial overrides apply on top.
+FORMAL_PPO: Dict[str, Any] = {
+    "trainer.save_freq": 25,
+    "trainer.test_freq": 25,
+    "trainer.resume_mode": "auto",
+    "trainer.ckpt_keep_every": 50,
+    "trainer.max_actor_ckpt_to_keep": 2,
+    "trainer.max_critic_ckpt_to_keep": 2,
+    "trainer.ckpt_milestones": [],
 }
 
 
@@ -228,6 +246,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         "trainer.rollout_data_dir": str(run_root / "rollout_data"),
         "trainer.validation_data_dir": str(run_root / "validation"),
     }.items():
+        _set(ppo, key, value)
+    for key, value in FORMAL_PPO.items():
         _set(ppo, key, value)
     if args.trial:
         for key, value in TRIAL_PPO.items():

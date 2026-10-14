@@ -3,15 +3,21 @@
     R1_RENDER_URL=http://HOST:PORT/render python -m vagen.interiorgs_v10_ppo --config RL/ppo.yaml --endpoint 250
 
 The optimizer and scheduler keep the config's horizon (``trainer.total_training_steps``); ``--endpoint``
-only stops ``fit`` after that many updates.  The env keeps its default (v10) success rules: this runner
-never sets ``r1_legacy_success``.
+only stops ``fit`` after that many updates, so a later run with a larger endpoint and ``resume_mode: auto``
+continues from the latest checkpoint.  The env keeps its default (v10) success rules: this runner never sets
+``r1_legacy_success``.
+
+Checkpoints (decision of 2026-10-14): with ``trainer.ckpt_keep_every`` = K, every K-th update's checkpoint is
+kept and of the others only the latest ``trainer.max_actor_ckpt_to_keep`` (``retained_steps``).
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import shutil
 from pathlib import Path
+from typing import Iterable, Set
 
 import ray
 from omegaconf import OmegaConf, open_dict
@@ -20,7 +26,35 @@ from vagen import main_ppo
 from vagen.ray_trainer import RayPPOTrainer
 
 
+def retained_steps(steps: Iterable[int], keep_every: int, keep_latest: int) -> Set[int]:
+    """Checkpoints to keep: every ``keep_every``-th step and the latest ``keep_latest`` of the others."""
+    steps = sorted(set(int(s) for s in steps))
+    milestones = {s for s in steps if keep_every > 0 and s % keep_every == 0}
+    others = [s for s in steps if s not in milestones]
+    return milestones | set(others[-keep_latest:] if keep_latest > 0 else [])
+
+
 class EndpointTrainer(RayPPOTrainer):
+    def _rotate_complete_checkpoints(self, current_folder: str):
+        keep_every = int(self.config.trainer.get("ckpt_keep_every", 0) or 0)
+        if keep_every <= 0:
+            return super()._rotate_complete_checkpoints(current_folder)
+        root = Path(current_folder).parent
+        complete = {}
+        for folder in root.glob("global_step_*"):
+            try:
+                step = int(folder.name.split("global_step_")[-1])
+            except ValueError:
+                continue
+            if (folder / "COMPLETE").exists():
+                complete[step] = folder
+        keep = retained_steps(complete, keep_every, int(self.config.trainer.max_actor_ckpt_to_keep))
+        keep.add(int(self.global_steps))
+        for step, folder in sorted(complete.items()):
+            if step not in keep and folder.resolve() != Path(current_folder).resolve():
+                print(f"[ckpt-rotate] removing checkpoint {folder} (keeping {sorted(keep)})")
+                shutil.rmtree(folder, ignore_errors=True)
+
     def fit(self):
         endpoint = int(os.environ["V10_PPO_ENDPOINT"])
         assert 0 < endpoint <= self.total_training_steps

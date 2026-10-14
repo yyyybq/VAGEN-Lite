@@ -88,13 +88,20 @@ class TrainingPrepTest(unittest.TestCase):
                       task_registry=str(sft / "task_registry.jsonl"), seed=42, cutoff_len=16384)
         with self.assertRaises(ValueError):  # without the option every trajectory lacks a review
             prep.prepare(Namespace(out=str(self.root / "lf_strict"), allow_unreviewed_trajectories=False, **common))
-        manifest = prep.prepare(Namespace(out=str(self.root / "lf"), allow_unreviewed_trajectories=True, **common))
+        manifest = prep.prepare(Namespace(out=str(self.root / "lf"), allow_unreviewed_trajectories=True,
+                                          save_per_epoch=True, **common))
         self.assertEqual(manifest["trajectory_semantic_review"], "not_required")
         self.assertEqual(manifest["counts"]["trajectory/train"], self.n_train)
         self.assertEqual(manifest["counts"]["trajectory/val"], self.n_val)
         cfg = (self.root / "lf" / "train.yaml").read_text()
         self.assertIn("dataset: trajectory_train", cfg)
         self.assertNotIn("qa_train", cfg)
+        import yaml
+
+        lf = yaml.safe_load(cfg)  # the model at the end of every epoch, weights only
+        self.assertEqual((lf["save_strategy"], lf["save_only_model"]), ("epoch", True))
+        prep.prepare(Namespace(out=str(self.root / "lf_steps"), allow_unreviewed_trajectories=True, **common))
+        self.assertNotIn("save_strategy", yaml.safe_load((self.root / "lf_steps" / "train.yaml").read_text()))
 
     def test_rl_config_and_prompt_consistency(self):
         import yaml
@@ -130,8 +137,16 @@ class TrainingPrepTest(unittest.TestCase):
         val_rows = [r for r in TP._jsonl(sft / "rows.jsonl") if r["split"] == "val"]
         picked = [r["task_id"] for r in TP._jsonl(out2 / "val.jsonl")]
         self.assertEqual(picked, [r["task_id"] for r in val_rows[:: max(1, len(val_rows) // 2)][:2]])
+        formal = yaml.safe_load((out2 / "ppo.yaml").read_text())["trainer"]
+        self.assertEqual({k: formal[k] for k in ("save_freq", "test_freq", "resume_mode", "ckpt_keep_every",
+                                                 "max_actor_ckpt_to_keep", "max_critic_ckpt_to_keep")},
+                         {"save_freq": 25, "test_freq": 25, "resume_mode": "auto", "ckpt_keep_every": 50,
+                          "max_actor_ckpt_to_keep": 2, "max_critic_ckpt_to_keep": 2})
+        self.assertEqual(formal["n_gpus_per_node"], 8)
         ppo = yaml.safe_load((out / "ppo.yaml").read_text())
         self.assertEqual(ppo["trainer"]["n_gpus_per_node"], 1)
+        self.assertEqual((ppo["trainer"]["save_freq"], ppo["trainer"]["ckpt_keep_every"],
+                          ppo["trainer"]["max_actor_ckpt_to_keep"], ppo["trainer"]["resume_mode"]), (1, 2, 1, "auto"))
         self.assertEqual(ppo["actor_rollout_ref"]["rollout"]["tensor_model_parallel_size"], 1)
         self.assertEqual(ppo["actor_rollout_ref"]["model"]["path"], "/models/m")
         self.assertEqual(ppo["data"]["train_files"], str((out / "train_env.yaml").resolve()))
