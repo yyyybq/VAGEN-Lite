@@ -196,3 +196,24 @@ def count_tokens(q: Question, size: int, family: str = "orig") -> Dict[str, int]
     t_out = text_tokens(str(v["answer"]))
     return {"visual": vis, "text_prompt": t_in, "answer": t_out,
             "total": CHAT_OVERHEAD + specials + vis + t_in + t_out + 1}
+
+
+# ----------------------------------------------------------------------------------------------------------------
+# replaced questions: later runs regenerate some groups/subtasks; the report and the review site drop the old ones
+# ----------------------------------------------------------------------------------------------------------------
+def parse_exclude(spec: str) -> List[Tuple[str, ...]]:
+    """'RUN_SUFFIX:GROUP[:SUBTASK],qid:QID,...' -> rules (RUN_SUFFIX matches the end of the run directory path)."""
+    return [tuple(x.split(":")) for x in spec.split(",") if x.strip()]
+
+
+def excluded(run: Any, q: Dict[str, Any], rules: Sequence[Tuple[str, ...]]) -> bool:
+    for rule in rules:
+        if rule[0] == "qid":
+            if q["qid"] == rule[1]:
+                return True
+            continue
+        if not str(run).rstrip("/").endswith(rule[0]) or q["group"] != rule[1]:
+            continue
+        if len(rule) < 3 or q["subtasks"][0] == rule[2]:
+            return True
+    return False

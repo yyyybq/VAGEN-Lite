@@ -55,8 +55,8 @@ def landmarks(ctx) -> List[str]:
     return [o for o in single_pool(ctx, 3.5) if ctx.obb[o].longest_edge >= 0.4]
 
 
-def shared_rec(vas, oids: Sequence[str]) -> List[str]:
-    return [o for o in oids if all(mv.vis_class(va, o) == "rec" for va in vas)]
+def shared_rec(vas, oids: Sequence[str], min_in_frame: float = 0.6) -> List[str]:
+    return [o for o in oids if all(mv.vis_class(va, o, min_in_frame) == "rec" for va in vas)]
 
 
 def in_frustum(vas_or_va, oids: Sequence[str]) -> List[str]:
@@ -243,14 +243,19 @@ def pair_motions(kind: str, rng) -> List[Tuple[float, float, float, Optional[flo
     return out
 
 
-def view_pairs(g: GenCtx, kind: str, max_pairs: int = 40, min_shared: int = 2) -> Iterator[Tuple[np.ndarray, np.ndarray]]:
+def view_pairs(g: GenCtx, kind: str, max_pairs: int = 40, min_shared: int = 2,
+               group: str = "") -> Iterator[Tuple[np.ndarray, np.ndarray]]:
     """Camera pairs where >= ``min_shared`` landmarks pass the v10 visibility prefilter in both views."""
     ctx = g.ctx
     lms = landmarks(ctx)
     seeds = list(itertools.combinations(lms, 2))
     g.rng.shuffle(seeds)
     n = 0
-    for a, b in seeds[:g.cap(60)]:
+    lim = g.cap(60, census=150)
+    if group:
+        g.count(group, "seeds_total", len(seeds))
+        g.count(group, "seeds_examined", min(len(seeds), lim))
+    for a, b in seeds[:lim]:
         if float(np.linalg.norm(ctx.obb[a].center[:2] - ctx.obb[b].center[:2])) > 3.5:
             continue
         cams1 = frame_candidates(ctx, [a, b], max_out=2)
@@ -276,11 +281,11 @@ def view_pairs(g: GenCtx, kind: str, max_pairs: int = 40, min_shared: int = 2) -
             break
 
 
-def render_pair(g: GenCtx, c1: np.ndarray, c2: np.ndarray, purpose: str):
+def render_pair(g: GenCtx, c1: np.ndarray, c2: np.ndarray, purpose: str, min_in_frame: float = 0.6):
     v1, a1 = g.bank.view(c1, purpose)
     v2, a2 = g.bank.view(c2, purpose)
     cand = sorted(set(a1.candidates_in_frustum(landmarks(g.ctx))) & set(a2.candidates_in_frustum(landmarks(g.ctx))))
-    shared = shared_rec([a1, a2], cand)
+    shared = shared_rec([a1, a2], cand, min_in_frame)
     return (v1, a1), (v2, a2), shared
 
 
@@ -289,7 +294,7 @@ def render_pair(g: GenCtx, c1: np.ndarray, c2: np.ndarray, purpose: str):
 # =============================================================================
 def m1_combos(g: GenCtx) -> Iterator[Combo]:
     for kind in ("translate", "rotate", "pitch"):
-        for c1, c2 in view_pairs(g, kind, max_pairs=12):
+        for c1, c2 in view_pairs(g, kind, max_pairs=12, group="M1"):
             yield Combo("M1", kind, (), [[c1, c2]], {"subtasks": SUBTASKS["M1"]})
     # BLINK multi-view: orbit around one object
     ctx = g.ctx
@@ -299,7 +304,8 @@ def m1_combos(g: GenCtx) -> Iterator[Combo]:
         c = ctx.obb[o].center
         for r in (2.0, 2.6, 3.2):
             for a0 in np.linspace(0, 360, 12, endpoint=False):
-                for d in (30.0, -30.0, 40.0, -40.0):
+                # random order: the first legal orbit is taken, a fixed order made almost every answer "right"
+                for d in sorted((30.0, -30.0, 40.0, -40.0), key=lambda _: g.rng.random()):
                     e1 = c[:2] + r * np.array([math.cos(math.radians(a0)), math.sin(math.radians(a0))])
                     e2 = c[:2] + r * np.array([math.cos(math.radians(a0 + d)), math.sin(math.radians(a0 + d))])
                     if not ctx.legal(np.stack([e1, e2])).all():
@@ -420,7 +426,7 @@ def m1_realize(r: Runner):
 # =============================================================================
 def m2_combos(g: GenCtx) -> Iterator[Combo]:
     for kind in ("translate", "far"):
-        for c1, c2 in view_pairs(g, kind, max_pairs=20):
+        for c1, c2 in view_pairs(g, kind, max_pairs=20, group="M2"):
             yield Combo("M2", kind, (), [[c1, c2]], {"subtasks": SUBTASKS["M2"]})
 
 
@@ -463,91 +469,97 @@ def m2_realize(r: Runner):
             return "no_object_in_one_image_only"
         if not emit:
             return None
-        st = pick_subtask(r, opts)
-        if st is None:
-            return None
-        imgs = [g.bank.save(v1), g.bank.save(v2)]
-        rev = {"shared": shared}
-        land = [g.obj_entry(o, ctx.disp[o], "shared_landmark") for o in shared]
-        if st == "MMSI-position-camera-object":
-            for x in g.rng.sample(only1, len(only1)):
-                ang, dist = mv.bearing(c2, ctx.obb[x].center)
-                form = g.rng.choice(["quad", "four"])
-                lab = mv.quadrant(ang) if form == "quad" else mv.four_way(ang)
-                if lab is None:
-                    continue
-                n, nb = named_the(g, x)
-                if form == "quad":
-                    keys = ["front-left", "front-right", "back-left", "back-right"]
-                    omap = {k: k.replace("-", " ") for k in keys}
-                else:
-                    keys = ["front", "back", "left", "right"]
-                    omap = {"front": "In front of me", "back": "Behind me", "left": "On my left", "right": "On my right"}
-                fam = {k: Phrasing(p.question, p.style, omap) for k, p in MMSI_CAMOBJ.items()}
-                g.emit("M2", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
-                       {"x": nb, "x_the": n, "X": cap(n)}, keys, lab, "mc",
-                       gt("物体中心在相机 2 水平坐标系里的方向（四象限或前后左右四向），离分界 <10° 不出题；物体只在图 1 里能认出、在图 2 里完全看不到；两图至少共同拍到 2 个能认出的物体。",
-                          "MMSI 原题由人工设计；这里由位姿和三维框中心算出。", bearing_deg=round(ang, 1), distance_m=round(dist, 2)),
-                       [g.obj_entry(x, n, "key_only_in_image_1")] + land, rev)
-                r.take(st)
-                return None
-            return "camobj_direction_ambiguous"
-        if st == "MMSI-position-object-object":
-            for rr_ in g.rng.sample(only2, len(only2)):
-                pairs = [(p, q) for p, q in itertools.permutations(rec1, 2) if rr_ not in (p, q)]
-                g.rng.shuffle(pairs)
-                for p, q in pairs:
-                    pq = ctx.obb[p].center[:2] - ctx.obb[q].center[:2]
-                    if np.linalg.norm(pq) < 0.8:
+        def emit_st(st: str) -> Optional[str]:
+            imgs = [g.bank.save(v1), g.bank.save(v2)]
+            rev = {"shared": shared}
+            land = [g.obj_entry(o, ctx.disp[o], "shared_landmark") for o in shared]
+            if st == "MMSI-position-camera-object":
+                for x in g.rng.sample(only1, len(only1)):
+                    ang, dist = mv.bearing(c2, ctx.obb[x].center)
+                    form = g.rng.choice(["quad", "four"])
+                    lab = mv.quadrant(ang) if form == "quad" else mv.four_way(ang)
+                    if lab is None:
                         continue
-                    k = g.rng.randrange(8)
-                    pdir = mv.COMPASS8[k]
-                    north = mv.rotate2(pq, 45.0 * k)  # p lies at compass angle 45k (clockwise) from north
-                    lab = mv.compass(north, ctx.obb[q].center, ctx.obb[rr_].center)
-                    if lab is None or float(np.linalg.norm(ctx.obb[rr_].center[:2] - ctx.obb[q].center[:2])) < 0.8:
-                        continue
-                    others = [c for c in mv.COMPASS8 if c != lab]
-                    g.rng.shuffle(others)
-                    keys = [lab] + others[:3]
-                    omap = {c: cap(c) for c in mv.COMPASS8}
-                    fam = {kk: Phrasing(pp.question, pp.style, omap) for kk, pp in MMSI_OBJOBJ.items()}
-                    names = {}
-                    for key, o in (("p", p), ("q", q), ("r", rr_)):
-                        n, nb = named_the(g, o)
-                        names[key], names[key + "_the"] = nb, n
+                    n, nb = named_the(g, x)
+                    if form == "quad":
+                        keys = ["front-left", "front-right", "back-left", "back-right"]
+                        omap = {k: k.replace("-", " ") for k in keys}
+                    else:
+                        keys = ["front", "back", "left", "right"]
+                        omap = {"front": "In front of me", "back": "Behind me", "left": "On my left", "right": "On my right"}
+                    fam = {k: Phrasing(p.question, p.style, omap) for k, p in MMSI_CAMOBJ.items()}
                     g.emit("M2", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
-                           dict(names, pdir=pdir), keys, lab, "mc",
-                           gt("指南针方向由题目给出的'P 在 Q 的某方向'定义（以 Q→P 的方向为准）；答 R 中心相对 Q 中心的 8 向，离扇区边界 <7.5° 不出题；R 只在图 2、P 和 Q 在图 1。",
-                              "MMSI 原题的参照方向由人从画面推断；这里精确按框中心计算。", p_dir=pdir),
-                           [g.obj_entry(p, names["p_the"], "reference_p"), g.obj_entry(q, names["q_the"], "origin_q"),
-                            g.obj_entry(rr_, names["r_the"], "query_only_in_image_2")] + land, rev)
+                           {"x": nb, "x_the": n, "X": cap(n)}, keys, lab, "mc",
+                           gt("物体中心在相机 2 水平坐标系里的方向（四象限或前后左右四向），离分界 <10° 不出题；物体只在图 1 里能认出、在图 2 里完全看不到；两图至少共同拍到 2 个能认出的物体。",
+                              "MMSI 原题由人工设计；这里由位姿和三维框中心算出。", bearing_deg=round(ang, 1), distance_m=round(dist, 2)),
+                           [g.obj_entry(x, n, "key_only_in_image_1")] + land, rev)
                     r.take(st)
                     return None
-            return "objobj_no_clear_direction"
-        # measurement
-        for x, y in itertools.product(g.rng.sample(only1, len(only1)), g.rng.sample(only2, len(only2))):
-            X, Y = ctx.obb[x], ctx.obb[y]
-            for dim in ("height", "length"):
-                vx = float(X.hi[2] - X.lo[2]) if dim == "height" else float(max(X.dims[k] for k in X.horizontal_axes()))
-                vy = float(Y.hi[2] - Y.lo[2]) if dim == "height" else float(max(Y.dims[k] for k in Y.horizontal_axes()))
-                if max(vx, vy) < 1.3 * min(vx, vy):
-                    continue
-                adj = "taller" if dim == "height" else "longer"
-                nx, nxb = named_the(g, x)
-                ny, nyb = named_the(g, y)
-                keys = ["x", "y", "same", "sometimes"]
-                omap = {"x": "The " + nxb, "y": "The " + nyb, "same": "The same " + dim,
-                        "sometimes": f"Sometimes the former is {adj}, sometimes the latter is {adj}"}
-                fam = {kk: Phrasing(pp.question, pp.style, omap) for kk, pp in MMSI_MEAS.items()}
-                g.emit("M2", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
-                       {"x": nxb, "y": nyb, "x_the": nx, "y_the": ny, "adj": adj, "dim": dim}, keys,
-                       "x" if vx > vy else "y", "mc",
-                       gt("高度 = 三维框竖直方向的长度；长度 = 框水平最长边；两者相差 ≥30% 才出题；X 只在图 1、Y 只在图 2。",
-                          "MMSI 原题由人估计；这里用三维框尺寸（框比实物略大）。", **{x: round(vx, 3), y: round(vy, 3)}),
-                       [g.obj_entry(x, nx, "only_in_image_1"), g.obj_entry(y, ny, "only_in_image_2")] + land, rev)
-                r.take(st)
+                return "camobj_direction_ambiguous"
+            if st == "MMSI-position-object-object":
+                for rr_ in g.rng.sample(only2, len(only2)):
+                    pairs = [(p, q) for p, q in itertools.permutations(rec1, 2) if rr_ not in (p, q)]
+                    g.rng.shuffle(pairs)
+                    for p, q in pairs:
+                        pq = ctx.obb[p].center[:2] - ctx.obb[q].center[:2]
+                        if np.linalg.norm(pq) < 0.8:
+                            continue
+                        k = g.rng.randrange(8)
+                        pdir = mv.COMPASS8[k]
+                        north = mv.rotate2(pq, 45.0 * k)  # p lies at compass angle 45k (clockwise) from north
+                        lab = mv.compass(north, ctx.obb[q].center, ctx.obb[rr_].center)
+                        if lab is None or float(np.linalg.norm(ctx.obb[rr_].center[:2] - ctx.obb[q].center[:2])) < 0.8:
+                            continue
+                        others = [c for c in mv.COMPASS8 if c != lab]
+                        g.rng.shuffle(others)
+                        keys = [lab] + others[:3]
+                        omap = {c: cap(c) for c in mv.COMPASS8}
+                        fam = {kk: Phrasing(pp.question, pp.style, omap) for kk, pp in MMSI_OBJOBJ.items()}
+                        names = {}
+                        for key, o in (("p", p), ("q", q), ("r", rr_)):
+                            n, nb = named_the(g, o)
+                            names[key], names[key + "_the"] = nb, n
+                        g.emit("M2", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
+                               dict(names, pdir=pdir), keys, lab, "mc",
+                               gt("指南针方向由题目给出的'P 在 Q 的某方向'定义（以 Q→P 的方向为准）；答 R 中心相对 Q 中心的 8 向，离扇区边界 <7.5° 不出题；R 只在图 2、P 和 Q 在图 1。",
+                                  "MMSI 原题的参照方向由人从画面推断；这里精确按框中心计算。", p_dir=pdir),
+                               [g.obj_entry(p, names["p_the"], "reference_p"), g.obj_entry(q, names["q_the"], "origin_q"),
+                                g.obj_entry(rr_, names["r_the"], "query_only_in_image_2")] + land, rev)
+                        r.take(st)
+                        return None
+                return "objobj_no_clear_direction"
+            # measurement
+            for x, y in itertools.product(g.rng.sample(only1, len(only1)), g.rng.sample(only2, len(only2))):
+                X, Y = ctx.obb[x], ctx.obb[y]
+                for dim in ("height", "length"):
+                    vx = float(X.hi[2] - X.lo[2]) if dim == "height" else float(max(X.dims[k] for k in X.horizontal_axes()))
+                    vy = float(Y.hi[2] - Y.lo[2]) if dim == "height" else float(max(Y.dims[k] for k in Y.horizontal_axes()))
+                    if max(vx, vy) < 1.3 * min(vx, vy):
+                        continue
+                    adj = "taller" if dim == "height" else "longer"
+                    nx, nxb = named_the(g, x)
+                    ny, nyb = named_the(g, y)
+                    keys = ["x", "y", "same", "sometimes"]
+                    omap = {"x": "The " + nxb, "y": "The " + nyb, "same": "The same " + dim,
+                            "sometimes": f"Sometimes the former is {adj}, sometimes the latter is {adj}"}
+                    fam = {kk: Phrasing(pp.question, pp.style, omap) for kk, pp in MMSI_MEAS.items()}
+                    g.emit("M2", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
+                           {"x": nxb, "y": nyb, "x_the": nx, "y_the": ny, "adj": adj, "dim": dim}, keys,
+                           "x" if vx > vy else "y", "mc",
+                           gt("高度 = 三维框竖直方向的长度；长度 = 框水平最长边；两者相差 ≥30% 才出题；X 只在图 1、Y 只在图 2。",
+                              "MMSI 原题由人估计；这里用三维框尺寸（框比实物略大）。", **{x: round(vx, 3), y: round(vy, 3)}),
+                           [g.obj_entry(x, nx, "only_in_image_1"), g.obj_entry(y, ny, "only_in_image_2")] + land, rev)
+                    r.take(st)
+                    return None
+            return "measurement_no_clear_pair"
+
+        # try the subtasks this pair supports, most needed first, until one yields a question
+        reason = None
+        for st in sorted([o for o in opts if r.need[o] > 0], key=lambda o: -r.need[o]):
+            reason = emit_st(st)
+            if reason is None:
                 return None
-        return "measurement_no_clear_pair"
+        return reason
 
     return realize
 
@@ -593,20 +605,31 @@ def regions(g: GenCtx) -> List[Dict[str, Any]]:
     return out
 
 
+REGION_SECTOR_SHARE = 0.85   # a region "lies in" a direction when at least this share of its area does
+
+
 def region_direction(c2w_or_origin, facing, poly: np.ndarray, mode: str) -> Optional[str]:
-    """Direction label valid for EVERY vertex of the region polygon (so the whole region lies in one
-    direction); None if the region straddles a boundary or contains the origin."""
-    labs = set()
-    for v in poly:
-        if facing is None:
-            ang, _ = mv.bearing(c2w_or_origin, v)
-        else:
-            ang = mv.bearing_from(c2w_or_origin, facing, v)
-        lab = mv.quadrant(ang, 3.0) if mode == "quad" else (mv.four_way(ang, 3.0) if mode == "four" else mv.sector8(ang, 3.0))
-        labs.add(lab)
-    if len(labs) != 1 or None in labs:
+    """Direction label of a region: the sector that holds at least REGION_SECTOR_SHARE of the region's area
+    (grid samples inside the polygon), seen from a camera (``facing`` None) or from an origin facing a point;
+    None if no sector holds that much or the origin lies inside the region."""
+    poly = np.asarray(poly, float)
+    lo, hi = poly.min(0), poly.max(0)
+    xs = np.linspace(lo[0], hi[0], 24)
+    ys = np.linspace(lo[1], hi[1], 24)
+    pts = np.stack(np.meshgrid(xs, ys, indexing="ij"), -1).reshape(-1, 2)
+    pts = pts[point_in_polygon(pts, poly)]
+    if not len(pts):
         return None
-    return labs.pop()
+    origin = np.asarray(c2w_or_origin, float)
+    o_xy = origin[:2, 3] if origin.ndim == 2 else origin[:2]
+    if point_in_polygon(o_xy[None], poly)[0]:
+        return None
+    labs = []
+    for v in pts:
+        ang = mv.bearing(c2w_or_origin, v)[0] if facing is None else mv.bearing_from(c2w_or_origin, facing, v)
+        labs.append(mv.quadrant(ang, 0.0) if mode == "quad" else (mv.four_way(ang, 0.0) if mode == "four" else mv.sector8(ang, 0.0)))
+    lab, n = Counter(labs).most_common(1)[0]
+    return lab if lab is not None and n >= REGION_SECTOR_SHARE * len(labs) else None
 
 
 def m3_combos(g: GenCtx) -> Iterator[Combo]:
@@ -627,7 +650,7 @@ def m3_combos(g: GenCtx) -> Iterator[Combo]:
             near = [o for o in lms if o not in A["members"]
                     and float(np.linalg.norm(ctx.obb[o].center[:2] - c1[:2, 3])) < 6.0]
             v1 = [o for o in near if ctx.face_visible(o, c1[None], K, SIZE)[0] and framed_loose(ctx.obb[o], c1, K, SIZE)]
-            if len(v1) < 2:
+            if len(v1) < 1:
                 continue
             cands = [mv.move(c1, dx, dz, t, p) for dx, dz, t, p in pair_motions("far", g.rng)]
             cands = [c for c in cands if ctx.legal(c[:2, 3][None])[0]
@@ -639,7 +662,7 @@ def m3_combos(g: GenCtx) -> Iterator[Combo]:
             for o in v1:
                 fr = np.array([framed_loose(ctx.obb[o], c, K, SIZE) for c in arr])
                 shared += (ctx.face_visible(o, arr, K, SIZE) & fr).astype(int)
-            ok = shared >= 2
+            ok = shared >= 1
             if not ok.any():
                 continue
             bonus = np.zeros(len(arr), bool)
@@ -670,9 +693,9 @@ def m3_realize(r: Runner):
 
     def realize(combo: Combo, emit: bool) -> Optional[str]:
         c1, c2 = combo.shots[0]
-        (v1, a1), (v2, a2), shared = render_pair(g, c1, c2, "M3")
-        if len(shared) < 2:
-            return "fewer_than_2_shared_objects"
+        (v1, a1), (v2, a2), shared = render_pair(g, c1, c2, "M3", min_in_frame=0.4)
+        if len(shared) < 1:   # M3: one clearly shared object links the two images
+            return "no_shared_object"
         regs = combo.info["regions"]
 
         def reg_vis(va, rg):
@@ -693,95 +716,101 @@ def m3_realize(r: Runner):
             return "no_region_in_one_image_only"
         if not emit:
             return None
-        st = pick_subtask(r, opts)
-        if st is None:
-            return None
-        imgs = [g.bank.save(v1), g.bank.save(v2)]
-        land = [g.obj_entry(o, ctx.disp[o], "shared_landmark") for o in shared]
-        rdef = "区域：'有某物体的房间' = 该物体所在房间的轮廓；功能区 = 一组物体（如餐桌和餐椅）在地面投影的最小外包凸多边形再向外扩 0.4 m。"
-        rdiff = "MMSI 原题的区域由人工划定（如'刷牙区'），这里的区域按上面的几何规则定义，每题都标明。"
-        if st == "MMSI-position-camera-region":
-            for rg in in1:
-                if point_in_polygon(c2[:2, 3][None], rg["poly"])[0]:
-                    continue
-                form = g.rng.choice(["quad", "four"])
-                lab = region_direction(c2, None, rg["poly"], form)
-                if lab is None:
-                    continue
-                keys = ["front-left", "front-right", "back-left", "back-right"] if form == "quad" else ["front", "back", "left", "right"]
-                omap = ({k: k.replace("-", " ").capitalize() for k in keys} if form == "quad"
-                        else {"front": "Front", "back": "Back", "left": "Left", "right": "Right"})
-                fam = {k: Phrasing(p.question, p.style, omap) for k, p in MMSI_CAMREG.items()}
-                nm, nm_the = reg_name(rg)
-                g.emit("M3", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
-                       {"reg": nm, "reg_the": nm_the, "Reg": cap(nm_the)}, keys, lab, "mc",
-                       gt("区域多边形的每个顶点都落在相机 2 的同一个方向扇区里（离分界 ≥3°）才出题。" + rdef, rdiff,
-                          region_kind=rg["kind"], region_polygon=np.round(rg["poly"], 3).tolist()),
-                       [g.obj_entry(m, ctx.disp[m], "region_member") for m in rg["members"]] + land,
-                       {"region_polygon": np.round(rg["poly"], 3).tolist(), "shared": shared})
-                r.take(st)
-                return None
-            return "camreg_ambiguous"
-        if st == "MMSI-position-object-region":
-            for rg in in2:
-                for x in g.rng.sample(rec1, len(rec1)):
-                    if x in rg["members"] or point_in_polygon(ctx.obb[x].center[:2][None], rg["poly"])[0]:
+        def emit_st(st: str) -> Optional[str]:
+            imgs = [g.bank.save(v1), g.bank.save(v2)]
+            land = [g.obj_entry(o, ctx.disp[o], "shared_landmark") for o in shared]
+            rdef = "两张图至少共同拍到 1 个能认出的物体。区域：'有某物体的房间' = 该物体所在房间的轮廓；功能区 = 一组物体（如餐桌和餐椅）在地面投影的最小外包凸多边形再向外扩 0.4 m。"
+            rdiff = "MMSI 原题的区域由人工划定（如'刷牙区'），这里的区域按上面的几何规则定义，每题都标明。"
+            if st == "MMSI-position-camera-region":
+                for rg in in1:
+                    if point_in_polygon(c2[:2, 3][None], rg["poly"])[0]:
                         continue
-                    others = [o for o in rec1 if o != x]
-                    p = g.rng.choice(others)
-                    q = x
-                    k = g.rng.randrange(8)
-                    north = mv.rotate2(ctx.obb[p].center[:2] - ctx.obb[q].center[:2], 45.0 * k)
-                    facing = ctx.obb[x].center[:2] + north
-                    lab = region_direction(ctx.obb[x].center, facing, rg["poly"], "eight")
+                    form = g.rng.choice(["quad", "four"])
+                    lab = region_direction(c2, None, rg["poly"], form)
                     if lab is None:
                         continue
-                    lab = mv.COMPASS8[mv.DIR8.index(lab)]
-                    keys = [lab] + g.rng.sample([c for c in mv.COMPASS8 if c != lab], 3)
-                    omap = {c: cap(c) for c in mv.COMPASS8}
-                    fam = {kk: Phrasing(pp.question, pp.style, omap) for kk, pp in MMSI_OBJREG.items()}
+                    keys = ["front-left", "front-right", "back-left", "back-right"] if form == "quad" else ["front", "back", "left", "right"]
+                    omap = ({k: k.replace("-", " ").capitalize() for k in keys} if form == "quad"
+                            else {"front": "Front", "back": "Back", "left": "Left", "right": "Right"})
+                    fam = {k: Phrasing(p.question, p.style, omap) for k, p in MMSI_CAMREG.items()}
                     nm, nm_the = reg_name(rg)
-                    np_, npb = named_the(g, p)
-                    nq, nqb = named_the(g, q)
                     g.emit("M3", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
-                           {"p": npb, "p_the": np_, "q": nqb, "q_the": nq, "x": nqb, "x_the": nq, "pdir": mv.COMPASS8[k],
-                            "reg": nm, "reg_the": nm_the}, keys, lab, "mc",
-                           gt("指南针方向由'P 在 Q 的某方向'定义；区域多边形每个顶点相对物体 X 都在同一个 8 向扇区内才出题。" + rdef, rdiff,
-                              region_kind=rg["kind"]),
-                           [g.obj_entry(p, np_, "reference_p"), g.obj_entry(q, nq, "origin")] +
+                           {"reg": nm, "reg_the": nm_the, "Reg": cap(nm_the)}, keys, lab, "mc",
+                           gt("区域面积至少 85% 落在相机 2 的同一个方向扇区里才出题。" + rdef, rdiff,
+                              region_kind=rg["kind"], region_polygon=np.round(rg["poly"], 3).tolist()),
                            [g.obj_entry(m, ctx.disp[m], "region_member") for m in rg["members"]] + land,
                            {"region_polygon": np.round(rg["poly"], 3).tolist(), "shared": shared})
                     r.take(st)
                     return None
-            return "objreg_ambiguous"
-        for ra, rb in itertools.product(in1, in2):
-            ca = np.mean(ra["poly"], axis=0)
-            rec_any = [o for o in rec1 if o not in ra["members"]]
-            if not rec_any:
-                break
-            p = g.rng.choice(rec_any)
-            k = g.rng.randrange(8)
-            north = mv.rotate2(ctx.obb[p].center[:2] - ca, 45.0 * k)
-            lab = region_direction(ca, ca + north, rb["poly"], "eight")
-            if lab is None:
-                continue
-            lab = mv.COMPASS8[mv.DIR8.index(lab)]
-            keys = [lab] + g.rng.sample([c for c in mv.COMPASS8 if c != lab], 3)
-            omap = {c: cap(c) for c in mv.COMPASS8}
-            fam = {kk: Phrasing(pp.question, pp.style, omap) for kk, pp in MMSI_REGREG.items()}
-            na, na_the = reg_name(ra)
-            nb_, nb_the = reg_name(rb)
-            np_, npb = named_the(g, p)
-            g.emit("M3", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
-                   {"p": npb, "p_the": np_, "pdir": mv.COMPASS8[k], "reg_a": na, "reg_a_the": na_the, "reg_b": nb_,
-                    "reg_b_the": nb_the}, keys, lab, "mc",
-                   gt("从区域 A 的中心看区域 B，B 的每个顶点都在同一个 8 向扇区内才出题；北向由'P 在 A 的某方向'定义。" + rdef, rdiff),
-                   [g.obj_entry(p, np_, "reference_p")] + [g.obj_entry(m, ctx.disp[m], "region_a_member") for m in ra["members"]]
-                   + [g.obj_entry(m, ctx.disp[m], "region_b_member") for m in rb["members"]] + land,
-                   {"region_polygons": [np.round(ra["poly"], 3).tolist(), np.round(rb["poly"], 3).tolist()], "shared": shared})
-            r.take(st)
-            return None
-        return "regreg_ambiguous"
+                return "camreg_ambiguous"
+            if st == "MMSI-position-object-region":
+                for rg in in2:
+                    for x in g.rng.sample(rec1, len(rec1)):
+                        if x in rg["members"] or point_in_polygon(ctx.obb[x].center[:2][None], rg["poly"])[0]:
+                            continue
+                        others = [o for o in rec1 if o != x]
+                        p = g.rng.choice(others)
+                        q = x
+                        k = g.rng.randrange(8)
+                        north = mv.rotate2(ctx.obb[p].center[:2] - ctx.obb[q].center[:2], 45.0 * k)
+                        facing = ctx.obb[x].center[:2] + north
+                        lab = region_direction(ctx.obb[x].center, facing, rg["poly"], "eight")
+                        if lab is None:
+                            continue
+                        lab = mv.COMPASS8[mv.DIR8.index(lab)]
+                        keys = [lab] + g.rng.sample([c for c in mv.COMPASS8 if c != lab], 3)
+                        omap = {c: cap(c) for c in mv.COMPASS8}
+                        fam = {kk: Phrasing(pp.question, pp.style, omap) for kk, pp in MMSI_OBJREG.items()}
+                        nm, nm_the = reg_name(rg)
+                        np_, npb = named_the(g, p)
+                        nq, nqb = named_the(g, q)
+                        g.emit("M3", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
+                               {"p": npb, "p_the": np_, "q": nqb, "q_the": nq, "x": nqb, "x_the": nq, "pdir": mv.COMPASS8[k],
+                                "reg": nm, "reg_the": nm_the}, keys, lab, "mc",
+                               gt("指南针方向由'P 在 Q 的某方向'定义；区域面积至少 85% 相对物体 X 落在同一个 8 向扇区内才出题。" + rdef, rdiff,
+                                  region_kind=rg["kind"]),
+                               [g.obj_entry(p, np_, "reference_p"), g.obj_entry(q, nq, "origin")] +
+                               [g.obj_entry(m, ctx.disp[m], "region_member") for m in rg["members"]] + land,
+                               {"region_polygon": np.round(rg["poly"], 3).tolist(), "shared": shared})
+                        r.take(st)
+                        return None
+                return "objreg_ambiguous"
+            for ra, rb in itertools.product(in1, in2):
+                ca = np.mean(ra["poly"], axis=0)
+                rec_any = [o for o in rec1 if o not in ra["members"]]
+                if not rec_any:
+                    break
+                p = g.rng.choice(rec_any)
+                k = g.rng.randrange(8)
+                north = mv.rotate2(ctx.obb[p].center[:2] - ca, 45.0 * k)
+                lab = region_direction(ca, ca + north, rb["poly"], "eight")
+                if lab is None:
+                    continue
+                lab = mv.COMPASS8[mv.DIR8.index(lab)]
+                keys = [lab] + g.rng.sample([c for c in mv.COMPASS8 if c != lab], 3)
+                omap = {c: cap(c) for c in mv.COMPASS8}
+                fam = {kk: Phrasing(pp.question, pp.style, omap) for kk, pp in MMSI_REGREG.items()}
+                na, na_the = reg_name(ra)
+                nb_, nb_the = reg_name(rb)
+                np_, npb = named_the(g, p)
+                g.emit("M3", [st, "SITE-C05"], "MMSI-Bench", "multi_image", [v1, v2], imgs, fam,
+                       {"p": npb, "p_the": np_, "pdir": mv.COMPASS8[k], "reg_a": na, "reg_a_the": na_the, "reg_b": nb_,
+                        "reg_b_the": nb_the}, keys, lab, "mc",
+                       gt("从区域 A 的中心看区域 B，B 的面积至少 85% 落在同一个 8 向扇区内才出题；北向由'P 在 A 的某方向'定义。" + rdef, rdiff),
+                       [g.obj_entry(p, np_, "reference_p")] + [g.obj_entry(m, ctx.disp[m], "region_a_member") for m in ra["members"]]
+                       + [g.obj_entry(m, ctx.disp[m], "region_b_member") for m in rb["members"]] + land,
+                       {"region_polygons": [np.round(ra["poly"], 3).tolist(), np.round(rb["poly"], 3).tolist()], "shared": shared})
+                r.take(st)
+                return None
+            return "regreg_ambiguous"
+
+        # try the subtasks this pair supports, most needed first, until one yields a question
+        reason = None
+        for st in sorted([o for o in opts if r.need[o] > 0], key=lambda o: -r.need[o]):
+            reason = emit_st(st)
+            if reason is None:
+                return None
+        return reason
 
     return realize
 
@@ -790,7 +819,7 @@ def m3_realize(r: Runner):
 # M4: cross-image point correspondence (BLINK)
 # =============================================================================
 def m4_combos(g: GenCtx) -> Iterator[Combo]:
-    for c1, c2 in view_pairs(g, "translate", max_pairs=20, min_shared=3):
+    for c1, c2 in view_pairs(g, "translate", max_pairs=20, min_shared=3, group="M4"):
         yield Combo("M4", "pair", (), [[c1, c2]], {"subtasks": ["BL-06"]})
 
 
@@ -933,8 +962,9 @@ def m5_realize(r: Runner):
 # M6 / M11: panning chains -- three images from one spot, turning step by step
 # =============================================================================
 def pan_chains(g: GenCtx, n_img: int, max_out: int = 30, group: str = "") -> Iterator[Tuple[List[np.ndarray], List[str]]]:
-    """From a legal spot, yaws psi, psi - step, ... (turning right); key object i must pass the visibility
-    prefilter in image i (within 30 deg of its axis) and lie outside the other images' field of view."""
+    """From a legal spot, yaws psi, psi -/+ step, ... (turning right or left, random per spot so the answers of
+    M6/M11 do not all fall on one side); key object i must pass the visibility prefilter in image i (within 20 deg
+    of its axis) and lie outside the other images' field of view."""
     ctx = g.ctx
     named = [o for o in simple_named_pool(ctx) if ctx.obb[o].longest_edge >= 0.3]
     if len(named) < n_img:
@@ -953,9 +983,10 @@ def pan_chains(g: GenCtx, n_img: int, max_out: int = 30, group: str = "") -> Ite
         p = grid[i]
         lm_near = [o for o in lms_all if float(np.linalg.norm(ctx.obb[o].center[:2] - p)) < 5.0]
         done = False
+        turn = g.rng.choice((-1.0, 1.0))
         for step in (65.0, 75.0):
             for psi0 in range(0, 360, 30):
-                yaws = [math.radians(psi0 - k * step) for k in range(n_img)]
+                yaws = [math.radians(psi0 + turn * k * step) for k in range(n_img)]
                 cams = [pose_yaw_pitch((p[0], p[1], CAMERA_HEIGHT_M), y, math.radians(-12.0)) for y in yaws]
                 keys = []
                 for k, c in enumerate(cams):
@@ -1018,7 +1049,11 @@ def m6_realize(r: Runner):
         why = chain_ok(g, vas, combo.objects)
         if why:
             return why
-        x, y, z = combo.objects
+        # roles are shuffled (otherwise "stand at the first, face the second" puts the third almost always on the
+        # turning side); the images are then reordered so that figure i shows the object of role i
+        order = list(range(3))
+        g.rng.shuffle(order)
+        x, y, z = (combo.objects[i] for i in order)
         ang = mv.bearing_from(ctx.obb[x].center, ctx.obb[y].center, ctx.obb[z].center)
         lab = mv.sector8(ang)
         if lab is None:
@@ -1033,11 +1068,13 @@ def m6_realize(r: Runner):
             names[k], names[k + "_the"] = nb, n
         keys = [lab] + g.rng.sample([d for d in mv.DIR8 if d != lab], 3)
         fam = {kk: Phrasing(pp.question, pp.style, MSR_DIR) for kk, pp in MMSI_MSR.items()}
+        vv = [vv[i] for i in order]
         imgs = [g.bank.save(v) for v, _ in vv]
         g.emit("M6", ["MMSI-multistep", "SITE-C05"], "MMSI-Bench", "multi_image", [v for v, _ in vv], imgs, fam, names,
                keys, lab, "mc",
-               gt("三张图从同一位置依次右转拍摄，相邻两张至少共同拍到一个能认出的物体；X、Y、Z 各只在第 1、2、3 张图里能认出、在其他图里完全看不到；答案是站在 X 中心面向 Y 中心时 Z 的 8 向方位（离扇区边界 <7.5° 不出题）。少任何一张图都无法定位对应物体。",
-                  "MMSI 多步题由人工设计，可组合任意能力；这里只组合'跨图定位 + 想象站位'两步。", bearing_deg=round(ang, 1)),
+               gt("三张图从同一位置朝同一方向（随机向左或向右）依次转身拍摄，拍摄顺序上相邻的两张至少共同拍到一个能认出的物体；X、Y、Z 各只在一张图里能认出、在其他图里完全看不到，三个物体的角色随机分配，图按角色重排成图 1、2、3；答案是站在 X 中心面向 Y 中心时 Z 的 8 向方位（离扇区边界 <7.5° 不出题）。少任何一张图都无法定位对应物体。",
+                  "MMSI 多步题由人工设计，可组合任意能力；这里只组合'跨图定位 + 想象站位'两步。",
+                  bearing_deg=round(ang, 1), capture_order_of_figures=[i + 1 for i in order]),
                [g.obj_entry(x, names["x_the"], "stand_at_only_in_image_1"), g.obj_entry(y, names["y_the"], "face_only_in_image_2"),
                 g.obj_entry(z, names["z_the"], "target_only_in_image_3")], {})
         r.take("MMSI-multistep")
@@ -1644,7 +1681,10 @@ def m10_combos(g: GenCtx) -> Iterator[Combo]:
              if 0.6 <= float(np.linalg.norm(ctx.obb[a].center[:2] - ctx.obb[b].center[:2])) <= 3.0]
     g.rng.shuffle(pairs)
     n = 0
-    for a, b in pairs[:g.cap(150)]:
+    lim = g.cap(150, census=300)
+    g.count("M10", "pairs_total", len(pairs))
+    g.count("M10", "pairs_examined", min(len(pairs), lim))
+    for a, b in pairs[:lim]:
         cams1 = frame_candidates(ctx, [a, b], max_out=2)
         for c1 in cams1:
             for s in (1.0, 1.4, 1.8, 2.3, 2.9, 3.5, -1.0, -1.4, -1.8, -2.3, -2.9, -3.5):

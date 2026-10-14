@@ -7,9 +7,11 @@
   and have at least one legal camera passing the v10 prefilter (no caps);
 * pass rate: share of rendered combos that pass the rendered-depth checks (from the render runs);
 * estimate: median combos per scene x pass rate = valid combos per scene; x 800 train / 1,000 scenes;
-* blind baseline: for each question, guess the most frequent answer among the OTHER questions with the same
-  subtask and the same object categories (else the same subtask); compare with a uniform random guess
-  (numeric answers: MRA of the median of the other answers);
+* blind baseline: for each question, guess the most frequent answer among the OTHER questions of the same
+  question type and the same object categories (else the same question type); compare with a uniform random guess
+  (numeric answers: MRA of the median of the other answers). The question type is what a reader can see in the
+  text: the subtask, except that EmbSpatial's left/right/above/below subtasks share one template (their subtask
+  ID is the answer itself, so conditioning on it would leak the answer);
 * tokens and image inputs per question from the records.
 """
 
@@ -24,6 +26,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 
+from .qa import excluded, parse_exclude
 from .scoring import vsi_mra
 
 TRAIN_SCENES = 800
@@ -31,11 +34,78 @@ ALL_SCENES = 1000
 
 
 def _jsonl(p: Path) -> List[Dict[str, Any]]:
-    return [json.loads(l) for l in p.read_text().splitlines() if l.strip()] if p.exists() else []
+    out = []
+    if p.exists():
+        for l in p.read_text().splitlines():
+            try:
+                out.append(json.loads(l))
+            except ValueError:
+                continue
+    return out
+
+
+# census caps (GenCtx.cap(..., census=N)) sample some enumerations; scale those combo kinds back up
+SCALED_KINDS = {"S3": ("triples", {"set_depth"}), "S4": ("triples", {"triple_closer"}),
+                "M1": ("seeds", {"translate", "rotate", "pitch"}), "M2": ("seeds", None), "M4": ("seeds", None),
+                "M6": ("grid_points", None), "M11": ("grid_points", None), "M7": ("grid_points", None),
+                "M10": ("pairs", None)}
+
+
+def scaled_combos(group: str, c: Dict[str, Any]) -> float:
+    total = float(c.get("combos_cpu", 0))
+    if group not in SCALED_KINDS:
+        return total
+    unit, kinds = SCALED_KINDS[group]
+    tot, ex = c.get(unit + "_total", 0), c.get(unit + "_examined", 0)
+    if not ex or tot <= ex:
+        return total
+    f = tot / ex
+    if kinds is None:
+        return total * f
+    part = sum(v for k, v in c.items() if k.startswith("combos_cpu:") and k.split(":", 1)[1] in kinds)
+    return total - part + part * f
+
+
+BLIND_MIN = 30
+
+
+def scan(spec: str) -> Dict[str, Dict[str, Any]]:
+    """Verified combos per scanned scene for rare groups; grid-point sampling (M6/M11) is scaled back up.
+
+    The render runs cap verified combos per scene (--verify-cap), so this is a lower bound when a scene has more."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for part in [x for x in spec.split(";") if x]:
+        g, rr = part.split("=")
+        agg: Counter = Counter()
+        for r in rr.split("+"):
+            s = json.loads((Path(r) / "stats.json").read_text())
+            for sid, v in s["scenes"].items():
+                c = (v.get("stats") or {}).get(g)
+                if c is None:
+                    continue
+                agg["scenes"] += 1
+                for k in ("combos_cpu", "rendered_combos", "verified_combos", "questions",
+                          "grid_points_total", "grid_points_examined"):
+                    agg[k] += c.get(k, 0)
+        f = agg["grid_points_total"] / agg["grid_points_examined"] if agg["grid_points_examined"] else 1.0
+        per = agg["verified_combos"] * f / agg["scenes"] if agg["scenes"] else 0.0
+        out[g] = {"scenes": agg["scenes"], "combos_cpu": agg["combos_cpu"], "rendered": agg["rendered_combos"],
+                  "verified": agg["verified_combos"], "sampling_scale": round(f, 2),
+                  "verified_per_scene": round(per, 3), "full_train_est": int(round(per * TRAIN_SCENES)),
+                  "full_all_est": int(round(per * ALL_SCENES))}
+    return out
 
 
 def canon(q: Dict[str, Any]) -> str:
     return str(q["answer"]).lower()
+
+
+TEMPLATE_FAMILY = {"ES-01": "ES-relation", "ES-02": "ES-relation", "ES-03": "ES-relation", "ES-04": "ES-relation"}
+
+
+def qtype(q: Dict[str, Any]) -> str:
+    st = q["subtasks"][0]
+    return TEMPLATE_FAMILY.get(st, st)
 
 
 def blind(questions: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -46,9 +116,9 @@ def blind(questions: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     for g, qs in groups.items():
         hits, rand, mra_blind, n_num = [], [], [], 0
         for i, q in enumerate(qs):
-            st = q["subtasks"][0]
+            st = qtype(q)
             cats = tuple(sorted(o["display"] for o in q["objects"] if o["role"] not in ("shared_landmark",)))
-            others = [x for j, x in enumerate(qs) if j != i and x["subtasks"][0] == st]
+            others = [x for j, x in enumerate(qs) if j != i and qtype(x) == st]
             same = [x for x in others if tuple(sorted(o["display"] for o in x["objects"]
                                                       if o["role"] not in ("shared_landmark",))) == cats]
             pool = same or others
@@ -70,6 +140,12 @@ def blind(questions: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
                        "random_hit_rate": round(float(np.mean(rand)), 3) if rand else None,
                        "numeric_questions": n_num,
                        "blind_mra_median_guess": round(float(np.mean(mra_blind)), 3) if mra_blind else None}
+        dist: Dict[str, Counter] = defaultdict(Counter)
+        for q in qs:
+            if q["answer_type"] != "numeric":
+                dist[qtype(q)][canon(q)] += 1
+        by_group[g]["answer_share_top"] = {t: [c.most_common(1)[0][0], round(c.most_common(1)[0][1] / sum(c.values()), 2),
+                                               sum(c.values())] for t, c in dist.items()}
     return by_group
 
 
@@ -78,26 +154,55 @@ def main() -> int:
     ap.add_argument("--census", required=True)
     ap.add_argument("--runs", required=True, help="sample runs (comma separated)")
     ap.add_argument("--stats-runs", default="", help="larger runs for pass rates and blind baselines")
+    ap.add_argument("--rate-override", default="", help="GROUP=run1+run2;GROUP2=run3 (pass rates from these runs)")
+    ap.add_argument("--scan", default="", help="GROUP=run1+run2;... rare groups: verified combos per scanned scene "
+                    "from runs that rendered every CPU combo (a larger scene sample than the census)")
+    ap.add_argument("--sample-extra", default="", help="more sample runs: their questions count, their stats do not "
+                    "enter the pass rates (runs that regenerated only some subtasks)")
+    ap.add_argument("--stats-extra", default="", help="same, for the stats runs")
+    ap.add_argument("--exclude", default="", help="RUN_SUFFIX:GROUP[:SUBTASK],qid:QID,... questions replaced by later runs")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     census = json.loads(Path(a.census).read_text())
-    per_scene: Dict[str, List[int]] = defaultdict(list)
+    per_scene: Dict[str, List[float]] = defaultdict(list)
+    raw_per_scene: Dict[str, List[int]] = defaultdict(list)
     for sc in census:
         for g, c in (sc.get("stats") or {}).items():
-            per_scene[g].append(int(c.get("combos_cpu", 0)))
+            raw_per_scene[g].append(int(c.get("combos_cpu", 0)))
+            per_scene[g].append(scaled_combos(g, c))
     runs = [Path(r) for r in a.runs.split(",") if r]
     sruns = [Path(r) for r in a.stats_runs.split(",") if r] or runs
-    sample = [q for r in runs for q in _jsonl(r / "questions.jsonl")]
-    statq = [q for r in sruns for q in _jsonl(r / "questions.jsonl")]
+    rules = parse_exclude(a.exclude)
+    extra_s = [Path(r) for r in a.sample_extra.split(",") if r]
+    extra_t = [Path(r) for r in a.stats_extra.split(",") if r]
+    sample = [q for r in runs + extra_s for q in _jsonl(r / "questions.jsonl") if not excluded(r, q, rules)]
+    statq = [q for r in sruns + extra_t for q in _jsonl(r / "questions.jsonl") if not excluded(r, q, rules)]
     rend, ver = Counter(), Counter()
     fail: Dict[str, Counter] = defaultdict(Counter)
-    for r in sruns:
+    override: Dict[str, List[Path]] = {}
+    for part in [x for x in a.rate_override.split(";") if x]:
+        g_, runs_ = part.split("=")
+        override[g_] = [Path(x) for x in runs_.split("+")]
+    # groups with an override take their pass rates and blind-baseline questions only from those runs
+    statq = [q for q in statq if q["group"] not in override] + \
+        [q for g_, rr in override.items() for r in rr for q in _jsonl(r / "questions.jsonl")
+         if q["group"] == g_ and not excluded(r, q, rules)]
+    # groups with too few questions in the stats runs use the sample runs (sample and top-up runs) instead
+    n_stat = Counter(q["group"] for q in statq)
+    statq = [q for q in statq if n_stat[q["group"]] >= BLIND_MIN] + \
+        [q for q in sample if n_stat[q["group"]] < BLIND_MIN]
+    rate_runs = sorted(set(sruns) | set(runs) | {r for rr in override.values() for r in rr})
+    for r in rate_runs:
         s = json.loads((r / "stats.json").read_text())
         for sid, v in s["scenes"].items():
             for g, c in (v.get("stats") or {}).items():
+                if g in override and r not in override[g]:
+                    continue
                 rend[g] += c.get("rendered_combos", 0)
                 ver[g] += c.get("verified_combos", 0)
             for g, c in (v.get("fail") or {}).items():
+                if g in override and r not in override[g]:
+                    continue
                 fail[g].update(c)
     out: Dict[str, Any] = {"groups": {}}
     for g in sorted(set(per_scene) | set(rend), key=lambda x: (x[0] != "S", x[0] != "M", int(x[1:]))):
@@ -109,8 +214,9 @@ def main() -> int:
         tok512 = [q["tokens"]["512"]["total"] for q in qs]
         tok256 = [q["tokens"]["256"]["total"] for q in qs]
         out["groups"][g] = {
-            "combos_per_scene_median": med, "combos_per_scene_range": [min(combos), max(combos)] if combos else None,
-            "combos_total_20": int(sum(combos)) if combos else None, "scenes_with_combos": sum(1 for c in combos if c > 0),
+            "combos_per_scene_median": med, "combos_per_scene_range": [round(min(combos), 1), round(max(combos), 1)] if combos else None,
+            "combos_raw_total_20": int(sum(raw_per_scene.get(g, []))),
+            "combos_total_20": round(float(sum(combos)), 1) if combos else None, "scenes_with_combos": sum(1 for c in combos if c > 0),
             "rendered": rend[g], "verified": ver[g], "pass_rate": round(pr, 3) if pr is not None else None,
             "valid_per_scene_est": round(med * pr, 1) if med is not None and pr is not None else None,
             "valid_mean_per_scene_est": round(float(np.mean(combos)) * pr, 1) if combos and pr is not None else None,
@@ -122,6 +228,7 @@ def main() -> int:
             "tokens_256_mean": round(float(np.mean(tok256)), 1) if tok256 else None,
             "top_fail": fail[g].most_common(4),
         }
+    out["scan"] = scan(a.scan)
     out["blind"] = blind(statq)
     out["sample_total"] = len(sample)
     out["stats_total"] = len(statq)

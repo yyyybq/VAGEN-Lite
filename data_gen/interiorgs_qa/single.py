@@ -595,7 +595,10 @@ def s3_combos(g: GenCtx) -> Iterator[Combo]:
             continue
         trip = list(itertools.combinations(sorted(objs), 3))
         g.rng.shuffle(trip)
-        for t in trip[:g.cap(40)]:
+        lim = g.cap(40, census=300)
+        g.count("S3", "triples_total", len(trip))
+        g.count("S3", "triples_examined", min(len(trip), lim))
+        for t in trip[:lim]:
             if not g.distinct_names(t):
                 continue
             cs = [ctx.obb[o].center for o in t]
@@ -720,12 +723,15 @@ def s4_combos(g: GenCtx) -> Iterator[Combo]:
     for o in pool:
         room_objs.setdefault(ctx.room_of_obj.get(o), []).append(o)
     for room, objs in room_objs.items():
-        trip = list(itertools.permutations(sorted(objs), 3))
+        trip = [(c, a, b) for c, a, b in itertools.permutations(sorted(objs), 3) if a < b]
         g.rng.shuffle(trip)
+        lim = g.cap(len(trip), census=300)
+        g.count("S4", "triples_total", len(trip))
+        g.count("S4", "triples_examined", min(len(trip), lim))
         n = 0
-        for c, a, b in trip:
-            if n >= g.cap(25) or a > b:
-                continue
+        for c, a, b in trip[:lim]:
+            if n >= g.cap(25):
+                break
             if not g.distinct_names([a, b, c]):
                 continue
             da, db = distance(ctx, a, c), distance(ctx, b, c)
@@ -797,7 +803,9 @@ def s4_realize(r: Runner):
                     cand += [("touching", "no")]
                 if not cand:
                     return "bl03_distance_band"
-                rel, truth = g.rng.choice(cand)
+                # pick the truth value first so yes/no stay balanced (most pairs also qualify for "touching? no")
+                want = g.rng.choice(("yes", "no"))
+                rel, truth = g.rng.choice([c for c in cand if c[1] == want] or cand)
                 fam = blink_yesno(g.rng.choice(BL_REL_ORIG[rel]), BL_REL_PARA[rel])
                 g.emit("S4", ["BL-03", "SITE-C02"], bench_of("BL-03"), "image", [vid], [img], fam,
                        fields_ab(names[0], names[1]), YESNO, truth, "yesno",

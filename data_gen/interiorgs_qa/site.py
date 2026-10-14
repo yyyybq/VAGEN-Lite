@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 import numpy as np
 
 from .geom import OBB, camera_K, project
+from .qa import excluded, parse_exclude
 
 SITE_VERSION = "interiorgs_qa_review_site_v1"
 TEMPLATE = Path(__file__).with_name("site_template.html")
@@ -84,7 +85,9 @@ def main() -> int:
     ap.add_argument("--trials", default=None)
     ap.add_argument("--out", required=True)
     ap.add_argument("--title", default="InteriorGS 空间问答样题审核")
+    ap.add_argument("--exclude", default="", help="RUN_SUFFIX:GROUP[:SUBTASK],qid:QID,... questions replaced by later runs")
     a = ap.parse_args()
+    rules = parse_exclude(a.exclude)
     site = Path(a.out)
     site.mkdir(parents=True, exist_ok=True)
     cache: Dict[str, str] = {}
@@ -93,6 +96,8 @@ def main() -> int:
         run = Path(run)
         views = {r["view_id"]: r for r in _jsonl(run / "views.jsonl")}
         for q in _jsonl(run / "questions.jsonl"):
+            if excluded(run, q, rules):
+                continue
             imgs = q["extra"]["images"]
             img512 = [copy_img(run / p, site, p, cache) for p in imgs]
             img256 = [copy_img(run / p.replace(".png", "_256.png"), site, p.replace(".png", "_256.png"), cache) for p in imgs]
