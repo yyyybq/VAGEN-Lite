@@ -45,7 +45,7 @@ class SuccessRulesTest(unittest.TestCase):
         cls._tmp.cleanup()
 
     def test_thresholds_from_the_labels(self):
-        self.assertEqual(TV.VISIBILITY_RULE_VERSION, "face_visible_v2")
+        self.assertEqual(TV.VISIBILITY_RULE_VERSION, "face_visible_v3")
         self.assertEqual(TV.MIN_FACE_VISIBLE_FRACTION, 0.4)
         self.assertEqual(TV.MIN_FACE_AREA_FRACTION, 0.003)
         self.assertEqual(TV.LATERAL_MAX_ANGLE_DEG, 45.0)

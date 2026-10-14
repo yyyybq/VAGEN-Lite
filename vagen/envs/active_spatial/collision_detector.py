@@ -32,6 +32,65 @@ COLLISION_CONVENTION_MIN_EVIDENCE = 20
 COLLISION_CONVENTION_MIN_RELATIVE_MARGIN = 0.10
 
 
+
+# Door openings: a hole belongs to a wall when all its corners lie within half the wall's thickness (plus this
+# slack) of the wall's centre line.
+_HOLE_ON_WALL_SLACK_M = 0.05
+
+
+def occlusion_wall_panels(structure: Dict[str, Any], y_sign: float
+                          ) -> Optional[List[Tuple[np.ndarray, np.ndarray, float, float]]]:
+    """Wall panels (a, b, z_low, z_high) for the visibility rule from structure.json ``walls`` and ``holes``.
+
+    Each wall is its centre line extruded from the floor to its ``height``.  A DOOR hole on the wall removes
+    its span up to the door's top (the part above the door still hides); windows stay solid.  Returns None
+    when the file has no ``walls`` list (the caller then falls back to the room edges)."""
+    walls = structure.get("walls") if isinstance(structure, dict) else None
+    if not isinstance(walls, list):
+        return None
+    doors = []
+    for hole in structure.get("holes", []) or []:
+        pts = [p for p in hole.get("profile", []) or [] if len(p) >= 2]
+        if str(hole.get("type", "")).upper() != "DOOR" or len(pts) < 2:
+            continue
+        xy = np.array([[float(p[0]), y_sign * float(p[1])] for p in pts])
+        zs = [float(p[2]) for p in pts if len(p) >= 3]
+        doors.append((xy, min(zs) if zs else 0.0, max(zs) if zs else float("inf")))
+    panels: List[Tuple[np.ndarray, np.ndarray, float, float]] = []
+    for wall in walls:
+        loc = wall.get("location") or []
+        if len(loc) < 2:
+            continue
+        a = np.array([float(loc[0][0]), y_sign * float(loc[0][1])])
+        b = np.array([float(loc[1][0]), y_sign * float(loc[1][1])])
+        length = float(np.linalg.norm(b - a))
+        height = float(wall.get("height") or 2.8)
+        if length < 1e-6 or height <= 0.0:
+            continue
+        ev = (b - a) / length
+        nv = np.array([-ev[1], ev[0]])
+        half = 0.5 * float(wall.get("thickness") or 0.0) + _HOLE_ON_WALL_SLACK_M
+        cuts = []
+        for xy, z0, z1 in doors:
+            u = (xy - a) @ ev
+            if np.abs((xy - a) @ nv).max() > half or u.max() <= 0.0 or u.min() >= length:
+                continue
+            cuts.append((max(0.0, float(u.min())), min(length, float(u.max())), max(0.0, z0), min(height, z1)))
+        cuts.sort()
+        pos = 0.0
+        for u0, u1, z0, z1 in cuts:
+            if u0 > pos:
+                panels.append((a + ev * pos, a + ev * u0, 0.0, height))
+            if z0 > 0.0:
+                panels.append((a + ev * u0, a + ev * u1, 0.0, z0))
+            if z1 < height:
+                panels.append((a + ev * u0, a + ev * u1, z1, height))
+            pos = max(pos, u1)
+        if pos < length:
+            panels.append((a + ev * pos, b.copy(), 0.0, height))
+    return panels
+
+
 @dataclass
 class CollisionResult:
     """Result of collision check."""
@@ -196,6 +255,10 @@ class CollisionDetector:
         self.room_boundary: Optional[AABB] = None
         self.room_profiles: List[np.ndarray] = []  # Room polygons from structure.json
         self.wall_segments: List[Tuple[np.ndarray, np.ndarray]] = []  # Wall line segments
+        # Walls for the visibility rule only (target_visibility.OccluderSet.from_detector): structure.json
+        # "walls" (centre lines) as panels (a, b, z_low, z_high) with door openings cut out.  None when
+        # structure.json has no "walls" list; collision keeps using wall_segments.
+        self.occlusion_walls: Optional[List[Tuple[np.ndarray, np.ndarray, float, float]]] = None
         self.structure_y_sign: float = -1.0
         self.structure_alignment_scores: Dict[str, int] = {}
         self.structure_convention_status: str = "unverified"
@@ -288,6 +351,7 @@ class CollisionDetector:
                 
                 self.room_profiles = []
                 self.wall_segments = []
+                self.occlusion_walls = None
                 door_segments = []
                 
                 y_sign = self._select_structure_y_sign(structure_data, scene_id)
@@ -334,6 +398,7 @@ class CollisionDetector:
                         is_door = self._segment_overlaps_door(p1, p2, door_segments)
                         if not is_door:
                             self.wall_segments.append((p1, p2))
+                self.occlusion_walls = occlusion_wall_panels(structure_data, y_sign)
                 
                 print(
                     f"[CollisionDetector] Loaded {len(self.room_profiles)} rooms, "
@@ -544,6 +609,7 @@ class CollisionDetector:
             try:
                 self.room_profiles = []
                 self.wall_segments = []
+                self.occlusion_walls = None
                 door_segments = []
                 y_sign = self._select_structure_y_sign(structure_data, scene_id)
                 for room in structure_data.get("rooms", []):
@@ -572,6 +638,7 @@ class CollisionDetector:
                         p2 = room_profile[(i + 1) % n].copy()
                         if not self._segment_overlaps_door(p1, p2, door_segments):
                             self.wall_segments.append((p1, p2))
+                self.occlusion_walls = occlusion_wall_panels(structure_data, y_sign)
                 print(
                     f"[CollisionDetector] Loaded {len(self.room_profiles)} rooms, "
                     f"{len(self.wall_segments)} wall segments from AOSS structure.json "

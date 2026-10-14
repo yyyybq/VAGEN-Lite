@@ -18,11 +18,18 @@ The same definition decides "at least one target can be recognised" in a start f
 generator's former occlusion gate (half of the whole box unhidden), which judged built-in objects such as a
 fridge that only shows its front as hidden.
 
-Occluders: every labels.json box except labels that never block a view (rugs, ceiling lights,
-curtains, ...) and thick "wall" label boxes (diagonal walls; the structure walls cover them), plus the
-structure walls extruded to ``WALL_HEIGHT_M``.  Boxes of built-in objects overlap the wall or a neighbouring
-cabinet; an overlap must not hide them, so an occluder only counts if the sight line enters it before the
-line comes within ``OVERLAP_MARGIN_M`` of the target's box.
+Occluders: every labels.json box except labels that never block a view (rugs, ceiling lights, windows,
+...) and thick "wall" label boxes (diagonal walls; the structure walls cover them), plus the walls of
+structure.json.  Boxes of built-in objects overlap the wall or a neighbouring cabinet; an overlap must not
+hide them, so an occluder only counts if the sight line enters it before the line comes within
+``OVERLAP_MARGIN_M`` of the target's box.
+
+Walls (rule ``face_visible_v3``, decision of 2026-10-14 after the round-5 check page): the structure.json
+``walls`` list, each centre line extruded to its height, with door openings cut out up to the door's top;
+curtains hide what is behind them.  Before, the walls were the room outlines minus every edge that touches
+a door (collision still uses those), so a kitchen wall with a door in it hid nothing and interior walls that
+are no room edge were missing; curtains never hid anything, so a camera behind a closed curtain "saw" the
+room.  A detector without a structure.json ``walls`` list falls back to the room outlines.
 
 The thresholds were set on 207 human-labelled examples (data_gen/interiorgs_v10/cluster_runs/
 REPORT_R5_20261014.md).  ``score_with_visibility`` is what the env's success check calls (unless
@@ -36,7 +43,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-VISIBILITY_RULE_VERSION = "face_visible_v2"
+VISIBILITY_RULE_VERSION = "face_visible_v3"
 FACE_SAMPLES_PER_AXIS = 5          # 5 x 5 sample points per face
 # Human labels (2026-10-13): recognised in ~70% of examples with 0.3-0.4 of the best face visible and in
 # ~96% at 0.4-0.5; in 50-63% below 0.3% of the image and 93% at 0.3-0.6%.
@@ -80,6 +87,9 @@ NON_OCCLUDING_HEAD_NOUNS = frozenset({
     "curtain", "curtains", "window",
 })
 WALL_LABEL_HEAD_NOUNS = frozenset({"wall"})
+# Curtains hide what is behind them under face_visible_v3 (OccluderSet.from_detector); the generator's old
+# box_v1 rule keeps them see-through.
+CURTAIN_HEAD_NOUNS = frozenset({"curtain", "curtains"})
 
 _T_EPS = 1e-9
 _CHUNK_ELEMS = 1_500_000
@@ -98,6 +108,11 @@ def is_non_occluding(label: Any) -> bool:
     return text.split(" ")[-1] in NON_OCCLUDING_HEAD_NOUNS
 
 
+def is_curtain_label(label: Any) -> bool:
+    text = _norm_label(label)
+    return bool(text) and text.split(" ")[-1] in CURTAIN_HEAD_NOUNS
+
+
 def is_wall_label(label: Any) -> bool:
     text = _norm_label(label)
     return bool(text) and (text in WALL_LABEL_HEAD_NOUNS or text.split(" ")[-1] in WALL_LABEL_HEAD_NOUNS)
@@ -107,10 +122,14 @@ def is_wall_label(label: Any) -> bool:
 # Occluders
 # =============================================================================
 class OccluderSet:
-    """Arrays of occluding AABBs plus extruded wall segments for one scene."""
+    """Arrays of occluding AABBs plus extruded wall panels for one scene.
+
+    Wall k is the vertical panel over the segment wall_a[k] -> wall_b[k] between heights wall_z0[k] and
+    wall_z1[k] (default: the floor to ``wall_height``)."""
 
     def __init__(self, ids: Sequence[str], labels: Sequence[str], mins: np.ndarray, maxs: np.ndarray,
-                 wall_a: np.ndarray, wall_b: np.ndarray, wall_height: float = WALL_HEIGHT_M) -> None:
+                 wall_a: np.ndarray, wall_b: np.ndarray, wall_height: float = WALL_HEIGHT_M,
+                 wall_z0: Optional[Sequence[float]] = None, wall_z1: Optional[Sequence[float]] = None) -> None:
         self.ids = np.asarray([str(i) for i in ids], dtype=object)
         self.labels = list(labels)
         self.mins = np.asarray(mins, float).reshape(-1, 3)
@@ -118,18 +137,23 @@ class OccluderSet:
         self.wall_a = np.asarray(wall_a, float).reshape(-1, 2)
         self.wall_b = np.asarray(wall_b, float).reshape(-1, 2)
         self.wall_height = float(wall_height)
+        n = self.wall_a.shape[0]
+        self.wall_z0 = np.zeros(n) if wall_z0 is None else np.asarray(wall_z0, float).reshape(n)
+        self.wall_z1 = np.full(n, self.wall_height) if wall_z1 is None else np.asarray(wall_z1, float).reshape(n)
 
     @classmethod
     def from_boxes(cls, boxes: Iterable[Tuple[str, str, Any, Any]], wall_segments: Sequence[Tuple[Any, Any]] = (),
-                   include_wall_boxes: bool = True) -> "OccluderSet":
-        """``boxes``: (id, label, bmin, bmax) per object."""
+                   include_wall_boxes: bool = True, curtains_occlude: bool = False,
+                   wall_panels: Optional[Sequence[Tuple[Any, Any, float, float]]] = None) -> "OccluderSet":
+        """``boxes``: (id, label, bmin, bmax) per object.  ``wall_panels`` (a, b, z_low, z_high), when given,
+        replace ``wall_segments`` (full height)."""
         ids: List[str] = []
         labels: List[str] = []
         mins: List[np.ndarray] = []
         maxs: List[np.ndarray] = []
         for oid, label, bmin, bmax in boxes:
             bmin, bmax = np.asarray(bmin, float), np.asarray(bmax, float)
-            if is_non_occluding(label):
+            if is_non_occluding(label) and not (curtains_occlude and is_curtain_label(label)):
                 continue
             if is_wall_label(label):
                 if not include_wall_boxes:
@@ -143,18 +167,29 @@ class OccluderSet:
             labels.append(str(label))
             mins.append(bmin)
             maxs.append(bmax)
+        mins_a = np.asarray(mins, float).reshape(-1, 3)
+        maxs_a = np.asarray(maxs, float).reshape(-1, 3)
+        if wall_panels is not None:
+            wa = [np.asarray(p[0], float)[:2] for p in wall_panels]
+            wb = [np.asarray(p[1], float)[:2] for p in wall_panels]
+            return cls(ids, labels, mins_a, maxs_a, np.asarray(wa, float).reshape(-1, 2),
+                       np.asarray(wb, float).reshape(-1, 2), wall_z0=[float(p[2]) for p in wall_panels],
+                       wall_z1=[float(p[3]) for p in wall_panels])
         wa = [np.asarray(a, float)[:2] for a, _ in wall_segments]
         wb = [np.asarray(b, float)[:2] for _, b in wall_segments]
-        return cls(ids, labels, np.asarray(mins, float).reshape(-1, 3), np.asarray(maxs, float).reshape(-1, 3),
-                   np.asarray(wa, float).reshape(-1, 2), np.asarray(wb, float).reshape(-1, 2))
+        return cls(ids, labels, mins_a, maxs_a, np.asarray(wa, float).reshape(-1, 2),
+                   np.asarray(wb, float).reshape(-1, 2))
 
     @classmethod
     def from_detector(cls, detector: Any) -> "OccluderSet":
-        """The scene's occluders from a loaded CollisionDetector (labels.json boxes + structure walls).
+        """The scene's occluders from a loaded CollisionDetector: labels.json boxes (curtains included) and
+        the structure.json walls with their door openings (``detector.occlusion_walls``; the room outlines
+        when the file has no walls list).
 
         Both the env and the generator build their occluders this way, from the same loader."""
         return cls.from_boxes(getattr(detector, "label_boxes", None) or [],
-                              list(getattr(detector, "wall_segments", None) or []))
+                              list(getattr(detector, "wall_segments", None) or []), curtains_occlude=True,
+                              wall_panels=getattr(detector, "occlusion_walls", None))
 
     def __len__(self) -> int:
         return int(self.mins.shape[0])
@@ -206,7 +241,7 @@ def blocked_mask(occ: OccluderSet, origins: np.ndarray, points: np.ndarray, targ
                 hit = (tf >= tn) & (tf > _T_EPS) & (tn < limit[:, :, None] - _T_EPS)
                 blocked |= hit.any(axis=2)
         if occ.wall_a.shape[0]:
-            wa, wb = occ.wall_a, occ.wall_b
+            wa, wb, wz0, wz1 = occ.wall_a, occ.wall_b, occ.wall_z0, occ.wall_z1
             dd = d[:, :, None, :]
             e = (wb - wa)[None, None, :, :]
             diff = (wa[None, :, :] - o[:, None, :2])[:, None, :, :]
@@ -216,7 +251,7 @@ def blocked_mask(occ: OccluderSet, origins: np.ndarray, points: np.ndarray, targ
                 u = (diff[..., 0] * dd[..., 1] - diff[..., 1] * dd[..., 0]) / denom
             z = o[:, None, None, 2] + t * dd[..., 2]
             hit = ((np.abs(denom) > 1e-12) & (t > _T_EPS) & (t < limit[:, :, None] - _T_EPS)
-                   & (u >= 0.0) & (u <= 1.0) & (z >= 0.0) & (z <= occ.wall_height))
+                   & (u >= 0.0) & (u <= 1.0) & (z >= wz0[None, None, :]) & (z <= wz1[None, None, :]))
             blocked |= hit.any(axis=2)
         out[s0:s0 + step] = blocked
     return out
