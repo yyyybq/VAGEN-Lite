@@ -29,6 +29,13 @@ class JobScoTest(unittest.TestCase):
             self.assertEqual(json.loads((run / "job_rl" / "prepared.json").read_text())["spec"], "N4lS.Iq.I80.8")
             self.assertTrue((run / "job" / "launch.sh").exists())
 
+    def test_jobs_run_from_the_cluster_checkout(self):
+        """Round 6: the cluster checkout is the only code directory (no more VAGEN-Lite-r4)."""
+        self.assertEqual(J.WORKTREE, "/mnt/umm/users/yinbaiqiao/VAGEN-Lite")
+        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        self.assertIn("\nWORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite\n", script)
+        self.assertNotIn("VAGEN-Lite-r4", script)
+
 
 if __name__ == "__main__":
     unittest.main()

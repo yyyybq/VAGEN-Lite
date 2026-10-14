@@ -23,7 +23,7 @@ import subprocess
 from pathlib import Path
 from typing import List
 
-WORKTREE = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-r4"
+WORKTREE = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite"  # the cluster checkout, the only code directory since round 6
 SCRIPT = "examples/train/active_spatial/sco_interiorgs_v10_train.sh"
 SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
 IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"

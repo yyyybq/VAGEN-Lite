@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# InteriorGS v10 training jobs (2026-10-14), run from the separate work tree VAGEN-Lite-r4.
+# InteriorGS v10 training jobs (2026-10-14), run from the cluster checkout /mnt/umm/users/yinbaiqiao/VAGEN-Lite
+# (since round 6 the only code directory; it is checked against main by git hash before a launch).
 #
 #   sft-trial  RUN LF_DIR [MAX_STEPS]   1 card : LLaMA-Factory through accelerate + FSDP (the formal path, 1 process)
 #   sft        RUN LF_DIR               8 cards: the formal SFT (FSDP, full fine-tune, vision tower frozen)
@@ -12,7 +13,7 @@
 set -euo pipefail
 MODE=${1:?mode}
 RUN=${2:?run directory}
-WORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-r4
+WORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite
 ENV_ROOT=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
 PY=${ENV_ROOT}/bin/python
 GS_ROOT=/mnt/umm/users/yinbaiqiao/InteriorGS_ply
