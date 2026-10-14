@@ -14,7 +14,7 @@
 #                                        the retention rule (kept: updates 2 and 3) in RUN/logs/resume_check.json
 #
 # Environment setup as in sco_dense_score_reward_only_parallel.sh. sco jobs run as root: outputs are handed
-# back to the owner of RUN on exit.
+# back to the owner of RUN on exit (and the SFT model / evaluation results, written outside RUN).
 set -euo pipefail
 MODE=${1:?mode}
 RUN=${2:?run directory}
@@ -26,7 +26,7 @@ VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_sp
 mkdir -p "${RUN}/logs"
 OWNER=$(stat -c %u:%g "${RUN}")
 # the exit record is written before ownership is handed back, so it is not left owned by root
-trap 'status=$?; [[ -n ${renderer_pid:-} ]] && kill "${renderer_pid}" 2>/dev/null; printf "{\"mode\":\"%s\",\"exit_status\":%s,\"ended_utc\":\"%s\"}\n" "${MODE}" "${status}" "$(date -u +%FT%TZ)" > "${RUN}/logs/${MODE}_exit.json"; chown -R "${OWNER}" "${RUN}" 2>/dev/null || true; exit ${status}' EXIT
+trap 'status=$?; [[ -n ${renderer_pid:-} ]] && kill "${renderer_pid}" 2>/dev/null; printf "{\"mode\":\"%s\",\"exit_status\":%s,\"ended_utc\":\"%s\"}\n" "${MODE}" "${status}" "$(date -u +%FT%TZ)" > "${RUN}/logs/${MODE}_exit.json"; chown -R "${OWNER}" "${RUN}" ${ALSO_OWNED:+"${ALSO_OWNED}"} 2>/dev/null || true; exit ${status}' EXIT
 exec > >(tee -a "${RUN}/logs/${MODE}-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).log") 2>&1
 cd "${WORKTREE}"
 export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1
@@ -75,6 +75,7 @@ lf_train() {  # $1 = LLaMA-Factory recipe, $2 = number of processes
 case ${MODE} in
   sft-trial)
     LF=${3:?LLaMA-Factory directory}
+    ALSO_OWNED=${LF}  # the model is written to LF/model, outside RUN
     STEPS=${4:-30}
     export CUDA_VISIBLE_DEVICES=0
     "${PY}" - "${LF}/train.yaml" "${RUN}/sft_trial.yaml" "${RUN}/model" "${STEPS}" <<'PY'
@@ -88,6 +89,7 @@ PY
     ;;
   sft)
     LF=${3:?LLaMA-Factory directory}
+    ALSO_OWNED=${LF}  # the model is written to LF/model, outside RUN
     export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
     lf_train "${LF}/train.yaml" 8
     ;;
@@ -123,6 +125,7 @@ PY
   eval)
     EVAL=${3:?evaluation folder}
     NAME=${4:?model name}
+    ALSO_OWNED=${EVAL}/${NAME}  # the results folder, outside RUN
     MODEL=${5:?Hugging Face model folder}
     export CUDA_VISIBLE_DEVICES=0
     start_renderer 0

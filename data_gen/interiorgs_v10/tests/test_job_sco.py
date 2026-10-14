@@ -36,6 +36,14 @@ class JobScoTest(unittest.TestCase):
         self.assertIn("\nWORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite\n", script)
         self.assertNotIn("VAGEN-Lite-r4", script)
 
+    def test_outputs_outside_run_are_handed_back(self):
+        """Round 8: the SFT model (LF/model) and evaluation results (EVAL/NAME) were left root-only (mode 600)."""
+        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        self.assertIn('chown -R "${OWNER}" "${RUN}" ${ALSO_OWNED:+"${ALSO_OWNED}"}', script)
+        for mode, line in (("sft)", "ALSO_OWNED=${LF}"), ("eval)", "ALSO_OWNED=${EVAL}/${NAME}")):
+            block = script.split(f"\n  {mode}\n", 1)[1].split(";;", 1)[0]
+            self.assertIn(line, block)
+
 
 if __name__ == "__main__":
     unittest.main()
