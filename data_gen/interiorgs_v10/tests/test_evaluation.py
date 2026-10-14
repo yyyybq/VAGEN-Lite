@@ -47,6 +47,19 @@ class EvaluationTest(unittest.TestCase):
             table = (Path(tmp) / "table.md").read_text(encoding="utf-8")
         self.assertIn("| sft | 2 | 0.500 |", table)
 
+    def test_replace_flagged(self):
+        picked = [_row(i, "projective_relations", 2) for i in range(4)] + [_row(10, "occlusion_alignment", 8)]
+        pool = picked + [_row(20 + i, "projective_relations", 1 + i % 3) for i in range(3)] + [_row(30, "projective_relations", 7)]
+        res = E.replace_flagged(picked, ["t0001", "t0010", "t0021"], pool, seed=3)
+        ids = [r["task_id"] for r in res["tasks"]]
+        self.assertEqual(len(ids), 4)                         # the OA task had no substitute
+        self.assertNotIn("t0001", ids)
+        self.assertNotIn("t0021", ids)                        # flagged tasks never come back in
+        swap = next(s for s in res["swaps"] if s["out"] == "t0001")
+        self.assertIn(swap["in"], {"t0020", "t0022"})          # same family and d* band (1-3), unflagged
+        self.assertIsNone(next(s for s in res["swaps"] if s["out"] == "t0010")["in"])
+        self.assertEqual(res, E.replace_flagged(picked, ["t0001", "t0010", "t0021"], list(reversed(pool)), seed=3))
+
 
 if __name__ == "__main__":
     unittest.main()

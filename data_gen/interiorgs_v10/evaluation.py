@@ -9,6 +9,9 @@ share it):
     # per model, a one-card sco job (sco_interiorgs_v10_train.sh eval RUN EVAL NAME MODEL [PROMPT_FORMAT]):
     python -m data_gen.interiorgs_v10.evaluation run --eval EVAL --name NAME --model HF_DIR
     python -m data_gen.interiorgs_v10.evaluation table --eval EVAL     # EVAL/table.md, EVAL/table.json
+    # round 7: drop tasks flagged by the rendered-depth check, refill from the same family and d* band
+    python -m data_gen.interiorgs_v10.evaluation replace --eval EVAL --flagged depth_check_summary.json \
+        --run RUN/output --split-manifest RUN/split_manifest.json --out EVAL2
 
 Subset: ``PER_FAMILY`` tasks per family (all of a family's test tasks when it has fewer), spread evenly over
 the d* bands 1-3 / 4-6 / 7-8 (a band short of tasks gives its share to the others), drawn with ``SEED``.
@@ -87,6 +90,54 @@ def cmd_select(args: argparse.Namespace) -> None:
                  "task_ids": [r["task_id"] for r in picked]}
     (out / "selection.json").write_text(json.dumps(selection, indent=1))
     print(json.dumps({k: v for k, v in selection.items() if k != "task_ids"}, indent=1))
+
+
+def replace_flagged(picked: Sequence[Dict[str, Any]], flagged: Sequence[str], pool: Sequence[Dict[str, Any]],
+                    seed: int = SEED) -> Dict[str, Any]:
+    """Each flagged task of ``picked`` is replaced by an unflagged task of ``pool`` (not yet picked) from the same
+    family and d* band, else from the same family; a task with no substitute is dropped.  The others stay."""
+    flagged = set(flagged)
+    cell = lambda r: (r["task_type"], band_name(int(r["difficulty"]["d_star"])))  # noqa: E731
+    used = {r["task_id"] for r in picked}
+    cand: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
+    for r in sorted(pool, key=lambda r: r["task_id"]):
+        if r["task_id"] not in flagged and r["task_id"] not in used:
+            cand[cell(r)].append(r)
+    rng = random.Random(seed)
+    for v in cand.values():
+        rng.shuffle(v)
+    out, swaps = [], []
+    for r in picked:
+        if r["task_id"] not in flagged:
+            out.append(r)
+            continue
+        c = cell(r)
+        src = cand[c] or next((cand[k] for k in sorted(cand) if k[0] == c[0] and cand[k]), [])
+        new = src.pop() if src else None
+        if new is not None:
+            out.append(new)
+        swaps.append({"out": r["task_id"], "in": new["task_id"] if new else None, "cell": list(c)})
+    return {"tasks": out, "swaps": swaps}
+
+
+def cmd_replace(args: argparse.Namespace) -> None:
+    from .release import finalize_task_row, split_lookup
+
+    picked = _jsonl(Path(args.eval) / "tasks.jsonl")
+    flagged = json.loads(Path(args.flagged).read_text())["flagged_task_ids"]
+    lookup = split_lookup(json.loads(Path(args.split_manifest).read_text()))
+    pool = [finalize_task_row(r, "test") for r in _jsonl(Path(args.run) / "tasks.jsonl")
+            if lookup.get(str(r["scene_id"])) == "test"]
+    res = replace_flagged(picked, flagged, pool, args.seed)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in res["tasks"]))
+    summary = {"version": VERSION, "seed": args.seed, "source": str(args.eval), "tasks": len(res["tasks"]),
+               "flagged_in_source": len(res["swaps"]), "replaced": sum(s["in"] is not None for s in res["swaps"]),
+               "dropped": sum(s["in"] is None for s in res["swaps"]), "swaps": res["swaps"],
+               "task_ids": [r["task_id"] for r in res["tasks"]]}
+    (out / "selection.json").write_text(json.dumps(summary, indent=1))
+    print(json.dumps({k: v for k, v in summary.items() if k not in ("swaps", "task_ids")}, indent=1))
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +305,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--max-turns", type=int, default=12)
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
+    x = sub.add_parser("replace")
+    x.add_argument("--eval", required=True, help="the evaluation folder to start from (tasks.jsonl)")
+    x.add_argument("--flagged", required=True, help="depth_check_summary.json (flagged_task_ids)")
+    x.add_argument("--run", required=True)
+    x.add_argument("--split-manifest", required=True)
+    x.add_argument("--seed", type=int, default=SEED)
+    x.add_argument("--out", required=True)
     args = ap.parse_args(argv)
-    {"select": cmd_select, "run": cmd_run, "table": cmd_table}[args.cmd](args)
+    {"select": cmd_select, "run": cmd_run, "table": cmd_table, "replace": cmd_replace}[args.cmd](args)
     return 0
 
 
