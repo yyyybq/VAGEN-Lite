@@ -19,24 +19,25 @@
 - COVERAGE.md 第二版（逐项重判 + 白话摘要 + 4.0 节逐项改动表；92 个子任务编号全部落到组、试验或不做清单，无遗漏）。
 - 盲答基线发现 5 处由出题顺序造成的答案偏差，已改代码并重跑：M6 多步题"右前"占 10/11（连拍总向右转、角色固定）；
   S1 的 BLINK"左边吗"全答"是"；S2 上下题、S4"碰到吗"多答"否"；M1 的 BLINK 多视角题"向右"占 85–89%（转动方向与起始方位按固定顺序尝试）。
-- M6、M11 重跑完成（各 10 题）；审核网页、COVERAGE 第二版、报告初稿完成。
+- M6、M11 重跑完成（各 10 题）；是非题与 BLINK 多视角题的答案平衡重跑完成。
+- 报告 [`REPORT_20261014.md`](REPORT_20261014.md) 完成（产量、盲答基线、预算方案、试验说明、需要拍板的 10 件事）；审核网页同步到本机。
 
-## 2. 正在运行什么（2026-10-14 23:30 UTC 前后提交）
+## 2. 正在运行什么
 
-| 任务 | 编号 | 输出（日志在 `exps/interiorgs_qa_jobs/<名字>/logs/`） |
+没有。最后一批 GPU 任务（2026-10-14 23:35 UTC 前完成）：
+
+| 任务 | 编号 | 输出 |
 | --- | --- | --- |
-| 重跑 S1/S2/S4 的是非题、M1 的 BLINK 多视角题样题（答案平衡最终版） | SCO pt-ymlxym1a | `exps/interiorgs_qa_sample_20261014/rebalance4/`，任务名 rebal4_sample |
-| 同上，统计扩量（盲答基线用，4 个任务各 5 个场景） | SCO pt-wo8h9pgr / pt-8zwxbpb4 / pt-nhjfta7a / pt-i5ejp6mc | `exps/interiorgs_qa_stats_20261014/rebalance4_{a,b,c,d}/`，任务名 rebal4_stats_{a,b,c,d} |
+| 重跑 M6、M11（修正转身方向与角色） | SCO pt-mo70i9gp | `exps/interiorgs_qa_sample_20261014/topup_pan2/` |
+| 重跑 S1/S2/S4 的是非题、M1 的 BLINK 多视角题样题（答案平衡最终版） | SCO pt-ymlxym1a | `exps/interiorgs_qa_sample_20261014/rebalance4/` |
+| 同上，统计扩量（4 个任务各 5 个场景） | SCO pt-wo8h9pgr / pt-8zwxbpb4 / pt-nhjfta7a / pt-i5ejp6mc | `exps/interiorgs_qa_stats_20261014/rebalance4_{a,b,c,d}/` |
 
-已完成的补跑：M6、M11 重跑（topup_pan2，pt-mo70i9gp）。中间版本 rebalance、rebalance2、rebalance3_* 不再使用（rebalance2 的 S1 题已平衡，但为一致起见改用 rebalance4）。
-被取代的旧题（网页和报告里都去掉）的清单在 `docs/interiorgs_qa/audit/report_numbers_20261014.sh` 和 `site_20261014.sh` 的 EXCL 变量里。
-
-查看 GPU 任务状态：`PYTHONPATH=. python -m data_gen.interiorgs_qa.sco status --job exps/interiorgs_qa_jobs/<名字>`。
+中间版本 rebalance、rebalance2、rebalance3_* 不再使用。被取代的旧题清单在 `docs/interiorgs_qa/audit/report_numbers_20261014.sh` 和 `site_20261014.sh` 的 EXCL 变量里。
 
 ## 3. 下一步
 
-1. 收上面的结果；跑 `report_numbers_20261014.sh` 和 `site_20261014.sh`，把盲答表填进报告，网页同步到本机。
-2. 提交、推送，停下等用户标注。
+1. **等用户标注。** 审核网页在本机 `C:\Users\user\Downloads\_ICLR27_Probing_Spatial_World_Representation\interiorgs_qa_review_site\index.html`（服务器 `exps/interiorgs_qa_site_20261014/`）。用户交回导出的 JSON 后，拷到服务器 `exps/interiorgs_qa_review_labels_20261014/`。
+2. 按标注结果和报告第九节的决定：校准 Around 遮挡阈值，定试验 F/G/颜色出不出题，清理出错的类别，然后做全量。
 
 ## 4. 约定
 
