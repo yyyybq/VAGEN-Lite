@@ -40,7 +40,9 @@ def now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def prepare(pilot: Path, gs_root: str) -> None:
+def prepare(pilot: Path, gs_root: str, command: str = "pilot render") -> None:
+    """``command``: the data_gen.interiorgs_v10 module and subcommand the job runs with ``--pilot --gs-root``
+    (default the frame renderer; ``depth_check run`` for the rendered-depth check)."""
     job = pilot / "job"
     job.mkdir(parents=True, exist_ok=True)
     archive = job / "source.tar.gz"
@@ -68,7 +70,7 @@ export CUDA_HOME=$RUNTIME_ENV TORCH_CUDA_ARCH_LIST=9.0 OMP_NUM_THREADS=1 PYTHONU
 export CPATH="$RUNTIME_ENV/targets/x86_64-linux/include:${{CPATH:-}}"
 export LIBRARY_PATH="$RUNTIME_ENV/targets/x86_64-linux/lib:${{LIBRARY_PATH:-}}"
 nvidia-smi --query-gpu=name,memory.total --format=csv || true
-$RUNTIME_ENV/bin/python -m data_gen.interiorgs_v10.pilot render --pilot "$PILOT" --gs-root {gs_root}
+$RUNTIME_ENV/bin/python -m data_gen.interiorgs_v10.{command} --pilot "$PILOT" --gs-root {gs_root}
 """)
     launch.chmod(0o755)
     digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()  # noqa: E731
@@ -143,11 +145,13 @@ def main() -> None:
     ap.add_argument("action", choices=("prepare", "submit", "status", "stop", "delete"))
     ap.add_argument("--pilot", required=True, type=Path)
     ap.add_argument("--gs-root", default=None)
+    ap.add_argument("--command", default="pilot render",
+                    help="module and subcommand the job runs (default: render the frames of frames.jsonl)")
     args = ap.parse_args()
     if args.action == "prepare":
         if not args.gs_root:
             raise SystemExit("--gs-root is required for prepare")
-        prepare(args.pilot.resolve(), args.gs_root)
+        prepare(args.pilot.resolve(), args.gs_root, args.command)
     elif args.action == "submit":
         submit(args.pilot.resolve())
     elif args.action == "status":

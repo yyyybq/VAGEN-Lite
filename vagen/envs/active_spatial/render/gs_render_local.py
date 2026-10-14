@@ -282,3 +282,19 @@ class GaussianRenderer:
         rendered_image_uint8 = (rendered_image * 255).astype(np.uint8)
         
         return rendered_image_uint8
+
+    def render_depth_from_cam_param(self, camera_intrinsics, camera_extrinsics, width: int = 512,
+                                    height: int = 512):
+        """RGB (H, W, 3) uint8, expected depth (H, W) float32 in metres along the camera's viewing axis, and
+        accumulated opacity (H, W) float32, from the same rasterisation as ``render_image_from_cam_param``
+        (gsplat render_mode "RGB+ED").  Used by the rendered-depth check of terminal frames."""
+        from gsplat.rendering import rasterization
+
+        K_tensor, viewmat = self._prepare_camera_data(camera_intrinsics, camera_extrinsics)
+        render_colors, render_alphas, _ = rasterization(
+            means=self.means, quats=self.quats, scales=self.scales, opacities=self.opacities,
+            colors=self.colors, viewmats=viewmat, Ks=K_tensor, width=width, height=height,
+            sh_degree=self.sh_degree, packed=False, render_mode="RGB+ED")
+        out = render_colors[0].cpu().numpy()
+        rgb = (np.clip(out[..., :3], 0, 1) * 255).astype(np.uint8)
+        return rgb, out[..., 3].astype(np.float32), render_alphas[0, ..., 0].cpu().numpy().astype(np.float32)
