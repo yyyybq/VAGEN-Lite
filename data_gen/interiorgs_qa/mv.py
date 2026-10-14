@@ -124,11 +124,15 @@ def turn_move_distance(c2w: np.ndarray, turn: str, p: Sequence[float], step: flo
     return float(np.linalg.norm(p - c2[:2, 3])), float(np.linalg.norm(p - c3[:2, 3]))
 
 
-def vis_class(va, oid: str, min_in_frame: float = 0.6) -> str:
-    """'rec' recognisable, 'abs' absent, 'part' in between, on the rendered view."""
+ABSENT_LOOSE_AREA = 0.002   # "does not appear": at most an unrecognisable sliver (< 0.2% of the image)
+
+
+def vis_class(va, oid: str, min_in_frame: float = 0.6, loose_absent: bool = False) -> str:
+    """'rec' recognisable, 'abs' absent, 'part' in between, on the rendered view.  ``loose_absent``: a
+    sliver below ABSENT_LOOSE_AREA of the image (and not recognisable) also counts as absent."""
     ov = va.obj(oid)
     if ov.recognisable(min_in_frame):
         return "rec"
-    if ov.absent():
+    if ov.absent() or (loose_absent and ov.area < ABSENT_LOOSE_AREA):
         return "abs"
     return "part"

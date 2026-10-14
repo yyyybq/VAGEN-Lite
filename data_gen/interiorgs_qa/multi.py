@@ -23,7 +23,7 @@ from .geom import (CAMERA_HEIGHT_M, OBB, angle_diff_deg, camera_K, convex_hull, 
                    point_in_polygon, polygon_area, pose_yaw_pitch, project, yaw_pitch_of)
 from .qa import Phrasing
 from .single import Runner, pick_subtask, review_boxes
-from .views import frame_candidates, framed
+from .views import box_outside_view, frame_candidates, framed, framed_loose
 
 SIZE = 512
 K = camera_K(SIZE)
@@ -261,10 +261,11 @@ def view_pairs(g: GenCtx, kind: str, max_pairs: int = 40, min_shared: int = 2) -
                 continue
             arr = np.asarray(cands)
             near = [o for o in lms if float(np.linalg.norm(ctx.obb[o].center[:2] - c1[:2, 3])) < 6.0]
-            v1 = {o: bool(ctx.face_visible(o, c1[None], K, SIZE)[0]) for o in near}
+            v1 = {o: bool(ctx.face_visible(o, c1[None], K, SIZE)[0]) and framed_loose(ctx.obb[o], c1, K, SIZE) for o in near}
             shared = np.zeros(len(arr), int)
             for o in [o for o in near if v1[o]]:
-                shared += ctx.face_visible(o, arr, K, SIZE).astype(int)
+                fr = np.array([framed_loose(ctx.obb[o], c, K, SIZE) for c in arr])
+                shared += (ctx.face_visible(o, arr, K, SIZE) & fr).astype(int)
             ok = np.flatnonzero(shared >= min_shared)
             if not len(ok):
                 continue
@@ -427,7 +428,7 @@ def only_in(vas, oids: Sequence[str], i: int) -> List[str]:
     """Objects recognisable in view i and absent from every other view."""
     out = []
     for o in oids:
-        cls = [mv.vis_class(va, o) for va in vas]
+        cls = [mv.vis_class(va, o, loose_absent=True) for va in vas]
         if cls[i] == "rec" and all(c == "abs" for j, c in enumerate(cls) if j != i):
             out.append(o)
     return out
@@ -609,12 +610,52 @@ def region_direction(c2w_or_origin, facing, poly: np.ndarray, mode: str) -> Opti
 
 
 def m3_combos(g: GenCtx) -> Iterator[Combo]:
+    """Constructive: camera 1 frames region A's anchor; camera 2 is turned / moved so that no member of A can
+    show (whole boxes outside its view) while it shares >= 2 landmarks with camera 1; among those, prefer a
+    camera 2 that sees another region B none of whose members camera 1 can show (region-region questions)."""
     regs = regions(g)
     if not regs:
         return
-    for kind in ("far", "translate"):
-        for c1, c2 in view_pairs(g, kind, max_pairs=20):
-            yield Combo("M3", kind, (), [[c1, c2]], {"subtasks": SUBTASKS["M3"], "regions": regs})
+    ctx = g.ctx
+    lms = landmarks(ctx)
+    order = list(range(len(regs)))
+    g.rng.shuffle(order)
+    n = 0
+    for ia in order:
+        A = regs[ia]
+        for c1 in frame_candidates(ctx, [A["anchor"]], max_out=3):
+            near = [o for o in lms if o not in A["members"]
+                    and float(np.linalg.norm(ctx.obb[o].center[:2] - c1[:2, 3])) < 6.0]
+            v1 = [o for o in near if ctx.face_visible(o, c1[None], K, SIZE)[0] and framed_loose(ctx.obb[o], c1, K, SIZE)]
+            if len(v1) < 2:
+                continue
+            cands = [mv.move(c1, dx, dz, t, p) for dx, dz, t, p in pair_motions("far", g.rng)]
+            cands = [c for c in cands if ctx.legal(c[:2, 3][None])[0]
+                     and not any(ctx.face_seen_any(m, c[None], K, SIZE)[0] for m in A["members"])]
+            if not cands:
+                continue
+            arr = np.asarray(cands)
+            shared = np.zeros(len(arr), int)
+            for o in v1:
+                fr = np.array([framed_loose(ctx.obb[o], c, K, SIZE) for c in arr])
+                shared += (ctx.face_visible(o, arr, K, SIZE) & fr).astype(int)
+            ok = shared >= 2
+            if not ok.any():
+                continue
+            bonus = np.zeros(len(arr), bool)
+            for B in regs:
+                if B is A or any(ctx.face_seen_any(m, c1[None], K, SIZE)[0] for m in B["members"]):
+                    continue
+                bonus |= ctx.face_visible(B["anchor"], arr, K, SIZE)
+            pick = np.flatnonzero(ok & bonus)
+            pick = pick if len(pick) else np.flatnonzero(ok)
+            c2 = arr[g.rng.choice(list(pick))]
+            yield Combo("M3", "region_" + A["kind"], (A["anchor"],), [[c1, c2]],
+                        {"subtasks": SUBTASKS["M3"], "regions": regs})
+            n += 1
+            break
+        if n >= g.cap(40):
+            return
 
 
 def reg_name(rg) -> Tuple[str, str]:
@@ -635,7 +676,7 @@ def m3_realize(r: Runner):
         regs = combo.info["regions"]
 
         def reg_vis(va, rg):
-            return [mv.vis_class(va, m) for m in rg["members"]]
+            return [mv.vis_class(va, m, loose_absent=True) for m in rg["members"]]
 
         in1 = [rg for rg in regs if any(c == "rec" for c in reg_vis(a1, rg)) and all(c == "abs" for c in reg_vis(a2, rg))]
         in2 = [rg for rg in regs if any(c == "rec" for c in reg_vis(a2, rg)) and all(c == "abs" for c in reg_vis(a1, rg))]
@@ -891,7 +932,7 @@ def m5_realize(r: Runner):
 # =============================================================================
 # M6 / M11: panning chains -- three images from one spot, turning step by step
 # =============================================================================
-def pan_chains(g: GenCtx, n_img: int, max_out: int = 30) -> Iterator[Tuple[List[np.ndarray], List[str]]]:
+def pan_chains(g: GenCtx, n_img: int, max_out: int = 30, group: str = "") -> Iterator[Tuple[List[np.ndarray], List[str]]]:
     """From a legal spot, yaws psi, psi - step, ... (turning right); key object i must pass the visibility
     prefilter in image i (within 30 deg of its axis) and lie outside the other images' field of view."""
     ctx = g.ctx
@@ -904,10 +945,15 @@ def pan_chains(g: GenCtx, n_img: int, max_out: int = 30) -> Iterator[Tuple[List[
     idx = list(range(len(grid)))
     g.rng.shuffle(idx)
     n = 0
-    for i in idx[:g.cap(150)]:
+    if group:
+        g.count(group, "grid_points_total", len(idx))
+        g.count(group, "grid_points_examined", min(len(idx), g.cap(150, census=400)))
+    lms_all = landmarks(ctx)
+    for i in idx[:g.cap(150, census=400)]:
         p = grid[i]
+        lm_near = [o for o in lms_all if float(np.linalg.norm(ctx.obb[o].center[:2] - p)) < 5.0]
         done = False
-        for step in (60.0, 70.0):
+        for step in (65.0, 75.0):
             for psi0 in range(0, 360, 30):
                 yaws = [math.radians(psi0 - k * step) for k in range(n_img)]
                 cams = [pose_yaw_pitch((p[0], p[1], CAMERA_HEIGHT_M), y, math.radians(-12.0)) for y in yaws]
@@ -917,19 +963,22 @@ def pan_chains(g: GenCtx, n_img: int, max_out: int = 30) -> Iterator[Tuple[List[
                     for o in named:
                         ang, dist = mv.bearing(c, ctx.obb[o].center)
                         a = ang if ang <= 180 else ang - 360
-                        if abs(a) > 30 or not (1.0 <= dist <= 5.0):
+                        if abs(a) > 20 or not (1.0 <= dist <= 5.0):
                             continue
                         others = [cams[j] for j in range(n_img) if j != k]
                         if any(abs(((mv.bearing(c_o, ctx.obb[o].center)[0] + 180) % 360) - 180) < 55 for c_o in others):
                             continue
                         cand.append(o)
-                    others = np.stack([cams[j] for j in range(n_img) if j != k])
+                    others = [cams[j] for j in range(n_img) if j != k]
                     cand = [o for o in cand if ctx.face_visible(o, c[None], K, SIZE)[0]
-                            and not ctx.face_seen_any(o, others, K, SIZE).any()]
+                            and not ctx.face_seen_any(o, np.stack(others), K, SIZE).any()]
                     if not cand:
                         break
                     keys.append(g.rng.choice(cand))
-                if len(keys) == n_img and len(set(keys)) == n_img and g.distinct_names(keys):
+                if (len(keys) == n_img and len(set(keys)) == n_img and g.distinct_names(keys)
+                        and all(any(framed_loose(ctx.obb[o], cams[j], K, SIZE) and framed_loose(ctx.obb[o], cams[j + 1], K, SIZE)
+                                    and ctx.face_visible(o, np.stack([cams[j], cams[j + 1]]), K, SIZE).all()
+                                    for o in lm_near) for j in range(n_img - 1))):
                     yield cams, keys
                     n += 1
                     done = True
@@ -942,7 +991,7 @@ def pan_chains(g: GenCtx, n_img: int, max_out: int = 30) -> Iterator[Tuple[List[
 
 def chain_ok(g: GenCtx, vas, keys: Sequence[str]) -> Optional[str]:
     for i, k in enumerate(keys):
-        cls = [mv.vis_class(va, k) for va in vas]
+        cls = [mv.vis_class(va, k, loose_absent=True) for va in vas]
         if cls[i] != "rec" or any(c != "abs" for j, c in enumerate(cls) if j != i):
             return "key_object_not_only_in_its_image"
     lms = landmarks(g.ctx)
@@ -954,7 +1003,7 @@ def chain_ok(g: GenCtx, vas, keys: Sequence[str]) -> Optional[str]:
 
 
 def m6_combos(g: GenCtx) -> Iterator[Combo]:
-    for cams, keys in pan_chains(g, 3):
+    for cams, keys in pan_chains(g, 3, group="M6"):
         yield Combo("M6", "pan3", tuple(keys), [cams], {"subtasks": ["MMSI-multistep"]})
 
 
@@ -1010,7 +1059,7 @@ def vs_distractors8(answer: str, rng) -> List[str]:
 
 
 def m11_combos(g: GenCtx) -> Iterator[Combo]:
-    for cams, keys in pan_chains(g, 3):
+    for cams, keys in pan_chains(g, 3, group="M11"):
         yield Combo("M11", "pan3", tuple(keys), [cams], {"subtasks": ["VS-05"]})
 
 
@@ -1076,7 +1125,9 @@ def m7_combos(g: GenCtx) -> Iterator[Combo]:
     idx = list(range(len(grid)))
     g.rng.shuffle(idx)
     n = 0
-    for i in idx[:g.cap(200)]:
+    g.count("M7", "grid_points_total", len(idx))
+    g.count("M7", "grid_points_examined", min(len(idx), g.cap(200, census=400)))
+    for i in idx[:g.cap(200, census=400)]:
         p = grid[i]
         for psi0 in ((0.0, 90.0, 180.0, 270.0) if g.rng.random() < 0.5 else (45.0, 135.0, 225.0, 315.0)):
             cams = [pose_yaw_pitch((p[0], p[1], CAMERA_HEIGHT_M), math.radians(psi0 - 90.0 * k), math.radians(-12.0))
@@ -1229,7 +1280,7 @@ def m8_combos(g: GenCtx) -> Iterator[Combo]:
                     break
 
             def side(near_xy, away, near_id):
-                for off in (0.0, 8.0, -8.0, 15.0, -15.0):
+                for off in (0.0, 8.0, -8.0, 15.0, -15.0, 25.0, -25.0, 35.0, -35.0):
                     for dist in (1.2, 1.6, 2.0, 2.5):
                         e = near_xy + dist * mv.rotate2(away, off)
                         if ctx.legal(e[None])[0]:
@@ -1388,8 +1439,8 @@ AMONG_SEVERE_OCCLUSION = 0.6
 
 def m9_combos(g: GenCtx) -> Iterator[Combo]:
     ctx = g.ctx
-    pool = [o for o in simple_named_pool(ctx) if ctx.obb[o].longest_edge >= 0.3]
-    centers = list(pool)
+    pool = [o for o in scene_pool(ctx) if ctx.obb[o].longest_edge >= 0.3]
+    centers = [o for o in simple_named_pool(ctx) if ctx.obb[o].longest_edge >= 0.3]
     g.rng.shuffle(centers)
     n = 0
     for c in centers:
@@ -1400,7 +1451,7 @@ def m9_combos(g: GenCtx) -> Iterator[Combo]:
                 continue
             v = ctx.obb[o].center[:2] - C[:2]
             d = float(np.linalg.norm(v))
-            if 1.2 <= d <= 4.5:
+            if 1.0 <= d <= 5.0:
                 around.append((math.degrees(math.atan2(v[1], v[0])) % 360.0, d, o))
         if len(around) < 4:
             continue
@@ -1409,7 +1460,7 @@ def m9_combos(g: GenCtx) -> Iterator[Combo]:
             pick = []
             for k in range(4):
                 tgt = (th0 + 90 * k) % 360
-                cand = [(angle_diff_deg(a, tgt), d, o) for a, d, o in around if angle_diff_deg(a, tgt) <= 25]
+                cand = [(angle_diff_deg(a, tgt), d, o) for a, d, o in around if angle_diff_deg(a, tgt) <= 35]
                 if not cand:
                     break
                 pick.append(min(cand)[2])
@@ -1427,12 +1478,24 @@ def m9_combos(g: GenCtx) -> Iterator[Combo]:
             u = v / np.linalg.norm(v)
             dmax = float(np.linalg.norm(v)) - 0.5
             cam = None
-            for dist in (2.4, 2.0, 1.7, 1.4, 1.1):
-                if dist > dmax:
-                    continue
-                e = C[:2] + dist * u
-                if ctx.legal(e[None])[0]:
-                    cam = look_at((e[0], e[1], CAMERA_HEIGHT_M), C)
+            bg = S[(k + 2) % 4]
+            # around the centre in direction k (offset up to 24 deg so the background is not hidden right
+            # behind the centre), nearer to the centre than S_k so S_k stays behind the camera
+            for off in (0.0, 12.0, -12.0, 24.0, -24.0, 35.0, -35.0):
+                for dist in (2.4, 2.0, 1.7, 1.4, 1.1, 2.8, 3.2):
+                    e = C[:2] + dist * mv.rotate2(u, off)
+                    if not ctx.legal(e[None])[0]:
+                        continue
+                    cam_t = look_at((e[0], e[1], CAMERA_HEIGHT_M), C)
+                    b_ang = signed(mv.bearing(cam_t, ctx.obb[S[k]].center)[0])
+                    if abs(b_ang) < 120.0:
+                        continue   # S_k must stay behind the camera (the "what is behind me" answer)
+                    if (framed_loose(ctx.obb[c], cam_t, K, SIZE) and ctx.face_visible(c, cam_t[None], K, SIZE)[0]
+                            and ctx.face_seen_any(bg, cam_t[None], K, SIZE)[0]
+                            and not ctx.face_seen_any(S[k], cam_t[None], K, SIZE)[0]):
+                        cam = cam_t
+                        break
+                if cam is not None:
                     break
             if cam is None:
                 break
@@ -1459,7 +1522,7 @@ def m9_realize(r: Runner):
         for i, (vid, va) in enumerate(vv):
             if mv.vis_class(va, c) != "rec":
                 return "center_not_recognisable"
-            if mv.vis_class(va, surr[i]) != "abs":
+            if mv.vis_class(va, surr[i], loose_absent=True) != "abs":
                 return "object_behind_camera_visible"
             bg = va.obj(surr[(i + 2) % 4])
             if bg.absent():
@@ -1470,94 +1533,100 @@ def m9_realize(r: Runner):
             return "three_or_more_backgrounds_severely_occluded"
         if not emit:
             return None
-        st = pick_subtask(r, SUBTASKS["M9"])
-        if st is None:
-            return None
-        nc, ncb = named_the(g, c)
-        sn = [named_the(g, s) for s in surr]
-        header = (f"Based on these four images (image 1, 2, 3, and 4) showing the {ncb} from different viewpoints (front, left, back, and right), "
-                  "with each camera aligned with room walls and partially capturing the surroundings: ")
-        objs = [g.obj_entry(c, nc, "center")] + [g.obj_entry(s, sn[i][0], f"behind_camera_{i + 1}") for i, s in enumerate(surr)]
-        defin = ("中心物体四周大致成直角分布 4 个物体（夹角误差 ≤20°）；第 i 台相机站在中心物体与第 i 个周围物体之间、朝向中心物体，该周围物体在相机身后（图中完全看不到），对面的周围物体在中心物体后方可见；"
-                 "按 MindCube 附录 B，四张图里背景物体被严重遮挡（被盖住 ≥60%）的不超过两张。")
-        diff = "MindCube 原题由人选景标注；这里按几何构造、渲染深度核验。"
-        keys_all = [cap(x[1]) for x in sn]
-        imgs4 = [g.bank.save(v) for v, _ in vv]
-        if st == "MC-among-q1":
-            i = g.rng.randrange(4)
-            j = g.rng.choice([(i + 1) % 4, (i + 3) % 4])
-            lab = mv.movement_label(cams[i], cams[j])
-            if lab is None:
-                return "q1_movement_ambiguous"
-            keys = ["Directly left", "Directly right", "Diagonally forward and left", "Diagonally forward and right"]
-            g.emit("M9", [st, "MC-relation-agent-agent", "MC-dynamics-simultaneous"] + TAGS_AMONG, "MindCube", "multi_image",
-                   [vv[i][0], vv[j][0]], [imgs4[i], imgs4[j]], MC_MOVE, {}, keys, lab, "mc",
-                   gt(defin + " q1：相机 2 位置在相机 1 水平坐标系里的方位。", diff), objs, {})
-            r.take(st)
-            return None
-        k = g.rng.randrange(4)
-        if st == "MC-among-q2-current":
-            q = header + f"If I am standing at the same spot and facing the same direction as shown in image {k + 1}, what is behind me?"
-            fam = {"orig": Phrasing(q, "mindcube"),
-                   "t1": Phrasing(f"The four photos circle the {ncb}. Standing where image {k + 1} was taken and facing the same way, what is directly behind me?", "t_paren"),
-                   "t2": Phrasing(f"From image {k + 1}'s camera position, which object is at my back?", "t_dot"),
-                   "t3": Phrasing(f"Which object would I see if I turned around at the spot of image {k + 1}?", "t_colon"),
-                   "h1": Phrasing(f"Behind the photographer of image {k + 1}, which of these objects stands?", "h_inline")}
-            g.emit("M9", [st, "MC-perspective-self", "MC-relation-agent-object"] + TAGS_AMONG, "MindCube", "multi_image",
-                   [v for v, _ in vv], imgs4, fam, {}, keys_all, cap(sn[k][1]), "mc",
-                   gt(defin + " q2-current：第 k 台相机身后的周围物体。", diff), objs, {})
-            r.take(st)
-            return None
-        if st == "MC-among-q2-sequence":
-            turn = g.rng.choice(["left", "right"])
-            cands = [i for i in range(4) if i != k]
-            g.rng.shuffle(cands)
-            for i in cands:
-                d0, d1 = mv.turn_move_distance(cams[k], turn, ctx.obb[surr[i]].center, step=1.0)
-                if d1 < d0 - 0.1:
-                    truth = "Yes"
-                elif d1 > d0 + 0.02:
-                    truth = "No"
-                else:
-                    continue
-                q = header + f"If I am standing at the same spot and facing the same direction as shown in image {k + 1}, then I turn {turn} and move forward, will I get closer to the {sn[i][1]}?"
-                fam = {"orig": Phrasing(q, "mindcube"),
-                       "t1": Phrasing(f"From image {k + 1}'s viewpoint I turn {turn} and walk forward about a metre. Do I get closer to the {sn[i][1]}?", "t_paren"),
-                       "t2": Phrasing(f"Turning {turn} at image {k + 1}'s spot and stepping ahead: am I approaching the {sn[i][1]}?", "t_dot"),
-                       "t3": Phrasing(f"Standing as in image {k + 1}, I make a {turn} turn and go straight. Will the {sn[i][1]} be nearer?", "t_colon"),
-                       "h1": Phrasing(f"A {turn} turn and a short walk from image {k + 1}'s camera: does the distance to the {sn[i][1]} shrink?", "h_inline")}
-                g.emit("M9", [st, "MC-dynamics-sequential", "MC-relation-agent-object"] + TAGS_AMONG, "MindCube", "multi_image",
-                       [v for v, _ in vv], imgs4, fam, {}, YESNO_MC, truth, "yesno",
-                       gt(defin + " q2-sequence：原地转 90° 后直走 1 m，距离减少 >0.1 m 为'是'，增加为'否'，其余不出题。",
-                          diff + " 原题未规定前进距离，这里取 1 m。", d0=round(d0, 3), d1=round(d1, 3)), objs, {},
-                       keep_orig_order=YESNO_MC)
+        def emit_st(st: str) -> Optional[str]:
+            nc, ncb = named_the(g, c)
+            sn = [named_the(g, s) for s in surr]
+            header = (f"Based on these four images (image 1, 2, 3, and 4) showing the {ncb} from different viewpoints (front, left, back, and right), "
+                      "with each camera aligned with room walls and partially capturing the surroundings: ")
+            objs = [g.obj_entry(c, nc, "center")] + [g.obj_entry(s, sn[i][0], f"behind_camera_{i + 1}") for i, s in enumerate(surr)]
+            defin = ("中心物体四周大致成直角分布 4 个物体（与直角的偏差 ≤35°）；第 i 台相机在第 i 个周围物体那一侧（偏开 ≤35°）、朝向中心物体，该周围物体在相机身后（方位角 ≥120° 且图中完全看不到），对面的周围物体在中心物体后方露出；"
+                     "按 MindCube 附录 B，四张图里背景物体被严重遮挡（被盖住 ≥60%）的不超过两张。")
+            diff = "MindCube 原题由人选景标注；这里按几何构造、渲染深度核验。"
+            keys_all = [cap(x[1]) for x in sn]
+            imgs4 = [g.bank.save(v) for v, _ in vv]
+            if st == "MC-among-q1":
+                i = g.rng.randrange(4)
+                j = g.rng.choice([(i + 1) % 4, (i + 3) % 4])
+                lab = mv.movement_label(cams[i], cams[j])
+                if lab is None:
+                    return "q1_movement_ambiguous"
+                keys = ["Directly left", "Directly right", "Diagonally forward and left", "Diagonally forward and right"]
+                g.emit("M9", [st, "MC-relation-agent-agent", "MC-dynamics-simultaneous"] + TAGS_AMONG, "MindCube", "multi_image",
+                       [vv[i][0], vv[j][0]], [imgs4[i], imgs4[j]], MC_MOVE, {}, keys, lab, "mc",
+                       gt(defin + " q1：相机 2 位置在相机 1 水平坐标系里的方位。", diff), objs, {})
                 r.take(st)
                 return None
-            return "q2_sequence_ambiguous"
-        # q5: what is to the left / right of the central object in image k
-        side = g.rng.choice(["left", "right"])
-        cand = []
-        for i in range(4):
-            if i in (k, (k + 2) % 4):
-                continue
-            ang, _ = mv.bearing(cams[k], ctx.obb[surr[i]].center)
-            a = ang if ang <= 180 else ang - 360
-            if side == "left" and a < -15 or side == "right" and a > 15:
-                cand.append(i)
-        if len(cand) != 1:
-            return "q5_ambiguous"
-        i = cand[0]
-        q = header + f"From the viewpoint presented in image {k + 1}, what is to the {side} of the {ncb}?"
-        fam = {"orig": Phrasing(q, "mindcube"),
-               "t1": Phrasing(f"Seen from where image {k + 1} was taken, which object is on the {side} side of the {ncb}?", "t_paren"),
-               "t2": Phrasing(f"In image {k + 1}'s viewpoint, what stands to the {side} of the {ncb} (possibly outside the frame)?", "t_dot"),
-               "t3": Phrasing(f"Facing the {ncb} as in image {k + 1}, name the object on its {side}.", "t_colon"),
-               "h1": Phrasing(f"Looking at the {ncb} from image {k + 1}'s camera, which of these lies off to the {side}?", "h_inline")}
-        g.emit("M9", [st, "MC-relation-object-object", "MC-perspective-self"] + TAGS_AMONG, "MindCube", "multi_image",
-               [v for v, _ in vv], imgs4, fam, {}, keys_all, cap(sn[i][1]), "mc",
-               gt(defin + " q5：从第 k 台相机看，中心物体左（右）侧的周围物体（方位偏离中心 >15°）。", diff), objs, {})
-        r.take(st)
-        return None
+            k = g.rng.randrange(4)
+            if st == "MC-among-q2-current":
+                q = header + f"If I am standing at the same spot and facing the same direction as shown in image {k + 1}, what is behind me?"
+                fam = {"orig": Phrasing(q, "mindcube"),
+                       "t1": Phrasing(f"The four photos circle the {ncb}. Standing where image {k + 1} was taken and facing the same way, what is directly behind me?", "t_paren"),
+                       "t2": Phrasing(f"From image {k + 1}'s camera position, which object is at my back?", "t_dot"),
+                       "t3": Phrasing(f"Which object would I see if I turned around at the spot of image {k + 1}?", "t_colon"),
+                       "h1": Phrasing(f"Behind the photographer of image {k + 1}, which of these objects stands?", "h_inline")}
+                g.emit("M9", [st, "MC-perspective-self", "MC-relation-agent-object"] + TAGS_AMONG, "MindCube", "multi_image",
+                       [v for v, _ in vv], imgs4, fam, {}, keys_all, cap(sn[k][1]), "mc",
+                       gt(defin + " q2-current：第 k 台相机身后的周围物体。", diff), objs, {})
+                r.take(st)
+                return None
+            if st == "MC-among-q2-sequence":
+                turn = g.rng.choice(["left", "right"])
+                cands = [i for i in range(4) if i != k]
+                g.rng.shuffle(cands)
+                for i in cands:
+                    d0, d1 = mv.turn_move_distance(cams[k], turn, ctx.obb[surr[i]].center, step=1.0)
+                    if d1 < d0 - 0.1:
+                        truth = "Yes"
+                    elif d1 > d0 + 0.02:
+                        truth = "No"
+                    else:
+                        continue
+                    q = header + f"If I am standing at the same spot and facing the same direction as shown in image {k + 1}, then I turn {turn} and move forward, will I get closer to the {sn[i][1]}?"
+                    fam = {"orig": Phrasing(q, "mindcube"),
+                           "t1": Phrasing(f"From image {k + 1}'s viewpoint I turn {turn} and walk forward about a metre. Do I get closer to the {sn[i][1]}?", "t_paren"),
+                           "t2": Phrasing(f"Turning {turn} at image {k + 1}'s spot and stepping ahead: am I approaching the {sn[i][1]}?", "t_dot"),
+                           "t3": Phrasing(f"Standing as in image {k + 1}, I make a {turn} turn and go straight. Will the {sn[i][1]} be nearer?", "t_colon"),
+                           "h1": Phrasing(f"A {turn} turn and a short walk from image {k + 1}'s camera: does the distance to the {sn[i][1]} shrink?", "h_inline")}
+                    g.emit("M9", [st, "MC-dynamics-sequential", "MC-relation-agent-object"] + TAGS_AMONG, "MindCube", "multi_image",
+                           [v for v, _ in vv], imgs4, fam, {}, YESNO_MC, truth, "yesno",
+                           gt(defin + " q2-sequence：原地转 90° 后直走 1 m，距离减少 >0.1 m 为'是'，增加为'否'，其余不出题。",
+                              diff + " 原题未规定前进距离，这里取 1 m。", d0=round(d0, 3), d1=round(d1, 3)), objs, {},
+                           keep_orig_order=YESNO_MC)
+                    r.take(st)
+                    return None
+                return "q2_sequence_ambiguous"
+            # q5: what is to the left / right of the central object in image k
+            side = g.rng.choice(["left", "right"])
+            cand = []
+            for i in range(4):
+                if i in (k, (k + 2) % 4):
+                    continue
+                ang, _ = mv.bearing(cams[k], ctx.obb[surr[i]].center)
+                a = ang if ang <= 180 else ang - 360
+                if side == "left" and a < -15 or side == "right" and a > 15:
+                    cand.append(i)
+            if len(cand) != 1:
+                return "q5_ambiguous"
+            i = cand[0]
+            q = header + f"From the viewpoint presented in image {k + 1}, what is to the {side} of the {ncb}?"
+            fam = {"orig": Phrasing(q, "mindcube"),
+                   "t1": Phrasing(f"Seen from where image {k + 1} was taken, which object is on the {side} side of the {ncb}?", "t_paren"),
+                   "t2": Phrasing(f"In image {k + 1}'s viewpoint, what stands to the {side} of the {ncb} (possibly outside the frame)?", "t_dot"),
+                   "t3": Phrasing(f"Facing the {ncb} as in image {k + 1}, name the object on its {side}.", "t_colon"),
+                   "h1": Phrasing(f"Looking at the {ncb} from image {k + 1}'s camera, which of these lies off to the {side}?", "h_inline")}
+            g.emit("M9", [st, "MC-relation-object-object", "MC-perspective-self"] + TAGS_AMONG, "MindCube", "multi_image",
+                   [v for v, _ in vv], imgs4, fam, {}, keys_all, cap(sn[i][1]), "mc",
+                   gt(defin + " q5：从第 k 台相机看，中心物体左（右）侧的周围物体（方位偏离中心 >15°）。", diff), objs, {})
+            r.take(st)
+            return None
+
+        # one verified set of four views carries one question per subtask still needed (MindCube asks several
+        # questions about the same four images)
+        todo = [s_ for s_ in SUBTASKS["M9"] if r.need[s_] > 0]
+        if not todo:
+            return None
+        outcomes = [emit_st(s_) for s_ in todo]
+        return None if any(o is None for o in outcomes) else outcomes[0]
 
     return realize
 
@@ -1578,14 +1647,14 @@ def m10_combos(g: GenCtx) -> Iterator[Combo]:
     for a, b in pairs[:g.cap(150)]:
         cams1 = frame_candidates(ctx, [a, b], max_out=2)
         for c1 in cams1:
-            for s in (1.2, 1.6, 2.0, 2.5, -1.2, -1.6, -2.0, -2.5):
+            for s in (1.0, 1.4, 1.8, 2.3, 2.9, 3.5, -1.0, -1.4, -1.8, -2.3, -2.9, -3.5):
                 c2 = mv.move(c1, right=s)
                 if not ctx.legal(c2[:2, 3][None])[0]:
                     continue
                 if not ctx.face_visible(b, c2[None], K, SIZE)[0] or ctx.face_seen_any(a, c2[None], K, SIZE)[0]:
                     continue
-                cs = [o for o in pool if o not in (a, b) and ctx.face_visible(o, c2[None], K, SIZE)[0]
-                      and not ctx.face_seen_any(o, c1[None], K, SIZE)[0]]
+                cs = [o for o in pool if o not in (a, b) and not ctx.face_seen_any(o, c1[None], K, SIZE)[0]
+                      and framed_loose(ctx.obb[o], c2, K, SIZE) and ctx.face_visible(o, c2[None], K, SIZE)[0]]
                 if not cs:
                     continue
                 yield Combo("M10", "translation", (a, b, g.rng.choice(cs)), [[c1, c2]],
@@ -1624,7 +1693,7 @@ def m10_realize(r: Runner):
         c1, c2 = combo.shots[0]
         v1, a1 = g.bank.view(c1, "M10")
         v2, a2 = g.bank.view(c2, "M10")
-        cls = {o: (mv.vis_class(a1, o), mv.vis_class(a2, o)) for o in (a, b, c)}
+        cls = {o: (mv.vis_class(a1, o, loose_absent=True), mv.vis_class(a2, o, loose_absent=True)) for o in (a, b, c)}
         if cls[a] != ("rec", "abs") or cls[b] != ("rec", "rec") or cls[c] != ("abs", "rec"):
             return "translation_visibility_pattern"
         r1 = tr_relation(c1, ctx.obb[a].center, ctx.obb[b].center)

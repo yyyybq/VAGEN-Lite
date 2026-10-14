@@ -158,12 +158,16 @@ def render_arrow_item(ctx, R, o: str, cat: str, out: Path, rng) -> Optional[Dict
             if ctx.legal(e[None])[0]:
                 poses.append(look_at((e[0], e[1], CAMERA_HEIGHT_M), box.center))
     cams = frame_candidates(ctx, [o], poses=poses, max_out=1)
+    min_in_frame = 0.7
+    if not cams:  # small rooms (bathrooms): any direction, closer, partly cut by the border allowed
+        cams = frame_candidates(ctx, [o], max_out=1, radii=(1.0, 1.3, 1.7, 2.1, 2.6))
+        min_in_frame = 0.5
     if not cams:
         return None
     c2w = cams[0]
     rgb, depth, alpha = R.render(c2w, SIZE)
     ov, _ = object_view(o, box, c2w, depth, alpha)
-    if not ov.recognisable(0.7):
+    if not ov.recognisable(min_in_frame):
         return None
     tag = f"{cat.replace(' ', '_')}_{ctx.scene_id}_{o}"
     base = Image.fromarray(rgb)

@@ -1,0 +1,102 @@
+{
+ "S1": {
+  "ES-01": 60,
+  "ES-02": 60,
+  "VS-01": 60,
+  "BL-03": 60
+ },
+ "S2": {
+  "ES-03": 60,
+  "ES-04": 60,
+  "3D-01": 60,
+  "3D-02": 60,
+  "BL-03": 60
+ },
+ "S3": {
+  "ES-05": 60,
+  "ES-06": 60,
+  "3D-03": 60,
+  "BL-02": 60
+ },
+ "S4": {
+  "3D-04": 60,
+  "3D-08": 60,
+  "BL-03": 60
+ },
+ "S5": {
+  "BL-01": 60
+ },
+ "S6": {
+  "BL-05": 60
+ },
+ "S7": {
+  "3D-11": 60
+ },
+ "M1": {
+  "MMSI-position-camera-camera": 60,
+  "MMSI-motion-camera": 60,
+  "BL-04": 60
+ },
+ "M2": {
+  "MMSI-position-camera-object": 60,
+  "MMSI-position-object-object": 60,
+  "MMSI-attribute-measurement": 60
+ },
+ "M3": {
+  "MMSI-position-camera-region": 60,
+  "MMSI-position-object-region": 60,
+  "MMSI-position-region-region": 60
+ },
+ "M4": {
+  "BL-06": 60
+ },
+ "M5": {
+  "MMSI-attribute-appearance": 60
+ },
+ "M6": {
+  "MMSI-multistep": 60
+ },
+ "M7": {
+  "MC-rotation-current": 60,
+  "MC-rotation-mental-turn": 60
+ },
+ "M8": {
+  "MC-around-q1": 60,
+  "MC-around-q2": 60,
+  "MC-around-q3": 60
+ },
+ "M9": {
+  "MC-among-q1": 60,
+  "MC-among-q2-current": 60,
+  "MC-among-q2-sequence": 60,
+  "MC-among-q5": 60
+ },
+ "M10": {
+  "MC-translation-transitive": 60
+ },
+ "M11": {
+  "VS-05": 60
+ },
+ "V1": {
+  "VSI-count": 60
+ },
+ "V2": {
+  "VSI-distance-absolute": 60,
+  "VSI-distance-relative": 60
+ },
+ "V3": {
+  "VSI-size-object": 60,
+  "VSI-size-room": 60
+ },
+ "V4": {
+  "VSI-direction-easy": 60,
+  "VSI-direction-medium": 60,
+  "VSI-direction-hard": 60
+ },
+ "V5": {
+  "VSI-route": 60
+ },
+ "V6": {
+  "VSI-order": 60
+ }
+}

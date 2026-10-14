@@ -24,6 +24,7 @@ from .common import Combo, GenCtx, bare, cap, single_pool
 from .geom import CAMERA_HEIGHT_M, angle_diff_deg, box_distance, camera_K, point_in_polygon, polygon_area, pose_yaw_pitch
 from .qa import Phrasing
 from .single import Runner, pick_subtask
+from .scene_ctx import face_visible_grid
 from .visible import RECOGNISABLE_AREA
 
 SIZE = 512
@@ -95,15 +96,19 @@ def room_tour(g: GenCtx, room: int, main: Sequence[str]) -> Optional[Dict[str, A
     pts = pts[point_in_polygon(pts, poly)] if len(pts) else pts
     if len(pts) < 8:
         return None
-    # candidate viewpoints: every other grid node x 8 headings
+    # candidate viewpoints: up to 120 grid nodes x 8 headings (sight lines tested once per position)
     cand = pts[::3]
+    if len(cand) > 120:
+        cand = cand[sorted(g.rng.sample(range(len(cand)), 120))]
     yaws = np.radians(np.arange(0, 360, 45))
     poses = np.array([pose_yaw_pitch((p[0], p[1], CAMERA_HEIGHT_M), y, math.radians(PITCH_DEG)) for p in cand for y in yaws])
     if not len(poses):
         return None
+    rots = poses[:len(yaws), :3, :3]
+    cpos = np.array([[p[0], p[1], CAMERA_HEIGHT_M] for p in cand])
     cover = np.zeros((len(poses), len(main)), bool)
     for j, o in enumerate(main):
-        cover[:, j] = ctx.face_visible(o, poses, K, SIZE)
+        cover[:, j] = face_visible_grid(ctx, o, cpos, rots, K, SIZE)
     chosen, covered = [], np.zeros(len(main), bool)
     while not covered.all() and len(chosen) < 5:
         gain = (cover & ~covered).sum(1)
@@ -591,7 +596,7 @@ def v5_realize(r: Runner):
 # =============================================================================
 # V6 appearance order
 # =============================================================================
-MIN_GAP_FRAMES = 3
+MIN_GAP_FRAMES = 2
 
 
 def v6_realize(r: Runner):

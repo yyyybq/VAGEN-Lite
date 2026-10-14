@@ -42,9 +42,12 @@ class GenCtx:
         self.fail: Dict[str, Counter] = defaultdict(Counter)    # group -> rejection reasons
         self.census = False     # True: generators drop the caps they use to save time (combo census)
 
-    def cap(self, n: int) -> int:
-        """A generator's search cap, lifted in census mode."""
-        return 10 ** 9 if self.census else n
+    def cap(self, n: int, census: Optional[int] = None) -> int:
+        """A generator's search cap: ``n`` when generating; in census mode ``census`` (a larger sample whose
+        count is scaled up in the report) or no cap at all."""
+        if not self.census:
+            return n
+        return 10 ** 9 if census is None else census
 
     # ------------------------------------------------------------------ names
     def name_single(self, va: ViewAnalysis, oid: str) -> Optional[Tuple[str, str]]:

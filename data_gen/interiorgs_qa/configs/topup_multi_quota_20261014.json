@@ -1,0 +1,6 @@
+{"M3": {"MMSI-position-camera-region": 4, "MMSI-position-object-region": 3, "MMSI-position-region-region": 3},
+ "M6": {"MMSI-multistep": 9},
+ "M8": {"MC-around-q2": 3, "MC-around-q3": 3},
+ "M9": {"MC-among-q1": 3, "MC-among-q2-current": 3, "MC-among-q2-sequence": 2, "MC-among-q5": 2},
+ "M10": {"MC-translation-transitive": 8},
+ "M11": {"VS-05": 10}}

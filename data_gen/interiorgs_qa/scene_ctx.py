@@ -178,3 +178,19 @@ class SceneCtx:
 def load_split(path: Path) -> Dict[str, str]:
     m = json.loads(Path(path).read_text())
     return {s: k.replace("_scenes", "") for k in ("train_scenes", "val_scenes", "test_scenes") for s in m.get(k, [])}
+
+
+def face_visible_grid(ctx: "SceneCtx", oid: str, positions: np.ndarray, rotations: np.ndarray, K: np.ndarray,
+                      size: int) -> np.ndarray:
+    """face_visible_v3 at every (position, rotation) pair, position-major (N * Y,).  Occlusion depends only on
+    the camera position, so the sight lines are tested once per position and shared by all rotations."""
+    o = ctx.by_id[oid]
+    P = np.asarray(positions, float).reshape(-1, 3)
+    Rs = np.asarray(rotations, float).reshape(-1, 3, 3)
+    geom = TV.FaceGeometry(o.aabb_min, o.aabb_max)
+    blocked = TV.blocked_mask(ctx.occ, P, geom.points, geom.lo, geom.hi, exclude_ids=(oid,))
+    Y = len(Rs)
+    R_all = np.tile(Rs, (len(P), 1, 1))
+    C_all = np.repeat(P, Y, axis=0)
+    stats = TV.face_visibility(R_all, C_all, geom, np.repeat(blocked, Y, axis=0), K, size, size)
+    return stats["visible"]

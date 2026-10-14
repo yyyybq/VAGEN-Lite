@@ -181,3 +181,22 @@ class ViewBank:
             for vid, rec in self.records.items():
                 if rec["saved"]:
                     f.write(json.dumps(rec) + "\n")
+
+
+def box_outside_view(box: OBB, c2w: np.ndarray, K: np.ndarray, size: int, margin: float = 0.03) -> bool:
+    """True when the box's whole projection lies outside the image (with a margin): it cannot show at all."""
+    uv, z = project(box.corners, c2w, K)
+    if np.all(z <= 0.05):
+        return True
+    if np.any(z <= 0.05):
+        return False   # straddles the camera plane: may reach into the image
+    m = margin * size
+    return bool(uv[:, 0].max() < -m or uv[:, 0].min() > size + m or uv[:, 1].max() < -m or uv[:, 1].min() > size + m)
+
+
+def framed_loose(box: OBB, c2w: np.ndarray, K: np.ndarray, size: int) -> bool:
+    """The box's centre projects inside the image and at least half of its corners do (a landmark that is
+    mostly in the picture)."""
+    uv, z = project(np.vstack([box.corners, box.center[None]]), c2w, K)
+    inside = (z > 0.1) & (uv[:, 0] >= 0) & (uv[:, 0] <= size) & (uv[:, 1] >= 0) & (uv[:, 1] <= size)
+    return bool(inside[-1] and inside[:8].mean() >= 0.5)

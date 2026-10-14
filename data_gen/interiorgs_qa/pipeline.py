@@ -89,16 +89,26 @@ def cmd_census(a: argparse.Namespace) -> None:
     groups = a.groups.split(",") if a.groups else list(group_table())
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    jobs = [(s, groups, split.get(s, "?")) for s in scenes]
+    jobs = [(s, [grp], split.get(s, "?")) for s in scenes for grp in groups]   # one task per (scene, group)
     with mp.get_context("fork").Pool(min(a.workers, len(jobs))) as pool:
-        res = pool.map(census_scene, jobs, chunksize=1)
+        parts = pool.map(census_scene, jobs, chunksize=1)
+    merged: Dict[str, Dict[str, Any]] = {}
+    for p in parts:
+        m = merged.setdefault(p["scene_id"], {"scene_id": p["scene_id"], "stats": {}, "seconds": 0.0})
+        m["stats"].update(p.get("stats") or {})
+        m["seconds"] += p.get("seconds", 0.0)
+        if "naming" in p:
+            m["naming"] = p["naming"]
+        if "error" in p:
+            m.setdefault("errors", []).append({"error": p["error"], "traceback": p.get("traceback")})
+    res = [merged[s] for s in scenes if s in merged]
     (out / "census.json").write_text(json.dumps(res, indent=1))
     tot: Dict[str, Counter] = defaultdict(Counter)
     for r in res:
         for grp, c in (r.get("stats") or {}).items():
             tot[grp].update({k: v for k, v in c.items() if isinstance(v, (int, float))})
     print(json.dumps({k: dict(v) for k, v in tot.items()}, indent=1))
-    errs = [r["scene_id"] for r in res if "error" in r]
+    errs = [r["scene_id"] for r in res if "errors" in r]
     if errs:
         print("errors:", errs)
 
