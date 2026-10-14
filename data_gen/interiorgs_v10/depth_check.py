@@ -202,9 +202,21 @@ def summarize(tasks: Sequence[Dict[str, Any]], results: Sequence[Dict[str, Any]]
     }
 
 
+def _results(path: Path) -> List[Dict[str, Any]]:
+    """results.jsonl, skipping unreadable lines: read from another node while the job appends to it, the
+    shared file system can return a half-written tail."""
+    out = []
+    for line in Path(path).read_bytes().decode("utf-8", errors="replace").splitlines():
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
 def cmd_report(args: argparse.Namespace) -> None:
     pilot = Path(args.pilot)
-    summary = summarize(_jsonl(pilot / "tasks.jsonl"), _jsonl(pilot / "results.jsonl"))
+    summary = summarize(_jsonl(pilot / "tasks.jsonl"), _results(pilot / "results.jsonl"))
     (pilot / "depth_check_summary.json").write_text(json.dumps(summary, indent=1))
     print(json.dumps({k: v for k, v in summary.items() if k != "flagged_task_ids"}, indent=1))
 
