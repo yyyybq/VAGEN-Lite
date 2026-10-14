@@ -90,6 +90,8 @@ ssh -o ControlMaster=no fujian 'cat /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/va
 
 第七轮的核对（SFT 数据、RL 奖励、简单策略）都没发现会让训练白跑的问题，详见 `cluster_runs/REPORT_R7_20261014.md`。
 
+**训练中记录的验证成功率偏低 2–4 个百分点**：验证时补齐到 48 条用的复制品被拼进了原轨迹（每批前 16 条各含两次尝试，成功标记取回合多的那次）。训练不受影响。重算：第 0 次 35.0%（记录 32.8%），第 25 次 39.6%（记录 35.9%）；重算脚本 `interiorgs_v10_r7_20261014/scripts/val_corrected.py`。修法（`mark_padding_uids`）训练结束后提交。
+
 ## 4. 待决事项
 
 按影响大小排序；推荐项放在第一个。详见 `cluster_runs/REPORT_R7_20261014.md` 第七节和 `REPORT_R6_20261014.md` 第八节。
