@@ -75,7 +75,9 @@ class EvaluationTest(unittest.TestCase):
                 return self._obs(200 if done else 90), (4.99 if done else -0.16), done, info
 
             def _calculate_canonical_metric(self):
-                return {"success": self._current_step >= 3}
+                ok = self._current_step >= 3
+                return {"success": ok, "gates": {"distance_ok": ok, "target_a_clearly_visible": True},
+                        "continuous_gate_progress": min(1.0, self._current_step / 3)}
 
         answers = iter(["move_forward|turn_left", "move_forward"])
         policy = type("P", (), {"generate": lambda self, s, u, im: next(answers)})()
@@ -91,6 +93,9 @@ class EvaluationTest(unittest.TestCase):
                          (["move_forward", "turn_left"], 1, -0.16, False))
         self.assertEqual((t1["met"], row["final_frame"], row["end_reason"], row["task_description"]),
                          (True, "frames/007_02.jpg", "success_auto", "Go."))
+        self.assertEqual(row["start"], {"failed_gates": ["distance_ok"], "progress": 0.0})  # before the first turn
+        self.assertEqual((t0["failed_gates"], t0["progress"], t1["failed_gates"], t1["progress"]),
+                         (["distance_ok"], 0.6667, [], 1.0))
         answers = iter(["move_forward|turn_left", "move_forward"])
         self.assertNotIn("trajectory", E.run_episode(Env(), policy, 7, 12))  # without a frames folder: counts only
 

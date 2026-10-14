@@ -157,6 +157,15 @@ def env_config(env_template: Path, tasks: Path, gs_root: str, prompt_format: Opt
     return cfg
 
 
+def gate_summary(metric: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The success conditions not met at a pose (``failed_gates``) and the 0..1 progress toward success."""
+    if not metric:
+        return {"failed_gates": None, "progress": None}
+    progress = metric.get("continuous_gate_progress", metric.get("shaping_score"))
+    return {"failed_gates": sorted(k for k, v in (metric.get("gates") or {}).items() if not v),
+            "progress": None if progress is None else round(float(progress), 4)}
+
+
 def _images(obs: Dict[str, Any]) -> List[Any]:
     return [im for v in (obs.get("multi_modal_data") or {}).values() for im in (v or [])]
 
@@ -172,6 +181,7 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
     item = env.current_item or {}
     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
     done, trajectory, end_reason = False, [], None
+    start = gate_summary(env._calculate_canonical_metric()) if frames is not None else None
 
     def keep(image: Any, turn: int) -> Optional[str]:
         if frames is None or image is None:
@@ -203,14 +213,15 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         end_reason = step_info.get("termination_reason", end_reason)
         if frames is not None:
             trajectory.append(dict(seen, answer=text, actions=[str(a) for a in parsed], valid=valid,
-                                   collisions=blocked, reward=round(float(reward), 4), met=met))
+                                   collisions=blocked, reward=round(float(reward), 4), met=met,
+                                   **gate_summary(metric)))
     row = {"index": index, "task_id": item.get("task_id"), "scene_id": item.get("scene_id"),
            "task_type": item.get("task_type"), "d_star": int((item.get("difficulty") or {}).get("d_star", 0)),
            "success": success, "actions_to_success": actions_to_success, "turns": turns,
            "actions": attempted, "collisions": collisions, "invalid_turns": invalid}
     if frames is not None:
         last = _images(obs)
-        row.update(task_description=item.get("task_description"), trajectory=trajectory,
+        row.update(task_description=item.get("task_description"), start=start, trajectory=trajectory,
                    final_frame=keep(last[0] if last else None, turns),
                    end_reason=end_reason if done else "max_turns")
     return row
