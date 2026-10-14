@@ -22,6 +22,25 @@ def _as_1d_object_array(items: List[Any]) -> np.ndarray:
     return arr
 
 
+def mark_padding_uids(padded: DataProto, pad_size: int) -> None:
+    """
+    ``pad_dataproto_to_divisor`` pads with copies of the first rows, uid / group_idx / traj_idx included.
+    Give every copy its own uid and group_idx so the no-concat validation filter (``uid in original_uids``)
+    drops its turns. Kept, they were merged into the original trajectory by ``concat_val_multi_turn``: the
+    summed reward counted two rollouts and the success flag came from the longer one.
+    """
+    if pad_size <= 0:
+        return
+    n = len(padded)
+    nt = padded.non_tensor_batch
+    for key in ("uid", "group_idx"):
+        if key in nt:
+            arr = np.array(nt[key], dtype=object, copy=True)
+            for i in range(n - pad_size, n):
+                arr[i] = f"__pad__{i}"
+            nt[key] = arr
+
+
 def concat_val_multi_turn(
     test_output_gen_batch: DataProto,
     test_gen_batch: DataProto,

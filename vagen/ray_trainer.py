@@ -64,7 +64,7 @@ from verl.utils.torch_functional import masked_mean
 from vagen.utils.image_dump_actor import ImageDumpActor
 from vagen.utils.upload_hugging_face import HFUploadManager
 from vagen.utils.image_validation_logger import ValidationGenerationsLogger
-from vagen.utils.concat_val_multi_turn import concat_val_multi_turn
+from vagen.utils.concat_val_multi_turn import concat_val_multi_turn, mark_padding_uids
 from vagen.utils.image_token_utils import replace_image_tokens_for_logging
 from vagen.utils.active_spatial_ppo_snapshot import (
     directory_manifest_sha256,
@@ -1822,6 +1822,9 @@ class RayPPOTrainer:
                 original_uids = set(test_gen_batch.non_tensor_batch["uid"])
 
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, size_divisor)
+            if not self.concat_multi_turn:
+                # the padding copies keep their uid; new uids let the filter below drop their trajectories
+                mark_padding_uids(test_gen_batch_padded, pad_size)
             if not self.async_rollout_mode:
                 test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
             else:
