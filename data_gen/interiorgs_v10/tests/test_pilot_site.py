@@ -87,5 +87,25 @@ class PilotSiteTest(unittest.TestCase):
         self.assertNotIn("InteriorGS 试点标注", html)
 
 
+    def test_audit_mode(self):
+        """Round 6: the check page's questions, chosen by what each task contains; no machine judgement shown."""
+        pilot = self.root / "audit"
+        (pilot / "frames" / "plain").mkdir(parents=True, exist_ok=True)
+        tasks = [dict(r, pilot_pool="formal", check_group=P.AUDIT_GROUP, check_lateral_angle_deg=None)
+                 for r in self.rows[:4]]
+        frames = [f for r in tasks for f in P.check_frames(r)]
+        (pilot / "pilot_tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in tasks))
+        (pilot / "frames.jsonl").write_text("".join(json.dumps(f) + "\n" for f in frames))
+        (pilot / "threshold_examples.jsonl").write_text("")
+        data = PS.build_data(pilot, None, None, mode="audit")
+        for t, r in zip(data["tasks"], tasks):
+            keys = {q["key"] for q in t["questions"]}
+            self.assertTrue({"concise", "unique"} <= keys)
+            self.assertEqual("lateral" in keys, r["task_type"] == "projective_relations")
+            self.assertEqual(t["info"], [])
+            self.assertIn("站在起点", next(q["text"] for q in t["questions"] if q["key"] == "unique"))
+        PS.build_site(pilot, self.root / "audit_site", mode="audit")
+        self.assertIn("InteriorGS 第六轮人工检查", (self.root / "audit_site" / "index.html").read_text(encoding="utf-8"))
+
 if __name__ == "__main__":
     unittest.main()

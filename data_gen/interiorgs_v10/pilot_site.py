@@ -48,12 +48,14 @@ def frame_role_zh(state_id: str, roles: Sequence[str], d: int) -> str:
     return f"中间关键帧（走了 {k} 步之后）"
 
 
-METHOD_ZH = {"unique_label": "只写名字", "room": "用房间区分", "anchor": "用参照物区分", "size": "用大小比较"}
+METHOD_ZH = {"unique_label": "只写名字", "room": "用房间区分", "anchor": "用参照物区分", "size": "用大小比较",
+             "room_local": "只写名字（起点所在的房间里只有一个）"}
 CHECK_GROUP_ZH = {
     "lateral_near_45": "左右题，终点时 B 指向 A 的线和左右方向的夹角接近 45°",
     "name_only": "所有目标都只写名字",
     "room": "有目标用房间区分",
     "reference": "有目标用参照物区分（参照物画绿框）",
+    "audit_r6": "第六轮规则下的 val / test 题（按族和最少步数分层抽取）",
 }
 
 
@@ -62,11 +64,24 @@ def check_questions(t: Dict[str, Any], row: Dict[str, Any], d: int) -> List[Dict
     from html import escape
 
     refs = "、".join(f"「{escape(x['ref'])}」" for x in t["targets"])
+    group = row.get("check_group")
+    unique = ("站在起点的位置，按这些描述能确定各自指的是哪个物体吗？" if group == "audit_r6"
+              else "按这些描述，能在整个场景里各自唯一找到目标吗？")
     qs = [{"key": "concise", "opts": "yes",
            "text": f"描述 {refs} 是否刚好够用：没有多余的修饰，需要区分的地方也说清楚了？"},
-          {"key": "unique", "opts": "yes", "text": "按这些描述，能在整个场景里各自唯一找到目标吗？"}]
-    group = row.get("check_group")
+          {"key": "unique", "opts": "yes", "text": unique}]
     end = f"s{d}"
+    if group == "audit_r6":  # the round-6 check asks what applies to the task's content
+        methods = [e.get("ref_method") for e in row["target_object"]["objects"]]
+        group = None
+        if row["task_type"] == "projective_relations":
+            qs.append({"key": "lateral", "opts": "yes", "frame": end,
+                       "text": "【终点画面】A（红框）和 B（蓝框）是左右关系，而不是一前一后？"})
+        if "room" in methods:
+            qs.append({"key": "room_name", "opts": "yes",
+                       "text": "描述里的房间名（bedroom、kitchen 等）和俯视图、画面里这个房间的用途相符吗？"})
+        if any(e.get("ref_anchor") for e in row["target_object"]["objects"]):
+            group = "reference"
     if group == "lateral_near_45":
         qs.append({"key": "lateral", "opts": "yes", "frame": end,
                    "text": "【终点画面】A（红框）和 B（蓝框）是左右关系，而不是一前一后？"})
@@ -111,7 +126,7 @@ def build_data(pilot: Path, no_task: Optional[Dict[str, Any]], uncertain_dir: Op
                        for f in task_frames],
             "topdown": f"img/topdown/{r['task_id']}.png",
         })
-        if mode == "check":
+        if mode in ("check", "audit"):
             t = out_tasks[-1]
             methods = [METHOD_ZH.get(e.get("ref_method"), "旧规则") for e in r["target_object"]["objects"]]
             info_targets = list(t["targets"])
@@ -123,6 +138,8 @@ def build_data(pilot: Path, no_task: Optional[Dict[str, Any]], uncertain_dir: Op
             angle = r.get("check_lateral_angle_deg")
             if angle is not None:
                 t["info"].append(f"终点时 B→A 与左右方向的夹角：{angle:.1f}°（规则要求不超过 45°）")
+            if mode == "audit":  # an estimate of how many tasks are bad: blind, like the pilot
+                t["info"] = []
     examples = _jsonl(pilot / "threshold_examples.jsonl")
     rng = random.Random(seed)
     general = [e for e in examples if e["group"] == "general"]
@@ -173,6 +190,8 @@ def build_site(pilot: Path, out: Path, no_task_path: Optional[Path] = None,
             .replace("__DATA_HASH__", data_hash))
     if mode == "check":
         html = html.replace("InteriorGS 试点标注", "InteriorGS 检查页")
+    if mode == "audit":
+        html = html.replace("InteriorGS 试点标注", "InteriorGS 第六轮人工检查")
     (out / "index.html").write_text(html, encoding="utf-8")
     summary = {"tasks": len(data["tasks"]), "task_frames": sum(len(t["frames"]) for t in data["tasks"]),
                "visibility_examples": len(data["visibility"]), "uncertain_boxes": len(data["uncertain"]),
@@ -187,7 +206,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--no-task-objects", type=Path, default=None)
     ap.add_argument("--uncertain-figures", type=Path, default=None)
-    ap.add_argument("--mode", choices=("pilot", "check"), default="pilot",
+    ap.add_argument("--mode", choices=("pilot", "check", "audit"), default="pilot",
                     help="check: the 2026-10-14 check page (pilot.py check), questions about the three fixes")
     args = ap.parse_args(argv)
     print(json.dumps(build_site(args.pilot, args.out, args.no_task_objects, args.uncertain_figures, args.mode),

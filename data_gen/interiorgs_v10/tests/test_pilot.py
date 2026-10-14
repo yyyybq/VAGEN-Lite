@@ -105,5 +105,26 @@ class PilotTest(unittest.TestCase):
                 self.assertEqual(frames[0]["overlay"]["RA"]["color"], "lime")
 
 
+    def test_audit_selection(self):
+        """Round 6: 100 formal val / test tasks spread over the families and d* bands, start and end frames."""
+        self.assertEqual(P.audit_quota(["b", "a", "c"], 100), {"a": 34, "b": 33, "c": 33})
+        run = self.root / "audit_run"
+        run.mkdir(exist_ok=True)
+        rows = [dict(r, scene_id=sid, task_id=r["task_id"] + "_" + sid) for sid in ("two_rooms", "val_scene", "tr")
+                for r in self.rows]
+        (run / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        manifest = self.root / "audit_split.json"
+        manifest.write_text(json.dumps({"train_scenes": ["tr"], "val_scenes": ["val_scene"],
+                                        "test_scenes": ["two_rooms"]}))
+        out = self.root / "audit"
+        from argparse import Namespace
+
+        P.cmd_audit(Namespace(run=str(run), split_manifest=str(manifest), n=6, seed=1, out=str(out)))
+        tasks = [json.loads(l) for l in (out / "pilot_tasks.jsonl").read_text().splitlines()]
+        self.assertTrue(0 < len(tasks) <= 6)
+        self.assertTrue(all(t["split"] in ("val", "test") and t["check_group"] == P.AUDIT_GROUP for t in tasks))
+        frames = [json.loads(l) for l in (out / "frames.jsonl").read_text().splitlines()]
+        self.assertEqual(len(frames), 2 * len(tasks))
+
 if __name__ == "__main__":
     unittest.main()

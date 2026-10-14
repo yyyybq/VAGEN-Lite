@@ -559,12 +559,55 @@ def cmd_check(args: argparse.Namespace) -> None:
     print(json.dumps(report, indent=1))
 
 
+AUDIT_GROUP = "audit_r6"
+
+
+def audit_quota(families: Sequence[str], n: int) -> Dict[str, int]:
+    """``n`` tasks over the families as evenly as possible (the first families in order get the remainder)."""
+    fams = sorted(families)
+    return {f: n // len(fams) + (1 if i < n % len(fams) else 0) for i, f in enumerate(fams)}
+
+
+def cmd_audit(args: argparse.Namespace) -> None:
+    """Round-6 human check (decision of 2026-10-14): formal val and test tasks, stratified by family and d*,
+    the check page's questions (pilot_site --mode audit), start and end frame of each task."""
+    manifest = json.loads(Path(args.split_manifest).read_text())
+    split_of = {s: k.replace("_scenes", "") for k in ("train_scenes", "val_scenes", "test_scenes")
+                for s in manifest.get(k, [])}
+    rows = [(kind, dict(r, split=split_of.get(r["scene_id"]))) for kind, r in _read_rows(Path(args.run))
+            if kind == "formal" and split_of.get(r["scene_id"]) in ("val", "test")]
+    quota = audit_quota({r["task_type"] for _, r in rows}, args.n)
+    tasks = [dict(r, check_group=AUDIT_GROUP,
+                  check_lateral_angle_deg=final_lateral_angle(r) if r["task_type"] == "projective_relations" else None)
+             for r in select_tasks(rows, quota, seed=args.seed)]
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    frames = [f for r in tasks for f in check_frames(r)]
+    (out / "pilot_tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in tasks))
+    (out / "threshold_examples.jsonl").write_text("")
+    (out / "frames.jsonl").write_text("".join(json.dumps(f) + "\n" for f in frames))
+    report = {"tasks": len(tasks), "seed": args.seed, "quota": quota,
+              "by_family": dict(Counter(r["task_type"] for r in tasks)),
+              "by_split": dict(Counter(r["split"] for r in tasks)),
+              "by_band": dict(Counter(str(band_of(int(r["difficulty"]["d_star"]))) for r in tasks)),
+              "by_method": dict(Counter(m for r in tasks for m in ref_methods(r))),
+              "scenes": len({r["scene_id"] for r in tasks}), "frames": len(frames)}
+    (out / "selection_report.json").write_text(json.dumps(report, indent=1))
+    print(json.dumps(report, indent=1))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check")
     c.add_argument("--run", required=True)
     c.add_argument("--out", required=True)
+    a = sub.add_parser("audit")
+    a.add_argument("--run", required=True)
+    a.add_argument("--split-manifest", required=True)
+    a.add_argument("--n", type=int, default=100)
+    a.add_argument("--seed", type=int, default=20261014)
+    a.add_argument("--out", required=True)
     s = sub.add_parser("select")
     s.add_argument("--run", required=True)
     s.add_argument("--scenes-root", required=True)
@@ -580,7 +623,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     t.add_argument("--scenes-root", required=True)
     t.add_argument("--no-task-objects", default=None)
     args = ap.parse_args(argv)
-    {"select": cmd_select, "render": cmd_render, "topdown": cmd_topdown, "check": cmd_check}[args.cmd](args)
+    {"select": cmd_select, "render": cmd_render, "topdown": cmd_topdown, "check": cmd_check,
+     "audit": cmd_audit}[args.cmd](args)
     return 0
 
 
