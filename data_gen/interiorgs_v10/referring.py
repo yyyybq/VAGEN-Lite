@@ -68,6 +68,9 @@ room, so 'in the living room' is not needed"; "the room has only one bed, 'next 
   rooms apart, that start is not used (``start_context.start_refs``).  The entry records the room
   (``ref_room``) and the other X instances (``ref_confusers``).
 * Otherwise reference ("next to the A") or size, as in v2.
+* A target described by a reference object or a size comparison also lists every other valid description
+  (``Obj.ref_alternatives``): a task whose other target is the chosen reference object uses the next one, or
+  is dropped when none is left (decision of 2026-10-14: 6.5% of the round-6 tasks had that).
 * Room types (``infer_room_type_v3``): only a toilet, bathtub or shower makes a bathroom by itself (a
   washbasin or vanity cabinet only when nothing of another room type stands there), and a room that also
   holds what another room type has (a sofa, a dining table or a desk in a "bathroom"; a dining table or a
@@ -585,6 +588,8 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
         obj.ref, obj.ref_method = None, None
         if cfg.rules in ("v2", "v3"):
             obj.ref_extra = None
+        if cfg.rules == "v3":
+            obj.ref_alternatives = None
         t = id_index[obj.id]
         disp = idx.disp[t]
         if not _label_usable(disp):
@@ -628,6 +633,8 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
                              "ref_anchor": _anchor_entry(anchor) if anchor is not None else None}
             if len(ref) > 3:
                 obj.ref_extra.update(ref[3])
+        if cfg.rules == "v3" and method_used in (METHOD_ANCHOR, METHOD_SIZE):
+            obj.ref_alternatives = _alternatives(idx, t, disp, members, anchors, reference_ok)
         funnel.add("referring", method_used)
     return funnel
 
@@ -714,8 +721,22 @@ def _try_room_local(idx: "_SceneIndex", t: int, disp: str, members: Sequence[int
              "ref_confusers": [str(idx.pool[i].id) for i in members if i != t]})
 
 
+def _alternatives(idx: "_SceneIndex", t: int, disp: str, members: Sequence[int], anchors: Sequence[int],
+                  reference_ok: Callable[[Obj], bool]) -> List[Dict[str, Any]]:
+    """v3: every valid reference-object description (nearest reference first), then the size comparison."""
+    found: List[Tuple[str, str, int]] = []
+    _try_anchor_v2(idx, t, disp, members, anchors, [], collect=found)
+    out = [{"ref": text, "ref_method": method, "ref_anchor": _anchor_entry(idx.pool[j])} for text, method, j in found]
+    size = _try_size(idx, t, disp, members, [], reference_ok)
+    if size is not None:
+        out.append({"ref": size[0], "ref_method": size[1], "ref_anchor": None})
+    return out
+
+
 def _try_anchor_v2(idx: "_SceneIndex", t: int, disp: str, members: Sequence[int],
-                   anchors: Sequence[int], details: List[str]) -> Optional[Tuple[str, str, int]]:
+                   anchors: Sequence[int], details: List[str],
+                   collect: Optional[List[Tuple[str, str, int]]] = None) -> Optional[Tuple[str, str, int]]:
+    """The nearest valid reference object; with ``collect``, every valid one is appended there (nearest first)."""
     cfg = idx.cfg
     target = idx.pool[t]
     cand = []
@@ -743,8 +764,13 @@ def _try_anchor_v2(idx: "_SceneIndex", t: int, disp: str, members: Sequence[int]
                 reason = "anchor:other_room"
                 continue
         if _anchor_resolution(idx, members, idx.disp[j]) == [t]:
-            return (f"the {disp} next to the {idx.disp[j]}", METHOD_ANCHOR, j)
+            if collect is None:
+                return (f"the {disp} next to the {idx.disp[j]}", METHOD_ANCHOR, j)
+            collect.append((f"the {disp} next to the {idx.disp[j]}", METHOD_ANCHOR, j))
+            continue
         reason = "anchor:ambiguous"
+    if collect:
+        return collect[0]
     details.append(reason)
     return None
 

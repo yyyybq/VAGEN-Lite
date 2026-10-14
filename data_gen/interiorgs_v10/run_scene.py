@@ -76,6 +76,9 @@ class RunConfig:
     # starts with its hidden target clearly visible (start_context.py).
     require_structure_walls: bool = False
     oa_start_target_visible: bool = False
+    # a target's reference object is never another target of the same task: the target takes another valid
+    # description, or the item is dropped (object preset v10_r6 lists the alternatives; start_context.py)
+    forbid_other_target_reference: bool = False
 
 
 _IGNORED_CACHE: Dict[str, Dict[str, List[str]]] = {}
@@ -344,6 +347,21 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
                 items += _family_items(scene, fam, objs, cfg, funnel)
             except Exception as exc:  # a broken family must not kill the scene
                 funnel.add("items", f"{fam}_error:{type(exc).__name__}")
+        if cfg.forbid_other_target_reference:
+            from .start_context import avoid_other_target_references
+
+            by_id = {str(o.id): o for o in objs}
+            kept = []
+            for item in items:
+                before = item["task_description"]
+                fixed = avoid_other_target_references(item, by_id)
+                if fixed is None:
+                    funnel.add("items", "reference_is_other_target_dropped")
+                    continue
+                if fixed["task_description"] != before:
+                    funnel.add("items", "reference_is_other_target_redescribed")
+                kept.append(fixed)
+            items = kept
         summary["n_items"] = len(items)
         t = _tick("items", t)
 

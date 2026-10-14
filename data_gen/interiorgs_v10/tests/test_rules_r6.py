@@ -132,6 +132,32 @@ class StartContextTest(unittest.TestCase):
                          {"b1": {"ref": "the bed", "ref_method": R.METHOD_ROOM_LOCAL}})
         self.assertEqual(SC.start_refs(self.scene, {"target_object": {"objects": []}}, inside, self.obs), {})
 
+    def test_reference_never_the_other_target(self):
+        """A target described by a reference object that is the task's other target takes its next valid
+        description; with none left the item is dropped."""
+        rooms = [_room(0, 0, 0, 6, 5)]
+        objs = [_box("c1", "chair", 1.0, 1.0, 0, 1.5, 1.5, 0.9, 0), _box("c2", "chair", 4.0, 3.5, 0, 4.5, 4.0, 0.9, 0),
+                _box("s", "sofa", 1.7, 0.6, 0, 3.3, 1.4, 0.9, 0),       # nearest reference of c1
+                _box("t", "dining table", 0.2, 1.8, 0, 1.4, 3.0, 0.8, 0),  # second reference of c1
+                _box("w", "wardrobe", 4.8, 3.2, 0, 5.8, 4.4, 2.1, 0)]      # c2's reference
+        scene = _scene(objs, rooms)
+        got = _assign(scene, {"c1", "c2", "s", "t"})
+        alts = got["c1"].ref_alternatives
+        self.assertEqual(got["c1"].ref, "the chair next to the sofa")
+        self.assertEqual([a["ref"] for a in alts][:2], ["the chair next to the sofa", "the chair next to the dining table"])
+        item = {"task_type": "projective_relations", "canonical_task_metric_version": C.CANONICAL_TASK_METRIC_V1,
+                "target_region": {"params": {"relation": "left"}},
+                "target_object": {"objects": [got["c1"].target_object_entry(), got["s"].target_object_entry()]}}
+        item["task_description"] = SC.describe(item)
+        fixed = SC.avoid_other_target_references(copy.deepcopy(item), got)
+        a = fixed["target_object"]["objects"][0]
+        self.assertEqual((a["ref"], a["ref_anchor"]["id"]), ("the chair next to the dining table", "t"))
+        self.assertIn("the chair next to the dining table appears to the left of the sofa", fixed["task_description"])
+        got["c1"].ref_alternatives = alts[:1]  # no other description: the item is not made
+        self.assertIsNone(SC.avoid_other_target_references(copy.deepcopy(item), got))
+        other = dict(item, target_object={"objects": [got["c1"].target_object_entry(), got["c2"].target_object_entry()]})
+        self.assertIs(SC.avoid_other_target_references(other, got), other)  # nothing to change
+
     def test_oa_target_visible(self):
         item = {"task_type": "occlusion_alignment", "target_region": {"params": {"occluded": "7", "occluder": "8"}}}
         obs = {"targets": {"7": {"identifiable": False}, "8": {"identifiable": True}}}
@@ -204,7 +230,7 @@ class RunOptionsTest(unittest.TestCase):
         r6 = json.loads((root / "generation_r6_20261014.json").read_text(encoding="utf-8"))["run_config"]
         diff = {k for k in set(r5) | set(r6) if r5.get(k) != r6.get(k)}
         self.assertEqual(diff, {"object_preset", "no_task_objects", "require_structure_walls",
-                                "oa_start_target_visible"})
+                                "oa_start_target_visible", "forbid_other_target_reference"})
         self.assertEqual(r6["object_preset"], "v10_r6")
         RunConfig(**r6)
         self.assertTrue((Path(__file__).resolve().parents[3] / r6["no_task_objects"]).is_file())

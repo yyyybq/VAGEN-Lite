@@ -241,6 +241,11 @@ class Obj:
     # the reference object "ref_anchor" to be clearly visible in a success frame).  None under "v1", whose
     # entries (and task ids) stay as they were.
     ref_extra: Optional[Dict[str, Any]] = None
+    # Referring rules "v3" only: every valid description of a target described by a reference object or a
+    # size comparison, in order of preference ({"ref", "ref_method", "ref_anchor"}; the first is ``ref``).
+    # A task whose other target is the chosen reference object uses the next one
+    # (start_context.avoid_other_target_references).  Not part of the target entry.
+    ref_alternatives: Optional[List[Dict[str, Any]]] = None
 
     @property
     def center(self) -> np.ndarray:

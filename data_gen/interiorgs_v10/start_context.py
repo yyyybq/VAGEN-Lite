@@ -63,6 +63,32 @@ def start_refs(scene: Any, item: Dict[str, Any], c2w: Any,
     return out
 
 
+def avoid_other_target_references(item: Dict[str, Any], objs_by_id: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Decision of 2026-10-14: a target's reference object must not be another target of the same task.  Such a
+    target takes its next valid description (``Obj.ref_alternatives``) whose reference is no target of the task;
+    returns the item (description rebuilt when something changed) or None when a target has none left."""
+    entries = target_entries(item)
+    ids = {str(e["id"]) for e in entries}
+
+    def bad(anchor: Optional[Dict[str, Any]], own: str) -> bool:
+        return bool(anchor) and str(anchor.get("id")) in ids - {own}
+
+    changed = False
+    for e in entries:
+        own = str(e["id"])
+        if not bad(e.get("ref_anchor"), own):
+            continue
+        obj = objs_by_id.get(own)
+        alt = next((a for a in (getattr(obj, "ref_alternatives", None) or []) if not bad(a.get("ref_anchor"), own)), None)
+        if alt is None:
+            return None
+        e.update(ref=alt["ref"], ref_method=alt["ref_method"], ref_anchor=alt["ref_anchor"])
+        changed = True
+    if changed:
+        item["task_description"] = describe(item)
+    return item
+
+
 def describe(item: Dict[str, Any]) -> str:
     """The task description from the target entries' ``ref`` (the builders' own wording)."""
     from . import contract as C

@@ -1,5 +1,5 @@
 {
-  "description": "Generation config of round 6, 2026-10-14 (cluster_runs/REPORT_R6_20261014.md): the round-5 config with the changes the round-5 check page asked for. Code side (no config key): the env's visibility rule is face_visible_v3 (structure.json walls with door openings, curtains hide). Config side: object_preset v10_r6 (referring rules v3: a target that is the only one of its kind in the start's room is just 'the X', the room form only from other rooms; stricter room types), no_task_objects 20261014 (the 20261013 list plus boxes whose size is far from their category's, label_outliers.py), require_structure_walls (no tasks in scenes without walls, e.g. an outdoor playground) and oa_start_target_visible (occlusion alignment starts with its target visible).",
+  "description": "Generation config of round 6, 2026-10-14 (cluster_runs/REPORT_R6_20261014.md): the round-5 config with the changes the round-5 check page asked for. Code side (no config key): the env's visibility rule is face_visible_v3 (structure.json walls with door openings, curtains hide). Config side: object_preset v10_r6 (referring rules v3: a target that is the only one of its kind in the start's room is just 'the X', the room form only from other rooms; stricter room types), no_task_objects 20261014 (the 20261013 list plus boxes whose size is far from their category's, label_outliers.py), require_structure_walls (no tasks in scenes without walls, e.g. an outdoor playground) oa_start_target_visible (occlusion alignment starts with its target visible) and forbid_other_target_reference (a target's reference object is never the task's other target: another valid description, or the task is not made; 6.5% of the first round-6 run had one).",
   "run_config": {
     "object_preset": "v10_r6",
     "families": [
@@ -43,6 +43,7 @@
     "no_task_objects": "data_gen/interiorgs_v10/configs/no_task_objects_20261014.json",
     "visibility_rule": "env",
     "require_structure_walls": true,
-    "oa_start_target_visible": true
+    "oa_start_target_visible": true,
+    "forbid_other_target_reference": true
   }
 }

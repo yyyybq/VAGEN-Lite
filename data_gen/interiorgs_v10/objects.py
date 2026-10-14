@@ -458,7 +458,7 @@ def candidate_objects(scene: Any, preset: PresetLike = "v10_relaxed") -> Tuple[L
     out: List[Obj] = []
     for o in passed:
         c = copy.copy(o)
-        c.ref, c.ref_method, c.ref_extra = None, None, None
+        c.ref, c.ref_method, c.ref_extra, c.ref_alternatives = None, None, None, None
         out.append(c)
 
     if cfg.ref_policy == "v9_label":
