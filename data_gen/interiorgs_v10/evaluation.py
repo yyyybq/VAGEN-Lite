@@ -231,7 +231,7 @@ def cmd_table(args: argparse.Namespace) -> None:
         cells += [fmt(m["success_by_band"].get(b)) for b in bands]
         cells += [fmt(m["actions_over_dstar"]), fmt(m["collision_rate"]), fmt(m["invalid_rate"])]
         lines.append("| " + " | ".join(cells) + " |")
-    (ev / "table.md").write_text("\n".join(lines) + "\n")
+    (ev / "table.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 
 

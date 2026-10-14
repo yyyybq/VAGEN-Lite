@@ -44,7 +44,7 @@ class EvaluationTest(unittest.TestCase):
             d.mkdir()
             (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
             E.cmd_table(type("A", (), {"eval": tmp})())
-            table = (Path(tmp) / "table.md").read_text()
+            table = (Path(tmp) / "table.md").read_text(encoding="utf-8")
         self.assertIn("| sft | 2 | 0.500 |", table)
 
 

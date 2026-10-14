@@ -7,6 +7,8 @@
 #   rl-trial   RUN RL_DIR [ENDPOINT]    1 card : the 3DGS render service and PPO on the same card
 #   renderer   RUN                      1 card : the render service for a formal RL run (writes RUN/renderer_endpoint.txt)
 #   rl         RUN RL_DIR ENDPOINT      8 cards: PPO, waits for RUN/renderer_endpoint.txt
+#   eval       RUN EVAL NAME MODEL [PROMPT_FORMAT]  1 card: the render service and vLLM; one greedy episode per task
+#                                        of EVAL/tasks.jsonl (data_gen/interiorgs_v10/evaluation.py), results in EVAL/NAME
 #   rl-resume-check RUN RL_DIR          1 card : a trial config (rl-config --trial) run to update 2, then a second
 #                                        process that must resume from update 2 and stop after 3; checks that and
 #                                        the retention rule (kept: updates 2 and 3) in RUN/logs/resume_check.json
@@ -117,6 +119,15 @@ result["ok"] = result["resumed_from_update_2"] and steps == [2, 3]
 print(json.dumps(result))
 assert result["ok"], result
 PY
+    ;;
+  eval)
+    EVAL=${3:?evaluation folder}
+    NAME=${4:?model name}
+    MODEL=${5:?Hugging Face model folder}
+    export CUDA_VISIBLE_DEVICES=0
+    start_renderer 0
+    "${PY}" -m data_gen.interiorgs_v10.evaluation run --eval "${EVAL}" --name "${NAME}" --model "${MODEL}" \
+      ${6:+--prompt-format "$6"}
     ;;
   renderer)
     export CUDA_VISIBLE_DEVICES=0
