@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tupl
 
 import numpy as np
 
-from .common import (Combo, GenCtx, bare, bbox_gap_x, bbox_gap_y, cap, distance, overlap_1d, pairs_near,
+from .common import (Combo, GenCtx, balanced_choice, bare, bbox_gap_x, bbox_gap_y, cap, distance, overlap_1d, pairs_near,
                      single_pool)
 from .draw import draw_boxes, draw_points, flat_surface_points
 from .geom import OBB, angle_diff_deg, camera_K, footprint_overlap_fraction, project, to_camera
@@ -429,12 +429,15 @@ def s1_realize(r: Runner):
                        {"x": bare(nx), "y": bare(ny), "x_the": nx, "y_the": ny}, keys, lab, "mc",
                        gt_record("VS-01", label=lab), objs, rev)
             else:
-                ask = g.rng.choice(["left", "right"])
-                truth = "yes" if ask == "left" else "no"   # asked about A=left object
+                # wording and answer balanced together; A is the left or the right object accordingly
+                ask, truth = balanced_choice(g.rng, "S1/BL-03", [(w, t) for w in ("left", "right") for t in ("yes", "no")])
+                a_is_left = (ask == "left") == (truth == "yes")
+                nA, nB = (names[0], names[1]) if a_is_left else (names[1], names[0])
                 fam = blink_yesno(g.rng.choice(BL_REL_ORIG[ask]), BL_REL_PARA[ask])
                 g.emit("S1", ["BL-03", "SITE-C02"], bench_of("BL-03"), "image", [vid], [img], fam,
-                       fields_ab(names[0], names[1]), YESNO, truth, "yesno",
-                       gt_record("BL-03-lr", asked=ask, gap_px=gap), objs, rev, keep_orig_order=YESNO)
+                       fields_ab(nA, nB), YESNO, truth, "yesno",
+                       gt_record("BL-03-lr", asked=ask, gap_px=gap, a_is_left_object=a_is_left),
+                       objs if a_is_left else objs[::-1], rev, keep_orig_order=YESNO)
             r.take(st)
             return None
         return "not_clear_after_render"
@@ -542,20 +545,22 @@ def s2_realize(r: Runner):
                        {"hl": hl, "hl_er": hl}, [bare(names[0]), bare(names[1])], bare(ans), "mc", gt_record("3D-01", **vals), objs, rev)
             else:
                 pos = "above_pos" in kinds
-                form = g.rng.choice(["above", "under"])
-                # "Is X directly above Y?": X = a (upper) gives the truth for positives, swapped gives "no"
-                if form == "above":
-                    X, Y = (a, b) if (pos or g.rng.random() < 0.5) else (b, a)
-                    truth = "yes" if (pos and X == a) else "no"
-                else:
-                    X, Y = (b, a) if (pos or g.rng.random() < 0.5) else (a, b)
-                    truth = "yes" if (pos and X == b) else "no"
+                # "Is X directly above Y?": for a positive pair X = a (upper) is "yes" and the swap is "no";
+                # a negative pair is "no" either way. Wording and answer are balanced over the run.
+                truths = ("yes", "no") if pos else ("no",)
+                pick = balanced_choice(g.rng, "S2/" + st, [(f, t) for f in ("above", "under") for t in truths], max_lead=2)
+                if pick is None:
+                    return "answer_balance_skip"
+                form, truth = pick
+                upper_first = (truth == "yes") == (form == "above") if pos else g.rng.random() < 0.5
+                X, Y = (a, b) if upper_first else (b, a)
                 nX, nY = names[[a, b].index(X)], names[[a, b].index(Y)]
                 if st == "3D-02":
                     g.emit("S2", [st, "SITE-C02"], bench_of(st), "image", [vid], [img], TDSR[form],
                            fields_ab(nX, nY), YESNO, truth, "yesno", gt_record("3D-02", **vals), objs, rev)
                 else:
-                    on_top = pos and form == "above" and float(A.lo[2] - B.hi[2]) <= 0.05 and g.rng.random() < 0.5
+                    on_top = (pos and form == "above" and truth == "yes" and float(A.lo[2] - B.hi[2]) <= 0.05
+                              and g.rng.random() < 0.5)
                     rel = "on_top" if on_top else ("above" if form == "above" else "below")
                     fam = blink_yesno(g.rng.choice(BL_REL_ORIG[rel]), BL_REL_PARA[rel])
                     g.emit("S2", ["BL-03", "SITE-C02"], bench_of("BL-03"), "image", [vid], [img], fam,
@@ -803,9 +808,12 @@ def s4_realize(r: Runner):
                     cand += [("touching", "no")]
                 if not cand:
                     return "bl03_distance_band"
-                # pick the truth value first so yes/no stay balanced (most pairs also qualify for "touching? no")
-                want = g.rng.choice(("yes", "no"))
-                rel, truth = g.rng.choice([c for c in cand if c[1] == want] or cand)
+                # balanced over (relation word, answer): most pairs also qualify for "touching? no", which would
+                # otherwise make "no" the answer to most questions
+                pick = balanced_choice(g.rng, "S4/BL-03", cand, max_lead=2)
+                if pick is None:
+                    return "answer_balance_skip"
+                rel, truth = pick
                 fam = blink_yesno(g.rng.choice(BL_REL_ORIG[rel]), BL_REL_PARA[rel])
                 g.emit("S4", ["BL-03", "SITE-C02"], bench_of("BL-03"), "image", [vid], [img], fam,
                        fields_ab(names[0], names[1]), YESNO, truth, "yesno",

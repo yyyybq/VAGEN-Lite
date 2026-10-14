@@ -22,7 +22,7 @@ import json
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
@@ -104,48 +104,57 @@ TEMPLATE_FAMILY = {"ES-01": "ES-relation", "ES-02": "ES-relation", "ES-03": "ES-
 
 
 def qtype(q: Dict[str, Any]) -> str:
+    """The question type as a reader sees it in the text (the same template can serve several groups)."""
     st = q["subtasks"][0]
+    if st == "BL-03":       # the relation word is part of the question ("left of", "on top of", "touching", ...)
+        v = (q.get("gt") or {}).get("values") or {}
+        return "BL-03:" + str(v.get("relation") or v.get("asked") or "")
     return TEMPLATE_FAMILY.get(st, st)
 
 
+def _cats(q: Dict[str, Any]) -> Tuple[str, ...]:
+    return tuple(sorted(o["display"] for o in q["objects"] if o["role"] not in ("shared_landmark",)))
+
+
 def blind(questions: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Guess without the image: pool all questions of the same type (across groups), prefer those with the same
+    object categories, and answer with their most frequent answer (numeric: their median)."""
+    by_type: Dict[str, List[int]] = defaultdict(list)
+    for i, q in enumerate(questions):
+        by_type[qtype(q)].append(i)
+    res: Dict[str, Dict[str, list]] = defaultdict(lambda: {"hits": [], "rand": [], "mra": [], "n": [], "num": []})
+    for i, q in enumerate(questions):
+        g = q["group"]
+        res[g]["n"].append(1)
+        others = [questions[j] for j in by_type[qtype(q)] if j != i]
+        same = [x for x in others if _cats(x) == _cats(q)]
+        pool = same or others
+        if q["answer_type"] == "numeric":
+            res[g]["num"].append(1)
+            if pool:
+                guess = statistics.median(float(x["answer"]) for x in pool)
+                res[g]["mra"].append(vsi_mra(str(guess), float(q["answer"])))
+            continue
+        opts = q["variants"]["orig"].get("options") or []
+        res[g]["rand"].append(1.0 / max(len(opts), 2))
+        if not pool:
+            res[g]["hits"].append(0.0)
+            continue
+        guess = Counter(canon(x) for x in pool).most_common(1)[0][0]
+        res[g]["hits"].append(1.0 if guess == canon(q) else 0.0)
     by_group: Dict[str, Dict[str, Any]] = {}
-    groups = defaultdict(list)
-    for q in questions:
-        groups[q["group"]].append(q)
-    for g, qs in groups.items():
-        hits, rand, mra_blind, n_num = [], [], [], 0
-        for i, q in enumerate(qs):
-            st = qtype(q)
-            cats = tuple(sorted(o["display"] for o in q["objects"] if o["role"] not in ("shared_landmark",)))
-            others = [x for j, x in enumerate(qs) if j != i and qtype(x) == st]
-            same = [x for x in others if tuple(sorted(o["display"] for o in x["objects"]
-                                                      if o["role"] not in ("shared_landmark",))) == cats]
-            pool = same or others
-            if q["answer_type"] == "numeric":
-                n_num += 1
-                if pool:
-                    guess = statistics.median(float(x["answer"]) for x in pool)
-                    mra_blind.append(vsi_mra(str(guess), float(q["answer"])))
-                continue
-            opts = q["variants"]["orig"].get("options") or []
-            rand.append(1.0 / max(len(opts), 2))
-            if not pool:
-                hits.append(0.0)
-                continue
-            guess = Counter(canon(x) for x in pool).most_common(1)[0][0]
-            hits.append(1.0 if guess == canon(q) else 0.0)
-        by_group[g] = {"questions": len(qs), "mc_questions": len(hits),
-                       "blind_hit_rate": round(float(np.mean(hits)), 3) if hits else None,
-                       "random_hit_rate": round(float(np.mean(rand)), 3) if rand else None,
-                       "numeric_questions": n_num,
-                       "blind_mra_median_guess": round(float(np.mean(mra_blind)), 3) if mra_blind else None}
+    for g, r in res.items():
         dist: Dict[str, Counter] = defaultdict(Counter)
-        for q in qs:
-            if q["answer_type"] != "numeric":
+        for q in questions:
+            if q["group"] == g and q["answer_type"] != "numeric":
                 dist[qtype(q)][canon(q)] += 1
-        by_group[g]["answer_share_top"] = {t: [c.most_common(1)[0][0], round(c.most_common(1)[0][1] / sum(c.values()), 2),
-                                               sum(c.values())] for t, c in dist.items()}
+        by_group[g] = {"questions": len(r["n"]), "mc_questions": len(r["hits"]),
+                       "blind_hit_rate": round(float(np.mean(r["hits"])), 3) if r["hits"] else None,
+                       "random_hit_rate": round(float(np.mean(r["rand"])), 3) if r["rand"] else None,
+                       "numeric_questions": len(r["num"]),
+                       "blind_mra_median_guess": round(float(np.mean(r["mra"])), 3) if r["mra"] else None,
+                       "answer_share_top": {t: [c.most_common(1)[0][0], round(c.most_common(1)[0][1] / sum(c.values()), 2),
+                                                sum(c.values())] for t, c in dist.items()}}
     return by_group
 
 

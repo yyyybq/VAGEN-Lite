@@ -17,27 +17,26 @@
 - 统计扩量运行完成（20 场景，每场景每子任务最多 3 题）：`exps/interiorgs_qa_stats_20261014/`。
 - 试验 F（10 类×5 例）、试验 G（20 个物体）、颜色试做（10 题）渲染完成：`exps/interiorgs_qa_trials/merged/`。
 - COVERAGE.md 第二版（逐项重判 + 白话摘要 + 4.0 节逐项改动表；92 个子任务编号全部落到组、试验或不做清单，无遗漏）。
-- 盲答基线发现 3 处由出题顺序造成的答案偏差，已改代码并重跑：M6 多步题 10 题里 9 题答案是"右前"（连拍总向右转、角色固定）；
-  S4 的 BLINK 关系题"否"占 89%；M1 的 BLINK 多视角题"向右"占 89%（绕物体转动方向按固定顺序尝试）。
+- 盲答基线发现 5 处由出题顺序造成的答案偏差，已改代码并重跑：M6 多步题"右前"占 10/11（连拍总向右转、角色固定）；
+  S1 的 BLINK"左边吗"全答"是"；S2 上下题、S4"碰到吗"多答"否"；M1 的 BLINK 多视角题"向右"占 85–89%（转动方向与起始方位按固定顺序尝试）。
+- M6、M11 重跑完成（各 10 题）；审核网页、COVERAGE 第二版、报告初稿完成。
 
-## 2. 正在运行什么（2026-10-14 23:00 UTC 前后提交）
+## 2. 正在运行什么（2026-10-14 23:30 UTC 前后提交）
 
 | 任务 | 编号 | 输出（日志在 `exps/interiorgs_qa_jobs/<名字>/logs/`） |
 | --- | --- | --- |
-| 重跑 M6、M11 样题（修正转身方向与角色） | SCO pt-mo70i9gp | `exps/interiorgs_qa_sample_20261014/topup_pan2/`，任务名 topup_pan2 |
-| 重跑 S4 的 BL-03、M1 的 BL-04 样题（答案平衡） | SCO pt-i4sumvbt | `exps/interiorgs_qa_sample_20261014/rebalance/`，任务名 rebal_sample |
-| 同上，统计扩量（盲答基线用） | SCO pt-0bhhq1z9 | `exps/interiorgs_qa_stats_20261014/rebalance/`，任务名 rebal_stats |
+| 重跑 S1/S2/S4 的是非题、M1 的 BLINK 多视角题样题（答案平衡最终版） | SCO pt-ymlxym1a | `exps/interiorgs_qa_sample_20261014/rebalance4/`，任务名 rebal4_sample |
+| 同上，统计扩量（盲答基线用，4 个任务各 5 个场景） | SCO pt-wo8h9pgr / pt-8zwxbpb4 / pt-nhjfta7a / pt-i5ejp6mc | `exps/interiorgs_qa_stats_20261014/rebalance4_{a,b,c,d}/`，任务名 rebal4_stats_{a,b,c,d} |
 
-被取代的旧题（网页和报告里都去掉）：`multi` 和 `topup_multi_a` 里的 M6、M11；`single` 里 S4 的 BL-03；`multi` 里 M1 的 BL-04；
-`topup_m3` 开头 2 道旧版 M3（qid 8704d4e110bd0a20、5d1ee32b9f7ff454）。已删除任务 topup_pan（pt-g2g57yf7）留下的目录不用。
+已完成的补跑：M6、M11 重跑（topup_pan2，pt-mo70i9gp）。中间版本 rebalance、rebalance2、rebalance3_* 不再使用（rebalance2 的 S1 题已平衡，但为一致起见改用 rebalance4）。
+被取代的旧题（网页和报告里都去掉）的清单在 `docs/interiorgs_qa/audit/report_numbers_20261014.sh` 和 `site_20261014.sh` 的 EXCL 变量里。
 
 查看 GPU 任务状态：`PYTHONPATH=. python -m data_gen.interiorgs_qa.sco status --job exps/interiorgs_qa_jobs/<名字>`。
 
 ## 3. 下一步
 
-1. 收上面三个任务的结果，重算报告数字（`report.py`）。
-2. 生成审核网页（`site.py`），同步到本机 `C:\Users\user\Downloads\_ICLR27_Probing_Spatial_World_Representation\interiorgs_qa_review_site\`。
-3. 写 `REPORT_20261014.md`；提交、推送，停下等用户标注。
+1. 收上面的结果；跑 `report_numbers_20261014.sh` 和 `site_20261014.sh`，把盲答表填进报告，网页同步到本机。
+2. 提交、推送，停下等用户标注。
 
 ## 4. 约定
 

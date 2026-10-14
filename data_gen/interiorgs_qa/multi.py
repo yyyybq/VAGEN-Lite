@@ -303,7 +303,9 @@ def m1_combos(g: GenCtx) -> Iterator[Combo]:
     for o in pool[:g.cap(20)]:
         c = ctx.obb[o].center
         for r in (2.0, 2.6, 3.2):
-            for a0 in np.linspace(0, 360, 12, endpoint=False):
+            # random start azimuth: sweeping from 0 deg upward first meets the start of the free arc around the
+            # object, where only the +d partner is legal (that made 85% of the answers "right")
+            for a0 in g.rng.sample(list(np.linspace(0, 360, 12, endpoint=False)), 12):
                 # random order: the first legal orbit is taken, a fixed order made almost every answer "right"
                 for d in sorted((30.0, -30.0, 40.0, -40.0), key=lambda _: g.rng.random()):
                     e1 = c[:2] + r * np.array([math.cos(math.radians(a0)), math.sin(math.radians(a0))])

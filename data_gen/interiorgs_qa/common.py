@@ -110,6 +110,31 @@ class GenCtx:
 # =============================================================================
 # Helpers shared by groups
 # =============================================================================
+# answer balancing for yes/no wordings: the counts live for the whole process (one render run walks many scenes)
+_BALANCE: Counter = Counter()
+
+
+def balanced_choice(rng: random.Random, key: str, cands: Sequence[Tuple[str, str]],
+                    max_lead: Optional[int] = None) -> Optional[Tuple[str, str]]:
+    """Pick one (wording, yes/no answer) candidate so that, over the run, each wording is answered "yes" about as
+    often as "no": prefer the candidate whose wording is furthest behind on its answer, then the least used
+    wording, ties at random. With ``max_lead``, return None (skip the question) when every candidate's answer
+    already leads its wording by more than that (e.g. a pair that can only be asked with answer "no").
+    Counts live for the whole process (one render run walks many scenes)."""
+    def score(c: Tuple[str, str]) -> Tuple[int, int]:
+        w, ans = c
+        other = "no" if ans == "yes" else "yes"
+        return (_BALANCE[(key, w, ans)] - _BALANCE[(key, w, other)],
+                _BALANCE[(key, w, "yes")] + _BALANCE[(key, w, "no")])
+    cands = list(cands)
+    low = min(score(c) for c in cands)
+    if max_lead is not None and low[0] > max_lead:
+        return None
+    pick = rng.choice([c for c in cands if score(c) == low])
+    _BALANCE[(key, pick[0], pick[1])] += 1
+    return pick
+
+
 def bare(name: str) -> str:
     return name[4:] if name.startswith("the ") else name
 
