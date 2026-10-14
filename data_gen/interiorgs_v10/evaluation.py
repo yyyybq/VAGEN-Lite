@@ -15,6 +15,7 @@ share it):
 
 Subset: ``PER_FAMILY`` tasks per family (all of a family's test tasks when it has fewer), spread evenly over
 the d* bands 1-3 / 4-6 / 7-8 (a band short of tasks gives its share to the others), drawn with ``SEED``.
+Each results row also holds the trajectory (frames, answers, actions; round 8) for the browsing page.
 Metrics per model: success rate (overall, per family, per d* band), actions taken / d* on successes,
 collision rate (blocked moves per action) and invalid-answer rate (turns whose answer did not parse).
 """
@@ -32,7 +33,7 @@ from typing import Any, Dict, List, Optional, Sequence
 PER_FAMILY = 50
 SEED = 20261014
 BANDS = ((1, 3), (4, 6), (7, 8))
-VERSION = "interiorgs_v10_eval_v1"
+VERSION = "interiorgs_v10_eval_v2"  # v2 (round 8): results rows carry the trajectory and frames
 
 
 def band_name(d: int) -> str:
@@ -156,32 +157,63 @@ def env_config(env_template: Path, tasks: Path, gs_root: str, prompt_format: Opt
     return cfg
 
 
-def run_episode(env: Any, policy: Any, index: int, max_turns: int) -> Dict[str, Any]:
-    """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py."""
+def _images(obs: Dict[str, Any]) -> List[Any]:
+    return [im for v in (obs.get("multi_modal_data") or {}).values() for im in (v or [])]
+
+
+def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None) -> Dict[str, Any]:
+    """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py.
+
+    With ``frames`` (round 8) the row also carries the trajectory: per turn the frame the model saw (a JPEG in
+    ``frames``, named <index>_<turn>.jpg), the user text, the answer, the parsed actions, blocked moves, reward
+    and whether the task was met after the turn; then the frame after the last turn and the env's end reason."""
     obs, info = env.reset(seed=index)
     system = env.system_prompt()
     item = env.current_item or {}
     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
-    done = False
+    done, trajectory, end_reason = False, [], None
+
+    def keep(image: Any, turn: int) -> Optional[str]:
+        if frames is None or image is None:
+            return None
+        frames.mkdir(parents=True, exist_ok=True)
+        name = f"{index:03d}_{turn:02d}.jpg"
+        image.convert("RGB").save(frames / name, format="JPEG", quality=85)
+        return f"{frames.name}/{name}"
+
     while not done and turns < max_turns:
-        images = [im for v in (obs.get("multi_modal_data") or {}).values() for im in (v or [])]
+        images = _images(obs)
         if len(images) != 1:
             raise RuntimeError(f"expected one observation image, got {len(images)}")
         text = policy.generate(system, obs["obs_str"], images[0])
+        seen = {"frame": keep(images[0], turns), "user": obs["obs_str"]}
         obs, reward, done, step_info = env.step(text)
         turns += 1
         parsed = list(step_info.get("actions") or [])
         tm = (step_info.get("metrics") or {}).get("turn_metrics") or {}
         attempted += len(parsed)
-        collisions += int(tm.get("collision_count", 0) or 0)
-        invalid += int(not bool(tm.get("action_is_valid", bool(parsed))))
+        blocked = int(tm.get("collision_count", 0) or 0)
+        collisions += blocked
+        valid = bool(tm.get("action_is_valid", bool(parsed)))
+        invalid += int(not valid)
         metric = env._calculate_canonical_metric()
-        if metric and metric.get("success") and not success:
+        met = bool(metric and metric.get("success"))
+        if met and not success:
             success, actions_to_success = True, int(env._current_step)
-    return {"index": index, "task_id": item.get("task_id"), "scene_id": item.get("scene_id"),
-            "task_type": item.get("task_type"), "d_star": int((item.get("difficulty") or {}).get("d_star", 0)),
-            "success": success, "actions_to_success": actions_to_success, "turns": turns,
-            "actions": attempted, "collisions": collisions, "invalid_turns": invalid}
+        end_reason = step_info.get("termination_reason", end_reason)
+        if frames is not None:
+            trajectory.append(dict(seen, answer=text, actions=[str(a) for a in parsed], valid=valid,
+                                   collisions=blocked, reward=round(float(reward), 4), met=met))
+    row = {"index": index, "task_id": item.get("task_id"), "scene_id": item.get("scene_id"),
+           "task_type": item.get("task_type"), "d_star": int((item.get("difficulty") or {}).get("d_star", 0)),
+           "success": success, "actions_to_success": actions_to_success, "turns": turns,
+           "actions": attempted, "collisions": collisions, "invalid_turns": invalid}
+    if frames is not None:
+        last = _images(obs)
+        row.update(task_description=item.get("task_description"), trajectory=trajectory,
+                   final_frame=keep(last[0] if last else None, turns),
+                   end_reason=end_reason if done else "max_turns")
+    return row
 
 
 class VllmPolicy:  # pragma: no cover - needs a GPU
@@ -233,7 +265,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
             if i in done:
                 continue
             try:
-                row = run_episode(env, policy, i, int(args.max_turns))
+                row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames")
             except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
                 row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
             f.write(json.dumps(row) + "\n")

@@ -47,6 +47,53 @@ class EvaluationTest(unittest.TestCase):
             table = (Path(tmp) / "table.md").read_text(encoding="utf-8")
         self.assertIn("| sft | 2 | 0.500 |", table)
 
+    def test_run_episode_records_the_trajectory(self):
+        from PIL import Image
+
+        class Env:  # two turns: a blocked move, then success at the third action
+            current_item = {"task_id": "t1", "scene_id": "s1", "task_type": "fov_inclusion", "task_description": "Go.",
+                            "difficulty": {"d_star": 2}}
+            _current_step = 0
+
+            def _obs(self, shade):
+                return {"obs_str": f"<image>\nturn {self._current_step}",
+                        "multi_modal_data": {"<image>": [Image.new("RGB", (8, 8), (shade, 0, 0))]}}
+
+            def reset(self, seed):
+                return self._obs(10), {}
+
+            def system_prompt(self):
+                return "sys"
+
+            def step(self, text):
+                acts = text.split("|")
+                self._current_step += len(acts)
+                done = self._current_step >= 3
+                info = {"actions": acts, "metrics": {"turn_metrics": {"collision_count": int(not done),
+                                                                      "action_is_valid": True}},
+                        "termination_reason": "success_auto" if done else "continuing"}
+                return self._obs(200 if done else 90), (4.99 if done else -0.16), done, info
+
+            def _calculate_canonical_metric(self):
+                return {"success": self._current_step >= 3}
+
+        answers = iter(["move_forward|turn_left", "move_forward"])
+        policy = type("P", (), {"generate": lambda self, s, u, im: next(answers)})()
+        with tempfile.TemporaryDirectory() as tmp:
+            row = E.run_episode(Env(), policy, 7, 12, frames=Path(tmp) / "frames")
+            files = sorted(p.name for p in (Path(tmp) / "frames").iterdir())
+        self.assertEqual(files, ["007_00.jpg", "007_01.jpg", "007_02.jpg"])
+        self.assertEqual((row["success"], row["actions_to_success"], row["turns"], row["collisions"]), (True, 3, 2, 1))
+        t0, t1 = row["trajectory"]
+        self.assertEqual((t0["frame"], t0["user"], t0["answer"]), ("frames/007_00.jpg", "<image>\nturn 0",
+                                                                    "move_forward|turn_left"))
+        self.assertEqual((t0["actions"], t0["collisions"], t0["reward"], t0["met"]),
+                         (["move_forward", "turn_left"], 1, -0.16, False))
+        self.assertEqual((t1["met"], row["final_frame"], row["end_reason"], row["task_description"]),
+                         (True, "frames/007_02.jpg", "success_auto", "Go."))
+        answers = iter(["move_forward|turn_left", "move_forward"])
+        self.assertNotIn("trajectory", E.run_episode(Env(), policy, 7, 12))  # without a frames folder: counts only
+
     def test_replace_flagged(self):
         picked = [_row(i, "projective_relations", 2) for i in range(4)] + [_row(10, "occlusion_alignment", 8)]
         pool = picked + [_row(20 + i, "projective_relations", 1 + i % 3) for i in range(3)] + [_row(30, "projective_relations", 7)]
