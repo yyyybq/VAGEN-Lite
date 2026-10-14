@@ -1,0 +1,83 @@
+{
+  "source_run": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_gen_20261014",
+  "source_snapshot": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_gen_20261014/job/src_shard1",
+  "source_commit": "35585b88",
+  "tokenizer": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/model_restore/qwen25vl7b_pretrained_cc594898/tokenizer.json",
+  "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+  "policy": {
+    "prompt_format": "no_think",
+    "chunking": "action_runs",
+    "max_actions_per_turn": 5,
+    "explicit_done": false,
+    "observation_pose": "runtime",
+    "env_feedback": "Action executed.",
+    "system_prompt": {
+      "step_translation": 0.3,
+      "step_rotation_deg": 20.0,
+      "action_space": "strafe",
+      "enable_explicit_done": false,
+      "max_actions_per_step": 5,
+      "format_reward": 0.01,
+      "invalid_format_penalty": -0.2,
+      "success_reward": 5.0
+    }
+  },
+  "assumptions": [
+    "No GPU, no render, no dataset export, no trained-model inference.",
+    "Counts use existing certificates and frozen r5 prompt functions in memory.",
+    "256x256 RGB assumed smart-resized to 252x252; patch 14, merge 2 gives 81 LLM visual tokens.",
+    "ChatML qwen2_vl template; train_on_prompt false, mask_history false, no packing/truncation simulated.",
+    "Estimated loss includes assistant content + im_end + newline; actual labels must be audited after final processing.",
+    "Terminal frames are rendered for validation but not fed into action-only SFT when explicit_done=false."
+  ],
+  "counts": {
+    "train": {
+      "tasks": 10477,
+      "primitive_actions": 48930,
+      "planned_render_frames": 35156,
+      "assistant_turns": 24679,
+      "training_image_occurrences": 24679,
+      "assistant_content_tokens": 294864,
+      "estimated_loss_tokens_with_im_end_newline": 344222,
+      "text_content_tokens_excluding_images_template": 7751248,
+      "estimated_total_tokens_chatml_visual81": 10123459
+    },
+    "val": {
+      "tasks": 1351,
+      "primitive_actions": 6342,
+      "planned_render_frames": 4590,
+      "assistant_turns": 3239,
+      "training_image_occurrences": 3239,
+      "assistant_content_tokens": 38460,
+      "estimated_loss_tokens_with_im_end_newline": 44938,
+      "text_content_tokens_excluding_images_template": 1006500,
+      "estimated_total_tokens_chatml_visual81": 1317721
+    }
+  },
+  "sequence_lengths": {
+    "train": {
+      "min": 613,
+      "median": 884,
+      "max": 2345,
+      "over_16384": 0
+    },
+    "val": {
+      "min": 612,
+      "median": 886,
+      "max": 2273,
+      "over_16384": 0
+    }
+  },
+  "source_sha256": {
+    "exps/vagen_active_spatial/interiorgs_v10_gen_20261014/sft/rows.jsonl": "3c1eee117a490f6441d002ba5f025cd1e05f594d35cd474875762c4066a63ceb",
+    "exps/vagen_active_spatial/interiorgs_v10_gen_20261014/sft/frames.jsonl": "d2f4f56ad54a101ac517a9bf0d3b86c481180f368fa4fbdd7dd8958f801f8924",
+    "exps/vagen_active_spatial/interiorgs_v10_gen_20261014/split_manifest.json": "84565090e97d361bb1e9896833a2df3eee12f23d2158ccbecbf602f428fc1e41",
+    "exps/vagen_active_spatial/interiorgs_v10_gen_20261014/job/src_shard1/data_gen/interiorgs_v10/admission.py": "017000ec4c966c03a17b1c40f5df06cabd8c0f9c8d1d39410c817cac792269fd",
+    "exps/vagen_active_spatial/interiorgs_v10_gen_20261014/job/src_shard1/data_gen/interiorgs_v10/release.py": "7f173aafbeffce7cdf7f6e5c2787c8867c610f1409699ffa78af18970a10af5a",
+    "exps/vagen_active_spatial/interiorgs_v10_gen_20261014/job/src_shard1/data_gen/interiorgs_v10/qa_states.py": "ad164d61b4c4498b685839fa20aa69fe6a785b1e19735d1d8504e5fcdf10f25b",
+    "exps/vagen_active_spatial/interiorgs_v10_gen_20261014/job/src_shard1/data_gen/interiorgs_v10/configs/admission_v2.json": "5491343883f1ce9f0b2dfe44ceb83b15105a04c0fc6409c077662ae20a9b445e",
+    "exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/model_restore/qwen25vl7b_pretrained_cc594898/tokenizer_config.json": "4abd3520120e266da84c0864fee064d1fb10806f02225911a47253dd38dc5f56",
+    "exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/model_restore/qwen25vl7b_pretrained_cc594898/preprocessor_config.json": "f2058c716eef96ccaed1cc1e2d0c08306b62586d535b28d9d08e691b2fab7ca0",
+    "third_party/LLaMA-Factory/src/llamafactory/data/template.py": "445fa2d95f010b7041c0a4474b5254fd51d84a331229ce6c5095e97a3dcac4eb"
+  }
+}

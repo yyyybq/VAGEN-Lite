@@ -1,0 +1,20 @@
+{
+  "captured_at_utc": "2026-10-14T14:45:51.079988+00:00",
+  "note": "Supplementary hashes collected after the completed audits; these are not evidence that these inputs had identical bytes at audit start. Existing code/split/no-task hashes and metadata digest are in the audit JSON.",
+  "inputs": {
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_gen_20261014/output/tasks.jsonl": {
+      "sha256": "c306366f1cf71fe5b43c308ebcc360a9e0c3e2f95528cd8c5b115f3e9ce18534",
+      "bytes": 40910066
+    },
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_gen_20261014/code_commit.txt": {
+      "sha256": "d9bf4fe098460e900f9e7064bcb8837c8157ee1fe815d572fc08ec142c67a1a8",
+      "bytes": 9
+    },
+    "/tmp/interiorgs_qa_metadata_files.json": {
+      "sha256": "0551c6ddadaa883b7278fa324f3d52359d50d900c17696d99963daff2f0127d8",
+      "bytes": 102
+    }
+  },
+  "expected_metadata_manifest_sha256": "79c157277ebb96e60cfa62fd5945bdd33ec87232fc114c7704cd7de7cfa3d7d7",
+  "expected_v3_audit_script_sha256": "2b6224a10d4122b9bcb90b0b4310d55544376df163b5a2414d877083cc6625e9"
+}

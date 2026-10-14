@@ -1,0 +1,5504 @@
+{
+  "audit_kind": "read_only_cpu_geometric_capacity_not_QA_generation",
+  "seed": 20261014,
+  "selected_train_scenes": [
+    "0188_840119",
+    "0190_840097",
+    "0222_840246",
+    "0393_840188",
+    "0404_840155",
+    "0418_840024",
+    "0449_840240",
+    "0453_840431",
+    "0550_840913",
+    "0556_840926",
+    "0565_840943",
+    "0615_841191",
+    "0649_841461",
+    "0670_841489",
+    "0695_841526",
+    "0756_840012",
+    "0813_841249",
+    "0866_841789",
+    "0933_841849",
+    "0985_841962"
+  ],
+  "selection_method": "sorted(random.Random(20261014).sample(sorted(r5 split train_scenes),20)); no task/quality filtering",
+  "metadata_root": "/mnt/umm/users/yinbaiqiao/InteriorGS_meta",
+  "r5_run": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_gen_20261014",
+  "source_snapshot": "/tmp/interiorgs_qa_cpu_v3_snapshot",
+  "r5_recorded_commit": "35585b88",
+  "current_repository_HEAD_at_start": "3a964c795f82e4014572d7dc61425cd22d7816f3",
+  "source_sha256_at_start": {
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/contract.py": "58b51f0c7c7b71ea353461c095720142cc40a2d83a416f945474fa107d71b605",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/scene.py": "97e60b049af99c0feae23ced476b60e34c5281cce028ab288b58a4cad4319be9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/referring.py": "a3979a69396afce385d7fe601a57dd0bf49387f34d99c5c59d784b9936c2cb45",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/objects.py": "f3d34b03624a88d896f330f93386729a29417d9a803578ee2fea9664d60daeea",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/active_spatial_env.py": "77a92eb12247b5dfe628042643c38b9f94243f2bd6821211ed055d36c717db0f",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/__init__.py": "201f51c04d71488f2eb051ced5b611e10e80b91e82e457fc9dac02da4f35ce6f",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/canonical_camera.py": "ec38613908fd0d69726a2e1fbcccacf2a823d80e45193387fd9a3aab83c1da39",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/visual_bbox_metrics.py": "17da286dedd83358215920d79b5e4013613625df899f72ac21e521cabdeb2f8e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/target_visibility.py": "001b1f78de67ef903df1df1b047515339b0f305fafd74436852260a2dd07f6e4",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/occlusion.py": "6cfc4f7a2fb74b9c3ec2bc75d50764614ea4ed854b5b9036f9ef015b86bf7aaa",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/admission.py": "017000ec4c966c03a17b1c40f5df06cabd8c0f9c8d1d39410c817cac792269fd",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/coordinates.py": "732936372efaf48d37d4f59689d83c9338017ff0fc31778dc96ecd930bd6a4b5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/diagnose_run.py": "2a065586109ff1f0201ac4263478832e0efb00a9e4ce865ba8a83d27b494396e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/difficulty.py": "6d1f7bb0997a1781a15444155103902144925e617305d0228cb025a684b7b54d",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/endpoints.py": "a07cc2fef8c722b8b130da9840e6f4398a6ea00ee5b1a8f844a084c8e961034c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/fastgeom.py": "d4bf18632332ce7162b22d73bc70de227b0090eda30b331906f96bda400d49bb",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/fetch_interiorgs_metadata.py": "fe74a9f89b8b420f43ec07992db6418cee8db10017124f59f4d53bc33a769337",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/initial_states.py": "134d79cc5d6db68e936b7751ab2587a1a52681cbd2dd11209652d4fc85ef0fd7",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/job_sco.py": "827ab5eb930844da3890d9279435debc91c2c932ea53f0f5f9ae1a2ea071459e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/label_outliers.py": "5c883674697b052451d7629e5cf19d2e0f1b606e91b2b3cdf9de5a11b4c0b174",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/make_split.py": "5961e39f9f1a5856dc8e458bdb4a667f7bc40ab6081a33b1d88b4d3e2c85ce77",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/make_viewer.py": "fc832edda692ecc5b092979cc9a4754c7156a4b1cabe645582d2e85d70b3606d",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/pilot.py": "f53fca7ad055e5557556f5e6a41d550bb2610750287b234546c18905f139e0b1",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/pilot_sco.py": "2f75d27a49399119555b04170dfbfe09e653c33cb69a24590fc4c3f6f0dd6523",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/pilot_site.py": "7a616a91501d95e8e46a998630ab6878eeb3e8ac41e9542798b4f90c99a92e7c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/pitch_audit.py": "b16724f18a0e602e916e8784751e9b0be045d843e80ae7e140840ea72258f9b7",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/qa_states.py": "ad164d61b4c4498b685839fa20aa69fe6a785b1e19735d1d8504e5fcdf10f25b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/r1_regression.py": "5e25bf4e7f70d0af4758aa3d9535ef5c979da4232d251393e7fc180076fd25cb",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/release.py": "7f173aafbeffce7cdf7f6e5c2787c8867c610f1409699ffa78af18970a10af5a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/replay_env.py": "2cc5242db2fca473d40924f1ab2bb211ca48a33abe45c80a753c5022d1b88e5b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/run_all.py": "873783d392248f6c6eae6d87d11d814c06d3c248d2409b3cf672a7a53ad173ea",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/run_scene.py": "e3a6d51c478b913aee01abe483c89f9c924a7e833113462db0638e8aa4ac0e09",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/sampling.py": "34a8f40a1cfd32a54341b21a61ba660d922b18ef885fb0cee46b9e734c6a5a78",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/scene_identity.py": "494b6730391d0be9655bd3e8dc9239c29cac420725f679f3d3d87198785d7985",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/sco_interiorgs_v10.py": "fc409d3e90b024a301f46e8d0b26ca3c2b71481961330b9debb2008200e5cc49",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/shard_sco.py": "27ac1345ec65d0ba84d9e8bc1aca8b04218f4804085b060745403e594026b324",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/start_context.py": "b0addb5f25a2dbd496777528d994a9ecc41f56c9bc725b41f10a2a98f8e38e0b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/training_prep.py": "044fea50451099f416ded5d2229faf0d2ffb1a2911829a4d8cd40e0acde49848",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/absolute_positioning.py": "4f0d6fdbf2f0ed1a2400bf2b16e20185ee6513e429a03c9c2a7dc934d42d053b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/canonical_v2.py": "86ad5fb7f860ebd280c14ed560abac4d54e5b46bd496c86d188b2214f02ab828",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/centering.py": "dc16c460aebdd126841d24913c2aa8f80c02316821e19073572fbad11599d637",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/common.py": "a85d4120114a1d9ba5aa099c8bcdc11bf17fc984665e8db27c6e006bde90603b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/equidistance.py": "74243d7be7bf792479ddfdf6bb407d3acd732d0df12ee67b9783306e7c14b806",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/fov_inclusion.py": "a87eaf0348886b41f5b9c8a9e01ae739fd6fa017d783b30fe65894bfb0e4f9ae",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/judges_v2.py": "fa496d2fbbcec33f8ec2d5cf2c8080ad2ce9457938a8b96f4dd7558cc02cf7a9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/occlusion_alignment.py": "511d3318d93242d93c91d232ca1fda17a92a63971812c0ad8ee74ebb0ca28c18",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/screen_occupancy.py": "145fe41e32c74b0404b35765bffea0b05ca4c890f9ffacc960c871835770de3a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/size_distance_invariance.py": "7e008c709a5942cdc56a8856a5ba856d3609c0801e0e8642cb7ffafbea2168ea",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/testing/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/testing/synthetic_scene.py": "add73abe7695c0ffa186f2b43198399057494939048914b74d260a6211d2f4e9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_admission.py": "79197b37133395e689c2267ad6998d603bdad4599a1e76be79699e3683df3324",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_allocation.py": "8b273f95691f2a3107f6e575b68ea5801224b9967c7a9589c52e0800a6a3e753",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_contract.py": "96aa57d26c45dab81b6db7d537336f7b3e9b3c8096aa0da4305ecb4fbad5780b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_difficulty.py": "f827caf3fbbbfc3782a8a1c54c352bcdae61734e96e9b1fd56914ef335694ed4",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_endpoints.py": "562a5066d9ad62e562f2c425ec116a8c93ac2f5b3f2b5cb2ad70e188dbdb20af",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_env_defaults.py": "71840090b6cab01387f0248451facf9005545aeaa1d0b30b1f6283bbf54913e2",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_families.py": "92979714e4cc249b0157d8a252488f3ca40a612bf3d38fa47008e875fd20cc58",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_fetch.py": "72e519789595d81781dfe633adc4dbc6833e441dcefd0750f75ef3868ab414ed",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_geometry.py": "c2f34e438ca2a698777b4fd943546d92bff25eb6d9aa6827d2abfff5ea0431e5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_job_sco.py": "9e8e0a51404aceae6c5ff5a83431d182b2fe0de1be28d38580732b0ba6ae986d",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_label_outliers.py": "4cdb5e3b8c48894eb0088a2f4f8ab09b2a3aa8d98bbea0407527a16770fc4423",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_make_split.py": "39d41a1387db101bde464dcd1b1cf4b646810cf3cf6cae4fe5a873feebdaefb5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_motion_model.py": "47e3575ee57a6fe7694cffcb0b2936a862ee79c0b720cbfc00961568ad5328f4",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_no_task_objects.py": "0125403a1c8aff8ea72e62a671777127288293ffebe1fdb5984d621168ee7db4",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_objects.py": "d66a19197491d9bdd1c48e423378f424df7dbcca2f5071b4272ff5dbc46e955a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_pilot.py": "1cc5022f54cfc3c288465384687a7d1d3d7c680a983c4d330af40e5cfbd0374e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_pilot_sco.py": "7bb805967901237d0bec8aa8b632a01141c4ef7ec54c70215f15c3d06c21c680",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_pilot_site.py": "54c4317153e0c3f3f1f09d2927331bc52b4539e0e8410633e4608b9dddc1836c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_r1_regression.py": "b6d9ed5da6774aa4bd558069ee5ad934601649560b3233869dec0668d0e19f5c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_referring_v2.py": "37b658eedcea405b06e08755b0194f83abd5a5acab05cc714fee4198f68bc73a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_replay_env.py": "2a5e576a7c0724e27e8f6982149461f4cdaa22da7d8c68718bb0742b332305e5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_rules_r6.py": "3d9d8b2c1e81b9ea7e46f66f6163941ddb247a82eade767d6e2f7db12ea48388",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_runtime_check.py": "68e6353ceb8c81223c9aa45f7fe9cd543392d16ddabccf805bc393216e0bf78a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_shard_sco.py": "cce20b2b6271fd4e846a3faea26bd9cd1042806110fd2c5b6f3450f59b9a31de",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_success_rules_r5.py": "247918825085e82d0e40fdde998d85c458f5ddf9c010a0a1b27f723838255bea",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_training_prep.py": "844317aae9ef7ce0d3854bf11a2df42dd4131446865a4ec40470803375217e68",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_viewer.py": "b2314d2dc393bda616e208e2a6f1b8b6e31f5d959eacfcf480c461eab464944b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_visibility.py": "c7388b1672575c7f06b3d5029da072ba2898bb279ca32d9a3efa0d6f93a7dba1",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_walls_r6.py": "ab08c664f9be814179e824d3664ae8846817b818e6ff0eac27618b7b54658994",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_work_budget.py": "186496bd9c37037cb257abcf2cb06628cdedb197eb0328fb93213fa5ad295943",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/gym_base_env.py": "62e820752a244df252f9a57c5d86a1f7ea2b5d74688a51e4484bf53800414aeb",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/gym_image_env.py": "89ab3991c8517e60eb25a90401d7a07260f5f7276a22e2ec9f598f40aba336ce",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/_compat.py": "6e86efbbaccf9146e40d29e8e417d7ecfb5137a988f76f968e760a315b394a16",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/canonical_task_metrics.py": "fe119aaf1860c73f289952d7d7eb8290df1e6403ddb130838f3add7dd82ab2e9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/canonical_task_metrics_v2.py": "8f324f1a1f01ef175409f7106b1f0b2e01243cbe14f7b8706c4e592e92f06640",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/collision_detector.py": "245974675a871a1f5c14fe8c38fbf5084b6a7dd02637d79933dcc60ac8e9c343",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/dataset_contract.py": "383649e76662d6353fb2b75140756f3026fbf840a8374619d57c546fad0b0b1c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/env.py": "45e480210ac089d1acd5cb629f860e9dae859813304faa8371ad7831d40c94a9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/env_config.py": "b36518e43440d74401cc89aed500c80e678547ae5bea9668956db76afd80a051",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/gs_io.py": "5a40698fa5abc8ad14d40ee55d2b0821e2394ff4f0b2f8d4e70016f5643f4c49",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/handler.py": "f3d523a0b34784a8d99b80ccbc8539396312a7cbbb4a2a409862a0123cbc6efe",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/prompt.py": "d544b4a83b0baaf198adc4f0b8c765a7ce2668384c6be5381f0de4ffd4be4802",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/r1_legacy.py": "7dc5116ccdca3a476bfe344d0b05ef5c240ba7de67e0644fd7da93ff76b12f8a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/region_metrics.py": "3fee4e1be72ae83f494f48afc029a5fc31e338299237e47fca34502026a7bc52",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/reward_trace.py": "69beb22f7c1abe60a46b6a45e244418619f0cc6f279c7424e402293dba4b3b79",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/serve.py": "e92943a96dc5bc98bccc6e922050ec2aec50c59c7988a85e63d81d7f31a70a89",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/service.py": "752a75d9bab3ef4cd776658b817e6e52dbb607784344fc1f4c24280ce35d262d",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/spatial_potential_field.py": "5595931bd03f812728c98e3885b19c1f60fa6a0c9950bc3d7f1803be85fd3788",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/utils.py": "a8bcac3909bb61d381f8a9cbf4caebec68a01204feb0abb3c322f331042af5e8",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/visibility_checker.py": "5bb61eb606b9357cb76a628de722d8c05646220d7a57db614566909c0bbd4635",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/__init__.py": "6c0fc104480d7c64acb689dcbc750de68d24f5e834761f71b6b149cbfcae50b3",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/binary_utils.py": "3bfa5dd6e13718293b505eada0063c2d1138c2fbc04e9592e583e5089ba0fba5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/gs_render_client.py": "2f22ce6e0f1e4741a92b4202715b5e83a20edac52c5d4f70c6bbd6bc9160633e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/gs_render_local.py": "eed275dcaa3e31f2622e0ea434cb5a774dc8523f25f70d95cb80afa79bca6bc7",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/http_render_client.py": "273833051fd47ccf8da6021ed9ab7f0e83bc0e05e69c0000dc2226957fe784a1",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/simple_gs_render_server.py": "ac53444b5fd5ee35fe88ad535c66246f8180a9161006a069159811fc4ba289ed",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/unified_renderer.py": "4db21dcc3640729f0353e50729a9f2846dc69844241d9b0e5a2cde8a907a9d46",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/ws_client.py": "1d8cd717ab5aad321b21ad0c307917a385652c27fa0ab17915c85944349e5841",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/__init__.py": "785ac5baa2f5c9bd5b7f83eb0767c3de9508c0aed233e383e55f9d2206569332",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/handler.py": "fe7b39e7046a62419589f6b8677231d99466e0fa317f25d2da7af3826f628060",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/multipart.py": "5b3450144a335cb6311969cc20556e12a4c020a44c14f730951a195cb80526c8",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/pool.py": "4ec4d3ef70a6f1054e9cbed429fcf1e4baee2bf30bf9538d143ae3cd8c82a58c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/service.py": "218fd44dfa2105cd393b94efcbaefb09596fc1d050ad2abd6660ed73af373826",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/worker.py": "758d1ec715ebed4ae33ea2f7e81052625718443cc25d9a7ca28c65e050239a0d",
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_gen_20261014/split_manifest.json": "84565090e97d361bb1e9896833a2df3eee12f23d2158ccbecbf602f428fc1e41",
+    "/tmp/interiorgs_qa_cpu_v3.py": "2b6224a10d4122b9bcb90b0b4310d55544376df163b5a2414d877083cc6625e9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/configs/no_task_objects_20261013.json": "9f0e6121c0f2a6a315b6fb0a267e4fbb06fa0bb1b810f02c1cce0c3f4e23d4fc"
+  },
+  "analysis_source_commit": "3a964c795f82e4014572d7dc61425cd22d7816f3",
+  "visibility_rule": "face_visible_v3",
+  "sampling": {
+    "grid_spacing_m": 0.8,
+    "max_raw_grid_points_per_scene": 2000,
+    "max_legal_positions_per_scene": 24,
+    "yaw_degrees": [
+      0,
+      90,
+      180,
+      270
+    ],
+    "max_ref_targets_per_scene": 24,
+    "position_height_m": 1.5,
+    "wall_clearance_m": 0.5,
+    "camera_radius_m": 0.15,
+    "safety_margin_m": 0.05,
+    "target_selection": "uniform seeded sample if >24 eligible targets; all otherwise",
+    "position_selection": "uniform seeded sample of eligible fixed-grid positions if >24; all otherwise",
+    "face_visible_fraction": 0.4,
+    "face_image_area_fraction": 0.003,
+    "face_grid": 5,
+    "overlap_margin_m": 0.1,
+    "lateral_pixel_margin": 12,
+    "lateral_max_angle_deg": 45,
+    "vertical_pixel_margin": 12,
+    "depth_gap_m": 0.5,
+    "pair_min_center_separation_m": 0.5,
+    "size_ratio_min": 1.2,
+    "triple_xy_area_min_m2": 0.1,
+    "multiview_min_translation_m": 0.5
+  },
+  "schema": {
+    "scene_count": 1000,
+    "counts": {
+      "scenes_with_labels.json": 1000,
+      "label_records": 506061,
+      "bbox_length_8": 446813,
+      "eight_corner_axis_aligned": 405472,
+      "ordered_box_corner_pattern_valid": 446813,
+      "orthogonal_box_edges": 446741,
+      "recoverable_geometric_OBB": 446741,
+      "eight_corner_non_axis_aligned": 41341,
+      "recoverable_rotated_OBB": 41329,
+      "bbox_length_0": 59248,
+      "scenes_with_structure.json": 1000,
+      "rooms": 6607,
+      "scenes_with_nonempty_rooms": 1000,
+      "walls": 31387,
+      "scenes_with_nonempty_walls": 986,
+      "holes": 13658,
+      "scenes_with_nonempty_holes": 987,
+      "hole_type_WINDOW": 6273,
+      "hole_type_DOOR": 5716,
+      "hole_type_HOLE": 885,
+      "scenes_with_occupancy.json": 1000,
+      "nonorthogonal_or_degenerate_box_edges": 72,
+      "hole_type_OPENING": 784
+    },
+    "label_key_occurrences": {
+      "ins_id": 506061,
+      "label": 506061,
+      "bounding_box": 446813,
+      "room_box": 1000
+    },
+    "structure_key_scene_occurrences": {
+      "rooms": 1000,
+      "holes": 1000,
+      "walls": 1000
+    },
+    "room_key_occurrences": {
+      "profile": 6607
+    },
+    "wall_key_occurrences": {
+      "thickness": 31387,
+      "height": 31387,
+      "location": 31387
+    },
+    "hole_key_occurrences": {
+      "thickness": 13658,
+      "profile": 13658,
+      "type": 13658
+    },
+    "occupancy_key_scene_occurrences": {
+      "scale": 1000,
+      "center": 1000,
+      "upper": 1000,
+      "lower": 1000,
+      "min": 1000,
+      "max": 1000
+    },
+    "label_category_count": 715,
+    "top30_categories": [
+      [
+        "book",
+        80096
+      ],
+      [
+        "wall",
+        32049
+      ],
+      [
+        "Boxed food",
+        20519
+      ],
+      [
+        "downlights",
+        17982
+      ],
+      [
+        "Bagged food",
+        13562
+      ],
+      [
+        "floor",
+        13486
+      ],
+      [
+        "ceiling",
+        13134
+      ],
+      [
+        "Medicine box",
+        12605
+      ],
+      [
+        "ornament",
+        11105
+      ],
+      [
+        "vegetable",
+        10598
+      ],
+      [
+        "fruit",
+        9322
+      ],
+      [
+        "chair",
+        7771
+      ],
+      [
+        "drinks",
+        7495
+      ],
+      [
+        "canned food",
+        6279
+      ],
+      [
+        "cup",
+        6206
+      ],
+      [
+        "window",
+        6101
+      ],
+      [
+        "wardrobe",
+        5934
+      ],
+      [
+        "decorative painting",
+        5681
+      ],
+      [
+        "body pillow",
+        5681
+      ],
+      [
+        "curtain",
+        5612
+      ],
+      [
+        "cigar",
+        5525
+      ],
+      [
+        "plant",
+        5008
+      ],
+      [
+        "pillow",
+        4912
+      ],
+      [
+        "wine",
+        4805
+      ],
+      [
+        "other",
+        4654
+      ],
+      [
+        "box",
+        4144
+      ],
+      [
+        "Toiletries",
+        3863
+      ],
+      [
+        "bread",
+        3523
+      ],
+      [
+        "chandelier",
+        3510
+      ],
+      [
+        "door",
+        3412
+      ]
+    ],
+    "examples": {
+      "non_axis_aligned_box": {
+        "scene": "0001_839920",
+        "id": "113",
+        "bbox": [
+          {
+            "x": 2.3421218400690105,
+            "y": -3.6627182065426847,
+            "z": 0.0
+          },
+          {
+            "x": 2.649939977240121,
+            "y": -2.816994838857245,
+            "z": 0.0
+          },
+          {
+            "x": 3.49566335993099,
+            "y": -3.124812993457316,
+            "z": 0.0
+          },
+          {
+            "x": 3.1878452227598792,
+            "y": -3.9705363611427553,
+            "z": 0.0
+          },
+          {
+            "x": 2.3421218400690105,
+            "y": -3.6627182065426847,
+            "z": 0.72
+          },
+          {
+            "x": 2.649939977240121,
+            "y": -2.816994838857245,
+            "z": 0.72
+          },
+          {
+            "x": 3.49566335993099,
+            "y": -3.124812993457316,
+            "z": 0.72
+          },
+          {
+            "x": 3.1878452227598792,
+            "y": -3.9705363611427553,
+            "z": 0.72
+          }
+        ]
+      }
+    },
+    "metadata_manifest_sha256": "79c157277ebb96e60cfa62fd5945bdd33ec87232fc114c7704cd7de7cfa3d7d7",
+    "seconds": 29.308
+  },
+  "scenes": [
+    {
+      "scene_id": "0188_840119",
+      "raw_bbox_objects": 301,
+      "r5_no_task_objects": 0,
+      "eligible_ref_targets": 3,
+      "eligible_categories": 3,
+      "ref_methods": {
+        "unique_label": 1,
+        "anchor": 2
+      },
+      "ref_anchors": 2,
+      "raw_duplicate_categories": 20,
+      "eligible_duplicate_categories": 0,
+      "metric_pair_structures": 3,
+      "aabb_size_comparison_structures": 2,
+      "room_polygons": 3,
+      "room_areas_m2": [
+        66.25,
+        41.238,
+        9.987999999999992
+      ],
+      "inferred_room_types": {
+        "0": null,
+        "1": null,
+        "2": null
+      },
+      "inferred_typed_rooms": 0,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 301,
+          "kept": 3,
+          "pass_single_filters": 23,
+          "reject_ceiling_mounted": 1,
+          "reject_dim_too_large": 1,
+          "reject_dim_too_small": 77,
+          "reject_door_window": 5,
+          "reject_light_fixture": 19,
+          "reject_longest_edge_too_small": 171,
+          "reject_no_ref": 20,
+          "reject_soft_furnishing": 2,
+          "reject_too_flat": 1,
+          "reject_volume_too_small": 1
+        },
+        "referring": {
+          "anchor": 2,
+          "no_ref": 20,
+          "unique_label": 1
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 20,
+          "too_small": 6
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 6,
+          "anchor:none_within_range": 9,
+          "anchor:overlaps_or_on_target": 5,
+          "room:room_type_unknown": 20,
+          "size:not_exactly_two": 18,
+          "size:ratio_below_threshold": 2,
+          "unique:duplicate_category": 20
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 219,
+      "grid_points_checked": 219,
+      "legal_grid_points_found": 120,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 3,
+      "sampled_target_ids": [
+        "201",
+        "38",
+        "50"
+      ],
+      "sampled_positions_xy": [
+        [
+          -3.2,
+          -3.2
+        ],
+        [
+          -3.2,
+          -1.6
+        ],
+        [
+          -3.2,
+          -0.8
+        ],
+        [
+          -2.4,
+          -0.8
+        ],
+        [
+          -2.4,
+          3.2
+        ],
+        [
+          -0.8,
+          -0.8
+        ],
+        [
+          -0.8,
+          0.8
+        ],
+        [
+          -0.8,
+          3.2
+        ],
+        [
+          2.4,
+          -2.4
+        ],
+        [
+          2.4,
+          0.8
+        ],
+        [
+          2.4,
+          4.0
+        ],
+        [
+          3.2,
+          0.8
+        ],
+        [
+          3.2,
+          2.4
+        ],
+        [
+          4.0,
+          -3.2
+        ],
+        [
+          4.0,
+          -1.6
+        ],
+        [
+          4.8,
+          -2.4
+        ],
+        [
+          4.8,
+          1.6
+        ],
+        [
+          4.8,
+          2.4
+        ],
+        [
+          4.8,
+          3.2
+        ],
+        [
+          5.6,
+          -2.4
+        ],
+        [
+          7.2,
+          -3.2
+        ],
+        [
+          8.0,
+          -3.2
+        ],
+        [
+          8.8,
+          -1.6
+        ],
+        [
+          12.0,
+          -0.8
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 3,
+      "covisible_unique_pairs": 1,
+      "lateral_unique_pairs": 1,
+      "depth_order_unique_pairs": 1,
+      "aabb_size_unique_pairs": 1,
+      "noncollinear_unique_triples": 0,
+      "object_seen_from_ge2_positions": 3,
+      "multiview_camera_pairs_ge1_anchor": 54,
+      "multiview_camera_pairs_ge3_anchors": 0,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 1,
+      "view_counts": {
+        "visible_object_view_slots": 20,
+        "views_with_ge2_targets": 4,
+        "views_with_ge3_targets": 0,
+        "covisible_pair_view_slots": 4,
+        "lateral_pair_view_slots": 3,
+        "metric_object_pair_view_slots": 4,
+        "aabb_size_pair_view_slots": 4,
+        "depth_order_pair_view_slots": 1,
+        "vertical_pair_view_slots": 0,
+        "noncollinear_triple_view_slots": 0,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.194
+    },
+    {
+      "scene_id": "0190_840097",
+      "raw_bbox_objects": 264,
+      "r5_no_task_objects": 0,
+      "eligible_ref_targets": 9,
+      "eligible_categories": 9,
+      "ref_methods": {
+        "unique_label": 6,
+        "anchor": 3
+      },
+      "ref_anchors": 3,
+      "raw_duplicate_categories": 30,
+      "eligible_duplicate_categories": 0,
+      "metric_pair_structures": 36,
+      "aabb_size_comparison_structures": 26,
+      "room_polygons": 3,
+      "room_areas_m2": [
+        17.385877324397484,
+        12.226448407676287,
+        5.086798181228502
+      ],
+      "inferred_room_types": {
+        "0": null,
+        "1": null,
+        "2": null
+      },
+      "inferred_typed_rooms": 0,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 264,
+          "kept": 9,
+          "pass_single_filters": 20,
+          "reject_curtain_blind": 10,
+          "reject_dim_too_large": 1,
+          "reject_dim_too_small": 74,
+          "reject_door_window": 12,
+          "reject_floor_covering": 3,
+          "reject_light_fixture": 14,
+          "reject_longest_edge_too_small": 59,
+          "reject_no_ref": 11,
+          "reject_small_clutter": 25,
+          "reject_soft_furnishing": 4,
+          "reject_structural": 11,
+          "reject_too_flat": 3,
+          "reject_volume_too_small": 28
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 1
+        },
+        "referring": {
+          "anchor": 3,
+          "no_ref": 11,
+          "unique_label": 6
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 36,
+          "too_small": 13
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 5,
+          "anchor:none_within_range": 4,
+          "anchor:overlaps_or_on_target": 2,
+          "room:room_type_unknown": 11,
+          "size:not_exactly_two": 10,
+          "size:ratio_below_threshold": 1,
+          "unique:duplicate_category": 11
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 8,
+      "raw_grid_points": 52,
+      "grid_points_checked": 52,
+      "legal_grid_points_found": 27,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 9,
+      "sampled_target_ids": [
+        "114",
+        "209",
+        "212",
+        "213",
+        "216",
+        "237",
+        "286",
+        "288",
+        "43"
+      ],
+      "sampled_positions_xy": [
+        [
+          18.4,
+          0.8
+        ],
+        [
+          18.4,
+          1.6
+        ],
+        [
+          19.2,
+          0.8
+        ],
+        [
+          19.2,
+          1.6
+        ],
+        [
+          19.2,
+          2.4
+        ],
+        [
+          20.0,
+          0.8
+        ],
+        [
+          20.0,
+          1.6
+        ],
+        [
+          20.0,
+          2.4
+        ],
+        [
+          21.6,
+          0.0
+        ],
+        [
+          21.6,
+          0.8
+        ],
+        [
+          22.4,
+          4.0
+        ],
+        [
+          22.4,
+          5.6
+        ],
+        [
+          23.2,
+          3.2
+        ],
+        [
+          23.2,
+          4.0
+        ],
+        [
+          23.2,
+          4.8
+        ],
+        [
+          23.2,
+          5.6
+        ],
+        [
+          24.0,
+          3.2
+        ],
+        [
+          24.0,
+          4.0
+        ],
+        [
+          24.0,
+          4.8
+        ],
+        [
+          24.0,
+          5.6
+        ],
+        [
+          24.8,
+          3.2
+        ],
+        [
+          24.8,
+          4.0
+        ],
+        [
+          24.8,
+          4.8
+        ],
+        [
+          24.8,
+          5.6
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 9,
+      "covisible_unique_pairs": 14,
+      "lateral_unique_pairs": 12,
+      "depth_order_unique_pairs": 8,
+      "aabb_size_unique_pairs": 8,
+      "noncollinear_unique_triples": 7,
+      "object_seen_from_ge2_positions": 7,
+      "multiview_camera_pairs_ge1_anchor": 240,
+      "multiview_camera_pairs_ge3_anchors": 4,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 6,
+      "view_counts": {
+        "visible_object_view_slots": 66,
+        "views_with_ge2_targets": 20,
+        "views_with_ge3_targets": 6,
+        "covisible_pair_view_slots": 38,
+        "lateral_pair_view_slots": 20,
+        "vertical_pair_view_slots": 20,
+        "metric_object_pair_view_slots": 38,
+        "depth_order_pair_view_slots": 17,
+        "aabb_size_pair_view_slots": 18,
+        "noncollinear_triple_view_slots": 10,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.321
+    },
+    {
+      "scene_id": "0222_840246",
+      "raw_bbox_objects": 323,
+      "r5_no_task_objects": 0,
+      "eligible_ref_targets": 58,
+      "eligible_categories": 42,
+      "ref_methods": {
+        "room": 12,
+        "unique_label": 23,
+        "anchor": 22,
+        "size": 1
+      },
+      "ref_anchors": 22,
+      "raw_duplicate_categories": 35,
+      "eligible_duplicate_categories": 15,
+      "metric_pair_structures": 1651,
+      "aabb_size_comparison_structures": 1349,
+      "room_polygons": 8,
+      "room_areas_m2": [
+        41.95585296908951,
+        15.642687177048089,
+        12.364219253072427,
+        7.8133473363717805,
+        7.284362866193739,
+        4.880675125452847,
+        4.077019471386839,
+        3.2960553849111847
+      ],
+      "inferred_room_types": {
+        "0": "living room",
+        "1": "bedroom",
+        "2": "bedroom",
+        "3": "dining room",
+        "4": "kitchen",
+        "5": "bathroom",
+        "6": "bathroom",
+        "7": "bathroom"
+      },
+      "inferred_typed_rooms": 8,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 323,
+          "kept": 58,
+          "pass_single_filters": 78,
+          "reject_ceiling_mounted": 1,
+          "reject_curtain_blind": 8,
+          "reject_dim_too_large": 1,
+          "reject_dim_too_small": 6,
+          "reject_door_window": 20,
+          "reject_generic_or_wall_fixture": 3,
+          "reject_light_fixture": 47,
+          "reject_longest_edge_too_small": 45,
+          "reject_no_ref": 20,
+          "reject_small_clutter": 98,
+          "reject_structural": 6,
+          "reject_too_flat": 3,
+          "reject_too_low": 3,
+          "reject_volume_too_small": 4
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 5
+        },
+        "referring": {
+          "anchor": 22,
+          "no_ref": 20,
+          "room": 12,
+          "size": 1,
+          "unique_label": 23
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 22,
+          "too_small": 30
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 13,
+          "anchor:none_within_range": 1,
+          "anchor:other_room": 6,
+          "room:not_unique_in_room_type": 20,
+          "size:not_exactly_two": 19,
+          "size:other_room": 1,
+          "unique:duplicate_category": 20
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 8,
+      "raw_grid_points": 166,
+      "grid_points_checked": 166,
+      "legal_grid_points_found": 84,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 24,
+      "sampled_target_ids": [
+        "101",
+        "102",
+        "103",
+        "123",
+        "132",
+        "144",
+        "156",
+        "160",
+        "161",
+        "165",
+        "167",
+        "170",
+        "177",
+        "180",
+        "186",
+        "193",
+        "207",
+        "214",
+        "225",
+        "354",
+        "355",
+        "356",
+        "357",
+        "397"
+      ],
+      "sampled_positions_xy": [
+        [
+          -4.0,
+          -4.8
+        ],
+        [
+          -4.0,
+          0.0
+        ],
+        [
+          -4.0,
+          1.6
+        ],
+        [
+          -4.0,
+          4.8
+        ],
+        [
+          -3.2,
+          0.8
+        ],
+        [
+          -2.4,
+          -4.8
+        ],
+        [
+          -2.4,
+          0.8
+        ],
+        [
+          -2.4,
+          3.2
+        ],
+        [
+          -1.6,
+          1.6
+        ],
+        [
+          -0.8,
+          -0.8
+        ],
+        [
+          -0.8,
+          1.6
+        ],
+        [
+          -0.8,
+          4.0
+        ],
+        [
+          1.6,
+          -0.8
+        ],
+        [
+          1.6,
+          1.6
+        ],
+        [
+          1.6,
+          2.4
+        ],
+        [
+          1.6,
+          3.2
+        ],
+        [
+          1.6,
+          4.0
+        ],
+        [
+          2.4,
+          0.0
+        ],
+        [
+          3.2,
+          -0.8
+        ],
+        [
+          3.2,
+          0.8
+        ],
+        [
+          4.0,
+          -2.4
+        ],
+        [
+          4.8,
+          -3.2
+        ],
+        [
+          5.6,
+          -3.2
+        ],
+        [
+          5.6,
+          1.6
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 0.41379310344827586,
+      "visible_unique_targets": 16,
+      "covisible_unique_pairs": 15,
+      "lateral_unique_pairs": 12,
+      "depth_order_unique_pairs": 5,
+      "aabb_size_unique_pairs": 12,
+      "noncollinear_unique_triples": 4,
+      "object_seen_from_ge2_positions": 10,
+      "multiview_camera_pairs_ge1_anchor": 101,
+      "multiview_camera_pairs_ge3_anchors": 2,
+      "lateral_relation_flip_pairs": 2,
+      "complete_category_count_categories": 13,
+      "view_counts": {
+        "visible_object_view_slots": 58,
+        "views_with_ge2_targets": 17,
+        "views_with_ge3_targets": 6,
+        "covisible_pair_view_slots": 29,
+        "lateral_pair_view_slots": 20,
+        "metric_object_pair_view_slots": 29,
+        "aabb_size_pair_view_slots": 24,
+        "vertical_pair_view_slots": 20,
+        "depth_order_pair_view_slots": 8,
+        "noncollinear_triple_view_slots": 6,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.898
+    },
+    {
+      "scene_id": "0393_840188",
+      "raw_bbox_objects": 616,
+      "r5_no_task_objects": 0,
+      "eligible_ref_targets": 7,
+      "eligible_categories": 7,
+      "ref_methods": {
+        "anchor": 3,
+        "unique_label": 4
+      },
+      "ref_anchors": 3,
+      "raw_duplicate_categories": 26,
+      "eligible_duplicate_categories": 0,
+      "metric_pair_structures": 21,
+      "aabb_size_comparison_structures": 17,
+      "room_polygons": 1,
+      "room_areas_m2": [
+        159.45650000000003
+      ],
+      "inferred_room_types": {
+        "0": null
+      },
+      "inferred_typed_rooms": 0,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 616,
+          "kept": 7,
+          "pass_single_filters": 93,
+          "reject_curtain_blind": 8,
+          "reject_dim_too_small": 266,
+          "reject_door_window": 11,
+          "reject_floor_covering": 44,
+          "reject_generic_or_wall_fixture": 11,
+          "reject_light_fixture": 48,
+          "reject_longest_edge_too_small": 97,
+          "reject_no_ref": 86,
+          "reject_outside_rooms": 10,
+          "reject_soft_furnishing": 20,
+          "reject_structural": 8
+        },
+        "referring": {
+          "anchor": 3,
+          "no_ref": 86,
+          "unique_label": 4
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 86,
+          "too_small": 34
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 5,
+          "anchor:none_within_range": 81,
+          "room:room_type_unknown": 86,
+          "size:not_exactly_two": 86,
+          "unique:duplicate_category": 86
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 308,
+      "grid_points_checked": 308,
+      "legal_grid_points_found": 166,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 7,
+      "sampled_target_ids": [
+        "104",
+        "106",
+        "107",
+        "146",
+        "177",
+        "193",
+        "197"
+      ],
+      "sampled_positions_xy": [
+        [
+          -4.0,
+          -12.8
+        ],
+        [
+          -2.4,
+          -11.2
+        ],
+        [
+          -2.4,
+          3.2
+        ],
+        [
+          -1.6,
+          -12.8
+        ],
+        [
+          -1.6,
+          0.8
+        ],
+        [
+          -0.8,
+          -9.6
+        ],
+        [
+          -0.8,
+          -6.4
+        ],
+        [
+          -0.8,
+          -5.6
+        ],
+        [
+          -0.8,
+          0.0
+        ],
+        [
+          -0.0,
+          0.8
+        ],
+        [
+          0.8,
+          -9.6
+        ],
+        [
+          0.8,
+          -5.6
+        ],
+        [
+          0.8,
+          -3.2
+        ],
+        [
+          0.8,
+          2.4
+        ],
+        [
+          1.6,
+          -8.0
+        ],
+        [
+          1.6,
+          -3.2
+        ],
+        [
+          2.4,
+          -9.6
+        ],
+        [
+          2.4,
+          -2.4
+        ],
+        [
+          2.4,
+          0.0
+        ],
+        [
+          2.4,
+          1.6
+        ],
+        [
+          3.2,
+          -8.8
+        ],
+        [
+          3.2,
+          -7.2
+        ],
+        [
+          4.0,
+          -2.4
+        ],
+        [
+          4.8,
+          0.8
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 4,
+      "covisible_unique_pairs": 3,
+      "lateral_unique_pairs": 2,
+      "depth_order_unique_pairs": 1,
+      "aabb_size_unique_pairs": 2,
+      "noncollinear_unique_triples": 1,
+      "object_seen_from_ge2_positions": 2,
+      "multiview_camera_pairs_ge1_anchor": 47,
+      "multiview_camera_pairs_ge3_anchors": 0,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 4,
+      "view_counts": {
+        "visible_object_view_slots": 15,
+        "views_with_ge2_targets": 1,
+        "views_with_ge3_targets": 1,
+        "covisible_pair_view_slots": 3,
+        "depth_order_pair_view_slots": 1,
+        "metric_object_pair_view_slots": 3,
+        "aabb_size_pair_view_slots": 2,
+        "lateral_pair_view_slots": 2,
+        "vertical_pair_view_slots": 1,
+        "noncollinear_triple_view_slots": 1,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.583
+    },
+    {
+      "scene_id": "0404_840155",
+      "raw_bbox_objects": 735,
+      "r5_no_task_objects": 0,
+      "eligible_ref_targets": 5,
+      "eligible_categories": 5,
+      "ref_methods": {
+        "anchor": 2,
+        "unique_label": 3
+      },
+      "ref_anchors": 2,
+      "raw_duplicate_categories": 48,
+      "eligible_duplicate_categories": 0,
+      "metric_pair_structures": 10,
+      "aabb_size_comparison_structures": 7,
+      "room_polygons": 2,
+      "room_areas_m2": [
+        170.7862,
+        24.131639999999976
+      ],
+      "inferred_room_types": {
+        "0": "bedroom",
+        "1": null
+      },
+      "inferred_typed_rooms": 1,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 735,
+          "kept": 5,
+          "pass_single_filters": 77,
+          "reject_dim_too_large": 1,
+          "reject_dim_too_small": 30,
+          "reject_door_window": 5,
+          "reject_floor_covering": 2,
+          "reject_generic_or_wall_fixture": 2,
+          "reject_light_fixture": 48,
+          "reject_longest_edge_too_small": 229,
+          "reject_no_ref": 72,
+          "reject_small_clutter": 293,
+          "reject_soft_furnishing": 32,
+          "reject_structural": 13,
+          "reject_too_flat": 1,
+          "reject_volume_too_small": 2
+        },
+        "referring": {
+          "anchor": 2,
+          "no_ref": 72,
+          "unique_label": 3
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 76,
+          "too_small": 18
+        },
+        "referring.no_ref_detail": {
+          "anchor:none_within_range": 69,
+          "anchor:overlaps_or_on_target": 3,
+          "room:not_unique_in_room_type": 70,
+          "room:other_instance_room_type_unknown": 1,
+          "room:room_type_unknown": 1,
+          "size:not_exactly_two": 68,
+          "size:ratio_below_threshold": 4,
+          "unique:duplicate_category": 72
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 320,
+      "grid_points_checked": 320,
+      "legal_grid_points_found": 234,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 5,
+      "sampled_target_ids": [
+        "252",
+        "258",
+        "264",
+        "31",
+        "90"
+      ],
+      "sampled_positions_xy": [
+        [
+          -3.2,
+          -8.8
+        ],
+        [
+          -3.2,
+          -6.4
+        ],
+        [
+          -1.6,
+          -4.8
+        ],
+        [
+          -1.6,
+          -4.0
+        ],
+        [
+          -0.8,
+          0.0
+        ],
+        [
+          -0.0,
+          -0.8
+        ],
+        [
+          0.8,
+          -9.6
+        ],
+        [
+          0.8,
+          -6.4
+        ],
+        [
+          0.8,
+          0.8
+        ],
+        [
+          3.2,
+          -3.2
+        ],
+        [
+          4.0,
+          0.8
+        ],
+        [
+          4.8,
+          -9.6
+        ],
+        [
+          4.8,
+          -5.6
+        ],
+        [
+          5.6,
+          -8.8
+        ],
+        [
+          5.6,
+          -1.6
+        ],
+        [
+          6.4,
+          -2.4
+        ],
+        [
+          6.4,
+          -0.8
+        ],
+        [
+          8.0,
+          -0.8
+        ],
+        [
+          9.6,
+          -4.8
+        ],
+        [
+          9.6,
+          -3.2
+        ],
+        [
+          11.2,
+          -4.8
+        ],
+        [
+          11.2,
+          -3.2
+        ],
+        [
+          11.2,
+          -1.6
+        ],
+        [
+          12.0,
+          0.8
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 4,
+      "covisible_unique_pairs": 3,
+      "lateral_unique_pairs": 2,
+      "depth_order_unique_pairs": 3,
+      "aabb_size_unique_pairs": 2,
+      "noncollinear_unique_triples": 1,
+      "object_seen_from_ge2_positions": 4,
+      "multiview_camera_pairs_ge1_anchor": 148,
+      "multiview_camera_pairs_ge3_anchors": 0,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 3,
+      "view_counts": {
+        "visible_object_view_slots": 29,
+        "views_with_ge2_targets": 7,
+        "views_with_ge3_targets": 1,
+        "covisible_pair_view_slots": 9,
+        "vertical_pair_view_slots": 6,
+        "depth_order_pair_view_slots": 5,
+        "metric_object_pair_view_slots": 9,
+        "lateral_pair_view_slots": 4,
+        "aabb_size_pair_view_slots": 7,
+        "noncollinear_triple_view_slots": 1,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.549
+    },
+    {
+      "scene_id": "0418_840024",
+      "raw_bbox_objects": 594,
+      "r5_no_task_objects": 1,
+      "eligible_ref_targets": 26,
+      "eligible_categories": 20,
+      "ref_methods": {
+        "size": 2,
+        "room": 4,
+        "unique_label": 13,
+        "anchor": 7
+      },
+      "ref_anchors": 7,
+      "raw_duplicate_categories": 31,
+      "eligible_duplicate_categories": 6,
+      "metric_pair_structures": 323,
+      "aabb_size_comparison_structures": 282,
+      "room_polygons": 4,
+      "room_areas_m2": [
+        65.80000000000001,
+        4.68,
+        115.3144016014061,
+        22.864621812002333
+      ],
+      "inferred_room_types": {
+        "0": null,
+        "1": "bathroom",
+        "2": "living room",
+        "3": "bedroom"
+      },
+      "inferred_typed_rooms": 3,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 594,
+          "kept": 26,
+          "pass_single_filters": 99,
+          "reject_curtain_blind": 13,
+          "reject_dim_too_large": 2,
+          "reject_dim_too_small": 9,
+          "reject_door_window": 12,
+          "reject_light_fixture": 72,
+          "reject_longest_edge_too_small": 72,
+          "reject_no_ref": 73,
+          "reject_no_task_list": 1,
+          "reject_small_clutter": 258,
+          "reject_soft_furnishing": 29,
+          "reject_structural": 7,
+          "reject_too_flat": 4,
+          "reject_too_low": 2,
+          "reject_volume_too_small": 14
+        },
+        "referring": {
+          "anchor": 7,
+          "no_ref": 73,
+          "room": 4,
+          "size": 2,
+          "unique_label": 13
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 64,
+          "too_small": 51
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 18,
+          "anchor:none_within_range": 47,
+          "anchor:other_room": 6,
+          "anchor:overlaps_or_on_target": 2,
+          "room:not_unique_in_room_type": 46,
+          "room:other_instance_room_type_unknown": 13,
+          "room:room_type_unknown": 14,
+          "size:not_exactly_two": 71,
+          "size:ratio_below_threshold": 2,
+          "unique:duplicate_category": 73
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 300,
+      "grid_points_checked": 300,
+      "legal_grid_points_found": 212,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 24,
+      "sampled_target_ids": [
+        "170",
+        "289",
+        "472",
+        "473",
+        "479",
+        "494",
+        "495",
+        "497",
+        "498",
+        "503",
+        "504",
+        "505",
+        "510",
+        "511",
+        "514",
+        "53",
+        "533",
+        "54",
+        "546",
+        "554",
+        "555",
+        "556",
+        "557",
+        "57"
+      ],
+      "sampled_positions_xy": [
+        [
+          -9.6,
+          -10.4
+        ],
+        [
+          -9.6,
+          2.4
+        ],
+        [
+          -8.0,
+          -6.4
+        ],
+        [
+          -8.0,
+          -4.8
+        ],
+        [
+          -8.0,
+          -1.6
+        ],
+        [
+          -6.4,
+          -4.8
+        ],
+        [
+          -5.6,
+          -9.6
+        ],
+        [
+          -5.6,
+          -4.8
+        ],
+        [
+          -5.6,
+          -3.2
+        ],
+        [
+          -5.6,
+          -2.4
+        ],
+        [
+          -4.0,
+          -0.8
+        ],
+        [
+          -2.4,
+          -1.6
+        ],
+        [
+          -2.4,
+          3.2
+        ],
+        [
+          -1.6,
+          -0.8
+        ],
+        [
+          -0.8,
+          -4.0
+        ],
+        [
+          -0.8,
+          -2.4
+        ],
+        [
+          -0.8,
+          -1.6
+        ],
+        [
+          -0.8,
+          3.2
+        ],
+        [
+          0.0,
+          -4.8
+        ],
+        [
+          0.0,
+          -1.6
+        ],
+        [
+          0.0,
+          0.8
+        ],
+        [
+          0.8,
+          -0.0
+        ],
+        [
+          1.6,
+          -0.0
+        ],
+        [
+          3.2,
+          -2.4
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 0.9230769230769231,
+      "visible_unique_targets": 16,
+      "covisible_unique_pairs": 28,
+      "lateral_unique_pairs": 17,
+      "depth_order_unique_pairs": 11,
+      "aabb_size_unique_pairs": 24,
+      "noncollinear_unique_triples": 19,
+      "object_seen_from_ge2_positions": 13,
+      "multiview_camera_pairs_ge1_anchor": 502,
+      "multiview_camera_pairs_ge3_anchors": 46,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 13,
+      "view_counts": {
+        "visible_object_view_slots": 119,
+        "views_with_ge2_targets": 26,
+        "views_with_ge3_targets": 19,
+        "covisible_pair_view_slots": 120,
+        "depth_order_pair_view_slots": 31,
+        "metric_object_pair_view_slots": 120,
+        "aabb_size_pair_view_slots": 106,
+        "lateral_pair_view_slots": 80,
+        "noncollinear_triple_view_slots": 77,
+        "vertical_pair_view_slots": 93,
+        "full_scene_category_count_view_slots": 1
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 1.459
+    },
+    {
+      "scene_id": "0449_840240",
+      "raw_bbox_objects": 405,
+      "r5_no_task_objects": 2,
+      "eligible_ref_targets": 18,
+      "eligible_categories": 16,
+      "ref_methods": {
+        "anchor": 10,
+        "unique_label": 6,
+        "size": 2
+      },
+      "ref_anchors": 10,
+      "raw_duplicate_categories": 54,
+      "eligible_duplicate_categories": 2,
+      "metric_pair_structures": 153,
+      "aabb_size_comparison_structures": 127,
+      "room_polygons": 14,
+      "room_areas_m2": [
+        38.69326781763799,
+        15.021016544666722,
+        13.508106854038697,
+        9.787237721483493,
+        9.339398124836684,
+        8.058860809027152,
+        6.558759969635005,
+        4.649910312788236,
+        3.0359326821150248,
+        0.047999999999998266,
+        0.025163044599697315,
+        0.01020000000000465,
+        0.006400000000006401,
+        0.004491406250000551
+      ],
+      "inferred_room_types": {
+        "0": "living room",
+        "1": "bedroom",
+        "2": "bedroom",
+        "3": null,
+        "4": "bedroom",
+        "5": null,
+        "6": null,
+        "7": "bathroom",
+        "8": "bathroom",
+        "9": null,
+        "10": null,
+        "11": null,
+        "12": null,
+        "13": null
+      },
+      "inferred_typed_rooms": 6,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 405,
+          "kept": 18,
+          "pass_single_filters": 47,
+          "reject_blacklist": 17,
+          "reject_ceiling_mounted": 1,
+          "reject_curtain_blind": 7,
+          "reject_dim_too_large": 2,
+          "reject_dim_too_small": 25,
+          "reject_door_window": 18,
+          "reject_floor_covering": 3,
+          "reject_generic_or_wall_fixture": 15,
+          "reject_light_fixture": 60,
+          "reject_longest_edge_too_small": 55,
+          "reject_no_ref": 29,
+          "reject_no_task_list": 2,
+          "reject_small_clutter": 117,
+          "reject_soft_furnishing": 18,
+          "reject_structural": 1,
+          "reject_too_flat": 5,
+          "reject_too_low": 2,
+          "reject_volume_too_small": 10
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 1
+        },
+        "referring": {
+          "anchor": 10,
+          "no_ref": 29,
+          "size": 2,
+          "unique_label": 6
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 29,
+          "too_small": 22
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 6,
+          "anchor:none_within_range": 3,
+          "anchor:other_room": 19,
+          "anchor:overlaps_or_on_target": 1,
+          "room:not_unique_in_room_type": 4,
+          "room:other_instance_room_type_unknown": 12,
+          "room:room_type_unknown": 13,
+          "size:not_exactly_two": 21,
+          "size:other_room": 4,
+          "size:ratio_below_threshold": 4,
+          "unique:duplicate_category": 29
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 8,
+      "raw_grid_points": 182,
+      "grid_points_checked": 182,
+      "legal_grid_points_found": 65,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 18,
+      "sampled_target_ids": [
+        "149",
+        "156",
+        "238",
+        "275",
+        "276",
+        "297",
+        "316",
+        "330",
+        "386",
+        "397",
+        "421",
+        "424",
+        "425",
+        "442",
+        "482",
+        "495",
+        "500",
+        "508"
+      ],
+      "sampled_positions_xy": [
+        [
+          -7.2,
+          4.8
+        ],
+        [
+          -7.2,
+          6.4
+        ],
+        [
+          -5.6,
+          -3.2
+        ],
+        [
+          -5.6,
+          -1.6
+        ],
+        [
+          -5.6,
+          2.4
+        ],
+        [
+          -5.6,
+          4.8
+        ],
+        [
+          -5.6,
+          6.4
+        ],
+        [
+          -4.0,
+          -3.2
+        ],
+        [
+          -4.0,
+          -2.4
+        ],
+        [
+          -4.0,
+          2.4
+        ],
+        [
+          -0.8,
+          5.6
+        ],
+        [
+          -0.0,
+          -3.2
+        ],
+        [
+          -0.0,
+          -1.6
+        ],
+        [
+          0.0,
+          5.6
+        ],
+        [
+          0.8,
+          -4.8
+        ],
+        [
+          0.8,
+          -4.0
+        ],
+        [
+          0.8,
+          -0.0
+        ],
+        [
+          0.8,
+          2.4
+        ],
+        [
+          0.8,
+          3.2
+        ],
+        [
+          1.6,
+          -4.8
+        ],
+        [
+          1.6,
+          -2.4
+        ],
+        [
+          1.6,
+          -0.0
+        ],
+        [
+          1.6,
+          4.0
+        ],
+        [
+          2.4,
+          -0.8
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 6,
+      "covisible_unique_pairs": 1,
+      "lateral_unique_pairs": 0,
+      "depth_order_unique_pairs": 1,
+      "aabb_size_unique_pairs": 1,
+      "noncollinear_unique_triples": 0,
+      "object_seen_from_ge2_positions": 5,
+      "multiview_camera_pairs_ge1_anchor": 21,
+      "multiview_camera_pairs_ge3_anchors": 0,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 7,
+      "view_counts": {
+        "visible_object_view_slots": 16,
+        "views_with_ge2_targets": 1,
+        "views_with_ge3_targets": 0,
+        "covisible_pair_view_slots": 1,
+        "vertical_pair_view_slots": 1,
+        "depth_order_pair_view_slots": 1,
+        "metric_object_pair_view_slots": 1,
+        "aabb_size_pair_view_slots": 1,
+        "lateral_pair_view_slots": 0,
+        "noncollinear_triple_view_slots": 0,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.935
+    },
+    {
+      "scene_id": "0453_840431",
+      "raw_bbox_objects": 306,
+      "r5_no_task_objects": 3,
+      "eligible_ref_targets": 27,
+      "eligible_categories": 21,
+      "ref_methods": {
+        "unique_label": 13,
+        "room": 4,
+        "anchor": 9,
+        "size": 1
+      },
+      "ref_anchors": 9,
+      "raw_duplicate_categories": 36,
+      "eligible_duplicate_categories": 5,
+      "metric_pair_structures": 351,
+      "aabb_size_comparison_structures": 276,
+      "room_polygons": 8,
+      "room_areas_m2": [
+        2.7251208843703996,
+        30.556282017287252,
+        3.8946678541720416,
+        1.6715159999999996,
+        11.51202388895829,
+        13.441940000000002,
+        8.3139130724572,
+        8.556831098039698
+      ],
+      "inferred_room_types": {
+        "0": "bathroom",
+        "1": "living room",
+        "2": "kitchen",
+        "3": "bathroom",
+        "4": "living room",
+        "5": "bedroom",
+        "6": "bedroom",
+        "7": "bathroom"
+      },
+      "inferred_typed_rooms": 8,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 306,
+          "kept": 27,
+          "pass_single_filters": 50,
+          "reject_curtain_blind": 10,
+          "reject_dim_too_large": 1,
+          "reject_dim_too_small": 12,
+          "reject_door_window": 6,
+          "reject_floor_covering": 3,
+          "reject_generic_or_wall_fixture": 12,
+          "reject_light_fixture": 28,
+          "reject_longest_edge_too_small": 67,
+          "reject_no_ref": 23,
+          "reject_no_task_list": 3,
+          "reject_small_clutter": 83,
+          "reject_soft_furnishing": 10,
+          "reject_structural": 2,
+          "reject_too_flat": 7,
+          "reject_too_low": 1,
+          "reject_volume_too_small": 11
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 3
+        },
+        "referring": {
+          "anchor": 9,
+          "no_ref": 23,
+          "room": 4,
+          "size": 1,
+          "unique_label": 13
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 35,
+          "too_small": 14
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 6,
+          "anchor:other_room": 17,
+          "room:not_unique_in_room_type": 23,
+          "size:not_exactly_two": 22,
+          "size:other_not_referable": 1,
+          "unique:duplicate_category": 23
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 8,
+      "raw_grid_points": 136,
+      "grid_points_checked": 136,
+      "legal_grid_points_found": 54,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 24,
+      "sampled_target_ids": [
+        "120",
+        "133",
+        "176",
+        "178",
+        "179",
+        "187",
+        "189",
+        "192",
+        "205",
+        "240",
+        "248",
+        "253",
+        "268",
+        "278",
+        "281",
+        "292",
+        "297",
+        "298",
+        "300",
+        "305",
+        "308",
+        "309",
+        "313",
+        "317"
+      ],
+      "sampled_positions_xy": [
+        [
+          -3.2,
+          1.6
+        ],
+        [
+          -2.4,
+          1.6
+        ],
+        [
+          -2.4,
+          2.4
+        ],
+        [
+          -0.8,
+          -0.8
+        ],
+        [
+          -0.8,
+          -0.0
+        ],
+        [
+          0.0,
+          -4.0
+        ],
+        [
+          0.0,
+          -3.2
+        ],
+        [
+          0.0,
+          -1.6
+        ],
+        [
+          0.8,
+          -4.8
+        ],
+        [
+          1.6,
+          -4.8
+        ],
+        [
+          1.6,
+          4.8
+        ],
+        [
+          2.4,
+          -4.8
+        ],
+        [
+          2.4,
+          -4.0
+        ],
+        [
+          2.4,
+          -1.6
+        ],
+        [
+          2.4,
+          -0.0
+        ],
+        [
+          2.4,
+          0.8
+        ],
+        [
+          2.4,
+          1.6
+        ],
+        [
+          3.2,
+          -2.4
+        ],
+        [
+          3.2,
+          -1.6
+        ],
+        [
+          3.2,
+          0.8
+        ],
+        [
+          3.2,
+          2.4
+        ],
+        [
+          4.0,
+          -0.8
+        ],
+        [
+          4.0,
+          3.2
+        ],
+        [
+          4.0,
+          4.8
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 0.8888888888888888,
+      "visible_unique_targets": 15,
+      "covisible_unique_pairs": 7,
+      "lateral_unique_pairs": 5,
+      "depth_order_unique_pairs": 2,
+      "aabb_size_unique_pairs": 6,
+      "noncollinear_unique_triples": 0,
+      "object_seen_from_ge2_positions": 11,
+      "multiview_camera_pairs_ge1_anchor": 57,
+      "multiview_camera_pairs_ge3_anchors": 1,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 15,
+      "view_counts": {
+        "visible_object_view_slots": 45,
+        "views_with_ge2_targets": 9,
+        "views_with_ge3_targets": 2,
+        "covisible_pair_view_slots": 13,
+        "lateral_pair_view_slots": 9,
+        "metric_object_pair_view_slots": 13,
+        "aabb_size_pair_view_slots": 11,
+        "depth_order_pair_view_slots": 2,
+        "vertical_pair_view_slots": 7,
+        "noncollinear_triple_view_slots": 0,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.831
+    },
+    {
+      "scene_id": "0550_840913",
+      "raw_bbox_objects": 186,
+      "r5_no_task_objects": 1,
+      "eligible_ref_targets": 22,
+      "eligible_categories": 20,
+      "ref_methods": {
+        "anchor": 8,
+        "unique_label": 14
+      },
+      "ref_anchors": 8,
+      "raw_duplicate_categories": 38,
+      "eligible_duplicate_categories": 2,
+      "metric_pair_structures": 231,
+      "aabb_size_comparison_structures": 193,
+      "room_polygons": 7,
+      "room_areas_m2": [
+        7.4716015198028565,
+        6.772800000000004,
+        30.79521409162787,
+        5.632429065408587,
+        10.246845352556408,
+        3.088799999999999,
+        2.2010000000000005
+      ],
+      "inferred_room_types": {
+        "0": "bedroom",
+        "1": "bedroom",
+        "2": null,
+        "3": "bathroom",
+        "4": "bedroom",
+        "5": null,
+        "6": "bathroom"
+      },
+      "inferred_typed_rooms": 5,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 186,
+          "kept": 22,
+          "pass_single_filters": 43,
+          "reject_curtain_blind": 5,
+          "reject_dim_too_large": 1,
+          "reject_dim_too_small": 9,
+          "reject_door_window": 5,
+          "reject_floor_covering": 2,
+          "reject_generic_or_wall_fixture": 5,
+          "reject_light_fixture": 18,
+          "reject_longest_edge_too_small": 37,
+          "reject_no_ref": 21,
+          "reject_no_task_list": 1,
+          "reject_small_clutter": 25,
+          "reject_soft_furnishing": 15,
+          "reject_structural": 2,
+          "reject_too_flat": 4,
+          "reject_volume_too_small": 14
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 3
+        },
+        "referring": {
+          "anchor": 8,
+          "no_ref": 21,
+          "unique_label": 14
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 28,
+          "too_small": 15
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 8,
+          "anchor:other_room": 13,
+          "room:not_unique_in_room_type": 11,
+          "room:other_instance_room_type_unknown": 2,
+          "room:room_type_unknown": 8,
+          "size:not_exactly_two": 15,
+          "size:ratio_below_threshold": 6,
+          "unique:duplicate_category": 21
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 8,
+      "raw_grid_points": 103,
+      "grid_points_checked": 103,
+      "legal_grid_points_found": 42,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 22,
+      "sampled_target_ids": [
+        "105",
+        "109",
+        "114",
+        "116",
+        "119",
+        "131",
+        "133",
+        "155",
+        "162",
+        "163",
+        "177",
+        "197",
+        "209",
+        "210",
+        "218",
+        "221",
+        "222",
+        "67",
+        "80",
+        "90",
+        "91",
+        "98"
+      ],
+      "sampled_positions_xy": [
+        [
+          -4.8,
+          0.8
+        ],
+        [
+          -4.8,
+          1.6
+        ],
+        [
+          -4.0,
+          0.0
+        ],
+        [
+          -4.0,
+          0.8
+        ],
+        [
+          -4.0,
+          1.6
+        ],
+        [
+          -3.2,
+          -2.4
+        ],
+        [
+          -3.2,
+          -1.6
+        ],
+        [
+          -3.2,
+          0.0
+        ],
+        [
+          -2.4,
+          -2.4
+        ],
+        [
+          -2.4,
+          -1.6
+        ],
+        [
+          -2.4,
+          0.0
+        ],
+        [
+          -2.4,
+          0.8
+        ],
+        [
+          -2.4,
+          1.6
+        ],
+        [
+          -1.6,
+          -1.6
+        ],
+        [
+          -1.6,
+          0.0
+        ],
+        [
+          0.8,
+          0.0
+        ],
+        [
+          1.6,
+          0.8
+        ],
+        [
+          1.6,
+          2.4
+        ],
+        [
+          1.6,
+          3.2
+        ],
+        [
+          2.4,
+          0.8
+        ],
+        [
+          3.2,
+          2.4
+        ],
+        [
+          3.2,
+          3.2
+        ],
+        [
+          4.0,
+          -1.6
+        ],
+        [
+          4.8,
+          -1.6
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 13,
+      "covisible_unique_pairs": 33,
+      "lateral_unique_pairs": 11,
+      "depth_order_unique_pairs": 23,
+      "aabb_size_unique_pairs": 28,
+      "noncollinear_unique_triples": 34,
+      "object_seen_from_ge2_positions": 10,
+      "multiview_camera_pairs_ge1_anchor": 127,
+      "multiview_camera_pairs_ge3_anchors": 7,
+      "lateral_relation_flip_pairs": 1,
+      "complete_category_count_categories": 15,
+      "view_counts": {
+        "visible_object_view_slots": 62,
+        "views_with_ge2_targets": 18,
+        "views_with_ge3_targets": 7,
+        "covisible_pair_view_slots": 69,
+        "lateral_pair_view_slots": 23,
+        "metric_object_pair_view_slots": 69,
+        "aabb_size_pair_view_slots": 59,
+        "vertical_pair_view_slots": 33,
+        "depth_order_pair_view_slots": 44,
+        "noncollinear_triple_view_slots": 57,
+        "full_scene_category_count_view_slots": 2
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.556
+    },
+    {
+      "scene_id": "0556_840926",
+      "raw_bbox_objects": 179,
+      "r5_no_task_objects": 4,
+      "eligible_ref_targets": 16,
+      "eligible_categories": 16,
+      "ref_methods": {
+        "room": 1,
+        "unique_label": 14,
+        "anchor": 1
+      },
+      "ref_anchors": 1,
+      "raw_duplicate_categories": 28,
+      "eligible_duplicate_categories": 0,
+      "metric_pair_structures": 120,
+      "aabb_size_comparison_structures": 102,
+      "room_polygons": 9,
+      "room_areas_m2": [
+        30.487876206866105,
+        10.001400224918916,
+        9.43750521972656,
+        8.644450726797267,
+        5.56587773310995,
+        4.273564307166011,
+        3.0563832111532108,
+        0.011564835249423311,
+        0.00854811797010857
+      ],
+      "inferred_room_types": {
+        "0": "living room",
+        "1": "bedroom",
+        "2": "bedroom",
+        "3": null,
+        "4": "kitchen",
+        "5": null,
+        "6": "bathroom",
+        "7": null,
+        "8": null
+      },
+      "inferred_typed_rooms": 5,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 179,
+          "kept": 16,
+          "pass_single_filters": 36,
+          "reject_blacklist": 1,
+          "reject_curtain_blind": 5,
+          "reject_dim_too_small": 5,
+          "reject_door_window": 6,
+          "reject_floor_covering": 1,
+          "reject_generic_or_wall_fixture": 7,
+          "reject_light_fixture": 17,
+          "reject_longest_edge_too_small": 47,
+          "reject_no_ref": 20,
+          "reject_no_task_list": 4,
+          "reject_small_clutter": 20,
+          "reject_soft_furnishing": 17,
+          "reject_structural": 1,
+          "reject_too_flat": 7,
+          "reject_volume_too_small": 5
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 3
+        },
+        "referring": {
+          "anchor": 1,
+          "no_ref": 20,
+          "room": 1,
+          "unique_label": 14
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 21,
+          "too_small": 11
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 9,
+          "anchor:other_room": 8,
+          "anchor:overlaps_or_on_target": 3,
+          "room:not_unique_in_room_type": 6,
+          "room:other_instance_room_type_unknown": 9,
+          "room:room_type_unknown": 5,
+          "size:not_exactly_two": 16,
+          "size:other_room": 2,
+          "size:ratio_below_threshold": 2,
+          "unique:duplicate_category": 20
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 117,
+      "grid_points_checked": 117,
+      "legal_grid_points_found": 28,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 16,
+      "sampled_target_ids": [
+        "102",
+        "105",
+        "107",
+        "112",
+        "114",
+        "115",
+        "145",
+        "151",
+        "152",
+        "155",
+        "157",
+        "180",
+        "223",
+        "68",
+        "74",
+        "75"
+      ],
+      "sampled_positions_xy": [
+        [
+          -5.6,
+          -2.4
+        ],
+        [
+          -4.8,
+          -2.4
+        ],
+        [
+          -2.4,
+          -1.6
+        ],
+        [
+          -1.6,
+          -2.4
+        ],
+        [
+          -0.8,
+          -3.2
+        ],
+        [
+          -0.8,
+          -2.4
+        ],
+        [
+          -0.8,
+          -1.6
+        ],
+        [
+          -0.8,
+          -0.8
+        ],
+        [
+          -0.8,
+          -0.0
+        ],
+        [
+          -0.8,
+          0.8
+        ],
+        [
+          -0.8,
+          1.6
+        ],
+        [
+          0.0,
+          -2.4
+        ],
+        [
+          0.0,
+          -1.6
+        ],
+        [
+          0.0,
+          -0.0
+        ],
+        [
+          0.0,
+          0.8
+        ],
+        [
+          0.0,
+          1.6
+        ],
+        [
+          0.8,
+          -1.6
+        ],
+        [
+          0.8,
+          -0.8
+        ],
+        [
+          0.8,
+          -0.0
+        ],
+        [
+          0.8,
+          0.8
+        ],
+        [
+          1.6,
+          -2.4
+        ],
+        [
+          1.6,
+          -0.8
+        ],
+        [
+          2.4,
+          -2.4
+        ],
+        [
+          2.4,
+          -0.8
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 10,
+      "covisible_unique_pairs": 29,
+      "lateral_unique_pairs": 23,
+      "depth_order_unique_pairs": 24,
+      "aabb_size_unique_pairs": 25,
+      "noncollinear_unique_triples": 31,
+      "object_seen_from_ge2_positions": 10,
+      "multiview_camera_pairs_ge1_anchor": 720,
+      "multiview_camera_pairs_ge3_anchors": 94,
+      "lateral_relation_flip_pairs": 1,
+      "complete_category_count_categories": 14,
+      "view_counts": {
+        "visible_object_view_slots": 147,
+        "views_with_ge2_targets": 43,
+        "views_with_ge3_targets": 24,
+        "covisible_pair_view_slots": 178,
+        "lateral_pair_view_slots": 88,
+        "vertical_pair_view_slots": 128,
+        "metric_object_pair_view_slots": 178,
+        "aabb_size_pair_view_slots": 145,
+        "depth_order_pair_view_slots": 81,
+        "noncollinear_triple_view_slots": 112,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.426
+    },
+    {
+      "scene_id": "0565_840943",
+      "raw_bbox_objects": 184,
+      "r5_no_task_objects": 2,
+      "eligible_ref_targets": 17,
+      "eligible_categories": 16,
+      "ref_methods": {
+        "anchor": 5,
+        "size": 1,
+        "unique_label": 10,
+        "room": 1
+      },
+      "ref_anchors": 5,
+      "raw_duplicate_categories": 34,
+      "eligible_duplicate_categories": 1,
+      "metric_pair_structures": 135,
+      "aabb_size_comparison_structures": 119,
+      "room_polygons": 6,
+      "room_areas_m2": [
+        8.298187450919318,
+        4.04810430131424,
+        11.81686900576523,
+        4.390332394507155,
+        15.15482526554504,
+        3.8294426391331804
+      ],
+      "inferred_room_types": {
+        "0": "bedroom",
+        "1": "bathroom",
+        "2": "bedroom",
+        "3": null,
+        "4": "living room",
+        "5": "kitchen"
+      },
+      "inferred_typed_rooms": 5,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 184,
+          "kept": 17,
+          "pass_single_filters": 32,
+          "reject_curtain_blind": 6,
+          "reject_dim_too_small": 17,
+          "reject_door_window": 7,
+          "reject_floor_covering": 4,
+          "reject_generic_or_wall_fixture": 12,
+          "reject_light_fixture": 28,
+          "reject_longest_edge_too_small": 56,
+          "reject_no_ref": 15,
+          "reject_no_task_list": 2,
+          "reject_small_clutter": 3,
+          "reject_soft_furnishing": 8,
+          "reject_structural": 3,
+          "reject_too_flat": 2,
+          "reject_volume_too_small": 4
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 1
+        },
+        "referring": {
+          "anchor": 5,
+          "no_ref": 15,
+          "room": 1,
+          "size": 1,
+          "unique_label": 10
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 18,
+          "too_small": 8
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 3,
+          "anchor:other_room": 11,
+          "anchor:overlaps_or_on_target": 1,
+          "room:not_unique_in_room_type": 9,
+          "room:other_instance_room_type_unknown": 3,
+          "room:room_type_unknown": 3,
+          "size:not_exactly_two": 11,
+          "size:other_room": 2,
+          "size:ratio_below_threshold": 2,
+          "unique:duplicate_category": 15
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 8,
+      "raw_grid_points": 79,
+      "grid_points_checked": 79,
+      "legal_grid_points_found": 21,
+      "grid_was_capped": false,
+      "sampled_positions": 21,
+      "sampled_targets": 17,
+      "sampled_target_ids": [
+        "129",
+        "132",
+        "134",
+        "139",
+        "142",
+        "143",
+        "145",
+        "146",
+        "160",
+        "161",
+        "167",
+        "175",
+        "192",
+        "198",
+        "212",
+        "83",
+        "89"
+      ],
+      "sampled_positions_xy": [
+        [
+          -1.6,
+          -4.0
+        ],
+        [
+          -1.6,
+          -3.2
+        ],
+        [
+          -1.6,
+          -2.4
+        ],
+        [
+          -1.6,
+          0.0
+        ],
+        [
+          -1.6,
+          0.8
+        ],
+        [
+          -1.6,
+          1.6
+        ],
+        [
+          -0.8,
+          -3.2
+        ],
+        [
+          -0.8,
+          -2.4
+        ],
+        [
+          -0.8,
+          0.0
+        ],
+        [
+          -0.8,
+          0.8
+        ],
+        [
+          -0.8,
+          1.6
+        ],
+        [
+          0.0,
+          1.6
+        ],
+        [
+          0.8,
+          -4.0
+        ],
+        [
+          0.8,
+          -3.2
+        ],
+        [
+          0.8,
+          -2.4
+        ],
+        [
+          0.8,
+          1.6
+        ],
+        [
+          0.8,
+          3.2
+        ],
+        [
+          0.8,
+          4.0
+        ],
+        [
+          1.6,
+          -4.0
+        ],
+        [
+          1.6,
+          -3.2
+        ],
+        [
+          1.6,
+          -2.4
+        ]
+      ],
+      "sampled_views": 84,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 11,
+      "covisible_unique_pairs": 19,
+      "lateral_unique_pairs": 15,
+      "depth_order_unique_pairs": 7,
+      "aabb_size_unique_pairs": 16,
+      "noncollinear_unique_triples": 12,
+      "object_seen_from_ge2_positions": 11,
+      "multiview_camera_pairs_ge1_anchor": 130,
+      "multiview_camera_pairs_ge3_anchors": 17,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 10,
+      "view_counts": {
+        "visible_object_view_slots": 61,
+        "views_with_ge2_targets": 15,
+        "views_with_ge3_targets": 11,
+        "covisible_pair_view_slots": 55,
+        "vertical_pair_view_slots": 47,
+        "depth_order_pair_view_slots": 17,
+        "metric_object_pair_view_slots": 52,
+        "aabb_size_pair_view_slots": 48,
+        "lateral_pair_view_slots": 32,
+        "noncollinear_triple_view_slots": 18,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.385
+    },
+    {
+      "scene_id": "0615_841191",
+      "raw_bbox_objects": 312,
+      "r5_no_task_objects": 1,
+      "eligible_ref_targets": 52,
+      "eligible_categories": 35,
+      "ref_methods": {
+        "room": 13,
+        "unique_label": 19,
+        "anchor": 19,
+        "size": 1
+      },
+      "ref_anchors": 19,
+      "raw_duplicate_categories": 31,
+      "eligible_duplicate_categories": 12,
+      "metric_pair_structures": 1325,
+      "aabb_size_comparison_structures": 1113,
+      "room_polygons": 7,
+      "room_areas_m2": [
+        42.331859623167766,
+        13.903599161478505,
+        13.865456019273893,
+        10.467246669770233,
+        10.021113199209932,
+        7.402336038444545,
+        4.313450005132151
+      ],
+      "inferred_room_types": {
+        "0": "living room",
+        "1": "bedroom",
+        "2": "bedroom",
+        "3": "bathroom",
+        "4": "bedroom",
+        "5": "kitchen",
+        "6": "bathroom"
+      },
+      "inferred_typed_rooms": 7,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 312,
+          "kept": 52,
+          "pass_single_filters": 72,
+          "reject_ceiling_mounted": 3,
+          "reject_curtain_blind": 4,
+          "reject_dim_too_small": 5,
+          "reject_door_window": 14,
+          "reject_floor_covering": 1,
+          "reject_light_fixture": 26,
+          "reject_longest_edge_too_small": 10,
+          "reject_no_ref": 20,
+          "reject_no_task_list": 1,
+          "reject_small_clutter": 123,
+          "reject_soft_furnishing": 32,
+          "reject_structural": 1,
+          "reject_too_flat": 8,
+          "reject_too_low": 1,
+          "reject_volume_too_small": 11
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 2
+        },
+        "referring": {
+          "anchor": 19,
+          "no_ref": 20,
+          "room": 13,
+          "size": 1,
+          "unique_label": 19
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 26,
+          "too_small": 22
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 7,
+          "anchor:none_within_range": 3,
+          "anchor:other_room": 9,
+          "anchor:overlaps_or_on_target": 1,
+          "room:not_unique_in_room_type": 20,
+          "size:not_exactly_two": 20,
+          "unique:duplicate_category": 20
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 195,
+      "grid_points_checked": 195,
+      "legal_grid_points_found": 90,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 24,
+      "sampled_target_ids": [
+        "197",
+        "207",
+        "223",
+        "226",
+        "229",
+        "230",
+        "239",
+        "247",
+        "251",
+        "260",
+        "268",
+        "275",
+        "287",
+        "289",
+        "292",
+        "296",
+        "301",
+        "325",
+        "327",
+        "341",
+        "351",
+        "76",
+        "77",
+        "82"
+      ],
+      "sampled_positions_xy": [
+        [
+          -4.8,
+          5.6
+        ],
+        [
+          -4.0,
+          0.8
+        ],
+        [
+          -4.0,
+          4.0
+        ],
+        [
+          -3.2,
+          -4.0
+        ],
+        [
+          -3.2,
+          -1.6
+        ],
+        [
+          -3.2,
+          0.8
+        ],
+        [
+          -3.2,
+          2.4
+        ],
+        [
+          -3.2,
+          4.0
+        ],
+        [
+          -2.4,
+          -3.2
+        ],
+        [
+          -2.4,
+          -0.0
+        ],
+        [
+          -2.4,
+          3.2
+        ],
+        [
+          -1.6,
+          -0.8
+        ],
+        [
+          -1.6,
+          2.4
+        ],
+        [
+          -1.6,
+          5.6
+        ],
+        [
+          -0.0,
+          -0.8
+        ],
+        [
+          -0.0,
+          2.4
+        ],
+        [
+          0.8,
+          1.6
+        ],
+        [
+          0.8,
+          3.2
+        ],
+        [
+          0.8,
+          4.0
+        ],
+        [
+          1.6,
+          -0.8
+        ],
+        [
+          1.6,
+          5.6
+        ],
+        [
+          2.4,
+          -4.0
+        ],
+        [
+          2.4,
+          0.8
+        ],
+        [
+          3.2,
+          3.2
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 0.46153846153846156,
+      "visible_unique_targets": 13,
+      "covisible_unique_pairs": 32,
+      "lateral_unique_pairs": 24,
+      "depth_order_unique_pairs": 21,
+      "aabb_size_unique_pairs": 26,
+      "noncollinear_unique_triples": 36,
+      "object_seen_from_ge2_positions": 12,
+      "multiview_camera_pairs_ge1_anchor": 287,
+      "multiview_camera_pairs_ge3_anchors": 14,
+      "lateral_relation_flip_pairs": 6,
+      "complete_category_count_categories": 13,
+      "view_counts": {
+        "visible_object_view_slots": 91,
+        "views_with_ge2_targets": 25,
+        "views_with_ge3_targets": 13,
+        "covisible_pair_view_slots": 91,
+        "lateral_pair_view_slots": 51,
+        "vertical_pair_view_slots": 57,
+        "metric_object_pair_view_slots": 91,
+        "aabb_size_pair_view_slots": 72,
+        "depth_order_pair_view_slots": 40,
+        "noncollinear_triple_view_slots": 68,
+        "full_scene_category_count_view_slots": 3
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 1.222
+    },
+    {
+      "scene_id": "0649_841461",
+      "raw_bbox_objects": 302,
+      "r5_no_task_objects": 2,
+      "eligible_ref_targets": 33,
+      "eligible_categories": 21,
+      "ref_methods": {
+        "anchor": 19,
+        "size": 3,
+        "unique_label": 8,
+        "room": 3
+      },
+      "ref_anchors": 19,
+      "raw_duplicate_categories": 42,
+      "eligible_duplicate_categories": 7,
+      "metric_pair_structures": 528,
+      "aabb_size_comparison_structures": 430,
+      "room_polygons": 15,
+      "room_areas_m2": [
+        27.0725,
+        26.430610400390627,
+        21.144669037246704,
+        15.63685842212945,
+        15.612230712890625,
+        14.2375,
+        11.350780204098218,
+        9.424900000000001,
+        8.283600659179683,
+        5.771599999999999,
+        4.808500000000001,
+        3.835355021827212,
+        3.1005000000000003,
+        1.5899999999999999,
+        1.5192480468750063
+      ],
+      "inferred_room_types": {
+        "0": "living room",
+        "1": null,
+        "2": "dining room",
+        "3": null,
+        "4": "living room",
+        "5": "bedroom",
+        "6": null,
+        "7": "bedroom",
+        "8": "bedroom",
+        "9": "bathroom",
+        "10": null,
+        "11": null,
+        "12": "bathroom",
+        "13": null,
+        "14": null
+      },
+      "inferred_typed_rooms": 8,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 302,
+          "kept": 33,
+          "pass_single_filters": 93,
+          "reject_curtain_blind": 6,
+          "reject_dim_too_small": 19,
+          "reject_door_window": 19,
+          "reject_floor_covering": 2,
+          "reject_generic_or_wall_fixture": 3,
+          "reject_light_fixture": 33,
+          "reject_longest_edge_too_small": 41,
+          "reject_no_ref": 60,
+          "reject_no_task_list": 2,
+          "reject_small_clutter": 19,
+          "reject_soft_furnishing": 47,
+          "reject_structural": 1,
+          "reject_too_flat": 2,
+          "reject_too_low": 3,
+          "reject_volume_too_small": 12
+        },
+        "referring": {
+          "anchor": 19,
+          "no_ref": 60,
+          "room": 3,
+          "size": 3,
+          "unique_label": 8
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 59,
+          "too_small": 25
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 24,
+          "anchor:none_within_range": 2,
+          "anchor:other_room": 29,
+          "anchor:overlaps_or_on_target": 5,
+          "room:not_unique_in_room_type": 11,
+          "room:other_instance_room_type_unknown": 32,
+          "room:room_type_unknown": 17,
+          "size:not_exactly_two": 57,
+          "size:ratio_below_threshold": 3,
+          "unique:duplicate_category": 60
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 284,
+      "grid_points_checked": 284,
+      "legal_grid_points_found": 120,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 24,
+      "sampled_target_ids": [
+        "102",
+        "125",
+        "142",
+        "165",
+        "176",
+        "195",
+        "218",
+        "228",
+        "261",
+        "273",
+        "275",
+        "281",
+        "282",
+        "298",
+        "300",
+        "303",
+        "332",
+        "337",
+        "342",
+        "346",
+        "367",
+        "375",
+        "388",
+        "392"
+      ],
+      "sampled_positions_xy": [
+        [
+          -14.4,
+          1.6
+        ],
+        [
+          -13.6,
+          1.6
+        ],
+        [
+          -12.0,
+          2.4
+        ],
+        [
+          -9.6,
+          3.2
+        ],
+        [
+          -8.0,
+          0.8
+        ],
+        [
+          -8.0,
+          1.6
+        ],
+        [
+          -7.2,
+          -0.8
+        ],
+        [
+          -6.4,
+          -4.8
+        ],
+        [
+          -6.4,
+          -4.0
+        ],
+        [
+          -6.4,
+          -3.2
+        ],
+        [
+          -6.4,
+          -1.6
+        ],
+        [
+          -5.6,
+          0.8
+        ],
+        [
+          -5.6,
+          2.4
+        ],
+        [
+          -5.6,
+          3.2
+        ],
+        [
+          -0.8,
+          -3.2
+        ],
+        [
+          -0.8,
+          3.2
+        ],
+        [
+          0.0,
+          -4.8
+        ],
+        [
+          0.0,
+          -3.2
+        ],
+        [
+          0.0,
+          -2.4
+        ],
+        [
+          0.0,
+          -0.8
+        ],
+        [
+          4.0,
+          -0.0
+        ],
+        [
+          5.6,
+          -2.4
+        ],
+        [
+          5.6,
+          0.8
+        ],
+        [
+          5.6,
+          1.6
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 0.7272727272727273,
+      "visible_unique_targets": 12,
+      "covisible_unique_pairs": 6,
+      "lateral_unique_pairs": 3,
+      "depth_order_unique_pairs": 3,
+      "aabb_size_unique_pairs": 5,
+      "noncollinear_unique_triples": 1,
+      "object_seen_from_ge2_positions": 7,
+      "multiview_camera_pairs_ge1_anchor": 53,
+      "multiview_camera_pairs_ge3_anchors": 0,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 9,
+      "view_counts": {
+        "visible_object_view_slots": 36,
+        "views_with_ge2_targets": 6,
+        "views_with_ge3_targets": 1,
+        "covisible_pair_view_slots": 8,
+        "depth_order_pair_view_slots": 3,
+        "metric_object_pair_view_slots": 8,
+        "aabb_size_pair_view_slots": 5,
+        "full_scene_category_count_view_slots": 1,
+        "lateral_pair_view_slots": 5,
+        "vertical_pair_view_slots": 4,
+        "noncollinear_triple_view_slots": 1
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 1.103
+    },
+    {
+      "scene_id": "0670_841489",
+      "raw_bbox_objects": 145,
+      "r5_no_task_objects": 1,
+      "eligible_ref_targets": 19,
+      "eligible_categories": 15,
+      "ref_methods": {
+        "anchor": 5,
+        "room": 5,
+        "unique_label": 9
+      },
+      "ref_anchors": 5,
+      "raw_duplicate_categories": 27,
+      "eligible_duplicate_categories": 3,
+      "metric_pair_structures": 170,
+      "aabb_size_comparison_structures": 146,
+      "room_polygons": 5,
+      "room_areas_m2": [
+        52.549670931788995,
+        19.981121186782033,
+        14.661510697436555,
+        9.813213714003567,
+        7.435266427363697
+      ],
+      "inferred_room_types": {
+        "0": "living room",
+        "1": "bedroom",
+        "2": "study",
+        "3": "kitchen",
+        "4": "bathroom"
+      },
+      "inferred_typed_rooms": 5,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 145,
+          "kept": 19,
+          "pass_single_filters": 33,
+          "reject_curtain_blind": 3,
+          "reject_dim_too_large": 2,
+          "reject_dim_too_small": 3,
+          "reject_door_window": 10,
+          "reject_floor_covering": 2,
+          "reject_light_fixture": 12,
+          "reject_longest_edge_too_small": 25,
+          "reject_no_ref": 14,
+          "reject_no_task_list": 1,
+          "reject_small_clutter": 25,
+          "reject_soft_furnishing": 10,
+          "reject_structural": 10,
+          "reject_too_flat": 1,
+          "reject_too_low": 2,
+          "reject_volume_too_small": 6
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 1
+        },
+        "referring": {
+          "anchor": 5,
+          "no_ref": 14,
+          "room": 5,
+          "unique_label": 9
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 17,
+          "too_small": 13
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 8,
+          "anchor:none_within_range": 3,
+          "anchor:overlaps_or_on_target": 3,
+          "room:not_unique_in_room_type": 14,
+          "size:not_exactly_two": 12,
+          "size:ratio_below_threshold": 2,
+          "unique:duplicate_category": 14
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 181,
+      "grid_points_checked": 181,
+      "legal_grid_points_found": 104,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 19,
+      "sampled_target_ids": [
+        "124",
+        "126",
+        "127",
+        "128",
+        "139",
+        "156",
+        "157",
+        "160",
+        "162",
+        "182",
+        "190",
+        "48",
+        "57",
+        "61",
+        "75",
+        "76",
+        "86",
+        "88",
+        "92"
+      ],
+      "sampled_positions_xy": [
+        [
+          -4.8,
+          -1.6
+        ],
+        [
+          -4.0,
+          -8.8
+        ],
+        [
+          -4.0,
+          -7.2
+        ],
+        [
+          -3.2,
+          -6.4
+        ],
+        [
+          -3.2,
+          -1.6
+        ],
+        [
+          -2.4,
+          -8.8
+        ],
+        [
+          -2.4,
+          -7.2
+        ],
+        [
+          -2.4,
+          -4.0
+        ],
+        [
+          -2.4,
+          -1.6
+        ],
+        [
+          0.8,
+          -5.6
+        ],
+        [
+          1.6,
+          -3.2
+        ],
+        [
+          1.6,
+          -1.6
+        ],
+        [
+          1.6,
+          0.8
+        ],
+        [
+          2.4,
+          -4.8
+        ],
+        [
+          2.4,
+          -4.0
+        ],
+        [
+          2.4,
+          -1.6
+        ],
+        [
+          3.2,
+          -2.4
+        ],
+        [
+          4.0,
+          -8.8
+        ],
+        [
+          4.8,
+          -8.0
+        ],
+        [
+          5.6,
+          -8.0
+        ],
+        [
+          5.6,
+          -7.2
+        ],
+        [
+          6.4,
+          -4.0
+        ],
+        [
+          6.4,
+          -3.2
+        ],
+        [
+          6.4,
+          -2.4
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 16,
+      "covisible_unique_pairs": 33,
+      "lateral_unique_pairs": 32,
+      "depth_order_unique_pairs": 12,
+      "aabb_size_unique_pairs": 30,
+      "noncollinear_unique_triples": 46,
+      "object_seen_from_ge2_positions": 14,
+      "multiview_camera_pairs_ge1_anchor": 97,
+      "multiview_camera_pairs_ge3_anchors": 16,
+      "lateral_relation_flip_pairs": 2,
+      "complete_category_count_categories": 10,
+      "view_counts": {
+        "visible_object_view_slots": 70,
+        "views_with_ge2_targets": 12,
+        "views_with_ge3_targets": 7,
+        "covisible_pair_view_slots": 76,
+        "vertical_pair_view_slots": 44,
+        "depth_order_pair_view_slots": 27,
+        "metric_object_pair_view_slots": 76,
+        "aabb_size_pair_view_slots": 73,
+        "lateral_pair_view_slots": 45,
+        "noncollinear_triple_view_slots": 71,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.535
+    },
+    {
+      "scene_id": "0695_841526",
+      "raw_bbox_objects": 398,
+      "r5_no_task_objects": 2,
+      "eligible_ref_targets": 19,
+      "eligible_categories": 14,
+      "ref_methods": {
+        "anchor": 7,
+        "size": 3,
+        "unique_label": 6,
+        "room": 3
+      },
+      "ref_anchors": 7,
+      "raw_duplicate_categories": 39,
+      "eligible_duplicate_categories": 5,
+      "metric_pair_structures": 171,
+      "aabb_size_comparison_structures": 134,
+      "room_polygons": 16,
+      "room_areas_m2": [
+        40.17081213188171,
+        36.66404462096853,
+        15.817648312835694,
+        11.741104394966362,
+        9.789482421874993,
+        9.582929799979926,
+        5.448144989013672,
+        5.249904676818849,
+        5.194793725919723,
+        5.09250012817383,
+        4.920212162017819,
+        4.799636037445069,
+        0.12015398025512702,
+        0.07321049423217829,
+        0.06265391693115241,
+        0.05409456787109512
+      ],
+      "inferred_room_types": {
+        "0": "living room",
+        "1": "living room",
+        "2": "bedroom",
+        "3": "bedroom",
+        "4": "bedroom",
+        "5": "living room",
+        "6": null,
+        "7": "bathroom",
+        "8": null,
+        "9": null,
+        "10": "bathroom",
+        "11": null,
+        "12": null,
+        "13": null,
+        "14": null,
+        "15": null
+      },
+      "inferred_typed_rooms": 8,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 398,
+          "kept": 19,
+          "pass_single_filters": 56,
+          "reject_blacklist": 5,
+          "reject_ceiling_mounted": 1,
+          "reject_curtain_blind": 9,
+          "reject_dim_too_large": 3,
+          "reject_dim_too_small": 23,
+          "reject_door_window": 19,
+          "reject_floor_covering": 4,
+          "reject_generic_or_wall_fixture": 30,
+          "reject_light_fixture": 21,
+          "reject_longest_edge_too_small": 28,
+          "reject_no_ref": 37,
+          "reject_no_task_list": 2,
+          "reject_small_clutter": 104,
+          "reject_soft_furnishing": 68,
+          "reject_structural": 9,
+          "reject_too_flat": 3,
+          "reject_volume_too_small": 13
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 5
+        },
+        "referring": {
+          "anchor": 7,
+          "no_ref": 37,
+          "room": 3,
+          "size": 3,
+          "unique_label": 6
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 38,
+          "too_small": 33
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 13,
+          "anchor:none_within_range": 8,
+          "anchor:other_room": 14,
+          "anchor:overlaps_or_on_target": 2,
+          "room:not_unique_in_room_type": 18,
+          "room:other_instance_room_type_unknown": 13,
+          "room:room_type_unknown": 6,
+          "size:not_exactly_two": 34,
+          "size:other_room": 3,
+          "unique:duplicate_category": 37
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 278,
+      "grid_points_checked": 278,
+      "legal_grid_points_found": 130,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 19,
+      "sampled_target_ids": [
+        "188",
+        "236",
+        "237",
+        "250",
+        "256",
+        "264",
+        "296",
+        "328",
+        "389",
+        "390",
+        "403",
+        "405",
+        "410",
+        "411",
+        "419",
+        "431",
+        "435",
+        "461",
+        "473"
+      ],
+      "sampled_positions_xy": [
+        [
+          -6.4,
+          -0.0
+        ],
+        [
+          -6.4,
+          1.6
+        ],
+        [
+          -6.4,
+          3.2
+        ],
+        [
+          -6.4,
+          6.4
+        ],
+        [
+          -5.6,
+          -2.4
+        ],
+        [
+          -5.6,
+          -1.6
+        ],
+        [
+          -5.6,
+          1.6
+        ],
+        [
+          -4.8,
+          -0.0
+        ],
+        [
+          -4.8,
+          3.2
+        ],
+        [
+          -4.0,
+          -0.0
+        ],
+        [
+          -3.2,
+          6.4
+        ],
+        [
+          -1.6,
+          6.4
+        ],
+        [
+          -0.8,
+          -0.0
+        ],
+        [
+          -0.8,
+          1.6
+        ],
+        [
+          -0.8,
+          3.2
+        ],
+        [
+          -0.8,
+          5.6
+        ],
+        [
+          0.8,
+          1.6
+        ],
+        [
+          1.6,
+          5.6
+        ],
+        [
+          3.2,
+          -0.0
+        ],
+        [
+          4.0,
+          6.4
+        ],
+        [
+          4.8,
+          0.8
+        ],
+        [
+          5.6,
+          2.4
+        ],
+        [
+          5.6,
+          3.2
+        ],
+        [
+          6.4,
+          3.2
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 9,
+      "covisible_unique_pairs": 8,
+      "lateral_unique_pairs": 2,
+      "depth_order_unique_pairs": 7,
+      "aabb_size_unique_pairs": 5,
+      "noncollinear_unique_triples": 4,
+      "object_seen_from_ge2_positions": 7,
+      "multiview_camera_pairs_ge1_anchor": 53,
+      "multiview_camera_pairs_ge3_anchors": 1,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 9,
+      "view_counts": {
+        "visible_object_view_slots": 35,
+        "views_with_ge2_targets": 8,
+        "views_with_ge3_targets": 3,
+        "covisible_pair_view_slots": 20,
+        "vertical_pair_view_slots": 5,
+        "depth_order_pair_view_slots": 17,
+        "metric_object_pair_view_slots": 20,
+        "aabb_size_pair_view_slots": 11,
+        "lateral_pair_view_slots": 3,
+        "noncollinear_triple_view_slots": 8,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 1.086
+    },
+    {
+      "scene_id": "0756_840012",
+      "raw_bbox_objects": 118,
+      "r5_no_task_objects": 0,
+      "eligible_ref_targets": 9,
+      "eligible_categories": 9,
+      "ref_methods": {
+        "anchor": 3,
+        "unique_label": 4,
+        "size": 2
+      },
+      "ref_anchors": 3,
+      "raw_duplicate_categories": 20,
+      "eligible_duplicate_categories": 0,
+      "metric_pair_structures": 36,
+      "aabb_size_comparison_structures": 31,
+      "room_polygons": 1,
+      "room_areas_m2": [
+        68.1096
+      ],
+      "inferred_room_types": {
+        "0": "bathroom"
+      },
+      "inferred_typed_rooms": 1,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 118,
+          "kept": 9,
+          "pass_single_filters": 34,
+          "reject_dim_too_large": 1,
+          "reject_dim_too_small": 2,
+          "reject_door_window": 6,
+          "reject_floor_covering": 1,
+          "reject_light_fixture": 24,
+          "reject_longest_edge_too_small": 23,
+          "reject_no_ref": 25,
+          "reject_small_clutter": 20,
+          "reject_soft_furnishing": 1,
+          "reject_structural": 2,
+          "reject_too_flat": 1,
+          "reject_too_low": 1,
+          "reject_volume_too_small": 2
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 2
+        },
+        "referring": {
+          "anchor": 3,
+          "no_ref": 25,
+          "size": 2,
+          "unique_label": 4
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 25,
+          "too_small": 12
+        },
+        "referring.no_ref_detail": {
+          "anchor:none_within_range": 25,
+          "room:not_unique_in_room_type": 25,
+          "size:not_exactly_two": 25,
+          "unique:duplicate_category": 25
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 170,
+      "grid_points_checked": 170,
+      "legal_grid_points_found": 70,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 9,
+      "sampled_target_ids": [
+        "101",
+        "104",
+        "105",
+        "107",
+        "45",
+        "56",
+        "58",
+        "72",
+        "74"
+      ],
+      "sampled_positions_xy": [
+        [
+          -0.8,
+          -2.4
+        ],
+        [
+          -0.8,
+          -1.6
+        ],
+        [
+          0.0,
+          -1.6
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          6.4
+        ],
+        [
+          0.0,
+          8.0
+        ],
+        [
+          0.0,
+          8.8
+        ],
+        [
+          0.0,
+          9.6
+        ],
+        [
+          0.8,
+          -1.6
+        ],
+        [
+          0.8,
+          0.0
+        ],
+        [
+          0.8,
+          1.6
+        ],
+        [
+          0.8,
+          3.2
+        ],
+        [
+          1.6,
+          -0.8
+        ],
+        [
+          1.6,
+          3.2
+        ],
+        [
+          2.4,
+          -2.4
+        ],
+        [
+          2.4,
+          0.0
+        ],
+        [
+          2.4,
+          2.4
+        ],
+        [
+          3.2,
+          0.8
+        ],
+        [
+          3.2,
+          1.6
+        ],
+        [
+          3.2,
+          4.0
+        ],
+        [
+          4.0,
+          -2.4
+        ],
+        [
+          4.0,
+          0.0
+        ],
+        [
+          4.0,
+          0.8
+        ],
+        [
+          4.0,
+          2.4
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 8,
+      "covisible_unique_pairs": 16,
+      "lateral_unique_pairs": 16,
+      "depth_order_unique_pairs": 9,
+      "aabb_size_unique_pairs": 14,
+      "noncollinear_unique_triples": 16,
+      "object_seen_from_ge2_positions": 8,
+      "multiview_camera_pairs_ge1_anchor": 355,
+      "multiview_camera_pairs_ge3_anchors": 89,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 5,
+      "view_counts": {
+        "visible_object_view_slots": 99,
+        "views_with_ge2_targets": 20,
+        "views_with_ge3_targets": 15,
+        "covisible_pair_view_slots": 134,
+        "lateral_pair_view_slots": 70,
+        "vertical_pair_view_slots": 114,
+        "metric_object_pair_view_slots": 134,
+        "aabb_size_pair_view_slots": 110,
+        "depth_order_pair_view_slots": 54,
+        "noncollinear_triple_view_slots": 89,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.228
+    },
+    {
+      "scene_id": "0813_841249",
+      "raw_bbox_objects": 693,
+      "r5_no_task_objects": 0,
+      "eligible_ref_targets": 53,
+      "eligible_categories": 41,
+      "ref_methods": {
+        "anchor": 35,
+        "unique_label": 16,
+        "size": 1,
+        "room": 1
+      },
+      "ref_anchors": 35,
+      "raw_duplicate_categories": 72,
+      "eligible_duplicate_categories": 9,
+      "metric_pair_structures": 1375,
+      "aabb_size_comparison_structures": 1134,
+      "room_polygons": 9,
+      "room_areas_m2": [
+        85.42167803540039,
+        19.92799999999997,
+        16.450000000000017,
+        16.016099999999994,
+        12.163169929931641,
+        11.869800000000001,
+        4.599999999999996,
+        4.590000000000003,
+        3.3000000000000043
+      ],
+      "inferred_room_types": {
+        "0": null,
+        "1": "bedroom",
+        "2": "bedroom",
+        "3": "bedroom",
+        "4": "bedroom",
+        "5": "bedroom",
+        "6": "bathroom",
+        "7": "bathroom",
+        "8": "bathroom"
+      },
+      "inferred_typed_rooms": 8,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 693,
+          "kept": 53,
+          "pass_single_filters": 90,
+          "reject_blacklist": 2,
+          "reject_ceiling_mounted": 2,
+          "reject_curtain_blind": 21,
+          "reject_dim_too_large": 4,
+          "reject_dim_too_small": 54,
+          "reject_door_window": 18,
+          "reject_floor_covering": 2,
+          "reject_generic_or_wall_fixture": 38,
+          "reject_light_fixture": 68,
+          "reject_longest_edge_too_small": 161,
+          "reject_no_ref": 37,
+          "reject_small_clutter": 96,
+          "reject_soft_furnishing": 109,
+          "reject_structural": 2,
+          "reject_too_flat": 7,
+          "reject_too_low": 1,
+          "reject_volume_too_small": 18
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 2
+        },
+        "referring": {
+          "anchor": 35,
+          "no_ref": 37,
+          "room": 1,
+          "size": 1,
+          "unique_label": 16
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 32,
+          "too_small": 45
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 24,
+          "anchor:other_room": 11,
+          "anchor:overlaps_or_on_target": 2,
+          "room:not_unique_in_room_type": 15,
+          "room:other_instance_room_type_unknown": 7,
+          "room:room_type_unknown": 15,
+          "size:not_exactly_two": 34,
+          "size:other_room": 3,
+          "unique:duplicate_category": 37
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 309,
+      "grid_points_checked": 309,
+      "legal_grid_points_found": 190,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 24,
+      "sampled_target_ids": [
+        "173",
+        "174",
+        "230",
+        "267",
+        "276",
+        "277",
+        "393",
+        "427",
+        "440",
+        "509",
+        "511",
+        "513",
+        "544",
+        "547",
+        "564",
+        "572",
+        "606",
+        "634",
+        "638",
+        "644",
+        "672",
+        "744",
+        "758",
+        "91"
+      ],
+      "sampled_positions_xy": [
+        [
+          1.6,
+          1.6
+        ],
+        [
+          2.4,
+          1.6
+        ],
+        [
+          3.2,
+          3.2
+        ],
+        [
+          4.8,
+          -2.4
+        ],
+        [
+          4.8,
+          1.6
+        ],
+        [
+          4.8,
+          4.0
+        ],
+        [
+          7.2,
+          -4.0
+        ],
+        [
+          7.2,
+          -0.8
+        ],
+        [
+          8.0,
+          -0.0
+        ],
+        [
+          8.8,
+          -0.8
+        ],
+        [
+          8.8,
+          4.8
+        ],
+        [
+          9.6,
+          -3.2
+        ],
+        [
+          11.2,
+          3.2
+        ],
+        [
+          12.0,
+          -4.0
+        ],
+        [
+          14.4,
+          -2.4
+        ],
+        [
+          14.4,
+          -0.8
+        ],
+        [
+          14.4,
+          1.6
+        ],
+        [
+          14.4,
+          4.8
+        ],
+        [
+          15.2,
+          -4.0
+        ],
+        [
+          16.0,
+          -4.8
+        ],
+        [
+          16.0,
+          -3.2
+        ],
+        [
+          16.0,
+          -2.4
+        ],
+        [
+          16.8,
+          0.0
+        ],
+        [
+          16.8,
+          3.2
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 0.4528301886792453,
+      "visible_unique_targets": 15,
+      "covisible_unique_pairs": 11,
+      "lateral_unique_pairs": 7,
+      "depth_order_unique_pairs": 3,
+      "aabb_size_unique_pairs": 8,
+      "noncollinear_unique_triples": 0,
+      "object_seen_from_ge2_positions": 10,
+      "multiview_camera_pairs_ge1_anchor": 90,
+      "multiview_camera_pairs_ge3_anchors": 0,
+      "lateral_relation_flip_pairs": 1,
+      "complete_category_count_categories": 10,
+      "view_counts": {
+        "visible_object_view_slots": 49,
+        "views_with_ge2_targets": 15,
+        "views_with_ge3_targets": 2,
+        "covisible_pair_view_slots": 19,
+        "lateral_pair_view_slots": 11,
+        "vertical_pair_view_slots": 5,
+        "metric_object_pair_view_slots": 14,
+        "aabb_size_pair_view_slots": 13,
+        "depth_order_pair_view_slots": 3,
+        "noncollinear_triple_view_slots": 0,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 1.9
+    },
+    {
+      "scene_id": "0866_841789",
+      "raw_bbox_objects": 110,
+      "r5_no_task_objects": 0,
+      "eligible_ref_targets": 14,
+      "eligible_categories": 14,
+      "ref_methods": {
+        "anchor": 2,
+        "unique_label": 11,
+        "size": 1
+      },
+      "ref_anchors": 2,
+      "raw_duplicate_categories": 19,
+      "eligible_duplicate_categories": 0,
+      "metric_pair_structures": 90,
+      "aabb_size_comparison_structures": 77,
+      "room_polygons": 4,
+      "room_areas_m2": [
+        12.536999999999999,
+        12.028962470703124,
+        4.20382215576172,
+        3.092605553015694
+      ],
+      "inferred_room_types": {
+        "0": null,
+        "1": "kitchen",
+        "2": null,
+        "3": "bathroom"
+      },
+      "inferred_typed_rooms": 2,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 110,
+          "kept": 14,
+          "pass_single_filters": 26,
+          "reject_ceiling_mounted": 1,
+          "reject_dim_too_small": 7,
+          "reject_door_window": 9,
+          "reject_floor_covering": 1,
+          "reject_generic_or_wall_fixture": 1,
+          "reject_light_fixture": 16,
+          "reject_longest_edge_too_small": 35,
+          "reject_no_ref": 12,
+          "reject_soft_furnishing": 7,
+          "reject_structural": 1,
+          "reject_too_flat": 2,
+          "reject_too_low": 1,
+          "reject_volume_too_small": 3
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 2
+        },
+        "referring": {
+          "anchor": 2,
+          "no_ref": 12,
+          "size": 1,
+          "unique_label": 11
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 12,
+          "too_small": 17
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 6,
+          "anchor:other_room": 6,
+          "room:not_unique_in_room_type": 3,
+          "room:other_instance_room_type_unknown": 4,
+          "room:room_type_unknown": 5,
+          "size:not_exactly_two": 12,
+          "unique:duplicate_category": 12
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 8,
+      "raw_grid_points": 50,
+      "grid_points_checked": 50,
+      "legal_grid_points_found": 14,
+      "grid_was_capped": false,
+      "sampled_positions": 14,
+      "sampled_targets": 14,
+      "sampled_target_ids": [
+        "103",
+        "104",
+        "105",
+        "109",
+        "113",
+        "114",
+        "116",
+        "118",
+        "119",
+        "120",
+        "126",
+        "56",
+        "69",
+        "95"
+      ],
+      "sampled_positions_xy": [
+        [
+          -0.8,
+          -2.4
+        ],
+        [
+          -0.8,
+          -1.6
+        ],
+        [
+          -0.8,
+          -0.8
+        ],
+        [
+          0.0,
+          -2.4
+        ],
+        [
+          0.0,
+          -1.6
+        ],
+        [
+          0.0,
+          -0.8
+        ],
+        [
+          0.8,
+          -2.4
+        ],
+        [
+          0.8,
+          -1.6
+        ],
+        [
+          0.8,
+          -0.8
+        ],
+        [
+          1.6,
+          0.8
+        ],
+        [
+          1.6,
+          1.6
+        ],
+        [
+          1.6,
+          2.4
+        ],
+        [
+          1.6,
+          3.2
+        ],
+        [
+          1.6,
+          4.0
+        ]
+      ],
+      "sampled_views": 56,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 6,
+      "covisible_unique_pairs": 4,
+      "lateral_unique_pairs": 2,
+      "depth_order_unique_pairs": 3,
+      "aabb_size_unique_pairs": 3,
+      "noncollinear_unique_triples": 1,
+      "object_seen_from_ge2_positions": 5,
+      "multiview_camera_pairs_ge1_anchor": 76,
+      "multiview_camera_pairs_ge3_anchors": 0,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 11,
+      "view_counts": {
+        "visible_object_view_slots": 28,
+        "views_with_ge2_targets": 5,
+        "views_with_ge3_targets": 1,
+        "covisible_pair_view_slots": 7,
+        "vertical_pair_view_slots": 7,
+        "depth_order_pair_view_slots": 5,
+        "metric_object_pair_view_slots": 7,
+        "aabb_size_pair_view_slots": 6,
+        "lateral_pair_view_slots": 2,
+        "noncollinear_triple_view_slots": 1,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.16
+    },
+    {
+      "scene_id": "0933_841849",
+      "raw_bbox_objects": 316,
+      "r5_no_task_objects": 2,
+      "eligible_ref_targets": 19,
+      "eligible_categories": 17,
+      "ref_methods": {
+        "unique_label": 10,
+        "anchor": 6,
+        "room": 3
+      },
+      "ref_anchors": 6,
+      "raw_duplicate_categories": 37,
+      "eligible_duplicate_categories": 2,
+      "metric_pair_structures": 170,
+      "aabb_size_comparison_structures": 149,
+      "room_polygons": 10,
+      "room_areas_m2": [
+        44.89592300000001,
+        23.149605500000007,
+        22.018887,
+        12.0669505,
+        11.730369,
+        10.751559499999999,
+        6.899172750000002,
+        5.284564000000003,
+        3.18254575,
+        2.0820890000000003
+      ],
+      "inferred_room_types": {
+        "0": "living room",
+        "1": "bedroom",
+        "2": "bedroom",
+        "3": null,
+        "4": "living room",
+        "5": "bedroom",
+        "6": null,
+        "7": "bathroom",
+        "8": "bathroom",
+        "9": null
+      },
+      "inferred_typed_rooms": 7,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 316,
+          "kept": 19,
+          "pass_single_filters": 49,
+          "reject_blacklist": 19,
+          "reject_curtain_blind": 14,
+          "reject_dim_too_large": 2,
+          "reject_dim_too_small": 9,
+          "reject_door_window": 19,
+          "reject_floor_covering": 3,
+          "reject_generic_or_wall_fixture": 11,
+          "reject_light_fixture": 50,
+          "reject_longest_edge_too_small": 48,
+          "reject_no_ref": 30,
+          "reject_no_task_list": 2,
+          "reject_small_clutter": 44,
+          "reject_soft_furnishing": 26,
+          "reject_structural": 5,
+          "reject_too_flat": 8,
+          "reject_volume_too_small": 7
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 3
+        },
+        "referring": {
+          "anchor": 6,
+          "no_ref": 30,
+          "room": 3,
+          "unique_label": 10
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 32,
+          "too_small": 7
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 9,
+          "anchor:none_within_range": 1,
+          "anchor:other_room": 18,
+          "anchor:overlaps_or_on_target": 2,
+          "room:not_unique_in_room_type": 6,
+          "room:other_instance_room_type_unknown": 18,
+          "room:room_type_unknown": 6,
+          "size:not_exactly_two": 27,
+          "size:other_not_referable": 1,
+          "size:other_room": 2,
+          "unique:duplicate_category": 30
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 7,
+      "existing_r5_max_steps": 6,
+      "raw_grid_points": 246,
+      "grid_points_checked": 246,
+      "legal_grid_points_found": 81,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 19,
+      "sampled_target_ids": [
+        "223",
+        "239",
+        "253",
+        "254",
+        "255",
+        "265",
+        "289",
+        "290",
+        "300",
+        "306",
+        "307",
+        "313",
+        "314",
+        "328",
+        "334",
+        "335",
+        "350",
+        "351",
+        "385"
+      ],
+      "sampled_positions_xy": [
+        [
+          -6.4,
+          -4.8
+        ],
+        [
+          -5.6,
+          -5.6
+        ],
+        [
+          -5.6,
+          -4.8
+        ],
+        [
+          -4.0,
+          -5.6
+        ],
+        [
+          -2.4,
+          -3.2
+        ],
+        [
+          -2.4,
+          -1.6
+        ],
+        [
+          -2.4,
+          -0.8
+        ],
+        [
+          -1.6,
+          -5.6
+        ],
+        [
+          -1.6,
+          -4.8
+        ],
+        [
+          -1.6,
+          -0.0
+        ],
+        [
+          -0.8,
+          -5.6
+        ],
+        [
+          -0.8,
+          -0.0
+        ],
+        [
+          0.0,
+          2.4
+        ],
+        [
+          2.4,
+          -4.8
+        ],
+        [
+          2.4,
+          3.2
+        ],
+        [
+          2.4,
+          4.8
+        ],
+        [
+          3.2,
+          0.8
+        ],
+        [
+          4.8,
+          -4.0
+        ],
+        [
+          4.8,
+          -3.2
+        ],
+        [
+          4.8,
+          -2.4
+        ],
+        [
+          4.8,
+          4.0
+        ],
+        [
+          5.6,
+          -4.0
+        ],
+        [
+          5.6,
+          0.8
+        ],
+        [
+          5.6,
+          5.6
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 4,
+      "covisible_unique_pairs": 1,
+      "lateral_unique_pairs": 1,
+      "depth_order_unique_pairs": 0,
+      "aabb_size_unique_pairs": 1,
+      "noncollinear_unique_triples": 0,
+      "object_seen_from_ge2_positions": 3,
+      "multiview_camera_pairs_ge1_anchor": 16,
+      "multiview_camera_pairs_ge3_anchors": 0,
+      "lateral_relation_flip_pairs": 0,
+      "complete_category_count_categories": 11,
+      "view_counts": {
+        "visible_object_view_slots": 12,
+        "views_with_ge2_targets": 2,
+        "views_with_ge3_targets": 0,
+        "covisible_pair_view_slots": 2,
+        "lateral_pair_view_slots": 2,
+        "vertical_pair_view_slots": 2,
+        "metric_object_pair_view_slots": 2,
+        "aabb_size_pair_view_slots": 2,
+        "depth_order_pair_view_slots": 0,
+        "noncollinear_triple_view_slots": 0,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.874
+    },
+    {
+      "scene_id": "0985_841962",
+      "raw_bbox_objects": 206,
+      "r5_no_task_objects": 1,
+      "eligible_ref_targets": 15,
+      "eligible_categories": 14,
+      "ref_methods": {
+        "anchor": 5,
+        "unique_label": 9,
+        "room": 1
+      },
+      "ref_anchors": 5,
+      "raw_duplicate_categories": 28,
+      "eligible_duplicate_categories": 1,
+      "metric_pair_structures": 103,
+      "aabb_size_comparison_structures": 90,
+      "room_polygons": 13,
+      "room_areas_m2": [
+        29.819527,
+        23.10917099999999,
+        8.854033999999999,
+        8.693855,
+        6.993779999999996,
+        3.7197299999999998,
+        3.0175100000000015,
+        0.21340800000000115,
+        0.0832499999999996,
+        0.061236000000000956,
+        0.05877599999999994,
+        0.05471999999999966,
+        0.05147999999999997
+      ],
+      "inferred_room_types": {
+        "0": "living room",
+        "1": "bedroom",
+        "2": null,
+        "3": "bedroom",
+        "4": null,
+        "5": "bathroom",
+        "6": "bathroom",
+        "7": null,
+        "8": null,
+        "9": null,
+        "10": null,
+        "11": null,
+        "12": null
+      },
+      "inferred_typed_rooms": 5,
+      "coordinate_status": "frozen",
+      "coordinate_usable": true,
+      "object_funnel": {
+        "objects": {
+          "input": 206,
+          "kept": 15,
+          "pass_single_filters": 42,
+          "reject_dim_too_large": 1,
+          "reject_dim_too_small": 28,
+          "reject_door_window": 14,
+          "reject_floor_covering": 3,
+          "reject_generic_or_wall_fixture": 3,
+          "reject_light_fixture": 47,
+          "reject_longest_edge_too_small": 41,
+          "reject_no_ref": 27,
+          "reject_no_task_list": 1,
+          "reject_small_clutter": 4,
+          "reject_soft_furnishing": 15,
+          "reject_too_flat": 4,
+          "reject_volume_too_small": 3
+        },
+        "objects.diag": {
+          "kept_but_runtime_collision_ignores_label": 2
+        },
+        "referring": {
+          "anchor": 5,
+          "no_ref": 27,
+          "room": 1,
+          "unique_label": 9
+        },
+        "referring.anchor_pool": {
+          "not_unique_in_room": 18,
+          "too_small": 25
+        },
+        "referring.no_ref_detail": {
+          "anchor:ambiguous": 14,
+          "anchor:other_room": 10,
+          "anchor:overlaps_or_on_target": 3,
+          "room:not_unique_in_room_type": 7,
+          "room:other_instance_room_type_unknown": 13,
+          "room:room_type_unknown": 7,
+          "size:not_exactly_two": 21,
+          "size:other_room": 6,
+          "unique:duplicate_category": 27
+        }
+      },
+      "existing_r5_tasks": 14,
+      "existing_r5_trajectory_ge2": 13,
+      "existing_r5_trajectory_ge4": 10,
+      "existing_r5_max_steps": 7,
+      "raw_grid_points": 148,
+      "grid_points_checked": 148,
+      "legal_grid_points_found": 54,
+      "grid_was_capped": false,
+      "sampled_positions": 24,
+      "sampled_targets": 15,
+      "sampled_target_ids": [
+        "198",
+        "205",
+        "228",
+        "244",
+        "245",
+        "260",
+        "262",
+        "263",
+        "264",
+        "273",
+        "274",
+        "275",
+        "278",
+        "285",
+        "286"
+      ],
+      "sampled_positions_xy": [
+        [
+          -4.0,
+          -4.0
+        ],
+        [
+          -4.0,
+          -2.4
+        ],
+        [
+          -4.0,
+          -1.6
+        ],
+        [
+          -4.0,
+          -0.0
+        ],
+        [
+          -4.0,
+          0.8
+        ],
+        [
+          -4.0,
+          4.8
+        ],
+        [
+          -3.2,
+          0.8
+        ],
+        [
+          -3.2,
+          1.6
+        ],
+        [
+          -2.4,
+          -1.6
+        ],
+        [
+          -2.4,
+          -0.8
+        ],
+        [
+          -2.4,
+          0.8
+        ],
+        [
+          -2.4,
+          2.4
+        ],
+        [
+          -1.6,
+          4.8
+        ],
+        [
+          -0.8,
+          -4.0
+        ],
+        [
+          -0.0,
+          -4.0
+        ],
+        [
+          -0.0,
+          -0.0
+        ],
+        [
+          -0.0,
+          2.4
+        ],
+        [
+          -0.0,
+          4.8
+        ],
+        [
+          0.8,
+          -0.0
+        ],
+        [
+          0.8,
+          2.4
+        ],
+        [
+          1.6,
+          -0.0
+        ],
+        [
+          2.4,
+          -2.4
+        ],
+        [
+          2.4,
+          2.4
+        ],
+        [
+          2.4,
+          3.2
+        ]
+      ],
+      "sampled_views": 96,
+      "sampling_status": "ok",
+      "sampled_object_fraction": 1.0,
+      "visible_unique_targets": 11,
+      "covisible_unique_pairs": 32,
+      "lateral_unique_pairs": 15,
+      "depth_order_unique_pairs": 21,
+      "aabb_size_unique_pairs": 29,
+      "noncollinear_unique_triples": 48,
+      "object_seen_from_ge2_positions": 11,
+      "multiview_camera_pairs_ge1_anchor": 153,
+      "multiview_camera_pairs_ge3_anchors": 21,
+      "lateral_relation_flip_pairs": 2,
+      "complete_category_count_categories": 9,
+      "view_counts": {
+        "visible_object_view_slots": 74,
+        "views_with_ge2_targets": 19,
+        "views_with_ge3_targets": 10,
+        "covisible_pair_view_slots": 107,
+        "depth_order_pair_view_slots": 54,
+        "metric_object_pair_view_slots": 103,
+        "aabb_size_pair_view_slots": 95,
+        "lateral_pair_view_slots": 43,
+        "vertical_pair_view_slots": 54,
+        "noncollinear_triple_view_slots": 89,
+        "full_scene_category_count_view_slots": 0
+      },
+      "unestimated": {
+        "intrinsic_object_front_and_orientation": "not estimated: no semantic front metadata; AABB axes do not establish facing",
+        "video_route_QA": "not estimated: only existing R5 path lengths counted; no route/temporal observation coverage evaluated",
+        "appearance_order_QA": "not estimated: requires full temporal visibility sequence and identity audit",
+        "room_type_ground_truth": "not available: inferred_room_types are furniture heuristics",
+        "render_or_RGB_quality": "not estimated: CPU only",
+        "absolute_metric_scale_identifiability": "not estimated: geometry exists but RGB alone may not provide scale"
+      },
+      "seconds": 0.589
+    }
+  ],
+  "elapsed_seconds": 44.506,
+  "source_sha256_at_end": {
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/contract.py": "58b51f0c7c7b71ea353461c095720142cc40a2d83a416f945474fa107d71b605",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/scene.py": "97e60b049af99c0feae23ced476b60e34c5281cce028ab288b58a4cad4319be9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/referring.py": "a3979a69396afce385d7fe601a57dd0bf49387f34d99c5c59d784b9936c2cb45",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/objects.py": "f3d34b03624a88d896f330f93386729a29417d9a803578ee2fea9664d60daeea",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/active_spatial_env.py": "77a92eb12247b5dfe628042643c38b9f94243f2bd6821211ed055d36c717db0f",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/__init__.py": "201f51c04d71488f2eb051ced5b611e10e80b91e82e457fc9dac02da4f35ce6f",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/canonical_camera.py": "ec38613908fd0d69726a2e1fbcccacf2a823d80e45193387fd9a3aab83c1da39",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/visual_bbox_metrics.py": "17da286dedd83358215920d79b5e4013613625df899f72ac21e521cabdeb2f8e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/target_visibility.py": "001b1f78de67ef903df1df1b047515339b0f305fafd74436852260a2dd07f6e4",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/occlusion.py": "6cfc4f7a2fb74b9c3ec2bc75d50764614ea4ed854b5b9036f9ef015b86bf7aaa",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/admission.py": "017000ec4c966c03a17b1c40f5df06cabd8c0f9c8d1d39410c817cac792269fd",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/coordinates.py": "732936372efaf48d37d4f59689d83c9338017ff0fc31778dc96ecd930bd6a4b5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/diagnose_run.py": "2a065586109ff1f0201ac4263478832e0efb00a9e4ce865ba8a83d27b494396e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/difficulty.py": "6d1f7bb0997a1781a15444155103902144925e617305d0228cb025a684b7b54d",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/endpoints.py": "a07cc2fef8c722b8b130da9840e6f4398a6ea00ee5b1a8f844a084c8e961034c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/fastgeom.py": "d4bf18632332ce7162b22d73bc70de227b0090eda30b331906f96bda400d49bb",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/fetch_interiorgs_metadata.py": "fe74a9f89b8b420f43ec07992db6418cee8db10017124f59f4d53bc33a769337",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/initial_states.py": "134d79cc5d6db68e936b7751ab2587a1a52681cbd2dd11209652d4fc85ef0fd7",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/job_sco.py": "827ab5eb930844da3890d9279435debc91c2c932ea53f0f5f9ae1a2ea071459e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/label_outliers.py": "5c883674697b052451d7629e5cf19d2e0f1b606e91b2b3cdf9de5a11b4c0b174",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/make_split.py": "5961e39f9f1a5856dc8e458bdb4a667f7bc40ab6081a33b1d88b4d3e2c85ce77",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/make_viewer.py": "fc832edda692ecc5b092979cc9a4754c7156a4b1cabe645582d2e85d70b3606d",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/pilot.py": "f53fca7ad055e5557556f5e6a41d550bb2610750287b234546c18905f139e0b1",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/pilot_sco.py": "2f75d27a49399119555b04170dfbfe09e653c33cb69a24590fc4c3f6f0dd6523",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/pilot_site.py": "7a616a91501d95e8e46a998630ab6878eeb3e8ac41e9542798b4f90c99a92e7c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/pitch_audit.py": "b16724f18a0e602e916e8784751e9b0be045d843e80ae7e140840ea72258f9b7",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/qa_states.py": "ad164d61b4c4498b685839fa20aa69fe6a785b1e19735d1d8504e5fcdf10f25b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/r1_regression.py": "5e25bf4e7f70d0af4758aa3d9535ef5c979da4232d251393e7fc180076fd25cb",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/release.py": "7f173aafbeffce7cdf7f6e5c2787c8867c610f1409699ffa78af18970a10af5a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/replay_env.py": "2cc5242db2fca473d40924f1ab2bb211ca48a33abe45c80a753c5022d1b88e5b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/run_all.py": "873783d392248f6c6eae6d87d11d814c06d3c248d2409b3cf672a7a53ad173ea",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/run_scene.py": "e3a6d51c478b913aee01abe483c89f9c924a7e833113462db0638e8aa4ac0e09",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/sampling.py": "34a8f40a1cfd32a54341b21a61ba660d922b18ef885fb0cee46b9e734c6a5a78",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/scene_identity.py": "494b6730391d0be9655bd3e8dc9239c29cac420725f679f3d3d87198785d7985",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/sco_interiorgs_v10.py": "fc409d3e90b024a301f46e8d0b26ca3c2b71481961330b9debb2008200e5cc49",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/shard_sco.py": "27ac1345ec65d0ba84d9e8bc1aca8b04218f4804085b060745403e594026b324",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/start_context.py": "b0addb5f25a2dbd496777528d994a9ecc41f56c9bc725b41f10a2a98f8e38e0b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/training_prep.py": "044fea50451099f416ded5d2229faf0d2ffb1a2911829a4d8cd40e0acde49848",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/absolute_positioning.py": "4f0d6fdbf2f0ed1a2400bf2b16e20185ee6513e429a03c9c2a7dc934d42d053b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/canonical_v2.py": "86ad5fb7f860ebd280c14ed560abac4d54e5b46bd496c86d188b2214f02ab828",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/centering.py": "dc16c460aebdd126841d24913c2aa8f80c02316821e19073572fbad11599d637",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/common.py": "a85d4120114a1d9ba5aa099c8bcdc11bf17fc984665e8db27c6e006bde90603b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/equidistance.py": "74243d7be7bf792479ddfdf6bb407d3acd732d0df12ee67b9783306e7c14b806",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/fov_inclusion.py": "a87eaf0348886b41f5b9c8a9e01ae739fd6fa017d783b30fe65894bfb0e4f9ae",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/judges_v2.py": "fa496d2fbbcec33f8ec2d5cf2c8080ad2ce9457938a8b96f4dd7558cc02cf7a9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/occlusion_alignment.py": "511d3318d93242d93c91d232ca1fda17a92a63971812c0ad8ee74ebb0ca28c18",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/screen_occupancy.py": "145fe41e32c74b0404b35765bffea0b05ca4c890f9ffacc960c871835770de3a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/families/size_distance_invariance.py": "7e008c709a5942cdc56a8856a5ba856d3609c0801e0e8642cb7ffafbea2168ea",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/testing/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/testing/synthetic_scene.py": "add73abe7695c0ffa186f2b43198399057494939048914b74d260a6211d2f4e9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_admission.py": "79197b37133395e689c2267ad6998d603bdad4599a1e76be79699e3683df3324",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_allocation.py": "8b273f95691f2a3107f6e575b68ea5801224b9967c7a9589c52e0800a6a3e753",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_contract.py": "96aa57d26c45dab81b6db7d537336f7b3e9b3c8096aa0da4305ecb4fbad5780b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_difficulty.py": "f827caf3fbbbfc3782a8a1c54c352bcdae61734e96e9b1fd56914ef335694ed4",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_endpoints.py": "562a5066d9ad62e562f2c425ec116a8c93ac2f5b3f2b5cb2ad70e188dbdb20af",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_env_defaults.py": "71840090b6cab01387f0248451facf9005545aeaa1d0b30b1f6283bbf54913e2",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_families.py": "92979714e4cc249b0157d8a252488f3ca40a612bf3d38fa47008e875fd20cc58",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_fetch.py": "72e519789595d81781dfe633adc4dbc6833e441dcefd0750f75ef3868ab414ed",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_geometry.py": "c2f34e438ca2a698777b4fd943546d92bff25eb6d9aa6827d2abfff5ea0431e5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_job_sco.py": "9e8e0a51404aceae6c5ff5a83431d182b2fe0de1be28d38580732b0ba6ae986d",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_label_outliers.py": "4cdb5e3b8c48894eb0088a2f4f8ab09b2a3aa8d98bbea0407527a16770fc4423",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_make_split.py": "39d41a1387db101bde464dcd1b1cf4b646810cf3cf6cae4fe5a873feebdaefb5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_motion_model.py": "47e3575ee57a6fe7694cffcb0b2936a862ee79c0b720cbfc00961568ad5328f4",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_no_task_objects.py": "0125403a1c8aff8ea72e62a671777127288293ffebe1fdb5984d621168ee7db4",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_objects.py": "d66a19197491d9bdd1c48e423378f424df7dbcca2f5071b4272ff5dbc46e955a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_pilot.py": "1cc5022f54cfc3c288465384687a7d1d3d7c680a983c4d330af40e5cfbd0374e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_pilot_sco.py": "7bb805967901237d0bec8aa8b632a01141c4ef7ec54c70215f15c3d06c21c680",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_pilot_site.py": "54c4317153e0c3f3f1f09d2927331bc52b4539e0e8410633e4608b9dddc1836c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_r1_regression.py": "b6d9ed5da6774aa4bd558069ee5ad934601649560b3233869dec0668d0e19f5c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_referring_v2.py": "37b658eedcea405b06e08755b0194f83abd5a5acab05cc714fee4198f68bc73a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_replay_env.py": "2a5e576a7c0724e27e8f6982149461f4cdaa22da7d8c68718bb0742b332305e5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_rules_r6.py": "3d9d8b2c1e81b9ea7e46f66f6163941ddb247a82eade767d6e2f7db12ea48388",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_runtime_check.py": "68e6353ceb8c81223c9aa45f7fe9cd543392d16ddabccf805bc393216e0bf78a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_shard_sco.py": "cce20b2b6271fd4e846a3faea26bd9cd1042806110fd2c5b6f3450f59b9a31de",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_success_rules_r5.py": "247918825085e82d0e40fdde998d85c458f5ddf9c010a0a1b27f723838255bea",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_training_prep.py": "844317aae9ef7ce0d3854bf11a2df42dd4131446865a4ec40470803375217e68",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_viewer.py": "b2314d2dc393bda616e208e2a6f1b8b6e31f5d959eacfcf480c461eab464944b",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_visibility.py": "c7388b1672575c7f06b3d5029da072ba2898bb279ca32d9a3efa0d6f93a7dba1",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_walls_r6.py": "ab08c664f9be814179e824d3664ae8846817b818e6ff0eac27618b7b54658994",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/tests/test_work_budget.py": "186496bd9c37037cb257abcf2cb06628cdedb197eb0328fb93213fa5ad295943",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/gym_base_env.py": "62e820752a244df252f9a57c5d86a1f7ea2b5d74688a51e4484bf53800414aeb",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/gym_image_env.py": "89ab3991c8517e60eb25a90401d7a07260f5f7276a22e2ec9f598f40aba336ce",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/_compat.py": "6e86efbbaccf9146e40d29e8e417d7ecfb5137a988f76f968e760a315b394a16",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/canonical_task_metrics.py": "fe119aaf1860c73f289952d7d7eb8290df1e6403ddb130838f3add7dd82ab2e9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/canonical_task_metrics_v2.py": "8f324f1a1f01ef175409f7106b1f0b2e01243cbe14f7b8706c4e592e92f06640",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/collision_detector.py": "245974675a871a1f5c14fe8c38fbf5084b6a7dd02637d79933dcc60ac8e9c343",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/dataset_contract.py": "383649e76662d6353fb2b75140756f3026fbf840a8374619d57c546fad0b0b1c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/env.py": "45e480210ac089d1acd5cb629f860e9dae859813304faa8371ad7831d40c94a9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/env_config.py": "b36518e43440d74401cc89aed500c80e678547ae5bea9668956db76afd80a051",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/gs_io.py": "5a40698fa5abc8ad14d40ee55d2b0821e2394ff4f0b2f8d4e70016f5643f4c49",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/handler.py": "f3d523a0b34784a8d99b80ccbc8539396312a7cbbb4a2a409862a0123cbc6efe",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/prompt.py": "d544b4a83b0baaf198adc4f0b8c765a7ce2668384c6be5381f0de4ffd4be4802",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/r1_legacy.py": "7dc5116ccdca3a476bfe344d0b05ef5c240ba7de67e0644fd7da93ff76b12f8a",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/region_metrics.py": "3fee4e1be72ae83f494f48afc029a5fc31e338299237e47fca34502026a7bc52",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/reward_trace.py": "69beb22f7c1abe60a46b6a45e244418619f0cc6f279c7424e402293dba4b3b79",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/serve.py": "e92943a96dc5bc98bccc6e922050ec2aec50c59c7988a85e63d81d7f31a70a89",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/service.py": "752a75d9bab3ef4cd776658b817e6e52dbb607784344fc1f4c24280ce35d262d",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/spatial_potential_field.py": "5595931bd03f812728c98e3885b19c1f60fa6a0c9950bc3d7f1803be85fd3788",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/utils.py": "a8bcac3909bb61d381f8a9cbf4caebec68a01204feb0abb3c322f331042af5e8",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/visibility_checker.py": "5bb61eb606b9357cb76a628de722d8c05646220d7a57db614566909c0bbd4635",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/__init__.py": "6c0fc104480d7c64acb689dcbc750de68d24f5e834761f71b6b149cbfcae50b3",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/binary_utils.py": "3bfa5dd6e13718293b505eada0063c2d1138c2fbc04e9592e583e5089ba0fba5",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/gs_render_client.py": "2f22ce6e0f1e4741a92b4202715b5e83a20edac52c5d4f70c6bbd6bc9160633e",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/gs_render_local.py": "eed275dcaa3e31f2622e0ea434cb5a774dc8523f25f70d95cb80afa79bca6bc7",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/http_render_client.py": "273833051fd47ccf8da6021ed9ab7f0e83bc0e05e69c0000dc2226957fe784a1",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/simple_gs_render_server.py": "ac53444b5fd5ee35fe88ad535c66246f8180a9161006a069159811fc4ba289ed",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/unified_renderer.py": "4db21dcc3640729f0353e50729a9f2846dc69844241d9b0e5a2cde8a907a9d46",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/ws_client.py": "1d8cd717ab5aad321b21ad0c307917a385652c27fa0ab17915c85944349e5841",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/__init__.py": "785ac5baa2f5c9bd5b7f83eb0767c3de9508c0aed233e383e55f9d2206569332",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/handler.py": "fe7b39e7046a62419589f6b8677231d99466e0fa317f25d2da7af3826f628060",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/multipart.py": "5b3450144a335cb6311969cc20556e12a4c020a44c14f730951a195cb80526c8",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/pool.py": "4ec4d3ef70a6f1054e9cbed429fcf1e4baee2bf30bf9538d143ae3cd8c82a58c",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/service.py": "218fd44dfa2105cd393b94efcbaefb09596fc1d050ad2abd6660ed73af373826",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/vagen/envs/active_spatial/render/service_http/worker.py": "758d1ec715ebed4ae33ea2f7e81052625718443cc25d9a7ca28c65e050239a0d",
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_gen_20261014/split_manifest.json": "84565090e97d361bb1e9896833a2df3eee12f23d2158ccbecbf602f428fc1e41",
+    "/tmp/interiorgs_qa_cpu_v3.py": "2b6224a10d4122b9bcb90b0b4310d55544376df163b5a2414d877083cc6625e9",
+    "/tmp/interiorgs_qa_cpu_v3_snapshot/data_gen/interiorgs_v10/configs/no_task_objects_20261013.json": "9f0e6121c0f2a6a315b6fb0a267e4fbb06fa0bb1b810f02c1cce0c3f4e23d4fc"
+  },
+  "source_snapshot_unchanged": true,
+  "schema_caveats": [
+    "Raw eight-corner boxes include rotated OBBs; corner-pattern/orthogonality census reports recoverability. The reused v10 parser converts every box to AABB and loses that rotation. OBB axes still do not establish semantic front.",
+    "Room semantic types are absent unless counts explicitly show otherwise. Inferred types are heuristics, not annotated GT.",
+    "Occupancy JSON inspected only for schema; grid/image masks were not loaded.",
+    "Current commit snapshot uses face_visible_v3, while scene splits and existing trajectories remain the frozen r5 batch and object selection stays v10_r5. V3 includes structure-wall panels with door holes and curtains; visibility is still a box-based geometry proxy, not RGB identifiability."
+  ],
+  "count_caveats": [
+    "All counts are bounded CPU geometry candidates, not independent QA examples or validated images.",
+    "Counts reuse the same images/objects/pairs across capabilities and MUST NOT be summed into dataset size.",
+    "No successful question or answer text was created; candidate_objects was used only to audit existing referring-expression eligibility.",
+    "No scenes were replaced based on poor yield.",
+    "Existing R5 paths are short action certificates, not newly generated route-navigation/video questions.",
+    "Full-scene category count slots require every raw bounding-box instance in that category to be among sampled targets and geometrically visible; incomplete categories are not counted."
+  ],
+  "metadata_files_per_scene": {
+    "labels.json": 1000,
+    "occupancy.json": 1000,
+    "occupancy.png": 1000,
+    "structure.json": 1000
+  },
+  "capacity_layers": {
+    "precise_within_sampling": [
+      "visible_unique_targets",
+      "lateral_unique_pairs",
+      "depth_order_unique_pairs",
+      "aabb_size_unique_pairs",
+      "noncollinear_unique_triples",
+      "view_counts"
+    ],
+    "structural_upper_bounds_only": [
+      "metric_pair_structures",
+      "aabb_size_comparison_structures",
+      "room_polygons",
+      "inferred_typed_rooms",
+      "object_seen_from_ge2_positions",
+      "multiview_camera_pairs_ge1_anchor",
+      "multiview_camera_pairs_ge3_anchors",
+      "lateral_relation_flip_pairs",
+      "existing_r5_tasks",
+      "existing_r5_trajectory_ge2",
+      "existing_r5_trajectory_ge4"
+    ],
+    "not_estimated": [
+      "true_multiview_necessity",
+      "video_route_QA",
+      "appearance_order_QA",
+      "intrinsic_object_semantic_front",
+      "absolute_metric_scale_identifiability",
+      "RGB_identifiability",
+      "pixel_masks_or_depth_GT"
+    ]
+  },
+  "totals": {
+    "raw_bbox_objects": 6693,
+    "eligible_ref_targets": 441,
+    "sampled_positions": 467,
+    "sampled_targets": 336,
+    "sampled_views": 1868,
+    "visible_unique_targets": 201,
+    "lateral_unique_pairs": 202,
+    "depth_order_unique_pairs": 165,
+    "aabb_size_unique_pairs": 246,
+    "noncollinear_unique_triples": 261,
+    "object_seen_from_ge2_positions": 163,
+    "multiview_camera_pairs_ge3_anchors": 312,
+    "existing_r5_trajectory_ge2": 260,
+    "existing_r5_trajectory_ge4": 197,
+    "room_polygons": 145
+  },
+  "total_view_counts": {
+    "visible_object_view_slots": 1132,
+    "views_with_ge2_targets": 273,
+    "covisible_pair_view_slots": 983,
+    "lateral_pair_view_slots": 513,
+    "metric_object_pair_view_slots": 971,
+    "aabb_size_pair_view_slots": 812,
+    "depth_order_pair_view_slots": 411,
+    "views_with_ge3_targets": 129,
+    "vertical_pair_view_slots": 648,
+    "noncollinear_triple_view_slots": 609,
+    "full_scene_category_count_view_slots": 7
+  }
+}

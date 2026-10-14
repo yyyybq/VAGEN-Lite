@@ -1,0 +1,82 @@
+{
+  "0188_840119": {
+    "count": 3,
+    "full_ref_geometry_sha256": "458edf2206b87218cc346bb0c4e2f52e8445468367651f3a07fe6ea1a9c354e3"
+  },
+  "0190_840097": {
+    "count": 9,
+    "full_ref_geometry_sha256": "5f21f29e19a5435f06d3e1fa293178cfcc1f64183065ee8ac34416ec79714aac"
+  },
+  "0222_840246": {
+    "count": 58,
+    "full_ref_geometry_sha256": "5f458d23de37c5e930a3ec2aedc6d12236793fb207e6e021b073f466b05eba65"
+  },
+  "0393_840188": {
+    "count": 7,
+    "full_ref_geometry_sha256": "63f742ea49a8fd471725cf316f548d089db58a4ae85d5a8f6f2feb66210784f4"
+  },
+  "0404_840155": {
+    "count": 5,
+    "full_ref_geometry_sha256": "b266b940e7dadbe59b4305870bf409a4197086c88c4e33717184fcba0b3aa123"
+  },
+  "0418_840024": {
+    "count": 26,
+    "full_ref_geometry_sha256": "a1486108d85eb4af0fdeb7f3dfca5b74fe109c38b5c131b682a2adf63b527d8c"
+  },
+  "0449_840240": {
+    "count": 18,
+    "full_ref_geometry_sha256": "ab11b32404e38b6ca99309839951a549afc641f19471d6ad43762526b46b548c"
+  },
+  "0453_840431": {
+    "count": 27,
+    "full_ref_geometry_sha256": "e646645c40655a9ba1a097900f4024e120e2567b5892aaa59ab031cc8c752123"
+  },
+  "0550_840913": {
+    "count": 22,
+    "full_ref_geometry_sha256": "162a393f7247603858cde6fa2f39f40887c7c3b890971053b51d78c1dad5c07c"
+  },
+  "0556_840926": {
+    "count": 16,
+    "full_ref_geometry_sha256": "39e94dd8ca120058f596c1483908010b40b59adadc69a1957ad34257f7321886"
+  },
+  "0565_840943": {
+    "count": 17,
+    "full_ref_geometry_sha256": "a7c6b312572f48f6d2b06f648b68a6ed2a9cf9807dd8fee50f937e2f7947e1cc"
+  },
+  "0615_841191": {
+    "count": 52,
+    "full_ref_geometry_sha256": "a746e30e69304e0e5c1412811d9d4d644ab87a74dbb7d85e64bb7338c08ac2c4"
+  },
+  "0649_841461": {
+    "count": 33,
+    "full_ref_geometry_sha256": "0d17a026eec923714debf1d2bfd6d30fe40106410863a33ab07b26f3e84b3b47"
+  },
+  "0670_841489": {
+    "count": 19,
+    "full_ref_geometry_sha256": "16ac116aa293b097a122b6a9ee4fdb02b4225fb1c98127ba3208fe5d6453e3e4"
+  },
+  "0695_841526": {
+    "count": 19,
+    "full_ref_geometry_sha256": "41f9ef5a8f89da32e6042e7aa367c546c1bb04c24aa73a409bdacb3cfa4253dd"
+  },
+  "0756_840012": {
+    "count": 9,
+    "full_ref_geometry_sha256": "a4bcf3ee6664fe2871f8495e0fb6805f98d227f3597a6ecf3d132a755c77cf15"
+  },
+  "0813_841249": {
+    "count": 53,
+    "full_ref_geometry_sha256": "ae98c9c4b91d6cea09e38b545e264daed55dddcb0a2ae3663011827ca4808755"
+  },
+  "0866_841789": {
+    "count": 14,
+    "full_ref_geometry_sha256": "a13aa8ab3b16fa48b23431fb7c7d442de6b9b42a09a77a73aadc0cca01422158"
+  },
+  "0933_841849": {
+    "count": 19,
+    "full_ref_geometry_sha256": "12c292bfb67452323e2551ed84d8eeccfb271d1e0510143fcc7b39dd35b2d1ea"
+  },
+  "0985_841962": {
+    "count": 15,
+    "full_ref_geometry_sha256": "fcb522134acf31ceaf45b93a8b2f8c5c52928c7e3f8609660252650e6ea97450"
+  }
+}
