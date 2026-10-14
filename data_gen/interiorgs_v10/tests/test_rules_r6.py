@@ -198,6 +198,17 @@ class RunOptionsTest(unittest.TestCase):
                     self.assertEqual(e["ref"], e["ref_outside"])
         self.assertIn(R.METHOD_ROOM_LOCAL, seen)
 
+    def test_r6_config(self):
+        root = Path(__file__).resolve().parents[1] / "configs"
+        r5 = json.loads((root / "generation_r5_20261014.json").read_text(encoding="utf-8"))["run_config"]
+        r6 = json.loads((root / "generation_r6_20261014.json").read_text(encoding="utf-8"))["run_config"]
+        diff = {k for k in set(r5) | set(r6) if r5.get(k) != r6.get(k)}
+        self.assertEqual(diff, {"object_preset", "no_task_objects", "require_structure_walls",
+                                "oa_start_target_visible"})
+        self.assertEqual(r6["object_preset"], "v10_r6")
+        RunConfig(**r6)
+        self.assertTrue((Path(__file__).resolve().parents[3] / r6["no_task_objects"]).is_file())
+
 
 if __name__ == "__main__":
     unittest.main()
