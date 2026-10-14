@@ -272,7 +272,11 @@ V10_R5 = dataclasses.replace(
     V10_RELAXED, name="v10_r5", referring=ReferringConfig(rules="v2"),
     blacklist=LEGACY_BLACKLIST | frozenset({"wall panels", "wall panel", "edge combination"}))
 
-PRESETS: Dict[str, ObjectConfig] = {c.name: c for c in (V9_STRICT, V10_RELAXED, V9_NO_UNIQUE, V10_R5)}
+# 2026-10-14, round 6: referring rules v3 (a target that is the only one of its kind in the start's room is
+# just "the X"; stricter room types; referring.py module docstring).
+V10_R6 = dataclasses.replace(V10_R5, name="v10_r6", referring=ReferringConfig(rules="v3"))
+
+PRESETS: Dict[str, ObjectConfig] = {c.name: c for c in (V9_STRICT, V10_RELAXED, V9_NO_UNIQUE, V10_R5, V10_R6)}
 
 PresetLike = Union[str, ObjectConfig]
 

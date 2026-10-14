@@ -57,6 +57,21 @@ Same order (name, room, reference, size), with these changes:
   ``anchor_max_footprint_overlap`` of the smaller one), and the whole expression must still pick out
   exactly one object of the scene (``resolve``).  The target entry records the reference
   (``ref_anchor``) so the env can require it to be clearly visible in a success frame.
+
+Rules "v3" (user decisions of 2026-10-14 on the round-5 check page: "the camera is already in the living
+room, so 'in the living room' is not needed"; "the room has only one bed, 'next to ...' is not needed")
+-------------------------------------------------------------------------------------------------------
+* A name that is unique in the scene stays "the X".
+* Otherwise, if the target is the only X in its room, the expression is "the X" (``room_local``) and holds
+  only for a start inside that room from which no other X can be recognised; for any other start the
+  task uses the room form "the X in the R" (``ref_outside``, v2 rule) or, when room types cannot tell the
+  rooms apart, that start is not used (``start_context.start_refs``).  The entry records the room
+  (``ref_room``) and the other X instances (``ref_confusers``).
+* Otherwise reference ("next to the A") or size, as in v2.
+* Room types (``infer_room_type_v3``): only a toilet, bathtub or shower makes a bathroom by itself (a
+  washbasin or vanity cabinet only when nothing of another room type stands there), and a room that also
+  holds what another room type has (a sofa, a dining table or a desk in a "bathroom"; a dining table or a
+  sofa in a kitchen; a dining table in a bedroom) gets no type.
 """
 
 from __future__ import annotations
@@ -215,6 +230,7 @@ METHOD_UNIQUE = "unique_label"
 METHOD_ROOM = "room"
 METHOD_ANCHOR = "anchor"
 METHOD_SIZE = "size"
+METHOD_ROOM_LOCAL = "room_local"  # v3: "the X", the only X in the start's room
 
 
 @dataclasses.dataclass(frozen=True)
@@ -222,7 +238,7 @@ class ReferringConfig:
     """Thresholds of the referring-expression generator (all sweepable)."""
 
     methods: Tuple[str, ...] = (METHOD_UNIQUE, METHOD_ROOM, METHOD_ANCHOR, METHOD_SIZE)
-    rules: str = "v1"                    # "v1" (20261011c - 20261013) | "v2" (see module docstring)
+    rules: str = "v1"                    # "v1" (20261011c - 20261013) | "v2" | "v3" (module docstring)
     # v2 only: reference objects ------------------------------------------------
     anchor_min_face_m2: float = 0.25     # largest box face (two largest dims) of a reference
     anchor_max_footprint_overlap: float = 0.10  # shared XY footprint / the smaller footprint
@@ -337,6 +353,40 @@ def infer_room_type(displays: Sequence[str]) -> Optional[str]:
     return None
 
 
+# v3: only fixtures nobody puts elsewhere make a bathroom by themselves; a washbasin or vanity cabinet also
+# stands in halls and dressing areas.
+ROOM_STRONG_ITEMS_V3: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("bathroom", ("closestool", "toilet", "squat toilet", "bathtub", "shower")),
+    ("kitchen", ("gas stove", "range hood", "cooktop", "kitchen counter")),
+    ("bedroom", ("bed",)),
+)
+ROOM_WEAK_ITEMS_V3: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("bathroom", ("washbasin", "vanity cabinet")),
+    ("living room", ("sofa",)),
+    ("dining room", ("dining table",)),
+    ("study", ("desk",)),
+)
+# weak types a room of a strong type may also hold (a bedroom with a desk or a sofa is still a bedroom)
+_ROOM_ALLOWED_WEAK_V3 = {"bathroom": frozenset({"bathroom"}), "kitchen": frozenset(),
+                         "bedroom": frozenset({"study", "living room"})}
+
+
+def infer_room_type_v3(displays: Sequence[str]) -> Optional[str]:
+    """v3 room type from the display labels of the objects in one room, or None (mixed or unknown)."""
+    strong = [rtype for rtype, items in ROOM_STRONG_ITEMS_V3 if _has_item(displays, items)]
+    weak = {rtype for rtype, items in ROOM_WEAK_ITEMS_V3 if _has_item(displays, items)}
+    if len(strong) > 1:
+        return None
+    if strong:
+        return None if weak - _ROOM_ALLOWED_WEAK_V3[strong[0]] else strong[0]
+    if "bathroom" in weak and len(weak) > 1:
+        return None
+    for rtype, _ in ROOM_WEAK_ITEMS_V3:
+        if rtype in weak:
+            return rtype
+    return None
+
+
 def _label_usable(disp: str) -> bool:
     """A display label can head an expression only if it is non-empty, has no
     viewpoint word and cannot be confused with the expression grammar."""
@@ -428,14 +478,15 @@ class _SceneIndex:
                 r = self.room_of(i)
                 if r is not None:
                     shown.setdefault(int(r), []).append(self.disp[i])
-            self._inferred = {r: infer_room_type(d) for r, d in shown.items()}
+            infer = infer_room_type_v3 if self.cfg.rules == "v3" else infer_room_type
+            self._inferred = {r: infer(d) for r, d in shown.items()}
         return self._inferred
 
     def rtype_of(self, i: int) -> Optional[str]:
         idx = self.room_of(i)
         if idx is None or idx not in self.rooms_by_index:
             return None
-        if self.cfg.rules == "v2":
+        if self.cfg.rules in ("v2", "v3"):
             return self.inferred_room_types().get(int(idx))
         return room_type(getattr(self.rooms_by_index[idx], "name", None))
 
@@ -494,7 +545,7 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
     an instance that ended without a ref).
     """
     cfg = config or DEFAULT_REFERRING
-    if cfg.rules not in ("v1", "v2"):
+    if cfg.rules not in ("v1", "v2", "v3"):
         raise ValueError(f"unknown referring rules {cfg.rules!r}")
     funnel = Funnel()
     pool = list(scene.objects if pool is None else pool)
@@ -516,7 +567,7 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
             continue
         if float(a.aabb_min[2]) > cfg.anchor_max_bottom_z_m:
             continue
-        if cfg.rules == "v2":
+        if cfg.rules in ("v2", "v3"):
             if _largest_face(a) < cfg.anchor_min_face_m2:
                 funnel.add("referring.anchor_pool", "too_small")
                 continue
@@ -532,7 +583,7 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
 
     for obj in objs:
         obj.ref, obj.ref_method = None, None
-        if cfg.rules == "v2":
+        if cfg.rules in ("v2", "v3"):
             obj.ref_extra = None
         t = id_index[obj.id]
         disp = idx.disp[t]
@@ -549,11 +600,13 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
                     ref = (f"the {disp}", METHOD_UNIQUE)
                 else:
                     details.append("unique:duplicate_category")
+            elif method == METHOD_ROOM and cfg.rules == "v3":
+                ref = _try_room_local(idx, t, disp, members, details)
             elif method == METHOD_ROOM:
                 ref = (_try_room_v2 if cfg.rules == "v2" else _try_room)(idx, t, disp, members, details)
             elif method == METHOD_ANCHOR:
-                ref = (_try_anchor_v2 if cfg.rules == "v2" else _try_anchor)(idx, t, disp, members, anchors,
-                                                                             details)
+                ref = (_try_anchor_v2 if cfg.rules in ("v2", "v3") else _try_anchor)(idx, t, disp, members,
+                                                                                     anchors, details)
             elif method == METHOD_SIZE:
                 ref = _try_size(idx, t, disp, members, details, reference_ok)
             else:
@@ -569,10 +622,12 @@ def assign_referring_expressions(scene: Any, objs: Sequence[Obj],
         if has_viewpoint_word(text):  # cannot happen: labels are pre-checked
             raise AssertionError(f"viewpoint word in referring expression {text!r}")
         obj.ref, obj.ref_method = text, method_used
-        if cfg.rules == "v2":
-            anchor = idx.pool[ref[2]] if len(ref) > 2 else None
+        if cfg.rules in ("v2", "v3"):
+            anchor = idx.pool[ref[2]] if len(ref) > 2 and ref[2] is not None else None
             obj.ref_extra = {"ref_method": method_used,
                              "ref_anchor": _anchor_entry(anchor) if anchor is not None else None}
+            if len(ref) > 3:
+                obj.ref_extra.update(ref[3])
         funnel.add("referring", method_used)
     return funnel
 
@@ -641,6 +696,22 @@ def _try_room_v2(idx: "_SceneIndex", t: int, disp: str, members: Sequence[int],
         return None
     prep = ROOM_PREPOSITION.get(rtype, "in")
     return (f"the {disp} {prep} the {rtype}", METHOD_ROOM)
+
+
+def _try_room_local(idx: "_SceneIndex", t: int, disp: str, members: Sequence[int],
+                    details: List[str]) -> Optional[Tuple[str, str, None, Dict[str, Any]]]:
+    """v3: "the X" for the only X in its room; the room form for starts outside it (when room types tell)."""
+    room = idx.room_of(t)
+    if room is None:
+        details.append("room_local:outside_rooms")
+        return None
+    if [i for i in members if idx.room_of(i) == room] != [t]:
+        details.append("room_local:not_unique_in_room")
+        return None
+    outside = _try_room_v2(idx, t, disp, members, [])
+    return (f"the {disp}", METHOD_ROOM_LOCAL, None,
+            {"ref_room": int(room), "ref_outside": outside[0] if outside else None,
+             "ref_confusers": [str(idx.pool[i].id) for i in members if i != t]})
 
 
 def _try_anchor_v2(idx: "_SceneIndex", t: int, disp: str, members: Sequence[int],

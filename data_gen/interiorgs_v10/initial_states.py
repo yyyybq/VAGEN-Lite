@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
+from . import start_context
 from .contract import ACTIONS, INVERSE_ACTION, MAX_PRIMITIVE_STEPS, WORK, Funnel, Obj, yaw_of
 from .difficulty import (
     ACTION_INDEX,
@@ -224,7 +225,8 @@ class ItemSearch:
                  diversity_deg: float = 30.0, require_terminal_identifiable: bool = True,
                  require_generator_safe_certificate: bool = False, funnel: Optional[Funnel] = None,
                  item_key: Any = None, max_examined: int = 1500, max_terminal_checks: int = 24,
-                 terminal_roles: Optional[Sequence[int]] = None, runtime_success_fn: Any = None) -> None:
+                 terminal_roles: Optional[Sequence[int]] = None, runtime_success_fn: Any = None,
+                 oa_start_target_visible: bool = False) -> None:
         self.scene, self.item = scene, item
         self.bands = [tuple(int(v) for v in b) for b in bands]
         self.d_max = max(hi for _, hi in self.bands)
@@ -248,6 +250,10 @@ class ItemSearch:
         self.funnel = funnel if funnel is not None else Funnel()
         self.item_key = item_key
         self.targets = item_targets(scene, item)
+        # 2026-10-14 (start_context.py): occlusion alignment starts with its target visible; descriptions
+        # of targets named after their room ("room_local") depend on the start
+        self.oa_start_visible = bool(oa_start_target_visible)
+        self.start_dependent_refs = start_context.has_room_local(item)
         # targets that must be identifiable in the terminal frame (default: all of them)
         self.terminal_targets = (self.targets if terminal_roles is None
                                  else [self.targets[i] for i in terminal_roles if i < len(self.targets)])
@@ -454,6 +460,13 @@ class ItemSearch:
         if obs["n_identifiable"] < 1:
             self._cand("no_target_identifiable")
             return None
+        if self.oa_start_visible and not start_context.oa_target_visible(self.item, obs):
+            self._cand("oa_target_not_visible_at_start")
+            return None
+        refs = start_context.start_refs(self.scene, self.item, c2w, self.obs_fn) if self.start_dependent_refs else {}
+        if refs is None:
+            self._cand("target_not_describable_from_start")
+            return None
         # explicit reverse path -> forward hint
         hint: List[str] = []
         node = i
@@ -543,6 +556,8 @@ class ItemSearch:
             "endpoint_index": endpoint_index if cert["certificate_source"] == "hint" else None,
             "certify_seconds": float(dt),
         }
+        if refs:
+            ep["target_refs"] = refs
         if needs.get(band, 0) > 0:
             needs[band] -= 1
             self.accepted.append(ep)

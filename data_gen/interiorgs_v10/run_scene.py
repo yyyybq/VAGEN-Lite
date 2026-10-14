@@ -71,6 +71,11 @@ class RunConfig:
     # object clearly visible, the 45-degree left/right rule) for success, start-frame and final-frame checks
     # alike.  "face_v1" is the 2026-10-13 name of "env" (that config no longer reproduces exactly).
     visibility_rule: str = "box_v1"
+    # 2026-10-14, round 6 (off by default; generation_r6_20261014.json turns them on):
+    # scenes whose structure.json has no walls (outdoor areas, open halls) get no tasks; occlusion alignment
+    # starts with its hidden target clearly visible (start_context.py).
+    require_structure_walls: bool = False
+    oa_start_target_visible: bool = False
 
 
 _IGNORED_CACHE: Dict[str, Dict[str, List[str]]] = {}
@@ -204,7 +209,10 @@ def _endpoints_for(scene: Any, item: Dict[str, Any], cfg: RunConfig, funnel: Fun
 
 
 def _task_row(scene: Any, item: Dict[str, Any], ep: Dict[str, Any]) -> Dict[str, Any]:
+    from .start_context import apply_refs
+
     row = json.loads(json.dumps(_jsonable(item)))
+    apply_refs(row, ep.get("target_refs"))  # referring rules v3: the start decides "the X" or its room form
     row["init_camera"] = {"intrinsics": C.NATIVE_K, "extrinsics": _jsonable(ep["init_c2w"])}
     row["difficulty"] = _jsonable(ep["difficulty"])
     row["initial_observability"] = _jsonable(ep.get("initial_observability"))
@@ -306,6 +314,11 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
         summary["convention"] = {k: _jsonable(v) for k, v in conv.items()
                                  if k in ("sign", "status", "usable", "conflict_with_v1", "env_override_required")}
         t = _tick("load", t)
+        if cfg.require_structure_walls and not getattr(scene.detector, "occlusion_walls", None):
+            funnel.add("scene", "no_structure_walls")
+            summary.update(status="no_structure_walls", n_tasks=0, tasks_by_type={}, tasks_by_d_star={},
+                           seconds=round(time.perf_counter() - t0, 2))
+            return {"rows": rows, "funnel": funnel.to_dict(), "summary": summary, "timings": timings}
         if cfg.require_usable_convention and not conv.get("usable", conv.get("status") == "frozen"):
             funnel.add("scene", "convention_unusable")
             summary.update(status="convention_unusable", n_tasks=0, tasks_by_type={}, tasks_by_d_star={},
@@ -370,7 +383,9 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
                                                  family_quotas=cfg.family_quotas, reserve_k=cfg.reserve_k,
                                                  terminal_identifiable=cfg.terminal_identifiable,
                                                  soft_max=cfg.family_quota_soft_max,
-                                                 runtime_success_check=cfg.runtime_success_check)
+                                                 runtime_success_check=cfg.runtime_success_check,
+                                                 **({"oa_start_target_visible": True}
+                                                    if cfg.oa_start_target_visible else {}))
         funnel.merge(f)
         t = _tick("episodes", t)
         if work_mode:

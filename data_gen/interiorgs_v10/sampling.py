@@ -22,6 +22,14 @@ from .contract import (
 )
 
 
+def projective_description(a_ref: str, b_ref: str, relation: str) -> str:
+    return f"Move so that {a_ref} appears to the {relation} of {b_ref} in your view."
+
+
+def fov_description(a_ref: str, b_ref: str) -> str:
+    return f"Move so that both {a_ref} and {b_ref} are fully inside your view."
+
+
 def projective_item(scene_id: str, obj_a: Obj, obj_b: Obj, relation: str,
                     init_c2w: Optional[np.ndarray] = None) -> Dict[str, Any]:
     """Canonical v1 Projective item: 'A appears to the <relation> of B'."""
@@ -32,7 +40,7 @@ def projective_item(scene_id: str, obj_a: Obj, obj_b: Obj, relation: str,
     return {
         "scene_id": scene_id,
         "task_type": "projective_relations",
-        "task_description": f"Move so that {a_ref} appears to the {relation} of {b_ref} in your view.",
+        "task_description": projective_description(a_ref, b_ref, relation),
         "target_object": {"objects": [obj_a.target_object_entry(), obj_b.target_object_entry()]},
         "target_region": {
             "type": "projective",
@@ -59,7 +67,7 @@ def fov_item(scene_id: str, obj_a: Obj, obj_b: Obj, init_c2w: Optional[np.ndarra
     item = projective_item(scene_id, obj_a, obj_b, "left", init_c2w)
     item.update({
         "task_type": "fov_inclusion",
-        "task_description": f"Move so that both {a_ref} and {b_ref} are fully inside your view.",
+        "task_description": fov_description(a_ref, b_ref),
     })
     item["target_region"] = {
         "type": "fov",
