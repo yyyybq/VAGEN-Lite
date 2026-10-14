@@ -257,6 +257,25 @@ def _format_block(policy: Mapping[str, Any], first: bool) -> str:
     return fn(max_actions_per_step=exp["max_actions_per_turn"], action_sep="|", add_example=first)
 
 
+def runtime_poses(raw_row: Mapping[str, Any]) -> List[np.ndarray]:
+    """The camera pose after each action of the certificate, as the RL env computes it (its ViewManipulator).
+
+    The generator's own replica (``certificate_poses``) agrees up to float rounding; a value such as -1e-15
+    then prints as "-0.00" in one and "0.00" in the other (round 7: 6 of 70 later turns).  The pose line of
+    the SFT conversations is built from these poses so it matches the env character for character."""
+    from vagen.envs.active_spatial.utils import ViewManipulator
+
+    from .contract import STEP_ROTATION_DEG, STEP_TRANSLATION_M
+
+    vm = ViewManipulator(step_translation=STEP_TRANSLATION_M, step_rotation_deg=STEP_ROTATION_DEG, world_up_axis="Z")
+    vm.reset(np.asarray(raw_row["init_camera"]["extrinsics"], dtype=np.float64))
+    poses = [vm.get_pose()]
+    for a in certificate(raw_row):
+        vm.step(a)
+        poses.append(vm.get_pose())
+    return poses
+
+
 def pose_line(c2w: Any) -> str:
     """The RL env's "Current camera pose" observation line for a camera-to-world pose."""
     from vagen.envs.active_spatial.utils import c2w_extrinsic_to_se3, format_pose6_deg
@@ -338,13 +357,14 @@ def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], poli
     if terminal is None or not bool(terminal.get("success")):
         return None, "sft_terminal_not_successful"
     desc = str(raw_row.get("task_description") or "").strip()
+    shown = runtime_poses(raw_row)  # the pose lines exactly as the env prints them
     conv: List[Dict[str, Any]] = [{"role": "system", "content": protocol_system_prompt(str(raw_row["task_type"]), policy)}]
     for t, chunk in enumerate(chunks):
-        conv.append({"role": "user", "content": _user_turn(desc, t == 0, policy, poses[bounds[t]]),
+        conv.append({"role": "user", "content": _user_turn(desc, t == 0, policy, shown[bounds[t]]),
                      "image_path": frame[bounds[t]]})
         conv.append({"role": "assistant", "content": "<action>" + "".join(a + "|" for a in chunk) + "</action>"})
     if exp.get("explicit_done"):
-        conv.append({"role": "user", "content": _user_turn(desc, False, policy, poses[d]), "image_path": frame[d]})
+        conv.append({"role": "user", "content": _user_turn(desc, False, policy, shown[d]), "image_path": frame[d]})
         conv.append({"role": "assistant", "content": "<action>done|</action>"})
     turn_images = [str(t["image_path"]) for t in conv if t["role"] == "user"]
     image_paths = list(turn_images)
