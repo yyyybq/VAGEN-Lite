@@ -276,11 +276,13 @@ def runtime_poses(raw_row: Mapping[str, Any]) -> List[np.ndarray]:
     return poses
 
 
-def pose_line(c2w: Any) -> str:
-    """The RL env's "Current camera pose" observation line for a camera-to-world pose."""
+def pose_line(c2w: Any, normalize_zero: bool = False) -> str:
+    """The RL env's "Current camera pose" observation line for a camera-to-world pose (``normalize_zero``: the env
+    setting pose_normalize_negative_zero)."""
     from vagen.envs.active_spatial.utils import c2w_extrinsic_to_se3, format_pose6_deg
 
-    return "Current camera pose: " + format_pose6_deg(c2w_extrinsic_to_se3(np.asarray(c2w, dtype=float)))
+    return "Current camera pose: " + format_pose6_deg(c2w_extrinsic_to_se3(np.asarray(c2w, dtype=float)),
+                                                      normalize_zero=normalize_zero)
 
 
 def _user_turn(desc: str, first: bool, policy: Mapping[str, Any], pose: Any = None) -> str:
@@ -291,7 +293,7 @@ def _user_turn(desc: str, first: bool, policy: Mapping[str, Any], pose: Any = No
     if mode == "runtime":
         if pose is None:
             raise ValueError("observation_pose='runtime' needs the turn's camera pose")
-        observation = "<image>\n" + pose_line(pose)
+        observation = "<image>\n" + pose_line(pose, bool(exp.get("pose_normalize_negative_zero", False)))
     elif mode == "none":
         observation = "<image>"
     else:

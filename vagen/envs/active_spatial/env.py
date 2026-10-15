@@ -2007,7 +2007,7 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Get current pose info
         current_pose = c2w_extrinsic_to_se3(self.view_engine.get_pose())
-        pose_str = format_pose6_deg(current_pose)
+        pose_str = format_pose6_deg(current_pose, normalize_zero=bool(self.config.get("pose_normalize_negative_zero", False)))
         
         # Render the current view image
         rendered_image = self._render_image()
@@ -2115,7 +2115,7 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Get current pose info
         current_pose = c2w_extrinsic_to_se3(self.view_engine.get_pose())
-        pose_str = format_pose6_deg(current_pose)
+        pose_str = format_pose6_deg(current_pose, normalize_zero=bool(self.config.get("pose_normalize_negative_zero", False)))
         
         # Build task prompt if not provided
         if not task_prompt and init_obs and self.current_item:

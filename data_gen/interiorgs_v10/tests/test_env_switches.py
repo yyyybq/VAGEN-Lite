@@ -135,5 +135,17 @@ class EnvSwitchTest(unittest.TestCase):
             self.assertEqual(old.replace(feedback(old), ""), new.replace(feedback(new), ""))  # the rest is identical
 
 
+    def test_pose_zero_sign_setting_reaches_the_pose_line(self):
+        """Next data version: pose_normalize_negative_zero is passed to the pose formatter (off by default)."""
+        from vagen.envs.active_spatial.utils import format_pose6_deg
+
+        for setting in (False, True):
+            with mock.patch("vagen.envs.active_spatial.env.format_pose6_deg", wraps=format_pose6_deg) as fmt:
+                env = self.env(self.rows[0], f"pose{setting}", pose_normalize_negative_zero=setting)
+                RC.step(env, answer(["turn_left"]))
+            self.assertTrue(fmt.call_args_list)
+            self.assertEqual({c.kwargs.get("normalize_zero") for c in fmt.call_args_list}, {setting})
+
+
 if __name__ == "__main__":
     unittest.main()

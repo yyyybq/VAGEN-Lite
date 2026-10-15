@@ -201,6 +201,9 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     action_sep: str = "|"  # Separator for multiple actions
     image_placeholder: str = "<image>"  # Placeholder for image in prompt
     use_task_description: bool = True  # Prefer dataset task_description over generic preset text
+    # Round 9 (next data version; default off): print a pose value that rounds to zero as "0.00", never "-0.00"
+    # (the SFT export option of the same name must match).
+    pose_normalize_negative_zero: bool = False
     enable_occlusion_task_guidance: bool = False  # Add occlusion-specific strategy text to the Task line (off: privileged hints)
     enable_occlusion_occluder_hint: bool = False  # Add occluder relative direction/distance from the live pose (off: privileged)
     # Success rule.  Default: the canonical metric AND every target the task needs is clearly visible

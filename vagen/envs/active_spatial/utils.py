@@ -245,9 +245,13 @@ def c2w_se3_to_extrinsic(pose6_deg: Sequence[float]) -> np.ndarray:
     return E
 
 
-def format_pose6_deg(p: List[float]) -> str:
-    """Format 6-DoF pose for display."""
+def format_pose6_deg(p: List[float], normalize_zero: bool = False) -> str:
+    """Format 6-DoF pose for display.  ``normalize_zero`` (round 9, default off): a value that rounds to zero is
+    printed without a sign ("0.00", not "-0.00"); float noise such as -1e-15 otherwise flips the sign."""
     tx, ty, tz, rx, ry, rz = p
+    if normalize_zero:
+        tx, ty, tz = (round(float(v), 4) + 0.0 for v in (tx, ty, tz))
+        rx, ry, rz = (round(float(v), 2) + 0.0 for v in (rx, ry, rz))
     return f"[tx={tx:.4f}, ty={ty:.4f}, tz={tz:.4f}, rx={rx:.2f}°, ry={ry:.2f}°, rz={rz:.2f}°]"
 
 
