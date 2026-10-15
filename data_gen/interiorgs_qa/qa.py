@@ -33,7 +33,9 @@ def _opts(options: Sequence[str], fmt: str, sep: str) -> str:
     return sep.join(fmt.format(L=LETTERS[i], o=o) for i, o in enumerate(options))
 
 
-STYLES: Dict[str, Callable[[str, Sequence[str]], str]] = {
+# version 1 (2026-10-14): the 240 sample questions and the first bank trials were rendered with these; kept so
+# that render() can recover a stored question's wording and re-render it with the current layouts
+LEGACY_STYLES: Dict[str, Callable[[str, Sequence[str]], str]] = {
     # BLINK prompt field: "...\nSelect from the following choices.\n(A) x\n(B) y"
     "blink": lambda q, o: q + "\nSelect from the following choices.\n" + _opts(o, "({L}) {o}", "\n"),
     "blink_options": lambda q, o: q + " Select from the following options.\n" + _opts(o, "({L}) {o}", "\n"),
@@ -64,6 +66,61 @@ STYLES: Dict[str, Callable[[str, Sequence[str]], str]] = {
 }
 
 
+# version 2 (2026-10-15, user decision 1): every "orig" layout is the prompt scripts/easi_eval.py actually sends
+# (EASI v0.2.2 runner -> lmms-eval tasks in third_party/lmms-eval/lmms_eval/tasks: vsibench_multiimage, mmsi_bench,
+# mindcube_tiny, viewspatial, blink, 3dsrbench_circular, embspatial), answer-format instruction included; the held-out
+# wording ends with one uniform instruction; the training wordings are unchanged.
+PROMPT_VERSION = 2
+MINDCUBE_HEADER = ("[Task]\nYour task is to analyze the spatial arrangement of objects in the scene by examining the provided "
+                   "images, which show the scene from different viewpoints.\n[Answer Instruction]\nYou only need to provide "
+                   "*ONE* correct answer selecting from the options listed below. For example, if you think the correct answer "
+                   "is 'A. Above' from 'A. Above B. Under C. Front D. Behind', your response should **only** be "
+                   "'<answer>A. Above</answer>'.\n\n[Question]\n")
+HELD_OUT_MC = "Answer with the option's letter only."
+HELD_OUT_NUM = "Answer with a number only."
+
+
+def _blink_note(o: Sequence[str]) -> str:
+    # lmms-eval blink: pre_prompt "Note: You only need to respond with {} without providing any additional
+    # information.\n" formatted with the choice letters, followed by BLINK's own prompt field
+    return ("Note: You only need to respond with " + ", ".join(LETTERS[i] for i in range(len(o)))
+            + " without providing any additional information.\n")
+
+
+STYLES: Dict[str, Callable[[str, Sequence[str]], str]] = {
+    # BLINK (blink_doc_to_text): note + prompt field "...\nSelect from the following choices.\n(A) x\n(B) y"
+    "blink": lambda q, o: _blink_note(o) + q + "\nSelect from the following choices.\n" + _opts(o, "({L}) {o}", "\n"),
+    "blink_options": lambda q, o: _blink_note(o) + q + " Select from the following options.\n" + _opts(o, "({L}) {o}", "\n"),
+    # VSI-Bench (vsibench_doc_to_text, default kwargs): the same as version 1
+    "vsi_mc": lambda q, o: "These are frames of a video.\n" + q + "\nOptions:\n" + _opts(o, "{L}. {o}", "\n")
+    + "\nAnswer with the option's letter from the given choices directly.",
+    "vsi_na": lambda q, o: "These are frames of a video.\n" + q + "\nPlease answer the question using a single word or phrase.",
+    # MMSI-Bench (msr_doc_to_text): question field with the options inline, then the post_prompt
+    "mmsi": lambda q, o: q + "\nOptions: " + _opts(o, "{L}: {o}", ", ")
+    + "\nAnswer with the option's letter from the given choices directly. Enclose the option's letter within ``.",
+    # MindCube (mindcube_doc_to_text returns the dataset's input_prompt): one fixed header, then the question
+    "mindcube": lambda q, o: MINDCUBE_HEADER + q + " " + _opts(o, "{L}. {o}", " "),
+    # 3DSRBench (3dsrbench_circular doc_to_text, default post_prompt)
+    "3dsr": lambda q, o: "Question: " + q + "\nOptions:\n" + "".join(f"{LETTERS[i]}. {x}\n" for i, x in enumerate(o))
+    + "Please select the correct answer from the options above. \n",
+    # ViewSpatial-Bench (viewspatial_doc_to_text): choices field is "A. x\nB. y"
+    "viewspatial": lambda q, o: "Question: " + q + "\nChoices: " + _opts(o, "{L}. {o}", "\n")
+    + "\nReply only to the corresponding option.\nAnswer:",
+    # EmbSpatial-Bench (embspatial_doc_to_text): fixed note, question, "A) x" lines
+    "embspatial": lambda q, o: ("Note: You only need to respond with A, B, C, D without providing any additional "
+                                "information.\n") + q + "\n" + _opts(o, "{L}) {o}", "\n"),
+    # training layouts (unchanged)
+    "t_paren": lambda q, o: q + "\n" + _opts(o, "({L}) {o}", "\n") + "\nAnswer with the letter.",
+    "t_dot": lambda q, o: q + "\nChoices: " + _opts(o, "{L}. {o}", "; ") + ".\nRespond with one letter.",
+    "t_colon": lambda q, o: q + "\n" + _opts(o, "{L}: {o}", "\n"),
+    # held-out layout: the uniform instruction replaces version 1's "Give only the option letter."
+    "h_inline": lambda q, o: q + " Pick one -- " + _opts(o, "option {L} is \"{o}\"", ", ") + ".\n" + HELD_OUT_MC,
+    # numeric answers
+    "num": lambda q, o: q + "\nAnswer with a single number.",
+    "num_h": lambda q, o: q + "\n" + HELD_OUT_NUM,
+}
+
+
 @dataclasses.dataclass
 class Phrasing:
     question: Any                         # str.format template (or a list of them) over the question's fields
@@ -91,7 +148,8 @@ def build_variants(families: Dict[str, Phrasing], fields: Dict[str, Any], option
         q = qt.format(**fields)
         if numeric or option_keys is None:
             text = STYLES[phr.style](q, [])
-            out[fam] = {"family": fam, "text": text, "options": None, "answer": str(answer_key), "style": phr.style}
+            out[fam] = {"family": fam, "text": text, "options": None, "answer": str(answer_key), "style": phr.style,
+                        "prompt_version": PROMPT_VERSION}
             continue
         keys = list(option_keys)
         if fam == "orig" and keep_orig_order is not None:
@@ -102,8 +160,52 @@ def build_variants(families: Dict[str, Phrasing], fields: Dict[str, Any], option
         idx = keys.index(answer_key)
         out[fam] = {"family": fam, "text": STYLES[phr.style](q, opts), "options": opts,
                     "option_keys": [str(k) for k in keys], "answer": LETTERS[idx], "answer_text": opts[idx],
-                    "style": phr.style}
+                    "style": phr.style, "prompt_version": PROMPT_VERSION}
     return out
+
+
+def _stem(text: str, style: str, options: Sequence[str], styles: Dict[str, Callable]) -> Optional[str]:
+    """The question sentence inside a rendered prompt (the layout is applied around it)."""
+    mark = "\x00STEM\x00"
+    pre, suf = styles[style](mark, list(options or [])).split(mark)
+    if text.startswith(pre) and text.endswith(suf) and len(text) >= len(pre) + len(suf):
+        return text[len(pre):len(text) - len(suf)]
+    return None
+
+
+def render(q: Dict[str, Any], fam: str, options: Optional[Sequence[str]] = None) -> str:
+    """The prompt of one wording of a stored question in the current layouts (version 2), whichever version it was
+    stored with; ``options`` re-renders it with another option order (circular evaluation)."""
+    v = q["variants"][fam]
+    opts = list(options) if options is not None else list(v.get("options") or [])
+    if v.get("prompt_version") == PROMPT_VERSION and options is None:
+        return v["text"]
+    styles = STYLES if v.get("prompt_version") == PROMPT_VERSION else LEGACY_STYLES
+    stem = _stem(v["text"], v["style"], v.get("options") or [], styles)
+    if stem is None:
+        raise ValueError(f"cannot recover the question of {q.get('qid')} / {fam} (style {v['style']})")
+    return STYLES[v["style"]](stem, opts)
+
+
+def answer_target(q: Dict[str, Any], fam: str, letter: Optional[str] = None,
+                  options: Optional[Sequence[str]] = None) -> str:
+    """The training answer, written the way the wording's instruction asks for it: MindCube's
+    '<answer>A. text</answer>', MMSI's letter in backticks, ViewSpatial's option line 'A. text' (the form of its
+    answer field), otherwise the option letter; numeric questions: the number."""
+    v = q["variants"][fam]
+    if q["answer_type"] == "numeric" or not v.get("options"):
+        return str(v["answer"])
+    letter = letter or v["answer"]
+    opts = list(options) if options is not None else list(v["options"])
+    text = opts[LETTERS.index(letter)]
+    style = v["style"]
+    if style == "mindcube":
+        return f"<answer>{letter}. {text}</answer>"
+    if style == "mmsi":
+        return f"`{letter}`"
+    if style == "viewspatial":
+        return f"{letter}. {text}"
+    return letter
 
 
 # =============================================================================

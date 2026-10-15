@@ -28,12 +28,13 @@ import argparse
 import json
 import math
 import statistics
-import time
 from collections import defaultdict
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .export_lf import image_path, load_runs, load_selection
+from .qa import render
 from .scoring import circular_variants, score
 
 CIRCULAR = ("MMSI-Bench", "3DSRBench")
@@ -84,7 +85,7 @@ def build_requests(items, families: Sequence[str], res: int) -> List[Dict[str, A
         for fam in families:
             if fam not in q["variants"]:
                 continue
-            rots = circular_variants(q, fam) if q["benchmark"] in CIRCULAR else [(q["variants"][fam]["text"],
+            rots = circular_variants(q, fam) if q["benchmark"] in CIRCULAR else [(render(q, fam),
                                                                                  q["variants"][fam]["answer"])]
             for r, (text, ans) in enumerate(rots):
                 reqs.append({"qid": q["qid"], "family": fam, "rotation": r, "text": text, "answer": ans,
@@ -176,10 +177,103 @@ def summarise(questions: Dict[str, Dict[str, Any]], reqs: List[Dict[str, Any]]) 
             rs = [r for r in rows if r["res"] == res and r["family"] == fam]
             k = f"res{res}/{fam}"
             summary[k] = {"all": block(rs),
+                          "official": official_merge(rs),
                           "by_group": {g: block([r for r in rs if r["group"] == g]) for g in sorted({r["group"] for r in rs},
                                        key=lambda x: (x[0] != "S", x[0] != "M", int(x[1:])))},
                           "by_benchmark": {b: block([r for r in rs if r["benchmark"] == b]) for b in sorted({r["benchmark"] for r in rs})}}
     return {"summary": summary, "rows": rows}
+
+
+# ----------------------------------------------------------------------------- official benchmark scores
+# How each benchmark merges its questions into one score (user decision 5 of 2026-10-15: the benchmark's own way):
+# * VSI-Bench: the three relative-direction levels are averaged into one task first, then the mean over its 8 tasks
+#   (MRA for the 4 numeric tasks, accuracy for the others) -- lmms-eval vsibench _compute_all_subscores;
+# * MindCube: accuracy over all questions except translation, which is listed on its own (MindCube-Tiny in EASI-8
+#   has rotation, around and among only);
+# * MMSI-Bench, BLINK, ViewSpatial-Bench, EmbSpatial-Bench: accuracy over all questions (lmms-eval: MMSI "average"
+#   is over all questions, BLINK's group score is size-weighted, ViewSpatial / EmbSpatial overall over all questions);
+#   MMSI also gets the circular score;
+# * 3DSRBench: CircularEval over all questions (the benchmark's own metric); the plain accuracy (EASI's headline
+#   number for 3DSRBench) is given next to it.
+# Intervals: Wilson for one accuracy over all questions, a bootstrap over questions (within each task) for means of
+# task scores.
+VSI_TASKS = {"VSI-count": "object_counting", "VSI-distance-absolute": "object_abs_distance",
+             "VSI-size-object": "object_size_estimation", "VSI-size-room": "room_size_estimation",
+             "VSI-distance-relative": "object_rel_distance", "VSI-route": "route_planning",
+             "VSI-order": "obj_appearance_order", "VSI-direction-easy": "object_rel_direction",
+             "VSI-direction-medium": "object_rel_direction", "VSI-direction-hard": "object_rel_direction"}
+MINDCUBE_TRANSLATION = ("MC-translation-transitive",)
+APPENDIX_GROUPS = ("M6", "M10", "M11", "V6")   # too few questions: appendix only, no conclusions (decision 5)
+
+
+def _score_of(r: Dict[str, Any]) -> Optional[float]:
+    return r.get("mra", r.get("acc"))
+
+
+def _bootstrap(parts: Dict[str, List[float]], combine, n_boot: int = 2000, seed: int = 0) -> Tuple[float, float]:
+    import random as _r
+
+    rng = _r.Random(seed)
+    vals = []
+    for _ in range(n_boot):
+        sample = {k: [v[rng.randrange(len(v))] for _ in v] for k, v in parts.items() if v}
+        vals.append(combine(sample))
+    vals.sort()
+    return round(vals[int(0.025 * n_boot)], 4), round(vals[int(0.975 * n_boot) - 1], 4)
+
+
+def official_merge(rs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    by_b: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in rs:
+        by_b[r["benchmark"]].append(r)
+    # VSI-Bench
+    v = by_b.get("VSI-Bench", [])
+    if v:
+        tasks: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+        for r in v:
+            s = _score_of(r)
+            if s is not None:
+                tasks[VSI_TASKS.get(r["subtask"], r["subtask"])][r["subtask"]].append(s)
+
+        def vsi_overall(parts: Dict[str, List[float]]) -> float:
+            per_task = defaultdict(list)
+            for key, xs in parts.items():
+                task, sub = key.split("|")
+                per_task[task].append(statistics.mean(xs))
+            return statistics.mean(statistics.mean(ys) for ys in per_task.values())
+
+        flat = {f"{t}|{s}": xs for t, d in tasks.items() for s, xs in d.items()}
+        overall = vsi_overall(flat)
+        lo, hi = _bootstrap(flat, vsi_overall)
+        task_scores = {t: round(statistics.mean(statistics.mean(xs) for xs in d.values()), 4) for t, d in tasks.items()}
+        out["VSI-Bench"] = {"metric": "8 类任务得分的平均（方向题三档先平均）", "score": round(overall, 4), "ci95": [lo, hi],
+                            "questions": len(v), "tasks": task_scores, "tasks_present": len(task_scores)}
+    # MindCube
+    m = by_b.get("MindCube", [])
+    if m:
+        main = [r["acc"] for r in m if r["subtask"] not in MINDCUBE_TRANSLATION and "acc" in r]
+        tr = [r["acc"] for r in m if r["subtask"] in MINDCUBE_TRANSLATION and "acc" in r]
+        if main:
+            out["MindCube"] = dict(acc_ci(main), metric="全部题的准确率（不含平移题）", score=round(statistics.mean(main), 4))
+        if tr:
+            out["MindCube（平移，单列）"] = dict(acc_ci(tr), metric="平移题的准确率", score=round(statistics.mean(tr), 4))
+    # pooled benchmarks
+    for b, name in (("MMSI-Bench", "MMSI-Bench"), ("BLINK", "BLINK"), ("ViewSpatial-Bench", "ViewSpatial-Bench"),
+                    ("EmbSpatial-Bench", "EmbSpatial-Bench")):
+        xs = [r["acc"] for r in by_b.get(b, []) if "acc" in r]
+        if xs:
+            out[name] = dict(acc_ci(xs), metric="全部题的准确率", score=round(statistics.mean(xs), 4))
+            if b == "MMSI-Bench":
+                c = [r["circular"] for r in by_b[b] if "circular" in r]
+                if c:
+                    out[name]["circular"] = acc_ci(c)
+    d3 = by_b.get("3DSRBench", [])
+    c = [r["circular"] for r in d3 if "circular" in r]
+    if c:
+        out["3DSRBench"] = dict(acc_ci(c), metric="轮换选项评分（全部题）", score=round(statistics.mean(c), 4),
+                                plain=acc_ci([r["acc"] for r in d3 if "acc" in r]))
+    return out
 
 
 def fmt(b: Dict[str, Any]) -> str:
@@ -196,13 +290,34 @@ def fmt(b: Dict[str, Any]) -> str:
     return "；".join(parts)
 
 
+def fmt_official(name: str, o: Dict[str, Any]) -> str:
+    ci = o.get("ci95") or [None, None]
+    n = o.get("questions", o.get("n"))
+    pct = name != "VSI-Bench"
+    f = (lambda x: f"{x:.0%}") if pct else (lambda x: f"{x:.3f}")
+    s = f"{f(o['score'])}（{f(ci[0])}–{f(ci[1])}，{n} 题）"
+    if "circular" in o:
+        c = o["circular"]
+        s += f"；轮换选项 {c['mean']:.0%}（{c['ci95'][0]:.0%}–{c['ci95'][1]:.0%}）"
+    if "plain" in o:
+        c = o["plain"]
+        s += f"；普通评分 {c['mean']:.0%}（{c['ci95'][0]:.0%}–{c['ci95'][1]:.0%}）"
+    if "tasks" in o:
+        s += f"；{o['tasks_present']} 类任务在内"
+    return s
+
+
 def markdown(res: Dict[str, Any], title: str) -> str:
     lines = [f"# {title}", ""]
     for k, s in res["summary"].items():
-        lines += [f"## {k}", "", f"全部：{fmt(s['all'])}", "", "| 组 | 结果 |", "| --- | --- |"]
-        lines += [f"| {g} | {fmt(b)} |" for g, b in s["by_group"].items()]
-        lines += ["", "| benchmark | 结果 |", "| --- | --- |"]
-        lines += [f"| {g} | {fmt(b)} |" for g, b in s["by_benchmark"].items()]
+        lines += [f"## {k}", "", "### 主结果：按 benchmark，官方合并方式", "", "| benchmark | 合并方式 | 结果 |", "| --- | --- | --- |"]
+        lines += [f"| {b} | {o['metric']} | {fmt_official(b, o)} |" for b, o in s["official"].items()]
+        lines += ["", f"全部选择题合计：{fmt(s['all'])}", "", "### 各组", "", "| 组 | 结果 |", "| --- | --- |"]
+        lines += [f"| {g} | {fmt(b)} |" for g, b in s["by_group"].items() if g not in APPENDIX_GROUPS]
+        app = [(g, b) for g, b in s["by_group"].items() if g in APPENDIX_GROUPS]
+        if app:
+            lines += ["", "### 附录：题太少的组（只列题数和区间，不单独下结论）", "", "| 组 | 结果 |", "| --- | --- |"]
+            lines += [f"| {g} | {fmt(b)} |" for g, b in app]
         lines.append("")
     return "\n".join(lines)
 

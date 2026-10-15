@@ -160,29 +160,25 @@ def score(question: Dict[str, Any], reply: str, family: str = "orig") -> Dict[st
 
 
 def circular_variants(question: Dict[str, Any], family: str = "orig") -> List[Tuple[str, str]]:
-    """(prompt, answer letter) for every rotation of the options, re-rendered in the family's layout."""
-    from .qa import STYLES
+    """(prompt, answer letter) for every rotation of the options, rendered in the family's current layout
+    (qa.render: the original-benchmark wordings as scripts/easi_eval.py sends them)."""
+    from .qa import render
 
     v = question["variants"][family]
     if not v.get("options"):
-        return [(v["text"], v["answer"])]
-    head = v["text"]
-    # the question part is everything before the rendered options; rebuild with the style function
-    q = head.split("\nOptions")[0].split("\nSelect from")[0]
-    out = []
-    for opts, a in rotations(v["options"], v["answer"]):
-        out.append((STYLES[v["style"]](q, opts), a))
-    return out
+        return [(render(question, family), v["answer"])]
+    return [(render(question, family, opts), a) for opts, a in rotations(v["options"], v["answer"])]
 
 
 def self_check(questions: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """Every stored answer, given as the reply, must score 1 under its benchmark's rules."""
+    """Every training answer (qa.answer_target, the form each wording's instruction asks for), given as the
+    reply, must score 1 under its benchmark's rules."""
+    from .qa import answer_target
+
     bad = []
     for q in questions:
         for fam, v in q["variants"].items():
-            reply = str(v["answer"])
-            if q["benchmark"] == "MMSI-Bench":
-                reply = f"``{reply}``"
+            reply = answer_target(q, fam)
             s = score(q, reply, fam)
             if min(s.values()) < 1.0:
                 bad.append((q["qid"], fam, reply, s))

@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
-from .qa import excluded, parse_exclude
+from .qa import answer_target, excluded, parse_exclude, render
 
 ACT_RECIPE = Path("/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_20261014/lf/train.yaml")
 TRAIN_FAMILIES = ("orig", "t1", "t2", "t3")
@@ -83,7 +83,8 @@ def pick_family(q: Dict[str, Any], seed: int, families: Sequence[str]) -> str:
 
 
 def answer_text(q: Dict[str, Any], fam: str) -> str:
-    return str(q["variants"][fam]["answer"])
+    """The answer in the form the wording's instruction asks for (qa.answer_target)."""
+    return answer_target(q, fam)
 
 
 def video_key(q: Dict[str, Any]) -> Tuple[str, Tuple[str, ...]]:
@@ -101,7 +102,7 @@ def build_records(items: Sequence[Tuple[Path, Dict[str, Any]]], res: int, seed: 
             continue
         fam = pick_family(q, seed, families)
         imgs = [image_path(run, p, res) for p in q["extra"]["images"]]
-        user = "<image>" * len(imgs) + "\n" + q["variants"][fam]["text"]
+        user = "<image>" * len(imgs) + "\n" + render(q, fam)
         records.append({"messages": [{"role": "user", "content": user},
                                      {"role": "assistant", "content": answer_text(q, fam)}],
                         "images": imgs, "videos": []})
@@ -114,7 +115,7 @@ def build_records(items: Sequence[Tuple[Path, Dict[str, Any]]], res: int, seed: 
         for i, (run, q) in enumerate(qs):
             fam = pick_family(q, seed, families)
             fams.append(fam)
-            text = q["variants"][fam]["text"]
+            text = render(q, fam)
             msgs.append({"role": "user", "content": ("<video>\n" + text) if i == 0 else text})
             msgs.append({"role": "assistant", "content": answer_text(q, fam)})
         records.append({"messages": msgs, "images": [], "videos": [frames]})
