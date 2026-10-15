@@ -2205,6 +2205,17 @@ class ActiveSpatialEnv(BaseEnv):
             # v17: action-space + done switch
             action_space=getattr(self.config, "action_space", "legacy"),
             enable_explicit_done=getattr(self.config, "enable_explicit_done", True),
+            # round 9: "actual" lists the reward terms below instead of the legacy lines
+            reward_text=getattr(self.config, "prompt_reward_text", "legacy"),
+            max_consecutive_invalid_actions=self.config.max_consecutive_invalid_actions,
+            enable_step_penalty=self.config.enable_step_penalty,
+            step_penalty=self.config.step_penalty,
+            collision_penalty=self.config.collision_penalty,
+            max_consecutive_collisions=self.config.max_consecutive_collisions,
+            consecutive_collision_penalty=self.config.consecutive_collision_penalty,
+            enable_low_info_frame_check=self.config.enable_low_info_frame_check,
+            max_consecutive_low_info_frames=self.config.max_consecutive_low_info_frames,
+            low_info_frame_penalty=self.config.low_info_frame_penalty,
         )
     
     def compute_reward(self) -> float:

@@ -196,6 +196,10 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     
     # ====== Prompt Configuration ======
     prompt_format: str = "free_think"  # "free_think", "no_think", "approach"
+    # Round 9 (next data version; default "legacy", the text R1 and v10 trained with): "actual" makes the system
+    # prompt's Rewards block list the reward terms this env applies.  The SFT export's system_prompt.reward_text
+    # (and any non-default reward setting) must match.
+    prompt_reward_text: str = "legacy"
     history_window_size: int = 1  # Observations retained, including the current frame
     max_actions_per_step: int = 5  # Maximum actions allowed per step
     action_sep: str = "|"  # Separator for multiple actions

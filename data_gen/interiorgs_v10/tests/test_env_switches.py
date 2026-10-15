@@ -147,5 +147,17 @@ class EnvSwitchTest(unittest.TestCase):
             self.assertEqual({c.kwargs.get("normalize_zero") for c in fmt.call_args_list}, {setting})
 
 
+    def test_reward_text_setting_reaches_the_system_prompt(self):
+        """Next data version: prompt_reward_text; the env passes its own reward settings (default: legacy text)."""
+        legacy = self.env(self.rows[0], "rt_legacy").system_prompt()
+        self.assertIn("Progress toward target pose" if self.rows[0]["task_type"] != "projective_relations"
+                      else "Gate-aligned projective progress", legacy)
+        actual = self.env(self.rows[0], "rt_actual", prompt_reward_text="actual", max_consecutive_collisions=0).system_prompt()
+        self.assertIn("- There is no reward for partial progress", actual)
+        self.assertIn("- Each blocked move (the camera stays where it was): -0.15\n", actual)
+        self.assertNotIn("Progress toward target pose", actual)
+        self.assertEqual(actual.split("Rewards:")[0], legacy.split("Rewards:")[0])  # only the Rewards block changes
+
+
 if __name__ == "__main__":
     unittest.main()

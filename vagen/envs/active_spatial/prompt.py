@@ -98,8 +98,38 @@ def _action_descriptions(max_actions: int = 1, action_sep: str = "|",
     return f"\n{header}\n{body}\n"
 
 
+def _actual_reward_lines(kwargs) -> str:
+    """The reward terms the env applies, from its settings (defaults: the v10 S0 config).  Round 9: the legacy
+    lines promise a progress reward that S0 does not give."""
+    def num(key, default):
+        return float(kwargs.get(key, default))
+
+    lines = []
+    n_invalid = int(kwargs.get("max_consecutive_invalid_actions", 3))
+    lines.append(f"- Invalid format (no action can be read): {num('invalid_format_penalty', -0.1):g}"
+                 + (f"; {n_invalid} in a row end the episode" if n_invalid > 0 else ""))
+    if num("format_reward", 0.0) > 0.0:
+        lines.append(f"- Format correct: +{num('format_reward', 0.0):g}")
+    if kwargs.get("enable_step_penalty", True) and num("step_penalty", -0.01) != 0.0:
+        lines.append(f"- Each response (step): {num('step_penalty', -0.01):g}")
+    n_blocked = int(kwargs.get("max_consecutive_collisions", 3))
+    lines.append(f"- Each blocked move (the camera stays where it was): {num('collision_penalty', -0.15):g}"
+                 + (f"; {n_blocked} blocked moves in a row end the episode "
+                    f"({num('consecutive_collision_penalty', -0.5):g} more)" if n_blocked > 0 else ""))
+    if kwargs.get("enable_low_info_frame_check", True):
+        n_low = int(kwargs.get("max_consecutive_low_info_frames", 3))
+        lines.append(f"- Nearly uniform view (e.g. facing a wall): {num('low_info_frame_penalty', -0.2):g}"
+                     + (f"; {n_low} in a row end the episode" if n_low > 0 else ""))
+    lines.append(f"- Reaching the requested view: +{num('success_reward', 1.0):g}, and the episode ends")
+    lines.append("- There is no reward for partial progress")
+    return "\n".join(lines)
+
+
 def system_prompt(**kwargs):
-    """Generate the system prompt for the Active Spatial environment."""
+    """Generate the system prompt for the Active Spatial environment.
+
+    ``reward_text``: "legacy" (default, the text R1 and v10 trained with) or "actual" (round 9, next data version:
+    the reward terms the env really applies, from the env settings passed in)."""
     selected_format = kwargs.get("format", "free_think")
     step_translation = kwargs.get("step_translation", 0.1)
     step_rotation_deg = kwargs.get("step_rotation_deg", 5.0)
@@ -172,6 +202,11 @@ def system_prompt(**kwargs):
         )
         success_reward_line = f"- Reaching target pose: +{success_reward:g}"
 
+    if str(kwargs.get("reward_text", "legacy")) == "actual":
+        reward_lines = _actual_reward_lines(kwargs)
+    else:
+        reward_lines = f"{format_reward_line}\n{progress_reward_line}\n{success_reward_line}"
+
     base_prompt = f"""You are a spatial navigation agent in a 3D indoor environment. Your task is to navigate a camera to reach a specific target view of an object.
 {actions_block}
 Step sizes: translation = {step_translation:.2f} meters, rotation = {step_rotation_deg:.1f} degrees.
@@ -184,9 +219,7 @@ Example:
 {format_config['example']}
 
 Rewards:
-{format_reward_line}
-{progress_reward_line}
-{success_reward_line}
+{reward_lines}
 
 Hints:
 1. Pay attention to the target object and the requested view (front, back, left, right, etc.)
@@ -211,9 +244,7 @@ Example:
 {format_config['example']}
 
 Rewards:
-{format_reward_line}
-{progress_reward_line}
-{success_reward_line}
+{reward_lines}
 
 Hints:
 1. Pay attention to the target object and the requested view (front, back, left, right, etc.)
