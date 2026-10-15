@@ -1,0 +1,108 @@
+{
+ "note": "per-scene quotas of the question bank (2026-10-15): common groups 3 questions per subtask per scene (about 5-7 times the training need), rare groups and video every combo (999 = no limit); obj_cap: questions per object and group in one scene; verify_cap 0: stop a group when its quotas are met",
+ "obj_cap": 6,
+ "verify_cap": 0,
+ "wide_search": true,
+ "groups": {
+  "S1": {
+   "ES-01": 3,
+   "ES-02": 3,
+   "VS-01": 3,
+   "BL-03": 3
+  },
+  "S2": {
+   "ES-03": 3,
+   "ES-04": 3,
+   "3D-01": 3,
+   "3D-02": 3,
+   "BL-03": 3
+  },
+  "S3": {
+   "ES-05": 3,
+   "ES-06": 3,
+   "3D-03": 3,
+   "BL-02": 3
+  },
+  "S4": {
+   "3D-04": 3,
+   "3D-08": 3,
+   "BL-03": 3
+  },
+  "S5": {
+   "BL-01": 3
+  },
+  "S6": {
+   "BL-05": 3
+  },
+  "S7": {
+   "3D-11": 3
+  },
+  "M1": {
+   "MMSI-position-camera-camera": 3,
+   "MMSI-motion-camera": 3,
+   "BL-04": 3
+  },
+  "M2": {
+   "MMSI-position-camera-object": 3,
+   "MMSI-position-object-object": 3,
+   "MMSI-attribute-measurement": 3
+  },
+  "M3": {
+   "MMSI-position-camera-region": 999,
+   "MMSI-position-object-region": 999,
+   "MMSI-position-region-region": 999
+  },
+  "M4": {
+   "BL-06": 3
+  },
+  "M5": {
+   "MMSI-attribute-appearance": 3
+  },
+  "M6": {
+   "MMSI-multistep": 999
+  },
+  "M7": {
+   "MC-rotation-current": 3,
+   "MC-rotation-mental-turn": 3
+  },
+  "M8": {
+   "MC-around-q1": 999,
+   "MC-around-q2": 999,
+   "MC-around-q3": 999
+  },
+  "M9": {
+   "MC-among-q1": 999,
+   "MC-among-q2-current": 999,
+   "MC-among-q2-sequence": 999,
+   "MC-among-q5": 999
+  },
+  "M10": {
+   "MC-translation-transitive": 999
+  },
+  "M11": {
+   "VS-05": 999
+  },
+  "V1": {
+   "VSI-count": 999
+  },
+  "V2": {
+   "VSI-distance-absolute": 999,
+   "VSI-distance-relative": 999
+  },
+  "V3": {
+   "VSI-size-object": 999,
+   "VSI-size-room": 999
+  },
+  "V4": {
+   "VSI-direction-easy": 999,
+   "VSI-direction-medium": 999,
+   "VSI-direction-hard": 999
+  },
+  "V5": {
+   "VSI-route": 999
+  },
+  "V6": {
+   "VSI-order": 999
+  }
+ }
+}

@@ -57,13 +57,46 @@ def ring_poses(ctx, target: np.ndarray, radii: Sequence[float] = RADII, n_az: in
     return [look_at((x, y, CAMERA_HEIGHT_M), target) for (x, y) in eyes[ok]]
 
 
+SAME_NAME_PREFILTER = True   # module switch: the CPU same-name check below (off only to measure its effect)
+
+
+def same_name_visible(ctx, oids: Sequence[str], c2ws: np.ndarray, K: np.ndarray, size: int) -> np.ndarray:
+    """(N,) True where some other object a reader would call by the same name as one of ``oids`` may show in
+    the picture (any sample point of a facing side not blocked by boxes or walls). Objects with a scene-unique
+    description are skipped: a single-image question can still name them by that description. The render check
+    (ViewAnalysis.name_unique_in_image) stays the authority; this only saves renders that would fail it."""
+    hit = np.zeros(len(c2ws), bool)
+    for o in oids:
+        if ctx.scene_ref(o) is not None:
+            continue
+        for x in ctx.same_name(o):
+            if ctx.duplicates.get(x) == o or ctx.duplicates.get(o) == x:
+                continue
+            todo = np.flatnonzero(~hit)
+            if not len(todo):
+                return hit
+            box = ctx.obb.get(x)
+            if box is not None:   # cheap projection test first: most instances are behind or beside the camera
+                todo = todo[[not box_outside_view(box, c2ws[i], K, size) for i in todo]]
+                if not len(todo):
+                    continue
+            try:
+                seen = ctx.face_seen_any(x, c2ws[todo], K, size)
+            except (AttributeError, KeyError, ValueError):
+                continue
+            hit[todo[seen]] = True
+    return hit
+
+
 def frame_candidates(ctx, oids: Sequence[str], size: int = IMAGE_SIZE, target: Optional[np.ndarray] = None,
                      poses: Optional[List[np.ndarray]] = None, extra: Optional[Callable[[np.ndarray], bool]] = None,
                      need_visible: Optional[Sequence[str]] = None, max_out: int = 4,
-                     radii: Sequence[float] = RADII) -> List[np.ndarray]:
+                     radii: Sequence[float] = RADII, unique_in_image: Sequence[str] = ()) -> List[np.ndarray]:
     """Cameras that see every object of ``need_visible`` (default ``oids``) clearly by the v10 rule and
     frame every object of ``oids``; ``extra`` adds a question-specific check.  Ranked by the smallest
-    projected size of the objects (larger is better) with diversity in viewing direction."""
+    projected size of the objects (larger is better) with diversity in viewing direction.
+    ``unique_in_image``: objects a single-image question names as "the X" -- cameras where another X may show
+    are dropped before rendering (same_name_visible)."""
     K = camera_K(size)
     if target is None:
         target = np.mean([ctx.obb[o].center for o in oids], axis=0)
@@ -84,6 +117,10 @@ def frame_candidates(ctx, oids: Sequence[str], size: int = IMAGE_SIZE, target: O
             return []
     if extra is not None:
         idx = np.array([i for i in idx if extra(c2ws[i])], dtype=int)
+        if not len(idx):
+            return []
+    if unique_in_image and SAME_NAME_PREFILTER:
+        idx = idx[~same_name_visible(ctx, unique_in_image, c2ws[idx], K, size)]
         if not len(idx):
             return []
     # score: the smallest object's projected height share (bigger is better), mild preference for ~2.5 m

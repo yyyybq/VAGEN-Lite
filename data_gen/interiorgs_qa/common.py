@@ -41,12 +41,15 @@ class GenCtx:
         self.stats: Dict[str, Counter] = defaultdict(Counter)   # group -> counters
         self.fail: Dict[str, Counter] = defaultdict(Counter)    # group -> rejection reasons
         self.census = False     # True: generators drop the caps they use to save time (combo census)
+        self.obj_cap: Optional[int] = None   # bank mode: questions per (group, object) in this scene
+        self.wide = False   # bank mode: search as widely as the census does (every combo of the rare groups)
+        self.obj_uses: Counter = Counter()
 
     def cap(self, n: int, census: Optional[int] = None) -> int:
         """A generator's search cap: ``n`` when generating; in census mode ``census`` (a larger sample whose
         count is scaled up in the report) or no cap at all."""
         if not self.census:
-            return n
+            return census if (self.wide and census is not None) else n
         return 10 ** 9 if census is None else census
 
     # ------------------------------------------------------------------ names
@@ -94,11 +97,26 @@ class GenCtx:
                      variants=variants, answer=answer, answer_type=answer_type, gt=gt, objects=objects,
                      review=review or {}, extra=dict(extra or {}, images=list(images)))
         q.tokens = {"512": count_tokens(q, 512), "256": count_tokens(q, 256)}
+        q.extra["pitch_deg"] = [self.pitch_of(v) for v in view_ids]
+        for o in objects:
+            self.obj_uses[(group, o["id"])] += 1
         self.questions.append(q)
         self.stats[group]["questions"] += 1
         for s in subtasks:
             self.stats[group]["subtask:" + s] += 1
         return q
+
+    def pitch_of(self, vid: str) -> Optional[float]:
+        """Camera pitch of a view in degrees (negative: looking down), from its pose."""
+        rec = self.bank.records.get(vid)
+        if rec is None:
+            return None
+        f = np.asarray(rec["c2w"], float)[:3, 2]
+        return round(math.degrees(math.asin(max(-1.0, min(1.0, float(f[2]))))), 2)
+
+    def capped(self, group: str, oids: Sequence[str]) -> bool:
+        """Bank mode: an object of the combo already appears in obj_cap questions of this group here."""
+        return self.obj_cap is not None and any(self.obj_uses[(group, o)] >= self.obj_cap for o in oids)
 
     def count(self, group: str, key: str, n: int = 1) -> None:
         self.stats[group][key] += n
@@ -112,6 +130,9 @@ class GenCtx:
 # =============================================================================
 # answer balancing for yes/no wordings: the counts live for the whole process (one render run walks many scenes)
 _BALANCE: Counter = Counter()
+# bank mode (pipeline bank): generation only builds the question bank; answers are balanced later, over the whole
+# bank, by the sampler (sample.py), so here the wording/answer is drawn uniformly among the feasible ones
+BANK_MODE = False
 
 
 def balanced_choice(rng: random.Random, key: str, cands: Sequence[Tuple[str, str]],
@@ -127,6 +148,8 @@ def balanced_choice(rng: random.Random, key: str, cands: Sequence[Tuple[str, str
         return (_BALANCE[(key, w, ans)] - _BALANCE[(key, w, other)],
                 _BALANCE[(key, w, "yes")] + _BALANCE[(key, w, "no")])
     cands = list(cands)
+    if BANK_MODE:
+        return rng.choice(cands)
     low = min(score(c) for c in cands)
     if max_lead is not None and low[0] > max_lead:
         return None

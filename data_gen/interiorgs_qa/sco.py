@@ -39,6 +39,8 @@ def prepare(job: Path, module_args: List[str]) -> None:
                         filter=lambda ti: None if "__pycache__" in ti.name or "figures_cabinet" in ti.name else ti)
     module, rest = module_args[0], module_args[1:]
     cmd = " ".join(shlex.quote(a) for a in rest)
+    # only the renderer-driven modules take the scene folder; others (evaluate, export, ...) do not
+    gs = f" --gs-root {GS_ROOT}" if module in ("pipeline", "trials") else ""
     launch = job / "launch.sh"
     launch.write_text(f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -56,9 +58,12 @@ export CC=$RUNTIME_ENV/bin/x86_64-conda-linux-gnu-gcc CXX=$RUNTIME_ENV/bin/x86_6
 export CUDA_HOME=$RUNTIME_ENV TORCH_CUDA_ARCH_LIST=9.0 OMP_NUM_THREADS=4 PYTHONUNBUFFERED=1 NO_PROXY='*' no_proxy='*'
 export CPATH="$RUNTIME_ENV/targets/x86_64-linux/include:${{CPATH:-}}"
 export LIBRARY_PATH="$RUNTIME_ENV/targets/x86_64-linux/lib:${{LIBRARY_PATH:-}}"
+# curand headers for kernels compiled at first use (vLLM / flashinfer), as in sco_interiorgs_v10_train.sh
+CURAND=$RUNTIME_ENV/lib/python3.12/site-packages/nvidia/curand
+export CPATH="$CURAND/include:$CPATH" LIBRARY_PATH="$CURAND/lib:$LIBRARY_PATH" LD_LIBRARY_PATH="$CURAND/lib:$RUNTIME_ENV/lib:${{LD_LIBRARY_PATH:-}}"
 nvidia-smi --query-gpu=name,memory.total --format=csv || true
 
-$RUNTIME_ENV/bin/python -m data_gen.interiorgs_qa.{module} {cmd} --gs-root {GS_ROOT}
+$RUNTIME_ENV/bin/python -m data_gen.interiorgs_qa.{module} {cmd}{gs}
 echo JOB_DONE
 """)
     launch.chmod(0o755)

@@ -1,0 +1,466 @@
+<title>InteriorGS 样题审核</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one working column. A sticky control bar (group, progress, display toggles, save state), then one
+   question per screen: the prompt as the model sees it, the rendered views, how the answer was computed, and
+   the five review checks. Palette: survey-sheet neutrals with a slight green cast, one teal accent for controls,
+   semantic green/red/amber reserved for the answers. */
+:root {
+  --bg: #f1f3f0;
+  --panel: #fbfcfa;
+  --fg: #1c2420;
+  --muted: #5d6a64;
+  --line: #d3d9d5;
+  --accent: #1d6a73;
+  --accent-fg: #ffffff;
+  --yes: #2d8650;
+  --no: #b8382d;
+  --unsure: #94700f;
+  --na: #66716b;
+  --on-sem: #ffffff;
+  --ans-bg: #e2f0e5;
+  --ans-line: #2d8650;
+  --focus-bg: #fbf1cf;
+  --focus-line: #c29a1f;
+  --img-bg: #101614;
+  --scrim: rgba(8, 12, 10, 0.88);
+  --font-ui: "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, "Microsoft YaHei", monospace;
+  --step-0: 0.875rem;
+  --step-1: 0.9375rem;
+  --step-2: 1.0625rem;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111614; --panel: #19201d; --fg: #e4eae6; --muted: #98a59e; --line: #2c3632;
+    --accent: #5fb0b9; --accent-fg: #0b1513; --yes: #4bb673; --no: #e36d61; --unsure: #d2a73f; --na: #8b9690;
+    --on-sem: #0b1513; --ans-bg: #1b3224; --ans-line: #4bb673; --focus-bg: #322e1b; --focus-line: #c29a1f;
+    --img-bg: #000000; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111614; --panel: #19201d; --fg: #e4eae6; --muted: #98a59e; --line: #2c3632;
+  --accent: #5fb0b9; --accent-fg: #0b1513; --yes: #4bb673; --no: #e36d61; --unsure: #d2a73f; --na: #8b9690;
+  --on-sem: #0b1513; --ans-bg: #1b3224; --ans-line: #4bb673; --focus-bg: #322e1b; --focus-line: #c29a1f;
+  --img-bg: #000000; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: var(--step-1)/1.6 var(--font-ui); padding-inline: 16px; padding-block: 0 64px; }
+button, select, textarea, input { font: inherit; color: inherit; }
+button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; margin-inline: -16px; padding: 8px 16px;
+  background: var(--panel); border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+header h1 { font-size: var(--step-2); font-weight: 600; margin: 0; letter-spacing: 0.01em; }
+.ctl { border: 1px solid var(--line); background: var(--bg); padding: 4px 10px; border-radius: var(--radius); cursor: pointer; }
+.ctl.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.prog { color: var(--muted); font-size: var(--step-0); font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 8px; }
+.bar { display: inline-block; width: 110px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--yes); }
+.right { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.chip { font-size: 0.8125rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.chip.ok { color: var(--yes); border-color: var(--yes); }
+.chip.warn { color: var(--unsure); border-color: var(--unsure); }
+.chip.bad { color: var(--no); border-color: var(--no); }
+main { max-width: 1240px; margin: 0 auto; padding-block: 14px 0; display: grid; gap: 12px; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: var(--step-0); }
+.meta .id { font-family: var(--font-mono); font-size: 0.8125rem; }
+.label { color: var(--muted); font-size: 0.8125rem; letter-spacing: 0.04em; }
+.qtext { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+.opts { display: grid; gap: 2px; margin-top: 6px; }
+.opts div { padding: 2px 8px; border-radius: 4px; overflow-wrap: anywhere; }
+.opts div.ans { background: var(--ans-bg); outline: 1px solid var(--ans-line); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.card h3 { margin: 0 0 6px; font-size: var(--step-1); font-weight: 600; }
+.imgs { display: flex; gap: 10px; flex-wrap: wrap; }
+.fig { position: relative; margin: 0; width: 400px; max-width: 100%; }
+.fig .frame { position: relative; width: 100%; aspect-ratio: 1 / 1; max-width: 100%; background: var(--img-bg); border-radius: var(--radius); overflow: hidden; }
+.fig img { display: block; width: 100%; height: 100%; cursor: zoom-in; }
+.fig canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.fig .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: var(--step-0); }
+.fig figcaption { font-size: 0.8125rem; color: var(--muted); }
+.strip { display: flex; gap: 4px; overflow-x: auto; padding-block: 6px; }
+.strip img { width: 64px; height: 64px; flex: none; border: 2px solid transparent; border-radius: 4px; cursor: pointer; background: var(--img-bg); }
+.strip img.cur { border-color: var(--accent); }
+.vctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.vctl input[type=range] { flex: 1 1 160px; min-width: 0; accent-color: var(--accent); }
+.vctl .n { font-variant-numeric: tabular-nums; color: var(--muted); font-size: var(--step-0); }
+.qs { display: grid; gap: 4px; }
+.q { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 8px; border-radius: var(--radius); }
+.q.cur { background: var(--focus-bg); outline: 1px solid var(--focus-line); }
+.q .t { flex: 1 1 320px; min-width: 0; }
+.q .opts-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.q button { border: 1px solid var(--line); background: var(--panel); padding: 3px 10px; border-radius: 5px; cursor: pointer; min-width: 58px; }
+.q button .k { color: var(--muted); font-size: 0.6875rem; margin-left: 4px; font-family: var(--font-mono); }
+.q button.sel { color: var(--on-sem); }
+.q button.sel .k { color: inherit; opacity: 0.75; }
+.q button.sel[data-v="0"] { background: var(--yes); border-color: var(--yes); }
+.q button.sel[data-v="1"] { background: var(--no); border-color: var(--no); }
+.q button.sel[data-v="2"] { background: var(--unsure); border-color: var(--unsure); }
+.q button.sel[data-v="3"] { background: var(--na); border-color: var(--na); }
+details summary { cursor: pointer; color: var(--accent); }
+pre.json { white-space: pre-wrap; overflow-wrap: anywhere; font: 0.75rem/1.5 var(--font-mono); background: var(--bg); padding: 6px 8px; border-radius: var(--radius); max-height: 260px; overflow: auto; }
+textarea { width: 100%; min-height: 56px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px; }
+.nav { display: flex; gap: 8px; flex-wrap: wrap; }
+.nav button { border: 1px solid var(--line); background: var(--panel); padding: 5px 12px; border-radius: var(--radius); cursor: pointer; }
+.def { background: var(--bg); border-left: 3px solid var(--focus-line); padding: 6px 10px; margin-block: 6px; font-size: var(--step-0); overflow-wrap: anywhere; }
+.note { color: var(--muted); font-size: var(--step-0); }
+.help { display: grid; gap: 6px; }
+kbd { font-family: var(--font-mono); font-size: 0.75rem; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--bg); }
+#lightbox { position: fixed; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; z-index: 20; cursor: zoom-out; padding: 16px; }
+#lightbox img { max-width: 100%; max-height: 100%; width: min(768px, 100%); height: auto; }
+#toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 30;
+  background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: var(--radius); font-size: var(--step-0); max-width: calc(100% - 32px); }
+@media (max-width: 640px) { header { position: static; } }
+@media (prefers-reduced-motion: no-preference) { .q, .ctl { transition: background-color 120ms ease; } }
+</style>
+
+<header>
+  <h1 id="title">InteriorGS 样题审核</h1>
+  <select id="groupSel" class="ctl" aria-label="只看某一组"></select>
+  <div class="prog" id="prog"></div>
+  <div class="right">
+    <span class="chip" id="saveChip">正在连接…</span>
+    <button class="ctl" id="btnRes" title="切换 512 / 256 显示（R）">512×512</button>
+    <button class="ctl" id="btnBox" title="显示 / 隐藏题目物体的三维框投影（B）">框：关</button>
+    <button class="ctl" id="btnHelp">说明</button>
+    <button class="ctl" id="btnImport">导入</button>
+    <button class="ctl" id="btnExport" title="下载一份结果文件作备份（E）">导出</button>
+    <input type="file" id="fileImport" accept=".json,application/json" hidden>
+  </div>
+</header>
+<main>
+  <section class="card help" id="help" hidden>
+    <h3>怎么标</h3>
+    <div>每页一道样题，共 240 道（单图 70、多图 110、视频 60）。下面五项用按钮回答；只看某一组可以用左上角的下拉框。</div>
+    <div id="helpSave">标注会自动保存到这个页面里：换电脑、换浏览器打开同一个链接，标过的都在；Claude 可以直接读取，不需要导出。右上角的圆角标签显示保存状态。"导出"只是另存一份备份文件。</div>
+    <div>绿色底的选项是标准答案。"框"按钮叠加题目里物体的三维框投影（默认关）；"512×512"按钮切换成 256×256 的版本，用来回答第 5 项。</div>
+    <div>快捷键：<kbd>1</kbd>–<kbd>4</kbd> 选当前一项的第 1–4 个选项（选完跳到下一项），<kbd>J</kbd>/<kbd>K</kbd> 下 / 上一项，<kbd>←</kbd>/<kbd>→</kbd> 上 / 下一题，<kbd>N</kbd> 下一道没标完的，<kbd>B</kbd> 框，<kbd>R</kbd> 分辨率，<kbd>,</kbd>/<kbd>.</kbd> 视频上 / 下一帧，<kbd>E</kbd> 导出。点图放大，<kbd>Esc</kbd> 关闭。</div>
+  </section>
+  <div id="view" class="qs"></div>
+</main>
+<div id="lightbox" hidden><img alt="放大的图"></div>
+<div id="toast" role="status" hidden></div>
+<script>
+const DATA = /*__DATA__*/null;
+const DATA_HASH = "__DATA_HASH__";
+const PREF_KEY = "interiorgs_qa_review_artifact_v1";
+const BACKUP_KEY = "interiorgs_qa_review_artifact_labels_v1";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const O = {can: ["能", "不能", "不确定", "不适用"], amb: ["没有歧义", "有歧义", "不确定"], ok: ["正确", "错误", "不确定"]};
+const ITEMS = DATA.items;
+const GROUP_ORDER = [...new Set(ITEMS.map((it) => it.group))];
+
+// ---------- per-viewer preferences (position, toggles): browser storage only ----------
+function loadPrefs() {
+  try { const s = JSON.parse(localStorage.getItem(PREF_KEY) || "null"); if (s && typeof s === "object") return s; } catch (e) {}
+  return {pos: 0, res: 512, box: false, group: "", helpSeen: false};
+}
+const prefs = loadPrefs();
+function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {} }
+
+// ---------- labels: the page's database (collection "labels", one document per question) ----------
+let answers = {};
+try { answers = JSON.parse(localStorage.getItem(BACKUP_KEY) || "{}") || {}; } catch (e) { answers = {}; }
+let db = null, readOnly = false, mode = "connecting";
+const writing = {};
+function backup() { try { localStorage.setItem(BACKUP_KEY, JSON.stringify(answers)); } catch (e) {} }
+function setChip(kind, text) { const c = $("saveChip"); c.className = "chip " + kind; c.textContent = text; }
+function showMode() {
+  if (mode === "db") setChip("ok", readOnly ? "只读" : "已保存到页面");
+  else if (mode === "local") setChip("warn", "只存在本浏览器");
+  else setChip("", "正在连接…");
+}
+async function persist(id) {
+  backup();
+  if (!db || readOnly) return;
+  const w = writing[id] || (writing[id] = {busy: false, dirty: false});
+  if (w.busy) { w.dirty = true; return; }
+  w.busy = true; setChip("warn", "保存中…");
+  try {
+    do {
+      w.dirty = false;
+      const body = JSON.parse(JSON.stringify(answers[id] || {}));
+      try { await db.collection("labels").doc(id).set(body); }
+      catch (e) {
+        if (e && e.code === "unavailable") { await new Promise((r) => setTimeout(r, 600 + Math.random() * 900)); await db.collection("labels").doc(id).set(body); }
+        else throw e;
+      }
+    } while (w.dirty);
+    showMode();
+  } catch (e) {
+    if (e && e.code === "invalid_argument") { readOnly = true; showMode(); toast("这个链接对你是只读的，标注只保存在本浏览器。"); }
+    else { setChip("bad", "保存失败"); toast("保存失败：" + ((e && e.message) || "未知原因") + "。标注已留在本浏览器，稍后再点一次会重试。"); }
+  } finally { w.busy = false; }
+}
+async function connect() {
+  const use = (n) => (window.claude && window.claude.use) ? window.claude.use(n) : Promise.resolve(null);
+  try { db = await use("db"); } catch (e) { db = null; }
+  if (!db) { mode = "local"; showMode(); $("helpSave").textContent = "这个页面现在连不上它的数据库，标注只保存在本浏览器里（换浏览器或清理数据会丢）。标完请点\"导出\"，把文件交回。"; return; }
+  try { const user = await use("user"); if (user && (await user.can("data.write")) === false) readOnly = true; } catch (e) {}
+  mode = "db"; showMode();
+  let first = true;
+  db.collection("labels").onSnapshot((snap) => {
+    let touchedCurrent = false;
+    const cid = currentItem() && currentItem().id;
+    for (const ch of snap.docChanges()) {
+      const id = ch.doc.id;
+      if (writing[id] && writing[id].busy) continue;
+      if (ch.type === "removed") delete answers[id];
+      else answers[id] = JSON.parse(JSON.stringify(ch.doc.data() || {}));
+      if (id === cid) touchedCurrent = true;
+    }
+    if (first) {
+      first = false;
+      // labels made before the database answered (or while it was unreachable) are written up once
+      let local = {};
+      try { local = JSON.parse(localStorage.getItem(BACKUP_KEY) || "{}") || {}; } catch (e) {}
+      const remote = new Set(snap.docs.map((d) => d.id));
+      for (const [id, a] of Object.entries(local)) if (!remote.has(id) && Object.keys(a).length) { answers[id] = a; persist(id); }
+    }
+    backup();
+    if (touchedCurrent && document.activeElement && document.activeElement.id === "note") renderHeader();
+    else render();
+  }, (e) => { setChip("bad", "连接中断"); toast("和页面数据库的连接断了，标注先存在本浏览器。刷新页面可以重连。"); mode = "local"; });
+}
+
+// ---------- images: packed per group as {path: data URI} JSON files next to the page ----------
+const packs = {}, imgURI = {};
+function loadPack(name) {
+  if (!packs[name]) packs[name] = fetch("packs/" + name + ".json").then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((m) => { Object.assign(imgURI, m); return true; }).catch((e) => { delete packs[name]; throw e; });
+  return packs[name];
+}
+function ensureImages(paths) {
+  const names = [...new Set(paths.map((p) => DATA.pack_of[p]).filter(Boolean))];
+  return Promise.all(names.map(loadPack));
+}
+const src = (p) => imgURI[p] || "";
+
+// ---------- review questions ----------
+function questions(it) {
+  const qs = [{key: "recog", opts: O.can, text: "1. 能否认出题目说的物体？（题目没有点名物体时选\"不适用\"）"}];
+  if (it.media !== "image") qs.push({key: "same", opts: O.can, text: "2. 多张图 / 多帧里，能否认出是同一个物体？"});
+  qs.push({key: "answer", opts: O.ok, text: "3. 标准答案（绿色）是否正确？"});
+  qs.push({key: "ambig", opts: O.amb, text: "4. 题目有没有歧义？（多种理解、物体指代不清、选项里不止一个说得通）"});
+  qs.push({key: "r256", opts: O.can, text: "5. 切到 256×256（按 R）后，还能认出题目说的物体吗？"});
+  return qs;
+}
+function itemState(it) {
+  const a = answers[it.id] || {};
+  const qs = questions(it);
+  const n = qs.filter((q) => a[q.key] !== undefined).length;
+  return n === 0 ? "none" : (n === qs.length ? "done" : "part");
+}
+function list() { return prefs.group ? ITEMS.filter((it) => it.group === prefs.group) : ITEMS; }
+function currentItem() { const L = list(); return L.length ? L[Math.min(prefs.pos || 0, L.length - 1)] : null; }
+
+let cur = 0, frame = 0;
+function renderHeader() {
+  const sel = $("groupSel");
+  const opt = (g) => {
+    const its = ITEMS.filter((x) => x.group === g);
+    const d = its.filter((x) => itemState(x) === "done").length;
+    return `<option value="${g}" ${prefs.group === g ? "selected" : ""}>${esc(its[0].group_zh)}（${d}/${its.length}）</option>`;
+  };
+  const allDone = ITEMS.filter((x) => itemState(x) === "done").length;
+  sel.innerHTML = `<option value="">全部组（${allDone}/${ITEMS.length}）</option>` + GROUP_ORDER.map(opt).join("");
+  const L = list();
+  const done = L.filter((it) => itemState(it) === "done").length;
+  const pct = L.length ? Math.round(100 * done / L.length) : 0;
+  $("prog").innerHTML = `<span>已标完 ${done} / ${L.length}</span><span class="bar"><i style="width:${pct}%"></i></span>`;
+  $("btnRes").textContent = prefs.res === 256 ? "256×256" : "512×512";
+  $("btnRes").classList.toggle("on", prefs.res === 256);
+  $("btnBox").textContent = prefs.box ? "框：开" : "框：关";
+  $("btnBox").classList.toggle("on", prefs.box);
+}
+function fig(path, cap, idx) {
+  const s = src(path);
+  return `<figure class="fig"><div class="frame">${s ? `<img src="${s}" data-ov="${idx}" alt="${esc(cap)}">` : `<div class="loading">图片加载中…</div>`}<canvas data-ov="${idx}"></canvas></div><figcaption>${esc(cap)}</figcaption></figure>`;
+}
+const EDGES = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+const BOX_COLORS = ["#e3263b", "#2a6fe0", "#21a35a", "#e0a000", "#9b3fd1", "#00a3a3"];
+function drawOverlays(overlays) {
+  document.querySelectorAll("#view .fig").forEach((f) => {
+    const im = f.querySelector("img"), cv = f.querySelector("canvas");
+    if (!cv) return;
+    const k = +cv.dataset.ov;
+    const doDraw = () => {
+      const w = cv.clientWidth, h = cv.clientHeight;
+      cv.width = w; cv.height = h;
+      const ctx = cv.getContext("2d"); ctx.clearRect(0, 0, w, h);
+      if (!prefs.box || !overlays || !overlays[k]) return;
+      const s = w / 512;
+      overlays[k].forEach((b, j) => {
+        const col = BOX_COLORS[j % BOX_COLORS.length];
+        ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath();
+        EDGES.forEach(([p, q]) => { ctx.moveTo(b.uv[p][0] * s, b.uv[p][1] * s); ctx.lineTo(b.uv[q][0] * s, b.uv[q][1] * s); });
+        ctx.stroke();
+        ctx.fillStyle = col; ctx.font = "12px sans-serif";
+        const x = Math.min(...b.uv.map((u) => u[0])) * s, y = Math.min(...b.uv.map((u) => u[1])) * s;
+        ctx.fillText(b.label || "", Math.max(2, x), Math.max(12, y - 2));
+      });
+    };
+    if (!im || im.complete) doDraw(); else im.onload = doDraw;
+  });
+}
+function qHtml(q, i, a) {
+  const btns = q.opts.map((o, v) => `<button data-q="${i}" data-v="${v}" class="${a[q.key] === v ? "sel" : ""}">${o}<span class="k">${v + 1}</span></button>`).join("");
+  return `<div class="q ${i === cur ? "cur" : ""}" id="q${i}"><div class="t">${q.text}</div><div class="opts-row">${btns}</div></div>`;
+}
+function variantHtml(v, title) {
+  if (!v) return "";
+  const opts = v.options ? `<div class="opts">${v.options.map((o, i) => `<div class="${"ABCDEFGH"[i] === v.answer ? "ans" : ""}">${"ABCDEFGH"[i]}. ${esc(o)}</div>`).join("")}</div>`
+                         : `<div class="opts"><div class="ans">标准答案：${esc(v.answer)}</div></div>`;
+  return `<div class="label">${title}</div><div class="qtext">${esc(v.text)}${opts}</div>`;
+}
+let waiting = null;
+function render() {
+  renderHeader();
+  const L = list();
+  if (!L.length) { $("view").innerHTML = `<div class="card">这一组没有题。</div>`; return; }
+  const idx = Math.min(prefs.pos || 0, L.length - 1);
+  prefs.pos = idx;
+  const it = L[idx];
+  const a = answers[it.id] || {};
+  const qs = questions(it);
+  cur = Math.max(0, Math.min(cur, qs.length - 1));
+  const imgs = prefs.res === 256 ? it.img256 : it.img512;
+  const need = it.img512.concat(it.img256);
+  if (need.some((p) => !imgURI[p]) && waiting !== it.id) {
+    waiting = it.id;
+    ensureImages(need).then(() => { waiting = null; if (currentItem() && currentItem().id === it.id) render(); })
+      .catch(() => { waiting = null; toast("图片没加载出来，请刷新页面再试。"); });
+  }
+  let html = `<div class="meta"><span>第 ${idx + 1} / ${L.length} 题</span><span>${esc(it.group_zh)}</span><span>子任务 ${esc(it.subtasks.join("、"))}</span><span>${esc(it.benchmark)}</span><span>场景 <span class="id">${esc(it.scene)}</span></span>
+    <span>${it.media === "video" ? "视频 " + imgs.length + " 帧" : imgs.length + " 张图"}</span>
+    <span>视觉 token ${it.tokens["512"] ? it.tokens["512"].visual : "?"}（512）/ ${it.tokens["256"] ? it.tokens["256"].visual : "?"}（256）</span><span class="id">${esc(it.id)}</span></div>`;
+  html += `<div>${variantHtml(it.orig, "原 benchmark 格式（评测第 1 组，也是训练措辞之一）")}</div>`;
+  if (it.media === "video") {
+    frame = Math.max(0, Math.min(frame, imgs.length - 1));
+    html += `<div class="card"><div class="vctl"><button class="ctl" id="fPrev">◀ 上一帧</button><input type="range" id="fSlider" min="0" max="${imgs.length - 1}" value="${frame}" aria-label="帧"><button class="ctl" id="fNext">下一帧 ▶</button><span class="n" id="fLab">第 ${frame + 1} / ${imgs.length} 帧</span></div>
+      <div class="imgs" id="vmain">${fig(imgs[frame], "当前帧", 0)}</div>
+      <div class="strip">${it.img256.map((p, i) => `<img src="${src(p)}" data-f="${i}" class="${i === frame ? "cur" : ""}" alt="第 ${i + 1} 帧" title="第 ${i + 1} 帧">`).join("")}</div></div>`;
+  } else {
+    html += `<div class="card"><div class="imgs">${imgs.map((p, i) => fig(p, imgs.length > 1 ? `图 ${i + 1}` : "图", i)).join("")}</div></div>`;
+  }
+  html += `<div class="card"><h3>审核</h3><div class="qs">${qs.map((q, i) => qHtml(q, i, a)).join("")}</div></div>`;
+  html += `<div class="card"><h3>标准答案怎么算的</h3><div class="def">${esc(it.gt.definition)}</div>
+    <div class="def"><b>和原 benchmark 的不同：</b>${esc(it.gt.differs_from_original)}</div>
+    <div class="note">题目物体：${it.objects.map((o) => `${esc(o.name || o.display)}（${esc(o.role)}）`).join("；") || "无"}</div>
+    <details><summary>计算依据（数值）</summary><pre class="json">${esc(JSON.stringify(it.gt.values, null, 1))}</pre></details>
+    <details><summary>训练措辞示例 / 留出措辞（评测第 2 组）</summary>${variantHtml(it.train, "训练措辞之一")}${variantHtml(it.heldout, "留出措辞（训练时不用）")}</details></div>`;
+  html += `<div class="card"><h3>备注（可选）</h3><textarea id="note" placeholder="有什么想说明的写在这里">${esc(a.note || "")}</textarea></div>
+    <div class="nav"><button id="prev">← 上一题</button><button id="next">下一题 →</button><button id="nextOpen">下一道没标完的（N）</button></div>`;
+  $("view").innerHTML = html;
+  $("view").querySelectorAll("button[data-q]").forEach((b) => b.onclick = () => answer(+b.dataset.q, +b.dataset.v, false));
+  $("view").querySelectorAll(".fig img").forEach((im) => im.onclick = () => zoom(im.src));
+  $("view").querySelectorAll(".strip img").forEach((im) => im.onclick = () => setFrame(+im.dataset.f));
+  if ($("fPrev")) { $("fPrev").onclick = () => step(-1); $("fNext").onclick = () => step(1); $("fSlider").oninput = (e) => setFrame(+e.target.value); }
+  let noteTimer = null;
+  $("note").oninput = (e) => {
+    const val = e.target.value;
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => { const x = answers[it.id] || (answers[it.id] = {}); x.note = val; x._t = new Date().toISOString(); persist(it.id); }, 700);
+  };
+  $("prev").onclick = () => go(-1); $("next").onclick = () => go(1); $("nextOpen").onclick = nextOpen;
+  drawOverlays(it.media === "video" ? [it.overlays[frame]] : it.overlays);
+  savePrefs();
+  const nxt = L[idx + 1];
+  if (nxt) setTimeout(() => ensureImages(nxt.img512.concat(nxt.img256)).catch(() => {}), 400);
+}
+function setFrame(f) {
+  const it = currentItem(); if (!it || it.media !== "video") return;
+  const imgs = prefs.res === 256 ? it.img256 : it.img512;
+  frame = Math.max(0, Math.min(imgs.length - 1, f));
+  $("vmain").innerHTML = fig(imgs[frame], "当前帧", 0);
+  $("vmain").querySelectorAll(".fig img").forEach((im) => im.onclick = () => zoom(im.src));
+  $("fSlider").value = frame; $("fLab").textContent = `第 ${frame + 1} / ${imgs.length} 帧`;
+  document.querySelectorAll(".strip img").forEach((im) => im.classList.toggle("cur", +im.dataset.f === frame));
+  drawOverlays([it.overlays[frame]]);
+}
+function step(d) { setFrame(frame + d); }
+function answer(i, v, advance) {
+  const it = currentItem(); if (!it) return;
+  const qs = questions(it);
+  if (v >= qs[i].opts.length) return;
+  const a = answers[it.id] || (answers[it.id] = {});
+  a[qs[i].key] = v; a._t = new Date().toISOString();
+  persist(it.id);
+  cur = advance ? Math.min(i + 1, qs.length - 1) : i;
+  render();
+}
+function go(d) { const L = list(); prefs.pos = Math.max(0, Math.min(L.length - 1, (prefs.pos || 0) + d)); cur = 0; frame = 0; render(); window.scrollTo(0, 0); }
+function nextOpen() {
+  const L = list(), n = L.length, start = prefs.pos || 0;
+  for (let k = 1; k <= n; k++) { const j = (start + k) % n; if (itemState(L[j]) !== "done") { prefs.pos = j; cur = 0; frame = 0; render(); window.scrollTo(0, 0); return; } }
+  toast("这一组已经全部标完了。");
+}
+function zoom(s) { const lb = $("lightbox"); lb.querySelector("img").src = s; lb.hidden = false; }
+$("lightbox").onclick = () => { $("lightbox").hidden = true; };
+let toastTimer = null;
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 4200); }
+
+async function exportJson() {
+  const out = {version: "interiorgs_qa_review_labels_v1", site_version: DATA.version, data_hash: DATA_HASH, exported_at: new Date().toISOString(),
+    answers: {items: answers}, option_codes: "每个问题的值是所选按钮的序号（0 起），按钮文字见网页；_t 是作答时间"};
+  const d = new Date(), p = (x) => String(x).padStart(2, "0");
+  const filename = `interiorgs_qa_review_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`;
+  let dl = null;
+  try { dl = (window.claude && window.claude.use) ? await window.claude.use("downloads") : null; } catch (e) { dl = null; }
+  if (!dl) { toast(mode === "db" ? "这里不能下载文件；标注已经保存在页面里，不需要导出。" : "这里不能下载文件。"); return; }
+  try { await dl.save({filename, data: JSON.stringify(out, null, 1)}); toast("已导出 " + filename); }
+  catch (e) { toast(e && e.code === "declined" ? "已取消导出。" : "导出没有成功：" + ((e && e.message) || "未知原因")); }
+}
+$("btnExport").onclick = exportJson;
+$("btnImport").onclick = () => $("fileImport").click();
+$("fileImport").onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(async (txt) => {
+    const d = JSON.parse(txt);
+    const incoming = d && d.answers && (d.answers.items || d.answers);
+    if (!incoming || typeof incoming !== "object") { toast("这不是本页面导出的结果文件。"); return; }
+    const ids = new Set(ITEMS.map((it) => it.id));
+    let n = 0;
+    for (const [id, a] of Object.entries(incoming)) {
+      if (!ids.has(id) || !a || !Object.keys(a).length) continue;
+      answers[id] = Object.assign({}, answers[id] || {}, a); n += 1;
+      await persist(id);
+    }
+    render(); toast(`已载入 ${n} 道题的标注。`);
+  }).catch(() => toast("读取失败：文件不是有效的 JSON。"));
+  e.target.value = "";
+};
+$("btnHelp").onclick = () => { $("help").hidden = !$("help").hidden; prefs.helpSeen = true; savePrefs(); };
+$("btnRes").onclick = () => { prefs.res = prefs.res === 256 ? 512 : 256; render(); };
+$("btnBox").onclick = () => { prefs.box = !prefs.box; render(); };
+$("groupSel").onchange = (e) => { prefs.group = e.target.value; prefs.pos = 0; cur = 0; frame = 0; render(); };
+let resizeTimer = null;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { const it = currentItem(); if (it) drawOverlays(it.media === "video" ? [it.overlays[frame]] : it.overlays); }, 150); });
+document.addEventListener("keydown", (e) => {
+  if (["TEXTAREA", "INPUT", "SELECT"].includes(e.target.tagName)) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const it = currentItem(); if (!it) return;
+  const qs = questions(it);
+  const k = e.key;
+  if ("1234".includes(k) && k.length === 1) { answer(cur, +k - 1, true); e.preventDefault(); }
+  else if (k === "j" || k === "ArrowDown") { cur = Math.min(cur + 1, qs.length - 1); render(); e.preventDefault(); }
+  else if (k === "k" || k === "ArrowUp") { cur = Math.max(cur - 1, 0); render(); e.preventDefault(); }
+  else if (k === "ArrowRight") { go(1); e.preventDefault(); }
+  else if (k === "ArrowLeft") { go(-1); e.preventDefault(); }
+  else if (k === "n" || k === "N") nextOpen();
+  else if (k === "b" || k === "B") { prefs.box = !prefs.box; render(); }
+  else if (k === "r" || k === "R") { prefs.res = prefs.res === 256 ? 512 : 256; render(); }
+  else if (k === ",") step(-1);
+  else if (k === ".") step(1);
+  else if (k === "e" || k === "E") exportJson();
+  else if (k === "Escape") $("lightbox").hidden = true;
+});
+if (!prefs.helpSeen) $("help").hidden = false;
+showMode();
+render();
+connect();
+</script>

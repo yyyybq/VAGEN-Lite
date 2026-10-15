@@ -174,6 +174,117 @@ def cmd_render(a: argparse.Namespace) -> None:
     qf.close()
 
 
+def cmd_bank(a: argparse.Namespace) -> None:
+    """Question bank for full-scale generation: every scene of a shard, per-scene quotas, no answer balancing.
+
+    The plan (JSON) gives per-scene quotas {"groups": {group: {subtask: n}}}, "obj_cap" (questions per object and
+    group in one scene) and "verify_cap" (0: stop a group once its quotas are met). A quota larger than a group can
+    ever reach (999) means "every combo": the rare groups and the video tours. Each scene is written to
+    OUT/scenes/<scene>/ (questions.jsonl, views.jsonl, stats.json) and marked done.json last, so a re-run of the same
+    command skips finished scenes and redoes an interrupted one (resume); ``--shard i/n`` takes scenes i, i+n, ...
+    """
+    from . import common, views
+    from .render import CachedRenderer, GSRenderer, ProxyRenderer
+    from .single import Runner
+
+    common.BANK_MODE = True
+    views.SAME_NAME_PREFILTER = not a.no_name_prefilter
+    plan = json.loads(Path(a.plan).read_text())
+    scenes = [l.strip() for l in Path(a.scenes_file).read_text().splitlines() if l.strip()]
+    i, n = (int(x) for x in a.shard.split("/"))
+    mine = scenes[i::n]
+    split = load_split(SPLIT_MANIFEST)
+    out = Path(a.out)
+    (out / "scenes").mkdir(parents=True, exist_ok=True)
+    table = group_table()
+    groups = [g for g in plan["groups"] if not a.groups or g in a.groups.split(",")]
+    base = None
+    for sid in mine:
+        sd = out / "scenes" / sid
+        if (sd / "done.json").exists():
+            continue
+        sd.mkdir(parents=True, exist_ok=True)
+        for f in ("views.jsonl", "error.json"):
+            if (sd / f).exists():
+                (sd / f).unlink()
+        t0 = time.time()
+        try:
+            ctx = SceneCtx(sid)
+            if a.proxy:
+                R = CachedRenderer(ProxyRenderer(ctx))
+            else:
+                base = base or GSRenderer(a.gs_root)
+                base.set_scene(sid)
+                R = CachedRenderer(base)
+            bank = ViewBank(ctx, R, out, size=a.size)
+            g = GenCtx(ctx, bank, split.get(sid, "?"))
+            g.obj_cap = plan.get("obj_cap")
+            g.wide = bool(plan.get("wide_search", True))
+            exceptions = []
+            for grp in groups:
+                kind, (combos, realize) = table[grp]
+                t = time.time()
+                r = Runner(g, grp, dict(plan["groups"][grp]), int(plan.get("verify_cap", 0)))
+                try:
+                    r.run(combos(g), realize(r))
+                except Exception as exc:
+                    g.reject(grp, "exception:" + type(exc).__name__)
+                    exceptions.append({"group": grp, "traceback": traceback.format_exc()})
+                g.stats[grp]["seconds"] = round(time.time() - t, 2)
+            tmp = sd / "questions.jsonl.tmp"
+            with open(tmp, "w") as qf:
+                for q in g.questions:
+                    qf.write(json.dumps(q.to_json(), default=_np) + "\n")
+            tmp.replace(sd / "questions.jsonl")
+            bank.dump(sd / "views.jsonl")
+            st = {"scene_id": sid, "split": g.split, "stats": {k: dict(v) for k, v in g.stats.items()},
+                  "fail": {k: dict(v) for k, v in g.fail.items()}, "renders": R.renders,
+                  "questions": len(g.questions), "exceptions": exceptions, "seconds": round(time.time() - t0, 1)}
+            (sd / "stats.json").write_text(json.dumps(st, indent=1, default=_np))
+            (sd / "done.json").write_text(json.dumps({"utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                                                      "shard": a.shard, "questions": len(g.questions),
+                                                      "seconds": st["seconds"]}))
+            print(sid, len(g.questions), "questions", st["seconds"], "s", flush=True)
+        except Exception as exc:
+            (sd / "error.json").write_text(json.dumps({"error": f"{type(exc).__name__}: {exc}",
+                                                       "traceback": traceback.format_exc()}, indent=1))
+            print(sid, "ERROR", exc, flush=True)
+
+
+def cmd_bank_merge(a: argparse.Namespace) -> None:
+    """Join the scenes of a bank into OUT/questions.jsonl, OUT/views.jsonl and OUT/bank_stats.json."""
+    out = Path(a.out)
+    done, missing, errors = [], [], []
+    scenes = ([l.strip() for l in Path(a.scenes_file).read_text().splitlines() if l.strip()] if a.scenes_file
+              else sorted(p.name for p in (out / "scenes").iterdir()))
+    tot: Dict[str, Counter] = defaultdict(Counter)
+    fails: Dict[str, Counter] = defaultdict(Counter)
+    seconds, nq = 0.0, 0
+    with open(out / "questions.jsonl", "w") as qf, open(out / "views.jsonl", "w") as vf:
+        for sid in scenes:
+            sd = out / "scenes" / sid
+            if not (sd / "done.json").exists():
+                (errors if (sd / "error.json").exists() else missing).append(sid)
+                continue
+            done.append(sid)
+            qf.write((sd / "questions.jsonl").read_text())
+            if (sd / "views.jsonl").exists():
+                vf.write((sd / "views.jsonl").read_text())
+            st = json.loads((sd / "stats.json").read_text())
+            seconds += st["seconds"]
+            nq += st["questions"]
+            for grp, c in st["stats"].items():
+                tot[grp].update({k: v for k, v in c.items() if isinstance(v, (int, float))})
+            for grp, c in st["fail"].items():
+                fails[grp].update(c)
+    res = {"scenes_done": len(done), "scenes_missing": missing, "scenes_error": errors, "questions": nq,
+           "scene_seconds_total": round(seconds, 1), "scene_seconds_mean": round(seconds / max(len(done), 1), 1),
+           "groups": {g: dict(c) for g, c in tot.items()}, "fail": {g: dict(c.most_common(6)) for g, c in fails.items()}}
+    (out / "bank_stats.json").write_text(json.dumps(res, indent=1))
+    print(json.dumps({k: res[k] for k in ("scenes_done", "questions", "scene_seconds_mean")}),
+          "missing", len(missing), "errors", len(errors))
+
+
 def _np(x):
     import numpy as np
 
@@ -205,8 +316,22 @@ def main() -> int:
     r.add_argument("--proxy", action="store_true")
     r.add_argument("--all-scenes", action="store_true", help="visit every scene even when quotas are met")
     r.add_argument("--gs-root", default="/mnt/umm/users/yinbaiqiao/InteriorGS_ply")
+    b = sub.add_parser("bank")
+    b.add_argument("--scenes-file", required=True)
+    b.add_argument("--plan", required=True, help="per-scene quotas, object cap (configs/bank_plan_*.json)")
+    b.add_argument("--out", required=True)
+    b.add_argument("--shard", default="0/1", help="i/n: scenes i, i+n, i+2n, ... of the scenes file")
+    b.add_argument("--groups", default="")
+    b.add_argument("--size", type=int, default=512)
+    b.add_argument("--proxy", action="store_true")
+    b.add_argument("--no-name-prefilter", action="store_true", help="skip the CPU same-name camera check")
+    b.add_argument("--gs-root", default="/mnt/umm/users/yinbaiqiao/InteriorGS_ply")
+    m = sub.add_parser("bank-merge")
+    m.add_argument("--out", required=True)
+    m.add_argument("--scenes-file", default="")
+    m.add_argument("--gs-root", default="")
     a = ap.parse_args()
-    {"census": cmd_census, "render": cmd_render}[a.cmd](a)
+    {"census": cmd_census, "render": cmd_render, "bank": cmd_bank, "bank-merge": cmd_bank_merge}[a.cmd](a)
     return 0
 
 

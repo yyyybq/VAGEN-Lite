@@ -1,0 +1,12 @@
+{
+ "note": "Sampling plan (user decisions of 2026-10-15): training budget = Act-SFT image inputs per epoch (24,564 in exps/vagen_active_spatial/interiorgs_v10_train_20261014/lf), scaled to the number of train scenes in the bank when scale_budget_to_scenes is set (trial runs); one third of the train scenes get one 32-frame video conversation and nothing else; no answer above 50% of a question type (70% for two-option types), training and evaluation alike; one object in at most 2 questions of a group per scene in training, 3 in evaluation.",
+ "seed": 20261015,
+ "train": {"image_input_budget": 24564, "n_scenes": 800, "scale_budget_to_scenes": true,
+           "video_scene_fraction": 0.3333, "rare_groups_everywhere": false},
+ "answer_cap": 0.5,
+ "answer_cap_binary": 0.7,
+ "object_cap": 2,
+ "eval_object_cap": 3,
+ "eval": {"max_per_subtask": 0},
+ "rare_groups": ["M3", "M6", "M8", "M9", "M10", "M11", "V5", "V6"]
+}

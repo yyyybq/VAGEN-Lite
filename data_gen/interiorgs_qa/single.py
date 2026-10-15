@@ -254,6 +254,9 @@ class Runner:
                 break
             if self.tried >= self.verify_cap and not self.want(combo.info.get("subtasks", [])):
                 continue
+            if self.g.capped(self.group, combo.objects):
+                self.g.reject(self.group, "object_cap")
+                continue
             self.tried += 1
             self.g.count(self.group, "rendered_combos")
             reason = realize(combo, True)
@@ -316,7 +319,7 @@ def s1_combos(g: GenCtx) -> Iterator[Combo]:
             sep = bbox_gap_x(ra, rb) >= 12 or bbox_gap_x(rb, ra) >= 12
             return sep and overlap_1d(ra[1], ra[3], rb[1], rb[3]) > 0
 
-        cams = frame_candidates(ctx, [a, b], extra=lateral, max_out=2)
+        cams = frame_candidates(ctx, [a, b], extra=lateral, max_out=2, unique_in_image=[a, b])
         if cams:
             yield Combo("S1", "pair_lateral", (a, b), [[c] for c in cams], {"subtasks": SUBTASKS["S1"]})
 
@@ -476,7 +479,7 @@ def s2_combos(g: GenCtx) -> Iterator[Combo]:
         if not kinds:
             continue
         extra = vertical if kinds == ["image_vertical"] else None
-        cams = frame_candidates(ctx, [a, b], extra=extra, max_out=2)
+        cams = frame_candidates(ctx, [a, b], extra=extra, max_out=2, unique_in_image=[a, b])
         if cams:
             yield Combo("S2", "+".join(kinds), (a, b), [[c] for c in cams], {"subtasks": SUBTASKS["S2"], "kinds": kinds})
 
@@ -588,7 +591,7 @@ def s3_combos(g: GenCtx) -> Iterator[Combo]:
             za, zb = to_camera(np.stack([ctx.obb[a].center, ctx.obb[b].center]), c2w)[:, 2]
             return abs(float(za - zb)) >= 0.8
 
-        cams = frame_candidates(ctx, [a, b], extra=depth_gap, max_out=2)
+        cams = frame_candidates(ctx, [a, b], extra=depth_gap, max_out=2, unique_in_image=[a, b])
         if cams:
             yield Combo("S3", "pair_depth", (a, b), [[c] for c in cams], {"subtasks": ["3D-03", "BL-02"]})
     # triples / quadruples for EmbSpatial closest / farthest
@@ -614,7 +617,7 @@ def s3_combos(g: GenCtx) -> Iterator[Combo]:
                 z = np.sort(to_camera(np.stack([ctx.obb[o].center for o in t]), c2w)[:, 2])
                 return (z[1] - z[0] >= 0.6) or (z[2] - z[1] >= 0.6)
 
-            cams = frame_candidates(ctx, list(t), extra=spread, max_out=2)
+            cams = frame_candidates(ctx, list(t), extra=spread, max_out=2, unique_in_image=list(t))
             if cams:
                 yield Combo("S3", "set_depth", tuple(t), [[c] for c in cams], {"subtasks": ["ES-05", "ES-06"]})
 
@@ -720,7 +723,7 @@ def s4_combos(g: GenCtx) -> Iterator[Combo]:
             kinds.append("not_touch")
         if not kinds:
             continue
-        cams = frame_candidates(ctx, [a, b], max_out=2)
+        cams = frame_candidates(ctx, [a, b], max_out=2, unique_in_image=[a, b])
         if cams:
             yield Combo("S4", "pair_" + kinds[0], (a, b), [[c] for c in cams],
                         {"subtasks": ["3D-04", "BL-03"], "kinds": kinds, "distance": d})
@@ -742,7 +745,7 @@ def s4_combos(g: GenCtx) -> Iterator[Combo]:
             da, db = distance(ctx, a, c), distance(ctx, b, c)
             if abs(da - db) < max(0.5, 0.3 * min(da, db)):
                 continue
-            cams = frame_candidates(ctx, [a, b, c], max_out=2)
+            cams = frame_candidates(ctx, [a, b, c], max_out=2, unique_in_image=[a, b, c])
             if cams:
                 n += 1
                 yield Combo("S4", "triple_closer", (c, a, b), [[x] for x in cams],
@@ -912,7 +915,7 @@ def s6_combos(g: GenCtx) -> Iterator[Combo]:
     pool = single_pool(ctx)
     g.rng.shuffle(pool)
     for o in pool:
-        cams = frame_candidates(ctx, [o], max_out=2, radii=(1.5, 2.0, 2.6, 3.2, 3.9))
+        cams = frame_candidates(ctx, [o], max_out=2, radii=(1.5, 2.0, 2.6, 3.2, 3.9), unique_in_image=[o])
         if cams:
             yield Combo("S6", "single", (o,), [[c] for c in cams], {"subtasks": ["BL-05"]})
 
@@ -999,7 +1002,7 @@ def s7_combos(g: GenCtx) -> Iterator[Combo]:
             kind = "perpendicular"
         else:
             continue
-        cams = frame_candidates(ctx, [a, b], max_out=2)
+        cams = frame_candidates(ctx, [a, b], max_out=2, unique_in_image=[a, b])
         if cams:
             yield Combo("S7", kind, (a, b), [[c] for c in cams], {"subtasks": ["3D-11"], "angle_deg": diff})
 
