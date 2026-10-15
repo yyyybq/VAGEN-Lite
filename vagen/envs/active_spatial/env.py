@@ -285,6 +285,7 @@ class ActiveSpatialEnv(BaseEnv):
                 "safety_margin": config.collision_safety_margin,
                 "enable_object_collision": True,
                 "enable_boundary_collision": True,
+                "wall_model": getattr(config, "wall_model", "room_edges"),  # round 10: "thick" for v10 data
             })
         
         # Collision tracking for episode

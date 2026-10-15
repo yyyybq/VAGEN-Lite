@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 
 def _box(ins_id: str, label: str, xmin: float, ymin: float, zmin: float,
@@ -42,7 +42,10 @@ def _walls_for_rect(start_id: int, x0: float, y0: float, x1: float, y1: float,
 
 
 def _write(scene_dir: Path, labels: List[dict], rooms: List[Tuple[str, Sequence[Sequence[float]]]],
-           holes: List[Sequence[Sequence[float]]], y_sign: float, truth: dict) -> Path:
+           holes: List[Sequence[Sequence[float]]], y_sign: float, truth: dict,
+           walls: Optional[List[Tuple[Sequence[float], Sequence[float], float]]] = None) -> Path:
+    """``walls``: optional structure.json ``walls`` list as ((x0, y0), (x1, y1), thickness) centre lines, 2.8 m
+    high (real scenes have one; without it the loaders fall back to the room outlines)."""
     scene_dir.mkdir(parents=True, exist_ok=True)
     structure = {
         "rooms": [
@@ -54,6 +57,10 @@ def _write(scene_dir: Path, labels: List[dict], rooms: List[Tuple[str, Sequence[
             for poly in holes
         ],
     }
+    if walls is not None:
+        structure["walls"] = [{"thickness": float(t), "height": 2.8,
+                               "location": [[float(a[0]), float(y_sign * a[1])], [float(b[0]), float(y_sign * b[1])]]}
+                              for a, b, t in walls]
     (scene_dir / "labels.json").write_text(json.dumps(labels, indent=1))
     (scene_dir / "structure.json").write_text(json.dumps(structure, indent=1))
     truth = dict(truth)
@@ -62,11 +69,12 @@ def _write(scene_dir: Path, labels: List[dict], rooms: List[Tuple[str, Sequence[
     return scene_dir
 
 
-def two_rooms(root: Path) -> Path:
+def two_rooms(root: Path, walls: bool = False) -> Path:
     """Living room [0,6]x[0,5] + bedroom [6,10]x[0,5], door at x=6, y in [2,3].
 
     Duplicates: 2 dining chairs, 2 bedside tables.  Structure stored with the
-    historical -y convention.
+    historical -y convention.  ``walls``: also a structure.json ``walls`` list (0.2 m thick: the outer
+    rectangle and the partition at x = 6 with the door), as real scenes have.
     """
     labels = [
         _box("1", "multi person sofa", 0.3, 1.5, 0.0, 1.2, 3.7, 0.9),
@@ -97,6 +105,10 @@ def two_rooms(root: Path) -> Path:
         "duplicate_labels": {"dining chair": ["6", "7"], "bedside table": ["11", "12"]},
         "rooms": ["living room", "bedroom"],
     }
+    if walls:
+        wall_list = [((0, 0), (10, 0), 0.2), ((10, 0), (10, 5), 0.2), ((10, 5), (0, 5), 0.2), ((0, 5), (0, 0), 0.2),
+                     ((6, 0), (6, 5), 0.2)]
+        return _write(root / "synth_two_rooms_walls", labels, rooms, holes, y_sign=-1.0, truth=truth, walls=wall_list)
     return _write(root / "synth_two_rooms", labels, rooms, holes, y_sign=-1.0, truth=truth)
 
 
@@ -147,13 +159,17 @@ def dense_duplicates(root: Path) -> Path:
                   y_sign=-1.0, truth=truth)
 
 
-def write_synthetic_scenes(root: Path) -> Dict[str, Path]:
+def write_synthetic_scenes(root: Path, with_walls: bool = False) -> Dict[str, Path]:
+    """``with_walls``: also "two_rooms_walls", the two-room scene with a structure.json walls list (round 10)."""
     root = Path(root)
-    return {
+    out = {
         "two_rooms": two_rooms(root),
         "symmetric_ambiguous": symmetric_ambiguous(root),
         "dense_duplicates": dense_duplicates(root),
     }
+    if with_walls:
+        out["two_rooms_walls"] = two_rooms(root, walls=True)
+    return out
 
 
 if __name__ == "__main__":  # pragma: no cover

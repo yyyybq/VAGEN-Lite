@@ -165,6 +165,10 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     collision_invalidate_action: bool = True  # If True, collision actions don't move camera
     max_consecutive_collisions: int = 3  # Terminate only after repeated collision attempts
     consecutive_collision_penalty: float = -0.5  # Extra penalty when repeated collisions terminate
+    # Round 10: how structure.json walls block movement and sight (collision_detector.WALL_MODELS).
+    # "room_edges": the historical rule (R1, v10 up to round 9); "thick": walls are slabs of their thickness
+    # with doors and floor-level openings cut out (v10 from round 10; the generator must use the same model).
+    wall_model: str = "room_edges"
     # Round 9 switch: when a move of the turn is blocked, the feedback says how many of the turn's actions were
     # executed and which were blocked ("2 of 3 actions executed; blocked: move_backward (blocked by wall).").
     # Default False: "Action executed." whenever any move took effect, the collision message only when none did.

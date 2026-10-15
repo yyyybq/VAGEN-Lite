@@ -76,6 +76,10 @@ class RunConfig:
     # starts with its hidden target clearly visible (start_context.py).
     require_structure_walls: bool = False
     oa_start_target_visible: bool = False
+    # 2026-10-15, round 10: the wall model of the collision detector and the visibility rule
+    # (collision_detector.WALL_MODELS).  "thick": structure.json walls as slabs of their thickness, doors and
+    # floor-level openings cut out; the RL env must be configured with the same wall_model.
+    wall_model: str = "room_edges"
     # a target's reference object is never another target of the same task: the target takes another valid
     # description, or the item is dropped (object preset v10_r6 lists the alternatives; start_context.py)
     forbid_other_target_reference: bool = False
@@ -307,7 +311,7 @@ def _generate_scene(scene_dir: Any, scene_id: Optional[str], cfg: RunConfig) -> 
         t = time.perf_counter()
         sid = scene_id or Path(scene_dir).name
         scene = load_scene(Path(scene_dir), scene_id, ignored_ids=ignored_object_ids(cfg.ignored_objects, sid),
-                           no_task_ids=ignored_object_ids(cfg.no_task_objects, sid))
+                           no_task_ids=ignored_object_ids(cfg.no_task_objects, sid), wall_model=cfg.wall_model)
         if scene.ignored_object_ids:
             summary["ignored_object_ids"] = list(scene.ignored_object_ids)
         if scene.no_task_object_ids:

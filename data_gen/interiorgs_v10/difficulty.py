@@ -191,8 +191,11 @@ class _DetectorReplica:
         all_segs = list(det.wall_segments or [])
         seg_a = np.array([np.asarray(a, dtype=np.float64)[:2] for a, _ in all_segs]).reshape(-1, 2)
         seg_b = np.array([np.asarray(b, dtype=np.float64)[:2] for _, b in all_segs]).reshape(-1, 2)
-        # scene.wall_distance always uses every wall segment ...
-        self.swa, self.swb = seg_a, seg_b
+        # scene.wall_distance always uses every clearance segment (the room edges; the same list as the
+        # collision segments under the "room_edges" wall model) ...
+        clear = list(getattr(scene, "clearance_segments", None) or all_segs)
+        self.swa = np.array([np.asarray(a, dtype=np.float64)[:2] for a, _ in clear]).reshape(-1, 2)
+        self.swb = np.array([np.asarray(b, dtype=np.float64)[:2] for _, b in clear]).reshape(-1, 2)
         # ... the detector only when object collision is enabled
         self.wa = seg_a if self.objects_on else seg_a[:0]
         self.wb = seg_b if self.objects_on else seg_b[:0]

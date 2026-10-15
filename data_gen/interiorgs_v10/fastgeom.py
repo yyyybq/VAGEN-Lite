@@ -285,12 +285,18 @@ class LegalityKernel:
                  object_collision: bool = True, boundary_collision: bool = True, scene_loaded: bool = True,
                  ref_point: Optional[Callable[[float, float], bool]] = None,
                  ref_transition: Optional[Callable[[float, float, float, float], bool]] = None,
-                 cell: float = 0.5, reach: float = 0.45) -> None:
+                 cell: float = 0.5, reach: float = 0.45,
+                 clearance_segments: Optional[Sequence[Tuple[np.ndarray, np.ndarray]]] = None) -> None:
+        """``clearance_segments``: the walls Scene.wall_distance measures ``min_wall_distance`` from (the room
+        edges); default the collision ``wall_segments`` (the two coincide under the "room_edges" wall model)."""
         self.z = float(z)
         self.polygons = [np.asarray(p, dtype=np.float64).reshape(-1, 2) for p in polygons]
         segs = list(wall_segments)
         self.walls = (np.array([[float(a[0]), float(a[1]), float(b[0]), float(b[1])] for a, b in segs],
                                dtype=np.float64).reshape(-1, 4))
+        csegs = segs if clearance_segments is None else list(clearance_segments)
+        self.cwalls = (np.array([[float(a[0]), float(a[1]), float(b[0]), float(b[1])] for a, b in csegs],
+                                dtype=np.float64).reshape(-1, 4))
         box_min = np.asarray(box_min, dtype=np.float64).reshape(-1, 3)
         box_max = np.asarray(box_max, dtype=np.float64).reshape(-1, 3)
         # Only boxes whose z-slab contains z can contain a point at height z, and a
@@ -327,8 +333,9 @@ class LegalityKernel:
     def _build_grid(self) -> None:
         pts = [np.zeros((0, 2))]
         pts += [p for p in self.polygons if len(p)]
-        if len(self.walls):
-            pts += [self.walls[:, :2], self.walls[:, 2:]]
+        for w in (self.walls, self.cwalls):
+            if len(w):
+                pts += [w[:, :2], w[:, 2:]]
         if len(self.bmin):
             pts += [self.bmin, self.bmax]
         allp = np.concatenate(pts, axis=0)
@@ -339,13 +346,17 @@ class LegalityKernel:
         hi = allp.max(axis=0) + pad
         self.grid = _Grid(lo, hi, self.cell)
         g = self.grid
-        wall_rects = (np.stack([np.minimum(self.walls[:, 0], self.walls[:, 2]), np.minimum(self.walls[:, 1], self.walls[:, 3]),
-                                np.maximum(self.walls[:, 0], self.walls[:, 2]), np.maximum(self.walls[:, 1], self.walls[:, 3])], axis=1)
-                      if len(self.walls) else np.zeros((0, 4)))
+
+        def rects(w: np.ndarray) -> np.ndarray:
+            return (np.stack([np.minimum(w[:, 0], w[:, 2]), np.minimum(w[:, 1], w[:, 3]),
+                              np.maximum(w[:, 0], w[:, 2]), np.maximum(w[:, 1], w[:, 3])], axis=1)
+                    if len(w) else np.zeros((0, 4)))
+
+        wall_rects = rects(self.walls)
         box_rects = np.concatenate([self.bmin, self.bmax], axis=1) if len(self.bmin) else np.zeros((0, 4))
-        r_pt = max(self.min_wall_distance, self.camera_radius) + CELL_MARGIN
         r_tr = self.reach + self.camera_radius + CELL_MARGIN
-        self.pt_walls = g.csr(wall_rects, r_pt)
+        self.pt_walls = g.csr(wall_rects, self.camera_radius + CELL_MARGIN)
+        self.pt_cwalls = g.csr(rects(self.cwalls), self.min_wall_distance + CELL_MARGIN)
         self.pt_boxes = g.csr(box_rects, CELL_MARGIN)
         self.tr_walls = g.csr(wall_rects, r_tr)
         self.tr_boxes = g.csr(box_rects, self.reach + CELL_MARGIN)
@@ -414,21 +425,22 @@ class LegalityKernel:
             near[exact] |= nr
         legal = in_room.copy()
 
-        # 2. walls: Scene.wall_distance < min_wall_distance, then detector's < camera_radius
-        if len(self.walls):
+        # 2. walls: Scene.wall_distance (clearance segments) < min_wall_distance, then the detector's
+        #    distance to its collision segments < camera_radius
+        if len(self.cwalls):
+            q, k = self._pairs(cells, in_grid, self.pt_cwalls, len(self.cwalls))
+            if len(q):
+                w = self.cwalls[k]
+                d_clip, deg_near = point_segment_distance_clip(x[q], y[q], w[:, 0], w[:, 1], w[:, 2], w[:, 3])
+                near |= _any_by(q, _close(d_clip, self.min_wall_distance) | deg_near, n)
+                legal &= ~_any_by(q, d_clip < self.min_wall_distance, n)
+        if self.check_walls:
             q, k = self._pairs(cells, in_grid, self.pt_walls, len(self.walls))
             if len(q):
                 w = self.walls[k]
-                px = x[q]
-                py = y[q]
-                d_clip, deg_near = point_segment_distance_clip(px, py, w[:, 0], w[:, 1], w[:, 2], w[:, 3])
-                too_close = d_clip < self.min_wall_distance
-                near |= _any_by(q, _close(d_clip, self.min_wall_distance) | deg_near, n)
-                if self.check_walls:
-                    d_det = point_segment_distance_branch(px, py, w[:, 0], w[:, 1], w[:, 2], w[:, 3])
-                    too_close = too_close | (d_det < self.camera_radius)
-                    near |= _any_by(q, _close(d_det, self.camera_radius), n)
-                legal &= ~_any_by(q, too_close, n)
+                d_det = point_segment_distance_branch(x[q], y[q], w[:, 0], w[:, 1], w[:, 2], w[:, 3])
+                near |= _any_by(q, _close(d_det, self.camera_radius), n)
+                legal &= ~_any_by(q, d_det < self.camera_radius, n)
 
         # 3. object boxes (AABB.contains, inclusive, exact comparisons)
         if self.check_boxes:

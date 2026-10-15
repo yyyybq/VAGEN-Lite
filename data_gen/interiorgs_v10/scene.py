@@ -124,9 +124,18 @@ class Scene:
                 return room.index
         return None
 
+    @property
+    def clearance_segments(self) -> List[Tuple[np.ndarray, np.ndarray]]:
+        """The walls a generated pose keeps ``min_wall_distance`` from: the room outline edges without those
+        touching a door (the detector's collision segments under the "room_edges" wall model; under "thick"
+        the collision segments are the slab outlines and this list is kept separately)."""
+        det = self.detector
+        return list(getattr(det, "clearance_segments", None) or []) if hasattr(det, "clearance_segments") \
+            else list(det.wall_segments or [])
+
     def wall_distance(self, x: float, y: float) -> float:
         p = np.array([x, y], dtype=float)
-        segs = self.detector.wall_segments
+        segs = self.clearance_segments
         if not segs:
             return math.inf
         return min(point_segment_distance(p, a, b) for a, b in segs)
@@ -154,7 +163,8 @@ class Scene:
         from .fastgeom import LegalityKernel
 
         det = self.detector
-        key = (float(self.min_wall_distance), id(det), len(det.object_boxes), len(det.wall_segments),
+        clearance = self.clearance_segments
+        key = (float(self.min_wall_distance), id(det), len(det.object_boxes), len(det.wall_segments), len(clearance),
                float(det.floor_height), float(det.ceiling_height), float(det.camera_radius),
                bool(det.enable_object_collision), bool(det.enable_boundary_collision), bool(det.scene_loaded),
                len(self.rooms))
@@ -167,7 +177,8 @@ class Scene:
                 z=CAMERA_HEIGHT_M, floor_height=det.floor_height, ceiling_height=det.ceiling_height,
                 camera_radius=det.camera_radius, min_wall_distance=self.min_wall_distance,
                 object_collision=det.enable_object_collision, boundary_collision=det.enable_boundary_collision,
-                scene_loaded=det.scene_loaded, ref_point=self._ref_point, ref_transition=self._ref_transition)
+                scene_loaded=det.scene_loaded, ref_point=self._ref_point, ref_transition=self._ref_transition,
+                clearance_segments=clearance)
             self._kernel_key = key
         return self._kernel
 
@@ -217,8 +228,11 @@ class Scene:
 
 def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
                y_sign_override: Optional[float] = None, ignored_ids: Optional[Sequence[str]] = None,
-               no_task_ids: Optional[Sequence[str]] = None) -> Scene:
+               no_task_ids: Optional[Sequence[str]] = None, wall_model: str = "room_edges") -> Scene:
     """Load a scene, calibrate the structure Y sign (v2) and build the detector.
+
+    ``wall_model`` (round 10): the detector's wall model ("room_edges" or "thick"); the RL env must be
+    configured with the same value (ActiveSpatialEnvConfig.wall_model).
 
     Sign selection: explicit ``y_sign_override`` > calibration v2 (passed to the
     detector as an override only when v1 would not freeze it) > v1 inside the
@@ -253,7 +267,7 @@ def load_scene(scene_dir: Path, scene_id: Optional[str] = None,
         overrides = None
         source = "detector_v1"
     detector = CollisionDetector(camera_radius=CAMERA_RADIUS_M, safety_margin=SAFETY_MARGIN_M,
-                                 structure_y_sign_overrides=overrides)
+                                 structure_y_sign_overrides=overrides, wall_model=wall_model)
     import contextlib
     import io
 
