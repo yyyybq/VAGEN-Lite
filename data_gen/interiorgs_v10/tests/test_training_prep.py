@@ -102,6 +102,17 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual((lf["save_strategy"], lf["save_only_model"]), ("epoch", True))
         prep.prepare(Namespace(out=str(self.root / "lf_steps"), allow_unreviewed_trajectories=True, **common))
         self.assertNotIn("save_strategy", yaml.safe_load((self.root / "lf_steps" / "train.yaml").read_text()))
+        # round 10: --keep-text keeps every message as the env shows it (the system prompt and later user turns
+        # end with a newline); the default strips them, as rounds 6-9 trained
+        self.assertEqual(manifest["trajectory_text"], "stripped")
+        kept = prep.prepare(Namespace(out=str(self.root / "lf_keep"), allow_unreviewed_trajectories=True,
+                                      keep_text=True, **common))
+        self.assertEqual(kept["trajectory_text"], "verbatim")
+        source = records[0]["conversations"]
+        for out_dir, expect in (("lf", lambda t: t.strip()), ("lf_keep", lambda t: t)):
+            first = json.loads((self.root / out_dir / "trajectory_train.jsonl").read_text().splitlines()[0])
+            self.assertEqual([m["content"] for m in first["messages"]], [expect(t["content"]) for t in source])
+        self.assertTrue(source[0]["content"].endswith("\n"))  # the env's system prompt does end with one
 
     def test_rl_config_and_prompt_consistency(self):
         import yaml

@@ -154,7 +154,9 @@ def prepare(args):
                             "Use R1 canonical trajectories; legacy score labels need a separate recipe"
                         )
                     _validate_record(row, path.parent)
-                    record = _convert_record(row, path.parent, strip_think=True)
+                    # --keep-text (InteriorGS v10 from round 10): the messages exactly as the env shows them; the
+                    # default strips leading/trailing whitespace and collapses blank lines (rounds 6-9 trained so)
+                    record = _convert_record(row, path.parent, strip_think=not getattr(args, "keep_text", False))
                     validate_messages(record)
                 samples.append(
                     {
@@ -282,6 +284,8 @@ def prepare(args):
         # explicit and recorded: trajectories admitted without a semantic (model or human) review
         "trajectory_semantic_review": ("not_required" if getattr(args, "allow_unreviewed_trajectories", False)
                                        else "required"),
+        # "verbatim": the env's text character for character; "stripped": leading/trailing whitespace removed
+        "trajectory_text": "verbatim" if getattr(args, "keep_text", False) else "stripped",
         "sources": sources,
         "counts": {f"{k}/{s}": len(v) for (k, s), v in buckets.items()},
         "excluded": dict(excluded),
@@ -327,6 +331,10 @@ def main():
     p.add_argument("--allow-unreviewed-trajectories", action="store_true",
                    help="Admit trajectories without a semantic review (InteriorGS v10 first SFT version, 2026-10-14); "
                         "recorded in the output manifest")
+    p.add_argument("--keep-text", action="store_true",
+                   help="Keep every message exactly as the trajectory file has it (InteriorGS v10 from round 10, "
+                        "2026-10-15: the env's text, trailing newlines included); the default strips leading and "
+                        "trailing whitespace and collapses blank lines")
     args = p.parse_args()
     if args.cutoff_len <= 0:
         p.error("cutoff-len must be positive")
