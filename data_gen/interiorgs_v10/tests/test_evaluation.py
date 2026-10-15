@@ -8,6 +8,13 @@ from pathlib import Path
 from data_gen.interiorgs_v10 import evaluation as E
 
 
+class _Img:  # a frame stand-in that can be saved as a JPEG
+    def convert(self, mode):
+        from PIL import Image
+
+        return Image.new(mode, (4, 4))
+
+
 def _row(i, fam, d):
     return {"task_id": f"t{i:04d}", "task_type": fam, "scene_id": f"s{i % 7}", "difficulty": {"d_star": d}}
 
@@ -98,6 +105,67 @@ class EvaluationTest(unittest.TestCase):
                          (["distance_ok"], 0.6667, [], 1.0))
         answers = iter(["move_forward|turn_left", "move_forward"])
         self.assertNotIn("trajectory", E.run_episode(Env(), policy, 7, 12))  # without a frames folder: counts only
+
+    def test_history_gives_every_earlier_turn_in_the_sft_layout(self):
+        part = lambda im: {"type": "image", "id": im}  # noqa: E731
+        msgs = E.chat_messages("sys", [("[Initial Observation]:\n<image>\nTask A", "f0", "<action>turn_left|</action>")],
+                               "[Observation]:\n<image>\nEnvironment Feedback: Action executed.", "f1", part)
+        self.assertEqual([m["role"] for m in msgs], ["system", "user", "assistant", "user"])
+        self.assertEqual(msgs[1]["content"], [{"type": "text", "text": "[Initial Observation]:\n"},
+                                              {"type": "image", "id": "f0"}, {"type": "text", "text": "\nTask A"}])
+        self.assertEqual(msgs[2]["content"], "<action>turn_left|</action>")
+        self.assertEqual(msgs[3]["content"][1], {"type": "image", "id": "f1"})
+        self.assertEqual(len(E.chat_messages("sys", [], "<image>\nx", "f", part)), 2)  # no history: system + user
+
+        class Env:
+            current_item = {"task_id": "t", "task_type": "fov_inclusion", "difficulty": {"d_star": 2}}
+            _current_step = 0
+
+            def reset(self, seed):
+                return {"obs_str": "<image>\nturn 0", "multi_modal_data": {"<image>": ["frame0"]}}, {}
+
+            def system_prompt(self):
+                return "sys"
+
+            def step(self, text):
+                self._current_step += 1
+                obs = {"obs_str": f"<image>\nturn {self._current_step}",
+                       "multi_modal_data": {"<image>": [f"frame{self._current_step}"]}}
+                return obs, -0.01, self._current_step >= 3, {"actions": ["turn_left"], "metrics": {}}
+
+            def _calculate_canonical_metric(self):
+                return {"success": False}
+
+        calls = []
+
+        class Policy:
+            last_prompt_tokens = None
+
+            def generate(self, system, user_text, image, earlier=()):
+                calls.append((user_text, image, list(earlier)))
+                self.last_prompt_tokens = 100 * (len(earlier) + 1)
+                return f"<action>a{len(calls)}|</action>"
+
+        row = E.run_episode(Env(), Policy(), 0, 12, history=True)
+        self.assertEqual(row["turns"], 3)
+        self.assertEqual(calls[0][2], [])
+        self.assertEqual(calls[2][2], [("<image>\nturn 0", "frame0", "<action>a1|</action>"),
+                                       ("<image>\nturn 1", "frame1", "<action>a2|</action>")])
+        calls.clear()
+        E.run_episode(Env(), Policy(), 0, 12)  # without history the earlier turns are not passed
+        self.assertEqual([c[2] for c in calls], [[], [], []])
+        class FrameEnv(Env):  # frames that can be saved, for the recorded trajectory
+            def reset(self, seed):
+                obs, info = super().reset(seed)
+                return dict(obs, multi_modal_data={"<image>": [_Img()]}), info
+
+            def step(self, text):
+                obs, reward, done, info = super().step(text)
+                return dict(obs, multi_modal_data={"<image>": [_Img()]}), reward, done, info
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rec = E.run_episode(FrameEnv(), Policy(), 0, 12, frames=Path(tmp) / "frames", history=True)
+        self.assertEqual([t["prompt_tokens"] for t in rec["trajectory"]], [100, 200, 300])  # the input length per call
 
     def test_switches_reach_the_env_config(self):
         import argparse

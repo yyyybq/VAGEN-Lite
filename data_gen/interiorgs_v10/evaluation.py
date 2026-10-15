@@ -28,7 +28,7 @@ import random
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 PER_FAMILY = 50
 SEED = 20261014
@@ -186,17 +186,36 @@ def _images(obs: Dict[str, Any]) -> List[Any]:
     return [im for v in (obs.get("multi_modal_data") or {}).values() for im in (v or [])]
 
 
-def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None) -> Dict[str, Any]:
+def chat_messages(system: str, earlier: Sequence[Tuple[str, Any, str]], user_text: str, image: Any,
+                  image_part: Callable[[Any], Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The chat for one model call, in the layout of the SFT conversations: the system prompt, then every earlier
+    turn (its user text with the frame where "<image>" stands, and the model's answer), then the current user
+    turn.  ``earlier`` is empty without history (the RL input since round 6)."""
+    def user(text: str, im: Any) -> Dict[str, Any]:
+        before, _, after = text.partition("<image>")
+        content = ([{"type": "text", "text": before}] if before else []) + [image_part(im)]
+        content += [{"type": "text", "text": after}] if after else []
+        return {"role": "user", "content": content}
+
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": system}]
+    for text, im, answer in earlier:
+        messages += [user(text, im), {"role": "assistant", "content": answer}]
+    return messages + [user(user_text, image)]
+
+
+def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None,
+                history: bool = False) -> Dict[str, Any]:
     """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py.
 
     With ``frames`` (round 8) the row also carries the trajectory: per turn the frame the model saw (a JPEG in
     ``frames``, named <index>_<turn>.jpg), the user text, the answer, the parsed actions, blocked moves, reward
-    and whether the task was met after the turn; then the frame after the last turn and the env's end reason."""
+    and whether the task was met after the turn; then the frame after the last turn and the env's end reason.
+    With ``history`` (round 9 switch) every model call also gets all earlier turns of the episode, as in SFT."""
     obs, info = env.reset(seed=index)
     system = env.system_prompt()
     item = env.current_item or {}
     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
-    done, trajectory, end_reason = False, [], None
+    done, trajectory, end_reason, earlier = False, [], None, []
     start = gate_summary(env._calculate_canonical_metric()) if frames is not None else None
 
     def keep(image: Any, turn: int) -> Optional[str]:
@@ -211,8 +230,14 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         images = _images(obs)
         if len(images) != 1:
             raise RuntimeError(f"expected one observation image, got {len(images)}")
-        text = policy.generate(system, obs["obs_str"], images[0])
+        if history:
+            text = policy.generate(system, obs["obs_str"], images[0], earlier=list(earlier))
+            earlier.append((obs["obs_str"], images[0], text))
+        else:
+            text = policy.generate(system, obs["obs_str"], images[0])
         seen = {"frame": keep(images[0], turns), "user": obs["obs_str"]}
+        if getattr(policy, "last_prompt_tokens", None) is not None:
+            seen["prompt_tokens"] = policy.last_prompt_tokens
         obs, reward, done, step_info = env.step(text)
         turns += 1
         parsed = list(step_info.get("actions") or [])
@@ -243,29 +268,32 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
     return row
 
 
+def _image_url(image: Any) -> Dict[str, Any]:
+    import base64
+    import io
+
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()}}
+
+
 class VllmPolicy:  # pragma: no cover - needs a GPU
-    def __init__(self, model: str, gpu_memory_utilization: float = 0.6, max_model_len: int = 8192) -> None:
+    def __init__(self, model: str, gpu_memory_utilization: float = 0.6, max_model_len: int = 8192,
+                 max_images: int = 1) -> None:
         from vllm import LLM
 
         self.llm = LLM(model=model, gpu_memory_utilization=gpu_memory_utilization, max_model_len=max_model_len,
-                       enforce_eager=True, enable_prefix_caching=True, limit_mm_per_prompt={"image": 1},
+                       enforce_eager=True, enable_prefix_caching=True, limit_mm_per_prompt={"image": max_images},
                        trust_remote_code=False)
+        self.last_prompt_tokens: Optional[int] = None
 
-    def generate(self, system: str, user_text: str, image: Any) -> str:
-        import base64
-        import io
-
+    def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = ()) -> str:
         from vllm import SamplingParams
 
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-        before, _, after = user_text.partition("<image>")
-        content = ([{"type": "text", "text": before}] if before else []) + [{"type": "image_url", "image_url": {"url": url}}]
-        content += [{"type": "text", "text": after}] if after else []
         params = SamplingParams(temperature=0.0, max_tokens=384, stop=["</action>"], include_stop_str_in_output=True)
-        out = self.llm.chat([{"role": "system", "content": system}, {"role": "user", "content": content}],
-                            sampling_params=params, use_tqdm=False)
+        out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url), sampling_params=params,
+                            use_tqdm=False)
+        self.last_prompt_tokens = len(out[0].prompt_token_ids)
         return out[0].outputs[0].text
 
 
@@ -283,10 +311,13 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
     env = ActiveSpatialEnv(ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items() if k in keys}))
     t0 = time.time()
-    policy = VllmPolicy(args.model)
+    # with history a call carries every earlier frame; SFT trained with cutoff 16,384 tokens
+    policy = VllmPolicy(args.model, max_model_len=16384 if args.history else 8192,
+                        max_images=int(args.max_turns) if args.history else 1)
     (out / "model.json").write_text(json.dumps({"name": args.name, "model": args.model, "version": VERSION,
                                                 "prompt_format": cfg["prompt_format"], "greedy": True,
                                                 "env_switches": switches, "max_turns": int(args.max_turns),
+                                                "history": bool(args.history),
                                                 "load_seconds": round(time.time() - t0, 1)}, indent=1))
     done = {r["index"] for r in _jsonl(out / "results.jsonl")} if (out / "results.jsonl").exists() else set()
     with open(out / "results.jsonl", "a") as f:
@@ -294,7 +325,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
             if i in done:
                 continue
             try:
-                row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames")
+                row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames", history=args.history)
             except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
                 row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
             f.write(json.dumps(row) + "\n")
@@ -369,6 +400,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
     r.add_argument("--no-collision-end", action="store_true", help="3 blocked moves in a row no longer end the task")
     r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
+    r.add_argument("--history", action="store_true", help="every model call gets all earlier turns, as in SFT")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     x = sub.add_parser("replace")
