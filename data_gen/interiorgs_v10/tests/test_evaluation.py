@@ -206,6 +206,33 @@ class EvaluationTest(unittest.TestCase):
             self.assertTrue(told["collision_feedback_detail"])
             self.assertNotIn("collision_feedback_detail", plain)
 
+    def test_end_reasons_and_paired_comparison(self):
+        def r(i, ok, end):
+            return {"index": i, "task_type": "fov_inclusion", "d_star": 2, "success": ok, "actions_to_success": 2 if ok else None,
+                    "turns": 2, "actions": 4, "collisions": 0, "invalid_turns": 0, "end_reason": end}
+
+        base = [r(0, True, "success_auto"), r(1, False, "max_primitive_steps"), r(2, False, "consecutive_collision"),
+                r(3, True, "max_primitive_steps_success"), r(4, False, "max_turns"), {"index": 5, "error": "x"}]
+        m = E.metrics(base)
+        self.assertEqual(m["used_limit"], 3)  # the action limit (with and without success at the last action) or turn limit
+        self.assertEqual(m["collision_ended"], 1)
+        self.assertEqual(m["ended_by"]["success_auto"], 1)
+        self.assertIsNone(E.metrics([dict(base[0], end_reason=None)])["used_limit"])  # eval v1 rows: not recorded
+        other = [r(0, True, "success_auto"), r(1, True, "success_auto"), r(2, True, "success_auto"),
+                 r(3, False, "max_primitive_steps"), r(4, False, "max_turns"), r(5, True, "success_auto")]
+        self.assertEqual(E.paired(base, other), {"tasks": 5, "both": 1, "only_base": 1, "only_other": 2, "neither": 1,
+                                                 "p": 1.0})
+        self.assertEqual((round(E.sign_test(23, 18), 3), round(E.sign_test(6, 19), 3), E.sign_test(0, 0)),
+                         (0.533, 0.015, 1.0))  # round 8: SFT e3 vs RL 250, SFT e2 vs e3
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, rows in (("D0", base), ("D1", other)):
+                (Path(tmp) / name).mkdir()
+                (Path(tmp) / name / "results.jsonl").write_text("".join(json.dumps(x) + "\n" for x in rows))
+            out = Path(tmp) / "cmp.json"
+            E.cmd_compare(type("A", (), {"base": str(Path(tmp) / "D0"), "other": [str(Path(tmp) / "D1")], "out": str(out)})())
+            self.assertEqual(json.loads(out.read_text())["compare"]["D1"]["only_other"], 2)
+            self.assertIn("| D1 | 5 | 1 | 1 | 2 | 1 | 1.000 |", out.with_suffix(".md").read_text(encoding="utf-8"))
+
     def test_replace_flagged(self):
         picked = [_row(i, "projective_relations", 2) for i in range(4)] + [_row(10, "occlusion_alignment", 8)]
         pool = picked + [_row(20 + i, "projective_relations", 1 + i % 3) for i in range(3)] + [_row(30, "projective_relations", 7)]

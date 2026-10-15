@@ -366,6 +366,7 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         by_band[band_name(r["d_star"])].append(r)
     actions = sum(r["actions"] for r in ok)
     turns = sum(r["turns"] for r in ok)
+    ended = Counter(r["end_reason"] for r in ok if r.get("end_reason"))  # recorded since eval v2
     return {
         "episodes": len(ok), "errors": len(rows) - len(ok), "success": rate(ok),
         "success_by_family": {k: rate(v) for k, v in sorted(by_family.items())},
@@ -374,7 +375,49 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                                if succ else None),
         "collision_rate": round(sum(r["collisions"] for r in ok) / actions, 4) if actions else None,
         "invalid_rate": round(sum(r["invalid_turns"] for r in ok) / turns, 4) if turns else None,
+        "ended_by": dict(sorted(ended.items())) if ended else None,
+        # used up the action or turn limit (with or without meeting the task at the last action)
+        "used_limit": sum(ended[k] for k in LIMIT_ENDS) if ended else None,
+        "collision_ended": ended["consecutive_collision"] if ended else None,
     }
+
+
+LIMIT_ENDS = ("max_primitive_steps", "max_primitive_steps_success", "max_turns")
+
+
+def sign_test(b: int, c: int) -> float:
+    """Exact two-sided sign (McNemar) test on the tasks only one of two models solved: how likely a split at least
+    this uneven is if both models were equally good."""
+    import math
+
+    n, k = b + c, min(b, c)
+    if n == 0:
+        return 1.0
+    return min(1.0, 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2 ** n)
+
+
+def paired(base: Sequence[Dict[str, Any]], other: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Task-by-task comparison of two result sets on the same tasks (infrastructure errors left out)."""
+    a = {r["index"]: bool(r["success"]) for r in base if "error" not in r}
+    b = {r["index"]: bool(r["success"]) for r in other if "error" not in r}
+    idx = sorted(set(a) & set(b))
+    only_base = sum(a[i] and not b[i] for i in idx)
+    only_other = sum(b[i] and not a[i] for i in idx)
+    both = sum(a[i] and b[i] for i in idx)
+    return {"tasks": len(idx), "both": both, "only_base": only_base, "only_other": only_other,
+            "neither": len(idx) - both - only_base - only_other, "p": round(sign_test(only_base, only_other), 4)}
+
+
+def cmd_compare(args: argparse.Namespace) -> None:
+    base = _jsonl(Path(args.base) / "results.jsonl")
+    out = {Path(d).name: paired(base, _jsonl(Path(d) / "results.jsonl")) for d in args.other}
+    lines = [f"基准：{args.base}", "", "| 对象 | 题数 | 都做对 | 只有基准做对 | 只有对象做对 | 都没做对 | p |",
+             "| --- | --- | --- | --- | --- | --- | --- |"]
+    lines += [f"| {k} | {v['tasks']} | {v['both']} | {v['only_base']} | {v['only_other']} | {v['neither']} | {v['p']:.3f} |"
+              for k, v in out.items()]
+    Path(args.out).write_text(json.dumps({"base": str(args.base), "compare": out}, indent=1))
+    Path(args.out).with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n".join(lines))
 
 
 def cmd_table(args: argparse.Namespace) -> None:
@@ -385,13 +428,16 @@ def cmd_table(args: argparse.Namespace) -> None:
     (ev / "table.json").write_text(json.dumps(models, indent=1))
     families = sorted({f for m in models.values() for f in m["success_by_family"]})
     bands = [f"{lo}-{hi}" for lo, hi in BANDS]
-    head = ["模型", "题数", "成功率"] + families + [f"d* {b}" for b in bands] + ["步数/d*", "碰撞率", "不合法率"]
+    head = ["模型", "题数", "成功率"] + families + [f"d* {b}" for b in bands] + ["步数/d*", "碰撞率", "不合法率",
+                                                                                  "用满上限", "连续碰撞结束"]
     lines = ["| " + " | ".join(head) + " |", "| " + " | ".join("---" for _ in head) + " |"]
     fmt = lambda v: "—" if v is None else f"{v:.3f}"  # noqa: E731
     for name, m in models.items():
         cells = [name, str(m["episodes"]), fmt(m["success"])] + [fmt(m["success_by_family"].get(f)) for f in families]
         cells += [fmt(m["success_by_band"].get(b)) for b in bands]
         cells += [fmt(m["actions_over_dstar"]), fmt(m["collision_rate"]), fmt(m["invalid_rate"])]
+        cells += ["—" if m["used_limit"] is None else str(m["used_limit"]),
+                  "—" if m["collision_ended"] is None else str(m["collision_ended"])]
         lines.append("| " + " | ".join(cells) + " |")
     (ev / "table.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
@@ -424,6 +470,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--sft-text", action="store_true", help="messages as the SFT data has them (leading/trailing whitespace stripped)")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
+    c = sub.add_parser("compare", help="task-by-task comparison against a base result folder")
+    c.add_argument("--base", required=True, help="a result folder (with results.jsonl)")
+    c.add_argument("--other", required=True, nargs="+")
+    c.add_argument("--out", required=True, help="JSON file; a .md table is written next to it")
     x = sub.add_parser("replace")
     x.add_argument("--eval", required=True, help="the evaluation folder to start from (tasks.jsonl)")
     x.add_argument("--flagged", required=True, help="depth_check_summary.json (flagged_task_ids)")
@@ -432,7 +482,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     x.add_argument("--seed", type=int, default=SEED)
     x.add_argument("--out", required=True)
     args = ap.parse_args(argv)
-    {"select": cmd_select, "run": cmd_run, "table": cmd_table, "replace": cmd_replace}[args.cmd](args)
+    {"select": cmd_select, "run": cmd_run, "table": cmd_table, "replace": cmd_replace,
+     "compare": cmd_compare}[args.cmd](args)
     return 0
 
 
