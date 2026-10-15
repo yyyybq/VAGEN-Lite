@@ -17,15 +17,15 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 LABELS = {"base_qwen25vl7b": "原始 Qwen2.5-VL-7B", "v10_sft_e1": "SFT 第 1 轮", "v10_sft_e2": "SFT 第 2 轮",
           "v10_sft_e3": "SFT 第 3 轮", "r1_final": "R1 最终模型"}
 FAMILIES = {"absolute_positioning": "到物体距离", "equidistance": "等距", "fov_inclusion": "两物同框",
             "occlusion_alignment": "让目标被挡住", "projective_relations": "左右", "screen_occupancy": "画面高度"}
-END = {"success_auto": "成功（自动结束）", "max_primitive_steps": "用满 12 个动作", "max_primitive_steps_success": "用满动作时成功",
+END = {"success_auto": "成功（自动结束）", "max_primitive_steps": "用满动作上限", "max_primitive_steps_success": "用满动作时成功",
        "consecutive_collision": "连续 3 次碰撞", "consecutive_invalid": "连续 3 次格式错误", "low_info": "画面太单调（连续 3 次）",
-       "max_turns": "用满 12 个回合", "continuing": "未结束"}
+       "max_turns": "用满回合上限", "continuing": "未结束"}
 
 
 def label(name: str) -> str:
@@ -35,8 +35,13 @@ def label(name: str) -> str:
 
 def model_order(name: str) -> tuple:
     m = re.fullmatch(r"v10_rl_(\d+)", name)
+    d = re.fullmatch(r"D(\d+)", name)  # round 9 diagnostic runs, after the models
     order = ["base_qwen25vl7b", "r1_final", "v10_sft_e1", "v10_sft_e2", "v10_sft_e3"]
-    return (1, int(m.group(1))) if m else (0, order.index(name) if name in order else 99, name)
+    if m:
+        return (1, int(m.group(1)))
+    if d:
+        return (2, int(d.group(1)))
+    return (0, order.index(name) if name in order else 99, name)
 
 
 def _lines(user: str, *prefixes: str) -> Optional[str]:
@@ -81,23 +86,40 @@ def episode(row: Dict[str, Any], frames_root: Path, images: Images) -> Dict[str,
             "ff": images.add(frames_root / row["final_frame"]) if row.get("final_frame") else None}
 
 
-def build(eval_dir: Path, out: Path, models: Optional[Sequence[str]] = None) -> Dict[str, Any]:
-    eval_dir, out = Path(eval_dir), Path(out)
-    tasks = [json.loads(l) for l in (eval_dir / "tasks.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
-    names = [d.name for d in eval_dir.iterdir() if (d / "results.jsonl").is_file()]
-    names = sorted((n for n in names if not models or n in models), key=model_order)
+def _tasks(eval_dir: Path) -> List[Dict[str, Any]]:
+    return [json.loads(l) for l in (eval_dir / "tasks.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def build(eval_dirs: Union[Path, Sequence[Path]], out: Path, models: Optional[Sequence[str]] = None,
+          labels: Optional[Dict[str, str]] = None, defaults: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """One page over one or more evaluation folders of the same tasks (e.g. round 8's models and round 9's
+    diagnostic runs); ``labels`` names runs, ``defaults`` picks the two columns shown first ({"left", "right"})."""
+    dirs = [Path(eval_dirs)] if isinstance(eval_dirs, (str, Path)) else [Path(d) for d in eval_dirs]
+    out = Path(out)
+    tasks = _tasks(dirs[0])
+    where: Dict[str, Path] = {}
+    for d in dirs:
+        if [t["task_id"] for t in _tasks(d)] != [t["task_id"] for t in tasks]:
+            raise ValueError(f"{d} has other tasks than {dirs[0]}")
+        for run in d.iterdir():
+            if (run / "results.jsonl").is_file() and (not models or run.name in models):
+                if run.name in where:
+                    raise ValueError(f"{run.name} is in both {where[run.name]} and {d}")
+                where[run.name] = d
+    names = sorted(where, key=model_order)
     out.mkdir(parents=True, exist_ok=True)
     images = Images(out)
     episodes: Dict[str, Dict[int, Any]] = {}
     for name in names:
         rows = {}
-        for line in (eval_dir / name / "results.jsonl").read_text(encoding="utf-8").splitlines():
+        for line in (where[name] / name / "results.jsonl").read_text(encoding="utf-8").splitlines():
             if line.strip():
                 r = json.loads(line)
-                rows[int(r["index"])] = episode(r, eval_dir / name, images)
+                rows[int(r["index"])] = episode(r, where[name] / name, images)
         episodes[name] = rows
     data = {
-        "models": [{"name": n, "label": label(n)} for n in names],
+        "models": [{"name": n, "label": (labels or {}).get(n, label(n))} for n in names],
+        "defaults": defaults or {},
         "families": FAMILIES, "end": END,
         "tasks": [{"i": i, "id": t["task_id"], "scene": t.get("scene_id"), "fam": t["task_type"],
                    "d": int((t.get("difficulty") or {}).get("d_star", 0)), "desc": t.get("task_description")}
@@ -170,9 +192,9 @@ function opt(sel, value, text) { const o = document.createElement("option"); o.v
 D.models.forEach(m => { opt($("fmodel"), m.name, m.label); opt($("ma"), m.name, m.label); opt($("mb"), m.name, m.label); });
 Object.entries(D.families).forEach(([k, v]) => opt($("ffam"), k, v + "（" + k + "）"));
 const pick = (want) => { const m = D.models.find(m => m.name === want); return m ? m.name : null; };
-$("ma").value = pick("v10_sft_e3") || D.models[0].name;
+$("ma").value = pick((D.defaults || {}).left) || pick("v10_sft_e3") || D.models[0].name;
 const rl = D.models.filter(m => m.name.startsWith("v10_rl_"));
-$("mb").value = rl.length ? rl[rl.length - 1].name : D.models[Math.min(1, D.models.length - 1)].name;
+$("mb").value = pick((D.defaults || {}).right) || (rl.length ? rl[rl.length - 1].name : D.models[Math.min(1, D.models.length - 1)].name);
 $("fmodel").value = $("mb").value;
 $("legend").textContent = "图例：" + D.models.map((m, i) => (i + 1) + " " + m.label).join("，");
 function ep(model, i) { return (D.episodes[model] || {})[String(i)]; }
@@ -232,11 +254,16 @@ renderList();
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--eval", required=True, type=Path)
+    ap.add_argument("--eval", required=True, type=Path, nargs="+", help="evaluation folders of the same tasks")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--models", nargs="*", default=None)
+    ap.add_argument("--label", action="append", default=[], metavar="NAME=TEXT", help="name a run (repeatable)")
+    ap.add_argument("--left", default=None, help="the run shown in the left column first")
+    ap.add_argument("--right", default=None, help="the run shown in the right column first")
     args = ap.parse_args(argv)
-    print(json.dumps(build(args.eval, args.out, args.models), ensure_ascii=False))
+    labels = dict(x.split("=", 1) for x in args.label)
+    defaults = {k: v for k, v in (("left", args.left), ("right", args.right)) if v}
+    print(json.dumps(build(args.eval, args.out, args.models, labels, defaults), ensure_ascii=False))
     return 0
 
 

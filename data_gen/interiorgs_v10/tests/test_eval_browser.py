@@ -49,6 +49,23 @@ class BrowserTest(unittest.TestCase):
             self.assertEqual(data["episodes"]["v10_sft_e3"]["1"], {"error": "renderer"})
             self.assertEqual(B.build(ev, Path(tmp) / "one", ["v10_rl_050"])["models"], ["v10_rl_050"])
 
+            # round 9: a second folder with the same tasks (diagnostic runs), labels and the two first columns
+            diag = Path(tmp) / "diag"
+            (diag / "D1").mkdir(parents=True)
+            (diag / "tasks.jsonl").write_text((ev / "tasks.jsonl").read_text())
+            _frame(diag / "D1" / "frames" / "000_00.jpg", 10)
+            (diag / "D1" / "results.jsonl").write_text((ev / "v10_rl_050" / "results.jsonl").read_text())
+            both = B.build([ev, diag], Path(tmp) / "both", labels={"D1": "D1 每个动作检查成功"},
+                           defaults={"left": "v10_sft_e3", "right": "D1"})
+            self.assertEqual(both["models"], ["v10_sft_e3", "v10_rl_050", "D1"])
+            js = (Path(tmp) / "both" / "data.js").read_text(encoding="utf-8")
+            data = json.loads(js[len("window.EVAL_DATA = "):].rstrip().rstrip(";"))
+            self.assertEqual(data["models"][-1], {"name": "D1", "label": "D1 每个动作检查成功"})
+            self.assertEqual(data["defaults"], {"left": "v10_sft_e3", "right": "D1"})
+            (diag / "tasks.jsonl").write_text(json.dumps(dict(tasks[0], task_id="other")) + "\n")
+            with self.assertRaises(ValueError):  # other tasks: refuse to put them side by side
+                B.build([ev, diag], Path(tmp) / "bad")
+
 
 if __name__ == "__main__":
     unittest.main()
