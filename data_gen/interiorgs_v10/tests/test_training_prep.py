@@ -100,6 +100,9 @@ class TrainingPrepTest(unittest.TestCase):
 
         lf = yaml.safe_load(cfg)  # the model at the end of every epoch, weights only
         self.assertEqual((lf["save_strategy"], lf["save_only_model"]), ("epoch", True))
+        self.assertEqual(lf["num_train_epochs"], 3)  # the default; round 10 trains 5 (--epochs)
+        prep.prepare(Namespace(out=str(self.root / "lf_e5"), allow_unreviewed_trajectories=True, epochs=5, **common))
+        self.assertEqual(yaml.safe_load((self.root / "lf_e5" / "train.yaml").read_text())["num_train_epochs"], 5)
         prep.prepare(Namespace(out=str(self.root / "lf_steps"), allow_unreviewed_trajectories=True, **common))
         self.assertNotIn("save_strategy", yaml.safe_load((self.root / "lf_steps" / "train.yaml").read_text()))
         # round 10: --keep-text keeps every message as the env shows it (the system prompt and later user turns

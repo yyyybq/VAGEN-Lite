@@ -251,7 +251,7 @@ def prepare(args):
         "per_device_eval_batch_size": 1,
         "gradient_accumulation_steps": 8,
         "learning_rate": 1e-5,
-        "num_train_epochs": 3,
+        "num_train_epochs": int(getattr(args, "epochs", 3) or 3),
         "lr_scheduler_type": "cosine",
         "warmup_ratio": 0.03,
         "bf16": True,
@@ -325,6 +325,7 @@ def main():
     p.add_argument("--task-registry", help="Required raw task registry for release-v2 splits")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--cutoff-len", type=int, default=16384)
+    p.add_argument("--epochs", type=int, default=3, help="training epochs in the recipe (InteriorGS v10 round 10: 5)")
     p.add_argument("--save-per-epoch", action="store_true",
                    help="save the model (weights only, no optimizer state) at the end of every epoch "
                         "instead of every 200 steps (InteriorGS v10, decision of 2026-10-14)")
