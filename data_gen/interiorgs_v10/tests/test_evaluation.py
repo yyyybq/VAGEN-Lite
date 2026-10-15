@@ -99,6 +99,22 @@ class EvaluationTest(unittest.TestCase):
         answers = iter(["move_forward|turn_left", "move_forward"])
         self.assertNotIn("trajectory", E.run_episode(Env(), policy, 7, 12))  # without a frames folder: counts only
 
+    def test_switches_reach_the_env_config(self):
+        import argparse
+        import os
+        from unittest import mock
+
+        template = Path(E.__file__).with_name("configs") / "rl_env_v10_S0.yaml"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"R1_RENDER_URL": "http://x/render"}):
+            tasks = Path(tmp) / "tasks.jsonl"
+            tasks.write_text("")
+            plain = E.env_config(template, tasks, "/gs", None, E.switch_overrides(argparse.Namespace()))
+            self.assertEqual(E.switch_overrides(argparse.Namespace()), {})  # no switch: the template's rules
+            self.assertNotIn("success_check_each_action", plain)
+            on = E.env_config(template, tasks, "/gs", None, E.switch_overrides(argparse.Namespace(check_each_action=True)))
+            self.assertTrue(on["success_check_each_action"])
+            self.assertEqual({k: v for k, v in on.items() if k != "success_check_each_action"}, plain)
+
     def test_replace_flagged(self):
         picked = [_row(i, "projective_relations", 2) for i in range(4)] + [_row(10, "occlusion_alignment", 8)]
         pool = picked + [_row(20 + i, "projective_relations", 1 + i % 3) for i in range(3)] + [_row(30, "projective_relations", 7)]

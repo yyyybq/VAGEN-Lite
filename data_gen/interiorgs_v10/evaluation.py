@@ -144,7 +144,8 @@ def cmd_replace(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # run (one card: the render service and vLLM)
 # ---------------------------------------------------------------------------
-def env_config(env_template: Path, tasks: Path, gs_root: str, prompt_format: Optional[str]) -> Dict[str, Any]:
+def env_config(env_template: Path, tasks: Path, gs_root: str, prompt_format: Optional[str],
+               overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     import os
 
     import yaml
@@ -154,7 +155,16 @@ def env_config(env_template: Path, tasks: Path, gs_root: str, prompt_format: Opt
                r1_legacy_success=False)
     if prompt_format:
         cfg["prompt_format"] = prompt_format
+    cfg.update(overrides or {})
     return cfg
+
+
+def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
+    """The env settings changed by the round-9 switches given on the command line (none: the template's rules)."""
+    out: Dict[str, Any] = {}
+    if getattr(args, "check_each_action", False):
+        out["success_check_each_action"] = True
+    return out
 
 
 def gate_summary(metric: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -262,13 +272,15 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     out.mkdir(parents=True, exist_ok=True)
     tasks = ev / "tasks.jsonl"
     n = len(_jsonl(tasks))
-    cfg = env_config(Path(args.env_template), tasks, args.gs_root, args.prompt_format)
+    switches = switch_overrides(args)
+    cfg = env_config(Path(args.env_template), tasks, args.gs_root, args.prompt_format, switches)
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
     env = ActiveSpatialEnv(ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items() if k in keys}))
     t0 = time.time()
     policy = VllmPolicy(args.model)
     (out / "model.json").write_text(json.dumps({"name": args.name, "model": args.model, "version": VERSION,
                                                 "prompt_format": cfg["prompt_format"], "greedy": True,
+                                                "env_switches": switches, "max_turns": int(args.max_turns),
                                                 "load_seconds": round(time.time() - t0, 1)}, indent=1))
     done = {r["index"] for r in _jsonl(out / "results.jsonl")} if (out / "results.jsonl").exists() else set()
     with open(out / "results.jsonl", "a") as f:
@@ -346,6 +358,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--env-template", default=str(Path(__file__).with_name("configs") / "rl_env_v10_S0.yaml"))
     r.add_argument("--prompt-format", default=None, help="the model's own prompt format (R1: its own)")
     r.add_argument("--max-turns", type=int, default=12)
+    # round 9 switches (default: the template's rules)
+    r.add_argument("--check-each-action", action="store_true", help="check success after every action, stop at the first")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     x = sub.add_parser("replace")
