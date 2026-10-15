@@ -174,6 +174,28 @@ FORMAL_PPO: Dict[str, Any] = {
 }
 
 
+# Round 10 (2026-10-15): how the model's input carries the earlier turns of an episode ("history", the fifth
+# default rule).  "none": as rounds 6-9, each turn a separate sample with the current frame only; "no_concat":
+# each turn a separate sample carrying every earlier turn (the env setting history_window_size = the turn limit;
+# the no-concat agent loop); "concat": one sequence per episode as in SFT (verl's multi-turn: the concat agent
+# loop, trainer.concat_multi_turn, GAE over the whole sequence; the response budget must hold every later turn).
+HISTORY_MODES = ("none", "no_concat", "concat")
+CONCAT_RESPONSE_LENGTH = 4096  # 12 turns x (81 image tokens + ~150 text + the answer) stay well below this
+
+
+def history_overrides(mode: str, max_turns: int) -> Dict[str, Dict[str, Any]]:
+    """{"env": env-config overrides, "ppo": PPO-config overrides} for a history mode."""
+    if mode not in HISTORY_MODES:
+        raise ValueError(f"history mode must be one of {HISTORY_MODES}, not {mode!r}")
+    if mode == "none":
+        return {"env": {}, "ppo": {}}
+    if mode == "no_concat":
+        return {"env": {"history_window_size": int(max_turns)}, "ppo": {}}
+    return {"env": {}, "ppo": {"trainer.concat_multi_turn": True, "algorithm.adv_estimator": "gae",
+                               "actor_rollout_ref.rollout.agent.agent_loop_config_path": "vagen/configs/agent.yaml",
+                               "data.max_response_length": CONCAT_RESPONSE_LENGTH}}
+
+
 def _set(cfg: Dict[str, Any], dotted: str, value: Any) -> None:
     node = cfg
     keys = dotted.split(".")
@@ -211,12 +233,17 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     rows = _jsonl(Path(args.rows))
     parts = {"train": [r for r in rows if r.get("split") == "train"],
              "val": [r for r in rows if r.get("split") == "val"]}
-    if args.val_limit:  # evenly spread over the val rows (they come sorted by scene)
+    val_tasks = getattr(args, "val_tasks", None)
+    if val_tasks:  # round 10: the fixed validation set (evaluation.py select --split val), published rows
+        parts["val"] = [dict(r, split="val") for r in _jsonl(Path(val_tasks))]
+    elif args.val_limit:  # evenly spread over the val rows (they come sorted by scene)
         step = max(1, len(parts["val"]) // args.val_limit)
         parts["val"] = parts["val"][::step][: args.val_limit]
     if not parts["train"] or not parts["val"]:
         raise SystemExit("rl-config needs train and val rows (training_prep sft-frames rows.jsonl)")
     template = yaml.safe_load(Path(args.env_template).read_text())
+    history = history_overrides(getattr(args, "history_mode", None) or "none",
+                                int(template["envs"][0].get("max_turns", 12)))
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -224,7 +251,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         entry = env["envs"][0]
         entry.update(n_envs=len(selected), seed=[0, len(selected)], seed_list=list(range(len(selected))))
         entry["config"].update(jsonl_path=str((out / f"{split}.jsonl").resolve()), gs_root=str(args.gs_root),
-                               train_size=len(selected))
+                               train_size=len(selected), **history["env"])
         env_paths[split] = out / f"{split}_env.yaml"
         env_paths[split].write_text(yaml.safe_dump(env, sort_keys=False))
     mismatches = prompt_mismatches(template["envs"][0]["config"], [r["task_type"] for r in rows], load_policy())
@@ -247,9 +274,27 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     if args.trial:
         for key, value in TRIAL_PPO.items():
             _set(ppo, key, value)
+    for key, value in history["ppo"].items():
+        _set(ppo, key, value)
+    # round 10 options: validation on the fixed set without sampling (one greedy trajectory per task, in one
+    # batch), its frequency, and the critic warm-up
+    if getattr(args, "greedy_val", False):
+        for key, value in {"actor_rollout_ref.rollout.val_kwargs.n": 1,
+                           "actor_rollout_ref.rollout.val_kwargs.do_sample": False,
+                           "actor_rollout_ref.rollout.val_kwargs.temperature": 0.0}.items():
+            _set(ppo, key, value)
+    if val_tasks:
+        _set(ppo, "data.val_batch_size", len(parts["val"]))
+    if getattr(args, "test_freq", None):
+        _set(ppo, "trainer.test_freq", int(args.test_freq))
+    if getattr(args, "critic_warmup", None) is not None:
+        _set(ppo, "trainer.critic_warmup", int(args.critic_warmup))
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
+              "history_mode": getattr(args, "history_mode", None) or "none", "val_tasks": val_tasks,
+              "greedy_val": bool(getattr(args, "greedy_val", False)),
+              "test_freq": ppo["trainer"].get("test_freq"), "critic_warmup": ppo["trainer"].get("critic_warmup"),
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
@@ -275,6 +320,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--name", required=True)
     c.add_argument("--run-root", required=True, help="checkpoints, rollouts and validation go below it")
     c.add_argument("--val-limit", type=int, default=0)
+    c.add_argument("--val-tasks", default=None,
+                   help="round 10: a tasks.jsonl of published val rows (evaluation.py select --split val) used as the "
+                        "validation set instead of --val-limit rows; validated in one batch")
+    c.add_argument("--greedy-val", action="store_true", help="validation without sampling: one trajectory per task")
+    c.add_argument("--history-mode", choices=HISTORY_MODES, default="none",
+                   help="how the input carries earlier turns: none (rounds 6-9), no_concat (per-turn samples with "
+                        "the full history), concat (one sequence per episode)")
+    c.add_argument("--test-freq", type=int, default=None, help="validate every N updates (template: 25)")
+    c.add_argument("--critic-warmup", type=int, default=None, help="updates that train only the value network")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--out", required=True)
     args = ap.parse_args(argv)

@@ -168,6 +168,69 @@ class TrainingPrepTest(unittest.TestCase):
         types = ["projective_relations", "occlusion_alignment", "fov_inclusion"]
         self.assertEqual(TP.prompt_mismatches(cfg, types, policy), [])
         self.assertEqual(TP.prompt_mismatches(dict(cfg, format_reward=0.01), types, policy), sorted(types))
+        # the check covers every argument the env passes (round 10: the reward text and the collision rule too)
+        self.assertEqual(TP.prompt_mismatches(dict(cfg, prompt_reward_text="legacy"), types, policy), sorted(types))
+        self.assertEqual(TP.prompt_mismatches(dict(cfg, max_consecutive_collisions=3), types, policy), sorted(types))
+
+    def test_rl_config_round10_options(self):
+        """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""
+        import yaml
+
+        sft = self.root / "sft_rl10"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        template = self.root / "ppo_template10.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12, "val_batch_size": 8,
+                                                                      "max_response_length": 384},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False, "critic_warmup": 60, "test_freq": 50},
+            "actor_rollout_ref": {"model": {"path": "old"}, "actor": {"ppo_mini_batch_size": 8},
+                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4,
+                                              "val_kwargs": {"n": 4, "do_sample": True, "temperature": 0.8},
+                                              "agent": {"num_workers": 8, "agent_loop_config_path": "x.yaml"}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+        val_rows = [r for r in TP._jsonl(sft / "rows.jsonl") if r["split"] == "val"]
+        val_tasks = self.root / "val_tasks.jsonl"
+        val_tasks.write_text("".join(json.dumps(r) + "\n" for r in val_rows[:1]))
+        env_template = Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"
+        self.assertEqual(TP.history_overrides("none", 12), {"env": {}, "ppo": {}})
+        self.assertEqual(TP.history_overrides("no_concat", 12)["env"], {"history_window_size": 12})
+        with self.assertRaises(ValueError):
+            TP.history_overrides("window4", 12)
+        base = dict(rows=str(sft / "rows.jsonl"), env_template=str(env_template), ppo_template=str(template),
+                    gs_root="/ply", model="/m", name="t", val_limit=0, trial=False)
+        for mode in ("no_concat", "concat"):
+            out = self.root / f"rl10_{mode}"
+            TP.cmd_rl_config(Namespace(**base, run_root=str(self.root / f"run_{mode}"), out=str(out), history_mode=mode,
+                                       val_tasks=str(val_tasks), greedy_val=True, test_freq=25, critic_warmup=10))
+            ppo = yaml.safe_load((out / "ppo.yaml").read_text())
+            env = yaml.safe_load((out / "train_env.yaml").read_text())["envs"][0]
+            val_env = yaml.safe_load((out / "val_env.yaml").read_text())["envs"][0]
+            self.assertEqual((ppo["trainer"]["test_freq"], ppo["trainer"]["critic_warmup"]), (25, 10))
+            self.assertEqual(ppo["actor_rollout_ref"]["rollout"]["val_kwargs"],
+                             {"n": 1, "do_sample": False, "temperature": 0.0})
+            self.assertEqual((val_env["n_envs"], ppo["data"]["val_batch_size"]), (1, 1))  # the fixed set, one batch
+            self.assertEqual(TP._jsonl(out / "val.jsonl")[0]["task_id"], val_rows[0]["task_id"])
+            if mode == "no_concat":
+                self.assertEqual((env["config"]["history_window_size"], val_env["config"]["history_window_size"]), (12, 12))
+                self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["trainer"]["concat_multi_turn"]),
+                                 ("no_concat_gae", False))
+                self.assertEqual(ppo["data"]["max_response_length"], 384)
+            else:
+                self.assertNotIn("history_window_size", env["config"])  # the chat history carries the turns
+                self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["trainer"]["concat_multi_turn"]), ("gae", True))
+                self.assertEqual(ppo["actor_rollout_ref"]["rollout"]["agent"]["agent_loop_config_path"],
+                                 "vagen/configs/agent.yaml")
+                self.assertEqual(ppo["data"]["max_response_length"], TP.CONCAT_RESPONSE_LENGTH)
+            report = json.loads((out / "rl_config_report.json").read_text())
+            self.assertEqual((report["history_mode"], report["greedy_val"], report["val"]), (mode, True, 1))
+        # without the options nothing changes (rounds 6-9 behaviour)
+        out = self.root / "rl10_plain"
+        TP.cmd_rl_config(Namespace(**base, run_root=str(self.root / "run_plain"), out=str(out)))
+        ppo = yaml.safe_load((out / "ppo.yaml").read_text())
+        self.assertEqual((ppo["trainer"]["test_freq"], ppo["trainer"]["critic_warmup"],
+                          ppo["actor_rollout_ref"]["rollout"]["val_kwargs"]["n"], ppo["data"]["val_batch_size"]),
+                         (25, 60, 4, 8))
 
 
 if __name__ == "__main__":

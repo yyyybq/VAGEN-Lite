@@ -18,6 +18,20 @@ class RetainedStepsTest(unittest.TestCase):
         self.assertEqual(retained_steps([1, 2, 3], 2, 1), {2, 3})  # the one-card resume check
         self.assertEqual(retained_steps([1, 2, 3], 0, 1), {3})
 
+    def test_history_mode_from_the_config_pair(self):
+        from omegaconf import OmegaConf
+
+        from vagen.interiorgs_v10_ppo import history_mode
+
+        def cfg(adv, concat):
+            return OmegaConf.create({"algorithm": {"adv_estimator": adv}, "trainer": {"concat_multi_turn": concat}})
+
+        self.assertEqual(history_mode(cfg("no_concat_gae", False)), "no_concat")  # rounds 6-9 and no_concat history
+        self.assertEqual(history_mode(cfg("gae", True)), "concat")               # one sequence per episode
+        for bad in (("gae", False), ("no_concat_gae", True), ("grpo", True)):
+            with self.assertRaises(ValueError):
+                history_mode(cfg(*bad))
+
 
 if __name__ == "__main__":
     unittest.main()

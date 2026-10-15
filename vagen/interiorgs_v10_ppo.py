@@ -2,6 +2,9 @@
 
     R1_RENDER_URL=http://HOST:PORT/render python -m vagen.interiorgs_v10_ppo --config RL/ppo.yaml --endpoint 250
 
+Round 10: the config may use verl's concat multi-turn mode (one sequence per episode, ``trainer.concat_multi_turn``
+with ``adv_estimator: gae``) or the no-concat mode (``no_concat_gae``); ``history_mode`` checks the pair.
+
 The optimizer and scheduler keep the config's horizon (``trainer.total_training_steps``); ``--endpoint``
 only stops ``fit`` after that many updates, so a later run with a larger endpoint and ``resume_mode: auto``
 continues from the latest checkpoint.  The env keeps its default (v10) success rules: this runner never sets
@@ -64,6 +67,20 @@ class EndpointTrainer(RayPPOTrainer):
         assert checkpoint.is_dir(), f"no checkpoint at the endpoint: {checkpoint}"
 
 
+# Round 10: the two ways an episode's earlier turns reach the model (training_prep.history_overrides).
+# Each turn a separate sample (the no-concat agent loop, its own GAE) or one sequence per episode
+# (verl's multi-turn concat mode with plain GAE); the advantage estimator must match the mode.
+MODES = {("no_concat_gae", False): "no_concat", ("gae", True): "concat"}
+
+
+def history_mode(cfg) -> str:
+    """The run's mode from (algorithm.adv_estimator, trainer.concat_multi_turn); an unknown pair is an error."""
+    key = (str(cfg.algorithm.adv_estimator), bool(cfg.trainer.concat_multi_turn))
+    if key not in MODES:
+        raise ValueError(f"adv_estimator / concat_multi_turn {key} is not a supported pair: {sorted(MODES)}")
+    return MODES[key]
+
+
 class V10TaskRunner(main_ppo.TaskRunner):
     def run(self, config):
         main_ppo.RayPPOTrainer = EndpointTrainer
@@ -77,7 +94,7 @@ def main() -> None:
     args = ap.parse_args()
     os.environ["V10_PPO_ENDPOINT"] = str(args.endpoint)
     cfg = OmegaConf.load(args.config)
-    assert cfg.algorithm.adv_estimator == "no_concat_gae" and not cfg.trainer.concat_multi_turn
+    print(f"[interiorgs_v10_ppo] history mode: {history_mode(cfg)}")
     with open_dict(cfg):
         cfg.ray_kwargs.ray_init.include_dashboard = False
         temp = os.environ.get("V10_RAY_TEMP_DIR")
