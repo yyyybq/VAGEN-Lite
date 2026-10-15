@@ -952,7 +952,7 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Track collisions in this step
         step_collisions = []
-        collision_feedback = ""
+        collision_suffix = ""
         turn_moves: List[str] = []  # movement/rotation actions attempted this turn, in order
         turn_blocked: List[Tuple[str, Any]] = []  # (action, collision) for the blocked ones
         
@@ -1158,7 +1158,7 @@ class ActiveSpatialEnv(BaseEnv):
         # Build collision feedback message
         if step_collisions:
             collision_msgs = [_collision_text(cr) for cr in step_collisions]
-            collision_feedback = f" [Collision: {', '.join(collision_msgs)}]"
+            collision_suffix = f" [Collision: {', '.join(collision_msgs)}]"
         
         # Calculate pose-based reward if not done by explicit 'done' action
         if not done and metrics["turn_metrics"]["action_is_valid"]:
@@ -1278,7 +1278,7 @@ class ActiveSpatialEnv(BaseEnv):
         elif metrics["turn_metrics"]["action_is_effective"]:
             env_feedback = "Action executed."
         elif step_collisions:
-            env_feedback = f"Action blocked by collision.{collision_feedback}"
+            env_feedback = f"Action blocked by collision.{collision_suffix}"
         else:
             env_feedback = "Action had no effect."
         info["env_feedback"] = env_feedback

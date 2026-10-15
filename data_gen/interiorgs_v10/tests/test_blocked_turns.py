@@ -77,7 +77,7 @@ class BlockedTurnTest(unittest.TestCase):
             FRAME.save(sft / "frames" / "plain" / safe_name(f["frame_id"]))
         policy = load_policy()
         policy["sft"]["export"]["blocked_turn_share"] = 1.0  # every task that has a blocked move at the drawn turn
-        with mock.patch.object(TP, "load_policy", lambda: policy):
+        with mock.patch("data_gen.interiorgs_v10.admission.load_policy", lambda: policy):  # imported at call time
             TP.cmd_sft_records(Namespace(dir=str(sft), scenes_root=str(self.scene_dir.parent), env_template=str(TEMPLATE)))
         records = TP._jsonl(sft / "sft_trajectories.jsonl")
         report = json.loads((sft / "sft_records_report.json").read_text())
