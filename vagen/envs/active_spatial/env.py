@@ -29,7 +29,7 @@ import asyncio
 import json
 import numpy as np
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from PIL import Image
 import os
 
