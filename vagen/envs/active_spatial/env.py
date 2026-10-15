@@ -90,11 +90,23 @@ def _run_async(coro):
         return asyncio.run(coro)
 
 
-def _collision_text(cr: Any) -> str:
+def collision_text(cr: Any) -> str:
     """How a blocked move is described in the feedback ("blocked by sofa", "blocked by floor", ...)."""
     if cr.collision_type == "object":
         return f"blocked by {cr.collision_object}"
     return f"blocked by {cr.collision_type}"
+
+
+_collision_text = collision_text
+
+
+def collision_feedback(turn_moves: Sequence[str], turn_blocked: Sequence[Tuple[str, str]]) -> str:
+    """The detailed feedback of a turn with blocked moves (collision_feedback_detail): how many of the turn's
+    moves ran and which were blocked, e.g. "2 of 3 actions executed; blocked: move_backward (blocked by wall).".
+    ``turn_blocked``: (action, collision_text) pairs.  Shared with the SFT export (release.py), whose inserted
+    blocked turns must read exactly as the env writes them."""
+    return (f"{len(turn_moves) - len(turn_blocked)} of {len(turn_moves)} actions executed; blocked: "
+            + "; ".join(f"{a} ({text})" for a, text in turn_blocked) + ".")
 
 
 def _canonical_shaping_score(metric: Dict[str, Any]) -> float:
@@ -1262,8 +1274,7 @@ class ActiveSpatialEnv(BaseEnv):
         # Build env_feedback with collision info
         if turn_blocked and getattr(self.config, "collision_feedback_detail", False):
             # round 9 switch: say how many of the turn's moves were executed and which ones were blocked
-            env_feedback = (f"{len(turn_moves) - len(turn_blocked)} of {len(turn_moves)} actions executed; blocked: "
-                            + "; ".join(f"{a} ({_collision_text(cr)})" for a, cr in turn_blocked) + ".")
+            env_feedback = collision_feedback(turn_moves, [(a, collision_text(cr)) for a, cr in turn_blocked])
         elif metrics["turn_metrics"]["action_is_effective"]:
             env_feedback = "Action executed."
         elif step_collisions:

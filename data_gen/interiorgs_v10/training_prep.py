@@ -73,27 +73,39 @@ def cmd_sft_frames(args: argparse.Namespace) -> None:
     lookup = split_lookup(manifest)
     splits = tuple(s for s in args.splits.split(",") if s)
     policy = load_policy()
+    excluded = set()
+    if getattr(args, "exclude", None):  # round 10: tasks flagged by the rendered-depth check
+        excluded = set(json.loads(Path(args.exclude).read_text())["flagged_task_ids"])
+    sources = [("formal", Path(args.run) / "tasks.jsonl")]
+    if getattr(args, "include_reserve", False):  # round 10: the reserve tasks too, marked, for the larger SFT set
+        sources.append(("reserve", Path(args.run) / "tasks_reserve.jsonl"))
     rows, skipped = [], Counter()
-    for raw in _jsonl(Path(args.run) / "tasks.jsonl"):
-        split = lookup.get(str(raw["scene_id"]))
-        if split is None:
-            skipped["scene_not_in_manifest"] += 1
-            continue
-        if split not in splits:
-            skipped[f"split_{split}"] += 1
-            continue
-        rows.append(finalize_task_row(raw, split))
+    for kind, path in sources:
+        for raw in _jsonl(path):
+            split = lookup.get(str(raw["scene_id"]))
+            if split is None:
+                skipped["scene_not_in_manifest"] += 1
+                continue
+            if split not in splits:
+                skipped[f"split_{split}"] += 1
+                continue
+            if raw["task_id"] in excluded:
+                skipped[f"excluded_{kind}_{raw['task_type']}"] += 1
+                continue
+            rows.append(dict(finalize_task_row(raw, split), reserve=(kind == "reserve")))
     if args.limit:
         rows = rows[: args.limit]
     frames = sft_frames(rows, policy)
     _write_jsonl(out / "rows.jsonl", rows)
     _write_jsonl(out / "frames.jsonl", frames)
+    # RL trains on the formal tasks of train (the reserve tasks are SFT-only)
     _write_jsonl(out / "task_registry.jsonl",
-                 [registry_row(r, {"sft": True, "rl": r["split"] == "train"}) for r in rows])
+                 [registry_row(r, {"sft": True, "rl": r["split"] == "train" and not r.get("reserve")}) for r in rows])
     (out / "split_manifest.json").write_text(json.dumps(manifest, indent=1))
     report = {"tasks": len(rows), "by_split": dict(Counter(r["split"] for r in rows)),
               "by_family": dict(Counter(r["task_type"] for r in rows)), "frames": len(frames),
-              "scenes": len({r["scene_id"] for r in rows}), "skipped": dict(skipped)}
+              "scenes": len({r["scene_id"] for r in rows}), "skipped": dict(skipped),
+              "reserve": sum(1 for r in rows if r.get("reserve")), "excluded": len(excluded)}
     (out / "sft_frames_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
 
@@ -111,18 +123,45 @@ def cmd_sft_records(args: argparse.Namespace) -> None:
         path = d / "frames" / "plain" / safe_name(f["frame_id"])
         if path.is_file():
             images[f"{f['task_id']}:{f['state_id']}"] = str(path)
+    # round 10: the scene's collision detector (the env's wall model) for the inserted blocked turns
+    scenes_root = Path(args.scenes_root) if getattr(args, "scenes_root", None) else None
+    wall_model = "room_edges"
+    if scenes_root is not None:
+        import yaml
+
+        template = Path(getattr(args, "env_template", None) or Path(__file__).with_name("configs") / "rl_env_v10_S0.yaml")
+        wall_model = yaml.safe_load(template.read_text())["envs"][0]["config"].get("wall_model", "room_edges")
+    detectors: Dict[str, Any] = {}
+
+    def detector_for(scene_id: str):
+        if scenes_root is None:
+            return None
+        if scene_id not in detectors:
+            from .scene import load_scene
+
+            detectors.clear()  # rows come sorted by scene; keep one scene loaded
+            detectors[scene_id] = load_scene(scenes_root / scene_id, scene_id, wall_model=wall_model).detector
+        return detectors[scene_id]
+
     records, reasons = [], Counter()
     for row in rows:
-        rec, reason = build_sft_record(row, images, policy)
+        rec, reason = build_sft_record(row, images, policy, detector=detector_for(str(row["scene_id"])))
         if rec is None:
             reasons[reason] += 1
             continue
+        rec["reserve"] = bool(row.get("reserve"))
         records.append(rec)
     _write_jsonl(d / "sft_trajectories.jsonl", records)
+    formal = [r for r in records if not r["reserve"]]
+    if len(formal) < len(records):  # the smaller SFT set: formal tasks only
+        _write_jsonl(d / "sft_trajectories_formal.jsonl", formal)
     report = {"tasks": len(rows), "records": len(records), "dropped": dict(reasons),
               "by_split": dict(Counter(r["split"] for r in records)),
               "turns": dict(Counter(r["trajectory_steps"] for r in records)),
-              "images": len(images)}
+              "images": len(images), "reserve_records": len(records) - len(formal),
+              "blocked_turns": sum(1 for r in records if r.get("blocked_insert")),
+              "blocked_moves": dict(Counter(r["blocked_insert"]["move"] for r in records if r.get("blocked_insert"))),
+              "wall_model": wall_model if scenes_root is not None else None}
     (d / "sft_records_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
 
@@ -308,9 +347,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     f.add_argument("--split-manifest", required=True)
     f.add_argument("--splits", default=",".join(SFT_SPLITS))
     f.add_argument("--limit", type=int, default=0, help="first N tasks only (smoke tests)")
+    f.add_argument("--include-reserve", action="store_true",
+                   help="round 10: also the reserve tasks (tasks_reserve.jsonl), marked reserve, for the larger SFT set")
+    f.add_argument("--exclude", default=None, help="depth_check_summary.json: its flagged tasks are left out")
     f.add_argument("--out", required=True)
     r = sub.add_parser("sft-records")
     r.add_argument("--dir", required=True)
+    r.add_argument("--scenes-root", default=None,
+                   help="round 10: InteriorGS scene folders (labels.json, structure.json); with it a share of the "
+                        "conversations get an inserted blocked turn (policy sft.export.blocked_turn_share)")
+    r.add_argument("--env-template", default=None, help="the RL env YAML whose wall model the blocked turns use")
     c = sub.add_parser("rl-config")
     c.add_argument("--rows", required=True, help="published rows with split (sft-frames rows.jsonl)")
     c.add_argument("--env-template", default=str(Path(__file__).with_name("configs") / "rl_env_v10_S0.yaml"))

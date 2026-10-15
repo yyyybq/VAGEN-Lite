@@ -26,6 +26,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import random
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -285,8 +286,10 @@ def pose_line(c2w: Any, normalize_zero: bool = False) -> str:
                                                       normalize_zero=normalize_zero)
 
 
-def _user_turn(desc: str, first: bool, policy: Mapping[str, Any], pose: Any = None) -> str:
-    """One user turn; with observation_pose = "runtime" it shows the pose line exactly as the RL env does."""
+def _user_turn(desc: str, first: bool, policy: Mapping[str, Any], pose: Any = None,
+               env_feedback: Optional[str] = None) -> str:
+    """One user turn; with observation_pose = "runtime" it shows the pose line exactly as the RL env does.
+    ``env_feedback``: the feedback line of a later turn (default the policy's, "Action executed.")."""
     P = _prompt_module()
     exp = policy["sft"]["export"]
     mode = exp.get("observation_pose", "none")
@@ -301,9 +304,59 @@ def _user_turn(desc: str, first: bool, policy: Mapping[str, Any], pose: Any = No
     if first:
         text = P.init_observation_template(observation=observation, task_prompt=desc)
     else:
-        text = P.action_template(observation=observation, env_feedback=exp.get("env_feedback", "Action executed."),
-                                 task_prompt=desc)
+        text = P.action_template(observation=observation,
+                                 env_feedback=env_feedback if env_feedback is not None
+                                 else exp.get("env_feedback", "Action executed."), task_prompt=desc)
     return text + "\n" + _format_block(policy, first)
+
+
+# Round 10 (decision 6 of 2026-10-15): "what to do after a blocked move".  In a share of the conversations one
+# extra turn is inserted before a turn of the shortest path: the assistant tries a move the collision detector
+# blocks from that pose, the next user turn shows the same frame and pose with the env's detailed feedback
+# ("0 of 1 actions executed; blocked: move_forward (blocked by wall)."), and the shortest path goes on unchanged
+# (a blocked move does not move the camera).  The move and the turn are drawn per task from a fixed seed.
+MOVES = ("move_forward", "move_backward", "move_left", "move_right")
+_BLOCKED_FEEDBACK_RE = re.compile(r"\d+ of \d+ actions executed; blocked: [^\n]*\.")
+
+
+def blocked_moves(detector: Any, c2w: Any) -> List[Tuple[str, str]]:
+    """(move, collision text) for every move the env's collision detector blocks from this pose, computed with
+    the env's own ViewManipulator and CollisionDetector (``detector``: the scene's, with the env's wall model)."""
+    from vagen.envs.active_spatial.env import collision_text
+    from vagen.envs.active_spatial.utils import ViewManipulator
+
+    from .contract import STEP_ROTATION_DEG, STEP_TRANSLATION_M
+
+    c2w = np.asarray(c2w, dtype=np.float64)
+    out = []
+    for move in MOVES:
+        vm = ViewManipulator(step_translation=STEP_TRANSLATION_M, step_rotation_deg=STEP_ROTATION_DEG, world_up_axis="Z")
+        vm.reset(c2w)
+        vm.step(move)
+        res = detector.check_collision(vm.get_pose()[:3, 3], previous_position=c2w[:3, 3])
+        if res.has_collision:
+            out.append((move, collision_text(res)))
+    return out
+
+
+def blocked_insert(raw_row: Mapping[str, Any], policy: Mapping[str, Any], detector: Any, n_turns: int,
+                   poses: Sequence[Any]) -> Optional[Dict[str, Any]]:
+    """The blocked turn to insert for this task, or None: {"turn": t, "move", "blocked_by"}.  A task is chosen with
+    probability ``sft.export.blocked_turn_share`` (seed ``blocked_turn_seed`` and the task id); the turn is drawn
+    among the turns, the move among the moves blocked at that turn's pose (none blocked: no insertion)."""
+    exp = policy["sft"]["export"]
+    share = float(exp.get("blocked_turn_share", 0.0) or 0.0)
+    if share <= 0.0 or detector is None or n_turns <= 0:
+        return None
+    rng = random.Random(f"{exp.get('blocked_turn_seed', 20261015)}:{raw_row['task_id']}")
+    if rng.random() >= share:
+        return None
+    t = rng.randrange(n_turns)
+    blocked = blocked_moves(detector, poses[t])
+    if not blocked:
+        return None
+    move, text = blocked[rng.randrange(len(blocked))]
+    return {"turn": t, "move": move, "blocked_by": text}
 
 
 def scan_leakage(record: Mapping[str, Any], policy: Mapping[str, Any]) -> List[str]:
@@ -331,6 +384,7 @@ def scan_leakage(record: Mapping[str, Any], policy: Mapping[str, Any]) -> List[s
         text = _POSE_LINE_RE.sub(" ", text)
         for block in fixed:
             text = text.replace(block, " ")
+        text = _BLOCKED_FEEDBACK_RE.sub(" ", text)  # the env's own feedback line of an inserted blocked turn
         for name, rx in (("unit", _UNIT_RE), ("decimal", _DECIMAL_RE), ("oracle_word", _ORACLE_RE)):
             m = rx.search(text)
             if m:
@@ -339,9 +393,14 @@ def scan_leakage(record: Mapping[str, Any], policy: Mapping[str, Any]) -> List[s
 
 
 def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], policy: Mapping[str, Any], *,
-                     semantic_review: Optional[Mapping[str, Any]] = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """One multi-turn no-think SFT conversation from the certificate (actions only)."""
+                     semantic_review: Optional[Mapping[str, Any]] = None,
+                     detector: Any = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """One multi-turn no-think SFT conversation from the certificate (actions only).
+
+    ``detector`` (round 10): the scene's collision detector; with it, a share of the conversations get one
+    inserted blocked turn (``blocked_insert``)."""
     from vagen.envs.active_spatial.dataset_contract import row_digest
+    from vagen.envs.active_spatial.env import collision_feedback
 
     exp = policy["sft"]["export"]
     tid = str(raw_row["task_id"])
@@ -360,9 +419,18 @@ def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], poli
         return None, "sft_terminal_not_successful"
     desc = str(raw_row.get("task_description") or "").strip()
     shown = runtime_poses(raw_row)  # the pose lines exactly as the env prints them
+    insert = blocked_insert(raw_row, policy, detector, len(chunks), [shown[b] for b in bounds[:-1]])
     conv: List[Dict[str, Any]] = [{"role": "system", "content": protocol_system_prompt(str(raw_row["task_type"]), policy)}]
     for t, chunk in enumerate(chunks):
-        conv.append({"role": "user", "content": _user_turn(desc, t == 0, policy, shown[bounds[t]]),
+        feedback = None
+        if insert is not None and insert["turn"] == t:
+            # the blocked attempt: same frame and pose before and after, the env's detailed feedback in between
+            conv.append({"role": "user", "content": _user_turn(desc, t == 0, policy, shown[bounds[t]]),
+                         "image_path": frame[bounds[t]]})
+            conv.append({"role": "assistant", "content": "<action>" + insert["move"] + "|</action>"})
+            feedback = collision_feedback([insert["move"]], [(insert["move"], insert["blocked_by"])])
+        conv.append({"role": "user", "content": _user_turn(desc, t == 0 and feedback is None, policy, shown[bounds[t]],
+                                                           env_feedback=feedback),
                      "image_path": frame[bounds[t]]})
         conv.append({"role": "assistant", "content": "<action>" + "".join(a + "|" for a in chunk) + "</action>"})
     if exp.get("explicit_done"):
@@ -388,8 +456,9 @@ def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], poli
                            "terminal_checked_by": "release.build_sft_record"},
         "prompt_format": exp["prompt_format"],
         "chunking": exp["chunking"],
-        "trajectory_steps": len(chunks),
+        "trajectory_steps": len(chunks) + (1 if insert else 0),
         "total_actions": d,
+        "blocked_insert": insert,
         "d_star": (raw_row.get("difficulty") or {}).get("d_star"),
         "conversations": conv,
         "conversation_image_paths": turn_images,

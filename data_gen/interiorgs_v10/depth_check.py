@@ -114,7 +114,8 @@ def cmd_prepare(args: argparse.Namespace) -> None:
     split_of = {s: k.replace("_scenes", "") for k in ("train_scenes", "val_scenes", "test_scenes")
                 for s in manifest.get(k, [])}
     want = set(args.splits.split(","))
-    rows = [r for r in _jsonl(Path(args.run) / "tasks.jsonl") if split_of.get(r["scene_id"]) in want]
+    files = ["tasks.jsonl"] + (["tasks_reserve.jsonl"] if getattr(args, "include_reserve", False) else [])
+    rows = [r for f in files for r in _jsonl(Path(args.run) / f) if split_of.get(r["scene_id"]) in want]
     if args.limit:
         rows = rows[: args.limit]
     frames, tasks = [], []
@@ -228,6 +229,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--run", required=True, help="run_all output folder (tasks.jsonl)")
     p.add_argument("--split-manifest", required=True)
     p.add_argument("--splits", default="val,test")
+    p.add_argument("--include-reserve", action="store_true", help="round 10: the reserve tasks too")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--out", required=True)
     r = sub.add_parser("run")
