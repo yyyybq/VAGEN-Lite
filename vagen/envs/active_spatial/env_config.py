@@ -165,6 +165,10 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     collision_invalidate_action: bool = True  # If True, collision actions don't move camera
     max_consecutive_collisions: int = 3  # Terminate only after repeated collision attempts
     consecutive_collision_penalty: float = -0.5  # Extra penalty when repeated collisions terminate
+    # Round 9 switch: when a move of the turn is blocked, the feedback says how many of the turn's actions were
+    # executed and which were blocked ("2 of 3 actions executed; blocked: move_backward (blocked by wall).").
+    # Default False: "Action executed." whenever any move took effect, the collision message only when none did.
+    collision_feedback_detail: bool = False
 
     # ====== Low-Information Frame Configuration ======
     enable_low_info_frame_check: bool = True

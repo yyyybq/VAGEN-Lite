@@ -19,6 +19,11 @@ INVERSE = {"move_forward": "move_backward", "move_backward": "move_forward", "mo
            "move_right": "move_left", "turn_left": "turn_right", "turn_right": "turn_left"}
 
 
+def feedback(obs_str):
+    """The "Environment Feedback: ..." line of an observation."""
+    return next(line for line in obs_str.splitlines() if line.startswith("Environment Feedback: "))
+
+
 def answer(actions):
     return "<action>" + "".join(a + "|" for a in actions) + "</action>"
 
@@ -107,6 +112,27 @@ class EnvSwitchTest(unittest.TestCase):
         self.assertEqual(last["components"]["collision"]["scale"], -0.15)
         self.assertNotIn("consecutive_collision", last["components"])
         self.assertAlmostEqual(last["reward"], -0.01 - 0.15 * last["collisions"])
+
+    def test_collision_feedback_says_what_was_blocked(self):
+        """Switch 4: the same blocked moves, with the old feedback and with the detailed one."""
+        row, move, n = self.blocked_run()
+        runs = {}
+        for detail in (False, True):
+            env = self.env(row, f"fb{detail}", max_consecutive_collisions=0, collision_feedback_detail=detail)
+            runs[detail] = [RC.step(env, answer([move] * 5)) for _ in range(n)]
+        blocked_turns = [k for k, s in enumerate(runs[True]) if s["collisions"]]
+        self.assertTrue(blocked_turns)
+        for k in blocked_turns:
+            c = runs[True][k]["collisions"]
+            self.assertEqual(runs[False][k]["collisions"], c)
+            old = runs[False][k]["obs"]["obs_str"]
+            new = runs[True][k]["obs"]["obs_str"]
+            self.assertIn("Environment Feedback: Action executed." if c < 5 else
+                          "Environment Feedback: Action blocked by collision.", old)  # partial blocks were silent
+            self.assertIn(f"Environment Feedback: {5 - c} of 5 actions executed; blocked: ", new)
+            blocked_list = feedback(new).split("blocked: ", 1)[1]
+            self.assertEqual(blocked_list.count(f"{move} (blocked by "), c)
+            self.assertEqual(old.replace(feedback(old), ""), new.replace(feedback(new), ""))  # the rest is identical
 
 
 if __name__ == "__main__":

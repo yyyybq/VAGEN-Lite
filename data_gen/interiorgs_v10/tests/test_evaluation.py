@@ -118,6 +118,9 @@ class EvaluationTest(unittest.TestCase):
             self.assertEqual((plain["max_episode_steps"], limit["max_episode_steps"]), (12, 20))
             free = E.env_config(template, tasks, "/gs", None, E.switch_overrides(argparse.Namespace(no_collision_end=True)))
             self.assertEqual((plain.get("max_consecutive_collisions", 3), free["max_consecutive_collisions"]), (3, 0))
+            told = E.env_config(template, tasks, "/gs", None, E.switch_overrides(argparse.Namespace(collision_feedback=True)))
+            self.assertTrue(told["collision_feedback_detail"])
+            self.assertNotIn("collision_feedback_detail", plain)
 
     def test_replace_flagged(self):
         picked = [_row(i, "projective_relations", 2) for i in range(4)] + [_row(10, "occlusion_alignment", 8)]

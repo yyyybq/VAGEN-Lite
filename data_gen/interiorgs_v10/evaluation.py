@@ -168,6 +168,8 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         out["max_episode_steps"] = int(args.max_actions)
     if getattr(args, "no_collision_end", False):
         out["max_consecutive_collisions"] = 0  # blocked moves still cost -0.15 each
+    if getattr(args, "collision_feedback", False):
+        out["collision_feedback_detail"] = True
     return out
 
 
@@ -366,6 +368,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--check-each-action", action="store_true", help="check success after every action, stop at the first")
     r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
     r.add_argument("--no-collision-end", action="store_true", help="3 blocked moves in a row no longer end the task")
+    r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     x = sub.add_parser("replace")

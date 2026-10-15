@@ -90,6 +90,13 @@ def _run_async(coro):
         return asyncio.run(coro)
 
 
+def _collision_text(cr: Any) -> str:
+    """How a blocked move is described in the feedback ("blocked by sofa", "blocked by floor", ...)."""
+    if cr.collision_type == "object":
+        return f"blocked by {cr.collision_object}"
+    return f"blocked by {cr.collision_type}"
+
+
 def _canonical_shaping_score(metric: Dict[str, Any]) -> float:
     """Select the reward potential without changing canonical success."""
     return float(metric.get("shaping_score", metric["score"]))
@@ -933,6 +940,8 @@ class ActiveSpatialEnv(BaseEnv):
         # Track collisions in this step
         step_collisions = []
         collision_feedback = ""
+        turn_moves: List[str] = []  # movement/rotation actions attempted this turn, in order
+        turn_blocked: List[Tuple[str, Any]] = []  # (action, collision) for the blocked ones
         
         # Execute parsed actions (strict or fallback). Strictness only affects format reward.
         if action_executable:
@@ -996,6 +1005,7 @@ class ActiveSpatialEnv(BaseEnv):
                     
                     # Execute action
                     self.view_engine.step(action_lower)
+                    turn_moves.append(action_lower)
                     self._current_step += 1
                     
                     # Check for collision after action
@@ -1016,6 +1026,7 @@ class ActiveSpatialEnv(BaseEnv):
                             )
                             self.last_collision_result = collision_result
                             step_collisions.append(collision_result)
+                            turn_blocked.append((action_lower, collision_result))
                             
                             # Apply collision penalty
                             self.reward += self.config.collision_penalty
@@ -1133,16 +1144,7 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Build collision feedback message
         if step_collisions:
-            collision_msgs = []
-            for cr in step_collisions:
-                if cr.collision_type == "object":
-                    collision_msgs.append(f"blocked by {cr.collision_object}")
-                elif cr.collision_type == "floor":
-                    collision_msgs.append("blocked by floor")
-                elif cr.collision_type == "ceiling":
-                    collision_msgs.append("blocked by ceiling")
-                else:
-                    collision_msgs.append(f"blocked by {cr.collision_type}")
+            collision_msgs = [_collision_text(cr) for cr in step_collisions]
             collision_feedback = f" [Collision: {', '.join(collision_msgs)}]"
         
         # Calculate pose-based reward if not done by explicit 'done' action
@@ -1257,7 +1259,11 @@ class ActiveSpatialEnv(BaseEnv):
         info["consecutive_collision_count"] = self.consecutive_collision_count
         
         # Build env_feedback with collision info
-        if metrics["turn_metrics"]["action_is_effective"]:
+        if turn_blocked and getattr(self.config, "collision_feedback_detail", False):
+            # round 9 switch: say how many of the turn's moves were executed and which ones were blocked
+            env_feedback = (f"{len(turn_moves) - len(turn_blocked)} of {len(turn_moves)} actions executed; blocked: "
+                            + "; ".join(f"{a} ({_collision_text(cr)})" for a, cr in turn_blocked) + ".")
+        elif metrics["turn_metrics"]["action_is_effective"]:
             env_feedback = "Action executed."
         elif step_collisions:
             env_feedback = f"Action blocked by collision.{collision_feedback}"
