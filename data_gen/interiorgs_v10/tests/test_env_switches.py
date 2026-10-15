@@ -61,6 +61,21 @@ class EnvSwitchTest(unittest.TestCase):
             self.assertEqual(on["reward"], 5.0)  # success, and the turn ends inside the action loop: no step penalty
             self.assertIn("auto_terminated", on["flags"])
 
+    def test_action_limit_is_a_setting(self):
+        """Switch 2: 15 turns in place go past the template's 12-action limit when it is raised to 20."""
+        for row in self.rows:
+            runs = {}
+            for limit in (12, 20):
+                env = self.env(row, f"limit{limit}", max_episode_steps=limit)
+                runs[limit] = [RC.step(env, answer(["turn_left"] * 5)) for _ in range(3)]
+            if any(r["success"] for rs in runs.values() for r in rs):
+                continue  # this task is met by turning in place; take another
+            self.assertEqual([(r["env_step"], r["done"]) for r in runs[12]], [(5, False), (10, False), (12, True)])
+            self.assertIn("truncated_max_primitive_steps", runs[12][-1]["flags"])
+            self.assertEqual([(r["env_step"], r["done"]) for r in runs[20]], [(5, False), (10, False), (15, False)])
+            return
+        self.fail("no task to test on")
+
 
 if __name__ == "__main__":
     unittest.main()

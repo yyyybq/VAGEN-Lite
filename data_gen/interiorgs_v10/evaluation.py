@@ -164,6 +164,8 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     if getattr(args, "check_each_action", False):
         out["success_check_each_action"] = True
+    if getattr(args, "max_actions", None):
+        out["max_episode_steps"] = int(args.max_actions)
     return out
 
 
@@ -360,6 +362,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--max-turns", type=int, default=12)
     # round 9 switches (default: the template's rules)
     r.add_argument("--check-each-action", action="store_true", help="check success after every action, stop at the first")
+    r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     x = sub.add_parser("replace")
