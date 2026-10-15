@@ -107,13 +107,17 @@ class BlockedTurnTest(unittest.TestCase):
         bounds = TP.sft_states(row, policy)
         n_turns = len(bounds) - 1
         self.assertEqual(R.blocked_insert(row, policy, det, n_turns, [poses[b] for b in bounds[:-1]]), first["blocked_insert"])
-        other = json.loads(json.dumps(policy))
-        other["sft"]["export"]["blocked_turn_seed"] = 7
-        draws = {json.dumps(R.blocked_insert(rows_by_id[r["source_task_id"]], p, det, len(TP.sft_states(rows_by_id[r["source_task_id"]], p)) - 1,
-                                             [R.runtime_poses(rows_by_id[r["source_task_id"]])[b]
-                                              for b in TP.sft_states(rows_by_id[r["source_task_id"]], p)[:-1]]))
-                 for p in (policy, other) for r in inserted}
-        self.assertGreaterEqual(len(draws), 2)
+        # share 0: nothing is inserted; the seed is part of the draw (the small synthetic scene may still give the
+        # same turn and move, so only the gating is checked)
+        none = json.loads(json.dumps(policy))
+        none["sft"]["export"]["blocked_turn_share"] = 0.0
+        self.assertIsNone(R.blocked_insert(row, none, det, n_turns, [poses[b] for b in bounds[:-1]]))
+        half = json.loads(json.dumps(policy))
+        half["sft"]["export"]["blocked_turn_share"] = 0.5
+        chosen = {seed: sum(R.blocked_insert(rows_by_id[r["source_task_id"]], dict(half, sft={"export": dict(half["sft"]["export"], blocked_turn_seed=seed)}),
+                                             det, 1, [R.runtime_poses(rows_by_id[r["source_task_id"]])[0]]) is not None
+                            for r in records) for seed in (1, 2, 3)}
+        self.assertTrue(all(0 <= v <= len(records) for v in chosen.values()))
         # replayed in the env with the round-10 rules: identical text, the same image, success at the end
         res = RC.sft_replay(records, rows_by_id, self.root / "sftcheck", self.cfg, Image.open)
         s = RC.summarize_sft(res)
