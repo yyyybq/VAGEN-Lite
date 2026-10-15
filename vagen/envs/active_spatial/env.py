@@ -2189,35 +2189,9 @@ class ActiveSpatialEnv(BaseEnv):
         return obs
     
     def system_prompt(self) -> str:
-        """Get the system prompt for this environment."""
-        return system_prompt(
-            format=self.config.prompt_format,
-            step_translation=self.config.step_translation,
-            step_rotation_deg=self.config.step_rotation_deg,
-            # Thread the per-step action budget and reward scalars from config
-            # so the system prompt agrees with the user-side format prompt
-            # (which already parameterises `max_actions_per_step`).
-            max_actions_per_step=getattr(self.config, "max_actions_per_step", 1),
-            action_sep=getattr(self.config, "action_sep", "|"),
-            format_reward=getattr(self.config, "format_reward", 0.2),
-            invalid_format_penalty=getattr(self.config, "invalid_format_penalty", -0.1),
-            success_reward=getattr(self.config, "success_reward", 1.0),
-            task_type=(self.current_item or {}).get("task_type", ""),
-            # v17: action-space + done switch
-            action_space=getattr(self.config, "action_space", "legacy"),
-            enable_explicit_done=getattr(self.config, "enable_explicit_done", True),
-            # round 9: "actual" lists the reward terms below instead of the legacy lines
-            reward_text=getattr(self.config, "prompt_reward_text", "legacy"),
-            max_consecutive_invalid_actions=self.config.max_consecutive_invalid_actions,
-            enable_step_penalty=self.config.enable_step_penalty,
-            step_penalty=self.config.step_penalty,
-            collision_penalty=self.config.collision_penalty,
-            max_consecutive_collisions=self.config.max_consecutive_collisions,
-            consecutive_collision_penalty=self.config.consecutive_collision_penalty,
-            enable_low_info_frame_check=self.config.enable_low_info_frame_check,
-            max_consecutive_low_info_frames=self.config.max_consecutive_low_info_frames,
-            low_info_frame_penalty=self.config.low_info_frame_penalty,
-        )
+        """Get the system prompt for this environment (the arguments come from the config, so the SFT export
+        check can build the same prompt: ActiveSpatialEnvConfig.system_prompt_arguments)."""
+        return system_prompt(**self.config.system_prompt_arguments((self.current_item or {}).get("task_type", "")))
     
     def compute_reward(self) -> float:
         """Compute final reward for the episode."""

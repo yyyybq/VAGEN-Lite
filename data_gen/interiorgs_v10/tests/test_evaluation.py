@@ -188,10 +188,17 @@ class EvaluationTest(unittest.TestCase):
         import os
         from unittest import mock
 
-        template = Path(E.__file__).with_name("configs") / "rl_env_v10_S0.yaml"
+        configs = Path(E.__file__).with_name("configs")
+        template = configs / "rl_env_v10_S0_r6.yaml"  # the switches are defined against the rounds 6-9 rules
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"R1_RENDER_URL": "http://x/render"}):
             tasks = Path(tmp) / "tasks.jsonl"
             tasks.write_text("")
+            # round 10: the live template has switches 1, 3 and 4 on; the flags then change nothing
+            live = E.env_config(configs / "rl_env_v10_S0.yaml", tasks, "/gs", None, {})
+            self.assertEqual((live["success_check_each_action"], live["max_consecutive_collisions"],
+                              live["collision_feedback_detail"], live["wall_model"]), (True, 0, True, "thick"))
+            self.assertEqual(E.env_config(configs / "rl_env_v10_S0.yaml", tasks, "/gs", None, E.switch_overrides(
+                argparse.Namespace(check_each_action=True, no_collision_end=True, collision_feedback=True))), live)
             plain = E.env_config(template, tasks, "/gs", None, E.switch_overrides(argparse.Namespace()))
             self.assertEqual(E.switch_overrides(argparse.Namespace()), {})  # no switch: the template's rules
             self.assertNotIn("success_check_each_action", plain)

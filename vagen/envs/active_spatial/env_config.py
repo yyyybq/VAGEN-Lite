@@ -256,6 +256,38 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     def get(self, key: str, default=None):
         """Get configuration value by key."""
         return getattr(self, key, default)
+
+    def system_prompt_arguments(self, task_type: str = "") -> dict:
+        """The arguments the env passes to prompt.system_prompt (ActiveSpatialEnv.system_prompt).  Shared with the
+        SFT export check (data_gen/interiorgs_v10/training_prep.py prompt_mismatches), so RL and SFT prompts are
+        compared with every setting the env itself uses."""
+        return dict(
+            format=self.prompt_format,
+            step_translation=self.step_translation,
+            step_rotation_deg=self.step_rotation_deg,
+            # Thread the per-step action budget and reward scalars from config so the system prompt agrees
+            # with the user-side format prompt (which already parameterises `max_actions_per_step`).
+            max_actions_per_step=getattr(self, "max_actions_per_step", 1),
+            action_sep=getattr(self, "action_sep", "|"),
+            format_reward=getattr(self, "format_reward", 0.2),
+            invalid_format_penalty=getattr(self, "invalid_format_penalty", -0.1),
+            success_reward=getattr(self, "success_reward", 1.0),
+            task_type=task_type,
+            # v17: action-space + done switch
+            action_space=getattr(self, "action_space", "legacy"),
+            enable_explicit_done=getattr(self, "enable_explicit_done", True),
+            # round 9: "actual" lists the reward terms below instead of the legacy lines
+            reward_text=getattr(self, "prompt_reward_text", "legacy"),
+            max_consecutive_invalid_actions=self.max_consecutive_invalid_actions,
+            enable_step_penalty=self.enable_step_penalty,
+            step_penalty=self.step_penalty,
+            collision_penalty=self.collision_penalty,
+            max_consecutive_collisions=self.max_consecutive_collisions,
+            consecutive_collision_penalty=self.consecutive_collision_penalty,
+            enable_low_info_frame_check=self.enable_low_info_frame_check,
+            max_consecutive_low_info_frames=self.max_consecutive_low_info_frames,
+            low_info_frame_penalty=self.low_info_frame_penalty,
+        )
     
     @property
     def cache_key(self) -> str:

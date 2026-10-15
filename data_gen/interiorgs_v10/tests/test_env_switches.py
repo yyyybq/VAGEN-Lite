@@ -36,7 +36,9 @@ class EnvSwitchTest(unittest.TestCase):
         paths = write_synthetic_scenes(cls.root / "scenes")
         scene_dir = paths["two_rooms"]
         cls.rows = _jsonable(generate_scene(scene_dir, scene_dir.name, RunConfig(target_tasks_per_scene=8)))["rows"]
-        cls.cfg = RC.env_config(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml", "http://127.0.0.1:1/render")
+        # the rounds 6-9 template: these tests exercise every switch against the legacy behaviour (the live
+        # template, rl_env_v10_S0.yaml, has switches 1, 3 and 4 and the thick walls on since round 10)
+        cls.cfg = RC.env_config(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0_r6.yaml", "http://127.0.0.1:1/render")
         cls.cfg["gs_root"] = str(scene_dir.parent)
         cls.patch = mock.patch("vagen.envs.active_spatial.env.ActiveSpatialEnv._render_image", lambda self: FRAME.copy())
         cls.patch.start()
@@ -146,6 +148,22 @@ class EnvSwitchTest(unittest.TestCase):
             self.assertTrue(fmt.call_args_list)
             self.assertEqual({c.kwargs.get("normalize_zero") for c in fmt.call_args_list}, {setting})
 
+
+    def test_round10_template_has_the_switches_on(self):
+        """The live template turns switches 1, 3 and 4 on, uses thick walls and the next-version text settings."""
+        live = RC.env_config(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml", "http://127.0.0.1:1/render")
+        self.assertEqual({k: live[k] for k in ("success_check_each_action", "max_consecutive_collisions",
+                                               "collision_feedback_detail", "wall_model", "prompt_reward_text",
+                                               "pose_normalize_negative_zero", "max_episode_steps", "turn_budget")},
+                         {"success_check_each_action": True, "max_consecutive_collisions": 0,
+                          "collision_feedback_detail": True, "wall_model": "thick", "prompt_reward_text": "actual",
+                          "pose_normalize_negative_zero": True, "max_episode_steps": 12, "turn_budget": 12})
+        old = {k: v for k, v in self.cfg.items() if k != "gs_root"}
+        self.assertEqual({k: v for k, v in live.items() if k in old and k != "gs_root"
+                          and k not in ("success_check_each_action", "max_consecutive_collisions",
+                                        "collision_feedback_detail", "wall_model", "prompt_reward_text",
+                                        "pose_normalize_negative_zero")},
+                         {k: v for k, v in old.items() if k not in live or k in old})  # nothing else differs
 
     def test_reward_text_setting_reaches_the_system_prompt(self):
         """Next data version: prompt_reward_text; the env passes its own reward settings (default: legacy text)."""

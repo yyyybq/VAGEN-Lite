@@ -335,7 +335,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                                                 "prompt_format": cfg["prompt_format"], "greedy": True,
                                                 "env_switches": switches, "max_turns": int(args.max_turns),
                                                 "history": bool(args.history),
-                                                "sft_text": bool(args.history or args.sft_text),
+                                                "sft_text": bool(args.sft_text),
                                                 "load_seconds": round(time.time() - t0, 1)}, indent=1))
     done = {r["index"] for r in _jsonl(out / "results.jsonl")} if (out / "results.jsonl").exists() else set()
     with open(out / "results.jsonl", "a") as f:
@@ -344,7 +344,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                 continue
             try:
                 row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames", history=args.history,
-                                  as_sft=args.history or args.sft_text)
+                                  as_sft=args.sft_text)
             except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
                 row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
             f.write(json.dumps(row) + "\n")
@@ -465,9 +465,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
     r.add_argument("--no-collision-end", action="store_true", help="3 blocked moves in a row no longer end the task")
     r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
-    r.add_argument("--history", action="store_true",
-                   help="every model call gets all earlier turns, exactly as in SFT (implies --sft-text)")
-    r.add_argument("--sft-text", action="store_true", help="messages as the SFT data has them (leading/trailing whitespace stripped)")
+    r.add_argument("--history", action=argparse.BooleanOptionalAction, default=True,
+                   help="every model call gets all earlier turns, exactly as in SFT (round-10 default; --no-history "
+                        "for a single-turn input)")
+    r.add_argument("--sft-text", action="store_true",
+                   help="messages as the SFT data of rounds 6-9 had them (leading/trailing whitespace stripped); the "
+                        "round-10 export keeps the env's text, so this is only for models of those rounds")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     c = sub.add_parser("compare", help="task-by-task comparison against a base result folder")

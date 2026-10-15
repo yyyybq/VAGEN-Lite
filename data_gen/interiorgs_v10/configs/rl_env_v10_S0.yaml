@@ -3,6 +3,17 @@
 #   prompt_format: no_think   -- the v10 SFT data is action-only (configs/admission_v2.json sft.export), and
 #                                RL starts from that SFT model, so both show the same prompt;
 #   r1_legacy_success: false  -- the env's v10 success rules (target_visibility.py), not R1's.
+# Round 10 (2026-10-15, decisions after the round-9 diagnostics; rl_env_v10_S0_r6.yaml is the previous version):
+#   success_check_each_action  -- success is checked after every action and ends the episode at once;
+#   max_consecutive_collisions 0 and collision_feedback_detail -- blocked moves never end the episode, the
+#                                feedback says how many actions ran and which were blocked;
+#   wall_model thick           -- walls are slabs with their passages cut out (the generator uses the same);
+#   prompt_reward_text actual and pose_normalize_negative_zero -- the system prompt lists the real reward
+#                                terms, a pose value that rounds to zero prints as 0.00.
+#   The fifth rule, history (every earlier turn in the model's input), is the agent loop's: training_prep.py
+#   rl-config --history-mode sets history_window_size (per-turn samples) or concat_multi_turn (one sequence).
+# The SFT export (configs/admission_v2.json sft.export) must match the prompt and pose settings here
+# (training_prep.py rl-config checks the system prompt).
 # training_prep.py rl-config fills jsonl_path, gs_root, train_size, n_envs and the seeds per split.
 envs:
 - name: ActiveSpatial
@@ -12,6 +23,7 @@ envs:
   config:
     action_space: strafe
     client_url: ${oc.env:R1_RENDER_URL}
+    collision_feedback_detail: true
     enable_auto_termination: true
     enable_distance_in_obs: false
     enable_explicit_done: false
@@ -25,6 +37,7 @@ envs:
     image_width: 256
     invalid_format_penalty: -0.1
     max_actions_per_step: 5
+    max_consecutive_collisions: 0
     max_episode_steps: 12
     near_success_bonus: 0.0
     near_success_threshold: 0.55
@@ -32,14 +45,18 @@ envs:
     potential_field_orientation_weight: 0.3
     potential_field_position_weight: 0.7
     potential_field_progress_mode: potential
+    pose_normalize_negative_zero: true
     potential_field_reward_scale: 1.0
     prompt_format: no_think
+    prompt_reward_text: actual
     r1_legacy_success: false
     render_backend: http
     render_fail_fast: true
     step_rotation_deg: 20.0
     step_translation: 0.3
+    success_check_each_action: true
     success_reward: 5.0
     success_score_threshold: 0.65
     test_size: 0
     turn_budget: 12
+    wall_model: thick

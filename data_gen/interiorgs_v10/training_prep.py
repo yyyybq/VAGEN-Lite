@@ -189,12 +189,7 @@ def env_system_prompt(env_cfg: Dict[str, Any], task_type: str) -> str:
 
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
     c = ActiveSpatialEnvConfig(**{k: v for k, v in env_cfg.items() if k in keys})
-    return P.system_prompt(format=c.prompt_format, step_translation=c.step_translation,
-                           step_rotation_deg=c.step_rotation_deg, max_actions_per_step=c.max_actions_per_step,
-                           action_sep=getattr(c, "action_sep", "|"), format_reward=c.format_reward,
-                           invalid_format_penalty=c.invalid_format_penalty, success_reward=c.success_reward,
-                           task_type=task_type, action_space=c.action_space,
-                           enable_explicit_done=c.enable_explicit_done)
+    return P.system_prompt(**c.system_prompt_arguments(task_type))  # every setting the env itself passes
 
 
 def prompt_mismatches(env_cfg: Dict[str, Any], task_types: Sequence[str], policy: Dict[str, Any]) -> List[str]:

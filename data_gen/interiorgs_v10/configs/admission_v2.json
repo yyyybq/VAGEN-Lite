@@ -63,6 +63,7 @@
       "max_actions_per_turn": 5,
       "explicit_done": false,
       "observation_pose": "runtime",
+      "pose_normalize_negative_zero": true,
       "env_feedback": "Action executed.",
       "system_prompt": {
         "step_translation": 0.3,
@@ -72,8 +73,19 @@
         "max_actions_per_step": 5,
         "format_reward": 0.0,
         "invalid_format_penalty": -0.1,
-        "success_reward": 5.0
-      }
+        "success_reward": 5.0,
+        "reward_text": "actual",
+        "max_consecutive_invalid_actions": 3,
+        "enable_step_penalty": true,
+        "step_penalty": -0.01,
+        "collision_penalty": -0.15,
+        "max_consecutive_collisions": 0,
+        "consecutive_collision_penalty": -0.5,
+        "enable_low_info_frame_check": true,
+        "max_consecutive_low_info_frames": 3,
+        "low_info_frame_penalty": -0.2
+      },
+      "note_round10": "2026-10-15: the system prompt lists the env's real reward terms (reward_text actual with the S0 settings; blocked moves never end the episode) and a pose value that rounds to zero prints as 0.00, matching configs/rl_env_v10_S0.yaml; rounds 6-9 exported the legacy text and -0.00."
     }
   },
   "qa": {

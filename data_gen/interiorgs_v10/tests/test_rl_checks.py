@@ -45,8 +45,9 @@ class RlChecksTest(unittest.TestCase):
         self.assertEqual((s["errors"], s["success"], s["success_at_d_star"], s["done_on_last_planned_turn"]),
                          (0, len(self.rows), len(self.rows), len(self.rows)))
         self.assertEqual(s["max_reconstruction_error"], 0.0)
-        # S0: +5 for success on the last turn, -0.01 per turn, nothing else
-        self.assertEqual({k.split(":")[1] for k in s["rewards"] if k.startswith("last")}, {"4.99"})
+        # S0: +5 for success on the last turn, -0.01 per turn, nothing else.  Round 10: success is checked after
+        # every action and ends the turn inside the action loop, before the step penalty, so the last turn is 5.0
+        self.assertEqual({k.split(":")[1] for k in s["rewards"] if k.startswith("last")}, {"5.0"})
         self.assertTrue(all(k.endswith(":-0.01") for k in s["rewards"] if k.startswith("earlier")))
 
     def test_baselines(self):

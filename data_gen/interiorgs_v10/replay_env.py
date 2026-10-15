@@ -75,6 +75,19 @@ json.dump(out, open(out_path, "w"))
 """
 
 
+RENDERER_KEYS = ("client_url", "render_backend", "gpu_device", "render_fail_fast", "jsonl_path", "gs_root",
+                 "train_size", "test_size")
+
+
+def template_rules(env_yaml: Path) -> Dict[str, Any]:
+    """The env settings of an RL env YAML (envs[0].config) without the renderer and dataset entries: the rules
+    (wall model, success check, collision and prompt settings) the replay should use."""
+    import yaml
+
+    cfg = dict(yaml.safe_load(Path(env_yaml).read_text(encoding="utf-8"))["envs"][0]["config"])
+    return {k: v for k, v in cfg.items() if k not in RENDERER_KEYS}
+
+
 def env_copy(dst: Path) -> Path:
     """Snapshot of this repository's ``vagen`` package (the replay never touches the live tree)."""
     shutil.copytree(REPO / "vagen", dst / "vagen", ignore=shutil.ignore_patterns("__pycache__"))
@@ -157,6 +170,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--no-task-objects", type=Path, default=None,
                     help="configs/no_task_objects_*.json: which scenes form the no-task group")
     ap.add_argument("--env-config", default="{}", help="JSON of extra ActiveSpatialEnvConfig fields")
+    ap.add_argument("--env-template", type=Path, default=None,
+                    help="an RL env YAML (configs/rl_env_v10_S0.yaml): replay with its rules (wall model, success "
+                         "check per action, collision rules); the renderer settings are dropped. --env-config "
+                         "overrides single fields on top")
     ap.add_argument("--include-reserve", action="store_true", help="also sample tasks_reserve.jsonl")
     ap.add_argument("--json", type=Path)
     args = ap.parse_args(argv)
@@ -164,7 +181,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.include_reserve and (args.run / "tasks_reserve.jsonl").exists():
         rows += [json.loads(l) for l in (args.run / "tasks_reserve.jsonl").read_text().splitlines() if l.strip()]
     listed = set((json.loads(args.no_task_objects.read_text()).get("scenes") or {})) if args.no_task_objects else set()
-    extra = json.loads(args.env_config)
+    extra = {**(template_rules(args.env_template) if args.env_template else {}), **json.loads(args.env_config)}
     results = replay(select_rows(rows, args.per_family, args.per_override, per_ignored=args.per_ignored,
                                  listed_scenes=listed), args.scenes_root, extra)
     rep = {"env_config": {**ENV_CONFIG, **extra}, "summary": summarize(results, listed), "results": results}
