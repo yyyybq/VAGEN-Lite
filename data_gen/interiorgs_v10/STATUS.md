@@ -87,10 +87,21 @@
 | 2026-10-15 第九轮 | **1. 环境加 5 个开关，默认都关**（R1 和现有训练不变）：每个动作检查成功（`success_check_each_action`）、上限可设（`max_episode_steps` / `max_turns`）、撞墙不结束（`max_consecutive_collisions: 0`）、碰撞如实反馈（`collision_feedback_detail`）、带历史（评测 `--history`，格式和 SFT 逐字一致）。 |
 | 2026-10-15 第九轮 | **2. 只给下一版用的两个文字开关**：系统提示的奖励说明按实际规则写（`prompt_reward_text: actual`）、位姿的 −0.00 写成 0.00（`pose_normalize_negative_zero`）；环境和 SFT 导出各有同名设置，要一起打开。 |
 | 2026-10-15 第九轮 | **3. `lf/model` 所有者改回你；`patches/` 已删。** |
+| 2026-10-15 第十轮 | **1. 默认规则**：每个动作检查成功、撞墙不结束、碰撞如实反馈、带历史默认打开，动作和回合上限保持 12（`configs/rl_env_v10_S0.yaml`、评测默认 `--history`；第六至九轮的模板留作 `rl_env_v10_S0_r6.yaml`）。R1 和环境的代码默认值不变。 |
+| 2026-10-15 第十轮 | **2. RL 带历史的做法**：先各做一次单卡试跑（"每个回合单独一个样本" `--history-mode no_concat`、"一道题一个序列" `--history-mode concat`），比较速度、奖励是否正常、训练是否稳定；"一道题一个序列"正常就用它，否则用前者。单卡放不下 7B 的 PPO（第五轮同样原因），试跑用第五轮的 3B SFT 模型。 |
+| 2026-10-15 第十轮 | **3. 文字首尾空白**：SFT 导出照环境的原文（`prepare_active_spatial_sft.py --keep-text`），不再去掉。 |
+| 2026-10-15 第十轮 | **4. 系统提示的奖励说明改成实际规则（`prompt_reward_text: actual`），位姿 −0.00 统一成 0.00**；环境模板和 SFT 导出策略（`admission_v2.json` 的 `sft.export`）一起打开。 |
+| 2026-10-15 第十轮 | **5. 深度核对也对 train 做**（正式题和后备题一起），标出的题从训练数据里去掉（`sft-frames --exclude`），val、test 的评测集抽题时也去掉（`evaluation.py select --exclude`）。 |
+| 2026-10-15 第十轮 | **6. "撞到之后怎么办"的样本，只做便宜的版本**：在最短走法的某个回合前插入一个会被挡住的动作（用环境自己的碰撞检测挑），接上环境的如实反馈，再继续原来的最短走法（`release.blocked_insert`，比例 `sft.export.blocked_turn_share`）。 |
+| 2026-10-15 第十轮 | **7. 后退占比本轮不改。** |
+| 2026-10-15 第十轮 | **8. 挑模型只看验证集**：固定 200 道左右的 val 题（按族和最少步数分层，固定随机种子），每题一条不采样的轨迹；SFT 挑 epoch、RL 挑检查点都按它（`train_chain` 的 `sft_eval` / `pick_sft`，RL 的 `--val-tasks --greedy-val`）；test 只记录。 |
+| 2026-10-15 第十轮 | **9. 墙改成有厚度**（第七轮第 3 条的执行）：`wall_model: thick`，生成器和环境用同一套墙板（门和落地的洞口是通道，窗户不是）。 |
 
 ## 3. 现在在做的事
 
-**没有在跑的任务。** 第九轮的诊断评测已结束（2026-10-15 04:40 UTC），sco 任务都已删除。详见 `cluster_runs/REPORT_R9_20261015.md`。
+**第十轮训练链在跑（2026-10-15 14:26 UTC 起，代码 `c212b0a0`）：** `exps/vagen_active_spatial/interiorgs_v10_train_r10_20261015/`，看 `PROGRESS.md` 或 `python -m data_gen.interiorgs_v10.train_chain status --dir <该目录>`。步骤：两组 SFT（只用正式题 / 加后备题，各 5 个 epoch，8 卡 pt-bjcfifv5 / pt-k9lxp6la）→ 每个 epoch 在 193 道验证题和 279 道评测题上评测 → 按验证集挑检查点 → RL（S0，一道题一个序列，`critic_warmup` 10，150 次以内，每 25 次验证）→ 评测。新数据 `interiorgs_v10_gen_r10_20261015/`（厚墙），详见 `cluster_runs/REPORT_R10_20261015.md`（训练部分待填）。
+
+第九轮的诊断评测已结束（2026-10-15 04:40 UTC），sco 任务都已删除。详见 `cluster_runs/REPORT_R9_20261015.md`。
 
 - **诊断评测的结论：** 现在的失败里有相当一部分是环境规则和输入造成的。同一个 SFT 模型，五个开关全开从 23.4% 升到 34.9%；主要来自带历史（+5.0 个百分点）和"撞墙不结束 + 如实反馈"（+3.2，p = 0.012）。上限 20 在全开时没有带来任何成功（成功全在 12 个动作以内）。
 - **SFT 导出去掉了每段文字的首尾空白**，RL 和评测没有去掉；单独改这一点几乎没有影响（23.7%），下一版统一。
