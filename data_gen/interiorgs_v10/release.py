@@ -343,7 +343,8 @@ def blocked_insert(raw_row: Mapping[str, Any], policy: Mapping[str, Any], detect
                    poses: Sequence[Any]) -> Optional[Dict[str, Any]]:
     """The blocked turn to insert for this task, or None: {"turn": t, "move", "blocked_by"}.  A task is chosen with
     probability ``sft.export.blocked_turn_share`` (seed ``blocked_turn_seed`` and the task id); the turn is drawn
-    among the turns, the move among the moves blocked at that turn's pose (none blocked: no insertion)."""
+    among the turns whose pose has a blocked move (generated poses keep 0.5 m from walls and objects, so most
+    turns have none), the move among the moves blocked there; a task with no such turn gets no insertion."""
     exp = policy["sft"]["export"]
     share = float(exp.get("blocked_turn_share", 0.0) or 0.0)
     if share <= 0.0 or detector is None or n_turns <= 0:
@@ -351,10 +352,11 @@ def blocked_insert(raw_row: Mapping[str, Any], policy: Mapping[str, Any], detect
     rng = random.Random(f"{exp.get('blocked_turn_seed', 20261015)}:{raw_row['task_id']}")
     if rng.random() >= share:
         return None
-    t = rng.randrange(n_turns)
-    blocked = blocked_moves(detector, poses[t])
-    if not blocked:
+    candidates = [(t, blocked_moves(detector, poses[t])) for t in range(n_turns)]
+    candidates = [(t, b) for t, b in candidates if b]
+    if not candidates:
         return None
+    t, blocked = candidates[rng.randrange(len(candidates))]
     move, text = blocked[rng.randrange(len(blocked))]
     return {"turn": t, "move": move, "blocked_by": text}
 
