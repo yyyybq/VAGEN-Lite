@@ -47,6 +47,12 @@ class BlockedTurnTest(unittest.TestCase):
         cls.patch.stop()
         cls._tmp.cleanup()
 
+    def test_policy_inserts_a_blocked_turn_in_one_conversation_of_five(self):
+        """Decision 6 of 2026-10-15: 20% of the conversations (seeded), so the blocked moves stay a small share of all
+        SFT actions (about one in twenty) while the feedback text is seen in thousands of conversations."""
+        exp = load_policy()["sft"]["export"]
+        self.assertEqual((exp["blocked_turn_share"], exp["blocked_turn_seed"]), (0.2, 20261015))
+
     def test_feedback_text_is_the_env_function(self):
         self.assertEqual(collision_feedback(["move_forward"], [("move_forward", "blocked by wall")]),
                          "0 of 1 actions executed; blocked: move_forward (blocked by wall).")

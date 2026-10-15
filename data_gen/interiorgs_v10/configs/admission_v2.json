@@ -65,6 +65,8 @@
       "observation_pose": "runtime",
       "pose_normalize_negative_zero": true,
       "env_feedback": "Action executed.",
+      "blocked_turn_share": 0.2,
+      "blocked_turn_seed": 20261015,
       "system_prompt": {
         "step_translation": 0.3,
         "step_rotation_deg": 20.0,
