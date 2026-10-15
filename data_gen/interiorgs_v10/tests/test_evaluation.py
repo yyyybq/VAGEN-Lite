@@ -240,6 +240,42 @@ class EvaluationTest(unittest.TestCase):
             self.assertEqual(json.loads(out.read_text())["compare"]["D1"]["only_other"], 2)
             self.assertIn("| D1 | 5 | 1 | 1 | 2 | 1 | 1.000 |", out.with_suffix(".md").read_text(encoding="utf-8"))
 
+    def test_select_from_a_split_without_flagged_tasks(self):
+        """Round 10: select --split val --exclude depth_check_summary.json (the fixed validation set)."""
+        from argparse import Namespace
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "output"
+            run.mkdir()
+            rows = []
+            for i in range(60):
+                scene = f"v{i % 6}" if i % 2 else f"t{i % 6}"
+                rows.append({"task_id": f"k{i:03d}", "scene_id": scene, "task_type": "equidistance",
+                             "difficulty": {"d_star": 1 + i % 8}, "target_object": {}, "target_region": {},
+                             "init_camera": {}, "camera_model_version": "m", "canonical_task_metric_version": "c",
+                             "action_protocol_version": "a"})
+            (run / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            manifest = Path(tmp) / "split.json"
+            manifest.write_text(json.dumps({"version": 2, "train_scenes": [], "val_scenes": [f"v{k}" for k in range(6)],
+                                            "test_scenes": [f"t{k}" for k in range(6)]}))
+            flagged = Path(tmp) / "depth.json"
+            flagged.write_text(json.dumps({"flagged_task_ids": [f"k{i:03d}" for i in range(1, 60, 2)][:10]}))
+            out = Path(tmp) / "val200"
+            E.cmd_select(Namespace(run=str(run), split_manifest=str(manifest), per_family=12, seed=1, split="val",
+                                   exclude=str(flagged), out=str(out)))
+            picked = [json.loads(l) for l in (out / "tasks.jsonl").read_text().splitlines()]
+            sel = json.loads((out / "selection.json").read_text())
+            self.assertEqual(len(picked), 12)
+            self.assertTrue(all(r["scene_id"].startswith("v") and r["split"] == "val" for r in picked))
+            self.assertFalse({r["task_id"] for r in picked} & set(json.loads(flagged.read_text())["flagged_task_ids"]))
+            self.assertEqual((sel["split"], sel["val_tasks"], sel["excluded_flagged"]), ("val", 30, 10))
+            # the default is the test split, nothing excluded, as before
+            out2 = Path(tmp) / "test"
+            E.cmd_select(Namespace(run=str(run), split_manifest=str(manifest), per_family=12, seed=1, out=str(out2)))
+            picked2 = [json.loads(l) for l in (out2 / "tasks.jsonl").read_text().splitlines()]
+            self.assertTrue(all(r["scene_id"].startswith("t") and r["split"] == "test" for r in picked2))
+            self.assertEqual(json.loads((out2 / "selection.json").read_text())["test_tasks"], 30)
+
     def test_replace_flagged(self):
         picked = [_row(i, "projective_relations", 2) for i in range(4)] + [_row(10, "occlusion_alignment", 8)]
         pool = picked + [_row(20 + i, "projective_relations", 1 + i % 3) for i in range(3)] + [_row(30, "projective_relations", 7)]

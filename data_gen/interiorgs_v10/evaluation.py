@@ -6,6 +6,8 @@ share it):
 
     python -m data_gen.interiorgs_v10.evaluation select --run RUN/output --split-manifest RUN/split_manifest.json \\
         --out EVAL                                      # EVAL/tasks.jsonl + EVAL/selection.json
+    # round 10: the fixed validation set (about 200 val tasks: --split val --per-family 34), tasks flagged by the
+    # depth check excluded up front (--exclude depth_check_summary.json)
     # per model, a one-card sco job (sco_interiorgs_v10_train.sh eval RUN EVAL NAME MODEL [PROMPT_FORMAT]):
     python -m data_gen.interiorgs_v10.evaluation run --eval EVAL --name NAME --model HF_DIR
     python -m data_gen.interiorgs_v10.evaluation table --eval EVAL     # EVAL/table.md, EVAL/table.json
@@ -72,20 +74,33 @@ def select_tasks(rows: Sequence[Dict[str, Any]], per_family: int = PER_FAMILY, s
     return picked
 
 
-def cmd_select(args: argparse.Namespace) -> None:
+def split_rows(run: Path, split_manifest: Path, split: str) -> List[Dict[str, Any]]:
+    """The formal tasks of one split as published rows."""
     from .release import finalize_task_row, split_lookup
 
-    manifest = json.loads(Path(args.split_manifest).read_text())
-    lookup = split_lookup(manifest)
-    rows = [finalize_task_row(r, "test") for r in _jsonl(Path(args.run) / "tasks.jsonl")
-            if lookup.get(str(r["scene_id"])) == "test"]
-    picked = select_tasks(rows, args.per_family, args.seed)
+    lookup = split_lookup(json.loads(Path(split_manifest).read_text()))
+    return [finalize_task_row(r, split) for r in _jsonl(Path(run) / "tasks.jsonl")
+            if lookup.get(str(r["scene_id"])) == split]
+
+
+def flagged_ids(path: Optional[str]) -> set:
+    """Task ids of a depth_check_summary.json (round 10: excluded from the fixed sets up front)."""
+    return set(json.loads(Path(path).read_text())["flagged_task_ids"]) if path else set()
+
+
+def cmd_select(args: argparse.Namespace) -> None:
+    split = getattr(args, "split", None) or "test"
+    rows = split_rows(Path(args.run), Path(args.split_manifest), split)
+    excluded = flagged_ids(getattr(args, "exclude", None))
+    pool = [r for r in rows if r["task_id"] not in excluded]
+    picked = select_tasks(pool, args.per_family, args.seed)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in picked))
     cells = Counter((r["task_type"], band_name(int(r["difficulty"]["d_star"]))) for r in picked)
-    avail = Counter((r["task_type"], band_name(int(r["difficulty"]["d_star"]))) for r in rows)
-    selection = {"version": VERSION, "seed": args.seed, "per_family": args.per_family, "test_tasks": len(rows),
+    avail = Counter((r["task_type"], band_name(int(r["difficulty"]["d_star"]))) for r in pool)
+    selection = {"version": VERSION, "seed": args.seed, "per_family": args.per_family, "split": split,
+                 f"{split}_tasks": len(rows), "excluded_flagged": len(rows) - len(pool),
                  "picked": len(picked), "scenes": len({r["scene_id"] for r in picked}),
                  "cells": {f"{f}|{b}": {"picked": n, "available": avail[(f, b)]} for (f, b), n in sorted(cells.items())},
                  "task_ids": [r["task_id"] for r in picked]}
@@ -122,13 +137,9 @@ def replace_flagged(picked: Sequence[Dict[str, Any]], flagged: Sequence[str], po
 
 
 def cmd_replace(args: argparse.Namespace) -> None:
-    from .release import finalize_task_row, split_lookup
-
     picked = _jsonl(Path(args.eval) / "tasks.jsonl")
-    flagged = json.loads(Path(args.flagged).read_text())["flagged_task_ids"]
-    lookup = split_lookup(json.loads(Path(args.split_manifest).read_text()))
-    pool = [finalize_task_row(r, "test") for r in _jsonl(Path(args.run) / "tasks.jsonl")
-            if lookup.get(str(r["scene_id"])) == "test"]
+    flagged = sorted(flagged_ids(args.flagged))
+    pool = split_rows(Path(args.run), Path(args.split_manifest), getattr(args, "split", None) or "test")
     res = replace_flagged(picked, flagged, pool, args.seed)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -451,6 +462,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s.add_argument("--split-manifest", required=True)
     s.add_argument("--per-family", type=int, default=PER_FAMILY)
     s.add_argument("--seed", type=int, default=SEED)
+    s.add_argument("--split", default="test", help="which split to draw from (round 10: val for the fixed validation set)")
+    s.add_argument("--exclude", default=None, help="depth_check_summary.json: its flagged tasks are never drawn")
     s.add_argument("--out", required=True)
     r = sub.add_parser("run")
     r.add_argument("--eval", required=True)
@@ -482,6 +495,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     x.add_argument("--flagged", required=True, help="depth_check_summary.json (flagged_task_ids)")
     x.add_argument("--run", required=True)
     x.add_argument("--split-manifest", required=True)
+    x.add_argument("--split", default="test")
     x.add_argument("--seed", type=int, default=SEED)
     x.add_argument("--out", required=True)
     args = ap.parse_args(argv)
