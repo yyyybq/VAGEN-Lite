@@ -1,5 +1,6 @@
 """evaluation.py: the fixed test subset and the metrics table (the episodes themselves need a GPU)."""
 
+import importlib.util
 import json
 import tempfile
 import unittest
@@ -136,13 +137,14 @@ class EvaluationTest(unittest.TestCase):
             def _calculate_canonical_metric(self):
                 return {"success": False}
 
-        calls = []
+        calls, flags = [], []
 
         class Policy:
             last_prompt_tokens = None
 
-            def generate(self, system, user_text, image, earlier=()):
+            def generate(self, system, user_text, image, earlier=(), as_sft=False):
                 calls.append((user_text, image, list(earlier)))
+                flags.append(as_sft)
                 self.last_prompt_tokens = 100 * (len(earlier) + 1)
                 return f"<action>a{len(calls)}|</action>"
 
@@ -154,6 +156,9 @@ class EvaluationTest(unittest.TestCase):
         calls.clear()
         E.run_episode(Env(), Policy(), 0, 12)  # without history the earlier turns are not passed
         self.assertEqual([c[2] for c in calls], [[], [], []])
+        flags.clear()
+        E.run_episode(Env(), Policy(), 0, 12, as_sft=True)
+        self.assertEqual(flags, [True, True, True])
         class FrameEnv(Env):  # frames that can be saved, for the recorded trajectory
             def reset(self, seed):
                 obs, info = super().reset(seed)
@@ -166,6 +171,17 @@ class EvaluationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             rec = E.run_episode(FrameEnv(), Policy(), 0, 12, frames=Path(tmp) / "frames", history=True)
         self.assertEqual([t["prompt_tokens"] for t in rec["trajectory"]], [100, 200, 300])  # the input length per call
+
+    @unittest.skipUnless(importlib.util.find_spec("scipy"), "the SFT export package needs scipy (the cluster env)")
+    def test_messages_as_the_sft_data_has_them(self):
+        part = lambda im: {"type": "image", "id": im}  # noqa: E731
+        # the env's trailing newlines removed (as the LLaMA-Factory export did), the rest unchanged
+        sft = E.chat_messages("sys line.\n", [("<image>\nTask A\n", "f0", "<action>a|</action>")],
+                              "[Observation]:\n<image>\nEnvironment Feedback: Action executed.\n", "f1", part, as_sft=True)
+        self.assertEqual(sft[0]["content"], "sys line.")
+        self.assertEqual(sft[1]["content"], [{"type": "image", "id": "f0"}, {"type": "text", "text": "\nTask A"}])
+        self.assertEqual(sft[3]["content"][-1], {"type": "text", "text": "\nEnvironment Feedback: Action executed."})
+        self.assertEqual(E.sft_text("a\n\n\n\nb\n"), "a\n\nb")
 
     def test_switches_reach_the_env_config(self):
         import argparse

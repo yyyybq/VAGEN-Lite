@@ -186,31 +186,44 @@ def _images(obs: Dict[str, Any]) -> List[Any]:
     return [im for v in (obs.get("multi_modal_data") or {}).values() for im in (v or [])]
 
 
+def sft_text(text: str) -> str:
+    """A message as the SFT data has it: the LLaMA-Factory export (prepare_active_spatial_sft.py) passes every
+    message through this function, which collapses 3+ newlines to 2 and strips leading and trailing whitespace;
+    the env's text keeps them (its system prompt and later user turns end with a newline)."""
+    from data_gen.active_spatial_sft.convert_to_qwen25vl_sft import _strip_think_from_content
+
+    return _strip_think_from_content(text)
+
+
 def chat_messages(system: str, earlier: Sequence[Tuple[str, Any, str]], user_text: str, image: Any,
-                  image_part: Callable[[Any], Dict[str, Any]]) -> List[Dict[str, Any]]:
+                  image_part: Callable[[Any], Dict[str, Any]], as_sft: bool = False) -> List[Dict[str, Any]]:
     """The chat for one model call, in the layout of the SFT conversations: the system prompt, then every earlier
     turn (its user text with the frame where "<image>" stands, and the model's answer), then the current user
-    turn.  ``earlier`` is empty without history (the RL input since round 6)."""
-    def user(text: str, im: Any) -> Dict[str, Any]:
-        before, _, after = text.partition("<image>")
+    turn.  ``earlier`` is empty without history (the RL input since round 6).  ``as_sft``: every message as the
+    SFT data has it (``sft_text``)."""
+    text = sft_text if as_sft else (lambda t: t)
+
+    def user(raw: str, im: Any) -> Dict[str, Any]:
+        before, _, after = text(raw).partition("<image>")
         content = ([{"type": "text", "text": before}] if before else []) + [image_part(im)]
         content += [{"type": "text", "text": after}] if after else []
         return {"role": "user", "content": content}
 
-    messages: List[Dict[str, Any]] = [{"role": "system", "content": system}]
-    for text, im, answer in earlier:
-        messages += [user(text, im), {"role": "assistant", "content": answer}]
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": text(system)}]
+    for raw, im, answer in earlier:
+        messages += [user(raw, im), {"role": "assistant", "content": text(answer)}]
     return messages + [user(user_text, image)]
 
 
 def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None,
-                history: bool = False) -> Dict[str, Any]:
+                history: bool = False, as_sft: bool = False) -> Dict[str, Any]:
     """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py.
 
     With ``frames`` (round 8) the row also carries the trajectory: per turn the frame the model saw (a JPEG in
     ``frames``, named <index>_<turn>.jpg), the user text, the answer, the parsed actions, blocked moves, reward
     and whether the task was met after the turn; then the frame after the last turn and the env's end reason.
-    With ``history`` (round 9 switch) every model call also gets all earlier turns of the episode, as in SFT."""
+    With ``history`` (round 9 switch) every model call also gets all earlier turns of the episode, as in SFT;
+    with ``as_sft`` every message is passed through ``sft_text`` first."""
     obs, info = env.reset(seed=index)
     system = env.system_prompt()
     item = env.current_item or {}
@@ -230,11 +243,14 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         images = _images(obs)
         if len(images) != 1:
             raise RuntimeError(f"expected one observation image, got {len(images)}")
+        kw: Dict[str, Any] = {}
         if history:
-            text = policy.generate(system, obs["obs_str"], images[0], earlier=list(earlier))
+            kw["earlier"] = list(earlier)
+        if as_sft:
+            kw["as_sft"] = True
+        text = policy.generate(system, obs["obs_str"], images[0], **kw)
+        if history:
             earlier.append((obs["obs_str"], images[0], text))
-        else:
-            text = policy.generate(system, obs["obs_str"], images[0])
         seen = {"frame": keep(images[0], turns), "user": obs["obs_str"]}
         if getattr(policy, "last_prompt_tokens", None) is not None:
             seen["prompt_tokens"] = policy.last_prompt_tokens
@@ -287,11 +303,12 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
                        trust_remote_code=False)
         self.last_prompt_tokens: Optional[int] = None
 
-    def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = ()) -> str:
+    def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
+                 as_sft: bool = False) -> str:
         from vllm import SamplingParams
 
         params = SamplingParams(temperature=0.0, max_tokens=384, stop=["</action>"], include_stop_str_in_output=True)
-        out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url), sampling_params=params,
+        out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft), sampling_params=params,
                             use_tqdm=False)
         self.last_prompt_tokens = len(out[0].prompt_token_ids)
         return out[0].outputs[0].text
@@ -318,6 +335,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                                                 "prompt_format": cfg["prompt_format"], "greedy": True,
                                                 "env_switches": switches, "max_turns": int(args.max_turns),
                                                 "history": bool(args.history),
+                                                "sft_text": bool(args.history or args.sft_text),
                                                 "load_seconds": round(time.time() - t0, 1)}, indent=1))
     done = {r["index"] for r in _jsonl(out / "results.jsonl")} if (out / "results.jsonl").exists() else set()
     with open(out / "results.jsonl", "a") as f:
@@ -325,7 +343,8 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
             if i in done:
                 continue
             try:
-                row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames", history=args.history)
+                row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames", history=args.history,
+                                  as_sft=args.history or args.sft_text)
             except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
                 row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
             f.write(json.dumps(row) + "\n")
@@ -400,7 +419,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
     r.add_argument("--no-collision-end", action="store_true", help="3 blocked moves in a row no longer end the task")
     r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
-    r.add_argument("--history", action="store_true", help="every model call gets all earlier turns, as in SFT")
+    r.add_argument("--history", action="store_true",
+                   help="every model call gets all earlier turns, exactly as in SFT (implies --sft-text)")
+    r.add_argument("--sft-text", action="store_true", help="messages as the SFT data has them (leading/trailing whitespace stripped)")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     x = sub.add_parser("replace")
