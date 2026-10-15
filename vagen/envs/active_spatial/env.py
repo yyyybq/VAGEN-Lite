@@ -992,6 +992,7 @@ class ActiveSpatialEnv(BaseEnv):
                     self.action_counts[action_lower] = self.action_counts.get(action_lower, 0) + 1
                     # Store position before action
                     pre_action_pos = self.view_engine.get_pose()[:3, 3].copy()
+                    blocked = False  # this action hit something (its move was undone)
                     
                     # Execute action
                     self.view_engine.step(action_lower)
@@ -1006,6 +1007,7 @@ class ActiveSpatialEnv(BaseEnv):
                         )
                         
                         if collision_result.has_collision:
+                            blocked = True
                             self.collision_count += 1
                             self.consecutive_collision_count += 1
                             self.max_consecutive_collision_count = max(
@@ -1052,7 +1054,25 @@ class ActiveSpatialEnv(BaseEnv):
                             self.consecutive_collision_count = 0
                     else:
                         self.consecutive_collision_count = 0
-                    
+
+                    if self.config.success_check_each_action and self.config.enable_auto_termination and not blocked:
+                        canonical_metric = self._calculate_canonical_metric()
+                        if canonical_metric is not None and bool(canonical_metric["success"]):
+                            # stop at the first action that meets the task; the rest of the turn is not executed
+                            done = True
+                            self.episode_done = True
+                            self.reward += self.config.success_reward
+                            self._reward_trace.record("success", raw=1.0, scale=self.config.success_reward)
+                            metrics["traj_metrics"]["success"] = True
+                            self.success_by_auto = True
+                            terminal_score = _canonical_shaping_score(canonical_metric)
+                            info["canonical_task_metric"] = canonical_metric
+                            info["final_score"] = terminal_score
+                            info["auto_terminated"] = True
+                            info["success_mid_turn"] = True
+                            self.final_score = float(terminal_score)
+                            break
+
                     if self._current_step >= self._max_episode_steps:
                         done = True
                         self.episode_done = True

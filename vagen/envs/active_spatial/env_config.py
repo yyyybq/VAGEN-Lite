@@ -100,6 +100,9 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     orientation_reward_scale: float = 0.0  # ★ α_ori: scale for Δorientation_score in "dual" mode
     success_score_threshold: float = 0.95  # Score threshold for task success
     enable_auto_termination: bool = True  # Auto-terminate episode when score >= threshold (no need for 'done' action)
+    # Round 9 switch: with auto-termination, check success after every executed action and stop at the first
+    # success (canonical-metric tasks).  Default False: checked once, after all actions of the turn (R1, v10).
+    success_check_each_action: bool = False
 
     # ─── AND-gate success criterion (S1 follow-up) ────────────────────────
     # When success_require_both=True, auto-termination requires BOTH the
