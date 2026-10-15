@@ -116,6 +116,8 @@ class EvaluationTest(unittest.TestCase):
             self.assertEqual({k: v for k, v in on.items() if k != "success_check_each_action"}, plain)
             limit = E.env_config(template, tasks, "/gs", None, E.switch_overrides(argparse.Namespace(max_actions=20)))
             self.assertEqual((plain["max_episode_steps"], limit["max_episode_steps"]), (12, 20))
+            free = E.env_config(template, tasks, "/gs", None, E.switch_overrides(argparse.Namespace(no_collision_end=True)))
+            self.assertEqual((plain.get("max_consecutive_collisions", 3), free["max_consecutive_collisions"]), (3, 0))
 
     def test_replace_flagged(self):
         picked = [_row(i, "projective_relations", 2) for i in range(4)] + [_row(10, "occlusion_alignment", 8)]

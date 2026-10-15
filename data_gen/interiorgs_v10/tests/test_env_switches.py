@@ -77,5 +77,37 @@ class EnvSwitchTest(unittest.TestCase):
         self.fail("no task to test on")
 
 
+    def blocked_run(self):
+        """A task and a move that runs into something: 3 turns of 5 identical moves end by repeated collisions."""
+        if getattr(self, "_blocked", None) is None:
+            for row in self.rows:
+                for move in ("move_forward", "move_backward", "move_left", "move_right"):
+                    env = self.env(row, "probe")
+                    steps = []
+                    for _ in range(3):
+                        steps.append(RC.step(env, answer([move] * 5)))
+                        if steps[-1]["done"]:
+                            break
+                    if "early_terminated_collision" in steps[-1]["flags"] and not any(s["success"] for s in steps):
+                        type(self)._blocked = (row, move, len(steps))
+                        return self._blocked
+            self.fail("no move runs into anything in the synthetic scene")
+        return self._blocked
+
+    def test_repeated_collisions_need_not_end_the_task(self):
+        """Switch 3: with max_consecutive_collisions = 0 the task goes on; each blocked move still costs -0.15."""
+        row, move, n = self.blocked_run()
+        env = self.env(row, "nocollend", max_consecutive_collisions=0)
+        steps = [RC.step(env, answer([move] * 5)) for _ in range(n)]
+        self.assertFalse(any(s["done"] for s in steps))
+        self.assertFalse(any("early_terminated_collision" in s["flags"] for s in steps))
+        last = steps[-1]
+        self.assertGreater(last["collisions"], 0)
+        self.assertEqual(last["components"]["collision"]["events"], last["collisions"])
+        self.assertEqual(last["components"]["collision"]["scale"], -0.15)
+        self.assertNotIn("consecutive_collision", last["components"])
+        self.assertAlmostEqual(last["reward"], -0.01 - 0.15 * last["collisions"])
+
+
 if __name__ == "__main__":
     unittest.main()
