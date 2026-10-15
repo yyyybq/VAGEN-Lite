@@ -41,6 +41,9 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--pack-mb", type=float, default=11.0, help="max size of one pack file (MB, after base64)")
     ap.add_argument("--title", default="InteriorGS 样题审核")
+    ap.add_argument("--previous", default="", help="index.html of the version now online: its question order is embedded so a "
+                    "viewer keeps their place when questions are removed")
+    ap.add_argument("--removed-note", default="", help="one sentence for the help box (what was removed and why)")
     a = ap.parse_args()
     site, out = Path(a.site), Path(a.out)
     (out / "packs").mkdir(parents=True, exist_ok=True)
@@ -77,6 +80,10 @@ def main() -> int:
                 size += len(uri) + len(p) + 6
 
     page = {"version": data["version"] + "+artifact", "title": a.title, "items": items, "pack_of": pack_of}
+    if a.previous:
+        page["previous_order"] = [[it["id"], it["group"]] for it in read_site_data(Path(a.previous))["items"]]
+    if a.removed_note:
+        page["removed_note"] = a.removed_note
     blob = json.dumps(page, ensure_ascii=False, separators=(",", ":"))
     h = hashlib.sha256(blob.encode()).hexdigest()[:16]
     html = TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", blob).replace("__DATA_HASH__", h)

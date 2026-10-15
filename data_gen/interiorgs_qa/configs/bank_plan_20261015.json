@@ -1,5 +1,5 @@
 {
- "note": "per-scene quotas of the question bank (2026-10-15): common groups 3 questions per subtask per scene (about 5-7 times the training need), rare groups and video every combo (999 = no limit); obj_cap: questions per object and group in one scene; verify_cap 0: stop a group when its quotas are met",
+ "note": "per-scene quotas of the question bank (2026-10-15): common groups 3 questions per subtask per scene (about 5-7 times the training need), rare groups and video every combo (999 = no limit); obj_cap: questions per object and group in one scene; verify_cap 0: stop a group when its quotas are met S7 (3D-11, parallel / perpendicular) removed: user decision of 2026-10-15 during labelling.",
  "obj_cap": 6,
  "verify_cap": 0,
  "wide_search": true,
@@ -33,9 +33,6 @@
   },
   "S6": {
    "BL-05": 3
-  },
-  "S7": {
-   "3D-11": 3
   },
   "M1": {
    "MMSI-position-camera-camera": 3,

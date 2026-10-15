@@ -134,7 +134,7 @@ kbd { font-family: var(--font-mono); font-size: 0.75rem; border: 1px solid var(-
 <main>
   <section class="card help" id="help" hidden>
     <h3>怎么标</h3>
-    <div>每页一道样题，共 240 道（单图 70、多图 110、视频 60）。下面五项用按钮回答；只看某一组可以用左上角的下拉框。</div>
+    <div id="helpCount">每页一道样题。下面五项用按钮回答；只看某一组可以用左上角的下拉框。</div>
     <div id="helpSave">标注会自动保存到这个页面里：换电脑、换浏览器打开同一个链接，标过的都在；Claude 可以直接读取，不需要导出。右上角的圆角标签显示保存状态。"导出"只是另存一份备份文件。</div>
     <div>绿色底的选项是标准答案。"框"按钮叠加题目里物体的三维框投影（默认关）；"512×512"按钮切换成 256×256 的版本，用来回答第 5 项。</div>
     <div>快捷键：<kbd>1</kbd>–<kbd>4</kbd> 选当前一项的第 1–4 个选项（选完跳到下一项），<kbd>J</kbd>/<kbd>K</kbd> 下 / 上一项，<kbd>←</kbd>/<kbd>→</kbd> 上 / 下一题，<kbd>N</kbd> 下一道没标完的，<kbd>B</kbd> 框，<kbd>R</kbd> 分辨率，<kbd>,</kbd>/<kbd>.</kbd> 视频上 / 下一帧，<kbd>E</kbd> 导出。点图放大，<kbd>Esc</kbd> 关闭。</div>
@@ -325,6 +325,7 @@ function render() {
   const idx = Math.min(prefs.pos || 0, L.length - 1);
   prefs.pos = idx;
   const it = L[idx];
+  prefs.curId = it.id;
   const a = answers[it.id] || {};
   const qs = questions(it);
   cur = Math.max(0, Math.min(cur, qs.length - 1));
@@ -459,6 +460,31 @@ document.addEventListener("keydown", (e) => {
   else if (k === "e" || k === "E") exportJson();
   else if (k === "Escape") $("lightbox").hidden = true;
 });
+function restorePosition() {
+  // the question the viewer was on: by id (this version), else by index in the previous version's list
+  let id = prefs.curId;
+  const prev = DATA.previous_order || [];
+  if (!id && prev.length) {
+    const oldL = prev.filter((x) => !prefs.group || x[1] === prefs.group);
+    const o = oldL[Math.min(prefs.pos || 0, oldL.length - 1)];
+    if (o) id = o[0];
+  }
+  if (prefs.group && !ITEMS.some((it) => it.group === prefs.group)) prefs.group = "";   // a removed group
+  if (!id) return;
+  const L = list();
+  let i = L.findIndex((it) => it.id === id);
+  if (i < 0 && prev.length) {   // the question was removed: the next question of the old order that still exists
+    const ids = prev.map((x) => x[0]);
+    for (let j = ids.indexOf(id) + 1; j < ids.length && i < 0; j++) i = L.findIndex((it) => it.id === ids[j]);
+  }
+  if (i >= 0) prefs.pos = i;
+}
+restorePosition();
+(function helpCount() {
+  const n = (m) => ITEMS.filter((it) => it.media === m).length;
+  $("helpCount").textContent = `每页一道样题，共 ${ITEMS.length} 道（单图 ${n("image")}、多图 ${n("multi_image")}、视频 ${n("video")}）。` +
+    (DATA.removed_note ? DATA.removed_note + " " : "") + "下面五项用按钮回答；只看某一组可以用左上角的下拉框。";
+})();
 if (!prefs.helpSeen) $("help").hidden = false;
 showMode();
 render();
