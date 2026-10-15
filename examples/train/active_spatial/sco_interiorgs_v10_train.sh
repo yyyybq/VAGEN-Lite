@@ -7,8 +7,11 @@
 #   rl-trial   RUN RL_DIR [ENDPOINT]    1 card : the 3DGS render service and PPO on the same card
 #   renderer   RUN                      1 card : the render service for a formal RL run (writes RUN/renderer_endpoint.txt)
 #   rl         RUN RL_DIR ENDPOINT      8 cards: PPO, waits for RUN/renderer_endpoint.txt
-#   eval       RUN EVAL NAME MODEL [PROMPT_FORMAT]  1 card: the render service and vLLM; one greedy episode per task
-#                                        of EVAL/tasks.jsonl (data_gen/interiorgs_v10/evaluation.py), results in EVAL/NAME
+#   eval       RUN EVAL NAME MODEL [PROMPT_FORMAT|- [OPTION ...]]  1 card: the render service and vLLM; one greedy
+#                                        episode per task of EVAL/tasks.jsonl (data_gen/interiorgs_v10/evaluation.py),
+#                                        results in EVAL/NAME; OPTIONs go to "evaluation.py run" (round 9 switches,
+#                                        e.g. --check-each-action --max-actions 20 --max-turns 20); "-": the default
+#                                        prompt format
 #   rl-resume-check RUN RL_DIR          1 card : a trial config (rl-config --trial) run to update 2, then a second
 #                                        process that must resume from update 2 and stop after 3; checks that and
 #                                        the retention rule (kept: updates 2 and 3) in RUN/logs/resume_check.json
@@ -127,10 +130,13 @@ PY
     NAME=${4:?model name}
     ALSO_OWNED=${EVAL}/${NAME}  # the results folder, outside RUN
     MODEL=${5:?Hugging Face model folder}
+    PROMPT_FORMAT=${6:-}
+    [[ ${PROMPT_FORMAT} == - ]] && PROMPT_FORMAT=
+    EVAL_OPTIONS=("${@:7}")
     export CUDA_VISIBLE_DEVICES=0
     start_renderer 0
     "${PY}" -m data_gen.interiorgs_v10.evaluation run --eval "${EVAL}" --name "${NAME}" --model "${MODEL}" \
-      ${6:+--prompt-format "$6"}
+      ${PROMPT_FORMAT:+--prompt-format "${PROMPT_FORMAT}"} ${EVAL_OPTIONS[@]+"${EVAL_OPTIONS[@]}"}
     ;;
   renderer)
     export CUDA_VISIBLE_DEVICES=0

@@ -44,6 +44,27 @@ class JobScoTest(unittest.TestCase):
             block = script.split(f"\n  {mode}\n", 1)[1].split(";;", 1)[0]
             self.assertIn(line, block)
 
+    def test_eval_mode_passes_options(self):
+        """Round 9: the switches after MODEL and PROMPT_FORMAT ("-" for the default) reach evaluation.py run."""
+        import subprocess
+        import tempfile
+
+        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        block = script.split("\n  eval)\n", 1)[1].split(";;", 1)[0]
+        # the eval block as it is, without the GPU and the render service, and with the evaluation echoed
+        lines = [l for l in block.splitlines() if "CUDA_VISIBLE_DEVICES" not in l and "start_renderer" not in l]
+        body = "\n".join(lines).replace('"${PY}" -m data_gen.interiorgs_v10.evaluation run --eval', "echo run --eval")
+        self.assertIn("echo run --eval", body)
+        with tempfile.TemporaryDirectory() as tmp:
+            sh = Path(tmp) / "eval_args.sh"
+            sh.write_text("set -euo pipefail\n" + body + "\n")
+            out = lambda *a: subprocess.run(["bash", str(sh), *a], capture_output=True, text=True, check=True).stdout.split()  # noqa: E731
+            base = ["run", "--eval", "E", "--name", "N", "--model", "M"]
+            self.assertEqual(out("eval", "RUN", "E", "N", "M"), base)
+            self.assertEqual(out("eval", "RUN", "E", "N", "M", "free_think"), base + ["--prompt-format", "free_think"])
+            self.assertEqual(out("eval", "RUN", "E", "N", "M", "-", "--check-each-action", "--max-actions", "20"),
+                             base + ["--check-each-action", "--max-actions", "20"])
+
 
 if __name__ == "__main__":
     unittest.main()
