@@ -1,0 +1,309 @@
+path	大小GB	修改日期	属主	检查点数	HF权重数	类别	建议去向
+exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009	1762.23	2026-10-09	yinbaiqiao	0	0	dense-score pilot 训练产物（1.8 TB，branches/）	待定 D7b
+exps/vagen_active_spatial/interiorgs_v10_train_20261014	1571.71	2026-10-14	yinbaiqiao	7	7	模型权重（SFT 3 epoch + RL 7 个检查点，含 verl 分片）	models/：保留 HF 权重；verl 分片（critic/optimizer，约 1.3 TB）待定 D7a
+exps/vagen_active_spatial/R1-clean-Projective-v0-taskfix	1238.50	2026-10-11	yinbaiqiao	5	0	R1 训练产物（1.27 TB，verl 分片，无 HF 导出）	待定 D6：删除分片或只留最后一步 HF
+exps/vagen_active_spatial/interiorgs_v10_r10_20261015	406.80	2026-10-15	yinbaiqiao	0	0	正在运行（第十轮）	不碰，待本轮结束后按规则处理
+exps/vagen_active_spatial/interiorgs_v10_r5_20261014	268.54	2026-10-13	yinbaiqiao	0	0	中间结果（第五轮单卡试跑，含 3B SFT 模型）	3B SFT 模型 → models/；其余待定 D7c
+exps/vagen_active_spatial/interiorgs_v10_train_r10_20261015	268.40	2026-10-15	yinbaiqiao	0	0	正在运行（第十轮）	不碰，待本轮结束后按规则处理
+exps/vagen_active_spatial/qwen3vl_active_spatial_smoke_h800_20261002_metricfix	228.67	2026-10-02	root	1	1	Qwen3-VL smoke（root）	删除候选（smoke）
+exps/vagen_active_spatial/interiorgs_v10_r6_20261014	101.90	2026-10-14	yinbaiqiao	0	0	中间结果（v10 各轮审计）	archive/interiorgs_v10_rounds/（压缩）
+exps/vagen_active_spatial/qwen_v50_clean_d0pass_20260824_full	93.90	2026-08-24	root	3	3	8 月 clean 系列（有 HF 权重，MASTER_RESULTS 引用）	HF 权重 → models/historical/；其余 archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full	90.41	2026-08-24	root	3	3	8 月 clean 系列（有 HF 权重，MASTER_RESULTS 引用）	HF 权重 → models/historical/；其余 archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/r1_h1_aoss_repair_20260905	64.48	2026-09-30	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/unified_eval_runs/frozen_ckpts	61.81	2026-07-29	yinbaiqiao	0	0	模型权重（历史主线 v46@200 / v50@150）	models/historical/（保留）
+exps/vagen_active_spatial/R1-clean-Projective-v0	34.06	2026-10-08	yinbaiqiao	1	0	R1 发布 + 冻结数据 + 1 个检查点	archive/r1/（冻结数据保留；检查点待定 D6）
+exps/vagen_active_spatial/active_spatial_dense_score_diagnostic_real_batch_20260916_r5	31.51	2026-09-28	root	0	0	dense-score pilot 中间产物	archive/dense_score_pilot/（压缩）
+exps/vagen_active_spatial/cambrian_c4_clean_d0pass_20260822_h800_r5_full	31.38	2026-08-22	root	1	1	8 月 clean 系列（有 HF 权重，MASTER_RESULTS 引用）	HF 权重 → models/historical/；其余 archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/active_spatial_dense_score_diagnostic_real_batch_20260916_r4	30.91	2026-09-19	root	0	0	dense-score pilot 中间产物	archive/dense_score_pilot/（压缩）
+exps/vagen_active_spatial/active_spatial_dense_score_diagnostic_real_batch_20260916_r2	30.91	2026-09-18	root	0	0	dense-score pilot 中间产物	archive/dense_score_pilot/（压缩）
+exps/vagen_active_spatial/u1_step32_diagnostic_snapshot	15.26	2026-08-28	yinbaiqiao	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_r10_20261015	6.75	2026-10-15	yinbaiqiao	0	0	最终数据集（当前版本，厚墙）	data/releases/interiorgs_v10_tasks_r10（固定位置）
+exps/vagen_active_spatial/interiorgs_v10_r4_20261013	4.64	2026-10-13	yinbaiqiao	0	0	中间结果（v10 各轮审计）	archive/interiorgs_v10_rounds/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_r6b_20261014	3.50	2026-10-14	yinbaiqiao	0	0	数据集（上一版，train_20261014 所用）	data/releases/interiorgs_v10_tasks_r6b（保留）
+exps/interiorgs_qa_stats_20261014	3.26	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/interiorgs_v10_r8_20261014	1.87	2026-10-15	yinbaiqiao	0	0	评测结果（第八、九轮）	results/interiorgs_v10/（保留）
+exps/interiorgs_qa_sample_20261014	1.36	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260822_sco_renderer_r1_full	1.19	2026-08-22	root	14	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v47_clean_d0pass_20260826_recovery_r1_full	1.18	2026-08-26	root	3	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v48_clean_d0pass_20260823_full	1.18	2026-08-24	root	3	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/a2_v46_arrival_stop	0.75	2026-08-20	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/unified_eval_runs/easi_results	0.74	2026-08-03	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_20261011c	0.66	2026-10-11	yinbaiqiao	0	0	作废/中间数据集	archive/data_intermediate/（压缩）
+exps/vagen_active_spatial/a1_v46_spatial_aux_w005	0.62	2026-08-20	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/v46_baseline_qwen25vl_7b	0.60	2026-08-06	root	7	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_20261011b	0.58	2026-10-11	yinbaiqiao	0	0	作废/中间数据集	archive/data_intermediate/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_20261011	0.57	2026-10-11	yinbaiqiao	0	0	作废/中间数据集	archive/data_intermediate/（压缩）
+exps/unified_eval_runs/a1a2b5_easi_results	0.56	2026-08-08	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/v46_baseline_qwen25vl_3b	0.56	2026-08-07	root	8	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_r9_20261015	0.55	2026-10-15	yinbaiqiao	0	0	评测结果（第八、九轮）	results/interiorgs_v10/（保留）
+exps/vagen_active_spatial/R1-gate-aligned-pilot8-v2-20261005	0.51	2026-10-05	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/interiorgs_qa_jobs	0.46	2026-10-15	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/interiorgs_qa_bank_trial_20261015	0.45	2026-10-15	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/interiorgs_qa_bank_trial_20261015b	0.45	2026-10-15	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/interiorgs_v10_gen_r6_20261014	0.36	2026-10-14	yinbaiqiao	0	0	作废/中间数据集	archive/data_intermediate/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_20261012_final	0.34	2026-10-13	yinbaiqiao	0	0	作废/中间数据集	archive/data_intermediate/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_20261014	0.33	2026-10-13	yinbaiqiao	0	0	作废/中间数据集	archive/data_intermediate/（压缩）
+exps/vagen_active_spatial/R1-task-context-v1-acceptance-20261003	0.33	2026-10-05	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/interiorgs_qa_trials	0.22	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/b5_c8_wrapper_img25_actionvalid	0.22	2026-08-20	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_cabinet_audit_20261012	0.20	2026-10-12	yinbaiqiao	0	0	中间结果（v10 各轮审计）	archive/interiorgs_v10_rounds/（压缩）
+exps/unified_eval_runs/qwen3b_easi_results	0.20	2026-08-07	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/qwen_v50_clean_d0pass_20260823_full	0.17	2026-08-24	root	1	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v19	0.16	2026-07-28	root	6	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/dense_score_renderer_microbenchmark_20261008	0.16	2026-10-09	yinbaiqiao	0	0	dense-score pilot 中间产物	archive/dense_score_pilot/（压缩）
+exps/unified_eval_runs/v46baseline_easi_results	0.15	2026-08-09	yinbaiqiao	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/R1-gate-aligned-sft-v2-20261008	0.14	2026-10-09	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/vagen_active_spatial/dense_score_reward_only_pilot_20261007	0.13	2026-10-07	yinbaiqiao	0	0	dense-score pilot 中间产物	archive/dense_score_pilot/（压缩）
+exps/interiorgs_qa_gputest1	0.13	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r2_20261007	0.13	2026-10-07	yinbaiqiao	0	0	dense-score pilot 中间产物	archive/dense_score_pilot/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_r7_20261014	0.12	2026-10-14	yinbaiqiao	0	0	评测集（eval_c 278 题）+ 中间结果	评测集 → data/releases；其余 archive/
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v4	0.11	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.log	0.11	2026-07-21	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.log.before_resume_20260723_022932	0.11	2026-07-23	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.log.before_resume_20260723_022945	0.11	2026-07-23	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/one_ckpt_v46_baseline_qwen25vl_7b_s350_20260809_055209	0.11	2026-08-09	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/one_ckpt_v46_baseline_qwen25vl_7b_s250_20260809_055154	0.11	2026-08-09	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/one_ckpt_v46_baseline_qwen25vl_7b_s300_20260809_055209	0.11	2026-08-09	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/logs	0.10	2026-08-09	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/r1_observation_aligned_reward_audit	0.09	2026-09-04	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/vagen_active_spatial/sco_renderer	0.09	2026-10-01	yinbaiqiao	0	0	集群任务记录	archive/cluster_logs/
+exps/vagen_active_spatial/R1-gate-aligned-pilot8-20261005	0.09	2026-10-05	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/vagen_active_spatial/qwen_v47_clean_d0pass_20260823_full	0.08	2026-08-24	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_20261012_sample100	0.08	2026-10-11	yinbaiqiao	0	0	作废/中间数据集	archive/data_intermediate/（压缩）
+exps/interiorgs_qa_site_20261014	0.08	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_20261007	0.07	2026-10-07	yinbaiqiao	0	0	dense-score pilot 中间产物	archive/dense_score_pilot/（压缩）
+exps/vagen_active_spatial/R1-gate-aligned-sft-v1-20261008	0.07	2026-10-08	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260821_full_r6	0.07	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260823_sco_renderer_r2_full	0.06	2026-08-24	root	2	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/interiorgs_qa_site_preview	0.05	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/v46_7b_nodelta_w3	0.05	2026-07-18	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/render_logs	0.04	2026-08-18	yinbaiqiao	0	0	集群任务记录	archive/cluster_logs/
+exps/vagen_active_spatial/qwen_v48_clean_d0pass_20260821_h800_r1_full	0.03	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v47_clean_d0pass_20260821_h800_r1_full	0.03	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v50_clean_d0pass_20260821_h800_r1_full	0.03	2026-08-22	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/v46_7b_nodelta_w3.log.crashed_20260719_015604	0.03	2026-07-19	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260821_full_r3	0.02	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v11	0.02	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/qwen_v47_clean_d0pass_20260824_full	0.02	2026-08-24	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260820_full	0.02	2026-08-20	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260820_full_r2	0.02	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260821_full_r4	0.02	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260820_full_r2_acceptance_smoke	0.02	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260821_full_r6_acceptance_smoke	0.02	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260822_sco_renderer_r1_full_acceptance_smoke	0.02	2026-08-22	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v47_clean_d0pass_20260821_h800_r1_full_acceptance_smoke	0.02	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v50_clean_d0pass_20260823_full_acceptance_smoke	0.02	2026-08-24	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_8gpu_smoke_acceptance_smoke	0.02	2026-08-19	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260820_full_acceptance_smoke	0.02	2026-08-20	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260821_full_r3_acceptance_smoke	0.02	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v47_clean_d0pass_20260823_full_acceptance_smoke	0.02	2026-08-24	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v47_clean_d0pass_20260824_full_acceptance_smoke	0.02	2026-08-24	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v48_clean_d0pass_20260821_h800_r1_full_acceptance_smoke	0.02	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v48_clean_d0pass_20260823_full_acceptance_smoke	0.02	2026-08-24	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v50_clean_d0pass_20260821_h800_r1_full_acceptance_smoke	0.02	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v50_clean_d0pass_20260824_full_acceptance_smoke	0.02	2026-08-24	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/d0_17_qwen_clean_acceptance_smoke_actorupdate_31_101_jumpbox_renderer	0.02	2026-08-18	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/d0_17_qwen_clean_acceptance_smoke_31_101_jumpbox_renderer	0.02	2026-08-18	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260818_renderer8768	0.02	2026-08-18	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit_31_101_jumpbox_renderer	0.02	2026-08-18	root	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit_run3	0.02	2026-08-18	root	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit_run4	0.02	2026-08-18	root	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit_run5	0.02	2026-08-18	root	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit_run2	0.02	2026-08-18	root	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_sco_r5_acceptance_smoke	0.02	2026-08-19	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_sco_r7_acceptance_smoke	0.02	2026-08-19	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit	0.02	2026-08-18	root	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v17	0.02	2026-07-27	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/protocol_only_prepost	0.01	2026-08-30	yinbaiqiao	4	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/unified_eval_runs/one_ckpt_v46_baseline_qwen25vl_7b_s300_20260808_185337	0.01	2026-08-08	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/one_ckpt_v46_baseline_qwen25vl_7b_s250_20260808_185331	0.01	2026-08-08	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/one_ckpt_v46_baseline_qwen25vl_7b_s350_20260808_185322	0.01	2026-08-08	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v13	0.01	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/a1_v46_spatial_aux_w005.log	0.01	2026-08-08	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/cambrian_c4_clean_d0pass_20260822_h800_r4_full	0.01	2026-08-22	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen3vl_active_spatial_smoke_h800_20261001_fix3	0.01	2026-10-01	root	0	0	Qwen3-VL smoke（root）	删除候选（smoke）
+exps/vagen_active_spatial/a2_v46_arrival_stop.log	0.01	2026-08-06	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v46_baseline_qwen25vl_7b.log	0.01	2026-08-08	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v6	0.01	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/unified_eval_runs/a1a2b5_ckpt_eval_20260807	0.01	2026-08-07	yinbaiqiao	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v10	0.01	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/qwen3vl_active_spatial_smoke_h800_20261001_fix2	0.01	2026-10-01	root	0	0	Qwen3-VL smoke（root）	删除候选（smoke）
+exps/vagen_active_spatial/r1_h1_layout_repair_20260905	0.01	2026-09-05	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/vagen_active_spatial/qwen_v48_clean_d0pass_20260823_full_pre_resume_archive_20260826	0.01	2026-08-26	yinbaiqiao	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/unified_eval_runs/v46_baseline_ckpt_eval_20260808	0.01	2026-08-08	yinbaiqiao	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/d0_6_b5_forced_scoring_matrix	0.01	2026-08-10	root	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/d0_12_b5_logprob_plumbing_smoke	0.01	2026-08-16	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/interiorgs_v10_real_20261011	0.01	2026-10-11	yinbaiqiao	0	0	中间结果（v10 各轮审计）	archive/interiorgs_v10_rounds/（压缩）
+exps/vagen_active_spatial/v46_baseline_qwen25vl_3b.log	0.01	2026-08-12	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260821_full_r3	0.01	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/v46_7b_nodelta_w3_rerun.launch_20260726_195333_fsdp_attn_fix.log	0.01	2026-07-29	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/unified_h800_7b_eval_v2	0.01	2026-07-31	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/d0_16_b5_decoupled_rollout_correction_smoke	0.01	2026-08-17	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/d0_3_b5_exact_fsdp_smoke	0.01	2026-08-09	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/v50_7b_w3_format001_stable.launch_restart_20260727_032849.log	0.01	2026-07-29	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/u1_fwdfirst_rewscale_i2i_short_diag_20260803	0.01	2026-08-03	yinbaiqiao	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/render_service_8767_on168_gpu7.log	0.01	2026-08-12	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v46_baseline_qwen25vl_3b.log.bak.before_resume150_20260809_151732	0.01	2026-08-08	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/interiorgs_qa_smoke1	0.01	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/b5_c8_wrapper_img25_actionvalid.log	0.00	2026-08-08	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260725_071812.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/analysis_artifacts	0.00	2026-08-07	yinbaiqiao	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/R1-clean-Projective-v1	0.00	2026-10-07	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/vagen_active_spatial/d0_4_b5_logprob_localization	0.00	2026-08-09	root	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/d0_5_b5_vision_select_logprob	0.00	2026-08-10	root	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/interiorgs_qa_lf_20261015	0.00	2026-10-15	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/interiorgs_qa_eval_20261015	0.00	2026-10-15	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/v49_7b_v26_repro.launch_20260724_171233.log	0.00	2026-07-25	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/qwen3vl_zoetrope_smoke	0.00	2026-10-02	root	0	0	Qwen3-VL smoke（root）	删除候选（smoke）
+exps/vagen_active_spatial/cambrian_c4_clean_d0pass_20260821_h800_r1_full	0.00	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v9	0.00	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/v49_7b_v26_repro.launch_20260726_092830_skipval.log	0.00	2026-07-27	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v49_7b_v26_repro_bad_render_20260723_010323	0.00	2026-07-23	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/v49_7b_v26_repro_bad_render_20260723_010323.log	0.00	2026-07-23	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/interiorgs_qa_refs	0.00	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260724_171439.log	0.00	2026-07-25	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/qa_results	0.00	2026-08-01	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/a1_v46_spatial_aux_w005.log.bak.20260805_033407	0.00	2026-08-04	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_8gpu_smoke	0.00	2026-08-19	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_8gpu_smoke	0.00	2026-08-19	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260820_full	0.00	2026-08-20	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260820_full_r2	0.00	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c4_clean_d0pass_20260822_h800_r3_full	0.00	2026-08-22	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_sco_r5	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_sco_r6	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_sco_r5	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_sco_r7	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/render_server_8777.log	0.00	2026-07-21	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/d0_17_jumpbox_renderer_preflight_rerun	0.00	2026-08-18	yinbaiqiao	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260724_170051.log	0.00	2026-07-24	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/test_id_stratified_400_seed42.jsonl	0.00	2026-07-28	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_sco_r6	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/v46_7b_nodelta_w3.log	0.00	2026-07-20	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/a1_v46_spatial_aux_w005.log.bak.20260804_171346	0.00	2026-08-04	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/active_spatial_dense_score_diagnostic_real_batch_20260916_r3	0.00	2026-09-18	root	0	0	dense-score pilot 中间产物	archive/dense_score_pilot/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_20261012_identity	0.00	2026-10-11	yinbaiqiao	0	0	作废/中间数据集	archive/data_intermediate/（压缩）
+exps/vagen_active_spatial/v47_7b_nodelta_w3_kl40.log	0.00	2026-07-20	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v2	0.00	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260821_full_r3_acceptance_smoke	0.00	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/cambrian_c4_clean_d0pass_20260821_h800_r1_full_acceptance_smoke	0.00	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_8gpu_smoke_acceptance_smoke	0.00	2026-08-19	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260821_full_r4_acceptance_smoke	0.00	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260823_sco_renderer_r2_full_acceptance_smoke	0.00	2026-08-24	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_acceptance_smoke	0.00	2026-08-24	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/d0_17_cambrian_clean_acceptance_smoke_actorupdate_31_101_jumpbox_renderer	0.00	2026-08-18	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260726_184955_resume150_final.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v46_7b_nodelta_w3_rerun.launch_20260726_184604_eager_valuehead.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.log.crashed_20260719_015604	0.00	2026-07-19	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v46_baseline_qwen25vl_3b.log.bak.before_render168_20260809_161422	0.00	2026-08-09	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260820_full_acceptance_smoke	0.00	2026-08-20	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/v49_7b_v26_repro.log	0.00	2026-07-23	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/qwen3vl_active_spatial_smoke_r3	0.00	2026-09-30	root	0	0	Qwen3-VL smoke（root）	删除候选（smoke）
+exps/vagen_active_spatial/a2_v46_arrival_stop.log.bak.20260804_171346	0.00	2026-08-04	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260820_full_r2_acceptance_smoke	0.00	2026-08-21	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260726_195315_resume150_fsdp_attn_fix.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/cambrian_c4_clean_d0pass_20260821_h800_r2_full	0.00	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server	0.00	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v3	0.00	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v8	0.00	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/active_spatial_dense_score_diagnostic_real_batch_20260916	0.00	2026-09-17	root	0	0	dense-score pilot 中间产物	archive/dense_score_pilot/（压缩）
+exps/vagen_active_spatial/v49_7b_v26_repro.launch_20260724_165222.log	0.00	2026-07-24	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v49_7b_v26_repro.launch_20260726_040151.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v12	0.00	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit_run3.log	0.00	2026-08-18	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/qwen3vl_active_spatial_smoke_h800_20261001	0.00	2026-10-01	root	0	0	Qwen3-VL smoke（root）	删除候选（smoke）
+exps/vagen_active_spatial/qwen3vl_active_spatial_smoke_h800_20261001_fix1	0.00	2026-10-01	root	0	0	Qwen3-VL smoke（root）	删除候选（smoke）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_sco_r5_acceptance_smoke	0.00	2026-08-19	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_sco_r6_acceptance_smoke	0.00	2026-08-19	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260726_194652_resume150_no_flashattn.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v7	0.00	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_smoke_server_2gpu	0.00	2026-07-25	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/v46_7b_nodelta_w3_rerun.launch_20260726_194710_no_flashattn.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit_run4.log	0.00	2026-08-18	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit_run5.log	0.00	2026-08-18	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/render_server_8777_repro.log	0.00	2026-07-28	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v46_7b_nodelta_w3_rerun.launch_20260726_184307_loggerfix.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/b5_c8_wrapper_img25_actionvalid.log.bak.20260806_034423	0.00	2026-08-04	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit_run2.log	0.00	2026-08-18	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/one_ckpt_b5_c8_wrapper_img25_actionvalid_s100_20260808_182609	0.00	2026-08-08	yinbaiqiao	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/interiorgs_qa_census_20261014	0.00	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_smoke_server	0.00	2026-07-25	root	0	0	smoke 残留（root）	删除候选
+exps/vagen_active_spatial/sco_submissions	0.00	2026-08-24	yinbaiqiao	0	0	集群任务记录	archive/cluster_logs/
+exps/vagen_active_spatial/v50_7b_w3_format001_stable.launch_20260727_032512.log	0.00	2026-07-27	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v5	0.00	2026-07-26	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/v46_7b_nodelta_w3_rerun.launch_20260726_184009_trl.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260726_183133_resume150.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260726_183347_resume150_skipval.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260726_184009_resume150_trl.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v46_7b_nodelta_w3_rerun.launch_20260726_183134.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/R1-experiment-tracking	0.00	2026-10-10	yinbaiqiao	0	0	R1 中间产物	archive/r1/（压缩）
+exps/vagen_active_spatial/render_service_8768_u1_audit.log	0.00	2026-07-29	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v16	0.00	2026-07-27	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/vagen_active_spatial/qwen3vl_active_spatial_smoke_r2	0.00	2026-09-30	root	0	0	Qwen3-VL smoke（root）	删除候选（smoke）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260725_071641.log	0.00	2026-07-25	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/smoke_launch.log	0.00	2026-07-29	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_diag_20261012	0.00	2026-10-11	yinbaiqiao	0	0	中间结果（v10 各轮审计）	archive/interiorgs_v10_rounds/（压缩）
+exps/unified_eval_runs/unified_h800_7b_eval_runtime	0.00	2026-07-28	yinbaiqiao	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/eval_configs	0.00	2026-07-31	yinbaiqiao	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/one_ckpt_v46_baseline_qwen25vl_7b_s250_20260809_053917	0.00	2026-08-09	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/one_ckpt_v46_baseline_qwen25vl_7b_s300_20260809_053917	0.00	2026-08-09	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/one_ckpt_v46_baseline_qwen25vl_7b_s350_20260809_053924	0.00	2026-08-09	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/vagen_active_spatial/c8_fwdfirst_rewscale_lfp_server_v15	0.00	2026-07-27	root	0	0	7–8 月旧实验（检查点已删，仅日志）	archive/experiments_legacy_runs/（压缩）
+exps/interiorgs_qa_report_20261014	0.00	2026-10-14	yinbaiqiao	0	0	另一会话（QA）	不碰
+exps/vagen_active_spatial/qwen3vl_active_spatial_smoke	0.00	2026-09-30	root	0	0	Qwen3-VL smoke（root）	删除候选（smoke）
+exps/vagen_active_spatial/render_service_8767_on173.log	0.00	2026-08-04	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/clean_rl_anchor_launch_20260819	0.00	2026-08-19	yinbaiqiao	0	0	集群任务记录	archive/cluster_logs/
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260821_full_r4	0.00	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260821_full_r5	0.00	2026-08-21	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260726_184307_resume150_loggerfix.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v48_7b_nodelta_w1.launch_20260726_184604_resume150_eager_valuehead.log	0.00	2026-07-26	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/d0_17_qwen_v46_logprob_audit.log	0.00	2026-08-18	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/launch_overrides	0.00	2026-08-04	yinbaiqiao	0	0	历史	archive/
+exps/vagen_active_spatial/render_service_8767.log	0.00	2026-08-09	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/MASTER_RESULTS.md	0.00	2026-10-07	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/leakage_and_checkpoint_manifest.json	0.00	2026-07-28	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_sco	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_sco_r2	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_sco_r3	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/cambrian_c8_clean_d0pass_20260819_sco_r4	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_sco	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_sco_r2	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_sco_r3	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/qwen_v46_clean_d0pass_20260819_sco_r4	0.00	2026-08-19	root	0	0	8 月 clean 系列（仅日志/验证）	archive/clean_runs_aug/（压缩）
+exps/vagen_active_spatial/clean_rl_anchor_launch_20260820	0.00	2026-08-20	yinbaiqiao	0	0	集群任务记录	archive/cluster_logs/
+exps/vagen_active_spatial/d0_17_jumpbox_renderer_preflight	0.00	2026-08-18	yinbaiqiao	0	0	D0 诊断残留（root）	archive/diagnostics_d0_u1/（压缩）
+exps/vagen_active_spatial/v46_baseline_qwen25vl_3b.log.bak.failed_20260807_041011	0.00	2026-08-06	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/easi_pending_locks	0.00	2026-08-08	root	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/eval_one_ckpt_8gpu.sh	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/launch_qwen3b_easi_8gpu.sh	0.00	2026-08-09	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/launch_v46baseline_easi_8gpu.sh	0.00	2026-08-09	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/qa_backend	0.00	2026-08-01	yinbaiqiao	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/run_pending_easi_parallel_worker.sh	0.00	2026-08-09	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/run_unified_eval_worker.sh	0.00	2026-08-09	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/interiorgs_v10_gen_20261012_identity.log	0.00	2026-10-11	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/render_smoke_0003.png	0.00	2026-07-23	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v46_baseline_qwen25vl_3b.log.bak.failed_zoetrope_20260807_042035	0.00	2026-08-07	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/v49_7b_v26_repro.launch_20260724_165134.log	0.00	2026-07-24	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/.cache	0.00	2026-07-29	yinbaiqiao	0	0	评测结果（旧协议，MASTER_RESULTS 来源）	archive/results_legacy/（压缩）
+exps/unified_eval_runs/README.md	0.00	2026-08-07	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/_restart_a1a2b5_nav_247.sh	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/babysit_easi_pending.sh	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/babysit_v46_7b_curve_sco.sh	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/easi_pending_queue.txt	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/launch_a1a2b5_easi_8gpu.sh	0.00	2026-08-07	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/launch_easi_pending_247.sh	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/launch_remote_eval.sh	0.00	2026-07-29	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/launch_suite_job.sh	0.00	2026-07-29	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/prebuild_gsplat_cuda.sh	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/run_a1a2b5_easi.sh	0.00	2026-08-07	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/run_a1a2b5_easi_gpu_worker.sh	0.00	2026-08-09	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/run_a1a2b5_eval_worker.sh	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/run_pending_easi_gpu_worker.sh	0.00	2026-08-09	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/run_pending_easi_queue_worker.sh	0.00	2026-08-09	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/run_qwen3b_easi_gpu_worker.sh	0.00	2026-08-07	root	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/run_v46baseline_eval_worker.sh	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/smoke_cambrian_vllm.py	0.00	2026-07-29	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/smoke_launch.pid	0.00	2026-07-28	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/submit_eval_one_ckpt_sco.sh	0.00	2026-08-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/test_suites_all_ood_v2.yaml	0.00	2026-07-29	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/unified_eval_runs/test_suites_runtime.yaml	0.00	2026-07-28	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
+exps/vagen_active_spatial/.r1_sft_prepare.lock	0.00	2026-10-08	yinbaiqiao	0		散落日志	archive/cluster_logs/（压缩）
