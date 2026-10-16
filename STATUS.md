@@ -8,6 +8,8 @@
 - **第二阶段（整理）** 2026-10-16 开始，只做不与训练链冲突的部分。
   - 标签 `pre-cleanup-20261016`（main `3c1d59ed`）已推送。整理在分支 `cleanup/20261016` 上做，用独立检出 `~/VAGEN-Lite-cleanup-wt`；共享目录 `~/VAGEN-Lite` 留在 main，不动。分支已合并 main 到第十一轮的 `8134f102`。
   - 第一批归档 `52eb7944`：807 个无人引用的文件移入 `archive/`，索引 [archive/README.md](archive/README.md)。
+  - 第二批 `efc6928e`（D4 选 a 的文档部分）：5 份旁支模型文档和 Qwen3-VL 环境检查移入 `archive/side_models/`。`vagen/models/` 要连同核心训练循环里导入它的分支一起移走，放到代码搬动批次。
+  - **两次事故，已处理**：集群归档时移走了两个仍被在用代码读取的目录。第十一轮训练脚本写死的 gsplat 编译缓存，已由第十一轮会话移到仓库外修好；自有 QA 流水线读的第六轮生成目录，已原样还原。全面核查后补了 17 条兼容链接。见 [docs/reports/CLEANUP_ARCHIVE_AUDIT_20261016.md](docs/reports/CLEANUP_ARCHIVE_AUDIT_20261016.md)。
   - **整理前后行为一致**：两套测试无新增失败，固定输出 17 个文件里 14 个逐字节相同、3 个只差耗时字段。见 [docs/reports/CLEANUP_EQUIVALENCE_20261016.md](docs/reports/CLEANUP_EQUIVALENCE_20261016.md)。
   - 集群整理（都有清单，可追溯）：
     - root 属主文件已全部收回；
@@ -17,8 +19,8 @@
     - 固定位置 `data/releases/`、`models/`、`results/` 已建好（目前是指向原目录的符号链接），32 份 `manifest.json` 已写出（`scripts/cluster/make_all_manifests.sh`）。
   - dense-score pilot r3 结论报告：[docs/reports/DENSE_SCORE_PILOT_R3_CONCLUSION_20261016.md](docs/reports/DENSE_SCORE_PILOT_R3_CONCLUSION_20261016.md)（D7b：只报告、不删）。
   - 单卡冒烟：[docs/reports/SMOKE_DOWNSTREAM_20261016.md](docs/reports/SMOKE_DOWNSTREAM_20261016.md)。EASI 3B/7B 通过；StarVLA 3B/7B 单卡通过（要绕开 DeepSpeed）；RLinf 已解决 Python 环境和 git 两个问题，卡在计算节点的渲染库，第五次任务用项目内的渲染库覆盖层重试。
-- **等你决定**：D4（旁支模型去留）和主线用 3B 还是 7B；`archive/cluster/_pending_delete/`（230 GB 冒烟残留）删不删。
-- **还没做**：代码搬动（data_gen / training / evaluation / downstream 拆分，等第十一轮结束）、统一配置、数据与权重从原目录真正搬到固定位置、git 历史重写（D1，最后做）。
+- **已决定（2026-10-16 晚）**：D4 选 a；主线用 Qwen2.5-VL-7B，3B 只用于单卡试跑；`archive/cluster/_pending_delete/` 的 230 GB 冒烟残留已删除，逐文件记录 `archive/cluster/DELETED_pending_delete_20261016.tsv`。
+- **还没做**：代码搬动（data_gen / training / evaluation / downstream 拆分，含 `vagen/models/`，等第十一轮结束），每批之后撤掉对应的兼容链接；统一配置；数据与权重从原目录真正搬到固定位置；git 历史重写（D1，最后做）。以后每次移动集群数据前，先跑 `scripts/cluster/audit_archived_paths.sh`。
 
 ## 2. 正在运行（2026-10-16 晚）
 
