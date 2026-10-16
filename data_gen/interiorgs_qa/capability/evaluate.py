@@ -14,6 +14,53 @@ import re
 from typing import Any, Sequence
 
 LETTERS = "ABCDEFGH"
+KIND_NAMES_ZH = {
+    "absolute_distance": "到目标的距离估计",
+    "equidistance_closer": "两目标远近比较（含距离相同）",
+    "occlusion_closer": "两目标谁更近（遮挡任务来源）",
+    "projective_direction": "两目标的左、右、前、后关系",
+    "occlusion_state": "双图遮挡状态判断",
+    "fov_complete": "两目标是否完整入框",
+}
+TASK_NAMES_ZH = {
+    "absolute_positioning": "绝对距离任务",
+    "equidistance": "等距任务",
+    "projective_relations": "视角方向任务",
+    "occlusion_alignment": "遮挡任务（未标明细分题型）",
+    "fov_inclusion": "同时入框任务",
+    "screen_occupancy": "占画面高度任务",
+}
+
+
+def question_kind(question: dict[str, Any]) -> str:
+    return question.get("kind") or question["task_type"]
+
+
+def semantic_counts(questions: Sequence[dict[str, Any]], *fields: str) -> tuple[dict[str, int], dict[str, int]]:
+    """Count available meaning keys, with explicit fallback-field provenance."""
+    counts, origins = Counter(), Counter()
+    for q in questions:
+        for field in fields:
+            value = q.get(field)
+            if isinstance(value, str) and value:
+                counts[value] += 1
+                origins[field] += 1
+                break
+        else:
+            origins["missing"] += 1
+    return dict(sorted(counts.items())), dict(sorted(origins.items()))
+
+
+def semantic_name_zh(key: str) -> str:
+    names = {"a_closer": "先提到的目标更近", "b_closer": "后提到的目标更近", "same": "两目标距离相同",
+             "left": "在左侧", "right": "在右侧", "front": "在前方", "behind": "在后方",
+             "both": "两目标均完整入框", "a_only": "仅先提目标完整入框",
+             "b_only": "仅后提目标完整入框", "neither": "两目标均未完整入框",
+             "fully_hidden": "完全被指定物体遮挡", "partly_hidden": "部分被指定物体遮挡",
+             "not_hidden": "未被指定物体遮挡", "outside": "位于画面外"}
+    if re.fullmatch(r"distance_[0-3]", key):
+        return f"第{int(key[-1])+1}小的距离选项"
+    return names.get(key, "该组最常见的答案含义")
 
 
 def load_questions(path: Path) -> list[dict[str, Any]]:
@@ -124,8 +171,22 @@ def _distribution(questions: Sequence[dict[str, Any]], outcomes: Sequence[dict[s
     majority_letter, majority_n = max(sorted(counts.items()), key=lambda item: item[1])
     result: dict[str, Any] = {"questions": count, "answer_letter_counts": dict(sorted(counts.items())),
         "chance_accuracy": sum(1 / len(q["options"]) for q in questions) / count,
+        "chance_expected_correct": sum(1 / len(q["options"]) for q in questions),
         "majority_baseline": {"letter": majority_letter, "correct": majority_n, "questions": count,
                               "accuracy": majority_n / count}}
+    meanings, meaning_origins = semantic_counts(questions, "presented_answer_key", "answer_key")
+    source_meanings, source_origins = semantic_counts(questions, "source_answer_key", "answer_key")
+    meaning_count = sum(meanings.values())
+    semantic_baseline = None
+    if meaning_count:
+        key, correct = max(sorted(meanings.items()), key=lambda item: item[1])
+        semantic_baseline = {"answer_key": key, "meaning_zh": semantic_name_zh(key),
+                             "correct": correct, "questions": meaning_count,
+                             "accuracy": correct / meaning_count}
+    result.update(presented_answer_key_counts=meanings, source_answer_key_counts=source_meanings,
+                  presented_answer_key_fields=meaning_origins, source_answer_key_fields=source_origins,
+                  majority_semantic_baseline=semantic_baseline,
+                  source_answer_key_note_zh="原任务角色仅用于覆盖分布；不是模型可见信息或无图预测成绩。缺少原角色字段时回退旧答案键，不能据此推断原角色偏置已消除。")
     for mode in ("with_images", "text_only"):
         values = [r for r in outcomes if r["mode"] == mode]
         correct = sum(r["correct"] for r in values)
@@ -164,33 +225,44 @@ def evaluate_questions(questions: Sequence[dict[str, Any]], predictions: Sequenc
         qs = [q for q in questions if q["group"] == group]
         ids = {q["qid"] for q in qs}
         groups[group] = _distribution(qs, [r for r in outcomes if r["qid"] in ids])
-    tests = [test for group in groups.values() for test in group["text_only_binomial_tests"]]
-    threshold = alpha / max(1, len(tests))
-    for test in tests:
-        test["multiple_comparison_threshold"] = threshold
-        test["investigate_text_shortcut"] = test["p_one_sided"] < threshold
+    by_kind = {}
+    for kind in sorted({question_kind(q) for q in questions}):
+        qs = [q for q in questions if question_kind(q) == kind]
+        ids = {q["qid"] for q in qs}
+        by_kind[kind] = _distribution(qs, [r for r in outcomes if r["qid"] in ids])
+        by_kind[kind]["name_zh"] = KIND_NAMES_ZH.get(kind, TASK_NAMES_ZH.get(kind, "未命名能力题"))
+    for collection, scope in ((groups, "parent_groups"), (by_kind, "question_kinds")):
+        tests = [test for group in collection.values() for test in group["text_only_binomial_tests"]]
+        threshold = alpha / max(1, len(tests))
+        for test in tests:
+            test["multiple_comparison_threshold"] = threshold
+            test["multiple_comparison_scope"] = scope
+            test["investigate_text_shortcut"] = test["p_one_sided"] < threshold
     by_task = {}
     for task in sorted({q["task_type"] for q in questions}):
         qs = [q for q in questions if q["task_type"] == task]; ids = {q["qid"] for q in qs}
         by_task[task] = _distribution(qs, [r for r in outcomes if r["qid"] in ids])
     return {"schema_version": "interiorgs_capability_model_check_v1", "questions": len(questions),
             "requests": len(predictions), "all": _distribution(questions, outcomes), "by_group": groups,
-            "by_task_type": by_task, "predictions": outcomes,
+            "by_task_type": by_task, "by_kind": by_kind, "predictions": outcomes,
             "interpretation_zh": "这些结果只用于发现文字捷径等明显问题，不替代人工审核，不筛题、不放行训练数据。",
-            "binomial_test_zh": "按相同选项数分别检验纯文字答对数是否高于随机水平；能力类别之间用检验次数校正提示阈值。小样本提示不证明文字泄漏。",
+            "binomial_test_zh": "按实际题型和相同选项数分别检验纯文字答对数是否高于随机水平，并用检验次数校正提示阈值；父任务类别另留汇总。小样本提示不证明文字泄漏。",
             "model_used_for_review": False, "model_used_for_filtering": False}
 
 
 def markdown(summary: dict[str, Any]) -> str:
     n = summary["questions"]
     lines = [f"本次对同一批{n}道样题分别进行了有图与纯文字检查，共获得{summary['requests']}条回答；结果只供查找问题，不作为人工审核结论。",
-             "威尔逊区间是在样本数量有限时给准确率标注的不确定范围；这里使用95%的区间。随机水平按每题选项数计算，常选答案基线表示始终回答本组最常见选项字母的成绩。",
-             "", "| 能力类别 | 有图答对／题数 | 纯文字答对／题数 | 随机水平 | 常选字母答对／题数 |",
-             "|---|---:|---:|---:|---:|"]
-    for group, row in summary["by_group"].items():
+             "威尔逊区间是在样本数量有限时给准确率标注的不确定范围；这里使用95%的区间。随机答对数是按每题选项数计算的期望值，可以是小数。常选字母表示始终选同一字母；常选含义表示始终选择题面中的同一种关系，例如先提到的目标更近，不随选项字母重排而改变。",
+             "", "| 实际题型 | 有图答对／题数 | 纯文字答对／题数 | 随机预期答对／题数 | 常选字母答对／题数 | 常选含义答对／有含义记录题数 |",
+             "|---|---:|---:|---:|---:|---:|"]
+    for kind, row in summary["by_kind"].items():
         v, t, m = row["with_images"], row["text_only"], row["majority_baseline"]
-        lines.append(f"| {group} | {v['correct']}／{v['questions']} | {t['correct']}／{t['questions']} | {row['chance_accuracy']:.1%} | {m['correct']}／{m['questions']}（{m['letter']}） |")
-    lines.extend(["", summary["binomial_test_zh"], "详细区间、各选项数量、格式不合规回答和检验结果见同目录summary.json。", ""])
+        s = row["majority_semantic_baseline"]
+        meaning = f"{s['correct']}／{s['questions']}（{s['meaning_zh']}）" if s else "未记录答案含义"
+        lines.append(f"| {row['name_zh']} | {v['correct']}／{v['questions']} | {t['correct']}／{t['questions']} | {row['chance_expected_correct']:.2f}／{row['questions']}（{row['chance_accuracy']:.1%}） | {m['correct']}／{m['questions']}（{m['letter']}） | {meaning} |")
+    lines.extend(["", "原任务中对象角色的答案分布另存于summary.json，只用于检查覆盖；它不是模型能从题面直接获得的提示，也不是模型成绩。常选含义只使用当前题面含义，缺失含义字段的题不计入该列分母。",
+                  summary["binomial_test_zh"], "详细区间、各选项数量、格式不合规回答和检验结果见同目录summary.json。", ""])
     return "\n".join(lines)
 
 

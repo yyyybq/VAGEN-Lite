@@ -9,7 +9,7 @@ import pytest
 
 from data_gen.interiorgs_qa.capability.evaluate import (
     binomial_upper_tail, build_requests, evaluate_questions, load_questions, parse_letter,
-    processor_input, prompt_text, run_inference, wilson,
+    markdown, processor_input, prompt_text, run_inference, wilson,
 )
 
 
@@ -32,6 +32,7 @@ def test_requests_preserve_image_order_and_do_not_contain_gt(tmp_path):
     for secret in ("PRIVATE_ANSWER", "PRIVATE_TASK", "PRIVATE_GEOMETRY", "PRIVATE_SOURCE"):
         assert secret not in json.dumps(requests)
     q["answer"] = "B"; q["answer_key"] = "different"
+    q["source_answer_key"] = "PRIVATE_SOURCE_ROLE"; q["presented_answer_key"] = "PRIVATE_PRESENTED_ROLE"
     assert build_requests([q]) == requests
 
 
@@ -107,3 +108,69 @@ def test_loader_rejects_missing_images_and_non_letter_answer(tmp_path):
     with pytest.raises(ValueError): load_questions(path)
     q["answer"] = "A"; q["images"] = [str(tmp_path / "missing.png")]; path.write_text(json.dumps(q) + "\n")
     with pytest.raises(ValueError): load_questions(path)
+
+
+def test_actual_kinds_split_two_choice_distance_from_four_choice_occlusion(tmp_path):
+    qs = []
+    # All source tasks put their second object closer; mention-order changes
+    # balance the answer as read in the actual question, not the source roles.
+    for i, (letter, presented) in enumerate(zip(['A', 'B', 'B', 'A'],
+                                               ['a_closer', 'b_closer', 'a_closer', 'b_closer'])):
+        q = question(tmp_path, f'near{i}', answer=letter, group='遮挡判断', task='occlusion_alignment')
+        q.update(kind='occlusion_closer', answer_key=presented, source_answer_key='b_closer')
+        qs.append(q)
+    for i, (letter, key) in enumerate([('A', 'fully_hidden'), ('C', 'partly_hidden')]):
+        q = question(tmp_path, f'hidden{i}', answer=letter, options=['fully', 'partly', 'clear', 'outside'],
+                     group='遮挡判断', task='occlusion_alignment')
+        q.update(kind='occlusion_state', answer_key=key, source_answer_key=key)
+        qs.append(q)
+    predictions = [{'qid': q['qid'], 'mode': mode,
+                    'reply': q['answer'] if mode == 'with_images' else 'A'}
+                   for mode in ('with_images', 'text_only') for q in qs]
+    result = evaluate_questions(qs, predictions)
+    assert result['by_group']['遮挡判断']['questions'] == 6
+    assert result['by_task_type']['occlusion_alignment']['questions'] == 6
+    assert set(result['by_kind']) == {'occlusion_closer', 'occlusion_state'}
+    near, hidden = (result['by_kind'][kind] for kind in ['occlusion_closer', 'occlusion_state'])
+    assert near['questions'] == 4 and near['chance_accuracy'] == .5
+    assert hidden['questions'] == 2 and hidden['chance_accuracy'] == .25
+    assert near['chance_expected_correct'] == 2 and hidden['chance_expected_correct'] == .5
+    assert near['majority_baseline']['correct'] == 2
+    assert near['majority_semantic_baseline']['correct'] == 2
+    assert near['majority_semantic_baseline']['questions'] == 4
+    assert near['presented_answer_key_counts'] == {'a_closer': 2, 'b_closer': 2}
+    assert near['source_answer_key_counts'] == {'b_closer': 4}
+    assert 'source_majority_semantic_baseline' not in near
+    assert near['source_answer_key_fields'] == {'source_answer_key': 4}
+    tests = [row['text_only_binomial_tests'][0] for row in [near, hidden]]
+    assert [test['option_count'] for test in tests] == [2, 4]
+    assert all(test['multiple_comparison_scope'] == 'question_kinds' for test in tests)
+    assert all(test['multiple_comparison_threshold'] == .025 for test in tests)
+    report = markdown(result)
+    assert '两目标谁更近（遮挡任务来源）' in report and '双图遮挡状态判断' in report
+    assert 'occlusion_closer' not in report and 'occlusion_state' not in report
+    assert '2／4（先提到的目标更近）' in report
+    assert '0.50／2（25.0%）' in report
+    assert '不是模型成绩' in report
+
+
+def test_semantic_field_precedence_missing_denominator_and_legacy_fallback(tmp_path):
+    first, second, third = [question(tmp_path, f'fallback{i}') for i in range(3)]
+    first.update(kind='occlusion_closer', answer_key='b_closer', presented_answer_key='a_closer',
+                 source_answer_key='b_closer')
+    second.update(kind='occlusion_closer', answer_key='a_closer')
+    third.update(kind='occlusion_closer'); del third['answer_key']
+    qs = [first, second, third]
+    predictions = [{'qid': q['qid'], 'mode': mode, 'reply': 'A'}
+                   for mode in ('with_images', 'text_only') for q in qs]
+    row = evaluate_questions(qs, predictions)['by_kind']['occlusion_closer']
+    assert row['questions'] == 3 and row['majority_baseline']['questions'] == 3
+    assert row['presented_answer_key_counts'] == {'a_closer': 2}
+    assert row['source_answer_key_counts'] == {'a_closer': 1, 'b_closer': 1}
+    assert row['presented_answer_key_fields'] == {'presented_answer_key': 1, 'answer_key': 1, 'missing': 1}
+    assert row['source_answer_key_fields'] == {'source_answer_key': 1, 'answer_key': 1, 'missing': 1}
+    assert row['majority_semantic_baseline']['correct'] == 2
+    assert row['majority_semantic_baseline']['questions'] == 2
+    third_only = evaluate_questions([third], [p for p in predictions if p['qid'] == third['qid']])
+    assert third_only['all']['majority_semantic_baseline'] is None
+    assert '未记录答案含义' in markdown(third_only)
