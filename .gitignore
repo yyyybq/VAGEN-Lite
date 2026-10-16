@@ -113,3 +113,8 @@ docs/diagnosis/**/*.json
 docs/diagnosis/**/*.jsonl
 docs/diagnosis/**/*.png
 docs/diagnosis/**/*.csv
+
+# Cleanup (2026-10): cluster-only archive of experiment residue, logs and old results (manifest alongside)
+archive/cluster/
+# Cleanup scratch on the cluster
+exps/_cleanup_*/
