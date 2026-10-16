@@ -9,7 +9,8 @@ A formal PPO run is two jobs on one RUN (the render service writes RUN/renderer_
 it): give each its own --job-dir, e.g. job_renderer and job_rl.
 
 Trials use one card (the user's rule for every job but the formal training); the formal SFT and PPO
-trainers use eight, the PPO render service one.
+trainers use eight, the PPO render service one.  The pool is zoetrope unless a job is prepared with another one
+(--pool, the training chain's plan "pool"; round 11: h800 when zoetrope is full, the user's decision).
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 WORKTREE = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite"  # the cluster checkout, the only code directory since round 6
 SCRIPT = "examples/train/active_spatial/sco_interiorgs_v10_train.sh"
@@ -29,6 +30,7 @@ SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
 IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"
 MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
 POOL = "zoetrope"
+POOLS = ("zoetrope", "h800")  # same H800 cards, specs, image and storage
 SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 
@@ -37,7 +39,10 @@ def now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def prepare(run: Path, gpus: int, mode_args: List[str], job_dir: str = "job") -> Path:
+def prepare(run: Path, gpus: int, mode_args: List[str], job_dir: str = "job", pool: Optional[str] = None) -> Path:
+    pool = pool or POOL
+    if pool not in POOLS:
+        raise ValueError(f"pool must be one of {POOLS}")
     if gpus not in SPECS:
         raise ValueError(f"gpus must be one of {sorted(SPECS)}")
     if not mode_args:
@@ -48,7 +53,7 @@ def prepare(run: Path, gpus: int, mode_args: List[str], job_dir: str = "job") ->
     args = " ".join(shlex.quote(a) for a in mode_args[1:])
     launch.write_text(f"#!/usr/bin/env bash\nexec bash {WORKTREE}/{SCRIPT} {shlex.quote(mode_args[0])} {run} {args}\n")
     launch.chmod(0o755)
-    (job / "prepared.json").write_text(json.dumps({"utc": now(), "gpus": gpus, "spec": SPECS[gpus], "pool": POOL,
+    (job / "prepared.json").write_text(json.dumps({"utc": now(), "gpus": gpus, "spec": SPECS[gpus], "pool": pool,
                                                    "mode_args": mode_args}, indent=1))
     return launch
 
@@ -60,7 +65,7 @@ def submit(run: Path, job_dir: str = "job") -> str:
         return json.loads(receipt.read_text())["job_id"]
     prepared = json.loads((job / "prepared.json").read_text())
     name = f"interiorgs-v10-{prepared['mode_args'][0]}-{run.name}".replace("_", "-")[-60:]
-    command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={POOL}", f"--job-name={name}",
+    command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={prepared.get('pool', POOL)}", f"--job-name={name}",
                "--priority=HIGHEST", "--quota-type=reserved", f"--container-image-url={IMAGE}",
                f"--storage-mount={MOUNT}", "--training-framework=pytorch", "--worker-nodes=1",
                f"--worker-spec={prepared['spec']}", f"--command=bash {job}/launch.sh"]
@@ -107,11 +112,12 @@ def main() -> None:
     ap.add_argument("--run", required=True, type=Path)
     ap.add_argument("--gpus", type=int, default=1)
     ap.add_argument("--job-dir", default="job", help="folder under RUN for this job")
+    ap.add_argument("--pool", choices=POOLS, default=None, help=f"resource pool (default {POOL})")
     ap.add_argument("mode_args", nargs="*")
     args = ap.parse_args()
     run = args.run.resolve()
     if args.action == "prepare":
-        print(prepare(run, args.gpus, args.mode_args, args.job_dir))
+        print(prepare(run, args.gpus, args.mode_args, args.job_dir, args.pool))
     elif args.action == "submit":
         print(submit(run, args.job_dir))
     elif args.action == "status":

@@ -35,7 +35,8 @@ TR/rl_<name> and TR/rl_run_<name>); "evaluate" then evaluates every run's checkp
 Plan "eval"."variants" ([{"suffix", "sets", "options", "models"}]) adds evaluation runs with other options (e.g.
 sampled: "--samples 4 --temperature 0.8 --top-p 0.92") for the listed models ("sft_pick" = the picked SFT
 checkpoint, "rl" = every RL checkpoint, or result names).  While RL runs, PROGRESS.md shows each run's training
-success per task family in blocks of 25 updates (from the rollout dumps).
+success per task family in blocks of 25 updates (from the rollout dumps).  Plan "pool" picks the sco pool of
+every job the chain submits (default zoetrope; round 11 moved to h800 when zoetrope was full, the user's call).
 
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
@@ -411,7 +412,7 @@ class Chain:
             run = self.tr / (f"sft_{group}" if group else "sft")
             run.mkdir(parents=True, exist_ok=True)
             if not (run / "job" / "submission.json").exists():
-                job_sco.prepare(run, 8, ["sft", str(self.lf_dir(group))])
+                job_sco.prepare(run, 8, ["sft", str(self.lf_dir(group))], pool=self.plan.get("pool"))
                 job_sco.submit(run)
             runs[group or "sft"] = run
         self.mark("sft", job_ids={n: json.loads((r / "job" / "submission.json").read_text())["job_id"]
@@ -444,7 +445,8 @@ class Chain:
                     run = self.tr / "eval_runs" / name
                     run.mkdir(parents=True, exist_ok=True)
                     if not (run / "job" / "submission.json").exists():
-                        job_sco.prepare(run, 1, ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options])
+                        job_sco.prepare(run, 1, ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options],
+                                        pool=self.plan.get("pool"))
                         job_sco.submit(run)
                     running[name] = run
                 for name, run in list(running.items()):
@@ -553,10 +555,10 @@ class Chain:
             if not (d / "job_renderer" / "submission.json").exists():
                 for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
                     (d / f).unlink(missing_ok=True)
-                job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer")
+                job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.plan.get("pool"))
                 job_sco.submit(d, job_dir="job_renderer")
             if not (d / "job_rl" / "submission.json").exists():
-                job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl")
+                job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl", pool=self.plan.get("pool"))
                 job_sco.submit(d, job_dir="job_rl")
         self.mark(step, job_ids={f"{n}/{j}": json.loads((r["run_dir"] / j / "submission.json").read_text())["job_id"]
                                  for n, r in runs.items() for j in ("job_renderer", "job_rl")})
@@ -606,10 +608,10 @@ class Chain:
         if not (run / jr / "submission.json").exists():
             for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
                 (run / f).unlink(missing_ok=True)
-            job_sco.prepare(run, 1, ["renderer"], job_dir=jr)
+            job_sco.prepare(run, 1, ["renderer"], job_dir=jr, pool=self.plan.get("pool"))
             job_sco.submit(run, job_dir=jr)
         if not (run / jl / "submission.json").exists():
-            job_sco.prepare(run, 8, ["rl", str(self.tr / "rl"), str(endpoint)], job_dir=jl)
+            job_sco.prepare(run, 8, ["rl", str(self.tr / "rl"), str(endpoint)], job_dir=jl, pool=self.plan.get("pool"))
             job_sco.submit(run, job_dir=jl)
         self.mark(step, job_ids={d: json.loads((run / d / "submission.json").read_text())["job_id"] for d in (jr, jl)})
 

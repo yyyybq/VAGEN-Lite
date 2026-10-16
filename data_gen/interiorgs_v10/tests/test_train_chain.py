@@ -133,7 +133,7 @@ class ChainTest(unittest.TestCase):
             (ev / "v10_rl_050" / "done.json").write_text("{}")  # evaluated before: no new job
             prepared, deleted, fail = {}, [], set()
 
-            def prepare(run, gpus, args, job_dir="job"):
+            def prepare(run, gpus, args, job_dir="job", pool=None):
                 prepared[run.name] = (gpus, args)
                 (run / job_dir).mkdir(parents=True, exist_ok=True)
 
@@ -217,7 +217,7 @@ class ChainTest(unittest.TestCase):
             # sft: one 8-card job per group, both submitted before waiting
             prepared, deleted = {}, []
 
-            def prepare(run, gpus, args, job_dir="job"):
+            def prepare(run, gpus, args, job_dir="job", pool=None):
                 prepared[run.name] = (gpus, args)
                 (run / job_dir).mkdir(parents=True, exist_ok=True)
 
@@ -332,7 +332,7 @@ class ChainTest(unittest.TestCase):
             rl = {"history_mode": "concat", "critic_warmup": 10, "train_batch_size": 24, "ppo_mini_batch_size": 16,
                   "save_freq": 50, "no_internal_val": True}
             chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 100, "ppo_template": "/S0.yaml", "gs_root": "/ply",
-                             "eval_sets": {"val400": str(val), "test": str(test)},
+                             "pool": "h800", "eval_sets": {"val400": str(val), "test": str(test)},
                              "rl_runs": {"rs0": {"reward_preset": "S0", "rl": rl}, "rd": {"reward_preset": "dense", "rl": rl}},
                              "eval": {"every": 50, "variants": [{"suffix": "_s4", "sets": ["val400"],
                                                                  "options": ["--samples", "4", "--temperature", "0.8"],
@@ -356,11 +356,12 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(by_out[str(root / "rl_rs0")][by_out[str(root / "rl_rs0")].index("--reward-preset") + 1], "S0")
 
             # PPO: rs0 finishes, rd's render service dies; rs0 is not stopped, the step fails naming rd
-            prepared, deleted = {}, []
+            prepared, deleted, pools = {}, [], set()
             polls = {"n": 0}
 
-            def prepare(run, gpus, args, job_dir="job"):
+            def prepare(run, gpus, args, job_dir="job", pool=None):
                 prepared[(run.name, job_dir)] = (gpus, args)
+                pools.add(pool)
                 (run / job_dir).mkdir(parents=True, exist_ok=True)
 
             def submit(run, job_dir="job"):
@@ -388,6 +389,7 @@ class ChainTest(unittest.TestCase):
                 self.assertNotIn("rs0", str(err.exception))
                 self.assertEqual(prepared[("rl_run_rs0", "job_rl")], (8, ["rl", str(root / "rl_rs0"), "100"]))
                 self.assertEqual(prepared[("rl_run_rd", "job_renderer")], (1, ["renderer"]))
+                self.assertEqual(pools, {"h800"})  # the plan's pool reaches every job (round 11: zoetrope was full)
                 self.assertEqual(sorted(set(deleted)), [("rl_run_rd", "job_renderer"), ("rl_run_rd", "job_rl"),
                                                         ("rl_run_rs0", "job_renderer"), ("rl_run_rs0", "job_rl")])
                 self.assertTrue((root / "rl_run_rs0" / "STOP_RENDERER").exists())

@@ -29,6 +29,28 @@ class JobScoTest(unittest.TestCase):
             self.assertEqual(json.loads((run / "job_rl" / "prepared.json").read_text())["spec"], "N4lS.Iq.I80.8")
             self.assertTrue((run / "job" / "launch.sh").exists())
 
+    def test_pool_per_job(self):
+        """Round 11: zoetrope by default, h800 when asked (the user's decision when zoetrope is full); the pool
+        recorded at prepare is the one the submission names."""
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "run"
+            J.prepare(run, 1, ["eval", "/e", "n", "/m", "-"])
+            J.prepare(run, 8, ["rl", "/rl", "300"], job_dir="job_rl", pool="h800")
+            self.assertEqual(json.loads((run / "job" / "prepared.json").read_text())["pool"], "zoetrope")
+            self.assertEqual(json.loads((run / "job_rl" / "prepared.json").read_text())["pool"], "h800")
+            with self.assertRaises(ValueError):
+                J.prepare(run, 1, ["eval"], pool="nowhere")
+            calls = []
+            done = mock.Mock(returncode=0, stdout="created pt-abc123", stderr="")
+            with mock.patch.object(J.subprocess, "run", lambda cmd, **k: calls.append(cmd) or done):
+                self.assertEqual(J.submit(run), "pt-abc123")
+                self.assertEqual(J.submit(run, "job_rl"), "pt-abc123")
+            self.assertIn("--aec2-name=zoetrope", calls[0])
+            self.assertIn("--aec2-name=h800", calls[1])
+            self.assertIn("--worker-spec=N4lS.Iq.I80.8", calls[1])
+
     def test_jobs_run_from_the_cluster_checkout(self):
         """Round 6: the cluster checkout is the only code directory (no more VAGEN-Lite-r4)."""
         self.assertEqual(J.WORKTREE, "/mnt/umm/users/yinbaiqiao/VAGEN-Lite")
