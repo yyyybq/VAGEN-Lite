@@ -48,6 +48,14 @@ class BrowserTest(unittest.TestCase):
             self.assertTrue((out / "img" / (e["t"][0]["f"] + ".jpg")).is_file())
             self.assertEqual(data["episodes"]["v10_sft_e3"]["1"], {"error": "renderer"})
             self.assertEqual(B.build(ev, Path(tmp) / "one", ["v10_rl_050"])["models"], ["v10_rl_050"])
+            # round 11: a sampled run (several episodes per task) is not shown
+            (ev / "v10_rl_050_s4").mkdir()
+            (ev / "v10_rl_050_s4" / "results.jsonl").write_text((ev / "v10_rl_050" / "results.jsonl").read_text())
+            (ev / "v10_rl_050_s4" / "model.json").write_text(json.dumps({"samples": 4}))
+            self.assertEqual(B.build(ev, Path(tmp) / "nosampled")["models"], ["v10_sft_e3", "v10_rl_050"])
+            import shutil
+
+            shutil.rmtree(ev / "v10_rl_050_s4")
 
             # round 9: a second folder with the same tasks (diagnostic runs), labels and the two first columns
             diag = Path(tmp) / "diag"

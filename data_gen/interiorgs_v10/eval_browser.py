@@ -90,6 +90,14 @@ def _tasks(eval_dir: Path) -> List[Dict[str, Any]]:
     return [json.loads(l) for l in (eval_dir / "tasks.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
+def sampled_run(run: Path) -> bool:
+    """A sampled evaluation (round 11: several episodes per task) is left out: the page shows one episode per task."""
+    try:
+        return int(json.loads((run / "model.json").read_text(encoding="utf-8")).get("samples") or 1) > 1
+    except (OSError, ValueError):
+        return False
+
+
 def build(eval_dirs: Union[Path, Sequence[Path]], out: Path, models: Optional[Sequence[str]] = None,
           labels: Optional[Dict[str, str]] = None, defaults: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """One page over one or more evaluation folders of the same tasks (e.g. round 8's models and round 9's
@@ -102,7 +110,7 @@ def build(eval_dirs: Union[Path, Sequence[Path]], out: Path, models: Optional[Se
         if [t["task_id"] for t in _tasks(d)] != [t["task_id"] for t in tasks]:
             raise ValueError(f"{d} has other tasks than {dirs[0]}")
         for run in d.iterdir():
-            if (run / "results.jsonl").is_file() and (not models or run.name in models):
+            if (run / "results.jsonl").is_file() and (not models or run.name in models) and not sampled_run(run):
                 if run.name in where:
                     raise ValueError(f"{run.name} is in both {where[run.name]} and {d}")
                 where[run.name] = d

@@ -106,6 +106,54 @@ class EvaluationTest(unittest.TestCase):
                          (["distance_ok"], 0.6667, [], 1.0))
         answers = iter(["move_forward|turn_left", "move_forward"])
         self.assertNotIn("trajectory", E.run_episode(Env(), policy, 7, 12))  # without a frames folder: counts only
+        # round 11: a sampled episode passes a fixed seed per (task, sample, turn) and records its sample number
+        seeds = []
+
+        def sampled(self, s, u, im, seed=None):
+            seeds.append(seed)
+            return next(answers)
+
+        answers = iter(["move_forward|turn_left", "move_forward"])
+        with tempfile.TemporaryDirectory() as tmp:
+            row = E.run_episode(Env(), type("S", (), {"generate": sampled})(), 7, 12, frames=Path(tmp) / "frames",
+                                sample=2, seed=11)
+            files = sorted(p.name for p in (Path(tmp) / "frames").iterdir())
+        self.assertEqual(row["sample"], 2)
+        self.assertEqual(files, ["007_s2_00.jpg", "007_s2_01.jpg", "007_s2_02.jpg"])
+        self.assertEqual(seeds, [E.call_seed(11, 7, 2, 0), E.call_seed(11, 7, 2, 1)])
+        self.assertEqual(len({E.call_seed(11, 7, k, 0) for k in range(4)}), 4)  # the samples of a task differ
+        self.assertEqual(E.call_seed(11, 7, 2, 0), E.call_seed(11, 7, 2, 0))   # and are reproducible
+
+    def test_sampled_metrics_and_table(self):
+        """A sampled run: the success column is the mean over the episodes, plus the share of tasks with at least one
+        success; task-by-task comparison refuses it."""
+        rows = []
+        for i, outcomes in enumerate(([True, False, False, False], [False] * 4, [True] * 4)):
+            for k, ok in enumerate(outcomes):
+                rows.append({"index": i, "sample": k, "task_type": "fov_inclusion", "d_star": 2, "success": ok,
+                             "actions_to_success": 2 if ok else None, "turns": 1, "actions": 2, "collisions": 0,
+                             "invalid_turns": 0})
+        m = E.metrics(rows)
+        self.assertEqual((m["samples"], m["tasks"], m["episodes"]), (4, 3, 12))
+        self.assertEqual(m["pass_at_n"], round(2 / 3, 4))
+        self.assertEqual(m["success_mean"], round((0.25 + 0 + 1) / 3, 4))
+        self.assertEqual(m["success"], round(5 / 12, 4))
+        self.assertNotIn("pass_at_n", E.metrics([{k: v for k, v in rows[0].items() if k != "sample"}]))  # greedy
+        with self.assertRaises(ValueError):
+            E.paired(rows, rows)
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "m_s4"
+            d.mkdir()
+            (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            E.cmd_table(type("A", (), {"eval": tmp})())
+            table = (Path(tmp) / "table.md").read_text(encoding="utf-8")
+        self.assertIn("| m_s4 | 3×4 | 0.417 |", table)
+        self.assertIn("0.667（4 条）", table)
+        import argparse
+
+        self.assertFalse(E.sampling_mode(argparse.Namespace(samples=1, temperature=0.0)))
+        self.assertTrue(E.sampling_mode(argparse.Namespace(samples=4, temperature=0.8)))
+        self.assertTrue(E.sampling_mode(argparse.Namespace(samples=1, temperature=0.8)))
 
     def test_history_gives_every_earlier_turn_in_the_sft_layout(self):
         part = lambda im: {"type": "image", "id": im}  # noqa: E731
