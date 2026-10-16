@@ -58,6 +58,33 @@ class FailAnalysisTest(unittest.TestCase):
             table = out.with_suffix(".md").read_text(encoding="utf-8")
             self.assertIn("| 第十轮 | 4 | 3 | 1（25.0%） | 1（25.0%） | 1（25.0%） |", table)
 
+    def test_blocked_reaction_and_focus(self):
+        """Round 11: the turn after a blocked move (repeat / back off / blocked again) and the three conditions."""
+        fb = "Environment Feedback: 1 of 2 actions executed; blocked: move_backward (blocked by wall).\n"
+        traj = [dict(turn(["move_forward", "move_backward"], ["inside_frame", "min_area"], 0.2), collisions=1, user="x"),
+                dict(turn(["move_forward"], ["inside_frame"], 0.3), collisions=0, user=fb),          # backs off
+                dict(turn(["move_left"], ["target_a_clearly_visible"], 0.3), collisions=1, user="ok"),
+                dict(turn(["move_right"], ["target_a_clearly_visible", "occluder_clearly_visible"], 0.3),
+                     collisions=1, user="blocked: move_left (blocked by sofa)."),                    # backs off, blocked again
+                dict(turn(["move_right"], ["min_area", "inside_frame"], 0.3), collisions=0,
+                     user="blocked: move_right (blocked by sofa)."),                                 # repeats
+                dict(turn(["turn_left"], ["inside_frame"], 0.3), collisions=1, user="")]             # no next turn
+        self.assertEqual(F.blocked_in_feedback(fb), ["move_backward"])
+        self.assertEqual(F.blocked_in_feedback("Action executed."), [])
+        self.assertEqual([F.focus_of(g) for g in ("inside_frame", "reference_b_clearly_visible", "occluder_clearly_visible",
+                                                  "min_area", "equidistant")],
+                         ["目标不在画面里", "没有一个面看清楚", None, "目标太小", None])
+        rep = F.analyse([row(0, "equidistance", False, traj=traj), row(1, "equidistance", True, traj=traj[:2])])
+        b = rep["equidistance"]["blocked_reaction"]
+        self.assertEqual((b["turns"], b["named"], b["repeat"], b["back_off"], b["blocked_again"]), (4, 4, 1, 3, 1))
+        self.assertEqual(b["blocked_again_share"], 0.25)
+        self.assertEqual(rep["all"]["focus_at_end"], {"目标不在画面里": 1, "没有一个面看清楚": 0, "目标太小": 0})
+        self.assertEqual(rep["all"]["near_misses"], 1)
+        self.assertEqual(rep["all"]["focus_near_miss"], {"目标不在画面里": 1, "没有一个面看清楚": 0, "目标太小": 0})
+        md = F.markdown({"m": rep})
+        self.assertIn("| m | 4 | 1（25.0%） | 3（75.0%） | 1（25.0%） |", md)
+        self.assertIn("| m | 1 | 1 | 0 | 0 | 1 | 1 | 0 | 0 |", md)
+
 
 if __name__ == "__main__":
     unittest.main()
