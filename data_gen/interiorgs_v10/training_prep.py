@@ -346,6 +346,27 @@ HISTORY_MODES = ("none", "no_concat", "concat")
 CONCAT_RESPONSE_LENGTH = 4096  # 12 turns x (81 image tokens + ~150 text + the answer) stay well below this
 
 
+# Round 11: the reward presets of the RL env.  "S0": the template's sparse reward (success +5, step -0.01, blocked
+# move -0.15, invalid answer -0.1, near-uniform view -0.2).  "dense": the dense-score pilot's S5 branch on top of
+# it (exps/.../dense_score_reward_only_pilot_parallel_r3_20261009/frozen/configs/S5.train.yaml): progress
+# shaping on the canonical metric's 0..1 progress (potential mode, gamma 0.99), a bonus while that progress is
+# at least near_success_threshold, and the visibility shaping.  DENSE_ADJUST holds the changes made after the
+# round-11 pilot (empty until then).  The system prompt stays the SFT one for both (its reward lines describe
+# the sparse terms), so the two runs differ only in the reward.
+REWARD_PRESETS = ("S0", "dense")
+DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
+            "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,
+            "enable_visibility_shaping_reward": True}
+DENSE_ADJUST: Dict[str, Any] = {}
+
+
+def reward_overrides(preset: str) -> Dict[str, Any]:
+    """Env-config overrides of a reward preset."""
+    if preset not in REWARD_PRESETS:
+        raise ValueError(f"reward preset must be one of {REWARD_PRESETS}, not {preset!r}")
+    return {} if preset == "S0" else {**DENSE_S5, **DENSE_ADJUST}
+
+
 def history_overrides(mode: str, max_turns: int) -> Dict[str, Dict[str, Any]]:
     """{"env": env-config overrides, "ppo": PPO-config overrides} for a history mode."""
     if mode not in HISTORY_MODES:
@@ -410,6 +431,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     template = yaml.safe_load(Path(args.env_template).read_text())
     history = history_overrides(getattr(args, "history_mode", None) or "none",
                                 int(template["envs"][0].get("max_turns", 12)))
+    history["env"].update(reward_overrides(getattr(args, "reward_preset", None) or "S0"))
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -455,12 +477,29 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         _set(ppo, "trainer.test_freq", int(args.test_freq))
     if getattr(args, "critic_warmup", None) is not None:
         _set(ppo, "trainer.critic_warmup", int(args.critic_warmup))
+    # round 11: more tasks per update, checkpoints every N updates (all kept, the older ones cut to their weights),
+    # no validation inside training (models are picked with the single-card evaluation script)
+    if getattr(args, "train_batch_size", None):
+        _set(ppo, "data.train_batch_size", int(args.train_batch_size))
+    if getattr(args, "ppo_mini_batch_size", None):
+        _set(ppo, "actor_rollout_ref.actor.ppo_mini_batch_size", int(args.ppo_mini_batch_size))
+    if getattr(args, "save_freq", None):
+        for key, value in {"trainer.save_freq": int(args.save_freq), "trainer.ckpt_keep_every": int(args.save_freq),
+                           "trainer.ckpt_prune_to_hf": True}.items():
+            _set(ppo, key, value)
+    if getattr(args, "no_internal_val", False):
+        _set(ppo, "trainer.val_before_train", False)
+        _set(ppo, "trainer.test_freq", -1)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
               "history_mode": getattr(args, "history_mode", None) or "none", "val_tasks": val_tasks,
               "greedy_val": bool(getattr(args, "greedy_val", False)),
               "test_freq": ppo["trainer"].get("test_freq"), "critic_warmup": ppo["trainer"].get("critic_warmup"),
+              "reward_preset": getattr(args, "reward_preset", None) or "S0",
+              "env_reward_overrides": reward_overrides(getattr(args, "reward_preset", None) or "S0"),
+              "train_batch_size": (ppo.get("data") or {}).get("train_batch_size"),
+              "save_freq": ppo["trainer"].get("save_freq"),
               "reserve_rows_skipped": reserve_skipped,
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
@@ -508,6 +547,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "the full history), concat (one sequence per episode)")
     c.add_argument("--test-freq", type=int, default=None, help="validate every N updates (template: 25)")
     c.add_argument("--critic-warmup", type=int, default=None, help="updates that train only the value network")
+    c.add_argument("--reward-preset", choices=REWARD_PRESETS, default="S0",
+                   help="round 11: S0 (sparse) or dense (the dense-score pilot's S5 shaping on top of S0)")
+    c.add_argument("--train-batch-size", type=int, default=None, help="tasks per update (template: 12)")
+    c.add_argument("--ppo-mini-batch-size", type=int, default=None, help="tasks per optimizer step (template: 8)")
+    c.add_argument("--save-freq", type=int, default=None,
+                   help="a checkpoint every N updates, all kept; the older ones keep only actor/huggingface")
+    c.add_argument("--no-internal-val", action="store_true", help="no validation inside training")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--out", required=True)
     args = ap.parse_args(argv)

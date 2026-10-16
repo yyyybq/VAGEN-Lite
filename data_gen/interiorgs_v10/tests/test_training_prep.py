@@ -175,6 +175,53 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(TP.prompt_mismatches(dict(cfg, prompt_reward_text="legacy"), types, policy), sorted(types))
         self.assertEqual(TP.prompt_mismatches(dict(cfg, max_consecutive_collisions=3), types, policy), sorted(types))
 
+    def test_rl_config_round11_options(self):
+        """Reward presets (S0 sparse, dense = the S5 shaping), 24 tasks per update, checkpoints every 50 updates
+        (all kept, the older ones cut to their weights), no validation inside training."""
+        import yaml
+
+        sft = self.root / "sft_rl11"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        template = self.root / "ppo_template11.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False, "save_freq": 25, "test_freq": 25},
+            "actor_rollout_ref": {"model": {"path": "old"}, "actor": {"ppo_mini_batch_size": 8},
+                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4, "agent": {"num_workers": 8}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+        env_template = Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"
+        self.assertEqual(TP.reward_overrides("S0"), {})
+        self.assertTrue(TP.reward_overrides("dense")["enable_potential_shaping_reward"])
+        with self.assertRaises(ValueError):
+            TP.reward_overrides("S5")
+        outs = {}
+        for preset in ("S0", "dense"):
+            out = self.root / f"rl11_{preset}"
+            TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(env_template), ppo_template=str(template),
+                                       gs_root="/ply", model="/m", name="t", run_root=str(self.root / f"run11_{preset}"),
+                                       val_limit=1, trial=False, out=str(out), history_mode="concat", reward_preset=preset,
+                                       train_batch_size=24, ppo_mini_batch_size=16, save_freq=50, no_internal_val=True))
+            outs[preset] = out
+        envs = {p: yaml.safe_load((o / "train_env.yaml").read_text())["envs"][0]["config"] for p, o in outs.items()}
+        ppo = yaml.safe_load((outs["dense"] / "ppo.yaml").read_text())
+        for key, value in TP.DENSE_S5.items():
+            self.assertEqual(envs["dense"][key], value)
+        self.assertFalse(envs["S0"]["enable_potential_shaping_reward"])
+        differ = sorted(k for k in set(envs["S0"]) | set(envs["dense"]) if envs["S0"].get(k) != envs["dense"].get(k)
+                        and k != "jsonl_path")
+        self.assertEqual(differ, sorted(k for k, v in TP.reward_overrides("dense").items()
+                                        if envs["S0"].get(k) != v))  # nothing else differs
+        self.assertEqual((ppo["data"]["train_batch_size"], ppo["actor_rollout_ref"]["actor"]["ppo_mini_batch_size"]), (24, 16))
+        self.assertEqual({k: ppo["trainer"][k] for k in ("save_freq", "ckpt_keep_every", "ckpt_prune_to_hf",
+                                                         "val_before_train", "test_freq")},
+                         {"save_freq": 50, "ckpt_keep_every": 50, "ckpt_prune_to_hf": True, "val_before_train": False,
+                          "test_freq": -1})
+        self.assertEqual(json.loads((outs["dense"] / "rl_config_report.json").read_text())["reward_preset"], "dense")
+        # the system prompt is the same for both presets (and matches the SFT one; rl-config checks it)
+        types = ["projective_relations", "equidistance"]
+        self.assertEqual(TP.prompt_mismatches(envs["dense"], types, load_policy()), [])
+
     def test_rl_config_trains_on_formal_tasks_only(self):
         """Reserve rows (sft-frames --include-reserve) are SFT-only: rl-config leaves them out of train and val."""
         import yaml

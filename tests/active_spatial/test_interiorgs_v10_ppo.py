@@ -18,6 +18,29 @@ class RetainedStepsTest(unittest.TestCase):
         self.assertEqual(retained_steps([1, 2, 3], 2, 1), {2, 3})  # the one-card resume check
         self.assertEqual(retained_steps([1, 2, 3], 0, 1), {3})
 
+    def test_prune_to_hf_keeps_only_the_weights(self):
+        import tempfile
+        from pathlib import Path
+
+        from vagen.interiorgs_v10_ppo import prune_to_hf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ck = Path(tmp) / "global_step_50"
+            for rel in ("actor/huggingface/model.safetensors", "actor/model_world_size_8_rank_0.pt",
+                        "actor/optim_world_size_8_rank_0.pt", "critic/model_world_size_8_rank_0.pt", "data.pt"):
+                (ck / rel).parent.mkdir(parents=True, exist_ok=True)
+                (ck / rel).write_text("x")
+            (ck / "COMPLETE").write_text("")
+            removed = prune_to_hf(ck)
+            self.assertEqual(sorted(removed), ["actor/model_world_size_8_rank_0.pt", "actor/optim_world_size_8_rank_0.pt",
+                                               "critic", "data.pt"])
+            left = sorted(str(p.relative_to(ck)).replace("\\", "/") for p in ck.rglob("*") if p.is_file())
+            self.assertEqual(left, ["COMPLETE", "actor/huggingface/model.safetensors"])
+            bare = Path(tmp) / "global_step_75"
+            (bare / "critic").mkdir(parents=True)
+            self.assertEqual(prune_to_hf(bare), [])  # no actor/huggingface: left alone
+            self.assertTrue((bare / "critic").is_dir())
+
     def test_history_mode_from_the_config_pair(self):
         from omegaconf import OmegaConf
 
