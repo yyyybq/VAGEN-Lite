@@ -427,6 +427,142 @@ class ChainTest(unittest.TestCase):
             self.assertIn("**RL rd：**", md)
             self.assertIn("| 1-25 | 0.50（8） |", md)
 
+    def test_block_stats(self):
+        """Round 11: per 25 updates, training success, the share of tasks with both outcomes, reward, entropy, KL."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "rollout_data"
+            d.mkdir()
+            ep = lambda fam, task, ok, score: json.dumps({"task_type": fam, "scene_id": "s", "gts": {"t": task},  # noqa: E731
+                                                          "traj_success": ok, "score": score}) + "\n"
+            (d / "1.jsonl").write_text(ep("fov_inclusion", 1, True, 5.0) + ep("fov_inclusion", 1, False, -1.0)
+                                       + ep("equidistance", 2, True, 5.0) + ep("equidistance", 2, True, 4.0))
+            (d / "2.jsonl").write_text(ep("fov_inclusion", 1, False, -1.0) + ep("fov_inclusion", 1, False, -1.0))
+            (d / "26.jsonl").write_text(ep("fov_inclusion", 1, True, 5.0) + ep("fov_inclusion", 1, False, 0.0))
+            log = ("(Runner) step:1 - actor/entropy:np.float64(0.5) - actor/kl_loss:np.float64(0.001) - actor/ppo_kl:0.0\n"
+                   "step:2 - actor/entropy:0.3 - actor/kl_loss:0.003 - actor/ppo_kl:0.002\nstep:26 - actor/entropy:0.2\n")
+            got = T.block_stats(d, log)
+            self.assertEqual(list(got), ["1-25", "26-50"])
+            b = got["1-25"]
+            self.assertEqual((b["updates"], b["episodes"], b["tasks"]), (2, 6, 3))  # task 1 in update 1, 2 in 1, 1 in 2
+            self.assertEqual((b["success"], b["mixed_share"], b["reward_mean"]), (0.5, round(1 / 3, 4), round(11 / 6, 4)))
+            self.assertEqual((b["entropy"], b["kl"], b["ppo_kl"]), (0.4, 0.002, 0.001))
+            self.assertEqual(b["families"]["fov_inclusion"], {"success": 0.25, "episodes": 4})
+            self.assertEqual((got["26-50"]["mixed_share"], got["26-50"]["kl"]), (1.0, None))
+            self.assertEqual(T.block_stats(Path(tmp) / "missing"), {})
+
+    def test_reserve_tasks_signal_check_and_fallback(self):
+        """Round 11, the user's decisions: RL on the reserve tasks (checked against the SFT conversations and the depth
+        flags); at update 25 each run needs 40-60% training success and >= 30% mixed tasks, else the runs stop, move
+        to rl_attempts/ and RL restarts from the fallback SFT checkpoint; a second miss stops the chain."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def chain_for(root):
+            rl = {"history_mode": "concat", "critic_warmup": 10, "train_batch_size": 24, "save_freq": 50,
+                  "no_internal_val": True, "task_pool": "reserve", "rows": "/rl_rows/rows.jsonl", "exclude": "/flags.json",
+                  "signal_check": {"at": 25, "success_min": 0.4, "success_max": 0.6, "mixed_min": 0.3}}
+            chain = T.Chain({"tr": str(root), "sft_dir": str(root / "sft"), "endpoint": 50, "ppo_template": "/S0.yaml",
+                             "gs_root": "/ply", "sft_groups": {"formal": "sft_trajectories.jsonl"}, "rl": rl,
+                             "rl_runs": {"rs0": {"reward_preset": "S0"}, "rd": {"reward_preset": "dense"}},
+                             "rl_fallback_model": "/lf/model/checkpoint-924"}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_formal_e9", "model": "/lf/model/checkpoint-1386",
+                                                            "select_by": "val400", "scores": {"sft_formal_e9": 0.42}}
+            return chain
+
+        def jobs(chain, outcomes):
+            """job_sco stand-ins: the trainer of attempt k writes 25 updates of rollouts with outcome pattern
+            outcomes[k-1] (per task of 4 episodes), then the endpoint checkpoint."""
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            def status(run, job_dir="job"):
+                if job_dir == "job_renderer":
+                    return {"state": "RUNNING", "finished": False}
+                d = run / "rollout_data"
+                if not d.is_dir():
+                    d.mkdir(parents=True)
+                    pattern = outcomes[int(chain.state.get("rl_attempt", 1)) - 1]
+                    for step in range(1, 26):
+                        rows = [{"task_type": "fov_inclusion", "scene_id": "s", "gts": {"t": t}, "traj_success": ok,
+                                 "score": 5.0 if ok else -0.5} for t, oks in enumerate(pattern) for ok in oks]
+                        (d / f"{step}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+                    return {"state": "RUNNING", "finished": False}
+                (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                return {"state": "SUCCEEDED", "finished": True}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            return mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete)
+
+        memorised = [[True] * 4] * 4                                    # 100% success, no task with both outcomes
+        learnable = [[True, False, True, False], [True, True, False, False], [False] * 4, [True] * 4]  # 50%, 50% mixed
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = chain_for(root)
+            calls = []
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.rl_config()
+            rd = next(c for c in calls if c[c.index("--out") + 1] == str(root / "rl_rd"))
+            self.assertEqual(rd[rd.index("--rows") + 1], "/rl_rows/rows.jsonl")
+            self.assertEqual(rd[rd.index("--task-pool") + 1], "reserve")
+            self.assertEqual(rd[rd.index("--sft-trajectories") + 1], str(root / "sft" / "sft_trajectories.jsonl"))
+            self.assertEqual(rd[rd.index("--exclude") + 1], "/flags.json")
+            self.assertEqual(rd[rd.index("--model") + 1], str(Path("/lf/model/checkpoint-1386")))
+            calls.clear()
+            with jobs(chain, [memorised, learnable]):
+                chain.rl()
+            checks = chain.state["signal_checks"]
+            self.assertEqual([c["ok"] for c in checks], [False, True])
+            self.assertEqual(checks[0]["runs"]["rs0"]["success"], 1.0)
+            self.assertEqual(checks[0]["runs"]["rs0"]["mixed_share"], 0.0)
+            self.assertEqual((checks[1]["runs"]["rd"]["success"], checks[1]["runs"]["rd"]["mixed_share"]), (0.5, 0.5))
+            self.assertEqual(checks[1]["model"], str(Path("/lf/model/checkpoint-924")))
+            # the missed attempt is kept aside; the restart was configured from the fallback checkpoint
+            self.assertTrue((root / "rl_attempts" / "attempt1_rs0_run" / "rollout_data" / "25.jsonl").is_file())
+            self.assertEqual({c[c.index("--model") + 1] for c in calls}, {str(Path("/lf/model/checkpoint-924"))})
+            self.assertTrue((root / "rl_run_rd" / "checkpoints" / "global_step_50").is_dir())
+            md = T.render_markdown(chain.state)
+            self.assertIn("没通过", md)
+            self.assertIn("rs0 训练成功率 1.000、有成有败的题 0.000（不满足）", md)
+        with tempfile.TemporaryDirectory() as tmp:  # a second miss stops the chain
+            chain = chain_for(Path(tmp))
+            chain.sh = lambda args, **k: None
+            with jobs(chain, [memorised, memorised]):
+                with self.assertRaises(T.ChainError) as err:
+                    chain.rl()
+            self.assertIn("missed again", str(err.exception))
+            self.assertEqual([c["ok"] for c in chain.state["signal_checks"]], [False, False])
+
+    def test_variants_on_extra_sets_with_sft_epochs(self):
+        """Round 11: SFT epoch checkpoints evaluated on a set of training tasks only (plan eval extra_sets)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for step in (154, 308, 1386):
+                (root / "lf_formal" / "model" / f"checkpoint-{step}").mkdir(parents=True)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "sft_groups": {"formal": "x.jsonl"},
+                             "eval_sets": {"val400": str(root / "val400")},
+                             "eval": {"every": 50, "extra_sets": {"train200": str(root / "train200")},
+                                      "variants": [{"suffix": "", "sets": ["train200"],
+                                                    "models": ["sft_formal_e1", "sft_formal_e3"]}]}},
+                            sleep=lambda s: None)
+            got = {}
+            chain.eval_jobs = lambda step, j: got.update(j)
+            chain.tables = lambda: None
+            chain.evaluate()
+            self.assertEqual(got["train200__sft_formal_e1"][:3], (root / "train200", "sft_formal_e1",
+                                                                  str(root / "lf_formal" / "model" / "checkpoint-154")))
+            self.assertEqual(got["train200__sft_formal_e3"][2], str(root / "lf_formal" / "model" / "checkpoint-1386"))
+            self.assertFalse(any(k.startswith("train200__") and "rl" in k for k in got))  # only the listed models
+            self.assertFalse(any(k.startswith("val400__sft_formal") for k in got))
+            self.assertIsNone(chain.sft_epoch_model("sft_formal_e9"))
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)

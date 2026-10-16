@@ -38,6 +38,16 @@ checkpoint, "rl" = every RL checkpoint, or result names).  While RL runs, PROGRE
 success per task family in blocks of 25 updates (from the rollout dumps).  Plan "pool" picks the sco pool of
 every job the chain submits (default zoetrope; round 11 moved to h800 when zoetrope was full, the user's call).
 
+Round 11, second part (the user's decisions): the RL tasks must be ones SFT never trained on.  Plan "rl" options
+"rows" (a rows.jsonl with reserve rows, sft-frames --include-reserve), "task_pool" ("reserve") and "exclude" (the
+depth-check flags) reach rl-config, which also gets the SFT conversations and refuses any overlap.  Every 25
+updates PROGRESS.md shows per run the training success (all, per family), the share of tasks whose 4 episodes both
+succeed and fail ("mixed"), the total reward per episode, entropy and KL (block_stats).  Plan "rl"."signal_check"
+({"at": 25, "success_min", "success_max", "mixed_min"}) checks every run at that update; if any run misses, the
+runs are stopped and moved to TR/rl_attempts/, and RL restarts from plan "rl_fallback_model" (once); a second miss
+stops the chain.  Plan "eval"."extra_sets" ({name: folder}) are evaluation sets only variants use, and variant
+models may name SFT epoch checkpoints ("sft_<group>_e<k>").
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -172,6 +182,72 @@ def family_success(rollout_dir: Path, block: int = 25) -> Dict[str, Dict[str, An
     return out
 
 
+BLOCK_LOG_KEYS = {"entropy": "actor/entropy", "kl": "actor/kl_loss", "ppo_kl": "actor/ppo_kl"}
+
+
+def block_stats(rollout_dir: Path, log_text: str = "", block: int = 25) -> Dict[str, Dict[str, Any]]:
+    """Round 11, per block of ``block`` updates, from verl's rollout dumps (rollout_data/<update>.jsonl, one row per
+    episode) and the trainer's console log: training success (all and per family), the share of tasks whose episodes
+    in one update both succeed and fail ("mixed_share": the tasks a comparison within the group can learn from; a
+    task is its scene and its gts within one update), the total reward per episode ("reward_mean", the dumps' score)
+    and the means of the actor's entropy, its KL to the start model (actor/kl_loss) and the policy change per update
+    (actor/ppo_kl).  {"1-25": {"updates", "episodes", "tasks", "success", "mixed_share", "reward_mean", "entropy",
+    "kl", "ppo_kl", "families": {family: {"success", "episodes"}}}}."""
+    from collections import defaultdict
+
+    def label(step: int) -> str:
+        lo = (step - 1) // block * block + 1
+        return f"{lo}-{lo + block - 1}"
+
+    eps: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    steps: Dict[str, set] = defaultdict(set)
+    for f in Path(rollout_dir).glob("*.jsonl") if Path(rollout_dir).is_dir() else []:
+        try:
+            step = int(f.stem)
+        except ValueError:
+            continue
+        for line in f.read_text(errors="ignore").splitlines():
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if "traj_success" not in r:
+                continue
+            steps[label(step)].add(step)
+            eps[label(step)].append({"step": step, "success": float(bool(r["traj_success"])),
+                                     "score": float(r.get("score") or 0.0), "family": str(r.get("task_type")),
+                                     "task": r.get("task_id") or (r.get("scene_id"), json.dumps(r.get("gts"), sort_keys=True))})
+    logged: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+    for line in log_text.splitlines():
+        m = re.search(r"step:(\d+) - (.*)", line)
+        if not m:
+            continue
+        values = dict(_METRIC.findall(m.group(2)))
+        for name, key in BLOCK_LOG_KEYS.items():
+            if key in values:
+                logged[label(int(m.group(1)))][name].append(float(values[key]))
+    out = {}
+    for lab in sorted(eps, key=lambda x: int(x.split("-")[0])):
+        rows = eps[lab]
+        groups: Dict[Any, List[float]] = defaultdict(list)
+        fams: Dict[str, List[float]] = defaultdict(list)
+        for e in rows:
+            groups[(e["step"], e["task"] if isinstance(e["task"], str) else tuple(e["task"]))].append(e["success"])
+            fams[e["family"]].append(e["success"])
+        mixed = sum(1 for v in groups.values() if 0 < sum(v) < len(v))
+        mean = lambda v: round(sum(v) / len(v), 4) if v else None  # noqa: E731
+        out[lab] = {"updates": len(steps[lab]), "episodes": len(rows), "tasks": len(groups),
+                    "success": mean([e["success"] for e in rows]), "mixed_share": round(mixed / len(groups), 4),
+                    "reward_mean": mean([e["score"] for e in rows]),
+                    **{k: mean(logged[lab].get(k, [])) for k in BLOCK_LOG_KEYS},
+                    "families": {f: {"success": mean(v), "episodes": len(v)} for f, v in sorted(fams.items())}}
+    return out
+
+
+class SignalCheckFailed(Exception):
+    """An RL run missed the signal check (plan "rl"."signal_check")."""
+
+
 def epoch_checkpoints(model_dir: Path) -> List[Tuple[int, Path]]:
     """(epoch number, folder) of the per-epoch checkpoints LLaMA-Factory left in the model folder
     (checkpoint-<step>, one per epoch with save_strategy epoch), in training order."""
@@ -245,7 +321,10 @@ class Chain:
                 for name, spec in runs.items()}
 
     def sft_model(self) -> Path:
-        """The RL start model: the picked SFT checkpoint, else the (single) final SFT model."""
+        """The RL start model: the fallback after a missed signal check, else the picked SFT checkpoint, else the
+        (single) final SFT model."""
+        if self.state.get("rl_model_override"):
+            return Path(self.state["rl_model_override"])
         decision = self.state["steps"].get("pick_sft", {}).get("decision") or {}
         if decision.get("model"):
             return Path(decision["model"])
@@ -264,8 +343,12 @@ class Chain:
             for name, run in self.rl_runs().items():
                 logs = sorted((run["run_dir"] / "logs").glob("rl-*.log")) if (run["run_dir"] / "logs").is_dir() else []
                 if logs:
-                    runs_state[name] = rl_progress("\n".join(p.read_text(errors="ignore") for p in logs))
-                    runs_state[name]["family_success"] = family_success(run["run_dir"] / "rollout_data")
+                    text = "\n".join(p.read_text(errors="ignore") for p in logs)
+                    runs_state[name] = rl_progress(text)
+                    blocks = block_stats(run["run_dir"] / "rollout_data", text)
+                    runs_state[name]["blocks"] = {k: {x: y for x, y in v.items() if x != "families"}
+                                                  for k, v in blocks.items()}
+                    runs_state[name]["family_success"] = {k: v["families"] for k, v in blocks.items()}
             if runs_state:
                 self.state["rl_runs"] = runs_state
         else:
@@ -517,7 +600,7 @@ class Chain:
         for name, run in self.rl_runs().items():
             rl = run["rl"]
             args = [sys.executable, "-m", "data_gen.interiorgs_v10.training_prep", "rl-config",
-                    "--rows", str(self.sft_dir / "rows.jsonl"), "--ppo-template", self.plan["ppo_template"],
+                    "--rows", str(rl.get("rows") or self.sft_dir / "rows.jsonl"), "--ppo-template", self.plan["ppo_template"],
                     "--gs-root", self.plan["gs_root"], "--model", str(self.sft_model()),
                     "--name", self.plan.get("rl_name", "v10_rl_s0") + (f"_{name}" if name else ""),
                     "--run-root", str(run["run_dir"]),
@@ -533,13 +616,75 @@ class Chain:
                     args.append(flag)
             if self.plan.get("rl_runs"):
                 args += ["--reward-preset", run["reward_preset"]]
+            if rl.get("task_pool"):  # round 11: RL trains on tasks SFT never trained on, checked against the SFT data
+                args += ["--task-pool", str(rl["task_pool"]), "--sft-trajectories",
+                         *[str(self.sft_dir / t) for t in self.sft_groups().values()]]
+            if rl.get("exclude"):
+                args += ["--exclude", str(rl["exclude"])]
             self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
 
     def rl(self) -> None:
         if not self.plan.get("rl_runs"):
             self._ppo("rl", int(self.plan["endpoint"]))
             return
-        self._ppo_runs("rl", int(self.plan["endpoint"]))
+        while True:
+            try:
+                self._ppo_runs("rl", int(self.plan["endpoint"]))
+                return
+            except SignalCheckFailed as exc:
+                fallback = self.plan.get("rl_fallback_model")
+                if not fallback or self.state.get("rl_model_override"):
+                    raise ChainError(f"signal check missed again, RL stopped: {exc}") from None
+                attempt = int(self.state.get("rl_attempt", 1))
+                self.archive_rl_runs(f"attempt{attempt}")
+                self.state["rl_model_override"] = str(fallback)
+                self.state["rl_attempt"] = attempt + 1
+                self.mark("rl", note=f"signal check missed ({exc}); restarting from {fallback}")
+                self.rl_config()
+
+    def archive_rl_runs(self, tag: str) -> None:
+        """Move every run's config and run folder to TR/rl_attempts/<tag>_<name>_{config,run} (a restart starts clean)."""
+        dest = self.tr / "rl_attempts"
+        dest.mkdir(parents=True, exist_ok=True)
+        for name, run in self.rl_runs().items():
+            for key, kind in (("rl_dir", "config"), ("run_dir", "run")):
+                src = run[key]
+                if src.exists():
+                    target = dest / f"{tag}_{name or 'rl'}_{kind}"
+                    k = 2
+                    while target.exists():
+                        target, k = dest / f"{tag}_{name or 'rl'}_{kind}_{k}", k + 1
+                    src.rename(target)
+
+    def signal_check(self, runs: Dict[str, Dict[str, Any]]) -> None:
+        """Plan "rl"."signal_check": once every run has its first ``at`` updates, each run's training success must be
+        within [success_min, success_max] and its mixed share at least mixed_min; the result is kept in
+        state["signal_checks"]; a miss raises SignalCheckFailed.  Checked once per attempt."""
+        check = (self.plan.get("rl") or {}).get("signal_check")
+        if not check:
+            return
+        attempt = int(self.state.get("rl_attempt", 1))
+        if any(c.get("attempt") == attempt for c in self.state.get("signal_checks", [])):
+            return
+        at = int(check.get("at", 25))
+        stats = {}
+        for name, run in runs.items():
+            d = run["run_dir"] / "rollout_data"
+            have = {int(f.stem) for f in d.glob("*.jsonl") if f.stem.isdigit()} if d.is_dir() else set()
+            if not set(range(1, at + 1)) <= have:
+                return
+            b = block_stats(d, block=at)[f"1-{at}"]
+            ok = (float(check["success_min"]) <= b["success"] <= float(check["success_max"])
+                  and b["mixed_share"] >= float(check["mixed_min"]))
+            stats[name] = {k: b[k] for k in ("success", "mixed_share", "episodes", "tasks", "reward_mean")}
+            stats[name]["ok"] = bool(ok)
+        rec = {"attempt": attempt, "model": str(self.sft_model()), "at": at, "check": dict(check), "runs": stats,
+               "ok": all(s["ok"] for s in stats.values()), "utc": now()}
+        self.state.setdefault("signal_checks", []).append(rec)
+        self.save()
+        if not rec["ok"]:
+            raise SignalCheckFailed(f"update {at}, start {rec['model']}: " + "; ".join(
+                f"{n} success {s['success']:.3f} mixed {s['mixed_share']:.3f}" for n, s in stats.items()))
 
     def _ppo_runs(self, step: str, endpoint: int) -> None:
         """Round 11: every run of plan "rl_runs" at the same time (its render service on 1 card, PPO on 8), up to
@@ -580,6 +725,7 @@ class Chain:
                         ended[name] = f"renderer {st_r.get('state')}"
                         active.pop(name)
                 self.mark(step, jobs={**states, **{f"{n}/ended": v for n, v in ended.items()}})
+                self.signal_check(runs)
                 if active:
                     self.sleep(POLL_S)
         finally:
@@ -672,7 +818,8 @@ class Chain:
         single = len(sets) == 1 and not self.plan.get("eval_sets")  # the legacy layout: run names without the set
         jobs = {(name if single else f"{set_name}__{name}"): (eval_dir, name, model, prompt_format, opts)
                 for set_name, eval_dir in sets.items() for name, (model, prompt_format, opts) in models.items()}
-        jobs.update(self.variant_jobs(ev, sets, models, rl_names))
+        extra = {k: Path(v) for k, v in (ev.get("extra_sets") or {}).items()}  # round 11: sets only variants use
+        jobs.update(self.variant_jobs(ev, {**sets, **extra}, models, rl_names))
         self.eval_jobs("evaluate", jobs)
         self.tables()
 
@@ -697,12 +844,23 @@ class Chain:
                     model, prompt_format, _ = models[name]
                 elif pick.get("best") == name:
                     model, prompt_format = pick["model"], None
+                elif self.sft_epoch_model(name) is not None:  # round 11: an SFT epoch checkpoint by result name
+                    model, prompt_format = str(self.sft_epoch_model(name)), None
                 else:
                     raise ChainError(f"variant {v.get('suffix')}: no model named {name}")
                 for set_name in v.get("sets") or list(sets):
                     result = name + v["suffix"]
                     jobs[f"{set_name}__{result}"] = (sets[set_name], result, model, prompt_format, list(v.get("options") or []))
         return jobs
+
+    def sft_epoch_model(self, name: str) -> Optional[Path]:
+        """The checkpoint of an SFT epoch by its result name ("sft_<group>_e<k>", "sft_e<k>" for the single group)."""
+        for group in self.sft_groups():
+            prefix = f"sft_{group}_e" if group else "sft_e"
+            if name.startswith(prefix) and name[len(prefix):].isdigit():
+                found = dict(epoch_checkpoints(self.lf_dir(group) / "model"))
+                return found.get(int(name[len(prefix):]))
+        return None
 
     # -------------------------------------------------------------- driver
     def run(self) -> int:
@@ -768,6 +926,15 @@ def render_markdown(state: Dict[str, Any]) -> str:
     for name, rl in (state.get("rl_runs") or {}).items():
         lines += ["", f"**RL {name}：** 已完成 {rl.get('last_update')} 次更新；最近一次更新的训练成功率 {rl.get('train_success_last')}，"
                       f"最近 10 次平均 {rl.get('train_success_mean_last10')}；每次更新约 {rl.get('seconds_per_update_mean_last10')} 秒"]
+        blocks = rl.get("blocks") or {}
+        if blocks:
+            fmt = lambda v, p=3: "—" if v is None else f"{v:.{p}f}"  # noqa: E731
+            lines += ["", "| 更新 | 训练成功率 | 有成有败的题 | 每条轨迹的总奖励 | 熵 | KL（对起点模型） | 每次更新的策略变化 |",
+                      "| --- | --- | --- | --- | --- | --- | --- |"]
+            for label, b in blocks.items():
+                lines.append(f"| {label}（{b.get('updates')} 次） | {fmt(b.get('success'))} | {fmt(b.get('mixed_share'))}"
+                             f"（{b.get('tasks')} 题） | {fmt(b.get('reward_mean'))} | {fmt(b.get('entropy'))} | "
+                             f"{fmt(b.get('kl'), 5)} | {fmt(b.get('ppo_kl'), 5)} |")
         fam = rl.get("family_success") or {}
         if fam:
             families = sorted({f for b in fam.values() for f in b})
@@ -775,6 +942,11 @@ def render_markdown(state: Dict[str, Any]) -> str:
             for label, cells in fam.items():
                 lines.append(f"| {label} | " + " | ".join(
                     f"{cells[f]['success']:.2f}（{cells[f]['episodes']}）" if f in cells else "—" for f in families) + " |")
+    for c in state.get("signal_checks") or []:
+        lines += ["", f"**第 {c['attempt']} 次 RL 的信号检查（第 {c['at']} 次更新，起点 {c['model']}）：**"
+                      f"{'通过' if c['ok'] else '没通过'}；" + "；".join(
+                          f"{n} 训练成功率 {s['success']:.3f}、有成有败的题 {s['mixed_share']:.3f}"
+                          f"{'' if s['ok'] else '（不满足）'}" for n, s in c["runs"].items())]
     rl = state.get("rl") or {}
     if rl:
         val = "，".join(f"{s} 次：{v:.3f}" for s, v in rl.get("val_success") or [])
