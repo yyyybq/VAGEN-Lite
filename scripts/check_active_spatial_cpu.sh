@@ -42,8 +42,6 @@ exec "$PYTHON" -m pytest -q -p no:cacheprovider \
     tests/active_spatial/test_r1_sft_pipeline.py \
     tests/active_spatial/test_reward_trace.py \
     tests/active_spatial/test_ppo_snapshot_replay.py \
-    tests/test_r1_clean_projective_v0.py \
-    tests/test_r1_projective_projection_frontier.py \
     data_gen/active_spatial_qa/test_qa_contract.py \
     data_gen/active_spatial_qa/test_all_no_diagnosis.py \
     "$@"

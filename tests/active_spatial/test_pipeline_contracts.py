@@ -277,7 +277,7 @@ def test_actual_launcher_materializes_disjoint_enumerated_manifests(tmp_path, ne
     target.update(train_size=6, test_size=2)
     yaml_path = tmp_path / "input.yaml"
     yaml_path.write_text(yaml.safe_dump(config))
-    launcher = (root / "examples/train/active_spatial/run_experiment.sh").read_text()
+    launcher = (root / "archive/experiments_legacy/launchers/run_experiment.sh").read_text()  # archived launcher (cleanup 2026-10); replace when training/ gets its own launcher
     # Execute only the real YAML generation heredoc, never Ray/GPU/cache setup.
     body = launcher.split("$PYTHON - <<PYEOF\n", 1)[1].split("\nPYEOF", 1)[0]
     env = dict(os.environ)
