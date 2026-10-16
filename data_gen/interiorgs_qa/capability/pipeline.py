@@ -25,6 +25,10 @@ META = Path('/mnt/umm/users/yinbaiqiao/InteriorGS_meta')
 GROUPS = {'absolute_positioning':'距离估计', 'equidistance':'远近比较',
           'projective_relations':'视角方向', 'occlusion_alignment':'遮挡判断',
           'fov_inclusion':'画面边缘裁切'}
+SIZE_EXCLUSION_ZH = {
+    'size_comparison_not_uniquely_bound': '较大、较小等描述无法在本任务场景中绑定唯一的真实同类比较对象。',
+    'size_comparison_not_identifiable_with_real_depth': '较大、较小等描述所需的比较对象未同时通过几何和实际深度可辨认检查。',
+}
 
 
 def dump(path, data):
@@ -126,6 +130,7 @@ def make_question(task, draft, records, states, dest):
                       'environment_success':records[-1]['measurement']['metric'].get('success'),
                       'formal_role_answer_key':draft['answer_key'],
                       'mentioned_object_roles':wording.get('mentioned_object_roles',['a','b']),
+                      'size_comparison_references':records[-1].get('size_comparison_references',{}),
                       'definition_notes':draft.get('extra',{}),
                       'image_order':'first identifies target; second is judged' if len(images)==2 else 'current view'}}
 
@@ -162,7 +167,7 @@ def finalize(root, geometry, dest):
     geometry_rows=read_rows(geometry/'geometry.jsonl')
     if len(geometry_rows)!=len(states) or {r['state_id'] for r in geometry_rows}!=set(states):
         raise ValueError('geometry must bind every source state exactly once')
-    scenes, boxes, accepted, ledger = {}, {}, {}, []
+    scenes, boxes, size_bindings, accepted, ledger = {}, {}, {}, {}, []
     for n,rec in enumerate(geometry_rows):
         task=tasks[rec['parent_task_id']]; state=states[rec['state_id']]; sid=state['scene_id']
         reason=None
@@ -176,6 +181,9 @@ def finalize(root, geometry, dest):
                 raise ValueError('render evidence changed or incomplete: '+rec['view_key'])
             if sid not in scenes:
                 scenes[sid]=load_task_scene(task,META); boxes[sid]=evidence.load_boxes(META/sid)
+            if task['task_id'] not in size_bindings:
+                size_bindings[task['task_id']]=evidence.bind_size_references(task,scenes[sid])
+            size_refs=size_bindings[task['task_id']]
             with np.load(render['depth']) as d:
                 wide=None
                 if render.get('wide_depth'):
@@ -184,12 +192,16 @@ def finalize(root, geometry, dest):
                     rec['wide_center_comparison']=report
                     if not consistent:
                         raise ValueError('wide diagnostic and native depth disagree: '+rec['view_key'])
-                stat,masks=evidence.analyse(task,np.array(state['c2w']),d['depth'],d['alpha'],face_occluders_for(scenes[sid]),boxes[sid],wide)
+                stat,masks=evidence.analyse(task,np.array(state['c2w']),d['depth'],d['alpha'],face_occluders_for(scenes[sid]),boxes[sid],wide,
+                                            size_references=size_refs)
             rec['render']=render; rec['depth_evidence']=stat
+            rec['size_comparison_references']=size_refs
+            rec['size_reference_exclusions']=[{'target_slot':slot,'reason':why,'reason_zh':SIZE_EXCLUSION_ZH[why]}
+                for slot in size_refs if (why:=evidence.size_reference_failure(task,stat,size_refs,slots={slot}))]
             targets=rec['measurement']['objects']
-            good=all(stat.get(o['id'],{}).get('visible') for o in targets) and evidence.visible_references(task,stat)
+            good=all(stat.get(o['id'],{}).get('visible') for o in targets) and evidence.visible_references(task,stat,size_references=size_refs)
             if rec['drafts'] and not good:
-                rec['drafts']=[]; reason='target_or_reference_not_identifiable_with_real_depth'
+                rec['drafts']=[]; reason=evidence.size_reference_failure(task,stat,size_refs) or 'target_or_reference_not_identifiable_with_real_depth'
             if rec['drafts'] and task['task_type']=='fov_inclusion':
                 ok,reason=evidence.fov_depth_agrees(targets,stat,rec['drafts'][0]['extra']['full_flags'])
                 if not ok: rec['drafts']=[]
@@ -198,17 +210,20 @@ def finalize(root, geometry, dest):
             if task['task_type']=='occlusion_alignment':
                 key,ev,why=evidence.occlusion_class(task,rec['measurement'],stat,masks)
                 bslot=1
-                if not evidence.visible_references(task,stat,slots={bslot}): key=None; why='occluder_reference_not_visible'
+                if not evidence.visible_references(task,stat,slots={bslot},size_references=size_refs):
+                    key=None; why=evidence.size_reference_failure(task,stat,size_refs,slots={bslot}) or 'occluder_reference_not_visible'
                 rec['occlusion_state_key']=key; rec['occlusion_evidence']=ev
                 rec['occlusion_reason']=why
             identifying = (task['task_type']=='occlusion_alignment' and stat.get(targets[0]['id'],{}).get('visible')
-                           and evidence.visible_references(task,stat,slots={0}))
+                           and evidence.visible_references(task,stat,slots={0},size_references=size_refs))
             if rec['drafts'] or rec.get('occlusion_state_key') or identifying:
                 accepted[rec['state_id']]=rec
             if not rec['drafts'] and not reason: reason=(rec['reasons'] or ['no_single_image_draft'])[0]
         ledger.append({'state_id':state['state_id'],'scene_id':sid,'task_type':task['task_type'],
                        'single_image_drafts':len(rec['drafts']) if rec.get('render') else 0,
                        'occlusion_category':rec.get('occlusion_state_key'), 'first_exclusion':reason,
+                       'first_exclusion_zh':SIZE_EXCLUSION_ZH.get(reason),
+                       'size_reference_exclusions':rec.get('size_reference_exclusions',[]),
                        'geometry_reasons':rec['reasons'], 'occlusion_exclusion':rec.get('occlusion_reason')})
         if n%100==0: print(json.dumps({'depth_checked_states':n+1,'evidence_states':len(accepted)}),flush=True)
     bank=[]; seen=set()
@@ -229,7 +244,8 @@ def finalize(root, geometry, dest):
             if (s['parent_task_id']==task['task_id'] and len(actions)<len(current_actions)
                 and current_actions[:len(actions)]==actions and other['view_key']!=rec['view_key']
                 and other['depth_evidence'].get(aid,{}).get('visible')
-                and evidence.visible_references(task,other['depth_evidence'],slots={0})):
+                and evidence.visible_references(task,other['depth_evidence'],slots={0},
+                                                size_references=size_bindings[task['task_id']])):
                 refs.append((len(actions),otherid,other))
         if not refs: continue
         _,firstid,first=min(refs)

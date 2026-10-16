@@ -14,6 +14,7 @@ import numpy as np
 from data_gen.interiorgs_qa.geom import OBB
 from data_gen.interiorgs_qa.visible import object_view, visible_mask
 from data_gen.interiorgs_v10.depth_check import depth_hidden
+from data_gen.interiorgs_v10.referring import category_matches, display_label
 from vagen.envs.active_spatial import target_visibility as TV
 
 
@@ -42,7 +43,7 @@ def face_with_depth(obj, pose, K, depth, alpha, occ):
     return {'rule': rule, 'with_depth': checked, 'hidden_samples': int(extra.sum())}
 
 
-def analyse(task, pose, depth, alpha, occ, boxes, wide=None):
+def analyse(task, pose, depth, alpha, occ, boxes, wide=None, *, size_references=None):
     pose = np.asarray(pose, float)
     K, width, height = TV.item_camera(task)
     if (width, height) != (256, 256) or depth.shape != (256, 256):
@@ -50,7 +51,7 @@ def analyse(task, pose, depth, alpha, occ, boxes, wide=None):
     if not np.isfinite(depth).all() or not np.isfinite(alpha).all():
         raise ValueError('invalid rendered depth/alpha')
     targets = task['target_object']['objects']
-    refs = [r for _, r in all_target_references(task)]
+    refs = [r for _, r in all_target_references(task, size_references)]
     out, masks = {}, {}
     for obj in targets + refs:
         oid = str(obj['id'])
@@ -88,15 +89,67 @@ def analyse(task, pose, depth, alpha, occ, boxes, wide=None):
     return out, masks
 
 
-def all_target_references(task):
+def bind_size_references(task, scene):
+    """Bind a size description to the unique real comparison instance, without editing the task.
+
+    A missing/ambiguous binding remains None so downstream checks fail closed.
+    The existing referring generator uses the same category-matching function
+    and only creates size descriptions when exactly two instances match.
+    """
+    result = {}
+    for slot, target in enumerate(task['target_object']['objects']):
+        if target.get('ref_method') != 'size':
+            continue
+        result[slot] = None
+        if str(getattr(scene, 'scene_id', '')) != str(task.get('scene_id', '')):
+            continue
+        category = display_label(str(target.get('label', '')))
+        matches = [obj for obj in scene.objects
+                   if category_matches(category, display_label(str(obj.label)))]
+        own = [obj for obj in matches if str(obj.id) == str(target['id'])]
+        other = [obj for obj in matches if str(obj.id) != str(target['id'])]
+        if len(matches) != 2 or len(own) != 1 or len(other) != 1:
+            continue
+        if not (np.allclose(own[0].aabb_min, target['bbox_min'], atol=1e-6, rtol=0)
+                and np.allclose(own[0].aabb_max, target['bbox_max'], atol=1e-6, rtol=0)):
+            continue
+        obj = other[0]
+        if not (np.isfinite(obj.aabb_min).all() and np.isfinite(obj.aabb_max).all()
+                and np.all(np.asarray(obj.aabb_max) > np.asarray(obj.aabb_min))):
+            continue
+        result[slot] = {'id': str(obj.id), 'label': str(obj.label),
+                        'bbox_min': np.asarray(obj.aabb_min, float).tolist(),
+                        'bbox_max': np.asarray(obj.aabb_max, float).tolist(),
+                        'comparison_for_target_id': str(target['id']),
+                        'source_scene_id': str(scene.scene_id)}
+    return result
+
+
+def size_reference_failure(task, stats, size_references=None, slots=None):
+    for slot, obj in enumerate(task['target_object']['objects']):
+        if obj.get('ref_method') != 'size' or (slots is not None and slot not in slots):
+            continue
+        comparison = (size_references or {}).get(slot)
+        if comparison is None:
+            return 'size_comparison_not_uniquely_bound'
+        if not stats.get(str(comparison['id']), {}).get('visible', False):
+            return 'size_comparison_not_identifiable_with_real_depth'
+    return None
+
+
+def all_target_references(task, size_references=None):
     """Include the hidden target's identifying anchor, not only success-required B."""
-    return [(slot, obj["ref_anchor"]) for slot, obj in enumerate(task["target_object"]["objects"])
+    refs = [(slot, obj["ref_anchor"]) for slot, obj in enumerate(task["target_object"]["objects"])
             if isinstance(obj.get("ref_anchor"), dict) and "bbox_min" in obj["ref_anchor"]
             and "bbox_max" in obj["ref_anchor"]]
+    refs.extend((slot, obj) for slot, obj in (size_references or {}).items() if obj is not None)
+    return refs
 
 
-def visible_references(task, stats, slots=None):
-    for slot, obj in all_target_references(task):
+def visible_references(task, stats, slots=None, *, size_references=None):
+    if size_reference_failure(task, stats, size_references, slots) is not None:
+        return False
+    for slot, obj in all_target_references(task, size_references):
         if slots is None or slot in slots:
             if not stats.get(str(obj['id']), {}).get('visible', False):
                 return False
