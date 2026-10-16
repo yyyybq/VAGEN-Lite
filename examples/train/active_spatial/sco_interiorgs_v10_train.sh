@@ -25,7 +25,9 @@ WORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite
 ENV_ROOT=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
 PY=${ENV_ROOT}/bin/python
 GS_ROOT=/mnt/umm/users/yinbaiqiao/InteriorGS_ply
-VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_20261007/torch_extensions/gsplat_cuda
+# the gsplat build validated on 2026-10-07 (dense-score pilot), kept outside the code directory since round 11: the
+# checkout's experiment folders get moved into archive/ by the directory clean-up
+VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/gsplat_cuda_validated_20261007
 mkdir -p "${RUN}/logs"
 OWNER=$(stat -c %u:%g "${RUN}")
 # the exit record is written before ownership is handed back, so it is not left owned by root

@@ -36,6 +36,15 @@ class JobScoTest(unittest.TestCase):
         self.assertIn("\nWORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite\n", script)
         self.assertNotIn("VAGEN-Lite-r4", script)
 
+    def test_gsplat_build_outside_the_checkout(self):
+        """Round 11: the validated gsplat build every render service copies lived in an experiment folder of the
+        checkout, which the directory clean-up moved into archive/ (every RL and evaluation job would have
+        failed at start); it now lives outside the checkout."""
+        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        line = next(l for l in script.splitlines() if l.startswith("VALIDATED_GSPLAT_CACHE="))
+        self.assertEqual(line, "VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/gsplat_cuda_validated_20261007")
+        self.assertFalse(line.split("=", 1)[1].startswith(J.WORKTREE + "/"))
+
     def test_outputs_outside_run_are_handed_back(self):
         """Round 8: the SFT model (LF/model) and evaluation results (EVAL/NAME) were left root-only (mode 600)."""
         script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
