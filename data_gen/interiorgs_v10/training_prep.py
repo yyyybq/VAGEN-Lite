@@ -25,7 +25,7 @@ import argparse
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -63,6 +63,106 @@ def sft_frames(rows: Sequence[Dict[str, Any]], policy: Dict[str, Any]) -> List[D
     return out
 
 
+def plan_frames(rows: Sequence[Dict[str, Any]], policy: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Round 11: the frames of the rows' ``blocked_plan`` paths (the escaped pose, every turn start, the end), as
+    states ``x<k>`` of the task, in the render job's format."""
+    from .pilot import camera_item
+    from .release import plan_frame_states
+
+    out = []
+    for row in rows:
+        plan = row.get("blocked_plan")
+        if not plan:
+            continue
+        for k in plan_frame_states(plan, policy):
+            out.append({"frame_id": f"{row['task_id']}__x{k}", "kind": "sft", "task_id": row["task_id"],
+                        "scene_id": row["scene_id"], "state_id": f"x{k}", "c2w": plan["poses"][k],
+                        "camera_item": camera_item(row), "overlay": {}})
+    return out
+
+
+def _plan_scene(job: Tuple[str, str, List[Dict[str, Any]], str, int]) -> List[Tuple[str, Any, bool]]:
+    """(task_id, plan or None, selected) for the rows of one scene (a worker of ``plan_blocked``)."""
+    from .admission import load_policy
+    from .release import blocked_selected, plan_blocked_escape
+    from .scene import load_scene
+
+    scenes_root, scene_id, rows, wall_model, max_actions = job
+    policy = load_policy()
+    selected = [r for r in rows if blocked_selected(r, policy)]
+    if not selected:
+        return [(r["task_id"], None, False) for r in rows]
+    scene = load_scene(Path(scenes_root) / scene_id, scene_id, wall_model=wall_model)
+    out = []
+    for r in rows:
+        if not blocked_selected(r, policy):
+            out.append((r["task_id"], None, False))
+            continue
+        out.append((r["task_id"], plan_blocked_escape(r, policy, scene, max_actions=max_actions), True))
+    return out
+
+
+def plan_blocked(rows: Sequence[Dict[str, Any]], scenes_root: Path, wall_model: str, max_actions: int,
+                 workers: int = 1) -> Dict[str, Any]:
+    """Round 11: ``release.plan_blocked_escape`` for every row, scene by scene (``workers`` processes).  Returns
+    {"plans": {task_id: plan}, "selected": n, "no_candidate": n}."""
+    by_scene: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        by_scene.setdefault(str(r["scene_id"]), []).append(r)
+    jobs = [(str(scenes_root), sid, rs, wall_model, int(max_actions)) for sid, rs in sorted(by_scene.items())]
+    if workers > 1:
+        import multiprocessing as mp
+
+        with mp.get_context("fork").Pool(workers) as pool:
+            results = pool.map(_plan_scene, jobs, chunksize=1)
+    else:
+        results = [_plan_scene(j) for j in jobs]
+    plans, selected, missing = {}, 0, 0
+    for res in results:
+        for tid, plan, sel in res:
+            selected += int(sel)
+            if plan is not None:
+                plans[tid] = plan
+            elif sel:
+                missing += 1
+    return {"plans": plans, "selected": selected, "no_candidate": missing}
+
+
+def _template_env(env_template: Optional[str]) -> Dict[str, Any]:
+    import yaml
+
+    template = Path(env_template or Path(__file__).with_name("configs") / "rl_env_v10_S0.yaml")
+    return dict(yaml.safe_load(template.read_text())["envs"][0]["config"])
+
+
+def blocked_report(rows: Sequence[Dict[str, Any]], policy: Dict[str, Any]) -> Dict[str, Any]:
+    """Counts of the inserted blocked turns of the SFT rows and their share of all assistant actions."""
+    from .release import conversation_actions
+
+    plans = [r["blocked_plan"] for r in rows if r.get("blocked_plan")]
+    actions = sum(conversation_actions(r, policy) for r in rows)
+    return {"blocked_turns": len(plans), "conversations": len(rows), "assistant_actions": actions,
+            "blocked_action_share": round(len(plans) / actions, 5) if actions else 0.0,
+            "blocked_moves": dict(Counter(p["move"] for p in plans)),
+            "escape_moves": dict(Counter(p["escape"] for p in plans)),
+            "escape_is_opposite": sum(1 for p in plans if p["escape"] == {"move_forward": "move_backward",
+                                                                           "move_backward": "move_forward",
+                                                                           "move_left": "move_right",
+                                                                           "move_right": "move_left"}[p["move"]]),
+            "blocked_by": dict(Counter(p["blocked_by"].split(" by ", 1)[-1] if p["blocked_by"].endswith("wall")
+                                       else "object" for p in plans)),
+            "path_lengths": dict(Counter(len(p["path"]) for p in plans)),
+            "by_family": dict(Counter(r["task_type"] for r in rows if r.get("blocked_plan")))}
+
+
+def check_blocked_share(report: Dict[str, Any], policy: Dict[str, Any]) -> None:
+    """Decision 5 of round 11: the blocked moves stay at most ``blocked_turn_max_action_share`` of all SFT actions."""
+    cap = float(policy["sft"]["export"].get("blocked_turn_max_action_share", 1.0))
+    if report["blocked_action_share"] > cap:
+        raise SystemExit(f"blocked moves are {report['blocked_action_share']:.2%} of the SFT actions, above the "
+                         f"{cap:.0%} cap: lower sft.export.blocked_turn_share")
+
+
 def cmd_sft_frames(args: argparse.Namespace) -> None:
     from .admission import load_policy
     from .release import finalize_task_row, registry_row, split_lookup
@@ -95,7 +195,18 @@ def cmd_sft_frames(args: argparse.Namespace) -> None:
             rows.append(dict(finalize_task_row(raw, split), reserve=(kind == "reserve")))
     if args.limit:
         rows = rows[: args.limit]
-    frames = sft_frames(rows, policy)
+    exp = policy["sft"]["export"]
+    planned = None
+    if exp.get("blocked_turn_style", "continue") == "escape" and getattr(args, "scenes_root", None):
+        # round 11: the blocked turns are planned here, so the frames of their new paths get rendered
+        env = _template_env(getattr(args, "env_template", None))
+        planned = plan_blocked([r for r in rows if not r.get("reserve")], Path(args.scenes_root),
+                               env.get("wall_model", "room_edges"), int(env.get("max_episode_steps", 12)),
+                               int(getattr(args, "workers", 1) or 1))
+        for r in rows:
+            if r["task_id"] in planned["plans"]:
+                r["blocked_plan"] = planned["plans"][r["task_id"]]
+    frames = sft_frames(rows, policy) + plan_frames(rows, policy)
     _write_jsonl(out / "rows.jsonl", rows)
     _write_jsonl(out / "frames.jsonl", frames)
     # RL trains on the formal tasks of train (the reserve tasks are SFT-only)
@@ -106,8 +217,14 @@ def cmd_sft_frames(args: argparse.Namespace) -> None:
               "by_family": dict(Counter(r["task_type"] for r in rows)), "frames": len(frames),
               "scenes": len({r["scene_id"] for r in rows}), "skipped": dict(skipped),
               "reserve": sum(1 for r in rows if r.get("reserve")), "excluded": len(excluded)}
+    if planned is not None:
+        report["blocked"] = dict(blocked_report(rows, policy), selected=planned["selected"],
+                                 selected_without_escape=planned["no_candidate"],
+                                 share=exp.get("blocked_turn_share"), seed=exp.get("blocked_turn_seed"))
     (out / "sft_frames_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
+    if planned is not None:
+        check_blocked_share(report["blocked"], policy)
 
 
 def cmd_sft_records(args: argparse.Namespace) -> None:
@@ -123,8 +240,11 @@ def cmd_sft_records(args: argparse.Namespace) -> None:
         path = d / "frames" / "plain" / safe_name(f["frame_id"])
         if path.is_file():
             images[f"{f['task_id']}:{f['state_id']}"] = str(path)
-    # round 10: the scene's collision detector (the env's wall model) for the inserted blocked turns
+    # round 10 (blocked_turn_style "continue"): the scene's collision detector (the env's wall model) for the
+    # inserted blocked turns; round 11 ("escape") plans them in sft-frames, so the rows carry them
     scenes_root = Path(args.scenes_root) if getattr(args, "scenes_root", None) else None
+    if policy["sft"]["export"].get("blocked_turn_style", "continue") != "continue":
+        scenes_root = None
     wall_model = "room_edges"
     if scenes_root is not None:
         import yaml
@@ -162,8 +282,12 @@ def cmd_sft_records(args: argparse.Namespace) -> None:
               "blocked_turns": sum(1 for r in records if r.get("blocked_insert")),
               "blocked_moves": dict(Counter(r["blocked_insert"]["move"] for r in records if r.get("blocked_insert"))),
               "wall_model": wall_model if scenes_root is not None else None}
+    actions = sum(int(r["total_actions"]) for r in records)
+    report["assistant_actions"] = actions
+    report["blocked_action_share"] = round(report["blocked_turns"] / actions, 5) if actions else 0.0
     (d / "sft_records_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
+    check_blocked_share(report, policy)  # round 11: at most 3% of the SFT actions are blocked moves
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +478,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     f.add_argument("--include-reserve", action="store_true",
                    help="round 10: also the reserve tasks (tasks_reserve.jsonl), marked reserve, for the larger SFT set")
     f.add_argument("--exclude", default=None, help="depth_check_summary.json: its flagged tasks are left out")
+    f.add_argument("--scenes-root", default=None,
+                   help="round 11: InteriorGS scene folders; with policy blocked_turn_style \"escape\" the inserted "
+                        "blocked turns (blocked move, escape, new shortest path) are planned here and their frames listed")
+    f.add_argument("--env-template", default=None, help="the RL env YAML (wall model, action limit) for the planning")
+    f.add_argument("--workers", type=int, default=1, help="processes for the planning (one scene each)")
     f.add_argument("--out", required=True)
     r = sub.add_parser("sft-records")
     r.add_argument("--dir", required=True)

@@ -316,27 +316,184 @@ def _user_turn(desc: str, first: bool, policy: Mapping[str, Any], pose: Any = No
 # ("0 of 1 actions executed; blocked: move_forward (blocked by wall)."), and the shortest path goes on unchanged
 # (a blocked move does not move the camera).  The move and the turn are drawn per task from a fixed seed.
 MOVES = ("move_forward", "move_backward", "move_left", "move_right")
+INVERSE = {"move_forward": "move_backward", "move_backward": "move_forward", "move_left": "move_right",
+           "move_right": "move_left", "turn_left": "turn_right", "turn_right": "turn_left"}
 _BLOCKED_FEEDBACK_RE = re.compile(r"\d+ of \d+ actions executed; blocked: [^\n]*\.")
+
+
+def step_pose(c2w: Any, action: str) -> np.ndarray:
+    """The camera pose after one action, as the env's ViewManipulator computes it."""
+    from vagen.envs.active_spatial.utils import ViewManipulator
+
+    from .contract import STEP_ROTATION_DEG, STEP_TRANSLATION_M
+
+    vm = ViewManipulator(step_translation=STEP_TRANSLATION_M, step_rotation_deg=STEP_ROTATION_DEG, world_up_axis="Z")
+    vm.reset(np.asarray(c2w, dtype=np.float64))
+    vm.step(action)
+    return vm.get_pose()
+
+
+def blocked_move_results(detector: Any, c2w: Any) -> List[Tuple[str, Any]]:
+    """(move, CollisionResult) for every move the env's collision detector blocks from this pose (``detector``:
+    the scene's, with the env's wall model)."""
+    c2w = np.asarray(c2w, dtype=np.float64)
+    out = []
+    for move in MOVES:
+        res = detector.check_collision(step_pose(c2w, move)[:3, 3], previous_position=c2w[:3, 3])
+        if res.has_collision:
+            out.append((move, res))
+    return out
 
 
 def blocked_moves(detector: Any, c2w: Any) -> List[Tuple[str, str]]:
     """(move, collision text) for every move the env's collision detector blocks from this pose, computed with
     the env's own ViewManipulator and CollisionDetector (``detector``: the scene's, with the env's wall model)."""
     from vagen.envs.active_spatial.env import collision_text
-    from vagen.envs.active_spatial.utils import ViewManipulator
 
-    from .contract import STEP_ROTATION_DEG, STEP_TRANSLATION_M
+    return [(move, collision_text(res)) for move, res in blocked_move_results(detector, c2w)]
 
+
+def obstacle_distance(detector: Any, result: Any, position: Any) -> Optional[float]:
+    """Distance from ``position`` to the obstacle that blocked a move: the (camera-radius expanded) box of the object
+    or the wall segment named in the CollisionResult; None for other collisions (floor, ceiling)."""
+    pos = np.asarray(position, dtype=np.float64)
+    details = getattr(result, "details", None) or {}
+    if result.collision_type == "object":
+        oid = str(details.get("object_id", ""))
+        boxes = [b for b in getattr(detector, "object_boxes", []) if str(getattr(b, "ins_id", "")) == oid]
+        return min(float(b.distance_to_point(pos)) for b in boxes) if boxes else None
+    if result.collision_type == "wall" and "wall_start" in details and "wall_end" in details:
+        a, b = np.asarray(details["wall_start"], float)[:2], np.asarray(details["wall_end"], float)[:2]
+        q = pos[:2]
+        ab = b - a
+        t = 0.0 if float(ab @ ab) == 0.0 else float(np.clip((q - a) @ ab / float(ab @ ab), 0.0, 1.0))
+        return float(np.linalg.norm(q - (a + t * ab)))
+    return None
+
+
+def escape_moves(detector: Any, c2w: Any, result: Any) -> List[Tuple[str, float]]:
+    """Round 11: the moves that leave a blocking obstacle -- not blocked themselves and ending farther from the
+    obstacle than the start -- with the distance gained, largest gain first (ties in MOVES order)."""
     c2w = np.asarray(c2w, dtype=np.float64)
+    d0 = obstacle_distance(detector, result, c2w[:3, 3])
+    if d0 is None:
+        return []
     out = []
     for move in MOVES:
-        vm = ViewManipulator(step_translation=STEP_TRANSLATION_M, step_rotation_deg=STEP_ROTATION_DEG, world_up_axis="Z")
-        vm.reset(c2w)
-        vm.step(move)
-        res = detector.check_collision(vm.get_pose()[:3, 3], previous_position=c2w[:3, 3])
-        if res.has_collision:
-            out.append((move, collision_text(res)))
-    return out
+        nxt = step_pose(c2w, move)
+        if detector.check_collision(nxt[:3, 3], previous_position=c2w[:3, 3]).has_collision:
+            continue
+        d1 = obstacle_distance(detector, result, nxt[:3, 3])
+        if d1 is not None and d1 > d0 + 1e-6:
+            out.append((move, round(d1 - d0, 6)))
+    return sorted(out, key=lambda x: (-x[1], MOVES.index(x[0])))
+
+
+def env_success_oracle(raw_row: Mapping[str, Any], scene: Any) -> Any:
+    """The env's success rule for a task row (the canonical metric and the visibility rules, occluders from the
+    scene's detector with the env's wall model), as a difficulty.SuccessOracle for the shortest-path search."""
+    from vagen.envs.active_spatial import target_visibility as TV
+
+    from .difficulty import SuccessOracle
+
+    occ = TV.OccluderSet.from_detector(scene.detector)
+    item = dict(raw_row)
+
+    def exact(c2w: Any) -> bool:
+        return bool(TV.score_with_visibility(item, np.asarray(c2w, float), occ)["success"])
+
+    return SuccessOracle(exact, exact_fn=exact)
+
+
+def plan_blocked_escape(raw_row: Mapping[str, Any], policy: Mapping[str, Any], scene: Any,
+                        max_actions: int = 12) -> Optional[Dict[str, Any]]:
+    """Round 11 (decision 5): the blocked turn to insert for this task, or None.
+
+    A task is chosen with probability ``sft.export.blocked_turn_share`` (seed ``blocked_turn_seed`` and the task
+    id).  Among the turns of its shortest path whose start pose has a blocked move with at least one escape move
+    (``escape_moves``), one turn and one blocked move are drawn; the conversation then shows the blocked attempt,
+    the escape move (the one that gains the most distance from the obstacle) and the shortest path from the
+    escaped pose (``difficulty.certify_d_star`` with the env's success rule; going back and on along the old path
+    bounds it).  The whole episode must fit the env's action limit and the escaped pose must not already succeed.
+    Returns {"turn", "move", "blocked_by", "escape", "gain_m", "path", "poses"} (``poses``: the runtime poses from
+    the escaped pose on, one per path action plus the start)."""
+    from vagen.envs.active_spatial.env import collision_text
+
+    from .difficulty import certify_d_star
+
+    exp = policy["sft"]["export"]
+    share = float(exp.get("blocked_turn_share", 0.0) or 0.0)
+    if share <= 0.0 or scene is None:
+        return None
+    rng = random.Random(f"{exp.get('blocked_turn_seed', 20261016)}:{raw_row['task_id']}")
+    if rng.random() >= share:
+        return None
+    cert = certificate(raw_row)
+    chunks = chunk_certificate(cert, exp["chunking"], exp["max_actions_per_turn"])
+    bounds = turn_boundaries(raw_row, policy)
+    shown = runtime_poses(raw_row)
+    det = scene.detector
+    candidates = []
+    for t in range(len(chunks)):
+        for move, res in blocked_move_results(det, shown[bounds[t]]):
+            esc = escape_moves(det, shown[bounds[t]], res)
+            if esc:
+                candidates.append((t, move, res, esc))
+    if not candidates:
+        return None
+    oracle = env_success_oracle(raw_row, scene)
+    order = list(range(len(candidates)))
+    rng.shuffle(order)
+    for i in order:
+        t, move, res, esc = candidates[i]
+        budget = int(max_actions) - bounds[t] - 2  # actions before, the blocked one, the escape
+        if budget < 1:
+            continue
+        for escape, gain in esc:
+            start = step_pose(shown[bounds[t]], escape)
+            if oracle(start):
+                continue
+            hint = [INVERSE[escape]] + list(cert[bounds[t]:])
+            found = certify_d_star(scene, oracle, start, d_max=min(budget, len(hint)), hint_actions=hint)
+            if found.get("d_star") is None or not found.get("certificate") or len(found["certificate"]) > budget:
+                continue
+            path = list(found["certificate"])
+            poses = [start]
+            for a in path:
+                poses.append(step_pose(poses[-1], a))
+            if not oracle(poses[-1]):
+                continue
+            return {"turn": t, "move": move, "blocked_by": collision_text(res), "escape": escape, "gain_m": gain,
+                    "path": path, "poses": [np.asarray(p).tolist() for p in poses],
+                    "path_source": found.get("certificate_source")}
+    return None
+
+
+def blocked_selected(raw_row: Mapping[str, Any], policy: Mapping[str, Any]) -> bool:
+    """Whether the seeded draw of ``plan_blocked_escape`` selects this task (before looking for a blocked move)."""
+    exp = policy["sft"]["export"]
+    share = float(exp.get("blocked_turn_share", 0.0) or 0.0)
+    return share > 0.0 and random.Random(f"{exp.get('blocked_turn_seed', 20261016)}:{raw_row['task_id']}").random() < share
+
+
+def conversation_actions(raw_row: Mapping[str, Any], policy: Mapping[str, Any]) -> int:
+    """How many actions the assistant turns of a row's SFT conversation hold (with a ``blocked_plan``: the path up to
+    its turn, the blocked move, the escape and the new path)."""
+    plan = raw_row.get("blocked_plan")
+    cert = certificate(raw_row)
+    if not plan:
+        return len(cert)
+    return turn_boundaries(raw_row, policy)[int(plan["turn"])] + 2 + len(plan["path"])
+
+
+def plan_frame_states(plan: Mapping[str, Any], policy: Mapping[str, Any]) -> List[int]:
+    """Indices into ``plan["poses"]`` whose frames the conversation shows: the start of every turn of the path
+    (the escaped pose first) and its end."""
+    exp = policy["sft"]["export"]
+    ks = [0]
+    for c in chunk_certificate(list(plan["path"]), exp["chunking"], exp["max_actions_per_turn"]):
+        ks.append(ks[-1] + len(c))
+    return sorted(set(ks))
 
 
 def blocked_insert(raw_row: Mapping[str, Any], policy: Mapping[str, Any], detector: Any, n_turns: int,
@@ -399,8 +556,11 @@ def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], poli
                      detector: Any = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """One multi-turn no-think SFT conversation from the certificate (actions only).
 
-    ``detector`` (round 10): the scene's collision detector; with it, a share of the conversations get one
-    inserted blocked turn (``blocked_insert``)."""
+    ``detector`` (round 10, ``blocked_turn_style`` "continue"): the scene's collision detector; with it, a share of
+    the conversations get one inserted blocked turn and then go on along the shortest path (``blocked_insert``).
+    Round 11 (style "escape"): a row carrying ``blocked_plan`` (``plan_blocked_escape``, made by sft-frames) shows
+    the blocked attempt, the escape move and the shortest path from the escaped pose; its frames are the plan's
+    states ``x<k>``."""
     from vagen.envs.active_spatial.dataset_contract import row_digest
     from vagen.envs.active_spatial.env import collision_feedback
 
@@ -412,6 +572,9 @@ def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], poli
     d = len(cert)
     if not chunks:
         return None, "sft_empty_certificate"
+    plan = raw_row.get("blocked_plan")
+    if plan:
+        return _escape_record(raw_row, images, policy, plan, semantic_review)
     frame = {k: images.get(f"{tid}:s{k}") for k in range(d + 1)}
     if any(frame[b] is None for b in bounds):
         return None, "sft_frame_missing_image"
@@ -421,7 +584,8 @@ def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], poli
         return None, "sft_terminal_not_successful"
     desc = str(raw_row.get("task_description") or "").strip()
     shown = runtime_poses(raw_row)  # the pose lines exactly as the env prints them
-    insert = blocked_insert(raw_row, policy, detector, len(chunks), [shown[b] for b in bounds[:-1]])
+    insert = (blocked_insert(raw_row, policy, detector, len(chunks), [shown[b] for b in bounds[:-1]])
+              if exp.get("blocked_turn_style", "continue") == "continue" else None)
     conv: List[Dict[str, Any]] = [{"role": "system", "content": protocol_system_prompt(str(raw_row["task_type"]), policy)}]
     for t, chunk in enumerate(chunks):
         feedback = None
@@ -471,6 +635,78 @@ def build_sft_record(raw_row: Mapping[str, Any], images: Mapping[str, str], poli
     }
     if all(frame[k] is not None for k in range(d + 1)):
         record["primitive_image_paths"] = [frame[k] for k in range(d + 1)]
+    findings = scan_leakage(record, policy)
+    if findings:
+        return None, "sft_text_leakage"
+    return record, None
+
+
+def _escape_record(raw_row: Mapping[str, Any], images: Mapping[str, str], policy: Mapping[str, Any],
+                   plan: Mapping[str, Any], semantic_review: Optional[Mapping[str, Any]]
+                   ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The round-11 conversation of a row with a ``blocked_plan``: the shortest path up to the plan's turn, the
+    blocked attempt (same frame and pose after it, the env's detailed feedback), the escape move, then the
+    shortest path from the escaped pose in runs of identical actions."""
+    from vagen.envs.active_spatial.dataset_contract import row_digest
+    from vagen.envs.active_spatial.env import collision_feedback
+
+    exp = policy["sft"]["export"]
+    tid = str(raw_row["task_id"])
+    cert = certificate(raw_row)
+    chunks = chunk_certificate(cert, exp["chunking"], exp["max_actions_per_turn"])
+    bounds = turn_boundaries(raw_row, policy)
+    t = int(plan["turn"])
+    path = list(plan["path"])
+    ppos = [np.asarray(p, dtype=float) for p in plan["poses"]]
+    frame = {k: images.get(f"{tid}:s{k}") for k in bounds[: t + 1]}
+    pframe = {k: images.get(f"{tid}:x{k}") for k in plan_frame_states(plan, policy)}
+    if any(v is None for v in list(frame.values()) + list(pframe.values())):
+        return None, "sft_frame_missing_image"
+    terminal = score_task(raw_row, ppos[-1])
+    if terminal is None or not bool(terminal.get("success")):
+        return None, "sft_terminal_not_successful"
+    desc = str(raw_row.get("task_description") or "").strip()
+    shown = runtime_poses(raw_row)
+    conv: List[Dict[str, Any]] = [{"role": "system", "content": protocol_system_prompt(str(raw_row["task_type"]), policy)}]
+
+    def turn(first: bool, pose: Any, image: str, answer: List[str], feedback: Optional[str] = None) -> None:
+        conv.append({"role": "user", "content": _user_turn(desc, first, policy, pose, env_feedback=feedback),
+                     "image_path": image})
+        conv.append({"role": "assistant", "content": "<action>" + "".join(a + "|" for a in answer) + "</action>"})
+
+    for k in range(t):
+        turn(k == 0, shown[bounds[k]], frame[bounds[k]], chunks[k])
+    turn(t == 0, shown[bounds[t]], frame[bounds[t]], [plan["move"]])
+    blocked = collision_feedback([plan["move"]], [(plan["move"], plan["blocked_by"])])
+    turn(False, shown[bounds[t]], frame[bounds[t]], [plan["escape"]], feedback=blocked)
+    k = 0
+    for c in chunk_certificate(path, exp["chunking"], exp["max_actions_per_turn"]):
+        turn(False, ppos[k], pframe[k], c)
+        k += len(c)
+    turn_images = [str(u["image_path"]) for u in conv if u["role"] == "user"]
+    image_paths = list(turn_images)
+    if pframe[len(path)] not in image_paths:
+        image_paths.append(pframe[len(path)])
+    actions = list(cert[: bounds[t]]) + [plan["move"], plan["escape"]] + path
+    record: Dict[str, Any] = {
+        "id": f"sft_{tid}", "source_task_id": tid, "parent_task_id": tid,
+        "source_task_sha256": row_digest({k2: v for k2, v in raw_row.items() if k2 != "blocked_plan"}),
+        "source_versions": {k2: raw_row.get(k2) for k2 in VERSION_KEYS},
+        "scene_id": str(raw_row["scene_id"]), "split": raw_row["split"], "task_type": raw_row.get("task_type"),
+        "task_description": desc, "success": True,
+        "score_contract": {"success_source": "canonical_gates",
+                           "metric_version": raw_row.get("canonical_task_metric_version"),
+                           "terminal_checked_by": "release.build_sft_record"},
+        "prompt_format": exp["prompt_format"], "chunking": exp["chunking"],
+        "trajectory_steps": sum(1 for u in conv if u["role"] == "user"),
+        "total_actions": len(actions),
+        "blocked_insert": {"style": "escape", "turn": t, "move": plan["move"], "blocked_by": plan["blocked_by"],
+                           "escape": plan["escape"], "gain_m": plan.get("gain_m"), "path_actions": len(path),
+                           "path_extra_actions": len(path) - (len(cert) - bounds[t])},
+        "d_star": (raw_row.get("difficulty") or {}).get("d_star"),
+        "conversations": conv, "conversation_image_paths": turn_images, "image_paths": image_paths,
+        "semantic_review": dict(semantic_review or {}),
+    }
     findings = scan_leakage(record, policy)
     if findings:
         return None, "sft_text_leakage"
