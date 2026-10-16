@@ -270,8 +270,11 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     rows = _jsonl(Path(args.rows))
-    parts = {"train": [r for r in rows if r.get("split") == "train"],
-             "val": [r for r in rows if r.get("split") == "val"]}
+    # RL trains on the formal tasks of train; reserve rows (sft-frames --include-reserve) are SFT-only, as the task
+    # registry says (round 10: the first RL run with reserve rows in rows.jsonl took them too)
+    parts = {"train": [r for r in rows if r.get("split") == "train" and not r.get("reserve")],
+             "val": [r for r in rows if r.get("split") == "val" and not r.get("reserve")]}
+    reserve_skipped = sum(1 for r in rows if r.get("reserve") and r.get("split") in ("train", "val"))
     val_tasks = getattr(args, "val_tasks", None)
     if val_tasks:  # round 10: the fixed validation set (evaluation.py select --split val), published rows
         parts["val"] = [dict(r, split="val") for r in _jsonl(Path(val_tasks))]
@@ -334,6 +337,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "history_mode": getattr(args, "history_mode", None) or "none", "val_tasks": val_tasks,
               "greedy_val": bool(getattr(args, "greedy_val", False)),
               "test_freq": ppo["trainer"].get("test_freq"), "critic_warmup": ppo["trainer"].get("critic_warmup"),
+              "reserve_rows_skipped": reserve_skipped,
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))

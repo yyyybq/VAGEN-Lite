@@ -175,6 +175,36 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(TP.prompt_mismatches(dict(cfg, prompt_reward_text="legacy"), types, policy), sorted(types))
         self.assertEqual(TP.prompt_mismatches(dict(cfg, max_consecutive_collisions=3), types, policy), sorted(types))
 
+    def test_rl_config_trains_on_formal_tasks_only(self):
+        """Reserve rows (sft-frames --include-reserve) are SFT-only: rl-config leaves them out of train and val."""
+        import yaml
+
+        sft = self.root / "sft_rl_reserve"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        rows = TP._jsonl(sft / "rows.jsonl")
+        marked = [dict(r, reserve=(i % 2 == 1)) for i, r in enumerate(rows)]
+        (sft / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in marked))
+        template = self.root / "ppo_template_reserve.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False},
+            "actor_rollout_ref": {"model": {"path": "old"}, "actor": {"ppo_mini_batch_size": 8},
+                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4, "agent": {"num_workers": 8}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+        out = self.root / "rl_reserve"
+        TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
+            Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
+            gs_root="/ply", model="/m", name="t", run_root=str(self.root / "rl_run_reserve"), val_limit=0,
+            trial=False, out=str(out)))
+        train = TP._jsonl(out / "train.jsonl")
+        want = [r["task_id"] for r in marked if r["split"] == "train" and not r["reserve"]]
+        self.assertEqual([r["task_id"] for r in train], want)
+        self.assertTrue(want)
+        self.assertFalse(any(r.get("reserve") for r in TP._jsonl(out / "val.jsonl")))
+        report = json.loads((out / "rl_config_report.json").read_text())
+        self.assertEqual(report["reserve_rows_skipped"], sum(1 for r in marked if r["reserve"]))
+
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""
         import yaml
