@@ -20,6 +20,10 @@ the d* bands 1-3 / 4-6 / 7-8 (a band short of tasks gives its share to the other
 Each results row also holds the trajectory (frames, answers, actions; round 8) for the browsing page.
 Metrics per model: success rate (overall, per family, per d* band), actions taken / d* on successes,
 collision rate (blocked moves per action) and invalid-answer rate (turns whose answer did not parse).
+
+Round 11: ``run --samples N --temperature T --top-p P`` runs N sampled episodes per task, as in RL training
+(temperature 0.8, top-p 0.92), instead of one greedy episode; each row carries its ``sample`` number and the
+metrics add the share of tasks with at least one success (``pass_at_n``) and the mean over the N episodes.
 """
 
 from __future__ import annotations
@@ -226,15 +230,27 @@ def chat_messages(system: str, earlier: Sequence[Tuple[str, Any, str]], user_tex
     return messages + [user(user_text, image)]
 
 
+def call_seed(base: int, index: int, sample: int, turn: int) -> int:
+    """The sampling seed of one model call: fixed per (task, sample, turn), so a sampled run is reproducible and the
+    N samples of a task differ."""
+    import hashlib
+
+    digest = hashlib.sha256(f"{base}:{index}:{sample}:{turn}".encode()).digest()
+    return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
+
+
 def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None,
-                history: bool = False, as_sft: bool = False) -> Dict[str, Any]:
+                history: bool = False, as_sft: bool = False, sample: Optional[int] = None,
+                seed: Optional[int] = None) -> Dict[str, Any]:
     """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py.
 
     With ``frames`` (round 8) the row also carries the trajectory: per turn the frame the model saw (a JPEG in
     ``frames``, named <index>_<turn>.jpg), the user text, the answer, the parsed actions, blocked moves, reward
     and whether the task was met after the turn; then the frame after the last turn and the env's end reason.
     With ``history`` (round 9 switch) every model call also gets all earlier turns of the episode, as in SFT;
-    with ``as_sft`` every message is passed through ``sft_text`` first."""
+    with ``as_sft`` every message is passed through ``sft_text`` first.  ``sample`` / ``seed`` (round 11): the
+    sample number of a sampled run and the base seed of its model calls (``call_seed``); frames are then named
+    <index>_s<sample>_<turn>.jpg."""
     obs, info = env.reset(seed=index)
     system = env.system_prompt()
     item = env.current_item or {}
@@ -246,7 +262,7 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         if frames is None or image is None:
             return None
         frames.mkdir(parents=True, exist_ok=True)
-        name = f"{index:03d}_{turn:02d}.jpg"
+        name = f"{index:03d}_{turn:02d}.jpg" if sample is None else f"{index:03d}_s{sample}_{turn:02d}.jpg"
         image.convert("RGB").save(frames / name, format="JPEG", quality=85)
         return f"{frames.name}/{name}"
 
@@ -259,6 +275,8 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             kw["earlier"] = list(earlier)
         if as_sft:
             kw["as_sft"] = True
+        if seed is not None:
+            kw["seed"] = call_seed(seed, index, sample or 0, turns)
         text = policy.generate(system, obs["obs_str"], images[0], **kw)
         if history:
             earlier.append((obs["obs_str"], images[0], text))
@@ -287,6 +305,8 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
            "task_type": item.get("task_type"), "d_star": int((item.get("difficulty") or {}).get("d_star", 0)),
            "success": success, "actions_to_success": actions_to_success, "turns": turns,
            "actions": attempted, "collisions": collisions, "invalid_turns": invalid}
+    if sample is not None:
+        row["sample"] = int(sample)
     if frames is not None:
         last = _images(obs)
         row.update(task_description=item.get("task_description"), start=start, trajectory=trajectory,
@@ -306,19 +326,21 @@ def _image_url(image: Any) -> Dict[str, Any]:
 
 class VllmPolicy:  # pragma: no cover - needs a GPU
     def __init__(self, model: str, gpu_memory_utilization: float = 0.6, max_model_len: int = 8192,
-                 max_images: int = 1) -> None:
+                 max_images: int = 1, temperature: float = 0.0, top_p: float = 1.0) -> None:
         from vllm import LLM
 
         self.llm = LLM(model=model, gpu_memory_utilization=gpu_memory_utilization, max_model_len=max_model_len,
                        enforce_eager=True, enable_prefix_caching=True, limit_mm_per_prompt={"image": max_images},
                        trust_remote_code=False)
         self.last_prompt_tokens: Optional[int] = None
+        self.temperature, self.top_p = float(temperature), float(top_p)
 
     def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
-                 as_sft: bool = False) -> str:
+                 as_sft: bool = False, seed: Optional[int] = None) -> str:
         from vllm import SamplingParams
 
-        params = SamplingParams(temperature=0.0, max_tokens=384, stop=["</action>"], include_stop_str_in_output=True)
+        params = SamplingParams(temperature=self.temperature, top_p=self.top_p, seed=seed, max_tokens=384,
+                                stop=["</action>"], include_stop_str_in_output=True)
         out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft), sampling_params=params,
                             use_tqdm=False)
         self.last_prompt_tokens = len(out[0].prompt_token_ids)
@@ -340,27 +362,45 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     env = ActiveSpatialEnv(ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items() if k in keys}))
     t0 = time.time()
     # with history a call carries every earlier frame; SFT trained with cutoff 16,384 tokens
+    sampled = sampling_mode(args)
     policy = VllmPolicy(args.model, max_model_len=16384 if args.history else 8192,
-                        max_images=int(args.max_turns) if args.history else 1)
+                        max_images=int(args.max_turns) if args.history else 1,
+                        temperature=float(args.temperature) if sampled else 0.0,
+                        top_p=float(args.top_p) if sampled else 1.0)
     (out / "model.json").write_text(json.dumps({"name": args.name, "model": args.model, "version": VERSION,
-                                                "prompt_format": cfg["prompt_format"], "greedy": True,
+                                                "prompt_format": cfg["prompt_format"], "greedy": not sampled,
+                                                "samples": int(args.samples) if sampled else 1,
+                                                "temperature": float(args.temperature) if sampled else 0.0,
+                                                "top_p": float(args.top_p) if sampled else 1.0,
+                                                "sample_seed": int(args.sample_seed) if sampled else None,
                                                 "env_switches": switches, "max_turns": int(args.max_turns),
                                                 "history": bool(args.history),
                                                 "sft_text": bool(args.sft_text),
                                                 "load_seconds": round(time.time() - t0, 1)}, indent=1))
-    done = {r["index"] for r in _jsonl(out / "results.jsonl")} if (out / "results.jsonl").exists() else set()
+    done = ({(r["index"], r.get("sample")) for r in _jsonl(out / "results.jsonl")}
+            if (out / "results.jsonl").exists() else set())
+    samples = list(range(int(args.samples))) if sampled else [None]
     with open(out / "results.jsonl", "a") as f:
         for i in range(n):
-            if i in done:
-                continue
-            try:
-                row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames", history=args.history,
-                                  as_sft=args.sft_text)
-            except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
-                row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
-            f.write(json.dumps(row) + "\n")
-            f.flush()
-    (out / "done.json").write_text(json.dumps({"episodes": n, "seconds": round(time.time() - t0, 1)}))
+            for k in samples:
+                if (i, k) in done:
+                    continue
+                try:
+                    row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames",
+                                      history=args.history, as_sft=args.sft_text, sample=k,
+                                      seed=int(args.sample_seed) if sampled else None)
+                except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
+                    row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
+                    if k is not None:
+                        row["sample"] = k
+                f.write(json.dumps(row) + "\n")
+                f.flush()
+    (out / "done.json").write_text(json.dumps({"episodes": n * len(samples), "seconds": round(time.time() - t0, 1)}))
+
+
+def sampling_mode(args: argparse.Namespace) -> bool:
+    """A sampled run (round 11): several episodes per task, or any temperature above 0."""
+    return int(getattr(args, "samples", 1) or 1) > 1 or float(getattr(args, "temperature", 0.0) or 0.0) > 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +418,15 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     actions = sum(r["actions"] for r in ok)
     turns = sum(r["turns"] for r in ok)
     ended = Counter(r["end_reason"] for r in ok if r.get("end_reason"))  # recorded since eval v2
-    return {
+    extra: Dict[str, Any] = {}
+    if any("sample" in r for r in ok):  # a sampled run (round 11): per task, any success and the mean
+        per_task: Dict[int, List[bool]] = defaultdict(list)
+        for r in ok:
+            per_task[r["index"]].append(bool(r["success"]))
+        extra = {"samples": max(len(v) for v in per_task.values()), "tasks": len(per_task),
+                 "pass_at_n": round(sum(any(v) for v in per_task.values()) / len(per_task), 4),
+                 "success_mean": round(sum(sum(v) / len(v) for v in per_task.values()) / len(per_task), 4)}
+    return {**extra,
         "episodes": len(ok), "errors": len(rows) - len(ok), "success": rate(ok),
         "success_by_family": {k: rate(v) for k, v in sorted(by_family.items())},
         "success_by_band": {k: rate(v) for k, v in sorted(by_band.items())},
@@ -408,7 +456,10 @@ def sign_test(b: int, c: int) -> float:
 
 
 def paired(base: Sequence[Dict[str, Any]], other: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """Task-by-task comparison of two result sets on the same tasks (infrastructure errors left out)."""
+    """Task-by-task comparison of two result sets on the same tasks (infrastructure errors left out).  Greedy runs
+    only: a sampled run has several rows per task."""
+    if any("sample" in r for r in list(base) + list(other)):
+        raise ValueError("paired compares greedy runs (one episode per task); a sampled run was given")
     a = {r["index"]: bool(r["success"]) for r in base if "error" not in r}
     b = {r["index"]: bool(r["success"]) for r in other if "error" not in r}
     idx = sorted(set(a) & set(b))
@@ -440,7 +491,8 @@ def cmd_table(args: argparse.Namespace) -> None:
     families = sorted({f for m in models.values() for f in m["success_by_family"]})
     bands = [f"{lo}-{hi}" for lo, hi in BANDS]
     head = ["模型", "题数", "成功率"] + families + [f"d* {b}" for b in bands] + ["步数/d*", "碰撞率", "不合法率",
-                                                                                  "用满上限", "连续碰撞结束"]
+                                                                                  "用满上限", "连续碰撞结束",
+                                                                                  "至少一条成功（采样）"]
     lines = ["| " + " | ".join(head) + " |", "| " + " | ".join("---" for _ in head) + " |"]
     fmt = lambda v: "—" if v is None else f"{v:.3f}"  # noqa: E731
     for name, m in models.items():
@@ -448,7 +500,10 @@ def cmd_table(args: argparse.Namespace) -> None:
         cells += [fmt(m["success_by_band"].get(b)) for b in bands]
         cells += [fmt(m["actions_over_dstar"]), fmt(m["collision_rate"]), fmt(m["invalid_rate"])]
         cells += ["—" if m["used_limit"] is None else str(m["used_limit"]),
-                  "—" if m["collision_ended"] is None else str(m["collision_ended"])]
+                  "—" if m["collision_ended"] is None else str(m["collision_ended"]),
+                  f"{m['pass_at_n']:.3f}（{m['samples']} 条）" if "pass_at_n" in m else "—"]
+        if "pass_at_n" in m:  # the success column of a sampled run is the mean over its episodes
+            cells[1] = f"{m['tasks']}×{m['samples']}"
         lines.append("| " + " | ".join(cells) + " |")
     (ev / "table.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
@@ -481,6 +536,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--history", action=argparse.BooleanOptionalAction, default=True,
                    help="every model call gets all earlier turns, exactly as in SFT (round-10 default; --no-history "
                         "for a single-turn input)")
+    r.add_argument("--samples", type=int, default=1,
+                   help="round 11: episodes per task; with more than 1 (or a temperature above 0) the answers are "
+                        "sampled as in RL training instead of greedy")
+    r.add_argument("--temperature", type=float, default=0.0, help="sampling temperature (RL training: 0.8)")
+    r.add_argument("--top-p", type=float, default=1.0, help="nucleus sampling (RL training: 0.92)")
+    r.add_argument("--sample-seed", type=int, default=20261016, help="base seed of the sampled model calls")
     r.add_argument("--sft-text", action="store_true",
                    help="messages as the SFT data of rounds 6-9 had them (leading/trailing whitespace stripped); the "
                         "round-10 export keeps the env's text, so this is only for models of those rounds")

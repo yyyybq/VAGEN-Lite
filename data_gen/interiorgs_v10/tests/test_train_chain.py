@@ -304,6 +304,127 @@ class ChainTest(unittest.TestCase):
                 self.assertEqual(prepared["val200__v10_rl_100"][1][-1], "--x")
                 self.assertIn("挑出 sft_formal_reserve_e1", (root / "PROGRESS.md").read_text(encoding="utf-8"))
 
+    def test_family_success_from_rollout_dumps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "rollout_data"
+            d.mkdir()
+            for step, rows in ((1, [("fov_inclusion", 1.0), ("fov_inclusion", 0.0), ("equidistance", 0.0)]),
+                               (25, [("fov_inclusion", 1.0)]), (26, [("equidistance", 1.0)])):
+                (d / f"{step}.jsonl").write_text("".join(json.dumps({"task_type": f, "traj_success": v}) + "\n"
+                                                         for f, v in rows) + "not json\n")
+            got = T.family_success(d)
+            self.assertEqual(list(got), ["1-25", "26-50"])
+            self.assertEqual(got["1-25"]["fov_inclusion"], {"success": round(2 / 3, 4), "episodes": 3})
+            self.assertEqual(got["1-25"]["equidistance"], {"success": 0.0, "episodes": 1})
+            self.assertEqual(got["26-50"], {"equidistance": {"success": 1.0, "episodes": 1}})
+            self.assertEqual(T.family_success(Path(tmp) / "missing"), {})
+
+    def test_two_rl_runs_and_variants(self):
+        """Round 11: R-S0 and R-D from the picked SFT checkpoint at the same time; a failed run does not stop the
+        other; every run's checkpoints and the sampled variants are evaluated."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            val, test = root / "val400", root / "test"
+            rl = {"history_mode": "concat", "critic_warmup": 10, "train_batch_size": 24, "ppo_mini_batch_size": 16,
+                  "save_freq": 50, "no_internal_val": True}
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 100, "ppo_template": "/S0.yaml", "gs_root": "/ply",
+                             "eval_sets": {"val400": str(val), "test": str(test)},
+                             "rl_runs": {"rs0": {"reward_preset": "S0", "rl": rl}, "rd": {"reward_preset": "dense", "rl": rl}},
+                             "eval": {"every": 50, "variants": [{"suffix": "_s4", "sets": ["val400"],
+                                                                 "options": ["--samples", "4", "--temperature", "0.8"],
+                                                                 "models": ["sft_pick", "rl", "r10_sft_e5"]}],
+                                      "models": {"r10_sft_e5": {"model": "/r10"}}}}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_e7", "model": "/lf/model/checkpoint-7",
+                                                            "select_by": "val400", "scores": {"sft_e7": 0.5}}
+            calls = []
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.rl_config()
+            self.assertEqual(len(calls), 2)
+            by_out = {c[c.index("--out") + 1]: c for c in calls}
+            rd = by_out[str(root / "rl_rd")]
+            self.assertEqual(rd[rd.index("--reward-preset") + 1], "dense")
+            self.assertEqual(rd[rd.index("--run-root") + 1], str(root / "rl_run_rd"))
+            self.assertEqual(rd[rd.index("--model") + 1], str(Path("/lf/model/checkpoint-7")))
+            for flag, value in (("--train-batch-size", "24"), ("--ppo-mini-batch-size", "16"), ("--save-freq", "50"),
+                                ("--critic-warmup", "10"), ("--history-mode", "concat")):
+                self.assertEqual(rd[rd.index(flag) + 1], value)
+            self.assertIn("--no-internal-val", rd)
+            self.assertEqual(by_out[str(root / "rl_rs0")][by_out[str(root / "rl_rs0")].index("--reward-preset") + 1], "S0")
+
+            # PPO: rs0 finishes, rd's render service dies; rs0 is not stopped, the step fails naming rd
+            prepared, deleted = {}, []
+            polls = {"n": 0}
+
+            def prepare(run, gpus, args, job_dir="job"):
+                prepared[(run.name, job_dir)] = (gpus, args)
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            def status(run, job_dir="job"):
+                polls["n"] += 1
+                if run.name == "rl_run_rd" and job_dir == "job_renderer":
+                    return {"state": "FAILED", "finished": True}
+                if run.name == "rl_run_rs0" and job_dir == "job_rl" and polls["n"] > 4:
+                    (run / "checkpoints" / "global_step_100").mkdir(parents=True, exist_ok=True)
+                    return {"state": "SUCCEEDED", "finished": True}
+                return {"state": "RUNNING", "finished": False}
+
+            def delete(run, job_dir="job"):
+                deleted.append((run.name, job_dir))
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name(f"submission_{len(deleted)}_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                with self.assertRaises(T.ChainError) as err:
+                    chain.rl()
+                self.assertIn("rd (renderer FAILED)", str(err.exception))
+                self.assertNotIn("rs0", str(err.exception))
+                self.assertEqual(prepared[("rl_run_rs0", "job_rl")], (8, ["rl", str(root / "rl_rs0"), "100"]))
+                self.assertEqual(prepared[("rl_run_rd", "job_renderer")], (1, ["renderer"]))
+                self.assertEqual(sorted(set(deleted)), [("rl_run_rd", "job_renderer"), ("rl_run_rd", "job_rl"),
+                                                        ("rl_run_rs0", "job_renderer"), ("rl_run_rs0", "job_rl")])
+                self.assertTrue((root / "rl_run_rs0" / "STOP_RENDERER").exists())
+                # a resumed chain trains only the run without its endpoint checkpoint
+                prepared.clear()
+                (root / "rl_run_rd" / "checkpoints" / "global_step_100").mkdir(parents=True)
+                chain.rl()
+                self.assertEqual(prepared, {})
+
+            # evaluation: every run's checkpoints on both sets, the sampled variant on val400 only
+            for run in ("rs0", "rd"):
+                for st in (50, 100):
+                    m = root / f"rl_run_{run}" / "checkpoints" / f"global_step_{st}" / "actor" / "huggingface"
+                    m.mkdir(parents=True, exist_ok=True)
+                    (m / "config.json").write_text("{}")
+            for m in (Path("/r10"), Path("/lf/model/checkpoint-7")):
+                pass
+            jobs = {}
+            chain.eval_jobs = lambda step, j: jobs.update(j)
+            chain.tables = lambda: None
+            chain.evaluate()
+            names = sorted(jobs)
+            self.assertIn("val400__rs0_050", names)
+            self.assertIn("test__rd_100", names)
+            self.assertIn("val400__rd_100_s4", names)
+            self.assertIn("val400__sft_e7_s4", names)
+            self.assertIn("val400__r10_sft_e5_s4", names)
+            self.assertNotIn("test__rd_100_s4", names)
+            self.assertEqual(jobs["val400__sft_e7_s4"][2], "/lf/model/checkpoint-7")
+            self.assertEqual(jobs["val400__rd_050_s4"][4], ["--samples", "4", "--temperature", "0.8"])
+            self.assertEqual(len([n for n in names if n.endswith("_s4")]), 6)  # 4 RL checkpoints, the pick, r10
+            chain.state["rl_runs"] = {"rd": {"last_update": 25, "family_success": {"1-25": {"fov_inclusion": {
+                "success": 0.5, "episodes": 8}}}}}
+            md = T.render_markdown(chain.state)
+            self.assertIn("**RL rd：**", md)
+            self.assertIn("| 1-25 | 0.50（8） |", md)
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)

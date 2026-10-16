@@ -65,8 +65,11 @@
       "observation_pose": "runtime",
       "pose_normalize_negative_zero": true,
       "env_feedback": "Action executed.",
-      "blocked_turn_share": 0.2,
-      "blocked_turn_seed": 20261015,
+      "blocked_turn_style": "escape",
+      "blocked_turn_share": 0.5,
+      "blocked_turn_seed": 20261016,
+      "blocked_turn_max_action_share": 0.03,
+      "note_round11": "2026-10-16: blocked turns in the escape style (decision 5 of round 11): the blocked attempt, then a move the collision detector picks to leave the obstacle, then the shortest path from there; planned by training_prep sft-frames --scenes-root, at most 3% of the SFT actions. Round 10 used style continue (the blocked attempt, then the old shortest path), share 0.2, seed 20261015.",
       "system_prompt": {
         "step_translation": 0.3,
         "step_rotation_deg": 20.0,

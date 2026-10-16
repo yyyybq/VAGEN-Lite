@@ -25,7 +25,7 @@ import argparse
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -63,6 +63,106 @@ def sft_frames(rows: Sequence[Dict[str, Any]], policy: Dict[str, Any]) -> List[D
     return out
 
 
+def plan_frames(rows: Sequence[Dict[str, Any]], policy: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Round 11: the frames of the rows' ``blocked_plan`` paths (the escaped pose, every turn start, the end), as
+    states ``x<k>`` of the task, in the render job's format."""
+    from .pilot import camera_item
+    from .release import plan_frame_states
+
+    out = []
+    for row in rows:
+        plan = row.get("blocked_plan")
+        if not plan:
+            continue
+        for k in plan_frame_states(plan, policy):
+            out.append({"frame_id": f"{row['task_id']}__x{k}", "kind": "sft", "task_id": row["task_id"],
+                        "scene_id": row["scene_id"], "state_id": f"x{k}", "c2w": plan["poses"][k],
+                        "camera_item": camera_item(row), "overlay": {}})
+    return out
+
+
+def _plan_scene(job: Tuple[str, str, List[Dict[str, Any]], str, int]) -> List[Tuple[str, Any, bool]]:
+    """(task_id, plan or None, selected) for the rows of one scene (a worker of ``plan_blocked``)."""
+    from .admission import load_policy
+    from .release import blocked_selected, plan_blocked_escape
+    from .scene import load_scene
+
+    scenes_root, scene_id, rows, wall_model, max_actions = job
+    policy = load_policy()
+    selected = [r for r in rows if blocked_selected(r, policy)]
+    if not selected:
+        return [(r["task_id"], None, False) for r in rows]
+    scene = load_scene(Path(scenes_root) / scene_id, scene_id, wall_model=wall_model)
+    out = []
+    for r in rows:
+        if not blocked_selected(r, policy):
+            out.append((r["task_id"], None, False))
+            continue
+        out.append((r["task_id"], plan_blocked_escape(r, policy, scene, max_actions=max_actions), True))
+    return out
+
+
+def plan_blocked(rows: Sequence[Dict[str, Any]], scenes_root: Path, wall_model: str, max_actions: int,
+                 workers: int = 1) -> Dict[str, Any]:
+    """Round 11: ``release.plan_blocked_escape`` for every row, scene by scene (``workers`` processes).  Returns
+    {"plans": {task_id: plan}, "selected": n, "no_candidate": n}."""
+    by_scene: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        by_scene.setdefault(str(r["scene_id"]), []).append(r)
+    jobs = [(str(scenes_root), sid, rs, wall_model, int(max_actions)) for sid, rs in sorted(by_scene.items())]
+    if workers > 1:
+        import multiprocessing as mp
+
+        with mp.get_context("fork").Pool(workers) as pool:
+            results = pool.map(_plan_scene, jobs, chunksize=1)
+    else:
+        results = [_plan_scene(j) for j in jobs]
+    plans, selected, missing = {}, 0, 0
+    for res in results:
+        for tid, plan, sel in res:
+            selected += int(sel)
+            if plan is not None:
+                plans[tid] = plan
+            elif sel:
+                missing += 1
+    return {"plans": plans, "selected": selected, "no_candidate": missing}
+
+
+def _template_env(env_template: Optional[str]) -> Dict[str, Any]:
+    import yaml
+
+    template = Path(env_template or Path(__file__).with_name("configs") / "rl_env_v10_S0.yaml")
+    return dict(yaml.safe_load(template.read_text())["envs"][0]["config"])
+
+
+def blocked_report(rows: Sequence[Dict[str, Any]], policy: Dict[str, Any]) -> Dict[str, Any]:
+    """Counts of the inserted blocked turns of the SFT rows and their share of all assistant actions."""
+    from .release import conversation_actions
+
+    plans = [r["blocked_plan"] for r in rows if r.get("blocked_plan")]
+    actions = sum(conversation_actions(r, policy) for r in rows)
+    return {"blocked_turns": len(plans), "conversations": len(rows), "assistant_actions": actions,
+            "blocked_action_share": round(len(plans) / actions, 5) if actions else 0.0,
+            "blocked_moves": dict(Counter(p["move"] for p in plans)),
+            "escape_moves": dict(Counter(p["escape"] for p in plans)),
+            "escape_is_opposite": sum(1 for p in plans if p["escape"] == {"move_forward": "move_backward",
+                                                                           "move_backward": "move_forward",
+                                                                           "move_left": "move_right",
+                                                                           "move_right": "move_left"}[p["move"]]),
+            "blocked_by": dict(Counter(p["blocked_by"].split(" by ", 1)[-1] if p["blocked_by"].endswith("wall")
+                                       else "object" for p in plans)),
+            "path_lengths": dict(Counter(len(p["path"]) for p in plans)),
+            "by_family": dict(Counter(r["task_type"] for r in rows if r.get("blocked_plan")))}
+
+
+def check_blocked_share(report: Dict[str, Any], policy: Dict[str, Any]) -> None:
+    """Decision 5 of round 11: the blocked moves stay at most ``blocked_turn_max_action_share`` of all SFT actions."""
+    cap = float(policy["sft"]["export"].get("blocked_turn_max_action_share", 1.0))
+    if report["blocked_action_share"] > cap:
+        raise SystemExit(f"blocked moves are {report['blocked_action_share']:.2%} of the SFT actions, above the "
+                         f"{cap:.0%} cap: lower sft.export.blocked_turn_share")
+
+
 def cmd_sft_frames(args: argparse.Namespace) -> None:
     from .admission import load_policy
     from .release import finalize_task_row, registry_row, split_lookup
@@ -95,7 +195,18 @@ def cmd_sft_frames(args: argparse.Namespace) -> None:
             rows.append(dict(finalize_task_row(raw, split), reserve=(kind == "reserve")))
     if args.limit:
         rows = rows[: args.limit]
-    frames = sft_frames(rows, policy)
+    exp = policy["sft"]["export"]
+    planned = None
+    if exp.get("blocked_turn_style", "continue") == "escape" and getattr(args, "scenes_root", None):
+        # round 11: the blocked turns are planned here, so the frames of their new paths get rendered
+        env = _template_env(getattr(args, "env_template", None))
+        planned = plan_blocked([r for r in rows if not r.get("reserve")], Path(args.scenes_root),
+                               env.get("wall_model", "room_edges"), int(env.get("max_episode_steps", 12)),
+                               int(getattr(args, "workers", 1) or 1))
+        for r in rows:
+            if r["task_id"] in planned["plans"]:
+                r["blocked_plan"] = planned["plans"][r["task_id"]]
+    frames = sft_frames(rows, policy) + plan_frames(rows, policy)
     _write_jsonl(out / "rows.jsonl", rows)
     _write_jsonl(out / "frames.jsonl", frames)
     # RL trains on the formal tasks of train (the reserve tasks are SFT-only)
@@ -106,8 +217,14 @@ def cmd_sft_frames(args: argparse.Namespace) -> None:
               "by_family": dict(Counter(r["task_type"] for r in rows)), "frames": len(frames),
               "scenes": len({r["scene_id"] for r in rows}), "skipped": dict(skipped),
               "reserve": sum(1 for r in rows if r.get("reserve")), "excluded": len(excluded)}
+    if planned is not None:
+        report["blocked"] = dict(blocked_report(rows, policy), selected=planned["selected"],
+                                 selected_without_escape=planned["no_candidate"],
+                                 share=exp.get("blocked_turn_share"), seed=exp.get("blocked_turn_seed"))
     (out / "sft_frames_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
+    if planned is not None:
+        check_blocked_share(report["blocked"], policy)
 
 
 def cmd_sft_records(args: argparse.Namespace) -> None:
@@ -123,8 +240,11 @@ def cmd_sft_records(args: argparse.Namespace) -> None:
         path = d / "frames" / "plain" / safe_name(f["frame_id"])
         if path.is_file():
             images[f"{f['task_id']}:{f['state_id']}"] = str(path)
-    # round 10: the scene's collision detector (the env's wall model) for the inserted blocked turns
+    # round 10 (blocked_turn_style "continue"): the scene's collision detector (the env's wall model) for the
+    # inserted blocked turns; round 11 ("escape") plans them in sft-frames, so the rows carry them
     scenes_root = Path(args.scenes_root) if getattr(args, "scenes_root", None) else None
+    if policy["sft"]["export"].get("blocked_turn_style", "continue") != "continue":
+        scenes_root = None
     wall_model = "room_edges"
     if scenes_root is not None:
         import yaml
@@ -162,8 +282,12 @@ def cmd_sft_records(args: argparse.Namespace) -> None:
               "blocked_turns": sum(1 for r in records if r.get("blocked_insert")),
               "blocked_moves": dict(Counter(r["blocked_insert"]["move"] for r in records if r.get("blocked_insert"))),
               "wall_model": wall_model if scenes_root is not None else None}
+    actions = sum(int(r["total_actions"]) for r in records)
+    report["assistant_actions"] = actions
+    report["blocked_action_share"] = round(report["blocked_turns"] / actions, 5) if actions else 0.0
     (d / "sft_records_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
+    check_blocked_share(report, policy)  # round 11: at most 3% of the SFT actions are blocked moves
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +344,27 @@ FORMAL_PPO: Dict[str, Any] = {
 # loop, trainer.concat_multi_turn, GAE over the whole sequence; the response budget must hold every later turn).
 HISTORY_MODES = ("none", "no_concat", "concat")
 CONCAT_RESPONSE_LENGTH = 4096  # 12 turns x (81 image tokens + ~150 text + the answer) stay well below this
+
+
+# Round 11: the reward presets of the RL env.  "S0": the template's sparse reward (success +5, step -0.01, blocked
+# move -0.15, invalid answer -0.1, near-uniform view -0.2).  "dense": the dense-score pilot's S5 branch on top of
+# it (exps/.../dense_score_reward_only_pilot_parallel_r3_20261009/frozen/configs/S5.train.yaml): progress
+# shaping on the canonical metric's 0..1 progress (potential mode, gamma 0.99), a bonus while that progress is
+# at least near_success_threshold, and the visibility shaping.  DENSE_ADJUST holds the changes made after the
+# round-11 pilot (empty until then).  The system prompt stays the SFT one for both (its reward lines describe
+# the sparse terms), so the two runs differ only in the reward.
+REWARD_PRESETS = ("S0", "dense")
+DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
+            "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,
+            "enable_visibility_shaping_reward": True}
+DENSE_ADJUST: Dict[str, Any] = {}
+
+
+def reward_overrides(preset: str) -> Dict[str, Any]:
+    """Env-config overrides of a reward preset."""
+    if preset not in REWARD_PRESETS:
+        raise ValueError(f"reward preset must be one of {REWARD_PRESETS}, not {preset!r}")
+    return {} if preset == "S0" else {**DENSE_S5, **DENSE_ADJUST}
 
 
 def history_overrides(mode: str, max_turns: int) -> Dict[str, Dict[str, Any]]:
@@ -286,6 +431,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     template = yaml.safe_load(Path(args.env_template).read_text())
     history = history_overrides(getattr(args, "history_mode", None) or "none",
                                 int(template["envs"][0].get("max_turns", 12)))
+    history["env"].update(reward_overrides(getattr(args, "reward_preset", None) or "S0"))
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -331,12 +477,29 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         _set(ppo, "trainer.test_freq", int(args.test_freq))
     if getattr(args, "critic_warmup", None) is not None:
         _set(ppo, "trainer.critic_warmup", int(args.critic_warmup))
+    # round 11: more tasks per update, checkpoints every N updates (all kept, the older ones cut to their weights),
+    # no validation inside training (models are picked with the single-card evaluation script)
+    if getattr(args, "train_batch_size", None):
+        _set(ppo, "data.train_batch_size", int(args.train_batch_size))
+    if getattr(args, "ppo_mini_batch_size", None):
+        _set(ppo, "actor_rollout_ref.actor.ppo_mini_batch_size", int(args.ppo_mini_batch_size))
+    if getattr(args, "save_freq", None):
+        for key, value in {"trainer.save_freq": int(args.save_freq), "trainer.ckpt_keep_every": int(args.save_freq),
+                           "trainer.ckpt_prune_to_hf": True}.items():
+            _set(ppo, key, value)
+    if getattr(args, "no_internal_val", False):
+        _set(ppo, "trainer.val_before_train", False)
+        _set(ppo, "trainer.test_freq", -1)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
               "history_mode": getattr(args, "history_mode", None) or "none", "val_tasks": val_tasks,
               "greedy_val": bool(getattr(args, "greedy_val", False)),
               "test_freq": ppo["trainer"].get("test_freq"), "critic_warmup": ppo["trainer"].get("critic_warmup"),
+              "reward_preset": getattr(args, "reward_preset", None) or "S0",
+              "env_reward_overrides": reward_overrides(getattr(args, "reward_preset", None) or "S0"),
+              "train_batch_size": (ppo.get("data") or {}).get("train_batch_size"),
+              "save_freq": ppo["trainer"].get("save_freq"),
               "reserve_rows_skipped": reserve_skipped,
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
@@ -354,6 +517,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     f.add_argument("--include-reserve", action="store_true",
                    help="round 10: also the reserve tasks (tasks_reserve.jsonl), marked reserve, for the larger SFT set")
     f.add_argument("--exclude", default=None, help="depth_check_summary.json: its flagged tasks are left out")
+    f.add_argument("--scenes-root", default=None,
+                   help="round 11: InteriorGS scene folders; with policy blocked_turn_style \"escape\" the inserted "
+                        "blocked turns (blocked move, escape, new shortest path) are planned here and their frames listed")
+    f.add_argument("--env-template", default=None, help="the RL env YAML (wall model, action limit) for the planning")
+    f.add_argument("--workers", type=int, default=1, help="processes for the planning (one scene each)")
     f.add_argument("--out", required=True)
     r = sub.add_parser("sft-records")
     r.add_argument("--dir", required=True)
@@ -379,6 +547,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "the full history), concat (one sequence per episode)")
     c.add_argument("--test-freq", type=int, default=None, help="validate every N updates (template: 25)")
     c.add_argument("--critic-warmup", type=int, default=None, help="updates that train only the value network")
+    c.add_argument("--reward-preset", choices=REWARD_PRESETS, default="S0",
+                   help="round 11: S0 (sparse) or dense (the dense-score pilot's S5 shaping on top of S0)")
+    c.add_argument("--train-batch-size", type=int, default=None, help="tasks per update (template: 12)")
+    c.add_argument("--ppo-mini-batch-size", type=int, default=None, help="tasks per optimizer step (template: 8)")
+    c.add_argument("--save-freq", type=int, default=None,
+                   help="a checkpoint every N updates, all kept; the older ones keep only actor/huggingface")
+    c.add_argument("--no-internal-val", action="store_true", help="no validation inside training")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--out", required=True)
     args = ap.parse_args(argv)

@@ -1,4 +1,4 @@
-"""Round 10, decision 6: SFT conversations with one inserted blocked move ("what to do after a blocked move").
+"""Round 10, decision 6, and round 11, decision 5: SFT conversations with one inserted blocked move.
 
 The assistant tries a move the collision detector blocks, the next user turn shows the same frame and pose with the
 env's detailed feedback, and the shortest path goes on.  Replayed in the RL env (round-10 template: detailed
@@ -47,11 +47,12 @@ class BlockedTurnTest(unittest.TestCase):
         cls.patch.stop()
         cls._tmp.cleanup()
 
-    def test_policy_inserts_a_blocked_turn_in_one_conversation_of_five(self):
-        """Decision 6 of 2026-10-15: 20% of the conversations (seeded), so the blocked moves stay a small share of all
-        SFT actions (about one in twenty) while the feedback text is seen in thousands of conversations."""
+    def test_policy_uses_the_escape_style_under_the_cap(self):
+        """Round 11, decision 5: the escape style, half of the conversations drawn (seeded), blocked moves at most 3%
+        of the SFT actions (round 10: style continue, 20%, seed 20261015)."""
         exp = load_policy()["sft"]["export"]
-        self.assertEqual((exp["blocked_turn_share"], exp["blocked_turn_seed"]), (0.2, 20261015))
+        self.assertEqual((exp["blocked_turn_style"], exp["blocked_turn_share"], exp["blocked_turn_seed"],
+                          exp["blocked_turn_max_action_share"]), ("escape", 0.5, 20261016, 0.03))
 
     def test_feedback_text_is_the_env_function(self):
         self.assertEqual(collision_feedback(["move_forward"], [("move_forward", "blocked by wall")]),
@@ -82,7 +83,8 @@ class BlockedTurnTest(unittest.TestCase):
         for f in TP._jsonl(sft / "frames.jsonl"):
             FRAME.save(sft / "frames" / "plain" / safe_name(f["frame_id"]))
         policy = load_policy()
-        policy["sft"]["export"]["blocked_turn_share"] = 1.0  # every task that has a blocked move at the drawn turn
+        policy["sft"]["export"].update(blocked_turn_style="continue", blocked_turn_share=1.0,  # the round-10 style
+                                       blocked_turn_seed=20261015)
         with mock.patch("data_gen.interiorgs_v10.admission.load_policy", lambda: policy):  # imported at call time
             TP.cmd_sft_records(Namespace(dir=str(sft), scenes_root=str(self.scene_dir.parent), env_template=str(TEMPLATE)))
         records = TP._jsonl(sft / "sft_trajectories.jsonl")
@@ -135,6 +137,111 @@ class BlockedTurnTest(unittest.TestCase):
         TP.cmd_sft_records(Namespace(dir=str(sft)))
         self.assertTrue(all(r["blocked_insert"] is None for r in TP._jsonl(sft / "sft_trajectories.jsonl")))
         self.assertFalse((sft / "sft_trajectories_formal.jsonl").exists())
+
+
+class EscapeTurnTest(unittest.TestCase):
+    """Round 11, decision 5: after the blocked attempt the assistant leaves the obstacle with a move the collision
+    detector picks (not blocked, farther from the obstacle), then follows the shortest path from there.  Planned
+    in sft-frames (its new frames get rendered), built in sft-records, replayed in the RL env."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._tmp.name)
+        cls.scene_dir = write_synthetic_scenes(cls.root / "scenes", with_walls=True)["two_rooms_walls"]
+        cfg = RunConfig(target_tasks_per_scene=10, wall_model="thick", visibility_rule="env", require_structure_walls=True)
+        cls.rows = _jsonable(generate_scene(cls.scene_dir, cls.scene_dir.name, cfg))["rows"]
+        cls.cfg = RC.env_config(TEMPLATE, "http://127.0.0.1:1/render")
+        cls.cfg["gs_root"] = str(cls.scene_dir.parent)
+        cls.patch = mock.patch("vagen.envs.active_spatial.env.ActiveSpatialEnv._render_image", lambda self: FRAME.copy())
+        cls.patch.start()
+        cls.policy = load_policy()
+        cls.policy["sft"]["export"]["blocked_turn_share"] = 1.0  # every task with an escapable blocked move
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.patch.stop()
+        cls._tmp.cleanup()
+
+    def test_escape_moves_leave_the_obstacle(self):
+        from data_gen.interiorgs_v10.contract import pose_from_xy_yaw
+
+        det = load_scene(self.scene_dir, self.scene_dir.name, wall_model="thick").detector
+        pose = pose_from_xy_yaw(0.35, 1.0, np.pi)  # 0.25 m in front of the west wall's inner face, facing it
+        blocked = dict(R.blocked_move_results(det, pose))
+        self.assertIn("move_forward", blocked)
+        esc = R.escape_moves(det, pose, blocked["move_forward"])
+        self.assertEqual(esc[0][0], "move_backward")  # straight away from the wall gains the full step
+        self.assertAlmostEqual(esc[0][1], 0.3, places=6)
+        self.assertNotIn("move_forward", [m for m, _ in esc])
+        self.assertTrue(all(g > 0 for _, g in esc))
+        for m, _ in esc:  # never blocked themselves
+            self.assertFalse(det.check_collision(R.step_pose(pose, m)[:3, 3], previous_position=pose[:3, 3]).has_collision)
+        self.assertLess(R.obstacle_distance(det, blocked["move_forward"], pose[:3, 3]), 0.3)
+
+    def test_planned_rendered_built_and_replayed(self):
+        run = self.root / "run"
+        run.mkdir(exist_ok=True)
+        (run / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in self.rows))
+        manifest = self.root / "split.json"
+        manifest.write_text(json.dumps({"version": 2, "train_scenes": [self.rows[0]["scene_id"]], "val_scenes": [],
+                                        "test_scenes": []}))
+        sft = self.root / "sft"
+        with mock.patch("data_gen.interiorgs_v10.admission.load_policy", lambda: self.policy):
+            TP.cmd_sft_frames(Namespace(run=str(run), split_manifest=str(manifest), splits="train", limit=0, out=str(sft),
+                                        scenes_root=str(self.scene_dir.parent), env_template=str(TEMPLATE), workers=1))
+            rows = TP._jsonl(sft / "rows.jsonl")
+            planned = [r for r in rows if r.get("blocked_plan")]
+            self.assertTrue(planned, "no task had an escapable blocked move")
+            report = json.loads((sft / "sft_frames_report.json").read_text())["blocked"]
+            self.assertEqual(report["blocked_turns"], len(planned))
+            self.assertEqual(report["selected"], len(rows))
+            frames = TP._jsonl(sft / "frames.jsonl")
+            xframes = {(f["task_id"], f["state_id"]) for f in frames if f["state_id"].startswith("x")}
+            for r in planned:
+                plan = r["blocked_plan"]
+                for k in R.plan_frame_states(plan, self.policy):
+                    self.assertIn((r["task_id"], f"x{k}"), xframes)
+                self.assertNotEqual(plan["escape"], plan["move"])
+                bounds = R.turn_boundaries(r, self.policy)
+                self.assertLessEqual(bounds[plan["turn"]] + 2 + len(plan["path"]), 12)  # fits the action limit
+                np.testing.assert_allclose(plan["poses"][0], R.step_pose(R.runtime_poses(r)[bounds[plan["turn"]]],
+                                                                         plan["escape"]), atol=1e-12)
+            (sft / "frames" / "plain").mkdir(parents=True)
+            for f in frames:
+                FRAME.save(sft / "frames" / "plain" / safe_name(f["frame_id"]))
+            TP.cmd_sft_records(Namespace(dir=str(sft)))
+        records = TP._jsonl(sft / "sft_trajectories.jsonl")
+        self.assertEqual(len(records), len(rows))
+        inserted = [r for r in records if r.get("blocked_insert")]
+        self.assertEqual(len(inserted), len(planned))
+        for rec in inserted:
+            ins = rec["blocked_insert"]
+            conv = rec["conversations"]
+            k = 2 * ins["turn"] + 1
+            self.assertEqual(conv[k + 1]["content"], "<action>" + ins["move"] + "|</action>")
+            self.assertEqual(conv[k + 3]["content"], "<action>" + ins["escape"] + "|</action>")
+            self.assertEqual(conv[k]["image_path"], conv[k + 2]["image_path"])         # blocked: the camera stayed
+            self.assertNotEqual(conv[k + 2]["image_path"], conv[k + 4]["image_path"])  # the escape moved it
+            self.assertIn("Environment Feedback: " + collision_feedback([ins["move"]], [(ins["move"], ins["blocked_by"])]),
+                          conv[k + 2]["content"])
+            self.assertIn("Environment Feedback: Action executed.", conv[k + 4]["content"])
+            self.assertEqual(R.scan_leakage(rec, self.policy), [])
+        rep = json.loads((sft / "sft_records_report.json").read_text())
+        self.assertEqual(rep["blocked_turns"], len(inserted))
+        self.assertEqual(rep["assistant_actions"], sum(r["total_actions"] for r in records))
+        # replayed in the env with the round-10/11 rules: identical text and pose every turn, success at the end
+        rows_by_id = {r["task_id"]: r for r in rows}
+        res = RC.sft_replay(inserted, rows_by_id, self.root / "sftcheck", self.cfg, Image.open)
+        s = RC.summarize_sft(res)
+        n = len(inserted)
+        self.assertEqual((s["errors"], s["system_identical"], s["final_success"], s["final_done"], s["early_done"]),
+                         (0, n, n, n, 0))
+        self.assertEqual((s["text_identical"], s["pose_identical"]), (s["user_turns"], s["user_turns"]))
+        # the cap: more than the allowed share of blocked moves stops the export
+        with self.assertRaises(SystemExit):
+            TP.check_blocked_share({"blocked_action_share": 0.031}, self.policy)
+        TP.check_blocked_share({"blocked_action_share": 0.03}, self.policy)
 
 
 if __name__ == "__main__":

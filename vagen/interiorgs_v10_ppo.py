@@ -11,7 +11,10 @@ continues from the latest checkpoint.  The env keeps its default (v10) success r
 ``r1_legacy_success``.
 
 Checkpoints (decision of 2026-10-14): with ``trainer.ckpt_keep_every`` = K, every K-th update's checkpoint is
-kept and of the others only the latest ``trainer.max_actor_ckpt_to_keep`` (``retained_steps``).
+kept and of the others only the latest ``trainer.max_actor_ckpt_to_keep`` (``retained_steps``).  Round 11:
+with ``trainer.ckpt_prune_to_hf`` every kept checkpoint but the newest is cut down to its loadable weights
+(``actor/huggingface``; the optimizer and critic states, about 200 GB each, are only needed to resume from the
+newest one).
 """
 
 from __future__ import annotations
@@ -20,13 +23,35 @@ import argparse
 import os
 import shutil
 from pathlib import Path
-from typing import Iterable, Set
+from typing import Iterable, List, Set
 
 import ray
 from omegaconf import OmegaConf, open_dict
 
 from vagen import main_ppo
 from vagen.ray_trainer import RayPPOTrainer
+
+
+def prune_to_hf(folder: Path) -> List[str]:
+    """Delete everything in a checkpoint folder except ``actor/huggingface`` and the COMPLETE marker; returns the
+    removed paths (relative).  A folder without ``actor/huggingface`` is left alone."""
+    folder = Path(folder)
+    keep = folder / "actor" / "huggingface"
+    if not keep.is_dir():
+        return []
+    removed = []
+    for p in sorted(folder.iterdir()):
+        if p.name == "COMPLETE":
+            continue
+        if p.name == "actor":
+            for q in sorted(p.iterdir()):
+                if q.name != "huggingface":
+                    removed.append(str(q.relative_to(folder)))
+                    shutil.rmtree(q, ignore_errors=True) if q.is_dir() else q.unlink(missing_ok=True)
+            continue
+        removed.append(str(p.relative_to(folder)))
+        shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
+    return removed
 
 
 def retained_steps(steps: Iterable[int], keep_every: int, keep_latest: int) -> Set[int]:
@@ -57,6 +82,13 @@ class EndpointTrainer(RayPPOTrainer):
             if step not in keep and folder.resolve() != Path(current_folder).resolve():
                 print(f"[ckpt-rotate] removing checkpoint {folder} (keeping {sorted(keep)})")
                 shutil.rmtree(folder, ignore_errors=True)
+        if bool(self.config.trainer.get("ckpt_prune_to_hf", False)):
+            newest = max([s for s in complete if s in keep] + [int(self.global_steps)])
+            for step, folder in sorted(complete.items()):
+                if step in keep and step != newest and folder.resolve() != Path(current_folder).resolve():
+                    removed = prune_to_hf(folder)
+                    if removed:
+                        print(f"[ckpt-rotate] {folder}: kept actor/huggingface, removed {removed}")
 
     def fit(self):
         endpoint = int(os.environ["V10_PPO_ENDPOINT"])
