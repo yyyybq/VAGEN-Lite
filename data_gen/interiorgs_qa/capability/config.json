@@ -1,0 +1,32 @@
+{
+  "version": "interiorgs_capability_rules_20261016_v1",
+  "seed": 20261016,
+  "enabled_kinds": ["absolute_distance", "equidistance_closer", "projective_direction", "occlusion_closer", "fov_complete"],
+  "paused_kinds": ["screen_occupancy", "absolute_facing", "action_consequence"],
+  "distance_options_m": [1.5, 2.0, 2.5, 3.0],
+  "distance_extension_step_m": 0.5,
+  "distance_error_to_runner_up_ratio": 0.5,
+  "comparison_same_inset_m": 0.05,
+  "comparison_far_relative_gap": 0.20,
+  "comparison_tolerance_buffer_m": 0.10,
+  "direction_boundary_deg": 45.0,
+  "direction_ambiguity_halfwidth_deg": 10.0,
+  "direction_min_center_gap_px": 24.0,
+  "direction_min_lateral_m": 0.10,
+  "framing_full_min_fraction": 0.995,
+  "framing_full_border_margin_px": 1.0,
+  "framing_cropped_max_fraction": 0.80,
+  "framing_cropped_min_fraction": 0.20,
+  "max_answer_share_multi_option": 0.40,
+  "max_answer_share_two_option": 0.55,
+  "notes_zh": [
+    "所有阈值只是候选筛选范围，不更改环境成功判据。",
+    "每个几何草案都等待实际图片、深度证据及用户审核，不自动进入训练。",
+    "左右与纵深交界的35度至55度区间不出题；画面中心间距不足24像素不出左右题。",
+    "等距的差不多远答案须比环境容差再留0.05米余量；明确远近须超过环境容差0.10米且至少相差较远距离的20%。",
+    "入框几何草案仍需与实际可辨认轮廓及深度一致，不能只凭盒子框放行。",
+    "距离在1.5至3.0米时固定用正式菜单1.5、2.0、2.5、3.0米；仅范围外按正式菜单0.5米间隔扩展窗口。",
+    "答案分布由整批选样统一平衡，本模块不按答案选模板或选项顺序。",
+    "无法满足答案占比上限时记录真实状态的抽样缺口，不为平衡改距离选项或改标签。"
+  ]
+}
