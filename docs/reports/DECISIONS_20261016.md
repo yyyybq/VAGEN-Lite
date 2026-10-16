@@ -7,7 +7,9 @@
 | D1 | (b) 重写 git 历史，**放最后做**，并保存新旧提交号对照表 | 整理分支合并后做；重写前在集群留镜像；对照表写入 `docs/reports/COMMIT_MAP_<日期>.tsv`，文档里引用的提交号同时换成标签 |
 | D2 | 推荐：上游 VAGEN 环境与示例移到 `archive/upstream/` | |
 | D3 | 推荐：轨迹评测统一到 v10 `evaluation.py`，旧评测栈归档 | `evaluation/metrics.py` 里被 `train_chain.py` 用到的部分先并入保留代码 |
-| D4 | **暂缓**：先做 RLinf、StarVLA、EASI 的单卡冒烟，核查各自支持的模型尺寸，再定旁支模型去留和主线用 3B 还是 7B | 冒烟结果写进第二阶段报告 |
+| D4 | 冒烟之后（2026-10-16 晚）定为 **(a)**：Cambrian-S、SenseNova-U1、Qwen3-VL 三条旁支的代码和文档归档，`.venv-qwen3vl` 留在磁盘；实验矩阵的起点模型只有 Qwen2.5-VL | 冒烟结果见 [SMOKE_DOWNSTREAM_20261016.md](SMOKE_DOWNSTREAM_20261016.md)。文档已归档到 `archive/side_models/`；`vagen/models/` 要连同核心训练循环里导入它的分支一起移走，放到第十一轮结束后的代码搬动批次 |
+| 主线尺寸 | **7B**（Qwen2.5-VL-7B-Instruct）；3B 只用于单卡试跑 | 第三、四阶段的默认配置用 7B。RLinf 现有配置接的是 Qwen3-VL-4B 底座的 StarVLA 策略，要换成 Qwen2.5-VL-7B 的策略需要一次 8 卡 StarVLA 训练，属于正式实验，等你安排 |
+| 冒烟残留 | `archive/cluster/_pending_delete/`（45 个条目，230 GB）**删除** | 2026-10-16 已删；逐文件记录 `archive/cluster/DELETED_pending_delete_20261016.tsv` |
 | D5 | 推荐：文本 12 维动作路线代码归档，49 GiB smoke 检查点删除 | |
 | D6 | 推荐：导出 `R1-clean-Projective-v0-taskfix` 第 250 步 HF actor 后删除全部分片；冻结数据、发布 json、报告归档 | |
 | D7a | 推荐：`interiorgs_v10_train_20261014/rl_run` 只留 7 个 HF actor 和日志；按新增第 3 条，第 250 步的续训状态也保留 | |

@@ -14,6 +14,7 @@
 | legacy_text_action/ | LLaMA-Factory 把 12 维动作写成文本的 RoboCasa 路线 | downstream/（StarVLA 连续动作头） |
 | history/docs、history/diagnosis、history/reports | 历史交接文档、诊断报告、9 月组会报告（含两份标明为 plus10pp 的派生情景，不是实测） | docs/EXPERIMENTS.md 历史节 |
 | tests/ | 只对归档代码有意义的测试 | tests/ |
+| side_models/ | Cambrian-S、SenseNova-U1、Qwen3-VL 三条旁支模型的文档和 Qwen3-VL 环境检查脚本（决定 D4 选 a）。适配代码 `vagen/models/` 还在原位：核心训练循环里有按模型类型才走到的分支会导入它，要连同这些分支一起移走，放在第十一轮结束后的代码搬动批次。`.venv-qwen3vl` 留在集群磁盘上，4 个 Cambrian 历史权重留在 `models/historical/`（D10） | 主线只用 Qwen2.5-VL，正式实验用 7B |
 | cluster/（只在集群，不入 git） | 实验残留、旧评测结果、日志，见 cluster/MANIFEST_moves_20261016.tsv | — |
 
 集群 `archive/cluster/` 里小文件多的类目（logs、results_legacy、data_intermediate、experiments_legacy_runs、r1、diagnostics_d0_u1、misc）已按条目压成 `<条目>.tar.gz`，原目录在压缩成功后删除。122 个条目从 41.6 GB 压到 19.8 GB，每条的压缩前后大小和 SHA-256 见 `cluster/MANIFEST_compressed_20261016.tsv`。还原一条：`tar -xzf <条目>.tar.gz -C <所在目录>`。存权重的大目录（clean_runs_aug、dense_score_pilot、interiorgs_v10_rounds、_pending_delete）没有压缩：内容主要是浮点张量，压不了多少还很费时。
@@ -485,3 +486,16 @@
 | exps/vagen_active_spatial/{R1-clean-Projective-v0,r1_h1_aoss_repair_20260905}（被跟踪的 57 个文件） | r1/exps_artifacts/ | 2026-09 至 10-01 | R1 报告、哈希清单、启动脚本 |
 | vagen/envs/{sokoban,frozenlake,navigation,primitive_skill,spatial_gym}、vagen/inference、examples/{train,evaluate}/{同名} 、docs/{index,quickstart,configuration,custom-*,issues}.md | upstream/ | 2026-02 至 06 | 上游 VAGEN |
 | mkdocs.yml、.readthedocs.yaml、docs/requirements.txt | 已删除（决定 D12） | 2026-10-10 | 上游文档站配置 |
+
+## 逐文件清单（第二批，2026-10-16，决定 D4 的文档部分）
+
+| 原路径 | 现位置 | 最后提交 | 说明 |
+| --- | --- | --- | --- |
+| docs/active_spatial_qwen3vl_migration.md | archive/side_models/docs/ | 2026-10-06 | Qwen3-VL 迁移说明 |
+| docs/model_backbone_integration.md | archive/side_models/docs/ | 2026-08-31 | Qwen / Cambrian-S 接入说明 |
+| docs/cambrian_iteration.md | archive/side_models/docs/ | 2026-06-14 | Cambrian-S 实验记录 |
+| docs/cambrian_s_new_server_smoke_handoff.md | archive/side_models/docs/ | 2026-08-31 | Cambrian-S 新机器 smoke 交接 |
+| docs/sensenova_u1_active_spatial.md | archive/side_models/docs/ | 2026-10-10 | SenseNova-U1 接入说明 |
+| scripts/check_qwen3_vl_env.py | archive/side_models/scripts/ | 2026-10-06 | Qwen3-VL 环境检查，只被上面的迁移说明引用 |
+
+README、`docs/active_spatial.md`、`docs/active_spatial_end_to_end.md` 里指向这些文档的链接已改到归档位置。
