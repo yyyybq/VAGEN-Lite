@@ -7,6 +7,10 @@ import random
 import re
 
 
+TEMPLATE_VERSION = "v2"
+SYMMETRIC_KINDS = frozenset(("equidistance_closer", "occlusion_closer"))
+
+
 TEMPLATES = {
     "absolute_distance": (
         "About how far are you from {a}, measured horizontally to its nearest side?",
@@ -24,9 +28,9 @@ TEMPLATES = {
         "Compare your horizontal distances to {a} and {b}: which nearest side is closer?",
     ),
     "projective_direction": (
-        "From your viewpoint, where is {a} relative to {b}?",
+        "From your viewpoint, in which main direction is {a} relative to {b}?",
         "Looking from your current position, which direction best describes {a} relative to {b}?",
-        "In this view, is {a} to the left, to the right, in front of, or behind {b}?",
+        "In this view, is {a} mainly to the left, to the right, in front of, or behind {b}?",
     ),
     "fov_complete": (
         "Are {a} and {b} both fully inside the image, without being cut off by its edges?",
@@ -57,20 +61,40 @@ def _identity(identity):
         raise ValueError("sampling identity must be JSON-compatible")
 
 
+def _mention_roles(kind, identity, seed):
+    """One answer-independent draw, separate from wording/option-order RNG."""
+    material = json.dumps({"seed": seed, "identity": identity, "kind": kind,
+                           "purpose": "symmetric_mention_order_v2"},
+                          sort_keys=True, ensure_ascii=False, allow_nan=False)
+    rng = random.Random(int.from_bytes(hashlib.sha256(material.encode()).digest(), "big"))
+    return ["b", "a"] if rng.randrange(2) else ["a", "b"]
+
+
 def render_draft(draft: dict, identity, seed: int) -> dict:
     """Use only opaque state identity, kind and seed to choose wording/order.
 
     ``options`` contains strings; parallel ``option_keys`` retain semantic keys.
-    ``answer`` is one letter.
+    ``answer`` is one letter. ``source_answer_key`` keeps the formal object roles;
+    returned answer/option keys refer to the presented mention order for the
+    two symmetric nearer-object kinds only. No source draft is mutated.
     No correctness, geometric measurements or answer values enter the RNG seed.
     """
     _identity(identity)
-    kind, fields = draft["kind"], draft["fields"]
+    kind, fields = draft["kind"], dict(draft["fields"])
     if kind not in TEMPLATES:
         raise ValueError("template kind is not enabled")
     keys = list(draft["option_keys"])
     if len(keys) != len(set(keys)) or draft["answer_key"] not in keys:
         raise ValueError("invalid option keys or answer key")
+    source_answer_key = answer_key = draft["answer_key"]
+    mentioned_roles = ["a", "b"] if "b" in fields else ["a"]
+    if kind in SYMMETRIC_KINDS:
+        mentioned_roles = _mention_roles(kind, identity, seed)
+        if mentioned_roles == ["b", "a"]:
+            fields["a"], fields["b"] = fields["b"], fields["a"]
+            mapping = {"a_closer": "b_closer", "b_closer": "a_closer", "same": "same"}
+            keys = [mapping[key] for key in keys]
+            answer_key = mapping[answer_key]
     material = json.dumps({"seed": seed, "identity": identity, "kind": kind}, sort_keys=True, ensure_ascii=False, allow_nan=False)
     rng = random.Random(int.from_bytes(hashlib.sha256(material.encode()).digest(), "big"))
     template_index = rng.randrange(len(TEMPLATES[kind]))
@@ -98,5 +122,6 @@ def render_draft(draft: dict, identity, seed: int) -> dict:
         rng.shuffle(keys)
     options = [texts[key] for key in keys]
     return {"question": TEMPLATES[kind][template_index].format(**fields) + " Answer with one option letter only.",
-            "options": options, "option_keys": keys, "answer": chr(65+keys.index(draft["answer_key"])),
-            "answer_key": draft["answer_key"], "template_id": f"{kind}_v1_{template_index}"}
+            "options": options, "option_keys": keys, "answer": chr(65+keys.index(answer_key)),
+            "source_answer_key": source_answer_key, "mentioned_object_roles": mentioned_roles,
+            "answer_key": answer_key, "template_id": f"{kind}_{TEMPLATE_VERSION}_{template_index}"}

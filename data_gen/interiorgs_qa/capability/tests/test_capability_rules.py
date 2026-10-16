@@ -2,6 +2,7 @@
 import copy
 import json
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -191,6 +192,66 @@ class DraftRulesTests(unittest.TestCase):
 
 
 class TemplateTests(unittest.TestCase):
+    def test_symmetric_swap_preserves_true_object_options_and_source_draft(self):
+        for kind in ("equidistance_closer", "occlusion_closer"):
+            draft = {"kind": kind, "fields": {"a": "the chair", "b": "the bed"},
+                     "answer_key": "b_closer", "option_keys": ["a_closer", "b_closer"] +
+                     (["same"] if kind == "equidistance_closer" else [])}
+            original = copy.deepcopy(draft)
+            for source_answer in draft["option_keys"]:
+                draft["answer_key"] = source_answer
+                with patch.object(templates, "_mention_roles", return_value=["a", "b"]):
+                    plain = templates.render_draft(draft, "opaque", 2)
+                with patch.object(templates, "_mention_roles", return_value=["b", "a"]):
+                    swapped = templates.render_draft(draft, "opaque", 2)
+                self.assertEqual(plain["options"], swapped["options"])
+                self.assertEqual(plain["answer"], swapped["answer"])
+                self.assertEqual(swapped["source_answer_key"], source_answer)
+                mapping = {"a_closer": "b_closer", "b_closer": "a_closer", "same": "same"}
+                self.assertEqual(swapped["answer_key"], mapping[source_answer])
+                self.assertEqual(swapped["option_keys"], [mapping[k] for k in plain["option_keys"]])
+                self.assertLess(swapped["question"].find("the bed"), swapped["question"].find("the chair"))
+                answer_text = swapped["options"][ord(swapped["answer"])-65]
+                if source_answer != "same":
+                    self.assertIn(original["fields"][source_answer[0]], answer_text)
+                self.assertIn("_v2_", swapped["template_id"])
+            draft["answer_key"] = original["answer_key"]
+            self.assertEqual(draft, original)
+
+    def test_symmetric_mention_order_wording_and_options_do_not_read_answer(self):
+        for kind in ("equidistance_closer", "occlusion_closer"):
+            draft = {"kind": kind, "fields": {"a": "the chair", "b": "the bed"},
+                     "answer_key": "b_closer", "option_keys": ["a_closer", "b_closer"] +
+                     (["same"] if kind == "equidistance_closer" else [])}
+            seen = set()
+            for seed in range(60):
+                baseline = templates.render_draft(draft, {"state_id": "opaque"}, seed)
+                seen.add(tuple(baseline["mentioned_object_roles"]))
+                for source_answer in draft["option_keys"]:
+                    changed = copy.deepcopy(draft)
+                    changed["answer_key"] = source_answer
+                    actual = templates.render_draft(changed, {"state_id": "opaque"}, seed)
+                    for key in ("question", "options", "option_keys", "mentioned_object_roles", "template_id"):
+                        self.assertEqual(actual[key], baseline[key])
+                    self.assertEqual(actual["source_answer_key"], source_answer)
+            self.assertEqual(seen, {("a", "b"), ("b", "a")})
+
+    def test_nonsymmetric_kinds_never_request_mention_swap(self):
+        examples = [
+            ("absolute_distance", ["distance_0", "distance_1", "distance_2", "distance_3"],
+             {"a": "the chair", "distance_options_m": [1.5, 2., 2.5, 3.]}),
+            ("projective_direction", ["left", "right", "front", "behind"], {"a": "the chair", "b": "the bed"}),
+            ("fov_complete", ["both", "a_only", "b_only", "neither"], {"a": "the chair", "b": "the bed"}),
+            ("occlusion_state", ["fully_hidden", "partly_hidden", "not_hidden", "outside"], {"a": "the chair", "b": "the bed"}),
+        ]
+        with patch.object(templates, "_mention_roles", side_effect=AssertionError("unexpected swap")):
+            for kind, keys, fields in examples:
+                result = templates.render_draft({"kind": kind, "fields": fields,
+                                                 "answer_key": keys[0], "option_keys": keys}, "opaque", 8)
+                self.assertEqual(result["source_answer_key"], keys[0])
+                self.assertEqual(result["answer_key"], keys[0])
+                self.assertEqual(result["mentioned_object_roles"], ["a", "b"] if "b" in fields else ["a"])
+
     def test_answer_does_not_choose_wording_or_option_order(self):
         task, measured = measured_fixture("projective_relations")
         draft = rules.propose(task, measured)[0][0]
