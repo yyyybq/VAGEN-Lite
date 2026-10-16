@@ -256,6 +256,39 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertFalse(any(r.get("reserve") for r in TP._jsonl(out / "val.jsonl")))
         report = json.loads((out / "rl_config_report.json").read_text())
         self.assertEqual(report["reserve_rows_skipped"], sum(1 for r in marked if r["reserve"]))
+        self.assertEqual(report["task_pool"], "formal")
+
+        # round 11: --task-pool reserve trains on the reserve tasks only (val stays formal); the SFT conversations
+        # and the depth-check flags are checked against the train tasks
+        reserve = [r for r in marked if r["split"] == "train" and r["reserve"]]
+        formal = [r for r in marked if r["split"] == "train" and not r["reserve"]]
+        sft_conv = self.root / "sft_conv_formal.jsonl"
+        sft_conv.write_text("".join(json.dumps({"source_task_id": r["task_id"]}) + "\n" for r in formal))
+        flags = self.root / "depth_flags.json"
+        flags.write_text(json.dumps({"flagged_task_ids": ["not_a_train_task"]}))
+
+        def config(out_name, **kw):
+            TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
+                Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
+                gs_root="/ply", model="/m", name="t", run_root=str(self.root / "rl_run_pool"), val_limit=0,
+                trial=False, out=str(self.root / out_name), **kw))
+            return self.root / out_name
+
+        out = config("rl_pool_reserve", task_pool="reserve", sft_trajectories=[str(sft_conv)], exclude=str(flags))
+        self.assertEqual([r["task_id"] for r in TP._jsonl(out / "train.jsonl")], [r["task_id"] for r in reserve])
+        self.assertTrue(reserve)
+        self.assertFalse(any(r.get("reserve") for r in TP._jsonl(out / "val.jsonl")))
+        report = json.loads((out / "rl_config_report.json").read_text())
+        self.assertEqual((report["task_pool"], report["sft_overlap"], report["sft_tasks_checked"],
+                          report["depth_flagged_in_train"], report["depth_flagged_checked"]),
+                         ("reserve", 0, len(formal), 0, 1))
+        self.assertEqual(sum(report["by_family_train"].values()), len(reserve))
+        # a train task that SFT trained on, or one the depth check flagged, stops the configuration
+        with self.assertRaises(SystemExit):
+            config("rl_pool_formal_vs_sft", task_pool="formal", sft_trajectories=[str(sft_conv)])
+        flags.write_text(json.dumps({"flagged_task_ids": [reserve[0]["task_id"]]}))
+        with self.assertRaises(SystemExit):
+            config("rl_pool_flagged", task_pool="reserve", exclude=str(flags))
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

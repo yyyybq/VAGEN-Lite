@@ -362,6 +362,7 @@ CONCAT_RESPONSE_LENGTH = 4096  # 12 turns x (81 image tokens + ~150 text + the a
 # The system prompt stays the SFT one for both (its reward lines describe the sparse terms), so the two runs
 # differ only in the reward.
 REWARD_PRESETS = ("S0", "dense")
+TASK_POOLS = ("formal", "reserve")  # which train tasks RL takes (round 11: reserve, the tasks SFT never saw)
 DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
             "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,
             "enable_visibility_shaping_reward": True}
@@ -424,11 +425,31 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     rows = _jsonl(Path(args.rows))
-    # RL trains on the formal tasks of train; reserve rows (sft-frames --include-reserve) are SFT-only, as the task
-    # registry says (round 10: the first RL run with reserve rows in rows.jsonl took them too)
-    parts = {"train": [r for r in rows if r.get("split") == "train" and not r.get("reserve")],
+    # Which tasks RL trains on (the train split of rows.jsonl).  Round 10: the formal tasks only (the first run with
+    # reserve rows in rows.jsonl took them too).  Round 11 (the user's decision): the tasks RL trains on must be ones
+    # SFT never trained on; SFT takes the formal tasks, so RL takes the reserve tasks (--task-pool reserve, rows
+    # from sft-frames --include-reserve).  Validation rows stay formal.
+    pool = getattr(args, "task_pool", None) or "formal"
+    if pool not in TASK_POOLS:
+        raise SystemExit(f"--task-pool must be one of {TASK_POOLS}")
+    parts = {"train": [r for r in rows if r.get("split") == "train" and bool(r.get("reserve")) == (pool == "reserve")],
              "val": [r for r in rows if r.get("split") == "val" and not r.get("reserve")]}
-    reserve_skipped = sum(1 for r in rows if r.get("reserve") and r.get("split") in ("train", "val"))
+    reserve_skipped = sum(1 for r in rows if r.get("reserve") and r.get("split") in ("train", "val")) \
+        if pool == "formal" else 0
+    # the checks of the rule: no train task in the SFT conversations, none flagged by the depth check
+    sft_ids = set()
+    for path in getattr(args, "sft_trajectories", None) or []:
+        sft_ids |= {r["source_task_id"] for r in _jsonl(Path(path))}
+    overlap = sorted(r["task_id"] for r in parts["train"] if r["task_id"] in sft_ids)
+    if overlap:
+        raise SystemExit(f"{len(overlap)} RL train tasks are in the SFT conversations (e.g. {overlap[:3]}): RL must "
+                         "train on tasks SFT never trained on")
+    flagged = set(json.loads(Path(args.exclude).read_text())["flagged_task_ids"]) if getattr(args, "exclude", None) \
+        else set()
+    flagged_in_train = sorted(r["task_id"] for r in parts["train"] if r["task_id"] in flagged)
+    if flagged_in_train:
+        raise SystemExit(f"{len(flagged_in_train)} RL train tasks are flagged by the depth check (e.g. "
+                         f"{flagged_in_train[:3]})")
     val_tasks = getattr(args, "val_tasks", None)
     if val_tasks:  # round 10: the fixed validation set (evaluation.py select --split val), published rows
         parts["val"] = [dict(r, split="val") for r in _jsonl(Path(val_tasks))]
@@ -510,6 +531,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "train_batch_size": (ppo.get("data") or {}).get("train_batch_size"),
               "save_freq": ppo["trainer"].get("save_freq"),
               "reserve_rows_skipped": reserve_skipped,
+              "task_pool": pool,
+              "sft_tasks_checked": len(sft_ids), "sft_overlap": len(overlap),
+              "depth_flagged_checked": len(flagged), "depth_flagged_in_train": len(flagged_in_train),
+              "train_scenes": len({r["scene_id"] for r in parts["train"]}),
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
@@ -563,6 +588,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--save-freq", type=int, default=None,
                    help="a checkpoint every N updates, all kept; the older ones keep only actor/huggingface")
     c.add_argument("--no-internal-val", action="store_true", help="no validation inside training")
+    c.add_argument("--task-pool", choices=TASK_POOLS, default="formal",
+                   help="round 11: the train tasks RL takes: formal (rounds 6-10) or reserve (rows from sft-frames "
+                        "--include-reserve; the rule since round 11: RL trains on tasks SFT never trained on)")
+    c.add_argument("--sft-trajectories", nargs="*", default=None,
+                   help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
+    c.add_argument("--exclude", default=None,
+                   help="depth_check_summary.json: no RL train task may be among its flagged tasks")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--out", required=True)
     args = ap.parse_args(argv)
