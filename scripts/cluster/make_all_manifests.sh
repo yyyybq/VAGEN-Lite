@@ -19,8 +19,8 @@ for s in 50 100 150 175 200 225 250; do
 done
 mk --kind model --name interiorgs_v10_sft_r5_qwen25vl3b --path models/interiorgs_v10_sft_r5_qwen25vl3b --source exps/vagen_active_spatial/interiorgs_v10_r5_20261014/trial --note "round 5 one-card trial: Qwen2.5-VL-3B SFT; used by the round-10 one-card RL pilots"
 for m in models/historical/*/; do n=$(basename "$m"); mk --kind model --name "$n" --path "$m" --note "historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md"; done
-for m in models/base/*/; do n=$(basename "$m"); mk --kind model --name "$n" --path "$m" --note "base model (HF hub snapshot)"; done
+for m in models/base/*/; do n=$(basename "$m"); mk --kind model --name "$n" --path "$m" --out "models/base/$n.manifest.json" --note "base model (HF hub snapshot); the manifest sits beside the link so the HF cache stays untouched"; done
 # results
 mk --kind result --name interiorgs_v10_r8_eval2 --path results/interiorgs_v10_r8_eval2 --source exps/vagen_active_spatial/interiorgs_v10_r8_20261014 --note "round 8: all 10 models on the 278-task eval set, with per-step trajectories; table.md"
 mk --kind result --name interiorgs_v10_r9_eval_diag --path results/interiorgs_v10_r9_eval_diag --source exps/vagen_active_spatial/interiorgs_v10_r9_20261015 --note "round 9: diagnostic evaluation D1-D7 (rule switches) of SFT epoch 3"
-echo "manifests written: $(find data/releases models results -maxdepth 2 -name manifest.json 2>/dev/null | wc -l)"
+echo "manifests written: $(find -L data/releases models results -maxdepth 3 -name manifest.json -o -name "*.manifest.json" 2>/dev/null | wc -l)"
