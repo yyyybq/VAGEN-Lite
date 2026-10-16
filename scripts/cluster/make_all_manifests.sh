@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Write manifest.json for every fixed-location dataset, model and result entry (cleanup task, 2026-10).
-# Run from the repo root on the cluster. Idempotent; re-run after new entries are added.
+# Run on the cluster; ROOT=<checkout> picks the checkout whose data/releases, models/, results/ get manifests. Idempotent; re-run after new entries are added.
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# ROOT: the checkout that holds data/releases, models/ and results/ (default: the repo this script lives in)
+ROOT=${ROOT:-$(cd "$HERE/../.." && pwd)}
+cd "$ROOT"
 PY=${PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python}
-mk() { "$PY" scripts/cluster/make_manifest.py "$@" | tail -1; }
+mk() { "$PY" "$HERE/make_manifest.py" --repo "$ROOT" "$@" | tail -1; }
 # datasets
 mk --kind dataset --name interiorgs_v10_tasks_r10 --path data/releases/interiorgs_v10_tasks_r10 --note "round 10 generator (thick walls, generation_r10_20261015.json): formal + reserve tasks, split_manifest, sft frame lists"
 mk --kind dataset --name interiorgs_v10_tasks_r6b --path data/releases/interiorgs_v10_tasks_r6b --note "round 6b generator (generation_r6_20261014.json); data of the first SFT/RL (interiorgs_v10_train_20261014)"
