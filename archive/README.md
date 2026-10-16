@@ -16,6 +16,8 @@
 | tests/ | 只对归档代码有意义的测试 | tests/ |
 | cluster/（只在集群，不入 git） | 实验残留、旧评测结果、日志，见 cluster/MANIFEST_moves_20261016.tsv | — |
 
+集群 `archive/cluster/` 里小文件多的类目（logs、results_legacy、data_intermediate、experiments_legacy_runs、r1、diagnostics_d0_u1、misc）已按条目压成 `<条目>.tar.gz`，原目录在压缩成功后删除。122 个条目从 41.6 GB 压到 19.8 GB，每条的压缩前后大小和 SHA-256 见 `cluster/MANIFEST_compressed_20261016.tsv`。还原一条：`tar -xzf <条目>.tar.gz -C <所在目录>`。存权重的大目录（clean_runs_aug、dense_score_pilot、interiorgs_v10_rounds、_pending_delete）没有压缩：内容主要是浮点张量，压不了多少还很费时。
+
 ## 逐文件清单（第一批，2026-10-16）
 
 | 原路径 | 现位置 | 最后提交 | 说明 |
