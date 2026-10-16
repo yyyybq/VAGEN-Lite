@@ -205,8 +205,13 @@ class TrainingPrepTest(unittest.TestCase):
             outs[preset] = out
         envs = {p: yaml.safe_load((o / "train_env.yaml").read_text())["envs"][0]["config"] for p, o in outs.items()}
         ppo = yaml.safe_load((outs["dense"] / "ppo.yaml").read_text())
-        for key, value in TP.DENSE_S5.items():
+        for key, value in TP.reward_overrides("dense").items():
             self.assertEqual(envs["dense"][key], value)
+        # the S5 shaping, then the round-11 adjustments: progress term x10, the two terms that never pay off
+        self.assertEqual((envs["dense"]["potential_field_gamma"], envs["dense"]["potential_field_reward_scale"]), (0.99, 10.0))
+        self.assertTrue(envs["dense"]["enable_potential_shaping_reward"])
+        self.assertFalse(envs["dense"]["enable_near_success_reward"])
+        self.assertFalse(envs["dense"]["enable_visibility_shaping_reward"])
         self.assertFalse(envs["S0"]["enable_potential_shaping_reward"])
         differ = sorted(k for k in set(envs["S0"]) | set(envs["dense"]) if envs["S0"].get(k) != envs["dense"].get(k)
                         and k != "jsonl_path")

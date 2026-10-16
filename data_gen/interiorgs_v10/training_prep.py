@@ -351,13 +351,22 @@ CONCAT_RESPONSE_LENGTH = 4096  # 12 turns x (81 image tokens + ~150 text + the a
 # it (exps/.../dense_score_reward_only_pilot_parallel_r3_20261009/frozen/configs/S5.train.yaml): progress
 # shaping on the canonical metric's 0..1 progress (potential mode, gamma 0.99), a bonus while that progress is
 # at least near_success_threshold, and the visibility shaping.  DENSE_ADJUST holds the changes made after the
-# round-11 pilot (empty until then).  The system prompt stays the SFT one for both (its reward lines describe
-# the sparse terms), so the two runs differ only in the reward.
+# round-11 checks of the reward in the env (shortest paths of 120 formal train tasks, no rendering):
+#   potential_field_reward_scale 10   at scale 1 the progress term adds +0.014 on average over a whole shortest
+#                                     path (at most 0.37), below 1% of the success reward 5 and of the order of
+#                                     the step penalty; at 10: +0.14 on average, up to 3.7, turning in place -0.16;
+#   enable_near_success_reward off    the bonus needs the potential (half the 0..1 progress, which is capped while
+#                                     the task is unmet) at 0.55 or more, never reached before success: it never
+#                                     pays; lowered, it would pay every turn spent next to the goal (hovering);
+#   enable_visibility_shaping_reward off  inactive for v10 tasks (it needs a single target centre): off says so.
+# The system prompt stays the SFT one for both (its reward lines describe the sparse terms), so the two runs
+# differ only in the reward.
 REWARD_PRESETS = ("S0", "dense")
 DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
             "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,
             "enable_visibility_shaping_reward": True}
-DENSE_ADJUST: Dict[str, Any] = {}
+DENSE_ADJUST: Dict[str, Any] = {"potential_field_reward_scale": 10.0, "enable_near_success_reward": False,
+                                "enable_visibility_shaping_reward": False}
 
 
 def reward_overrides(preset: str) -> Dict[str, Any]:
