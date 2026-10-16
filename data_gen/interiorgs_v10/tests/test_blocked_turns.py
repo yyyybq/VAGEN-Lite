@@ -227,6 +227,11 @@ class EscapeTurnTest(unittest.TestCase):
                           conv[k + 2]["content"])
             self.assertIn("Environment Feedback: Action executed.", conv[k + 4]["content"])
             self.assertEqual(R.scan_leakage(rec, self.policy), [])
+        # every record binds to its parent in the task registry (prepare_active_spatial_sft.py refuses a mismatch;
+        # the first round-11 chain run stopped there: the escape records hashed the row without its plan)
+        registry = {r["task_id"]: r for r in TP._jsonl(sft / "task_registry.jsonl")}
+        self.assertEqual([r["source_task_id"] for r in records
+                          if r["source_task_sha256"] != registry[r["source_task_id"]]["source_task_sha256"]], [])
         rep = json.loads((sft / "sft_records_report.json").read_text())
         self.assertEqual(rep["blocked_turns"], len(inserted))
         self.assertEqual(rep["assistant_actions"], sum(r["total_actions"] for r in records))

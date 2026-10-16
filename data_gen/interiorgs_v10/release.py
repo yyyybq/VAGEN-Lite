@@ -690,7 +690,8 @@ def _escape_record(raw_row: Mapping[str, Any], images: Mapping[str, str], policy
     actions = list(cert[: bounds[t]]) + [plan["move"], plan["escape"]] + path
     record: Dict[str, Any] = {
         "id": f"sft_{tid}", "source_task_id": tid, "parent_task_id": tid,
-        "source_task_sha256": row_digest({k2: v for k2, v in raw_row.items() if k2 != "blocked_plan"}),
+        # the row as published in rows.jsonl, plan included: the task registry is written from those rows
+        "source_task_sha256": row_digest(dict(raw_row)),
         "source_versions": {k2: raw_row.get(k2) for k2 in VERSION_KEYS},
         "scene_id": str(raw_row["scene_id"]), "split": raw_row["split"], "task_type": raw_row.get("task_type"),
         "task_description": desc, "success": True,
