@@ -1,9 +1,5 @@
 env_registry:
   # Local environments
-  Sokoban: vagen.envs.sokoban.sokoban_env.Sokoban
-  FrozenLake: vagen.envs.frozenlake.frozenlake_env.FrozenLake
-  SpatialGym: vagen.envs.spatial_gym.spatial_gym_env.SpatialGym
-  PrimitiveSkill: vagen.envs.primitive_skill.primitive_skill_env.PrimitiveSkillEnv
   # Active Spatial Navigation (local, in-process)
   ActiveSpatial: vagen.envs.active_spatial.active_spatial_env.ActiveSpatialGymEnv
   SpatialMCQ: vagen.envs.spatial_mcq.spatial_mcq_env.SpatialMCQEnv
