@@ -31,6 +31,7 @@
 - **RL（R11-RS0 稀疏、R11-RD 密集）**：后备题、起点 SFT 第 6 个 epoch（第 9 个 epoch 起步时信号检查没通过），300 次。验证集 37%–41%，和起点 38.7% 持平；两者之间也没有差别。检查点 `rl_run_{rs0,rd}/checkpoints/global_step_{50,...,300}`（只留权重）。
 - **评测结果**：`interiorgs_v10_r11_20261016/eval_val400/`（398 道 val 题，以后固定用它）、`eval_test/`（279 道 test 题，和第十轮同一套）、`eval_train200/`（198 道 SFT 训练题），表 `table.md`；分析在 `analysis/`。详见 `cluster_runs/REPORT_R11_20261016.md`。
 - **修正包 RL（R11-PS0、R11-PD）**：`exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/`，2026-10-17 11:58 UTC 起在跑。
+- **评测轨迹浏览页：** 本机双击 `exps/interiorgs_v10_eval_browser_r11_20261017/index.html`（279 道评测题 × 7 个模型，默认左边第十轮最终模型、右边本轮 SFT 第 9 个 epoch）；集群 `interiorgs_v10_r11_20261016/browser/`。
 
 **实验编号**（第十一轮起每次训练一个编号，以后沿用 `R<轮>-<名称>[-A<第几次尝试>]`）：
 
