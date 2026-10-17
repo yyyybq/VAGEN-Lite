@@ -12,7 +12,8 @@ Each failed episode gets one primary failure mode, the first that applies in thi
   low_info_end   ended by 3 near-uniform frames in a row (e.g. facing a wall)
   near_miss      at some turn exactly one success condition was unmet (the env's gates), but never none
   went_backwards progress at the end below the start
-  oscillating    the turns alternate opposite moves (turn_left/turn_right or forward/backward) 2+ times
+  oscillating    the turns alternate opposite moves (turn_left/turn_right or forward/backward) 2+ times; since
+                 round 11 backing off from a blocked move does not count (backs_off)
   wandered       none of the above: the budget ran out without getting close
 
 plus the success conditions still unmet at the end (the env's gate names) and blocked moves per failure.  The
@@ -83,11 +84,22 @@ def blocked_reaction(traj: Sequence[Dict[str, Any]]) -> collections.Counter:
     return c
 
 
+def backs_off(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    """Round 11: turn b starts by backing off from a move blocked in turn a (the opposite of a blocked move named
+    in b's feedback line, or of a's last action when the feedback names none) - what the round-11 blocked-turn
+    samples teach, not oscillation."""
+    if not int(a.get("collisions") or 0) or not b.get("actions"):
+        return False
+    blocked = blocked_in_feedback(b.get("user") or "") or list(a.get("actions") or [])[-1:]
+    return any((m, b["actions"][0]) in OPP for m in blocked)
+
+
 def flips(traj: Sequence[Dict[str, Any]]) -> int:
-    """How often a turn's first action undoes the previous turn's last action."""
+    """How often a turn's first action undoes the previous turn's last action, not counting backing off from a
+    blocked move (round 11, ``backs_off``)."""
     n = 0
     for a, b in zip(traj, traj[1:]):
-        if a.get("actions") and b.get("actions") and (a["actions"][-1], b["actions"][0]) in OPP:
+        if a.get("actions") and b.get("actions") and (a["actions"][-1], b["actions"][0]) in OPP and not backs_off(a, b):
             n += 1
     return n
 

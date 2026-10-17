@@ -58,6 +58,26 @@ class FailAnalysisTest(unittest.TestCase):
             table = out.with_suffix(".md").read_text(encoding="utf-8")
             self.assertIn("| 第十轮 | 4 | 3 | 1（25.0%） | 1（25.0%） | 1（25.0%） |", table)
 
+    def test_backing_off_is_not_oscillation(self):
+        """Round 11: the move away from an obstacle right after a blocked move is what the blocked-turn samples
+        teach; it no longer counts as a flip of the oscillating mode."""
+        fb = "blocked: move_backward (blocked by wall)."
+        t = lambda acts, blocked=0, user="": dict(turn(acts, ["a", "b"], 0.3), collisions=blocked, user=user)  # noqa: E731
+        back_off = [t(["move_backward"], blocked=1), t(["move_forward"], user=fb),
+                    t(["move_backward"], blocked=1), t(["move_forward"], user=fb)]
+        self.assertTrue(F.backs_off(back_off[0], back_off[1]))
+        self.assertEqual(F.flips(back_off), 1)  # only turn 2 -> 3 (move_forward then move_backward) is a flip
+        self.assertNotEqual(F.mode(row(0, "f", False, traj=back_off)), "oscillating")
+        # without a blocked move the same alternation is oscillation; a reversal of an unblocked move too
+        free = [t(["move_backward"]), t(["move_forward"]), t(["move_backward"]), t(["move_forward"])]
+        self.assertEqual(F.flips(free), 3)
+        self.assertEqual(F.mode(row(0, "f", False, traj=free)), "oscillating")
+        other = [t(["move_backward", "move_left"], blocked=1), t(["move_right"], user=fb)]
+        self.assertFalse(F.backs_off(other[0], other[1]))  # move_right undoes move_left, not the blocked move_backward
+        self.assertEqual(F.flips(other), 1)
+        # feedback without named moves (older rules): the last action of the blocked turn is taken as blocked
+        self.assertTrue(F.backs_off(t(["turn_left", "move_left"], blocked=1), t(["move_right"], user="Action blocked by collision.")))
+
     def test_blocked_reaction_and_focus(self):
         """Round 11: the turn after a blocked move (repeat / back off / blocked again) and the three conditions."""
         fb = "Environment Feedback: 1 of 2 actions executed; blocked: move_backward (blocked by wall).\n"
