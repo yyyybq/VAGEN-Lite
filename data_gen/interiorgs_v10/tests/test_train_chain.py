@@ -563,6 +563,101 @@ class ChainTest(unittest.TestCase):
             self.assertFalse(any(k.startswith("val400__sft_formal") for k in got))
             self.assertIsNone(chain.sft_epoch_model("sft_formal_e9"))
 
+    def test_guard_reason(self):
+        """Round 11: the user's stop conditions for the optimisation-package runs."""
+        guards = {"kl_max": 0.2, "invalid_max": 0.05, "invalid_window": 3, "success_drop": 0.10, "drop_window": 4,
+                  "start_updates": 2}
+        line = lambda s, succ=0.5, kl=0.01, inv=0.0, extra="": (  # noqa: E731
+            f"(Runner) step:{s} - episode/success_rate:{succ} - actor/kl_loss:np.float64({kl}) - "
+            f"transition/invalid_action_rate/mean:{inv}{extra}\n")
+        ok = "".join(line(s) for s in range(1, 8))
+        self.assertIsNone(T.guard_reason(ok, guards))
+        self.assertIsNone(T.guard_reason("", guards))
+        self.assertIn("NaN in actor/pg_loss at update 3",
+                      T.guard_reason(ok + line(3, extra=" - actor/pg_loss:np.float64(nan)"), guards))
+        self.assertIsNone(T.guard_reason(ok + line(8, extra=" - val-core/x:nan"), guards))  # other metrics: not a stop
+        self.assertIn("KL to the start model 0.250", T.guard_reason(ok + line(8, kl=0.25), guards))
+        self.assertIsNone(T.guard_reason(ok + line(8, kl=0.15), guards))
+        # unparseable answers: the mean of the last 3 updates
+        self.assertIsNone(T.guard_reason(ok + line(8, inv=0.12), guards))  # (0 + 0 + 0.12) / 3 = 0.04
+        self.assertIn("unparseable answers 0.070", T.guard_reason(ok + line(8, inv=0.1) + line(9, inv=0.11), guards))
+        # training success 0.5 at the start; 4 consecutive updates below 0.4 stop the run, 3 do not
+        low = "".join(line(s, succ=0.35) for s in range(8, 12))
+        self.assertIn("training success below the start (0.500", T.guard_reason(ok + low, guards))
+        self.assertIsNone(T.guard_reason(ok + low + line(12, succ=0.45), guards))
+
+    def test_package_runs_with_guards(self):
+        """Round 11: the package options reach rl-config; a run stopped by a guard does not fail the step and only
+        its existing checkpoints are evaluated; the other run goes on to the endpoint."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rl = {"history_mode": "concat", "save_freq": 50, "no_internal_val": True, "task_pool": "reserve",
+                  "rows": "/rl_rows.jsonl", "opt_package": "p1", "candidates": 24, "target_groups": 12,
+                  "guards": {"kl_max": 0.2}}
+            chain = T.Chain({"tr": tmp, "sft_dir": str(root / "sft"), "endpoint": 100, "ppo_template": "/S0.yaml",
+                             "gs_root": "/ply", "sft_groups": {"formal": "sft_trajectories.jsonl"}, "rl": rl,
+                             "rl_runs": {"ps0": {"reward_preset": "S0"}, "pd": {"reward_preset": "dense"}},
+                             "eval_sets": {"val400": str(root / "val400")}, "eval": {"every": 50}}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_formal_e9", "model": "/lf/e9",
+                                                            "select_by": "val400", "scores": {"sft_formal_e9": 0.42}}
+            calls = []
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.rl_config()
+            ps0 = next(c for c in calls if c[c.index("--out") + 1] == str(root / "rl_ps0"))
+            for flag, value in (("--opt-package", "p1"), ("--candidates", "24"), ("--target-groups", "12"),
+                                ("--task-pool", "reserve")):
+                self.assertEqual(ps0[ps0.index(flag) + 1], value)
+            self.assertNotIn("--rollouts", ps0)
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            polls = {"n": 0}
+
+            def status(run, job_dir="job"):
+                if job_dir == "job_renderer":
+                    return {"state": "RUNNING", "finished": False}
+                polls["n"] += 1
+                logs = run / "logs"
+                logs.mkdir(exist_ok=True)
+                if run.name == "rl_run_pd":  # KL runs away after its first checkpoint
+                    (run / "checkpoints" / "global_step_50" / "actor" / "huggingface").mkdir(parents=True, exist_ok=True)
+                    (logs / "rl-1.log").write_text("step:60 - actor/kl_loss:np.float64(0.31)\n")
+                    return {"state": "RUNNING", "finished": False}
+                (logs / "rl-1.log").write_text("step:1 - actor/kl_loss:np.float64(0.01)\n")
+                if polls["n"] > 3:
+                    for st in (50, 100):
+                        (run / "checkpoints" / f"global_step_{st}" / "actor" / "huggingface").mkdir(parents=True, exist_ok=True)
+                    return {"state": "SUCCEEDED", "finished": True}
+                return {"state": "RUNNING", "finished": False}
+
+            deleted = []
+
+            def delete(run, job_dir="job"):
+                deleted.append((run.name, job_dir))
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.rl()  # does not raise: pd was stopped by a guard, ps0 reached the endpoint
+            self.assertIn("KL to the start model 0.310", chain.state["guard_stops"]["pd"]["reason"])
+            self.assertIn(("rl_run_pd", "job_rl"), deleted)
+            self.assertTrue((root / "rl_run_pd" / "STOP_RENDERER").exists())
+            self.assertIn("**RL pd 被自动停止**", T.render_markdown(chain.state))
+            jobs = {}
+            chain.eval_jobs = lambda step, j: jobs.update(j)
+            chain.tables = lambda: None
+            chain.evaluate()
+            self.assertEqual(sorted(jobs), ["val400__pd_050", "val400__ps0_050", "val400__ps0_100"])
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)

@@ -48,6 +48,14 @@ runs are stopped and moved to TR/rl_attempts/, and RL restarts from plan "rl_fal
 stops the chain.  Plan "eval"."extra_sets" ({name: folder}) are evaluation sets only variants use, and variant
 models may name SFT epoch checkpoints ("sft_<group>_e<k>").
 
+Round 11, third part (the optimisation package): plan "rl" options "opt_package" ("p1"), "candidates",
+"target_groups", "rollouts" reach rl-config; the 25-update blocks add the tasks dropped (all success / all
+failure) and refilled per update, the clip fraction, gradient norm, seconds per update and the share of
+unparseable answers.  Plan "rl"."guards" stop a run (only that run; its logs stay, its checkpoints are still
+evaluated) on NaN in the trainer's main metrics, KL to the start model above kl_max, the share of unparseable
+answers above invalid_max (mean of the last invalid_window updates), or training success below the start (mean
+of the first start_updates) by more than success_drop in each of drop_window consecutive updates (guard_reason).
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -182,7 +190,51 @@ def family_success(rollout_dir: Path, block: int = 25) -> Dict[str, Dict[str, An
     return out
 
 
-BLOCK_LOG_KEYS = {"entropy": "actor/entropy", "kl": "actor/kl_loss", "ppo_kl": "actor/ppo_kl"}
+BLOCK_LOG_KEYS = {"entropy": "actor/entropy", "kl": "actor/kl_loss", "ppo_kl": "actor/ppo_kl",
+                  # round 11, the optimisation package
+                  "clip": "actor/pg_clipfrac", "grad_norm": "actor/grad_norm", "seconds": "timing_s/step",
+                  "invalid": "transition/invalid_action_rate/mean", "kept": "filter/mixed/kept",
+                  "dropped_all_success": "filter/mixed/dropped_all_success",
+                  "dropped_all_fail": "filter/mixed/dropped_all_fail", "refilled": "filter/mixed/refilled",
+                  "shortfall": "filter/mixed/shortfall"}
+GUARD_NAN_KEYS = ("actor/pg_loss", "actor/kl_loss", "actor/entropy", "actor/grad_norm", "actor/ppo_kl",
+                  "critic/score/mean", "critic/advantages/max", "critic/advantages/min")
+
+
+def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
+    """Round 11 (the user's stop conditions for the optimisation-package runs), from the trainer's console lines
+    "step:N - key:value - ...": a reason to stop the run, or None."""
+    per: Dict[int, Dict[str, float]] = {}
+    for line in log_text.splitlines():
+        m = re.search(r"step:(\d+) - (.*)", line)
+        if not m:
+            continue
+        step, body = int(m.group(1)), m.group(2)
+        for key in GUARD_NAN_KEYS:
+            if re.search(re.escape(key) + r":(?:np\.float64\()?-?nan\b", body):
+                return f"NaN in {key} at update {step}"
+        per[step] = {k: float(v) for k, v in _METRIC.findall(body)}
+    steps = sorted(s for s in per if s > 0)
+    if not steps:
+        return None
+    kl = per[steps[-1]].get("actor/kl_loss")
+    kl_max = float(guards.get("kl_max", 0.2))
+    if kl is not None and kl > kl_max:
+        return f"KL to the start model {kl:.3f} > {kl_max} at update {steps[-1]}"
+    w = int(guards.get("invalid_window", 10))
+    inv = [per[s]["transition/invalid_action_rate/mean"] for s in steps[-w:] if "transition/invalid_action_rate/mean" in per[s]]
+    inv_max = float(guards.get("invalid_max", 0.05))
+    if len(inv) >= w and sum(inv) / len(inv) > inv_max:
+        return f"unparseable answers {sum(inv) / len(inv):.3f} > {inv_max} (mean of updates {steps[-w]}-{steps[-1]})"
+    succ = [(s, per[s]["episode/success_rate"]) for s in steps if "episode/success_rate" in per[s]]
+    n0, nd, drop = int(guards.get("start_updates", 5)), int(guards.get("drop_window", 50)), float(guards.get("success_drop", 0.10))
+    if len(succ) >= n0 + nd:
+        start = sum(v for _, v in succ[:n0]) / n0
+        tail = succ[-nd:]
+        if all(v < start - drop for _, v in tail):
+            return (f"training success below the start ({start:.3f}, updates 1-{n0}) by more than {drop} in each of "
+                    f"updates {tail[0][0]}-{tail[-1][0]}")
+    return None
 
 
 def block_stats(rollout_dir: Path, log_text: str = "", block: int = 25) -> Dict[str, Dict[str, Any]]:
@@ -621,6 +673,10 @@ class Chain:
                          *[str(self.sft_dir / t) for t in self.sft_groups().values()]]
             if rl.get("exclude"):
                 args += ["--exclude", str(rl["exclude"])]
+            for key, flag in (("opt_package", "--opt-package"), ("candidates", "--candidates"),
+                              ("target_groups", "--target-groups"), ("rollouts", "--rollouts")):
+                if rl.get(key) is not None:  # round 11: the optimisation package
+                    args += [flag, str(rl[key])]
             self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
 
     def rl(self) -> None:
@@ -724,6 +780,16 @@ class Chain:
                         job_sco.delete(d, "job_rl")
                         ended[name] = f"renderer {st_r.get('state')}"
                         active.pop(name)
+                for name, run in list(active.items()):  # round 11: the stop conditions (plan rl.guards)
+                    guards = run["rl"].get("guards")
+                    logs = sorted((run["run_dir"] / "logs").glob("rl-*.log")) if guards else []
+                    reason = guard_reason("\n".join(p.read_text(errors="ignore") for p in logs), guards) if logs else None
+                    if reason:
+                        (run["run_dir"] / "STOP_RENDERER").touch()
+                        job_sco.delete(run["run_dir"], "job_rl")
+                        self.state.setdefault("guard_stops", {})[name] = {"reason": reason, "utc": now()}
+                        ended[name] = f"stopped: {reason}"
+                        active.pop(name)
                 self.mark(step, jobs={**states, **{f"{n}/ended": v for n, v in ended.items()}})
                 self.signal_check(runs)
                 if active:
@@ -739,8 +805,9 @@ class Chain:
                 for j in ("job_rl", "job_renderer"):
                     if (run["run_dir"] / j / "submission.json").exists():
                         job_sco.delete(run["run_dir"], j)
+        stopped = self.state.get("guard_stops") or {}  # stopped by a guard: not a failure of the step
         bad = [f"{n} ({ended.get(n)})" for n, r in runs.items()
-               if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir()]
+               if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir() and n not in stopped]
         if bad:
             raise ChainError("RL runs without a checkpoint at update " + str(endpoint) + ": " + ", ".join(bad))
 
@@ -811,7 +878,10 @@ class Chain:
             ckpts = run["run_dir"] / "checkpoints"
             for s in range(every, self.final_update() + 1, every):
                 name = f"{run_name}_{s:03d}" if run_name else f"v10_rl_{s:03d}"
-                models[name] = (str(ckpts / f"global_step_{s}" / "actor" / "huggingface"), None, options)
+                hf = ckpts / f"global_step_{s}" / "actor" / "huggingface"
+                if run_name in (self.state.get("guard_stops") or {}) and not hf.is_dir():
+                    continue  # a run stopped by a guard: the checkpoints it reached
+                models[name] = (str(hf), None, options)
                 rl_names.append(name)
         models.update({name: (m["model"], m.get("prompt_format"), list(m.get("options", options)))
                        for name, m in (ev.get("models") or {}).items()})
@@ -929,12 +999,17 @@ def render_markdown(state: Dict[str, Any]) -> str:
         blocks = rl.get("blocks") or {}
         if blocks:
             fmt = lambda v, p=3: "—" if v is None else f"{v:.{p}f}"  # noqa: E731
-            lines += ["", "| 更新 | 训练成功率 | 有成有败的题 | 每条轨迹的总奖励 | 熵 | KL（对起点模型） | 每次更新的策略变化 |",
-                      "| --- | --- | --- | --- | --- | --- | --- |"]
+            lines += ["", "| 更新 | 训练成功率 | 有成有败的题 | 每条轨迹的总奖励 | 熵 | KL（对起点模型） | 每次更新的策略变化 "
+                          "| clip 比例 | 梯度大小 | 每次更新秒数 | 格式错误 | 每次更新：保留 / 丢掉（全成功、全失败）/ 补抽 / 缺 |",
+                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
             for label, b in blocks.items():
+                filt = ("—" if b.get("kept") is None else
+                        f"{fmt(b.get('kept'), 1)} / {fmt(b.get('dropped_all_success'), 1)}、{fmt(b.get('dropped_all_fail'), 1)} / "
+                        f"{fmt(b.get('refilled'), 1)} / {fmt(b.get('shortfall'), 1)}")
                 lines.append(f"| {label}（{b.get('updates')} 次） | {fmt(b.get('success'))} | {fmt(b.get('mixed_share'))}"
                              f"（{b.get('tasks')} 题） | {fmt(b.get('reward_mean'))} | {fmt(b.get('entropy'))} | "
-                             f"{fmt(b.get('kl'), 5)} | {fmt(b.get('ppo_kl'), 5)} |")
+                             f"{fmt(b.get('kl'), 5)} | {fmt(b.get('ppo_kl'), 5)} | {fmt(b.get('clip'), 4)} | "
+                             f"{fmt(b.get('grad_norm'), 2)} | {fmt(b.get('seconds'), 0)} | {fmt(b.get('invalid'))} | {filt} |")
         fam = rl.get("family_success") or {}
         if fam:
             families = sorted({f for b in fam.values() for f in b})
@@ -942,6 +1017,8 @@ def render_markdown(state: Dict[str, Any]) -> str:
             for label, cells in fam.items():
                 lines.append(f"| {label} | " + " | ".join(
                     f"{cells[f]['success']:.2f}（{cells[f]['episodes']}）" if f in cells else "—" for f in families) + " |")
+    for name, g in (state.get("guard_stops") or {}).items():
+        lines += ["", f"**RL {name} 被自动停止**（{g.get('utc')}）：{g.get('reason')}"]
     for c in state.get("signal_checks") or []:
         lines += ["", f"**第 {c['attempt']} 次 RL 的信号检查（第 {c['at']} 次更新，起点 {c['model']}）：**"
                       f"{'通过' if c['ok'] else '没通过'}；" + "；".join(
