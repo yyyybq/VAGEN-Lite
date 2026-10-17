@@ -1,0 +1,328 @@
+[
+ {
+  "kind": "dataset",
+  "repo": "nyu-visionx/VSI-Bench",
+  "sha": "3a6a1cf9ac54c403509b15260897cc6ddc41b408",
+  "last_modified": "2026-10-08T00:09:17.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 10,
+  "total_gb": 5.73,
+  "top_level_gb": {
+   ".": 5.73
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "array/SAT",
+  "sha": "bda5dde942d7f7b41bff7935f086ed9a9e348ae3",
+  "last_modified": "2026-02-16T16:07:18.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 6,
+  "total_gb": 7.563,
+  "top_level_gb": {
+   ".": 7.563
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "nv-njb/SAT",
+  "sha": "85f0ea843878d3a15e3935da7c1ede53276d171f",
+  "last_modified": "2026-05-20T22:55:29.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 3,
+  "total_gb": 0.197,
+  "top_level_gb": {
+   "data": 0.197,
+   ".": 0.0
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "lidingm/ViewSpatial-Bench",
+  "sha": "95d9ea3a94da7190bd19d2539ff661f93dba21dd",
+  "last_modified": "2026-06-28T08:08:31.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 5,
+  "total_gb": 1.514,
+  "top_level_gb": {
+   ".": 1.514
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "MLL-Lab/MindCube",
+  "sha": "9c941b46a6bd65b6914669ef7a579948fc9c8467",
+  "last_modified": "2025-11-20T22:47:53.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 3,
+  "total_gb": 0.644,
+  "top_level_gb": {
+   ".": 0.644
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "RunsenXu/MMSI-Bench",
+  "sha": "ec7c92bfaf7728fcca1d61e3e224e190af309436",
+  "last_modified": "2025-10-23T13:04:41.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 4,
+  "total_gb": 1.763,
+  "top_level_gb": {
+   ".": 1.763
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "Journey9ni/vstibench",
+  "sha": "0903eb0b0c9d03da730d43503c48302a1f3b412d",
+  "last_modified": "2026-07-14T00:22:10.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 5,
+  "total_gb": 5.537,
+  "top_level_gb": {
+   ".": 5.537,
+   "erratum": 0.0
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "hongxingli/SPBench",
+  "sha": "03611025a4e6032c558117c0e86b76c8b084c305",
+  "last_modified": "2026-06-30T16:57:18.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 6,
+  "total_gb": 0.186,
+  "top_level_gb": {
+   ".": 0.186
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "esi-bench/ESI-Bench",
+  "sha": "104667c2af08776297f1d9438db013f92e451bde",
+  "last_modified": "2026-08-27T11:25:45.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 5,
+  "total_gb": 0.002,
+  "top_level_gb": {
+   "data": 0.002,
+   "scripts": 0.0,
+   ".": 0.0
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "ESI-Bench/ESI-Bench",
+  "sha": "104667c2af08776297f1d9438db013f92e451bde",
+  "last_modified": "2026-08-27T11:25:45.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 5,
+  "total_gb": 0.002,
+  "top_level_gb": {
+   "data": 0.002,
+   "scripts": 0.0,
+   ".": 0.0
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "ESI-Bench/esi-bench-passive-single",
+  "sha": "159806e86b5ef49b5cd88625ec9978a9fa0a18a2",
+  "last_modified": "2026-08-25T13:07:09.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 3429,
+  "total_gb": 2.76,
+  "top_level_gb": {
+   "data": 2.76,
+   "scripts": 0.0,
+   ".": 0.0
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "lalayg/pano",
+  "sha": "415676872c07ac1e8a2551f6f89a95fd66ad688a",
+  "last_modified": "2026-02-05T21:52:52.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 2,
+  "total_gb": 5.332,
+  "top_level_gb": {
+   ".": 5.332
+  }
+ },
+ {
+  "kind": "dataset",
+  "repo": "behavior-1k/2025-challenge-demos",
+  "sha": "33639692425296185f245aaa648530178c7b3d2b",
+  "last_modified": "2025-12-02T06:22:23.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 100000,
+  "total_gb": 1573.221,
+  "top_level_gb": {
+   "videos": 1389.189,
+   "data": 164.534,
+   "meta": 19.366,
+   "annotations": 0.133,
+   ".": 0.0
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "kagakouko/Spatial-Interactor-Qwen2.5-VL-7B",
+  "sha": "3e5d2ec15a226926de32e839f911627fbdf5eace",
+  "last_modified": "2026-09-23T17:22:34.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 23,
+  "total_gb": 16.658,
+  "top_level_gb": {
+   ".": 16.6,
+   "assets": 0.057
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "kagakouko/Spatial-Interactor-Qwen2.5-VL-3B",
+  "sha": "71c54110022b2f4720d904031a70a205241eb9b1",
+  "last_modified": "2026-09-23T17:22:29.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 21,
+  "total_gb": 8.205,
+  "top_level_gb": {
+   ".": 8.148,
+   "assets": 0.057
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "sensenova/SenseNova-SI-1.1-Qwen2.5-VL-7B",
+  "sha": "883d10010b3e37195236dc899f4e64fba2989b6b",
+  "last_modified": "2026-05-12T16:07:27.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 19,
+  "total_gb": 16.6,
+  "top_level_gb": {
+   ".": 16.6
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "rayruiyang/VST-7B-SFT",
+  "sha": "2841c2c899beac8bbb486700faa7b521f1f69d53",
+  "last_modified": "2025-11-11T01:57:08.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 16,
+  "total_gb": 16.6,
+  "top_level_gb": {
+   ".": 16.6
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "rayruiyang/VST-7B-RL",
+  "sha": "b18ec54b43e1d0b8a171cf41d9f221fbedd803ae",
+  "last_modified": "2025-11-11T01:57:58.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 17,
+  "total_gb": 16.6,
+  "top_level_gb": {
+   ".": 16.6
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "AntResearchNLP/ViLASR",
+  "sha": "89f84f291ac5a3a18acfddf65ec6b3ccda523db8",
+  "last_modified": "2025-08-11T09:04:16.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 18,
+  "total_gb": 16.6,
+  "top_level_gb": {
+   ".": 16.6
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "Video-R1/Video-R1-7B",
+  "sha": "e6840e4cdc86b484b05aacdcb5c88ad3d7ef3d76",
+  "last_modified": "2025-10-24T19:21:21.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 27,
+  "total_gb": 16.601,
+  "top_level_gb": {
+   ".": 16.601
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "RUBBISHLIKE/SpaceR",
+  "sha": "669cff6b1cf74fdaff75378d24c5c96459276152",
+  "last_modified": "2025-07-07T09:09:05.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 15,
+  "total_gb": 16.599,
+  "top_level_gb": {
+   ".": 16.599
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "Diankun/Spatial-MLLM-subset-sft",
+  "sha": "7c07e6ab09819c848fc7fbdfdb5c58c30d5c7265",
+  "last_modified": "2025-06-10T16:52:13.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 14,
+  "total_gb": 10.658,
+  "top_level_gb": {
+   ".": 10.658
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "hongxingli/SpatialLadder-3B",
+  "sha": "0819c3adf8827a2ea6c0348d49a23503ecb1f428",
+  "last_modified": "2026-06-30T16:56:34.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 18,
+  "total_gb": 15.035,
+  "top_level_gb": {
+   ".": 15.035
+  }
+ },
+ {
+  "kind": "model",
+  "repo": "MLL-Lab/MindCube-Qwen2.5VL-RawQA-SFT",
+  "sha": "d5ecb32d91d94b71460994b323f8d5166c2317a8",
+  "last_modified": "2025-06-20T05:43:11.000Z",
+  "gated": false,
+  "private": false,
+  "n_files": 13,
+  "total_gb": 7.514,
+  "top_level_gb": {
+   ".": 7.514
+  }
+ }
+]

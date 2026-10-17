@@ -1,0 +1,43 @@
+== date
+Sat 17 Oct 2026 06:45:01 PM UTC
+== nvidia-smi
+Sat Oct 17 18:45:01 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 595.71.05              Driver Version: 595.71.05      CUDA Version: 13.2     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA H800                    On  |   00000000:44:00.0 Off |                    0 |
+| N/A   29C    P0             71W /  700W |       0MiB /  81559MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+== query
+name, driver_version, compute_cap, memory.total [MiB]
+NVIDIA H800, 595.71.05, 9.0, 81559 MiB
+== NVIDIA_DRIVER_CAPABILITIES= NVIDIA_VISIBLE_DEVICES=GPU-b67ed4f9-6b39-5cec-46e8-8a232ab1d60e
+== cuda version from driver
+CUDA Version: 13.2
+== graphics libs
+	libvulkan.so.1 (libc6,x86-64) => /lib/x86_64-linux-gnu/libvulkan.so.1
+== vulkan icd
+ls: cannot access '/usr/share/vulkan/icd.d': No such file or directory
+/etc/vulkan/icd.d:
+nvidia_icd.json
+== vulkaninfo
+== os
+NAME="Ubuntu"
+VERSION="20.04.3 LTS (Focal Fossa)"
+ID=ubuntu
+5.14.0-284.25.1.el9_2.x86_64
+== glibc
+ldd (Ubuntu GLIBC 2.31-0ubuntu9.2) 2.31
