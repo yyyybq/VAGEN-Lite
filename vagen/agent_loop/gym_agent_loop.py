@@ -58,6 +58,12 @@ class AgentState(Enum):
     TERMINATED = "terminated"
 
 
+def turn_invalid(info: Any) -> bool:
+    """Whether the env could not parse the turn's answer (its turn_metrics.action_is_valid is False)."""
+    tm = ((info or {}).get("metrics") or {}).get("turn_metrics") or {} if isinstance(info, dict) else {}
+    return "action_is_valid" in tm and not bool(tm["action_is_valid"])
+
+
 class AgentData:
     """Container for all mutable trajectory state."""
     def __init__(
@@ -88,6 +94,7 @@ class AgentData:
         self.env_rewards: List[float] = []
         self.traj_success: bool = False
         self.env_turns: int = 0
+        self.invalid_turns: int = 0  # turns whose answer the env could not parse (turn_metrics.action_is_valid)
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -300,6 +307,8 @@ class GymAgentLoop(AgentLoopBase):
                     "score_improvement":  agent_data.final_score - agent_data.initial_score,
                     "n_primitive_steps":  agent_data.n_primitive_steps,
                     "n_turns":            agent_data.env_turns,
+                    # the share of the episode's turns with an unparseable answer (transition/invalid_action_rate)
+                    "invalid_action":     agent_data.invalid_turns / max(1, agent_data.env_turns),
                 },
             },
         )
@@ -397,6 +406,7 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.env_rewards.append(float(reward))
         agent_data.traj_success = extract_success(info)
         agent_data.env_turns += 1
+        agent_data.invalid_turns += int(turn_invalid(info))
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))

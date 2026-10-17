@@ -2442,6 +2442,8 @@ class RayPPOTrainer:
                 batch.non_tensor_batch["uid"] = np.array(
                     [str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object
                 )
+                # the tasks' draw order, for filters that take groups in order (mixed_outcome)
+                uid_draw_order = {str(u): i for i, u in enumerate(batch.non_tensor_batch["uid"])}
 
                 gen_batch = self._get_gen_batch(batch)
 
@@ -2798,7 +2800,9 @@ class RayPPOTrainer:
                     
                     # filter the training batch for effective update (Refer to STARPO-S and DAPO)
                     if self.config.filter.get("enable", False):
+                        batch.meta_info["uid_draw_order"] = uid_draw_order
                         batch,metrics = FILTER_REGISTRY.get(self.config.filter.name)(batch, metrics,**self.config.filter.filter_kwargs)
+                        batch.meta_info.pop("uid_draw_order", None)
                         if self.config.trainer.balance_batch:
                             # re-balance after filtering
                             divisor_size = self.actor_rollout_wg.world_size

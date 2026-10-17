@@ -121,6 +121,66 @@ def reward_variance_filter(data_proto: DataProto, metrics, **kwargs) -> tuple[Da
     return filtered_data, metrics
 
 
+@register_filter("mixed_outcome")
+def mixed_outcome_filter(data_proto: DataProto, metrics, **kwargs) -> tuple[DataProto, dict]:
+    """InteriorGS v10, round 11 (the optimisation package): train only on the groups (the episodes of one task)
+    whose episodes both succeed and fail (``traj_success``); a group that all succeeds or all fails gives a group
+    comparison nothing to learn from.
+
+    The update draws more tasks than it trains on (data.train_batch_size candidates).  Taken in draw order
+    (meta_info["uid_draw_order"], uid -> position; else the order of first appearance), the first
+    ``target_groups`` candidates are the nominal batch; each of them that all succeeds or all fails is dropped and
+    replaced by the next mixed group among the extra candidates (the refill; at most the number of extra
+    candidates).  If no group is mixed, the nominal batch is kept with its advantages set to zero (the update
+    then only applies the entropy and KL terms).
+
+    kwargs: target_groups (default: all candidates), success_key (default "traj_success").
+    Metrics (filter/mixed/): candidates, nominal, kept, dropped_all_success and dropped_all_fail (among the
+    nominal batch), refilled, shortfall (target - kept), mixed_share (of all candidates), empty_fallback.
+    """
+    import numpy as np
+
+    key = kwargs.get("success_key", "traj_success")
+    uids = [str(u) for u in data_proto.non_tensor_batch["uid"]]
+    success = np.asarray(data_proto.non_tensor_batch[key], dtype=float) > 0.5
+    draw = data_proto.meta_info.get("uid_draw_order") or {}
+    groups: dict = {}
+    for i, u in enumerate(uids):
+        groups.setdefault(u, []).append(i)
+    first = {u: idx[0] for u, idx in groups.items()}
+    ordered = sorted(groups, key=lambda u: (draw.get(u, len(draw) + first[u]), first[u]))
+    target = int(kwargs.get("target_groups") or 0) or len(ordered)
+
+    def kind(u: str) -> str:
+        s = success[groups[u]]
+        return "mixed" if s.any() and not s.all() else ("all_success" if s.all() else "all_fail")
+
+    kinds = {u: kind(u) for u in ordered}
+    nominal, extra = ordered[:target], ordered[target:]
+    kept = [u for u in nominal if kinds[u] == "mixed"]
+    refill = [u for u in extra if kinds[u] == "mixed"][: max(0, target - len(kept))]
+    keep = kept + refill
+    fallback = not keep
+    if fallback:
+        keep = list(nominal)
+    filtered = data_proto.select_idxs(sorted(i for u in keep for i in groups[u]))
+    if fallback and "advantages" in filtered.batch.keys():
+        filtered.batch["advantages"] = filtered.batch["advantages"] * 0.0
+    if metrics is not None:
+        n_mixed = sum(1 for k in kinds.values() if k == "mixed")
+        metrics.update({
+            "filter/mixed/candidates": len(ordered), "filter/mixed/nominal": len(nominal),
+            "filter/mixed/kept": 0 if fallback else len(keep),
+            "filter/mixed/dropped_all_success": sum(1 for u in nominal if kinds[u] == "all_success"),
+            "filter/mixed/dropped_all_fail": sum(1 for u in nominal if kinds[u] == "all_fail"),
+            "filter/mixed/refilled": len(refill),
+            "filter/mixed/shortfall": target - (0 if fallback else len(keep)),
+            "filter/mixed/mixed_share": n_mixed / max(1, len(ordered)),
+            "filter/mixed/empty_fallback": float(fallback),
+        })
+    return filtered, metrics
+
+
 @register_filter("reward_variance_top_p")
 def reward_variance_top_p_filter(data_proto: DataProto, metrics, **kwargs) -> tuple[DataProto, dict]:
     """A filter that selects samples using top-p (nucleus) sampling based on reward variance.

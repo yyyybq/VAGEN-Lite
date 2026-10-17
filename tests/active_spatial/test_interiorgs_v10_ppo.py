@@ -51,7 +51,8 @@ class RetainedStepsTest(unittest.TestCase):
 
         self.assertEqual(history_mode(cfg("no_concat_gae", False)), "no_concat")  # rounds 6-9 and no_concat history
         self.assertEqual(history_mode(cfg("gae", True)), "concat")               # one sequence per episode
-        for bad in (("gae", False), ("no_concat_gae", True), ("grpo", True)):
+        self.assertEqual(history_mode(cfg("grpo", True)), "concat")              # round 11: the optimisation package
+        for bad in (("gae", False), ("no_concat_gae", True), ("grpo", False)):
             with self.assertRaises(ValueError):
                 history_mode(cfg(*bad))
 
