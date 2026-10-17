@@ -363,6 +363,45 @@ CONCAT_RESPONSE_LENGTH = 4096  # 12 turns x (81 image tokens + ~150 text + the a
 # differ only in the reward.
 REWARD_PRESETS = ("S0", "dense")
 TASK_POOLS = ("formal", "reserve")  # which train tasks RL takes (round 11: reserve, the tasks SFT never saw)
+
+# Round 11, the optimisation package (the user's decision after R-S0 / R-D left the model where it started: KL to
+# the start model 0.002 at update 150, about 3/4 of the tasks all succeeding or all failing).  On top of the run's
+# settings: GRPO (the episodes of one task compared with each other) instead of the value network; only tasks
+# whose episodes both succeed and fail are trained on (vagen's mixed_outcome filter; each update draws
+# ``candidates`` tasks, the first ``target_groups`` are the nominal batch and the extra ones refill dropped tasks);
+# ``rollouts`` episodes per task; the learning rate, KL penalty and entropy bonus below.  p1, with the reasons:
+#   rollouts 8, candidates 24, target_groups 12: from the epoch-9 start about 24% of tasks are mixed with 8
+#       episodes (a beta-binomial fit to its 4-episode outcomes), so 24 candidates (192 episodes, twice the
+#       current generation, about 2.5 minutes per update) keep about 6 tasks (48 episodes, all informative,
+#       against about 24 informative of the current 96);
+#   lr 2e-6 (5e-7 before): the per-update policy change was about 1e-4 and the KL stalled at 0.002; 4x the step;
+#   kl_loss_coef 0.05 (0.3 before): the KL penalty held the policy at the start model;
+#   entropy_coeff 0.01 (0.005 before): entropy fell from 0.077 to 0.046 with the old step; the larger step needs
+#       a stronger bonus to keep it above 70% of the start.
+OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
+    "p1": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
+           "entropy_coeff": 0.01},
+}
+
+
+def package_overrides(name: str, candidates: Optional[int] = None, target_groups: Optional[int] = None,
+                      rollouts: Optional[int] = None) -> Dict[str, Any]:
+    """PPO-config overrides of an optimisation package (dotted keys), with optional sizes (one-card pilots)."""
+    if name not in OPT_PACKAGES:
+        raise ValueError(f"optimisation package must be one of {sorted(OPT_PACKAGES)}, not {name!r}")
+    p = dict(OPT_PACKAGES[name])
+    for key, value in (("candidates", candidates), ("target_groups", target_groups), ("rollouts", rollouts)):
+        if value:
+            p[key] = int(value)
+    if p["candidates"] < p["target_groups"]:
+        raise ValueError(f"candidates ({p['candidates']}) must be at least target_groups ({p['target_groups']})")
+    return {"algorithm.adv_estimator": "grpo", "algorithm.norm_adv_by_std_in_grpo": True,
+            "actor_rollout_ref.rollout.n": p["rollouts"], "data.train_batch_size": p["candidates"],
+            "actor_rollout_ref.actor.ppo_mini_batch_size": p["target_groups"],
+            "filter.enable": True, "filter.name": "mixed_outcome",
+            "filter.filter_kwargs": {"target_groups": p["target_groups"]},
+            "actor_rollout_ref.actor.optim.lr": p["lr"], "actor_rollout_ref.actor.kl_loss_coef": p["kl_loss_coef"],
+            "actor_rollout_ref.actor.entropy_coeff": p["entropy_coeff"], "trainer.critic_warmup": 0}
 DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
             "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,
             "enable_visibility_shaping_reward": True}
@@ -520,6 +559,14 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     if getattr(args, "no_internal_val", False):
         _set(ppo, "trainer.val_before_train", False)
         _set(ppo, "trainer.test_freq", -1)
+    package = None
+    if getattr(args, "opt_package", None):  # round 11: applied last, over the sizes and the warm-up above
+        if not ppo["trainer"].get("concat_multi_turn"):
+            raise SystemExit("the optimisation package needs the concat history mode (--history-mode concat)")
+        package = package_overrides(args.opt_package, getattr(args, "candidates", None),
+                                    getattr(args, "target_groups", None), getattr(args, "rollouts", None))
+        for key, value in package.items():
+            _set(ppo, key, value)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
@@ -532,6 +579,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "save_freq": ppo["trainer"].get("save_freq"),
               "reserve_rows_skipped": reserve_skipped,
               "task_pool": pool,
+              "opt_package": getattr(args, "opt_package", None), "opt_package_overrides": package,
               "sft_tasks_checked": len(sft_ids), "sft_overlap": len(overlap),
               "depth_flagged_checked": len(flagged), "depth_flagged_in_train": len(flagged_in_train),
               "train_scenes": len({r["scene_id"] for r in parts["train"]}),
@@ -588,6 +636,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--save-freq", type=int, default=None,
                    help="a checkpoint every N updates, all kept; the older ones keep only actor/huggingface")
     c.add_argument("--no-internal-val", action="store_true", help="no validation inside training")
+    c.add_argument("--opt-package", choices=sorted(OPT_PACKAGES), default=None,
+                   help="round 11: the optimisation package (GRPO, mixed-outcome tasks only with refill, 8 episodes "
+                        "per task, larger learning rate, smaller KL penalty, entropy bonus)")
+    c.add_argument("--candidates", type=int, default=None, help="tasks drawn per update (package default)")
+    c.add_argument("--target-groups", type=int, default=None, help="tasks trained on per update (package default)")
+    c.add_argument("--rollouts", type=int, default=None, help="episodes per task (package default)")
     c.add_argument("--task-pool", choices=TASK_POOLS, default="formal",
                    help="round 11: the train tasks RL takes: formal (rounds 6-10) or reserve (rows from sft-frames "
                         "--include-reserve; the rule since round 11: RL trains on tasks SFT never trained on)")

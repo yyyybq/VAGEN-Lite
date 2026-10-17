@@ -227,6 +227,62 @@ class TrainingPrepTest(unittest.TestCase):
         types = ["projective_relations", "equidistance"]
         self.assertEqual(TP.prompt_mismatches(envs["dense"], types, load_policy()), [])
 
+    def test_rl_config_optimisation_package(self):
+        """Round 11: the optimisation package on top of the run's settings: GRPO without a value network, only
+        mixed-outcome tasks (24 candidates, 12 trained on), 8 episodes per task, lr 2e-6, KL coefficient 0.05,
+        entropy bonus 0.01; sizes can be made smaller for a one-card pilot; it needs the concat history mode."""
+        import yaml
+
+        sft = self.root / "sft_rl_pkg"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        template = self.root / "ppo_template_pkg.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False, "critic_warmup": 10},
+            "filter": {"enable": False, "name": "reward_variance", "filter_kwargs": {"topk": 0.2}},
+            "actor_rollout_ref": {"model": {"path": "old"},
+                                  "actor": {"ppo_mini_batch_size": 8, "optim": {"lr": 5e-7}, "kl_loss_coef": 0.3,
+                                            "entropy_coeff": 0.005, "use_kl_loss": True},
+                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4, "agent": {"num_workers": 8}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+
+        def config(out_name, **kw):
+            args = dict(rows=str(sft / "rows.jsonl"), env_template=str(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"),
+                        ppo_template=str(template), gs_root="/ply", model="/m", name="t",
+                        run_root=str(self.root / f"run_{out_name}"), val_limit=1, trial=False, out=str(self.root / out_name),
+                        history_mode="concat", train_batch_size=24, ppo_mini_batch_size=12, critic_warmup=10)
+            args.update(kw)
+            TP.cmd_rl_config(Namespace(**args))
+            return yaml.safe_load((self.root / out_name / "ppo.yaml").read_text()), \
+                json.loads((self.root / out_name / "rl_config_report.json").read_text())
+
+        ppo, report = config("rl_pkg", opt_package="p1")
+        a = ppo["actor_rollout_ref"]
+        self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["algorithm"]["norm_adv_by_std_in_grpo"]), ("grpo", True))
+        self.assertEqual((a["rollout"]["n"], ppo["data"]["train_batch_size"], a["actor"]["ppo_mini_batch_size"]), (8, 24, 12))
+        self.assertEqual(ppo["filter"], {"enable": True, "name": "mixed_outcome", "filter_kwargs": {"target_groups": 12}})
+        self.assertEqual((a["actor"]["optim"]["lr"], a["actor"]["kl_loss_coef"], a["actor"]["entropy_coeff"]), (2e-6, 0.05, 0.01))
+        self.assertEqual(ppo["trainer"]["critic_warmup"], 0)
+        self.assertTrue(ppo["trainer"]["concat_multi_turn"])
+        self.assertEqual(report["opt_package"], "p1")
+        self.assertEqual(report["opt_package_overrides"]["data.train_batch_size"], 24)
+        # a one-card pilot: smaller sizes, the same algorithm and step sizes
+        ppo, _ = config("rl_pkg_pilot", opt_package="p1", candidates=6, target_groups=2, trial=True)
+        self.assertEqual((ppo["data"]["train_batch_size"], ppo["filter"]["filter_kwargs"]["target_groups"],
+                          ppo["actor_rollout_ref"]["actor"]["ppo_mini_batch_size"], ppo["actor_rollout_ref"]["rollout"]["n"]),
+                         (6, 2, 2, 8))
+        with self.assertRaises(ValueError):
+            TP.package_overrides("p1", candidates=4, target_groups=6)
+        with self.assertRaises(ValueError):
+            TP.package_overrides("p9")
+        with self.assertRaises(SystemExit):  # GRPO over whole episodes needs the concat mode
+            config("rl_pkg_noconcat", opt_package="p1", history_mode="none")
+        # without the package nothing changes
+        ppo, report = config("rl_nopkg")
+        self.assertEqual(ppo["algorithm"]["adv_estimator"], "gae")
+        self.assertIsNone(report["opt_package"])
+
     def test_rl_config_trains_on_formal_tasks_only(self):
         """Reserve rows (sft-frames --include-reserve) are SFT-only: rl-config leaves them out of train and val."""
         import yaml
