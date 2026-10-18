@@ -87,7 +87,8 @@ def collect_lmms(run_dir: Path, bench: dict) -> dict:
 def collect_vlmeval(run_dir: Path, bench: dict) -> dict:
     data = bench["data"]
     acc_file = _latest(str(run_dir / "vlmeval" / "**" / f"*{data}*_acc*.*sv"))
-    sep = "\t" if acc_file.endswith(".tsv") else ","
+    with open(acc_file) as fh:  # VLMEvalKit writes tab-separated tables under .csv names too
+        sep = "\t" if "\t" in fh.readline() else ","
     import pandas as pd
 
     acc = pd.read_csv(acc_file, sep=sep)

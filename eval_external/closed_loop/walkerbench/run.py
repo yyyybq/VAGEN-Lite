@@ -34,6 +34,7 @@ import re
 import shutil
 import sys
 import threading
+import types
 from collections import defaultdict
 from pathlib import Path
 
@@ -76,9 +77,14 @@ def load_module(name: str, path: Path):
     return mod
 
 
-def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: bool, workers: int) -> list[str]:
+def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: bool, workers: int,
+              limit: int | None = None) -> list[str]:
     os.chdir(copy)
     sys.path.insert(0, str(copy))
+    # WalkerBench's examples/ has no __init__.py; an installed package named "examples" would win over it
+    examples = types.ModuleType("examples")
+    examples.__path__ = [str(copy / "examples")]
+    sys.modules["examples"] = examples
     os.environ.update({"API_BASE_URL": base_url, "API_KEY": "local-vllm-no-key", "TEMPERATURE": str(temperature),
                        "BENCHMARK_URL": "http://127.0.0.1:1"})  # placeholder: the agent never needs the server
     rbp = load_module("wb_run_benchmark_parallel", copy / "scripts" / "run_benchmark_parallel.py")
@@ -108,6 +114,11 @@ def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: b
     rbp.TASKS_DIR = copy / "tasks" / "standard"
     rbp.LOGS_DIR = copy / "logs"
     tasks = sorted(p.stem for p in rbp.TASKS_DIR.glob("*.json"))
+    if limit:  # smoke tests only: the first task of each type, then the second of each type, ...
+        by_type = {}
+        for t in tasks:
+            by_type.setdefault(t.split("_", 1)[0], []).append(t)
+        tasks = [v[k] for k in range(limit) for v in by_type.values() if k < len(v)][:limit]
     rbp.total_tasks_count = len(tasks)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         ok = list(pool.map(lambda t: rbp.run_single_task(code, t), tasks))

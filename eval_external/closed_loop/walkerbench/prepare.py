@@ -35,7 +35,7 @@ def unpack() -> int:
 
 
 def task_panos(task: dict) -> set[str]:
-    ids = {task.get("spawn_point")}
+    ids = {task.get("spawn_point"), task.get("spawn_pano_id")}  # navigation / perception tasks
     ids.update(task.get("target_pano_ids") or [])
     ids.update(p.get("pano_id") for p in task.get("visual_path") or [])
     return {i for i in ids if i}
