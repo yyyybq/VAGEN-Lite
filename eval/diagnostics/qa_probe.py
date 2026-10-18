@@ -8,7 +8,7 @@
     python -m eval.diagnostics.qa_probe curve --out OUT --chain "R11-SFT=sft_formal_e{1..10}@154" ...
 
 ``run`` asks each probe question exactly as the training row has it (no system prompt, the images where the
-``<image>`` markers stand), greedy, at most 64 new tokens, and scores the first answer it can read: a yes / no, or
+``<image>`` markers stand), greedy, at most 256 new tokens, and scores the first answer it can read: a yes / no, or
 an option letter (also "(B)", "B." or the option's own text).  An answer it cannot read counts as wrong and is
 reported as unreadable, because the action-only models answer in their action format.
 OUT/<name>.jsonl has every answer, OUT/<name>.json the accuracies.
@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-MAX_TOKENS = 64
+MAX_TOKENS = 256  # the base model reasons before it answers; 64 cut 18% of its answers before the letter
 LETTERS = "ABCD"
 
 
@@ -171,7 +171,7 @@ def cmd_curve(args: argparse.Namespace) -> None:
     out = Path(args.out)
     chains = [parse_chain(c) for c in args.chain]
     md = ["# P1 探针曲线", "",
-          "每个检查点在 `p1_probe.jsonl`（500 道 val 场景的转移题）上的准确率。不采样，最多生成 64 个词元；"
+          "每个检查点在 `p1_probe.jsonl`（500 道 val 场景的转移题）上的准确率。不采样，最多生成 256 个词元；"
           "读不出答案的算错，另列\"读不出\"。随机猜的准确率：是非题和左右、哪个更近 50%，遮挡 33%，其余四选一 25%。", ""]
     curves: Dict[str, List[Tuple[int, Dict[str, Any]]]] = {}
     for cname, pts in chains:
