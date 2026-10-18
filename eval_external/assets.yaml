@@ -1,0 +1,20 @@
+# Everything eval_external downloads, pinned to the Hugging Face revision recorded in step 0
+# (step0/hf_inventory.json).  tools/fetch_assets.py reads this file; files land under ROOT/<dir>.
+root: /mnt/umm/users/yinbaiqiao/eval_external_assets
+
+datasets:
+  sat_real:            {repo: nv-njb/SAT, revision: 85f0ea843878d3a15e3935da7c1ede53276d171f, dir: data/sat_real}
+  sat_syn:             {repo: array/SAT, revision: bda5dde942d7f7b41bff7935f086ed9a9e348ae3, dir: data/sat_array,
+                        allow: [README.md, SAT_val.parquet, SAT_test.parquet]}
+  vstibench:           {repo: Journey9ni/vstibench, revision: 0903eb0b0c9d03da730d43503c48302a1f3b412d, dir: data/vstibench}
+  spbench:             {repo: hongxingli/SPBench, revision: 03611025a4e6032c558117c0e86b76c8b084c305, dir: data/spbench}
+  walkerbench_pano:    {repo: lalayg/pano, revision: 415676872c07ac1e8a2551f6f89a95fd66ad688a, dir: data/walkerbench_pano}
+
+models:
+  SI-7B:               {repo: kagakouko/Spatial-Interactor-Qwen2.5-VL-7B, revision: 3e5d2ec15a226926de32e839f911627fbdf5eace, dir: models/SI-7B}
+  SI-3B:               {repo: kagakouko/Spatial-Interactor-Qwen2.5-VL-3B, revision: 71c54110022b2f4720d904031a70a205241eb9b1, dir: models/SI-3B}
+  SpaceR-7B:           {repo: RUBBISHLIKE/SpaceR, revision: 669cff6b1cf74fdaff75378d24c5c96459276152, dir: models/SpaceR-7B}
+  VideoR1-7B:          {repo: Video-R1/Video-R1-7B, revision: e6840e4cdc86b484b05aacdcb5c88ad3d7ef3d76, dir: models/VideoR1-7B}
+  ViLASR-7B:           {repo: AntResearchNLP/ViLASR, revision: 89f84f291ac5a3a18acfddf65ec6b3ccda523db8, dir: models/ViLASR-7B}
+  VST-7B-RL:           {repo: rayruiyang/VST-7B-RL, revision: b18ec54b43e1d0b8a171cf41d9f221fbedd803ae, dir: models/VST-7B-RL}
+  SenseNovaSI-7B:      {repo: sensenova/SenseNova-SI-1.1-Qwen2.5-VL-7B, revision: 883d10010b3e37195236dc899f4e64fba2989b6b, dir: models/SenseNovaSI-7B}
