@@ -1138,6 +1138,19 @@ def compute_unique_sample_mask(data: DataProto) -> np.ndarray:
     return mask
 
 
+def rollout_dump_view(batch: DataProto, pre_filter_batch, reward_extra_infos_dict: dict) -> tuple[DataProto, dict]:
+    """What the rollout dump writes.  Without a group filter: the batch and its extras.  With one (round 11, the
+    optimisation package): every candidate episode, each marked ``kept_for_update`` (its group went into the
+    update) - the per-episode extras (traj_success, task_type, ...) have one entry per candidate, so a dump of the
+    filtered batch lost them all."""
+    if pre_filter_batch is None:
+        return batch, reward_extra_infos_dict
+    kept = {str(u) for u in batch.non_tensor_batch["uid"]}
+    extras = dict(reward_extra_infos_dict)
+    extras["kept_for_update"] = [str(u) in kept for u in pre_filter_batch.non_tensor_batch["uid"]]
+    return pre_filter_batch, extras
+
+
 def compute_valid_return_metrics(data: DataProto, ignore_value: float = -100.0) -> dict[str, float]:
     """Log return stats on real value-supervision positions only."""
     if "returns" not in data.batch or "response_mask" not in data.batch:
@@ -2799,7 +2812,10 @@ class RayPPOTrainer:
                     
                     
                     # filter the training batch for effective update (Refer to STARPO-S and DAPO)
+                    pre_filter_batch = None
                     if self.config.filter.get("enable", False):
+                        if self.config.trainer.get("rollout_data_dir", None):
+                            pre_filter_batch = batch  # the rollout dump writes every candidate (rollout_dump_view)
                         batch.meta_info["uid_draw_order"] = uid_draw_order
                         batch,metrics = FILTER_REGISTRY.get(self.config.filter.name)(batch, metrics,**self.config.filter.filter_kwargs)
                         batch.meta_info.pop("uid_draw_order", None)
@@ -2960,7 +2976,8 @@ class RayPPOTrainer:
                     # Log rollout generations if enabled
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
                     if rollout_data_dir:
-                        self._log_rollout_data(batch, reward_extra_infos_dict, timing_raw, rollout_data_dir)
+                        dump_batch, dump_extras = rollout_dump_view(batch, pre_filter_batch, reward_extra_infos_dict)
+                        self._log_rollout_data(dump_batch, dump_extras, timing_raw, rollout_data_dir)
 
                 # validate
                 if (

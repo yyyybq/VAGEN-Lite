@@ -1,5 +1,6 @@
 """Round 11, the optimisation package of InteriorGS v10 RL: the mixed-outcome group filter with refill from extra
-candidates, the per-episode share of unparseable answers, and GRPO in the concat (one sequence per episode) mode."""
+candidates, the per-episode share of unparseable answers, GRPO in the concat (one sequence per episode) mode, and
+the rollout dump of a filtered update."""
 
 import importlib.util
 import unittest
@@ -78,6 +79,65 @@ class InvalidTurnAndGrpoModeTest(unittest.TestCase):
         self.assertEqual(history_mode(cfg("gae", True)), "concat")
         with self.assertRaises(ValueError):
             history_mode(cfg("grpo", False))  # GRPO in the per-turn mode is not supported
+
+
+@unittest.skipUnless(HAVE_TRAINING_ENV, "needs the training env")
+class RolloutDumpTest(unittest.TestCase):
+    def test_filtered_update_dumps_every_candidate(self):
+        """The dump of a filtered update keeps every candidate episode with its outcome and family (round 11: the
+        dump of the filtered batch had lost them), each marked kept_for_update."""
+        import json
+        import os
+        import tempfile
+        import types
+
+        import numpy as np
+        import torch
+        from omegaconf import OmegaConf
+        from verl import DataProto
+
+        from vagen.custom_filter.filter import FILTER_REGISTRY
+        from vagen.ray_trainer import RayPPOTrainer, rollout_dump_view
+
+        succ = [1.0, 0.0, 1.0, 1.0, 0.0, 1.0]  # t0 mixed, t1 all success, t2 mixed
+        n = len(succ)
+        full = DataProto.from_dict(
+            tensors={"prompts": torch.full((n, 2), 5), "responses": torch.full((n, 3), 6),
+                     "token_level_scores": torch.tensor(succ).unsqueeze(1).repeat(1, 3)},
+            non_tensors={"uid": np.array(["t0", "t0", "t1", "t1", "t2", "t2"], dtype=object),
+                         "traj_success": np.array(succ)})
+        full.meta_info["uid_draw_order"] = {"t0": 0, "t1": 1, "t2": 2}
+        extras = {"traj_success": succ, "task_type": ["equidistance"] * 2 + ["fov_inclusion"] * 2 + ["screen_occupancy"] * 2}
+        kept, _ = FILTER_REGISTRY["mixed_outcome"](full, {}, target_groups=2)  # t1 dropped, t2 refills it
+        self.assertEqual(len(kept), 4)
+        # no filter: the batch and its extras as they are
+        batch, dump_extras = rollout_dump_view(kept, None, extras)
+        self.assertIs(batch, kept)
+        self.assertIs(dump_extras, extras)
+        # a filter: every candidate, marked
+        batch, dump_extras = rollout_dump_view(kept, full, extras)
+        self.assertIs(batch, full)
+        self.assertEqual(dump_extras["kept_for_update"], [True, True, False, False, True, True])
+        self.assertNotIn("kept_for_update", extras)
+
+        class Tok:
+            pad_token_id = 0
+
+            def batch_decode(self, seqs, skip_special_tokens=False):
+                return [" ".join(map(str, s)) for s in seqs]
+
+        with tempfile.TemporaryDirectory() as d:
+            fake = types.SimpleNamespace(tokenizer=Tok(), config=OmegaConf.create({"trainer": {}}), global_steps=7,
+                                         _log_image_enable=False)
+            fake._dump_generations = lambda **kw: RayPPOTrainer._dump_generations(fake, **kw)
+            RayPPOTrainer._log_rollout_data(fake, batch, dump_extras, {}, d)
+            with open(os.path.join(d, "7.jsonl"), encoding="utf-8") as f:
+                rows = [json.loads(line) for line in f if line.strip()]
+        self.assertEqual(len(rows), n)
+        self.assertEqual([r["kept_for_update"] for r in rows], [True, True, False, False, True, True])
+        self.assertEqual([r["traj_success"] for r in rows], succ)
+        self.assertEqual([r["task_type"] for r in rows], extras["task_type"])
+        self.assertEqual([r["score"] for r in rows], [3 * s for s in succ])
 
 
 if __name__ == "__main__":
