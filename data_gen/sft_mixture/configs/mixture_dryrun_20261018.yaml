@@ -1,0 +1,41 @@
+# Step 3 acceptance (docs/transition_qa/PROGRESS.md): the 230 P0 sample questions, a small P1 and a small P2 draw,
+# built into one mixture and loaded by LLaMA-Factory on one card (sco_interiorgs_v10_train.sh sft-trial, 5 steps).
+# The 7B optimiser state does not fit one card (docs/interiorgs_qa/REPORT_20261015.md), so the dry run trains the
+# round-5 3B SFT model (Qwen2.5-VL-3B), as the earlier one-card pilots did; the data path is the same.
+name: dryrun_20261018
+out: exps/sft_mixture_dryrun_20261018
+seed: 20261018
+split_manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/split_manifest.json
+task_rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/rows.jsonl
+base_recipe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/train.yaml
+train_overrides:
+  model_name_or_path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r5_20261014/trial/sft_trial_run/model
+  num_train_epochs: 1
+  per_device_eval_batch_size: 1
+  save_only_model: true
+pools:
+  P0:
+    kind: interiorgs_qa_lf
+    dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_lf_20261015/sample_256
+    train: qa_train.jsonl
+    val: qa_val.jsonl
+    exclude_groups: [S7]        # the user dropped the parallel / perpendicular group (2026-10-15): 240 -> 230 questions
+    val_scenes: train
+    val_scenes_reason: 样题导出把每第 10 道题留作验证，都是 train 场景；全量 P0 题库有 val 场景的题后改用那些
+  P1:
+    kind: transition_qa
+    train: exps/transition_qa_20261018/p1_train.jsonl
+    val: exps/transition_qa_20261018/p1_test.jsonl
+  P2:
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/trajectory_val.jsonl
+val:
+  P0: all
+  P1: 100
+  P2: 50
+recipes:
+  D_small:
+    description: 干跑：P0 样题全部 + P1、P2 各一小份
+    output_format: action_only
+    pools: {P0: all, P1: 500, P2: 300}

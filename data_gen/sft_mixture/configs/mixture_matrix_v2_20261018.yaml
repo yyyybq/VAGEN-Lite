@@ -1,0 +1,54 @@
+# The SFT data of the experiment matrix (configs/matrix_v2, docs/transition_qa/PROGRESS.md):
+#   A no SFT | B P0 | C P0 + P2 | D P0 + P1 + P2 | E = D's SFT, RL with the free_think prompt (user, 2026-10-18).
+# All groups output actions only (the current format).  P0 is the 230 sample questions until the full P0 bank exists
+# (the user decides when); then point pools.P0 at the bank's export and give it validation rows from val scenes.
+# P1 in D: as many questions as P2 has trajectories (a default to confirm; P1 has 35,039 training questions).
+# base_recipe is the round-11 formal SFT recipe (8 cards); the matrix configs (step 7) set the training settings.
+name: matrix_v2_20261018
+out: exps/sft_mixture_matrix_v2_20261018
+seed: 20261018
+split_manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/split_manifest.json
+task_rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/rows.jsonl
+base_recipe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/train.yaml
+pools:
+  P0:
+    kind: interiorgs_qa_lf
+    dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_lf_20261015/sample_256
+    train: qa_train.jsonl
+    val: qa_val.jsonl
+    exclude_groups: [S7]
+    val_scenes: train
+    val_scenes_reason: 样题导出把每第 10 道题留作验证，都是 train 场景；全量 P0 题库有 val 场景的题后改用那些
+  P1:
+    kind: transition_qa
+    train: exps/transition_qa_20261018/p1_train.jsonl
+    val: exps/transition_qa_20261018/p1_test.jsonl
+  P2:
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/trajectory_val.jsonl
+val:
+  P0: all
+  P1: 300
+  P2: 300
+recipes:
+  A:
+    description: 不做 SFT，原始模型直接 RL
+    output_format: action_only
+    pools: {}
+  B:
+    description: 只练 P0
+    output_format: action_only
+    pools: {P0: all}
+  C:
+    description: P0 + 动作轨迹
+    output_format: action_only
+    pools: {P0: all, P2: all}
+  D:
+    description: P0 + 转移题 + 动作轨迹（三种样本分开，同一次训练）
+    output_format: action_only
+    pools: {P0: all, P1: {times: 1.0, of: P2}, P2: all}
+  E:
+    same_as: D
+    description: RL 时换 free_think 提示（探索性，排在 D 之后；RL 前 50 步解析失败率超过 20% 就放弃）
+    output_format: action_only（RL 时 free_think）
