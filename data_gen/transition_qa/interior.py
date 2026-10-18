@@ -136,7 +136,7 @@ def cmd_questions(args: argparse.Namespace) -> None:
     """goal_now (Yes) on every rendered, non-blank interior frame -> OUT/raw/zz_interior.jsonl (read by build)."""
     from data_gen.interiorgs_v10.pilot import safe_name
 
-    sft, out = Path(args.sft_dir), Path(args.out)
+    sft, out = Path(args.sft_dir), Path(args.out).resolve()  # absolute image paths: training runs elsewhere
     d = out / "interior"
     rows = {r["task_id"]: r for r in GEN.read_jsonl(sft / "rows.jsonl")}
     manifest = json.loads((d / "frames" / "render_manifest.json").read_text())

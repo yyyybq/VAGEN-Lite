@@ -128,6 +128,15 @@ def load_pool(name: str, spec: Dict[str, Any], split: str, tasks: Dict[str, Dict
     raise MixtureError(f"pool {name}: unknown kind {kind!r}")
 
 
+def check_media(name: str, rows: Sequence[Dict[str, Any]]) -> None:
+    """Every image and video frame is an absolute path to an existing file (the trainer runs from another folder)."""
+    paths = {p for r in rows for p in r["images"]} | {p for r in rows for v in r["videos"] for p in v}
+    bad = sorted(p for p in paths if not (Path(p).is_absolute() and Path(p).is_file()))
+    if bad:
+        raise MixtureError(f"{name}: {len(bad)} of {len(paths)} images are not absolute paths of existing files, "
+                           f"e.g. {bad[:2]}")
+
+
 def check_scenes(name: str, split: str, rows: Sequence[Dict[str, Any]], allowed: set, which: str) -> None:
     bad = sorted({r["scene"] for r in rows if r["scene"] not in allowed})
     if bad:
@@ -236,6 +245,8 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
         rows = pools[name]["val"]
         want = len(rows) if n == "all" else int(n)
         val_rows[name] = stratified(rows, want, random.Random(f"{seed}:val:{name}"))
+        if cfg.get("check_media", True):
+            check_media(f"{name}_val", val_rows[name])
     table = []
     for rname, rspec in (cfg.get("recipes") or {}).items():
         if only and rname not in only:
@@ -261,6 +272,8 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
         for pool in POOLS:
             if counts.get(pool):
                 rows = stratified(pools[pool]["train"], counts[pool], random.Random(f"{seed}:{rname}:{pool}"))
+                if cfg.get("check_media", True):
+                    check_media(f"{rname} {pool}_train", rows)
                 write_jsonl(d / f"{pool}_train.jsonl", rows)
                 info[f"{pool}_train"] = dict(DATASET_INFO, file_name=f"{pool}_train.jsonl")
                 train_sets.append(f"{pool}_train")

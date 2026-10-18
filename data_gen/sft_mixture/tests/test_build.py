@@ -50,6 +50,7 @@ def _setup(tmp: Path, p2_val_scene: str = "s9"):
                                                    "num_train_epochs": 10}))
     return {
         "name": "t", "out": str(tmp / "out"), "seed": 1, "split_manifest": str(tmp / "manifest.json"),
+        "check_media": False,  # synthetic image paths
         "task_rows": str(tmp / "rows.jsonl"), "base_recipe": str(tmp / "base.yaml"),
         "pools": {
             "P0": {"kind": "interiorgs_qa_lf", "dir": str(tmp / "p0"), "train": "qa_train.jsonl",
@@ -112,6 +113,17 @@ def test_p2_val_rows_must_come_from_val_scenes(tmp_path):
     cfg = _setup(tmp_path, p2_val_scene="s2")   # validation trajectories of a train scene
     with pytest.raises(SystemExit):
         B.build(cfg)
+
+
+def test_media_must_be_absolute_existing_files(tmp_path):
+    img = tmp_path / "a.png"
+    img.write_bytes(b"x")
+    ok = [{"images": [str(img)], "videos": [[str(img)]]}]
+    B.check_media("ok", ok)
+    with pytest.raises(SystemExit):
+        B.check_media("relative", [{"images": ["exps/a.png"], "videos": []}])
+    with pytest.raises(SystemExit):
+        B.check_media("missing", [{"images": [str(tmp_path / "b.png")], "videos": []}])
 
 
 def test_counts():
