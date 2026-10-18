@@ -14,12 +14,14 @@ import argparse
 import datetime
 import json
 import os
+import time
 from pathlib import Path
 
 import yaml
 from huggingface_hub import snapshot_download
 
 HERE = Path(__file__).resolve().parent.parent
+ATTEMPTS = 5
 
 
 def load(path: Path) -> dict:
@@ -34,14 +36,22 @@ def fetch(root: Path, kind: str, name: str, spec: dict) -> dict:
         print(f"skip {name}: already at {spec['revision'][:10]}")
         return json.loads(receipt.read_text())
     target.mkdir(parents=True, exist_ok=True)
-    snapshot_download(
-        repo_id=spec["repo"],
-        repo_type="dataset" if kind == "datasets" else "model",
-        revision=spec["revision"],
-        local_dir=str(target),
-        allow_patterns=spec.get("allow"),
-        max_workers=4,
-    )
+    for attempt in range(1, ATTEMPTS + 1):  # the mirror drops a connection now and then; downloads resume
+        try:
+            snapshot_download(
+                repo_id=spec["repo"],
+                repo_type="dataset" if kind == "datasets" else "model",
+                revision=spec["revision"],
+                local_dir=str(target),
+                allow_patterns=spec.get("allow"),
+                max_workers=4,
+            )
+            break
+        except Exception as e:
+            if attempt == ATTEMPTS:
+                raise
+            print(f"{name}: attempt {attempt} failed ({type(e).__name__}); retrying in {30 * attempt}s", flush=True)
+            time.sleep(30 * attempt)
     files = sorted(p for p in target.rglob("*") if p.is_file() and ".cache" not in p.parts and p.name != receipt.name)
     out = {
         "name": name,

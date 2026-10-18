@@ -63,6 +63,32 @@ def test_view_rejects_other_architectures(tmp_path):
     raise AssertionError("expected ValueError")
 
 
+def test_read_head_without_git(tmp_path, monkeypatch):
+    from eval_external.common import manifest as MF
+
+    common = tmp_path / "main" / ".git"
+    (common / "refs" / "heads").mkdir(parents=True)
+    (common / "packed-refs").write_text("# pack-refs\n" + "a" * 40 + " refs/heads/packed\n")
+    wt_git = common / "worktrees" / "wt"
+    wt_git.mkdir(parents=True)
+    (wt_git / "commondir").write_text("../..\n")
+    (wt_git / "HEAD").write_text("ref: refs/heads/eval\n")
+    (common / "refs" / "heads" / "eval").write_text("b" * 40 + "\n")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    (wt / ".git").write_text(f"gitdir: {wt_git}\n")
+    assert MF._read_head(wt) == "b" * 40
+    (wt_git / "HEAD").write_text("ref: refs/heads/packed\n")
+    assert MF._read_head(wt) == "a" * 40
+
+    def no_git(*a, **k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(MF.subprocess, "run", no_git)
+    st = MF.git_state(wt)
+    assert st["commit"] == "a" * 40 and st["dirty"] is None
+
+
 def test_manifest_fields(tmp_path):
     path = write_manifest(tmp_path / "run", models=[{"code": "m"}], benchmark={"name": "b"}, backend={"name": "x"},
                           prompt={"post": "p"}, frames=32, decoding={"do_sample": False})

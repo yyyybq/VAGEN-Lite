@@ -18,13 +18,48 @@ from pathlib import Path
 EVAL_ROOT = Path(__file__).resolve().parent.parent
 
 
-def git_state(path: Path) -> dict:
-    def run(*args: str) -> str:
-        r = subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True)
-        return r.stdout.strip() if r.returncode == 0 else ""
+def _read_head(path: Path) -> str | None:
+    """HEAD's commit read from the .git files (the sco image has no git binary); handles worktrees and
+    packed refs."""
+    dot = Path(path) / ".git"
+    if dot.is_file():
+        gitdir = Path(dot.read_text().split("gitdir:", 1)[1].strip())
+        gitdir = gitdir if gitdir.is_absolute() else (Path(path) / gitdir)
+    elif dot.is_dir():
+        gitdir = dot
+    else:
+        return None
+    common = gitdir
+    if (gitdir / "commondir").exists():
+        common = (gitdir / (gitdir / "commondir").read_text().strip()).resolve()
+    head = (gitdir / "HEAD").read_text().strip()
+    if not head.startswith("ref:"):
+        return head
+    ref = head.split(":", 1)[1].strip()
+    for base in (gitdir, common):
+        if (base / ref).exists():
+            return (base / ref).read_text().strip()
+    packed = common / "packed-refs"
+    if packed.exists():
+        for line in packed.read_text().splitlines():
+            if line.endswith(" " + ref):
+                return line.split()[0]
+    return None
 
-    return {"path": str(path), "commit": run("rev-parse", "HEAD"),
-            "dirty": bool(run("status", "--porcelain", "--untracked-files=no"))}
+
+def git_state(path: Path) -> dict:
+    def run(*args: str) -> str | None:
+        try:
+            r = subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True)
+        except FileNotFoundError:
+            return None
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    commit = run("rev-parse", "HEAD")
+    if commit is None:
+        return {"path": str(path), "commit": _read_head(path), "dirty": None, "read": ".git files (no git binary)"}
+    status = run("status", "--porcelain", "--untracked-files=no")
+    return {"path": str(path), "commit": commit, "dirty": bool(status)}
 
 
 def write_manifest(run_dir: Path, *, models: list[dict], benchmark: dict, backend: dict, prompt: dict,
