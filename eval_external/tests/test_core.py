@@ -32,6 +32,7 @@ def _fake_checkpoint(tmp_path, dtype="float32"):
     (ckpt / "tokenizer.json").write_text("{}")
     (ckpt / "chat_template.jinja").write_text("{{ messages }}")
     (ckpt / "optimizer.pt").write_bytes(b"x")
+    (ckpt / "pytorch_model.bin").write_bytes(b"x")
     reg = {"hf_home": str(tmp_path / "hf"), "root": str(tmp_path / "root"), "vagen_exps": str(tmp_path / "exps"),
            "models": {"ours-X": {"source": "local", "path": "run/ckpt", "family": "qwen2_5_vl", "params": "7B"}}}
     return ckpt, reg
@@ -46,7 +47,7 @@ def test_view_is_bf16_greedy_and_leaves_checkpoint_alone(tmp_path):
     gen = json.loads((view / "generation_config.json").read_text())
     assert gen == {"eos_token_id": [1, 2], "pad_token_id": 2, "do_sample": False, "repetition_penalty": 1.0}
     assert (view / "model-00001-of-00001.safetensors").is_symlink()
-    assert not (view / "optimizer.pt").exists()
+    assert not (view / "optimizer.pt").exists() and not (view / "pytorch_model.bin").exists()
     assert {p.name: p.read_bytes() for p in ckpt.iterdir()} == before
     d = M.describe("ours-X", reg)
     assert d["weights_sha256"] == M.weight_hash("ours-X", reg)["sha256"]

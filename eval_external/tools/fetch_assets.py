@@ -22,6 +22,9 @@ from huggingface_hub import snapshot_download
 
 HERE = Path(__file__).resolve().parent.parent
 ATTEMPTS = 5
+# Models: weights as safetensors plus configs and tokenizer files only.  Some repos also carry training state
+# (rng_state_*.pth, scheduler.pt, training_args.bin): pickle files we never load and do not download.
+MODEL_ALLOW = ["*.safetensors", "*.json", "*.txt", "*.jinja", "*.model", "*.tiktoken", "README.md"]
 
 
 def load(path: Path) -> dict:
@@ -43,7 +46,7 @@ def fetch(root: Path, kind: str, name: str, spec: dict) -> dict:
                 repo_type="dataset" if kind == "datasets" else "model",
                 revision=spec["revision"],
                 local_dir=str(target),
-                allow_patterns=spec.get("allow"),
+                allow_patterns=spec.get("allow") or (MODEL_ALLOW if kind == "models" else None),
                 max_workers=4,
             )
             break

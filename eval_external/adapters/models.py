@@ -30,6 +30,7 @@ FAMILY_ARCH = {"qwen2_5_vl": "Qwen2_5_VLForConditionalGeneration"}
 VIEW_DTYPE = "bfloat16"
 GREEDY_KEYS = ("bos_token_id", "eos_token_id", "pad_token_id")
 TRAINING_STATE = ("optimizer", "scheduler", "rng_state", "trainer_state", "training_args")  # not linked into views
+PICKLE_SUFFIXES = (".bin", ".pt", ".pth", ".pkl", ".ckpt")  # never linked: views load safetensors only
 
 
 def load_registry(path: Path = REGISTRY) -> dict:
@@ -100,7 +101,7 @@ def build_view(code: str, reg: dict | None = None) -> Path:
     for p in sorted(src.iterdir()):
         if p.name in ("config.json", "generation_config.json") or p.is_dir() or p.name.startswith("."):
             continue
-        if p.name.startswith(TRAINING_STATE):
+        if p.name.startswith(TRAINING_STATE) or p.name.endswith(PICKLE_SUFFIXES):
             continue
         link = view / p.name
         if link.is_symlink() or link.exists():
