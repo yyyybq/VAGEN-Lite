@@ -28,6 +28,28 @@ from eval_external.qa_transfer.benchmarks import BENCHMARKS
 from eval_external.qa_transfer.parse_check import mcq_letter, number
 
 
+# VSTI-Bench's five categories as VLM-3R reports them (its Table 2: Cam-Obj Abs. Dist., Cam. Displace., Cam. Mov.
+# Dir., Obj-Obj Rel. Pos., Cam-Obj Rel. Dist.; "Avg." is their mean).  The task's own "overall" averages the nine
+# question types instead (v1/v2/v3 and lr/nf/ud separately), which is a different number.
+VSTI_GROUPS = {
+    "camera_obj_abs_dist": ["camera_obj_abs_dist"],
+    "camera_displacement": ["camera_displacement"],
+    "camera_movement_direction": ["camera_movement_direction"],
+    "obj_obj_relative_pos": ["obj_obj_relative_pos_lr", "obj_obj_relative_pos_nf", "obj_obj_relative_pos_ud"],
+    "camera_obj_rel_dist": ["camera_obj_rel_dist_v1", "camera_obj_rel_dist_v2", "camera_obj_rel_dist_v3"],
+}
+
+
+def vsti_avg5(by_type: dict) -> tuple[float, dict]:
+    """Mean of the five categories; each category scores all its items together."""
+    groups = {}
+    for g, types in VSTI_GROUPS.items():
+        items = [s for t in types for s in by_type.get(t, [])]
+        if items:
+            groups[g] = 100 * sum(items) / len(items)
+    return (sum(groups.values()) / len(groups) if groups else float("nan")), groups
+
+
 def _latest(pattern: str) -> str:
     files = sorted(glob.glob(pattern, recursive=True), key=os.path.getmtime)
     if not files:
@@ -79,9 +101,15 @@ def collect_lmms(run_dir: Path, bench: dict) -> dict:
             is_mcq = bool(opts) and str(opts) not in ("None", "[]", "nan")
             n_opt = len(opts) if isinstance(opts, list) else (str(opts).count("'") // 2 if is_mcq else 0)
             unparse += not _usable(str(doc.get("prediction", "")), is_mcq, max(n_opt, 2))
-    return {"overall": overall, "scores": scores, "unparseable": unparse,
-            "subscores": {k: 100 * sum(v) / len(v) for k, v in sorted(by_type.items())},
-            "files": [res_file, sam_file]}
+    out = {"overall": overall, "scores": scores, "unparseable": unparse,
+           "subscores": {k: 100 * sum(v) / len(v) for k, v in sorted(by_type.items())},
+           "files": [res_file, sam_file]}
+    if task.startswith("vstibench"):
+        avg5, groups = vsti_avg5(by_type)
+        out["task_overall_9_types"] = overall
+        out["overall"] = avg5  # the number VLM-3R and Spatial-Interactor report
+        out["subscores"].update({f"group/{g}": v for g, v in groups.items()})
+    return out
 
 
 def collect_vlmeval(run_dir: Path, bench: dict) -> dict:
@@ -134,6 +162,9 @@ def collect(run_dir: Path) -> dict:
            "manifest": manifest}
     if "backend_table" in got:
         out["backend_table"] = got["backend_table"]
+    if "task_overall_9_types" in got:
+        out["task_overall_9_types"] = round(got["task_overall_9_types"], 2)
+        out["overall_definition"] = "mean of VLM-3R's five categories (each category scores all its items)"
     k = got["overall"] / 100 * n
     p, lo, hi = wilson(k, n)
     out["ci95"] = [round(100 * lo, 1), round(100 * hi, 1)]
