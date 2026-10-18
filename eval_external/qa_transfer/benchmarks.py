@@ -8,6 +8,8 @@ format.  Decoding is greedy for every model; each model's view also carries a gr
 
 from __future__ import annotations
 
+from pathlib import Path
+
 # Same arguments as VLMEvalKit's own "Qwen2.5-VL-7B-Instruct" / "-3B-Instruct" entries (EASI v0.2.2 config.py),
 # used for every Qwen2.5-VL-based model.  The class is Qwen2VLChat loaded with SDPA attention instead of
 # flash-attn (qa_transfer/vlmeval_launch.py says why).
@@ -24,6 +26,8 @@ VLMEVAL_DECODING = {"max_new_tokens": 2048, "do_sample": False, "temperature": 0
 # lmms-eval: model "qwen2_5_vl" with these model_args (pretrained= is added per model); the decoding comes from
 # each task's yaml (greedy) plus the view's generation_config.json.
 LMMS_QWEN25VL_ARGS = {"max_num_frames": 32, "attn_implementation": "sdpa"}
+# Our task variants (lmms_tasks/*.yaml): each includes the original task and changes only what its header says.
+LMMS_INCLUDE = Path(__file__).resolve().parent / "lmms_tasks"
 
 BENCHMARKS = {
     # name used in eval_external tables -> backend and backend-specific settings
@@ -38,9 +42,11 @@ BENCHMARKS = {
                    "num_post": "Answer briefly and directly in one float number."},
     },
     "VSI-Bench@lmms": {
-        "backend": "lmms_eval", "task": "vsibench", "frames": 32, "items": 5130,
+        "backend": "lmms_eval", "task": "vsibench_ee", "frames": 32, "items": 5130,
         "metric": "mean over 8 sub-tasks; MCQ accuracy, numeric MRA",
-        "source": {"dataset": "nyu-visionx/VSI-Bench (HF datasets cache)", "videos": "$HF_HOME/vsibench"},
+        "source": {"dataset": "nyu-visionx/VSI-Bench (HF snapshot, revision recorded at run time)",
+                   "videos": "$HF_HOME/vsibench, unpacked from the same snapshot",
+                   "task": "lmms_tasks/vsibench_ee.yaml = lmms-eval vsibench with dataset token off"},
         "prompt": {"impl": "lmms_eval/tasks/vsibench/utils.py vsibench_doc_to_text"},
     },
     "SAT-Real": {

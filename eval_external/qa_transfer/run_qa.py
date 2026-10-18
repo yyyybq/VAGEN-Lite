@@ -19,8 +19,8 @@ from pathlib import Path
 
 from eval_external.adapters import models as M
 from eval_external.common.manifest import git_state, write_manifest
-from eval_external.qa_transfer.benchmarks import (BENCHMARKS, LMMS_QWEN25VL_ARGS, VLMEVAL_DECODING,
-                                                  VLMEVAL_QWEN25VL)
+from eval_external.qa_transfer.benchmarks import (BENCHMARKS, LMMS_INCLUDE, LMMS_QWEN25VL_ARGS,
+                                                  VLMEVAL_DECODING, VLMEVAL_QWEN25VL)
 
 WORKTREE = Path(__file__).resolve().parents[2]
 REPOS = Path("/mnt/umm/users/yinbaiqiao/eval_external_assets/repos")
@@ -49,7 +49,7 @@ def run_lmms_eval(code: str, bench: dict, run_dir: Path) -> list[str]:
     args = {"pretrained": str(M.view_dir(code)), **LMMS_QWEN25VL_ARGS}
     return [sys.executable, "-m", "lmms_eval", "--model", "qwen2_5_vl", "--model_args",
             ",".join(f"{k}={v}" for k, v in args.items()), "--tasks", bench["task"], "--batch_size", "1",
-            "--log_samples", "--output_path", str(run_dir / "lmms")]
+            "--include_path", str(LMMS_INCLUDE), "--log_samples", "--output_path", str(run_dir / "lmms")]
 
 
 def main() -> None:
