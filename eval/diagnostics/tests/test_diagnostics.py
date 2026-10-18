@@ -75,6 +75,42 @@ def test_score_and_summary():
     assert s["qtype"]["closer_now"]["unreadable"] == 1.0
 
 
+def test_history_permutation_differs_and_keeps_turns():
+    from eval.diagnostics import history_ablation as HA
+
+    assert HA.permutation(0, "k") == [] and HA.permutation(1, "k") == [0]
+    for n in range(2, 8):
+        for k in range(20):
+            p = HA.permutation(n, f"t{k}")
+            assert sorted(p) == list(range(n)) and p != list(range(n))
+
+    class Base:
+        def generate(self, system, user_text, image, earlier=(), **kw):
+            return earlier
+
+    out = HA.shuffled_policy(Base)().generate("s", "u", None, earlier=[("o1", 1, "a1"), ("o2", 2, "a2"), ("o3", 3, "a3")])
+    assert sorted(out) == [("o1", 1, "a1"), ("o2", 2, "a2"), ("o3", 3, "a3")] and out != sorted(out)
+
+
+def test_transfer_table(tmp_path):
+    import json
+
+    from eval.diagnostics import transfer_table as TT
+
+    def write(name, succ):
+        d = tmp_path / name
+        d.mkdir()
+        rows = [{"index": i, "task_type": f, "success": s} for i, (f, s) in enumerate(succ)]
+        (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    fams = ["projective_relations", "projective_relations", "equidistance", "fov_inclusion"]
+    write("base", list(zip(fams, [False, False, False, True])))
+    write("proj", list(zip(fams, [True, False, False, True])))
+    t = TT.table({"baseline": {"eval": str(tmp_path), "name": "base"},
+                  "runs": [{"eval": str(tmp_path), "name": "proj", "qa_groups": ["投影"]}]})
+    assert t["投影"]["投影"] == (50.0, 1) and t["投影"]["距离类"] == (0.0, 1) and t["距离类"]["投影"] == (None, 0)
+    assert "+50.0" in TT.markdown(t)
+
+
 def test_parse_chain():
     name, pts = QP.parse_chain("R11-SFT=sft_formal_e{1..3}@154")
     assert name == "R11-SFT" and pts == [("sft_formal_e1", 154), ("sft_formal_e2", 308), ("sft_formal_e3", 462)]
