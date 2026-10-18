@@ -1,0 +1,35 @@
+# Same as vstibench.yaml in this folder but on the labels BEFORE the authors' 2026-07-13 camera-position
+# correction (dataset revision 27ff0a2, 6,042 items, 839 camera-displacement items).  Spatial-Interactor reports
+# 839 camera-displacement items, i.e. this version; we run it only to compare with their numbers.  The videos
+# are the same files (the correction changed only test.json).
+dataset_path: Journey9ni/vstibench
+dataset_kwargs:
+  token: False
+  cache_dir: vstibench
+  video: True
+  revision: 27ff0a2ddb5b22c1eb036a4249345e6f00ee8ea1
+task: vstibench_prefix_ee
+test_split: test
+output_type: generate_until
+process_docs: !function utils.process_docs
+doc_to_visual: !function utils.vsibench_doc_to_visual
+doc_to_text: !function utils.vsibench_doc_to_text
+doc_to_target: "ground_truth"
+generation_kwargs:
+  max_new_tokens: 16
+  temperature: 0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: false
+process_results: !function utils.vsibench_process_results
+metric_list:
+  - metric: vsibench_score
+    aggregation: !function utils.vsibench_aggregate_results
+    higher_is_better: true
+lmms_eval_specific_kwargs:
+  default:
+    pre_prompt: ""
+    mca_post_prompt: "Answer with the option's letter from the given choices directly."
+    na_post_prompt: "Please answer the question using a single word or phrase."
+metadata:
+  - version: 0.0

@@ -1,0 +1,35 @@
+# VSTI-Bench as VLM-3R evaluates it (VLM-3R 206afd0, thinking-in-space/lmms_eval/tasks/vstibench/vstibench.yaml),
+# with three changes: task name vstibench_ee, dataset token off (the dataset is public), and the dataset pinned to
+# revision 0903eb0 = labels after the authors' 2026-07-13 camera-position correction (5,736 items).
+# utils.py next to this file is VLM-3R's (Apache 2.0) and reads cache_dir from this file.
+dataset_path: Journey9ni/vstibench
+dataset_kwargs:
+  token: False
+  cache_dir: vstibench
+  video: True
+  revision: 0903eb0b0c9d03da730d43503c48302a1f3b412d
+task: vstibench_ee
+test_split: test
+output_type: generate_until
+process_docs: !function utils.process_docs
+doc_to_visual: !function utils.vsibench_doc_to_visual
+doc_to_text: !function utils.vsibench_doc_to_text
+doc_to_target: "ground_truth"
+generation_kwargs:
+  max_new_tokens: 16
+  temperature: 0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: false
+process_results: !function utils.vsibench_process_results
+metric_list:
+  - metric: vsibench_score
+    aggregation: !function utils.vsibench_aggregate_results
+    higher_is_better: true
+lmms_eval_specific_kwargs:
+  default:
+    pre_prompt: ""
+    mca_post_prompt: "Answer with the option's letter from the given choices directly."
+    na_post_prompt: "Please answer the question using a single word or phrase."
+metadata:
+  - version: 0.0
