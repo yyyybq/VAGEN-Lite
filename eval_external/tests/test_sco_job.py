@@ -19,3 +19,10 @@ def test_launch_script_runs_offline_in_the_worktree_and_hands_files_back():
     assert "python -m m --bench VSI-Bench@lmms > /tmp/run/job/run.log 2>&1" in text
     assert f"chown -R {job.OWNER} /tmp/run" in text and "! -name hub" in text
     assert text.rstrip().endswith("exit $rc")
+
+
+def test_queue_run_dirs_match_manual_naming():
+    from eval_external.sco import queue as Q
+
+    assert Q.run_dir("step1", "base-7B", "VSI-Bench@lmms").name == "base-7B__VSI-Bench_lmms"
+    assert Q.run_dir("step2", "SI-7B", "SAT-Real") == Q.QA_RUNS / "step2" / "SI-7B__SAT-Real"
