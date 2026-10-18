@@ -358,6 +358,7 @@ BUILD_CONFIG: Dict[str, Any] = {
     "scene_cap": 0.08,
     "probe_size": 500,
     "goal_max_share_in_class": 0.5,  # "is the task met (after the action)?" at most half of the state / forward class
+    "final_letter_slack": 1.10,      # after sampling, per file: <= +2.4 points for 2 options, +1.8 for 4
 }
 ORDINAL = {"distance_bin", "height_bin"}         # options in ascending order: balance the letter
 SHUFFLED = {"occluded", "both_in_view"}          # categorical: option order drawn per question
@@ -410,13 +411,19 @@ def _cap_unchanged(rs: List[Dict[str, Any]], share: float, rng: random.Random) -
     return [r for r in rs if r["changed"] or id(r) in keep], len(unchanged) - max_un
 
 
-def _cap_flips(rs: List[Dict[str, Any]], band: Tuple[float, float], rng: random.Random) -> Tuple[List[Dict[str, Any]], int]:
-    """Keep the share of answers that differ from the current answer inside ``band`` (no 'flip it' shortcut)."""
+def _cap_flips(rs: List[Dict[str, Any]], band: Tuple[float, float], rng: random.Random,
+               min_side: float = 0.10) -> Tuple[List[Dict[str, Any]], int]:
+    """Keep the share of answers that differ from the current answer inside ``band`` (no 'flip it' shortcut).
+    Only where both outcomes really occur (each at least ``min_side`` of the candidates): a turn never swaps
+    the left / right order of two objects in front of the camera, so left_right_after almost never flips and
+    is left as it is (its share is reported)."""
     known = [r for r in rs if r["flip"] is not None]
     if not known:
         return rs, 0
     flips = [r for r in known if r["flip"]]
     keeps = [r for r in known if not r["flip"]]
+    if min(len(flips), len(keeps)) < min_side * len(known):
+        return rs, 0
     lo, hi = band
     share = len(flips) / len(known)
     if share > hi:
@@ -529,6 +536,42 @@ def scene_cap(records: List[Dict[str, Any]], cap: float, rng: random.Random) -> 
     return out, dropped
 
 
+REORDERABLE = {"closer", "action", "occluded", "both_in_view"}   # option order carries no meaning
+
+
+def place_correct(rec: Dict[str, Any], pos: int) -> Dict[str, Any]:
+    """The same question with its correct option moved to position ``pos`` (the others keep their order)."""
+    opts = list(rec["options"])
+    correct = opts.pop(Q.LETTERS.index(rec["answer"]))
+    opts.insert(pos, correct)
+    head = rec["question"].rsplit("\n(A) ", 1)[0]
+    return dict(rec, options=opts, answer=Q.LETTERS[pos],
+                question=f"{head}\n{Q.options_block(opts)}\n{Q.ANSWER_LETTER}")
+
+
+def even_letters(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random.Random, cap: bool = True,
+                 report: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Final letter balance of one file: the correct option of a reorderable question goes to the positions in
+    turn (by sample id); the other questions' letters are capped at ``final_letter_slack`` x the rarest."""
+    by_q: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for r in records:
+        by_q[r["qtype"]].append(r)
+    out = []
+    for q, rs in sorted(by_q.items()):
+        rs = sorted(rs, key=lambda r: r["sample_id"])
+        if rs[0]["kind"] in REORDERABLE:
+            start = Q.stable_int(q, "letters") % len(rs[0]["options"])
+            out.extend(place_correct(r, (start + i) % len(r["options"])) for i, r in enumerate(rs))
+        elif cap:
+            kept, dropped = _cap_groups(rs, lambda r: r["answer"], cfg["final_letter_slack"], rng)
+            if report is not None and dropped:
+                report[q] = dropped
+            out.extend(kept)
+        else:
+            out.extend(rs)
+    return sorted(out, key=lambda r: r["sample_id"])
+
+
 def to_lf(rec: Dict[str, Any]) -> Dict[str, Any]:
     if len(rec["images"]) == 2:
         head = "First image: <image>\nSecond image: <image>\n"
@@ -546,17 +589,29 @@ def to_lf(rec: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def probe_subset(records: List[Dict[str, Any]], size: int, rng: random.Random) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Fixed probe set: equal share per qtype (as far as each has questions), the rest is the test set."""
+    """Fixed probe set: equal share per qtype (as far as each has questions) and, within a qtype, the answer
+    letters in turn; the rest is the test set."""
     by_q: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
     for r in sorted(records, key=lambda r: r["sample_id"]):
         by_q[r["qtype"]].append(r)
-    for rs in by_q.values():
-        rng.shuffle(rs)
+    queues: Dict[str, List[Dict[str, Any]]] = {}
+    for q, rs in by_q.items():
+        by_letter: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+        for r in rs:
+            by_letter[r["answer"]].append(r)
+        for group in by_letter.values():
+            rng.shuffle(group)
+        order: List[Dict[str, Any]] = []
+        while any(by_letter.values()):
+            for letter in sorted(by_letter):
+                if by_letter[letter]:
+                    order.append(by_letter[letter].pop())
+        queues[q] = order[::-1]  # pop() from the end takes them in letter turn
     probe: List[Dict[str, Any]] = []
-    while len(probe) < size and any(by_q.values()):
-        for q in sorted(by_q):
-            if by_q[q] and len(probe) < size:
-                probe.append(by_q[q].pop())
+    while len(probe) < size and any(queues.values()):
+        for q in sorted(queues):
+            if queues[q] and len(probe) < size:
+                probe.append(queues[q].pop())
     ids = {r["sample_id"] for r in probe}
     return probe, [r for r in records if r["sample_id"] not in ids]
 
@@ -593,7 +648,10 @@ def cmd_build(args: argparse.Namespace) -> None:
         stats[name] = rep
         built[name] = sorted(rs, key=lambda r: r["sample_id"])
     probe, test = probe_subset(built["val"], int(cfg["probe_size"]), rng)
-    files = {"p1_train.jsonl": built["train"], "p1_test.jsonl": test, "p1_probe.jsonl": probe}
+    final = stats.setdefault("final_letter_cap_dropped", {})
+    files = {"p1_train.jsonl": even_letters(built["train"], cfg, rng, report=final.setdefault("train", {})),
+             "p1_test.jsonl": even_letters(test, cfg, rng, report=final.setdefault("test", {})),
+             "p1_probe.jsonl": even_letters(probe, cfg, rng, cap=False)}
     if {r["scene"] for r in built["train"]} & ({r["scene"] for r in test} | {r["scene"] for r in probe}):
         raise SystemExit("a scene is in both the training and the test questions")
     for name, rs in files.items():

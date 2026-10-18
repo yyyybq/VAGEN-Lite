@@ -47,7 +47,11 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
         cls = (stats.get(split) or {}).get("classes") or {}
         if cls:
             lines.append(f"- {split} 场景：" + "；".join(f"{CLASS_ZH[k]}可用 {v['available']}、留下 {v['kept']}"
-                                                        for k, v in sorted(cls.items())))
+                                                        for k, v in sorted(cls.items()) if k in CLASS_ZH))
+            capped = cls.get("goal_cap_dropped") or {}
+            if capped:
+                lines.append(f"  - \"任务要求满足了吗\"两类题（goal_now / goal_after）各自最多占本类的一半，因此去掉："
+                             + "，".join(f"{CLASS_ZH[k]} {n} 道" for k, n in sorted(capped.items())))
     lines.append("")
     # ------------------------------------------------------------------ family x qtype x split
     lines += ["## 2. 按任务族 × 题类 × 划分的题数", ""]

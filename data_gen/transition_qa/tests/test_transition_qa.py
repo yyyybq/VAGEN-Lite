@@ -165,6 +165,29 @@ def test_forward_caps_unchanged_and_flip_share():
     assert abs(yes - 0.5) <= 0.05
 
 
+def test_flip_band_left_alone_when_flips_are_physically_rare():
+    rng = random.Random(0)
+    rs = [_rec(i, "left_right_after", "A" if i % 2 else "B", "", flip=(i < 20)) for i in range(1000)]
+    kept, dropped = GEN._cap_flips(rs, (0.35, 0.65), rng)
+    assert dropped == 0 and len(kept) == 1000
+
+
+def test_even_letters_moves_the_correct_option_in_turn():
+    rng = random.Random(0)
+    rs = []
+    for i in range(103):
+        r = _rec(i, "action_between", "A", "")
+        r["options"] = ["right one", "x", "y", "z"]
+        r["question"] = "What did the camera do?\n" + Q.options_block(r["options"]) + "\n" + Q.ANSWER_LETTER
+        rs.append(r)
+    out = GEN.even_letters(rs, GEN.BUILD_CONFIG, rng)
+    letters = collections.Counter(r["answer"] for r in out)
+    assert max(letters.values()) - min(letters.values()) <= 1
+    for r in out:
+        assert r["options"][Q.LETTERS.index(r["answer"])] == "right one"
+        assert f"({r['answer']}) right one" in r["question"]
+
+
 def test_class_ratio_and_probe():
     rng = random.Random(0)
     rs = ([_rec(i, "goal_now", "Yes", "") for i in range(500)]
