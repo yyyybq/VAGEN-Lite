@@ -1,0 +1,149 @@
+"""P1_STATS.md from a built bank (OUT/p1_*.jsonl, OUT/stats.json).
+
+    python -m data_gen.transition_qa.report --out OUT --md docs/transition_qa/P1_STATS.md
+"""
+
+from __future__ import annotations
+
+import argparse
+import collections
+import json
+import random
+from pathlib import Path
+from typing import Any, Dict, List
+
+from . import generate as GEN
+
+FILES = ("p1_train.jsonl", "p1_test.jsonl", "p1_probe.jsonl")
+CLASS_ZH = {"state": "状态题 (a)", "forward": "前向题 (b)", "inverse": "逆向题 (c)"}
+TARGET = {"state": 0.50, "forward": 0.35, "inverse": 0.15}
+
+
+def _table(header: List[str], rows: List[List[Any]]) -> str:
+    out = ["| " + " | ".join(header) + " |", "| " + " | ".join("---" for _ in header) + " |"]
+    out += ["| " + " | ".join(str(c) for c in r) + " |" for r in rows]
+    return "\n".join(out)
+
+
+def _pct(a: float, b: float) -> str:
+    return f"{100.0 * a / b:.1f}%" if b else "–"
+
+
+def write(out: Path, md: Path) -> Dict[str, Any]:
+    stats = json.loads((out / "stats.json").read_text())
+    data = {f: GEN.read_jsonl(out / f) for f in FILES}
+    lines: List[str] = ["# P1 转移题：统计", "",
+                        f"由 `python -m data_gen.transition_qa.report` 从 `{out}` 生成。"
+                        "题库怎么来的、各题类的答案用哪个函数算，见 `PROGRESS.md` 第 1.3 节和第 2 节。", ""]
+    # ------------------------------------------------------------------ sizes and classes
+    lines += ["## 1. 题数和三类题的比例", ""]
+    rows = []
+    for f, rs in data.items():
+        c = collections.Counter(r["qclass"] for r in rs)
+        rows.append([f, len(rs)] + [f"{c[k]}（{_pct(c[k], len(rs))}）" for k in ("state", "forward", "inverse")])
+    lines += [_table(["文件", "题数", "状态题 (a)", "前向题 (b)", "逆向题 (c)"], rows), "",
+              "目标比例 50% / 35% / 15%。三类题按这个比例从平衡后的题里抽，受最少的那一类限制。", ""]
+    for split in ("train", "val"):
+        cls = (stats.get(split) or {}).get("classes") or {}
+        if cls:
+            lines.append(f"- {split} 场景：" + "；".join(f"{CLASS_ZH[k]}可用 {v['available']}、留下 {v['kept']}"
+                                                        for k, v in sorted(cls.items())))
+    lines.append("")
+    # ------------------------------------------------------------------ family x qtype x split
+    lines += ["## 2. 按任务族 × 题类 × 划分的题数", ""]
+    qtypes = sorted({r["qtype"] for rs in data.values() for r in rs})
+    fams = sorted({r["family"] for rs in data.values() for r in rs})
+    for f, rs in data.items():
+        c = collections.Counter((r["family"], r["qtype"]) for r in rs)
+        rows = [[fam] + [c[(fam, q)] for q in qtypes] + [sum(c[(fam, q)] for q in qtypes)] for fam in fams]
+        rows.append(["合计"] + [sum(c[(fam, q)] for fam in fams) for q in qtypes] + [len(rs)])
+        lines += [f"**{f}**", "", _table(["任务族"] + qtypes + ["合计"], rows), ""]
+    # ------------------------------------------------------------------ answers
+    lines += ["## 3. 答案分布", "",
+              "\"字母\"是正确选项的字母；\"偏差\"是各字母占比和均匀分布之差的最大值（验收线 5 个百分点）。"
+              "\"答案值\"是选项的含义（例如 left / right、full / partial / none）。", ""]
+    worst = 0.0
+    for f, rs in data.items():
+        rows = []
+        for q in qtypes:
+            sub = [r for r in rs if r["qtype"] == q]
+            if not sub:
+                continue
+            letters = collections.Counter(r["answer"] for r in sub)
+            n_opts = 2 if sub[0]["answer"] in ("Yes", "No") else len(sub[0]["options"])
+            keys = ["Yes", "No"] if sub[0]["answer"] in ("Yes", "No") else list("ABCD"[:n_opts])
+            dev = max(abs(letters[k] / len(sub) - 1.0 / len(keys)) for k in keys)
+            worst = max(worst, dev) if f != "p1_probe.jsonl" else worst
+            values = collections.Counter(r["answer_value"] for r in sub)
+            rows.append([q, len(sub), " / ".join(f"{k} {_pct(letters[k], len(sub))}" for k in keys),
+                         f"{100 * dev:.1f}", "，".join(f"{k} {v}" for k, v in values.most_common(6))])
+        lines += [f"**{f}**", "", _table(["题类", "题数", "字母", "偏差（百分点）", "答案值（前 6）"], rows), ""]
+    lines += [f"训练集和测试集里字母偏差的最大值：{100 * worst:.1f} 个百分点"
+              f"（探针集只有 500 道、每类约 30 道，不计入；它的偏差见上表）。", ""]
+    # ------------------------------------------------------------------ forward caps
+    lines += ["## 4. 前向题：没变化的题、答案和现在不同的题", "",
+              "\"没变化\"：被问的量在动作前后的变化小于门槛（例如转身后到物体的距离不变）；上限 10%。"
+              "\"答案变了\"：动作后的答案和现在的答案不同；控制在 35%–65%，防止模型学成\"把现在的答案反过来\"。", ""]
+    rows = []
+    for f, rs in data.items():
+        for q in qtypes:
+            sub = [r for r in rs if r["qtype"] == q and r["qclass"] == "forward"]
+            if not sub:
+                continue
+            known = [r for r in sub if r["flip"] is not None]
+            rows.append([f, q, len(sub), _pct(sum(not r["changed"] for r in sub), len(sub)),
+                         _pct(sum(bool(r["flip"]) for r in known), len(known)) if known else "–"])
+    lines += [_table(["文件", "题类", "题数", "没变化", "答案变了"], rows), ""]
+    # ------------------------------------------------------------------ funnel
+    lines += ["## 5. 过滤：没出的题和原因", "",
+              f"每条轨迹最多取 3 个状态（终点一定取）。原始候选题 {stats['raw_records']} 道（训练和 val 场景合计），"
+              "下表是在候选阶段就没出的题（按题类和原因）；之后的平衡、比例、场景上限去掉的数量见第 6 节。", ""]
+    funnel = stats["funnel"]
+    by_q: Dict[str, Dict[str, int]] = collections.defaultdict(dict)
+    for k, v in funnel.items():
+        if ":" in k:
+            q, why = k.split(":", 1)
+            by_q[q][why] = v
+    rows = [[q, by_q[q].get("emitted", 0) + by_q[q].get("emitted_interior", 0),
+             "，".join(f"{w} {n}" for w, n in sorted(by_q[q].items(), key=lambda x: -x[1]) if not w.startswith("emitted"))]
+            for q in sorted(by_q)]
+    lines += [_table(["题类", "出了", "没出（原因 数量）"], rows), "",
+              f"- 锚点状态 {funnel.get('anchor_states', 0)} 个；一致性检查：{json.dumps(stats['checks'], ensure_ascii=False)}"
+              "（`terminal_not_success`、`success_before_terminal` 都没有出现就是 0）。", ""]
+    lines += ["原因的含义：`not_visible` 被问物体在当前画面里不满足可见规则；`near_boundary` 离判定阈值太近；"
+              "`beyond_45deg` 左右题里两物体的连线和相机左右轴夹角超过 45°；`blocked_move` 动作会被碰撞规则挡住；"
+              "`behind_camera` / `out_of_frame` / `cut_off_vertically` 物体在相机后方、出画、上下不完整；"
+              "`blocked_turn` 逆向题的那个回合被挡住了（两张图一样）。", ""]
+    # ------------------------------------------------------------------ build drops
+    lines += ["## 6. 平衡和上限去掉的题", ""]
+    for split in ("train", "val"):
+        rep = stats.get(split) or {}
+        rows = [[q, v.get("before"), json.dumps(v.get("dropped", {}), ensure_ascii=False), v.get("after_balance")]
+                for q, v in sorted((rep.get("balance") or {}).items())]
+        if rows:
+            lines += [f"**{split} 场景**", "", _table(["题类", "平衡前", "去掉（原因）", "平衡后"], rows), "",
+                      f"场景上限（单个场景不超过 8%）去掉：{json.dumps(rep.get('scene_cap_dropped', {}))}", ""]
+    # ------------------------------------------------------------------ examples
+    lines += ["## 7. 每类两道原题", ""]
+    rng = random.Random(7)
+    for q in qtypes:
+        pool = [r for r in data["p1_train.jsonl"] if r["qtype"] == q] or [r for r in data["p1_test.jsonl"] if r["qtype"] == q]
+        for r in rng.sample(pool, min(2, len(pool))):
+            lines += [f"**{q}**（{r['family']}，{r['state_role']}，`{r['sample_id']}`）", "", "```",
+                      r["messages"][0]["content"], f"答案：{r['messages'][1]['content']}", "```",
+                      "图：" + "；".join(f"`{p}`" for p in r["images"]), ""]
+    md.parent.mkdir(parents=True, exist_ok=True)
+    md.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    return {"worst_letter_deviation": worst, "files": {f: len(rs) for f, rs in data.items()}}
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--md", required=True)
+    args = ap.parse_args()
+    print(json.dumps(write(Path(args.out), Path(args.md)), indent=1))
+
+
+if __name__ == "__main__":
+    main()

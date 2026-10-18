@@ -357,6 +357,7 @@ BUILD_CONFIG: Dict[str, Any] = {
     "flip_band": (0.35, 0.65),      # share of forward questions whose answer differs from the current one
     "scene_cap": 0.08,
     "probe_size": 500,
+    "goal_max_share_in_class": 0.5,  # "is the task met (after the action)?" at most half of the state / forward class
 }
 ORDINAL = {"distance_bin", "height_bin"}         # options in ascending order: balance the letter
 SHUFFLED = {"occluded", "both_in_view"}          # categorical: option order drawn per question
@@ -469,29 +470,47 @@ def balance_split(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: rando
     return kept
 
 
+def _stratified(rs: List[Dict[str, Any]], want: int, rng: random.Random) -> List[Dict[str, Any]]:
+    """``want`` records of ``rs``, the same fraction from every (qtype, answer, changed) stratum."""
+    if want >= len(rs):
+        return list(rs)
+    strata: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = collections.defaultdict(list)
+    for r in rs:
+        strata[(r["qtype"], r["answer"], str(r["changed"]))].append(r)
+    frac = want / len(rs)
+    out = []
+    for key in sorted(strata):
+        group = strata[key]
+        rng.shuffle(group)
+        out.extend(group[: int(round(frac * len(group)))])
+    return out
+
+
 def class_ratio(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random.Random,
                 report: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Downsample the classes to the target shares, stratified by (qtype, answer) so the balance survives."""
+    """Downsample the classes to the target shares, stratified by (qtype, answer) so the balance survives.
+    Before that the goal questions are capped at ``goal_max_share_in_class`` of their class."""
     by_class: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
     for r in records:
         by_class[r["qclass"]].append(r)
+    if not records:
+        return []
+    share = float(cfg.get("goal_max_share_in_class", 1.0))
+    for c in ("state", "forward"):
+        goal = [r for r in by_class[c] if r["kind"] == "goal"]
+        other = [r for r in by_class[c] if r["kind"] != "goal"]
+        cap = int(share / (1 - share) * len(other)) if share < 1 else len(goal)
+        if len(goal) > cap:
+            report.setdefault("goal_cap_dropped", {})[c] = len(goal) - cap
+            by_class[c] = other + _stratified(goal, cap, rng)
     ratio = cfg["ratio"]
-    total = min(len(by_class[c]) / ratio[c] for c in ratio if ratio[c] > 0)
+    present = [c for c in ratio if ratio[c] > 0 and by_class[c]]  # a missing class is reported, not a zero total
+    total = min(len(by_class[c]) / ratio[c] for c in present)
     out = []
     for c, rs in by_class.items():
         want = int(round(total * ratio[c]))
         report[c] = {"available": len(rs), "kept": min(want, len(rs))}
-        if want >= len(rs):
-            out.extend(rs)
-            continue
-        strata: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = collections.defaultdict(list)
-        for r in rs:
-            strata[(r["qtype"], r["answer"], str(r["changed"]))].append(r)
-        frac = want / len(rs)
-        for key in sorted(strata):
-            group = strata[key]
-            rng.shuffle(group)
-            out.extend(group[: int(round(frac * len(group)))])
+        out.extend(_stratified(rs, want, rng))
     return out
 
 

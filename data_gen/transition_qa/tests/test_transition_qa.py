@@ -121,6 +121,19 @@ def test_build_text_answers_point_at_the_value():
     assert t["answer"] == "Yes" and "Do X." in t["question"]
 
 
+def test_interior_offsets_move_in_the_camera_frame():
+    from data_gen.interiorgs_v10.contract import pose_from_xy_yaw
+    from data_gen.transition_qa.interior import offset_pose
+
+    c2w = pose_from_xy_yaw(1.0, 2.0, 0.3)
+    right, forward = c2w[:3, 0], c2w[:3, 2]
+    p = offset_pose(c2w, -0.15, 0.3, 0.0)
+    assert np.allclose(p[:3, 3], c2w[:3, 3] - 0.15 * right + 0.3 * forward)
+    q = offset_pose(c2w, 0.0, 0.0, -10.0)
+    assert np.allclose(q[:3, 3], c2w[:3, 3]) and not np.allclose(q[:3, :3], c2w[:3, :3])
+    assert abs(q[2, 2] - c2w[2, 2]) < 1e-12   # still level
+
+
 # ----------------------------------------------------------------------------- build
 def _rec(i, qtype, answer, value, scene="s1", split="train", qclass=None, changed=True, flip=True):
     kind = qtype.rsplit("_", 1)[0]
@@ -157,11 +170,24 @@ def test_class_ratio_and_probe():
     rs = ([_rec(i, "goal_now", "Yes", "") for i in range(500)]
           + [_rec(1000 + i, "goal_after", "No", "") for i in range(2000)]
           + [_rec(5000 + i, "action_between", "A", "") for i in range(1000)])
-    out = GEN.class_ratio(rs, GEN.BUILD_CONFIG, rng, {})
+    out = GEN.class_ratio(rs, dict(GEN.BUILD_CONFIG, goal_max_share_in_class=1.0), rng, {})
     c = collections.Counter(r["qclass"] for r in out)
     assert c["state"] == 500 and c["forward"] == 350 and c["inverse"] == 150
     probe, rest = GEN.probe_subset(out, 100, rng)
     assert len(probe) == 100 and not ({r["sample_id"] for r in probe} & {r["sample_id"] for r in rest})
+
+
+def test_goal_questions_at_most_half_of_their_class():
+    rng = random.Random(0)
+    rs = ([_rec(i, "goal_now", "Yes" if i % 2 else "No", "") for i in range(800)]
+          + [_rec(1000 + i, "closer_now", "A" if i % 2 else "B", "a") for i in range(200)]
+          + [_rec(5000 + i, "action_between", "A", "") for i in range(1000)])
+    rep = {}
+    out = GEN.class_ratio(rs, GEN.BUILD_CONFIG, rng, rep)
+    state = [r for r in out if r["qclass"] == "state"]
+    goal = [r for r in state if r["kind"] == "goal"]
+    assert len(goal) == 200 and len(state) == 400 and rep["goal_cap_dropped"]["state"] == 600
+    assert sum(r["answer"] == "Yes" for r in goal) == 100
 
 
 def test_build_refuses_a_val_scene_in_train(tmp_path):
