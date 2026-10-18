@@ -9,6 +9,10 @@ datasets:
   vstibench:           {repo: Journey9ni/vstibench, revision: 0903eb0b0c9d03da730d43503c48302a1f3b412d, dir: data/vstibench}
   spbench:             {repo: hongxingli/SPBench, revision: 03611025a4e6032c558117c0e86b76c8b084c305, dir: data/spbench}
   walkerbench_pano:    {repo: lalayg/pano, revision: 415676872c07ac1e8a2551f6f89a95fd66ad688a, dir: data/walkerbench_pano}
+  # VLMEvalKit question tables (EASI); VLMEvalKit checks each file's md5 before use.  dir is $LMUData.
+  easi_tsv:            {repo: lmms-lab-si/EASI-Leaderboard-Data, revision: 52bb1dd2bc5cd58a291b3a780dab08d19c0ccf0d, dir: LMUData,
+                        allow: [VSI-Bench.tsv, MMSIBench_wo_circular.tsv, MindCubeBench_raw_qa.tsv, MindCubeBench_tiny_raw_qa.tsv,
+                                SPBench-MV.tsv, ViewSpatialBench.tsv]}
 
 models:
   SI-7B:               {repo: kagakouko/Spatial-Interactor-Qwen2.5-VL-7B, revision: 3e5d2ec15a226926de32e839f911627fbdf5eace, dir: models/SI-7B}

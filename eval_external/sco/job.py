@@ -25,7 +25,7 @@ from pathlib import Path
 WORKTREE = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-eval"
 ROOT = Path("/mnt/umm/users/yinbaiqiao/eval_external_assets")
 ENV_BIN = "/mnt/umm/users/yinbaiqiao/.conda/envs/eval-external/bin"
-HF_HOME = "/mnt/umm/users/yinbaiqiao/.cache/huggingface"
+HF_HOME = str(ROOT / "hf_home")  # hub/ links to the shared ~/.cache/huggingface/hub (tools/login_env.sh)
 SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
 IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"   # same image as the training jobs
 MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
@@ -63,6 +63,7 @@ def launch_script(run: Path, command: list[str], env: dict[str, str]) -> str:
         "rc=$?",
         f"echo $rc > {job}/exit_code",
         f"chown -R {OWNER} {run} {ROOT / 'LMUData'} 2>/dev/null",
+        f"find {HF_HOME} -mindepth 1 -maxdepth 1 ! -name hub -exec chown -R {OWNER} {{}} + 2>/dev/null",
         "exit $rc",
     ]
     return "\n".join(lines) + "\n"
