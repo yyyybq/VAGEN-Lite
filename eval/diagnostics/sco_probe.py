@@ -1,0 +1,86 @@
+"""One-card sco job that runs ``qa_probe run`` from this checkout (the training script's job modes have no probe).
+
+    python -m eval.diagnostics.sco_probe --run RUN --probe p1_probe.jsonl --from-eval EVAL --names a,b,c [--submit]
+
+Writes RUN/job/launch.sh and RUN/job/prepared.json in the format of data_gen/interiorgs_v10/job_sco.py and, with
+--submit, submits through job_sco.submit (status / delete with job_sco.py as usual).  The environment block is the
+one of examples/train/active_spatial/sco_interiorgs_v10_train.sh; sco jobs run as root, so RUN is handed back to
+its owner on exit.  Results go to RUN/probe/<name>.json(l).
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import json
+import shlex
+from pathlib import Path
+
+from data_gen.interiorgs_v10 import job_sco
+
+CHECKOUT = Path(__file__).resolve().parents[2]
+ENV_ROOT = "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite"
+
+LAUNCH = """#!/usr/bin/env bash
+set -euo pipefail
+RUN={run}
+ENV_ROOT={env_root}
+OWNER=$(stat -c %u:%g "$RUN")
+mkdir -p "$RUN/logs" "$RUN/probe"
+trap 'status=$?; printf "{{\\"exit_status\\":%s,\\"ended_utc\\":\\"%s\\"}}\\n" "$status" "$(date -u +%FT%TZ)" > "$RUN/logs/qa_probe_exit.json"; chown -R "$OWNER" "$RUN" 2>/dev/null || true; exit $status' EXIT
+exec > >(tee -a "$RUN/logs/qa_probe-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).log") 2>&1
+cd {checkout}
+export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 NO_PROXY='*' no_proxy='*'
+export PYTHONPATH="{checkout}:${{PYTHONPATH:-}}" TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export TORCH_CUDA_ARCH_LIST=9.0 CUDA_VISIBLE_DEVICES=0 VLLM_USE_FLASHINFER_SAMPLER=1
+export CC=$ENV_ROOT/bin/x86_64-conda-linux-gnu-gcc CXX=$ENV_ROOT/bin/x86_64-conda-linux-gnu-g++
+export TORCH_EXTENSIONS_DIR=$RUN/torch_extensions
+WHEEL_ROOT=$ENV_ROOT/lib/python3.12/site-packages/nvidia/curand
+export CUDA_HOME=$ENV_ROOT CURAND_INCLUDE_DIR=$WHEEL_ROOT/include CURAND_LIBRARY_DIR=$WHEEL_ROOT/lib
+export PATH="$CUDA_HOME/bin:$ENV_ROOT/bin:$PATH"
+export CPATH="$CURAND_INCLUDE_DIR:$ENV_ROOT/targets/x86_64-linux/include:${{CPATH:-}}"
+export LIBRARY_PATH="$CURAND_LIBRARY_DIR:$ENV_ROOT/targets/x86_64-linux/lib:${{LIBRARY_PATH:-}}"
+export LD_LIBRARY_PATH="$CURAND_LIBRARY_DIR:$ENV_ROOT/lib:$ENV_ROOT/targets/x86_64-linux/lib:${{LD_LIBRARY_PATH:-}}"
+nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
+git -C {checkout} rev-parse HEAD || true
+$ENV_ROOT/bin/python -m eval.diagnostics.qa_probe run --probe {probe} --out "$RUN/probe" {models}
+"""
+
+
+def prepare(run: Path, probe: str, from_eval: str = "", names: str = "", models=(), pool: str = None) -> Path:
+    run = run.resolve()
+    job = run / "job"
+    job.mkdir(parents=True, exist_ok=True)
+    args = []
+    if from_eval:
+        args += ["--from-eval", from_eval, "--names", names]
+    for m in models:
+        args += ["--model", m]
+    launch = job / "launch.sh"
+    launch.write_text(LAUNCH.format(run=run, env_root=ENV_ROOT, checkout=CHECKOUT, probe=shlex.quote(str(Path(probe).resolve())),
+                                    models=" ".join(shlex.quote(a) for a in args)))
+    launch.chmod(0o755)
+    (job / "prepared.json").write_text(json.dumps({
+        "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "gpus": 1, "spec": job_sco.SPECS[1],
+        "pool": pool or job_sco.POOL, "mode_args": ["qa-probe", str(run)]}, indent=1))
+    return launch
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--run", required=True, type=Path)
+    ap.add_argument("--probe", required=True)
+    ap.add_argument("--from-eval", default="")
+    ap.add_argument("--names", default="")
+    ap.add_argument("--model", action="append", default=[])
+    ap.add_argument("--pool", choices=job_sco.POOLS, default=None)
+    ap.add_argument("--submit", action="store_true")
+    a = ap.parse_args()
+    a.run.mkdir(parents=True, exist_ok=True)
+    print(prepare(a.run, a.probe, a.from_eval, a.names, a.model, a.pool))
+    if a.submit:
+        print(job_sco.submit(a.run.resolve()))
+
+
+if __name__ == "__main__":
+    main()
