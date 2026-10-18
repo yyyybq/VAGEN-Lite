@@ -78,6 +78,8 @@ def test_read_head_without_git(tmp_path, monkeypatch):
     wt.mkdir()
     (wt / ".git").write_text(f"gitdir: {wt_git}\n")
     assert MF._read_head(wt) == "b" * 40
+    (wt / "sub").mkdir()
+    assert MF._read_head(wt / "sub") == "b" * 40  # found from a subdirectory too
     (wt_git / "HEAD").write_text("ref: refs/heads/packed\n")
     assert MF._read_head(wt) == "a" * 40
 

@@ -21,14 +21,15 @@ EVAL_ROOT = Path(__file__).resolve().parent.parent
 def _read_head(path: Path) -> str | None:
     """HEAD's commit read from the .git files (the sco image has no git binary); handles worktrees and
     packed refs."""
-    dot = Path(path) / ".git"
+    top = next((p for p in [Path(path).resolve(), *Path(path).resolve().parents] if (p / ".git").exists()), None)
+    if top is None:
+        return None
+    dot = top / ".git"
     if dot.is_file():
         gitdir = Path(dot.read_text().split("gitdir:", 1)[1].strip())
-        gitdir = gitdir if gitdir.is_absolute() else (Path(path) / gitdir)
-    elif dot.is_dir():
-        gitdir = dot
+        gitdir = gitdir if gitdir.is_absolute() else (top / gitdir)
     else:
-        return None
+        gitdir = dot
     common = gitdir
     if (gitdir / "commondir").exists():
         common = (gitdir / (gitdir / "commondir").read_text().strip()).resolve()
