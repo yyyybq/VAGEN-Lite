@@ -7,6 +7,9 @@ datasets:
   sat_syn:             {repo: array/SAT, revision: bda5dde942d7f7b41bff7935f086ed9a9e348ae3, dir: data/sat_array,
                         allow: [README.md, SAT_val.parquet, SAT_test.parquet]}
   vstibench:           {repo: Journey9ni/vstibench, revision: 0903eb0b0c9d03da730d43503c48302a1f3b412d, dir: data/vstibench}
+  # the questions before the authors' 2026-07-13 label correction (the videos did not change)
+  vstibench_prefix:    {repo: Journey9ni/vstibench, revision: 27ff0a2ddb5b22c1eb036a4249345e6f00ee8ea1, dir: data/vstibench_prefix,
+                        allow: [test.json]}
   spbench:             {repo: hongxingli/SPBench, revision: 03611025a4e6032c558117c0e86b76c8b084c305, dir: data/spbench}
   walkerbench_pano:    {repo: lalayg/pano, revision: 415676872c07ac1e8a2551f6f89a95fd66ad688a, dir: data/walkerbench_pano}
   # VLMEvalKit question tables (EASI); VLMEvalKit checks each file's md5 before use.  dir is $LMUData.

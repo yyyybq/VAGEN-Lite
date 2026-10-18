@@ -1,13 +1,14 @@
 # Same as vstibench.yaml in this folder but on the labels BEFORE the authors' 2026-07-13 camera-position
 # correction (dataset revision 27ff0a2, 6,042 items, 839 camera-displacement items).  Spatial-Interactor reports
 # 839 camera-displacement items, i.e. this version; we run it only to compare with their numbers.  The videos
-# are the same files (the correction changed only test.json).
-dataset_path: Journey9ni/vstibench
+# are the same files (the correction changed only test.json); the questions are our pinned download of 27ff0a2.
+dataset_path: json
 dataset_kwargs:
   token: False
   cache_dir: vstibench
   video: True
-  revision: 27ff0a2ddb5b22c1eb036a4249345e6f00ee8ea1
+  data_files:
+    test: /mnt/umm/users/yinbaiqiao/eval_external_assets/data/vstibench_prefix/test.json
 task: vstibench_prefix_ee
 test_split: test
 output_type: generate_until

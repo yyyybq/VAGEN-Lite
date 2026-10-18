@@ -1,13 +1,16 @@
 # VSTI-Bench as VLM-3R evaluates it (VLM-3R 206afd0, thinking-in-space/lmms_eval/tasks/vstibench/vstibench.yaml),
-# with three changes: task name vstibench_ee, dataset token off (the dataset is public), and the dataset pinned to
-# revision 0903eb0 = labels after the authors' 2026-07-13 camera-position correction (5,736 items).
+# with three changes: task name vstibench_ee, dataset token off (the dataset is public), and the questions read from
+# our pinned download of revision 0903eb0 (labels after the authors' 2026-07-13 camera-position correction, 5,736
+# items) instead of through the Hugging Face cache: offline, `datasets` does not tell two cached revisions apart
+# (a first run by revision got the other version).  The videos come from $HF_HOME/vstibench as in the original.
 # utils.py next to this file is VLM-3R's (Apache 2.0) and reads cache_dir from this file.
-dataset_path: Journey9ni/vstibench
+dataset_path: json
 dataset_kwargs:
   token: False
   cache_dir: vstibench
   video: True
-  revision: 0903eb0b0c9d03da730d43503c48302a1f3b412d
+  data_files:
+    test: /mnt/umm/users/yinbaiqiao/eval_external_assets/data/vstibench/test.json
 task: vstibench_ee
 test_split: test
 output_type: generate_until
