@@ -42,7 +42,7 @@ def now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def launch_script(run: Path, command: list[str], env: dict[str, str]) -> str:
+def launch_script(run: Path, command: list[str], env: dict[str, str], also_own: tuple[str, ...] = ()) -> str:
     exports = {
         "PATH": f"{ENV_BIN}:$PATH",
         "HF_HOME": HF_HOME,
@@ -63,7 +63,7 @@ def launch_script(run: Path, command: list[str], env: dict[str, str]) -> str:
         f"{' '.join(shlex.quote(c) for c in command)} > {job}/run.log 2>&1",
         "rc=$?",
         f"echo $rc > {job}/exit_code",
-        f"chown -R {OWNER} {run} {ROOT / 'LMUData'} 2>/dev/null",
+        f"chown -R {OWNER} {run} {ROOT / 'LMUData'} {' '.join(shlex.quote(p) for p in also_own)} 2>/dev/null",
         f"find {HF_HOME} -mindepth 1 -maxdepth 1 ! -name hub -exec chown -R {OWNER} {{}} + 2>/dev/null",
         "exit $rc",
     ]
@@ -93,7 +93,8 @@ def active() -> list[dict]:
     return out
 
 
-def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_limit: bool = False) -> str:
+def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_limit: bool = False,
+           also_own: tuple[str, ...] = ()) -> str:
     job = run / "job"
     receipt = job / "submission.json"
     if receipt.exists():
@@ -103,7 +104,7 @@ def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_
         raise SystemExit(f"{len(running)} eval_external jobs not finished (limit {MAX_ACTIVE}): "
                          + ", ".join(r["name"] for r in running))
     job.mkdir(parents=True, exist_ok=True)
-    (job / "launch.sh").write_text(launch_script(run, command, env))
+    (job / "launch.sh").write_text(launch_script(run, command, env, also_own))
     (job / "launch.sh").chmod(0o755)
     job_name = ("evalext-" + re.sub(r"[^a-z0-9-]+", "-", name.lower())).strip("-")[:60]
     cmd = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={POOL}", f"--job-name={job_name}",
@@ -167,6 +168,7 @@ def main() -> None:
     ap.add_argument("--name")
     ap.add_argument("--env", action="append", default=[], help="KEY=VALUE exported in the job")
     ap.add_argument("--force-limit", action="store_true", help="submit even with MAX_ACTIVE jobs running")
+    ap.add_argument("--also-own", action="append", default=[], help="another folder the job writes, handed back")
     opts, command = split_argv(sys.argv[1:])
     args = ap.parse_args(opts)
     if args.action == "active":
@@ -179,7 +181,7 @@ def main() -> None:
         if not command or not args.name:
             raise SystemExit("submit needs --name and a command after --")
         env = dict(kv.split("=", 1) for kv in args.env)
-        print(submit(run, args.name, command, env, args.force_limit))
+        print(submit(run, args.name, command, env, args.force_limit, tuple(args.also_own)))
     elif args.action == "status":
         print(json.dumps(status(run)))
     else:
