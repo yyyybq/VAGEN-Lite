@@ -58,14 +58,15 @@ BENCHMARKS = {
     },
     "MindCube-Tiny": {
         "backend": "vlmevalkit", "data": "MindCubeBench_tiny_raw_qa",
-        "data_cfg": {"class": "MindCubeBench", "dataset": "MindCubeBench_tiny_raw_qa"}, "frames": None, "items": 1050,
+        # EASI's table has 1,040 items; MindCube's own MindCube_tinybench.jsonl has 1,050.
+        "data_cfg": {"class": "MindCubeBench", "dataset": "MindCubeBench_tiny_raw_qa"}, "frames": None, "items": 1040,
         "metric": "accuracy",
         "source": {"questions": "lmms-lab-si/EASI-Leaderboard-Data@52bb1dd MindCubeBench_tiny_raw_qa.tsv"},
         "prompt": {"impl": "vlmeval.dataset.MindCubeBench.build_prompt (raw QA)"},
     },
     "MindCube": {
         "backend": "vlmevalkit", "data": "MindCubeBench_raw_qa",
-        "data_cfg": {"class": "MindCubeBench", "dataset": "MindCubeBench_raw_qa"}, "frames": None, "items": None,
+        "data_cfg": {"class": "MindCubeBench", "dataset": "MindCubeBench_raw_qa"}, "frames": None, "items": 21154,
         "metric": "accuracy",
         "source": {"questions": "lmms-lab-si/EASI-Leaderboard-Data@52bb1dd MindCubeBench_raw_qa.tsv"},
         "prompt": {"impl": "vlmeval.dataset.MindCubeBench.build_prompt (raw QA)"},
