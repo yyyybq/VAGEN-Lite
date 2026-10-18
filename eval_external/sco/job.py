@@ -20,6 +20,7 @@ import json
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 WORKTREE = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-eval"
@@ -151,6 +152,14 @@ def delete(run: Path) -> dict:
     return {"job_id": rec["job_id"], "state_before": state, "delete_rc": rc}
 
 
+def split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
+    """Our options before the first "--", the job's command after it."""
+    if "--" not in argv:
+        return argv, []
+    i = argv.index("--")
+    return argv[:i], argv[i + 1:]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("action", choices=("submit", "status", "delete", "active"))
@@ -158,14 +167,15 @@ def main() -> None:
     ap.add_argument("--name")
     ap.add_argument("--env", action="append", default=[], help="KEY=VALUE exported in the job")
     ap.add_argument("--force-limit", action="store_true", help="submit even with MAX_ACTIVE jobs running")
-    ap.add_argument("command", nargs=argparse.REMAINDER)
-    args = ap.parse_args()
+    opts, command = split_argv(sys.argv[1:])
+    args = ap.parse_args(opts)
     if args.action == "active":
         print(json.dumps(active(), indent=1))
         return
+    if args.run is None:
+        raise SystemExit("--run is required")
     run = args.run.resolve()
     if args.action == "submit":
-        command = args.command[1:] if args.command[:1] == ["--"] else args.command
         if not command or not args.name:
             raise SystemExit("submit needs --name and a command after --")
         env = dict(kv.split("=", 1) for kv in args.env)
