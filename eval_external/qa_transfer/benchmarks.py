@@ -9,9 +9,10 @@ format.  Decoding is greedy for every model; each model's view also carries a gr
 from __future__ import annotations
 
 # Same arguments as VLMEvalKit's own "Qwen2.5-VL-7B-Instruct" / "-3B-Instruct" entries (EASI v0.2.2 config.py),
-# used for every Qwen2.5-VL-based model.
+# used for every Qwen2.5-VL-based model.  The class is Qwen2VLChat loaded with SDPA attention instead of
+# flash-attn (qa_transfer/vlmeval_launch.py says why).
 VLMEVAL_QWEN25VL = {
-    "class": "Qwen2VLChat",
+    "class": "Qwen2VLChatSDPA",
     "min_pixels": 1280 * 28 * 28,
     "max_pixels": 16384 * 28 * 28,
     "use_custom_prompt": False,
@@ -22,7 +23,7 @@ VLMEVAL_DECODING = {"max_new_tokens": 2048, "do_sample": False, "temperature": 0
 
 # lmms-eval: model "qwen2_5_vl" with these model_args (pretrained= is added per model); the decoding comes from
 # each task's yaml (greedy) plus the view's generation_config.json.
-LMMS_QWEN25VL_ARGS = {"max_num_frames": 32, "attn_implementation": "flash_attention_2"}
+LMMS_QWEN25VL_ARGS = {"max_num_frames": 32, "attn_implementation": "sdpa"}
 
 BENCHMARKS = {
     # name used in eval_external tables -> backend and backend-specific settings

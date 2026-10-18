@@ -22,6 +22,7 @@ from eval_external.common.manifest import git_state, write_manifest
 from eval_external.qa_transfer.benchmarks import (BENCHMARKS, LMMS_QWEN25VL_ARGS, VLMEVAL_DECODING,
                                                   VLMEVAL_QWEN25VL)
 
+WORKTREE = Path(__file__).resolve().parents[2]
 REPOS = Path("/mnt/umm/users/yinbaiqiao/eval_external_assets/repos")
 VLMEVAL_DIR = REPOS / "EASI" / "VLMEvalKit"
 LMMS_DIR = REPOS / "lmms-eval"
@@ -39,8 +40,9 @@ def run_vlmevalkit(code: str, bench: dict, run_dir: Path) -> list[str]:
            "data": {bench["data"]: bench["data_cfg"]}}
     cfg_path = run_dir / "vlmeval_config.json"
     cfg_path.write_text(json.dumps(cfg, indent=1) + "\n")
-    return [sys.executable, str(VLMEVAL_DIR / "run.py"), "--config", str(cfg_path), "--work-dir",
-            str(run_dir / "vlmeval"), "--mode", "all", "--judge", "exact_matching", "--verbose", "--reuse"]
+    return [sys.executable, "-m", "eval_external.qa_transfer.vlmeval_launch", "--config", str(cfg_path),
+            "--work-dir", str(run_dir / "vlmeval"), "--mode", "all", "--judge", "exact_matching", "--verbose",
+            "--reuse"]
 
 
 def run_lmms_eval(code: str, bench: dict, run_dir: Path) -> list[str]:
@@ -81,7 +83,10 @@ def main() -> None:
                               "source": source},
                    backend={**backend, "command": cmd}, prompt=bench["prompt"], frames=bench["frames"],
                    decoding=decoding)
-    rc = subprocess.run(cmd, cwd=str(VLMEVAL_DIR if bench["backend"] == "vlmevalkit" else LMMS_DIR)).returncode
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(WORKTREE), env.get("PYTHONPATH")) if p)
+    rc = subprocess.run(cmd, cwd=str(VLMEVAL_DIR if bench["backend"] == "vlmevalkit" else LMMS_DIR),
+                        env=env).returncode
     files = sorted(str(p.relative_to(run_dir)) for p in run_dir.rglob("*") if p.is_file())
     (run_dir / "outputs.json").write_text(json.dumps({"returncode": rc, "files": files}, indent=1) + "\n")
     sys.exit(rc)
