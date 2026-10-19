@@ -1,5 +1,6 @@
 # 矩阵第二版 A 组：不做 SFT，原始 7B 直接 RL。说明见 configs/matrix_v2/README.md。
 # 只写配置。train_chain_plan 是训练链 plan.json 能读的字段；needs_chain_support 是它现在读不了的（CHANGES.md 第 5 节）。
+# 2026-10-19 按第十二轮的决定更新：RL 成对（S0 和 D）、v2 评测集。
 group: A
 description: 不做 SFT，原始模型直接 RL
 output_format: action_only
@@ -8,57 +9,56 @@ data: null   # 没有 SFT 数据
 
 sft: null
 
-rl:
+rl:   # 第十二轮第 2 条：每次 RL 实验成对跑，S0 和 D 同一个起点、同一批题、同一个种子、同样的更新次数
   start: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b
+  pair:
+    p1s0: v10_p1_S0   # data_gen/interiorgs_v10/configs/rl_standards.json：修正包 p1 + 稀疏奖励
+    p1d: v10_p1_D     # 修正包 p1 + 密集奖励
+  seed: 20261019
   tasks: train 后备题（task_pool reserve），去掉深度核对标出的题
-  reward_preset: S0
-  opt_package: p1
-  history_mode: concat
   updates: 300
-  save_freq: 50
   output_format: action_only
   guards: {kl_max: 0.2, invalid_max: 0.05, invalid_window: 10, success_drop: 0.10, drop_window: 50, start_updates: 5}
+  startup: {retries: 2, stall_minutes: 40}
   risk: >-
-    原始 7B 在验证集上成功 5.8%，同一道题 8 条轨迹里有成有败的题会很少，修正包只训这种题，每次更新可能凑不满 12 道
-    （日志的 filter/mixed/shortfall）。这是 A 组本来要看的：没有 SFT 时 RL 能否起步。
+    原始 7B 在验证集上成功 5.8%（第十一轮 val400），同一道题 8 条轨迹里有成有败的题会很少，修正包只训这种题，
+    每次更新可能凑不满 12 道（日志的 filter/mixed/shortfall）。这是 A 组本来要看的：没有 SFT 时 RL 能否起步。
 
 eval:
   sets:
-    val400: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/eval_val400
-    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/eval_test
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2    # 413 道 = val400 + 15 道遮挡题
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2  # 292 道 = 279 + 13 道遮挡题
   every: 50
   diagnostics:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
-    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261018/p1_probe.jsonl --from-eval <val400> --names <RL 各检查点>
-    baseline: docs/transition_qa/DIAG_BASELINE.md（第 0 步 = 原始 7B，评测和探针都已有）
+    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261018/p1_probe.jsonl --from-eval <val> --names <两个 RL 的各检查点>
+    baseline: docs/transition_qa/DIAG_BASELINE.md（第 0 步 = 原始 7B，探针已有；失败拆解的基线用的是第十一轮的 val400 / test）
 
-train_chain_plan:
+train_chain_plan:   # 照第十二轮的 plan（interiorgs_v10_train_r12a_20261019）写
   tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m2_a
   sft_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft
   commit: TBD  # main 合并 transition-qa 之后的提交
   model: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b
-  ppo_template: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/ppo_template_S0.yaml
   gs_root: /mnt/umm/users/yinbaiqiao/InteriorGS_ply
   scenes_root: /mnt/umm/users/yinbaiqiao/InteriorGS_meta
   sft_groups: {mix: sft_trajectories.jsonl}   # 只给 rl-config 查 RL 题和 SFT 题不重合（A 没有 SFT，这项检查不会拦）
   eval_sets:
-    val400: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/eval_val400
-    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/eval_test
-  select_by: val400
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2
+  select_by: val
   max_eval_jobs: 10
   pool: h800
   endpoint: 300
   rl_name: v10_rl_m2_a
   rl:
-    history_mode: concat
-    save_freq: 50
-    no_internal_val: true
+    standard: v10_p1_S0
+    seed: 20261019
     task_pool: reserve
     rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/rl_rows/rows.jsonl
     exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
-    opt_package: p1
     guards: {kl_max: 0.2, invalid_max: 0.05, invalid_window: 10, success_drop: 0.10, drop_window: 50, start_updates: 5}
-  rl_runs: {s0: {reward_preset: S0}}
+    startup: {retries: 2, stall_minutes: 40}
+  rl_runs: {p1s0: {}, p1d: {rl: {standard: v10_p1_D}}}
   eval: {every: 50, options: []}
 
 needs_chain_support:
@@ -71,4 +71,4 @@ manual_steps:   # 不改训练链时（第十一轮修正包 RL 就是这样从�
     并写 "rl_model_override" = rl.start，再 train_chain run
   - 评测结束后手工跑 eval.diagnostics 的两个诊断
 
-estimate: {rl: 1 + 8 卡约 11.5 小时, evaluate: 单卡约 1 小时}
+estimate: {rl: 两个各 1 + 8 卡约 11.5 小时（可同时跑）, evaluate: 两个 RL 各 6 个检查点 × 2 个题集}

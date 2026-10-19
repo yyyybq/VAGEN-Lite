@@ -3,8 +3,8 @@
 # All groups output actions only (the current format).  P0 is the 230 sample questions until the full P0 bank exists
 # (the user decides when); then point pools.P0 at the bank's export and give it validation rows from val scenes.
 # P1 in D: as many questions as P2 has trajectories (a default to confirm; P1 has 35,039 training questions).
-# base_recipe is the round-11 formal SFT recipe (8 cards); train_overrides set what configs/matrix_v2 (step 7) chose:
-# 5 epochs (the round-10 final model is epoch 5; round 11 gained nothing from 10), the best epoch picked on val400.
+# base_recipe is the round-11 formal SFT recipe (8 cards); train_overrides: 10 epochs, the best epoch picked on the
+# validation set (round 12, decision 6 of 2026-10-19; configs/matrix_v2 first had 5).
 name: matrix_v2_20261018
 out: exps/sft_mixture_matrix_v2_20261018
 seed: 20261018
@@ -12,7 +12,7 @@ split_manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/i
 task_rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/rows.jsonl
 base_recipe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/train.yaml
 train_overrides:
-  num_train_epochs: 5
+  num_train_epochs: 10
 pools:
   P0:
     kind: interiorgs_qa_lf
