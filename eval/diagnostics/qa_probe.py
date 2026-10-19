@@ -177,12 +177,14 @@ def summary(answers: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
-OPTION_TYPES = ("correct", "count", "opposite", "other_kind", "unreadable")
+OPTION_TYPES = ("correct", "count", "opposite", "other_kind", "action_and_count", "unreadable")
 
 
 def inverse_confusion(answers: Sequence[Dict[str, Any]], probe: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
     """action_between: true action -> what the chosen option was: the answer, the same action another number of times
-    (count), the opposite action (opposite), the other kind on the same side (other_kind), or unreadable."""
+    (count), the opposite action or the other kind on the same side the same number of times (opposite / other_kind),
+    the other action another number of times (action_and_count: the fourth cell of the 2 x 2 options, 2026-10-19), or
+    unreadable."""
     from data_gen.interiorgs_v10.contract import INVERSE_ACTION
     from data_gen.transition_qa.shortcuts import parse_action_option
 
@@ -198,6 +200,7 @@ def inverse_confusion(answers: Sequence[Dict[str, Any]], probe: Dict[str, Dict[s
         else:
             chosen = opts[LETTERS.index(a["parsed"])]
             kind = ("correct" if chosen == right else "count" if chosen[0] == right[0]
+                    else "action_and_count" if chosen[1] != right[1]
                     else "opposite" if chosen[0] == INVERSE_ACTION[right[0]] else "other_kind")
         table[right[0]][kind] += 1
     return dict(table)

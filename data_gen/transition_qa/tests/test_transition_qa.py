@@ -50,18 +50,29 @@ def test_inverse_options_distinct_correct_and_uniform():
     assert max(abs(s - 0.25) for s in shares) < 0.03
 
 
-def test_inverse_options_are_solvable_from_the_text_alone():
-    """Documents the flaw found on 2026-10-19 (DIAG3_PROBE.md): with distractors (a, k2), (inv a, k), (b, k) the
-    answer is the only option whose action repeats and whose count is the most common.  Change this test with the fix."""
+def test_inverse_options_are_a_symmetric_2x2():
+    """2026-10-19 fix (DIAG3_PROBE.md): the options are {a, b} x {k, k2}, so no option stands out by its text (the
+    earlier distractors made the answer the only option whose action repeats with the commonest count), and the
+    action pairs are symmetric relations, so a pair never occurs only with one of its actions as the answer."""
     from data_gen.transition_qa import shortcuts as SC
 
+    pairs = set()
     for action in ACTIONS:
         for k in range(1, 6):
-            for key in ("x", "y", "z"):
-                opts, pos = Q.inverse_options(action, k, key)
+            for i in range(30):
+                opts, pos = Q.inverse_options(action, k, f"t{i}:{action}:{k}")
                 texts = [f"the camera {Q.action_text(a, j, past=True)}" for a, j in opts]
                 assert [SC.parse_action_option(t) for t in texts] == [(a, j) for a, j in opts]
-                assert SC.inverse_frequency({"options": texts}) == [pos]
+                assert len(SC.inverse_frequency({"options": texts})) == 4      # every option qualifies: a guess
+                acts = collections.Counter(a for a, _ in opts)
+                counts = collections.Counter(j for _, j in opts)
+                assert sorted(acts.values()) == [2, 2] and sorted(counts.values()) == [2, 2]
+                assert k in counts and set(counts) - {k} <= {k - 1, k + 1}             # a neighbouring count
+                pairs.add(frozenset(acts))
+    for pair in pairs:  # every pair can have either action as the answer
+        a, b = sorted(pair)
+        assert any(frozenset(c for c, _ in Q.inverse_options(b, 2, f"s{i}")[0]) == pair for i in range(40)), pair
+    assert len(pairs) == 5  # fwd-bwd, turn l-r, move l-r, turn_left-move_left, turn_right-move_right
 
 
 def test_grid_options_contain_the_value_within_bounds():
@@ -240,7 +251,7 @@ def test_probe_select_per_qtype_balanced_and_spread():
     for i in range(10):
         rs.append(_rec(2000 + i, "occluded_now", "A", "full", split="val"))
     rep = {}
-    picks = GEN.probe_select(rs, GEN.PROBE_CONFIG, rng, rep)
+    picks = GEN.probe_select(rs, dict(GEN.PROBE_CONFIG, per_qtype_overrides={}), rng, rep)
     by_q = collections.Counter(r["qtype"] for r in picks)
     assert by_q["goal_now"] == 40 and by_q["goal_after"] == 40
     assert by_q["occluded_now"] == 10 and rep["occluded_now"]["short"] == 30   # reported, not padded
@@ -251,6 +262,59 @@ def test_probe_select_per_qtype_balanced_and_spread():
     after = [r for r in picks if r["qtype"] == "goal_after"]
     assert sum(not r["changed"] for r in after) <= 4
     assert len({r["sample_id"] for r in picks}) == len(picks)
+
+
+def _inverse_rec(i, action, k, split="train"):
+    opts, pos = Q.inverse_options(action, k, f"k{i}")
+    rec = _rec(i, "action_between", Q.LETTERS[pos], f"{action}x{k}", split=split)
+    rec["options"] = [f"the camera {Q.action_text(a, j, past=True)}" for a, j in opts]
+    return rec
+
+
+def test_inverse_balance_within_cells():
+    rng = random.Random(0)
+    rs = [_inverse_rec(i, "move_backward" if i % 5 else "move_forward", 1 + i % 3) for i in range(3000)]
+    kept, dropped = GEN._balance_inverse(rs, 1.15, rng)
+    cells = collections.defaultdict(collections.Counter)
+    for r in kept:
+        acts, action, counts, low = Q.inverse_balance_keys(r)
+        cells[(acts, counts)][(action, low)] += 1
+    for groups in cells.values():  # four answers per cell, each at most 1.15 x the rarest
+        assert len(groups) == 4 and max(groups.values()) <= 1.15 * min(groups.values()) + 1
+    assert dropped == len(rs) - len(kept) and len(kept) > 0
+
+
+def test_window_balance_hides_the_letter():
+    rng = random.Random(0)
+    rs = []
+    for i in range(2000):
+        r = _rec(i, "distance_bin_now", "ABCD"[i % 4 if i % 3 else 0], "")
+        r["options"] = ["about 1.0 meters" if i % 2 else "about 1.5 meters", "b", "c", "d"]
+        rs.append(r)
+    rs.append(dict(_rec(9999, "distance_bin_now", "A", ""), options=["about 9.0 meters", "b", "c", "d"]))
+    kept, dropped = GEN._balance_windows(rs, 1.15, rng)
+    by = collections.defaultdict(collections.Counter)
+    for r in kept:
+        by[r["options"][0]][r["answer"]] += 1
+    assert "about 9.0 meters" not in by                       # a window missing letters is left out
+    for c in by.values():
+        assert len(c) == 4 and max(c.values()) <= 1.15 * min(c.values()) + 1
+
+
+def test_probe_takes_whole_types_and_shuffles_categorical_options():
+    rng = random.Random(0)
+    rs = []
+    for i in range(90):
+        r = _rec(i, "occluded_now", "A", ["full", "partial", "none"][i % 3], split="val")
+        r["options"] = ["fully hidden behind the bed", "partly hidden behind the bed", "not hidden behind the bed"]
+        r["answer"] = "ABC"[i % 3]
+        r["kind"] = "occluded"
+        rs.append(r)
+    rep = {}
+    picks = GEN.probe_select(rs, dict(GEN.PROBE_CONFIG, per_qtype_overrides={"occluded_now": "all"}), rng, rep)
+    assert len(picks) == 90 and rep["occluded_now"]["short"] == 0
+    shuffled = [GEN.shuffle_options(r) for r in rs]
+    assert len({tuple(r["options"]) for r in shuffled}) > 1   # the option order is drawn per question
 
 
 def test_all_anchor_states():

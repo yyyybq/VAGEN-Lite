@@ -341,25 +341,67 @@ SAME_SIDE_OTHER_KIND = {"turn_left": "move_left", "turn_right": "move_right",
                         "move_left": "turn_left", "move_right": "turn_right"}
 
 
+def other_action(action: str, key: str) -> str:
+    """The second action of the 2 x 2.  Both relations used are symmetric, so the pair of actions shown does not
+    tell which of the two is the answer: the opposite action, or for turns and sideways moves the other kind on the
+    same side (turn_left <-> move_left), in turn by ``key``; forward / backward only pair with each other (a
+    sideways partner would pair them with an action whose own partner is a turn, and that pair would give the
+    answer away)."""
+    if action in SAME_SIDE_OTHER_KIND and stable_int(key, "b") % 2 == 1:
+        return SAME_SIDE_OTHER_KIND[action]
+    return INVERSE_ACTION[action]
+
+
+def inverse_balance_keys(rec: Dict[str, Any]) -> Tuple[Tuple[str, ...], str, Tuple[int, int], bool]:
+    """(the pair of actions shown, the answer's action, the pair of counts shown, the answer has the smaller
+    count) of an inverse question: build balances the answer within each action pair and each count pair, so the
+    options' texts carry no prior either (2026-10-19)."""
+    opts = [parse_action_text(o) for o in rec["options"]]
+    action, k = rec["answer_value"].rsplit("x", 1)
+    acts = tuple(sorted({a for a, _ in opts}))
+    counts = tuple(sorted({j for _, j in opts}))
+    return acts, action, counts, int(k) == counts[0]
+
+
 def inverse_options(action: str, k: int, key: str, k_max: int = 5) -> Tuple[List[Tuple[str, int]], int]:
-    """Correct (action, k) plus 3 distractors from the action space: the same action another number of times,
-    the opposite action the same number of times, the other kind of action on the same side (turn <-> strafe;
-    a sideways move for forward / backward).  The correct option's position is drawn by ``key``."""
+    """The correct (a, k) and three distractors that fill a 2 x 2: {a, b} x {k, k2}, with b = ``other_action`` and
+    k2 a neighbouring count (one below or one above, drawn by ``key`` when both exist).  Every action and every count
+    appears exactly twice, so the options alone do not single out the answer (2026-10-19, user's choice: the earlier
+    distractors (a, k2), (inv a, k), (b, k) made it the only option whose action repeats and whose count is the
+    commonest; DIAG3_PROBE.md).  The correct option's position and the distractors' order are drawn by ``key``."""
+    import random as _random
+
     k = int(k)
-    others = [j for j in range(1, k_max + 1) if j != k]
-    near = [j for j in others if abs(j - k) == 1] or others
+    near = [j for j in (k - 1, k + 1) if 1 <= j <= k_max]
     k2 = near[stable_int(key, "k") % len(near)]
-    if action in SAME_SIDE_OTHER_KIND:
-        third = (SAME_SIDE_OTHER_KIND[action], k)
-    else:
-        third = (("move_left", "move_right")[stable_int(key, "side") % 2], k)
-    distractors = [(action, k2), (INVERSE_ACTION[action], k), third]
+    b = other_action(action, key)
+    distractors = [(action, k2), (b, k), (b, k2)]
+    _random.Random(stable_int(key, "order")).shuffle(distractors)
     pos = stable_int(key, "pos") % 4
     opts = list(distractors)
     opts.insert(pos, (action, k))
     if len(set(opts)) != 4:
         raise AssertionError(f"inverse options not distinct: {opts}")
     return opts, pos
+
+
+_ACTION_RE = None
+
+
+def parse_action_text(text: str) -> Tuple[str, int]:
+    """'the camera turned left by 40 degrees' -> ('turn_left', 2) (the inverse questions' option texts)."""
+    import re
+
+    global _ACTION_RE
+    if _ACTION_RE is None:
+        _ACTION_RE = re.compile(r"the camera (turned|moved) (left|right|forward|backward|sideways to the left|"
+                                r"sideways to the right) by ([0-9.]+) (degrees|meters)")
+    verb, direction, amount, _ = _ACTION_RE.fullmatch(text.strip()).groups()
+    if verb == "turned":
+        return f"turn_{direction}", int(round(float(amount) / STEP_ROTATION_DEG))
+    moves = {"forward": "move_forward", "backward": "move_backward", "sideways to the left": "move_left",
+             "sideways to the right": "move_right"}
+    return moves[direction], int(round(float(amount) / STEP_TRANSLATION_M))
 
 
 def build_inverse_text(action: str, k: int, key: str, cfg: Dict[str, Any]) -> Dict[str, Any]:

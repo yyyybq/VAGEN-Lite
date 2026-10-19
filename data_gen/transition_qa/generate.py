@@ -374,7 +374,10 @@ BUILD_CONFIG: Dict[str, Any] = {
     "final_letter_slack": 1.10,      # after sampling, per file: <= +2.4 points for 2 options, +1.8 for 4
 }
 PROBE_CONFIG: Dict[str, Any] = {
-    "per_qtype": 40,                # user, 2026-10-19: at least 40 per question type (15 types -> 600 questions)
+    "per_qtype": 40,                # user, 2026-10-19: at least 40 per question type
+    # the four types of the pre-registration (PREREG_D_vs_C.md), enlarged (user, 2026-10-19): "all" = every val
+    # candidate that passed the filters (the answers then keep their natural shares)
+    "per_qtype_overrides": {"goal_now": 200, "goal_after": 200, "occluded_now": "all", "occluded_after": "all"},
     "unchanged_max_share": 0.10,
 }
 ORDINAL = {"distance_bin", "height_bin"}         # options in ascending order: balance the letter
@@ -454,6 +457,52 @@ def _cap_flips(rs: List[Dict[str, Any]], band: Tuple[float, float], rng: random.
     return [r for r in rs if id(r) not in drop], len(drop)
 
 
+def _balance_inverse(rs: List[Dict[str, Any]], slack: float, rng: random.Random) -> Tuple[List[Dict[str, Any]], int]:
+    """Inverse questions (2026-10-19): within each cell (the pair of actions shown, the pair of counts shown) the four
+    possible answers (either action x the smaller or the larger count) at most ``slack`` x the rarest; a cell where one
+    of them never occurs is left out.  Then neither the option texts nor their priors tell the answer
+    (shortcuts.py: the learned rules fall to chance)."""
+    cells: Dict[Any, Dict[Any, List[Dict[str, Any]]]] = collections.defaultdict(lambda: collections.defaultdict(list))
+    for r in rs:
+        acts, action, counts, low = Q.inverse_balance_keys(r)
+        cells[(acts, counts)][(action, low)].append(r)
+    kept, dropped = [], 0
+    for (acts, _), groups in sorted(cells.items()):
+        want = [(a, low) for a in acts for low in (True, False)]
+        if len(acts) != 2 or any(not groups.get(w) for w in want):
+            dropped += sum(len(v) for v in groups.values())
+            continue
+        cap = int(math.floor(slack * min(len(groups[w]) for w in want)))
+        for w in want:
+            v = sorted(groups[w], key=lambda r: r["sample_id"])
+            rng.shuffle(v)
+            kept.extend(v[:cap])
+            dropped += max(0, len(v) - cap)
+    return kept, dropped
+
+
+def _balance_windows(rs: List[Dict[str, Any]], slack: float, rng: random.Random) -> Tuple[List[Dict[str, Any]], int]:
+    """Distance / screen-height questions (2026-10-19): within each option window (its smallest option) every letter
+    at most ``slack`` x the rarest; a window where a letter never occurs is left out, so the window does not tell
+    the letter (before: the smallest option alone guessed 34%-44% against 25%)."""
+    windows: Dict[str, Dict[str, List[Dict[str, Any]]]] = collections.defaultdict(lambda: collections.defaultdict(list))
+    for r in rs:
+        windows[r["options"][0]][r["answer"]].append(r)
+    kept, dropped = [], 0
+    for w, groups in sorted(windows.items()):
+        letters = Q.LETTERS[: len(next(iter(groups.values()))[0]["options"])]
+        if any(not groups.get(x) for x in letters):
+            dropped += sum(len(v) for v in groups.values())
+            continue
+        cap = int(math.floor(slack * min(len(groups[x]) for x in letters)))
+        for x in letters:
+            v = sorted(groups[x], key=lambda r: r["sample_id"])
+            rng.shuffle(v)
+            kept.extend(v[:cap])
+            dropped += max(0, len(v) - cap)
+    return kept, dropped
+
+
 def balance_split(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random.Random,
                   report: Dict[str, Any]) -> List[Dict[str, Any]]:
     by_qtype: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
@@ -478,11 +527,16 @@ def balance_split(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: rando
                 dropped["unchanged"] += n
             if kind in SHUFFLED:
                 rs, by = _cap_groups(rs, lambda r: r["answer_value"], cfg["balance_slack"], rng, cfg["rare_value_share"])
-            elif kind in ORDINAL or kind in ("goal", "left_right"):
+                dropped["answer_balance"] += sum(by.values())
+            elif kind in ORDINAL:  # the letter within each option window
+                rs, n = _balance_windows(rs, cfg["balance_slack"], rng)
+                dropped["answer_balance"] += n
+            elif kind in ("goal", "left_right"):
                 rs, by = _cap_groups(rs, lambda r: r["answer"], cfg["balance_slack"], rng)
-            else:
-                by = {}
-            dropped["answer_balance"] += sum(by.values())
+                dropped["answer_balance"] += sum(by.values())
+            elif kind == "action":  # the answer within each (action pair, count pair) cell
+                rs, n = _balance_inverse(rs, cfg["balance_slack"], rng)
+                dropped["answer_balance"] += n
             if len(rs) == n0:
                 break
         if forward:
@@ -649,18 +703,20 @@ def _spread(rs: List[Dict[str, Any]], rng: random.Random) -> List[Dict[str, Any]
 
 def probe_select(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random.Random,
                  report: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The fixed probe set: ``per_qtype`` questions of every question type.  Within a type the answers take turns
+    """The fixed probe set: ``per_qtype`` questions of every question type (``per_qtype_overrides``: another number,
+    or "all" candidates of that type).  Within a type the answers take turns
     (the answer value for the reorderable types, whose letters ``even_letters`` then sets; the letter for the
     others), for forward questions crossed with "the answer differs from the current one"; families and tasks take
     turns within each answer; forward questions whose asked quantity did not change at most
     ``unchanged_max_share``."""
-    per_q = int(cfg["per_qtype"])
     by_q: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
     for r in sorted(records, key=lambda r: r["sample_id"]):
         by_q[r["qtype"]].append(r)
     picks: List[Dict[str, Any]] = []
     for q, rs in sorted(by_q.items()):
         kind, forward = rs[0]["kind"], rs[0]["qclass"] == "forward"
+        size = (cfg.get("per_qtype_overrides") or {}).get(q, cfg["per_qtype"])
+        per_q = len(rs) if size == "all" else int(size)
 
         def key(r: Dict[str, Any]) -> Tuple[str, ...]:
             k = str(r["answer_value"] if kind in REORDERABLE else r["answer"])
@@ -670,7 +726,13 @@ def probe_select(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random
         for r in rs:
             buckets[key(r)].append(r)
         queues = {k: _spread(v, rng) for k, v in sorted(buckets.items())}
-        max_unchanged = int(math.floor(float(cfg["unchanged_max_share"]) * per_q)) if forward else per_q
+        share = float(cfg["unchanged_max_share"])
+        if not forward:
+            max_unchanged = per_q
+        elif size == "all":  # every changed one, the unchanged ones up to the share of the result
+            max_unchanged = int(math.floor(share / (1 - share) * sum(1 for r in rs if r["changed"])))
+        else:
+            max_unchanged = int(math.floor(share * per_q))
         chosen: List[Dict[str, Any]] = []
         used_tasks: set = set()
         n_unchanged = 0
@@ -733,8 +795,14 @@ def cmd_probe(args: argparse.Namespace) -> None:
     if args.scenes_from:
         scenes = {json.loads(l)["scene_id"] for l in Path(args.scenes_from).read_text().splitlines() if l.strip()}
         val = [r for r in val if r["scene"] in scenes]
+    # the same answer balance as the bank (option windows, inverse cells, yes / no, option order drawn per question),
+    # except for the types taken whole; their categorical options are shuffled as build does (2026-10-19: the probe
+    # step had left the template order, and the moved answer stood out)
+    whole = {q for q, size in (cfg.get("per_qtype_overrides") or {}).items() if size == "all"}
+    balanced = balance_split([r for r in val if r["qtype"] not in whole], BUILD_CONFIG, rng, {})
+    taken = [shuffle_options(r) if r["kind"] in SHUFFLED else r for r in val if r["qtype"] in whole]
     report: Dict[str, Any] = {}
-    picks = even_letters(probe_select(val, cfg, rng, report), BUILD_CONFIG, rng, cap=False)
+    picks = even_letters(probe_select(balanced + taken, cfg, rng, report), BUILD_CONFIG, rng, cap=False)
     n = write_jsonl(out / "p1_probe.jsonl", (to_lf(r) for r in picks))
     stats = {"questions": n, "config": cfg, "seed": args.seed, "candidates": len(val),
              "scenes": len({r["scene"] for r in picks}), "scenes_allowed": len(scenes) if scenes else None,
