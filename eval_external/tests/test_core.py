@@ -71,6 +71,23 @@ def test_view_unifies_pixel_limits_and_fixes_processor_name(tmp_path):
     assert changes["video_preprocessor_config.json"]["max_pixels"] == [147456, 12845056]
 
 
+def test_view_fixes_exported_sub_config_dtypes_and_attention(tmp_path):
+    ckpt, reg = _fake_checkpoint(tmp_path)
+    exported = {"architectures": ["Qwen2_5_VLForConditionalGeneration"], "dtype": "float32",
+                "attn_implementation": "eager", "text_config": {"dtype": "float32", "hidden_size": 8},
+                "vision_config": {"dtype": "float32", "depth": 32}}
+    (ckpt / "config.json").write_text(json.dumps(exported))
+    view = M.build_view("ours-X", reg)
+    cfg = json.loads((view / "config.json").read_text())
+    assert cfg["dtype"] == cfg["torch_dtype"] == "bfloat16" and "attn_implementation" not in cfg
+    assert cfg["text_config"] == {"dtype": "bfloat16", "hidden_size": 8}
+    assert cfg["vision_config"] == {"dtype": "bfloat16", "depth": 32}
+    assert M.describe("ours-X", reg)["view_changes"]["config"] == {
+        "attn_implementation": ["eager", None], "text_config.dtype": ["float32", "bfloat16"],
+        "vision_config.dtype": ["float32", "bfloat16"]}
+    assert json.loads((ckpt / "config.json").read_text()) == exported  # checkpoint untouched
+
+
 def test_view_rejects_other_architectures(tmp_path):
     ckpt, reg = _fake_checkpoint(tmp_path)
     (ckpt / "config.json").write_text(json.dumps({"architectures": ["LlavaForConditionalGeneration"]}))

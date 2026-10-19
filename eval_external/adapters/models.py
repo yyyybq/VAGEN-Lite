@@ -38,6 +38,13 @@ PIXELS = {"min_pixels": 3136, "max_pixels": 12845056, "size": {"shortest_edge": 
 PROCESSOR_FILES = ("preprocessor_config.json", "video_preprocessor_config.json")
 KNOWN_IMAGE_PROCESSORS = ("Qwen2VLImageProcessor", "Qwen2VLImageProcessorFast")
 PICKLE_SUFFIXES = (".bin", ".pt", ".pth", ".pkl", ".ckpt")  # never linked: views load safetensors only
+# verl's Hugging Face export of our RL checkpoints (float32) also writes text_config.dtype and vision_config.dtype
+# float32, and "attn_implementation": "eager" (its training setting).  transformers 4.56 loading with
+# torch_dtype="auto" (VLMEvalKit) follows the sub-config dtypes, so ours-RL-150 ran its language and vision towers
+# in float32: VSI-Bench ran out of memory in attention, MindCube stopped at lm_head (float vs bfloat16).  Views set
+# bfloat16 in the sub-configs too and drop the attention key (the backend asks for its own); both are listed in
+# view_changes.json.  vLLM runs float32 checkpoints in bfloat16 anyway.
+ATTN_KEYS = ("attn_implementation", "_attn_implementation")
 
 
 def load_registry(path: Path = REGISTRY) -> dict:
@@ -128,8 +135,19 @@ def build_view(code: str, reg: dict | None = None) -> Path:
         if link.is_symlink() or link.exists():
             link.unlink()
         link.symlink_to(p.resolve())
-    cfg["torch_dtype"] = VIEW_DTYPE
-    cfg["dtype"] = VIEW_DTYPE
+    config_changes = {}
+    for prefix, holder in (("", cfg), ("text_config.", cfg.get("text_config")),
+                           ("vision_config.", cfg.get("vision_config"))):
+        if holder is None:
+            continue
+        for key in ("torch_dtype", "dtype"):
+            if (key in holder or not prefix) and holder.get(key) != VIEW_DTYPE:
+                if prefix:  # the top-level dtype is set for every view and not listed
+                    config_changes[prefix + key] = [holder.get(key), VIEW_DTYPE]
+                holder[key] = VIEW_DTYPE
+        for key in ATTN_KEYS:
+            if key in holder:
+                config_changes[prefix + key] = [holder.pop(key), None]
     _write_json(view / "config.json", cfg)
     gen = {}
     if (src / "generation_config.json").exists():
@@ -137,7 +155,7 @@ def build_view(code: str, reg: dict | None = None) -> Path:
         gen = {k: old[k] for k in GREEDY_KEYS if k in old}
     gen.update({"do_sample": False, "repetition_penalty": 1.0})
     _write_json(view / "generation_config.json", gen)
-    _write_json(view / "view_changes.json", {"processor": changes})
+    _write_json(view / "view_changes.json", {"processor": changes, "config": config_changes})
     return view
 
 
