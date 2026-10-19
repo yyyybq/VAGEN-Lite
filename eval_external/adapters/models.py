@@ -30,6 +30,13 @@ FAMILY_ARCH = {"qwen2_5_vl": "Qwen2_5_VLForConditionalGeneration"}
 VIEW_DTYPE = "bfloat16"
 GREEDY_KEYS = ("bos_token_id", "eos_token_id", "pad_token_id")
 TRAINING_STATE = ("optimizer", "scheduler", "rng_state", "trainer_state", "training_args")  # not linked into views
+# Image and video pixel limits of Qwen2.5-VL-7B-Instruct, the same in every view.  SpaceR and Video-R1 ship
+# max_pixels 401,408 and SenseNova-SI 147,456; backends that load the processor without pixel arguments
+# (VLMEvalKit, vLLM) would shrink their images further than every other model's.  Each view lists what it changed
+# in view_changes.json, which describe() puts in the manifest.
+PIXELS = {"min_pixels": 3136, "max_pixels": 12845056, "size": {"shortest_edge": 3136, "longest_edge": 12845056}}
+PROCESSOR_FILES = ("preprocessor_config.json", "video_preprocessor_config.json")
+KNOWN_IMAGE_PROCESSORS = ("Qwen2VLImageProcessor", "Qwen2VLImageProcessorFast")
 PICKLE_SUFFIXES = (".bin", ".pt", ".pth", ".pkl", ".ckpt")  # never linked: views load safetensors only
 
 
@@ -98,8 +105,22 @@ def build_view(code: str, reg: dict | None = None) -> Path:
         raise ValueError(f"{code}: architecture {arch} is not {FAMILY_ARCH[e['family']]}")
     view = view_dir(code, reg)
     view.mkdir(parents=True, exist_ok=True)
+    changes = {}
     for p in sorted(src.iterdir()):
         if p.name in ("config.json", "generation_config.json") or p.is_dir() or p.name.startswith("."):
+            continue
+        if p.name in PROCESSOR_FILES:
+            proc = json.loads(p.read_text())
+            new = {**proc, **PIXELS}
+            if "image_processor_type" in proc and proc["image_processor_type"] not in KNOWN_IMAGE_PROCESSORS:
+                new["image_processor_type"] = "Qwen2VLImageProcessor"  # e.g. Video-R1's Qwen2_5_VLImageProcessor
+            diff = {k: [proc.get(k), new[k]] for k in sorted(new) if proc.get(k) != new[k] and k in proc}
+            if diff:
+                changes[p.name] = diff
+            link = view / p.name
+            if link.is_symlink() or link.exists():
+                link.unlink()
+            _write_json(link, new)
             continue
         if p.name.startswith(TRAINING_STATE) or p.name.endswith(PICKLE_SUFFIXES):
             continue
@@ -116,6 +137,7 @@ def build_view(code: str, reg: dict | None = None) -> Path:
         gen = {k: old[k] for k in GREEDY_KEYS if k in old}
     gen.update({"do_sample": False, "repetition_penalty": 1.0})
     _write_json(view / "generation_config.json", gen)
+    _write_json(view / "view_changes.json", {"processor": changes})
     return view
 
 
@@ -177,6 +199,8 @@ def describe(code: str, reg: dict | None = None, with_hash: bool = True) -> dict
         "view_dtype": VIEW_DTYPE,
         "chat_template_sha256": chat_template_sha(view if view.exists() else source_dir(code, reg)),
         "note": e.get("note"),
+        "view_changes": (json.loads((view / "view_changes.json").read_text())
+                         if (view / "view_changes.json").exists() else None),
     }
     if with_hash:
         out["weights_sha256"] = weight_hash(code, reg)["sha256"]

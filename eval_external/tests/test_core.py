@@ -54,6 +54,23 @@ def test_view_is_bf16_greedy_and_leaves_checkpoint_alone(tmp_path):
     assert d["chat_template_sha256"] is not None
 
 
+def test_view_unifies_pixel_limits_and_fixes_processor_name(tmp_path):
+    ckpt, reg = _fake_checkpoint(tmp_path)
+    (ckpt / "preprocessor_config.json").write_text(json.dumps({
+        "image_processor_type": "Qwen2_5_VLImageProcessor", "max_pixels": 401408, "min_pixels": 3136,
+        "size": {"longest_edge": 401408, "shortest_edge": 3136}, "patch_size": 14}))
+    (ckpt / "video_preprocessor_config.json").write_text(json.dumps({"max_pixels": 147456, "fps": None}))
+    view = M.build_view("ours-X", reg)
+    img = json.loads((view / "preprocessor_config.json").read_text())
+    vid = json.loads((view / "video_preprocessor_config.json").read_text())
+    assert img["max_pixels"] == vid["max_pixels"] == 12845056 and img["size"]["longest_edge"] == 12845056
+    assert img["image_processor_type"] == "Qwen2VLImageProcessor" and img["patch_size"] == 14
+    assert not (view / "preprocessor_config.json").is_symlink()
+    changes = M.describe("ours-X", reg)["view_changes"]["processor"]
+    assert changes["preprocessor_config.json"]["max_pixels"] == [401408, 12845056]
+    assert changes["video_preprocessor_config.json"]["max_pixels"] == [147456, 12845056]
+
+
 def test_view_rejects_other_architectures(tmp_path):
     ckpt, reg = _fake_checkpoint(tmp_path)
     (ckpt / "config.json").write_text(json.dumps({"architectures": ["LlavaForConditionalGeneration"]}))
