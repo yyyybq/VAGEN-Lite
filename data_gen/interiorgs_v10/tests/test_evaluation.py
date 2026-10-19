@@ -337,6 +337,83 @@ class EvaluationTest(unittest.TestCase):
         self.assertIsNone(next(s for s in res["swaps"] if s["out"] == "t0010")["in"])
         self.assertEqual(res, E.replace_flagged(picked, ["t0001", "t0010", "t0021"], list(reversed(pool)), seed=3))
 
+    def test_top_up_a_family_from_reserve_tasks(self):
+        """Round 12: the occlusion family topped up from the split's reserve tasks: flagged tasks and tasks already
+        in the set never taken, d* bands evened out, only tasks whose replay succeeds; the old tasks stay."""
+        oa = "occlusion_alignment"
+        v1 = [_row(i, "projective_relations", 2) for i in range(3)] + [_row(10 + i, oa, 5) for i in range(2)]
+        pool = ([_row(100 + i, oa, 2) for i in range(2)] + [_row(110, oa, 5)] + [_row(120 + i, oa, 8) for i in range(3)]
+                + [_row(130, oa, 8), _row(10, oa, 5), _row(140, "equidistance", 2)])  # flagged, already in, other family
+        failed = {"t0100"}  # a band 1-3 task, surely in the first batch
+        calls = []
+
+        def replay(rows):
+            calls.append([r["task_id"] for r in rows])
+            return [{"task_id": r["task_id"], "ok": r["task_id"] not in failed} for r in rows]
+
+        res = E.top_up(v1, pool, oa, 6, replay, flagged=["t0130"], seed=4)
+        self.assertEqual([r["task_id"] for r in res["tasks"][:5]], [r["task_id"] for r in v1])  # unchanged, first
+        added = [r["task_id"] for r in res["added"]]
+        self.assertEqual(len(added), 4)
+        self.assertFalse({"t0130", "t0010", "t0140", "t0100"} & set(added))
+        # v1 has 2 tasks in band 4-6: the first picks come from 1-3 and 7-8
+        self.assertEqual(sorted(E.band_name(r["difficulty"]["d_star"]) for r in res["added"][:2]), ["1-3", "7-8"])
+        self.assertEqual(res["family_after"], {"1-3": 1, "4-6": 3, "7-8": 2})  # the failed task's place went to 4-6
+        self.assertEqual(res["candidates"], 6)
+        self.assertEqual(res["wanted"], 4)
+        self.assertEqual([r["task_id"] for r in res["replayed"] if not r["ok"]], ["t0100"])
+        self.assertEqual((len(calls[0]), calls[1]), (4, ["t0110"]))  # replayed in batches of what is still missing
+        # not enough reserve tasks: everything that replays is taken
+        short = E.top_up(v1, pool, oa, 20, replay, flagged=["t0130"], seed=4)
+        self.assertEqual(len(short["added"]), 5)
+        self.assertEqual(short["wanted"], 18)
+        self.assertEqual(E.top_up(v1, pool, oa, 2, replay)["added"], [])  # already at the target
+
+    def test_top_up_command_reads_the_split_reserve(self):
+        """Round 12: top-up takes the reserve tasks of the split only (tasks_reserve.jsonl) and writes the new set
+        and, with --family-out, the family's tasks alone."""
+        from argparse import Namespace
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import replay_env
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "output"
+            run.mkdir()
+            base = {"target_object": {}, "target_region": {}, "init_camera": {}, "camera_model_version": "m",
+                    "canonical_task_metric_version": "c", "action_protocol_version": "a"}
+            reserve = [dict(base, task_id=f"r{i}", scene_id="v0" if i < 3 else "t0", task_type="occlusion_alignment",
+                            difficulty={"d_star": 3 + i}) for i in range(5)]
+            (run / "tasks_reserve.jsonl").write_text("".join(json.dumps(r) + "\n" for r in reserve))
+            manifest = Path(tmp) / "split.json"
+            manifest.write_text(json.dumps({"version": 2, "train_scenes": [], "val_scenes": ["v0"], "test_scenes": ["t0"]}))
+            v1 = Path(tmp) / "v1"
+            v1.mkdir()
+            (v1 / "tasks.jsonl").write_text(json.dumps(dict(base, task_id="f1", scene_id="v0", task_type="equidistance",
+                                                            difficulty={"d_star": 4}, split="val")) + "\n")
+            env = Path(tmp) / "env.yaml"
+            env.write_text("envs:\n- config: {wall_model: thick, jsonl_path: x}\n")
+            replayed = []
+
+            def fake_replay(rows, scenes_root, env_config=None):
+                replayed.append((sorted(r["task_id"] for r in rows), env_config))
+                return [{"task_id": r["task_id"], "ok": True} for r in rows]
+
+            with mock.patch.object(replay_env, "replay", fake_replay):
+                E.cmd_top_up(Namespace(eval=str(v1), family="occlusion_alignment", target=10, run=str(run),
+                                       split_manifest=str(manifest), split="val", exclude=None, scenes_root="/meta",
+                                       env_template=str(env), seed=1, out=str(Path(tmp) / "v2"),
+                                       family_out=str(Path(tmp) / "v2_oa")))
+            v2 = [json.loads(l) for l in (Path(tmp) / "v2" / "tasks.jsonl").read_text().splitlines()]
+            self.assertEqual([r["task_id"] for r in v2[:1]], ["f1"])
+            self.assertEqual(sorted(r["task_id"] for r in v2[1:]), ["r0", "r1", "r2"])  # the val scene's reserve only
+            self.assertTrue(all(r["split"] == "val" for r in v2))
+            self.assertEqual(replayed[0][1], {"wall_model": "thick"})  # the template's rules, not its dataset keys
+            sel = json.loads((Path(tmp) / "v2" / "selection.json").read_text())
+            self.assertEqual((sel["added"], sel["reserve_candidates"], sel["wanted"]), (3, 3, 10))
+            oa = [json.loads(l) for l in (Path(tmp) / "v2_oa" / "tasks.jsonl").read_text().splitlines()]
+            self.assertEqual(sorted(r["task_id"] for r in oa), ["r0", "r1", "r2"])
+
 
 if __name__ == "__main__":
     unittest.main()
