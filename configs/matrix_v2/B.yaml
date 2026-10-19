@@ -1,0 +1,83 @@
+# 矩阵第二版 B 组：只练 P0（仿 benchmark 的 QA），不练动作；之后 RL。说明见 configs/matrix_v2/README.md。
+# 只写配置。train_chain_plan 是训练链 plan.json 能读的字段；needs_chain_support 是它现在读不了的（CHANGES.md 第 5 节）。
+group: B
+description: 只练 P0；之后 RL
+output_format: action_only
+
+data:
+  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v2_20261018.yaml
+  recipe: B
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v2_20261018/B
+  train_rows: {P0: 177, P1: 0, P2: 0}        # P0 = 230 道样题（177 条记录）；全量 P0 可用时重建
+  val_rows: {P0: 20, P1: 300, P2: 300}         # 五组相同；每个池单独算验证损失
+
+sft:
+  base_model: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b
+  epochs: 5
+  cards: 8
+  recipe: data/lf_dir 下的 train.yaml（第十一轮正式 SFT 的设置，5 个 epoch，每个 epoch 存一次，eval_on_each_dataset）
+  select: 每个 epoch 在 val400 上评测（不采样），挑成功率最高的，打平取更早的
+
+rl:
+  start: SFT 挑出的检查点
+  tasks: train 后备题（task_pool reserve），去掉深度核对标出的题
+  reward_preset: S0
+  opt_package: p1
+  history_mode: concat
+  updates: 300
+  save_freq: 50
+  output_format: action_only
+  guards: {kl_max: 0.2, invalid_max: 0.05, invalid_window: 10, success_drop: 0.10, drop_window: 50, start_updates: 5}
+
+eval:
+  sets:
+    val400: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/eval_val400
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/eval_test
+  every: 50
+  diagnostics:
+    failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
+    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261018/p1_probe.jsonl --from-eval <val400> --names <SFT 各 epoch 和 RL 各检查点>
+    baseline: docs/transition_qa/DIAG_BASELINE.md
+
+train_chain_plan:
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m2_b
+  sft_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft
+  commit: TBD  # main 合并 transition-qa 之后的提交
+  model: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b
+  ppo_template: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/ppo_template_S0.yaml
+  gs_root: /mnt/umm/users/yinbaiqiao/InteriorGS_ply
+  scenes_root: /mnt/umm/users/yinbaiqiao/InteriorGS_meta
+  keep_text: true
+  sft_epochs: 5
+  sft_groups: {mix: sft_trajectories.jsonl}   # 组名决定 TR/lf_mix；轨迹文件给 rl-config 查 RL 题和 SFT 题不重合
+  eval_sets:
+    val400: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/eval_val400
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/eval_test
+  select_by: val400
+  max_eval_jobs: 10
+  pool: h800
+  endpoint: 300
+  rl_name: v10_rl_m2_b
+  rl:
+    history_mode: concat
+    save_freq: 50
+    no_internal_val: true
+    task_pool: reserve
+    rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/rl_rows/rows.jsonl
+    exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
+    opt_package: p1
+    guards: {kl_max: 0.2, invalid_max: 0.05, invalid_window: 10, success_drop: 0.10, drop_window: 50, start_updates: 5}
+  rl_runs: {s0: {reward_preset: S0}}
+  eval: {every: 50, options: []}
+
+needs_chain_support:
+  sft_lf_dirs: {mix: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v2_20261018/B}
+  # SFT 用这个已经建好的 LLaMA-Factory 目录（混合配方），跳过 sft-records 和 prepare_active_spatial_sft.py
+  diagnostics_after_eval: true   # 评测后跑失败拆解和 P1 探针
+
+manual_steps:   # 不改训练链时
+  - ln -s <data.lf_dir> <tr>/lf_mix    # 训练链的 SFT、按 epoch 评测、挑模型都按 TR/lf_<组名> 找
+  - 在 <tr>/progress.json 里把 render、sft_data 标成 done（note 写"SFT 数据由 data_gen/sft_mixture 构建"），再 train_chain run
+  - 评测结束后手工跑 eval.diagnostics 的两个诊断
+
+estimate: {sft: 8 卡十几分钟（177 条）, sft_eval: 10 个单卡任务约 1 小时, rl: 1 + 8 卡约 11.5 小时, evaluate: 单卡约 1 小时}
