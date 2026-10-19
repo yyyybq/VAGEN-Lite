@@ -874,8 +874,8 @@ def m4_realize(r: Runner):
             labels = "ABCD"
             placed = [pts[i] for i in order]
             ans = labels[order.index(0)]
-            img1 = g.bank.save_marked(v1, f"ref{x}_{y}", lambda im: draw_points(im, [(x, y)], ["REF"]))
-            img2 = g.bank.save_marked(v2, f"cand{ans}{x}_{y}", lambda im: draw_points(im, placed, list(labels)))
+            img1 = g.bank.save_marked(v1, f"ref{x}_{y}", lambda im, k: draw_points(im, [(x, y)], ["REF"], k=k))
+            img2 = g.bank.save_marked(v2, f"cand{ans}{x}_{y}", lambda im, k: draw_points(im, placed, list(labels), k=k))
             g.emit("M4", ["BL-06", "SITE-C05"], "BLINK", "multi_image", [v1, v2], [img1, img2], BL_CORR, {}, list("ABCD"),
                    ans, "mc", gt("图 1 可见表面上的点按深度和两台相机位姿投到图 2，再用图 2 的深度确认没被挡住（差 ≤ max(6 cm, 3%)）；干扰点是图 2 里离答案 ≥60 像素的其他平滑表面点。",
                                  "BLINK 原题来自 HPatches 的单应变换（平面场景）；这里是一般三维场景的深度重投影。",

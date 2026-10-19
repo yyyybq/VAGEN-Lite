@@ -198,18 +198,24 @@ class ViewBank:
             rec["saved"] = True
         return self.rel_path(vid)
 
-    def save_marked(self, vid: str, tag: str, draw: Callable[[Any], None]) -> str:
-        """A copy of the view with marks drawn into it (BLINK points or boxes): it is the model's input."""
+    def save_marked(self, vid: str, tag: str, draw: Callable[[Any, float], None]) -> str:
+        """A copy of the view with marks drawn into it (BLINK points or boxes): it is the model's input.
+
+        The 256 copy is resized from the clean render first and marked afterwards, so its letters are drawn at
+        a size legible at 256 (``draw.mark_style``) instead of shrinking with the image. ``draw(img, k)`` gets
+        the image and the factor from render pixels to its pixels."""
         from PIL import Image
 
         va = self.analysis[vid]
         d = self.out / "views" / self.ctx.scene_id
         d.mkdir(parents=True, exist_ok=True)
         img = Image.fromarray(va.rgb).convert("RGB")
-        draw(img)
+        small = img.resize((256, 256), Image.BILINEAR)
+        draw(img, 1.0)
+        draw(small, 256 / img.size[0])
         name = f"{vid}__{tag}"
         img.save(d / f"{name}.png")
-        img.resize((256, 256), Image.BILINEAR).save(d / f"{name}_256.png")
+        small.save(d / f"{name}_256.png")
         self.save(vid)
         return self.rel_path(name)
 
