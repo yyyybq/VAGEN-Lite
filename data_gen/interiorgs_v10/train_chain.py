@@ -59,7 +59,9 @@ of the first start_updates) by more than success_drop in each of drop_window con
 Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
 or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
 submitted again, at most "retries" (default 2) times per run (startup_problem; the render service keeps running);
-PROGRESS.md lists every resubmission.
+PROGRESS.md lists every resubmission.  Plan "rl" options "standard" (a named configuration of
+configs/rl_standards.json; the plan's "ppo_template" is then optional) and "seed" reach rl-config, and a run's
+"reward_preset" only when the plan names one.
 
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
@@ -416,7 +418,7 @@ class Chain:
             return {"": {"rl_dir": self.tr / "rl", "run_dir": self.tr / "rl_run", "reward_preset": "S0",
                          "rl": dict(self.plan.get("rl") or {})}}
         return {name: {"rl_dir": self.tr / f"rl_{name}", "run_dir": self.tr / f"rl_run_{name}",
-                       "reward_preset": spec.get("reward_preset", "S0"),
+                       "reward_preset": spec.get("reward_preset"),  # None: rl-config's default or the standard's
                        "rl": {**dict(self.plan.get("rl") or {}), **dict(spec.get("rl") or {})}}
                 for name, spec in runs.items()}
 
@@ -700,12 +702,14 @@ class Chain:
         for name, run in self.rl_runs().items():
             rl = run["rl"]
             args = [sys.executable, "-m", "data_gen.interiorgs_v10.training_prep", "rl-config",
-                    "--rows", str(rl.get("rows") or self.sft_dir / "rows.jsonl"), "--ppo-template", self.plan["ppo_template"],
+                    "--rows", str(rl.get("rows") or self.sft_dir / "rows.jsonl"),
                     "--gs-root", self.plan["gs_root"], "--model", str(self.sft_model()),
                     "--name", self.plan.get("rl_name", "v10_rl_s0") + (f"_{name}" if name else ""),
                     "--run-root", str(run["run_dir"]),
                     "--val-limit", str(self.plan.get("val_limit", 64)), "--out", str(run["rl_dir"])]
-            for key, flag in (("history_mode", "--history-mode"), ("critic_warmup", "--critic-warmup"),
+            if self.plan.get("ppo_template"):  # round 12: optional with a standard configuration
+                args += ["--ppo-template", str(self.plan["ppo_template"])]
+            for key, flag in (("standard", "--standard"), ("seed", "--seed"), ("history_mode", "--history-mode"), ("critic_warmup", "--critic-warmup"),
                               ("test_freq", "--test-freq"), ("val_tasks", "--val-tasks"),
                               ("train_batch_size", "--train-batch-size"),
                               ("ppo_mini_batch_size", "--ppo-mini-batch-size"), ("save_freq", "--save-freq")):
@@ -714,7 +718,7 @@ class Chain:
             for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val")):
                 if rl.get(key):
                     args.append(flag)
-            if self.plan.get("rl_runs"):
+            if self.plan.get("rl_runs") and run["reward_preset"]:
                 args += ["--reward-preset", run["reward_preset"]]
             if rl.get("task_pool"):  # round 11: RL trains on tasks SFT never trained on, checked against the SFT data
                 args += ["--task-pool", str(rl["task_pool"]), "--sft-trajectories",

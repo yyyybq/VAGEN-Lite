@@ -764,6 +764,25 @@ class ChainTest(unittest.TestCase):
             self.assertIn("start-up: no output for", str(err))
             self.assertTrue((Path(tmp) / "rl_run_b" / "checkpoints" / "global_step_50").is_dir())
 
+    def test_standard_and_seed_reach_rl_config(self):
+        """Round 12: plan rl "standard" and "seed" reach rl-config (no --ppo-template then, and --reward-preset only
+        when a run names one)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": str(root / "sft"), "endpoint": 300, "gs_root": "/ply",
+                             "rl": {"standard": "v10_p1_S0", "seed": 20261019, "rows": "/rows.jsonl", "task_pool": "reserve"},
+                             "rl_runs": {"ps0": {}, "pd": {"rl": {"standard": "v10_p1_D"}}}}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_formal_e9", "model": "/lf/e9"}
+            calls = {}
+            chain.sh = lambda args, **k: calls.__setitem__(args[args.index("--out") + 1], args)
+            chain.rl_config()
+            ps0, pd = calls[str(root / "rl_ps0")], calls[str(root / "rl_pd")]
+            self.assertEqual((ps0[ps0.index("--standard") + 1], pd[pd.index("--standard") + 1]), ("v10_p1_S0", "v10_p1_D"))
+            self.assertEqual((ps0[ps0.index("--seed") + 1], pd[pd.index("--seed") + 1]), ("20261019", "20261019"))
+            for args in (ps0, pd):
+                self.assertNotIn("--ppo-template", args)
+                self.assertNotIn("--reward-preset", args)
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)
