@@ -33,17 +33,21 @@
 - **RL，修正包（R11-PS0 稀疏、R11-PD 密集）**：`exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_{ps0,pd}/checkpoints/global_step_{50,...,300}`，起点 SFT 第 9 个 epoch、后备题、300 次。**第一次确认 RL 有提高**：P-S0 第 300 次验证集 48.7%、评测集 43.4%，P-D 第 150 次 46.5% / 45.5%，起点 42.0% / 39.4%；两集合并逐题 103 对 65（p = 0.004）、90 对 55（p = 0.005）。稀疏和密集之间没有差别（p = 0.87）。**最终模型待定**（推荐 P-S0 第 300 次，见第 4 节）。
 - **评测轨迹浏览页：** 本机双击 `exps/interiorgs_v10_eval_browser_r11_20261017/index.html`（279 道评测题 × 9 个模型，默认左边本轮 SFT 第 9 个 epoch、右边 P-S0 第 300 次）；集群 `interiorgs_v10_r11_20261016/browser/`。
 
-**实验编号**（第十一轮起每次训练一个编号，以后沿用 `R<轮>-<名称>[-A<第几次尝试>]`）：
+**实验编号**（第十一轮起每次训练一个编号，以后沿用 `R<轮>-<名称>[-A<第几次尝试>]`；第十二轮起每次 RL 都是 S0 / D 一对：同起点、同一批题、同一种子、同样的更新次数。**数据版本：** 题目都是第十轮出的题（`interiorgs_v10_gen_r10_20261015`），SFT 用正式题，RL 用 train 场景的后备题；评测集 v1 是 `interiorgs_v10_r11_20261016/eval_val400`（398 道）和 `eval_test`（279 道），v2 是 `interiorgs_v10_r12_20261019/eval_val_v2`（413 道）和 `eval_test_v2`（292 道），只是遮挡族多了后备题。**种子：** 任务顺序是 PPO 配置的 `data.seed`；vLLM 的采样种子在这版 verl 里固定为 0）：
 
-| 编号 | 起点 | 数据 | 奖励 / 设置 | 代码提交 | 结果路径（`exps/vagen_active_spatial/` 下） | 结果 |
-| --- | --- | --- | --- | --- | --- | --- |
-| R11-SFT | 原始 Qwen2.5-VL-7B | `interiorgs_v10_r11_20261016/sft`（11,095 段正式题对话，带完整历史，被挡 v2 样本 1,169 段） | 10 个 epoch | `24dbb03f` | `interiorgs_v10_train_r11_20261016/lf_formal/model` | 挑第 9 个 epoch，验证集 42.0% |
-| R11-RS0-A0 / R11-RD-A0 | SFT 第 9 个 epoch | train 正式题（SFT 训过） | S0 / 密集，24 题 × 4 条 | `605db690` | `…_train_r11_20261016/rl_attempts/attempt0_formal_*` | 第 43 次停：训练成功率 97–98%，几乎没有可学的信号 |
-| R11-RS0-A1 / R11-RD-A1 | SFT 第 9 个 epoch | train 后备题 10,798 道 | 同上 | `ce7a2730` | `…/rl_attempts/attempt1_*` | 第 25 次信号检查没通过（有成有败 19% / 21%） |
-| R11-RS0 / R11-RD | SFT 第 6 个 epoch | train 后备题 | 同上 | `ce7a2730` | `…_train_r11_20261016/rl_run_{rs0,rd}` | 300 次，和起点持平 |
-| R11-T3B-D / R11-T3B-S0 | 第五轮 3B SFT | train 正式题 | 密集 / S0，单卡 15 次 | `d362ed50` | `interiorgs_v10_r11_20261016/pilot_run_{dense,S0}` | 密集奖励数值合理、训练稳定 |
-| R11-T3B-P1-S0 / -D | 第五轮 3B SFT | train 后备题 | 修正包（单卡，4 候选留 2），30 次 | `94063ca9` | `interiorgs_v10_r11_20261016/pkg_pilot_run_{S0,dense}` | 组内比较、丢题、补抽正常；单卡 bf16 权重下 KL 不动（见报告） |
-| R11-PS0 / R11-PD | SFT 第 9 个 epoch | train 后备题 | 修正包 p1（GRPO、只用有成有败的题、24 候选留 12、8 条、lr 2e-6、KL 0.05、熵 0.01）+ S0 / 密集 | `94063ca9` | `interiorgs_v10_train_r11p_20261017/rl_run_{ps0,pd}` | 300 次，都高于起点：P-S0 第 300 次 48.7% / 43.4%，P-D 第 150 次 46.5% / 45.5%（验证集 / 评测集；起点 42.0% / 39.4%） |
+| 编号 | 起点 | 数据 | 奖励 / 设置 | 种子 | 代码提交 | 结果路径（`exps/vagen_active_spatial/` 下） | 结果 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| R11-SFT | 原始 Qwen2.5-VL-7B | `interiorgs_v10_r11_20261016/sft`（11,095 段正式题对话，带完整历史，被挡 v2 样本 1,169 段） | 10 个 epoch | —（LLaMA-Factory 默认） | `24dbb03f` | `interiorgs_v10_train_r11_20261016/lf_formal/model` | 挑第 9 个 epoch，验证集 42.0% |
+| R11-RS0-A0 / R11-RD-A0 | SFT 第 9 个 epoch | train 正式题（SFT 训过） | S0 / 密集，24 题 × 4 条 | 任务顺序 20260930，采样 0 | `605db690` | `…_train_r11_20261016/rl_attempts/attempt0_formal_*` | 第 43 次停：训练成功率 97–98%，几乎没有可学的信号 |
+| R11-RS0-A1 / R11-RD-A1 | SFT 第 9 个 epoch | train 后备题 10,798 道 | 同上 | 任务顺序 20260930，采样 0 | `ce7a2730` | `…/rl_attempts/attempt1_*` | 第 25 次信号检查没通过（有成有败 19% / 21%） |
+| R11-RS0 / R11-RD | SFT 第 6 个 epoch | train 后备题 | 同上 | 任务顺序 20260930，采样 0 | `ce7a2730` | `…_train_r11_20261016/rl_run_{rs0,rd}` | 300 次，和起点持平 |
+| R11-T3B-D / R11-T3B-S0 | 第五轮 3B SFT | train 正式题 | 密集 / S0，单卡 15 次 | 任务顺序 20260930，采样 0 | `d362ed50` | `interiorgs_v10_r11_20261016/pilot_run_{dense,S0}` | 密集奖励数值合理、训练稳定 |
+| R11-T3B-P1-S0 / -D | 第五轮 3B SFT | train 后备题 | 修正包（单卡，4 候选留 2），30 次 | 任务顺序 20260930，采样 0 | `94063ca9` | `interiorgs_v10_r11_20261016/pkg_pilot_run_{S0,dense}` | 组内比较、丢题、补抽正常；单卡 bf16 权重下 KL 不动（见报告） |
+| R11-PS0 / R11-PD | SFT 第 9 个 epoch | train 后备题 | 修正包 p1（GRPO、只用有成有败的题、24 候选留 12、8 条、lr 2e-6、KL 0.05、熵 0.01）+ S0 / 密集 | 任务顺序 20260930，采样 0 | `94063ca9` | `interiorgs_v10_train_r11p_20261017/rl_run_{ps0,pd}` | 300 次，都高于起点：P-S0 第 300 次 48.7% / 43.4%，P-D 第 150 次 46.5% / 45.5%（验证集 / 评测集；起点 42.0% / 39.4%） |
+| R12-P1-S0 / R12-P1-D | SFT 第 9 个 epoch（`checkpoint-1386`） | train 后备题 10,798 道；评测集 v2 | 标准配置 `v10_p1_S0` / `v10_p1_D`（即第十一轮的修正包 p1），300 次 | 任务顺序 20261019，采样 0 | `ff958185` | `interiorgs_v10_train_r12a_20261019/rl_run_{p1s0,p1d}` | 进行中（复现对照：和 R11-PS0 / R11-PD 只差种子） |
+| R12-P1-A0 | 同上 | 同上 | 同上，另把采样种子写进了采样配置 | 同上 | `805de347` | `interiorgs_v10_train_r12a_20261019/attempt0_rollout_seed` | 两个训练任务在模型初始化时失败（这版 verl 的采样配置没有 seed 这一项），改正后重启 |
+| R12-P2-S0 / R12-P2-D | 同上 | 同上 | 候选标准 `v10_p2_S0` / `v10_p2_D`（p1 改成每次 48 道候选，凑满 12 道有成有败的题），300 次 | 任务顺序 20261019，采样 0 | `ff958185` | `interiorgs_v10_train_r12b_20261019/rl_run_{p2s0,p2d}` | 第一对 RL 结束后自动开始 |
+| R12-E | （已有模型） | 遮挡 v2 题 38 道 / 42 道；采样评测用 v1 验证集 | 第十一轮的 9 个模型在遮挡 v2 题上重评；P-S0 第 300 次、P-D 第 150 次采样 4 次 | — | `805de347` | `interiorgs_v10_train_r12e_20261019`（结果在 `interiorgs_v10_r12_20261019/eval_*_v2_oa/` 和 `interiorgs_v10_r11_20261016/eval_val400/*_s4`） | 进行中 |
 
 **第十轮训练出的模型（`exps/vagen_active_spatial/interiorgs_v10_train_r10_20261015/`，新规则、带历史）：**
 - **最终模型：SFT 只用正式题那一组的第 5 个 epoch** `lf_formal/model/checkpoint-770`（Qwen2.5-VL-7B，5 个 epoch，每个 epoch 在 `checkpoint-154 / -308 / -462 / -616 / -770`）。验证集 47.1%，评测集 40.1%。
@@ -150,7 +154,13 @@
 
 ## 3. 现在在做的事
 
-**没有在跑的任务。** 第十一轮已结束（2026-10-18），本轮提交的 sco 任务都已删除；等你对第 4 节的决定。
+**在跑：第十二轮**（2026-10-19 起，H800 池，报告 `cluster_runs/REPORT_R12_20261019.md`）：
+
+- 第一对 R12-P1-S0 / R12-P1-D（复现对照，新种子 20261019），训练链 `interiorgs_v10_train_r12a_20261019`；结束后自动开始第二对 R12-P2-S0 / R12-P2-D（候选标准做法，每次 48 道候选），训练链 `interiorgs_v10_train_r12b_20261019`（接续脚本 `interiorgs_v10_r12_20261019/scripts/launch_pair2_r12.sh`）。
+- 只评测的训练链 R12-E（`interiorgs_v10_train_r12e_20261019`）：第十一轮的 9 个模型在遮挡 v2 题上重评，P-S0 第 300 次和 P-D 第 150 次按训练时的方式采样评测。
+- 密集奖励的体检（不用 GPU）：`interiorgs_v10_r12_20261019/scripts/dense_check_r12.py`。
+
+第十一轮已结束（2026-10-18）。
 
 第十一轮的结论（详见 `cluster_runs/REPORT_R11_20261016.md`）：
 
