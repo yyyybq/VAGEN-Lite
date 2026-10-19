@@ -32,6 +32,25 @@ def test_overflow_from_run_log(tmp_path):
     assert R.overflow_from_run_log(tmp_path / "run.log") == {"last_attempt_failures": 2, "overflow": 1}
 
 
+def test_lenient_json():
+    assert json.loads(R.lenient_json("I observe ...\nAnswer: STOP(24.0"))["ACTION"] == "STOP(24.0)"
+    assert json.loads(R.lenient_json("first MOVE(2) then\nAnswer: MOVE(1)"))["ACTION"] == "MOVE(1)"
+    assert json.loads(R.lenient_json('ACTION: ROTATION(160, -10)'))["ACTION"] == "ROTATION(160, -10)"
+    assert json.loads(R.lenient_json('Answer: STOP("ARRIVED")'))["ACTION"] == 'STOP("ARRIVED")'
+    assert R.lenient_json("<action>move_backward</action>") is None
+    assert R.lenient_json("ROTATION(160)") is None  # heading and pitch both needed
+
+
+def test_queue_walkerbench_variants():
+    from eval_external.sco import queue as Q
+
+    it = Q.item("step2", "SI-7B", "WalkerBench-lenient")
+    assert it.run_dir.name == "SI-7B__lenient" and it.command[-1] == "--lenient"
+    assert Q.item("step2", "SI-7B", "WalkerBench-blind").command[-1] == "--blind"
+    plain = Q.item("step2", "SI-7B", "WalkerBench")
+    assert plain.run_dir.name == "SI-7B" and plain.command[-1] == str(plain.run_dir)
+
+
 def test_rescore_accepts_only_all_overflow(tmp_path):
     over = ("API call failed (attempt 3/3): Error code: 400 - The decoder prompt (length 128800) is longer than the "
             "maximum model length of 128000.")

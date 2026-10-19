@@ -1,6 +1,6 @@
 """WalkerBench Standard-100 with one model code, inside one one-card sco job.
 
-    python -m eval_external.closed_loop.walkerbench.run --model base-7B --run-dir RUN [--blind] [--temperature 0]
+    python -m eval_external.closed_loop.walkerbench.run --model base-7B --run-dir RUN [--blind] [--lenient]
 
 What runs is WalkerBench's own agent and loop (b197f51): examples/vln_agent.py VLNAgent (its system prompts per
 task type, its observation text, its JSON action format MOVE / ROTATION / STOP, full dialogue history) driven by
@@ -16,7 +16,11 @@ Changes, all recorded in the manifest:
    same file the server would serve.  --blind keeps the reference behaviour (no image), to compare with
    published numbers.
 3. The reference agent repairs unparseable replies by calling gpt-4o-mini, an external paid model; that is
-   switched off.  An unparseable reply becomes the agent's own fallback (turn in place) and is counted.
+   switched off.  An unparseable reply becomes the agent's own fallback (turn in place) and is counted.  (The
+   repair call goes to the same API address as the model, so with a local model server it fails and the reference
+   code falls back the same way.)  --lenient, a diagnostic only, puts a local rule in its place: a reply whose text
+   names a WalkerBench action outside the JSON ("Answer: STOP(24.0", "ACTION: MOVE(1)") becomes {"ACTION": that
+   action}, its last one, a missing final ")" added; every repair is logged to RUN/lenient_repairs.jsonl.
 4. Temperature: --temperature (default 0, greedy, as in the QA runs); the agent's own default is 0.3.
 The model is served by vLLM on the model's view (closed_loop/vllm_server.py); no external API is called.
 
@@ -60,6 +64,16 @@ OVERFLOW_MARKERS = ("maximum context length", "longer than the maximum model len
 OVERFLOW_TAG = "[eval_external: context overflow]"
 COUNTS = defaultdict(int)
 LOCK = threading.Lock()
+_WB_ACTION = re.compile(r"MOVE\(\s*\d+\s*\)?|ROTATION\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\)?|STOP\([^)\n]*\)?")
+
+
+def lenient_json(text: str) -> str | None:
+    """--lenient: the last WalkerBench action named in a reply, as the JSON the agent expects; None if none."""
+    found = _WB_ACTION.findall(text or "")
+    if not found:
+        return None
+    action = found[-1].strip()
+    return json.dumps({"THOUGHT": "", "ACTION": action if action.endswith(")") else action + ")"})
 
 
 def make_copy(run_dir: Path) -> tuple[Path, str]:
@@ -87,7 +101,7 @@ def load_module(name: str, path: Path):
 
 
 def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: bool, workers: int,
-              limit: int | None = None) -> list[str]:
+              limit: int | None = None, lenient_log: Path | None = None) -> list[str]:
     os.chdir(copy)
     sys.path.insert(0, str(copy))
     # WalkerBench's examples/ has no __init__.py; an installed package named "examples" would win over it
@@ -137,9 +151,16 @@ def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: b
             return base64.b64encode(path.read_bytes()).decode("utf-8")
 
         def _repair_json_with_gpt4o(self, malformed_response):
+            if lenient_log is None:
+                with LOCK:
+                    COUNTS["repair_skipped"] += 1
+                return None
+            fixed = lenient_json(malformed_response)
             with LOCK:
-                COUNTS["repair_skipped"] += 1
-            return None
+                COUNTS["lenient_repairs" if fixed else "lenient_no_action"] += 1
+                with open(lenient_log, "a") as f:
+                    f.write(json.dumps({"original": malformed_response, "repaired": fixed}) + "\n")
+            return fixed
 
     rbp.VLNAgent = EvalAgent
     rbp.TASKS_DIR = copy / "tasks" / "standard"
@@ -250,6 +271,8 @@ def main() -> None:
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--rescore", action="store_true", help="rescore an earlier invalid run (no model, login node)")
+    ap.add_argument("--lenient", action="store_true",
+                    help="diagnostic: a WalkerBench action named outside the JSON is accepted (local rule, logged)")
     args = ap.parse_args()
     run_dir = args.run_dir.resolve()
     if args.rescore:
@@ -268,14 +291,19 @@ def main() -> None:
                  "server": {"vllm": SERVER_DEFAULTS}, "workers": args.workers},
         prompt={"impl": "examples/vln_agent.py (system prompts config/system_prompt_*.txt)",
                 "images": "withheld (reference behaviour)" if args.blind else "sent (local file)",
-                "json_repair": "off (reference uses gpt-4o-mini)"},
+                "json_repair": ("lenient local rule (diagnostic): the last MOVE / ROTATION / STOP named in the reply"
+                                if args.lenient else "off (reference uses gpt-4o-mini)")},
         frames=None, decoding={"temperature": args.temperature, "max_tokens": 16384, "other": "vLLM defaults"})
+    lenient_log = run_dir / "lenient_repairs.jsonl" if args.lenient else None
+    if lenient_log is not None and lenient_log.exists():
+        lenient_log.unlink()
     with VLLMServer(args.model, log=run_dir / "vllm.log") as srv:
-        tasks = run_tasks(copy, args.model, srv.base_url, args.temperature, args.blind, args.workers)
+        tasks = run_tasks(copy, args.model, srv.base_url, args.temperature, args.blind, args.workers,
+                          lenient_log=lenient_log)
         server_alive = srv.alive()
     res = score(copy, tasks)
-    res.update({"model": args.model, "blind": args.blind, "temperature": args.temperature, "counts": dict(COUNTS),
-                "server_alive_at_end": server_alive})
+    res.update({"model": args.model, "blind": args.blind, "lenient": args.lenient, "temperature": args.temperature,
+                "counts": dict(COUNTS), "server_alive_at_end": server_alive})
     # A task whose episode raised inside WalkerBench's own loop has no log and scores 0 (score() counts every task):
     # the loop indexes the observation after an action that failed and returned none ("'NoneType' object is not
     # subscriptable"); res["counts"]["tasks_without_log"] reports how many.  Only a dead model server, or a call

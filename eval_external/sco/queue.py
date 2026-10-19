@@ -4,7 +4,9 @@
 
 KIND is a QA benchmark of qa_transfer/benchmarks.py, or
   WalkerBench, WalkerBench-blind          closed_loop/walkerbench/run.py (blind: no image, the reference agent's way)
+  WalkerBench-lenient                     the same with --lenient (an action named outside the JSON is accepted)
   OwnEnv, OwnEnv-shuffle, OwnEnv-drop      diagnostics/ownenv_job.sh (our env; dialogue history as is / shuffled / dropped)
+  OwnEnv-lenient                          the same, history as is, untagged "Answer:" lines accepted
 
 Every minute: a finished job (SUCCEEDED, exit 0) is collected into RUN/results.json and deleted; a failed one is
 left as it is and marked failed (never resubmitted automatically); a pending item is submitted when fewer than
@@ -71,12 +73,12 @@ def item(stage: str, model: str, kind: str) -> Item:
                     ["python", "-m", "eval_external.qa_transfer.run_qa", "--model", model, "--bench", kind,
                      "--run-dir", str(rd)],
                     lambda: (J.ROOT / "data_prep" / f"{kind.replace('@', '_at_')}.json").exists(), _qa_collect)
-    if kind in ("WalkerBench", "WalkerBench-blind"):
-        blind = kind.endswith("blind")
-        rd = RUNS / "walkerbench" / stage / (f"{model}__blind" if blind else model)
-        return Item(rd, f"{stage}-wb{'-blind' if blind else ''}-{model}",
+    if kind in ("WalkerBench", "WalkerBench-blind", "WalkerBench-lenient"):
+        variant = kind.partition("-")[2]  # "", "blind" or "lenient"
+        rd = RUNS / "walkerbench" / stage / (f"{model}__{variant}" if variant else model)
+        return Item(rd, f"{stage}-wb{'-' + variant if variant else ''}-{model}",
                     ["python", "-m", "eval_external.closed_loop.walkerbench.run", "--model", model, "--run-dir",
-                     str(rd)] + (["--blind"] if blind else []),
+                     str(rd)] + ([f"--{variant}"] if variant else []),
                     lambda: (J.ROOT / "data_prep" / "walkerbench.json").exists(),
                     lambda d: _require(d / "results.json"))
     if kind in OWNENV_MODES:

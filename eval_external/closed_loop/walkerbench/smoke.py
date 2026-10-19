@@ -10,6 +10,9 @@ reference agent sends none) and that each task produced a scored log.
 --error overflow / other: from the second turn on, every call gets a 400 (vLLM's context-length message, or
 another one).  Checks that the unanswered steps are counted, tagged as overflow only in the first case, and that
 only the second case makes the run invalid.
+
+--plain [--lenient]: the server answers "Answer: STOP(10" with no JSON (Spatial-Interactor's style).  Checks that
+every such reply is unparseable without --lenient and repaired by the local rule with it.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from pathlib import Path
 from eval_external.closed_loop.walkerbench import run as R
 
 CALLS = []
-ERROR = {"mode": "none"}
+ERROR = {"mode": "none", "plain": False}
 MESSAGES = {  # as vLLM 0.11 words them
     "overflow": "'max_tokens' or 'max_completion_tokens' is too large: 16384. This model's maximum context length "
                 "is 128000 tokens and your request has 117561 input tokens (16384 > 128000 - 117561). None",
@@ -57,6 +60,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         action = "ROTATION(90, 0)" if turn == 0 else "STOP(10)"
         content = json.dumps({"THOUGHT": "smoke test", "ACTION": action})
+        if ERROR["plain"]:  # Spatial-Interactor's way: no JSON, final ")" missing
+            content = f"I observe the street.\nAnswer: {action[:-1]}"
         self._send(200, {"id": "x", "object": "chat.completion", "created": 0, "model": req["model"],
                          "choices": [{"index": 0, "message": {"role": "assistant", "content": content},
                                       "finish_reason": "stop"}],
@@ -68,15 +73,19 @@ def main() -> None:
     ap.add_argument("--run-dir", required=True, type=Path)
     ap.add_argument("--limit", type=int, default=5)
     ap.add_argument("--error", choices=("none", "overflow", "other"), default="none")
+    ap.add_argument("--plain", action="store_true", help="answer 'Answer: STOP(10' instead of JSON")
+    ap.add_argument("--lenient", action="store_true")
     args = ap.parse_args()
-    ERROR["mode"] = args.error
+    ERROR.update(mode=args.error, plain=args.plain)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base_url = f"http://127.0.0.1:{server.server_address[1]}/v1"
     run_dir = args.run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
     copy, diff = R.make_copy(run_dir)
-    tasks = R.run_tasks(copy, "fake", base_url, 0.0, blind=False, workers=2, limit=args.limit)
+    lenient_log = run_dir / "lenient_repairs.jsonl" if args.lenient else None
+    tasks = R.run_tasks(copy, "fake", base_url, 0.0, blind=False, workers=2, limit=args.limit,
+                        lenient_log=lenient_log)
     res = R.score(copy, tasks)
     res["server_alive_at_end"] = True
     server.shutdown()
@@ -88,7 +97,11 @@ def main() -> None:
               "valid": R.is_valid(res), "settings_diff": diff}
     print(json.dumps(report, indent=1))
     ok = report["calls"] > 0 and report["calls_with_one_image"] == report["calls"] and res["n_scored"] == len(tasks)
-    if args.error == "none":
+    if args.plain:  # every reply is unparseable JSON; only the lenient rule rescues it
+        rescued = R.COUNTS["lenient_repairs"]
+        ok = ok and (res["unparseable_steps"] == 0 and rescued > 0 if args.lenient
+                     else res["unparseable_steps"] > 0 and rescued == 0)
+    elif args.error == "none":
         ok = ok and res["api_failed_steps"] == 0 and report["valid"]
     elif args.error == "overflow":
         ok = ok and res["api_failed_steps"] > 0 and res["context_overflow_steps"] == res["api_failed_steps"] \
