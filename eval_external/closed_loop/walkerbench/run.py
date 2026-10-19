@@ -194,15 +194,18 @@ def main() -> None:
     res = score(copy, tasks)
     res.update({"model": args.model, "blind": args.blind, "temperature": args.temperature, "counts": dict(COUNTS),
                 "server_alive_at_end": server_alive})
-    valid = server_alive and res["api_failed_steps"] == 0 and COUNTS["tasks_without_log"] == 0
-    # an invalid run (the server died or did not answer) never produces results.json, so the queue marks it failed
+    # A task whose episode raised inside WalkerBench's own loop has no log and scores 0 (score() counts every task):
+    # the loop indexes the observation after an action that failed and returned none ("'NoneType' object is not
+    # subscriptable"); res["counts"]["tasks_without_log"] reports how many.  Only a dead or silent model server
+    # makes the run invalid: then no results.json is written, so the queue marks it failed.
+    valid = server_alive and res["api_failed_steps"] == 0
     with open(run_dir / ("results.json" if valid else "results_invalid.json"), "w", newline="\n") as f:
         json.dump(res, f, indent=1, default=str)
         f.write("\n")
     print(json.dumps({k: v for k, v in res.items() if k != "per_task"}, indent=1))
     if not valid:
         raise SystemExit(f"invalid run: server alive {server_alive}, {res['api_failed_steps']} steps without an "
-                         f"answer from the model, {COUNTS['tasks_without_log']} tasks without a log")
+                         f"answer from the model")
 
 
 if __name__ == "__main__":
