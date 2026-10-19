@@ -168,7 +168,54 @@ def summary(answers: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         for a in answers:
             groups[a[key]].append(a)
         out[key] = {k: acc(v) for k, v in sorted(groups.items())}
+    for q, sel in out["qtype"].items():  # yes / no types: accuracy when the answer is Yes and when it is No
+        rows = [a for a in answers if a["qtype"] == q]
+        if rows and all(a["gold"] in ("Yes", "No") for a in rows):
+            sel["by_gold"] = {g: (sum(a["correct"] for a in rows if a["gold"] == g) / max(1, sum(a["gold"] == g for a in rows)))
+                              for g in ("Yes", "No")}
+            sel["said_yes"] = sum(a["parsed"] == "Yes" for a in rows) / len(rows)
     return out
+
+
+OPTION_TYPES = ("correct", "count", "opposite", "other_kind", "unreadable")
+
+
+def inverse_confusion(answers: Sequence[Dict[str, Any]], probe: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+    """action_between: true action -> what the chosen option was: the answer, the same action another number of times
+    (count), the opposite action (opposite), the other kind on the same side (other_kind), or unreadable."""
+    from data_gen.interiorgs_v10.contract import INVERSE_ACTION
+    from data_gen.transition_qa.shortcuts import parse_action_option
+
+    table: Dict[str, Dict[str, int]] = collections.defaultdict(lambda: {t: 0 for t in OPTION_TYPES})
+    for a in answers:
+        if a["qtype"] != "action_between":
+            continue
+        row = probe[a["sample_id"]]
+        opts = [parse_action_option(o) for o in row["options"]]
+        right = opts[LETTERS.index(row["answer"])]
+        if a["parsed"] not in tuple(LETTERS[: len(opts)]):
+            kind = "unreadable"
+        else:
+            chosen = opts[LETTERS.index(a["parsed"])]
+            kind = ("correct" if chosen == right else "count" if chosen[0] == right[0]
+                    else "opposite" if chosen[0] == INVERSE_ACTION[right[0]] else "other_kind")
+        table[right[0]][kind] += 1
+    return dict(table)
+
+
+def cmd_confusion(args: argparse.Namespace) -> None:
+    out = Path(args.out)
+    probe = {r["sample_id"]: r for r in (json.loads(l) for l in Path(args.probe).read_text().splitlines() if l.strip())}
+    res = {}
+    for name in [n for n in args.names.split(",") if n]:
+        answers = [json.loads(l) for l in (out / f"{name}.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+        res[name] = inverse_confusion(answers, probe)
+    (out / "inverse_confusion.json").write_text(json.dumps(res, indent=1))
+    for name, table in res.items():
+        tot = collections.Counter()
+        for row in table.values():
+            tot.update(row)
+        print(name, json.dumps(dict(tot)))
 
 
 # =============================================================================
@@ -348,6 +395,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     r.add_argument("--names", default="", help="with --from-eval: comma-separated result folder names")
     r.add_argument("--in-process", action="store_true", help=argparse.SUPPRESS)
     r.set_defaults(func=cmd_run)
+    x = sub.add_parser("confusion", help="action_between: the true action against the kind of option chosen")
+    x.add_argument("--probe", required=True)
+    x.add_argument("--out", required=True)
+    x.add_argument("--names", required=True, help="comma-separated result names in OUT")
+    x.set_defaults(func=cmd_confusion)
     s = sub.add_parser("rescore")
     s.add_argument("--probe", required=True)
     s.add_argument("--out", required=True)

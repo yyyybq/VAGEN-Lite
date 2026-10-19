@@ -99,6 +99,19 @@ def test_score_and_summary():
     assert s["all"]["formats"]["letter_variant"] == 0.5
 
 
+def test_yes_no_split_and_inverse_confusion():
+    rows = [{"sample_id": str(i), "qtype": "goal_now", "qclass": "state", "family": "f", "options": [],
+             "messages": [{}, {"content": "Yes" if i < 2 else "No"}]} for i in range(4)]
+    s = QP.summary(QP.score(rows, ["No", "Yes", "No", "No"]))
+    assert s["qtype"]["goal_now"]["by_gold"] == {"Yes": 0.5, "No": 1.0} and s["qtype"]["goal_now"]["said_yes"] == 0.25
+    opts = ["the camera turned left by 40 degrees", "the camera turned left by 60 degrees",
+            "the camera turned right by 40 degrees", "the camera moved sideways to the left by 0.6 meters"]
+    probe = {"x": {"options": opts, "answer": "A"}}
+    for chosen, kind in (("A", "correct"), ("B", "count"), ("C", "opposite"), ("D", "other_kind"), (None, "unreadable")):
+        t = QP.inverse_confusion([{"sample_id": "x", "qtype": "action_between", "parsed": chosen}], probe)
+        assert t["turn_left"][kind] == 1
+
+
 def test_format_classes():
     opts = ["to the left", "to the right"]
     assert QP.format_class("B", opts, False) == "exact"

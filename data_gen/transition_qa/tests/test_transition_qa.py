@@ -50,6 +50,20 @@ def test_inverse_options_distinct_correct_and_uniform():
     assert max(abs(s - 0.25) for s in shares) < 0.03
 
 
+def test_inverse_options_are_solvable_from_the_text_alone():
+    """Documents the flaw found on 2026-10-19 (DIAG3_PROBE.md): with distractors (a, k2), (inv a, k), (b, k) the
+    answer is the only option whose action repeats and whose count is the most common.  Change this test with the fix."""
+    from data_gen.transition_qa import shortcuts as SC
+
+    for action in ACTIONS:
+        for k in range(1, 6):
+            for key in ("x", "y", "z"):
+                opts, pos = Q.inverse_options(action, k, key)
+                texts = [f"the camera {Q.action_text(a, j, past=True)}" for a, j in opts]
+                assert [SC.parse_action_option(t) for t in texts] == [(a, j) for a, j in opts]
+                assert SC.inverse_frequency({"options": texts}) == [pos]
+
+
 def test_grid_options_contain_the_value_within_bounds():
     for v in (0.5, 1.0, 2.5, 4.0):
         vals, pos = Q.grid_options(v, 0.5, 0.5, float("inf"), f"k{v}")
