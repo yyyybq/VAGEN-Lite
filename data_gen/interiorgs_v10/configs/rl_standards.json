@@ -1,0 +1,17 @@
+{
+ "_doc": "Named standard RL configurations of InteriorGS v10 (round 12, the user's handover for the experiment matrix): training_prep rl-config --standard NAME, or plan rl.standard in the training chain. Each fixes the options of the recipe; the start model, the rows (reserve train tasks, sft-frames --include-reserve), the depth-check exclusion, the run folders and the seed stay with the run. Every RL experiment is a pair: the S0 and the D configuration of one recipe, same start, tasks, seed and number of updates (decision 2026-10-19, round 12). Template paths are relative to data_gen/interiorgs_v10/.",
+ "_v10_p1": "The optimisation package of round 11 (P-S0 / P-D, interiorgs_v10_train_r11p_20261017): GRPO without a value network, only tasks whose 8 episodes both succeed and fail, 24 candidate tasks per update of which 12 are the nominal batch (dropped tasks refilled from the other 12), lr 2e-6, KL coefficient 0.05, entropy bonus 0.01, one sequence per episode, reserve train tasks, a checkpoint every 50 updates, no validation inside training. Seed of round 11: data.seed 20260930 (the template), rollout seed 0.",
+ "_v10_p2": "Round 12 candidate standard: p1 with 48 candidate tasks per update, so that the 12 trained tasks are filled (p1 kept about 6).",
+ "v10_p1_S0": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+               "opt_package": "p1", "reward_preset": "S0",
+               "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p1_D": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+              "opt_package": "p1", "reward_preset": "dense",
+              "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p2_S0": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+               "opt_package": "p2", "reward_preset": "S0",
+               "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p2_D": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+              "opt_package": "p2", "reward_preset": "dense",
+              "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
+}

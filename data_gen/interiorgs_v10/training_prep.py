@@ -17,6 +17,11 @@ not used.  The conversations are built by ``release.build_sft_record`` (the RL e
     python scripts/prepare_active_spatial_sft.py --trajectory SFT/sft_trajectories.jsonl \\
         --split-manifest SFT/split_manifest.json --task-registry SFT/task_registry.jsonl \\
         --qa-probability 0 --allow-unreviewed-trajectories --model MODEL --out LF
+
+Round 12: ``rl-config --standard NAME`` takes a named standard configuration (configs/rl_standards.json: the
+round-11 optimisation package with the sparse or the dense reward, v10_p1_S0 / v10_p1_D, and the candidate p2 with
+48 candidate tasks per update) with the repository's PPO template (configs/ppo_template_v10.yaml); ``--seed N``
+sets the run's task order and sampling seed (the template's 20260930 and vLLM's 0 otherwise).
 """
 
 from __future__ import annotations
@@ -378,10 +383,46 @@ TASK_POOLS = ("formal", "reserve")  # which train tasks RL takes (round 11: rese
 #   kl_loss_coef 0.05 (0.3 before): the KL penalty held the policy at the start model;
 #   entropy_coeff 0.01 (0.005 before): entropy fell from 0.077 to 0.046 with the old step; the larger step needs
 #       a stronger bonus to keep it above 70% of the start.
+# Round 12, p2 (the candidate standard): p1 with 48 candidates.  With 24, P-S0 / P-D kept about 6 tasks per update
+# (about 4 dropped as all success, 5 as all failure, 3 refilled, 6 short of 12); 48 candidates fill the 12 tasks
+# (at about 25% mixed, 48 x 0.25 = 12) for twice the generation (about 4 minutes per update instead of about 2).
 OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
     "p1": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
            "entropy_coeff": 0.01},
+    "p2": {"rollouts": 8, "candidates": 48, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
+           "entropy_coeff": 0.01},
 }
+
+# Round 12 (the user's handover for the experiment matrix): named standard RL configurations, rl-config --standard
+# NAME.  Each fixes the rl-config options that make the recipe (configs/rl_standards.json); options a standard does
+# not name stay free (model, rows, run folders, seed), and an explicit option that contradicts the standard is
+# refused.  Template paths are relative to this package.
+STANDARDS_FILE = Path(__file__).with_name("configs") / "rl_standards.json"
+STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "opt_package", "reward_preset",
+                 "ppo_template", "env_template")
+
+
+def load_standards(path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
+    """{name: rl-config options} of the named standard configurations (keys starting with "_" are notes)."""
+    data = json.loads(Path(path or STANDARDS_FILE).read_text(encoding="utf-8"))
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
+def apply_standard(args: argparse.Namespace, name: str, standards: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Fill ``args`` with the standard's options; an option given explicitly with another value is refused."""
+    standards = standards if standards is not None else load_standards()
+    if name not in standards:
+        raise SystemExit(f"--standard must be one of {sorted(standards)}, not {name!r}")
+    std = {k: v for k, v in standards[name].items() if k in STANDARD_KEYS}
+    for key, value in std.items():
+        if key in ("ppo_template", "env_template"):
+            value = str((Path(__file__).parent / value).resolve()) if not Path(value).is_absolute() else value
+        current = getattr(args, key, None)
+        if current in (None, False):
+            setattr(args, key, value)
+        elif (str(Path(current).resolve()) if key.endswith("_template") else current) != value:
+            raise SystemExit(f"--standard {name} sets {key} to {value!r}; the command gives {current!r}")
+    return std
 
 
 def package_overrides(name: str, candidates: Optional[int] = None, target_groups: Optional[int] = None,
@@ -461,6 +502,11 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
 
     from .admission import load_policy
 
+    standard = getattr(args, "standard", None)
+    if standard:  # round 12: a named standard configuration fixes the recipe's options
+        apply_standard(args, standard)
+    if not getattr(args, "ppo_template", None):
+        raise SystemExit("rl-config needs --ppo-template (or a --standard that names one)")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     rows = _jsonl(Path(args.rows))
@@ -559,6 +605,9 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     if getattr(args, "no_internal_val", False):
         _set(ppo, "trainer.val_before_train", False)
         _set(ppo, "trainer.test_freq", -1)
+    if getattr(args, "seed", None) is not None:  # round 12: the run's seed, for the task order and the sampling
+        for key in ("data.seed", "actor_rollout_ref.rollout.seed"):
+            _set(ppo, key, int(args.seed))
     package = None
     if getattr(args, "opt_package", None):  # round 11: applied last, over the sizes and the warm-up above
         if not ppo["trainer"].get("concat_multi_turn"):
@@ -580,6 +629,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "reserve_rows_skipped": reserve_skipped,
               "task_pool": pool,
               "opt_package": getattr(args, "opt_package", None), "opt_package_overrides": package,
+              "standard": standard or None, "ppo_template": str(args.ppo_template),
+              # the task order (data.seed) and the sampling (vLLM's seed, 0 when the template leaves it out)
+              "seed": {"data": (ppo.get("data") or {}).get("seed"),
+                       "rollout": ((ppo.get("actor_rollout_ref") or {}).get("rollout") or {}).get("seed", 0)},
               "sft_tasks_checked": len(sft_ids), "sft_overlap": len(overlap),
               "depth_flagged_checked": len(flagged), "depth_flagged_in_train": len(flagged_in_train),
               "train_scenes": len({r["scene_id"] for r in parts["train"]}),
@@ -614,7 +667,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c = sub.add_parser("rl-config")
     c.add_argument("--rows", required=True, help="published rows with split (sft-frames rows.jsonl)")
     c.add_argument("--env-template", default=str(Path(__file__).with_name("configs") / "rl_env_v10_S0.yaml"))
-    c.add_argument("--ppo-template", required=True, help="a complete PPO config (dense-score S0)")
+    c.add_argument("--ppo-template", default=None, help="a complete PPO config (dense-score S0); a --standard names one")
     c.add_argument("--gs-root", required=True, help="scene folders with 3dgs_compressed.ply")
     c.add_argument("--model", required=True)
     c.add_argument("--name", required=True)
@@ -624,13 +677,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="round 10: a tasks.jsonl of published val rows (evaluation.py select --split val) used as the "
                         "validation set instead of --val-limit rows; validated in one batch")
     c.add_argument("--greedy-val", action="store_true", help="validation without sampling: one trajectory per task")
-    c.add_argument("--history-mode", choices=HISTORY_MODES, default="none",
+    c.add_argument("--history-mode", choices=HISTORY_MODES, default=None,
                    help="how the input carries earlier turns: none (rounds 6-9), no_concat (per-turn samples with "
-                        "the full history), concat (one sequence per episode)")
+                        "the full history), concat (one sequence per episode); default none")
     c.add_argument("--test-freq", type=int, default=None, help="validate every N updates (template: 25)")
     c.add_argument("--critic-warmup", type=int, default=None, help="updates that train only the value network")
-    c.add_argument("--reward-preset", choices=REWARD_PRESETS, default="S0",
-                   help="round 11: S0 (sparse) or dense (the dense-score pilot's S5 shaping on top of S0)")
+    c.add_argument("--reward-preset", choices=REWARD_PRESETS, default=None,
+                   help="round 11: S0 (sparse, the default) or dense (the dense-score pilot's S5 shaping on top of S0)")
     c.add_argument("--train-batch-size", type=int, default=None, help="tasks per update (template: 12)")
     c.add_argument("--ppo-mini-batch-size", type=int, default=None, help="tasks per optimizer step (template: 8)")
     c.add_argument("--save-freq", type=int, default=None,
@@ -642,14 +695,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--candidates", type=int, default=None, help="tasks drawn per update (package default)")
     c.add_argument("--target-groups", type=int, default=None, help="tasks trained on per update (package default)")
     c.add_argument("--rollouts", type=int, default=None, help="episodes per task (package default)")
-    c.add_argument("--task-pool", choices=TASK_POOLS, default="formal",
-                   help="round 11: the train tasks RL takes: formal (rounds 6-10) or reserve (rows from sft-frames "
+    c.add_argument("--task-pool", choices=TASK_POOLS, default=None,
+                   help="round 11: the train tasks RL takes: formal (rounds 6-10, the default) or reserve (rows from sft-frames "
                         "--include-reserve; the rule since round 11: RL trains on tasks SFT never trained on)")
     c.add_argument("--sft-trajectories", nargs="*", default=None,
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,
                    help="depth_check_summary.json: no RL train task may be among its flagged tasks")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
+    c.add_argument("--seed", type=int, default=None,
+                   help="round 12: the run's seed (task order data.seed and vLLM sampling seed); the template's otherwise")
+    c.add_argument("--standard", default=None,
+                   help="round 12: a named standard configuration (configs/rl_standards.json) fixing the recipe's options")
     c.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     {"sft-frames": cmd_sft_frames, "sft-records": cmd_sft_records, "rl-config": cmd_rl_config}[args.cmd](args)

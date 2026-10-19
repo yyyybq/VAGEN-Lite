@@ -283,6 +283,71 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(ppo["algorithm"]["adv_estimator"], "gae")
         self.assertIsNone(report["opt_package"])
 
+    def test_rl_config_standards_and_seed(self):
+        """Round 12: named standard configurations (configs/rl_standards.json, the package with S0 and with the dense
+        reward; p2 with 48 candidates) fix the recipe's options and the repository's PPO template; an explicit
+        option against the standard is refused; --seed sets the task order and the sampling seed."""
+        import yaml
+
+        standards = TP.load_standards()
+        self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_S0", "v10_p2_D", "v10_p2_S0"])
+        for name, std in standards.items():
+            self.assertLessEqual(set(std), set(TP.STANDARD_KEYS), name)
+            for key in ("ppo_template", "env_template"):
+                self.assertTrue((Path(TP.__file__).parent / std[key]).is_file(), (name, key))
+            self.assertEqual(std["reward_preset"], "dense" if name.endswith("_D") else "S0")
+        self.assertEqual({**TP.OPT_PACKAGES["p2"], "candidates": 24}, TP.OPT_PACKAGES["p1"])  # p2 = p1 with 48 candidates
+        # the repository template parses to the round-11 template (only a header comment added)
+        repo_template = yaml.safe_load((Path(TP.__file__).with_name("configs") / "ppo_template_v10.yaml").read_text())
+        self.assertEqual((repo_template["data"]["seed"], repo_template["algorithm"]["adv_estimator"]), (20260930, "no_concat_gae"))
+        self.assertNotIn("seed", repo_template["actor_rollout_ref"]["rollout"])
+
+        sft = self.root / "sft_rl_std"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        rows = [json.loads(l) for l in (sft / "rows.jsonl").read_text().splitlines() if l.strip()]
+        for r in rows:  # the train rows become reserve rows (what the standards train on)
+            r["reserve"] = r["split"] == "train"
+        (sft / "rows_reserve.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+        def config(out_name, **kw):
+            args = dict(rows=str(sft / "rows_reserve.jsonl"), gs_root="/ply", model="/m", name="t",
+                        run_root=str(self.root / f"run_{out_name}"), val_limit=1, trial=False, out=str(self.root / out_name))
+            args.update(kw)
+            TP.cmd_rl_config(Namespace(**args))
+            return (yaml.safe_load((self.root / out_name / "ppo.yaml").read_text()),
+                    yaml.safe_load((self.root / out_name / "train_env.yaml").read_text())["envs"][0]["config"],
+                    json.loads((self.root / out_name / "rl_config_report.json").read_text()))
+
+        ppo, env, report = config("rl_std_d", standard="v10_p1_D", seed=7)
+        a = ppo["actor_rollout_ref"]
+        self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["data"]["train_batch_size"], a["rollout"]["n"],
+                          ppo["filter"]["filter_kwargs"]["target_groups"]), ("grpo", 24, 8, 12))
+        self.assertTrue(ppo["trainer"]["concat_multi_turn"])
+        self.assertEqual((ppo["trainer"]["save_freq"], ppo["trainer"]["test_freq"]), (50, -1))
+        self.assertEqual((ppo["data"]["seed"], a["rollout"]["seed"]), (7, 7))
+        self.assertEqual(env["potential_field_reward_scale"], 10.0)  # the dense reward
+        self.assertEqual((report["standard"], report["seed"], report["task_pool"], report["reward_preset"]),
+                         ("v10_p1_D", {"data": 7, "rollout": 7}, "reserve", "dense"))
+        self.assertEqual(report["train"], sum(1 for r in rows if r["reserve"]))
+        self.assertTrue(report["ppo_template"].endswith("ppo_template_v10.yaml"))
+        # no seed: the template's (task order 20260930, sampling 0), as in round 11
+        ppo, env, report = config("rl_std_s0", standard="v10_p2_S0")
+        self.assertEqual(report["seed"], {"data": 20260930, "rollout": 0})
+        self.assertEqual((ppo["data"]["train_batch_size"], ppo["filter"]["filter_kwargs"]["target_groups"]), (48, 12))
+        self.assertFalse(env.get("enable_potential_shaping_reward", False))
+        # an option against the standard is refused; options the standard does not name stay free
+        with self.assertRaises(SystemExit):
+            config("rl_std_bad", standard="v10_p1_S0", reward_preset="dense")
+        with self.assertRaises(SystemExit):
+            config("rl_std_bad2", standard="v10_p1_S0", history_mode="none")
+        with self.assertRaises(SystemExit):
+            config("rl_std_unknown", standard="v10_p9_S0")
+        ppo, _, _ = config("rl_std_same", standard="v10_p1_S0", reward_preset="S0", save_freq=50)  # agreeing: fine
+        self.assertEqual(ppo["data"]["train_batch_size"], 24)
+        with self.assertRaises(SystemExit):  # neither a template nor a standard
+            config("rl_no_template")
+
     def test_rl_config_trains_on_formal_tasks_only(self):
         """Reserve rows (sft-frames --include-reserve) are SFT-only: rl-config leaves them out of train and val."""
         import yaml
