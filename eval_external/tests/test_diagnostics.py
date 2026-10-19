@@ -32,3 +32,20 @@ def test_history_modes():
     s = reorder(earlier, "shuffle", "u")
     assert sorted(s) == sorted(earlier) and s == reorder(earlier, "shuffle", "u")  # same turns, deterministic
     assert any(reorder(earlier, "shuffle", f"u{k}") != earlier for k in range(5))  # actually reordered
+
+
+def test_lenient_rewrite_only_wraps_untagged_answer_lines():
+    from eval_external.diagnostics.ownenv_eval import lenient_rewrite
+
+    reply = "I observe the cabinet ... then move forward about 1.2 meters.\nAnswer: move_forward|move_right|move_forward"
+    assert lenient_rewrite(reply) == "<action>move_forward|move_right|move_forward|</action>"
+    assert lenient_rewrite("Answer: <action>turn_left|</action>") is None   # already tagged: untouched
+    assert lenient_rewrite("I would go forward.") is None                     # no answer line: untouched
+    assert lenient_rewrite("Final answer: turn_left, move_forward.") == "<action>turn_left|move_forward|</action>"
+
+
+def test_queue_lenient_item():
+    from eval_external.sco import queue as Q
+
+    it = Q.item("step2", "SI-7B", "OwnEnv-lenient")
+    assert it.run_dir.name == "SI-7B__lenient" and it.command[-4:] == ["SI-7B__lenient", "SI-7B", "normal", "--lenient"]

@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import json
 import random
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -58,7 +59,22 @@ def reorder(earlier: list, mode: str, user_text: str) -> list:
     return list(earlier)
 
 
-def patched_policy(evaluation, mode: str):
+_ANSWER_LINE = re.compile(r"^\s*(?:final\s+)?answer\s*[:：]\s*(.+?)\s*$", re.I | re.M)
+
+
+def lenient_rewrite(text: str) -> str | None:
+    """Diagnostic only (--lenient): a reply without <action> tags whose last "Answer: a|b|c" line lists actions
+    becomes "<action>a|b|c|</action>"; the env still checks every action name.  None when nothing is rewritten."""
+    if "<action>" in text:
+        return None
+    lines = _ANSWER_LINE.findall(text)
+    if not lines:
+        return None
+    actions = [a for a in re.split(r"[|,;\s]+", lines[-1].strip().strip(".")) if re.fullmatch(r"[a-z_]+", a)]
+    return "<action>" + "|".join(actions) + "|</action>" if actions else None
+
+
+def patched_policy(evaluation, mode: str, lenient_log: Path | None = None):
     base = evaluation.VllmPolicy
 
     class Policy(base):
@@ -72,7 +88,14 @@ def patched_policy(evaluation, mode: str):
                                             evaluation._image_url, as_sft)
             out = self.llm.chat(msgs, sampling_params=params, use_tqdm=False)
             self.last_prompt_tokens = len(out[0].prompt_token_ids)
-            return out[0].outputs[0].text
+            text = out[0].outputs[0].text
+            if lenient_log is not None:
+                fixed = lenient_rewrite(text)
+                with open(lenient_log, "a") as f:
+                    f.write(json.dumps({"original": text, "rewritten": fixed}) + "\n")
+                if fixed is not None:
+                    text = fixed
+            return text
 
     return Policy
 
@@ -100,13 +123,18 @@ def main() -> None:
     ap.add_argument("--model", required=True, help="eval_external model code")
     ap.add_argument("--name", required=True, help="result folder name under the eval copy")
     ap.add_argument("--history-mode", choices=("normal", "shuffle", "drop"), default="normal")
+    ap.add_argument("--lenient", action="store_true",
+                    help="diagnostic: wrap an untagged final 'Answer: a|b' line in <action> tags (logged per call)")
     args = ap.parse_args()
     ev = ensure_eval_copy()
     sys.path.insert(0, str(WORKTREE))
     from data_gen.interiorgs_v10 import evaluation
 
     original_generate = evaluation.VllmPolicy.generate
-    evaluation.VllmPolicy = patched_policy(evaluation, args.history_mode)
+    lenient_log = (ev / args.name / "lenient_rewrites.jsonl") if args.lenient else None
+    if lenient_log is not None:
+        lenient_log.parent.mkdir(parents=True, exist_ok=True)
+    evaluation.VllmPolicy = patched_policy(evaluation, args.history_mode, lenient_log)
     write_manifest(
         ev / args.name, models=[M.describe(args.model)],
         benchmark={"name": "Active Spatial own env, 279 test tasks (round-10 eval_test)", "items_expected": 279,
@@ -115,7 +143,8 @@ def main() -> None:
         backend={"name": "data_gen/interiorgs_v10/evaluation.py run (defaults)",
                  "policy_override": "VllmPolicy.generate with repetition_penalty and history mode",
                  "replaced_generate_of": getattr(original_generate, "__qualname__", None)},
-        prompt={"impl": "the env's own prompt (prompt_format of rl_env_v10_S0.yaml)", "history_mode": args.history_mode},
+        prompt={"impl": "the env's own prompt (prompt_format of rl_env_v10_S0.yaml)", "history_mode": args.history_mode,
+                "lenient_answer_parsing": bool(args.lenient)},
         frames=None, decoding={"temperature": 0.0, "top_p": 1.0, "max_tokens": 384, "stop": ["</action>"],
                                "repetition_penalty": REPETITION_PENALTY})
     view = str(M.view_dir(args.model))

@@ -28,7 +28,8 @@ from eval_external.sco import job as J
 
 RUNS = J.ROOT / "runs"
 QA_RUNS = RUNS / "qa"
-OWNENV_MODES = {"OwnEnv": "normal", "OwnEnv-shuffle": "shuffle", "OwnEnv-drop": "drop"}
+OWNENV_MODES = {"OwnEnv": "normal", "OwnEnv-shuffle": "shuffle", "OwnEnv-drop": "drop",
+                "OwnEnv-lenient": "lenient"}  # lenient: history normal, untagged "Answer:" lines accepted
 
 
 @dataclass
@@ -82,9 +83,10 @@ def item(stage: str, model: str, kind: str) -> Item:
         mode = OWNENV_MODES[kind]
         name = model if mode == "normal" else f"{model}__{mode}"
         rd = RUNS / "ownenv" / "eval_test" / name
-        return Item(rd, f"{stage}-own-{mode}-{model}",
-                    ["bash", "eval_external/diagnostics/ownenv_job.sh", name, model, mode],
-                    lambda: True, _ownenv_collect, also_own=(str(RUNS / "ownenv"),))
+        command = ["bash", "eval_external/diagnostics/ownenv_job.sh", name, model]
+        command += ["normal", "--lenient"] if mode == "lenient" else [mode]
+        return Item(rd, f"{stage}-own-{mode}-{model}", command, lambda: True, _ownenv_collect,
+                    also_own=(str(RUNS / "ownenv"),))
     raise SystemExit(f"unknown kind {kind}")
 
 
