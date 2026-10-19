@@ -6,7 +6,8 @@
 Steps, each started only after the previous one succeeded:
 
 1. ``check_code``  the cluster checkout is the commit named in the plan (every tracked file) with no local
-                   change besides the verl submodule;
+                   change besides the verl submodule (round 12: and documents under docs/, which other sessions
+                   edit in this checkout and training never reads);
 2. ``render``      SFT frames, one sco card (pilot_sco.py), every frame of frames.jsonl present afterwards;
 3. ``sft_data``    conversations (training_prep sft-records; with "scenes_root" a share of them get an inserted
                    blocked turn) and the LLaMA-Factory data and recipe (scripts/prepare_active_spatial_sft.py,
@@ -346,6 +347,19 @@ def job_logs(run_dir: Path, prefix: str, since_utc: Optional[str]) -> List[Path]
     return out
 
 
+def code_changes(porcelain: Sequence[str]) -> Tuple[List[str], List[str]]:
+    """(changes that matter, ignored changes) of ``git status --porcelain`` lines.  Ignored: the verl submodule
+    pointer and, round 12, files under docs/ (other sessions edit their documents in this checkout; training and
+    evaluation never read them)."""
+    changed, ignored = [], []
+    for line in porcelain:
+        path = line[3:].strip().strip('"')
+        if line.strip() == "M verl":
+            continue
+        (ignored if path.startswith("docs/") and " -> " not in path else changed).append(line)
+    return changed, ignored
+
+
 class SignalCheckFailed(Exception):
     """An RL run missed the signal check (plan "rl"."signal_check")."""
 
@@ -530,11 +544,13 @@ class Chain:
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
         if not head.startswith(want) and not want.startswith(head):
             raise ChainError(f"checkout is {head}, the plan names {want}")
-        changed = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT,
-                                 capture_output=True, text=True).stdout.splitlines()
-        changed = [c for c in changed if c.strip() != "M verl"]
+        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT,
+                                capture_output=True, text=True).stdout.splitlines()
+        changed, ignored = code_changes(status)
         if changed:
             raise ChainError(f"tracked files differ from {head[:8]}: {changed[:5]}")
+        if ignored:  # round 12: other sessions' uncommitted documents (training never reads docs/)
+            self.mark("check_code", note=f"uncommitted documents left as they are: {ignored[:5]}")
         from .job_sco import WORKTREE
 
         if Path(WORKTREE).resolve() != ROOT.resolve():

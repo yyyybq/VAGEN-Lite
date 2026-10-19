@@ -807,6 +807,17 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(steps["rl"]["note"], "not planned (eval_only)")
             self.assertTrue(all(steps[s]["state"] == "done" for s in T.STEPS))
 
+    def test_code_changes(self):
+        """Round 12: uncommitted changes under docs/ (another session's documents) do not stop the chain; any other
+        tracked change does; the verl submodule pointer is ignored as before."""
+        changed, ignored = T.code_changes([" M verl", " M docs/interiorgs_qa/audit/site_20261014.sh"])
+        self.assertEqual((changed, ignored), ([], [" M docs/interiorgs_qa/audit/site_20261014.sh"]))
+        changed, _ = T.code_changes([" M data_gen/interiorgs_v10/train_chain.py", "M  docs/x.md",
+                                     "R  docs/a.md -> data_gen/a.py", " D vagen/env.py"])
+        self.assertEqual(changed, [" M data_gen/interiorgs_v10/train_chain.py", "R  docs/a.md -> data_gen/a.py",
+                                   " D vagen/env.py"])
+        self.assertEqual(T.code_changes([]), ([], []))
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)
