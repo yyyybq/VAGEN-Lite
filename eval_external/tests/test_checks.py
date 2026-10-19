@@ -70,6 +70,20 @@ def test_own_pixel_view_keeps_published_limits(tmp_path):
     assert json.loads((view / "config.json").read_text())["dtype"] == "bfloat16"
 
 
+def test_esi_action_rule():
+    from eval_external.closed_loop.esi_format_check import action_ok, classify
+
+    p_obj = 'ACTIONS:\n  pick up <object>\n  place <object> on top of <object>\n  put back <object>\n  move_forward | stop'
+    assert action_ok("turn_left", p_obj) and action_ok("stop", p_obj)
+    assert action_ok("pick up lemon to the left of B", p_obj) and not action_ok("pick up ", p_obj)
+    assert not action_ok("<action>move_forward|</action>", p_obj) and not action_ok("forward", p_obj)
+    p_named = "4. Available pickup actions: pick_up_obj_near_tennis ball, pick_up_obj_near_conch."
+    assert action_ok("pick_up_obj_near_conch", p_named) and not action_ok("pick up conch", p_named)
+    assert classify({"action": "move_left", "answer": "not sure", "confidence": 0.2}, p_obj) == []
+    assert classify({"raw_response": "x", "error": "JSON parse failed", "action": "move_forward"}, p_obj) == [
+        "no_json", "no_answer", "no_confidence"]
+
+
 def test_queue_replace_waits_for_normal_run(tmp_path, monkeypatch):
     from eval_external.sco import queue as Q
 

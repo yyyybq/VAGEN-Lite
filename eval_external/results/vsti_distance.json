@@ -1,0 +1,122 @@
+{
+ "base-7B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 905,
+   "spearman": 0.263,
+   "distinct_values": 7,
+   "top5": [
+    [
+     1.0,
+     393
+    ],
+    [
+     0.5,
+     182
+    ],
+    [
+     2.0,
+     127
+    ],
+    [
+     1.5,
+     90
+    ],
+    [
+     3.0,
+     60
+    ]
+   ],
+   "top5_share": 0.941
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 832,
+   "spearman": 0.246,
+   "distinct_values": 11,
+   "top5": [
+    [
+     10.0,
+     451
+    ],
+    [
+     1.0,
+     235
+    ],
+    [
+     3.0,
+     59
+    ],
+    [
+     0.5,
+     33
+    ],
+    [
+     0.05,
+     26
+    ]
+   ],
+   "top5_share": 0.966
+  }
+ },
+ "ours-SFT": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 881,
+   "spearman": 0.334,
+   "distinct_values": 21,
+   "top5": [
+    [
+     0.5,
+     262
+    ],
+    [
+     0.05,
+     158
+    ],
+    [
+     0.01,
+     154
+    ],
+    [
+     0.15,
+     133
+    ],
+    [
+     0.25,
+     27
+    ]
+   ],
+   "top5_share": 0.833
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 822,
+   "spearman": 0.288,
+   "distinct_values": 37,
+   "top5": [
+    [
+     10.0,
+     369
+    ],
+    [
+     0.03,
+     85
+    ],
+    [
+     0.5,
+     76
+    ],
+    [
+     0.05,
+     67
+    ],
+    [
+     1.52,
+     40
+    ]
+   ],
+   "top5_share": 0.775
+  }
+ }
+}

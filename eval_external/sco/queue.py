@@ -67,7 +67,23 @@ def _require(path: Path) -> None:
         raise FileNotFoundError(f"the job ended without {path}")
 
 
+ESI_MODELS = ["ours-SFT", "ours-RL-150", "ours-SFT-r11", "ours-RL-r11", "ours-RL-r11-dense", "base-7B", "SI-7B"]
+
+
+def _esi_collect(rd: Path) -> None:
+    from eval_external.closed_loop.esi_format_check import cmd_summary
+
+    cmd_summary(None)
+    _require(rd / "summary.json")
+    (rd / "results.json").write_text((rd / "summary.json").read_text())
+
+
 def item(stage: str, model: str, kind: str) -> Item:
+    if kind == "ESIFormatCheck":  # "all:ESIFormatCheck": ESI-Bench first-step format check of ESI_MODELS
+        rd = RUNS / "esi_format_check"
+        return Item(rd, f"{stage}-esi-format",
+                    ["python", "-m", "eval_external.closed_loop.esi_format_check", "run", "--models", *ESI_MODELS],
+                    lambda: (rd / "items.json").exists(), _esi_collect, also_own=(str(rd),))
     if kind in BENCHMARKS:
         rd = run_dir(stage, model, kind)
         return Item(rd, f"{stage}-{kind}-{model}",
