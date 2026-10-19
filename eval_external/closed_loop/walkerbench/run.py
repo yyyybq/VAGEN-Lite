@@ -19,6 +19,13 @@ Changes, all recorded in the manifest:
    switched off.  An unparseable reply becomes the agent's own fallback (turn in place) and is counted.
 4. Temperature: --temperature (default 0, greedy, as in the QA runs); the agent's own default is 0.3.
 The model is served by vLLM on the model's view (closed_loop/vllm_server.py); no external API is called.
+
+Context overflow: the agent keeps every earlier turn, image included (max_history_turns 1000), and asks for
+max_tokens 16384, so a long episode outgrows the model's 128,000-token context and vLLM rejects the call; the
+agent then takes its own fallback (turn in place) for that step and every later one.  Such a step is the model's
+failed step, as it would be with any 128k-context model under these settings: it is tagged in the step log,
+counted (context_overflow_steps / _tasks) and does not make the run invalid.  Any other unanswered call does.
+    python -m eval_external.closed_loop.walkerbench.run --rescore RUN    (runs made before the tag; see rescore)
 """
 
 from __future__ import annotations
@@ -48,7 +55,9 @@ REPO = ROOT / "repos" / "WalkerBench"
 PANORAMAS = ROOT / "data" / "walkerbench_pano" / "panoramas"
 TYPES = ("angle", "dis", "height", "nav", "vis")  # Spatial-Interactor's column order
 UNPARSEABLE_MARKERS = ("Failed to parse response", "Invalid action format", "Unknown command")
-API_FAILED_MARKER = "All API retries failed"  # the model server did not answer: the run is not valid
+API_FAILED_MARKER = "All API retries failed"  # the model server did not answer: the run is not valid ...
+OVERFLOW_MARKERS = ("maximum context length", "longer than the maximum model length")  # ... unless vLLM said this
+OVERFLOW_TAG = "[eval_external: context overflow]"
 COUNTS = defaultdict(int)
 LOCK = threading.Lock()
 
@@ -91,6 +100,28 @@ def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: b
     base_agent = rbp.VLNAgent
 
     class EvalAgent(base_agent):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._overflow = False
+            completions = self.client.chat.completions
+            create = completions.create
+
+            def create_noting_overflow(*a, **k):  # the agent catches the error; keep why the last attempt failed
+                self._overflow = False
+                try:
+                    return create(*a, **k)
+                except Exception as e:
+                    self._overflow = any(m in str(e) for m in OVERFLOW_MARKERS)
+                    raise
+
+            completions.create = create_noting_overflow
+
+        def decide_action(self, observation):
+            action = super().decide_action(observation)
+            if self._overflow and API_FAILED_MARKER in str(action.get("reason")):
+                action["reason"] = f"{action['reason']} {OVERFLOW_TAG}"
+            return action
+
         def get_image_base64(self, image_url):
             if blind or not image_url:
                 with LOCK:
@@ -126,20 +157,49 @@ def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: b
     return tasks
 
 
+def count_steps(logs: list[Path]) -> dict:
+    """Steps of the step logs: all, unparseable, unanswered, unanswered for context overflow (tagged), and the
+    tasks (log names) with an unanswered step."""
+    c = {"steps_logged": 0, "unparseable_steps": 0, "api_failed_steps": 0, "context_overflow_steps": 0}
+    failed_tasks = set()
+    for log in logs:
+        for line in open(log):
+            e = json.loads(line)
+            if e.get("event") != "action":
+                continue
+            reason = str(e.get("reason"))
+            c["steps_logged"] += 1
+            c["unparseable_steps"] += any(m in reason for m in UNPARSEABLE_MARKERS)
+            c["api_failed_steps"] += API_FAILED_MARKER in reason
+            c["context_overflow_steps"] += OVERFLOW_TAG in reason
+            if API_FAILED_MARKER in reason:
+                failed_tasks.add(log.stem)
+    c["api_failed_tasks"] = len(failed_tasks)
+    return c
+
+
+def overflow_from_run_log(run_log: Path) -> dict:
+    """For runs made before the tag: the agent prints every failed attempt with vLLM's message; a step is
+    unanswered when its last attempt (k/k) fails.  Counts those last attempts, and the ones that were overflow."""
+    last = [line for line in open(run_log, errors="replace")
+            if re.search(r"API call failed \(attempt (\d+)/\1\)", line)]
+    return {"last_attempt_failures": len(last),
+            "overflow": sum(any(m in line for m in OVERFLOW_MARKERS) for line in last)}
+
+
+def is_valid(res: dict) -> bool:
+    return bool(res["server_alive_at_end"]) and res["api_failed_steps"] == res["context_overflow_steps"]
+
+
 def score(copy: Path, tasks: list[str]) -> dict:
     ev = load_module("wb_evaluate_all", copy / "scripts" / "evaluate_all.py")
-    per_task, unparseable_steps, api_failed_steps, total_steps = {}, 0, 0, 0
-    for log in sorted((copy / "logs").glob("*.jsonl")):
+    logs = sorted((copy / "logs").glob("*.jsonl"))
+    per_task = {}
+    for log in logs:
         r = ev.evaluate_session(log, copy / "tasks" / "standard")
         if r:
             per_task[r["task_id"]] = r
-        for line in open(log):
-            e = json.loads(line)
-            if e.get("event") == "action":
-                total_steps += 1
-                reason = str(e.get("reason"))
-                unparseable_steps += any(m in reason for m in UNPARSEABLE_MARKERS)
-                api_failed_steps += API_FAILED_MARKER in reason
+    steps = count_steps(logs)
     by_type = defaultdict(list)
     for t in tasks:
         r = per_task.get(t)
@@ -157,23 +217,45 @@ def score(copy: Path, tasks: list[str]) -> dict:
     out["total_sr"] = round(sum(srs) / len(srs), 2)
     out["overall_ci95"] = [round(100 * lo, 1), round(100 * hi, 1)]
     out["mean_steps"] = round(sum(r["steps"] for r in per_task.values()) / max(len(per_task), 1), 2)
-    out["steps_logged"] = total_steps
-    out["unparseable_steps"] = unparseable_steps
-    out["unparseable_pct"] = round(100 * unparseable_steps / max(total_steps, 1), 2)
-    out["api_failed_steps"] = api_failed_steps
+    out.update(steps)
+    out["unparseable_pct"] = round(100 * steps["unparseable_steps"] / max(steps["steps_logged"], 1), 2)
     out["per_task"] = per_task
     return out
 
 
+def rescore(run_dir: Path) -> bool:
+    """A run made before the overflow tag that was judged invalid (results_invalid.json): its unanswered steps
+    count as overflow when run.log shows exactly that many last-attempt failures and every one of them is vLLM's
+    context-length message.  Writes results.json (with "rescored") when the run is then valid."""
+    res = json.loads((run_dir / "results_invalid.json").read_text())
+    steps = count_steps(sorted((run_dir / "WalkerBench" / "logs").glob("*.jsonl")))
+    log = overflow_from_run_log(run_dir / "job" / "run.log")
+    all_overflow = log["last_attempt_failures"] == log["overflow"] == steps["api_failed_steps"]
+    res.update(steps)
+    res["context_overflow_steps"] = steps["api_failed_steps"] if all_overflow else 0
+    res["rescored"] = {"from": "results_invalid.json + job/run.log", "run_log": log, "all_overflow": all_overflow}
+    ok = is_valid(res)
+    if ok:
+        with open(run_dir / "results.json", "w", newline="\n") as f:
+            json.dump(res, f, indent=1, default=str)
+            f.write("\n")
+    return ok
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model", required=True)
+    ap.add_argument("--model")
     ap.add_argument("--run-dir", required=True, type=Path)
     ap.add_argument("--blind", action="store_true", help="send no image (the reference agent's behaviour)")
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--rescore", action="store_true", help="rescore an earlier invalid run (no model, login node)")
     args = ap.parse_args()
     run_dir = args.run_dir.resolve()
+    if args.rescore:
+        raise SystemExit(0 if rescore(run_dir) else f"{run_dir}: still invalid")
+    if not args.model:
+        ap.error("--model is required")
     run_dir.mkdir(parents=True, exist_ok=True)
     copy, diff = make_copy(run_dir)
     write_manifest(
@@ -196,16 +278,17 @@ def main() -> None:
                 "server_alive_at_end": server_alive})
     # A task whose episode raised inside WalkerBench's own loop has no log and scores 0 (score() counts every task):
     # the loop indexes the observation after an action that failed and returned none ("'NoneType' object is not
-    # subscriptable"); res["counts"]["tasks_without_log"] reports how many.  Only a dead or silent model server
-    # makes the run invalid: then no results.json is written, so the queue marks it failed.
-    valid = server_alive and res["api_failed_steps"] == 0
+    # subscriptable"); res["counts"]["tasks_without_log"] reports how many.  Only a dead model server, or a call
+    # left unanswered for any reason but context overflow, makes the run invalid: then no results.json is written,
+    # so the queue marks it failed.
+    valid = is_valid(res)
     with open(run_dir / ("results.json" if valid else "results_invalid.json"), "w", newline="\n") as f:
         json.dump(res, f, indent=1, default=str)
         f.write("\n")
     print(json.dumps({k: v for k, v in res.items() if k != "per_task"}, indent=1))
     if not valid:
         raise SystemExit(f"invalid run: server alive {server_alive}, {res['api_failed_steps']} steps without an "
-                         f"answer from the model")
+                         f"answer from the model, {res['context_overflow_steps']} of them context overflow")
 
 
 if __name__ == "__main__":
