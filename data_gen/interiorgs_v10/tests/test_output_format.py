@@ -50,6 +50,13 @@ class OutputFormatTest(unittest.TestCase):
                 args["output_format"] = fmt
             TP.cmd_rl_config(Namespace(**args))
             cls.out[fmt] = out
+        # matrix group E: the free_think prompt and a 6,144-token answer budget (user, 2026-10-19)
+        out = cls.root / "rl_e"
+        TP.cmd_rl_config(Namespace(rows=str(cls.sft / "rows.jsonl"), env_template=str(cls.env_template),
+                                   ppo_template=str(cls.template), gs_root="/ply", model="/m", name="t",
+                                   run_root=str(cls.root / "run_think_action"), val_limit=1, trial=False, out=str(out),
+                                   history_mode="concat", output_format="think_action", max_response_length=6144))
+        cls.out["e"] = out
 
     @classmethod
     def tearDownClass(cls):
@@ -119,6 +126,33 @@ class OutputFormatTest(unittest.TestCase):
         cut = parse("<think>a long thought that never ends")
         self.assertFalse(cut["format_correct"])
         self.assertEqual(cut["parse_error"], "missing_action_tag")
+        # the share of answers with thinking text (group E): a non-empty think block, closed or cut off
+        self.assertEqual([a["has_think"], t["has_think"], cut["has_think"]], [False, True, True])
+        self.assertFalse(parse("<think> </think><action>turn_left|</action>")["has_think"])
+
+    def test_answer_budget_only_where_asked(self):
+        ppo = {f: yaml.safe_load((self.out[f] / "ppo.yaml").read_text()) for f in ("think_action", "e")}
+        self.assertEqual(ppo["think_action"]["data"]["max_response_length"], TP.CONCAT_RESPONSE_LENGTH)
+        self.assertEqual(ppo["e"]["data"]["max_response_length"], 6144)
+        for p in ppo.values():
+            p["data"].pop("train_files"), p["data"].pop("val_files"), p["data"].pop("max_response_length")
+            for k in ("default_local_dir", "rollout_data_dir", "validation_data_dir"):
+                p["trainer"].pop(k)
+        self.assertEqual(ppo["think_action"], ppo["e"])
+        rep = json.loads((self.out["e"] / "rl_config_report.json").read_text())
+        self.assertEqual(rep["max_response_length"], 6144)
+        with self.assertRaises(SystemExit):  # the budget is the concat mode's one-sequence budget
+            TP.cmd_rl_config(Namespace(rows=str(self.sft / "rows.jsonl"), env_template=str(self.env_template),
+                                       ppo_template=str(self.template), gs_root="/ply", model="/m", name="t",
+                                       run_root=str(self.root / "y"), val_limit=1, trial=False,
+                                       out=str(self.root / "y_out"), history_mode="no_concat", max_response_length=6144))
+
+    def test_agent_loop_counts_turns_with_thinking_text(self):
+        from vagen.agent_loop.gym_agent_loop import turn_has_think
+
+        self.assertTrue(turn_has_think({"metrics": {"turn_metrics": {"has_think": True}}}))
+        self.assertFalse(turn_has_think({"metrics": {"turn_metrics": {"action_is_valid": True}}}))
+        self.assertFalse(turn_has_think(None))
 
 
 if __name__ == "__main__":

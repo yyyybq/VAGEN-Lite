@@ -64,6 +64,12 @@ def turn_invalid(info: Any) -> bool:
     return "action_is_valid" in tm and not bool(tm["action_is_valid"])
 
 
+def turn_has_think(info: Any) -> bool:
+    """Whether the turn's answer had thinking text (the env's turn_metrics.has_think: a non-empty <think> block)."""
+    tm = ((info or {}).get("metrics") or {}).get("turn_metrics") or {} if isinstance(info, dict) else {}
+    return bool(tm.get("has_think", False))
+
+
 class AgentData:
     """Container for all mutable trajectory state."""
     def __init__(
@@ -95,6 +101,7 @@ class AgentData:
         self.traj_success: bool = False
         self.env_turns: int = 0
         self.invalid_turns: int = 0  # turns whose answer the env could not parse (turn_metrics.action_is_valid)
+        self.think_turns: int = 0    # turns whose answer had thinking text (turn_metrics.has_think)
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -309,6 +316,8 @@ class GymAgentLoop(AgentLoopBase):
                     "n_turns":            agent_data.env_turns,
                     # the share of the episode's turns with an unparseable answer (transition/invalid_action_rate)
                     "invalid_action":     agent_data.invalid_turns / max(1, agent_data.env_turns),
+                    # the share of the episode's turns whose answer had thinking text (transition/think_rate)
+                    "think_rate":         agent_data.think_turns / max(1, agent_data.env_turns),
                 },
             },
         )
@@ -407,6 +416,7 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.traj_success = extract_success(info)
         agent_data.env_turns += 1
         agent_data.invalid_turns += int(turn_invalid(info))
+        agent_data.think_turns += int(turn_has_think(info))
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))

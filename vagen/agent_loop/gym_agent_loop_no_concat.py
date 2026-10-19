@@ -489,6 +489,7 @@ class GymAgentLoop(AgentLoopBase):
                 "unknown_action_name":     float(turn_metrics.get("unknown_action_name", 0.0)),
                 "truncated_before_action": float(turn_metrics.get("truncated_before_action", 0.0)),
                 "multiple_action_tag":     float(turn_metrics.get("multiple_action_tag", 0.0)),
+                "think_rate":              float(turn_metrics.get("has_think", 0.0)),
                 "strict_action_tag_rate":  float(turn_metrics.get("strict_action_tag", 0.0)),
                 "tool_call_rate":          float(turn_metrics.get("tool_call", 0.0)),
                 "fallback_parse_rate":     float(turn_metrics.get("fallback_parse", 0.0)),

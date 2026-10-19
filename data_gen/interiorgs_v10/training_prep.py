@@ -590,6 +590,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             _set(ppo, key, value)
     for key, value in history["ppo"].items():
         _set(ppo, key, value)
+    if getattr(args, "max_response_length", None):  # matrix group E (user, 2026-10-19): room for thinking text
+        if not ppo["trainer"].get("concat_multi_turn"):
+            raise SystemExit("--max-response-length is the one-sequence answer budget of --history-mode concat")
+        _set(ppo, "data.max_response_length", int(args.max_response_length))
     # round 10 options: validation on the fixed set without sampling (one greedy trajectory per task, in one
     # batch), its frequency, and the critic warm-up
     if getattr(args, "greedy_val", False):
@@ -631,6 +635,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "model": model, "system_prompt_matches_sft": True, "output_format": output_format,
               "rl_prompt_format": history["env"].get("prompt_format", template["envs"][0]["config"].get("prompt_format")),
               "history_mode": getattr(args, "history_mode", None) or "none", "val_tasks": val_tasks,
+              "max_response_length": (ppo.get("data") or {}).get("max_response_length"),
               "greedy_val": bool(getattr(args, "greedy_val", False)),
               "test_freq": ppo["trainer"].get("test_freq"), "critic_warmup": ppo["trainer"].get("critic_warmup"),
               "reward_preset": getattr(args, "reward_preset", None) or "S0",
@@ -715,6 +720,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--output-format", choices=sorted(OUTPUT_FORMATS), default="action_only",
                    help="action_only: the template's prompt (the SFT one); think_action: the free_think prompt for a "
                         "model trained on actions only (matrix group E); the prompt check still runs on the template")
+    c.add_argument("--max-response-length", type=int, default=None,
+                   help=f"concat history mode: the answer budget of one episode in tokens (default {CONCAT_RESPONSE_LENGTH}); "
+                        "matrix group E uses 6144 for thinking text")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--seed", type=int, default=None,
                    help="round 12: the run's seed, the order of the tasks (data.seed); the template's otherwise")
