@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P1 转移题核对</title>
+<style>
+/* One reading column of question cards under a sticky tally; each card: images, stem, options with the bank's answer,
+   family / qtype, the filter checks, three verdict buttons and a note. Verdicts stay in this browser and export as JSON. */
+:root {
+  --bg: #eef1f4; --surface: #ffffff; --ink: #18212b; --muted: #5a6876; --line: #d5dce3; --accent: #1d5b86;
+  --ok: #1b7348; --ok-bg: #e1f2e8; --bad: #b13a2e; --bad-bg: #f7e3e0; --amb: #8a6400; --amb-bg: #f5ecd3;
+  --chip-bg: #e3e9ef; --new: #6b3fa0; --new-bg: #efe6f8;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12171d; --surface: #1a2129; --ink: #e3e9ef; --muted: #98a6b4; --line: #2c3742; --accent: #7db7e0;
+    --ok: #6fcf9a; --ok-bg: #173627; --bad: #f08a7d; --bad-bg: #3e1f1b; --amb: #e2b95a; --amb-bg: #3a2f14;
+    --chip-bg: #26313c; --new: #c7a6ee; --new-bg: #2e2340; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.6;
+       padding: 0 max(16px, env(safe-area-inset-right, 0px)) 48px max(16px, env(safe-area-inset-left, 0px)); }
+.wrap { max-width: 940px; margin: 0 auto; display: grid; gap: 18px; }
+header.intro { padding-block: 26px 4px; display: grid; gap: 8px; }
+h1 { font-size: 1.55rem; margin: 0; text-wrap: balance; }
+.intro p { margin: 0; color: var(--muted); max-width: 72ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 0.88rem; }
+.swatch { display: inline-block; width: 12px; height: 12px; border: 2px solid; margin-right: 6px; vertical-align: -1px; }
+.tally { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 10px; border-bottom: 1px solid var(--line);
+         display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-variant-numeric: tabular-nums; }
+.tally strong { font-size: 1.1rem; }
+.tally .rate { color: var(--accent); font-weight: 700; }
+.tally .tools { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.tally button, .tally label.btn { font: inherit; font-size: 0.88rem; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--line);
+         background: var(--surface); color: var(--ink); cursor: pointer; }
+.tally button.primary { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.status { font-size: 0.84rem; color: var(--muted); flex-basis: 100%; }
+article.q { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 12px; min-width: 0; }
+article.q[data-verdict="right"] { border-color: var(--ok); }
+article.q[data-verdict="wrong"] { border-color: var(--bad); }
+article.q[data-verdict="ambiguous"] { border-color: var(--amb); }
+.qhead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.qnum { font-weight: 700; font-size: 1.05rem; margin-right: 4px; }
+.chip { background: var(--chip-bg); font-family: var(--font-mono); font-size: 0.78rem; padding: 2px 8px; border-radius: 999px; }
+.chip.cls { font-family: var(--font-body); }
+.chip.new { background: var(--new-bg); color: var(--new); font-family: var(--font-body); }
+.sid { margin-left: auto; color: var(--muted); font-family: var(--font-mono); font-size: 0.75rem; }
+.task { color: var(--muted); font-size: 0.9rem; }
+.task b { color: var(--ink); font-weight: 500; }
+.shots { display: flex; flex-wrap: wrap; gap: 12px; }
+figure { margin: 0; display: grid; gap: 4px; min-width: 0; }
+figure img { width: 280px; max-width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; border: 1px solid var(--line); display: block; }
+figcaption { font-size: 0.82rem; color: var(--muted); }
+figure.ref figcaption { color: var(--accent); }
+.stem { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 0.86rem;
+        background: var(--bg); border-radius: 6px; padding: 10px 12px; }
+ol.opts { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+ol.opts li { font-family: var(--font-mono); font-size: 0.86rem; padding: 4px 10px; border-radius: 6px; border: 1px solid transparent; }
+ol.opts li.correct { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); font-weight: 500; }
+.answer { font-size: 0.95rem; }
+.answer b { color: var(--ok); }
+details.checks summary { cursor: pointer; color: var(--accent); font-size: 0.9rem; font-weight: 500; }
+.tablewrap { overflow-x: auto; min-width: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.83rem; margin-top: 6px; }
+th, td { text-align: left; vertical-align: top; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+td.v { font-family: var(--font-mono); font-size: 0.8rem; white-space: nowrap; }
+td.r { color: var(--muted); }
+td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.verdict { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.verdict button { font: inherit; font-weight: 500; padding: 6px 18px; border-radius: 8px; border: 1px solid var(--line);
+                  background: var(--surface); color: var(--ink); cursor: pointer; min-width: 84px; }
+.verdict button:focus-visible, .verdict input:focus-visible, .tally button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.verdict button[data-v="right"][aria-pressed="true"] { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.verdict button[data-v="wrong"][aria-pressed="true"] { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+.verdict button[data-v="ambiguous"][aria-pressed="true"] { background: var(--amb-bg); border-color: var(--amb); color: var(--amb); }
+.verdict input { flex: 1 1 240px; min-width: 0; font: inherit; font-size: 0.9rem; padding: 6px 10px; border-radius: 8px;
+                 border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+section.funnel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 8px; min-width: 0; }
+section.funnel h2 { font-size: 1.1rem; margin: 0; }
+section.funnel p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="intro">
+    <h1>P1 转移题核对（30 道）</h1>
+    <p>每道题看图判断题库的正确答案对不对：点"对 / 错 / 有歧义"，有疑问写一句备注。选择存在这个浏览器里（换浏览器或清缓存会丢），核完点"导出 JSON"把结果文件发回来。</p>
+    <p>前向题另附"动作之后"的画面，只供核对，模型看不到；逆向题的两张图依次是动作前、动作后。标"补入"的题替换了旧核对页里被重建题库抽掉的题（同题类、同划分）。每题下面的"过滤检查"是这道题经过的每一道过滤：测得的值和规则。</p>
+    <div class="legend">
+      <span><span class="swatch" style="border-color:#ff0000"></span>红框 A：任务里的第一个物体</span>
+      <span><span class="swatch" style="border-color:#0000ff"></span>蓝框 B：第二个物体（遮挡题里 A 是要藏的目标，B 是遮挡物）</span>
+    </div>
+  </header>
+  <div class="tally" id="tally" aria-live="polite"></div>
+  <main id="list" class="wrap"></main>
+  <section class="funnel">
+    <h2>没出的候选题：原因和数量</h2>
+    <p>题库全部候选题（train 和 val 场景），按题类分。"出题"是通过了候选阶段过滤的数量；"平衡等去掉"只算 train，是答案平衡和前向题上限去掉的数量，之后还有三类题的上限和抽样。前向题的候选动作被碰撞规则挡住的单列一行。</p>
+    <div class="tablewrap"><table id="funnel-table"></table></div>
+  </section>
+  <section class="funnel" id="fallback-box" hidden>
+    <h2>导出的 JSON</h2>
+    <p>浏览器没有下载文件时，全选下面的文字复制出来。</p>
+    <textarea id="fallback" readonly></textarea>
+  </section>
+</div>
+<script type="application/json" id="review-data">__REVIEW_DATA__</script>
+<script type="application/json" id="funnel-data">__FUNNEL_DATA__</script>
+<script type="application/json" id="meta-data">__META__</script>
+<script>
+(function () {
+  const ITEMS = JSON.parse(document.getElementById("review-data").textContent);
+  const FUNNEL = JSON.parse(document.getElementById("funnel-data").textContent);
+  const META = JSON.parse(document.getElementById("meta-data").textContent);
+  const KEY = "p1_review:" + META.bank + ":" + META.page;
+  const CLASS_ZH = { state: "状态题", forward: "前向题", inverse: "逆向题" };
+  const ROLE_ZH = { terminal: "轨迹终点", start: "起点", middle: "中间帧", interior: "目标区域内部（另渲染）" };
+  const LABEL = { right: "对", wrong: "错", ambiguous: "有歧义" };
+  const REASON_ZH = {
+    near_boundary: "离判定阈值太近", near_boundary_yes: "在成功边界上（答是）", near_boundary_no: "在成功边界上（答否）",
+    not_visible: "被问物体看不清", not_visible_now: "当前画面里被问物体看不清", behind_camera: "在相机后方",
+    out_of_frame: "动作后出画", beyond_45deg: "夹角超过 45°（是前后关系）", below_options: "低于最小选项", above_options: "高于最大选项",
+    cut_off_vertically: "上下被截", occluder_not_visible: "遮挡物看不清", occluder_out_of_view: "动作后遮挡物不在视野",
+    target_behind_camera: "目标在相机后方", target_out_of_frame: "目标出画", target_not_visible: "目标看不清",
+    blocked_turn: "被挡住的回合", mixed_actions: "回合里有几种动作", pose_mismatch: "位姿复核不符", blocked_move: "动作被碰撞规则挡住"
+  };
+  const DROP_ZH = { answer_balance: "答案平衡", unchanged: "没变化上限", flip_band: "翻转比例" };
+  let verdicts = {};
+  let status = "";
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const idOf = (n) => "q" + String(n).padStart(2, "0");
+
+  function load() { try { verdicts = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { verdicts = {}; status = "这个浏览器不能保存选择：核完请马上导出。"; } }
+  function persist() { try { localStorage.setItem(KEY, JSON.stringify(verdicts)); } catch (e) { status = "这个浏览器不能保存选择：核完请马上导出。"; } }
+
+  function exportData() {
+    const counts = { right: 0, wrong: 0, ambiguous: 0, unchecked: 0 };
+    const rows = ITEMS.map((it) => {
+      const v = verdicts[idOf(it.n)] || {};
+      counts[v.verdict || "unchecked"] += 1;
+      return { n: it.n, sample_id: it.sample_id, qtype: it.qtype, family: it.family, split: it.split, origin: it.origin || "kept",
+               answer: it.answer, verdict: v.verdict || null, note: v.note || "" };
+    });
+    return { page: META.page, bank: META.bank, exported_utc: new Date().toISOString(), counts: counts, verdicts: rows };
+  }
+
+  function doExport() {
+    const text = JSON.stringify(exportData(), null, 1);
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = "p1_review_verdicts.json"; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      status = "已导出 p1_review_verdicts.json（如果没看到下载，用页面最后的文字框）。";
+    } catch (e) { status = "下载被浏览器拦下了，用页面最后的文字框复制。"; }
+    const box = document.getElementById("fallback-box");
+    box.hidden = false; document.getElementById("fallback").value = text;
+    renderTally();
+  }
+
+  function doImport(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        (data.verdicts || []).forEach((r) => { if (r.verdict || r.note) verdicts[idOf(r.n)] = { verdict: r.verdict || null, note: r.note || "" }; });
+        persist(); ITEMS.forEach(paint); status = "已导入。"; renderTally();
+      } catch (e) { status = "导入失败：不是导出的 JSON。"; renderTally(); }
+    };
+    reader.readAsText(file);
+  }
+
+  function renderTally() {
+    const t = document.getElementById("tally");
+    t.textContent = "";
+    const c = { right: 0, wrong: 0, ambiguous: 0 };
+    Object.values(verdicts).forEach((v) => { if (c[v.verdict] != null) c[v.verdict] += 1; });
+    const done = c.right + c.wrong + c.ambiguous, judged = c.right + c.wrong;
+    const add = (label, value) => { const s = el("span"); s.append(label + " "); s.append(el("strong", null, String(value))); t.append(s); };
+    add("已核", done + " / " + ITEMS.length); add("对", c.right); add("错", c.wrong); add("有歧义", c.ambiguous);
+    t.append(el("span", "rate", judged ? "通过率 " + (100 * c.right / judged).toFixed(1) + "%（不计有歧义）" : "通过率 –"));
+    const tools = el("span", "tools");
+    const exp = el("button", "primary", "导出 JSON"); exp.type = "button"; exp.addEventListener("click", doExport); tools.append(exp);
+    const imp = el("label", "btn", "导入 JSON"); const inp = el("input"); inp.type = "file"; inp.accept = "application/json,.json"; inp.hidden = true;
+    inp.addEventListener("change", () => { if (inp.files[0]) doImport(inp.files[0]); }); imp.append(inp); tools.append(imp);
+    t.append(tools);
+    if (status) t.append(el("span", "status", status));
+  }
+
+  function card(it) {
+    const id = idOf(it.n);
+    const c = el("article", "q"); c.id = id;
+    const head = el("div", "qhead");
+    head.append(el("span", "qnum", "第 " + it.n + " 题"));
+    head.append(el("span", "chip cls", CLASS_ZH[it.qclass] || it.qclass));
+    head.append(el("span", "chip", it.qtype));
+    head.append(el("span", "chip", it.family));
+    head.append(el("span", "chip cls", (it.split === "train" ? "训练场景" : "val 场景") + "，" + (ROLE_ZH[it.state_role] || it.state_role)));
+    if (it.origin === "replacement") head.append(el("span", "chip new", "补入"));
+    head.append(el("span", "sid", it.sample_id));
+    c.append(head);
+    const task = el("div", "task");
+    task.append("任务："); task.append(el("b", null, it.task_description || "–"));
+    Object.entries(it.objects || {}).forEach(([slot, ref]) => { task.append("　" + (slot === "A" ? "红框 A：" : "蓝框 B：")); task.append(el("b", null, ref || "–")); });
+    c.append(task);
+    const shots = el("div", "shots");
+    const caps = it.images.length === 2 ? ["动作前（模型看到）", "动作后（模型看到）"] : ["当前画面（模型看到）"];
+    it.images.forEach((src, i) => { const f = el("figure"); const im = el("img"); im.src = src; im.alt = caps[i]; im.width = 256; im.height = 256; f.append(im); f.append(el("figcaption", null, caps[i])); shots.append(f); });
+    if (it.post_image) { const f = el("figure", "ref"); const im = el("img"); im.src = it.post_image; im.alt = "动作之后"; im.width = 256; im.height = 256; f.append(im); f.append(el("figcaption", null, "动作之后（只供核对，模型看不到）")); shots.append(f); }
+    c.append(shots);
+    const stem = it.question.split("\n(A) ")[0].replace(/^(First image: <image>\nSecond image: <image>\n|<image>\n)/, "");
+    c.append(el("pre", "stem", stem));
+    const letter = "ABCD".indexOf(it.answer);
+    if (it.options && it.options.length) {
+      const ol = el("ol", "opts");
+      it.options.forEach((o, i) => { const li = el("li", i === letter ? "correct" : null, "(" + "ABCD"[i] + ") " + o + (i === letter ? "　← 题库答案" : "")); ol.append(li); });
+      c.append(ol);
+    } else {
+      const a = el("div", "answer"); a.append("题库答案："); a.append(el("b", null, it.answer)); c.append(a);
+    }
+    if (it.checks && it.checks.length) {
+      const det = el("details", "checks"); det.open = true;
+      det.append(el("summary", null, "过滤检查（" + it.checks.length + " 项）"));
+      const w = el("div", "tablewrap"); const tb = el("table");
+      const hr = el("tr"); ["检查", "这道题", "规则"].forEach((h) => hr.append(el("th", null, h))); tb.append(hr);
+      it.checks.forEach((k) => { const tr = el("tr"); tr.append(el("td", null, k.check)); tr.append(el("td", "v", k.value)); tr.append(el("td", "r", k.rule)); tb.append(tr); });
+      w.append(tb); det.append(w); c.append(det);
+    }
+    const row = el("div", "verdict");
+    ["right", "wrong", "ambiguous"].forEach((v) => {
+      const b = el("button", null, LABEL[v]); b.type = "button"; b.dataset.v = v; b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict === v ? null : v, note: cur.note || "" }; persist(); paint(it); renderTally(); });
+      row.append(b);
+    });
+    const note = el("input"); note.type = "text"; note.placeholder = "备注（可选）：哪里不对、哪里有歧义";
+    note.addEventListener("input", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict || null, note: note.value }; persist(); });
+    row.append(note);
+    c.append(row);
+    return c;
+  }
+
+  function paint(it) {
+    const c = document.getElementById(idOf(it.n)); if (!c) return;
+    const v = verdicts[idOf(it.n)] || {};
+    if (v.verdict) c.dataset.verdict = v.verdict; else delete c.dataset.verdict;
+    c.querySelectorAll(".verdict button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v.verdict)));
+    const note = c.querySelector(".verdict input"); if (note && document.activeElement !== note) note.value = v.note || "";
+  }
+
+  function funnel() {
+    const t = document.getElementById("funnel-table");
+    const hr = el("tr"); [["题类", ""], ["出题", "n"], ["没出：原因（候选数）", ""], ["平衡等去掉（train）", ""]].forEach(([h, k]) => hr.append(el("th", k || null, h))); t.append(hr);
+    const fmt = (n) => Number(n).toLocaleString("en-US");
+    FUNNEL.forEach((r) => {
+      const tr = el("tr");
+      tr.append(el("td", null, r.qtype === "forward" ? "前向题（全部）" : r.qtype));
+      tr.append(el("td", "n", r.qtype === "forward" ? "–" : fmt(r.emitted)));
+      tr.append(el("td", null, Object.entries(r.reasons).sort((a, b) => b[1] - a[1]).map(([k, n]) => (REASON_ZH[k] || k) + " " + fmt(n)).join("；") || "–"));
+      tr.append(el("td", null, Object.entries(r.dropped || {}).filter(([, n]) => n).map(([k, n]) => (DROP_ZH[k] || k) + " " + fmt(n)).join("；") || "–"));
+      t.append(tr);
+    });
+  }
+
+  load();
+  const list = document.getElementById("list");
+  ITEMS.forEach((it) => list.append(card(it)));
+  ITEMS.forEach(paint);
+  funnel();
+  renderTally();
+})();
+</script>
+</body>
+</html>

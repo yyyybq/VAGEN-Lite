@@ -1,8 +1,9 @@
 """Spot check of the built bank (step 2 acceptance: the user checks 30 random questions).
 
     python -m data_gen.transition_qa.review sample --sft-dir SFT --out OUT [--n 30]
+    python -m data_gen.transition_qa.review refill --sft-dir SFT --old OLD_OUT --out OUT   # the same check, rebuilt bank
     python data_gen/interiorgs_v10/pilot_sco.py prepare --pilot OUT/review --gs-root PLY   # then submit
-    python -m data_gen.transition_qa.review page --out OUT
+    python -m data_gen.transition_qa.review page --out OUT [--html OUT/review/p1_review.html]
 
 ``sample`` draws the questions (2 per question type from the training and test files, then random ones),
 draws the task's objects on copies of their images (A red, B blue: ``admission.overlay_boxes``,
@@ -36,11 +37,6 @@ def _image_pose(path: str, frames: Dict[str, Dict[str, Any]], interior: Dict[str
 
 
 def cmd_sample(args: argparse.Namespace) -> None:
-    from PIL import Image
-
-    from data_gen.interiorgs_v10.admission import overlay_boxes
-    from data_gen.interiorgs_v10.pilot import draw_overlay
-
     sft, out = Path(args.sft_dir), Path(args.out)
     d = out / "review"
     (d / "img").mkdir(parents=True, exist_ok=True)
@@ -62,32 +58,107 @@ def cmd_sample(args: argparse.Namespace) -> None:
     rng.shuffle(picks)
     render, sample = [], []
     for i, r in enumerate(picks, 1):
-        row = rows[r["task_id"]]
-        boxed = []
-        for j, path in enumerate(r["images"]):
-            f = _image_pose(path, frames, interior)
-            img = draw_overlay(Image.open(path), overlay_boxes(row, np.asarray(f["c2w"], float)))
-            name = f"q{i:02d}_{j}.png"
-            img.save(d / "img" / name)
-            boxed.append(name)
-        post = None
-        if r["qclass"] == "forward":
-            f = _image_pose(r["images"][0], frames, interior)
-            pose = G.repeated_action_pose(np.asarray(f["c2w"], float), r["action"], int(r["k"]))
-            post = f"q{i:02d}_post"
-            render.append({"frame_id": post, "kind": "transition_qa_review", "task_id": r["task_id"],
-                           "scene_id": r["scene"], "state_id": "post", "c2w": pose.tolist(),
-                           "camera_item": f["camera_item"], "overlay": overlay_boxes(row, pose)})
-        sample.append({"n": i, "sample_id": r["sample_id"], "qtype": r["qtype"], "qclass": r["qclass"],
-                       "family": r["family"], "split": r["split"], "task_id": r["task_id"],
-                       "task_description": row["task_description"], "question": r["messages"][0]["content"],
-                       "answer": r["messages"][1]["content"], "options": r["options"], "boxed": boxed,
-                       "post_frame": post, "originals": r["images"],
-                       "objects": {s: e.get("ref") for s, e in zip("AB", row["target_object"]["objects"])}})
+        entry, post = _review_entry(i, r, rows[r["task_id"]], frames, interior, d)
+        sample.append(entry)
+        if post:
+            render.append(post)
     GEN.write_jsonl(d / "sample.jsonl", sample)
     GEN.write_jsonl(d / "frames.jsonl", render)
     print(json.dumps({"questions": len(sample), "post_frames": len(render),
                       "by_qtype": collections.Counter(s["qtype"] for s in sample)}, indent=1))
+
+
+def _review_entry(i: int, r: Dict[str, Any], row: Dict[str, Any], frames: Dict[str, Dict[str, Any]],
+                  interior: Dict[str, Dict[str, Any]], d: Path) -> Any:
+    """(sample entry, frame to render or None) of question ``i``: the task's objects boxed on copies of the
+    question's images (A red, B blue) and, for a forward question, the view after the action."""
+    from PIL import Image
+
+    from data_gen.interiorgs_v10.admission import overlay_boxes
+    from data_gen.interiorgs_v10.pilot import draw_overlay
+
+    boxed = []
+    for j, path in enumerate(r["images"]):
+        f = _image_pose(path, frames, interior)
+        img = draw_overlay(Image.open(path), overlay_boxes(row, np.asarray(f["c2w"], float)))
+        name = f"q{i:02d}_{j}.png"
+        img.save(d / "img" / name)
+        boxed.append(name)
+    post, render = None, None
+    if r["qclass"] == "forward":
+        f = _image_pose(r["images"][0], frames, interior)
+        pose = G.repeated_action_pose(np.asarray(f["c2w"], float), r["action"], int(r["k"]))
+        post = f"q{i:02d}_post"
+        render = {"frame_id": post, "kind": "transition_qa_review", "task_id": r["task_id"],
+                  "scene_id": r["scene"], "state_id": "post", "c2w": pose.tolist(),
+                  "camera_item": f["camera_item"], "overlay": overlay_boxes(row, pose)}
+    entry = {"n": i, "sample_id": r["sample_id"], "qtype": r["qtype"], "qclass": r["qclass"],
+             "family": r["family"], "split": r["split"], "task_id": r["task_id"],
+             "task_description": row["task_description"], "question": r["messages"][0]["content"],
+             "answer": r["messages"][1]["content"], "options": r["options"], "boxed": boxed,
+             "post_frame": post, "originals": r["images"],
+             "objects": {s: e.get("ref") for s, e in zip("AB", row["target_object"]["objects"])}}
+    return entry, render
+
+
+def cmd_refill(args: argparse.Namespace) -> None:
+    """The questions of an earlier check (``--old`` OUT) in a rebuilt bank (``--out``): a question the new bank still
+    has is taken as the new bank writes it (its letters may have moved); one it dropped is replaced by a random
+    question of the same type and split that the check does not hold yet (another task where possible).  The views
+    after the action of kept forward questions are copied from the old check; the others are listed for rendering."""
+    import shutil
+
+    from data_gen.interiorgs_v10.pilot import safe_name
+
+    sft, out, old = Path(args.sft_dir), Path(args.out), Path(args.old)
+    d = out / "review"
+    (d / "img").mkdir(parents=True, exist_ok=True)
+    (d / "frames" / "boxes").mkdir(parents=True, exist_ok=True)
+    rows = {r["task_id"]: r for r in GEN.read_jsonl(sft / "rows.jsonl")}
+    frames = {f["frame_id"]: f for f in GEN.read_jsonl(sft / "frames.jsonl")}
+    for extra in sorted(out.glob("extra_*")):  # tasks without SFT conversations (generate raw --tag)
+        rows.update({r["task_id"]: r for r in GEN.read_jsonl(extra / "rows.jsonl")})
+        frames.update({f["frame_id"]: f for f in GEN.read_jsonl(extra / "frames.jsonl")})
+    interior = {}
+    for base in (out, old):
+        p = base / "interior" / "frames.jsonl"
+        if p.exists():
+            interior.update({f["frame_id"]: f for f in GEN.read_jsonl(p)})
+    bank: Dict[str, Dict[str, Any]] = {}
+    for name in ("p1_train.jsonl", "p1_test.jsonl"):
+        bank.update({r["sample_id"]: r for r in GEN.read_jsonl(out / name)})
+    by_type: Dict[Any, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for r in sorted(bank.values(), key=lambda r: r["sample_id"]):
+        by_type[(r["qtype"], r["split"])].append(r)
+    previous = GEN.read_jsonl(old / "review" / "sample.jsonl")
+    rng = random.Random(args.seed)
+    held = {s["sample_id"] for s in previous if s["sample_id"] in bank}
+    tasks = {bank[s]["task_id"] for s in held}
+    sample, render, report = [], [], []
+    for s in sorted(previous, key=lambda s: s["n"]):
+        if s["sample_id"] in bank:
+            r, origin = bank[s["sample_id"]], "kept"
+        else:
+            pool = [r for r in by_type[(s["qtype"], s["split"])] if r["sample_id"] not in held]
+            fresh = [r for r in pool if r["task_id"] not in tasks] or pool
+            r, origin = rng.choice(fresh), "replacement"
+            held.add(r["sample_id"])
+            tasks.add(r["task_id"])
+        entry, post = _review_entry(s["n"], r, rows[r["task_id"]], frames, interior, d)
+        entry.update(origin=origin, replaced=None if origin == "kept" else s["sample_id"])
+        if post:
+            old_post = old / "review" / "frames" / "boxes" / safe_name(post["frame_id"])
+            if origin == "kept" and old_post.is_file():
+                shutil.copyfile(old_post, d / "frames" / "boxes" / old_post.name)
+            else:
+                render.append(post)
+        sample.append(entry)
+        report.append({"n": s["n"], "qtype": s["qtype"], "origin": origin, "sample_id": r["sample_id"],
+                       "old_sample_id": s["sample_id"]})
+    GEN.write_jsonl(d / "sample.jsonl", sample)
+    GEN.write_jsonl(d / "frames.jsonl", render)
+    print(json.dumps({"questions": len(sample), "kept": sum(x["origin"] == "kept" for x in report),
+                      "replaced": [x for x in report if x["origin"] != "kept"], "to_render": len(render)}, indent=1))
 
 
 # =============================================================================
@@ -217,8 +288,23 @@ def cmd_page(args: argparse.Namespace) -> None:
         items.append(s)
     (d / "review_data.json").write_text(json.dumps(items, ensure_ascii=False))
     stats = json.loads((out / "stats.json").read_text())
-    (d / "funnel_data.json").write_text(json.dumps(funnel_table(stats), ensure_ascii=False))
-    print(json.dumps({"items": len(items), "bytes": (d / "review_data.json").stat().st_size}))
+    funnel = funnel_table(stats)
+    (d / "funnel_data.json").write_text(json.dumps(funnel, ensure_ascii=False))
+    info = {"items": len(items), "bytes": (d / "review_data.json").stat().st_size}
+    if args.html:  # one self-contained file: images inline, verdicts kept in the browser and exported as JSON
+        def blob(x: Any) -> str:
+            return json.dumps(x, ensure_ascii=False).replace("</", "<\\/")
+
+        meta = {"bank": str(out.resolve()), "page": Path(args.html).name, "questions": len(items)}
+        page = TEMPLATE.read_text(encoding="utf-8")
+        page = page.replace("__REVIEW_DATA__", blob(items)).replace("__FUNNEL_DATA__", blob(funnel))
+        page = page.replace("__META__", blob(meta))
+        Path(args.html).write_text(page, encoding="utf-8", newline="\n")
+        info["html"] = str(Path(args.html).resolve())
+    print(json.dumps(info))
+
+
+TEMPLATE = Path(__file__).with_name("review_page.html")
 
 
 def main() -> None:
@@ -230,8 +316,15 @@ def main() -> None:
     a.add_argument("--n", type=int, default=30)
     a.add_argument("--seed", type=int, default=20261018)
     a.set_defaults(func=cmd_sample)
+    f = sub.add_parser("refill")
+    f.add_argument("--sft-dir", required=True)
+    f.add_argument("--old", required=True, help="the bank folder of the earlier check (its review/sample.jsonl)")
+    f.add_argument("--out", required=True, help="the rebuilt bank")
+    f.add_argument("--seed", type=int, default=20261020)
+    f.set_defaults(func=cmd_refill)
     b = sub.add_parser("page")
     b.add_argument("--out", required=True)
+    b.add_argument("--html", default="", help="also write the self-contained check page here")
     b.set_defaults(func=cmd_page)
     args = ap.parse_args()
     args.func(args)
