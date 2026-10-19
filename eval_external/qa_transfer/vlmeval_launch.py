@@ -62,6 +62,9 @@ class Qwen2VLChatSDPA(Qwen2VLChat):
 vlmeval.vlm.Qwen2VLChatSDPA = Qwen2VLChatSDPA
 
 if __name__ == "__main__":
+    from eval_external.qa_transfer import pixel_log
+
+    pixel_log.install()  # only when EE_PIXEL_LOG is set (run_qa sets it)
     sys.argv = [str(VLMEVAL_RUN)] + sys.argv[1:]
     sys.path.insert(0, str(VLMEVAL_RUN.parent))
     runpy.run_path(str(VLMEVAL_RUN), run_name="__main__")

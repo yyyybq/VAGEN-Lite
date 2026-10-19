@@ -31,6 +31,12 @@ models:
     {source: local, path: interiorgs_v10_train_r11p_20261017/rl_run_ps0/checkpoints/global_step_300/actor/huggingface,
      family: qwen2_5_vl, params: 7B,
      note: "round 11 RL, optimisation package p1, sparse reward (P-S0), update 300, stored in float32 (val 48.7%, test 43.4%)"}
+  # round 11 dense reward (added 2026-10-19 for the history diagnostics, paired with ours-RL-r11 = P-S0: same start,
+  # same tasks, same seed, same number of updates)
+  ours-RL-r11-dense:
+    {source: local, path: interiorgs_v10_train_r11p_20261017/rl_run_pd/checkpoints/global_step_300/actor/huggingface,
+     family: qwen2_5_vl, params: 7B,
+     note: "round 11 RL, optimisation package p1, dense reward (P-D), update 300, stored in float32 (test 45.2%)"}
   SI-7B:          {source: asset, asset: SI-7B, family: qwen2_5_vl, params: 7B}
   SI-3B:          {source: asset, asset: SI-3B, family: qwen2_5_vl, params: 3B}
   SpaceR-7B:      {source: asset, asset: SpaceR-7B, family: qwen2_5_vl, params: 7B}
@@ -38,3 +44,8 @@ models:
   ViLASR-7B:      {source: asset, asset: ViLASR-7B, family: qwen2_5_vl, params: 7B}
   VST-7B-RL:      {source: asset, asset: VST-7B-RL, family: qwen2_5_vl, params: 7B}
   SenseNovaSI-7B: {source: asset, asset: SenseNovaSI-7B, family: qwen2_5_vl, params: 7B}
+  # the same weights with the pixel limits their authors published (VSI-Bench only; decided 2026-10-19); every other
+  # view change (bfloat16, processor class name) as in the plain codes
+  SpaceR-7B-ownpx:      {source: asset, asset: SpaceR-7B, family: qwen2_5_vl, params: 7B, pixels: own}
+  VideoR1-7B-ownpx:     {source: asset, asset: VideoR1-7B, family: qwen2_5_vl, params: 7B, pixels: own}
+  SenseNovaSI-7B-ownpx: {source: asset, asset: SenseNovaSI-7B, family: qwen2_5_vl, params: 7B, pixels: own}

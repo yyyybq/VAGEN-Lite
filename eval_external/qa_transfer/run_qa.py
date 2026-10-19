@@ -47,7 +47,7 @@ def run_vlmevalkit(code: str, bench: dict, run_dir: Path) -> list[str]:
 
 def run_lmms_eval(code: str, bench: dict, run_dir: Path) -> list[str]:
     args = {"pretrained": str(M.view_dir(code)), **LMMS_QWEN25VL_ARGS}
-    return [sys.executable, "-m", "lmms_eval", "--model", "qwen2_5_vl", "--model_args",
+    return [sys.executable, "-m", "eval_external.qa_transfer.lmms_launch", "--model", "qwen2_5_vl", "--model_args",
             ",".join(f"{k}={v}" for k, v in args.items()), "--tasks", bench["task"], "--batch_size", "1",
             "--include_path", str(LMMS_INCLUDE), "--log_samples", "--output_path", str(run_dir / "lmms")]
 
@@ -85,6 +85,8 @@ def main() -> None:
                    decoding=decoding)
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(p for p in (str(WORKTREE), env.get("PYTHONPATH")) if p)
+    env["EE_PIXEL_LOG"] = str(run_dir / "input_pixels.jsonl")  # every processor call's image / video grids
+    (run_dir / "input_pixels.jsonl").unlink(missing_ok=True)
     rc = subprocess.run(cmd, cwd=str(VLMEVAL_DIR if bench["backend"] == "vlmevalkit" else LMMS_DIR),
                         env=env).returncode
     files = sorted(str(p.relative_to(run_dir)) for p in run_dir.rglob("*") if p.is_file())

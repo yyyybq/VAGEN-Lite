@@ -10,12 +10,18 @@ results.json holds:
   n_correct, ci95  for accuracy-type benchmarks: items scored right and the Wilson 95% interval of overall
                    (for mixed accuracy/MRA benchmarks the interval treats the mean item score as a proportion)
   n_unparseable    answers that name no usable option / number by parse_check's rule (same rule for all models)
+  checks           predictions written vs items of the benchmark (must be equal), whether the backend logged a
+                   skipped model x dataset combination (must not), run time vs base-7B's run of the same
+                   benchmark (under SHORT_RUN_FRACTION of it is flagged "short_run", not failed)
+  input_pixels     what the model saw, from the processor log (pixel_log.py), for runs made since 2026-10-19
   manifest         the run's manifest.json (model, hashes, prompt, frames, decoding)
+A run whose checks fail raises CheckFailed: no results.json is written and the queue marks it collect_failed.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime
 import glob
 import json
 import math
@@ -24,8 +30,17 @@ from collections import defaultdict
 from pathlib import Path
 
 from eval_external.common.stats import wilson
+from eval_external.qa_transfer import pixel_log
 from eval_external.qa_transfer.benchmarks import BENCHMARKS
 from eval_external.qa_transfer.parse_check import mcq_letter, number
+
+QA_RUNS = Path("/mnt/umm/users/yinbaiqiao/eval_external_assets/runs/qa")
+SHORT_RUN_FRACTION = 0.3  # a backend that skips a dataset finishes in minutes; a real run takes hours
+SKIP_MARKERS = ("combination failed",)  # VLMEvalKit: "Model X x Dataset Y combination failed: ..., skipping"
+
+
+class CheckFailed(RuntimeError):
+    pass
 
 
 # VSTI-Bench's five categories as VLM-3R reports them (its Table 2: Cam-Obj Abs. Dist., Cam. Displace., Cam. Mov.
@@ -101,7 +116,7 @@ def collect_lmms(run_dir: Path, bench: dict) -> dict:
             is_mcq = bool(opts) and str(opts) not in ("None", "[]", "nan")
             n_opt = len(opts) if isinstance(opts, list) else (str(opts).count("'") // 2 if is_mcq else 0)
             unparse += not _usable(str(doc.get("prediction", "")), is_mcq, max(n_opt, 2))
-    out = {"overall": overall, "scores": scores, "unparseable": unparse,
+    out = {"overall": overall, "scores": scores, "unparseable": unparse, "n_predictions": len(rows),
            "subscores": {k: 100 * sum(v) / len(v) for k, v in sorted(by_type.items())},
            "files": [res_file, sam_file]}
     if task.startswith("vstibench"):
@@ -143,10 +158,34 @@ def collect_vlmeval(run_dir: Path, bench: dict) -> dict:
     overall = float(overall) if overall is not None else 100 * sum(scores) / max(len(scores), 1)
     if overall <= 1.0 and scores and sum(scores) / len(scores) > 0.01:
         overall *= 100
-    return {"overall": overall, "scores": scores, "unparseable": unparse,
+    return {"overall": overall, "scores": scores, "unparseable": unparse, "n_predictions": len(items),
             "subscores": {k: 100 * sum(v) / len(v) for k, v in sorted(by_type.items())},
-            "backend_table": {str(k): (float(v) if isinstance(v, (int, float)) else v) for k, v in row.items()},
+            "backend_table":{str(k): (float(v) if isinstance(v, (int, float)) else v) for k, v in row.items()},
             "files": [acc_file, item_file]}
+
+
+def run_duration_s(run_dir: Path) -> float | None:
+    """From the manifest (written before the backend starts) to outputs.json (written when it returns)."""
+    end = run_dir / "outputs.json"
+    if not end.exists():
+        return None
+    start = datetime.datetime.fromisoformat(json.load(open(run_dir / "manifest.json"))["utc"])
+    return round(end.stat().st_mtime - start.timestamp(), 1)
+
+
+def reference_duration_s(bench_name: str) -> float | None:
+    ref = QA_RUNS / "step1" / f"base-7B__{bench_name.replace('@', '_')}"
+    return run_duration_s(ref) if (ref / "manifest.json").exists() else None
+
+
+def checks(run_dir: Path, n_predictions: int, n_expected: int, bench_name: str) -> dict:
+    log = run_dir / "job" / "run.log"
+    text = log.read_text(errors="replace") if log.exists() else ""
+    dur, ref = run_duration_s(run_dir), reference_duration_s(bench_name)
+    return {"predictions_equal_items": n_predictions == n_expected, "n_predictions": n_predictions,
+            "n_expected": n_expected, "backend_skipped": any(m in text for m in SKIP_MARKERS),
+            "duration_s": dur, "base7b_duration_s": ref,
+            "short_run": bool(dur is not None and ref and dur < SHORT_RUN_FRACTION * ref)}
 
 
 def collect(run_dir: Path) -> dict:
@@ -155,11 +194,14 @@ def collect(run_dir: Path) -> dict:
     bench = BENCHMARKS[name]
     got = collect_lmms(run_dir, bench) if bench["backend"] == "lmms_eval" else collect_vlmeval(run_dir, bench)
     n = len(got.pop("scores"))
+    chk = checks(run_dir, got.pop("n_predictions"), bench["items"], name)
+    if not chk["predictions_equal_items"] or chk["backend_skipped"]:
+        raise CheckFailed(f"{run_dir.name}: {chk}")
     out = {"bench": name, "model": manifest["models"][0]["code"], "backend": bench["backend"],
            "overall": round(got["overall"], 2), "subscores": {k: round(v, 2) for k, v in got["subscores"].items()},
            "n_items": n, "n_expected": bench["items"], "n_unparseable": got["unparseable"],
            "unparseable_pct": round(100 * got["unparseable"] / max(n, 1), 2), "files": got["files"],
-           "manifest": manifest}
+           "checks": chk, "input_pixels": pixel_log.summarize(run_dir / "input_pixels.jsonl"), "manifest": manifest}
     if "backend_table" in got:
         out["backend_table"] = got["backend_table"]
     if "task_overall_9_types" in got:

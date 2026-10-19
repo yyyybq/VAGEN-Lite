@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-card job: the 3DGS render service and our env's evaluation for one model (diagnostics/ownenv_eval.py).
 #
-#   bash eval_external/diagnostics/ownenv_job.sh NAME MODEL_CODE [normal|shuffle|drop] [--lenient]
+#   bash eval_external/diagnostics/ownenv_job.sh NAME MODEL_CODE [normal|shuffle|drop|replace] [--lenient]
 #
 # The set-up is the "eval" mode of examples/train/active_spatial/sco_interiorgs_v10_train.sh (render service on
 # port 8915 of the same card, the validated gsplat build, the same environment variables), with two changes:

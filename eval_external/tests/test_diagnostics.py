@@ -34,14 +34,17 @@ def test_history_modes():
     assert any(reorder(earlier, "shuffle", f"u{k}") != earlier for k in range(5))  # actually reordered
 
 
-def test_lenient_rewrite_only_wraps_untagged_answer_lines():
+def test_lenient_rewrite_only_wraps_an_untagged_last_answer_line():
     from eval_external.diagnostics.ownenv_eval import lenient_rewrite
 
     reply = "I observe the cabinet ... then move forward about 1.2 meters.\nAnswer: move_forward|move_right|move_forward"
     assert lenient_rewrite(reply) == "<action>move_forward|move_right|move_forward|</action>"
+    assert lenient_rewrite(reply + "\n\n") == "<action>move_forward|move_right|move_forward|</action>"
     assert lenient_rewrite("Answer: <action>turn_left|</action>") is None   # already tagged: untouched
     assert lenient_rewrite("I would go forward.") is None                     # no answer line: untouched
-    assert lenient_rewrite("Final answer: turn_left, move_forward.") == "<action>turn_left|move_forward|</action>"
+    assert lenient_rewrite("Answer: turn_left\nResponse: done") is None       # answer line is not the last line
+    assert lenient_rewrite("Final answer: turn_left, move_forward.") is None  # only "Answer:"
+    assert lenient_rewrite("answer: turn_left, move_forward.") == "<action>turn_left|move_forward|</action>"
 
 
 def test_queue_lenient_item():

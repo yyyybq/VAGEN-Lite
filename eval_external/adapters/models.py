@@ -118,7 +118,7 @@ def build_view(code: str, reg: dict | None = None) -> Path:
             continue
         if p.name in PROCESSOR_FILES:
             proc = json.loads(p.read_text())
-            new = {**proc, **PIXELS}
+            new = dict(proc) if e.get("pixels") == "own" else {**proc, **PIXELS}  # "own": the published limits
             if "image_processor_type" in proc and proc["image_processor_type"] not in KNOWN_IMAGE_PROCESSORS:
                 new["image_processor_type"] = "Qwen2VLImageProcessor"  # e.g. Video-R1's Qwen2_5_VLImageProcessor
             diff = {k: [proc.get(k), new[k]] for k in sorted(new) if proc.get(k) != new[k] and k in proc}

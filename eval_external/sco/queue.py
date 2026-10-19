@@ -6,6 +6,7 @@ KIND is a QA benchmark of qa_transfer/benchmarks.py, or
   WalkerBench, WalkerBench-blind          closed_loop/walkerbench/run.py (blind: no image, the reference agent's way)
   WalkerBench-lenient                     the same with --lenient (an action named outside the JSON is accepted)
   OwnEnv, OwnEnv-shuffle, OwnEnv-drop      diagnostics/ownenv_job.sh (our env; dialogue history as is / shuffled / dropped)
+  OwnEnv-replace                          history replaced by another same-scene task's turns (after the normal run)
   OwnEnv-lenient                          the same, history as is, untagged "Answer:" lines accepted
 
 Every minute: a finished job (SUCCEEDED, exit 0) is collected into RUN/results.json and deleted; a failed one is
@@ -30,8 +31,8 @@ from eval_external.sco import job as J
 
 RUNS = J.ROOT / "runs"
 QA_RUNS = RUNS / "qa"
-OWNENV_MODES = {"OwnEnv": "normal", "OwnEnv-shuffle": "shuffle", "OwnEnv-drop": "drop",
-                "OwnEnv-lenient": "lenient"}  # lenient: history normal, untagged "Answer:" lines accepted
+OWNENV_MODES = {"OwnEnv": "normal", "OwnEnv-shuffle": "shuffle", "OwnEnv-drop": "drop", "OwnEnv-replace": "replace",
+                "OwnEnv-lenient": "lenient"}  # lenient: history normal, an untagged last line "Answer:" accepted
 
 
 @dataclass
@@ -87,9 +88,20 @@ def item(stage: str, model: str, kind: str) -> Item:
         rd = RUNS / "ownenv" / "eval_test" / name
         command = ["bash", "eval_external/diagnostics/ownenv_job.sh", name, model]
         command += ["normal", "--lenient"] if mode == "lenient" else [mode]
-        return Item(rd, f"{stage}-own-{mode}-{model}", command, lambda: True, _ownenv_collect,
+        donor = RUNS / "ownenv" / "eval_test" / model / "results.json"  # replace takes turns from the normal run
+        return Item(rd, f"{stage}-own-{mode}-{model}", command,
+                    (lambda: donor.exists()) if mode == "replace" else (lambda: True), _ownenv_collect,
                     also_own=(str(RUNS / "ownenv"),))
     raise SystemExit(f"unknown kind {kind}")
+
+
+def done_label(rd: Path) -> str:
+    """'done', or 'done_flagged: ...' when collect's checks flagged the run (QA: run time far below base-7B's)."""
+    try:
+        chk = json.loads((rd / "results.json").read_text()).get("checks") or {}
+    except (OSError, ValueError):
+        return "done"
+    return "done_flagged: short run" if chk.get("short_run") else "done"
 
 
 def step(stage: str, items: list[tuple[str, Item]]) -> dict:
@@ -103,7 +115,7 @@ def step(stage: str, items: list[tuple[str, Item]]) -> dict:
                 try:
                     it.collect(it.run_dir)
                     J.delete(it.run_dir)
-                    status[key] = "done"
+                    status[key] = done_label(it.run_dir)
                 except Exception:
                     status[key] = "collect_failed: " + traceback.format_exc(limit=1).strip().splitlines()[-1]
             elif st["state"] in J.FINISHED:
@@ -112,7 +124,7 @@ def step(stage: str, items: list[tuple[str, Item]]) -> dict:
                 status[key] = f"running ({st['state']})"
             continue
         if (it.run_dir / "results.json").exists():
-            status[key] = "done"
+            status[key] = done_label(it.run_dir)
             continue
         if n_active >= J.MAX_ACTIVE:
             status[key] = "pending"
