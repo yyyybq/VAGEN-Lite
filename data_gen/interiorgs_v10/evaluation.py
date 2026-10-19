@@ -24,6 +24,11 @@ collision rate (blocked moves per action) and invalid-answer rate (turns whose a
 Round 11: ``run --samples N --temperature T --top-p P`` runs N sampled episodes per task, as in RL training
 (temperature 0.8, top-p 0.92), instead of one greedy episode; each row carries its ``sample`` number and the
 metrics add the share of tasks with at least one success (``pass_at_n``) and the mean over the N episodes.
+
+Round 12: ``top-up --eval V1 --family F --target N --split S ... --out V2`` keeps every task of V1 and adds
+reserve tasks of family F from the same split (not flagged by the depth check, replayed in the env: success exactly
+at d*, no collision; d* bands evened out) until V2 has N tasks of F (or the reserve runs out); ``--family-out``
+also writes F's tasks of V2 alone, to evaluate existing models on them only.
 """
 
 from __future__ import annotations
@@ -154,6 +159,95 @@ def cmd_replace(args: argparse.Namespace) -> None:
                "task_ids": [r["task_id"] for r in res["tasks"]]}
     (out / "selection.json").write_text(json.dumps(summary, indent=1))
     print(json.dumps({k: v for k, v in summary.items() if k not in ("swaps", "task_ids")}, indent=1))
+
+
+def reserve_rows(run: Path, split_manifest: Path, split: str) -> List[Dict[str, Any]]:
+    """Round 12: the reserve tasks (tasks_reserve.jsonl) of one split as published rows."""
+    from .release import finalize_task_row, split_lookup
+
+    lookup = split_lookup(json.loads(Path(split_manifest).read_text()))
+    path = Path(run) / "tasks_reserve.jsonl"
+    return [finalize_task_row(r, split) for r in (_jsonl(path) if path.is_file() else [])
+            if lookup.get(str(r["scene_id"])) == split]
+
+
+def balanced_order(rows: Sequence[Dict[str, Any]], existing: Counter, seed: int = SEED) -> List[Dict[str, Any]]:
+    """``rows`` in the order a top-up takes them: each next one from the d* band with the fewest tasks so far
+    (``existing`` counts the set's tasks per band), random within a band (``seed``)."""
+    rng = random.Random(seed)
+    bands: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in sorted(rows, key=lambda r: r["task_id"]):
+        bands[band_name(int(r["difficulty"]["d_star"]))].append(r)
+    for v in bands.values():
+        rng.shuffle(v)
+    counts = Counter(existing)
+    order = []
+    while any(bands.values()):
+        b = min((b for b in sorted(bands) if bands[b]), key=lambda b: (counts[b], b))
+        order.append(bands[b].pop(0))
+        counts[b] += 1
+    return order
+
+
+def top_up(tasks: Sequence[Dict[str, Any]], pool: Sequence[Dict[str, Any]], family: str, target: int,
+           replay_fn: Callable[[Sequence[Dict[str, Any]]], Sequence[Dict[str, Any]]],
+           flagged: Sequence[str] = (), seed: int = SEED) -> Dict[str, Any]:
+    """Round 12 (the user's decision for the occlusion family): add tasks of ``family`` from ``pool`` (reserve
+    tasks of the same split) until the set has ``target`` of them: flagged tasks and tasks already in the set are
+    never taken; candidates in balanced_order (d* bands evened out), each replayed in the env (``replay_fn``, rows
+    -> records with "ok") and taken only if the replay succeeds exactly at d* without a collision.  The set's other
+    tasks stay as they are."""
+    have = {r["task_id"] for r in tasks}
+    flagged = set(flagged)
+    existing = Counter(band_name(int(r["difficulty"]["d_star"])) for r in tasks if r["task_type"] == family)
+    want = max(0, int(target) - sum(existing.values()))
+    cands = [r for r in pool if r["task_type"] == family and r["task_id"] not in have and r["task_id"] not in flagged]
+    order = balanced_order(cands, existing, seed)
+    added: List[Dict[str, Any]] = []
+    replayed: List[Dict[str, Any]] = []
+    i = 0
+    while len(added) < want and i < len(order):
+        batch = order[i:i + want - len(added)]
+        i += len(batch)
+        results = {r["task_id"]: r for r in replay_fn(batch)}
+        for row in batch:
+            rec = results.get(row["task_id"]) or {"task_id": row["task_id"], "ok": False, "error": "not replayed"}
+            replayed.append(rec)
+            if rec.get("ok"):
+                added.append(row)
+    return {"tasks": list(tasks) + added, "added": added, "replayed": replayed, "wanted": want,
+            "candidates": len(cands), "family_before": dict(existing),
+            "family_after": dict(existing + Counter(band_name(int(r["difficulty"]["d_star"])) for r in added))}
+
+
+def cmd_top_up(args: argparse.Namespace) -> None:
+    from . import replay_env
+
+    split = args.split
+    tasks = _jsonl(Path(args.eval) / "tasks.jsonl")
+    pool = reserve_rows(Path(args.run), Path(args.split_manifest), split)
+    rules = replay_env.template_rules(Path(args.env_template))
+    res = top_up(tasks, pool, args.family, args.target,
+                 lambda rows: replay_env.replay(rows, Path(args.scenes_root), rules),
+                 sorted(flagged_ids(getattr(args, "exclude", None))), args.seed)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in res["tasks"]))
+    summary = {"version": VERSION, "seed": args.seed, "source": str(args.eval), "split": split, "family": args.family,
+               "target": args.target, "tasks": len(res["tasks"]), "source_tasks": len(tasks),
+               "family_before": res["family_before"], "family_after": res["family_after"],
+               "reserve_candidates": res["candidates"], "wanted": res["wanted"], "added": len(res["added"]),
+               "replayed": len(res["replayed"]), "replay_failed": [r for r in res["replayed"] if not r.get("ok")],
+               "added_task_ids": [r["task_id"] for r in res["added"]], "task_ids": [r["task_id"] for r in res["tasks"]]}
+    (out / "selection.json").write_text(json.dumps(summary, indent=1))
+    if getattr(args, "family_out", None):  # the family's tasks alone (to evaluate existing models on them only)
+        fam = Path(args.family_out)
+        fam.mkdir(parents=True, exist_ok=True)
+        rows = [r for r in res["tasks"] if r["task_type"] == args.family]
+        (fam / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        (fam / "selection.json").write_text(json.dumps({**summary, "tasks": len(rows), "subset_of": str(out),
+                                                        "task_ids": [r["task_id"] for r in rows]}, indent=1))
+    print(json.dumps({k: v for k, v in summary.items() if k not in ("task_ids", "added_task_ids")}, indent=1))
 
 
 # ---------------------------------------------------------------------------
@@ -559,9 +653,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     x.add_argument("--split", default="test")
     x.add_argument("--seed", type=int, default=SEED)
     x.add_argument("--out", required=True)
+    u = sub.add_parser("top-up", help="round 12: add one family's reserve tasks of the split, replayed, up to a target")
+    u.add_argument("--eval", required=True, help="the evaluation folder to start from (tasks.jsonl; it stays as it is)")
+    u.add_argument("--family", required=True)
+    u.add_argument("--target", type=int, required=True, help="tasks of the family wanted in the new set")
+    u.add_argument("--run", required=True, help="run_all output directory (tasks_reserve.jsonl)")
+    u.add_argument("--split-manifest", required=True)
+    u.add_argument("--split", required=True)
+    u.add_argument("--exclude", default=None, help="depth_check_summary.json: its flagged tasks are never taken")
+    u.add_argument("--scenes-root", required=True, help="InteriorGS scene folders for the replay")
+    u.add_argument("--env-template", default=str(Path(__file__).with_name("configs") / "rl_env_v10_S0.yaml"),
+                   help="the env rules of the replay")
+    u.add_argument("--seed", type=int, default=SEED)
+    u.add_argument("--out", required=True)
+    u.add_argument("--family-out", default=None, help="also write the family's tasks of the new set alone here")
     args = ap.parse_args(argv)
     {"select": cmd_select, "run": cmd_run, "table": cmd_table, "replace": cmd_replace,
-     "compare": cmd_compare}[args.cmd](args)
+     "compare": cmd_compare, "top-up": cmd_top_up}[args.cmd](args)
     return 0
 
 

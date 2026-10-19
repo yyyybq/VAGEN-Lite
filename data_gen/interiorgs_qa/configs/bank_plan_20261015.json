@@ -1,5 +1,5 @@
 {
- "note": "per-scene quotas of the question bank (2026-10-15): common groups 3 questions per subtask per scene (about 5-7 times the training need), rare groups and video every combo (999 = no limit); obj_cap: questions per object and group in one scene; verify_cap 0: stop a group when its quotas are met S7 (3D-11, parallel / perpendicular) removed: user decision of 2026-10-15 during labelling.",
+ "note": "per-scene quotas of the question bank (2026-10-15): common groups 3 questions per subtask per scene (about 5-7 times the training need), rare groups and video every combo (999 = no limit); obj_cap: questions per object and group in one scene; verify_cap 0: stop a group when its quotas are met. S7 (3D-11, parallel / perpendicular) removed: user decision of 2026-10-15 during labelling. MMSI-position-object-object (M2), MMSI-position-object-region and MMSI-position-region-region (M3) removed: the questions that fix the compass by one stated direction, user decision of 2026-10-19 during labelling.",
  "obj_cap": 6,
  "verify_cap": 0,
  "wide_search": true,
@@ -41,13 +41,10 @@
   },
   "M2": {
    "MMSI-position-camera-object": 3,
-   "MMSI-position-object-object": 3,
    "MMSI-attribute-measurement": 3
   },
   "M3": {
-   "MMSI-position-camera-region": 999,
-   "MMSI-position-object-region": 999,
-   "MMSI-position-region-region": 999
+   "MMSI-position-camera-region": 999
   },
   "M4": {
    "BL-06": 3
