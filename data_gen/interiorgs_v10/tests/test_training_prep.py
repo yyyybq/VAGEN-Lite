@@ -286,7 +286,8 @@ class TrainingPrepTest(unittest.TestCase):
     def test_rl_config_standards_and_seed(self):
         """Round 12: named standard configurations (configs/rl_standards.json, the package with S0 and with the dense
         reward; p2 with 48 candidates) fix the recipe's options and the repository's PPO template; an explicit
-        option against the standard is refused; --seed sets the task order and the sampling seed."""
+        option against the standard is refused; --seed sets the task order (data.seed) and nothing in the rollout
+        config (this verl's RolloutConfig has no seed: the first round-12 start failed on it)."""
         import yaml
 
         standards = TP.load_standards()
@@ -325,10 +326,11 @@ class TrainingPrepTest(unittest.TestCase):
                           ppo["filter"]["filter_kwargs"]["target_groups"]), ("grpo", 24, 8, 12))
         self.assertTrue(ppo["trainer"]["concat_multi_turn"])
         self.assertEqual((ppo["trainer"]["save_freq"], ppo["trainer"]["test_freq"]), (50, -1))
-        self.assertEqual((ppo["data"]["seed"], a["rollout"]["seed"]), (7, 7))
+        self.assertEqual(ppo["data"]["seed"], 7)
+        self.assertNotIn("seed", a["rollout"])  # RolloutConfig(**rollout) must not get an unknown field
         self.assertEqual(env["potential_field_reward_scale"], 10.0)  # the dense reward
         self.assertEqual((report["standard"], report["seed"], report["task_pool"], report["reward_preset"]),
-                         ("v10_p1_D", {"data": 7, "rollout": 7}, "reserve", "dense"))
+                         ("v10_p1_D", {"data": 7, "rollout": 0}, "reserve", "dense"))
         self.assertEqual(report["train"], sum(1 for r in rows if r["reserve"]))
         self.assertTrue(report["ppo_template"].endswith("ppo_template_v10.yaml"))
         # no seed: the template's (task order 20260930, sampling 0), as in round 11

@@ -21,7 +21,8 @@ not used.  The conversations are built by ``release.build_sft_record`` (the RL e
 Round 12: ``rl-config --standard NAME`` takes a named standard configuration (configs/rl_standards.json: the
 round-11 optimisation package with the sparse or the dense reward, v10_p1_S0 / v10_p1_D, and the candidate p2 with
 48 candidate tasks per update) with the repository's PPO template (configs/ppo_template_v10.yaml); ``--seed N``
-sets the run's task order and sampling seed (the template's 20260930 and vLLM's 0 otherwise).
+sets the run's task order (data.seed; the template's 20260930 otherwise); vLLM's sampling seed stays 0 (this
+verl's rollout config has no seed field: setting one stops the trainer at start-up).
 """
 
 from __future__ import annotations
@@ -605,9 +606,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     if getattr(args, "no_internal_val", False):
         _set(ppo, "trainer.val_before_train", False)
         _set(ppo, "trainer.test_freq", -1)
-    if getattr(args, "seed", None) is not None:  # round 12: the run's seed, for the task order and the sampling
-        for key in ("data.seed", "actor_rollout_ref.rollout.seed"):
-            _set(ppo, key, int(args.seed))
+    if getattr(args, "seed", None) is not None:  # round 12: the run's seed, the order of the tasks (data.seed); this
+        _set(ppo, "data.seed", int(args.seed))      # verl's RolloutConfig has no seed (vLLM samples with seed 0)
     package = None
     if getattr(args, "opt_package", None):  # round 11: applied last, over the sizes and the warm-up above
         if not ppo["trainer"].get("concat_multi_turn"):
@@ -630,9 +630,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "task_pool": pool,
               "opt_package": getattr(args, "opt_package", None), "opt_package_overrides": package,
               "standard": standard or None, "ppo_template": str(args.ppo_template),
-              # the task order (data.seed) and the sampling (vLLM's seed, 0 when the template leaves it out)
-              "seed": {"data": (ppo.get("data") or {}).get("seed"),
-                       "rollout": ((ppo.get("actor_rollout_ref") or {}).get("rollout") or {}).get("seed", 0)},
+              # the task order (data.seed); vLLM's sampling seed is 0 in this verl (RolloutConfig has no seed field)
+              "seed": {"data": (ppo.get("data") or {}).get("seed"), "rollout": 0},
               "sft_tasks_checked": len(sft_ids), "sft_overlap": len(overlap),
               "depth_flagged_checked": len(flagged), "depth_flagged_in_train": len(flagged_in_train),
               "train_scenes": len({r["scene_id"] for r in parts["train"]}),
@@ -704,7 +703,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="depth_check_summary.json: no RL train task may be among its flagged tasks")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--seed", type=int, default=None,
-                   help="round 12: the run's seed (task order data.seed and vLLM sampling seed); the template's otherwise")
+                   help="round 12: the run's seed, the order of the tasks (data.seed); the template's otherwise")
     c.add_argument("--standard", default=None,
                    help="round 12: a named standard configuration (configs/rl_standards.json) fixing the recipe's options")
     c.add_argument("--out", required=True)
