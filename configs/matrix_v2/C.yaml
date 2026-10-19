@@ -1,4 +1,7 @@
 # 矩阵第二版 C 组：P0 + P2（不加转移题）；之后 RL。说明见 configs/matrix_v2/README.md。
+# RL 标准名是变量：{rl_package}（configs/matrix_v2/vars.yaml，现在 v10_p1）和 {pkg}（它去掉 v10_ 的短名，用在 RL 的目录名里）；
+# 训练链的 plan 用 python -m data_gen.sft_mixture.matrix_plan --group <组> 生成（填变量、核对标准）。
+# 注意：v10_p1 / v10_p2 是 RL 修正包（rl_standards.json 里的优化设置）的名字，和数据池 P1（转移题）/ P2（动作轨迹）无关。
 # 只写配置。train_chain_plan 是训练链 plan.json 能读的字段；needs_chain_support 是它现在读不了的（CHANGES.md 第 5 节）。
 # 2026-10-19 按第十二轮的决定更新：RL 成对（S0 和 D）、SFT 10 个 epoch、v2 评测集。
 group: C
@@ -22,8 +25,8 @@ sft:
 rl:   # 第十二轮第 2 条：每次 RL 实验成对跑，S0 和 D 同一个起点、同一批题、同一个种子、同样的更新次数
   start: SFT 挑出的检查点
   pair:
-    p1s0: v10_p1_S0   # data_gen/interiorgs_v10/configs/rl_standards.json：修正包 p1 + 稀疏奖励
-    p1d: v10_p1_D     # 修正包 p1 + 密集奖励
+    "{pkg}s0": "{rl_package}_S0"   # data_gen/interiorgs_v10/configs/rl_standards.json：修正包 + 稀疏奖励
+    "{pkg}d": "{rl_package}_D"     # 修正包 + 密集奖励
   seed: 20261019
   tasks: train 后备题（task_pool reserve），去掉深度核对标出的题
   updates: 300
@@ -38,7 +41,7 @@ eval:
   every: 50
   diagnostics:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
-    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261018/p1_probe.jsonl --from-eval <val> --names <SFT 各 epoch 和两个 RL 的各检查点>
+    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019/p1_probe.jsonl --from-eval <val> --names <SFT 各 epoch 和两个 RL 的各检查点>
     baseline: docs/transition_qa/DIAG_BASELINE.md（失败拆解的基线用的是第十一轮的 val400 / test，v2 多了 28 道遮挡题）
 
 train_chain_plan:   # 照第十二轮的 plan（interiorgs_v10_train_r12a_20261019）写
@@ -60,14 +63,14 @@ train_chain_plan:   # 照第十二轮的 plan（interiorgs_v10_train_r12a_202610
   endpoint: 300
   rl_name: v10_rl_m2_c
   rl:
-    standard: v10_p1_S0
+    standard: "{rl_package}_S0"
     seed: 20261019
     task_pool: reserve
     rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/rl_rows/rows.jsonl
     exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
     guards: {kl_max: 0.2, invalid_max: 0.05, invalid_window: 10, success_drop: 0.10, drop_window: 50, start_updates: 5}
     startup: {retries: 2, stall_minutes: 40}
-  rl_runs: {p1s0: {}, p1d: {rl: {standard: v10_p1_D}}}
+  rl_runs: {"{pkg}s0": {}, "{pkg}d": {rl: {standard: "{rl_package}_D"}}}
   eval: {every: 50, options: []}
 
 needs_chain_support:

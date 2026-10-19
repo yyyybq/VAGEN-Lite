@@ -1,4 +1,7 @@
 # 矩阵第二版 E 组（探索性，排在 D 之后）：SFT 与 D 相同、共用 D 挑出的 SFT 模型；RL 时换 free_think 提示（先想再输出动作）。
+# RL 标准名是变量：{rl_package}（configs/matrix_v2/vars.yaml，现在 v10_p1）和 {pkg}（它去掉 v10_ 的短名，用在 RL 的目录名里）；
+# 训练链的 plan 用 python -m data_gen.sft_mixture.matrix_plan --group <组> 生成（填变量、核对标准）。
+# 注意：v10_p1 / v10_p2 是 RL 修正包（rl_standards.json 里的优化设置）的名字，和数据池 P1（转移题）/ P2（动作轨迹）无关。
 # 用户 2026-10-18 的决定：RL 前 50 次更新解析失败率超过 20% 就放弃。说明见 configs/matrix_v2/README.md。
 # 只写配置。train_chain_plan 是训练链 plan.json 能读的字段；needs_chain_support 是它现在读不了的（CHANGES.md 第 5 节）。
 # 2026-10-19 按第十二轮的决定更新：RL 成对（S0 和 D，两个都用 free_think 提示）、v2 评测集。
@@ -15,8 +18,8 @@ sft:
 rl:   # 第十二轮第 2 条：每次 RL 实验成对跑，S0 和 D 同一个起点、同一批题、同一个种子、同样的更新次数
   start: D 组挑出的 SFT 检查点（D 的 progress.json 里 pick_sft 的 decision.model）
   pair:
-    p1s0: v10_p1_S0   # data_gen/interiorgs_v10/configs/rl_standards.json：修正包 p1 + 稀疏奖励
-    p1d: v10_p1_D     # 修正包 p1 + 密集奖励
+    "{pkg}s0": "{rl_package}_S0"   # data_gen/interiorgs_v10/configs/rl_standards.json：修正包 + 稀疏奖励
+    "{pkg}d": "{rl_package}_D"     # 修正包 + 密集奖励
   seed: 20261019
   tasks: train 后备题（task_pool reserve），去掉深度核对标出的题
   updates: 300
@@ -24,14 +27,16 @@ rl:   # 第十二轮第 2 条：每次 RL 实验成对跑，S0 和 D 同一个�
   guards: {kl_max: 0.2, invalid_max: 0.20, invalid_window: 10, success_drop: 0.10, drop_window: 50, start_updates: 5}
   startup: {retries: 2, stall_minutes: 40}
   abandon_rule: 前 50 次更新里，解析失败率（transition/invalid_action_rate，最近 10 次的平均）超过 20% 就停
+  max_response_length: 6144   # 只对 E（用户 2026-10-19）；其他组 4096
+  think_share: transition/think_rate   # 含思考文字的回答比例（用户 2026-10-19）
 
-pending:   # 用户待定（CHANGES.md 第 4 节）
-  think_share_metric: >-
-    待定。free_think 提示下只回 <action>…</action> 也算格式正确、不扣分，模型可以完全不写思考文字，解析失败率仍然很低。
-    建议记录"带思考文字的回答比例"（要在 vagen 的环境或训练指标里加一项，属于现有文件），或给缺思考块的回答扣格式分（改奖励）。
+decided:   # 用户 2026-10-19（原来的两件待定事，CHANGES.md 第 4 节）
+  think_share: >-
+    记录含思考文字的回答比例：RL 日志 transition/think_rate（每个 episode 里回答带非空 <think> 块的回合占比，
+    环境的 turn_metrics.has_think；本分支加的，所有 RL 都记，只输出动作的组应接近 0）；评测用 eval.diagnostics.format_check。
   max_response_length: >-
-    待定，建议 6144。一条序列模式下整个 episode 的回答上限是 4096 个词元（training_prep.py 的 CONCAT_RESPONSE_LENGTH），
-    12 个回合已用约 3,100；每回合加 100–200 个词元的思考文字会超出，截在 </action> 之前就读不出动作。
+    6144，只对 E：rl-config --max-response-length 6144（本分支加的选项；一条序列模式下整个 episode 的回答上限，
+    其他组仍是 4096）。vLLM 开了分块预填充，max_num_batched_tokens 8192 不用改。
 
 eval:
   sets:
@@ -41,7 +46,7 @@ eval:
   prompt_format: free_think   # RL 检查点用 free_think 提示评测（evaluation.py --prompt-format free_think）
   diagnostics:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
-    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261018/p1_probe.jsonl --from-eval <val> --names <两个 RL 的各检查点>
+    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019/p1_probe.jsonl --from-eval <val> --names <两个 RL 的各检查点>
     format_check: python -m eval.diagnostics.format_check --eval <set> --out <TR>/diag/format_<set>   # 带思考文字的回答多少、能否读出动作
     baseline: docs/transition_qa/DIAG_BASELINE.md；第 0 步 = D 组挑出的 SFT 检查点
 
@@ -62,14 +67,14 @@ train_chain_plan:   # 照第十二轮的 plan（interiorgs_v10_train_r12a_202610
   endpoint: 300
   rl_name: v10_rl_m2_e
   rl:
-    standard: v10_p1_S0
+    standard: "{rl_package}_S0"
     seed: 20261019
     task_pool: reserve
     rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/rl_rows/rows.jsonl
     exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
     guards: {kl_max: 0.2, invalid_max: 0.20, invalid_window: 10, success_drop: 0.10, drop_window: 50, start_updates: 5}
     startup: {retries: 2, stall_minutes: 40}
-  rl_runs: {p1s0: {}, p1d: {rl: {standard: v10_p1_D}}}
+  rl_runs: {"{pkg}s0": {}, "{pkg}d": {rl: {standard: "{rl_package}_D"}}}
   eval: {every: 50, options: []}
 
 needs_chain_support:
@@ -77,16 +82,16 @@ needs_chain_support:
   rl_output_format: think_action        # rl_config 步给 rl-config 传 --output-format think_action（两个 RL 都要）
   guards_invalid_until: 50              # 解析失败率这条只在前 50 次更新里检查；现有规则整个训练都生效（这里 20% 一直适用，比要求严）
   eval_rl_prompt_format: free_think     # evaluate 步给 RL 检查点传 --prompt-format free_think（现在固定用默认提示）
-  max_response_length: 待定（pending.max_response_length）
-  think_share_metric: 待定（pending.think_share_metric）
+  rl_max_response_length: 6144         # rl_config 步给 rl-config 传 --max-response-length 6144（两个 RL 都要）
   diagnostics_after_eval: true
 
 manual_steps:   # 不改训练链时
   - 等 D 组的 pick_sft 完成，取 decision.model
   - 在 <tr>/progress.json 里把 render、sft_data、sft、sft_eval、pick_sft 标成 done（note 写"SFT 同 D"），
     写 "rl_model_override" = D 的 decision.model
-  - 手工跑两次 rl-config（--standard v10_p1_S0 / v10_p1_D，都加 --seed 20261019 --output-format think_action），
-    生成的配置放到 <tr>/rl_p1s0、<tr>/rl_p1d，把 rl_config 标成 done，再 train_chain run
+  - 手工跑两次 rl-config（--standard {rl_package}_S0 / {rl_package}_D，都加 --seed 20261019 --output-format think_action
+    --max-response-length 6144），生成的配置放到 <tr>/rl_{pkg}s0、<tr>/rl_{pkg}d，把 rl_config 标成 done，再 train_chain run
+  - RL 日志里看 transition/think_rate：一直接近 0 说明模型没开始写思考文字
   - evaluate 步训练链会用默认提示，所以 E 的 RL 检查点要手工评测：sco_interiorgs_v10_train.sh eval 的第 6 个参数写 free_think
   - 评测结束后手工跑 eval.diagnostics 的诊断（含 format_check）
 

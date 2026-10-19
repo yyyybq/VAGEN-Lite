@@ -1,0 +1,68 @@
+# 矩阵第二版 C0 组：主线，不新训练（用户 2026-10-19）。SFT = 第十一轮正式 SFT（只练 P2）的第 9 个 epoch；
+# RL = 从它起步的成对 RL，就是第十二轮的复现对，结果直接取那条训练链。说明见 configs/matrix_v2/README.md。
+# RL 标准名是变量：{rl_package}（configs/matrix_v2/vars.yaml，现在 v10_p1）和 {pkg}；reuse 按它取第十二轮的哪条链。
+# 注意：v10_p1 / v10_p2 是 RL 修正包（rl_standards.json 里的优化设置）的名字，和数据池 P1（转移题）/ P2（动作轨迹）无关。
+# 没有 train_chain_plan：python -m data_gen.sft_mixture.matrix_plan --group C0 打印 reuse。
+group: C0
+description: 主线：第十一轮正式 SFT 第 9 个 epoch（只练 P2）+ 成对 RL；不新训练，结果取第十二轮的训练链
+output_format: action_only
+
+data:
+  recipe: 主线（第十一轮 lf_formal，只有 P2）
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal
+  train_rows: {P0: 0, P1: 0, P2: 9802}
+  val_rows: {P2: 1293}   # 主线 SFT 的验证损失用全部 1,293 条 val 轨迹；B–D 用 P0 20 / P1 300 / P2 300（P2 的 300 条是这 1,293 条的子集）
+
+sft:
+  model: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386
+  epoch: 9                 # 每个 epoch 154 步（9,802 条 / 每步 64 条）
+  epochs_trained: 10
+  picked: 第十一轮按 val400（398 道）挑：e9 41.96%（e7 41.46%、e10 41.46%）。B–D 按 eval_val_v2（413 道）挑，规则相同
+  recipe_check: >-
+    和 B–D 的 train.yaml 逐项比过（README 的"C0 和矩阵的 SFT 配方"）：超参数全部相同；不同的只有数据（dataset、dataset_dir）、
+    验证集（eval_dataset、eval_on_each_dataset）、输出目录，以及 image_max_pixels / video_max_pixels（B–D 写明 65536，
+    主线用 LLaMA-Factory 的默认值；256×256 的动作帧在两边都不缩放）。B–D 的 P2 训练行和主线的 trajectory_train.jsonl
+    逐条相同、顺序相同（对话和图片）。
+
+rl:   # 第十二轮第 2 条：成对，S0 和 D 同一个起点、同一批题、同一个种子、同样的更新次数；设置和 A–E 完全相同
+  start: sft.model
+  pair:
+    "{pkg}s0": "{rl_package}_S0"
+    "{pkg}d": "{rl_package}_D"
+  seed: 20261019
+  tasks: train 后备题（task_pool reserve），去掉深度核对标出的题
+  updates: 300
+  output_format: action_only
+
+reuse:   # 按 rl_package 取第十二轮的哪条训练链；data_gen/sft_mixture/tests/test_matrix_configs.py 核对它的 RL 设置和 D 组相同
+  v10_p1:
+    plan: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/scripts/plan_r12a.json
+    tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12a_20261019
+    rl_runs: {p1s0: rl_run_p1s0, p1d: rl_run_p1d}
+    entries: STATUS.md 的 R12-P1-S0 / R12-P1-D（复现对）
+    status_2026_10_19: 在跑（11:52 UTC：p1s0 第 181 次更新、p1d 第 149 次）
+  v10_p2:
+    plan: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/scripts/plan_r12b.json
+    tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12b_20261019
+    rl_runs: {p2s0: rl_run_p2s0, p2d: rl_run_p2d}
+    entries: STATUS.md 的 R12-P2-S0 / R12-P2-D（候选标准）
+    status_2026_10_19: 还没开始（训练链目录不存在）
+
+eval:
+  sets:
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2    # 413 道
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2  # 292 道
+  every: 50   # 第十二轮训练链自己评测
+  diagnostics:
+    failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <reuse.tr>/diag/failure_<set>
+    qa_probe: >-
+      SFT 第 9 个 epoch 已在 docs/transition_qa/DIAG3_PROBE.md 里（sft_formal_e9）；第十二轮的 RL 检查点在训练链结束后跑
+      python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019/p1_probe.jsonl
+      --model <名字>=<reuse.tr>/<rl_run>/checkpoints/global_step_<N>/actor/huggingface ...
+
+needs_chain_support: {}   # 不跑训练链
+manual_steps:
+  - 不训练。第十二轮的训练链结束后，从 reuse.tr 取两个 RL 的评测结果，和 A–E 一起比
+  - 跑两个诊断（失败拆解、P1 探针）
+
+estimate: {gpu: 0（RL 由第十二轮完成；只有诊断要一张卡约 1 小时）}

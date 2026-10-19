@@ -24,8 +24,8 @@ pools:
     val_scenes_reason: 样题导出把每第 10 道题留作验证，都是 train 场景；全量 P0 题库有 val 场景的题后改用那些
   P1:
     kind: transition_qa
-    train: exps/transition_qa_20261018/p1_train.jsonl
-    val: exps/transition_qa_20261018/p1_test.jsonl
+    train: exps/transition_qa_20261019/p1_train.jsonl   # 2026-10-19: rebuilt with the new class rules (was 20261018)
+    val: exps/transition_qa_20261019/p1_test.jsonl
   P2:
     kind: sft_trajectories
     train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/trajectory_train.jsonl
