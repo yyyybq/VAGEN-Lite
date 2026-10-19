@@ -134,6 +134,25 @@ def test_group_a_and_e(cfgs):
         assert "max_response_length" not in cfgs[g]["rl"]                  # 6,144 only for E
 
 
+def test_chain_patch_plans():
+    """Patches 0001 / 0002 (docs/transition_qa/patches): every needs_chain_support field maps to a plan field."""
+    probe = yaml.safe_load((MATRIX / "vars.yaml").read_text(encoding="utf-8"))["p1_probe"]
+    patch_text = "\n".join(p.read_text(encoding="utf-8") for p in sorted((ROOT / "docs" / "transition_qa" / "patches").glob("*.patch")))
+    for g in GROUPS + ("D_noP0",):
+        p = MP.plan_with_chain_patch(g)
+        for dotted in MP.chain_fields(g):
+            assert re.search(rf'["\']{dotted.split(".")[-1]}["\']', patch_text), (g, dotted)  # the patches read it
+        assert p["diagnostics"] == {"failure_breakdown": True, "probes": {"P1": probe, "P0": None}}, g
+    assert MP.plan_with_chain_patch("E")["start_model"] == {"from_chain": MP.plan("D")["tr"]}
+    assert MP.plan_with_chain_patch("A")["start_model"].endswith("/inputs/base_7b")
+    e = MP.plan_with_chain_patch("E")["rl"]
+    assert (e["output_format"], e["max_response_length"], e["guards"]["invalid_until"]) == ("think_action", 6144, 50)
+    assert MP.plan_with_chain_patch("E")["eval"]["rl_prompt_format"] == "free_think"
+    for g in ("B", "C", "D", "D_noP0"):
+        assert MP.plan_with_chain_patch(g)["sft_lf_dirs"]["mix"].endswith(f"sft_mixture_matrix_v2_20261018/{g}")
+    assert "sft_lf_dirs" not in MP.plan("D")  # without the flag: only the fields today's chain reads
+
+
 def test_d_nop0_is_d_without_p0():
     alt, d = MP.load_group("D_noP0"), MP.load_group("D")
     pa, pd = MP.plan("D_noP0"), MP.plan("D")

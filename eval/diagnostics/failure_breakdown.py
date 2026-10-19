@@ -32,6 +32,19 @@ CLASS_ZH = {"reached": "到过（成功）", "drifted": "到过又走偏", "stop
 BUDGET_ENDS = {"max_primitive_steps", "max_turns"}
 FAMILY_ORDER = ("projective_relations", "absolute_positioning", "screen_occupancy", "equidistance",
                 "occlusion_alignment", "fov_inclusion")
+# why a "stopped" episode ended (the env's end_reason)
+STOP_ZH = {"low_info": "画面几乎一片", "consecutive_invalid": "连续读不出动作（格式错误）", "collision": "连续撞墙"}
+# the three groups of success conditions (the user's: the frame / a clearly visible face / the task's relation), as
+# the main line's round-12 dense-reward check groups them (exps/.../interiorgs_v10_r12_20261019/scripts/
+# dense_check_r12.py GROUP; target_in_front added to the frame group)
+GATE_GROUP = {g: k for k, gates in {
+    "frame": ("in_front", "target_in_front", "inside_frame", "fully_in_frame", "visible", "min_area",
+              "vertical_contained", "occluder_in_front", "occluder_inside_frame", "occluder_min_area", "occluder_visible"),
+    "clear_face": ("target_a_clearly_visible", "target_b_clearly_visible", "reference_a_clearly_visible",
+                   "reference_b_clearly_visible", "required_targets_found"),
+    "relation": ("distance", "equidistant", "occupancy", "relation", "margin", "lateral_within_45deg",
+                 "target_hidden", "target_in_view_direction")}.items() for g in gates}
+GROUP_ZH = {"frame": "画面", "clear_face": "看清楚", "relation": "关系", "other": "其他"}
 
 
 def classify(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -55,6 +68,8 @@ def classify(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def breakdown(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     by_family: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    stops: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    groups: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
     gates: collections.Counter = collections.Counter()
     start_close = 0
     errors = 0
@@ -66,11 +81,26 @@ def breakdown(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         fam = str(r.get("task_type"))
         by_family[fam][c["class"]] += 1
         by_family["all"][c["class"]] += 1
+        if c["class"] == "stopped":
+            why = c.get("end_reason") if c.get("end_reason") in STOP_ZH else "other"
+            stops[fam][why] += 1
+            stops["all"][why] += 1
         if c["class"] == "budget_one_gate":
             gates[c["gate"]] += 1
+            group = GATE_GROUP.get(c["gate"], "other")
+            groups[fam][group] += 1
+            groups["all"][group] += 1
             start_close += int(c["start_one_gate"])
     return {"by_family": {k: dict(v) for k, v in by_family.items()}, "one_gate": dict(gates.most_common()),
+            "one_gate_group": {k: dict(v) for k, v in groups.items()}, "stopped_by": {k: dict(v) for k, v in stops.items()},
             "one_gate_start_already": start_close, "errors": errors}
+
+
+def relation_share(res: Dict[str, Any], family: str = "all") -> Optional[float]:
+    """Among the episodes that ran out of actions one condition short, the share whose condition is a relation one."""
+    g = (res.get("one_gate_group") or {}).get(family) or {}
+    n = sum(g.values())
+    return g.get("relation", 0) / n if n else None
 
 
 def table(name: str, res: Dict[str, Any]) -> List[str]:
@@ -86,6 +116,13 @@ def table(name: str, res: Dict[str, Any]) -> List[str]:
     if res["one_gate"]:
         top = "，".join(f"{g} {n}" for g, n in list(res["one_gate"].items())[:6])
         lines += ["", f"只差一个门时差的是：{top}；其中 {res['one_gate_start_already']} 道起点就只差一个门。"]
+        g = (res.get("one_gate_group") or {}).get("all") or {}
+        if g:
+            lines.append("按三组条件：" + "，".join(f"{GROUP_ZH[k]} {g.get(k, 0)}" for k in GROUP_ZH if g.get(k))
+                         + f"（\"关系\"占 {100 * relation_share(res):.0f}%）。")
+    s = (res.get("stopped_by") or {}).get("all") or {}
+    if s:
+        lines.append("没到就停了的原因：" + "，".join(f"{STOP_ZH.get(k, '其他')} {n}" for k, n in s.items()) + "。")
     return lines + [""]
 
 

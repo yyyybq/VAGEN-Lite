@@ -106,5 +106,9 @@ B、C、D 的 `train.yaml` 和主线的 `lf_formal/train.yaml` 逐项比较：
 
 1. 合并：分支 `transition-qa` 一直和 main 保持同步；合并到 main 由用户在冻结期触发（用户 2026-10-19 的决定）。
    训练链只在主工作树按 plan 的 commit 运行（`check_code`），新代码要在那个 commit 里：混合配方、诊断、`rl-config --output-format` / `--max-response-length`、思考文字比例的指标。
-2. 训练链加 `needs_chain_support` 里的字段；或者按各文件的 `manual_steps` 手工准备 progress.json。
+2. 训练链加 `needs_chain_support` 里的字段：
+   - 已做成补丁 `docs/transition_qa/patches/0001`、`0002`（`CHANGES.md` 第 6 节）；
+   - 合并后打上，再用 `matrix_plan --group <组> --chain-patch --commit <提交>` 生成 plan；
+   - 不打补丁就按各文件的 `manual_steps` 手工准备 progress.json。
+   - 补丁 0002 的 `diagnostics` 步会给每个检查点自动跑 P1 探针，探针集路径在 `vars.yaml`（`p1_probe`；`p0_probe` 到位后填）。
 3. 定 RL 标准：修正包 p2（48 道候选题）还是第十二轮的候选标准。定下来后改 `vars.yaml` 的 `rl_package`。

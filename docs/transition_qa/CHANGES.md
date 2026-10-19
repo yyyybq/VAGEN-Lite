@@ -113,3 +113,52 @@
 另外，训练链的 `check_code` 要求主工作树是 plan 里的 commit。矩阵要用的新代码得先合并到 main：
 混合配方、诊断、`rl-config --output-format` / `--max-response-length`、`transition/think_rate`。合并由用户在冻结期触发。
 各组 YAML 的 `commit` 写的是 `TBD`，`matrix_plan --commit` 可以填。
+
+表里的 7 个字段已经做成补丁（第 6 节）。补丁打上之后就不用手工准备 progress.json 了，各组的 `manual_steps` 只在不打补丁时用。
+D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval`。
+
+## 6. 等冻结期合并的补丁（`docs/transition_qa/patches/`，2026-10-19）
+
+两个补丁都改 `data_gen/interiorgs_v10/train_chain.py`。它是主线的现有文件，本分支没有改它：
+- 补丁只放在 `docs/transition_qa/patches/`，没有打到分支的代码上；
+- 本分支和 main 的这个文件逐字相同，补丁就是对着它做的。
+
+| 补丁 | 内容 | 改的文件 |
+| --- | --- | --- |
+| `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
+| `0002-train-chain-diagnostics-step.patch` | 第 7 个字段：新的第 11 步 `diagnostics`，评测之后跑失败拆解和探针（P1；P0 探针到位后同样接入） | `train_chain.py`（在 0001 之上约 110 行），`tests/test_train_chain.py`（1 行：步骤多了一个），`tests/test_train_chain_matrix.py`（加 2 个测试） |
+
+### 6.1 每个字段谁写、谁读
+
+所有字段都由 `python -m data_gen.sft_mixture.matrix_plan --group <组> --chain-patch` 从各组 YAML 的 `needs_chain_support` 写进 plan.json；探针路径取自 `configs/matrix_v2/vars.yaml`（`p1_probe`、`p0_probe`）。
+
+| plan 字段 | 哪几组 | 训练链里谁读 | 读了以后写什么 |
+| --- | --- | --- | --- |
+| `sft_lf_dirs` | B、C、D、D_noP0 | `lf_dir()`：SFT、每个 epoch 的评测、挑 epoch 都用这个目录；`render` 看到它就不渲染；`sft_data` 用 `check_lf_dir()` 核对 train.yaml（`output_dir` 是 `<目录>/model`、epoch 数等于 `sft_epochs`、每个 epoch 存一次），不跑 `sft-records` | progress.json 的 `steps.sft_data.lf_dirs`、`steps.render.note`；LLaMA-Factory 把模型写到 `<目录>/model` |
+| `start_model` | A（模型路径）、E（`{from_chain: D 组的 TR}`） | `run()`：`render` 到 `pick_sft` 五步标成 done（note "not planned (start_model)"）；`sft_model()`：RL 起点。E 读 D 组的 `progress.json` 里 `steps.pick_sft.decision.model`，那是 D 组训练链的 `pick_sft` 步写的；D 还没挑出来就停下报错 | `steps.rl_config.start_model`（实际用的起点） |
+| `rl.output_format` | E | `rl_config` → `training_prep rl-config --output-format` | RL 的 `train_env.yaml` / `val_env.yaml` 的 `prompt_format: free_think` |
+| `rl.max_response_length` | E | `rl_config` → `rl-config --max-response-length` | `ppo.yaml` 的 `data.max_response_length: 6144` |
+| `rl.guards.invalid_until` | E | `guard_reason()`：从训练日志的 `transition/invalid_action_rate/mean` 算解析失败率，只在最后一次更新 ≤ 这个值时检查 | 超过门槛时停这个 RL（`guard_stops`） |
+| `eval.rl_prompt_format` | E | `evaluate`：RL 检查点的评测任务的第 6 个参数 → `evaluation.py --prompt-format` | 评测结果 `EVAL/<RL 名>_<更新次数>/` |
+| `diagnostics` | 全部 | 新的 `diagnostics` 步：`failure_breakdown` 读评测结果（`evaluate` 写的 `EVAL/NAME/results.jsonl`）；探针用 `eval.diagnostics.sco_probe` 提交单卡任务（每个任务 6 个模型），模型是每个 SFT epoch、起点、每个 RL 检查点和 `eval.models`；最后 `qa_probe curve` | `TR/diag/failure_<题集>.{json,md}`、`TR/diag/probe_<名字>/<模型>.json(l)`、`curve.md`、`curve.png`；`steps.diagnostics.job_ids` |
+
+- **用卡**：一个矩阵组约 22 个模型（10 个 SFT epoch、2 个 RL 各 6 个检查点），每个约 3.5 分钟，共约 1.3 卡时，4 个单卡任务。
+- **P0 探针**：
+  - `p0_probe` 现在是 null，这一项跳过。
+  - P0 题库到了以后填路径即可，但 P0 有视频题，`qa_probe.chat` 现在只放图片；要先让它支持视频行。
+
+### 6.2 怎么打（冻结期，用户触发合并之后）
+
+```
+git apply --check docs/transition_qa/patches/0001-train-chain-matrix-fields.patch
+git apply docs/transition_qa/patches/0001-train-chain-matrix-fields.patch
+git apply docs/transition_qa/patches/0002-train-chain-diagnostics-step.patch
+python -m pytest -q data_gen/interiorgs_v10/tests/test_train_chain.py data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
+python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打完补丁的提交> --out <TR>/plan.json
+```
+
+- 已核对：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和测过的文件逐字相同；两个测试文件 27 个测试全部通过（原有 19 个、新加 8 个）。
+- 对正在跑的训练链的影响：
+  - 打了补丁，旧 plan 没有这些字段，行为不变；
+  - 第 11 步 `diagnostics` 记成 "not planned"；
+  - 已有的 progress.json 会多一个 `diagnostics` 步，状态 pending。

@@ -8,3 +8,7 @@
 # 注意：v10_p1 / v10_p2 是 RL 修正包（优化设置：GRPO、每次更新抽多少候选题等）的名字，
 # 和数据池 P1（转移题）/ P2（第十一轮的 SFT 动作轨迹）无关。
 rl_package: v10_p1   # 第十二轮如果把修正包 p2（48 道候选题）定为标准，改成 v10_p2
+
+# 探针集（补丁 0002 的 diagnostics 步、matrix_plan --chain-patch 用）。P0 探针到位后填 p0_probe。
+p1_probe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019/p1_probe.jsonl
+p0_probe: null

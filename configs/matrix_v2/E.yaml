@@ -78,7 +78,7 @@ train_chain_plan:   # 照第十二轮的 plan（interiorgs_v10_train_r12a_202610
   eval: {every: 50, options: []}
 
 needs_chain_support:
-  start_model: D 组挑出的 SFT 检查点   # 跳过 render 到 pick_sft，RL 从它开始
+  start_model: {from_chain: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m2_d}   # D 组挑出的 SFT 检查点（补丁 0001 读 D 的 progress.json）；跳过 render 到 pick_sft
   rl_output_format: think_action        # rl_config 步给 rl-config 传 --output-format think_action（两个 RL 都要）
   guards_invalid_until: 50              # 解析失败率这条只在前 50 次更新里检查；现有规则整个训练都生效（这里 20% 一直适用，比要求严）
   eval_rl_prompt_format: free_think     # evaluate 步给 RL 检查点传 --prompt-format free_think（现在固定用默认提示）

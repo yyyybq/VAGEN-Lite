@@ -25,9 +25,10 @@ LAUNCH = """#!/usr/bin/env bash
 set -euo pipefail
 RUN={run}
 ENV_ROOT={env_root}
+OUT={out}
 OWNER=$(stat -c %u:%g "$RUN")
-mkdir -p "$RUN/logs" "$RUN/probe"
-trap 'status=$?; printf "{{\\"exit_status\\":%s,\\"ended_utc\\":\\"%s\\"}}\\n" "$status" "$(date -u +%FT%TZ)" > "$RUN/logs/qa_probe_exit.json"; chown -R "$OWNER" "$RUN" 2>/dev/null || true; exit $status' EXIT
+mkdir -p "$RUN/logs" "$OUT"
+trap 'status=$?; printf "{{\\"exit_status\\":%s,\\"ended_utc\\":\\"%s\\"}}\\n" "$status" "$(date -u +%FT%TZ)" > "$RUN/logs/qa_probe_exit.json"; chown -R "$OWNER" "$RUN" "$OUT" 2>/dev/null || true; exit $status' EXIT
 exec > >(tee -a "$RUN/logs/qa_probe-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).log") 2>&1
 cd {checkout}
 export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 NO_PROXY='*' no_proxy='*'
@@ -43,11 +44,13 @@ export LIBRARY_PATH="$CURAND_LIBRARY_DIR:$ENV_ROOT/targets/x86_64-linux/lib:${{L
 export LD_LIBRARY_PATH="$CURAND_LIBRARY_DIR:$ENV_ROOT/lib:$ENV_ROOT/targets/x86_64-linux/lib:${{LD_LIBRARY_PATH:-}}"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
 git -C {checkout} rev-parse HEAD || true
-$ENV_ROOT/bin/python -m eval.diagnostics.qa_probe run --probe {probe} --out "$RUN/probe" {models}
+$ENV_ROOT/bin/python -m eval.diagnostics.qa_probe run --probe {probe} --out "$OUT" {models}
 """
 
 
-def prepare(run: Path, probe: str, from_eval: str = "", names: str = "", models=(), pool: str = None) -> Path:
+def prepare(run: Path, probe: str, from_eval: str = "", names: str = "", models=(), pool: str = None,
+            out_dir: str = None) -> Path:
+    """RUN/job/launch.sh and prepared.json; results go to ``out_dir`` (default RUN/probe), handed back to the owner."""
     run = run.resolve()
     job = run / "job"
     job.mkdir(parents=True, exist_ok=True)
@@ -57,7 +60,8 @@ def prepare(run: Path, probe: str, from_eval: str = "", names: str = "", models=
     for m in models:
         args += ["--model", m]
     launch = job / "launch.sh"
-    launch.write_text(LAUNCH.format(run=run, env_root=ENV_ROOT, checkout=CHECKOUT, probe=shlex.quote(str(Path(probe).resolve())),
+    out = shlex.quote(str(Path(out_dir).resolve())) if out_dir else "\"$RUN/probe\""
+    launch.write_text(LAUNCH.format(run=run, out=out, env_root=ENV_ROOT, checkout=CHECKOUT, probe=shlex.quote(str(Path(probe).resolve())),
                                     models=" ".join(shlex.quote(a) for a in args)))
     launch.chmod(0o755)
     (job / "prepared.json").write_text(json.dumps({
