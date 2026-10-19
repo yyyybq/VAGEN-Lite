@@ -62,6 +62,28 @@ def compliant(text: str, options: Sequence[str], yes_no: bool) -> bool:
     return re.fullmatch(rf"[{LETTERS[: len(options)]}]\.?", t) is not None
 
 
+FORMATS = ("exact", "letter_variant", "reasoning", "action_tag", "other")
+
+
+def format_class(text: str, options: Sequence[str], yes_no: bool) -> str:
+    """How an answer departs from the asked format: exact (the letter or Yes / No alone); letter_variant (the
+    letter in brackets and / or with the option's text, one short line); reasoning (an explanation, with or without
+    a <think> block); action_tag (the action format, <action>...</action>); other."""
+    t = re.sub(r"<\|[^>]*\|>", " ", str(text or "")).strip()
+    if compliant(t, options, yes_no):
+        return "exact"
+    if re.search(r"<\s*/?\s*action\s*>", t, re.IGNORECASE):
+        return "action_tag"
+    one_line = "\n" not in t and len(t) <= 120
+    if yes_no and one_line and re.match(r"(?i)^\W*(yes|no)\b", t):
+        return "letter_variant"
+    if not yes_no and one_line and re.match(rf"^\W*\(?[{LETTERS[: len(options)]}]\)?(?:[\s.:)]|$)", t):
+        return "letter_variant"
+    if "<think>" in t.lower() or len(t.split()) >= 8:
+        return "reasoning"
+    return "other"
+
+
 def _numbers(s: str) -> List[float]:
     return [float(x) for x in re.findall(r"(?<![\d.])\d+(?:\.\d+)?", s)]
 
@@ -124,6 +146,7 @@ def score(rows: Sequence[Dict[str, Any]], outputs: Sequence[str]) -> List[Dict[s
         out.append({"sample_id": r["sample_id"], "qtype": r["qtype"], "qclass": r["qclass"], "family": r["family"],
                     "gold": gold, "output": text, "parsed": got, "correct": got == gold, "readable": got is not None,
                     "compliant": compliant(text, r.get("options") or [], yes_no),
+                    "format": format_class(text, r.get("options") or [], yes_no),
                     "n_options": 2 if yes_no else len(r.get("options") or [])})
     return out
 
@@ -137,7 +160,8 @@ def summary(answers: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                 "unreadable": sum(not a["readable"] for a in sel) / n,
                 "noncompliant": sum(not a.get("compliant", True) for a in sel) / n,
                 "strict_accuracy": sum(a["correct"] and a.get("compliant", True) for a in sel) / n,
-                "chance": sum(1.0 / a["n_options"] for a in sel) / n if all(a.get("n_options") for a in sel) else None}
+                "chance": sum(1.0 / a["n_options"] for a in sel) / n if all(a.get("n_options") for a in sel) else None,
+                "formats": {f: sum(a.get("format") == f for a in sel) / n for f in FORMATS} if all("format" in a for a in sel) else None}
     out = {"all": acc(answers)}
     for key in ("qclass", "qtype"):
         groups: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
@@ -188,6 +212,24 @@ def run_one(name: str, model: str, probe: Path, out: Path) -> None:  # pragma: n
                                                   "load_seconds": round(load, 1),
                                                   "answer_seconds": round(time.time() - t0 - load, 1),
                                                   **summary(answers)}, indent=1))
+
+
+def cmd_rescore(args: argparse.Namespace) -> None:
+    """Read the saved answers again with the current parser and format rules (no GPU): OUT/<name>.jsonl and the
+    accuracies in OUT/<name>.json are rewritten; the model, timings and probe path are kept."""
+    out = Path(args.out)
+    rows = {r["sample_id"]: r for r in (json.loads(l) for l in Path(args.probe).read_text().splitlines() if l.strip())}
+    for path in sorted(out.glob("*.jsonl")):
+        old = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        answers = score([rows[a["sample_id"]] for a in old], [a["output"] for a in old])
+        with open(path, "w", encoding="utf-8") as f:
+            for a in answers:
+                f.write(json.dumps(a, ensure_ascii=False) + "\n")
+        meta_path = path.with_suffix(".json")
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {"name": path.stem}
+        meta = {k: v for k, v in meta.items() if k in ("name", "model", "probe", "load_seconds", "answer_seconds")}
+        meta_path.write_text(json.dumps({**meta, **summary(answers)}, indent=1))
+        print(f"{path.stem}: " + json.dumps({k: summary(answers)["all"][k] for k in ("accuracy", "noncompliant")}))
 
 
 def models_from_eval(ev: Path, names: Sequence[str]) -> List[Tuple[str, str]]:
@@ -253,16 +295,19 @@ def cmd_curve(args: argparse.Namespace) -> None:
         curves[cname] = [(s, r) for s, _, r in rows]
         qtypes = sorted({q for _, _, r in rows for q in r["qtype"]})
         md += [f"## {cname}", "",
-               "| 步数 | 检查点 | 全部 | 随机 | 严格 | 读不出 | 不合规 | 状态题 | 前向题 | 逆向题 | " + " | ".join(qtypes) + " |",
-               "| " + " | ".join("---" for _ in range(10 + len(qtypes))) + " |"]
+               "| 步数 | 检查点 | 全部 | 随机 | 严格 | 读不出 | 不合规 | 其中：括号 / 带选项文字 | 推理 | 动作格式 | 状态题 | 前向题 | 逆向题 | "
+               + " | ".join(qtypes) + " |",
+               "| " + " | ".join("---" for _ in range(13 + len(qtypes))) + " |"]
 
         def pct(x):
             return "–" if x is None else f"{100 * x:.1f}"
 
         for step, model, r in rows:
             cls, a = r["qclass"], r["all"]
+            fm = a.get("formats") or {}
             md.append(f"| {step} | {model} | {pct(a['accuracy'])} | {pct(a.get('chance'))} | {pct(a.get('strict_accuracy'))} | "
-                      f"{pct(a['unreadable'])} | {pct(a.get('noncompliant'))} | "
+                      f"{pct(a['unreadable'])} | {pct(a.get('noncompliant'))} | {pct(fm.get('letter_variant'))} | "
+                      f"{pct(fm.get('reasoning'))} | {pct(fm.get('action_tag'))} | "
                       + " | ".join(pct((cls.get(c) or {}).get("accuracy")) for c in ("state", "forward", "inverse"))
                       + " | " + " | ".join(pct((r["qtype"].get(q) or {}).get("accuracy")) for q in qtypes) + " |")
         md.append("")
@@ -303,6 +348,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     r.add_argument("--names", default="", help="with --from-eval: comma-separated result folder names")
     r.add_argument("--in-process", action="store_true", help=argparse.SUPPRESS)
     r.set_defaults(func=cmd_run)
+    s = sub.add_parser("rescore")
+    s.add_argument("--probe", required=True)
+    s.add_argument("--out", required=True)
+    s.set_defaults(func=cmd_rescore)
     c = sub.add_parser("curve")
     c.add_argument("--out", required=True)
     c.add_argument("--chain", action="append", required=True)

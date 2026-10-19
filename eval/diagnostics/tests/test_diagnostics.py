@@ -89,12 +89,25 @@ def test_score_and_summary():
              "messages": [{}, {"content": "B"}]}]
     ans = QP.score(rows, ["Yes", "<action>move_left|</action>"])
     s = QP.summary(ans)
+    formats = {"exact": 0.5, "letter_variant": 0.0, "reasoning": 0.0, "action_tag": 0.5, "other": 0.0}
     assert s["all"] == {"n": 2, "accuracy": 0.5, "unreadable": 0.5, "noncompliant": 0.5, "strict_accuracy": 0.5,
-                        "chance": 0.5}
+                        "chance": 0.5, "formats": formats}
     assert s["qtype"]["closer_now"]["unreadable"] == 1.0
     ans = QP.score(rows, ["Yes, it is.", "B"])
     s = QP.summary(ans)
     assert s["all"]["accuracy"] == 1.0 and s["all"]["noncompliant"] == 0.5 and s["all"]["strict_accuracy"] == 0.5
+    assert s["all"]["formats"]["letter_variant"] == 0.5
+
+
+def test_format_classes():
+    opts = ["to the left", "to the right"]
+    assert QP.format_class("B", opts, False) == "exact"
+    assert QP.format_class("(B)", opts, False) == "letter_variant"
+    assert QP.format_class("(A) to the left", opts, False) == "letter_variant"
+    assert QP.format_class("To determine the side, look at the sofa and the lamp; the answer is A", opts, False) == "reasoning"
+    assert QP.format_class("<action>turn_left|</action>", opts, False) == "action_tag"
+    assert QP.format_class("No, it is not.", [], True) == "letter_variant"
+    assert QP.format_class("left", opts, False) == "other"
 
 
 def test_history_permutation_differs_and_keeps_turns():
