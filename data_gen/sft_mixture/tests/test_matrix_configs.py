@@ -134,6 +134,21 @@ def test_group_a_and_e(cfgs):
         assert "max_response_length" not in cfgs[g]["rl"]                  # 6,144 only for E
 
 
+def test_d_nop0_is_d_without_p0():
+    alt, d = MP.load_group("D_noP0"), MP.load_group("D")
+    pa, pd = MP.plan("D_noP0"), MP.plan("D")
+    assert {k for k in pd if pa.get(k) != pd.get(k)} == {"tr", "rl_name"}           # same SFT / RL / eval settings
+    assert alt["data"]["train_rows"] == {"P0": 0, "P1": 9802, "P2": 9802}
+    assert {k: v for k, v in alt.items() if k not in ("group", "description", "status", "data", "train_chain_plan",
+                                                        "needs_chain_support")} == \
+        {k: v for k, v in d.items() if k not in ("group", "description", "status", "data", "train_chain_plan",
+                                                 "needs_chain_support")}
+    mix = yaml.safe_load(MIXTURE.read_text(encoding="utf-8"))["recipes"]
+    assert mix["D_noP0"]["draw_as"] == "D"                                           # the same P1 / P2 rows as D
+    assert mix["D_noP0"]["pools"] == {k: v for k, v in mix["D"]["pools"].items() if k != "P0"}
+    assert alt["needs_chain_support"]["sft_lf_dirs"]["mix"].endswith("/D_noP0")
+
+
 def test_c0_reuses_the_round12_pair():
     c0 = MP.load_group("C0")
     assert "train_chain_plan" not in c0 and c0["sft"]["model"].endswith("lf_formal/model/checkpoint-1386")

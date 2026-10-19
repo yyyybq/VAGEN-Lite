@@ -55,3 +55,8 @@ recipes:
     same_as: D
     description: RL 时换 free_think 提示（探索性，排在 D 之后；RL 前 50 步解析失败率超过 20% 就放弃）
     output_format: action_only（RL 时 free_think）
+  D_noP0:   # 备选（用户 2026-10-19）：D 去掉 P0，P1 和 P2 的行和 D 逐条相同；只写配置，不排期
+    description: 转移题 + 动作轨迹，不含 P0（备选，不排期）
+    output_format: action_only
+    draw_as: D
+    pools: {P1: {times: 1.0, of: P2}, P2: all}

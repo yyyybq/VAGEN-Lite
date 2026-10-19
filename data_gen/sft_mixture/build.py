@@ -16,6 +16,8 @@ recipe table.  Rules:
 * Counts per pool: ``all``, a number, ``{times: x, of: POOL}`` (x times another pool's count in the same recipe)
   or ``{share: x}`` of the recipe's ``total``; smaller than the pool means a stratified draw (P0 by question
   group, P1 by question type, P2 by task family) with the config's seed.
+* ``draw_as: OTHER``: draw each pool with another recipe's seed, so a recipe that drops a pool keeps exactly the
+  other recipe's rows of the pools it shares (matrix D_noP0 = D without P0).
 """
 
 from __future__ import annotations
@@ -271,7 +273,8 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
         info, train_sets, val_sets, summary = {}, [], [], {}
         for pool in POOLS:
             if counts.get(pool):
-                rows = stratified(pools[pool]["train"], counts[pool], random.Random(f"{seed}:{rname}:{pool}"))
+                draw = rspec.get("draw_as", rname)  # another recipe's seed: the same rows of the shared pools
+                rows = stratified(pools[pool]["train"], counts[pool], random.Random(f"{seed}:{draw}:{pool}"))
                 if cfg.get("check_media", True):
                     check_media(f"{rname} {pool}_train", rows)
                 write_jsonl(d / f"{pool}_train.jsonl", rows)
