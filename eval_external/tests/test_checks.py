@@ -79,9 +79,23 @@ def test_esi_action_rule():
     assert not action_ok("<action>move_forward|</action>", p_obj) and not action_ok("forward", p_obj)
     p_named = "4. Available pickup actions: pick_up_obj_near_tennis ball, pick_up_obj_near_conch."
     assert action_ok("pick_up_obj_near_conch", p_named) and not action_ok("pick up conch", p_named)
+    p_list = "You can take the following actions:\n  put_on_slope: place the mango on the slope\n  move_forward\n\nx"
+    assert action_ok("put_on_slope", p_list) and not action_ok("put_on_table", p_list)
+    p_choice = '{\n  "action": "<action_name>",\n  "choice_letter": "<A or B>",\n  "confidence": <float>\n}'
+    assert classify({"action": "turn_up", "choice_letter": "B", "confidence": 0.4}, p_choice) == []
+    assert classify({"action": "turn_up", "answer": "B", "confidence": 0.4}, p_choice) == ["no_answer"]
     assert classify({"action": "move_left", "answer": "not sure", "confidence": 0.2}, p_obj) == []
     assert classify({"raw_response": "x", "error": "JSON parse failed", "action": "move_forward"}, p_obj) == [
         "no_json", "no_answer", "no_confidence"]
+
+
+def test_done_label_reads_any_results_file(tmp_path):
+    from eval_external.sco import queue as Q
+
+    (tmp_path / "results.json").write_text(json.dumps([{"model": "m"}]))  # the ESI format check writes a list
+    assert Q.done_label(tmp_path) == "done"
+    (tmp_path / "results.json").write_text(json.dumps({"checks": {"short_run": True}}))
+    assert Q.done_label(tmp_path) == "done_flagged: short run"
 
 
 def test_queue_replace_waits_for_normal_run(tmp_path, monkeypatch):

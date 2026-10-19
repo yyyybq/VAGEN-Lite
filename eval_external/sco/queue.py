@@ -114,9 +114,10 @@ def item(stage: str, model: str, kind: str) -> Item:
 def done_label(rd: Path) -> str:
     """'done', or 'done_flagged: ...' when collect's checks flagged the run (QA: run time far below base-7B's)."""
     try:
-        chk = json.loads((rd / "results.json").read_text()).get("checks") or {}
+        res = json.loads((rd / "results.json").read_text())
     except (OSError, ValueError):
         return "done"
+    chk = (res.get("checks") if isinstance(res, dict) else None) or {}  # ESI format check: a list of rows
     return "done_flagged: short run" if chk.get("short_run") else "done"
 
 

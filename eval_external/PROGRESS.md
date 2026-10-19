@@ -462,3 +462,33 @@ base-7B 和 Spatial-Interactor（SI）报的基座数对照（汇总表在 `resu
   - 三个合计约 6–15 小时。按你的决定（第 14 条）先不跑，等主表出来再定。
 
 **新的产物**：`results/qa_checks.md`、`results/vsti_distance.md`；`runs/esi_format_check/`；`qa_transfer/pixel_log.py`、`check_runs.py`、`vsti_distance.py`；`closed_loop/esi_format_check.py`。
+
+## 2026-10-19 ESI-Bench 首步格式检查的结果（第 6 条）
+
+**结论：** 我们的 5 个模型在 ESI-Bench 自带的格式下基本答不出合法回答，20 道题里无效 16–20 道；base-7B 只有 1 道无效，SI-7B 3 道。表现和 WalkerBench 一样：我们的模型把我们环境的动作串写进回答，不按别的 benchmark 的格式来。
+
+"无效"是按 ESI-Bench 自己会怎么处理来定的：它的解析器从不报错，而是悄悄补默认值（缺动作当 move_forward，缺答案当 "unsure"，缺置信度当 0.0），不认识的动作什么也不做。所以一条回答只要满足下面任何一条就算无效，因为模型本来的意图会被默认值换掉：
+- 解析不出 JSON；
+- 动作不是它的 10 个相机动作、stop，或这道题提示词里列出的操作（例如 "fill water in hingeless jar"、"put_on_slope"、"pick up <object>"）；
+- 缺这道题 JSON 模板要的答案字段（多数题是 answer，部分遮挡题是 choice_letter / choice_text）；
+- 缺数值型的 confidence。
+
+| 模型 | 无效 / 20 | 解析不出 JSON | 动作不合法 | 缺答案 | 缺置信度 | 写到 1,024 token 上限被截断 |
+|---|---|---|---|---|---|---|
+| base-7B | 1（5%） | 0 | 1 | 0 | 0 | 0 |
+| SI-7B | 3（15%） | 0 | 3 | 0 | 0 | 0 |
+| ours-SFT | 16（80%） | 1 | 16 | 16 | 16 | 5 |
+| ours-RL-150 | 17（85%） | 1 | 16 | 16 | 16 | 7 |
+| ours-SFT-r11 | 20（100%） | 3 | 19 | 19 | 19 | 15 |
+| ours-RL-r11（P-S0） | 20（100%） | 2 | 19 | 20 | 20 | 14 |
+| ours-RL-r11-dense（P-D） | 20（100%） | 11 | 20 | 20 | 20 | 17 |
+
+- 我们模型的典型回答：`{"move_backward": "move_backward"}`、`{"turn_left|turn_left|turn_left|turn_left|</action>": 0.95}`，或者把 `move_backward|` 一直重复到 1,024 个 token 的上限。ESI-Bench 让服务端强制输出 JSON，所以它们只能写出这种"形式上是 JSON、内容是我们环境的动作串"的回答。
+- base-7B 那 1 道：把 "unsure" 写成了动作。SI-7B 那 3 道：把一段描述、"A"、"not sure" 写成了动作。
+- 第十一轮的三个模型比第十轮的两个更差（20/20 对 16–17/20），截断也更多。
+
+**这次检查的范围**：只是一局的第一次调用，画面用官方离线渲染图代替模拟器的第一帧，题目每类 2 道，共 20 道。它说明的是"按 ESI-Bench 的格式能不能答"，不是 ESI-Bench 的成绩。ESI-Bench 正式运行仍然做不了（H800 没有 RT 核）。
+
+**中途修正过的判定**：第一版只认 answer 字段和三种物体操作，把 base-7B、SI-7B 的 2–4 道合法回答也算成了无效（部分遮挡题用 choice_letter、灌水题和斜面题有自己的操作）。现在答案字段和动作列表都从每道题自己的提示词里读，已保存的回答全部按新判定重新算过，不需要重跑。我们模型的数没变。
+
+**产物**：`runs/esi_format_check/`（items.json 是题目和提示词，<模型>.jsonl 是逐题原始回答，summary.json 是汇总）。
