@@ -373,6 +373,7 @@ base-7B 和 Spatial-Interactor（SI）报的基座数对照（汇总表在 `resu
     - 我们的环境：正式成绩用严格格式；
     - WalkerBench：主表所有模型都用本地规则，严格模式放附录；
     - 两张表都列出每个模型"规则救回了多少比例的无效回答"。
+14. WalkerBench 多测 300 题先不跑，等主表（本地规则）出来再定。
 
 **付费调用核查：除 WalkerBench 那一步修补（已关）外，没有别的付费调用**
 - 问答：我们给 VLMEvalKit 显式传了 `--judge exact_matching`（不传的话，它对部分数据集默认调 GPT 判分）。用到的五个数据集（VSI、ViewSpatial、MindCube、MMSI、SPBench）在这个设置下都走规则判分。
@@ -458,6 +459,6 @@ base-7B 和 Spatial-Interactor（SI）报的基座数对照（汇总表在 `resu
   - base-7B：100 题用了 0.28 小时，300 题约 0.9 小时；
   - SI-7B：本地规则下 100 题 0.10 小时（严格 0.16 小时），300 题约 0.3–0.5 小时；
   - 我们最好的模型：我们的模型很少主动停下，一般走满步数，100 题要 1.7–4.7 小时，300 题约 5–14 小时。主表（本地规则）跑完才知道哪个最好。
-  - 三个合计约 6–15 小时。没有跑。
+  - 三个合计约 6–15 小时。按你的决定（第 14 条）先不跑，等主表出来再定。
 
 **新的产物**：`results/qa_checks.md`、`results/vsti_distance.md`；`runs/esi_format_check/`；`qa_transfer/pixel_log.py`、`check_runs.py`、`vsti_distance.py`；`closed_loop/esi_format_check.py`。
