@@ -53,6 +53,9 @@ class VLLMServer:
             if not env.get(var) and (prefix / "bin" / tool).exists():
                 env[var] = str(prefix / "bin" / tool)
         env.setdefault("TORCH_CUDA_ARCH_LIST", "9.0")
+        # FlashInfer's sampler is compiled at start-up and fails without the CUDA header set-up of the training
+        # scripts; with greedy decoding the sampler only takes the argmax, so PyTorch's own sampler is used.
+        env["VLLM_USE_FLASHINFER_SAMPLER"] = "0"
         env.setdefault("NO_PROXY", "*")
         env.setdefault("no_proxy", "*")
         return env
