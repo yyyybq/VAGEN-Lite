@@ -26,3 +26,15 @@ def test_queue_run_dirs_match_manual_naming():
 
     assert Q.run_dir("step1", "base-7B", "VSI-Bench@lmms").name == "base-7B__VSI-Bench_lmms"
     assert Q.run_dir("step2", "SI-7B", "SAT-Real") == Q.QA_RUNS / "step2" / "SI-7B__SAT-Real"
+
+
+def test_queue_item_kinds():
+    from eval_external.sco import queue as Q
+
+    qa = Q.item("step2", "SI-7B", "VSI-Bench")
+    assert qa.run_dir == Q.QA_RUNS / "step2" / "SI-7B__VSI-Bench" and "--bench" in qa.command
+    wb = Q.item("step2", "base-7B", "WalkerBench-blind")
+    assert wb.run_dir.name == "base-7B__blind" and wb.command[-1] == "--blind"
+    own = Q.item("step2", "ours-SFT", "OwnEnv-shuffle")
+    assert own.run_dir.name == "ours-SFT__shuffle" and own.command[-3:] == ["ours-SFT__shuffle", "ours-SFT", "shuffle"]
+    assert own.also_own == (str(Q.RUNS / "ownenv"),)

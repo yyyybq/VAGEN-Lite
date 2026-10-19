@@ -77,6 +77,24 @@ def patched_policy(evaluation, mode: str):
     return Policy
 
 
+def summarize(name: str) -> dict:
+    """Success rate with its Wilson interval, invalid turns, collisions and the failure breakdown of one run."""
+    from eval_external.common.stats import wilson
+    from eval_external.diagnostics.failure_breakdown import breakdown
+
+    rows = [json.loads(line) for line in open(EVAL / name / "results.jsonl") if line.strip()]
+    ok = [r for r in rows if "error" not in r]
+    k = sum(bool(r["success"]) for r in ok)
+    p, lo, hi = wilson(k, len(ok))
+    turns = sum(r["turns"] for r in ok) or 1
+    actions = sum(r["actions"] for r in ok) or 1
+    return {"name": name, "n": len(ok), "errors": len(rows) - len(ok), "success": k,
+            "success_rate": round(100 * p, 2), "ci95": [round(100 * lo, 1), round(100 * hi, 1)],
+            "invalid_turn_pct": round(100 * sum(r["invalid_turns"] for r in ok) / turns, 2),
+            "collision_per_action": round(sum(r["collisions"] for r in ok) / actions, 4),
+            "breakdown": breakdown(rows), "manifest": json.loads((EVAL / name / "manifest.json").read_text())}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", required=True, help="eval_external model code")
