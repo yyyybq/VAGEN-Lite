@@ -47,8 +47,8 @@ ROOT = Path("/mnt/umm/users/yinbaiqiao/eval_external_assets")
 REPO = ROOT / "repos" / "WalkerBench"
 PANORAMAS = ROOT / "data" / "walkerbench_pano" / "panoramas"
 TYPES = ("angle", "dis", "height", "nav", "vis")  # Spatial-Interactor's column order
-FALLBACK_MARKERS = ("Failed to parse response", "Invalid action format", "Unknown command",
-                    "All API retries failed")
+UNPARSEABLE_MARKERS = ("Failed to parse response", "Invalid action format", "Unknown command")
+API_FAILED_MARKER = "All API retries failed"  # the model server did not answer: the run is not valid
 COUNTS = defaultdict(int)
 LOCK = threading.Lock()
 
@@ -128,7 +128,7 @@ def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: b
 
 def score(copy: Path, tasks: list[str]) -> dict:
     ev = load_module("wb_evaluate_all", copy / "scripts" / "evaluate_all.py")
-    per_task, fallback_steps, total_steps = {}, 0, 0
+    per_task, unparseable_steps, api_failed_steps, total_steps = {}, 0, 0, 0
     for log in sorted((copy / "logs").glob("*.jsonl")):
         r = ev.evaluate_session(log, copy / "tasks" / "standard")
         if r:
@@ -137,7 +137,9 @@ def score(copy: Path, tasks: list[str]) -> dict:
             e = json.loads(line)
             if e.get("event") == "action":
                 total_steps += 1
-                fallback_steps += any(m in str(e.get("reason")) for m in FALLBACK_MARKERS)
+                reason = str(e.get("reason"))
+                unparseable_steps += any(m in reason for m in UNPARSEABLE_MARKERS)
+                api_failed_steps += API_FAILED_MARKER in reason
     by_type = defaultdict(list)
     for t in tasks:
         r = per_task.get(t)
@@ -156,8 +158,9 @@ def score(copy: Path, tasks: list[str]) -> dict:
     out["overall_ci95"] = [round(100 * lo, 1), round(100 * hi, 1)]
     out["mean_steps"] = round(sum(r["steps"] for r in per_task.values()) / max(len(per_task), 1), 2)
     out["steps_logged"] = total_steps
-    out["fallback_steps"] = fallback_steps
-    out["fallback_pct"] = round(100 * fallback_steps / max(total_steps, 1), 2)
+    out["unparseable_steps"] = unparseable_steps
+    out["unparseable_pct"] = round(100 * unparseable_steps / max(total_steps, 1), 2)
+    out["api_failed_steps"] = api_failed_steps
     out["per_task"] = per_task
     return out
 
@@ -187,12 +190,19 @@ def main() -> None:
         frames=None, decoding={"temperature": args.temperature, "max_tokens": 16384, "other": "vLLM defaults"})
     with VLLMServer(args.model, log=run_dir / "vllm.log") as srv:
         tasks = run_tasks(copy, args.model, srv.base_url, args.temperature, args.blind, args.workers)
+        server_alive = srv.alive()
     res = score(copy, tasks)
-    res.update({"model": args.model, "blind": args.blind, "temperature": args.temperature, "counts": dict(COUNTS)})
-    with open(run_dir / "results.json", "w", newline="\n") as f:
+    res.update({"model": args.model, "blind": args.blind, "temperature": args.temperature, "counts": dict(COUNTS),
+                "server_alive_at_end": server_alive})
+    valid = server_alive and res["api_failed_steps"] == 0 and COUNTS["tasks_without_log"] == 0
+    # an invalid run (the server died or did not answer) never produces results.json, so the queue marks it failed
+    with open(run_dir / ("results.json" if valid else "results_invalid.json"), "w", newline="\n") as f:
         json.dump(res, f, indent=1, default=str)
         f.write("\n")
     print(json.dumps({k: v for k, v in res.items() if k != "per_task"}, indent=1))
+    if not valid:
+        raise SystemExit(f"invalid run: server alive {server_alive}, {res['api_failed_steps']} steps without an "
+                         f"answer from the model, {COUNTS['tasks_without_log']} tasks without a log")
 
 
 if __name__ == "__main__":

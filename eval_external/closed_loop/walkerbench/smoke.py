@@ -67,7 +67,7 @@ def main() -> None:
     report = {"tasks": tasks, "calls": len(CALLS), "calls_with_one_image": sum(c["images"] == 1 for c in CALLS),
               "temperatures": sorted({c["temperature"] for c in CALLS}, key=str), "counts": dict(R.COUNTS),
               "n_scored": res["n_scored"], "total_sr": res["total_sr"], "mean_steps": res["mean_steps"],
-              "fallback_steps": res["fallback_steps"], "settings_diff": diff}
+              "unparseable_steps": res["unparseable_steps"], "api_failed_steps": res["api_failed_steps"], "settings_diff": diff}
     print(json.dumps(report, indent=1))
     ok = report["calls"] > 0 and report["calls_with_one_image"] == report["calls"] and res["n_scored"] == len(tasks)
     raise SystemExit(0 if ok else 1)

@@ -19,7 +19,10 @@ from pathlib import Path
 
 from eval_external.adapters import models as M
 
-SERVER_DEFAULTS = {"max_model_len": 128000, "max_images": 64, "gpu_memory_utilization": 0.85, "seed": 0}
+# enforce_eager: no CUDA graphs.  With them, vLLM 0.11 hit "CUDA error: an illegal memory access" two minutes into
+# the first WalkerBench run (Qwen2.5-VL, multi-image chats); our env's evaluation always ran eager and never did.
+SERVER_DEFAULTS = {"max_model_len": 128000, "max_images": 64, "gpu_memory_utilization": 0.85, "seed": 0,
+                   "enforce_eager": True}
 
 
 class VLLMServer:
@@ -41,7 +44,11 @@ class VLLMServer:
                 "--max-model-len", str(self.cfg["max_model_len"]),
                 "--limit-mm-per-prompt", json.dumps({"image": self.cfg["max_images"]}),
                 "--gpu-memory-utilization", str(self.cfg["gpu_memory_utilization"]),
-                "--seed", str(self.cfg["seed"]), "--generation-config", "vllm"]
+                "--seed", str(self.cfg["seed"]), "--generation-config", "vllm"] + (
+                    ["--enforce-eager"] if self.cfg["enforce_eager"] else [])
+
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
 
     @staticmethod
     def env() -> dict:
