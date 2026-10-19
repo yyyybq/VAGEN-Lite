@@ -371,3 +371,30 @@
   - 记录解析失败率；
   - 确认 E 组的 RL 配置只需换 `prompt_format`。
   预计不改现有文件；`CHANGES.md` 记录结论。
+
+## 6. 第 6 步（2026-10-18）：输出格式开关 —— 完成
+
+### 6.1 结论（详见 `CHANGES.md`）
+
+1. **开关三处里两处已有，只补了 RL 那一处。**
+   - SFT 导出（`sft.export.prompt_format`）、环境的提示（`prompt_format`）、评测（`--prompt-format`）、解析器（两种格式都读）、解析失败的记录，都已经有了。
+   - 只差一件：rl-config 发现 RL 提示和 SFT 提示不同就拒绝生成配置，E 组生成不了。
+     为此给 `training_prep.py rl-config` 加了 `--output-format think_action`（15 行），这是本分支唯一改动的现有文件。默认行为不变。
+2. **验收通过。** 在旧评测集 278 道（10 个模型）和评测集 279 道（37 个模型）的历史轨迹上，86,067 个回答里 99.98% 两种写法读出同样的动作，也和评测记录的相同。
+   - 16 个不一致都是原始 7B 不带标签的回答：解析器在"先想再输出"格式下会读出思考块之后的裸动作，只输出动作的格式不会。这是现有规则，没改。
+3. **E 组有两件事要你定：**
+   - 模型在 `free_think` 提示下不写思考文字也不扣分，所以 E 的解析失败率可能很低，但模型根本没开始思考。建议加一个"带思考文字的回答比例"指标，要改 vagen 的现有文件。
+   - 一条序列模式下整个 episode 的回答上限 4,096 个词元，加了思考文字会不够，E 要放宽到约 6,144。
+
+### 6.2 产物
+
+- **代码：**
+  - `data_gen/interiorgs_v10/training_prep.py`（改）；
+  - `data_gen/interiorgs_v10/tests/test_output_format.py`（新，5 个测试）；
+  - `eval/diagnostics/format_check.py`（新）和它的测试（诊断测试合计 9 个）。
+- **文档：** `docs/transition_qa/CHANGES.md`。
+- **结果：** `exps/diagnostics_20261018/format_check.{md,json}`。
+
+### 6.3 下一步
+
+第 7 步：矩阵配置 `configs/matrix_v2/`。每组一个 YAML，写清数据配方、SFT 配置、RL 配置、评测集；只写配置，`train_chain` 读不了的字段写进 `CHANGES.md` 第 5 节。
