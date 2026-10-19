@@ -56,6 +56,11 @@ evaluated) on NaN in the trainer's main metrics, KL to the start model above kl_
 answers above invalid_max (mean of the last invalid_window updates), or training success below the start (mean
 of the first start_updates) by more than success_drop in each of drop_window consecutive updates (guard_reason).
 
+Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
+or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
+submitted again, at most "retries" (default 2) times per run (startup_problem; the render service keeps running);
+PROGRESS.md lists every resubmission.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -83,6 +88,13 @@ STEP_ZH = {"check_code": "核对代码", "render": "渲染 SFT 画面", "sft_dat
 CARDS = {"render": "1", "sft": "每组 8", "sft_eval": "每个 1", "rl": "1 + 8", "rl_extend": "1 + 8", "evaluate": "每个模型 1"}
 POLL_S = 60.0
 DEFAULT_MAX_EVAL_JOBS = 10
+# round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
+# during startup", after "GCS cannot find the node ... registration may not be complete")
+STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
+                           "raylet failed to start")
+STARTUP_DEFAULTS = {"retries": 2, "stall_minutes": 40}
+_UPDATE_LINE = re.compile(r"step:\d+ - ")
+_LOG_START = re.compile(r"-(\d{8}T\d{6}Z)-")
 
 
 def now() -> str:
@@ -296,6 +308,40 @@ def block_stats(rollout_dir: Path, log_text: str = "", block: int = 25) -> Dict[
     return out
 
 
+def startup_problem(log_text: str, state: Optional[str], finished: bool, quiet_s: Optional[float],
+                    stall_s: float) -> Optional[str]:
+    """Round 12 (the user's decision 5): why a trainer job needs resubmitting, or None.  Only before its first
+    update: the job ended (not SUCCEEDED) with a Ray start-up failure in its log, or it is running and its log has
+    not grown for ``stall_s`` seconds (``quiet_s``)."""
+    if _UPDATE_LINE.search(log_text):
+        return None
+    if finished:
+        if state == "SUCCEEDED":
+            return None
+        marker = next((m for m in STARTUP_FAILURE_MARKERS if m in log_text), None)
+        return f"ended {state} at Ray start-up ({marker})" if marker else None
+    if quiet_s is not None and quiet_s >= stall_s:
+        return f"no output for {quiet_s / 60:.0f} minutes before the first update"
+    return None
+
+
+def job_logs(run_dir: Path, prefix: str, since_utc: Optional[str]) -> List[Path]:
+    """The logs of one job (logs/<prefix>-<start UTC>-<id>-worker-0.log) started after its submission at
+    ``since_utc`` (two minutes of clock slack); all of them when the submission time is unknown."""
+    d = run_dir / "logs"
+    if not d.is_dir():
+        return []
+    t0 = (datetime.datetime.fromisoformat(since_utc).timestamp() - 120) if since_utc else None
+    out = []
+    for p in sorted(d.glob(f"{prefix}-*.log")):
+        m = _LOG_START.search(p.name)
+        if t0 is not None and m and datetime.datetime.strptime(m.group(1), "%Y%m%dT%H%M%SZ").replace(
+                tzinfo=datetime.timezone.utc).timestamp() < t0:
+            continue
+        out.append(p)
+    return out
+
+
 class SignalCheckFailed(Exception):
     """An RL run missed the signal check (plan "rl"."signal_check")."""
 
@@ -334,8 +380,10 @@ def pick_best(scores: Dict[str, Optional[float]], order: Sequence[str]) -> Optio
 # The chain
 # ---------------------------------------------------------------------------
 class Chain:
-    def __init__(self, plan: Dict[str, Any], sleep: Callable[[float], None] = time.sleep) -> None:
+    def __init__(self, plan: Dict[str, Any], sleep: Callable[[float], None] = time.sleep,
+                 clock: Callable[[], float] = time.time) -> None:
         self.plan = plan
+        self.clock = clock
         self.tr = Path(plan["tr"])
         self.sft_dir = Path(plan["sft_dir"])
         self.state_path = self.tr / "progress.json"
@@ -771,6 +819,25 @@ class Chain:
                     d = run["run_dir"]
                     st_rl, st_r = job_sco.status(d, "job_rl"), job_sco.status(d, "job_renderer")
                     states[f"{name}/rl"], states[f"{name}/renderer"] = st_rl.get("state"), st_r.get("state")
+                    problem = self.startup_check(name, run, st_rl)  # round 12: Ray start-up failure or silence
+                    if problem:
+                        retries = self.state.setdefault("startup_retries", {}).setdefault(name, [])
+                        limit = int(self.startup_settings(run)["retries"])
+                        if len(retries) < limit:
+                            job_sco.delete(d, "job_rl")
+                            retries.append({"utc": now(), "job_id": st_rl.get("job_id"), "reason": problem})
+                            job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
+                                            pool=self.plan.get("pool"))
+                            job_sco.submit(d, job_dir="job_rl")
+                            retries[-1]["new_job_id"] = json.loads((d / "job_rl" / "submission.json").read_text())["job_id"]
+                            self.save()
+                            continue
+                        if not st_rl.get("finished"):  # silent again after the last resubmission: give up on it
+                            (d / "STOP_RENDERER").touch()
+                            job_sco.delete(d, "job_rl")
+                            ended[name] = f"start-up: {problem} (after {limit} resubmissions)"
+                            active.pop(name)
+                            continue
                     if st_rl.get("finished") or st_rl.get("state") in ("NOT_FOUND", "SUSPENDED"):
                         (d / "STOP_RENDERER").touch()
                         ended[name] = st_rl.get("state")
@@ -810,6 +877,29 @@ class Chain:
                if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir() and n not in stopped]
         if bad:
             raise ChainError("RL runs without a checkpoint at update " + str(endpoint) + ": " + ", ".join(bad))
+
+    def startup_settings(self, run: Dict[str, Any]) -> Dict[str, Any]:
+        return {**STARTUP_DEFAULTS, **dict(run["rl"].get("startup") or {})}
+
+    def startup_check(self, name: str, run: Dict[str, Any], st: Dict[str, Any]) -> Optional[str]:
+        """Round 12: startup_problem for the run's current trainer job (its logs since its submission; silence
+        counted from the later of its last log write and the first poll that saw it running)."""
+        d = run["run_dir"]
+        receipt = d / "job_rl" / "submission.json"
+        if not receipt.exists():
+            return None
+        sub = json.loads(receipt.read_text())
+        logs = job_logs(d, "rl", sub.get("utc"))
+        text = "\n".join(p.read_text(errors="ignore") for p in logs)
+        quiet = None
+        if st.get("state") == "RUNNING":
+            seen = self.state.setdefault("startup_seen_running", {})
+            key = str(st.get("job_id") or sub.get("job_id"))
+            seen.setdefault(key, self.clock())
+            last = max([seen[key]] + [p.stat().st_mtime for p in logs])
+            quiet = self.clock() - last
+        return startup_problem(text, st.get("state"), bool(st.get("finished")), quiet,
+                               float(self.startup_settings(run)["stall_minutes"]) * 60)
 
     def _ppo(self, step: str, endpoint: int, suffix: str = "") -> None:
         """Render service (1 card) + PPO (8 cards) to ``endpoint``; resumes from the latest checkpoint."""
@@ -1019,6 +1109,10 @@ def render_markdown(state: Dict[str, Any]) -> str:
                     f"{cells[f]['success']:.2f}（{cells[f]['episodes']}）" if f in cells else "—" for f in families) + " |")
     for name, g in (state.get("guard_stops") or {}).items():
         lines += ["", f"**RL {name} 被自动停止**（{g.get('utc')}）：{g.get('reason')}"]
+    for name, retries in (state.get("startup_retries") or {}).items():
+        for k, r in enumerate(retries, 1):
+            lines += ["", f"**RL {name} 启动失败，第 {k} 次自动重新提交**（{r.get('utc')}）：{r.get('job_id')} → "
+                          f"{r.get('new_job_id')}；原因：{r.get('reason')}"]
     for c in state.get("signal_checks") or []:
         lines += ["", f"**第 {c['attempt']} 次 RL 的信号检查（第 {c['at']} 次更新，起点 {c['model']}）：**"
                       f"{'通过' if c['ok'] else '没通过'}；" + "；".join(

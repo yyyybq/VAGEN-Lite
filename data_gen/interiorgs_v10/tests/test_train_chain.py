@@ -658,6 +658,112 @@ class ChainTest(unittest.TestCase):
             chain.evaluate()
             self.assertEqual(sorted(jobs), ["val400__pd_050", "val400__ps0_050", "val400__ps0_100"])
 
+    def test_startup_problem_and_job_logs(self):
+        """Round 12 (the user's decision 5): which trainer jobs count as failed or stuck at Ray start-up."""
+        failed = "ray init kwargs: {}\nException: The current node timed out during startup. This could happen ...\n"
+        self.assertIn("ended FAILED at Ray start-up (timed out during startup)",
+                      T.startup_problem(failed, "FAILED", True, None, 2400))
+        self.assertIsNone(T.startup_problem("Traceback ...\nKeyError: 'x'\n", "FAILED", True, None, 2400))  # other errors
+        self.assertIsNone(T.startup_problem(failed + "step:1 - x:1\n", "FAILED", True, None, 2400))  # past the start-up
+        self.assertIsNone(T.startup_problem("", "SUCCEEDED", True, None, 2400))
+        hung = "INFO worker.py:2024 -- Started a local Ray instance.\n"
+        self.assertIn("no output for 41 minutes", T.startup_problem(hung, "RUNNING", False, 41 * 60, 2400))
+        self.assertIsNone(T.startup_problem(hung, "RUNNING", False, 39 * 60, 2400))
+        self.assertIsNone(T.startup_problem(hung + "(TaskRunner) step:3 - a:1\n", "RUNNING", False, 3600, 2400))
+        self.assertIsNone(T.startup_problem("", "PENDING", False, None, 2400))  # queued: not counted
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "logs").mkdir()
+            for name in ("rl-20261017T115911Z-pt-1-worker-0.log", "rl-20261017T121226Z-pt-2-worker-0.log",
+                         "renderer-20261017T121226Z-pt-3-worker-0.log"):
+                (d / "logs" / name).write_text("x")
+            got = [p.name for p in T.job_logs(d, "rl", "2026-10-17T12:12:00+00:00")]
+            self.assertEqual(got, ["rl-20261017T121226Z-pt-2-worker-0.log"])  # the earlier attempt's log is not this job's
+            self.assertEqual(len(T.job_logs(d, "rl", None)), 2)
+            self.assertEqual(T.job_logs(d / "none", "rl", None), [])
+
+    def test_startup_resubmission(self):
+        """Round 12: a trainer that fails at Ray start-up, then one silent for 40 minutes, are deleted and submitted
+        again (the run then reaches its endpoint); a run silent a third time after 2 resubmissions is given up and
+        the step fails; the render services are not touched; PROGRESS.md lists the resubmissions."""
+        import datetime
+        import time
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def run_chain(root, scripts):
+            """scripts: {run name: [behaviour of its 1st, 2nd, ... trainer job]}, behaviours "ray_fail", "hang", "ok"."""
+            clock = {"t": time.time()}
+            chain = T.Chain({"tr": str(root), "sft_dir": str(root / "sft"), "endpoint": 50, "gs_root": "/ply",
+                             "rl": {"standard": "v10_p1_S0"}, "rl_runs": {n: {} for n in scripts}},
+                            sleep=lambda s: clock.__setitem__("t", clock["t"] + 20 * 60), clock=lambda: clock["t"])
+            submitted = {n: 0 for n in scripts}
+            deleted = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                name = run.name[len("rl_run_"):]
+                if job_dir == "job_rl":
+                    submitted[name] += 1
+                job_id = f"pt-{name}-{job_dir}-{submitted[name]}"
+                (run / job_dir / "submission.json").write_text(json.dumps(
+                    {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "job_id": job_id}))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_renderer":
+                    done = (run / "STOP_RENDERER").exists()
+                    return {"job_id": job_id, "state": "SUCCEEDED" if done else "RUNNING", "finished": done}
+                name = run.name[len("rl_run_"):]
+                kind = scripts[name][submitted[name] - 1]
+                log = run / "logs" / f"rl-{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}-{job_id}-worker-0.log"
+                log.parent.mkdir(exist_ok=True)
+                if not any(p.name.endswith(f"{job_id}-worker-0.log") for p in log.parent.glob("rl-*.log")):
+                    log.write_text({"ray_fail": "Exception: The current node timed out during startup.\n",
+                                    "hang": "INFO worker.py:2024 -- Started a local Ray instance.\n",
+                                    "ok": "(TaskRunner) step:1 - episode/success_rate:0.4\n"}[kind])
+                if kind == "ray_fail":
+                    return {"job_id": job_id, "state": "FAILED", "finished": True}
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                return {"job_id": job_id, "state": "RUNNING", "finished": False}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    deleted.append(json.loads(receipt.read_text())["job_id"])
+                    receipt.replace(receipt.with_name(f"submission_{deleted[-1]}_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                try:
+                    chain.rl()
+                    err = None
+                except T.ChainError as exc:
+                    err = exc
+            return chain, submitted, deleted, err
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chain, submitted, deleted, err = run_chain(Path(tmp), {"a": ["ray_fail", "hang", "ok"], "b": ["ok"]})
+            self.assertIsNone(err)
+            self.assertEqual(submitted, {"a": 3, "b": 1})
+            retries = chain.state["startup_retries"]["a"]
+            self.assertEqual([r["job_id"] for r in retries], ["pt-a-job_rl-1", "pt-a-job_rl-2"])
+            self.assertEqual([r["new_job_id"] for r in retries], ["pt-a-job_rl-2", "pt-a-job_rl-3"])
+            self.assertIn("timed out during startup", retries[0]["reason"])
+            self.assertIn("no output for", retries[1]["reason"])
+            self.assertNotIn("b", chain.state["startup_retries"])
+            self.assertFalse(any("job_renderer" in j for j in deleted[:2]))  # the render service kept running
+            self.assertIn("**RL a 启动失败，第 2 次自动重新提交**", T.render_markdown(chain.state))
+        with tempfile.TemporaryDirectory() as tmp:
+            chain, submitted, _, err = run_chain(Path(tmp), {"c": ["hang", "hang", "hang"], "b": ["ok"]})
+            self.assertEqual(submitted, {"c": 3, "b": 1})  # 2 resubmissions, then given up
+            self.assertIn("start-up: no output for", str(err))
+            self.assertTrue((Path(tmp) / "rl_run_b" / "checkpoints" / "global_step_50").is_dir())
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)
