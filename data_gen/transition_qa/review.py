@@ -8,7 +8,8 @@
 draws the task's objects on copies of their images (A red, B blue: ``admission.overlay_boxes``,
 ``pilot.draw_overlay``) and writes OUT/review/frames.jsonl: the view after the action of every forward question,
 boxed, so the checker can see what the answer is about.  ``page`` collects everything into review_data.json
-(images inline) for the check page.
+(images inline, and every question's filter checks: the measured value against the rule) and funnel_data.json
+(per question type, why candidates were not asked) for the check page.
 """
 
 from __future__ import annotations
@@ -89,10 +90,117 @@ def cmd_sample(args: argparse.Namespace) -> None:
                       "by_qtype": collections.Counter(s["qtype"] for s in sample)}, indent=1))
 
 
+# =============================================================================
+# filter checks: what each question passed, with the measured value against the rule (for the check page)
+# =============================================================================
+VISIBLE = {"left_right": "A、B 在当前画面都清楚可见（face_visible_v3）", "closer": "A、B 在当前画面都清楚可见（face_visible_v3）",
+           "distance_bin": "A 在当前画面清楚可见（face_visible_v3）", "height_bin": "A 在当前画面清楚可见（face_visible_v3）",
+           "occluded": "B（遮挡物）在当前画面清楚可见（face_visible_v3）"}
+
+
+def _f(x: Any, nd: int = 2) -> str:
+    return "–" if x is None else f"{float(x):.{nd}f}"
+
+
+def filter_checks(rec: Dict[str, Any], cfg: Dict[str, Any]) -> List[Dict[str, str]]:
+    """[{check, value, rule}] for one bank row: every filter of generate.py / questions.py it went through."""
+    audit = json.loads(rec.get("audit") or "{}")
+    qtype, kind = rec["qtype"], rec["qtype"].rsplit("_", 1)[0]
+    after = rec["qclass"] == "forward"
+    out: List[Dict[str, str]] = []
+
+    def add(check: str, value: str, rule: str) -> None:
+        out.append({"check": check, "value": value, "rule": rule})
+
+    if qtype == "action_between":
+        add("这一回合没有被挡住，前后两帧不同", "通过", "被挡住的回合两张图看不出动作，不出题")
+        add("回合里只有一种动作", f"{rec['action']} × {rec['k']}", "混合动作的回合不出题")
+        add("前一帧位姿做这个动作 k 次 = 后一帧位姿", "误差 ≤ 0.001", "用 contract.apply_action 复核")
+        return out
+    if after:
+        add("动作的每一步都合法", f"{rec['action']} × {rec['k']}", "有一步被碰撞规则（厚墙）挡住就不出题")
+    q_now = audit.get("quantity_before") if after else audit.get("quantity")
+    q = audit.get("quantity_after") if after else audit.get("quantity")
+    if kind == "goal":
+        if "interior" in audit:
+            s = audit["interior"]
+            add("目标区域内部的成功状态", f"相对终点 右 {_f(s.get('offset_right_m'))} m、前 {_f(s.get('offset_forward_m'))} m、"
+                f"转 {_f(s.get('offset_yaw_deg'), 0)}°", "挪 ±0.10 m、转 ±6° 仍然成功（终点帧大多贴着成功边界）")
+        else:
+            pot = audit.get("potential_after" if after else "potential")
+            gates = audit.get("failed_gates_after" if after else "failed_gates") or []
+            add("离成功边界够远", "通过", f"位姿挪 ±{cfg['goal_perturb_m']} m、转 ±{cfg['goal_perturb_deg']}° 后结论不变")
+            add("势能（环境的同一次计算）", _f(pot), "≥ 0.5 当且仅当成功")
+            add("没通过的门", "、".join(map(str, gates)) if gates else "无", "答“是”时为空")
+        return out
+    if kind in VISIBLE:  # forward questions too: the objects are asked about in the image the model sees
+        add(VISIBLE[kind], "通过", "看不清的物体不问")
+
+    def addq(check: str, value: str, rule: str) -> None:  # the measured quantity: of the pose after the action
+        add(("动作后：" if after else "") + check, value, rule)
+    if kind == "left_right":
+        addq("两个物体中心都在相机前方", "通过", "")
+        addq("B→A 连线和相机左右轴的夹角", "≤ 45°", "超过 45° 按任务定义是前后关系，不出题")
+        if after:
+            addq("动作后两个物体在画面内的比例", f"≥ {cfg['lr_post_min_inside']}", "")
+        addq("两个中心的横坐标差 |uA − uB|", f"{abs(float(q)):.1f} px", f"≥ {cfg['lr_min_sep_px']:.0f} px（成功门 12 px 加 8 px 缓冲）")
+    elif kind == "closer":
+        addq("距离差 dA − dB（到包围盒地面投影最近边的水平距离）", f"{float(q):+.2f} m",
+            f"|dA − dB| ≥ 较远者的 {100 * cfg['closer_min_rel']:.0f}%")
+    elif kind == "distance_bin":
+        g = round(float(q) / cfg["dist_step_m"]) * cfg["dist_step_m"]
+        addq("到 A 的水平距离", f"{float(q):.2f} m（正确选项 {g:.1f} m，差 {abs(float(q) - g):.2f} m）",
+            f"离正确选项 ≤ {cfg['dist_max_offset_m']} m，否则不出题")
+    elif kind == "height_bin":
+        g = round(float(q) / cfg["height_step"]) * cfg["height_step"]
+        addq("A 上下完整在画面里", f"≥ {cfg['height_vertical_min']}", "上下被截的不问")
+        addq("A 的高度占画面高度", f"{float(q):.3f}（正确选项 {g:.1f}，差 {abs(float(q) - g):.3f}）",
+            f"离正确选项 ≤ {cfg['height_max_offset']}，否则不出题")
+    elif kind == "occluded":
+        lo, hi = cfg["hidden_partial"]
+        rule = {"full": f"完全：≥ {cfg['hidden_full']}", "none": f"没有：≤ {cfg['hidden_none']}",
+                "partial": f"部分：{lo}–{hi}"}[rec["answer_value"]]
+        addq("A 的 8 个角在相机前方，轮廓在画面内的比例", f"≥ {cfg['oa_in_frame_min']}", "出画不算被挡（任务的门）")
+        if rec["answer_value"] != "full":
+            addq("A 也清楚可见", "通过", "答“没有 / 部分”时防止 A 其实被墙挡住")
+        addq("A 被 B 挡住的比例（OA 判据本身）", _f(q, 3), rule + "；介于两档之间的不出题")
+    elif kind == "both_in_view":
+        a, b = (q or [None, None])
+        addq("A、B 在画面内的比例", f"A {_f(a)}，B {_f(b)}",
+            f"“在”：8 个角在前方、≥ {cfg['fov_in_min']} 且清楚可见；“不在”：≤ {cfg['fov_out_max']} 或在相机后方；介于之间不出题")
+    if after:
+        add("动作前 → 动作后被问的量", f"{_f(q_now) if not isinstance(q_now, list) else q_now} → "
+            f"{_f(q) if not isinstance(q, list) else q}", "“–”：现在这一侧本身不出题（例如离阈值太近）")
+        add("被问的量变了（changed）", "是" if rec.get("changed") else "否", "没变的最多占这一题类的 10%")
+        if rec.get("flip") is not None:
+            add("答案和现在不同（flip）", "是" if rec["flip"] else "否", "两种结果都常见时比例控制在 35%–65%")
+    return out
+
+
+def funnel_table(stats: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Per qtype: candidates asked, the reasons the others were not asked, and what balancing dropped (train)."""
+    funnel = stats.get("funnel", {})
+    rows: Dict[str, Dict[str, Any]] = collections.defaultdict(lambda: {"emitted": 0, "reasons": {}, "dropped": {}})
+    for key, n in funnel.items():
+        if ":" not in key:
+            continue
+        q, reason = key.split(":", 1)
+        if reason.startswith("emitted"):
+            rows[q]["emitted"] += n
+        else:
+            rows[q]["reasons"][reason] = n
+    for q, rep in stats.get("train", {}).get("balance", {}).items():
+        rows[q]["dropped"] = rep.get("dropped", {})
+    return [dict(qtype=q, **v) for q, v in sorted(rows.items())]
+
+
 def cmd_page(args: argparse.Namespace) -> None:
     from data_gen.interiorgs_v10.pilot import safe_name
 
-    d = Path(args.out) / "review"
+    out = Path(args.out)
+    d = out / "review"
+    cfg = json.loads((out / "config.json").read_text())
+    bank = {r["sample_id"]: r for f in ("p1_train.jsonl", "p1_test.jsonl") for r in GEN.read_jsonl(out / f)}
 
     def b64(p: Path) -> str:
         return "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()
@@ -103,8 +211,13 @@ def cmd_page(args: argparse.Namespace) -> None:
         s["images"] = [b64(d / "img" / n) for n in s.pop("boxed")]
         post = s.pop("post_frame")
         s["post_image"] = b64(d / "frames" / "boxes" / safe_name(post)) if post else None
+        rec = bank[s["sample_id"]]
+        s["state_role"] = rec["state_role"]
+        s["checks"] = filter_checks(rec, cfg)
         items.append(s)
     (d / "review_data.json").write_text(json.dumps(items, ensure_ascii=False))
+    stats = json.loads((out / "stats.json").read_text())
+    (d / "funnel_data.json").write_text(json.dumps(funnel_table(stats), ensure_ascii=False))
     print(json.dumps({"items": len(items), "bytes": (d / "review_data.json").stat().st_size}))
 
 

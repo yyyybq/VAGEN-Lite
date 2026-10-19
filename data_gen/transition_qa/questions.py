@@ -21,7 +21,7 @@ from data_gen.interiorgs_v10.contract import INVERSE_ACTION, STEP_ROTATION_DEG, 
 from data_gen.interiorgs_v10.qa_states import ref_text
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "states_per_trajectory": 3,          # anchor states per trajectory, the terminal one included
+    "states_per_trajectory": 0,          # anchor states per trajectory (0: every distinct frame; bank of 2026-10-18: 3)
     "goal_perturb_m": 0.05,              # goal labels must survive these pose changes
     "goal_perturb_deg": 3.0,
     "lr_min_sep_px": 20.0,               # projective margin gate 12 px + 8 px buffer (256-wide image)

@@ -140,7 +140,8 @@ def _rec(i, qtype, answer, value, scene="s1", split="train", qclass=None, change
     rec = {"sample_id": f"id{i:06d}", "qtype": qtype, "kind": "action" if kind == "action" else kind,
            "qclass": qclass or Q.QCLASS[qtype.rsplit("_", 1)[-1]], "answer": answer, "answer_value": value,
            "scene": scene, "split": split, "changed": changed, "flip": flip, "images": ["x.png"],
-           "options": ["Yes", "No"], "question": "q", "state_pos": 0, "task_id": f"t{i}", "pool": "P1"}
+           "options": ["Yes", "No"], "question": "q", "state_pos": 0, "task_id": f"t{i}", "pool": "P1",
+           "family": "projective_relations"}
     return rec
 
 
@@ -188,29 +189,62 @@ def test_even_letters_moves_the_correct_option_in_turn():
         assert f"({r['answer']}) right one" in r["question"]
 
 
-def test_class_ratio_and_probe():
-    rng = random.Random(0)
-    rs = ([_rec(i, "goal_now", "Yes", "") for i in range(500)]
-          + [_rec(1000 + i, "goal_after", "No", "") for i in range(2000)]
-          + [_rec(5000 + i, "action_between", "A", "") for i in range(1000)])
-    out = GEN.class_ratio(rs, dict(GEN.BUILD_CONFIG, goal_max_share_in_class=1.0), rng, {})
-    c = collections.Counter(r["qclass"] for r in out)
-    assert c["state"] == 500 and c["forward"] == 350 and c["inverse"] == 150
-    probe, rest = GEN.probe_subset(out, 100, rng)
-    assert len(probe) == 100 and not ({r["sample_id"] for r in probe} & {r["sample_id"] for r in rest})
-
-
-def test_goal_questions_at_most_half_of_their_class():
+def test_class_caps_keep_state_and_cap_forward_inverse():
     rng = random.Random(0)
     rs = ([_rec(i, "goal_now", "Yes" if i % 2 else "No", "") for i in range(800)]
           + [_rec(1000 + i, "closer_now", "A" if i % 2 else "B", "a") for i in range(200)]
-          + [_rec(5000 + i, "action_between", "A", "") for i in range(1000)])
+          + [_rec(2000 + i, "goal_after", "Yes" if i % 2 else "No", "") for i in range(3000)]
+          + [_rec(6000 + i, "closer_after", "A" if i % 2 else "B", "a") for i in range(1000)]
+          + [_rec(8000 + i, "action_between", "A", "") for i in range(1000)])
     rep = {}
-    out = GEN.class_ratio(rs, GEN.BUILD_CONFIG, rng, rep)
-    state = [r for r in out if r["qclass"] == "state"]
-    goal = [r for r in state if r["kind"] == "goal"]
-    assert len(goal) == 200 and len(state) == 400 and rep["goal_cap_dropped"]["state"] == 600
-    assert sum(r["answer"] == "Yes" for r in goal) == 100
+    out = GEN.class_caps(rs, GEN.BUILD_CONFIG, rng, rep)
+    c = collections.Counter(r["qclass"] for r in out)
+    assert c["state"] == 1000                                     # all kept, goal_now 80% of them included
+    assert c["forward"] == 1200                                   # 1.2 x state
+    assert c["inverse"] == int(0.15 / 0.85 * 2200)                # 15% of the bank
+    assert c["inverse"] / len(out) <= 0.15
+    fwd = [r for r in out if r["qclass"] == "forward"]
+    goal = [r for r in fwd if r["kind"] == "goal"]
+    assert rep["goal_cap_dropped"] == {"forward": 2000}           # goal_after capped at the other forward ones
+    assert abs(len(goal) - 600) <= 1
+    assert abs(sum(r["answer"] == "Yes" for r in goal) - len(goal) / 2) <= 1
+
+
+def test_probe_select_per_qtype_balanced_and_spread():
+    rng = random.Random(0)
+    fams = ["projective_relations", "equidistance", "fov_inclusion"]
+    rs = []
+    for i in range(300):
+        r = _rec(i, "goal_now", "Yes" if i % 4 == 0 else "No", "", split="val")
+        r.update(family=fams[i % 3], task_id=f"t{i % 50}")
+        rs.append(r)
+    for i in range(300):
+        r = _rec(1000 + i, "goal_after", "Yes" if i % 3 == 0 else "No", "", split="val",
+                 changed=(i % 2 == 0), flip=(i % 5 == 0))
+        r.update(family=fams[i % 3], task_id=f"u{i % 60}")
+        rs.append(r)
+    for i in range(10):
+        rs.append(_rec(2000 + i, "occluded_now", "A", "full", split="val"))
+    rep = {}
+    picks = GEN.probe_select(rs, GEN.PROBE_CONFIG, rng, rep)
+    by_q = collections.Counter(r["qtype"] for r in picks)
+    assert by_q["goal_now"] == 40 and by_q["goal_after"] == 40
+    assert by_q["occluded_now"] == 10 and rep["occluded_now"]["short"] == 30   # reported, not padded
+    now = [r for r in picks if r["qtype"] == "goal_now"]
+    assert sum(r["answer"] == "Yes" for r in now) == 20
+    assert max(collections.Counter(r["family"] for r in now).values()) <= 16   # 40 / 3 families, task turns first
+    assert len({r["task_id"] for r in now}) >= 36   # tasks take turns (greedy; 50 tasks, Yes only on 25)
+    after = [r for r in picks if r["qtype"] == "goal_after"]
+    assert sum(not r["changed"] for r in after) <= 4
+    assert len({r["sample_id"] for r in picks}) == len(picks)
+
+
+def test_all_anchor_states():
+    images = [{"frame_id": f"t__s{k}"} for k in (0, 2, 2, 4, 6)]   # s2 shown twice (a blocked turn)
+    picks = GEN.pick_anchor_positions(images, "t", 0)
+    assert [p for p, _ in picks] == [0, 2, 3, 4]
+    assert dict((p, role) for p, role in picks)[0] == "start" and picks[-1] == (4, "terminal")
+    assert len(GEN.pick_anchor_positions(images, "t", 3)) == 3
 
 
 def test_build_refuses_a_val_scene_in_train(tmp_path):
@@ -221,7 +255,7 @@ def test_build_refuses_a_val_scene_in_train(tmp_path):
     manifest = tmp_path / "m.json"
     manifest.write_text(json.dumps({"train_scenes": ["s1"], "val_scenes": ["s9"], "test_scenes": []}))
     with pytest.raises(SystemExit):
-        GEN.main(["build", "--out", str(tmp_path), "--split-manifest", str(manifest)])
+        GEN.main(["build", "--out", str(tmp_path), "--split-manifest", str(manifest), "--no-probe"])
 
 
 # ----------------------------------------------------------------------------- integration (cluster data)

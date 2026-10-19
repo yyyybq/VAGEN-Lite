@@ -137,7 +137,7 @@ def cmd_questions(args: argparse.Namespace) -> None:
     from data_gen.interiorgs_v10.pilot import safe_name
 
     sft, out = Path(args.sft_dir), Path(args.out).resolve()  # absolute image paths: training runs elsewhere
-    d = out / "interior"
+    d = Path(args.interior).resolve() if args.interior else out / "interior"  # a rebuilt bank reuses the renders
     rows = {r["task_id"]: r for r in GEN.read_jsonl(sft / "rows.jsonl")}
     manifest = json.loads((d / "frames" / "render_manifest.json").read_text())
     ok = {r["frame_id"] for r in manifest["rendered"] if float(r["std"]) >= 2.0}
@@ -173,6 +173,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     b = sub.add_parser("questions")
     b.add_argument("--sft-dir", required=True)
     b.add_argument("--out", required=True)
+    b.add_argument("--interior", default="", help="the rendered interior folder (default OUT/interior)")
     b.set_defaults(func=cmd_questions)
     args = p.parse_args(argv)
     args.func(args)

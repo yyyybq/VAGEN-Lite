@@ -16,7 +16,6 @@ from . import generate as GEN
 
 FILES = ("p1_train.jsonl", "p1_test.jsonl", "p1_probe.jsonl")
 CLASS_ZH = {"state": "状态题 (a)", "forward": "前向题 (b)", "inverse": "逆向题 (c)"}
-TARGET = {"state": 0.50, "forward": 0.35, "inverse": 0.15}
 
 
 def _table(header: List[str], rows: List[List[Any]]) -> str:
@@ -41,17 +40,31 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
     for f, rs in data.items():
         c = collections.Counter(r["qclass"] for r in rs)
         rows.append([f, len(rs)] + [f"{c[k]}（{_pct(c[k], len(rs))}）" for k in ("state", "forward", "inverse")])
+    cfg = stats.get("config") or {}
     lines += [_table(["文件", "题数", "状态题 (a)", "前向题 (b)", "逆向题 (c)"], rows), "",
-              "目标比例 50% / 35% / 15%。三类题按这个比例从平衡后的题里抽，受最少的那一类限制。", ""]
+              f"三类题的规则（用户 2026-10-19）：状态题全部保留（答案平衡之后）；前向题最多是状态题的 "
+              f"{cfg.get('forward_max_vs_state')} 倍；逆向题最多占题库的 {100 * float(cfg.get('inverse_max_share', 0)):.0f}%；"
+              f"\"动作后任务要求会满足吗\"（goal_after）最多占前向题的一半；单个场景最多 {100 * float(cfg.get('scene_cap', 0)):.0f}%。"
+              "超出的按（题类、答案、是否变化）分层抽。", ""]
     for split in ("train", "val"):
         cls = (stats.get(split) or {}).get("classes") or {}
         if cls:
             lines.append(f"- {split} 场景：" + "；".join(f"{CLASS_ZH[k]}可用 {v['available']}、留下 {v['kept']}"
                                                         for k, v in sorted(cls.items()) if k in CLASS_ZH))
+            caps = cls.get("caps") or {}
+            if caps:
+                lines.append(f"  - 上限：前向题 {caps.get('forward')} 道，逆向题 {caps.get('inverse')} 道")
             capped = cls.get("goal_cap_dropped") or {}
             if capped:
-                lines.append(f"  - \"任务要求满足了吗\"两类题（goal_now / goal_after）各自最多占本类的一半，因此去掉："
-                             + "，".join(f"{CLASS_ZH[k]} {n} 道" for k, n in sorted(capped.items())))
+                lines.append("  - goal 上限去掉：" + "，".join(f"{CLASS_ZH[k]} {n} 道" for k, n in sorted(capped.items())))
+    if stats.get("probe_excluded"):
+        lines.append(f"- 测试集去掉了探针集的 {stats['probe_excluded']} 道题（两份不重叠）。")
+    probe_stats = out / "probe_stats.json"
+    if probe_stats.exists():
+        ps = json.loads(probe_stats.read_text())
+        short = {q: v["short"] for q, v in ps["by_qtype"].items() if v["short"]}
+        lines.append(f"- 探针集：{ps['questions']} 道，每个题类 {ps['config']['per_qtype']} 道，来自 {ps['scenes']} 个 val 场景"
+                     + (f"；不够的题类：{json.dumps(short)}" if short else "；每个题类都够") + "。")
     lines.append("")
     # ------------------------------------------------------------------ family x qtype x split
     lines += ["## 2. 按任务族 × 题类 × 划分的题数", ""]
@@ -83,7 +96,7 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
                          f"{100 * dev:.1f}", "，".join(f"{k} {v}" for k, v in values.most_common(6))])
         lines += [f"**{f}**", "", _table(["题类", "题数", "字母", "偏差（百分点）", "答案值（前 6）"], rows), ""]
     lines += [f"训练集和测试集里字母偏差的最大值：{100 * worst:.1f} 个百分点"
-              f"（探针集只有 500 道、每类约 30 道，不计入；它的偏差见上表）。", ""]
+              f"（探针集每类只有约 40 道，不计入；它的偏差见上表）。", ""]
     # ------------------------------------------------------------------ forward caps
     lines += ["## 4. 前向题：没变化的题、答案和现在不同的题", "",
               "\"没变化\"：被问的量在动作前后的变化小于门槛（例如转身后到物体的距离不变）；上限 10%。"
@@ -100,7 +113,8 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
     lines += [_table(["文件", "题类", "题数", "没变化", "答案变了"], rows), ""]
     # ------------------------------------------------------------------ funnel
     lines += ["## 5. 过滤：没出的题和原因", "",
-              f"每条轨迹最多取 3 个状态（终点一定取）。原始候选题 {stats['raw_records']} 道（训练和 val 场景合计），"
+              f"每条轨迹的每个不同的帧都当锚点状态（2026-10-18 的题库每条轨迹最多 3 个）。"
+              f"原始候选题 {stats['raw_records']} 道（训练和 val 场景合计），"
               "下表是在候选阶段就没出的题（按题类和原因）；之后的平衡、比例、场景上限去掉的数量见第 6 节。", ""]
     funnel = stats["funnel"]
     by_q: Dict[str, Dict[str, int]] = collections.defaultdict(dict)

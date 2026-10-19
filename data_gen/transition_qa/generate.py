@@ -1,12 +1,15 @@
 """Transition-question bank from the SFT trajectories (docs/transition_qa/PROGRESS.md, step 2).
 
-    python -m data_gen.transition_qa.generate raw   --sft-dir SFT --scenes-root META --out OUT [--workers 12]
-    python -m data_gen.transition_qa.generate build --out OUT [--seed 20261018]
+    python -m data_gen.transition_qa.generate raw   --sft-dir SFT --scenes-root META --out OUT [--workers 12] [--tag T]
+    python -m data_gen.transition_qa.generate probe --out OUT --split-manifest M [--scenes-from TASKS] [--per-qtype 40]
+    python -m data_gen.transition_qa.generate build --out OUT --split-manifest M [--seed 20261018]
 
 ``raw``: per scene (one process each), every anchor state of every trajectory -> candidate questions with the
-reasons for the ones not asked (OUT/raw/<scene>.jsonl, OUT/raw/<scene>.json).  Finished scenes are skipped.
-``build``: balance answers, forward-question caps, class ratio, scene cap, train / test / probe split ->
-OUT/p1_train.jsonl, p1_test.jsonl, p1_probe.jsonl (LLaMA-Factory sharegpt rows plus metadata) and stats.json.
+reasons for the ones not asked (OUT/raw/<scene>[__T].jsonl, .json).  Finished scenes are skipped.
+``probe``: the fixed probe set from the val candidates (OUT/p1_probe.jsonl, probe_stats.json); build leaves its
+questions out of the test set.  ``build``: balance answers, forward-question caps, the class rules, scene cap ->
+OUT/p1_train.jsonl, p1_test.jsonl (LLaMA-Factory sharegpt rows plus metadata) and stats.json.
+Field meanings and the rules: docs/transition_qa/DATA_CONTRACT.md.
 """
 
 from __future__ import annotations
@@ -93,12 +96,15 @@ def trajectory_steps(traj: Dict[str, Any], poses: Dict[str, Any]) -> Tuple[List[
 # raw candidates of one scene
 # =============================================================================
 def pick_anchor_positions(images: Sequence[Dict[str, Any]], task_id: str, n: int) -> List[Tuple[int, str]]:
-    """Positions in ``images`` of at most ``n`` distinct frames: the terminal frame, the start frame and random
-    others.  A frame shown twice (a blocked turn) is taken at its last position, so its turn is the one that moved."""
+    """Positions in ``images`` of at most ``n`` distinct frames (``n`` <= 0: all of them): the terminal frame, the
+    start frame and random others.  A frame shown twice (a blocked turn) is taken at its last position, so its turn
+    is the one that moved."""
     last_pos: Dict[str, int] = {}
     for i, im in enumerate(images):
         last_pos[im["frame_id"]] = i
     order = sorted(last_pos.values())
+    if n <= 0:
+        n = len(order)
     terminal, start = order[-1], order[0]
     picks = [(terminal, "terminal")]
     if start != terminal and len(picks) < n:
@@ -284,19 +290,20 @@ def inverse_candidate(images: Sequence[Dict[str, Any]], turns: Sequence[Dict[str
 def _scene_job(args: Tuple[str, Dict[str, Any]]) -> Tuple[str, str]:
     scene_id, cfg = args
     raw = Path(cfg["out"]) / "raw"
-    done = raw / f"{scene_id}.json"
+    stem = f"{scene_id}__{cfg['tag']}" if cfg.get("tag") else scene_id  # a tagged source next to the main one
+    done = raw / f"{stem}.json"
     if done.exists():
         return scene_id, "skipped"
     t0 = time.time()
     try:
         recs, info = scene_candidates(scene_id, cfg)
     except G.ConsistencyError as exc:
-        (raw / f"{scene_id}.consistency_error.txt").write_text(str(exc))
+        (raw / f"{stem}.consistency_error.txt").write_text(str(exc))
         return scene_id, f"consistency_error: {exc}"
     except Exception:
-        (raw / f"{scene_id}.error.txt").write_text(traceback.format_exc())
+        (raw / f"{stem}.error.txt").write_text(traceback.format_exc())
         return scene_id, "error"
-    write_jsonl(raw / f"{scene_id}.jsonl", recs)
+    write_jsonl(raw / f"{stem}.jsonl", recs)
     info.update(scene=scene_id, records=len(recs), seconds=round(time.time() - t0, 1))
     done.write_text(json.dumps(info, indent=1))
     return scene_id, f"{len(recs)} records, {info['seconds']} s"
@@ -307,7 +314,9 @@ def cmd_raw(args: argparse.Namespace) -> None:
     out = Path(args.out)
     (out / "raw").mkdir(parents=True, exist_ok=True)
     cfg = dict(Q.DEFAULT_CONFIG)
-    cfg.update(scenes_root=str(args.scenes_root), wall_model=args.wall_model, out=str(out))
+    cfg.update(scenes_root=str(args.scenes_root), wall_model=args.wall_model, out=str(out), tag=args.tag)
+    if args.states_per_trajectory is not None:
+        cfg["states_per_trajectory"] = int(args.states_per_trajectory)
     manifest = json.loads((sft / "split_manifest.json").read_text())
     split_of = {s: k for k in ("train", "val", "test") for s in manifest[f"{k}_scenes"]}
     _INPUTS["rows"] = {r["task_id"]: r for r in read_jsonl(sft / "rows.jsonl")}
@@ -326,7 +335,8 @@ def cmd_raw(args: argparse.Namespace) -> None:
         scenes = [s for s in args.scenes.split(",") if s]
     if args.limit_scenes:
         scenes = scenes[: args.limit_scenes]
-    (out / "config.json").write_text(json.dumps(dict(cfg, sft_dir=str(sft), scenes=len(scenes)), indent=1, default=list))
+    name = f"config__{args.tag}.json" if args.tag else "config.json"
+    (out / name).write_text(json.dumps(dict(cfg, sft_dir=str(sft), scenes=len(scenes)), indent=1, default=list))
     jobs = [(s, cfg) for s in scenes]
     t0 = time.time()
     if args.workers > 1:
@@ -350,15 +360,22 @@ def cmd_raw(args: argparse.Namespace) -> None:
 # build: balance, ratio, caps, split, export
 # =============================================================================
 BUILD_CONFIG: Dict[str, Any] = {
-    "ratio": {"state": 0.50, "forward": 0.35, "inverse": 0.15},
+    # class rules of 2026-10-19 (user): every state question is kept (after the answer balance); forward questions
+    # at most 1.2 x the state questions; inverse questions at most 15% of the bank; the scene cap stays 8%.
+    # (2026-10-18: shares 50 / 35 / 15 and goal questions at most half of the state and of the forward class.)
+    "forward_max_vs_state": 1.2,
+    "inverse_max_share": 0.15,
+    "goal_max_share_in_class": {"forward": 0.5},  # goal_after <= half the forward class; goal_now is a state question
     "balance_slack": 1.15,          # each answer group at most 1.15 x the smallest one (<= +3.5 points for 2 options)
     "rare_value_share": 0.05,       # categorical values below this share are kept whole and not balanced against
     "unchanged_max_share": 0.10,    # forward questions whose asked quantity did not change
     "flip_band": (0.35, 0.65),      # share of forward questions whose answer differs from the current one
     "scene_cap": 0.08,
-    "probe_size": 500,
-    "goal_max_share_in_class": 0.5,  # "is the task met (after the action)?" at most half of the state / forward class
     "final_letter_slack": 1.10,      # after sampling, per file: <= +2.4 points for 2 options, +1.8 for 4
+}
+PROBE_CONFIG: Dict[str, Any] = {
+    "per_qtype": 40,                # user, 2026-10-19: at least 40 per question type (15 types -> 600 questions)
+    "unchanged_max_share": 0.10,
 }
 ORDINAL = {"distance_bin", "height_bin"}         # options in ascending order: balance the letter
 SHUFFLED = {"occluded", "both_in_view"}          # categorical: option order drawn per question
@@ -478,46 +495,59 @@ def balance_split(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: rando
 
 
 def _stratified(rs: List[Dict[str, Any]], want: int, rng: random.Random) -> List[Dict[str, Any]]:
-    """``want`` records of ``rs``, the same fraction from every (qtype, answer, changed) stratum."""
+    """Exactly ``want`` records of ``rs``, the same fraction from every (qtype, answer, changed) stratum (largest
+    remainders get the leftover places, so a cap is never exceeded)."""
     if want >= len(rs):
         return list(rs)
     strata: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = collections.defaultdict(list)
     for r in rs:
         strata[(r["qtype"], r["answer"], str(r["changed"]))].append(r)
     frac = want / len(rs)
+    keys = sorted(strata)
+    take = {k: int(math.floor(frac * len(strata[k]))) for k in keys}
+    rest = sorted(keys, key=lambda k: (-(frac * len(strata[k]) - take[k]), k))
+    for k in rest[: want - sum(take.values())]:
+        take[k] += 1
     out = []
-    for key in sorted(strata):
+    for key in keys:
         group = strata[key]
         rng.shuffle(group)
-        out.extend(group[: int(round(frac * len(group)))])
+        out.extend(group[: take[key]])
     return out
 
 
-def class_ratio(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random.Random,
-                report: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Downsample the classes to the target shares, stratified by (qtype, answer) so the balance survives.
-    Before that the goal questions are capped at ``goal_max_share_in_class`` of their class."""
+def class_caps(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random.Random,
+               report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The class rules: the state questions are all kept; the goal questions of a class named in
+    ``goal_max_share_in_class`` are capped at that share of it; the forward questions at
+    ``forward_max_vs_state`` x the state questions; the inverse questions at ``inverse_max_share`` of the result.
+    Every cut is stratified by (qtype, answer, changed), so the balance survives."""
     by_class: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
     for r in records:
         by_class[r["qclass"]].append(r)
     if not records:
         return []
-    share = float(cfg.get("goal_max_share_in_class", 1.0))
-    for c in ("state", "forward"):
+    avail = {c: len(rs) for c, rs in by_class.items()}
+    for c, share in (cfg.get("goal_max_share_in_class") or {}).items():
         goal = [r for r in by_class[c] if r["kind"] == "goal"]
         other = [r for r in by_class[c] if r["kind"] != "goal"]
         cap = int(share / (1 - share) * len(other)) if share < 1 else len(goal)
         if len(goal) > cap:
             report.setdefault("goal_cap_dropped", {})[c] = len(goal) - cap
             by_class[c] = other + _stratified(goal, cap, rng)
-    ratio = cfg["ratio"]
-    present = [c for c in ratio if ratio[c] > 0 and by_class[c]]  # a missing class is reported, not a zero total
-    total = min(len(by_class[c]) / ratio[c] for c in present)
+    n_state = len(by_class["state"])
+    fwd_cap = int(math.floor(float(cfg["forward_max_vs_state"]) * n_state))
+    if len(by_class["forward"]) > fwd_cap:
+        by_class["forward"] = _stratified(by_class["forward"], fwd_cap, rng)
+    s = float(cfg["inverse_max_share"])
+    inv_cap = int(math.floor(s / (1 - s) * (n_state + len(by_class["forward"]))))
+    if len(by_class["inverse"]) > inv_cap:
+        by_class["inverse"] = _stratified(by_class["inverse"], inv_cap, rng)
     out = []
-    for c, rs in by_class.items():
-        want = int(round(total * ratio[c]))
-        report[c] = {"available": len(rs), "kept": min(want, len(rs))}
-        out.extend(_stratified(rs, want, rng))
+    for c in ("state", "forward", "inverse"):
+        report[c] = {"available": avail.get(c, 0), "kept": len(by_class[c])}
+        out.extend(by_class[c])
+    report["caps"] = {"forward": fwd_cap, "inverse": inv_cap}
     return out
 
 
@@ -550,9 +580,10 @@ def place_correct(rec: Dict[str, Any], pos: int) -> Dict[str, Any]:
 
 
 def even_letters(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random.Random, cap: bool = True,
-                 report: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    """Final letter balance of one file: the correct option of a reorderable question goes to the positions in
-    turn (by sample id); the other questions' letters are capped at ``final_letter_slack`` x the rarest."""
+                 report: Optional[Dict[str, Any]] = None, place: bool = True) -> List[Dict[str, Any]]:
+    """Letter balance of one file: the correct option of a reorderable question goes to the positions in turn
+    (by sample id; ``place``); the other questions' letters are capped at ``final_letter_slack`` x the rarest
+    (``cap``)."""
     by_q: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
     for r in records:
         by_q[r["qtype"]].append(r)
@@ -560,6 +591,9 @@ def even_letters(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random
     for q, rs in sorted(by_q.items()):
         rs = sorted(rs, key=lambda r: r["sample_id"])
         if rs[0]["kind"] in REORDERABLE:
+            if not place:
+                out.extend(rs)
+                continue
             start = Q.stable_int(q, "letters") % len(rs[0]["options"])
             out.extend(place_correct(r, (start + i) % len(r["options"])) for i, r in enumerate(rs))
         elif cap:
@@ -588,38 +622,83 @@ def to_lf(rec: Dict[str, Any]) -> Dict[str, Any]:
     return row
 
 
-def probe_subset(records: List[Dict[str, Any]], size: int, rng: random.Random) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Fixed probe set: equal share per qtype (as far as each has questions) and, within a qtype, the answer
-    letters in turn; the rest is the test set."""
+def _spread(rs: List[Dict[str, Any]], rng: random.Random) -> List[Dict[str, Any]]:
+    """``rs`` reordered so that families, and tasks within a family, take turns (a probe draws from the front)."""
+    by_fam: Dict[str, Dict[str, List[Dict[str, Any]]]] = collections.defaultdict(lambda: collections.defaultdict(list))
+    for r in rs:
+        by_fam[r["family"]][r["task_id"]].append(r)
+    fam_queues = []
+    for fam in sorted(by_fam):
+        tasks = [list(v) for _, v in sorted(by_fam[fam].items())]
+        rng.shuffle(tasks)
+        for t in tasks:
+            rng.shuffle(t)
+        order = []
+        while any(tasks):
+            for t in tasks:
+                if t:
+                    order.append(t.pop())
+        fam_queues.append(order)
+    out = []
+    while any(fam_queues):
+        for q in fam_queues:
+            if q:
+                out.append(q.pop(0))
+    return out
+
+
+def probe_select(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: random.Random,
+                 report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The fixed probe set: ``per_qtype`` questions of every question type.  Within a type the answers take turns
+    (the answer value for the reorderable types, whose letters ``even_letters`` then sets; the letter for the
+    others), for forward questions crossed with "the answer differs from the current one"; families and tasks take
+    turns within each answer; forward questions whose asked quantity did not change at most
+    ``unchanged_max_share``."""
+    per_q = int(cfg["per_qtype"])
     by_q: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
     for r in sorted(records, key=lambda r: r["sample_id"]):
         by_q[r["qtype"]].append(r)
-    queues: Dict[str, List[Dict[str, Any]]] = {}
-    for q, rs in by_q.items():
-        by_letter: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    picks: List[Dict[str, Any]] = []
+    for q, rs in sorted(by_q.items()):
+        kind, forward = rs[0]["kind"], rs[0]["qclass"] == "forward"
+
+        def key(r: Dict[str, Any]) -> Tuple[str, ...]:
+            k = str(r["answer_value"] if kind in REORDERABLE else r["answer"])
+            return (k, str(bool(r["flip"]))) if forward and r["flip"] is not None else (k,)
+
+        buckets: Dict[Tuple[str, ...], List[Dict[str, Any]]] = collections.defaultdict(list)
         for r in rs:
-            by_letter[r["answer"]].append(r)
-        for group in by_letter.values():
-            rng.shuffle(group)
-        order: List[Dict[str, Any]] = []
-        while any(by_letter.values()):
-            for letter in sorted(by_letter):
-                if by_letter[letter]:
-                    order.append(by_letter[letter].pop())
-        queues[q] = order[::-1]  # pop() from the end takes them in letter turn
-    probe: List[Dict[str, Any]] = []
-    while len(probe) < size and any(queues.values()):
-        for q in sorted(queues):
-            if queues[q] and len(probe) < size:
-                probe.append(queues[q].pop())
-    ids = {r["sample_id"] for r in probe}
-    return probe, [r for r in records if r["sample_id"] not in ids]
+            buckets[key(r)].append(r)
+        queues = {k: _spread(v, rng) for k, v in sorted(buckets.items())}
+        max_unchanged = int(math.floor(float(cfg["unchanged_max_share"]) * per_q)) if forward else per_q
+        chosen: List[Dict[str, Any]] = []
+        used_tasks: set = set()
+        n_unchanged = 0
+        turn = sorted(queues, key=lambda k: (len(buckets[k]), k))  # the scarcest answer picks its tasks first
+        while len(chosen) < per_q and any(queues.values()):
+            for k in turn:
+                if len(chosen) >= per_q:
+                    break
+                queue = queues[k]
+                if forward and n_unchanged >= max_unchanged:
+                    queue[:] = [r for r in queue if r["changed"]]
+                if not queue:
+                    continue
+                # a task not asked yet in this type first (answers of one task in different buckets)
+                r = queue.pop(next((i for i, r in enumerate(queue) if r["task_id"] not in used_tasks), 0))
+                n_unchanged += int(forward and not r["changed"])
+                chosen.append(r)
+                used_tasks.add(r["task_id"])
+        report[q] = {"available": len(rs), "picked": len(chosen), "short": max(0, per_q - len(chosen)),
+                     "by_key": {"/".join(k): len(v) for k, v in sorted(buckets.items())},
+                     "picked_by_key": dict(collections.Counter("/".join(key(r)) for r in chosen)),
+                     "families": dict(collections.Counter(r["family"] for r in chosen)),
+                     "tasks": len({r["task_id"] for r in chosen})}
+        picks.extend(chosen)
+    return picks
 
 
-def cmd_build(args: argparse.Namespace) -> None:
-    out = Path(args.out)
-    cfg = dict(BUILD_CONFIG)
-    rng = random.Random(args.seed)
+def _read_raw(out: Path) -> Tuple[List[Dict[str, Any]], collections.Counter, collections.Counter]:
     records: List[Dict[str, Any]] = []
     funnel: collections.Counter = collections.Counter()
     checks: collections.Counter = collections.Counter()
@@ -628,10 +707,12 @@ def cmd_build(args: argparse.Namespace) -> None:
         funnel.update(info["funnel"])
         checks.update(info["checks"])
         records.extend(read_jsonl(info_path.with_suffix(".jsonl")))
-    manifest = json.loads(Path(args.split_manifest).read_text())
+    return records, funnel, checks
+
+
+def _check_scenes(records: List[Dict[str, Any]], manifest_path: str) -> Dict[str, List[Dict[str, Any]]]:
+    manifest = json.loads(Path(manifest_path).read_text())
     train_scenes, val_scenes = set(manifest["train_scenes"]), set(manifest["val_scenes"])
-    stats: Dict[str, Any] = {"raw_records": len(records), "funnel": dict(funnel), "checks": dict(checks),
-                             "config": cfg, "seed": args.seed}
     splits = {"train": [r for r in records if r["split"] == "train"],
               "val": [r for r in records if r["split"] == "val"]}
     for name, rs in splits.items():
@@ -639,23 +720,70 @@ def cmd_build(args: argparse.Namespace) -> None:
         bad = [r for r in rs if r["scene"] not in allowed]
         if bad:
             raise SystemExit(f"{len(bad)} {name} records from scenes outside the {name} scenes, e.g. {bad[0]['scene']}")
+    return splits
+
+
+def cmd_probe(args: argparse.Namespace) -> None:
+    out = Path(args.out)
+    cfg = dict(PROBE_CONFIG, per_qtype=args.per_qtype)
+    rng = random.Random(args.seed)
+    records, _, _ = _read_raw(out)
+    val = _check_scenes(records, args.split_manifest)["val"]
+    scenes = None
+    if args.scenes_from:
+        scenes = {json.loads(l)["scene_id"] for l in Path(args.scenes_from).read_text().splitlines() if l.strip()}
+        val = [r for r in val if r["scene"] in scenes]
+    report: Dict[str, Any] = {}
+    picks = even_letters(probe_select(val, cfg, rng, report), BUILD_CONFIG, rng, cap=False)
+    n = write_jsonl(out / "p1_probe.jsonl", (to_lf(r) for r in picks))
+    stats = {"questions": n, "config": cfg, "seed": args.seed, "candidates": len(val),
+             "scenes": len({r["scene"] for r in picks}), "scenes_allowed": len(scenes) if scenes else None,
+             "scenes_from": args.scenes_from, "by_qtype": report}
+    (out / "probe_stats.json").write_text(json.dumps(stats, indent=1))
+    print(json.dumps({"questions": n, "short": {q: v["short"] for q, v in report.items() if v["short"]}}, indent=1))
+
+
+def cmd_build(args: argparse.Namespace) -> None:
+    out = Path(args.out)
+    cfg = dict(BUILD_CONFIG)
+    rng = random.Random(args.seed)
+    records, funnel, checks = _read_raw(out)
+    stats: Dict[str, Any] = {"raw_records": len(records), "funnel": dict(funnel), "checks": dict(checks),
+                             "config": cfg, "seed": args.seed}
+    splits = _check_scenes(records, args.split_manifest)
+    probe_path = out / "p1_probe.jsonl"
+    if not probe_path.exists() and not args.no_probe:
+        raise SystemExit(f"{probe_path} missing: build the probe set first (generate probe), or pass --no-probe")
+    probe_ids = {r["sample_id"] for r in read_jsonl(probe_path)} if probe_path.exists() else set()
+    splits["val"] = [r for r in splits["val"] if r["sample_id"] not in probe_ids]
+    stats["probe_excluded"] = len(probe_ids)
     built: Dict[str, List[Dict[str, Any]]] = {}
+    final = stats.setdefault("final_letter_cap_dropped", {})
     for name, rs in splits.items():
         rep: Dict[str, Any] = {}
         rs = balance_split(rs, cfg, rng, rep.setdefault("balance", {}))
-        rs = class_ratio(rs, cfg, rng, rep.setdefault("classes", {}))
-        rs, rep["scene_cap_dropped"] = scene_cap(rs, cfg["scene_cap"], rng)
+        # the letter cap before the class caps, so the caps hold on the written file (the stratified cuts keep
+        # the letter shares); the scene cap last, the class caps again if it cut anything
+        rs = even_letters(rs, cfg, rng, place=False, report=final.setdefault("test" if name == "val" else name, {}))
+        rep["scene_cap_dropped"] = {}
+        for _ in range(3):
+            rs = class_caps(rs, cfg, rng, rep.setdefault("classes", {}))
+            rs, dropped = scene_cap(rs, cfg["scene_cap"], rng)
+            for s, n in dropped.items():
+                rep["scene_cap_dropped"][s] = rep["scene_cap_dropped"].get(s, 0) + n
+            if not dropped:
+                break
         stats[name] = rep
         built[name] = sorted(rs, key=lambda r: r["sample_id"])
-    probe, test = probe_subset(built["val"], int(cfg["probe_size"]), rng)
-    final = stats.setdefault("final_letter_cap_dropped", {})
-    files = {"p1_train.jsonl": even_letters(built["train"], cfg, rng, report=final.setdefault("train", {})),
-             "p1_test.jsonl": even_letters(test, cfg, rng, report=final.setdefault("test", {})),
-             "p1_probe.jsonl": even_letters(probe, cfg, rng, cap=False)}
-    if {r["scene"] for r in built["train"]} & ({r["scene"] for r in test} | {r["scene"] for r in probe}):
+    files = {"p1_train.jsonl": even_letters(built["train"], cfg, rng, cap=False),
+             "p1_test.jsonl": even_letters(built["val"], cfg, rng, cap=False)}
+    probe_scenes = {r["scene"] for r in read_jsonl(probe_path)} if probe_path.exists() else set()
+    if {r["scene"] for r in built["train"]} & ({r["scene"] for r in built["val"]} | probe_scenes):
         raise SystemExit("a scene is in both the training and the test questions")
     for name, rs in files.items():
         stats.setdefault("files", {})[name] = write_jsonl(out / name, (to_lf(r) for r in rs))
+    if probe_path.exists():
+        stats["files"]["p1_probe.jsonl"] = len(probe_ids)
     (out / "stats.json").write_text(json.dumps(stats, indent=1, default=str))
     print(json.dumps({k: stats[k] for k in ("raw_records", "files", "checks")}, indent=1))
 
@@ -671,11 +799,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     r.add_argument("--workers", type=int, default=1)
     r.add_argument("--scenes", default="", help="comma-separated scene ids (default: all)")
     r.add_argument("--limit-scenes", type=int, default=0)
+    r.add_argument("--tag", default="", help="name suffix of the raw files (a second source, e.g. extra val tasks)")
+    r.add_argument("--states-per-trajectory", type=int, default=None, help="anchor states per trajectory (0: all)")
     r.set_defaults(func=cmd_raw)
+    pr = sub.add_parser("probe")
+    pr.add_argument("--out", required=True)
+    pr.add_argument("--split-manifest", required=True)
+    pr.add_argument("--scenes-from", default="", help="a tasks.jsonl: only its scenes (e.g. the round-12 eval_val_v2)")
+    pr.add_argument("--per-qtype", type=int, default=PROBE_CONFIG["per_qtype"])
+    pr.add_argument("--seed", type=int, default=20261019)
+    pr.set_defaults(func=cmd_probe)
     b = sub.add_parser("build")
     b.add_argument("--out", required=True)
     b.add_argument("--split-manifest", required=True)
     b.add_argument("--seed", type=int, default=20261018)
+    b.add_argument("--no-probe", action="store_true", help="build without a probe set (the test set keeps every val question)")
     b.set_defaults(func=cmd_build)
     args = p.parse_args(argv)
     args.func(args)
