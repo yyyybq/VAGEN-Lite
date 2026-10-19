@@ -783,6 +783,30 @@ class ChainTest(unittest.TestCase):
                 self.assertNotIn("--ppo-template", args)
                 self.assertNotIn("--reward-preset", args)
 
+    def test_eval_only_plan(self):
+        """Round 12: an eval_only plan runs check_code and evaluate only, on the listed models and variants."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = {"tr": tmp, "sft_dir": tmp, "eval_only": True,
+                    "eval_sets": {"val_oa": str(root / "val_oa"), "test_oa": str(root / "test_oa")},
+                    "eval": {"models": {"sft_formal_e9": {"model": "/m/e9"}, "r1_final": {"model": "/m/r1", "prompt_format": "r1"}},
+                             "extra_sets": {"val400": str(root / "val400")},
+                             "variants": [{"suffix": "_s4", "sets": ["val400"], "models": ["sft_formal_e9"],
+                                           "options": ["--samples", "4"]}]}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            chain.check_code = lambda: None
+            got = {}
+            chain.eval_jobs = lambda step, j: got.update(j)
+            chain.tables = lambda: None
+            self.assertEqual(chain.run(), 0)
+            self.assertEqual(sorted(got), ["test_oa__r1_final", "test_oa__sft_formal_e9", "val400__sft_formal_e9_s4",
+                                           "val_oa__r1_final", "val_oa__sft_formal_e9"])
+            self.assertEqual(got["val_oa__r1_final"][3], "r1")
+            self.assertEqual(got["val400__sft_formal_e9_s4"][4], ["--samples", "4"])
+            steps = chain.state["steps"]
+            self.assertEqual(steps["rl"]["note"], "not planned (eval_only)")
+            self.assertTrue(all(steps[s]["state"] == "done" for s in T.STEPS))
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)

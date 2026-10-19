@@ -61,7 +61,8 @@ or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before it
 submitted again, at most "retries" (default 2) times per run (startup_problem; the render service keeps running);
 PROGRESS.md lists every resubmission.  Plan "rl" options "standard" (a named configuration of
 configs/rl_standards.json; the plan's "ppo_template" is then optional) and "seed" reach rl-config, and a run's
-"reward_preset" only when the plan names one.
+"reward_preset" only when the plan names one.  Plan "eval_only": true runs only check_code and evaluate (the
+plan's "eval"."models" and variants on its sets; no RL checkpoints), e.g. to evaluate existing models on a new set.
 
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
@@ -90,6 +91,7 @@ STEP_ZH = {"check_code": "核对代码", "render": "渲染 SFT 画面", "sft_dat
 CARDS = {"render": "1", "sft": "每组 8", "sft_eval": "每个 1", "rl": "1 + 8", "rl_extend": "1 + 8", "evaluate": "每个模型 1"}
 POLL_S = 60.0
 DEFAULT_MAX_EVAL_JOBS = 10
+EVAL_ONLY_STEPS = ("check_code", "evaluate")
 # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
 # during startup", after "GCS cannot find the node ... registration may not be complete")
 STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
@@ -968,7 +970,7 @@ class Chain:
         options = list(ev.get("options") or [])
         models: Dict[str, Tuple[str, Optional[str], Sequence[str]]] = {}
         rl_names: List[str] = []
-        for run_name, run in self.rl_runs().items():
+        for run_name, run in ({} if self.plan.get("eval_only") else self.rl_runs()).items():
             ckpts = run["run_dir"] / "checkpoints"
             for s in range(every, self.final_update() + 1, every):
                 name = f"{run_name}_{s:03d}" if run_name else f"v10_rl_{s:03d}"
@@ -1034,6 +1036,9 @@ class Chain:
         for step in STEPS:
             info = self.state["steps"][step]
             if info.get("state") == "done":
+                continue
+            if self.plan.get("eval_only") and step not in EVAL_ONLY_STEPS:  # round 12: evaluation of existing models
+                self.mark(step, state="done", note="not planned (eval_only)")
                 continue
             self.mark(step, state="running", started_utc=now(), error=None)
             try:
