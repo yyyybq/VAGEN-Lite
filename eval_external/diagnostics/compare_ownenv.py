@@ -23,9 +23,21 @@ def run_path(name: str) -> Path:
     return SOURCE_EVAL / name[4:] if name.startswith("r10:") else EVAL / name
 
 
+KEEP: set[str] | None = None  # --multi-task-scenes: only tasks whose scene has another test task
+
+
 def load(name: str) -> dict[str, dict]:
     rows = [json.loads(line) for line in open(run_path(name) / "results.jsonl") if line.strip()]
-    return {r["task_id"]: r for r in rows if "error" not in r}
+    return {r["task_id"]: r for r in rows if "error" not in r and (KEEP is None or r["task_id"] in KEEP)}
+
+
+def multi_task_scene_ids() -> set[str]:
+    from collections import Counter
+
+    tasks = [json.loads(line) for line in open(EVAL / "tasks.jsonl")]
+    rows = [json.loads(line) for line in open(EVAL / "ours-SFT" / "results.jsonl")]  # index -> task_id
+    n = Counter(t["scene_id"] for t in tasks)
+    return {r["task_id"] for r in rows if n[tasks[r["index"]]["scene_id"]] > 1}
 
 
 def mcnemar_exact(b: int, c: int) -> float:
@@ -61,7 +73,12 @@ def main() -> None:
     ap.add_argument("--ref", default="base-7B")
     ap.add_argument("--runs", nargs="*", help="default: every finished run in the eval copy")
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--multi-task-scenes", action="store_true",
+                    help="only tasks whose scene has another test task (replace-history donors from the same scene)")
     args = ap.parse_args()
+    global KEEP
+    if args.multi_task_scenes:
+        KEEP = multi_task_scene_ids()
     names = args.runs or sorted(p.parent.name for p in EVAL.glob("*/results.json"))
     ref = load(args.ref)
     table = {n: {**paired(ref, load(n)), "by_type": by_type(load(n))} for n in names}

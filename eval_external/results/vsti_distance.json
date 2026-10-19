@@ -118,5 +118,65 @@
    ],
    "top5_share": 0.775
   }
+ },
+ "ours-RL-150": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 890,
+   "spearman": 0.344,
+   "distinct_values": 29,
+   "top5": [
+    [
+     0.5,
+     227
+    ],
+    [
+     0.01,
+     170
+    ],
+    [
+     0.15,
+     165
+    ],
+    [
+     0.05,
+     143
+    ],
+    [
+     0.1,
+     28
+    ]
+   ],
+   "top5_share": 0.824
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 825,
+   "spearman": 0.265,
+   "distinct_values": 38,
+   "top5": [
+    [
+     10.0,
+     354
+    ],
+    [
+     0.03,
+     87
+    ],
+    [
+     0.05,
+     67
+    ],
+    [
+     0.5,
+     62
+    ],
+    [
+     1.52,
+     45
+    ]
+   ],
+   "top5_share": 0.745
+  }
  }
 }

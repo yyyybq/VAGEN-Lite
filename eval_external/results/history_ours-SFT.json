@@ -1,0 +1,110 @@
+{
+ "ref": "ours-SFT",
+ "runs": {
+  "ours-SFT__shuffle": {
+   "n": 279,
+   "success": 116,
+   "ref_success": 112,
+   "diff_pts": 1.4,
+   "only_run": 13,
+   "only_ref": 9,
+   "p_mcnemar": 0.5235,
+   "by_type": {
+    "absolute_positioning": [
+     33,
+     50
+    ],
+    "equidistance": [
+     11,
+     50
+    ],
+    "fov_inclusion": [
+     19,
+     50
+    ],
+    "occlusion_alignment": [
+     8,
+     29
+    ],
+    "projective_relations": [
+     15,
+     50
+    ],
+    "screen_occupancy": [
+     30,
+     50
+    ]
+   }
+  },
+  "ours-SFT__drop": {
+   "n": 279,
+   "success": 95,
+   "ref_success": 112,
+   "diff_pts": -6.1,
+   "only_run": 13,
+   "only_ref": 30,
+   "p_mcnemar": 0.0137,
+   "by_type": {
+    "absolute_positioning": [
+     26,
+     50
+    ],
+    "equidistance": [
+     7,
+     50
+    ],
+    "fov_inclusion": [
+     17,
+     50
+    ],
+    "occlusion_alignment": [
+     2,
+     29
+    ],
+    "projective_relations": [
+     19,
+     50
+    ],
+    "screen_occupancy": [
+     24,
+     50
+    ]
+   }
+  },
+  "ours-SFT__replace": {
+   "n": 279,
+   "success": 89,
+   "ref_success": 112,
+   "diff_pts": -8.2,
+   "only_run": 22,
+   "only_ref": 45,
+   "p_mcnemar": 0.0067,
+   "by_type": {
+    "absolute_positioning": [
+     26,
+     50
+    ],
+    "equidistance": [
+     5,
+     50
+    ],
+    "fov_inclusion": [
+     19,
+     50
+    ],
+    "occlusion_alignment": [
+     1,
+     29
+    ],
+    "projective_relations": [
+     17,
+     50
+    ],
+    "screen_occupancy": [
+     21,
+     50
+    ]
+   }
+  }
+ }
+}
