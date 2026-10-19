@@ -26,8 +26,8 @@ COLUMNS = [  # (column label, benchmark, sub-item or None)
     ("VSTI 修正前", "VSTI-Bench-prefix", None), ("VSTI 修正前 相机位移", "VSTI-Bench-prefix", "camera_displacement"),
     ("MMSI", "MMSI", None), ("SPBench-MV", "SPBench-MV", None),
 ]
-MODEL_ORDER = ["base-3B", "base-7B", "ours-SFT", "ours-RL-50", "ours-RL-150", "SI-3B", "SI-7B", "SpaceR-7B",
-               "VideoR1-7B", "ViLASR-7B", "VST-7B-RL", "SenseNovaSI-7B"]
+MODEL_ORDER = ["base-3B", "base-7B", "ours-SFT", "ours-RL-50", "ours-RL-150", "ours-SFT-r11", "ours-RL-r11",
+               "SI-3B", "SI-7B", "SpaceR-7B", "VideoR1-7B", "ViLASR-7B", "VST-7B-RL", "SenseNovaSI-7B"]
 
 
 def load_results(stage: str) -> dict:
