@@ -455,3 +455,23 @@
 **还剩的事：**
 - 你核对 30 道题后，我读回结果，把通过率写进第 2.1 节和报告；
 - 合并、训练链的字段、E 组的两件事，等你决定（报告第 2 节）。
+
+## 9. 合并（2026-10-19）
+
+用户要求：先把 main 的新提交合进 `transition-qa`，跑测试，没问题再合并到 main，不推送。
+
+1. **main 已合进本分支：** 提交 `bd29d26b`，合入 main `ff958185`（第十二轮开始后的 11 个提交）。没有冲突。
+   `training_prep.py` 里第十二轮的 `rl-config --standard`、`--seed` 和本分支的 `--output-format` 并存，逐行看过。
+2. **测试全部通过：** 301 个，用时 14 分 23 秒。
+   - 本分支的三个包；
+   - `data_gen/interiorgs_v10/tests` 全部，含第十二轮新加的测试和 `test_output_format.py`；
+   - `tests/active_spatial/test_round11_package.py`。
+3. **没有合并到 main，暂停在这里：** 第十二轮的训练链正在主工作树里跑。
+   - 进程：`train_chain run`，pid 308981，plan `interiorgs_v10_train_r12a_20261019` / `r12e`；
+   - 还有一个 RL 任务 `interiorgs-v10-rl-rl-run-p1d` 在跑。
+   原规则是"合并到 main 必须等训练链结束"；快进 main 会改动正在运行的训练链所用的工作树文件。
+4. **矩阵配置和第十二轮的决定不一致，要更新：**
+   - 第十二轮第 2 条：每次 RL 实验都成对跑，S0 和 D，用 `rl.standard` 的 `v10_p1_S0` / `v10_p1_D` 和固定种子；本分支的配置只有 S0；
+   - 第十二轮第 6 条：SFT 训 10 个 epoch；本分支的配置是 5 个；
+   - 第十二轮用新的评测集 `interiorgs_v10_r12_20261019/eval_val_v2`、`eval_test_v2`（STATUS 还没写），本分支的配置用的是第十一轮的 val400 / test。
+   配置文件都是本分支新加的、没有启动过，改起来不影响别的东西；等第十二轮的设置定下来后统一改，并重估用卡（成对后 RL 用卡翻倍）。
