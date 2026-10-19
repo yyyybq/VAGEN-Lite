@@ -51,6 +51,24 @@ def test_parse_answer():
     assert QP.parse_answer("<action>turn_left|</action>", [], True) is None
 
 
+def test_parse_answer_lenient_and_compliance():
+    dist = ["about 1.5 meters", "about 2.0 meters", "about 2.5 meters", "about 3.0 meters"]
+    assert QP.parse_answer("I estimate 2.5 m.", dist, False) == "C"                       # the option's number
+    assert QP.parse_answer("<think>far</think><answer>(B)</answer>", dist, False) == "B"   # after think, in answer
+    assert QP.parse_answer("b", dist, False) == "B" and QP.parse_answer("**D**", dist, False) == "D"
+    assert QP.parse_answer("Option c", dist, False) == "C"
+    assert QP.parse_answer("between 2.0 and 2.5", dist, False) is None                      # two options named
+    lr = ["to the left", "to the right"]
+    assert QP.parse_answer("It is on the left side.", lr, False) == "A"
+    occ = ["fully hidden behind the bed", "partly hidden behind the bed", "not hidden behind the bed"]
+    assert QP.parse_answer("The table is partially covered.", occ, False) == "B"
+    assert QP.parse_answer("not fully", occ, False) is None
+    assert QP.compliant("B", dist, False) and QP.compliant("B.", dist, False)
+    assert not QP.compliant("(B)", dist, False) and not QP.compliant("The answer is B", dist, False)
+    assert QP.compliant("yes", [], True) and not QP.compliant("Yes, it is.", [], True)
+    assert not QP.compliant("E", dist, False)
+
+
 def test_chat_puts_images_where_the_markers_are(tmp_path):
     a, b = tmp_path / "a.png", tmp_path / "b.png"
     a.write_bytes(b"a")
@@ -71,8 +89,12 @@ def test_score_and_summary():
              "messages": [{}, {"content": "B"}]}]
     ans = QP.score(rows, ["Yes", "<action>move_left|</action>"])
     s = QP.summary(ans)
-    assert s["all"] == {"n": 2, "accuracy": 0.5, "unreadable": 0.5}
+    assert s["all"] == {"n": 2, "accuracy": 0.5, "unreadable": 0.5, "noncompliant": 0.5, "strict_accuracy": 0.5,
+                        "chance": 0.5}
     assert s["qtype"]["closer_now"]["unreadable"] == 1.0
+    ans = QP.score(rows, ["Yes, it is.", "B"])
+    s = QP.summary(ans)
+    assert s["all"]["accuracy"] == 1.0 and s["all"]["noncompliant"] == 0.5 and s["all"]["strict_accuracy"] == 0.5
 
 
 def test_history_permutation_differs_and_keeps_turns():
