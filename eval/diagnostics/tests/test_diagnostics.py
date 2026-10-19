@@ -111,6 +111,24 @@ def test_transfer_table(tmp_path):
     assert "+50.0" in TT.markdown(t)
 
 
+def test_format_check_rewrites(tmp_path):
+    import json
+
+    from eval.diagnostics import format_check as FC
+
+    assert FC.as_action_only("<think>go left</think>\n<action>move_left|</action>") == "<action>move_left|</action>"
+    assert FC.as_think_action("<action>turn_right|</action>").startswith("<think>")
+    d = tmp_path / "m"
+    d.mkdir()
+    (d / "model.json").write_text(json.dumps({"prompt_format": "free_think"}))
+    turns = [{"answer": "<think>x</think><action>turn_left|turn_left|</action>", "actions": ["turn_left", "turn_left"]},
+             {"answer": "<action>move_forward|</action>", "actions": ["move_forward"]},
+             {"answer": "<think>cut off before the action", "actions": []}]
+    (d / "results.jsonl").write_text(json.dumps({"index": 0, "trajectory": turns}) + "\n")
+    r = FC.check_folder(d, FC.parser())
+    assert (r["turns"], r["agree"], r["unreadable"], r["has_think"]) == (3, 3, 1, 2)
+
+
 def test_parse_chain():
     name, pts = QP.parse_chain("R11-SFT=sft_formal_e{1..3}@154")
     assert name == "R11-SFT" and pts == [("sft_formal_e1", 154), ("sft_formal_e2", 308), ("sft_formal_e3", 462)]
