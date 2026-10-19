@@ -10,6 +10,7 @@ sampling parameters, so all models decode the same way.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -42,6 +43,20 @@ class VLLMServer:
                 "--gpu-memory-utilization", str(self.cfg["gpu_memory_utilization"]),
                 "--seed", str(self.cfg["seed"]), "--generation-config", "vllm"]
 
+    @staticmethod
+    def env() -> dict:
+        """Triton builds a small C helper at start-up; the sco image has no system compiler, so use the env's conda
+        gcc, as examples/train/active_spatial/sco_interiorgs_v10_train.sh does."""
+        env = dict(os.environ)
+        prefix = Path(sys.executable).resolve().parent.parent
+        for var, tool in (("CC", "x86_64-conda-linux-gnu-gcc"), ("CXX", "x86_64-conda-linux-gnu-g++")):
+            if not env.get(var) and (prefix / "bin" / tool).exists():
+                env[var] = str(prefix / "bin" / tool)
+        env.setdefault("TORCH_CUDA_ARCH_LIST", "9.0")
+        env.setdefault("NO_PROXY", "*")
+        env.setdefault("no_proxy", "*")
+        return env
+
     def _ready(self) -> bool:
         try:
             with urllib.request.urlopen(f"{self.base_url}/models", timeout=5) as r:
@@ -52,7 +67,7 @@ class VLLMServer:
     def __enter__(self) -> "VLLMServer":
         self.log.parent.mkdir(parents=True, exist_ok=True)
         self._log_fh = open(self.log, "w")
-        self.proc = subprocess.Popen(self.command(), stdout=self._log_fh, stderr=subprocess.STDOUT)
+        self.proc = subprocess.Popen(self.command(), stdout=self._log_fh, stderr=subprocess.STDOUT, env=self.env())
         deadline = time.time() + 1200
         while time.time() < deadline:
             if self.proc.poll() is not None:
