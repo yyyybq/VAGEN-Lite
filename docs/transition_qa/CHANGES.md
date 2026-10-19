@@ -63,11 +63,20 @@
    - E 组的配置要把这个上限放宽，例如 6,144。这个值现在是 `training_prep.py` 里的常量，改成可配置也要动现有文件。
 3. **解析器的宽松度不对称（第 3 节）：** 建议保持。只有原始模型会写这种回答，改了会改变现有训练对格式的判定。
 
-## 5. 训练链需要加的（第 7 步写配置时用；这里不改 `train_chain.py`）
+## 5. 训练链需要加的（矩阵配置 `configs/matrix_v2/` 用；这里不改 `train_chain.py`）
 
-- **E 组的输出格式：** plan 的 RL 步加一个输出格式字段，训练链据此给 rl-config 传 `--output-format think_action`。
-  现在 `train_chain` 不认识这个字段。
-- **E 组的放弃规则**（前 50 次更新解析失败率超过 20%）：
-  - 现有的 `rl.guards` 可以写 `invalid_max: 0.20`，`invalid_window` 设为求平均的次数；
-  - 但现有规则在整个训练中都生效，不是只看前 50 次。要"只看前 50 次"，需要加一个字段，例如 `invalid_until: 50`。
-- **E 组的评测：** 训练链的评测步要给 E 的模型传 `--prompt-format free_think`。SCO 脚本的 `eval` 模式已有这个参数，训练链要按组传。
+每组 YAML 的 `train_chain_plan` 只用了训练链现在读得了的字段，有测试核对：`data_gen/sft_mixture/tests/test_matrix_configs.py`
+逐个字段去 `train_chain.py` 的源码里找。读不了的放在 `needs_chain_support`，汇总如下。
+
+| 字段 | 哪几组 | 训练链要做的 | 不改训练链时的办法（各组 `manual_steps`） |
+| --- | --- | --- | --- |
+| `sft_lf_dirs: {组名: 目录}` | B、C、D | SFT 直接用这个已建好的 LLaMA-Factory 目录（混合配方构建器的输出）里的 `train.yaml`，跳过 `sft-records` 和 `prepare_active_spatial_sft.py`。现在的 `sft_data` 步会对 plan 的 `sft_dir` 重写 `sft_trajectories.jsonl`；矩阵用的是第十一轮的目录，不能让它重跑 | 把混合目录软链到 `TR/lf_mix`，`progress.json` 里把 `render`、`sft_data` 标成 done |
+| `start_model` | A、E | 跳过 `render` 到 `pick_sft` 五步，RL 从给定模型开始（A：原始 7B；E：D 组挑出的 SFT 检查点） | `progress.json` 里这五步标 done，写 `rl_model_override`（第十一轮修正包 RL 就是这样起步的） |
+| `rl.output_format` | E | `rl_config` 步给 rl-config 传 `--output-format think_action`（rl-config 已支持，第 1 节） | 手工跑 rl-config，把 `rl_config` 标成 done |
+| `rl.guards.invalid_until` | E | 解析失败率这条只在前 N 次更新里检查（用户要求前 50 次超过 20% 就放弃） | 不加时，`invalid_max: 0.20` 整个训练都适用，比要求严 |
+| `eval.rl_prompt_format` | E | `evaluate` 步给 RL 检查点传 `--prompt-format free_think`。现在 RL 检查点固定用默认提示，只有 `eval.models` 里的模型能指定格式 | 手工提交评测任务，SCO 脚本 `eval` 模式的第 6 个参数写 `free_think` |
+| `max_response_length`（待定） | E | rl-config 的一条序列回答上限可配置（现在是常量 4096） | 没有；要改 `training_prep.py`（第 4 节第 2 条） |
+| `diagnostics_after_eval` | 全部 | 评测之后跑失败拆解和 P1 探针 | 手工跑 `eval.diagnostics` |
+
+另外，训练链的 `check_code` 要求主工作树是 plan 里的 commit。矩阵要用的新代码（混合配方、诊断、`rl-config --output-format`）
+得先合并到 main（由用户决定，等第十一轮训练链结束）；各组 YAML 的 `commit` 写的是 `TBD`。

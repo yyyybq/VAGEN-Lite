@@ -398,3 +398,49 @@
 ### 6.3 下一步
 
 第 7 步：矩阵配置 `configs/matrix_v2/`。每组一个 YAML，写清数据配方、SFT 配置、RL 配置、评测集；只写配置，`train_chain` 读不了的字段写进 `CHANGES.md` 第 5 节。
+
+用户决定（2026-10-18）：E 组的两件事（思考文字比例的指标、回答长度上限）先按待定写进配置和 `CHANGES.md`。
+
+## 7. 第 7 步（2026-10-18）：矩阵配置 —— 完成
+
+### 7.1 结论
+
+1. **五组的配置写好了：** `configs/matrix_v2/A.yaml` … `E.yaml`，加 `README.md`（五组、共同设置、用卡估计、启动前要做的）。没有启动训练。
+2. **每个文件分四块：**
+   - 各组的数据配方、SFT、RL、评测集；
+   - `train_chain_plan`：训练链 plan.json 读得了的字段，照第十一轮修正包的 plan 写；
+   - `needs_chain_support`：训练链现在读不了的字段；
+   - `manual_steps`：不改训练链时手工怎么跑。
+3. **训练链读不了的，归成 7 项**（`CHANGES.md` 第 5 节）：
+   - B、C、D：SFT 要直接用混合配方的目录；
+   - A、E：要从给定模型直接开始 RL；
+   - E：要传输出格式、只在前 50 次检查解析失败率、评测时用 `free_think` 提示、回答长度上限（待定）；
+   - 全部：评测后跑诊断。
+   除了回答长度，每一项都有不改训练链的手工办法，第十一轮修正包 RL 就用过其中"标成 done + 指定起点模型"的办法。
+4. **我定的两项设置，可以改：**
+   - SFT 训 5 个 epoch：第十轮最终模型是第 5 个 epoch，第十一轮训到 10 个 epoch 没有提高；
+   - RL 用修正包 `p1` 加稀疏 S0：第十一轮修正包 PS0 第 300 次比它的起点 SFT 第 9 个 epoch 高，
+     验证集 48.7% 对 42.0%，评测集 43.4% 对 39.4%；稀疏和密集（PD）之间没有一致的差别。
+   混合配方已按 5 个 epoch 重建，三个 `train.yaml` 都是 5 个 epoch，每个池分别算验证损失。
+5. **启动前要先合并：** 训练链只在主工作树、按 plan 的 commit 运行，矩阵要用的新代码得先合并到 main。由你决定，等第十一轮训练链结束。
+6. **用卡估计**（按第十一轮实测）：
+   - SFT 每组 8 卡 2–3 小时（B 几分钟）；
+   - RL 每组 1 + 8 卡约 11.5 小时；
+   - 合计约 600 卡时，RL 占大头。
+
+### 7.2 做了什么
+
+- **配置和说明：**
+  - `configs/matrix_v2/{README.md, A.yaml, B.yaml, C.yaml, D.yaml, E.yaml}`；
+  - 混合配方配置 `data_gen/sft_mixture/configs/mixture_matrix_v2_20261018.yaml` 加 `train_overrides: {num_train_epochs: 5}`。
+- **测试：** `data_gen/sft_mixture/tests/test_matrix_configs.py`（5 个）。
+  - 每个 `train_chain_plan` 字段都在 `train_chain.py` 的源码里能找到；
+  - 五组共用的设置相同：任务、评测集、修正包、只用后备题做 RL；
+  - B、C、D 的数据和混合配方一致，D 的 P1 = P2 条数；
+  - E 的解析失败门槛是 20%，其余是 5%。
+  这个包合计 11 个测试，全部通过。
+- **数据：** 矩阵的混合数据已重建，`exps/sft_mixture_matrix_v2_20261018/{B,C,D}`。
+
+### 7.3 下一步
+
+第 8 步：总报告 `docs/transition_qa/REPORT.md`，汇总第 1–7 步、待定事项和启动前要做的。30 道人工核对还没有结果，报告里会写明。
