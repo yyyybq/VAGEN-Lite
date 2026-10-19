@@ -1,161 +1,194 @@
 # 转移题、混合 SFT、输出格式开关、诊断、实验矩阵：总报告
 
-2026-10-19。任务说明：用户 2026-10-17 的提示词（第 0–8 节）。代码和文档都在分支 `transition-qa`
-（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data`，从 main `a59f9583` 开出），17 个提交，只在本地，没有推送，没有合并。
-逐步记录见 `PROGRESS.md`，改动清单见 `CHANGES.md`。
+2026-10-19（第二版，加上当天第二批要求的结果）。任务说明：用户 2026-10-17 的提示词（第 0–8 节）和 2026-10-19 的两批要求。
+
+- 代码和文档都在分支 `transition-qa`（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data`），只在本地，没有推送，没有合并到 main。
+- 分支和 main 保持同步（最近一次合入 main `71372b7e`）；合并到 main 由你在冻结期触发。
+- 逐步记录见 `PROGRESS.md`（2026-10-19 第二批在第 10 节），改动清单见 `CHANGES.md`。
+- 字段和规则见 `DATA_CONTRACT.md`，题型见 `P1_QTYPES.md`。
+
+> 名字提醒：`v10_p1` / `v10_p2` 是 RL 修正包，和数据池 P1（转移题）/ P2（动作轨迹）无关。
 
 ## 结论
 
-1. **转移题题库（P1）生成完了，除人工核对外的验收都通过。**
-   - 规模：训练集 35,039 道，只来自 train 场景；测试集 4,073 道、探针集 500 道，只来自 val 场景。
-   - 比例：训练集里状态题、前向题、逆向题占 49.9% / 34.9% / 15.3%，目标 50 / 35 / 15。
-   - 平衡：每种题的正确字母和均匀分布最多差 2.4 个百分点，验收线 5。
-   - 划分：train 和 val 场景没有交叉。
-   - 一致性：答案全部来自环境和生成器自己的判定函数，在全部 11,095 条轨迹上和环境的成功判定一致，没有发现判定函数之间的矛盾。
-   - **30 道人工核对还没有结果**：核对页已发布（https://claude.ai/artifact/NszETEpoarL6CXzbAZKdfQ ），截至写这份报告时没有提交任何选择。
-2. **混合配方构建器能用了。**
-   - 一个配置文件给出三个池（P0 仿 benchmark 的 QA、P1 转移题、P2 SFT 动作轨迹）的来源和每组的条数。
-   - 230 道 P0 样题、500 道 P1、300 条 P2 在 SCO 单卡上被 LLaMA-Factory 全部加载并训练 5 步。
-   - 三个池的验证损失分别算出：P0 0.494、P1 0.340、P2 0.200。
-3. **诊断基线：现有模型的主要失败是"差最后一步"，而现有动作训练几乎没有改变模型回答转移题的能力。**
-   - 失败拆解：所有 SFT、RL 模型都有 28%–37% 的题用完 12 个动作时，最好的那个回合只差一个成功条件；提前停下的不超过 0.4%。
-   - P1 探针：36 个检查点都在 43.4%–48.0%，原始 7B 45.4%，随机猜 36.4%。
-   - 只有"相机做了什么动作"随 SFT 上升（49% → 59%–78%）。
-   - "当前是否已满足要求"所有模型都在 51%，等于随机猜。
-4. **输出格式开关：只改了一个现有文件。**
-   - 改动：`training_prep.py rl-config` 加了 `--output-format think_action`（15 行），供 E 组 RL 用 `free_think` 提示；其余几处开关原来就有。
-   - 验收：在 278 道和 279 道评测题的历史轨迹上（47 个模型，86,067 个回答），两种写法读出的动作 99.98% 相同。
-5. **矩阵 A–E 的配置写好了，没有启动。** 2026-10-19 已按第十二轮的决定更新：每组 RL 成对（S0 和 D，同一种子），SFT 10 个 epoch，v2 评测集。
-   - main 的第十二轮提交已合进本分支，没有冲突，301 个测试全部通过。
-   - 你决定等第十二轮训练链结束再把 main 快进到本分支；现在 main 没有动。
-   - 训练链还要加 7 个字段（每个都写了不改训练链时的手工办法）。
-   - 用卡估计约 1,300 卡时，RL 占大头（五组各一对，共 10 个 RL）。
-6. **本任务用了约 3.4 个 H800 卡时**，都是 SCO 单卡任务：渲染 7,528 + 14 张图、LLaMA-Factory 干跑、36 个检查点的探针。
-   跑完的任务都已删除，28 GB 的干跑权重也已删除。
+1. **转移题题库（P1）按 2026-10-19 的规则重建了，训练题从 35,039 道增加到 90,101 道。**
+   - 规则：状态题全保留；锚点放开到每条轨迹的全部可用帧；前向题 ≤ 状态题 1.2 倍；逆向题 ≤ 15%；单场景 ≤ 8%。
+   - 训练集：状态 34,812（38.6%）/ 前向 41,774（46.4%）/ 逆向 13,515（15.0%）；测试集 6,035 道；探针集 600 道。
+   - 字母和均匀分布最多差 2.9 个百分点（验收线 5）；train 和 val 场景没有交叉；全部 11,110 条轨迹的终点成功、终点前不成功。
+   - **要你看一眼**：状态题全保留以后，"当前是否已满足要求"（`goal_now`）占状态题的 70.9%。旧规则下这类题最多占一半，这次放开了（第 2 节第 1 条）。
+2. **探针集换成第二版，诊断 3 重跑：动作训练基本不改变回答转移题的能力。**
+   - 探针集：600 道，15 个题类各 40 道，来自第十二轮 v2 验证集的 97 个场景。遮挡题不够，按预授权给 v2 新增的 15 道遮挡题渲染了 58 张帧。
+   - 23 个检查点（原始 7B、SFT 10 个 epoch、P-S0 和 P-D 各 6 个）在 42.3%–48.5%；原始 7B 45.8%，随机猜 36.1%，标准误约 ±2 个百分点。
+   - 所有模型在"当前是否已满足要求"上几乎总答 No。训练后的模型在"A 被 B 挡住了吗"上低于随机，因为多答"没有"。
+   - **格式不合规率**：训练过的模型 48%–80%，几乎全部是写成 `(B)`，读得出，没有一个用动作格式；原始 7B 15.8%，全是先推理再答。
+3. **C0（主线，不新训练）加进矩阵，SFT 配方和主线逐项一致。**
+   - C0 = 第十一轮正式 SFT 第 9 个 epoch + 成对 RL，就是第十二轮正在跑的复现对（R12-P1-S0 / -D），结果直接取那条训练链。
+   - B / C / D 的 SFT 超参数和主线完全相同；P2 训练行逐条相同、顺序相同；不同的只有数据和验证集。
+   - RL 标准名做成了变量（`configs/matrix_v2/vars.yaml`），换 p2 只改一行。
+4. **E 组的两件事做了。**
+   - RL 日志记录含思考文字的回答比例：`transition/think_rate`。
+   - 回答上限只对 E 升到 6,144：`rl-config --max-response-length`。
+   - 为此改了 5 个现有文件，都是加选项或加指标，默认行为不变（`CHANGES.md` 第 1 节）。
+5. **30 道人工核对还没有结果。** 核对页加了每道题的过滤检查和"没出的候选题"表：https://claude.ai/artifact/NszETEpoarL6CXzbAZKdfQ 。
+6. **测试**：和 main 同步后 308 个测试全部通过；之后改的诊断包 11 个通过。
+7. **用卡**：本任务累计约 4.8 个 H800 卡时，都是 SCO 单卡任务，跑完的都已删除。
+   - 2026-10-18 约 3.4 卡时：渲染 7,528 + 14 张、干跑、36 个检查点的旧探针；
+   - 2026-10-19 约 1.4 卡时：渲染 58 张、23 个检查点的新探针。
 
 ## 术语
 
-- **状态 / 帧对**：状态是 SFT 轨迹上的一个相机位姿和它的图；帧对是同一条轨迹里相邻的两张图，中间是一个回合的动作。
+- **状态 / 锚点状态**：状态是 SFT 轨迹上的一个相机位姿和它的图；锚点状态是拿来出题的状态。
 - **门**：任务成功判据里的一项条件，例如"目标在画面里的部分不少于 95%"；全部通过才算成功。
 - **状态题 / 前向题 / 逆向题**：
   - 状态题问当前这张图，例如"现在 A 在 B 的左边还是右边"；
   - 前向题问某个动作之后，例如"左转 40 度后哪个更近"，不另外渲染；
   - 逆向题给前后两张图，问相机做了什么动作。
-- **P0 / P1 / P2**：三个 SFT 数据池。P0 是仿 8 个 benchmark 的 QA（现在只有 230 道样题），P1 是转移题，P2 是 SFT 动作轨迹。
+- **P0 / P1 / P2**：三个 SFT 数据池。P0 是仿 8 个 benchmark 的 QA（现在只有 230 道样题），P1 是转移题，P2 是第十一轮的 SFT 动作轨迹。
 - **正式题 / 后备题**：生成器给每个场景出的两批题。SFT 只用正式题，RL 只用后备题（第十一轮第 7 条决定）。
+- **格式不合规**：探针题的回答不是题目要求的"只写选项字母 / 只写 Yes 或 No"；宽松读法仍可能读得出。
 
 ## 1. 每一步
 
 | 步 | 做了什么 | 结果 | 详见 |
 | --- | --- | --- | --- |
-| 1 | 读代码，写"题型 → 复用函数"对照表，估渲染预算 | 几何判定全部复用现有函数；推荐的方案 0 张渲染；5 件事请你定（你都选了推荐项） | `PROGRESS.md` 第 1 节 |
-| 2 | 出状态题、前向题、逆向题（逆向题用现有帧对，并入本步） | P1 题库，见结论第 1 条；按预授权渲染 7,528 个目标区域内部的成功状态 | 第 2 节、`P1_STATS.md` |
-| 3 | 混合配方构建器 `data_gen/sft_mixture/` | 干跑通过；A–E 的配方表 | 第 3 节、`RECIPES.md` |
-| 4 | 诊断 1（失败拆解）和诊断 3（P1 探针）的基线；诊断 2、4 只写了代码 | 见结论第 3 条 | 第 4 节、`DIAG_BASELINE.md` |
-| 5 | 逆向题渲染 | 并入第 2 步，用现有帧对，不渲染 | 第 2 节 |
-| 6 | 输出格式开关 | 见结论第 4 条 | 第 6 节、`CHANGES.md` |
-| 7 | 矩阵配置 `configs/matrix_v2/` | 五组配置、启动前要做的 | 第 7 节、`configs/matrix_v2/README.md` |
+| 1 | 读代码，写"题型 → 复用函数"对照表，估渲染预算 | 几何判定全部复用现有函数；5 件事你都选了推荐项 | `PROGRESS.md` 第 1 节 |
+| 2 | 出状态题、前向题、逆向题；按预授权渲染 7,528 个目标区域内部的成功状态 | 2026-10-18 的题库 | 第 2 节 |
+| 3 | 混合配方构建器 `data_gen/sft_mixture/` | 干跑通过；配方表 | 第 3 节、`RECIPES.md` |
+| 4 | 诊断 1（失败拆解）和诊断 3（P1 探针）的基线 | 失败主要是"差最后一步"；探针平 | 第 4 节、`DIAG_BASELINE.md` |
+| 6 | 输出格式开关 | 历史轨迹上两种写法读出的动作 99.98% 相同 | 第 6 节、`CHANGES.md` |
+| 7 | 矩阵配置 `configs/matrix_v2/` | 按第十二轮更新：成对 RL、10 个 epoch、v2 题集 | 第 7、9 节 |
+| 10.2 | 第二版探针集，诊断 3 重跑 | 结论第 2 条 | 第 10.2 节、`DIAG3_PROBE.md` |
+| 10.3 | 数据契约、题型目录 | | `DATA_CONTRACT.md`、`P1_QTYPES.md` |
+| 10.4 | 新的比例规则，重建题库和混合配方 | 结论第 1 条 | 第 10.4 节、`P1_STATS.md` |
+| 10.5 | C0、SFT 配方核对、RL 标准名做成变量 | 结论第 3 条 | 第 10.5 节、`configs/matrix_v2/README.md` |
+| 10.6 | E 组：思考文字比例、回答上限 6,144 | 结论第 4 条 | 第 10.6 节、`CHANGES.md` |
 
-**P1 题库的组成（训练集）。**
+**P1 题库（2026-10-19，`exps/transition_qa_20261019`）**
 
-| 大类 | 题类 | 题数 |
-| --- | --- | --- |
-| 状态题 | 当前是否已满足要求 / 左右 / 距离几米 / 是否都在画面里 / 哪个更近 / 高度占几成 / 被挡的程度 | 8,719 / 3,231 / 2,123 / 1,320 / 1,151 / 716 / 207 |
-| 前向题 | 动作后是否满足要求 / 距离 / 高度 / 是否都在画面里 / 左右 / 哪个更近 / 被挡的程度 | 6,104 / 2,522 / 958 / 860 / 856 / 754 / 162 |
-| 逆向题 | 两帧之间的动作 | 5,356 |
+| 大类 | 训练 | 测试 | 探针 |
+| --- | --- | --- | --- |
+| 状态题 | 34,812（`goal_now` 24,672、左右 3,515、距离 2,397、视野 1,711、哪个更近 1,444、高度 806、遮挡 267） | 2,332 | 280 |
+| 前向题 | 41,774（`goal_after` 20,887，其余 6 类 20,887） | 2,798 | 280 |
+| 逆向题 | 13,515 | 905 | 40 |
+| 合计 | 90,101 | 6,035 | 600 |
 
-**矩阵五组（训练条数；一条 = 一段对话，P2 一条是一整条多回合轨迹）。**
+**矩阵六组（训练条数；一条 = 一段对话，P2 一条是一整条多回合轨迹）**
 
 | 组 | P0 | P1 | P2 | 输出格式 | 之后 |
 | --- | --- | --- | --- | --- | --- |
 | A | 0 | 0 | 0 | 只输出动作 | 原始 7B 直接 RL |
 | B | 177（230 道样题） | 0 | 0 | 只输出动作 | RL |
+| C0 | 0 | 0 | 9,802（主线，第 9 个 epoch） | 只输出动作 | 第十二轮的复现对，不新训练 |
 | C | 177 | 0 | 9,802 | 只输出动作 | RL |
 | D | 177 | 9,802 | 9,802 | 只输出动作 | RL |
-| E | 同 D（共用 D 的 SFT 模型） | | | RL 时 `free_think` | RL（探索性，前 50 次更新解析失败率超过 20% 就放弃） |
+| E | 同 D（共用 D 的 SFT 模型） | | | RL 时 `free_think`，回答上限 6,144 | RL（探索性，前 50 次更新解析失败率超过 20% 就放弃） |
 
 所有组按第十二轮的决定设置：
 - SFT 训 10 个 epoch，按 val 挑最好的 epoch；
-- RL 只用后备题，每组成对跑（`v10_p1_S0` 和 `v10_p1_D`，只差奖励，种子 20261019），各训 300 次更新；
-- 评测集是第十二轮的 v2：val 413 道、test 292 道，即第十一轮的 val400 / test 各加约 15 道遮挡题。
+- RL 只用后备题，每组成对跑（`{rl_package}_S0` 和 `_D`，现在 `v10_p1`，只差奖励，种子 20261019），各训 300 次更新；
+- 评测集是第十二轮的 v2：val 413 道、test 292 道。
 
 ## 2. 等你决定的事（按影响排序，推荐项放第一个）
 
-1. **合并 `transition-qa` 到 main：已决定**（2026-10-19），等第十二轮训练链结束后把 main 快进到本分支，推送前再问你。
-   - main 的第十二轮提交已合进本分支（`bd29d26b`），没有冲突，301 个测试通过。
-   - 分支只改了 `training_prep.py` 一个现有文件，默认行为不变，其余 39 个是新文件。
+1. **状态题里的 goal 题要不要再设上限**（新问题）。新规则"状态题全保留"和 2026-10-18 保留的"goal 题最多占所在大类一半"冲突。我按新规则做了：
+   - 状态题里不限 goal，`goal_now` 占状态题 70.9%；
+   - `goal_after` 最多占前向题一半这条保留。
+   - (a) 维持现在这样；
+   - (b) 状态题里也限一半：`goal_now` 留 10,140 道，状态题 20,280、前向题按 1.2 倍缩到 24,336、逆向题 7,873，训练集约 5.2 万道。
+   - 我没有推荐：探针显示所有模型在这类题上都只会答 No，多练它可能有用，但它会占训练集近三成。
 2. **训练链的 7 个字段**（`CHANGES.md` 第 5 节）：
-   - (a) **推荐**：在 `train_chain.py` 里加上，矩阵五组就能无人值守地跑；
-   - (b) 按各组 `manual_steps` 手工准备 progress.json（第十一轮修正包 RL 用过这个办法）。
-     A、B、C、D 可以这样跑；E 的评测和输出格式要多手工两步。
-3. **E 组的两件事**（你说先按待定写进配置）：
-   - 要不要记录"带思考文字的回答比例"。在 `free_think` 提示下只回动作也不扣分，模型可以完全不写思考文字；
-   - 一条序列模式的回答上限要不要从 4,096 放宽到约 6,144。
-   两件都要改现有文件（vagen 的指标、`training_prep.py` 的常量）。
-4. **30 道人工核对：** 在核对页上点完即可，我读回后写通过率。
-5. **P0 全量题库什么时候生成：** 由你通知。现在 B 组只有 177 条记录。全量可用时改混合配置的 P0 路径、重建，并给 P0 一份 val 场景的验证集。
-6. **（可选）诊断 2，历史打乱：** 代码已有。对现有模型跑三档（正常 / 打乱 / 删掉历史），每档每个模型一个单卡评测，约 1 小时。
-7. **修正包 p1 还是 p2：** p2（每次更新 48 道候选题）是第十二轮的候选标准。矩阵现在用 p1；第十二轮定为 p2 的话，把各组的 `rl.standard` 换成 `v10_p2_*`。
+   - (a) **推荐**：在 `train_chain.py` 里加上，矩阵各组就能无人值守地跑；
+   - (b) 按各组 `manual_steps` 手工准备 progress.json。
+3. **合并到 main**：由你在冻结期触发。分支已和 main 同步，308 个测试通过。
+   - 本分支改了 5 个现有文件：`training_prep.py`、`env.py`、两个 agent loop、`ray_trainer.py`；都是加选项或加指标。
+   - 合并会把 `transition/think_rate` 带进所有之后的 RL 日志。
+4. **30 道人工核对**：在核对页上点完即可，我读回后写通过率。其中 22 道在新题库里，题干、选项、答案不变。
+5. **修正包 p1 还是 p2**：第十二轮定了以后改 `configs/matrix_v2/vars.yaml` 的 `rl_package` 一行；C0 自动对应 r12a 或 r12b。
+6. **P0 全量题库什么时候生成**：由你通知。现在 B 组只有 177 条记录。
+7. **（可选）E 组正式跑之前，先用 `--trial` 在 GPU 上试 6,144 的回答上限**：一条序列最长从 8,192 变成 10,240 个词元，显存没试过。
+8. **（可选）诊断 2，历史打乱**：代码已有，约 1 卡时。
 
 ## 3. 风险和局限
 
-- **P0 很小：** 现在只有 230 道样题。B 组几乎等于不做 SFT；P0 的验证集来自 train 场景（样题导出时每 10 道留 1 道）。
-- **"任务要求满足了吗"类题的上限：** 这类题在状态题、前向题里各最多占一半（你决定保留），所以训练集停在 35,039 道。
-  去掉上限能到约 6.8 万道，其中这类题约占 59%。
-- **左右前向题的答案几乎从不改变：** 转身不改变两个物体的左右顺序，所以 `left_right_after` 的答案基本等于现在的答案。这类题信息量低，只占训练集 2.4%。
-- **逆向题的动作分布：** 动作来自最短路径，后退较多（可用帧对里约三分之一是后退）。正确选项的字母是均匀的，但动作种类不均匀。
-- **探针的局限：**
-  - 每种题约 37 道，只适合看总体和三大类；
-  - D 组练过 P1，探针题和 P1 同一种格式，D 在探针上会直接占优；所以探针主要看 RL 过程中 QA 能力保持还是丢失，迁移要看评测成功率。
-- **A 组的风险：** 从原始 7B 起步（验证集成功 5.8%），修正包只训"同一道题 8 条轨迹里有成有败"的题，这种题会很少，每次更新可能凑不满。
-- **诊断基线的题集：** 失败拆解的基线是在第十一轮的 val400 / test 上算的；矩阵用 v2 题集，多了 28 道遮挡题，比较时要按同一批题。
-- **没有在 GPU 上跑过的代码：** 诊断 2（历史打乱）、诊断 4（迁移表，等矩阵结果）、`rl-config --output-format think_action` 生成的配置（只有单元测试）。
+- **P0 很小**：只有 230 道样题，B 组几乎等于不做 SFT；P0 的验证集来自 train 场景。
+- **goal 题占比高**：见第 2 节第 1 条。
+- **遮挡题少、答案不均**：
+  - 遮挡族只占正式题的 2.8%：训练集里 `occluded_now` 267 道、`occluded_after` 577 道。
+  - 探针的 `occluded_now` 答案是完全 16 / 部分 17 / 没有 7，总答"部分"能得 42.5%。
+- **左右前向题的答案几乎从不改变**：转身不改变两个物体的左右顺序。这是物理事实，照实保留。
+- **逆向题的动作分布**：动作来自最短路径，后退多、前进少。训练集字母均匀，动作种类不均匀。
+- **探针的局限**：
+  - 每类 40 道，题类之间的差别要超过约 15 个百分点才可靠。
+  - "相机做了什么动作"两版探针的结论相反（抽法不同），不下结论。
+  - D 组练过 P1，探针题和 P1 同一种格式，D 在探针上会直接占优；探针主要看 QA 能力在 RL 中保持还是丢失，迁移要看评测成功率。
+- **A 组的风险**：从原始 7B 起步（验证集成功 5.8%），"8 条轨迹里有成有败"的题会很少，每次更新可能凑不满。
+- **资源池**：2026-10-19 `zoetrope` 满，单卡任务在那里排了约 50 分钟没起来；`h800` 立刻起来。矩阵的 plan 用的是 `h800`。
+- **没有在 GPU 上跑过的代码**：
+  - 诊断 2（历史打乱）；
+  - 诊断 4（迁移表，等矩阵结果）；
+  - `rl-config --output-format think_action` / `--max-response-length` 生成的配置；
+  - `transition/think_rate`（只有单元测试）。
 
 ## 4. 产物
 
 | 什么 | 在哪（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data` 下） |
 | --- | --- |
-| 转移题生成器、测试 | `data_gen/transition_qa/` |
-| 题库、统计、原始候选、内部状态的图、核对题 | `exps/transition_qa_20261018/`（`p1_train/test/probe.jsonl`、`stats.json`、`raw/`、`interior/`、`review/`） |
-| 混合配方构建器、配置、测试 | `data_gen/sft_mixture/` |
-| 干跑、矩阵的混合数据 | `exps/sft_mixture_dryrun_20261018/`、`exps/sft_mixture_matrix_v2_20261018/{B,C,D}` |
+| 转移题生成器、测试 | `data_gen/transition_qa/`（`generate.py` raw / probe / build、`extra_tasks.py`、`interior.py`、`review.py`、`report.py`） |
+| 题库（现行） | `exps/transition_qa_20261019/`（`p1_train/test/probe.jsonl`、`stats.json`、`probe_stats.json`、`raw/`、`extra_oa15/`） |
+| 题库（2026-10-18，保留） | `exps/transition_qa_20261018/`（含内部状态的图 `interior/`、核对题 `review/`） |
+| 混合配方构建器、配置、矩阵 plan 生成 | `data_gen/sft_mixture/`（`build.py`、`matrix_plan.py`） |
+| 矩阵的混合数据 | `exps/sft_mixture_matrix_v2_20261018/{B,C,D}`（2026-10-19 用新题库重建） |
 | 诊断代码、测试 | `eval/diagnostics/` |
-| 诊断结果 | `exps/diagnostics_20261018/`（失败拆解、`probe_all/` 探针和曲线、`format_check`） |
-| 矩阵配置 | `configs/matrix_v2/` |
-| 唯一改动的现有文件和它的测试 | `data_gen/interiorgs_v10/training_prep.py`、`tests/test_output_format.py` |
-| 文档 | `docs/transition_qa/`：本报告、`PROGRESS.md`、`P1_STATS.md`、`RECIPES.md`、`DIAG_BASELINE.md`、`CHANGES.md`、`probe_curve_baseline.png` |
-
-测试：
-- 本分支新加的 43 个：`transition_qa` 17、`sft_mixture` 12、`eval/diagnostics` 9、输出格式 5。
-- 合入 main 的第十二轮提交后，跑了 301 个测试，全部通过：本分支的三个包、`data_gen/interiorgs_v10/tests` 全部、
-  `tests/active_spatial/test_round11_package.py`。
-- 之后按第十二轮改了矩阵配置，`sft_mixture` 的 12 个再跑一遍，全部通过。
+| 诊断结果 | `exps/diagnostics_20261018/`（失败拆解、旧探针、`format_check`）、`exps/diagnostics_20261019/probe_v2_all/`（新探针、`curve.md`、`curve.png`） |
+| 矩阵配置 | `configs/matrix_v2/`（A–E、C0、`vars.yaml`、README） |
+| 改动的现有文件 | `CHANGES.md` 第 1 节 |
+| 文档 | `docs/transition_qa/`：本报告、`PROGRESS.md`、`DATA_CONTRACT.md`、`P1_QTYPES.md`、`P1_STATS.md`、`RECIPES.md`、`DIAG_BASELINE.md`、`DIAG3_PROBE.md`、`CHANGES.md`、两张探针曲线图 |
 
 ## 5. 复现
 
 在工作树下执行。`PY=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python`；
-`SFT=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft`；`META=/mnt/umm/users/yinbaiqiao/InteriorGS_meta`。
+`SFT=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft`；`META=/mnt/umm/users/yinbaiqiao/InteriorGS_meta`；
+`R12=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019`；`OUT=exps/transition_qa_20261019`。
 
 ```bash
-# P1：候选题（CPU，12 进程约 7 分钟）、内部状态（约 5 分钟）、渲染（单卡约 13 分钟）、构建、统计、核对题
-$PY -m data_gen.transition_qa.generate raw --sft-dir $SFT --scenes-root $META --out exps/transition_qa_20261018 --workers 12
-$PY -m data_gen.transition_qa.interior plan --sft-dir $SFT --scenes-root $META --out exps/transition_qa_20261018 --workers 12
-$PY data_gen/interiorgs_v10/pilot_sco.py prepare --pilot exps/transition_qa_20261018/interior --gs-root /mnt/umm/users/yinbaiqiao/InteriorGS_ply
-$PY data_gen/interiorgs_v10/pilot_sco.py submit --pilot exps/transition_qa_20261018/interior
-$PY -m data_gen.transition_qa.interior questions --sft-dir $SFT --out exps/transition_qa_20261018
-$PY -m data_gen.transition_qa.generate build --out exps/transition_qa_20261018 --split-manifest $SFT/split_manifest.json
-$PY -m data_gen.transition_qa.report --out exps/transition_qa_20261018 --md docs/transition_qa/P1_STATS.md
-$PY -m data_gen.transition_qa.review sample --sft-dir $SFT --out exps/transition_qa_20261018
-# 混合配方
+# P1 题库：候选题（CPU，12 进程约 10 分钟）、内部状态题（图用 2026-10-18 的渲染）
+$PY -m data_gen.transition_qa.generate raw --sft-dir $SFT --scenes-root $META --out $OUT --workers 12
+$PY -m data_gen.transition_qa.interior questions --sft-dir $SFT --out $OUT --interior exps/transition_qa_20261018/interior
+# v2 新增的 15 道遮挡题：最短路径帧（58 张）、渲染（单卡 1 分钟；zoetrope 满时用 h800）、候选题
+$PY -m data_gen.transition_qa.extra_tasks frames --tasks $R12/eval_val_v2/tasks.jsonl --ids-from $R12/eval_val_v2_oa/selection.json --sft-dir $SFT --out $OUT/extra_oa15
+$PY data_gen/interiorgs_v10/pilot_sco.py prepare --pilot $OUT/extra_oa15 --gs-root /mnt/umm/users/yinbaiqiao/InteriorGS_ply   # 再提交
+$PY -m data_gen.transition_qa.extra_tasks trajectories --dir $OUT/extra_oa15
+$PY -m data_gen.transition_qa.generate raw --sft-dir $OUT/extra_oa15 --scenes-root $META --out $OUT --tag oa15
+# 探针集、构建、统计
+$PY -m data_gen.transition_qa.generate probe --out $OUT --split-manifest $SFT/split_manifest.json --scenes-from $R12/eval_val_v2/tasks.jsonl
+$PY -m data_gen.transition_qa.generate build --out $OUT --split-manifest $SFT/split_manifest.json
+$PY -m data_gen.transition_qa.report --out $OUT --md docs/transition_qa/P1_STATS.md
+# 混合配方、矩阵 plan
 $PY -m data_gen.sft_mixture.build --config data_gen/sft_mixture/configs/mixture_matrix_v2_20261018.yaml
+$PY -m data_gen.sft_mixture.matrix_plan --group D --commit <main 的提交> --out plan.json
 # 诊断
+$PY -m eval.diagnostics.sco_probe --run <目录> --probe $OUT/p1_probe.jsonl --from-eval <评测目录> --names <结果目录名> --pool h800 --submit
+$PY -m eval.diagnostics.qa_probe rescore --probe $OUT/p1_probe.jsonl --out <结果目录>
+$PY -m eval.diagnostics.qa_probe curve --out <结果目录> --chain "R11-SFT=base_7b:0,sft_formal_e1:154,..."
 $PY -m eval.diagnostics.failure_breakdown --eval <评测目录> --out <前缀>
-$PY -m eval.diagnostics.sco_probe --run <目录> --probe exps/transition_qa_20261018/p1_probe.jsonl --from-eval <评测目录> --names <结果目录名> --submit
-$PY -m eval.diagnostics.format_check --eval <评测目录> --out <前缀>
 ```
 
 ## 6. 提交（分支 `transition-qa`，从旧到新）
 
-`081465f2` 第 1 步文档；`4f3862af`、`d7447b46`、`1a19d536`、`e6b0bc6a` 第 2 步；`3322b8c2`、`2416c3be`、`f7c39f26` 第 3 步；
-`c7a549f9`、`263ee8b7`、`c9e886be`、`39d5d941` 第 4 步；`2db60377`、`a842323a`、`6dcd8a1f` 第 6 步；`28849c0f`、`fea558ed` 第 7 步；
-`0f02b448` 本报告；`bd29d26b` 合入 main（第十二轮开始后）；`54a69d7e` 合并记录；以及按第十二轮更新矩阵配置的提交。
+- 2026-10-17 至 18：
+  - `081465f2` 第 1 步文档；
+  - `4f3862af`、`d7447b46`、`1a19d536`、`e6b0bc6a` 第 2 步；
+  - `3322b8c2`、`2416c3be`、`f7c39f26` 第 3 步；
+  - `c7a549f9`、`263ee8b7`、`c9e886be`、`39d5d941` 第 4 步；
+  - `2db60377`、`a842323a`、`6dcd8a1f` 第 6 步；
+  - `28849c0f`、`fea558ed` 第 7 步；
+  - `0f02b448` 第一版报告。
+- 2026-10-19：
+  - `bd29d26b` 合入 main，`54a69d7e` 合并记录；`f3456c80`、`adc041e9` 矩阵按第十二轮更新；
+  - 第二批：
+    - `1359c557` 题库规则和探针集；
+    - `84a9adba` 探针的宽松读法和格式不合规率；
+    - `548a7c06` E 组的指标和回答上限；
+    - `eeed7669` C0、标准名变量、数据契约；
+    - `a1d09600` 合入 main `71372b7e`；
+    - 以及结果和文档的提交。
