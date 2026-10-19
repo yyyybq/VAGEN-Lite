@@ -23,6 +23,14 @@ models:
   ours-RL-50:
     {source: local, path: interiorgs_v10_train_r10_20261015/rl_run/checkpoints/global_step_50/actor/huggingface,
      family: qwen2_5_vl, params: 7B, note: "round 10 RL (S0), update 50, stored in float32 (val 46.6%, test 40.5%)"}
+  # round 11 (added 2026-10-18): the first SFT -> RL pair where RL clearly gained (val 42.0 -> 48.7, test 39.4 -> 43.4)
+  ours-SFT-r11:
+    {source: local, path: interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386, family: qwen2_5_vl,
+     params: 7B, note: "round 11 SFT on formal tasks, epoch 9 (val 42.0%, test 39.4%); start of P-S0"}
+  ours-RL-r11:
+    {source: local, path: interiorgs_v10_train_r11p_20261017/rl_run_ps0/checkpoints/global_step_300/actor/huggingface,
+     family: qwen2_5_vl, params: 7B,
+     note: "round 11 RL, optimisation package p1, sparse reward (P-S0), update 300, stored in float32 (val 48.7%, test 43.4%)"}
   SI-7B:          {source: asset, asset: SI-7B, family: qwen2_5_vl, params: 7B}
   SI-3B:          {source: asset, asset: SI-3B, family: qwen2_5_vl, params: 3B}
   SpaceR-7B:      {source: asset, asset: SpaceR-7B, family: qwen2_5_vl, params: 7B}
