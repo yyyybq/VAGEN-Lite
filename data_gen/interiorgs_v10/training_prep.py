@@ -363,6 +363,11 @@ CONCAT_RESPONSE_LENGTH = 4096  # 12 turns x (81 image tokens + ~150 text + the a
 # differ only in the reward.
 REWARD_PRESETS = ("S0", "dense")
 TASK_POOLS = ("formal", "reserve")  # which train tasks RL takes (round 11: reserve, the tasks SFT never saw)
+# The output format of RL (docs/transition_qa, step 6): action_only keeps the template's prompt (the SFT one, actions
+# only); think_action shows the free_think prompt (think, then the action) to a model trained on actions only (the
+# matrix's group E, an exploratory run decided by the user on 2026-10-18).  The system-prompt check still runs on the
+# template, so the RL prompt differs from the SFT one only in its output-format lines; the env's parser reads both.
+OUTPUT_FORMATS = {"action_only": None, "think_action": "free_think"}
 
 # Round 11, the optimisation package (the user's decision after R-S0 / R-D left the model where it started: KL to
 # the start model 0.002 at update 150, about 3/4 of the tasks all succeeding or all failing).  On top of the run's
@@ -501,6 +506,11 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     history = history_overrides(getattr(args, "history_mode", None) or "none",
                                 int(template["envs"][0].get("max_turns", 12)))
     history["env"].update(reward_overrides(getattr(args, "reward_preset", None) or "S0"))
+    output_format = getattr(args, "output_format", None) or "action_only"
+    if output_format not in OUTPUT_FORMATS:
+        raise SystemExit(f"--output-format must be one of {sorted(OUTPUT_FORMATS)}")
+    if OUTPUT_FORMATS[output_format]:  # applied to the written env configs only; the prompt check uses the template
+        history["env"]["prompt_format"] = OUTPUT_FORMATS[output_format]
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -569,7 +579,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             _set(ppo, key, value)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
-              "model": model, "system_prompt_matches_sft": True,
+              "model": model, "system_prompt_matches_sft": True, "output_format": output_format,
+              "rl_prompt_format": history["env"].get("prompt_format", template["envs"][0]["config"].get("prompt_format")),
               "history_mode": getattr(args, "history_mode", None) or "none", "val_tasks": val_tasks,
               "greedy_val": bool(getattr(args, "greedy_val", False)),
               "test_freq": ppo["trainer"].get("test_freq"), "critic_warmup": ppo["trainer"].get("critic_warmup"),
@@ -649,6 +660,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,
                    help="depth_check_summary.json: no RL train task may be among its flagged tasks")
+    c.add_argument("--output-format", choices=sorted(OUTPUT_FORMATS), default="action_only",
+                   help="action_only: the template's prompt (the SFT one); think_action: the free_think prompt for a "
+                        "model trained on actions only (matrix group E); the prompt check still runs on the template")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--out", required=True)
     args = ap.parse_args(argv)
