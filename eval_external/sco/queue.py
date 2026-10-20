@@ -125,28 +125,60 @@ def done_label(rd: Path) -> str:
     return "done_flagged: short run" if chk.get("short_run") else "done"
 
 
-MOVE_AFTER_S = 1800  # 2026-10-20: a job still waiting for a card on h800 after this long moves to zoetrope (once)
+MOVE_AFTER_S = 1800  # 2026-10-20: a job still waiting for a card after this long may change pool ...
+MAX_MOVES = 3        # ... to the other pool (h800 <-> zoetrope) when fewer jobs wait there, at most this often
 
 
-def waiting_too_long(receipt: Path, state: str, now: float | None = None) -> bool:
+def pool_waiting() -> dict[str, int]:
+    """Jobs of the whole workspace waiting for a card, per pool (the latest 300 jobs of `sco acp jobs list`)."""
+    import subprocess
+
+    res = subprocess.run([J.SCO, "acp", "jobs", "list", "--workspace-name=aigc", "-o", "json", "--page-size", "300"],
+                         capture_output=True, text=True)
+    try:
+        d = json.loads(res.stdout)
+    except ValueError:
+        return {}
+    out = {p: 0 for p in J.POOLS}
+    for j in (d.get("jobs") if isinstance(d, dict) else d) or []:
+        pool = (j.get("resource_pool") or {}).get("name")
+        if pool in out and j.get("state") in J.WAITING:
+            out[pool] += 1
+    return out
+
+
+def move_target(receipt: Path, state: str, waiting: dict[str, int], now: float | None = None) -> str | None:
+    """The pool to move a waiting job to, or None: it waited over MOVE_AFTER_S since its last submission, the
+    other pool has fewer jobs waiting, and it has moved fewer than MAX_MOVES times."""
     rec = json.loads(receipt.read_text())
+    pool = rec.get("pool", J.POOL)
+    other = next(p for p in J.POOLS if p != pool)
     started = datetime.datetime.fromisoformat(rec["utc"]).timestamp()
     now = time.time() if now is None else now
-    return state in J.WAITING and rec.get("pool", J.POOL) == "h800" and now - started > MOVE_AFTER_S
+    moves = len(list(receipt.parent.glob("submission_*_deleted.json")))
+    if (state in J.WAITING and now - started > MOVE_AFTER_S and moves < MAX_MOVES
+            and pool in waiting and other in waiting and waiting[other] < waiting[pool]):
+        return other
+    return None
 
 
 def step(stage: str, items: list[tuple[str, Item]]) -> dict:
     status = {}
     n_active = len(J.active())
+    waiting = None
     for key, it in items:
         receipt = it.run_dir / "job" / "submission.json"
         if receipt.exists():
             st = J.status(it.run_dir)
-            if waiting_too_long(receipt, st["state"]):
+            target = None
+            if st["state"] in J.WAITING:
+                waiting = pool_waiting() if waiting is None else waiting
+                target = move_target(receipt, st["state"], waiting)
+            if target:
                 old = J.delete(it.run_dir)
                 if old["delete_rc"] == 0:
-                    J.submit(it.run_dir, it.name, it.command, {}, also_own=it.also_own, pool="zoetrope")
-                    status[key] = f"moved to zoetrope (waited on h800 as {old['job_id']})"
+                    J.submit(it.run_dir, it.name, it.command, {}, also_own=it.also_own, pool=target)
+                    status[key] = f"moved to {target} (was waiting as {old['job_id']}; waiting jobs {waiting})"
                     continue
             if st["state"] == "SUCCEEDED" and st["exit_code"] == "0":
                 try:

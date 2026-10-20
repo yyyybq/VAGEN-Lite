@@ -89,18 +89,21 @@ def test_esi_action_rule():
         "no_json", "no_answer", "no_confidence"]
 
 
-def test_waiting_jobs_move_to_zoetrope_once(tmp_path):
+def test_waiting_jobs_move_to_the_less_crowded_pool(tmp_path):
     from eval_external.sco import queue as Q
 
     t0 = datetime.datetime(2026, 10, 20, 7, 0, tzinfo=datetime.timezone.utc)
     r = tmp_path / "submission.json"
-    r.write_text(json.dumps({"utc": t0.isoformat(), "pool": "h800"}))
-    later = t0.timestamp() + Q.MOVE_AFTER_S + 1
-    assert Q.waiting_too_long(r, "STARTING", later) and Q.waiting_too_long(r, "QUEUEING", later)
-    assert not Q.waiting_too_long(r, "RUNNING", later)
-    assert not Q.waiting_too_long(r, "STARTING", t0.timestamp() + 60)
     r.write_text(json.dumps({"utc": t0.isoformat(), "pool": "zoetrope"}))
-    assert not Q.waiting_too_long(r, "STARTING", later)  # never moved back
+    later = t0.timestamp() + Q.MOVE_AFTER_S + 1
+    w = {"h800": 11, "zoetrope": 36}
+    assert Q.move_target(r, "STARTING", w, later) == "h800"
+    assert Q.move_target(r, "RUNNING", w, later) is None
+    assert Q.move_target(r, "STARTING", w, t0.timestamp() + 60) is None         # not waited long enough
+    assert Q.move_target(r, "STARTING", {"h800": 40, "zoetrope": 36}, later) is None  # other pool not better
+    for k in range(Q.MAX_MOVES):
+        (tmp_path / f"submission_pt-{k}_deleted.json").write_text("{}")
+    assert Q.move_target(r, "STARTING", w, later) is None                       # moved often enough
 
 
 def test_done_label_reads_any_results_file(tmp_path):
