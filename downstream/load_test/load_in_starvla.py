@@ -182,8 +182,9 @@ def main() -> int:
             "trainable": sum(p.numel() for p in model.parameters() if p.requires_grad),
         }
         report["dtypes"] = {"backbone": dtype_counts(vlm), "action_head": dtype_counts(head)}
+        action_cfg = model.config.framework.action_model  # QwenOFT's merged config (sets action_hidden_dim)
         report["hidden_size"] = int(vlm.config.hidden_size)
-        report["action_hidden_dim"] = int(cfg.framework.action_model.action_hidden_dim)
+        report["action_hidden_dim"] = int(action_cfg.action_hidden_dim)
         report["action_token_id"] = int(model.action_token_id)
         report["action_head_init_sha"] = sha(torch.cat([p.detach().flatten().float() for p in head.parameters()]))
         save()
@@ -199,8 +200,8 @@ def main() -> int:
         torch.cuda.synchronize()
         report["to_cuda_seconds"] = round(time.time() - t0, 1)
         report["gpu_mem_gb"] = {"after_load": round(torch.cuda.max_memory_allocated() / 2**30, 2)}
-        horizon = int(cfg.framework.action_model.action_horizon)
-        action_dim = int(cfg.framework.action_model.action_dim)
+        horizon = int(action_cfg.action_horizon)
+        action_dim = int(action_cfg.action_dim)
         examples = fake_examples(args.batch, horizon, action_dim, args.seed)
 
         model.train()
