@@ -134,12 +134,12 @@ index 00000000..f34df3d0
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
-index 80eb803d..4a48fff2 100644
+index 8e4d762a..8e7a6344 100644
 --- a/data_gen/interiorgs_v10/train_chain.py
 +++ b/data_gen/interiorgs_v10/train_chain.py
-@@ -65,6 +65,15 @@ configs/rl_standards.json; the plan's "ppo_template" is then optional) and "seed
- "reward_preset" only when the plan names one.  Plan "eval_only": true runs only check_code and evaluate (the
- plan's "eval"."models" and variants on its sets; no RL checkpoints), e.g. to evaluate existing models on a new set.
+@@ -91,6 +91,15 @@ run's best on the validation set (ties: the earlier) and its last one, and every
+ trained but the picked one (with the final weights in the model folder); nothing outside this chain's folder, and
+ nothing of a run whose checkpoints are not all evaluated.  What was deleted is kept in state["retained"].
  
 +Experiment matrix v2 (branch transition-qa, docs/transition_qa/CHANGES.md section 5): plan "sft_lf_dirs"
 +({group: LLaMA-Factory folder}) trains a group on a folder built elsewhere (data_gen/sft_mixture): "render" and
@@ -153,15 +153,15 @@ index 80eb803d..4a48fff2 100644
  A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
  logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
  continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
-@@ -93,6 +102,7 @@ CARDS = {"render": "1", "sft": "每组 8", "sft_eval": "每个 1", "rl": "1 + 8"
- POLL_S = 60.0
+@@ -120,6 +129,7 @@ POLL_S = 60.0
  DEFAULT_MAX_EVAL_JOBS = 10
  EVAL_ONLY_STEPS = ("check_code", "evaluate")
+ RL_STEPS = ("rl_config", "rl", "rl_extend")
 +SFT_STEPS = ("render", "sft_data", "sft", "sft_eval", "pick_sft")  # skipped with plan "start_model" (matrix v2)
  # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
  # during startup", after "GCS cannot find the node ... registration may not be complete")
  STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
-@@ -239,9 +249,10 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
+@@ -266,9 +276,10 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
      if kl is not None and kl > kl_max:
          return f"KL to the start model {kl:.3f} > {kl_max} at update {steps[-1]}"
      w = int(guards.get("invalid_window", 10))
@@ -173,7 +173,7 @@ index 80eb803d..4a48fff2 100644
          return f"unparseable answers {sum(inv) / len(inv):.3f} > {inv_max} (mean of updates {steps[-w]}-{steps[-1]})"
      succ = [(s, per[s]["episode/success_rate"]) for s in steps if "episode/success_rate" in per[s]]
      n0, nd, drop = int(guards.get("start_updates", 5)), int(guards.get("drop_window", 50)), float(guards.get("success_drop", 0.10))
-@@ -418,8 +429,50 @@ class Chain:
+@@ -454,8 +465,50 @@ class Chain:
          return dict(groups) if groups else {"": "sft_trajectories.jsonl"}
  
      def lf_dir(self, group: str) -> Path:
@@ -224,7 +224,7 @@ index 80eb803d..4a48fff2 100644
      def eval_sets(self) -> Dict[str, Path]:
          sets = self.plan.get("eval_sets")
          if sets:
-@@ -443,6 +496,9 @@ class Chain:
+@@ -479,6 +532,9 @@ class Chain:
          (single) final SFT model."""
          if self.state.get("rl_model_override"):
              return Path(self.state["rl_model_override"])
@@ -234,7 +234,7 @@ index 80eb803d..4a48fff2 100644
          decision = self.state["steps"].get("pick_sft", {}).get("decision") or {}
          if decision.get("model"):
              return Path(decision["model"])
-@@ -560,6 +616,9 @@ class Chain:
+@@ -650,6 +706,9 @@ class Chain:
          from . import pilot_sco
          from .pilot import safe_name
  
@@ -244,7 +244,7 @@ index 80eb803d..4a48fff2 100644
          frames = [json.loads(l) for l in (self.sft_dir / "frames.jsonl").read_text().splitlines() if l.strip()]
          plain = self.sft_dir / "frames" / "plain"
  
-@@ -588,11 +647,20 @@ class Chain:
+@@ -678,12 +737,21 @@ class Chain:
  
      def sft_data(self) -> None:
          py = sys.executable
@@ -255,19 +255,20 @@ index 80eb803d..4a48fff2 100644
 +        if self.lf_given():  # sft-records would rewrite sft_dir's conversations, which these folders do not use
 +            self.mark("sft_data", note="SFT data built elsewhere (sft_lf_dirs)")
 +            return
-         records = [py, "-m", "data_gen.interiorgs_v10.training_prep", "sft-records", "--dir", str(self.sft_dir)]
-         if self.plan.get("scenes_root"):  # round 10: inserted blocked turns need the scenes' collision detectors
-             records += ["--scenes-root", str(self.plan["scenes_root"])]
-         self.sh(records, log=self.tr / "logs" / "sft_records.log")
+         if self.plan.get("sft_records", True):  # round 12 batch: false = the conversation files exist already
+             records = [py, "-m", "data_gen.interiorgs_v10.training_prep", "sft-records", "--dir", str(self.sft_dir)]
+             if self.plan.get("scenes_root"):  # round 10: inserted blocked turns need the scenes' collision detectors
+                 records += ["--scenes-root", str(self.plan["scenes_root"])]
+             self.sh(records, log=self.tr / "logs" / "sft_records.log")
          for group, trajectory in self.sft_groups().items():
 +            if group in given:
 +                continue
              if not (self.sft_dir / trajectory).is_file():
                  raise ChainError(f"sft-records wrote no {trajectory} for group {group or 'default'}")
              lf = self.lf_dir(group)
-@@ -747,7 +815,12 @@ class Chain:
-                               ("target_groups", "--target-groups"), ("rollouts", "--rollouts")):
-                 if rl.get(key) is not None:  # round 11: the optimisation package
+@@ -866,7 +934,12 @@ class Chain:
+                               ("curriculum_max_dstar", "--curriculum-max-dstar")):
+                 if rl.get(key) is not None:  # round 11: the optimisation package; round 12 batch: easy tasks first
                      args += [flag, str(rl[key])]
 +            for key, flag in (("output_format", "--output-format"), ("max_response_length", "--max-response-length")):
 +                if rl.get(key) is not None:  # matrix v2, group E: the free_think prompt and a longer answer budget
@@ -278,7 +279,7 @@ index 80eb803d..4a48fff2 100644
  
      def rl(self) -> None:
          if not self.plan.get("rl_runs"):
-@@ -993,7 +1066,7 @@ class Chain:
+@@ -1187,7 +1260,7 @@ class Chain:
                  hf = ckpts / f"global_step_{s}" / "actor" / "huggingface"
                  if run_name in (self.state.get("guard_stops") or {}) and not hf.is_dir():
                      continue  # a run stopped by a guard: the checkpoints it reached
@@ -287,9 +288,9 @@ index 80eb803d..4a48fff2 100644
                  rl_names.append(name)
          models.update({name: (m["model"], m.get("prompt_format"), list(m.get("options", options)))
                         for name, m in (ev.get("models") or {}).items()})
-@@ -1056,6 +1129,9 @@ class Chain:
-             if self.plan.get("eval_only") and step not in EVAL_ONLY_STEPS:  # round 12: evaluation of existing models
-                 self.mark(step, state="done", note="not planned (eval_only)")
+@@ -1302,6 +1375,9 @@ class Chain:
+             if self.plan.get("sft_only") and step in RL_STEPS:  # round 12 batch: SFT and its evaluation only
+                 self.mark(step, state="done", note="not planned (sft_only)")
                  continue
 +            if self.plan.get("start_model") and step in SFT_STEPS:  # matrix v2: RL starts from a given model
 +                self.mark(step, state="done", note="not planned (start_model)")

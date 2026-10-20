@@ -1,5 +1,5 @@
 diff --git a/data_gen/interiorgs_v10/tests/test_train_chain.py b/data_gen/interiorgs_v10/tests/test_train_chain.py
-index 44739348..8775bf37 100644
+index 521fda5f..bf19acdf 100644
 --- a/data_gen/interiorgs_v10/tests/test_train_chain.py
 +++ b/data_gen/interiorgs_v10/tests/test_train_chain.py
 @@ -65,7 +65,7 @@ class ChainTest(unittest.TestCase):
@@ -12,7 +12,7 @@ index 44739348..8775bf37 100644
  
      def test_progress_without_the_new_steps(self):
 diff --git a/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py b/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
-index f34df3d0..2230819c 100644
+index f34df3d0..c7111291 100644
 --- a/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
 +++ b/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
 @@ -51,7 +51,7 @@ class MatrixFieldsTest(unittest.TestCase):
@@ -24,7 +24,7 @@ index f34df3d0..2230819c 100644
              for s in T.SFT_STEPS:
                  self.assertEqual(chain.state["steps"][s]["note"], "not planned (start_model)")
              self.assertEqual(chain.sft_model(), Path("/models/base_7b"))
-@@ -125,5 +125,74 @@ class MatrixFieldsTest(unittest.TestCase):
+@@ -125,5 +125,79 @@ class MatrixFieldsTest(unittest.TestCase):
              self.assertIsNone(got["val__base"][3])  # a listed model keeps its own format
  
  
@@ -48,13 +48,15 @@ index f34df3d0..2230819c 100644
 +            plan = {"tr": str(tr), "sft_dir": str(root), "endpoint": 100, "sft_groups": {"mix": "x.jsonl"},
 +                    "sft_lf_dirs": {"mix": str(lf)}, "eval_sets": {"val": str(root / "val")}, "rl_runs": {"p1s0": {}},
 +                    "eval": {"every": 50}, "diagnostics": {"probes": {"P1": str(root / "p1_probe.jsonl"), "P0": None},
-+                                                          "models_per_job": 3}}
++                                                          "models_per_job": 3},
++                    "retain": "best_and_last"}
 +            chain = T.Chain(plan, sleep=lambda s: None)
 +            chain.state["steps"]["pick_sft"]["decision"] = {"select_by": "val", "scores": {"sft_mix_e1": 0.3, "sft_mix_e2": 0.4},
 +                                                            "best": "sft_mix_e2", "model": str(lf / "model" / "checkpoint-308"),
 +                                                            "other_sets": {}}
 +            calls, prepared = [], {}
 +            chain.sh = lambda args, **k: calls.append(args)
++            chain.retain = lambda: calls.append(["retain"])  # main's retention: after the probes
 +
 +            def prepare(run, probe, models=(), pool=None, out_dir=None, **k):
 +                prepared[run.name] = ([m.split("=", 1)[0] for m in models], out_dir)
@@ -83,7 +85,9 @@ index f34df3d0..2230819c 100644
 +                                 ["p1s0_050", "p1s0_100", "sft_mix_e1", "sft_mix_e2"])
 +                self.assertEqual(len(prepared), 2)  # 4 models, 3 per job; the null P0 probe is skipped
 +                self.assertTrue(all(o == str(tr / "diag" / "probe_P1") for _, o in prepared.values()))
-+                curve = calls[-1]
++                self.assertEqual(chain.retain_after(), "diagnostics")
++                self.assertEqual(calls[-1], ["retain"])
++                curve = calls[-2]
 +                self.assertIn("SFT_mix=sft_mix_e1:1,sft_mix_e2:2", curve)
 +                self.assertIn("RL_p1s0=sft_mix_e2:0,p1s0_050:50,p1s0_100:100", curve)
 +                prepared.clear()
@@ -95,15 +99,16 @@ index f34df3d0..2230819c 100644
 +            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 100}, sleep=lambda s: None)
 +            chain.diagnostics()
 +            self.assertEqual(chain.state["steps"]["diagnostics"]["note"], "not planned")
++            self.assertEqual(chain.retain_after(), "evaluate")  # no diagnostics step: right after evaluate
 +
 +
  if __name__ == "__main__":
      unittest.main()
 diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
-index 4a48fff2..1303c4db 100644
+index 8e7a6344..4c9fcdd9 100644
 --- a/data_gen/interiorgs_v10/train_chain.py
 +++ b/data_gen/interiorgs_v10/train_chain.py
-@@ -74,6 +74,13 @@ TR} for that chain's picked SFT checkpoint) skips render to pick_sft and starts
+@@ -100,6 +100,13 @@ TR} for that chain's picked SFT checkpoint) skips render to pick_sft and starts
  unparseable answers only up to that update; plan "eval"."rl_prompt_format" evaluates the RL checkpoints with that
  prompt format.
  
@@ -117,7 +122,7 @@ index 4a48fff2..1303c4db 100644
  A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
  logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
  continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
-@@ -94,14 +101,18 @@ from pathlib import Path
+@@ -120,14 +127,18 @@ from pathlib import Path
  from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
  
  ROOT = Path(__file__).resolve().parents[2]
@@ -137,10 +142,26 @@ index 4a48fff2..1303c4db 100644
  DEFAULT_MAX_EVAL_JOBS = 10
 -EVAL_ONLY_STEPS = ("check_code", "evaluate")
 +EVAL_ONLY_STEPS = ("check_code", "evaluate", "diagnostics")
+ RL_STEPS = ("rl_config", "rl", "rl_extend")
  SFT_STEPS = ("render", "sft_data", "sft", "sft_eval", "pick_sft")  # skipped with plan "start_model" (matrix v2)
  # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
- # during startup", after "GCS cannot find the node ... registration may not be complete")
-@@ -1108,6 +1119,97 @@ class Chain:
+@@ -1271,9 +1282,14 @@ class Chain:
+         jobs.update(self.variant_jobs(ev, {**sets, **extra}, models, rl_names))
+         self.eval_jobs("evaluate", jobs)
+         self.tables()
+-        if self.plan.get("retain") == "best_and_last":  # round 12 batch: disk
++        if self.plan.get("retain") == "best_and_last" and self.retain_after() == "evaluate":  # round 12 batch: disk
+             self.retain()
+ 
++    def retain_after(self) -> str:
++        """The step after which the retention rule deletes checkpoints: evaluate, or diagnostics when the plan has
++        one (its probes need every evaluated checkpoint; patch 0002)."""
++        return "diagnostics" if self.plan.get("diagnostics") else "evaluate"
++
+     def retain(self) -> None:
+         """Delete the checkpoints the plan's retention rule does not keep (see the module docstring)."""
+         import shutil
+@@ -1351,6 +1367,99 @@ class Chain:
                      jobs[f"{set_name}__{result}"] = (sets[set_name], result, model, prompt_format, list(v.get("options") or []))
          return jobs
  
@@ -234,6 +255,8 @@ index 4a48fff2..1303c4db 100644
 +                         "--probe-name", f"{probe_name} ({probe})", *[a for c in chains for a in ("--chain", c)]],
 +                        log=self.tr / "logs" / f"probe_curve_{probe_name}.log")
 +        self.mark("diagnostics", models=len(models), probes=sorted(probes))
++        if self.plan.get("retain") == "best_and_last" and self.retain_after() == "diagnostics":
++            self.retain()  # kept until the probes had every evaluated checkpoint
 +
      def sft_epoch_model(self, name: str) -> Optional[Path]:
          """The checkpoint of an SFT epoch by its result name ("sft_<group>_e<k>", "sft_e<k>" for the single group)."""

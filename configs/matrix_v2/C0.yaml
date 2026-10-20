@@ -57,7 +57,7 @@ eval:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <reuse.tr>/diag/failure_<set>
     qa_probe: >-
       SFT 第 9 个 epoch 已在 docs/transition_qa/DIAG3_PROBE.md 里（sft_formal_e9）；第十二轮的 RL 检查点在训练链结束后跑
-      python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019/p1_probe.jsonl
+      python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_probe.jsonl
       --model <名字>=<reuse.tr>/<rl_run>/checkpoints/global_step_<N>/actor/huggingface ...
 
 needs_chain_support: {}   # 不跑训练链

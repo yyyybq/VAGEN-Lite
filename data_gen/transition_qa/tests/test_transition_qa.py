@@ -301,6 +301,60 @@ def test_window_balance_hides_the_letter():
         assert len(c) == 4 and max(c.values()) <= 1.15 * min(c.values()) + 1
 
 
+def test_answers_balanced_within_stem_cells():
+    rng = random.Random(0)
+    rs = []
+    for i in range(1200):
+        action = ["move_left", "move_right", "turn_left"][i % 3]
+        yes = (i % 10 < 8) if action == "move_left" else (i % 10 < 2) if action == "move_right" else (i % 2 == 0)
+        r = _rec(i, "goal_after", "Yes" if yes else "No", "yes" if yes else "no", changed=True, flip=None)
+        r.update(action=action, k=1)
+        rs.append(r)
+    rs.append(dict(_rec(5000, "goal_after", "Yes", "yes", flip=None), action="move_forward", k=3))  # a cell with one answer
+    kept = GEN.balance_split(rs, GEN.BUILD_CONFIG, rng, {})
+    by = collections.defaultdict(collections.Counter)
+    for r in kept:
+        by[GEN.stem_cell(r)][r["answer"]] += 1
+    assert ("projective_relations", "move_forward", 3) not in by          # it would give its answer away
+    for c in by.values():
+        assert len(c) == 2 and max(c.values()) <= 1.15 * min(c.values()) + 1
+
+
+def test_window_quota_is_the_optimum():
+    # bins 1..6 (0.5 m .. 3.0 m): windows 1, 2, 3; bin 1 only fits window 1, bin 6 only window 3
+    n = {1: 10, 2: 30, 3: 40, 4: 40, 5: 30, 6: 10}
+    q = GEN.window_quota(n, 1, 6)
+    for b, cnt in n.items():
+        assert sum(t for s, t in q.items() if s <= b <= s + 3) <= cnt
+    assert sum(q.values()) == 40                              # 10 + 20 + 10: bins 3 and 4 are in every window
+
+
+def test_assign_windows_balances_and_keeps_more_than_trimming():
+    rng = random.Random(0)
+    rs = []
+    counts = {1: 60, 2: 200, 3: 300, 4: 320, 5: 260, 6: 160, 7: 80, 8: 40}   # bins of 0.5 m, many near the smallest option
+    i = 0
+    for b, c in counts.items():
+        for _ in range(c):
+            value = b * 0.5
+            vals, pos = Q.grid_options(value, 0.5, 0.5, float("inf"), f"k{i}")
+            r = _rec(i, "distance_bin_now", Q.LETTERS[pos], f"{value:.1f}")
+            r.update(kind="distance_bin", options=[Q.grid_text("distance_bin", v) for v in vals],
+                     question="How far?\n" + Q.options_block([Q.grid_text("distance_bin", v) for v in vals]) + "\n" + Q.ANSWER_LETTER)
+            rs.append(r)
+            i += 1
+    trimmed, _ = GEN._balance_windows([dict(r) for r in rs], 1.15, random.Random(0))
+    kept = GEN.balance_split(rs, GEN.BUILD_CONFIG, rng, {})
+    assert len(kept) > 1.3 * len(trimmed)
+    by = collections.defaultdict(collections.Counter)
+    for r in kept:
+        assert r["options"][Q.LETTERS.index(r["answer"])] == Q.grid_text("distance_bin", float(r["answer_value"]))
+        assert r["question"].endswith(Q.options_block(r["options"]) + "\n" + Q.ANSWER_LETTER)
+        by[r["options"][0]][r["answer"]] += 1
+    for c in by.values():
+        assert len(c) == 4 and max(c.values()) <= 1.15 * min(c.values()) + 1
+
+
 def test_probe_takes_whole_types_and_shuffles_categorical_options():
     rng = random.Random(0)
     rs = []
@@ -315,6 +369,30 @@ def test_probe_takes_whole_types_and_shuffles_categorical_options():
     assert len(picks) == 90 and rep["occluded_now"]["short"] == 0
     shuffled = [GEN.shuffle_options(r) for r in rs]
     assert len({tuple(r["options"]) for r in shuffled}) > 1   # the option order is drawn per question
+
+
+def test_text_only_rules_and_section(tmp_path):
+    from data_gen.transition_qa import report as R
+    from data_gen.transition_qa import shortcuts as SC
+
+    def goal(i, split, answer, action):
+        r = _rec(i, "goal_after", answer, answer.lower(), split=split)
+        r.update(options=[], action=action, k=1)
+        return r
+
+    # in training, turning left always gives Yes and turning right No: the rule reads that off the stem
+    train = [goal(i, "train", "Yes" if i % 2 else "No", "turn_left" if i % 2 else "turn_right") for i in range(40)]
+    test = [goal(100 + i, "val", "Yes", "turn_left") for i in range(10)] + \
+           [goal(200 + i, "val", "Yes", "move_forward") for i in range(10)]          # never seen: a guess
+    for name, rows in (("p1_train.jsonl", train), ("p1_test.jsonl", test)):
+        GEN.write_jsonl(tmp_path / name, rows)
+    got = {(r["file"], r["rule"]): r["accuracy"] for r in SC.report(tmp_path)}
+    assert got[("p1_test.jsonl", "learned_action")] == pytest.approx((10 * 1.0 + 10 * 0.5) / 20)
+    (tmp_path / "blind" / "test").mkdir(parents=True)
+    (tmp_path / "blind" / "test" / "base_7b_blind.json").write_text(json.dumps(
+        {"all": {"accuracy": 0.55, "unreadable": 0.0}, "qtype": {"goal_after": {"accuracy": 0.55, "unreadable": 0.0}}}))
+    text = "\n".join(R.text_only_section(tmp_path, {"p1_test.jsonl": test}))
+    assert "base_7b_blind 不看图" in text and "55.0%" in text and "75.0%（learned_action）" in text
 
 
 def test_all_anchor_states():

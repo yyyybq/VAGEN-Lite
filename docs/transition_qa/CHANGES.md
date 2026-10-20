@@ -117,16 +117,20 @@
 表里的 7 个字段已经做成补丁（第 6 节）。补丁打上之后就不用手工准备 progress.json 了，各组的 `manual_steps` 只在不打补丁时用。
 D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval`。
 
-## 6. 等冻结期合并的补丁（`docs/transition_qa/patches/`，2026-10-19）
+## 6. 等冻结期合并的补丁（`docs/transition_qa/patches/`，2026-10-19；2026-10-20 挪到新的 main 上）
 
 两个补丁都改 `data_gen/interiorgs_v10/train_chain.py`。它是主线的现有文件，本分支没有改它：
 - 补丁只放在 `docs/transition_qa/patches/`，没有打到分支的代码上；
 - 本分支和 main 的这个文件逐字相同，补丁就是对着它做的。
 
+**2026-10-20 重做**：main 新加了 15 个提交（第十二轮批次：`pool: auto`、`retries`、`rl.extend`、`retain`、`sft_records` / `sft_only` 等开关），已合进本分支（`321f63f8`）。`train_chain.py` 改动多，原来的补丁打不上了，按三方合并挪到 main `7e9c4f77` 上：
+- 文字冲突 5 处，都是两边各加了开关（模块说明、步骤元组、`sft_data` 开头、`run()` 的跳步、`EVAL_ONLY_STEPS`），两边都保留；
+- 另有一处**语义冲突**：main 的 `retain: best_and_last` 在 `evaluate` 一结束就删掉大部分 RL 检查点和 SFT epoch，而补丁 0002 的 `diagnostics` 排在 `evaluate` 之后，要用这些检查点跑探针。改成：plan 里有 `diagnostics` 时，清理放到 `diagnostics` 之后（`retain_after()`）；没有时照旧在 `evaluate` 之后。测试 `test_probes_every_evaluated_model` 核对了顺序。
+
 | 补丁 | 内容 | 改的文件 |
 | --- | --- | --- |
 | `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
-| `0002-train-chain-diagnostics-step.patch` | 第 7 个字段：新的第 11 步 `diagnostics`，评测之后跑失败拆解和探针（P1；P0 探针到位后同样接入） | `train_chain.py`（在 0001 之上约 110 行），`tests/test_train_chain.py`（1 行：步骤多了一个），`tests/test_train_chain_matrix.py`（加 2 个测试） |
+| `0002-train-chain-diagnostics-step.patch` | 第 7 个字段：新的第 11 步 `diagnostics`，评测之后跑失败拆解和探针（P1；P0 探针到位后同样接入）；有它时 main 的 `retain` 清理挪到它之后 | `train_chain.py`（在 0001 之上约 120 行），`tests/test_train_chain.py`（1 行：步骤多了一个），`tests/test_train_chain_matrix.py`（加 2 个测试） |
 
 ### 6.1 每个字段谁写、谁读
 
@@ -157,7 +161,7 @@ python -m pytest -q data_gen/interiorgs_v10/tests/test_train_chain.py data_gen/i
 python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打完补丁的提交> --out <TR>/plan.json
 ```
 
-- 已核对：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和测过的文件逐字相同；两个测试文件 27 个测试全部通过（原有 19 个、新加 8 个）。
+- 已核对（2026-10-20，main `7e9c4f77`）：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和测过的文件逐字相同；两个测试文件 33 个测试全部通过（main 原有 25 个、新加 8 个）。main 再改 `train_chain.py` 的话，合并前要重新核对一次。
 - 对正在跑的训练链的影响：
   - 打了补丁，旧 plan 没有这些字段，行为不变；
   - 第 11 步 `diagnostics` 记成 "not planned"；

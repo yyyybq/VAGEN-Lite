@@ -15,9 +15,14 @@ their action format.  Separately, an answer not in the asked format (the letter 
 non-compliant even when it can be read (user, 2026-10-19: lenient reading, the format non-compliance rate on its own).
 OUT/<name>.jsonl has every answer, OUT/<name>.json the accuracies.
 
+``run --no-images``: the text-only baseline (user, 2026-10-20: the original 7B given only the stem and the options,
+a fixed column from now on).  The images are left out, every ``<image>`` marker becomes ``[image not shown]`` and
+BLIND_NOTE goes before the question, so the model still picks an option; everything else as above.
+
 ``curve``: a chain is NAME=MODELS@STEPS_PER_MODEL or NAME=m1:s1,m2:s2,... (model name : training step); it writes
 OUT/curve.md (one table per chain: step, overall, chance, strict, unreadable, non-compliant, per class, per question
-type) and OUT/curve.png.
+type) and OUT/curve.png.  ``--reference NAME=LABEL`` adds a fixed row to every table (e.g. the text-only baseline)
+and a dotted line to the figure.
 """
 
 from __future__ import annotations
@@ -229,12 +234,18 @@ def _image_part(path: str) -> Dict[str, Any]:
     return {"type": "image_url", "image_url": {"url": "data:image/png;base64," + data}}
 
 
-def chat(row: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The probe row's user turn with its images where the <image> markers stand."""
+BLIND_NOTE = "The images for this question are not shown to you. Still choose the most likely answer.\n"
+BLIND_MARK = "[image not shown]"
+
+
+def chat(row: Dict[str, Any], blind: bool = False) -> List[Dict[str, Any]]:
+    """The probe row's user turn with its images where the <image> markers stand; ``blind``: text only."""
     text = row["messages"][0]["content"]
     parts = text.split("<image>")
     if len(parts) - 1 != len(row["images"]):
         raise ValueError(f"{row['sample_id']}: {len(parts) - 1} <image> markers, {len(row['images'])} images")
+    if blind:
+        return [{"role": "user", "content": [{"type": "text", "text": BLIND_NOTE + BLIND_MARK.join(parts)}]}]
     content: List[Dict[str, Any]] = []
     for i, piece in enumerate(parts):
         if piece:
@@ -244,7 +255,7 @@ def chat(row: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [{"role": "user", "content": content}]
 
 
-def run_one(name: str, model: str, probe: Path, out: Path) -> None:  # pragma: no cover - needs a GPU
+def run_one(name: str, model: str, probe: Path, out: Path, blind: bool = False) -> None:  # pragma: no cover - GPU
     from vllm import LLM, SamplingParams
 
     rows = [json.loads(l) for l in probe.read_text().splitlines() if l.strip()]
@@ -253,13 +264,13 @@ def run_one(name: str, model: str, probe: Path, out: Path) -> None:  # pragma: n
               limit_mm_per_prompt={"image": 2}, trust_remote_code=False)
     load = time.time() - t0
     params = SamplingParams(temperature=0.0, max_tokens=MAX_TOKENS)
-    res = llm.chat([chat(r) for r in rows], sampling_params=params, use_tqdm=False)
+    res = llm.chat([chat(r, blind) for r in rows], sampling_params=params, use_tqdm=False)
     answers = score(rows, [r.outputs[0].text for r in res])
     with open(out / f"{name}.jsonl", "w", encoding="utf-8") as f:
         for a in answers:
             f.write(json.dumps(a, ensure_ascii=False) + "\n")
     (out / f"{name}.json").write_text(json.dumps({"name": name, "model": model, "probe": str(probe),
-                                                  "load_seconds": round(load, 1),
+                                                  "images": not blind, "load_seconds": round(load, 1),
                                                   "answer_seconds": round(time.time() - t0 - load, 1),
                                                   **summary(answers)}, indent=1))
 
@@ -277,7 +288,7 @@ def cmd_rescore(args: argparse.Namespace) -> None:
                 f.write(json.dumps(a, ensure_ascii=False) + "\n")
         meta_path = path.with_suffix(".json")
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {"name": path.stem}
-        meta = {k: v for k, v in meta.items() if k in ("name", "model", "probe", "load_seconds", "answer_seconds")}
+        meta = {k: v for k, v in meta.items() if k in ("name", "model", "probe", "images", "load_seconds", "answer_seconds")}
         meta_path.write_text(json.dumps({**meta, **summary(answers)}, indent=1))
         print(f"{path.stem}: " + json.dumps({k: summary(answers)["all"][k] for k in ("accuracy", "noncompliant")}))
 
@@ -297,10 +308,10 @@ def cmd_run(args: argparse.Namespace) -> None:
             print(f"{name}: done before", flush=True)
             continue
         if args.in_process:
-            run_one(name, model, Path(args.probe), out)
+            run_one(name, model, Path(args.probe), out, args.no_images)
         else:  # a fresh process per model: vLLM releases the card only when its process ends
             cmd = [sys.executable, "-m", "eval.diagnostics.qa_probe", "run", "--probe", args.probe, "--out", str(out),
-                   "--model", f"{name}={model}", "--in-process"]
+                   "--model", f"{name}={model}", "--in-process"] + (["--no-images"] if args.no_images else [])
             rc = subprocess.run(cmd, env=os.environ.copy()).returncode
             print(f"{name}: exit {rc}", flush=True)
             continue
@@ -327,6 +338,11 @@ def parse_chain(spec: str) -> Tuple[str, List[Tuple[str, int]]]:
 def cmd_curve(args: argparse.Namespace) -> None:
     out = Path(args.out)
     chains = [parse_chain(c) for c in args.chain]
+    refs = []  # fixed rows: (label, name, result)
+    for spec in args.reference:
+        name, label = spec.split("=", 1) if "=" in spec else (spec, spec)
+        if (out / f"{name}.json").exists():
+            refs.append((label, name, json.loads((out / f"{name}.json").read_text())))
     md = ["# P1 探针曲线", "",
           f"每个检查点在 `{args.probe_name}` 上的准确率（%）。不采样，最多生成 {MAX_TOKENS} 个词元；答案宽松地读（见 `parse_answer`），"
           "读不出的算错，另列\"读不出\"。\"不合规\"：回答不是题目要求的格式（只写选项字母，或只写 Yes / No），"
@@ -344,6 +360,7 @@ def cmd_curve(args: argparse.Namespace) -> None:
             continue
         curves[cname] = [(s, r) for s, _, r in rows]
         qtypes = sorted({q for _, _, r in rows for q in r["qtype"]})
+        rows = [(label, name, r) for label, name, r in refs] + rows  # the fixed rows first, their label as the step
         md += [f"## {cname}", "",
                "| 步数 | 检查点 | 全部 | 随机 | 严格 | 读不出 | 不合规 | 其中：括号 / 带选项文字 | 推理 | 动作格式 | 状态题 | 前向题 | 逆向题 | "
                + " | ".join(qtypes) + " |",
@@ -375,6 +392,9 @@ def cmd_curve(args: argparse.Namespace) -> None:
                                       ("inverse", "inverse", ":")):
                 ys = [(r["all"] if key == "all" else r["qclass"].get(key, {})).get("accuracy") for _, r in pts]
                 ax.plot(steps, [None if y is None else 100 * y for y in ys], style, marker="o", ms=3, label=label)
+            for label, _, r in refs:
+                ax.axhline(100 * r["all"]["accuracy"], color="grey", ls=":", lw=1)
+                ax.text(steps[0], 100 * r["all"]["accuracy"], f" {label}", fontsize=7, color="grey", va="bottom")
             ax.set_title(cname)
             ax.set_xlabel("training step")
             ax.grid(alpha=0.3)
@@ -396,6 +416,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     r.add_argument("--model", action="append", default=[], help="NAME=PATH (repeatable)")
     r.add_argument("--from-eval", default="", help="an evaluation folder: the models of its result folders")
     r.add_argument("--names", default="", help="with --from-eval: comma-separated result folder names")
+    r.add_argument("--no-images", action="store_true", help="the text-only baseline: stem and options, no images")
     r.add_argument("--in-process", action="store_true", help=argparse.SUPPRESS)
     r.set_defaults(func=cmd_run)
     x = sub.add_parser("confusion", help="action_between: the true action against the kind of option chosen")
@@ -411,6 +432,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     c.add_argument("--out", required=True)
     c.add_argument("--chain", action="append", required=True)
     c.add_argument("--probe-name", default="p1_probe.jsonl", help="how the table names the probe set")
+    c.add_argument("--reference", action="append", default=[], help="NAME=LABEL: a fixed row (e.g. the text-only baseline)")
     c.set_defaults(func=cmd_curve)
     args = ap.parse_args(argv)
     args.func(args)

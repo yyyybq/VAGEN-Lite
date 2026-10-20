@@ -267,6 +267,17 @@ def grid_options(value: float, step: float, lo: float, hi: float, key: str) -> T
     return [round(first + i * step, 2) for i in range(4)], pos
 
 
+def grid_spec(kind: str, cfg: Dict[str, Any]) -> Tuple[float, float, float]:
+    """(step, smallest option, largest option) of the distance / screen-height options."""
+    if kind == "distance_bin":
+        return cfg["dist_step_m"], cfg["dist_min_option_m"], math.inf
+    return cfg["height_step"], cfg["height_min_option"], cfg["height_max_option"]
+
+
+def grid_text(kind: str, v: float) -> str:
+    return f"about {v:.1f} meters" if kind == "distance_bin" else f"about {int(round(v * 100))}%"
+
+
 def _prefix(action: Optional[Tuple[str, int]]) -> str:
     """Condition of a state question (None) or of a forward question."""
     if action is None:
@@ -302,15 +313,15 @@ def build_text(kind: str, item: Dict[str, Any], roles: Dict[str, Dict[str, Any]]
             f"{opts[0]} or {opts[1]}?\n{options_block(opts)}\n{ANSWER_LETTER}"
         return {"question": q, "options": opts, "answer": LETTERS[order.index(value)], "answer_value": value}
     if kind == "distance_bin":
-        vals, pos = grid_options(float(value), cfg["dist_step_m"], cfg["dist_min_option_m"], math.inf, key)
-        opts = [f"about {v:.1f} meters" for v in vals]
+        vals, pos = grid_options(float(value), *grid_spec(kind, cfg), key)
+        opts = [grid_text(kind, v) for v in vals]
         verb = "will you be" if after else "are you"
         q = f"{prefix}about how far {verb} from {refs['a']}, measured horizontally to its nearest side?\n" \
             f"{options_block(opts)}\n{ANSWER_LETTER}"
         return {"question": q, "options": opts, "answer": LETTERS[pos], "answer_value": f"{float(value):.1f}"}
     if kind == "height_bin":
-        vals, pos = grid_options(float(value), cfg["height_step"], cfg["height_min_option"], cfg["height_max_option"], key)
-        opts = [f"about {int(round(v * 100))}%" for v in vals]
+        vals, pos = grid_options(float(value), *grid_spec(kind, cfg), key)
+        opts = [grid_text(kind, v) for v in vals]
         verb = "will" if after else "does"
         q = f"{prefix}about what fraction of the image height {verb} {refs['a']} fill, from its top to its bottom?\n" \
             f"{options_block(opts)}\n{ANSWER_LETTER}"

@@ -368,6 +368,10 @@ BUILD_CONFIG: Dict[str, Any] = {
     "goal_max_share_in_class": {"forward": 0.5},  # goal_after <= half the forward class; goal_now is a state question
     "balance_slack": 1.15,          # each answer group at most 1.15 x the smallest one (<= +3.5 points for 2 options)
     "rare_value_share": 0.05,       # categorical values below this share are kept whole and not balanced against
+    # the answer balance within each stem cell (family, action, count; 2026-10-20): both_in_view has four answers
+    # over 18 action cells, and 1.15 there left 94 of the 253 test questions of both_in_view_after (1.5: 112); 2.0
+    # keeps 181, with the family-and-action rule at 26.5% against 25% (user's rule: no type below half)
+    "cell_slack": {"both_in_view": 2.0},
     "unchanged_max_share": 0.10,    # forward questions whose asked quantity did not change
     "flip_band": (0.35, 0.65),      # share of forward questions whose answer differs from the current one
     "scene_cap": 0.08,
@@ -404,6 +408,38 @@ def _cap_groups(records: List[Dict[str, Any]], key, slack: float, rng: random.Ra
             dropped[str(g)] = len(rs) - cap
             rs = rs[:cap]
         kept.extend(rs)
+    return kept, dropped
+
+
+def stem_cell(r: Dict[str, Any]) -> Tuple[Any, ...]:
+    """What the stem says besides the objects: the task family (its task sentence) and the action with its count."""
+    return (r["family"], r.get("action") or None, r.get("k") or None)
+
+
+def _balance_cells(rs: List[Dict[str, Any]], key, slack: float, rng: random.Random,
+                   rare_share: float = 0.0) -> Tuple[List[Dict[str, Any]], int]:
+    """The answer balance within each stem cell (2026-10-20; before, only over the whole type, and the family and
+    the action alone answered goal_after 72%, goal_now 65% and both_in_view_after 39% of the test questions):
+    every answer at most ``slack`` x the rarest regular answer of the cell; a cell lacking a regular answer is left
+    out.  Regular: at least ``rare_share`` of the type (both_in_view "neither" is rare)."""
+    total = collections.Counter(key(r) for r in rs)
+    regular = sorted(v for v, c in total.items() if c >= rare_share * len(rs))
+    if len(regular) <= 1:
+        return rs, 0
+    cells: Dict[Any, Dict[Any, List[Dict[str, Any]]]] = collections.defaultdict(lambda: collections.defaultdict(list))
+    for r in rs:
+        cells[stem_cell(r)][key(r)].append(r)
+    kept, dropped = [], 0
+    for _, groups in sorted(cells.items(), key=lambda kv: str(kv[0])):
+        if any(not groups.get(v) for v in regular):
+            dropped += sum(len(v) for v in groups.values())
+            continue
+        cap = int(math.floor(slack * min(len(groups[v]) for v in regular)))
+        for v, g in sorted(groups.items(), key=lambda kv: str(kv[0])):
+            g = sorted(g, key=lambda r: r["sample_id"])
+            rng.shuffle(g)
+            kept.extend(g[:cap])
+            dropped += max(0, len(g) - cap)
     return kept, dropped
 
 
@@ -481,10 +517,78 @@ def _balance_inverse(rs: List[Dict[str, Any]], slack: float, rng: random.Random)
     return kept, dropped
 
 
+def window_quota(n_by_bin: Dict[int, int], lo: int, hi: int) -> Dict[int, int]:
+    """Questions per letter for each option window (its first grid index s, options s..s+3): every letter of a window
+    equally often and as many questions as possible, i.e. max sum t_s with, for every grid value b, the windows
+    holding b taking together at most its n_b questions.  The constraint matrix is an interval matrix, so the
+    optimum is whole."""
+    from scipy.optimize import linprog
+
+    wins = list(range(lo, hi - 2))
+    bins = list(range(lo, hi + 1))  # every grid value of the windows, also the ones without questions (they cap at 0)
+    if not wins or not n_by_bin:
+        return {}
+    a_ub = [[1.0 if s <= b <= s + 3 else 0.0 for s in wins] for b in bins]
+    res = linprog([-1.0] * len(wins), A_ub=a_ub, b_ub=[n_by_bin.get(b, 0) for b in bins], bounds=[(0, None)] * len(wins),
+                  method="highs")
+    if not res.success:
+        raise RuntimeError(f"window quota: {res.message}")
+    return {s: int(math.floor(x + 1e-6)) for s, x in zip(wins, res.x) if x >= 1 - 1e-6}
+
+
+def _assign_windows(rs: List[Dict[str, Any]], slack: float) -> List[Dict[str, Any]]:
+    """Distance / screen-height questions (2026-10-20): choose each question's option window again so that every
+    window has its four letters equally often (``window_quota``); the rest go where the slack leaves room (else to
+    their first window, and _balance_windows drops them).  The raw files draw the window per question among the ones
+    that fit, which near the smallest option leaves only A (and trimming those windows dropped 60% of the val
+    distance_bin_now questions)."""
+    if not rs:
+        return rs
+    kind = rs[0]["kind"]
+    step, lo_v, hi_v = Q.grid_spec(kind, Q.DEFAULT_CONFIG)
+    by_bin: Dict[int, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for r in rs:
+        b = int(round(float(r["answer_value"]) / step))
+        if abs(b * step - float(r["answer_value"])) > 1e-6:
+            raise ValueError(f"{r['sample_id']}: answer {r['answer_value']} is not on the {step} grid")
+        by_bin[b].append(r)
+    lo = int(round(lo_v / step))
+    hi = int(round(hi_v / step)) if hi_v != math.inf else max(by_bin) + 3
+    quota = window_quota({b: len(v) for b, v in by_bin.items()}, lo, hi)
+    room = {s: int(math.floor(slack * t)) - t for s, t in quota.items()}
+    used: Dict[Tuple[int, int], int] = collections.defaultdict(int)
+    out = []
+
+    def place(r: Dict[str, Any], s: int, b: int) -> Dict[str, Any]:
+        opts = [Q.grid_text(kind, round((s + i) * step, 2)) for i in range(4)]
+        head = r["question"].rsplit("\n(A) ", 1)[0]
+        return dict(r, options=opts, answer=Q.LETTERS[b - s], question=f"{head}\n{Q.options_block(opts)}\n{Q.ANSWER_LETTER}")
+
+    for b, v in sorted(by_bin.items()):
+        v = sorted(v, key=lambda r: Q.stable_int(r["sample_id"], "window"))
+        fits = [s for s in range(b - 3, b + 1) if s >= lo and s + 3 <= hi]
+        i = 0
+        for s in fits:
+            take = quota.get(s, 0)
+            out.extend(place(r, s, b) for r in v[i:i + take])
+            i += take
+        for r in v[i:]:
+            spare = [s for s in fits if used[(s, b - s)] < room.get(s, 0)]
+            s = max(spare, key=lambda s: room[s] - used[(s, b - s)]) if spare else \
+                max(fits, key=lambda s: quota.get(s, 0)) if fits else None
+            if s is None:  # no window of four fits (never on the current grids)
+                out.append(r)
+                continue
+            used[(s, b - s)] += 1
+            out.append(place(r, s, b))
+    return out
+
+
 def _balance_windows(rs: List[Dict[str, Any]], slack: float, rng: random.Random) -> Tuple[List[Dict[str, Any]], int]:
     """Distance / screen-height questions (2026-10-19): within each option window (its smallest option) every letter
     at most ``slack`` x the rarest; a window where a letter never occurs is left out, so the window does not tell
-    the letter (before: the smallest option alone guessed 34%-44% against 25%)."""
+    the letter (before: the smallest option alone guessed 34%-44% against 25%).  _assign_windows comes first, so
+    this only trims what the window quota could not place."""
     windows: Dict[str, Dict[str, List[Dict[str, Any]]]] = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in rs:
         windows[r["options"][0]][r["answer"]].append(r)
@@ -525,15 +629,17 @@ def balance_split(records: List[Dict[str, Any]], cfg: Dict[str, Any], rng: rando
                 dropped["flip_band"] += n
                 rs, n = _cap_unchanged(rs, cfg["unchanged_max_share"], rng)
                 dropped["unchanged"] += n
-            if kind in SHUFFLED:
-                rs, by = _cap_groups(rs, lambda r: r["answer_value"], cfg["balance_slack"], rng, cfg["rare_value_share"])
-                dropped["answer_balance"] += sum(by.values())
-            elif kind in ORDINAL:  # the letter within each option window
+            if kind in SHUFFLED:  # the answer within each stem cell (family, action, count)
+                rs, n = _balance_cells(rs, lambda r: r["answer_value"], (cfg.get("cell_slack") or {}).get(kind, cfg["balance_slack"]),
+                                       rng, cfg["rare_value_share"])
+                dropped["answer_balance"] += n
+            elif kind in ORDINAL:  # the letter within each option window (windows chosen again after each cap)
+                rs = _assign_windows(rs, cfg["balance_slack"])
                 rs, n = _balance_windows(rs, cfg["balance_slack"], rng)
                 dropped["answer_balance"] += n
-            elif kind in ("goal", "left_right"):
-                rs, by = _cap_groups(rs, lambda r: r["answer"], cfg["balance_slack"], rng)
-                dropped["answer_balance"] += sum(by.values())
+            elif kind in ("goal", "left_right"):  # the answer within each stem cell
+                rs, n = _balance_cells(rs, lambda r: r["answer"], cfg["balance_slack"], rng)
+                dropped["answer_balance"] += n
             elif kind == "action":  # the answer within each (action pair, count pair) cell
                 rs, n = _balance_inverse(rs, cfg["balance_slack"], rng)
                 dropped["answer_balance"] += n

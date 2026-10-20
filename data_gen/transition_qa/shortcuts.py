@@ -12,6 +12,10 @@ Rules (docs/transition_qa/DIAG3_PROBE.md, "捷径检查"):
   most often had right for the same set of options; it catches priors (an action pair or a count pair whose answer
   is usually the same one, a distance window whose answer is usually the same step).  A set never seen in
   training is a guess.
+- ``learned_action`` (goal, left_right, closer, both_in_view, occluded, on the test and probe files): the answer
+  (its meaning: yes / no, left / right, full / partial / none, ...) the training file most often had for the same
+  family and action with its count (``stem_cell``: what the stem says besides the objects).  It found the goal
+  types' priors of 2026-10-20 (goal_after 72%, goal_now 65% against 50%).
 - ``option_order`` (both_in_view, occluded): the answer is moved to a position in turn and the other options keep
   their order; when that order is the fixed one of the question template, the moved option stands out.  (build draws
   a random order first; the probe set of 2026-10-19 did not.)
@@ -74,12 +78,18 @@ def _expected(rows: Sequence[Dict[str, Any]], rule) -> float:
     return total / len(rows) if rows else float("nan")
 
 
+def answer_text(r: Dict[str, Any]) -> str:
+    """The right option's text (Yes / No for the yes / no types)."""
+    return r["options"][LETTERS.index(r["answer"])] if r["options"] else r["answer"]
+
+
 def learned_table(train: Sequence[Dict[str, Any]], qtype: str, signature) -> Dict[Any, str]:
-    """The answer most often right in the training file for each option-set signature (option text, or letter)."""
+    """The answer most often right in the training file for each signature (an option set; for the yes / no types
+    the family and the action)."""
     tab: Dict[Any, collections.Counter] = collections.defaultdict(collections.Counter)
     for r in train:
         if r["qtype"] == qtype:
-            tab[signature(r)][r["options"][LETTERS.index(r["answer"])]] += 1
+            tab[signature(r)][answer_text(r)] += 1
     return {k: c.most_common(1)[0][0] for k, c in tab.items()}
 
 
@@ -89,7 +99,31 @@ def learned_accuracy(rows: Sequence[Dict[str, Any]], table: Dict[Any, str], sign
     total = 0.0
     for r in rows:
         best = table.get(signature(r))
-        total += (best == r["options"][LETTERS.index(r["answer"])]) if best is not None else 1.0 / len(r["options"])
+        total += (best == answer_text(r)) if best is not None else 1.0 / (len(r["options"]) or 2)
+    return total / len(rows) if rows else float("nan")
+
+
+VALUE_KINDS = ("goal", "left_right", "closer", "both_in_view", "occluded")  # the answer's meaning is among every option set
+
+
+stem_cell = GEN.stem_cell  # the family and the action with its count (build balances the answers within it)
+
+
+def learned_value_table(train: Sequence[Dict[str, Any]], qtype: str) -> Dict[Any, str]:
+    tab: Dict[Any, collections.Counter] = collections.defaultdict(collections.Counter)
+    for r in train:
+        if r["qtype"] == qtype:
+            tab[stem_cell(r)][r["answer_value"]] += 1
+    return {k: c.most_common(1)[0][0] for k, c in tab.items()}
+
+
+def learned_value_accuracy(rows: Sequence[Dict[str, Any]], table: Dict[Any, str]) -> float:
+    """A rule that answers what the training file most often had for the same family and action (the answer's
+    meaning, e.g. "no" or "full", which every option set of the type has); guesses for a cell never seen."""
+    total = 0.0
+    for r in rows:
+        best = table.get(stem_cell(r))
+        total += (best == r["answer_value"]) if best is not None else 1.0 / (len(r["options"]) or 2)
     return total / len(rows) if rows else float("nan")
 
 
@@ -121,6 +155,8 @@ def report(bank: Path) -> List[Dict[str, Any]]:
             if rs[0]["options"] and f != "p1_train.jsonl":  # any type: the option set -> the commonest right option
                 sig = lambda r: frozenset(r["options"])  # noqa: E731
                 rules.append(("learned_options", learned_accuracy(rs, learned_table(files["p1_train.jsonl"], q, sig), sig)))
+            if q.rsplit("_", 1)[0] in VALUE_KINDS and f != "p1_train.jsonl":  # the stem's family and action -> the commonest answer
+                rules.append(("learned_action", learned_value_accuracy(rs, learned_value_table(files["p1_train.jsonl"], q))))
             for rule, acc in rules:
                 out.append({"file": f, "qtype": q, "n": len(rs), "rule": rule, "accuracy": acc, "chance": chance})
     return out

@@ -46,7 +46,7 @@ eval:
   prompt_format: free_think   # RL 检查点用 free_think 提示评测（evaluation.py --prompt-format free_think）
   diagnostics:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
-    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019/p1_probe.jsonl --from-eval <val> --names <两个 RL 的各检查点>
+    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_probe.jsonl --from-eval <val> --names <两个 RL 的各检查点>
     format_check: python -m eval.diagnostics.format_check --eval <set> --out <TR>/diag/format_<set>   # 带思考文字的回答多少、能否读出动作
     baseline: docs/transition_qa/DIAG_BASELINE.md；第 0 步 = D 组挑出的 SFT 检查点
 

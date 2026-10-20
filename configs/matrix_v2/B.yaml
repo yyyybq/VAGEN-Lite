@@ -41,7 +41,7 @@ eval:
   every: 50
   diagnostics:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
-    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019/p1_probe.jsonl --from-eval <val> --names <SFT 各 epoch 和两个 RL 的各检查点>
+    qa_probe: python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_probe.jsonl --from-eval <val> --names <SFT 各 epoch 和两个 RL 的各检查点>
     baseline: docs/transition_qa/DIAG_BASELINE.md（失败拆解的基线用的是第十一轮的 val400 / test，v2 多了 28 道遮挡题）
 
 train_chain_plan:   # 照第十二轮的 plan（interiorgs_v10_train_r12a_20261019）写

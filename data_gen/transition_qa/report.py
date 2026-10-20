@@ -28,6 +28,49 @@ def _pct(a: float, b: float) -> str:
     return f"{100.0 * a / b:.1f}%" if b else "–"
 
 
+def text_only_section(out: Path, data: Dict[str, List[Dict[str, Any]]]) -> List[str]:
+    """Section 7: how much the text alone answers, per question type, on the test and probe files: chance, the best
+    rule learned on the training file (shortcuts.py) and the original 7B given only the stem and the options
+    (OUT/blind/<test|probe>/<name>.json from ``qa_probe run --no-images``; user 2026-10-20, a fixed column)."""
+    from . import shortcuts as SC
+
+    best: Dict[Any, Dict[str, Any]] = {}
+    for r in SC.report(out):
+        key = (r["file"], r["qtype"])
+        if key not in best or r["accuracy"] > best[key]["accuracy"]:
+            best[key] = r
+    lines = ["## 7. 只看文字能答对多少", "",
+             "同一道题不给图、只给题干和选项时的准确率，和随机猜比；明显高于随机猜，说明题目文字泄露了答案。"
+             "\"学出来的规则\"：只用训练集文字学到的最强一条（`shortcuts.py`，例如同一组选项在训练集里最常对的那个）；"
+             "\"原版 7B 不看图\"：原版 Qwen2.5-VL-7B 只拿到题干和选项（`qa_probe run --no-images`，题前一句"
+             "\"看不到图也请选最可能的答案\"，不采样），读不出的算错。", ""]
+    for f, split in (("p1_test.jsonl", "test"), ("p1_probe.jsonl", "probe")):
+        rs = data.get(f) or []
+        if not rs:
+            continue
+        blind = {p.stem: json.loads(p.read_text()) for p in sorted((out / "blind" / split).glob("*.json"))}
+        header = ["题类", "题数", "随机猜", "学出来的规则（哪条）"] + [f"{n} 不看图" for n in blind] + \
+                 [f"{n} 读不出" for n in blind]
+        rows = []
+        for q in sorted({r["qtype"] for r in rs}):
+            sub = [r for r in rs if r["qtype"] == q]
+            chance = 0.5 if sub[0]["answer"] in ("Yes", "No") else 1.0 / len(sub[0]["options"])
+            b = best.get((f, q))
+            rows.append([q, len(sub), f"{100 * chance:.1f}%", f"{100 * b['accuracy']:.1f}%（{b['rule']}）" if b else "–"]
+                        + [_fmt_acc(((res.get("qtype") or {}).get(q) or {}).get("accuracy")) for res in blind.values()]
+                        + [_fmt_acc(((res.get("qtype") or {}).get(q) or {}).get("unreadable")) for res in blind.values()])
+        chance_all = sum(0.5 if r["answer"] in ("Yes", "No") else 1.0 / len(r["options"]) for r in rs) / len(rs)
+        rows.append(["全部", len(rs), f"{100 * chance_all:.1f}%", ""]
+                    + [_fmt_acc(res["all"]["accuracy"]) for res in blind.values()]
+                    + [_fmt_acc(res["all"]["unreadable"]) for res in blind.values()])
+        lines += [f"**{f}**", "", _table(header, rows), ""]
+    return lines
+
+
+def _fmt_acc(x: Any) -> str:
+    return "–" if x is None else f"{100 * float(x):.1f}%"
+
+
 def write(out: Path, md: Path) -> Dict[str, Any]:
     stats = json.loads((out / "stats.json").read_text())
     data = {f: GEN.read_jsonl(out / f) for f in FILES}
@@ -63,7 +106,11 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
     if probe_stats.exists():
         ps = json.loads(probe_stats.read_text())
         short = {q: v["short"] for q, v in ps["by_qtype"].items() if v["short"]}
-        lines.append(f"- 探针集：{ps['questions']} 道，每个题类 {ps['config']['per_qtype']} 道，来自 {ps['scenes']} 个 val 场景"
+        over = ps["config"].get("per_qtype_overrides") or {}
+        sizes = (f"每个题类 {ps['config']['per_qtype']} 道，其中 "
+                 + "、".join(f"{q} {'全部可用的' if v == 'all' else v}" for q, v in sorted(over.items())) + "（预注册要的题类）"
+                 if over else f"每个题类 {ps['config']['per_qtype']} 道")
+        lines.append(f"- 探针集：{ps['questions']} 道，{sizes}，来自 {ps['scenes']} 个 val 场景"
                      + (f"；不够的题类：{json.dumps(short)}" if short else "；每个题类都够") + "。")
     lines.append("")
     # ------------------------------------------------------------------ family x qtype x split
@@ -141,8 +188,10 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
         if rows:
             lines += [f"**{split} 场景**", "", _table(["题类", "平衡前", "去掉（原因）", "平衡后"], rows), "",
                       f"场景上限（单个场景不超过 8%）去掉：{json.dumps(rep.get('scene_cap_dropped', {}))}", ""]
+    # ------------------------------------------------------------------ text only
+    lines += text_only_section(out, data)
     # ------------------------------------------------------------------ examples
-    lines += ["## 7. 每类两道原题", ""]
+    lines += ["## 8. 每类两道原题", ""]
     rng = random.Random(7)
     for q in qtypes:
         pool = [r for r in data["p1_train.jsonl"] if r["qtype"] == q] or [r for r in data["p1_test.jsonl"] if r["qtype"] == q]

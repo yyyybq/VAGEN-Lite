@@ -1,6 +1,7 @@
 """One-card sco job that runs ``qa_probe run`` from this checkout (the training script's job modes have no probe).
 
     python -m eval.diagnostics.sco_probe --run RUN --probe p1_probe.jsonl --from-eval EVAL --names a,b,c [--submit]
+    # the text-only baseline: --model base_7b_blind=/path/to/Qwen2.5-VL-7B-Instruct --no-images
 
 Writes RUN/job/launch.sh and RUN/job/prepared.json in the format of data_gen/interiorgs_v10/job_sco.py and, with
 --submit, submits through job_sco.submit (status / delete with job_sco.py as usual).  The environment block is the
@@ -49,7 +50,7 @@ $ENV_ROOT/bin/python -m eval.diagnostics.qa_probe run --probe {probe} --out "$OU
 
 
 def prepare(run: Path, probe: str, from_eval: str = "", names: str = "", models=(), pool: str = None,
-            out_dir: str = None) -> Path:
+            out_dir: str = None, blind: bool = False) -> Path:
     """RUN/job/launch.sh and prepared.json; results go to ``out_dir`` (default RUN/probe), handed back to the owner."""
     run = run.resolve()
     job = run / "job"
@@ -59,6 +60,8 @@ def prepare(run: Path, probe: str, from_eval: str = "", names: str = "", models=
         args += ["--from-eval", from_eval, "--names", names]
     for m in models:
         args += ["--model", m]
+    if blind:  # the text-only baseline (qa_probe run --no-images)
+        args.append("--no-images")
     launch = job / "launch.sh"
     out = shlex.quote(str(Path(out_dir).resolve())) if out_dir else "\"$RUN/probe\""
     launch.write_text(LAUNCH.format(run=run, out=out, env_root=ENV_ROOT, checkout=CHECKOUT, probe=shlex.quote(str(Path(probe).resolve())),
@@ -78,10 +81,12 @@ def main() -> None:
     ap.add_argument("--names", default="")
     ap.add_argument("--model", action="append", default=[])
     ap.add_argument("--pool", choices=job_sco.POOLS, default=None)
+    ap.add_argument("--out-dir", default=None, help="where the results go (default RUN/probe)")
+    ap.add_argument("--no-images", action="store_true", help="the text-only baseline")
     ap.add_argument("--submit", action="store_true")
     a = ap.parse_args()
     a.run.mkdir(parents=True, exist_ok=True)
-    print(prepare(a.run, a.probe, a.from_eval, a.names, a.model, a.pool))
+    print(prepare(a.run, a.probe, a.from_eval, a.names, a.model, a.pool, a.out_dir, a.no_images))
     if a.submit:
         print(job_sco.submit(a.run.resolve()))
 

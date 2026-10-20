@@ -82,6 +82,16 @@ def test_chat_puts_images_where_the_markers_are(tmp_path):
         QP.chat(row)
 
 
+def test_chat_blind_keeps_only_the_text(tmp_path):
+    row = {"sample_id": "s", "images": [str(tmp_path / "missing.png")] * 2,  # never read
+           "messages": [{"role": "user", "content": "First image: <image>\nSecond image: <image>\nWhat?"}]}
+    content = QP.chat(row, blind=True)[0]["content"]
+    assert [c["type"] for c in content] == ["text"]
+    text = content[0]["text"]
+    assert text.startswith(QP.BLIND_NOTE) and "<image>" not in text and text.count(QP.BLIND_MARK) == 2
+    assert text.endswith("What?")
+
+
 def test_score_and_summary():
     rows = [{"sample_id": "1", "qtype": "goal_now", "qclass": "state", "family": "f", "options": [],
              "messages": [{}, {"content": "Yes"}]},

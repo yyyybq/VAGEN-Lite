@@ -32,7 +32,7 @@
 每组的 RL 都是一对：`{pkg}s0`（修正包 + 稀疏奖励 S0）和 `{pkg}d`（修正包 + 密集奖励 D）。
 
 - **P0**：仿 8 个 benchmark 的 QA，现在只有 230 道样题（177 条记录）。全量题库可用时（用户通知），改 `data_gen/sft_mixture/configs/mixture_matrix_v2_20261018.yaml` 的 P0 路径，重新构建。
-- **P1**：转移题。D 用 9,802 道，和 P2 的轨迹条数一样多（用户 2026-10-18 的决定），从 2026-10-19 重建的题库 `exps/transition_qa_20261019` 里抽。
+- **P1**：转移题。D 用 9,802 道，和 P2 的轨迹条数一样多（用户 2026-10-18 的决定），从 2026-10-20 重建的题库 `exps/transition_qa_20261019b` 里抽（修掉了只看文字就能答的捷径，`docs/transition_qa/DIAG3_PROBE.md`）。
 - **P2**：第十一轮的 SFT 动作轨迹，train 9,802 条，只来自正式题。
 - 各组的条数见 `docs/transition_qa/RECIPES.md`。
 
@@ -84,7 +84,7 @@ B、C、D 的 `train.yaml` 和主线的 `lf_formal/train.yaml` 逐项比较：
   - 频率：SFT 每个 epoch、RL 每 50 次各评一次。
   - 诊断：
     - 失败拆解：`eval/diagnostics/failure_breakdown.py`；
-    - P1 探针：`qa_probe.py`，用 `exps/transition_qa_20261019/p1_probe.jsonl`（600 道，每类 40 道）；
+    - P1 探针：`qa_probe.py`，用 `exps/transition_qa_20261019b/p1_probe.jsonl`（1,041 道：`goal_now`、`goal_after` 各 200，`occluded_now`、`occluded_after` 取全部的 77、124，其余每类 40）；
     - 基线：失败拆解看 `docs/transition_qa/DIAG_BASELINE.md`，探针看 `DIAG3_PROBE.md`。
 
 ## 用卡估计（按第十一轮实测）
