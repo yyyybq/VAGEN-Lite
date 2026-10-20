@@ -82,6 +82,8 @@ class BatchBoardTest(unittest.TestCase):
                               "rl_runs": {"x": {"last_update": 100, "seconds_per_update_mean_last10": 120}},
                               "job_retries": {"rl/x": [{"reason": "trainer ended FAILED"}]}})
         failed = chain("f", {"state": "failed", "steps": {"sft": {"state": "failed", "error": "ChainError: boom"}}})
+        sft_wait = chain("w", {"state": "running", "steps": {"sft": {"state": "running", "jobs": {"s050": "RUNNING"}}},
+                               "queue": {"pt-9": {"what": "sft/s050", "queued_s": 600, "started": None}}})
         self.result("v2", "val", "d_050", {"v1"})
         self.result("v2", "test", "d_050", {"t1"})
         self.result("v2", "val", "s_050", {"v1", "v2"})
@@ -100,7 +102,8 @@ class BatchBoardTest(unittest.TestCase):
             {"id": "E3", "name": "失败", "chain": failed},
             {"id": "E4", "name": "完成", "chain": done, "runs": {"s": "S0", "d": "D"}, "controls": {"s": "sftc", "d": "sftc"},
              "sft_group": "g", "sft_control": "sftc"},
-            {"id": "E5", "name": "没开始", "chain": str(self.root / "none")}]}
+            {"id": "E5", "name": "没开始", "chain": str(self.root / "none")},
+            {"id": "E6", "name": "SFT 等卡", "chain": sft_wait}]}
         md = B.render(manifest, now)
         self.assertIn("| E1 | 排队 | 排队中 | RL |", md)
         self.assertIn("1 个在排队（最长 2.0 小时）", md)
@@ -110,6 +113,7 @@ class BatchBoardTest(unittest.TestCase):
         self.assertIn("| E3 | 失败 |", md)
         self.assertIn("失败原因：ChainError: boom", md)
         self.assertIn("| E5 | 没开始 | 未启动 |", md)
+        self.assertIn("| E6 | SFT 等卡 | 排队中 | SFT |", md)  # the SFT step lists waiting jobs as running
         self.assertIn("SFT 挑出 sft_g_e2", md)
         self.assertIn("S0（s）挑出 s_050", md)
         self.assertIn("D 对 S0", md)

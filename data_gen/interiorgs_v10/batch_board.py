@@ -93,11 +93,16 @@ def experiment_row(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], now: da
     trainers = [v for k, v in jobs.items() if k.endswith("/rl") and isinstance(v, str)]
     if trainers:  # an RL step waits as long as its 8-card trainers wait (the render services start at once)
         job_states = trainers
+    # the step's own queue records (the SFT step lists its jobs as running while they wait for cards)
+    step_queue = [q for q in (st.get("queue") or {}).values() if str(q.get("what", "")).startswith(f"{current}/")
+                  and not str(q.get("what", "")).endswith("/renderer")]
     if st.get("state") == "done":
         state = "已完成"
     elif st.get("state") == "failed":
         state = "失败"
     elif job_states and all(v in ("STARTING", "PENDING", "QUEUING", "QUEUED", "WAITING", "CREATING") for v in job_states):
+        state = "排队中"
+    elif step_queue and not any(q.get("started") for q in step_queue):
         state = "排队中"
     else:
         state = "运行中"
