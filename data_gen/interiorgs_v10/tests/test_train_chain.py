@@ -1213,14 +1213,16 @@ class ChainTest(unittest.TestCase):
             root = Path(tmp)
             chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "retries": 2, "pool": "h800",
                              "rl": {"renderer_when_trainer_runs": {"trainer_wait_s": 7200}},
-                             "rl_runs": {"a": {}, "b": {}}}, sleep=lambda s: None)
+                             "rl_runs": {"a": {}, "b": {}, "c": {"rl": {"renderer_when_trainer_runs": {
+                                 "trainer_wait_s": 7200, "renderer_pool": "zoe-cf-render"}}}}}, sleep=lambda s: None)
             b = root / "rl_run_b"  # submitted before the switch, still waiting; its render service already deleted
             (b / "job_rl").mkdir(parents=True)
             (b / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-b-old"}))
             (b / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope",
                                                                    "mode_args": ["rl", str(root / "rl_b"), "50"]}))
             trainer = {"a": iter(["STARTING", "STARTING", "RUNNING", "FAILED", "STARTING", "RUNNING", "ok"]),
-                       "b": iter(["STARTING", "RUNNING", "RUNNING", "ok"])}
+                       "b": iter(["STARTING", "RUNNING", "RUNNING", "ok"]),
+                       "c": iter(["STARTING", "RUNNING", "ok"])}
             events, count = [], {}
 
             def prepare(run, gpus, args, job_dir="job", pool=None):
@@ -1266,6 +1268,8 @@ class ChainTest(unittest.TestCase):
             self.assertNotIn(("submit", "b", "job_rl"), bev)  # the waiting job is kept, with its place in the queue
             self.assertEqual([e[0] + " " + e[2] for e in bev[1:3]], ["prepare job_renderer", "submit job_renderer"])
             self.assertEqual(bev[1][4], "zoetrope")  # the render service goes to its trainer's pool
+            cev = [e for e in events if e[1] == "c" and e[0] == "prepare"]
+            self.assertEqual([(e[2], e[4]) for e in cev], [("job_rl", "h800"), ("job_renderer", "zoe-cf-render")])
             self.assertEqual([r["trainer"] for r in chain.state["renderer_on_trainer_start"]["a"]], ["pt-a-rl-1", "pt-a-rl-2"])
             self.assertTrue((root / "rl_run_b" / "checkpoints" / "global_step_50").is_dir())
 

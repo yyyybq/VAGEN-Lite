@@ -94,8 +94,9 @@ nothing of a run whose checkpoints are not all evaluated.  What was deleted is k
 Round 12 batch (cards): plan "rl" "renderer_when_trainer_runs": {"trainer_wait_s": N, "pools": [...]} submits a
 run's render service only once its trainer has its cards (a lone render service on a node keeps 8-card jobs off it
 while the trainer queues); the trainer waits up to N seconds for the service.  "pools" limits it to trainers in
-those pools (where a single card is found quickly).  A trainer submitted before the switch keeps its job and place
-in the queue (only its launch script gets the wait).
+those pools (where a single card is found quickly); "renderer_pool" puts those services in another pool (the user's
+decision of 2026-10-20: zoe-cf-render, job_sco.RENDER_POOLS).  A trainer submitted before the switch keeps its job
+and place in the queue (only its launch script gets the wait).
 
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
@@ -999,7 +1000,8 @@ class Chain:
                     lazy = self.renderer_wait(run) is not None
                     st_rl = job_sco.status(d, "job_rl")
                     if lazy and st_rl.get("state") == "RUNNING" and not (d / "job_renderer" / "submission.json").exists():
-                        submit_renderer(name, d, trainer_pool(d))  # the trainer has its cards: now its render service
+                        # the trainer has its cards: now its render service (in the switch's render pool, else the trainer's)
+                        submit_renderer(name, d, self.renderer_pool(run) or trainer_pool(d))
                         self.state.setdefault("renderer_on_trainer_start", {}).setdefault(name, []).append(
                             {"utc": now(), "trainer": st_rl.get("job_id"),
                              "renderer": json.loads((d / "job_renderer" / "submission.json").read_text())["job_id"]})
@@ -1120,6 +1122,13 @@ class Chain:
             if pool not in opt["pools"]:
                 return None
         return int(opt.get("trainer_wait_s", RENDERER_WAIT_S))
+
+    def renderer_pool(self, run: Dict[str, Any]) -> Optional[str]:
+        """renderer_when_trainer_runs "renderer_pool": the pool for the render services submitted when a trainer starts
+        (round 12 batch: zoe-cf-render, kept for render services, so they take no card in the trainers' pools); None:
+        the trainer's pool."""
+        opt = run["rl"].get("renderer_when_trainer_runs")
+        return opt.get("renderer_pool") if isinstance(opt, dict) else None
 
     def trainer_args(self, run: Dict[str, Any], endpoint: int, pool: Optional[str] = None) -> List[str]:
         """The sco entry script's arguments for a run's trainer (with the switch: how long it waits for its render

@@ -35,6 +35,9 @@ IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"
 MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
 POOL = "zoetrope"
 POOLS = ("zoetrope", "h800")  # same H800 cards, specs, image and storage
+# round 12 batch (the user's decision of 2026-10-20): a pool for the RL render services only (4 machines, same cards,
+# zone and network); a job is prepared there only when asked, pick_pool never chooses it
+RENDER_POOLS = ("zoe-cf-render",)
 SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUED", "WAITING", "CREATING"}  # created, no cards yet
@@ -46,8 +49,8 @@ def now() -> str:
 
 def prepare(run: Path, gpus: int, mode_args: List[str], job_dir: str = "job", pool: Optional[str] = None) -> Path:
     pool = pool or POOL
-    if pool not in POOLS:
-        raise ValueError(f"pool must be one of {POOLS}")
+    if pool not in POOLS + RENDER_POOLS:
+        raise ValueError(f"pool must be one of {POOLS + RENDER_POOLS}")
     if gpus not in SPECS:
         raise ValueError(f"gpus must be one of {sorted(SPECS)}")
     if not mode_args:
