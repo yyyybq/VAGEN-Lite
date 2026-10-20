@@ -1,0 +1,208 @@
+{
+ "robocasa": "1.0.1",
+ "function": "groot_dataset.get_subset_demos_filter_key",
+ "filter_key_seed": 0,
+ "tasks": {
+  "CloseBlenderLid": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "CloseFridge": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "CloseToasterOvenDoor": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "CoffeeSetupMug": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "NavigateKitchen": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "OpenCabinet": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "OpenDrawer": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "OpenStandMixerHead": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PickPlaceCounterToCabinet": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PickPlaceCounterToStove": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PickPlaceDrawerToCounter": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PickPlaceSinkToCounter": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PickPlaceToasterToCounter": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "SlideDishwasherRack": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "TurnOffStove": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "TurnOnElectricKettle": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "TurnOnMicrowave": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "TurnOnSinkFaucet": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "DeliverStraw": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "GetToastedBread": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "KettleBoiling": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "LoadDishwasher": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PackIdenticalLunches": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PreSoakPan": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PrepareCoffee": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "RinseSinkBasin": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "ScrubCuttingBoard": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "SearingMeat": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "SetUpCuttingStation": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "StackBowlsCabinet": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "SteamInMicrowave": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "StirVegetables": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "StoreLeftoversInBowl": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "WashLettuce": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "ArrangeBreadBasket": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "ArrangeTea": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "BreadSelection": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "CategorizeCondiments": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "CuttingToolSelection": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "GarnishPancake": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "GatherTableware": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "HeatKebabSandwich": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "MakeIceLemonade": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PanTransfer": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "PortionHotDogs": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "RecycleBottlesByType": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "SeparateFreezerRack": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "WaffleReheat": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "WashFruitColander": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  },
+  "WeighIngredients": {
+   "50_demos_matches_manifest": true,
+   "150_demos_matches_manifest": true
+  }
+ },
+ "all_match": true
+}
