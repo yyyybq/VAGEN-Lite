@@ -93,6 +93,28 @@ def create_command(job: Path, prepared: dict) -> List[str]:
             "--worker-nodes=1", f"--worker-spec={prepared['spec']}", f"--command=bash {job}/launch.sh"]
 
 
+def waiting_by_pool(jobs, pools=POOLS) -> dict:
+    """{pool: jobs created but not yet given cards} of a `sco acp jobs list` result (every user's jobs)."""
+    out = {p: 0 for p in pools}
+    for j in jobs:
+        pool = j.get("resource_pool")
+        name = pool.get("name") if isinstance(pool, dict) else pool
+        if name in out and j.get("state") in ("STARTING", "QUEUEING", "PENDING", "QUEUED", "WAITING", "CREATING"):
+            out[name] += 1
+    return out
+
+
+def pick_pool(pools=POOLS) -> str:
+    """The pool with the fewest waiting jobs right now (a failed listing: the first of `pools`)."""
+    res = subprocess.run([SCO, "acp", "jobs", "list", "--workspace-name=aigc", "--page-size", "500", "-o", "json"],
+                         capture_output=True, text=True)
+    try:
+        waiting = waiting_by_pool(json.loads(res.stdout), pools)
+    except Exception:
+        return pools[0]
+    return min(pools, key=lambda p: (waiting[p], list(pools).index(p)))
+
+
 def submit(run: Path) -> str:
     job = run / "job"
     receipt = job / "submission.json"
