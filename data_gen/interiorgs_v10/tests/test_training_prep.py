@@ -350,6 +350,116 @@ class TrainingPrepTest(unittest.TestCase):
         with self.assertRaises(SystemExit):  # neither a template nor a standard
             config("rl_no_template")
 
+    def test_rl_config_curriculum(self):
+        """Round 12 batch: --curriculum-easy-updates N puts the easy-first sampler into the PPO config (the first N
+        updates draw only tasks with d* <= max_dstar) and turns the dataloader workers off (verl's rule); it refuses
+        when the train rows have too few easy tasks."""
+        import yaml
+
+        sft = self.root / "sft_rl_curr"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        rows = [json.loads(l) for l in (sft / "rows.jsonl").read_text().splitlines() if l.strip()]
+        for r in rows:  # the train rows become reserve rows (what the standard trains on)
+            r["reserve"] = r["split"] == "train"
+        (sft / "rows_reserve.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        easy = sum(1 for r in rows if r["split"] == "train" and int(r["difficulty"]["d_star"]) <= 3)
+        self.assertGreater(easy, 0)
+
+        def config(out_name, **kw):
+            args = dict(rows=str(sft / "rows_reserve.jsonl"), gs_root="/ply", model="/m", name="t", standard="v10_p1_S0",
+                        run_root=str(self.root / f"run_{out_name}"), val_limit=1, trial=False, out=str(self.root / out_name))
+            args.update(kw)
+            TP.cmd_rl_config(Namespace(**args))
+            return (yaml.safe_load((self.root / out_name / "ppo.yaml").read_text()),
+                    json.loads((self.root / out_name / "rl_config_report.json").read_text()))
+
+        # one candidate per update here, so that the synthetic rows have enough easy tasks
+        ppo, report = config("rl_curr", curriculum_easy_updates=easy, curriculum_max_dstar=3, candidates=1, target_groups=1)
+        self.assertEqual(ppo["data"]["sampler"], {"class_path": "pkg://vagen.curriculum_sampler",
+                                                  "class_name": "DifficultyCurriculumSampler", "easy_updates": easy,
+                                                  "max_dstar": 3})
+        self.assertEqual(ppo["data"]["dataloader_num_workers"], 0)
+        self.assertEqual((report["curriculum"]["easy_tasks"], report["curriculum"]["easy_draws"]), (easy, easy))
+        with self.assertRaises(SystemExit):  # more easy draws than easy tasks
+            config("rl_curr_bad", curriculum_easy_updates=easy + 1, candidates=1, target_groups=1)
+        ppo, report = config("rl_nocurr")  # without the option nothing changes
+        self.assertIsNone(report["curriculum"])
+        self.assertNotEqual((ppo["data"].get("sampler") or {}).get("class_name"), "DifficultyCurriculumSampler")
+
+    def test_data_scale_subsets(self):
+        """Round 12 batch: nested train-scene subsets (fixed seed) with all formal tasks of their scenes for SFT and
+        only their scenes' reserve tasks for RL; an arm with one subset's task count over every scene."""
+        records, rows = [], []
+        counts = {f"sc{i:02d}": 2 + i % 5 for i in range(10)}  # 2..6 train records per scene
+        for s, n in counts.items():
+            for k in range(n):
+                records.append({"id": f"{s}_{k}", "scene_id": s, "split": "train"})
+            rows.append({"task_id": f"{s}_r", "scene_id": s, "split": "train", "reserve": True})
+            rows.append({"task_id": f"{s}_f", "scene_id": s, "split": "train", "reserve": False})
+        records += [{"id": f"v{k}", "scene_id": "val0", "split": "val"} for k in range(3)]
+        rows += [{"task_id": "v_f", "scene_id": "val0", "split": "val", "reserve": False},
+                 {"task_id": "v_r", "scene_id": "val0", "split": "val", "reserve": True}]
+        res = TP.build_subsets(records, rows, [2, 4, 8], equal_tasks_of=4, flagged=["sc03_r"], seed=7)
+        sub = res["subsets"]
+        self.assertEqual(sorted(sub), ["s002", "s004", "s008", "w10"])
+        order = res["scene_order"]
+        self.assertEqual(sorted(order), sorted(counts))
+        self.assertEqual(sub["s002"]["scenes"], sorted(order[:2]))
+        self.assertTrue(set(sub["s002"]["scenes"]) < set(sub["s004"]["scenes"]) < set(sub["s008"]["scenes"]))  # nested
+        for name, s in sub.items():
+            self.assertEqual(sum(1 for r in s["sft"] if r["split"] == "val"), 3)  # every val record stays
+            train_scenes = {r["scene_id"] for r in s["sft"] if r["split"] == "train"}
+            self.assertLessEqual(train_scenes, set(s["scenes"]))
+            reserve = [r for r in s["rows"] if r["reserve"]]
+            self.assertTrue(all(r["scene_id"] in s["scenes"] and r["split"] == "train" for r in reserve))
+            self.assertNotIn("sc03_r", {r["task_id"] for r in reserve})  # flagged tasks never reach RL
+            self.assertNotIn("v_r", {r["task_id"] for r in s["rows"]})
+            self.assertIn("v_f", {r["task_id"] for r in s["rows"]})  # rl-config needs the formal val rows
+        self.assertEqual(sub["s004"]["train_records"], sum(counts[s] for s in order[:4]))
+        w = sub["w10"]
+        self.assertEqual(w["train_records"], sub["s004"]["train_records"])  # same task count, all scenes
+        per = {}
+        for r in w["sft"]:
+            if r["split"] == "train":
+                per[r["scene_id"]] = per.get(r["scene_id"], 0) + 1
+        self.assertEqual(len(per), 10)
+        self.assertLessEqual(max(per.values()) - min(per.values()), 2)
+        self.assertEqual(res, TP.build_subsets(list(reversed(records)), rows, [2, 4, 8], 4, ["sc03_r"], seed=7))  # fixed
+        self.assertNotEqual(TP.build_subsets(records, rows, [2], seed=8)["scene_order"], order)
+        with self.assertRaises(ValueError):
+            TP.build_subsets(records, rows, [11])
+        # quotas: as even as capacities allow
+        self.assertEqual(TP.spread_quota({"a": 1, "b": 5, "c": 5}, 9, seed=1), {"a": 1, "b": 4, "c": 4})
+        with self.assertRaises(ValueError):
+            TP.spread_quota({"a": 1}, 2)
+        # the command: files per subset, the source SFT folder linked in
+        out = self.root / "subsets_cmd"
+        src = self.root / "subsets_src"
+        src.mkdir()
+        (src / "frames.jsonl").write_text("")
+        (src / "split_manifest.json").write_text("{}")
+        (src / "traj.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+        (src / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        flags = src / "flags.json"
+        flags.write_text(json.dumps({"flagged_task_ids": ["sc03_r"]}))
+        import os
+
+        try:  # symbolic links need a privilege on Windows; the cluster (Linux) has them
+            os.symlink(src / "frames.jsonl", self.root / "symlink_probe")
+            can_link = True
+        except OSError:
+            can_link = False
+        TP.cmd_subsets(Namespace(trajectories=str(src / "traj.jsonl"), rows=str(src / "rows.jsonl"), exclude=str(flags),
+                                 sizes="2,4", equal_tasks_of=4, seed=7, link_from=str(src) if can_link else None,
+                                 out=str(out)))
+        summary = json.loads((out / "subsets.json").read_text())
+        self.assertEqual(summary["subsets"]["s004"]["train_records"], sub["s004"]["train_records"])
+        self.assertEqual(len((out / "sft_trajectories_w10.jsonl").read_text().splitlines()), w["train_records"] + 3)
+        self.assertTrue((out / "rows_s002.jsonl").is_file())
+        if can_link:
+            self.assertTrue((out / "frames.jsonl").exists() and (out / "split_manifest.json").exists())
+
     def test_rl_config_trains_on_formal_tasks_only(self):
         """Reserve rows (sft-frames --include-reserve) are SFT-only: rl-config leaves them out of train and val."""
         import yaml

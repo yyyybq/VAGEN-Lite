@@ -65,6 +65,32 @@ configs/rl_standards.json; the plan's "ppo_template" is then optional) and "seed
 "reward_preset" only when the plan names one.  Plan "eval_only": true runs only check_code and evaluate (the
 plan's "eval"."models" and variants on its sets; no RL checkpoints), e.g. to evaluate existing models on a new set.
 
+Round 12 batch (the data-scale curve): plan "sft_records": false skips training_prep sft-records (the SFT folder
+already holds the conversation files, e.g. training_prep subsets); "sft_eval_epochs" ([2, 4, ...]) limits the
+per-epoch evaluation and the pick to those epochs, "sft_eval_sets" (["val"]) to those sets (the pick is evaluated on
+the others with an eval variant of "sft_pick"); "sft_only": true skips the RL steps and evaluates no RL checkpoint.
+
+Round 12 batch: plan "pool": "auto" submits every job to the pool with the fewest waiting jobs at that moment
+(job_sco.pick_pool; a run's render service and trainer stay in one pool); the time each job waited for cards is kept
+in state["queue"] and shown in PROGRESS.md.
+
+Round 12 batch (the user's rule: any failed job is resubmitted at most twice): plan "retries": N resubmits a failed
+job up to N times before the step fails: an RL trainer that ends without its endpoint checkpoint (it resumes from
+its latest checkpoint; together with the start-up resubmissions at most N per run), a render service that dies (it
+and the trainer are resubmitted), an SFT job (its model folder is moved aside first) and an evaluation job (it goes
+on from the results already written).  Every resubmission is kept in state["job_retries"] and shown in PROGRESS.md.
+
+Round 12 batch (RL from the original model): a run whose plan "rl" has "extend": {"to": 600, "vs": 200,
+"min_gain": 0.02} is continued from its endpoint checkpoint to "to" when, on the validation set (the evaluation
+script; "select_by"), its endpoint checkpoint is the best of its checkpoints and at least min_gain above the one at
+"vs" (still rising clearly).  The decision is made once per run in the rl_extend step; evaluate then covers each
+run's checkpoints up to its own last update.
+
+Round 12 batch (disk): plan "retain": "best_and_last" deletes, once evaluate is done, every RL checkpoint but the
+run's best on the validation set (ties: the earlier) and its last one, and every SFT epoch checkpoint this chain
+trained but the picked one (with the final weights in the model folder); nothing outside this chain's folder, and
+nothing of a run whose checkpoints are not all evaluated.  What was deleted is kept in state["retained"].
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -93,6 +119,7 @@ CARDS = {"render": "1", "sft": "每组 8", "sft_eval": "每个 1", "rl": "1 + 8"
 POLL_S = 60.0
 DEFAULT_MAX_EVAL_JOBS = 10
 EVAL_ONLY_STEPS = ("check_code", "evaluate")
+RL_STEPS = ("rl_config", "rl", "rl_extend")
 # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
 # during startup", after "GCS cannot find the node ... registration may not be complete")
 STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
@@ -360,6 +387,15 @@ def code_changes(porcelain: Sequence[str]) -> Tuple[List[str], List[str]]:
     return changed, ignored
 
 
+def drop_partial_line(path: Path) -> None:
+    """A results.jsonl whose last line was cut off by a dying job loses that line (the rerun redoes the task)."""
+    if not path.is_file():
+        return
+    text = path.read_text()
+    if text and not text.endswith("\n"):
+        path.write_text(text[: text.rfind("\n") + 1])
+
+
 class SignalCheckFailed(Exception):
     """An RL run missed the signal check (plan "rl"."signal_check")."""
 
@@ -448,6 +484,50 @@ class Chain:
             return Path(decision["model"])
         return self.lf_dir("") / "model"
 
+    def job_pool(self, key: Optional[str] = None) -> Optional[str]:
+        """The pool for a new job: the plan's, or with "auto" the one with the fewest waiting jobs now (round 12
+        batch); with a ``key`` (an RL run) the first choice is kept, so its render service and trainer share it."""
+        pool = self.plan.get("pool")
+        if pool != "auto":
+            return pool
+        from . import job_sco
+
+        chosen = self.state.setdefault("run_pools", {})
+        if key is not None and key in chosen:
+            return chosen[key]
+        pool = job_sco.pick_pool()
+        if key is not None:
+            chosen[key] = pool
+        return pool
+
+    def take_retry(self, key: str, what: str, job_id: Optional[str], reason: str, used: int = 0) -> bool:
+        """Round 12 batch: whether a failed job may be resubmitted (plan "retries" minus earlier ones for ``key`` and
+        ``used`` others, e.g. a run's start-up resubmissions); if so, the resubmission is recorded."""
+        budget = int(self.plan.get("retries", 0) or 0)
+        rec = self.state.setdefault("job_retries", {}).setdefault(key, [])
+        if len(rec) + used >= budget:
+            return False
+        rec.append({"utc": now(), "what": what, "job_id": job_id, "reason": reason})
+        self.save()
+        return True
+
+    def note_queue(self, what: str, run: Path, job_dir: str, st: Dict[str, Any]) -> None:
+        """Round 12 batch: how long a job waited for cards (its creation to its start; still waiting: to now)."""
+        job_id = st.get("job_id")
+        if not job_id or not st.get("create_time"):
+            return
+        try:
+            created = datetime.datetime.fromisoformat(str(st["create_time"]).replace("Z", "+00:00"))
+            end = (datetime.datetime.fromisoformat(str(st["start_time"]).replace("Z", "+00:00")) if st.get("start_time")
+                   else datetime.datetime.now(datetime.timezone.utc))
+        except ValueError:
+            return
+        prepared = run / job_dir / "prepared.json"
+        pool = json.loads(prepared.read_text()).get("pool") if prepared.is_file() else None
+        self.state.setdefault("queue", {})[job_id] = {
+            "what": what, "pool": pool, "created": str(st["create_time"]), "started": st.get("start_time"),
+            "queued_s": round((end - created).total_seconds())}
+
     # -------------------------------------------------------------- bookkeeping
     def save(self) -> None:
         self.state["updated_utc"] = now()
@@ -513,9 +593,10 @@ class Chain:
                     raise ChainError(f"job {name} is {s.get('state')}")
             self.sleep(POLL_S)
 
-    def wait_all(self, step: str, runs: Dict[str, Path]) -> None:
+    def wait_all(self, step: str, runs: Dict[str, Path], on_retry: Optional[Callable[[str], None]] = None) -> None:
         """Poll until every job of ``runs`` ({name: run folder}) finished; every job is deleted afterwards; a job
-        that did not succeed fails the step (after the others ended too)."""
+        that did not succeed fails the step (after the others ended too), unless plan "retries" allows resubmitting
+        it (``on_retry(name)`` runs first)."""
         from . import job_sco
 
         pending, ended = dict(runs), {}
@@ -523,7 +604,16 @@ class Chain:
             while pending:
                 for name, run in list(pending.items()):
                     st = job_sco.status(run)
-                    if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
+                    self.note_queue(f"{step}/{name}", run, "job", st)
+                    done = st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND")
+                    if done and st.get("state") != "SUCCEEDED" and self.take_retry(
+                            f"{step}/{name}", step, st.get("job_id"), f"ended {st.get('state')}"):
+                        job_sco.delete(run)
+                        if on_retry is not None:
+                            on_retry(name)
+                        job_sco.submit(run)
+                        continue
+                    if done:
                         ended[name] = st.get("state")
                         job_sco.delete(run)
                         pending.pop(name)
@@ -588,10 +678,11 @@ class Chain:
 
     def sft_data(self) -> None:
         py = sys.executable
-        records = [py, "-m", "data_gen.interiorgs_v10.training_prep", "sft-records", "--dir", str(self.sft_dir)]
-        if self.plan.get("scenes_root"):  # round 10: inserted blocked turns need the scenes' collision detectors
-            records += ["--scenes-root", str(self.plan["scenes_root"])]
-        self.sh(records, log=self.tr / "logs" / "sft_records.log")
+        if self.plan.get("sft_records", True):  # round 12 batch: false = the conversation files exist already
+            records = [py, "-m", "data_gen.interiorgs_v10.training_prep", "sft-records", "--dir", str(self.sft_dir)]
+            if self.plan.get("scenes_root"):  # round 10: inserted blocked turns need the scenes' collision detectors
+                records += ["--scenes-root", str(self.plan["scenes_root"])]
+            self.sh(records, log=self.tr / "logs" / "sft_records.log")
         for group, trajectory in self.sft_groups().items():
             if not (self.sft_dir / trajectory).is_file():
                 raise ChainError(f"sft-records wrote no {trajectory} for group {group or 'default'}")
@@ -615,12 +706,21 @@ class Chain:
             run = self.tr / (f"sft_{group}" if group else "sft")
             run.mkdir(parents=True, exist_ok=True)
             if not (run / "job" / "submission.json").exists():
-                job_sco.prepare(run, 8, ["sft", str(self.lf_dir(group))], pool=self.plan.get("pool"))
+                job_sco.prepare(run, 8, ["sft", str(self.lf_dir(group))], pool=self.job_pool())
                 job_sco.submit(run)
             runs[group or "sft"] = run
         self.mark("sft", job_ids={n: json.loads((r / "job" / "submission.json").read_text())["job_id"]
                                   for n, r in runs.items()})
-        self.wait_all("sft", runs)
+
+        def fresh_model_folder(name: str) -> None:  # a resubmitted SFT starts over (save_only_model: no resume)
+            model = self.lf_dir("" if name == "sft" else name) / "model"
+            if model.exists():
+                k = 1
+                while (model.parent / f"model_failed_{k}").exists():
+                    k += 1
+                model.rename(model.parent / f"model_failed_{k}")
+
+        self.wait_all("sft", runs, on_retry=fresh_model_folder)
         for group in self.sft_groups():
             model = self.lf_dir(group) / "model"
             if not (model / "config.json").is_file() or not list(model.glob("*.safetensors")):
@@ -649,13 +749,20 @@ class Chain:
                     run.mkdir(parents=True, exist_ok=True)
                     if not (run / "job" / "submission.json").exists():
                         job_sco.prepare(run, 1, ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options],
-                                        pool=self.plan.get("pool"))
+                                        pool=self.job_pool())
                         job_sco.submit(run)
                     running[name] = run
                 for name, run in list(running.items()):
                     st = job_sco.status(run)
+                    self.note_queue(f"{step}/{name}", run, "job", st)
                     if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
                         eval_dir, result = jobs[name][0], jobs[name][1]
+                        if not (eval_dir / result / "done.json").exists() and self.take_retry(
+                                f"{step}/{name}", "evaluation", st.get("job_id"), f"ended {st.get('state')} without results"):
+                            job_sco.delete(run)
+                            drop_partial_line(eval_dir / result / "results.jsonl")
+                            job_sco.submit(run)  # the evaluation goes on from the results already written
+                            continue
                         if not (eval_dir / result / "done.json").exists():
                             failed.append(f"{name} ({st.get('state')})")
                         ended[name] = st.get("state")
@@ -676,15 +783,24 @@ class Chain:
             self.sh([sys.executable, "-m", "data_gen.interiorgs_v10.evaluation", "table", "--eval", str(eval_dir)],
                     log=self.tr / "logs" / f"eval_table_{eval_dir.name}.log")
 
+    def sft_epochs(self, group: str) -> List[Tuple[int, Path]]:
+        """The epoch checkpoints of a group that are evaluated and picked from (round 12 batch: plan
+        "sft_eval_epochs" limits them)."""
+        ckpts = epoch_checkpoints(self.lf_dir(group) / "model")
+        wanted = self.plan.get("sft_eval_epochs")
+        return [(e, p) for e, p in ckpts if not wanted or e in {int(x) for x in wanted}]
+
     def sft_eval(self) -> None:
         sets = self.eval_sets()
         if not sets or not self.plan.get("sft_groups"):
             self.mark("sft_eval", note="not planned")
             return
+        if self.plan.get("sft_eval_sets"):  # round 12 batch: e.g. the validation set only
+            sets = {k: v for k, v in sets.items() if k in set(self.plan["sft_eval_sets"])}
         options = list((self.plan.get("eval") or {}).get("options") or [])
         jobs = {}
         for group in self.sft_groups():
-            ckpts = epoch_checkpoints(self.lf_dir(group) / "model")
+            ckpts = self.sft_epochs(group)
             if not ckpts:
                 raise ChainError(f"no epoch checkpoints in {self.lf_dir(group) / 'model'}")
             for epoch, path in ckpts:
@@ -705,14 +821,15 @@ class Chain:
             raise ChainError(f"select_by {select_by!r} is not one of the eval sets {sorted(sets)}")
         candidates: Dict[str, str] = {}  # result name -> checkpoint, in tie-break order (epoch, then group)
         for group in self.sft_groups():
-            for epoch, path in epoch_checkpoints(self.lf_dir(group) / "model"):
+            for epoch, path in self.sft_epochs(group):
                 candidates[f"sft_{group}_e{epoch}"] = str(path)
         order = sorted(candidates, key=lambda n: (int(n.rsplit("_e", 1)[1]), list(self.sft_groups()).index(n[4:].rsplit("_e", 1)[0])))
         scores = {n: success_rate(sets[select_by] / n) for n in order}
         if any(v is None for v in scores.values()):
             raise ChainError("missing validation results for " + ", ".join(n for n, v in scores.items() if v is None))
         best = pick_best(scores, order)
-        others = {s: {n: success_rate(d / n) for n in order} for s, d in sets.items() if s != select_by}
+        others = {s: {n: success_rate(d / n) for n in order} for s, d in sets.items()
+                  if s != select_by and (not self.plan.get("sft_eval_sets") or s in self.plan["sft_eval_sets"])}
         self.mark("pick_sft", decision={"select_by": select_by, "scores": scores, "best": best,
                                         "model": candidates[best], "other_sets": others})
 
@@ -744,8 +861,10 @@ class Chain:
             if rl.get("exclude"):
                 args += ["--exclude", str(rl["exclude"])]
             for key, flag in (("opt_package", "--opt-package"), ("candidates", "--candidates"),
-                              ("target_groups", "--target-groups"), ("rollouts", "--rollouts")):
-                if rl.get(key) is not None:  # round 11: the optimisation package
+                              ("target_groups", "--target-groups"), ("rollouts", "--rollouts"),
+                              ("curriculum_easy_updates", "--curriculum-easy-updates"),
+                              ("curriculum_max_dstar", "--curriculum-max-dstar")):
+                if rl.get(key) is not None:  # round 11: the optimisation package; round 12 batch: easy tasks first
                     args += [flag, str(rl[key])]
             self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
 
@@ -759,7 +878,9 @@ class Chain:
                 return
             except SignalCheckFailed as exc:
                 fallback = self.plan.get("rl_fallback_model")
-                if not fallback or self.state.get("rl_model_override"):
+                if not fallback:  # round 12 batch: no fallback start model (RL from the original model)
+                    raise ChainError(f"signal check missed, RL stopped (no fallback start model): {exc}") from None
+                if self.state.get("rl_model_override"):
                     raise ChainError(f"signal check missed again, RL stopped: {exc}") from None
                 attempt = int(self.state.get("rl_attempt", 1))
                 self.archive_rl_runs(f"attempt{attempt}")
@@ -785,7 +906,8 @@ class Chain:
     def signal_check(self, runs: Dict[str, Dict[str, Any]]) -> None:
         """Plan "rl"."signal_check": once every run has its first ``at`` updates, each run's training success must be
         within [success_min, success_max] and its mixed share at least mixed_min; the result is kept in
-        state["signal_checks"]; a miss raises SignalCheckFailed.  Checked once per attempt."""
+        state["signal_checks"]; a miss raises SignalCheckFailed.  Checked once per attempt.  Round 12 batch: a bound
+        the check leaves out is not checked (RL from the original model: only mixed_min)."""
         check = (self.plan.get("rl") or {}).get("signal_check")
         if not check:
             return
@@ -800,8 +922,9 @@ class Chain:
             if not set(range(1, at + 1)) <= have:
                 return
             b = block_stats(d, block=at)[f"1-{at}"]
-            ok = (float(check["success_min"]) <= b["success"] <= float(check["success_max"])
-                  and b["mixed_share"] >= float(check["mixed_min"]))
+            lo, hi, mixed = check.get("success_min"), check.get("success_max"), check.get("mixed_min")
+            ok = ((lo is None or b["success"] >= float(lo)) and (hi is None or b["success"] <= float(hi))
+                  and (mixed is None or b["mixed_share"] >= float(mixed)))
             stats[name] = {k: b[k] for k in ("success", "mixed_share", "episodes", "tasks", "reward_mean")}
             stats[name]["ok"] = bool(ok)
         rec = {"attempt": attempt, "model": str(self.sft_model()), "at": at, "check": dict(check), "runs": stats,
@@ -812,24 +935,24 @@ class Chain:
             raise SignalCheckFailed(f"update {at}, start {rec['model']}: " + "; ".join(
                 f"{n} success {s['success']:.3f} mixed {s['mixed_share']:.3f}" for n, s in stats.items()))
 
-    def _ppo_runs(self, step: str, endpoint: int) -> None:
+    def _ppo_runs(self, step: str, endpoint: int, only: Optional[set] = None) -> None:
         """Round 11: every run of plan "rl_runs" at the same time (its render service on 1 card, PPO on 8), up to
         ``endpoint``; a run whose endpoint checkpoint exists is skipped.  A failed run does not stop the others;
         the step fails after all ended if any failed."""
         from . import job_sco
 
         runs = {n: r for n, r in self.rl_runs().items()
-                if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir()}
+                if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir() and (only is None or n in only)}
         for name, run in runs.items():
             d = run["run_dir"]
             d.mkdir(parents=True, exist_ok=True)
             if not (d / "job_renderer" / "submission.json").exists():
                 for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
                     (d / f).unlink(missing_ok=True)
-                job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.plan.get("pool"))
+                job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.job_pool(name))
                 job_sco.submit(d, job_dir="job_renderer")
             if not (d / "job_rl" / "submission.json").exists():
-                job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl", pool=self.plan.get("pool"))
+                job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl", pool=self.job_pool(name))
                 job_sco.submit(d, job_dir="job_rl")
         self.mark(step, job_ids={f"{n}/{j}": json.loads((r["run_dir"] / j / "submission.json").read_text())["job_id"]
                                  for n, r in runs.items() for j in ("job_renderer", "job_rl")})
@@ -841,6 +964,8 @@ class Chain:
                     d = run["run_dir"]
                     st_rl, st_r = job_sco.status(d, "job_rl"), job_sco.status(d, "job_renderer")
                     states[f"{name}/rl"], states[f"{name}/renderer"] = st_rl.get("state"), st_r.get("state")
+                    self.note_queue(f"{step}/{name}/rl", d, "job_rl", st_rl)
+                    self.note_queue(f"{step}/{name}/renderer", d, "job_renderer", st_r)
                     problem = self.startup_check(name, run, st_rl)  # round 12: Ray start-up failure or silence
                     if problem:
                         retries = self.state.setdefault("startup_retries", {}).setdefault(name, [])
@@ -849,7 +974,7 @@ class Chain:
                             job_sco.delete(d, "job_rl")
                             retries.append({"utc": now(), "job_id": st_rl.get("job_id"), "reason": problem})
                             job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
-                                            pool=self.plan.get("pool"))
+                                            pool=self.job_pool(name))
                             job_sco.submit(d, job_dir="job_rl")
                             retries[-1]["new_job_id"] = json.loads((d / "job_rl" / "submission.json").read_text())["job_id"]
                             self.save()
@@ -860,11 +985,34 @@ class Chain:
                             ended[name] = f"start-up: {problem} (after {limit} resubmissions)"
                             active.pop(name)
                             continue
-                    if st_rl.get("finished") or st_rl.get("state") in ("NOT_FOUND", "SUSPENDED"):
+                    rl_done = st_rl.get("finished") or st_rl.get("state") in ("NOT_FOUND", "SUSPENDED")
+                    r_done = st_r.get("finished") or st_r.get("state") in ("NOT_FOUND", "SUSPENDED")
+                    reached = (d / "checkpoints" / f"global_step_{endpoint}").is_dir()
+                    used = len((self.state.get("startup_retries") or {}).get(name, []))
+                    if rl_done and not reached and self.take_retry(  # round 12 batch: resume from the last checkpoint
+                            f"rl/{name}", "trainer", st_rl.get("job_id"), f"trainer ended {st_rl.get('state')}", used):
+                        job_sco.delete(d, "job_rl")
+                        job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
+                                        pool=self.job_pool(name))
+                        job_sco.submit(d, job_dir="job_rl")
+                        continue
+                    if not rl_done and r_done and self.take_retry(
+                            f"rl/{name}", "renderer", st_r.get("job_id"), f"render service ended {st_r.get('state')}", used):
+                        job_sco.delete(d, "job_rl")  # the trainer needs the new render service's address
+                        job_sco.delete(d, "job_renderer")
+                        for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
+                            (d / f).unlink(missing_ok=True)
+                        job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.job_pool(name))
+                        job_sco.submit(d, job_dir="job_renderer")
+                        job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
+                                        pool=self.job_pool(name))
+                        job_sco.submit(d, job_dir="job_rl")
+                        continue
+                    if rl_done:
                         (d / "STOP_RENDERER").touch()
                         ended[name] = st_rl.get("state")
                         active.pop(name)
-                    elif st_r.get("finished") or st_r.get("state") in ("NOT_FOUND", "SUSPENDED"):
+                    elif r_done:
                         (d / "STOP_RENDERER").touch()  # the render service died: the trainer cannot go on
                         job_sco.delete(d, "job_rl")
                         ended[name] = f"renderer {st_r.get('state')}"
@@ -957,7 +1105,17 @@ class Chain:
         if not (run / "checkpoints" / f"global_step_{endpoint}").is_dir():
             raise ChainError(f"no checkpoint at update {endpoint}")
 
+    def extend_runs(self) -> Dict[str, Dict[str, Any]]:
+        """Round 12 batch: the RL runs with an extension rule (plan rl "extend")."""
+        if not self.plan.get("rl_runs"):
+            return {}
+        return {n: r for n, r in self.rl_runs().items() if (r["rl"].get("extend") or {}).get("to")}
+
     def rl_extend(self) -> None:
+        runs = self.extend_runs()
+        if runs:  # round 12 batch: per run, on the validation set
+            self._extend_by_validation(runs)
+            return
         target = self.plan.get("extend_to")
         if not target:
             self.mark("rl_extend", note="not planned")
@@ -972,8 +1130,44 @@ class Chain:
         if decision["extend_to"]:
             self._ppo("rl_extend", int(decision["extend_to"]), suffix="_ext")
 
-    def final_update(self) -> int:
-        decision = self.state["steps"].get("rl_extend", {}).get("decision") or {}
+    def _extend_by_validation(self, runs: Dict[str, Dict[str, Any]]) -> None:
+        step = self.state["steps"]["rl_extend"]
+        decisions = step.get("decisions")
+        if decisions is None:  # decided once; a resumed chain keeps the decisions
+            sets = self.eval_sets()
+            select = self.plan.get("select_by") or next(iter(sets))
+            vdir = sets[select]
+            every = int((self.plan.get("eval") or {}).get("every", 50))
+            end = int(self.plan["endpoint"])
+            options = list((self.plan.get("eval") or {}).get("options") or [])
+            jobs = {}
+            for name, run in runs.items():
+                for s in range(every, end + 1, every):
+                    hf = run["run_dir"] / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface"
+                    if hf.is_dir():
+                        jobs[f"{select}__{name}_{s:03d}"] = (vdir, f"{name}_{s:03d}", str(hf), None, options)
+            self.eval_jobs("rl_extend", jobs)  # the same results the evaluate step would write
+            decisions = {}
+            for name, run in runs.items():
+                rule = run["rl"]["extend"]
+                vals = {s: success_rate(vdir / f"{name}_{s:03d}") for s in range(every, end + 1, every)}
+                vals = {s: v for s, v in vals.items() if v is not None}
+                last, ref = vals.get(end), vals.get(int(rule.get("vs", end - 100)))
+                keep = (last is not None and ref is not None and last >= max(vals.values())
+                        and last - ref >= float(rule.get("min_gain", 0.02)))
+                decisions[name] = {"set": select, "val": {str(k): v for k, v in vals.items()}, "rule": dict(rule),
+                                   "extend_to": int(rule["to"]) if keep else None}
+            self.mark("rl_extend", decisions=decisions)
+        targets = {n: d["extend_to"] for n, d in decisions.items() if d.get("extend_to")}
+        if targets:
+            self._ppo_runs("rl_extend", max(targets.values()), only=set(targets))
+
+    def final_update(self, run_name: Optional[str] = None) -> int:
+        step = self.state["steps"].get("rl_extend", {})
+        per_run = (step.get("decisions") or {}).get(run_name) if run_name is not None else None
+        if per_run and per_run.get("extend_to"):  # round 12 batch: a run continued past the endpoint
+            return int(per_run["extend_to"])
+        decision = step.get("decision") or {}
         return int(decision.get("extend_to") or self.plan["endpoint"])
 
     def evaluate(self) -> None:
@@ -986,9 +1180,9 @@ class Chain:
         options = list(ev.get("options") or [])
         models: Dict[str, Tuple[str, Optional[str], Sequence[str]]] = {}
         rl_names: List[str] = []
-        for run_name, run in ({} if self.plan.get("eval_only") else self.rl_runs()).items():
+        for run_name, run in ({} if self.plan.get("eval_only") or self.plan.get("sft_only") else self.rl_runs()).items():
             ckpts = run["run_dir"] / "checkpoints"
-            for s in range(every, self.final_update() + 1, every):
+            for s in range(every, self.final_update(run_name or None) + 1, every):
                 name = f"{run_name}_{s:03d}" if run_name else f"v10_rl_{s:03d}"
                 hf = ckpts / f"global_step_{s}" / "actor" / "huggingface"
                 if run_name in (self.state.get("guard_stops") or {}) and not hf.is_dir():
@@ -1004,6 +1198,55 @@ class Chain:
         jobs.update(self.variant_jobs(ev, {**sets, **extra}, models, rl_names))
         self.eval_jobs("evaluate", jobs)
         self.tables()
+        if self.plan.get("retain") == "best_and_last":  # round 12 batch: disk
+            self.retain()
+
+    def retain(self) -> None:
+        """Delete the checkpoints the plan's retention rule does not keep (see the module docstring)."""
+        import shutil
+
+        sets = self.eval_sets()
+        select = self.plan.get("select_by") or next(iter(sets))
+        every = int((self.plan.get("eval") or {}).get("every", 50))
+        done: Dict[str, Any] = {}
+        tr = self.tr.resolve()
+
+        def remove(path: Path) -> None:
+            if tr not in path.resolve().parents:  # never outside this chain's folder
+                raise ChainError(f"retention refused to delete {path} (outside {tr})")
+            shutil.rmtree(path) if path.is_dir() else path.unlink()
+
+        if not (self.plan.get("eval_only") or self.plan.get("sft_only")):
+            for name, run in (self.rl_runs() if self.plan.get("rl_runs") else {}).items():
+                ckpts = sorted(int(p.name.split("_")[-1]) for p in (run["run_dir"] / "checkpoints").glob("global_step_*")
+                               if p.name.split("_")[-1].isdigit())
+                if not ckpts:
+                    continue
+                vals = {s: success_rate(sets[select] / f"{name}_{s:03d}") for s in ckpts if s % every == 0}
+                if not vals or any(v is None for v in vals.values()) or set(vals) != set(ckpts):
+                    done[name] = {"skipped": "not every checkpoint has a validation result"}
+                    continue
+                best = max(vals, key=lambda s: (vals[s], -s))
+                keep = {best, max(ckpts)}
+                gone = [s for s in ckpts if s not in keep]
+                for s in gone:
+                    remove(run["run_dir"] / "checkpoints" / f"global_step_{s}")
+                done[name] = {"kept": sorted(keep), "deleted": gone, "best": best}
+        pick = (self.state["steps"].get("pick_sft", {}).get("decision") or {}).get("model")
+        for group in self.sft_groups() if self.plan.get("sft_groups") else []:
+            model = self.lf_dir(group) / "model"
+            if not pick or not model.is_dir() or Path(pick).parent.resolve() != model.resolve():
+                continue  # an SFT this chain did not train, or not the picked group
+            gone = []
+            for epoch, path in epoch_checkpoints(model):
+                if path.resolve() != Path(pick).resolve():
+                    remove(path)
+                    gone.append(epoch)
+            for weights in list(model.glob("*.safetensors")) + list(model.glob("*.safetensors.index.json")):
+                remove(weights)
+            done[f"sft_{group}"] = {"kept": Path(pick).name, "deleted_epochs": gone}
+        self.state["retained"] = done
+        self.save()
 
     def variant_jobs(self, ev: Dict[str, Any], sets: Dict[str, Path],
                      models: Dict[str, Tuple[str, Optional[str], Sequence[str]]],
@@ -1055,6 +1298,9 @@ class Chain:
                 continue
             if self.plan.get("eval_only") and step not in EVAL_ONLY_STEPS:  # round 12: evaluation of existing models
                 self.mark(step, state="done", note="not planned (eval_only)")
+                continue
+            if self.plan.get("sft_only") and step in RL_STEPS:  # round 12 batch: SFT and its evaluation only
+                self.mark(step, state="done", note="not planned (sft_only)")
                 continue
             self.mark(step, state="running", started_utc=now(), error=None)
             try:
@@ -1134,6 +1380,22 @@ def render_markdown(state: Dict[str, Any]) -> str:
                     f"{cells[f]['success']:.2f}（{cells[f]['episodes']}）" if f in cells else "—" for f in families) + " |")
     for name, g in (state.get("guard_stops") or {}).items():
         lines += ["", f"**RL {name} 被自动停止**（{g.get('utc')}）：{g.get('reason')}"]
+    for name, d in ((state["steps"].get("rl_extend") or {}).get("decisions") or {}).items():
+        vals = "，".join(f"{k} 次 {v:.3f}" for k, v in (d.get("val") or {}).items())
+        lines += ["", f"**RL {name} 是否接着训**（{d.get('set')}：{vals}）："
+                      + (f"接着训到 {d['extend_to']} 次" if d.get("extend_to") else "不接着训")]
+    for name, r in (state.get("retained") or {}).items():
+        lines += ["", f"**保留规则 {name}：** " + (r["skipped"] if r.get("skipped") else
+                                                    f"留 {r.get('kept')}，删 {r.get('deleted', r.get('deleted_epochs'))}")]
+    queue = state.get("queue") or {}
+    if queue:
+        lines += ["", "| 任务 | sco 任务 | 池 | 排队（分钟） | 状态 |", "| --- | --- | --- | --- | --- |"]
+        for job_id, q in sorted(queue.items(), key=lambda kv: kv[1].get("created") or ""):
+            lines.append(f"| {q.get('what')} | {job_id} | {q.get('pool')} | {round((q.get('queued_s') or 0) / 60)} | "
+                         f"{'已开始' if q.get('started') else '排队中'} |")
+    for key, retries in (state.get("job_retries") or {}).items():
+        for k, r in enumerate(retries, 1):
+            lines += ["", f"**{key} 失败，第 {k} 次自动重新提交**（{r.get('utc')}）：{r.get('job_id')}；原因：{r.get('reason')}"]
     for name, retries in (state.get("startup_retries") or {}).items():
         for k, r in enumerate(retries, 1):
             lines += ["", f"**RL {name} 启动失败，第 {k} 次自动重新提交**（{r.get('utc')}）：{r.get('job_id')} → "
