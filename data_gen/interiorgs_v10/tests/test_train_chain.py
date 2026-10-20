@@ -540,6 +540,63 @@ class ChainTest(unittest.TestCase):
             self.assertIn("missed again", str(err.exception))
             self.assertEqual([c["ok"] for c in chain.state["signal_checks"]], [False, False])
 
+    def test_signal_check_on_mixed_share_only(self):
+        """Round 12 batch (RL from the original model): a signal check with only mixed_min ignores the training
+        success; without a fallback start model a miss stops RL with a clear reason."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def run(pattern):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply",
+                                 "rl": {"signal_check": {"at": 25, "mixed_min": 0.10}},
+                                 "rl_runs": {"as0": {}, "ad": {}}}, sleep=lambda s: None)
+
+                def prepare(run_dir, gpus, args, job_dir="job", pool=None):
+                    (run_dir / job_dir).mkdir(parents=True, exist_ok=True)
+
+                def submit(run_dir, job_dir="job"):
+                    (run_dir / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run_dir.name}-{job_dir}"}))
+
+                def status(run_dir, job_dir="job"):
+                    if job_dir == "job_renderer":
+                        return {"state": "RUNNING", "finished": False}
+                    d = run_dir / "rollout_data"
+                    if not d.is_dir():
+                        d.mkdir(parents=True)
+                        for step in range(1, 26):
+                            rows = [{"task_type": "fov_inclusion", "scene_id": f"s{t}", "gts": None, "traj_success": ok}
+                                    for t, oks in enumerate(pattern) for ok in oks]
+                            (d / f"{step}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+                        return {"state": "RUNNING", "finished": False}
+                    (run_dir / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"state": "SUCCEEDED", "finished": True}
+
+                def delete(run_dir, job_dir="job"):
+                    receipt = run_dir / job_dir / "submission.json"
+                    if receipt.exists():
+                        receipt.replace(receipt.with_name("submission_deleted.json"))
+
+                with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                    try:
+                        chain.rl()
+                        return chain.state["signal_checks"], None
+                    except T.ChainError as exc:
+                        return chain.state["signal_checks"], str(exc)
+
+        # 1 success in 80 episodes (1%), but 1 of 10 tasks mixed (10%): passes
+        rare = [[True] + [False] * 7] + [[False] * 8] * 9
+        checks, err = run(rare)
+        self.assertIsNone(err)
+        self.assertTrue(checks[0]["ok"])
+        self.assertAlmostEqual(checks[0]["runs"]["as0"]["success"], 1 / 80, places=4)
+        self.assertEqual(checks[0]["runs"]["as0"]["mixed_share"], 0.1)
+        checks, err = run([[False] * 8] * 10)  # nothing ever succeeds: no task is mixed
+        self.assertFalse(checks[0]["ok"])
+        self.assertIn("signal check missed, RL stopped (no fallback start model)", err)
+
     def test_variants_on_extra_sets_with_sft_epochs(self):
         """Round 11: SFT epoch checkpoints evaluated on a set of training tasks only (plan eval extra_sets)."""
         with tempfile.TemporaryDirectory() as tmp:

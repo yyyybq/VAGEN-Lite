@@ -761,7 +761,9 @@ class Chain:
                 return
             except SignalCheckFailed as exc:
                 fallback = self.plan.get("rl_fallback_model")
-                if not fallback or self.state.get("rl_model_override"):
+                if not fallback:  # round 12 batch: no fallback start model (RL from the original model)
+                    raise ChainError(f"signal check missed, RL stopped (no fallback start model): {exc}") from None
+                if self.state.get("rl_model_override"):
                     raise ChainError(f"signal check missed again, RL stopped: {exc}") from None
                 attempt = int(self.state.get("rl_attempt", 1))
                 self.archive_rl_runs(f"attempt{attempt}")
@@ -787,7 +789,8 @@ class Chain:
     def signal_check(self, runs: Dict[str, Dict[str, Any]]) -> None:
         """Plan "rl"."signal_check": once every run has its first ``at`` updates, each run's training success must be
         within [success_min, success_max] and its mixed share at least mixed_min; the result is kept in
-        state["signal_checks"]; a miss raises SignalCheckFailed.  Checked once per attempt."""
+        state["signal_checks"]; a miss raises SignalCheckFailed.  Checked once per attempt.  Round 12 batch: a bound
+        the check leaves out is not checked (RL from the original model: only mixed_min)."""
         check = (self.plan.get("rl") or {}).get("signal_check")
         if not check:
             return
@@ -802,8 +805,9 @@ class Chain:
             if not set(range(1, at + 1)) <= have:
                 return
             b = block_stats(d, block=at)[f"1-{at}"]
-            ok = (float(check["success_min"]) <= b["success"] <= float(check["success_max"])
-                  and b["mixed_share"] >= float(check["mixed_min"]))
+            lo, hi, mixed = check.get("success_min"), check.get("success_max"), check.get("mixed_min")
+            ok = ((lo is None or b["success"] >= float(lo)) and (hi is None or b["success"] <= float(hi))
+                  and (mixed is None or b["mixed_share"] >= float(mixed)))
             stats[name] = {k: b[k] for k in ("success", "mixed_share", "episodes", "tasks", "reward_mean")}
             stats[name]["ok"] = bool(ok)
         rec = {"attempt": attempt, "model": str(self.sft_model()), "at": at, "check": dict(check), "runs": stats,
