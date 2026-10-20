@@ -125,6 +125,16 @@ def done_label(rd: Path) -> str:
     return "done_flagged: short run" if chk.get("short_run") else "done"
 
 
+MOVE_AFTER_S = 1800  # 2026-10-20: a job still waiting for a card on h800 after this long moves to zoetrope (once)
+
+
+def waiting_too_long(receipt: Path, state: str, now: float | None = None) -> bool:
+    rec = json.loads(receipt.read_text())
+    started = datetime.datetime.fromisoformat(rec["utc"]).timestamp()
+    now = time.time() if now is None else now
+    return state in J.WAITING and rec.get("pool", J.POOL) == "h800" and now - started > MOVE_AFTER_S
+
+
 def step(stage: str, items: list[tuple[str, Item]]) -> dict:
     status = {}
     n_active = len(J.active())
@@ -132,6 +142,12 @@ def step(stage: str, items: list[tuple[str, Item]]) -> dict:
         receipt = it.run_dir / "job" / "submission.json"
         if receipt.exists():
             st = J.status(it.run_dir)
+            if waiting_too_long(receipt, st["state"]):
+                old = J.delete(it.run_dir)
+                if old["delete_rc"] == 0:
+                    J.submit(it.run_dir, it.name, it.command, {}, also_own=it.also_own, pool="zoetrope")
+                    status[key] = f"moved to zoetrope (waited on h800 as {old['job_id']})"
+                    continue
             if st["state"] == "SUCCEEDED" and st["exit_code"] == "0":
                 try:
                     it.collect(it.run_dir)
@@ -178,7 +194,7 @@ def main() -> None:
             status = {"error": traceback.format_exc()}
         out.write_text(json.dumps({"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                                    "items": status}, indent=1) + "\n")
-        live = [v for v in status.values() if v.startswith(("pending", "running", "submitted"))]
+        live = [v for v in status.values() if v.startswith(("pending", "running", "submitted", "moved"))]
         if "error" not in status and not live:
             break
         time.sleep(args.interval)

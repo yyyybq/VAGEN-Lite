@@ -6,7 +6,8 @@
     python -m eval_external.sco.job active                    # our jobs that are not finished
 
 Rules (decided 2026-10-18): pool h800, one H800 per job, at most MAX_ACTIVE of our jobs not finished at once
-(the round-11 training chain runs on zoetrope).  Every job is recorded in ROOT/sco_jobs.jsonl.  The job runs as
+(the round-11 training chain runs on zoetrope).  2026-10-20: a job that waits for a card on h800 may be moved to
+zoetrope (sco/queue.py does it after MOVE_AFTER_S), still within MAX_ACTIVE.  Every job is recorded in ROOT/sco_jobs.jsonl.  The job runs as
 root in the container; launch.sh hands RUN_DIR and LMUData back to the user when it ends.  The command runs
 with the eval-external conda env, offline Hugging Face (everything is downloaded on the login node first) and
 the worktree as working directory.
@@ -31,8 +32,10 @@ SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
 IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"   # same image as the training jobs
 MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
 POOL = "h800"
+POOLS = ("h800", "zoetrope")  # zoetrope only for jobs moved after waiting on h800 (2026-10-20)
 SPEC = "N4lS.Iq.I80.1"  # one H800, 14 vCPU
 MAX_ACTIVE = 4
+WAITING = {"STARTING", "QUEUEING", "PENDING"}  # submitted, no card yet
 OWNER = "20325:20325"  # yinbaiqiao
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED", "NOT_FOUND"}
 LEDGER = ROOT / "sco_jobs.jsonl"
@@ -94,7 +97,9 @@ def active() -> list[dict]:
 
 
 def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_limit: bool = False,
-           also_own: tuple[str, ...] = ()) -> str:
+           also_own: tuple[str, ...] = (), pool: str = POOL) -> str:
+    if pool not in POOLS:
+        raise SystemExit(f"pool {pool} not allowed ({POOLS})")
     job = run / "job"
     receipt = job / "submission.json"
     if receipt.exists():
@@ -107,7 +112,7 @@ def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_
     (job / "launch.sh").write_text(launch_script(run, command, env, also_own))
     (job / "launch.sh").chmod(0o755)
     job_name = ("evalext-" + re.sub(r"[^a-z0-9-]+", "-", name.lower())).strip("-")[:60]
-    cmd = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={POOL}", f"--job-name={job_name}",
+    cmd = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={pool}", f"--job-name={job_name}",
            "--priority=HIGHEST", "--quota-type=reserved", f"--container-image-url={IMAGE}",
            f"--storage-mount={MOUNT}", "--training-framework=pytorch", "--worker-nodes=1",
            f"--worker-spec={SPEC}", f"--command=bash {job}/launch.sh"]
@@ -117,8 +122,8 @@ def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_
     if res.returncode != 0 or len(ids) != 1:
         raise SystemExit(f"submission uncertain; read {job}/submit.log and the job list before any retry")
     job_id = ids.pop()
-    rec = {"utc": now(), "job_id": job_id, "name": job_name, "run": str(run), "pool": POOL, "spec": SPEC,
-           "command": command}
+    rec = {"utc": now(), "job_id": job_id, "name": job_name, "run": str(run), "pool": pool, "spec": SPEC,
+           "command": command, "env": env, "also_own": list(also_own)}
     receipt.write_text(json.dumps(rec, indent=1) + "\n")
     with open(LEDGER, "a") as f:
         f.write(json.dumps(rec) + "\n")

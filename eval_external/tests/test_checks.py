@@ -89,6 +89,20 @@ def test_esi_action_rule():
         "no_json", "no_answer", "no_confidence"]
 
 
+def test_waiting_jobs_move_to_zoetrope_once(tmp_path):
+    from eval_external.sco import queue as Q
+
+    t0 = datetime.datetime(2026, 10, 20, 7, 0, tzinfo=datetime.timezone.utc)
+    r = tmp_path / "submission.json"
+    r.write_text(json.dumps({"utc": t0.isoformat(), "pool": "h800"}))
+    later = t0.timestamp() + Q.MOVE_AFTER_S + 1
+    assert Q.waiting_too_long(r, "STARTING", later) and Q.waiting_too_long(r, "QUEUEING", later)
+    assert not Q.waiting_too_long(r, "RUNNING", later)
+    assert not Q.waiting_too_long(r, "STARTING", t0.timestamp() + 60)
+    r.write_text(json.dumps({"utc": t0.isoformat(), "pool": "zoetrope"}))
+    assert not Q.waiting_too_long(r, "STARTING", later)  # never moved back
+
+
 def test_done_label_reads_any_results_file(tmp_path):
     from eval_external.sco import queue as Q
 
