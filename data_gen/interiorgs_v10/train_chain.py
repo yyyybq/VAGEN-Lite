@@ -744,8 +744,10 @@ class Chain:
             if rl.get("exclude"):
                 args += ["--exclude", str(rl["exclude"])]
             for key, flag in (("opt_package", "--opt-package"), ("candidates", "--candidates"),
-                              ("target_groups", "--target-groups"), ("rollouts", "--rollouts")):
-                if rl.get(key) is not None:  # round 11: the optimisation package
+                              ("target_groups", "--target-groups"), ("rollouts", "--rollouts"),
+                              ("curriculum_easy_updates", "--curriculum-easy-updates"),
+                              ("curriculum_max_dstar", "--curriculum-max-dstar")):
+                if rl.get(key) is not None:  # round 11: the optimisation package; round 12 batch: easy tasks first
                     args += [flag, str(rl[key])]
             self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
 

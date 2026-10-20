@@ -782,6 +782,13 @@ class ChainTest(unittest.TestCase):
             for args in (ps0, pd):
                 self.assertNotIn("--ppo-template", args)
                 self.assertNotIn("--reward-preset", args)
+                self.assertNotIn("--curriculum-easy-updates", args)
+            # round 12 batch: the easy-first options reach rl-config
+            chain.plan["rl"].update(curriculum_easy_updates=50, curriculum_max_dstar=3)
+            chain.rl_config()
+            ps0 = calls[str(root / "rl_ps0")]
+            self.assertEqual((ps0[ps0.index("--curriculum-easy-updates") + 1], ps0[ps0.index("--curriculum-max-dstar") + 1]),
+                             ("50", "3"))
 
     def test_eval_only_plan(self):
         """Round 12: an eval_only plan runs check_code and evaluate only, on the listed models and variants."""

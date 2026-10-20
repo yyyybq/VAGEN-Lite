@@ -621,6 +621,19 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                                     getattr(args, "target_groups", None), getattr(args, "rollouts", None))
         for key, value in package.items():
             _set(ppo, key, value)
+    curriculum = None
+    if getattr(args, "curriculum_easy_updates", None):  # round 12 batch: easy tasks first (vagen/curriculum_sampler)
+        max_d = int(getattr(args, "curriculum_max_dstar", None) or 3)
+        easy = sum(1 for r in parts["train"] if int(r["difficulty"]["d_star"]) <= max_d)
+        need = int(args.curriculum_easy_updates) * int(ppo["data"]["train_batch_size"])
+        if need > easy:
+            raise SystemExit(f"{args.curriculum_easy_updates} easy updates need {need} tasks with d* <= {max_d}, "
+                             f"the train rows have {easy}")
+        curriculum = {"class_path": "pkg://vagen.curriculum_sampler", "class_name": "DifficultyCurriculumSampler",
+                      "easy_updates": int(args.curriculum_easy_updates), "max_dstar": max_d}
+        _set(ppo, "data.sampler", curriculum)
+        _set(ppo, "data.dataloader_num_workers", 0)  # verl's rule for a custom sampler
+        curriculum = dict(curriculum, easy_tasks=easy, easy_draws=need)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
@@ -634,7 +647,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "reserve_rows_skipped": reserve_skipped,
               "task_pool": pool,
               "opt_package": getattr(args, "opt_package", None), "opt_package_overrides": package,
-              "standard": standard or None, "ppo_template": str(args.ppo_template),
+              "standard": standard or None, "ppo_template": str(args.ppo_template), "curriculum": curriculum,
               # the task order (data.seed); vLLM's sampling seed is 0 in this verl (RolloutConfig has no seed field)
               "seed": {"data": (ppo.get("data") or {}).get("seed"), "rollout": 0},
               "sft_tasks_checked": len(sft_ids), "sft_overlap": len(overlap),
@@ -823,6 +836,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--seed", type=int, default=None,
                    help="round 12: the run's seed, the order of the tasks (data.seed); the template's otherwise")
+    c.add_argument("--curriculum-easy-updates", type=int, default=None,
+                   help="round 12 batch: the first N updates draw only tasks with d* <= --curriculum-max-dstar")
+    c.add_argument("--curriculum-max-dstar", type=int, default=None, help="the easy tasks' largest d* (default 3)")
     c.add_argument("--standard", default=None,
                    help="round 12: a named standard configuration (configs/rl_standards.json) fixing the recipe's options")
     c.add_argument("--out", required=True)

@@ -350,6 +350,43 @@ class TrainingPrepTest(unittest.TestCase):
         with self.assertRaises(SystemExit):  # neither a template nor a standard
             config("rl_no_template")
 
+    def test_rl_config_curriculum(self):
+        """Round 12 batch: --curriculum-easy-updates N puts the easy-first sampler into the PPO config (the first N
+        updates draw only tasks with d* <= max_dstar) and turns the dataloader workers off (verl's rule); it refuses
+        when the train rows have too few easy tasks."""
+        import yaml
+
+        sft = self.root / "sft_rl_curr"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        rows = [json.loads(l) for l in (sft / "rows.jsonl").read_text().splitlines() if l.strip()]
+        for r in rows:  # the train rows become reserve rows (what the standard trains on)
+            r["reserve"] = r["split"] == "train"
+        (sft / "rows_reserve.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        easy = sum(1 for r in rows if r["split"] == "train" and int(r["difficulty"]["d_star"]) <= 3)
+        self.assertGreater(easy, 0)
+
+        def config(out_name, **kw):
+            args = dict(rows=str(sft / "rows_reserve.jsonl"), gs_root="/ply", model="/m", name="t", standard="v10_p1_S0",
+                        run_root=str(self.root / f"run_{out_name}"), val_limit=1, trial=False, out=str(self.root / out_name))
+            args.update(kw)
+            TP.cmd_rl_config(Namespace(**args))
+            return (yaml.safe_load((self.root / out_name / "ppo.yaml").read_text()),
+                    json.loads((self.root / out_name / "rl_config_report.json").read_text()))
+
+        # one candidate per update here, so that the synthetic rows have enough easy tasks
+        ppo, report = config("rl_curr", curriculum_easy_updates=easy, curriculum_max_dstar=3, candidates=1, target_groups=1)
+        self.assertEqual(ppo["data"]["sampler"], {"class_path": "pkg://vagen.curriculum_sampler",
+                                                  "class_name": "DifficultyCurriculumSampler", "easy_updates": easy,
+                                                  "max_dstar": 3})
+        self.assertEqual(ppo["data"]["dataloader_num_workers"], 0)
+        self.assertEqual((report["curriculum"]["easy_tasks"], report["curriculum"]["easy_draws"]), (easy, easy))
+        with self.assertRaises(SystemExit):  # more easy draws than easy tasks
+            config("rl_curr_bad", curriculum_easy_updates=easy + 1, candidates=1, target_groups=1)
+        ppo, report = config("rl_nocurr")  # without the option nothing changes
+        self.assertIsNone(report["curriculum"])
+        self.assertNotEqual((ppo["data"].get("sampler") or {}).get("class_name"), "DifficultyCurriculumSampler")
+
     def test_data_scale_subsets(self):
         """Round 12 batch: nested train-scene subsets (fixed seed) with all formal tasks of their scenes for SFT and
         only their scenes' reserve tasks for RL; an arm with one subset's task count over every scene."""
