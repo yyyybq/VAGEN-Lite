@@ -1081,6 +1081,62 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(submitted, ["val__r1", "val__r1"])
             self.assertEqual(len(chain.state["job_retries"]["evaluate/val__r1"]), 1)
 
+    def test_extension_by_validation(self):
+        """Round 12 batch (RL from the original model): after the endpoint, the checkpoints are evaluated on the
+        validation set; a run whose endpoint checkpoint is the best and min_gain above the one at "vs" goes on to
+        "to", the other stops; evaluate covers each run up to its own last update."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 300, "select_by": "val",
+                             "eval_sets": {"val": str(root / "val"), "test": str(root / "test")}, "eval": {"every": 50},
+                             "rl": {"extend": {"to": 600, "vs": 200, "min_gain": 0.02}},
+                             "rl_runs": {"as0": {}, "ad": {}}}, sleep=lambda s: None)
+            curves = {"as0": [0.05, 0.08, 0.10, 0.12, 0.13, 0.15],   # still rising: 0.15 - 0.12 >= 0.02
+                      "ad": [0.05, 0.08, 0.10, 0.14, 0.13, 0.15]}   # 0.15 - 0.14 < 0.02: stop
+            for name in curves:
+                for s in range(50, 301, 50):
+                    (root / f"rl_run_{name}" / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface").mkdir(parents=True)
+            evaluated = {}
+
+            def eval_jobs(step, jobs):
+                evaluated.update(jobs)
+                for key, (d, result, model, fmt, opts) in jobs.items():
+                    name, s = result.rsplit("_", 1)
+                    rate = curves[name][int(s) // 50 - 1]
+                    out = d / result
+                    out.mkdir(parents=True, exist_ok=True)
+                    rows = [{"success": i < round(rate * 100), "task_type": "fov_inclusion", "d_star": 3, "turns": 1,
+                             "actions": 1, "collisions": 0, "invalid_turns": 0, "actions_to_success": 1} for i in range(100)]
+                    (out / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+                    (out / "done.json").write_text("{}")
+
+            chain.eval_jobs = eval_jobs
+            extended = []
+            chain._ppo_runs = lambda step, endpoint, only=None: extended.append((step, endpoint, sorted(only or [])))
+            chain.rl_extend()
+            self.assertEqual(sorted(evaluated), sorted(f"val__{n}_{s:03d}" for n in curves for s in range(50, 301, 50)))
+            decisions = chain.state["steps"]["rl_extend"]["decisions"]
+            self.assertEqual((decisions["as0"]["extend_to"], decisions["ad"]["extend_to"]), (600, None))
+            self.assertEqual(extended, [("rl_extend", 600, ["as0"])])
+            self.assertEqual((chain.final_update("as0"), chain.final_update("ad"), chain.final_update()), (600, 300, 300))
+            self.assertIn("**RL as0 是否接着训**", T.render_markdown(chain.state))
+            self.assertIn("接着训到 600 次", T.render_markdown(chain.state))
+            chain.rl_extend()  # decided once: no second evaluation round
+            self.assertEqual(len(extended), 2)
+            for s in range(350, 601, 50):
+                (root / "rl_run_as0" / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface").mkdir(parents=True)
+            jobs = {}
+            chain.eval_jobs = lambda step, j: jobs.update(j)
+            chain.tables = lambda: None
+            chain.evaluate()
+            self.assertIn("test__as0_600", jobs)
+            self.assertIn("test__ad_300", jobs)
+            self.assertNotIn("test__ad_350", jobs)
+        with tempfile.TemporaryDirectory() as tmp:  # no extension rule: the legacy step, not planned
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 300, "rl_runs": {"p1s0": {}}}, sleep=lambda s: None)
+            chain.rl_extend()
+            self.assertEqual(chain.state["steps"]["rl_extend"]["note"], "not planned")
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)

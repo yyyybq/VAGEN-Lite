@@ -80,6 +80,12 @@ its latest checkpoint; together with the start-up resubmissions at most N per ru
 and the trainer are resubmitted), an SFT job (its model folder is moved aside first) and an evaluation job (it goes
 on from the results already written).  Every resubmission is kept in state["job_retries"] and shown in PROGRESS.md.
 
+Round 12 batch (RL from the original model): a run whose plan "rl" has "extend": {"to": 600, "vs": 200,
+"min_gain": 0.02} is continued from its endpoint checkpoint to "to" when, on the validation set (the evaluation
+script; "select_by"), its endpoint checkpoint is the best of its checkpoints and at least min_gain above the one at
+"vs" (still rising clearly).  The decision is made once per run in the rl_extend step; evaluate then covers each
+run's checkpoints up to its own last update.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -924,14 +930,14 @@ class Chain:
             raise SignalCheckFailed(f"update {at}, start {rec['model']}: " + "; ".join(
                 f"{n} success {s['success']:.3f} mixed {s['mixed_share']:.3f}" for n, s in stats.items()))
 
-    def _ppo_runs(self, step: str, endpoint: int) -> None:
+    def _ppo_runs(self, step: str, endpoint: int, only: Optional[set] = None) -> None:
         """Round 11: every run of plan "rl_runs" at the same time (its render service on 1 card, PPO on 8), up to
         ``endpoint``; a run whose endpoint checkpoint exists is skipped.  A failed run does not stop the others;
         the step fails after all ended if any failed."""
         from . import job_sco
 
         runs = {n: r for n, r in self.rl_runs().items()
-                if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir()}
+                if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir() and (only is None or n in only)}
         for name, run in runs.items():
             d = run["run_dir"]
             d.mkdir(parents=True, exist_ok=True)
@@ -1094,7 +1100,17 @@ class Chain:
         if not (run / "checkpoints" / f"global_step_{endpoint}").is_dir():
             raise ChainError(f"no checkpoint at update {endpoint}")
 
+    def extend_runs(self) -> Dict[str, Dict[str, Any]]:
+        """Round 12 batch: the RL runs with an extension rule (plan rl "extend")."""
+        if not self.plan.get("rl_runs"):
+            return {}
+        return {n: r for n, r in self.rl_runs().items() if (r["rl"].get("extend") or {}).get("to")}
+
     def rl_extend(self) -> None:
+        runs = self.extend_runs()
+        if runs:  # round 12 batch: per run, on the validation set
+            self._extend_by_validation(runs)
+            return
         target = self.plan.get("extend_to")
         if not target:
             self.mark("rl_extend", note="not planned")
@@ -1109,8 +1125,44 @@ class Chain:
         if decision["extend_to"]:
             self._ppo("rl_extend", int(decision["extend_to"]), suffix="_ext")
 
-    def final_update(self) -> int:
-        decision = self.state["steps"].get("rl_extend", {}).get("decision") or {}
+    def _extend_by_validation(self, runs: Dict[str, Dict[str, Any]]) -> None:
+        step = self.state["steps"]["rl_extend"]
+        decisions = step.get("decisions")
+        if decisions is None:  # decided once; a resumed chain keeps the decisions
+            sets = self.eval_sets()
+            select = self.plan.get("select_by") or next(iter(sets))
+            vdir = sets[select]
+            every = int((self.plan.get("eval") or {}).get("every", 50))
+            end = int(self.plan["endpoint"])
+            options = list((self.plan.get("eval") or {}).get("options") or [])
+            jobs = {}
+            for name, run in runs.items():
+                for s in range(every, end + 1, every):
+                    hf = run["run_dir"] / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface"
+                    if hf.is_dir():
+                        jobs[f"{select}__{name}_{s:03d}"] = (vdir, f"{name}_{s:03d}", str(hf), None, options)
+            self.eval_jobs("rl_extend", jobs)  # the same results the evaluate step would write
+            decisions = {}
+            for name, run in runs.items():
+                rule = run["rl"]["extend"]
+                vals = {s: success_rate(vdir / f"{name}_{s:03d}") for s in range(every, end + 1, every)}
+                vals = {s: v for s, v in vals.items() if v is not None}
+                last, ref = vals.get(end), vals.get(int(rule.get("vs", end - 100)))
+                keep = (last is not None and ref is not None and last >= max(vals.values())
+                        and last - ref >= float(rule.get("min_gain", 0.02)))
+                decisions[name] = {"set": select, "val": {str(k): v for k, v in vals.items()}, "rule": dict(rule),
+                                   "extend_to": int(rule["to"]) if keep else None}
+            self.mark("rl_extend", decisions=decisions)
+        targets = {n: d["extend_to"] for n, d in decisions.items() if d.get("extend_to")}
+        if targets:
+            self._ppo_runs("rl_extend", max(targets.values()), only=set(targets))
+
+    def final_update(self, run_name: Optional[str] = None) -> int:
+        step = self.state["steps"].get("rl_extend", {})
+        per_run = (step.get("decisions") or {}).get(run_name) if run_name is not None else None
+        if per_run and per_run.get("extend_to"):  # round 12 batch: a run continued past the endpoint
+            return int(per_run["extend_to"])
+        decision = step.get("decision") or {}
         return int(decision.get("extend_to") or self.plan["endpoint"])
 
     def evaluate(self) -> None:
@@ -1125,7 +1177,7 @@ class Chain:
         rl_names: List[str] = []
         for run_name, run in ({} if self.plan.get("eval_only") or self.plan.get("sft_only") else self.rl_runs()).items():
             ckpts = run["run_dir"] / "checkpoints"
-            for s in range(every, self.final_update() + 1, every):
+            for s in range(every, self.final_update(run_name or None) + 1, every):
                 name = f"{run_name}_{s:03d}" if run_name else f"v10_rl_{s:03d}"
                 hf = ckpts / f"global_step_{s}" / "actor" / "huggingface"
                 if run_name in (self.state.get("guard_stops") or {}) and not hf.is_dir():
@@ -1274,6 +1326,10 @@ def render_markdown(state: Dict[str, Any]) -> str:
                     f"{cells[f]['success']:.2f}（{cells[f]['episodes']}）" if f in cells else "—" for f in families) + " |")
     for name, g in (state.get("guard_stops") or {}).items():
         lines += ["", f"**RL {name} 被自动停止**（{g.get('utc')}）：{g.get('reason')}"]
+    for name, d in ((state["steps"].get("rl_extend") or {}).get("decisions") or {}).items():
+        vals = "，".join(f"{k} 次 {v:.3f}" for k, v in (d.get("val") or {}).items())
+        lines += ["", f"**RL {name} 是否接着训**（{d.get('set')}：{vals}）："
+                      + (f"接着训到 {d['extend_to']} 次" if d.get("extend_to") else "不接着训")]
     queue = state.get("queue") or {}
     if queue:
         lines += ["", "| 任务 | sco 任务 | 池 | 排队（分钟） | 状态 |", "| --- | --- | --- | --- | --- |"]
