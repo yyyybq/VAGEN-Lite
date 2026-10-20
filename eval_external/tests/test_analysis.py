@@ -14,6 +14,19 @@ def test_ratio_stats_counts_and_shares():
     assert ratio_stats([(None, 1.0)]) == {"n": 1, "n_no_number_or_zero": 1}
 
 
+def test_mindcube_text_rule():
+    from eval_external.qa_transfer.mindcube_text_rule import rule_letter
+
+    c = ["A. Diagonally forward and left", "B. Directly right", "C. Yes", "D. Yes"]
+    assert rule_letter("<answer>Directly right</answer>", c) == "B"    # text of exactly one option
+    assert rule_letter("<answer>Directly right.</answer>", c) == "B"   # one trailing period dropped
+    assert rule_letter("<answer>B. Directly right</answer>", c) is None  # a letter answer: official result stands
+    assert rule_letter("<answer>B</answer>", c) is None and rule_letter("(B)", c) is None
+    assert rule_letter("<answer>Yes</answer>", c) is None              # matches two options
+    assert rule_letter("<answer>directly right</answer>", c) is None   # case-sensitive
+    assert rule_letter("Directly right", c) == "B"                     # no tags: the whole reply
+
+
 def test_mcnemar_and_paired():
     assert mcnemar_exact(0, 0) == 1.0
     assert abs(mcnemar_exact(0, 6) - 2 / 64) < 1e-12        # all six discordant pairs one way
