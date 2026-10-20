@@ -98,6 +98,11 @@ those pools (where a single card is found quickly); "renderer_pool" puts those s
 decision of 2026-10-20: zoe-cf-render, job_sco.RENDER_POOLS).  A trainer submitted before the switch keeps its job
 and place in the queue (only its launch script gets the wait).
 
+Round 12 batch (render speed): plan "rl" "renderer_workers": N gives a run's render service N worker processes (one
+scene each) taking N requests at a time instead of 12, so the scenes of an update stay loaded instead of being read
+again from the shared disk for about every second request.  A render service still waiting for its card gets the
+new count in its launch script.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -955,7 +960,7 @@ class Chain:
         def submit_renderer(name: str, d: Path, pool: Optional[str] = None) -> None:
             for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
                 (d / f).unlink(missing_ok=True)
-            job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=pool or self.job_pool(name))
+            job_sco.prepare(d, 1, self.renderer_args(runs[name]), job_dir="job_renderer", pool=pool or self.job_pool(name))
             job_sco.submit(d, job_dir="job_renderer")
 
         def trainer_pool(d: Path) -> Optional[str]:  # the render service goes where its trainer runs
@@ -987,6 +992,15 @@ class Chain:
                 old = json.loads(prepared.read_text()) if prepared.is_file() else {}
                 if old.get("mode_args") != self.trainer_args(run, endpoint):
                     job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
+                                    pool=old.get("pool") or self.job_pool(name))
+            if run["rl"].get("renderer_workers") and (d / "job_renderer" / "submission.json").exists():
+                # a render service submitted before plan rl "renderer_workers" was set, still waiting for its card: its
+                # launch script (read when the job starts) gets the new count; the job keeps its place in the queue
+                prepared = d / "job_renderer" / "prepared.json"
+                old = json.loads(prepared.read_text()) if prepared.is_file() else {}
+                if (old.get("mode_args") != self.renderer_args(run)
+                        and job_sco.status(d, "job_renderer").get("state") in job_sco.WAITING):
+                    job_sco.prepare(d, 1, self.renderer_args(run), job_dir="job_renderer",
                                     pool=old.get("pool") or self.job_pool(name))
         self.mark(step, job_ids={f"{n}/{j}": json.loads((r["run_dir"] / j / "submission.json").read_text())["job_id"]
                                  for n, r in runs.items() for j in ("job_renderer", "job_rl")
@@ -1054,7 +1068,8 @@ class Chain:
                         for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
                             (d / f).unlink(missing_ok=True)
                         if not lazy:
-                            job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.job_pool(name))
+                            job_sco.prepare(d, 1, self.renderer_args(run), job_dir="job_renderer",
+                                            pool=self.job_pool(name))
                             job_sco.submit(d, job_dir="job_renderer")
                         job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
                                         pool=self.job_pool(name))
@@ -1129,6 +1144,14 @@ class Chain:
         the trainer's pool."""
         opt = run["rl"].get("renderer_when_trainer_runs")
         return opt.get("renderer_pool") if isinstance(opt, dict) else None
+
+    def renderer_args(self, run: Dict[str, Any]) -> List[str]:
+        """The sco entry script's arguments for a run's render service.  Round 12 batch (a new option, the user's
+        request of 2026-10-20): plan rl "renderer_workers": N runs N worker processes (one scene each) taking N
+        requests at a time, so the scenes of an update stay loaded (with the default 12, an update of 24 scenes reloads
+        a scene file for about every second request); without it the script's default, 12."""
+        workers = run["rl"].get("renderer_workers")
+        return ["renderer", str(int(workers))] if workers else ["renderer"]
 
     def trainer_args(self, run: Dict[str, Any], endpoint: int, pool: Optional[str] = None) -> List[str]:
         """The sco entry script's arguments for a run's trainer (with the switch: how long it waits for its render

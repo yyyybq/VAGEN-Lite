@@ -1290,6 +1290,65 @@ class ChainTest(unittest.TestCase):
             (x["run_dir"] / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "h800"}))
             self.assertEqual(only.trainer_args(x, 50)[-1], str(T.RENDERER_WAIT_S))
 
+    def test_renderer_workers(self):
+        """Round 12 batch (a new option): plan rl "renderer_workers" gives the render services that many worker
+        processes (the entry script's renderer argument), for services submitted with the trainer or once it runs; a
+        service still waiting for its card gets the count in its launch script (job kept), a running one is left
+        alone; without the option the arguments are unchanged."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(T.Chain({"tr": tmp, "sft_dir": tmp, "rl_runs": {"x": {}}}).renderer_args(
+                {"rl": {}}), ["renderer"])
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "pool": "h800",
+                             "rl": {"renderer_workers": 32},
+                             "rl_runs": {"new": {}, "lazy": {"rl": {"renderer_workers": 32,
+                                                                 "renderer_when_trainer_runs": {"trainer_wait_s": 600}}},
+                                         "queued": {}, "running": {}}}, sleep=lambda s: None)
+            for name, state in (("queued", "STARTING"), ("running", "RUNNING")):  # submitted before the option
+                d = root / f"rl_run_{name}"
+                for j, args in (("job_rl", ["rl", str(root / f"rl_{name}"), "50"]), ("job_renderer", ["renderer"])):
+                    (d / j).mkdir(parents=True)
+                    (d / j / "submission.json").write_text(json.dumps({"job_id": f"pt-{name}-{j}", "state": state}))
+                    (d / j / "prepared.json").write_text(json.dumps({"pool": "zoetrope", "mode_args": args}))
+            trainer = {"new": iter(["RUNNING", "ok"]), "lazy": iter(["STARTING", "RUNNING", "ok"]),
+                       "queued": iter(["STARTING", "ok"]), "running": iter(["RUNNING", "ok"])}
+            prepared = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                prepared.append((run.name[7:], job_dir, list(args), pool))
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            def status(run, job_dir="job"):
+                sub = json.loads((run / job_dir / "submission.json").read_text())
+                if job_dir == "job_renderer":
+                    if (run / "STOP_RENDERER").exists():
+                        return {"job_id": sub["job_id"], "state": "SUCCEEDED", "finished": True}
+                    return {"job_id": sub["job_id"], "state": sub.get("state", "RUNNING"), "finished": False}
+                kind = next(trainer[run.name[7:]])
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": sub["job_id"], "state": "SUCCEEDED", "finished": True}
+                return {"job_id": sub["job_id"], "state": kind, "finished": False}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.rl()
+            renderers = {(n, tuple(a), p) for n, j, a, p in prepared if j == "job_renderer"}
+            self.assertEqual(renderers, {("new", ("renderer", "32"), "h800"), ("lazy", ("renderer", "32"), "h800"),
+                                         ("queued", ("renderer", "32"), "zoetrope")})  # "running" left alone
+            self.assertNotIn("running", {n for n, j, a, p in prepared})
+
     def test_waiting_for_the_renderer_is_not_startup_silence(self):
         """renderer_when_trainer_runs: a running trainer still waiting for its render service's address is not silent
         at start-up; silence counts from the address being written."""

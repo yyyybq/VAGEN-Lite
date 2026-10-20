@@ -5,7 +5,8 @@
 #   sft-trial  RUN LF_DIR [MAX_STEPS]   1 card : LLaMA-Factory through accelerate + FSDP (the formal path, 1 process)
 #   sft        RUN LF_DIR               8 cards: the formal SFT (FSDP, full fine-tune, vision tower frozen)
 #   rl-trial   RUN RL_DIR [ENDPOINT]    1 card : the 3DGS render service and PPO on the same card
-#   renderer   RUN                      1 card : the render service for a formal RL run (writes RUN/renderer_endpoint.txt)
+#   renderer   RUN [WORKERS]            1 card : the render service for a formal RL run (writes RUN/renderer_endpoint.txt);
+#                                        WORKERS worker processes and requests at a time (default 12)
 #   rl         RUN RL_DIR ENDPOINT [WAIT_S]  8 cards: PPO, waits up to WAIT_S (default 3600) s for RUN/renderer_endpoint.txt
 #   eval       RUN EVAL NAME MODEL [PROMPT_FORMAT|- [OPTION ...]]  1 card: the render service and vLLM; one greedy
 #                                        episode per task of EVAL/tasks.jsonl (data_gen/interiorgs_v10/evaluation.py),
@@ -52,12 +53,13 @@ export VLLM_USE_FLASHINFER_SAMPLER=1
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
 git -C "${WORKTREE}" rev-parse HEAD 2>/dev/null || cat "${WORKTREE}/.synced_commit" 2>/dev/null || true
 
-start_renderer() {  # $1 = gpu index; leaves renderer_pid and R1_RENDER_URL
+start_renderer() {  # $1 = gpu index, $2 = worker processes = requests at a time (default 12); leaves renderer_pid and R1_RENDER_URL
+  local workers=${2:-12}
   mkdir -p "${TORCH_EXTENSIONS_DIR}"
   [[ -d ${TORCH_EXTENSIONS_DIR}/gsplat_cuda ]] || cp -a "${VALIDATED_GSPLAT_CACHE}" "${TORCH_EXTENSIONS_DIR}/gsplat_cuda"
   bash examples/train/active_spatial/start_gs_render_http_service.sh \
     --gs-root "${GS_ROOT}" --host 0.0.0.0 --port 8915 --gpus "$1" \
-    --max-workers 12 --max-inflight 12 --admit-timeout 900 --conda-env "${ENV_ROOT}" \
+    --max-workers "${workers}" --max-inflight "${workers}" --admit-timeout 900 --conda-env "${ENV_ROOT}" \
     > "${RUN}/logs/renderer_service.log" 2>&1 &
   renderer_pid=$!
   for _ in $(seq 1 180); do
@@ -142,7 +144,9 @@ PY
     ;;
   renderer)
     export CUDA_VISIBLE_DEVICES=0
-    start_renderer 0
+    # round 12 batch: the chain's plan rl "renderer_workers" passes more worker processes (one scene each), so the
+    # scenes of an update stay loaded; default 12
+    start_renderer 0 "${3:-12}"
     printf 'http://%s:8915/render\n' "$(hostname -I | awk '{print $1}')" > "${RUN}/renderer_endpoint.tmp"
     mv "${RUN}/renderer_endpoint.tmp" "${RUN}/renderer_endpoint.txt"
     while [[ ! -e ${RUN}/STOP_RENDERER ]]; do kill -0 "${renderer_pid}"; sleep 10; done
