@@ -1,0 +1,75 @@
+{
+ "Q3VL4B": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/starVLA/playground/Pretrained_models/Qwen3-VL-4B-Instruct-Action",
+  "exists": true,
+  "checks": {
+   "tokenizer_files": [
+    "tokenizer.json"
+   ],
+   "tokenizer_config": true,
+   "image_processor": true,
+   "chat_template": "chat_template.jinja"
+  },
+  "problems": [],
+  "files": [
+   ".gitattributes",
+   "README.md",
+   "added_custom_token_id_map.json",
+   "added_tokens.json",
+   "chat_template.jinja",
+   "config.json",
+   "generation_config.json",
+   "merges.txt",
+   "model-00001-of-00002.safetensors",
+   "model-00002-of-00002.safetensors",
+   "model.safetensors.index.json",
+   "preprocessor_config.json",
+   "special_tokens_map.json",
+   "tokenizer.json",
+   "tokenizer_config.json",
+   "video_preprocessor_config.json",
+   "vocab.json"
+  ],
+  "config": {
+   "model_type": "qwen3_vl",
+   "architectures": [
+    "Qwen3VLForConditionalGeneration"
+   ],
+   "torch_dtype": "bfloat16",
+   "transformers_version": "4.57.0",
+   "hidden_size": 2560,
+   "num_hidden_layers": 36,
+   "vocab_size": 153984,
+   "tie_word_embeddings": true,
+   "vision_depth": 24,
+   "vision_out_hidden_size": 2560
+  },
+  "shards": 2,
+  "tensors": 713,
+  "params_total": 4443058688,
+  "bytes_total": 8886117376,
+  "per_dtype": {
+   "BF16": {
+    "tensors": 713,
+    "params": 4443058688,
+    "bytes": 8886117376
+   }
+  },
+  "params_by_group_and_dtype": {
+   "language": {
+    "BF16": 4027710976
+   },
+   "vision": {
+    "BF16": 415347712
+   }
+  },
+  "key_scheme": "new (model.language_model.* / model.visual.*)",
+  "embedding_shapes": {
+   "model.language_model.embed_tokens.weight": [
+    153984,
+    2560
+   ]
+  },
+  "format": "complete HF export"
+ }
+}

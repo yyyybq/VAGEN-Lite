@@ -1,0 +1,7 @@
+58G	/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/datasets/v1.0/target
+412G	/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/datasets/v1.0/pretrain
+23G	/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/robocasa/robocasa/models/assets
+7.1G	/mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/robocasa/robocasa/models/assets
+2.0G	/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/.venv
+19G	/mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/RLinf/venv_mnt
+8.1G	/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA

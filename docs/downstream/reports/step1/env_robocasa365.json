@@ -1,0 +1,42 @@
+{
+ "python": "3.13.14",
+ "executable": "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/.venv/bin/python",
+ "dists": {
+  "torch": "2.9.1+cpu",
+  "torchvision": "0.24.1+cpu",
+  "lerobot": "0.3.3",
+  "av": "18.1.0",
+  "mujoco": "3.3.1",
+  "robosuite": "1.5.2",
+  "robocasa": "1.0.1",
+  "numpy": "2.2.5",
+  "numba": "0.61.2",
+  "gymnasium": "1.3.0",
+  "PyOpenGL": "3.1.10",
+  "pyarrow": "25.0.1",
+  "pandas": "3.0.6",
+  "imageio": "2.37.4",
+  "opencv-python": "5.0.0.93",
+  "mink": "0.0.5"
+ },
+ "imports": {
+  "torch": "ok /mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/.venv/lib/python3.13/site-packages/torch/__init__.py",
+  "transformers": "FAIL ModuleNotFoundError: No module named 'transformers'",
+  "flash_attn": "FAIL ModuleNotFoundError: No module named 'flash_attn'",
+  "deepspeed": "FAIL ModuleNotFoundError: No module named 'deepspeed'",
+  "accelerate": "FAIL ModuleNotFoundError: No module named 'accelerate'",
+  "mujoco": "ok /mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/.venv/lib/python3.13/site-packages/mujoco/__init__.py",
+  "robosuite": "ok /mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/.venv/lib/python3.13/site-packages/robosuite/__init__.py",
+  "robocasa": "ok /mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/robocasa/robocasa/__init__.py",
+  "robocasa.utils.dataset_registry_utils": "ok /mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/robocasa/robocasa/utils/dataset_registry_utils.py",
+  "ray": "FAIL ModuleNotFoundError: No module named 'ray'",
+  "hydra": "FAIL ModuleNotFoundError: No module named 'hydra'",
+  "rlinf": "FAIL ModuleNotFoundError: No module named 'rlinf'",
+  "starVLA": "FAIL ModuleNotFoundError: No module named 'starVLA'",
+  "lerobot": "ok /mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/.venv/lib/python3.13/site-packages/lerobot/__init__.py",
+  "av": "ok /mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/.venv/lib/python3.13/site-packages/av/__init__.py",
+  "decord": "FAIL ModuleNotFoundError: No module named 'decord'",
+  "qwen_vl_utils": "FAIL ModuleNotFoundError: No module named 'qwen_vl_utils'"
+ },
+ "torch_cuda_build": null
+}

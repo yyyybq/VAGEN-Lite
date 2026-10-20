@@ -1,0 +1,42 @@
+{
+ "pretrain/atomic/human": {
+  "catalog": 65,
+  "complete": 63,
+  "missing": 2,
+  "other": 0,
+  "episodes": 7135,
+  "frames": 1433581
+ },
+ "pretrain/atomic/mg": {
+  "catalog": 60,
+  "complete": 57,
+  "missing": 3,
+  "other": 0,
+  "episodes": 507189,
+  "frames": 108379328
+ },
+ "pretrain/composite/human": {
+  "catalog": 235,
+  "complete": 230,
+  "missing": 2,
+  "other": 3,
+  "episodes": 24171,
+  "frames": 27039320
+ },
+ "target/atomic/human": {
+  "catalog": 18,
+  "complete": 18,
+  "missing": 0,
+  "other": 0,
+  "episodes": 9126,
+  "frames": 2231347
+ },
+ "target/composite/human": {
+  "catalog": 32,
+  "complete": 32,
+  "missing": 0,
+  "other": 0,
+  "episodes": 16181,
+  "frames": 12726552
+ }
+}

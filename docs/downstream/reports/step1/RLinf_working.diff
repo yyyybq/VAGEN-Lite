@@ -1,0 +1,85 @@
+diff --git a/rlinf/models/embodiment/starvla/__init__.py b/rlinf/models/embodiment/starvla/__init__.py
+index d5e6af2..cd863e9 100644
+--- a/rlinf/models/embodiment/starvla/__init__.py
++++ b/rlinf/models/embodiment/starvla/__init__.py
+@@ -51,6 +51,11 @@ def get_model(
+         ValueError: If no checkpoint path is provided in 'cfg'.
+     """
+     logger = get_logger()
++    if str(getattr(cfg, "policy_setup", "")).lower() == "robocasa365":
++        if getattr(cfg, "action_stats_source", "minmax") != "minmax":
++            raise ValueError(
++                "RoboCasa365 StarVLA checkpoints require minmax action statistics"
++            )
+     model_path = getattr(cfg, "model_path", None)
+     if model_path is None:
+         raise ValueError(
+diff --git a/rlinf/models/embodiment/starvla/utils/action_space.py b/rlinf/models/embodiment/starvla/utils/action_space.py
+index d8f2f9c..03c23a2 100644
+--- a/rlinf/models/embodiment/starvla/utils/action_space.py
++++ b/rlinf/models/embodiment/starvla/utils/action_space.py
+@@ -22,6 +22,8 @@ from typing import Any, Optional
+ 
+ import numpy as np
+ 
++ROBOCASA365_ACTION_CONTRACT = "panda_omron_continuous_minmax_v1"
++
+ 
+ def resolve_action_norm_stats(
+     starvla_model: Any,
+@@ -180,6 +182,33 @@ def unnormalize_actions_for_env(
+             "Set cfg.unnorm_key=None to use normalized actions directly."
+         )
+ 
++    if policy_setup is not None and str(policy_setup).lower() == "robocasa365":
++        # PandaOmronRoboCasa365DataConfig uses continuous min_max on ALL
++        # twelve dimensions, including gripper and control mode. Match its
++        # Normalizer.inverse, without the generic LIBERO gripper threshold.
++        actions = np.asarray(normalized_actions, dtype=np.float32)
++        low = np.asarray(action_norm_stats["q01"], dtype=np.float32)
++        high = np.asarray(action_norm_stats["q99"], dtype=np.float32)
++        mask = np.asarray(action_norm_stats["mask"], dtype=bool)
++        if (
++            actions.shape[-1] != 12
++            or low.shape != (12,)
++            or high.shape != (12,)
++            or mask.shape != (12,)
++            or not mask.all()
++        ):
++            raise ValueError(
++                "RoboCasa365 requires twelve continuously normalized action dimensions"
++            )
++        if (
++            not np.isfinite(actions).all()
++            or not np.isfinite(low).all()
++            or not np.isfinite(high).all()
++            or np.any(high < low)
++        ):
++            raise ValueError("Invalid RoboCasa365 actions or normalization statistics")
++        return (actions + 1) / 2 * (high - low) + low
++
+     try:
+         from starVLA.model.tools import FrameworkTools
+     except ImportError as exc:
+diff --git a/tests/unit_tests/test_models.py b/tests/unit_tests/test_models.py
+index fc60e2d..dbf605e 100644
+--- a/tests/unit_tests/test_models.py
++++ b/tests/unit_tests/test_models.py
+@@ -353,6 +353,17 @@ def test_starvla_action_stats_require_a_norm_stats_mapping():
+         )
+ 
+ 
++def test_starvla_robocasa_preserves_continuous_gripper_and_control_mode():
++    action_space = _load_starvla_util("action_space")
++    stats = {"q01": -np.ones(12), "q99": np.ones(12), "mask": np.ones(12, dtype=bool)}
++    actions = np.linspace(-1.2, 1.2, 24, dtype=np.float32).reshape(1, 2, 12)
++    result = action_space.unnormalize_actions_for_env(actions, stats, "robocasa365")
++    np.testing.assert_allclose(result, actions, atol=1e-6)
++    stats["mask"][6] = False
++    with pytest.raises(ValueError, match="continuous"):
++        action_space.unnormalize_actions_for_env(actions, stats, "robocasa365")
++
++
+ def test_starvla_env_actions_keep_their_shape_and_map_the_libero_gripper(monkeypatch):
+     action_space = _load_starvla_util("action_space")
+     received_shapes = []

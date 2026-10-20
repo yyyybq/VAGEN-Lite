@@ -1,0 +1,18 @@
+# sco acp jobs list, workspace aigc, 3 pages x 500 = 1500 jobs created 2026-09-30T17:31:11Z .. 2026-10-20T11:17:46Z; filtered on starvla|robocasa|rlinf|downstream|navigatekitchen
+create_time	job_id	name	state	pool
+2026-10-01T02:51:17Z	pt-2av31dl7	starvla_nk_qwenoft_20261001_h800_8gpu	SUCCEEDED	h800
+2026-10-02T20:43:25Z	pt-vsvqp1z7	starvla_mobile_contract_smoke_20261002	FAILED	h800
+2026-10-02T20:48:04Z	pt-b2dlso6g	starvla_mobile_contract_smoke_egl_20261002	FAILED	h800
+2026-10-02T20:58:05Z	pt-xkffg3xp	starvla_mobile_contract_smoke_osmesa_20261002	FAILED	h800
+2026-10-02T21:00:40Z	pt-f6ctnhzt	starvla_mobile_contract_smoke_client_20261002	SUCCEEDED	h800
+2026-10-16T06:45:52Z	pt-13kh2el1	cleanup-smoke-starvla_7b	SUCCEEDED	zoetrope
+2026-10-16T06:45:52Z	pt-c8ukfb85	cleanup-smoke-starvla_3b	SUCCEEDED	zoetrope
+2026-10-16T06:45:53Z	pt-ignjv4xu	cleanup-smoke-rlinf	SUCCEEDED	zoetrope
+2026-10-16T06:53:59Z	pt-fsqblfdn	cleanup-smoke-starvla_3b_single	SUCCEEDED	zoetrope
+2026-10-16T06:53:59Z	pt-udcgghvj	cleanup-smoke-starvla_7b_single	SUCCEEDED	zoetrope
+2026-10-16T06:55:22Z	pt-nhsxtxqj	cleanup-smoke-rlinf2	SUCCEEDED	zoetrope
+2026-10-16T06:58:13Z	pt-tv4rhwuw	cleanup-smoke-starvla_3b_single2	SUCCEEDED	zoetrope
+2026-10-16T06:58:14Z	pt-6wnv9e1u	cleanup-smoke-starvla_7b_single2	SUCCEEDED	zoetrope
+2026-10-16T11:00:40Z	pt-mabdf9b4	cleanup-smoke-rlinf3	SUCCEEDED	zoetrope
+2026-10-16T11:12:34Z	pt-nfx51b5p	cleanup-smoke-rlinf4	SUCCEEDED	zoetrope
+2026-10-16T15:28:50Z	pt-65515vh8	cleanup-smoke-rlinf5	SUCCEEDED	zoetrope
