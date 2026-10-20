@@ -1,0 +1,14 @@
+{
+ "MUJOCO_GL": "egl",
+ "PYOPENGL_PLATFORM": "egl",
+ "EGL_library": null,
+ "OSMesa_library": null,
+ "NUMBA_DISABLE_JIT": null,
+ "python": "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/bin/python",
+ "host": "pt-5bf9da063dd842968143fc4fd6704509-worker-0",
+ "sphere": {
+  "ok": false,
+  "error": "RuntimeError: The MUJOCO_EGL_DEVICE_ID environment variable must be an integer between 0 and -1 (inclusive), got 0.",
+  "traceback": "Traceback (most recent call last):\n  File \"/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream/downstream/load_test/render_check.py\", line 88, in main\n    report[stage] = fn()\n  File \"/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream/downstream/load_test/render_check.py\", line 37, in sphere\n    renderer = mujoco.Renderer(model, height=64, width=64)\n  File \"/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/mujoco/renderer.py\", line 84, in __init__\n    self._gl_context = gl_context.GLContext(width, height)\n  File \"/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/mujoco/egl/__init__.py\", line 95, in __init__\n    EGL_DISPLAY = create_initialized_egl_device_display()\n  File \"/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/mujoco/egl/__init__.py\", line 44, in create_initialized_egl_device_display\n    raise RuntimeError(\nRuntimeError: The MUJOCO_EGL_DEVICE_ID environment variable must be an integer between 0 and -1 (inclusive), got 0.\n"
+ }
+}

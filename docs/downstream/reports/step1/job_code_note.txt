@@ -1,0 +1,1 @@
+2026-10-20T12:32:33Z job still STARTING (no worker.log). prepared.json records commit 6916aae6; before the job started the worktree moved to 7e4fe62e (load_in_starvla.py reads action_hidden_dim/horizon/action_dim from model.config). The job runs 7e4fe62e.

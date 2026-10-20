@@ -1,0 +1,18 @@
+{
+ "utc": "2026-10-20T12:28:14.802892+00:00",
+ "gpus": 1,
+ "spec": "N4lS.Iq.I80.1",
+ "pool": "h800",
+ "name": "step1-load",
+ "payload": [
+  "bash",
+  "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream/downstream/load_test/run_load_test.sh",
+  "/mnt/umm/users/yinbaiqiao/downstream_runs/step1_load_test_20261020/out"
+ ],
+ "worktree": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream",
+ "code": {
+  "commit": "6916aae6b78d0220e523dfbfb8bd657eb1d8b259",
+  "branch": "downstream",
+  "dirty_downstream_files": []
+ }
+}

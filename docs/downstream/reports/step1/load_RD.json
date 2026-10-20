@@ -1,0 +1,83 @@
+{
+ "name": "RD",
+ "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_pd/checkpoints/global_step_150/actor/huggingface",
+ "status": "ok",
+ "seed": 1234,
+ "host": "pt-5bf9da063dd842968143fc4fd6704509-worker-0",
+ "torch": "2.6.0+cu124",
+ "cuda_device": "NVIDIA H800",
+ "transformers": "4.57.0",
+ "build_seconds": 6.3,
+ "loading_info": {
+  "missing_keys": [],
+  "unexpected_keys": [],
+  "mismatched_keys": [],
+  "error_msgs": [],
+  "kwargs": {
+   "attn_implementation": "sdpa",
+   "torch_dtype": "auto",
+   "output_loading_info": "True"
+  }
+ },
+ "action_head_rng": {
+  "cpu_rng_sha": "de89fdb4ebc4cb9b"
+ },
+ "params": {
+  "total": 8420774924,
+  "backbone": 8292166656,
+  "action_head": 128608268,
+  "trainable": 8420774924
+ },
+ "dtypes": {
+  "backbone": {
+   "torch.float32": 8292166656
+  },
+  "action_head": {
+   "torch.float32": 128608268
+  }
+ },
+ "hidden_size": 3584,
+ "action_hidden_dim": 3584,
+ "action_token_id": 146663,
+ "action_head_init_sha": "e8914bf63f2de953",
+ "file_comparison": {
+  "file_tensors": 729,
+  "equal": 729,
+  "differ": [],
+  "differ_count": 0,
+  "max_abs_diff": 0.0,
+  "file_keys_absent_in_model": [],
+  "absent_count": 0,
+  "model_keys_not_in_file": [],
+  "not_in_file_count": 0,
+  "seconds": 20.4
+ },
+ "to_cuda_seconds": 5.2,
+ "gpu_mem_gb": {
+  "after_load": 31.51
+ },
+ "train_forward": {
+  "batch": 2,
+  "loss": 0.6216894388198853,
+  "loss_finite": true,
+  "seconds": 2.09,
+  "peak_gpu_mem_gb": 52.93
+ },
+ "backward_info": {
+  "fits_one_card": true,
+  "params_with_grad": 7875777548,
+  "grads_finite": true,
+  "seconds": 0.47,
+  "peak_gpu_mem_gb": 64.55
+ },
+ "predict_action": {
+  "shape": [
+   1,
+   16,
+   12
+  ],
+  "finite": true,
+  "seconds": 0.13,
+  "peak_gpu_mem_gb": 46.23
+ }
+}

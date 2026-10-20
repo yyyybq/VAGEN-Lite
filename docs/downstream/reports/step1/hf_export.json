@@ -1,0 +1,549 @@
+{
+ "B": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b",
+  "exists": true,
+  "checks": {
+   "tokenizer_files": [
+    "tokenizer.json"
+   ],
+   "tokenizer_config": true,
+   "image_processor": true,
+   "chat_template": "chat_template.json"
+  },
+  "problems": [],
+  "files": [
+   ".gitattributes",
+   "README.md",
+   "chat_template.json",
+   "config.json",
+   "generation_config.json",
+   "merges.txt",
+   "model-00001-of-00005.safetensors",
+   "model-00002-of-00005.safetensors",
+   "model-00003-of-00005.safetensors",
+   "model-00004-of-00005.safetensors",
+   "model-00005-of-00005.safetensors",
+   "model.safetensors.index.json",
+   "preprocessor_config.json",
+   "tokenizer.json",
+   "tokenizer_config.json",
+   "vocab.json"
+  ],
+  "config": {
+   "model_type": "qwen2_5_vl",
+   "architectures": [
+    "Qwen2_5_VLForConditionalGeneration"
+   ],
+   "torch_dtype": "bfloat16",
+   "transformers_version": "4.41.2",
+   "hidden_size": 3584,
+   "num_hidden_layers": 28,
+   "vocab_size": 152064,
+   "tie_word_embeddings": false,
+   "vision_depth": 32,
+   "vision_out_hidden_size": 3584
+  },
+  "shards": 5,
+  "tensors": 729,
+  "params_total": 8292166656,
+  "bytes_total": 16584333312,
+  "per_dtype": {
+   "BF16": {
+    "tensors": 729,
+    "params": 8292166656,
+    "bytes": 16584333312
+   }
+  },
+  "params_by_group_and_dtype": {
+   "language": {
+    "BF16": 7070619136
+   },
+   "lm_head": {
+    "BF16": 544997376
+   },
+   "vision": {
+    "BF16": 676550144
+   }
+  },
+  "key_scheme": "old (model.layers.* / visual.*)",
+  "embedding_shapes": {
+   "model.embed_tokens.weight": [
+    152064,
+    3584
+   ],
+   "lm_head.weight": [
+    152064,
+    3584
+   ]
+  },
+  "action_token": {
+   "token_ids": [
+    146663
+   ],
+   "single_token": true,
+   "len_tokenizer": 151665
+  },
+  "format": "complete HF export"
+ },
+ "S": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386",
+  "exists": true,
+  "checks": {
+   "tokenizer_files": [
+    "tokenizer.json"
+   ],
+   "tokenizer_config": true,
+   "image_processor": true,
+   "chat_template": "chat_template.jinja"
+  },
+  "problems": [],
+  "files": [
+   "added_tokens.json",
+   "chat_template.jinja",
+   "config.json",
+   "generation_config.json",
+   "merges.txt",
+   "model-00001-of-00007.safetensors",
+   "model-00002-of-00007.safetensors",
+   "model-00003-of-00007.safetensors",
+   "model-00004-of-00007.safetensors",
+   "model-00005-of-00007.safetensors",
+   "model-00006-of-00007.safetensors",
+   "model-00007-of-00007.safetensors",
+   "model.safetensors.index.json",
+   "preprocessor_config.json",
+   "special_tokens_map.json",
+   "tokenizer.json",
+   "tokenizer_config.json",
+   "trainer_state.json",
+   "training_args.bin",
+   "video_preprocessor_config.json",
+   "vocab.json"
+  ],
+  "config": {
+   "model_type": "qwen2_5_vl",
+   "architectures": [
+    "Qwen2_5_VLForConditionalGeneration"
+   ],
+   "torch_dtype": "bfloat16",
+   "transformers_version": "4.56.1",
+   "hidden_size": 3584,
+   "num_hidden_layers": 28,
+   "vocab_size": 152064,
+   "tie_word_embeddings": false,
+   "vision_depth": 32,
+   "vision_out_hidden_size": 3584
+  },
+  "shards": 7,
+  "tensors": 729,
+  "params_total": 8292166656,
+  "bytes_total": 31904715264,
+  "per_dtype": {
+   "BF16": {
+    "tensors": 385,
+    "params": 631975680,
+    "bytes": 1263951360
+   },
+   "F32": {
+    "tensors": 344,
+    "params": 7660190976,
+    "bytes": 30640763904
+   }
+  },
+  "params_by_group_and_dtype": {
+   "language": {
+    "F32": 7070619136
+   },
+   "lm_head": {
+    "F32": 544997376
+   },
+   "vision": {
+    "F32": 44574464,
+    "BF16": 631975680
+   }
+  },
+  "key_scheme": "old (model.layers.* / visual.*)",
+  "embedding_shapes": {
+   "model.embed_tokens.weight": [
+    152064,
+    3584
+   ],
+   "lm_head.weight": [
+    152064,
+    3584
+   ]
+  },
+  "action_token": {
+   "token_ids": [
+    146663
+   ],
+   "single_token": true,
+   "len_tokenizer": 151665
+  },
+  "format": "complete HF export"
+ },
+ "RS": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_ps0/checkpoints/global_step_300/actor/huggingface",
+  "exists": true,
+  "checks": {
+   "tokenizer_files": [
+    "tokenizer.json"
+   ],
+   "tokenizer_config": true,
+   "image_processor": true,
+   "chat_template": "chat_template.jinja"
+  },
+  "problems": [],
+  "files": [
+   "added_tokens.json",
+   "chat_template.jinja",
+   "config.json",
+   "generation_config.json",
+   "merges.txt",
+   "model-00001-of-00007.safetensors",
+   "model-00002-of-00007.safetensors",
+   "model-00003-of-00007.safetensors",
+   "model-00004-of-00007.safetensors",
+   "model-00005-of-00007.safetensors",
+   "model-00006-of-00007.safetensors",
+   "model-00007-of-00007.safetensors",
+   "model.safetensors.index.json",
+   "preprocessor_config.json",
+   "special_tokens_map.json",
+   "tokenizer.json",
+   "tokenizer_config.json",
+   "video_preprocessor_config.json",
+   "vocab.json"
+  ],
+  "config": {
+   "model_type": "qwen2_5_vl",
+   "architectures": [
+    "Qwen2_5_VLForConditionalGeneration"
+   ],
+   "torch_dtype": "float32",
+   "transformers_version": "4.56.1",
+   "hidden_size": 3584,
+   "num_hidden_layers": 28,
+   "vocab_size": 152064,
+   "tie_word_embeddings": false,
+   "vision_depth": 32,
+   "vision_out_hidden_size": 3584
+  },
+  "shards": 7,
+  "tensors": 729,
+  "params_total": 8292166656,
+  "bytes_total": 33168666624,
+  "per_dtype": {
+   "F32": {
+    "tensors": 729,
+    "params": 8292166656,
+    "bytes": 33168666624
+   }
+  },
+  "params_by_group_and_dtype": {
+   "language": {
+    "F32": 7070619136
+   },
+   "lm_head": {
+    "F32": 544997376
+   },
+   "vision": {
+    "F32": 676550144
+   }
+  },
+  "key_scheme": "old (model.layers.* / visual.*)",
+  "embedding_shapes": {
+   "model.embed_tokens.weight": [
+    152064,
+    3584
+   ],
+   "lm_head.weight": [
+    152064,
+    3584
+   ]
+  },
+  "action_token": {
+   "token_ids": [
+    146663
+   ],
+   "single_token": true,
+   "len_tokenizer": 151665
+  },
+  "format": "complete HF export"
+ },
+ "RD": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_pd/checkpoints/global_step_150/actor/huggingface",
+  "exists": true,
+  "checks": {
+   "tokenizer_files": [
+    "tokenizer.json"
+   ],
+   "tokenizer_config": true,
+   "image_processor": true,
+   "chat_template": "chat_template.jinja"
+  },
+  "problems": [],
+  "files": [
+   "added_tokens.json",
+   "chat_template.jinja",
+   "config.json",
+   "generation_config.json",
+   "merges.txt",
+   "model-00001-of-00007.safetensors",
+   "model-00002-of-00007.safetensors",
+   "model-00003-of-00007.safetensors",
+   "model-00004-of-00007.safetensors",
+   "model-00005-of-00007.safetensors",
+   "model-00006-of-00007.safetensors",
+   "model-00007-of-00007.safetensors",
+   "model.safetensors.index.json",
+   "preprocessor_config.json",
+   "special_tokens_map.json",
+   "tokenizer.json",
+   "tokenizer_config.json",
+   "video_preprocessor_config.json",
+   "vocab.json"
+  ],
+  "config": {
+   "model_type": "qwen2_5_vl",
+   "architectures": [
+    "Qwen2_5_VLForConditionalGeneration"
+   ],
+   "torch_dtype": "float32",
+   "transformers_version": "4.56.1",
+   "hidden_size": 3584,
+   "num_hidden_layers": 28,
+   "vocab_size": 152064,
+   "tie_word_embeddings": false,
+   "vision_depth": 32,
+   "vision_out_hidden_size": 3584
+  },
+  "shards": 7,
+  "tensors": 729,
+  "params_total": 8292166656,
+  "bytes_total": 33168666624,
+  "per_dtype": {
+   "F32": {
+    "tensors": 729,
+    "params": 8292166656,
+    "bytes": 33168666624
+   }
+  },
+  "params_by_group_and_dtype": {
+   "language": {
+    "F32": 7070619136
+   },
+   "lm_head": {
+    "F32": 544997376
+   },
+   "vision": {
+    "F32": 676550144
+   }
+  },
+  "key_scheme": "old (model.layers.* / visual.*)",
+  "embedding_shapes": {
+   "model.embed_tokens.weight": [
+    152064,
+    3584
+   ],
+   "lm_head.weight": [
+    152064,
+    3584
+   ]
+  },
+  "action_token": {
+   "token_ids": [
+    146663
+   ],
+   "single_token": true,
+   "len_tokenizer": 151665
+  },
+  "format": "complete HF export"
+ },
+ "R10S5": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r10_20261015/lf_formal/model/checkpoint-770",
+  "exists": true,
+  "checks": {
+   "tokenizer_files": [
+    "tokenizer.json"
+   ],
+   "tokenizer_config": true,
+   "image_processor": true,
+   "chat_template": "chat_template.jinja"
+  },
+  "problems": [],
+  "files": [
+   "added_tokens.json",
+   "chat_template.jinja",
+   "config.json",
+   "generation_config.json",
+   "merges.txt",
+   "model-00001-of-00007.safetensors",
+   "model-00002-of-00007.safetensors",
+   "model-00003-of-00007.safetensors",
+   "model-00004-of-00007.safetensors",
+   "model-00005-of-00007.safetensors",
+   "model-00006-of-00007.safetensors",
+   "model-00007-of-00007.safetensors",
+   "model.safetensors.index.json",
+   "preprocessor_config.json",
+   "special_tokens_map.json",
+   "tokenizer.json",
+   "tokenizer_config.json",
+   "trainer_state.json",
+   "training_args.bin",
+   "video_preprocessor_config.json",
+   "vocab.json"
+  ],
+  "config": {
+   "model_type": "qwen2_5_vl",
+   "architectures": [
+    "Qwen2_5_VLForConditionalGeneration"
+   ],
+   "torch_dtype": "bfloat16",
+   "transformers_version": "4.56.1",
+   "hidden_size": 3584,
+   "num_hidden_layers": 28,
+   "vocab_size": 152064,
+   "tie_word_embeddings": false,
+   "vision_depth": 32,
+   "vision_out_hidden_size": 3584
+  },
+  "shards": 7,
+  "tensors": 729,
+  "params_total": 8292166656,
+  "bytes_total": 31904715264,
+  "per_dtype": {
+   "BF16": {
+    "tensors": 385,
+    "params": 631975680,
+    "bytes": 1263951360
+   },
+   "F32": {
+    "tensors": 344,
+    "params": 7660190976,
+    "bytes": 30640763904
+   }
+  },
+  "params_by_group_and_dtype": {
+   "language": {
+    "F32": 7070619136
+   },
+   "lm_head": {
+    "F32": 544997376
+   },
+   "vision": {
+    "F32": 44574464,
+    "BF16": 631975680
+   }
+  },
+  "key_scheme": "old (model.layers.* / visual.*)",
+  "embedding_shapes": {
+   "model.embed_tokens.weight": [
+    152064,
+    3584
+   ],
+   "lm_head.weight": [
+    152064,
+    3584
+   ]
+  },
+  "action_token": {
+   "token_ids": [
+    146663
+   ],
+   "single_token": true,
+   "len_tokenizer": 151665
+  },
+  "format": "complete HF export"
+ },
+ "R1": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0/formal/checkpoints/global_step_250/actor/huggingface",
+  "exists": true,
+  "checks": {
+   "tokenizer_files": [
+    "tokenizer.json"
+   ],
+   "tokenizer_config": true,
+   "image_processor": true,
+   "chat_template": "chat_template.jinja"
+  },
+  "problems": [],
+  "files": [
+   "added_tokens.json",
+   "chat_template.jinja",
+   "config.json",
+   "generation_config.json",
+   "merges.txt",
+   "model-00001-of-00007.safetensors",
+   "model-00002-of-00007.safetensors",
+   "model-00003-of-00007.safetensors",
+   "model-00004-of-00007.safetensors",
+   "model-00005-of-00007.safetensors",
+   "model-00006-of-00007.safetensors",
+   "model-00007-of-00007.safetensors",
+   "model.safetensors.index.json",
+   "preprocessor_config.json",
+   "special_tokens_map.json",
+   "tokenizer.json",
+   "tokenizer_config.json",
+   "video_preprocessor_config.json",
+   "vocab.json"
+  ],
+  "config": {
+   "model_type": "qwen2_5_vl",
+   "architectures": [
+    "Qwen2_5_VLForConditionalGeneration"
+   ],
+   "torch_dtype": "float32",
+   "transformers_version": "4.56.1",
+   "hidden_size": 3584,
+   "num_hidden_layers": 28,
+   "vocab_size": 152064,
+   "tie_word_embeddings": false,
+   "vision_depth": 32,
+   "vision_out_hidden_size": 3584
+  },
+  "shards": 7,
+  "tensors": 729,
+  "params_total": 8292166656,
+  "bytes_total": 33168666624,
+  "per_dtype": {
+   "F32": {
+    "tensors": 729,
+    "params": 8292166656,
+    "bytes": 33168666624
+   }
+  },
+  "params_by_group_and_dtype": {
+   "language": {
+    "F32": 7070619136
+   },
+   "lm_head": {
+    "F32": 544997376
+   },
+   "vision": {
+    "F32": 676550144
+   }
+  },
+  "key_scheme": "old (model.layers.* / visual.*)",
+  "embedding_shapes": {
+   "model.embed_tokens.weight": [
+    152064,
+    3584
+   ],
+   "lm_head.weight": [
+    152064,
+    3584
+   ]
+  },
+  "action_token": {
+   "token_ids": [
+    146663
+   ],
+   "single_token": true,
+   "len_tokenizer": 151665
+  },
+  "format": "complete HF export"
+ }
+}

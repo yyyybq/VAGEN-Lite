@@ -1,0 +1,21 @@
+{
+ "utc": "2026-10-20T12:28:16.721220+00:00",
+ "job_id": "pt-405nyxoy",
+ "command": [
+  "/mnt/umm/users/yinbaiqiao/.sco/bin/sco",
+  "acp",
+  "jobs",
+  "create",
+  "--workspace-name=aigc",
+  "--aec2-name=h800",
+  "--job-name=downstream-step1-load",
+  "--priority=HIGHEST",
+  "--quota-type=reserved",
+  "--container-image-url=registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617",
+  "--storage-mount=019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm",
+  "--training-framework=pytorch",
+  "--worker-nodes=1",
+  "--worker-spec=N4lS.Iq.I80.1",
+  "--command=bash /mnt/umm/users/yinbaiqiao/downstream_runs/step1_load_test_20261020/job/launch.sh"
+ ]
+}

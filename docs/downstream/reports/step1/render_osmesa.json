@@ -1,0 +1,58 @@
+{
+ "MUJOCO_GL": "osmesa",
+ "PYOPENGL_PLATFORM": "osmesa",
+ "EGL_library": null,
+ "OSMesa_library": null,
+ "NUMBA_DISABLE_JIT": "1",
+ "python": "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/bin/python",
+ "host": "pt-5bf9da063dd842968143fc4fd6704509-worker-0",
+ "sphere": {
+  "ok": true,
+  "shape": [
+   64,
+   64,
+   3
+  ],
+  "range": [
+   0,
+   255
+  ]
+ },
+ "kitchen": {
+  "ok": true,
+  "task": "NavigateKitchen",
+  "seed": 0,
+  "instruction": "Navigate to the stand mixer.",
+  "cameras": {
+   "video.robot0_agentview_left": {
+    "shape": [
+     256,
+     256,
+     3
+    ],
+    "nonconstant": true
+   },
+   "video.robot0_agentview_right": {
+    "shape": [
+     256,
+     256,
+     3
+    ],
+    "nonconstant": true
+   },
+   "video.robot0_eye_in_hand": {
+    "shape": [
+     256,
+     256,
+     3
+    ],
+    "nonconstant": true
+   }
+  },
+  "reset_seconds": 21.1,
+  "seconds_per_step": 0.21,
+  "steps": 10,
+  "robocasa": "1.0.1",
+  "robocasa_file": "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/robocasa/robocasa/__init__.py"
+ }
+}
