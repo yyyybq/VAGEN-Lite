@@ -86,6 +86,11 @@ script; "select_by"), its endpoint checkpoint is the best of its checkpoints and
 "vs" (still rising clearly).  The decision is made once per run in the rl_extend step; evaluate then covers each
 run's checkpoints up to its own last update.
 
+Round 12 batch (disk): plan "retain": "best_and_last" deletes, once evaluate is done, every RL checkpoint but the
+run's best on the validation set (ties: the earlier) and its last one, and every SFT epoch checkpoint this chain
+trained but the picked one (with the final weights in the model folder); nothing outside this chain's folder, and
+nothing of a run whose checkpoints are not all evaluated.  What was deleted is kept in state["retained"].
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -1193,6 +1198,55 @@ class Chain:
         jobs.update(self.variant_jobs(ev, {**sets, **extra}, models, rl_names))
         self.eval_jobs("evaluate", jobs)
         self.tables()
+        if self.plan.get("retain") == "best_and_last":  # round 12 batch: disk
+            self.retain()
+
+    def retain(self) -> None:
+        """Delete the checkpoints the plan's retention rule does not keep (see the module docstring)."""
+        import shutil
+
+        sets = self.eval_sets()
+        select = self.plan.get("select_by") or next(iter(sets))
+        every = int((self.plan.get("eval") or {}).get("every", 50))
+        done: Dict[str, Any] = {}
+        tr = self.tr.resolve()
+
+        def remove(path: Path) -> None:
+            if tr not in path.resolve().parents:  # never outside this chain's folder
+                raise ChainError(f"retention refused to delete {path} (outside {tr})")
+            shutil.rmtree(path) if path.is_dir() else path.unlink()
+
+        if not (self.plan.get("eval_only") or self.plan.get("sft_only")):
+            for name, run in (self.rl_runs() if self.plan.get("rl_runs") else {}).items():
+                ckpts = sorted(int(p.name.split("_")[-1]) for p in (run["run_dir"] / "checkpoints").glob("global_step_*")
+                               if p.name.split("_")[-1].isdigit())
+                if not ckpts:
+                    continue
+                vals = {s: success_rate(sets[select] / f"{name}_{s:03d}") for s in ckpts if s % every == 0}
+                if not vals or any(v is None for v in vals.values()) or set(vals) != set(ckpts):
+                    done[name] = {"skipped": "not every checkpoint has a validation result"}
+                    continue
+                best = max(vals, key=lambda s: (vals[s], -s))
+                keep = {best, max(ckpts)}
+                gone = [s for s in ckpts if s not in keep]
+                for s in gone:
+                    remove(run["run_dir"] / "checkpoints" / f"global_step_{s}")
+                done[name] = {"kept": sorted(keep), "deleted": gone, "best": best}
+        pick = (self.state["steps"].get("pick_sft", {}).get("decision") or {}).get("model")
+        for group in self.sft_groups() if self.plan.get("sft_groups") else []:
+            model = self.lf_dir(group) / "model"
+            if not pick or not model.is_dir() or Path(pick).parent.resolve() != model.resolve():
+                continue  # an SFT this chain did not train, or not the picked group
+            gone = []
+            for epoch, path in epoch_checkpoints(model):
+                if path.resolve() != Path(pick).resolve():
+                    remove(path)
+                    gone.append(epoch)
+            for weights in list(model.glob("*.safetensors")) + list(model.glob("*.safetensors.index.json")):
+                remove(weights)
+            done[f"sft_{group}"] = {"kept": Path(pick).name, "deleted_epochs": gone}
+        self.state["retained"] = done
+        self.save()
 
     def variant_jobs(self, ev: Dict[str, Any], sets: Dict[str, Path],
                      models: Dict[str, Tuple[str, Optional[str], Sequence[str]]],
@@ -1330,6 +1384,9 @@ def render_markdown(state: Dict[str, Any]) -> str:
         vals = "，".join(f"{k} 次 {v:.3f}" for k, v in (d.get("val") or {}).items())
         lines += ["", f"**RL {name} 是否接着训**（{d.get('set')}：{vals}）："
                       + (f"接着训到 {d['extend_to']} 次" if d.get("extend_to") else "不接着训")]
+    for name, r in (state.get("retained") or {}).items():
+        lines += ["", f"**保留规则 {name}：** " + (r["skipped"] if r.get("skipped") else
+                                                    f"留 {r.get('kept')}，删 {r.get('deleted', r.get('deleted_epochs'))}")]
     queue = state.get("queue") or {}
     if queue:
         lines += ["", "| 任务 | sco 任务 | 池 | 排队（分钟） | 状态 |", "| --- | --- | --- | --- | --- |"]

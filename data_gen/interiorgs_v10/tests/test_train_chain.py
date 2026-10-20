@@ -1137,6 +1137,58 @@ class ChainTest(unittest.TestCase):
             chain.rl_extend()
             self.assertEqual(chain.state["steps"]["rl_extend"]["note"], "not planned")
 
+    def test_retention_best_and_last(self):
+        """Round 12 batch (disk): after evaluate, every RL checkpoint but the best on the validation set and the last
+        is deleted, and every SFT epoch but the picked one (with the final weights); a run with an unevaluated
+        checkpoint is left alone; an SFT this chain did not train is never touched."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outside = root / "elsewhere" / "lf_formal" / "model" / "checkpoint-1386"
+            outside.mkdir(parents=True)
+
+            def write(result, rate):
+                out = root / "val" / result
+                out.mkdir(parents=True, exist_ok=True)
+                rows = [{"success": i < round(rate * 100), "task_type": "fov_inclusion", "d_star": 3, "turns": 1,
+                         "actions": 1, "collisions": 0, "invalid_turns": 0, "actions_to_success": 1} for i in range(100)]
+                (out / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+                (out / "done.json").write_text("{}")
+
+            tr = root / "tr"
+            for name, rates in (("s100s0", [0.40, 0.46, 0.44]), ("s100d", [0.41, 0.42, 0.40])):
+                for k, s in enumerate((50, 100, 150)):
+                    (tr / f"rl_run_{name}" / "checkpoints" / f"global_step_{s}" / "actor").mkdir(parents=True)
+                    if not (name == "s100d" and s == 150):  # s100d's last checkpoint has no result yet
+                        write(f"{name}_{s:03d}", rates[k])
+            model = tr / "lf_s100" / "model"
+            for e in (2, 4, 6):
+                (model / f"checkpoint-{e * 10}").mkdir(parents=True)
+            (model / "model-00001-of-00002.safetensors").write_text("")
+            (model / "config.json").write_text("{}")
+            chain = T.Chain({"tr": str(tr), "sft_dir": tmp, "endpoint": 150, "select_by": "val", "retain": "best_and_last",
+                             "eval_sets": {"val": str(root / "val")}, "eval": {"every": 50},
+                             "sft_groups": {"s100": "x.jsonl"}, "rl_runs": {"s100s0": {}, "s100d": {}}}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_s100_e4", "model": str(model / "checkpoint-40"),
+                                                            "select_by": "val", "scores": {}}
+            chain.retain()
+            left = sorted(p.name for p in (tr / "rl_run_s100s0" / "checkpoints").iterdir())
+            self.assertEqual(left, ["global_step_100", "global_step_150"])  # best (100) and last (150)
+            self.assertEqual(len(list((tr / "rl_run_s100d" / "checkpoints").iterdir())), 3)  # not all evaluated
+            self.assertEqual(sorted(p.name for p in model.iterdir()), ["checkpoint-40", "config.json"])
+            self.assertTrue(outside.is_dir())
+            r = chain.state["retained"]
+            self.assertEqual(r["s100s0"], {"kept": [100, 150], "deleted": [50], "best": 100})
+            self.assertIn("skipped", r["s100d"])
+            self.assertEqual(r["sft_s100"], {"kept": "checkpoint-40", "deleted_epochs": [1, 3]})  # epochs count the checkpoints
+            self.assertIn("**保留规则 s100s0：** 留 [100, 150]，删 [50]", T.render_markdown(chain.state))
+            # an SFT start from another chain (round 11's) is never touched
+            chain2 = T.Chain({"tr": str(tr), "sft_dir": tmp, "endpoint": 150, "select_by": "val", "retain": "best_and_last",
+                              "eval_sets": {"val": str(root / "val")}, "sft_groups": {"formal": "x.jsonl"}}, sleep=lambda s: None)
+            chain2.state["steps"]["pick_sft"]["decision"] = {"model": str(outside), "best": "sft_formal_e9", "select_by": "val",
+                                                             "scores": {}}
+            chain2.retain()
+            self.assertTrue(outside.is_dir())
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)
