@@ -1,6 +1,7 @@
-"""WalkerBench Standard-100 with one model code, inside one one-card sco job.
+"""WalkerBench Standard-100 (or --task-set extra300) with one model code, inside one one-card sco job.
 
     python -m eval_external.closed_loop.walkerbench.run --model base-7B --run-dir RUN [--blind] [--lenient]
+        [--task-set extra300]
 
 What runs is WalkerBench's own agent and loop (b197f51): examples/vln_agent.py VLNAgent (its system prompts per
 task type, its observation text, its JSON action format MOVE / ROTATION / STOP, full dialogue history) driven by
@@ -76,15 +77,21 @@ def lenient_json(text: str) -> str | None:
     return json.dumps({"THOUGHT": "", "ACTION": action if action.endswith(")") else action + ")"})
 
 
-def make_copy(run_dir: Path) -> tuple[Path, str]:
+TASK_SETS = {"standard": None,  # the repo's tasks/standard (Standard-100)
+             "extra300": ROOT / "data_prep" / "walkerbench_extra300" / "tasks"}  # extra_set.py (2026-10-20)
+
+
+def make_copy(run_dir: Path, task_set: str = "standard") -> tuple[Path, str]:
     copy = run_dir / "WalkerBench"
     if copy.exists():
         shutil.rmtree(copy)
     shutil.copytree(REPO, copy, ignore=shutil.ignore_patterns(".git", "logs", "temp_images"))
+    if TASK_SETS[task_set] is not None:
+        shutil.copytree(TASK_SETS[task_set], copy / "tasks" / task_set)
     settings = copy / "config" / "settings.py"
     old = settings.read_text()
     new, n1 = re.subn(r"(?m)^PANORAMAS_DIR = .*$", f'PANORAMAS_DIR = Path("{PANORAMAS}")', old)
-    new, n2 = re.subn(r"(?m)^TASKS_DIR = .*$", 'TASKS_DIR = BASE_DIR / "tasks" / "standard"', new)
+    new, n2 = re.subn(r"(?m)^TASKS_DIR = .*$", f'TASKS_DIR = BASE_DIR / "tasks" / "{task_set}"', new)
     if (n1, n2) != (1, 1):
         raise RuntimeError("config/settings.py layout changed; PANORAMAS_DIR / TASKS_DIR not found once each")
     settings.write_text(new)
@@ -101,7 +108,7 @@ def load_module(name: str, path: Path):
 
 
 def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: bool, workers: int,
-              limit: int | None = None, lenient_log: Path | None = None) -> list[str]:
+              limit: int | None = None, lenient_log: Path | None = None, task_set: str = "standard") -> list[str]:
     os.chdir(copy)
     sys.path.insert(0, str(copy))
     # WalkerBench's examples/ has no __init__.py; an installed package named "examples" would win over it
@@ -163,7 +170,7 @@ def run_tasks(copy: Path, code: str, base_url: str, temperature: float, blind: b
             return fixed
 
     rbp.VLNAgent = EvalAgent
-    rbp.TASKS_DIR = copy / "tasks" / "standard"
+    rbp.TASKS_DIR = copy / "tasks" / task_set
     rbp.LOGS_DIR = copy / "logs"
     tasks = sorted(p.stem for p in rbp.TASKS_DIR.glob("*.json"))
     if limit:  # smoke tests only: the first task of each type, then the second of each type, ...
@@ -212,12 +219,12 @@ def is_valid(res: dict) -> bool:
     return bool(res["server_alive_at_end"]) and res["api_failed_steps"] == res["context_overflow_steps"]
 
 
-def score(copy: Path, tasks: list[str]) -> dict:
+def score(copy: Path, tasks: list[str], task_set: str = "standard") -> dict:
     ev = load_module("wb_evaluate_all", copy / "scripts" / "evaluate_all.py")
     logs = sorted((copy / "logs").glob("*.jsonl"))
     per_task = {}
     for log in logs:
-        r = ev.evaluate_session(log, copy / "tasks" / "standard")
+        r = ev.evaluate_session(log, copy / "tasks" / task_set)
         if r:
             per_task[r["task_id"]] = r
     steps = count_steps(logs)
@@ -273,6 +280,8 @@ def main() -> None:
     ap.add_argument("--rescore", action="store_true", help="rescore an earlier invalid run (no model, login node)")
     ap.add_argument("--lenient", action="store_true",
                     help="diagnostic: a WalkerBench action named outside the JSON is accepted (local rule, logged)")
+    ap.add_argument("--task-set", choices=sorted(TASK_SETS), default="standard",
+                    help="standard (Standard-100) or extra300 (300 further tasks of the full set, extra_set.py)")
     args = ap.parse_args()
     run_dir = args.run_dir.resolve()
     if args.rescore:
@@ -280,12 +289,16 @@ def main() -> None:
     if not args.model:
         ap.error("--model is required")
     run_dir.mkdir(parents=True, exist_ok=True)
-    copy, diff = make_copy(run_dir)
+    copy, diff = make_copy(run_dir, args.task_set)
+    n_tasks = len(list((copy / "tasks" / args.task_set).glob("*.json")))
+    tasks_src = ("tasks/standard (5 types x 20)" if args.task_set == "standard" else
+                 json.loads((TASK_SETS[args.task_set].parent / "selection.json").read_text()))
     write_manifest(
         run_dir, models=[M.describe(args.model)],
-        benchmark={"name": "WalkerBench Standard-100", "items_expected": 100,
+        benchmark={"name": f"WalkerBench {'Standard-100' if args.task_set == 'standard' else args.task_set}",
+                   "items_expected": n_tasks,
                    "source": {"code": git_state(REPO), "panoramas": "lalayg/pano@415676872c07 panoramas.zip (zoom 2)",
-                              "tasks": "tasks/standard (5 types x 20)"},
+                              "tasks": tasks_src},
                    "metric": "success rate per type; total = mean of the 5 types; steps = mean executed actions"},
         backend={"name": "WalkerBench agent + loop + evaluator (in-process)", "settings_diff": diff,
                  "server": {"vllm": SERVER_DEFAULTS}, "workers": args.workers},
@@ -299,10 +312,11 @@ def main() -> None:
         lenient_log.unlink()
     with VLLMServer(args.model, log=run_dir / "vllm.log") as srv:
         tasks = run_tasks(copy, args.model, srv.base_url, args.temperature, args.blind, args.workers,
-                          lenient_log=lenient_log)
+                          lenient_log=lenient_log, task_set=args.task_set)
         server_alive = srv.alive()
-    res = score(copy, tasks)
-    res.update({"model": args.model, "blind": args.blind, "lenient": args.lenient, "temperature": args.temperature,
+    res = score(copy, tasks, args.task_set)
+    res.update({"model": args.model, "blind": args.blind, "lenient": args.lenient, "task_set": args.task_set,
+                "temperature": args.temperature,
                 "counts": dict(COUNTS), "server_alive_at_end": server_alive})
     # A task whose episode raised inside WalkerBench's own loop has no log and scores 0 (score() counts every task):
     # the loop indexes the observation after an action that failed and returned none ("'NoneType' object is not

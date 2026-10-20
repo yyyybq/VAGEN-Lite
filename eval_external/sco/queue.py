@@ -5,6 +5,7 @@
 KIND is a QA benchmark of qa_transfer/benchmarks.py, or
   WalkerBench, WalkerBench-blind          closed_loop/walkerbench/run.py (blind: no image, the reference agent's way)
   WalkerBench-lenient                     the same with --lenient (an action named outside the JSON is accepted)
+  ...@extra300                            any of the three on the 300 further tasks (closed_loop/walkerbench/extra_set.py)
   OwnEnv, OwnEnv-shuffle, OwnEnv-drop      diagnostics/ownenv_job.sh (our env; dialogue history as is / shuffled / dropped)
   OwnEnv-replace                          history replaced by another same-scene task's turns (after the normal run)
   OwnEnv-lenient                          the same, history as is, untagged "Answer:" lines accepted
@@ -90,13 +91,16 @@ def item(stage: str, model: str, kind: str) -> Item:
                     ["python", "-m", "eval_external.qa_transfer.run_qa", "--model", model, "--bench", kind,
                      "--run-dir", str(rd)],
                     lambda: (J.ROOT / "data_prep" / f"{kind.replace('@', '_at_')}.json").exists(), _qa_collect)
-    if kind in ("WalkerBench", "WalkerBench-blind", "WalkerBench-lenient"):
-        variant = kind.partition("-")[2]  # "", "blind" or "lenient"
-        rd = RUNS / "walkerbench" / stage / (f"{model}__{variant}" if variant else model)
-        return Item(rd, f"{stage}-wb{'-' + variant if variant else ''}-{model}",
+    base, _, task_set = kind.partition("@")  # "WalkerBench-lenient@extra300": the extra300 task set
+    if base in ("WalkerBench", "WalkerBench-blind", "WalkerBench-lenient"):
+        variant = base.partition("-")[2]  # "", "blind" or "lenient"
+        suffix = "__".join(x for x in (task_set, variant) if x)
+        rd = RUNS / "walkerbench" / stage / (f"{model}__{suffix}" if suffix else model)
+        ready = J.ROOT / "data_prep" / ("walkerbench_extra300/selection.json" if task_set else "walkerbench.json")
+        return Item(rd, f"{stage}-wb{'-' + suffix if suffix else ''}-{model}",
                     ["python", "-m", "eval_external.closed_loop.walkerbench.run", "--model", model, "--run-dir",
-                     str(rd)] + ([f"--{variant}"] if variant else []),
-                    lambda: (J.ROOT / "data_prep" / "walkerbench.json").exists(),
+                     str(rd)] + ([f"--{variant}"] if variant else []) + (["--task-set", task_set] if task_set else []),
+                    lambda: (J.ROOT / "data_prep" / "walkerbench.json").exists() and ready.exists(),
                     lambda d: _require(d / "results.json"))
     if kind in OWNENV_MODES:
         mode = OWNENV_MODES[kind]

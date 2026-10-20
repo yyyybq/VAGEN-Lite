@@ -49,6 +49,9 @@ def test_queue_walkerbench_variants():
     assert Q.item("step2", "SI-7B", "WalkerBench-blind").command[-1] == "--blind"
     plain = Q.item("step2", "SI-7B", "WalkerBench")
     assert plain.run_dir.name == "SI-7B" and plain.command[-1] == str(plain.run_dir)
+    extra = Q.item("step2", "base-7B", "WalkerBench-lenient@extra300")
+    assert extra.run_dir.name == "base-7B__extra300__lenient"
+    assert extra.command[-3:] == ["--lenient", "--task-set", "extra300"]
 
 
 def test_rescore_accepts_only_all_overflow(tmp_path):

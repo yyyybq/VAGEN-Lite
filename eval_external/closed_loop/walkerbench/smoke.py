@@ -75,6 +75,7 @@ def main() -> None:
     ap.add_argument("--error", choices=("none", "overflow", "other"), default="none")
     ap.add_argument("--plain", action="store_true", help="answer 'Answer: STOP(10' instead of JSON")
     ap.add_argument("--lenient", action="store_true")
+    ap.add_argument("--task-set", default="standard", choices=sorted(R.TASK_SETS))
     args = ap.parse_args()
     ERROR.update(mode=args.error, plain=args.plain)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -82,11 +83,11 @@ def main() -> None:
     base_url = f"http://127.0.0.1:{server.server_address[1]}/v1"
     run_dir = args.run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
-    copy, diff = R.make_copy(run_dir)
+    copy, diff = R.make_copy(run_dir, args.task_set)
     lenient_log = run_dir / "lenient_repairs.jsonl" if args.lenient else None
     tasks = R.run_tasks(copy, "fake", base_url, 0.0, blind=False, workers=2, limit=args.limit,
-                        lenient_log=lenient_log)
-    res = R.score(copy, tasks)
+                        lenient_log=lenient_log, task_set=args.task_set)
+    res = R.score(copy, tasks, args.task_set)
     res["server_alive_at_end"] = True
     server.shutdown()
     report = {"tasks": tasks, "calls": len(CALLS), "calls_with_one_image": sum(c["images"] == 1 for c in CALLS),
