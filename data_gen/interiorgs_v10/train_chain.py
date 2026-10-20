@@ -70,6 +70,10 @@ already holds the conversation files, e.g. training_prep subsets); "sft_eval_epo
 per-epoch evaluation and the pick to those epochs, "sft_eval_sets" (["val"]) to those sets (the pick is evaluated on
 the others with an eval variant of "sft_pick"); "sft_only": true skips the RL steps and evaluates no RL checkpoint.
 
+Round 12 batch: plan "pool": "auto" submits every job to the pool with the fewest waiting jobs at that moment
+(job_sco.pick_pool; a run's render service and trainer stay in one pool); the time each job waited for cards is kept
+in state["queue"] and shown in PROGRESS.md.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -454,6 +458,39 @@ class Chain:
             return Path(decision["model"])
         return self.lf_dir("") / "model"
 
+    def job_pool(self, key: Optional[str] = None) -> Optional[str]:
+        """The pool for a new job: the plan's, or with "auto" the one with the fewest waiting jobs now (round 12
+        batch); with a ``key`` (an RL run) the first choice is kept, so its render service and trainer share it."""
+        pool = self.plan.get("pool")
+        if pool != "auto":
+            return pool
+        from . import job_sco
+
+        chosen = self.state.setdefault("run_pools", {})
+        if key is not None and key in chosen:
+            return chosen[key]
+        pool = job_sco.pick_pool()
+        if key is not None:
+            chosen[key] = pool
+        return pool
+
+    def note_queue(self, what: str, run: Path, job_dir: str, st: Dict[str, Any]) -> None:
+        """Round 12 batch: how long a job waited for cards (its creation to its start; still waiting: to now)."""
+        job_id = st.get("job_id")
+        if not job_id or not st.get("create_time"):
+            return
+        try:
+            created = datetime.datetime.fromisoformat(str(st["create_time"]).replace("Z", "+00:00"))
+            end = (datetime.datetime.fromisoformat(str(st["start_time"]).replace("Z", "+00:00")) if st.get("start_time")
+                   else datetime.datetime.now(datetime.timezone.utc))
+        except ValueError:
+            return
+        prepared = run / job_dir / "prepared.json"
+        pool = json.loads(prepared.read_text()).get("pool") if prepared.is_file() else None
+        self.state.setdefault("queue", {})[job_id] = {
+            "what": what, "pool": pool, "created": str(st["create_time"]), "started": st.get("start_time"),
+            "queued_s": round((end - created).total_seconds())}
+
     # -------------------------------------------------------------- bookkeeping
     def save(self) -> None:
         self.state["updated_utc"] = now()
@@ -529,6 +566,7 @@ class Chain:
             while pending:
                 for name, run in list(pending.items()):
                     st = job_sco.status(run)
+                    self.note_queue(f"{step}/{name}", run, "job", st)
                     if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
                         ended[name] = st.get("state")
                         job_sco.delete(run)
@@ -622,7 +660,7 @@ class Chain:
             run = self.tr / (f"sft_{group}" if group else "sft")
             run.mkdir(parents=True, exist_ok=True)
             if not (run / "job" / "submission.json").exists():
-                job_sco.prepare(run, 8, ["sft", str(self.lf_dir(group))], pool=self.plan.get("pool"))
+                job_sco.prepare(run, 8, ["sft", str(self.lf_dir(group))], pool=self.job_pool())
                 job_sco.submit(run)
             runs[group or "sft"] = run
         self.mark("sft", job_ids={n: json.loads((r / "job" / "submission.json").read_text())["job_id"]
@@ -656,11 +694,12 @@ class Chain:
                     run.mkdir(parents=True, exist_ok=True)
                     if not (run / "job" / "submission.json").exists():
                         job_sco.prepare(run, 1, ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options],
-                                        pool=self.plan.get("pool"))
+                                        pool=self.job_pool())
                         job_sco.submit(run)
                     running[name] = run
                 for name, run in list(running.items()):
                     st = job_sco.status(run)
+                    self.note_queue(f"{step}/{name}", run, "job", st)
                     if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
                         eval_dir, result = jobs[name][0], jobs[name][1]
                         if not (eval_dir / result / "done.json").exists():
@@ -849,10 +888,10 @@ class Chain:
             if not (d / "job_renderer" / "submission.json").exists():
                 for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
                     (d / f).unlink(missing_ok=True)
-                job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.plan.get("pool"))
+                job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.job_pool(name))
                 job_sco.submit(d, job_dir="job_renderer")
             if not (d / "job_rl" / "submission.json").exists():
-                job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl", pool=self.plan.get("pool"))
+                job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl", pool=self.job_pool(name))
                 job_sco.submit(d, job_dir="job_rl")
         self.mark(step, job_ids={f"{n}/{j}": json.loads((r["run_dir"] / j / "submission.json").read_text())["job_id"]
                                  for n, r in runs.items() for j in ("job_renderer", "job_rl")})
@@ -864,6 +903,8 @@ class Chain:
                     d = run["run_dir"]
                     st_rl, st_r = job_sco.status(d, "job_rl"), job_sco.status(d, "job_renderer")
                     states[f"{name}/rl"], states[f"{name}/renderer"] = st_rl.get("state"), st_r.get("state")
+                    self.note_queue(f"{step}/{name}/rl", d, "job_rl", st_rl)
+                    self.note_queue(f"{step}/{name}/renderer", d, "job_renderer", st_r)
                     problem = self.startup_check(name, run, st_rl)  # round 12: Ray start-up failure or silence
                     if problem:
                         retries = self.state.setdefault("startup_retries", {}).setdefault(name, [])
@@ -872,7 +913,7 @@ class Chain:
                             job_sco.delete(d, "job_rl")
                             retries.append({"utc": now(), "job_id": st_rl.get("job_id"), "reason": problem})
                             job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
-                                            pool=self.plan.get("pool"))
+                                            pool=self.job_pool(name))
                             job_sco.submit(d, job_dir="job_rl")
                             retries[-1]["new_job_id"] = json.loads((d / "job_rl" / "submission.json").read_text())["job_id"]
                             self.save()
@@ -1160,6 +1201,12 @@ def render_markdown(state: Dict[str, Any]) -> str:
                     f"{cells[f]['success']:.2f}（{cells[f]['episodes']}）" if f in cells else "—" for f in families) + " |")
     for name, g in (state.get("guard_stops") or {}).items():
         lines += ["", f"**RL {name} 被自动停止**（{g.get('utc')}）：{g.get('reason')}"]
+    queue = state.get("queue") or {}
+    if queue:
+        lines += ["", "| 任务 | sco 任务 | 池 | 排队（分钟） | 状态 |", "| --- | --- | --- | --- | --- |"]
+        for job_id, q in sorted(queue.items(), key=lambda kv: kv[1].get("created") or ""):
+            lines.append(f"| {q.get('what')} | {job_id} | {q.get('pool')} | {round((q.get('queued_s') or 0) / 60)} | "
+                         f"{'已开始' if q.get('started') else '排队中'} |")
     for name, retries in (state.get("startup_retries") or {}).items():
         for k, r in enumerate(retries, 1):
             lines += ["", f"**RL {name} 启动失败，第 {k} 次自动重新提交**（{r.get('utc')}）：{r.get('job_id')} → "

@@ -11,6 +11,10 @@ it): give each its own --job-dir, e.g. job_renderer and job_rl.
 Trials use one card (the user's rule for every job but the formal training); the formal SFT and PPO
 trainers use eight, the PPO render service one.  The pool is zoetrope unless a job is prepared with another one
 (--pool, the training chain's plan "pool"; round 11: h800 when zoetrope is full, the user's decision).
+
+Round 12 batch: ``pick_pool()`` returns the pool with the fewest jobs waiting for cards (the workspace's job list,
+every user's jobs); ``status`` also gives the job's creation and start times, so the chain can tell how long it
+queued.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ POOL = "zoetrope"
 POOLS = ("zoetrope", "h800")  # same H800 cards, specs, image and storage
 SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
+WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUED", "WAITING", "CREATING"}  # created, no cards yet
 
 
 def now() -> str:
@@ -88,7 +93,33 @@ def describe(job_id: str) -> dict:
 def status(run: Path, job_dir: str = "job") -> dict:
     job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
     d = describe(job_id)
-    return {"job_id": job_id, "state": d.get("state"), "finished": d.get("state") in FINISHED}
+    return {"job_id": job_id, "state": d.get("state"), "finished": d.get("state") in FINISHED,
+            "create_time": d.get("create_time"), "start_time": d.get("start_time")}
+
+
+def waiting_by_pool(jobs: List[dict], pools=POOLS) -> dict:
+    """{pool: jobs created but not yet given cards} of a job list (sco acp jobs list)."""
+    out = {p: 0 for p in pools}
+    for j in jobs:
+        pool = j.get("resource_pool")
+        name = pool.get("name") if isinstance(pool, dict) else pool
+        if name in out and str(j.get("state")) in WAITING:
+            out[name] += 1
+    return out
+
+
+def pick_pool(pools=POOLS) -> str:
+    """The pool with the fewest waiting jobs right now (ties and a failed listing: the first of ``pools``)."""
+    res = subprocess.run([SCO, "acp", "jobs", "list", "--workspace-name=aigc", "--page-size", "500", "-o", "json"],
+                         capture_output=True, text=True)
+    try:
+        jobs = json.loads(res.stdout) if res.returncode == 0 else None
+    except ValueError:
+        jobs = None
+    if not isinstance(jobs, list):
+        return pools[0]
+    waiting = waiting_by_pool(jobs, pools)
+    return min(pools, key=lambda p: (waiting[p], list(pools).index(p)))
 
 
 def delete(run: Path, job_dir: str = "job") -> dict:

@@ -933,6 +933,35 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(chain.run(), 0)
             self.assertEqual(chain.state["steps"]["rl"]["note"], "not planned (sft_only)")
 
+    def test_auto_pool_and_queue_times(self):
+        """Round 12 batch: plan "pool": "auto" asks job_sco.pick_pool for every new job, an RL run's render service
+        and trainer share the first choice; the time a job waited for cards is kept and shown."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "pool": "auto"}, sleep=lambda s: None)
+            picks = iter(["zoetrope", "h800", "zoetrope"])
+            with mock.patch.object(job_sco, "pick_pool", side_effect=lambda: next(picks)):
+                self.assertEqual(chain.job_pool("p1s0"), "zoetrope")
+                self.assertEqual(chain.job_pool("p1s0"), "zoetrope")  # the run keeps its pool
+                self.assertEqual(chain.job_pool("p1d"), "h800")
+                self.assertEqual(chain.job_pool(), "zoetrope")  # an evaluation job: picked anew
+            self.assertEqual(T.Chain({"tr": tmp, "sft_dir": tmp, "pool": "h800"}).job_pool("x"), "h800")
+            run = root / "rl_run_p1s0"
+            (run / "job_rl").mkdir(parents=True)
+            (run / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope"}))
+            chain.note_queue("rl/p1s0/rl", run, "job_rl", {"job_id": "pt-1", "create_time": "2026-10-20T01:00:00Z",
+                                                          "start_time": "2026-10-20T01:42:00Z"})
+            chain.note_queue("rl/p1s0/rl", run, "job_rl", {"job_id": "pt-2", "create_time": None})  # unknown: skipped
+            q = chain.state["queue"]
+            self.assertEqual(q["pt-1"], {"what": "rl/p1s0/rl", "pool": "zoetrope", "created": "2026-10-20T01:00:00Z",
+                                         "started": "2026-10-20T01:42:00Z", "queued_s": 2520})
+            self.assertNotIn("pt-2", q)
+            self.assertIn("| rl/p1s0/rl | pt-1 | zoetrope | 42 | 已开始 |", T.render_markdown(chain.state))
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)

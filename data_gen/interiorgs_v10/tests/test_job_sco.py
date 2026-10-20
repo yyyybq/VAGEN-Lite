@@ -51,6 +51,30 @@ class JobScoTest(unittest.TestCase):
             self.assertIn("--aec2-name=h800", calls[1])
             self.assertIn("--worker-spec=N4lS.Iq.I80.8", calls[1])
 
+    def test_pick_the_pool_with_fewer_waiting_jobs(self):
+        """Round 12 batch: the pool with the fewest jobs waiting for cards (every user's jobs in the workspace)."""
+        from unittest import mock
+
+        jobs = [{"state": "STARTING", "resource_pool": {"name": "h800"}},
+                {"state": "STARTING", "resource_pool": {"name": "h800"}},
+                {"state": "RUNNING", "resource_pool": {"name": "zoetrope"}},
+                {"state": "STARTING", "resource_pool": {"name": "zoetrope"}},
+                {"state": "SUCCEEDED", "resource_pool": {"name": "zoetrope"}}]
+        self.assertEqual(J.waiting_by_pool(jobs), {"zoetrope": 1, "h800": 2})
+
+        class Res:
+            def __init__(self, out, rc=0):
+                self.stdout, self.returncode, self.stderr = out, rc, ""
+
+        with mock.patch.object(J.subprocess, "run", return_value=Res(json.dumps(jobs))):
+            self.assertEqual(J.pick_pool(), "zoetrope")
+        with mock.patch.object(J.subprocess, "run", return_value=Res(json.dumps(jobs[:1]))):
+            self.assertEqual(J.pick_pool(), "zoetrope")  # h800 has one waiting, zoetrope none
+        with mock.patch.object(J.subprocess, "run", return_value=Res("", rc=1)):
+            self.assertEqual(J.pick_pool(), J.POOLS[0])  # no listing: the first pool
+        with mock.patch.object(J.subprocess, "run", return_value=Res("[]")):
+            self.assertEqual(J.pick_pool(("h800", "zoetrope")), "h800")  # a tie: the first of the given order
+
     def test_jobs_run_from_the_cluster_checkout(self):
         """Round 6: the cluster checkout is the only code directory (no more VAGEN-Lite-r4)."""
         self.assertEqual(J.WORKTREE, "/mnt/umm/users/yinbaiqiao/VAGEN-Lite")
