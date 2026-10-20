@@ -92,6 +92,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     <h1>P1 转移题核对（30 道）</h1>
     <p>每道题看图判断题库的正确答案对不对：点"对 / 错 / 有歧义"，有疑问写一句备注。选择存在这个浏览器里（换浏览器或清缓存会丢），核完点"导出 JSON"把结果文件发回来。</p>
     <p>前向题另附"动作之后"的画面，只供核对，模型看不到；逆向题的两张图依次是动作前、动作后。标"补入"的题替换了旧核对页里被重建题库抽掉的题（同题类、同划分）。每题下面的"过滤检查"是这道题经过的每一道过滤：测得的值和规则。</p>
+    <p id="note" hidden></p>
     <div class="legend">
       <span><span class="swatch" style="border-color:#ff0000"></span>红框 A：任务里的第一个物体</span>
       <span><span class="swatch" style="border-color:#0000ff"></span>蓝框 B：第二个物体（遮挡题里 A 是要藏的目标，B 是遮挡物）</span>
@@ -119,6 +120,9 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
   const FUNNEL = JSON.parse(document.getElementById("funnel-data").textContent);
   const META = JSON.parse(document.getElementById("meta-data").textContent);
   const KEY = "p1_review:" + META.bank + ":" + META.page;
+  if (META.title) { document.title = META.title; document.querySelector("header.intro h1").textContent = META.title; }
+  if (META.note) { const p = document.getElementById("note"); p.textContent = META.note; p.hidden = false; }
+  const EXPORT_NAME = String(META.page || "p1_review.html").replace(/\.html$/, "") + "_verdicts.json";
   const CLASS_ZH = { state: "状态题", forward: "前向题", inverse: "逆向题" };
   const ROLE_ZH = { terminal: "轨迹终点", start: "起点", middle: "中间帧", interior: "目标区域内部（另渲染）" };
   const LABEL = { right: "对", wrong: "错", ambiguous: "有歧义" };
@@ -145,7 +149,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
       const v = verdicts[idOf(it.n)] || {};
       counts[v.verdict || "unchecked"] += 1;
       return { n: it.n, sample_id: it.sample_id, qtype: it.qtype, family: it.family, split: it.split, origin: it.origin || "kept",
-               answer: it.answer, verdict: v.verdict || null, note: v.note || "" };
+               tag: it.tag || null, answer: it.answer, verdict: v.verdict || null, note: v.note || "" };
     });
     return { page: META.page, bank: META.bank, exported_utc: new Date().toISOString(), counts: counts, verdicts: rows };
   }
@@ -155,9 +159,9 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     try {
       const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
       const a = document.createElement("a");
-      a.href = url; a.download = "p1_review_verdicts.json"; document.body.append(a); a.click(); a.remove();
+      a.href = url; a.download = EXPORT_NAME; document.body.append(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      status = "已导出 p1_review_verdicts.json（如果没看到下载，用页面最后的文字框）。";
+      status = "已导出 " + EXPORT_NAME + "（如果没看到下载，用页面最后的文字框）。";
     } catch (e) { status = "下载被浏览器拦下了，用页面最后的文字框复制。"; }
     const box = document.getElementById("fallback-box");
     box.hidden = false; document.getElementById("fallback").value = text;
@@ -203,6 +207,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     head.append(el("span", "chip", it.family));
     head.append(el("span", "chip cls", (it.split === "train" ? "训练场景" : "val 场景") + "，" + (ROLE_ZH[it.state_role] || it.state_role)));
     if (it.origin === "replacement") head.append(el("span", "chip new", "补入"));
+    if (it.tag) head.append(el("span", "chip new", it.tag));
     head.append(el("span", "sid", it.sample_id));
     c.append(head);
     const task = el("div", "task");
@@ -255,6 +260,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
 
   function funnel() {
     const t = document.getElementById("funnel-table");
+    if (!FUNNEL.length) { t.closest("section").hidden = true; return; }
     const hr = el("tr"); [["题类", ""], ["出题", "n"], ["没出：原因（候选数）", ""], ["平衡等去掉（train）", ""]].forEach(([h, k]) => hr.append(el("th", k || null, h))); t.append(hr);
     const fmt = (n) => Number(n).toLocaleString("en-US");
     FUNNEL.forEach((r) => {

@@ -320,6 +320,24 @@ def test_answers_balanced_within_stem_cells():
         assert len(c) == 2 and max(c.values()) <= 1.15 * min(c.values()) + 1
 
 
+def test_occluder_check_spreads_over_types_answers_and_tasks():
+    from data_gen.transition_qa import review as RV
+
+    assert RV.occluder_group("wardrobe") == "wardrobe" and RV.occluder_group("easel") == "thin"
+    assert RV.occluder_group("sofa") == ""
+    rs = []
+    for i in range(60):
+        r = _rec(i, "occluded_now" if i % 3 else "occluded_after", "A", ["full", "partial"][i % 2])
+        r["task_id"] = f"t{i % 30}"
+        r["label"] = ["easel", "monitor", "telescope"][i % 3]
+        rs.append(r)
+    picks = RV.spread_pick(rs, 10, random.Random(0), lambda r: r["label"])
+    assert len(picks) == 10 and len({r["sample_id"] for r in picks}) == 10
+    cells = collections.Counter((r["qtype"], r["answer_value"]) for r in picks)
+    assert len(cells) == 4 and max(cells.values()) - min(cells.values()) <= 1     # both types, both answers, in turn
+    assert len({r["task_id"] for r in picks}) == 10                                # new tasks while there are some
+
+
 def test_window_quota_is_the_optimum():
     # bins 1..6 (0.5 m .. 3.0 m): windows 1, 2, 3; bin 1 only fits window 1, bin 6 only window 3
     n = {1: 10, 2: 30, 3: 40, 4: 40, 5: 30, 6: 10}

@@ -4,6 +4,9 @@
     python -m data_gen.transition_qa.review refill --sft-dir SFT --old OLD_OUT --out OUT   # the same check, rebuilt bank
     python data_gen/interiorgs_v10/pilot_sco.py prepare --pilot OUT/review --gs-root PLY   # then submit
     python -m data_gen.transition_qa.review page --out OUT [--html OUT/review/p1_review.html]
+    # occlusion questions with a suspect occluder (wardrobe, person, thin or irregular), 10 per group
+    python -m data_gen.transition_qa.review occluders --sft-dir SFT --out OUT --extra EXTRA_TASKS
+    python -m data_gen.transition_qa.review page --out OUT --dir review_occluders --no-funnel --title ... --html ...
 
 ``sample`` draws the questions (2 per question type from the training and test files, then random ones),
 draws the task's objects on copies of their images (A red, B blue: ``admission.overlay_boxes``,
@@ -162,6 +165,89 @@ def cmd_refill(args: argparse.Namespace) -> None:
 
 
 # =============================================================================
+# occluder check (user, 2026-10-20): occluders are solid boxes in the occlusion judge; check the suspect ones
+# =============================================================================
+# Occluders whose bounding box is a poor stand-in for their shape: open inside (wardrobe, question 18 of the first
+# check), a person, thin or irregular objects.  Only "fully / partly hidden" answers can be wrong this way (the box
+# covers more than the object), so the check draws from those.
+OCCLUDER_GROUPS = {
+    "wardrobe": ("wardrobe",),
+    "person": ("person",),
+    "thin": ("live streaming equipment", "computer", "monitor", "easel", "telescope", "musical instrument",
+             "shower head", "dry branches", "tv", "microphone", "faucet combination", "clock", "sculpture"),
+}
+GROUP_ZH = {"wardrobe": "衣柜", "person": "人", "thin": "细或不规则"}
+
+
+def occluder_group(label: str) -> str:
+    return next((g for g, labels in OCCLUDER_GROUPS.items() if label in labels), "")
+
+
+def spread_pick(cands: List[Dict[str, Any]], n: int, rng: random.Random, label_of) -> List[Dict[str, Any]]:
+    """``n`` of ``cands``: (qtype, answer) groups in turn, then tasks and occluder labels not used yet."""
+    cands = sorted(cands, key=lambda r: r["sample_id"])
+    rng.shuffle(cands)
+    buckets: Dict[Any, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for r in cands:
+        buckets[(r["qtype"], r["answer_value"])].append(r)
+    picked: List[Dict[str, Any]] = []
+    tasks: set = set()
+    labels: collections.Counter = collections.Counter()
+    while len(picked) < n and any(buckets.values()):
+        for key in sorted(buckets):
+            b = buckets[key]
+            if len(picked) >= n or not b:
+                continue
+            b.sort(key=lambda r: (r["task_id"] in tasks, labels[label_of(r)]))  # stable: keeps the drawn order
+            r = b.pop(0)
+            picked.append(r)
+            tasks.add(r["task_id"])
+            labels[label_of(r)] += 1
+    return picked
+
+
+def cmd_occluders(args: argparse.Namespace) -> None:
+    """``--per-group`` occlusion questions of the bank (train, test, probe) with a "fully / partly hidden" answer per
+    occluder group, boxed like ``sample``, into OUT/<dir>; plus population.json: every occlusion question of the bank
+    by group and answer (to turn the error rate of the check into a share of the bank)."""
+    sft, out = Path(args.sft_dir), Path(args.out)
+    d = out / args.dir
+    (d / "img").mkdir(parents=True, exist_ok=True)
+    rows = {r["task_id"]: r for r in GEN.read_jsonl(sft / "rows.jsonl")}
+    frames = {f["frame_id"]: f for f in GEN.read_jsonl(sft / "frames.jsonl")}
+    for extra in [Path(p) for p in args.extra] + sorted(out.glob("extra_*")):
+        rows.update({r["task_id"]: r for r in GEN.read_jsonl(extra / "rows.jsonl")})
+        frames.update({f["frame_id"]: f for f in GEN.read_jsonl(extra / "frames.jsonl")})
+    label_of = lambda r: rows[r["task_id"]]["target_object"]["objects"][1]["label"]  # noqa: E731
+    occ = [dict(r, bank_file=f) for f in ("p1_train.jsonl", "p1_test.jsonl", "p1_probe.jsonl")
+           for r in GEN.read_jsonl(out / f) if r["qtype"].startswith("occluded")]
+    population: Dict[str, Dict[str, int]] = collections.defaultdict(collections.Counter)
+    for r in occ:
+        population[occluder_group(label_of(r)) or "other"][r["answer_value"]] += 1
+    rng = random.Random(args.seed)
+    picks = []
+    for g in OCCLUDER_GROUPS:
+        cands = [r for r in occ if occluder_group(label_of(r)) == g and r["answer_value"] in ("full", "partial")]
+        picks += [(g, r) for r in spread_pick(cands, args.per_group, rng, label_of)]
+    rng.shuffle(picks)
+    sample, render = [], []
+    for i, (g, r) in enumerate(picks, 1):
+        entry, post = _review_entry(i, r, rows[r["task_id"]], frames, {}, d)
+        entry.update(tag=f"遮挡物：{GROUP_ZH[g]}（{label_of(r)}）", occluder_group=g, occluder_label=label_of(r),
+                     bank_file=r["bank_file"])
+        sample.append(entry)
+        if post:
+            render.append(post)
+    GEN.write_jsonl(d / "sample.jsonl", sample)
+    GEN.write_jsonl(d / "frames.jsonl", render)
+    (d / "population.json").write_text(json.dumps({g: dict(c) for g, c in population.items()}, indent=1))
+    print(json.dumps({"questions": len(sample), "post_frames": len(render),
+                      "by_group": collections.Counter(s["occluder_group"] for s in sample),
+                      "by_qtype_answer": collections.Counter((s["qtype"], s["answer"]) for s in sample).most_common(),
+                      "population": {g: dict(c) for g, c in population.items()}}, indent=1, default=str))
+
+
+# =============================================================================
 # filter checks: what each question passed, with the measured value against the rule (for the check page)
 # =============================================================================
 VISIBLE = {"left_right": "A、B 在当前画面都清楚可见（face_visible_v3）", "closer": "A、B 在当前画面都清楚可见（face_visible_v3）",
@@ -269,9 +355,10 @@ def cmd_page(args: argparse.Namespace) -> None:
     from data_gen.interiorgs_v10.pilot import safe_name
 
     out = Path(args.out)
-    d = out / "review"
+    d = out / args.dir
     cfg = json.loads((out / "config.json").read_text())
-    bank = {r["sample_id"]: r for f in ("p1_train.jsonl", "p1_test.jsonl") for r in GEN.read_jsonl(out / f)}
+    bank = {r["sample_id"]: r for f in ("p1_train.jsonl", "p1_test.jsonl", "p1_probe.jsonl") if (out / f).exists()
+            for r in GEN.read_jsonl(out / f)}
 
     def b64(p: Path) -> str:
         return "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()
@@ -287,15 +374,15 @@ def cmd_page(args: argparse.Namespace) -> None:
         s["checks"] = filter_checks(rec, cfg)
         items.append(s)
     (d / "review_data.json").write_text(json.dumps(items, ensure_ascii=False))
-    stats = json.loads((out / "stats.json").read_text())
-    funnel = funnel_table(stats)
+    funnel = [] if args.no_funnel else funnel_table(json.loads((out / "stats.json").read_text()))
     (d / "funnel_data.json").write_text(json.dumps(funnel, ensure_ascii=False))
     info = {"items": len(items), "bytes": (d / "review_data.json").stat().st_size}
     if args.html:  # one self-contained file: images inline, verdicts kept in the browser and exported as JSON
         def blob(x: Any) -> str:
             return json.dumps(x, ensure_ascii=False).replace("</", "<\\/")
 
-        meta = {"bank": str(out.resolve()), "page": Path(args.html).name, "questions": len(items)}
+        meta = {"bank": str(out.resolve()), "page": Path(args.html).name, "questions": len(items),
+                "title": args.title or None, "note": args.note or None}
         page = TEMPLATE.read_text(encoding="utf-8")
         page = page.replace("__REVIEW_DATA__", blob(items)).replace("__FUNNEL_DATA__", blob(funnel))
         page = page.replace("__META__", blob(meta))
@@ -322,9 +409,21 @@ def main() -> None:
     f.add_argument("--out", required=True, help="the rebuilt bank")
     f.add_argument("--seed", type=int, default=20261020)
     f.set_defaults(func=cmd_refill)
+    o = sub.add_parser("occluders", help="occlusion questions with suspect occluders (wardrobe, person, thin)")
+    o.add_argument("--sft-dir", required=True)
+    o.add_argument("--out", required=True, help="the bank")
+    o.add_argument("--dir", default="review_occluders")
+    o.add_argument("--extra", action="append", default=[], help="a folder of extra tasks (rows.jsonl, frames.jsonl)")
+    o.add_argument("--per-group", type=int, default=10)
+    o.add_argument("--seed", type=int, default=20261020)
+    o.set_defaults(func=cmd_occluders)
     b = sub.add_parser("page")
     b.add_argument("--out", required=True)
+    b.add_argument("--dir", default="review", help="the check's folder under OUT")
     b.add_argument("--html", default="", help="also write the self-contained check page here")
+    b.add_argument("--title", default="", help="the page's heading (default: the 30-question check)")
+    b.add_argument("--note", default="", help="one more paragraph under the heading")
+    b.add_argument("--no-funnel", action="store_true", help="leave out the table of candidates not asked")
     b.set_defaults(func=cmd_page)
     args = ap.parse_args()
     args.func(args)
