@@ -27,7 +27,7 @@ torchcodec==0.2.1
 peft==0.11.1
 imageio[ffmpeg]
 opencv-python
-gymnasium
+gymnasium==1.3.0
 gym
 # RLinf StarVLA pins (requirements/embodied/models/starvla.txt) except numpy (below)
 accelerate==1.5.2
