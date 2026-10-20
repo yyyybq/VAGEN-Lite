@@ -74,6 +74,12 @@ Round 12 batch: plan "pool": "auto" submits every job to the pool with the fewes
 (job_sco.pick_pool; a run's render service and trainer stay in one pool); the time each job waited for cards is kept
 in state["queue"] and shown in PROGRESS.md.
 
+Round 12 batch (the user's rule: any failed job is resubmitted at most twice): plan "retries": N resubmits a failed
+job up to N times before the step fails: an RL trainer that ends without its endpoint checkpoint (it resumes from
+its latest checkpoint; together with the start-up resubmissions at most N per run), a render service that dies (it
+and the trainer are resubmitted), an SFT job (its model folder is moved aside first) and an evaluation job (it goes
+on from the results already written).  Every resubmission is kept in state["job_retries"] and shown in PROGRESS.md.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -370,6 +376,15 @@ def code_changes(porcelain: Sequence[str]) -> Tuple[List[str], List[str]]:
     return changed, ignored
 
 
+def drop_partial_line(path: Path) -> None:
+    """A results.jsonl whose last line was cut off by a dying job loses that line (the rerun redoes the task)."""
+    if not path.is_file():
+        return
+    text = path.read_text()
+    if text and not text.endswith("\n"):
+        path.write_text(text[: text.rfind("\n") + 1])
+
+
 class SignalCheckFailed(Exception):
     """An RL run missed the signal check (plan "rl"."signal_check")."""
 
@@ -474,6 +489,17 @@ class Chain:
             chosen[key] = pool
         return pool
 
+    def take_retry(self, key: str, what: str, job_id: Optional[str], reason: str, used: int = 0) -> bool:
+        """Round 12 batch: whether a failed job may be resubmitted (plan "retries" minus earlier ones for ``key`` and
+        ``used`` others, e.g. a run's start-up resubmissions); if so, the resubmission is recorded."""
+        budget = int(self.plan.get("retries", 0) or 0)
+        rec = self.state.setdefault("job_retries", {}).setdefault(key, [])
+        if len(rec) + used >= budget:
+            return False
+        rec.append({"utc": now(), "what": what, "job_id": job_id, "reason": reason})
+        self.save()
+        return True
+
     def note_queue(self, what: str, run: Path, job_dir: str, st: Dict[str, Any]) -> None:
         """Round 12 batch: how long a job waited for cards (its creation to its start; still waiting: to now)."""
         job_id = st.get("job_id")
@@ -556,9 +582,10 @@ class Chain:
                     raise ChainError(f"job {name} is {s.get('state')}")
             self.sleep(POLL_S)
 
-    def wait_all(self, step: str, runs: Dict[str, Path]) -> None:
+    def wait_all(self, step: str, runs: Dict[str, Path], on_retry: Optional[Callable[[str], None]] = None) -> None:
         """Poll until every job of ``runs`` ({name: run folder}) finished; every job is deleted afterwards; a job
-        that did not succeed fails the step (after the others ended too)."""
+        that did not succeed fails the step (after the others ended too), unless plan "retries" allows resubmitting
+        it (``on_retry(name)`` runs first)."""
         from . import job_sco
 
         pending, ended = dict(runs), {}
@@ -567,7 +594,15 @@ class Chain:
                 for name, run in list(pending.items()):
                     st = job_sco.status(run)
                     self.note_queue(f"{step}/{name}", run, "job", st)
-                    if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
+                    done = st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND")
+                    if done and st.get("state") != "SUCCEEDED" and self.take_retry(
+                            f"{step}/{name}", step, st.get("job_id"), f"ended {st.get('state')}"):
+                        job_sco.delete(run)
+                        if on_retry is not None:
+                            on_retry(name)
+                        job_sco.submit(run)
+                        continue
+                    if done:
                         ended[name] = st.get("state")
                         job_sco.delete(run)
                         pending.pop(name)
@@ -665,7 +700,16 @@ class Chain:
             runs[group or "sft"] = run
         self.mark("sft", job_ids={n: json.loads((r / "job" / "submission.json").read_text())["job_id"]
                                   for n, r in runs.items()})
-        self.wait_all("sft", runs)
+
+        def fresh_model_folder(name: str) -> None:  # a resubmitted SFT starts over (save_only_model: no resume)
+            model = self.lf_dir("" if name == "sft" else name) / "model"
+            if model.exists():
+                k = 1
+                while (model.parent / f"model_failed_{k}").exists():
+                    k += 1
+                model.rename(model.parent / f"model_failed_{k}")
+
+        self.wait_all("sft", runs, on_retry=fresh_model_folder)
         for group in self.sft_groups():
             model = self.lf_dir(group) / "model"
             if not (model / "config.json").is_file() or not list(model.glob("*.safetensors")):
@@ -702,6 +746,12 @@ class Chain:
                     self.note_queue(f"{step}/{name}", run, "job", st)
                     if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
                         eval_dir, result = jobs[name][0], jobs[name][1]
+                        if not (eval_dir / result / "done.json").exists() and self.take_retry(
+                                f"{step}/{name}", "evaluation", st.get("job_id"), f"ended {st.get('state')} without results"):
+                            job_sco.delete(run)
+                            drop_partial_line(eval_dir / result / "results.jsonl")
+                            job_sco.submit(run)  # the evaluation goes on from the results already written
+                            continue
                         if not (eval_dir / result / "done.json").exists():
                             failed.append(f"{name} ({st.get('state')})")
                         ended[name] = st.get("state")
@@ -924,11 +974,34 @@ class Chain:
                             ended[name] = f"start-up: {problem} (after {limit} resubmissions)"
                             active.pop(name)
                             continue
-                    if st_rl.get("finished") or st_rl.get("state") in ("NOT_FOUND", "SUSPENDED"):
+                    rl_done = st_rl.get("finished") or st_rl.get("state") in ("NOT_FOUND", "SUSPENDED")
+                    r_done = st_r.get("finished") or st_r.get("state") in ("NOT_FOUND", "SUSPENDED")
+                    reached = (d / "checkpoints" / f"global_step_{endpoint}").is_dir()
+                    used = len((self.state.get("startup_retries") or {}).get(name, []))
+                    if rl_done and not reached and self.take_retry(  # round 12 batch: resume from the last checkpoint
+                            f"rl/{name}", "trainer", st_rl.get("job_id"), f"trainer ended {st_rl.get('state')}", used):
+                        job_sco.delete(d, "job_rl")
+                        job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
+                                        pool=self.job_pool(name))
+                        job_sco.submit(d, job_dir="job_rl")
+                        continue
+                    if not rl_done and r_done and self.take_retry(
+                            f"rl/{name}", "renderer", st_r.get("job_id"), f"render service ended {st_r.get('state')}", used):
+                        job_sco.delete(d, "job_rl")  # the trainer needs the new render service's address
+                        job_sco.delete(d, "job_renderer")
+                        for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
+                            (d / f).unlink(missing_ok=True)
+                        job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.job_pool(name))
+                        job_sco.submit(d, job_dir="job_renderer")
+                        job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
+                                        pool=self.job_pool(name))
+                        job_sco.submit(d, job_dir="job_rl")
+                        continue
+                    if rl_done:
                         (d / "STOP_RENDERER").touch()
                         ended[name] = st_rl.get("state")
                         active.pop(name)
-                    elif st_r.get("finished") or st_r.get("state") in ("NOT_FOUND", "SUSPENDED"):
+                    elif r_done:
                         (d / "STOP_RENDERER").touch()  # the render service died: the trainer cannot go on
                         job_sco.delete(d, "job_rl")
                         ended[name] = f"renderer {st_r.get('state')}"
@@ -1207,6 +1280,9 @@ def render_markdown(state: Dict[str, Any]) -> str:
         for job_id, q in sorted(queue.items(), key=lambda kv: kv[1].get("created") or ""):
             lines.append(f"| {q.get('what')} | {job_id} | {q.get('pool')} | {round((q.get('queued_s') or 0) / 60)} | "
                          f"{'已开始' if q.get('started') else '排队中'} |")
+    for key, retries in (state.get("job_retries") or {}).items():
+        for k, r in enumerate(retries, 1):
+            lines += ["", f"**{key} 失败，第 {k} 次自动重新提交**（{r.get('utc')}）：{r.get('job_id')}；原因：{r.get('reason')}"]
     for name, retries in (state.get("startup_retries") or {}).items():
         for k, r in enumerate(retries, 1):
             lines += ["", f"**RL {name} 启动失败，第 {k} 次自动重新提交**（{r.get('utc')}）：{r.get('job_id')} → "

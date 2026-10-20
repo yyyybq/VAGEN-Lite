@@ -962,6 +962,125 @@ class ChainTest(unittest.TestCase):
             self.assertNotIn("pt-2", q)
             self.assertIn("| rl/p1s0/rl | pt-1 | zoetrope | 42 | 已开始 |", T.render_markdown(chain.state))
 
+    def test_retries_of_failed_jobs(self):
+        """Round 12 batch (the user's rule): plan "retries": 2 resubmits a failed RL trainer (it resumes), a dead
+        render service (with its trainer), an SFT job (model folder moved aside) and an evaluation job (going on from
+        its results); a third failure fails the step; without the option nothing is resubmitted."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def rl_chain(root, script, retries=2):
+            """script: per run, the outcomes of its successive trainer / renderer jobs."""
+            chain = T.Chain({"tr": str(root), "sft_dir": str(root), "endpoint": 50, "gs_root": "/ply", "retries": retries,
+                             "rl_runs": {n: {} for n in script}}, sleep=lambda s: None)
+            count = {}
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                key = (run.name, job_dir)
+                count[key] = count.get(key, 0) + 1
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}-{count[key]}"}))
+
+            def status(run, job_dir="job"):
+                name = run.name[len("rl_run_"):]
+                n = count[(run.name, job_dir)]
+                kind = script[name][job_dir][min(n, len(script[name][job_dir])) - 1]
+                if kind == "ok" and job_dir == "job_rl":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": f"x{n}", "state": "SUCCEEDED", "finished": True}
+                if kind == "run":
+                    if job_dir == "job_renderer" and (run / "STOP_RENDERER").exists():
+                        return {"job_id": f"x{n}", "state": "SUCCEEDED", "finished": True}
+                    return {"job_id": f"x{n}", "state": "RUNNING", "finished": False}
+                return {"job_id": f"x{n}", "state": "FAILED", "finished": True}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            return chain, count, mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chain, count, patch = rl_chain(Path(tmp), {
+                "a": {"job_rl": ["fail", "fail", "ok"], "job_renderer": ["run"]},          # the trainer fails twice
+                "b": {"job_rl": ["run", "ok"], "job_renderer": ["fail", "run"]}})          # the render service dies
+            with patch:
+                chain.rl()
+            self.assertEqual(count[("rl_run_a", "job_rl")], 3)
+            self.assertEqual((count[("rl_run_b", "job_renderer")], count[("rl_run_b", "job_rl")]), (2, 2))
+            self.assertEqual([r["what"] for r in chain.state["job_retries"]["rl/a"]], ["trainer", "trainer"])
+            self.assertEqual([r["what"] for r in chain.state["job_retries"]["rl/b"]], ["renderer"])
+            self.assertIn("**rl/a 失败，第 2 次自动重新提交**", T.render_markdown(chain.state))
+        with tempfile.TemporaryDirectory() as tmp:  # a third failure: given up, the step fails
+            chain, count, patch = rl_chain(Path(tmp), {"a": {"job_rl": ["fail"] * 3, "job_renderer": ["run"]}})
+            with patch, self.assertRaises(T.ChainError):
+                chain.rl()
+            self.assertEqual(count[("rl_run_a", "job_rl")], 3)
+        with tempfile.TemporaryDirectory() as tmp:  # no "retries": as before
+            chain, count, patch = rl_chain(Path(tmp), {"a": {"job_rl": ["fail", "ok"], "job_renderer": ["run"]}}, retries=0)
+            with patch, self.assertRaises(T.ChainError):
+                chain.rl()
+            self.assertEqual(count[("rl_run_a", "job_rl")], 1)
+
+        # SFT: the failed run's model folder is kept aside and the job resubmitted
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "retries": 2, "sft_groups": {"s050": "x.jsonl"}}, sleep=lambda s: None)
+            (root / "lf_s050" / "model" / "checkpoint-5").mkdir(parents=True)
+            states = iter(["FAILED", "SUCCEEDED"])
+
+            def status(run, job_dir="job"):
+                s = next(states)
+                if s == "SUCCEEDED":
+                    model = root / "lf_s050" / "model"
+                    model.mkdir(parents=True, exist_ok=True)
+                    (model / "config.json").write_text("{}")
+                    (model / "model.safetensors").write_text("")
+                return {"job_id": "pt-s", "state": s, "finished": True}
+
+            submitted = []
+            with mock.patch.multiple(job_sco, prepare=lambda *a, **k: None, status=status,
+                                     submit=lambda run, job_dir="job": (submitted.append(run.name), (run / "job").mkdir(parents=True, exist_ok=True),
+                                                                        (run / "job" / "submission.json").write_text('{"job_id": "pt-s"}')),
+                                     delete=lambda run, job_dir="job": (run / "job" / "submission.json").unlink(missing_ok=True)):
+                chain.sft()
+            self.assertEqual(submitted, ["sft_s050", "sft_s050"])
+            self.assertTrue((root / "lf_s050" / "model_failed_1" / "checkpoint-5").is_dir())
+
+        # evaluation: the rerun goes on from the results written (a cut-off last line dropped)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "retries": 2}, sleep=lambda s: None)
+            (root / "m").mkdir()
+            (root / "m" / "config.json").write_text("{}")
+            res = root / "val" / "r1"
+            res.mkdir(parents=True)
+            (res / "results.jsonl").write_text('{"index": 0}\n{"index": 1, "succ')
+            states = iter(["FAILED", "SUCCEEDED"])
+            submitted = []
+
+            def status(run, job_dir="job"):
+                s = next(states)
+                if s == "SUCCEEDED":
+                    self.assertEqual((res / "results.jsonl").read_text(), '{"index": 0}\n')  # the partial line went
+                    (res / "done.json").write_text("{}")
+                return {"job_id": "pt-e", "state": s, "finished": True}
+
+            def submit(run, job_dir="job"):
+                submitted.append(run.name)
+                (run / "job" / "submission.json").write_text("{}")
+
+            with mock.patch.multiple(job_sco, status=status, submit=submit,
+                                     prepare=lambda run, *a, **k: (run / "job").mkdir(parents=True, exist_ok=True),
+                                     delete=lambda run, job_dir="job": (run / "job" / "submission.json").unlink(missing_ok=True)):
+                chain.eval_jobs("evaluate", {"val__r1": (root / "val", "r1", str(root / "m"), None, [])})
+            self.assertEqual(submitted, ["val__r1", "val__r1"])
+            self.assertEqual(len(chain.state["job_retries"]["evaluate/val__r1"]), 1)
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)
