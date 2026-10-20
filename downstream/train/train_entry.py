@@ -137,6 +137,7 @@ def dry_run(args) -> int:
     from starVLA.training.trainer_utils.config_tracker import wrap_config
 
     cfg = load_config(args.config_yaml, args.overrides)
+    cfg.framework.qwenvl.attn_implementation = "sdpa"  # FlashAttention cannot initialise on CPU; no effect on weights
     seed = int(cfg.seed)
     force_bf16_loading()
     module = seed_dataset(seed)
@@ -153,7 +154,8 @@ def dry_run(args) -> int:
     global_batch = int(data_cfg.per_device_batch_size) * args.world
     batches, digest = sample_ids(dataset, args.batches, global_batch)
     record = {"config": str(args.config_yaml), "base_vlm": str(cfg.framework.qwenvl.base_vlm), "seed": seed,
-              "load_dtype": LOAD_DTYPE, "backbone_dtypes": backbone_dtypes(model),
+              "mode": "dry run on CPU (attention sdpa)", "load_dtype": LOAD_DTYPE,
+              "backbone_dtypes": backbone_dtypes(model),
               "rng_sha_before_build": rng_before,
               "action_head_init_sha": tensor_sha(model.action_model.parameters()),
               "dataset_seed": int(dataset.seed), "global_batch": global_batch, "n_batches": args.batches,
