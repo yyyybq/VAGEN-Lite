@@ -13,7 +13,9 @@ What it changes relative to starVLA/training/train_starvla.py (decisions D1 / D2
      only on the seed (StarVLA seeds after building the model);
   3. the seed is passed to the dataset sampler (StarVLA always uses its default 42), so the data order depends only
      on the seed;
-  4. the checkpoint at the last step is not written twice (StarVLA writes steps_<max> and final_model).
+  4. the checkpoint at the last step is not written twice (StarVLA writes steps_<max> and final_model);
+  5. the data / framework config keys are all read before StarVLA saves run/config.yaml, so the policy server
+     (which builds its serving contract from that file) sees obs_image_size etc. even in a short run.
 It also writes, on rank 0, OUTPUT/downstream_record.json (load dtype, action-head hash, the sample ids of the first
 20 global batches, timings) and OUTPUT/metrics.jsonl (one line per logged step).
 """
@@ -107,6 +109,24 @@ def sample_ids(dataset, n_batches: int, global_batch: int):
         batches.append(batch)
     digest = hashlib.sha256(json.dumps(batches).encode()).hexdigest()[:16]
     return batches, digest
+
+
+SERVING_SECTIONS = (("datasets", "vla_data"), ("framework", "action_model"), ("framework", "qwenvl"))
+
+
+def mark_for_serving(cfg) -> list:
+    """StarVLA saves run/config.yaml with only the config keys training has read, and its policy server builds the
+    serving contract from that file (e.g. training_obs_image_size, which a short run never reads).  Read every key of
+    the data and framework sections so config.yaml carries them all."""
+    read = []
+    for path in SERVING_SECTIONS:
+        node = cfg
+        for part in path:
+            node = getattr(node, part)
+        for key in list(node.keys()):
+            getattr(node, key)
+            read.append(".".join(path + (key,)))
+    return read
 
 
 def backbone_dtypes(model) -> dict:
@@ -214,6 +234,7 @@ def train(args) -> int:
     T.VLATrainer._log_metrics = _log_metrics
 
     cfg = T.wrap_config(cfg)
+    record["serving_keys_read"] = len(mark_for_serving(cfg))
     output_dir = T.setup_directories(cfg)
     t0 = time.time()
     vla, rng_before = seeded_build(T.build_framework, cfg, seed)

@@ -74,7 +74,8 @@ def _as_int(value):
         return None if value is None else str(value)
 
 
-def _init_worker(ckpt: str, servers, starvla_root: str):
+def connect(ckpt: str, server: str, starvla_root: str):
+    """A websocket client to one policy server, checked against the checkpoint's contract."""
     sys.path.insert(0, str(WORKTREE))
     sys.path.insert(0, starvla_root)
     from deployment.model_server.tools.websocket_policy_client import WebsocketClientPolicy
@@ -82,21 +83,35 @@ def _init_worker(ckpt: str, servers, starvla_root: str):
 
     config, _ = checkpoint_config(ckpt)
     contract = PolicyContract.from_config(config)
-    worker = mp.current_process()._identity[0] if mp.current_process()._identity else 1
-    host, port = servers[(worker - 1) % len(servers)].split(":")
+    host, port = server.split(":")
     policy = WebsocketClientPolicy(host, int(port))
     verify_server(policy.get_server_metadata(), ckpt, contract)
-    _STATE.update(contract=contract, policy=policy, server=f"{host}:{port}", worker=worker)
+    return contract, policy
+
+
+def _init_worker(ckpt: str, servers, starvla_root: str):
+    """Never raises: a failing initializer makes multiprocessing respawn workers forever, so the error is kept and
+    every episode of this worker reports it instead."""
+    worker = mp.current_process()._identity[0] if mp.current_process()._identity else 1
+    server = servers[(worker - 1) % len(servers)]
+    _STATE.update(server=server, worker=worker)
+    try:
+        contract, policy = connect(ckpt, server, starvla_root)
+        _STATE.update(contract=contract, policy=policy)
+    except Exception as exc:
+        _STATE["init_error"] = f"{type(exc).__name__}: {exc}"[:500]
 
 
 def run_episode(spec: dict) -> dict:
+    out = dict(spec, worker=_STATE.get("worker"), server=_STATE.get("server"), pid=os.getpid())
+    if "init_error" in _STATE:
+        return dict(out, status="error", error="worker init: " + _STATE["init_error"], wall_seconds=0.0)
     import gymnasium as gym
     import numpy as np
     import robocasa.wrappers.gym_wrapper  # noqa: F401  (registers robocasa/<task>)
     from vagen.envs.robocasa.starvla_contract import gym_action
 
     contract, policy = _STATE["contract"], _STATE["policy"]
-    out = dict(spec, worker=_STATE["worker"], server=_STATE["server"], pid=os.getpid())
     env = None
     started = time.monotonic()
     try:
@@ -168,6 +183,14 @@ def main() -> int:
         e.update(split=args.split, execute_steps=args.execute_steps)
     (args.out / "plan.json").write_text(json.dumps({"ckpt": args.ckpt, "servers": args.servers, "workers": args.workers,
                                                     "episodes": episodes}, indent=1) + "\n")
+    for server in args.servers.split(","):  # fail fast, before any simulator starts
+        try:
+            connect(args.ckpt, server, args.starvla_root)
+        except Exception as exc:
+            (args.out / "summary.json").write_text(json.dumps({"error": f"server {server}: {type(exc).__name__}: {exc}"},
+                                                              indent=1) + "\n")
+            print(f"[closed_loop] server {server} failed the contract check: {type(exc).__name__}: {exc}")
+            return 2
     rows = []
     t0 = time.monotonic()
     ctx = mp.get_context("spawn")

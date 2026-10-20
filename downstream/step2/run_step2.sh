@@ -4,10 +4,12 @@
 #   1 seed evidence: CPU dry runs (RS s1, B s1, RS s2)                5 closed loop: 1 policy server (GPU 0), the same
 #   2 SFT: StarVLA via downstream/train/train_entry.py, 8 GPUs          24 episodes with 3, 12 and 24 parallel
 #   3 held-out action error (scripts/eval_starvla_heldout.py, 1 GPU)     simulator processes, GPU utilisation sampled
-# Usage: run_step2.sh EXP_DIR DATA_DIR.  Writes only under EXP_DIR.
+# Usage: run_step2.sh EXP_DIR DATA_DIR [eval-only TAG].  "eval-only TAG" repeats only stage 5 for the existing
+# checkpoint, into EXP_DIR/step2/TAG/ (earlier outputs are left as they are).  Writes only under EXP_DIR.
 set -uo pipefail
-EXP="${1:?Usage: run_step2.sh EXP_DIR DATA_DIR}"
-DATA="${2:?Usage: run_step2.sh EXP_DIR DATA_DIR}"
+EXP="${1:?Usage: run_step2.sh EXP_DIR DATA_DIR [eval-only TAG]}"
+DATA="${2:?Usage: run_step2.sh EXP_DIR DATA_DIR [eval-only TAG]}"
+MODE="${3:-all}"
 WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MAIN=/mnt/umm/users/yinbaiqiao/VAGEN-Lite
 STARVLA_ROOT="$MAIN/third_party/starVLA"
@@ -17,12 +19,18 @@ TASKS="NavigateKitchen OpenStandMixerHead CloseToasterOvenDoor"
 SEEDS="1000-1007"
 OUT="$EXP/step2"
 CKPT="$EXP/run/final_model/pytorch_model.pt"
-mkdir -p "$OUT/seed"
+if [[ "$MODE" == eval-only ]]; then
+  EOUT="$OUT/${4:?eval-only needs a TAG}"
+  [[ -e "$EOUT" ]] && { echo "[step2] $EOUT exists: use a new TAG"; exit 2; }
+else
+  EOUT="$OUT"
+fi
+mkdir -p "$OUT/seed" "$EOUT"
 export PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export WANDB_MODE=disabled WANDB_DISABLED=true NO_PROXY='*' no_proxy='*' STARVLA_ROOT
 export HF_HOME=/mnt/umm/users/yinbaiqiao/.cache/huggingface
-TIMES="$OUT/stage_times.tsv"
-echo -e "stage\tstart_utc\tseconds\trc" > "$TIMES"
+TIMES="$EOUT/stage_times.tsv"
+[[ -f "$TIMES" ]] || echo -e "stage\tstart_utc\tseconds\trc" > "$TIMES"
 stage() {  # stage NAME COMMAND...: run, time, record
   local name=$1; shift
   local t0=$(date +%s) s0=$(date -u +%FT%TZ)
@@ -45,8 +53,9 @@ source "$WT/examples/train/robocasa/setup_starvla_env.sh"
 set +e
 export PYTHONPATH="$WT:$STARVLA_ROOT"
 nvidia-smi --query-gpu=index,name,driver_version,memory.total --format=csv,noheader
-echo "[step2] cpu quota: $(cat /sys/fs/cgroup/cpu.max 2>/dev/null)"
+echo "[step2] mode=$MODE cpu quota: $(cat /sys/fs/cgroup/cpu.max 2>/dev/null)"
 
+if [[ "$MODE" == all ]]; then
 # ---- 0 checks -----------------------------------------------------------------------------------------------
 stage verify_starts python "$WT/downstream/verify_starts.py" verify --starts B RS > "$OUT/verify_starts.json" \
   || { echo "[step2] a start changed since it was locked: stop"; exit 3; }
@@ -67,12 +76,15 @@ cd "$STARVLA_ROOT"
 stage train accelerate launch --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml --num_processes 8 \
   "$WT/downstream/train/train_entry.py" --config_yaml "$EXP/config.yaml" > "$OUT/train.log" 2>&1
 cd "$WT"
+fi
 [[ -f "$CKPT" ]] || { echo "[step2] no final checkpoint: stop"; tail -50 "$OUT/train.log"; exit 4; }
 ls -la "$CKPT"
 
+if [[ "$MODE" == all ]]; then
 # ---- 3 held-out action error (1 GPU) -------------------------------------------------------------------------
 stage heldout env CUDA_VISIBLE_DEVICES=0 python "$WT/scripts/eval_starvla_heldout.py" --ckpt "$CKPT" \
   --out "$OUT/heldout" --episodes-per-task 20 --frames-per-episode 3 > "$OUT/heldout.log" 2>&1
+fi
 
 # ---- simulator environment -------------------------------------------------------------------------------------
 SIM_PYTHONPATH="$MAIN/playground/Runtime/robocasa_client:$WT:$STARVLA_ROOT:$ROBOCASA365_ROOT/robocasa:$ROBOCASA365_ROOT/robomimic"
@@ -86,17 +98,19 @@ sim() {  # sim THREADS COMMAND...: run in the simulator Python environment with 
 }
 mkdir -p "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"
 
+if [[ "$MODE" == all ]]; then
 # ---- 4 seed check ---------------------------------------------------------------------------------------------
 stage seed_check sim 4 timeout 1800 "$SIM_PY" "$WT/downstream/eval/seed_check.py" --tasks $TASKS --seed 1000 \
   --out "$OUT/seed_check.json" > "$OUT/seed_check.log" 2>&1
+fi
 
 # ---- 5 closed loop -------------------------------------------------------------------------------------------
 CUDA_VISIBLE_DEVICES=0 CKPT="$CKPT" PORT=5678 bash "$WT/examples/evaluate/robocasa/run_starvla_mobile.sh" server \
-  > "$OUT/server.log" 2>&1 &
+  > "$EOUT/server.log" 2>&1 &
 SERVER_PID=$!
 for i in $(seq 1 120); do
   python -c 'import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1",5678)))' && break
-  kill -0 "$SERVER_PID" 2>/dev/null || { echo "[step2] policy server died"; tail -40 "$OUT/server.log"; exit 5; }
+  kill -0 "$SERVER_PID" 2>/dev/null || { echo "[step2] policy server died"; tail -40 "$EOUT/server.log"; exit 5; }
   sleep 5
 done
 echo "[step2] policy server ready after ~$((i * 5))s"
@@ -105,12 +119,14 @@ CPUS=$(awk '{print int($1/$2)}' /sys/fs/cgroup/cpu.max 2>/dev/null || echo 112)
 for P in 3 12 24; do
   THREADS=$(( (CPUS - 8) / P )); (( THREADS < 1 )) && THREADS=1
   nvidia-smi --query-gpu=timestamp,index,utilization.gpu,memory.used --format=csv,noheader -i 0 -lms 2000 \
-    > "$OUT/gpu_util_P$P.csv" 2>/dev/null &
+    > "$EOUT/gpu_util_P$P.csv" 2>/dev/null &
   MON_PID=$!
   stage "eval_P$P" sim "$THREADS" timeout 10800 "$SIM_PY" "$WT/downstream/eval/closed_loop.py" --ckpt "$CKPT" \
-    --servers 127.0.0.1:5678 --tasks $TASKS --seeds "$SEEDS" --workers "$P" --out "$OUT/eval_P$P" \
-    > "$OUT/eval_P$P.log" 2>&1
+    --servers 127.0.0.1:5678 --tasks $TASKS --seeds "$SEEDS" --workers "$P" --out "$EOUT/eval_P$P" \
+    > "$EOUT/eval_P$P.log" 2>&1
+  rc=$?
   kill "$MON_PID" 2>/dev/null; MON_PID=""
-  echo "[step2] P=$P threads/process=$THREADS: $(cat "$OUT/eval_P$P/summary.json" 2>/dev/null | tr -d '\n' | cut -c1-300)"
+  echo "[step2] P=$P threads/process=$THREADS: $(cat "$EOUT/eval_P$P/summary.json" 2>/dev/null | tr -d '\n' | cut -c1-300)"
+  (( rc == 2 )) && { echo "[step2] server failed the contract check: stop"; exit 6; }
 done
 echo "[step2] done $(date -u +%T)"
