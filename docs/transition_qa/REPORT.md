@@ -1,13 +1,33 @@
 # 转移题、混合 SFT、输出格式开关、诊断、实验矩阵：总报告
 
-2026-10-19（第三版，加上当天第三批"P1 收尾与准备"的结果）。任务说明：用户 2026-10-17 的提示词（第 0–8 节）和 2026-10-19 的三批要求。
+2026-10-20（第四版，加上第四批：30 道核对的结果、按方案 (a) 修掉文字捷径后重建题库和配方、不看图的基线、探针重跑）。任务说明：用户 2026-10-17 的提示词（第 0–8 节）、2026-10-19 的三批要求和 2026-10-20 的要求。
 
 - 代码和文档都在分支 `transition-qa`（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data`），只在本地，没有推送，没有合并到 main。
-- 分支和 main 保持同步（最近一次合入 main `71372b7e`）；合并到 main 由你在冻结期触发。
-- 逐步记录见 `PROGRESS.md`（第二批在第 10 节，第三批在第 11 节），改动清单见 `CHANGES.md`。
+- 分支和 main 保持同步（最近一次合入 main `7e9c4f77`）；合并到 main 由你在冻结期触发。
+- 逐步记录见 `PROGRESS.md`（第二批在第 10 节，第三批在第 11 节，第四批在第 12 节），改动清单见 `CHANGES.md`。
 - 字段和规则见 `DATA_CONTRACT.md`，题型见 `P1_QTYPES.md`，数据集卡片见 `P1_DATASET_CARD.md`。
 
 > 名字提醒：`v10_p1` / `v10_p2` 是 RL 修正包，和数据池 P1（转移题）/ P2（动作轨迹）无关。
+
+## 第四批的结论（2026-10-20）
+
+1. **题库按方案 (a) 修好并重建了，题目文字不再泄露答案**（`exps/transition_qa_20261019b`）。
+   - 训练集 87,525 道（状态 35,962 / 前向 43,154 / 逆向 8,409 = 9.6%），测试集 5,985 道，探针集 1,041 道。
+   - 只用题目文字的规则在测试集上都在随机猜 ± 5.4 个百分点内；之前逆向题 100%、goal 题 65%–72%、距离题 44%（`P1_DATASET_CARD.md` 第 5 节）。
+   - 不看图的原始 7B：测试集 35.5%（随机 38.5%），探针 34.3%（随机 40.1%），没有一个题类明显高于随机（`P1_STATS.md` 第 7 节）。
+2. **方案 (a) 之外改了两条规则**（都为了不让某个题类掉到一半以下，或堵住新查出的捷径）：
+   - 距离、高度题在构建时重新分配选项窗口，而不是只裁窗口（只裁的话测试集 `distance_bin_now` 366 → 145 道，重分后 361 道）；
+   - 是非、左右、遮挡、视野题的答案在"任务族 × 动作 × 次数"的每一格里平衡（只凭任务和动作能答对 goal_after 71.9%、goal_now 65.3%、both_in_view_after 39.2%）；视野题这一格上限放宽到 2 倍，测试集 181 / 253 道。
+   - 掉一半以上的只有测试集的遮挡两类（全部进了探针集，之前已说明）。
+3. **修掉捷径后，所有现有模型在探针上都只比随机猜高一点：23 个检查点 40.5%–43.2%，随机 40.1%**（`DIAG3_PROBE.md` 第三版）。第二版探针上的 42.3%–48.5% 有一部分来自捷径；原始 7B 逆向题从 77.5% 变成 27.5%（随机 25%）。goal 题仍几乎只答 No，遮挡题训练后低于随机。曲线没有趋势，只是整体下移、更平。
+4. **30 道人工核对：28 道判对、2 道判错，复查后真错 1 道。**
+   - 第 18 题（遮挡）真错：遮挡物按实心包围盒算，敞开的衣柜框住了目标、画面里却看得见。这是环境的遮挡判据本身的局限（题库和判分用同一个函数），没改；遮挡候选题里衣柜占 11.8%，人 5.8%，细或不规则的物体约 15%。
+   - 第 20 题（逆向）没错：两帧位姿正好差后退 0.300 m；核对页同时显示了任务原文，容易误读成问"任务完成没有"。
+   - 第 10 题（你的疑问）：当前距离是 1.04 m（不是 2.5 m），后退 0.6 m 后 1.61 m，所以答"约 1.5 米"。
+5. **预登记**：探针四类题扩容了（goal 各 200、遮挡 77 / 124）；遮挡两类改用平衡准确率；按实测的逐题不一致率，goal 两类能测出约 6–7 个百分点的差（`PREREG_D_vs_C.md`）。
+6. **冻结期补丁挪到了新的 main 上**：main 新加的 15 个提交改了 `train_chain.py`，原补丁打不上了；重新做好，33 个测试通过。其中发现一处要注意的：main 新的 `retain` 在评测一结束就删检查点，补丁的 `diagnostics` 步要用它们跑探针，改成有 `diagnostics` 时清理放在它之后（`CHANGES.md` 第 6 节）。
+7. **配方重建**：B、C、D、D_noP0 用新题库重建；D 仍是 P0 177 + P1 9,802 + P2 9,802，其中 P1 的逆向题 942 道。矩阵配置、`vars.yaml`、探针路径都指到新目录。
+8. 本批用卡约 1.4 卡时（5 个单卡推理任务，排队约 1 小时 50 分钟），本任务累计约 8.2 卡时。
 
 ## 第三批的结论（2026-10-19 晚）
 
@@ -116,36 +136,35 @@
 - 题库不用重建：`exps/transition_qa_20261019` 就是这个规则。
 - 另一个选项（没有采用）：状态题里也限一半，训练集约 5.2 万道。
 
+**已定（2026-10-19 / 20）**：捷径按方案 (a) 修（已重建）；探针四类题扩容（已做）；修正包仍是 p1（主线第十二轮决定 8）；30 道核对已核完。
+
 还没定的：
 
-1. **题库的捷径问题怎么改**（第三批新发现，最要紧；矩阵开跑前要定）。改法见 `DIAG3_PROBE.md` 开头第 5 条：
-   - (a) **推荐**：逆向题选项改成 2 动作 × 2 次数，探针步骤补上打乱，距离、高度题按（最小选项、字母）一起平衡；重建题库和混合配方，重抽探针并重跑（推理约 1.4 卡时）；
-   - (b) 只修探针的打乱（我的代码错误），题库先不动，逆向题在 D 组里照旧（带捷径）。
-2. **探针要不要为预登记的四类题扩容**（`PREREG_D_vs_C.md` 第 0 节）：
-   - (a) **推荐**：goal 两类各 200 道、遮挡两类用全部合格候选；
-   - (b) 维持每类 40 道。
-3. **训练链的 7 个字段**：已做成两个补丁（`CHANGES.md` 第 6 节），合并时打上即可。不打就按各组 `manual_steps` 手工准备。
-4. **合并到 main**：由你在冻结期触发。分支已和 main 同步。
+1. **遮挡题的"实心包围盒"问题**（第四批人工核对发现）：
+   - (a) **推荐**：先不动题库和环境，矩阵照常；另抽 30 道遮挡物是衣柜、人、细或不规则物体的遮挡题核一遍，量出错的比例再定。核对页现成，不用 GPU；
+   - (b) 在题库里去掉这些类别的遮挡物（遮挡题约少 30%；但 RL 的遮挡任务还是按包围盒判分，题库和奖励会不一致）；
+   - (c) 改主线的遮挡判据（例如用渲染的不透明度复核），影响 RL 奖励和评测，要渲染。
+2. **训练链的 7 个字段**：两个补丁已挪到 main `7e9c4f77` 上（`CHANGES.md` 第 6 节），合并时打上即可；main 再改 `train_chain.py` 的话要重新核对。不打就按各组 `manual_steps` 手工准备。
+3. **合并到 main**：由你在冻结期触发。分支已和 main 同步。
    - 本分支改了 5 个现有文件：`training_prep.py`、`env.py`、两个 agent loop、`ray_trainer.py`；都是加选项或加指标。
    - 合并会把 `transition/think_rate` 带进所有之后的 RL 日志。
-5. **30 道人工核对**：用新的核对页（`exps/transition_qa_20261019/review/p1_review.html`）点完，导出 JSON 发回来，我写通过率。
-6. **修正包 p1 还是 p2**：第十二轮定了以后改 `configs/matrix_v2/vars.yaml` 的 `rl_package` 一行；C0 自动对应 r12a 或 r12b。
-7. **P0 全量题库什么时候生成**：由你通知。现在 B 组只有 177 条记录。
-8. **（可选）E 组正式跑之前，先用 `--trial` 在 GPU 上试 6,144 的回答上限**：一条序列最长从 8,192 变成 10,240 个词元，显存没试过。
+4. **预登记定稿**：`PREREG_D_vs_C.md` 的探针部分已按扩容后的探针集和实测不一致率改好，请过目；`occluded_now` 只有 77 道，10 个百分点的判定线对它偏小。
+5. **P0 全量题库什么时候生成**：由你通知。现在 B 组只有 177 条记录。
+6. **（可选）E 组正式跑之前，先用 `--trial` 在 GPU 上试 6,144 的回答上限**：一条序列最长从 8,192 变成 10,240 个词元，显存没试过。
 
 ## 3. 风险和局限
 
 - **P0 很小**：只有 230 道样题，B 组几乎等于不做 SFT；P0 的验证集来自 train 场景。
-- **goal 题占比高**：`goal_now` 占状态题 70.9%、`goal_after` 占前向题 50%，两类合计占训练集 50.6%（45,559 / 90,101）。探针显示现有模型在这类题上只会答 No；D 组练了以后能否改过来，看 D 的探针结果。
-- **遮挡题少、答案不均**：
-  - 遮挡族只占正式题的 2.8%：训练集里 `occluded_now` 267 道、`occluded_after` 577 道。
-  - 探针的 `occluded_now` 答案是完全 16 / 部分 17 / 没有 7，总答"部分"能得 42.5%。
+- **goal 题占比高**：`goal_now` 占状态题 68.6%、`goal_after` 占前向题 48.1%，两类合计占训练集 51.9%（45,438 / 87,525）。探针显示现有模型在这类题上只会答 No；D 组练了以后能否改过来，看 D 的探针结果。
+- **遮挡题少、答案不均，遮挡物按实心包围盒算**：
+  - 遮挡族只占正式题的 2.8%：训练集里 `occluded_now` 267 道、`occluded_after` 412 道；测试集没有（全部进了探针集）。
+  - 探针的 `occluded_now` 答案是完全 46 / 部分 24 / 没有 7，总答"完全"能得 59.7%，所以用平衡准确率。
+  - 敞开的、镂空的或不规则的遮挡物会让答案和画面不符（第 2 节第 1 条）。
 - **左右前向题的答案几乎从不改变**：转身不改变两个物体的左右顺序。这是物理事实，照实保留。
-- **逆向题的动作分布**：动作来自最短路径，后退多、前进少。训练集字母均匀，动作种类不均匀。
+- **逆向题的动作分布**：动作来自最短路径；按选项格配平后，训练集以转身、侧移 2 次为多。逆向题只有 9.6%（配平去掉的多），没碰到 15% 的上限。
 - **探针的局限**：
-  - 每类 40 道，题类之间的差别要超过约 15 个百分点才可靠。
-  - "相机做了什么动作"两版探针的结论相反（抽法不同），不下结论。
-  - D 组练过 P1，探针题和 P1 同一种格式，D 在探针上会直接占优；探针主要看 QA 能力在 RL 中保持还是丢失，迁移要看评测成功率。
+  - 预登记的四类之外每类 40 道，题类之间的差别要超过约 15 个百分点才可靠。
+  - 现有模型都在随机猜附近，探针目前分不出它们；D 组练过 P1，探针题和 P1 同一种格式，D 在探针上会直接占优。探针主要看 D 学会了没有、QA 能力在 RL 中保持还是丢失，迁移要看评测成功率。
 - **A 组的风险**：从原始 7B 起步（验证集成功 5.8%），"8 条轨迹里有成有败"的题会很少，每次更新可能凑不满。
 - **资源池**：2026-10-19 `zoetrope` 满，单卡任务在那里排了约 50 分钟没起来；`h800` 立刻起来。矩阵的 plan 用的是 `h800`。
 - **没有在 GPU 上跑过的代码**：
@@ -159,12 +178,13 @@
 | 什么 | 在哪（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data` 下） |
 | --- | --- |
 | 转移题生成器、测试 | `data_gen/transition_qa/`（`generate.py` raw / probe / build、`extra_tasks.py`、`interior.py`、`review.py`、`report.py`） |
-| 题库（现行） | `exps/transition_qa_20261019/`（`p1_train/test/probe.jsonl`、`stats.json`、`probe_stats.json`、`raw/`、`extra_oa15/`） |
+| 题库（现行，2026-10-20） | `exps/transition_qa_20261019b/`（`p1_train/test/probe.jsonl`、`stats.json`、`probe_stats.json`、`shortcuts.md`、`blind/`、`raw/`） |
+| 题库（2026-10-19，保留） | `exps/transition_qa_20261019/`（有捷径；含 v2 新增遮挡题的帧 `extra_oa15/`、核对页和核对结果 `review/`） |
 | 题库（2026-10-18，保留） | `exps/transition_qa_20261018/`（含内部状态的图 `interior/`、核对题 `review/`） |
 | 混合配方构建器、配置、矩阵 plan 生成 | `data_gen/sft_mixture/`（`build.py`、`matrix_plan.py`） |
-| 矩阵的混合数据 | `exps/sft_mixture_matrix_v2_20261018/{B,C,D}`（2026-10-19 用新题库重建） |
+| 矩阵的混合数据 | `exps/sft_mixture_matrix_v2_20261018/{B,C,D,D_noP0}`（2026-10-20 用新题库重建；旧的配方表 `recipes_bank1019.*`） |
 | 诊断代码、测试 | `eval/diagnostics/` |
-| 诊断结果 | `exps/diagnostics_20261018/`（失败拆解、旧探针、`format_check`）、`exps/diagnostics_20261019/probe_v2_all/`（新探针、`curve.md`、`curve.png`） |
+| 诊断结果 | `exps/diagnostics_20261018/`（失败拆解、旧探针、`format_check`）、`exps/diagnostics_20261019/`（第二版探针、诊断 2、C0 的失败拆解）、`exps/diagnostics_20261020/probe_v3_all/`（第三版探针、不看图的基线、`curve.md`、`curve.png`） |
 | 矩阵配置 | `configs/matrix_v2/`（A–E、C0、`vars.yaml`、README） |
 | 改动的现有文件 | `CHANGES.md` 第 1 节 |
 | 文档 | `docs/transition_qa/`：本报告、`PROGRESS.md`、`DATA_CONTRACT.md`、`P1_QTYPES.md`、`P1_STATS.md`、`RECIPES.md`、`DIAG_BASELINE.md`、`DIAG3_PROBE.md`、`CHANGES.md`、两张探针曲线图 |
@@ -173,20 +193,23 @@
 
 在工作树下执行。`PY=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python`；
 `SFT=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft`；`META=/mnt/umm/users/yinbaiqiao/InteriorGS_meta`；
-`R12=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019`；`OUT=exps/transition_qa_20261019`。
+`R12=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019`；`OUT=exps/transition_qa_20261019b`；
+`OA15=exps/transition_qa_20261019/extra_oa15`（2026-10-19 渲染的 v2 新增遮挡题的帧，2026-10-20 直接复用）。
 
 ```bash
-# P1 题库：候选题（CPU，12 进程约 10 分钟）、内部状态题（图用 2026-10-18 的渲染）
+# P1 题库：候选题（CPU，12 进程约 11 分钟）、内部状态题（图用 2026-10-18 的渲染）
 $PY -m data_gen.transition_qa.generate raw --sft-dir $SFT --scenes-root $META --out $OUT --workers 12
 $PY -m data_gen.transition_qa.interior questions --sft-dir $SFT --out $OUT --interior exps/transition_qa_20261018/interior
-# v2 新增的 15 道遮挡题：最短路径帧（58 张）、渲染（单卡 1 分钟；zoetrope 满时用 h800）、候选题
-$PY -m data_gen.transition_qa.extra_tasks frames --tasks $R12/eval_val_v2/tasks.jsonl --ids-from $R12/eval_val_v2_oa/selection.json --sft-dir $SFT --out $OUT/extra_oa15
-$PY data_gen/interiorgs_v10/pilot_sco.py prepare --pilot $OUT/extra_oa15 --gs-root /mnt/umm/users/yinbaiqiao/InteriorGS_ply   # 再提交
-$PY -m data_gen.transition_qa.extra_tasks trajectories --dir $OUT/extra_oa15
-$PY -m data_gen.transition_qa.generate raw --sft-dir $OUT/extra_oa15 --scenes-root $META --out $OUT --tag oa15
-# 探针集、构建、统计
+# v2 新增的 15 道遮挡题：最短路径帧（58 张，2026-10-19 渲染过，单卡 1 分钟）、候选题
+$PY -m data_gen.transition_qa.extra_tasks frames --tasks $R12/eval_val_v2/tasks.jsonl --ids-from $R12/eval_val_v2_oa/selection.json --sft-dir $SFT --out $OA15
+$PY data_gen/interiorgs_v10/pilot_sco.py prepare --pilot $OA15 --gs-root /mnt/umm/users/yinbaiqiao/InteriorGS_ply   # 再提交
+$PY -m data_gen.transition_qa.extra_tasks trajectories --dir $OA15
+$PY -m data_gen.transition_qa.generate raw --sft-dir $OA15 --scenes-root $META --out $OUT --tag oa15
+# 探针集、构建、文字捷径检查、不看图的基线、统计
 $PY -m data_gen.transition_qa.generate probe --out $OUT --split-manifest $SFT/split_manifest.json --scenes-from $R12/eval_val_v2/tasks.jsonl
 $PY -m data_gen.transition_qa.generate build --out $OUT --split-manifest $SFT/split_manifest.json
+$PY -m data_gen.transition_qa.shortcuts --out $OUT --md $OUT/shortcuts.md
+$PY -m eval.diagnostics.sco_probe --run <目录> --probe $OUT/p1_test.jsonl --model base_7b_blind=<原始 7B> --no-images --pool h800 --out-dir $OUT/blind/test --submit   # 探针集同样
 $PY -m data_gen.transition_qa.report --out $OUT --md docs/transition_qa/P1_STATS.md
 # 混合配方、矩阵 plan
 $PY -m data_gen.sft_mixture.build --config data_gen/sft_mixture/configs/mixture_matrix_v2_20261018.yaml
@@ -194,7 +217,7 @@ $PY -m data_gen.sft_mixture.matrix_plan --group D --commit <main 的提交> --ou
 # 诊断
 $PY -m eval.diagnostics.sco_probe --run <目录> --probe $OUT/p1_probe.jsonl --from-eval <评测目录> --names <结果目录名> --pool h800 --submit
 $PY -m eval.diagnostics.qa_probe rescore --probe $OUT/p1_probe.jsonl --out <结果目录>
-$PY -m eval.diagnostics.qa_probe curve --out <结果目录> --chain "R11-SFT=base_7b:0,sft_formal_e1:154,..."
+$PY -m eval.diagnostics.qa_probe curve --out <结果目录> --chain "R11-SFT=base_7b:0,sft_formal_e1:154,..." --reference "base_7b_blind=原版 7B 不看图"
 $PY -m eval.diagnostics.failure_breakdown --eval <评测目录> --out <前缀>
 ```
 
@@ -217,3 +240,8 @@ $PY -m eval.diagnostics.failure_breakdown --eval <评测目录> --out <前缀>
     - `eeed7669` C0、标准名变量、数据契约；
     - `a1d09600` 合入 main `71372b7e`；
     - 以及结果和文档的提交。
+  - 第三批：`ec9aeb61` 补丁、诊断 C / F / G 草稿，`dcd079e1` 诊断 2 和第三版报告，`cc8d482a` 捷径修法的代码。
+- 2026-10-20（第四批）：
+  - `321f63f8` 合入 main `7e9c4f77`；
+  - `e2958a61` 题库 20261019b（窗口重新分配、题干格平衡）、不看图的基线、补丁挪到新 main、配置指到新题库；
+  - 以及探针结果和文档的提交。

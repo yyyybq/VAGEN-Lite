@@ -105,13 +105,18 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
     probe_stats = out / "probe_stats.json"
     if probe_stats.exists():
         ps = json.loads(probe_stats.read_text())
-        short = {q: v["short"] for q, v in ps["by_qtype"].items() if v["short"]}
         over = ps["config"].get("per_qtype_overrides") or {}
+        by_q = ps["by_qtype"]
+        short = {q: v["short"] for q, v in by_q.items() if v["short"] and over.get(q) != "all"}
+        capped = {q: v["short"] for q, v in by_q.items() if v["short"] and over.get(q) == "all"}  # the unchanged cap
         sizes = (f"每个题类 {ps['config']['per_qtype']} 道，其中 "
-                 + "、".join(f"{q} {'全部可用的' if v == 'all' else v}" for q, v in sorted(over.items())) + "（预注册要的题类）"
+                 + "、".join(f"{q} " + (f"全部可用的 {by_q[q]['picked']} 道" if v == "all" else f"{v} 道")
+                            for q, v in sorted(over.items())) + "（预注册要的题类）"
                  if over else f"每个题类 {ps['config']['per_qtype']} 道")
         lines.append(f"- 探针集：{ps['questions']} 道，{sizes}，来自 {ps['scenes']} 个 val 场景"
-                     + (f"；不够的题类：{json.dumps(short)}" if short else "；每个题类都够") + "。")
+                     + (f"；不够的题类：{json.dumps(short)}" if short else "；其余题类都够")
+                     + ("".join(f"；{q} 另有 {n} 道\"没变化\"的超过 10% 上限，没取" for q, n in sorted(capped.items())))
+                     + "。")
     lines.append("")
     # ------------------------------------------------------------------ family x qtype x split
     lines += ["## 2. 按任务族 × 题类 × 划分的题数", ""]

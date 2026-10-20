@@ -392,9 +392,13 @@ def cmd_curve(args: argparse.Namespace) -> None:
                                       ("inverse", "inverse", ":")):
                 ys = [(r["all"] if key == "all" else r["qclass"].get(key, {})).get("accuracy") for _, r in pts]
                 ax.plot(steps, [None if y is None else 100 * y for y in ys], style, marker="o", ms=3, label=label)
-            for label, _, r in refs:
+            for _, name, r in refs:  # the figure has no CJK font: the reference's name, not its label
                 ax.axhline(100 * r["all"]["accuracy"], color="grey", ls=":", lw=1)
-                ax.text(steps[0], 100 * r["all"]["accuracy"], f" {label}", fontsize=7, color="grey", va="bottom")
+                ax.text(steps[0], 100 * r["all"]["accuracy"], f" {name}", fontsize=7, color="grey", va="bottom")
+            chance = pts[0][1]["all"].get("chance")
+            if chance is not None:
+                ax.axhline(100 * chance, color="black", ls="--", lw=0.8)
+                ax.text(steps[-1], 100 * chance, "chance ", fontsize=7, ha="right", va="bottom")
             ax.set_title(cname)
             ax.set_xlabel("training step")
             ax.grid(alpha=0.3)
