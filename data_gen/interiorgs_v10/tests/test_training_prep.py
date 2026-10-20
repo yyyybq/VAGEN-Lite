@@ -350,6 +350,79 @@ class TrainingPrepTest(unittest.TestCase):
         with self.assertRaises(SystemExit):  # neither a template nor a standard
             config("rl_no_template")
 
+    def test_data_scale_subsets(self):
+        """Round 12 batch: nested train-scene subsets (fixed seed) with all formal tasks of their scenes for SFT and
+        only their scenes' reserve tasks for RL; an arm with one subset's task count over every scene."""
+        records, rows = [], []
+        counts = {f"sc{i:02d}": 2 + i % 5 for i in range(10)}  # 2..6 train records per scene
+        for s, n in counts.items():
+            for k in range(n):
+                records.append({"id": f"{s}_{k}", "scene_id": s, "split": "train"})
+            rows.append({"task_id": f"{s}_r", "scene_id": s, "split": "train", "reserve": True})
+            rows.append({"task_id": f"{s}_f", "scene_id": s, "split": "train", "reserve": False})
+        records += [{"id": f"v{k}", "scene_id": "val0", "split": "val"} for k in range(3)]
+        rows += [{"task_id": "v_f", "scene_id": "val0", "split": "val", "reserve": False},
+                 {"task_id": "v_r", "scene_id": "val0", "split": "val", "reserve": True}]
+        res = TP.build_subsets(records, rows, [2, 4, 8], equal_tasks_of=4, flagged=["sc03_r"], seed=7)
+        sub = res["subsets"]
+        self.assertEqual(sorted(sub), ["s002", "s004", "s008", "w10"])
+        order = res["scene_order"]
+        self.assertEqual(sorted(order), sorted(counts))
+        self.assertEqual(sub["s002"]["scenes"], sorted(order[:2]))
+        self.assertTrue(set(sub["s002"]["scenes"]) < set(sub["s004"]["scenes"]) < set(sub["s008"]["scenes"]))  # nested
+        for name, s in sub.items():
+            self.assertEqual(sum(1 for r in s["sft"] if r["split"] == "val"), 3)  # every val record stays
+            train_scenes = {r["scene_id"] for r in s["sft"] if r["split"] == "train"}
+            self.assertLessEqual(train_scenes, set(s["scenes"]))
+            reserve = [r for r in s["rows"] if r["reserve"]]
+            self.assertTrue(all(r["scene_id"] in s["scenes"] and r["split"] == "train" for r in reserve))
+            self.assertNotIn("sc03_r", {r["task_id"] for r in reserve})  # flagged tasks never reach RL
+            self.assertNotIn("v_r", {r["task_id"] for r in s["rows"]})
+            self.assertIn("v_f", {r["task_id"] for r in s["rows"]})  # rl-config needs the formal val rows
+        self.assertEqual(sub["s004"]["train_records"], sum(counts[s] for s in order[:4]))
+        w = sub["w10"]
+        self.assertEqual(w["train_records"], sub["s004"]["train_records"])  # same task count, all scenes
+        per = {}
+        for r in w["sft"]:
+            if r["split"] == "train":
+                per[r["scene_id"]] = per.get(r["scene_id"], 0) + 1
+        self.assertEqual(len(per), 10)
+        self.assertLessEqual(max(per.values()) - min(per.values()), 2)
+        self.assertEqual(res, TP.build_subsets(list(reversed(records)), rows, [2, 4, 8], 4, ["sc03_r"], seed=7))  # fixed
+        self.assertNotEqual(TP.build_subsets(records, rows, [2], seed=8)["scene_order"], order)
+        with self.assertRaises(ValueError):
+            TP.build_subsets(records, rows, [11])
+        # quotas: as even as capacities allow
+        self.assertEqual(TP.spread_quota({"a": 1, "b": 5, "c": 5}, 9, seed=1), {"a": 1, "b": 4, "c": 4})
+        with self.assertRaises(ValueError):
+            TP.spread_quota({"a": 1}, 2)
+        # the command: files per subset, the source SFT folder linked in
+        out = self.root / "subsets_cmd"
+        src = self.root / "subsets_src"
+        src.mkdir()
+        (src / "frames.jsonl").write_text("")
+        (src / "split_manifest.json").write_text("{}")
+        (src / "traj.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+        (src / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        flags = src / "flags.json"
+        flags.write_text(json.dumps({"flagged_task_ids": ["sc03_r"]}))
+        import os
+
+        try:  # symbolic links need a privilege on Windows; the cluster (Linux) has them
+            os.symlink(src / "frames.jsonl", self.root / "symlink_probe")
+            can_link = True
+        except OSError:
+            can_link = False
+        TP.cmd_subsets(Namespace(trajectories=str(src / "traj.jsonl"), rows=str(src / "rows.jsonl"), exclude=str(flags),
+                                 sizes="2,4", equal_tasks_of=4, seed=7, link_from=str(src) if can_link else None,
+                                 out=str(out)))
+        summary = json.loads((out / "subsets.json").read_text())
+        self.assertEqual(summary["subsets"]["s004"]["train_records"], sub["s004"]["train_records"])
+        self.assertEqual(len((out / "sft_trajectories_w10.jsonl").read_text().splitlines()), w["train_records"] + 3)
+        self.assertTrue((out / "rows_s002.jsonl").is_file())
+        if can_link:
+            self.assertTrue((out / "frames.jsonl").exists() and (out / "split_manifest.json").exists())
+
     def test_rl_config_trains_on_formal_tasks_only(self):
         """Reserve rows (sft-frames --include-reserve) are SFT-only: rl-config leaves them out of train and val."""
         import yaml

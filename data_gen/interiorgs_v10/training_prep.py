@@ -23,6 +23,11 @@ round-11 optimisation package with the sparse or the dense reward, v10_p1_S0 / v
 48 candidate tasks per update) with the repository's PPO template (configs/ppo_template_v10.yaml); ``--seed N``
 sets the run's task order (data.seed; the template's 20260930 otherwise); vLLM's sampling seed stays 0 (this
 verl's rollout config has no seed field: setting one stops the trainer at start-up).
+
+Round 12 batch: ``subsets --trajectories SFT/sft_trajectories.jsonl --rows ROWS --sizes 50,100,200,400
+--equal-tasks-of 200 --link-from SFT --out DIR`` draws nested train-scene subsets (a fixed seed; each the first n
+scenes of one shuffled order) with all formal tasks of their scenes for SFT and the reserve tasks of their scenes
+for RL, plus an arm with the same task count over every scene.
 """
 
 from __future__ import annotations
@@ -640,6 +645,120 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     print(json.dumps(report, indent=1))
 
 
+# Round 12 batch (the user's data-scale curve): nested subsets of the train scenes that have formal SFT tasks
+# (a fixed seed shuffles the sorted scene list; a subset of n scenes is the first n), each with all formal tasks of
+# its scenes for SFT and the reserve tasks of its scenes for RL; and an arm with the task count of one subset spread
+# over every scene (scenes and tasks separated).
+SUBSET_SEED = 20261020
+
+
+def scene_order(scenes: Sequence[str], seed: int = SUBSET_SEED) -> List[str]:
+    import random
+
+    order = sorted(set(scenes))
+    random.Random(seed).shuffle(order)
+    return order
+
+
+def spread_quota(capacity: Dict[str, int], total: int, seed: int = SUBSET_SEED) -> Dict[str, int]:
+    """``total`` tasks over the scenes as evenly as possible (each scene at most its ``capacity``): every scene gets
+    the floor share, the remainder goes one by one to randomly chosen scenes with room left."""
+    import random
+
+    scenes = sorted(capacity)
+    if total > sum(capacity.values()):
+        raise ValueError(f"{total} tasks wanted, only {sum(capacity.values())} available")
+    quota = {s: 0 for s in scenes}
+    rng = random.Random(seed)
+    left = total
+    while left > 0:
+        room = [s for s in scenes if quota[s] < capacity[s]]
+        share = max(1, left // len(room))
+        if share * len(room) <= left:
+            for s in room:
+                take = min(share, capacity[s] - quota[s])
+                quota[s] += take
+                left -= take
+        else:
+            for s in rng.sample(room, left):
+                quota[s] += 1
+            left = 0
+    return quota
+
+
+def build_subsets(records: Sequence[Dict[str, Any]], rows: Sequence[Dict[str, Any]], sizes: Sequence[int],
+                  equal_tasks_of: Optional[int] = None, flagged: Sequence[str] = (),
+                  seed: int = SUBSET_SEED) -> Dict[str, Any]:
+    """{name: {"scenes", "sft" (train records of the scenes + every val record), "rows" (reserve train rows of the
+    scenes, flagged tasks left out, + every formal val row)}} for subsets s<n> of the train scenes with formal SFT
+    records (nested, first n of scene_order), plus w<all> with as many train records as subset ``equal_tasks_of``,
+    spread over all scenes (spread_quota; records drawn at random within a scene)."""
+    import random
+
+    train = [r for r in records if r.get("split") == "train"]
+    val = sorted((r for r in records if r.get("split") == "val"), key=lambda r: r["id"])
+    by_scene: Dict[str, List[Dict[str, Any]]] = {}
+    for r in sorted(train, key=lambda r: r["id"]):
+        by_scene.setdefault(str(r["scene_id"]), []).append(r)
+    order = scene_order(list(by_scene), seed)
+    flagged = set(flagged)
+    rows = sorted(rows, key=lambda r: r["task_id"])  # the outputs do not depend on the input order
+    reserve = [r for r in rows if r.get("split") == "train" and r.get("reserve") and r["task_id"] not in flagged]
+    val_rows = [r for r in rows if r.get("split") == "val" and not r.get("reserve")]
+    out: Dict[str, Any] = {"seed": seed, "scene_order": order, "subsets": {}}
+
+    def subset(name: str, scenes: Sequence[str], sft_train: List[Dict[str, Any]]) -> None:
+        keep = set(scenes)
+        out["subsets"][name] = {"scenes": sorted(keep), "sft": sft_train + val,
+                                "rows": [r for r in reserve if str(r["scene_id"]) in keep] + val_rows,
+                                "train_records": len(sft_train)}
+
+    for n in sorted(set(int(x) for x in sizes)):
+        if n > len(order):
+            raise ValueError(f"subset of {n} scenes wanted, only {len(order)} train scenes have formal tasks")
+        scenes = order[:n]
+        subset(f"s{n:03d}", scenes, [r for s in scenes for r in by_scene[s]])
+    if equal_tasks_of:
+        total = out["subsets"][f"s{int(equal_tasks_of):03d}"]["train_records"]
+        quota = spread_quota({s: len(v) for s, v in by_scene.items()}, total, seed)
+        rng = random.Random(seed + 1)
+        picked = [r for s in sorted(by_scene) for r in rng.sample(by_scene[s], quota[s])]
+        subset(f"w{len(order)}", list(by_scene), picked)
+        out["subsets"][f"w{len(order)}"]["per_scene"] = {"min": min(quota.values()), "max": max(quota.values())}
+    return out
+
+
+def cmd_subsets(args: argparse.Namespace) -> None:
+    """Round 12: the data-scale subsets as files (sft_trajectories_<name>.jsonl, rows_<name>.jsonl, subsets.json)
+    in --out, with the source SFT folder's frames, split manifest and task registry linked in (an SFT folder the
+    training chain can use with "sft_records": false)."""
+    import os
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    flagged = json.loads(Path(args.exclude).read_text())["flagged_task_ids"] if args.exclude else []
+    res = build_subsets(_jsonl(Path(args.trajectories)), _jsonl(Path(args.rows)),
+                        [int(x) for x in args.sizes.split(",")], args.equal_tasks_of, flagged, args.seed)
+    summary = {"seed": res["seed"], "trajectories": str(args.trajectories), "rows": str(args.rows),
+               "scene_order": res["scene_order"], "subsets": {}}
+    for name, s in res["subsets"].items():
+        _write_jsonl(out / f"sft_trajectories_{name}.jsonl", s["sft"])
+        _write_jsonl(out / f"rows_{name}.jsonl", s["rows"])
+        summary["subsets"][name] = {"scenes": len(s["scenes"]), "train_records": s["train_records"],
+                                    "val_records": len(s["sft"]) - s["train_records"],
+                                    "reserve_rows": sum(1 for r in s["rows"] if r.get("reserve")),
+                                    "reserve_scenes": len({r["scene_id"] for r in s["rows"] if r.get("reserve")}),
+                                    **({"per_scene": s["per_scene"]} if "per_scene" in s else {}),
+                                    "scene_ids": s["scenes"]}
+    if args.link_from:
+        src = Path(args.link_from).resolve()
+        for name in ("frames.jsonl", "frames", "split_manifest.json", "task_registry.jsonl"):
+            if (src / name).exists() and not (out / name).exists():
+                os.symlink(src / name, out / name)
+    (out / "subsets.json").write_text(json.dumps(summary, indent=1))
+    print(json.dumps({n: {k: v for k, v in s.items() if k != "scene_ids"} for n, s in summary["subsets"].items()}, indent=1))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -707,8 +826,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--standard", default=None,
                    help="round 12: a named standard configuration (configs/rl_standards.json) fixing the recipe's options")
     c.add_argument("--out", required=True)
+    u = sub.add_parser("subsets", help="round 12: nested train-scene subsets for the data-scale curve")
+    u.add_argument("--trajectories", required=True, help="the SFT conversations (sft_trajectories.jsonl, with split)")
+    u.add_argument("--rows", required=True, help="published rows with reserve rows (sft-frames --include-reserve)")
+    u.add_argument("--exclude", default=None, help="depth_check_summary.json: flagged tasks never reach RL")
+    u.add_argument("--sizes", default="50,100,200,400")
+    u.add_argument("--equal-tasks-of", type=int, default=None,
+                   help="also an arm with the train records of this subset size spread over all scenes")
+    u.add_argument("--seed", type=int, default=SUBSET_SEED)
+    u.add_argument("--link-from", default=None, help="the source SFT folder: link its frames, manifest and registry")
+    u.add_argument("--out", required=True)
     args = ap.parse_args(argv)
-    {"sft-frames": cmd_sft_frames, "sft-records": cmd_sft_records, "rl-config": cmd_rl_config}[args.cmd](args)
+    {"sft-frames": cmd_sft_frames, "sft-records": cmd_sft_records, "rl-config": cmd_rl_config,
+     "subsets": cmd_subsets}[args.cmd](args)
     return 0
 
 
