@@ -51,9 +51,21 @@ class EvaluationTest(unittest.TestCase):
             d = Path(tmp) / "sft"
             d.mkdir()
             (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            # round 12 batch: other chains' jobs still writing into the shared folder (a half-written last line, an
+            # empty file) do not stop the table; a bad line before the last still does
+            busy = Path(tmp) / "busy"
+            busy.mkdir()
+            (busy / "results.jsonl").write_text(json.dumps(rows[0]) + "\n" + json.dumps(rows[1])[:30])
+            (Path(tmp) / "new").mkdir()
+            (Path(tmp) / "new" / "results.jsonl").write_text("")
             E.cmd_table(type("A", (), {"eval": tmp})())
             table = (Path(tmp) / "table.md").read_text(encoding="utf-8")
+            (busy / "results.jsonl").write_text(json.dumps(rows[1])[:30] + "\n" + json.dumps(rows[0]) + "\n")
+            with self.assertRaises(json.JSONDecodeError):
+                E.cmd_table(type("A", (), {"eval": tmp})())
         self.assertIn("| sft | 2 | 0.500 |", table)
+        self.assertIn("| busy | 1 | 1.000 |", table)
+        self.assertNotIn("| new |", table)
 
     def test_run_episode_records_the_trajectory(self):
         from PIL import Image
