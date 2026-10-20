@@ -65,6 +65,11 @@ configs/rl_standards.json; the plan's "ppo_template" is then optional) and "seed
 "reward_preset" only when the plan names one.  Plan "eval_only": true runs only check_code and evaluate (the
 plan's "eval"."models" and variants on its sets; no RL checkpoints), e.g. to evaluate existing models on a new set.
 
+Round 12 batch (the data-scale curve): plan "sft_records": false skips training_prep sft-records (the SFT folder
+already holds the conversation files, e.g. training_prep subsets); "sft_eval_epochs" ([2, 4, ...]) limits the
+per-epoch evaluation and the pick to those epochs, "sft_eval_sets" (["val"]) to those sets (the pick is evaluated on
+the others with an eval variant of "sft_pick"); "sft_only": true skips the RL steps and evaluates no RL checkpoint.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -93,6 +98,7 @@ CARDS = {"render": "1", "sft": "每组 8", "sft_eval": "每个 1", "rl": "1 + 8"
 POLL_S = 60.0
 DEFAULT_MAX_EVAL_JOBS = 10
 EVAL_ONLY_STEPS = ("check_code", "evaluate")
+RL_STEPS = ("rl_config", "rl", "rl_extend")
 # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
 # during startup", after "GCS cannot find the node ... registration may not be complete")
 STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
@@ -588,10 +594,11 @@ class Chain:
 
     def sft_data(self) -> None:
         py = sys.executable
-        records = [py, "-m", "data_gen.interiorgs_v10.training_prep", "sft-records", "--dir", str(self.sft_dir)]
-        if self.plan.get("scenes_root"):  # round 10: inserted blocked turns need the scenes' collision detectors
-            records += ["--scenes-root", str(self.plan["scenes_root"])]
-        self.sh(records, log=self.tr / "logs" / "sft_records.log")
+        if self.plan.get("sft_records", True):  # round 12 batch: false = the conversation files exist already
+            records = [py, "-m", "data_gen.interiorgs_v10.training_prep", "sft-records", "--dir", str(self.sft_dir)]
+            if self.plan.get("scenes_root"):  # round 10: inserted blocked turns need the scenes' collision detectors
+                records += ["--scenes-root", str(self.plan["scenes_root"])]
+            self.sh(records, log=self.tr / "logs" / "sft_records.log")
         for group, trajectory in self.sft_groups().items():
             if not (self.sft_dir / trajectory).is_file():
                 raise ChainError(f"sft-records wrote no {trajectory} for group {group or 'default'}")
@@ -676,15 +683,24 @@ class Chain:
             self.sh([sys.executable, "-m", "data_gen.interiorgs_v10.evaluation", "table", "--eval", str(eval_dir)],
                     log=self.tr / "logs" / f"eval_table_{eval_dir.name}.log")
 
+    def sft_epochs(self, group: str) -> List[Tuple[int, Path]]:
+        """The epoch checkpoints of a group that are evaluated and picked from (round 12 batch: plan
+        "sft_eval_epochs" limits them)."""
+        ckpts = epoch_checkpoints(self.lf_dir(group) / "model")
+        wanted = self.plan.get("sft_eval_epochs")
+        return [(e, p) for e, p in ckpts if not wanted or e in {int(x) for x in wanted}]
+
     def sft_eval(self) -> None:
         sets = self.eval_sets()
         if not sets or not self.plan.get("sft_groups"):
             self.mark("sft_eval", note="not planned")
             return
+        if self.plan.get("sft_eval_sets"):  # round 12 batch: e.g. the validation set only
+            sets = {k: v for k, v in sets.items() if k in set(self.plan["sft_eval_sets"])}
         options = list((self.plan.get("eval") or {}).get("options") or [])
         jobs = {}
         for group in self.sft_groups():
-            ckpts = epoch_checkpoints(self.lf_dir(group) / "model")
+            ckpts = self.sft_epochs(group)
             if not ckpts:
                 raise ChainError(f"no epoch checkpoints in {self.lf_dir(group) / 'model'}")
             for epoch, path in ckpts:
@@ -705,14 +721,15 @@ class Chain:
             raise ChainError(f"select_by {select_by!r} is not one of the eval sets {sorted(sets)}")
         candidates: Dict[str, str] = {}  # result name -> checkpoint, in tie-break order (epoch, then group)
         for group in self.sft_groups():
-            for epoch, path in epoch_checkpoints(self.lf_dir(group) / "model"):
+            for epoch, path in self.sft_epochs(group):
                 candidates[f"sft_{group}_e{epoch}"] = str(path)
         order = sorted(candidates, key=lambda n: (int(n.rsplit("_e", 1)[1]), list(self.sft_groups()).index(n[4:].rsplit("_e", 1)[0])))
         scores = {n: success_rate(sets[select_by] / n) for n in order}
         if any(v is None for v in scores.values()):
             raise ChainError("missing validation results for " + ", ".join(n for n, v in scores.items() if v is None))
         best = pick_best(scores, order)
-        others = {s: {n: success_rate(d / n) for n in order} for s, d in sets.items() if s != select_by}
+        others = {s: {n: success_rate(d / n) for n in order} for s, d in sets.items()
+                  if s != select_by and (not self.plan.get("sft_eval_sets") or s in self.plan["sft_eval_sets"])}
         self.mark("pick_sft", decision={"select_by": select_by, "scores": scores, "best": best,
                                         "model": candidates[best], "other_sets": others})
 
@@ -992,7 +1009,7 @@ class Chain:
         options = list(ev.get("options") or [])
         models: Dict[str, Tuple[str, Optional[str], Sequence[str]]] = {}
         rl_names: List[str] = []
-        for run_name, run in ({} if self.plan.get("eval_only") else self.rl_runs()).items():
+        for run_name, run in ({} if self.plan.get("eval_only") or self.plan.get("sft_only") else self.rl_runs()).items():
             ckpts = run["run_dir"] / "checkpoints"
             for s in range(every, self.final_update() + 1, every):
                 name = f"{run_name}_{s:03d}" if run_name else f"v10_rl_{s:03d}"
@@ -1061,6 +1078,9 @@ class Chain:
                 continue
             if self.plan.get("eval_only") and step not in EVAL_ONLY_STEPS:  # round 12: evaluation of existing models
                 self.mark(step, state="done", note="not planned (eval_only)")
+                continue
+            if self.plan.get("sft_only") and step in RL_STEPS:  # round 12 batch: SFT and its evaluation only
+                self.mark(step, state="done", note="not planned (sft_only)")
                 continue
             self.mark(step, state="running", started_utc=now(), error=None)
             try:

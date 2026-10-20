@@ -882,6 +882,57 @@ class ChainTest(unittest.TestCase):
                                    " D vagen/env.py"])
         self.assertEqual(T.code_changes([]), ([], []))
 
+    def test_sft_only_chain_with_chosen_epochs(self):
+        """Round 12 batch (the data-scale curve): no sft-records call, only epochs 2/4/.. evaluated, only on the
+        validation set, the pick among them, then the pick alone on the test set; no RL step, no RL checkpoint."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for e in range(1, 5):
+                (root / "lf_s100" / "model" / f"checkpoint-{e * 10}").mkdir(parents=True)
+            (root / "sft").mkdir()
+            (root / "sft" / "traj_s100.jsonl").write_text("{}\n")
+            plan = {"tr": tmp, "sft_dir": str(root / "sft"), "commit": "x", "model": "/base", "sft_epochs": 4,
+                    "sft_groups": {"s100": "traj_s100.jsonl"}, "sft_records": False, "sft_only": True,
+                    "sft_eval_epochs": [2, 4], "sft_eval_sets": ["val"], "select_by": "val",
+                    "eval_sets": {"val": str(root / "val"), "test": str(root / "test")},
+                    "eval": {"variants": [{"suffix": "", "sets": ["test"], "models": ["sft_pick"]}]}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            calls = []
+
+            def sh(args, **k):
+                calls.append(args)
+                if "prepare_active_spatial_sft.py" in args:
+                    (root / "lf_s100" / "train.yaml").write_text("x")
+
+            chain.sh = sh
+            chain.sft_data()
+            self.assertFalse(any("sft-records" in a for a in calls))  # the conversation files exist already
+            self.assertTrue(any(str(root / "sft" / "traj_s100.jsonl") in a for a in calls))
+            jobs = {}
+            chain.eval_jobs = lambda step, j: jobs.update(j)
+            chain.tables = lambda: None
+            chain.sft_eval()
+            self.assertEqual(sorted(jobs), ["val__sft_s100_e2", "val__sft_s100_e4"])
+            for name, rate in (("sft_s100_e2", 0.40), ("sft_s100_e4", 0.38)):
+                d = root / "val" / name
+                d.mkdir(parents=True)
+                (d / "done.json").write_text("{}")
+                rows = [{"success": i < rate * 100, "task_type": "fov_inclusion", "d_star": 3, "turns": 1, "actions": 1,
+                         "collisions": 0, "invalid_turns": 0, "actions_to_success": 1} for i in range(100)]
+                (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            chain.pick_sft()
+            decision = chain.state["steps"]["pick_sft"]["decision"]
+            self.assertEqual((decision["best"], decision["model"]), ("sft_s100_e2", str(root / "lf_s100" / "model" / "checkpoint-20")))
+            self.assertEqual(decision["other_sets"], {})  # no test numbers for the unpicked epochs
+            jobs.clear()
+            chain.evaluate()
+            self.assertEqual(sorted(jobs), ["test__sft_s100_e2"])  # only the pick on the test set, no RL checkpoint
+            for step in T.STEPS:  # the RL steps are skipped by run()
+                setattr(chain, step, lambda: None)
+            chain.state["steps"] = {s: {"state": "pending"} for s in T.STEPS}
+            self.assertEqual(chain.run(), 0)
+            self.assertEqual(chain.state["steps"]["rl"]["note"], "not planned (sft_only)")
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)
