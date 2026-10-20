@@ -954,8 +954,12 @@ class Chain:
         the step fails after all ended if any failed."""
         from . import job_sco
 
+        # a run stopped by a guard stays stopped when the chain is started again (round 12 batch: a restart had
+        # submitted the stopped run anew, and taken its ended render service for a dead one)
+        stopped_before = set(self.state.get("guard_stops") or {})
         runs = {n: r for n, r in self.rl_runs().items()
-                if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir() and (only is None or n in only)}
+                if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir() and (only is None or n in only)
+                and n not in stopped_before}
 
         def submit_renderer(name: str, d: Path, pool: Optional[str] = None) -> None:
             for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):

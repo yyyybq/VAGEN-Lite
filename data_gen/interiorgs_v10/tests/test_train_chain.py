@@ -1349,6 +1349,42 @@ class ChainTest(unittest.TestCase):
                                          ("queued", ("renderer", "32"), "zoetrope")})  # "running" left alone
             self.assertNotIn("running", {n for n, j, a, p in prepared})
 
+    def test_guard_stopped_run_stays_stopped_after_a_restart(self):
+        """A run stopped by a guard is not submitted again when the chain is started again (round 12 batch: a restart
+        had submitted it anew and taken its ended render service for a dead one); the other runs go on."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply",
+                             "rl_runs": {"stopped": {}, "going": {}}}, sleep=lambda s: None)
+            chain.state["guard_stops"] = {"stopped": {"reason": "unparseable answers 0.052 > 0.05", "utc": "x"}}
+            d = root / "rl_run_stopped" / "job_renderer"  # its render service ended when it was stopped
+            d.mkdir(parents=True)
+            (d / "submission.json").write_text(json.dumps({"job_id": "pt-old"}))
+            submitted = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                submitted.append((run.name, job_dir))
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_rl":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=lambda *a, **k: None):
+                chain.rl()
+            self.assertEqual(sorted(submitted), [("rl_run_going", "job_renderer"), ("rl_run_going", "job_rl")])
+            self.assertNotIn("rl/stopped", chain.state.get("job_retries") or {})
+
     def test_waiting_for_the_renderer_is_not_startup_silence(self):
         """renderer_when_trainer_runs: a running trainer still waiting for its render service's address is not silent
         at start-up; silence counts from the address being written."""
