@@ -1,0 +1,5 @@
+# Installed with --no-deps after rlinf_starvla_robocasa365.txt (as RLinf's installer does for robosuite):
+# mink 0.0.5 declares numpy<2 but runs with numpy 2.2.5 in both working RoboCasa 1.0.1 envs on this cluster
+# (probe_spatial/robocasa365/.venv and policies/diffusion_policy/.venv).
+robosuite==1.5.2
+mink==0.0.5

@@ -36,13 +36,14 @@ huggingface-hub==0.36.2
 qwen-vl-utils
 tiktoken
 transformers_stream_generator==0.0.4
-# RoboCasa 1.0.1 asserts numpy==2.2.5, mujoco==3.3.1 and robosuite>=1.5.2 at import (robocasa/__init__.py);
+# RoboCasa 1.0.1 asserts numpy==2.2.5, mujoco==3.3.1 and robosuite>=1.5.2 at import (robocasa/__init__.py); robosuite
+# and mink are in rlinf_nodeps.txt (installed --no-deps: mink 0.0.5 pins numpy<2, as in the working simulator envs);
 # pyarrow in the starVLA env (14.0.1) is built for numpy 1.x
 numpy==2.2.5
 numba==0.61.2
 scipy==1.15.3
 mujoco==3.3.1
-robosuite==1.5.2
+qpsolvers[quadprog]>=4.3.1
 termcolor
 h5py
 lxml
