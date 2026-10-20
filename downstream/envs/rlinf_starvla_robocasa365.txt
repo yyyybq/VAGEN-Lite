@@ -1,0 +1,49 @@
+# Packages added on top of the starVLA conda env (torch 2.6.0+cu124, flash-attn 2.7.4, Python 3.10) by a venv with
+# --system-site-packages: the "StarVLA + RoboCasa365" environment for RLinf (decision D7).  The starVLA env itself and
+# the existing RLinf env (third_party/RLinf/venv_mnt) are not changed.  RLinf, StarVLA and RoboCasa 1.0.1 are used
+# from source via PYTHONPATH (downstream/envs/activate_rlinf.sh), not installed.
+#
+# RLinf core (pyproject.toml dependencies; dev tools such as ruff / pre-commit / gsutil / pytest left out)
+ray[default]>=2.47.0
+hydra-core<1.4.0.dev8
+datasets==3.6.0
+torchdata==0.11.0
+einops
+nvitop
+debugpy
+pybind11
+ninja
+lz4
+zstandard
+icmplib
+sortedcontainers
+tensorboard
+wandb<0.25.1
+swanlab>=0.6.11
+protobuf>=6.33.5,<7
+# RLinf embodied extra (pyproject [embodied]); torchcodec 0.2.x is the release built for torch 2.6
+transformers==4.57.6
+torchcodec==0.2.1
+peft==0.11.1
+imageio[ffmpeg]
+opencv-python
+gymnasium
+gym
+# RLinf StarVLA pins (requirements/embodied/models/starvla.txt) except numpy (below)
+accelerate==1.5.2
+diffusers==0.33.1
+huggingface-hub==0.36.2
+qwen-vl-utils
+tiktoken
+transformers_stream_generator==0.0.4
+# RoboCasa 1.0.1 asserts numpy==2.2.5, mujoco==3.3.1 and robosuite>=1.5.2 at import (robocasa/__init__.py);
+# pyarrow in the starVLA env (14.0.1) is built for numpy 1.x
+numpy==2.2.5
+numba==0.61.2
+scipy==1.15.3
+mujoco==3.3.1
+robosuite==1.5.2
+termcolor
+h5py
+lxml
+pyarrow>=16
