@@ -91,6 +91,12 @@ run's best on the validation set (ties: the earlier) and its last one, and every
 trained but the picked one (with the final weights in the model folder); nothing outside this chain's folder, and
 nothing of a run whose checkpoints are not all evaluated.  What was deleted is kept in state["retained"].
 
+Round 12 batch (cards): plan "rl" "renderer_when_trainer_runs": {"trainer_wait_s": N, "pools": [...]} submits a
+run's render service only once its trainer has its cards (a lone render service on a node keeps 8-card jobs off it
+while the trainer queues); the trainer waits up to N seconds for the service.  "pools" limits it to trainers in
+those pools (where a single card is found quickly).  A trainer submitted before the switch keeps its job and place
+in the queue (only its launch script gets the wait).
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -125,6 +131,7 @@ RL_STEPS = ("rl_config", "rl", "rl_extend")
 STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
                            "raylet failed to start")
 STARTUP_DEFAULTS = {"retries": 2, "stall_minutes": 40}
+RENDERER_WAIT_S = 6 * 3600  # renderer_when_trainer_runs: how long a trainer waits for its render service
 _UPDATE_LINE = re.compile(r"step:\d+ - ")
 _LOG_START = re.compile(r"-(\d{8}T\d{6}Z)-")
 
@@ -943,26 +950,64 @@ class Chain:
 
         runs = {n: r for n, r in self.rl_runs().items()
                 if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir() and (only is None or n in only)}
+
+        def submit_renderer(name: str, d: Path, pool: Optional[str] = None) -> None:
+            for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
+                (d / f).unlink(missing_ok=True)
+            job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=pool or self.job_pool(name))
+            job_sco.submit(d, job_dir="job_renderer")
+
+        def trainer_pool(d: Path) -> Optional[str]:  # the render service goes where its trainer runs
+            prepared = d / "job_rl" / "prepared.json"
+            return json.loads(prepared.read_text()).get("pool") if prepared.is_file() else None
+
+        def drop_renderer(d: Path) -> None:  # with renderer_when_trainer_runs: the next trainer gets a new one
+            if (d / "job_renderer" / "submission.json").exists():
+                (d / "STOP_RENDERER").touch()
+                job_sco.delete(d, "job_renderer")
+            for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
+                (d / f).unlink(missing_ok=True)
+
         for name, run in runs.items():
             d = run["run_dir"]
             d.mkdir(parents=True, exist_ok=True)
-            if not (d / "job_renderer" / "submission.json").exists():
-                for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
-                    (d / f).unlink(missing_ok=True)
-                job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.job_pool(name))
-                job_sco.submit(d, job_dir="job_renderer")
-            if not (d / "job_rl" / "submission.json").exists():
-                job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl", pool=self.job_pool(name))
+            new_trainer = not (d / "job_rl" / "submission.json").exists()
+            pool = self.job_pool(name) if new_trainer else None  # a run keeps its first pool (job_pool)
+            lazy = self.renderer_wait(run, pool) is not None
+            if not (d / "job_renderer" / "submission.json").exists() and not lazy:
+                submit_renderer(name, d)
+            if new_trainer:
+                job_sco.prepare(d, 8, self.trainer_args(run, endpoint, pool), job_dir="job_rl", pool=self.job_pool(name))
                 job_sco.submit(d, job_dir="job_rl")
+            elif lazy and not (d / "job_renderer" / "submission.json").exists():
+                # a trainer submitted before the switch, still waiting: its launch script (read when the job starts)
+                # gets the longer wait for the render service; the job itself is kept, with its place in the queue
+                prepared = d / "job_rl" / "prepared.json"
+                old = json.loads(prepared.read_text()) if prepared.is_file() else {}
+                if old.get("mode_args") != self.trainer_args(run, endpoint):
+                    job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
+                                    pool=old.get("pool") or self.job_pool(name))
         self.mark(step, job_ids={f"{n}/{j}": json.loads((r["run_dir"] / j / "submission.json").read_text())["job_id"]
-                                 for n, r in runs.items() for j in ("job_renderer", "job_rl")})
+                                 for n, r in runs.items() for j in ("job_renderer", "job_rl")
+                                 if (r["run_dir"] / j / "submission.json").exists()})
         active, ended = dict(runs), {}
         try:
             while active:
                 states = {}
                 for name, run in list(active.items()):
                     d = run["run_dir"]
-                    st_rl, st_r = job_sco.status(d, "job_rl"), job_sco.status(d, "job_renderer")
+                    lazy = self.renderer_wait(run) is not None
+                    st_rl = job_sco.status(d, "job_rl")
+                    if lazy and st_rl.get("state") == "RUNNING" and not (d / "job_renderer" / "submission.json").exists():
+                        submit_renderer(name, d, trainer_pool(d))  # the trainer has its cards: now its render service
+                        self.state.setdefault("renderer_on_trainer_start", {}).setdefault(name, []).append(
+                            {"utc": now(), "trainer": st_rl.get("job_id"),
+                             "renderer": json.loads((d / "job_renderer" / "submission.json").read_text())["job_id"]})
+                        self.save()
+                    if (d / "job_renderer" / "submission.json").exists():
+                        st_r = job_sco.status(d, "job_renderer")
+                    else:  # renderer_when_trainer_runs: not submitted while the trainer waits for cards
+                        st_r = {"state": "AFTER_TRAINER_START", "finished": False}
                     states[f"{name}/rl"], states[f"{name}/renderer"] = st_rl.get("state"), st_r.get("state")
                     self.note_queue(f"{step}/{name}/rl", d, "job_rl", st_rl)
                     self.note_queue(f"{step}/{name}/renderer", d, "job_renderer", st_r)
@@ -972,8 +1017,10 @@ class Chain:
                         limit = int(self.startup_settings(run)["retries"])
                         if len(retries) < limit:
                             job_sco.delete(d, "job_rl")
+                            if lazy:
+                                drop_renderer(d)
                             retries.append({"utc": now(), "job_id": st_rl.get("job_id"), "reason": problem})
-                            job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
+                            job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
                                             pool=self.job_pool(name))
                             job_sco.submit(d, job_dir="job_rl")
                             retries[-1]["new_job_id"] = json.loads((d / "job_rl" / "submission.json").read_text())["job_id"]
@@ -992,7 +1039,9 @@ class Chain:
                     if rl_done and not reached and self.take_retry(  # round 12 batch: resume from the last checkpoint
                             f"rl/{name}", "trainer", st_rl.get("job_id"), f"trainer ended {st_rl.get('state')}", used):
                         job_sco.delete(d, "job_rl")
-                        job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
+                        if lazy:
+                            drop_renderer(d)
+                        job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
                                         pool=self.job_pool(name))
                         job_sco.submit(d, job_dir="job_rl")
                         continue
@@ -1002,9 +1051,10 @@ class Chain:
                         job_sco.delete(d, "job_renderer")
                         for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
                             (d / f).unlink(missing_ok=True)
-                        job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.job_pool(name))
-                        job_sco.submit(d, job_dir="job_renderer")
-                        job_sco.prepare(d, 8, ["rl", str(run["rl_dir"]), str(endpoint)], job_dir="job_rl",
+                        if not lazy:
+                            job_sco.prepare(d, 1, ["renderer"], job_dir="job_renderer", pool=self.job_pool(name))
+                            job_sco.submit(d, job_dir="job_renderer")
+                        job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
                                         pool=self.job_pool(name))
                         job_sco.submit(d, job_dir="job_rl")
                         continue
@@ -1035,7 +1085,8 @@ class Chain:
             for run in runs.values():
                 (run["run_dir"] / "STOP_RENDERER").touch()
             for _ in range(20):  # the render services exit within a minute of STOP_RENDERER
-                if all(job_sco.status(r["run_dir"], "job_renderer").get("finished") for r in runs.values()):
+                if all(job_sco.status(r["run_dir"], "job_renderer").get("finished") for r in runs.values()
+                       if (r["run_dir"] / "job_renderer" / "submission.json").exists()):
                     break
                 self.sleep(15)
             for run in runs.values():
@@ -1050,6 +1101,32 @@ class Chain:
 
     def startup_settings(self, run: Dict[str, Any]) -> Dict[str, Any]:
         return {**STARTUP_DEFAULTS, **dict(run["rl"].get("startup") or {})}
+
+    def renderer_wait(self, run: Dict[str, Any], pool: Optional[str] = None) -> Optional[int]:
+        """Round 12 batch (a new switch): plan rl "renderer_when_trainer_runs": {"trainer_wait_s": N, "pools": [...]}
+        submits a run's render service only once its trainer has its cards, so no card is held while the trainer
+        waits for a whole node (one busy card on a node keeps every 8-card job off it); the trainer waits up to N
+        seconds (default 6 hours) for the service's address.  With "pools", only for a trainer in one of them (where a
+        single card is found quickly; ``pool``, else the trainer's prepared job).  A failed trainer's service is stopped
+        with it and its next trainer gets a new one.  None: the render service goes with the trainer, as before."""
+        opt = run["rl"].get("renderer_when_trainer_runs")
+        if not opt:
+            return None
+        opt = opt if isinstance(opt, dict) else {}
+        if opt.get("pools") is not None:
+            if pool is None:
+                prepared = run["run_dir"] / "job_rl" / "prepared.json"
+                pool = json.loads(prepared.read_text()).get("pool") if prepared.is_file() else None
+            if pool not in opt["pools"]:
+                return None
+        return int(opt.get("trainer_wait_s", RENDERER_WAIT_S))
+
+    def trainer_args(self, run: Dict[str, Any], endpoint: int, pool: Optional[str] = None) -> List[str]:
+        """The sco entry script's arguments for a run's trainer (with the switch: how long it waits for its render
+        service; without it the script's default, an hour)."""
+        args = ["rl", str(run["rl_dir"]), str(endpoint)]
+        wait = self.renderer_wait(run, pool)
+        return args + [str(wait)] if wait is not None else args
 
     def startup_check(self, name: str, run: Dict[str, Any], st: Dict[str, Any]) -> Optional[str]:
         """Round 12: startup_problem for the run's current trainer job (its logs since its submission; silence
@@ -1066,8 +1143,11 @@ class Chain:
             seen = self.state.setdefault("startup_seen_running", {})
             key = str(st.get("job_id") or sub.get("job_id"))
             seen.setdefault(key, self.clock())
-            last = max([seen[key]] + [p.stat().st_mtime for p in logs])
-            quiet = self.clock() - last
+            marks: Optional[List[float]] = [seen[key]] + [p.stat().st_mtime for p in logs]
+            if self.renderer_wait(run) is not None:  # waiting for its render service is not start-up silence
+                address = d / "renderer_endpoint.txt"
+                marks = marks + [address.stat().st_mtime] if address.exists() else None
+            quiet = self.clock() - max(marks) if marks else None
         return startup_problem(text, st.get("state"), bool(st.get("finished")), quiet,
                                float(self.startup_settings(run)["stall_minutes"]) * 60)
 

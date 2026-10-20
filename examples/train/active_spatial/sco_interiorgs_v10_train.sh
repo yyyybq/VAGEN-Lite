@@ -6,7 +6,7 @@
 #   sft        RUN LF_DIR               8 cards: the formal SFT (FSDP, full fine-tune, vision tower frozen)
 #   rl-trial   RUN RL_DIR [ENDPOINT]    1 card : the 3DGS render service and PPO on the same card
 #   renderer   RUN                      1 card : the render service for a formal RL run (writes RUN/renderer_endpoint.txt)
-#   rl         RUN RL_DIR ENDPOINT      8 cards: PPO, waits for RUN/renderer_endpoint.txt
+#   rl         RUN RL_DIR ENDPOINT [WAIT_S]  8 cards: PPO, waits up to WAIT_S (default 3600) s for RUN/renderer_endpoint.txt
 #   eval       RUN EVAL NAME MODEL [PROMPT_FORMAT|- [OPTION ...]]  1 card: the render service and vLLM; one greedy
 #                                        episode per task of EVAL/tasks.jsonl (data_gen/interiorgs_v10/evaluation.py),
 #                                        results in EVAL/NAME; OPTIONs go to "evaluation.py run" (round 9 switches,
@@ -150,8 +150,11 @@ PY
   rl)
     RL=${3:?RL config directory}
     ENDPOINT=${4:?endpoint}
+    # round 12 batch: the chain's renderer_when_trainer_runs switch submits the render service once this job has
+    # its cards and passes a longer wait; default an hour
+    RENDERER_WAIT_S=${5:-3600}
     export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-    for _ in $(seq 1 720); do [[ -s ${RUN}/renderer_endpoint.txt ]] && break; sleep 5; done
+    for _ in $(seq 1 $((RENDERER_WAIT_S / 5))); do [[ -s ${RUN}/renderer_endpoint.txt ]] && break; sleep 5; done
     export R1_RENDER_URL
     R1_RENDER_URL=$(<"${RUN}/renderer_endpoint.txt")
     export V10_RAY_TEMP_DIR=/tmp/v10_ray_$$

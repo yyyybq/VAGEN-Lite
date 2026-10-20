@@ -1200,6 +1200,123 @@ class ChainTest(unittest.TestCase):
                 chain.wait_jobs("rl", {"rl": lambda: {"state": "RUNNING", "finished": False},
                                        "renderer": lambda: {"state": "FAILED", "finished": True}}, "rl")
 
+    def test_renderer_when_trainer_runs(self):
+        """Round 12 batch (a new switch): with plan rl "renderer_when_trainer_runs" a run's render service is submitted
+        only once its trainer has its cards and the trainer is told how long to wait for it; a trainer submitted
+        before the switch keeps its job (only its launch script gets the wait); a failed trainer's service is stopped
+        and the next trainer gets a new one once it runs; without the switch the trainer's arguments are unchanged."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "retries": 2, "pool": "h800",
+                             "rl": {"renderer_when_trainer_runs": {"trainer_wait_s": 7200}},
+                             "rl_runs": {"a": {}, "b": {}}}, sleep=lambda s: None)
+            b = root / "rl_run_b"  # submitted before the switch, still waiting; its render service already deleted
+            (b / "job_rl").mkdir(parents=True)
+            (b / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-b-old"}))
+            (b / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope",
+                                                                   "mode_args": ["rl", str(root / "rl_b"), "50"]}))
+            trainer = {"a": iter(["STARTING", "STARTING", "RUNNING", "FAILED", "STARTING", "RUNNING", "ok"]),
+                       "b": iter(["STARTING", "RUNNING", "RUNNING", "ok"])}
+            events, count = [], {}
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                events.append(("prepare", run.name[7:], job_dir, list(args), pool))
+
+            def submit(run, job_dir="job"):
+                count[(run.name, job_dir)] = count.get((run.name, job_dir), 0) + 1
+                job_id = f"pt-{run.name[7:]}-{job_dir[4:]}-{count[(run.name, job_dir)]}"
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": job_id}))
+                events.append(("submit", run.name[7:], job_dir))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_renderer":
+                    done = (run / "STOP_RENDERER").exists()
+                    return {"job_id": job_id, "state": "SUCCEEDED" if done else "RUNNING", "finished": done}
+                kind = next(trainer[run.name[7:]])
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                return {"job_id": job_id, "state": kind, "finished": kind == "FAILED"}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    events.append(("delete", run.name[7:], job_dir))
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.rl()
+            a = [e for e in events if e[1] == "a"]
+            self.assertEqual([e[0] + " " + e[2] for e in a], [
+                "prepare job_rl", "submit job_rl",                          # no render service while it queues
+                "prepare job_renderer", "submit job_renderer",              # the trainer runs: its service
+                "delete job_rl", "delete job_renderer",                     # the trainer failed: both go
+                "prepare job_rl", "submit job_rl",                          # resubmitted (resumes), no service yet
+                "prepare job_renderer", "submit job_renderer",              # running again: a new service
+                "delete job_rl", "delete job_renderer"])                    # the end of the step
+            self.assertEqual(a[0][3], ["rl", str(root / "rl_a"), "50", "7200"])
+            bev = [e for e in events if e[1] == "b"]
+            self.assertEqual(bev[0], ("prepare", "b", "job_rl", ["rl", str(root / "rl_b"), "50", "7200"], "zoetrope"))
+            self.assertNotIn(("submit", "b", "job_rl"), bev)  # the waiting job is kept, with its place in the queue
+            self.assertEqual([e[0] + " " + e[2] for e in bev[1:3]], ["prepare job_renderer", "submit job_renderer"])
+            self.assertEqual(bev[1][4], "zoetrope")  # the render service goes to its trainer's pool
+            self.assertEqual([r["trainer"] for r in chain.state["renderer_on_trainer_start"]["a"]], ["pt-a-rl-1", "pt-a-rl-2"])
+            self.assertTrue((root / "rl_run_b" / "checkpoints" / "global_step_50").is_dir())
+
+            plain = T.Chain({"tr": tmp, "sft_dir": tmp, "rl_runs": {"x": {}}})
+            self.assertEqual(plain.trainer_args(plain.rl_runs()["x"], 50), ["rl", str(root / "rl_x"), "50"])
+            on = T.Chain({"tr": tmp, "sft_dir": tmp, "rl": {"renderer_when_trainer_runs": True}, "rl_runs": {"x": {}}})
+            self.assertEqual(on.trainer_args(on.rl_runs()["x"], 50)[-1], str(T.RENDERER_WAIT_S))
+            # "pools": only for a trainer in one of them (given, else its prepared job's pool)
+            only = T.Chain({"tr": tmp, "sft_dir": tmp, "rl": {"renderer_when_trainer_runs": {"pools": ["h800"]}},
+                            "rl_runs": {"x": {}}})
+            x = only.rl_runs()["x"]
+            self.assertEqual(only.renderer_wait(x, "h800"), T.RENDERER_WAIT_S)
+            self.assertIsNone(only.renderer_wait(x, "zoetrope"))
+            self.assertIsNone(only.renderer_wait(x))  # no prepared trainer yet: no pool known
+            (x["run_dir"] / "job_rl").mkdir(parents=True)
+            (x["run_dir"] / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope"}))
+            self.assertEqual(only.trainer_args(x, 50), ["rl", str(root / "rl_x"), "50"])
+            (x["run_dir"] / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "h800"}))
+            self.assertEqual(only.trainer_args(x, 50)[-1], str(T.RENDERER_WAIT_S))
+
+    def test_waiting_for_the_renderer_is_not_startup_silence(self):
+        """renderer_when_trainer_runs: a running trainer still waiting for its render service's address is not silent
+        at start-up; silence counts from the address being written."""
+        import os
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            clock = {"t": time.time()}
+
+            def setup(rl):
+                chain = T.Chain({"tr": tmp, "sft_dir": tmp, "rl": rl, "rl_runs": {"x": {}}}, clock=lambda: clock["t"])
+                run = chain.rl_runs()["x"]
+                (run["run_dir"] / "job_rl").mkdir(parents=True, exist_ok=True)
+                (run["run_dir"] / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-x"}))
+                return chain, run
+
+            st = {"job_id": "pt-x", "state": "RUNNING", "finished": False}
+            lazy, run = setup({"renderer_when_trainer_runs": True})
+            plain, plain_run = setup({})
+            self.assertIsNone(lazy.startup_check("x", run, st))
+            self.assertIsNone(plain.startup_check("x", plain_run, st))
+            clock["t"] += 3 * 3600
+            self.assertIsNone(lazy.startup_check("x", run, st))  # three hours waiting for the service
+            self.assertIn("no output for 180 minutes", plain.startup_check("x", plain_run, st))
+            address = run["run_dir"] / "renderer_endpoint.txt"
+            address.write_text("http://10.0.0.1:8915/render\n")
+            os.utime(address, (clock["t"] - 10 * 60, clock["t"] - 10 * 60))
+            self.assertIsNone(lazy.startup_check("x", run, st))
+            os.utime(address, (clock["t"] - 41 * 60, clock["t"] - 41 * 60))
+            self.assertIn("no output for 41 minutes", lazy.startup_check("x", run, st))
+
 
 if __name__ == "__main__":
     unittest.main()
