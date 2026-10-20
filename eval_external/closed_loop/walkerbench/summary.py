@@ -50,6 +50,59 @@ def build(stage: str) -> dict:
     return {"main": main, "strict": strict}
 
 
+def combined(stage: str, main_run: str, extra_run: str) -> dict | None:
+    """Standard-100 (main-table run) + extra300 for one model: per-type successes, total over 400 with its Wilson
+    interval, and per-task success for paired tests."""
+    from eval_external.common.stats import wilson
+
+    a, b = load(stage, main_run), load(stage, extra_run)
+    if not (a and b):
+        return None
+    per = {t: a["per_type"][t]["success"] + b["per_type"][t]["success"] for t in TYPES}
+    n = a["n_tasks"] + b["n_tasks"]
+    k = sum(per.values())
+    p, lo, hi = wilson(k, n)
+    succ = {}  # per_task is keyed by the task file's name, unique across both sets
+    for res in (a, b):
+        for tid, r in res["per_task"].items():
+            succ[tid] = bool(r.get("success"))
+    return {"n": n, "success": k, "rate": round(100 * p, 1), "ci95": [round(100 * lo, 1), round(100 * hi, 1)],
+            "per_type": per, "per_task": succ,
+            "mean_steps": round((a["mean_steps"] * a["n_scored"] + b["mean_steps"] * b["n_scored"])
+                                / (a["n_scored"] + b["n_scored"]), 2)}
+
+
+def extra_tables(stage: str, main: dict) -> list[str]:
+    from eval_external.diagnostics.compare_ownenv import mcnemar_exact
+
+    rows = {}
+    for m, r in main.items():
+        c = combined(stage, r["run"], f"{m}__extra300__lenient")
+        x = load(stage, f"{m}__extra300__lenient")
+        if c and x:
+            rows[m] = (row(x, f"{m}__extra300__lenient"), c)
+    if not rows:
+        return []
+    out = ["", "**加测 300 题（本地规则；每类 60 题）和合计 400 题**", "",
+           "| 模型 | 加测 300 题成功率（95% 区间） | 加测各类成功题数 | 合计 400 题成功率（95% 区间） | 合计各类成功题数（每类 80） | 平均步数（400 题） | 规则救回的无效回答（加测） |",
+           "|---|---|---|---|---|---|---|"]
+    for m, (x, c) in rows.items():
+        out.append(f"| {m} | {x['total_sr']:.1f} [{x['ci95'][0]}, {x['ci95'][1]}] | "
+                   + " / ".join(str(x["per_type"][t]) for t in TYPES)
+                   + f" | {c['rate']} [{c['ci95'][0]}, {c['ci95'][1]}]（{c['success']}/{c['n']}） | "
+                   + " / ".join(str(c["per_type"][t]) for t in TYPES) + f" | {c['mean_steps']} | "
+                   + (f"{x['rule_rescued']}%（{x['rule_tried']} 个里）" if x["rule_tried"] else "无无效回答") + " |")
+    names = list(rows)
+    if len(names) == 2:
+        (m1, (_, c1)), (m2, (_, c2)) = rows.items()
+        common = set(c1["per_task"]) & set(c2["per_task"])
+        only1 = sum(c1["per_task"][t] and not c2["per_task"][t] for t in common)
+        only2 = sum(c2["per_task"][t] and not c1["per_task"][t] for t in common)
+        out += ["", f"逐题配对（{len(common)} 题）：只有 {m1} 做对 {only1} 题，只有 {m2} 做对 {only2} 题，"
+                    f"精确 McNemar p = {mcnemar_exact(only1, only2):.2g}。"]
+    return out
+
+
 def table(rows: dict, rule: bool) -> list[str]:
     head = "| 模型 | 成功率（95% 区间） | 角度 / 距离 / 高度 / 导航 / 可见性（成功题数） | 平均步数 | 解析不出的步 | 上下文溢出的步 |"
     head += " 规则救回的无效回答 |" if rule else ""
@@ -73,6 +126,7 @@ def main() -> None:
     args = ap.parse_args()
     t = build(args.stage)
     md = (["**主表：本地规则（回答不是 JSON 时，取其中最后提到的 MOVE / ROTATION / STOP）**", ""] + table(t["main"], True)
+          + extra_tables(args.stage, t["main"])
           + ["", "**附录：严格解析（WalkerBench 自己的 JSON 解析，不修补）**", ""] + table(t["strict"], False))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.with_suffix(".json").write_text(json.dumps(t, indent=1, ensure_ascii=False) + "\n")
