@@ -1,0 +1,125 @@
+[launch] host=pt-5bf9da063dd842968143fc4fd6704509-worker-0 date=2026-10-20T13:30:29Z uid=0
+NVIDIA H800, 595.71.05, 81559 MiB
+[step1] worktree=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream out=/mnt/umm/users/yinbaiqiao/downstream_runs/step1_load_test_20261020/out (code commit: job/prepared.json; the image has no git)
+[starVLA] python=/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python
+[starVLA] CUDA_HOME=/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA nvcc=12.4, V12.4.131
+[step1] 1/3 HF export check 13:30:29
+B      complete HF export  params=8292166656  dtypes=['BF16']  config_dtype=bfloat16  problems=[]
+S      complete HF export  params=8292166656  dtypes=['BF16', 'F32']  config_dtype=bfloat16  problems=[]
+RS     complete HF export  params=8292166656  dtypes=['F32']  config_dtype=float32  problems=[]
+RD     complete HF export  params=8292166656  dtypes=['F32']  config_dtype=float32  problems=[]
+R10S5  complete HF export  params=8292166656  dtypes=['BF16', 'F32']  config_dtype=bfloat16  problems=[]
+R1     complete HF export  params=8292166656  dtypes=['F32']  config_dtype=float32  problems=[]
+[step1] 2/3 StarVLA load test 13:30:48
+[step1] load B 13:30:48
+10/20 [13:31:09] WARNING  | >> [*] [StarVLA]               base_framework.py:120
+                          Reproducibility notice: this                          
+                          repository is under active                            
+                          development. The latest code may                      
+                          not exactly reproduce every                           
+                          previously released HF                                
+                          checkpoint because code,                              
+                          configs, preprocessing, and                           
+                          evaluation behavior can change                        
+                          over time. For exact                                  
+                          reproduction, checkout the                            
+                          repository revision from the                          
+                          checkpoint's release/training                         
+                          time and use its own config.                          
+/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/lib/python3.10/site-packages/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py:1171: UserWarning: Specified kernel cache directory is not writable! This disables kernel caching. Specified directory is /mnt/umm/users/yinbaiqiao/.cache/torch/kernels. This warning will appear only once per process. (Triggered internally at /pytorch/aten/src/ATen/native/cuda/jit_utils.cpp:1460.)
+  split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
+{"name": "B", "status": "ok", "params": {"total": 8420774924, "backbone": 8292166656, "action_head": 128608268, "trainable": 8420774924}, "dtypes": {"backbone": {"torch.bfloat16": 8292166656}, "action_head": {"torch.float32": 128608268}}, "gpu_mem_gb": {"after_load": 15.97}, "error": null}
+0 MiB
+[step1] load S 13:31:30
+10/20 [13:31:50] WARNING  | >> [*] [StarVLA]               base_framework.py:120
+                          Reproducibility notice: this                          
+                          repository is under active                            
+                          development. The latest code may                      
+                          not exactly reproduce every                           
+                          previously released HF                                
+                          checkpoint because code,                              
+                          configs, preprocessing, and                           
+                          evaluation behavior can change                        
+                          over time. For exact                                  
+                          reproduction, checkout the                            
+                          repository revision from the                          
+                          checkpoint's release/training                         
+                          time and use its own config.                          
+Loading checkpoint shards:   0%|          | 0/7 [00:00<?, ?it/s]Loading checkpoint shards:  14%|█▍        | 1/7 [00:01<00:11,  1.99s/it]Loading checkpoint shards:  29%|██▊       | 2/7 [00:05<00:13,  2.64s/it]Loading checkpoint shards:  43%|████▎     | 3/7 [00:07<00:10,  2.73s/it]Loading checkpoint shards:  57%|█████▋    | 4/7 [00:10<00:08,  2.86s/it]Loading checkpoint shards:  71%|███████▏  | 5/7 [00:13<00:05,  2.88s/it]Loading checkpoint shards:  86%|████████▌ | 6/7 [00:16<00:02,  2.91s/it]Loading checkpoint shards: 100%|██████████| 7/7 [00:18<00:00,  2.34s/it]Loading checkpoint shards: 100%|██████████| 7/7 [00:18<00:00,  2.58s/it]
+/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/lib/python3.10/site-packages/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py:1171: UserWarning: Specified kernel cache directory is not writable! This disables kernel caching. Specified directory is /mnt/umm/users/yinbaiqiao/.cache/torch/kernels. This warning will appear only once per process. (Triggered internally at /pytorch/aten/src/ATen/native/cuda/jit_utils.cpp:1460.)
+  split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
+{"name": "S", "status": "ok", "params": {"total": 8420774924, "backbone": 8292166656, "action_head": 128608268, "trainable": 8420774924}, "dtypes": {"backbone": {"torch.bfloat16": 8292166656}, "action_head": {"torch.float32": 128608268}}, "gpu_mem_gb": {"after_load": 15.97}, "error": null}
+0 MiB
+[step1] load RS 13:32:40
+10/20 [13:33:01] WARNING  | >> [*] [StarVLA]               base_framework.py:120
+                          Reproducibility notice: this                          
+                          repository is under active                            
+                          development. The latest code may                      
+                          not exactly reproduce every                           
+                          previously released HF                                
+                          checkpoint because code,                              
+                          configs, preprocessing, and                           
+                          evaluation behavior can change                        
+                          over time. For exact                                  
+                          reproduction, checkout the                            
+                          repository revision from the                          
+                          checkpoint's release/training                         
+                          time and use its own config.                          
+/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/lib/python3.10/site-packages/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py:1171: UserWarning: Specified kernel cache directory is not writable! This disables kernel caching. Specified directory is /mnt/umm/users/yinbaiqiao/.cache/torch/kernels. This warning will appear only once per process. (Triggered internally at /pytorch/aten/src/ATen/native/cuda/jit_utils.cpp:1460.)
+  split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
+{"name": "RS", "status": "ok", "params": {"total": 8420774924, "backbone": 8292166656, "action_head": 128608268, "trainable": 8420774924}, "dtypes": {"backbone": {"torch.float32": 8292166656}, "action_head": {"torch.float32": 128608268}}, "gpu_mem_gb": {"after_load": 31.51}, "error": null}
+0 MiB
+[step1] load RD 13:33:32
+10/20 [13:33:52] WARNING  | >> [*] [StarVLA]               base_framework.py:120
+                          Reproducibility notice: this                          
+                          repository is under active                            
+                          development. The latest code may                      
+                          not exactly reproduce every                           
+                          previously released HF                                
+                          checkpoint because code,                              
+                          configs, preprocessing, and                           
+                          evaluation behavior can change                        
+                          over time. For exact                                  
+                          reproduction, checkout the                            
+                          repository revision from the                          
+                          checkpoint's release/training                         
+                          time and use its own config.                          
+/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/lib/python3.10/site-packages/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py:1171: UserWarning: Specified kernel cache directory is not writable! This disables kernel caching. Specified directory is /mnt/umm/users/yinbaiqiao/.cache/torch/kernels. This warning will appear only once per process. (Triggered internally at /pytorch/aten/src/ATen/native/cuda/jit_utils.cpp:1460.)
+  split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
+{"name": "RD", "status": "ok", "params": {"total": 8420774924, "backbone": 8292166656, "action_head": 128608268, "trainable": 8420774924}, "dtypes": {"backbone": {"torch.float32": 8292166656}, "action_head": {"torch.float32": 128608268}}, "gpu_mem_gb": {"after_load": 31.51}, "error": null}
+0 MiB
+[step1] 3/3 render check 13:34:24
+ls: cannot access '/dev/dri': No such file or directory
+NVIDIA_DRIVER_CAPABILITIES=unset
+Exception ignored in: <function GLContext.__del__ at 0x7f152e47c0d0>
+Traceback (most recent call last):
+  File "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/mujoco/egl/__init__.py", line 138, in __del__
+    self.free()
+  File "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/mujoco/egl/__init__.py", line 128, in free
+    if self._context:
+AttributeError: 'GLContext' object has no attribute '_context'
+Exception ignored in: <function Renderer.__del__ at 0x7f152b9eedd0>
+Traceback (most recent call last):
+  File "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/mujoco/renderer.py", line 337, in __del__
+    self.close()
+  File "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/mujoco/renderer.py", line 325, in close
+    if self._mjr_context:
+AttributeError: 'Renderer' object has no attribute '_mjr_context'
+{"MUJOCO_GL": "egl", "PYOPENGL_PLATFORM": "egl", "EGL_library": null, "OSMesa_library": null, "NUMBA_DISABLE_JIT": null, "python": "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/bin/python", "host": "pt-5bf9da063dd842968143fc4fd6704509-worker-0", "sphere": false}
+[step1] egl rc=1
+[robosuite WARNING] No private macro file found! (macros.py:57)
+[robosuite WARNING] It is recommended to use a private macro file (macros.py:58)
+[robosuite WARNING] To setup, run: python /mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/robosuite/scripts/setup_macros.py (macros.py:59)
+[robosuite WARNING] Could not import robosuite_models. Some robots may not be available. If you want to use these robots, please install robosuite_models from source (https://github.com/ARISE-Initiative/robosuite_models) or through pip install. (__init__.py:30)
+[robosuite WARNING] Could not load the mink-based whole-body IK. Make sure you install related import properly, otherwise you will not be able to use the default IK controller setting for GR1 robot. (__init__.py:40)
+[robosuite INFO] Loading controller configuration from: /mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/robosuite/controllers/config/robots/default_pandaomron.json (composite_controller_factory.py:121)
+/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/gymnasium/utils/passive_env_checker.py:157: UserWarning: [33mWARN: The obs returned by the `reset()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/lib/python3.10/site-packages/gymnasium/utils/passive_env_checker.py:157: UserWarning: [33mWARN: The obs returned by the `step()` method is not within the observation space.[0m
+  logger.warn(f"{pre} is not within the observation space.")
+WARNING: mimicgen environments not imported since mimicgen is not installed!
+Creating NavigateKitchen with split=target
+{"MUJOCO_GL": "osmesa", "PYOPENGL_PLATFORM": "osmesa", "EGL_library": null, "OSMesa_library": null, "NUMBA_DISABLE_JIT": "1", "python": "/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/policies/diffusion_policy/.venv/bin/python", "host": "pt-5bf9da063dd842968143fc4fd6704509-worker-0", "sphere": true, "kitchen": true}
+[step1] osmesa rc=0
+[step1] done 13:35:01
+[launch] rc=0 date=2026-10-20T13:35:01Z
