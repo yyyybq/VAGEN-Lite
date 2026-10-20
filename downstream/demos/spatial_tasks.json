@@ -1,0 +1,25 @@
+{
+ "_doc": "Which of the 34 seen target tasks need a spatial-relation judgment (decision D6). Evidence: spatial_keyword_counts.json (spatial words in every instruction variant of meta/tasks.jsonl).",
+ "rule": "A task is spatial when the main instruction the policy receives (annotation.human.task_description, not the subtask annotations) picks its target or goal by a relation the policy must resolve in the scene: left / right, front / rear / center, top of several, under an object, next to / near, stacking order by relative size; or when the goal is to bring the robot to a named place (navigation). Not spatial: target named only by object category or by a single container, or a word like 'on top' that only names the normal closed position.",
+ "spatial": {
+  "CoffeeSetupMug": "place the mug under the coffee machine dispenser",
+  "NavigateKitchen": "navigate to a named fixture or object (robot-to-object relation)",
+  "OpenDrawer": "open the left / right drawer",
+  "SlideDishwasherRack": "slide the top dishwasher rack",
+  "TurnOffStove": "turn off the front / rear, left / center / right burner",
+  "DeliverStraw": "take a straw from the drawer in front",
+  "PrepareCoffee": "place the mug under the coffee machine dispenser",
+  "SearingMeat": "place the pan on the rear / front, left / center / right burner",
+  "StackBowlsCabinet": "place the smaller bowl on top of the larger one"
+ },
+ "borderline_not_in_group": {
+  "KettleBoiling": "main instruction 'place the kettle on a stove burner, then turn the burner on' has no relation word, but the burner to turn on is the one under the kettle; left / front words appear only in subtask annotations",
+  "PackIdenticalLunches": "'each tupperware on the nearby counter': 'nearby' may or may not disambiguate the counter",
+  "SetUpCuttingStation": "'left drawer' appears only in subtask annotations, not in the main instruction"
+ },
+ "not_spatial": ["CloseBlenderLid", "CloseFridge", "CloseToasterOvenDoor", "OpenCabinet", "OpenStandMixerHead",
+                 "PickPlaceCounterToCabinet", "PickPlaceCounterToStove", "PickPlaceDrawerToCounter",
+                 "PickPlaceSinkToCounter", "PickPlaceToasterToCounter", "TurnOnElectricKettle", "TurnOnMicrowave",
+                 "TurnOnSinkFaucet", "GetToastedBread", "LoadDishwasher", "PreSoakPan", "RinseSinkBasin",
+                 "ScrubCuttingBoard", "SteamInMicrowave", "StirVegetables", "StoreLeftoversInBowl", "WashLettuce"]
+}

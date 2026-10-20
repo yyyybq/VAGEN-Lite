@@ -1,0 +1,264 @@
+{
+ "CloseBlenderLid": {
+  "group": "atomic_seen",
+  "instructions": 2,
+  "keywords": {
+   "top/bottom/above/below/under": {
+    "instructions": 1,
+    "example": "Close the lid blender by securely placing the lid on top."
+   }
+  }
+ },
+ "CloseFridge": {
+  "group": "atomic_seen",
+  "instructions": 3,
+  "keywords": {}
+ },
+ "CloseToasterOvenDoor": {
+  "group": "atomic_seen",
+  "instructions": 2,
+  "keywords": {}
+ },
+ "CoffeeSetupMug": {
+  "group": "atomic_seen",
+  "instructions": 2,
+  "keywords": {
+   "top/bottom/above/below/under": {
+    "instructions": 1,
+    "example": "Pick the mug from the counter and place it under the coffee machine dispenser."
+   }
+  }
+ },
+ "NavigateKitchen": {
+  "group": "atomic_seen",
+  "instructions": 14,
+  "keywords": {}
+ },
+ "OpenCabinet": {
+  "group": "atomic_seen",
+  "instructions": 3,
+  "keywords": {}
+ },
+ "OpenDrawer": {
+  "group": "atomic_seen",
+  "instructions": 3,
+  "keywords": {
+   "left/right": {
+    "instructions": 2,
+    "example": "Open the right drawer."
+   }
+  }
+ },
+ "OpenStandMixerHead": {
+  "group": "atomic_seen",
+  "instructions": 2,
+  "keywords": {}
+ },
+ "PickPlaceCounterToCabinet": {
+  "group": "atomic_seen",
+  "instructions": 106,
+  "keywords": {}
+ },
+ "PickPlaceCounterToStove": {
+  "group": "atomic_seen",
+  "instructions": 29,
+  "keywords": {}
+ },
+ "PickPlaceDrawerToCounter": {
+  "group": "atomic_seen",
+  "instructions": 10,
+  "keywords": {}
+ },
+ "PickPlaceSinkToCounter": {
+  "group": "atomic_seen",
+  "instructions": 35,
+  "keywords": {}
+ },
+ "PickPlaceToasterToCounter": {
+  "group": "atomic_seen",
+  "instructions": 2,
+  "keywords": {}
+ },
+ "SlideDishwasherRack": {
+  "group": "atomic_seen",
+  "instructions": 3,
+  "keywords": {
+   "top/bottom/above/below/under": {
+    "instructions": 2,
+    "example": "Fully slide the top dishwasher rack in."
+   }
+  }
+ },
+ "TurnOffStove": {
+  "group": "atomic_seen",
+  "instructions": 9,
+  "keywords": {
+   "left/right": {
+    "instructions": 5,
+    "example": "Turn off the front right burner of the stove."
+   },
+   "front/rear/back": {
+    "instructions": 6,
+    "example": "Turn off the front right burner of the stove."
+   },
+   "center/middle": {
+    "instructions": 3,
+    "example": "Turn off the front center burner of the stove."
+   }
+  }
+ },
+ "TurnOnElectricKettle": {
+  "group": "atomic_seen",
+  "instructions": 2,
+  "keywords": {}
+ },
+ "TurnOnMicrowave": {
+  "group": "atomic_seen",
+  "instructions": 2,
+  "keywords": {}
+ },
+ "TurnOnSinkFaucet": {
+  "group": "atomic_seen",
+  "instructions": 2,
+  "keywords": {}
+ },
+ "DeliverStraw": {
+  "group": "composite_seen",
+  "instructions": 15,
+  "keywords": {
+   "front/rear/back": {
+    "instructions": 2,
+    "example": "Take a straw from the drawer in front and place it inside the glass cup on the dining counter."
+   }
+  }
+ },
+ "GetToastedBread": {
+  "group": "composite_seen",
+  "instructions": 18,
+  "keywords": {}
+ },
+ "KettleBoiling": {
+  "group": "composite_seen",
+  "instructions": 18,
+  "keywords": {
+   "left/right": {
+    "instructions": 5,
+    "example": "turn on the left burner where the kettle is placed"
+   },
+   "front/rear/back": {
+    "instructions": 5,
+    "example": "turn on the front-right burner where the kettle is placed"
+   },
+   "center/middle": {
+    "instructions": 2,
+    "example": "turn on the center burner where the kettle is placed"
+   }
+  }
+ },
+ "LoadDishwasher": {
+  "group": "composite_seen",
+  "instructions": 14,
+  "keywords": {}
+ },
+ "PackIdenticalLunches": {
+  "group": "composite_seen",
+  "instructions": 445,
+  "keywords": {
+   "front/rear/back": {
+    "instructions": 1,
+    "example": "navigate back to the fridge"
+   },
+   "next to/beside/near/far": {
+    "instructions": 51,
+    "example": "Place one eggplant and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches."
+   }
+  }
+ },
+ "PreSoakPan": {
+  "group": "composite_seen",
+  "instructions": 14,
+  "keywords": {}
+ },
+ "PrepareCoffee": {
+  "group": "composite_seen",
+  "instructions": 12,
+  "keywords": {
+   "top/bottom/above/below/under": {
+    "instructions": 2,
+    "example": "Pick the mug from the cabinet, place it under the coffee machine dispenser, and press the start button."
+   }
+  }
+ },
+ "RinseSinkBasin": {
+  "group": "composite_seen",
+  "instructions": 9,
+  "keywords": {}
+ },
+ "ScrubCuttingBoard": {
+  "group": "composite_seen",
+  "instructions": 12,
+  "keywords": {}
+ },
+ "SearingMeat": {
+  "group": "composite_seen",
+  "instructions": 69,
+  "keywords": {
+   "left/right": {
+    "instructions": 30,
+    "example": "Grab the pan from the cabinet and place it on the rear right burner on the stove. Then place the chicken drumstick on the stove and turn the burner on."
+   },
+   "front/rear/back": {
+    "instructions": 36,
+    "example": "Grab the pan from the cabinet and place it on the rear right burner on the stove. Then place the chicken drumstick on the stove and turn the burner on."
+   },
+   "center/middle": {
+    "instructions": 18,
+    "example": "Grab the pan from the cabinet and place it on the rear center burner on the stove. Then place the chicken drumstick on the stove and turn the burner on."
+   }
+  }
+ },
+ "SetUpCuttingStation": {
+  "group": "composite_seen",
+  "instructions": 25,
+  "keywords": {
+   "left/right": {
+    "instructions": 4,
+    "example": "pick up the knife from the left drawer"
+   }
+  }
+ },
+ "StackBowlsCabinet": {
+  "group": "composite_seen",
+  "instructions": 16,
+  "keywords": {
+   "top/bottom/above/below/under": {
+    "instructions": 3,
+    "example": "Pick up the bowls on the counter and stack them on top of one another in the open cabinet. Place the smaller bowl on top of the larger bowl."
+   },
+   "size order": {
+    "instructions": 7,
+    "example": "Pick up the bowls on the counter and stack them on top of one another in the open cabinet. Place the smaller bowl on top of the larger bowl."
+   }
+  }
+ },
+ "SteamInMicrowave": {
+  "group": "composite_seen",
+  "instructions": 68,
+  "keywords": {}
+ },
+ "StirVegetables": {
+  "group": "composite_seen",
+  "instructions": 286,
+  "keywords": {}
+ },
+ "StoreLeftoversInBowl": {
+  "group": "composite_seen",
+  "instructions": 83,
+  "keywords": {}
+ },
+ "WashLettuce": {
+  "group": "composite_seen",
+  "instructions": 13,
+  "keywords": {}
+ }
+}
