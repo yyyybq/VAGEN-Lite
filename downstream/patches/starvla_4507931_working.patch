@@ -1,0 +1,339 @@
+diff --git a/deployment/model_server/policy_norm_processor.py b/deployment/model_server/policy_norm_processor.py
+index e150b39..275b488 100644
+--- a/deployment/model_server/policy_norm_processor.py
++++ b/deployment/model_server/policy_norm_processor.py
+@@ -68,14 +68,15 @@ def _resolve_robot_type(
+             "cannot resolve training-time robot_type."
+         ) from e
+ 
+-    if data_mix not in DATASET_NAMED_MIXTURES:
++    explicit_mixture = model_cfg["datasets"]["vla_data"].get("mixture_spec")
++    if not explicit_mixture and data_mix not in DATASET_NAMED_MIXTURES:
+         raise KeyError(
+             f"data_mix={data_mix!r} not in DATASET_NAMED_MIXTURES "
+             f"(available: {sorted(DATASET_NAMED_MIXTURES.keys())[:20]} ...). "
+             "Did you forget to register the example under examples/<bench>/train_files/data_registry/?"
+         )
+ 
+-    mixture = DATASET_NAMED_MIXTURES[data_mix]
++    mixture = explicit_mixture or DATASET_NAMED_MIXTURES[data_mix]
+     robot_types = sorted({entry[2] for entry in mixture})
+ 
+     if len(robot_types) == 1:
+diff --git a/examples/simBenchmarks/Robocasa_365/eval_files/run_eval.sh b/examples/simBenchmarks/Robocasa_365/eval_files/run_eval.sh
+index 233bfd5..0a0698e 100755
+--- a/examples/simBenchmarks/Robocasa_365/eval_files/run_eval.sh
++++ b/examples/simBenchmarks/Robocasa_365/eval_files/run_eval.sh
+@@ -21,7 +21,7 @@ case "${1:-}" in
+     ;;
+   client)
+     # Run inside the `robocasa365` env
+-    exec python -m examples.Robocasa_365.eval_files.simulation_env \
++    exec python -m examples.simBenchmarks.Robocasa_365.eval_files.simulation_env \
+       --args.pretrained-path "${CKPT}" \
+       --args.env-name "${ENV_NAME}" \
+       --args.port "${PORT}" \
+diff --git a/examples/simBenchmarks/Robocasa_365/train_files/data_registry/data_config.py b/examples/simBenchmarks/Robocasa_365/train_files/data_registry/data_config.py
+index 9d6d8de..d53f0ec 100644
+--- a/examples/simBenchmarks/Robocasa_365/train_files/data_registry/data_config.py
++++ b/examples/simBenchmarks/Robocasa_365/train_files/data_registry/data_config.py
+@@ -6,8 +6,9 @@ Schema follows the official robocasa LeRobot conversion (see
+ ``robocasa/scripts/dataset_scripts/convert_hdf5_lerobot.py``):
+ 
+ * observation.state (16d): base_position(3) + base_rotation(4) + eef_pos_rel(3) + eef_rot_rel(4) + gripper_qpos(2)
+-* action (12d): eef_pos(3) + eef_rot(3) + gripper_close(1) + base_motion(4) + control_mode(1)
+-* 3 cameras at 256x256, 20 fps. We only use ``robot0_agentview_left`` for training.
++* packed LeRobot ``action`` column (modality.json): base_motion(4) + control_mode(1) + eef_pos(3) + eef_rot(3) + gripper_close(1)
++* model / gym action (12d, ``action_keys`` concat): eef_pos(3) + eef_rot(3) + gripper_close(1) + base_motion(4) + control_mode(1)
++* 3 cameras at 256x256, 20 fps. Training uses the named video keys in ``video_keys``.
+ """
+ 
+ from starVLA.dataloader.gr00t_lerobot.datasets import ModalityConfig
+@@ -128,6 +129,13 @@ _TARGET_HUMAN_ATOMIC = {
+     "TurnOnSinkFaucet":          "v1.0/target/atomic/TurnOnSinkFaucet/20250812",
+ }
+ 
++# Pretrain/human split uses the same LeRobot v2.1 layout as target/human, but
++# lives under ``v1.0/pretrain/...``. Local dumps currently ship NavigateKitchen
++# only as pretrain (503 eps, 20 fps, action_dim=12).
++_PRETRAIN_HUMAN_ATOMIC = {
++    "NavigateKitchen": "v1.0/pretrain/atomic/NavigateKitchen/20250821",
++}
++
+ # Composite multi-step tasks (target/human split, 32 tasks).
+ # Includes both ``composite_seen`` (16) and ``composite_unseen`` (16) — these
+ # are *training* data; ``unseen`` only refers to the eval task list.
+@@ -177,6 +185,12 @@ DATASET_NAMED_MIXTURES = {
+     "robocasa365_open_drawer_target_human": [
+         ("v1.0/target/atomic/OpenDrawer/20250816/lerobot", 1.0, _ROBOT_TAG),
+     ],
++    # Local LeRobot layout: datasets/v1.0/pretrain/atomic/NavigateKitchen/<date>/lerobot
++    "robocasa365_navigate_kitchen_pretrain_human": _entries(_PRETRAIN_HUMAN_ATOMIC),
++    # Official target/human NavigateKitchen (only if that split is downloaded).
++    "robocasa365_navigate_kitchen_target_human": [
++        ("v1.0/target/atomic/NavigateKitchen/20250821/lerobot", 1.0, _ROBOT_TAG),
++    ],
+     # ------- full mixtures (each task weighted 1.0; equal sampling per task) -------
+     "robocasa365_atomic_target_human_all":    _entries(_TARGET_HUMAN_ATOMIC),
+     "robocasa365_composite_target_human_all": _entries(_TARGET_HUMAN_COMPOSITE),
+diff --git a/starVLA/dataloader/gr00t_lerobot/transform/state_action.py b/starVLA/dataloader/gr00t_lerobot/transform/state_action.py
+index 9b8ab6d..993ffa2 100644
+--- a/starVLA/dataloader/gr00t_lerobot/transform/state_action.py
++++ b/starVLA/dataloader/gr00t_lerobot/transform/state_action.py
+@@ -18,8 +18,12 @@ import random
+ from typing import Any, ClassVar
+ 
+ import numpy as np
+-import pytorch3d.transforms as pt
+ import torch
++
++try:
++    import pytorch3d.transforms as pt
++except ImportError:  # py3.12 / torch 2.8: pipablepytorch3d is not published
++    pt = None
+ from pydantic import Field, PrivateAttr, field_validator, model_validator
+ 
+ from ..schema import DatasetMetadata, RotationType, StateActionMetadata
+@@ -49,6 +53,12 @@ class RotationTransform:
+             to_convention = to_convention.replace("r", "X").replace("p", "Y").replace("y", "Z")
+         else:
+             to_convention = None
++        if pt is None:
++            raise ImportError(
++                "pytorch3d is required only for rotation-rep conversion. "
++                "RoboCasa365 PandaOmron min_max / sin-cos paths do not need it. "
++                "Install pytorch3d or avoid rotation_type conversion in modality metadata."
++            )
+         assert from_rep != to_rep, f"from_rep and to_rep cannot be the same: {from_rep}"
+         assert from_rep in self.valid_reps, f"Invalid from_rep: {from_rep}"
+         assert to_rep in self.valid_reps, f"Invalid to_rep: {to_rep}"
+diff --git a/starVLA/dataloader/lerobot_datasets.py b/starVLA/dataloader/lerobot_datasets.py
+index 9257717..98a60af 100644
+--- a/starVLA/dataloader/lerobot_datasets.py
++++ b/starVLA/dataloader/lerobot_datasets.py
+@@ -88,7 +88,8 @@ def get_vla_dataset(
+     data_root_dir = data_cfg.data_root_dir
+     data_mix = data_cfg.data_mix
+     delete_pause_frame = data_cfg.get("delete_pause_frame", False)
+-    mixture_spec = DATASET_NAMED_MIXTURES[data_mix]
++    # Save explicit dataset membership in the run config for reproducible transfer.
++    mixture_spec = data_cfg.get("mixture_spec") or DATASET_NAMED_MIXTURES[data_mix]
+     logger.info(f"[dataloader] Using mixture '{data_mix}': {[(d, w, r) for d, w, r in mixture_spec]}")
+     included_datasets, filtered_mixture_spec = set(), []
+     for d_name, d_weight, robot_type in mixture_spec:  
+@@ -159,4 +160,4 @@ if __name__ == "__main__":
+         if count > 3:
+             break
+         count += 1
+-        pass
+\ No newline at end of file
++        pass
+diff --git a/starVLA/model/framework/base_framework.py b/starVLA/model/framework/base_framework.py
+index 7ba0edc..43a1ad7 100644
+--- a/starVLA/model/framework/base_framework.py
++++ b/starVLA/model/framework/base_framework.py
+@@ -75,9 +75,19 @@ def _auto_import_framework_modules() -> None:
+             for _, sub_name, _ in pkgutil.iter_modules([str(sub_dir)]):
+                 if sub_name.startswith("_"):
+                     continue
+-                importlib.import_module(f"starVLA.model.framework.{module_name}.{sub_name}")
++                try:
++                    importlib.import_module(f"starVLA.model.framework.{module_name}.{sub_name}")
++                except Exception as exc:
++                    logger.warning(
++                        f"Skip framework {module_name}.{sub_name}: {type(exc).__name__}: {exc}"
++                    )
+         else:
+-            importlib.import_module(f"starVLA.model.framework.{module_name}")
++            try:
++                importlib.import_module(f"starVLA.model.framework.{module_name}")
++            except Exception as exc:
++                logger.warning(
++                    f"Skip framework {module_name}: {type(exc).__name__}: {exc}"
++                )
+ 
+     _FRAMEWORKS_IMPORTED = True
+ 
+diff --git a/starVLA/model/modules/vlm/QWen3.py b/starVLA/model/modules/vlm/QWen3.py
+index b8f9b1a..b6342c4 100644
+--- a/starVLA/model/modules/vlm/QWen3.py
++++ b/starVLA/model/modules/vlm/QWen3.py
+@@ -50,7 +50,6 @@ class _QWen3_VL_Interface(nn.Module):
+         qwenvl_config = config.framework.get("qwenvl", {})
+         model_id = qwenvl_config.get("base_vlm", "Qwen/Qwen3-VL-4B-Instruct")
+         attn_implementation = qwenvl_config.get("attn_implementation", "sdpa")
+-        attn_implementation = "sdpa"
+         # Fallback to sdpa if flash_attention_2 is requested but flash_attn is not installed
+         if attn_implementation == "flash_attention_2":
+             if not has_flash_attn():
+@@ -61,7 +60,7 @@ class _QWen3_VL_Interface(nn.Module):
+             model_id,
+             attn_implementation=attn_implementation,
+             dtype=torch.bfloat16,
+-            ignore_mismatched_sizes=True, # resize image no longer needed? @TODO check bug
++            ignore_mismatched_sizes=False,
+         )
+         processor = AutoProcessor.from_pretrained(model_id)
+         processor.tokenizer.padding_side = "left"
+diff --git a/starVLA/model/modules/vlm/__init__.py b/starVLA/model/modules/vlm/__init__.py
+index ec2fcf5..2be894b 100644
+--- a/starVLA/model/modules/vlm/__init__.py
++++ b/starVLA/model/modules/vlm/__init__.py
+@@ -1,7 +1,29 @@
++import json
++from pathlib import Path
++
++
++def local_model_type(model_path):
++    """HF actor exports often have names such as actor/huggingface."""
++    path = Path(model_path) / "config.json"
++    if path.is_file():
++        return json.loads(path.read_text()).get("model_type")
++    return None
++
++
+ def get_vlm_model(config):
+ 
+     vlm_name = config.framework.qwenvl.base_vlm
+ 
++    model_type = local_model_type(vlm_name)
++    if model_type == "qwen2_5_vl":
++        from .QWen2_5 import _QWen_VL_Interface
++
++        return _QWen_VL_Interface(config)
++    if model_type == "qwen3_vl":
++        from .QWen3 import _QWen3_VL_Interface
++
++        return _QWen3_VL_Interface(config)
++
+     if "Qwen2.5-VL" in vlm_name or "nora" in vlm_name.lower():  # temp for some ckpt
+         from .QWen2_5 import _QWen_VL_Interface
+ 
+diff --git a/examples/simBenchmarks/Robocasa_365/train_files/run_robocasa365_navigatekitchen.sh b/examples/simBenchmarks/Robocasa_365/train_files/run_robocasa365_navigatekitchen.sh
+new file mode 100755
+index 0000000..e03bd4e
+--- /dev/null
++++ b/examples/simBenchmarks/Robocasa_365/train_files/run_robocasa365_navigatekitchen.sh
+@@ -0,0 +1,47 @@
++#!/usr/bin/env bash
++# RoboCasa365 PandaOmron — NavigateKitchen (pretrain/human LeRobot v2.1).
++# Run from the StarVLA repo root inside the `starVLA` conda env.
++#
++# Local layout expected under ${DATA_ROOT}:
++#   v1.0/pretrain/atomic/NavigateKitchen/20250821/lerobot/{data,videos,meta}
++set -euo pipefail
++
++if [[ "${CONDA_DEFAULT_ENV:-}" != "starVLA" ]]; then
++  source "$(conda info --base)/etc/profile.d/conda.sh"
++  conda activate starVLA
++fi
++
++NUM_GPUS=${NUM_GPUS:-$(python -c "import torch;print(torch.cuda.device_count())")}
++
++TASK=NavigateKitchen
++BATCH=${BATCH:-8}
++MAX_STEPS=${MAX_STEPS:-100000}
++SAVE_EVERY=${SAVE_EVERY:-10000}
++EVAL_EVERY=${EVAL_EVERY:-1000}
++LOG_EVERY=${LOG_EVERY:-100}
++DATA_ROOT=${DATA_ROOT:-./playground/Datasets/robocasa365}
++DATA_MIX=${DATA_MIX:-robocasa365_navigate_kitchen_pretrain_human}
++
++run_root_dir=${RUN_ROOT_DIR:-./playground/Checkpoints}
++run_id=${RUN_ID:-robocasa365_qwenoft_${TASK}}
++output_dir=${run_root_dir}/${run_id}
++mkdir -p "${output_dir}"
++cp "$0" "${output_dir}/"
++
++accelerate launch \
++  --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml \
++  --num_processes "${NUM_GPUS}" \
++  starVLA/training/train_starvla.py \
++  --config_yaml ./examples/simBenchmarks/Robocasa_365/train_files/starvla_qwenoft_navigatekitchen.yaml \
++  --datasets.vla_data.data_root_dir "${DATA_ROOT}" \
++  --datasets.vla_data.data_mix "${DATA_MIX}" \
++  --datasets.vla_data.per_device_batch_size "${BATCH}" \
++  --framework.action_model.action_dim 12 \
++  --framework.action_model.state_dim 16 \
++  --trainer.max_train_steps "${MAX_STEPS}" \
++  --trainer.save_interval "${SAVE_EVERY}" \
++  --trainer.logging_frequency "${LOG_EVERY}" \
++  --trainer.eval_interval "${EVAL_EVERY}" \
++  --run_root_dir "${run_root_dir}" \
++  --run_id "${run_id}" \
++  --wandb_project starVLA_robocasa365
+diff --git a/examples/simBenchmarks/Robocasa_365/train_files/starvla_qwenoft_navigatekitchen.yaml b/examples/simBenchmarks/Robocasa_365/train_files/starvla_qwenoft_navigatekitchen.yaml
+new file mode 100644
+index 0000000..fb3ced5
+--- /dev/null
++++ b/examples/simBenchmarks/Robocasa_365/train_files/starvla_qwenoft_navigatekitchen.yaml
+@@ -0,0 +1,69 @@
++run_id: starvla_qwenoft_robocasa365_NavigateKitchen
++run_root_dir: playground/Checkpoints
++seed: 42
++wandb_entity: your_wandb_entity
++wandb_project: starVLA_robocasa365
++is_debug: false
++version_id: "0.21"
++
++# QwenOFT: Qwen3-VL-4B backbone + MLP regression action head (L1).
++# action_dim=12 is PandaOmron gym / StarVLA concat order, NOT the packed
++# LeRobot parquet order. Named keys in PandaOmronRoboCasa365DataConfig
++# reassemble modality.json slices:
++#   eef_pos(3) + eef_rot(3) + gripper_close(1) + base_motion(4) + control_mode(1)
++framework:
++  name: QwenOFT
++  qwenvl:
++    base_vlm: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/starVLA/playground/Pretrained_models/Qwen3-VL-4B-Instruct-Action
++    attn_implementation: flash_attention_2
++  action_model:
++    action_model_type: MLP
++    action_dim: 12
++    state_dim: 16
++    action_horizon: 16
++    future_action_window_size: 15
++    past_action_window_size: 0
++
++datasets:
++  vla_data:
++    dataset_py: lerobot_datasets
++    include_state: false
++    # Override from the VAGEN-Lite launcher. Relative paths in the mixture
++    # are v1.0/pretrain/atomic/NavigateKitchen/20250821/lerobot
++    data_root_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/playground/Datasets/robocasa365
++    data_mix: robocasa365_navigate_kitchen_pretrain_human
++    action_type: delta_ee
++    sequential_step_sampling: false
++    per_device_batch_size: 4
++    load_all_data_for_training: true
++    obs_image_size: [224, 224]
++    delete_pause_frame: false
++    video_backend: torchvision_av
++
++trainer:
++  max_train_steps: 100
++  num_warmup_steps: 10
++  save_interval: 100
++  eval_interval: 1000
++  learning_rate:
++    base: 2.5e-05
++    qwen_vl_interface: 1.0e-05
++    action_model: 1.0e-04
++  lr_scheduler_type: cosine_with_min_lr
++  scheduler_specific_kwargs:
++    min_lr: 1.0e-06
++  freeze_modules: ''
++  loss_scale:
++    vla: 1.0
++    vlm: 0.1
++  max_grad_norm: 1.0
++  weight_decay: 0.0
++  logging_frequency: 5
++  gradient_clipping: 1.0
++  gradient_accumulation_steps: 1
++
++  optimizer:
++    name: AdamW
++    betas: [0.9, 0.95]
++    eps: 1.0e-08
++    weight_decay: 1.0e-08

@@ -1,0 +1,56 @@
+{
+ "B": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b",
+  "index_sha256": "73b333b0b16e5286ddba615d2caebcd495cf7e616f52eb217a81781393d79de9",
+  "config_sha256": "77d9ec7321cc572e3579e2c84799c9cadaded63c49ce93b101733349fc330c43",
+  "shards": {
+   "model-00001-of-00005.safetensors": 3900233256,
+   "model-00002-of-00005.safetensors": 3864726320,
+   "model-00003-of-00005.safetensors": 3864726424,
+   "model-00004-of-00005.safetensors": 3864733680,
+   "model-00005-of-00005.safetensors": 1089994880
+  }
+ },
+ "S": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386",
+  "index_sha256": "7e77e1ec1717cadd1d3d775a04165ed94a6ee0e715c37dca16b60ef5dc9e8245",
+  "config_sha256": "9f88cd8a49cb965a0cb0dac1e1a4b723e5287ef16c5624bbd9fb3ee355dccf3c",
+  "shards": {
+   "model-00001-of-00007.safetensors": 4943554792,
+   "model-00002-of-00007.safetensors": 4932743928,
+   "model-00003-of-00007.safetensors": 4998852240,
+   "model-00004-of-00007.safetensors": 4984124336,
+   "model-00005-of-00007.safetensors": 4932743992,
+   "model-00006-of-00007.safetensors": 4932787320,
+   "model-00007-of-00007.safetensors": 2179989632
+  }
+ },
+ "RS": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_ps0/checkpoints/global_step_300/actor/huggingface",
+  "index_sha256": "357dab2925ab4f4725ce9ee714572a65f3b1adedb49ab2e95fa1beb38c75c220",
+  "config_sha256": "721ec50b57e960b7855d73614d02dd5ccc5bdd01c1be49b713d203d00f2a100b",
+  "shards": {
+   "model-00001-of-00007.safetensors": 4952311608,
+   "model-00002-of-00007.safetensors": 4984124272,
+   "model-00003-of-00007.safetensors": 4932743936,
+   "model-00004-of-00007.safetensors": 4998852296,
+   "model-00005-of-00007.safetensors": 4984124336,
+   "model-00006-of-00007.safetensors": 4932743992,
+   "model-00007-of-00007.safetensors": 3383846800
+  }
+ },
+ "RD": {
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_pd/checkpoints/global_step_150/actor/huggingface",
+  "index_sha256": "357dab2925ab4f4725ce9ee714572a65f3b1adedb49ab2e95fa1beb38c75c220",
+  "config_sha256": "721ec50b57e960b7855d73614d02dd5ccc5bdd01c1be49b713d203d00f2a100b",
+  "shards": {
+   "model-00001-of-00007.safetensors": 4952311608,
+   "model-00002-of-00007.safetensors": 4984124272,
+   "model-00003-of-00007.safetensors": 4932743936,
+   "model-00004-of-00007.safetensors": 4998852296,
+   "model-00005-of-00007.safetensors": 4984124336,
+   "model-00006-of-00007.safetensors": 4932743992,
+   "model-00007-of-00007.safetensors": 3383846800
+  }
+ }
+}
