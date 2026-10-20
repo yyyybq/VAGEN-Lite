@@ -131,15 +131,16 @@ def delete(run: Path) -> str:
 
 
 def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    payload = argv[argv.index("--") + 1:] if "--" in argv else []  # everything after -- is the payload
+    argv = argv[:argv.index("--")] if "--" in argv else argv
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("action", choices=["prepare", "submit", "status", "delete"])
     ap.add_argument("--run", type=Path, required=True)
     ap.add_argument("--gpus", type=int, default=1)
     ap.add_argument("--pool", default="h800")
     ap.add_argument("--name", default="job")
-    ap.add_argument("payload", nargs=argparse.REMAINDER)
     args = ap.parse_args(argv)
-    payload = args.payload[1:] if args.payload[:1] == ["--"] else args.payload
     if args.action == "prepare":
         print(prepare(args.run, args.gpus, args.pool, args.name, payload))
     elif args.action == "submit":

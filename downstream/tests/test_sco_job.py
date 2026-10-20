@@ -21,6 +21,15 @@ def test_prepare_writes_launch_and_receipt_fields(tmp_path):
     assert "commit" in prepared["code"]
 
 
+def test_main_prepare_takes_the_payload_after_double_dash(tmp_path, capsys):
+    run = tmp_path / "run"
+    assert sco_job.main(["prepare", "--run", str(run), "--gpus", "1", "--pool", "h800", "--name", "step1-load",
+                         "--", "bash", "x.sh", "--flag", str(run / "out")]) == 0
+    prepared = json.loads((run / "job/prepared.json").read_text())
+    assert prepared["payload"] == ["bash", "x.sh", "--flag", str(run / "out")]
+    assert prepared["name"] == "step1-load"
+
+
 def test_create_command(tmp_path):
     sco_job.prepare(tmp_path / "run", 8, "zoetrope", "ds-rs-030-s1", ["true"])
     prepared = json.loads((tmp_path / "run/job/prepared.json").read_text())
