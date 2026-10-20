@@ -1,0 +1,33 @@
+{
+ "_doc": "Start weights (backbones) of the downstream line. Adding a start = adding one entry; nothing else changes. role main = the four starts of step 3; spare = recorded for later. Paths are read only, never copied.",
+ "B": {
+  "role": "main",
+  "desc": "original Qwen2.5-VL-7B-Instruct (snapshot cc594898; the copy the round-11 SFT was trained from)",
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b"
+ },
+ "S": {
+  "role": "main",
+  "desc": "round-11 action SFT, epoch 9 (checkpoint-1386)",
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386"
+ },
+ "RS": {
+  "role": "main",
+  "desc": "round-11 P-S0 (RL package p1, sparse reward) update 300, from S",
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_ps0/checkpoints/global_step_300/actor/huggingface"
+ },
+ "RD": {
+  "role": "main",
+  "desc": "round-11 P-D (RL package p1, dense reward) update 150, from S",
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_pd/checkpoints/global_step_150/actor/huggingface"
+ },
+ "R10S5": {
+  "role": "spare",
+  "desc": "round-10 action SFT (formal tasks), epoch 5 (checkpoint-770), the final model of round 10",
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r10_20261015/lf_formal/model/checkpoint-770"
+ },
+ "R1": {
+  "role": "spare",
+  "desc": "R1 final model (R1-clean-Projective-v0 formal RL, update 250), as evaluated in round 10",
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0/formal/checkpoints/global_step_250/actor/huggingface"
+ }
+}
