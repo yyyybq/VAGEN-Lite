@@ -162,16 +162,17 @@ export CUDA_HOME=$RUNTIME_ENV TORCH_CUDA_ARCH_LIST=9.0 OMP_NUM_THREADS=1 PYTHONU
 export CPATH="$RUNTIME_ENV/targets/x86_64-linux/include:${{CPATH:-}}"
 export LIBRARY_PATH="$RUNTIME_ENV/targets/x86_64-linux/lib:${{LIBRARY_PATH:-}}"
 nvidia-smi --query-gpu=name,memory.total --format=csv || true
-$RUNTIME_ENV/bin/python -m data_gen.transition_qa.occ_depth run --pilot "$PILOT" --gs-root {gs_root} {extra}
+$RUNTIME_ENV/bin/python -m {module} run --pilot "$PILOT" --gs-root {gs_root} {extra}
 """
 
 
-def cmd_job(args: argparse.Namespace) -> None:
-    """DIR/job: the code frozen into source.tar.gz and a launch.sh in the format of pilot_sco (one card), submitted with
-    data_gen.interiorgs_v10.job_sco (status / delete as usual)."""
+def write_job(pilot: Path, gs_root: str, pool: str, module: str = "data_gen.transition_qa.occ_depth",
+              extra: str = "") -> Path:
+    """PILOT/job: the code frozen into source.tar.gz and a launch.sh in the format of pilot_sco (one card) running
+    ``python -m MODULE run --pilot PILOT --gs-root GS_ROOT EXTRA``; submit with data_gen.interiorgs_v10.job_sco."""
     from data_gen.interiorgs_v10 import job_sco
 
-    pilot = Path(args.pilot).resolve()
+    pilot = Path(pilot).resolve()
     job = pilot / "job"
     job.mkdir(parents=True, exist_ok=True)
     archive = job / "source.tar.gz"
@@ -179,16 +180,24 @@ def cmd_job(args: argparse.Namespace) -> None:
         for rel in ("data_gen/__init__.py", "data_gen/interiorgs_v10", "data_gen/transition_qa", "vagen", "ply_gaussian_loader.py"):
             if (ROOT / rel).exists():
                 tar.add(ROOT / rel, arcname=rel, filter=lambda ti: None if "__pycache__" in ti.name or "figures_cabinet" in ti.name else ti)
-    extra = "--save-rgb" if args.save_rgb else ""
     (job / "launch.sh").write_text(LAUNCH.format(pilot=shlex.quote(str(pilot)), archive=shlex.quote(str(archive)),
-                                                 env=RUNTIME_ENV, gs_root=shlex.quote(args.gs_root), extra=extra))
+                                                 env=RUNTIME_ENV, gs_root=shlex.quote(gs_root), extra=extra,
+                                                 module=module))
     (job / "launch.sh").chmod(0o755)
     (job / "prepared.json").write_text(json.dumps({
-        "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "mode_args": ["occ-depth"],
-        "spec": job_sco.SPECS[1], "pool": args.pool}, indent=1))
-    print(json.dumps({"launch": str(job / "launch.sh")}))
+        "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "mode_args": [module.rsplit(".", 1)[-1].replace("_", "-")],
+        "spec": job_sco.SPECS[1], "pool": pool}, indent=1))
+    return job / "launch.sh"
+
+
+def cmd_job(args: argparse.Namespace) -> None:
+    """DIR/job (write_job) for this module; --submit submits it."""
+    from data_gen.interiorgs_v10 import job_sco
+
+    launch = write_job(Path(args.pilot), args.gs_root, args.pool, extra="--save-rgb" if args.save_rgb else "")
+    print(json.dumps({"launch": str(launch)}))
     if args.submit:
-        print(job_sco.submit(pilot))
+        print(job_sco.submit(Path(args.pilot).resolve()))
 
 
 def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU and the 3DGS files
