@@ -35,9 +35,9 @@ def test_failed_worker_init_returns_error_rows_instead_of_hanging(monkeypatch):
 
     monkeypatch.setattr(closed_loop, "connect", boom)
     closed_loop._STATE.clear()
-    closed_loop._init_worker("/ckpt.pt", ["127.0.0.1:5678"], "/starvla")  # must not raise
+    closed_loop._init_worker("/ckpt.pt", ["127.0.0.1:5678"], "/starvla", stable_regions=False)  # must not raise
     row = closed_loop.run_episode({"task": "OpenDrawer", "seed": 1, "max_steps": 750})
-    assert row["status"] == "error" and "worker init" in row["error"] and row["task"] == "OpenDrawer"
+    assert row["status"] == "error" and "worker init: TypeError" in row["error"] and row["task"] == "OpenDrawer"
     closed_loop._STATE.clear()
 
 
