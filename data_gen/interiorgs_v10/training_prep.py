@@ -621,6 +621,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                                     getattr(args, "target_groups", None), getattr(args, "rollouts", None))
         for key, value in package.items():
             _set(ppo, key, value)
+    if getattr(args, "entropy_coeff", None) is not None:  # round 12 batch: the entropy bonus instead of the package's
+        _set(ppo, "actor_rollout_ref.actor.entropy_coeff", float(args.entropy_coeff))
     curriculum = None
     if getattr(args, "curriculum_easy_updates", None):  # round 12 batch: easy tasks first (vagen/curriculum_sampler)
         max_d = int(getattr(args, "curriculum_max_dstar", None) or 3)
@@ -648,6 +650,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "task_pool": pool,
               "opt_package": getattr(args, "opt_package", None), "opt_package_overrides": package,
               "standard": standard or None, "ppo_template": str(args.ppo_template), "curriculum": curriculum,
+              "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
+              "entropy_coeff_override": getattr(args, "entropy_coeff", None),
               # the task order (data.seed); vLLM's sampling seed is 0 in this verl (RolloutConfig has no seed field)
               "seed": {"data": (ppo.get("data") or {}).get("seed"), "rollout": 0},
               "sft_tasks_checked": len(sft_ids), "sft_overlap": len(overlap),
@@ -836,6 +840,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--seed", type=int, default=None,
                    help="round 12: the run's seed, the order of the tasks (data.seed); the template's otherwise")
+    c.add_argument("--entropy-coeff", type=float, default=None,
+                   help="round 12 batch: the actor's entropy bonus, over the package's (the user's decision of "
+                        "2026-10-21: the A-group and E1 reruns with 0, reported apart from the standard)")
     c.add_argument("--curriculum-easy-updates", type=int, default=None,
                    help="round 12 batch: the first N updates draw only tasks with d* <= --curriculum-max-dstar")
     c.add_argument("--curriculum-max-dstar", type=int, default=None, help="the easy tasks' largest d* (default 3)")

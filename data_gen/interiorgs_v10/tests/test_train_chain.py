@@ -846,6 +846,12 @@ class ChainTest(unittest.TestCase):
             ps0 = calls[str(root / "rl_ps0")]
             self.assertEqual((ps0[ps0.index("--curriculum-easy-updates") + 1], ps0[ps0.index("--curriculum-max-dstar") + 1]),
                              ("50", "3"))
+            self.assertNotIn("--entropy-coeff", ps0)
+            # round 12 batch: the entropy bonus reaches rl-config, 0 included
+            chain.plan["rl"].update(entropy_coeff=0)
+            chain.rl_config()
+            ps0 = calls[str(root / "rl_ps0")]
+            self.assertEqual(ps0[ps0.index("--entropy-coeff") + 1], "0")
 
     def test_eval_only_plan(self):
         """Round 12: an eval_only plan runs check_code and evaluate only, on the listed models and variants."""
