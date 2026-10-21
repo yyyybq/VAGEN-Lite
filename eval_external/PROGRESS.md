@@ -736,3 +736,22 @@ zoe-cf-render 有 4 台 H800 整机，只对 aigc 开放。16:50 上面没有任
   - 8 个作业撤回。它们都没启动过，没有损失。
   - 队列重启。现在 61 项都在让路，等 h800 或 zoetrope 的 RL 训练启动。
 - 撤回的作业在各自目录里留下 `submission_<作业号>_deleted.json`。换池规则会把它算作换过一次（每项最多换 3 次）。
+
+## 2026-10-21 报告草稿（第 6 步，先用已完成的部分）
+
+**结论：** 草稿在 `eval_external/REPORT_external_transfer.md`，三个问题都先作答，外部模型的问答留空待补。
+- 问题 1（RL 对 SFT 的问答迁移）：基本持平，没有一个 benchmark 显著掉分；涨跌都来自 SFT。
+- 问题 2（和 SI-7B 的闭环差距）：ESI-Bench 正式评测做不了，改用 WalkerBench 分类别和我们的环境回答。两边的模型到了对方的闭环协议里，都先卡在输出格式上。
+- 问题 3（外部专用模型在我们环境里）：不涨；SI-7B 因为格式显著更低。
+
+**为这份草稿新做的**
+- `qa_transfer/paired.py`：同一 benchmark 上两个模型逐题配对。
+  - 给出总分差的配对 bootstrap 区间（每种题型内部重抽 2000 次，按 benchmark 自己的口径重算总分）；每题非对即错的 benchmark 另给 McNemar p。
+  - 每次运行重算的总分都和 results.json 的官方总分核对过（差 ≤ 0.05 点）。
+  - 结果在 `results/qa_paired_step2.md`。
+- 用已有脚本对所有跑完的模型重算了三项分析：距离尺度（`results/scale_bias_step2.md`）、VSTI 排序相关（`results/vsti_distance.md`）、MindCube 诊断规则（`results/mindcube_text_rule.md`）。
+- 问答汇总表 `results/qa_step2.md`；我们环境的逐题比较 `results/ownenv_vs_base7b.md`、`results/ownenv_rl_vs_sft_r10.md`、`results/ownenv_rl_vs_sft_r11.md`。
+
+**更正一处以前的说法**：10-19 我写过"我们的模型对物体、房间有多大仍然有正确的米制感觉"。这只对中位数成立：物体尺寸、房间面积的回答中位数是真实值的 0.69–1.08 倍，但分散得多，这两类的 MRA 比 base-7B 低 10–28 点。
+
+**新发现、待查**：我们 5 个模型在 VSTI 的"相机运动方向"上比 base-7B 低 14.6–19.3 点。
