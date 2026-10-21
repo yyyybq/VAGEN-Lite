@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
-"""Evaluate every checkpoint of running experiments as it appears, and keep a board (login node, CPU).
+"""Evaluate every checkpoint of the downstream runs as it appears, gate step 3, and keep a board (login node, CPU).
 
-    python downstream/eval/watch.py --exps DS-B-100-s1 DS-S-100-s1 DS-RS-100-s1 DS-RD-100-s1 \
-        --cards 8 --servers 1 --workers 24 --every 900 --board RUNS/BOARD_D5.md
+    python downstream/eval/watch.py --every 900 --board RUNS/BOARD.md       # started by downstream/eval/watch.sh
 
-For each experiment EXP (<runs-root>/<id>): checkpoints are EXP/run/checkpoints/steps_<N>_pytorch_model.pt and
-EXP/run/final_model/pytorch_model.pt (tagged steps_<max_train_steps>).  A checkpoint is evaluated once it has not
-changed for --settle seconds: EXP/evals/<tag>/ gets an sco job running downstream/eval/run_eval_ckpt.sh with the
-fixed plan eval/eval_d6.json, on the pool with fewer waiting jobs.  Nothing is ever deleted.  The board lists per
-experiment the training job state, the last logged step and loss, and per checkpoint the eval state and success
-(overall, atomic_seen, composite_seen, spatial group).
+Experiments: the 36 step-3 runs DS-<start>-<ratio>-s<seed> (downstream/train/runs.py; the D5 runs are DS-*-100-s1);
+those without a directory are listed, not watched.  Checkpoints: EXP/run/checkpoints/steps_<N>_pytorch_model.pt and
+EXP/run/final_model/pytorch_model.pt (tagged steps_<max_train_steps>).  A checkpoint unchanged for --settle seconds
+gets one evaluation job EXP/evals/<tag>/ (downstream/eval/run_eval_ckpt.sh, the fixed plan eval/eval_d6.json, --cards
+cards, --servers policy servers, the current number of simulator workers), on the pool with fewer waiting jobs.
+
+Rules of the user's decisions of 2026-10-21 on the step-2 report:
+  * before every submission (evaluation or training) the free space under the folder quota is read
+    (downstream/quota.py); below --min-free-tb, or unreadable, nothing is submitted and the board raises an alarm;
+  * --repeat EXP:TAG: that checkpoint is also evaluated by a second job, EXP/evals/<TAG>_repeat/, with the same seeds,
+    once per value of --repeat-workers (e.g. 48,96: the parallelism test).  When both jobs are done the board shows
+    the success difference (evaluation noise) and each P's mean episode time against the first job's P; later
+    evaluations then use the largest tested P whose mean episode time is at most --max-slowdown times the first's;
+  * --gate EXP:TAG: when that checkpoint's first evaluation is done, the runs of --gate-ratios x --gate-seeds x all
+    starts are made (if needed) and submitted if the 34 tasks had more than 0 successful episodes; with 0 nothing is
+    submitted and the board says so.  The decision is kept in --state.
+Nothing is ever deleted.  Finished jobs are remembered in --state and not queried again.
 """
 from __future__ import annotations
 
@@ -23,9 +33,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DOWNSTREAM = HERE.parent
 sys.path.insert(0, str(DOWNSTREAM))
+sys.path.insert(0, str(DOWNSTREAM / "train"))
+import quota  # noqa: E402
+import runs  # noqa: E402
 import sco_job  # noqa: E402
 
-RUNS_ROOT = Path("/mnt/umm/users/yinbaiqiao/downstream_runs/experiments")
+RUNS_ROOT = Path("/mnt/umm/users/yinbaiqiao/downstream_runs")
 
 
 def checkpoints(exp: Path) -> list:
@@ -40,30 +53,41 @@ def checkpoints(exp: Path) -> list:
     return sorted(out, key=lambda x: int(x[0].split("_")[1]))
 
 
-def settled(path: Path, settle: float) -> bool:
-    return path.is_file() and time.time() - path.stat().st_mtime > settle
+def settled(path: Path, settle: float, now=time.time) -> bool:
+    return path.is_file() and now() - path.stat().st_mtime > settle
 
 
-def groups() -> dict:
+def groups():
+    """(task -> atomic_seen / composite_seen, spatial tasks, borderline tasks)."""
     tasks = json.loads((DOWNSTREAM / "demos/target50_tasks.json").read_text())["tasks"]
-    spatial = json.loads((DOWNSTREAM / "demos/spatial_tasks.json").read_text())["spatial"]
-    out = {t["task"]: t["group"] for t in tasks}
-    return out, set(spatial)
+    sp = json.loads((DOWNSTREAM / "demos/spatial_tasks.json").read_text())
+    return {t["task"]: t["group"] for t in tasks}, set(sp["spatial"]), set(sp.get("borderline_not_in_group", {}))
 
 
-def score(summary_path: Path) -> dict | None:
+GROUP_KEYS = ("all", "atomic_seen", "composite_seen", "spatial", "borderline")
+
+
+def score(summary_path: Path):
+    """{group: [successes, episodes]} of a finished evaluation, None before."""
     if not summary_path.is_file():
         return None
-    per_task = json.loads(summary_path.read_text())["per_task"]
-    group_of, spatial = groups()
-    agg = {}
-    for task, s in per_task.items():
-        for key in ("all", group_of.get(task, "?"), "spatial" if task in spatial else None):
-            if key:
-                a = agg.setdefault(key, [0, 0])
-                a[0] += s["successes"]
-                a[1] += s["n"]
-    return {k: f"{v[0]}/{v[1]}" for k, v in agg.items()}
+    summary = json.loads(summary_path.read_text())
+    if "per_task" not in summary:
+        return None
+    group_of, spatial, borderline = groups()
+    agg = {k: [0, 0] for k in GROUP_KEYS}
+    for task, s in summary["per_task"].items():
+        keys = ["all", group_of.get(task, "?")]
+        keys += ["spatial"] if task in spatial else ["borderline"] if task in borderline else []
+        for k in keys:
+            a = agg.setdefault(k, [0, 0])
+            a[0] += s["successes"]
+            a[1] += s["n"]
+    return agg
+
+
+def fmt(agg) -> str:
+    return " / ".join(f"{agg[k][0]}/{agg[k][1]}" if agg and agg.get(k, [0, 0])[1] else "-" for k in GROUP_KEYS)
 
 
 def last_metric(exp: Path):
@@ -74,72 +98,255 @@ def last_metric(exp: Path):
     return json.loads(lines[-1]) if lines else None
 
 
-def tick(exp_ids, runs_root: Path, cards: int, servers: int, workers: int, settle: float, dry: bool = False) -> list:
-    rows = []
-    for exp_id in exp_ids:
-        exp = runs_root / exp_id
-        train_state = None
-        if (exp / "job/submission.json").exists():
-            try:
-                train_state = sco_job.status(exp)["state"]
-            except Exception as exc:
-                train_state = f"status error {type(exc).__name__}"
+def outcomes(episodes_dir: Path) -> dict:
+    """(task, seed) -> success of a finished evaluation."""
+    path = episodes_dir / "episodes.jsonl"
+    rows = [json.loads(x) for x in path.read_text().splitlines() if x.strip()] if path.is_file() else []
+    return {(r["task"], r["seed"]): bool(r.get("success")) for r in rows if r.get("status") == "complete"}
+
+
+def compare(first_dir: Path, other_dir: Path) -> dict:
+    """Noise and speed of `other_dir` against `first_dir` (two evaluations of one checkpoint, same seeds)."""
+    a, b = (json.loads((d / "summary.json").read_text()) for d in (first_dir, other_dir))
+    oa, ob = outcomes(first_dir), outcomes(other_dir)
+    common = sorted(set(oa) & set(ob))
+    rate = lambda s: s["successes"] / max(1, s["complete"])  # noqa: E731
+    return {"successes": [a["successes"], b["successes"]], "episodes": [a["complete"], b["complete"]],
+            "rate_diff_points": round(100 * (rate(b) - rate(a)), 2),
+            "episodes_compared": len(common), "episodes_with_other_outcome": sum(oa[k] != ob[k] for k in common),
+            "episode_mean_seconds": [a["episode_wall_mean_seconds"], b["episode_wall_mean_seconds"]],
+            "slowdown": round(b["episode_wall_mean_seconds"] / a["episode_wall_mean_seconds"], 3)
+            if a.get("episode_wall_mean_seconds") else None,
+            "wall_seconds": [a["wall_seconds"], b["wall_seconds"]], "workers": [a["workers"], b["workers"]]}
+
+
+def parse_target(text: str):
+    exp, tag = text.split(":")
+    return exp, tag
+
+
+class Watcher:
+    def __init__(self, args, jobs=sco_job, free_space=quota.free_space, run_tools=runs, now=time.time):
+        self.a, self.jobs, self.free_space, self.runs, self.now = args, jobs, free_space, run_tools, now
+        self.experiments = args.runs_root / "experiments"
+        self.state = json.loads(args.state.read_text()) if args.state.is_file() else {}
+        self.state.setdefault("finished", {})
+        self.alerts, self.notes = [], []
+        self.disk = None
+
+    # ------------------------------------------------------------------------------------------- bookkeeping
+    def save(self):
+        self.a.state.write_text(json.dumps(self.state, indent=1) + "\n")
+
+    def job(self, run: Path) -> dict:
+        key = str(run)
+        if key in self.state["finished"]:
+            return self.state["finished"][key]
+        st = self.jobs.status(run)
+        if st.get("finished"):
+            self.state["finished"][key] = st
+        return st
+
+    def disk_ok(self) -> bool:
+        if self.disk is None:
+            self.disk = self.free_space() or {}
+            if not self.disk:
+                self.alerts.append("剩余空间读不出（`sco afs dir-quota list` 失败），本轮不提交任何任务")
+            elif self.disk["free_tb_min"] < self.a.min_free_tb:
+                self.alerts.append(f"剩余空间不足：配额 {self.disk['quota_tb']} TB、已用 {self.disk['used_tb']} TB，"
+                                   f"剩余至少 {self.disk['free_tb_min']} TB < {self.a.min_free_tb} TB，本轮不提交任何任务")
+        return bool(self.disk) and self.disk["free_tb_min"] >= self.a.min_free_tb
+
+    def workers(self) -> int:
+        return int(self.state.get("workers", {}).get("chosen", self.a.workers))
+
+    def submit_eval(self, run: Path, ckpt: Path, workers: str, name: str) -> str:
+        if not self.disk_ok():
+            return "未提交（剩余空间不足或读不出）"
+        if self.a.dry:
+            return f"would submit (workers {workers})"
+        pool = self.jobs.pick_pool()
+        self.jobs.prepare(run, self.a.cards, pool, name[:40],
+                          ["bash", str(HERE / "run_eval_ckpt.sh"), str(ckpt), str(run / "out"), str(self.a.servers),
+                           str(workers)])
+        return f"submitted {self.jobs.submit(run)} ({pool}, workers {workers})"
+
+    def eval_entry(self, exp: Path, tag: str, path: Path, suffix: str, workers: str) -> dict:
+        run = exp / "evals" / f"{tag}{suffix}"
+        entry = {"tag": f"{tag}{suffix}", "state": "waiting for the file to settle"}
+        if (run / "job/submission.json").exists():
+            st = self.job(run)
+            entry["state"] = st["state"] if not st["finished"] else f"{st['state']} exit {st['exit_code']}"
+            entry["finished"] = bool(st["finished"])
+            entry["score"] = score(run / "out/episodes/summary.json")
+        elif settled(path, self.a.settle, self.now):
+            name = f"ev-{exp.name.lower()}-{tag.replace('_', '')}{suffix.replace('_', '-')}"
+            entry["state"] = self.submit_eval(run, path, workers, name)
+        return entry
+
+    # ------------------------------------------------------------------------------------------- one pass
+    def experiment_row(self, exp: Path) -> dict:
+        train = self.job(exp)["state"] if (exp / "job/submission.json").exists() else "未提交"
         metric = last_metric(exp)
-        row = {"exp": exp_id, "train": train_state,
-               "step": metric.get("step") if metric else None,
+        row = {"exp": exp.name, "train": train, "step": metric.get("step") if metric else None,
                "loss": metric.get("action_dit_loss") if metric else None, "evals": []}
+        repeats = {parse_target(t) for t in self.a.repeat}
         for tag, path in checkpoints(exp):
-            run = exp / "evals" / tag
-            entry = {"tag": tag, "state": "waiting for the file to settle"}
-            if (run / "job/submission.json").exists():
-                st = sco_job.status(run)
-                entry["state"] = st["state"] if not st["finished"] else f"{st['state']} exit {st['exit_code']}"
-                entry["score"] = score(run / "out/episodes/summary.json")
-            elif settled(path, settle):
-                if dry:
-                    entry["state"] = "would submit"
-                else:
-                    pool = sco_job.pick_pool()
-                    sco_job.prepare(run, cards, pool, f"ev-{exp_id.lower()}-{tag.replace('_', '')}"[:40],
-                                    ["bash", str(HERE / "run_eval_ckpt.sh"), str(path), str(run / "out"),
-                                     str(servers), str(workers)])
-                    entry["state"] = f"submitted {sco_job.submit(run)} ({pool})"
-            row["evals"].append(entry)
-        rows.append(row)
-    return rows
+            row["evals"].append(self.eval_entry(exp, tag, path, "", str(self.workers())))
+            if (exp.name, tag) in repeats:
+                row["evals"].append(self.eval_entry(exp, tag, path, "_repeat", self.a.repeat_workers))
+        return row
+
+    def repeat_results(self):
+        """Noise / speed comparisons of each --repeat target whose two jobs are done; sets the worker count."""
+        out = []
+        for target in self.a.repeat:
+            exp, tag = parse_target(target)
+            first = self.experiments / exp / "evals" / tag / "out/episodes"
+            rep = self.experiments / exp / "evals" / f"{tag}_repeat/out"
+            if not (first / "summary.json").is_file():
+                continue
+            for p in self.a.repeat_workers.split(","):
+                d = rep / f"episodes_P{p}" if "," in self.a.repeat_workers else rep / "episodes"
+                if (d / "summary.json").is_file() and "per_task" in json.loads((d / "summary.json").read_text()):
+                    out.append(dict(compare(first, d), target=target, workers_tested=int(p)))
+        tested = {r["workers_tested"]: r for r in out}
+        wanted = [int(p) for p in self.a.repeat_workers.split(",")]
+        if tested and set(wanted) <= set(tested) and "workers" not in self.state:
+            ok = [p for p in wanted if tested[p]["slowdown"] is not None and tested[p]["slowdown"] <= self.a.max_slowdown]
+            chosen = max(ok) if ok else self.a.workers
+            self.state["workers"] = {"chosen": chosen, "utc": utc(),
+                                     "why": {p: tested[p]["slowdown"] for p in wanted}, "limit": self.a.max_slowdown}
+        return out
+
+    def gate(self):
+        if not self.a.gate:
+            return None
+        if "gate" in self.state and self.state["gate"].get("decided"):
+            return self.state["gate"]
+        exp, tag = parse_target(self.a.gate)
+        summary_path = self.experiments / exp / "evals" / tag / "out/episodes/summary.json"
+        run = self.experiments / exp / "evals" / tag
+        if not (run / "job/submission.json").exists():
+            return {"decided": False, "note": f"等 {exp} {tag} 的评测"}
+        st = self.job(run)
+        if not st["finished"]:
+            return {"decided": False, "note": f"等 {exp} {tag} 的评测（{st['state']}）"}
+        agg = score(summary_path)
+        if agg is None:
+            self.alerts.append(f"{exp} {tag} 的评测已结束但没有结果（{st['state']} exit {st['exit_code']}），第三步其余任务未提交")
+            return {"decided": False, "note": "门槛评测没有结果"}
+        successes = agg["all"][0]
+        if successes == 0:
+            self.state["gate"] = {"decided": True, "utc": utc(), "successes": 0, "submitted": [],
+                                  "note": f"{exp} {tag} 在 34 个任务上成功 0 个回合：按规定停下，不提交第三步其余任务"}
+            self.alerts.append(self.state["gate"]["note"])
+            return self.state["gate"]
+        if not self.disk_ok():
+            return {"decided": False, "note": f"{exp} {tag} 成功 {successes} 个回合，但剩余空间不足或读不出，暂不提交"}
+        if self.a.dry:
+            return {"decided": False, "note": f"would submit ({successes} successes)"}
+        done, errors = [], []
+        for start, ratio, seed in self.runs.grid(runs.STARTS, self.a.gate_ratios, self.a.gate_seeds):
+            made = self.runs.make(start, ratio, seed, self.a.runs_root)
+            if "error" in made:
+                errors.append(made)
+                continue
+            out = self.runs.submit(start, ratio, seed, self.a.runs_root)
+            (errors if "error" in out else done).append(out)
+        self.state["gate"] = {"decided": not errors, "utc": utc(), "successes": successes, "submitted": done,
+                              "errors": errors,
+                              "note": f"{exp} {tag} 成功 {successes} 个回合 > 0：提交第三步其余 {len(done)} 个任务"}
+        if errors:
+            self.alerts.append(f"第三步其余任务有 {len(errors)} 个没建成或没提交成功，下一轮重试：{errors[:2]}")
+        return self.state["gate"]
+
+    def tick(self):
+        exp_ids = self.a.exps or [runs.exp_id(s, r, k) for s, r, k in runs.grid(runs.STARTS, runs.RATIOS, (1, 2, 3))]
+        rows, missing = [], []
+        self.disk_ok()  # read once per pass, so the board always shows the free space (and its alarm)
+        for exp_id in exp_ids:
+            exp = self.experiments / exp_id
+            if (exp / "experiment.json").exists():
+                rows.append(self.experiment_row(exp))
+            else:
+                missing.append(exp_id)
+        rep = self.repeat_results()
+        gate = self.gate()
+        self.save()
+        return rows, missing, rep, gate
 
 
-def board(rows) -> str:
-    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [f"# 第三步 D5 四条线（自动生成，{now}）", "",
-             "| 实验 | 训练任务状态 | 最近记录的步数 | 动作损失 | 检查点：评测状态（成功数/回合数：全部 / 单步 / 多步 / 空间组） |",
-             "| --- | --- | ---: | ---: | --- |"]
+def utc() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def board(w: Watcher, rows, missing, rep, gate) -> str:
+    lines = [f"# 下游线看板（自动生成，{utc()}）", ""]
+    for a in w.alerts:
+        lines.append(f"> **报警**：{a}")
+    if w.alerts:
+        lines.append("")
+    d = w.disk or {}
+    lines += [f"- 剩余空间：{'配额 %s TB，已用 %s TB，剩余至少 %s TB' % (d['quota_tb'], d['used_tb'], d['free_tb_min']) if d else '本轮未读或读不出'}"
+              f"（少于 {w.a.min_free_tb} TB 不提交）",
+              f"- 评测并行进程数：{w.workers()}"
+              + (f"（{w.state['workers']['utc']} 按并行度测试选定：每回合时间是 P={w.a.workers} 的 "
+                 f"{w.state['workers']['why']} 倍，上限 {w.state['workers']['limit']}）" if "workers" in w.state else
+                 f"（并行度测试未完成前用 {w.a.workers}）"),
+              f"- 第三步其余任务的门槛（{w.a.gate}）：{(gate or {}).get('note', '-')}", ""]
+    if rep:
+        lines += ["## 同一检查点的两次评测（噪声与并行度）", "",
+                  "| 检查点 | 第二次的 P | 成功（第一次 / 第二次） | 成功率差（百分点） | 结果不同的回合 / 比较的回合 | 平均每回合秒数（第一次 / 第二次） | 倍数 | 总墙钟秒数 |",
+                  "| --- | ---: | --- | ---: | --- | --- | ---: | --- |"]
+        for r in rep:
+            lines.append(f"| {r['target']} | {r['workers_tested']} | {r['successes'][0]} / {r['successes'][1]} | "
+                         f"{r['rate_diff_points']} | {r['episodes_with_other_outcome']} / {r['episodes_compared']} | "
+                         f"{r['episode_mean_seconds'][0]} / {r['episode_mean_seconds'][1]} | {r['slowdown']} | "
+                         f"{r['wall_seconds'][0]} / {r['wall_seconds'][1]} |")
+        lines.append("")
+    lines += ["## 实验", "",
+              "| 实验 | 训练任务 | 最近记录的步数 | 动作损失 | 检查点：评测状态（成功回合/回合：全部 / 单步 / 多步 / 空间组 / 边界 3 个） |",
+              "| --- | --- | ---: | ---: | --- |"]
     for r in rows:
-        evals = "<br>".join(
-            f"{e['tag']}: {e['state']}" + (f" — {e['score'].get('all', '-')} / {e['score'].get('atomic_seen', '-')}"
-                                            f" / {e['score'].get('composite_seen', '-')} / {e['score'].get('spatial', '-')}"
-                                            if e.get("score") else "")
-            for e in r["evals"]) or "—"
+        evals = "<br>".join(f"{e['tag']}: {e['state']}" + (f" — {fmt(e['score'])}" if e.get("score") else "")
+                            for e in r["evals"]) or "—"
         loss = f"{r['loss']:.4f}" if isinstance(r["loss"], float) else "—"
-        lines.append(f"| {r['exp']} | {r['train'] or '—'} | {r['step'] if r['step'] is not None else '—'} | {loss} | {evals} |")
+        lines.append(f"| {r['exp']} | {r['train']} | {r['step'] if r['step'] is not None else '—'} | {loss} | {evals} |")
+    if missing:
+        lines += ["", f"未建目录（不看）：{', '.join(missing)}"]
     return "\n".join(lines) + "\n"
 
 
-def main(argv=None) -> int:
+def parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--exps", nargs="+", required=True)
+    ap.add_argument("--exps", nargs="*", default=None, help="default: the 36 step-3 runs")
     ap.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     ap.add_argument("--cards", type=int, default=8, help="cards per eval job (they buy CPUs: 14 vCPU each)")
     ap.add_argument("--servers", type=int, default=1, help="policy servers per eval job (one GPU each)")
-    ap.add_argument("--workers", type=int, default=24)
+    ap.add_argument("--workers", type=int, default=24, help="simulator workers until the parallelism test decides")
+    ap.add_argument("--repeat", nargs="*", default=["DS-B-100-s1:steps_25000"])
+    ap.add_argument("--repeat-workers", default="48,96")
+    ap.add_argument("--max-slowdown", type=float, default=1.5)
+    ap.add_argument("--gate", default="DS-B-100-s1:steps_25000")
+    ap.add_argument("--gate-ratios", nargs="+", default=["030", "010"])
+    ap.add_argument("--gate-seeds", nargs="+", type=int, default=[1, 2, 3])
+    ap.add_argument("--min-free-tb", type=float, default=1.0)
     ap.add_argument("--settle", type=float, default=600, help="seconds a checkpoint file must be unchanged")
+    ap.add_argument("--state", type=Path, default=RUNS_ROOT / "WATCH_STATE.json")
     ap.add_argument("--every", type=float, default=0, help="loop period in seconds (0: run once)")
     ap.add_argument("--board", type=Path, default=None)
-    ap.add_argument("--dry", action="store_true", help="never submit")
-    args = ap.parse_args(argv)
+    ap.add_argument("--dry", action="store_true", help="never submit, never write --state")
+    return ap
+
+
+def main(argv=None) -> int:
+    args = parser().parse_args(argv)
     while True:
-        rows = tick(args.exps, args.runs_root, args.cards, args.servers, args.workers, args.settle, args.dry)
-        text = board(rows)
+        w = Watcher(args)
+        if args.dry:
+            w.save = lambda: None
+        text = board(w, *w.tick())
         if args.board:
             args.board.write_text(text)
         print(text, flush=True)

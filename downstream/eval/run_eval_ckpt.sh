@@ -3,7 +3,9 @@
 #   SERVERS policy servers (run_starvla_mobile.sh server, one per GPU), WORKERS simulator processes spread over them,
 #   OSMesa rendering (downstream/eval/sim_env.sh), GPU utilisation sampled every 5 s.
 # Usage: run_eval_ckpt.sh CKPT OUT SERVERS WORKERS (SERVERS policy servers on GPUs 0..SERVERS-1; the job's card
-# count only buys CPUs: 14 vCPU per H800).  Writes only under OUT.
+# count only buys CPUs: 14 vCPU per H800).  WORKERS may be a list, e.g. 48,96: the whole plan then runs once per value,
+# one after the other (parallelism test), into OUT/episodes_P<n>/ with OUT/gpu_util_P<n>.csv; a single value writes
+# OUT/episodes/ and OUT/gpu_util.csv.  Writes only under OUT.
 set -uo pipefail
 CKPT="${1:?Usage: run_eval_ckpt.sh CKPT OUT SERVERS WORKERS}"
 OUT="${2:?}"; SERVERS="${3:?}"; WORKERS="${4:?}"
@@ -16,10 +18,6 @@ mkdir -p "$OUT"
 PIDS=()
 cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"; }
 trap cleanup EXIT
-TASKS=$(python3 -c 'import json,sys
-p=json.load(open(sys.argv[1])); t=json.load(open(sys.argv[2]))["tasks"]
-print(" ".join(x["task"] for x in t if x["group"] in p["groups"]))' "$PLAN" "$WT/downstream/demos/target50_tasks.json")
-SEEDS=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["seeds"])' "$PLAN")
 ADDRS=""
 for g in $(seq 0 $((SERVERS - 1))); do
   port=$((5700 + g))
@@ -35,12 +33,20 @@ for port in $(seq 5700 $((5700 + SERVERS - 1))); do
   done
 done
 echo "[eval] servers ready: $ADDRS $(date -u +%T)"
-nvidia-smi --query-gpu=timestamp,index,utilization.gpu,memory.used --format=csv,noheader -lms 5000 > "$OUT/gpu_util.csv" &
-PIDS+=($!)
 CPUS=$(awk '{print int($1/$2)}' /sys/fs/cgroup/cpu.max 2>/dev/null || echo 14)
-THREADS=$(( (CPUS - 2 * SERVERS) / WORKERS )); (( THREADS < 1 )) && THREADS=1
-sim "$THREADS" "$SIM_PY" "$WT/downstream/eval/closed_loop.py" --ckpt "$CKPT" --servers "$ADDRS" --tasks $TASKS \
-  --seeds "$SEEDS" --workers "$WORKERS" --out "$OUT/episodes" > "$OUT/closed_loop.log" 2>&1
-rc=$?
-echo "[eval] rc=$rc $(date -u +%T) threads/process=$THREADS $(head -c 400 "$OUT/episodes/summary.json" 2>/dev/null | tr -d '\n')"
+IFS=, read -r -a PLIST <<< "$WORKERS"
+rc=0
+for W in "${PLIST[@]}"; do
+  if (( ${#PLIST[@]} == 1 )); then SUFFIX=""; else SUFFIX="_P$W"; fi
+  nvidia-smi --query-gpu=timestamp,index,utilization.gpu,memory.used --format=csv,noheader -lms 5000 \
+    > "$OUT/gpu_util$SUFFIX.csv" &
+  GPID=$!
+  THREADS=$(( (CPUS - 2 * SERVERS) / W )); (( THREADS < 1 )) && THREADS=1
+  echo "[eval] >>> workers=$W threads/process=$THREADS $(date -u +%T)"
+  sim "$THREADS" "$SIM_PY" "$WT/downstream/eval/closed_loop.py" --ckpt "$CKPT" --servers "$ADDRS" --eval-plan "$PLAN" \
+    --workers "$W" --out "$OUT/episodes$SUFFIX" > "$OUT/closed_loop$SUFFIX.log" 2>&1
+  r=$?; (( r )) && rc=$r
+  kill "$GPID" 2>/dev/null
+  echo "[eval] <<< workers=$W rc=$r $(date -u +%T) $(head -c 400 "$OUT/episodes$SUFFIX/summary.json" 2>/dev/null | tr -d '\n')"
+done
 exit $rc

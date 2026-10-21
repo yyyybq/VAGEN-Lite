@@ -1,9 +1,11 @@
 {
- "_doc": "Fixed closed-loop evaluation of the downstream line (decision D6): the 34 seen target tasks (18 atomic_seen + 16 composite_seen) x 20 episodes = 680 episodes, target kitchens, task-specific horizons of RoboCasa 1.0.1, one policy call per 16-step chunk. Evaluation seeds are separate from training seeds (training uses the experiment's seed: 1, 2, 3).",
- "name": "seen34x20",
+ "_doc": "Fixed closed-loop evaluation of the downstream line.  Decision D6 (2026-10-20) fixed the 34 seen target tasks (18 atomic_seen + 16 composite_seen); the user's decision 3 on the step-2 report (2026-10-21) set the episodes: the 9 spatial tasks of spatial_tasks.json x 50 (seeds_spatial) and the other 25 tasks x 20 (seeds) = 950 episodes.  Target kitchens, task-specific horizons of RoboCasa 1.0.1, one policy call per 16-step chunk, counter-region order made process-independent (decision 1 of 2026-10-21; docs/downstream/EVAL_PROTOCOL.md).  Evaluation seeds are separate from training seeds (training uses the experiment's seed 1, 2, 3).",
+ "name": "seen34_spatial50_v2",
  "split": "target",
  "seeds": "1000-1019",
+ "seeds_spatial": "1000-1049",
  "execute_steps": 16,
  "groups": ["atomic_seen", "composite_seen"],
- "spatial_tasks": "downstream/demos/spatial_tasks.json"
+ "spatial_tasks": "downstream/demos/spatial_tasks.json",
+ "stable_counter_regions": true
 }

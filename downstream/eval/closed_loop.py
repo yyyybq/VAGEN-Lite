@@ -7,6 +7,7 @@ PYTHONPATH of examples/evaluate/robocasa/run_starvla_mobile.sh; policy servers r
 
     python downstream/eval/closed_loop.py --ckpt CKPT --servers 127.0.0.1:5678 --tasks NavigateKitchen \
         --seeds 1000-1007 --workers 12 --out OUT
+    python downstream/eval/closed_loop.py --ckpt CKPT --servers ... --eval-plan downstream/eval/eval_d6.json ...
 
 Per episode: gym.make('robocasa/<task>', split=target, seed=s) and env.reset(seed=s) (the seed reaches the env's
 RNG, which draws the kitchen layout / style and object placement), the task-specific horizon of RoboCasa 1.0.1
@@ -51,6 +52,23 @@ def horizons(path: Path = TASKS) -> dict:
 def plan(tasks, seeds, horizon_of=None):
     horizon_of = horizon_of or horizons()
     return [{"task": t, "seed": int(s), "max_steps": horizon_of[t]} for t in tasks for s in seeds]
+
+
+def eval_plan_episodes(path: Path, tasks_path: Path = TASKS):
+    """(episodes, plan dict) of a fixed evaluation plan (downstream/eval/eval_d6.json): every task of the plan's
+    groups with the plan's `seeds`; the spatial tasks (plan `spatial_tasks` file, key "spatial") with `seeds_spatial`
+    when the plan has it."""
+    p = json.loads(Path(path).read_text())
+    task_rows = json.loads(Path(tasks_path).read_text())["tasks"]
+    horizon_of = {t["task"]: int(t["horizon"]) for t in task_rows}
+    spatial = set()
+    if p.get("seeds_spatial"):
+        spatial = set(json.loads((WORKTREE / p["spatial_tasks"]).read_text())["spatial"])
+    episodes = []
+    for t in (row["task"] for row in task_rows if row["group"] in p["groups"]):
+        seeds = p["seeds_spatial"] if t in spatial else p["seeds"]
+        episodes += plan([t], parse_seeds(seeds), horizon_of)
+    return episodes, p
 
 
 def state_fingerprint(env, obs) -> dict:
@@ -219,8 +237,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--servers", required=True, help="host:port[,host:port...]; workers are spread over them")
-    ap.add_argument("--tasks", nargs="+", required=True)
-    ap.add_argument("--seeds", required=True, help="e.g. 1000-1019 or 1000,1003")
+    ap.add_argument("--eval-plan", type=Path, help="a fixed plan file (downstream/eval/eval_d6.json): tasks, seeds, "
+                                                   "split, execute steps")
+    ap.add_argument("--tasks", nargs="+")
+    ap.add_argument("--seeds", help="e.g. 1000-1019 or 1000,1003")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--split", default="target")
     ap.add_argument("--execute-steps", type=int, default=16)
@@ -229,12 +249,26 @@ def main() -> int:
     ap.add_argument("--no-stable-regions", dest="stable_regions", action="store_false",
                     help="leave RoboCasa's counter-region order as it is (differs between processes)")
     args = ap.parse_args()
+    eval_plan = None
+    if args.eval_plan:
+        if args.tasks or args.seeds:
+            ap.error("--eval-plan replaces --tasks / --seeds")
+        episodes, eval_plan = eval_plan_episodes(args.eval_plan)
+        args.split, args.execute_steps = eval_plan["split"], int(eval_plan["execute_steps"])
+        if not eval_plan.get("stable_counter_regions", True):
+            args.stable_regions = False
+    elif args.tasks and args.seeds:
+        episodes = plan(args.tasks, parse_seeds(args.seeds))
+    else:
+        ap.error("give --eval-plan, or --tasks and --seeds")
     args.out.mkdir(parents=True, exist_ok=False)
-    episodes = longest_first(plan(args.tasks, parse_seeds(args.seeds)))
+    episodes = longest_first(episodes)
     for e in episodes:
         e.update(split=args.split, execute_steps=args.execute_steps)
     (args.out / "plan.json").write_text(json.dumps({"ckpt": args.ckpt, "servers": args.servers, "workers": args.workers,
                                                     "stable_counter_regions": args.stable_regions,
+                                                    "eval_plan": eval_plan and {"path": str(args.eval_plan),
+                                                                                "name": eval_plan["name"]},
                                                     "episodes": episodes}, indent=1) + "\n")
     for server in args.servers.split(","):  # fail fast, before any simulator starts
         try:
@@ -254,7 +288,8 @@ def main() -> int:
                 rows.append(row)
                 f.write(json.dumps(row) + "\n")
                 f.flush()
-    summary = dict(summarize(rows, args.workers, time.monotonic() - t0), stable_counter_regions=args.stable_regions)
+    summary = dict(summarize(rows, args.workers, time.monotonic() - t0), stable_counter_regions=args.stable_regions,
+                   eval_plan=eval_plan["name"] if eval_plan else None)
     (args.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps({k: summary[k] for k in ("episodes", "complete", "successes", "wall_seconds",
                                               "episode_wall_mean_seconds", "episodes_per_hour")}))
