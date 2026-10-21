@@ -203,6 +203,10 @@ class EpisodeLoop:
             self._recover(obs, j.failure_type or "unknown")
         elif over_budget:
             self._recover(obs, "timeout")
+            if st.current_subtask is sub:
+                # new budget window for the same subtask (retries still bound the total), otherwise the
+                # budget check would trigger a decision -- and a model call -- on every following step
+                st.subtask_start_step = max(st.step, 0)
 
     def _plan(self, obs: Observation) -> None:
         st = self.state

@@ -202,3 +202,30 @@ def test_checker_downgrades_low_confidence_and_handles_errors():
     chk2 = LLMChecker(deps({}, provider=broken, version="v1", slot="check"))
     chk2.reset(c)
     assert chk2.judge(obs(), view).status == JudgmentStatus.UNKNOWN
+
+
+# ---------------------------------------------------------------- loop budget regression
+
+def test_subtask_step_budget_does_not_trigger_a_check_every_step():
+    """Regression: an over-budget subtask whose checker keeps saying in_progress (and no recovery
+    module) must get a fresh budget window, not a model call on every following step."""
+    from agent.interfaces import SkillSpec
+    from helpers import make_cfg, make_policy, run_episode
+
+    cfg = make_cfg("L0_exec_only")
+    cfg["modules"]["plan"] = {"enabled": True, "impl": "llm", "provider": "astra", "prompt_version": "v1"}
+    cfg["modules"]["check"] = {"enabled": True, "impl": "llm", "provider": "astra", "prompt_version": "v1"}
+    cfg["providers"]["astra"]["replies"] = {
+        "plan.next_subtask": [{**PLAN_REPLY, "skill": "go_to", "args": [{"name": "object", "value": "radio"}], "max_steps": 60}],
+        "check.judge": [CHECK_REPLIES[0]],  # always in_progress
+    }
+    cfg["loop"]["check_interval_steps"] = 1000
+    skills = (SkillSpec(name=FULL_TASK_SKILL, instruction_template="{task_prompt}", description="all"),
+              SkillSpec(name="go_to", instruction_template="Go to the {object}.", description="nav",
+                        inputs=("object",), available=True))
+    policy, _, _ = make_policy(cfg)
+    policy.skills_for_task = lambda task: skills
+    run_episode(policy, lambda t: synth_obs(t), 600)
+    requests = policy._loops[0].m.get("check").provider.inner.requests
+    judge_calls = sum(1 for r in requests if r.purpose == "check.judge")
+    assert judge_calls <= 600 // 60 + 2, judge_calls
