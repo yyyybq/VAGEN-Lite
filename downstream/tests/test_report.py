@@ -1,0 +1,88 @@
+"""Tests of downstream/report (statistics by hand-computed values; the whole build on simulated runs)."""
+import json
+import math
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+pytest.importorskip("matplotlib")
+pytest.importorskip("PIL")
+from downstream.report import build, collect, simulate, stats  # noqa: E402
+
+
+def test_wilson_and_exact_tests_match_hand_values():
+    r, lo, hi = stats.wilson(10, 20)
+    assert r == 0.5 and abs(lo - 0.2993) < 1e-3 and abs(hi - 0.7007) < 1e-3
+    assert all(math.isnan(v) for v in stats.wilson(0, 0))
+    assert stats.binom_two_sided(0, 5) == 2 / 32
+    assert stats.mcnemar_exact(8, 2) == pytest.approx(2 * (1 + 10 + 45) / 1024)
+    assert stats.mcnemar_exact(0, 0) == 1.0
+    assert stats.holm([0.01, 0.04, 0.03]) == pytest.approx([0.03, 0.06, 0.06])
+    assert math.isnan(stats.holm([0.01, math.nan])[1])
+
+
+def test_paired_counts_only_common_episodes():
+    a = {("T", 1, 1): True, ("T", 2, 1): True, ("T", 3, 1): False, ("T", 4, 1): True, ("T", 9, 1): True}
+    b = {("T", 1, 1): True, ("T", 2, 1): False, ("T", 3, 1): False, ("T", 4, 1): False}
+    r = stats.paired(a, b)
+    assert (r["n"], r["both"], r["only_a"], r["only_b"], r["neither"]) == (4, 1, 2, 0, 1)
+    assert r["diff"] == 0.5 and r["rate_a"] == 0.75 and r["rate_b"] == 0.25
+    assert r["low"] < 0.5 < r["high"] and r["p"] == 0.5
+
+
+def test_seed_spread():
+    m, s, n = stats.seed_spread([0.2, 0.4, 0.6])
+    assert (round(m, 6), round(s, 6), n) == (0.4, 0.2, 3)
+    assert math.isnan(stats.seed_spread([0.3])[1])
+
+
+@pytest.fixture(scope="module")
+def sim(tmp_path_factory):
+    root = tmp_path_factory.mktemp("sim")
+    simulate.simulate(root, seed=1)
+    return root
+
+
+def test_simulated_tree_reads_back(sim):
+    coll = collect.collect(sim)
+    assert len(coll.experiments) == 36 and coll.starts() == ["B", "S", "RS", "RD"]
+    assert len(coll.first()) == 4 * 8 + 8 + 24 and len([e for e in coll.evals if e.kind == "repeat"]) == 2
+    assert all(len(e.episodes) == 950 for e in coll.first())
+    assert stats.common_steps(coll, "100", [1])[-1] == 200000
+    cmp = stats.compare(coll, "100", 200000, [1, 2, 3])
+    assert cmp["groups"]["B"]["all"][1] == 3 * 950 and cmp["groups"]["B"]["spatial"][1] == 3 * 450
+    rs = cmp["vs_reference"]["RS"]
+    assert rs["groups"]["all"]["n"] == 2850 and len(rs["tasks"]) == 34
+    assert all(0 <= t["p_holm"] <= 1 for t in rs["tasks"].values())
+
+
+def test_build_writes_a_complete_page(sim, tmp_path):
+    out = build.build(sim, tmp_path / "report")
+    assert out["simulated"] and out["evaluations"] == 64 and out["examples"] >= 6
+    assert set(out["figures"]) == {"loss", "checkpoints", "learning", "heatmap", "forest", "agreement", "efficiency",
+                                   "noise"}
+    page = (tmp_path / "report/index.html").read_text(encoding="utf-8")
+    for anchor in ("summary", "metrics", "training", "checkpoints", "efficiency", "tasks", "agreement", "noise",
+                   "examples", "sources"):
+        assert f'id="{anchor}"' in page
+    assert "模拟数据" in page and page.startswith("<title>RoboCasa 起点对照</title>")
+    assert out["html_bytes"] < 16 * 1024 * 1024
+    results = json.loads((tmp_path / "report/results.json").read_text(encoding="utf-8"))
+    assert results["main_label"].startswith("第三步，100% 数据") and results["noise"][0]["compared"] == 950
+    assert results["d5_step"] == 200000 and len(results["summary_lines"]) >= 8
+
+
+def test_build_before_any_evaluation_shows_losses_only(tmp_path):
+    root = tmp_path / "runs"
+    exp = root / "experiments/DS-B-100-s1"
+    (exp / "run").mkdir(parents=True)
+    (exp / "experiment.json").write_text("{}")
+    (exp / "run/metrics.jsonl").write_text("".join(json.dumps({"step": s, "action_dit_loss": 1 / s}) + "\n"
+                                                   for s in range(100, 5001, 100)))
+    out = build.build(root, tmp_path / "report")
+    assert out["figures"] == ["loss"] and out["examples"] == 0 and not out["simulated"]
+    page = (tmp_path / "report/index.html").read_text(encoding="utf-8")
+    assert "还没有完成的闭环评测" in page and "模拟数据" not in page
