@@ -1355,6 +1355,92 @@ class ChainTest(unittest.TestCase):
                                          ("queued", ("renderer", "32"), "zoetrope")})  # "running" left alone
             self.assertNotIn("running", {n for n, j, a, p in prepared})
 
+    def test_renderer_first(self):
+        """Round 12 batch (a new switch): plan rl "renderer_first" submits the render service first and the trainer only
+        once the service runs with its address written (in the service's pool, without the lazy wait); a trainer queued
+        before the switch keeps its place and gets its service at once in its own pool; a failed trainer is resubmitted
+        with the service kept; a service that dies while its trainer still queues is resubmitted alone."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clock = {"poll": 0}
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "retries": 2, "pool": "h800",
+                             "rl": {"renderer_first": True, "renderer_workers": 32,
+                                    "renderer_when_trainer_runs": {"trainer_wait_s": 600}},  # ignored with renderer_first
+                             "rl_runs": {"a": {}, "b": {}, "c": {}}},
+                            sleep=lambda s: clock.__setitem__("poll", clock["poll"] + 1))
+            schedules = {("a", "job_renderer"): [["STARTING", "RUNNING"]],
+                         ("a", "job_rl"): [["STARTING", "FAILED"], ["RUNNING", "ok"]],
+                         ("b", "job_renderer"): [["RUNNING"]],
+                         ("c", "job_renderer"): [["STARTING", "RUNNING", "RUNNING", "FAILED"], ["RUNNING"]],
+                         ("c", "job_rl"): [["STARTING", "STARTING", "STARTING", "STARTING", "RUNNING", "ok"]]}
+            jobs = {"pt-b-rl-0": (["STARTING", "RUNNING", "ok"], 0)}
+            b = root / "rl_run_b"  # a trainer queued before the switch, without a render service
+            (b / "job_rl").mkdir(parents=True)
+            (b / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-b-rl-0"}))
+            (b / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope", "mode_args": ["rl", "x", "50"]}))
+            events, count = [], {}
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                (run / job_dir / "prepared.json").write_text(json.dumps({"pool": pool, "mode_args": list(args)}))
+                events.append(("prepare", run.name[7:], job_dir, list(args), pool))
+
+            def submit(run, job_dir="job"):
+                key = (run.name[7:], job_dir)
+                count[key] = count.get(key, 0) + 1
+                job_id = f"pt-{key[0]}-{job_dir[4:]}-{count[key]}"
+                jobs[job_id] = (schedules[key][count[key] - 1], clock["poll"])
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": job_id}))
+                events.append(("submit", key[0], job_dir, job_id, clock["poll"]))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_renderer" and (run / "STOP_RENDERER").exists():
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                sched, t0 = jobs[job_id]
+                kind = sched[min(clock["poll"] - t0, len(sched) - 1)]
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                if job_dir == "job_renderer" and kind == "RUNNING":  # the service writes its address once up
+                    (run / "renderer_endpoint.txt").write_text("http://10.0.0.1:8915/render\n")
+                return {"job_id": job_id, "state": kind, "finished": kind == "FAILED"}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    events.append(("delete", run.name[7:], job_dir, json.loads(receipt.read_text())["job_id"], clock["poll"]))
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.rl()
+            end = max(e[-1] for e in events if e[0] == "submit")
+
+            def seq(name):  # submissions and deletions before the end of the step
+                return [(e[0], e[2], e[3]) for e in events if e[1] == name and e[0] != "prepare" and e[-1] <= end]
+
+            self.assertEqual(seq("a"), [("submit", "job_renderer", "pt-a-renderer-1"),  # the service first
+                                        ("submit", "job_rl", "pt-a-rl-1"),             # once it is up
+                                        ("delete", "job_rl", "pt-a-rl-1"),             # the trainer failed:
+                                        ("submit", "job_rl", "pt-a-rl-2")])            # again, the service kept
+            a_up = next(e[-1] for e in events if e[:4] == ("submit", "a", "job_rl", "pt-a-rl-1"))
+            self.assertGreater(a_up, next(e[-1] for e in events if e[:3] == ("submit", "a", "job_renderer")))
+            a_rl = [e for e in events if e[:3] == ("prepare", "a", "job_rl")]
+            self.assertEqual([(e[3], e[4]) for e in a_rl], [(["rl", str(root / "rl_a"), "50"], "h800")] * 2)  # no wait
+            self.assertEqual(seq("b"), [("submit", "job_renderer", "pt-b-renderer-1")])  # the queued trainer is kept
+            self.assertIn(("prepare", "b", "job_renderer", ["renderer", "32"], "zoetrope"), events)  # in its pool
+            self.assertEqual(seq("c"), [("submit", "job_renderer", "pt-c-renderer-1"),
+                                        ("submit", "job_rl", "pt-c-rl-1"),
+                                        ("delete", "job_renderer", "pt-c-renderer-1"),  # died, the trainer queued:
+                                        ("submit", "job_renderer", "pt-c-renderer-2")])  # the service alone again
+            self.assertEqual(sorted(chain.state["trainer_after_renderer"]), ["a", "c"])
+            for name in "abc":
+                self.assertTrue((root / f"rl_run_{name}" / "checkpoints" / "global_step_50").is_dir())
+
     def test_guard_stopped_run_stays_stopped_after_a_restart(self):
         """A run stopped by a guard is not submitted again when the chain is started again (round 12 batch: a restart
         had submitted it anew and taken its ended render service for a dead one); the other runs go on."""
