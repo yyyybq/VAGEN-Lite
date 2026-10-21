@@ -223,7 +223,8 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
     file, for the filled tasks' minimum step count by the per-episode "task_id"), success_key (default
     "traj_success").  Metrics: those of mixed_outcome (filter/mixed/..., counting the mixed tasks only), and
     filter/keep/: all_fail and all_fail_above_threshold (candidates), filled, kept_total, shortfall,
-    filled_std_mean / _min / _max, filled_adv_scale_mean, filled_family/<family> (count), filled_min_steps_mean.
+    filled_std_mean / _min / _max, filled_adv_scale_mean, filled_below_floor (filled tasks whose spread is under the
+    floor, so scaled down), filled_family/<family> (count), filled_min_steps_mean.
     """
     from collections import Counter
 
@@ -295,6 +296,7 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
             "filter/keep/filled_std_min": float(np.min(stds)) if stds else 0.0,
             "filter/keep/filled_std_max": float(np.max(stds)) if stds else 0.0,
             "filter/keep/filled_adv_scale_mean": float(np.mean(list(scale.values()))) if scale else 0.0,
+            "filter/keep/filled_below_floor": sum(1 for u in filled if spread[u] < floor),  # scaled down by the floor
         })
         family = data_proto.non_tensor_batch.get("task_type")
         if family is not None:

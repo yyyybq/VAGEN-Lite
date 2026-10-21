@@ -57,6 +57,7 @@ class KeepByReturnStdTest(unittest.TestCase):
         self.assertEqual(sorted(kept), ["t0", "t1", "t4"])
         self.assertEqual((m["filter/mixed/kept"], m["filter/keep/filled"], m["filter/keep/kept_total"]), (1, 2, 3))
         self.assertEqual((m["filter/keep/all_fail"], m["filter/keep/all_fail_above_threshold"]), (3, 2))
+        self.assertEqual(m["filter/keep/filled_below_floor"], 2)  # spreads 0.35 and 0.58 under the floor 1.0
         self.assertAlmostEqual(m["filter/keep/filled_std_max"], float(torch.std(torch.tensor([1.0, 0, 1, 0]))), places=5)
         self.assertEqual((m["filter/keep/filled_family/equidistance"], m["filter/keep/filled_family/occlusion_alignment"]),
                          (1, 1))
@@ -69,6 +70,7 @@ class KeepByReturnStdTest(unittest.TestCase):
         # a spread above the floor is left as it is
         out, m = f(self.batch([mixed, wider]), {}, target_groups=2, std_threshold=0.2, std_floor=0.5)
         self.assertEqual(float(out.batch["advantages"].min()), 1.0)
+        self.assertEqual(m["filter/keep/filled_below_floor"], 0)
 
     def test_enough_mixed_tasks_and_fallback(self):
         from vagen.custom_filter.filter import FILTER_REGISTRY
