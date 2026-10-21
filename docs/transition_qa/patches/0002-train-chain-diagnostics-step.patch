@@ -1,5 +1,5 @@
 diff --git a/data_gen/interiorgs_v10/tests/test_train_chain.py b/data_gen/interiorgs_v10/tests/test_train_chain.py
-index 521fda5f..bf19acdf 100644
+index f77546dd..1e2b207e 100644
 --- a/data_gen/interiorgs_v10/tests/test_train_chain.py
 +++ b/data_gen/interiorgs_v10/tests/test_train_chain.py
 @@ -65,7 +65,7 @@ class ChainTest(unittest.TestCase):
@@ -105,10 +105,10 @@ index f34df3d0..c7111291 100644
  if __name__ == "__main__":
      unittest.main()
 diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
-index 8e7a6344..4c9fcdd9 100644
+index 7185e7b3..94170c1e 100644
 --- a/data_gen/interiorgs_v10/train_chain.py
 +++ b/data_gen/interiorgs_v10/train_chain.py
-@@ -100,6 +100,13 @@ TR} for that chain's picked SFT checkpoint) skips render to pick_sft and starts
+@@ -112,6 +112,13 @@ TR} for that chain's picked SFT checkpoint) skips render to pick_sft and starts
  unparseable answers only up to that update; plan "eval"."rl_prompt_format" evaluates the RL checkpoints with that
  prompt format.
  
@@ -122,7 +122,7 @@ index 8e7a6344..4c9fcdd9 100644
  A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
  logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
  continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
-@@ -120,14 +127,18 @@ from pathlib import Path
+@@ -132,14 +139,18 @@ from pathlib import Path
  from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
  
  ROOT = Path(__file__).resolve().parents[2]
@@ -145,7 +145,7 @@ index 8e7a6344..4c9fcdd9 100644
  RL_STEPS = ("rl_config", "rl", "rl_extend")
  SFT_STEPS = ("render", "sft_data", "sft", "sft_eval", "pick_sft")  # skipped with plan "start_model" (matrix v2)
  # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
-@@ -1271,9 +1282,14 @@ class Chain:
+@@ -1387,9 +1398,14 @@ class Chain:
          jobs.update(self.variant_jobs(ev, {**sets, **extra}, models, rl_names))
          self.eval_jobs("evaluate", jobs)
          self.tables()
@@ -161,7 +161,7 @@ index 8e7a6344..4c9fcdd9 100644
      def retain(self) -> None:
          """Delete the checkpoints the plan's retention rule does not keep (see the module docstring)."""
          import shutil
-@@ -1351,6 +1367,99 @@ class Chain:
+@@ -1467,6 +1483,99 @@ class Chain:
                      jobs[f"{set_name}__{result}"] = (sets[set_name], result, model, prompt_format, list(v.get("options") or []))
          return jobs
  

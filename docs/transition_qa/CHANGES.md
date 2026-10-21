@@ -127,6 +127,8 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
 - 文字冲突 5 处，都是两边各加了开关（模块说明、步骤元组、`sft_data` 开头、`run()` 的跳步、`EVAL_ONLY_STEPS`），两边都保留；
 - 另有一处**语义冲突**：main 的 `retain: best_and_last` 在 `evaluate` 一结束就删掉大部分 RL 检查点和 SFT epoch，而补丁 0002 的 `diagnostics` 排在 `evaluate` 之后，要用这些检查点跑探针。改成：plan 里有 `diagnostics` 时，清理放到 `diagnostics` 之后（`retain_after()`）；没有时照旧在 `evaluate` 之后。测试 `test_probes_every_evaluated_model` 核对了顺序。
 
+**2026-10-21 再挪一次**：main 又加了 8 个提交（`renderer_when_trainer_runs` / `renderer_pool`、`renderer_workers`、被守卫停下的运行重启后保持停下、评测表跳过写坏的最后一行），合进本分支（`ca4d4578`）后补丁 0001 打不上了。同样按三方合并挪到 main `616ae4d8`：只有 1 处文字冲突（模块说明里两边各加的段落），两边都保留；0002 直接打上。
+
 | 补丁 | 内容 | 改的文件 |
 | --- | --- | --- |
 | `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
@@ -161,7 +163,7 @@ python -m pytest -q data_gen/interiorgs_v10/tests/test_train_chain.py data_gen/i
 python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打完补丁的提交> --out <TR>/plan.json
 ```
 
-- 已核对（2026-10-20，main `7e9c4f77`）：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和测过的文件逐字相同；两个测试文件 33 个测试全部通过（main 原有 25 个、新加 8 个）。main 再改 `train_chain.py` 的话，合并前要重新核对一次。
+- 已核对（2026-10-21，main `616ae4d8`）：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和测过的文件逐字相同；两个测试文件 37 个测试全部通过（main 原有 29 个、新加 8 个）。main 再改 `train_chain.py` 的话，合并前要重新核对一次。
 - 对正在跑的训练链的影响：
   - 打了补丁，旧 plan 没有这些字段，行为不变；
   - 第 11 步 `diagnostics` 记成 "not planned"；
