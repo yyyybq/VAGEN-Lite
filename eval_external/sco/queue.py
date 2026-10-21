@@ -21,6 +21,8 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
+import sys
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -224,8 +226,12 @@ def main() -> None:
             status = step(args.stage, items)
         except Exception:
             status = {"error": traceback.format_exc()}
-        out.write_text(json.dumps({"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            print(status["error"], file=sys.stderr, flush=True)  # the queue log
+        # written whole and renamed: a queue killed mid-write (2026-10-20 21:03) left an empty file behind
+        tmp = out.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                                    "items": status}, indent=1) + "\n")
+        os.replace(tmp, out)
         live = [v for v in status.values() if v.startswith(("pending", "running", "submitted", "moved"))]
         if "error" not in status and not live:
             break
