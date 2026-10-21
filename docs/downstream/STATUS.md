@@ -37,11 +37,12 @@
 | `pt-189qz570`、`pt-9ruo5yrs`、`pt-g0ydp76l`、`pt-405nyxoy` | 第一、二步早先的任务 | 已结束，记录已删（见第二步报告） | — |
 
 **登录节点上本线的后台进程**：
-- **看板** `downstream/eval/watch.py`（10-21 11:09 起，PID 3981646，代码 `e156660c`）。每 15 分钟一轮，每轮做这几件事：
+- **看板** `downstream/eval/watch.py`（10-21 18:48 起，PID 245614，代码 `a1bb6d52`）。每 15 分钟一轮，每轮做这几件事：
   - 读一次配额剩余空间：剩余至少 1 TB 才提交任务；不足或读不出，只报警、不提交；
   - 给每个存好（10 分钟内没再变动）的新检查点提交一个 8 卡评测；
   - 评 DS-B 第一个检查点两遍，比较噪声和并行度；
   - 按门槛提交第三步其余 24 个；
+  - 有新评测完成时重建结果报告；
   - 写看板 `downstream_runs/BOARD.md`，日志写在 `downstream_runs/logs/watch.log`，状态写在 `downstream_runs/WATCH_STATE.json`。
   - 它在自己的会话里用 nohup 运行（setsid），ssh 断开后仍会继续；它从不删文件。
   - 启动、停止和查看（在集群 worktree 里）：
@@ -76,6 +77,21 @@ bash downstream/eval/watch.sh status
 - **StarVLA**：`4507931` + 补丁 [downstream/patches/starvla_4507931_working.patch](../../downstream/patches/starvla_4507931_working.patch)（sha256 `b039782d…`，`git apply --reverse --check` 通过）。每个实验的 `experiment.json` 记提交号和补丁哈希。
 - **评测**：[EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，计划文件 [downstream/eval/eval_d6.json](../../downstream/eval/eval_d6.json)，运行脚本 `downstream/eval/run_eval_ckpt.sh CKPT OUT 服务数 进程数[,进程数…]`。
 - **剩余空间**：`python3 downstream/quota.py` 读 `sco afs dir-quota list` 整张表里我们这一行（`-d` 参数返回的记录不对，不用它）。
+- **结果报告**（10-21 起）：`downstream/report/`。
+  - 内容：
+    - 收集训练损失和全部评测；
+    - 配对统计：Wilson 区间、逐任务 McNemar 精确检验加 Holm 校正、跨任务 Wilcoxon 检验、种子均值 ± 标准差；
+    - 8 张图：训练损失、检查点曲线、样本效率曲线、逐任务热力图、逐任务配对差、结果一致性、成功所用步数、评测噪声；
+    - 指标说明；
+    - 按固定规则挑的范例。范例画面来自每个评测回合记下的 8 帧画面条（`frames/<任务>_s<种子>.jpg`，10-21 起记录）。
+  - 生成：看板在有新评测完成时自动重建到 `downstream_runs/report/`（`index.html`、`results.json`、`figures/`）。手动生成用下面的命令（vagen-lite 环境，登录节点 CPU，几秒钟）：
+
+```bash
+/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python -m downstream.report.build --out /mnt/umm/users/yinbaiqiao/downstream_runs/report
+```
+
+  - 网页版（私有 Artifact，我在有新结果时重新发布）：https://claude.ai/artifact/Qa1oNasyCN5pSkjg2LXhBq
+  - 版式预览用的模拟数据在 `downstream_runs/checks/report_sim_20261021/`（目录里有 `SIMULATED` 标记文件，页面带"模拟数据"横幅），与真实实验分开。
 - **D7 新环境**：`/mnt/umm/users/yinbaiqiao/envs/rlinf-starvla-rc365`。它是叠在 starVLA 环境上的 venv，1.9 GB；包清单在 `downstream/envs/`，激活用 `source downstream/envs/activate_rlinf.sh <ENV>`。
 
 ## 4. 权重与数据路径
