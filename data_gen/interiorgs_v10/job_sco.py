@@ -14,7 +14,8 @@ trainers use eight, the PPO render service one.  The pool is zoetrope unless a j
 
 Round 12 batch: ``pick_pool()`` returns the pool with the fewest jobs waiting for cards (the workspace's job list,
 every user's jobs); ``status`` also gives the job's creation and start times, so the chain can tell how long it
-queued.
+queued.  ``pool_view(pool)`` gives the workspace's running jobs of a pool by machine (every page of the job list
+and each job's workers) and the jobs waiting there, for the chain's renderer_repack.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 WORKTREE = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite"  # the cluster checkout, the only code directory since round 6
 SCRIPT = "examples/train/active_spatial/sco_interiorgs_v10_train.sh"
@@ -124,6 +125,62 @@ def pick_pool(pools=POOLS) -> str:
         return pools[0]
     waiting = waiting_by_pool(jobs, pools)
     return min(pools, key=lambda p: (waiting[p], list(pools).index(p)))
+
+
+def list_jobs(max_pages: int = 100) -> Optional[List[dict]]:
+    """Every job of the workspace (sco lists 500 at most per page, newest first; jobs started weeks ago still run on
+    later pages), None when a page cannot be read."""
+    jobs: dict = {}
+    for page in range(1, max_pages + 1):
+        res = subprocess.run([SCO, "acp", "jobs", "list", "--workspace-name=aigc", "--page-size", "500",
+                              "--page-token", str(page), "-o", "json"], capture_output=True, text=True)
+        try:
+            batch = json.loads(res.stdout) if res.returncode == 0 else None
+        except ValueError:
+            batch = None
+        if not isinstance(batch, list):
+            return None
+        jobs.update({str(j.get("name")): j for j in batch})
+        if len(batch) < 500:
+            return list(jobs.values())
+    return None
+
+
+def worker_hosts(text: str) -> List[Tuple[int, str]]:
+    """(cards, machine IP) per worker row of ``sco acp jobs get-workers`` (none for a job not placed yet)."""
+    return [(int(c), h) for c, h in re.findall(r"加速芯片:(\d+)[^|]*\|\s*(\d+\.\d+\.\d+\.\d+)\s*\|", text)]
+
+
+def job_hosts(job_id: str) -> List[Tuple[int, str]]:
+    res = subprocess.run([SCO, "acp", "jobs", "get-workers", "--workspace-name=aigc", job_id], capture_output=True,
+                         text=True)
+    return worker_hosts(res.stdout) if res.returncode == 0 else []
+
+
+def pool_view(pool: str) -> Optional[dict]:
+    """Round 12 batch (the training chain's renderer_repack): the workspace's jobs in a pool by machine,
+    {"hosts": {machine IP: [{"job_id", "name", "cards"}]}, "waiting": [display names of the jobs waiting for cards]}.
+    Other workspaces' jobs on the same machines are not seen.  None when the job list or a running job's machine
+    cannot be read (nothing is decided on a partial view)."""
+    jobs = list_jobs()
+    if jobs is None:
+        return None
+    hosts: dict = {}
+    waiting = []
+    for j in jobs:
+        p = j.get("resource_pool")
+        if (p.get("name") if isinstance(p, dict) else p) != pool:
+            continue
+        state, name = str(j.get("state")), str(j.get("display_name") or "")
+        if state in WAITING:
+            waiting.append(name)
+        elif state == "RUNNING":
+            rows = job_hosts(str(j.get("name")))
+            if not rows:
+                return None
+            for cards, host in rows:
+                hosts.setdefault(host, []).append({"job_id": str(j.get("name")), "name": name, "cards": cards})
+    return {"hosts": hosts, "waiting": waiting}
 
 
 def delete(run: Path, job_dir: str = "job") -> dict:

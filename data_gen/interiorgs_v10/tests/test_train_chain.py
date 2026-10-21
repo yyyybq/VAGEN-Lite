@@ -1442,6 +1442,134 @@ class ChainTest(unittest.TestCase):
             for name in "abc":
                 self.assertTrue((root / f"rl_run_{name}" / "checkpoints" / "global_step_50").is_dir())
 
+    def test_renderer_repack(self):
+        """Round 12 batch (a new switch, the user's decision of 2026-10-21): plan rl "renderer_repack" moves a render
+        service held while its trainer queues off a machine where only such services are left (10.123.72.34: the
+        100-scene pair's two services alone for hours after the single-card jobs around them ended).  The new service
+        starts first; the old one is deleted only once the new one runs on a busy machine with room and the trainer
+        still waits (its address file then replaces the old one); otherwise the new one is deleted and the old one
+        stays.  The pools are looked at every every_min minutes, a run is moved at most once per gap_min."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def render(name, job_id):
+            return {"job_id": job_id, "name": f"interiorgs-v10-renderer-rl-run-{name}", "cards": 1}
+
+        h1, h2, h3 = "10.0.0.1", "10.0.0.2", "10.0.0.3"
+        names = ["a", "c", "d", "e", "f", "g"]  # all on h1, their trainers waiting
+        view = {"hosts": {h1: [render(n, f"pt-{n}-old") for n in names],
+                          h2: [{"job_id": "pt-other", "name": "someone-4card", "cards": 2}, render("y", "pt-y-old")],
+                          h3: [render("b", "pt-b-old"), {"job_id": "pt-ev", "name": "interiorgs-v10-eval-val-m", "cards": 1}],
+                          "10.0.0.4": [{"job_id": "pt-big", "name": "big", "cards": 8}],
+                          "10.0.0.5": [render("z", "pt-z-old")]},  # z's trainer waits too
+                "waiting": [f"interiorgs-v10-rl-rl-run-{n}" for n in names + ["b", "z"]] + ["someone-else"]}
+        # h1 and h5 hold only services of waiting trainers; h3 has an evaluation, h2 a job and y (its trainer runs)
+        self.assertEqual(T.stranded_hosts(view), [h1, "10.0.0.5"])
+        self.assertEqual(T.repack_room(view, h1), {h2: 5, h3: 6})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clock = {"t": 0.0}
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply",
+                             "rl": {"renderer_repack": True, "renderer_workers": 32},
+                             "rl_runs": {n: {} for n in names + ["b"]}},
+                            sleep=lambda s: None, clock=lambda: clock["t"])
+            runs = chain.rl_runs()
+            for n in names + ["b"]:
+                d = runs[n]["run_dir"]
+                for j, job_id in (("job_renderer", f"pt-{n}-old"), ("job_rl", f"pt-{n}-rl")):
+                    (d / j).mkdir(parents=True)
+                    (d / j / "submission.json").write_text(json.dumps({"job_id": job_id}))
+                    (d / j / "prepared.json").write_text(json.dumps({"pool": "zoetrope", "mode_args": [j]}))
+                (d / "renderer_endpoint.txt").write_text(f"http://old-{n}:8915/render\n")
+            jobs, hosts, events, looks = {f"pt-{n}-rl": "QUEUEING" for n in names + ["b"]}, {}, [], []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                (run / job_dir / "prepared.json").write_text(json.dumps({"pool": pool, "mode_args": list(args)}))
+                events.append(("prepare", run.name[7:], job_dir, list(args), pool))
+
+            def submit(run, job_dir="job"):
+                job_id = f"pt-{run.name[7:]}-new"
+                jobs[job_id] = "QUEUEING"
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": job_id}))
+                events.append(("submit", run.name[7:], job_dir, job_id))
+                return job_id
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                state = jobs.get(job_id, "RUNNING")
+                return {"job_id": job_id, "state": state, "finished": state in job_sco.FINISHED}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                job_id = json.loads(receipt.read_text())["job_id"]
+                events.append(("delete", run.name[7:], job_dir, job_id))
+                receipt.replace(receipt.with_name(f"submission_{job_id}_deleted.json"))
+                return {"job_id": job_id, "delete_rc": 0}
+
+            def up(name, host):  # the new service runs on host and has written its address
+                jobs[f"pt-{name}-new"] = "RUNNING"
+                hosts[f"pt-{name}-new"] = [(1, host)]
+                (runs[name]["run_dir"] / T.NEXT_ENDPOINT).write_text(f"http://new-{name}:8915/render\n")
+
+            states = {f"{n}/{j}": s for n in names + ["b"] for j, s in (("rl", "QUEUEING"), ("renderer", "RUNNING"))}
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete,
+                                     pool_view=lambda pool: looks.append(pool) or view,
+                                     job_hosts=lambda job_id: hosts.get(job_id, [])):
+                chain.repack(runs, runs, states)  # t = 0: one look at the pool, a move for every run on h1
+                self.assertEqual(looks, ["zoetrope"])
+                self.assertEqual(sorted(e[1] for e in events if e[0] == "submit"), sorted(names))  # not b (h3)
+                self.assertIn(("prepare", "a", "job_renderer_next", ["renderer", "32", T.NEXT_ENDPOINT], "zoetrope"),
+                              events)
+                clock["t"] = 120.0
+                up("a", h2)                                # a: up on a busy machine, trainer waiting: moved
+                states["c/rl"] = jobs["pt-c-rl"] = "RUNNING"  # c: the trainer got its cards first
+                up("d", "10.0.0.9")                        # d: landed on a machine that was not busy
+                jobs["pt-f-new"] = "FAILED"                # f: the new service failed
+                chain.repack(runs, runs, states)
+                self.assertEqual(looks, ["zoetrope"])      # the next look comes after every_min
+                clock["t"] = 31 * 60.0                     # e: still no card after wait_min; g: the run ended
+                # the next look (every_min after the first): the others were moved lately (gap_min), b is not stranded
+                chain.repack(runs, {n: r for n, r in runs.items() if n != "g"}, states)
+                self.assertEqual(looks, ["zoetrope", "zoetrope"])
+                clock["t"] = 40 * 60.0
+                chain.repack(runs, runs, states)
+                self.assertEqual(looks, ["zoetrope", "zoetrope"])
+            self.assertEqual(sum(e[0] == "submit" for e in events), len(names))  # nothing more after the first look
+            moves = {n: m[-1] for n, m in chain.state["renderer_moves"].items()}
+            self.assertEqual(moves["a"]["result"], "moved")
+            self.assertEqual((moves["a"]["from_host"], moves["a"]["to_host"]), (h1, h2))
+            a = runs["a"]["run_dir"]
+            self.assertEqual((a / "renderer_endpoint.txt").read_text(), "http://new-a:8915/render\n")
+            self.assertEqual(json.loads((a / "job_renderer" / "submission.json").read_text())["job_id"], "pt-a-new")
+            self.assertTrue((a / "job_renderer" / "submission_pt-a-old_deleted.json").exists())
+            self.assertFalse((a / "job_renderer_next" / "submission.json").exists())
+            self.assertIn("trainer got its cards first", moves["c"]["result"])
+            self.assertIn("landed on 10.0.0.9", moves["d"]["result"])
+            self.assertIn("ended FAILED", moves["f"]["result"])
+            self.assertIn("no card for the new render service in 30 minutes", moves["e"]["result"])
+            self.assertIn("the run ended", moves["g"]["result"])
+            for n in "cdefg":  # the old service stays, the new one is gone
+                d = runs[n]["run_dir"]
+                self.assertTrue(moves[n]["result"].startswith("cancelled: "))
+                self.assertEqual((d / "renderer_endpoint.txt").read_text(), f"http://old-{n}:8915/render\n")
+                self.assertEqual(json.loads((d / "job_renderer" / "submission.json").read_text())["job_id"], f"pt-{n}-old")
+                self.assertFalse((d / "job_renderer_next" / "submission.json").exists())
+                self.assertFalse((d / T.NEXT_ENDPOINT).exists())
+            self.assertEqual([e for e in events if e[0] == "delete" and e[2] == "job_renderer"],
+                             [("delete", "a", "job_renderer", "pt-a-old")])
+            self.assertNotIn("b", chain.state["renderer_moves"])
+            md = T.render_markdown(chain.state)
+            self.assertIn("**RL a 的渲染服务挪机器**", md)
+            self.assertIn("pt-a-old（10.0.0.1，机器上只剩等卡训练的渲染服务）→ pt-a-new（10.0.0.2）；已挪走", md)
+            self.assertIn("没挪：the trainer got its cards first", md)
+            # without the switch nothing is looked at
+            plain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "rl_runs": {"b": {}}},
+                            sleep=lambda s: None, clock=lambda: 1e9)
+            with mock.patch.object(job_sco, "pool_view", side_effect=AssertionError("looked")):
+                plain.repack(plain.rl_runs(), plain.rl_runs(), states)
+
     def test_guard_stopped_run_stays_stopped_after_a_restart(self):
         """A run stopped by a guard is not submitted again when the chain is started again (round 12 batch: a restart
         had submitted it anew and taken its ended render service for a dead one); the other runs go on."""

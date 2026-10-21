@@ -5,8 +5,9 @@
 #   sft-trial  RUN LF_DIR [MAX_STEPS]   1 card : LLaMA-Factory through accelerate + FSDP (the formal path, 1 process)
 #   sft        RUN LF_DIR               8 cards: the formal SFT (FSDP, full fine-tune, vision tower frozen)
 #   rl-trial   RUN RL_DIR [ENDPOINT]    1 card : the 3DGS render service and PPO on the same card
-#   renderer   RUN [WORKERS]            1 card : the render service for a formal RL run (writes RUN/renderer_endpoint.txt);
-#                                        WORKERS worker processes and requests at a time (default 12)
+#   renderer   RUN [WORKERS [ENDPOINT_NAME]]  1 card : the render service for a formal RL run (writes
+#                                        RUN/renderer_endpoint.txt, or RUN/ENDPOINT_NAME); WORKERS worker processes and
+#                                        requests at a time (default 12)
 #   rl         RUN RL_DIR ENDPOINT [WAIT_S]  8 cards: PPO, waits up to WAIT_S (default 3600) s for RUN/renderer_endpoint.txt
 #   eval       RUN EVAL NAME MODEL [PROMPT_FORMAT|- [OPTION ...]]  1 card: the render service and vLLM; one greedy
 #                                        episode per task of EVAL/tasks.jsonl (data_gen/interiorgs_v10/evaluation.py),
@@ -60,7 +61,7 @@ start_renderer() {  # $1 = gpu index, $2 = worker processes = requests at a time
   bash examples/train/active_spatial/start_gs_render_http_service.sh \
     --gs-root "${GS_ROOT}" --host 0.0.0.0 --port 8915 --gpus "$1" \
     --max-workers "${workers}" --max-inflight "${workers}" --admit-timeout 900 --conda-env "${ENV_ROOT}" \
-    > "${RUN}/logs/renderer_service.log" 2>&1 &
+    > "${RENDERER_SERVICE_LOG:-${RUN}/logs/renderer_service.log}" 2>&1 &
   renderer_pid=$!
   for _ in $(seq 1 180); do
     "${PY}" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8915/health", timeout=2)' 2>/dev/null && break
@@ -145,10 +146,15 @@ PY
   renderer)
     export CUDA_VISIBLE_DEVICES=0
     # round 12 batch: the chain's plan rl "renderer_workers" passes more worker processes (one scene each), so the
-    # scenes of an update stay loaded; default 12
+    # scenes of an update stay loaded; default 12.  ENDPOINT_NAME (the chain's renderer_repack): a second service,
+    # started before the first one is deleted, writes its own address file (the chain renames it once the move is
+    # decided) and its own service log
+    ENDPOINT_NAME=${4:-renderer_endpoint.txt}
+    [[ ${ENDPOINT_NAME} == renderer_endpoint.txt ]] ||
+      RENDERER_SERVICE_LOG=${RUN}/logs/renderer_service-$(date -u +%Y%m%dT%H%M%SZ).log
     start_renderer 0 "${3:-12}"
-    printf 'http://%s:8915/render\n' "$(hostname -I | awk '{print $1}')" > "${RUN}/renderer_endpoint.tmp"
-    mv "${RUN}/renderer_endpoint.tmp" "${RUN}/renderer_endpoint.txt"
+    printf 'http://%s:8915/render\n' "$(hostname -I | awk '{print $1}')" > "${RUN}/${ENDPOINT_NAME%.txt}.tmp"
+    mv "${RUN}/${ENDPOINT_NAME%.txt}.tmp" "${RUN}/${ENDPOINT_NAME}"
     while [[ ! -e ${RUN}/STOP_RENDERER ]]; do kill -0 "${renderer_pid}"; sleep 10; done
     ;;
   rl)

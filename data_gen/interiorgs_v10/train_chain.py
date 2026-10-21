@@ -108,6 +108,12 @@ scene each) taking N requests at a time instead of 12, so the scenes of an updat
 again from the shared disk for about every second request.  A render service still waiting for its card gets the
 new count in its launch script.
 
+Round 12 batch (cards, a new switch, the user's decision of 2026-10-21): plan "rl" "renderer_repack": true (or
+{"every_min": 30, "gap_min": 120, "wait_min": 30}) moves a render service held while its trainer queues off a
+machine where only such services are left (their neighbours finished), so the machine can take an 8-card job: a new
+service is started first and the old one deleted only once the new one runs on a busy machine with the trainer still
+waiting (Chain.repack).  PROGRESS.md lists every try.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -143,6 +149,12 @@ STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node
                            "raylet failed to start")
 STARTUP_DEFAULTS = {"retries": 2, "stall_minutes": 40}
 RENDERER_WAIT_S = 6 * 3600  # renderer_when_trainer_runs: how long a trainer waits for its render service
+# renderer_repack: minutes between looks at the pools, between two moves of one run's render service, and how long
+# the new service may wait for a card
+REPACK_DEFAULTS = {"every_min": 30, "gap_min": 120, "wait_min": 30}
+NEXT_ENDPOINT = "renderer_endpoint_next.txt"  # the address file of the service a move starts
+RENDER_JOB, TRAINER_JOB = "interiorgs-v10-renderer-", "interiorgs-v10-rl-"  # sco display names (job_sco.submit)
+CARDS_PER_MACHINE = 8
 _UPDATE_LINE = re.compile(r"step:\d+ - ")
 _LOG_START = re.compile(r"-(\d{8}T\d{6}Z)-")
 
@@ -438,6 +450,27 @@ def success_rate(results: Path) -> Optional[float]:
 
     rows = [json.loads(l) for l in (results / "results.jsonl").read_text().splitlines() if l.strip()]
     return float(metrics(rows)["success"]) if rows else None
+
+
+def stranded_hosts(view: Dict[str, Any]) -> List[str]:
+    """Round 12 batch (renderer_repack): the machines of a pool view (job_sco.pool_view) whose every job is an RL
+    render service whose trainer still waits for cards: moving those services would free the whole machine."""
+    waiting = set(view.get("waiting") or [])
+    return sorted(h for h, jobs in (view.get("hosts") or {}).items()
+                  if jobs and all(j["name"].startswith(RENDER_JOB) and TRAINER_JOB + j["name"][len(RENDER_JOB):] in waiting
+                                  for j in jobs))
+
+
+def repack_room(view: Dict[str, Any], host: str) -> Dict[str, int]:
+    """{machine: free cards} of the pool's other machines that are in use but not full and not stranded themselves:
+    where a moved render service should go (the scheduler puts a one-card job on a busy machine with room)."""
+    stranded = set(stranded_hosts(view))
+    room = {}
+    for h, jobs in (view.get("hosts") or {}).items():
+        used = sum(int(j["cards"]) for j in jobs)
+        if h != host and h not in stranded and 0 < used < CARDS_PER_MACHINE:
+            room[h] = CARDS_PER_MACHINE - used
+    return room
 
 
 def pick_best(scores: Dict[str, Optional[float]], order: Sequence[str]) -> Optional[str]:
@@ -1136,6 +1169,7 @@ class Chain:
                         self.state.setdefault("guard_stops", {})[name] = {"reason": reason, "utc": now()}
                         ended[name] = f"stopped: {reason}"
                         active.pop(name)
+                self.repack(runs, active, states)  # round 12 batch: plan rl "renderer_repack"
                 self.mark(step, jobs={**states, **{f"{n}/ended": v for n, v in ended.items()}})
                 self.signal_check(runs)
                 if active:
@@ -1149,7 +1183,7 @@ class Chain:
                     break
                 self.sleep(15)
             for run in runs.values():
-                for j in ("job_rl", "job_renderer"):
+                for j in ("job_rl", "job_renderer", "job_renderer_next"):  # _next: a renderer_repack move under way
                     if (run["run_dir"] / j / "submission.json").exists():
                         job_sco.delete(run["run_dir"], j)
         stopped = self.state.get("guard_stops") or {}  # stopped by a guard: not a failure of the step
@@ -1202,6 +1236,119 @@ class Chain:
         a scene file for about every second request); without it the script's default, 12."""
         workers = run["rl"].get("renderer_workers")
         return ["renderer", str(int(workers))] if workers else ["renderer"]
+
+    def repack_settings(self, run: Dict[str, Any]) -> Optional[Dict[str, float]]:
+        """Plan rl "renderer_repack": true or {"every_min", "gap_min", "wait_min"} (REPACK_DEFAULTS); None without."""
+        opt = run["rl"].get("renderer_repack")
+        if not opt:
+            return None
+        return {k: float(v) for k, v in {**REPACK_DEFAULTS, **(opt if isinstance(opt, dict) else {})}.items()}
+
+    def repack(self, runs: Dict[str, Dict[str, Any]], active: Dict[str, Dict[str, Any]],
+               states: Dict[str, Any]) -> None:
+        """Round 12 batch (a new switch, the user's decision of 2026-10-21): plan rl "renderer_repack".  The scheduler
+        puts a one-card job on a busy machine, but a render service held while its trainer queues for hours outlives
+        its neighbours and can be left alone on a machine, which then takes no 8-card job (sco cannot place a job on a
+        given machine).  Every "every_min" minutes the chain looks at the pools of its runs whose trainer waits: a
+        render service on a machine where every job is such a service (stranded_hosts), while the pool's other busy
+        machines have room for them all (repack_room), is moved.  A second service is submitted (job_renderer_next,
+        writing NEXT_ENDPOINT); once it runs on one of those machines with the trainer still waiting, its address
+        replaces the old one and the old service is deleted, so the trainer keeps its place in the queue and never
+        waits for a service.  Otherwise (the trainer got its cards first, the new service landed elsewhere or found no
+        card in "wait_min" minutes, the old one ended) the new one is deleted and the old one stays.  At most one move
+        per run in "gap_min" minutes; state["renderer_moves"] keeps every try."""
+        from . import job_sco
+
+        moves = self.state.setdefault("renderer_moves", {})
+        t = self.clock()
+        for name, run in runs.items():  # moves under way
+            if (run["run_dir"] / "job_renderer_next" / "submission.json").exists():
+                self._repack_follow(name, run, states, t, ended=name not in active)
+        todo = {n: r for n, r in active.items() if self.repack_settings(r)}
+        cands = {}
+        for name, run in todo.items():
+            d, opt = run["run_dir"], self.repack_settings(run)
+            last = (moves.get(name) or [{}])[-1]
+            if ((d / "job_renderer_next" / "submission.json").exists() or not (d / "job_rl" / "submission.json").exists()
+                    or states.get(f"{name}/rl") not in job_sco.WAITING or states.get(f"{name}/renderer") != "RUNNING"
+                    or t - float(last.get("t", float("-inf"))) < opt["gap_min"] * 60):
+                continue
+            cands[name] = run
+        every = min((self.repack_settings(r)["every_min"] for r in todo.values()), default=0) * 60
+        if not cands or t - float(self.state.get("repack_checked_t", float("-inf"))) < every:
+            return
+        self.state["repack_checked_t"] = t
+        views: Dict[Optional[str], Optional[Dict[str, Any]]] = {}
+        for name, run in cands.items():
+            d = run["run_dir"]
+            pool = json.loads((d / "job_renderer" / "prepared.json").read_text()).get("pool")
+            if pool not in views:
+                views[pool] = job_sco.pool_view(pool)
+            view = views[pool]
+            old = json.loads((d / "job_renderer" / "submission.json").read_text())["job_id"]
+            host = next((h for h, jobs in (view or {}).get("hosts", {}).items() if any(j["job_id"] == old for j in jobs)),
+                        None)
+            if not view or host not in stranded_hosts(view):
+                continue
+            room = repack_room(view, host)
+            if sum(room.values()) < len(view["hosts"][host]):
+                continue
+            for f in (NEXT_ENDPOINT, NEXT_ENDPOINT[:-4] + ".tmp"):
+                (d / f).unlink(missing_ok=True)
+            workers = run["rl"].get("renderer_workers") or 12
+            job_sco.prepare(d, 1, ["renderer", str(int(workers)), NEXT_ENDPOINT], job_dir="job_renderer_next", pool=pool)
+            job_sco.submit(d, job_dir="job_renderer_next")
+            new = json.loads((d / "job_renderer_next" / "submission.json").read_text())["job_id"]
+            moves.setdefault(name, []).append({"utc": now(), "t": t, "from_job": old, "from_host": host,
+                                               "room": sorted(room), "to_job": new, "result": None})
+        self.save()
+
+    def _repack_follow(self, name: str, run: Dict[str, Any], states: Dict[str, Any], t: float,
+                       ended: bool = False) -> None:
+        """A move under way (see repack): commit it, cancel it, or wait."""
+        from . import job_sco
+
+        d = run["run_dir"]
+        opt = self.repack_settings(run) or {k: float(v) for k, v in REPACK_DEFAULTS.items()}
+        rec = self.state.setdefault("renderer_moves", {}).setdefault(name, [{"t": t, "from_job": None, "room": []}])[-1]
+        st = job_sco.status(d, "job_renderer_next")
+        receipt = d / "job_renderer" / "submission.json"
+        current = json.loads(receipt.read_text())["job_id"] if receipt.exists() else None
+        nxt = d / NEXT_ENDPOINT
+        reason = None
+        if ended:
+            reason = "the run ended"
+        elif current != rec.get("from_job") or states.get(f"{name}/renderer") != "RUNNING":
+            reason = "the old render service ended or was replaced meanwhile"
+        elif states.get(f"{name}/rl") not in job_sco.WAITING:
+            reason = "the trainer got its cards first (the old render service serves it)"
+        elif st.get("finished") or st.get("state") in ("NOT_FOUND", "SUSPENDED"):
+            reason = f"the new render service ended {st.get('state')}"
+        elif st.get("state") == "RUNNING" and nxt.is_file() and nxt.read_text().strip():
+            rows = job_sco.job_hosts(str(st.get("job_id")))
+            rec["to_host"] = rows[0][1] if rows else None
+            if rec["to_host"] not in rec.get("room", []):
+                reason = f"the new render service landed on {rec['to_host']}, not on a busy machine with room"
+            elif job_sco.status(d, "job_rl").get("state") not in job_sco.WAITING:
+                reason = "the trainer got its cards first (the old render service serves it)"
+            else:
+                nxt.replace(d / "renderer_endpoint.txt")  # the trainer reads the address when it starts
+                gone = job_sco.delete(d, "job_renderer")
+                if receipt.exists():  # not deleted: kept aside for a look by hand, the new receipt takes its place
+                    receipt.rename(receipt.with_name(f"submission_{current}_not_deleted.json"))
+                for f in ("submission.json", "prepared.json"):
+                    (d / "job_renderer_next" / f).replace(d / "job_renderer" / f)
+                rec.update(result="moved", old_deleted=(gone or {}).get("delete_rc") == 0, done_utc=now())
+                self.save()
+                return
+        elif t - float(rec.get("t", t)) > opt["wait_min"] * 60:
+            reason = f"no card for the new render service in {opt['wait_min']:g} minutes"
+        if reason:
+            job_sco.delete(d, "job_renderer_next")
+            for f in (NEXT_ENDPOINT, NEXT_ENDPOINT[:-4] + ".tmp"):
+                (d / f).unlink(missing_ok=True)
+            rec.update(result=f"cancelled: {reason}", done_utc=now())
+            self.save()
 
     def trainer_args(self, run: Dict[str, Any], endpoint: int, pool: Optional[str] = None) -> List[str]:
         """The sco entry script's arguments for a run's trainer (with the switch: how long it waits for its render
@@ -1562,6 +1709,13 @@ def render_markdown(state: Dict[str, Any]) -> str:
         for k, r in enumerate(retries, 1):
             lines += ["", f"**RL {name} 启动失败，第 {k} 次自动重新提交**（{r.get('utc')}）：{r.get('job_id')} → "
                           f"{r.get('new_job_id')}；原因：{r.get('reason')}"]
+    for name, ms in (state.get("renderer_moves") or {}).items():
+        for m in ms:
+            result = m.get("result")
+            lines += ["", f"**RL {name} 的渲染服务挪机器**（{m.get('utc')}）：{m.get('from_job')}（{m.get('from_host')}，"
+                          f"机器上只剩等卡训练的渲染服务）→ {m.get('to_job')}（{m.get('to_host') or '还没放上'}）；"
+                          + ("已挪走" if result == "moved" else f"没挪：{result[len('cancelled: '):]}" if result
+                             else "进行中")]
     for c in state.get("signal_checks") or []:
         lines += ["", f"**第 {c['attempt']} 次 RL 的信号检查（第 {c['at']} 次更新，起点 {c['model']}）：**"
                       f"{'通过' if c['ok'] else '没通过'}；" + "；".join(

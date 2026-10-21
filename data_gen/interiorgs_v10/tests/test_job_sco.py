@@ -134,6 +134,73 @@ class JobScoTest(unittest.TestCase):
             self.assertEqual(out("eval", "RUN", "E", "N", "M", "-", "--check-each-action", "--max-actions", "20"),
                              base + ["--check-each-action", "--max-actions", "20"])
 
+    def test_pool_view(self):
+        """Round 12 batch (the chain's renderer_repack): the workspace's running jobs of a pool by machine and the jobs
+        waiting there, from every page of the job list (500 per page, newest first: jobs started weeks ago still run
+        on later pages) and each running job's workers; nothing when a page or a running job's machine is unreadable."""
+        from unittest import mock
+
+        table = ("+----+----+----+----+----+\n| DISPLAY NAME | RESOURCE | HOST IP | POD IP | WORKER STATUS |\n"
+                 "| pt-{w}-worker-0 | H800(加速芯片:{c}, vCPU:14核,    | {h} | 10.119.20.27 | Running       |\n"
+                 "|                 | 内存:240GiB)                   |              |              |               |\n")
+        self.assertEqual(J.worker_hosts(table.format(w="a", c=1, h="10.123.72.36") + table.format(w="b", c=8, h="10.0.0.2")),
+                         [(1, "10.123.72.36"), (8, "10.0.0.2")])
+        self.assertEqual(J.worker_hosts("| pt-x-worker-0 |          |         |        |               |"), [])
+        old = [{"name": f"pt-done{i}", "state": "SUCCEEDED", "resource_pool": {"name": "zoetrope"}} for i in range(498)]
+        page1 = old + [{"name": "pt-r1", "display_name": "interiorgs-v10-renderer-rl-run-s", "state": "RUNNING",
+                        "resource_pool": {"name": "zoetrope"}},
+                       {"name": "pt-t1", "display_name": "interiorgs-v10-rl-rl-run-s", "state": "QUEUEING",
+                        "resource_pool": {"name": "zoetrope"}}]
+        page2 = [{"name": "pt-old", "display_name": "vln_eval", "state": "RUNNING", "resource_pool": {"name": "zoetrope"}},
+                 {"name": "pt-h", "display_name": "elsewhere", "state": "RUNNING", "resource_pool": {"name": "h800"}}]
+        where = {"pt-r1": table.format(w="r1", c=1, h="10.0.0.1"), "pt-old": table.format(w="o", c=8, h="10.0.0.9")}
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            if "list" in cmd:
+                page = {"1": page1, "2": page2}[cmd[cmd.index("--page-token") + 1]]
+                return mock.Mock(returncode=0, stdout=json.dumps(page))
+            return mock.Mock(returncode=0, stdout=where.get(cmd[-1], ""))
+
+        with mock.patch.object(J.subprocess, "run", run):
+            view = J.pool_view("zoetrope")
+        self.assertEqual(view, {"hosts": {"10.0.0.1": [{"job_id": "pt-r1", "name": "interiorgs-v10-renderer-rl-run-s", "cards": 1}],
+                                          "10.0.0.9": [{"job_id": "pt-old", "name": "vln_eval", "cards": 8}]},
+                                "waiting": ["interiorgs-v10-rl-rl-run-s"]})
+        self.assertEqual(sum("list" in c for c in calls), 2)  # page 2 was short: no page 3
+        self.assertFalse(any(c[-1] == "pt-h" for c in calls))  # another pool's jobs are not looked up
+        del where["pt-old"]  # a running job whose machine cannot be read: no view
+        with mock.patch.object(J.subprocess, "run", run):
+            self.assertIsNone(J.pool_view("zoetrope"))
+        with mock.patch.object(J.subprocess, "run", return_value=mock.Mock(returncode=1, stdout="")):
+            self.assertIsNone(J.pool_view("zoetrope"))
+
+    def test_renderer_mode_address_file(self):
+        """Round 12 batch (renderer_repack): the renderer mode's optional ENDPOINT_NAME; a second service, started
+        before the first is deleted, writes its own address file and its own service log; without it, as before."""
+        import subprocess
+        import tempfile
+
+        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        block = script.split("\n  renderer)\n", 1)[1].split(";;", 1)[0]
+        stubs = ('RUN=$2\nhostname() { echo 10.1.2.3; }\n'
+                 'start_renderer() { echo "$2 ${RENDERER_SERVICE_LOG:-default}" > "${RUN}/started"; renderer_pid=$$; }\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            sh, run = Path(tmp) / "renderer.sh", Path(tmp) / "run"
+            sh.write_text("set -euo pipefail\n" + stubs + block + "\n")
+            run.mkdir()
+            (run / "STOP_RENDERER").touch()  # the service loop ends at once
+            subprocess.run(["bash", str(sh), "renderer", str(run), "32"], check=True)
+            self.assertEqual((run / "renderer_endpoint.txt").read_text(), "http://10.1.2.3:8915/render\n")
+            self.assertEqual((run / "started").read_text(), "32 default\n")
+            (run / "renderer_endpoint.txt").write_text("old\n")
+            subprocess.run(["bash", str(sh), "renderer", str(run), "32", "renderer_endpoint_next.txt"], check=True)
+            self.assertEqual((run / "renderer_endpoint.txt").read_text(), "old\n")  # untouched
+            self.assertEqual((run / "renderer_endpoint_next.txt").read_text(), "http://10.1.2.3:8915/render\n")
+            self.assertRegex((run / "started").read_text(), r"^32 .*/logs/renderer_service-\d{8}T\d{6}Z\.log\n$")
+            self.assertEqual(sorted(p.name for p in run.iterdir() if p.suffix == ".tmp"), [])
+
 
 if __name__ == "__main__":
     unittest.main()
