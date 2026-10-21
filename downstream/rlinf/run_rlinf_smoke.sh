@@ -17,11 +17,15 @@ export PATH="/mnt/umm/users/yinbaiqiao/downstream_runs/tools/bin:$PATH" NO_PROXY
 export RLINF_PY="$ENV/bin/python" HF_HOME=/mnt/umm/users/yinbaiqiao/.cache/huggingface
 export NUMBA_CACHE_DIR="/tmp/ds-numba-$UID" MESA_SHADER_CACHE_DIR="/tmp/ds-mesa-$UID"
 mkdir -p "$NUMBA_CACHE_DIR" "$MESA_SHADER_CACHE_DIR"
-trap 'rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"' EXIT
 nvidia-smi --query-gpu=index,name,driver_version --format=csv,noheader
 CONFIG="$RUN/cfg/train.yaml"
 TAG="${RLINF_TAG:-$(date -u +%Y%m%dT%H%M%SZ)}"
 LOG="$RUN/rlinf_$TAG.log"
+# GPU memory and utilisation of all 8 cards every 2 s (peak memory for the step-4 plan)
+nvidia-smi --query-gpu=timestamp,index,memory.used,utilization.gpu --format=csv,noheader -lms 2000 \
+  > "$RUN/gpu_$TAG.csv" &
+GPU_PID=$!
+trap 'kill $GPU_PID 2>/dev/null; rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"' EXIT
 echo "[rlinf] git=$(command -v git) python=$RLINF_PY overrides=${OVERRIDES[*]:-none} log=$LOG $(date -u +%FT%TZ)"
 cd "$WT"
 export PYTHONPATH="$WT:$WT/third_party/RLinf:$WT/third_party/starVLA${PYTHONPATH:+:$PYTHONPATH}"
