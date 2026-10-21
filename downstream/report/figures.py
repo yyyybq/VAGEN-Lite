@@ -60,7 +60,10 @@ def loss_curves(coll, ratio: str = "100", seed: int = 1, reference: str = "B", w
     top.set_ylabel("action loss, L1 (moving mean of %d logs)" % window)
     top.set_title(f"Training loss, {RATIO_PERCENT.get(ratio, ratio)}% data, seed {seed} (same batches for every start)")
     top.legend(ncol=4, loc="upper right", fontsize=8)
-    if reference in series:
+    if reference not in series or len(series) == 1:
+        bottom.set_visible(False)
+        top.set_xlabel("training step (thousands)")
+    else:
         ref = series[reference]
         for s, v in series.items():
             if s == reference:
