@@ -6,18 +6,18 @@
 
 | 文件 | 题数 | 状态题 (a) | 前向题 (b) | 逆向题 (c) |
 | --- | --- | --- | --- | --- |
-| p1_train.jsonl | 87525 | 35962（41.1%） | 43154（49.3%） | 8409（9.6%） |
+| p1_train.jsonl | 87437 | 35922（41.1%） | 43106（49.3%） | 8409（9.6%） |
 | p1_test.jsonl | 5985 | 2313（38.6%） | 2775（46.4%） | 897（15.0%） |
-| p1_probe.jsonl | 1041 | 477（45.8%） | 524（50.3%） | 40（3.8%） |
+| p1_probe.jsonl | 952 | 441（46.3%） | 471（49.5%） | 40（4.2%） |
 
 三类题的规则（用户 2026-10-19）：状态题全部保留（答案平衡之后）；前向题最多是状态题的 1.2 倍；逆向题最多占题库的 15%；"动作后任务要求会满足吗"（goal_after）最多占前向题的一半；单个场景最多 8%。超出的按（题类、答案、是否变化）分层抽。
 
-- train 场景：前向题 (b)可用 54470、留下 43154；逆向题 (c)可用 8409、留下 8409；状态题 (a)可用 35962、留下 35962
-  - 上限：前向题 43154 道，逆向题 13961 道
-- val 场景：前向题 (b)可用 6698、留下 2775；逆向题 (c)可用 1015、留下 897；状态题 (a)可用 2313、留下 2313
+- train 场景：前向题 (b)可用 54398、留下 43106；逆向题 (c)可用 8409、留下 8409；状态题 (a)可用 35922、留下 35922
+  - 上限：前向题 43106 道，逆向题 13946 道
+- val 场景：前向题 (b)可用 6697、留下 2775；逆向题 (c)可用 1015、留下 897；状态题 (a)可用 2313、留下 2313
   - 上限：前向题 2775 道，逆向题 897 道
-- 测试集去掉了探针集的 1041 道题（两份不重叠）。
-- 探针集：1041 道，每个题类 40 道，其中 goal_after 200 道、goal_now 200 道、occluded_after 全部可用的 124 道、occluded_now 全部可用的 77 道（预注册要的题类），来自 97 个 val 场景；其余题类都够；occluded_after 另有 75 道"没变化"的超过 10% 上限，没取。
+- 测试集去掉了探针集的 952 道题（两份不重叠）。
+- 探针集：952 道，每个题类 40 道，其中 goal_after 200 道、goal_now 200 道、occluded_after 全部可用的 71 道、occluded_now 全部可用的 41 道（预注册要的题类），来自 97 个 val 场景；其余题类都够；occluded_after 另有 37 道"没变化"的超过 10% 上限，没取。
 
 ## 2. 按任务族 × 题类 × 划分的题数
 
@@ -25,25 +25,25 @@
 
 | 任务族 | action_between | both_in_view_after | both_in_view_now | closer_after | closer_now | distance_bin_after | distance_bin_now | goal_after | goal_now | height_bin_after | height_bin_now | left_right_after | left_right_now | occluded_after | occluded_now | 合计 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| absolute_positioning | 1310 | 0 | 0 | 0 | 0 | 9637 | 2686 | 7012 | 6913 | 0 | 0 | 0 | 0 | 0 | 0 | 27558 |
-| equidistance | 1477 | 0 | 0 | 2496 | 1444 | 0 | 0 | 1693 | 2569 | 0 | 0 | 0 | 0 | 0 | 0 | 9679 |
-| fov_inclusion | 1245 | 3314 | 2459 | 0 | 0 | 0 | 0 | 1518 | 2985 | 0 | 0 | 0 | 0 | 0 | 0 | 11521 |
-| occlusion_alignment | 238 | 0 | 0 | 0 | 0 | 0 | 0 | 749 | 705 | 0 | 0 | 0 | 0 | 412 | 267 | 2371 |
-| projective_relations | 2828 | 0 | 0 | 0 | 0 | 0 | 0 | 4729 | 5739 | 0 | 0 | 2645 | 3515 | 0 | 0 | 19456 |
-| screen_occupancy | 1311 | 0 | 0 | 0 | 0 | 0 | 0 | 5065 | 5761 | 3884 | 919 | 0 | 0 | 0 | 0 | 16940 |
-| 合计 | 8409 | 3314 | 2459 | 2496 | 1444 | 9637 | 2686 | 20766 | 24672 | 3884 | 919 | 2645 | 3515 | 412 | 267 | 87525 |
+| absolute_positioning | 1310 | 0 | 0 | 0 | 0 | 9640 | 2686 | 6998 | 6909 | 0 | 0 | 0 | 0 | 0 | 0 | 27543 |
+| equidistance | 1477 | 0 | 0 | 2497 | 1444 | 0 | 0 | 1709 | 2577 | 0 | 0 | 0 | 0 | 0 | 0 | 9704 |
+| fov_inclusion | 1245 | 3314 | 2459 | 0 | 0 | 0 | 0 | 1550 | 2981 | 0 | 0 | 0 | 0 | 0 | 0 | 11549 |
+| occlusion_alignment | 238 | 0 | 0 | 0 | 0 | 0 | 0 | 731 | 711 | 0 | 0 | 0 | 0 | 355 | 227 | 2262 |
+| projective_relations | 2828 | 0 | 0 | 0 | 0 | 0 | 0 | 4699 | 5724 | 0 | 0 | 2645 | 3515 | 0 | 0 | 19411 |
+| screen_occupancy | 1311 | 0 | 0 | 0 | 0 | 0 | 0 | 5083 | 5770 | 3885 | 919 | 0 | 0 | 0 | 0 | 16968 |
+| 合计 | 8409 | 3314 | 2459 | 2497 | 1444 | 9640 | 2686 | 20770 | 24672 | 3885 | 919 | 2645 | 3515 | 355 | 227 | 87437 |
 
 **p1_test.jsonl**
 
 | 任务族 | action_between | both_in_view_after | both_in_view_now | closer_after | closer_now | distance_bin_after | distance_bin_now | goal_after | goal_now | height_bin_after | height_bin_now | left_right_after | left_right_now | occluded_after | occluded_now | 合计 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| absolute_positioning | 141 | 0 | 0 | 0 | 0 | 694 | 361 | 511 | 382 | 0 | 0 | 0 | 0 | 0 | 0 | 2089 |
-| equidistance | 145 | 0 | 0 | 156 | 160 | 0 | 0 | 88 | 56 | 0 | 0 | 0 | 0 | 0 | 0 | 605 |
-| fov_inclusion | 120 | 181 | 252 | 0 | 0 | 0 | 0 | 84 | 98 | 0 | 0 | 0 | 0 | 0 | 0 | 735 |
-| occlusion_alignment | 38 | 0 | 0 | 0 | 0 | 0 | 0 | 37 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 77 |
-| projective_relations | 281 | 0 | 0 | 0 | 0 | 0 | 0 | 306 | 222 | 0 | 0 | 139 | 354 | 0 | 0 | 1302 |
-| screen_occupancy | 172 | 0 | 0 | 0 | 0 | 0 | 0 | 347 | 279 | 232 | 147 | 0 | 0 | 0 | 0 | 1177 |
-| 合计 | 897 | 181 | 252 | 156 | 160 | 694 | 361 | 1373 | 1039 | 232 | 147 | 139 | 354 | 0 | 0 | 5985 |
+| absolute_positioning | 140 | 0 | 0 | 0 | 0 | 694 | 361 | 510 | 386 | 0 | 0 | 0 | 0 | 0 | 0 | 2091 |
+| equidistance | 144 | 0 | 0 | 160 | 160 | 0 | 0 | 83 | 57 | 0 | 0 | 0 | 0 | 0 | 0 | 604 |
+| fov_inclusion | 122 | 172 | 252 | 0 | 0 | 0 | 0 | 88 | 96 | 0 | 0 | 0 | 0 | 0 | 0 | 730 |
+| occlusion_alignment | 33 | 0 | 0 | 0 | 0 | 0 | 0 | 41 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 76 |
+| projective_relations | 294 | 0 | 0 | 0 | 0 | 0 | 0 | 322 | 221 | 0 | 0 | 139 | 354 | 0 | 0 | 1330 |
+| screen_occupancy | 164 | 0 | 0 | 0 | 0 | 0 | 0 | 336 | 277 | 230 | 147 | 0 | 0 | 0 | 0 | 1154 |
+| 合计 | 897 | 172 | 252 | 160 | 160 | 694 | 361 | 1380 | 1039 | 230 | 147 | 139 | 354 | 0 | 0 | 5985 |
 
 **p1_probe.jsonl**
 
@@ -52,10 +52,10 @@
 | absolute_positioning | 25 | 0 | 0 | 0 | 0 | 40 | 40 | 37 | 38 | 0 | 0 | 0 | 0 | 0 | 0 | 180 |
 | equidistance | 9 | 0 | 0 | 40 | 40 | 0 | 0 | 34 | 37 | 0 | 0 | 0 | 0 | 0 | 0 | 160 |
 | fov_inclusion | 2 | 40 | 40 | 0 | 0 | 0 | 0 | 34 | 36 | 0 | 0 | 0 | 0 | 0 | 0 | 152 |
-| occlusion_alignment | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 25 | 19 | 0 | 0 | 0 | 0 | 124 | 77 | 246 |
+| occlusion_alignment | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 25 | 19 | 0 | 0 | 0 | 0 | 71 | 41 | 157 |
 | projective_relations | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 35 | 36 | 0 | 0 | 40 | 40 | 0 | 0 | 154 |
 | screen_occupancy | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 35 | 34 | 40 | 40 | 0 | 0 | 0 | 0 | 149 |
-| 合计 | 40 | 40 | 40 | 40 | 40 | 40 | 40 | 200 | 200 | 40 | 40 | 40 | 40 | 124 | 77 | 1041 |
+| 合计 | 40 | 40 | 40 | 40 | 40 | 40 | 40 | 200 | 200 | 40 | 40 | 40 | 40 | 71 | 41 | 952 |
 
 ## 3. 答案分布
 
@@ -66,37 +66,37 @@
 | 题类 | 题数 | 字母 | 偏差（百分点） | 答案值（前 6） |
 | --- | --- | --- | --- | --- |
 | action_between | 8409 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | turn_leftx2 730，turn_rightx2 712，move_leftx2 521，turn_rightx1 506，turn_leftx1 499，move_rightx2 475 |
-| both_in_view_after | 3314 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | only_b 954，only_a 917，neither 869，both 574 |
+| both_in_view_after | 3314 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | only_b 968，only_a 932，neither 836，both 578 |
 | both_in_view_now | 2459 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | both 770，only_b 672，only_a 632，neither 385 |
-| closer_after | 2496 | A 50.0% / B 50.0% | 0.0 | b 1282，a 1214 |
+| closer_after | 2497 | A 50.0% / B 50.0% | 0.0 | b 1275，a 1222 |
 | closer_now | 1444 | A 50.0% / B 50.0% | 0.0 | b 734，a 710 |
-| distance_bin_after | 9637 | A 24.8% / B 25.2% / C 25.2% / D 24.8% | 0.2 | 2.0 2033，2.5 1958，3.0 1534，1.5 1456，3.5 901，1.0 759 |
+| distance_bin_after | 9640 | A 24.8% / B 25.2% / C 25.2% / D 24.8% | 0.2 | 2.0 2060，2.5 1937，3.0 1548，1.5 1456，3.5 914，1.0 745 |
 | distance_bin_now | 2686 | A 24.8% / B 24.3% / C 26.2% / D 24.6% | 1.2 | 2.5 669，2.0 532，3.0 493，1.5 468，3.5 195，1.0 152 |
-| goal_after | 20766 | Yes 49.7% / No 50.3% | 0.3 | no 10452，yes 10314 |
+| goal_after | 20770 | Yes 49.7% / No 50.3% | 0.3 | no 10454，yes 10316 |
 | goal_now | 24672 | Yes 47.6% / No 52.4% | 2.4 | no 12923，yes 11749 |
-| height_bin_after | 3884 | A 25.6% / B 25.8% / C 25.0% / D 23.5% | 1.5 | 0.2 927，0.3 912，0.4 844，0.5 493，0.1 330，0.8 102 |
+| height_bin_after | 3885 | A 25.6% / B 25.8% / C 25.0% / D 23.5% | 1.5 | 0.3 932，0.2 923，0.4 819，0.5 511，0.1 334，0.7 101 |
 | height_bin_now | 919 | A 24.4% / B 25.8% / C 25.8% / D 24.0% | 1.0 | 0.2 223，0.4 223，0.3 223，0.5 106，0.1 89，0.7 14 |
 | left_right_after | 2645 | A 52.1% / B 47.9% | 2.1 | left 1378，right 1267 |
 | left_right_now | 3515 | A 52.4% / B 47.6% | 2.4 | left 1841，right 1674 |
-| occluded_after | 412 | A 33.3% / B 33.5% / C 33.3% | 0.2 | full 138，partial 137，none 137 |
-| occluded_now | 267 | A 33.3% / B 33.3% / C 33.3% | 0.0 | full 93，none 93，partial 81 |
+| occluded_after | 355 | A 33.2% / B 33.5% / C 33.2% | 0.2 | none 121，full 118，partial 116 |
+| occluded_now | 227 | A 33.5% / B 33.0% / C 33.5% | 0.3 | full 79，none 79，partial 69 |
 
 **p1_test.jsonl**
 
 | 题类 | 题数 | 字母 | 偏差（百分点） | 答案值（前 6） |
 | --- | --- | --- | --- | --- |
-| action_between | 897 | A 25.0% / B 25.0% / C 25.1% / D 25.0% | 0.1 | turn_leftx2 74，turn_rightx2 72，move_backwardx2 64，move_forwardx2 60，move_rightx2 54，move_leftx2 52 |
-| both_in_view_after | 181 | A 24.9% / B 24.9% / C 24.9% / D 25.4% | 0.4 | only_a 51，only_b 47，neither 46，both 37 |
+| action_between | 897 | A 25.0% / B 25.0% / C 25.1% / D 25.0% | 0.1 | turn_rightx2 74，turn_leftx2 74，move_backwardx2 59，turn_rightx1 56，move_forwardx2 56，move_rightx2 53 |
+| both_in_view_after | 172 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | only_b 51，neither 49，only_a 44，both 28 |
 | both_in_view_now | 252 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | only_a 72，both 72，only_b 72，neither 36 |
-| closer_after | 156 | A 50.0% / B 50.0% | 0.0 | b 78，a 78 |
+| closer_after | 160 | A 50.0% / B 50.0% | 0.0 | b 81，a 79 |
 | closer_now | 160 | A 50.0% / B 50.0% | 0.0 | b 84，a 76 |
-| distance_bin_after | 694 | A 24.9% / B 25.2% / C 25.1% / D 24.8% | 0.2 | 2.5 153，2.0 130，3.0 109，1.5 90，3.5 76，1.0 44 |
-| distance_bin_now | 361 | A 25.5% / B 24.1% / C 26.3% / D 24.1% | 1.3 | 2.5 89，3.0 76，1.5 61，2.0 59，3.5 31，4.0 28 |
-| goal_after | 1373 | Yes 49.8% / No 50.2% | 0.2 | no 689，yes 684 |
+| distance_bin_after | 694 | A 24.8% / B 25.2% / C 25.1% / D 24.9% | 0.2 | 2.5 145，2.0 126，3.0 114，1.5 86，3.5 73，1.0 53 |
+| distance_bin_now | 361 | A 25.5% / B 24.1% / C 26.3% / D 24.1% | 1.3 | 2.5 90，3.0 76，1.5 61，2.0 59，3.5 30，4.0 28 |
+| goal_after | 1380 | Yes 50.0% / No 50.0% | 0.0 | yes 690，no 690 |
 | goal_now | 1039 | Yes 47.6% / No 52.4% | 2.4 | no 544，yes 495 |
-| height_bin_after | 232 | A 24.1% / B 26.3% / C 25.4% / D 24.1% | 1.3 | 0.2 56，0.4 48，0.3 48，0.5 25，0.1 25，0.7 11 |
+| height_bin_after | 230 | A 24.8% / B 26.1% / C 25.2% / D 23.9% | 1.1 | 0.2 53，0.3 50，0.4 45，0.1 29，0.5 24，0.8 12 |
 | height_bin_now | 147 | A 24.5% / B 25.9% / C 25.9% / D 23.8% | 1.2 | 0.3 35，0.2 34，0.4 31，0.1 22，0.5 12，0.6 4 |
-| left_right_after | 139 | A 51.8% / B 48.2% | 1.8 | left 72，right 67 |
+| left_right_after | 139 | A 52.5% / B 47.5% | 2.5 | left 73，right 66 |
 | left_right_now | 354 | A 52.3% / B 47.7% | 2.3 | left 185，right 169 |
 
 **p1_probe.jsonl**
@@ -116,10 +116,10 @@
 | height_bin_now | 40 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | 0.2 10，0.4 9，0.3 9，0.5 5，0.1 4，0.8 2 |
 | left_right_after | 40 | A 50.0% / B 50.0% | 0.0 | right 20，left 20 |
 | left_right_now | 40 | A 50.0% / B 50.0% | 0.0 | right 20，left 20 |
-| occluded_after | 124 | A 33.1% / B 33.9% / C 33.1% | 0.5 | full 53，partial 43，none 28 |
-| occluded_now | 77 | A 33.8% / B 32.5% / C 33.8% | 0.9 | full 46，partial 24，none 7 |
+| occluded_after | 71 | A 32.4% / B 33.8% / C 33.8% | 0.9 | none 27，full 22，partial 22 |
+| occluded_now | 41 | A 34.1% / B 31.7% / C 34.1% | 1.6 | full 19，partial 15，none 7 |
 
-训练集和测试集里字母偏差的最大值：2.4 个百分点（探针集每类只有约 40 道，不计入；它的偏差见上表）。
+训练集和测试集里字母偏差的最大值：2.5 个百分点（探针集每类只有约 40 道，不计入；它的偏差见上表）。
 
 ## 4. 前向题：没变化的题、答案和现在不同的题
 
@@ -127,26 +127,26 @@
 
 | 文件 | 题类 | 题数 | 没变化 | 答案变了 |
 | --- | --- | --- | --- | --- |
-| p1_train.jsonl | both_in_view_after | 3314 | 10.0% | 64.8% |
-| p1_train.jsonl | closer_after | 2496 | 10.0% | 45.5% |
-| p1_train.jsonl | distance_bin_after | 9637 | 10.0% | 65.3% |
-| p1_train.jsonl | goal_after | 20766 | 10.0% | 52.9% |
-| p1_train.jsonl | height_bin_after | 3884 | 10.0% | 64.5% |
+| p1_train.jsonl | both_in_view_after | 3314 | 10.0% | 65.4% |
+| p1_train.jsonl | closer_after | 2497 | 10.0% | 45.5% |
+| p1_train.jsonl | distance_bin_after | 9640 | 10.0% | 65.0% |
+| p1_train.jsonl | goal_after | 20770 | 10.0% | 52.8% |
+| p1_train.jsonl | height_bin_after | 3885 | 10.1% | 64.8% |
 | p1_train.jsonl | left_right_after | 2645 | 10.0% | 0.0% |
-| p1_train.jsonl | occluded_after | 412 | 8.0% | 66.4% |
-| p1_test.jsonl | both_in_view_after | 181 | 9.9% | 61.5% |
-| p1_test.jsonl | closer_after | 156 | 9.6% | 40.7% |
-| p1_test.jsonl | distance_bin_after | 694 | 9.9% | 65.5% |
-| p1_test.jsonl | goal_after | 1373 | 9.8% | 53.1% |
-| p1_test.jsonl | height_bin_after | 232 | 10.3% | 62.2% |
-| p1_test.jsonl | left_right_after | 139 | 10.1% | 0.0% |
+| p1_train.jsonl | occluded_after | 355 | 9.0% | 61.1% |
+| p1_test.jsonl | both_in_view_after | 172 | 10.5% | 66.1% |
+| p1_test.jsonl | closer_after | 160 | 10.0% | 48.5% |
+| p1_test.jsonl | distance_bin_after | 694 | 9.9% | 61.7% |
+| p1_test.jsonl | goal_after | 1380 | 9.8% | 53.8% |
+| p1_test.jsonl | height_bin_after | 230 | 8.7% | 66.0% |
+| p1_test.jsonl | left_right_after | 139 | 8.6% | 0.0% |
 | p1_probe.jsonl | both_in_view_after | 40 | 10.0% | 51.9% |
 | p1_probe.jsonl | closer_after | 40 | 5.0% | 50.0% |
 | p1_probe.jsonl | distance_bin_after | 40 | 10.0% | 42.9% |
 | p1_probe.jsonl | goal_after | 200 | 10.0% | 50.0% |
 | p1_probe.jsonl | height_bin_after | 40 | 10.0% | 46.4% |
 | p1_probe.jsonl | left_right_after | 40 | 10.0% | 0.0% |
-| p1_probe.jsonl | occluded_after | 124 | 9.7% | 50.7% |
+| p1_probe.jsonl | occluded_after | 71 | 9.9% | 55.8% |
 
 ## 5. 过滤：没出的题和原因
 
@@ -177,6 +177,15 @@
 
 ## 6. 平衡和上限去掉的题
 
+**渲染深度核对遮挡题**（2026-10-21，`occ_depth.py`）：答"完全挡住"的要求目标在渲染图里被挡 ≥ 0.70，答"部分挡住"的 ≥ 0.10，否则在平衡之前去掉；答"没有"的不核对。
+
+| 题类 / 答案 | 核对 | 去掉 | 没有深度结果（也去掉） |
+| --- | --- | --- | --- |
+| occluded_after/full | 829 | 372 | 0 |
+| occluded_after/partial | 472 | 108 | 0 |
+| occluded_now/full | 408 | 193 | 0 |
+| occluded_now/partial | 105 | 21 | 0 |
+
 **train 场景**
 
 | 题类 | 平衡前 | 去掉（原因） | 平衡后 |
@@ -194,8 +203,8 @@
 | height_bin_now | 1898 | {"answer_balance": 979} | 919 |
 | left_right_after | 5870 | {"flip_band": 0, "unchanged": 2331, "answer_balance": 201} | 3338 |
 | left_right_now | 3673 | {"answer_balance": 74} | 3599 |
-| occluded_after | 1436 | {"flip_band": 123, "unchanged": 416, "answer_balance": 377} | 520 |
-| occluded_now | 537 | {"answer_balance": 270} | 267 |
+| occluded_after | 1047 | {"flip_band": 0, "unchanged": 328, "answer_balance": 271} | 448 |
+| occluded_now | 359 | {"answer_balance": 132} | 227 |
 
 场景上限（单个场景不超过 8%）去掉：{}
 
@@ -204,19 +213,19 @@
 | 题类 | 平衡前 | 去掉（原因） | 平衡后 |
 | --- | --- | --- | --- |
 | action_between | 3265 | {"answer_balance": 2250} | 1015 |
-| both_in_view_after | 1478 | {"flip_band": 63, "unchanged": 283, "answer_balance": 697} | 435 |
+| both_in_view_after | 1478 | {"flip_band": 97, "unchanged": 285, "answer_balance": 685} | 411 |
 | both_in_view_now | 345 | {"answer_balance": 93} | 252 |
-| closer_after | 672 | {"flip_band": 184, "unchanged": 108} | 380 |
+| closer_after | 672 | {"flip_band": 184, "unchanged": 102} | 386 |
 | closer_now | 160 | {} | 160 |
-| distance_bin_after | 2311 | {"flip_band": 320, "unchanged": 305, "answer_balance": 8} | 1678 |
+| distance_bin_after | 2311 | {"flip_band": 327, "unchanged": 307, "answer_balance": 0} | 1677 |
 | distance_bin_now | 397 | {"answer_balance": 34} | 363 |
-| goal_after | 13414 | {"flip_band": 3714, "unchanged": 3549, "answer_balance": 2837} | 3314 |
+| goal_after | 13414 | {"flip_band": 3714, "unchanged": 3502, "answer_balance": 2868} | 3330 |
 | goal_now | 3645 | {"answer_balance": 2584} | 1061 |
-| height_bin_after | 1333 | {"flip_band": 0, "unchanged": 358, "answer_balance": 417} | 558 |
+| height_bin_after | 1333 | {"flip_band": 0, "unchanged": 351, "answer_balance": 424} | 558 |
 | height_bin_now | 248 | {"answer_balance": 100} | 148 |
-| left_right_after | 727 | {"flip_band": 0, "unchanged": 297, "answer_balance": 97} | 333 |
+| left_right_after | 727 | {"flip_band": 0, "unchanged": 295, "answer_balance": 97} | 335 |
 | left_right_now | 445 | {"answer_balance": 82} | 363 |
-| occluded_after | 75 | {"flip_band": 0, "unchanged": 75, "answer_balance": 0} | 0 |
+| occluded_after | 37 | {"flip_band": 0, "unchanged": 37, "answer_balance": 0} | 0 |
 
 场景上限（单个场景不超过 8%）去掉：{}
 
@@ -228,41 +237,41 @@
 
 | 题类 | 题数 | 随机猜 | 学出来的规则（哪条） | base_7b_blind 不看图 | base_7b_blind 读不出 |
 | --- | --- | --- | --- | --- | --- |
-| action_between | 897 | 25.0% | 26.3%（learned_options） | 22.0% | 17.9% |
-| both_in_view_after | 181 | 25.0% | 27.3%（learned_options） | 19.3% | 12.2% |
-| both_in_view_now | 252 | 25.0% | 28.6%（learned_action） | 18.7% | 0.0% |
-| closer_after | 156 | 50.0% | 50.3%（learned_options） | 16.0% | 66.7% |
-| closer_now | 160 | 50.0% | 52.8%（learned_options） | 53.1% | 0.6% |
-| distance_bin_after | 694 | 25.0% | 25.5%（learned_options） | 19.7% | 13.7% |
-| distance_bin_now | 361 | 25.0% | 26.3%（first_option） | 15.0% | 31.6% |
-| goal_after | 1373 | 50.0% | 51.2%（learned_action） | 50.2% | 0.0% |
+| action_between | 897 | 25.0% | 25.5%（learned_options） | 20.1% | 18.3% |
+| both_in_view_after | 172 | 25.0% | 30.2%（learned_action） | 18.6% | 13.4% |
+| both_in_view_now | 252 | 25.0% | 28.6%（learned_action） | 19.4% | 0.0% |
+| closer_after | 160 | 50.0% | 48.1%（learned_options） | 16.2% | 68.8% |
+| closer_now | 160 | 50.0% | 52.8%（learned_options） | 53.8% | 0.6% |
+| distance_bin_after | 694 | 25.0% | 24.4%（learned_options） | 22.0% | 12.1% |
+| distance_bin_now | 361 | 25.0% | 26.6%（first_option） | 13.9% | 35.7% |
+| goal_after | 1380 | 50.0% | 52.8%（learned_action） | 50.0% | 0.0% |
 | goal_now | 1039 | 50.0% | 52.4%（learned_action） | 52.4% | 0.0% |
-| height_bin_after | 232 | 25.0% | 24.1%（learned_options） | 19.4% | 17.2% |
-| height_bin_now | 147 | 25.0% | 25.9%（learned_options） | 20.4% | 1.4% |
-| left_right_after | 139 | 50.0% | 55.4%（learned_action） | 45.3% | 16.5% |
-| left_right_now | 354 | 50.0% | 52.3%（learned_options） | 48.9% | 0.0% |
-| 全部 | 5985 | 38.5% |  | 35.5% | 9.4% |
+| height_bin_after | 230 | 25.0% | 28.3%（learned_options） | 23.5% | 14.3% |
+| height_bin_now | 147 | 25.0% | 25.9%（learned_options） | 16.3% | 0.7% |
+| left_right_after | 139 | 50.0% | 52.5%（learned_options） | 46.0% | 8.6% |
+| left_right_now | 354 | 50.0% | 52.3%（learned_options） | 51.4% | 0.8% |
+| 全部 | 5985 | 38.5% |  | 35.7% | 9.4% |
 
 **p1_probe.jsonl**
 
 | 题类 | 题数 | 随机猜 | 学出来的规则（哪条） | base_7b_blind 不看图 | base_7b_blind 读不出 |
 | --- | --- | --- | --- | --- | --- |
-| action_between | 40 | 25.0% | 25.0%（inverse_frequency） | 25.0% | 22.5% |
-| both_in_view_after | 40 | 25.0% | 29.4%（learned_options） | 20.0% | 7.5% |
+| action_between | 40 | 25.0% | 25.0%（inverse_frequency） | 15.0% | 37.5% |
+| both_in_view_after | 40 | 25.0% | 37.5%（learned_action） | 17.5% | 12.5% |
 | both_in_view_now | 40 | 25.0% | 30.6%（learned_options） | 27.5% | 0.0% |
-| closer_after | 40 | 50.0% | 52.5%（learned_options） | 12.5% | 72.5% |
-| closer_now | 40 | 50.0% | 50.0%（learned_options） | 52.5% | 2.5% |
-| distance_bin_after | 40 | 25.0% | 35.0%（first_option） | 22.5% | 10.0% |
-| distance_bin_now | 40 | 25.0% | 27.5%（first_option） | 20.0% | 22.5% |
-| goal_after | 200 | 50.0% | 51.0%（learned_action） | 50.0% | 0.0% |
+| closer_after | 40 | 50.0% | 47.5%（learned_options） | 15.0% | 62.5% |
+| closer_now | 40 | 50.0% | 50.0%（learned_options） | 50.0% | 2.5% |
+| distance_bin_after | 40 | 25.0% | 25.0%（first_option） | 27.5% | 15.0% |
+| distance_bin_now | 40 | 25.0% | 27.5%（first_option） | 15.0% | 32.5% |
+| goal_after | 200 | 50.0% | 49.5%（learned_action） | 50.0% | 0.0% |
 | goal_now | 200 | 50.0% | 50.0%（learned_action） | 50.0% | 0.0% |
-| height_bin_after | 40 | 25.0% | 35.0%（first_option） | 25.0% | 25.0% |
-| height_bin_now | 40 | 25.0% | 25.0%（learned_options） | 22.5% | 5.0% |
-| left_right_after | 40 | 50.0% | 60.0%（learned_action） | 30.0% | 17.5% |
-| left_right_now | 40 | 50.0% | 50.0%（learned_options） | 42.5% | 5.0% |
-| occluded_after | 124 | 33.3% | 40.1%（learned_options） | 24.2% | 0.8% |
-| occluded_now | 77 | 33.3% | 59.7%（learned_action） | 9.1% | 0.0% |
-| 全部 | 1041 | 40.1% |  | 34.3% | 7.4% |
+| height_bin_after | 40 | 25.0% | 30.0%（first_option） | 22.5% | 15.0% |
+| height_bin_now | 40 | 25.0% | 25.0%（learned_options） | 15.0% | 2.5% |
+| left_right_after | 40 | 50.0% | 60.0%（learned_action） | 37.5% | 10.0% |
+| left_right_now | 40 | 50.0% | 50.0%（learned_options） | 50.0% | 0.0% |
+| occluded_after | 71 | 33.3% | 44.6%（learned_options） | 39.4% | 1.4% |
+| occluded_now | 41 | 33.3% | 46.3%（learned_action） | 14.6% | 0.0% |
+| 全部 | 952 | 40.7% |  | 36.9% | 8.1% |
 
 ## 8. 每类两道原题
 
@@ -296,33 +305,33 @@ Answer with the option's letter.
 ```
 图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_6e87c8e766cf0fa996bda6f8__s0.png`；`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_6e87c8e766cf0fa996bda6f8__s3.png`
 
-**both_in_view_after**（fov_inclusion，start，`p1_7e8e9bacbf97`）
+**both_in_view_after**（fov_inclusion，start，`p1_7d65240ef275`）
 
 ```
 <image>
-If the camera moves sideways to the right by 0.3 meters from the current view, will the oven and the fridge both be inside the view?
-(A) only the oven
-(B) neither
-(C) both are
-(D) only the fridge
+If the camera turns right by 60 degrees from the current view, will the taller wardrobe and the TV both be inside the view?
+(A) only the TV
+(B) only the taller wardrobe
+(C) neither
+(D) both are
 Answer with the option's letter.
 答案：A
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_85b5e68ec3e91aafcb6cfd4d__s0.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_32dad472ac291aa8257d5ec6__s0.png`
 
-**both_in_view_after**（fov_inclusion，start，`p1_ce4dc238b12f`）
+**both_in_view_after**（fov_inclusion，terminal，`p1_cdb953fe1f1e`）
 
 ```
 <image>
-If the camera moves sideways to the left by 0.9 meters from the current view, will the dining table and the TV cabinet both be inside the view?
-(A) neither
-(B) only the TV cabinet
+If the camera turns right by 40 degrees from the current view, will the smaller coffee table and the sofa both be inside the view?
+(A) only the smaller coffee table
+(B) only the sofa
 (C) both are
-(D) only the dining table
+(D) neither
 Answer with the option's letter.
 答案：B
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_25a3b7ab070a55bac0754227__s0.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_5dcd80b77457afa32007da99__s7.png`
 
 **both_in_view_now**（fov_inclusion，terminal，`p1_1516152f7a04`）
 
@@ -352,29 +361,29 @@ Answer with the option's letter.
 ```
 图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_ab58285c6b791594a4ab4153__s5.png`
 
-**closer_after**（equidistance，middle，`p1_e097594bf940`）
+**closer_after**（equidistance，terminal，`p1_df9ad6ea5b41`）
 
 ```
 <image>
-If the camera moves forward by 0.3 meters from the current view, which will be closer to you (horizontal distance to its nearest side): the wardrobe or the coffee table?
-(A) the wardrobe
-(B) the coffee table
+If the camera moves forward by 0.6 meters from the current view, which will be closer to you (horizontal distance to its nearest side): the stool or the bedside table?
+(A) the bedside table
+(B) the stool
 Answer with the option's letter.
 答案：B
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_7a9b07e8308da3f232d7d9ba__s6.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_86b67d9b42d8ed55c4d10cce__s4.png`
 
-**closer_after**（equidistance，terminal，`p1_28637c181786`）
+**closer_after**（equidistance，terminal，`p1_279b5f987ce0`）
 
 ```
 <image>
-If the camera moves sideways to the left by 0.9 meters from the current view, which will be closer to you (horizontal distance to its nearest side): the flowers or the water bar?
-(A) the water bar
-(B) the flowers
+If the camera moves sideways to the right by 0.9 meters from the current view, which will be closer to you (horizontal distance to its nearest side): the cabinet or the coffee table?
+(A) the coffee table
+(B) the cabinet
 Answer with the option's letter.
 答案：A
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_dd8d664d8e8a2c0e642481e1__s5.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_a26074d73bf81aedb19b10e2__s4.png`
 
 **closer_now**（equidistance，terminal，`p1_81e98a8bcd3a`）
 
@@ -400,33 +409,33 @@ Answer with the option's letter.
 ```
 图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_31fee75af52f61f97d54d73b__s2.png`
 
-**distance_bin_after**（absolute_positioning，start，`p1_193a63105a00`）
+**distance_bin_after**（absolute_positioning，terminal，`p1_193e691392e1`）
 
 ```
 <image>
-If the camera moves forward by 0.9 meters from the current view, about how far will you be from the TV, measured horizontally to its nearest side?
+If the camera moves backward by 0.3 meters from the current view, about how far will you be from the water bar, measured horizontally to its nearest side?
 (A) about 1.0 meters
 (B) about 1.5 meters
 (C) about 2.0 meters
 (D) about 2.5 meters
 Answer with the option's letter.
-答案：B
+答案：D
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_930a13bcbd99182b6c361312__s0.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_0b28109a5dfc8a01b5719381__s4.png`
 
-**distance_bin_after**（absolute_positioning，middle，`p1_dbf15be6c44c`）
+**distance_bin_after**（absolute_positioning，terminal，`p1_dc7027a503f5`）
 
 ```
 <image>
-If the camera moves backward by 0.3 meters from the current view, about how far will you be from the storage rack next to the water dispenser, measured horizontally to its nearest side?
-(A) about 2.0 meters
-(B) about 2.5 meters
-(C) about 3.0 meters
-(D) about 3.5 meters
+If the camera moves sideways to the left by 0.3 meters from the current view, about how far will you be from the trash can, measured horizontally to its nearest side?
+(A) about 2.5 meters
+(B) about 3.0 meters
+(C) about 3.5 meters
+(D) about 4.0 meters
 Answer with the option's letter.
-答案：D
+答案：B
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_18ac336f4734f6ec555e7024__s5.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_bca944b9b26144b4cae0190c__s1.png`
 
 **distance_bin_now**（absolute_positioning，middle，`p1_518a0680ce56`）
 
@@ -456,73 +465,73 @@ Answer with the option's letter.
 ```
 图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_ad44b6e59c5b02755203f85f__s4.png`
 
-**goal_after**（equidistance，middle，`p1_22691aa84dc1`）
+**goal_after**（equidistance，terminal，`p1_2252abc0ec96`）
 
 ```
 <image>
-Task: Move to a spot that is equally far from the chair next to the sofa and the side table (measured to their nearest sides), with both of them in view.
+Task: Move to a spot that is equally far from the dishwasher and the electric cooker (measured to their nearest sides), with both of them in view.
+If the camera moves sideways to the left by 0.3 meters from the current view, will the task's requirement be met? Answer Yes or No.
+答案：Yes
+```
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_482cd9940abb9c4ce2c21e8b__s6.png`
+
+**goal_after**（screen_occupancy，terminal，`p1_aee4cd67abe0`）
+
+```
+<image>
+Task: Move so that the dining table is fully visible from top to bottom and its height fills about 15% of the image height.
 If the camera moves backward by 0.3 meters from the current view, will the task's requirement be met? Answer Yes or No.
-答案：No
-```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_3f028135a0c1930f31dcce92__s5.png`
-
-**goal_after**（absolute_positioning，terminal，`p1_aea37124ecaf`）
-
-```
-<image>
-Task: Move to a spot about 2.5 meters away from the massage chair next to the dish sterilizer (measured to its nearest side), keeping the massage chair next to the dish sterilizer in view.
-If the camera moves sideways to the right by 0.9 meters from the current view, will the task's requirement be met? Answer Yes or No.
 答案：Yes
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_14cae61d62461ac96eec51d8__s1.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_24c247c6b11da7019ea9b7ee__x2.png`
 
-**goal_now**（fov_inclusion，start，`p1_8e4b60db2146`）
+**goal_now**（projective_relations，middle，`p1_8e24cbbaee91`）
 
 ```
 <image>
-Task: Move so that both the fruit plate and the computer are fully in your view.
+Task: Move so that the wardrobe appears to the right of the chair next to the projection screen in your view.
 In the current view, is the task's requirement already met? Answer Yes or No.
 答案：No
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_9c7bf0d8e315109b8b529f3b__s0.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_a99120089e90853a93ead160__s1.png`
 
-**goal_now**（fov_inclusion，interior，`p1_1698fc3813b0`）
+**goal_now**（screen_occupancy，interior，`p1_167c21ea8664`）
 
 ```
 <image>
-Task: Move so that both the floor lamp and the table are fully in your view.
+Task: Move so that the easel is fully visible from top to bottom and its height fills about 60% of the image height.
 In the current view, is the task's requirement already met? Answer Yes or No.
 答案：Yes
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261018/interior/frames/plain/v10_b33c81917556152f9d606f53__i0.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261018/interior/frames/plain/v10_6e6289d7f3552a322928cfba__i0.png`
 
-**height_bin_after**（screen_occupancy，terminal，`p1_3e9a973ba003`）
+**height_bin_after**（screen_occupancy，start，`p1_3f204df4378c`）
 
 ```
 <image>
-If the camera turns right by 40 degrees from the current view, about what fraction of the image height will the sofa fill, from its top to its bottom?
+If the camera moves backward by 0.9 meters from the current view, about what fraction of the image height will the notebook computer fill, from its top to its bottom?
 (A) about 10%
 (B) about 20%
 (C) about 30%
 (D) about 40%
 Answer with the option's letter.
-答案：D
+答案：A
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_e7b6508aac37f1b21a50989c__s2.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_bdd87e29666b91b98cdcbbd0__s0.png`
 
-**height_bin_after**（screen_occupancy，middle，`p1_17bec553c1f3`）
+**height_bin_after**（screen_occupancy，middle，`p1_17f6be69307a`）
 
 ```
 <image>
-If the camera moves backward by 0.9 meters from the current view, about what fraction of the image height will the sofa fill, from its top to its bottom?
+If the camera turns left by 20 degrees from the current view, about what fraction of the image height will the fireplace fill, from its top to its bottom?
 (A) about 20%
 (B) about 30%
 (C) about 40%
 (D) about 50%
 Answer with the option's letter.
-答案：B
+答案：D
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_5cb2d8aff7aa2131c953585f__s2.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_fc66a4c98daf469dccb52d52__s2.png`
 
 **height_bin_now**（screen_occupancy，middle，`p1_93c1b19c2c03`）
 
@@ -552,103 +561,103 @@ Answer with the option's letter.
 ```
 图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_06d0a965230ba8efe4598dcf__s3.png`
 
-**left_right_after**（projective_relations，terminal，`p1_17454fd4e7e6`）
+**left_right_after**（projective_relations，terminal，`p1_17719b5a9952`）
 
 ```
 <image>
-If the camera moves sideways to the right by 0.6 meters from the current view, will the wardrobe be to the left or to the right of the bed?
+If the camera moves backward by 0.3 meters from the current view, will the flowers be to the left or to the right of the smaller side table?
 (A) to the left
 (B) to the right
 Answer with the option's letter.
 答案：A
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_29e7ad912e38b437106d5d92__s4.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_10184bdf7e64e7c7c9a7bc85__s7.png`
 
-**left_right_after**（projective_relations，middle，`p1_df0ee5f115bb`）
+**left_right_after**（projective_relations，terminal，`p1_deaac429e1da`）
 
 ```
 <image>
-If the camera moves backward by 0.3 meters from the current view, will the table be to the left or to the right of the sofa?
+If the camera moves forward by 0.6 meters from the current view, will the water dispenser be to the left or to the right of the storage rack next to the sofa?
 (A) to the left
 (B) to the right
 Answer with the option's letter.
 答案：A
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_90f3af13f7ecf110632a27e5__s6.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_040ff2a68a74ea575851d148__s2.png`
 
-**left_right_now**（projective_relations，terminal，`p1_23987fa1c813`）
+**left_right_now**（projective_relations，terminal，`p1_23a982333325`）
 
 ```
 <image>
-In the current view, is the TV to the left or to the right of the bed?
+In the current view, is the plant to the left or to the right of the side table?
+(A) to the left
+(B) to the right
+Answer with the option's letter.
+答案：B
+```
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_7c49668c7a4a38748e60d0a5__s5.png`
+
+**left_right_now**（projective_relations，terminal，`p1_3f95c904df83`）
+
+```
+<image>
+In the current view, is the sofa to the left or to the right of the side table?
 (A) to the left
 (B) to the right
 Answer with the option's letter.
 答案：A
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_c50663fc42d51980d634e6e2__s7.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_9343f438cf57805a21887d88__x1.png`
 
-**left_right_now**（projective_relations，terminal，`p1_3f42453e0949`）
-
-```
-<image>
-In the current view, is the cabinet to the left or to the right of the refrigerator?
-(A) to the left
-(B) to the right
-Answer with the option's letter.
-答案：A
-```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_3e373abc54b0c16506dd9e7d__s2.png`
-
-**occluded_after**（occlusion_alignment，middle，`p1_cbc43a12d84f`）
+**occluded_after**（occlusion_alignment，terminal，`p1_e622f0e0f405`）
 
 ```
 <image>
-If the camera moves backward by 0.9 meters from the current view, will the chair next to the mirror be hidden behind the sofa?
-(A) fully hidden behind the sofa
+If the camera moves sideways to the left by 0.9 meters from the current view, will the stool next to the floor lamp be hidden behind the sofa?
+(A) not hidden behind the sofa
 (B) partly hidden behind the sofa
-(C) not hidden behind the sofa
+(C) fully hidden behind the sofa
 Answer with the option's letter.
 答案：C
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_91317f4fc969354a6f1b19e0__s1.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_b70bfa335843e19ee291552b__s4.png`
 
-**occluded_after**（occlusion_alignment，start，`p1_cafab2917ff3`）
-
-```
-<image>
-If the camera moves forward by 0.3 meters from the current view, will the cabinet next to the fan be hidden behind the person next to the water dispenser?
-(A) not hidden behind the person next to the water dispenser
-(B) partly hidden behind the person next to the water dispenser
-(C) fully hidden behind the person next to the water dispenser
-Answer with the option's letter.
-答案：B
-```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_17745beae1e3b3a8f4a528de__s0.png`
-
-**occluded_now**（occlusion_alignment，terminal，`p1_27498b0a0a66`）
+**occluded_after**（occlusion_alignment，middle，`p1_e54734cba5c2`）
 
 ```
 <image>
-In the current view, is the table next to the drum kit hidden behind the larger coffee maker?
-(A) fully hidden behind the larger coffee maker
-(B) not hidden behind the larger coffee maker
-(C) partly hidden behind the larger coffee maker
-Answer with the option's letter.
-答案：A
-```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_7816ca65144f58360fa4cdde__s7.png`
-
-**occluded_now**（occlusion_alignment，terminal，`p1_ca583269d552`）
-
-```
-<image>
-In the current view, is the coffee table hidden behind the wardrobe?
+If the camera moves forward by 0.3 meters from the current view, will the bedside table be hidden behind the wardrobe?
 (A) partly hidden behind the wardrobe
-(B) fully hidden behind the wardrobe
-(C) not hidden behind the wardrobe
+(B) not hidden behind the wardrobe
+(C) fully hidden behind the wardrobe
 Answer with the option's letter.
 答案：B
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_84bc0570021d89b5c7b78720__s2.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_25a608876df74330d293d746__x1.png`
+
+**occluded_now**（occlusion_alignment，start，`p1_ad900ec668c8`）
+
+```
+<image>
+In the current view, is the camera next to the wardrobe hidden behind the microphone?
+(A) partly hidden behind the microphone
+(B) not hidden behind the microphone
+(C) fully hidden behind the microphone
+Answer with the option's letter.
+答案：B
+```
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_436b17f6849b8340193dd5c5__s0.png`
+
+**occluded_now**（occlusion_alignment，start，`p1_13dfcf5b2787`）
+
+```
+<image>
+In the current view, is the plant next to the coffee table hidden behind the TV cabinet?
+(A) partly hidden behind the TV cabinet
+(B) fully hidden behind the TV cabinet
+(C) not hidden behind the TV cabinet
+Answer with the option's letter.
+答案：C
+```
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_3826e7b6f3f45347673c01b6__s0.png`
 
