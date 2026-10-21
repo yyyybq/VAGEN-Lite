@@ -149,6 +149,52 @@ class RunnerTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 OJ.parse_sets(["nonsense=1"])
 
+    def test_b_alignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            (p / "maps").mkdir()
+            row = {"sample_id": "s", "b": B, "K": K.tolist(), "c2w": C2W.tolist()}
+            for d, status in ((2.2, "ok"), (1.0, "in_front"), (6.0, "see_through")):
+                np.savez_compressed(p / "maps" / "s.npz", depth=np.full((H, W), d, np.float16),
+                                    alpha=np.full((H, W), 255, np.uint8))
+                al = OJ.b_alignment(p, row)
+                self.assertEqual(al["status"], status)
+                self.assertGreater(al["pixels"], 10000)
+            self.assertAlmostEqual(al["behind"], 1.0)
+            np.savez_compressed(p / "maps" / "s.npz", depth=np.full((H, W), 1.0, np.float16),
+                                alpha=np.full((H, W), 255, np.uint8))
+            self.assertAlmostEqual(OJ.b_alignment(p, row)["front_dist"], 1.0, places=2)  # 1 m in front of the box
+
+    def test_alignment_objects_and_tasks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            (p / "maps").mkdir()
+            rows = []
+            for sid, d, bid in (("q1", 1.0, "b1"), ("q2", 1.0, "b1"), ("q3", 2.2, "b1"), ("q4", 2.2, "b2")):
+                np.savez_compressed(p / "maps" / f"{sid}.npz", depth=np.full((H, W), d, np.float16),
+                                    alpha=np.full((H, W), 255, np.uint8))
+                rows.append({"sample_id": sid, "task_id": "t", "scene_id": "s", "qtype": "occluded_now",
+                             "answer_value": "full", "a": A, "b": dict(B, id=bid, label="person"), "K": K.tolist(),
+                             "c2w": C2W.tolist()})
+            (p / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            tasks = [{"task_id": f"t{i}", "scene_id": "s", "task_type": tt, "split": "train", "reserve": res,
+                      "target_region": {"params": {"object_b_id": bid}}}
+                     for i, (bid, tt, res) in enumerate((("b1", "occlusion_alignment", True), ("b2", "occlusion_alignment", True),
+                                                         ("b3", "occlusion_alignment", True), ("b1", "occlusion_alignment", False),
+                                                         ("b1", "centering", True)))]
+            (p / "rows.jsonl").write_text("".join(json.dumps(t) + "\n" for t in tasks))
+            with contextlib.redirect_stdout(io.StringIO()):
+                OJ.cmd_alignment(argparse.Namespace(pilot=str(p), out_dir="", margin=0.05,
+                                                    tasks=[f"all={p / 'rows.jsonl'}", f"rl={p / 'rows.jsonl'}:reserve"]))
+            objs = {o["b_id"]: o for o in map(json.loads, (p / "alignment_objects.jsonl").read_text().splitlines())}
+            self.assertEqual((objs["b1"]["status"], objs["b1"]["questions"], objs["b2"]["status"]), ("in_front", 3, "ok"))
+            self.assertAlmostEqual(objs["b1"]["front_dist"], 1.0, places=2)
+            s = json.loads((p / "alignment_summary.json").read_text())
+            self.assertEqual(s["by_group"]["person"]["in_front"], 2)
+            self.assertEqual(s["objects_by_group"]["all"]["flagged"], 1)
+            self.assertEqual(s["tasks"]["all"], {"occlusion_tasks": 4, "occluder_measured": 3, "occluder_flagged": 2})
+            self.assertEqual(s["tasks"]["rl"], {"occlusion_tasks": 3, "occluder_measured": 2, "occluder_flagged": 1})
+
 
 if __name__ == "__main__":
     unittest.main()

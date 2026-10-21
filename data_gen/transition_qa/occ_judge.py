@@ -255,6 +255,135 @@ def cmd_confusion(args: argparse.Namespace) -> None:
         GEN.write_jsonl(Path(args.out).with_suffix(".labels.jsonl"), labelled)
 
 
+# ---------------------------------------------------------------------------
+# alignment: is the occluder rendered where its box is? (the user's choice of 2026-10-21: measure it)
+# ---------------------------------------------------------------------------
+ALIGN_MARGIN_M = 0.05
+ALIGN_STATUSES = ("ok", "in_front", "see_through", "mixed", "too_small")
+ALIGN_ZH = {"ok": "在框里", "in_front": "框前有东西", "see_through": "框里是空的", "mixed": "混合", "too_small": "太小"}
+
+
+def box_distance(pts: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+    gap = np.maximum(np.maximum(lo[None, :] - pts, 0.0), pts - hi[None, :])
+    return np.sqrt((gap ** 2).sum(axis=1))
+
+
+def b_alignment(pilot: Path, row: Dict[str, Any], margin: float = ALIGN_MARGIN_M,
+                min_pixels: int = OD.MIN_PIXELS) -> Dict[str, Any]:
+    """Over the pixels whose ray crosses the occluder B's box: the shares whose rendered surface lies inside the box
+    (within ``margin`` along the ray), in front of it (B displaced toward the camera, or something else in the way:
+    "in_front") or behind it (the box is see-through: hollow, open, thin, or B is not there: "see_through"); the
+    median distance from the surfaces in front to the box; a status by the share that is at least one half."""
+    depth, alpha = load_maps(pilot, row["sample_id"])
+    K, c2w = np.asarray(row["K"], dtype=np.float64), np.asarray(row["c2w"], dtype=np.float64)
+    h, w = depth.shape
+    origin = c2w[:3, 3]
+    dirs = OD.pixel_rays(K, c2w, w, h)
+    lo, hi = OD.bounds(row["b"])
+    near, far = OD.ray_box(origin, dirs, lo, hi)
+    d = depth.reshape(-1).astype(np.float64)
+    surf = np.isfinite(near) & (alpha.reshape(-1) >= OD.MIN_ALPHA) & np.isfinite(d) & (d > 0)
+    with np.errstate(invalid="ignore"):
+        front = surf & (d < near - margin)
+        behind = surf & (d > far + margin)
+    n, n_front, n_behind = int(surf.sum()), int(front.sum()), int(behind.sum())
+    shares = {"inside": (n - n_front - n_behind) / n if n else 0.0, "front": n_front / n if n else 0.0,
+              "behind": n_behind / n if n else 0.0}
+    pts = origin[None, :] + dirs[front] * d[front, None]
+    front_dist = float(np.median(box_distance(pts, lo, hi))) if len(pts) else None
+    if n < min_pixels:
+        status = "too_small"
+    elif shares["inside"] >= 0.5:
+        status = "ok"
+    elif shares["front"] >= 0.5:
+        status = "in_front"
+    elif shares["behind"] >= 0.5:
+        status = "see_through"
+    else:
+        status = "mixed"
+    return {"pixels": n, **{k: round(v, 4) for k, v in shares.items()},
+            "front_dist": None if front_dist is None else round(front_dist, 3), "status": status}
+
+
+def group_of(label: Optional[str]) -> str:
+    return occluder_group(str(label or "").strip().lower()) or "other"
+
+
+def read_tasks(spec: str) -> Tuple[str, List[Dict[str, Any]]]:
+    """NAME=PATH[:reserve]: the occlusion_alignment rows of a task file (only the RL reserve rows with :reserve)."""
+    name, path = spec.split("=", 1)
+    reserve = path.endswith(":reserve")
+    path = path[: -len(":reserve")] if reserve else path
+    rows = [r for r in GEN.read_jsonl(Path(path)) if r.get("task_type") == "occlusion_alignment"
+            and (not reserve or (r.get("reserve") and r.get("split") == "train"))]
+    return name, rows
+
+
+def cmd_alignment(args: argparse.Namespace) -> None:
+    """Per question, per occluder object and per occluder group: is B rendered where its box is?  With --tasks, the
+    occlusion tasks of those files whose occluder was measured, and which of them have a flagged box."""
+    pilot = Path(args.pilot)
+    out = Path(args.out_dir or pilot)
+    out.mkdir(parents=True, exist_ok=True)
+    ok, errors = results(pilot)
+    per_q = []
+    for r in ok:
+        al = b_alignment(pilot, r, args.margin)
+        per_q.append({"sample_id": r["sample_id"], "task_id": r.get("task_id"), "scene_id": r["scene_id"],
+                      "qtype": r["qtype"], "answer_value": r["answer_value"], "b_id": str(r["b"].get("id")),
+                      "b_label": r["b"].get("label"), "group": group_of(r["b"].get("label")), **al})
+    GEN.write_jsonl(out / "alignment.jsonl", per_q)
+    objects: Dict[Tuple[str, str], List[Dict[str, Any]]] = collections.defaultdict(list)
+    for q in per_q:
+        if q["status"] != "too_small":
+            objects[(q["scene_id"], q["b_id"])].append(q)
+    per_obj = []
+    for (scene, bid), qs in sorted(objects.items()):
+        st = collections.Counter(q["status"] for q in qs)
+        med = {k: round(float(np.median([q[k] for q in qs])), 3) for k in ("inside", "front", "behind")}
+        dists = [q["front_dist"] for q in qs if q["front_dist"] is not None and q["front"] >= 0.25]
+        status = "ok" if med["inside"] >= 0.5 else st.most_common(1)[0][0] if st.most_common(1)[0][0] != "ok" else "mixed"
+        per_obj.append({"scene_id": scene, "b_id": bid, "label": qs[0]["b_label"], "group": qs[0]["group"],
+                        "questions": len(qs), "statuses": dict(st), **med,
+                        "front_dist": round(float(np.median(dists)), 3) if dists else None, "status": status})
+    GEN.write_jsonl(out / "alignment_objects.jsonl", per_obj)
+    groups = ("person", "wardrobe", "thin", "other")
+    summary: Dict[str, Any] = {"pilot": str(pilot), "questions": len(per_q), "errors": len(errors), "margin": args.margin,
+                               "by_group": {}, "by_answer": {}, "objects_by_group": {}, "tasks": {}}
+    print(f"questions {len(per_q)} (errors {len(errors)}), objects {len(per_obj)}")
+    print("group       questions  " + "  ".join(f"{ALIGN_ZH[s]:>6s}" for s in ALIGN_STATUSES) + "  | objects  flagged")
+    for g in groups + ("all",):
+        qs = [q for q in per_q if g == "all" or q["group"] == g]
+        obs = [o for o in per_obj if g == "all" or o["group"] == g]
+        c = collections.Counter(q["status"] for q in qs)
+        flagged = sum(o["status"] != "ok" for o in obs)
+        summary["by_group"][g] = {"questions": len(qs), **{s: c[s] for s in ALIGN_STATUSES}}
+        summary["objects_by_group"][g] = {"objects": len(obs), "flagged": flagged,
+                                          **collections.Counter(o["status"] for o in obs)}
+        print(f"{g:10s}  {len(qs):9d}  " + "  ".join(f"{c[s]:6d}" for s in ALIGN_STATUSES) + f"  | {len(obs):7d}  {flagged:7d}")
+    for ans in LABELS:
+        c = collections.Counter(q["status"] for q in per_q if q["answer_value"] == ans)
+        summary["by_answer"][ans] = {s: c[s] for s in ALIGN_STATUSES}
+    flagged = {(o["scene_id"], o["b_id"]): o for o in per_obj if o["status"] != "ok"}
+    measured = {(o["scene_id"], o["b_id"]): o for o in per_obj}
+    for spec in args.tasks:
+        name, rows = read_tasks(spec)
+        hits, n_measured = [], 0
+        for t in rows:
+            params = (t.get("target_region") or {}).get("params") or {}
+            key = (str(t.get("scene_id")), str(params.get("object_b_id")))
+            if key in measured:
+                n_measured += 1
+            if key in flagged:
+                o = flagged[key]
+                hits.append({"task_id": t.get("task_id"), "scene_id": key[0], "b_id": key[1], "b_label": o["label"],
+                             "status": o["status"], "inside": o["inside"], "front_dist": o["front_dist"]})
+        summary["tasks"][name] = {"occlusion_tasks": len(rows), "occluder_measured": n_measured, "occluder_flagged": len(hits)}
+        GEN.write_jsonl(out / f"alignment_tasks_{name}.jsonl", hits)
+        print(f"tasks {name}: {len(rows)} occlusion tasks, occluder measured here {n_measured}, flagged {len(hits)}")
+    (out / "alignment_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -280,6 +409,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     x.add_argument("--set", action="append", default=[])
     x.add_argument("--out", default="")
     x.set_defaults(func=cmd_confusion)
+    al = sub.add_parser("alignment")
+    al.add_argument("--pilot", required=True)
+    al.add_argument("--out-dir", default="", help="default: the pilot folder")
+    al.add_argument("--margin", type=float, default=ALIGN_MARGIN_M)
+    al.add_argument("--tasks", action="append", default=[], help="NAME=PATH[:reserve] (repeatable)")
+    al.set_defaults(func=cmd_alignment)
     args = ap.parse_args(argv)
     args.func(args)
 
