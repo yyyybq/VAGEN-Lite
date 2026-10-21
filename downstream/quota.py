@@ -15,6 +15,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 
 SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
 VOLUME = "019ec9f9-6d12-7d49-aad4-864b15c9eb06"
@@ -45,13 +46,19 @@ def parse(text: str, user_dir: str = USER_DIR):
     return None
 
 
-def free_space(run=subprocess.run):
-    """parse() of a fresh listing; None when sco fails or the row is not there."""
-    try:
-        res = run([SCO, "afs", "dir-quota", "list", "-i", VOLUME], capture_output=True, text=True, timeout=120)
-    except Exception:
-        return None
-    return parse(res.stdout) if res.returncode == 0 else None
+def free_space(run=subprocess.run, attempts: int = 3, pause: float = 5.0, sleep=time.sleep):
+    """parse() of a fresh listing; None when sco fails (or the row is missing) `attempts` times in a row."""
+    for i in range(attempts):
+        try:
+            res = run([SCO, "afs", "dir-quota", "list", "-i", VOLUME], capture_output=True, text=True, timeout=120)
+            out = parse(res.stdout) if res.returncode == 0 else None
+        except Exception:
+            out = None
+        if out:
+            return out
+        if i + 1 < attempts:
+            sleep(pause)
+    return None
 
 
 if __name__ == "__main__":

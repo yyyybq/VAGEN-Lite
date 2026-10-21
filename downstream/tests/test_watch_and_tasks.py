@@ -205,6 +205,15 @@ def test_quota_parse_gives_a_lower_bound():
     assert quota.parse(setting) is None
 
 
+def test_quota_free_space_retries():
+    from types import SimpleNamespace
+
+    good = "  019e  /users/yinbaiqiao  0  1  22 TB  12 TB  success\n"
+    replies = [SimpleNamespace(returncode=1, stdout=""), SimpleNamespace(returncode=0, stdout=good)]
+    assert quota.free_space(run=lambda *a, **k: replies.pop(0), sleep=lambda s: None)["free_tb_min"] == 9.5
+    assert quota.free_space(run=lambda *a, **k: SimpleNamespace(returncode=1, stdout=""), sleep=lambda s: None) is None
+
+
 def test_waiting_by_pool():
     jobs = [{"resource_pool": {"name": "h800"}, "state": "STARTING"},
             {"resource_pool": "zoetrope", "state": "RUNNING"},
