@@ -11,6 +11,8 @@ share it):
     # per model, a one-card sco job (sco_interiorgs_v10_train.sh eval RUN EVAL NAME MODEL [PROMPT_FORMAT]):
     python -m data_gen.interiorgs_v10.evaluation run --eval EVAL --name NAME --model HF_DIR
     python -m data_gen.interiorgs_v10.evaluation table --eval EVAL     # EVAL/table.md, EVAL/table.json
+    python -m data_gen.interiorgs_v10.evaluation terminal --eval EVAL  # round 12 batch: EVAL/terminal.md / .json:
+                                                                        # end progress, conditions met, collisions
     # round 7: drop tasks flagged by the rendered-depth check, refill from the same family and d* band
     python -m data_gen.interiorgs_v10.evaluation replace --eval EVAL --flagged depth_check_summary.json \
         --run RUN/output --split-manifest RUN/split_manifest.json --out EVAL2
@@ -36,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -549,6 +552,95 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
 
 LIMIT_ENDS = ("max_primitive_steps", "max_primitive_steps_success", "max_turns")
 
+# Round 12 batch (the user's decision of 2026-10-21): the success conditions of each family as the evaluation rows name
+# them (failed_gates, v2 sets); "target_a_clearly_visible" and "reference_a_clearly_visible" are one condition (the
+# prefix is the object's role in the task) and count once.
+FAMILY_CONDITIONS: Dict[str, Tuple[str, ...]] = {
+    "absolute_positioning": ("distance", "in_front", "inside_frame", "min_area", "visible", "a_clearly_visible"),
+    "equidistance": ("equidistant", "in_front", "inside_frame", "min_area", "visible", "a_clearly_visible",
+                     "b_clearly_visible"),
+    "fov_inclusion": ("fully_in_frame", "in_front", "inside_frame", "min_area", "visible", "a_clearly_visible",
+                      "b_clearly_visible"),
+    "occlusion_alignment": ("occluder_in_front", "occluder_inside_frame", "occluder_min_area", "occluder_visible",
+                            "target_hidden", "target_in_front", "target_in_view_direction", "b_clearly_visible"),
+    "projective_relations": ("in_front", "inside_frame", "lateral_within_45deg", "margin", "min_area", "relation",
+                             "visible", "a_clearly_visible", "b_clearly_visible"),
+    "screen_occupancy": ("in_front", "inside_frame", "min_area", "occupancy", "vertical_contained", "visible",
+                         "a_clearly_visible"),
+}
+
+
+VALID_ACTIONS = ("move_forward", "move_backward", "move_left", "move_right", "turn_left", "turn_right")
+
+
+def unreadable_form(answer: str) -> str:
+    """Round 12 batch (the user's decision 22): the form of an answer the env could not read: no <action> tag, an
+    empty action, the format example copied (action1, action, ...), spaces instead of underscores (turn left), or
+    another made-up name; "other" when every name is a real action (e.g. contradictory moves)."""
+    m = re.search(r"<action>(.*?)</action>", answer or "", re.S)
+    if not m:
+        return "no_action_tag"
+    acts = [a.strip() for a in m.group(1).split("|") if a.strip()]
+    if not acts:
+        return "empty_action"
+    bad = [a for a in acts if a not in VALID_ACTIONS]
+    if any(re.fullmatch(r"action\d*|\.\.\.", a) for a in bad):
+        return "format_example_copied"
+    if any(a.replace(" ", "_") in VALID_ACTIONS for a in bad):
+        return "space_instead_of_underscore"
+    return "made_up_name" if bad else "other"
+
+
+def unreadable_forms(rows: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+    """{form: count} of the unreadable answers (turns not valid) in the recorded trajectories."""
+    forms = Counter(unreadable_form(str(t.get("answer") or "")) for r in rows if "error" not in r
+                    for t in (r.get("trajectory") or []) if not t.get("valid", True))
+    return dict(forms.most_common())
+
+
+def condition_name(gate: str) -> str:
+    """One name per success condition: the role prefix of a clearly-visible condition dropped."""
+    for role in ("target_", "reference_"):
+        if gate.startswith(role) and gate.endswith("_clearly_visible") and len(gate) == len(role) + len("a_clearly_visible"):
+            return gate[len(role):]
+    return gate
+
+
+def terminal_metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Round 12 batch (the user's decision of 2026-10-21): how close the episodes end to success, from the recorded
+    trajectories: the progress (0..1, the env's distance from meeting every success condition) of the last pose,
+    averaged over the successful and over the failed episodes, and per family the share of its success conditions
+    met at the end.  Rows without a recorded trajectory are left out; None when none has one."""
+    ok = [r for r in rows if "error" not in r and "trajectory" in r]
+    if not ok:
+        return {"episodes": 0, "progress_end_success": None, "progress_end_fail": None, "conditions_met_share": None,
+                "conditions_met_by_family": {}}
+
+    def end(r: Dict[str, Any]) -> Tuple[float, set]:
+        traj = r.get("trajectory") or []
+        last = traj[-1] if traj else (r.get("start") or {})
+        return float(last.get("progress") or 0.0), {condition_name(g) for g in (last.get("failed_gates") or [])}
+
+    mean = lambda xs: round(sum(xs) / len(xs), 4) if xs else None  # noqa: E731
+    prog = {True: [], False: []}
+    by_family: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: {"all": [], "failed": []})
+    for r in ok:
+        p, failed = end(r)
+        success = bool(r.get("success"))
+        prog[success].append(p)
+        conds = FAMILY_CONDITIONS.get(r.get("task_type"))
+        if conds:
+            met = 1.0 if success else 1.0 - len(failed & set(conds)) / len(conds)
+            by_family[r["task_type"]]["all"].append(met)
+            if not success:
+                by_family[r["task_type"]]["failed"].append(met)
+    every = [m for v in by_family.values() for m in v["all"]]
+    return {"episodes": len(ok), "progress_end_success": mean(prog[True]), "progress_end_fail": mean(prog[False]),
+            "conditions_met_share": mean(every),
+            "conditions_met_by_family": {k: {"conditions": len(FAMILY_CONDITIONS[k]), "met_share": mean(v["all"]),
+                                             "met_share_failed": mean(v["failed"]), "episodes": len(v["all"])}
+                                         for k, v in sorted(by_family.items())}}
+
 
 def sign_test(b: int, c: int) -> float:
     """Exact two-sided sign (McNemar) test on the tasks only one of two models solved: how likely a split at least
@@ -617,6 +709,34 @@ def cmd_table(args: argparse.Namespace) -> None:
     print("\n".join(lines))
 
 
+def cmd_terminal(args: argparse.Namespace) -> None:
+    """Round 12 batch: terminal_metrics and the collision rate of every result folder of an evaluation set, into
+    terminal.json and terminal.md (table.json / table.md stay as they are)."""
+    ev = Path(args.eval)
+    models = {}
+    for d in sorted(p for p in ev.iterdir() if (p / "results.jsonl").exists()):
+        rows = _jsonl(d / "results.jsonl", partial_ok=True)
+        if rows:
+            models[d.name] = {**terminal_metrics(rows), "success": metrics(rows)["success"],
+                              "collision_rate": metrics(rows)["collision_rate"],
+                              "unreadable_share": metrics(rows)["invalid_rate"], "unreadable_forms": unreadable_forms(rows)}
+    (ev / "terminal.json").write_text(json.dumps(models, indent=1))
+    families = list(FAMILY_CONDITIONS)
+    head = ["模型", "题数", "成功率", "终点进度分（成功的题）", "终点进度分（失败的题）", "终点满足的条件比例", "碰撞率",
+            "读不出动作的回合比例", "读不出的形式"] + [f"{f} 满足比例（失败的题）" for f in families]
+    fmt = lambda v: "—" if v is None else f"{v:.3f}"  # noqa: E731
+    lines = ["| " + " | ".join(head) + " |", "| " + " | ".join("---" for _ in head) + " |"]
+    for name, m in models.items():
+        fam = m["conditions_met_by_family"]
+        cells = [name, str(m["episodes"]), fmt(m["success"]), fmt(m["progress_end_success"]),
+                 fmt(m["progress_end_fail"]), fmt(m["conditions_met_share"]), fmt(m["collision_rate"]),
+                 fmt(m["unreadable_share"]), "，".join(f"{k} {v}" for k, v in m["unreadable_forms"].items()) or "—"]
+        cells += [fmt((fam.get(f) or {}).get("met_share_failed")) for f in families]
+        lines.append("| " + " | ".join(cells) + " |")
+    (ev / "terminal.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n".join(lines))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -655,6 +775,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "round-10 export keeps the env's text, so this is only for models of those rounds")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
+    m = sub.add_parser("terminal", help="round 12 batch: end progress, conditions met at the end, collision rate")
+    m.add_argument("--eval", required=True)
     c = sub.add_parser("compare", help="task-by-task comparison against a base result folder")
     c.add_argument("--base", required=True, help="a result folder (with results.jsonl)")
     c.add_argument("--other", required=True, nargs="+")
@@ -683,7 +805,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     u.add_argument("--family-out", default=None, help="also write the family's tasks of the new set alone here")
     args = ap.parse_args(argv)
     {"select": cmd_select, "run": cmd_run, "table": cmd_table, "replace": cmd_replace,
-     "compare": cmd_compare, "top-up": cmd_top_up}[args.cmd](args)
+     "compare": cmd_compare, "top-up": cmd_top_up, "terminal": cmd_terminal}[args.cmd](args)
     return 0
 
 
