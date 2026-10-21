@@ -12,6 +12,14 @@ on the validation set (ties: the earlier) with its validation and test success, 
 control and of S0 with D (sign test, both sets together), and for an SFT group the picked epoch.
 
 Round-11 models have v1 results plus the occlusion v2 re-evaluation; their v2 results are merged from the two.
+
+Round 12 (the user's section 4 of 2026-10-21), optional manifest keys: an experiment's "section" puts it in its own
+table under that heading (the dense reward's first batch apart from the batch); its "comparisons" ([[run, run or
+result name], ...]) add task-by-task comparisons between its runs' picks (or a fixed result); "health": true adds
+each chain's health (its process alive, how long since its progress file changed, its last restart and why, from
+the events); "events" (a JSON-lines file of {"utc", "kind", "text", "chains"}) and "heartbeat" (a file holding the
+guard's last check as epoch seconds) add the guard's records: when it last looked, and the latest restarts and
+changes.
 """
 
 from __future__ import annotations
@@ -19,6 +27,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,6 +36,8 @@ STEPS_ZH = {"check_code": "核对代码", "render": "渲染", "sft_data": "SFT �
             "pick_sft": "挑 SFT", "rl_config": "RL 配置", "rl": "RL", "rl_extend": "RL 续训", "evaluate": "评测"}
 EVAL_HOURS = 1.5  # the evaluation step after RL, rough (12 single-card jobs, at most 10 at a time)
 DEFAULT_SECONDS = 135.0  # seconds per update before a run has logged any
+EVENTS_SHOWN = 15  # the latest guard records on the board
+HEARTBEAT_LATE_MIN = 15  # the guard checks every 5 minutes; later than this it is reported as possibly stopped
 
 
 def _jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -157,12 +168,14 @@ def experiment_results(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], st:
     decisions = (steps.get("rl_extend") or {}).get("decisions") or {}
     endpoint = int((st.get("plan") or {}).get("endpoint") or 300)
     picks = {}
+    by_run = {}
     for run, reward in (exp.get("runs") or {}).items():
         last = int((decisions.get(run) or {}).get("extend_to") or endpoint)
         best = best_checkpoint(sets, run, last)
         if not best:
             continue
         picks[reward] = best
+        by_run[run] = best
         line = f"- {reward}（{run}）挑出 {best}：验证集 {fmt(success(results(sets, best, 'val')))}、评测集 " \
                f"{fmt(success(results(sets, best, 'test')))}{quality(sets, best)}"
         control = (exp.get("controls") or {}).get(run)
@@ -174,7 +187,43 @@ def experiment_results(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], st:
         c = compare(sets, picks["S0"], picks["D"])
         if c:
             lines.append(f"- D 对 S0：{cmp_text(c)}")
+    for other, base in exp.get("comparisons") or []:  # named pairs: a run's pick (or a fixed result) against another
+        a, b = by_run.get(other, other), by_run.get(base, base)
+        c = compare(sets, b, a) if other in by_run and (base in by_run or base not in (exp.get("runs") or {})) else None
+        if c:
+            lines.append(f"- {other}（{a}）对 {base}（{b}）：{cmp_text(c)}")
     return lines
+
+
+def read_events(path: Optional[str]) -> List[Dict[str, Any]]:
+    """The guard's records (JSON lines), oldest first; [] without the file; a cut-off last line is skipped."""
+    if not path or not Path(path).is_file():
+        return []
+    out = []
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def chain_health(chain: str, events: List[Dict[str, Any]], now: datetime.datetime) -> Dict[str, str]:
+    """A chain's process (alive / gone / ended), minutes since its progress file changed and its last restart."""
+    p = Path(chain) / "progress.json"
+    if not p.is_file():
+        return {"process": "未启动", "age": "", "restart": ""}
+    st = json.loads(p.read_text())
+    pid = st.get("chain_pid")
+    if st.get("state") != "running":
+        process = "已结束"
+    else:
+        process = "在跑" if pid and Path(f"/proc/{int(pid)}").exists() else "**进程不在**"
+    age = (now.timestamp() - os.path.getmtime(p)) / 60
+    restarts = [e for e in events if e.get("kind") == "chain_restart" and chain in (e.get("chains") or [])]
+    last = restarts[-1] if restarts else None
+    return {"process": process, "age": f"{age:.0f} 分钟前",
+            "restart": f"{str(last.get('utc', ''))[5:16].replace('T', ' ')}（{last.get('text', '')}）" if last else ""}
 
 
 def quality(sets: Dict[str, Dict[str, str]], name: str) -> str:
@@ -211,13 +260,17 @@ def cmp_text(c: Dict[str, Any]) -> str:
 def render(manifest: Dict[str, Any], now: Optional[datetime.datetime] = None) -> str:
     now = now or datetime.datetime.now(datetime.timezone.utc)
     sets = {k: manifest[k] for k in ("v1", "v2", "v2_oa") if k in manifest}
+    head = ["| 编号 | 实验 | 状态 | 当前步骤 | 进度 | 排队 | 预计完成（UTC） | 说明 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |"]
     lines = [f"# {manifest.get('title', '批次看板')}", "",
              f"更新于 {now.strftime('%Y-%m-%d %H:%M')} UTC（每半小时更新一次）。状态：排队中 = 任务都在等卡；"
-             f"预计完成 = 剩下的更新次数 × 最近 10 次的平均秒数，再加约 {EVAL_HOURS} 小时评测。", "",
-             "| 编号 | 实验 | 状态 | 当前步骤 | 进度 | 排队 | 预计完成（UTC） | 说明 |",
-             "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+             f"预计完成 = 剩下的更新次数 × 最近 10 次的平均秒数，再加约 {EVAL_HOURS} 小时评测。", ""] + head
     details = []
+    section = None
     for exp in manifest["experiments"]:
+        if exp.get("section") and exp["section"] != section:  # an experiment group listed apart (its own table)
+            section = exp["section"]
+            lines += ["", f"## {section}", ""] + head
         row = experiment_row(exp, sets, now)
         lines.append(f"| {exp['id']} | {exp['name']} | {row['state']} | {row['step']} | {row['progress']} | "
                      f"{row['queue']} | {row['eta']} | {'；'.join(row['notes'])} |")
@@ -225,6 +278,27 @@ def render(manifest: Dict[str, Any], now: Optional[datetime.datetime] = None) ->
             res = experiment_results(exp, sets, row["progress_state"])
             if res:
                 details += ["", f"**{exp['id']} {exp['name']}**", ""] + res
+    events = read_events(manifest.get("events"))
+    if manifest.get("health"):
+        lines += ["", "## 训练链健康", "", "| 编号 | 训练链 | 进程 | 状态文件更新 | 最近一次重启（原因） |",
+                  "| --- | --- | --- | --- | --- |"]
+        for exp in manifest["experiments"]:
+            h = chain_health(exp["chain"], events, now)
+            lines.append(f"| {exp['id']} | {Path(exp['chain']).name} | {h['process']} | {h['age']} | {h['restart']} |")
+    if manifest.get("events") or manifest.get("heartbeat"):
+        lines += ["", "## 守护进程与重启记录", ""]
+        beat = Path(manifest["heartbeat"]) if manifest.get("heartbeat") else None
+        if beat and beat.is_file():
+            late = (now.timestamp() - float(beat.read_text().strip() or 0)) / 60
+            lines.append(f"守护进程最近一次检查在 {late:.0f} 分钟前（每 5 分钟一次）"
+                         + ("" if late <= HEARTBEAT_LATE_MIN else "，**超过 15 分钟没有检查，可能已停**") + "。")
+        else:
+            lines.append("**没有守护进程的检查记录。**")
+        if events:
+            lines += ["", "| 时间（UTC） | 类型 | 内容 |", "| --- | --- | --- |"]
+            for e in events[-EVENTS_SHOWN:][::-1]:
+                lines.append(f"| {str(e.get('utc', ''))[5:16].replace('T', ' ')} | {e.get('kind', '')} | "
+                             f"{str(e.get('text', '')).replace('|', '/')} |")
     if details:
         lines += ["", "## 结果（v2：验证集 413 道、评测集 292 道；按验证集挑检查点）"] + details
     return "\n".join(lines) + "\n"

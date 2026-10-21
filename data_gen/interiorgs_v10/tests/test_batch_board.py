@@ -138,6 +138,40 @@ class BatchBoardTest(unittest.TestCase):
         self.assertIn("对 sftc", md)
         out = self.root / "board.md"
         (self.root / "m.json").write_text(json.dumps(dict(manifest, out=str(out))))
+
+        # round 12 (the user's section 4): a section listed apart, named comparisons, chain health, guard records
+        import os
+        import time
+
+        self.result("v2", "val", "k_050", {"v1", "v2", "v3", "v4"})
+        self.result("v2", "test", "k_050", {"t1", "t2"})
+        keep = chain("k", {"state": "running", "chain_pid": os.getpid(), "plan": {"endpoint": 50},
+                           "steps": {"rl": {"state": "done"}, "evaluate": {"state": "done"}}})
+        gone = chain("g", {"state": "running", "chain_pid": 2 ** 22 + 12345, "steps": {"rl": {"state": "running"}}})
+        events = self.root / "events.jsonl"
+        events.write_text(json.dumps({"utc": "2026-10-21T19:20:20+00:00", "kind": "chain_restart",
+                                      "text": "plan: renderer_repack", "chains": [keep]}) + "\n"
+                          + json.dumps({"utc": "2026-10-21T19:25:00+00:00", "kind": "board_restart",
+                                        "text": "board loop gone, restarted"}) + "\n" + '{"utc": "2026-10-21T19:3')
+        beat = self.root / "heartbeat"
+        beat.write_text(str(now.timestamp() - 20 * 60))
+        m2 = dict(manifest, health=True, events=str(events), heartbeat=str(beat), experiments=manifest["experiments"] + [
+            {"id": "K1", "name": "第一批", "section": "密集奖励第一批", "chain": keep, "runs": {"k": "D-keep"},
+             "controls": {"k": "d_050"}, "comparisons": [["k", "s_050"]]},
+            {"id": "G1", "name": "进程没了", "section": "密集奖励第一批", "chain": gone}])
+        md2 = B.render(m2, now)
+        self.assertIn("## 密集奖励第一批", md2)
+        self.assertLess(md2.index("| E6 |"), md2.index("## 密集奖励第一批"))
+        self.assertLess(md2.index("## 密集奖励第一批"), md2.index("| K1 |"))
+        self.assertIn("D-keep（k）挑出 k_050", md2)
+        self.assertIn("k（k_050）对 s_050（s_050）", md2)
+        self.assertIn("| K1 | k | 在跑 |", md2)
+        self.assertIn("| G1 | g | **进程不在** |", md2)
+        self.assertIn("10-21 19:20（plan: renderer_repack）", md2)
+        self.assertIn("守护进程最近一次检查在 20 分钟前", md2)
+        self.assertIn("可能已停", md2)
+        self.assertIn("| 10-21 19:25 | board_restart | board loop gone, restarted |", md2)
+        self.assertNotIn("## 训练链健康", md)  # without the keys: as before
         self.assertEqual(B.main(["--manifest", str(self.root / "m.json")]), 0)
         self.assertIn("测试批次", out.read_text(encoding="utf-8"))
 
