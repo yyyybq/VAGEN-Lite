@@ -50,6 +50,16 @@ class JobScoTest(unittest.TestCase):
             self.assertIn("--aec2-name=zoetrope", calls[0])
             self.assertIn("--aec2-name=h800", calls[1])
             self.assertIn("--worker-spec=N4lS.Iq.I80.8", calls[1])
+            # round 12 batch: the render-service pool is accepted when asked, never picked for other jobs
+            J.prepare(run, 1, ["renderer"], job_dir="job_renderer", pool="zoe-cf-render")
+            with mock.patch.object(J.subprocess, "run", lambda cmd, **k: calls.append(cmd) or done):
+                J.submit(run, "job_renderer")
+            self.assertIn("--aec2-name=zoe-cf-render", calls[2])
+            self.assertIn("--worker-spec=N4lS.Iq.I80.1", calls[2])
+            self.assertNotIn("zoe-cf-render", J.POOLS)
+            listing = mock.Mock(returncode=0, stdout=json.dumps([{"state": "STARTING", "resource_pool": {"name": "h800"}}]))
+            with mock.patch.object(J.subprocess, "run", return_value=listing):
+                self.assertEqual(J.pick_pool(), "zoetrope")
 
     def test_pick_the_pool_with_fewer_waiting_jobs(self):
         """Round 12 batch: the pool with the fewest jobs waiting for cards (every user's jobs in the workspace)."""

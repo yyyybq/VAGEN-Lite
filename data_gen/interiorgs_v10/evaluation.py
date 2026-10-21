@@ -54,8 +54,20 @@ def band_name(d: int) -> str:
     return "other"
 
 
-def _jsonl(path: Path) -> List[Dict[str, Any]]:
-    return [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
+def _jsonl(path: Path, partial_ok: bool = False) -> List[Dict[str, Any]]:
+    """The rows of a JSON-lines file.  With ``partial_ok`` a last line that does not parse is left out: a results file
+    another chain's evaluation job is still writing (round 12 batch: a table over a shared evaluation folder failed on
+    such a line)."""
+    lines = [l for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = []
+    for i, line in enumerate(lines):
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            if partial_ok and i == len(lines) - 1:
+                break
+            raise
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -580,7 +592,9 @@ def cmd_table(args: argparse.Namespace) -> None:
     ev = Path(args.eval)
     models = {}
     for d in sorted(p for p in ev.iterdir() if (p / "results.jsonl").exists()):
-        models[d.name] = metrics(_jsonl(d / "results.jsonl"))
+        rows = _jsonl(d / "results.jsonl", partial_ok=True)  # other chains' jobs may still be writing theirs
+        if rows:
+            models[d.name] = metrics(rows)
     (ev / "table.json").write_text(json.dumps(models, indent=1))
     families = sorted({f for m in models.values() for f in m["success_by_family"]})
     bands = [f"{lo}-{hi}" for lo, hi in BANDS]
