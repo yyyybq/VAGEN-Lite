@@ -13,5 +13,18 @@
                "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
  "v10_p2_D": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
               "opt_package": "p2", "reward_preset": "dense",
-              "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
+              "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "_dense_batch1": "The dense reward's first batch (the user's decision of 2026-10-21): p1 with the keep_by_return_std group filter: places the mixed tasks leave free go to all-fail tasks whose 8 returns spread (std, n-1) at least keep_std_threshold, their group comparison dividing by at least keep_std_floor. Thresholds from pair 1's training rollouts (cluster_runs/KEEP_THRESHOLD_R12_20261021.md): the top 20% of the all-fail spreads, 0.335 under D, 0.134 under S0. Floor 1.77 = 5/sqrt(8), the smallest spread a mixed task can have; 1.0 the variant with a stronger signal.",
+ "v10_p1_D_keep_177": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                       "opt_package": "p1", "reward_preset": "dense", "group_filter": "keep_by_return_std",
+                       "keep_std_threshold": 0.335, "keep_std_floor": 1.77,
+                       "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p1_D_keep_100": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                       "opt_package": "p1", "reward_preset": "dense", "group_filter": "keep_by_return_std",
+                       "keep_std_threshold": 0.335, "keep_std_floor": 1.0,
+                       "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p1_S0_keep": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                    "opt_package": "p1", "reward_preset": "S0", "group_filter": "keep_by_return_std",
+                    "keep_std_threshold": 0.134, "keep_std_floor": 1.77,
+                    "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
 }

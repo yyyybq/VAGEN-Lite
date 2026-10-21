@@ -291,12 +291,19 @@ class TrainingPrepTest(unittest.TestCase):
         import yaml
 
         standards = TP.load_standards()
-        self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_S0", "v10_p2_D", "v10_p2_S0"])
+        self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_S0",
+                                             "v10_p1_S0_keep", "v10_p2_D", "v10_p2_S0"])
         for name, std in standards.items():
             self.assertLessEqual(set(std), set(TP.STANDARD_KEYS), name)
             for key in ("ppo_template", "env_template"):
                 self.assertTrue((Path(TP.__file__).parent / std[key]).is_file(), (name, key))
-            self.assertEqual(std["reward_preset"], "dense" if name.endswith("_D") else "S0")
+            self.assertEqual(std["reward_preset"], "dense" if "_D" in name else "S0")
+        # the dense reward's first batch: the filter, thresholds and floors of the three runs
+        self.assertEqual({n: (standards[n]["group_filter"], standards[n]["keep_std_threshold"], standards[n]["keep_std_floor"])
+                          for n in ("v10_p1_D_keep_177", "v10_p1_D_keep_100", "v10_p1_S0_keep")},
+                         {"v10_p1_D_keep_177": ("keep_by_return_std", 0.335, 1.77),
+                          "v10_p1_D_keep_100": ("keep_by_return_std", 0.335, 1.0),
+                          "v10_p1_S0_keep": ("keep_by_return_std", 0.134, 1.77)})
         self.assertEqual({**TP.OPT_PACKAGES["p2"], "candidates": 24}, TP.OPT_PACKAGES["p1"])  # p2 = p1 with 48 candidates
         # the repository template parses to the round-11 template (only a header comment added)
         repo_template = yaml.safe_load((Path(TP.__file__).with_name("configs") / "ppo_template_v10.yaml").read_text())
@@ -356,6 +363,10 @@ class TrainingPrepTest(unittest.TestCase):
                          ("keep_by_return_std", 12, 0.33, 1.77))
         self.assertEqual(Path(kw["rows"]), (self.root / "rl_keep" / "train.jsonl").resolve())
         self.assertEqual((report["group_filter"], report["group_filter_kwargs"]["std_threshold"]), ("keep_by_return_std", 0.33))
+        ppo, env, report = config("rl_keep_std", standard="v10_p1_S0_keep")  # a standard names the filter
+        self.assertEqual((ppo["filter"]["name"], ppo["filter"]["filter_kwargs"]["std_threshold"],
+                          ppo["filter"]["filter_kwargs"]["std_floor"], report["reward_preset"]),
+                         ("keep_by_return_std", 0.134, 1.77, "S0"))
         with self.assertRaises(SystemExit):  # a threshold is required
             config("rl_keep_bad", standard="v10_p1_D", group_filter="keep_by_return_std")
         with self.assertRaises(SystemExit):  # it fills the package's batch
