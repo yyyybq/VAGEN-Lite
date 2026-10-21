@@ -386,6 +386,13 @@ class TrainingPrepTest(unittest.TestCase):
         ppo, report = config("rl_nocurr")  # without the option nothing changes
         self.assertIsNone(report["curriculum"])
         self.assertNotEqual((ppo["data"].get("sampler") or {}).get("class_name"), "DifficultyCurriculumSampler")
+        # round 12 batch: --entropy-coeff replaces the package's entropy bonus (0 included); without it, the package's
+        self.assertEqual((ppo["actor_rollout_ref"]["actor"]["entropy_coeff"], report["entropy_coeff"],
+                          report["entropy_coeff_override"]), (0.01, 0.01, None))
+        ppo, report = config("rl_noent", entropy_coeff=0.0)
+        self.assertEqual((ppo["actor_rollout_ref"]["actor"]["entropy_coeff"], report["entropy_coeff"],
+                          report["entropy_coeff_override"]), (0.0, 0.0, 0.0))
+        self.assertEqual(ppo["actor_rollout_ref"]["actor"]["optim"]["lr"], 2e-6)  # the rest of the package stays
 
     def test_data_scale_subsets(self):
         """Round 12 batch: nested train-scene subsets (fixed seed) with all formal tasks of their scenes for SFT and
