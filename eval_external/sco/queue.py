@@ -1,6 +1,6 @@
 """Keep one-card jobs running from a list of MODEL:KIND items (login node, background), up to J.POOL_LIMITS per
 pool (2026-10-21: h800 4, zoetrope 4; a new job takes h800's free slots first, then zoetrope's).  Nothing new is
-submitted to a pool where a job of our own sco account waits for a whole 8-card machine (yield_pools).
+submitted to a pool where an interiorgs-v10-rl-* training job waits for a whole 8-card machine (yield_pools).
 
     nohup python -m eval_external.sco.queue --stage step2 ours-SFT:OwnEnv base-7B:WalkerBench SI-7B:VSI-Bench ... &
 
@@ -166,14 +166,16 @@ def pool_waiting(jobs: list[dict] | None = None) -> dict[str, int]:
     return out
 
 
+YIELD_TO = "interiorgs-v10-rl-"  # the RL training jobs (decision 20); bq_tp_* and every other 8-card job: no yield
+
+
 def yield_pools(jobs: list[dict]) -> set[str]:
-    """Pools where a job of our own sco account (the one that owns our evalext-* jobs) waits for a whole 8-card
-    machine.  Single-card jobs land on the emptiest machine and keep it from ever having 8 free cards, so we submit
-    nothing new there until those jobs have started (2026-10-21, decision 19)."""
+    """Pools where an RL training job (name starting with YIELD_TO) waits for a whole 8-card machine.  Single-card
+    jobs land on the emptiest machine and keep it from ever having 8 free cards, so we submit nothing new there until
+    those jobs have started (2026-10-21, decisions 19 and 20)."""
     name = lambda j: j.get("display_name") or j.get("name") or ""
-    ours = {(j.get("ownership") or {}).get("user_id") for j in jobs if name(j).startswith("evalext-")} - {None, ""}
     return {_pool(j) for j in jobs
-            if j.get("state") in J.WAITING and (j.get("ownership") or {}).get("user_id") in ours
+            if j.get("state") in J.WAITING and name(j).startswith(YIELD_TO)
             and _gpus_per_worker(j) >= 8 and _pool(j) in J.POOLS}
 
 
@@ -205,7 +207,7 @@ def step(stage: str, items: list[tuple[str, Item]]) -> dict:
             if st["state"] in J.WAITING:
                 target = move_target(receipt, st["state"], waiting)
                 if target and (counts.get(target, 0) >= J.POOL_LIMITS[target] or target in blocked):
-                    target = None  # no free slot of ours there, or our own 8-card jobs wait there
+                    target = None  # no free slot of ours there, or RL training waits there
             if target:
                 source = json.loads(receipt.read_text()).get("pool", J.POOL)
                 old = J.delete(it.run_dir)
@@ -233,7 +235,7 @@ def step(stage: str, items: list[tuple[str, Item]]) -> dict:
         pool = J.free_pool(counts, exclude=blocked)  # h800 first, then zoetrope; none where we yield
         if pool is None:
             yielding = blocked and J.free_pool(counts) is not None
-            status[key] = (f"pending (yielding: own 8-card jobs wait on {', '.join(sorted(blocked))})"
+            status[key] = (f"pending (yielding: RL training waits on {', '.join(sorted(blocked))})"
                            if yielding else "pending")
             continue
         if not it.prepared():
