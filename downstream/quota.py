@@ -3,10 +3,11 @@
 
     python downstream/quota.py            # {"quota_tb": 22.0, "used_tb": 12.0, "free_tb_min": 9.5, ...}
 
-Reads `sco afs dir-quota list -i <volume> -d /users/yinbaiqiao` (the method of data_gen/interiorgs_v10/STATUS.md,
-"配额事故").  sco prints sizes with two significant digits ("12 TB", "8.6 TB"), so `free_tb_min` subtracts half a
-unit of the last printed digit from the free space: a lower bound, used by the evaluation watcher before every
-submission.
+Reads the full table of `sco afs dir-quota list -i <volume>` (the method of data_gen/interiorgs_v10/STATUS.md,
+"配额事故") and takes the /users/yinbaiqiao row in state "success".  Not `-d /users/yinbaiqiao`: that returns a
+different record (11 TB, 0 B used, state "setting" on 2026-10-21) that does not match the real usage.  sco prints sizes
+with two significant digits ("12 TB", "8.6 TB"), so `free_tb_min` subtracts half a unit of the last printed digit from
+the free space: a lower bound, used by the evaluation watcher before every submission.
 """
 from __future__ import annotations
 
@@ -30,10 +31,10 @@ def _tb(number: str, unit: str):
 
 
 def parse(text: str, user_dir: str = USER_DIR):
-    """{quota_tb, used_tb, free_tb_min} from the table sco prints, or None if the row is missing."""
+    """{quota_tb, used_tb, free_tb_min} from the table sco prints, or None if there is no such row in state success."""
     for line in text.splitlines():
         cols = line.split()
-        if user_dir not in cols:
+        if user_dir not in cols or cols[-1] != "success":
             continue
         sizes = SIZE.findall(line[line.index(user_dir) + len(user_dir):])
         if len(sizes) < 2:
@@ -47,8 +48,7 @@ def parse(text: str, user_dir: str = USER_DIR):
 def free_space(run=subprocess.run):
     """parse() of a fresh listing; None when sco fails or the row is not there."""
     try:
-        res = run([SCO, "afs", "dir-quota", "list", "-i", VOLUME, "-d", USER_DIR], capture_output=True, text=True,
-                  timeout=120)
+        res = run([SCO, "afs", "dir-quota", "list", "-i", VOLUME], capture_output=True, text=True, timeout=120)
     except Exception:
         return None
     return parse(res.stdout) if res.returncode == 0 else None

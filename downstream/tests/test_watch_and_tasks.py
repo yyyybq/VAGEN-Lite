@@ -201,6 +201,8 @@ def test_quota_parse_gives_a_lower_bound():
                                  "row": "019e  /users/yinbaiqiao   0  12234998  22 TB  12 TB  success"}
     assert quota.parse(text, "/users/xiaohongcan")["free_tb_min"] == 13.35
     assert quota.parse("nothing here") is None
+    setting = "  019e  /users/yinbaiqiao  0  0  11 TB  0 B  setting\n"  # what `-d /users/yinbaiqiao` returned
+    assert quota.parse(setting) is None
 
 
 def test_waiting_by_pool():
