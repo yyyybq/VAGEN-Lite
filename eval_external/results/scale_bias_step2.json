@@ -1,4 +1,51 @@
 {
+ "base-3B": {
+  "VSI-Bench/object_abs_distance": {
+   "n": 834,
+   "n_no_number_or_zero": 91,
+   "median": 0.556,
+   "q25": 0.312,
+   "q75": 1.0,
+   "share_below_half": 0.424,
+   "share_above_double": 0.055
+  },
+  "VSI-Bench/object_size_estimation": {
+   "n": 953,
+   "n_no_number_or_zero": 37,
+   "median": 0.465,
+   "q25": 0.323,
+   "q75": 0.624,
+   "share_below_half": 0.576,
+   "share_above_double": 0.004
+  },
+  "VSI-Bench/room_size_estimation": {
+   "n": 288,
+   "n_no_number_or_zero": 0,
+   "median": 0.81,
+   "q25": 0.549,
+   "q75": 1.817,
+   "share_below_half": 0.215,
+   "share_above_double": 0.212
+  },
+  "VSTI-Bench/camera_obj_abs_dist": {
+   "n": 905,
+   "n_no_number_or_zero": 2,
+   "median": 0.385,
+   "q25": 0.263,
+   "q75": 0.556,
+   "share_below_half": 0.652,
+   "share_above_double": 0.003
+  },
+  "VSTI-Bench/camera_displacement": {
+   "n": 833,
+   "n_no_number_or_zero": 0,
+   "median": 0.714,
+   "q25": 0.417,
+   "q75": 1.5,
+   "share_below_half": 0.318,
+   "share_above_double": 0.182
+  }
+ },
  "base-7B": {
   "VSI-Bench/object_abs_distance": {
    "n": 834,
@@ -111,6 +158,53 @@
    "share_above_double": 0.547
   }
  },
+ "ours-RL-50": {
+  "VSI-Bench/object_abs_distance": {
+   "n": 834,
+   "n_no_number_or_zero": 97,
+   "median": 0.094,
+   "q25": 0.025,
+   "q75": 0.298,
+   "share_below_half": 0.822,
+   "share_above_double": 0.033
+  },
+  "VSI-Bench/object_size_estimation": {
+   "n": 953,
+   "n_no_number_or_zero": 11,
+   "median": 0.873,
+   "q25": 0.512,
+   "q75": 1.442,
+   "share_below_half": 0.232,
+   "share_above_double": 0.209
+  },
+  "VSI-Bench/room_size_estimation": {
+   "n": 288,
+   "n_no_number_or_zero": 0,
+   "median": 1.075,
+   "q25": 0.725,
+   "q75": 2.553,
+   "share_below_half": 0.101,
+   "share_above_double": 0.285
+  },
+  "VSTI-Bench/camera_obj_abs_dist": {
+   "n": 905,
+   "n_no_number_or_zero": 23,
+   "median": 0.107,
+   "q25": 0.029,
+   "q75": 0.294,
+   "share_below_half": 0.871,
+   "share_above_double": 0.024
+  },
+  "VSTI-Bench/camera_displacement": {
+   "n": 833,
+   "n_no_number_or_zero": 11,
+   "median": 2.564,
+   "q25": 0.25,
+   "q75": 6.25,
+   "share_below_half": 0.31,
+   "share_above_double": 0.544
+  }
+ },
  "ours-RL-150": {
   "VSI-Bench/object_abs_distance": {
    "n": 834,
@@ -156,6 +250,165 @@
    "q75": 6.25,
    "share_below_half": 0.305,
    "share_above_double": 0.544
+  }
+ },
+ "ours-SFT-r11": {
+  "VSI-Bench/object_abs_distance": {
+   "n": 834,
+   "n_no_number_or_zero": 140,
+   "median": 0.2,
+   "q25": 0.062,
+   "q75": 0.385,
+   "share_below_half": 0.798,
+   "share_above_double": 0.013
+  },
+  "VSI-Bench/object_size_estimation": {
+   "n": 953,
+   "n_no_number_or_zero": 47,
+   "median": 0.694,
+   "q25": 0.361,
+   "q75": 1.192,
+   "share_below_half": 0.363,
+   "share_above_double": 0.123
+  },
+  "VSI-Bench/room_size_estimation": {
+   "n": 288,
+   "n_no_number_or_zero": 7,
+   "median": 0.725,
+   "q25": 0.371,
+   "q75": 1.734,
+   "share_below_half": 0.356,
+   "share_above_double": 0.214
+  },
+  "VSTI-Bench/camera_obj_abs_dist": {
+   "n": 905,
+   "n_no_number_or_zero": 83,
+   "median": 0.208,
+   "q25": 0.056,
+   "q75": 0.385,
+   "share_below_half": 0.853,
+   "share_above_double": 0.01
+  },
+  "VSTI-Bench/camera_displacement": {
+   "n": 833,
+   "n_no_number_or_zero": 107,
+   "median": 0.833,
+   "q25": 0.25,
+   "q75": 4.167,
+   "share_below_half": 0.404,
+   "share_above_double": 0.373
+  }
+ },
+ "ours-RL-r11": {
+  "VSI-Bench/object_abs_distance": {
+   "n": 834,
+   "n_no_number_or_zero": 179,
+   "median": 0.208,
+   "q25": 0.091,
+   "q75": 0.455,
+   "share_below_half": 0.763,
+   "share_above_double": 0.014
+  },
+  "VSI-Bench/object_size_estimation": {
+   "n": 953,
+   "n_no_number_or_zero": 45,
+   "median": 0.725,
+   "q25": 0.372,
+   "q75": 1.211,
+   "share_below_half": 0.348,
+   "share_above_double": 0.121
+  },
+  "VSI-Bench/room_size_estimation": {
+   "n": 288,
+   "n_no_number_or_zero": 7,
+   "median": 1.042,
+   "q25": 0.488,
+   "q75": 2.31,
+   "share_below_half": 0.26,
+   "share_above_double": 0.267
+  },
+  "VSTI-Bench/camera_obj_abs_dist": {
+   "n": 905,
+   "n_no_number_or_zero": 152,
+   "median": 0.263,
+   "q25": 0.091,
+   "q75": 0.417,
+   "share_below_half": 0.793,
+   "share_above_double": 0.028
+  },
+  "VSTI-Bench/camera_displacement": {
+   "n": 833,
+   "n_no_number_or_zero": 143,
+   "median": 1.77,
+   "q25": 0.417,
+   "q75": 5.933,
+   "share_below_half": 0.275,
+   "share_above_double": 0.484
+  }
+ },
+ "SI-7B": {
+  "VSI-Bench/object_abs_distance": {
+   "n": 834,
+   "n_no_number_or_zero": 0,
+   "median": 0.524,
+   "q25": 0.321,
+   "q75": 0.833,
+   "share_below_half": 0.464,
+   "share_above_double": 0.022
+  },
+  "VSI-Bench/object_size_estimation": {
+   "n": 953,
+   "n_no_number_or_zero": 0,
+   "median": 1.0,
+   "q25": 0.844,
+   "q75": 1.195,
+   "share_below_half": 0.03,
+   "share_above_double": 0.04
+  },
+  "VSI-Bench/room_size_estimation": {
+   "n": 288,
+   "n_no_number_or_zero": 0,
+   "median": 0.706,
+   "q25": 0.556,
+   "q75": 0.926,
+   "share_below_half": 0.201,
+   "share_above_double": 0.021
+  },
+  "VSTI-Bench/camera_obj_abs_dist": {
+   "n": 905,
+   "n_no_number_or_zero": 0,
+   "median": 0.667,
+   "q25": 0.455,
+   "q75": 1.0,
+   "share_below_half": 0.291,
+   "share_above_double": 0.02
+  },
+  "VSTI-Bench/camera_displacement": {
+   "n": 833,
+   "n_no_number_or_zero": 0,
+   "median": 1.056,
+   "q25": 0.644,
+   "q75": 1.667,
+   "share_below_half": 0.138,
+   "share_above_double": 0.18
+  },
+  "VSTI-Bench-prefix/camera_obj_abs_dist": {
+   "n": 905,
+   "n_no_number_or_zero": 0,
+   "median": 0.571,
+   "q25": 0.367,
+   "q75": 0.889,
+   "share_below_half": 0.408,
+   "share_above_double": 0.034
+  },
+  "VSTI-Bench-prefix/camera_displacement": {
+   "n": 839,
+   "n_no_number_or_zero": 0,
+   "median": 1.0,
+   "q25": 0.667,
+   "q75": 1.462,
+   "share_below_half": 0.117,
+   "share_above_double": 0.129
   }
  }
 }

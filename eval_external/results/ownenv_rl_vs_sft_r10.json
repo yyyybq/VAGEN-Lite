@@ -1,0 +1,40 @@
+{
+ "ref": "ours-SFT",
+ "runs": {
+  "ours-RL-150": {
+   "n": 279,
+   "success": 124,
+   "ref_success": 112,
+   "diff_pts": 4.3,
+   "only_run": 23,
+   "only_ref": 11,
+   "p_mcnemar": 0.0576,
+   "by_type": {
+    "absolute_positioning": [
+     34,
+     50
+    ],
+    "equidistance": [
+     11,
+     50
+    ],
+    "fov_inclusion": [
+     22,
+     50
+    ],
+    "occlusion_alignment": [
+     7,
+     29
+    ],
+    "projective_relations": [
+     17,
+     50
+    ],
+    "screen_occupancy": [
+     33,
+     50
+    ]
+   }
+  }
+ }
+}

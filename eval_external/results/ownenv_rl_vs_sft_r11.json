@@ -1,0 +1,75 @@
+{
+ "ref": "ours-SFT-r11",
+ "runs": {
+  "ours-RL-r11": {
+   "n": 279,
+   "success": 117,
+   "ref_success": 107,
+   "diff_pts": 3.6,
+   "only_run": 35,
+   "only_ref": 25,
+   "p_mcnemar": 0.2451,
+   "by_type": {
+    "absolute_positioning": [
+     30,
+     50
+    ],
+    "equidistance": [
+     14,
+     50
+    ],
+    "fov_inclusion": [
+     21,
+     50
+    ],
+    "occlusion_alignment": [
+     5,
+     29
+    ],
+    "projective_relations": [
+     19,
+     50
+    ],
+    "screen_occupancy": [
+     28,
+     50
+    ]
+   }
+  },
+  "ours-RL-r11-dense": {
+   "n": 279,
+   "success": 128,
+   "ref_success": 107,
+   "diff_pts": 7.5,
+   "only_run": 41,
+   "only_ref": 20,
+   "p_mcnemar": 0.0099,
+   "by_type": {
+    "absolute_positioning": [
+     31,
+     50
+    ],
+    "equidistance": [
+     12,
+     50
+    ],
+    "fov_inclusion": [
+     22,
+     50
+    ],
+    "occlusion_alignment": [
+     5,
+     29
+    ],
+    "projective_relations": [
+     21,
+     50
+    ],
+    "screen_occupancy": [
+     37,
+     50
+    ]
+   }
+  }
+ }
+}

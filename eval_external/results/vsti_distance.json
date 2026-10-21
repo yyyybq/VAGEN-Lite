@@ -1,4 +1,64 @@
 {
+ "base-3B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 903,
+   "spearman": 0.023,
+   "distinct_values": 7,
+   "top5": [
+    [
+     0.5,
+     679
+    ],
+    [
+     1.0,
+     152
+    ],
+    [
+     0.1,
+     28
+    ],
+    [
+     1.5,
+     24
+    ],
+    [
+     0.01,
+     15
+    ]
+   ],
+   "top5_share": 0.994
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 833,
+   "spearman": 0.157,
+   "distinct_values": 6,
+   "top5": [
+    [
+     1.0,
+     289
+    ],
+    [
+     0.5,
+     244
+    ],
+    [
+     1.5,
+     220
+    ],
+    [
+     10.0,
+     61
+    ],
+    [
+     0.1,
+     16
+    ]
+   ],
+   "top5_share": 0.996
+  }
+ },
  "base-7B": {
   "camera_obj_abs_dist": {
    "n": 905,
@@ -119,6 +179,66 @@
    "top5_share": 0.775
   }
  },
+ "ours-RL-50": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 882,
+   "spearman": 0.358,
+   "distinct_values": 22,
+   "top5": [
+    [
+     0.5,
+     233
+    ],
+    [
+     0.01,
+     168
+    ],
+    [
+     0.05,
+     157
+    ],
+    [
+     0.15,
+     130
+    ],
+    [
+     0.1,
+     30
+    ]
+   ],
+   "top5_share": 0.814
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 822,
+   "spearman": 0.275,
+   "distinct_values": 34,
+   "top5": [
+    [
+     10.0,
+     364
+    ],
+    [
+     0.03,
+     93
+    ],
+    [
+     0.5,
+     65
+    ],
+    [
+     0.05,
+     60
+    ],
+    [
+     1.52,
+     37
+    ]
+   ],
+   "top5_share": 0.753
+  }
+ },
  "ours-RL-150": {
   "camera_obj_abs_dist": {
    "n": 905,
@@ -177,6 +297,186 @@
     ]
    ],
    "top5_share": 0.745
+  }
+ },
+ "ours-SFT-r11": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 822,
+   "spearman": 0.31,
+   "distinct_values": 29,
+   "top5": [
+    [
+     0.5,
+     398
+    ],
+    [
+     0.01,
+     96
+    ],
+    [
+     0.05,
+     92
+    ],
+    [
+     0.1,
+     80
+    ],
+    [
+     0.15,
+     35
+    ]
+   ],
+   "top5_share": 0.853
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 726,
+   "spearman": 0.298,
+   "distinct_values": 50,
+   "top5": [
+    [
+     0.5,
+     227
+    ],
+    [
+     10.0,
+     190
+    ],
+    [
+     0.05,
+     58
+    ],
+    [
+     2.0,
+     33
+    ],
+    [
+     1.0,
+     26
+    ]
+   ],
+   "top5_share": 0.736
+  }
+ },
+ "ours-RL-r11": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 753,
+   "spearman": 0.3,
+   "distinct_values": 17,
+   "top5": [
+    [
+     0.5,
+     428
+    ],
+    [
+     0.05,
+     80
+    ],
+    [
+     0.1,
+     76
+    ],
+    [
+     0.01,
+     42
+    ],
+    [
+     0.2,
+     35
+    ]
+   ],
+   "top5_share": 0.878
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 690,
+   "spearman": 0.261,
+   "distinct_values": 28,
+   "top5": [
+    [
+     10.0,
+     237
+    ],
+    [
+     0.5,
+     209
+    ],
+    [
+     1.0,
+     40
+    ],
+    [
+     2.0,
+     39
+    ],
+    [
+     20.0,
+     34
+    ]
+   ],
+   "top5_share": 0.81
+  }
+ },
+ "SI-7B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 905,
+   "spearman": 0.324,
+   "distinct_values": 14,
+   "top5": [
+    [
+     1.0,
+     358
+    ],
+    [
+     0.8,
+     300
+    ],
+    [
+     1.9,
+     97
+    ],
+    [
+     0.3,
+     37
+    ],
+    [
+     0.5,
+     29
+    ]
+   ],
+   "top5_share": 0.907
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 833,
+   "spearman": 0.446,
+   "distinct_values": 15,
+   "top5": [
+    [
+     1.9,
+     238
+    ],
+    [
+     1.0,
+     230
+    ],
+    [
+     0.8,
+     123
+    ],
+    [
+     2.9,
+     71
+    ],
+    [
+     1.3,
+     40
+    ]
+   ],
+   "top5_share": 0.843
   }
  }
 }

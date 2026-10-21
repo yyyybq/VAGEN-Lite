@@ -20,6 +20,36 @@
   "diagnostic_acc": 34.23
  },
  {
+  "model": "SI-7B",
+  "bench": "MindCube",
+  "reported_overall": 82.79,
+  "n": 21154,
+  "official_acc": 82.79,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 82.79
+ },
+ {
+  "model": "SI-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 73.46,
+  "n": 1040,
+  "official_acc": 73.46,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 73.46
+ },
+ {
+  "model": "base-3B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 41.54,
+  "n": 1040,
+  "official_acc": 41.54,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 41.54
+ },
+ {
   "model": "ours-RL-150",
   "bench": "MindCube",
   "reported_overall": 32.62,
@@ -37,6 +67,26 @@
   "official_acc": 31.25,
   "rule_applied": 174,
   "rule_applied_pct": 16.73,
+  "diagnostic_acc": 37.31
+ },
+ {
+  "model": "ours-RL-50",
+  "bench": "MindCube",
+  "reported_overall": 32.79,
+  "n": 21154,
+  "official_acc": 32.79,
+  "rule_applied": 3025,
+  "rule_applied_pct": 14.3,
+  "diagnostic_acc": 36.32
+ },
+ {
+  "model": "ours-RL-50",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 31.15,
+  "n": 1040,
+  "official_acc": 31.15,
+  "rule_applied": 186,
+  "rule_applied_pct": 17.88,
   "diagnostic_acc": 37.31
  },
  {

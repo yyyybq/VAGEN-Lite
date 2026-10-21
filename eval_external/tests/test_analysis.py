@@ -35,3 +35,20 @@ def test_mcnemar_and_paired():
     run = {"a": {"success": False}, "b": {"success": True}, "c": {"success": True}, "d": {"success": True}}
     p = paired(ref, run)
     assert (p["success"], p["ref_success"], p["only_run"], p["only_ref"], p["diff_pts"]) == (3, 2, 2, 1, 25.0)
+
+
+def test_paired_headline_rules():
+    import pytest
+
+    from eval_external.qa_transfer.paired import headline
+
+    sums = {"object_rel_direction_easy": 1.0, "object_rel_direction_medium": 0.0, "object_rel_direction_hard": 2.0,
+            "route_planning": 3.0}
+    ns = {"object_rel_direction_easy": 2, "object_rel_direction_medium": 2, "object_rel_direction_hard": 2,
+          "route_planning": 4}
+    assert headline("items", sums, ns) == pytest.approx(0.6)       # 6 / 10
+    assert headline("types", sums, ns) == pytest.approx(0.5625)    # mean(0.5, 0, 1, 0.75)
+    assert headline("vsi8", sums, ns) == pytest.approx(0.625)      # mean(mean(0.5, 0, 1), 0.75)
+    v = headline("vsti5", {"camera_displacement": 1.0, "obj_obj_relative_pos_lr": 1.0, "obj_obj_relative_pos_nf": 0.0},
+                 {"camera_displacement": 2, "obj_obj_relative_pos_lr": 1, "obj_obj_relative_pos_nf": 1})
+    assert v == pytest.approx(0.5)                                  # mean(1/2, (1 + 0) / 2)

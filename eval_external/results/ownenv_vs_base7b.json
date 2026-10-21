@@ -1,0 +1,985 @@
+{
+ "ref": "base-7B",
+ "runs": {
+  "SI-7B": {
+   "n": 279,
+   "success": 5,
+   "ref_success": 23,
+   "diff_pts": -6.5,
+   "only_run": 3,
+   "only_ref": 21,
+   "p_mcnemar": 0.0003,
+   "by_type": {
+    "absolute_positioning": [
+     1,
+     50
+    ],
+    "equidistance": [
+     0,
+     50
+    ],
+    "fov_inclusion": [
+     1,
+     50
+    ],
+    "occlusion_alignment": [
+     1,
+     29
+    ],
+    "projective_relations": [
+     1,
+     50
+    ],
+    "screen_occupancy": [
+     1,
+     50
+    ]
+   }
+  },
+  "SI-7B__lenient": {
+   "n": 279,
+   "success": 22,
+   "ref_success": 23,
+   "diff_pts": -0.4,
+   "only_run": 12,
+   "only_ref": 13,
+   "p_mcnemar": 1.0,
+   "by_type": {
+    "absolute_positioning": [
+     7,
+     50
+    ],
+    "equidistance": [
+     1,
+     50
+    ],
+    "fov_inclusion": [
+     4,
+     50
+    ],
+    "occlusion_alignment": [
+     1,
+     29
+    ],
+    "projective_relations": [
+     5,
+     50
+    ],
+    "screen_occupancy": [
+     4,
+     50
+    ]
+   }
+  },
+  "SenseNovaSI-7B": {
+   "n": 279,
+   "success": 25,
+   "ref_success": 23,
+   "diff_pts": 0.7,
+   "only_run": 9,
+   "only_ref": 7,
+   "p_mcnemar": 0.8036,
+   "by_type": {
+    "absolute_positioning": [
+     5,
+     50
+    ],
+    "equidistance": [
+     1,
+     50
+    ],
+    "fov_inclusion": [
+     7,
+     50
+    ],
+    "occlusion_alignment": [
+     0,
+     29
+    ],
+    "projective_relations": [
+     6,
+     50
+    ],
+    "screen_occupancy": [
+     6,
+     50
+    ]
+   }
+  },
+  "SpaceR-7B": {
+   "n": 279,
+   "success": 23,
+   "ref_success": 23,
+   "diff_pts": 0.0,
+   "only_run": 9,
+   "only_ref": 9,
+   "p_mcnemar": 1.0,
+   "by_type": {
+    "absolute_positioning": [
+     5,
+     50
+    ],
+    "equidistance": [
+     3,
+     50
+    ],
+    "fov_inclusion": [
+     4,
+     50
+    ],
+    "occlusion_alignment": [
+     0,
+     29
+    ],
+    "projective_relations": [
+     6,
+     50
+    ],
+    "screen_occupancy": [
+     5,
+     50
+    ]
+   }
+  },
+  "VST-7B-RL": {
+   "n": 279,
+   "success": 19,
+   "ref_success": 23,
+   "diff_pts": -1.4,
+   "only_run": 11,
+   "only_ref": 15,
+   "p_mcnemar": 0.5572,
+   "by_type": {
+    "absolute_positioning": [
+     0,
+     50
+    ],
+    "equidistance": [
+     4,
+     50
+    ],
+    "fov_inclusion": [
+     5,
+     50
+    ],
+    "occlusion_alignment": [
+     1,
+     29
+    ],
+    "projective_relations": [
+     7,
+     50
+    ],
+    "screen_occupancy": [
+     2,
+     50
+    ]
+   }
+  },
+  "ViLASR-7B": {
+   "n": 279,
+   "success": 26,
+   "ref_success": 23,
+   "diff_pts": 1.1,
+   "only_run": 12,
+   "only_ref": 9,
+   "p_mcnemar": 0.6636,
+   "by_type": {
+    "absolute_positioning": [
+     4,
+     50
+    ],
+    "equidistance": [
+     3,
+     50
+    ],
+    "fov_inclusion": [
+     4,
+     50
+    ],
+    "occlusion_alignment": [
+     1,
+     29
+    ],
+    "projective_relations": [
+     7,
+     50
+    ],
+    "screen_occupancy": [
+     7,
+     50
+    ]
+   }
+  },
+  "VideoR1-7B": {
+   "n": 279,
+   "success": 20,
+   "ref_success": 23,
+   "diff_pts": -1.1,
+   "only_run": 9,
+   "only_ref": 12,
+   "p_mcnemar": 0.6636,
+   "by_type": {
+    "absolute_positioning": [
+     4,
+     50
+    ],
+    "equidistance": [
+     0,
+     50
+    ],
+    "fov_inclusion": [
+     5,
+     50
+    ],
+    "occlusion_alignment": [
+     0,
+     29
+    ],
+    "projective_relations": [
+     7,
+     50
+    ],
+    "screen_occupancy": [
+     4,
+     50
+    ]
+   }
+  },
+  "base-7B": {
+   "n": 279,
+   "success": 23,
+   "ref_success": 23,
+   "diff_pts": 0.0,
+   "only_run": 0,
+   "only_ref": 0,
+   "p_mcnemar": 1.0,
+   "by_type": {
+    "absolute_positioning": [
+     6,
+     50
+    ],
+    "equidistance": [
+     4,
+     50
+    ],
+    "fov_inclusion": [
+     5,
+     50
+    ],
+    "occlusion_alignment": [
+     0,
+     29
+    ],
+    "projective_relations": [
+     4,
+     50
+    ],
+    "screen_occupancy": [
+     4,
+     50
+    ]
+   }
+  },
+  "ours-RL-150": {
+   "n": 279,
+   "success": 124,
+   "ref_success": 23,
+   "diff_pts": 36.2,
+   "only_run": 109,
+   "only_ref": 8,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     34,
+     50
+    ],
+    "equidistance": [
+     11,
+     50
+    ],
+    "fov_inclusion": [
+     22,
+     50
+    ],
+    "occlusion_alignment": [
+     7,
+     29
+    ],
+    "projective_relations": [
+     17,
+     50
+    ],
+    "screen_occupancy": [
+     33,
+     50
+    ]
+   }
+  },
+  "ours-RL-150__drop": {
+   "n": 279,
+   "success": 97,
+   "ref_success": 23,
+   "diff_pts": 26.5,
+   "only_run": 85,
+   "only_ref": 11,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     23,
+     50
+    ],
+    "equidistance": [
+     11,
+     50
+    ],
+    "fov_inclusion": [
+     17,
+     50
+    ],
+    "occlusion_alignment": [
+     3,
+     29
+    ],
+    "projective_relations": [
+     17,
+     50
+    ],
+    "screen_occupancy": [
+     26,
+     50
+    ]
+   }
+  },
+  "ours-RL-150__replace": {
+   "n": 279,
+   "success": 105,
+   "ref_success": 23,
+   "diff_pts": 29.4,
+   "only_run": 92,
+   "only_ref": 10,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     24,
+     50
+    ],
+    "equidistance": [
+     10,
+     50
+    ],
+    "fov_inclusion": [
+     21,
+     50
+    ],
+    "occlusion_alignment": [
+     7,
+     29
+    ],
+    "projective_relations": [
+     20,
+     50
+    ],
+    "screen_occupancy": [
+     23,
+     50
+    ]
+   }
+  },
+  "ours-RL-150__shuffle": {
+   "n": 279,
+   "success": 116,
+   "ref_success": 23,
+   "diff_pts": 33.3,
+   "only_run": 100,
+   "only_ref": 7,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     31,
+     50
+    ],
+    "equidistance": [
+     11,
+     50
+    ],
+    "fov_inclusion": [
+     19,
+     50
+    ],
+    "occlusion_alignment": [
+     5,
+     29
+    ],
+    "projective_relations": [
+     18,
+     50
+    ],
+    "screen_occupancy": [
+     32,
+     50
+    ]
+   }
+  },
+  "ours-RL-r11": {
+   "n": 279,
+   "success": 117,
+   "ref_success": 23,
+   "diff_pts": 33.7,
+   "only_run": 100,
+   "only_ref": 6,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     30,
+     50
+    ],
+    "equidistance": [
+     14,
+     50
+    ],
+    "fov_inclusion": [
+     21,
+     50
+    ],
+    "occlusion_alignment": [
+     5,
+     29
+    ],
+    "projective_relations": [
+     19,
+     50
+    ],
+    "screen_occupancy": [
+     28,
+     50
+    ]
+   }
+  },
+  "ours-RL-r11-dense": {
+   "n": 279,
+   "success": 128,
+   "ref_success": 23,
+   "diff_pts": 37.6,
+   "only_run": 112,
+   "only_ref": 7,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     31,
+     50
+    ],
+    "equidistance": [
+     12,
+     50
+    ],
+    "fov_inclusion": [
+     22,
+     50
+    ],
+    "occlusion_alignment": [
+     5,
+     29
+    ],
+    "projective_relations": [
+     21,
+     50
+    ],
+    "screen_occupancy": [
+     37,
+     50
+    ]
+   }
+  },
+  "ours-RL-r11-dense__drop": {
+   "n": 279,
+   "success": 82,
+   "ref_success": 23,
+   "diff_pts": 21.1,
+   "only_run": 70,
+   "only_ref": 11,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     19,
+     50
+    ],
+    "equidistance": [
+     8,
+     50
+    ],
+    "fov_inclusion": [
+     16,
+     50
+    ],
+    "occlusion_alignment": [
+     5,
+     29
+    ],
+    "projective_relations": [
+     15,
+     50
+    ],
+    "screen_occupancy": [
+     19,
+     50
+    ]
+   }
+  },
+  "ours-RL-r11-dense__replace": {
+   "n": 279,
+   "success": 100,
+   "ref_success": 23,
+   "diff_pts": 27.6,
+   "only_run": 84,
+   "only_ref": 7,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     28,
+     50
+    ],
+    "equidistance": [
+     10,
+     50
+    ],
+    "fov_inclusion": [
+     21,
+     50
+    ],
+    "occlusion_alignment": [
+     2,
+     29
+    ],
+    "projective_relations": [
+     19,
+     50
+    ],
+    "screen_occupancy": [
+     20,
+     50
+    ]
+   }
+  },
+  "ours-RL-r11-dense__shuffle": {
+   "n": 279,
+   "success": 122,
+   "ref_success": 23,
+   "diff_pts": 35.5,
+   "only_run": 105,
+   "only_ref": 6,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     34,
+     50
+    ],
+    "equidistance": [
+     11,
+     50
+    ],
+    "fov_inclusion": [
+     18,
+     50
+    ],
+    "occlusion_alignment": [
+     6,
+     29
+    ],
+    "projective_relations": [
+     19,
+     50
+    ],
+    "screen_occupancy": [
+     34,
+     50
+    ]
+   }
+  },
+  "ours-RL-r11__drop": {
+   "n": 279,
+   "success": 68,
+   "ref_success": 23,
+   "diff_pts": 16.1,
+   "only_run": 56,
+   "only_ref": 11,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     22,
+     50
+    ],
+    "equidistance": [
+     6,
+     50
+    ],
+    "fov_inclusion": [
+     10,
+     50
+    ],
+    "occlusion_alignment": [
+     2,
+     29
+    ],
+    "projective_relations": [
+     13,
+     50
+    ],
+    "screen_occupancy": [
+     15,
+     50
+    ]
+   }
+  },
+  "ours-RL-r11__replace": {
+   "n": 279,
+   "success": 88,
+   "ref_success": 23,
+   "diff_pts": 23.3,
+   "only_run": 71,
+   "only_ref": 6,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     24,
+     50
+    ],
+    "equidistance": [
+     7,
+     50
+    ],
+    "fov_inclusion": [
+     17,
+     50
+    ],
+    "occlusion_alignment": [
+     4,
+     29
+    ],
+    "projective_relations": [
+     15,
+     50
+    ],
+    "screen_occupancy": [
+     21,
+     50
+    ]
+   }
+  },
+  "ours-RL-r11__shuffle": {
+   "n": 279,
+   "success": 109,
+   "ref_success": 23,
+   "diff_pts": 30.8,
+   "only_run": 91,
+   "only_ref": 5,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     27,
+     50
+    ],
+    "equidistance": [
+     10,
+     50
+    ],
+    "fov_inclusion": [
+     20,
+     50
+    ],
+    "occlusion_alignment": [
+     5,
+     29
+    ],
+    "projective_relations": [
+     21,
+     50
+    ],
+    "screen_occupancy": [
+     26,
+     50
+    ]
+   }
+  },
+  "ours-SFT": {
+   "n": 279,
+   "success": 112,
+   "ref_success": 23,
+   "diff_pts": 31.9,
+   "only_run": 96,
+   "only_ref": 7,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     32,
+     50
+    ],
+    "equidistance": [
+     9,
+     50
+    ],
+    "fov_inclusion": [
+     19,
+     50
+    ],
+    "occlusion_alignment": [
+     7,
+     29
+    ],
+    "projective_relations": [
+     16,
+     50
+    ],
+    "screen_occupancy": [
+     29,
+     50
+    ]
+   }
+  },
+  "ours-SFT-r11": {
+   "n": 279,
+   "success": 107,
+   "ref_success": 23,
+   "diff_pts": 30.1,
+   "only_run": 95,
+   "only_ref": 11,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     26,
+     50
+    ],
+    "equidistance": [
+     5,
+     50
+    ],
+    "fov_inclusion": [
+     20,
+     50
+    ],
+    "occlusion_alignment": [
+     8,
+     29
+    ],
+    "projective_relations": [
+     20,
+     50
+    ],
+    "screen_occupancy": [
+     28,
+     50
+    ]
+   }
+  },
+  "ours-SFT-r11__drop": {
+   "n": 279,
+   "success": 84,
+   "ref_success": 23,
+   "diff_pts": 21.9,
+   "only_run": 73,
+   "only_ref": 12,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     23,
+     50
+    ],
+    "equidistance": [
+     7,
+     50
+    ],
+    "fov_inclusion": [
+     14,
+     50
+    ],
+    "occlusion_alignment": [
+     3,
+     29
+    ],
+    "projective_relations": [
+     11,
+     50
+    ],
+    "screen_occupancy": [
+     26,
+     50
+    ]
+   }
+  },
+  "ours-SFT-r11__replace": {
+   "n": 279,
+   "success": 88,
+   "ref_success": 23,
+   "diff_pts": 23.3,
+   "only_run": 76,
+   "only_ref": 11,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     26,
+     50
+    ],
+    "equidistance": [
+     5,
+     50
+    ],
+    "fov_inclusion": [
+     16,
+     50
+    ],
+    "occlusion_alignment": [
+     3,
+     29
+    ],
+    "projective_relations": [
+     15,
+     50
+    ],
+    "screen_occupancy": [
+     23,
+     50
+    ]
+   }
+  },
+  "ours-SFT-r11__shuffle": {
+   "n": 279,
+   "success": 102,
+   "ref_success": 23,
+   "diff_pts": 28.3,
+   "only_run": 90,
+   "only_ref": 11,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     25,
+     50
+    ],
+    "equidistance": [
+     8,
+     50
+    ],
+    "fov_inclusion": [
+     17,
+     50
+    ],
+    "occlusion_alignment": [
+     10,
+     29
+    ],
+    "projective_relations": [
+     15,
+     50
+    ],
+    "screen_occupancy": [
+     27,
+     50
+    ]
+   }
+  },
+  "ours-SFT__drop": {
+   "n": 279,
+   "success": 95,
+   "ref_success": 23,
+   "diff_pts": 25.8,
+   "only_run": 80,
+   "only_ref": 8,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     26,
+     50
+    ],
+    "equidistance": [
+     7,
+     50
+    ],
+    "fov_inclusion": [
+     17,
+     50
+    ],
+    "occlusion_alignment": [
+     2,
+     29
+    ],
+    "projective_relations": [
+     19,
+     50
+    ],
+    "screen_occupancy": [
+     24,
+     50
+    ]
+   }
+  },
+  "ours-SFT__replace": {
+   "n": 279,
+   "success": 89,
+   "ref_success": 23,
+   "diff_pts": 23.7,
+   "only_run": 78,
+   "only_ref": 12,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     26,
+     50
+    ],
+    "equidistance": [
+     5,
+     50
+    ],
+    "fov_inclusion": [
+     19,
+     50
+    ],
+    "occlusion_alignment": [
+     1,
+     29
+    ],
+    "projective_relations": [
+     17,
+     50
+    ],
+    "screen_occupancy": [
+     21,
+     50
+    ]
+   }
+  },
+  "ours-SFT__shuffle": {
+   "n": 279,
+   "success": 116,
+   "ref_success": 23,
+   "diff_pts": 33.3,
+   "only_run": 100,
+   "only_ref": 7,
+   "p_mcnemar": 0.0,
+   "by_type": {
+    "absolute_positioning": [
+     33,
+     50
+    ],
+    "equidistance": [
+     11,
+     50
+    ],
+    "fov_inclusion": [
+     19,
+     50
+    ],
+    "occlusion_alignment": [
+     8,
+     29
+    ],
+    "projective_relations": [
+     15,
+     50
+    ],
+    "screen_occupancy": [
+     30,
+     50
+    ]
+   }
+  }
+ }
+}
