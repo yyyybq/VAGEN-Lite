@@ -1,0 +1,4 @@
+base: L0_exec_only.yaml
+run: {name: L1_plan}
+modules:
+  plan: {enabled: true, impl: llm, provider: astra, prompt_version: v1, params: {cameras: [head]}}

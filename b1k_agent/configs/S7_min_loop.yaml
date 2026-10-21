@@ -1,0 +1,7 @@
+# Step 7 minimal closed loop: M-plan + M-check (strong model) + minimal M-recover; M-goal off.
+base: L0_exec_only.yaml
+run: {name: S7_min_loop}
+modules:
+  plan:    {enabled: true, impl: llm, provider: astra, prompt_version: v1, params: {cameras: [head]}}
+  check:   {enabled: true, impl: llm, provider: astra, prompt_version: v1, params: {min_confidence: 0.6}}
+  recover: {enabled: true, impl: scripted, params: {}}
