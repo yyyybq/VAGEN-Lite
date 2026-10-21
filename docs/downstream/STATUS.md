@@ -1,6 +1,6 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-10-21 11:30 UTC（第二步已确认通过；第三步进行中：12 个训练任务已提交，其余 24 个等门槛）。任务书分四步，每步做完停下来等确认。
+最后更新：2026-10-21 19:25 UTC（第二步已确认通过；第三步进行中：12 个训练任务已提交，其余 24 个等门槛；RLinf 第四次试跑排队中）。任务书分四步，每步做完停下来等确认。
 
 ## 1. 现在在哪一步
 
@@ -16,7 +16,11 @@
   - DS-B 第一个检查点评两遍：第一遍 P = 24，第二遍依次 P = 48、P = 96。用来量评测噪声，并决定以后的并行度。
   - D5 还没有检查点被评过（第一个约在 13:35），所以不需要按新规模补评。
 - **起点校验已加强**（10-21 11:13，在 D5 四个都开跑之后）：锁定文件加了每个分片的修改时间和首尾各 4 MiB 的 sha256。RS 和 RD 的 7 个分片里，首尾哈希没有一个相同，现在能分开了。见 `downstream_runs/logs/verify_starts_extend_20261021T111341Z.json`。
-- **RLinf 第三次试跑**（`pt-00o9ha1p`）还在排队。结果出来后单独报告：2 次更新是否完成、每次更新的耗时、8 个环境 CPU 渲染的速度、8 卡显存峰值。试跑脚本已加每 2 秒一次的 8 卡显存采样。通过后开始写第四步方案。
+- **RLinf 两次更新的试跑还没通过**：
+  - 第三次（`pt-00o9ha1p`，10-21 19:00–19:10）：价值头的问题已解决，到第一次训练更新的反向传播时显存不够。当时 8 张卡的峰值都在 76.9–77.7 GB；反向还要再申请 15.69 GiB，正好是整个 7B 模型 bf16 的大小。
+  - 原因判断：RLinf 只在模型有 `language_model` 属性或声明了 `_no_split_modules` 时才自动按层切分；StarVLA 的包装两者都没有，配置里也没设，所以整个模型是一个 FSDP 单元。
+  - 第四次（`pt-jnetqxe5`，19:19 提交，zoetrope，排队中）：加了按层切分（Qwen2_5_VLDecoderLayer、Qwen2_5_VLVisionBlock）和梯度检查点，仍然只用命令行覆盖，准备好的 train.yaml 不改。
+  - 通过后单独报告并开始写第四步方案。
 
 ## 2. 谁在跑
 
@@ -30,7 +34,8 @@
 | `pt-m7uot7w8`、`pt-z33scadg` | DS-S-100-s2、s3（8 卡，h800） | 11:22 提交 | `downstream_runs/experiments/DS-S-100-s{2,3}/` |
 | `pt-b7e6m4kc`、`pt-3z7es9qe` | DS-RS-100-s2、s3（8 卡，h800） | 11:22 提交 | `downstream_runs/experiments/DS-RS-100-s{2,3}/` |
 | `pt-u3tp47ku`、`pt-wm06mc05` | DS-RD-100-s2、s3（8 卡，h800） | 11:22 提交 | `downstream_runs/experiments/DS-RD-100-s{2,3}/` |
-| `pt-00o9ha1p` | RLinf 2 次更新试跑，第三次（8 卡，zoetrope；加 `actor.fsdp_config.use_orig_params=true`） | 排队中（07:08 提交） | `downstream_runs/experiments/RLINF-SMOKE-1/retry2/` |
+| `pt-jnetqxe5` | RLinf 2 次更新试跑，第四次（8 卡，zoetrope；use_orig_params、按层切分、梯度检查点） | 排队中（19:19 提交） | `downstream_runs/experiments/RLINF-SMOKE-1/retry3/` |
+| `pt-00o9ha1p` | RLinf 试跑，第三次（加 use_orig_params） | 退出码 255（19:00–19:10）：第一次训练更新反向时显存不够；记录已删 | `downstream_runs/experiments/RLINF-SMOKE-1/retry2/` |
 | `pt-cb0kvvf0` | 34 个评测任务的重置扫描（1 卡） | 已完成（07:46–09:01）：原版 89 / 102 对可复现，固定顺序后 102 / 102；记录已删 | `downstream_runs/checks/reset_sweep_20261021/` |
 | `pt-4qac93lo` | 第二步闭环评测重跑（8 卡） | 已完成，退出码 0；记录已删 | `downstream_runs/experiments/STEP2-RS-s1/step2/eval2/` |
 | `pt-a7r4q7s5` | RLinf 试跑，第二次 | 退出码 255：第一次训练更新时价值头在 FSDP 下取不到参数；记录已删 | `downstream_runs/experiments/RLINF-SMOKE-1/` |
@@ -127,7 +132,7 @@ bash downstream/eval/watch.sh status
 | --- | --- | --- | --- | --- | --- | --- |
 | STEP1-LOAD | 1 | B / S / RS / RD | 1 | 实测约 5 分钟 | 已完成，四个起点都通过 | `downstream_runs/step1_load_test_20261020/out/` |
 | STEP2-RS-s1 | 2 | RS | 8 | 训练实测 434 秒（200 步） | **通过**（10-21 确认） | `downstream_runs/experiments/STEP2-RS-s1/` |
-| RLINF-SMOKE-1 | 2（D7） | STEP2-RS-s1 的检查点 | 8 | 第二次实测 692 秒后失败 | 第三次排队中（`pt-00o9ha1p`） | `downstream_runs/experiments/RLINF-SMOKE-1/` |
+| RLINF-SMOKE-1 | 2（D7） | STEP2-RS-s1 的检查点 | 8 | 第二次 692 秒、第三次 646 秒后失败（环境交互 41 秒跑通，第一次训练更新没完成） | 第四次排队中（`pt-jnetqxe5`） | `downstream_runs/experiments/RLINF-SMOKE-1/` |
 | DS-{B,S,RS,RD}-100-s1 | 3（D5） | 四个起点 | 各 8 | 训练约 42.0 小时；每个检查点评测上限约 3.4 小时（950 回合，P = 24） | 训练中，每 2.5 万步存一次 | `downstream_runs/experiments/DS-*-100-s1/` |
 | DS-{B,S,RS,RD}-100-s{2,3} | 3 | 四个起点 | 各 8 | 同上，只评最后一个检查点 | 11:22 提交 | `downstream_runs/experiments/DS-*-100-s{2,3}/` |
 | DS-{B,S,RS,RD}-{030,010}-s{1,2,3} | 3 | 四个起点 | 各 8 | 同上 | 实验目录在建；等门槛（DS-B-100-s1 第 2.5 万步评测成功回合 > 0）后由看板提交 | `downstream_runs/experiments/DS-*-{030,010}-s*/` |
@@ -148,6 +153,6 @@ bash downstream/eval/watch.sh status
 - P = 48、96 的并行度测试：在 DS-B 第一个检查点的第二遍评测里做。
 - 代码同步改用 git。已改。
 - 看板改成断开后仍运行，启动命令见第 2 节。已改。
-- RLinf 第三次试跑：结果出来后单独报告。
+- RLinf：第三次已报告（显存不够），第四次排队中，结果出来后单独报告。
 
 **待定**：暂无。门槛不过（成功回合 = 0）时会停下来等你决定。
