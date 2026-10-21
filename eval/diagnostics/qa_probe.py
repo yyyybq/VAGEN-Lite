@@ -6,6 +6,9 @@
     python -m eval.diagnostics.qa_probe run --probe ... --out OUT --from-eval EVAL_DIR --names rs0_050,rs0_100
     # table and figure: checkpoint step -> accuracy per question type
     python -m eval.diagnostics.qa_probe curve --out OUT --chain "R11-SFT=sft_formal_e{1..10}@154" ...
+    # the pre-registered comparison of two groups (PREREG_D_vs_C.md section 3.3): group A - group B
+    python -m eval.diagnostics.qa_probe compare --probe p1_probe.jsonl --out OUT \
+        --a D=d_s0_300,d_d_300 --b C=c_s0_300,c_d_300 --label D_vs_C
 
 ``run`` asks each probe question exactly as the training row has it (no system prompt, the images where the
 ``<image>`` markers stand), greedy, at most 256 new tokens, and reads the answer leniently (``parse_answer``: a
@@ -23,6 +26,14 @@ BLIND_NOTE goes before the question, so the model still picks an option; everyth
 OUT/curve.md (one table per chain: step, overall, chance, strict, unreadable, non-compliant, per class, per question
 type) and OUT/curve.png.  ``--reference NAME=LABEL`` adds a fixed row to every table (e.g. the text-only baseline)
 and a dotted line to the figure.
+
+``compare``: a group is [GROUP=]S0_RESULT,D_RESULT (the group's two RLs, S0 first; the pairs are S0 against S0 and
+D against D) or a single result (one pair, for checks; a single result against a two-RL group serves both pairs).
+``goal_now`` and ``goal_after`` each: the accuracy difference and the exact McNemar test per pair, and pooled (the
+mean of the pair differences; McNemar on the 2 x n question-RL pairs).  The two occlusion types pooled (112
+questions): the balanced accuracy (the mean of the full / partial / none accuracies) per pair and pooled, with a 95%
+CI and two-sided p from a bootstrap that resamples questions within each answer value (the same draw for both groups
+and both RLs).  Verdicts as the pre-registration has them (``verdict``).  Writes OUT/compare_<label>.json and .md.
 """
 
 from __future__ import annotations
@@ -31,6 +42,7 @@ import argparse
 import base64
 import collections
 import json
+import math
 import os
 import re
 import subprocess
@@ -411,6 +423,280 @@ def cmd_curve(args: argparse.Namespace) -> None:
     print((out / "curve.md").read_text(encoding="utf-8")[:3000])
 
 
+# =============================================================================
+# comparing two groups (docs/transition_qa/PREREG_D_vs_C.md section 3.3)
+# =============================================================================
+GOAL_TYPES = ("goal_now", "goal_after")
+OCC_TYPES = ("occluded_now", "occluded_after")
+ANSWER_VALUES = {"goal": ("yes", "no"), "occlusion": ("full", "partial", "none")}  # the probe rows' answer_value
+ALPHA = 0.05
+MIN_DIFF = {"goal": 0.10, "occlusion": 0.20}  # the pooled difference a "difference" needs (user, 2026-10-21)
+BOOT_REPS, BOOT_SEED = 2000, 20261021
+TOL = 1e-9  # a difference this close to a threshold (or to 0) counts as on it
+
+
+def mcnemar(only_a: int, only_b: int) -> float:
+    """Exact two-sided McNemar test: the binomial test (p = 1/2) on the only_a + only_b discordant questions."""
+    m = only_a + only_b
+    if not m:
+        return 1.0
+    return min(1.0, 2 * sum(math.comb(m, i) for i in range(min(only_a, only_b) + 1)) / 2 ** m)
+
+
+def same_sign(diffs: Sequence[float]) -> bool:
+    """The per-RL differences all above 0 or all below; a difference of 0 has no sign."""
+    return all(d > TOL for d in diffs) or all(d < -TOL for d in diffs)
+
+
+def verdict(diff: float, diffs: Sequence[float], min_diff: float, p: Optional[float] = None) -> Dict[str, Any]:
+    """"difference" iff |pooled difference| >= min_diff, the per-RL differences have the same sign, and p < ALPHA
+    when a p value decides (goal; for occlusion the CI and p are only reported).  ``failed``: the conditions not met."""
+    failed = []
+    if p is not None and not p < ALPHA:
+        failed.append("p")
+    if abs(diff) < min_diff - TOL:
+        failed.append("size")
+    if not same_sign(diffs):
+        failed.append("sign")
+    return {"verdict": "no difference" if failed else "difference", "failed": failed, "same_sign": same_sign(diffs)}
+
+
+def stratified_draws(sizes: Sequence[int], reps: int, seed: int) -> List[Any]:
+    """Per answer value, a (reps, n_v) array of question indices drawn with replacement within that value, so every
+    replicate keeps the n_v questions of each answer.  One draw serves both groups and every pair."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    return [rng.integers(0, n, size=(reps, n)) for n in sizes]
+
+
+def _boot(d: Any) -> Dict[str, Any]:
+    """The 95% percentile CI and the two-sided p = min(1, 2 min(P(d* <= 0), P(d* >= 0))) of bootstrap differences."""
+    import numpy as np
+
+    r = np.round(d, 12)  # a replicate within rounding of 0 counts as 0 on both sides
+    return {"ci": [float(np.percentile(d, 2.5)), float(np.percentile(d, 97.5))],
+            "p": float(min(1.0, 2 * min((r <= 0).mean(), (r >= 0).mean())))}
+
+
+def _acc(correct: Dict[str, bool], ids: Sequence[str]) -> Optional[float]:
+    return sum(correct[s] for s in ids) / len(ids) if ids else None
+
+
+def load_correct(out: Path, name: str, probe: Dict[str, Dict[str, Any]], qtypes: Sequence[str]) -> Dict[str, bool]:
+    """sample_id -> correct for every probe question of ``qtypes``.  The result must have them all, with the probe's
+    question type and answer, so a result from another probe version fails here."""
+    lines = (out / f"{name}.jsonl").read_text(encoding="utf-8").splitlines()
+    rows = {a["sample_id"]: a for a in (json.loads(l) for l in lines if l.strip())}
+    need = [s for s, r in probe.items() if r["qtype"] in qtypes]
+    missing = [s for s in need if s not in rows]
+    if missing:
+        raise ValueError(f"{name}: {len(missing)} of the {len(need)} probe questions missing (e.g. {missing[0]})")
+    other = [s for s in need if rows[s].get("qtype") != probe[s]["qtype"]
+             or rows[s].get("gold") != probe[s].get("answer", rows[s].get("gold"))]
+    if other:
+        raise ValueError(f"{name}: {len(other)} questions with another type or answer than the probe's (e.g. {other[0]})")
+    return {s: bool(rows[s]["correct"]) for s in need}
+
+
+def compare_mcnemar(res: Dict[str, Dict[str, bool]], pairs: Sequence[Tuple[str, str, str]], ids: Sequence[str],
+                    value: Dict[str, str], values: Sequence[str]) -> Dict[str, Any]:
+    """goal: per pair (label, a, b) the accuracy difference a - b and the exact McNemar test; pooled: the mean of the
+    pair differences, and McNemar on the len(pairs) x n question-RL pairs."""
+    n = len(ids)
+    if not n:
+        raise ValueError("no probe questions of this type")
+    by = {v: [s for s in ids if value[s] == v] for v in values}
+    per = []
+    for label, a, b in pairs:
+        only_a = sum(res[a][s] and not res[b][s] for s in ids)
+        only_b = sum(res[b][s] and not res[a][s] for s in ids)
+        per.append({"pair": label, "a": a, "b": b, "n": n, "acc_a": _acc(res[a], ids), "acc_b": _acc(res[b], ids),
+                    "by_answer_a": {v: _acc(res[a], by[v]) for v in values},
+                    "by_answer_b": {v: _acc(res[b], by[v]) for v in values},
+                    "diff": (only_a - only_b) / n, "only_a": only_a, "only_b": only_b,
+                    "discordance": (only_a + only_b) / n, "p": mcnemar(only_a, only_b)})
+    only_a, only_b = sum(r["only_a"] for r in per), sum(r["only_b"] for r in per)
+    diffs = [r["diff"] for r in per]
+    diff, p = sum(diffs) / len(diffs), mcnemar(only_a, only_b)
+    pooled = {"n": n * len(per), "diff": diff, "only_a": only_a, "only_b": only_b,
+              "discordance": (only_a + only_b) / (n * len(per)), "p": p, **verdict(diff, diffs, MIN_DIFF["goal"], p)}
+    return {"n": n, "n_by_answer": {v: len(by[v]) for v in values}, "per_pair": per, "pooled": pooled}
+
+
+def compare_balanced(res: Dict[str, Dict[str, bool]], pairs: Sequence[Tuple[str, str, str]], ids: Sequence[str],
+                     value: Dict[str, str], values: Sequence[str], reps: int = BOOT_REPS,
+                     seed: int = BOOT_SEED) -> Dict[str, Any]:
+    """Occlusion: per pair the balanced-accuracy difference a - b (the mean of the per-answer accuracies), pooled the
+    mean of the pair differences; each with a CI and p from the stratified paired bootstrap (``stratified_draws``,
+    the same draw for every model).  The verdict does not use the CI or p."""
+    import numpy as np
+
+    strata = [[s for s in ids if value[s] == v] for v in values]
+    if not all(strata):
+        raise ValueError(f"an answer value without questions: {dict(zip(values, map(len, strata)))}")
+    draws = stratified_draws([len(st) for st in strata], reps, seed)
+    per, boots = [], []
+    for label, a, b in pairs:
+        d = np.zeros(reps)
+        for st, idx in zip(strata, draws):
+            xa = np.array([res[a][s] for s in st], float)
+            xb = np.array([res[b][s] for s in st], float)
+            d += (xa[idx].mean(1) - xb[idx].mean(1)) / len(strata)
+        boots.append(d)
+        acc_a = {v: _acc(res[a], st) for v, st in zip(values, strata)}
+        acc_b = {v: _acc(res[b], st) for v, st in zip(values, strata)}
+        bal_a, bal_b = sum(acc_a.values()) / len(values), sum(acc_b.values()) / len(values)
+        only_a = sum(res[a][s] and not res[b][s] for s in ids)
+        only_b = sum(res[b][s] and not res[a][s] for s in ids)
+        per.append({"pair": label, "a": a, "b": b, "n": len(ids), "bal_a": bal_a, "bal_b": bal_b,
+                    "by_answer_a": acc_a, "by_answer_b": acc_b, "diff": bal_a - bal_b, "only_a": only_a,
+                    "only_b": only_b, "discordance": (only_a + only_b) / len(ids), **_boot(d)})
+    diffs = [r["diff"] for r in per]
+    diff = sum(diffs) / len(diffs)
+    only_a, only_b = sum(r["only_a"] for r in per), sum(r["only_b"] for r in per)
+    pooled = {"n": len(ids) * len(per), "diff": diff, "only_a": only_a, "only_b": only_b,
+              "discordance": (only_a + only_b) / (len(ids) * len(per)), **_boot(sum(boots) / len(boots)),
+              **verdict(diff, diffs, MIN_DIFF["occlusion"])}
+    return {"n": len(ids), "n_by_answer": {v: len(st) for v, st in zip(values, strata)}, "per_pair": per,
+            "pooled": pooled}
+
+
+def parse_group(spec: str) -> Tuple[str, List[str]]:
+    """[GROUP=]S0_RESULT,D_RESULT or [GROUP=]RESULT -> (group name, result names); no GROUP: the result names.  A
+    result name may carry a folder (relative to OUT, or absolute) when the groups' results lie in different folders."""
+    name, rest = spec.split("=", 1) if "=" in spec else ("", spec)
+    models = [m for m in rest.split(",") if m]
+    if len(models) not in (1, 2):
+        raise ValueError(f"a group is one result or two (S0 RL, D RL): {spec}")
+    return name or "-".join(Path(m).name for m in models), models
+
+
+def make_pairs(a: Sequence[str], b: Sequence[str]) -> List[Tuple[str, str, str]]:
+    """(label, a, b): S0 against S0 and D against D; a single result serves both pairs; one result each: one pair."""
+    if max(len(a), len(b)) == 1:
+        return [("single", a[0], b[0])]
+    return [(label, a[min(i, len(a) - 1)], b[min(i, len(b) - 1)]) for i, label in enumerate(("S0", "D"))]
+
+
+def compare(probe_path: Path, out: Path, a: Tuple[str, List[str]], b: Tuple[str, List[str]], label: str,
+            reps: int = BOOT_REPS, seed: int = BOOT_SEED) -> Dict[str, Any]:
+    """Group a - group b on the probe, as section 3.3 of the pre-registration has it (the module docstring)."""
+    lines = Path(probe_path).read_text(encoding="utf-8").splitlines()
+    probe = {r["sample_id"]: r for r in (json.loads(l) for l in lines if l.strip())}
+    value = {s: r.get("answer_value") for s, r in probe.items()}
+    pairs = make_pairs(a[1], b[1])
+    res = {m: load_correct(Path(out), m, probe, GOAL_TYPES + OCC_TYPES) for m in dict.fromkeys(a[1] + b[1])}
+
+    def ids(types: Sequence[str]) -> List[str]:
+        return [s for s, r in probe.items() if r["qtype"] in types]
+
+    result: Dict[str, Any] = {
+        "label": label, "probe": str(probe_path), "out": str(out),
+        "groups": {"a": {"name": a[0], "results": a[1]}, "b": {"name": b[0], "results": b[1]}},
+        "pairs": [{"pair": p, "a": x, "b": y} for p, x, y in pairs],
+        "rules": {"alpha": ALPHA, "min_diff": MIN_DIFF, "reps": reps, "seed": seed}}
+    for q in GOAL_TYPES:
+        result[q] = compare_mcnemar(res, pairs, ids((q,)), value, ANSWER_VALUES["goal"])
+    result["occlusion"] = {"qtypes": list(OCC_TYPES), **compare_balanced(
+        res, pairs, ids(OCC_TYPES), value, ANSWER_VALUES["occlusion"], reps, seed)}
+    return result
+
+
+VERDICT_ZH = {"difference": "**有差异**", "no difference": "没有差异"}
+PAIR_ZH = {"S0": "S0", "D": "D", "single": "单对"}
+
+
+def _pp(x: Optional[float], signed: bool = False) -> str:
+    return "–" if x is None else f"{100 * x:+.1f}" if signed else f"{100 * x:.1f}"
+
+
+def _p(p: float) -> str:
+    return "< 0.001" if p < 0.001 else f"{p:.3f}"
+
+
+def _why(pooled: Dict[str, Any], kind: str, single: bool) -> str:
+    text = {"p": "p ≥ 0.05", "size": f"|差| < {100 * MIN_DIFF[kind]:.0f} 个百分点",
+            "sign": "差为 0" if single else "S0 和 D 的差不同号或为 0"}
+    return "；没达到：" + "、".join(text[f] for f in pooled["failed"]) if pooled["failed"] else ""
+
+
+def compare_markdown(r: Dict[str, Any]) -> str:
+    A, B = r["groups"]["a"]["name"], r["groups"]["b"]["name"]
+    single, occ = len(r["pairs"]) == 1, r["occlusion"]
+    nv, rules = occ["n_by_answer"], r["rules"]
+
+    def per_pair(rows: Sequence[Dict[str, Any]]) -> str:
+        return "" if single else "；" + "、".join(f"{PAIR_ZH[x['pair']]} {_pp(x['diff'], True)}" for x in rows)
+
+    md = [f"# 探针比较：{A} − {B}（`{r['label']}`）", "",
+          f"`python -m eval.diagnostics.qa_probe compare`，按 `docs/transition_qa/PREREG_D_vs_C.md` 第 3.3 节。"
+          f"题集 `{r['probe']}`，回答在 `{r['out']}`。", "",
+          "- 配对：" + "；".join(f"{PAIR_ZH[p['pair']]}：`{p['a']}` 对 `{p['b']}`" for p in r["pairs"]) + "。",
+          "- goal 两类各自比：每对的准确率差，McNemar 精确检验（只看一对一错的题，双侧二项检验）；合起来的差是各对的差的平均，"
+          f"McNemar 用 {len(r['pairs'])} × n 个\"题 × RL\"。判定\"有差异\"：合起来 p < {ALPHA}，"
+          f"且 |差| ≥ {100 * MIN_DIFF['goal']:.0f} 个百分点，且各对的差同号。",
+          f"- 遮挡两类合起来（{occ['n']} 道：完全 / 部分 / 没有 {nv['full']} / {nv['partial']} / {nv['none']} 道）比平衡准确率"
+          f"（三种答案各自准确率的平均，随机 33.3%）。95% 置信区间和双侧 p 来自自助法（{rules['reps']:,} 次，种子 {rules['seed']}，"
+          "在每种答案里按题重抽，两组、各对用同一组抽样）。判定\"有差异\"：|合起来的差| ≥ "
+          f"{100 * MIN_DIFF['occlusion']:.0f} 个百分点，且各对的差同号；置信区间和 p 照报，不参与判定。",
+          "- 不一致率：一边对、一边错的题占的比例。"]
+    if single:
+        md.append("- 只有一对（检查用）：\"同号\"只要求差不为 0。")
+    md += ["", "## 结论", ""]
+    for q in GOAL_TYPES:
+        pl = r[q]["pooled"]
+        md.append(f"- `{q}`：{VERDICT_ZH[pl['verdict']]}（{A} − {B} {_pp(pl['diff'], True)} 个百分点，McNemar p = "
+                  f"{_p(pl['p'])}{per_pair(r[q]['per_pair'])}{_why(pl, 'goal', single)}）")
+    pl = occ["pooled"]
+    md += [f"- 遮挡两类合起来的平衡准确率：{VERDICT_ZH[pl['verdict']]}（{A} − {B} {_pp(pl['diff'], True)} 个百分点，"
+           f"95% 置信区间 {_pp(pl['ci'][0], True)} 到 {_pp(pl['ci'][1], True)}，p = {_p(pl['p'])}"
+           f"{per_pair(occ['per_pair'])}{_why(pl, 'occlusion', single)}）", "",
+           "## goal 两类：准确率（%）", "",
+           "括号里是答案为 Yes / No 时的准确率。", "",
+           f"| 题类 | 配对 | 题数 | {A}（Yes / No） | {B}（Yes / No） | {A} − {B} | 只有 {A} 对 / 只有 {B} 对 | 不一致率 | "
+           "McNemar p | 判定 |",
+           "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+
+    def cell(acc: Optional[float], by: Dict[str, Optional[float]]) -> str:
+        return f"{_pp(acc)}（{' / '.join(_pp(x) for x in by.values())}）"
+
+    for q in GOAL_TYPES:
+        for x in r[q]["per_pair"]:
+            md.append(f"| `{q}` | {PAIR_ZH[x['pair']]} | {x['n']} | {cell(x['acc_a'], x['by_answer_a'])} | "
+                      f"{cell(x['acc_b'], x['by_answer_b'])} | {_pp(x['diff'], True)} | {x['only_a']} / {x['only_b']} | "
+                      f"{_pp(x['discordance'])} | {_p(x['p'])} | |")
+        pl = r[q]["pooled"]
+        md.append(f"| `{q}` | 合起来 | {pl['n']} | – | – | {_pp(pl['diff'], True)} | {pl['only_a']} / {pl['only_b']} | "
+                  f"{_pp(pl['discordance'])} | {_p(pl['p'])} | {VERDICT_ZH[pl['verdict']]} |")
+    md += ["", "## 遮挡两类合起来：平衡准确率（%）", "",
+           "括号里是答案为完全 / 部分 / 没有时的准确率；单个配对的置信区间和 p 只作参考。", "",
+           f"| 配对 | 题数 | {A}（完全 / 部分 / 没有） | {B}（完全 / 部分 / 没有） | {A} − {B} | 95% 置信区间 | p | "
+           f"只有 {A} 对 / 只有 {B} 对 | 不一致率 | 判定 |",
+           "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for x in occ["per_pair"]:
+        md.append(f"| {PAIR_ZH[x['pair']]} | {x['n']} | {cell(x['bal_a'], x['by_answer_a'])} | "
+                  f"{cell(x['bal_b'], x['by_answer_b'])} | {_pp(x['diff'], True)} | "
+                  f"{_pp(x['ci'][0], True)} 到 {_pp(x['ci'][1], True)} | {_p(x['p'])} | {x['only_a']} / {x['only_b']} | "
+                  f"{_pp(x['discordance'])} | |")
+    po = occ["pooled"]
+    md.append(f"| 合起来 | {po['n']} | – | – | {_pp(po['diff'], True)} | {_pp(po['ci'][0], True)} 到 "
+              f"{_pp(po['ci'][1], True)} | {_p(po['p'])} | {po['only_a']} / {po['only_b']} | {_pp(po['discordance'])} | "
+              f"{VERDICT_ZH[po['verdict']]} |")
+    return "\n".join(md) + "\n"
+
+
+def cmd_compare(args: argparse.Namespace) -> None:
+    out = Path(args.out)
+    a, b = parse_group(args.a), parse_group(args.b)
+    label = args.label or f"{a[0]}_vs_{b[0]}"
+    result = compare(Path(args.probe), out, a, b, label, args.reps, args.seed)
+    (out / f"compare_{label}.json").write_text(json.dumps(result, indent=1, ensure_ascii=False), encoding="utf-8")
+    md = compare_markdown(result)
+    (out / f"compare_{label}.md").write_text(md, encoding="utf-8")
+    print(md.split("## goal")[0])
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -438,6 +724,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     c.add_argument("--probe-name", default="p1_probe.jsonl", help="how the table names the probe set")
     c.add_argument("--reference", action="append", default=[], help="NAME=LABEL: a fixed row (e.g. the text-only baseline)")
     c.set_defaults(func=cmd_curve)
+    k = sub.add_parser("compare", help="group A - group B, as PREREG_D_vs_C.md section 3.3 has it")
+    k.add_argument("--probe", required=True)
+    k.add_argument("--out", required=True, help="the folder with the result files; compare_<label>.json / .md go here")
+    k.add_argument("--a", required=True, help="[GROUP=]S0_RESULT,D_RESULT or [GROUP=]RESULT (result names in OUT; "
+                                              "a name may carry a folder, relative to OUT or absolute)")
+    k.add_argument("--b", required=True, help="as --a; the differences are A - B")
+    k.add_argument("--label", default="", help="the output name (default: A's name _vs_ B's name)")
+    k.add_argument("--reps", type=int, default=BOOT_REPS, help="bootstrap replicates")
+    k.add_argument("--seed", type=int, default=BOOT_SEED, help="bootstrap seed")
+    k.set_defaults(func=cmd_compare)
     args = ap.parse_args(argv)
     args.func(args)
 
