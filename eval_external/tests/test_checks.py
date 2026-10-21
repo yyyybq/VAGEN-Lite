@@ -89,6 +89,18 @@ def test_esi_action_rule():
         "no_json", "no_answer", "no_confidence"]
 
 
+def test_pool_slots_fill_h800_first():
+    from eval_external.sco import job as J
+
+    assert J.POOL_LIMITS == {"h800": 4, "zoetrope": 4} and J.MAX_ACTIVE == 8
+    assert J.free_pool({"h800": 3, "zoetrope": 0}) == "h800"
+    assert J.free_pool({"h800": 4, "zoetrope": 0}) == "zoetrope"
+    assert J.free_pool({"h800": 4, "zoetrope": 3}) == "zoetrope"
+    assert J.free_pool({"h800": 4, "zoetrope": 4}) is None
+    assert J.active_by_pool([{"pool": "h800"}, {"pool": "zoetrope"}, {"pool": "h800"}, {}]) == {
+        "h800": 3, "zoetrope": 1}  # a record without a pool was submitted to h800
+
+
 def test_waiting_jobs_move_to_the_less_crowded_pool(tmp_path):
     from eval_external.sco import queue as Q
 

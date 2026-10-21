@@ -1,4 +1,5 @@
-"""Keep up to MAX_ACTIVE one-card jobs running from a list of MODEL:KIND items (login node, background).
+"""Keep one-card jobs running from a list of MODEL:KIND items (login node, background), up to J.POOL_LIMITS per
+pool (2026-10-21: h800 4, zoetrope 4; a new job takes h800's free slots first, then zoetrope's).
 
     nohup python -m eval_external.sco.queue --stage step2 ours-SFT:OwnEnv base-7B:WalkerBench SI-7B:VSI-Bench ... &
 
@@ -11,8 +12,8 @@ KIND is a QA benchmark of qa_transfer/benchmarks.py, or
   OwnEnv-lenient                          the same, history as is, untagged "Answer:" lines accepted
 
 Every minute: a finished job (SUCCEEDED, exit 0) is collected into RUN/results.json and deleted; a failed one is
-left as it is and marked failed (never resubmitted automatically); a pending item is submitted when fewer than
-MAX_ACTIVE of our jobs are unfinished and its inputs are prepared.  Items are submitted in list order.  The state
+left as it is and marked failed (never resubmitted automatically); a pending item is submitted when a pool has a
+free slot and its inputs are prepared.  Items are submitted in list order.  The state
 of every item is written to ROOT/runs/queue_<stage>.json.  Exits when nothing is pending or running.
 """
 
@@ -166,7 +167,7 @@ def move_target(receipt: Path, state: str, waiting: dict[str, int], now: float |
 
 def step(stage: str, items: list[tuple[str, Item]]) -> dict:
     status = {}
-    n_active = len(J.active())
+    counts = J.active_by_pool()  # our unfinished jobs per pool, against J.POOL_LIMITS
     waiting = None
     for key, it in items:
         receipt = it.run_dir / "job" / "submission.json"
@@ -176,10 +177,15 @@ def step(stage: str, items: list[tuple[str, Item]]) -> dict:
             if st["state"] in J.WAITING:
                 waiting = pool_waiting() if waiting is None else waiting
                 target = move_target(receipt, st["state"], waiting)
+                if target and counts.get(target, 0) >= J.POOL_LIMITS[target]:
+                    target = None  # no free slot of ours there
             if target:
+                source = json.loads(receipt.read_text()).get("pool", J.POOL)
                 old = J.delete(it.run_dir)
                 if old["delete_rc"] == 0:
                     J.submit(it.run_dir, it.name, it.command, {}, also_own=it.also_own, pool=target)
+                    counts[source] -= 1
+                    counts[target] = counts.get(target, 0) + 1
                     status[key] = f"moved to {target} (was waiting as {old['job_id']}; waiting jobs {waiting})"
                     continue
             if st["state"] == "SUCCEEDED" and st["exit_code"] == "0":
@@ -197,15 +203,16 @@ def step(stage: str, items: list[tuple[str, Item]]) -> dict:
         if (it.run_dir / "results.json").exists():
             status[key] = done_label(it.run_dir)
             continue
-        if n_active >= J.MAX_ACTIVE:
+        pool = J.free_pool(counts)  # h800 first, then zoetrope
+        if pool is None:
             status[key] = "pending"
             continue
         if not it.prepared():
             status[key] = "pending (inputs not prepared)"
             continue
-        J.submit(it.run_dir, it.name, it.command, {}, also_own=it.also_own)
-        n_active += 1
-        status[key] = "submitted"
+        J.submit(it.run_dir, it.name, it.command, {}, also_own=it.also_own, pool=pool)
+        counts[pool] += 1
+        status[key] = f"submitted ({pool})"
     return status
 
 

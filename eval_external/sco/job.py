@@ -5,9 +5,10 @@
     python -m eval_external.sco.job delete --run RUN_DIR      # after it ends (or to cancel)
     python -m eval_external.sco.job active                    # our jobs that are not finished
 
-Rules (decided 2026-10-18): pool h800, one H800 per job, at most MAX_ACTIVE of our jobs not finished at once
-(the round-11 training chain runs on zoetrope).  2026-10-20: a job that waits for a card on h800 may be moved to
-zoetrope (sco/queue.py does it after MOVE_AFTER_S), still within MAX_ACTIVE.  Every job is recorded in ROOT/sco_jobs.jsonl.  The job runs as
+Rules (decided 2026-10-18): pool h800, one H800 per job, at most 4 of our jobs not finished at once (the round-11
+training chain runs on zoetrope).  2026-10-20: a job waiting for a card may move to the other pool (sco/queue.py).
+2026-10-21: at most POOL_LIMITS unfinished jobs per pool, h800 4 and zoetrope 4 (8 in all); a new job takes the
+first pool in POOLS order with a free slot, so h800 fills first.  Every job is recorded in ROOT/sco_jobs.jsonl.  The job runs as
 root in the container; launch.sh hands RUN_DIR and LMUData back to the user when it ends.  The command runs
 with the eval-external conda env, offline Hugging Face (everything is downloaded on the login node first) and
 the worktree as working directory.
@@ -32,9 +33,10 @@ SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
 IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"   # same image as the training jobs
 MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
 POOL = "h800"
-POOLS = ("h800", "zoetrope")  # zoetrope only for jobs moved after waiting on h800 (2026-10-20)
+POOLS = ("h800", "zoetrope")  # in this order a new job takes the first pool with a free slot (2026-10-21)
+POOL_LIMITS = {"h800": 4, "zoetrope": 4}  # our unfinished jobs per pool (2026-10-21: zoetrope up to 4 more)
 SPEC = "N4lS.Iq.I80.1"  # one H800, 14 vCPU
-MAX_ACTIVE = 4
+MAX_ACTIVE = sum(POOL_LIMITS.values())
 WAITING = {"STARTING", "QUEUEING", "PENDING"}  # submitted, no card yet
 OWNER = "20325:20325"  # yinbaiqiao
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED", "NOT_FOUND"}
@@ -96,17 +98,35 @@ def active() -> list[dict]:
     return out
 
 
+def active_by_pool(running: list[dict] | None = None) -> dict[str, int]:
+    """Our unfinished jobs per pool."""
+    out = {p: 0 for p in POOLS}
+    for r in active() if running is None else running:
+        p = r.get("pool", POOL)
+        out[p] = out.get(p, 0) + 1
+    return out
+
+
+def free_pool(counts: dict[str, int]) -> str | None:
+    """The first pool in POOLS order with fewer unfinished jobs than its limit, or None when all are full."""
+    return next((p for p in POOLS if counts.get(p, 0) < POOL_LIMITS[p]), None)
+
+
 def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_limit: bool = False,
-           also_own: tuple[str, ...] = (), pool: str = POOL) -> str:
-    if pool not in POOLS:
+           also_own: tuple[str, ...] = (), pool: str | None = None) -> str:
+    """pool None: the first pool with a free slot (h800, then zoetrope)."""
+    if pool is not None and pool not in POOLS:
         raise SystemExit(f"pool {pool} not allowed ({POOLS})")
     job = run / "job"
     receipt = job / "submission.json"
     if receipt.exists():
         return json.loads(receipt.read_text())["job_id"]
     running = active()
-    if len(running) >= MAX_ACTIVE and not force_limit:
-        raise SystemExit(f"{len(running)} eval_external jobs not finished (limit {MAX_ACTIVE}): "
+    counts = active_by_pool(running)
+    if pool is None:
+        pool = free_pool(counts) or (POOL if force_limit else None)
+    if pool is None or (counts.get(pool, 0) >= POOL_LIMITS[pool] and not force_limit):
+        raise SystemExit(f"no free slot (unfinished jobs per pool {counts}, limits {POOL_LIMITS}): "
                          + ", ".join(r["name"] for r in running))
     job.mkdir(parents=True, exist_ok=True)
     (job / "launch.sh").write_text(launch_script(run, command, env, also_own))
@@ -172,7 +192,8 @@ def main() -> None:
     ap.add_argument("--run", type=Path)
     ap.add_argument("--name")
     ap.add_argument("--env", action="append", default=[], help="KEY=VALUE exported in the job")
-    ap.add_argument("--force-limit", action="store_true", help="submit even with MAX_ACTIVE jobs running")
+    ap.add_argument("--force-limit", action="store_true", help="submit even when the pool limits are reached")
+    ap.add_argument("--pool", choices=POOLS, help="default: the first pool with a free slot")
     ap.add_argument("--also-own", action="append", default=[], help="another folder the job writes, handed back")
     opts, command = split_argv(sys.argv[1:])
     args = ap.parse_args(opts)
@@ -186,7 +207,7 @@ def main() -> None:
         if not command or not args.name:
             raise SystemExit("submit needs --name and a command after --")
         env = dict(kv.split("=", 1) for kv in args.env)
-        print(submit(run, args.name, command, env, args.force_limit, tuple(args.also_own)))
+        print(submit(run, args.name, command, env, args.force_limit, tuple(args.also_own), args.pool))
     elif args.action == "status":
         print(json.dumps(status(run)))
     else:
