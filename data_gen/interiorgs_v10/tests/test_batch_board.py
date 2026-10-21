@@ -63,6 +63,23 @@ class BatchBoardTest(unittest.TestCase):
         self.result("v2", "test", "new_100", set())
         self.assertEqual(B.best_checkpoint(self.sets, "new", 100), "new_050")
 
+    def test_quality(self):
+        """Round 12 batch: a model's end progress over its failed episodes, the share of success conditions met at the
+        end and the collision rate over validation + test; nothing for rows without a recorded trajectory."""
+        for part in ("val", "test"):  # every task of the set, all failed the same way
+            d = Path(self.sets["v2"][part]) / "m_100"
+            d.mkdir(parents=True)
+            tasks = [json.loads(l) for l in (Path(self.sets["v2"][part]) / "tasks.jsonl").read_text().splitlines()]
+            rows = [{"task_id": t["task_id"], "task_type": "absolute_positioning", "success": False, "actions": 4,
+                     "collisions": 1, "start": {"progress": 0.0, "failed_gates": ["distance"]},
+                     "trajectory": [{"progress": 0.2, "failed_gates": ["distance", "visible", "in_front"]}]} for t in tasks]
+            (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            (d / "done.json").write_text("{}")
+        self.assertEqual(B.quality(self.sets, "m_100"), "；终点进度分（失败的题）0.200、终点满足的条件 50.0%、碰撞率 25.0%")
+        self.result("v2", "val", "plain", {"v1"})  # rows without trajectories
+        self.result("v2", "test", "plain", set())
+        self.assertEqual(B.quality(self.sets, "plain"), "")
+
     def test_rows_and_render(self):
         now = datetime.datetime(2026, 10, 20, 8, 0, tzinfo=datetime.timezone.utc)
 

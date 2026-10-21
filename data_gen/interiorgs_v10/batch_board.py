@@ -146,7 +146,7 @@ def experiment_results(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], st:
         pick = (steps.get("pick_sft") or {}).get("decision") or {}
         if pick.get("best"):
             val, test = success(results(sets, pick["best"], "val")), success(results(sets, pick["best"], "test"))
-            line = f"- SFT 挑出 {pick['best']}：验证集 {fmt(val)}、评测集 {fmt(test)}"
+            line = f"- SFT 挑出 {pick['best']}：验证集 {fmt(val)}、评测集 {fmt(test)}{quality(sets, pick['best'])}"
             c = compare(sets, exp["sft_control"], pick["best"]) if exp.get("sft_control") else None
             if c:
                 line += f"；对 {exp['sft_control']}：{cmp_text(c)}"
@@ -163,7 +163,7 @@ def experiment_results(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], st:
             continue
         picks[reward] = best
         line = f"- {reward}（{run}）挑出 {best}：验证集 {fmt(success(results(sets, best, 'val')))}、评测集 " \
-               f"{fmt(success(results(sets, best, 'test')))}"
+               f"{fmt(success(results(sets, best, 'test')))}{quality(sets, best)}"
         control = (exp.get("controls") or {}).get(run)
         c = compare(sets, control, best) if control else None
         if c:
@@ -174,6 +174,26 @@ def experiment_results(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], st:
         if c:
             lines.append(f"- D 对 S0：{cmp_text(c)}")
     return lines
+
+
+def quality(sets: Dict[str, Dict[str, str]], name: str) -> str:
+    """Round 12 batch (the user's decision of 2026-10-21): a model's end progress over its failed episodes, the share
+    of the success conditions met at the end and the collision rate (validation + test); "" without recorded
+    trajectories."""
+    from .evaluation import terminal_metrics
+
+    rows = []
+    for part in ("val", "test"):
+        res = results(sets, name, part)
+        rows += list((res or {}).values())
+    t = terminal_metrics(rows)
+    if not t["episodes"]:
+        return ""
+    actions = sum(int(r.get("actions") or 0) for r in rows)
+    collisions = sum(int(r.get("collisions") or 0) for r in rows)
+    prog = "—" if t["progress_end_fail"] is None else f"{t['progress_end_fail']:.3f}"
+    return (f"；终点进度分（失败的题）{prog}、终点满足的条件 {fmt(t['conditions_met_share'])}、"
+            f"碰撞率 {fmt(collisions / actions if actions else None)}")
 
 
 def fmt(v: Optional[float]) -> str:
