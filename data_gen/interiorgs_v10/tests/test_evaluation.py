@@ -67,6 +67,44 @@ class EvaluationTest(unittest.TestCase):
         self.assertIn("| busy | 1 | 1.000 |", table)
         self.assertNotIn("| new |", table)
 
+    def test_terminal_metrics(self):
+        """Round 12 batch: how close the episodes end to success: the last pose's progress over the successful and the
+        failed episodes, the share of the family's success conditions met at the end (a role prefix of a clearly-visible
+        condition does not make it another one); rows without a recorded trajectory are left out."""
+        base = {"collisions": 0, "actions": 2, "turns": 1, "invalid_turns": 0, "d_star": 2, "actions_to_success": None}
+        rows = [dict(base, task_type="absolute_positioning", success=True, actions_to_success=2,
+                     start={"progress": 0.1, "failed_gates": ["distance"]},
+                     trajectory=[{"progress": 0.7, "failed_gates": [], "met": True}]),
+                dict(base, task_type="absolute_positioning", success=False, collisions=1,
+                     start={"progress": 0.1, "failed_gates": ["distance"]},
+                     trajectory=[{"progress": 0.2, "failed_gates": ["distance", "target_a_clearly_visible"]}]),
+                dict(base, task_type="equidistance", success=False, turns=0, actions=0,
+                     start={"progress": 0.05, "failed_gates": ["equidistant", "reference_b_clearly_visible", "visible"]},
+                     trajectory=[]),
+                dict(base, task_type="equidistance", success=True, actions_to_success=2)]  # an old row: no trajectory
+        self.assertEqual(E.condition_name("target_a_clearly_visible"), "a_clearly_visible")
+        self.assertEqual(E.condition_name("reference_b_clearly_visible"), "b_clearly_visible")
+        self.assertEqual(E.condition_name("target_in_front"), "target_in_front")
+        m = E.terminal_metrics(rows)
+        self.assertEqual(m["episodes"], 3)
+        self.assertEqual((m["progress_end_success"], m["progress_end_fail"]), (0.7, 0.125))
+        fam = m["conditions_met_by_family"]
+        self.assertEqual(fam["absolute_positioning"], {"conditions": 6, "met_share": 0.8333, "met_share_failed": 0.6667,
+                                                       "episodes": 2})
+        self.assertEqual(fam["equidistance"]["met_share"], round(1 - 3 / 7, 4))
+        self.assertEqual(m["conditions_met_share"], round((1 + 4 / 6 + 4 / 7) / 3, 4))
+        self.assertIsNone(E.terminal_metrics(rows[3:])["progress_end_fail"])
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "model_a"
+            d.mkdir()
+            (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            E.cmd_terminal(type("A", (), {"eval": tmp})())
+            out = json.loads((Path(tmp) / "terminal.json").read_text())
+            table = (Path(tmp) / "terminal.md").read_text(encoding="utf-8")
+        self.assertEqual(out["model_a"]["progress_end_fail"], 0.125)
+        self.assertEqual(out["model_a"]["collision_rate"], round(1 / 6, 4))
+        self.assertIn("| model_a | 3 |", table)
+
     def test_run_episode_records_the_trajectory(self):
         from PIL import Image
 
