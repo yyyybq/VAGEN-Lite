@@ -15,7 +15,8 @@ RNG, which draws the kitchen layout / style and object placement), the task-spec
 model's 16-step chunk), stop on success.  Episodes run longest horizon first.  Each worker process keeps one
 websocket client and first makes RoboCasa's counter-region order process-independent (stable_counter_regions; off
 with --no-stable-regions).  Writes OUT/episodes.jsonl (one line per episode, including a fingerprint of the initial
-state and its joint positions) and OUT/summary.json.
+state and its joint positions), OUT/summary.json, and per episode an example strip OUT/frames/<task>_s<seed>.jpg
+(8 evenly spaced 128 px frames of the left agent-view camera; off with --no-frames).
 """
 from __future__ import annotations
 
@@ -169,6 +170,69 @@ def _init_worker(ckpt: str, servers, starvla_root: str, stable_regions: bool = T
         _STATE["init_error"] = f"{type(exc).__name__}: {exc}"[:500]
 
 
+FRAME_CAMERA = "video.robot0_agentview_left"
+FRAME_SIZE = 128
+FRAMES_PER_EPISODE = 8
+
+
+def pick_indices(n: int, k: int) -> list:
+    """k evenly spaced indices into n items, first and last included (all of them if n <= k)."""
+    if n <= k:
+        return list(range(n))
+    return sorted({round(i * (n - 1) / (k - 1)) for i in range(k)})
+
+
+class FrameRecorder:
+    """One small frame of FRAME_CAMERA per policy call; at the end FRAMES_PER_EPISODE evenly spaced ones (the first
+    and the last included) are written side by side as one JPEG, with the control step under each frame and a
+    green (success) or red (failure) bar at the bottom: the example strips of the result report."""
+
+    def __init__(self, path: Path, size: int = FRAME_SIZE, keep: int = FRAMES_PER_EPISODE, camera: str = FRAME_CAMERA):
+        self.path, self.size, self.keep, self.camera, self.frames = Path(path), size, keep, camera, []
+
+    def add(self, step: int, obs) -> None:
+        import numpy as np
+        from PIL import Image
+
+        img = obs.get(self.camera) if hasattr(obs, "get") else None
+        if img is None:
+            return
+        arr = np.asarray(img)
+        arr = arr[-1] if arr.ndim == 4 else arr
+        small = Image.fromarray(arr.astype(np.uint8)).resize((self.size, self.size), Image.BILINEAR)
+        self.frames.append((int(step), np.asarray(small)))
+
+    def save(self, success: bool) -> dict:
+        from PIL import Image, ImageDraw
+
+        chosen = [self.frames[i] for i in pick_indices(len(self.frames), self.keep)]
+        if not chosen:
+            return {"frames_error": f"no {self.camera} in the observations"}
+        label, bar = 14, 4
+        sheet = Image.new("RGB", (self.size * len(chosen), self.size + label + bar), (255, 255, 255))
+        draw = ImageDraw.Draw(sheet)
+        for i, (step, frame) in enumerate(chosen):
+            sheet.paste(Image.fromarray(frame), (i * self.size, 0))
+            draw.text((i * self.size + 3, self.size + 1), f"t={step}", fill=(40, 40, 40))
+        draw.rectangle([0, self.size + label, sheet.width, sheet.height], fill=(34, 139, 34) if success else (200, 40, 40))
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        sheet.save(self.path, quality=85)
+        return {"frames": f"{self.path.parent.name}/{self.path.name}", "frame_steps": [s for s, _ in chosen]}
+
+
+def _safe(fn):
+    """fn, but a failure only switches it off (recording frames must never stop an episode)."""
+    state = {"on": True}
+
+    def call(*args):
+        if state["on"]:
+            try:
+                fn(*args)
+            except Exception:
+                state["on"] = False
+    return call
+
+
 def run_episode(spec: dict) -> dict:
     out = dict(spec, worker=_STATE.get("worker"), server=_STATE.get("server"), pid=os.getpid())
     if "init_error" in _STATE:
@@ -187,6 +251,10 @@ def run_episode(spec: dict) -> dict:
         out["reset_seconds"] = round(time.monotonic() - started, 2)
         out["init"] = state_fingerprint(env, obs)
         out["init_qpos"] = initial_qpos(env)
+        recorder = FrameRecorder(Path(spec["frames_dir"]) / f"{spec['task']}_s{spec['seed']}.jpg") \
+            if spec.get("frames_dir") else None
+        record = _safe(recorder.add) if recorder else (lambda *a: None)
+        record(0, obs)
         steps, calls, success, latencies = 0, 0, False, []
         terminated = truncated = False
         while steps < spec["max_steps"] and not (success or terminated or truncated):
@@ -201,10 +269,16 @@ def run_episode(spec: dict) -> dict:
                 success = success or bool(info.get("success", False))
                 if success or terminated or truncated:
                     break
+            record(steps, obs)
         out.update(success=bool(success), steps=steps, policy_calls=calls, terminated=bool(terminated),
                    truncated=bool(truncated), step_limit=steps >= spec["max_steps"],
                    inference_mean_seconds=round(float(np.mean(latencies)), 4) if latencies else None,
                    status="complete")
+        if recorder:
+            try:
+                out.update(recorder.save(success))
+            except Exception as exc:  # an example strip is never worth an episode
+                out["frames_error"] = f"{type(exc).__name__}: {exc}"[:300]
     except Exception as exc:
         out.update(status="error", error=f"{type(exc).__name__}: {exc}"[:500], traceback=traceback.format_exc()[-2000:])
     finally:
@@ -248,6 +322,8 @@ def main() -> int:
     ap.add_argument("--starvla-root", default=str(WORKTREE / "third_party/starVLA"))
     ap.add_argument("--no-stable-regions", dest="stable_regions", action="store_false",
                     help="leave RoboCasa's counter-region order as it is (differs between processes)")
+    ap.add_argument("--no-frames", dest="frames", action="store_false",
+                    help="do not write the per-episode example strip OUT/frames/<task>_s<seed>.jpg")
     args = ap.parse_args()
     eval_plan = None
     if args.eval_plan:
@@ -265,6 +341,8 @@ def main() -> int:
     episodes = longest_first(episodes)
     for e in episodes:
         e.update(split=args.split, execute_steps=args.execute_steps)
+        if args.frames:
+            e["frames_dir"] = str(args.out / "frames")
     (args.out / "plan.json").write_text(json.dumps({"ckpt": args.ckpt, "servers": args.servers, "workers": args.workers,
                                                     "stable_counter_regions": args.stable_regions,
                                                     "eval_plan": eval_plan and {"path": str(args.eval_plan),
