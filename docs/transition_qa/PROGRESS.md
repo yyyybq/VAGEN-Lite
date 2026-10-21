@@ -861,3 +861,4 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - 清单在 `occ_judge_all/alignment_tasks_*.jsonl`。
 - 文档 `OCCLUSION_JUDGE.md`：框判据错在哪、深度图判据的定义、校准、两次核对的数字、2,249 道的测量、对题库探针和环境评测集的影响、没做的。
 - 和 main 同步：合入 `2b54b45d`（`a5c5f2fc`，没有冲突，本分支的 `think_rate` 保留）。两个冻结期补丁又挪了一次：1 处说明文字冲突，两边都保留；训练链 40 个测试通过（main 32 个 + 补丁 8 个）。
+- 全部登记的测试（80 个文件，合并后的分支）：547 个通过、5 个跳过、1 个失败。失败的是 `tests/test_starvla_transfer.py` 的一个测试，要读 git 不管的 `third_party/starVLA`，只有主工作树有，和以前一样。
