@@ -255,8 +255,9 @@ def agreement(coll, cmp, groups=("all", "spatial", "other")):
         ax.set_xlabel("share of paired episodes (%)")
         ax.set_title(stats.GROUP_LABEL[g])
         ax.grid(axis="y", visible=False)
-    axes[0][0].legend(fontsize=7, loc="lower left", bbox_to_anchor=(0, 1.12), ncol=4)
-    fig.tight_layout()
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=4, fontsize=8, bbox_to_anchor=(0.5, 1.0))
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
     return fig
 
 
@@ -303,13 +304,18 @@ def noise(coll):
         return None
     fig, (ax, bx) = plt.subplots(1, 2, figsize=(8.4, 3.4))
     marks = ["o", "s", "^", "D"]
+    top = 0.0
     for i, (a, r) in enumerate(pairs):
         ta, tr = stats.task_counts([dict(x, train_seed=a.seed) for x in a.episodes]), \
             stats.task_counts([dict(x, train_seed=r.seed) for x in r.episodes])
         common = sorted(set(ta) & set(tr))
-        ax.scatter([100 * ta[t][0] / ta[t][1] for t in common], [100 * tr[t][0] / tr[t][1] for t in common],
-                   s=16, marker=marks[i % 4], alpha=0.75, label=f"repeat P={r.workers}")
-    ax.plot([0, 100], [0, 100], color=MUTED, lw=0.8)
+        xs, ys = [100 * ta[t][0] / ta[t][1] for t in common], [100 * tr[t][0] / tr[t][1] for t in common]
+        top = max([top] + xs + ys)
+        ax.scatter(xs, ys, s=16, marker=marks[i % 4], alpha=0.75, label=f"repeat P={r.workers}")
+    lim = min(100.0, top + 5)
+    ax.plot([0, lim], [0, lim], color=MUTED, lw=0.8)
+    ax.set_xlim(-2, lim)
+    ax.set_ylim(-2, lim)
     ax.set_xlabel(f"first job, P={pairs[0][0].workers} (% per task)")
     ax.set_ylabel("repeat (% per task)")
     ax.set_title(f"{pairs[0][0].exp} step {pairs[0][0].step // 1000}k, same seeds")
@@ -321,7 +327,7 @@ def noise(coll):
     for i, v in enumerate(vals):
         bx.text(i, v, f"{v:.0f} s\n{v / vals[0]:.2f}x", ha="center", va="bottom", fontsize=8)
     bx.axhline(1.5 * vals[0], color="#c2410c", lw=1, ls="--")
-    bx.text(len(vals) - 0.5, 1.5 * vals[0], "1.5x limit", color="#c2410c", fontsize=8, ha="right", va="bottom")
+    bx.text(-0.45, 1.5 * vals[0], "1.5x limit", color="#c2410c", fontsize=8, ha="left", va="bottom")
     bx.set_ylabel("mean wall time per episode (s)")
     bx.set_ylim(0, max(vals) * 1.35)
     bx.grid(axis="x", visible=False)
