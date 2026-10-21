@@ -39,6 +39,7 @@ Why a server instead of a wrapper inside the evaluator:
   - The episode budget is `max_steps × 1 s`, counted from after the first query, which is uncharged up to 600 s.
   - Each query is capped at 600 s.
   - An over-budget rollout scores 0.
+- Stale observations (task spec §5): because the official loop waits for our reply, every high-level decision is made on the observation of the step it answers, and its action is executed on that same step. No decision can be applied to a later, changed world. The cost of thinking shows up only as budget time, never as a desync.
 - Our handling:
   - `EpisodeState.t_budget_start` starts at the end of the first `step()`.
   - The loop skips provider-backed module calls when less than `loop.provider_min_remaining_s` remains.
