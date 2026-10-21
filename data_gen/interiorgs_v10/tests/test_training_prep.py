@@ -347,6 +347,21 @@ class TrainingPrepTest(unittest.TestCase):
             config("rl_std_unknown", standard="v10_p9_S0")
         ppo, _, _ = config("rl_std_same", standard="v10_p1_S0", reward_preset="S0", save_freq=50)  # agreeing: fine
         self.assertEqual(ppo["data"]["train_batch_size"], 24)
+        self.assertEqual(ppo["filter"]["name"], "mixed_outcome")
+        # the dense-reward first batch: the keep_by_return_std filter with its threshold, floor and task file
+        ppo, _, report = config("rl_keep", standard="v10_p1_D", group_filter="keep_by_return_std",
+                                keep_std_threshold=0.33, keep_std_floor=1.77)
+        kw = ppo["filter"]["filter_kwargs"]
+        self.assertEqual((ppo["filter"]["name"], kw["target_groups"], kw["std_threshold"], kw["std_floor"]),
+                         ("keep_by_return_std", 12, 0.33, 1.77))
+        self.assertEqual(Path(kw["rows"]), (self.root / "rl_keep" / "train.jsonl").resolve())
+        self.assertEqual((report["group_filter"], report["group_filter_kwargs"]["std_threshold"]), ("keep_by_return_std", 0.33))
+        with self.assertRaises(SystemExit):  # a threshold is required
+            config("rl_keep_bad", standard="v10_p1_D", group_filter="keep_by_return_std")
+        with self.assertRaises(SystemExit):  # it fills the package's batch
+            config("rl_keep_bad2", ppo_template=str(Path(TP.__file__).with_name("configs") / "ppo_template_v10.yaml"),
+                   env_template=str(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"),
+                   group_filter="keep_by_return_std", keep_std_threshold=0.3)
         with self.assertRaises(SystemExit):  # neither a template nor a standard
             config("rl_no_template")
 

@@ -405,7 +405,13 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
 # refused.  Template paths are relative to this package.
 STANDARDS_FILE = Path(__file__).with_name("configs") / "rl_standards.json"
 STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "opt_package", "reward_preset",
-                 "ppo_template", "env_template")
+                 "ppo_template", "env_template", "group_filter", "keep_std_threshold", "keep_std_floor")
+# Round 12, the dense-reward first batch (D-keep, the user's decision of 2026-10-21): which group filter the
+# package's batch goes through.  mixed_outcome (the package's) trains only on tasks whose episodes both succeed and
+# fail; keep_by_return_std (vagen/custom_filter/filter.py) fills the places still free with all-fail tasks whose
+# episode returns spread at least keep_std_threshold (standard deviation, n - 1), their group comparison dividing
+# by at least keep_std_floor.
+GROUP_FILTERS = ("mixed_outcome", "keep_by_return_std")
 
 
 def load_standards(path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
@@ -623,6 +629,20 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             _set(ppo, key, value)
     if getattr(args, "entropy_coeff", None) is not None:  # round 12 batch: the entropy bonus instead of the package's
         _set(ppo, "actor_rollout_ref.actor.entropy_coeff", float(args.entropy_coeff))
+    group_filter = getattr(args, "group_filter", None)
+    filter_kwargs = None
+    if group_filter not in (None, *GROUP_FILTERS):
+        raise SystemExit(f"--group-filter must be one of {GROUP_FILTERS}, not {group_filter!r}")
+    if group_filter == "keep_by_return_std":  # round 12, the dense-reward first batch (D-keep)
+        if not package:
+            raise SystemExit("--group-filter keep_by_return_std fills the package's batch: it needs --opt-package")
+        if getattr(args, "keep_std_threshold", None) is None:
+            raise SystemExit("--group-filter keep_by_return_std needs --keep-std-threshold")
+        filter_kwargs = dict(package["filter.filter_kwargs"], std_threshold=float(args.keep_std_threshold),
+                             std_floor=float(getattr(args, "keep_std_floor", None) or 0.0),
+                             rows=str((out / "train.jsonl").resolve()))  # the filled tasks' d* in the metrics
+        _set(ppo, "filter.name", group_filter)
+        _set(ppo, "filter.filter_kwargs", filter_kwargs)
     curriculum = None
     if getattr(args, "curriculum_easy_updates", None):  # round 12 batch: easy tasks first (vagen/curriculum_sampler)
         max_d = int(getattr(args, "curriculum_max_dstar", None) or 3)
@@ -652,6 +672,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "standard": standard or None, "ppo_template": str(args.ppo_template), "curriculum": curriculum,
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
               "entropy_coeff_override": getattr(args, "entropy_coeff", None),
+              "group_filter": ((ppo.get("filter") or {}).get("name") if (ppo.get("filter") or {}).get("enable") else None),
+              "group_filter_kwargs": filter_kwargs,
               # the task order (data.seed); vLLM's sampling seed is 0 in this verl (RolloutConfig has no seed field)
               "seed": {"data": (ppo.get("data") or {}).get("seed"), "rollout": 0},
               "sft_tasks_checked": len(sft_ids), "sft_overlap": len(overlap),
@@ -843,6 +865,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--entropy-coeff", type=float, default=None,
                    help="round 12 batch: the actor's entropy bonus, over the package's (the user's decision of "
                         "2026-10-21: the A-group and E1 reruns with 0, reported apart from the standard)")
+    c.add_argument("--group-filter", choices=GROUP_FILTERS, default=None,
+                   help="round 12, the dense-reward first batch: the package's group filter (mixed_outcome) or "
+                        "keep_by_return_std (all-fail tasks with spread returns fill the free places)")
+    c.add_argument("--keep-std-threshold", type=float, default=None,
+                   help="keep_by_return_std: the smallest return spread (std, n-1) of an all-fail task it takes")
+    c.add_argument("--keep-std-floor", type=float, default=None,
+                   help="keep_by_return_std: the filled tasks' group comparison divides by at least this (default 0)")
     c.add_argument("--curriculum-easy-updates", type=int, default=None,
                    help="round 12 batch: the first N updates draw only tasks with d* <= --curriculum-max-dstar")
     c.add_argument("--curriculum-max-dstar", type=int, default=None, help="the easy tasks' largest d* (default 3)")
