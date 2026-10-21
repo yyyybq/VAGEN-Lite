@@ -101,6 +101,25 @@ def test_pool_slots_fill_h800_first():
         "h800": 3, "zoetrope": 1}  # a record without a pool was submitted to h800
 
 
+def test_yield_to_own_waiting_8_card_jobs():
+    from eval_external.sco import job as J
+    from eval_external.sco import queue as Q
+
+    def j(name, pool, state, gpus, user):
+        return {"display_name": name, "state": state, "resource_pool": {"name": pool}, "ownership": {"user_id": user},
+                "roles": [{"resource_spec": [{"limits": {"nvidia.com/gpu": str(gpus)}}]}]}
+
+    jobs = [j("evalext-step2-mmsi-x", "h800", "RUNNING", 1, "me"),
+            j("interiorgs-v10-rl-rl-run-s100d", "zoetrope", "STARTING", 8, "me"),   # ours, waiting, 8 cards
+            j("vln_train", "h800", "STARTING", 8, "someone"),                        # someone else's
+            j("renderer", "h800", "STARTING", 1, "me")]                              # ours but one card
+    assert Q.yield_pools(jobs) == {"zoetrope"}
+    assert Q.pool_waiting(jobs) == {"h800": 2, "zoetrope": 1}
+    assert Q.yield_pools([j("x", "zoetrope", "STARTING", 8, "me")]) == set()       # no evalext job: owner unknown
+    assert J.free_pool({"h800": 4, "zoetrope": 0}, exclude={"zoetrope"}) is None
+    assert J.free_pool({"h800": 3, "zoetrope": 0}, exclude={"zoetrope"}) == "h800"
+
+
 def test_waiting_jobs_move_to_the_less_crowded_pool(tmp_path):
     from eval_external.sco import queue as Q
 

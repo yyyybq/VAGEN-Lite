@@ -107,9 +107,9 @@ def active_by_pool(running: list[dict] | None = None) -> dict[str, int]:
     return out
 
 
-def free_pool(counts: dict[str, int]) -> str | None:
-    """The first pool in POOLS order with fewer unfinished jobs than its limit, or None when all are full."""
-    return next((p for p in POOLS if counts.get(p, 0) < POOL_LIMITS[p]), None)
+def free_pool(counts: dict[str, int], exclude: set[str] | frozenset = frozenset()) -> str | None:
+    """The first pool in POOLS order (not in exclude) with fewer unfinished jobs than its limit, or None."""
+    return next((p for p in POOLS if p not in exclude and counts.get(p, 0) < POOL_LIMITS[p]), None)
 
 
 def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_limit: bool = False,
