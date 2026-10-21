@@ -117,7 +117,7 @@
 表里的 7 个字段已经做成补丁（第 6 节）。补丁打上之后就不用手工准备 progress.json 了，各组的 `manual_steps` 只在不打补丁时用。
 D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval`。
 
-## 6. 等冻结期合并的补丁（`docs/transition_qa/patches/`，2026-10-19；2026-10-20 挪到新的 main 上）
+## 6. 等冻结期合并的补丁（`docs/transition_qa/patches/`，2026-10-19；2026-10-20 起几次挪到新的 main 上）
 
 两个补丁都改 `data_gen/interiorgs_v10/train_chain.py`。它是主线的现有文件，本分支没有改它：
 - 补丁只放在 `docs/transition_qa/patches/`，没有打到分支的代码上；
@@ -128,6 +128,11 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
 - 另有一处**语义冲突**：main 的 `retain: best_and_last` 在 `evaluate` 一结束就删掉大部分 RL 检查点和 SFT epoch，而补丁 0002 的 `diagnostics` 排在 `evaluate` 之后，要用这些检查点跑探针。改成：plan 里有 `diagnostics` 时，清理放到 `diagnostics` 之后（`retain_after()`）；没有时照旧在 `evaluate` 之后。测试 `test_probes_every_evaluated_model` 核对了顺序。
 
 **2026-10-21 再挪一次**：main 又加了 8 个提交（`renderer_when_trainer_runs` / `renderer_pool`、`renderer_workers`、被守卫停下的运行重启后保持停下、评测表跳过写坏的最后一行），合进本分支（`ca4d4578`）后补丁 0001 打不上了。同样按三方合并挪到 main `616ae4d8`：只有 1 处文字冲突（模块说明里两边各加的段落），两边都保留；0002 直接打上。
+
+**2026-10-21 第三次**：main 又加了 3 个提交（`029efb97`：rl-config `--entropy-coeff` 和 plan rl `entropy_coeff`；`e8730061`：plan rl `renderer_first`；`cc131696`：只改 STATUS），合进本分支（`3924c144`，没有冲突）后两个补丁都打不上了。按三方合并挪到 main `cc131696`：
+- 没有文字冲突：rl-config 的参数两边各加在自己的循环里（main 的 `entropy_coeff` 在优化包那组，补丁的 `output_format`、`max_response_length` 在自己那组），模块说明两段都保留；
+- `renderer_first` 只改 RL 任务的提交顺序，和补丁改的步骤（`rl_config` 的参数、守卫、评测参数、`diagnostics`）不重叠；
+- 补丁现在写完整的 blob 号（`git diff --full-index`），在主仓库里用 `git apply -3` 也找得到原文件。
 
 | 补丁 | 内容 | 改的文件 |
 | --- | --- | --- |
@@ -163,7 +168,8 @@ python -m pytest -q data_gen/interiorgs_v10/tests/test_train_chain.py data_gen/i
 python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打完补丁的提交> --out <TR>/plan.json
 ```
 
-- 已核对（2026-10-21，main `616ae4d8`）：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和测过的文件逐字相同；两个测试文件 37 个测试全部通过（main 原有 29 个、新加 8 个）。main 再改 `train_chain.py` 的话，合并前要重新核对一次。
+- 已核对（2026-10-21，main `cc131696`）：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和三方合并得到的文件逐字相同；在合并了 main 的本分支上，两个测试文件 38 个测试全部通过（main 原有 30 个、新加 8 个）。main 再改 `train_chain.py` 的话，合并前要重新核对一次。
+- 要先合并本分支再打补丁（就是上面的顺序）：`diagnostics` 步用到本分支的 `eval/diagnostics`，只有 main 的代码时它的 4 个测试会因为找不到模块而失败。
 - 对正在跑的训练链的影响：
   - 打了补丁，旧 plan 没有这些字段，行为不变；
   - 第 11 步 `diagnostics` 记成 "not planned"；
