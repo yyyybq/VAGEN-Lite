@@ -15,22 +15,28 @@
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #12171d; --surface: #1a2129; --ink: #e3e9ef; --muted: #98a6b4; --line: #2c3742; --accent: #7db7e0;
     --ok: #6fcf9a; --ok-bg: #173627; --bad: #f08a7d; --bad-bg: #3e1f1b; --amb: #e2b95a; --amb-bg: #3a2f14;
     --chip-bg: #26313c; --new: #c7a6ee; --new-bg: #2e2340; color-scheme: dark;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #12171d; --surface: #1a2129; --ink: #e3e9ef; --muted: #98a6b4; --line: #2c3742; --accent: #7db7e0;
+  --ok: #6fcf9a; --ok-bg: #173627; --bad: #f08a7d; --bad-bg: #3e1f1b; --amb: #e2b95a; --amb-bg: #3a2f14;
+  --chip-bg: #26313c; --new: #c7a6ee; --new-bg: #2e2340; color-scheme: dark;
+}
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.6;
-       padding: 0 max(16px, env(safe-area-inset-right, 0px)) 48px max(16px, env(safe-area-inset-left, 0px)); }
+       padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+       padding-block: 0 48px; }
 .wrap { max-width: 940px; margin: 0 auto; display: grid; gap: 18px; }
 header.intro { padding-block: 26px 4px; display: grid; gap: 8px; }
 h1 { font-size: 1.55rem; margin: 0; text-wrap: balance; }
 .intro p { margin: 0; color: var(--muted); max-width: 72ch; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 0.88rem; }
 .swatch { display: inline-block; width: 12px; height: 12px; border: 2px solid; margin-right: 6px; vertical-align: -1px; }
-.tally { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 10px; border-bottom: 1px solid var(--line);
+.tally { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 2; background: var(--bg); padding-block: 10px; border-bottom: 1px solid var(--line);
          display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-variant-numeric: tabular-nums; }
 .tally strong { font-size: 1.1rem; }
 .tally .rate { color: var(--accent); font-weight: 700; }
@@ -143,6 +149,55 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
   function load() { try { verdicts = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { verdicts = {}; status = "这个浏览器不能保存选择：核完请马上导出。"; } }
   function persist() { try { localStorage.setItem(KEY, JSON.stringify(verdicts)); } catch (e) { status = "这个浏览器不能保存选择：核完请马上导出。"; } }
 
+  // Published as an artifact (META.store "db"): every verdict is also kept in the artifact's own store, collection
+  // "verdicts", one document per question (q01 ...), so the phone and the computer see the same verdicts and Claude
+  // reads them directly. One write at a time per document; a note is written after a pause in typing.
+  let remote = null;
+  const writing = {}, dirty = {}, timers = {}, pending = new Set();
+  function saveRemote(id, delay) {
+    if (!remote) return;
+    pending.add(id);
+    clearTimeout(timers[id]);
+    timers[id] = setTimeout(() => flush(id), delay || 0);
+  }
+  async function flush(id) {
+    if (writing[id]) { dirty[id] = true; return; }
+    writing[id] = true;
+    const it = ITEMS.find((x) => idOf(x.n) === id);
+    const v = verdicts[id] || {};
+    try {
+      await remote.collection("verdicts").doc(id).set({ n: it.n, sample_id: it.sample_id, qtype: it.qtype, tag: it.tag || null,
+        answer: it.answer, verdict: v.verdict || null, note: v.note || "", saved_utc: new Date().toISOString() });
+    } catch (e) {
+      status = "云端保存失败（" + ((e && e.code) || "unknown") + "）：选择还在这个浏览器里，核完请导出 JSON。"; renderTally();
+    }
+    writing[id] = false;
+    if (dirty[id]) { dirty[id] = false; flush(id); } else { pending.delete(id); }
+  }
+  function connect() {
+    if (META.store !== "db" || !window.claude || !window.claude.use) return;
+    window.claude.use("db").then((db) => {
+      if (!db) { status = "没连上云端：选择只存在这个浏览器里，核完请导出 JSON。"; renderTally(); return; }
+      remote = db;
+      let first = true;
+      db.collection("verdicts").onSnapshot((snap) => {
+        const seen = new Set();
+        snap.docs.forEach((d) => {
+          seen.add(d.id);
+          if (pending.has(d.id) || d.metadata.hasPendingWrites) return;  // this page's own write is on its way
+          const b = d.data() || {};
+          verdicts[d.id] = { verdict: b.verdict || null, note: b.note || "" };
+        });
+        if (first) {  // verdicts made in this browser before the store was reached go up once
+          first = false;
+          Object.keys(verdicts).forEach((id) => { if (!seen.has(id) && (verdicts[id].verdict || verdicts[id].note)) saveRemote(id, 0); });
+          status = "选择会自动保存到云端：手机和电脑打开看到的是同一份，不用导出。";
+        }
+        persist(); ITEMS.forEach(paint); renderTally();
+      }, () => { remote = null; status = "云端连接断了：之后的选择只存在这个浏览器里，核完请导出 JSON。"; renderTally(); });
+    }).catch(() => {});
+  }
+
   function exportData() {
     const counts = { right: 0, wrong: 0, ambiguous: 0, unchecked: 0 };
     const rows = ITEMS.map((it) => {
@@ -156,7 +211,9 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
 
   function doExport() {
     const text = JSON.stringify(exportData(), null, 1);
-    try {
+    if (META.store === "db") {  // the artifact viewer never downloads; the verdicts are in the store already
+      status = remote ? "结果已自动保存到云端，不用导出；要留底可以复制页面最后的文字。" : "没连上云端：请复制页面最后的文字发回来。";
+    } else try {
       const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
       const a = document.createElement("a");
       a.href = url; a.download = EXPORT_NAME; document.body.append(a); a.click(); a.remove();
@@ -173,7 +230,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result);
-        (data.verdicts || []).forEach((r) => { if (r.verdict || r.note) verdicts[idOf(r.n)] = { verdict: r.verdict || null, note: r.note || "" }; });
+        (data.verdicts || []).forEach((r) => { if (r.verdict || r.note) { verdicts[idOf(r.n)] = { verdict: r.verdict || null, note: r.note || "" }; saveRemote(idOf(r.n), 0); } });
         persist(); ITEMS.forEach(paint); status = "已导入。"; renderTally();
       } catch (e) { status = "导入失败：不是导出的 JSON。"; renderTally(); }
     };
@@ -240,11 +297,11 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     const row = el("div", "verdict");
     ["right", "wrong", "ambiguous"].forEach((v) => {
       const b = el("button", null, LABEL[v]); b.type = "button"; b.dataset.v = v; b.setAttribute("aria-pressed", "false");
-      b.addEventListener("click", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict === v ? null : v, note: cur.note || "" }; persist(); paint(it); renderTally(); });
+      b.addEventListener("click", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict === v ? null : v, note: cur.note || "" }; persist(); saveRemote(id, 0); paint(it); renderTally(); });
       row.append(b);
     });
     const note = el("input"); note.type = "text"; note.placeholder = "备注（可选）：哪里不对、哪里有歧义";
-    note.addEventListener("input", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict || null, note: note.value }; persist(); });
+    note.addEventListener("input", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict || null, note: note.value }; persist(); saveRemote(id, 800); });
     row.append(note);
     c.append(row);
     return c;
@@ -279,6 +336,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
   ITEMS.forEach(paint);
   funnel();
   renderTally();
+  connect();
 })();
 </script>
 </body>

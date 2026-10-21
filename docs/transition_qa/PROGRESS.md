@@ -752,3 +752,10 @@
 - **页面**：`exps/transition_qa_20261019b/review_occluders/p1_occluder_review.html`（本机副本在 Windows 仓库同一路径下，git 忽略），导出文件名 `p1_occluder_review_verdicts.json`。18 道前向题的"动作之后"画面在 `h800` 上渲染（`pt-fravgvfq`，18 张，不到 1 分钟，已删）。
 - **代码**：`review occluders`；`review page` 加了 `--dir`、`--title`、`--note`、`--no-funnel`，题库包括探针集；模板显示每题的标签（遮挡物类别），导出文件名跟页面名走。
 - 等用户核完。
+- **手机打不开**（用户 2026-10-20）：发过去的是 5 MB、图片内嵌的本地 HTML 文件，手机上的 Claude 应用打不开。改成发布为私有网页：https://claude.ai/artifact/17w3i8mEJeTXCfnzN168BV （只有用户能打开）。选择除了存在浏览器里，还存进网页自己的存储（db，collection `verdicts`，文档 `q01`–`q30`），手机和电脑看到同一份，核完不用导出，直接读。`review page --artifact` 生成这一版（去掉文档外壳，META.store = "db"），本地文件版不变。
+
+### 12.10 集群配额写满（2026-10-20 约 20:30–21:02 起，到 2026-10-21 早上恢复）
+
+- 往 `/mnt/umm/users/yinbaiqiao` 写任何东西都报 "No space left on device"（整个盘还有 3.9T，是用户目录的配额）。最早的痕迹是 r12f c3s0 的训练日志（20:30 前后），21:02 起 9 条第十二轮训练链的进度文件都停止更新。
+- **本分支**：同步时 tar 先删了 `review.py`、`review_page.html`、`test_transition_qa.py` 再写不进去；它们都在 `1abcdd08` 里，配额恢复后用 `git checkout` 还原，再换成新版本。
+- **训练链**（只读查看，没有动主工作树）：9 个驱动进程在 2026-10-21 05:40–05:41 被重新启动（不是本会话做的），状态文件完整，没有步骤失败。写满期间失败的 RL 训练任务被各链按重试规则重新提交了：r12f c3s0、r12g cus0、r12h e1d 的重试次数因此用完（plan `retries` 2，含启动阶段的重新提交），再失败一次那一步就会失败。r12f c3d 的第 50 步检查点正写到一半（没有 `COMPLETE` 标记和 `actor/huggingface`，80 GiB）；训练只从有 `COMPLETE` 的检查点续跑，所以它从头开始，跑到第 50 步时会覆盖这个文件夹。r12g、r12h 的 4 个运行在写满前还没有检查点，从头开始；r12b p2s0 从第 150 步续跑。

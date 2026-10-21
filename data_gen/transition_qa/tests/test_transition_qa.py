@@ -338,6 +338,15 @@ def test_occluder_check_spreads_over_types_answers_and_tasks():
     assert len({r["task_id"] for r in picks}) == 10                                # new tasks while there are some
 
 
+def test_review_page_as_an_artifact():
+    from data_gen.transition_qa import review as RV
+
+    page = RV.artifact_page(RV.TEMPLATE.read_text(encoding="utf-8"))
+    assert not page.lower().startswith("<!doctype") and "<body>" not in page and "</html>" not in page
+    assert page.startswith("<title>") and '<meta name="claude:viewport-fit-sides" content="cover">' in page[:200]
+    assert 'META.store !== "db"' in page and ":root[data-theme=\"dark\"]" in page
+
+
 def test_window_quota_is_the_optimum():
     # bins 1..6 (0.5 m .. 3.0 m): windows 1, 2, 3; bin 1 only fits window 1, bin 6 only window 3
     n = {1: 10, 2: 30, 3: 40, 4: 40, 5: 30, 6: 10}

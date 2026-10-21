@@ -382,16 +382,34 @@ def cmd_page(args: argparse.Namespace) -> None:
             return json.dumps(x, ensure_ascii=False).replace("</", "<\\/")
 
         meta = {"bank": str(out.resolve()), "page": Path(args.html).name, "questions": len(items),
-                "title": args.title or None, "note": args.note or None}
+                "title": args.title or None, "note": args.note or None, "store": "db" if args.artifact else None}
         page = TEMPLATE.read_text(encoding="utf-8")
         page = page.replace("__REVIEW_DATA__", blob(items)).replace("__FUNNEL_DATA__", blob(funnel))
         page = page.replace("__META__", blob(meta))
+        if args.short_title:
+            page = page.replace("<title>P1 转移题核对</title>", f"<title>{args.short_title}</title>", 1)
+        if args.artifact:
+            page = artifact_page(page)
         Path(args.html).write_text(page, encoding="utf-8", newline="\n")
         info["html"] = str(Path(args.html).resolve())
     print(json.dumps(info))
 
 
 TEMPLATE = Path(__file__).with_name("review_page.html")
+
+
+def artifact_page(page: str) -> str:
+    """The page as a claude.ai artifact (opens on a phone; user 2026-10-20): the publisher wraps it in its own document
+    skeleton, so the doctype, html / head / body tags and the charset / viewport metas go; the side gutter keeps the
+    safe-area insets.  Verdicts then also go to the artifact's store (META.store "db", capability {db: {}})."""
+    for tag in ("<!doctype html>\n", '<html lang="zh-CN">\n', "<head>\n", '<meta charset="utf-8">\n',
+                '<meta name="viewport" content="width=device-width, initial-scale=1">\n', "</head>\n", "<body>\n",
+                "</body>\n", "</html>\n"):
+        if tag not in page:
+            raise ValueError(f"template changed: {tag.strip()} not found")
+        page = page.replace(tag, "", 1)
+    head, rest = page.split("</title>\n", 1)
+    return head + '</title>\n<meta name="claude:viewport-fit-sides" content="cover">\n' + rest
 
 
 def main() -> None:
@@ -424,6 +442,9 @@ def main() -> None:
     b.add_argument("--title", default="", help="the page's heading (default: the 30-question check)")
     b.add_argument("--note", default="", help="one more paragraph under the heading")
     b.add_argument("--no-funnel", action="store_true", help="leave out the table of candidates not asked")
+    b.add_argument("--short-title", default="", help="the browser tab's (and the artifact's) name")
+    b.add_argument("--artifact", action="store_true", help="write the page to publish as a claude.ai artifact "
+                   "(no document skeleton; verdicts also saved in the artifact's db, collection verdicts)")
     b.set_defaults(func=cmd_page)
     args = ap.parse_args()
     args.func(args)
