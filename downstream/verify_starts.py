@@ -110,7 +110,9 @@ def extend(names=None, lock_path: Path = LOCK) -> dict:
         if not problems:
             lock[name].update({k: current[k] for k in DEEP_KEYS})
         report[name] = problems
-    lock_path.write_text(json.dumps(lock, indent=1) + "\n")
+    tmp = lock_path.with_name(lock_path.name + ".tmp")  # replaced in one step: concurrent readers never see half
+    tmp.write_text(json.dumps(lock, indent=1) + "\n")
+    tmp.replace(lock_path)
     return report
 
 
