@@ -1376,7 +1376,8 @@ class ChainTest(unittest.TestCase):
                          ("a", "job_rl"): [["STARTING", "FAILED"], ["RUNNING", "ok"]],
                          ("b", "job_renderer"): [["RUNNING"]],
                          ("c", "job_renderer"): [["STARTING", "RUNNING", "RUNNING", "FAILED"], ["RUNNING"]],
-                         ("c", "job_rl"): [["STARTING", "STARTING", "STARTING", "STARTING", "RUNNING", "ok"]]}
+                         # sco's spelling of a queued job (job_sco.WAITING lacked it: the queued trainer was deleted)
+                         ("c", "job_rl"): [["QUEUEING", "QUEUEING", "QUEUEING", "QUEUEING", "RUNNING", "ok"]]}
             jobs = {"pt-b-rl-0": (["STARTING", "RUNNING", "ok"], 0)}
             b = root / "rl_run_b"  # a trainer queued before the switch, without a render service
             (b / "job_rl").mkdir(parents=True)

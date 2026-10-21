@@ -40,7 +40,8 @@ POOLS = ("zoetrope", "h800")  # same H800 cards, specs, image and storage
 RENDER_POOLS = ("zoe-cf-render",)
 SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
-WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUED", "WAITING", "CREATING"}  # created, no cards yet
+# created, no cards yet; sco spells it QUEUEING (round 12 batch: without it a job in that state counted as not waiting)
+WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUEING", "QUEUED", "WAITING", "CREATING"}
 
 
 def now() -> str:

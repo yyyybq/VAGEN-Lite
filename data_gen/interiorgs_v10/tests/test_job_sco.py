@@ -71,6 +71,10 @@ class JobScoTest(unittest.TestCase):
                 {"state": "STARTING", "resource_pool": {"name": "zoetrope"}},
                 {"state": "SUCCEEDED", "resource_pool": {"name": "zoetrope"}}]
         self.assertEqual(J.waiting_by_pool(jobs), {"zoetrope": 1, "h800": 2})
+        # sco's spelling of a queued job (round 12 batch: it was missing, so such jobs counted as not waiting)
+        self.assertIn("QUEUEING", J.WAITING)
+        self.assertEqual(J.waiting_by_pool(jobs + [{"state": "QUEUEING", "resource_pool": "zoetrope"}] * 2),
+                         {"zoetrope": 3, "h800": 2})
 
         class Res:
             def __init__(self, out, rc=0):

@@ -100,7 +100,8 @@ def experiment_row(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], now: da
         state = "已完成"
     elif st.get("state") == "failed":
         state = "失败"
-    elif job_states and all(v in ("STARTING", "PENDING", "QUEUING", "QUEUED", "WAITING", "CREATING") for v in job_states):
+    elif job_states and all(v in ("STARTING", "PENDING", "QUEUING", "QUEUEING", "QUEUED", "WAITING", "CREATING")
+                            for v in job_states):
         state = "排队中"
     elif step_queue and not any(q.get("started") for q in step_queue):
         state = "排队中"

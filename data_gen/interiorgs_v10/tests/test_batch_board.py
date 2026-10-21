@@ -91,7 +91,7 @@ class BatchBoardTest(unittest.TestCase):
 
         queued = chain("q", {"state": "running", "plan": {"endpoint": 300},
                              "steps": {"rl": {"state": "running", "jobs": {"as0/rl": "STARTING", "as0/renderer": "RUNNING",
-                                                                            "ad/rl": "STARTING", "ad/renderer": "RUNNING"}}},
+                                                                            "ad/rl": "QUEUEING", "ad/renderer": "RUNNING"}}},
                              "queue": {"pt-1": {"what": "rl/as0/rl", "queued_s": 7200, "started": None},
                                        "pt-2": {"what": "rl/as0/renderer", "queued_s": 60, "started": "x"}}})
         running = chain("r", {"state": "running", "plan": {"endpoint": 300},
