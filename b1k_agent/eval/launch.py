@@ -245,9 +245,15 @@ def connect_host(host: str) -> str:
 
 
 def no_proxy_env(environ: dict) -> dict:
-    """Local health checks and websockets (requests / websockets>=15 honour *_proxy) must bypass any proxy."""
+    """When a proxy is configured, local health checks and websockets (requests and websockets>=15 honour
+    *_proxy) must bypass it: add 127.0.0.1 and localhost to NO_PROXY unless they are already there."""
+    if not any(environ.get(k) for k in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")):
+        return {}
     have = [h.strip() for h in (environ.get("NO_PROXY") or environ.get("no_proxy") or "").split(",") if h.strip()]
-    value = ",".join(have + [h for h in ("127.0.0.1", "localhost") if h not in have])
+    missing = [h for h in ("127.0.0.1", "localhost") if h not in have]
+    if not missing:
+        return {}
+    value = ",".join(have + missing)
     return {"NO_PROXY": value, "no_proxy": value}
 
 

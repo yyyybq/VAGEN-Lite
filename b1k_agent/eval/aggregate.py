@@ -618,11 +618,12 @@ def _finite_mean(xs: Iterable[Any]) -> Optional[float]:
 
 
 def task_values(rows: Iterable[dict], metric: str) -> dict[str, list[float]]:
+    """task -> finite values of ``metric`` (normalized_agent_distance is inf when the agent never moved)."""
     out = collections.defaultdict(list)
     for r in rows:
-        v = r[metric]
-        if v is not None:
-            out[r["task"]].append(float(v))
+        v = _float(r[metric])
+        if v is not None and math.isfinite(v):
+            out[r["task"]].append(v)
     return dict(out)
 
 
@@ -707,13 +708,15 @@ def per_config_summary(rows: list[dict], configs: dict, declared: Optional[dict]
             "mean_q": task_mean(q_by_task),
             "mean_q_ci": ci_of(stratified_bootstrap(q_by_task, n_boot, _rng(seed, c["label"] + "|q")), level),
             "mean_q_budget2026": task_mean(qb_by_task),
-            "mean_q_budget2026_ci": ci_of(stratified_bootstrap(qb_by_task, n_boot, _rng(seed, c["label"] + "|qb")), level),
+            "mean_q_budget2026_ci": ci_of(stratified_bootstrap(qb_by_task, n_boot, _rng(seed, c["label"] + "|qb")),
+                                          level),
             "mean_q_infra_as_zero": task_mean(strict),
-            "success_rate": task_mean(task_values([dict(r, success=float(bool(r["success"]))) for r in inc], "success")),
+            "success_rate": task_mean(task_values([dict(r, success=float(bool(r["success"]))) for r in inc],
+                                                  "success")),
             "n_budget_violations": sum(r["budget_ok"] is False for r in ev),
             "n_budget_unknown": sum(r["budget_ok"] is None for r in ev),
-            "total_cost_usd": sum(float(r["cost_usd"] or 0.0) for r in mine if not r["superseded"]),
-            "total_provider_calls": sum(int(r["provider_calls"] or 0) for r in mine if not r["superseded"]),
+            "total_cost_usd": sum(float(r["cost_usd"] or 0.0) for r in mine),  # every attempt, re-runs included
+            "total_provider_calls": sum(int(r["provider_calls"] or 0) for r in mine),
             "synthetic_inputs": any(r["synthetic"] for r in mine),
         }
         for m in SECONDARY:
