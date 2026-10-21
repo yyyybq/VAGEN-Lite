@@ -186,6 +186,14 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
               "`blocked_turn` 逆向题的那个回合被挡住了（两张图一样）。", ""]
     # ------------------------------------------------------------------ build drops
     lines += ["## 6. 平衡和上限去掉的题", ""]
+    depth = stats.get("occlusion_depth") or {}
+    if depth.get("by_label"):
+        lines += [f"**渲染深度核对遮挡题**（2026-10-21，`occ_depth.py`）：答\"完全挡住\"的要求目标在渲染图里被挡 ≥ "
+                  f"{depth['full_min']:.2f}，答\"部分挡住\"的 ≥ {depth['partial_min']:.2f}，否则在平衡之前去掉；"
+                  "答\"没有\"的不核对。", "",
+                  _table(["题类 / 答案", "核对", "去掉", "没有深度结果（也去掉）"],
+                         [[k, v.get("checked", 0), v.get("dropped", 0), v.get("no_depth", 0)]
+                          for k, v in depth["by_label"].items()]), ""]
     for split in ("train", "val"):
         rep = stats.get(split) or {}
         rows = [[q, v.get("before"), json.dumps(v.get("dropped", {}), ensure_ascii=False), v.get("after_balance")]

@@ -372,6 +372,10 @@ BUILD_CONFIG: Dict[str, Any] = {
     # over 18 action cells, and 1.15 there left 94 of the 253 test questions of both_in_view_after (1.5: 112); 2.0
     # keeps 181, with the family-and-action rule at 26.5% against 25% (user's rule: no type below half)
     "cell_slack": {"both_in_view": 2.0},
+    # occlusion labels checked against the rendered depth (user, 2026-10-21; occ_depth.py, PROGRESS 12.11): a "fully" /
+    # "partly hidden" candidate stays only if the target is hidden in the render by at least this share of its
+    # silhouette (any surface in front); OUT/<results> from occ_depth run.  None: no check.
+    "occlusion_depth": {"results": "occ_depth_all/results.jsonl", "full_min": 0.70, "partial_min": 0.10},
     "unchanged_max_share": 0.10,    # forward questions whose asked quantity did not change
     "flip_band": (0.35, 0.65),      # share of forward questions whose answer differs from the current one
     "scene_cap": 0.08,
@@ -878,6 +882,41 @@ def _read_raw(out: Path) -> Tuple[List[Dict[str, Any]], collections.Counter, col
     return records, funnel, checks
 
 
+def depth_check_occlusion(records: List[Dict[str, Any]], out: Path, cfg: Dict[str, Any],
+                          report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Drop the occlusion candidates whose "fully" / "partly hidden" label the rendered depth does not bear out (user,
+    2026-10-21): the target must be hidden in the render (occ_depth.py, depth_any) by at least full_min / partial_min
+    of its silhouette.  A checked label without a depth result is dropped too; "not hidden" labels stay as they are
+    (the box can only claim too much: PROGRESS 12.11)."""
+    spec = cfg.get("occlusion_depth")
+    if not spec:
+        return records
+    need = {"full": float(spec["full_min"]), "partial": float(spec["partial_min"])}
+    if not any(r["kind"] == "occluded" and r["answer_value"] in need for r in records):
+        return records
+    path = out / spec["results"]
+    if not path.exists():
+        raise SystemExit(f"{path} missing: run occ_depth (prepare, job) first, or set occlusion_depth to None")
+    res = {r["sample_id"]: r for r in read_jsonl(path) if "error" not in r}
+    counts: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    kept = []
+    for r in records:
+        if r["kind"] == "occluded" and r["answer_value"] in need:
+            key = f"{r['qtype']}/{r['answer_value']}"
+            counts[key]["checked"] += 1
+            x = res.get(r["sample_id"])
+            if x is None:
+                counts[key]["no_depth"] += 1
+                continue
+            if float(x["depth_any"]) < need[r["answer_value"]]:
+                counts[key]["dropped"] += 1
+                continue
+        kept.append(r)
+    report.update({"results": str(path), "full_min": need["full"], "partial_min": need["partial"],
+                   "by_label": {k: dict(v) for k, v in sorted(counts.items())}})
+    return kept
+
+
 def _check_scenes(records: List[Dict[str, Any]], manifest_path: str) -> Dict[str, List[Dict[str, Any]]]:
     manifest = json.loads(Path(manifest_path).read_text())
     train_scenes, val_scenes = set(manifest["train_scenes"]), set(manifest["val_scenes"])
@@ -896,6 +935,8 @@ def cmd_probe(args: argparse.Namespace) -> None:
     cfg = dict(PROBE_CONFIG, per_qtype=args.per_qtype)
     rng = random.Random(args.seed)
     records, _, _ = _read_raw(out)
+    depth_report: Dict[str, Any] = {}
+    records = depth_check_occlusion(records, out, BUILD_CONFIG, depth_report)
     val = _check_scenes(records, args.split_manifest)["val"]
     scenes = None
     if args.scenes_from:
@@ -912,7 +953,7 @@ def cmd_probe(args: argparse.Namespace) -> None:
     n = write_jsonl(out / "p1_probe.jsonl", (to_lf(r) for r in picks))
     stats = {"questions": n, "config": cfg, "seed": args.seed, "candidates": len(val),
              "scenes": len({r["scene"] for r in picks}), "scenes_allowed": len(scenes) if scenes else None,
-             "scenes_from": args.scenes_from, "by_qtype": report}
+             "scenes_from": args.scenes_from, "by_qtype": report, "occlusion_depth": depth_report}
     (out / "probe_stats.json").write_text(json.dumps(stats, indent=1))
     print(json.dumps({"questions": n, "short": {q: v["short"] for q, v in report.items() if v["short"]}}, indent=1))
 
@@ -924,6 +965,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     records, funnel, checks = _read_raw(out)
     stats: Dict[str, Any] = {"raw_records": len(records), "funnel": dict(funnel), "checks": dict(checks),
                              "config": cfg, "seed": args.seed}
+    records = depth_check_occlusion(records, out, cfg, stats.setdefault("occlusion_depth", {}))
     splits = _check_scenes(records, args.split_manifest)
     probe_path = out / "p1_probe.jsonl"
     if not probe_path.exists() and not args.no_probe:

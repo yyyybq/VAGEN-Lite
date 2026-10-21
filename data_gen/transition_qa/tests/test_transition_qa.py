@@ -371,6 +371,29 @@ def test_depth_checked_occlusion_tells_the_occluder_from_a_wall():
     assert OD.answer_of(0.9) == "full" and OD.answer_of(0.0) == "none" and OD.answer_of(0.8) == "between"
 
 
+def test_occlusion_labels_checked_against_the_rendered_depth(tmp_path):
+    def occ(i, value, qtype="occluded_now"):
+        r = _rec(i, qtype, "A", value)
+        r["kind"] = "occluded"
+        return r
+
+    recs = [occ(1, "full"), occ(2, "full"), occ(3, "partial"), occ(4, "partial"), occ(5, "none"), occ(6, "full"),
+            _rec(7, "goal_now", "Yes", "yes")]
+    (tmp_path / "d").mkdir()
+    GEN.write_jsonl(tmp_path / "d" / "r.jsonl", [
+        {"sample_id": "id000001", "depth_any": 0.95}, {"sample_id": "id000002", "depth_any": 0.40},   # full: kept / dropped
+        {"sample_id": "id000003", "depth_any": 0.12}, {"sample_id": "id000004", "depth_any": 0.02},   # partial: kept / dropped
+        {"sample_id": "id000006", "error": "RuntimeError: x"}])                                        # no depth: dropped
+    cfg = dict(GEN.BUILD_CONFIG, occlusion_depth={"results": "d/r.jsonl", "full_min": 0.70, "partial_min": 0.10})
+    rep = {}
+    kept = GEN.depth_check_occlusion(recs, tmp_path, cfg, rep)
+    assert sorted(r["sample_id"] for r in kept) == ["id000001", "id000003", "id000005", "id000007"]
+    assert rep["by_label"]["occluded_now/full"] == {"checked": 3, "dropped": 1, "no_depth": 1}
+    assert GEN.depth_check_occlusion([recs[-1]], tmp_path / "nowhere", cfg, {}) == [recs[-1]]   # nothing to check
+    with pytest.raises(SystemExit):
+        GEN.depth_check_occlusion(recs, tmp_path / "nowhere", cfg, {})
+
+
 def test_window_quota_is_the_optimum():
     # bins 1..6 (0.5 m .. 3.0 m): windows 1, 2, 3; bin 1 only fits window 1, bin 6 only window 3
     n = {1: 10, 2: 30, 3: 40, 4: 40, 5: 30, 6: 10}
