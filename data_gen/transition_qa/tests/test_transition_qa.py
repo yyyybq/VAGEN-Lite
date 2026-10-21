@@ -347,6 +347,30 @@ def test_review_page_as_an_artifact():
     assert 'META.store !== "db"' in page and ":root[data-theme=\"dark\"]" in page
 
 
+def test_depth_checked_occlusion_tells_the_occluder_from_a_wall():
+    from data_gen.interiorgs_v10.depth_check import depth_hidden
+    from data_gen.transition_qa import occ_depth as OD
+
+    c2w = np.eye(4)                                   # camera at the origin: right x, down y, forward z
+    K = np.array([[100.0, 0, 50], [0, 100.0, 50], [0, 0, 1]])
+    depth = np.full((100, 100), 2.0)                  # a surface 2 m ahead everywhere
+    alpha = np.ones((100, 100))
+    pts = np.array([[0.0, 0.0, 3.0], [0.3, 0.0, 3.0], [0.0, 0.0, 1.0]])   # two behind the surface, one in front
+    hit = depth_hidden(pts, c2w, K, depth, alpha)
+    assert hit.tolist() == [True, True, False]
+    surf = OD.surface_points(pts, c2w, K, depth)
+    assert np.allclose(surf[1], [0.2, 0.0, 2.0])      # on the ray to the point, at the rendered depth
+    occluder = {"bbox_min": [-0.5, -0.5, 1.9], "bbox_max": [0.5, 0.5, 2.1]}      # the surface belongs to B
+    elsewhere = {"bbox_min": [3.0, 3.0, 1.9], "bbox_max": [4.0, 4.0, 2.1]}       # B is somewhere else: a wall hides
+    w, framed = np.ones(3), np.ones(3, bool)
+    box_hit = np.array([True, True, True])
+    by_b = OD.fractions(w, framed, box_hit, hit, OD.inside_box(surf, occluder))
+    by_wall = OD.fractions(w, framed, box_hit, hit, OD.inside_box(surf, elsewhere))
+    assert by_b["depth_b"] == pytest.approx(2 / 3) and by_b["box"] == 1.0
+    assert by_wall["depth_any"] == pytest.approx(2 / 3) and by_wall["depth_b"] == 0.0
+    assert OD.answer_of(0.9) == "full" and OD.answer_of(0.0) == "none" and OD.answer_of(0.8) == "between"
+
+
 def test_window_quota_is_the_optimum():
     # bins 1..6 (0.5 m .. 3.0 m): windows 1, 2, 3; bin 1 only fits window 1, bin 6 only window 3
     n = {1: 10, 2: 30, 3: 40, 4: 40, 5: 30, 6: 10}
