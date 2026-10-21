@@ -759,3 +759,4 @@
 - 往 `/mnt/umm/users/yinbaiqiao` 写任何东西都报 "No space left on device"（整个盘还有 3.9T，是用户目录的配额）。最早的痕迹是 r12f c3s0 的训练日志（20:30 前后），21:02 起 9 条第十二轮训练链的进度文件都停止更新。
 - **本分支**：同步时 tar 先删了 `review.py`、`review_page.html`、`test_transition_qa.py` 再写不进去；它们都在 `1abcdd08` 里，配额恢复后用 `git checkout` 还原，再换成新版本。
 - **训练链**（只读查看，没有动主工作树）：9 个驱动进程在 2026-10-21 05:40–05:41 被重新启动（不是本会话做的），状态文件完整，没有步骤失败。写满期间失败的 RL 训练任务被各链按重试规则重新提交了：r12f c3s0、r12g cus0、r12h e1d 的重试次数因此用完（plan `retries` 2，含启动阶段的重新提交），再失败一次那一步就会失败。r12f c3d 的第 50 步检查点正写到一半（没有 `COMPLETE` 标记和 `actor/huggingface`，80 GiB）；训练只从有 `COMPLETE` 的检查点续跑，所以它从头开始，跑到第 50 步时会覆盖这个文件夹。r12g、r12h 的 4 个运行在写满前还没有检查点，从头开始；r12b p2s0 从第 150 步续跑。
+- **之后**：合入 main `616ae4d8`（`ca4d4578`），冻结期补丁挪到它上面（`607fee04`，1 处说明文字冲突，37 个训练链测试通过）。全部登记的测试文件：516 个通过，5 个跳过，1 个失败（还是 `tests/test_starvla_transfer.py`，这个工作树没有检出 `third_party/starVLA` 子模块）；日志 `exps/transition_qa_20261019b/tests_ca4d4578.log`。
