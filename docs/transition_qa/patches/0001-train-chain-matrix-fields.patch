@@ -134,12 +134,12 @@ index 0000000000000000000000000000000000000000..f34df3d0f58b4b968c5aafde0d6d3a88
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
-index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e70969350ddd 100644
+index 17b10973a82440a8792c10892615fa8e755e09ea..63a2e974830b51a52a1191b3ce378a1a34ec4626 100644
 --- a/data_gen/interiorgs_v10/train_chain.py
 +++ b/data_gen/interiorgs_v10/train_chain.py
-@@ -108,6 +108,15 @@ scene each) taking N requests at a time instead of 12, so the scenes of an updat
- again from the shared disk for about every second request.  A render service still waiting for its card gets the
- new count in its launch script.
+@@ -121,6 +121,15 @@ machine where only such services are left (their neighbours finished), so the ma
+ service is started first and the old one deleted only once the new one runs on a busy machine with the trainer still
+ waiting (Chain.repack).  PROGRESS.md lists every try.
  
 +Experiment matrix v2 (branch transition-qa, docs/transition_qa/CHANGES.md section 5): plan "sft_lf_dirs"
 +({group: LLaMA-Factory folder}) trains a group on a folder built elsewhere (data_gen/sft_mixture): "render" and
@@ -153,7 +153,7 @@ index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e709
  A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
  logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
  continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
-@@ -137,6 +146,7 @@ POLL_S = 60.0
+@@ -150,6 +159,7 @@ POLL_S = 60.0
  DEFAULT_MAX_EVAL_JOBS = 10
  EVAL_ONLY_STEPS = ("check_code", "evaluate")
  RL_STEPS = ("rl_config", "rl", "rl_extend")
@@ -161,7 +161,7 @@ index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e709
  # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
  # during startup", after "GCS cannot find the node ... registration may not be complete")
  STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
-@@ -284,9 +294,10 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
+@@ -303,9 +313,10 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
      if kl is not None and kl > kl_max:
          return f"KL to the start model {kl:.3f} > {kl_max} at update {steps[-1]}"
      w = int(guards.get("invalid_window", 10))
@@ -173,7 +173,7 @@ index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e709
          return f"unparseable answers {sum(inv) / len(inv):.3f} > {inv_max} (mean of updates {steps[-w]}-{steps[-1]})"
      succ = [(s, per[s]["episode/success_rate"]) for s in steps if "episode/success_rate" in per[s]]
      n0, nd, drop = int(guards.get("start_updates", 5)), int(guards.get("drop_window", 50)), float(guards.get("success_drop", 0.10))
-@@ -472,8 +483,50 @@ class Chain:
+@@ -524,8 +535,50 @@ class Chain:
          return dict(groups) if groups else {"": "sft_trajectories.jsonl"}
  
      def lf_dir(self, group: str) -> Path:
@@ -224,7 +224,7 @@ index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e709
      def eval_sets(self) -> Dict[str, Path]:
          sets = self.plan.get("eval_sets")
          if sets:
-@@ -497,6 +550,9 @@ class Chain:
+@@ -549,6 +602,9 @@ class Chain:
          (single) final SFT model."""
          if self.state.get("rl_model_override"):
              return Path(self.state["rl_model_override"])
@@ -234,7 +234,7 @@ index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e709
          decision = self.state["steps"].get("pick_sft", {}).get("decision") or {}
          if decision.get("model"):
              return Path(decision["model"])
-@@ -668,6 +724,9 @@ class Chain:
+@@ -740,6 +796,9 @@ class Chain:
          from . import pilot_sco
          from .pilot import safe_name
  
@@ -244,7 +244,7 @@ index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e709
          frames = [json.loads(l) for l in (self.sft_dir / "frames.jsonl").read_text().splitlines() if l.strip()]
          plain = self.sft_dir / "frames" / "plain"
  
-@@ -696,12 +755,21 @@ class Chain:
+@@ -768,12 +827,21 @@ class Chain:
  
      def sft_data(self) -> None:
          py = sys.executable
@@ -266,7 +266,7 @@ index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e709
              if not (self.sft_dir / trajectory).is_file():
                  raise ChainError(f"sft-records wrote no {trajectory} for group {group or 'default'}")
              lf = self.lf_dir(group)
-@@ -885,7 +953,12 @@ class Chain:
+@@ -957,7 +1025,12 @@ class Chain:
                  if rl.get(key) is not None:  # round 11: the optimisation package; round 12 batch: easy tasks first,
                      # the entropy bonus (0 is passed too)
                      args += [flag, str(rl[key])]
@@ -279,7 +279,7 @@ index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e709
  
      def rl(self) -> None:
          if not self.plan.get("rl_runs"):
-@@ -1349,7 +1422,7 @@ class Chain:
+@@ -1541,7 +1614,7 @@ class Chain:
                  hf = ckpts / f"global_step_{s}" / "actor" / "huggingface"
                  if run_name in (self.state.get("guard_stops") or {}) and not hf.is_dir():
                      continue  # a run stopped by a guard: the checkpoints it reached
@@ -288,7 +288,7 @@ index 92731a9c2ede21a9bf723ffcdaa4c361c6d40295..6b33f3403b4c06acf124c4b20f48e709
                  rl_names.append(name)
          models.update({name: (m["model"], m.get("prompt_format"), list(m.get("options", options)))
                         for name, m in (ev.get("models") or {}).items()})
-@@ -1464,6 +1537,9 @@ class Chain:
+@@ -1656,6 +1729,9 @@ class Chain:
              if self.plan.get("sft_only") and step in RL_STEPS:  # round 12 batch: SFT and its evaluation only
                  self.mark(step, state="done", note="not planned (sft_only)")
                  continue

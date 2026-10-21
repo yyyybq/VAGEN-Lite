@@ -134,6 +134,8 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
 - `renderer_first` 只改 RL 任务的提交顺序，和补丁改的步骤（`rl_config` 的参数、守卫、评测参数、`diagnostics`）不重叠；
 - 补丁现在写完整的 blob 号（`git diff --full-index`），在主仓库里用 `git apply -3` 也找得到原文件。
 
+**2026-10-21 第四次**：main 又加了 23 个提交（第十二轮批次：`renderer_repack`、启动失败最多重交 5 次、分组过滤 `keep_by_return_std` 及其 rl-config 参数、评测的读不出率等），合进本分支（`a5c5f2fc`，没有冲突；本分支在 `gym_agent_loop.py` 加的 `transition/think_rate` 保留）后两个补丁都打不上了。同样按三方合并挪到 main `2b54b45d`：只有 1 处文字冲突（模块说明里两边各加的段落），两边都保留；0002 直接打上。
+
 | 补丁 | 内容 | 改的文件 |
 | --- | --- | --- |
 | `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
@@ -168,7 +170,7 @@ python -m pytest -q data_gen/interiorgs_v10/tests/test_train_chain.py data_gen/i
 python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打完补丁的提交> --out <TR>/plan.json
 ```
 
-- 已核对（2026-10-21，main `cc131696`）：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和三方合并得到的文件逐字相同；在合并了 main 的本分支上，两个测试文件 38 个测试全部通过（main 原有 30 个、新加 8 个）。main 再改 `train_chain.py` 的话，合并前要重新核对一次。
+- 已核对（2026-10-21，main `2b54b45d`）：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和三方合并得到的文件逐字相同；在合并了 main 的本分支上，两个测试文件 40 个测试全部通过（main 原有 32 个、新加 8 个）。main 再改 `train_chain.py` 的话，合并前要重新核对一次。
 - 要先合并本分支再打补丁（就是上面的顺序）：`diagnostics` 步用到本分支的 `eval/diagnostics`，只有 main 的代码时它的 4 个测试会因为找不到模块而失败。
 - 对正在跑的训练链的影响：
   - 打了补丁，旧 plan 没有这些字段，行为不变；

@@ -3,7 +3,7 @@
 2026-10-21（第五版，加上第五批：遮挡物核对、遮挡题的渲染深度核对、重建和探针重跑；之后按你定的改了预登记并定稿，跑了 C0 的探针）。任务说明：用户 2026-10-17 的提示词（第 0–8 节）、2026-10-19 的三批要求和 2026-10-20 的要求。
 
 - 代码和文档都在分支 `transition-qa`（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data`），只在本地，没有推送，没有合并到 main。
-- 分支和 main 保持同步（最近一次合入 main `cc131696`）；合并到 main 由你在冻结期触发。
+- 分支和 main 保持同步（最近一次合入 main `2b54b45d`）；合并到 main 由你在冻结期触发。
 - 逐步记录见 `PROGRESS.md`（第二批在第 10 节，第三批在第 11 节，第四批在第 12 节），改动清单见 `CHANGES.md`。
 - 字段和规则见 `DATA_CONTRACT.md`，题型见 `P1_QTYPES.md`，数据集卡片见 `P1_DATASET_CARD.md`。
 
@@ -161,7 +161,7 @@
 
 还没定的：
 
-1. **训练链的 7 个字段**：两个补丁已挪到 main `cc131696` 上（`CHANGES.md` 第 6 节），合并时打上即可；main 再改 `train_chain.py` 的话要重新核对。不打就按各组 `manual_steps` 手工准备。
+1. **训练链的 7 个字段**：两个补丁已挪到 main `2b54b45d` 上（`CHANGES.md` 第 6 节），合并时打上即可；main 再改 `train_chain.py` 的话要重新核对。不打就按各组 `manual_steps` 手工准备。
 2. **合并到 main**：由你在冻结期触发。分支已和 main 同步。
    - 本分支改了 5 个现有文件：`training_prep.py`、`env.py`、两个 agent loop、`ray_trainer.py`；都是加选项或加指标。
    - 合并会把 `transition/think_rate` 带进所有之后的 RL 日志。
