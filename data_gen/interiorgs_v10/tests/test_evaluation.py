@@ -105,6 +105,34 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(out["model_a"]["collision_rate"], round(1 / 6, 4))
         self.assertIn("| model_a | 3 |", table)
 
+    def test_unreadable_forms(self):
+        """Round 12 batch (the user's decision 22): the forms of the answers the env could not read, and their share
+        per result folder in terminal.json / terminal.md."""
+        self.assertEqual(E.unreadable_form("<action>action1|action2|</action>"), "format_example_copied")
+        self.assertEqual(E.unreadable_form("<action>|</action>"), "empty_action")
+        self.assertEqual(E.unreadable_form("<action>turn left</action>"), "space_instead_of_underscore")
+        self.assertEqual(E.unreadable_form("<action>look_down|</action>"), "made_up_name")
+        self.assertEqual(E.unreadable_form("I will move forward"), "no_action_tag")
+        self.assertEqual(E.unreadable_form("<action>move_forward|move_backward|</action>"), "other")
+        base = {"task_type": "absolute_positioning", "success": False, "collisions": 0, "actions": 1, "d_star": 2,
+                "actions_to_success": None, "turns": 2, "invalid_turns": 1,
+                "start": {"progress": 0.1, "failed_gates": ["distance"]}}
+        turn = {"progress": 0.1, "failed_gates": ["distance"]}
+        rows = [dict(base, trajectory=[dict(turn, answer="<action>action1|</action>", valid=False),
+                                       dict(turn, answer="<action>move_forward|</action>", valid=True)]),
+                dict(base, trajectory=[dict(turn, answer="<action>action1|</action>", valid=False),
+                                       dict(turn, answer="<action>move_left|</action>", valid=True)])]
+        self.assertEqual(E.unreadable_forms(rows), {"format_example_copied": 2})
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "m"
+            d.mkdir()
+            (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            E.cmd_terminal(type("A", (), {"eval": tmp})())
+            out = json.loads((Path(tmp) / "terminal.json").read_text())
+            table = (Path(tmp) / "terminal.md").read_text(encoding="utf-8")
+        self.assertEqual((out["m"]["unreadable_share"], out["m"]["unreadable_forms"]), (0.5, {"format_example_copied": 2}))
+        self.assertIn("format_example_copied 2", table)
+
     def test_run_episode_records_the_trajectory(self):
         from PIL import Image
 

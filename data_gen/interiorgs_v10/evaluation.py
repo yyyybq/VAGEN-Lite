@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -569,6 +570,34 @@ FAMILY_CONDITIONS: Dict[str, Tuple[str, ...]] = {
 }
 
 
+VALID_ACTIONS = ("move_forward", "move_backward", "move_left", "move_right", "turn_left", "turn_right")
+
+
+def unreadable_form(answer: str) -> str:
+    """Round 12 batch (the user's decision 22): the form of an answer the env could not read: no <action> tag, an
+    empty action, the format example copied (action1, action, ...), spaces instead of underscores (turn left), or
+    another made-up name; "other" when every name is a real action (e.g. contradictory moves)."""
+    m = re.search(r"<action>(.*?)</action>", answer or "", re.S)
+    if not m:
+        return "no_action_tag"
+    acts = [a.strip() for a in m.group(1).split("|") if a.strip()]
+    if not acts:
+        return "empty_action"
+    bad = [a for a in acts if a not in VALID_ACTIONS]
+    if any(re.fullmatch(r"action\d*|\.\.\.", a) for a in bad):
+        return "format_example_copied"
+    if any(a.replace(" ", "_") in VALID_ACTIONS for a in bad):
+        return "space_instead_of_underscore"
+    return "made_up_name" if bad else "other"
+
+
+def unreadable_forms(rows: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+    """{form: count} of the unreadable answers (turns not valid) in the recorded trajectories."""
+    forms = Counter(unreadable_form(str(t.get("answer") or "")) for r in rows if "error" not in r
+                    for t in (r.get("trajectory") or []) if not t.get("valid", True))
+    return dict(forms.most_common())
+
+
 def condition_name(gate: str) -> str:
     """One name per success condition: the role prefix of a clearly-visible condition dropped."""
     for role in ("target_", "reference_"):
@@ -689,17 +718,19 @@ def cmd_terminal(args: argparse.Namespace) -> None:
         rows = _jsonl(d / "results.jsonl", partial_ok=True)
         if rows:
             models[d.name] = {**terminal_metrics(rows), "success": metrics(rows)["success"],
-                              "collision_rate": metrics(rows)["collision_rate"]}
+                              "collision_rate": metrics(rows)["collision_rate"],
+                              "unreadable_share": metrics(rows)["invalid_rate"], "unreadable_forms": unreadable_forms(rows)}
     (ev / "terminal.json").write_text(json.dumps(models, indent=1))
     families = list(FAMILY_CONDITIONS)
-    head = ["模型", "题数", "成功率", "终点进度分（成功的题）", "终点进度分（失败的题）", "终点满足的条件比例", "碰撞率"] + \
-        [f"{f} 满足比例（失败的题）" for f in families]
+    head = ["模型", "题数", "成功率", "终点进度分（成功的题）", "终点进度分（失败的题）", "终点满足的条件比例", "碰撞率",
+            "读不出动作的回合比例", "读不出的形式"] + [f"{f} 满足比例（失败的题）" for f in families]
     fmt = lambda v: "—" if v is None else f"{v:.3f}"  # noqa: E731
     lines = ["| " + " | ".join(head) + " |", "| " + " | ".join("---" for _ in head) + " |"]
     for name, m in models.items():
         fam = m["conditions_met_by_family"]
         cells = [name, str(m["episodes"]), fmt(m["success"]), fmt(m["progress_end_success"]),
-                 fmt(m["progress_end_fail"]), fmt(m["conditions_met_share"]), fmt(m["collision_rate"])]
+                 fmt(m["progress_end_fail"]), fmt(m["conditions_met_share"]), fmt(m["collision_rate"]),
+                 fmt(m["unreadable_share"]), "，".join(f"{k} {v}" for k, v in m["unreadable_forms"].items()) or "—"]
         cells += [fmt((fam.get(f) or {}).get("met_share_failed")) for f in families]
         lines.append("| " + " | ".join(cells) + " |")
     (ev / "terminal.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -179,8 +179,8 @@ def experiment_results(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], st:
 
 def quality(sets: Dict[str, Dict[str, str]], name: str) -> str:
     """Round 12 batch (the user's decision of 2026-10-21): a model's end progress over its failed episodes, the share
-    of the success conditions met at the end and the collision rate (validation + test); "" without recorded
-    trajectories."""
+    of the success conditions met at the end, the collision rate and the share of turns with an unreadable answer
+    (validation + test); "" without recorded trajectories."""
     from .evaluation import terminal_metrics
 
     rows = []
@@ -192,9 +192,11 @@ def quality(sets: Dict[str, Dict[str, str]], name: str) -> str:
         return ""
     actions = sum(int(r.get("actions") or 0) for r in rows)
     collisions = sum(int(r.get("collisions") or 0) for r in rows)
+    turns = sum(int(r.get("turns") or 0) for r in rows)
+    invalid = sum(int(r.get("invalid_turns") or 0) for r in rows)  # the user's decision 22: unreadable answers
     prog = "—" if t["progress_end_fail"] is None else f"{t['progress_end_fail']:.3f}"
     return (f"；终点进度分（失败的题）{prog}、终点满足的条件 {fmt(t['conditions_met_share'])}、"
-            f"碰撞率 {fmt(collisions / actions if actions else None)}")
+            f"碰撞率 {fmt(collisions / actions if actions else None)}、读不出动作的回合 {fmt(invalid / turns if turns else None)}")
 
 
 def fmt(v: Optional[float]) -> str:
