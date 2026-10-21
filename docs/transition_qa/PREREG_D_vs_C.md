@@ -78,7 +78,7 @@
 - **命令**（2026-10-21 起）：D − C 用 `python -m eval.diagnostics.qa_probe compare --probe exps/transition_qa_20261019b/p1_probe.jsonl --out OUT --a D=<D 组的 S0 RL>,<D 组的 D RL> --b C=<C 组的 S0 RL>,<C 组的 D RL>`；D − C0 把 `--b` 换成 `C0=c0_p1s0_250,c0_p1d_100`（结果名可以带目录，相对 OUT 或绝对路径；C0 的在 `exps/diagnostics_20261021/probe_v3d_all/`）。
   - 上表的指标、检验和判定都在 `eval/diagnostics/qa_probe.py` 的 `compare` 里：S0 对 S0、D 对 D 配对；McNemar 是精确检验；自助法 2,000 次，种子固定 20261021。
   - 写 `OUT/compare_<label>.json` 和中文表 `OUT/compare_<label>.md`（按答案分开的准确率、逐题不一致率一起报）。
-  - 实现时的读法："同号"是两个差都 > 0 或都 < 0，有一个差为 0 不算同号；差恰好等于 10 / 20 个百分点算达到。
+  - 实现时的读法（用户 2026-10-21 确认）："同号"是两个差都 > 0 或都 < 0，有一个差为 0 不算同号；差恰好等于 10 / 20 个百分点算达到。
 
 - **起点**（2026-10-21 的探针，`DIAG3_PROBE.md`）：所有现有模型在两类 goal 题上几乎只答 No。
   - 答案是 Yes 的题答对 0%–19%，答案是 No 的题 89%–100%（每类 100 道）。
