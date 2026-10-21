@@ -6,10 +6,12 @@
 Inputs per run directory (all read-only; each file's sha256 goes into the provenance record):
   <run>/eval_output/json/<task>_<instance_id>_<rollout_id>.json   official per-rollout results, or the
         directory named by status.json ``eval_output_dir`` (OmniGibson/omnigibson/eval/evaluator.py record_fn)
-  <run>/status.json         launcher status (optional). Read keys: eval_output_dir, task, instance_ids
-        (resolved) or mode + instance_indices, num_rollouts, seed, max_steps, config_name, config_hash,
-        infra_error (whole run failed for infrastructure reasons), infra_errors ([{task, instance_id,
-        rollout_id, reason}]), evaluator_exit_code / exit_code
+  <run>/status.json         eval/launch.py status (optional). Read keys: state, reason, eval_output_dir,
+        task, instance_ids (resolved) or mode + instance_indices, num_rollouts, seed, max_steps,
+        config_name, config_hash, infra_error (false or the reason), infra_errors ([{task, instance_id,
+        rollout_id, reason}]), evaluator_exit_code. Results status.json expects but the evaluator never
+        wrote are infra errors when the run is flagged infra / exited non-zero / state "failed", are
+        skipped while it is still planned / starting / running, and otherwise count as missing (Q = 0).
   <run>/run_manifest.json   agent manifest (agent/config.py build_manifest): config, config_hash, seed
   <run>/episodes/*/summary.json   agent episode summaries (agent/recorder.py episode_end, NAS copies)
 
@@ -68,6 +70,7 @@ BUDGET_FAILURE_REASONS = frozenset({"group_time_budget_exceeded", "policy_query_
 DEFAULT_INFRA_FAILURE_REASONS = ("policy_connection_lost",)
 SECONDS_PER_STEP = 1.0  # 2026 rule: rollout budget = max_steps x 1 s
 MAX_INFRA_RERUNS = 2
+RUNNING_STATES = frozenset({"planned", "starting", "running"})  # eval/launch.py status.json "state"
 
 # Keys that do not change agent behaviour; dropped before hashing configs into one comparison group.
 # run.seed is its own column so that seeds of one config pool together.
@@ -268,7 +271,7 @@ def load_run(run_dir: str, inputs: InputLog, order: int = 0) -> RunData:
     cfg = manifest.get("config") if isinstance(manifest.get("config"), dict) else None
     name = _get(cfg, "run.name") or status.get("config_name") or os.path.basename(run_dir)
     chash = manifest.get("config_hash") or status.get("config_hash")
-    key = config_key(cfg) if cfg is not None else (chash or f"name:{name}")
+    key = config_key(cfg) if cfg is not None else f"name:{name}"
     seed = manifest.get("seed", _get(cfg, "run.seed"))
     if seed is None:
         seed = status.get("seed")
@@ -308,8 +311,9 @@ _EP_RE = re.compile(r"-ep(\d+)-env(\d+)$")
 def match_summaries(run: RunData, official_keys: Sequence[tuple]) -> tuple[dict, list]:
     """Assign each agent episode summary to an official (task, instance_id, rollout_id).
 
-    Order of evidence: the server's --tag instance=<id> (a comma list is indexed by the env index in
-    the episode id), else status.json instance ids indexed by env index, else the only result of that
+    Order of evidence: the server's --tag instance_id / instance / instance_ids (eval/launch.py passes
+    instance_ids=<comma list in env order>; a list is indexed by the env index in the episode id), else
+    status.json instance ids indexed by env index, else the only result of that
     task in the run. Rollout = tag, else the rank of the episode counter among that instance's episodes
     (one evaluator run() == one reset == one rollout, evaluator.py run()).
     """
@@ -324,7 +328,7 @@ def match_summaries(run: RunData, official_keys: Sequence[tuple]) -> tuple[dict,
             task = status_task
         m = _EP_RE.search(str(s.get("episode_id", "")))
         ep, env = (int(m.group(1)), int(m.group(2))) if m else (0, None)
-        raw = tags.get("instance_id", tags.get("instance"))
+        raw = next((tags[k] for k in ("instance_id", "instance", "instance_ids") if tags.get(k) is not None), None)
         tag_ids = [i for i in (_int(x) for x in str(raw).split(",")) if i is not None] if raw is not None else []
         iid, how = None, None
         if len(tag_ids) == 1:
@@ -367,6 +371,8 @@ def _infra_flags(status: dict) -> tuple[Optional[str], dict]:
     exit_code = status.get("evaluator_exit_code", status.get("exit_code"))
     if whole is None and exit_code not in (None, 0):
         whole = f"evaluator exit code {exit_code}"
+    if whole is None and status.get("state") == "failed":  # launcher failure or user stop, not the policy
+        whole = "launcher state failed: " + ("; ".join(map(str, status.get("reason") or [])) or "no reason given")
     per = {}
     for e in status.get("infra_errors") or []:
         key = (str(e.get("task") or status.get("task") or ""), _int(e.get("instance_id")), _int(e.get("rollout_id")) or 0)
@@ -374,19 +380,20 @@ def _infra_flags(status: dict) -> tuple[Optional[str], dict]:
     return whole, per
 
 
-def _budget(rec: Optional[dict], summary: Optional[dict], status: dict) -> tuple[Optional[bool], str, Optional[float], Optional[float], Optional[float]]:
+def _budget(rec: dict, summary: Optional[dict], status: dict) -> dict:
+    """2026 budget verdict for one rollout: budget_ok True / False / None (unknown) and its source."""
     budget_s = _float((summary or {}).get("wallclock_budget_s"))
     if budget_s is None and status.get("max_steps") is not None:
         budget_s = float(status["max_steps"]) * SECONDS_PER_STEP
-    elapsed = _float((summary or {}).get("elapsed_s"))
-    eval_time = _float(_get(rec, "time.evaluation_time"))
-    if rec is not None and "failure_reason" in rec:
-        return rec["failure_reason"] not in BUDGET_FAILURE_REASONS, "failure_reason", budget_s, elapsed, eval_time
-    if eval_time is not None and budget_s is not None:
-        return eval_time <= budget_s, "evaluation_time", budget_s, elapsed, eval_time
-    if elapsed is not None and budget_s is not None:
-        return elapsed <= budget_s, "agent_elapsed", budget_s, elapsed, eval_time
-    return None, "unknown", budget_s, elapsed, eval_time
+    out = {"wallclock_budget_s": budget_s, "elapsed_s": _float((summary or {}).get("elapsed_s")),
+           "evaluation_time": _float(_get(rec, "time.evaluation_time")), "budget_ok": None, "budget_source": "unknown"}
+    if "failure_reason" in rec:
+        out.update(budget_ok=rec["failure_reason"] not in BUDGET_FAILURE_REASONS, budget_source="failure_reason")
+    elif out["evaluation_time"] is not None and budget_s is not None:
+        out.update(budget_ok=out["evaluation_time"] <= budget_s, budget_source="evaluation_time")
+    elif out["elapsed_s"] is not None and budget_s is not None:
+        out.update(budget_ok=out["elapsed_s"] <= budget_s, budget_source="agent_elapsed")
+    return out
 
 
 def _base_row(run: RunData, task: str, iid: int, rid: int) -> dict:
@@ -412,7 +419,7 @@ def _attach_summary(row: dict, entry: Optional[tuple]) -> None:
         row["synthetic"] = True
 
 
-def episode_rows(run: RunData, infra_reasons: Iterable[str] = DEFAULT_INFRA_FAILURE_REASONS) -> tuple[list[dict], list[str]]:
+def episode_rows(run: RunData, infra_reasons: Iterable[str] = DEFAULT_INFRA_FAILURE_REASONS) -> tuple[list, list]:
     """One row per official result of the run, plus placeholders for results status.json expected."""
     infra_reasons = set(infra_reasons)
     warnings = list(run.warnings)
@@ -427,16 +434,13 @@ def episode_rows(run: RunData, infra_reasons: Iterable[str] = DEFAULT_INFRA_FAIL
         reason = rec.get("failure_reason")
         nt = _float(_get(rec, "time.normalized_time"))
         entry = matched.get((task, iid, rid))
-        summary = entry[1] if entry else None
-        ok, source, budget_s, elapsed, eval_time = _budget(rec, summary, run.status)
         row.update(q_final=q, success=bool(rec.get("success")), steps=rec.get("steps"),
                    sim_time=_get(rec, "time.simulator_time"), normalized_time=nt, time_score=time_score(nt),
                    norm_dist_base=_get(rec, "normalized_agent_distance.base"),
                    norm_dist_left=_get(rec, "normalized_agent_distance.left"),
                    norm_dist_right=_get(rec, "normalized_agent_distance.right"),
-                   failure_reason=reason, budget_ok=ok, budget_source=source, evaluation_time=eval_time,
-                   elapsed_s=elapsed, wallclock_budget_s=budget_s, json_path=path,
-                   synthetic=bool(rec.get("_synthetic")))
+                   failure_reason=reason, json_path=path, synthetic=bool(rec.get("_synthetic")),
+                   **_budget(rec, entry[1] if entry else None, run.status))
         _attach_summary(row, entry)
         infra = per_infra.get((task, iid, rid)) or (f"failure_reason={reason}" if reason in infra_reasons else None)
         if infra:
@@ -448,7 +452,9 @@ def episode_rows(run: RunData, infra_reasons: Iterable[str] = DEFAULT_INFRA_FAIL
 
     status_task = run.status.get("task") or run.status.get("task_name")
     ids = _status_instance_ids(run.status)
-    if status_task and ids:
+    if run.status.get("state") in RUNNING_STATES:
+        warnings.append(f"run {run.run_id} is still {run.status['state']}: results it has not written yet are not counted")
+    elif status_task and ids:
         for iid in ids:
             for rid in range(int(run.status.get("num_rollouts") or 1)):
                 if (status_task, iid, rid) in seen:
@@ -519,12 +525,13 @@ def resolve_attempts(rows: list[dict]) -> list[str]:
                 continue
             r["superseded"] = True
             r["superseded_reason"] = "infra attempt, re-run" if i < ci else "later attempt after a counted result"
+        where = f"{key[1]}/{key[2]} seed {key[3]} ({chosen['config']})"
         if ci > MAX_INFRA_RERUNS:
-            warnings.append(f"{key[1]}/{key[2]} seed {key[3]} ({chosen['config']}): {ci} infra re-runs (max {MAX_INFRA_RERUNS})")
+            warnings.append(f"{where}: {ci} infra re-runs (max {MAX_INFRA_RERUNS})")
         later = len(attempts) - ci - 1
         if later:
-            warnings.append(f"{key[1]}/{key[2]} seed {key[3]} ({chosen['config']}): {later} attempt(s) after a counted "
-                            f"result ignored; policy failures must not be re-run (6.5)")
+            warnings.append(f"{where}: {later} attempt(s) after a counted result ignored; "
+                            "policy failures must not be re-run (6.5)")
     return warnings
 
 
@@ -561,11 +568,34 @@ def finalize_rows(rows: list[dict]) -> None:
         r["included"] = bool(r["in_declared"] and not r["superseded"] and not r["infra_error"])
 
 
+def unify_config_keys(runs: Sequence[RunData]) -> list[str]:
+    """Runs without a manifest config (e.g. the server never started) join the config whose manifest
+    has the same agent config_hash (status.json), else the only config with the same run name."""
+    warnings = []
+    full = [r for r in runs if isinstance(r.manifest.get("config"), dict)]
+    by_hash = {r.config_hash: r.config_key for r in full if r.config_hash}
+    by_name = collections.defaultdict(set)
+    for r in full:
+        by_name[r.config_name].add(r.config_key)
+    for r in runs:
+        if r in full:
+            continue
+        if r.config_hash in by_hash:
+            r.config_key = by_hash[r.config_hash]
+        elif len(by_name.get(r.config_name, ())) == 1:
+            r.config_key = next(iter(by_name[r.config_name]))
+            warnings.append(f"run {r.run_id} has no manifest config; grouped with config {r.config_name!r} by name")
+        elif not r.status.get("direct"):  # direct runs (evaluator -> executor) have no agent manifest
+            warnings.append(f"run {r.run_id} has no manifest config; grouped by name {r.config_name!r} only")
+    return warnings
+
+
 def build_configs(runs: Sequence[RunData]) -> dict:
     """config_key -> {label, names, hashes, seeds, runs, order}; labels disambiguated by key prefix."""
     configs: dict[str, dict] = {}
     for run in runs:
-        c = configs.setdefault(run.config_key, {"names": [], "hashes": set(), "seeds": set(), "runs": [], "order": run.order})
+        c = configs.setdefault(run.config_key,
+                               {"names": [], "hashes": set(), "seeds": set(), "runs": [], "order": run.order})
         if run.config_name not in c["names"]:
             c["names"].append(run.config_name)
         if run.config_hash:
@@ -747,12 +777,13 @@ def write_csv(path: str, records: list[dict], fields: Sequence[str]) -> None:
 
 def render_markdown(result: dict) -> str:
     prov = result["provenance"]
+    code = prov["code"] or {}
+    commit = (code.get("commit") or "unknown") + (" dirty" if code.get("dirty") else "")
     lvl = int(round(result["bootstrap"]["ci_level"] * 100))
-    out = [f"# Aggregated results",
+    out = ["# Aggregated results",
            "",
            f"Generated by `eval/aggregate.py` at {prov['generated_at']} from {len(prov['inputs'])} input files "
-           f"(code {(prov['code'] or {}).get('commit') or 'unknown'}{' dirty' if (prov['code'] or {}).get('dirty') else ''}). "
-           "Do not edit by hand; re-run the aggregator.",
+           f"(code {commit}). Do not edit by hand; re-run the aggregator.",
            ""]
     if result["synthetic_inputs"]:
         out += ["**WARNING: SYNTHETIC inputs present. These numbers are not results.**", ""]
@@ -771,8 +802,8 @@ def render_markdown(result: dict) -> str:
           c["mean_provider_calls"], c["mean_cost_usd"], c["mean_recoveries"]] for c in result["configs"]]))
     out += ["", "## Per task", ""]
     out.append(md_table(
-        ["config", "task", "episodes (incl. missing)", "missing", "infra", "mean Q", "Q (2026 budget)", "success", "budget viol.",
-         "steps", "time score", "dist base", "provider calls"],
+        ["config", "task", "episodes (incl. missing)", "missing", "infra", "mean Q", "Q (2026 budget)", "success",
+         "budget viol.", "steps", "time score", "dist base", "provider calls"],
         [[t["config"], t["task"], t["n_included"], t["n_missing"], t["n_infra"], t["mean_q"], t["mean_q_budget2026"],
           t["success_rate"], t["n_budget_violations"], t["mean_steps"], t["mean_time_score"], t["mean_norm_dist_base"],
           t["mean_provider_calls"]] for t in result["per_task"]]))
@@ -817,7 +848,7 @@ def aggregate(run_dirs: Sequence[str], out_dir: Optional[str] = None, declared_p
               infra_reasons: Iterable[str] = DEFAULT_INFRA_FAILURE_REASONS, argv: Optional[list] = None) -> dict:
     inputs = InputLog()
     runs = [load_run(d, inputs, order=i) for i, d in enumerate(run_dirs)]
-    warnings: list[str] = []
+    warnings: list[str] = unify_config_keys(runs)
     rows: list[dict] = []
     for run in runs:
         r, w = episode_rows(run, infra_reasons)

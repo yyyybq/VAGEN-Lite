@@ -245,6 +245,21 @@ def test_status_infra_and_missing_results(tmp_path):
     assert res["configs"][0]["mean_q"] == pytest.approx(0.25)
 
 
+def test_crashed_run_without_manifest_joins_its_config(tmp_path):
+    root = str(tmp_path / "runs")
+    ok_run = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.5})
+    crashed = os.path.join(root, "crashed")
+    _write_json(os.path.join(crashed, "status.json"),
+                {"_synthetic": True, "run_id": "crashed", "config_name": "L0_exec_only",
+                 "config_hash": "hash-L0_exec_only-turning_on_radio-s0", "task": "picking_up_trash",
+                 "instance_ids": [301], "evaluator_exit_code": 1})
+    res = agg.aggregate([ok_run, crashed], None, n_boot=0)
+    assert [c["config"] for c in res["configs"]] == ["L0_exec_only"]
+    c = res["configs"][0]
+    assert c["n_infra"] == 1 and c["mean_q"] == pytest.approx(0.5) and c["n_tasks"] == 1
+    assert c["tasks_without_valid_episodes"] == ["picking_up_trash"]
+
+
 def test_summary_join_by_env_index(tmp_path):
     """num_envs > 1: one server episode per env; the summary carries no instance tag."""
     root = str(tmp_path / "runs")

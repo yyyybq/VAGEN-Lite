@@ -95,6 +95,19 @@ def test_cli(tmp_path, capsys):
     assert "--steps plan,check" in open(out / "ladder1_plan.yaml", encoding="utf-8").readline()
 
 
+@pytest.mark.parametrize("kind", ["ladder", "loo"])
+def test_committed_generated_configs_are_current(tmp_path, kind):
+    """configs/ladder and configs/loo must match a fresh generation from the current L0 / L4."""
+    committed = os.path.join(CFG, kind)
+    if not os.path.isdir(committed):
+        pytest.skip(f"configs/{kind} not generated")
+    fresh = ablation.ladder(L0, L4, STEPS, str(tmp_path)) if kind == "ladder" else ablation.loo(L4, str(tmp_path))
+    assert sorted(os.listdir(committed)) == sorted(os.path.basename(p) for p in fresh)
+    for path in fresh:
+        mine = os.path.join(committed, os.path.basename(path))
+        assert ablation.resolved(mine) == ablation.resolved(path), f"{mine} is stale; regenerate it"
+
+
 def test_ladder_input_errors(tmp_path):
     with pytest.raises(SystemExit):
         ablation.ladder(L0, L1, ["plan", "check"], str(tmp_path))  # check is not enabled in L1

@@ -55,7 +55,8 @@ _ABSENT = "<absent>"
 
 def diff_configs(a: dict, b: dict) -> list[tuple[str, Any, Any]]:
     fa, fb = _flatten(a), _flatten(b)
-    return [(k, fa.get(k, _ABSENT), fb.get(k, _ABSENT)) for k in sorted(set(fa) | set(fb)) if fa.get(k, _ABSENT) != fb.get(k, _ABSENT)]
+    pairs = ((k, fa.get(k, _ABSENT), fb.get(k, _ABSENT)) for k in sorted(set(fa) | set(fb)))
+    return [(k, va, vb) for k, va, vb in pairs if va != vb]
 
 
 def switch_report(a: dict, b: dict) -> dict:

@@ -163,7 +163,7 @@ def test_summarize_distribution(tmp_path):
     assert cats["grasp_place"]["share"] == pytest.approx(2 / 3) and cats["uncertain"]["count"] == 1
     assert s["per_task"][TASK]["grasp_place"] == 2 and s["per_task"]["picking_up_trash"]["uncertain"] == 1
     md = fl.render_summary(s)
-    assert "抓放操作" in md and "1 unlabelled" in md
+    assert "抓放操作" in md and "1 unlabelled" in md and "SYNTHETIC" in md
     assert fl.main(["summarize", out, "--out", str(tmp_path / "dist.md")]) == 0
     bad = fl.load_records(out)
     bad[0]["category"] = "other"

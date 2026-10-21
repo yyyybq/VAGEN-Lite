@@ -154,7 +154,8 @@ Tests: `tests/test_protocol.py`.
   - `q_score.final` = 1.0 on success.
   - Otherwise: `max over goal options of (#goal literals FALSE at episode start and TRUE at episode end) / (#literals in that option)`.
   - Literals that are already true at the start count in the denominator but can never earn credit.
-  - Credit is measured at the END, so a literal satisfied and later undone earns nothing.
+  - Credit is measured once, at the step where the episode ends (success or timeout), not as a maximum over time [code `evaluator.py:125-137`]. A literal satisfied and later undone earns nothing.
+  - Breaking a literal that started true costs nothing, except that it can prevent full success.
   - The docs' wording "(predicates satisfied at episode end) / (total)" [docs `evaluation.md:231`] omits the "newly" condition.
 - **Other fields in the result JSON:** `success`, `steps`, `agent_distance{base,left,right}`, `normalized_agent_distance`, `time{simulator_steps, simulator_time, normalized_time}`. On 2026/eval also `failure_reason` and a time breakdown.
   - File name: `<out>/json/{task}_{instance_id}_{rollout}.json`, with the resolved id (301…).
@@ -253,17 +254,32 @@ Selection rule (spec): can be downloaded, loaded, and run through the official i
 
 ## 13. Dev tasks (Step 6)
 
-Proposal, pending the R6 table and a check on 105 that the instances exist:
+**No pure-navigation task exists** in the 100 BDDL goals: none mentions the agent, `inroom` or `grasped` [R6, derived]. The navigation probe is therefore a navigation-dominant task.
 
-| Role | Task (idx) | Why | est. max_steps |
-|---|---|---|---|
-| pure navigation (+ toggle) | `turning_on_radio` (0) | 1 goal literal, navigate and press; the only task with an official checkpoint | 3240 |
-| single-object | `make_rose_centerpieces` (56) or `re_shelving_library_books` (55) | few objects, short | ≈5k / 12.6k |
-| multi-object | `picking_up_trash` (1) | 3 cans into the trash can, 2 rooms | 7920 |
-| articulated | `store_honey` (83) or `rearranging_kitchen_furniture` (8) | open/close plus inside | 8685 / 13410 |
-| long-horizon | `putting_away_Halloween_decorations` (2) | 8 literals, cabinet, ≥400 s demo | 20700 |
+Credit caps:
+- "cap" = the best Q reachable without full success, given goal literals that are already true at the start.
+- Caps are heuristic, from the BDDL `:init`.
 
-The final choice depends on executor coverage: with a 50-task executor, Dev tasks must come from indices 0–49.
+**Proposal A, full 2026 coverage** (R6 §5):
+
+| Role | Task (idx) | Scene / rooms | ~max_steps | Goal literals | Cap |
+|---|---|---|---:|---|---:|
+| navigation-dominant | `turning_out_all_lights_before_sleep` (66, new) | house_single_floor, 8 room types | ~15.0k | 5 toggles; each room visit +0.2 | 1.0 |
+| single-object | `turning_on_radio` (0) | house_double_floor_lower, living_room | ~3.2k | 1 | 1.0 |
+| multi-object | `picking_up_trash` (1) | kitchen + living_room | ~7.9k | 3 cans inside the trash can | 1.0 |
+| articulated | `store_honey` (83, new) | Rs_int; jar in kitchen, cabinet in entryway | ~10.2k | 1 (inside cabinet) | 1.0 |
+| long-horizon | `putting_dishes_away_after_cleaning` (11) | kitchen | ~16.4k | 8 plates inside the cabinet + cabinet closed | ≈0.8 |
+
+**Proposal B, a 2025 50-task executor** (indices 0–49 only): replace 66 by `bringing_water` (17, two rooms with a fridge, cap 0.67) or `carrying_in_groceries` (14), and replace 83 by `rearranging_kitchen_furniture` (8, cap 0.75) or `make_microwave_popcorn` (40).
+
+**Choice rule:** freeze A or B after Step 5, from the executor's task coverage. Use public_test indices 10–19 plus train instances; never 0–9.
+
+**Approximate cost of one instance of each Proposal A task:** about 52.8k simulator steps. That is roughly 65 min at the documented 13.5 FPS, plus 150–300 s of scene load per task [inferred; to be replaced by Step-4 measurements].
+
+**Scoring implications** for M-goal / M-plan (R6, R7):
+- Secure the literals that start false first.
+- Never undo achieved ones; credit is read at the final step only.
+- End with a "close what was opened / restore initially-true literals" sweep. Initially-true literals give no partial credit but are required for the 1.0 of full success, and the jump from the cap (0.67–0.92) to 1.0 is large.
 
 ## 14. Page vs code discrepancies (keep checking)
 

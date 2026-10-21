@@ -61,7 +61,7 @@ SCHEMA_VERSION = 1
 
 RECORD_FIELDS = (
     "schema_version", "record_id", "run_id", "config", "episode_id", "task", "instance_id", "rollout_id", "seed",
-    "q_final", "success", "official_failure_reason", "infra_error", "steps",
+    "q_final", "success", "official_failure_reason", "infra_error", "steps", "synthetic",
     "video_path", "video_exists", "video_fps", "video_time_s", "step",
     "current_skill", "current_instruction", "model_judgment", "actual_outcome", "next_action",
     "category", "category_zh", "labeler", "evidence_notes",
@@ -86,8 +86,26 @@ def _moment(step: Any, kind: str, summary: str, **extra) -> dict:
     return {"step": _int(step), "kind": kind, "summary": summary, **extra}
 
 
-def _judgment(out: dict) -> dict:
-    return {k: out.get(k) for k in ("status", "confidence", "failure_type", "evidence", "source")}
+def _decision_moment(slot: str, out: Any, step: Any) -> Optional[dict]:
+    """A timeline moment for one recorder ``decision`` record (agent/recorder.py), or None."""
+    if slot == "plan" and out is None:
+        return _moment(step, "plan_exhausted", "planner returned no subtask")
+    if slot == "plan" and isinstance(out, dict):
+        kind = "fallback" if "fallback" in str(out.get("source", "")) else "subtask_start"
+        return _moment(step, kind, f"{out.get('skill')}: {out.get('instruction')} [{out.get('source')}]",
+                       skill=out.get("skill"), instruction=out.get("instruction"), evidence=out.get("evidence"))
+    if slot == "check" and isinstance(out, dict) and out.get("source") != "check.null":
+        j = {k: out.get(k) for k in ("status", "confidence", "failure_type", "evidence", "source")}
+        return _moment(step, "judgment", f"{j['status']} ({j['confidence']}) {j['failure_type'] or ''}".strip(),
+                       judgment=j)
+    if slot == "recover" and isinstance(out, dict):
+        return _moment(step, "recovery", f"{out.get('kind')}:{out.get('primitive')} {out.get('reason') or ''}".strip(),
+                       instruction=out.get("instruction"))
+    if slot == "recover":
+        return _moment(step, "recovery_none", "recovery module proposed nothing")
+    if slot in ("approach", "memory", "explore") and isinstance(out, dict):
+        return _moment(step, "adjust", f"{slot}: {out.get('reason') or out.get('instruction') or ''}".strip())
+    return None
 
 
 def build_timeline(events: Iterable[dict], video_fps: float = DEFAULT_VIDEO_FPS) -> list[dict]:
@@ -98,26 +116,9 @@ def build_timeline(events: Iterable[dict], video_fps: float = DEFAULT_VIDEO_FPS)
     for ev in events:
         kind, step = ev.get("kind"), ev.get("step")
         if kind == "decision":
-            slot, out = ev.get("slot"), ev.get("out")
-            if slot == "plan" and out is None:
-                moments.append(_moment(step, "plan_exhausted", "planner returned no subtask"))
-            elif slot == "plan" and isinstance(out, dict):
-                k = "fallback" if "fallback" in str(out.get("source", "")) else "subtask_start"
-                moments.append(_moment(step, k, f"{out.get('skill')}: {out.get('instruction')} [{out.get('source')}]",
-                                       skill=out.get("skill"), instruction=out.get("instruction"),
-                                       evidence=out.get("evidence")))
-            elif slot == "check" and isinstance(out, dict) and out.get("source") != "check.null":
-                j = _judgment(out)
-                moments.append(_moment(step, "judgment", f"{j['status']} ({j['confidence']}) {j['failure_type'] or ''}".strip(),
-                                       judgment=j))
-            elif slot == "recover":
-                if isinstance(out, dict):
-                    moments.append(_moment(step, "recovery", f"{out.get('kind')}:{out.get('primitive')} {out.get('reason') or ''}".strip(),
-                                           instruction=out.get("instruction")))
-                else:
-                    moments.append(_moment(step, "recovery_none", "recovery module proposed nothing"))
-            elif slot in ("approach", "memory", "explore") and isinstance(out, dict):
-                moments.append(_moment(step, "adjust", f"{slot}: {out.get('reason') or out.get('instruction') or ''}".strip()))
+            m = _decision_moment(ev.get("slot"), ev.get("out"), step)
+            if m is not None:
+                moments.append(m)
         elif kind == "executor":
             instr = ev.get("instruction")
             if instr != exec_instruction:
@@ -136,12 +137,15 @@ def build_timeline(events: Iterable[dict], video_fps: float = DEFAULT_VIDEO_FPS)
                                f"{st.get('skill')} -> {rec.get('outcome')} (retries {rec.get('retries')})",
                                skill=st.get("skill"), outcome=rec.get("outcome")))
         if str(st.get("source", "")).startswith("loop.fallback"):
-            moments.append(_moment(rec.get("start_step"), "fallback", f"loop fallback [{st.get('source')}]: full task prompt",
+            moments.append(_moment(rec.get("start_step"), "fallback",
+                                   f"loop fallback [{st.get('source')}]: full task prompt",
                                    skill=st.get("skill"), instruction=st.get("instruction")))
 
-    order = sorted(range(len(moments)), key=lambda i: (moments[i]["step"] if moments[i]["step"] is not None else 1 << 30,
-                                                       _PRIO.get(moments[i]["kind"], 9), i))
-    moments = [moments[i] for i in order]
+    def order(i):
+        m = moments[i]
+        return (m["step"] if m["step"] is not None else 1 << 30, _PRIO.get(m["kind"], 9), i)
+
+    moments = [moments[i] for i in sorted(range(len(moments)), key=order)]
     skill = instruction = judgment = None
     for m in moments:
         if m["kind"] in ("subtask_start", "fallback"):
@@ -155,8 +159,12 @@ def build_timeline(events: Iterable[dict], video_fps: float = DEFAULT_VIDEO_FPS)
     end = (end_summary or {}).get("steps")
     for i, m in enumerate(moments):
         nxt = next((n for n in moments[i + 1:] if n["kind"] in ACTION_KINDS), None)
-        m["next_action"] = f"step {nxt['step']}: {nxt['kind']}: {nxt['summary']}" if nxt else f"episode end (steps {end})"
+        m["next_action"] = _describe(nxt) if nxt else f"episode end (steps {end})"
     return moments
+
+
+def _describe(m: dict) -> str:
+    return f"step {m['step']}: {m['kind']}: {m['summary']}"
 
 
 def read_events(path: str, inputs: InputLog) -> list[dict]:
@@ -176,7 +184,8 @@ def _events_path(row: dict, local_root: Optional[str]) -> Optional[str]:
     if row.get("summary_path"):
         cands.append(os.path.join(os.path.dirname(row["summary_path"]), "events.jsonl"))
     if local_root and row.get("episode_id"):
-        cands.append(os.path.join(os.path.expanduser(local_root), row["run_id"], "episodes", row["episode_id"], "events.jsonl"))
+        local = os.path.join(os.path.expanduser(local_root), row["run_id"], "episodes", row["episode_id"])
+        cands.append(os.path.join(local, "events.jsonl"))
     return next((p for p in cands if os.path.isfile(p)), None)
 
 
@@ -200,6 +209,7 @@ def skeleton_records(run_dirs: Sequence[str], video_fps: Optional[float] = None,
                 episode_id=row["episode_id"], task=row["task"], instance_id=row["instance_id"],
                 rollout_id=row["rollout_id"], seed=row["seed"], q_final=row["q_final"], success=row["success"],
                 official_failure_reason=row["failure_reason"], infra_error=row["infra_error"], steps=row["steps"],
+                synthetic=row["synthetic"],
                 video_path=row["video_path"], video_exists=bool(row["video_path"] and os.path.isfile(row["video_path"])),
                 video_fps=fps, actual_outcome="", category=DEFAULT_CATEGORY,
                 category_zh=CATEGORY_LABELS_ZH[DEFAULT_CATEGORY], labeler="",
@@ -221,7 +231,7 @@ def anchor(record: dict, step: int, timeline: Optional[list] = None) -> dict:
     record.update(step=int(step), video_time_s=round(step / float(record.get("video_fps") or DEFAULT_VIDEO_FPS), 3),
                   current_skill=m.get("current_skill"), current_instruction=m.get("current_instruction"),
                   model_judgment=m.get("model_judgment"),
-                  next_action=f"step {nxt['step']}: {nxt['kind']}: {nxt['summary']}" if nxt else "none until episode end")
+                  next_action=_describe(nxt) if nxt else "none until episode end")
     return record
 
 
@@ -277,6 +287,7 @@ def summarize(records: Sequence[dict]) -> dict:
         "n_records": total,
         "n_episodes": len({r["record_id"].rsplit("#", 1)[0] for r in records}),
         "n_unlabelled": sum(1 for r in records if not r.get("labeler")),
+        "synthetic_inputs": any(r.get("synthetic") for r in records),
         "categories": [{"category": c, "label_zh": CATEGORY_LABELS_ZH[c], "count": counts[c],
                         "share": counts[c] / total if total else None, "episodes": len(episodes[c])} for c in CATEGORIES],
         "per_task": {t: {c: per_task[t][c] for c in CATEGORIES} for t in sorted(per_task)},
@@ -287,6 +298,8 @@ def render_summary(s: dict) -> str:
     out = ["# Failure distribution (task spec 6.7)", "",
            f"Generated by `eval/failures.py summarize`: {s['n_records']} record(s) from {s['n_episodes']} episode(s); "
            f"{s['n_unlabelled']} unlabelled (category defaults to uncertain until a human labels it).", ""]
+    if s["synthetic_inputs"]:
+        out += ["**WARNING: SYNTHETIC inputs present. This distribution is not a result.**", ""]
     out.append(md_table(["category", "类别", "count", "share", "episodes"],
                         [[c["category"], c["label_zh"], c["count"], c["share"], c["episodes"]] for c in s["categories"]]))
     out += ["", "## Per task", ""]
