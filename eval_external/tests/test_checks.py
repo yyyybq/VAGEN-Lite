@@ -89,16 +89,27 @@ def test_esi_action_rule():
         "no_json", "no_answer", "no_confidence"]
 
 
-def test_pool_slots_fill_h800_first():
+def test_pool_slots_fill_in_pool_order(monkeypatch):
     from eval_external.sco import job as J
 
-    assert J.POOL_LIMITS == {"h800": 4, "zoetrope": 4} and J.MAX_ACTIVE == 8
-    assert J.free_pool({"h800": 3, "zoetrope": 0}) == "h800"
-    assert J.free_pool({"h800": 4, "zoetrope": 0}) == "zoetrope"
+    assert J.POOLS == ("zoe-cf-render", "h800", "zoetrope") and J.MAX_ACTIVE == 8
+    assert J.POOL_LIMITS == {"zoe-cf-render": 0, "h800": 4, "zoetrope": 4}  # zoe-cf-render took none of our jobs
+    assert J.free_pool({}) == "h800"
     assert J.free_pool({"h800": 4, "zoetrope": 3}) == "zoetrope"
     assert J.free_pool({"h800": 4, "zoetrope": 4}) is None
+    monkeypatch.setitem(J.POOL_LIMITS, "zoe-cf-render", 8)  # decision 21 once the pool takes our jobs
+    assert J.free_pool({}) == "zoe-cf-render"
+    assert J.free_pool({"zoe-cf-render": 7}) == "zoe-cf-render"
+    assert J.free_pool({"zoe-cf-render": 8}) is None                        # 8 in all
+    assert J.free_pool({"zoe-cf-render": 5, "h800": 3}) is None             # 8 in all
+    assert J.free_pool({"zoe-cf-render": 2, "h800": 3}) == "zoe-cf-render"
+    assert J.free_pool({"zoe-cf-render": 2}, exclude={"zoe-cf-render"}) == "h800"
+    assert J.free_pool({"zoe-cf-render": 1, "h800": 4, "zoetrope": 0}, exclude={"zoe-cf-render"}) == "zoetrope"
+    assert J.free_pool({"h800": 4, "zoetrope": 3}) == "zoe-cf-render"
+    assert J.free_pool({"h800": 4, "zoetrope": 3}, exclude={"zoe-cf-render"}) == "zoetrope"
+    assert J.free_pool({"h800": 4, "zoetrope": 4}) is None
     assert J.active_by_pool([{"pool": "h800"}, {"pool": "zoetrope"}, {"pool": "h800"}, {}]) == {
-        "h800": 3, "zoetrope": 1}  # a record without a pool was submitted to h800
+        "zoe-cf-render": 0, "h800": 3, "zoetrope": 1}  # a record without a pool was submitted to h800
 
 
 def test_yield_to_own_waiting_8_card_jobs():
@@ -113,12 +124,17 @@ def test_yield_to_own_waiting_8_card_jobs():
             j("interiorgs-v10-rl-rl-run-s100d", "zoetrope", "STARTING", 8, "me"),   # RL training, waiting, 8 cards
             j("bq_tp_mmxbf16_t500_l20_p12_r2", "h800", "STARTING", 8, "me"),         # 8 cards but not RL: no yield
             j("vln_train", "h800", "STARTING", 8, "someone"),                        # someone else's
-            j("interiorgs-v10-renderer-rl-run-s100d", "h800", "STARTING", 1, "me")]  # one card
+            j("interiorgs-v10-renderer-rl-run-s100d", "h800", "STARTING", 1, "me"),  # one card
+            j("evalext-step2-sat-x", "zoe-cf-render", "QUEUEING", 1, "me")]          # one card on zoe-cf-render
     assert Q.yield_pools(jobs) == {"zoetrope"}
-    assert Q.pool_waiting(jobs) == {"h800": 3, "zoetrope": 1}
+    assert Q.pool_waiting(jobs) == {"zoe-cf-render": 1, "h800": 3, "zoetrope": 1}
     assert Q.yield_pools([j("interiorgs-v10-rl-rl-run-x", "h800", "RUNNING", 8, "me")]) == set()  # started
-    assert J.free_pool({"h800": 4, "zoetrope": 0}, exclude={"zoetrope"}) is None
-    assert J.free_pool({"h800": 3, "zoetrope": 0}, exclude={"zoetrope"}) == "h800"
+    # on zoe-cf-render any job waiting for whole machines counts, whoever submitted it (decision 21)
+    assert Q.yield_pools(jobs + [j("multion-noaug-4node-20261020", "zoe-cf-render", "STARTING", 8, "someone")]) == {
+        "zoetrope", "zoe-cf-render"}
+    assert Q.yield_pools([j("multion-noaug-4node-20261020", "zoe-cf-render", "SUSPENDED", 8, "someone")]) == set()
+    assert J.free_pool({"h800": 4, "zoetrope": 0}, exclude={"zoe-cf-render", "zoetrope"}) is None
+    assert J.free_pool({"h800": 3, "zoetrope": 0}, exclude={"zoe-cf-render", "zoetrope"}) == "h800"
 
 
 def test_waiting_jobs_move_to_the_less_crowded_pool(tmp_path):
@@ -128,11 +144,13 @@ def test_waiting_jobs_move_to_the_less_crowded_pool(tmp_path):
     r = tmp_path / "submission.json"
     r.write_text(json.dumps({"utc": t0.isoformat(), "pool": "zoetrope"}))
     later = t0.timestamp() + Q.MOVE_AFTER_S + 1
-    w = {"h800": 11, "zoetrope": 36}
-    assert Q.move_target(r, "STARTING", w, later) == "h800"
+    w = {"zoe-cf-render": 2, "h800": 11, "zoetrope": 36}
+    assert Q.move_target(r, "STARTING", w, later) == "zoe-cf-render"            # the fewest waiting
+    assert Q.move_target(r, "STARTING", w, later, allowed={"h800", "zoetrope"}) == "h800"
+    assert Q.move_target(r, "STARTING", w, later, allowed=set()) is None
     assert Q.move_target(r, "RUNNING", w, later) is None
     assert Q.move_target(r, "STARTING", w, t0.timestamp() + 60) is None         # not waited long enough
-    assert Q.move_target(r, "STARTING", {"h800": 40, "zoetrope": 36}, later) is None  # other pool not better
+    assert Q.move_target(r, "STARTING", {"zoe-cf-render": 36, "h800": 40, "zoetrope": 36}, later) is None  # none better
     for k in range(Q.MAX_MOVES):
         (tmp_path / f"submission_pt-{k}_deleted.json").write_text("{}")
     assert Q.move_target(r, "STARTING", w, later) is None                       # moved often enough

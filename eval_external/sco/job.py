@@ -8,7 +8,10 @@
 Rules (decided 2026-10-18): pool h800, one H800 per job, at most 4 of our jobs not finished at once (the round-11
 training chain runs on zoetrope).  2026-10-20: a job waiting for a card may move to the other pool (sco/queue.py).
 2026-10-21: at most POOL_LIMITS unfinished jobs per pool, h800 4 and zoetrope 4 (8 in all); a new job takes the
-first pool in POOLS order with a free slot, so h800 fills first.  Every job is recorded in ROOT/sco_jobs.jsonl.  The job runs as
+first pool in POOLS order with a free slot, so h800 fills first.  2026-10-21 (decision 21): zoe-cf-render (4 whole
+H800 machines, workspace aigc only, no RL training) comes first with up to 8, all pools together at most MAX_ACTIVE
+(8); its limit is 0 for now because the pool did not take our jobs.  Every job is recorded in ROOT/sco_jobs.jsonl.
+The job runs as
 root in the container; launch.sh hands RUN_DIR and LMUData back to the user when it ends.  The command runs
 with the eval-external conda env, offline Hugging Face (everything is downloaded on the login node first) and
 the worktree as working directory.
@@ -32,11 +35,13 @@ HF_HOME = str(ROOT / "hf_home")  # hub/ links to the shared ~/.cache/huggingface
 SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
 IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"   # same image as the training jobs
 MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
-POOL = "h800"
-POOLS = ("h800", "zoetrope")  # in this order a new job takes the first pool with a free slot (2026-10-21)
-POOL_LIMITS = {"h800": 4, "zoetrope": 4}  # our unfinished jobs per pool (2026-10-21: zoetrope up to 4 more)
+POOL = "h800"  # a record without a pool was submitted here
+POOLS = ("zoe-cf-render", "h800", "zoetrope")  # in this order a new job takes the first pool with a free slot
+# our unfinished jobs per pool (decisions 18, 21).  zoe-cf-render 0: our 8 jobs there waited 17 minutes without a
+# machine on 2026-10-21 (zuojing's job there never started either); 8 again once the pool takes our jobs
+POOL_LIMITS = {"zoe-cf-render": 0, "h800": 4, "zoetrope": 4}
 SPEC = "N4lS.Iq.I80.1"  # one H800, 14 vCPU
-MAX_ACTIVE = sum(POOL_LIMITS.values())
+MAX_ACTIVE = 8  # our unfinished jobs in all pools together (decision 21)
 WAITING = {"STARTING", "QUEUEING", "PENDING"}  # submitted, no card yet
 OWNER = "20325:20325"  # yinbaiqiao
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED", "NOT_FOUND"}
@@ -108,13 +113,16 @@ def active_by_pool(running: list[dict] | None = None) -> dict[str, int]:
 
 
 def free_pool(counts: dict[str, int], exclude: set[str] | frozenset = frozenset()) -> str | None:
-    """The first pool in POOLS order (not in exclude) with fewer unfinished jobs than its limit, or None."""
+    """The first pool in POOLS order (not in exclude) with fewer unfinished jobs than its limit, or None; None also
+    when all pools together hold MAX_ACTIVE."""
+    if sum(counts.values()) >= MAX_ACTIVE:
+        return None
     return next((p for p in POOLS if p not in exclude and counts.get(p, 0) < POOL_LIMITS[p]), None)
 
 
 def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_limit: bool = False,
            also_own: tuple[str, ...] = (), pool: str | None = None) -> str:
-    """pool None: the first pool with a free slot (h800, then zoetrope)."""
+    """pool None: the first pool with a free slot (zoe-cf-render, h800, then zoetrope)."""
     if pool is not None and pool not in POOLS:
         raise SystemExit(f"pool {pool} not allowed ({POOLS})")
     job = run / "job"
@@ -125,9 +133,10 @@ def submit(run: Path, name: str, command: list[str], env: dict[str, str], force_
     counts = active_by_pool(running)
     if pool is None:
         pool = free_pool(counts) or (POOL if force_limit else None)
-    if pool is None or (counts.get(pool, 0) >= POOL_LIMITS[pool] and not force_limit):
-        raise SystemExit(f"no free slot (unfinished jobs per pool {counts}, limits {POOL_LIMITS}): "
-                         + ", ".join(r["name"] for r in running))
+    full = pool is None or counts.get(pool, 0) >= POOL_LIMITS[pool] or sum(counts.values()) >= MAX_ACTIVE
+    if full and not force_limit:
+        raise SystemExit(f"no free slot (unfinished jobs per pool {counts}, limits {POOL_LIMITS}, "
+                         f"{MAX_ACTIVE} in all): " + ", ".join(r["name"] for r in running))
     job.mkdir(parents=True, exist_ok=True)
     (job / "launch.sh").write_text(launch_script(run, command, env, also_own))
     (job / "launch.sh").chmod(0o755)
