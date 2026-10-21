@@ -260,6 +260,43 @@ def test_crashed_run_without_manifest_joins_its_config(tmp_path):
     assert c["tasks_without_valid_episodes"] == ["picking_up_trash"]
 
 
+def test_launcher_status_states(tmp_path):
+    """status.json as eval/launch.py writes it: state, reason, infra_error (reason string), infra_errors."""
+    root = str(tmp_path / "runs")
+    running = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.5, 302: 0.5}, run_suffix="-run", skip=(302,),
+                       status_extra={"state": "running", "infra_error": False, "evaluator_exit_code": None})
+    res = agg.aggregate([running], None, n_boot=0)
+    assert [r["instance_id"] for r in res["rows"]] == [301] and any("still running" in w for w in res["warnings"])
+    stopped = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.5}, run_suffix="-stop", skip=(301,),
+                       status_extra={"state": "failed", "reason": ["stopped_by_user"], "infra_error": False})
+    res = agg.aggregate([stopped], None, n_boot=0)
+    assert res["rows"][0]["infra_error"] and res["rows"][0]["infra_reason"] == "launcher state failed: stopped_by_user"
+    lost = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.5, 302: 0.5}, run_suffix="-lost", skip=(302,),
+                    status_extra={"state": "infra_error", "infra_error": "agent died", "evaluator_exit_code": 0,
+                                  "infra_errors": [{"task": "turning_on_radio", "instance_id": 302, "rollout_id": 0,
+                                                    "reason": "no official result JSON"}]})
+    res = agg.aggregate([lost], None, n_boot=0)
+    rows = {r["instance_id"]: r for r in res["rows"]}
+    assert not rows[301]["infra_error"] and rows[302]["infra_reason"] == "no official result JSON"
+
+
+def test_summary_join_by_launcher_tag(tmp_path):
+    """eval/launch.py tags the agent with instance_ids=<comma list in env order>."""
+    root = str(tmp_path / "runs")
+    run = make_run(root, "L1_plan", "turning_on_radio", {305: 1.0, 301: 0.5},
+                   status_extra={"instance_ids": None, "mode": None})
+    for d in os.listdir(os.path.join(run, "episodes")):
+        p = os.path.join(run, "episodes", d, "summary.json")
+        s = json.load(open(p))
+        s["tags"] = {"task": "turning_on_radio", "instance_ids": "305,301", "instance_indices": "4,0"}
+        s["provider_calls"] = 7 if s["episode_id"].endswith("env1") else 3
+        _write_json(p, s)
+    res = agg.aggregate([run], None, n_boot=0)
+    rows = {r["instance_id"]: r for r in res["rows"]}
+    assert rows[305]["join"] == rows[301]["join"] == "tag_env_index"
+    assert (rows[305]["provider_calls"], rows[301]["provider_calls"]) == (3, 7)
+
+
 def test_summary_join_by_env_index(tmp_path):
     """num_envs > 1: one server episode per env; the summary carries no instance tag."""
     root = str(tmp_path / "runs")
@@ -301,6 +338,15 @@ def test_cli_entry_point(runs, tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert "L0_exec_only: mean Q 0.450" in proc.stdout
     assert (out / "per_config.csv").is_file()
+
+
+def test_infinite_normalized_distance_is_skipped(tmp_path):
+    """agent_metric.py: normalized distance = human / agent, inf when the agent never moved."""
+    inf = {"normalized_agent_distance": {"base": float("inf"), "left": 1.0, "right": 1.0}}
+    run = make_run(str(tmp_path / "runs"), "L0_exec_only", "turning_on_radio", {301: 0.0, 302: 0.5},
+                   official_extra={301: inf})
+    c = agg.aggregate([run], None, n_boot=0)["configs"][0]
+    assert c["mean_norm_dist_base"] == pytest.approx(0.8) and c["mean_q"] == pytest.approx(0.25)
 
 
 def test_resolve_instance_ids_matches_official():
