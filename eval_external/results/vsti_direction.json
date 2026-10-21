@@ -1,0 +1,500 @@
+{
+ "baselines": {
+  "random": 36.4,
+  "best_fixed_order": {
+   "order": [
+    "Forward",
+    "Right",
+    "Left",
+    "Backward"
+   ],
+   "accuracy": 53.8
+  },
+  "worst_fixed_order": {
+   "order": [
+    "Backward",
+    "Left",
+    "Right",
+    "Forward"
+   ],
+   "accuracy": 20.3
+  },
+  "truth": {
+   "Forward": 372,
+   "Right": 253,
+   "Left": 197,
+   "Backward": 91
+  },
+  "offered": {
+   "Forward": 79.0,
+   "Backward": 68.3,
+   "Left": 76.0,
+   "Right": 74.2
+  },
+  "true_when_offered": {
+   "Forward": 51.6,
+   "Backward": 14.6,
+   "Left": 28.4,
+   "Right": 37.4
+  },
+  "n_options": {
+   "2": 312,
+   "3": 312,
+   "4": 289
+  }
+ },
+ "sft": {
+  "第十轮 SFT": {
+   "n_translations": 31398,
+   "share": {
+    "Forward": 13.3,
+    "Backward": 55.5,
+    "Left": 16.1,
+    "Right": 15.1
+   }
+  },
+  "第十一轮 SFT": {
+   "n_translations": 33248,
+   "share": {
+    "Forward": 13.7,
+    "Backward": 54.0,
+    "Left": 16.5,
+    "Right": 15.7
+   }
+  }
+ },
+ "models": {
+  "base-3B": {
+   "n": 913,
+   "accuracy": 48.1,
+   "ci95": [
+    44.9,
+    51.3
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 93.5,
+    "Backward": 5.5,
+    "Left": 6.6,
+    "Right": 28.9
+   },
+   "balanced_accuracy": 33.6,
+   "answer_share": {
+    "Forward": 75.5,
+    "Backward": 4.3,
+    "Left": 4.6,
+    "Right": 15.7
+   },
+   "answered_when_offered": {
+    "Forward": 95.6,
+    "Backward": 6.2,
+    "Left": 6.1,
+    "Right": 21.1
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 1.7,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 2.5,
+     "n_truth_Forward": 242,
+     "diff": -0.8,
+     "ci95": [
+      -4.0,
+      6.5
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 31.9,
+     "n_truth_Right": 166,
+     "when_truth_Left": 30.5,
+     "n_truth_Left": 128,
+     "diff": 1.5,
+     "ci95": [
+      -9.3,
+      11.9
+     ]
+    }
+   }
+  },
+  "base-7B": {
+   "n": 913,
+   "accuracy": 45.1,
+   "ci95": [
+    41.9,
+    48.4
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 58.9,
+    "Backward": 6.6,
+    "Left": 17.8,
+    "Right": 60.1
+   },
+   "balanced_accuracy": 35.9,
+   "answer_share": {
+    "Forward": 45.5,
+    "Backward": 4.2,
+    "Left": 9.4,
+    "Right": 41.0
+   },
+   "answered_when_offered": {
+    "Forward": 57.6,
+    "Backward": 6.1,
+    "Left": 12.4,
+    "Right": 55.2
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 10.0,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 8.3,
+     "n_truth_Forward": 242,
+     "diff": 1.7,
+     "ci95": [
+      -5.0,
+      12.3
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 53.6,
+     "n_truth_Right": 166,
+     "when_truth_Left": 60.2,
+     "n_truth_Left": 128,
+     "diff": -6.5,
+     "ci95": [
+      -17.6,
+      4.9
+     ]
+    }
+   }
+  },
+  "ours-SFT": {
+   "n": 913,
+   "accuracy": 30.6,
+   "ci95": [
+    27.7,
+    33.6
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 18.8,
+    "Backward": 70.3,
+    "Left": 24.4,
+    "Right": 38.3
+   },
+   "balanced_accuracy": 37.9,
+   "answer_share": {
+    "Forward": 12.6,
+    "Backward": 48.2,
+    "Left": 14.6,
+    "Right": 24.6
+   },
+   "answered_when_offered": {
+    "Forward": 16.0,
+    "Backward": 70.5,
+    "Left": 19.2,
+    "Right": 33.2
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 75.0,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 69.8,
+     "n_truth_Forward": 242,
+     "diff": 5.2,
+     "ci95": [
+      -8.2,
+      16.2
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 38.0,
+     "n_truth_Right": 166,
+     "when_truth_Left": 28.1,
+     "n_truth_Left": 128,
+     "diff": 9.8,
+     "ci95": [
+      -1.1,
+      20.2
+     ]
+    }
+   }
+  },
+  "ours-RL-50": {
+   "n": 913,
+   "accuracy": 29.9,
+   "ci95": [
+    27.0,
+    33.0
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 19.6,
+    "Backward": 71.4,
+    "Left": 21.8,
+    "Right": 36.4
+   },
+   "balanced_accuracy": 37.3,
+   "answer_share": {
+    "Forward": 13.7,
+    "Backward": 49.2,
+    "Left": 13.1,
+    "Right": 24.0
+   },
+   "answered_when_offered": {
+    "Forward": 17.3,
+    "Backward": 72.0,
+    "Left": 17.3,
+    "Right": 32.3
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 75.0,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 70.7,
+     "n_truth_Forward": 242,
+     "diff": 4.3,
+     "ci95": [
+      -9.0,
+      15.4
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 36.1,
+     "n_truth_Right": 166,
+     "when_truth_Left": 28.9,
+     "n_truth_Left": 128,
+     "diff": 7.2,
+     "ci95": [
+      -3.6,
+      17.6
+     ]
+    }
+   }
+  },
+  "ours-RL-150": {
+   "n": 913,
+   "accuracy": 29.1,
+   "ci95": [
+    26.3,
+    32.2
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 17.5,
+    "Backward": 72.5,
+    "Left": 21.3,
+    "Right": 36.8
+   },
+   "balanced_accuracy": 37.0,
+   "answer_share": {
+    "Forward": 11.9,
+    "Backward": 49.6,
+    "Left": 13.7,
+    "Right": 24.8
+   },
+   "answered_when_offered": {
+    "Forward": 15.1,
+    "Backward": 72.6,
+    "Left": 18.0,
+    "Right": 33.4
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 78.3,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 70.2,
+     "n_truth_Forward": 242,
+     "diff": 8.1,
+     "ci95": [
+      -5.0,
+      18.5
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 35.5,
+     "n_truth_Right": 166,
+     "when_truth_Left": 29.7,
+     "n_truth_Left": 128,
+     "diff": 5.9,
+     "ci95": [
+      -5.0,
+      16.3
+     ]
+    }
+   }
+  },
+  "ours-SFT-r11": {
+   "n": 913,
+   "accuracy": 26.6,
+   "ci95": [
+    23.9,
+    29.6
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 14.0,
+    "Backward": 91.2,
+    "Left": 29.4,
+    "Right": 19.8
+   },
+   "balanced_accuracy": 38.6,
+   "answer_share": {
+    "Forward": 10.6,
+    "Backward": 58.7,
+    "Left": 18.7,
+    "Right": 11.9
+   },
+   "answered_when_offered": {
+    "Forward": 13.5,
+    "Backward": 85.9,
+    "Left": 24.6,
+    "Right": 16.1
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 90.0,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 86.4,
+     "n_truth_Forward": 242,
+     "diff": 3.6,
+     "ci95": [
+      -7.2,
+      10.9
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 16.9,
+     "n_truth_Right": 166,
+     "when_truth_Left": 11.7,
+     "n_truth_Left": 128,
+     "diff": 5.1,
+     "ci95": [
+      -3.2,
+      13.0
+     ]
+    }
+   }
+  },
+  "ours-RL-r11": {
+   "n": 913,
+   "accuracy": 25.8,
+   "ci95": [
+    23.1,
+    28.8
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 12.9,
+    "Backward": 85.7,
+    "Left": 31.5,
+    "Right": 19.0
+   },
+   "balanced_accuracy": 37.3,
+   "answer_share": {
+    "Forward": 10.1,
+    "Backward": 57.4,
+    "Left": 20.9,
+    "Right": 11.6
+   },
+   "answered_when_offered": {
+    "Forward": 12.8,
+    "Backward": 84.0,
+    "Left": 27.5,
+    "Right": 15.7
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 86.7,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 83.5,
+     "n_truth_Forward": 242,
+     "diff": 3.2,
+     "ci95": [
+      -8.4,
+      11.5
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 16.9,
+     "n_truth_Right": 166,
+     "when_truth_Left": 10.2,
+     "n_truth_Left": 128,
+     "diff": 6.7,
+     "ci95": [
+      -1.4,
+      14.4
+     ]
+    }
+   }
+  },
+  "SI-7B": {
+   "n": 913,
+   "accuracy": 49.4,
+   "ci95": [
+    46.2,
+    52.6
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 80.4,
+    "Backward": 34.1,
+    "Left": 22.8,
+    "Right": 30.0
+   },
+   "balanced_accuracy": 41.8,
+   "answer_share": {
+    "Forward": 58.1,
+    "Backward": 13.0,
+    "Left": 12.9,
+    "Right": 16.0
+   },
+   "answered_when_offered": {
+    "Forward": 73.5,
+    "Backward": 19.1,
+    "Left": 17.0,
+    "Right": 21.6
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 35.0,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 9.9,
+     "n_truth_Forward": 242,
+     "diff": 25.1,
+     "ci95": [
+      13.4,
+      38.1
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 24.7,
+     "n_truth_Right": 166,
+     "when_truth_Left": 19.5,
+     "n_truth_Left": 128,
+     "diff": 5.2,
+     "ci95": [
+      -4.6,
+      14.4
+     ]
+    }
+   }
+  }
+ }
+}

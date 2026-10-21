@@ -52,3 +52,20 @@ def test_paired_headline_rules():
     v = headline("vsti5", {"camera_displacement": 1.0, "obj_obj_relative_pos_lr": 1.0, "obj_obj_relative_pos_nf": 0.0},
                  {"camera_displacement": 2, "obj_obj_relative_pos_lr": 1, "obj_obj_relative_pos_nf": 1})
     assert v == pytest.approx(0.5)                                  # mean(1/2, (1 + 0) / 2)
+
+
+def test_vsti_direction_discrimination_and_baselines():
+    from eval_external.qa_transfer.vsti_direction import baselines, discrimination
+
+    rs = [{"truth": "Backward", "options": ["Forward", "Backward"], "pred": "Backward"},
+          {"truth": "Backward", "options": ["Forward", "Backward", "Left"], "pred": "Forward"},
+          {"truth": "Forward", "options": ["Forward", "Backward"], "pred": "Backward"},
+          {"truth": "Forward", "options": ["Forward", "Backward"], "pred": "Forward"},
+          {"truth": "Left", "options": ["Left", "Right"], "pred": "Right"}]
+    d = discrimination(rs, ("Forward", "Backward"))
+    assert (d["when_truth_Backward"], d["when_truth_Forward"], d["diff"]) == (50.0, 50.0, 0.0)  # answer ignores truth
+    assert d["ci95"][0] < 0 < d["ci95"][1]
+    b = baselines(rs)
+    assert b["random"] == 46.7                                 # mean of 1/2, 1/3, 1/2, 1/2, 1/2
+    assert b["best_fixed_order"]["accuracy"] == 60.0           # e.g. Forward > Left: items 3, 4, 5
+    assert b["n_options"] == {2: 4, 3: 1}
