@@ -11,8 +11,10 @@ PYTHONPATH of examples/evaluate/robocasa/run_starvla_mobile.sh; policy servers r
 Per episode: gym.make('robocasa/<task>', split=target, seed=s) and env.reset(seed=s) (the seed reaches the env's
 RNG, which draws the kitchen layout / style and object placement), the task-specific horizon of RoboCasa 1.0.1
 (downstream/demos/target50_tasks.json) as the step limit, one policy call per `execute_steps` actions (= the
-model's 16-step chunk), stop on success.  Each worker process keeps one websocket client.  Writes
-OUT/episodes.jsonl (one line per episode, including a fingerprint of the initial state) and OUT/summary.json.
+model's 16-step chunk), stop on success.  Episodes run longest horizon first.  Each worker process keeps one
+websocket client and first makes RoboCasa's counter-region order process-independent (stable_counter_regions; off
+with --no-stable-regions).  Writes OUT/episodes.jsonl (one line per episode, including a fingerprint of the initial
+state and its joint positions) and OUT/summary.json.
 """
 from __future__ import annotations
 
@@ -67,6 +69,50 @@ def state_fingerprint(env, obs) -> dict:
             "images_sha": images.hexdigest()[:16], "instruction": obs.get("annotation.human.task_description")}
 
 
+def _ordered_set(items=()):
+    return dict.fromkeys(items)  # list(...) of it: the distinct items in first-seen order
+
+
+def with_ordered_set(func):
+    """A copy of func in which the name `set` is an insertion-ordered de-duplication, so list(set(xs)) keeps the
+    first-seen order of xs.  Nothing else changes (same code, defaults, closure; globals copied)."""
+    import types
+
+    new = types.FunctionType(func.__code__, dict(func.__globals__, set=_ordered_set), func.__name__,
+                             func.__defaults__, func.__closure__)
+    new.__kwdefaults__ = func.__kwdefaults__
+    new.__qualname__, new.__doc__, new.__module__ = func.__qualname__, func.__doc__, func.__module__
+    new.downstream_ordered_set = True
+    return new
+
+
+def stable_counter_regions() -> bool:
+    """Make RoboCasa 1.0.1's counter reset regions come in the same order in every process (this process only;
+    RoboCasa's files are not changed).  Counter.get_reset_regions (robocasa/models/fixtures/counter.py:813) de-duplicates the
+    candidate counter-top geoms with list(set(geoms)); the geoms are XML elements hashed by memory address, so the
+    region order differs between processes, and Fixture.sample_reset_region (fixture.py:383) then picks a region with
+    self.rng.choice(regions): the same seed puts a fixture (and the robot in front of it) on a different counter.
+    Returns True if the patch was applied now, False if it already was."""
+    from robocasa.models.fixtures.counter import Counter
+
+    if getattr(Counter.get_reset_regions, "downstream_ordered_set", False):
+        return False
+    Counter.get_reset_regions = with_ordered_set(Counter.get_reset_regions)
+    return True
+
+
+def initial_qpos(env) -> list:
+    """All joint positions after reset, rounded to 1e-6, so runs can be compared by size of difference, not only by
+    hash (fresh processes can differ by ~1e-6 in passive joints: downstream/eval/reset_repeat.py)."""
+    inner = getattr(env, "unwrapped", env)
+    return [round(float(x), 6) for x in getattr(inner, "env", inner).sim.data.qpos]
+
+
+def longest_first(episodes):
+    """Run order: longest task horizon first (stable), so the long episodes do not form the tail of the run."""
+    return sorted(episodes, key=lambda e: -e["max_steps"])
+
+
 def _as_int(value):
     try:
         return int(value)
@@ -89,13 +135,16 @@ def connect(ckpt: str, server: str, starvla_root: str):
     return contract, policy
 
 
-def _init_worker(ckpt: str, servers, starvla_root: str):
+def _init_worker(ckpt: str, servers, starvla_root: str, stable_regions: bool = True):
     """Never raises: a failing initializer makes multiprocessing respawn workers forever, so the error is kept and
     every episode of this worker reports it instead."""
     worker = mp.current_process()._identity[0] if mp.current_process()._identity else 1
     server = servers[(worker - 1) % len(servers)]
     _STATE.update(server=server, worker=worker)
     try:
+        if stable_regions:
+            import robocasa.wrappers.gym_wrapper  # noqa: F401  (imports RoboCasa before patching it)
+            stable_counter_regions()
         contract, policy = connect(ckpt, server, starvla_root)
         _STATE.update(contract=contract, policy=policy)
     except Exception as exc:
@@ -119,6 +168,7 @@ def run_episode(spec: dict) -> dict:
         obs, _ = env.reset(seed=spec["seed"])
         out["reset_seconds"] = round(time.monotonic() - started, 2)
         out["init"] = state_fingerprint(env, obs)
+        out["init_qpos"] = initial_qpos(env)
         steps, calls, success, latencies = 0, 0, False, []
         terminated = truncated = False
         while steps < spec["max_steps"] and not (success or terminated or truncated):
@@ -176,12 +226,15 @@ def main() -> int:
     ap.add_argument("--execute-steps", type=int, default=16)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--starvla-root", default=str(WORKTREE / "third_party/starVLA"))
+    ap.add_argument("--no-stable-regions", dest="stable_regions", action="store_false",
+                    help="leave RoboCasa's counter-region order as it is (differs between processes)")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
-    episodes = plan(args.tasks, parse_seeds(args.seeds))
+    episodes = longest_first(plan(args.tasks, parse_seeds(args.seeds)))
     for e in episodes:
         e.update(split=args.split, execute_steps=args.execute_steps)
     (args.out / "plan.json").write_text(json.dumps({"ckpt": args.ckpt, "servers": args.servers, "workers": args.workers,
+                                                    "stable_counter_regions": args.stable_regions,
                                                     "episodes": episodes}, indent=1) + "\n")
     for server in args.servers.split(","):  # fail fast, before any simulator starts
         try:
@@ -195,13 +248,13 @@ def main() -> int:
     t0 = time.monotonic()
     ctx = mp.get_context("spawn")
     with ctx.Pool(args.workers, initializer=_init_worker, initargs=(args.ckpt, args.servers.split(","),
-                                                                    args.starvla_root)) as pool:
+                                                                    args.starvla_root, args.stable_regions)) as pool:
         with open(args.out / "episodes.jsonl", "a") as f:
             for row in pool.imap_unordered(run_episode, episodes):
                 rows.append(row)
                 f.write(json.dumps(row) + "\n")
                 f.flush()
-    summary = summarize(rows, args.workers, time.monotonic() - t0)
+    summary = dict(summarize(rows, args.workers, time.monotonic() - t0), stable_counter_regions=args.stable_regions)
     (args.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps({k: summary[k] for k in ("episodes", "complete", "successes", "wall_seconds",
                                               "episode_wall_mean_seconds", "episodes_per_hour")}))

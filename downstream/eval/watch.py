@@ -2,7 +2,7 @@
 """Evaluate every checkpoint of running experiments as it appears, and keep a board (login node, CPU).
 
     python downstream/eval/watch.py --exps DS-B-100-s1 DS-S-100-s1 DS-RS-100-s1 DS-RD-100-s1 \
-        --gpus 1 --workers 12 --every 900 --board RUNS/BOARD_D5.md
+        --cards 8 --servers 1 --workers 24 --every 900 --board RUNS/BOARD_D5.md
 
 For each experiment EXP (<runs-root>/<id>): checkpoints are EXP/run/checkpoints/steps_<N>_pytorch_model.pt and
 EXP/run/final_model/pytorch_model.pt (tagged steps_<max_train_steps>).  A checkpoint is evaluated once it has not
@@ -74,7 +74,7 @@ def last_metric(exp: Path):
     return json.loads(lines[-1]) if lines else None
 
 
-def tick(exp_ids, runs_root: Path, gpus: int, workers: int, settle: float, dry: bool = False) -> list:
+def tick(exp_ids, runs_root: Path, cards: int, servers: int, workers: int, settle: float, dry: bool = False) -> list:
     rows = []
     for exp_id in exp_ids:
         exp = runs_root / exp_id
@@ -100,9 +100,9 @@ def tick(exp_ids, runs_root: Path, gpus: int, workers: int, settle: float, dry: 
                     entry["state"] = "would submit"
                 else:
                     pool = sco_job.pick_pool()
-                    sco_job.prepare(run, gpus, pool, f"ev-{exp_id.lower()}-{tag.replace('_', '')}"[:40],
+                    sco_job.prepare(run, cards, pool, f"ev-{exp_id.lower()}-{tag.replace('_', '')}"[:40],
                                     ["bash", str(HERE / "run_eval_ckpt.sh"), str(path), str(run / "out"),
-                                     str(gpus), str(workers)])
+                                     str(servers), str(workers)])
                     entry["state"] = f"submitted {sco_job.submit(run)} ({pool})"
             row["evals"].append(entry)
         rows.append(row)
@@ -129,15 +129,16 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--exps", nargs="+", required=True)
     ap.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
-    ap.add_argument("--gpus", type=int, default=1)
-    ap.add_argument("--workers", type=int, default=12)
+    ap.add_argument("--cards", type=int, default=8, help="cards per eval job (they buy CPUs: 14 vCPU each)")
+    ap.add_argument("--servers", type=int, default=1, help="policy servers per eval job (one GPU each)")
+    ap.add_argument("--workers", type=int, default=24)
     ap.add_argument("--settle", type=float, default=600, help="seconds a checkpoint file must be unchanged")
     ap.add_argument("--every", type=float, default=0, help="loop period in seconds (0: run once)")
     ap.add_argument("--board", type=Path, default=None)
     ap.add_argument("--dry", action="store_true", help="never submit")
     args = ap.parse_args(argv)
     while True:
-        rows = tick(args.exps, args.runs_root, args.gpus, args.workers, args.settle, args.dry)
+        rows = tick(args.exps, args.runs_root, args.cards, args.servers, args.workers, args.settle, args.dry)
         text = board(rows)
         if args.board:
             args.board.write_text(text)

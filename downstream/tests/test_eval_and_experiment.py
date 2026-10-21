@@ -19,6 +19,64 @@ def test_parse_seeds_and_plan_use_task_horizons():
                     {"task": "B", "seed": 1, "max_steps": 1200}, {"task": "B", "seed": 2, "max_steps": 1200}]
 
 
+def test_longest_first_is_a_stable_sort_by_horizon():
+    plan = closed_loop.plan(["A", "B", "C"], [1, 2], {"A": 450, "B": 1200, "C": 450})
+    order = [(e["task"], e["seed"]) for e in closed_loop.longest_first(plan)]
+    assert order == [("B", 1), ("B", 2), ("A", 1), ("A", 2), ("C", 1), ("C", 2)]
+
+
+def state(qpos_sha="q", layout=1, hinge=0.0, obj=(0.0, 0.0, 0.8), images="i"):
+    return {"layout_id": layout, "style_id": 1, "instruction": "x", "nq": 8, "qpos_sha": qpos_sha, "images_sha": images,
+            "joints": {"door": [False, [hinge]], "obj": [True, [*obj, 1.0, 0.0, 0.0, 0.0]]}, "rep": 0, "seconds": 1.0,
+            "task": "T", "seed": 1}
+
+
+def test_reset_repeat_compare_separates_noise_from_scene_changes():
+    import reset_repeat
+
+    same = reset_repeat.compare([state(), state()])
+    assert same["distinct_fingerprints"] == 1 and same["max_diff_other"] == 0.0 and not same["scene_differs"]
+    noise = reset_repeat.compare([state(), state(qpos_sha="q2", hinge=3e-6, images="i2")])
+    assert noise["distinct_fingerprints"] == 2 and not noise["scene_differs"]
+    assert noise["max_diff_other"] == 3e-6 and noise["max_diff_free"] == 0.0 and noise["joints_over_1e-4"] == []
+    moved = reset_repeat.compare([state(), state(qpos_sha="q3", obj=(0.2, 0.0, 0.8))])
+    assert moved["max_diff_free"] == 0.2 and moved["joints_over_1e-4"] == ["obj"]
+    assert reset_repeat.compare([state(), state(layout=2)])["scene_differs"]
+    assert reset_repeat.compare([state(), {"error": "x", "rep": 1}])["errors"] == 1
+
+
+class Geom:
+    """Hashed by memory address, like the XML elements RoboCasa de-duplicates with list(set(...))."""
+
+    def __init__(self, name, salt):
+        self.name, self.salt = name, salt
+
+    def __hash__(self):
+        return self.salt
+
+
+def dedup(items, keep=None):
+    """Same shape as Counter.get_reset_regions: list(set(...)) and then rely on the order."""
+    return [g.name for g in list(set(items))]
+
+
+def test_with_ordered_set_keeps_first_seen_order_whatever_the_hashes():
+    stable = closed_loop.with_ordered_set(dedup)
+    for salts in ([3, 1, 2], [1, 2, 3], [2, 3, 1]):  # a different "memory layout" each time
+        a, b, c = Geom("a", salts[0]), Geom("b", salts[1]), Geom("c", salts[2])
+        assert stable([a, b, a, c, b]) == ["a", "b", "c"]
+    assert [dedup([Geom("a", 3), Geom("b", 1)]), dedup([Geom("a", 1), Geom("b", 3)])] == [["b", "a"], ["a", "b"]]
+    assert stable.__name__ == "dedup" and stable.__defaults__ == (None,) and stable.downstream_ordered_set
+    assert "set" not in dedup.__globals__  # the original function and its module are untouched
+
+
+def test_reset_repeat_plan_tasks_are_the_34_seen_tasks():
+    import reset_repeat
+
+    tasks = reset_repeat.plan_tasks()
+    assert len(tasks) == 34 and "NavigateKitchen" in tasks
+
+
 def test_registry_horizons_cover_the_50_target_tasks():
     h = closed_loop.horizons()
     assert len(h) == 50 and h["NavigateKitchen"] == 450 and h["SearingMeat"] == 4350

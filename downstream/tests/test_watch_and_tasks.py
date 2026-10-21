@@ -34,7 +34,7 @@ def test_tick_dry_waits_for_settled_files_and_never_submits(tmp_path):
     exp = fake_exp(tmp_path)
     old = time.time() - 3600
     os.utime(exp / "run/checkpoints/steps_25000_pytorch_model.pt", (old, old))
-    rows = watch.tick(["DS-B-100-s1"], tmp_path, gpus=1, workers=12, settle=600, dry=True)
+    rows = watch.tick(["DS-B-100-s1"], tmp_path, cards=8, servers=1, workers=24, settle=600, dry=True)
     states = {e["tag"]: e["state"] for e in rows[0]["evals"]}
     assert states["steps_25000"] == "would submit"
     assert states["steps_50000"].startswith("waiting")
