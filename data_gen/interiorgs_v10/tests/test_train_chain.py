@@ -968,6 +968,98 @@ class ChainTest(unittest.TestCase):
             self.assertNotIn("pt-2", q)
             self.assertIn("| rl/p1s0/rl | pt-1 | zoetrope | 42 | 已开始 |", T.render_markdown(chain.state))
 
+    def test_record_nodes_and_separate_startup_retries(self):
+        """Round 12 batch (the user's decision of 2026-10-21): with plan "record_nodes" every trainer and render
+        service gets its machines looked up once (state["job_hosts"]) and the resubmission records carry them; with
+        "startup_retries_separate" a run resubmitted 3 times at start-up (limit 5) still has plan "retries" 2 for a
+        trainer that fails after its first update, without it the same run fails; without "record_nodes" nothing is
+        looked up."""
+        import datetime
+        import time
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def run_chain(root, script, separate, record=True):
+            clock = {"t": time.time()}
+            plan = {"tr": str(root), "sft_dir": str(root / "sft"), "endpoint": 50, "gs_root": "/ply", "retries": 2,
+                    "rl": {"standard": "v10_p1_S0", "startup": {"retries": 5}}, "rl_runs": {"a": {}}}
+            if record:
+                plan["record_nodes"] = True
+            if separate:
+                plan["startup_retries_separate"] = True
+            chain = T.Chain(plan, sleep=lambda s: clock.__setitem__("t", clock["t"] + 20 * 60), clock=lambda: clock["t"])
+            submitted = {"n": 0}
+            looked_up = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                if job_dir == "job_rl":
+                    submitted["n"] += 1
+                job_id = f"pt-{job_dir}-{submitted['n']}"
+                (run / job_dir / "submission.json").write_text(json.dumps(
+                    {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "job_id": job_id}))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_renderer":
+                    done = (run / "STOP_RENDERER").exists()
+                    return {"job_id": job_id, "state": "SUCCEEDED" if done else "RUNNING", "finished": done}
+                kind = script[submitted["n"] - 1]
+                log = run / "logs" / f"rl-{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}-{job_id}-worker-0.log"
+                log.parent.mkdir(exist_ok=True)
+                if not any(p.name.endswith(f"{job_id}-worker-0.log") for p in log.parent.glob("rl-*.log")):
+                    log.write_text("Exception: The current node timed out during startup.\n" if kind == "ray_fail"
+                                   else "(TaskRunner) step:1 - episode/success_rate:0.4\n")
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                return {"job_id": job_id, "state": "FAILED", "finished": True}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name(f"submission_{json.loads(receipt.read_text())['job_id']}_deleted.json"))
+
+            def machines(job_id):
+                looked_up.append(job_id)
+                return [f"10.0.0.{job_id.rsplit('-', 1)[1]}"]
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete), \
+                    mock.patch.object(T, "job_machines", side_effect=machines):
+                try:
+                    chain.rl()
+                    err = None
+                except T.ChainError as exc:
+                    err = exc
+            return chain, submitted["n"], looked_up, err
+
+        script = ["ray_fail", "ray_fail", "ray_fail", "mid_fail", "ok"]
+        with tempfile.TemporaryDirectory() as tmp:
+            chain, n, looked_up, err = run_chain(Path(tmp), script, separate=True)
+            self.assertIsNone(err)
+            self.assertEqual(n, 5)  # 3 start-up resubmissions, then 1 after the failure past the first update
+            starts = chain.state["startup_retries"]["a"]
+            self.assertEqual([r["hosts"] for r in starts], [["10.0.0.1"], ["10.0.0.2"], ["10.0.0.3"]])
+            self.assertEqual([(r["what"], r["hosts"]) for r in chain.state["job_retries"]["rl/a"]],
+                             [("trainer", ["10.0.0.4"])])
+            hosts = chain.state["job_hosts"]
+            self.assertEqual(sorted(k for k in hosts if "job_rl" in k), [f"pt-job_rl-{i}" for i in range(1, 6)])
+            self.assertEqual(hosts["pt-job_rl-2"]["what"], "rl/a/rl")
+            self.assertEqual(len(looked_up), len(set(looked_up)))  # each job looked up once
+        with tempfile.TemporaryDirectory() as tmp:  # start-up resubmissions count against plan "retries": as before
+            chain, n, _, err = run_chain(Path(tmp), script, separate=False)
+            self.assertIsInstance(err, T.ChainError)
+            self.assertEqual(n, 4)
+        with tempfile.TemporaryDirectory() as tmp:  # no "record_nodes": nothing looked up, records as before
+            chain, n, looked_up, err = run_chain(Path(tmp), ["ray_fail", "ok"], separate=True, record=False)
+            self.assertIsNone(err)
+            self.assertEqual(looked_up, [])
+            self.assertNotIn("job_hosts", chain.state)
+            self.assertNotIn("hosts", chain.state["startup_retries"]["a"][0])
+
     def test_retries_of_failed_jobs(self):
         """Round 12 batch (the user's rule): plan "retries": 2 resubmits a failed RL trainer (it resumes), a dead
         render service (with its trainer), an SFT job (model folder moved aside) and an evaluation job (going on from
