@@ -19,6 +19,8 @@ Rules of the user's decisions of 2026-10-21 on the step-2 report:
   * --gate EXP:TAG: when that checkpoint's first evaluation is done, the runs of --gate-ratios x --gate-seeds x all
     starts are made (if needed) and submitted if the 34 tasks had more than 0 successful episodes; with 0 nothing is
     submitted and the board says so.  The decision is kept in --state.
+  * when the set of finished evaluations changed, the result report (downstream/report) is rebuilt into
+    --report-out with --report-python (it needs matplotlib).
 Nothing is ever deleted.  Finished jobs are remembered in --state and not queried again.
 """
 from __future__ import annotations
@@ -26,6 +28,8 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -273,8 +277,30 @@ class Watcher:
                 missing.append(exp_id)
         rep = self.repeat_results()
         gate = self.gate()
+        self.report()
         self.save()
         return rows, missing, rep, gate
+
+    def report(self, run=subprocess.run):
+        """Rebuild the result report (downstream/report) when the set of finished evaluations changed.  It needs
+        matplotlib, so it runs in --report-python; a failure is shown on the board, never raised."""
+        if not self.a.report_out or self.a.dry:
+            return
+        done = sorted(k for k in self.state["finished"] if "/evals/" in k)
+        if done == self.state.get("report", {}).get("evaluations"):
+            return
+        t0 = time.time()
+        try:
+            res = run([self.a.report_python, "-m", "downstream.report.build", "--runs-root", str(self.a.runs_root),
+                       "--out", self.a.report_out], cwd=str(DOWNSTREAM.parent), capture_output=True, text=True,
+                      timeout=1800, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+            rc, tail = res.returncode, (res.stderr or res.stdout)[-300:]
+        except Exception as exc:
+            rc, tail = -1, f"{type(exc).__name__}: {exc}"[:300]
+        self.state["report"] = {"utc": utc(), "rc": rc, "seconds": round(time.time() - t0),
+                                "evaluations": done if rc == 0 else self.state.get("report", {}).get("evaluations")}
+        if rc != 0:
+            self.alerts.append(f"结果报告没有生成（退出码 {rc}）：{tail}")
 
 
 def utc() -> str:
@@ -294,7 +320,10 @@ def board(w: Watcher, rows, missing, rep, gate) -> str:
               + (f"（{w.state['workers']['utc']} 按并行度测试选定：每回合时间是 P={w.a.workers} 的 "
                  f"{w.state['workers']['why']} 倍，上限 {w.state['workers']['limit']}）" if "workers" in w.state else
                  f"（并行度测试未完成前用 {w.a.workers}）"),
-              f"- 第三步其余任务的门槛（{w.a.gate}）：{(gate or {}).get('note', '-')}", ""]
+              f"- 第三步其余任务的门槛（{w.a.gate}）：{(gate or {}).get('note', '-')}",
+              f"- 结果报告 `{w.a.report_out}/index.html`：" + (
+                  f"{w.state['report']['utc']} 生成（退出码 {w.state['report']['rc']}）" if "report" in w.state
+                  else "评测完成后自动生成"), ""]
     if rep:
         lines += ["## 同一检查点的两次评测（噪声与并行度）", "",
                   "| 检查点 | 第二次的 P | 成功（第一次 / 第二次） | 成功率差（百分点） | 结果不同的回合 / 比较的回合 | 平均每回合秒数（第一次 / 第二次） | 倍数 | 总墙钟秒数 |",
@@ -337,6 +366,9 @@ def parser():
     ap.add_argument("--every", type=float, default=0, help="loop period in seconds (0: run once)")
     ap.add_argument("--board", type=Path, default=None)
     ap.add_argument("--dry", action="store_true", help="never submit, never write --state")
+    ap.add_argument("--report-out", default=str(RUNS_ROOT / "report"),
+                    help="rebuild the result report here when evaluations finish (empty: never)")
+    ap.add_argument("--report-python", default="/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python")
     return ap
 
 

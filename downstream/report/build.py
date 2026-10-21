@@ -106,7 +106,7 @@ def describe(cmp, what: str) -> list:
                          f"McNemar p = {page.pval(d['p'])}；{d['tasks_up']} 个任务高于 {cmp['reference']}、"
                          f"{d['tasks_down']} 个低于，Wilcoxon p = {page.pval(d['wilcoxon_p'])}）")
         if diffs:
-            lines.append(f"{stats.GROUP_ZH[g]}，与 {cmp['reference']} 的配对差：" + "；".join(diffs) + "。")
+            lines.append(f"{what}，{stats.GROUP_ZH[g]}与 {cmp['reference']} 的配对差：" + "；".join(diffs) + "。")
     return lines
 
 

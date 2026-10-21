@@ -71,7 +71,7 @@ class FakeRuns:
 
 def watcher(tmp_path, *extra, jobs=None, free=FREE, run_tools=None):
     args = watch.parser().parse_args(["--runs-root", str(tmp_path), "--state", str(tmp_path / "state.json"),
-                                      "--exps", "DS-B-100-s1", "DS-S-100-s1", *extra])
+                                      "--report-out", "", "--exps", "DS-B-100-s1", "DS-S-100-s1", *extra])
     return watch.Watcher(args, jobs=jobs or FakeJobs(), free_space=lambda: free, run_tools=run_tools or FakeRuns())
 
 
@@ -169,6 +169,34 @@ def test_gate_stops_on_zero_successes(tmp_path):
     gate = w.gate()
     assert gate["decided"] and gate["successes"] == 0 and not run_tools.made and not run_tools.submitted
     assert any("成功 0 个回合" in a for a in w.alerts)
+
+
+def test_report_is_rebuilt_once_per_new_set_of_finished_evaluations(tmp_path):
+    from types import SimpleNamespace
+
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0 if len(calls) <= 2 else 1, stdout="", stderr="boom")
+
+    w = watcher(tmp_path)
+    w.a.report_out = str(tmp_path / "report")
+    w.report(run=fake_run)  # first pass: a report of the training losses
+    assert len(calls) == 1 and calls[0][1:4] == ["-m", "downstream.report.build", "--runs-root"]
+    w.report(run=fake_run)
+    assert len(calls) == 1  # nothing new finished: no rebuild
+    w.state["finished"]["/x/experiments/DS-B-100-s1/evals/steps_25000"] = {"state": "SUCCEEDED"}
+    w.report(run=fake_run)
+    assert len(calls) == 2 and w.state["report"]["rc"] == 0 and not w.alerts
+    w.state["finished"]["/x/experiments/DS-S-100-s1/evals/steps_25000"] = {"state": "SUCCEEDED"}
+    w.report(run=fake_run)
+    assert len(calls) == 3 and w.alerts and "退出码 1" in w.alerts[0]
+    assert len(w.state["report"]["evaluations"]) == 1  # a failed build does not count as built
+    w.a.report_out = ""
+    w.state["finished"]["/x/experiments/DS-RS-100-s1/evals/steps_25000"] = {"state": "SUCCEEDED"}
+    w.report(run=fake_run)
+    assert len(calls) == 3  # switched off
 
 
 def test_score_groups_spatial_and_borderline(tmp_path):
