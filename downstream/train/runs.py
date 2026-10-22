@@ -58,16 +58,19 @@ def make(start: str, ratio: str, seed: int, runs_root: Path = RUNS_ROOT, run=sub
     return {"exp": exp.name, "made": True}
 
 
-def submit(start: str, ratio: str, seed: int, runs_root: Path = RUNS_ROOT, jobs=sco_job) -> dict:
+def submit(start: str, ratio: str, seed: int, runs_root: Path = RUNS_ROOT, jobs=sco_job, pool: str = None) -> dict:
+    """One 8-card job: run_segmented.sh for a staged-plan experiment (experiment.json "segmented": full state,
+    evaluation inside the job), run_train.sh otherwise; to `pool`, or the pool with fewer waiting jobs."""
     exp = runs_root / "experiments" / exp_id(start, ratio, seed)
     if not (exp / "experiment.json").exists():
         return {"exp": exp.name, "job": None, "error": "no experiment directory (run make first)"}
     if (exp / "job/submission.json").exists():
         return {"exp": exp.name, "job": json.loads((exp / "job/submission.json").read_text())["job_id"],
                 "note": "already submitted"}
-    pool = jobs.pick_pool()
-    jobs.prepare(exp, 8, pool, exp.name.lower(), ["bash", str(HERE / "run_train.sh"), str(exp)])
-    return {"exp": exp.name, "job": jobs.submit(exp), "pool": pool}
+    script = "run_segmented.sh" if json.loads((exp / "experiment.json").read_text()).get("segmented") else "run_train.sh"
+    pool = pool or jobs.pick_pool()
+    jobs.prepare(exp, 8, pool, exp.name.lower(), ["bash", str(HERE / script), str(exp)])
+    return {"exp": exp.name, "job": jobs.submit(exp), "pool": pool, "script": script}
 
 
 def main(argv=None) -> int:

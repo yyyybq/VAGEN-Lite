@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate every checkpoint of the downstream runs as it appears, gate step 3, and keep a board (login node, CPU).
+"""Evaluate every checkpoint of the downstream runs as it appears, gate stage 2, and keep a board (login node, CPU).
 
     python downstream/eval/watch.py --every 900 --board RUNS/BOARD.md       # started by downstream/eval/watch.sh
 
@@ -24,11 +24,19 @@ Rules of the user's decisions of 2026-10-21 on the step-2 report:
     once per value of --repeat-workers (e.g. 48,96: the parallelism test).  When both jobs are done the board shows
     the success difference (evaluation noise) and each P's mean episode time against the first job's P; later
     evaluations then use the largest tested P whose mean episode time is at most --max-slowdown times the first's;
-  * --gate EXP:TAG: when that checkpoint's first evaluation is done, the runs of --gate-ratios x --gate-seeds x all
-    starts are made (if needed) and submitted if the 34 tasks had more than 0 successful episodes; with 0 nothing is
-    submitted and the board says so.  The decision is kept in --state.
   * when the set of finished evaluations changed, the result report (downstream/report) is rebuilt into
     --report-out with --report-python (it needs matplotlib).
+
+Rules of the user's decisions of 2026-10-22 on the stage-1 plan:
+  * segmented runs (experiment.json "segmented": run_segmented.sh) evaluate their checkpoints inside the training
+    job; the watcher only shows those, submits one-card shards for the intermediate ones only when the job's speed
+    rule (EXP/injob_eval.json "final_only") says so, and always the second evaluation of the final checkpoint
+    (same seeds, EXP/evals/steps_<last>_repeat/, the noise floor);
+  * all our 8-card jobs (training, RL, tests) share --slots places (4); the same-size yield (bq_tp_mmxbf16) holds an
+    8-card job back only in the pool where such a job waits;
+  * stage-2 gate: passed once any start's step --gate-step (100k) checkpoint, of stage 0 or stage 1, had more than 0
+    successful episodes on the 9 spatial tasks; then the --gate-ratios x --gate-seeds runs whose experiment directory
+    is set up for the staged plan are submitted one per free place.  The passing is kept in --state.
 Nothing is ever deleted.  Finished jobs are remembered in --state and not queried again.
 """
 from __future__ import annotations
@@ -64,6 +72,20 @@ def job_cards(job: dict):
         return int(str(job["roles"][0]["resource_spec"][0]["name"]).rsplit(".", 1)[1])
     except (KeyError, IndexError, TypeError, ValueError):
         return None
+
+
+def job_pool(job: dict):
+    pool = job.get("resource_pool")
+    return pool.get("name") if isinstance(pool, dict) else pool
+
+
+def segmented(exp: Path) -> dict:
+    """experiment.json of a stage-1 style run (full state, evaluation inside the job), else {}."""
+    try:
+        rec = json.loads((exp / "experiment.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    return rec if rec.get("segmented") else {}
 
 
 def start_rank(exp_name: str) -> int:
@@ -283,11 +305,12 @@ class Watcher:
             self._rooms[pool] = 0 if v is None else max(0, sum(sco_job.busy_room(v).values()) - waiting)
         return self._rooms[pool]
 
-    def priority_waiting(self, cards: int) -> list:
-        """Jobs of the user's earlier priorities still waiting for cards anywhere in the workspace, which hold back a
-        submission of `cards` cards: any --yield-to job (the main line's interiorgs-v10-*, the main window's
+    def priority_waiting(self, cards: int, pool: str = None) -> list:
+        """Jobs of the user's earlier priorities still waiting for cards, which hold back a submission of `cards`
+        cards: any --yield-to job anywhere in the workspace (the main line's interiorgs-v10-*, the main window's
         condition of 2026-10-22), and --yield-to-same-size jobs (bq_tp_mmxbf16, first in the user's GPU order) of the
-        same card count (a one-card shard on a busy machine does not take a whole machine from an 8-card job)."""
+        same card count (a one-card shard on a busy machine does not take a whole machine from an 8-card job) waiting
+        in `pool` (a machine of the other pool cannot run them; pool None: in any pool)."""
         out = []
         for j in self.job_list():
             name = str(j.get("display_name") or "")
@@ -295,22 +318,40 @@ class Watcher:
                 continue
             if any(name.startswith(p) for p in self.a.yield_to):
                 out.append(name)
-            elif any(name.startswith(p) for p in self.a.yield_to_same_size) and job_cards(j) in (None, cards):
+            elif any(name.startswith(p) for p in self.a.yield_to_same_size) and job_cards(j) in (None, cards) \
+                    and (pool is None or job_pool(j) in (None, pool)):
                 out.append(name)
         return out
 
-    def blocked(self, cards: int = 1):
-        """Why nothing of `cards` cards may be submitted in this pass, None if submitting is allowed."""
+    def blocked(self, cards: int = 1, pool: str = None):
+        """Why nothing of `cards` cards may be submitted (to `pool`, None: anywhere) in this pass, None if allowed."""
         if self.a.pause_file and Path(self.a.pause_file).exists():
             return f"暂停提交（{self.a.pause_file} 存在）"
         if self.held():
             return "等密集奖励第一批上机器"
-        waiting = self.priority_waiting(cards)
+        waiting = self.priority_waiting(cards, pool)
         if waiting:
             return f"给排在前面的任务让路：{len(waiting)} 个在排队（{', '.join(sorted(set(waiting))[:3])}…）"
         if not self.disk_ok():
             return "剩余空间不足或读不出"
         return None
+
+    def open_pool(self, cards: int = 8):
+        """(pool, None) of the pool an 8-card job may go to now (not blocked; fewer waiting jobs first), or (None, why)."""
+        reasons = {}
+        for pool in sorted(sco_job.POOLS, key=lambda p: sum(1 for j in self.job_list()
+                                                             if j.get("state") in sco_job.WAITING_STATES
+                                                             and job_pool(j) == p)):
+            reasons[pool] = self.blocked(cards, pool)
+            if not reasons[pool]:
+                return pool, None
+        return None, "；".join(f"{p}：{r}" for p, r in reasons.items())
+
+    def live8(self) -> list:
+        """Our 8-card jobs alive (waiting or running): stage 1-2 training, RL, tests.  They share --slots places."""
+        return [str(j.get("display_name")) for j in self.job_list()
+                if str(j.get("display_name") or "").startswith("downstream-") and job_cards(j) == 8
+                and (j.get("state") in sco_job.WAITING_STATES or j.get("state") == "RUNNING")]
 
     def live_shards(self) -> int:
         return sum(1 for j in self.job_list() if str(j.get("display_name") or "").startswith("downstream-ev")
@@ -430,22 +471,50 @@ class Watcher:
         return entry
 
     # ------------------------------------------------------------------------------------------- one pass
+    def repeat_targets(self) -> list:
+        """--repeat targets plus the final checkpoint of every segmented (stage-1 style) run: its second evaluation,
+        same seeds, by one-card shards (the user's decision 2 of 2026-10-22)."""
+        out = list(self.a.repeat)
+        for exp in sorted(self.experiments.glob("DS-*")):
+            rec = segmented(exp)
+            if rec and rec.get("repeat_final", True):
+                out.append(f"{exp.name}:steps_{rec['steps']}")
+        return list(dict.fromkeys(out))
+
+    def injob_entry(self, exp: Path, tag: str) -> dict:
+        """An evaluation the training job runs itself (run_segmented.sh): only shown."""
+        m = merged(exp / "evals" / tag)
+        return {"tag": tag, "finished": m is not None, "score": score(m[0]) if m else None,
+                "state": "任务内评测完成" if m else "由训练任务自己评（8 个策略服务 × 12 个仿真进程）"}
+
     def experiment_row(self, exp: Path) -> dict:
         train = self.job(exp)["state"] if (exp / "job/submission.json").exists() else "未提交"
         metric = last_metric(exp)
         row = {"exp": exp.name, "train": train, "step": metric.get("step") if metric else None,
                "loss": metric.get("action_dit_loss") if metric else None, "evals": []}
-        repeats = {parse_target(t) for t in self.a.repeat}
+        repeats = {parse_target(t) for t in self.repeat_targets()}
+        rec = segmented(exp)
+        rule = {}
+        if rec and (exp / "injob_eval.json").is_file():
+            rule = json.loads((exp / "injob_eval.json").read_text())
         for tag, path in checkpoints(exp):
-            row["evals"].append(self.eval_entry(exp, tag, path, "", str(self.workers())))
+            step = int(tag.split("_")[1])
+            if rec and (step == int(rec["steps"]) or rule.get("mode") != "final_only"):
+                row["evals"].append(self.injob_entry(exp, tag))
+            else:
+                row["evals"].append(self.eval_entry(exp, tag, path, "", str(self.workers())))
             if (exp.name, tag) in repeats:
                 row["evals"].append(self.eval_entry(exp, tag, path, "_repeat", self.a.repeat_workers))
+        if rule:
+            row["evals"].append({"tag": "任务内评测速度", "state": (
+                f"96 个进程每回合 {rule['wall_mean_seconds']} 秒，是 24 个进程估计值的 {rule['ratio']} 倍；"
+                + ("超过 1.5 倍：中间检查点改由 1 卡分片评" if rule["mode"] == "final_only" else "不超过 1.5 倍：中间检查点继续在任务内评"))})
         return row
 
     def repeat_results(self):
         """Noise / speed comparisons of each --repeat target whose two jobs are done; sets the worker count."""
         out = []
-        for target in self.a.repeat:
+        for target in self.repeat_targets():
             exp, tag = parse_target(target)
             first = merged(self.experiments / exp / "evals" / tag)
             if first is None:
@@ -470,41 +539,66 @@ class Watcher:
         return out
 
     def gate(self):
-        if not self.a.gate:
+        """Stage 2 (the user's decision 4 of 2026-10-22).  The gate is passed when any start's step --gate-step
+        checkpoint (100k: of stage 0's stopped D5 runs or of stage 1) had more than 0 successful episodes on the 9
+        spatial tasks.  Then the runs of the four starts x --gate-ratios x --gate-seeds are submitted, in that order,
+        one per free place: all our 8-card jobs (training, RL, tests) share --slots places.  Only runs whose
+        experiment directory is set up for the staged plan (experiment.json "segmented") are submitted; the others
+        wait and the board says so.  The passing is kept in the state file."""
+        if not self.a.gate_ratios:
             return None
-        if "gate" in self.state and self.state["gate"].get("decided"):
-            return self.state["gate"]
-        exp, tag = parse_target(self.a.gate)
-        run = self.experiments / exp / "evals" / tag
-        m = merged(run)
-        if m is None:
-            return {"decided": False, "note": f"等 {exp} {tag} 的评测"}
-        agg = score(m[0])
-        successes = agg["all"][0]
-        if successes == 0:
-            self.state["gate"] = {"decided": True, "utc": utc(), "successes": 0, "submitted": [],
-                                  "note": f"{exp} {tag} 在 34 个任务上成功 0 个回合：按规定停下，不提交第三步其余任务"}
-            self.alerts.append(self.state["gate"]["note"])
-            return self.state["gate"]
-        reason = self.blocked(8)
-        if reason:
-            return {"decided": False, "note": f"{exp} {tag} 成功 {successes} 个回合 > 0，暂不提交：{reason}"}
-        if self.a.dry:
-            return {"decided": False, "note": f"would submit ({successes} successes)"}
-        done, errors = [], []
+        st = self.state.setdefault("gate2", {"submitted": []})
+        step = self.a.gate_step
+        if not st.get("passed"):
+            hits, zero = [], []
+            for s in runs.STARTS:
+                exp = self.experiments / runs.exp_id(s, "100", 1)
+                for name in ("evals", f"evals_{STOPPED_RUN}"):
+                    m = merged(exp / name / f"steps_{step}")
+                    agg = score(m[0]) if m else None
+                    if agg and agg["spatial"][0] > 0:
+                        hits.append(f"{exp.name}{'（停下的那次）' if name != 'evals' else ''} 空间组 "
+                                    f"{agg['spatial'][0]}/{agg['spatial'][1]}")
+                    elif agg:
+                        zero.append(exp.name)
+            if not hits:
+                note = f"等任一起点第 {step // 1000}k 步检查点在 9 个空间任务上成功回合 > 0"
+                if len(set(zero)) == len(runs.STARTS):
+                    note += f"（四个起点第 {step // 1000}k 步已评的都是 0：闸门没过，等阶段 1 的或你的决定）"
+                    self.alerts.append(note)
+                return {"passed": False, "note": note}
+            st.update(passed=utc(), by=hits)
+        head = f"闸门 {st['passed']} 已过（{'；'.join(st['by'][:2])}）"
+        todo = []
         for start, ratio, seed in self.runs.grid(runs.STARTS, self.a.gate_ratios, self.a.gate_seeds):
-            made = self.runs.make(start, ratio, seed, self.a.runs_root)
-            if "error" in made:
-                errors.append(made)
+            exp = self.experiments / runs.exp_id(start, ratio, seed)
+            if exp.name not in st["submitted"] and not (exp / "job/submission.json").exists():
+                todo.append((start, ratio, seed, exp))
+        if not todo:
+            return {"passed": True, "note": head + "；阶段 2 的任务都已提交"}
+        ready = [t for t in todo if segmented(t[3])]
+        waiting = f"；{len(todo) - len(ready)} 个实验目录还没按阶段 1 的设置重建" if len(ready) < len(todo) else ""
+        live = self.live8()
+        free = self.a.slots - len(live)
+        if not ready:
+            return {"passed": True, "note": head + waiting}
+        if free <= 0:
+            return {"passed": True, "note": head + f"；{self.a.slots} 个 8 卡名额已满（{', '.join(live[:4])}）" + waiting}
+        pool, reason = self.open_pool(8)
+        if reason:
+            return {"passed": True, "note": head + f"；暂不提交：{reason}" + waiting}
+        sent = []
+        for start, ratio, seed, exp in ready[:free]:
+            if self.a.dry:
+                sent.append(f"{exp.name} (would, {pool})")
                 continue
-            out = self.runs.submit(start, ratio, seed, self.a.runs_root)
-            (errors if "error" in out else done).append(out)
-        self.state["gate"] = {"decided": not errors, "utc": utc(), "successes": successes, "submitted": done,
-                              "errors": errors,
-                              "note": f"{exp} {tag} 成功 {successes} 个回合 > 0：提交第三步其余 {len(done)} 个任务"}
-        if errors:
-            self.alerts.append(f"第三步其余任务有 {len(errors)} 个没建成或没提交成功，下一轮重试：{errors[:2]}")
-        return self.state["gate"]
+            out = self.runs.submit(start, ratio, seed, self.a.runs_root, pool=pool)
+            if "error" in out:
+                self.alerts.append(f"{exp.name} 没提交成功，下一轮重试：{out['error'][:200]}")
+                continue
+            st["submitted"].append(exp.name)
+            sent.append(f"{exp.name} {out.get('job')} ({pool})")
+        return {"passed": True, "note": head + f"；本轮提交 {len(sent)} 个：{'；'.join(sent)}" + waiting}
 
     def stage0_row(self, exp: Path) -> dict:
         """Stage 0 (user, 2026-10-22): the checkpoints kept from the stopped D5 run (run_stopped_<date>/checkpoints),
@@ -596,7 +690,10 @@ def board(w: Watcher, rows, missing, rep, gate) -> str:
                + (f"（{w.state['workers']['utc']} 按并行度测试选定：每回合时间是 P={w.a.workers} 的 "
                   f"{w.state['workers']['why']} 倍，上限 {w.state['workers']['limit']}）" if "workers" in w.state else
                   f"（并行度测试未完成前用 {w.a.workers}）")),
-              f"- 第三步其余任务的门槛（{w.a.gate}）：{(gate or {}).get('note', '-')}",
+              f"- 我们的 8 卡任务（训练、RL、测试共用 {w.a.slots} 个名额）：{len(w.live8())} 个在跑或排队"
+              + (f"（{', '.join(w.live8())}）" if w.live8() else ""),
+              f"- 阶段 2 闸门（任一起点第 {w.a.gate_step // 1000}k 步在 9 个空间任务上成功 > 0）："
+              f"{(gate or {}).get('note', '-')}",
               f"- 结果报告 `{w.a.report_out}/index.html`：" + (
                   f"{w.state['report']['utc']} 生成（退出码 {w.state['report']['rc']}）" if "report" in w.state
                   else "评测完成后自动生成")]
@@ -635,11 +732,14 @@ def parser():
     ap.add_argument("--cards", type=int, default=8, help="cards per eval job (they buy CPUs: 14 vCPU each)")
     ap.add_argument("--servers", type=int, default=1, help="policy servers per eval job (one GPU each)")
     ap.add_argument("--workers", type=int, default=24, help="simulator workers until the parallelism test decides")
-    ap.add_argument("--repeat", nargs="*", default=["DS-B-100-s1:steps_25000"])
+    ap.add_argument("--repeat", nargs="*", default=[],
+                    help="EXP:TAG evaluated a second time; the final checkpoint of every segmented run always is")
     ap.add_argument("--repeat-workers", default="48,96")
     ap.add_argument("--max-slowdown", type=float, default=1.5)
-    ap.add_argument("--gate", default="DS-B-100-s1:steps_25000")
-    ap.add_argument("--gate-ratios", nargs="+", default=["010"], help="stage 2 (user, 10-22): 010 first; 030 later")
+    ap.add_argument("--gate-step", type=int, default=100000,
+                    help="stage-2 gate: any start's checkpoint of this step with > 0 spatial successes (user, 10-22)")
+    ap.add_argument("--slots", type=int, default=4, help="places shared by all our 8-card jobs (user, 10-22)")
+    ap.add_argument("--gate-ratios", nargs="*", default=["010"], help="stage 2 (user, 10-22): 010 first; 030 later")
     ap.add_argument("--gate-seeds", nargs="+", type=int, default=[1], help="seeds 2 and 3 are not run (user, 10-22)")
     ap.add_argument("--min-free-tb", type=float, default=1.0)
     ap.add_argument("--settle", type=float, default=600, help="seconds a checkpoint file must be unchanged")

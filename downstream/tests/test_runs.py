@@ -63,6 +63,12 @@ def test_submit_once_per_run(tmp_path):
     exp = tmp_path / "experiments/DS-B-030-s1"
     exp.mkdir(parents=True)
     (exp / "experiment.json").write_text("{}")
-    assert runs.submit("B", "030", 1, tmp_path, jobs=jobs) == {"exp": "DS-B-030-s1", "job": "pt-new", "pool": "zoetrope"}
+    assert runs.submit("B", "030", 1, tmp_path, jobs=jobs) == {"exp": "DS-B-030-s1", "job": "pt-new", "pool": "zoetrope",
+                                                               "script": "run_train.sh"}
     assert jobs.prepared == [("DS-B-030-s1", 8, "zoetrope", "ds-b-030-s1", str(exp))]
     assert runs.submit("B", "030", 1, tmp_path, jobs=jobs)["note"] == "already submitted" and len(jobs.prepared) == 1
+    seg = tmp_path / "experiments/DS-S-010-s1"
+    seg.mkdir(parents=True)
+    (seg / "experiment.json").write_text(json.dumps({"segmented": True}))
+    out = runs.submit("S", "010", 1, tmp_path, jobs=jobs, pool="h800")
+    assert out["pool"] == "h800" and out["script"] == "run_segmented.sh"

@@ -82,14 +82,16 @@ class FakeRuns:
         self.made.append((start, ratio, seed))
         return {"exp": f"DS-{start}-{ratio}-s{seed}", "made": True}
 
-    def submit(self, start, ratio, seed, root):
+    def submit(self, start, ratio, seed, root, pool=None):
         self.submitted.append((start, ratio, seed))
+        self.pools = getattr(self, "pools", []) + [pool]
         return {"exp": f"DS-{start}-{ratio}-s{seed}", "job": "pt-x"}
 
 
 def watcher(tmp_path, *extra, jobs=None, free=FREE, run_tools=None, shards=0):
     args = watch.parser().parse_args(["--runs-root", str(tmp_path), "--state", str(tmp_path / "state.json"),
                                       "--report-out", "", "--shards", str(shards),
+                                      "--repeat", "DS-B-100-s1:steps_25000",
                                       "--exps", "DS-B-100-s1", "DS-S-100-s1", *extra])
     return watch.Watcher(args, jobs=jobs or FakeJobs(), free_space=lambda: free, run_tools=run_tools or FakeRuns())
 
@@ -265,16 +267,13 @@ def test_guard_deletes_a_shard_that_started_alone_and_waits_before_resubmitting(
     assert any("/evals/steps_25000/shards/s3of8/" in p[3][3] for p in jobs.prepared[before:])  # others go on
 
 
-def test_merged_shards_feed_the_gate(tmp_path):
-    jobs, run_tools = FakeJobs(), FakeRuns()
+def test_merged_combines_shards(tmp_path):
     exp = fake_exp(tmp_path, steps=(25000,))
     for i, ok in ((1, 0), (2, 2)):
         summary(exp / f"evals/steps_25000/shards/s{i}of2/out/episodes", {"OpenDrawer": {"n": 2, "successes": ok}},
                 outcomes=[("OpenDrawer", 1000 + 2 * i, ok > 0), ("OpenDrawer", 1001 + 2 * i, ok > 1)])
     m = watch.merged(exp / "evals/steps_25000")
     assert m[0]["per_task"]["OpenDrawer"] == {"n": 4, "successes": 2} and m[0]["shards"] == 2 and len(m[1]) == 4
-    gate = watcher(tmp_path, jobs=jobs, run_tools=run_tools, shards=2).gate()
-    assert gate["decided"] and gate["successes"] == 2 and len(run_tools.submitted) == 4
     (exp / "evals/steps_25000/shards/s2of2/out/episodes/summary.json").unlink()
     assert watch.merged(exp / "evals/steps_25000") is None
 
@@ -297,7 +296,7 @@ def test_repeat_compares_and_picks_the_largest_fast_enough_parallelism(tmp_path)
             outcomes=[("OpenDrawer", 1000, True), ("OpenDrawer", 1001, False)])
     summary(exp / "evals/steps_25000_repeat/out/episodes_P96", {"OpenDrawer": {"n": 2, "successes": 2}}, mean=160.0,
             workers=96, outcomes=[("OpenDrawer", 1000, True), ("OpenDrawer", 1001, True)])
-    w = watcher(tmp_path, "--gate", "")
+    w = watcher(tmp_path)
     rep = w.repeat_results()
     by_p = {r["workers_tested"]: r for r in rep}
     assert by_p[48]["slowdown"] == 1.4 and by_p[48]["episodes_with_other_outcome"] == 0
@@ -306,32 +305,85 @@ def test_repeat_compares_and_picks_the_largest_fast_enough_parallelism(tmp_path)
     assert w.workers() == 48 and w.state["workers"]["limit"] == 1.5
 
 
-def gate_setup(tmp_path, successes):
-    exp = fake_exp(tmp_path, steps=(25000,))
-    (exp / "evals/steps_25000/job").mkdir(parents=True)
-    (exp / "evals/steps_25000/job/submission.json").write_text(json.dumps({"job_id": "pt-g"}))
-    summary(exp / "evals/steps_25000/out/episodes", {"OpenDrawer": {"n": 50, "successes": successes},
-                                                     "CloseFridge": {"n": 20, "successes": 0}})
-    return FakeJobs({"steps_25000": "SUCCEEDED"}), FakeRuns()
+def stopped_100k(root: Path, start: str, spatial_successes: int):
+    """Stage 0's evaluation of a start's stopped 100k checkpoint (OpenDrawer is a spatial task, CloseFridge is not)."""
+    exp = root / "experiments" / f"DS-{start}-100-s1"
+    exp.mkdir(parents=True, exist_ok=True)
+    summary(exp / f"evals_{watch.STOPPED_RUN}/steps_100000/out/episodes",
+            {"OpenDrawer": {"n": 50, "successes": spatial_successes}, "CloseFridge": {"n": 20, "successes": 5}})
 
 
-def test_gate_submits_the_four_10_percent_seed1_runs_after_a_nonzero_first_checkpoint(tmp_path):
-    jobs, run_tools = gate_setup(tmp_path, successes=3)
+def stage2_dirs(root: Path, ready=("B", "S", "RS", "RD")):
+    for s in ("B", "S", "RS", "RD"):
+        exp = root / "experiments" / f"DS-{s}-010-s1"
+        exp.mkdir(parents=True, exist_ok=True)
+        (exp / "experiment.json").write_text(json.dumps({"steps": 100000, "segmented": s in ready}))
+
+
+def eight_card(name, state="RUNNING", pool="h800", cards=8):
+    return {"display_name": name, "state": state, "resource_pool": {"name": pool},
+            "roles": [{"resource_spec": [{"name": f"N4lS.Iq.I80.{cards}"}]}]}
+
+
+def test_gate_passes_on_spatial_successes_at_100k_and_fills_free_slots(tmp_path):
+    stopped_100k(tmp_path, "B", 0)
+    stopped_100k(tmp_path, "S", 2)
+    stage2_dirs(tmp_path, ready=("B", "S", "RS"))
+    jobs, run_tools = FakeJobs(), FakeRuns()
+    jobs.listing = [eight_card("downstream-ds-b-100-s1"), eight_card("downstream-ds-s-100-s1", "QUEUEING"),
+                    eight_card("downstream-ev-x-s1of8", cards=1), eight_card("someone-else", cards=8)]
     w = watcher(tmp_path, jobs=jobs, run_tools=run_tools)
     gate = w.gate()
-    assert gate["decided"] and gate["successes"] == 3 and len(run_tools.submitted) == 4
-    assert {r for _, r, _ in run_tools.submitted} == {"010"} and {s for *_, s in run_tools.submitted} == {1}
+    assert gate["passed"] and "DS-S-100-s1（停下的那次） 空间组 2/50" in gate["note"]
+    assert run_tools.submitted == [("B", "010", 1), ("S", "010", 1)]  # 4 places - 2 alive; RD's directory not ready
+    assert "1 个实验目录还没按阶段 1 的设置重建" in gate["note"]
     w.save()
-    again = watcher(tmp_path, jobs=jobs, run_tools=run_tools).gate()  # decided once, kept in the state file
-    assert again["decided"] and len(run_tools.submitted) == 4
+    jobs.listing += [eight_card("downstream-ds-b-010-s1"), eight_card("downstream-ds-s-010-s1")]
+    again = watcher(tmp_path, jobs=jobs, run_tools=run_tools).gate()  # passed once, kept; no place now
+    assert again["passed"] and "4 个 8 卡名额已满" in again["note"] and len(run_tools.submitted) == 2
 
 
-def test_gate_stops_on_zero_successes(tmp_path):
-    jobs, run_tools = gate_setup(tmp_path, successes=0)
+def test_gate_waits_while_spatial_successes_are_zero(tmp_path):
+    for s in ("B", "S", "RS", "RD"):
+        stopped_100k(tmp_path, s, 0)
+    stage2_dirs(tmp_path)
+    run_tools = FakeRuns()
+    w = watcher(tmp_path, run_tools=run_tools)
+    gate = w.gate()
+    assert not gate["passed"] and not run_tools.submitted and any("闸门没过" in a for a in w.alerts)
+
+
+def test_same_size_yield_is_per_pool_for_eight_card_jobs(tmp_path):
+    stopped_100k(tmp_path, "B", 1)
+    stage2_dirs(tmp_path)
+    jobs, run_tools = FakeJobs(), FakeRuns()
+    jobs.listing = [eight_card("bq_tp_mmxbf16_a", "STARTING", pool="zoetrope")]
     w = watcher(tmp_path, jobs=jobs, run_tools=run_tools)
     gate = w.gate()
-    assert gate["decided"] and gate["successes"] == 0 and not run_tools.made and not run_tools.submitted
-    assert any("成功 0 个回合" in a for a in w.alerts)
+    assert len(run_tools.submitted) == 4 and set(run_tools.pools) == {"h800"}  # zoetrope's bq_tp job keeps its pool
+    assert not w.blocked(1) and w.blocked(8, "zoetrope") and not w.blocked(8, "h800") and w.blocked(8)
+    jobs.listing.append(eight_card("bq_tp_mmxbf16_b", "STARTING", pool="h800"))
+    w2 = watcher(tmp_path, jobs=jobs, run_tools=FakeRuns())
+    assert w2.open_pool(8)[0] is None
+
+
+def test_segmented_runs_are_evaluated_in_the_job_and_their_final_twice(tmp_path):
+    exp = fake_exp(tmp_path, steps=(50000,), settled=(50000,))
+    (exp / "experiment.json").write_text(json.dumps({"steps": 200000, "segmented": True,
+                                                     "eval_points": [50000, 200000]}))
+    os.utime(exp / "run/final_model/pytorch_model.pt", (OLD, OLD))
+    jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("other", 1)]))})
+    w = watcher(tmp_path, "--repeat", jobs=jobs, shards=8)
+    assert w.repeat_targets() == ["DS-B-100-s1:steps_200000"]
+    rows, *_ = w.tick()
+    states = {e["tag"]: e["state"] for e in rows[0]["evals"]}
+    assert states["steps_50000"].startswith("由训练任务自己评") and states["steps_200000"].startswith("由训练任务自己评")
+    assert "1 个 1 卡分片" not in states["steps_200000_repeat"] and "待提交 8" in states["steps_200000_repeat"]
+    assert all("steps_200000_repeat" in p[3][3] for p in jobs.prepared)  # only the final's second evaluation
+    (exp / "injob_eval.json").write_text(json.dumps({"mode": "final_only", "ratio": 1.7, "wall_mean_seconds": 300}))
+    rows, *_ = watcher(tmp_path, "--repeat", jobs=FakeJobs(), shards=8).tick()
+    states = {e["tag"]: e["state"] for e in rows[0]["evals"]}
+    assert states["steps_50000"].startswith("8 个 1 卡分片") and "超过 1.5 倍" in states["任务内评测速度"]
 
 
 def test_report_is_rebuilt_once_per_new_set_of_finished_evaluations(tmp_path):
