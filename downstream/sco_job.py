@@ -81,7 +81,8 @@ def code_state(worktree: Path) -> dict:
         res = subprocess.run(["git", "-C", str(worktree), *a], capture_output=True, text=True)
         return res.stdout.strip() if res.returncode == 0 else None
 
-    dirty = git("status", "--porcelain", "--untracked-files=no", "--", "downstream", "docs/downstream")
+    dirty = git("status", "--porcelain", "--untracked-files=no", "--", "downstream", "docs/downstream",
+                ":(exclude)docs/downstream/MATRIX.md")  # rewritten by the watcher every pass
     return {"commit": git("rev-parse", "HEAD"), "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
             "dirty_downstream_files": dirty.splitlines() if dirty else []}
 

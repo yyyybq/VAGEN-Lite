@@ -546,3 +546,51 @@ def test_waiting_eight_card_evaluations_yield_to_the_main_line(tmp_path):
     assert jobs.deleted == ["steps_50000"] and not (evaldir / "job").exists()
     assert list(evaldir.glob("job_withdrawn_*")) and any("撤下我们还没开始的 8 卡评测 1 个" in n for n in w2.notes)
     assert len(jobs.prepared) == 1  # not resubmitted while the main line waits
+
+
+def test_stalled_evaluations_are_released_and_resubmitted(tmp_path):
+    b = stopped_exp(tmp_path, "B", steps=(50000, 100000))
+    root = b / f"evals_{watch.STOPPED_RUN}"
+    for tag in ("steps_50000",):
+        (root / tag / "job").mkdir(parents=True)
+        (root / tag / "job/submission.json").write_text(json.dumps({"job_id": "pt-old"}))
+        (root / tag / "job/prepared.json").write_text(json.dumps({"pool": "h800"}))
+        eps = root / tag / "out/episodes"
+        eps.mkdir(parents=True)
+        (eps / "episodes.jsonl").write_text('{"status": "complete"}\n')
+        for p in (root / tag / "job/submission.json", eps / "episodes.jsonl"):
+            os.utime(p, (OLD - 7200, OLD - 7200))  # started and last wrote 3 h ago
+    shard = root / "steps_100000/shards/s2of8"
+    (shard / "job").mkdir(parents=True)
+    (shard / "job/submission.json").write_text(json.dumps({"job_id": "pt-shard"}))
+    (shard / "job/prepared.json").write_text(json.dumps({"pool": "h800"}))
+    (shard / "out/episodes").mkdir(parents=True)
+    (shard / "out/episodes/episodes.jsonl").write_text('{"status": "complete"}\n')
+    for p in (shard / "job/submission.json", shard / "out/episodes/episodes.jsonl"):
+        os.utime(p, (OLD - 7200, OLD - 7200))
+    jobs = FakeJobs(states={"steps_50000": "RUNNING", "s2of8": "RUNNING"})
+    w = watcher(tmp_path, "--stage0", "--stage0-cards", "8", "--stage0-repeat", jobs=jobs, shards=8)
+    w.tick()
+    assert sorted(jobs.deleted) == ["s2of8", "steps_50000"]
+    assert list((root / "steps_50000").glob("job_hung_*")) and list(shard.glob("job_hung_*"))
+    assert sum("分钟没有完成一个回合" in a for a in w.alerts) == 2
+
+
+def test_matrix_lists_the_starts_and_the_pending_rows(tmp_path):
+    b = stopped_exp(tmp_path, "B", steps=(25000, 100000))
+    summary(b / f"evals_{watch.STOPPED_RUN}/steps_100000/out/episodes",
+            {"OpenDrawer": {"n": 50, "successes": 10}, "CloseFridge": {"n": 20, "successes": 5}})
+    (b / f"evals_{watch.STOPPED_RUN}/steps_100000/job").mkdir(parents=True)
+    (b / f"evals_{watch.STOPPED_RUN}/steps_100000/job/submission.json").write_text(json.dumps({"job_id": "pt-e0"}))
+    s1 = tmp_path / "experiments/DS-S-100-s1"
+    (s1 / "run").mkdir(parents=True)
+    (s1 / "experiment.json").write_text(json.dumps({"steps": 100000, "segmented": True}))
+    (s1 / "run/metrics.jsonl").write_text(json.dumps({"step": 4200, "action_dit_loss": 0.1}) + "\n")
+    w = watcher(tmp_path, "--stage0", jobs=FakeJobs(), shards=8)
+    text = watch.matrix(w)
+    assert text.count("\n| ") == 4 + len(watch.MATRIX_PENDING)  # four starts + the rows to be added
+    row_b = next(line for line in text.splitlines() if line.startswith("| B 原始 7B"))
+    assert "**1/4 个检查点评完**" in row_b and "`pt-e0`" in row_b and "100k：总体 21.4%（15/70），空间组 20.0%（10/50）" in row_b
+    row_s = next(line for line in text.splitlines() if line.startswith("| S 动作 SFT"))
+    assert "**未提交**" in row_s and "训练到第 4200 步（共 100000）" in row_s
+    assert "r12k S0-keep（待接入）" in text and "暂不跑" in row_b

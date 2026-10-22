@@ -378,29 +378,62 @@ class Watcher:
                 if str(j.get("display_name") or "").startswith("downstream-ev") and job_cards(j) == 8
                 and j.get("state") in sco_job.WAITING_STATES and (pool is None or job_pool(j) == pool)]
 
-    def whole_entry(self, exp: Path, tag: str, path: Path, root: Path, key) -> dict:
+    def stalled(self, d: Path, st: dict) -> bool:
+        """A running evaluation that has finished no episode for --stall-min minutes (and started earlier than that):
+        its main process lost a dead worker's episode (closed_loop before 2026-10-22 18:42 waited for it forever) or a
+        worker hangs.  The user's decision 3 of 2026-10-22: such a job is deleted and submitted again; the rerun
+        resumes and runs only the missing episodes."""
+        if not self.a.stall_min or st.get("finished") or st.get("state") != "RUNNING":
+            return False
+        limit = self.a.stall_min * 60
+        try:
+            started = datetime.datetime.strptime(st["start_time"], "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=datetime.timezone.utc).timestamp()
+        except (KeyError, TypeError, ValueError):
+            started = (d / "job/submission.json").stat().st_mtime
+        if self.now() - started < limit:
+            return False
+        ep = d / "out/episodes/episodes.jsonl"
+        last = ep.stat().st_mtime if ep.exists() else started
+        return self.now() - last > limit
+
+    def release(self, d: Path) -> None:
+        """Delete a stalled evaluation job and keep its record as job_hung_<time>; it is submitted again as usual."""
+        res = "dry run" if self.a.dry else self.jobs.delete(d)
+        if not self.a.dry:
+            (d / "job").rename(d / f"job_hung_{int(self.now())}")
+            self.state["finished"].pop(str(d), None)
+        self.alerts.append(f"{d.relative_to(self.experiments)} 有 {self.a.stall_min:.0f} 分钟没有完成一个回合：已删除任务，"
+                           f"重提后只补缺的回合（{res}）")
+
+    def whole_entry(self, exp: Path, tag: str, path: Path, root: Path, key, name: str = None) -> dict:
         """One checkpoint evaluated by one 8-card job (8 policy servers x 96 simulator processes) on an idle machine of
-        --whole-pools: EVALDIR/job, EVALDIR/out/episodes."""
+        --whole-pools: EVALDIR/job, EVALDIR/out/episodes (EVALDIR = ROOT/TAG)."""
         evaldir = root / tag
+        name = name or f"ev8-{exp.name.lower()}-stopped-{tag.replace('_', '')}"
         entry = {"tag": tag, "finished": False, "score": None}
         if (evaldir / "job/submission.json").exists():
             st = self.job(evaldir)
             m = merged(evaldir)
             if m:
                 return dict(entry, finished=True, score=score(m[0]), state="8 卡评测完成")
-            if not st["finished"]:
+            if not st["finished"] and self.stalled(evaldir, st):
+                self.release(evaldir)
+            elif not st["finished"]:
                 if st["state"] in sco_job.WAITING_STATES:
-                    self.waiting_whole.append((key, evaldir, path, f"ev8-{exp.name.lower()}-stopped-{tag.replace('_', '')}"))
+                    self.waiting_whole.append((key, evaldir, path, name))
                 return dict(entry, state=f"8 卡评测（8 个策略服务 × 96 个仿真进程）：{st['state']}")
-            fails = len(list(evaldir.glob("job_failed_*")))
-            if fails >= 2 or self.a.dry:
-                self.alerts.append(f"{exp.name} {tag} 的 8 卡评测失败了 3 次，不再重提，请看 job_failed_*")
-                return dict(entry, state="8 卡评测失败 3 次")
-            (evaldir / "job").rename(evaldir / f"job_failed_{fails + 1}")
-            self.state["finished"].pop(str(evaldir), None)
+            else:
+                fails = len(list(evaldir.glob("job_failed_*")))
+                if fails >= 2 or self.a.dry:
+                    self.alerts.append(f"{exp.name} {tag} 的 8 卡评测失败了 3 次，不再重提，请看 job_failed_*")
+                    return dict(entry, state="8 卡评测失败 3 次")
+                (evaldir / "job").rename(evaldir / f"job_failed_{fails + 1}")
+                self.state["finished"].pop(str(evaldir), None)
+        if (evaldir / "job").exists():  # a dry pass kept the stalled job
+            return dict(entry, state="8 卡评测：卡住（dry run，没有删除）")
         if not settled(path, self.a.settle, self.now):
             return dict(entry, state="waiting for the file to settle")
-        name = f"ev8-{exp.name.lower()}-stopped-{tag.replace('_', '')}"
         self.pending8.append((key, evaldir, path, name))
         return dict(entry, state="待提交（8 卡，等空闲机器）")
 
@@ -499,18 +532,24 @@ class Watcher:
             d = evaldir / "shards" / f"s{i}of{k}"
             if (d / "job/submission.json").exists():
                 st = self.job(d)
-                if not st["finished"]:
+                if not st["finished"] and self.stalled(d, st):
+                    self.release(d)
+                    if self.a.dry:
+                        counts["running"] += 1
+                        continue
+                elif not st["finished"]:
                     counts["running" if st["state"] == "RUNNING" else "waiting"] += 1
                     continue
-                if score(d / "out/episodes/summary.json"):
+                elif score(d / "out/episodes/summary.json"):
                     counts["done"] += 1
                     continue
-                fails = len(list(d.glob("job_failed_*")))
-                if fails >= 2 or self.a.dry:
-                    counts["failed"] += 1
-                    continue
-                (d / "job").rename(d / f"job_failed_{fails + 1}")
-                self.state["finished"].pop(str(d), None)
+                else:
+                    fails = len(list(d.glob("job_failed_*")))
+                    if fails >= 2 or self.a.dry:
+                        counts["failed"] += 1
+                        continue
+                    (d / "job").rename(d / f"job_failed_{fails + 1}")
+                    self.state["finished"].pop(str(d), None)
             last = (bounced.get(str(d)) or [None])[-1]
             if last and self.now() - last < self.a.bounce_wait_min * 60:
                 counts["waiting"] += 1
@@ -578,12 +617,13 @@ class Watcher:
 
     # ------------------------------------------------------------------------------------------- one pass
     def repeat_targets(self) -> list:
-        """--repeat targets plus the final checkpoint of every segmented (stage-1 style) run: its second evaluation,
-        same seeds, by one-card shards (the user's decision 2 of 2026-10-22)."""
+        """--repeat targets plus the final checkpoint of every segmented run whose experiment.json says
+        "repeat_final": its second evaluation with the same seeds (the noise floor).  The user's decision 1 of
+        2026-10-22 (second message): only start B's, as one 8-card job on an idle machine."""
         out = list(self.a.repeat)
         for exp in sorted(self.experiments.glob("DS-*")):
             rec = segmented(exp)
-            if rec and rec.get("repeat_final", True):
+            if rec and rec.get("repeat_final"):
                 out.append(f"{exp.name}:steps_{rec['steps']}")
         return list(dict.fromkeys(out))
 
@@ -609,7 +649,11 @@ class Watcher:
                 row["evals"].append(self.injob_entry(exp, tag))
             else:
                 row["evals"].append(self.eval_entry(exp, tag, path, "", str(self.workers())))
-            if (exp.name, tag) in repeats:
+            if (exp.name, tag) in repeats and rec:  # the noise floor of a stage-1 run: one 8-card job, idle machine
+                row["evals"].append(self.whole_entry(exp, f"{tag}_repeat", path, exp / "evals",
+                                                     key=(1, step, start_rank(exp.name), 1),
+                                                     name=f"ev8-{exp.name.lower()}-{tag.replace('_', '')}-rep"))
+            elif (exp.name, tag) in repeats:
                 row["evals"].append(self.eval_entry(exp, tag, path, "_repeat", self.a.repeat_workers))
         if rule:
             row["evals"].append({"tag": "任务内评测速度", "state": (
@@ -719,6 +763,12 @@ class Watcher:
                 row["evals"].append(self.whole_entry(exp, tag, path, root, key))
             else:  # one-card shards (a checkpoint whose shards started stays with them)
                 row["evals"].append(self.shard_entry(exp, tag, path, "", root=root, key=key))
+            if f"{exp.name}:{tag}" in self.a.stage0_repeat:
+                # the user's decision 7 of 2026-10-22: B 100k evaluated a second time as one 8-card job (same seeds);
+                # its difference to the shard version is the first estimate of the evaluation noise.  After the 50k
+                # evaluations, before 25k / 75k.
+                row["evals"].append(self.whole_entry(exp, f"{tag}_repeat", path, root, key=(0, 1, 9, step),
+                                                     name=f"ev8-{exp.name.lower()}-stopped-{tag.replace('_', '')}-rep"))
         return row
 
     def tick(self):
@@ -777,6 +827,109 @@ class Watcher:
 
 def utc() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+# ----------------------------------------------------------------------------- experiment matrix (user, 2026-10-22)
+MATRIX_PENDING = (
+    ("r12k S0-keep", "密集奖励第一批的 S0-keep（`pt-ma8luzju`）训完后接入"),
+    ("r12k D-keep", "密集奖励第一批的 D-keep（`pt-zhuu1j9h`、`pt-p6g2le55`）训完后接入"),
+    ("P0", "训练线 P0 的结果出来后接入"),
+    ("P1", "训练线 P1 的结果出来后接入"),
+    ("A 组", "A 组的结果出来后接入"),
+    ("复现种子", "复现种子的结果出来后接入"))
+
+
+def _rate(kn) -> str:
+    k, n = kn
+    return f"{100 * k / n:.1f}%（{k}/{n}）" if n else "—"
+
+
+def _stamp(paths) -> str:
+    times = [p.stat().st_mtime for p in paths if p.exists()]
+    return datetime.datetime.fromtimestamp(max(times), datetime.timezone.utc).strftime("%m-%d %H:%M") if times else ""
+
+
+def _job_id(d: Path):
+    sub = d / "job/submission.json"
+    return json.loads(sub.read_text()).get("job_id") if sub.is_file() else None
+
+
+def _cell(*parts) -> str:
+    return "<br>".join(p for p in parts if p) or "—"
+
+
+def matrix_e0(w: "Watcher", start: str) -> str:
+    exp = w.experiments / runs.exp_id(start, "100", 1)
+    root = exp / f"evals_{STOPPED_RUN}"
+    if not (exp / STOPPED_RUN / "checkpoints").is_dir():
+        return "—"
+    lines, done, jobs, files = [], 0, [], []
+    for step in (25000, 50000, 75000, 100000):
+        d = root / f"steps_{step}"
+        m = merged(d)
+        jid = _job_id(d) or ("8 个 1 卡分片" if (d / "shards").is_dir() else None)
+        if jid:
+            jobs.append(f"{step // 1000}k `{jid}`" if jid.startswith("pt-") else f"{step // 1000}k {jid}")
+        files += list(d.glob("out/episodes/summary.json")) + list(d.glob("shards/*/out/episodes/summary.json"))
+        if m:
+            done += 1
+            agg = score(m[0])
+            lines.append(f"{step // 1000}k：总体 {_rate(agg['all'])}，空间组 {_rate(agg['spatial'])}")
+        else:
+            lines.append(f"{step // 1000}k：{'评测中' if jid else '待提交'}")
+    for target in w.a.stage0_repeat:
+        name, tag = parse_target(target)
+        if name == exp.name:
+            m = merged(root / f"{tag}_repeat")
+            if m:
+                agg = score(m[0])
+                lines.append(f"{tag.split('_')[1][:-3]}k 第二遍（整机）：总体 {_rate(agg['all'])}，空间组 {_rate(agg['spatial'])}")
+            elif _job_id(root / f"{tag}_repeat"):
+                lines.append(f"{tag.split('_')[1][:-3]}k 第二遍（整机）：评测中 `{_job_id(root / f'{tag}_repeat')}`")
+    return _cell(f"**{done}/4 个检查点评完**", "；".join(jobs), f"`{root.relative_to(w.a.runs_root)}/`",
+                 "<br>".join(lines), f"更新 {_stamp(files)}" if files else "")
+
+
+def matrix_run(w: "Watcher", start: str, ratio: str, what: str) -> str:
+    exp = w.experiments / runs.exp_id(start, ratio, 1)
+    rec = segmented(exp)
+    if not rec:
+        return _cell(f"未开始（{what}的实验目录还没按阶段 1 的设置建）")
+    jid = _job_id(exp)
+    state = w.job(exp)["state"] if jid else "未提交"
+    metric = last_metric(exp)
+    steps = int(rec["steps"])
+    m = merged(exp / "evals" / f"steps_{steps}")
+    rep = merged(exp / "evals" / f"steps_{steps}_repeat") if rec.get("repeat_final") else None
+    agg = score(m[0]) if m else None
+    res = [f"最终 {steps // 1000}k：总体 {_rate(agg['all'])}，空间组 {_rate(agg['spatial'])}" if agg else
+           f"训练到第 {metric['step']} 步（共 {steps}）" if metric and "step" in metric else ""]
+    if rep:
+        ra = score(rep[0])
+        res.append(f"第二遍（整机）：总体 {_rate(ra['all'])}，空间组 {_rate(ra['spatial'])}")
+    files = [exp / "run/metrics.jsonl", exp / "evals" / f"steps_{steps}" / "out/episodes/summary.json"]
+    return _cell(f"**{state}**", f"任务 `{jid}`" if jid else "", f"`{exp.relative_to(w.a.runs_root)}/`",
+                 "<br>".join(r for r in res if r), f"更新 {_stamp(files)}" if _stamp(files) else "")
+
+
+def matrix(w: "Watcher") -> str:
+    """docs/downstream/MATRIX.md: rows are the starts (the four of now and the ones to be added), columns the
+    experiments E0-E4 (the user's decision 5 of 2026-10-22).  Rewritten by the watcher every pass."""
+    head = ["# 下游线实验矩阵（看板每轮自动重写，不要手改）", "",
+            f"生成于 {utc()}。E0 = 阶段 0 的检查点曲线（D5 停下时保留的 2.5 万–10 万步）；E1 = 阶段 1 主对比（100% 数据、"
+            f"种子 1）；E2 = 样本效率（10%、30% 数据）；E3 = RL（PPO）；E4 = 种子（2、3）。每格：状态、任务号、结果路径、"
+            f"成功率（总体 = 34 个任务 950 回合，空间组 = 9 个空间任务 450 回合；括号里是成功回合 / 回合）、最后更新时间（UTC）。",
+            "路径相对于 `/mnt/umm/users/yinbaiqiao/downstream_runs/`。状态和决定见 [STATUS.md](STATUS.md)。", "",
+            "| 起点 | E0 曲线 | E1 主对比 | E2 样本效率 | E3 RL | E4 种子 |", "| --- | --- | --- | --- | --- | --- |"]
+    names = {"B": "B 原始 7B", "S": "S 动作 SFT 第 9 个 epoch", "RS": "RS P-S0 第 300 次", "RD": "RD P-D 第 150 次"}
+    rows = []
+    for s in runs.STARTS:
+        e2 = "<br><br>".join(f"**{p}%**：{matrix_run(w, s, r, f'{p}% 数据')}" for r, p in (("010", 10), ("030", 30)))
+        rows.append(f"| {names.get(s, s)} | {matrix_e0(w, s)} | {matrix_run(w, s, '100', 'E1 ')} | {e2} | "
+                    f"未开始（1 小时实测排在阶段 1 之后、有名额时） | 暂不跑（你 10-22 的决定） |")
+    for name, note in MATRIX_PENDING:
+        rows.append(f"| {name}（待接入） | {note} | — | — | — | — |")
+    return "\n".join(head + rows) + "\n"
 
 
 def board(w: Watcher, rows, missing, rep, gate) -> str:
@@ -881,6 +1034,13 @@ def parser():
                     help="8: a stage-0 checkpoint whose shards have not started is evaluated by one 8-card job "
                          "(8 servers x 96 processes) on an idle machine of --whole-pools (the user, 10-22 16:30)")
     ap.add_argument("--whole-pools", nargs="*", default=["h800"], help="pools for the 8-card evaluations")
+    ap.add_argument("--stage0-repeat", nargs="*", default=["DS-B-100-s1:steps_100000"],
+                    help="stage-0 checkpoints evaluated a second time as one 8-card job (noise estimate)")
+    ap.add_argument("--stall-min", type=float, default=90,
+                    help="a running evaluation with no finished episode for this many minutes is deleted and "
+                         "submitted again (it resumes); 0: never")
+    ap.add_argument("--matrix", default=str(DOWNSTREAM.parent / "docs/downstream/MATRIX.md"),
+                    help="the experiment matrix rewritten every pass (empty: off)")
     ap.add_argument("--max-whole-per-pass", type=int, default=1,
                     help="8-card evaluations submitted per pass at most (the idle-machine estimate cannot see other "
                          "workspaces' jobs; on 10-22 two of four went to the queue)")
@@ -905,6 +1065,11 @@ def main(argv=None) -> int:
             text = board(w, *w.tick())
             if args.board:
                 args.board.write_text(text)
+            if args.matrix:
+                try:
+                    Path(args.matrix).write_text(matrix(w), encoding="utf-8")
+                except Exception as exc:  # the matrix must never stop the watcher
+                    print(f"[matrix {utc()}] {type(exc).__name__}: {exc}", flush=True)
             print(text, flush=True)
             if args.every <= 0:
                 return 0
