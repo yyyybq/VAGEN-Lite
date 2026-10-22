@@ -795,9 +795,17 @@ class Supervisor:
         print(f"[eval.launch {self.plan.run_id}] {msg}", flush=True)
 
     def run(self) -> dict:
+        previous = {}
         if threading.current_thread() is threading.main_thread():
             for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-                signal.signal(sig, self.request_stop)
+                previous[sig] = signal.signal(sig, self.request_stop)
+        try:
+            return self._run()
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+
+    def _run(self) -> dict:
         me = proc_stat(os.getpid()) or {}
         self.status.update(state="starting", started_at=now_iso(), supervisor={
             "pid": os.getpid(), "start_ticks": me.get("start_ticks"), "mode": self.mode, "host": socket.gethostname()})
