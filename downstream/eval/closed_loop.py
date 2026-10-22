@@ -249,14 +249,28 @@ def run_episode(spec: dict) -> dict:
     if marker is not None:
         marker.write_text(json.dumps({"task": spec["task"], "seed": spec["seed"], "started": time.time(),
                                       "max_steps": spec.get("max_steps")}))
+    _STATE["marker"], _STATE["beat"] = marker, 0.0
     try:
         return _run_episode(spec)
     finally:
+        _STATE["marker"] = None
         if marker is not None:
             try:
                 marker.unlink()
             except OSError:
                 pass
+
+
+def _heartbeat(every: float = 15.0) -> None:
+    """Touch the in-flight marker (at most every `every` seconds): the main process reads its age as the time since
+    this worker last made progress (a policy call)."""
+    marker, now = _STATE.get("marker"), time.time()
+    if marker is not None and now - _STATE.get("beat", 0.0) >= every:
+        try:
+            os.utime(marker)
+        except OSError:
+            pass
+        _STATE["beat"] = now
 
 
 def _run_episode(spec: dict) -> dict:
@@ -284,6 +298,7 @@ def _run_episode(spec: dict) -> dict:
         steps, calls, success, latencies = 0, 0, False, []
         terminated = truncated = False
         while steps < spec["max_steps"] and not (success or terminated or truncated):
+            _heartbeat()
             t = time.monotonic()
             response = policy.predict_action({"examples": [contract.example(obs)], "do_sample": False})
             latencies.append(time.monotonic() - t)
@@ -333,6 +348,17 @@ def hang_limit(max_steps) -> float:
     """Seconds after which a running episode counts as hung: 10 minutes of reset plus 3 s per control step, about 4x
     the slowest measured (0.81 s per step with 96 processes on one machine, 2026-10-22)."""
     return 600.0 + 3.0 * float(max_steps or 0)
+
+
+STALL_SECONDS = 600.0  # no progress (policy call) for this long: hung.  A policy call comes every 16 control steps
+# (13 s at 0.81 s per step); the longest gap is the scene build and reset at the start, up to about 2 minutes measured
+
+
+def hung(info: dict, marker_mtime: float, now: float, stall: float = STALL_SECONDS) -> bool:
+    """A live worker is hung when its episode made no progress (the marker is touched at every policy call) for
+    `stall` seconds, or ran longer than hang_limit() in all."""
+    started = float(info.get("started", now))
+    return now - max(started, marker_mtime) > stall or now - started > hang_limit(info.get("max_steps"))
 
 
 def _read_int(path: str):
@@ -424,8 +450,8 @@ def run_all(pool, episodes, write, inflight: Path, retries: int = 2, poll: float
     """Run every episode on `pool` (apply_async), passing each finished row to write().  A worker process that dies
     (killed for memory, a simulator crash) loses its episode: multiprocessing replaces the worker but never reports
     the task.  Every `poll` seconds the INFLIGHT markers are read; an episode whose worker is dead is run again (at
-    most `retries` times, then recorded as an error), and a worker still on one episode after hang_limit() is killed
-    first.  Returns counts of the retries, kills and episodes given up."""
+    most `retries` times, then recorded as an error), and a worker that hung() (no policy call for STALL_SECONDS, or
+    longer than hang_limit() in all) is killed first.  Returns counts of the retries, kills and episodes given up."""
     run = run or run_episode
     key = lambda e: (e["task"], e["seed"])  # noqa: E731
     pending, tries, stats = {}, {}, {"retried": 0, "killed_hung": 0, "given_up": 0}
@@ -446,11 +472,11 @@ def run_all(pool, episodes, write, inflight: Path, retries: int = 2, poll: float
                 write(row)
         for m in sorted(Path(inflight).glob("*.json")):
             try:
-                pid, info = int(m.stem), json.loads(m.read_text())
+                pid, info, mtime = int(m.stem), json.loads(m.read_text()), m.stat().st_mtime
             except (OSError, ValueError):
                 continue
             if alive(pid):
-                if now() - float(info.get("started", now())) > hang_limit(info.get("max_steps")):
+                if hung(info, mtime, now()):
                     try:
                         kill(pid, 9)
                         stats["killed_hung"] += 1

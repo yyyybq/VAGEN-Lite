@@ -145,3 +145,12 @@ def test_memory_monitor_reads_the_cgroup_and_worker_peaks(tmp_path, monkeypatch)
     assert res["peak_fraction"] == pytest.approx(500 / 1920, abs=1e-4) and res["oom_kills"] == 1
     assert res["workers_seen"] == 1 and res["worker_peak_max_bytes"] > 0 and res["samples"] == 1
     assert (tmp_path / "memory.csv").read_text().count("\n") == 2  # header + one sample
+
+
+def test_hung_means_no_progress_for_ten_minutes_or_too_long_in_all():
+    now = 10_000.0
+    info = {"started": now - 700, "max_steps": 100}
+    assert closed_loop.hung(info, now - 700, now)  # no policy call for 700 s > 600 (SearingMeat 1044, 2026-10-22)
+    assert not closed_loop.hung(info, now - 30, now)  # a policy call 30 s ago: still working
+    assert closed_loop.hung({"started": now - 1000, "max_steps": 100}, now - 5, now)  # 1000 s > 600 + 3 x 100
+    assert not closed_loop.hung({"started": now - 100, "max_steps": 100}, now - 100, now)  # scene build, reset
