@@ -9,6 +9,13 @@ EXP/run/final_model/pytorch_model.pt (tagged steps_<max_train_steps>).  A checkp
 gets one evaluation job EXP/evals/<tag>/ (downstream/eval/run_eval_ckpt.sh, the fixed plan eval/eval_d6.json, --cards
 cards, --servers policy servers, the current number of simulator workers), on the pool with fewer waiting jobs.
 
+Rules of 2026-10-22 (the user's staged plan, and the main window's conditions for one-card jobs):
+  * one-card evaluation shards (--shards) are queued in priority order (stage 0 first: the stopped D5 runs'
+    checkpoints, 100k -> 50k -> 25k / 75k, start by start; then later checkpoints by step) and submitted only while
+    no --pause-file exists, no --yield-to job (main line interiorgs-v10-*, bq_tp_mmxbf16) waits for cards, at most
+    --max-live-shards of ours are alive, and only into free cards of machines already running another job;
+  * the same pause / yield rules hold for every other submission (8-card evaluations, the stage-2 runs).
+
 Rules of the user's decisions of 2026-10-21 on the step-2 report:
   * before every submission (evaluation or training) the free space under the folder quota is read
     (downstream/quota.py); below --min-free-tb, or unreadable, nothing is submitted and the board raises an alarm;
@@ -46,12 +53,21 @@ import sco_job  # noqa: E402
 RUNS_ROOT = Path("/mnt/umm/users/yinbaiqiao/downstream_runs")
 
 
-def checkpoints(exp: Path) -> list:
+STOPPED_RUN = "run_stopped_20261022"
+STAGE0_ORDER = {100000: 0, 50000: 1, 25000: 2, 75000: 2}  # the user's order for the stopped runs' checkpoints
+
+
+def start_rank(exp_name: str) -> int:
+    start = exp_name.split("-")[1] if exp_name.count("-") >= 3 else ""
+    return runs.STARTS.index(start) if start in runs.STARTS else len(runs.STARTS)
+
+
+def checkpoints(exp: Path, run: str = "run") -> list:
     """[(tag, path)] in step order."""
     out = []
-    for p in sorted((exp / "run/checkpoints").glob("steps_*_pytorch_model.pt")):
+    for p in sorted((exp / run / "checkpoints").glob("steps_*_pytorch_model.pt")):
         out.append((p.name.split("_pytorch")[0], p))
-    final = exp / "run/final_model/pytorch_model.pt"
+    final = exp / run / "final_model/pytorch_model.pt"
     if final.is_file():
         steps = json.loads((exp / "experiment.json").read_text())["steps"]
         out.append((f"steps_{steps}", final))
@@ -179,6 +195,7 @@ class Watcher:
         self.alerts, self.notes = [], []
         self.disk = None
         self._hold, self._jobs, self._views, self._rooms = None, None, {}, {}
+        self.pending = []  # (priority key, shard dir, checkpoint, i, k, job name) collected in a pass
 
     # ------------------------------------------------------------------------------------------- bookkeeping
     def save(self):
@@ -207,10 +224,9 @@ class Watcher:
         return int(self.state.get("workers", {}).get("chosen", self.a.workers))
 
     def submit_eval(self, run: Path, ckpt: Path, workers: str, name: str) -> str:
-        if self.held():
-            return "未提交（等密集奖励第一批上机器）"
-        if not self.disk_ok():
-            return "未提交（剩余空间不足或读不出）"
+        reason = self.blocked()
+        if reason:
+            return f"未提交（{reason}）"
         if self.a.dry:
             return f"would submit (workers {workers})"
         pool = self.jobs.pick_pool()
@@ -258,23 +274,63 @@ class Watcher:
             self._rooms[pool] = 0 if v is None else max(0, sum(sco_job.busy_room(v).values()) - waiting)
         return self._rooms[pool]
 
-    def submit_shard(self, d: Path, ckpt: Path, i: int, k: int, name: str) -> str:
-        if self.held():
-            return "未提交（等密集奖励第一批上机器）"
-        if not self.disk_ok():
-            return "未提交（剩余空间不足或读不出）"
-        pool = max(sco_job.POOLS, key=self.room)
-        if self.room(pool) <= 0:
-            return "未提交（两个池里都没有已有任务、还有空卡的机器）"
-        if self.a.dry:
-            return f"would submit ({pool})"
-        self.jobs.prepare(d, 1, pool, name[:60], ["bash", str(HERE / "run_eval_ckpt.sh"), str(ckpt), str(d / "out"), "1",
-                                                  str(self.a.shard_workers), f"{i}/{k}"])
-        self._rooms[pool] -= 1
-        return f"submitted {self.jobs.submit(d)} ({pool})"
+    def priority_waiting(self) -> list:
+        """Jobs of the user's earlier priorities (--yield-to prefixes, e.g. the main line's interiorgs-v10-*) still
+        waiting for cards anywhere in the workspace: while there are any, this line submits nothing (main window's
+        condition of 2026-10-22; the user's GPU order bq_tp_mmxbf16 > main line > downstream)."""
+        return [str(j.get("display_name")) for j in self.job_list()
+                if j.get("state") in sco_job.WAITING_STATES
+                and any(str(j.get("display_name") or "").startswith(p) for p in self.a.yield_to)]
 
-    def shard_entry(self, exp: Path, tag: str, path: Path, suffix: str) -> dict:
-        evaldir, k = exp / "evals" / f"{tag}{suffix}", self.a.shards
+    def blocked(self):
+        """Why nothing may be submitted in this pass, None if submitting is allowed."""
+        if self.a.pause_file and Path(self.a.pause_file).exists():
+            return f"暂停提交（{self.a.pause_file} 存在）"
+        if self.held():
+            return "等密集奖励第一批上机器"
+        waiting = self.priority_waiting()
+        if waiting:
+            return f"给排在前面的任务让路：{len(waiting)} 个在排队（{', '.join(sorted(set(waiting))[:3])}…）"
+        if not self.disk_ok():
+            return "剩余空间不足或读不出"
+        return None
+
+    def live_shards(self) -> int:
+        return sum(1 for j in self.job_list() if str(j.get("display_name") or "").startswith("downstream-ev")
+                   and (j.get("state") in sco_job.WAITING_STATES or j.get("state") == "RUNNING"))
+
+    def flush_shards(self) -> None:
+        """Submit the pending shards in priority order, as far as the rules allow: nothing while blocked(); at most
+        --max-live-shards of our one-card jobs alive at once; only into busy_room of the pools."""
+        if not self.pending:
+            return
+        reason = self.blocked()
+        if reason:
+            self.notes.append(f"{len(self.pending)} 个分片待提交，本轮不提交：{reason}")
+            return
+        live, sent, left = self.live_shards(), [], None
+        for n, (_, d, ckpt, i, k, name) in enumerate(sorted(self.pending, key=lambda x: x[0])):
+            if live >= self.a.max_live_shards:
+                left = f"同时最多 {self.a.max_live_shards} 个 1 卡任务，已到上限"
+            else:
+                pool = max(sco_job.POOLS, key=self.room)
+                if self.room(pool) <= 0:
+                    left = "两个池里都没有已有别的任务、还有空卡的机器"
+            if left:
+                self.notes.append(f"本轮提交 {len(sent)} 个分片；其余 {len(self.pending) - n} 个等下一轮：{left}")
+                return
+            if self.a.dry:
+                sent.append(f"{name} (would, {pool})")
+            else:
+                self.jobs.prepare(d, 1, pool, name[:60], ["bash", str(HERE / "run_eval_ckpt.sh"), str(ckpt),
+                                                          str(d / "out"), "1", str(self.a.shard_workers), f"{i}/{k}"])
+                sent.append(f"{self.jobs.submit(d)} {name} ({pool})")
+            self._rooms[pool] -= 1
+            live += 1
+        self.notes.append(f"本轮提交 {len(sent)} 个分片：{'；'.join(sent[:4])}{'…' if len(sent) > 4 else ''}")
+
+    def shard_entry(self, exp: Path, tag: str, path: Path, suffix: str, root: Path = None, key=None) -> dict:
+        evaldir, k = (root or exp / "evals") / f"{tag}{suffix}", self.a.shards
         counts = {"done": 0, "running": 0, "waiting": 0, "failed": 0, "to submit": 0}
         notes = []
         bounced = self.state.setdefault("bounced", {})
@@ -301,13 +357,14 @@ class Watcher:
             if not settled(path, self.a.settle, self.now):
                 continue
             counts["to submit"] += 1
-            name = f"ev-{exp.name.lower()}-{tag.replace('_', '')}{suffix.replace('_', '-')}-s{i}of{k}"
-            notes.append(self.submit_shard(d, path, i, k, name))
+            stopped = "-stopped" if root is not None and root.name != "evals" else ""
+            name = f"ev-{exp.name.lower()}{stopped}-{tag.replace('_', '')}{suffix.replace('_', '-')}-s{i}of{k}"
+            self.pending.append(((key or (1, 0, 0, 0)) + (i,), d, path, i, k, name))
         m = merged(evaldir)
         entry = {"tag": f"{tag}{suffix}", "finished": m is not None, "score": score(m[0]) if m else None,
                  "state": f"{k} 个 1 卡分片：完成 {counts['done']}、运行 {counts['running']}、排队 {counts['waiting']}"
                           + (f"、失败 {counts['failed']}" if counts["failed"] else "")
-                          + (f"；本轮：{'；'.join(sorted(set(notes)))}" if notes else "")}
+                          + (f"、待提交 {counts['to submit']}" if counts["to submit"] else "")}
         if counts["failed"]:
             self.alerts.append(f"{exp.name} {tag}{suffix} 有 {counts['failed']} 个分片失败了 3 次，不再重提，请看 shards/*/job_failed_*")
         return entry
@@ -319,7 +376,7 @@ class Watcher:
         verified = self.state.setdefault("verified", {})
         bounced = self.state.setdefault("bounced", {})
         out = []
-        for sub in sorted(self.experiments.glob("DS-*/evals/*/shards/*/job/submission.json")):
+        for sub in sorted(self.experiments.glob("DS-*/evals*/*/shards/*/job/submission.json")):
             d, jid = sub.parent.parent, json.loads(sub.read_text())["job_id"]
             if jid in verified or str(d) in self.state["finished"]:
                 continue
@@ -341,7 +398,8 @@ class Watcher:
 
     def eval_entry(self, exp: Path, tag: str, path: Path, suffix: str, workers: str) -> dict:
         if self.a.shards:
-            return self.shard_entry(exp, tag, path, suffix)
+            step = int(tag.split("_")[1])
+            return self.shard_entry(exp, tag, path, suffix, key=(1, step, start_rank(exp.name), 1 if suffix else 0))
         run = exp / "evals" / f"{tag}{suffix}"
         entry = {"tag": f"{tag}{suffix}", "state": "waiting for the file to settle"}
         if (run / "job/submission.json").exists():
@@ -411,10 +469,9 @@ class Watcher:
                                   "note": f"{exp} {tag} 在 34 个任务上成功 0 个回合：按规定停下，不提交第三步其余任务"}
             self.alerts.append(self.state["gate"]["note"])
             return self.state["gate"]
-        if self.held():
-            return {"decided": False, "note": f"{exp} {tag} 成功 {successes} 个回合 > 0，等密集奖励第一批上机器后提交"}
-        if not self.disk_ok():
-            return {"decided": False, "note": f"{exp} {tag} 成功 {successes} 个回合，但剩余空间不足或读不出，暂不提交"}
+        reason = self.blocked()
+        if reason:
+            return {"decided": False, "note": f"{exp} {tag} 成功 {successes} 个回合 > 0，暂不提交：{reason}"}
         if self.a.dry:
             return {"decided": False, "note": f"would submit ({successes} successes)"}
         done, errors = [], []
@@ -432,18 +489,35 @@ class Watcher:
             self.alerts.append(f"第三步其余任务有 {len(errors)} 个没建成或没提交成功，下一轮重试：{errors[:2]}")
         return self.state["gate"]
 
+    def stage0_row(self, exp: Path) -> dict:
+        """Stage 0 (user, 2026-10-22): the checkpoints kept from the stopped D5 run (run_stopped_<date>/checkpoints),
+        evaluated into evals_run_stopped_<date>/ in the order 100k -> 50k -> 25k and 75k, start by start."""
+        stopped = exp / STOPPED_RUN
+        row = {"exp": f"{exp.name}（10-22 停下的那次）", "train": "已停", "step": None, "loss": None, "evals": []}
+        for tag, path in checkpoints(exp, run=STOPPED_RUN):
+            step = int(tag.split("_")[1])
+            row["evals"].append(self.shard_entry(exp, tag, path, "", root=exp / f"evals_{STOPPED_RUN}",
+                                                 key=(0, STAGE0_ORDER.get(step, 9), start_rank(exp.name), 0)))
+        return row
+
     def tick(self):
-        exp_ids = self.a.exps or [runs.exp_id(s, r, k) for s, r, k in runs.grid(runs.STARTS, runs.RATIOS, (1, 2, 3))]
+        exp_ids = self.a.exps or [runs.exp_id(s, r, k) for s, r, k in runs.grid(runs.STARTS, runs.RATIOS, (1,))]
         rows, missing = [], []
         self.guard()  # first: shards that started on an idle machine since the last look
         self.held()
         self.disk_ok()  # read once per pass, so the board always shows the free space (and its alarm)
+        if self.a.stage0 and self.a.shards:
+            for s in runs.STARTS:
+                exp = self.experiments / runs.exp_id(s, "100", 1)
+                if (exp / STOPPED_RUN / "checkpoints").is_dir():
+                    rows.append(self.stage0_row(exp))
         for exp_id in exp_ids:
             exp = self.experiments / exp_id
             if (exp / "experiment.json").exists():
                 rows.append(self.experiment_row(exp))
             else:
                 missing.append(exp_id)
+        self.flush_shards()
         rep = self.repeat_results()
         gate = self.gate()
         self.report()
@@ -536,8 +610,8 @@ def parser():
     ap.add_argument("--repeat-workers", default="48,96")
     ap.add_argument("--max-slowdown", type=float, default=1.5)
     ap.add_argument("--gate", default="DS-B-100-s1:steps_25000")
-    ap.add_argument("--gate-ratios", nargs="+", default=["030", "010"])
-    ap.add_argument("--gate-seeds", nargs="+", type=int, default=[1, 2, 3])
+    ap.add_argument("--gate-ratios", nargs="+", default=["010"], help="stage 2 (user, 10-22): 010 first; 030 later")
+    ap.add_argument("--gate-seeds", nargs="+", type=int, default=[1], help="seeds 2 and 3 are not run (user, 10-22)")
     ap.add_argument("--min-free-tb", type=float, default=1.0)
     ap.add_argument("--settle", type=float, default=600, help="seconds a checkpoint file must be unchanged")
     ap.add_argument("--state", type=Path, default=RUNS_ROOT / "WATCH_STATE.json")
@@ -555,6 +629,14 @@ def parser():
     ap.add_argument("--guard-every", type=float, default=120, help="seconds between placement checks")
     ap.add_argument("--hold-until-running", nargs="*", default=[],
                     help="job ids that must all have started before anything is submitted")
+    ap.add_argument("--stage0", action="store_true",
+                    help="also evaluate the checkpoints kept from the stopped D5 runs (run_stopped_20261022)")
+    ap.add_argument("--max-live-shards", type=int, default=8,
+                    help="at most this many of our one-card evaluation jobs alive at once (main window, 10-22)")
+    ap.add_argument("--yield-to", nargs="*", default=["interiorgs-v10-", "bq_tp_mmxbf16"],
+                    help="submit nothing while any workspace job whose name starts so is waiting for cards")
+    ap.add_argument("--pause-file", default=str(RUNS_ROOT / "PAUSE_SUBMISSIONS"),
+                    help="while this file exists nothing is submitted (e.g. on the main window's request)")
     return ap
 
 

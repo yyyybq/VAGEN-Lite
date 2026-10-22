@@ -59,8 +59,10 @@ class FakeJobs:
     def job_state(self, job_id):
         return self.job_states.get(job_id)
 
+    listing = []
+
     def list_jobs(self):
-        return []
+        return list(self.listing)
 
     def pool_view(self, pool, jobs=None):
         return self.views.get(pool, {"hosts": {}})
@@ -153,15 +155,62 @@ def test_busy_room_and_alone_on_machine():
 def test_shards_go_only_into_room_on_busy_machines(tmp_path):
     exp = fake_exp(tmp_path)
     jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("interiorgs-v10-rl-x", 5)]))})
-    rows, *_ = watcher(tmp_path, jobs=jobs, shards=8).tick()
+    w = watcher(tmp_path, jobs=jobs, shards=8)
+    w.tick()
     shard_jobs = [p for p in jobs.prepared if p[0].startswith("s")]
     assert len(shard_jobs) == 3  # the 3 free cards of the busy machine; zoetrope has no busy machine with room
     name, gpus, job_name, payload, pool = shard_jobs[0]
-    assert gpus == 1 and pool == "h800" and job_name.startswith("ev-ds-b-100-s1-steps25000")
+    assert gpus == 1 and pool == "h800" and job_name == "ev-ds-b-100-s1-steps25000-s1of8"
     assert payload[-3:] == ["1", "12", "1/8"] and payload[2].endswith("steps_25000_pytorch_model.pt")
-    entry = rows[0]["evals"][0]
-    assert "两个池里都没有已有任务、还有空卡的机器" in entry["state"]
+    assert [p[3][3].split("evals/")[1] for p in shard_jobs] == [  # the first evaluation before its repeat
+        "steps_25000/shards/s1of8/out", "steps_25000/shards/s2of8/out", "steps_25000/shards/s3of8/out"]
+    assert any("两个池里都没有已有别的任务、还有空卡的机器" in n for n in w.notes)
     assert (exp / "evals/steps_25000/shards/s1of8/job/submission.json").exists()
+
+
+def test_yield_pause_and_live_cap_block_shards(tmp_path):
+    fake_exp(tmp_path)
+    room = {"h800": busy_view(("10.0.0.1", [("other", 1)]))}
+    jobs = FakeJobs(views=room)
+    jobs.listing = [{"display_name": "interiorgs-v10-eval-x", "state": "QUEUEING"}]
+    w = watcher(tmp_path, jobs=jobs, shards=8)
+    w.tick()
+    assert not jobs.prepared and any("给排在前面的任务让路" in n for n in w.notes)
+    jobs.listing = [{"display_name": f"downstream-ev-x-s{i}of8", "state": "RUNNING"} for i in range(8)]
+    w = watcher(tmp_path, jobs=jobs, shards=8)
+    w.tick()
+    assert not jobs.prepared and any("已到上限" in n for n in w.notes)
+    jobs.listing = []
+    (tmp_path / "PAUSE").write_text("main window asked")
+    w = watcher(tmp_path, "--pause-file", str(tmp_path / "PAUSE"), jobs=jobs, shards=8)
+    w.tick()
+    assert not jobs.prepared and any("暂停提交" in n for n in w.notes)
+    (tmp_path / "PAUSE").unlink()
+    watcher(tmp_path, jobs=jobs, shards=8).tick()
+    assert len(jobs.prepared) == 7
+
+
+def test_stage0_goes_100k_then_50k_then_25k_and_75k_start_by_start(tmp_path):
+    for start in ("S", "B"):
+        exp = tmp_path / f"experiments/DS-{start}-100-s1"
+        (exp / "run_stopped_20261022/checkpoints").mkdir(parents=True)
+        (exp / "experiment.json").write_text(json.dumps({"steps": 200000}))
+        for s in (25000, 50000, 75000, 100000):
+            p = exp / f"run_stopped_20261022/checkpoints/steps_{s}_pytorch_model.pt"
+            p.write_bytes(b"x")
+            os.utime(p, (OLD, OLD))
+    jobs = FakeJobs(views={"h800": busy_view(*[(f"10.0.0.{i}", [("other", 1)]) for i in range(6)])})
+    w = watcher(tmp_path, "--stage0", "--max-live-shards", "40", jobs=jobs, shards=8)
+    rows, *_ = w.tick()
+    order = [p[3][3].split("experiments/")[1].replace("/evals_run_stopped_20261022", "").replace("/out", "")
+             for p in jobs.prepared]
+    assert len(order) == 40  # 6 busy machines x 7 free cards = 42, capped at 40
+    assert order[0] == "DS-B-100-s1/steps_100000/shards/s1of8" and order[7] == "DS-B-100-s1/steps_100000/shards/s8of8"
+    assert order[8] == "DS-S-100-s1/steps_100000/shards/s1of8"
+    assert order[16].startswith("DS-B-100-s1/steps_50000") and order[24].startswith("DS-S-100-s1/steps_50000")
+    assert {o.split("/")[1] for o in order[32:]} == {"steps_25000"}  # 25k and 75k share a rank; 25k comes first
+    assert jobs.prepared[0][2] == "ev-ds-b-100-s1-stopped-steps100000-s1of8"
+    assert rows[0]["exp"].startswith("DS-B-100-s1（10-22 停下的那次）")
 
 
 def test_hold_until_the_priority_jobs_run(tmp_path):
@@ -169,8 +218,8 @@ def test_hold_until_the_priority_jobs_run(tmp_path):
     room = {"h800": busy_view(("10.0.0.1", [("other", 1)]))}
     jobs = FakeJobs(views=room, job_states={"pt-dense1": "RUNNING", "pt-dense2": "STARTING"})
     w = watcher(tmp_path, "--hold-until-running", "pt-dense1", "pt-dense2", jobs=jobs, shards=8)
-    rows, *_ = w.tick()
-    assert not jobs.prepared and "等密集奖励第一批上机器" in rows[0]["evals"][0]["state"]
+    w.tick()
+    assert not jobs.prepared and any("等密集奖励第一批上机器" in n for n in w.notes)
     assert "hold_released" not in w.state
     jobs.job_states["pt-dense2"] = "RUNNING"
     w2 = watcher(tmp_path, "--hold-until-running", "pt-dense1", "pt-dense2", jobs=jobs, shards=8)
@@ -210,7 +259,7 @@ def test_merged_shards_feed_the_gate(tmp_path):
     m = watch.merged(exp / "evals/steps_25000")
     assert m[0]["per_task"]["OpenDrawer"] == {"n": 4, "successes": 2} and m[0]["shards"] == 2 and len(m[1]) == 4
     gate = watcher(tmp_path, jobs=jobs, run_tools=run_tools, shards=2).gate()
-    assert gate["decided"] and gate["successes"] == 2 and len(run_tools.submitted) == 24
+    assert gate["decided"] and gate["successes"] == 2 and len(run_tools.submitted) == 4
     (exp / "evals/steps_25000/shards/s2of2/out/episodes/summary.json").unlink()
     assert watch.merged(exp / "evals/steps_25000") is None
 
@@ -251,15 +300,15 @@ def gate_setup(tmp_path, successes):
     return FakeJobs({"steps_25000": "SUCCEEDED"}), FakeRuns()
 
 
-def test_gate_submits_the_other_24_runs_after_a_nonzero_first_checkpoint(tmp_path):
+def test_gate_submits_the_four_10_percent_seed1_runs_after_a_nonzero_first_checkpoint(tmp_path):
     jobs, run_tools = gate_setup(tmp_path, successes=3)
     w = watcher(tmp_path, jobs=jobs, run_tools=run_tools)
     gate = w.gate()
-    assert gate["decided"] and gate["successes"] == 3 and len(run_tools.submitted) == 24
-    assert {r for _, r, _ in run_tools.submitted} == {"030", "010"} and {s for *_, s in run_tools.submitted} == {1, 2, 3}
+    assert gate["decided"] and gate["successes"] == 3 and len(run_tools.submitted) == 4
+    assert {r for _, r, _ in run_tools.submitted} == {"010"} and {s for *_, s in run_tools.submitted} == {1}
     w.save()
     again = watcher(tmp_path, jobs=jobs, run_tools=run_tools).gate()  # decided once, kept in the state file
-    assert again["decided"] and len(run_tools.submitted) == 24
+    assert again["decided"] and len(run_tools.submitted) == 4
 
 
 def test_gate_stops_on_zero_successes(tmp_path):
