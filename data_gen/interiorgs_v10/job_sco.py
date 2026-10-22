@@ -23,13 +23,18 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import re
 import shlex
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-WORKTREE = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite"  # the cluster checkout, the only code directory since round 6
+DEFAULT_WORKTREE = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite"  # the cluster checkout, the code directory since round 6
+# Round 12 freeze (the user's section 4 of 2026-10-22): VAGEN_LITE_WORKTREE names another code directory (a copy of the
+# checkout the code reorganization does not touch); its jobs start from there and the job script gets the same
+# variable.  Unset: the checkout above, and every launch script as before.
+WORKTREE = os.environ.get("VAGEN_LITE_WORKTREE") or DEFAULT_WORKTREE
 SCRIPT = "examples/train/active_spatial/sco_interiorgs_v10_train.sh"
 SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
 IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"
@@ -61,7 +66,8 @@ def prepare(run: Path, gpus: int, mode_args: List[str], job_dir: str = "job", po
     job.mkdir(parents=True, exist_ok=True)
     launch = job / "launch.sh"
     args = " ".join(shlex.quote(a) for a in mode_args[1:])
-    launch.write_text(f"#!/usr/bin/env bash\nexec bash {WORKTREE}/{SCRIPT} {shlex.quote(mode_args[0])} {run} {args}\n")
+    env = "" if WORKTREE == DEFAULT_WORKTREE else f"env VAGEN_LITE_WORKTREE={shlex.quote(WORKTREE)} "
+    launch.write_text(f"#!/usr/bin/env bash\nexec {env}bash {WORKTREE}/{SCRIPT} {shlex.quote(mode_args[0])} {run} {args}\n")
     launch.chmod(0o755)
     (job / "prepared.json").write_text(json.dumps({"utc": now(), "gpus": gpus, "spec": SPECS[gpus], "pool": pool,
                                                    "mode_args": mode_args}, indent=1))

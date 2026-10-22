@@ -90,11 +90,33 @@ class JobScoTest(unittest.TestCase):
             self.assertEqual(J.pick_pool(("h800", "zoetrope")), "h800")  # a tie: the first of the given order
 
     def test_jobs_run_from_the_cluster_checkout(self):
-        """Round 6: the cluster checkout is the only code directory (no more VAGEN-Lite-r4)."""
+        """Round 6: the cluster checkout is the code directory (no more VAGEN-Lite-r4).  Round 12 freeze: unless
+        VAGEN_LITE_WORKTREE names another copy (the second dense batch, run from a copy the code reorganization does
+        not touch): its launch scripts start the job script there and pass the variable on; unset, the launch script
+        is as before."""
+        import importlib
+        import os
+        from unittest import mock
+
         self.assertEqual(J.WORKTREE, "/mnt/umm/users/yinbaiqiao/VAGEN-Lite")
         script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
-        self.assertIn("\nWORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite\n", script)
+        self.assertIn("\nWORKTREE=${VAGEN_LITE_WORKTREE:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite}\n", script)
         self.assertNotIn("VAGEN-Lite-r4", script)
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "run"
+            self.assertEqual(J.prepare(run, 1, ["eval", "/e"]).read_text(),
+                             f"#!/usr/bin/env bash\nexec bash {J.DEFAULT_WORKTREE}/{J.SCRIPT} eval {run} /e\n")
+            try:
+                with mock.patch.dict(os.environ, {"VAGEN_LITE_WORKTREE": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-r12dense"}):
+                    copy = importlib.reload(J)
+                    self.assertEqual(copy.WORKTREE, "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-r12dense")
+                    self.assertEqual(copy.prepare(run, 1, ["eval", "/e"]).read_text(),
+                                     "#!/usr/bin/env bash\nexec env VAGEN_LITE_WORKTREE=/mnt/umm/users/yinbaiqiao/"
+                                     f"VAGEN-Lite-r12dense bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-r12dense/{J.SCRIPT} "
+                                     f"eval {run} /e\n")
+            finally:
+                importlib.reload(J)
+        self.assertEqual(J.WORKTREE, J.DEFAULT_WORKTREE)
 
     def test_gsplat_build_outside_the_checkout(self):
         """Round 11: the validated gsplat build every render service copies lived in an experiment folder of the
