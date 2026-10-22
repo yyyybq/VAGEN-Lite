@@ -119,3 +119,29 @@ def test_a_real_pool_reruns_the_episode_of_a_killed_worker(tmp_path):
         stats = closed_loop.run_all(pool, eps, rows.append, inflight, poll=0.2, run=_episode)
     assert sorted(r["task"] for r in rows) == ["die", "ok", "ok", "ok"] and all(r["status"] == "complete" for r in rows)
     assert stats["retried"] == 1 and stats["given_up"] == 0
+
+
+def test_memory_monitor_reads_the_cgroup_and_worker_peaks(tmp_path, monkeypatch):
+    import os
+
+    import pytest
+
+    if not os.path.exists("/proc/self/status"):
+        pytest.skip("needs /proc")
+    cg = tmp_path / "cg"
+    cg.mkdir()
+    (cg / "memory.max").write_text(str(1920 * 2**30))
+    (cg / "memory.current").write_text(str(400 * 2**30))
+    (cg / "memory.peak").write_text(str(500 * 2**30))
+    (cg / "memory.events").write_text("low 0\nhigh 0\nmax 0\noom 1\noom_kill 1\n")
+    files = {k: str(cg / f"memory.{k if k != 'limit' else 'max'}") for k in ("limit", "current", "peak", "events")}
+    monkeypatch.setattr(closed_loop.MemoryMonitor, "V2", files)
+    mon = closed_loop.MemoryMonitor(tmp_path / "memory.csv", pids=lambda: [os.getpid()])
+    rows = []
+    closed_loop.run_all(FakePool(tmp_path, {("A", 1): ["ok"]}), [{"task": "A", "seed": 1}], rows.append, tmp_path,
+                        poll=0, sleep=lambda s: None, run=lambda e: None, monitor=mon)
+    res = mon.result()
+    assert res["cgroup_limit_bytes"] == 1920 * 2**30 and res["peak_bytes"] == 500 * 2**30
+    assert res["peak_fraction"] == pytest.approx(500 / 1920, abs=1e-4) and res["oom_kills"] == 1
+    assert res["workers_seen"] == 1 and res["worker_peak_max_bytes"] > 0 and res["samples"] == 1
+    assert (tmp_path / "memory.csv").read_text().count("\n") == 2  # header + one sample

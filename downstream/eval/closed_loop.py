@@ -335,8 +335,92 @@ def hang_limit(max_steps) -> float:
     return 600.0 + 3.0 * float(max_steps or 0)
 
 
+def _read_int(path: str):
+    try:
+        with open(path) as f:
+            text = f.read().strip()
+        return None if text in ("", "max") else int(text.split()[0])
+    except (OSError, ValueError):
+        return None
+
+
+def _status_kb(pid: int, field: str):
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith(field + ":"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+class MemoryMonitor:
+    """Memory of the evaluation job (the user's decision 3 of 2026-10-22): the container's cgroup limit, current use
+    and peak (all its processes: policy servers, simulator workers, this process), its out-of-memory kills, and each
+    simulator worker's peak resident memory (VmHWM).  sample() appends a row to OUT/memory.csv; result() goes into
+    summary.json["memory"]."""
+
+    V2 = {"limit": "/sys/fs/cgroup/memory.max", "current": "/sys/fs/cgroup/memory.current",
+          "peak": "/sys/fs/cgroup/memory.peak", "events": "/sys/fs/cgroup/memory.events"}
+    V1 = {"limit": "/sys/fs/cgroup/memory/memory.limit_in_bytes", "current": "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+          "peak": "/sys/fs/cgroup/memory/memory.max_usage_in_bytes", "events": "/sys/fs/cgroup/memory/memory.oom_control"}
+
+    def __init__(self, csv_path: Path, pids=lambda: []):
+        self.csv, self.pids = Path(csv_path), pids
+        self.files = self.V2 if os.path.exists(self.V2["current"]) else self.V1
+        self.hwm, self.max_current, self.samples = {}, 0, 0
+        if not self.csv.exists():
+            self.csv.write_text("utc,cgroup_current,cgroup_peak,workers,workers_rss_sum,worker_hwm_max\n")
+
+    def oom_kills(self):
+        try:
+            with open(self.files["events"]) as f:
+                for line in f:
+                    if line.startswith("oom_kill "):
+                        return int(line.split()[1])
+        except (OSError, ValueError):
+            pass
+        return None
+
+    def sample(self) -> None:
+        current, peak = _read_int(self.files["current"]), _read_int(self.files["peak"])
+        self.max_current = max(self.max_current, current or 0)
+        rss = 0
+        pids = list(self.pids())
+        for pid in pids:
+            h, r = _status_kb(pid, "VmHWM"), _status_kb(pid, "VmRSS")
+            if h is not None:
+                self.hwm[pid] = max(self.hwm.get(pid, 0), h)
+            rss += r or 0
+        self.samples += 1
+        with open(self.csv, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())},{current or ''},{peak or ''},{len(pids)},"
+                    f"{rss},{max(self.hwm.values(), default='')}\n")
+
+    def result(self) -> dict:
+        limit = _read_int(self.files["limit"])
+        total = None
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        total = int(line.split()[1]) * 1024
+        except (OSError, ValueError):
+            pass
+        capacity = limit if limit and (total is None or limit < total) else total
+        peak = _read_int(self.files["peak"]) or self.max_current or None
+        hwm = list(self.hwm.values())
+        return {"capacity_bytes": capacity, "cgroup_limit_bytes": limit, "meminfo_total_bytes": total,
+                "peak_bytes": peak, "peak_fraction": round(peak / capacity, 4) if peak and capacity else None,
+                "peak_source": "cgroup memory.peak" if _read_int(self.files["peak"]) else "largest sampled current",
+                "worker_peak_max_bytes": max(hwm, default=None),
+                "worker_peak_mean_bytes": round(sum(hwm) / len(hwm)) if hwm else None, "workers_seen": len(hwm),
+                "oom_kills": self.oom_kills(), "samples": self.samples}
+
+
 def run_all(pool, episodes, write, inflight: Path, retries: int = 2, poll: float = 30.0, alive=pid_alive,
-            now=time.time, kill=os.kill, sleep=time.sleep, run=None) -> dict:
+            now=time.time, kill=os.kill, sleep=time.sleep, run=None, monitor=None) -> dict:
     """Run every episode on `pool` (apply_async), passing each finished row to write().  A worker process that dies
     (killed for memory, a simulator crash) loses its episode: multiprocessing replaces the worker but never reports
     the task.  Every `poll` seconds the INFLIGHT markers are read; an episode whose worker is dead is run again (at
@@ -389,6 +473,11 @@ def run_all(pool, episodes, write, inflight: Path, retries: int = 2, poll: float
                 stats["given_up"] += 1
                 write(dict(e, status="error", error=f"its worker process died {tries[k]} times while running it",
                            wall_seconds=0.0))
+        if monitor is not None:
+            try:
+                monitor.sample()
+            except Exception:  # measuring memory must never stop an evaluation
+                pass
         if pending:
             sleep(poll)
     return stats
@@ -504,15 +593,22 @@ def main() -> int:
     with ctx.Pool(args.workers, initializer=_init_worker,
                   initargs=(args.ckpt, args.servers.split(","), args.starvla_root, args.stable_regions,
                             str(inflight))) as pool:
+        monitor = MemoryMonitor(args.out / "memory.csv",
+                                pids=lambda: [p.pid for p in getattr(pool, "_pool", []) if p.pid])
         with open(args.out / "episodes.jsonl", "a") as f:
             def write(row):
                 rows.append(row)
                 f.write(json.dumps(row) + "\n")
                 f.flush()
-            pool_stats = run_all(pool, todo, write, inflight)
+            pool_stats = run_all(pool, todo, write, inflight, monitor=monitor)
+        try:
+            monitor.sample()
+            memory = monitor.result()
+        except Exception as exc:
+            memory = {"error": f"{type(exc).__name__}: {exc}"[:300]}
     summary = dict(summarize(rows, args.workers, time.monotonic() - t0), stable_counter_regions=args.stable_regions,
                    eval_plan=eval_plan["name"] if eval_plan else None, shard=args.shard, resumed_complete=len(resumed),
-                   pool=pool_stats)
+                   pool=pool_stats, memory=memory)
     (args.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps({k: summary[k] for k in ("episodes", "complete", "successes", "wall_seconds",
                                               "episode_wall_mean_seconds", "episodes_per_hour")}))
