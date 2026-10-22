@@ -171,6 +171,9 @@ class Subtask:
     max_steps: Optional[int] = None  # executor steps before the loop forces a check
     source: str = ""
     evidence: str = ""
+    # what the checker should look for (MobiAgent-style planner contract, docs/PAPERS.md)
+    success_check: str = ""  # visible condition that means the subtask is done
+    failure_cues: tuple[str, ...] = ()  # visible signs that it has failed
 
 
 class JudgmentStatus(str, enum.Enum):

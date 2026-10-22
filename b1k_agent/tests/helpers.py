@@ -26,7 +26,8 @@ FIX = os.path.join(ROOT, "tests", "fixtures")
 TASK_PROMPT = "Turn on the radio receiver that's on the table in the living room."
 
 PLAN_REPLY = {"task_complete": False, "skill": "__full_task__", "args": [], "target_subgoals": ["g0"],
-              "max_steps": 300, "evidence": "radio visible on the table"}
+              "max_steps": 300, "success_check": "radio display lit", "failure_cues": ["radio on the floor"],
+              "evidence": "radio visible on the table"}
 CHECK_REPLIES = [
     {"status": "in_progress", "confidence": 0.7, "evidence": "arm moving toward radio", "failure_type": "none",
      "subgoals": [{"id": "g0", "estimate": "unsatisfied"}], "holding_left": "", "holding_right": ""},

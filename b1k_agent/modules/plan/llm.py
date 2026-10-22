@@ -40,9 +40,12 @@ def _schema(skill_names: list[str]) -> dict:
             },
             "target_subgoals": {"type": "array", "items": {"type": "string"}},
             "max_steps": {"type": "integer"},
+            "success_check": {"type": "string"},
+            "failure_cues": {"type": "array", "items": {"type": "string"}},
             "evidence": {"type": "string"},
         },
-        "required": ["task_complete", "skill", "args", "target_subgoals", "max_steps", "evidence"],
+        "required": ["task_complete", "skill", "args", "target_subgoals", "max_steps", "success_check",
+                     "failure_cues", "evidence"],
         "additionalProperties": False,
     }
 
@@ -141,4 +144,6 @@ class LLMPlanner:
         max_steps = max(self.min_max_steps, min(max_steps, self.default_max_steps * 4))
         return Subtask(subtask_id="", skill=skill.name, instruction=instruction, args=args,
                        target_subgoals=targets, max_steps=max_steps if skill.name != FULL_TASK_SKILL else None,
-                       source=f"plan.llm@{resp.provider}", evidence=str(r.get("evidence", ""))[:500])
+                       source=f"plan.llm@{resp.provider}", evidence=str(r.get("evidence", ""))[:500],
+                       success_check=str(r.get("success_check", ""))[:300],
+                       failure_cues=tuple(str(c)[:160] for c in (r.get("failure_cues") or [])[:6]))

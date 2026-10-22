@@ -81,6 +81,8 @@ class LLMChecker:
             subtask_text = f"the whole task: {sub.instruction}"
         else:
             subtask_text = f"{sub.skill} {dict(sub.args)}: '{sub.instruction}' (targets {', '.join(sub.target_subgoals) or 'n/a'})"
+        if sub is not None and (sub.success_check or sub.failure_cues):
+            subtask_text += f"\n  done when: {sub.success_check or 'n/a'}\n  failure cues: {'; '.join(sub.failure_cues) or 'n/a'}"
         user = render(
             self.prompt["USER"],
             task_prompt=self.ctx.task_instruction,

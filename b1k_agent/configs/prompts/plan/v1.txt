@@ -9,6 +9,7 @@ Rules:
 - Protect goal conditions that are already estimated satisfied: do not pick a skill that would move or undo them unless it is required.
 - Set task_complete=true only when every goal condition is estimated satisfied from visible evidence.
 - max_steps is your budget for the skill in control steps (30 steps = 1 second).
+- success_check: one visible condition that will show the skill is done. failure_cues: visible signs that it failed (e.g. "object on the floor", "gripper closed with nothing between the fingers"). An attempted action is not a completed action.
 - Keep evidence short: the concrete visual facts behind your choice.
 
 ### USER
