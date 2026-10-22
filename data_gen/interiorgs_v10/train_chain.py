@@ -500,6 +500,22 @@ def pick_best(scores: Dict[str, Optional[float]], order: Sequence[str]) -> Optio
     return max(ranked, key=lambda n: (scores[n], -order.index(n)))
 
 
+def eval_options_for(options: Sequence[str], format_example: Optional[str]) -> List[str]:
+    """The evaluation options for a model that trained with ``format_example`` (round 12 freeze, the user's 3.1.1):
+    --format-example is added unless it is the template's placeholder text; a plan option naming another one is
+    refused (a model is evaluated with the format text it trained with)."""
+    opts = list(options)
+    if "--format-example" in opts:
+        given = opts[opts.index("--format-example") + 1]
+        if format_example and given != format_example:
+            raise ChainError(f"the evaluation options give --format-example {given}, the model trained with "
+                             f"{format_example}")
+        return opts
+    if format_example and format_example != "placeholder":
+        opts += ["--format-example", format_example]
+    return opts
+
+
 # ---------------------------------------------------------------------------
 # The chain
 # ---------------------------------------------------------------------------
@@ -882,6 +898,22 @@ class Chain:
         wanted = self.plan.get("sft_eval_epochs")
         return [(e, p) for e, p in ckpts if not wanted or e in {int(x) for x in wanted}]
 
+    def run_format_example(self, run: Dict[str, Any]) -> Optional[str]:
+        """The format example a run's RL config chose (rl_config_report.json; round 12 freeze), None before it."""
+        report = run["rl_dir"] / "rl_config_report.json"
+        return json.loads(report.read_text()).get("format_example") if report.is_file() else None
+
+    def sft_format_example(self) -> Optional[str]:
+        """The format example the chain's SFT conversations show (training_prep.sft_format_examples), None when they
+        show neither or there are none."""
+        from .training_prep import sft_format_examples
+
+        paths = [self.sft_dir / t for t in self.sft_groups().values() if (self.sft_dir / t).is_file()]
+        found = sft_format_examples(paths) if paths else []
+        if len(found) > 1:
+            raise ChainError(f"the SFT groups show different format examples: {found}")
+        return found[0] if found else None
+
     def sft_eval(self) -> None:
         sets = self.eval_sets()
         if not sets or not self.plan.get("sft_groups"):
@@ -889,7 +921,7 @@ class Chain:
             return
         if self.plan.get("sft_eval_sets"):  # round 12 batch: e.g. the validation set only
             sets = {k: v for k, v in sets.items() if k in set(self.plan["sft_eval_sets"])}
-        options = list((self.plan.get("eval") or {}).get("options") or [])
+        options = eval_options_for((self.plan.get("eval") or {}).get("options") or [], self.sft_format_example())
         jobs = {}
         for group in self.sft_groups():
             ckpts = self.sft_epochs(group)
@@ -936,7 +968,8 @@ class Chain:
                     "--val-limit", str(self.plan.get("val_limit", 64)), "--out", str(run["rl_dir"])]
             if self.plan.get("ppo_template"):  # round 12: optional with a standard configuration
                 args += ["--ppo-template", str(self.plan["ppo_template"])]
-            for key, flag in (("standard", "--standard"), ("seed", "--seed"), ("history_mode", "--history-mode"), ("critic_warmup", "--critic-warmup"),
+            for key, flag in (("standard", "--standard"), ("seed", "--seed"), ("history_mode", "--history-mode"),
+                              ("format_example", "--format-example"), ("critic_warmup", "--critic-warmup"),
                               ("test_freq", "--test-freq"), ("val_tasks", "--val-tasks"),
                               ("train_batch_size", "--train-batch-size"),
                               ("ppo_mini_batch_size", "--ppo-mini-batch-size"), ("save_freq", "--save-freq")):
@@ -1498,10 +1531,11 @@ class Chain:
             options = list((self.plan.get("eval") or {}).get("options") or [])
             jobs = {}
             for name, run in runs.items():
+                run_options = eval_options_for(options, self.run_format_example(run))
                 for s in range(every, end + 1, every):
                     hf = run["run_dir"] / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface"
                     if hf.is_dir():
-                        jobs[f"{select}__{name}_{s:03d}"] = (vdir, f"{name}_{s:03d}", str(hf), None, options)
+                        jobs[f"{select}__{name}_{s:03d}"] = (vdir, f"{name}_{s:03d}", str(hf), None, run_options)
             self.eval_jobs("rl_extend", jobs)  # the same results the evaluate step would write
             decisions = {}
             for name, run in runs.items():
@@ -1538,12 +1572,13 @@ class Chain:
         rl_names: List[str] = []
         for run_name, run in ({} if self.plan.get("eval_only") or self.plan.get("sft_only") else self.rl_runs()).items():
             ckpts = run["run_dir"] / "checkpoints"
+            run_options = eval_options_for(options, self.run_format_example(run))
             for s in range(every, self.final_update(run_name or None) + 1, every):
                 name = f"{run_name}_{s:03d}" if run_name else f"v10_rl_{s:03d}"
                 hf = ckpts / f"global_step_{s}" / "actor" / "huggingface"
                 if run_name in (self.state.get("guard_stops") or {}) and not hf.is_dir():
                     continue  # a run stopped by a guard: the checkpoints it reached
-                models[name] = (str(hf), None, options)
+                models[name] = (str(hf), None, run_options)
                 rl_names.append(name)
         models.update({name: (m["model"], m.get("prompt_format"), list(m.get("options", options)))
                        for name, m in (ev.get("models") or {}).items()})

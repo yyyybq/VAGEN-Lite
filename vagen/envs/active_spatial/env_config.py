@@ -204,6 +204,11 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # prompt's Rewards block list the reward terms this env applies.  The SFT export's system_prompt.reward_text
     # (and any non-default reward setting) must match.
     prompt_reward_text: str = "legacy"
+    # Round 12 freeze (the user's 3.1.1): the format line shows "placeholder" names (default, the text every model up
+    # to round 12 trained with: action1|action2|...) or real "action_names" (prompt.FORMAT_EXAMPLES).  The SFT
+    # export's format_example must match (training_prep rl-config checks it against the start model's SFT
+    # conversations).
+    prompt_format_example: str = "placeholder"
     history_window_size: int = 1  # Observations retained, including the current frame
     max_actions_per_step: int = 5  # Maximum actions allowed per step
     action_sep: str = "|"  # Separator for multiple actions
@@ -278,6 +283,8 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
             enable_explicit_done=getattr(self, "enable_explicit_done", True),
             # round 9: "actual" lists the reward terms below instead of the legacy lines
             reward_text=getattr(self, "prompt_reward_text", "legacy"),
+            # round 12 freeze: placeholder or real action names in the "Response format" line
+            format_example=getattr(self, "prompt_format_example", "placeholder"),
             max_consecutive_invalid_actions=self.max_consecutive_invalid_actions,
             enable_step_penalty=self.enable_step_penalty,
             step_penalty=self.step_penalty,

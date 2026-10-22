@@ -2066,6 +2066,7 @@ class ActiveSpatialEnv(BaseEnv):
             max_actions_per_step=self.config.max_actions_per_step,
             action_sep=self.config.action_sep,
             add_example=init_obs,
+            format_example=self.config.get("prompt_format_example", "placeholder"),
         )
         obs_str += "\n" + format_prompt_text
         
@@ -2175,6 +2176,7 @@ class ActiveSpatialEnv(BaseEnv):
             max_actions_per_step=self.config.max_actions_per_step,
             action_sep=self.config.action_sep,
             add_example=init_obs,
+            format_example=self.config.get("prompt_format_example", "placeholder"),
         )
         obs_str += "\n" + format_prompt_text
         

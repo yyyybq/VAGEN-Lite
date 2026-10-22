@@ -294,6 +294,8 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         out["max_consecutive_collisions"] = 0  # blocked moves still cost -0.15 each
     if getattr(args, "collision_feedback", False):
         out["collision_feedback_detail"] = True
+    if getattr(args, "format_example", None):  # round 12 freeze: the format text the model trained with
+        out["prompt_format_example"] = args.format_example
     return out
 
 
@@ -761,6 +763,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
     r.add_argument("--no-collision-end", action="store_true", help="3 blocked moves in a row no longer end the task")
     r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
+    r.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
+                   help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
     r.add_argument("--history", action=argparse.BooleanOptionalAction, default=True,
                    help="every model call gets all earlier turns, exactly as in SFT (round-10 default; --no-history "
                         "for a single-turn input)")

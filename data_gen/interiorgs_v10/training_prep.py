@@ -405,7 +405,8 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
 # refused.  Template paths are relative to this package.
 STANDARDS_FILE = Path(__file__).with_name("configs") / "rl_standards.json"
 STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "opt_package", "reward_preset",
-                 "ppo_template", "env_template", "group_filter", "keep_std_threshold", "keep_std_floor")
+                 "ppo_template", "env_template", "group_filter", "keep_std_threshold", "keep_std_floor",
+                 "format_example")
 # Round 12, the dense-reward first batch (D-keep, the user's decision of 2026-10-21): which group filter the
 # package's batch goes through.  mixed_outcome (the package's) trains only on tasks whose episodes both succeed and
 # fail; keep_by_return_std (vagen/custom_filter/filter.py) fills the places still free with all-fail tasks whose
@@ -500,6 +501,33 @@ def env_system_prompt(env_cfg: Dict[str, Any], task_type: str) -> str:
     return P.system_prompt(**c.system_prompt_arguments(task_type))  # every setting the env itself passes
 
 
+def sft_format_examples(paths: Sequence[Path], max_actions: int = 5, action_sep: str = "|") -> List[str]:
+    """Which format example (prompt.FORMAT_EXAMPLES) the SFT conversations show: the format line of the first user
+    turn of each file's first record.  Round 12 freeze (the user's 3.1.1): an RL run must show the text its start
+    model trained with.  Files whose first turn shows neither are left out."""
+    from vagen.envs.active_spatial import prompt as P
+
+    found = set()
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            line = fh.readline()
+        if not line.strip():
+            continue
+        turns = json.loads(line).get("conversations") or []
+        text = next((str(t.get("content", "")) for t in turns if t.get("role") == "user"), "")
+        found |= {f for f in P.FORMAT_EXAMPLES if P.action_format_line(action_sep, max_actions, f) in text}
+    return sorted(found)
+
+
+def with_format_example(policy: Dict[str, Any], format_example: str) -> Dict[str, Any]:
+    """The policy with its SFT export's format example set (the prompt check after the SFT data decided it)."""
+    import copy
+
+    policy = copy.deepcopy(policy)
+    policy["sft"]["export"]["format_example"] = format_example
+    return policy
+
+
 def prompt_mismatches(env_cfg: Dict[str, Any], task_types: Sequence[str], policy: Dict[str, Any]) -> List[str]:
     """Task types whose RL system prompt differs from the SFT conversations' (release.protocol_system_prompt)."""
     from .release import protocol_system_prompt
@@ -559,6 +587,26 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     history = history_overrides(getattr(args, "history_mode", None) or "none",
                                 int(template["envs"][0].get("max_turns", 12)))
     history["env"].update(reward_overrides(getattr(args, "reward_preset", None) or "S0"))
+    # round 12 freeze (the user's 3.1.1): the format line shows placeholder or real action names.  Default: the SFT
+    # export's (admission policy); the start model's SFT conversations, when given, must show the same text, and
+    # then decide it for the system prompt check too.
+    from vagen.envs.active_spatial.prompt import FORMAT_EXAMPLES
+
+    from .release import format_example as policy_format_example
+
+    policy = load_policy()
+    fmt = getattr(args, "format_example", None) or policy_format_example(policy)
+    if fmt not in FORMAT_EXAMPLES:
+        raise SystemExit(f"--format-example must be one of {FORMAT_EXAMPLES}, not {fmt!r}")
+    tcfg = template["envs"][0]["config"]
+    sft_formats = sft_format_examples([Path(p) for p in getattr(args, "sft_trajectories", None) or []],
+                                      int(tcfg.get("max_actions_per_step", 5)), str(tcfg.get("action_sep", "|")))
+    if sft_formats and sft_formats != [fmt]:
+        raise SystemExit(f"the SFT conversations show the {sft_formats} format example, the RL config would show "
+                         f"{fmt!r}: give --format-example {sft_formats[0]} (or the conversations the start model "
+                         "trained on)")
+    if fmt != str(tcfg.get("prompt_format_example", "placeholder")):
+        history["env"]["prompt_format_example"] = fmt
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -569,7 +617,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                                train_size=len(selected), **history["env"])
         env_paths[split] = out / f"{split}_env.yaml"
         env_paths[split].write_text(yaml.safe_dump(env, sort_keys=False))
-    mismatches = prompt_mismatches(template["envs"][0]["config"], [r["task_type"] for r in rows], load_policy())
+    mismatches = prompt_mismatches(dict(tcfg, prompt_format_example=fmt), [r["task_type"] for r in rows],
+                                   with_format_example(policy, fmt) if sft_formats else policy)
     if mismatches:
         raise SystemExit(f"RL and SFT system prompts differ for {mismatches}")
     ppo = yaml.safe_load(Path(args.ppo_template).read_text())
@@ -670,6 +719,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "task_pool": pool,
               "opt_package": getattr(args, "opt_package", None), "opt_package_overrides": package,
               "standard": standard or None, "ppo_template": str(args.ppo_template), "curriculum": curriculum,
+              "format_example": fmt, "format_example_sft": sft_formats or None,
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
               "entropy_coeff_override": getattr(args, "entropy_coeff", None),
               "group_filter": ((ppo.get("filter") or {}).get("name") if (ppo.get("filter") or {}).get("enable") else None),
@@ -855,6 +905,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--task-pool", choices=TASK_POOLS, default=None,
                    help="round 11: the train tasks RL takes: formal (rounds 6-10, the default) or reserve (rows from sft-frames "
                         "--include-reserve; the rule since round 11: RL trains on tasks SFT never trained on)")
+    c.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
+                   help="round 12 freeze: the format line shows placeholder names (action1|action2|...) or real "
+                        "action names; default the SFT export's (admission policy), and it must match the SFT "
+                        "conversations given with --sft-trajectories")
     c.add_argument("--sft-trajectories", nargs="*", default=None,
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,
