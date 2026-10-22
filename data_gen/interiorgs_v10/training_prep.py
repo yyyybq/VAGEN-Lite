@@ -932,7 +932,13 @@ def cmd_format_sft(args: argparse.Namespace) -> None:
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    res = format_sft_records(_jsonl(Path(args.trajectories)), load_policy(), int(args.count), int(args.val_count),
+    # the source conversations keep the format text they were exported with (rounds 10-12: the placeholder, which the
+    # policy no longer names): the policy with that example is the one their texts are checked against
+    policy = load_policy()
+    found = sft_format_examples([Path(args.trajectories)])
+    if len(found) == 1:
+        policy = with_format_example(policy, found[0])
+    res = format_sft_records(_jsonl(Path(args.trajectories)), policy, int(args.count), int(args.val_count),
                              int(args.max_turns), args.format_example, int(args.seed))
     if len(res["records"]) < int(args.count) + int(args.val_count):
         raise SystemExit(f"only {len(res['records'])} conversations qualify: {res['report']}")

@@ -25,9 +25,30 @@ def record(i, family, split, assistant_turns, policy):
 
 class FormatSftTest(unittest.TestCase):
     def setUp(self):
-        self.policy = load_policy()
+        # the existing SFT data (rounds 10-12) shows the placeholder text; the policy names real action names now
+        self.policy = TP.with_format_example(load_policy(), "placeholder")
         self.records = [record(i, FAMILIES[i % 4], "val" if i % 10 == 0 else "train", 1 + i % 3, self.policy)
                         for i in range(200)]
+
+    def test_command_reads_the_source_text(self):
+        import json
+        import tempfile
+        from argparse import Namespace
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "sft_trajectories.jsonl"
+            src.write_text("".join(json.dumps(r) + "\n" for r in self.records))
+            out = Path(tmp) / "format"
+            TP.cmd_format_sft(Namespace(trajectories=str(src), count=30, val_count=4, max_turns=2,
+                                        format_example="action_names", seed=TP.FORMAT_SFT_SEED, link_from=None,
+                                        out=str(out)))
+            rep = json.loads((out / "format_sft_report.json").read_text())
+            self.assertEqual((rep["train"], rep["val"], rep["source_format_example"], rep["skipped"]),
+                             (30, 4, "placeholder", {}))
+            recs = TP._jsonl(out / "sft_trajectories_format.jsonl")
+            self.assertEqual(TP.sft_format_examples([out / "sft_trajectories_format.jsonl"]), ["action_names"])
+            self.assertEqual(len(recs), 34)
 
     def test_short_conversations_rewritten(self):
         res = TP.format_sft_records(self.records, self.policy, count=40, val_count=6)
