@@ -655,10 +655,6 @@ class Watcher:
                                                      name=f"ev8-{exp.name.lower()}-{tag.replace('_', '')}-rep"))
             elif (exp.name, tag) in repeats:
                 row["evals"].append(self.eval_entry(exp, tag, path, "_repeat", self.a.repeat_workers))
-        if rule:
-            row["evals"].append({"tag": "任务内评测速度", "state": (
-                f"96 个进程每回合 {rule['wall_mean_seconds']} 秒，是 24 个进程估计值的 {rule['ratio']} 倍；"
-                + ("超过 1.5 倍：中间检查点改由 1 卡分片评" if rule["mode"] == "final_only" else "不超过 1.5 倍：中间检查点继续在任务内评"))})
         return row
 
     def repeat_results(self):

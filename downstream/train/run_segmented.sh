@@ -6,12 +6,12 @@
 #      optimizer, LR schedule, random states, data position) and leaves after saving P's checkpoint and full state
 #      (at the last step: final_model);
 #   2. evaluate P's checkpoint here when full_state.py eval-mode says injob: 8 policy servers x 12 simulator
-#      processes over the 950-episode plan (downstream/eval/run_eval_ckpt.sh CKPT EXP/evals/steps_P/out 8 96);
-#   3. after the first in-job evaluation, full_state.py speed compares it with the 24-process figures and decides
-#      whether the intermediate points stay in the job (EXP/injob_eval.json).
+#      processes over the 950-episode plan (downstream/eval/run_eval_ckpt.sh CKPT EXP/evals/steps_P/out 8 96).
+# Stage 1 (E1) runs have one point only, the last step (the user's decision 1 of 2026-10-22, second message: only the
+# final checkpoint is evaluated in the job; E0 covers 25k-100k): train to the end, then evaluate the final checkpoint.
 # Started again (the same job relaunched, or resubmitted), it continues: checkpoints that exist are not retrained,
-# finished evaluations are not repeated, training resumes from the full state.
-# Writes only under EXP: run/, evals/steps_P/out/, train.log, segments.log, stage_times.tsv, injob_eval.json.
+# finished evaluations are not repeated (an interrupted one resumes), training resumes from the full state.
+# Writes only under EXP: run/, evals/steps_P/out/, train.log, segments.log, stage_times.tsv.
 # Usage: run_segmented.sh EXP
 set -uo pipefail
 EXP="${1:?Usage: run_segmented.sh EXP_DIR}"
@@ -71,7 +71,6 @@ for P in $(python3 "$FS" points "$EXP"); do
     rc=$?
     stage "eval_$P" "$t0" "$rc"
     [[ $rc -ne 0 ]] && log "evaluation of $P rc=$rc (training goes on; the watcher shows it)"
-    python3 "$FS" speed "$EXP" "$P" >> "$EXP/segments.log" 2>&1 || log "no speed figures for $P"
   fi
 done
 log "done"

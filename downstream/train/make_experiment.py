@@ -96,6 +96,9 @@ def main(argv=None) -> int:
     ap.add_argument("--archive-suffix", default="",
                     help="reuse an existing experiment directory whose run/, job/ and evals/ are gone (renamed): "
                          "its experiment.json, config.yaml and sources.json are renamed with this suffix, never deleted")
+    ap.add_argument("--repeat-final", action="store_true",
+                    help="the final checkpoint gets a second evaluation, same seeds, as one 8-card job on an idle "
+                         "machine (the noise floor; only start B, the user's decision of 2026-10-22)")
     args = ap.parse_args(argv)
     points = [int(p) for p in args.eval_points.split(",") if p.strip()]
     for v in [args.full_state_interval] + points:
@@ -149,7 +152,8 @@ def main(argv=None) -> int:
         "steps": args.steps, "save_interval": args.save_interval, "gpus": args.gpus,
         **({"segmented": True, "full_state_interval": args.full_state_interval,
             "eval_points": sorted({p for p in points if 0 < p <= args.steps} | {args.steps}),
-            "injob_eval": {"servers": 8, "workers": 96}} if args.full_state_interval else {}),
+            "injob_eval": {"servers": 8, "workers": 96}, "repeat_final": bool(args.repeat_final)}
+           if args.full_state_interval else {}),
         "per_device_batch": cfg["datasets"]["vla_data"]["per_device_batch_size"],
         "global_batch": cfg["datasets"]["vla_data"]["per_device_batch_size"] * args.gpus,
         "recipe": {"path": str(args.recipe), "sha256": sha256(args.recipe)},
