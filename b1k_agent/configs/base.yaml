@@ -15,7 +15,8 @@ paths:
 task_metadata:
   # same file the official evaluator uses for task_id <-> name (eval_utils._load_challenge_task_misc)
   task_misc_csv: /nas/baiqiao/BEHAVIOR-1K/datasets/2026-challenge-task-instances/metadata/B100_task_misc.csv
-  tasks_jsonl: null                             # demo dataset meta/tasks.jsonl, if downloaded
+  catalog_tsv: configs/tasks/task_catalog_2026.tsv   # fallback snapshot (ids, max_steps); official CSV wins
+  tasks_jsonl: configs/tasks/tasks_2026.jsonl         # NL instructions for all 100 tasks (meta/tasks.jsonl copy)
   bddl_root: /nas/baiqiao/BEHAVIOR-1K/bddl3/bddl/activity_definitions
 
 server:
@@ -52,12 +53,17 @@ executor:
 
 providers:
   astra:
+    # "Astra" = the user's preferred model name. Search snippets (2026-10-22) point to OpenAI GPT-6 Astra,
+    # id gpt-6-astra (https://developers.openai.com/api/docs/models/gpt-6-astra) -- unverified. Set
+    # ASTRA_BASE_URL (e.g. https://api.openai.com/v1), ASTRA_API_KEY, ASTRA_MODEL after GET /v1/models,
+    # then run python -m providers.probe. Nothing here assumes the id.
     kind: openai_compat
     label: astra
     base_url_env: ASTRA_BASE_URL
     api_key_env: ASTRA_API_KEY
     model_env: ASTRA_MODEL
     structured_output: json_schema
+    max_tokens_field: max_completion_tokens
     vision: true
   claude:                      # substitute provider; results must be labelled "claude", not "astra"
     kind: anthropic

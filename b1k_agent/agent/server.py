@@ -122,7 +122,10 @@ class AgentPolicy:
         executor_default = getattr(ex, "default_prompt", None)
         if callable(executor_default):
             executor_default = executor_default(name)
-        budget = self.max_steps * self.seconds_per_step if (self.max_steps and self.enforce_budget) else None
+        max_steps = self.max_steps or self.task_meta.max_steps(name)
+        if self.max_steps is None and max_steps is not None:
+            logger.info("max_steps for %s from the task catalog snapshot: %d (pass --max-steps to override)", name, max_steps)
+        budget = max_steps * self.seconds_per_step if (max_steps and self.enforce_budget) else None
         return EpisodeContext(
             episode_id=f"{self.run_id}-ep{self._episode_counter:03d}-env{env_idx}",
             env_index=env_idx,
@@ -131,7 +134,7 @@ class AgentPolicy:
             task_instruction=self.task_meta.prompt(name, executor_default),
             goal_spec=self.task_meta.goal_spec(name),
             skills=tuple(self.skills_for_task(name)),
-            max_steps=self.max_steps,
+            max_steps=max_steps,
             wallclock_budget_s=budget,
             seed=int(get(self.cfg, "run.seed", 0) or 0),
         )

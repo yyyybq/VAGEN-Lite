@@ -73,7 +73,8 @@ def make_run(root, config, task, values, seed=0, run_suffix="", official_extra=N
         if iid in skip:
             continue
         extra = (official_extra or {}).get(iid, {})
-        _write_json(os.path.join(run, "eval_output", "json", f"{task}_{iid}_0.json"), official_record(task, iid, q, **extra))
+        _write_json(os.path.join(run, "eval_output", "json", f"{task}_{iid}_0.json"),
+                    official_record(task, iid, q, **extra))
         eid = f"{run_id}-ep001-env{list(values).index(iid)}"
         summary = {"_synthetic": True, "episode_id": eid, "run_id": run_id, "task_name": task,
                    "tags": {"task": task, "instance": str(iid)}, "steps": 90, "elapsed_s": 60.0,
@@ -85,16 +86,16 @@ def make_run(root, config, task, values, seed=0, run_suffix="", official_extra=N
     return run
 
 
+def _pick(table, config, task):
+    return {iid: table[(config, task, iid)] for iid in IDS if (config, task, iid) in table}
+
+
 @pytest.fixture()
 def runs(tmp_path):
-    out = []
-    for config in Q:
-        for task in TASKS:
-            out.append(make_run(
-                str(tmp_path / "runs"), config, task, Q[config][task],
-                official_extra={iid: OFFICIAL_EXTRA[(config, task, iid)] for iid in IDS if (config, task, iid) in OFFICIAL_EXTRA},
-                summary_extra={iid: SUMMARY_EXTRA[(config, task, iid)] for iid in IDS if (config, task, iid) in SUMMARY_EXTRA}))
-    return out
+    return [make_run(str(tmp_path / "runs"), config, task, Q[config][task],
+                     official_extra=_pick(OFFICIAL_EXTRA, config, task),
+                     summary_extra=_pick(SUMMARY_EXTRA, config, task))
+            for config in Q for task in TASKS]
 
 
 def by_config(result):
@@ -124,7 +125,7 @@ def test_per_task_and_overall_means(runs, tmp_path):
     assert b["mean_q"] == pytest.approx((2.5 / 3 + 0.5) / 2)
     assert a["success_rate"] == pytest.approx((1 / 3 + 0) / 2)
     assert a["mean_time_score"] == pytest.approx(1.0)  # normalized_time 1 -> 3 - 2/1
-    assert "SUBSET" in a["scope"]  # no declared list -> labelled as a subset mean
+    assert a["scope"].startswith("SUBSET") and "no declared list" in a["scope"]  # labelled as a subset mean
     # seeds pool into one config even though ports and log roots differ per run
     assert len(res["configs"]) == 2 and len(a["runs"]) == 2
 
@@ -163,7 +164,9 @@ def test_bootstrap_is_deterministic_with_seed(runs, tmp_path):
     r1 = agg.aggregate(runs, None, n_boot=500, seed=0)
     r2 = agg.aggregate(runs, None, n_boot=500, seed=0)
     r3 = agg.aggregate(runs, None, n_boot=500, seed=1)
-    ci = lambda r: [(c["mean_q_ci"], c["mean_q_budget2026_ci"]) for c in r["configs"]]
+    def ci(r):
+        return [(c["mean_q_ci"], c["mean_q_budget2026_ci"]) for c in r["configs"]]
+
     assert ci(r1) == ci(r2)
     assert ci(r1) != ci(r3)
     for c in r1["configs"]:
@@ -171,6 +174,9 @@ def test_bootstrap_is_deterministic_with_seed(runs, tmp_path):
         assert lo <= c["mean_q"] <= hi
     p1 = [p["diff_ci"] for p in r1["paired"]]
     assert p1 == [p["diff_ci"] for p in r2["paired"]]
+    # L0 has no budget-only zero (its over-budget rollout already scored 0): same units, same stream, same CI
+    a = by_config(r1)["L0_exec_only"]
+    assert a["mean_q"] == a["mean_q_budget2026"] and a["mean_q_ci"] == a["mean_q_budget2026_ci"]
 
 
 def test_stratified_bootstrap_resamples_within_tasks():
@@ -202,7 +208,8 @@ def test_declared_instances_zero_fill_missing(runs, tmp_path):
     missing = [(r["config"], r["task"], r["instance_id"]) for r in res["missing"]]
     assert ("L0_exec_only", "turning_on_radio", 304) in missing
     assert all(r["q_final"] == 0.0 and r["missing"] for r in res["missing"])
-    assert "declared list" in a["scope"]
+    assert a["scope"].startswith("SUBSET mean over 2 task(s): picking_up_trash, turning_on_radio")
+    assert "declared instance list" in a["scope"]
     assert next(p for p in res["paired"] if p["metric"] == "q_final")["n_pairs"] == 5  # zero-filled units not paired
     md = open(tmp_path / "out" / "summary.md", encoding="utf-8").read()
     assert "Missing results (count as Q = 0)" in md and "304" in md
@@ -315,7 +322,7 @@ def test_summary_join_by_env_index(tmp_path):
 
 def test_inputs_untouched_and_provenance(runs, tmp_path):
     before = tree_hashes(str(tmp_path / "runs"))
-    res = agg.aggregate(runs, str(tmp_path / "out"), n_boot=50, argv=["test"])
+    agg.aggregate(runs, str(tmp_path / "out"), n_boot=50, argv=["test"])
     assert tree_hashes(str(tmp_path / "runs")) == before
     summary = json.load(open(tmp_path / "out" / "summary.json"))
     files = {i["path"]: i["sha256"] for i in summary["provenance"]["inputs"]}
@@ -328,6 +335,8 @@ def test_inputs_untouched_and_provenance(runs, tmp_path):
         assert os.path.isfile(tmp_path / "out" / name)
     with pytest.raises(SystemExit):
         agg.aggregate(runs, os.path.join(runs[0], "eval_output", "tables"), n_boot=0)
+    with pytest.raises(SystemExit):  # derived tables never land in a run dir's root
+        agg.aggregate(runs, runs[0], n_boot=0)
 
 
 def test_cli_entry_point(runs, tmp_path):
@@ -358,3 +367,107 @@ def test_resolve_instance_ids_matches_official():
         agg.resolve_instance_ids("public_test", [20])
     assert agg.time_score(1.0) == pytest.approx(1.0)
     assert agg.time_score(1 / 1.5) == pytest.approx(0.0)  # official failure normalized_time
+
+
+def test_declared_full_task_set_label(runs, tmp_path):
+    declared = tmp_path / "full.yaml"
+    declared.write_text("full: true\nmode: public_test\nindices: 0-2\ntasks: [turning_on_radio, picking_up_trash]\n")
+    a = by_config(agg.aggregate(runs, None, declared_path=str(declared), n_boot=0))["L0_exec_only"]
+    assert a["scope"] == "FULL declared task set (2 tasks)"
+
+
+EVAL_GIT = {"commit": "a8247a8c" + "0" * 32}
+
+
+def test_wrappers_are_separate_groups_not_reruns(tmp_path):
+    """Step-3 batch: L0 on one instance once per official wrapper = two groups, not a policy re-run."""
+    root = str(tmp_path / "runs")
+    d = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.5}, run_suffix="-default",
+                 status_extra={"wrapper": "default", "evaluator_git": EVAL_GIT})
+    r = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.25}, run_suffix="-rgbd",
+                 status_extra={"wrapper": "rgbd", "evaluator_git": EVAL_GIT})
+    res = agg.aggregate([d, r], None, n_boot=0)
+    cfg = by_config(res)
+    assert set(cfg) == {"L0_exec_only[wrapper=default]", "L0_exec_only[wrapper=rgbd]"}
+    assert cfg["L0_exec_only[wrapper=rgbd]"]["mean_q"] == pytest.approx(0.25)
+    assert cfg["L0_exec_only[wrapper=default]"]["condition"] == "wrapper=default evaluator=a8247a8c"
+    assert not any(row["superseded"] for row in res["rows"]) and not any("re-run" in w for w in res["warnings"])
+    p = next(p for p in res["paired"] if p["metric"] == "q_final")
+    assert p["n_pairs"] == 1 and p["diff_b_minus_a"] == pytest.approx(-0.25)
+    # evaluator versions (post2 vs 2026/eval) are separate groups too
+    e = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.0}, run_suffix="-2026",
+                 status_extra={"wrapper": "rgbd", "evaluator_git": {"commit": "38d2c9fb" + "0" * 32}})
+    labels = [c["config"] for c in agg.aggregate([r, e], None, n_boot=0)["configs"]]
+    assert labels == ["L0_exec_only[evaluator=a8247a8c]", "L0_exec_only[evaluator=38d2c9fb]"]
+
+
+def test_budget_is_max_steps_seconds(tmp_path):
+    """The 2026 rule is max_steps x 1 s, whatever budget the agent planned with (none when budget.enforce is off)."""
+    root = str(tmp_path / "runs")
+    multi_port = {"time": {"simulator_steps": 90, "simulator_time": 3.0, "normalized_time": 1.0,
+                           "evaluation_time": 101.0}}
+    run = make_run(root, "L1_plan", "turning_on_radio", {301: 1.0, 302: 1.0, 303: 1.0},
+                   official_extra={303: multi_port},
+                   summary_extra={301: {"wallclock_budget_s": None, "elapsed_s": 120.0},
+                                  302: {"wallclock_budget_s": 90.0, "elapsed_s": 95.0}})
+    res = agg.aggregate([run], None, n_boot=0)
+    rows = {r["instance_id"]: r for r in res["rows"]}
+    assert rows[301]["wallclock_budget_s"] == 100.0 and rows[301]["budget_ok"] is False  # status max_steps 100
+    assert rows[302]["budget_ok"] is True and rows[302]["budget_s_source"] == "max_steps x 1 s"
+    assert rows[303]["budget_source"] == "evaluation_time" and rows[303]["budget_ok"] is False
+    assert [r["q_budget2026"] for r in (rows[301], rows[302], rows[303])] == [0.0, 1.0, 0.0]
+    assert any("planned with a 90 s budget" in w for w in res["warnings"])
+    bare = make_run(root, "L1_plan", "turning_on_radio", {301: 1.0}, run_suffix="-bare",
+                    status_extra={"max_steps": None}, summary_extra={301: {"elapsed_s": 120.0}})
+    row = agg.aggregate([bare], None, n_boot=0)["rows"][0]
+    assert row["budget_s_source"] == "agent wallclock_budget_s" and row["budget_ok"] is False
+    unknown = make_run(root, "L1_plan", "turning_on_radio", {301: 1.0}, run_suffix="-unknown",
+                       status_extra={"max_steps": None}, summary_extra={301: {"wallclock_budget_s": None}})
+    row = agg.aggregate([unknown], None, n_boot=0)["rows"][0]
+    assert row["budget_ok"] is None and row["q_budget2026"] == 1.0  # unknown is counted, never zeroed
+
+
+def test_modules_and_provider_label_from_manifest(tmp_path):
+    run = make_run(str(tmp_path / "runs"), "L1_plan", "turning_on_radio", {301: 0.5})
+    path = os.path.join(run, "run_manifest.json")
+    man = json.load(open(path))
+    man["config"]["providers"] = {"claude": {"kind": "anthropic", "label": "claude-substitute"}}
+    man["modules"] = {  # agent/registry.py describe()
+        "plan": {"enabled": True, "impl": "plan:llm", "uses_provider": True, "provider": "claude"},
+        "check": {"enabled": True, "impl": "check:rule", "uses_provider": False, "provider": None},
+        "goal": {"enabled": False, "impl": "goal:null", "uses_provider": False, "provider": None}}
+    _write_json(path, man)
+    res = agg.aggregate([run], str(tmp_path / "out"), n_boot=0)
+    assert res["configs"][0]["modules"] == "plan=llm@claude-substitute, check=rule"
+    assert "plan=llm@claude-substitute" in open(tmp_path / "out" / "summary.md", encoding="utf-8").read()
+
+
+def test_batch_dir_expands_to_ledger_attempts(tmp_path):
+    root = str(tmp_path / "runs")
+    a1 = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.0}, run_suffix="-a1",
+                  official_extra={301: {"failure_reason": "policy_connection_lost"}})
+    a2 = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.4}, run_suffix="-a2")
+    batch = tmp_path / "batch"
+    batch.mkdir()
+    with open(batch / "jobs.jsonl", "w", encoding="utf-8") as f:  # eval/batch.py Ledger lines
+        for i, d in enumerate([a1, a2], 1):
+            f.write(json.dumps({"event": "attempt_start", "attempt": i, "run_dir": d}) + "\n")
+            f.write(json.dumps({"event": "attempt_end", "attempt": i, "run_dir": d}) + "\n")
+        f.write(json.dumps({"event": "attempt_start", "attempt": 3, "run_dir": str(tmp_path / "gone")}) + "\n")
+    res = agg.aggregate([str(batch)], None, n_boot=0)
+    assert res["configs"][0]["mean_q"] == pytest.approx(0.4)
+    assert [r["superseded"] for r in res["rows"]] == [True, False]
+    assert any("does not exist" in w for w in res["warnings"])
+    assert str(batch / "jobs.jsonl") in {i["path"] for i in res["provenance"]["inputs"]}
+
+
+def test_attempt_order_follows_started_at(tmp_path):
+    root = str(tmp_path / "runs")
+    late = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.9}, run_suffix="-late",
+                    status_extra={"started_at": "2026-10-23T10:00:00Z"})
+    early = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.3}, run_suffix="-early",
+                     status_extra={"started_at": "2026-10-23T09:00:00Z"})
+    res = agg.aggregate([late, early], None, n_boot=0)  # given in the wrong order
+    assert res["configs"][0]["mean_q"] == pytest.approx(0.3)
+    later = next(r for r in res["rows"] if r["superseded"])
+    assert later["run_id"].endswith("-late") and later["superseded_reason"] == "later attempt after a counted result"

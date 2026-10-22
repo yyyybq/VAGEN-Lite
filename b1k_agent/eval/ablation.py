@@ -127,7 +127,22 @@ def _command(argv: Optional[Sequence[str]]) -> str:
     return "python -m eval.ablation " + " ".join(argv) if argv else "eval.ablation"
 
 
-def ladder(base: str, final: str, steps: Sequence[str], out_dir: str, argv: Optional[Sequence[str]] = None) -> list[str]:
+def stale_files(out_dir: str, prefix: str, written: Sequence[str]) -> list[str]:
+    """Generated-looking files in ``out_dir`` that this call did not write (left by an earlier generation)."""
+    if not os.path.isdir(out_dir):
+        return []
+    mine = {os.path.basename(p) for p in written}
+    return sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir)
+                  if f.startswith(prefix) and f.endswith(".yaml") and f not in mine)
+
+
+def _note_stale(out_dir: str, prefix: str, written: Sequence[str]) -> None:
+    for p in stale_files(out_dir, prefix, written):
+        print(f"note: {_show(p)} was not written by this generation (stale?); remove it if it is", file=sys.stderr)
+
+
+def ladder(base: str, final: str, steps: Sequence[str], out_dir: str,
+           argv: Optional[Sequence[str]] = None) -> list[str]:
     unknown = [s for s in steps if s not in SLOT_PROTOCOLS]
     if unknown or len(set(steps)) != len(steps) or not steps:
         raise SystemExit(f"--steps must be distinct slots from {list(SLOT_PROTOCOLS)}, got {list(steps)}")
@@ -158,6 +173,7 @@ def ladder(base: str, final: str, steps: Sequence[str], out_dir: str, argv: Opti
         print(f"note: the last ladder step differs from {_show(final)} in {len(left)} key(s):", file=sys.stderr)
         for k, va, vb in left:
             print(f"  {k}: {va!r} -> {vb!r}", file=sys.stderr)
+    _note_stale(out_dir, "ladder", written)
     return written
 
 
@@ -179,6 +195,7 @@ def loo(final: str, out_dir: str, argv: Optional[Sequence[str]] = None) -> list[
         ok, text, _ = check(final, path, slot)
         if not ok:
             _fail(written, f"self-check failed for {_show(path)}:\n{text}")
+    _note_stale(out_dir, "loo_", written)
     return written
 
 

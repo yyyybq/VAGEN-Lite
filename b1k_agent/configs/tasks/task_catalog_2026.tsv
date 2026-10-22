@@ -1,0 +1,101 @@
+task_id	task	scene	human_mean_length_steps	max_steps	train_range	rooms
+0	turning_on_radio	house_double_floor_lower	2149.64	3224	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+1	picking_up_trash	house_double_floor_lower	5267.75	7901	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+2	putting_away_Halloween_decorations	house_double_floor_lower	13788.06	20682	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+3	cleaning_up_plates_and_food	house_double_floor_lower	13696.19	20544	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+4	can_meat	house_single_floor	11847.075	17770	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+5	setting_mousetraps	house_double_floor_upper	10196.11	15294	0-299	bathroom_0
+6	hiding_Easter_eggs	house_double_floor_lower	7619.725	11429	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+7	picking_up_toys	house_single_floor	18890.55	28335	0-299	childs_room_0 childs_room_1 childs_room_2 corridor_0 dining_room_0 entryway_0 garden_0
+8	rearranging_kitchen_furniture	house_double_floor_lower	8943.015	13414	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+9	putting_up_Christmas_decorations_inside	house_single_floor	13718.76	20578	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+10	set_up_a_coffee_station_in_your_kitchen	house_single_floor	6266.215	9399	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+11	putting_dishes_away_after_cleaning	house_single_floor	10953.43	16430	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+12	preparing_lunch_box	house_single_floor	8245.3	12367	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+13	loading_the_car	house_double_floor_lower	19226.37	28839	0-299	corridor_0 garage_0 garden_0 kitchen_0 living_room_0
+14	carrying_in_groceries	house_double_floor_lower	14274.805	21412	0-299	corridor_0 garage_0 garden_0 kitchen_0 living_room_0
+15	bringing_in_wood	house_double_floor_lower	13535.655	20303	0-299	corridor_0 garage_0 garden_0 kitchen_0 living_room_0
+16	moving_boxes_to_storage	house_double_floor_lower	14596.225	21894	0-299	corridor_0 garage_0 garden_0 kitchen_0 living_room_0
+17	bringing_water	house_single_floor	9438.545	14157	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+18	tidying_bedroom	house_single_floor	11037.445	16556	0-299	bathroom_1 bedroom_0 corridor_0 dining_room_0 entryway_0 garden_0
+19	outfit_a_basic_toolbox	house_single_floor	10637.97	15956	0-299	corridor_0 dining_room_0 entryway_0 garden_0 utility_room_0
+20	sorting_vegetables	house_single_floor	11903.7	17855	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+21	collecting_childrens_toys	house_single_floor	19186.325	28779	0-299	childs_room_0 childs_room_1 childs_room_2 corridor_0 dining_room_0 entryway_0 garden_0
+22	putting_shoes_on_rack	house_double_floor_lower	7726.145	11589	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+23	boxing_books_up_for_storage	house_double_floor_upper	24227.5	36341	0-299	living_room_0
+24	storing_food	house_single_floor	19869.12	29803	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+25	clearing_food_from_table_into_fridge	house_double_floor_lower	13068.16	19602	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+26	assembling_gift_baskets	house_double_floor_lower	26060.055	39090	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+27	sorting_household_items	house_single_floor	15807.755	23711	0-299	bathroom_0 bathroom_1 bedroom_0 corridor_0 dining_room_0 entryway_0 garden_0
+28	getting_organized_for_work	house_double_floor_upper	15671.01	23506	0-299	bedroom_0 bedroom_1 bedroom_2
+29	clean_up_your_desk	house_single_floor	21417.875	32126	0-299	childs_room_0 childs_room_1 childs_room_2 corridor_0 dining_room_0 entryway_0 garden_0
+30	setting_the_fire	house_double_floor_lower	9118.13	13677	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+31	clean_boxing_gloves	house_single_floor	8235.36	12353	0-299	corridor_0 dining_room_0 entryway_0 garden_0 utility_room_0
+32	wash_a_baseball_cap	house_single_floor	8349.41	12524	0-299	corridor_0 dining_room_0 entryway_0 garden_0 utility_room_0
+33	wash_dog_toys	house_single_floor	11222.8	16834	0-299	corridor_0 dining_room_0 entryway_0 garden_0 utility_room_0
+34	hanging_pictures	house_double_floor_lower	2387.415	3581	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+35	attach_a_camera_to_a_tripod	house_double_floor_upper	3911.575	5867	0-299	bedroom_0 bedroom_1 bedroom_2
+36	clean_a_patio	house_double_floor_lower	12070.81	18106	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+37	clean_a_trumpet	house_double_floor_upper	5307.16	7960	0-299	bedroom_0 bedroom_1 bedroom_2
+38	spraying_for_bugs	house_double_floor_lower	6479.475	9719	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+39	spraying_fruit_trees	house_double_floor_lower	8345.87	12518	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+40	make_microwave_popcorn	house_double_floor_lower	3237.775	4856	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+41	cook_cabbage	house_single_floor	14144.81	21217	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+42	chop_an_onion	house_double_floor_lower	6399.8	9599	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+43	slicing_vegetables	house_single_floor	14844.94	22267	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+44	chopping_wood	house_double_floor_lower	10751.985	16127	0-299	corridor_0 garage_0 garden_0 kitchen_0 living_room_0
+45	cook_hot_dogs	house_single_floor	9144.855	13717	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+46	cook_bacon	house_single_floor	7679.545	11519	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+47	freeze_pies	house_single_floor	12455.23	18682	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+48	canning_food	house_single_floor	22975.49	34463	0-299	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+49	make_pizza	house_double_floor_lower	19186.925	28780	0-299	corridor_0 garden_0 kitchen_0 living_room_0
+50	freeze_fruit	house_single_floor	12618.78	18928	1-300	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+51	cook_a_brisket	house_double_floor_lower	7334.995	11002	1-300	corridor_0 garden_0 kitchen_0 living_room_0
+52	sorting_bottles_cans_and_paper	house_double_floor_lower	10263.835	15395	1-300	kitchen_0 corridor_0 garden_0 living_room_0
+53	tidying_living_room	house_double_floor_upper	12565.88	18848	1-300	living_room_0
+54	putting_away_toys	house_single_floor	11296.755	16945	1-300	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+55	re_shelving_library_books	house_double_floor_upper	9528.43	14292	1-300	living_room_0
+56	make_rose_centerpieces	house_double_floor_lower	4532.155	6798	1-300	bathroom_0 corridor_0 garage_0 garden_0 kitchen_0 living_room_0
+57	sweeping_garage	house_double_floor_lower	4473.03	6709	1-300	garage_0 corridor_0
+58	stacking_wood	house_single_floor	15939.34	23909	1-300	corridor_0 garden_0 kitchen_0 living_room_0
+59	organizing_art_supplies	house_double_floor_upper	6194.365	9291	1-300	bathroom_0 bedroom_0 bedroom_1 bedroom_2 living_room_0
+60	scrubbing_bathroom_floor	house_single_floor	3153.83	4730	1-300	bathroom_0 bathroom_1 garden_0
+61	bringing_paper_to_recycling	house_double_floor_lower	11214.26	16821	1-300	corridor_0 garden_0 kitchen_0 living_room_0
+62	halve_an_egg	house_single_floor	6377.04	9565	1-300	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+63	installing_smoke_detectors	house_double_floor_lower	2568.77	3853	1-300	corridor_0 kitchen_0 living_room_0 garden_0
+64	setting_the_table	house_single_floor	17808.505	26712	1-300	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+65	unloading_the_car	house_double_floor_lower	11323.43	16985	1-300	garage_0 corridor_0 living_room_0 kitchen_0 garden_0
+66	turning_out_all_lights_before_sleep	house_single_floor	10006.11	15009	1-300	corridor_0 utility_room_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+67	boxing_food_after_dinner	house_single_floor	6697.715	10046	1-300	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+68	cleaning_up_branches_and_twigs	house_double_floor_lower	12527.07	18790	1-300	corridor_0 garden_0 garage_0 kitchen_0 living_room_0
+69	vacuuming_floors	house_double_floor_upper	2411.785	3617	1-300	bedroom_0 bedroom_1 bedroom_2 living_room_0
+70	thawing_frozen_food	house_double_floor_lower	8229.62	12344	1-300	corridor_0 garden_0 kitchen_0 living_room_0
+71	clean_your_rusty_garden_tools	house_single_floor	15157.91	22736	1-300	corridor_0 garden_0 kitchen_0 living_room_0 garage_0
+72	cook_a_frozen_pie	restaurant_diner	8667.96	13001	1-300	kitchen_0
+73	organizing_school_stuff	house_single_floor	14591.9	21887	1-300	bedroom_0 closet_0 closet_1 garden_0 corridor_0 bathroom_1
+74	carrying_out_garden_furniture	house_single_floor	11058.805	16588	1-300	corridor_0 dining_room_0 entryway_0 garden_0 kitchen_0 living_room_0 living_room_1
+75	put_together_a_basic_pruning_kit	house_double_floor_lower	11264.475	16896	1-300	garage_0 corridor_0 garden_0
+76	dispose_of_glass	hotel_suite_large	9195.33	13792	1-300	bathroom_0 bedroom_0
+77	installing_a_modem	Rs_int	2412.985	3619	1-300	bedroom_0 entryway_0 kitchen_0 living_room_0
+78	make_cabinet_doors	Rs_int	3442.525	5163	1-300	bedroom_0 entryway_0 kitchen_0 living_room_0
+79	polishing_shoes	hotel_suite_large	10737.985	16106	1-300	bedroom_0 bathroom_0
+80	clean_up_broken_glass	restaurant_diner	8691.415	13037	1-300	dining_room_0 corridor_0 bar_0 kitchen_0 bathroom_0
+81	packing_meal_for_delivery	restaurant_diner	8859.895	13289	1-300	kitchen_0 bar_0
+82	store_batteries	Rs_int	7704.235	11556	1-300	bedroom_0 entryway_0 kitchen_0 living_room_0
+83	store_honey	Rs_int	6766.84	10150	1-300	bedroom_0 entryway_0 kitchen_0 living_room_0
+84	tidying_bathroom	hotel_suite_large	13003.15	19504	1-300	bathroom_0 bedroom_0
+85	putting_dirty_dishes_in_sink	restaurant_diner	12148.58	18222	1-300	kitchen_0 bar_0 dining_room_0 corridor_0
+86	make_gift_bags_for_baby_showers	Rs_int	9650.92	14476	1-300	bedroom_0 entryway_0 kitchen_0 living_room_0
+87	collecting_aluminum_cans	hotel_suite_large	10202.875	15304	1-300	bathroom_0 bedroom_0
+88	rearrange_your_room	hotel_suite_large	12854.955	19282	1-300	bedroom_0 bathroom_0
+89	installing_a_fax_machine	office_cubicles_right	4076.89	6115	1-300	corridor_0 private_office_0 private_office_1 private_office_2 private_office_3 copy_room_0 shared_office_0
+90	composting_waste	Rs_int	3638.62	5457	1-300	entryway_0 kitchen_0 bedroom_0 living_room_0
+91	store_produce	restaurant_diner	9522.355	14283	1-300	kitchen_0
+92	installing_a_scanner	office_cubicles_right	4258.535	6387	1-300	corridor_0 private_office_0 private_office_1 private_office_2 private_office_3 copy_room_0 shared_office_0
+93	clean_a_keyboard	office_cubicles_right	3876.065	5814	1-300	private_office_0 private_office_1 private_office_2 private_office_3 shared_office_0 corridor_0
+94	dispose_of_batteries	office_cubicles_right	14428.39	21642	1-300	copy_room_0 corridor_0 private_office_0 private_office_1 private_office_2 private_office_3 shared_office_0
+95	cook_brussels_sprouts	restaurant_diner	15661.77	23492	1-300	bar_0 corridor_0 kitchen_0
+96	cook_broccolini	restaurant_diner	4617.76	6926	1-300	kitchen_0
+97	setup_a_bar_for_a_cocktail_party	restaurant_diner	13418.895	20128	1-300	bar_0 corridor_0 kitchen_0 dining_room_0
+98	laying_tile_floors	office_cubicles_right	14350.96	21526	1-300	bathroom_0 corridor_0 empty_room_0 private_office_0 private_office_1 private_office_2 private_office_3 copy_room_0 shared_office_0 conference_hall_0 meeting_room_0
+99	sorting_books_on_shelf	house_double_floor_upper	7739.35	11609	1-300	living_room_0

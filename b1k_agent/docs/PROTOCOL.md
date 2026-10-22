@@ -6,7 +6,7 @@ This file records what the official sources say and what the code does. Where th
 
 **Labels:** [code] verified in code · [docs] stated in docs · [inferred] our reasoning · NOT FOUND.
 
-**Detailed evidence** (file:line citations): research notes R1–R9, summarised here. They are kept outside the repo, in the writing session's scratchpad.
+**Detailed evidence** (file:line citations): `docs/research/R1–R9`, summarised here. `R9_critic.md` lists the errata.
 
 ## 1. Sources and versions
 
@@ -52,7 +52,7 @@ This file records what the official sources say and what the code does. Where th
 |---|---|---|---|
 | Report | `--mode public_test --instance-indices 0..9` | 301–310 | frozen configs only; 1 rollout per instance; no tuning, no memory selection, no re-runs to pick the best |
 | Dev | `--mode public_test --instance-indices 10..19` | 311–320 | tuning, ablations, failure analysis |
-| Dev (extra) | `--mode train --instance-indices <id>` | raw train IDs | more Dev episodes (demo instances; 200 per task [docs]) |
+| Dev (extra) | `--mode train --instance-indices <id>` | raw train IDs: 0–299 for tasks 0–49, 1–300 for tasks 50–99 | more Dev episodes. The demos were collected on train instances, so scores there are optimistic |
 | Hidden | `--mode hidden_test` | 321–340 | not available to us (`scene_test/private`) |
 
 Sources:
@@ -65,7 +65,9 @@ Sources:
 - **Step cap:**
   - `max_steps = int(1.5 × mean human demo length)` per task, from `2026-challenge-task-instances/metadata/task.jsonl` [code `evaluator.py:281-286`].
   - The env truncates on step `max_steps+1`, so the JSON shows `steps = max_steps+1` on timeout [code, off-by-one].
-  - Approximate values: `duration_s × 30 × 1.5`. For example, turning_on_radio ≈ 3240 steps; the longest task ≈ 39 105 steps [inferred from `task_data.json` durations].
+  - Exact values for all 100 tasks are in `configs/tasks/task_catalog_2026.tsv`. It is a third-party snapshot generated from the official `task.jsonl` with the same formula, cross-checked against `task_data.json` and the dataset mean; verify it on 105.
+  - turning_on_radio = **3224** (the shortest task); assembling_gift_baskets = 39090 (≈10.86 h at 1 s/step).
+  - The agent uses the catalog value when `--max-steps` is not given.
 - **Control:** 30 Hz; physics at 120 Hz [code `eval_utils.generate_basic_environment_config`].
 - **Success** (all goal literals true) ends the episode immediately [code].
 - **Timing rules for final evaluation** [docs, main updates 10/09; 2026/eval docs]:
@@ -201,6 +203,16 @@ Tests: `tests/test_protocol.py`.
   - Normalisation: z-score from `<ckpt>/assets/<repo-id>/norm_stats.json`.
   - Serving: `receding_horizon` runs 16 of the 32 actions, then re-infers.
 - **Language:** one fixed prompt per server process: `TASK_REGISTRY["b1k"]`, which holds only `turning_on_radio`: "Turn on the radio receiver that's on the table in the living room."
+- **The training prompt was probably different** [code, pipeline; R9]:
+  - The official replay writes the snake_case task name as the LeRobot task string (`lerobot_data_wrapper.py:359,477`).
+  - openpi reads `meta/tasks.parquet` as the prompt, and its tokenizer maps `_` to spaces.
+  - So the checkpoint most likely saw only "turning on radio", while it is served with the NL sentence. The released parquet was not inspected (HF blocked).
+  - Implications:
+    - L0 uses the official serving prompt (baseline fidelity).
+    - The Step-5 probe must include the snake_case prompt.
+    - Prompt swapping is not expected to steer this checkpoint.
+- **GPU co-location:** the documented π0.5 server reserves 85% of a GPU (`XLA_PYTHON_CLIENT_MEM_FRACTION=0.85`), and a BEHAVIOR simulator needs about 10.5 GB [3p, RAX docs]. Run them on separate GPUs, or lower the fraction. `eval/launch.py` defaults to separate GPUs.
+- **Observation payload:** ≈7.5 MiB per query with `RGBDFullResWrapper` (3 RGBA images + 3 depth maps); ≈0.57 MiB with `DefaultWrapper`. On localhost it is negligible. For remote serving it counts against the 1 s/step budget.
 - **Key mismatch** [code]:
   - The fork reads `robot::proprio` and `robot::robot:…` keys, but the official default robot is `robot_r1`.
   - As shipped, `serve_b1k.py` would fail with `KeyError('robot::proprio')` against the default evaluator.
@@ -272,7 +284,11 @@ Credit caps:
 
 **Proposal B, a 2025 50-task executor** (indices 0–49 only): replace 66 by `bringing_water` (17, two rooms with a fridge, cap 0.67) or `carrying_in_groceries` (14), and replace 83 by `rearranging_kitchen_furniture` (8, cap 0.75) or `make_microwave_popcorn` (40).
 
-**Choice rule:** freeze A or B after Step 5, from the executor's task coverage. Use public_test indices 10–19 plus train instances; never 0–9.
+**Proposal C, the Cracking-paper set** (cheaper: about 28.9k steps per sweep, with a published but non-official comparison): `picking_up_trash` (1), `make_rose_centerpieces` (56), `composting_waste` (90), `installing_smoke_detectors` (63), `make_microwave_popcorn` (40).
+
+Keep `turning_on_radio` as the pipeline smoke task regardless; it is the only task with an official π0.5 checkpoint.
+
+**Choice rule:** freeze A, B or C after Step 5, from the executor's task coverage. Use public_test indices 10–19 plus train instances; never 0–9.
 
 **Approximate cost of one instance of each Proposal A task:** about 52.8k simulator steps. That is roughly 65 min at the documented 13.5 FPS, plus 150–300 s of scene load per task [inferred; to be replaced by Step-4 measurements].
 

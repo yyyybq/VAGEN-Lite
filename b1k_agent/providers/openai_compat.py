@@ -10,7 +10,13 @@ Config:
     model_env: ASTRA_MODEL            # or model: <id>  (no default: never guess a model id)
     structured_output: json_schema    # json_schema | json_object | prompt_only
     vision: true
+    max_tokens_field: max_tokens      # newer OpenAI models take "max_completion_tokens"
     max_retries: 2
+
+Identification (2026-10-22, search snippets only, NOT verified against the API): the only API-served
+model named "Astra" found is OpenAI GPT-6 Astra, model id ``gpt-6-astra`` (Chat Completions and
+Responses API, text+image input, structured outputs listed). Confirm with ``GET /v1/models`` and
+providers/probe.py before use; do not hard-code a snapshot id.
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ class OpenAICompatProvider:
         self.max_retries = int(cfg.get("max_retries", 2))
         self.image_max_side = int(cfg.get("image_max_side", 768))
         self.extra_body = dict(cfg.get("extra_body") or {})
+        self.max_tokens_field = str(cfg.get("max_tokens_field", "max_tokens"))
         self.model = cfg.get("model") or os.environ.get(str(cfg.get("model_env", "")), "")
 
     def _endpoint(self) -> tuple[str, str]:
@@ -68,7 +75,7 @@ class OpenAICompatProvider:
         body: dict = {
             "model": self.model,
             "messages": [{"role": "system", "content": req.system}, {"role": "user", "content": content}],
-            "max_tokens": req.max_tokens,
+            self.max_tokens_field: req.max_tokens,
             **self.extra_body,
         }
         if req.json_schema is not None:

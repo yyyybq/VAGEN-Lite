@@ -11,6 +11,7 @@
 #   python -m eval.batch configs/batches/step3_turning_on_radio.yaml --dry-run
 #   nohup python -m eval.batch configs/batches/step3_turning_on_radio.yaml > step3_batch.out 2>&1 &
 batch: step3_turning_on_radio
+allow_report: true    # index 0 is a Report instance; L0 is frozen (see above)
 mode: public_test
 seeds: [0]
 retries_on_infra_error: 2

@@ -8,12 +8,20 @@ Inputs per run directory (all read-only; each file's sha256 goes into the proven
         directory named by status.json ``eval_output_dir`` (OmniGibson/omnigibson/eval/evaluator.py record_fn)
   <run>/status.json         eval/launch.py status (optional). Read keys: state, reason, eval_output_dir,
         task, instance_ids (resolved) or mode + instance_indices, num_rollouts, seed, max_steps,
-        config_name, config_hash, infra_error (false or the reason), infra_errors ([{task, instance_id,
-        rollout_id, reason}]), evaluator_exit_code. Results status.json expects but the evaluator never
+        max_steps_info, wrapper, evaluator_git, started_at, direct, config_name, config_hash, infra_error
+        (false or the reason), infra_errors ([{task, instance_id, rollout_id, reason}]),
+        evaluator_exit_code. Results status.json expects but the evaluator never
         wrote are infra errors when the run is flagged infra / exited non-zero / state "failed", are
         skipped while it is still planned / starting / running, and otherwise count as missing (Q = 0).
-  <run>/run_manifest.json   agent manifest (agent/config.py build_manifest): config, config_hash, seed
+  <run>/run_manifest.json   agent manifest (agent/config.py build_manifest): config, config_hash, seed,
+        modules (registry describe(): enabled slots, impls, providers), max_steps
   <run>/episodes/*/summary.json   agent episode summaries (agent/recorder.py episode_end, NAS copies)
+A directory holding an eval/batch.py ledger (jobs.jsonl) instead of a status.json stands for every attempt
+it lists, in ledger order.
+
+Comparison groups: one group = one agent config (the manifest config without seed, ports and log paths)
+under one evaluator condition (status.json wrapper, evaluator commit, a non-default --max-steps passed to
+the evaluator). Runs of one config with the DefaultWrapper and with the RGBDFullResWrapper are two groups.
 
 Scoring mirrors OmniGibson/omnigibson/eval/utils/score_utils.py compute_final_q_score (v3.9.3-post2):
 per-task mean of ``q_score.final``, overall = mean over tasks, success = q == 1 / ``success``, time score
@@ -24,18 +32,23 @@ per-task mean of ``q_score.final``, overall = mean over tasks, success = q == 1 
     counted and listed but excluded from the Q means; ``mean_q_infra_as_zero`` shows the strict value;
   * with ``--instances-declared``, every declared (task, instance) without a result counts as Q = 0 and
     is flagged ``missing``; results outside the declaration are kept in the CSV but not averaged;
+  * every mean is labelled SUBSET with its task list unless the declaration says ``full: true``;
   * ``q_budget2026`` applies the 2026 budget rule (Q = 0 when the rollout broke max_steps x 1 s or the
     600 s per-query cap) next to the raw official ``q_final``. budget_ok comes from failure_reason
-    (2026/eval JSONs), else the official multi-port ``time.evaluation_time``, else the agent's own
-    ``elapsed_s`` (clock starts after the uncharged first query), each compared with the budget; unknown
-    stays unknown and is counted, not zeroed;
-  * re-runs (6.5): attempts of one (config, task, instance, seed, rollout) are taken in input order; the
-    first non-infra attempt counts, earlier infra attempts are superseded, later attempts are flagged
-    (policy failures must never be re-run) and never replace the first valid result.
+    (2026/eval JSONs: group_time_budget_exceeded / policy_query_timeout), else the official multi-port
+    ``time.evaluation_time``, else the agent's own ``elapsed_s`` (clock starts after the uncharged first
+    query), each compared with max_steps x 1 s (status.json, else the manifest, else the summary's
+    ``wallclock_budget_s``); unknown stays unknown and is counted, not zeroed. The 600 s per-query cap
+    is only visible through 2026/eval's policy_query_timeout (summaries carry no per-query latency);
+  * re-runs (6.5): attempts of one (group, task, instance, seed, rollout) are ordered by status.json
+    started_at when every attempt has one, else by input order; the first non-infra attempt counts,
+    earlier infra attempts are superseded, later attempts are flagged (policy failures must never be
+    re-run) and never replace the first valid result.
 
 The bootstrap CI is task-stratified: resample episodes (instances x seeds) with replacement within each
-task, average per task, then over tasks. Paired comparisons use the (task, instance, seed, rollout)
-units evaluated in both configs (missing, infra and superseded rows left out).
+task, average per task, then over tasks; Q and the budget-rule Q share one random stream per group.
+Paired comparisons use the (task, instance, seed, rollout) units evaluated in both groups (missing,
+infra and superseded rows left out).
 
 Status: written and unit-tested on SYNTHETIC result files (tests/test_eval_analysis_*.py); not yet run
 on real outputs from server 105.
@@ -88,10 +101,12 @@ VOLATILE_CONFIG_KEYS = (
 )
 
 ROW_FIELDS = (
-    "config", "config_key", "config_hash", "run_id", "task", "instance_id", "rollout_id", "seed",
+    "config", "config_name", "condition", "group_key", "config_key", "config_hash", "run_id", "run_started_at",
+    "task", "instance_id", "rollout_id", "seed",
     "q_final", "q_budget2026", "success", "steps", "sim_time", "normalized_time", "time_score",
     "norm_dist_base", "norm_dist_left", "norm_dist_right",
-    "failure_reason", "budget_ok", "budget_source", "evaluation_time", "elapsed_s", "wallclock_budget_s",
+    "failure_reason", "budget_ok", "budget_source", "evaluation_time", "elapsed_s", "max_steps",
+    "wallclock_budget_s", "budget_s_source",
     "provider_calls", "provider_s", "tokens_in", "tokens_out", "cost_usd", "provider_errors",
     "recoveries", "replans", "fallbacks", "n_subtasks",
     "infra_error", "infra_reason", "missing", "missing_reason", "in_declared", "superseded",
@@ -227,6 +242,52 @@ class RunData:
     summaries: list  # [(path, summary)]
     order: int = 0
     warnings: list = dataclasses.field(default_factory=list)
+    condition: str = ""
+    started_at: Optional[str] = None
+    modules: str = ""
+
+    @property
+    def group_key(self) -> str:
+        return f"{self.config_key}|{self.condition}"
+
+
+def run_condition(status: dict) -> str:
+    """Evaluator-side settings that make two runs of one agent config incomparable (empty when unknown)."""
+    parts = []
+    wrapper = status.get("wrapper") or status.get("env_wrapper")
+    if wrapper:
+        parts.append(f"wrapper={str(wrapper).rsplit('.', 1)[-1]}")
+    commit = _get(status, "evaluator_git.commit")
+    if commit:
+        parts.append(f"evaluator={str(commit)[:8]}")
+    info = status.get("max_steps_info") or {}
+    if info.get("to_evaluator") and info.get("value") is not None:
+        parts.append(f"evaluator_max_steps={info['value']}")
+    return " ".join(parts)
+
+
+def modules_label(manifest: dict, status: dict) -> str:
+    """Enabled module slots as ``slot=impl@provider-label`` from the manifest's registry description."""
+    if status.get("direct"):
+        return "none (direct: evaluator -> executor server, no agent)"
+    desc = manifest.get("modules")
+    cfg = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
+    if not isinstance(desc, dict) or not desc:
+        desc = {s: {"enabled": b.get("enabled"), "impl": b.get("impl"), "provider": b.get("provider")}
+                for s, b in (cfg.get("modules") or {}).items() if isinstance(b, dict)}
+        if not desc:
+            return "unknown (no manifest)"
+    out = []
+    for slot, d in desc.items():
+        if not isinstance(d, dict) or not d.get("enabled"):
+            continue
+        impl = str(d.get("impl") or "")
+        impl = impl.split(":", 1)[1] if impl.startswith(f"{slot}:") else impl
+        prov = d.get("provider")
+        if prov and d.get("uses_provider", True):
+            impl += "@" + str(_get(cfg, f"providers.{prov}.label") or prov)
+        out.append(f"{slot}={impl}" if impl else slot)
+    return ", ".join(out) or "none (executor only)"
 
 
 def _eval_output_dir(run_dir: str, status: dict) -> tuple[str, Optional[str]]:
@@ -280,7 +341,28 @@ def load_run(run_dir: str, inputs: InputLog, order: int = 0) -> RunData:
         warnings.append(f"run {run_dir}: no official results and no status.json")
     return RunData(run_dir=run_dir, run_id=str(run_id), config_name=str(name), config_hash=chash, config_key=key,
                    seed=seed, status=status, manifest=manifest, eval_output_dir=out_dir, official=official,
-                   summaries=summaries, order=order, warnings=warnings)
+                   summaries=summaries, order=order, warnings=warnings, condition=run_condition(status),
+                   started_at=status.get("started_at") or status.get("created_at"),
+                   modules=modules_label(manifest, status))
+
+
+def expand_run_dirs(paths: Sequence[str], inputs: InputLog) -> tuple[list[str], list[str]]:
+    """Run directories; an eval/batch.py batch directory (jobs.jsonl, no status.json) expands to its attempts."""
+    out, warnings = [], []
+    for p in paths:
+        ledger = os.path.join(p, "jobs.jsonl")
+        if os.path.isfile(ledger) and not os.path.isfile(os.path.join(p, "status.json")):
+            lines = inputs.read_bytes(ledger).decode("utf-8").splitlines()
+            recs = [json.loads(line) for line in lines if line.strip()]
+            starts = [r["run_dir"] for r in recs if r.get("event") == "attempt_start" and r.get("run_dir")]
+            for d in dict.fromkeys(starts):
+                if os.path.isdir(d):
+                    out.append(d)
+                else:
+                    warnings.append(f"batch {p}: attempt run dir {d} does not exist")
+        else:
+            out.append(p)
+    return out, warnings
 
 
 def _status_instance_ids(status: dict) -> Optional[list[int]]:
@@ -375,17 +457,27 @@ def _infra_flags(status: dict) -> tuple[Optional[str], dict]:
         whole = "launcher state failed: " + ("; ".join(map(str, status.get("reason") or [])) or "no reason given")
     per = {}
     for e in status.get("infra_errors") or []:
-        key = (str(e.get("task") or status.get("task") or ""), _int(e.get("instance_id")), _int(e.get("rollout_id")) or 0)
+        task = str(e.get("task") or status.get("task") or "")
+        key = (task, _int(e.get("instance_id")), _int(e.get("rollout_id")) or 0)
         per[key] = str(e.get("reason") or "infra error (status.json)")
     return whole, per
 
 
-def _budget(rec: dict, summary: Optional[dict], status: dict) -> dict:
-    """2026 budget verdict for one rollout: budget_ok True / False / None (unknown) and its source."""
-    budget_s = _float((summary or {}).get("wallclock_budget_s"))
-    if budget_s is None and status.get("max_steps") is not None:
-        budget_s = float(status["max_steps"]) * SECONDS_PER_STEP
-    out = {"wallclock_budget_s": budget_s, "elapsed_s": _float((summary or {}).get("elapsed_s")),
+def _budget(rec: dict, summary: Optional[dict], run: RunData) -> dict:
+    """2026 budget verdict for one rollout: budget_ok True / False / None (unknown) and its source.
+
+    The budget is the rule's max_steps x 1 s: max_steps from status.json (eval/launch.py replaces it with
+    the value the evaluator logged), else the agent manifest; the agent's own ``wallclock_budget_s`` only
+    when neither is known (it follows the config's budget.seconds_per_step and is None when
+    budget.enforce is off, agent/server.py)."""
+    max_steps = _int(run.status.get("max_steps")) or _int(run.manifest.get("max_steps"))
+    agent_budget = _float((summary or {}).get("wallclock_budget_s"))
+    if max_steps:
+        budget_s, src = max_steps * SECONDS_PER_STEP, "max_steps x 1 s"
+    else:
+        budget_s, src = agent_budget, ("agent wallclock_budget_s" if agent_budget is not None else None)
+    out = {"max_steps": max_steps, "wallclock_budget_s": budget_s, "budget_s_source": src,
+           "elapsed_s": _float((summary or {}).get("elapsed_s")),
            "evaluation_time": _float(_get(rec, "time.evaluation_time")), "budget_ok": None, "budget_source": "unknown"}
     if "failure_reason" in rec:
         out.update(budget_ok=rec["failure_reason"] not in BUDGET_FAILURE_REASONS, budget_source="failure_reason")
@@ -398,10 +490,11 @@ def _budget(rec: dict, summary: Optional[dict], status: dict) -> dict:
 
 def _base_row(run: RunData, task: str, iid: int, rid: int) -> dict:
     row = {f: None for f in ROW_FIELDS}
-    row.update(config=run.config_name, config_key=run.config_key, config_hash=run.config_hash, run_id=run.run_id,
-               task=task, instance_id=iid, rollout_id=rid, seed=run.seed, infra_error=False, missing=False,
-               in_declared=True, superseded=False, synthetic=False, run_dir=run.run_dir,
-               video_path=os.path.join(run.eval_output_dir, "videos", f"{task}_{iid}_{rid}.mp4"))
+    row.update(config=run.config_name, config_name=run.config_name, condition=run.condition, group_key=run.group_key,
+               config_key=run.config_key, config_hash=run.config_hash, run_id=run.run_id,
+               run_started_at=run.started_at, task=task, instance_id=iid, rollout_id=rid, seed=run.seed,
+               infra_error=False, missing=False, in_declared=True, superseded=False, synthetic=False,
+               run_dir=run.run_dir, video_path=os.path.join(run.eval_output_dir, "videos", f"{task}_{iid}_{rid}.mp4"))
     return row
 
 
@@ -440,7 +533,11 @@ def episode_rows(run: RunData, infra_reasons: Iterable[str] = DEFAULT_INFRA_FAIL
                    norm_dist_left=_get(rec, "normalized_agent_distance.left"),
                    norm_dist_right=_get(rec, "normalized_agent_distance.right"),
                    failure_reason=reason, json_path=path, synthetic=bool(rec.get("_synthetic")),
-                   **_budget(rec, entry[1] if entry else None, run.status))
+                   **_budget(rec, entry[1] if entry else None, run))
+        agent_budget = _float(entry[1].get("wallclock_budget_s")) if entry else None
+        if agent_budget is not None and row["max_steps"] and abs(agent_budget - row["wallclock_budget_s"]) > 1e-6:
+            warnings.append(f"{task}/{iid} in run {run.run_id}: the agent planned with a {agent_budget:g} s budget, "
+                            f"the 2026 rule gives {row['wallclock_budget_s']:g} s (max_steps {row['max_steps']})")
         _attach_summary(row, entry)
         infra = per_infra.get((task, iid, rid)) or (f"failure_reason={reason}" if reason in infra_reasons else None)
         if infra:
@@ -453,7 +550,8 @@ def episode_rows(run: RunData, infra_reasons: Iterable[str] = DEFAULT_INFRA_FAIL
     status_task = run.status.get("task") or run.status.get("task_name")
     ids = _status_instance_ids(run.status)
     if run.status.get("state") in RUNNING_STATES:
-        warnings.append(f"run {run.run_id} is still {run.status['state']}: results it has not written yet are not counted")
+        warnings.append(f"run {run.run_id} is still {run.status['state']}: "
+                        "results it has not written yet are not counted")
     elif status_task and ids:
         for iid in ids:
             for rid in range(int(run.status.get("num_rollouts") or 1)):
@@ -482,6 +580,7 @@ def load_declared(path: str, inputs: InputLog) -> dict:
         tasks: {turning_on_radio: [301, 302], picking_up_trash: {mode: public_test, indices: "0-9"}}
         mode: public_test, indices: "0-9", tasks: [turning_on_radio, picking_up_trash]
         seeds: [0, 1, 2]        # optional; default: the seeds each config was run with
+        full: true              # optional; the list IS the whole challenge task set (not checked here)
     """
     raw = inputs.yaml(path)  # JSON is read by the same YAML parser
     if isinstance(raw, list):
@@ -501,22 +600,26 @@ def load_declared(path: str, inputs: InputLog) -> dict:
             ids = [int(i) for i in parse_indices(spec)]
         out[str(task)] = sorted(set(ids))
     seeds = raw.get("seeds")
-    return {"path": os.path.abspath(path), "tasks": out, "seeds": list(seeds) if seeds is not None else None}
+    return {"path": os.path.abspath(path), "tasks": out, "seeds": list(seeds) if seeds is not None else None,
+            "full": bool(raw.get("full", False))}
 
 
 # ------------------------------------------------------------------------------------ row post-processing
 
 
 def resolve_attempts(rows: list[dict]) -> list[str]:
-    """Rule 6.5: first non-infra attempt per (config, task, instance, seed, rollout) counts.
+    """Rule 6.5: first non-infra attempt per (group, task, instance, seed, rollout) counts.
 
-    A result status.json expected but the evaluator never wrote (no infra flag) is an attempt scored 0.
+    Attempts are ordered by their run's status.json started_at when all of them have one, else by input
+    order. A result status.json expected but the evaluator never wrote (no infra flag) is an attempt scored 0.
     """
     warnings = []
     groups = collections.defaultdict(list)
     for r in rows:
-        groups[(r["config_key"], r["task"], r["instance_id"], str(r["seed"]), r["rollout_id"])].append(r)
+        groups[(r["group_key"], r["task"], r["instance_id"], str(r["seed"]), r["rollout_id"])].append(r)
     for key, attempts in groups.items():
+        if len(attempts) > 1 and all(r["run_started_at"] for r in attempts):
+            attempts.sort(key=lambda r: str(r["run_started_at"]))  # stable: input order breaks ties
         chosen = next((r for r in attempts if not r["infra_error"]), attempts[-1])
         ci = attempts.index(chosen)
         for i, r in enumerate(attempts):
@@ -546,17 +649,17 @@ def apply_declared(rows: list[dict], declared: Optional[dict], configs: dict) ->
     for key, c in configs.items():
         seeds = declared["seeds"] if declared["seeds"] is not None else sorted(c["seeds"], key=str)
         have = {(r["task"], r["instance_id"], str(r["seed"])) for r in rows
-                if r["config_key"] == key and r["rollout_id"] == 0 and not r["superseded"]}
+                if r["group_key"] == key and r["rollout_id"] == 0 and not r["superseded"]}
         for seed in seeds:
             for task, iid in sorted(want):
                 if (task, iid, str(seed)) in have:
                     continue
                 row = {f: None for f in ROW_FIELDS}
-                row.update(config=c["label"], config_key=key, config_hash=None, run_id="", task=task, instance_id=iid,
-                           rollout_id=0, seed=seed, q_final=0.0, q_budget2026=0.0, success=False,
-                           budget_source="unknown", infra_error=False, missing=True,
-                           missing_reason="declared, no result (counts 0)", in_declared=True, superseded=False,
-                           synthetic=False)
+                row.update(config=c["label"], config_name=c["names"][0], condition=c["condition"], group_key=key,
+                           config_key=c["config_key"], run_id="", task=task, instance_id=iid, rollout_id=0, seed=seed,
+                           q_final=0.0, q_budget2026=0.0, success=False, budget_source="unknown", infra_error=False,
+                           missing=True, missing_reason="declared, no result (counts 0)", in_declared=True,
+                           superseded=False, synthetic=False)
                 added.append(row)
     return added
 
@@ -591,21 +694,37 @@ def unify_config_keys(runs: Sequence[RunData]) -> list[str]:
 
 
 def build_configs(runs: Sequence[RunData]) -> dict:
-    """config_key -> {label, names, hashes, seeds, runs, order}; labels disambiguated by key prefix."""
+    """group_key -> {label, names, config_key, condition, modules, hashes, seeds, runs, order}.
+
+    The label is the config name; groups sharing a name get their evaluator condition appended, and the
+    agent config key prefix when that is still ambiguous."""
     configs: dict[str, dict] = {}
     for run in runs:
-        c = configs.setdefault(run.config_key,
-                               {"names": [], "hashes": set(), "seeds": set(), "runs": [], "order": run.order})
+        c = configs.setdefault(run.group_key, {"names": [], "config_key": run.config_key, "condition": run.condition,
+                                               "modules": run.modules, "hashes": set(), "seeds": set(), "runs": [],
+                                               "order": run.order})
         if run.config_name not in c["names"]:
             c["names"].append(run.config_name)
+        if c["modules"].startswith("unknown") and not run.modules.startswith("unknown"):
+            c["modules"] = run.modules  # a crashed run without a manifest came first
         if run.config_hash:
             c["hashes"].add(run.config_hash)
         c["seeds"].add(run.seed)
         c["runs"].append(run.run_id)
-    name_count = collections.Counter(c["names"][0] for c in configs.values())
-    for key, c in configs.items():
-        name = c["names"][0]
-        c["label"] = name if name_count[name] == 1 else f"{name}@{key[:8]}"
+    by_name = collections.defaultdict(list)
+    for c in configs.values():
+        by_name[c["names"][0]].append(c)
+    for name, group in by_name.items():
+        conds = [dict(p.split("=", 1) for p in c["condition"].split()) for c in group]
+        differ = sorted(k for k in set().union(*conds) if len({d.get(k) for d in conds}) > 1)
+        keys_per_cond = collections.Counter(c["condition"] for c in group)
+        for c, d in zip(group, conds, strict=True):
+            label = name
+            if differ:
+                label += "[" + " ".join(f"{k}={d.get(k, '?')}" for k in differ) + "]"
+            if keys_per_cond[c["condition"]] > 1:
+                label += f"@{c['config_key'][:8]}"
+            c["label"] = label
     return configs
 
 
@@ -656,10 +775,23 @@ def _rng(seed: int, label: str) -> np.random.Generator:
     return np.random.default_rng([int(seed), zlib.crc32(label.encode("utf-8"))])
 
 
+def scope_label(tasks: Sequence[str], declared: Optional[dict], no_valid: Sequence[str]) -> str:
+    """Every mean names its task set; only a declaration marked ``full: true`` is not a SUBSET mean."""
+    shown = ", ".join(tasks) if len(tasks) <= 6 else f"{', '.join(tasks[:6])}, ... (see per-task table)"
+    if declared and declared.get("full"):
+        scope = f"FULL declared task set ({len(tasks)} tasks)"
+    else:
+        scope = f"SUBSET mean over {len(tasks)} task(s): {shown}"
+        scope += "; declared instance list" if declared else "; evaluated instances only, no declared list"
+    if no_valid:
+        scope += f"; {len(no_valid)} task(s) with only infra errors left out ({', '.join(no_valid)})"
+    return scope
+
+
 def per_task_table(rows: list[dict], configs: dict) -> list[dict]:
     out = []
     for key, c in sorted(configs.items(), key=lambda kv: kv[1]["order"]):
-        mine = [r for r in rows if r["config_key"] == key and r["in_declared"] and not r["superseded"]]
+        mine = [r for r in rows if r["group_key"] == key and r["in_declared"] and not r["superseded"]]
         for task in sorted({r["task"] for r in mine}):
             t = [r for r in mine if r["task"] == task]
             inc = [r for r in t if r["included"]]
@@ -681,7 +813,7 @@ def per_config_summary(rows: list[dict], configs: dict, declared: Optional[dict]
                        level: float) -> list[dict]:
     out = []
     for key, c in sorted(configs.items(), key=lambda kv: kv[1]["order"]):
-        mine = [r for r in rows if r["config_key"] == key]
+        mine = [r for r in rows if r["group_key"] == key]
         scoped = [r for r in mine if r["in_declared"] and not r["superseded"]]
         inc = [r for r in scoped if r["included"]]
         ev = [r for r in inc if not r["missing"]]
@@ -692,24 +824,20 @@ def per_config_summary(rows: list[dict], configs: dict, declared: Optional[dict]
         all_tasks = sorted({r["task"] for r in scoped})
         no_valid = [t for t in all_tasks if t not in q_by_task]
         strict = task_values([dict(r, q_final=0.0) if r["infra_error"] else r for r in scoped], "q_final")
-        if declared:
-            scope = f"declared list ({len(declared['tasks'])} tasks)"
-            if no_valid:
-                scope += f"; {len(no_valid)} task(s) with only infra errors left out"
-        else:
-            scope = f"SUBSET mean over {len(tasks)} evaluated task(s); no declared instance list"
         rec = {
-            "config": c["label"], "config_key": key, "config_names": c["names"], "config_hashes": sorted(c["hashes"]),
-            "runs": c["runs"], "seeds": sorted((s for s in c["seeds"]), key=str), "scope": scope, "n_tasks": len(tasks),
+            "config": c["label"], "group_key": key, "config_key": c["config_key"], "config_names": c["names"],
+            "config_hashes": sorted(c["hashes"]), "condition": c["condition"], "modules": c["modules"],
+            "runs": c["runs"], "seeds": sorted((s for s in c["seeds"]), key=str),
+            "scope": scope_label(tasks, declared, no_valid), "n_tasks": len(tasks),
             "tasks": tasks, "tasks_without_valid_episodes": no_valid, "n_included": len(inc), "n_evaluated": len(ev),
             "n_missing": sum(r["missing"] for r in scoped), "n_infra": len(infra),
             "n_superseded": sum(r["superseded"] for r in mine),
             "n_outside_declared": sum(not r["in_declared"] for r in mine),
+            # Q and the budget-rule Q share one stream (same resampled units), so equal inputs give equal CIs
             "mean_q": task_mean(q_by_task),
-            "mean_q_ci": ci_of(stratified_bootstrap(q_by_task, n_boot, _rng(seed, c["label"] + "|q")), level),
+            "mean_q_ci": ci_of(stratified_bootstrap(q_by_task, n_boot, _rng(seed, c["label"])), level),
             "mean_q_budget2026": task_mean(qb_by_task),
-            "mean_q_budget2026_ci": ci_of(stratified_bootstrap(qb_by_task, n_boot, _rng(seed, c["label"] + "|qb")),
-                                          level),
+            "mean_q_budget2026_ci": ci_of(stratified_bootstrap(qb_by_task, n_boot, _rng(seed, c["label"])), level),
             "mean_q_infra_as_zero": task_mean(strict),
             "success_rate": task_mean(task_values([dict(r, success=float(bool(r["success"]))) for r in inc],
                                                   "success")),
@@ -738,7 +866,7 @@ def paired_comparison(rows: list[dict], a: str, b: str, metric: str, n_boot: int
         diffs[k[0]].append(float(ub[k]) - float(ua[k]))
         va[k[0]].append(float(ua[k]))
         vb[k[0]].append(float(ub[k]))
-    samples = stratified_bootstrap(dict(diffs), n_boot, _rng(seed, f"{a}|{b}|{metric}"))
+    samples = stratified_bootstrap(dict(diffs), n_boot, _rng(seed, f"{a}|{b}"))
     return {"a": a, "b": b, "metric": metric, "n_pairs": len(common), "n_tasks": len(diffs),
             "tasks": sorted(diffs), "mean_a": task_mean(dict(va)), "mean_b": task_mean(dict(vb)),
             "diff_b_minus_a": task_mean(dict(diffs)), "diff_ci": ci_of(samples, level),
@@ -790,15 +918,23 @@ def render_markdown(result: dict) -> str:
            ""]
     if result["synthetic_inputs"]:
         out += ["**WARNING: SYNTHETIC inputs present. These numbers are not results.**", ""]
-    out += ["## Per-config summary", "",
+    out += ["## Configs", "",
+            "One row per comparison group: agent config (manifest, without seed / ports / log paths) x evaluator "
+            "condition. Modules come from the run manifest; a provider label other than `astra` (e.g. "
+            "`claude-substitute`) means the run is NOT an Astra result.", ""]
+    out.append(md_table(
+        ["config", "modules", "evaluator condition", "config hash(es)", "seeds", "runs"],
+        [[c["config"], c["modules"], c["condition"] or "unknown", ", ".join(h[:12] for h in c["config_hashes"]),
+          c["seeds"], len(c["runs"])] for c in result["configs"]]))
+    out += ["", "## Per-config summary", "",
             "Mean Q = mean over tasks of the per-task mean of official `q_score.final`. Infra errors are excluded "
             "from Q means and listed below. `Q (2026 budget)` sets Q = 0 when budget_ok is false (unknown is not "
             f"zeroed; see the unknown count). CIs: task-stratified bootstrap, {lvl}%, "
             f"B = {result['bootstrap']['n_boot']}, seed = {result['bootstrap']['seed']}.", ""]
     out.append(md_table(
-        ["config", "scope", "tasks", "episodes (incl. missing)", "missing (=0)", "infra (excl.)", "mean Q", f"{lvl}% CI",
-         "Q (2026 budget)", f"{lvl}% CI", "Q infra=0", "success", "budget viol.", "budget unknown", "time score",
-         "steps", "provider calls/ep", "cost/ep USD", "recoveries/ep"],
+        ["config", "scope", "tasks", "episodes (incl. missing)", "missing (=0)", "infra (excl.)", "mean Q",
+         f"{lvl}% CI", "Q (2026 budget)", f"{lvl}% CI", "Q infra=0", "success", "budget viol.", "budget unknown",
+         "time score", "steps", "provider calls/ep", "cost/ep USD", "recoveries/ep"],
         [[c["config"], c["scope"], c["n_tasks"], c["n_included"], c["n_missing"], c["n_infra"], c["mean_q"],
           c["mean_q_ci"], c["mean_q_budget2026"], c["mean_q_budget2026_ci"], c["mean_q_infra_as_zero"],
           c["success_rate"], c["n_budget_violations"], c["n_budget_unknown"], c["mean_time_score"], c["mean_steps"],
@@ -832,11 +968,15 @@ def render_markdown(result: dict) -> str:
 
 
 def _guard_outputs(out_dir: str, runs: Sequence[RunData], inputs: InputLog, names: Iterable[str]) -> None:
+    """Derived tables live apart from the logs: never inside an official output dir, never a run dir itself."""
     out_real = os.path.realpath(out_dir)
     for run in runs:
         official = os.path.realpath(run.eval_output_dir)
         if out_real == official or out_real.startswith(official + os.sep):
             raise SystemExit(f"refusing to write inside the official output dir {official}")
+        if out_real == os.path.realpath(run.run_dir):
+            raise SystemExit(f"refusing to write derived tables into the run dir {run.run_dir}; use a subdirectory "
+                             "or a separate tables directory")
     taken = {os.path.realpath(p) for p in inputs.files}
     for n in names:
         if os.path.realpath(os.path.join(out_dir, n)) in taken:
@@ -850,8 +990,9 @@ def aggregate(run_dirs: Sequence[str], out_dir: Optional[str] = None, declared_p
               n_boot: int = 2000, seed: int = 0, ci_level: float = 0.95, compare: Sequence[Sequence[str]] = (),
               infra_reasons: Iterable[str] = DEFAULT_INFRA_FAILURE_REASONS, argv: Optional[list] = None) -> dict:
     inputs = InputLog()
+    run_dirs, warnings = expand_run_dirs(run_dirs, inputs)
     runs = [load_run(d, inputs, order=i) for i, d in enumerate(run_dirs)]
-    warnings: list[str] = unify_config_keys(runs)
+    warnings += unify_config_keys(runs)
     rows: list[dict] = []
     for run in runs:
         r, w = episode_rows(run, infra_reasons)
@@ -860,7 +1001,7 @@ def aggregate(run_dirs: Sequence[str], out_dir: Optional[str] = None, declared_p
     declared = load_declared(declared_path, inputs) if declared_path else None
     configs = build_configs(runs)
     for r in rows:
-        r["config"] = configs[r["config_key"]]["label"]
+        r["config"] = configs[r["group_key"]]["label"]
     warnings += resolve_attempts(rows)
     rows += apply_declared(rows, declared, configs)
     finalize_rows(rows)
@@ -919,7 +1060,9 @@ def aggregate(run_dirs: Sequence[str], out_dir: Optional[str] = None, declared_p
 
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("run_dirs", nargs="+", help="run directories, in chronological order (re-run rule 6.5)")
+    ap.add_argument("run_dirs", nargs="+",
+                    help="run directories or eval/batch.py batch directories; input order is the attempt order "
+                         "when status.json has no started_at (re-run rule 6.5)")
     ap.add_argument("--out", required=True, help="output directory (never inside an official eval output dir)")
     ap.add_argument("--instances-declared", default=None, help="YAML/JSON declared task -> instance list")
     ap.add_argument("--bootstrap", type=int, default=2000, help="bootstrap replicates (0 = no CI)")

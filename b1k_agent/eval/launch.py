@@ -44,13 +44,22 @@ evaluator.py:281-286). After the run it is checked against the evaluator's "Sett
 
 status.json "state": planned | starting | running | done | failed | infra_error.
   done         every expected official JSON exists (a policy failure is NOT an infrastructure error);
-  infra_error  a server we started did not come up or died, the evaluator exited non-zero, timed out, or a
-               result JSON is missing (with --no-strict-exit a non-zero exit after ALL results is done);
-  failed       launcher-level failure before the evaluator ran, or stopped by the user.
+  infra_error  a server we started did not come up or died while the evaluator ran, the evaluator exited
+               non-zero or timed out, a result JSON is missing, or a result says failure_reason
+               policy_connection_lost (2026/eval). With --no-strict-exit a non-zero exit after ALL results is
+               done. "infra_kinds" names the causes; eval.batch does not re-run a bare exit code after
+               complete results (the official records exist; a re-run would choose between them);
+  failed       launcher-level failure before the evaluator ran, a GPU placement violation, or a user stop.
 Exit codes: done 0, failed 1, infra_error 2, still running (status) 3. On finish the launcher stops ONLY the
 process groups it started (pid + start time + owner verified), evaluator first, agent with SIGINT so it
 writes its last episode summary. --detach returns at once; a watcher process (`_watch RUN_DIR`) does the
 supervision and keeps status.json current.
+
+GPUs (CLAUDE.md "GPU discipline"): eval/gpu.py picks boards with memory.used < 2048 MiB and utilization < 10 %
+(evaluator first, executor second; --share-gpu puts both on one) and every process gets an explicit
+CUDA_VISIBLE_DEVICES (the agent gets none). No GPU free: exit 1 without starting anything, unless --wait-gpu.
+Every 30 s the supervisor reads nvidia-smi compute apps (read-only); a process of ours on a board it was not
+given stops the run (state failed, --gpu-mismatch warn only notes it).
 
 Status: written and unit-tested with mocks and fake processes (tests/test_eval_run_launch.py); nothing
 has been run on 105 yet.
@@ -96,6 +105,7 @@ METADATA_SUBDIR = os.path.join("2026-challenge-task-instances", "metadata")
 
 DEFAULT_BEHAVIOR_ENV = "/nas/baiqiao/envs/behavior"
 DEFAULT_APPDATA = "~/.omnigibson_appdata"
+CONNECTION_FAILURES = ("policy_connection_lost",)  # 2026/eval evaluator.py record_fn failure_reason
 TERMINAL = ("done", "failed", "infra_error")
 EXIT_CODES = {"done": 0, "failed": 1, "infra_error": 2}
 EXIT_RUNNING = 3
@@ -109,6 +119,10 @@ class StopRequested(Exception):
     pass
 
 
+class GpuPlacementError(Exception):
+    pass
+
+
 # ---------------------------------------------------------------------- official mirrors
 
 
@@ -118,7 +132,8 @@ def resolve_instance_ids(indices: Sequence[int], mode: str) -> list[int]:
         return [int(i) for i in indices]
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}")
-    split = TEST_INSTANCE_IDS[:NUM_PUBLIC_TEST_INSTANCES] if mode == "public_test" else TEST_INSTANCE_IDS[NUM_PUBLIC_TEST_INSTANCES:]
+    n_public = NUM_PUBLIC_TEST_INSTANCES
+    split = TEST_INSTANCE_IDS[:n_public] if mode == "public_test" else TEST_INSTANCE_IDS[n_public:]
     bad = [i for i in indices if not 0 <= int(i) < len(split)]
     if bad:
         raise ValueError(f"{mode} instance indices must be in 0..{len(split) - 1}, got {bad}")
@@ -147,6 +162,15 @@ def load_human_stats(task_name: str, task_jsonl: str, task_index: Optional[int] 
 def official_max_steps(task_name: str, task_jsonl: str, task_index: Optional[int] = None) -> int:
     """evaluator.py:281-286 default timeout: int(mean human length x EVAL_TIMEOUT_MULTIPLIER)."""
     return int(load_human_stats(task_name, task_jsonl, task_index)["length"] * EVAL_TIMEOUT_MULTIPLIER)
+
+
+def secret_env_names(cfg: dict) -> list[str]:
+    """Provider key variables (providers.*.api_key_env plus the documented names): only the agent may see them."""
+    names = {"ASTRA_API_KEY", "ANTHROPIC_API_KEY"}
+    for prov in (get(cfg, "providers", {}) or {}).values():
+        if isinstance(prov, dict) and prov.get("api_key_env"):
+            names.add(str(prov["api_key_env"]))
+    return sorted(names)
 
 
 def detect_repo_id(checkpoint_dir: str) -> Optional[str]:
@@ -247,7 +271,8 @@ def connect_host(host: str) -> str:
 def no_proxy_env(environ: dict) -> dict:
     """When a proxy is configured, local health checks and websockets (requests and websockets>=15 honour
     *_proxy) must bypass it: add 127.0.0.1 and localhost to NO_PROXY unless they are already there."""
-    if not any(environ.get(k) for k in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")):
+    proxies = ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+    if not any(environ.get(k) for k in proxies):
         return {}
     have = [h.strip() for h in (environ.get("NO_PROXY") or environ.get("no_proxy") or "").split(",") if h.strip()]
     missing = [h for h in ("127.0.0.1", "localhost") if h not in have]
@@ -402,7 +427,7 @@ def render_evaluator_script(*, run_id: str, cwd: str, env: dict, pythonpath: Opt
     lines = ["#!/usr/bin/env bash", f"# Official evaluator of run {run_id}; generated by eval/launch.py, which starts it",
              "# after the servers' /healthz answer. Re-runnable by hand: bash run_evaluator.sh", "set -e"]
     if env_setup:
-        lines.append(f"source {q(env_setup)}  # B1K_ENV_SETUP")
+        lines.append(f"source {q(env_setup)}  # B1K_ENV_SETUP; the exports below win (--data-root / --appdata change them)")
     lines.append(f"cd {q(cwd)}")
     lines += [f"export {k}={q(str(v))}" for k, v in env.items()]
     if pythonpath:
@@ -457,10 +482,12 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
     if start_agent and executor_needed and agent_port == exec_port:
         raise PlanError(f"agent and executor would share port {agent_port}")
     if executor_needed and get(cfg, "executor.params.port_per_env") and len(indices) > 1:
-        raise PlanError("executor.params.port_per_env with several envs needs one executor server per env (not supported here)")
+        raise PlanError("executor.params.port_per_env with several envs needs one executor server per env "
+                        "(not supported here)")
     eval_host = connect_host(exec_host if direct else agent_host)
     eval_port = exec_port if direct else agent_port
-    for name, host, port, starts in (("executor", exec_host, exec_port, start_executor), ("agent", agent_host, agent_port, start_agent)):
+    for name, host, port, starts in (("executor", exec_host, exec_port, start_executor),
+                                     ("agent", agent_host, agent_port, start_agent)):
         if starts and port_in_use(connect_host(host), port):
             problem(f"{name} port {port} is already in use (not ours to stop); choose another with --{name}-port")
 
@@ -468,14 +495,30 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
     openpi_root = os.path.expanduser(str(get(cfg, "paths.openpi_root") or ""))
     evaluator_root = os.path.abspath(os.path.expanduser(args.evaluator_root or b1k_root))
     data_root = os.path.expanduser(
-        args.data_root or get(cfg, "paths.data_root") or environ.get("OMNIGIBSON_DATA_PATH") or os.path.join(b1k_root, "datasets")
+        args.data_root or get(cfg, "paths.data_root") or environ.get("OMNIGIBSON_DATA_PATH")
+        or os.path.join(b1k_root, "datasets")
     )
-    appdata = os.path.expanduser(args.appdata or get(cfg, "paths.appdata") or DEFAULT_APPDATA)
+    appdata = os.path.expanduser(
+        args.appdata or get(cfg, "paths.appdata") or environ.get("OMNIGIBSON_APPDATA_PATH") or DEFAULT_APPDATA
+    )
     behavior_env = os.path.expanduser(args.behavior_env or get(cfg, "paths.behavior_env") or DEFAULT_BEHAVIOR_ENV)
     if not os.path.isfile(os.path.join(evaluator_root, "OmniGibson", "omnigibson", "eval", "eval.py")):
         problem(f"no official evaluator at {evaluator_root}/OmniGibson/omnigibson/eval/eval.py (--evaluator-root)")
     if not os.path.isdir(data_root):
         problem(f"data root {data_root} does not exist (OMNIGIBSON_DATA_PATH; --data-root)")
+    env_setup = args.env_setup or environ.get("B1K_ENV_SETUP") or None
+    if env_setup and not os.path.isfile(os.path.expanduser(env_setup)):
+        problem(f"env setup script {env_setup} (B1K_ENV_SETUP / --env-setup) not found")
+    conda_exe = args.conda_exe or environ.get("CONDA_EXE") or shutil.which("conda", path=environ.get("PATH")) or "conda"
+    if args.activation != "none":
+        if not (os.path.isfile(conda_exe) or shutil.which(conda_exe, path=environ.get("PATH"))):
+            msg = f"conda executable {conda_exe!r} not found (--conda-exe, $CONDA_EXE, PATH)"
+            if env_setup:
+                warnings.append(msg + "; assuming the env setup script provides it")
+            else:
+                problem(msg)
+        if not os.path.isdir(behavior_env):
+            problem(f"behavior conda env {behavior_env} not found (--behavior-env / paths.behavior_env)")
 
     metadata = os.path.join(data_root, METADATA_SUBDIR)
     task_misc = os.path.join(metadata, "B100_task_misc.csv")
@@ -508,7 +551,8 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
     if official is not None and source.startswith("cli") and max_steps != official:
         warnings.append(f"max_steps {max_steps} differs from the official default {official}")
     if to_eval:
-        warnings.append("--max-steps is passed to the evaluator: not the official default timeout (Dev/diagnostic runs only)")
+        warnings.append("--max-steps is passed to the evaluator: not the official default timeout "
+                        "(Dev/diagnostic runs only)")
     max_steps_info = {"value": max_steps, "source": source, "to_evaluator": to_eval, "official": official,
                       "official_error": official_err, "task_jsonl": task_jsonl, "task_index": task_index}
 
@@ -516,6 +560,7 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
     eval_gpus = gpus[:1]
     exec_gpus = (gpus[:1] if args.share_gpu else gpus[1:2]) if start_executor else []
     proxy = no_proxy_env(environ)
+    secrets = secret_env_names(cfg)  # unset for the executor and the evaluator (names only; values are never written)
     processes: list[ProcSpec] = []
     srv = dict(get(cfg, "executor.server", {}) or {})
     exec_settings: dict = {}
@@ -553,7 +598,8 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
         processes.append(ProcSpec(
             "executor", argv, cwd=openpi_root, log=os.path.join(logs, "executor.log"),
             env={**gpumod.cuda_env(exec_gpus), "XLA_PYTHON_CLIENT_MEM_FRACTION": str(mem), **proxy},
-            unset=["PYTHONPATH", "PYTHONHOME"], health_url=f"http://{connect_host(exec_host)}:{exec_port}/healthz",
+            unset=["PYTHONPATH", "PYTHONHOME", *secrets],
+            health_url=f"http://{connect_host(exec_host)}:{exec_port}/healthz",
             start_timeout_s=float(args.executor_start_timeout_s), stop=[["SIGINT", 30.0], ["SIGTERM", 15.0]],
         ))
 
@@ -576,7 +622,7 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
     agent_manifest = {
         "local": os.path.join(local_root, run_id, "run_manifest.json"),
         "nas": os.path.join(os.path.expanduser(str(log_root)), run_id, "run_manifest.json") if log_root else None,
-    }
+    } if start_agent else {}
     if start_agent:
         argv = [args.agent_python or sys.executable, "-m", "agent.server", "--config", os.path.abspath(args.config)]
         for ov in agent_overrides:
@@ -611,19 +657,17 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
     same_tree = bool(b1k_root) and os.path.realpath(evaluator_root) == os.path.realpath(b1k_root)
     eval_env = {"OMNIGIBSON_HEADLESS": "1", "OMNI_KIT_ACCEPT_EULA": "YES", **gpumod.cuda_env(eval_gpus),
                 "OMNIGIBSON_DATA_PATH": data_root, "OMNIGIBSON_APPDATA_PATH": appdata, **proxy}
-    env_setup = args.env_setup or environ.get("B1K_ENV_SETUP") or None
-    if env_setup and not os.path.isfile(os.path.expanduser(env_setup)):
-        problem(f"env setup script {env_setup} (B1K_ENV_SETUP / --env-setup) not found")
     script = render_evaluator_script(
         run_id=run_id, cwd=evaluator_root, env=eval_env,
         pythonpath=None if same_tree else os.path.join(evaluator_root, "OmniGibson"),
         env_setup=os.path.expanduser(env_setup) if env_setup else None, activation=args.activation,
-        behavior_env=behavior_env, conda_exe=args.conda_exe or environ.get("CONDA_EXE") or "conda",
-        evaluator_python=args.evaluator_python, cmd_prefix=shlex.split(args.evaluator_cmd_prefix or ""), eval_args=eval_args,
+        behavior_env=behavior_env, conda_exe=conda_exe,
+        evaluator_python=args.evaluator_python, cmd_prefix=shlex.split(args.evaluator_cmd_prefix or ""),
+        eval_args=eval_args,
     )
     processes.append(ProcSpec(
         "evaluator", ["bash", os.path.join(run_dir, "run_evaluator.sh")], cwd=evaluator_root,
-        log=os.path.join(logs, "evaluator.log"), unset=["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"],
+        log=os.path.join(logs, "evaluator.log"), unset=["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", *secrets],
         stop=[["SIGINT", 120.0], ["SIGTERM", 30.0]],
     ))
 
@@ -641,7 +685,8 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
         external_health=external_health, evaluator_script=script,
         options={"eval_timeout_s": args.eval_timeout_s, "server_death_grace_s": float(args.server_death_grace_s),
                  "strict_exit": bool(args.strict_exit), "sync_videos": bool(args.sync_videos),
-                 "poll_s": 2.0, "heartbeat_s": 30.0, "executor_settings": exec_settings},
+                 "poll_s": float(args.poll_s), "heartbeat_s": 30.0, "gpu_mismatch": args.gpu_mismatch,
+                 "executor_settings": exec_settings},
         processes=processes, warnings=warnings,
     )
 
@@ -671,6 +716,7 @@ def initial_status(plan: Plan) -> dict:
         "evaluator_git": plan.evaluator_git, "data_root": plan.data_root, "run_dir": plan.run_dir,
         "eval_output_dir": plan.eval_output_dir, "expected_results": plan.expected_results, "results": [],
         "processes": {}, "exit_codes": {}, "evaluator_exit_code": None, "infra_error": False, "infra_errors": [],
+        "infra_kinds": [], "results_complete": False,
         "agent_manifest": dict(plan.agent_manifest), "supervisor": None, "progress": {},
     }
 
@@ -740,27 +786,45 @@ def read_result(path: str) -> dict:
 
 
 def classify_outcome(*, evaluator_exit: Optional[int], expected: Sequence[str], found: Sequence[str],
-                     servers_died: Sequence[str] = (), timed_out: bool = False, strict_exit: bool = True) -> tuple:
-    """(state, reasons, warnings). Complete official JSONs = 'done', whatever success / q_score / failure_reason
-    they hold: a policy failure is never an infrastructure error."""
-    reasons, warnings = [], []
+                     servers_died: Sequence[str] = (), died_after_exit: Sequence[str] = (), timed_out: bool = False,
+                     strict_exit: bool = True, failure_reasons: Sequence[Optional[str]] = ()) -> dict:
+    """{"state": "done" | "infra_error", "reasons", "warnings", "kinds"} of one evaluator run.
+
+    infra_error: a server we started died while the evaluator ran, the evaluator timed out, an expected
+    official JSON is missing, the evaluator exited non-zero (``strict_exit``; otherwise only a warning once
+    every result exists), or a result's failure_reason is policy_connection_lost (2026/eval; eval.aggregate
+    counts it as infrastructure too). Otherwise 'done', whatever success / q_score / failure_reason the
+    JSONs hold: a policy failure is never an infrastructure error. A server found dead only after the
+    evaluator exited is a warning. ``kinds`` names the causes for eval.batch's re-run rule."""
+    reasons, warnings, kinds = [], [], []
     missing = [f for f in expected if f not in set(found)]
     if servers_died:
+        kinds.append("server_died")
         reasons.append("server died before the evaluator finished: " + ", ".join(servers_died))
+    if died_after_exit:
+        warnings.append("server(s) found dead after the evaluator exited: " + ", ".join(died_after_exit))
+    lost = sorted({r for r in failure_reasons if r in CONNECTION_FAILURES})
+    if lost:
+        kinds.append("connection_lost")
+        reasons.append("official result failure_reason " + ", ".join(lost))
     if timed_out:
+        kinds.append("timeout")
         reasons.append("evaluator exceeded --eval-timeout-s")
     if len(missing) == len(expected):
+        kinds.append("no_results")
         reasons.append("no official result JSON")
     elif missing:
+        kinds.append("missing_results")
         reasons.append("missing official result JSON: " + ", ".join(missing))
     if evaluator_exit not in (0, None):
         if strict_exit or missing:
+            kinds.append("exit_code")
             reasons.append(f"evaluator exit code {evaluator_exit}")
             if not missing:
                 warnings.append("all official result JSONs were written before the non-zero exit (shutdown crash?)")
         else:
             warnings.append(f"evaluator exit code {evaluator_exit} after all official results were written")
-    return ("infra_error" if reasons else "done"), reasons, warnings
+    return {"state": "infra_error" if reasons else "done", "reasons": reasons, "warnings": warnings, "kinds": kinds}
 
 
 # ---------------------------------------------------------------------- supervisor
@@ -771,17 +835,18 @@ class Supervisor:
 
     def __init__(self, plan: Plan, *, mode: str = "foreground", environ: Optional[dict] = None,
                  stop_event: Optional[threading.Event] = None, clock: Callable[[], float] = time.monotonic,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep, gpu_query: Callable = gpumod.query_gpus,
+                 apps_query: Callable = gpumod.query_compute_apps):
         self.plan = plan
         self.mode = mode
         self.environ = dict(os.environ if environ is None else environ)
         self.stop_event = stop_event or threading.Event()
         self.clock = clock
         self.sleep = sleep
+        self.gpu_query, self.apps_query = gpu_query, apps_query
         self.procs: dict[str, subprocess.Popen] = {}
         self.status = read_status(plan.run_dir) or initial_status(plan)
-        self._last_beat = 0.0
-        self._gpu_seen: set = set()
+        self._last_beat = None
 
     def request_stop(self, *_args) -> None:
         self.stop_event.set()
@@ -798,7 +863,8 @@ class Supervisor:
         previous = {}
         if threading.current_thread() is threading.main_thread():
             for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-                previous[sig] = signal.signal(sig, self.request_stop)
+                if signal.getsignal(sig) is not signal.SIG_IGN:  # keep nohup's ignored SIGHUP ignored
+                    previous[sig] = signal.signal(sig, self.request_stop)
         try:
             return self._run()
         finally:
@@ -818,12 +884,13 @@ class Supervisor:
             for spec in servers:
                 ok, why = self._wait_healthy(spec)
                 if not ok:
-                    outcome = {"forced": ("infra_error", [why])}
+                    outcome = {"forced": ("infra_error", [why], ["server_start"])}
                     break
             if not outcome:
                 for url in self.plan.external_health:
                     if not self._wait_url(url, 60.0):
-                        outcome = {"forced": ("failed", [f"external executor server not answering {url} (--no-executor)"])}
+                        why = f"external executor server not answering {url} (--no-executor)"
+                        outcome = {"forced": ("failed", [why], ["launcher"])}
             if not outcome:
                 self._record_agent_manifest()
                 self._spawn(self.plan.proc("evaluator"))
@@ -831,9 +898,11 @@ class Supervisor:
                 self._write()
                 outcome = self._monitor()
         except StopRequested:
-            outcome = {"forced": ("failed", ["stopped_by_user"])}
+            outcome = {"forced": ("failed", ["stopped_by_user"], ["stopped_by_user"])}
+        except GpuPlacementError as e:
+            outcome = {"forced": ("failed", [str(e)], ["gpu_placement"])}
         except Exception as e:  # the supervisor must always stop its children and finalize
-            outcome = {"forced": ("infra_error", [f"supervisor error: {type(e).__name__}: {e}"])}
+            outcome = {"forced": ("infra_error", [f"supervisor error: {type(e).__name__}: {e}"], ["supervisor_error"])}
             self.status["traceback"] = traceback.format_exc()[-4000:]
         finally:
             self._stop_all()
@@ -882,7 +951,8 @@ class Supervisor:
             for name, p in self.procs.items():
                 if name != "evaluator" and name not in died and p.poll() is not None:
                     died[name] = p.returncode
-                    first_death = first_death or self.clock()
+                    if first_death is None:
+                        first_death = self.clock()
                     self._note(f"{name} exited with code {p.returncode} while the evaluator was running")
             if first_death is not None and self.clock() - first_death > opts["server_death_grace_s"]:
                 self._note("stopping the evaluator: a server died and the evaluator did not exit within the grace period")
@@ -896,13 +966,11 @@ class Supervisor:
             self._heartbeat()
             self.sleep(opts.get("poll_s", 2.0))
         rc = ev.wait()
-        for name, p in self.procs.items():
-            if name != "evaluator" and name not in died and p.poll() is not None:
-                died[name] = p.returncode
-        return {"evaluator_exit": rc, "servers_died": sorted(died), "timed_out": timed_out}
+        after = sorted(n for n, p in self.procs.items() if n != "evaluator" and n not in died and p.poll() is not None)
+        return {"evaluator_exit": rc, "servers_died": sorted(died), "died_after_exit": after, "timed_out": timed_out}
 
     def _heartbeat(self) -> None:
-        if self.clock() - self._last_beat < self.plan.options.get("heartbeat_s", 30.0):
+        if self._last_beat is not None and self.clock() - self._last_beat < self.plan.options.get("heartbeat_s", 30.0):
             return
         self._last_beat = self.clock()
         json_dir = os.path.join(self.plan.eval_output_dir, "json")
@@ -913,28 +981,33 @@ class Supervisor:
         self._write()
 
     def _check_gpu_placement(self) -> None:
-        """Best effort, read-only: which boards our process groups really use (nvidia-smi compute apps)."""
-        todo = [n for n in self.procs if self.plan.gpus.get(n) and n not in self._gpu_seen]
-        if not todo:
-            return
+        """Read-only check of which boards our process groups really use (nvidia-smi compute apps). CUDA honours
+        CUDA_VISIBLE_DEVICES; whether Isaac Sim's renderer does is unverified, so a process found on a board it
+        was not given stops the run (--gpu-mismatch stop, default) or is only noted (warn)."""
         try:
-            by_uuid = {g.uuid: g.index for g in gpumod.query_gpus() if g.uuid}
-            apps = gpumod.query_compute_apps()
+            by_uuid = {g.uuid: g.index for g in self.gpu_query() if g.uuid}
+            apps = self.apps_query()
         except gpumod.GpuError:
             return
-        for name in todo:
-            pids = {m["pid"] for m in group_members(self.procs[name].pid)}
+        for name, proc in self.procs.items():
+            pids = {m["pid"] for m in group_members(proc.pid)}
             seen = sorted({by_uuid.get(a.gpu_uuid) for a in apps if a.pid in pids} - {None})
             if not seen:
                 continue
-            self._gpu_seen.add(name)
-            expected = [int(g) for g in self.plan.gpus[name] if str(g).isdigit()]
+            expected = [int(g) for g in self.plan.gpus.get(name) or [] if str(g).isdigit()]
             self.status.setdefault("gpu_placement", {})[name] = {"expected": expected, "seen": seen}
-            if set(seen) - set(expected):
-                self._note(f"{name} uses GPU(s) {seen}, assigned {expected}")
+            stray = sorted(set(seen) - set(expected))
+            if stray:
+                msg = f"{name} uses GPU(s) {stray} it was not assigned (assigned {expected})"
+                if self.plan.options.get("gpu_mismatch", "stop") == "stop":
+                    raise GpuPlacementError(msg + "; stopped (--gpu-mismatch warn only notes it)")
+                self._note(msg)
 
     def _record_agent_manifest(self) -> None:
+        """Point status.json at the agent's run_manifest.json (and copy it into the run dir when it lives elsewhere)."""
         ptr = self.status["agent_manifest"]
+        if not ptr:
+            return
         for key in ("nas", "local"):
             path = ptr.get(key)
             man = read_json(path) if path else None
@@ -944,9 +1017,14 @@ class Supervisor:
             if man.get("config_hash") != self.plan.config_hash:
                 self._note(f"agent manifest config_hash {man.get('config_hash')} != planned {self.plan.config_hash}")
             dest = os.path.join(self.plan.run_dir, "run_manifest.json")
-            if not os.path.exists(dest):
-                shutil.copy2(path, dest)
+            try:
+                if not os.path.exists(dest):
+                    shutil.copy2(path, dest)
+            except OSError as e:
+                self._note(f"copying {path} to {dest} failed: {e}")
             break
+        else:
+            self._note(f"agent run_manifest.json not found at {ptr.get('nas')} or {ptr.get('local')}")
         self._write()
 
     def _stop(self, name: str) -> None:
@@ -987,13 +1065,17 @@ class Supervisor:
         json_dir = os.path.join(plan.eval_output_dir, "json")
         found = sorted(os.listdir(json_dir)) if os.path.isdir(json_dir) else []
         evaluator_started = "evaluator" in self.procs
+        st["results"] = [read_result(os.path.join(json_dir, f)) for f in plan.expected_results]
         if "forced" in outcome:
-            state, reasons = outcome["forced"]
+            state, reasons, kinds = outcome["forced"]
             warnings: list = []
         else:
-            state, reasons, warnings = classify_outcome(
+            verdict = classify_outcome(
                 evaluator_exit=outcome["evaluator_exit"], expected=plan.expected_results, found=found,
-                servers_died=outcome["servers_died"], timed_out=outcome["timed_out"], strict_exit=plan.options["strict_exit"])
+                servers_died=outcome["servers_died"], died_after_exit=outcome["died_after_exit"],
+                timed_out=outcome["timed_out"], strict_exit=plan.options["strict_exit"],
+                failure_reasons=[r.get("failure_reason") for r in st["results"]])
+            state, reasons, warnings, kinds = verdict["state"], verdict["reasons"], verdict["warnings"], verdict["kinds"]
         log_path = plan.proc("evaluator").log
         if os.path.isfile(log_path):
             with open(log_path, encoding="utf-8", errors="replace") as f:
@@ -1004,13 +1086,17 @@ class Supervisor:
                 if st["max_steps"] is not None and logged != st["max_steps"]:
                     warnings.append(f"agent budget used max_steps={st['max_steps']} but the evaluator used {logged}")
                 st["max_steps"] = logged
-        st["results"] = [read_result(os.path.join(json_dir, f)) for f in plan.expected_results]
         st["unexpected_results"] = [f for f in found if f.endswith(".json") and f not in plan.expected_results]
+        st["progress"] = {"results_found": sum(f in found for f in plan.expected_results),
+                          "results_expected": len(plan.expected_results),
+                          "alive": {n: p.poll() is None for n, p in self.procs.items()}}
         missing = [r for r, f in zip(plan.instance_ids, plan.expected_results) if f not in found]
-        st.update(state=state, reason=reasons, ended_at=now_iso(), evaluator_started=evaluator_started,
-                  evaluator_exit_code=st["exit_codes"].get("evaluator"),
+        st.update(state=state, reason=reasons, infra_kinds=kinds if state != "done" else [], ended_at=now_iso(),
+                  evaluator_started=evaluator_started, evaluator_exit_code=st["exit_codes"].get("evaluator"),
+                  results_complete=not missing,
                   infra_error="; ".join(reasons) if state == "infra_error" else False,
-                  infra_errors=[{"task": plan.task, "instance_id": iid, "rollout_id": 0, "reason": "no official result JSON"}
+                  infra_errors=[{"task": plan.task, "instance_id": iid, "rollout_id": 0,
+                                 "reason": "no official result JSON"}
                                 for iid in missing] if state == "infra_error" else [])
         st["warnings"] = list(st.get("warnings", [])) + warnings
         self._copy_results(found)
@@ -1046,7 +1132,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--mode", choices=MODES, default="public_test")
     ap.add_argument("--instances", type=int, nargs="+", required=True, help="--instance-indices of the evaluator")
     ap.add_argument("--wrapper", choices=sorted(WRAPPERS), default="rgbd")
-    ap.add_argument("--seed", type=int, default=None, help="agent seed (default run.seed); the evaluator's own seed is fixed")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="agent seed (default run.seed); the evaluator's own seed is fixed")
     ap.add_argument("--run-id", default=None)
     ap.add_argument("--run-dir", default=None, help="default <run.log_root>/<run_id>")
     ap.add_argument("--tag", action="append", default=[], help="extra key=value label for the agent's episodes")
@@ -1061,7 +1148,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--replay-action-chunk-size", type=int, default=0)
     ap.add_argument("--evaluator-root", default=None, help="default paths.b1k_root; a 2026/eval worktree also works")
     ap.add_argument("--eval-output-dir", default=None, help="evaluator --output-dir (default <run_dir>/eval_output)")
-    ap.add_argument("--data-root", default=None, help="OMNIGIBSON_DATA_PATH (default paths.data_root, env, <b1k_root>/datasets)")
+    ap.add_argument("--data-root", default=None,
+                    help="OMNIGIBSON_DATA_PATH (default paths.data_root, env, <b1k_root>/datasets)")
     ap.add_argument("--appdata", default=None, help=f"OMNIGIBSON_APPDATA_PATH (default {DEFAULT_APPDATA})")
     ap.add_argument("--behavior-env", default=None, help=f"conda env prefix (default {DEFAULT_BEHAVIOR_ENV})")
     ap.add_argument("--activation", choices=("conda-run", "activate", "none"), default="conda-run")
@@ -1070,7 +1158,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--evaluator-cmd-prefix", default="", help="words put before `python -m omnigibson.eval.eval`")
     ap.add_argument("--env-setup", default=None, help="file sourced before the evaluator (default $B1K_ENV_SETUP)")
     ap.add_argument("--executor-python", default=None, help="default <paths.openpi_root>/.venv/bin/python")
-    ap.add_argument("--executor-repo-id", default=None, help="default executor.server.repo_id or the asset id in <ckpt>/assets")
+    ap.add_argument("--executor-repo-id", default=None,
+                    help="default executor.server.repo_id or the asset id in <ckpt>/assets")
     ap.add_argument("--executor-mem-fraction", type=float, default=None, help="XLA_PYTHON_CLIENT_MEM_FRACTION")
     ap.add_argument("--agent-python", default=None, help="default: this python")
     ap.add_argument("--gpus", default=None, help="explicit nvidia-smi indices EVAL[,EXEC]; still checked for being free")
@@ -1083,7 +1172,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--executor-start-timeout-s", type=float, default=1200.0)
     ap.add_argument("--agent-start-timeout-s", type=float, default=300.0)
     ap.add_argument("--eval-timeout-s", type=float, default=None)
-    ap.add_argument("--server-death-grace-s", type=float, default=900.0)
+    ap.add_argument("--server-death-grace-s", type=float, default=900.0,
+                    help="after a server dies, give the evaluator this long to record the failure and exit")
+    ap.add_argument("--poll-s", type=float, default=2.0, help="supervisor poll interval")
+    ap.add_argument("--gpu-mismatch", choices=("stop", "warn"), default="stop",
+                    help="a started process found on a GPU it was not given (nvidia-smi, every 30 s): stop or note")
     ap.add_argument("--strict-exit", action=argparse.BooleanOptionalAction, default=True,
                     help="non-zero evaluator exit = infra_error even when every result JSON exists (default on)")
     ap.add_argument("--sync-videos", action="store_true", help="with --eval-output-dir: also copy videos to the run dir")
@@ -1125,7 +1218,8 @@ def spawn_watcher(plan: Plan, timeout_s: float = 60.0) -> int:
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout_s and (read_status(plan.run_dir) or {}).get("state") == "planned":
         if p.poll() is not None:
-            raise PlanError(f"watcher exited with code {p.returncode} before starting (see {plan.run_dir}/logs/watcher.log)")
+            raise PlanError(f"watcher exited with code {p.returncode} before starting "
+                            f"(see {plan.run_dir}/logs/watcher.log)")
         time.sleep(0.2)
     return p.pid
 
@@ -1142,7 +1236,11 @@ def cmd_launch(argv: Sequence[str]) -> int:
         print()
         print(render_commands(plan), end="")
         return 0
-    prepare_run_dir(plan)
+    try:
+        prepare_run_dir(plan)
+    except OSError as e:
+        print(f"eval.launch: error: cannot write the run directory {plan.run_dir}: {e}", file=sys.stderr)
+        return EXIT_CODES["failed"]
     print(describe_plan(plan), flush=True)
     if args.detach:
         try:
@@ -1164,9 +1262,11 @@ def _status_view(st: dict) -> dict:
 
 
 def _print_status(view: dict) -> None:
-    print(f"run {view.get('run_id')}: {view.get('state')}  (started {view.get('started_at')}, ended {view.get('ended_at')})")
+    print(f"run {view.get('run_id')}: {view.get('state')}  "
+          f"(started {view.get('started_at')}, ended {view.get('ended_at')})")
     print(f"  {view.get('task')} {view.get('mode')} {view.get('instance_indices')} -> {view.get('instance_ids')}  "
-          f"{view.get('wrapper')}  seed {view.get('seed')}  max_steps {view.get('max_steps')}  config {view.get('config_name')}")
+          f"{view.get('wrapper')}  seed {view.get('seed')}  max_steps {view.get('max_steps')}  "
+          f"config {view.get('config_name')}")
     procs = ", ".join(f"{n} pid {p.get('pid')} {'alive' if view['alive'].get(n) else 'exit ' + str(p.get('exit_code'))}"
                       for n, p in (view.get("processes") or {}).items())
     print(f"  processes: {procs or '-'}; supervisor {'alive' if view['supervisor_alive'] else 'not running'}")
@@ -1206,7 +1306,8 @@ def cmd_status(argv: Sequence[str]) -> int:
             else:
                 _print_status(view)
             if stale:
-                print("  the supervisor is not running: this status is stale (python -m eval.launch stop RUN_DIR cleans up)")
+                print("  the supervisor is not running: this status is stale "
+                      "(python -m eval.launch stop RUN_DIR cleans up)")
                 return EXIT_CODES["infra_error"]
             return EXIT_CODES.get(state, EXIT_RUNNING)
         time.sleep(args.interval)
@@ -1255,7 +1356,8 @@ def cmd_stop(argv: Sequence[str]) -> int:
         if rec and rec.get("started_by_us") and not rec.get("ended_at"):
             rec["stop_actions"] = _stop_recorded_group(rec)
             rec["ended_at"] = now_iso()
-    st.update(state="failed", reason=["stopped_by_user", "supervisor not running"], ended_at=now_iso(), updated_at=now_iso())
+    st.update(state="failed", reason=["stopped_by_user", "supervisor not running"], ended_at=now_iso(),
+              updated_at=now_iso())
     write_json(os.path.join(args.run_dir, "status.json"), st)
     print("stopped the recorded process groups; state failed")
     return 0

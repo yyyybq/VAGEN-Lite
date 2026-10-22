@@ -93,6 +93,11 @@ def test_cli(tmp_path, capsys):
     assert ablation.main(["ladder", "--base", L0, "--steps", "plan,check", "--from", L4, "--out", str(out)]) == 0
     assert sorted(os.listdir(out)) == ["ladder1_plan.yaml", "ladder2_check.yaml"]
     assert "--steps plan,check" in open(out / "ladder1_plan.yaml", encoding="utf-8").readline()
+    capsys.readouterr()
+    ablation.ladder(L0, L4, STEPS, str(out))  # a longer ladder, then the short one again
+    assert ablation.main(["ladder", "--base", L0, "--steps", "plan,check", "--from", L4, "--out", str(out)]) == 0
+    err = capsys.readouterr().err
+    assert "ladder3_goal.yaml was not written by this generation" in err and "ladder1_plan.yaml" not in err
 
 
 @pytest.mark.parametrize("kind", ["ladder", "loo"])
