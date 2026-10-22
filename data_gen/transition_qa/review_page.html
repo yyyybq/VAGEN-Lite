@@ -86,6 +86,12 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
 .verdict button[data-v="ambiguous"][aria-pressed="true"] { background: var(--amb-bg); border-color: var(--amb); color: var(--amb); }
 .verdict input { flex: 1 1 240px; min-width: 0; font: inherit; font-size: 0.9rem; padding: 6px 10px; border-radius: 8px;
                  border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.fix { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.9rem; }
+.fix[hidden] { display: none; }
+.fix button { font: inherit; font-size: 0.88rem; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line);
+              background: var(--surface); color: var(--ink); cursor: pointer; }
+.fix button[aria-pressed="true"] { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); font-weight: 500; }
+.fix button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 section.funnel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 8px; min-width: 0; }
 section.funnel h2 { font-size: 1.1rem; margin: 0; }
 section.funnel p { margin: 0; color: var(--muted); font-size: 0.88rem; }
@@ -96,8 +102,8 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
 <div class="wrap">
   <header class="intro">
     <h1>P1 转移题核对（30 道）</h1>
-    <p>每道题看图判断题库的正确答案对不对：点"对 / 错 / 有歧义"，有疑问写一句备注。选择存在这个浏览器里（换浏览器或清缓存会丢），核完点"导出 JSON"把结果文件发回来。</p>
-    <p>前向题另附"动作之后"的画面，只供核对，模型看不到；逆向题的两张图依次是动作前、动作后。标"补入"的题替换了旧核对页里被重建题库抽掉的题（同题类、同划分）。每题下面的"过滤检查"是这道题经过的每一道过滤：测得的值和规则。</p>
+    <p class="default-intro">每道题看图判断题库的正确答案对不对：点"对 / 错 / 有歧义"，有疑问写一句备注。选择存在这个浏览器里（换浏览器或清缓存会丢），核完点"导出 JSON"把结果文件发回来。</p>
+    <p class="default-intro">前向题另附"动作之后"的画面，只供核对，模型看不到；逆向题的两张图依次是动作前、动作后。标"补入"的题替换了旧核对页里被重建题库抽掉的题（同题类、同划分）。每题下面的"过滤检查"是这道题经过的每一道过滤：测得的值和规则。</p>
     <p id="note" hidden></p>
     <div class="legend">
       <span><span class="swatch" style="border-color:#ff0000"></span>红框 A：任务里的第一个物体</span>
@@ -125,9 +131,15 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
   const ITEMS = JSON.parse(document.getElementById("review-data").textContent);
   const FUNNEL = JSON.parse(document.getElementById("funnel-data").textContent);
   const META = JSON.parse(document.getElementById("meta-data").textContent);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const KEY = "p1_review:" + META.bank + ":" + META.page;
   if (META.title) { document.title = META.title; document.querySelector("header.intro h1").textContent = META.title; }
   if (META.note) { const p = document.getElementById("note"); p.textContent = META.note; p.hidden = false; }
+  if (Array.isArray(META.intro) && META.intro.length) {  // a page with its own instructions (e.g. the probe check)
+    const first = document.querySelector("p.default-intro");
+    META.intro.forEach((text) => first.before(el("p", null, text)));
+    document.querySelectorAll("p.default-intro").forEach((x) => x.remove());
+  }
   const EXPORT_NAME = String(META.page || "p1_review.html").replace(/\.html$/, "") + "_verdicts.json";
   const CLASS_ZH = { state: "状态题", forward: "前向题", inverse: "逆向题" };
   const ROLE_ZH = { terminal: "轨迹终点", start: "起点", middle: "中间帧", interior: "目标区域内部（另渲染）" };
@@ -143,7 +155,6 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
   const DROP_ZH = { answer_balance: "答案平衡", unchanged: "没变化上限", flip_band: "翻转比例" };
   let verdicts = {};
   let status = "";
-  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const idOf = (n) => "q" + String(n).padStart(2, "0");
 
   function load() { try { verdicts = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { verdicts = {}; status = "这个浏览器不能保存选择：核完请马上导出。"; } }
@@ -167,7 +178,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     const v = verdicts[id] || {};
     try {
       await remote.collection("verdicts").doc(id).set({ n: it.n, sample_id: it.sample_id, qtype: it.qtype, tag: it.tag || null,
-        answer: it.answer, verdict: v.verdict || null, note: v.note || "", saved_utc: new Date().toISOString() });
+        answer: it.answer, verdict: v.verdict || null, note: v.note || "", fix: v.fix || null, saved_utc: new Date().toISOString() });
     } catch (e) {
       status = "云端保存失败（" + ((e && e.code) || "unknown") + "）：选择还在这个浏览器里，核完请导出 JSON。"; renderTally();
     }
@@ -186,7 +197,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
           seen.add(d.id);
           if (pending.has(d.id) || d.metadata.hasPendingWrites) return;  // this page's own write is on its way
           const b = d.data() || {};
-          verdicts[d.id] = { verdict: b.verdict || null, note: b.note || "" };
+          verdicts[d.id] = { verdict: b.verdict || null, note: b.note || "", fix: b.fix || null };
         });
         if (first) {  // verdicts made in this browser before the store was reached go up once
           first = false;
@@ -204,7 +215,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
       const v = verdicts[idOf(it.n)] || {};
       counts[v.verdict || "unchecked"] += 1;
       return { n: it.n, sample_id: it.sample_id, qtype: it.qtype, family: it.family, split: it.split, origin: it.origin || "kept",
-               tag: it.tag || null, answer: it.answer, verdict: v.verdict || null, note: v.note || "" };
+               tag: it.tag || null, answer: it.answer, verdict: v.verdict || null, note: v.note || "", fix: v.fix || null };
     });
     return { page: META.page, bank: META.bank, exported_utc: new Date().toISOString(), counts: counts, verdicts: rows };
   }
@@ -230,7 +241,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result);
-        (data.verdicts || []).forEach((r) => { if (r.verdict || r.note) { verdicts[idOf(r.n)] = { verdict: r.verdict || null, note: r.note || "" }; saveRemote(idOf(r.n), 0); } });
+        (data.verdicts || []).forEach((r) => { if (r.verdict || r.note) { verdicts[idOf(r.n)] = { verdict: r.verdict || null, note: r.note || "", fix: r.fix || null }; saveRemote(idOf(r.n), 0); } });
         persist(); ITEMS.forEach(paint); status = "已导入。"; renderTally();
       } catch (e) { status = "导入失败：不是导出的 JSON。"; renderTally(); }
     };
@@ -275,6 +286,7 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     const caps = it.images.length === 2 ? ["动作前（模型看到）", "动作后（模型看到）"] : ["当前画面（模型看到）"];
     it.images.forEach((src, i) => { const f = el("figure"); const im = el("img"); im.src = src; im.alt = caps[i]; im.width = 256; im.height = 256; f.append(im); f.append(el("figcaption", null, caps[i])); shots.append(f); });
     if (it.post_image) { const f = el("figure", "ref"); const im = el("img"); im.src = it.post_image; im.alt = "动作之后"; im.width = 256; im.height = 256; f.append(im); f.append(el("figcaption", null, "动作之后（只供核对，模型看不到）")); shots.append(f); }
+    (it.extra_images || []).forEach((x) => { const f = el("figure", "ref"); const im = el("img"); im.src = x.src; im.alt = x.caption; im.width = 256; im.height = 256; f.append(im); f.append(el("figcaption", null, x.caption)); shots.append(f); });
     c.append(shots);
     const stem = it.question.split("\n(A) ")[0].replace(/^(First image: <image>\nSecond image: <image>\n|<image>\n)/, "");
     c.append(el("pre", "stem", stem));
@@ -297,13 +309,23 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     const row = el("div", "verdict");
     ["right", "wrong", "ambiguous"].forEach((v) => {
       const b = el("button", null, LABEL[v]); b.type = "button"; b.dataset.v = v; b.setAttribute("aria-pressed", "false");
-      b.addEventListener("click", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict === v ? null : v, note: cur.note || "" }; persist(); saveRemote(id, 0); paint(it); renderTally(); });
+      b.addEventListener("click", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict === v ? null : v, note: cur.note || "", fix: cur.fix || null }; persist(); saveRemote(id, 0); paint(it); renderTally(); });
       row.append(b);
     });
     const note = el("input"); note.type = "text"; note.placeholder = "备注（可选）：哪里不对、哪里有歧义";
-    note.addEventListener("input", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict || null, note: note.value }; persist(); saveRemote(id, 800); });
+    note.addEventListener("input", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict || null, note: note.value, fix: cur.fix || null }; persist(); saveRemote(id, 800); });
     row.append(note);
     c.append(row);
+    if (it.fix_choices && it.fix_choices.length) {  // a wrong verdict: what the answer should be
+      const fx = el("div", "fix"); fx.hidden = true;
+      fx.append(el("span", null, "正确答案应为："));
+      it.fix_choices.forEach((ch) => {
+        const b = el("button", null, ch); b.type = "button"; b.dataset.fix = ch; b.setAttribute("aria-pressed", "false");
+        b.addEventListener("click", () => { const cur = verdicts[id] || {}; verdicts[id] = { verdict: cur.verdict || null, note: cur.note || "", fix: cur.fix === ch ? null : ch }; persist(); saveRemote(id, 0); paint(it); });
+        fx.append(b);
+      });
+      c.append(fx);
+    }
     return c;
   }
 
@@ -313,6 +335,8 @@ textarea#fallback { width: 100%; min-height: 160px; font-family: var(--font-mono
     if (v.verdict) c.dataset.verdict = v.verdict; else delete c.dataset.verdict;
     c.querySelectorAll(".verdict button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v.verdict)));
     const note = c.querySelector(".verdict input"); if (note && document.activeElement !== note) note.value = v.note || "";
+    const fx = c.querySelector(".fix");
+    if (fx) { fx.hidden = v.verdict !== "wrong"; fx.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.fix === v.fix))); }
   }
 
   function funnel() {

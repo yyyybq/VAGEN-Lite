@@ -7,6 +7,9 @@
     # occlusion questions with a suspect occluder (wardrobe, person, thin or irregular), 10 per group
     python -m data_gen.transition_qa.review occluders --sft-dir SFT --out OUT --extra EXTRA_TASKS
     python -m data_gen.transition_qa.review page --out OUT --dir review_occluders --no-funnel --title ... --html ...
+    # the probe's "fully / partly hidden" occlusion questions, occluders that do not match their box first (user 2026-10-21)
+    python -m data_gen.transition_qa.review probe-occlusion --sft-dir SFT --out OUT --judge OUT/occ_judge_all
+    python -m data_gen.transition_qa.review page --out OUT --dir review_probe_occ --no-funnel --artifact ...
 
 ``sample`` draws the questions (2 per question type from the training and test files, then random ones),
 draws the task's objects on copies of their images (A red, B blue: ``admission.overlay_boxes``,
@@ -248,6 +251,87 @@ def cmd_occluders(args: argparse.Namespace) -> None:
 
 
 # =============================================================================
+# the probe's occlusion questions by hand (user, 2026-10-21): the prereg's occlusion comparison uses them, and 27 of the
+# 41 "fully hidden" ones have an occluder whose box does not match the render (occ_judge alignment)
+# =============================================================================
+FIX_CHOICES = ["完全挡住", "部分挡住", "没有挡住", "不该出这道题"]
+STATUS_ZH = {"ok": "遮挡物和框对得上", "in_front": "框前另有东西", "see_through": "框里大半是空的", "mixed": "对不上（混合）"}
+
+
+def order_for_check(questions: List[Dict[str, Any]], status: Dict[str, str], seed: int) -> List[Dict[str, Any]]:
+    """Questions whose occluder does not match its box first, then the others; each block in a seeded random order."""
+    rng = random.Random(seed)
+    blocks = []
+    for flagged in (True, False):
+        b = sorted((q for q in questions if (status.get(q["sample_id"], "ok") != "ok") == flagged), key=lambda q: q["sample_id"])
+        rng.shuffle(b)
+        blocks += b
+    return blocks
+
+
+def cmd_probe_occlusion(args: argparse.Namespace) -> None:
+    """The probe's occlusion questions answered "fully / partly hidden", for a check by hand: the question's images
+    boxed (A red, B blue), for a forward question the view after the action (the frame occ_judge rendered, boxed), and
+    the depth judge's pixel classes on the judged frame; a "wrong" verdict takes the right answer (FIX_CHOICES)."""
+    from PIL import Image
+
+    from data_gen.interiorgs_v10.admission import overlay_boxes
+    from data_gen.interiorgs_v10.pilot import draw_overlay
+    from vagen.envs.active_spatial import occlusion_depth as OD
+
+    from . import occ_judge as OJ
+
+    sft, out, judge = Path(args.sft_dir), Path(args.out), Path(args.judge)
+    d = out / args.dir
+    (d / "img").mkdir(parents=True, exist_ok=True)
+    rows = {r["task_id"]: r for r in GEN.read_jsonl(sft / "rows.jsonl")}
+    frames = {f["frame_id"]: f for f in GEN.read_jsonl(sft / "frames.jsonl")}
+    for extra in [Path(p) for p in args.extra] + sorted(out.glob("extra_*")):
+        rows.update({r["task_id"]: r for r in GEN.read_jsonl(extra / "rows.jsonl")})
+        frames.update({f["frame_id"]: f for f in GEN.read_jsonl(extra / "frames.jsonl")})
+    align = {r["sample_id"]: r for r in GEN.read_jsonl(judge / "alignment.jsonl")}
+    judged = {r["sample_id"]: r for r in GEN.read_jsonl(judge / "results.jsonl") if "error" not in r}
+    probe = [r for r in GEN.read_jsonl(out / "p1_probe.jsonl")
+             if r["qtype"].startswith("occluded") and r["answer_value"] in ("full", "partial")]
+    picks = order_for_check(probe, {s: a["status"] for s, a in align.items()}, args.seed)
+
+    def save(img: Any, name: str) -> str:
+        img.convert("RGB").save(d / "img" / name, quality=88)
+        return name
+
+    sample = []
+    for i, r in enumerate(picks, 1):
+        row, al, jr = rows[r["task_id"]], align[r["sample_id"]], judged[r["sample_id"]]
+        boxed = []
+        for j, path in enumerate(r["images"]):
+            pose = np.asarray(_image_pose(path, frames, {})["c2w"], float)
+            boxed.append(save(draw_overlay(Image.open(path).convert("RGB"), overlay_boxes(row, pose)), f"q{i:02d}_{j}.jpg"))
+        rgb = Image.open(judge / "rgb" / f"{r['sample_id']}.jpg").convert("RGB")
+        extra = []
+        if r["qclass"] == "forward":
+            f = _image_pose(r["images"][0], frames, {})
+            pose = G.repeated_action_pose(np.asarray(f["c2w"], float), r["action"], int(r["k"]))
+            extra.append({"file": save(draw_overlay(rgb.copy(), overlay_boxes(row, pose)), f"q{i:02d}_post.jpg"),
+                          "caption": "动作之后（只供核对，模型看不到）"})
+        cls = OJ.rejudge(judge, jr, {"near_tol": args.near_tol}, with_classes=True)["classes"]
+        extra.append({"file": save(Image.fromarray(OD.overlay(np.asarray(rgb), cls)), f"q{i:02d}_depth.jpg"),
+                      "caption": "渲染分析（只供参考，见页首说明）"})
+        group = occluder_group(str(al["b_label"] or "").lower())
+        sample.append({"n": i, "sample_id": r["sample_id"], "qtype": r["qtype"], "qclass": r["qclass"],
+                       "family": r["family"], "split": r["split"], "task_id": r["task_id"],
+                       "task_description": row["task_description"], "question": r["messages"][0]["content"],
+                       "answer": r["messages"][1]["content"], "answer_value": r["answer_value"], "options": r["options"],
+                       "boxed": boxed, "post_frame": None, "originals": r["images"],
+                       "objects": {s: e.get("ref") for s, e in zip("AB", row["target_object"]["objects"])},
+                       "tag": f"遮挡物：{GROUP_ZH.get(group, '其他')}（{al['b_label']}）· {STATUS_ZH.get(al['status'], al['status'])}",
+                       "occluder_status": al["status"], "extra_images": extra, "fix_choices": FIX_CHOICES})
+    GEN.write_jsonl(d / "sample.jsonl", sample)
+    print(json.dumps({"questions": len(sample), "flagged_first": sum(s["occluder_status"] != "ok" for s in sample),
+                      "by_answer": collections.Counter(s["answer_value"] for s in sample),
+                      "by_qtype": collections.Counter(s["qtype"] for s in sample)}, ensure_ascii=False))
+
+
+# =============================================================================
 # filter checks: what each question passed, with the measured value against the rule (for the check page)
 # =============================================================================
 VISIBLE = {"left_right": "A、B 在当前画面都清楚可见（face_visible_v3）", "closer": "A、B 在当前画面都清楚可见（face_visible_v3）",
@@ -361,7 +445,8 @@ def cmd_page(args: argparse.Namespace) -> None:
             for r in GEN.read_jsonl(out / f)}
 
     def b64(p: Path) -> str:
-        return "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()
+        mime = "image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+        return f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()
 
     items = []
     for s in GEN.read_jsonl(d / "sample.jsonl"):
@@ -369,6 +454,7 @@ def cmd_page(args: argparse.Namespace) -> None:
         s["images"] = [b64(d / "img" / n) for n in s.pop("boxed")]
         post = s.pop("post_frame")
         s["post_image"] = b64(d / "frames" / "boxes" / safe_name(post)) if post else None
+        s["extra_images"] = [{"src": b64(d / "img" / e["file"]), "caption": e["caption"]} for e in s.pop("extra_images", [])]
         rec = bank[s["sample_id"]]
         s["state_role"] = rec["state_role"]
         s["checks"] = filter_checks(rec, cfg)
@@ -382,7 +468,8 @@ def cmd_page(args: argparse.Namespace) -> None:
             return json.dumps(x, ensure_ascii=False).replace("</", "<\\/")
 
         meta = {"bank": str(out.resolve()), "page": Path(args.html).name, "questions": len(items),
-                "title": args.title or None, "note": args.note or None, "store": "db" if args.artifact else None}
+                "title": args.title or None, "note": args.note or None, "store": "db" if args.artifact else None,
+                "intro": list(args.intro) or None}
         page = TEMPLATE.read_text(encoding="utf-8")
         page = page.replace("__REVIEW_DATA__", blob(items)).replace("__FUNNEL_DATA__", blob(funnel))
         page = page.replace("__META__", blob(meta))
@@ -435,6 +522,15 @@ def main() -> None:
     o.add_argument("--per-group", type=int, default=10)
     o.add_argument("--seed", type=int, default=20261020)
     o.set_defaults(func=cmd_occluders)
+    po = sub.add_parser("probe-occlusion", help="the probe's fully / partly hidden occlusion questions, for a check")
+    po.add_argument("--sft-dir", required=True)
+    po.add_argument("--out", required=True, help="the bank")
+    po.add_argument("--judge", required=True, help="occ_judge's folder with every candidate rendered (alignment run)")
+    po.add_argument("--dir", default="review_probe_occ")
+    po.add_argument("--extra", action="append", default=[], help="a folder of extra tasks (rows.jsonl, frames.jsonl)")
+    po.add_argument("--near-tol", type=float, default=0.15, help="the depth judge's near-face tolerance for the picture")
+    po.add_argument("--seed", type=int, default=20261021)
+    po.set_defaults(func=cmd_probe_occlusion)
     b = sub.add_parser("page")
     b.add_argument("--out", required=True)
     b.add_argument("--dir", default="review", help="the check's folder under OUT")
@@ -442,6 +538,7 @@ def main() -> None:
     b.add_argument("--title", default="", help="the page's heading (default: the 30-question check)")
     b.add_argument("--note", default="", help="one more paragraph under the heading")
     b.add_argument("--no-funnel", action="store_true", help="leave out the table of candidates not asked")
+    b.add_argument("--intro", action="append", default=[], help="a paragraph replacing the default instructions (repeatable)")
     b.add_argument("--short-title", default="", help="the browser tab's (and the artifact's) name")
     b.add_argument("--artifact", action="store_true", help="write the page to publish as a claude.ai artifact "
                    "(no document skeleton; verdicts also saved in the artifact's db, collection verdicts)")

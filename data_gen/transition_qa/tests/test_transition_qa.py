@@ -345,6 +345,21 @@ def test_review_page_as_an_artifact():
     assert not page.lower().startswith("<!doctype") and "<body>" not in page and "</html>" not in page
     assert page.startswith("<title>") and '<meta name="claude:viewport-fit-sides" content="cover">' in page[:200]
     assert 'META.store !== "db"' in page and ":root[data-theme=\"dark\"]" in page
+    # the probe check: extra pictures, the right answer of a wrong verdict, its own instructions
+    assert "it.extra_images" in page and "it.fix_choices" in page and "fix: v.fix || null" in page
+    assert "META.intro" in page and page.count('class="default-intro"') == 2
+
+
+def test_probe_check_puts_mismatched_occluders_first():
+    from data_gen.transition_qa import review as RV
+
+    qs = [{"sample_id": f"s{i:02d}"} for i in range(10)]
+    status = {f"s{i:02d}": ("ok" if i % 3 else "see_through") for i in range(10)}  # s00, s03, s06, s09 flagged
+    order = RV.order_for_check(qs, status, seed=1)
+    assert [q["sample_id"] for q in order[:4]] != [] and {q["sample_id"] for q in order[:4]} == {"s00", "s03", "s06", "s09"}
+    assert sorted(q["sample_id"] for q in order) == [q["sample_id"] for q in qs]
+    assert order == RV.order_for_check(list(reversed(qs)), status, seed=1)         # the order does not depend on the input's
+    assert RV.FIX_CHOICES[-1] == "不该出这道题" and RV.STATUS_ZH["see_through"] == "框里大半是空的"
 
 
 def test_depth_checked_occlusion_tells_the_occluder_from_a_wall():
