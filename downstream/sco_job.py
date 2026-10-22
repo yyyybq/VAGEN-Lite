@@ -115,6 +115,92 @@ def pick_pool(pools=POOLS) -> str:
     return min(pools, key=lambda p: (waiting[p], list(pools).index(p)))
 
 
+WAITING_STATES = ("STARTING", "QUEUEING", "PENDING", "QUEUED", "WAITING", "CREATING")
+CARDS_PER_MACHINE = 8
+
+
+def list_jobs(max_pages: int = 100):
+    """Every job of the workspace (sco lists at most 500 per page, newest first), None when a page cannot be read."""
+    jobs = {}
+    for page in range(1, max_pages + 1):
+        res = subprocess.run([SCO, "acp", "jobs", "list", "--workspace-name=aigc", "--page-size", "500",
+                              "--page-token", str(page), "-o", "json"], capture_output=True, text=True)
+        try:
+            batch = json.loads(res.stdout) if res.returncode == 0 else None
+        except ValueError:
+            batch = None
+        if not isinstance(batch, list):
+            return None
+        jobs.update({str(j.get("name")): j for j in batch})
+        if len(batch) < 500:
+            return list(jobs.values())
+    return None
+
+
+def worker_hosts(text: str):
+    """[(cards, machine IP)] per worker row of `sco acp jobs get-workers` (the training line's job_sco.py)."""
+    return [(int(c), h) for c, h in re.findall(r"加速芯片:(\d+)[^|]*\|\s*(\d+\.\d+\.\d+\.\d+)\s*\|", text)]
+
+
+def job_hosts(job_id: str):
+    res = subprocess.run([SCO, "acp", "jobs", "get-workers", "--workspace-name=aigc", job_id], capture_output=True,
+                         text=True)
+    return worker_hosts(res.stdout) if res.returncode == 0 else []
+
+
+def pool_view(pool: str, jobs=None, hosts_of=job_hosts):
+    """The workspace's running jobs of a pool by machine, {"hosts": {IP: [{"job_id", "name", "cards"}]}}, None when
+    the list or a running job's machine cannot be read (decide nothing on a partial view).  Jobs of other workspaces
+    on the same machines are not seen.  Same method as the training line's renderer_repack (job_sco.pool_view)."""
+    jobs = list_jobs() if jobs is None else jobs
+    if jobs is None:
+        return None
+    hosts = {}
+    for j in jobs:
+        p = j.get("resource_pool")
+        if (p.get("name") if isinstance(p, dict) else p) != pool or j.get("state") != "RUNNING":
+            continue
+        rows = hosts_of(str(j.get("name")))
+        if not rows:
+            return None
+        for cards, host in rows:
+            hosts.setdefault(host, []).append({"job_id": str(j.get("name")), "name": str(j.get("display_name") or ""),
+                                               "cards": int(cards)})
+    return {"hosts": hosts}
+
+
+def job_state(job_id: str):
+    """sco's state of a job by id (None when it cannot be read)."""
+    res = subprocess.run([SCO, "acp", "jobs", "describe", "--workspace-name=aigc", "-o", "json", job_id],
+                         capture_output=True, text=True)
+    try:
+        return json.loads(res.stdout).get("state") if res.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def busy_room(view, own_prefix: str = "downstream-ev") -> dict:
+    """{machine: free cards} of machines that already run some job other than our own evaluation shards and still
+    have free cards: the only places a one-card evaluation may start (the user's rule of 2026-10-22: never take an
+    idle machine, or 8-card jobs cannot get one)."""
+    room = {}
+    for host, jobs in (view or {}).get("hosts", {}).items():
+        used = sum(j["cards"] for j in jobs)
+        others = [j for j in jobs if not j["name"].startswith(own_prefix)]
+        if others and used < CARDS_PER_MACHINE:
+            room[host] = CARDS_PER_MACHINE - used
+    return room
+
+
+def alone_on_machine(view, job_id: str, own_prefix: str = "downstream-ev"):
+    """True if the machine running job_id has nothing but our evaluation shards on it (it took an idle machine),
+    False if it shares the machine with another job, None if the job is not in the view."""
+    for jobs in (view or {}).get("hosts", {}).values():
+        if any(j["job_id"] == job_id for j in jobs):
+            return all(j["name"].startswith(own_prefix) for j in jobs)
+    return None
+
+
 def submit(run: Path) -> str:
     job = run / "job"
     receipt = job / "submission.json"

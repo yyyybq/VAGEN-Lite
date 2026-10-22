@@ -5,10 +5,12 @@
 # Usage: run_eval_ckpt.sh CKPT OUT SERVERS WORKERS (SERVERS policy servers on GPUs 0..SERVERS-1; the job's card
 # count only buys CPUs: 14 vCPU per H800).  WORKERS may be a list, e.g. 48,96: the whole plan then runs once per value,
 # one after the other (parallelism test), into OUT/episodes_P<n>/ with OUT/gpu_util_P<n>.csv; a single value writes
-# OUT/episodes/ and OUT/gpu_util.csv.  Writes only under OUT.
+# OUT/episodes/ and OUT/gpu_util.csv.  Optional 5th argument SHARD "I/K": run only shard I of K of the plan (the
+# one-card evaluation jobs of 2026-10-22; each shard has its own OUT).  Writes only under OUT.
 set -uo pipefail
-CKPT="${1:?Usage: run_eval_ckpt.sh CKPT OUT SERVERS WORKERS}"
-OUT="${2:?}"; SERVERS="${3:?}"; WORKERS="${4:?}"
+CKPT="${1:?Usage: run_eval_ckpt.sh CKPT OUT SERVERS WORKERS [SHARD]}"
+OUT="${2:?}"; SERVERS="${3:?}"; WORKERS="${4:?}"; SHARD="${5:-}"
+SHARD_ARGS=(); [[ -n "$SHARD" ]] && SHARD_ARGS=(--shard "$SHARD")
 WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WT/downstream/eval/sim_env.sh"
 PLAN="$WT/downstream/eval/eval_d6.json"
@@ -44,7 +46,7 @@ for W in "${PLIST[@]}"; do
   THREADS=$(( (CPUS - 2 * SERVERS) / W )); (( THREADS < 1 )) && THREADS=1
   echo "[eval] >>> workers=$W threads/process=$THREADS $(date -u +%T)"
   sim "$THREADS" "$SIM_PY" "$WT/downstream/eval/closed_loop.py" --ckpt "$CKPT" --servers "$ADDRS" --eval-plan "$PLAN" \
-    --workers "$W" --out "$OUT/episodes$SUFFIX" > "$OUT/closed_loop$SUFFIX.log" 2>&1
+    --workers "$W" "${SHARD_ARGS[@]}" --out "$OUT/episodes$SUFFIX" > "$OUT/closed_loop$SUFFIX.log" 2>&1
   r=$?; (( r )) && rc=$r
   kill "$GPID" 2>/dev/null
   echo "[eval] <<< workers=$W rc=$r $(date -u +%T) $(head -c 400 "$OUT/episodes$SUFFIX/summary.json" 2>/dev/null | tr -d '\n')"

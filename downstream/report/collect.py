@@ -93,6 +93,27 @@ def _evaluation(exp_dir, start, ratio, seed, step, kind, ep_dir: Path):
                       summary, eps)
 
 
+def _sharded(exp_dir, start, ratio, seed, step, kind, evaldir: Path):
+    """One evaluation from its one-card shards (shards/s<I>of<K>/out/episodes), None until all K have a result."""
+    parts = sorted((evaldir / "shards").glob("s*of*"))
+    if not parts:
+        return None
+    k = int(parts[0].name.split("of")[1])
+    pieces = [_evaluation(exp_dir, start, ratio, seed, step, kind, evaldir / "shards" / f"s{i}of{k}" / "out/episodes")
+              for i in range(1, k + 1)]
+    if any(p is None for p in pieces):
+        return None
+    eps = [x for p in pieces for x in p.episodes]
+    summary = {"per_task": {}, "shards": k, "workers": pieces[0].workers,
+               "episode_wall_mean_seconds": sum(x["wall_seconds"] for x in eps) / max(1, len(eps)),
+               "wall_seconds": max(p.summary.get("wall_seconds") or 0 for p in pieces)}
+    for x in eps:
+        t = summary["per_task"].setdefault(x["task"], {"n": 0, "successes": 0})
+        t["n"] += 1
+        t["successes"] += int(x["success"])
+    return Evaluation(exp_dir.name, start, ratio, seed, step, kind, pieces[0].workers, evaldir, summary, eps)
+
+
 def evaluations(exp_dir: Path) -> list:
     parsed = parse_exp(exp_dir.name)
     if not parsed:
@@ -104,6 +125,11 @@ def evaluations(exp_dir: Path) -> list:
         if not m:
             continue
         step = int(m[1])
+        if (d / "shards").is_dir():
+            e = _sharded(exp_dir, start, ratio, seed, step, "repeat" if m[2] else "first", d)
+            if e:
+                out.append(e)
+            continue
         if m[2]:
             for ep_dir in sorted((d / "out").glob("episodes_P*")) or [d / "out/episodes"]:
                 e = _evaluation(exp_dir, start, ratio, seed, step, "repeat", ep_dir)

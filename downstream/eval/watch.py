@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import math
 import os
 import subprocess
 import sys
@@ -71,12 +72,13 @@ def groups():
 GROUP_KEYS = ("all", "atomic_seen", "composite_seen", "spatial", "borderline")
 
 
-def score(summary_path: Path):
-    """{group: [successes, episodes]} of a finished evaluation, None before."""
-    if not summary_path.is_file():
-        return None
-    summary = json.loads(summary_path.read_text())
-    if "per_task" not in summary:
+def score(summary):
+    """{group: [successes, episodes]} of a finished evaluation (a summary dict or a summary.json path), None before."""
+    if isinstance(summary, Path):
+        if not summary.is_file():
+            return None
+        summary = json.loads(summary.read_text())
+    if not summary or "per_task" not in summary:
         return None
     group_of, spatial, borderline = groups()
     agg = {k: [0, 0] for k in GROUP_KEYS}
@@ -109,10 +111,49 @@ def outcomes(episodes_dir: Path) -> dict:
     return {(r["task"], r["seed"]): bool(r.get("success")) for r in rows if r.get("status") == "complete"}
 
 
-def compare(first_dir: Path, other_dir: Path) -> dict:
-    """Noise and speed of `other_dir` against `first_dir` (two evaluations of one checkpoint, same seeds)."""
-    a, b = (json.loads((d / "summary.json").read_text()) for d in (first_dir, other_dir))
-    oa, ob = outcomes(first_dir), outcomes(other_dir)
+def merged(evaldir: Path):
+    """(summary, outcomes) of one evaluation: its single job (out/episodes) or all its one-card shards
+    (shards/s<I>of<K>/out/episodes) combined; None until every part has a result."""
+    single = evaldir / "out/episodes"
+    if (single / "summary.json").is_file():
+        s = json.loads((single / "summary.json").read_text())
+        return (s, outcomes(single)) if "per_task" in s else None
+    parts = sorted((evaldir / "shards").glob("s*of*"))
+    if not parts:
+        return None
+    k = int(parts[0].name.split("of")[1])
+    got = []
+    for i in range(1, k + 1):
+        d = evaldir / "shards" / f"s{i}of{k}" / "out/episodes"
+        if not (d / "summary.json").is_file():
+            return None
+        s = json.loads((d / "summary.json").read_text())
+        if "per_task" not in s:
+            return None
+        got.append((s, d))
+    per_task, outs, walls, means = {}, {}, [], []
+    for s, d in got:
+        for t, v in s["per_task"].items():
+            p = per_task.setdefault(t, {"n": 0, "successes": 0})
+            p["n"] += v["n"]
+            p["successes"] += v["successes"]
+        outs.update(outcomes(d))
+        walls.append(s["wall_seconds"])
+        if s.get("episode_wall_mean_seconds") is not None:
+            means.append((s["episode_wall_mean_seconds"], s["complete"]))
+    summary = {"per_task": per_task, "successes": sum(s["successes"] for s, _ in got),
+               "complete": sum(s["complete"] for s, _ in got), "wall_seconds": max(walls),
+               "episode_wall_mean_seconds": round(sum(m * n for m, n in means) / max(1, sum(n for _, n in means)), 3),
+               "workers": got[0][0]["workers"], "shards": k}
+    return summary, outs
+
+
+def compare(first, other) -> dict:
+    """Noise and speed of `other` against `first` (two evaluations of one checkpoint, same seeds); each is merged()
+    output or a directory holding summary.json and episodes.jsonl."""
+    first, other = (x if isinstance(x, tuple) else (json.loads((x / "summary.json").read_text()), outcomes(x))
+                    for x in (first, other))
+    (a, oa), (b, ob) = first, other
     common = sorted(set(oa) & set(ob))
     rate = lambda s: s["successes"] / max(1, s["complete"])  # noqa: E731
     return {"successes": [a["successes"], b["successes"]], "episodes": [a["complete"], b["complete"]],
@@ -137,6 +178,7 @@ class Watcher:
         self.state.setdefault("finished", {})
         self.alerts, self.notes = [], []
         self.disk = None
+        self._hold, self._jobs, self._views, self._rooms = None, None, {}, {}
 
     # ------------------------------------------------------------------------------------------- bookkeeping
     def save(self):
@@ -165,6 +207,8 @@ class Watcher:
         return int(self.state.get("workers", {}).get("chosen", self.a.workers))
 
     def submit_eval(self, run: Path, ckpt: Path, workers: str, name: str) -> str:
+        if self.held():
+            return "未提交（等密集奖励第一批上机器）"
         if not self.disk_ok():
             return "未提交（剩余空间不足或读不出）"
         if self.a.dry:
@@ -175,7 +219,129 @@ class Watcher:
                            str(workers)])
         return f"submitted {self.jobs.submit(run)} ({pool}, workers {workers})"
 
+    # ------------------------------------------------------------------------------- one-card shards (2026-10-22)
+    def held(self) -> bool:
+        """True while any job of --hold-until-running has not started: nothing is submitted before the user's
+        priority jobs (the dense-reward first batch) are on machines.  Released once, for good."""
+        if not self.a.hold_until_running or self.state.get("hold_released"):
+            return False
+        if self._hold is None:
+            states = {j: self.jobs.job_state(j) for j in self.a.hold_until_running}
+            started = [j for j, s in states.items() if s and s not in sco_job.WAITING_STATES]
+            if len(started) == len(states):
+                self.state["hold_released"] = utc()
+                self._hold = False
+            else:
+                self._hold = True
+                self.notes.append(f"等密集奖励第一批上机器：{len(started)}/{len(states)} 个已开始，之前不提交任何任务")
+        return self._hold
+
+    def job_list(self):
+        if self._jobs is None:
+            self._jobs = self.jobs.list_jobs() or []
+        return self._jobs
+
+    def view(self, pool: str):
+        if pool not in self._views:
+            self._views[pool] = self.jobs.pool_view(pool, jobs=self.job_list())
+        return self._views[pool]
+
+    def room(self, pool: str) -> int:
+        """Free cards on machines of `pool` that already run another job, minus our shards still waiting there."""
+        if pool not in self._rooms:
+            v = self.view(pool)
+            waiting = sum(1 for j in self.job_list()
+                          if (j.get("display_name") or "").startswith("downstream-ev")
+                          and j.get("state") in sco_job.WAITING_STATES
+                          and ((j.get("resource_pool") or {}).get("name") if isinstance(j.get("resource_pool"), dict)
+                               else j.get("resource_pool")) == pool)
+            self._rooms[pool] = 0 if v is None else max(0, sum(sco_job.busy_room(v).values()) - waiting)
+        return self._rooms[pool]
+
+    def submit_shard(self, d: Path, ckpt: Path, i: int, k: int, name: str) -> str:
+        if self.held():
+            return "未提交（等密集奖励第一批上机器）"
+        if not self.disk_ok():
+            return "未提交（剩余空间不足或读不出）"
+        pool = max(sco_job.POOLS, key=self.room)
+        if self.room(pool) <= 0:
+            return "未提交（两个池里都没有已有任务、还有空卡的机器）"
+        if self.a.dry:
+            return f"would submit ({pool})"
+        self.jobs.prepare(d, 1, pool, name[:60], ["bash", str(HERE / "run_eval_ckpt.sh"), str(ckpt), str(d / "out"), "1",
+                                                  str(self.a.shard_workers), f"{i}/{k}"])
+        self._rooms[pool] -= 1
+        return f"submitted {self.jobs.submit(d)} ({pool})"
+
+    def shard_entry(self, exp: Path, tag: str, path: Path, suffix: str) -> dict:
+        evaldir, k = exp / "evals" / f"{tag}{suffix}", self.a.shards
+        counts = {"done": 0, "running": 0, "waiting": 0, "failed": 0, "to submit": 0}
+        notes = []
+        bounced = self.state.setdefault("bounced", {})
+        for i in range(1, k + 1):
+            d = evaldir / "shards" / f"s{i}of{k}"
+            if (d / "job/submission.json").exists():
+                st = self.job(d)
+                if not st["finished"]:
+                    counts["running" if st["state"] == "RUNNING" else "waiting"] += 1
+                    continue
+                if score(d / "out/episodes/summary.json"):
+                    counts["done"] += 1
+                    continue
+                fails = len(list(d.glob("job_failed_*")))
+                if fails >= 2 or self.a.dry:
+                    counts["failed"] += 1
+                    continue
+                (d / "job").rename(d / f"job_failed_{fails + 1}")
+                self.state["finished"].pop(str(d), None)
+            last = (bounced.get(str(d)) or [None])[-1]
+            if last and self.now() - last < self.a.bounce_wait_min * 60:
+                counts["waiting"] += 1
+                continue
+            if not settled(path, self.a.settle, self.now):
+                continue
+            counts["to submit"] += 1
+            name = f"ev-{exp.name.lower()}-{tag.replace('_', '')}{suffix.replace('_', '-')}-s{i}of{k}"
+            notes.append(self.submit_shard(d, path, i, k, name))
+        m = merged(evaldir)
+        entry = {"tag": f"{tag}{suffix}", "finished": m is not None, "score": score(m[0]) if m else None,
+                 "state": f"{k} 个 1 卡分片：完成 {counts['done']}、运行 {counts['running']}、排队 {counts['waiting']}"
+                          + (f"、失败 {counts['failed']}" if counts["failed"] else "")
+                          + (f"；本轮：{'；'.join(sorted(set(notes)))}" if notes else "")}
+        if counts["failed"]:
+            self.alerts.append(f"{exp.name} {tag}{suffix} 有 {counts['failed']} 个分片失败了 3 次，不再重提，请看 shards/*/job_failed_*")
+        return entry
+
+    def guard(self) -> list:
+        """The user's rule (2026-10-22): a one-card evaluation must start on a machine that already runs something.
+        Every running shard not yet checked is looked up (sco get-workers); one that has nothing but our shards on
+        its machine took an idle machine: it is deleted at once and resubmitted after --bounce-wait-min."""
+        verified = self.state.setdefault("verified", {})
+        bounced = self.state.setdefault("bounced", {})
+        out = []
+        for sub in sorted(self.experiments.glob("DS-*/evals/*/shards/*/job/submission.json")):
+            d, jid = sub.parent.parent, json.loads(sub.read_text())["job_id"]
+            if jid in verified or str(d) in self.state["finished"]:
+                continue
+            if self.job(d)["state"] != "RUNNING":
+                continue
+            pool = json.loads((d / "job/prepared.json").read_text())["pool"]
+            alone = sco_job.alone_on_machine(self.view(pool), jid)
+            if alone is None:
+                continue
+            if alone:
+                self.jobs.delete(d)
+                (d / "job").rename(d / f"job_bounced_{int(self.now())}")
+                bounced.setdefault(str(d), []).append(self.now())
+                out.append(f"{jid} 落在没有别的任务的机器上，已删除，{self.a.bounce_wait_min:.0f} 分钟后重提")
+            else:
+                verified[jid] = utc()
+        self.notes += out
+        return out
+
     def eval_entry(self, exp: Path, tag: str, path: Path, suffix: str, workers: str) -> dict:
+        if self.a.shards:
+            return self.shard_entry(exp, tag, path, suffix)
         run = exp / "evals" / f"{tag}{suffix}"
         entry = {"tag": f"{tag}{suffix}", "state": "waiting for the file to settle"}
         if (run / "job/submission.json").exists():
@@ -206,17 +372,22 @@ class Watcher:
         out = []
         for target in self.a.repeat:
             exp, tag = parse_target(target)
-            first = self.experiments / exp / "evals" / tag / "out/episodes"
-            rep = self.experiments / exp / "evals" / f"{tag}_repeat/out"
-            if not (first / "summary.json").is_file():
+            first = merged(self.experiments / exp / "evals" / tag)
+            if first is None:
                 continue
+            if self.a.shards:  # one-card shards: the repeat is a second full set, a noise measurement only
+                again = merged(self.experiments / exp / "evals" / f"{tag}_repeat")
+                if again:
+                    out.append(dict(compare(first, again), target=target, workers_tested=again[0]["workers"]))
+                continue
+            rep = self.experiments / exp / "evals" / f"{tag}_repeat/out"
             for p in self.a.repeat_workers.split(","):
                 d = rep / f"episodes_P{p}" if "," in self.a.repeat_workers else rep / "episodes"
                 if (d / "summary.json").is_file() and "per_task" in json.loads((d / "summary.json").read_text()):
                     out.append(dict(compare(first, d), target=target, workers_tested=int(p)))
         tested = {r["workers_tested"]: r for r in out}
         wanted = [int(p) for p in self.a.repeat_workers.split(",")]
-        if tested and set(wanted) <= set(tested) and "workers" not in self.state:
+        if not self.a.shards and tested and set(wanted) <= set(tested) and "workers" not in self.state:
             ok = [p for p in wanted if tested[p]["slowdown"] is not None and tested[p]["slowdown"] <= self.a.max_slowdown]
             chosen = max(ok) if ok else self.a.workers
             self.state["workers"] = {"chosen": chosen, "utc": utc(),
@@ -229,23 +400,19 @@ class Watcher:
         if "gate" in self.state and self.state["gate"].get("decided"):
             return self.state["gate"]
         exp, tag = parse_target(self.a.gate)
-        summary_path = self.experiments / exp / "evals" / tag / "out/episodes/summary.json"
         run = self.experiments / exp / "evals" / tag
-        if not (run / "job/submission.json").exists():
+        m = merged(run)
+        if m is None:
             return {"decided": False, "note": f"等 {exp} {tag} 的评测"}
-        st = self.job(run)
-        if not st["finished"]:
-            return {"decided": False, "note": f"等 {exp} {tag} 的评测（{st['state']}）"}
-        agg = score(summary_path)
-        if agg is None:
-            self.alerts.append(f"{exp} {tag} 的评测已结束但没有结果（{st['state']} exit {st['exit_code']}），第三步其余任务未提交")
-            return {"decided": False, "note": "门槛评测没有结果"}
+        agg = score(m[0])
         successes = agg["all"][0]
         if successes == 0:
             self.state["gate"] = {"decided": True, "utc": utc(), "successes": 0, "submitted": [],
                                   "note": f"{exp} {tag} 在 34 个任务上成功 0 个回合：按规定停下，不提交第三步其余任务"}
             self.alerts.append(self.state["gate"]["note"])
             return self.state["gate"]
+        if self.held():
+            return {"decided": False, "note": f"{exp} {tag} 成功 {successes} 个回合 > 0，等密集奖励第一批上机器后提交"}
         if not self.disk_ok():
             return {"decided": False, "note": f"{exp} {tag} 成功 {successes} 个回合，但剩余空间不足或读不出，暂不提交"}
         if self.a.dry:
@@ -268,6 +435,8 @@ class Watcher:
     def tick(self):
         exp_ids = self.a.exps or [runs.exp_id(s, r, k) for s, r, k in runs.grid(runs.STARTS, runs.RATIOS, (1, 2, 3))]
         rows, missing = [], []
+        self.guard()  # first: shards that started on an idle machine since the last look
+        self.held()
         self.disk_ok()  # read once per pass, so the board always shows the free space (and its alarm)
         for exp_id in exp_ids:
             exp = self.experiments / exp_id
@@ -313,6 +482,14 @@ def board(w: Watcher, rows, missing, rep, gate) -> str:
         lines.append(f"> **报警**：{a}")
     if w.alerts:
         lines.append("")
+    for n in w.notes:
+        lines.append(f"> {n}")
+    if w.notes:
+        lines.append("")
+    if w.a.shards:
+        bounced = sum(len(v) for v in w.state.get("bounced", {}).values())
+        lines += [f"- 评测方式：每个检查点 {w.a.shards} 个 1 卡分片（每片 {w.a.shard_workers} 个仿真进程），只在已有别的任务、"
+                  f"还有空卡的机器上启动；落到空闲机器上的会被立刻删掉重提（累计 {bounced} 次）", ""]
     d = w.disk or {}
     lines += [f"- 剩余空间：{'配额 %s TB，已用 %s TB，剩余至少 %s TB' % (d['quota_tb'], d['used_tb'], d['free_tb_min']) if d else '本轮未读或读不出'}"
               f"（少于 {w.a.min_free_tb} TB 不提交）",
@@ -369,22 +546,37 @@ def parser():
     ap.add_argument("--report-out", default=str(RUNS_ROOT / "report"),
                     help="rebuild the result report here when evaluations finish (empty: never)")
     ap.add_argument("--report-python", default="/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python")
+    ap.add_argument("--shards", type=int, default=8,
+                    help="one-card shards per evaluation (0: one job of --cards cards, the old way)")
+    ap.add_argument("--shard-workers", type=int, default=12, help="simulator workers per one-card shard (14 vCPU)")
+    ap.add_argument("--bounce-wait-min", type=float, default=30,
+                    help="minutes before a shard deleted for starting on an idle machine is submitted again")
+    ap.add_argument("--guard-every", type=float, default=120, help="seconds between placement checks")
+    ap.add_argument("--hold-until-running", nargs="*", default=[],
+                    help="job ids that must all have started before anything is submitted")
     return ap
 
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
+    last_full = -math.inf
     while True:
         w = Watcher(args)
         if args.dry:
             w.save = lambda: None
-        text = board(w, *w.tick())
-        if args.board:
-            args.board.write_text(text)
-        print(text, flush=True)
-        if args.every <= 0:
-            return 0
-        time.sleep(args.every)
+        if time.time() - last_full >= args.every:
+            last_full = time.time()
+            text = board(w, *w.tick())
+            if args.board:
+                args.board.write_text(text)
+            print(text, flush=True)
+            if args.every <= 0:
+                return 0
+        else:  # between full passes: only the placement check of fresh one-card shards
+            for line in w.guard():
+                print(f"[guard {utc()}] {line}", flush=True)
+            w.save()
+        time.sleep(min(args.guard_every, args.every))
 
 
 if __name__ == "__main__":

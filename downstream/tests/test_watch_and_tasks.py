@@ -35,23 +35,39 @@ def fake_exp(root: Path, name="DS-B-100-s1", steps=(25000, 50000), final=True, s
 
 
 class FakeJobs:
-    def __init__(self, states=None):
-        self.prepared, self.states = [], states or {}
+    def __init__(self, states=None, views=None, job_states=None):
+        self.prepared, self.states, self.deleted = [], states or {}, []
+        self.views, self.job_states = views or {}, job_states or {}
 
     def pick_pool(self):
         return "h800"
 
     def prepare(self, run, gpus, pool, name, payload):
         (run / "job").mkdir(parents=True, exist_ok=True)
-        self.prepared.append((run.name, gpus, name, payload))
+        (run / "job/prepared.json").write_text(json.dumps({"pool": pool}))
+        self.prepared.append((run.name, gpus, name, payload, pool))
 
     def submit(self, run):
-        (run / "job/submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}"}))
-        return f"pt-{run.name}"
+        jid = f"pt-{run.parent.parent.name if run.parent.name == 'shards' else ''}{run.name}"
+        (run / "job/submission.json").write_text(json.dumps({"job_id": jid}))
+        return jid
 
     def status(self, run):
         st = self.states.get(run.name, "RUNNING")
         return {"state": st, "finished": st in ("SUCCEEDED", "FAILED"), "exit_code": "0"}
+
+    def job_state(self, job_id):
+        return self.job_states.get(job_id)
+
+    def list_jobs(self):
+        return []
+
+    def pool_view(self, pool, jobs=None):
+        return self.views.get(pool, {"hosts": {}})
+
+    def delete(self, run):
+        self.deleted.append(run.name)
+        return "deleted"
 
 
 class FakeRuns:
@@ -69,9 +85,10 @@ class FakeRuns:
         return {"exp": f"DS-{start}-{ratio}-s{seed}", "job": "pt-x"}
 
 
-def watcher(tmp_path, *extra, jobs=None, free=FREE, run_tools=None):
+def watcher(tmp_path, *extra, jobs=None, free=FREE, run_tools=None, shards=0):
     args = watch.parser().parse_args(["--runs-root", str(tmp_path), "--state", str(tmp_path / "state.json"),
-                                      "--report-out", "", "--exps", "DS-B-100-s1", "DS-S-100-s1", *extra])
+                                      "--report-out", "", "--shards", str(shards),
+                                      "--exps", "DS-B-100-s1", "DS-S-100-s1", *extra])
     return watch.Watcher(args, jobs=jobs or FakeJobs(), free_space=lambda: free, run_tools=run_tools or FakeRuns())
 
 
@@ -109,11 +126,92 @@ def test_submissions_carry_the_plan_parameters(tmp_path):
     exp = fake_exp(tmp_path)
     jobs = FakeJobs()
     watcher(tmp_path, jobs=jobs).tick()
-    by_run = {name: payload for name, _, _, payload in jobs.prepared}
+    by_run = {name: payload for name, _, _, payload, _ in jobs.prepared}
     assert by_run["steps_25000"][1:] == [str(watch.HERE / "run_eval_ckpt.sh"),
                                          str(exp / "run/checkpoints/steps_25000_pytorch_model.pt"),
                                          str(exp / "evals/steps_25000/out"), "1", "24"]
-    assert by_run["steps_25000_repeat"][-1] == "48,96" and {g for _, g, _, _ in jobs.prepared} == {8}
+    assert by_run["steps_25000_repeat"][-1] == "48,96" and {g for _, g, _, _, _ in jobs.prepared} == {8}
+
+
+def busy_view(*hosts):
+    """{"hosts": {ip: [jobs]}} from (ip, [(name, cards), ...]) pairs."""
+    return {"hosts": {ip: [{"job_id": f"pt-{n}", "name": n, "cards": c} for n, c in jobs] for ip, jobs in hosts}}
+
+
+def test_busy_room_and_alone_on_machine():
+    from sco_job import alone_on_machine, busy_room
+
+    view = busy_view(("10.0.0.1", [("interiorgs-v10-rl-x", 4)]), ("10.0.0.2", [("downstream-ev-a-s1of8", 1)]),
+                     ("10.0.0.3", [("other-8card", 8)]),
+                     ("10.0.0.4", [("downstream-ev-b-s2of8", 1), ("interiorgs-renderer", 1)]))
+    assert busy_room(view) == {"10.0.0.1": 4, "10.0.0.4": 6}  # not .2 (only our shard), not .3 (full)
+    assert alone_on_machine(view, "pt-downstream-ev-a-s1of8") is True
+    assert alone_on_machine(view, "pt-downstream-ev-b-s2of8") is False
+    assert alone_on_machine(view, "pt-missing") is None
+
+
+def test_shards_go_only_into_room_on_busy_machines(tmp_path):
+    exp = fake_exp(tmp_path)
+    jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("interiorgs-v10-rl-x", 5)]))})
+    rows, *_ = watcher(tmp_path, jobs=jobs, shards=8).tick()
+    shard_jobs = [p for p in jobs.prepared if p[0].startswith("s")]
+    assert len(shard_jobs) == 3  # the 3 free cards of the busy machine; zoetrope has no busy machine with room
+    name, gpus, job_name, payload, pool = shard_jobs[0]
+    assert gpus == 1 and pool == "h800" and job_name.startswith("ev-ds-b-100-s1-steps25000")
+    assert payload[-3:] == ["1", "12", "1/8"] and payload[2].endswith("steps_25000_pytorch_model.pt")
+    entry = rows[0]["evals"][0]
+    assert "两个池里都没有已有任务、还有空卡的机器" in entry["state"]
+    assert (exp / "evals/steps_25000/shards/s1of8/job/submission.json").exists()
+
+
+def test_hold_until_the_priority_jobs_run(tmp_path):
+    fake_exp(tmp_path)
+    room = {"h800": busy_view(("10.0.0.1", [("other", 1)]))}
+    jobs = FakeJobs(views=room, job_states={"pt-dense1": "RUNNING", "pt-dense2": "STARTING"})
+    w = watcher(tmp_path, "--hold-until-running", "pt-dense1", "pt-dense2", jobs=jobs, shards=8)
+    rows, *_ = w.tick()
+    assert not jobs.prepared and "等密集奖励第一批上机器" in rows[0]["evals"][0]["state"]
+    assert "hold_released" not in w.state
+    jobs.job_states["pt-dense2"] = "RUNNING"
+    w2 = watcher(tmp_path, "--hold-until-running", "pt-dense1", "pt-dense2", jobs=jobs, shards=8)
+    w2.tick()
+    assert w2.state["hold_released"] and len(jobs.prepared) == 7  # 7 free cards on the busy machine
+
+
+def test_guard_deletes_a_shard_that_started_alone_and_waits_before_resubmitting(tmp_path):
+    exp = fake_exp(tmp_path)
+    jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("other", 6)]))})
+    watcher(tmp_path, jobs=jobs, shards=8).tick()  # 2 shards submitted: s1of8, s2of8
+    jobs.views["h800"] = busy_view(("10.0.0.9", [("downstream-ev-x", 1)]))
+    jobs.views["h800"]["hosts"]["10.0.0.9"] = [{"job_id": "pt-steps_25000s1of8", "name": "downstream-ev-x", "cards": 1}]
+    jobs.views["h800"]["hosts"]["10.0.0.1"] = [{"job_id": "pt-steps_25000s2of8", "name": "downstream-ev-y", "cards": 1},
+                                              {"job_id": "pt-o", "name": "other", "cards": 6}]
+    w = watcher(tmp_path, jobs=jobs, shards=8)
+    out = w.guard()
+    assert len(out) == 1 and jobs.deleted == ["s1of8"]
+    assert list((exp / "evals/steps_25000/shards/s1of8").glob("job_bounced_*"))
+    assert "pt-steps_25000s2of8" in w.state["verified"]
+    w.save()
+    jobs.views["h800"] = busy_view(("10.0.0.1", [("other", 1)]))
+    before = len(jobs.prepared)
+    w3 = watcher(tmp_path, jobs=jobs, shards=8)
+    w3.tick()
+    resubmitted = [p for p in jobs.prepared[before:] if p[0] == "s1of8"]
+    assert not resubmitted  # within --bounce-wait-min
+
+
+def test_merged_shards_feed_the_gate(tmp_path):
+    jobs, run_tools = FakeJobs(), FakeRuns()
+    exp = fake_exp(tmp_path, steps=(25000,))
+    for i, ok in ((1, 0), (2, 2)):
+        summary(exp / f"evals/steps_25000/shards/s{i}of2/out/episodes", {"OpenDrawer": {"n": 2, "successes": ok}},
+                outcomes=[("OpenDrawer", 1000 + 2 * i, ok > 0), ("OpenDrawer", 1001 + 2 * i, ok > 1)])
+    m = watch.merged(exp / "evals/steps_25000")
+    assert m[0]["per_task"]["OpenDrawer"] == {"n": 4, "successes": 2} and m[0]["shards"] == 2 and len(m[1]) == 4
+    gate = watcher(tmp_path, jobs=jobs, run_tools=run_tools, shards=2).gate()
+    assert gate["decided"] and gate["successes"] == 2 and len(run_tools.submitted) == 24
+    (exp / "evals/steps_25000/shards/s2of2/out/episodes/summary.json").unlink()
+    assert watch.merged(exp / "evals/steps_25000") is None
 
 
 def test_low_or_unknown_space_blocks_every_submission(tmp_path):

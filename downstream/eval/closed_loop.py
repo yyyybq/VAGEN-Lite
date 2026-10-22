@@ -132,6 +132,15 @@ def longest_first(episodes):
     return sorted(episodes, key=lambda e: -e["max_steps"])
 
 
+def shard_of(episodes, shard: str):
+    """Shard "I/K" (1 <= I <= K) of an episode list already in run order: every K-th episode starting at the I-th,
+    so each shard gets its share of the long-horizon tasks.  The K shards partition the list."""
+    i, k = (int(x) for x in shard.split("/"))
+    if not 1 <= i <= k:
+        raise ValueError(f"shard {shard}: need 1 <= I <= K")
+    return episodes[i - 1::k]
+
+
 def _as_int(value):
     try:
         return int(value)
@@ -324,6 +333,7 @@ def main() -> int:
                     help="leave RoboCasa's counter-region order as it is (differs between processes)")
     ap.add_argument("--no-frames", dest="frames", action="store_false",
                     help="do not write the per-episode example strip OUT/frames/<task>_s<seed>.jpg")
+    ap.add_argument("--shard", default=None, help="I/K: run only shard I of K of the plan (one-card evaluation jobs)")
     args = ap.parse_args()
     eval_plan = None
     if args.eval_plan:
@@ -339,12 +349,14 @@ def main() -> int:
         ap.error("give --eval-plan, or --tasks and --seeds")
     args.out.mkdir(parents=True, exist_ok=False)
     episodes = longest_first(episodes)
+    if args.shard:
+        episodes = shard_of(episodes, args.shard)
     for e in episodes:
         e.update(split=args.split, execute_steps=args.execute_steps)
         if args.frames:
             e["frames_dir"] = str(args.out / "frames")
     (args.out / "plan.json").write_text(json.dumps({"ckpt": args.ckpt, "servers": args.servers, "workers": args.workers,
-                                                    "stable_counter_regions": args.stable_regions,
+                                                    "stable_counter_regions": args.stable_regions, "shard": args.shard,
                                                     "eval_plan": eval_plan and {"path": str(args.eval_plan),
                                                                                 "name": eval_plan["name"]},
                                                     "episodes": episodes}, indent=1) + "\n")
@@ -367,7 +379,7 @@ def main() -> int:
                 f.write(json.dumps(row) + "\n")
                 f.flush()
     summary = dict(summarize(rows, args.workers, time.monotonic() - t0), stable_counter_regions=args.stable_regions,
-                   eval_plan=eval_plan["name"] if eval_plan else None)
+                   eval_plan=eval_plan["name"] if eval_plan else None, shard=args.shard)
     (args.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps({k: summary[k] for k in ("episodes", "complete", "successes", "wall_seconds",
                                               "episode_wall_mean_seconds", "episodes_per_hour")}))

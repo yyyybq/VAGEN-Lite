@@ -75,6 +75,25 @@ def test_build_writes_a_complete_page(sim, tmp_path):
     assert results["d5_step"] == 200000 and len(results["summary_lines"]) >= 8
 
 
+def test_collect_merges_one_card_shards(tmp_path):
+    exp = tmp_path / "experiments/DS-RS-100-s1"
+    (exp / "run").mkdir(parents=True)
+    (exp / "experiment.json").write_text("{}")
+    for i in (1, 2):
+        d = exp / f"evals/steps_25000/shards/s{i}of2/out/episodes"
+        d.mkdir(parents=True)
+        rows = [{"task": "OpenDrawer", "seed": 1000 + 2 * i + j, "success": j == 0, "steps": 100, "max_steps": 750,
+                 "wall_seconds": 50.0 * i, "status": "complete"} for j in (0, 1)]
+        (d / "episodes.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        (d / "summary.json").write_text(json.dumps({"per_task": {"OpenDrawer": {"n": 2, "successes": 1}},
+                                                    "workers": 12, "wall_seconds": 100.0 * i}))
+    evs = collect.evaluations(exp)
+    assert len(evs) == 1 and evs[0].kind == "first" and evs[0].step == 25000 and len(evs[0].episodes) == 4
+    assert evs[0].successes == 2 and evs[0].summary["shards"] == 2 and evs[0].summary["episode_wall_mean_seconds"] == 75.0
+    (exp / "evals/steps_25000/shards/s2of2/out/episodes/summary.json").unlink()
+    assert collect.evaluations(exp) == []  # incomplete until every shard has a result
+
+
 def test_build_before_any_evaluation_shows_losses_only(tmp_path):
     root = tmp_path / "runs"
     exp = root / "experiments/DS-B-100-s1"
