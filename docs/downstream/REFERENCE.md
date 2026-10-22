@@ -1,0 +1,85 @@
+# 下游具身任务线：设计、规则、代码与路径（参考）
+
+最后更新：2026-10-22 19:50 UTC。现状看 [STATUS.md](STATUS.md)，各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每轮重写），评测协议看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，报告在 [reports/](reports/)。
+
+## 1. 分阶段设计（你 10-22 的指令；同日第二条指令修订）
+
+| 编号 | 阶段 | 内容 | 开始条件 |
+| --- | --- | --- | --- |
+| E0 | 0 | 评测 D5 停下时保留的 16 个检查点（四个起点 × 2.5 万 / 5 万 / 7.5 万 / 10 万步），顺序：四个起点的 10 万步 → 5 万步 → B 10 万步第二遍（整机，噪声估计）→ 2.5 万和 7.5 万。全部评完后出阶段 0 报告：四条曲线（总体、空间组）、步数规则的判定、空间任务里四起点平均成功率在 10%–60% 的清单（给 E3 选任务）、评测噪声的初步估计（B 10 万步分片版和整机版之差，种子相同） | 主窗口许可 |
+| E1 | 1 | DS-{B,S,RS,RD}-100-s1 从头跑；全状态续训；**只在最终检查点做任务内评测，中间点不评**（E0 已覆盖 2.5 万–10 万步）；最终检查点的第二次评测（噪声下限）**只做 B**，用整机 8 卡任务，有空机时再做 | 续训测通（已满足），且 E0 四个起点的 5 万和 10 万步齐；最晚 10-23 16:00 UTC。步数：四个起点 5 万→10 万的配对差都在噪声内（p > 0.05 且小于 3 个百分点）用 10 万步，否则 20 万。提交前报步数、依据，提交后报四个任务号 |
+| E2 | 2 | 先 DS-{B,S,RS,RD}-010-s1，再视卡情况 030 | 闸门（任一起点 10 万步检查点在 9 个空间任务上成功率 > 0）过了，且有名额；实验目录要先按 E1 的设置重建 |
+| E3 | 3 | 1 小时实测（含一次满配置更新）→ 四个起点各 1 个 PPO；任务按规则选（E0 报告的 10%–60% 清单），所有起点同一批任务；RL 前后用同一套 950 回合评测；最多 2 个 RL 同时跑 | E1 之后、有名额时 |
+| E4 | — | 种子 2、3 | 暂不跑；已有的目录留着不删，不再建新的 |
+
+- 名额：下游所有 8 卡训练（E1、E2 的训练，RL，测试）共用 4 个，RL 至多占 2 个；1 卡分片最多 8 个；8 卡评测任务不算训练名额。你在和主窗口谈动态名额，谈妥再改。
+- 统计：逐任务配对检验（34 个任务为配对单位）+ 评测噪声下限（同一检查点两次评测之差），见 EVAL_PROTOCOL.md 第 3、4 节。
+- 10-22 第一条指令里的"1.5 倍规则"（96 个进程每回合比 24 个进程慢超过 1.5 倍就改评法）已撤销：慢是因为同一台机器被更多进程分用，整机吞吐不变（约每秒 120 个控制步），任务内评测并不低效（你 10-22 第二条指令第 1 条）。
+
+## 2. 评测的运行规则
+
+- 主窗口 10-22 的条件：同时最多 8 个 1 卡任务，只投 h800 和 zoetrope；有 `interiorgs-v10-*` 在排队时不提交；已经开始的不删；`interiorgs-v10-*` 和 `bq_tp_mmxbf16` 的任务一概不碰；`downstream_runs/PAUSE_SUBMISSIONS` 存在时暂停一切提交。
+- 1 卡分片：每个检查点 8 片，每片约 119 回合、12 个仿真进程。原本只投到已有别的任务、还有空卡的机器上（填缝）；10-22 16:30 起 h800 上也可以落在空闲机器上。
+- 整机 8 卡评测（10-22 16:30 起，你的要求）：每个检查点一个 8 卡任务，8 个策略服务 × 96 个仿真进程，只投 h800 的空闲机器；每轮最多提交 1 个；我们有 8 卡评测在排队时不再提交；主线有任务排队时，我们还没开始的 8 卡评测自动撤下（记录改名 `job_withdrawn_*`），之后重提。
+- 卡住的评测（10-22 第二条指令第 3 条）：运行中的评测 90 分钟没有完成一个回合，看板删掉任务（记录改名 `job_hung_*`）并重提，重提的任务只补缺的回合。
+- 同卡数 `bq_tp_mmxbf16` 排队时不提交同卡数的任务（8 卡任务只看同一个池）。
+- 每轮读一次配额剩余空间，少于 1 TB 或读不出时只报警、不提交。
+
+## 3. 代码与位置
+
+- **代码与文档**：分支 `downstream`（从 main `59053083` 开出）。只新增 `downstream/` 和 `docs/downstream/`。
+- **同步**：本地 worktree `C:\Users\user\Desktop\code\VAGEN-Lite-downstream` 提交 → push → 集群 `git pull --ff-only`。只在集群上生成的文件（如 `starts_lock.json`）在集群上提交、push，再在本地 pull。`docs/downstream/MATRIX.md` 由看板在集群上重写，本地不改它。
+- **集群 worktree**：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream`；其中 `third_party`、`playground` 是指向主检出的链接（被 .gitignore 忽略），只读使用。
+- **大文件**在 `/mnt/umm/users/yinbaiqiao/downstream_runs/`（不进 git）：`data/target50_{100,030,010}`（训练数据，只建链接）、`experiments/<编号>/`、`checks/`（一次性检查）、`logs/`、看板 `BOARD.md`、看板状态 `WATCH_STATE.json`、报告 `report/`、`report_stage0/`。
+- **看板** `downstream/eval/watch.py`（`downstream/eval/watch.sh start|stop|status`，代码更新后先 stop 再 start；启动参数记在 `downstream_runs/watch.args`）：每 15 分钟一轮、每 2 分钟一次分片落点检查；按第 2 节的规则提交评测和 E2；重写 `BOARD.md` 和 `docs/downstream/MATRIX.md`；有新评测完成时重建结果报告。用 setsid + nohup 运行，ssh 断开后仍会继续。除了按规则删掉落在空闲机器上、排队中被撤下或卡住的评测任务，不删任何东西。
+- **训练**：`downstream/train/make_experiment.py`（建实验；E1 用 `--full-state-interval 25000 --eval-points "" --archive-suffix _stopped_20261022`，复用 DS-*-100-s1 目录，旧的 experiment.json 等改名保留；B 另加 `"repeat_final": true`）、`runs.py make|submit|list`、`train_entry.py`（全状态每 2.5 万步存一次只留最新，启动时找到全状态就续训；`trainer.stop_at` 段末退出）、`full_state.py`、`run_segmented.sh`（训到最后一步 → 任务内评测最终检查点）、`run_train.sh`（10-21 的旧流程）。续训测试：`resume_test.sh`、`resume_kill_test.sh`、`resume_check.py`。
+- **评测**：`downstream/eval/run_eval_ckpt.sh CKPT OUT 服务数 进程数 [分片]`、`closed_loop.py`（10-22 起：仿真进程死了或卡住时它的回合重跑；重跑一个评测时只补缺的回合；每 30 秒记一次内存，`OUT/episodes/memory.csv` 和 `summary.json["memory"]`）、计划 `downstream/eval/eval_d6.json`。
+- **报告**：`downstream/report/`（`python -m downstream.report.build --out DIR [--stage0]`，vagen-lite 环境）。主检验逐任务配对 + 噪声下限；阶段 0 页含曲线、10%–60% 清单、步数规则表、最后两点之差。网页版（私有 Artifact）：https://claude.ai/artifact/Qa1oNasyCN5pSkjg2LXhBq 。模拟数据在 `downstream_runs/checks/report_sim_20261021/`。
+- **第四步（E3）准备**：`downstream/rlinf/fsdp_7b.overrides`（7B 的三个 FSDP 设置）、`site/sitecustomize.py`（RLinf 的环境进程加台面区域顺序修正、分开记演员和价值头的梯度范数）、`run_rlinf.sh`（正式启动脚本）、`export_test.sh`（导回 StarVLA 格式 + 短评测，10-22 测通）。D7 环境：`/mnt/umm/users/yinbaiqiao/envs/rlinf-starvla-rc365`（`source downstream/envs/activate_rlinf.sh <ENV>`）。
+- **StarVLA**：`4507931` + 补丁 [downstream/patches/starvla_4507931_working.patch](../../downstream/patches/starvla_4507931_working.patch)；每个实验的 `experiment.json` 记提交号和补丁哈希。
+- **剩余空间**：`python3 downstream/quota.py`（读 `sco afs dir-quota list` 整张表里我们这一行）。
+
+## 4. 权重与数据
+
+起点登记在 [downstream/starts.json](../../downstream/starts.json)，锁定值在 [downstream/starts_lock.json](../../downstream/starts_lock.json)；每次建实验和每个训练任务开头都校验，变了就停。路径前缀 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/`。训练时所有起点按 bf16 加载。
+
+| 名字 | 用途 | 路径 | 格式 / 精度 |
+| --- | --- | --- | --- |
+| B | 原始 Qwen2.5-VL-7B-Instruct（`cc594898`） | `interiorgs_v10_r11_20261016/inputs/base_7b` | 完整 HF，bf16 |
+| S | 第十一轮动作 SFT 第 9 个 epoch | `interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386` | 完整 HF，bf16 + fp32 混合 |
+| RS | P-S0 第 300 次 | `interiorgs_v10_train_r11p_20261017/rl_run_ps0/checkpoints/global_step_300/actor/huggingface` | 完整 HF，fp32 |
+| RD | P-D 第 150 次 | `interiorgs_v10_train_r11p_20261017/rl_run_pd/checkpoints/global_step_150/actor/huggingface` | 完整 HF，fp32 |
+| R10S5（备用） | 第十轮 SFT 第 5 个 epoch | `interiorgs_v10_train_r10_20261015/lf_formal/model/checkpoint-770` | 完整 HF |
+| R1（备用） | R1 最终模型 | `R1-clean-Projective-v0/formal/checkpoints/global_step_250/actor/huggingface` | 完整 HF |
+
+| 数据 | 清单 | 规模 |
+| --- | --- | --- |
+| 第二步 | [step2_smoke.json](../../downstream/demos/manifests/step2_smoke.json) | 3 个任务各前 100 条示教（训练）+ 后 20 条（留出），训练 44,369 帧 |
+| 100% | [target50_100.json](../../downstream/demos/manifests/target50_100.json) | 50 个任务，25,307 条示教，14,957,899 帧 |
+| 30% | [target50_030.json](../../downstream/demos/manifests/target50_030.json) | 每任务 150 条（官方 `150_demos`），7,500 条，4,442,662 帧 |
+| 10% | [target50_010.json](../../downstream/demos/manifests/target50_010.json) | 每任务 50 条（官方 `50_demos`），2,500 条，1,494,106 帧；10% ⊂ 30% ⊂ 100% |
+| 原始示教 | `/mnt/umm/users/yinbaiqiao/probe_spatial/robocasa365/datasets/v1.0/target/` | 50 个任务齐全，58 GB |
+
+## 5. 已结束的任务
+
+| 任务 | 内容 | 结果 | 目录 |
+| --- | --- | --- | --- |
+| STEP1-LOAD | 四个起点的加载测试（1 卡） | 通过 | `downstream_runs/step1_load_test_20261020/out/` |
+| STEP2-RS-s1 | 第二步训练（8 卡，200 步 434 秒） | 通过（10-21 确认） | `downstream_runs/experiments/STEP2-RS-s1/` |
+| `pt-wytuck3x` | RLinf 2 次更新试跑，第四次 | 通过（10-22 10:03–10:19） | `downstream_runs/experiments/RLINF-SMOKE-1/` |
+| `pt-cb0kvvf0` | 34 个评测任务的重置扫描 | 原版 89 / 102 对可复现，固定顺序后 102 / 102 | `downstream_runs/checks/reset_sweep_20261021/` |
+| 29 个 | 10-21 提交的第三步训练和 D5 评测 | 10-22 09:08 撤下；输出改名 `run_stopped_20261022/`，记录改名 `job_cancelled_20261022/`；D5 的 4 个停在第 113,700–118,800 步，保留了 2.5 万–10 万步检查点（E0） | `downstream_runs/experiments/DS-*/` |
+| `pt-i4bzrj4k` | 续训测试第一次 + 96 进程评测检查 + 第四步导出测试（8 卡） | 恢复后逐步完全一致；全状态 109.8 GiB，存 68 秒，读 243–270 秒；"杀"只杀到启动器（弹性启动器的会话），所以重测；96 进程检查 95 回合 39 分钟；导出 78 秒、导出后 24 回合评测正常 | `downstream_runs/checks/resume_test_20261022/` |
+| `pt-uv1mh7fe` | 续训重测（8 卡） | 通过：第 150 步杀掉、无残留进程；从第 100 步恢复、段末第 200 步自动退出、再续到 300；第 101–300 步损失、300 个批次哈希、每一步学习率都与不中断的训练相同 | 同上，`RESUME-B2/`、`resume_check_RESUME-B2.json` |
+| 测试产物 | 3 份全状态、6 个权重、1 个导出策略，共 440 GB | 10-22 按你的指示删除，留日志、比对 JSON 和评测记录（7.8 MB） | 同上 |
+
+## 6. 决定记录
+
+**10-21 你对第二步报告的决定**：固定台面区域顺序（已执行）；950 回合评测（已执行）；同一检查点评两遍测噪声（10-22 改为 E0 的 B 10 万步两遍、E1 只做 B 的最终检查点两遍）；加强起点校验（已执行）；3 个边界任务单列（已执行）；D5 的中间检查点先留着、剩余空间少于 1 TB 报警（已执行）。
+
+**10-22 你的指令**：
+- 撤到只剩连通试跑，其余等密集奖励第一批上机器（已执行）；评测拆成 1 卡、只投已有占用的机器（已执行，后来按 16:30 的要求放宽到 h800 空机）。
+- 分阶段设计、先不比种子（第 1 节）。
+- 第二条：续训先测通再提交阶段 1（已测通）；任务内评测（已实现）；阶段 1 的提交时机和步数规则；名额 4 个、RL 至多 2 个；闸门；第四步准备（已做）；种子 2、3 的目录留着；第一个分片跑完后报评测时长和预计完成时间（18:05 已报）。
+- 16:30：把排队和没提交的迁到 h800 的空机上（已执行）。
+- 第三条：1.5 倍规则撤销，E1 只在最终检查点任务内评、B 的最终检查点做第二遍（整机）；删 440 GB 测试文件（已删）；整机评测记内存峰值、超过 80% 降进程数；卡住的整机评测删掉重提只补缺的回合（已实现）；E1 按已定条件提交；看板每轮重写 MATRIX.md、STATUS.md 只留现状；名额先按 4 个；E0 全部评完后出阶段 0 报告。
