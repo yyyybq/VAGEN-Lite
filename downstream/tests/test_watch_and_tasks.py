@@ -419,3 +419,25 @@ def test_spatial_list_partitions_the_34_seen_tasks():
     lists = json.loads((ROOT / "demos/spatial_tasks.json").read_text())
     parts = [set(lists["spatial"]), set(lists["borderline_not_in_group"]), set(lists["not_spatial"])]
     assert len(seen) == 34 and set().union(*parts) == seen and sum(len(p) for p in parts) == 34
+
+
+def test_stage0_report_is_built_into_its_own_folder(tmp_path):
+    from types import SimpleNamespace
+
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    w = watcher(tmp_path, "--stage0")
+    w.a.report_out = str(tmp_path / "report")
+    w.report(run=fake_run)
+    assert len(calls) == 2 and calls[0][-2:] == ["--out", str(tmp_path / "report")]
+    assert calls[1][-3:] == ["--out", str(tmp_path / "report_stage0"), "--stage0"]
+    w.state["finished"][f"/x/experiments/DS-B-100-s1/evals_{watch.STOPPED_RUN}/steps_100000/shards/s1of8"] = {}
+    w.report(run=fake_run)
+    assert len(calls) == 3 and calls[2][-1] == "--stage0"  # only the stage-0 report had a new evaluation
+    w.state["finished"]["/x/experiments/DS-B-100-s1/evals/steps_25000/shards/s1of8"] = {}
+    w.report(run=fake_run)
+    assert len(calls) == 4 and calls[3][-1] != "--stage0"

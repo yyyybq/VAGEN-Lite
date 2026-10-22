@@ -102,34 +102,109 @@ def describe(cmp, what: str) -> list:
         diffs = []
         for s, v in cmp["vs_reference"].items():
             d = v["groups"][g]
-            diffs.append(f"{s} {page.pts(d['diff'])} 个百分点（区间 {page.pts(d['low'])} 到 {page.pts(d['high'])}，"
-                         f"McNemar p = {page.pval(d['p'])}；{d['tasks_up']} 个任务高于 {cmp['reference']}、"
-                         f"{d['tasks_down']} 个低于，Wilcoxon p = {page.pval(d['wilcoxon_p'])}）")
+            diffs.append(f"{s} {page.pts(d['task_mean_diff'])} 个百分点（{d['tasks']} 个任务的平均，区间 "
+                         f"{page.pts(d['task_low'])} 到 {page.pts(d['task_high'])}；{d['tasks_up']} 个任务高于 "
+                         f"{cmp['reference']}、{d['tasks_down']} 个低于；Wilcoxon p = {page.pval(d['wilcoxon_p'])}，"
+                         f"符号检验 p = {page.pval(d['sign_p'])}）")
         if diffs:
-            lines.append(f"{what}，{stats.GROUP_ZH[g]}与 {cmp['reference']} 的配对差：" + "；".join(diffs) + "。")
+            lines.append(f"{what}，{stats.GROUP_ZH[g]}与 {cmp['reference']} 的逐任务配对差：" + "；".join(diffs) + "。")
     return lines
 
 
-def build(runs_root: Path, out: Path, reference: str = "B") -> dict:
+STAGE0_RUN = "run_stopped_20261022"
+BAND = (0.10, 0.60)
+
+
+def stage0(coll, reference: str = "B") -> dict:
+    """Stage 0 (user, 2026-10-22): the checkpoints kept from the stopped D5 runs (100% data, seed 1).
+    Success by checkpoint per start (all tasks, the 9 spatial tasks); the spatial tasks whose success averaged over
+    the four starts lies in 10%-60% at the latest checkpoint every start has; and, per start, the paired difference
+    between its last two evaluated checkpoints (same scenes), to see whether the curve has flattened."""
+    evs = [e for e in coll.first() if e.ratio == "100" and e.seed == 1]
+    starts = [s for s in coll.starts() if any(e.start == s for e in evs)]
+    curve = {s: {e.step: stats.group_counts([dict(x, train_seed=1) for x in e.episodes], coll.tasks)
+                 for e in evs if e.start == s} for s in starts}
+    common = stats.common_steps(coll, "100", [1])
+    latest = common[-1] if common else None
+    spatial = []
+    if latest:
+        for t in sorted(t for t, i in coll.tasks.items() if i.klass == "spatial"):
+            rates = {}
+            for s in starts:
+                k, n = stats.task_counts(stats.episodes_of(coll, s, "100", latest, [1])).get(t, (0, 0))
+                if n:
+                    rates[s] = k / n
+            mean = sum(rates.values()) / len(rates) if rates else math.nan
+            spatial.append({"task": t, "rates": rates, "mean": mean, "in_band": BAND[0] <= mean <= BAND[1]})
+    flat = {}
+    for s in starts:
+        steps = sorted(curve[s])
+        if len(steps) < 2:
+            continue
+        a, b = steps[-2], steps[-1]
+        ea, eb = stats.episodes_of(coll, s, "100", a, [1]), stats.episodes_of(coll, s, "100", b, [1])
+        row = {"from": a, "to": b}
+        for g in ("all", "spatial"):
+            keep = {t for t, i in coll.tasks.items() if stats.in_group(i, g)}
+            ma = {k: v for k, v in stats.outcome_map(ea).items() if k[0] in keep}
+            mb = {k: v for k, v in stats.outcome_map(eb).items() if k[0] in keep}
+            ta, tb = stats.task_counts([x for x in ea if x["task"] in keep]), stats.task_counts([x for x in eb if x["task"] in keep])
+            diffs = [tb[t][0] / tb[t][1] - ta[t][0] / ta[t][1] for t in sorted(set(ta) & set(tb)) if ta[t][1] and tb[t][1]]
+            row[g] = dict(stats.paired(mb, ma), **{"task_" + k: v for k, v in stats.task_level(diffs).items()})
+        flat[s] = row
+    return {"starts": starts, "steps": sorted({e.step for e in evs}), "curve": curve, "latest_common": latest,
+            "spatial": spatial, "flat": flat, "band": BAND}
+
+
+def stage0_lines(s0) -> list:
+    if not s0["curve"]:
+        return ["阶段 0 还没有评完的检查点。"]
+    lines = []
+    for s in s0["starts"]:
+        pts_ = []
+        for step, c in sorted(s0["curve"][s].items()):
+            pts_.append(f"{step // 1000}k {page.pct(c['all'][0] / c['all'][1])}（空间 "
+                        f"{page.pct(c['spatial'][0] / c['spatial'][1]) if c['spatial'][1] else '—'}）")
+        lines.append(f"{s}：" + "，".join(pts_) + "。")
+    if s0["latest_common"]:
+        band = [x["task"] for x in s0["spatial"] if x["in_band"]]
+        lines.append(f"四个起点都评过的最后一个检查点是 {s0['latest_common'] // 1000}k；9 个空间任务里，四个起点平均成功率在 "
+                     f"{int(100 * s0['band'][0])}%–{int(100 * s0['band'][1])}% 的有 {len(band)} 个：{'、'.join(band) or '无'}。")
+    for s, r in s0["flat"].items():
+        lines.append(f"{s} 最后两个检查点 {r['from'] // 1000}k → {r['to'] // 1000}k：全部任务 {page.pts(r['all']['diff'])} 个百分点"
+                     f"（McNemar p = {page.pval(r['all']['p'])}；逐任务平均 {page.pts(r['all']['task_task_mean_diff'])}，"
+                     f"Wilcoxon p = {page.pval(r['all']['task_wilcoxon_p'])}），空间组 {page.pts(r['spatial']['diff'])} 个百分点"
+                     f"（McNemar p = {page.pval(r['spatial']['p'])}）。")
+    return lines
+
+
+def build(runs_root: Path, out: Path, reference: str = "B", stage0_mode: bool = False) -> dict:
     from . import figures as F
 
-    coll = collect.collect(runs_root)
+    if stage0_mode:
+        coll = collect.collect(runs_root, evals_name=f"evals_{STAGE0_RUN}", run=STAGE0_RUN)
+    else:
+        coll = collect.collect(runs_root)
     simulated = (Path(runs_root) / "SIMULATED").exists()
     out = Path(out)
     (out / "figures").mkdir(parents=True, exist_ok=True)
     d5_step = d5_point(coll)
     d5 = stats.compare(coll, "100", d5_step, [1], reference) if d5_step else None
-    finals = {r: stats.compare(coll, r, FINAL_STEP, final_seeds(coll, r), reference)
-              for r in ("010", "030", "100") if final_seeds(coll, r)}
+    finals = {} if stage0_mode else {r: stats.compare(coll, r, FINAL_STEP, final_seeds(coll, r), reference)
+                                     for r in ("010", "030", "100") if final_seeds(coll, r)}
     seed_tables = {r: stats.seed_table(coll, r, FINAL_STEP) for r in ("010", "030", "100")}
     main = finals.get("100") or d5
-    if main is not None and main is finals.get("100"):
+    s0 = stage0(coll, reference) if stage0_mode else None
+    if stage0_mode:
+        main_label = (f"阶段 0：10-22 停下的 D5（100% 数据、训练种子 1），四个起点都评过的第 {d5_step // 1000}k 步"
+                      if d5_step else "阶段 0：还没有评完的检查点")
+    elif main is not None and main is finals.get("100"):
         main_label = f"第三步，100% 数据，第 {FINAL_STEP // 1000}k 步，训练种子 {','.join(map(str, main['seeds']))}"
     elif main is not None:
         main_label = f"D5，100% 数据，训练种子 1，第 {d5_step // 1000}k 步检查点"
     else:
         main_label = "还没有评测结果"
-    lines = []
+    lines = stage0_lines(s0) if s0 else []
     if not coll.first():
         lines.append("还没有完成的闭环评测。训练损失见下文；评测完成后重新生成本页即可。")
     if d5:
@@ -140,10 +215,12 @@ def build(runs_root: Path, out: Path, reference: str = "B") -> dict:
         lines += describe(cmp, f"第三步 {collect.RATIO_PERCENT[r]}% 数据第 {FINAL_STEP // 1000}k 步"
                                f"（训练种子 {','.join(map(str, cmp['seeds']))}）")
     noise = noise_rows(coll)
-    for x in noise:
-        lines.append(f"评测噪声：{x['exp']} 第 {x['step'] // 1000}k 步评两遍（并行进程 {x['workers'][0]} 与 "
-                     f"{x['workers'][1]}），成功率差 {page.pts(x['rate_diff'])} 个百分点，{x['changed']}/{x['compared']} "
-                     f"个回合结果不同；平均每回合 {x['seconds'][0]:.0f} 与 {x['seconds'][1]:.0f} 秒（{x['slowdown']:.2f} 倍）。")
+    floor = stats.noise_floor(coll)
+    for x, f in zip(noise, floor):
+        lines.append(f"评测噪声下限：{x['exp']} 第 {x['step'] // 1000}k 步用同一批种子评两遍，成功率差 "
+                     f"{page.pts(f['pooled_diff'])} 个百分点；逐任务差的平均绝对值 {page.pts(f['task_mean_abs_diff']).lstrip('+')} "
+                     f"个百分点、最大 {page.pts(f['task_max_abs_diff']).lstrip('+')}；{f['episodes_changed']}/{f['episodes_compared']} "
+                     f"个回合结果不同。起点之间的逐任务平均差小于这个量级时分不出来。")
 
     figs = {}
 
@@ -154,8 +231,11 @@ def build(runs_root: Path, out: Path, reference: str = "B") -> dict:
             F.plt.close(fig)
             figs[name] = path
     save("loss", F.loss_curves(coll, reference=reference))
-    save("checkpoints", F.checkpoint_curves(coll))
-    save("learning", F.learning_curves(coll, FINAL_STEP))
+    if stage0_mode:
+        save("checkpoints", F.checkpoint_curves(coll, groups=("all", "spatial")))
+    else:
+        save("checkpoints", F.checkpoint_curves(coll))
+        save("learning", F.learning_curves(coll, FINAL_STEP))
     if main:
         save("heatmap", F.task_heatmap(coll, main))
         save("forest", F.forest(coll, main))
@@ -171,7 +251,8 @@ def build(runs_root: Path, out: Path, reference: str = "B") -> dict:
                    "episodes": sum(len(e.episodes) for e in coll.first())},
         "reference": reference, "d5_step": d5_step, "d5": d5, "finals": finals, "final_step": FINAL_STEP,
         "seed_tables": seed_tables, "main_cmp": main, "main_label": main_label,
-        "task_order": F.task_order(coll, main) if main else [], "noise": noise, "summary_lines": lines,
+        "task_order": F.task_order(coll, main) if main else [], "noise": noise, "noise_floor": floor,
+        "summary_lines": lines, "stage0": s0,
         "examples_rule": ("范例按固定规则挑选，不凭观感：同一场景（同任务、同评测种子、同训练种子）里起点结果不一致的回合，"
                           "每个起点各取同样多个“它成功、B 失败”和“B 成功、它失败”，空间任务优先，再按任务名和种子排序；"
                           "另加一个全部成功、一个全部失败的场景。每条画面是该回合等间隔的 8 帧（左侧相机），"
@@ -200,8 +281,10 @@ def main(argv=None) -> int:
     ap.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--reference", default="B")
+    ap.add_argument("--stage0", action="store_true",
+                    help="stage 0: the stopped D5 runs (run_stopped_20261022, evals_run_stopped_20261022)")
     args = ap.parse_args(argv)
-    print(json.dumps(build(args.runs_root, args.out, args.reference)))
+    print(json.dumps(build(args.runs_root, args.out, args.reference, stage0_mode=args.stage0)))
     return 0
 
 

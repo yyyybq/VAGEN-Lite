@@ -178,11 +178,52 @@ def compare(coll, ratio: str, step: int, seeds, reference: str = "B") -> dict:
             keep = {t for t, info in coll.tasks.items() if in_group(info, g)}
             groups[g] = paired({k: v for k, v in mine.items() if k[0] in keep},
                                {k: v for k, v in ref.items() if k[0] in keep})
-            stat, p = wilcoxon_tasks([r["diff"] for t, r in per_task.items() if t in keep])
-            groups[g].update(wilcoxon_stat=stat, wilcoxon_p=p,
-                             tasks_up=sum(r["diff"] > 0 for t, r in per_task.items() if t in keep),
-                             tasks_down=sum(r["diff"] < 0 for t, r in per_task.items() if t in keep))
+            groups[g].update(task_level([r["diff"] for t, r in per_task.items() if t in keep]))
         out["vs_reference"][s] = {"tasks": per_task, "groups": groups}
+    return out
+
+
+def task_level(diffs: list, resamples: int = 2000, seed: int = 0) -> dict:
+    """The tasks as the pairing unit (the user's choice of 2026-10-22): one success-rate difference per task.
+    Mean difference over tasks with a 95% bootstrap interval (resampling tasks), the sign test (tasks up vs down)
+    and the Wilcoxon signed-rank test."""
+    import random
+
+    d = [x for x in diffs if not math.isnan(x)]
+    up, down = sum(x > 0 for x in d), sum(x < 0 for x in d)
+    stat, p = wilcoxon_tasks(d)
+    out = {"tasks": len(d), "tasks_up": up, "tasks_down": down, "task_mean_diff": sum(d) / len(d) if d else math.nan,
+           "sign_p": binom_two_sided(min(up, down), up + down), "wilcoxon_stat": stat, "wilcoxon_p": p,
+           "task_low": math.nan, "task_high": math.nan}
+    if d:
+        rng = random.Random(seed)
+        means = sorted(sum(rng.choice(d) for _ in d) / len(d) for _ in range(resamples))
+        out["task_low"], out["task_high"] = means[int(0.025 * resamples)], means[int(0.975 * resamples) - 1]
+    return out
+
+
+def noise_floor(coll) -> list:
+    """Two evaluations of one checkpoint with the same seeds (first and repeat): the differences between them are
+    what the evaluation alone produces.  Per pair: the pooled success difference, the per-task differences (mean of
+    their absolute values, largest), and the episodes whose outcome differs."""
+    first = {(e.exp, e.step): e for e in coll.first()}
+    out = []
+    for r in (e for e in coll.evals if e.kind == "repeat"):
+        a = first.get((r.exp, r.step))
+        if a is None:
+            continue
+        ta, tb = task_counts([dict(x, train_seed=0) for x in a.episodes]), \
+            task_counts([dict(x, train_seed=0) for x in r.episodes])
+        diffs = [tb[t][0] / tb[t][1] - ta[t][0] / ta[t][1] for t in sorted(set(ta) & set(tb)) if ta[t][1] and tb[t][1]]
+        oa = {(x["task"], x["eval_seed"]): x["success"] for x in a.episodes}
+        ob = {(x["task"], x["eval_seed"]): x["success"] for x in r.episodes}
+        common = set(oa) & set(ob)
+        out.append({"exp": a.exp, "step": a.step,
+                    "pooled_diff": r.successes / max(1, len(r.episodes)) - a.successes / max(1, len(a.episodes)),
+                    "task_mean_abs_diff": sum(abs(x) for x in diffs) / len(diffs) if diffs else math.nan,
+                    "task_max_abs_diff": max((abs(x) for x in diffs), default=math.nan),
+                    "episodes_changed": sum(oa[k] != ob[k] for k in common), "episodes_compared": len(common),
+                    "task_level": task_level(diffs)})
     return out
 
 

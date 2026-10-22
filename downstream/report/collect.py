@@ -66,9 +66,9 @@ def read_jsonl(path: Path) -> list:
     return [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
 
 
-def losses(exp_dir: Path) -> list:
+def losses(exp_dir: Path, run: str = "run") -> list:
     """[(step, loss)] in step order."""
-    rows = read_jsonl(exp_dir / "run/metrics.jsonl")
+    rows = read_jsonl(exp_dir / run / "metrics.jsonl")
     return sorted((int(r["step"]), float(r["action_dit_loss"])) for r in rows if "action_dit_loss" in r)
 
 
@@ -114,13 +114,13 @@ def _sharded(exp_dir, start, ratio, seed, step, kind, evaldir: Path):
     return Evaluation(exp_dir.name, start, ratio, seed, step, kind, pieces[0].workers, evaldir, summary, eps)
 
 
-def evaluations(exp_dir: Path) -> list:
+def evaluations(exp_dir: Path, evals_name: str = "evals") -> list:
     parsed = parse_exp(exp_dir.name)
     if not parsed:
         return []
     start, ratio, seed = parsed
     out = []
-    for d in sorted((exp_dir / "evals").glob("steps_*")):
+    for d in sorted((exp_dir / evals_name).glob("steps_*")):
         m = re.match(r"^steps_(\d+)(_repeat)?$", d.name)
         if not m:
             continue
@@ -158,13 +158,15 @@ class Collection:
         return [s for s in START_ORDER if s in present] + sorted(present - set(START_ORDER))
 
 
-def collect(runs_root: Path, downstream: Path = DOWNSTREAM) -> Collection:
+def collect(runs_root: Path, downstream: Path = DOWNSTREAM, evals_name: str = "evals", run: str = "run") -> Collection:
+    """Every DS-* experiment: its training losses (EXP/<run>/metrics.jsonl) and finished evaluations (EXP/<evals_name>/).
+    The stage-0 report reads the stopped D5 runs: run="run_stopped_20261022", evals_name="evals_run_stopped_20261022"."""
     exps, loss, evs = {}, {}, []
     for exp_dir in sorted((Path(runs_root) / "experiments").glob("DS-*")):
         parsed = parse_exp(exp_dir.name)
         if not parsed or not (exp_dir / "experiment.json").is_file():
             continue
         exps[exp_dir.name] = parsed
-        loss[exp_dir.name] = losses(exp_dir)
-        evs += evaluations(exp_dir)
+        loss[exp_dir.name] = losses(exp_dir, run)
+        evs += evaluations(exp_dir, evals_name)
     return Collection(Path(runs_root), task_table(downstream), exps, loss, evs)

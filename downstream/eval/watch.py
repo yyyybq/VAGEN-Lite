@@ -546,21 +546,28 @@ class Watcher:
         matplotlib, so it runs in --report-python; a failure is shown on the board, never raised."""
         if not self.a.report_out or self.a.dry:
             return
-        done = sorted(k for k in self.state["finished"] if "/evals/" in k)
-        if done == self.state.get("report", {}).get("evaluations"):
-            return
-        t0 = time.time()
-        try:
-            res = run([self.a.report_python, "-m", "downstream.report.build", "--runs-root", str(self.a.runs_root),
-                       "--out", self.a.report_out], cwd=str(DOWNSTREAM.parent), capture_output=True, text=True,
-                      timeout=1800, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
-            rc, tail = res.returncode, (res.stderr or res.stdout)[-300:]
-        except Exception as exc:
-            rc, tail = -1, f"{type(exc).__name__}: {exc}"[:300]
-        self.state["report"] = {"utc": utc(), "rc": rc, "seconds": round(time.time() - t0),
-                                "evaluations": done if rc == 0 else self.state.get("report", {}).get("evaluations")}
-        if rc != 0:
-            self.alerts.append(f"结果报告没有生成（退出码 {rc}）：{tail}")
+        # (state key, evaluations it reads, output folder, extra build options); with --stage0 also the report of
+        # the stopped D5 runs' checkpoints, in REPORT_OUT_stage0
+        targets = [("report", "/evals/", self.a.report_out, [])]
+        if self.a.stage0:
+            targets.append(("report_stage0", f"/evals_{STOPPED_RUN}/", self.a.report_out.rstrip("/") + "_stage0",
+                            ["--stage0"]))
+        for name, mark, out, extra in targets:
+            done = sorted(k for k in self.state["finished"] if mark in k)
+            if done == self.state.get(name, {}).get("evaluations"):
+                continue
+            t0 = time.time()
+            try:
+                res = run([self.a.report_python, "-m", "downstream.report.build", "--runs-root", str(self.a.runs_root),
+                           "--out", out] + extra, cwd=str(DOWNSTREAM.parent), capture_output=True, text=True,
+                          timeout=1800, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+                rc, tail = res.returncode, (res.stderr or res.stdout)[-300:]
+            except Exception as exc:
+                rc, tail = -1, f"{type(exc).__name__}: {exc}"[:300]
+            self.state[name] = {"utc": utc(), "rc": rc, "seconds": round(time.time() - t0), "out": out,
+                                "evaluations": done if rc == 0 else self.state.get(name, {}).get("evaluations")}
+            if rc != 0:
+                self.alerts.append(f"结果报告 {out} 没有生成（退出码 {rc}）：{tail}")
 
 
 def utc() -> str:
@@ -592,7 +599,12 @@ def board(w: Watcher, rows, missing, rep, gate) -> str:
               f"- 第三步其余任务的门槛（{w.a.gate}）：{(gate or {}).get('note', '-')}",
               f"- 结果报告 `{w.a.report_out}/index.html`：" + (
                   f"{w.state['report']['utc']} 生成（退出码 {w.state['report']['rc']}）" if "report" in w.state
-                  else "评测完成后自动生成"), ""]
+                  else "评测完成后自动生成")]
+    if w.a.stage0:
+        r0 = w.state.get("report_stage0")
+        lines.append(f"- 阶段 0 报告 `{w.a.report_out.rstrip('/')}_stage0/index.html`：" + (
+            f"{r0['utc']} 生成（退出码 {r0['rc']}）" if r0 else "阶段 0 的分片完成后自动生成"))
+    lines.append("")
     if rep:
         lines += ["## 同一检查点的两次评测（噪声与并行度）", "",
                   "| 检查点 | 第二次的 P | 成功（第一次 / 第二次） | 成功率差（百分点） | 结果不同的回合 / 比较的回合 | 平均每回合秒数（第一次 / 第二次） | 倍数 | 总墙钟秒数 |",

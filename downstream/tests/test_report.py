@@ -105,3 +105,50 @@ def test_build_before_any_evaluation_shows_losses_only(tmp_path):
     assert out["figures"] == ["loss"] and out["examples"] == 0 and not out["simulated"]
     page = (tmp_path / "report/index.html").read_text(encoding="utf-8")
     assert "还没有完成的闭环评测" in page and "模拟数据" not in page
+
+
+def test_task_level_pairs_by_task():
+    r = stats.task_level([0.1, 0.2, 0.3, 0.4, 0.5, -0.1, 0.0, math.nan])
+    assert (r["tasks"], r["tasks_up"], r["tasks_down"]) == (7, 5, 1)
+    assert r["task_mean_diff"] == pytest.approx(1.4 / 7) and r["sign_p"] == pytest.approx(14 / 64)
+    assert r["task_low"] < r["task_mean_diff"] < r["task_high"]
+    assert stats.task_level([])["tasks"] == 0 and math.isnan(stats.task_level([])["task_mean_diff"])
+
+
+def test_noise_floor_of_a_repeated_checkpoint(sim):
+    floor = stats.noise_floor(collect.collect(sim))
+    assert len(floor) == 2 and all(f["episodes_compared"] == 950 for f in floor)
+    f = floor[0]
+    assert f["task_level"]["tasks"] == 34 and 0 <= f["task_mean_abs_diff"] <= f["task_max_abs_diff"] <= 1
+
+
+def test_stage0_build_reads_the_stopped_runs(tmp_path):
+    import shutil
+
+    root = tmp_path / "sim"
+    simulate.simulate(root, seed=2)
+    for exp in (root / "experiments").glob("DS-*"):
+        if not exp.name.endswith("-100-s1"):
+            shutil.rmtree(exp)
+            continue
+        (exp / "run").rename(exp / build.STAGE0_RUN)
+        ev = exp / f"evals_{build.STAGE0_RUN}"
+        ev.mkdir()
+        for d in (exp / "evals").glob("steps_*"):
+            step = int(d.name.split("_")[1])
+            if step <= 100000:
+                d.rename(ev / d.name)
+        shutil.rmtree(exp / "evals")
+    assert build.build(root, tmp_path / "plain")["evaluations"] == 0  # the normal report does not read them
+    out = build.build(root, tmp_path / "report0", stage0_mode=True)
+    assert out["evaluations"] == 16 and "checkpoints" in out["figures"] and "learning" not in out["figures"]
+    results = json.loads((tmp_path / "report0/results.json").read_text(encoding="utf-8"))
+    s0 = results["stage0"]
+    assert s0["steps"] == [25000, 50000, 75000, 100000] and s0["latest_common"] == 100000
+    assert s0["starts"] == ["B", "S", "RS", "RD"] and len(s0["spatial"]) == 9
+    assert all(x["in_band"] == (0.1 <= x["mean"] <= 0.6) for x in s0["spatial"])
+    assert all((r["from"], r["to"]) == (75000, 100000) and r["all"]["n"] == 950 and r["spatial"]["n"] == 450
+               for r in s0["flat"].values())
+    assert results["finals"] == {} and results["main_label"].startswith("阶段 0") and len(results["noise_floor"]) == 2
+    page = (tmp_path / "report0/index.html").read_text(encoding="utf-8")
+    assert 'id="stage0"' in page and "最后两个检查点之差" in page and "评测噪声下限" in page

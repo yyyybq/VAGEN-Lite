@@ -89,17 +89,16 @@ GLOSSARY = [
     ("回合", "一次闭环评测：环境按评测种子重置出一个厨房和任务，策略每次输出 16 步动作，直到成功或到任务时限。"),
     ("成功率", "成功回合数 ÷ 回合数。一组任务的成功率把这组所有回合合在一起算（空间组 9 个任务各 50 回合，其余任务各 20 回合）。"),
     ("95% Wilson 区间", "成功率的不确定范围：回合数越少越宽。比如 20 回合里成功 10 个，区间约 30%–70%。图里的浅色带就是它。"),
-    ("配对", "两个起点在完全相同的回合上比较：同一任务、同一评测种子（所以初始场景逐位相同）、同一训练种子。配对能去掉场景难易带来的差别。"),
-    ("配对差（百分点）", "某起点的成功率减参照起点（B）的成功率，只算两者都有的回合。区间是配对的 95% 区间。正数表示比 B 高。"),
-    ("McNemar 精确检验 p 值", "只看两者结果不一致的回合：这个起点成功、B 失败的个数，和反过来的个数。如果两个起点其实一样好，两种情况应该一样多；p 值是在这个前提下出现眼前这么不平衡（或更不平衡）的概率。越小越不像巧合。"),
-    ("Holm 校正", "34 个任务各做一次检验，难免有几个碰巧很小的 p。Holm 校正按任务数抬高 p 值；逐任务图里实心点表示校正后仍小于 0.05。"),
-    ("跨任务 Wilcoxon 检验", "把每个任务的配对差当作一个数，检验这些差是否整体偏向一边（多数任务都高于 B 或都低于 B），不看回合数多少。"),
-    ("种子均值 ± 标准差", "第三步每格有 3 个训练种子（动作头初值和数据顺序不同）。图里的点是 3 个种子成功率的均值，误差条是样本标准差，表示训练本身的随机性。"),
-    ("结果一致性", "配对回合分成四类：两个都成功、只有这个起点成功、只有 B 成功、两个都失败。中间两类的多少决定了 McNemar 检验。"),
+    ("配对", "两个起点在完全相同的回合上比较：同一任务、同一评测种子（所以初始场景逐位相同）。配对能去掉场景难易带来的差别。"),
+    ("逐任务配对检验（主要检验）", "配对单位是任务（10-22 起的规定）：每个任务算一个成功率差（某起点减 B，同一批场景），34 个任务就有 34 个差。平均差的区间是对任务重抽样 2,000 次得到的 95% 区间。"),
+    ("Wilcoxon 符号秩检验", "检验这 34 个差是否整体偏向一边：既看正负，也看大小的排序。p 越小，越不像是任务间的随机起伏。"),
+    ("符号检验", "只数差为正和差为负的任务个数，如果两个起点其实一样好，两者应该差不多；p 是在这个前提下出现这么不平衡（或更不平衡）的概率。"),
+    ("评测噪声下限", "同一检查点用两个任务各评一遍、种子相同：两次之间的成功率差、逐任务差的平均绝对值、结果不同的回合数，都是评测本身带来的。起点之间的差小于这个下限，就分不出来。"),
+    ("McNemar 精确检验（参考）", "在一个任务内部按回合配对：只看两者结果不一致的回合。逐任务表和逐任务图里用它（Holm 校正后）标出单个任务上的差别，作参考。"),
+    ("结果一致性", "配对回合分成四类：两个都成功、只有这个起点成功、只有 B 成功、两个都失败。"),
     ("成功所用步数 / 时限", "只看成功的回合：用了多少控制步，除以该任务的时限。越小表示完成得越快。"),
     ("动作损失（L1）", "训练时模型预测的 16 步动作与示教动作的平均绝对误差，每 100 步记一次当步那批数据的值。同一训练种子下四个起点看到的是同一批数据，所以可以逐步相减。它衡量对示教的模仿，不等于闭环成功率。"),
     ("中间检查点", "D5 每 2.5 万步存一个检查点。学习率按总步数 20 万余弦衰减，中间检查点时学习率还高，所以它们只用来看成功率何时离开地板，不能当作更短训练的结果。"),
-    ("评测噪声", "同一检查点用两个任务各评一遍（种子相同）的差别：成功率差和逐回合结果不同的个数。评测在 CPU 上逐位可复现，剩下的差别来自 GPU 推理等。"),
     ("任务分组", "单步 18 个 / 多步 16 个是 RoboCasa 的分法。空间组 9 个：主指令要靠空间关系定目标或要导航（如左右抽屉、前后灶头、杯子放到出水口下面）。边界 3 个单独列出、不算入空间组。其余 22 个。"),
 ]
 
@@ -140,7 +139,8 @@ def group_table(cmp) -> str:
         return '<p class="empty">还没有可比较的评测。</p>'
     starts, ref = cmp["starts"], cmp["reference"]
     head = "".join(f'<th class="n">{E(s)} 成功率（区间）</th>' for s in starts) + "".join(
-        f'<th class="n">{E(s)} − {E(ref)}（区间）</th><th class="n">p</th>' for s in starts if s != ref)
+        f'<th class="n">{E(s)} − {E(ref)}：逐任务平均差（区间）</th><th class="n">任务 ↑↓ · Wilcoxon p · 符号 p</th>'
+        for s in starts if s != ref)
     rows = []
     for g in stats.GROUPS:
         cells = []
@@ -152,15 +152,17 @@ def group_table(cmp) -> str:
             if s == ref or s not in cmp["vs_reference"]:
                 continue
             v = cmp["vs_reference"][s]["groups"][g]
-            cls = "up" if v["diff"] > 0 and v["p"] < 0.05 else "down" if v["diff"] < 0 and v["p"] < 0.05 else ""
-            cells.append(f'<td class="n {cls}">{pts(v["diff"])}<br><span class="meta">{pts(v["low"])} 到 '
-                         f'{pts(v["high"])}</span></td><td class="n">{pval(v["p"])}<br><span class="meta">'
-                         f'{v["tasks_up"]}↑ {v["tasks_down"]}↓</span></td>')
+            sig = v["wilcoxon_p"] < 0.05 if not math.isnan(v["wilcoxon_p"]) else False
+            cls = "up" if sig and v["task_mean_diff"] > 0 else "down" if sig and v["task_mean_diff"] < 0 else ""
+            cells.append(f'<td class="n {cls}">{pts(v["task_mean_diff"])}<br><span class="meta">{pts(v["task_low"])} 到 '
+                         f'{pts(v["task_high"])}</span></td><td class="n">{v["tasks_up"]}↑ {v["tasks_down"]}↓<br>'
+                         f'<span class="meta">{pval(v["wilcoxon_p"])} · {pval(v["sign_p"])}</span></td>')
         rows.append(f"<tr><td>{E(stats.GROUP_ZH[g])}</td>{''.join(cells)}</tr>")
     return (f'<div class="tablewrap"><table><thead><tr><th>任务组</th>{head}</tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table></div>'
-            f'<p class="meta">差值单位：百分点；p：McNemar 精确检验（配对回合）；↑↓：该组里配对差为正 / 为负的任务个数。'
-            f'绿色 / 红色：p &lt; 0.05 的提高 / 降低。</p>')
+            f'<p class="meta">配对单位是任务：每个任务一个成功率差（同一批场景），差值单位百分点；区间是对任务重抽样的 95% 区间；'
+            f'↑↓：差为正 / 为负的任务个数；Wilcoxon：符号秩检验；符号：只看正负个数的检验。绿色 / 红色：Wilcoxon p &lt; 0.05 '
+            f'的提高 / 降低。和它比较的噪声下限见"评测噪声"一节。</p>')
 
 
 def task_table(coll, cmp, order) -> str:
@@ -210,6 +212,53 @@ def seed_tables(results) -> str:
             f'第 {results["final_step"] // 1000}k 步。</p>')
 
 
+def stage0_html(s0) -> str:
+    """Stage 0: success by checkpoint (all, spatial), the spatial tasks in the band, the last two points per start."""
+    if not s0 or not s0["curve"]:
+        return '<p class="empty">阶段 0 还没有评完的检查点。</p>'
+    steps, starts = s0["steps"], s0["starts"]
+    head = "".join(f'<th class="n">{s // 1000}k</th>' for s in steps)
+    rows = []
+    for g in ("all", "spatial"):
+        for s in starts:
+            cells = []
+            for step in steps:
+                c = s0["curve"][s].get(step)
+                k, n = c[g] if c else (0, 0)
+                cells.append(f'<td class="n">{k}/{n} = {pct(k / n)}</td>' if n else '<td class="n">—</td>')
+            rows.append(f"<tr><td>{E(stats.GROUP_ZH[g])}</td><td>{E(s)}</td>{''.join(cells)}</tr>")
+    curve = (f'<h3>成功率随检查点</h3><div class="tablewrap"><table><thead><tr><th>任务组</th><th>起点</th>{head}</tr>'
+             f'</thead><tbody>{"".join(rows)}</tbody></table></div>')
+    lo, hi = (int(100 * x) for x in s0["band"])
+    band = '<p class="empty">还没有四个起点都评过的检查点。</p>'
+    if s0["latest_common"]:
+        rows = []
+        for x in s0["spatial"]:
+            cells = "".join(f'<td class="n">{pct(x["rates"].get(s))}</td>' for s in starts)
+            rows.append(f'<tr><td>{E(x["task"])}</td>{cells}<td class="n">{pct(x["mean"])}</td>'
+                        f'<td class="n {"up" if x["in_band"] else ""}">{"是" if x["in_band"] else "否"}</td></tr>')
+        band = (f'<h3>空间任务：第 {s0["latest_common"] // 1000}k 步的成功率</h3><div class="tablewrap"><table><thead><tr>'
+                f'<th>任务</th>{"".join(f"<th class=n>{E(s)}</th>" for s in starts)}<th class="n">四起点平均</th>'
+                f'<th class="n">在 {lo}%–{hi}%</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+                f'<p class="meta">每格是该起点在该任务 50 个回合上的成功率；平均是对起点取平均。</p>')
+    rows = []
+    for s, r in s0["flat"].items():
+        cells = ""
+        for g in ("all", "spatial"):
+            v = r[g]
+            cells += (f'<td class="n">{pts(v["diff"])}<br><span class="meta">McNemar p {pval(v["p"])}</span></td>'
+                      f'<td class="n">{pts(v["task_task_mean_diff"])}<br><span class="meta">{v["task_tasks_up"]}↑ '
+                      f'{v["task_tasks_down"]}↓ · Wilcoxon p {pval(v["task_wilcoxon_p"])}</span></td>')
+        rows.append(f'<tr><td>{E(s)}</td><td class="n">{r["from"] // 1000}k → {r["to"] // 1000}k</td>{cells}</tr>')
+    flat = (f'<h3>最后两个检查点之差</h3><div class="tablewrap"><table><thead><tr><th>起点</th><th class="n">检查点</th>'
+            f'<th class="n">全部：合并差</th><th class="n">全部：逐任务平均差</th><th class="n">空间：合并差</th>'
+            f'<th class="n">空间：逐任务平均差</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+            f'<p class="meta">同一起点后一个检查点减前一个，同一批场景配对，单位百分点。合并差把所有回合放在一起；'
+            f'逐任务平均差先算每个任务的差再平均。p 大、差小说明这两个点之间分不出变化（曲线已平），'
+            f'判断时和"评测噪声"一节的下限比。</p>') if rows else '<p class="empty">每个起点至少要两个检查点。</p>'
+    return curve + band + flat
+
+
 def example_block(ex) -> str:
     strips = []
     for s, v in ex["per_start"].items():
@@ -228,7 +277,9 @@ def render(results: dict, coll, figs: dict, examples: list) -> str:
     r = results
     main = r.get("main_cmp")
     order = r.get("task_order") or []
-    nav = [("summary", "结论"), ("metrics", "指标说明"), ("training", "训练损失"), ("checkpoints", "检查点曲线"),
+    s0 = r.get("stage0")
+    nav = [("summary", "结论")] + ([("stage0", "阶段 0")] if s0 else []) + [
+           ("metrics", "指标说明"), ("training", "训练损失"), ("checkpoints", "检查点曲线"),
            ("efficiency", "样本效率"), ("tasks", "逐任务"), ("agreement", "结果一致性"), ("noise", "评测噪声"),
            ("examples", "范例"), ("sources", "数据来源")]
     parts = [f"<title>RoboCasa 起点对照</title>",
@@ -247,10 +298,17 @@ def render(results: dict, coll, figs: dict, examples: list) -> str:
     parts.append(f'<section id="summary"><h2>结论</h2>{legend(coll.starts())}'
                  f'<ul class="facts">{"".join(f"<li>{E(x)}</li>" for x in r["summary_lines"])}</ul>'
                  f'<h3>{E(r.get("main_label", ""))}</h3>{group_table(main)}</section>')
+    if s0:
+        parts.append(f'<section id="stage0"><h2>阶段 0：已保留检查点</h2><p class="prose">10-22 停下的四个 D5 训练'
+                     f'（100% 数据、训练种子 1）各保留 2.5 万、5 万、7.5 万、10 万步四个检查点，每个都按 950 回合协议评一遍。'
+                     f'</p>{stage0_html(s0)}</section>')
     parts.append('<section id="metrics"><h2>指标说明</h2><dl class="glossary">'
                  + "".join(f"<dt>{E(a)}</dt><dd>{E(b)}</dd>" for a, b in GLOSSARY) + "</dl></section>")
     parts.append(f'<section id="training"><h2>训练损失</h2>{figure(figs.get("loss"), "上：四个起点的动作损失（滑动平均，对数轴）。下：每个起点减 B，同一步、同一批数据逐点相减后再平滑；0 线以下表示损失比 B 低。", "训练损失曲线")}</section>')
-    parts.append(f'<section id="checkpoints"><h2>检查点曲线（D5）</h2>{figure(figs.get("checkpoints"), "100% 数据、训练种子 1 的四个任务，每 2.5 万步一个检查点的成功率，浅色带为 95% Wilson 区间。中间检查点学习率仍高，只用来看成功率何时离开地板。", "检查点成功率")}</section>')
+    ck_caption = ("100% 数据、训练种子 1，四个起点每 2.5 万步一个检查点的成功率：左为全部 34 个任务，右为 9 个空间任务；"
+                  "浅色带为 95% Wilson 区间。中间检查点学习率仍高，只用来看成功率何时离开地板和何时变平。") if s0 else \
+        "100% 数据、训练种子 1 的四个任务，每 2.5 万步一个检查点的成功率，浅色带为 95% Wilson 区间。中间检查点学习率仍高，只用来看成功率何时离开地板。"
+    parts.append(f'<section id="checkpoints"><h2>检查点曲线（D5）</h2>{figure(figs.get("checkpoints"), ck_caption, "检查点成功率")}</section>')
     parts.append(f'<section id="efficiency"><h2>样本效率</h2>{figure(figs.get("learning"), "第三步：横轴是用到的目标示教比例（10%、30%、100%），纵轴是最后一个检查点的成功率，点为 3 个训练种子的均值，误差条为标准差；每个小图一个任务组。", "样本效率曲线")}{seed_tables(r)}'
                  f'{figure(figs.get("efficiency"), "成功回合用了多少步（占任务时限的比例）。箱体为四分位，横线为中位数。", "成功所用步数")}</section>')
     parts.append(f'<section id="tasks"><h2>逐任务</h2><p class="prose">{E(r.get("main_label", ""))}。</p>'
@@ -267,6 +325,18 @@ def render(results: dict, coll, figs: dict, examples: list) -> str:
     noise_table = (f'<div class="tablewrap"><table><thead><tr><th>检查点</th><th class="n">并行进程数</th><th class="n">成功</th>'
                    f'<th class="n">成功率差（百分点）</th><th class="n">结果不同的回合</th><th class="n">平均每回合</th></tr>'
                    f'</thead><tbody>{noise_rows}</tbody></table></div>') if noise_rows else ""
+    floor_rows = "".join(
+        f'<tr><td>{E(f["exp"])} 第 {f["step"] // 1000}k 步</td><td class="n">{pts(f["pooled_diff"])}</td>'
+        f'<td class="n">{pts(f["task_mean_abs_diff"]).lstrip("+")}</td><td class="n">{pts(f["task_max_abs_diff"]).lstrip("+")}</td>'
+        f'<td class="n">{pts(f["task_level"]["task_mean_diff"])}（{pts(f["task_level"]["task_low"])} 到 '
+        f'{pts(f["task_level"]["task_high"])}）</td><td class="n">{f["episodes_changed"]}/{f["episodes_compared"]}</td></tr>'
+        for f in r.get("noise_floor", []))
+    if floor_rows:
+        noise_table += (f'<h3>评测噪声下限</h3><div class="tablewrap"><table><thead><tr><th>检查点</th>'
+                        f'<th class="n">合并差</th><th class="n">逐任务差的平均绝对值</th><th class="n">逐任务差的最大绝对值</th>'
+                        f'<th class="n">逐任务平均差（区间）</th><th class="n">结果不同的回合</th></tr></thead><tbody>{floor_rows}'
+                        f'</tbody></table></div><p class="meta">同一检查点、同一批评测种子评两遍（第二遍减第一遍，百分点）。'
+                        f'权重没变，差异全部来自评测本身；起点之间的差落在这个范围里就分不出来。</p>')
     parts.append(f'<section id="noise"><h2>评测噪声与并行度</h2>{figure(figs.get("noise"), "同一检查点、同一批评测种子评两遍：左为逐任务成功率（第一遍对重复），右为平均每回合用时；虚线是 1.5 倍上限，不超过它的最大并行度会用于以后的评测。", "评测噪声")}{noise_table}</section>')
     ex_html = "".join(example_block(x) for x in examples) if examples else \
         '<p class="empty">还没有带画面的评测回合（每个回合的 8 帧画面条从 10-21 起开始记录）。</p>'
