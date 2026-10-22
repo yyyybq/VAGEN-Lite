@@ -92,6 +92,8 @@ def watcher(tmp_path, *extra, jobs=None, free=FREE, run_tools=None, shards=0):
     args = watch.parser().parse_args(["--runs-root", str(tmp_path), "--state", str(tmp_path / "state.json"),
                                       "--report-out", "", "--shards", str(shards),
                                       "--repeat", "DS-B-100-s1:steps_25000",
+                                      # never the real pause file (the main window may have created it)
+                                      "--pause-file", str(tmp_path / "NO_PAUSE"),
                                       "--exps", "DS-B-100-s1", "DS-S-100-s1", *extra])
     return watch.Watcher(args, jobs=jobs or FakeJobs(), free_space=lambda: free, run_tools=run_tools or FakeRuns())
 
