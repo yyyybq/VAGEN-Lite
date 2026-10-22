@@ -1,59 +1,62 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-10-21 19:25 UTC（第二步已确认通过；第三步进行中：12 个训练任务已提交，其余 24 个等门槛；RLinf 第四次试跑排队中）。任务书分四步，每步做完停下来等确认。
+最后更新：2026-10-22 09:35 UTC（按你 10-22 的要求，下游任务撤到只剩 RLinf 试跑，其余等密集奖励第一批上机器后再提；评测改为只在已有任务的机器上启动的 1 卡分片）。任务书分四步，每步做完停下来等确认。
 
 ## 1. 现在在哪一步
 
 - **第一步（盘点与核实）**：已完成并经你确认。报告 [reports/STEP1_INVENTORY_20261020.md](reports/STEP1_INVENTORY_20261020.md)。
-- **第二步（连通试跑）**：已完成，10-21 经你确认通过。报告 [reports/STEP2_SMOKE_20261020.md](reports/STEP2_SMOKE_20261020.md)。
-- **第三步（四个起点 × 三档数据 × 三个种子）进行中**：
-  - D5 的 4 个（DS-*-100-s1，每 2.5 万步存一次）都在训练，复用为第三步 100% 数据、种子 1 的 4 格。
-  - 100% 数据、种子 2 和 3 的 8 个已于 11:22 UTC 提交，只存最后一个检查点。
-  - 其余 24 个（30% / 10% × 种子 1–3）的实验目录正在登录节点上建。由看板在 DS-B-100-s1 第 2.5 万步检查点评完后自动提交，条件是 34 个任务上的成功回合数大于 0；等于 0 就报警、不提交，等你决定。DS-B 的这个检查点约在 13:35 UTC 存好。
-  - 全量数据上实测每步 0.750 秒，每个训练任务约 42.0 小时。
-- **评测**：按 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)。
-  - 950 回合：9 个空间任务各 50 回合，其余 25 个任务各 20 回合；台面区域顺序固定；边界 3 个任务单独列出。
-  - DS-B 第一个检查点评两遍：第一遍 P = 24，第二遍依次 P = 48、P = 96。用来量评测噪声，并决定以后的并行度。
-  - D5 还没有检查点被评过（第一个约在 13:35），所以不需要按新规模补评。
-- **起点校验已加强**（10-21 11:13，在 D5 四个都开跑之后）：锁定文件加了每个分片的修改时间和首尾各 4 MiB 的 sha256。RS 和 RD 的 7 个分片里，首尾哈希没有一个相同，现在能分开了。见 `downstream_runs/logs/verify_starts_extend_20261021T111341Z.json`。
+- **第二步（连通试跑）**：已完成，10-21 经你确认通过。报告 [reports/STEP2_SMOKE_20261020.md](reports/STEP2_SMOKE_20261020.md)。RLinf 那部分还没通过（见下）。
+- **第三步：暂停**（10-22 09:08 UTC 按你的要求撤下）：
+  - 停掉了 9 个在跑的训练：
+    - D5 四个，分别到第 113,700–118,800 步，已存第 2.5 万–10 万步检查点；
+    - DS-B-100-s2 / s3、DS-S-100-s2 / s3、DS-RS-100-s2，分别到第 55,700–72,400 步，没有检查点。
+  - 撤下了 3 个排队的训练（DS-RS-100-s3、DS-RD-100-s2 / s3）和 18 个排队的评测。没有一个评测开始过，所以至今没有任何成功率。
+  - 什么都没删：
+    - 停下的输出改名为 `run_stopped_20261022/`，训练日志改名为 `train_stopped_20261022.log`；
+    - 撤下的任务记录改名为 `job_cancelled_20261022/`；
+    - 目录都在 `downstream_runs/experiments/DS-*/` 下。
+  - 30% / 10% 的 24 个实验目录已建好（没提交过）。
+  - 重新提交的时机：密集奖励第一批（训练链 `interiorgs_v10_train_r12k_20261021`）的三个训练任务都开始以后。三个任务是 S0-keep `pt-ma8luzju`（h800，10-22 09:09 开始）、D-keep-1.77 `pt-pt8wne8e`（zoetrope，排队）、D-keep-1.0 `pt-xg0rku15`（zoetrope，排队）。
+  - 重新提交时 D5 怎么接，需要你决定（第 6 节）。
+- **评测**：按 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)（950 回合、台面区域顺序固定、边界 3 个任务单列）。
+  - 10-22 起改为每个检查点 8 个 1 卡分片，每片约 119 回合、12 个仿真进程。
+  - **只在已有别的任务、还有空卡的机器上启动**：
+    - 提交前，用 `sco acp jobs get-workers` 查各机器在跑什么，只往"有别的任务、还有空卡"的机器的空卡数里提交；
+    - 分片开始后 2 分钟内再查一次：如果它所在的机器上只有我们的分片，说明占了空闲机器，立刻删掉，30 分钟后重提。
+    - 方法和训练线的渲染服务搬家（`renderer_repack`）相同。
+    - 局限：只看得到本工作区（aigc）的任务。
+  - 10-22 09:25 时两个池里有任务的机器都是 8 张卡占满，所以现在不会有分片被提交。
+  - P = 48 / 96 的并行度测试不再适用（1 卡分片每片只有 14 个 vCPU）。DS-B 第一个检查点评两遍的噪声测量保留，第二遍也是一套 8 个分片。
+- **起点校验已加强**（10-21 11:13）：锁定文件加了每个分片的修改时间和首尾各 4 MiB 的 sha256，RS 和 RD 现在能分开。
 - **RLinf 两次更新的试跑还没通过**：
-  - 第三次（`pt-00o9ha1p`，10-21 19:00–19:10）：价值头的问题已解决，到第一次训练更新的反向传播时显存不够。当时 8 张卡的显存峰值都在 75.1–75.8 GiB（nvidia-smi 的 76,855–77,655 MiB，每卡容量 79.18 GiB）；反向还要再申请 15.69 GiB，正好是整个 7B 模型 bf16 的大小。
-  - 原因判断：RLinf 只在模型有 `language_model` 属性或声明了 `_no_split_modules` 时才自动按层切分；StarVLA 的包装两者都没有，配置里也没设，所以整个模型是一个 FSDP 单元。
-  - 第四次（`pt-jnetqxe5`，19:19 提交，zoetrope，排队中）：加了按层切分（Qwen2_5_VLDecoderLayer、Qwen2_5_VLVisionBlock）和梯度检查点，仍然只用命令行覆盖，准备好的 train.yaml 不改。
-  - 通过后单独报告并开始写第四步方案。
+  - 第三次（`pt-00o9ha1p`，10-21 19:00–19:10）：价值头的问题已解决，到第一次训练更新的反向传播时显存不够。8 张卡显存峰值 75.1–75.8 GiB（每卡容量 79.18 GiB）；反向还要再申请 15.69 GiB，正好是整个 7B 模型 bf16 的大小。原因判断：StarVLA 的包装没被 RLinf 自动按层切分，整个模型是一个 FSDP 单元。
+  - 第四次：加了按层切分（Qwen2_5_VLDecoderLayer、Qwen2_5_VLVisionBlock）和梯度检查点，只用命令行覆盖。10-21 19:19 提交到 zoetrope（`pt-jnetqxe5`）；10-22 09:15 为了不排在密集奖励 D-keep 两个训练任务前面，改提交到 h800（`pt-wytuck3x`，排队中）。
+  - 通过后单独报告，并开始写第四步方案。
 
 ## 2. 谁在跑
 
 | sco 任务 | 内容 | 状态 | 目录 |
 | --- | --- | --- | --- |
-| `pt-au0xzxrw` | DS-B-100-s1（D5，8 卡，h800） | 训练中（10-21 08:00 开始） | `downstream_runs/experiments/DS-B-100-s1/` |
-| `pt-uatwo4vx` | DS-S-100-s1（D5，8 卡，h800） | 训练中（08:39 开始） | `downstream_runs/experiments/DS-S-100-s1/` |
-| `pt-10jkijs8` | DS-RS-100-s1（D5，8 卡，zoetrope） | 训练中（09:19 开始） | `downstream_runs/experiments/DS-RS-100-s1/` |
-| `pt-2z4mnq4y` | DS-RD-100-s1（D5，8 卡，h800） | 训练中（08:41 开始） | `downstream_runs/experiments/DS-RD-100-s1/` |
-| `pt-7jj35q08`、`pt-rq5ydrab` | DS-B-100-s2、s3（8 卡，h800） | 11:22 提交 | `downstream_runs/experiments/DS-B-100-s{2,3}/` |
-| `pt-m7uot7w8`、`pt-z33scadg` | DS-S-100-s2、s3（8 卡，h800） | 11:22 提交 | `downstream_runs/experiments/DS-S-100-s{2,3}/` |
-| `pt-b7e6m4kc`、`pt-3z7es9qe` | DS-RS-100-s2、s3（8 卡，h800） | 11:22 提交 | `downstream_runs/experiments/DS-RS-100-s{2,3}/` |
-| `pt-u3tp47ku`、`pt-wm06mc05` | DS-RD-100-s2、s3（8 卡，h800） | 11:22 提交 | `downstream_runs/experiments/DS-RD-100-s{2,3}/` |
-| `pt-jnetqxe5` | RLinf 2 次更新试跑，第四次（8 卡，zoetrope；use_orig_params、按层切分、梯度检查点） | 排队中（19:19 提交） | `downstream_runs/experiments/RLINF-SMOKE-1/retry3/` |
-| `pt-00o9ha1p` | RLinf 试跑，第三次（加 use_orig_params） | 退出码 255（19:00–19:10）：第一次训练更新反向时显存不够；记录已删 | `downstream_runs/experiments/RLINF-SMOKE-1/retry2/` |
-| `pt-cb0kvvf0` | 34 个评测任务的重置扫描（1 卡） | 已完成（07:46–09:01）：原版 89 / 102 对可复现，固定顺序后 102 / 102；记录已删 | `downstream_runs/checks/reset_sweep_20261021/` |
-| `pt-4qac93lo` | 第二步闭环评测重跑（8 卡） | 已完成，退出码 0；记录已删 | `downstream_runs/experiments/STEP2-RS-s1/step2/eval2/` |
-| `pt-a7r4q7s5` | RLinf 试跑，第二次 | 退出码 255：第一次训练更新时价值头在 FSDP 下取不到参数；记录已删 | `downstream_runs/experiments/RLINF-SMOKE-1/` |
-| `pt-189qz570`、`pt-9ruo5yrs`、`pt-g0ydp76l`、`pt-405nyxoy` | 第一、二步早先的任务 | 已结束，记录已删（见第二步报告） | — |
+| `pt-wytuck3x` | RLinf 2 次更新试跑，第四次（8 卡，h800；use_orig_params、按层切分、梯度检查点） | 排队中（10-22 09:15 提交） | `downstream_runs/experiments/RLINF-SMOKE-1/retry3/` |
+| 29 个（见上） | 第三步训练和 D5 评测 | 10-22 09:08 按你的要求撤下 | `downstream_runs/experiments/DS-*/` |
+| `pt-00o9ha1p`、`pt-a7r4q7s5` | RLinf 试跑第三、二次 | 退出码 255（显存不够；价值头取不到参数）；记录已删 | `downstream_runs/experiments/RLINF-SMOKE-1/` |
+| `pt-cb0kvvf0` | 34 个评测任务的重置扫描（1 卡） | 已完成：原版 89 / 102 对可复现，固定顺序后 102 / 102；记录已删 | `downstream_runs/checks/reset_sweep_20261021/` |
+| 更早的任务 | 第一、二步 | 已结束，记录已删（见第二步报告） | — |
 
 **登录节点上本线的后台进程**：
-- **看板** `downstream/eval/watch.py`（10-21 18:48 起，PID 245614，代码 `a1bb6d52`）。每 15 分钟一轮，每轮做这几件事：
-  - 读一次配额剩余空间：剩余至少 1 TB 才提交任务；不足或读不出，只报警、不提交；
-  - 给每个存好（10 分钟内没再变动）的新检查点提交一个 8 卡评测；
-  - 评 DS-B 第一个检查点两遍，比较噪声和并行度；
-  - 按门槛提交第三步其余 24 个；
-  - 有新评测完成时重建结果报告；
-  - 写看板 `downstream_runs/BOARD.md`，日志写在 `downstream_runs/logs/watch.log`，状态写在 `downstream_runs/WATCH_STATE.json`。
-  - 它在自己的会话里用 nohup 运行（setsid），ssh 断开后仍会继续；它从不删文件。
-  - 启动、停止和查看（在集群 worktree 里）：
+- **看板** `downstream/eval/watch.py`：10-22 09:25 起，PID 1201348，代码 `5cf505a0`，启动参数 `--hold-until-running pt-ma8luzju pt-pt8wne8e pt-xg0rku15`。
+  - 每 15 分钟一轮，每 2 分钟做一次分片落点检查。
+  - 在密集奖励第一批三个训练任务都开始之前，不提交任何任务。
+  - 每轮读一次配额剩余空间：剩余少于 1 TB 或读不出时，只报警、不提交。
+  - 新检查点按上面的规则提交 1 卡分片评测。
+  - 按门槛提交第三步其余 24 个。
+  - 有新评测完成时重建结果报告。
+  - 看板 `downstream_runs/BOARD.md`，日志 `downstream_runs/logs/watch.log`，状态 `downstream_runs/WATCH_STATE.json`。
+  - 用 setsid + nohup 运行，ssh 断开后仍会继续。它除了删掉落在空闲机器上的分片任务，不删任何东西。
+  - 启动、停止和查看（在集群 worktree 里；代码更新后要先 stop 再 start）：
 
 ```bash
-bash downstream/eval/watch.sh start
+bash downstream/eval/watch.sh start --hold-until-running pt-ma8luzju pt-pt8wne8e pt-xg0rku15
 ```
 
 ```bash
@@ -63,9 +66,6 @@ bash downstream/eval/watch.sh stop
 ```bash
 bash downstream/eval/watch.sh status
 ```
-
-  代码更新后要先 stop 再 start，新代码才生效。
-- **建实验目录的后台作业**（10:50 起）：先建 30% / 10% 数据目录（已完成），再建 8 个 100% s2 / s3 实验并提交（已完成），最后建其余 24 个实验目录（进行中，不提交）。日志 `downstream_runs/logs/step3_make_20261021.log`；做完自动退出。
 
 ## 3. 代码与位置
 
@@ -132,10 +132,10 @@ bash downstream/eval/watch.sh status
 | --- | --- | --- | --- | --- | --- | --- |
 | STEP1-LOAD | 1 | B / S / RS / RD | 1 | 实测约 5 分钟 | 已完成，四个起点都通过 | `downstream_runs/step1_load_test_20261020/out/` |
 | STEP2-RS-s1 | 2 | RS | 8 | 训练实测 434 秒（200 步） | **通过**（10-21 确认） | `downstream_runs/experiments/STEP2-RS-s1/` |
-| RLINF-SMOKE-1 | 2（D7） | STEP2-RS-s1 的检查点 | 8 | 第二次 692 秒、第三次 646 秒后失败（环境交互 41 秒跑通，第一次训练更新没完成） | 第四次排队中（`pt-jnetqxe5`） | `downstream_runs/experiments/RLINF-SMOKE-1/` |
-| DS-{B,S,RS,RD}-100-s1 | 3（D5） | 四个起点 | 各 8 | 训练约 42.0 小时；每个检查点评测上限约 3.4 小时（950 回合，P = 24） | 训练中，每 2.5 万步存一次 | `downstream_runs/experiments/DS-*-100-s1/` |
-| DS-{B,S,RS,RD}-100-s{2,3} | 3 | 四个起点 | 各 8 | 同上，只评最后一个检查点 | 11:22 提交 | `downstream_runs/experiments/DS-*-100-s{2,3}/` |
-| DS-{B,S,RS,RD}-{030,010}-s{1,2,3} | 3 | 四个起点 | 各 8 | 同上 | 实验目录在建；等门槛（DS-B-100-s1 第 2.5 万步评测成功回合 > 0）后由看板提交 | `downstream_runs/experiments/DS-*-{030,010}-s*/` |
+| RLINF-SMOKE-1 | 2（D7） | STEP2-RS-s1 的检查点 | 8 | 第二次 692 秒、第三次 646 秒后失败（环境交互 41 秒跑通，第一次训练更新没完成） | 第四次排队中（`pt-wytuck3x`，h800） | `downstream_runs/experiments/RLINF-SMOKE-1/` |
+| DS-{B,S,RS,RD}-100-s1 | 3（D5） | 四个起点 | 各 8 | 训练约 42.0 小时；评测改为 8 个 1 卡分片 | 10-22 09:08 撤下（到第 113,700–118,800 步，有第 2.5 万–10 万步检查点）；等密集奖励第一批上机器后重提，怎么接待你决定 | `downstream_runs/experiments/DS-*-100-s1/` |
+| DS-{B,S,RS,RD}-100-s{2,3} | 3 | 四个起点 | 各 8 | 同上，只评最后一个检查点 | 10-22 09:08 撤下（5 个在跑的到第 55,700–72,400 步，没有检查点；3 个没开始）；等密集奖励第一批上机器后从头重提 | `downstream_runs/experiments/DS-*-100-s{2,3}/` |
+| DS-{B,S,RS,RD}-{030,010}-s{1,2,3} | 3 | 四个起点 | 各 8 | 同上 | 实验目录已建好；等门槛（DS-B-100-s1 第 2.5 万步评测成功回合 > 0）且密集奖励第一批上机器后由看板提交 | `downstream_runs/experiments/DS-*-{030,010}-s*/` |
 
 ## 6. 决定记录与待定
 

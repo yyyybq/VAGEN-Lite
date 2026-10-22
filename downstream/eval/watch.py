@@ -493,10 +493,11 @@ def board(w: Watcher, rows, missing, rep, gate) -> str:
     d = w.disk or {}
     lines += [f"- 剩余空间：{'配额 %s TB，已用 %s TB，剩余至少 %s TB' % (d['quota_tb'], d['used_tb'], d['free_tb_min']) if d else '本轮未读或读不出'}"
               f"（少于 {w.a.min_free_tb} TB 不提交）",
-              f"- 评测并行进程数：{w.workers()}"
-              + (f"（{w.state['workers']['utc']} 按并行度测试选定：每回合时间是 P={w.a.workers} 的 "
-                 f"{w.state['workers']['why']} 倍，上限 {w.state['workers']['limit']}）" if "workers" in w.state else
-                 f"（并行度测试未完成前用 {w.a.workers}）"),
+              (f"- 评测并行进程数：每个 1 卡分片 {w.a.shard_workers} 个" if w.a.shards else
+               f"- 评测并行进程数：{w.workers()}"
+               + (f"（{w.state['workers']['utc']} 按并行度测试选定：每回合时间是 P={w.a.workers} 的 "
+                  f"{w.state['workers']['why']} 倍，上限 {w.state['workers']['limit']}）" if "workers" in w.state else
+                  f"（并行度测试未完成前用 {w.a.workers}）")),
               f"- 第三步其余任务的门槛（{w.a.gate}）：{(gate or {}).get('note', '-')}",
               f"- 结果报告 `{w.a.report_out}/index.html`：" + (
                   f"{w.state['report']['utc']} 生成（退出码 {w.state['report']['rc']}）" if "report" in w.state
