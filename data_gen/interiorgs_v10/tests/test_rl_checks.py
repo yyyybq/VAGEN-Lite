@@ -11,8 +11,10 @@ from unittest import mock
 import numpy as np
 from PIL import Image
 
+from data_gen.interiorgs_v10 import release as R
 from data_gen.interiorgs_v10 import rl_checks as RC
 from data_gen.interiorgs_v10 import training_prep as TP
+from data_gen.interiorgs_v10.admission import load_policy
 from data_gen.interiorgs_v10.pilot import safe_name
 from data_gen.interiorgs_v10.run_scene import RunConfig, _jsonable, generate_scene
 from data_gen.interiorgs_v10.testing.synthetic_scene import write_synthetic_scenes
@@ -30,6 +32,8 @@ class RlChecksTest(unittest.TestCase):
         scene_dir = paths["two_rooms"]
         cls.rows = _jsonable(generate_scene(scene_dir, scene_dir.name, RunConfig(target_tasks_per_scene=5)))["rows"]
         cls.cfg = RC.env_config(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml", "http://127.0.0.1:1/render")
+        # round 12 freeze: the env shows the policy's format example, as rl-config writes it into the RL env
+        cls.cfg["prompt_format_example"] = R.format_example(load_policy())
         cls.cfg["gs_root"] = str(scene_dir.parent)
         cls.patch = mock.patch("vagen.envs.active_spatial.env.ActiveSpatialEnv._render_image", lambda self: FRAME.copy())
         cls.patch.start()
