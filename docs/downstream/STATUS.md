@@ -36,7 +36,7 @@
 
 | sco 任务 | 内容 | 状态 | 目录 |
 | --- | --- | --- | --- |
-| `pt-rqtlcz9u` `pt-8agh5z4w` `pt-04ifqzpo` `pt-n2vw04v2` `pt-2b6ak1k6` `pt-yqry9u1x` `pt-d34si1tj` `pt-7gjl1h5y` | 阶段 0：DS-B 第 10 万步检查点的分片 1–8（各 1 卡，h800） | 分片 1–7 10-22 14:55 UTC 起、分片 8 16:23 起运行 | `downstream_runs/experiments/DS-B-100-s1/evals_run_stopped_20261022/steps_100000/shards/` |
+| `pt-rqtlcz9u` `pt-8agh5z4w` `pt-04ifqzpo` `pt-n2vw04v2` `pt-2b6ak1k6` `pt-yqry9u1x` `pt-d34si1tj` `pt-7gjl1h5y` | 阶段 0：DS-B 第 10 万步检查点的分片 1–8（各 1 卡，h800） | 分片 1、3、4、6、7 完成（各 2.88–2.98 小时）。**分片 2、5、8 卡住**：各差 1–2 个回合，17:49–17:58 后不再写结果。原因：某个仿真进程死了（没有报错，最可能是内存被杀），multiprocessing 的 `imap_unordered` 丢了它的回合、主进程一直等。18:43 删掉这 3 个任务（记录改名 `job_hung_*`），由看板重提；`closed_loop.py` 已修好（死掉的进程的回合重跑、卡住的进程先杀掉；重提时只跑缺的回合）。缺的回合：分片 2 StackBowlsCabinet 1013、1021；分片 5 SearingMeat 1044、LoadDishwasher 1002；分片 8 StoreLeftoversInBowl 1003 | `downstream_runs/experiments/DS-B-100-s1/evals_run_stopped_20261022/steps_100000/shards/` |
 | `pt-gh0hdj6y` `pt-eauxo4si` `pt-qt5b1gox` | 阶段 0：S、RS、RD 第 10 万步检查点，各一个 8 卡评测（8 个策略服务 × 96 个仿真进程，h800 空闲机器） | 10-22 16:42 UTC 起运行 | `downstream_runs/experiments/DS-{S,RS,RD}-100-s1/evals_run_stopped_20261022/steps_100000/` |
 | `pt-vakmljud` | 阶段 0：B 第 5 万步检查点，8 卡评测 | 10-22 16:42 提交，16:56 起运行 | `downstream_runs/experiments/DS-B-100-s1/evals_run_stopped_20261022/steps_50000/` |
 | `pt-9mh97gl1` `pt-9hgf4p4h` | 阶段 0：S、RS 第 5 万步检查点，8 卡评测 | 16:58 提交后一直排队；17:53 主窗口因主线 7 个评测排队而暂停我们的提交，我 17:53:54 把这两个（没开始过）撤下，记录改名 `job_withdrawn_*`，等暂停解除后重提 | `downstream_runs/experiments/DS-{S,RS}-100-s1/evals_run_stopped_20261022/steps_50000/` |
