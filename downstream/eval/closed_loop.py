@@ -163,12 +163,12 @@ def connect(ckpt: str, server: str, starvla_root: str):
     return contract, policy
 
 
-def _init_worker(ckpt: str, servers, starvla_root: str, stable_regions: bool = True):
+def _init_worker(ckpt: str, servers, starvla_root: str, stable_regions: bool = True, inflight: str = None):
     """Never raises: a failing initializer makes multiprocessing respawn workers forever, so the error is kept and
     every episode of this worker reports it instead."""
     worker = mp.current_process()._identity[0] if mp.current_process()._identity else 1
     server = servers[(worker - 1) % len(servers)]
-    _STATE.update(server=server, worker=worker)
+    _STATE.update(server=server, worker=worker, inflight=inflight)
     try:
         if stable_regions:
             import robocasa.wrappers.gym_wrapper  # noqa: F401  (imports RoboCasa before patching it)
@@ -243,6 +243,23 @@ def _safe(fn):
 
 
 def run_episode(spec: dict) -> dict:
+    """One episode; while it runs, INFLIGHT/<pid>.json names it, so the main process can tell which episode a worker
+    that died was running (multiprocessing loses that task and would otherwise wait for it forever)."""
+    marker = Path(_STATE["inflight"]) / f"{os.getpid()}.json" if _STATE.get("inflight") else None
+    if marker is not None:
+        marker.write_text(json.dumps({"task": spec["task"], "seed": spec["seed"], "started": time.time(),
+                                      "max_steps": spec.get("max_steps")}))
+    try:
+        return _run_episode(spec)
+    finally:
+        if marker is not None:
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+
+
+def _run_episode(spec: dict) -> dict:
     out = dict(spec, worker=_STATE.get("worker"), server=_STATE.get("server"), pid=os.getpid())
     if "init_error" in _STATE:
         return dict(out, status="error", error="worker init: " + _STATE["init_error"], wall_seconds=0.0)
@@ -297,6 +314,100 @@ def run_episode(spec: dict) -> dict:
     return out
 
 
+def pid_alive(pid: int) -> bool:
+    """False for a process that is gone or a zombie (dead, not yet reaped)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().split(")")[-1].split()[0] != "Z"
+    except OSError:
+        return True
+
+
+def hang_limit(max_steps) -> float:
+    """Seconds after which a running episode counts as hung: 10 minutes of reset plus 3 s per control step, about 4x
+    the slowest measured (0.81 s per step with 96 processes on one machine, 2026-10-22)."""
+    return 600.0 + 3.0 * float(max_steps or 0)
+
+
+def run_all(pool, episodes, write, inflight: Path, retries: int = 2, poll: float = 30.0, alive=pid_alive,
+            now=time.time, kill=os.kill, sleep=time.sleep, run=None) -> dict:
+    """Run every episode on `pool` (apply_async), passing each finished row to write().  A worker process that dies
+    (killed for memory, a simulator crash) loses its episode: multiprocessing replaces the worker but never reports
+    the task.  Every `poll` seconds the INFLIGHT markers are read; an episode whose worker is dead is run again (at
+    most `retries` times, then recorded as an error), and a worker still on one episode after hang_limit() is killed
+    first.  Returns counts of the retries, kills and episodes given up."""
+    run = run or run_episode
+    key = lambda e: (e["task"], e["seed"])  # noqa: E731
+    pending, tries, stats = {}, {}, {"retried": 0, "killed_hung": 0, "given_up": 0}
+
+    def submit(e):
+        pending[key(e)] = (e, pool.apply_async(run, (e,)))
+
+    for e in episodes:
+        submit(e)
+    while pending:
+        for k, (e, res) in list(pending.items()):
+            if res.ready():
+                del pending[k]
+                try:
+                    row = res.get()
+                except Exception as exc:  # run_episode catches its own errors; this is the transport failing
+                    row = dict(e, status="error", error=f"{type(exc).__name__}: {exc}"[:500], wall_seconds=0.0)
+                write(row)
+        for m in sorted(Path(inflight).glob("*.json")):
+            try:
+                pid, info = int(m.stem), json.loads(m.read_text())
+            except (OSError, ValueError):
+                continue
+            if alive(pid):
+                if now() - float(info.get("started", now())) > hang_limit(info.get("max_steps")):
+                    try:
+                        kill(pid, 9)
+                        stats["killed_hung"] += 1
+                    except OSError:
+                        pass
+                continue
+            try:
+                m.unlink()
+            except OSError:
+                pass
+            k = (info["task"], info["seed"])
+            if k not in pending or pending[k][1].ready():
+                continue
+            e = pending.pop(k)[0]
+            tries[k] = tries.get(k, 0) + 1
+            if tries[k] <= retries:
+                stats["retried"] += 1
+                submit(dict(e, attempt=tries[k]))
+            else:
+                stats["given_up"] += 1
+                write(dict(e, status="error", error=f"its worker process died {tries[k]} times while running it",
+                           wall_seconds=0.0))
+        if pending:
+            sleep(poll)
+    return stats
+
+
+def completed_rows(path: Path) -> list:
+    """The complete episodes of an earlier, interrupted run of the same plan (OUT/episodes.jsonl)."""
+    out = []
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get("status") == "complete":
+                out.append(r)
+    return out
+
+
 def summarize(rows, workers: int, wall: float) -> dict:
     done = [r for r in rows if r.get("status") == "complete"]
     per_task = {}
@@ -347,7 +458,6 @@ def main() -> int:
         episodes = plan(args.tasks, parse_seeds(args.seeds))
     else:
         ap.error("give --eval-plan, or --tasks and --seeds")
-    args.out.mkdir(parents=True, exist_ok=False)
     episodes = longest_first(episodes)
     if args.shard:
         episodes = shard_of(episodes, args.shard)
@@ -355,11 +465,27 @@ def main() -> int:
         e.update(split=args.split, execute_steps=args.execute_steps)
         if args.frames:
             e["frames_dir"] = str(args.out / "frames")
-    (args.out / "plan.json").write_text(json.dumps({"ckpt": args.ckpt, "servers": args.servers, "workers": args.workers,
-                                                    "stable_counter_regions": args.stable_regions, "shard": args.shard,
-                                                    "eval_plan": eval_plan and {"path": str(args.eval_plan),
-                                                                                "name": eval_plan["name"]},
-                                                    "episodes": episodes}, indent=1) + "\n")
+    record = {"ckpt": args.ckpt, "servers": args.servers, "workers": args.workers,
+              "stable_counter_regions": args.stable_regions, "shard": args.shard,
+              "eval_plan": eval_plan and {"path": str(args.eval_plan), "name": eval_plan["name"]}, "episodes": episodes}
+    resumed = []
+    if (args.out / "plan.json").is_file():  # an earlier run of this evaluation stopped: run only what is missing
+        old = json.loads((args.out / "plan.json").read_text())
+        same = (old.get("ckpt") == args.ckpt and old.get("shard") == args.shard
+                and old.get("stable_counter_regions") == args.stable_regions
+                and [(e["task"], e["seed"]) for e in old.get("episodes", [])] == [(e["task"], e["seed"]) for e in episodes])
+        if not same:
+            print(f"[closed_loop] {args.out} holds a different evaluation: not touching it")
+            return 2
+        resumed = completed_rows(args.out / "episodes.jsonl")
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        (args.out / f"resume_{stamp}.json").write_text(json.dumps(
+            {"resumed_complete": len(resumed), "servers": args.servers, "workers": args.workers}, indent=1) + "\n")
+    else:
+        args.out.mkdir(parents=True, exist_ok=False)
+        (args.out / "plan.json").write_text(json.dumps(record, indent=1) + "\n")
+    done_keys = {(r["task"], r["seed"]) for r in resumed}
+    todo = [e for e in episodes if (e["task"], e["seed"]) not in done_keys]
     for server in args.servers.split(","):  # fail fast, before any simulator starts
         try:
             connect(args.ckpt, server, args.starvla_root)
@@ -368,18 +494,25 @@ def main() -> int:
                                                               indent=1) + "\n")
             print(f"[closed_loop] server {server} failed the contract check: {type(exc).__name__}: {exc}")
             return 2
-    rows = []
+    rows = list(resumed)
     t0 = time.monotonic()
+    inflight = args.out / "inflight"
+    inflight.mkdir(exist_ok=True)
+    for stale in inflight.glob("*.json"):
+        stale.unlink()
     ctx = mp.get_context("spawn")
-    with ctx.Pool(args.workers, initializer=_init_worker, initargs=(args.ckpt, args.servers.split(","),
-                                                                    args.starvla_root, args.stable_regions)) as pool:
+    with ctx.Pool(args.workers, initializer=_init_worker,
+                  initargs=(args.ckpt, args.servers.split(","), args.starvla_root, args.stable_regions,
+                            str(inflight))) as pool:
         with open(args.out / "episodes.jsonl", "a") as f:
-            for row in pool.imap_unordered(run_episode, episodes):
+            def write(row):
                 rows.append(row)
                 f.write(json.dumps(row) + "\n")
                 f.flush()
+            pool_stats = run_all(pool, todo, write, inflight)
     summary = dict(summarize(rows, args.workers, time.monotonic() - t0), stable_counter_regions=args.stable_regions,
-                   eval_plan=eval_plan["name"] if eval_plan else None, shard=args.shard)
+                   eval_plan=eval_plan["name"] if eval_plan else None, shard=args.shard, resumed_complete=len(resumed),
+                   pool=pool_stats)
     (args.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps({k: summary[k] for k in ("episodes", "complete", "successes", "wall_seconds",
                                               "episode_wall_mean_seconds", "episodes_per_hour")}))

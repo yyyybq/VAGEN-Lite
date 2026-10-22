@@ -1,0 +1,88 @@
+"""CPU tests of the evaluation's worker pool loop (downstream/eval/closed_loop.run_all): an episode whose worker
+process dies is run again, a hung worker is killed, an episode that keeps killing its worker is given up; and of the
+resume helpers (completed_rows)."""
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "eval"))
+import closed_loop  # noqa: E402
+
+
+class Result:
+    def __init__(self, row=None):
+        self.row = row
+
+    def ready(self):
+        return self.row is not None
+
+    def get(self):
+        return self.row
+
+
+class FakePool:
+    """apply_async follows a script per episode: "ok" returns a complete row at once; "die" leaves an in-flight marker
+    of a process that is dead; "hang" leaves one of a live process started long ago."""
+
+    def __init__(self, inflight: Path, script: dict):
+        self.inflight, self.script, self.pid, self.dead, self.calls = inflight, script, 100, set(), []
+
+    def apply_async(self, fn, args):
+        e = args[0]
+        self.calls.append((e["task"], e["seed"], e.get("attempt", 0)))
+        what = self.script[(e["task"], e["seed"])].pop(0)
+        if what == "ok":
+            return Result(dict(e, status="complete", success=False, steps=10))
+        self.pid += 1
+        started = 0.0 if what == "hang" else 1e9
+        (self.inflight / f"{self.pid}.json").write_text(json.dumps({"task": e["task"], "seed": e["seed"],
+                                                                     "started": started, "max_steps": 100}))
+        if what == "die":
+            self.dead.add(self.pid)
+        return Result()
+
+
+def run(tmp_path, script, retries=2):
+    inflight = tmp_path / "inflight"
+    inflight.mkdir()
+    pool = FakePool(inflight, script)
+    rows = []
+
+    def kill(pid, sig):
+        pool.dead.add(pid)
+
+    episodes = [{"task": t, "seed": s} for t, s in script]
+    stats = closed_loop.run_all(pool, episodes, rows.append, inflight, retries=retries, poll=0,
+                                alive=lambda pid: pid not in pool.dead, now=lambda: 1e9, kill=kill,
+                                sleep=lambda s: None, run=lambda e: None)
+    return pool, rows, stats
+
+
+def test_a_dead_worker_episode_runs_again(tmp_path):
+    pool, rows, stats = run(tmp_path, {("A", 1): ["ok"], ("B", 2): ["die", "ok"]})
+    assert sorted((r["task"], r["status"]) for r in rows) == [("A", "complete"), ("B", "complete")]
+    assert stats == {"retried": 1, "killed_hung": 0, "given_up": 0}
+    assert ("B", 2, 1) in pool.calls and not list((tmp_path / "inflight").glob("*.json"))
+
+
+def test_an_episode_that_keeps_killing_its_worker_is_given_up(tmp_path):
+    pool, rows, stats = run(tmp_path, {("A", 1): ["ok"], ("C", 3): ["die", "die", "die"]})
+    by = {r["task"]: r for r in rows}
+    assert by["A"]["status"] == "complete" and by["C"]["status"] == "error" and "died 3 times" in by["C"]["error"]
+    assert stats == {"retried": 2, "killed_hung": 0, "given_up": 1}
+
+
+def test_a_hung_worker_is_killed_and_its_episode_run_again(tmp_path):
+    pool, rows, stats = run(tmp_path, {("H", 4): ["hang", "ok"]})
+    assert [r["status"] for r in rows] == ["complete"] and stats["killed_hung"] == 1 and stats["retried"] == 1
+
+
+def test_hang_limit_and_completed_rows(tmp_path):
+    assert closed_loop.hang_limit(4350) == 600 + 3 * 4350 and closed_loop.hang_limit(None) == 600
+    p = tmp_path / "episodes.jsonl"
+    p.write_bytes(b'{"task": "A", "seed": 1, "status": "complete"}\n{"task": "B", "seed": 2, "status": "error"}\n'
+                  b'\xa8garbage\n{"task": "C", "seed": 3, "status": "complete"}\n')
+    assert [r["task"] for r in closed_loop.completed_rows(p)] == ["A", "C"]
+    assert closed_loop.completed_rows(tmp_path / "missing.jsonl") == []
+    assert closed_loop.pid_alive(999999999) is False
