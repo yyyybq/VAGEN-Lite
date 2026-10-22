@@ -18,14 +18,16 @@ Spec (configs/batches/*.yaml; relative config paths are relative to the repo roo
     jobs_per_gpu: 1                        # >1 stacks this batch's OWN jobs on a GPU it holds (opt-in, Step 4)
     launch: {write_video: true}            # extra eval.launch flags (key -> --key, false -> --no-key), e.g.
                                            #   env_setup / evaluator_cmd_prefix / activation to reuse the helpers
-                                           #   in /nas/baiqiao/b1k_runs/ (see eval/launch.py)
+                                           #   in /nas/baiqiao/b1k_runs/ (see eval/launch.py); eval_output_dir
+                                           #   gets one subdirectory per attempt (<dir>/<run id>)
     overrides: []                          # -o key=value for every job
     batch_dir: ...                         # ledger + status; default <run.log_root>/_batches/<batch>
     jobs:
       - name: L0                           # job id prefix (default: the config file stem)
         config: configs/L0_exec_only.yaml  # or configs: [...]
         task: turning_on_radio             # or tasks: [...]
-        wrapper: default                   # any default above can be set per entry, plus direct / no_executor / note
+        wrapper: default                   # any default above can be set per entry (either form, e.g. wrappers:
+                                           #   [...] replaces a default wrapper), plus direct / no_executor / note
 
 Expansion is a cross product per entry (configs x tasks x wrappers x seeds x instance groups) with
 deterministic job ids "<name>-<task>-<pt|ht|tr><indices>-<wrapper>-s<seed>". Each job is labelled with its
@@ -35,15 +37,17 @@ jobs needs ``allow_report: true`` (Report instances: frozen configs only, docs/P
 Retry policy (CLAUDE.md "Experiment discipline"): a job is attempted until one attempt is "done" (success OR
 policy failure, never re-run); an "infra_error" attempt is re-run at most ``retries_on_infra_error`` times,
 except when every official result JSON exists and the cause cannot have tainted them (non-zero evaluator
-exit, launcher or batch killed; not a server death or lost connection): re-running would choose between
-official outcomes, so batch_status.json says so and a person decides. A "failed"
-attempt (launch-level failure, user stop) is not re-run in the same invocation; a later invocation re-runs
-it only if its evaluator never started or wrote no official result. Every attempt has its own run id and
-run directory and two ledger lines (attempt_start, attempt_end) in <batch_dir>/jobs.jsonl; re-running the
-same spec resumes from the ledger. <batch_dir>/batch_status.json is rewritten after every event. Jobs run
-sequentially by default; with --max-parallel N up to N jobs run at once, each on its own free GPU(s)
-(eval/gpu.py; checked by the batch, then passed as --gpus) and its own port slot. Without --wait-gpu the
-batch stops starting jobs when no GPU is free (one 30 s re-check right after one of its own attempts ended).
+exit or timeout, supervisor error, launcher or batch killed; not a server death or lost connection):
+re-running would choose between official outcomes, so batch_status.json says so and a person decides. A
+"failed" attempt (launch-level failure, user stop) is not re-run in the same invocation; a later invocation
+re-runs it only if its evaluator never started or wrote no official result. Every attempt has its own run id
+and run directory and two ledger lines (attempt_start, attempt_end) in <batch_dir>/jobs.jsonl; re-running
+the same spec resumes from the ledger (one batch per batch_dir at a time: <batch_dir>/batch.lock; an
+attempt left running on another host is resumed there). <batch_dir>/batch_status.json is rewritten after
+every event. Jobs run sequentially by default; with --max-parallel N up to N jobs run at once, each on its
+own free GPU(s) (eval/gpu.py; checked by the batch, then passed as --gpus) and its own port slot. Without
+--wait-gpu the batch stops starting jobs when no GPU is free (one 30 s re-check right after one of its own
+attempts ended).
 
 Status: written and unit-tested with a mocked job runner (tests/test_eval_run_batch.py); nothing has been
 run on 105 yet.
@@ -55,6 +59,7 @@ import argparse
 import collections
 import concurrent.futures
 import dataclasses
+import fcntl
 import hashlib
 import json
 import os
@@ -81,6 +86,7 @@ TOP_KEYS = {"batch", "description", "mode", "seed", "seeds", "wrapper", "wrapper
 ENTRY_KEYS = {"name", "config", "configs", "task", "tasks", "instances", "group_instances", "seed", "seeds",
               "wrapper", "wrappers", "mode", "direct", "no_executor", "overrides", "launch", "note"}
 INHERITED = ENTRY_KEYS - {"name", "overrides", "launch", "note"}
+ONE_OR_MANY = (("config", "configs"), ("task", "tasks"), ("wrapper", "wrappers"), ("seed", "seeds"))
 RESERVED_LAUNCH_KEYS = {"config", "override", "task", "mode", "instances", "wrapper", "seed", "run_id", "run_dir",
                         "executor_port", "agent_port", "gpus", "skip_gpu_check", "direct", "no_executor", "dry_run",
                         "detach", "tag"}
@@ -186,7 +192,12 @@ def expand_jobs(spec: dict) -> list[Job]:
         unknown = set(raw) - ENTRY_KEYS
         if unknown:
             raise SpecError(f"jobs[{n}]: unknown keys {sorted(unknown)}")
-        entry = {**{k: v for k, v in spec.items() if k in INHERITED}, **raw}
+        inherited = {k: v for k, v in spec.items() if k in INHERITED}
+        for one, many in ONE_OR_MANY:  # an entry's wrapper overrides a default wrappers list, and so on
+            if one in raw or many in raw:
+                inherited.pop(one, None)
+                inherited.pop(many, None)
+        entry = {**inherited, **raw}
         configs = [resolve_config_path(c) for c in _one_or_many(entry, "config", "configs")]
         tasks = _one_or_many(entry, "task", "tasks")
         wrappers = _one_or_many(entry, "wrapper", "wrappers", ["rgbd"])
@@ -266,11 +277,14 @@ def launch_argv(job: Job, *, run_id: str, run_dir: str, ports: Optional[dict] = 
         argv.append("--no-executor")
     for k, v in (tags or {}).items():
         argv += ["--tag", f"{k}={v}"]
-    return argv + launch_flags(dict(job.launch))
+    options = dict(job.launch)
+    if options.get("eval_output_dir"):  # a shared directory would mix jobs' identically named official JSONs
+        options["eval_output_dir"] = os.path.join(str(options["eval_output_dir"]), run_id)
+    return argv + launch_flags(options)
 
 
 # Infra causes that do not taint official results written before them (a server death or a lost connection does).
-UNTAINTED_KINDS = frozenset({"exit_code", "launcher_crash", "batch_interrupted"})
+UNTAINTED_KINDS = frozenset({"exit_code", "timeout", "supervisor_error", "launcher_crash", "batch_interrupted"})
 
 
 def rerun_blocked(end: dict) -> Optional[str]:
@@ -422,6 +436,9 @@ class BatchRunner:
                 rec = {**self._end_record(start, st), "recovered": True}
             else:
                 sup = st.get("supervisor") or {}
+                if launch.other_host(st):
+                    raise SpecError(f"attempt {start['run_id']} is {st.get('state')} on host {launch.other_host(st)}; "
+                                    "resume the batch there")
                 if sup and launch.process_alive(sup.get("pid"), sup.get("start_ticks")):
                     raise SpecError(f"attempt {start['run_id']} is still running (supervisor pid {sup['pid']}); "
                                     "wait or stop it")
@@ -504,6 +521,18 @@ class BatchRunner:
         return end
 
     def run(self) -> int:
+        """Holds <batch_dir>/batch.lock: a second eval.batch on the same ledger would start the same attempts."""
+        with open(os.path.join(self.batch_dir, "batch.lock"), "a", encoding="utf-8") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as e:
+                raise SpecError(f"another eval.batch holds {lock.name}; poll its batch_status.json") from e
+            except OSError as e:  # e.g. a NAS mount without lock support
+                self.log(f"[batch {self.batch}] warning: cannot lock {lock.name} ({e}); "
+                         "run one batch per spec at a time")
+            return self._run()
+
+    def _run(self) -> int:
         self._load_history()
         queue = collections.deque(j for j in self.jobs
                                   if next_attempt_allowed(self.history.get(j.job_id, []), self.max_retries, resume=True))

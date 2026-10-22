@@ -9,12 +9,16 @@ be restored and a round can be rolled back.
     python -m data.rounds resolve REGISTRY --round K [--own] [--root DIR]   # eval.launch arguments
     python -m data.rounds verify  REGISTRY [--root DIR]
 
+REGISTRY is one YAML file; keep it in the repo (data/rounds.yaml) next to the configs it names, with
+artifact paths on the NAS (absolute) or relative to --root (default: the repo).
+
 Round k (7.4): collect under a fixed budget -> label -> train exactly ONE trainable component
 (skill_executor | scorer | checker | memory) -> freeze -> Dev evaluation -> keep or rollback.
 Round 0 trains nothing: it is the baseline whose Step 6 / 7 runs give the failure distribution and
 decision logs. Each round records what was collected (budget, sources), how it was labelled, the
-trained component, the agent config (file + sha256 + dotted overrides), artifact paths + sha256, the
-frozen flag, the Dev run ids and the decision.
+trained component, the agent config (file + dotted overrides; at freezing: the resolved-config hash,
+as in run manifests, and the sha256 of its base chain, prompt files and skill catalog), artifact paths
++ sha256, the frozen flag, the Dev run ids and the decision.
 
 Rules enforced here:
   * a new round starts only after the previous one is frozen (and decided, from round 1 on);
@@ -72,7 +76,9 @@ class Artifact:
 class RoundConfig:
     path: str  # agent config YAML, relative to the registry root (the repo) or absolute
     overrides: tuple[str, ...] = ()  # dotted key=value overrides (agent/config.py apply_override)
-    sha256: Optional[str] = None
+    sha256: Optional[str] = None  # the config file itself
+    resolved_sha256: Optional[str] = None  # agent.config.config_hash of the resolved config (as in run manifests)
+    files: dict[str, str] = dataclasses.field(default_factory=dict)  # base chain, prompts, skill catalog -> sha256
 
 
 @dataclasses.dataclass(frozen=True)
@@ -130,7 +136,8 @@ class RoundRecord:
         if not self.config.path:
             out.append("config.path is empty")
         if self.frozen:
-            missing = [a.name for a in self.all_artifacts() if not a.sha256] + ([] if self.config.sha256 else ["config"])
+            missing = [a.name for a in self.all_artifacts() if not a.sha256]
+            missing += [] if (self.config.sha256 and self.config.resolved_sha256) else ["config"]
             if missing:
                 out.append(f"frozen round without sha256 for {missing}")
         names = [a.name for a in self.all_artifacts()]
@@ -162,7 +169,8 @@ class Registry:
     def errors(self) -> list[str]:
         out = []
         if _invariants_hash(self.invariants) != self.invariants_sha256:
-            out.append("registry invariants changed since creation (Report split, evaluator and budget are frozen forever)")
+            out.append("registry invariants changed since creation "
+                       "(Report split, evaluator and budget are frozen forever)")
         for key in DEFAULT_INVARIANTS:
             if not self.invariants.get(key):
                 out.append(f"invariant {key!r} missing")
@@ -241,6 +249,38 @@ def sha256_path(path: str) -> str:
     raise RoundError(f"{path} does not exist")
 
 
+def config_fingerprint(path: str, overrides: Sequence[str], root: str) -> tuple[str, dict[str, str]]:
+    """(resolved config hash, {file: sha256}) for an agent config: every file of its ``base:`` chain,
+    the prompt files of enabled modules (configs/prompts/<package>/<version>.txt), the skill catalog
+    and the repo-relative task metadata snapshots (task prompts). A checkpoint directory is not hashed
+    here; list trained weights as artifacts. Not covered: absolute paths into the BEHAVIOR-1K tree
+    (pinned by the evaluator invariant) and model ids read from env vars (providers.*.model_env)."""
+    from agent.config import REPO_ROOT, config_hash, get, load_config
+    from agent.prompts import DEFAULT_PROMPT_ROOT
+
+    try:
+        cfg = load_config(path, list(overrides))
+    except (OSError, ValueError) as e:
+        raise RoundError(f"config {path}: {e}") from None
+    paths = [os.path.normpath(os.path.join(REPO_ROOT, rel)) for rel in cfg["_meta"]["config_chain"]]
+    for slot, m in (cfg.get("modules") or {}).items():
+        if isinstance(m, dict) and m.get("enabled") and m.get("prompt_version"):
+            impl = str(m.get("impl", "null"))
+            package = impl.split(":", 1)[0] if ":" in impl else slot
+            paths.append(os.path.join(DEFAULT_PROMPT_ROOT, package, f"{m['prompt_version']}.txt"))
+    catalog = get(cfg, "executor.skill_catalog")
+    if catalog:
+        paths.append(catalog if os.path.isabs(catalog) else os.path.join(REPO_ROOT, catalog))
+    for key in ("catalog_tsv", "tasks_jsonl"):  # repo snapshots that set task prompts / max_steps (agent/task_meta.py)
+        rel = get(cfg, f"task_metadata.{key}")
+        if rel and not os.path.isabs(rel):
+            paths.append(os.path.join(REPO_ROOT, rel))
+    files = {}
+    for p in paths:
+        files[os.path.relpath(p, root)] = sha256_path(p) if os.path.exists(p) else "missing"
+    return config_hash(cfg), files
+
+
 def _hashed(a: Artifact, root: str) -> Artifact:
     digest = sha256_path(_abs(a.path, root))
     if a.sha256 and a.sha256 != digest:
@@ -288,9 +328,13 @@ def freeze_round(reg: Registry, k: int, root: str, now: Optional[str] = None) ->
     cfg_path = _abs(rec.config.path, root)
     if not os.path.isfile(cfg_path):
         raise RoundError(f"round {k}: config {cfg_path} does not exist")
-    config = dataclasses.replace(rec.config, sha256=sha256_path(cfg_path))
+    resolved, files = config_fingerprint(cfg_path, rec.config.overrides, root)
+    config = dataclasses.replace(rec.config, sha256=sha256_path(cfg_path), resolved_sha256=resolved, files=files)
     if rec.config.sha256 and rec.config.sha256 != config.sha256:
         raise RoundError(f"round {k}: config {rec.config.path} changed since its sha256 was recorded")
+    missing = [p for p, digest in files.items() if digest == "missing"]
+    if missing:
+        raise RoundError(f"round {k}: files the config needs do not exist: {missing}")
     labelling = dataclasses.replace(rec.labelling, files=tuple(_hashed(a, root) for a in rec.labelling.files))
     frozen = dataclasses.replace(rec, config=config, labelling=labelling,
                                  artifacts=tuple(_hashed(a, root) for a in rec.artifacts),
@@ -361,6 +405,15 @@ def verify_round(reg: Registry, k: int, root: str) -> list[str]:
     if not rec.frozen:
         return [f"round {k} is not frozen"]
     out = []
+    try:
+        resolved, files = config_fingerprint(_abs(rec.config.path, root), rec.config.overrides, root)
+        if resolved != rec.config.resolved_sha256:
+            out.append(f"round {k} config: the resolved config of {rec.config.path} changed since freezing")
+        for p in sorted(set(files) | set(rec.config.files)):
+            if files.get(p) != rec.config.files.get(p):
+                out.append(f"round {k} config file {p} changed since freezing")
+    except RoundError as e:
+        out.append(f"round {k} config: {e}")
     items = [("config", rec.config.path, rec.config.sha256)] + [(a.name, a.path, a.sha256) for a in rec.all_artifacts()]
     for name, path, digest in items:
         try:
@@ -399,7 +452,8 @@ def _show(reg: Registry) -> str:
     lines = ["invariants: " + "; ".join(f"{k}: {v}" for k, v in reg.invariants.items())]
     for r in reg.rounds:
         state = "frozen" if r.frozen else "open"
-        lines.append(f"round {r.round}: {r.trained_component or 'no training'} | {state} | dev runs {len(r.dev_run_ids)} | "
+        lines.append(f"round {r.round}: {r.trained_component or 'no training'} | {state} | "
+                     f"dev runs {len(r.dev_run_ids)} | "
                      f"decision {r.decision or '-'} | config {r.config.path} {' '.join(r.config.overrides)} | "
                      f"artifacts {len(r.all_artifacts())}")
     if reg.rounds:
@@ -423,7 +477,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     add("show")
     p = add("new")
-    p.add_argument("--spec", required=True, help="YAML with trained_component, config, collection, labelling, artifacts")
+    p.add_argument("--spec", required=True,
+                   help="YAML with trained_component, config, collection, labelling, artifacts")
     p = add("freeze")
     p.add_argument("--round", type=int, required=True)
     p = add("dev-runs")

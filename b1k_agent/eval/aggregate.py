@@ -9,10 +9,12 @@ Inputs per run directory (all read-only; each file's sha256 goes into the proven
   <run>/status.json         eval/launch.py status (optional). Read keys: state, reason, eval_output_dir,
         task, instance_ids (resolved) or mode + instance_indices, num_rollouts, seed, max_steps,
         max_steps_info, wrapper, evaluator_git, started_at, direct, config_name, config_hash, infra_error
-        (false or the reason), infra_errors ([{task, instance_id, rollout_id, reason}]),
+        (false or the reason), infra_errors ([{task, instance_id, rollout_id, reason}]), infra_kinds,
         evaluator_exit_code. Results status.json expects but the evaluator never
         wrote are infra errors when the run is flagged infra / exited non-zero / state "failed", are
         skipped while it is still planned / starting / running, and otherwise count as missing (Q = 0).
+        When a server we started died while the evaluator ran (state infra_error, infra kind
+        server_died) every result of the run is an infra error too: eval/batch.py re-runs that attempt.
   <run>/run_manifest.json   agent manifest (agent/config.py build_manifest): config, config_hash, seed,
         modules (registry describe(): enabled slots, impls, providers), max_steps
   <run>/episodes/*/summary.json   agent episode summaries (agent/recorder.py episode_end, NAS copies)
@@ -32,14 +34,17 @@ per-task mean of ``q_score.final``, overall = mean over tasks, success = q == 1 
     counted and listed but excluded from the Q means; ``mean_q_infra_as_zero`` shows the strict value;
   * with ``--instances-declared``, every declared (task, instance) without a result counts as Q = 0 and
     is flagged ``missing``; results outside the declaration are kept in the CSV but not averaged;
-  * every mean is labelled SUBSET with its task list unless the declaration says ``full: true``;
+  * every mean is labelled SUBSET with its task list unless the declaration says ``full: true``, names
+    exactly the 100 challenge tasks (configs/tasks/task_catalog_2026.tsv) and no task was left out;
   * ``q_budget2026`` applies the 2026 budget rule (Q = 0 when the rollout broke max_steps x 1 s or the
     600 s per-query cap) next to the raw official ``q_final``. budget_ok comes from failure_reason
     (2026/eval JSONs: group_time_budget_exceeded / policy_query_timeout), else the official multi-port
     ``time.evaluation_time``, else the agent's own ``elapsed_s`` (clock starts after the uncharged first
-    query), each compared with max_steps x 1 s (status.json, else the manifest, else the summary's
-    ``wallclock_budget_s``); unknown stays unknown and is counted, not zeroed. The 600 s per-query cap
-    is only visible through 2026/eval's policy_query_timeout (summaries carry no per-query latency);
+    query; over the budget is unknown, not a violation, when the agent episode outlived the rollout, as a
+    finished env of a num_envs > 1 batch does), each compared with max_steps x 1 s (status.json, else
+    the manifest, else the summary's ``wallclock_budget_s``); unknown stays unknown and is counted, not
+    zeroed. The 600 s per-query cap is only visible through 2026/eval's policy_query_timeout (summaries
+    carry no per-query latency);
   * re-runs (6.5): attempts of one (group, task, instance, seed, rollout) are ordered by status.json
     started_at when every attempt has one, else by input order; the first non-infra attempt counts,
     earlier infra attempts are superseded, later attempts are flagged (policy failures must never be
@@ -83,6 +88,8 @@ BUDGET_FAILURE_REASONS = frozenset({"group_time_budget_exceeded", "policy_query_
 DEFAULT_INFRA_FAILURE_REASONS = ("policy_connection_lost",)
 SECONDS_PER_STEP = 1.0  # 2026 rule: rollout budget = max_steps x 1 s
 MAX_INFRA_RERUNS = 2
+TAINTING_INFRA_KINDS = frozenset({"server_died"})  # eval/launch.py classify_outcome kinds that taint written results
+TASK_CATALOG = os.path.join(REPO_ROOT, "configs", "tasks", "task_catalog_2026.tsv")  # the 100 challenge tasks
 RUNNING_STATES = frozenset({"planned", "starting", "running"})  # eval/launch.py status.json "state"
 
 # Keys that do not change agent behaviour; dropped before hashing configs into one comparison group.
@@ -347,7 +354,8 @@ def load_run(run_dir: str, inputs: InputLog, order: int = 0) -> RunData:
 
 
 def expand_run_dirs(paths: Sequence[str], inputs: InputLog) -> tuple[list[str], list[str]]:
-    """Run directories; an eval/batch.py batch directory (jobs.jsonl, no status.json) expands to its attempts."""
+    """Run directories; an eval/batch.py batch directory (jobs.jsonl, no status.json) expands to its attempts.
+    A run directory reached twice (a batch dir and one of its attempts, or a repeated argument) is read once."""
     out, warnings = [], []
     for p in paths:
         ledger = os.path.join(p, "jobs.jsonl")
@@ -362,7 +370,15 @@ def expand_run_dirs(paths: Sequence[str], inputs: InputLog) -> tuple[list[str], 
                     warnings.append(f"batch {p}: attempt run dir {d} does not exist")
         else:
             out.append(p)
-    return out, warnings
+    seen, unique = set(), []
+    for d in out:
+        real = os.path.realpath(d)
+        if real in seen:
+            warnings.append(f"run dir {d} given more than once; read once")
+            continue
+        seen.add(real)
+        unique.append(d)
+    return unique, warnings
 
 
 def _status_instance_ids(status: dict) -> Optional[list[int]]:
@@ -446,6 +462,16 @@ def match_summaries(run: RunData, official_keys: Sequence[tuple]) -> tuple[dict,
     return matched, unmatched
 
 
+def _tainted(status: dict) -> Optional[str]:
+    """Why every official result of the run is an infra error, or None: a server we started died while the
+    evaluator ran (eval/launch.py infra kind ``server_died``). Results written after an executor death come
+    from the agent's hold fallback, and eval/batch.py re-runs such attempts, so the re-run must count."""
+    kinds = set(status.get("infra_kinds") or ()) & TAINTING_INFRA_KINDS
+    if status.get("state") != "infra_error" or not kinds:
+        return None
+    return f"run infra_error ({', '.join(sorted(kinds))}): " + "; ".join(map(str, status.get("reason") or []))
+
+
 def _infra_flags(status: dict) -> tuple[Optional[str], dict]:
     """(run-level infra reason or None, {(task, instance_id, rollout_id): reason}) from status.json."""
     whole = status.get("infra_error")
@@ -479,12 +505,20 @@ def _budget(rec: dict, summary: Optional[dict], run: RunData) -> dict:
     out = {"max_steps": max_steps, "wallclock_budget_s": budget_s, "budget_s_source": src,
            "elapsed_s": _float((summary or {}).get("elapsed_s")),
            "evaluation_time": _float(_get(rec, "time.evaluation_time")), "budget_ok": None, "budget_source": "unknown"}
+    # With num_envs > 1 the evaluator keeps querying a finished env until the whole batch ends, so that env's
+    # agent episode (and clock) outlives its rollout: its elapsed_s is then only an upper bound.
+    agent_steps, official_steps = _int((summary or {}).get("steps")), _int(rec.get("steps"))
+    outlived = agent_steps is not None and official_steps is not None and agent_steps > official_steps + 1
     if "failure_reason" in rec:
         out.update(budget_ok=rec["failure_reason"] not in BUDGET_FAILURE_REASONS, budget_source="failure_reason")
     elif out["evaluation_time"] is not None and budget_s is not None:
         out.update(budget_ok=out["evaluation_time"] <= budget_s, budget_source="evaluation_time")
     elif out["elapsed_s"] is not None and budget_s is not None:
-        out.update(budget_ok=out["elapsed_s"] <= budget_s, budget_source="agent_elapsed")
+        if out["elapsed_s"] <= budget_s or not outlived:
+            out.update(budget_ok=out["elapsed_s"] <= budget_s, budget_source="agent_elapsed")
+        else:
+            out.update(budget_source=f"unknown: the agent episode ran {agent_steps} steps, the rollout "
+                                     f"{official_steps} (num_envs > 1); its elapsed_s is only an upper bound")
     return out
 
 
@@ -519,6 +553,7 @@ def episode_rows(run: RunData, infra_reasons: Iterable[str] = DEFAULT_INFRA_FAIL
     keyed = [(_official_key(p, r), p, r) for p, r in run.official]
     matched, unmatched = match_summaries(run, [k for k, _, _ in keyed])
     whole_infra, per_infra = _infra_flags(run.status)
+    tainted = _tainted(run.status)
     rows = []
     seen = set()
     for (task, iid, rid), path, rec in keyed:
@@ -539,7 +574,8 @@ def episode_rows(run: RunData, infra_reasons: Iterable[str] = DEFAULT_INFRA_FAIL
             warnings.append(f"{task}/{iid} in run {run.run_id}: the agent planned with a {agent_budget:g} s budget, "
                             f"the 2026 rule gives {row['wallclock_budget_s']:g} s (max_steps {row['max_steps']})")
         _attach_summary(row, entry)
-        infra = per_infra.get((task, iid, rid)) or (f"failure_reason={reason}" if reason in infra_reasons else None)
+        infra = (per_infra.get((task, iid, rid)) or tainted
+                 or (f"failure_reason={reason}" if reason in infra_reasons else None))
         if infra:
             row.update(infra_error=True, infra_reason=infra)
         if q is None and not infra:
@@ -579,8 +615,13 @@ def load_declared(path: str, inputs: InputLog) -> dict:
 
         tasks: {turning_on_radio: [301, 302], picking_up_trash: {mode: public_test, indices: "0-9"}}
         mode: public_test, indices: "0-9", tasks: [turning_on_radio, picking_up_trash]
+        mode: public_test, tasks: {turning_on_radio: "0-9", picking_up_trash: [10, 11]}
         seeds: [0, 1, 2]        # optional; default: the seeds each config was run with
-        full: true              # optional; the list IS the whole challenge task set (not checked here)
+        full: true              # optional; the list IS the whole challenge task set (checked against
+                                # configs/tasks/task_catalog_2026.tsv; otherwise means stay SUBSET)
+
+    A per-task list or range holds instance ids when there is no top-level ``mode``, and indices into
+    that mode's split (public_test i -> 301 + i, as the evaluator resolves them) when there is one.
     """
     raw = inputs.yaml(path)  # JSON is read by the same YAML parser
     if isinstance(raw, list):
@@ -596,12 +637,32 @@ def load_declared(path: str, inputs: InputLog) -> dict:
             ids = resolve_instance_ids(top_mode, parse_indices(top_idx))
         elif isinstance(spec, dict):
             ids = resolve_instance_ids(spec.get("mode", top_mode or "train"), parse_indices(spec["indices"]))
+        elif top_mode is not None:
+            ids = resolve_instance_ids(top_mode, parse_indices(spec))
         else:
             ids = [int(i) for i in parse_indices(spec)]
         out[str(task)] = sorted(set(ids))
     seeds = raw.get("seeds")
+    full, warnings = bool(raw.get("full", False)), []
+    if full:
+        catalog = challenge_tasks(inputs)
+        if catalog is None or set(out) != catalog:
+            full = False
+            why = ("the task catalog is unreadable" if catalog is None else
+                   f"{len(catalog - set(out))} challenge task(s) missing, {len(set(out) - catalog)} unknown")
+            warnings.append(f"{path} says full: true but {why} ({TASK_CATALOG}); means are labelled SUBSET")
     return {"path": os.path.abspath(path), "tasks": out, "seeds": list(seeds) if seeds is not None else None,
-            "full": bool(raw.get("full", False))}
+            "full": full, "full_requested": bool(raw.get("full", False)), "warnings": warnings}
+
+
+def challenge_tasks(inputs: InputLog, path: str = TASK_CATALOG) -> Optional[set]:
+    """Task names of the 2026 challenge (the catalog snapshot of the official B100 task list), or None."""
+    try:
+        rows = inputs.read_bytes(path).decode("utf-8").splitlines()
+    except OSError:
+        return None
+    names = {r["task"] for r in csv.DictReader(rows, delimiter="\t") if r.get("task")}
+    return names or None
 
 
 # ------------------------------------------------------------------------------------ row post-processing
@@ -776,9 +837,10 @@ def _rng(seed: int, label: str) -> np.random.Generator:
 
 
 def scope_label(tasks: Sequence[str], declared: Optional[dict], no_valid: Sequence[str]) -> str:
-    """Every mean names its task set; only a declaration marked ``full: true`` is not a SUBSET mean."""
+    """Every mean names its task set; only a verified ``full: true`` declaration with every task averaged
+    is not a SUBSET mean."""
     shown = ", ".join(tasks) if len(tasks) <= 6 else f"{', '.join(tasks[:6])}, ... (see per-task table)"
-    if declared and declared.get("full"):
+    if declared and declared.get("full") and not no_valid:
         scope = f"FULL declared task set ({len(tasks)} tasks)"
     else:
         scope = f"SUBSET mean over {len(tasks)} task(s): {shown}"
@@ -968,12 +1030,15 @@ def render_markdown(result: dict) -> str:
 
 
 def _guard_outputs(out_dir: str, runs: Sequence[RunData], inputs: InputLog, names: Iterable[str]) -> None:
-    """Derived tables live apart from the logs: never inside an official output dir, never a run dir itself."""
+    """Derived tables live apart from the logs: never inside a directory the aggregator reads (official
+    output dirs, <run>/eval_output, <run>/episodes), never a run dir itself."""
     out_real = os.path.realpath(out_dir)
     for run in runs:
-        official = os.path.realpath(run.eval_output_dir)
-        if out_real == official or out_real.startswith(official + os.sep):
-            raise SystemExit(f"refusing to write inside the official output dir {official}")
+        for read_dir in (run.eval_output_dir, os.path.join(run.run_dir, "eval_output"),
+                         os.path.join(run.run_dir, "episodes")):
+            real = os.path.realpath(read_dir)
+            if out_real == real or out_real.startswith(real + os.sep):
+                raise SystemExit(f"refusing to write inside {real}, which the aggregator reads")
         if out_real == os.path.realpath(run.run_dir):
             raise SystemExit(f"refusing to write derived tables into the run dir {run.run_dir}; use a subdirectory "
                              "or a separate tables directory")
@@ -999,6 +1064,7 @@ def aggregate(run_dirs: Sequence[str], out_dir: Optional[str] = None, declared_p
         rows += r
         warnings += w
     declared = load_declared(declared_path, inputs) if declared_path else None
+    warnings += declared["warnings"] if declared else []
     configs = build_configs(runs)
     for r in rows:
         r["config"] = configs[r["group_key"]]["label"]

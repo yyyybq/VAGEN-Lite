@@ -108,9 +108,9 @@ class TruthWriter:
     def start(self, initial_masks: Sequence[Sequence[bool]], success: bool) -> dict:
         """Header plus the step-0 record (the state after the evaluator's reset)."""
         self.initial = [[bool(v) for v in m] for m in initial_masks]
-        self._write({"kind": "truth_header", "schema_version": TRUTH_SCHEMA_VERSION, "episode_id": self.episode_id,
-                     "literals": self.literals, "options": self.options,
-                     "initial_satisfied": self._satisfied(self.initial), **self.meta})
+        self._write({**self.meta, "kind": "truth_header", "schema_version": TRUTH_SCHEMA_VERSION,
+                     "episode_id": self.episode_id, "literals": self.literals, "options": self.options,
+                     "initial_satisfied": self._satisfied(self.initial)})
         return self.record(0, self.initial, success)
 
     def record(self, step: int, masks: Sequence[Sequence[bool]], success: bool, terminated: bool = False,
@@ -218,7 +218,8 @@ def load_truth(paths: Iterable[str]) -> dict[str, TruthTrack]:
                 if eid in tracks:
                     raise ValueError(f"{path}:{n}: episode {eid} already loaded (from {tracks[eid].source})")
                 if rec.get("schema_version") != TRUTH_SCHEMA_VERSION:
-                    raise ValueError(f"{path}:{n}: truth schema_version {rec.get('schema_version')} != {TRUTH_SCHEMA_VERSION}")
+                    raise ValueError(f"{path}:{n}: truth schema_version {rec.get('schema_version')} "
+                                     f"!= {TRUTH_SCHEMA_VERSION}")
                 tracks[eid] = TruthTrack(episode_id=eid, header=rec, records=[], source=source)
             elif kind in ("truth", "truth_footer"):
                 if eid not in tracks:

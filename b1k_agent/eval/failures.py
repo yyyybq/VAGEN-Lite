@@ -181,13 +181,15 @@ def _starts_without_summary(proposals: list[dict], why: str = "no episode summar
 
 
 def build_timeline(events: Iterable[dict], video_fps: float = DEFAULT_VIDEO_FPS,
-                   summary: Optional[dict] = None) -> list[dict]:
+                   summary: Optional[dict] = None, rollout_steps: Optional[int] = None) -> list[dict]:
     """Decision timeline of one episode from its events.jsonl records.
 
     Subtask starts, ends and loop fallbacks come from the episode's subtask records: the ``episode_end``
     event, else ``summary`` (summary.json, e.g. the snapshot written when the evaluator's connection
     closed). Each moment carries the step, the video time, the skill and instruction in force, the
-    latest model judgment and the loop's next action."""
+    latest model judgment and the loop's next action. ``rollout_steps`` (the official result's steps)
+    drops moments after the rollout ended: with num_envs > 1 the evaluator keeps querying a finished env
+    until the whole batch ends, and those later decisions never acted on the scored rollout."""
     moments: list[dict] = []
     proposals: list[dict] = []
     exec_instruction = None
@@ -230,6 +232,8 @@ def build_timeline(events: Iterable[dict], video_fps: float = DEFAULT_VIDEO_FPS,
         moments.append(_moment(rec.get("end_step"), "subtask_end",
                                f"{st.get('skill')} -> {rec.get('outcome')} (retries {rec.get('retries')})",
                                skill=st.get("skill"), outcome=rec.get("outcome")))
+    if rollout_steps is not None:
+        moments = [m for m in moments if m["step"] is None or m["step"] <= rollout_steps]
 
     def order(i):
         m = moments[i]
@@ -248,7 +252,7 @@ def build_timeline(events: Iterable[dict], video_fps: float = DEFAULT_VIDEO_FPS,
         m["current_skill"], m["current_instruction"], m["model_judgment"] = skill, instruction, judgment
         if m["kind"] == "subtask_end":
             skill = None
-    end = (end_summary or {}).get("steps")
+    end = (end_summary or {}).get("steps") if rollout_steps is None else rollout_steps
     for i, m in enumerate(moments):
         nxt = next((n for n in moments[i + 1:] if n["kind"] in ACTION_KINDS), None)
         m["next_action"] = _describe(nxt) if nxt else f"episode end (steps {end})"
@@ -311,7 +315,8 @@ def skeleton_records(run_dirs: Sequence[str], video_fps: Optional[float] = None,
                 continue
             epath = _events_path(row, local_root)
             summary = summaries.get(row["summary_path"])
-            timeline = build_timeline(read_events(epath, inputs), fps, summary) if epath else []
+            timeline = (build_timeline(read_events(epath, inputs), fps, summary, rollout_steps=_int(row["steps"]))
+                        if epath else [])
             ident = row["episode_id"] or f"{row['run_id']}:{row['task']}_{row['instance_id']}_{row['rollout_id']}"
             q = row["q_final"]
             rec = {f: None for f in RECORD_FIELDS}
@@ -372,14 +377,16 @@ def label(path: str, record_id: str, step: int, category: str, labeler: str, out
     base = next((r for r in records if r["record_id"] == record_id), None)
     if base is None:
         raise SystemExit(f"no record {record_id!r} in {path}")
+    root = next((r for r in records if r["record_id"] == base.get("timeline_ref")), base)  # holds the timeline
     if new:
         stem = record_id.rsplit("#", 1)[0]
-        n = 1 + max(int(r["record_id"].rsplit("#", 1)[1]) for r in records if r["record_id"].rsplit("#", 1)[0] == stem)
-        rec = {**base, "record_id": f"{stem}#{n}", "timeline": [], "timeline_ref": record_id}
-        anchor(rec, step, timeline=base.get("timeline"))
-        records.insert(records.index(base) + n, rec)
+        same = [i for i, r in enumerate(records) if r["record_id"].rsplit("#", 1)[0] == stem]
+        n = 1 + max(int(records[i]["record_id"].rsplit("#", 1)[1]) for i in same)
+        rec = {**base, "record_id": f"{stem}#{n}", "timeline": [], "timeline_ref": root["record_id"]}
+        anchor(rec, step, timeline=root.get("timeline"))
+        records.insert(same[-1] + 1, rec)
     else:
-        rec = anchor(base, step)
+        rec = anchor(base, step, timeline=root.get("timeline"))
     rec.update(category=category, category_zh=CATEGORY_LABELS_ZH[category], labeler=labeler.strip(),
                actual_outcome=outcome, evidence_notes=notes)
     write_records(path, records)

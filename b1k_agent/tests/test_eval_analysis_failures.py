@@ -258,3 +258,26 @@ def test_timeline_reads_real_recorder_output(tmp_path):
     failed = [i for i, m in enumerate(tl) if m["kind"] == "judgment" and m["model_judgment"]["status"] == "failed"]
     assert failed and tl[failed[0] + 1]["kind"] == "recovery"
     assert all(m["video_time_s"] == pytest.approx(m["step"] / 30.0, abs=1e-3) for m in tl)
+
+
+def test_relabel_secondary_record_keeps_its_context(tmp_path):
+    """A '#n' record stores no timeline of its own; re-labelling it reads the episode's '#0' timeline."""
+    run = make_run(str(tmp_path))
+    out = str(tmp_path / "failures.jsonl")
+    fl.write_records(out, fl.skeleton_records([run]))
+    rid = next(r["record_id"] for r in fl.load_records(out) if r["task"] == TASK)
+    second = fl.label(out, rid, 365, "skill_switch_handover", "tester", new=True)
+    again = fl.label(out, second["record_id"], 310, "grasp_place", "tester")
+    assert again["current_skill"] == "pick_up" and again["model_judgment"]["status"] == "failed"
+    assert again["next_action"] == "step 360: subtask_end: pick_up -> done (retries 1)"
+    third = fl.label(out, second["record_id"], 150, "task_order", "tester", new=True)
+    assert third["timeline_ref"] == rid and third["current_skill"] == "pick_up"
+    assert [r["record_id"] for r in fl.load_records(out)][-3:] == [rid, second["record_id"], third["record_id"]]
+
+
+def test_timeline_stops_at_the_official_rollout_end():
+    """num_envs > 1: decisions the agent made on a finished env's frozen observation are not part of the rollout."""
+    tl = fl.build_timeline(EVENTS, 30.0, rollout_steps=300)
+    assert max(m["step"] for m in tl) == 300 and tl[-1]["kind"] == "recovery"
+    assert tl[-1]["next_action"] == "episode end (steps 300)"
+    assert [m["step"] for m in fl.build_timeline(EVENTS, 30.0)][-1] == 360

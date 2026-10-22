@@ -229,3 +229,31 @@ def test_subtask_step_budget_does_not_trigger_a_check_every_step():
     requests = policy._loops[0].m.get("check").provider.inner.requests
     judge_calls = sum(1 for r in requests if r.purpose == "check.judge")
     assert judge_calls <= 600 // 60 + 2, judge_calls
+
+
+def test_call_ids_are_unique_across_providers():
+    from agent.recorder import RunRecorder
+    import tempfile
+    from providers import ProviderRequest
+
+    rec = RunRecorder("t", tempfile.mkdtemp(), save_frames=False)
+    pool = build_providers({"a": {"kind": "scripted", "replies": {"x": [{"k": 1}]}},
+                            "b": {"kind": "scripted", "replies": {"x": [{"k": 2}]}}}, recorder=rec)
+    seen = []
+    rec.provider_call = lambda eid, r: seen.append(r["call_id"])
+    for name in ("a", "b", "a", "b"):
+        pool[name].complete(ProviderRequest(system="s", user_text="u", purpose="x"))
+    assert len(set(seen)) == 4
+
+
+def test_steps_log_keeps_exact_float32_actions():
+    import glob
+    import json as _json
+
+    from helpers import make_cfg, make_policy, run_episode
+
+    policy, _, tmp = make_policy(make_cfg("L0_exec_only"))
+    acts = run_episode(policy, lambda t: synth_obs(t), 20)
+    rows = [_json.loads(l) for l in open(glob.glob(f"{tmp}/test/episodes/*/steps.jsonl")[0])]
+    assert [r["step"] for r in rows] == list(range(20))
+    np.testing.assert_array_equal(np.asarray(rows[7]["a"], np.float32), acts[7][0])

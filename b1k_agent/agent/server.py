@@ -177,6 +177,8 @@ class AgentPolicy:
                 if self.on_error == "raise":
                     raise
                 actions[i] = self._fallback_action(i, o)
+                if self.recorder is not None and loop.state is not None:
+                    self.recorder.step(loop.state, o, actions[i], "fallback")  # keep steps.jsonl gap-free
             finally:
                 ctxvars.current_episode.reset(tok[0])
                 ctxvars.current_step.reset(tok[1])

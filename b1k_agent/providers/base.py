@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import itertools
 import hashlib
 import io
 import json
@@ -101,6 +102,11 @@ def parse_json_loose(text: str) -> Optional[dict]:
         return None
 
 
+# One counter for every provider in the process, so call ids (and the image files named after them)
+# never collide when two providers are used in the same episode.
+_CALL_COUNTER = itertools.count(1)
+
+
 class LoggedProvider:
     """Wraps a provider: timing, cost, per-episode logging, deterministic error capture.
 
@@ -121,7 +127,7 @@ class LoggedProvider:
 
     def complete(self, req: ProviderRequest) -> ProviderResponse:
         self._calls += 1
-        call_id = f"{ctxvars.current_episode.get() or 'noep'}-c{self._calls:05d}"
+        call_id = f"{ctxvars.current_episode.get() or 'noep'}-c{next(_CALL_COUNTER):06d}"
         t0 = time.monotonic()
         try:
             resp = self.inner.complete(req)

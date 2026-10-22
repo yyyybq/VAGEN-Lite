@@ -419,6 +419,9 @@ import json, os, sys, time, urllib.request
 def arg(name):
     return sys.argv[sys.argv.index(name) + 1]
 
+def log(msg):  # OmniGibson/omnigibson/__init__.py LogFormatter: colour code + "[time] [LEVEL] [name] msg" + reset
+    print("\x1b[0m[00:00:01.000] [INFO] [omnigibson.eval.evaluator] " + msg + "\x1b[0m", flush=True)
+
 task, out, split = arg("--task-name"), arg("--output-dir"), arg("--mode")
 i = sys.argv.index("--instance-indices") + 1
 indices = []
@@ -430,8 +433,8 @@ mode = os.environ.get("FAKE_EVAL", "ok")
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 with opener.open("http://127.0.0.1:%s/healthz" % arg("--port"), timeout=5) as r:  # servers must be up already
     assert r.status == 200
-print("INFO Resolved %s instance ids for %s: %s" % (split, task, ids), flush=True)
-print("INFO Setting timeout to be 1.5x the average length of human demos: 1500", flush=True)
+log("Resolved %s instance ids for %s: %s" % (split, task, ids))
+log("Setting timeout to be 1.5x the average length of human demos: 1500")
 if mode == "hang":
     time.sleep(600)
 if mode == "crash":
@@ -446,9 +449,9 @@ for env_idx, iid in enumerate(ids):
     if mode == "connection_lost":
         rec["failure_reason"] = "policy_connection_lost"
     with open(os.path.join(out, "json", "%s_%d_0.json" % (task, iid)), "w") as f:
-        json.dump(rec, f)
-    print("INFO Instance %d (env %d) finished at step 1501: success=False q_score=0.0" % (iid, env_idx), flush=True)
-print("INFO Eval summary: 0/%d success | mean q_score=0.000 | task=%s" % (len(ids), task), flush=True)
+        f.write(json.dumps(rec)[:20] if mode == "truncated" else json.dumps(rec))
+    log("Instance %d (env %d) finished at step 1501: success=False q_score=0.0" % (iid, env_idx))
+log("Eval summary: 0/%d success | mean q_score=0.000 | task=%s" % (len(ids), task))
 sys.exit(3 if mode == "exit_after_json" else 0)
 '''
 
@@ -489,6 +492,7 @@ def test_supervisor_done_with_policy_failure(site, fakes):
     assert st["evaluator_exit_code"] == 0 and set(st["processes"]) == {"executor", "agent", "evaluator"}
     assert st["processes"]["agent"]["healthy_at"] and st["processes"]["executor"]["healthy_at"]
     assert st["evaluator_log"]["summary"] == {"success": 0, "n": 2, "mean_q_score": 0.0}
+    assert [(i["instance_id"], i["q_score"]) for i in st["evaluator_log"]["instances"]] == [(311, 0.0), (312, 0.0)]
     assert st["max_steps"] == 1500 and st["max_steps_info"]["evaluator_logged"] == 1500
     manifest = json.load(open(os.path.join(plan.run_dir, "run_manifest.json")))
     assert manifest["config_hash"] == plan.config_hash == st["agent_manifest"]["config_hash"]
@@ -648,3 +652,77 @@ def test_provider_keys_only_reach_the_agent(site):
     launch.prepare_run_dir(plan)
     for f in ("commands.sh", "plan.json", "status.json", "run_evaluator.sh"):
         assert "sk-secret" not in open(os.path.join(plan.run_dir, f)).read()
+
+
+# ---------------------------------------------------------------------- review regressions
+
+
+def test_parse_evaluator_log_strips_omnigibson_colour_codes():
+    """OmniGibson's LogFormatter (omnigibson/__init__.py) wraps every record in colour codes; q_score used to
+    end in "\\x1b[0m" and float() raised, so finalization crashed and status.json stayed "running"."""
+    def fmt(level, msg, colour="\x1b[0m"):
+        return f"{colour}[00:12:03.456] [{level}] [omnigibson.eval.evaluator] {msg}\x1b[0m\n"
+
+    out = launch.parse_evaluator_log([
+        fmt("INFO", "Setting timeout to be 1.5x the average length of human demos: 3224"),
+        fmt("INFO", "Instance 301 (env 0) finished at step 3224: success=False q_score=0.25"),
+        fmt("WARNING", "Policy evaluation failed at step 40 for instance 302: Websocket connection lost", "\x1b[33m"),
+        fmt("INFO", "Instance 302 (env 1) finished at step 40: success=False q_score=0.0"),
+        fmt("INFO", "Instance 303 (env 2) finished at step 9: success=True q_score=garbled"),
+    ])
+    assert out["max_steps"] == 3224
+    assert [(i["instance_id"], i["q_score"]) for i in out["instances"]] == [(301, 0.25), (302, 0.0), (303, None)]
+    assert out["failures"] == [{"step": 40, "instance_id": 302, "message": "Websocket connection lost"}]
+
+
+def test_supervisor_truncated_result_json_is_infra_error(site, fakes):
+    _, st = run_supervised(site, fakes, env={"FAKE_EVAL": "truncated"})
+    assert st["state"] == "infra_error" and st["infra_kinds"] == ["no_results"] and not st["results_complete"]
+    assert st["results"][0]["present"] is False
+    assert_all_stopped(st)
+
+
+def test_supervisor_finalize_error_still_ends_in_a_terminal_state(site, fakes, monkeypatch):
+    def boom(self, found):
+        raise OSError("NAS went away")
+
+    monkeypatch.setattr(launch.Supervisor, "_copy_results", boom)
+    plan, st = run_supervised(site, fakes)
+    assert st["state"] == "infra_error" and st["infra_kinds"] == ["supervisor_error"]
+    assert "finalize error: OSError: NAS went away" in st["reason"][-1] and st["results_complete"] is True
+    assert_all_stopped(st)
+
+
+def test_plan_refuses_stale_results_in_eval_output_dir(site):
+    out = site.tmp / "local_eval_out"
+    (out / "json").mkdir(parents=True)
+    (out / "json" / "turning_on_radio_311_0.json").write_text("{}")  # left by an earlier run
+    with pytest.raises(launch.PlanError, match="already holds"):
+        plan_for(site, "--eval-output-dir", str(out))
+    assert any("already holds" in w for w in plan_for(site, "--eval-output-dir", str(out), "--dry-run").warnings)
+    assert plan_for(site, "--eval-output-dir", str(out), instances=("12",)).eval_output_dir == str(out)
+
+
+def test_plan_rejects_duplicate_indices_and_flags_shared_group_budget(site):
+    with pytest.raises(launch.PlanError, match="duplicate"):
+        plan_for(site, instances=("10", "10"))
+    assert any("share ONE max_steps-second budget" in w for w in plan_for(site, instances=("10", "11")).warnings)
+    assert not any("share ONE" in w for w in plan_for(site).warnings)
+
+
+def test_status_and_stop_from_another_host_signal_nothing(tmp_path, capsys):
+    """Run dirs live on the NAS: pids / start times recorded on 105 must never be signalled from another host."""
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+    try:
+        start = launch.proc_stat(p.pid)["start_ticks"]
+        rec = {"pid": p.pid, "pgid": p.pid, "start_ticks": start, "started_by_us": True}
+        st = {"run_id": "r", "state": "running", "processes": {"evaluator": rec},
+              "supervisor": {"pid": p.pid, "start_ticks": start, "host": "some-other-host"}}
+        launch.write_json(str(tmp_path / "status.json"), st)
+        assert launch.main(["stop", str(tmp_path)]) == launch.EXIT_CODES["failed"]
+        assert p.poll() is None and launch.read_status(str(tmp_path))["state"] == "running"
+        assert launch.main(["status", str(tmp_path)]) == launch.EXIT_RUNNING  # unknown here, not "stale"
+        assert "some-other-host" in capsys.readouterr().out
+    finally:
+        p.kill()
+        p.wait()

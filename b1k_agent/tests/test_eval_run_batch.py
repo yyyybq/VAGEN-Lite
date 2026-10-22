@@ -3,6 +3,7 @@ retry policy with a MOCKED job runner (no eval.launch processes, no GPU)."""
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -192,6 +193,8 @@ def test_launch_argv_and_flags():
     ([EXIT_ONLY], True, False),                              # official results exist: a person decides
     ([dict(EXIT_ONLY, infra_kinds=["launcher_crash"])], True, False),
     ([dict(EXIT_ONLY, infra_kinds=["exit_code", "server_died"])], True, True),  # tainted results: re-run
+    ([dict(EXIT_ONLY, infra_kinds=["timeout", "exit_code"])], True, False),   # teardown hang after every result
+    ([dict(EXIT_ONLY, infra_kinds=["supervisor_error"])], True, False),
     ([dict(EXIT_ONLY, results_complete=False)], False, True),
     ([FAILED], False, False),                                # launch-level failure: not in the same invocation
     ([FAILED], True, True),                                  # ... but on resume when the evaluator never started
@@ -400,3 +403,76 @@ def test_interrupted_attempt_with_complete_official_results_is_not_rerun(tmp_pat
     job = bstatus(tmp_path)["jobs"][0]
     assert job["state"] == "infra_error" and job["results"][0]["q_score"] == 0.5
     assert "every official result exists" in job["rerun"]
+
+
+# ---------------------------------------------------------------------- review regressions
+
+
+def test_entry_overrides_the_inherited_one_or_many_form():
+    """A top-level ``wrapper`` / ``seeds`` / ``tasks`` default must not clash with an entry's other form."""
+    spec = spec_of(wrapper="rgbd", seeds=[0], tasks=["a", "b"], jobs=[
+        {"name": "x", "config": L0, "task": "t", "wrappers": ["default", "rgbd"], "seed": 1},
+        {"name": "y", "config": L0}])
+    ids = [j.job_id for j in batch.expand_jobs(spec)]
+    assert ids == ["x-t-pt10-default-s1", "x-t-pt10-rgbd-s1", "y-a-pt10-rgbd-s0", "y-b-pt10-rgbd-s0"]
+
+
+def test_eval_output_dir_option_gets_one_directory_per_attempt():
+    """Two configs on the same instance write the same official file name (<task>_<id>_0.json)."""
+    spec = spec_of(launch={"eval_output_dir": "/local/out"},
+                   jobs=[{"name": "L0", "config": L0, "task": "t"}, {"name": "L1", "config": L1, "task": "t"}])
+    dirs = []
+    for job in batch.expand_jobs(spec):
+        argv = batch.launch_argv(job, run_id=f"b-{job.job_id}-a0", run_dir="/r")
+        dirs.append(argv[argv.index("--eval-output-dir") + 1])
+    assert dirs == ["/local/out/b-L0-t-pt10-rgbd-s0-a0", "/local/out/b-L1-t-pt10-rgbd-s0-a0"]
+
+
+def test_resume_refuses_an_attempt_running_on_another_host(tmp_path):
+    """pids recorded on another host are never signalled; that attempt is resumed on its own host."""
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+    try:
+        start = launch.proc_stat(p.pid)["start_ticks"]
+        run_dir = tmp_path / "runs" / "b-L0-t-pt10-rgbd-s0-a0"
+        run_dir.mkdir(parents=True)
+        (run_dir / "status.json").write_text(json.dumps({
+            "state": "running",
+            "processes": {"evaluator": {"pid": p.pid, "pgid": p.pid, "start_ticks": start, "started_by_us": True}},
+            "supervisor": {"pid": 2 ** 22 + 7, "start_ticks": 1, "host": "some-other-host"}}))
+        os.makedirs(tmp_path / "batch")
+        batch.Ledger(str(tmp_path / "batch" / "jobs.jsonl")).append(
+            {"event": "attempt_start", "job_id": "L0-t-pt10-rgbd-s0", "attempt": 0, "run_id": run_dir.name,
+             "run_dir": str(run_dir)})
+        runner = ScriptedRunner({})
+        br, _ = make_runner(spec_of(), tmp_path, runner)
+        with pytest.raises(batch.SpecError, match="some-other-host"):
+            br.run()
+        assert runner.calls == [] and launch.read_status(str(run_dir))["state"] == "running" and p.poll() is None
+    finally:
+        p.kill()
+        p.wait()
+
+
+def test_one_batch_per_batch_dir(tmp_path):
+    started = threading.Event()
+    release = threading.Event()
+
+    class Blocking(ScriptedRunner):
+        def __call__(self, *a):
+            started.set()
+            release.wait(30)
+            return super().__call__(*a)
+
+    first, _ = make_runner(spec_of(), tmp_path, Blocking({"L0-t-pt10-rgbd-s0": [DONE]}))
+    t = threading.Thread(target=first.run)
+    t.start()
+    assert started.wait(30)
+    second_runner = ScriptedRunner({})
+    second, _ = make_runner(spec_of(), tmp_path, second_runner)
+    try:
+        with pytest.raises(batch.SpecError, match="another eval.batch"):
+            second.run()
+    finally:
+        release.set()
+        t.join(30)
+    assert second_runner.calls == [] and bstatus(tmp_path)["counts"] == {"done": 1}

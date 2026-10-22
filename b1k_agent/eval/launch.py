@@ -43,17 +43,18 @@ int(1.5 x task.jsonl "length") (OmniGibson/omnigibson/eval/utils/score_utils.py 
 evaluator.py:281-286). After the run it is checked against the evaluator's "Setting timeout to be" line.
 
 status.json "state": planned | starting | running | done | failed | infra_error.
-  done         every expected official JSON exists (a policy failure is NOT an infrastructure error);
+  done         every expected official JSON exists and parses (a policy failure is NOT an infrastructure error);
   infra_error  a server we started did not come up or died while the evaluator ran, the evaluator exited
-               non-zero or timed out, a result JSON is missing, or a result says failure_reason
+               non-zero or timed out, a result JSON is missing or unreadable, or a result says failure_reason
                policy_connection_lost (2026/eval). With --no-strict-exit a non-zero exit after ALL results is
-               done. "infra_kinds" names the causes; eval.batch does not re-run a bare exit code after
+               done. "infra_kinds" names the causes; eval.batch does not re-run an exit code / timeout after
                complete results (the official records exist; a re-run would choose between them);
   failed       launcher-level failure before the evaluator ran, a GPU placement violation, or a user stop.
 Exit codes: done 0, failed 1, infra_error 2, still running (status) 3. On finish the launcher stops ONLY the
 process groups it started (pid + start time + owner verified), evaluator first, agent with SIGINT so it
 writes its last episode summary. --detach returns at once; a watcher process (`_watch RUN_DIR`) does the
-supervision and keeps status.json current.
+supervision and keeps status.json current. `status` / `stop` on another host than the supervisor's (run dirs
+are on the NAS) only read status.json and never signal anything: pids are per host.
 
 GPUs (CLAUDE.md "GPU discipline"): eval/gpu.py picks boards with memory.used < 2048 MiB and utilization < 10 %
 (evaluator first, executor second; --share-gpu puts both on one) and every process gets an explicit
@@ -305,6 +306,13 @@ def read_status(run_dir: str) -> Optional[dict]:
     return read_json(os.path.join(run_dir, "status.json"))
 
 
+def other_host(st: dict) -> Optional[str]:
+    """The host that supervises the run when it is not this one: its pids and /proc start times mean nothing
+    here (run dirs live on the NAS), so nothing is checked or signalled from this host."""
+    host = (st.get("supervisor") or {}).get("host")
+    return host if host and host != socket.gethostname() else None
+
+
 # ---------------------------------------------------------------------- plan
 
 
@@ -456,10 +464,15 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
     cfg = load_config(args.config, args.override)
     task, mode, direct = args.task, args.mode, bool(args.direct)
     indices = [int(i) for i in args.instances]
+    if len(set(indices)) != len(indices):
+        raise PlanError(f"duplicate instance indices {indices}: the evaluator writes one JSON per instance id")
     try:
         instance_ids = resolve_instance_ids(indices, mode)
     except ValueError as e:
         raise PlanError(str(e)) from e
+    if len(indices) > 1:
+        warnings.append(f"{len(indices)} envs on one policy port: on 2026/eval they share ONE max_steps-second budget "
+                        "(evaluator.py time_limit_seconds), the agent budgets each env separately")
     cfg_seed = int(get(cfg, "run.seed", 0) or 0)
     seed = int(args.seed) if args.seed is not None else cfg_seed
     run_id = args.run_id or default_run_id(cfg, task, mode, indices, args.wrapper, seed, direct)
@@ -643,6 +656,11 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
         external_health.append(f"http://{connect_host(exec_host)}:{exec_port}/healthz")
 
     eval_output_dir = os.path.abspath(os.path.expanduser(args.eval_output_dir or os.path.join(run_dir, "eval_output")))
+    expected_results = [f"{task}_{iid}_0.json" for iid in instance_ids]
+    stale = [f for f in expected_results if os.path.exists(os.path.join(eval_output_dir, "json", f))]
+    if stale:
+        problem(f"{eval_output_dir}/json already holds {stale}: they would count as this run's results "
+                "(use a fresh --eval-output-dir)")
     eval_args = ["--task-name", task, "--host", eval_host, "--port", str(eval_port), "--mode", mode,
                  "--instance-indices", *map(str, indices), "--num-envs", str(len(indices)),
                  "--env-wrapper", WRAPPERS[args.wrapper], "--output-dir", eval_output_dir]
@@ -681,7 +699,7 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
         gpus={"evaluator": eval_gpus, "executor": exec_gpus, "agent": []},
         max_steps=max_steps, max_steps_info=max_steps_info, evaluator_root=evaluator_root,
         evaluator_git=git_info(evaluator_root), data_root=data_root, eval_output_dir=eval_output_dir,
-        expected_results=[f"{task}_{iid}_0.json" for iid in instance_ids], agent_manifest=agent_manifest, tags=tags,
+        expected_results=expected_results, agent_manifest=agent_manifest, tags=tags,
         external_health=external_health, evaluator_script=script,
         options={"eval_timeout_s": args.eval_timeout_s, "server_death_grace_s": float(args.server_death_grace_s),
                  "strict_exit": bool(args.strict_exit), "sync_videos": bool(args.sync_videos),
@@ -748,6 +766,15 @@ _LOG_PATTERNS = {
     "summary": re.compile(r"Eval summary: (\d+)/(\d+) success \| mean q_score=([0-9.]+)"),
     "failure": re.compile(r"Policy evaluation failed at step (\d+) for instance (\d+): (.*)"),
 }
+# OmniGibson/omnigibson/__init__.py LogFormatter wraps every record in colour codes ("\033[0m...\033[0m")
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _float_or_none(text: str) -> Optional[float]:
+    try:
+        return float(text)
+    except ValueError:
+        return None
 
 
 def parse_evaluator_log(lines) -> dict:
@@ -755,6 +782,7 @@ def parse_evaluator_log(lines) -> dict:
     out: dict = {"max_steps": None, "max_steps_source": None, "resolved_instance_ids": None, "instances": [],
                  "summary": None, "failures": [], "tracebacks": 0}
     for line in lines:
+        line = _ANSI.sub("", line)
         if "Traceback (most recent call last)" in line:
             out["tracebacks"] += 1
         if m := _LOG_PATTERNS["timeout_default"].search(line):
@@ -764,13 +792,13 @@ def parse_evaluator_log(lines) -> dict:
         elif m := _LOG_PATTERNS["resolved"].search(line):
             out["resolved_instance_ids"] = [int(x) for x in m.group(3).replace(" ", "").split(",") if x]
         elif m := _LOG_PATTERNS["instance"].search(line):
-            q = m.group(5)
             out["instances"].append({"instance_id": int(m.group(1)), "env": int(m.group(2)), "step": int(m.group(3)),
-                                     "success": m.group(4) == "True", "q_score": None if q == "None" else float(q)})
+                                     "success": m.group(4) == "True", "q_score": _float_or_none(m.group(5))})
         elif m := _LOG_PATTERNS["summary"].search(line):
             out["summary"] = {"success": int(m.group(1)), "n": int(m.group(2)), "mean_q_score": float(m.group(3))}
         elif m := _LOG_PATTERNS["failure"].search(line):
-            out["failures"].append({"step": int(m.group(1)), "instance_id": int(m.group(2)), "message": m.group(3)[:300]})
+            out["failures"].append({"step": int(m.group(1)), "instance_id": int(m.group(2)),
+                                    "message": m.group(3).rstrip()[:300]})
     return out
 
 
@@ -906,7 +934,18 @@ class Supervisor:
             self.status["traceback"] = traceback.format_exc()[-4000:]
         finally:
             self._stop_all()
-        return self._finalize(outcome)
+        try:
+            return self._finalize(outcome)
+        except Exception as e:  # never leave a non-terminal status.json behind
+            json_dir = os.path.join(self.plan.eval_output_dir, "json")
+            complete = all(read_result(os.path.join(json_dir, f))["present"] for f in self.plan.expected_results)
+            why = f"finalize error: {type(e).__name__}: {e}"
+            self.status.update(state="infra_error", reason=list(self.status.get("reason") or []) + [why],
+                               infra_kinds=["supervisor_error"], infra_error=why, results_complete=complete,
+                               evaluator_started="evaluator" in self.procs, ended_at=now_iso(),
+                               traceback=traceback.format_exc()[-4000:])
+            self._write()
+            return self.status
 
     def _spawn(self, spec: ProcSpec) -> None:
         os.makedirs(os.path.dirname(spec.log), exist_ok=True)
@@ -1063,9 +1102,10 @@ class Supervisor:
     def _finalize(self, outcome: dict) -> dict:
         plan, st = self.plan, self.status
         json_dir = os.path.join(plan.eval_output_dir, "json")
-        found = sorted(os.listdir(json_dir)) if os.path.isdir(json_dir) else []
+        listed = sorted(os.listdir(json_dir)) if os.path.isdir(json_dir) else []
         evaluator_started = "evaluator" in self.procs
         st["results"] = [read_result(os.path.join(json_dir, f)) for f in plan.expected_results]
+        found = [r["file"] for r in st["results"] if r["present"]]  # a truncated / unreadable JSON is no result
         if "forced" in outcome:
             state, reasons, kinds = outcome["forced"]
             warnings: list = []
@@ -1078,15 +1118,19 @@ class Supervisor:
             state, reasons, warnings, kinds = verdict["state"], verdict["reasons"], verdict["warnings"], verdict["kinds"]
         log_path = plan.proc("evaluator").log
         if os.path.isfile(log_path):
-            with open(log_path, encoding="utf-8", errors="replace") as f:
-                st["evaluator_log"] = parse_evaluator_log(f)
+            try:
+                with open(log_path, encoding="utf-8", errors="replace") as f:
+                    st["evaluator_log"] = parse_evaluator_log(f)
+            except Exception as e:  # the log is diagnostic; the official JSONs decide the outcome
+                st["evaluator_log"] = parse_evaluator_log([])
+                warnings.append(f"could not parse {log_path}: {type(e).__name__}: {e}")
             logged = st["evaluator_log"]["max_steps"]
             if logged is not None:
                 st["max_steps_info"]["evaluator_logged"] = logged
                 if st["max_steps"] is not None and logged != st["max_steps"]:
                     warnings.append(f"agent budget used max_steps={st['max_steps']} but the evaluator used {logged}")
                 st["max_steps"] = logged
-        st["unexpected_results"] = [f for f in found if f.endswith(".json") and f not in plan.expected_results]
+        st["unexpected_results"] = [f for f in listed if f.endswith(".json") and f not in plan.expected_results]
         st["progress"] = {"results_found": sum(f in found for f in plan.expected_results),
                           "results_expected": len(plan.expected_results),
                           "alive": {n: p.poll() is None for n, p in self.procs.items()}}
@@ -1099,7 +1143,7 @@ class Supervisor:
                                  "reason": "no official result JSON"}
                                 for iid in missing] if state == "infra_error" else [])
         st["warnings"] = list(st.get("warnings", [])) + warnings
-        self._copy_results(found)
+        self._copy_results(listed)
         self._write()
         print(f"[eval.launch {plan.run_id}] {state}" + (f": {'; '.join(reasons)}" if reasons else ""), flush=True)
         return st
@@ -1256,6 +1300,10 @@ def cmd_launch(argv: Sequence[str]) -> int:
 def _status_view(st: dict) -> dict:
     sup = st.get("supervisor") or {}
     view = dict(st)
+    view["other_host"] = other_host(st)
+    if view["other_host"]:  # cannot be checked from here
+        view["supervisor_alive"], view["alive"] = None, {}
+        return view
     view["supervisor_alive"] = process_alive(sup.get("pid"), sup.get("start_ticks")) if sup else False
     view["alive"] = {n: process_alive(p.get("pid"), p.get("start_ticks")) for n, p in (st.get("processes") or {}).items()}
     return view
@@ -1267,9 +1315,13 @@ def _print_status(view: dict) -> None:
     print(f"  {view.get('task')} {view.get('mode')} {view.get('instance_indices')} -> {view.get('instance_ids')}  "
           f"{view.get('wrapper')}  seed {view.get('seed')}  max_steps {view.get('max_steps')}  "
           f"config {view.get('config_name')}")
-    procs = ", ".join(f"{n} pid {p.get('pid')} {'alive' if view['alive'].get(n) else 'exit ' + str(p.get('exit_code'))}"
-                      for n, p in (view.get("processes") or {}).items())
-    print(f"  processes: {procs or '-'}; supervisor {'alive' if view['supervisor_alive'] else 'not running'}")
+    if view.get("other_host"):
+        print(f"  supervised on host {view['other_host']}: processes not checked from here")
+    else:
+        procs = ", ".join(f"{n} pid {p.get('pid')} "
+                          f"{'alive' if view['alive'].get(n) else 'exit ' + str(p.get('exit_code'))}"
+                          for n, p in (view.get("processes") or {}).items())
+        print(f"  processes: {procs or '-'}; supervisor {'alive' if view['supervisor_alive'] else 'not running'}")
     for r in view.get("results") or []:
         print(f"  {r.get('file')}: " + (f"success={r.get('success')} q={r.get('q_score')} steps={r.get('steps')}"
                                          + (f" failure_reason={r.get('failure_reason')}" if r.get("failure_reason") else "")
@@ -1298,7 +1350,7 @@ def cmd_status(argv: Sequence[str]) -> int:
             return EXIT_CODES["failed"]
         view = _status_view(st)
         state = st.get("state")
-        stale = state not in TERMINAL and not view["supervisor_alive"]
+        stale = state not in TERMINAL and not view["other_host"] and not view["supervisor_alive"]
         final = state in TERMINAL or stale or not args.wait or (args.timeout and time.monotonic() - t0 > args.timeout)
         if final:
             if args.json:
@@ -1338,6 +1390,9 @@ def cmd_stop(argv: Sequence[str]) -> int:
     if st.get("state") in TERMINAL:
         print(f"run already {st['state']}")
         return 0
+    if other_host(st):
+        print(f"run is supervised on host {other_host(st)}: run `stop` there (nothing signalled)", file=sys.stderr)
+        return EXIT_CODES["failed"]
     sup = st.get("supervisor") or {}
     sup_stat = proc_stat(sup["pid"]) if sup.get("pid") else None
     if sup_stat and sup_stat["uid"] == os.getuid() and process_alive(sup["pid"], sup.get("start_ticks")):

@@ -107,7 +107,7 @@ class RunRecorder:
     def step(self, state, obs, action: np.ndarray, source: str) -> None:
         eid = state.ctx.episode_id
         self._write(eid, "steps", {"step": obs.step, "t": round(obs.received_at, 4), "src": source,
-                                   "a": np.round(np.asarray(action, np.float64), 5).tolist()})
+                                   "a": np.asarray(action, np.float32).tolist()})  # exact float32 values (replayable)
         if self.save_frames and self.frame_every > 0 and obs.step % self.frame_every == 0:
             self.save_frame(eid, obs, tag="periodic")
 

@@ -10,9 +10,9 @@ Three record types:
   ExperienceRecord  one M-memory library entry; ``to_experience()`` gives the runtime
                     agent.interfaces.Experience that M-memory hands to the planner / checker.
   DistillRecord     one strong-model call with its legal inputs, its outputs (subtask choice,
-                    continue / switch, failure verdict, recovery choice) and visible evidence (7.3).
-                    The verification fields (truth_label, truth_source, correct) stay empty until
-                    diagnostics/label_distill.py fills them offline.
+                    continue / switch, failure verdict, recovery choice) and visible evidence (7.3),
+                    with the episode's resolved instance id. The verification fields (truth_label,
+                    truth_source, correct) stay empty until diagnostics/label_distill.py fills them offline.
 
 Field categories (7.2, agent/fields.py): every leaf field of every record type has exactly one of
 POLICY_OBSERVATION (legal at run time), TRAINING_ANNOTATION (labels / metadata, may come from
@@ -24,7 +24,8 @@ Split isolation (7.1): ``split_by_source`` assigns whole source trajectories to 
 neighbouring segments of one trajectory never land on both sides; ``validate_split`` checks it.
 Report (public_test 301-310) and hidden (321-340) instances never enter training data
 (docs/PROTOCOL.md; OmniGibson/omnigibson/eval/utils/eval_utils.py TEST_INSTANCE_IDS = range(301, 341),
-NUM_PUBLIC_TEST_INSTANCES = 20).
+NUM_PUBLIC_TEST_INSTANCES = 20). The check is by instance id, so records from our own runs (dev_run
+experiences, segments indexed by agent step) must carry the resolved instance id.
 
 Status: written and unit-tested (tests/test_data_diag_schema.py); no real data converted yet.
 """
@@ -39,7 +40,8 @@ import types
 import typing
 from typing import Any, ClassVar, Iterable, Optional, Sequence
 
-from agent.fields import EVALUATION_RECORD, FIELD_CATEGORIES as RUNTIME_FIELD_CATEGORIES, POLICY_OBSERVATION, TRAINING_ANNOTATION
+from agent.fields import EVALUATION_RECORD, POLICY_OBSERVATION, TRAINING_ANNOTATION
+from agent.fields import FIELD_CATEGORIES as RUNTIME_FIELD_CATEGORIES
 from agent.interfaces import Experience
 
 SCHEMA_VERSION = 1
@@ -141,7 +143,8 @@ class EpisodeOutcome:
 
 def _instance_errors(where: str, instance_id: Optional[int]) -> list[str]:
     if instance_id in REPORT_INSTANCE_IDS:
-        return [f"{where} {instance_id} is a Report instance (public_test 0-9); it never enters training data or memory"]
+        return [f"{where} {instance_id} is a Report instance (public_test 0-9); "
+                "it never enters training data or memory"]
     if instance_id in HIDDEN_INSTANCE_IDS:
         return [f"{where} {instance_id} is a hidden_test instance; it never enters training data or memory"]
     return []
@@ -225,8 +228,12 @@ class SkillSegment:
             out += ref.errors(f"observation_refs[{i}]", OBS_MODALITIES)
         out += self.action_ref.errors("action_ref", (ACTION_MODALITY,))
         out += self.time_sync.errors("time_sync")
+        if self.time_sync.index_unit == "step" and self.source_instance_id is None:
+            out.append("source_instance_id is required for a segment of an agent run (index_unit 'step'): "
+                       "Report / hidden instances are excluded by id")
         if self.completion_label is not None and self.label_source not in LABEL_SOURCES:
-            out.append(f"label_source {self.label_source!r} not in {list(LABEL_SOURCES)} (required with a completion label)")
+            out.append(f"label_source {self.label_source!r} not in {list(LABEL_SOURCES)} "
+                       "(required with a completion label)")
         if self.completion_label is None and self.label_source is not None and self.label_source not in LABEL_SOURCES:
             out.append(f"label_source {self.label_source!r} not in {list(LABEL_SOURCES)}")
         out += self.episode_outcome.errors("episode_outcome")
@@ -271,6 +278,9 @@ class ExperienceProvenance:
             out.append(f"{where}: a demo experience needs dataset and data_version")
         if self.kind == "dev_run" and not self.run_id:
             out.append(f"{where}: a dev_run experience needs run_id")
+        if self.kind == "dev_run" and self.instance_id is None:
+            out.append(f"{where}: a dev_run experience needs instance_id "
+                       "(Report / hidden instances are excluded by id)")
         out += _instance_errors(f"{where}.instance_id", self.instance_id)
         return out
 
@@ -411,6 +421,7 @@ class DistillRecord:
     usage: dict[str, Any] = dataclasses.field(default_factory=dict)
     cost_usd: Optional[float] = None
     round: int = 0
+    instance_id: Optional[int] = None  # resolved task instance of the episode (Report / hidden are rejected)
     truth_label: Optional[str] = None  # TRUTH_LABELS; filled offline by diagnostics/label_distill.py
     truth_source: Optional[str] = None
     correct: Optional[bool] = None
@@ -436,6 +447,7 @@ class DistillRecord:
         "usage": TRAINING_ANNOTATION,
         "cost_usd": TRAINING_ANNOTATION,
         "round": TRAINING_ANNOTATION,
+        "instance_id": TRAINING_ANNOTATION,
         "truth_label": TRAINING_ANNOTATION,  # simulator truth, offline only
         "truth_source": TRAINING_ANNOTATION,
         "correct": TRAINING_ANNOTATION,
@@ -468,6 +480,7 @@ class DistillRecord:
             out.append("correct is set but the truth label is unknown")
         if self.round < 0:
             out.append("round must be >= 0")
+        out += _instance_errors("instance_id", self.instance_id)
         return out
 
 
@@ -619,8 +632,8 @@ def check(obj: Any) -> Any:
     """Raise SchemaError when ``obj.errors()`` is not empty; return ``obj``."""
     problems = obj.errors()
     if problems:
-        raise SchemaError(f"{type(obj).__name__} {getattr(obj, 'record_id', '') or getattr(obj, 'segment_id', '') or getattr(obj, 'exp_id', '')}: "
-                          + "; ".join(problems))
+        ident = next((getattr(obj, k) for k in ("record_id", "segment_id", "exp_id") if getattr(obj, k, "")), "")
+        raise SchemaError(f"{type(obj).__name__} {ident}: " + "; ".join(problems))
     return obj
 
 
@@ -638,13 +651,17 @@ def write_jsonl(path: str, records: Iterable[Any], *, validate: bool = True) -> 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.tmp{os.getpid()}"
     n = 0
-    with open(tmp, "w", encoding="utf-8") as f:
-        for rec in records:
-            if validate:
-                check(rec)
-            f.write(dumps(rec) + "\n")
-            n += 1
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            for rec in records:
+                if validate:
+                    check(rec)
+                f.write(dumps(rec) + "\n")
+                n += 1
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     return n
 
 
@@ -675,9 +692,10 @@ def split_by_source(segments: Sequence[SkillSegment], dev_fraction: float, seed:
     """Assign every segment the split of its source trajectory (``SkillSegment.source_key``).
 
     A trajectory goes to dev when sha256(seed, dataset, trajectory id) mapped to [0, 1) is below
-    ``dev_fraction``. The assignment depends only on (seed, trajectory), so adding trajectories in a
-    later round never moves an earlier one across the split; the realised dev fraction is therefore
-    approximate for small trajectory counts."""
+    ``dev_fraction``. The assignment depends only on (seed, dev_fraction, trajectory), so adding
+    trajectories in a later round never moves an earlier one across the split as long as seed and
+    dev_fraction stay the same (changing either reassigns trajectories: keep them fixed across rounds);
+    the realised dev fraction is approximate for small trajectory counts."""
     if not 0.0 <= dev_fraction <= 1.0:
         raise ValueError(f"dev_fraction must be in [0, 1], got {dev_fraction}")
     return [dataclasses.replace(s, split="dev" if _unit_interval(seed, s.source_key) < dev_fraction else "train")
@@ -690,8 +708,10 @@ def split_violations(segments: Sequence[SkillSegment]) -> list[str]:
     for s in segments:
         by_source.setdefault(s.source_key, set()).add(s.split)
         ids[s.segment_id] = ids.get(s.segment_id, 0) + 1
-    out = [f"source trajectory {k[0]}/{k[1]} spans splits {sorted(v)}" for k, v in sorted(by_source.items()) if len(v) > 1]
-    out += [f"split {s.split!r} of segment {s.segment_id} not in {list(SPLITS)}" for s in segments if s.split not in SPLITS]
+    out = [f"source trajectory {k[0]}/{k[1]} spans splits {sorted(v)}"
+           for k, v in sorted(by_source.items()) if len(v) > 1]
+    out += [f"split {s.split!r} of segment {s.segment_id} not in {list(SPLITS)}"
+            for s in segments if s.split not in SPLITS]
     out += [f"segment_id {k} appears {n} times" for k, n in sorted(ids.items()) if n > 1]
     for s in segments:
         out += [f"segment {s.segment_id}: {e}" for e in _instance_errors("source_instance_id", s.source_instance_id)]

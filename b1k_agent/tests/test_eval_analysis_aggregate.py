@@ -370,10 +370,21 @@ def test_resolve_instance_ids_matches_official():
 
 
 def test_declared_full_task_set_label(runs, tmp_path):
+    """full: true is checked against the 100-task catalog: a 2-task list stays a SUBSET mean."""
     declared = tmp_path / "full.yaml"
     declared.write_text("full: true\nmode: public_test\nindices: 0-2\ntasks: [turning_on_radio, picking_up_trash]\n")
-    a = by_config(agg.aggregate(runs, None, declared_path=str(declared), n_boot=0))["L0_exec_only"]
-    assert a["scope"] == "FULL declared task set (2 tasks)"
+    res = agg.aggregate(runs, None, declared_path=str(declared), n_boot=0)
+    assert by_config(res)["L0_exec_only"]["scope"].startswith("SUBSET mean over 2 task(s)")
+    assert any("full: true but 98 challenge task(s) missing" in w for w in res["warnings"])
+    every = sorted(agg.challenge_tasks(agg.InputLog()))
+    assert len(every) == 100
+    declared.write_text(json.dumps({"full": True, "mode": "public_test", "indices": "0-2", "tasks": every}))
+    res = agg.aggregate(runs, None, declared_path=str(declared), n_boot=0)
+    a = by_config(res)["L0_exec_only"]
+    assert a["scope"] == "FULL declared task set (100 tasks)" and a["n_missing"] == 98 * 3
+    assert a["mean_q"] == pytest.approx((0.5 + 0.4) / 100)  # tasks never run count 0
+    # a task left out of the mean (only infra errors) makes it a subset mean again
+    assert agg.scope_label(every[:99], {"full": True}, [every[99]]).startswith("SUBSET")
 
 
 EVAL_GIT = {"commit": "a8247a8c" + "0" * 32}
@@ -471,3 +482,76 @@ def test_attempt_order_follows_started_at(tmp_path):
     assert res["configs"][0]["mean_q"] == pytest.approx(0.3)
     later = next(r for r in res["rows"] if r["superseded"])
     assert later["run_id"].endswith("-late") and later["superseded_reason"] == "later attempt after a counted result"
+
+
+def test_run_given_twice_is_read_once(tmp_path):
+    """A batch dir plus one of its attempt dirs (or a repeated argument) must not double rows or costs."""
+    root = str(tmp_path / "runs")
+    run = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.5, 302: 0.0})
+    batch = tmp_path / "batch"
+    batch.mkdir()
+    (batch / "jobs.jsonl").write_text(json.dumps({"event": "attempt_start", "attempt": 1, "run_dir": run}) + "\n")
+    once = agg.aggregate([run], None, n_boot=0)["configs"][0]
+    res = agg.aggregate([str(batch), run, run], None, n_boot=0)
+    c = res["configs"][0]
+    assert len(res["rows"]) == 2 and c["n_superseded"] == 0 and len(c["runs"]) == 1
+    assert c["total_cost_usd"] == pytest.approx(once["total_cost_usd"])
+    assert not any("must not be re-run" in w for w in res["warnings"])
+    assert any("given more than once" in w for w in res["warnings"])
+
+
+def test_server_death_taints_the_run_and_the_rerun_counts(tmp_path):
+    """eval/launch.py infra kind server_died with every JSON written (executor died -> agent hold fallback):
+    eval/batch.py re-runs the attempt, so its results are infra errors and the re-run is the counted one."""
+    root = str(tmp_path / "runs")
+    died = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.0}, run_suffix="-a1",
+                    status_extra={"state": "infra_error", "infra_kinds": ["server_died"], "results_complete": True,
+                                  "reason": ["server died before the evaluator finished: executor"],
+                                  "infra_error": "server died before the evaluator finished: executor",
+                                  "evaluator_exit_code": 0, "started_at": "2026-10-23T09:00:00Z"})
+    rerun = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.7}, run_suffix="-a2",
+                     status_extra={"state": "done", "started_at": "2026-10-23T10:00:00Z"})
+    res = agg.aggregate([died, rerun], None, n_boot=0)
+    rows = {r["run_id"]: r for r in res["rows"]}
+    first = rows["L0_exec_only-turning_on_radio-s0-a1"]
+    assert first["infra_error"] and first["superseded"] and "server_died" in first["infra_reason"]
+    assert res["configs"][0]["mean_q"] == pytest.approx(0.7)
+    assert not any("must not be re-run" in w for w in res["warnings"])
+    # an untainted cause (non-zero exit after every result was written) leaves the written results valid
+    exit_only = make_run(root, "L0_exec_only", "turning_on_radio", {301: 0.2}, run_suffix="-exit",
+                         status_extra={"state": "infra_error", "infra_kinds": ["exit_code"], "results_complete": True,
+                                       "infra_error": "evaluator exit code 1", "evaluator_exit_code": 1})
+    assert not agg.aggregate([exit_only], None, n_boot=0)["rows"][0]["infra_error"]
+
+
+def test_tables_never_written_where_the_aggregator_reads(runs, tmp_path):
+    for sub in (("episodes", "tables"), ("eval_output", "tables")):
+        with pytest.raises(SystemExit):
+            agg.aggregate(runs, os.path.join(runs[0], *sub), n_boot=0)
+    agg.aggregate(runs, os.path.join(runs[0], "tables"), n_boot=0)  # a separate subdirectory is fine
+    assert agg.aggregate(runs, None, n_boot=0)["configs"][0]["n_included"] == 6
+
+
+def test_budget_unknown_when_agent_episode_outlives_rollout(tmp_path):
+    """num_envs = 2: instance 301 finished at step 40 but the evaluator kept querying its frozen env until the
+    batch ended, so its agent clock (130 s) is not its rollout's time: unknown, never zeroed. 302 ran to the end."""
+    run = make_run(str(tmp_path / "runs"), "L1_plan", "turning_on_radio", {301: 1.0, 302: 0.0},
+                   official_extra={301: {"steps": 40}, 302: {"steps": 100}},
+                   summary_extra={301: {"steps": 101, "elapsed_s": 130.0}, 302: {"steps": 101, "elapsed_s": 130.0}})
+    rows = {r["instance_id"]: r for r in agg.aggregate([run], None, n_boot=0)["rows"]}
+    assert rows[301]["budget_ok"] is None and rows[301]["q_budget2026"] == 1.0
+    assert rows[301]["budget_source"].startswith("unknown: the agent episode ran 101 steps, the rollout 40")
+    assert rows[302]["budget_ok"] is False and rows[302]["budget_source"] == "agent_elapsed"
+
+
+def test_declared_per_task_indices_follow_the_top_level_mode(tmp_path):
+    """mode: public_test with per-task "0-9" means Report ids 301-310, not raw ids 0-9 (every result would be 0)."""
+    p = tmp_path / "report.yaml"
+    p.write_text("mode: public_test\ntasks:\n  turning_on_radio: 0-9\n  picking_up_trash: [10, 11]\n")
+    d = agg.load_declared(str(p), agg.InputLog())
+    assert d["tasks"] == {"turning_on_radio": list(range(301, 311)), "picking_up_trash": [311, 312]}
+    p.write_text("mode: public_test\ntasks: {turning_on_radio: [301]}\n")  # ids under a mode: refused, not zeroed
+    with pytest.raises(ValueError):
+        agg.load_declared(str(p), agg.InputLog())
+    p.write_text("tasks: {turning_on_radio: [301, 302]}\n")  # no mode: instance ids
+    assert agg.load_declared(str(p), agg.InputLog())["tasks"] == {"turning_on_radio": [301, 302]}

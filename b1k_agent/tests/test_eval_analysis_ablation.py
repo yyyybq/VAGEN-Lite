@@ -121,3 +121,19 @@ def test_ladder_input_errors(tmp_path):
     with pytest.raises(SystemExit):
         ablation.ladder(L0, L4, ["plan", "nonsense"], str(tmp_path))
     assert not os.listdir(tmp_path)
+
+
+def test_failed_self_check_restores_overwritten_files(tmp_path):
+    """A generation that fails its self-check must not delete or alter configs it had overwritten."""
+    base = tmp_path / "base_extra.yaml"  # check block with a param L4 lacks -> merged block != L4's block
+    base.write_text(f"base: {L0}\nrun: {{name: base_extra}}\n"
+                    "modules:\n  check: {enabled: false, params: {extra: 1}}\n")
+    out = tmp_path / "ladder"
+    out.mkdir()
+    (out / "ladder1_plan.yaml").write_text("# committed step 1\n")
+    (out / "ladder2_check.yaml").write_text("# committed step 2\n")
+    with pytest.raises(SystemExit):
+        ablation.ladder(str(base), L4, ["plan", "check", "goal"], str(out))
+    assert (out / "ladder1_plan.yaml").read_text() == "# committed step 1\n"
+    assert (out / "ladder2_check.yaml").read_text() == "# committed step 2\n"
+    assert sorted(os.listdir(out)) == ["ladder1_plan.yaml", "ladder2_check.yaml"]

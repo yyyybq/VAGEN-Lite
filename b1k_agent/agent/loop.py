@@ -16,6 +16,12 @@ Control flow (all branches look only at interface return values, config, and the
 
 With every slot disabled the planner is the null planner (the full task prompt), so the loop is a
 pure passthrough to the executor: that is configuration L0.
+
+Not yet wired: the ``score`` slot (M-score) needs several executor candidates per decision, which no
+executor provides yet, so the loop never calls it; enabling it changes nothing until then.
+Batched runs (one evaluator port, num_envs > 1): the evaluator keeps sending a finished env's frozen
+observation and the loop keeps running for it (its actions are ignored, but its strong-model calls
+cost time and money). Agent runs therefore use --num-envs 1, one rollout per evaluator process.
 """
 
 from __future__ import annotations
