@@ -462,12 +462,49 @@ def rule_gates(item: Dict[str, Any], c2w: Any, occ: OccluderSet) -> Dict[str, An
     return {"ok": bool(vis["visible"] and lat["ok"]), "visibility": vis, "lateral": lat}
 
 
+# Round 12 freeze (the user's decision of 2026-10-22, docs/dense_reward_dcond.md): which progress the shaping score
+# carries.  "product" (default, unchanged): the product of every condition score (the canonical components, the
+# clearly-visible rule's progress, the left/right 45-degree rule's), near zero while any one condition is far off.
+# "grouped_gated" (D-cond): 0.25 x frame + 0.25 x face + 0.5 x relation, each group the product of its condition
+# scores, the relation group counting only when every frame condition is met (the hard gate); frame conditions keep
+# their scores (0/1 or continuous, as the canonical metric gives them).  Capped below 1 while the task is not met, so
+# the shaping score keeps its meaning (>= 0.5 exactly on success).  Success does not depend on the version.
+PROGRESS_VERSIONS = ("product", "grouped_gated")
+DCOND_WEIGHTS = {"frame": 0.25, "face": 0.25, "relation": 0.5}
+# the frame group: the objects (and, for occlusion alignment, the occluder) in front of the camera, visible, large
+# enough and inside the frame; the face group is the clearly-visible rule's progress; every other canonical
+# condition (and the left/right 45-degree rule) is the relation group
+FRAME_CONDITIONS = frozenset({"objects_present", "two_objects", "in_front", "visible", "min_area", "inside_frame",
+                              "occluder_in_front", "occluder_visible", "occluder_min_area", "occluder_inside_frame",
+                              "target_in_front", "target_in_view_direction"})
+
+
+def progress_groups(metric: Dict[str, Any], vis: Dict[str, Any],
+                    lateral: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """{frame, face, relation: group scores in [0, 1], frame_met: every frame condition of the canonical metric met}."""
+    comps = metric.get("shaping_components") or {}
+    frame, relation = 1.0, 1.0
+    for key, value in comps.items():
+        v = min(1.0, max(0.0, float(value)))
+        if key in FRAME_CONDITIONS:
+            frame *= v
+        else:
+            relation *= v
+    if lateral is not None and lateral.get("applies"):
+        relation *= float(lateral["progress"])
+    frame_met = all(bool(ok) for g, ok in (metric.get("gates") or {}).items() if g in FRAME_CONDITIONS)
+    return {"frame": frame, "face": float(vis["progress"]), "relation": relation, "frame_met": frame_met}
+
+
 def apply_visibility(metric: Dict[str, Any], vis: Dict[str, Any],
-                     lateral: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                     lateral: Optional[Dict[str, Any]] = None, progress_version: str = "product") -> Dict[str, Any]:
     """The canonical metric with this module's gates added: success needs every required target (and its
     reference object) clearly visible and, for left/right, the 45-degree rule; the shaping score keeps its
-    meaning (>= 0.5 exactly on success)."""
+    meaning (>= 0.5 exactly on success).  ``progress_version`` (PROGRESS_VERSIONS): which progress it carries."""
     from .canonical_task_metrics_v2 import FAILING_PROGRESS_CAP
+
+    if progress_version not in PROGRESS_VERSIONS:
+        raise ValueError(f"progress version must be one of {PROGRESS_VERSIONS}, not {progress_version!r}")
 
     out = dict(metric)
     gates = dict(out.get("gates") or {})
@@ -485,20 +522,31 @@ def apply_visibility(metric: Dict[str, Any], vis: Dict[str, Any],
     if base is None:  # metrics without a gate-aligned progress (v1 FOV): use the shaping score
         base = float(metric.get("shaping_score", 0.0) or 0.0)
     progress = float(min(1.0, max(0.0, float(base)))) * float(vis["progress"]) * lat_progress
+    groups = None
+    if progress_version == "grouped_gated" and metric.get("shaping_components") is not None:
+        groups = progress_groups(metric, vis, lateral)
+        progress = (DCOND_WEIGHTS["frame"] * groups["frame"] + DCOND_WEIGHTS["face"] * groups["face"]
+                    + DCOND_WEIGHTS["relation"] * groups["relation"] * (1.0 if groups["frame_met"] else 0.0))
+        progress = float(min(1.0, max(0.0, progress)))
     if not success:
         progress = min(progress, FAILING_PROGRESS_CAP)
     out.update(success=success, gates=gates, continuous_gate_progress=progress,
                shaping_score=0.5 * progress + 0.5 * float(success), visibility=vis)
     if lateral is not None and lateral.get("applies"):
         out["lateral"] = lateral
+    if groups is not None:  # round 12 freeze: only the new version adds keys
+        out.update(progress_version=progress_version, progress_groups=groups)
     return out
 
 
-def score_with_visibility(item: Dict[str, Any], c2w: Any, occ: Optional[OccluderSet]) -> Dict[str, Any]:
-    """The env's success metric: the canonical metric plus, when ``occ`` is given, this module's rules."""
+def score_with_visibility(item: Dict[str, Any], c2w: Any, occ: Optional[OccluderSet],
+                          progress_version: str = "product") -> Dict[str, Any]:
+    """The env's success metric: the canonical metric plus, when ``occ`` is given, this module's rules
+    (``progress_version``: which progress the shaping score carries, PROGRESS_VERSIONS)."""
     from .canonical_task_metrics import score_canonical_task
 
     metric = score_canonical_task(item, np.asarray(c2w, float))
     if occ is None:
         return metric
-    return apply_visibility(metric, visibility_gates(item, c2w, occ), lateral_gate(item, c2w))
+    return apply_visibility(metric, visibility_gates(item, c2w, occ), lateral_gate(item, c2w),
+                            progress_version=progress_version)

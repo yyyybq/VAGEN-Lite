@@ -852,6 +852,18 @@ class ChainTest(unittest.TestCase):
             chain.rl_config()
             ps0 = calls[str(root / "rl_ps0")]
             self.assertEqual(ps0[ps0.index("--entropy-coeff") + 1], "0")
+            # round 12 freeze: the format example, the lenient reading, the unreadable answer's penalty and the group
+            # filter (D-cond + keep: its threshold in the plan) reach rl-config
+            for flag in ("--format-example", "--lenient-parse", "--invalid-penalty", "--group-filter"):
+                self.assertNotIn(flag, ps0)
+            chain.plan["rl"].update(format_example="placeholder", lenient_parse=True, invalid_penalty=-0.5,
+                                    group_filter="keep_by_return_std", keep_std_threshold=0.4, keep_std_floor=1.0)
+            chain.rl_config()
+            ps0 = calls[str(root / "rl_ps0")]
+            self.assertIn("--lenient-parse", ps0)
+            self.assertEqual([ps0[ps0.index(f) + 1] for f in ("--format-example", "--invalid-penalty", "--group-filter",
+                                                              "--keep-std-threshold", "--keep-std-floor")],
+                             ["placeholder", "-0.5", "keep_by_return_std", "0.4", "1.0"])
 
     def test_eval_only_plan(self):
         """Round 12: an eval_only plan runs check_code and evaluate only, on the listed models and variants."""

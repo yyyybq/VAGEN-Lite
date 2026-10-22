@@ -26,5 +26,9 @@
  "v10_p1_S0_keep": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
                     "opt_package": "p1", "reward_preset": "S0", "group_filter": "keep_by_return_std",
                     "keep_std_threshold": 0.134, "keep_std_floor": 1.77,
-                    "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
+                    "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "_dcond": "D-cond (the user's decision of 2026-10-22, docs/dense_reward_dcond.md): the dense reward with the grouped, gated progress (0.25 frame + 0.25 face + 0.5 relation, the relation group only once the target is in frame; reward preset D_cond). v10_p1_Dcond keeps the package's mixed-outcome filter; D-cond + keep (keep_by_return_std, floor 1.0) takes its threshold from the D_cond returns of all-fail tasks (the top 20% of their spreads), given as plan rl keep_std_threshold until it is fixed here.",
+ "v10_p1_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                  "opt_package": "p1", "reward_preset": "D_cond",
+                  "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
 }

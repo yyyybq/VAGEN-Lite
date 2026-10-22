@@ -291,13 +291,13 @@ class TrainingPrepTest(unittest.TestCase):
         import yaml
 
         standards = TP.load_standards()
-        self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_S0",
-                                             "v10_p1_S0_keep", "v10_p2_D", "v10_p2_S0"])
+        self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_Dcond",
+                                             "v10_p1_S0", "v10_p1_S0_keep", "v10_p2_D", "v10_p2_S0"])
         for name, std in standards.items():
             self.assertLessEqual(set(std), set(TP.STANDARD_KEYS), name)
             for key in ("ppo_template", "env_template"):
                 self.assertTrue((Path(TP.__file__).parent / std[key]).is_file(), (name, key))
-            self.assertEqual(std["reward_preset"], "dense" if "_D" in name else "S0")
+            self.assertEqual(std["reward_preset"], "D_cond" if "_Dcond" in name else "dense" if "_D" in name else "S0")
         # the dense reward's first batch: the filter, thresholds and floors of the three runs
         self.assertEqual({n: (standards[n]["group_filter"], standards[n]["keep_std_threshold"], standards[n]["keep_std_floor"])
                           for n in ("v10_p1_D_keep_177", "v10_p1_D_keep_100", "v10_p1_S0_keep")},

@@ -372,7 +372,7 @@ CONCAT_RESPONSE_LENGTH = 4096  # 12 turns x (81 image tokens + ~150 text + the a
 #   enable_visibility_shaping_reward off  inactive for v10 tasks (it needs a single target centre): off says so.
 # The system prompt stays the SFT one for both (its reward lines describe the sparse terms), so the two runs
 # differ only in the reward.
-REWARD_PRESETS = ("S0", "dense")
+REWARD_PRESETS = ("S0", "dense", "D_cond")
 TASK_POOLS = ("formal", "reserve")  # which train tasks RL takes (round 11: reserve, the tasks SFT never saw)
 
 # Round 11, the optimisation package (the user's decision after R-S0 / R-D left the model where it started: KL to
@@ -463,11 +463,18 @@ DENSE_ADJUST: Dict[str, Any] = {"potential_field_reward_scale": 10.0, "enable_ne
                                 "enable_visibility_shaping_reward": False}
 
 
+# Round 12 freeze (the user's decision of 2026-10-22): D_cond is the dense reward with the grouped, gated progress
+# (target_visibility.PROGRESS_VERSIONS, docs/dense_reward_dcond.md): same potential, same scale and discount.
+DENSE_COND: Dict[str, Any] = {"progress_version": "grouped_gated"}
+
+
 def reward_overrides(preset: str) -> Dict[str, Any]:
     """Env-config overrides of a reward preset."""
     if preset not in REWARD_PRESETS:
         raise ValueError(f"reward preset must be one of {REWARD_PRESETS}, not {preset!r}")
-    return {} if preset == "S0" else {**DENSE_S5, **DENSE_ADJUST}
+    if preset == "S0":
+        return {}
+    return {**DENSE_S5, **DENSE_ADJUST, **(DENSE_COND if preset == "D_cond" else {})}
 
 
 def history_overrides(mode: str, max_turns: int) -> Dict[str, Dict[str, Any]]:

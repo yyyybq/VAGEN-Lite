@@ -1466,7 +1466,8 @@ class ActiveSpatialEnv(BaseEnv):
         pose = self.view_engine.get_pose()
         if self.config.get("r1_legacy_success", False):
             return score_canonical_task(self.current_item, pose)
-        return score_with_visibility(self.current_item, pose, self._visibility_occluders())
+        return score_with_visibility(self.current_item, pose, self._visibility_occluders(),
+                                     progress_version=self.config.get("progress_version", "product"))
 
     def _visibility_occluders(self) -> OccluderSet:
         """Occluders of the current scene (labels.json boxes + structure walls), cached per scene."""

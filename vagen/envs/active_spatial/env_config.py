@@ -88,6 +88,10 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # "potential" : r_t = scale·(γ·Φ_t − Φ_{t-1})        ★ v18_potential: true Ng1999 potential-based
     # "dual"      : r_t = α_p·(pos_t − pos_{t-1}) + α_o·(ori_t − ori_{t-1})  ★ v18_dual: decoupled channels
     potential_field_progress_mode: str = "delta"
+    # Round 12 freeze (the user's decision of 2026-10-22, D-cond): the progress the canonical shaping score carries
+    # (target_visibility.PROGRESS_VERSIONS): "product" (default, every condition score multiplied, unchanged) or
+    # "grouped_gated" (0.25 frame + 0.25 face + 0.5 relation, the relation group only once the target is in frame).
+    progress_version: str = "product"
     potential_field_gamma: float = 1.0   # ★ Ng1999 γ for "potential" mode. 1.0 ⇒ equivalent to "delta".
     # Reward-only ablation switches.  These do not disable the potential-field
     # scorer, canonical gate, success decision, or termination.  Defaults keep

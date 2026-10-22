@@ -974,6 +974,8 @@ class Chain:
                 args += ["--ppo-template", str(self.plan["ppo_template"])]
             for key, flag in (("standard", "--standard"), ("seed", "--seed"), ("history_mode", "--history-mode"),
                               ("format_example", "--format-example"), ("invalid_penalty", "--invalid-penalty"),
+                              ("group_filter", "--group-filter"), ("keep_std_threshold", "--keep-std-threshold"),
+                              ("keep_std_floor", "--keep-std-floor"),
                               ("critic_warmup", "--critic-warmup"),
                               ("test_freq", "--test-freq"), ("val_tasks", "--val-tasks"),
                               ("train_batch_size", "--train-batch-size"),
