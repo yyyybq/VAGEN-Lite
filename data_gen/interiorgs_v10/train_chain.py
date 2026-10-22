@@ -973,7 +973,8 @@ class Chain:
             if self.plan.get("ppo_template"):  # round 12: optional with a standard configuration
                 args += ["--ppo-template", str(self.plan["ppo_template"])]
             for key, flag in (("standard", "--standard"), ("seed", "--seed"), ("history_mode", "--history-mode"),
-                              ("format_example", "--format-example"), ("critic_warmup", "--critic-warmup"),
+                              ("format_example", "--format-example"), ("invalid_penalty", "--invalid-penalty"),
+                              ("critic_warmup", "--critic-warmup"),
                               ("test_freq", "--test-freq"), ("val_tasks", "--val-tasks"),
                               ("train_batch_size", "--train-batch-size"),
                               ("ppo_mini_batch_size", "--ppo-mini-batch-size"), ("save_freq", "--save-freq")):

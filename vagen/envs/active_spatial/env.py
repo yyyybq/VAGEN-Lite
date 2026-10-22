@@ -388,6 +388,12 @@ class ActiveSpatialEnv(BaseEnv):
                     missing_action_tag=False, empty_action_body=False, unknown_action_name=False,
                     lenient_read=rule)
 
+    def _invalid_penalty(self) -> float:
+        """The penalty of an unreadable answer: the config's invalid_penalty_override when set (round 12 freeze, the
+        user's 3.1.3), else invalid_format_penalty (the value the system prompt shows)."""
+        override = self.config.get("invalid_penalty_override", None)
+        return float(self.config.invalid_format_penalty if override is None else override)
+
     def _strict_parse_func(self, response: str, **kwargs) -> Dict[str, Any]:
         """The strict reading (every answer before round 12's lenient switch)."""
         response_text = response or ""
@@ -1149,8 +1155,8 @@ class ActiveSpatialEnv(BaseEnv):
                 info["is_format_rewarded"] = True
                 info["is_format_penalized"] = False
             else:
-                self.reward += self.config.invalid_format_penalty
-                self._reward_trace.record("invalid", raw=1.0, scale=self.config.invalid_format_penalty)
+                self.reward += self._invalid_penalty()
+                self._reward_trace.record("invalid", raw=1.0, scale=self._invalid_penalty())
                 info["is_format_rewarded"] = False
                 info["is_format_penalized"] = True
                 info["format_penalty_reason"] = rst.get("parse_error") or "non_strict_protocol"
@@ -1159,10 +1165,10 @@ class ActiveSpatialEnv(BaseEnv):
             self._reward_trace.add_override(
                 "hard_invalid_reward_assignment",
                 previous_reward=float(self.reward),
-                assigned_reward=float(self.config.invalid_format_penalty),
+                assigned_reward=float(self._invalid_penalty()),
             )
-            self.reward = self.config.invalid_format_penalty
-            self._reward_trace.record("invalid", raw=1.0, scale=self.config.invalid_format_penalty)
+            self.reward = self._invalid_penalty()
+            self._reward_trace.record("invalid", raw=1.0, scale=self._invalid_penalty())
             self.consecutive_invalid_count += 1
             self.invalid_action_count += 1
             info["is_format_rewarded"] = False

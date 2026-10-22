@@ -625,6 +625,12 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual({k: v for k, v in env.items() if k not in ("lenient_parse", "jsonl_path")},
                          {k: v for k, v in env0.items() if k != "jsonl_path"})
         self.assertIn("lenient_parse", TP.STANDARD_KEYS)
+        # 3.1.3: --invalid-penalty sets the penalty the env applies; the prompt (checked against the SFT one) keeps -0.1
+        env5, report5 = config("rl_invalid", sft_trajectories=[str(convs["placeholder"])], invalid_penalty=-0.5)
+        self.assertEqual((env5["invalid_penalty_override"], env5["invalid_format_penalty"]), (-0.5, -0.1))
+        self.assertEqual((report5["invalid_penalty"], report0["invalid_penalty"]), (-0.5, -0.1))
+        self.assertNotIn("invalid_penalty_override", env0)
+        self.assertEqual(TP.env_system_prompt(env5, "fov_inclusion"), TP.env_system_prompt(env0, "fov_inclusion"))
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

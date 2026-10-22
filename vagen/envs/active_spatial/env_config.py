@@ -186,6 +186,10 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # (utils.lenient_actions: spaces instead of underscores, the first complete action block, a missing opening
     # tag).  Default off: every answer is read as before.
     lenient_parse: bool = False
+    # Round 12 freeze (the user's 3.1.3): the penalty the env applies to an answer it reads no action in, when set
+    # (e.g. -0.5); None (default): invalid_format_penalty.  The system prompt keeps showing invalid_format_penalty,
+    # the SFT conversations' text, as it does not show the dense reward's progress term either.
+    invalid_penalty_override: Optional[float] = None
     max_consecutive_invalid_actions: int = 3  # Terminate episode after this many consecutive invalid actions
     premature_done_penalty: float = -0.3  # Penalty when 'done' is called without reaching the target
     
