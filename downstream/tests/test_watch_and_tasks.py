@@ -222,8 +222,9 @@ def test_stage0_goes_100k_then_50k_then_25k_and_75k_start_by_start(tmp_path):
     w = watcher(tmp_path, "--stage0", "--max-live-shards", "40", jobs=jobs, shards=8)
     rows, *_ = w.tick()
     order = [p[3][3].split("experiments/")[1].replace("/evals_run_stopped_20261022", "").replace("/out", "")
-             for p in jobs.prepared]
+             for p in jobs.prepared if p[1] == 1]  # one-card shards (B 100k's second, 8-card evaluation aside)
     assert len(order) == 40  # 6 busy machines x 7 free cards = 42, capped at 40
+    assert [p[2] for p in jobs.prepared if p[1] == 8] == ["ev8-ds-b-100-s1-stopped-steps100000-rep"]
     assert order[0] == "DS-B-100-s1/steps_100000/shards/s1of8" and order[7] == "DS-B-100-s1/steps_100000/shards/s8of8"
     assert order[8] == "DS-S-100-s1/steps_100000/shards/s1of8"
     assert order[16].startswith("DS-B-100-s1/steps_50000") and order[24].startswith("DS-S-100-s1/steps_50000")
@@ -369,23 +370,24 @@ def test_same_size_yield_is_per_pool_for_eight_card_jobs(tmp_path):
     assert w2.open_pool(8)[0] is None
 
 
-def test_segmented_runs_are_evaluated_in_the_job_and_their_final_twice(tmp_path):
-    exp = fake_exp(tmp_path, steps=(50000,), settled=(50000,))
-    (exp / "experiment.json").write_text(json.dumps({"steps": 200000, "segmented": True,
-                                                     "eval_points": [50000, 200000]}))
-    os.utime(exp / "run/final_model/pytorch_model.pt", (OLD, OLD))
+def test_segmented_runs_evaluate_the_final_in_the_job_and_only_b_twice(tmp_path):
+    b = fake_exp(tmp_path, steps=(), settled=())
+    (b / "experiment.json").write_text(json.dumps({"steps": 200000, "segmented": True, "eval_points": [200000],
+                                                   "repeat_final": True}))
+    os.utime(b / "run/final_model/pytorch_model.pt", (OLD, OLD))
+    s = fake_exp(tmp_path, name="DS-S-100-s1", steps=(), settled=())
+    (s / "experiment.json").write_text(json.dumps({"steps": 200000, "segmented": True, "eval_points": [200000]}))
+    os.utime(s / "run/final_model/pytorch_model.pt", (OLD, OLD))
     jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("other", 1)]))})
     w = watcher(tmp_path, "--repeat", jobs=jobs, shards=8)
     assert w.repeat_targets() == ["DS-B-100-s1:steps_200000"]
     rows, *_ = w.tick()
-    states = {e["tag"]: e["state"] for e in rows[0]["evals"]}
-    assert states["steps_50000"].startswith("由训练任务自己评") and states["steps_200000"].startswith("由训练任务自己评")
-    assert "1 个 1 卡分片" not in states["steps_200000_repeat"] and "待提交 8" in states["steps_200000_repeat"]
-    assert all("steps_200000_repeat" in p[3][3] for p in jobs.prepared)  # only the final's second evaluation
-    (exp / "injob_eval.json").write_text(json.dumps({"mode": "final_only", "ratio": 1.7, "wall_mean_seconds": 300}))
-    rows, *_ = watcher(tmp_path, "--repeat", jobs=FakeJobs(), shards=8).tick()
-    states = {e["tag"]: e["state"] for e in rows[0]["evals"]}
-    assert states["steps_50000"].startswith("8 个 1 卡分片") and "超过 1.5 倍" in states["任务内评测速度"]
+    b_states = {e["tag"]: e["state"] for e in rows[0]["evals"]}
+    s_states = {e["tag"]: e["state"] for e in rows[1]["evals"]}
+    assert b_states["steps_200000"].startswith("由训练任务自己评")
+    assert b_states["steps_200000_repeat"].startswith("待提交（8 卡") and set(s_states) == {"steps_200000"}
+    assert [(p[1], p[3][-2:]) for p in jobs.prepared] == [(8, ["8", "96"])]  # B's second evaluation, whole machine
+    assert jobs.prepared[0][3][3].endswith("DS-B-100-s1/evals/steps_200000_repeat/out")
 
 
 def test_report_is_rebuilt_once_per_new_set_of_finished_evaluations(tmp_path):
@@ -588,7 +590,8 @@ def test_matrix_lists_the_starts_and_the_pending_rows(tmp_path):
     (s1 / "run/metrics.jsonl").write_text(json.dumps({"step": 4200, "action_dit_loss": 0.1}) + "\n")
     w = watcher(tmp_path, "--stage0", jobs=FakeJobs(), shards=8)
     text = watch.matrix(w)
-    assert text.count("\n| ") == 4 + len(watch.MATRIX_PENDING)  # four starts + the rows to be added
+    # header, rule line, the four starts and the rows to be added
+    assert sum(line.startswith("| ") for line in text.splitlines()) == 2 + 4 + len(watch.MATRIX_PENDING)
     row_b = next(line for line in text.splitlines() if line.startswith("| B 原始 7B"))
     assert "**1/4 个检查点评完**" in row_b and "`pt-e0`" in row_b and "100k：总体 21.4%（15/70），空间组 20.0%（10/50）" in row_b
     row_s = next(line for line in text.splitlines() if line.startswith("| S 动作 SFT"))
