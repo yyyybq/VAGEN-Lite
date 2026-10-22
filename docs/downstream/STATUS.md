@@ -28,16 +28,16 @@
   - 10-22 09:25 时两个池里有任务的机器都是 8 张卡占满，所以现在不会有分片被提交。
   - P = 48 / 96 的并行度测试不再适用（1 卡分片每片只有 14 个 vCPU）。DS-B 第一个检查点评两遍的噪声测量保留，第二遍也是一套 8 个分片。
 - **起点校验已加强**（10-21 11:13）：锁定文件加了每个分片的修改时间和首尾各 4 MiB 的 sha256，RS 和 RD 现在能分开。
-- **RLinf 两次更新的试跑还没通过**：
+- **RLinf 两次更新的试跑：通过**（第四次，`pt-wytuck3x`，10-22 10:03–10:19 UTC，报告 [reports/STEP2_RLINF_SMOKE_20261022.md](reports/STEP2_RLINF_SMOKE_20261022.md)）：每次更新 178.1 秒和 165.6 秒，8 个环境合计每秒 24–28 步，8 卡显存峰值 52.7–53.3 GiB。之前三次：
   - 第三次（`pt-00o9ha1p`，10-21 19:00–19:10）：价值头的问题已解决，到第一次训练更新的反向传播时显存不够。8 张卡显存峰值 75.1–75.8 GiB（每卡容量 79.18 GiB）；反向还要再申请 15.69 GiB，正好是整个 7B 模型 bf16 的大小。原因判断：StarVLA 的包装没被 RLinf 自动按层切分，整个模型是一个 FSDP 单元。
   - 第四次：加了按层切分（Qwen2_5_VLDecoderLayer、Qwen2_5_VLVisionBlock）和梯度检查点，只用命令行覆盖。10-21 19:19 提交到 zoetrope（`pt-jnetqxe5`）；10-22 09:15 为了不排在密集奖励 D-keep 两个训练任务前面，改提交到 h800（`pt-wytuck3x`，排队中）。
-  - 通过后单独报告，并开始写第四步方案。
+  - 第四步方案开始写。
 
 ## 2. 谁在跑
 
 | sco 任务 | 内容 | 状态 | 目录 |
 | --- | --- | --- | --- |
-| `pt-wytuck3x` | RLinf 2 次更新试跑，第四次（8 卡，h800；use_orig_params、按层切分、梯度检查点） | 排队中（10-22 09:15 提交） | `downstream_runs/experiments/RLINF-SMOKE-1/retry3/` |
+| `pt-wytuck3x` | RLinf 2 次更新试跑，第四次（8 卡，h800；use_orig_params、按层切分、梯度检查点） | **通过**，退出码 0（10-22 10:03–10:19） | `downstream_runs/experiments/RLINF-SMOKE-1/retry3/` |
 | 29 个（见上） | 第三步训练和 D5 评测 | 10-22 09:08 按你的要求撤下 | `downstream_runs/experiments/DS-*/` |
 | `pt-00o9ha1p`、`pt-a7r4q7s5` | RLinf 试跑第三、二次 | 退出码 255（显存不够；价值头取不到参数）；记录已删 | `downstream_runs/experiments/RLINF-SMOKE-1/` |
 | `pt-cb0kvvf0` | 34 个评测任务的重置扫描（1 卡） | 已完成：原版 89 / 102 对可复现，固定顺序后 102 / 102；记录已删 | `downstream_runs/checks/reset_sweep_20261021/` |
@@ -132,7 +132,7 @@ bash downstream/eval/watch.sh status
 | --- | --- | --- | --- | --- | --- | --- |
 | STEP1-LOAD | 1 | B / S / RS / RD | 1 | 实测约 5 分钟 | 已完成，四个起点都通过 | `downstream_runs/step1_load_test_20261020/out/` |
 | STEP2-RS-s1 | 2 | RS | 8 | 训练实测 434 秒（200 步） | **通过**（10-21 确认） | `downstream_runs/experiments/STEP2-RS-s1/` |
-| RLINF-SMOKE-1 | 2（D7） | STEP2-RS-s1 的检查点 | 8 | 第二次 692 秒、第三次 646 秒后失败（环境交互 41 秒跑通，第一次训练更新没完成） | 第四次排队中（`pt-wytuck3x`，h800） | `downstream_runs/experiments/RLINF-SMOKE-1/` |
+| RLINF-SMOKE-1 | 2（D7） | STEP2-RS-s1 的检查点 | 8 | 第二次 692 秒、第三次 646 秒后失败（环境交互 41 秒跑通，第一次训练更新没完成） | **第四次通过**（`pt-wytuck3x`，2 次更新、974 秒） | `downstream_runs/experiments/RLINF-SMOKE-1/` |
 | DS-{B,S,RS,RD}-100-s1 | 3（D5） | 四个起点 | 各 8 | 训练约 42.0 小时；评测改为 8 个 1 卡分片 | 10-22 09:08 撤下（到第 113,700–118,800 步，有第 2.5 万–10 万步检查点）；等密集奖励第一批上机器后重提，怎么接待你决定 | `downstream_runs/experiments/DS-*-100-s1/` |
 | DS-{B,S,RS,RD}-100-s{2,3} | 3 | 四个起点 | 各 8 | 同上，只评最后一个检查点 | 10-22 09:08 撤下（5 个在跑的到第 55,700–72,400 步，没有检查点；3 个没开始）；等密集奖励第一批上机器后从头重提 | `downstream_runs/experiments/DS-*-100-s{2,3}/` |
 | DS-{B,S,RS,RD}-{030,010}-s{1,2,3} | 3 | 四个起点 | 各 8 | 同上 | 实验目录已建好；等门槛（DS-B-100-s1 第 2.5 万步评测成功回合 > 0）且密集奖励第一批上机器后由看板提交 | `downstream_runs/experiments/DS-*-{030,010}-s*/` |
@@ -153,7 +153,7 @@ bash downstream/eval/watch.sh status
 - P = 48、96 的并行度测试：在 DS-B 第一个检查点的第二遍评测里做。
 - 代码同步改用 git。已改。
 - 看板改成断开后仍运行，启动命令见第 2 节。已改。
-- RLinf：第三次已报告（显存不够），第四次排队中，结果出来后单独报告。
+- RLinf：第四次通过，已单独报告（reports/STEP2_RLINF_SMOKE_20261022.md）；第四步方案开始写。
 
 **10-22 你的要求**：
 - 下游任务撤到只剩连通试跑需要的一两个，其余等密集奖励第一批上机器后再提。已执行：只留 RLinf 试跑。
