@@ -86,3 +86,36 @@ def test_hang_limit_and_completed_rows(tmp_path):
     assert [r["task"] for r in closed_loop.completed_rows(p)] == ["A", "C"]
     assert closed_loop.completed_rows(tmp_path / "missing.jsonl") == []
     assert closed_loop.pid_alive(999999999) is False
+
+
+def _episode(e):
+    """A stand-in for run_episode in a real pool: marks itself in flight; the "die" episode kills its own worker the
+    first time (as the memory killer would)."""
+    import os
+    import time
+
+    marker = Path(e["inflight"]) / f"{os.getpid()}.json"
+    marker.write_text(json.dumps({"task": e["task"], "seed": e["seed"], "started": time.time(), "max_steps": 10}))
+    if e["task"] == "die" and not e.get("attempt"):
+        os.kill(os.getpid(), 9)
+    marker.unlink()
+    return dict(e, status="complete")
+
+
+def test_a_real_pool_reruns_the_episode_of_a_killed_worker(tmp_path):
+    import multiprocessing as mp
+    import os
+
+    import pytest
+
+    if not hasattr(os, "fork"):
+        pytest.skip("needs fork")
+    inflight = tmp_path / "inflight"
+    inflight.mkdir()
+    eps = [{"task": "ok", "seed": i, "inflight": str(inflight)} for i in range(3)] + \
+        [{"task": "die", "seed": 9, "inflight": str(inflight)}]
+    rows = []
+    with mp.get_context("fork").Pool(2) as pool:
+        stats = closed_loop.run_all(pool, eps, rows.append, inflight, poll=0.2, run=_episode)
+    assert sorted(r["task"] for r in rows) == ["die", "ok", "ok", "ok"] and all(r["status"] == "complete" for r in rows)
+    assert stats["retried"] == 1 and stats["given_up"] == 0
