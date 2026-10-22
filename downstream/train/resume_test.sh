@@ -8,7 +8,8 @@
 #                     to MAX: the two moves of a segmented stage-1 job;
 #   then resume_check.py compares A and B (ROOT/resume_check.json), and, with EVAL_SHARD set, B's STOP checkpoint is
 #   evaluated on that shard of the plan with 8 policy servers x 96 simulator processes (ROOT/eval_P96/), to check the
-#   in-job evaluation and measure its time per episode.
+#   in-job evaluation and measure its time per episode;
+#   last (EXPORT_TEST=1, default), the step-4 export test downstream/rlinf/export_test.sh into ROOT/export_test/.
 # Every launch logs batch hashes (trainer.log_batch_digest=true).  Writes only under ROOT.
 # Usage: resume_test.sh ROOT        (KILL_AT=150 STOP=200 EVAL_SHARD=1/10 by default)
 set -uo pipefail
@@ -87,5 +88,10 @@ if [[ -n "$EVAL_SHARD" ]]; then
   bash "$WT/downstream/eval/run_eval_ckpt.sh" "$CK" "$ROOT/eval_P96/out" 8 96 "$EVAL_SHARD" >> "$ROOT/resume_test.log" 2>&1
   log "evaluation rc=$? $(( $(date +%s) - t0 ))s"
   python3 "$WT/downstream/train/resume_check.py" "$ROOT" > "$ROOT/resume_check.out" 2>&1
+fi
+if [[ "${EXPORT_TEST:-1}" == 1 && ! -e "$ROOT/export_test/export" ]]; then
+  log "step-4 export test (downstream/rlinf/export_test.sh)"
+  bash "$WT/downstream/rlinf/export_test.sh" "$ROOT/export_test" >> "$ROOT/resume_test.log" 2>&1
+  log "export test rc=$?"
 fi
 log "done"

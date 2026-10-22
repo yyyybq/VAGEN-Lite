@@ -1,0 +1,7 @@
+# Hydra overrides every RLinf run of a 7B StarVLA policy needs (RLinf smoke, 4th attempt, pt-wytuck3x, 2026-10-22):
+# without them FSDP cannot hand out the value head's parameters (use_orig_params), wraps the whole model as one unit
+# and runs out of memory in the first backward pass (per-layer wrap + gradient checkpointing).
+# downstream/rlinf/run_rlinf.sh passes them before any override given on its command line.
+actor.fsdp_config.use_orig_params=true
+++actor.fsdp_config.wrap_policy.transformer_layer_cls_to_wrap=[Qwen2_5_VLDecoderLayer,Qwen2_5_VLVisionBlock]
+actor.fsdp_config.gradient_checkpointing=true
