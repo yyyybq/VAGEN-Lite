@@ -12,7 +12,8 @@ cards, --servers policy servers, the current number of simulator workers), on th
 Rules of 2026-10-22 (the user's staged plan, and the main window's conditions for one-card jobs):
   * one-card evaluation shards (--shards) are queued in priority order (stage 0 first: the stopped D5 runs'
     checkpoints, 100k -> 50k -> 25k / 75k, start by start; then later checkpoints by step) and submitted only while
-    no --pause-file exists, no --yield-to job (main line interiorgs-v10-*, bq_tp_mmxbf16) waits for cards, at most
+    no --pause-file exists, no --yield-to job (main line interiorgs-v10-*) and no --yield-to-same-size job of the same
+    card count (bq_tp_mmxbf16) waits for cards, at most
     --max-live-shards of ours are alive, and only into free cards of machines already running another job;
   * the same pause / yield rules hold for every other submission (8-card evaluations, the stage-2 runs).
 
@@ -55,6 +56,14 @@ RUNS_ROOT = Path("/mnt/umm/users/yinbaiqiao/downstream_runs")
 
 STOPPED_RUN = "run_stopped_20261022"
 STAGE0_ORDER = {100000: 0, 50000: 1, 25000: 2, 75000: 2}  # the user's order for the stopped runs' checkpoints
+
+
+def job_cards(job: dict):
+    """Cards of a job from the sco job list (worker spec N4lS.Iq.I80.<cards>), None if not readable."""
+    try:
+        return int(str(job["roles"][0]["resource_spec"][0]["name"]).rsplit(".", 1)[1])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
 
 
 def start_rank(exp_name: str) -> int:
@@ -224,7 +233,7 @@ class Watcher:
         return int(self.state.get("workers", {}).get("chosen", self.a.workers))
 
     def submit_eval(self, run: Path, ckpt: Path, workers: str, name: str) -> str:
-        reason = self.blocked()
+        reason = self.blocked(self.a.cards)
         if reason:
             return f"未提交（{reason}）"
         if self.a.dry:
@@ -274,21 +283,29 @@ class Watcher:
             self._rooms[pool] = 0 if v is None else max(0, sum(sco_job.busy_room(v).values()) - waiting)
         return self._rooms[pool]
 
-    def priority_waiting(self) -> list:
-        """Jobs of the user's earlier priorities (--yield-to prefixes, e.g. the main line's interiorgs-v10-*) still
-        waiting for cards anywhere in the workspace: while there are any, this line submits nothing (main window's
-        condition of 2026-10-22; the user's GPU order bq_tp_mmxbf16 > main line > downstream)."""
-        return [str(j.get("display_name")) for j in self.job_list()
-                if j.get("state") in sco_job.WAITING_STATES
-                and any(str(j.get("display_name") or "").startswith(p) for p in self.a.yield_to)]
+    def priority_waiting(self, cards: int) -> list:
+        """Jobs of the user's earlier priorities still waiting for cards anywhere in the workspace, which hold back a
+        submission of `cards` cards: any --yield-to job (the main line's interiorgs-v10-*, the main window's
+        condition of 2026-10-22), and --yield-to-same-size jobs (bq_tp_mmxbf16, first in the user's GPU order) of the
+        same card count (a one-card shard on a busy machine does not take a whole machine from an 8-card job)."""
+        out = []
+        for j in self.job_list():
+            name = str(j.get("display_name") or "")
+            if j.get("state") not in sco_job.WAITING_STATES:
+                continue
+            if any(name.startswith(p) for p in self.a.yield_to):
+                out.append(name)
+            elif any(name.startswith(p) for p in self.a.yield_to_same_size) and job_cards(j) in (None, cards):
+                out.append(name)
+        return out
 
-    def blocked(self):
-        """Why nothing may be submitted in this pass, None if submitting is allowed."""
+    def blocked(self, cards: int = 1):
+        """Why nothing of `cards` cards may be submitted in this pass, None if submitting is allowed."""
         if self.a.pause_file and Path(self.a.pause_file).exists():
             return f"暂停提交（{self.a.pause_file} 存在）"
         if self.held():
             return "等密集奖励第一批上机器"
-        waiting = self.priority_waiting()
+        waiting = self.priority_waiting(cards)
         if waiting:
             return f"给排在前面的任务让路：{len(waiting)} 个在排队（{', '.join(sorted(set(waiting))[:3])}…）"
         if not self.disk_ok():
@@ -469,7 +486,7 @@ class Watcher:
                                   "note": f"{exp} {tag} 在 34 个任务上成功 0 个回合：按规定停下，不提交第三步其余任务"}
             self.alerts.append(self.state["gate"]["note"])
             return self.state["gate"]
-        reason = self.blocked()
+        reason = self.blocked(8)
         if reason:
             return {"decided": False, "note": f"{exp} {tag} 成功 {successes} 个回合 > 0，暂不提交：{reason}"}
         if self.a.dry:
@@ -633,8 +650,10 @@ def parser():
                     help="also evaluate the checkpoints kept from the stopped D5 runs (run_stopped_20261022)")
     ap.add_argument("--max-live-shards", type=int, default=8,
                     help="at most this many of our one-card evaluation jobs alive at once (main window, 10-22)")
-    ap.add_argument("--yield-to", nargs="*", default=["interiorgs-v10-", "bq_tp_mmxbf16"],
+    ap.add_argument("--yield-to", nargs="*", default=["interiorgs-v10-"],
                     help="submit nothing while any workspace job whose name starts so is waiting for cards")
+    ap.add_argument("--yield-to-same-size", nargs="*", default=["bq_tp_mmxbf16"],
+                    help="submit nothing of N cards while such a job of N cards waits (unknown size: wait too)")
     ap.add_argument("--pause-file", default=str(RUNS_ROOT / "PAUSE_SUBMISSIONS"),
                     help="while this file exists nothing is submitted (e.g. on the main window's request)")
     return ap

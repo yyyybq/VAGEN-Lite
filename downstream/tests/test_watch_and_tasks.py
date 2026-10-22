@@ -190,6 +190,21 @@ def test_yield_pause_and_live_cap_block_shards(tmp_path):
     assert len(jobs.prepared) == 7
 
 
+def test_bq_tp_jobs_hold_back_only_submissions_of_their_own_size(tmp_path):
+    spec = lambda c: [{"resource_spec": [{"name": f"N4lS.Iq.I80.{c}"}]}]  # noqa: E731
+    jobs = FakeJobs()
+    w = watcher(tmp_path, jobs=jobs)
+    jobs.listing = [{"display_name": "bq_tp_mmxbf16_t1000", "state": "STARTING", "roles": spec(8)},
+                    {"display_name": "bq_tp_mmxbf16_x", "state": "RUNNING", "roles": spec(1)}]
+    assert w.priority_waiting(1) == [] and w.priority_waiting(8) == ["bq_tp_mmxbf16_t1000"]
+    w = watcher(tmp_path, jobs=jobs)
+    jobs.listing = [{"display_name": "bq_tp_mmxbf16_eval", "state": "QUEUEING", "roles": spec(1)},
+                    {"display_name": "bq_tp_mmxbf16_nospec", "state": "QUEUEING"}]
+    assert w.priority_waiting(1) == ["bq_tp_mmxbf16_eval", "bq_tp_mmxbf16_nospec"]  # unknown size: wait too
+    assert w.priority_waiting(8) == ["bq_tp_mmxbf16_nospec"]
+    assert watch.job_cards({"roles": spec(8)}) == 8 and watch.job_cards({}) is None
+
+
 def test_stage0_goes_100k_then_50k_then_25k_and_75k_start_by_start(tmp_path):
     for start in ("S", "B"):
         exp = tmp_path / f"experiments/DS-{start}-100-s1"
