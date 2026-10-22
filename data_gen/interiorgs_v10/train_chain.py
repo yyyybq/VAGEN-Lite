@@ -839,6 +839,8 @@ class Chain:
                     "--epochs", str(int(self.plan.get("sft_epochs", 3))), "--out", str(lf)]
             if self.plan.get("keep_text"):
                 args.append("--keep-text")
+            if self.plan.get("sft_learning_rate"):  # round 12 freeze: the short format SFT (default 1e-5)
+                args += ["--learning-rate", str(float(self.plan["sft_learning_rate"]))]
             self.sh(args, cwd=ROOT / "scripts", log=self.tr / "logs" / f"prepare_sft{'_' + group if group else ''}.log")
             if not (lf / "train.yaml").is_file():
                 raise ChainError(f"prepare_active_spatial_sft.py wrote no train.yaml in {lf}")

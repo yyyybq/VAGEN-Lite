@@ -219,6 +219,13 @@ class ChainTest(unittest.TestCase):
             self.assertIn("--keep-text", formal)
             self.assertEqual(formal[formal.index("--out") + 1], str(root / "lf_formal"))
             self.assertEqual(calls[2][calls[2].index("--out") + 1], str(root / "lf_formal_reserve"))
+            # round 12 freeze: plan sft_learning_rate reaches the recipe (the short format SFT)
+            self.assertNotIn("--learning-rate", formal)
+            chain.plan["sft_learning_rate"] = 2e-6
+            calls.clear()
+            chain.sft_data()
+            self.assertEqual(calls[1][calls[1].index("--learning-rate") + 1], "2e-06")
+            del chain.plan["sft_learning_rate"]
             # sft: one 8-card job per group, both submitted before waiting
             prepared, deleted = {}, []
 

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import re
 import time
@@ -396,6 +397,8 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         seen = {"frame": keep(images[0], turns), "user": obs["obs_str"]}
         if getattr(policy, "last_prompt_tokens", None) is not None:
             seen["prompt_tokens"] = policy.last_prompt_tokens
+        if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
+            seen.update(entropy=round(float(policy.last_entropy), 5), tokens=int(policy.last_tokens or 0))
         obs, reward, done, step_info = env.step(text)
         turns += 1
         parsed = list(step_info.get("actions") or [])
@@ -437,9 +440,32 @@ def _image_url(image: Any) -> Dict[str, Any]:
     return {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()}}
 
 
+# Round 12 freeze (the user's 3.1.4 of 2026-10-22, the format SFT's acceptance): the token entropy of the answers, as
+# the RL logs report it (the entropy of the temperature-scaled next-token distribution, averaged over the answer's
+# tokens), estimated from the ENTROPY_TOP_K most likely tokens vLLM returns (raw log-probabilities, renormalised
+# after the temperature; the tail beyond them is left out, a slight underestimate).
+ENTROPY_TOP_K = 20
+
+
+def top_logprob_entropy(positions: Sequence[Sequence[float]], temperature: float) -> Optional[float]:
+    """The mean entropy (nats) over the answer's tokens of the temperature-scaled distribution renormalised over each
+    position's given raw log-probabilities (temperature 0 or less: the model's own, 1)."""
+    t = float(temperature) if temperature and temperature > 0 else 1.0
+    out = []
+    for lps in positions:
+        if not lps:
+            continue
+        z = [float(lp) / t for lp in lps]
+        m = max(z)
+        w = [math.exp(v - m) for v in z]
+        s = sum(w)
+        out.append(-sum((x / s) * math.log(x / s) for x in w if x > 0))
+    return sum(out) / len(out) if out else None
+
+
 class VllmPolicy:  # pragma: no cover - needs a GPU
     def __init__(self, model: str, gpu_memory_utilization: float = 0.6, max_model_len: int = 8192,
-                 max_images: int = 1, temperature: float = 0.0, top_p: float = 1.0) -> None:
+                 max_images: int = 1, temperature: float = 0.0, top_p: float = 1.0, entropy: bool = False) -> None:
         from vllm import LLM
 
         self.llm = LLM(model=model, gpu_memory_utilization=gpu_memory_utilization, max_model_len=max_model_len,
@@ -447,16 +473,25 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
                        trust_remote_code=False)
         self.last_prompt_tokens: Optional[int] = None
         self.temperature, self.top_p = float(temperature), float(top_p)
+        self.entropy = bool(entropy)  # round 12 freeze: the answers' token entropy (last_entropy, last_tokens)
+        self.last_entropy: Optional[float] = None
+        self.last_tokens: Optional[int] = None
 
     def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
                  as_sft: bool = False, seed: Optional[int] = None) -> str:
         from vllm import SamplingParams
 
         params = SamplingParams(temperature=self.temperature, top_p=self.top_p, seed=seed, max_tokens=384,
-                                stop=["</action>"], include_stop_str_in_output=True)
+                                stop=["</action>"], include_stop_str_in_output=True,
+                                **({"logprobs": ENTROPY_TOP_K} if self.entropy else {}))
         out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft), sampling_params=params,
                             use_tqdm=False)
         self.last_prompt_tokens = len(out[0].prompt_token_ids)
+        if self.entropy:
+            steps = out[0].outputs[0].logprobs or []
+            self.last_entropy = top_logprob_entropy([[lp.logprob for lp in pos.values()] for pos in steps],
+                                                    self.temperature)
+            self.last_tokens = len(steps)
         return out[0].outputs[0].text
 
 
@@ -479,7 +514,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     policy = VllmPolicy(args.model, max_model_len=16384 if args.history else 8192,
                         max_images=int(args.max_turns) if args.history else 1,
                         temperature=float(args.temperature) if sampled else 0.0,
-                        top_p=float(args.top_p) if sampled else 1.0)
+                        top_p=float(args.top_p) if sampled else 1.0, entropy=bool(getattr(args, "entropy", False)))
     (out / "model.json").write_text(json.dumps({"name": args.name, "model": args.model, "version": VERSION,
                                                 "prompt_format": cfg["prompt_format"], "greedy": not sampled,
                                                 "samples": int(args.samples) if sampled else 1,
@@ -489,6 +524,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                                                 "env_switches": switches, "max_turns": int(args.max_turns),
                                                 "history": bool(args.history),
                                                 "sft_text": bool(args.sft_text),
+                                                "entropy": bool(getattr(args, "entropy", False)),
                                                 "load_seconds": round(time.time() - t0, 1)}, indent=1))
     done = ({(r["index"], r.get("sample")) for r in _jsonl(out / "results.jsonl")}
             if (out / "results.jsonl").exists() else set())
@@ -519,6 +555,17 @@ def sampling_mode(args: argparse.Namespace) -> bool:
 # ---------------------------------------------------------------------------
 # table
 # ---------------------------------------------------------------------------
+def token_entropy(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """{"entropy": token-weighted mean of the recorded answers' entropy, "entropy_tokens"} when run --entropy recorded
+    it (round 12 freeze), else {}."""
+    pairs = [(float(t["entropy"]), int(t.get("tokens") or 0)) for r in rows for t in (r.get("trajectory") or [])
+             if t.get("entropy") is not None]
+    tokens = sum(n for _, n in pairs)
+    if not pairs or not tokens:
+        return {}
+    return {"entropy": round(sum(e * n for e, n in pairs) / tokens, 5), "entropy_tokens": tokens}
+
+
 def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     ok = [r for r in rows if "error" not in r]
     succ = [r for r in ok if r["success"]]
@@ -547,6 +594,11 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                                if succ else None),
         "collision_rate": round(sum(r["collisions"] for r in ok) / actions, 4) if actions else None,
         "invalid_rate": round(sum(r["invalid_turns"] for r in ok) / turns, 4) if turns else None,
+        # round 12 freeze: the stop line's measure (per episode the share of unreadable turns, averaged) and, with
+        # run --entropy, the answers' token entropy weighted by their tokens (the RL logs' actor/entropy)
+        "invalid_episode_mean": (round(sum(r["invalid_turns"] / r["turns"] for r in ok if r["turns"]) /
+                                       sum(1 for r in ok if r["turns"]), 4) if any(r["turns"] for r in ok) else None),
+        **token_entropy(ok),
         "ended_by": dict(sorted(ended.items())) if ended else None,
         # used up the action or turn limit (with or without meeting the task at the last action)
         "used_limit": sum(ended[k] for k in LIMIT_ENDS) if ended else None,
@@ -767,6 +819,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
     r.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
                    help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
+    r.add_argument("--entropy", action="store_true",
+                   help="round 12 freeze: record each answer's token entropy (top-20 log-probabilities, after the "
+                        "temperature), as the RL logs report it")
     r.add_argument("--lenient-parse", action="store_true",
                    help="round 12 freeze: read answers leniently when the strict reading finds no action")
     r.add_argument("--history", action=argparse.BooleanOptionalAction, default=True,

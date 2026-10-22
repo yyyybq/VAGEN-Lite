@@ -839,6 +839,114 @@ def build_subsets(records: Sequence[Dict[str, Any]], rows: Sequence[Dict[str, An
     return out
 
 
+# Round 12 freeze (the user's 3.1.4 of 2026-10-22): the format SFT of the original 7B, which RL from the original model
+# needs before it (its answers collapse into made-up action names, cluster_runs/FORMAT_DRIFT_R12.md): a few hundred
+# short conversations (1-2 assistant turns) from the existing SFT conversations, shown with the format example of the
+# future data (prompt.FORMAT_EXAMPLES, release.format_example), trained 1-2 epochs with a small learning rate.
+FORMAT_SFT_SEED = 20261022
+
+
+def format_sft_records(records: Sequence[Dict[str, Any]], policy: Dict[str, Any], count: int, val_count: int,
+                       max_turns: int = 2, format_example: str = "action_names",
+                       seed: int = FORMAT_SFT_SEED) -> Dict[str, Any]:
+    """{"records": the chosen conversations rewritten to ``format_example``, "report"}.  A conversation qualifies
+    with 1..``max_turns`` assistant turns; ``count`` train and ``val_count`` val ones are drawn at random (seed),
+    spread over the task families in proportion.  The rewrite replaces the system prompt and each user turn's format
+    text exactly (the texts the SFT export wrote with the policy's own format example); a conversation whose texts do
+    not match is left out and counted."""
+    import copy
+    import random
+
+    from .release import _format_block, format_example as policy_format_example, protocol_system_prompt
+
+    old_example = policy_format_example(policy)
+    new_policy = copy.deepcopy(policy)
+    new_policy["sft"]["export"]["format_example"] = format_example
+    old_blocks = {first: _format_block(policy, first) for first in (True, False)}
+    new_blocks = {first: _format_block(new_policy, first) for first in (True, False)}
+    skipped = Counter()
+
+    def rewrite(rec):
+        conv = copy.deepcopy(rec["conversations"])
+        t = str(rec.get("task_type") or "")
+        if conv[0]["role"] != "system" or conv[0]["content"] != protocol_system_prompt(t, policy):
+            skipped["system_prompt_differs"] += 1
+            return None
+        conv[0]["content"] = protocol_system_prompt(t, new_policy)
+        users = [m for m in conv if m["role"] == "user"]
+        for k, m in enumerate(users):
+            first = k == 0
+            if not m["content"].endswith("\n" + old_blocks[first]) or m["content"].count(old_blocks[first]) != 1:
+                skipped["format_text_differs"] += 1
+                return None
+            m["content"] = m["content"][: -len(old_blocks[first])] + new_blocks[first]
+        return dict(rec, conversations=conv, format_example=format_example)
+
+    def turns(rec):
+        return sum(1 for m in rec.get("conversations") or [] if m.get("role") == "assistant")
+
+    eligible = {"train": [], "val": []}
+    for rec in records:
+        if rec.get("split") in eligible and 1 <= turns(rec) <= max_turns:
+            eligible[rec["split"]].append(rec)
+    rng = random.Random(seed)
+    chosen, by_family = [], {}
+    for split, want in (("train", count), ("val", val_count)):
+        pool = sorted(eligible[split], key=lambda r: str(r.get("id")))
+        rng.shuffle(pool)
+        families = sorted({str(r.get("task_type")) for r in pool})
+        quota = {f: round(want * sum(1 for r in pool if str(r.get("task_type")) == f) / max(1, len(pool)))
+                 for f in families}
+        picked = []
+        for f in families:  # in proportion to the family's share of the eligible conversations
+            for rec in [r for r in pool if str(r.get("task_type")) == f]:
+                if sum(1 for p in picked if str(p.get("task_type")) == f) >= quota[f]:
+                    break
+                new = rewrite(rec)
+                if new is not None:
+                    picked.append(new)
+        for rec in pool:  # rounding: fill up to the number asked for
+            if len(picked) >= want:
+                break
+            if all(p.get("id") != rec.get("id") for p in picked):
+                new = rewrite(rec)
+                if new is not None:
+                    picked.append(new)
+        picked = picked[:want]
+        chosen += picked
+        by_family[split] = dict(Counter(str(r.get("task_type")) for r in picked))
+    report = {"source_records": len(records), "eligible": {k: len(v) for k, v in eligible.items()},
+              "max_assistant_turns": max_turns, "train": by_family.get("train") and sum(by_family["train"].values()),
+              "val": by_family.get("val") and sum(by_family["val"].values()), "by_family": by_family,
+              "assistant_turns": dict(Counter(turns(r) for r in chosen)), "format_example": format_example,
+              "source_format_example": old_example, "skipped": dict(skipped), "seed": seed}
+    return {"records": chosen, "report": report}
+
+
+def cmd_format_sft(args: argparse.Namespace) -> None:
+    """Round 12 freeze: the format SFT's conversations (sft_trajectories_format.jsonl) in --out, with the source SFT
+    folder's frames, split manifest and task registry linked in (a folder the chain uses with "sft_records": false)."""
+    import os
+
+    from .admission import load_policy
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    res = format_sft_records(_jsonl(Path(args.trajectories)), load_policy(), int(args.count), int(args.val_count),
+                             int(args.max_turns), args.format_example, int(args.seed))
+    if len(res["records"]) < int(args.count) + int(args.val_count):
+        raise SystemExit(f"only {len(res['records'])} conversations qualify: {res['report']}")
+    _write_jsonl(out / "sft_trajectories_format.jsonl", res["records"])
+    if args.link_from:
+        src = Path(args.link_from).resolve()
+        for name in ("frames.jsonl", "frames", "split_manifest.json", "task_registry.jsonl"):
+            if (src / name).exists() and not (out / name).exists():
+                os.symlink(src / name, out / name)
+    report = dict(res["report"], trajectories=str(args.trajectories))
+    (out / "format_sft_report.json").write_text(json.dumps(report, indent=1))
+    print(json.dumps(report, indent=1))
+
+
 def cmd_subsets(args: argparse.Namespace) -> None:
     """Round 12: the data-scale subsets as files (sft_trajectories_<name>.jsonl, rows_<name>.jsonl, subsets.json)
     in --out, with the source SFT folder's frames, split manifest and task registry linked in (an SFT folder the
@@ -970,9 +1078,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     u.add_argument("--seed", type=int, default=SUBSET_SEED)
     u.add_argument("--link-from", default=None, help="the source SFT folder: link its frames, manifest and registry")
     u.add_argument("--out", required=True)
+    x = sub.add_parser("format-sft", help="round 12 freeze: the short format SFT conversations (the user's 3.1.4)")
+    x.add_argument("--trajectories", required=True, help="the SFT conversations (sft_trajectories.jsonl, with split)")
+    x.add_argument("--count", type=int, default=400, help="train conversations")
+    x.add_argument("--val-count", type=int, default=40, help="val conversations (the SFT's evaluation loss)")
+    x.add_argument("--max-turns", type=int, default=2, help="at most this many assistant turns")
+    x.add_argument("--format-example", default="action_names", choices=["placeholder", "action_names"])
+    x.add_argument("--seed", type=int, default=FORMAT_SFT_SEED)
+    x.add_argument("--link-from", default=None, help="the source SFT folder: link its frames, manifest and registry")
+    x.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     {"sft-frames": cmd_sft_frames, "sft-records": cmd_sft_records, "rl-config": cmd_rl_config,
-     "subsets": cmd_subsets}[args.cmd](args)
+     "subsets": cmd_subsets, "format-sft": cmd_format_sft}[args.cmd](args)
     return 0
 
 
