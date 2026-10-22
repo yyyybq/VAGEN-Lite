@@ -1,8 +1,10 @@
 """Keep one-card jobs running from a list of MODEL:KIND items (login node, background), up to J.POOL_LIMITS per
-pool and J.MAX_ACTIVE in all (decision 21: zoe-cf-render 8, h800 4, zoetrope 4, 8 in all; a new job takes
-zoe-cf-render's free slots first, then h800's, then zoetrope's).  Nothing new is submitted to (or moved into) a pool
-where a job waits for a whole 8-card machine (yield_pools): on h800 and zoetrope only interiorgs-v10-rl-* training
-jobs count, on zoe-cf-render any job.
+pool and J.MAX_ACTIVE in all (decisions 18 and 21: zoe-cf-render 0 for now, h800 4, zoetrope 4, 8 in all; a new
+job takes the first pool in J.POOLS order with a free slot).  While an interiorgs-v10-rl-* training job waits for a
+whole 8-card machine on h800 or zoetrope, at most CAP_WHILE_RL_WAITS of ours run in all pools together, pools
+without such a job taking new jobs first, and nothing is moved into a pool where one waits (decision 22, which
+replaces the per-pool pause of decision 20).  Nothing new goes to zoe-cf-render while any job waits there for whole
+machines (decision 21).
 
     nohup python -m eval_external.sco.queue --stage step2 ours-SFT:OwnEnv base-7B:WalkerBench SI-7B:VSI-Bench ... &
 
@@ -168,18 +170,41 @@ def pool_waiting(jobs: list[dict] | None = None) -> dict[str, int]:
     return out
 
 
-YIELD_TO = "interiorgs-v10-rl-"  # h800, zoetrope: the RL training jobs (decision 20); bq_tp_* and the rest: no yield
+YIELD_TO = "interiorgs-v10-rl-"  # the RL training jobs (decisions 20, 22); bq_tp_* and every other 8-card job: no limit
 YIELD_TO_ALL = {"zoe-cf-render"}  # here any job waiting for whole machines, whoever submitted it (decision 21)
+CAP_WHILE_RL_WAITS = 2  # decision 22: ours in all pools together while an RL training job waits for a whole machine
+
+
+def _name(j: dict) -> str:
+    return j.get("display_name") or j.get("name") or ""
+
+
+def _waits_for_machine(j: dict) -> bool:
+    return j.get("state") in J.WAITING and _gpus_per_worker(j) >= 8 and _pool(j) in J.POOLS
+
+
+def rl_waiting_pools(jobs: list[dict]) -> set[str]:
+    """Pools where an RL training job (name starting with YIELD_TO) waits for a whole 8-card machine.  Single-card
+    jobs land on the emptiest machine and keep it from ever having 8 free cards (2026-10-21, decision 19)."""
+    return {_pool(j) for j in jobs if _waits_for_machine(j) and _name(j).startswith(YIELD_TO)}
 
 
 def yield_pools(jobs: list[dict]) -> set[str]:
-    """Pools where a job waits for whole 8-card machines: on zoe-cf-render any job, elsewhere an RL training job
-    (name starting with YIELD_TO).  Single-card jobs land on the emptiest machine and keep it from ever having 8 free
-    cards, so we submit nothing new there until those jobs have started (2026-10-21, decisions 19-21)."""
-    name = lambda j: j.get("display_name") or j.get("name") or ""
-    return {_pool(j) for j in jobs
-            if j.get("state") in J.WAITING and _gpus_per_worker(j) >= 8 and _pool(j) in J.POOLS
-            and (_pool(j) in YIELD_TO_ALL or name(j).startswith(YIELD_TO))}
+    """Pools that take nothing new from us: a YIELD_TO_ALL pool while any job waits there for whole 8-card
+    machines (decision 21)."""
+    return {_pool(j) for j in jobs if _waits_for_machine(j) and _pool(j) in YIELD_TO_ALL}
+
+
+def next_pool(counts: dict[str, int], jobs: list[dict]) -> tuple[str | None, str]:
+    """The pool for a new job now, or None and the reason when the RL rule holds it back.  While an RL training job
+    waits for a whole machine: at most CAP_WHILE_RL_WAITS of ours in all pools together, pools without such a job
+    first (decision 22); otherwise up to J.MAX_ACTIVE in J.POOLS order.  Never a yield_pools pool."""
+    rl, blocked = rl_waiting_pools(jobs), yield_pools(jobs)
+    cap = CAP_WHILE_RL_WAITS if rl else J.MAX_ACTIVE
+    pool = J.free_pool(counts, exclude=blocked, cap=cap, order=sorted(J.POOLS, key=lambda p: p in rl))
+    if pool is None and rl and J.free_pool(counts, exclude=blocked) is not None:
+        return None, f"RL training waits on {', '.join(sorted(rl))}: at most {cap} of ours run"
+    return pool, ""
 
 
 def move_target(receipt: Path, state: str, waiting: dict[str, int], now: float | None = None,
@@ -203,14 +228,15 @@ def step(stage: str, items: list[tuple[str, Item]]) -> dict:
     status = {}
     counts = J.active_by_pool()  # our unfinished jobs per pool, against J.POOL_LIMITS
     jobs = workspace_jobs()
-    waiting, blocked = pool_waiting(jobs), yield_pools(jobs)
+    waiting, blocked, rl = pool_waiting(jobs), yield_pools(jobs), rl_waiting_pools(jobs)
     for key, it in items:
         receipt = it.run_dir / "job" / "submission.json"
         if receipt.exists():
             st = J.status(it.run_dir)
             target = None
-            if st["state"] in J.WAITING:  # only into a pool with a free slot of ours where we do not yield
-                allowed = {p for p in J.POOLS if p not in blocked and counts.get(p, 0) < J.POOL_LIMITS[p]}
+            if st["state"] in J.WAITING:  # only into a pool with a free slot of ours, no RL training waiting there
+                allowed = {p for p in J.POOLS
+                           if p not in blocked and p not in rl and counts.get(p, 0) < J.POOL_LIMITS[p]}
                 target = move_target(receipt, st["state"], waiting, allowed=allowed)
             if target:
                 source = json.loads(receipt.read_text()).get("pool", J.POOL)
@@ -236,11 +262,9 @@ def step(stage: str, items: list[tuple[str, Item]]) -> dict:
         if (it.run_dir / "results.json").exists():
             status[key] = done_label(it.run_dir)
             continue
-        pool = J.free_pool(counts, exclude=blocked)  # zoe-cf-render, h800, zoetrope; none where we yield
+        pool, why = next_pool(counts, jobs)  # at most 2 of ours while RL training waits (decision 22)
         if pool is None:
-            yielding = blocked and J.free_pool(counts) is not None
-            status[key] = (f"pending (yielding: a whole-machine job waits on {', '.join(sorted(blocked))})"
-                           if yielding else "pending")
+            status[key] = f"pending ({why})" if why else "pending"
             continue
         if not it.prepared():
             status[key] = "pending (inputs not prepared)"

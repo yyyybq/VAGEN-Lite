@@ -126,15 +126,22 @@ def test_yield_to_own_waiting_8_card_jobs():
             j("vln_train", "h800", "STARTING", 8, "someone"),                        # someone else's
             j("interiorgs-v10-renderer-rl-run-s100d", "h800", "STARTING", 1, "me"),  # one card
             j("evalext-step2-sat-x", "zoe-cf-render", "QUEUEING", 1, "me")]          # one card on zoe-cf-render
-    assert Q.yield_pools(jobs) == {"zoetrope"}
+    assert Q.rl_waiting_pools(jobs) == {"zoetrope"} and Q.yield_pools(jobs) == set()
     assert Q.pool_waiting(jobs) == {"zoe-cf-render": 1, "h800": 3, "zoetrope": 1}
-    assert Q.yield_pools([j("interiorgs-v10-rl-rl-run-x", "h800", "RUNNING", 8, "me")]) == set()  # started
+    # decision 22: while RL training waits, at most 2 of ours in all pools, pools without waiting RL first
+    assert Q.next_pool({}, jobs) == ("h800", "") and Q.next_pool({"h800": 1}, jobs) == ("h800", "")
+    pool, why = Q.next_pool({"h800": 1, "zoetrope": 1}, jobs)
+    assert pool is None and "at most 2" in why
+    assert Q.next_pool({}, [j("interiorgs-v10-rl-rl-run-ae0d", "h800", "STARTING", 8, "me")]) == ("zoetrope", "")
+    started = [j("interiorgs-v10-rl-rl-run-x", "h800", "RUNNING", 8, "me")]
+    assert Q.rl_waiting_pools(started) == set()
+    assert Q.next_pool({"h800": 4, "zoetrope": 3}, started) == ("zoetrope", "")  # no RL waiting: 8 in all
+    assert Q.next_pool({"h800": 4, "zoetrope": 4}, started) == (None, "")
     # on zoe-cf-render any job waiting for whole machines counts, whoever submitted it (decision 21)
-    assert Q.yield_pools(jobs + [j("multion-noaug-4node-20261020", "zoe-cf-render", "STARTING", 8, "someone")]) == {
-        "zoetrope", "zoe-cf-render"}
+    assert Q.yield_pools([j("multion-noaug-4node-20261020", "zoe-cf-render", "STARTING", 8, "someone")]) == {
+        "zoe-cf-render"}
     assert Q.yield_pools([j("multion-noaug-4node-20261020", "zoe-cf-render", "SUSPENDED", 8, "someone")]) == set()
-    assert J.free_pool({"h800": 4, "zoetrope": 0}, exclude={"zoe-cf-render", "zoetrope"}) is None
-    assert J.free_pool({"h800": 3, "zoetrope": 0}, exclude={"zoe-cf-render", "zoetrope"}) == "h800"
+    assert J.free_pool({"h800": 1}, cap=2) == "h800" and J.free_pool({"h800": 2}, cap=2) is None
 
 
 def test_waiting_jobs_move_to_the_less_crowded_pool(tmp_path):
