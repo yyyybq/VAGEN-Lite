@@ -615,6 +615,16 @@ class TrainingPrepTest(unittest.TestCase):
             config("rl_fmt_wrong2", sft_trajectories=[str(convs["action_names"])])
         with self.assertRaises(SystemExit):
             config("rl_fmt_policy", format_example="action_names")
+        # round 12 freeze (the user's 3.1.2): --lenient-parse turns on the env's lenient reading, nothing else
+        env, report = config("rl_lenient", sft_trajectories=[str(convs["placeholder"])], lenient_parse=True)
+        self.assertTrue(env["lenient_parse"])
+        self.assertTrue(report["lenient_parse"])
+        env0, report0 = config("rl_strict", sft_trajectories=[str(convs["placeholder"])])
+        self.assertNotIn("lenient_parse", env0)
+        self.assertFalse(report0["lenient_parse"])
+        self.assertEqual({k: v for k, v in env.items() if k not in ("lenient_parse", "jsonl_path")},
+                         {k: v for k, v in env0.items() if k != "jsonl_path"})
+        self.assertIn("lenient_parse", TP.STANDARD_KEYS)
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

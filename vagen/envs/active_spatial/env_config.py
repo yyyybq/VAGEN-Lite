@@ -182,6 +182,10 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     
     # ====== Invalid Action Configuration ======
     invalid_format_penalty: float = -0.1  # Penalty for invalid format/actions
+    # Round 12 freeze (the user's 3.1.2): when the strict reading finds no action, read the answer leniently
+    # (utils.lenient_actions: spaces instead of underscores, the first complete action block, a missing opening
+    # tag).  Default off: every answer is read as before.
+    lenient_parse: bool = False
     max_consecutive_invalid_actions: int = 3  # Terminate episode after this many consecutive invalid actions
     premature_done_penalty: float = -0.3  # Penalty when 'done' is called without reaching the target
     

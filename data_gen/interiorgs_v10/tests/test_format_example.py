@@ -90,6 +90,10 @@ class FormatExampleTest(unittest.TestCase):
                          ["--format-example", "action_names"])
         with self.assertRaises(TC.ChainError):
             TC.eval_options_for(["--format-example", "placeholder"], "action_names")
+        # round 12 freeze, 3.1.2: a model that trained with the lenient reading is evaluated with it
+        self.assertEqual(TC.eval_options_for([], "placeholder", lenient_parse=True), ["--lenient-parse"])
+        self.assertEqual(TC.eval_options_for(["--lenient-parse"], None, lenient_parse=True), ["--lenient-parse"])
+        self.assertEqual(E.switch_overrides(Namespace(lenient_parse=True)), {"lenient_parse": True})
 
 
 if __name__ == "__main__":

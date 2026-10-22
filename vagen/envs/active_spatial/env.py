@@ -45,6 +45,7 @@ from .utils import (
     safe_open_rgb,
     parse_free_think,
     parse_actions,
+    lenient_actions,
     check_actions,
     ALLOWED_ACTIONS,
     ACTION_SPACE_PRESETS,
@@ -372,7 +373,23 @@ class ActiveSpatialEnv(BaseEnv):
         return params
     
     def _default_parse_func(self, response: str, **kwargs) -> Dict[str, Any]:
-        """Default parse function for action parsing."""
+        """Default parse function for action parsing; with the config's lenient_parse (round 12 freeze, the user's
+        3.1.2) an answer the strict reading finds no action in is read leniently (utils.lenient_actions), and the
+        result names the rule that read it ("lenient_read")."""
+        rst = ActiveSpatialEnv._strict_parse_func(self, response, **kwargs)
+        if rst["actions"] or not bool(getattr(getattr(self, "config", None), "lenient_parse", False)):
+            return rst
+        read = lenient_actions(response or "", sep=kwargs.get("action_sep", "|"),
+                               allowed=getattr(self, "_allowed_actions", None))
+        if read is None:
+            return rst
+        rule, names = read
+        return dict(rst, format_correct=True, actions=names[: kwargs.get("max_actions", 5)], parse_error="",
+                    missing_action_tag=False, empty_action_body=False, unknown_action_name=False,
+                    lenient_read=rule)
+
+    def _strict_parse_func(self, response: str, **kwargs) -> Dict[str, Any]:
+        """The strict reading (every answer before round 12's lenient switch)."""
         response_text = response or ""
         response_lower = response_text.lower()
         action_tag_count = response_lower.count("<action>")
@@ -923,6 +940,8 @@ class ActiveSpatialEnv(BaseEnv):
                 "missing_action_tag": bool(rst.get("missing_action_tag", False)),
                 "empty_action_body": bool(rst.get("empty_action_body", False)),
                 "unknown_action_name": bool(rst.get("unknown_action_name", False)),
+                # round 12 freeze: read only by the lenient reading (config lenient_parse)
+                "lenient_read": bool(rst.get("lenient_read")),
                 "truncated_before_action": bool(rst.get("truncated_before_action", False)),
                 "multiple_action_tag": bool(rst.get("multiple_action_tag", False)),
             },

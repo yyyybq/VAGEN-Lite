@@ -500,11 +500,14 @@ def pick_best(scores: Dict[str, Optional[float]], order: Sequence[str]) -> Optio
     return max(ranked, key=lambda n: (scores[n], -order.index(n)))
 
 
-def eval_options_for(options: Sequence[str], format_example: Optional[str]) -> List[str]:
+def eval_options_for(options: Sequence[str], format_example: Optional[str], lenient_parse: bool = False) -> List[str]:
     """The evaluation options for a model that trained with ``format_example`` (round 12 freeze, the user's 3.1.1):
     --format-example is added unless it is the template's placeholder text; a plan option naming another one is
-    refused (a model is evaluated with the format text it trained with)."""
+    refused (a model is evaluated with the format text it trained with).  ``lenient_parse`` (3.1.2): a model that
+    trained with the env's lenient reading is evaluated with it (--lenient-parse)."""
     opts = list(options)
+    if lenient_parse and "--lenient-parse" not in opts:
+        opts.append("--lenient-parse")
     if "--format-example" in opts:
         given = opts[opts.index("--format-example") + 1]
         if format_example and given != format_example:
@@ -898,10 +901,11 @@ class Chain:
         wanted = self.plan.get("sft_eval_epochs")
         return [(e, p) for e, p in ckpts if not wanted or e in {int(x) for x in wanted}]
 
-    def run_format_example(self, run: Dict[str, Any]) -> Optional[str]:
-        """The format example a run's RL config chose (rl_config_report.json; round 12 freeze), None before it."""
+    def run_eval_options(self, options: Sequence[str], run: Dict[str, Any]) -> List[str]:
+        """The evaluation options for a run's checkpoints: its format example and lenient reading (round 12 freeze)."""
         report = run["rl_dir"] / "rl_config_report.json"
-        return json.loads(report.read_text()).get("format_example") if report.is_file() else None
+        rep = json.loads(report.read_text()) if report.is_file() else {}
+        return eval_options_for(options, rep.get("format_example"), bool(rep.get("lenient_parse")))
 
     def sft_format_example(self) -> Optional[str]:
         """The format example the chain's SFT conversations show (training_prep.sft_format_examples), None when they
@@ -975,7 +979,8 @@ class Chain:
                               ("ppo_mini_batch_size", "--ppo-mini-batch-size"), ("save_freq", "--save-freq")):
                 if rl.get(key) is not None:
                     args += [flag, str(rl[key])]
-            for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val")):
+            for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val"),
+                              ("lenient_parse", "--lenient-parse")):
                 if rl.get(key):
                     args.append(flag)
             if self.plan.get("rl_runs") and run["reward_preset"]:
@@ -1531,7 +1536,7 @@ class Chain:
             options = list((self.plan.get("eval") or {}).get("options") or [])
             jobs = {}
             for name, run in runs.items():
-                run_options = eval_options_for(options, self.run_format_example(run))
+                run_options = self.run_eval_options(options, run)
                 for s in range(every, end + 1, every):
                     hf = run["run_dir"] / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface"
                     if hf.is_dir():
@@ -1572,7 +1577,7 @@ class Chain:
         rl_names: List[str] = []
         for run_name, run in ({} if self.plan.get("eval_only") or self.plan.get("sft_only") else self.rl_runs()).items():
             ckpts = run["run_dir"] / "checkpoints"
-            run_options = eval_options_for(options, self.run_format_example(run))
+            run_options = self.run_eval_options(options, run)
             for s in range(every, self.final_update(run_name or None) + 1, every):
                 name = f"{run_name}_{s:03d}" if run_name else f"v10_rl_{s:03d}"
                 hf = ckpts / f"global_step_{s}" / "actor" / "huggingface"

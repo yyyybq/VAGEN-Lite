@@ -296,6 +296,8 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         out["collision_feedback_detail"] = True
     if getattr(args, "format_example", None):  # round 12 freeze: the format text the model trained with
         out["prompt_format_example"] = args.format_example
+    if getattr(args, "lenient_parse", False):  # round 12 freeze: the lenient reading of the answers
+        out["lenient_parse"] = True
     return out
 
 
@@ -765,6 +767,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
     r.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
                    help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
+    r.add_argument("--lenient-parse", action="store_true",
+                   help="round 12 freeze: read answers leniently when the strict reading finds no action")
     r.add_argument("--history", action=argparse.BooleanOptionalAction, default=True,
                    help="every model call gets all earlier turns, exactly as in SFT (round-10 default; --no-history "
                         "for a single-turn input)")

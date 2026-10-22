@@ -406,7 +406,7 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
 STANDARDS_FILE = Path(__file__).with_name("configs") / "rl_standards.json"
 STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "opt_package", "reward_preset",
                  "ppo_template", "env_template", "group_filter", "keep_std_threshold", "keep_std_floor",
-                 "format_example")
+                 "format_example", "lenient_parse")
 # Round 12, the dense-reward first batch (D-keep, the user's decision of 2026-10-21): which group filter the
 # package's batch goes through.  mixed_outcome (the package's) trains only on tasks whose episodes both succeed and
 # fail; keep_by_return_std (vagen/custom_filter/filter.py) fills the places still free with all-fail tasks whose
@@ -607,6 +607,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                          "trained on)")
     if fmt != str(tcfg.get("prompt_format_example", "placeholder")):
         history["env"]["prompt_format_example"] = fmt
+    if getattr(args, "lenient_parse", False):  # round 12 freeze (the user's 3.1.2): the env's lenient reading
+        history["env"]["lenient_parse"] = True
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -720,6 +722,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "opt_package": getattr(args, "opt_package", None), "opt_package_overrides": package,
               "standard": standard or None, "ppo_template": str(args.ppo_template), "curriculum": curriculum,
               "format_example": fmt, "format_example_sft": sft_formats or None,
+              "lenient_parse": bool(getattr(args, "lenient_parse", False)),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
               "entropy_coeff_override": getattr(args, "entropy_coeff", None),
               "group_filter": ((ppo.get("filter") or {}).get("name") if (ppo.get("filter") or {}).get("enable") else None),
@@ -909,6 +912,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="round 12 freeze: the format line shows placeholder names (action1|action2|...) or real "
                         "action names; default the SFT export's (admission policy), and it must match the SFT "
                         "conversations given with --sft-trajectories")
+    c.add_argument("--lenient-parse", action="store_true",
+                   help="round 12 freeze: the env reads an answer leniently when the strict reading finds no action "
+                        "(spaces instead of underscores, the first complete action block, a missing opening tag)")
     c.add_argument("--sft-trajectories", nargs="*", default=None,
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,
