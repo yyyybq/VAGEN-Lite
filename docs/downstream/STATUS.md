@@ -153,7 +153,7 @@ bash downstream/eval/watch.sh status
 - P = 48、96 的并行度测试：在 DS-B 第一个检查点的第二遍评测里做。
 - 代码同步改用 git。已改。
 - 看板改成断开后仍运行，启动命令见第 2 节。已改。
-- RLinf：第四次通过，已单独报告（reports/STEP2_RLINF_SMOKE_20261022.md）；第四步方案开始写。
+- RLinf：第四次通过，已单独报告（reports/STEP2_RLINF_SMOKE_20261022.md）。第四步方案初稿：reports/STEP4_RL_PLAN_DRAFT_20261022.md（含 5 个待你决定的事）。
 
 **10-22 你的要求**：
 - 下游任务撤到只剩连通试跑需要的一两个，其余等密集奖励第一批上机器后再提。已执行：只留 RLinf 试跑。
