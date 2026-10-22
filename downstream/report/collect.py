@@ -67,9 +67,10 @@ def read_jsonl(path: Path) -> list:
 
 
 def losses(exp_dir: Path, run: str = "run") -> list:
-    """[(step, loss)] in step order."""
+    """[(step, loss)] in step order.  After a resume from a full state the steps between the state and the kill are
+    logged twice; the later launch's value is kept."""
     rows = read_jsonl(exp_dir / run / "metrics.jsonl")
-    return sorted((int(r["step"]), float(r["action_dit_loss"])) for r in rows if "action_dit_loss" in r)
+    return sorted({int(r["step"]): float(r["action_dit_loss"]) for r in rows if "action_dit_loss" in r}.items())
 
 
 def _evaluation(exp_dir, start, ratio, seed, step, kind, ep_dir: Path):

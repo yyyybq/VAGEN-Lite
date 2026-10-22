@@ -47,7 +47,8 @@ def code_state() -> dict:
 
 
 def build_config(recipe: dict, *, exp_dir: Path, exp_id: str, start_path: str, data_dir: Path, seed: int,
-                 steps: int, save_interval: int, log_every: int) -> dict:
+                 steps: int, save_interval: int, log_every: int, full_state_interval: int = 0,
+                 eval_points=()) -> dict:
     import copy
 
     cfg = copy.deepcopy(recipe)
@@ -59,6 +60,9 @@ def build_config(recipe: dict, *, exp_dir: Path, exp_id: str, start_path: str, d
     data["mixture_spec"] = json.loads((data_dir / "mixture_spec.json").read_text())
     trainer = cfg["trainer"]
     trainer.update(max_train_steps=int(steps), save_interval=int(save_interval), logging_frequency=int(log_every))
+    if full_state_interval:
+        trainer.update(full_state_interval=int(full_state_interval),
+                       eval_points=[int(p) for p in eval_points if 0 < int(p) < int(steps)])
     cfg["transfer"] = {"source_label": exp_id, "source_manifest": str(exp_dir / "sources.json"),
                        "split_manifest": str(data_dir / "split_manifest.json"),
                        "note": "downstream line; trainer mse_score is a training-batch diagnostic"}
@@ -84,7 +88,19 @@ def main(argv=None) -> int:
     ap.add_argument("--gpus", type=int, default=8)
     ap.add_argument("--runs-root", type=Path, default=RUNS_ROOT)
     ap.add_argument("--recipe", type=Path, default=HERE / "recipe.yaml")
+    ap.add_argument("--full-state-interval", type=int, default=0,
+                    help="stage 1: save the whole training state every N steps (newest kept) and run segmented "
+                         "(downstream/train/run_segmented.sh); --save-interval must divide N and the eval points")
+    ap.add_argument("--eval-points", default="", help="stage 1: comma-separated steps evaluated inside the job "
+                                                      "(the last step always is)")
+    ap.add_argument("--archive-suffix", default="",
+                    help="reuse an existing experiment directory whose run/, job/ and evals/ are gone (renamed): "
+                         "its experiment.json, config.yaml and sources.json are renamed with this suffix, never deleted")
     args = ap.parse_args(argv)
+    points = [int(p) for p in args.eval_points.split(",") if p.strip()]
+    for v in [args.full_state_interval] + points:
+        if v and v % args.save_interval:
+            raise SystemExit(f"{v} is not a multiple of --save-interval {args.save_interval}")
 
     start = load_starts([args.start])[args.start]
     problems = verify([args.start])[args.start]
@@ -97,10 +113,23 @@ def main(argv=None) -> int:
     if not data_check["ok"]:
         raise SystemExit(f"prepared data does not match its manifest: {data_check}")
     exp_dir = args.runs_root / args.exp_id
-    exp_dir.mkdir(parents=True, exist_ok=False)
+    if args.archive_suffix and exp_dir.is_dir():
+        busy = [n for n in ("run", "job", "evals") if (exp_dir / n).exists()]
+        if busy:
+            raise SystemExit(f"{exp_dir} still has {busy}: rename them first")
+        for name in ("experiment.json", "config.yaml", "sources.json"):
+            old = exp_dir / name
+            if old.exists():
+                new = exp_dir / f"{old.stem}{args.archive_suffix}{old.suffix}"
+                if new.exists():
+                    raise SystemExit(f"{new} exists already")
+                old.rename(new)
+    else:
+        exp_dir.mkdir(parents=True, exist_ok=False)
     recipe = yaml.safe_load(args.recipe.read_text())
     cfg = build_config(recipe, exp_dir=exp_dir, exp_id=args.exp_id, start_path=start["path"], data_dir=args.data,
-                       seed=args.seed, steps=args.steps, save_interval=args.save_interval, log_every=args.log_every)
+                       seed=args.seed, steps=args.steps, save_interval=args.save_interval, log_every=args.log_every,
+                       full_state_interval=args.full_state_interval, eval_points=points)
     (exp_dir / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
     sys.path.insert(0, str(WORKTREE / "scripts"))
     from prepare_starvla_transfer import inspect_checkpoint
@@ -118,6 +147,9 @@ def main(argv=None) -> int:
                  "train_episodes": sum(len(d["train_ids"]) for d in split["datasets"]),
                  "train_frames": sum(d["frames"]["train"] for d in split["datasets"])},
         "steps": args.steps, "save_interval": args.save_interval, "gpus": args.gpus,
+        **({"segmented": True, "full_state_interval": args.full_state_interval,
+            "eval_points": sorted({p for p in points if 0 < p <= args.steps} | {args.steps}),
+            "injob_eval": {"servers": 8, "workers": 96}} if args.full_state_interval else {}),
         "per_device_batch": cfg["datasets"]["vla_data"]["per_device_batch_size"],
         "global_batch": cfg["datasets"]["vla_data"]["per_device_batch_size"] * args.gpus,
         "recipe": {"path": str(args.recipe), "sha256": sha256(args.recipe)},
