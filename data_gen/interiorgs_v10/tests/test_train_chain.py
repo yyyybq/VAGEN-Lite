@@ -11,6 +11,11 @@ RL_LOG = """(TaskRunner pid=1) step:0 - val-aux/active_spatial/traj_success/mean
 (TaskRunner pid=1) step:1 - episode/success_rate:0.125 - timing_s/step:153.2
 (TaskRunner pid=1) step:2 - episode/success_rate:0.25 - timing_s/step:89.0 - val-aux/active_spatial/traj_success/mean@4:np.float64(0.0625)
 """
+# Round 12 freeze: a plan naming a standard gets the standard's chain settings (configs/rl_standards.json
+# chain_defaults); tests of the chain's own behaviour pin its built-in settings (no render-service-first flow, no
+# repack, no stop rules, the render service's own worker count, 2 start-up retries).
+CHAIN_BUILT_IN = {"renderer_first": False, "renderer_repack": False, "guards": None, "renderer_workers": None,
+                  "startup": {"retries": 2, "stall_minutes": 40}}
 
 
 class ProgressTest(unittest.TestCase):
@@ -753,7 +758,8 @@ class ChainTest(unittest.TestCase):
             """scripts: {run name: [behaviour of its 1st, 2nd, ... trainer job]}, behaviours "ray_fail", "hang", "ok"."""
             clock = {"t": time.time()}
             chain = T.Chain({"tr": str(root), "sft_dir": str(root / "sft"), "endpoint": 50, "gs_root": "/ply",
-                             "rl": {"standard": "v10_p1_S0"}, "rl_runs": {n: {} for n in scripts}},
+                             "startup_retries_separate": False,
+                             "rl": {"standard": "v10_p1_S0", **CHAIN_BUILT_IN}, "rl_runs": {n: {} for n in scripts}},
                             sleep=lambda s: clock.__setitem__("t", clock["t"] + 20 * 60), clock=lambda: clock["t"])
             submitted = {n: 0 for n in scripts}
             deleted = []
@@ -864,6 +870,38 @@ class ChainTest(unittest.TestCase):
             self.assertEqual([ps0[ps0.index(f) + 1] for f in ("--format-example", "--invalid-penalty", "--group-filter",
                                                               "--keep-std-threshold", "--keep-std-floor")],
                              ["placeholder", "-0.5", "keep_by_return_std", "0.4", "1.0"])
+
+    def test_standard_chain_defaults(self):
+        """Round 12 freeze (the user's decision 3 of 2026-10-22): a run whose plan rl names a standard gets the
+        standard's chain settings (32 render workers, render service first, repack, the batch's stop rules with the
+        10% line, 5 start-up retries counted apart) for each setting the plan does not give; without a standard
+        nothing changes."""
+        from data_gen.interiorgs_v10 import training_prep as TP
+
+        defaults = TP.load_chain_defaults()
+        self.assertEqual({k: defaults["rl"][k] for k in ("renderer_workers", "renderer_first", "renderer_repack")},
+                         {"renderer_workers": 32, "renderer_first": True, "renderer_repack": True})
+        self.assertEqual((defaults["rl"]["guards"]["invalid_max"], defaults["rl"]["startup"]["retries"]), (0.1, 5))
+        self.assertNotIn("chain_defaults", TP.load_standards())
+        with tempfile.TemporaryDirectory() as tmp:
+            base = {"tr": tmp, "sft_dir": tmp, "endpoint": 300, "gs_root": "/ply"}
+            chain = T.Chain({**base, "rl": {"standard": "v10_p1_S0", "guards": {"kl_max": 1.0}},
+                             "rl_runs": {"s0": {}, "d": {"rl": {"standard": "v10_p1_D", "renderer_workers": 12,
+                                                                "startup": {"stall_minutes": 60}}}}},
+                            sleep=lambda s: None)
+            runs = chain.rl_runs()
+            s0, d = runs["s0"]["rl"], runs["d"]["rl"]
+            self.assertEqual((s0["renderer_workers"], s0["renderer_first"], s0["renderer_repack"]), (32, True, True))
+            self.assertEqual(s0["guards"], {**defaults["rl"]["guards"], "kl_max": 1.0})  # the plan's value wins
+            self.assertEqual(s0["startup"], {"retries": 5, "stall_minutes": 40})
+            self.assertEqual((d["renderer_workers"], d["startup"]), (12, {"retries": 5, "stall_minutes": 60}))
+            self.assertTrue(chain.plan["startup_retries_separate"])
+            plain = T.Chain({**base, "rl": {"guards": {"kl_max": 1.0}}, "rl_runs": {"a": {}}}, sleep=lambda s: None)
+            self.assertEqual(plain.rl_runs()["a"]["rl"], {"guards": {"kl_max": 1.0}})
+            self.assertNotIn("startup_retries_separate", plain.plan)
+            # an explicit "no guards" stays
+            off = T.Chain({**base, "rl": {"standard": "v10_p1_S0", "guards": None}}, sleep=lambda s: None)
+            self.assertIsNone(off.rl_runs()[""]["rl"]["guards"])
 
     def test_eval_only_plan(self):
         """Round 12: an eval_only plan runs check_code and evaluate only, on the listed models and variants."""
@@ -995,11 +1033,10 @@ class ChainTest(unittest.TestCase):
         def run_chain(root, script, separate, record=True):
             clock = {"t": time.time()}
             plan = {"tr": str(root), "sft_dir": str(root / "sft"), "endpoint": 50, "gs_root": "/ply", "retries": 2,
-                    "rl": {"standard": "v10_p1_S0", "startup": {"retries": 5}}, "rl_runs": {"a": {}}}
+                    "rl": {"standard": "v10_p1_S0", **CHAIN_BUILT_IN, "startup": {"retries": 5, "stall_minutes": 40}},
+                    "rl_runs": {"a": {}}, "startup_retries_separate": bool(separate)}
             if record:
                 plan["record_nodes"] = True
-            if separate:
-                plan["startup_retries_separate"] = True
             chain = T.Chain(plan, sleep=lambda s: clock.__setitem__("t", clock["t"] + 20 * 60), clock=lambda: clock["t"])
             submitted = {"n": 0}
             looked_up = []

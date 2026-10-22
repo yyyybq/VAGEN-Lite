@@ -416,9 +416,17 @@ GROUP_FILTERS = ("mixed_outcome", "keep_by_return_std")
 
 
 def load_standards(path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
-    """{name: rl-config options} of the named standard configurations (keys starting with "_" are notes)."""
+    """{name: rl-config options} of the named standard configurations (keys starting with "_" are notes;
+    "chain_defaults" is the standard's chain settings, load_chain_defaults)."""
     data = json.loads(Path(path or STANDARDS_FILE).read_text(encoding="utf-8"))
-    return {k: v for k, v in data.items() if not k.startswith("_")}
+    return {k: v for k, v in data.items() if not k.startswith("_") and k != "chain_defaults"}
+
+
+def load_chain_defaults(path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
+    """Round 12 freeze (the user's decision 3 of 2026-10-22): {"rl": run settings, "plan": plan settings} the
+    training chain gives every run whose plan rl names a standard, under the plan's own values."""
+    data = json.loads(Path(path or STANDARDS_FILE).read_text(encoding="utf-8"))
+    return dict(data.get("chain_defaults") or {})
 
 
 def apply_standard(args: argparse.Namespace, name: str, standards: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:

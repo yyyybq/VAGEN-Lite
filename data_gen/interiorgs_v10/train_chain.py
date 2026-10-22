@@ -121,6 +121,11 @@ machine where only such services are left (their neighbours finished), so the ma
 service is started first and the old one deleted only once the new one runs on a busy machine with the trainer still
 waiting (Chain.repack).  PROGRESS.md lists every try.
 
+Round 12 freeze (the user's decision 3 of 2026-10-22): a run whose plan rl names a standard
+(configs/rl_standards.json) gets the standard's chain settings ("chain_defaults": 32 render workers, render service
+first, render-service repack, the batch's stop rules with the 10% unreadable-answer line, 5 start-up retries counted
+apart) for every setting the plan does not give; the plan's values win, key by key inside "guards" and "startup".
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -500,6 +505,32 @@ def pick_best(scores: Dict[str, Optional[float]], order: Sequence[str]) -> Optio
     return max(ranked, key=lambda n: (scores[n], -order.index(n)))
 
 
+def standard_chain_defaults(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """The standard's chain settings (training_prep.load_chain_defaults) when the plan's rl or a run's rl names a
+    standard, else {} (round 12 freeze, the user's decision 3 of 2026-10-22)."""
+    named = [(plan.get("rl") or {}).get("standard")] + [((spec or {}).get("rl") or {}).get("standard")
+                                                         for spec in (plan.get("rl_runs") or {}).values()]
+    if not any(named):
+        return {}
+    from .training_prep import load_chain_defaults
+
+    return load_chain_defaults()
+
+
+def with_chain_defaults(rl: Dict[str, Any], defaults: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """A run's rl settings with the standard's chain settings under them, when the run names a standard: a missing
+    setting takes the default; "guards" and "startup" are filled key by key."""
+    if not defaults or not rl.get("standard"):
+        return rl
+    out = dict(rl)
+    for key, value in defaults.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = {**value, **out[key]}
+        elif key not in out:
+            out[key] = value
+    return out
+
+
 def eval_options_for(options: Sequence[str], format_example: Optional[str], lenient_parse: bool = False) -> List[str]:
     """The evaluation options for a model that trained with ``format_example`` (round 12 freeze, the user's 3.1.1):
     --format-example is added unless it is the template's placeholder text; a plan option naming another one is
@@ -535,6 +566,10 @@ class Chain:
                                       {"plan": plan, "steps": {}})
         for s in STEPS:  # progress files written before a step existed
             self.state["steps"].setdefault(s, {"state": "pending"})
+        # round 12 freeze: the standard's chain settings, under the plan's own values
+        self.chain_defaults = standard_chain_defaults(plan)
+        for key, value in (self.chain_defaults.get("plan") or {}).items():
+            self.plan.setdefault(key, value)
 
     # -------------------------------------------------------------- plan views
     def sft_groups(self) -> Dict[str, str]:
@@ -557,10 +592,11 @@ class Chain:
         runs = self.plan.get("rl_runs")
         if not runs:
             return {"": {"rl_dir": self.tr / "rl", "run_dir": self.tr / "rl_run", "reward_preset": "S0",
-                         "rl": dict(self.plan.get("rl") or {})}}
+                         "rl": with_chain_defaults(dict(self.plan.get("rl") or {}), self.chain_defaults.get("rl"))}}
         return {name: {"rl_dir": self.tr / f"rl_{name}", "run_dir": self.tr / f"rl_run_{name}",
                        "reward_preset": spec.get("reward_preset"),  # None: rl-config's default or the standard's
-                       "rl": {**dict(self.plan.get("rl") or {}), **dict(spec.get("rl") or {})}}
+                       "rl": with_chain_defaults({**dict(self.plan.get("rl") or {}), **dict(spec.get("rl") or {})},
+                                                 self.chain_defaults.get("rl"))}
                 for name, spec in runs.items()}
 
     def sft_model(self) -> Path:
