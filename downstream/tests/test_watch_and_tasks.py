@@ -493,3 +493,34 @@ def test_stage0_report_is_built_into_its_own_folder(tmp_path):
     w.state["finished"]["/x/experiments/DS-B-100-s1/evals/steps_25000/shards/s1of8"] = {}
     w.report(run=fake_run)
     assert len(calls) == 4 and calls[3][-1] != "--stage0"
+
+
+def stopped_exp(root: Path, start: str, steps=(25000, 50000, 75000, 100000)):
+    exp = root / "experiments" / f"DS-{start}-100-s1"
+    (exp / f"{watch.STOPPED_RUN}/checkpoints").mkdir(parents=True)
+    (exp / "experiment.json").write_text(json.dumps({"steps": 200000}))
+    for s in steps:
+        p = exp / f"{watch.STOPPED_RUN}/checkpoints/steps_{s}_pytorch_model.pt"
+        p.write_bytes(b"x")
+        os.utime(p, (OLD, OLD))
+    return exp
+
+
+def test_stage0_eight_card_jobs_fill_idle_machines_in_order(tmp_path):
+    b = stopped_exp(tmp_path, "B")
+    stopped_exp(tmp_path, "S")
+    (b / f"evals_{watch.STOPPED_RUN}/steps_100000/shards/s1of8").mkdir(parents=True)  # B 100k started as shards
+    jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("other", 8)]), ("10.0.0.2", [("other", 8)]))})
+    w = watcher(tmp_path, "--stage0", "--stage0-cards", "8", "--pool-nodes", "h800:4", jobs=jobs, shards=8)
+    rows, *_ = w.tick()
+    eight = [p for p in jobs.prepared if p[1] == 8]
+    assert [p[2] for p in eight] == ["ev8-ds-s-100-s1-stopped-steps100000", "ev8-ds-b-100-s1-stopped-steps50000"]
+    assert eight[0][3][-2:] == ["8", "96"] and eight[0][4] == "h800"  # 4 machines - 2 busy = 2 idle
+    b_states = {e["tag"]: e["state"] for e in rows[0]["evals"]}
+    assert b_states["steps_100000"].startswith("8 个 1 卡分片")  # shards already begun: kept
+    jobs.listing = [eight_card("downstream-ev8-ds-s-100-s1-stopped-steps100000", "STARTING")]
+    before = len(jobs.prepared)
+    w2 = watcher(tmp_path, "--stage0", "--stage0-cards", "8", "--pool-nodes", "h800:9", jobs=jobs, shards=8)
+    w2.tick()
+    assert not [p for p in jobs.prepared[before:] if p[1] == 8]  # one of ours waits: no more
+    assert any("先不提交更多" in n for n in w2.notes) and w2.live8() == [] and w2.live_shards() == 0

@@ -227,6 +227,7 @@ class Watcher:
         self.disk = None
         self._hold, self._jobs, self._views, self._rooms = None, None, {}, {}
         self.pending = []  # (priority key, shard dir, checkpoint, i, k, job name) collected in a pass
+        self.pending8 = []  # (priority key, evaluation dir, checkpoint, job name): 8-card evaluations for idle machines
 
     # ------------------------------------------------------------------------------------------- bookkeeping
     def save(self):
@@ -298,7 +299,7 @@ class Watcher:
         if pool not in self._rooms:
             v = self.view(pool)
             waiting = sum(1 for j in self.job_list()
-                          if (j.get("display_name") or "").startswith("downstream-ev")
+                          if (j.get("display_name") or "").startswith("downstream-ev") and job_cards(j) in (None, 1)
                           and j.get("state") in sco_job.WAITING_STATES
                           and ((j.get("resource_pool") or {}).get("name") if isinstance(j.get("resource_pool"), dict)
                                else j.get("resource_pool")) == pool)
@@ -348,14 +349,84 @@ class Watcher:
         return None, "；".join(f"{p}：{r}" for p, r in reasons.items())
 
     def live8(self) -> list:
-        """Our 8-card jobs alive (waiting or running): stage 1-2 training, RL, tests.  They share --slots places."""
+        """Our 8-card training jobs alive (waiting or running): stage 1-2 training, RL, tests; they share --slots
+        places.  8-card evaluation jobs (downstream-ev8-*) are not training and do not count."""
         return [str(j.get("display_name")) for j in self.job_list()
                 if str(j.get("display_name") or "").startswith("downstream-") and job_cards(j) == 8
+                and not str(j.get("display_name")).startswith("downstream-ev")
                 and (j.get("state") in sco_job.WAITING_STATES or j.get("state") == "RUNNING")]
 
     def live_shards(self) -> int:
         return sum(1 for j in self.job_list() if str(j.get("display_name") or "").startswith("downstream-ev")
+                   and job_cards(j) in (None, 1)
                    and (j.get("state") in sco_job.WAITING_STATES or j.get("state") == "RUNNING"))
+
+    # ------------------------------------------------------------- whole idle machines (user, 2026-10-22 16:30)
+    def idle_nodes(self, pool: str):
+        """Machines of `pool` with nothing of this workspace running on them (--pool-nodes minus the machines in the
+        pool view), minus our 8-card evaluation jobs still waiting there; None if the view cannot be read.  Jobs of
+        other workspaces on the pool are not seen, so this can be too high; a waiting job of ours stops further ones."""
+        nodes = dict(x.split(":") for x in self.a.pool_nodes).get(pool)
+        v = self.view(pool)
+        if nodes is None or v is None:
+            return None
+        return max(0, int(nodes) - len(v["hosts"]) - len(self.waiting8(pool)))
+
+    def waiting8(self, pool: str = None) -> list:
+        return [str(j.get("display_name")) for j in self.job_list()
+                if str(j.get("display_name") or "").startswith("downstream-ev") and job_cards(j) == 8
+                and j.get("state") in sco_job.WAITING_STATES and (pool is None or job_pool(j) == pool)]
+
+    def whole_entry(self, exp: Path, tag: str, path: Path, root: Path, key) -> dict:
+        """One checkpoint evaluated by one 8-card job (8 policy servers x 96 simulator processes) on an idle machine of
+        --whole-pools: EVALDIR/job, EVALDIR/out/episodes."""
+        evaldir = root / tag
+        entry = {"tag": tag, "finished": False, "score": None}
+        if (evaldir / "job/submission.json").exists():
+            st = self.job(evaldir)
+            m = merged(evaldir)
+            if m:
+                return dict(entry, finished=True, score=score(m[0]), state="8 卡评测完成")
+            if not st["finished"]:
+                return dict(entry, state=f"8 卡评测（8 个策略服务 × 96 个仿真进程）：{st['state']}")
+            fails = len(list(evaldir.glob("job_failed_*")))
+            if fails >= 2 or self.a.dry:
+                self.alerts.append(f"{exp.name} {tag} 的 8 卡评测失败了 3 次，不再重提，请看 job_failed_*")
+                return dict(entry, state="8 卡评测失败 3 次")
+            (evaldir / "job").rename(evaldir / f"job_failed_{fails + 1}")
+            self.state["finished"].pop(str(evaldir), None)
+        if not settled(path, self.a.settle, self.now):
+            return dict(entry, state="waiting for the file to settle")
+        name = f"ev8-{exp.name.lower()}-stopped-{tag.replace('_', '')}"
+        self.pending8.append((key, evaldir, path, name))
+        return dict(entry, state="待提交（8 卡，等空闲机器）")
+
+    def flush_whole(self) -> None:
+        """Submit pending 8-card evaluations to idle machines of --whole-pools, in priority order: none while blocked,
+        none while one of ours waits there, at most idle_nodes() per pass."""
+        if not self.pending8:
+            return
+        todo, sent = sorted(self.pending8, key=lambda x: x[0]), []
+        for pool in self.a.whole_pools:
+            reason = self.blocked(8, pool)
+            if reason:
+                self.notes.append(f"{pool}：8 卡评测本轮不提交：{reason}")
+                continue
+            if self.waiting8(pool):
+                self.notes.append(f"{pool}：我们的 8 卡评测还有在排队的（{self.waiting8(pool)[0]}），先不提交更多")
+                continue
+            n = self.idle_nodes(pool) or 0
+            while n > 0 and todo:
+                _, evaldir, ckpt, name = todo.pop(0)
+                if self.a.dry:
+                    sent.append(f"{name} (would, {pool})")
+                else:
+                    self.jobs.prepare(evaldir, 8, pool, name[:40], ["bash", str(HERE / "run_eval_ckpt.sh"), str(ckpt),
+                                                                   str(evaldir / "out"), "8", "96"])
+                    sent.append(f"{self.jobs.submit(evaldir)} {name} ({pool})")
+                n -= 1
+        self.notes.append(f"8 卡评测（空闲机器）本轮提交 {len(sent)} 个{'：' + '；'.join(sent) if sent else ''}；"
+                          f"还有 {len(todo)} 个等空闲机器")
 
     def flush_shards(self) -> None:
         """Submit the pending shards in priority order, as far as the rules allow: nothing while blocked(); at most
@@ -372,7 +443,10 @@ class Watcher:
                 left = f"同时最多 {self.a.max_live_shards} 个 1 卡任务，已到上限"
             else:
                 pool = max(sco_job.POOLS, key=self.room)
-                if self.room(pool) <= 0:
+                if self.room(pool) <= 0 and self.a.idle_ok_pools:
+                    pool = self.a.idle_ok_pools[0]  # the user's go-ahead (10-22 16:30): idle machines there are fine
+                    self._rooms[pool] = self.room(pool) + 1
+                elif self.room(pool) <= 0:
                     left = "两个池里都没有已有别的任务、还有空卡的机器"
             if left:
                 self.notes.append(f"本轮提交 {len(sent)} 个分片；其余 {len(self.pending) - n} 个等下一轮：{left}")
@@ -441,6 +515,9 @@ class Watcher:
             if self.job(d)["state"] != "RUNNING":
                 continue
             pool = json.loads((d / "job/prepared.json").read_text())["pool"]
+            if pool in self.a.idle_ok_pools:  # idle machines allowed there (the user, 10-22 16:30)
+                verified[jid] = utc()
+                continue
             alone = sco_job.alone_on_machine(self.view(pool), jid)
             if alone is None:
                 continue
@@ -605,10 +682,14 @@ class Watcher:
         evaluated into evals_run_stopped_<date>/ in the order 100k -> 50k -> 25k and 75k, start by start."""
         stopped = exp / STOPPED_RUN
         row = {"exp": f"{exp.name}（10-22 停下的那次）", "train": "已停", "step": None, "loss": None, "evals": []}
+        root = exp / f"evals_{STOPPED_RUN}"
         for tag, path in checkpoints(exp, run=STOPPED_RUN):
             step = int(tag.split("_")[1])
-            row["evals"].append(self.shard_entry(exp, tag, path, "", root=exp / f"evals_{STOPPED_RUN}",
-                                                 key=(0, STAGE0_ORDER.get(step, 9), start_rank(exp.name), step)))
+            key = (0, STAGE0_ORDER.get(step, 9), start_rank(exp.name), step)
+            if self.a.stage0_cards == 8 and not (root / tag / "shards").exists():
+                row["evals"].append(self.whole_entry(exp, tag, path, root, key))
+            else:  # one-card shards (a checkpoint whose shards started stays with them)
+                row["evals"].append(self.shard_entry(exp, tag, path, "", root=root, key=key))
         return row
 
     def tick(self):
@@ -629,6 +710,7 @@ class Watcher:
             else:
                 missing.append(exp_id)
         self.flush_shards()
+        self.flush_whole()
         rep = self.repeat_results()
         gate = self.gate()
         self.report()
@@ -766,6 +848,14 @@ def parser():
                     help="submit nothing while any workspace job whose name starts so is waiting for cards")
     ap.add_argument("--yield-to-same-size", nargs="*", default=["bq_tp_mmxbf16"],
                     help="submit nothing of N cards while such a job of N cards waits (unknown size: wait too)")
+    ap.add_argument("--stage0-cards", type=int, choices=(1, 8), default=1,
+                    help="8: a stage-0 checkpoint whose shards have not started is evaluated by one 8-card job "
+                         "(8 servers x 96 processes) on an idle machine of --whole-pools (the user, 10-22 16:30)")
+    ap.add_argument("--whole-pools", nargs="*", default=["h800"], help="pools for the 8-card evaluations")
+    ap.add_argument("--pool-nodes", nargs="*", default=["h800:29", "zoetrope:15"],
+                    help="POOL:N machines usable in the pool (sco aec2 clusters list, minus exception nodes)")
+    ap.add_argument("--idle-ok-pools", nargs="*", default=[],
+                    help="one-card shards may also go to idle machines of these pools (no placement check there)")
     ap.add_argument("--pause-file", default=str(RUNS_ROOT / "PAUSE_SUBMISSIONS"),
                     help="while this file exists nothing is submitted (e.g. on the main window's request)")
     return ap
