@@ -256,7 +256,22 @@ def stage0_html(s0) -> str:
             f'<p class="meta">同一起点后一个检查点减前一个，同一批场景配对，单位百分点。合并差把所有回合放在一起；'
             f'逐任务平均差先算每个任务的差再平均。p 大、差小说明这两个点之间分不出变化（曲线已平），'
             f'判断时和"评测噪声"一节的下限比。</p>') if rows else '<p class="empty">每个起点至少要两个检查点。</p>'
-    return curve + band + flat
+    rule = s0.get("step_rule") or {}
+    rows = []
+    for s, r in rule.get("starts", {}).items():
+        rows.append(f'<tr><td>{E(s)}</td><td class="n">{pts(r["task_mean_diff"])}<br><span class="meta">{r["tasks_up"]}↑ '
+                    f'{r["tasks_down"]}↓</span></td><td class="n">{pval(r["wilcoxon_p"])}</td>'
+                    f'<td class="n {"" if r["within"] else "down"}">{"是" if r["within"] else "否"}</td>'
+                    f'<td class="n">{pts(r["diff"])}</td><td class="n">{pval(r["p"])}</td></tr>')
+    verdict = (f'按规则阶段 1 用 <b>{rule["steps"] // 1000}k</b> 步'
+               + ("" if rule["pooled_steps"] == rule["steps"] else f'（用合并差判断是 {rule["pooled_steps"] // 1000}k，不一致）')
+               if rule.get("complete") else "四个起点的 50k 和 100k 还没都评完。")
+    steps_rule = (f'<h3>阶段 1 的步数规则：50k → 100k</h3><div class="tablewrap"><table><thead><tr><th>起点</th>'
+                  f'<th class="n">逐任务平均差</th><th class="n">Wilcoxon p</th><th class="n">在噪声内</th>'
+                  f'<th class="n">合并差</th><th class="n">McNemar p</th></tr></thead><tbody>{"".join(rows)}</tbody></table>'
+                  f'</div><p class="meta">你 10-22 定的规则：四个起点的 50k 到 100k 配对差都在噪声内（p &gt; 0.05 且小于 3 个百分点）'
+                  f'用 10 万步，否则 20 万。按主检验（34 个任务为配对单位）判断，合并差和 McNemar 并列参考。{verdict}</p>')
+    return curve + band + flat + steps_rule
 
 
 def example_block(ex) -> str:

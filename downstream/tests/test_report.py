@@ -150,5 +150,33 @@ def test_stage0_build_reads_the_stopped_runs(tmp_path):
     assert all((r["from"], r["to"]) == (75000, 100000) and r["all"]["n"] == 950 and r["spatial"]["n"] == 450
                for r in s0["flat"].values())
     assert results["finals"] == {} and results["main_label"].startswith("阶段 0") and len(results["noise_floor"]) == 2
+    rule = s0["step_rule"]
+    assert rule["complete"] and set(rule["starts"]) == {"B", "S", "RS", "RD"} and rule["steps"] in (100000, 200000)
+    for r in rule["starts"].values():
+        assert r["n"] == 950 and r["within"] == (r["wilcoxon_p"] > 0.05 and abs(r["task_mean_diff"]) < 0.03)
+    assert (rule["steps"] == 100000) == all(r["within"] for r in rule["starts"].values())
     page = (tmp_path / "report0/index.html").read_text(encoding="utf-8")
-    assert 'id="stage0"' in page and "最后两个检查点之差" in page and "评测噪声下限" in page
+    assert 'id="stage0"' in page and "最后两个检查点之差" in page and "评测噪声下限" in page and "阶段 1 的步数规则" in page
+
+
+def test_step_rule_by_hand(tmp_path):
+    """Two tasks; B and S equal at 50k and 100k (within), RS and RD gain 40 points on both tasks (not within)."""
+    root = tmp_path / "runs"
+    tasks = {"OpenDrawer": 50, "CloseFridge": 20}
+    gain = {"B": 0.0, "S": 0.0, "RS": 0.4, "RD": 0.4}
+    for start, g in gain.items():
+        exp = root / f"experiments/DS-{start}-100-s1"
+        exp.mkdir(parents=True)
+        (exp / "experiment.json").write_text("{}")
+        for step, rate in ((50000, 0.2), (100000, 0.2 + g)):
+            d = exp / f"evals_{build.STAGE0_RUN}/steps_{step}/out/episodes"
+            d.mkdir(parents=True)
+            rows = [{"task": t, "seed": 1000 + i, "success": i < round(rate * n), "steps": 10, "max_steps": 100,
+                     "status": "complete"} for t, n in tasks.items() for i in range(n)]
+            (d / "episodes.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            (d / "summary.json").write_text(json.dumps({"per_task": {t: {"n": n} for t, n in tasks.items()}}))
+    coll = collect.collect(root, evals_name=f"evals_{build.STAGE0_RUN}", run=build.STAGE0_RUN)
+    rule = build.step_rule(coll, coll.starts())
+    assert rule["complete"] and rule["steps"] == 200000 and rule["pooled_steps"] == 200000
+    assert rule["starts"]["B"]["within"] and not rule["starts"]["RS"]["within"]
+    assert rule["starts"]["RS"]["task_mean_diff"] == pytest.approx(0.4) and rule["starts"]["RS"]["p"] < 0.05

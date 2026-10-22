@@ -153,7 +153,42 @@ def stage0(coll, reference: str = "B") -> dict:
             row[g] = dict(stats.paired(mb, ma), **{"task_" + k: v for k, v in stats.task_level(diffs).items()})
         flat[s] = row
     return {"starts": starts, "steps": sorted({e.step for e in evs}), "curve": curve, "latest_common": latest,
-            "spatial": spatial, "flat": flat, "band": BAND}
+            "spatial": spatial, "flat": flat, "band": BAND, "step_rule": step_rule(coll, starts)}
+
+
+RULE_FROM, RULE_TO, RULE_P, RULE_POINTS = 50000, 100000, 0.05, 0.03
+
+
+def pair_diff(coll, start, a, b, keep=None) -> dict:
+    """Checkpoint b minus checkpoint a of one start (100%, seed 1), same scenes: pooled (McNemar) and task-level."""
+    ea, eb = stats.episodes_of(coll, start, "100", a, [1]), stats.episodes_of(coll, start, "100", b, [1])
+    if keep is not None:
+        ea, eb = [x for x in ea if x["task"] in keep], [x for x in eb if x["task"] in keep]
+    ta, tb = stats.task_counts(ea), stats.task_counts(eb)
+    diffs = [tb[t][0] / tb[t][1] - ta[t][0] / ta[t][1] for t in sorted(set(ta) & set(tb)) if ta[t][1] and tb[t][1]]
+    return dict(stats.paired(stats.outcome_map(eb), stats.outcome_map(ea)), **stats.task_level(diffs))
+
+
+def step_rule(coll, starts) -> dict:
+    """The user's rule of 2026-10-22 for stage 1's number of steps: if, for all four starts, the paired difference
+    between their 50k and 100k checkpoints is within the noise (p > 0.05 and less than 3 points), 100k steps,
+    otherwise 200k.  Applied with the primary statistic (34 tasks as the pairing unit: mean per-task difference and
+    its Wilcoxon p); the pooled difference with McNemar's p is shown next to it."""
+    rows = {}
+    for s in starts:
+        have = {e.step for e in coll.first() if (e.start, e.ratio, e.seed) == (s, "100", 1)}
+        if {RULE_FROM, RULE_TO} <= have:
+            d = pair_diff(coll, s, RULE_FROM, RULE_TO)
+            primary = (not math.isnan(d["wilcoxon_p"]) and d["wilcoxon_p"] > RULE_P
+                       and abs(d["task_mean_diff"]) < RULE_POINTS) or (d["tasks_up"] + d["tasks_down"] == 0)
+            pooled = d["p"] > RULE_P and abs(d["diff"]) < RULE_POINTS
+            rows[s] = dict(d, within=primary, pooled_within=pooled)
+    complete = len(rows) == 4 and set(rows) == set(starts)
+    out = {"from": RULE_FROM, "to": RULE_TO, "p": RULE_P, "points": RULE_POINTS, "starts": rows, "complete": complete}
+    if complete:
+        out["steps"] = RULE_TO if all(r["within"] for r in rows.values()) else 200000
+        out["pooled_steps"] = RULE_TO if all(r["pooled_within"] for r in rows.values()) else 200000
+    return out
 
 
 def stage0_lines(s0) -> list:
@@ -175,6 +210,17 @@ def stage0_lines(s0) -> list:
                      f"（McNemar p = {page.pval(r['all']['p'])}；逐任务平均 {page.pts(r['all']['task_task_mean_diff'])}，"
                      f"Wilcoxon p = {page.pval(r['all']['task_wilcoxon_p'])}），空间组 {page.pts(r['spatial']['diff'])} 个百分点"
                      f"（McNemar p = {page.pval(r['spatial']['p'])}）。")
+    rule = s0.get("step_rule") or {}
+    for s, r in rule.get("starts", {}).items():
+        lines.append(f"阶段 1 步数规则，{s} 的 50k → 100k（同一批场景）：逐任务平均差 {page.pts(r['task_mean_diff'])} 个百分点，"
+                     f"Wilcoxon p = {page.pval(r['wilcoxon_p'])}，{'在' if r['within'] else '不在'}噪声内；"
+                     f"合并差 {page.pts(r['diff'])} 个百分点，McNemar p = {page.pval(r['p'])}。")
+    if rule.get("complete"):
+        lines.append(f"按规则（四个起点都满足 p > 0.05 且差小于 3 个百分点才用 10 万步）：阶段 1 用 {rule['steps'] // 1000}k 步"
+                     + ("" if rule["pooled_steps"] == rule["steps"] else
+                        f"；改用合并差判断会得到 {rule['pooled_steps'] // 1000}k 步，两种判断不一致") + "。")
+    elif rule:
+        lines.append(f"阶段 1 步数规则：四个起点的 50k 和 100k 还没都评完（已有 {len(rule.get('starts', {}))} 个起点）。")
     return lines
 
 
