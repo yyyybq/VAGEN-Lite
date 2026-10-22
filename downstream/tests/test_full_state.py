@@ -141,7 +141,8 @@ def test_resume_check_on_a_good_and_a_bad_resume(tmp_path):
               launches=[{"resumed_from": {"step": 5, "batches": 5, "skip": 5, "load_seconds": 3.0,
                                           "lr_after_load": lr5, "lr_saved": lr5}}])
     out = resume_check.check(tmp_path)
-    assert out["data_continues"] and out["schedule_continues"]
+    assert out["data_continues"] and out["schedule_continues"] and out["kill_effective"]
+    assert not out["segment_stopped"]  # only one resume here
     assert out["b_killed_after_step"] == 7 and out["b_resumed_from"] == [5] and out["redrawn_batches"] == 2
     assert out["loss_diff_before_kill"]["n"] == 5 and out["loss_diff_after_resume"]["n"] == 5
     assert out["loss_diff_after_resume"]["max_abs"] == pytest.approx(2e-4)
@@ -171,3 +172,23 @@ def test_build_config_writes_the_full_state_settings(tmp_path):
     plain = make_experiment.build_config(recipe, exp_dir=tmp_path / "e", exp_id="x", start_path="/s", data_dir=data,
                                          seed=1, steps=10, save_interval=10, log_every=1)
     assert "full_state_interval" not in plain["trainer"]
+
+
+def test_resume_check_tells_an_effective_kill_and_a_segment_end(tmp_path):
+    a_metrics = [m(s, 1.0 / s) for s in range(1, 11)]
+    a_digests = [{"batch": n, "step": n, "digest": f"d{n}"} for n in range(1, 11)]
+    write_run(tmp_path / "RESUME-A/run", a_metrics, a_digests)
+    # good: killed after 7 (states at 5), resumed 5 -> stop at 8, resumed 8 -> 10
+    good = [m(s, 1.0 / s) for s in range(1, 8)] + [{"resumed_from_step": 5}] + [m(s, 1.0 / s) for s in range(6, 9)] + \
+        [{"resumed_from_step": 8}] + [m(s, 1.0 / s) for s in range(9, 11)]
+    write_run(tmp_path / "B2/run", good, a_digests)
+    out = resume_check.check(tmp_path, "RESUME-A", "B2")
+    assert out["kill_effective"] and out["segment_stopped"] and out["second_launch_last_step"] == 8
+    # the first test of 2026-10-22: the kill missed the workers (first launch went on to 10), the stop launch found
+    # its step reached and left at once (no rows), the last launch resumed from the same state
+    missed = [m(s, 1.0 / s) for s in range(1, 11)] + [{"resumed_from_step": 8}, {"resumed_from_step": 8}] + \
+        [m(s, 1.0 / s) for s in range(9, 11)]
+    write_run(tmp_path / "B1/run", missed, a_digests)
+    out = resume_check.check(tmp_path, "RESUME-A", "B1")
+    assert out["data_continues"] and not out["kill_effective"] and not out["segment_stopped"]
+    assert resume_check.main([str(tmp_path), "RESUME-A", "B2"]) == 0 and (tmp_path / "resume_check_B2.json").is_file()

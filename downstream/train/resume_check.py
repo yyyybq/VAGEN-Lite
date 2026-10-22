@@ -4,8 +4,11 @@ killed, and resumed from its full state (twice).  Both log every step (loss, lea
 batch's actions and instructions on rank 0.
 
     python3 downstream/train/resume_check.py ROOT          # writes ROOT/resume_check.json, prints it
+    python3 downstream/train/resume_check.py ROOT A B      # runs ROOT/A and ROOT/B -> ROOT/resume_check_B.json
 
 Checks:
+  * the kill took effect (kill_effective): B's first launch stopped after the first resume's state and before the
+    second's, so the steps in between were trained twice; the segment launch ended at its stop step (segment_stopped);
   * batches: for every batch number, B's hash (the last launch that drew it) equals A's -> the data position was
     restored (same samples in the same order after the resume);
   * learning rates: equal at every step -> the schedule continued;
@@ -51,8 +54,8 @@ def stats(diffs: list) -> dict:
     return {"n": len(a), "mean_abs": sum(a) / len(a), "max_abs": max(a)}
 
 
-def check(root: Path) -> dict:
-    a_run, b_run = root / "RESUME-A/run", root / "RESUME-B/run"
+def check(root: Path, a_name: str = "RESUME-A", b_name: str = "RESUME-B") -> dict:
+    a_run, b_run = root / a_name / "run", root / b_name / "run"
     a = last_by(launches_of_metrics(a_run / "metrics.jsonl")[0], "step")
     b_launches = launches_of_metrics(b_run / "metrics.jsonl")
     b = last_by([r for launch in b_launches for r in launch], "step")  # later launches win
@@ -97,6 +100,13 @@ def check(root: Path) -> dict:
     }
     out["data_continues"] = bool(common) and not batch_mismatch and not redrawn_mismatch
     out["schedule_continues"] = bool(steps) and not lr_mismatch and all(x["lr_after_load"] == x["lr_saved"] for x in out["loads"])
+    # the kill took effect: the first launch stopped before the second full state, and the first resume went back to
+    # an earlier state (the steps in between were trained again); the segment launch ended at its stop step
+    seg_last = max((r["step"] for r in b_launches[1]), default=None) if len(b_launches) > 1 else None
+    out["second_launch_last_step"] = seg_last
+    out["kill_effective"] = bool(resumed_at) and killed_at is not None and resumed_at[0] < killed_at and (
+        len(resumed_at) < 2 or killed_at < resumed_at[1])
+    out["segment_stopped"] = len(resumed_at) >= 2 and seg_last == resumed_at[1]
     eps = root / "eval_P96/out/episodes"
     if (eps / "episodes.jsonl").is_file():
         sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -112,8 +122,10 @@ def check(root: Path) -> dict:
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     root = Path(argv[0])
-    out = check(root)
-    (root / "resume_check.json").write_text(json.dumps(out, indent=1) + "\n")
+    names = argv[1:3] if len(argv) >= 3 else []
+    out = check(root, *names)
+    (root / (f"resume_check_{names[1]}.json" if names else "resume_check.json")).write_text(
+        json.dumps(out, indent=1) + "\n")
     print(json.dumps(out, indent=1))
     return 0 if out["data_continues"] and out["schedule_continues"] else 1
 

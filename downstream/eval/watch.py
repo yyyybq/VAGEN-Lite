@@ -228,6 +228,7 @@ class Watcher:
         self._hold, self._jobs, self._views, self._rooms = None, None, {}, {}
         self.pending = []  # (priority key, shard dir, checkpoint, i, k, job name) collected in a pass
         self.pending8 = []  # (priority key, evaluation dir, checkpoint, job name): 8-card evaluations for idle machines
+        self.waiting_whole = []  # the same, for our 8-card evaluations submitted but still waiting for a machine
 
     # ------------------------------------------------------------------------------------------- bookkeeping
     def save(self):
@@ -388,6 +389,8 @@ class Watcher:
             if m:
                 return dict(entry, finished=True, score=score(m[0]), state="8 卡评测完成")
             if not st["finished"]:
+                if st["state"] in sco_job.WAITING_STATES:
+                    self.waiting_whole.append((key, evaldir, path, f"ev8-{exp.name.lower()}-stopped-{tag.replace('_', '')}"))
                 return dict(entry, state=f"8 卡评测（8 个策略服务 × 96 个仿真进程）：{st['state']}")
             fails = len(list(evaldir.glob("job_failed_*")))
             if fails >= 2 or self.a.dry:
@@ -401,9 +404,35 @@ class Watcher:
         self.pending8.append((key, evaldir, path, name))
         return dict(entry, state="待提交（8 卡，等空闲机器）")
 
+    def yield_waiting(self) -> list:
+        """--yield-to jobs (the main line) waiting for cards anywhere in the workspace."""
+        return [str(j.get("display_name")) for j in self.job_list() if j.get("state") in sco_job.WAITING_STATES
+                and any(str(j.get("display_name") or "").startswith(p) for p in self.a.yield_to)]
+
+    def withdraw_waiting_whole(self) -> list:
+        """While a main-line job waits, our 8-card evaluations that have not started are withdrawn (sco job deleted,
+        EVALDIR/job renamed job_withdrawn_<time>, nothing else touched) and go back to the queue: they must not take
+        a freed machine before the main line (the agreement with the main window, 2026-10-22)."""
+        out = []
+        if not self.waiting_whole or not self.yield_waiting():
+            return out
+        for key, evaldir, path, name in self.waiting_whole:
+            if self.a.dry:
+                out.append(f"{name} (would withdraw)")
+                continue
+            res = self.jobs.delete(evaldir)
+            (evaldir / "job").rename(evaldir / f"job_withdrawn_{int(self.now())}")
+            self.state["finished"].pop(str(evaldir), None)
+            self.pending8.append((key, evaldir, path, name))
+            out.append(f"{name}（{res}）")
+        self.notes.append(f"主线有任务在排队：撤下我们还没开始的 8 卡评测 {len(out)} 个：{'；'.join(out)}")
+        return out
+
     def flush_whole(self) -> None:
         """Submit pending 8-card evaluations to idle machines of --whole-pools, in priority order: none while blocked,
-        none while one of ours waits there, at most idle_nodes() per pass."""
+        none while one of ours waits there, at most --max-whole-per-pass and idle_nodes() per pass.  First, waiting
+        ones are withdrawn while the main line waits (withdraw_waiting_whole)."""
+        self.withdraw_waiting_whole()
         if not self.pending8:
             return
         todo, sent = sorted(self.pending8, key=lambda x: x[0]), []
@@ -415,7 +444,7 @@ class Watcher:
             if self.waiting8(pool):
                 self.notes.append(f"{pool}：我们的 8 卡评测还有在排队的（{self.waiting8(pool)[0]}），先不提交更多")
                 continue
-            n = self.idle_nodes(pool) or 0
+            n = min(self.idle_nodes(pool) or 0, self.a.max_whole_per_pass - len(sent))
             while n > 0 and todo:
                 _, evaldir, ckpt, name = todo.pop(0)
                 if self.a.dry:
@@ -852,6 +881,9 @@ def parser():
                     help="8: a stage-0 checkpoint whose shards have not started is evaluated by one 8-card job "
                          "(8 servers x 96 processes) on an idle machine of --whole-pools (the user, 10-22 16:30)")
     ap.add_argument("--whole-pools", nargs="*", default=["h800"], help="pools for the 8-card evaluations")
+    ap.add_argument("--max-whole-per-pass", type=int, default=1,
+                    help="8-card evaluations submitted per pass at most (the idle-machine estimate cannot see other "
+                         "workspaces' jobs; on 10-22 two of four went to the queue)")
     ap.add_argument("--pool-nodes", nargs="*", default=["h800:29", "zoetrope:15"],
                     help="POOL:N machines usable in the pool (sco aec2 clusters list, minus exception nodes)")
     ap.add_argument("--idle-ok-pools", nargs="*", default=[],

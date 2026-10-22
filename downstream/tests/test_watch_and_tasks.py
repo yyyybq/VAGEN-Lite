@@ -511,7 +511,8 @@ def test_stage0_eight_card_jobs_fill_idle_machines_in_order(tmp_path):
     stopped_exp(tmp_path, "S")
     (b / f"evals_{watch.STOPPED_RUN}/steps_100000/shards/s1of8").mkdir(parents=True)  # B 100k started as shards
     jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("other", 8)]), ("10.0.0.2", [("other", 8)]))})
-    w = watcher(tmp_path, "--stage0", "--stage0-cards", "8", "--pool-nodes", "h800:4", jobs=jobs, shards=8)
+    w = watcher(tmp_path, "--stage0", "--stage0-cards", "8", "--pool-nodes", "h800:4", "--max-whole-per-pass", "4",
+                jobs=jobs, shards=8)
     rows, *_ = w.tick()
     eight = [p for p in jobs.prepared if p[1] == 8]
     assert [p[2] for p in eight] == ["ev8-ds-s-100-s1-stopped-steps100000", "ev8-ds-b-100-s1-stopped-steps50000"]
@@ -524,3 +525,22 @@ def test_stage0_eight_card_jobs_fill_idle_machines_in_order(tmp_path):
     w2.tick()
     assert not [p for p in jobs.prepared[before:] if p[1] == 8]  # one of ours waits: no more
     assert any("先不提交更多" in n for n in w2.notes) and w2.live8() == [] and w2.live_shards() == 0
+
+
+def test_waiting_eight_card_evaluations_yield_to_the_main_line(tmp_path):
+    s = stopped_exp(tmp_path, "S", steps=(50000, 100000))
+    jobs = FakeJobs(states={"steps_50000": "STARTING"},
+                    views={"h800": busy_view(("10.0.0.1", [("other", 8)]))})
+    w = watcher(tmp_path, "--stage0", "--stage0-cards", "8", "--pool-nodes", "h800:3", jobs=jobs, shards=8)
+    w.tick()  # nothing waits in the main line: one submission per pass (S 100k first)
+    assert [p[2] for p in jobs.prepared] == ["ev8-ds-s-100-s1-stopped-steps100000"]
+    (s / f"evals_{watch.STOPPED_RUN}/steps_50000/job").mkdir(parents=True)
+    (s / f"evals_{watch.STOPPED_RUN}/steps_50000/job/submission.json").write_text(json.dumps({"job_id": "pt-w"}))
+    (s / f"evals_{watch.STOPPED_RUN}/steps_50000/job/prepared.json").write_text(json.dumps({"pool": "h800"}))
+    jobs.listing = [eight_card("interiorgs-v10-eval-test-x", "QUEUEING", cards=1)]
+    w2 = watcher(tmp_path, "--stage0", "--stage0-cards", "8", "--pool-nodes", "h800:3", jobs=jobs, shards=8)
+    w2.tick()
+    evaldir = s / f"evals_{watch.STOPPED_RUN}/steps_50000"
+    assert jobs.deleted == ["steps_50000"] and not (evaldir / "job").exists()
+    assert list(evaldir.glob("job_withdrawn_*")) and any("撤下我们还没开始的 8 卡评测 1 个" in n for n in w2.notes)
+    assert len(jobs.prepared) == 1  # not resubmitted while the main line waits
