@@ -208,7 +208,7 @@ def test_stage0_goes_100k_then_50k_then_25k_and_75k_start_by_start(tmp_path):
     assert order[0] == "DS-B-100-s1/steps_100000/shards/s1of8" and order[7] == "DS-B-100-s1/steps_100000/shards/s8of8"
     assert order[8] == "DS-S-100-s1/steps_100000/shards/s1of8"
     assert order[16].startswith("DS-B-100-s1/steps_50000") and order[24].startswith("DS-S-100-s1/steps_50000")
-    assert {o.split("/")[1] for o in order[32:]} == {"steps_25000"}  # 25k and 75k share a rank; 25k comes first
+    assert {o.split("/")[1] for o in order[32:]} == {"steps_25000"}  # 25k and 75k share a rank: one checkpoint at a time
     assert jobs.prepared[0][2] == "ev-ds-b-100-s1-stopped-steps100000-s1of8"
     assert rows[0]["exp"].startswith("DS-B-100-s1（10-22 停下的那次）")
 

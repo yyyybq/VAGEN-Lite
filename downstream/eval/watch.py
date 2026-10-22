@@ -497,7 +497,7 @@ class Watcher:
         for tag, path in checkpoints(exp, run=STOPPED_RUN):
             step = int(tag.split("_")[1])
             row["evals"].append(self.shard_entry(exp, tag, path, "", root=exp / f"evals_{STOPPED_RUN}",
-                                                 key=(0, STAGE0_ORDER.get(step, 9), start_rank(exp.name), 0)))
+                                                 key=(0, STAGE0_ORDER.get(step, 9), start_rank(exp.name), step)))
         return row
 
     def tick(self):
