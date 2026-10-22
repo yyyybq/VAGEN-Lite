@@ -100,7 +100,8 @@ def experiment_row(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], now: da
     steps = st.get("steps") or {}
     current = next((s for s in STEPS_ZH if (steps.get(s) or {}).get("state") in ("running", "failed")), None)
     jobs = (steps.get(current) or {}).get("jobs") or {}
-    job_states = [v for k, v in jobs.items() if k != "queued" and isinstance(v, str) and "ended" not in k]
+    job_states = [v for k, v in jobs.items() if k != "queued" and isinstance(v, str) and "ended" not in k
+                  and v not in ("SUCCEEDED", "FAILED", "STOPPED", "CANCELLED")]  # finished jobs neither run nor wait
     trainers = [v for k, v in jobs.items() if k.endswith("/rl") and isinstance(v, str)]
     if trainers:  # an RL step waits as long as its 8-card trainers wait (the render services start at once)
         job_states = trainers
