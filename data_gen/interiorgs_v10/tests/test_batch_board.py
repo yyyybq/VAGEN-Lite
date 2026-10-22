@@ -125,6 +125,16 @@ class BatchBoardTest(unittest.TestCase):
             {"id": "E5", "name": "没开始", "chain": str(self.root / "none")},
             {"id": "E6", "name": "SFT 等卡", "chain": sft_wait},
             {"id": "E7", "name": "评测等卡", "chain": eval_wait}]}
+        # a trainer deleted while it waited (moved to another pool): its queue record no longer counts as waiting
+        moved = chain("mv", {"state": "running", "plan": {"endpoint": 300},
+                             "steps": {"rl": {"state": "running", "jobs": {"y/rl": "QUEUEING", "y/renderer": "RUNNING"}}},
+                             "queue": {"pt-old": {"what": "rl/y/rl", "queued_s": 43000, "started": None},
+                                       "pt-new": {"what": "rl/y/rl", "queued_s": 300, "started": None}}})
+        (Path(moved) / "rl_run_y" / "job_rl").mkdir(parents=True)
+        (Path(moved) / "rl_run_y" / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-new"}))
+        self.assertIn("1 个在排队（最长 0.1 小时）", B.experiment_row({"chain": moved}, self.sets, now)["queue"])
+        (Path(queued) / "rl_run_as0" / "job_rl").mkdir(parents=True)  # the queued trainer's receipt: still its job
+        (Path(queued) / "rl_run_as0" / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-1"}))
         md = B.render(manifest, now)
         self.assertIn("| E1 | 排队 | 排队中 | RL |", md)
         self.assertIn("1 个在排队（最长 2.0 小时）", md)

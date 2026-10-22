@@ -92,6 +92,24 @@ def best_checkpoint(sets: Dict[str, Dict[str, str]], run: str, last: int, every:
     return max(scored)[2] if scored else None
 
 
+def current_job(chain: str, what: str, job_id: str) -> bool:
+    """Whether a queue record's job is still the job of its run: the receipt of its job folder names it.  A job
+    deleted while it waited (cancelled, moved to another pool, resubmitted) is not; an unknown kind of record is."""
+    parts = what.split("/")
+    if len(parts) == 3 and parts[0] in ("rl", "rl_extend") and parts[2] in ("rl", "renderer"):
+        receipt = Path(chain) / f"rl_run_{parts[1]}" / f"job_{parts[2]}" / "submission.json"
+    elif len(parts) == 2 and parts[0] in ("evaluate", "sft_eval"):
+        receipt = Path(chain) / "eval_runs" / parts[1] / "job" / "submission.json"
+    else:
+        return True
+    if not receipt.is_file():
+        return False
+    try:
+        return json.loads(receipt.read_text()).get("job_id") == job_id
+    except ValueError:
+        return True
+
+
 def experiment_row(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], now: datetime.datetime) -> Dict[str, Any]:
     p = Path(exp["chain"]) / "progress.json"
     if not p.is_file():
@@ -131,7 +149,7 @@ def experiment_row(exp: Dict[str, Any], sets: Dict[str, Dict[str, str]], now: da
                    for r in runs.values())
         eta = (now + datetime.timedelta(seconds=left, hours=EVAL_HOURS)).strftime("%m-%d %H:%M")
     queue = st.get("queue") or {}
-    waiting = [q for q in queue.values() if not q.get("started")]
+    waiting = [q for jid, q in queue.items() if not q.get("started") and current_job(exp["chain"], str(q.get("what", "")), jid)]
     started = [q for q in queue.values() if q.get("started")]
     qtext = ""
     if waiting:
