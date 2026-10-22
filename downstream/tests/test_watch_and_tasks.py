@@ -196,8 +196,9 @@ def test_guard_deletes_a_shard_that_started_alone_and_waits_before_resubmitting(
     before = len(jobs.prepared)
     w3 = watcher(tmp_path, jobs=jobs, shards=8)
     w3.tick()
-    resubmitted = [p for p in jobs.prepared[before:] if p[0] == "s1of8"]
-    assert not resubmitted  # within --bounce-wait-min
+    resubmitted = [p for p in jobs.prepared[before:] if "/evals/steps_25000/shards/s1of8/" in p[3][3]]
+    assert not resubmitted  # the bounced shard waits --bounce-wait-min
+    assert any("/evals/steps_25000/shards/s3of8/" in p[3][3] for p in jobs.prepared[before:])  # others go on
 
 
 def test_merged_shards_feed_the_gate(tmp_path):
