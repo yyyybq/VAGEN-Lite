@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any, Mapping
 
@@ -61,6 +62,7 @@ class OpenAICompatProvider:
         return base.rstrip("/") + "/chat/completions", key
 
     def complete(self, req: ProviderRequest) -> ProviderResponse:
+        """One call. ``req.timeout_s`` is a TOTAL deadline across retries (the loop budgets on it)."""
         import httpx
 
         url, key = self._endpoint()
@@ -72,9 +74,14 @@ class OpenAICompatProvider:
                 content.append({"type": "text", "text": f"[image: {label}]"})
                 content.append({"type": "image_url", "image_url": {
                     "url": "data:image/jpeg;base64," + b64(encode_jpeg(img, self.image_max_side))}})
+        system = req.system
+        if req.json_schema is not None and self.structured != "json_schema":
+            # json_object / prompt_only modes need the format in the prompt (and the word "JSON")
+            system += ("\n\nReply with a single JSON object (no prose) that conforms to this JSON schema:\n"
+                       + json.dumps(req.json_schema))
         body: dict = {
             "model": self.model,
-            "messages": [{"role": "system", "content": req.system}, {"role": "user", "content": content}],
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}],
             self.max_tokens_field: req.max_tokens,
             **self.extra_body,
         }
@@ -86,36 +93,54 @@ class OpenAICompatProvider:
                 body["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
         t0 = time.monotonic()
+        deadline = t0 + float(req.timeout_s)
         last: Exception | None = None
         for attempt in range(self.max_retries + 1):
+            left = deadline - time.monotonic()
+            if left <= 0.5:
+                break
             try:
-                r = httpx.post(url, headers=headers, content=json.dumps(body), timeout=req.timeout_s)
+                r = httpx.post(url, headers=headers, content=json.dumps(body), timeout=left)
                 if r.status_code in (408, 409, 429) or r.status_code >= 500:
                     raise ProviderError(f"HTTP {r.status_code}")
                 if r.status_code >= 400:
-                    # do not echo the request (it may contain the key in proxies' error pages)
-                    raise ProviderError(f"HTTP {r.status_code}: {r.text[:200]}")
+                    raise ProviderError(f"HTTP {r.status_code}: {_redact(r.text[:300], key)}")
                 data = r.json()
                 choice = (data.get("choices") or [{}])[0]
-                text = ((choice.get("message") or {}).get("content")) or ""
+                msg = choice.get("message") or {}
+                text = msg.get("content") or ""
                 if isinstance(text, list):
                     text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
                 usage = data.get("usage") or {}
+                error = None
+                if msg.get("refusal"):
+                    error = f"refusal: {str(msg['refusal'])[:200]}"
+                elif choice.get("finish_reason") == "length":
+                    error = "truncated (finish_reason=length)"
                 return ProviderResponse(
                     text=text,
-                    parsed=parse_json_loose(text) if req.json_schema is not None else None,
+                    parsed=parse_json_loose(text) if (req.json_schema is not None and error is None) else None,
                     usage={"input_tokens": int(usage.get("prompt_tokens") or 0),
                            "output_tokens": int(usage.get("completion_tokens") or 0)},
                     latency_s=time.monotonic() - t0,
                     model=str(data.get("model") or self.model),
                     provider=self.name,
+                    error=error,
                     stop_reason=choice.get("finish_reason"),
                 )
             except (ProviderError, httpx.TransportError) as e:
                 last = e
                 retryable = isinstance(e, httpx.TransportError) or str(e).startswith(("HTTP 408", "HTTP 409", "HTTP 429", "HTTP 5"))
-                if attempt < self.max_retries and retryable:
-                    time.sleep(min(8.0, 1.0 * 2**attempt))
+                backoff = min(8.0, 1.0 * 2**attempt)
+                if attempt < self.max_retries and retryable and time.monotonic() + backoff < deadline - 1.0:
+                    time.sleep(backoff)
                     continue
                 raise
-        raise ProviderError(str(last))
+        raise ProviderError(f"deadline of {req.timeout_s:.0f}s exhausted ({last})")
+
+
+def _redact(text: str, key: str) -> str:
+    """Error bodies from gateways may echo credentials; never let them reach the logs."""
+    if key:
+        text = text.replace(key, "***")
+    return re.sub(r"(sk-[A-Za-z0-9_\-]{6,}|Bearer\s+\S+)", "***", text)

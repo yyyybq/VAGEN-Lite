@@ -115,7 +115,7 @@ ROW_FIELDS = (
     "failure_reason", "budget_ok", "budget_source", "evaluation_time", "elapsed_s", "max_steps",
     "wallclock_budget_s", "budget_s_source",
     "provider_calls", "provider_s", "tokens_in", "tokens_out", "cost_usd", "provider_errors",
-    "recoveries", "replans", "fallbacks", "n_subtasks",
+    "all_provider_calls_failed", "recoveries", "replans", "fallbacks", "n_subtasks",
     "infra_error", "infra_reason", "missing", "missing_reason", "in_declared", "superseded",
     "superseded_reason", "attempt", "included", "synthetic",
     "episode_id", "join", "json_path", "video_path", "summary_path", "run_dir",
@@ -574,6 +574,11 @@ def episode_rows(run: RunData, infra_reasons: Iterable[str] = DEFAULT_INFRA_FAIL
             warnings.append(f"{task}/{iid} in run {run.run_id}: the agent planned with a {agent_budget:g} s budget, "
                             f"the 2026 rule gives {row['wallclock_budget_s']:g} s (max_steps {row['max_steps']})")
         _attach_summary(row, entry)
+        calls, errs = row.get("provider_calls"), row.get("provider_errors")
+        if calls and errs is not None and errs >= calls:
+            row["all_provider_calls_failed"] = True
+            warnings.append(f"{task}/{iid} in run {run.run_id}: all {calls} strong-model calls failed; "
+                            "the modules fell back and this episode is effectively L0")
         infra = (per_infra.get((task, iid, rid)) or tainted
                  or (f"failure_reason={reason}" if reason in infra_reasons else None))
         if infra:

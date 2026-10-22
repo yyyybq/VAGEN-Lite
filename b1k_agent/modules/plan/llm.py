@@ -62,7 +62,9 @@ class LLMPlanner:
         self.timeout_s = float(p.get("timeout_s", 60.0))
         self.default_max_steps = int(p.get("default_max_steps", 900))
         self.min_max_steps = int(p.get("min_max_steps", 60))
-        self.allow_task_complete = bool(p.get("allow_task_complete", True))
+        # The evaluator ends the episode as soon as the goal holds, so "task complete" is never true while
+        # we are asked; a claim of completion is treated as "keep going with the full task".
+        self.allow_task_complete = bool(p.get("allow_task_complete", False))
 
     def reset(self, ctx):
         self.ctx = ctx
@@ -73,7 +75,7 @@ class LLMPlanner:
     # ------------------------------------------------------------------
 
     def _fallback(self, why: str) -> Subtask:
-        return Subtask(subtask_id="", skill=FULL_TASK_SKILL, instruction=self.ctx.task_instruction,
+        return Subtask(subtask_id="", skill=FULL_TASK_SKILL, instruction=self.ctx.full_task_prompt,
                        max_steps=None, source="plan.llm.fallback", evidence=why)
 
     def _skills_text(self) -> str:
@@ -122,8 +124,10 @@ class LLMPlanner:
         if resp.error or not isinstance(resp.parsed, dict):
             return self._fallback(f"provider: {resp.error or 'unparseable reply'}")
         r: dict[str, Any] = resp.parsed
-        if r.get("task_complete") and self.allow_task_complete:
-            return None
+        if r.get("task_complete"):
+            if self.allow_task_complete:
+                return None
+            return self._fallback("model claimed the task is complete while the episode is still running")
         skill = self.skills.get(str(r.get("skill")))
         if skill is None:
             return self._fallback(f"unknown skill {r.get('skill')!r}")
@@ -132,7 +136,7 @@ class LLMPlanner:
             if isinstance(item, dict) and "name" in item:
                 args[str(item["name"])] = str(item.get("value", ""))
         if skill.name == FULL_TASK_SKILL:
-            instruction = self.ctx.task_instruction
+            instruction = self.ctx.full_task_prompt
         else:
             missing = [a for a in skill.inputs if a not in args]
             if missing:

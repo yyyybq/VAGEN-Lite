@@ -115,13 +115,14 @@ class LoggedProvider:
     also turned into an error response, but logged with error="unavailable: ...".
     """
 
-    def __init__(self, inner: Any, *, price_in_per_mtok: float = 0.0, price_out_per_mtok: float = 0.0,
+    def __init__(self, inner: Any, *, price_in_per_mtok: Optional[float] = None, price_out_per_mtok: Optional[float] = None,
                  recorder: Any = None, label: str = ""):
         self.inner = inner
         self.name = getattr(inner, "name", "provider")
         self.label = label or self.name
-        self.price_in = float(price_in_per_mtok or 0.0)
-        self.price_out = float(price_out_per_mtok or 0.0)
+        # None = price not configured -> cost is recorded as unknown, never as $0
+        self.price_in = None if price_in_per_mtok is None else float(price_in_per_mtok)
+        self.price_out = None if price_out_per_mtok is None else float(price_out_per_mtok)
         self.recorder = recorder
         self._calls = 0
 
@@ -139,7 +140,10 @@ class LoggedProvider:
             resp = ProviderResponse(text="", parsed=None, usage={}, latency_s=time.monotonic() - t0,
                                     model=getattr(self.inner, "model", ""), provider=self.label,
                                     error=f"{type(e).__name__}: {str(e)[:300]}")
-        cost = (resp.usage.get("input_tokens", 0) * self.price_in + resp.usage.get("output_tokens", 0) * self.price_out) / 1e6
+        if self.price_in is None or self.price_out is None:
+            cost = None
+        else:
+            cost = (resp.usage.get("input_tokens", 0) * self.price_in + resp.usage.get("output_tokens", 0) * self.price_out) / 1e6
         resp = dataclasses.replace(resp, cost_usd=cost, provider=self.label)
         self._log(call_id, req, resp)
         return resp

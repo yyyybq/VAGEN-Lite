@@ -1,8 +1,8 @@
 # Step-3 baseline runs (docs/RUNBOOK_105.md, Step 3): L0 = executor only (pi0.5 single-task checkpoint)
-# behind our agent server, on turning_on_radio public_test index 0 (instance id 301), once with each
-# official observation wrapper. Index 0 is a Report instance: allowed here because L0 is the frozen
-# executor-only baseline and each job runs exactly once (re-runs only for infrastructure errors, all
-# recorded in the ledger). The runbook's very first smoke episode uses Dev index 10 instead.
+# behind our agent server, on turning_on_radio public_test index 10 (instance id 311, a Dev instance),
+# once with each official observation wrapper. Report instances (indices 0-9) are not used: the wrapper
+# choice is a tuning decision, and Report runs only with frozen configs, one rollout per instance.
+# Re-runs only for infrastructure errors (max 2), all recorded in the ledger.
 #
 # max_steps: not set, so the official default applies (int(1.5 x mean human length) from task.jsonl); the
 # agent gets the same value as its 1 s/step budget.
@@ -11,7 +11,6 @@
 #   python -m eval.batch configs/batches/step3_turning_on_radio.yaml --dry-run
 #   nohup python -m eval.batch configs/batches/step3_turning_on_radio.yaml > step3_batch.out 2>&1 &
 batch: step3_turning_on_radio
-allow_report: true    # index 0 is a Report instance; L0 is frozen (see above)
 mode: public_test
 seeds: [0]
 retries_on_infra_error: 2
@@ -23,13 +22,13 @@ jobs:
   - name: L0
     config: configs/L0_exec_only.yaml
     task: turning_on_radio
-    instances: [0]
+    instances: [10]
     wrapper: default
     note: "Step-3 baseline run: L0 via the agent server, DefaultWrapper (224x224 RGB; the evaluator CLI default)"
   - name: L0
     config: configs/L0_exec_only.yaml
     task: turning_on_radio
-    instances: [0]
+    instances: [10]
     wrapper: rgbd
     note: "Step-3 baseline run: L0 via the agent server, RGBDFullResWrapper (720/480 RGB-D; the docs' official track wrapper)"
   # Passthrough-equivalence reference (evaluator -> executor server, no agent); uncomment to add it:
@@ -37,6 +36,6 @@ jobs:
   #   config: configs/L0_exec_only.yaml
   #   direct: true
   #   task: turning_on_radio
-  #   instances: [0]
+  #   instances: [10]
   #   wrapper: default
   #   note: "L0-direct reference for the DefaultWrapper Step-3 run"

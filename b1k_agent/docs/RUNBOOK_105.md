@@ -103,9 +103,10 @@ Write the measured numbers into PROTOCOL.md: the single-episode wall clock, the 
 
 ## Step 5 onward
 
+- Strong model (before any L1-L4 / S7 run): export `ASTRA_BASE_URL`, `ASTRA_API_KEY`, `ASTRA_MODEL` (never in a file under the repo), then `python -m providers.probe --config configs/S7_min_loop.yaml --provider astra --out docs/provider_probe_astra.json`. Configs with provider-backed modules refuse to start without them. A run with the Claude substitute uses the `claude` provider and is labelled as such.
 - Executor candidates and the skill diagnosis: `scripts/skill_probe.py` and `docs/PROTOCOL.md` §Executor candidates.
 - Dev set: `docs/PROTOCOL.md` §Dev tasks.
 - Ladder and leave-one-out configs: `python -m eval.ablation ...`.
 - Batches: `python -m eval.batch configs/batches/...`.
-- Tables: `python -m eval.aggregate ...`.
+- Tables: `python -m eval.aggregate <run_dir>... --out results/<name>` (add `--compare A B` for a paired table).
 - Failure distribution: `python -m eval.failures ...`.

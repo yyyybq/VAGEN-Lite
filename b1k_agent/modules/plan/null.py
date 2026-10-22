@@ -16,4 +16,4 @@ class NullPlanner:
         if self._issued:
             return None
         self._issued = True
-        return Subtask(subtask_id="", skill=FULL_TASK_SKILL, instruction=self._ctx.task_instruction, source="plan.null")
+        return Subtask(subtask_id="", skill=FULL_TASK_SKILL, instruction=self._ctx.full_task_prompt, source="plan.null")

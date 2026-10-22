@@ -54,7 +54,7 @@ python -m omnigibson.eval.eval --task-name turning_on_radio --mode public_test -
 python -m eval.launch --config configs/L0_exec_only.yaml --task turning_on_radio --instances 10 --dry-run
 
 # tables come from logs only
-python -m eval.aggregate <run_dir>...
+python -m eval.aggregate <run_dir>... --out results/<name>
 ```
 
 ## Modularity red lines (each has a test in `tests/`)

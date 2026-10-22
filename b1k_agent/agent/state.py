@@ -119,7 +119,9 @@ class EpisodeState:
         if self.t_first_obs is None:
             self.t_first_obs = obs.received_at
         self.t_latest_obs = obs.received_at
-        self.proprio_history.append((obs.step, np.array(obs.proprio, copy=True)))
+        snap = np.array(obs.proprio, copy=True)
+        snap.flags.writeable = False  # StateView returns the history as a tuple of these arrays
+        self.proprio_history.append((obs.step, snap))
         if self.instruction_override is not None and obs.step >= self.override_until_step:
             self.instruction_override = None
 
@@ -187,7 +189,7 @@ class EpisodeState:
             return self.instruction_override
         if self.current_subtask is not None:
             return self.current_subtask.instruction
-        return self.ctx.task_instruction
+        return self.ctx.full_task_prompt
 
     def summary_text(self, max_events: int = 12) -> str:
         """Compact history for prompts: recent events plus finished subtasks."""

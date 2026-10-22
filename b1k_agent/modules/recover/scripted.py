@@ -14,11 +14,13 @@ attempts and returns None when it has nothing sensible left (the loop then keeps
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 
 from agent.actions import hold_action, interpolate_joints
 from agent.fields import ACTION_SLICES, PROPRIO_SLICES
-from agent.interfaces import RecoveryKind, RecoveryPlan
+from agent.interfaces import FULL_TASK_SKILL, RecoveryKind, RecoveryPlan
 
 DEFAULT_PLAYBOOK = {
     "grasp_failed": ["retract_arms", "back_up"],
@@ -74,6 +76,8 @@ class ScriptedRecovery:
         raise KeyError(name)
 
     def propose(self, obs, state, failure_type: str):
+        if state.low_risk:
+            return None  # no blind motions in the last stretch before final-step scoring
         ft = failure_type if failure_type in self.playbook else "unknown"
         n = self.attempts.get(ft, 0)
         if n >= self.max_attempts_per_type:
@@ -82,9 +86,11 @@ class ScriptedRecovery:
         if self.instruction_recovery and ft in self.instruction_skills:
             skill = next((s for s in self.ctx.skills if s.name == self.instruction_skills[ft]), None)
             if skill is not None and skill.available and skill.verified and not skill.inputs:
-                return RecoveryPlan(kind=RecoveryKind.INSTRUCTION, primitive=skill.name,
-                                    instruction=skill.instruction_template, duration_steps=self.retract_steps * 3,
-                                    reason=f"{ft}: verified recovery skill", source="recover.scripted")
+                text = self.ctx.full_task_prompt if skill.name == FULL_TASK_SKILL else skill.instruction_template
+                if text and not re.search(r"\{[a-z_]+\}", text):
+                    return RecoveryPlan(kind=RecoveryKind.INSTRUCTION, primitive=skill.name,
+                                        instruction=text, duration_steps=self.retract_steps * 3,
+                                        reason=f"{ft}: verified recovery skill", source="recover.scripted")
         seq = self.playbook[ft]
         name = seq[n % len(seq)]
         return RecoveryPlan(kind=RecoveryKind.SCRIPTED, primitive=name, actions=self.primitive(name, obs, state),

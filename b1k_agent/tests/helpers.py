@@ -25,7 +25,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIX = os.path.join(ROOT, "tests", "fixtures")
 TASK_PROMPT = "Turn on the radio receiver that's on the table in the living room."
 
-PLAN_REPLY = {"task_complete": False, "skill": "__full_task__", "args": [], "target_subgoals": ["g0"],
+PLAN_REPLY = {"task_complete": False, "skill": "press_power", "args": [], "target_subgoals": ["g0"],
               "max_steps": 300, "success_check": "radio display lit", "failure_cues": ["radio on the floor"],
               "evidence": "radio visible on the table"}
 CHECK_REPLIES = [
@@ -71,6 +71,7 @@ def make_cfg(name: str, overrides=()) -> dict:
     cfg = load_config(os.path.join(ROOT, "configs", f"{name}.yaml"), list(overrides))
     cfg = copy.deepcopy(cfg)
     cfg["task_metadata"] = {"id_to_name": {0: "turning_on_radio"}, "bddl_root": FIX, "task_misc_csv": None}
+    cfg["executor"]["skill_catalog"] = os.path.join(FIX, "skills_test.yaml")
     scripted = {"kind": "scripted", "replies": {"plan.next_subtask": [PLAN_REPLY], "check.judge": CHECK_REPLIES}}
     cfg["providers"] = {"astra": dict(scripted), "claude": dict(scripted)}
     return cfg

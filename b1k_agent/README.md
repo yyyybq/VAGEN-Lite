@@ -51,8 +51,11 @@ Run everything from the repo root.
 # Tests (no simulator needed)
 python -m pytest -q
 
-# Probe a strong-model endpoint: text, JSON schema, vision, latency (keys never printed)
+# Probe a strong-model endpoint: text, JSON schema, vision, minimal and module-sized latency,
+# stop reasons, token usage, the model id the endpoint reports (keys never printed)
 python -m providers.probe --config configs/S7_min_loop.yaml --provider astra --out docs/provider_probe_astra.json
+# Configs with provider-backed modules (L1-L4, S7) refuse to start when the provider is not configured,
+# so a run cannot silently become L0 (agent.server --allow-unavailable-provider overrides; recorded in the manifest)
 
 # One official episode through the agent (Step 3; picks a free GPU, starts executor + agent + evaluator,
 # writes status.json / commands.sh / logs under /nas/baiqiao/b1k_runs/logs/<run_id>/)

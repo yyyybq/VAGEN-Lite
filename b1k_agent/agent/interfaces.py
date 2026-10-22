@@ -15,6 +15,7 @@ Nothing in here may carry simulator ground truth. ``Observation`` holds only fie
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import enum
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol, Sequence, runtime_checkable
@@ -36,6 +37,30 @@ FULL_TASK_SKILL = "__full_task__"
 # ----------------------------------------------------------------------------------------------
 
 
+class FrozenDict(dict):
+    """A dict that refuses mutation, so a module cannot change what the loop or another module sees.
+    Still a dict for json, dataclasses.asdict, copy/deepcopy and pickle."""
+
+    def _readonly(self, *args, **kwargs):
+        raise TypeError("read-only mapping")
+
+    __setitem__ = __delitem__ = __ior__ = _readonly
+    clear = pop = popitem = setdefault = update = _readonly
+
+    def __reduce__(self):
+        return (FrozenDict, (dict(self),))
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return FrozenDict({k: copy.deepcopy(v, memo) for k, v in self.items()})
+
+
+def _freeze(m: Any) -> Any:
+    return m if isinstance(m, FrozenDict) or m is None else FrozenDict(m)
+
+
 @dataclasses.dataclass(frozen=True)
 class Observation:
     """One logical environment's legal observation at one control step.
@@ -55,6 +80,10 @@ class Observation:
     cam_rel_poses: Optional[np.ndarray]  # camera poses relative to the robot base, as sent by the evaluator
     policy_dict: Mapping[str, np.ndarray]
     dropped_keys: tuple[str, ...] = ()  # keys received but not whitelisted (logged, never used)
+
+    def __post_init__(self):  # read-only mappings; build_observation also makes the arrays read-only views
+        for name in ("rgb", "depth", "policy_dict"):
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
 
 
 # ----------------------------------------------------------------------------------------------
@@ -148,12 +177,19 @@ class EpisodeContext:
     env_index: int
     task_name: str
     task_id: int
-    task_instruction: str  # natural-language task prompt (what the executor was trained with)
+    task_instruction: str  # natural-language task description (tasks.jsonl) for the strong model
     goal_spec: Optional[GoalSpec]
     skills: tuple[SkillSpec, ...]
     max_steps: Optional[int]  # official step cap; the 2026 wall-clock budget is max_steps * 1 s
     wallclock_budget_s: Optional[float]
     seed: int = 0
+    # the prompt the executor server itself uses for THIS task (None when it does not serve the task);
+    # full-task subtasks send it so L0 is byte-identical to the official baseline
+    executor_prompt: Optional[str] = None
+
+    @property
+    def full_task_prompt(self) -> str:
+        return self.executor_prompt or self.task_instruction
 
 
 # ----------------------------------------------------------------------------------------------
@@ -174,6 +210,11 @@ class Subtask:
     # what the checker should look for (MobiAgent-style planner contract, docs/PAPERS.md)
     success_check: str = ""  # visible condition that means the subtask is done
     failure_cues: tuple[str, ...] = ()  # visible signs that it has failed
+
+    def __post_init__(self):
+        object.__setattr__(self, "args", _freeze(self.args or {}))
+        object.__setattr__(self, "target_subgoals", tuple(self.target_subgoals))
+        object.__setattr__(self, "failure_cues", tuple(self.failure_cues))
 
 
 class JudgmentStatus(str, enum.Enum):

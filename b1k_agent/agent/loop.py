@@ -58,7 +58,13 @@ class LoopConfig:
     max_rejections_per_round: int = 2
     regression_risk_threshold: float = 0.5
     on_plan_exhausted: str = "full_task"  # "full_task" (keep running the task prompt) | "hold"
-    provider_min_remaining_s: float = 60.0  # skip strong-model calls when less budget remains
+    # Budget gate for strong-model calls (2026 rule: over budget = 0). A call is made only if, after it,
+    # the remaining budget still covers the remaining steps at the observed per-step cost:
+    #   remaining >= provider_min_remaining_s + provider_call_reserve_s + budget_safety * steps_left * s_per_step
+    provider_min_remaining_s: float = 60.0
+    provider_call_reserve_s: float = 120.0  # >= a module's worst-case call (its timeout_s is a total deadline)
+    budget_safety: float = 1.2
+    max_provider_s_per_step: float = 300.0  # keep every query well under the 600 s per-query limit
     retrieve_k: int = 3
     check_after_scripted: bool = True
 
@@ -76,6 +82,7 @@ class LoopConfig:
 class _Queued:
     action: np.ndarray
     source: str  # "exec" | "scripted" | "adjust" | "hold"
+    verify: bool = True  # check once the last action of this source has run (AdjustPlan.verify_after)
 
 
 class EpisodeLoop:
@@ -97,6 +104,7 @@ class EpisodeLoop:
         self._last_check_step = 0
         self._pending_verify = False
         self._views: dict[str, StateView] = {}
+        self._step_provider_s = 0.0
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -122,6 +130,10 @@ class EpisodeLoop:
         st = self.state
         assert st is not None, "reset() must be called before step()"
         st.observe(obs)
+        self._step_provider_s = 0.0
+        if st.t_budget_start is None and obs.step > 0:
+            # the first query raised before its action was emitted; start the clock anyway
+            st.t_budget_start = obs.received_at
 
         if self.m.get("goal").low_risk_mode(self._views["goal"]) and not st.low_risk:
             st.low_risk = True
@@ -137,7 +149,7 @@ class EpisodeLoop:
         if st.t_budget_start is None:
             st.t_budget_start = self.clock()
         if q.source in ("scripted", "adjust") and not any(x.source == q.source for x in self._queue):
-            self._pending_verify = self.cfg.check_after_scripted
+            self._pending_verify = self.cfg.check_after_scripted and q.verify
         st.last_action = q.action
         st.executed_actions += 1
         if self.recorder is not None:
@@ -162,11 +174,20 @@ class EpisodeLoop:
     def _provider_allowed(self, slot: str) -> bool:
         if not self.m.uses_provider(slot):
             return True
-        remaining = self.state.remaining_budget_s(self.clock())
+        st = self.state
+        if self._step_provider_s >= self.cfg.max_provider_s_per_step:
+            st.log("budget", f"skip {slot}: {self._step_provider_s:.0f}s of model calls in this query already", "loop")
+            return False
+        now = self.clock()
+        remaining = st.remaining_budget_s(now)
         if remaining is None:
             return True
-        if remaining < self.cfg.provider_min_remaining_s:
-            self.state.log("budget", f"skip {slot}: {remaining:.0f}s left", "loop")
+        steps_left = max(0, (st.ctx.max_steps or 0) - max(st.step, 0) - 1)
+        s_per_step = max(0.0, st.elapsed_s(now) - st.provider_time_s) / max(1, st.executed_actions)
+        need = (self.cfg.provider_min_remaining_s + self.cfg.provider_call_reserve_s
+                + self.cfg.budget_safety * steps_left * s_per_step)
+        if remaining < need:
+            st.log("budget", f"skip {slot}: {remaining:.0f}s left < {need:.0f}s needed", "loop")
             return False
         return True
 
@@ -178,7 +199,9 @@ class EpisodeLoop:
         finally:
             ctxvars.current_slot.reset(tok)
         if self.m.uses_provider(slot):
-            self.state.add_provider_time(self.clock() - t0)
+            dt = self.clock() - t0
+            self.state.add_provider_time(dt)
+            self._step_provider_s += dt
         if self.recorder is not None:
             self.recorder.decision(self.state, slot, out, self.clock() - t0)
         return out
@@ -187,8 +210,8 @@ class EpisodeLoop:
         st = self.state
         self._pending_verify = False
         if st.current_subtask is None and not st.plan_exhausted:
-            self._plan(obs)
             self._last_check_step = obs.step
+            self._safe_plan(obs)
             return
 
         self._last_check_step = obs.step
@@ -203,16 +226,32 @@ class EpisodeLoop:
         if j.status == JudgmentStatus.DONE:
             st.end_subtask("done")
             self._clear_exec()
+            # the evaluator is still asking, so the task is not finished: plan again (bounded)
+            if st.plan_exhausted and st.replans < self.cfg.max_replans:
+                st.replans += 1
+                st.plan_exhausted = False
             if not st.plan_exhausted:
-                self._plan(obs)
+                self._safe_plan(obs)
+            elif self.cfg.on_plan_exhausted == "full_task":
+                st.start_subtask(self._fallback_subtask("done_but_running"))
         elif j.status == JudgmentStatus.FAILED:
             self._recover(obs, j.failure_type or "unknown")
         elif over_budget:
             self._recover(obs, "timeout")
-            if st.current_subtask is sub:
-                # new budget window for the same subtask (retries still bound the total), otherwise the
-                # budget check would trigger a decision -- and a model call -- on every following step
-                st.subtask_start_step = max(st.step, 0)
+        if over_budget and st.current_subtask is sub:
+            # new budget window for the same subtask (retries still bound the total), otherwise the
+            # budget check would trigger a decision -- and a model call -- on every following step
+            st.subtask_start_step = max(st.step, 0)
+
+    def _safe_plan(self, obs: Observation) -> None:
+        """_plan with a deterministic fallback: a planning error must not re-trigger planning every step."""
+        st = self.state
+        try:
+            self._plan(obs)
+        except Exception as e:
+            st.log("plan", f"planning error: {e!r}", "loop")
+            if st.current_subtask is None:
+                st.start_subtask(self._fallback_subtask("plan_error"))
 
     def _plan(self, obs: Observation) -> None:
         st = self.state
@@ -228,7 +267,9 @@ class EpisodeLoop:
                 st.spatial_summary = summary
 
         nxt: Optional[Subtask] = None
+        vetoed = False
         for _ in range(self.cfg.max_rejections_per_round + 1):
+            vetoed = False
             if not self._provider_allowed("plan"):
                 nxt = self._fallback_subtask("budget")
                 break
@@ -243,7 +284,11 @@ class EpisodeLoop:
             st.rejected_candidates.append(nxt)
             st.log("plan", f"rejected {nxt.instruction!r}: regression risk {risk:.2f}", "goal")
             nxt = None
+            vetoed = True
 
+        if nxt is None and vetoed:
+            # every candidate was vetoed: that is not "nothing left to do"
+            nxt = self._fallback_subtask("vetoed")
         if nxt is None:
             st.plan_exhausted = True
             st.log("plan", "planner returned no subtask", "plan")
@@ -265,7 +310,7 @@ class EpisodeLoop:
         if adj is not None:
             if adj.actions is not None:
                 for a in validate_actions(adj.actions):
-                    self._queue.append(_Queued(a, "adjust"))
+                    self._queue.append(_Queued(a, "adjust", verify=adj.verify_after))
             if adj.instruction:
                 st.instruction_override = adj.instruction
                 st.override_until_step = st.step + max(1, self.cfg.check_interval_steps)
@@ -278,7 +323,7 @@ class EpisodeLoop:
         return Subtask(
             subtask_id=st.new_subtask_id(),
             skill=FULL_TASK_SKILL,
-            instruction=st.ctx.task_instruction,
+            instruction=st.ctx.full_task_prompt,
             source=f"loop.fallback.{why}",
         )
 
@@ -286,6 +331,7 @@ class EpisodeLoop:
         st = self.state
         sub = st.current_subtask
         if sub is None:
+            st.log("recover", f"dropped {failure_type}: no current subtask", "loop")
             return
         st.retries[sub.subtask_id] = st.retries.get(sub.subtask_id, 0) + 1
         if st.retries[sub.subtask_id] > self.cfg.max_retries_per_subtask:
@@ -294,7 +340,7 @@ class EpisodeLoop:
             if st.replans < self.cfg.max_replans:
                 st.replans += 1
                 st.plan_exhausted = False
-                self._plan(obs)
+                self._safe_plan(obs)
             else:
                 st.start_subtask(self._fallback_subtask("replans"))
             return
@@ -320,11 +366,18 @@ class EpisodeLoop:
             if st.replans < self.cfg.max_replans:
                 st.replans += 1
                 st.plan_exhausted = False
-                self._plan(obs)
+                self._safe_plan(obs)
+            else:
+                st.start_subtask(self._fallback_subtask("replans"))
         elif plan.kind == RecoveryKind.GIVE_UP:
             st.retries[sub.subtask_id] = self.cfg.max_retries_per_subtask
 
     # ------------------------------------------------------------------ execution
+
+    def _hold(self, obs: Observation) -> None:
+        self._queue.append(_Queued(hold_action(obs.proprio, self.state.last_action), "hold"))
+        # the executor's buffered chunk was planned before the hold; it must not resume afterwards
+        self.executor.interrupt()
 
     def _clear_exec(self) -> None:
         self._queue = [q for q in self._queue if q.source != "exec"]
@@ -333,12 +386,12 @@ class EpisodeLoop:
     def _fill_from_executor(self, obs: Observation) -> None:
         st = self.state
         if st.current_subtask is None and st.plan_exhausted and self.cfg.on_plan_exhausted == "hold":
-            self._queue.append(_Queued(hold_action(obs.proprio, st.last_action), "hold"))
+            self._hold(obs)
             return
         if st.low_risk and st.current_subtask is not None:
             risk = self.m.get("goal").regression_risk(st.current_subtask, self._views["goal"])
             if risk > self.cfg.regression_risk_threshold:
-                self._queue.append(_Queued(hold_action(obs.proprio, st.last_action), "hold"))
+                self._hold(obs)
                 return
         chunk: ActionChunk = self.executor.act(obs, st.current_instruction(), self.cfg.exec_horizon)
         actions = validate_actions(chunk.actions)

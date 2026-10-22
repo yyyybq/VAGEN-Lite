@@ -88,16 +88,21 @@ class OpenPIWebsocketExecutor:
         return dict(self._meta)
 
     def default_prompt(self, task_name: str) -> Optional[str]:
-        """The prompt the executor server would use for this task without an override."""
-        meta = self.metadata
-        prompts = meta.get("prompts") or {}
-        return prompts.get(task_name) or meta.get("default_prompt")
+        """The prompt the executor server uses for THIS task, or None when it does not serve the task
+        (a single-task server publishes only its own task; it must not lend its prompt to others)."""
+        return (self.metadata.get("prompts") or {}).get(task_name)
 
     # ------------------------------------------------------------------ Executor protocol
 
     def reset(self, ctx: EpisodeContext) -> None:
         self._ensure()
-        self._ws.send(self._packer.pack({"reset": True}))
+        try:
+            self._ws.send(self._packer.pack({"reset": True}))
+        except Exception as e:  # connection dropped between episodes: reconnect (fresh server session)
+            logger.warning("executor env%d reset failed (%s); reconnecting", self.env_idx, e)
+            self.close()
+            self._connect()
+            self._ws.send(self._packer.pack({"reset": True}))
         self._flush_next = False
         self._last_prompt = None
         self._task_prompt = self.default_prompt(ctx.task_name)
@@ -108,16 +113,16 @@ class OpenPIWebsocketExecutor:
     def act(self, obs: Observation, instruction: str, horizon: int) -> ActionChunk:
         self._ensure()
         req = dict(obs.policy_dict)
-        override = None
-        # A single-task server (serve_b1k style) already uses the task prompt; a multi-task server
-        # needs the prompt on every request, which is still the official per-task prompt.
-        if self._meta.get("multi_task") and instruction:
-            req["__prompt__"] = instruction
-        elif instruction and instruction != self._task_prompt:
-            if not self.allow_prompt_override:
-                raise ExecutorError("instruction differs from the executor's default prompt and overrides are disabled")
-            override = instruction
-            req["__prompt__"] = instruction
+        override = instruction if (instruction and instruction != self._task_prompt) else None
+        if override is not None and not self.allow_prompt_override:
+            raise ExecutorError("instruction differs from the executor's prompt for this task and overrides are disabled")
+        if self._meta.get("multi_task"):
+            # a multi-task server needs the prompt on every request (the per-task prompt or the override)
+            prompt = instruction or self._task_prompt
+            if prompt:
+                req["__prompt__"] = prompt
+        elif override is not None:
+            req["__prompt__"] = override
         if self._flush_next or override != self._last_prompt:
             req["__flush__"] = True
         if self.mode == "chunk":

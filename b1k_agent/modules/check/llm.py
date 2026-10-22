@@ -111,14 +111,19 @@ class LLMChecker:
         ft = str(r.get("failure_type") or "none")
         failure_type = ft if (status == JudgmentStatus.FAILED and ft in FAILURE_TYPES) else None
         updates = {}
+        # "unknown" (not visible now) must not overwrite an earlier observation
         for item in r.get("subgoals") or []:
-            if isinstance(item, dict) and item.get("id") in subgoal_ids and item.get("estimate") in ("satisfied", "unsatisfied", "unknown"):
+            if isinstance(item, dict) and item.get("id") in subgoal_ids and item.get("estimate") in ("satisfied", "unsatisfied"):
                 updates[item["id"]] = item["estimate"]
         holding = {}
         for arm in ("left", "right"):
             v = r.get(f"holding_{arm}")
-            if isinstance(v, str):
+            if isinstance(v, str) and v.strip().lower() != "unknown":
                 holding[arm] = v.strip()[:80]
+        if status == JudgmentStatus.DONE and sub is not None and sub.skill == FULL_TASK_SKILL:
+            # the evaluator ends the episode the moment the whole goal holds, so while we are being
+            # asked the whole task is not done; keep the subgoal estimates, keep executing
+            status = JudgmentStatus.IN_PROGRESS
         return Judgment(status=status, confidence=conf, evidence=str(r.get("evidence", ""))[:600],
                         failure_type=failure_type, subgoal_updates=updates, holding_updates=holding,
                         source=f"check.llm@{resp.provider}")

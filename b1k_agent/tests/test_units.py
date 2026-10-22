@@ -54,6 +54,25 @@ def test_bddl_or_and_not():
     assert [s.option for s in g.subgoals[1:]] == [1, 2]
 
 
+def test_bddl_option_ids_unique_across_or_nodes():
+    text = """(define (problem p) (:domain d) (:objects a.n.01_1 - a.n.01 b.n.01_1 - b.n.01)
+      (:init) (:goal (and (or (open ?a.n.01_1) (open ?b.n.01_1))
+                          (or (ontop ?a.n.01_1 ?b.n.01_1) (or (inside ?a.n.01_1 ?b.n.01_1) (under ?a.n.01_1 ?b.n.01_1))))))"""
+    g = parse_problem(text)
+    assert [(s.predicate, s.option) for s in g.subgoals] == [("open", 1), ("open", 2), ("ontop", 3), ("inside", 5), ("under", 6)]
+    assert "option 5 is a disjunct inside option 4" in g.parse_notes
+
+
+def test_bddl_forall_with_disjunctive_body_stays_quantified():
+    text = """(define (problem p) (:domain d) (:objects c.n.01_1 c.n.01_2 - c.n.01 t.n.01_1 - t.n.01 s.n.01_1 - s.n.01)
+      (:init) (:goal (and (forall (?c.n.01 - c.n.01) (or (inside ?c.n.01 ?t.n.01_1) (ontop ?c.n.01 ?s.n.01_1)))
+                          (forall (?c.n.01 - c.n.01) (not (open ?c.n.01))))))"""
+    g = parse_problem(text)
+    assert g.subgoals[0].quantified and g.subgoals[0].predicate == "forall" and g.subgoals[0].option == 0
+    assert [(s.predicate, s.args, s.negated) for s in g.subgoals[1:]] == [
+        ("open", ("c.n.01_1",), True), ("open", ("c.n.01_2",), True)]  # a plain forall body is still grounded
+
+
 # ---------------------------------------------------------------- config
 
 def test_config_inheritance_and_hash():
@@ -182,7 +201,9 @@ def test_planner_only_uses_available_skills_and_renders_templates():
     assert s2.skill == FULL_TASK_SKILL and s2.source == "plan.llm.fallback" and s2.instruction == TASK_PROMPT
     s3 = pl.next_subtask(obs(), view)
     assert s3.source == "plan.llm.fallback"  # missing args
-    assert pl.next_subtask(obs(), view) is None
+    # "task complete" is never true while the evaluator still asks: keep going with the full task
+    s4 = pl.next_subtask(obs(), view)
+    assert s4.skill == FULL_TASK_SKILL and s4.source == "plan.llm.fallback"
     schema = pl.provider.inner.requests[0].json_schema
     assert schema["properties"]["skill"]["enum"] == [FULL_TASK_SKILL, "go_to"]
 

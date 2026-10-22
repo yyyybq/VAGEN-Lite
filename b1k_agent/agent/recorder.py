@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import enum
 import json
+import logging
 import os
 import shutil
 import threading
@@ -98,7 +99,7 @@ class RunRecorder:
                 "events": open(os.path.join(d, "events.jsonl"), "a", encoding="utf-8"),
                 "steps": open(os.path.join(d, "steps.jsonl"), "a", encoding="utf-8"),
                 "counters": {"provider_calls": 0, "provider_s": 0.0, "tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0,
-                             "provider_errors": 0, "decisions": 0},
+                             "cost_unknown_calls": 0, "provider_errors": 0, "decisions": 0},
                 "t0": time.time(),
             }
         self._write(ctx.episode_id, "events", {"kind": "episode_start", "t": time.time(), "ctx": to_jsonable(ctx),
@@ -136,7 +137,10 @@ class RunRecorder:
                 usage = rec.get("usage") or {}
                 c["tokens_in"] += int(usage.get("input_tokens") or 0)
                 c["tokens_out"] += int(usage.get("output_tokens") or 0)
-                c["cost_usd"] += float(rec.get("cost_usd") or 0.0)
+                if rec.get("cost_usd") is None:
+                    c["cost_unknown_calls"] += 1  # no price configured: cost_usd is a lower bound
+                else:
+                    c["cost_usd"] += float(rec["cost_usd"])
                 if rec.get("error"):
                     c["provider_errors"] += 1
         self._write(episode_id, "events", {"kind": "provider_call", **rec})
@@ -173,10 +177,13 @@ class RunRecorder:
         with open(os.path.join(d, "summary.json"), "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
         if self.nas_dir:
-            nd = os.path.join(self.nas_dir, "episodes", eid)
-            os.makedirs(nd, exist_ok=True)
-            shutil.copy2(os.path.join(d, "summary.json"), os.path.join(nd, "summary.json"))
-            shutil.copy2(os.path.join(d, "events.jsonl"), os.path.join(nd, "events.jsonl"))
+            try:  # the NAS copy is a convenience; the local files are authoritative
+                nd = os.path.join(self.nas_dir, "episodes", eid)
+                os.makedirs(nd, exist_ok=True)
+                shutil.copy2(os.path.join(d, "summary.json"), os.path.join(nd, "summary.json"))
+                shutil.copy2(os.path.join(d, "events.jsonl"), os.path.join(nd, "events.jsonl"))
+            except OSError as e:
+                logging.getLogger("b1k_agent.recorder").warning("NAS copy of %s failed: %s", eid, e)
 
     def episode_end(self, state) -> dict:
         eid = state.ctx.episode_id

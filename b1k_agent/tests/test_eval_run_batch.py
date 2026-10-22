@@ -89,13 +89,13 @@ def bstatus(tmp_path):
 def test_step3_example_spec():
     path = os.path.join(ROOT, "configs", "batches", "step3_turning_on_radio.yaml")
     jobs = batch.expand_jobs(batch.load_spec(path))
-    assert [j.job_id for j in jobs] == ["L0-turning_on_radio-pt0-default-s0", "L0-turning_on_radio-pt0-rgbd-s0"]
+    assert [j.job_id for j in jobs] == ["L0-turning_on_radio-pt10-default-s0", "L0-turning_on_radio-pt10-rgbd-s0"]
     for j in jobs:
-        assert j.config == L0 and j.task == "turning_on_radio" and j.mode == "public_test" and j.instances == (0,)
-        assert j.split == "report" and not j.direct and "Step-3 baseline run" in j.note
+        assert j.config == L0 and j.task == "turning_on_radio" and j.mode == "public_test" and j.instances == (10,)
+        assert j.split == "dev" and not j.direct and "Step-3 baseline run" in j.note  # never Report for tuning
         assert dict(j.launch) == {"write_video": True}
     assert batch.attempt_run_id("step3_turning_on_radio", jobs[1].job_id, 0) == \
-        "step3_turning_on_radio-L0-turning_on_radio-pt0-rgbd-s0-a0"
+        "step3_turning_on_radio-L0-turning_on_radio-pt10-rgbd-s0-a0"
 
 
 def test_dev_ladder_example_spec():
@@ -345,8 +345,8 @@ def test_dry_run_cli(capsys):
     rc = batch.main([os.path.join(ROOT, "configs", "batches", "step3_turning_on_radio.yaml"), "--dry-run"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "## L0-turning_on_radio-pt0-default-s0  [report]" in out
-    assert "## L0-turning_on_radio-pt0-rgbd-s0  [report]" in out
+    assert "## L0-turning_on_radio-pt10-default-s0  [dev]" in out
+    assert "## L0-turning_on_radio-pt10-rgbd-s0  [dev]" in out
     assert out.count("python -m eval.launch --config") == 2 and "--write-video" in out
 
 

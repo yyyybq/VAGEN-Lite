@@ -63,6 +63,7 @@ class AgentPolicy:
         max_steps: Optional[int],
         skills_for_task: Callable[[str], tuple] = lambda task: (),
         clock: Callable[[], float] = time.monotonic,
+        providers: Optional[dict] = None,
     ):
         self.cfg = cfg
         self.make_executor = make_executor
@@ -73,6 +74,7 @@ class AgentPolicy:
         self.max_steps = max_steps
         self.skills_for_task = skills_for_task
         self.clock = clock
+        self._providers = dict(providers or {})
         self.loop_cfg = LoopConfig.from_dict(get(cfg, "loop", {}))
         self.camera_roles = dict(get(cfg, "server.camera_roles", None) or DEFAULT_CAMERA_ROLES)
         self.on_error = get(cfg, "server.on_error", "fallback")
@@ -98,9 +100,13 @@ class AgentPolicy:
 
     def reset(self) -> None:
         for env_idx, loop in self._loops.items():
-            if self._active.get(env_idx):
-                loop.close()
-            self._active[env_idx] = False
+            try:
+                if self._active.get(env_idx):
+                    loop.close()
+            except Exception:  # a logging failure must never merge two episodes
+                logger.error("closing episode of env %d failed:\n%s", env_idx, traceback.format_exc())
+            finally:
+                self._active[env_idx] = False
         self._episode_counter += 1
 
     def snapshot(self) -> None:
@@ -119,9 +125,14 @@ class AgentPolicy:
     def _context(self, env_idx: int, task_id: int) -> EpisodeContext:
         name = self.task_meta.name(task_id)
         ex = self._executors.get(env_idx)
-        executor_default = getattr(ex, "default_prompt", None)
-        if callable(executor_default):
-            executor_default = executor_default(name)
+        executor_prompt = None
+        lookup = getattr(ex, "default_prompt", None)
+        if callable(lookup):
+            executor_prompt = lookup(name)
+            if executor_prompt is None:
+                logger.warning(
+                    "executor does not serve task %r (no prompt for it in its metadata): full-task subtasks "
+                    "will send the NL task description as a prompt override", name)
         max_steps = self.max_steps or self.task_meta.max_steps(name)
         if self.max_steps is None and max_steps is not None:
             logger.info("max_steps for %s from the task catalog snapshot: %d (pass --max-steps to override)", name, max_steps)
@@ -131,12 +142,13 @@ class AgentPolicy:
             env_index=env_idx,
             task_name=name,
             task_id=task_id,
-            task_instruction=self.task_meta.prompt(name, executor_default),
+            task_instruction=self.task_meta.prompt(name),
             goal_spec=self.task_meta.goal_spec(name),
             skills=tuple(self.skills_for_task(name)),
             max_steps=max_steps,
             wallclock_budget_s=budget,
             seed=int(get(self.cfg, "run.seed", 0) or 0),
+            executor_prompt=executor_prompt,
         )
 
     # ------------------------------------------------------------------ inference
@@ -191,7 +203,7 @@ class AgentPolicy:
         st.log("fallback", "agent error -> executor with full task prompt", "server")
         st.fallbacks += 1
         try:
-            chunk = self._executors[env_idx].act(o, st.ctx.task_instruction, 1)
+            chunk = self._executors[env_idx].act(o, st.ctx.full_task_prompt, 1)
             return np.asarray(chunk.actions, np.float32).reshape(-1, ACTION_DIM_R1PRO)[0]
         except Exception:
             logger.error("executor fallback failed:\n%s", traceback.format_exc())
@@ -199,6 +211,32 @@ class AgentPolicy:
 
 
 # ---------------------------------------------------------------------- websocket transport
+
+
+def resolve_providers(providers: dict, modules_desc: dict) -> dict:
+    """For every provider an ENABLED module uses: kind, label, resolved model id and endpoint host
+    (never the key), plus "unavailable" when its configuration cannot work."""
+    from urllib.parse import urlparse
+
+    used = {d.get("provider") for d in modules_desc.values() if d.get("enabled") and d.get("uses_provider") and d.get("provider")}
+    out = {}
+    for name in sorted(used):
+        p = providers.get(name)
+        if p is None:
+            out[name] = {"unavailable": "not defined in the providers: block"}
+            continue
+        inner = getattr(p, "inner", p)
+        info = {"kind": type(inner).__name__, "label": getattr(p, "label", name), "model": getattr(inner, "model", None)}
+        try:
+            if hasattr(inner, "_endpoint"):
+                url, _key = inner._endpoint()
+                info["host"] = urlparse(url).hostname
+            elif hasattr(inner, "_client_or_raise"):
+                inner._client_or_raise()
+        except Exception as e:  # ProviderUnavailable and friends; messages never contain the key
+            info["unavailable"] = str(e)[:300]
+        out[name] = info
+    return out
 
 
 def obs_fingerprint(msg: dict) -> Optional[str]:
@@ -296,6 +334,7 @@ def build_policy(cfg: dict, run_id: str, max_steps: Optional[int], tags: dict) -
     policy = AgentPolicy(
         cfg,
         make_executor=lambda env_idx: build_executor(get(cfg, "executor", {}), env_idx=env_idx),
+        providers=providers,
         make_modules=lambda env_idx: build_modules(get(cfg, "modules", {}) or {}, providers, recorder=recorder),
         task_meta=task_meta,
         recorder=recorder,
@@ -315,6 +354,8 @@ def main(argv=None) -> None:
     ap.add_argument("--run-id", default=None)
     ap.add_argument("--max-steps", type=int, default=None, help="official step cap for this task (sets the 1 s/step budget)")
     ap.add_argument("--tag", action="append", default=[], help="key=value labels stored with every episode (task, instance, seed)")
+    ap.add_argument("--allow-unavailable-provider", action="store_true",
+                    help="start even if a provider used by an enabled module is not configured (its calls then fail -> fallbacks)")
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -323,6 +364,14 @@ def main(argv=None) -> None:
     run_id = args.run_id or f"{get(cfg, 'run.name', 'run')}-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     policy, recorder = build_policy(cfg, run_id, args.max_steps, tags)
     modules_desc = policy._loop(0).m.describe()
+    resolved = resolve_providers(policy._providers, modules_desc)
+    missing = {n: r["unavailable"] for n, r in resolved.items() if r.get("unavailable")}
+    if missing and not args.allow_unavailable_provider:
+        policy.close()
+        raise SystemExit(f"strong-model provider(s) used by enabled modules are not available: {missing}. "
+                         "A run without them would silently be L0; fix the env vars or pass --allow-unavailable-provider.")
+    for name, r in resolved.items():  # model / endpoint host (and "unavailable", if allowed) enter the config hash
+        cfg.setdefault("providers", {}).setdefault(name, {})["resolved"] = dict(r)
     manifest = build_manifest(cfg, modules_desc=modules_desc, extra={"run_id": run_id, "tags": tags, "max_steps": args.max_steps})
     path = recorder.write_run_file("run_manifest.json", manifest)
     logger.info("run %s config_hash=%s manifest=%s", run_id, manifest["config_hash"], path)

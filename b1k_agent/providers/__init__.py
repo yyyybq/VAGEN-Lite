@@ -44,8 +44,8 @@ def build_providers(cfg: Mapping[str, Any], recorder: Any = None) -> dict[str, L
         pcfg = dict(pcfg or {})
         out[name] = LoggedProvider(
             _make(name, pcfg),
-            price_in_per_mtok=pcfg.get("price_in_per_mtok", 0.0),
-            price_out_per_mtok=pcfg.get("price_out_per_mtok", 0.0),
+            price_in_per_mtok=pcfg.get("price_in_per_mtok"),
+            price_out_per_mtok=pcfg.get("price_out_per_mtok"),
             recorder=recorder,
             label=pcfg.get("label", name),
         )

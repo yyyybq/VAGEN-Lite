@@ -6,9 +6,15 @@ a list of subgoal literals a planner / goal manager can talk about.
 
 Goal flattening:
   (and A B ...)           -> subgoals of A, B, ... in order
-  (or A B ...)            -> each disjunct becomes its own option index (best-matched-clause scoring)
+  (or A B ...)            -> each disjunct gets its own option id, unique across the whole goal (two
+                             different or-nodes never share an id; a nested disjunct's id is noted in
+                             parse_notes with its enclosing option). Option ids only label disjuncts:
+                             the official metric scores the best of the goal's DNF options.
   (not (pred ...))        -> negated literal
-  (forall/exists/forn/forpairs/fornpairs ...) -> kept as ONE quantified subgoal with its text
+  (forall (?x - cat) B)   -> B grounded over the declared instances of cat, unless B contains a
+                             disjunction (or / imply / not over and-or-quantifier): then ONE quantified
+                             subgoal, since per-instance grounding would mix different instances' disjuncts
+  (exists/forn/forpairs/fornpairs ...) -> kept as ONE quantified subgoal with its text
 """
 
 from __future__ import annotations
@@ -76,7 +82,18 @@ def _substitute(e: SExpr, var: str, value: str) -> SExpr:
     return [_substitute(x, var, value) for x in e]
 
 
+def _disjunctive(e: SExpr) -> bool:
+    if isinstance(e, str) or not e:
+        return False
+    if e[0] in ("or", "imply"):
+        return True
+    if e[0] == "not" and len(e) == 2 and isinstance(e[1], list) and e[1] and e[1][0] in {"and", "or", "imply"} | QUANTIFIERS:
+        return True
+    return any(_disjunctive(x) for x in e[1:])
+
+
 def _flatten_goal(e: SExpr, out: list, option: int, counter: list, notes: list) -> None:
+    """counter = [next subgoal number, last option id used]."""
     if isinstance(e, str):
         notes.append(f"bare atom in goal: {e}")
         return
@@ -85,8 +102,11 @@ def _flatten_goal(e: SExpr, out: list, option: int, counter: list, notes: list) 
         for child in e[1:]:
             _flatten_goal(child, out, option, counter, notes)
     elif head == "or":
-        for i, child in enumerate(e[1:]):
-            _flatten_goal(child, out, option * 100 + i + 1 if option else i + 1, counter, notes)
+        for child in e[1:]:
+            counter[1] += 1
+            if option:
+                notes.append(f"option {counter[1]} is a disjunct inside option {option}")
+            _flatten_goal(child, out, counter[1], counter, notes)
     elif head == "not" and len(e) == 2 and isinstance(e[1], list) and e[1] and e[1][0] not in QUANTIFIERS | {"and", "or"}:
         lit = e[1]
         out.append(
@@ -100,7 +120,7 @@ def _flatten_goal(e: SExpr, out: list, option: int, counter: list, notes: list) 
             )
         )
         counter[0] += 1
-    elif head == "forall" and len(e) == 3 and _objects_ctx and _expandable(e[1]):
+    elif head == "forall" and len(e) == 3 and _objects_ctx and _expandable(e[1]) and not _disjunctive(e[2]):
         # (forall (?x - cat) body): ground over the declared instances of cat
         var, cat = str(e[1][0]), str(e[1][2])
         insts = [o for o, c in _objects_ctx[-1].items() if c == cat]
@@ -166,7 +186,7 @@ def parse_problem(text: str, task_name: str = "", path: str = "") -> GoalSpec:
         goal_text = to_text(goal_sec[1])
         _objects_ctx.append(objects)
         try:
-            _flatten_goal(goal_sec[1], subgoals, 0, [0], notes)
+            _flatten_goal(goal_sec[1], subgoals, 0, [0, 0], notes)
         finally:
             _objects_ctx.pop()
     return GoalSpec(

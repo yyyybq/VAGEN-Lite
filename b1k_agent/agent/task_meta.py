@@ -4,9 +4,9 @@ Sources (all public task metadata, legal policy inputs):
   * B100_task_misc.csv from the BEHAVIOR data root (2026-challenge-task-instances/metadata/), the
     same file the official evaluator uses to map names to the ``task_id`` it sends
     (OmniGibson/omnigibson/eval/utils/eval_utils.py _load_challenge_task_misc);
-  * the task prompt: the executor's own default prompt when it reports one (so that L0 sends the
-    exact text the executor was trained with), else a tasks.jsonl ({"task_index", "task"} lines
-    from the demo dataset's meta/tasks.jsonl), else the task name;
+  * the NL task description for the strong model: tasks.jsonl ({"task_index", "task"} lines from the
+    demo dataset's meta/tasks.jsonl), else the task name (the executor's own prompt for the task is
+    taken from the executor server's metadata, see agent/server.py, EpisodeContext.executor_prompt);
   * the BDDL problem file from bddl3/bddl/activity_definitions/<task>/problem0.bddl;
   * fallback snapshots in configs/tasks/ (task_catalog_2026.tsv: id, name, max_steps; tasks_2026.jsonl:
     NL instructions), used only for what the official files do not provide (see configs/tasks/README.md).
@@ -43,9 +43,8 @@ class TaskMetadata:
             raise KeyError(f"unknown task_id {task_id}; metadata has {len(self.id_to_name)} tasks")
         return self.id_to_name[task_id]
 
-    def prompt(self, task_name: str, executor_default: Optional[str] = None) -> str:
-        if executor_default:
-            return executor_default
+    def prompt(self, task_name: str) -> str:
+        """NL task description for the strong model (tasks.jsonl), else the task name in words."""
         return self.prompts.get(task_name, task_name.replace("_", " "))
 
     def goal_spec(self, task_name: str) -> Optional[GoalSpec]:

@@ -123,6 +123,13 @@ def whitelist(obs: Mapping[str, object]) -> tuple[dict, tuple[str, ...]]:
     return kept, tuple(sorted(dropped))
 
 
+def _readonly(x) -> np.ndarray:
+    """A non-writable VIEW: modules cannot change the data, and the caller's own arrays keep their flags."""
+    v = np.asarray(x).view()
+    v.flags.writeable = False
+    return v
+
+
 def _squeeze_batch(x: np.ndarray) -> np.ndarray:
     x = np.asarray(x)
     return x[0] if x.ndim >= 1 and x.shape[0] == 1 else x
@@ -151,14 +158,14 @@ def build_observation(
             role = camera_roles.get(m.group("link"), m.group("link"))
             if m.group("mod") == "rgb":
                 img = _squeeze_batch(arr)
-                rgb[role] = img[..., :3] if img.ndim == 3 else img
+                rgb[role] = _readonly(img[..., :3] if img.ndim == 3 else img)
             else:
-                depth[role] = _squeeze_batch(arr).astype(np.float32, copy=False)
+                depth[role] = _readonly(_squeeze_batch(arr).astype(np.float32, copy=False))
             continue
         if _PROPRIO_KEY.match(key):
-            proprio = _squeeze_batch(arr).astype(np.float32, copy=False).reshape(-1)
+            proprio = _readonly(_squeeze_batch(arr).astype(np.float32, copy=False).reshape(-1))
         elif _CAM_POSES_KEY.match(key):
-            cam_rel_poses = _squeeze_batch(arr)
+            cam_rel_poses = _readonly(_squeeze_batch(arr))
         elif key == _TASK_ID_KEY:
             task_id = int(np.asarray(arr).reshape(-1)[0])
     if proprio is None:
@@ -171,7 +178,8 @@ def build_observation(
         depth=depth,
         proprio=proprio,
         cam_rel_poses=cam_rel_poses,
-        policy_dict=kept,
+        # arrays become read-only views (same bytes, so L0 forwarding stays byte-identical); scalars are immutable
+        policy_dict={k: (_readonly(v) if isinstance(v, np.ndarray) else v) for k, v in kept.items()},
         dropped_keys=dropped,
     )
 

@@ -74,3 +74,35 @@ def test_modules_never_build_prompt_loaders_themselves():
                     if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) == "PromptLoader":
                         bad.append(os.path.join(root, f))
     assert not bad
+
+
+def test_observation_and_history_are_read_only():
+    import copy
+    import dataclasses
+    import json
+
+    from agent.fields import build_observation
+    from synth import synth_obs
+
+    raw = {k: v[0:1] for k, v in synth_obs(0, depth=True).items()}
+    o = build_observation(raw, step=0, received_at=0.0)
+    for arr in (o.proprio, *o.rgb.values(), *o.depth.values(),
+                *(v for v in o.policy_dict.values() if isinstance(v, np.ndarray))):
+        with pytest.raises(ValueError):
+            arr.flat[0] = 0
+    with pytest.raises(TypeError):
+        o.policy_dict["robot_r1::truth"] = np.zeros(1)
+    with pytest.raises(TypeError):
+        o.rgb.pop("head")
+    assert all(v.flags.writeable for v in raw.values() if isinstance(v, np.ndarray))  # caller's arrays untouched
+    st = EpisodeState(ctx=ctx())
+    st.observe(o)
+    (_, p), = StateView(st, "check").proprio_history
+    with pytest.raises(ValueError):
+        p[0] = 1.0
+    sub = Subtask(subtask_id="a", skill="s", instruction="i", args={"obj": "radio"}, failure_cues=["x"])
+    with pytest.raises(TypeError):
+        sub.args["obj"] = "other"
+    assert sub.failure_cues == ("x",)
+    assert dataclasses.asdict(sub)["args"] == {"obj": "radio"} and json.dumps(dataclasses.asdict(sub))
+    assert copy.deepcopy(sub) == sub and dataclasses.replace(sub, skill="t").args == {"obj": "radio"}

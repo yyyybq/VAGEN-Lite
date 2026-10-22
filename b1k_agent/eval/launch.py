@@ -174,6 +174,34 @@ def secret_env_names(cfg: dict) -> list[str]:
     return sorted(names)
 
 
+def missing_provider_env(cfg: dict, environ: dict) -> dict:
+    """Providers used by ENABLED provider-backed modules whose required settings are absent from both the
+    config and the environment: {provider: [what is missing]}. Names only, never values."""
+    providers = get(cfg, "providers", {}) or {}
+    used = {str(m["provider"]) for m in (get(cfg, "modules", {}) or {}).values()
+            if isinstance(m, dict) and m.get("enabled") and m.get("provider")}
+    out = {}
+    for name in sorted(used):
+        p = providers.get(name)
+        if not isinstance(p, dict):
+            out[name] = ["not defined in the providers: block"]
+            continue
+        miss = []
+        if p.get("kind") == "openai_compat":
+            for field, env_field in (("base_url", "base_url_env"), ("model", "model_env")):
+                if not p.get(field) and not (p.get(env_field) and environ.get(str(p[env_field]))):
+                    miss.append(str(p.get(env_field) or field))
+            if not (p.get("api_key_env") and environ.get(str(p["api_key_env"]))):
+                miss.append(str(p.get("api_key_env") or "api_key_env"))
+        elif p.get("kind") == "anthropic":
+            key_env = str(p.get("api_key_env") or "ANTHROPIC_API_KEY")
+            if not environ.get(key_env):
+                miss.append(key_env)
+        if miss:
+            out[name] = miss
+    return out
+
+
 def detect_repo_id(checkpoint_dir: str) -> Optional[str]:
     """The asset id under <ckpt>/assets/ that holds norm_stats.json (serve_b1k --repo-id); None if absent."""
     assets = os.path.join(checkpoint_dir, "assets")
@@ -483,6 +511,10 @@ def build_plan(args: argparse.Namespace, *, environ: Optional[dict] = None, gpu_
         raise PlanError(f"{run_dir} already holds a run (status.json); every run needs a new --run-id")
     logs = os.path.join(run_dir, "logs")
 
+    if not direct:
+        for name, miss in missing_provider_env(cfg, environ).items():
+            problem(f"provider {name!r} used by an enabled module is not configured ({', '.join(miss)} unset): "
+                    "the run would silently behave like L0")
     exec_impl = str(get(cfg, "executor.impl", "openpi_ws"))
     executor_needed = direct or exec_impl == "openpi_ws"
     start_executor = will_start_executor(cfg, direct, args.no_executor)

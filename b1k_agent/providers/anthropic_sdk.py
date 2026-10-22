@@ -84,7 +84,8 @@ class AnthropicProvider:
             output_config=output_config,
         )
         t0 = time.monotonic()
-        c = client.with_options(timeout=req.timeout_s)
+        # req.timeout_s is a total deadline: one attempt, no SDK retries inside it
+        c = client.with_options(timeout=req.timeout_s, max_retries=0)
         if self.refusal_fallback:
             resp = c.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs)
         else:
@@ -106,6 +107,6 @@ class AnthropicProvider:
             latency_s=time.monotonic() - t0,
             model=str(getattr(resp, "model", self.model)),
             provider=self.name,
-            error="refusal" if stop == "refusal" else None,
+            error="refusal" if stop == "refusal" else ("truncated (stop_reason=max_tokens)" if stop == "max_tokens" else None),
             stop_reason=stop,
         )

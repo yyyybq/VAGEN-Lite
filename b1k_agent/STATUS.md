@@ -32,7 +32,7 @@ Done, where server 105 is not needed:
 - `eval/launch.py` / `eval/batch.py` real process management.
 - `providers/openai_compat.py` (Astra) and `providers/anthropic_sdk.py` (Claude substitute): never called against a real endpoint.
 
-### 3. Interface-verified (mock / synthetic tests; `python -m pytest -q` → 381 passed)
+### 3. Interface-verified (mock / synthetic tests; `python -m pytest -q` → 406 passed)
 - **Agent server ↔ an official-style client:** `/healthz`, metadata, reset without reply, batched obs, the 2026/eval reconnect resend.
 - **Executor client ↔ a fake prompt-capable openpi server:** override, flush, chunk mode, multi-task.
 - **Loop:**
@@ -40,13 +40,15 @@ Done, where server 105 is not needed:
   - every slot on alone;
   - leave-one-out;
   - truth isolation (added or changed truth keys → identical decisions);
-  - read-only StateView;
+  - read-only StateView, observations (arrays, mappings), proprio history and subtask args;
   - prompt isolation;
-  - import guards;
+  - import guards (relative, from-package, `import_module` / `__import__`, no reaching into StateView internals);
   - batched envs with separate state;
-  - the budget regression.
+  - the budget regressions (over-budget subtask, provider-time gate);
+  - bounded re-plan after a DONE on an exhausted plan; all-vetoed candidates → fallback.
+- **Provider guards:** the agent server refuses to start when an enabled module's provider is unconfigured (`--allow-unavailable-provider` overrides, and the manifest records it); `eval.launch` checks the env-var names; `eval.aggregate` flags episodes whose strong-model calls all failed ("effectively L0"); the manifest and config hash include the resolved model id and endpoint host (never the key); total-deadline timeouts and redacted error bodies.
 - **Modules with scripted providers:** plan.llm, check.llm, check.rule, goal.bddl, recover.scripted.
-- **BDDL reader** on the 100 task files.
+- **BDDL reader** on the 100 task files; unique option ids per disjunct; `forall` over a disjunctive body stays one quantified subgoal.
 - **Task metadata from the snapshots:** 100 tasks, exact `max_steps`, NL instructions.
 - **eval:** launch/batch with fake processes; aggregate/ablation/failures on synthetic official JSONs.
 - **data / diagnostics** on synthetic logs.
@@ -81,12 +83,12 @@ Done, where server 105 is not needed:
 | No access to server 105 (all of Steps 1–7 that run anything) | Run `docs/RUNBOOK_105.md` on 105, or start a Claude Code session there (`claude remote-control` in `/nas/baiqiao/b1k_agent`) |
 | Smoke-test watcher state unknown | `scripts/takeover_check.sh` on 105 (read-only) |
 | GPUs were all busy at hand-off | `eval/gpu.py` takes only GPUs with < 2 GB used and < 10% utilization; wait otherwise; never touch others' processes |
-| Astra access | On 105, set `ASTRA_BASE_URL`, `ASTRA_API_KEY`, `ASTRA_MODEL`, then run `python -m providers.probe --config configs/S7_min_loop.yaml --provider astra`. Its latency decides how often M-plan / M-check can run inside the 1 s/step budget |
+| Astra access | On 105, set `ASTRA_BASE_URL`, `ASTRA_API_KEY`, `ASTRA_MODEL`, then run `python -m providers.probe --config configs/S7_min_loop.yaml --provider astra --out docs/provider_probe_astra.json`. Its module-sized latency (`latency_realistic`) decides how often M-plan / M-check can run inside the `max_steps` × 1 s budget. Until then L1–L4/S7 refuse to start (by design) |
 | Multi-task executor | On 105: can HF be reached? Download, load and run candidates through the official interface (PROTOCOL §12); then the skill probe |
 
 ## Next steps (expected gain / cost / dependency)
 
-1. **105 Steps 1–3** (`docs/RUNBOOK_105.md`): the takeover report; the smoke result; the official `--direct` baseline episode and the L0 passthrough episode on Dev instance 311, with both wrappers. Nothing else counts until a real episode exists.
+1. **105 Steps 1–3** (`docs/RUNBOOK_105.md`): the takeover report; the smoke result; the official `--direct` baseline episode and the L0 passthrough episode on Dev instance 311 (public_test index 10; `configs/batches/step3_turning_on_radio.yaml`), with both wrappers. Nothing else counts until a real episode exists.
 2. **Step 4:** throughput and determinism → fills PROTOCOL §11 and sets every later experiment size.
 3. **Probe Astra** (or label a substitute).
 4. **Step 5:** executor candidates; skill probe (`configs/skills/probe_turning_on_radio.txt`).
