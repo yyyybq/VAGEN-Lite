@@ -1,49 +1,55 @@
 # STATUS
 
-Last updated: 2026-10-21 (session `claude/b1k-agent-baseline`, cloud container).
+Last updated: 2026-10-22. Work so far comes from the cloud session on branch `claude/b1k-agent-baseline` of github.com/yyyybq/VAGEN-Lite (draft PR #3); see `docs/RUNBOOK_105.md` §0 for turning it into a standalone repo.
 
 ## Current stage
 
-Step 1 (takeover) is done only for the parts that do not need server 105:
-- official rules verified from source;
-- `docs/PROTOCOL.md` first version written;
-- framework code written and tested on mocks.
+Done, where server 105 is not needed:
+- **Step 1 desk part:** official rules verified from source (`docs/PROTOCOL.md`, evidence in `docs/research/`).
+- **Framework:** code written and tested on mocks.
+- **Tooling for Steps 1–7:** written and tested on mocks.
 
-Steps 1 (on 105) to 4 are **blocked**: this session runs in a cloud container. It has no `ssh`, no `/nas`, no GPU, and the network policy blocks behavior.stanford.edu / huggingface.co / arxiv.org. Next actions on 105: `docs/RUNBOOK_105.md`.
+**Blocked:** Step 1 on 105 (watcher, scripts, versions, checkpoint, datasets) through Step 7. This session runs in a cloud container: no `ssh`, no `/nas`, no GPU, and behavior.stanford.edu / huggingface.co / arxiv.org are blocked by the network policy.
 
 ## Five states
 
 ### 1. Planned (no code yet)
-- M-approach (depth-based distance to target).
-- M-memory retrieval (RAG) and bridge.
-- M-score.
-- M-distill small checker.
-- M-spatial.
-- M-explore.
-- M-skill executor.
-- A joint plan+check call (one model call, two interface returns).
-- GR00T executor adapter.
-- Comet / RLC executor adapters.
+- M-approach (depth grounding + base adjustment; Cracking-paper recipe, `docs/PAPERS.md`).
+- M-memory retrieval and bridge.
+- M-score, which also needs multi-candidate executors.
+- M-distill small checker. Its data export and labelling are written.
+- M-spatial and M-explore.
+- M-skill executor (fine-tuning on the 2026 skill annotations).
+- A joint plan+check call.
+- Before/after frame comparison in M-check.
+- Executor adapters for Comet / RLC / GR00T.
+- A chunk-returning agent server (`--replay-action-chunk-size`).
 
-### 2. Code written (not yet exercised beyond unit tests)
-- `executor/openpi_server/serve_b1k_prompted.py`: needs the openpi venv; never run.
+### 2. Code written, needs 105 to exercise
+- `executor/openpi_server/serve_b1k_prompted.py` (openpi venv).
+- `diagnostics/replay_truth.py` (behavior env).
+- `scripts/takeover_check.sh`, `inspect_checkpoint.py`, `inventory_datasets.py`, `measure_throughput.py`, `gpu_sampler.sh`, `skill_probe.py`, `record_obs_fixture.py`, `setup_agent_env.sh`.
+- `eval/launch.py` / `eval/batch.py` real process management.
 - `providers/openai_compat.py` (Astra) and `providers/anthropic_sdk.py` (Claude substitute): never called against a real endpoint.
-- `diagnostics/replay_truth.py`: needs the simulator.
-- `scripts/*` for 105.
 
-### 3. Interface-verified (mock / synthetic tests pass)
-- **Agent server ↔ an official-style client**: `/healthz`, metadata, reset, batched obs, the reconnect resend.
-- **Executor client ↔ a fake prompt-capable openpi server**: prompt override, flush, chunk mode.
+### 3. Interface-verified (mock / synthetic tests; `python -m pytest -q` → 381 passed)
+- **Agent server ↔ an official-style client:** `/healthz`, metadata, reset without reply, batched obs, the 2026/eval reconnect resend.
+- **Executor client ↔ a fake prompt-capable openpi server:** override, flush, chunk mode, multi-task.
 - **Loop:**
   - L0 passthrough identity;
-  - each module on/off;
+  - every slot on alone;
   - leave-one-out;
-  - truth isolation;
+  - truth isolation (added or changed truth keys → identical decisions);
+  - read-only StateView;
+  - prompt isolation;
+  - import guards;
   - batched envs with separate state;
   - the budget regression.
-- **Modules with mock providers:** plan.llm, check.llm / check.rule, goal.bddl, recover.scripted.
-- **BDDL reader:** checked on real task files (the 100 2026 tasks all have problem0.bddl).
-- **Config inheritance and hashing.**
+- **Modules with scripted providers:** plan.llm, check.llm, check.rule, goal.bddl, recover.scripted.
+- **BDDL reader** on the 100 task files.
+- **Task metadata from the snapshots:** 100 tasks, exact `max_steps`, NL instructions.
+- **eval:** launch/batch with fake processes; aggregate/ablation/failures on synthetic official JSONs.
+- **data / diagnostics** on synthetic logs.
 
 ### 4. Simulator-run
 - **None.**
@@ -51,39 +57,38 @@ Steps 1 (on 105) to 4 are **blocked**: this session runs in a cloud container. I
 ### 5. Full-eval results
 - **None.**
 
-## Verified facts (see docs/PROTOCOL.md for sources)
-- **Version:** the BEHAVIOR-1K tag `v3.9.3` does not exist. The real tags are `v3.9.3-post1` (`bd049de3`, used for final hidden tests) and `v3.9.3-post2` (`a8247a8c`, the one on 105, custom-robot fix).
-- **Timing rules:** the 2026 rules (max_steps × 1 s budget after a free first query, 600 s per query, over budget = 0) exist only on branch `2026/eval` (`38d2c9fb`).
-- **Instances:** Report = public_test indices 0–9 (IDs 301–310); Dev = 10–19 (IDs 311–320).
-- **Robot-name mismatch:** the openpi fork expects `robot::` keys; the official evaluator sends `robot_r1::`. Our serving script renames keys.
-- **No official multi-task executor exists.** The official checkpoints are `turning_on_radio` only (π0.5 and GR00T N1.7). The multi-task options are community 2025 50-task weights (Comet π0.5 with text prompts, RLC task-ID only) and a community 100-task GR00T N1.7 fine-tune (unverified).
-- **No released executor is trained on skill-level language.**
+## Verified facts that shape the plan (details and sources: `docs/PROTOCOL.md`, `docs/research/`)
+
+- **Versions:**
+  - The tag `v3.9.3` does not exist.
+  - Final hidden tests use `v3.9.3-post1`; 105 has `v3.9.3-post2` (custom-robot fix only).
+  - The 2026 timing rules exist only on branch `2026/eval` (`38d2c9fb`): `max_steps` × 1 s after a free first query, 600 s per query, over budget = 0.
+- **Instances:** Report = public_test 0–9 (IDs 301–310). Dev = 10–19 (311–320) plus train IDs (0–299 for tasks 0–49, 1–300 for tasks 50–99).
+- **Steps:** exact `max_steps` for every task (`configs/tasks/`); turning_on_radio = 3224.
+- **Q-score:** literals false at start and true at the final step, divided by the option length, maximised over options; 1.0 on success. Initially-true literals cap partial credit.
+- **openpi key mismatch:** the fork reads `robot::` keys; the evaluator sends `robot_r1::`. `serve_b1k_prompted.py --rename_robot_from robot_r1` fixes it. Check how the `b1k_runs` scripts handle it.
+- **Radio checkpoint prompt:** the π0.5 radio checkpoint was probably trained on "turning on radio" (snake_case task name) but is served with the NL instruction. Prompt swapping is not expected to steer it.
+- **Executors:**
+  - No official multi-task executor exists.
+  - Community options: Comet π0.5 (tasks 0–49, NL prompts), RLC (tasks 0–49, task-ID only), GR00T N1.7 100-task (unverified).
+  - No released executor is trained on skill language.
+- **"Astra"** is most likely OpenAI GPT-6 Astra (`gpt-6-astra`), per search snippets only. Verify with `GET /v1/models` and `python -m providers.probe`.
 
 ## Blocks and minimal conditions to clear them
 
 | Block | Minimal condition |
 |---|---|
-| No access to server 105 (Steps 1–4, any simulator run) | Run the runbook on 105 yourself, or start a Claude Code session there (`claude remote-control` in `/nas/baiqiao/b1k_agent`), or give this environment ssh access |
-| Smoke-test watcher state unknown | `scripts/takeover_check.sh` on 105 |
-| GPUs busy (8 GPUs used by egor at hand-off) | Wait; `eval/gpu.py` only takes GPUs with < 2 GB used and < 10% utilization; never touch others' processes |
-| Astra endpoint unknown | Set `ASTRA_BASE_URL`, `ASTRA_API_KEY`, `ASTRA_MODEL` on 105 and run `python -m providers.probe ...`; a Claude substitute is wired but its results must be labelled |
-| Multi-task executor | Check on 105 whether HF downloads work; inspect candidates (PROTOCOL §12); pick one that loads and runs through the official interface |
-| Web pages, HF, arXiv unreachable here | Read the docs from the repo; the papers listed in the spec are NOT verified (see `docs/PAPERS.md` once written) |
+| No access to server 105 (all of Steps 1–7 that run anything) | Run `docs/RUNBOOK_105.md` on 105, or start a Claude Code session there (`claude remote-control` in `/nas/baiqiao/b1k_agent`) |
+| Smoke-test watcher state unknown | `scripts/takeover_check.sh` on 105 (read-only) |
+| GPUs were all busy at hand-off | `eval/gpu.py` takes only GPUs with < 2 GB used and < 10% utilization; wait otherwise; never touch others' processes |
+| Astra access | On 105, set `ASTRA_BASE_URL`, `ASTRA_API_KEY`, `ASTRA_MODEL`, then run `python -m providers.probe --config configs/S7_min_loop.yaml --provider astra`. Its latency decides how often M-plan / M-check can run inside the 1 s/step budget |
+| Multi-task executor | On 105: can HF be reached? Download, load and run candidates through the official interface (PROTOCOL §12); then the skill probe |
 
-## Next steps (ordered by expected gain / cost / dependency)
+## Next steps (expected gain / cost / dependency)
 
-1. On 105, follow `docs/RUNBOOK_105.md`:
-   - Step 1 takeover script, including reading the `b1k_runs` scripts;
-   - Step 2 smoke result;
-   - Step 3: `--direct` baseline episode and the L0 passthrough episode on Dev instance 311, both wrappers;
-   - Step 4: throughput and determinism.
-   - **Gives the action base and official numbers; nothing else counts until then.**
-2. Probe the Astra endpoint (latency decides the check interval within the 1 s/step budget).
-3. Step 5:
-   - download and load the executor candidates;
-   - run the skill-instruction diagnosis (`scripts/skill_probe.py`).
-4. Step 6:
-   - L0 on 5 Dev tasks (from the executor's covered tasks);
-   - failure distribution (`eval.failures`).
-5. Step 7:
-   - `S7_min_loop` vs `L0_exec_only` vs `C_budget_matched` on the same Dev set: the first comparison table.
+1. **105 Steps 1–3** (`docs/RUNBOOK_105.md`): the takeover report; the smoke result; the official `--direct` baseline episode and the L0 passthrough episode on Dev instance 311, with both wrappers. Nothing else counts until a real episode exists.
+2. **Step 4:** throughput and determinism → fills PROTOCOL §11 and sets every later experiment size.
+3. **Probe Astra** (or label a substitute).
+4. **Step 5:** executor candidates; skill probe (`configs/skills/probe_turning_on_radio.txt`).
+5. **Step 6:** L0 on 5 Dev tasks (PROTOCOL §13; choose set A/B/C by executor coverage) → failure distribution (`eval.failures`).
+6. **Step 7:** `S7_min_loop` vs `L0_exec_only` vs `C_budget_matched` on the same Dev set → the first comparison table (`eval.aggregate --compare`).
