@@ -1319,6 +1319,19 @@ def compute_advantage(
             index=data.non_tensor_batch["uid"],
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
         )
+        # round 12 freeze, variant V8 (vagen/split_reward_adv.py): success and progress normalised apart
+        from vagen.split_reward_adv import progress_tensor, split_grpo_advantages, weight as split_weight
+
+        w = split_weight(config)
+        if w is not None and "reward_parts" in data.non_tensor_batch:
+            progress = progress_tensor(list(data.non_tensor_batch["reward_parts"]))
+            advantages = split_grpo_advantages(data.batch["token_level_rewards"].sum(dim=-1), progress,
+                                               list(data.non_tensor_batch["uid"]), grpo_calculation_mask, w,
+                                               norm_by_std=norm_adv_by_std_in_grpo)
+            returns = advantages
+            data.meta_info["split_adv_metrics"] = {"actor/split_adv/progress_return_mean": float(progress.mean()),
+                                                   "actor/split_adv/progress_return_std": float(progress.std())
+                                                   if len(progress) > 1 else 0.0}
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
     else:
@@ -2808,6 +2821,7 @@ class RayPPOTrainer:
                             config=self.config.algorithm,
                         )
                         metrics.update(batch.meta_info.pop("invalid_turn_metrics", {}))  # round 12 freeze
+                        metrics.update(batch.meta_info.pop("split_adv_metrics", {}))  # round 12 freeze, V8
 
                     if self.config.algorithm.adv_estimator in ["no_concat_gae_last", "no_concat_gae_first", "no_concat_gae"]:
                         batch.batch["value_mask"] = compute_value_mask(batch)

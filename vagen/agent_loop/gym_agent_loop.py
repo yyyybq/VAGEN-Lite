@@ -99,6 +99,7 @@ class AgentData:
         # of every turn the env could not read
         self.turn_span: Optional[tuple] = None
         self.invalid_spans: List[List[int]] = []
+        self.progress_return: float = 0.0  # round 12 freeze, V8: the env's applied progress reward, summed
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -205,7 +206,11 @@ class GymAgentLoop(AgentLoopBase):
         from vagen.invalid_turns import enabled as _invalid_turns_enabled
 
         cls.record_invalid_spans = _invalid_turns_enabled(config.get("algorithm", None))
-      
+        # round 12 freeze, variant V8: record each episode's progress return only when the switch is on
+        from vagen.split_reward_adv import weight as _split_weight
+
+        cls.record_reward_parts = _split_weight(config.get("algorithm", None)) is not None
+
         _placeholder = [{"role": "system", "content": "placeholder"}]
         if processor is not None:
             _prefix_text = processor.apply_chat_template(
@@ -341,6 +346,8 @@ class GymAgentLoop(AgentLoopBase):
             # lists would be broadcast into a multi-dimensional one
             output.extra_fields["invalid_turn_spans"] = {"spans": [list(s) for s in agent_data.invalid_spans
                                                                    if s[0] < self.response_length]}
+        if getattr(self, "record_reward_parts", False):  # round 12 freeze, V8 (vagen/split_reward_adv.py)
+            output.extra_fields["reward_parts"] = {"progress": float(agent_data.progress_return)}
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:
@@ -433,6 +440,10 @@ class GymAgentLoop(AgentLoopBase):
             obs, reward, done, info = {"obs_str":"Environment Error"}, 0.0, True, {"traj_success": False}
 
         agent_data.env_rewards.append(float(reward))
+        if getattr(self, "record_reward_parts", False):  # round 12 freeze, V8: the turn's applied progress reward
+            from vagen.split_reward_adv import progress_of_turn
+
+            agent_data.progress_return += progress_of_turn(info)
         agent_data.traj_success = extract_success(info)
         agent_data.env_turns += 1
         agent_data.invalid_turns += int(turn_invalid(info))
