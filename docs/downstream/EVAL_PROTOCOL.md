@@ -113,10 +113,15 @@
 - **参考**：每个成功率的 95% Wilson 区间；逐回合配对的 McNemar 精确检验及 Holm 校正（每个任务一个检验）。它们把回合当成独立的，只作参考，不作结论。
 - 代码：`downstream/report/stats.py`（`task_level`、`noise_floor`、`compare`），单元测试 `downstream/tests/test_report.py`。
 
-## 5. 剔除清单（你 10-23 的决定 1）
+## 5. 剔除清单（你 10-23 的决定 1；同日晚的决定 4 加了一个）
 
-- **规则**：同一个（任务, 种子）在至少两个不同检查点的评测里让仿真进程死掉或挂住，就剔除。所有起点、E0 / E1 / E3 用同一份；**E1 的评测开始后冻结**，再加要单独报告。
-- **清单**（[downstream/eval/excluded_episodes.json](../../downstream/eval/excluded_episodes.json)）：SearingMeat 1044、StoreLeftoversInBowl 1003、PreSoakPan 1016、DeliverStraw 1006、DeliverStraw 1014。每次评测 950 → **945 回合**；空间组 450 → 447（SearingMeat 和 DeliverStraw 是空间任务）。
+- **规则**：同一个（任务, 种子）在至少两个不同检查点的评测里让仿真进程死掉或挂住，就剔除。所有起点、E0 / E1 / E3 用同一份；**E1 的评测开始后冻结**（第一次 E1 评测是 B 第 15 万步，最早约 10-24 09:45 UTC），再加要单独报告。
+- **清单**（[downstream/eval/excluded_episodes.json](../../downstream/eval/excluded_episodes.json)）：
+  - 10-23 早定的 5 个：SearingMeat 1044、StoreLeftoversInBowl 1003、PreSoakPan 1016、DeliverStraw 1006、DeliverStraw 1014。
+  - 10-23 晚加的 1 个：LoadDishwasher 1002。它在 7 次评测里没跑完：6 次是进程连死 3 次，1 次是重试时策略服务已因空闲 30 分钟关掉。
+  - 合计 6 个，每次评测 950 → **944 回合**；空间组 450 → 447（SearingMeat 和 DeliverStraw 是空间任务，LoadDishwasher 不是）。
+- **按同一规则也满足、但没加入的 7 个**：OpenDrawer 1012、StackBowlsCabinet 1012、PrepareCoffee 1003、StirVegetables 1007、CloseBlenderLid 1005、StackBowlsCabinet 1013、StackBowlsCabinet 1021。它们的进程出过事，但重试都跑完了。证据见阶段 0 报告第 5 节。
+- **策略服务不再因空闲关闭**（10-23 晚的决定 4）：`run_eval_ckpt.sh` 用 `--idle_timeout -1` 启动 StarVLA 的服务，整个评测期间都不关（包括补回合期间）；评测结束时由脚本自己关。
 - **怎么用**：
   - `closed_loop.py` 在分片之后去掉清单里的回合，所以一个分片的回合不变；清单和它的 sha256 记在每次评测的 `plan.json`、`summary.json` 和 `resume_*.json` 里。
   - 报告（`downstream/report/collect.py`）和看板（`watch.merged`）不计清单里的回合，不管评测有没有记下它们。清单之前完成的评测里，这 5 个回合大多也跑完了（全部失败），一律不计。
@@ -125,7 +130,7 @@
   - 来源：各评测的 `episodes.jsonl` 和 `resume_*.json`；
   - 明细见 [reports/E0_PARTIAL_20261023.md](reports/E0_PARTIAL_20261023.md) 第 5 节。
   - 出事的评测个数：SearingMeat 1044 是 7 个，StoreLeftoversInBowl 1003 是 6 个，DeliverStraw 1006 是 5 个，DeliverStraw 1014 是 4 个，PreSoakPan 1016 是 4 个。
-  - 按同一规则，到这时还有 5 个也满足：LoadDishwasher 1002（4 个）、PrepareCoffee 1003（3 个）、OpenDrawer 1012、StackBowlsCabinet 1012、StirVegetables 1007（各 2 个）。它们是否加入，**等你定**；没定之前按上面 5 个执行。
+  - 按同一规则，到这时还有 5 个也满足：LoadDishwasher 1002（4 个）、PrepareCoffee 1003（3 个）、OpenDrawer 1012、StackBowlsCabinet 1012、StirVegetables 1007（各 2 个）。10-23 晚你决定只加 LoadDishwasher 1002；全部 17 次 E0 评测的证据见 [reports/E0_STAGE0_20261023.md](reports/E0_STAGE0_20261023.md) 第 5 节。
 - **原因不是内存不足**：
   - 整机评测（96 个进程，机器 1,920 GiB）内存峰值 554–631 GiB（29%–33%），单个仿真进程最多 6.3 GiB；
   - 有内存记录的评测里，内存不足被杀 0 次；
