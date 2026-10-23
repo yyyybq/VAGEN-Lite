@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | E0 | 0 | 评测 D5 停下时保留的 16 个检查点（四个起点 × 2.5 万 / 5 万 / 7.5 万 / 10 万步），顺序：四个起点的 10 万步 → 5 万步 → B 10 万步第二遍（整机，噪声估计）→ 2.5 万和 7.5 万。全部评完后出阶段 0 报告：四条曲线（总体、空间组）、步数规则的判定、空间任务里四起点平均成功率在 10%–60% 的清单（给 E3 选任务）、评测噪声的初步估计（B 10 万步分片版和整机版之差，种子相同） | 主窗口许可 |
 | E1 | 1 | DS-{B,S,RS,RD}-100-s1 从头跑 20 万步；全状态续训。**评第 15 万、17.5 万、20 万步**（你 10-23 晚的决定 2）：第 15 万、17.5 万步的权重由看板在全状态被替换前复制到 `EXP/evals_src/steps_<N>/`，整机评测；第 20 万步在任务内评。报告主数字用三点平均，并列三点之间的配对差作为训练末尾的起伏尺度。B 的第二遍评测（repeat_final）已取消 | 10-23 00:02 已提交（你的决定 3，20 万步） |
-| E2 | 2 | 先 DS-{B,S,RS,RD}-010-s1，再视卡情况 030 | 10-23 00:02 已提交；10-23 晚按你的决定 1 全部停下，机器让给主线，有空闲机器时一个一个续训 |
+| E2 | 2 | DS-{B,S,RS,RD}-010-s1 和 DS-{B,S,RS,RD}-030-s1，设置同 E1（20 万步、全状态每 2.5 万步、训练任务自己评第 20 万步） | 010：10-23 00:02 提交；19:17 按你的决定 1 停下；20:22–20:34 按空机规则续训。030：10-23 20:45 按你的决定提交（B、S 在 h800，RS、RD 在 zoetrope），实验目录同时重建（10-21 的旧文件加 `_made_20261021` 存档） |
 | E3 | 3 | 四个起点各 1 个 PPO，从各自 E1 的最终检查点出发；任务是阶段 0 定的 CoffeeSetupMug、OpenDrawer、SlideDishwasherRack、TurnOffStove（E1 评完后按同一规则复核，变了先报告）；轮转和训练轮数各 2，64 或 32 个环境（第二次实测后定），更新 100 次，每个起点不超过 30 小时；RL 前后用同一套 944 回合评测；最多 2 个 RL 同时跑。方案见 [reports/STEP4_RL_PLAN_20261023.md](reports/STEP4_RL_PLAN_20261023.md) | E1 评完、第二次速度实测之后，按空机规则提交 |
 | E4 | — | 种子 2、3 | 暂不跑；E1 结果出来后再定种子 2（你 10-23 晚的决定 3）；已有的目录留着不删 |
 
@@ -43,7 +43,7 @@
 - **同步**：本地 worktree `C:\Users\user\Desktop\code\VAGEN-Lite-downstream` 提交 → push → 集群 `git pull --ff-only`。只在集群上生成的文件（如 `starts_lock.json`）在集群上提交、push，再在本地 pull。`docs/downstream/MATRIX.md` 由看板在集群上重写，本地不改它。
 - **集群 worktree**：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream`；其中 `third_party`、`playground` 是指向主检出的链接（被 .gitignore 忽略），只读使用。
 - **大文件**在 `/mnt/umm/users/yinbaiqiao/downstream_runs/`（不进 git）：`data/target50_{100,030,010}`（训练数据，只建链接）、`experiments/<编号>/`、`checks/`（一次性检查）、`logs/`、看板 `BOARD.md`、看板状态 `WATCH_STATE.json`、报告 `report/`、`report_stage0/`、阶段 0 报告的数字和网页 `report_stage0_20261023/`。
-- **看板** `downstream/eval/watch.py`（`downstream/eval/watch.sh start|stop|status`，代码更新后先 stop 再 start；启动参数记在 `downstream_runs/watch.args`）：每 15 分钟一轮、每 2 分钟一次分片落点检查；按第 2 节的规则提交评测、E2 续训和队列里的任务；在 E1 的第 15 万、17.5 万步复制权重（`--extra-points`、`--extract-python`）；重写 `BOARD.md` 和 `docs/downstream/MATRIX.md`（训练、评测各一张表）；有新评测完成时重建结果报告。按空机提交的任务记在 `WATCH_STATE.json` 的 `idle_sent` 里。用 setsid + nohup 运行，ssh 断开后仍会继续。除了按规则删掉落在空闲机器上、排队中被撤下或卡住的评测任务，不删任何东西。
+- **看板** `downstream/eval/watch.py`（`downstream/eval/watch.sh start|stop|status`，代码更新后先 stop 再 start；启动参数记在 `downstream_runs/watch.args`）：每 15 分钟一轮、每 2 分钟一次分片落点检查；按第 2 节的规则提交评测、E2 续训（`--resume-ratios 010 030`）和队列里的任务；在 E1 的第 15 万、17.5 万步复制权重（`--extra-points`、`--extract-python`）；重写 `BOARD.md` 和 `docs/downstream/MATRIX.md`（训练、评测各一张表）；有新评测完成时重建结果报告。按空机提交的任务记在 `WATCH_STATE.json` 的 `idle_sent` 里。用 setsid + nohup 运行，ssh 断开后仍会继续。除了按规则删掉落在空闲机器上、排队中被撤下或卡住的评测任务，不删任何东西。
 - **训练**：`downstream/train/make_experiment.py`（建实验；E1 用 `--full-state-interval 25000 --eval-points "" --archive-suffix _stopped_20261022`，复用 DS-*-100-s1 目录，旧的 experiment.json 等改名保留；B 另加 `"repeat_final": true`）、`runs.py make|submit|list`、`train_entry.py`（全状态每 2.5 万步存一次只留最新，启动时找到全状态就续训；`trainer.stop_at` 段末退出）、`full_state.py`、`run_segmented.sh`（训到最后一步 → 任务内评测最终检查点）、`run_train.sh`（10-21 的旧流程）。续训测试：`resume_test.sh`、`resume_kill_test.sh`、`resume_check.py`。
 - **评测**：`downstream/eval/run_eval_ckpt.sh CKPT OUT 服务数 进程数 [分片]`、`closed_loop.py`（10-22 起：仿真进程死了或卡住时它的回合重跑；重跑一个评测时只补缺的回合；每 30 秒记一次内存，`OUT/episodes/memory.csv` 和 `summary.json["memory"]`）、计划 `downstream/eval/eval_d6.json`、剔除清单 `downstream/eval/excluded_episodes.json`（6 个回合，944）。10-23 晚起策略服务以 `--idle_timeout -1` 启动，整个评测期间不因空闲关闭，结束时由脚本关。
 - **从全状态复制权重**：`downstream/train/extract_weights.py FULL_STATE RUN_DIR DEST [--dry] [--like CKPT]`（StarVLA 环境的 Python：`/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python`）。取出 DeepSpeed `mp_rank_00_model_states.pt` 里的 bf16 模型权重，按 StarVLA 检查点格式写到 `DEST/checkpoints/steps_<N>_pytorch_model.pt`，并复制 `config.yaml`、`dataset_statistics.json`，最后写 `source.json`。看板在 E1 第 15 万、17.5 万步自动调用。
@@ -106,3 +106,5 @@
   4. 剔除清单加 LoadDishwasher 1002（944）；修策略服务的 30 分钟空闲关闭。
   5. 第四步方案按实测改：轮转和训练轮数各 2、试 64 个环境、更新 100 次、每个起点不超过 30 小时、任务用阶段 0 的 4 个。
   6. MATRIX 和 STATUS 按原来的行列维护，训练和评测分开。
+- 晚 20:34：看板改为每 5 分钟一轮、每轮最多 4 个 8 卡任务（你说"现在有很多空卡"）。
+- 晚 20:4x：E2 30% 组四个都上，两个交 zoetrope、两个交 h800，做好新的实验记录（`downstream_runs/logs/make_e2_030_20261023/`，实验目录里的 `experiment.json`）。
