@@ -80,6 +80,9 @@ RUNS_ROOT = Path("/mnt/umm/users/yinbaiqiao/downstream_runs")
 
 STOPPED_RUN = "run_stopped_20261022"
 STAGE0_ORDER = {100000: 0, 50000: 1, 25000: 2, 75000: 2}  # the user's order for the stopped runs' checkpoints
+# a job of the main line in any of these states still wants cards: we yield to it.  The main line's queued one-card
+# evaluations show as SUSPENDED in sco (2026-10-23 19:30, when that state was not counted and E2 went back in)
+HELD_STATES = tuple(sco_job.WAITING_STATES) + ("SUSPENDED",)
 
 
 def job_cards(job: dict):
@@ -360,7 +363,7 @@ class Watcher:
         out = []
         for j in self.job_list():
             name = str(j.get("display_name") or "")
-            if j.get("state") not in sco_job.WAITING_STATES:
+            if j.get("state") not in HELD_STATES:
                 continue
             if any(name.startswith(p) for p in self.a.yield_to):
                 out.append(name)
@@ -486,7 +489,7 @@ class Watcher:
 
     def yield_waiting(self) -> list:
         """--yield-to jobs (the main line) waiting for cards anywhere in the workspace."""
-        return [str(j.get("display_name")) for j in self.job_list() if j.get("state") in sco_job.WAITING_STATES
+        return [str(j.get("display_name")) for j in self.job_list() if j.get("state") in HELD_STATES
                 and any(str(j.get("display_name") or "").startswith(p) for p in self.a.yield_to)]
 
     def withdraw_waiting_whole(self) -> list:
@@ -924,7 +927,9 @@ class Watcher:
         todo = []
         for start, ratio, seed in self.runs.grid(runs.STARTS, self.a.gate_ratios, self.a.gate_seeds):
             exp = self.experiments / runs.exp_id(start, ratio, seed)
-            if exp.name not in st["submitted"] and not (exp / "job/submission.json").exists():
+            # only runs that never had a job: a run stopped to free machines (job_released_*) resumes through
+            # resume_released (idle machines only); on 2026-10-23 19:30 this gate sent E2's four back in
+            if exp.name not in st["submitted"] and not (exp / "job").exists() and not list(exp.glob("job_*")):
                 todo.append((start, ratio, seed, exp))
         if not todo:
             return {"passed": True, "note": head + "；阶段 2 的任务都已提交"}

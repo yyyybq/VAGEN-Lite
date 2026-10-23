@@ -136,6 +136,31 @@ def test_a_cached_finished_job_is_asked_again_once_its_run_has_a_new_job(tmp_pat
     assert w.job(exp)["state"] == "SUCCEEDED"
 
 
+def test_the_gate_never_sends_back_a_run_that_had_a_job(tmp_path):
+    """2026-10-23 19:30: the stage-2 gate took the four E2 runs stopped to free machines (job_released_*) for runs
+    never submitted and sent them back in; a run with any job history now resumes only through resume_released."""
+    from test_watch_and_tasks import stage2_dirs, stopped_100k
+
+    stopped_100k(tmp_path, "B", 3)
+    stage2_dirs(tmp_path)
+    for s in ("B", "S"):
+        (tmp_path / f"experiments/DS-{s}-010-s1/job_released_20261023T191729Z").mkdir()
+    run_tools = FakeRuns()
+    w = watcher(tmp_path, "--pool-nodes", "h800:0", run_tools=run_tools)
+    gate = w.gate()
+    assert gate["passed"] and run_tools.submitted == [("RS", "010", 1), ("RD", "010", 1)]
+
+
+def test_suspended_main_line_jobs_count_as_waiting(tmp_path):
+    """The main line's queued one-card evaluations show as SUSPENDED in sco: we yield to them as to waiting jobs."""
+    jobs = FakeJobs()
+    jobs.listing = [eight_card("interiorgs-v10-eval-val--dcks2-100", "SUSPENDED", cards=1)]
+    w = watcher(tmp_path, jobs=jobs)
+    assert "给排在前面的任务让路" in w.blocked(8, "h800") and w.yield_waiting()
+    jobs.listing = [eight_card("interiorgs-v10-eval-val--dcks2-100", "RUNNING", cards=1)]
+    assert not watcher(tmp_path, jobs=jobs).blocked(8, "h800")
+
+
 def test_e1_matrix_cells_show_each_point_and_the_mean_of_three(tmp_path):
     from test_watch_and_tasks import summary
 
