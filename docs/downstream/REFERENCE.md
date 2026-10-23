@@ -1,6 +1,6 @@
 # 下游具身任务线：设计、规则、代码与路径（参考）
 
-最后更新：2026-10-22 19:50 UTC。现状看 [STATUS.md](STATUS.md)，各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每轮重写），评测协议看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，报告在 [reports/](reports/)。
+最后更新：2026-10-23 12:20 UTC。现状看 [STATUS.md](STATUS.md)，各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每轮重写），评测协议看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，报告在 [reports/](reports/)。
 
 ## 1. 分阶段设计（你 10-22 的指令；同日第二条指令修订）
 
@@ -9,11 +9,12 @@
 | E0 | 0 | 评测 D5 停下时保留的 16 个检查点（四个起点 × 2.5 万 / 5 万 / 7.5 万 / 10 万步），顺序：四个起点的 10 万步 → 5 万步 → B 10 万步第二遍（整机，噪声估计）→ 2.5 万和 7.5 万。全部评完后出阶段 0 报告：四条曲线（总体、空间组）、步数规则的判定、空间任务里四起点平均成功率在 10%–60% 的清单（给 E3 选任务）、评测噪声的初步估计（B 10 万步分片版和整机版之差，种子相同） | 主窗口许可 |
 | E1 | 1 | DS-{B,S,RS,RD}-100-s1 从头跑；全状态续训；**只在最终检查点做任务内评测，中间点不评**（E0 已覆盖 2.5 万–10 万步）；最终检查点的第二次评测（噪声下限）**只做 B**，用整机 8 卡任务，有空机时再做 | 续训测通（已满足），且 E0 四个起点的 5 万和 10 万步齐；最晚 10-23 16:00 UTC。步数：四个起点 5 万→10 万的配对差都在噪声内（p > 0.05 且小于 3 个百分点）用 10 万步，否则 20 万。提交前报步数、依据，提交后报四个任务号 |
 | E2 | 2 | 先 DS-{B,S,RS,RD}-010-s1，再视卡情况 030 | 闸门（任一起点 10 万步检查点在 9 个空间任务上成功率 > 0）过了，且有名额；实验目录要先按 E1 的设置重建 |
-| E3 | 3 | 1 小时实测（含一次满配置更新）→ 四个起点各 1 个 PPO；任务按规则选（E0 报告的 10%–60% 清单），所有起点同一批任务；RL 前后用同一套 950 回合评测；最多 2 个 RL 同时跑 | E1 之后、有名额时 |
+| E3 | 3 | 1 小时实测（含一次满配置更新）→ 四个起点各 1 个 PPO；任务按规则选（E0 报告的 10%–60% 清单；10-23 的阶段 0 报告给出 CoffeeSetupMug、OpenDrawer、SlideDishwasherRack、TurnOffStove，E1 评完后按同一规则重算，变了先报告），所有起点同一批任务；RL 前后用同一套 950 回合评测；最多 2 个 RL 同时跑 | E1 之后、有名额时 |
 | E4 | — | 种子 2、3 | 暂不跑；已有的目录留着不删，不再建新的 |
 
 - 名额：下游所有 8 卡训练（E1、E2 的训练，RL，测试）共用 4 个，RL 至多占 2 个；1 卡分片最多 8 个；8 卡评测任务不算训练名额。你在和主窗口谈动态名额，谈妥再改。
-- 统计：逐任务配对检验（34 个任务为配对单位）+ 评测噪声下限（同一检查点两次评测之差），见 EVAL_PROTOCOL.md 第 3、4 节。
+- 统计：逐任务配对检验（34 个任务为配对单位）+ 评测噪声下限（同一检查点两次评测之差），见 EVAL_PROTOCOL.md 第 3、4 节。配对一律只用两边都完成的回合（逐任务差也是）。
+- 阶段 0 报告（10-23，[reports/E0_STAGE0_20261023.md](reports/E0_STAGE0_20261023.md)）：步数规则判 20 万步（与 E1 一致）；评测噪声下限为 0（B 10 万步两遍，944 个共同回合全同）；同一起点相邻检查点之差（总体平均 3.3、最大 6.8 个百分点）和同一检查点起点之差（平均 2.8、最大 7.4）一样大，单个检查点、单个种子上的起点差要按这个尺度读。
 - 10-22 第一条指令里的"1.5 倍规则"（96 个进程每回合比 24 个进程慢超过 1.5 倍就改评法）已撤销：慢是因为同一台机器被更多进程分用，整机吞吐不变（约每秒 120 个控制步），任务内评测并不低效（你 10-22 第二条指令第 1 条）。
 
 ## 2. 评测的运行规则
@@ -30,11 +31,11 @@
 - **代码与文档**：分支 `downstream`（从 main `59053083` 开出）。只新增 `downstream/` 和 `docs/downstream/`。
 - **同步**：本地 worktree `C:\Users\user\Desktop\code\VAGEN-Lite-downstream` 提交 → push → 集群 `git pull --ff-only`。只在集群上生成的文件（如 `starts_lock.json`）在集群上提交、push，再在本地 pull。`docs/downstream/MATRIX.md` 由看板在集群上重写，本地不改它。
 - **集群 worktree**：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream`；其中 `third_party`、`playground` 是指向主检出的链接（被 .gitignore 忽略），只读使用。
-- **大文件**在 `/mnt/umm/users/yinbaiqiao/downstream_runs/`（不进 git）：`data/target50_{100,030,010}`（训练数据，只建链接）、`experiments/<编号>/`、`checks/`（一次性检查）、`logs/`、看板 `BOARD.md`、看板状态 `WATCH_STATE.json`、报告 `report/`、`report_stage0/`。
+- **大文件**在 `/mnt/umm/users/yinbaiqiao/downstream_runs/`（不进 git）：`data/target50_{100,030,010}`（训练数据，只建链接）、`experiments/<编号>/`、`checks/`（一次性检查）、`logs/`、看板 `BOARD.md`、看板状态 `WATCH_STATE.json`、报告 `report/`、`report_stage0/`、阶段 0 报告的数字和网页 `report_stage0_20261023/`。
 - **看板** `downstream/eval/watch.py`（`downstream/eval/watch.sh start|stop|status`，代码更新后先 stop 再 start；启动参数记在 `downstream_runs/watch.args`）：每 15 分钟一轮、每 2 分钟一次分片落点检查；按第 2 节的规则提交评测和 E2；重写 `BOARD.md` 和 `docs/downstream/MATRIX.md`；有新评测完成时重建结果报告。用 setsid + nohup 运行，ssh 断开后仍会继续。除了按规则删掉落在空闲机器上、排队中被撤下或卡住的评测任务，不删任何东西。
 - **训练**：`downstream/train/make_experiment.py`（建实验；E1 用 `--full-state-interval 25000 --eval-points "" --archive-suffix _stopped_20261022`，复用 DS-*-100-s1 目录，旧的 experiment.json 等改名保留；B 另加 `"repeat_final": true`）、`runs.py make|submit|list`、`train_entry.py`（全状态每 2.5 万步存一次只留最新，启动时找到全状态就续训；`trainer.stop_at` 段末退出）、`full_state.py`、`run_segmented.sh`（训到最后一步 → 任务内评测最终检查点）、`run_train.sh`（10-21 的旧流程）。续训测试：`resume_test.sh`、`resume_kill_test.sh`、`resume_check.py`。
 - **评测**：`downstream/eval/run_eval_ckpt.sh CKPT OUT 服务数 进程数 [分片]`、`closed_loop.py`（10-22 起：仿真进程死了或卡住时它的回合重跑；重跑一个评测时只补缺的回合；每 30 秒记一次内存，`OUT/episodes/memory.csv` 和 `summary.json["memory"]`）、计划 `downstream/eval/eval_d6.json`。
-- **报告**：`downstream/report/`（`python -m downstream.report.build --out DIR [--stage0]`，vagen-lite 环境）。主检验逐任务配对 + 噪声下限；阶段 0 页含曲线、10%–60% 清单、步数规则表、最后两点之差。网页版（私有 Artifact）：https://claude.ai/artifact/Qa1oNasyCN5pSkjg2LXhBq 。模拟数据在 `downstream_runs/checks/report_sim_20261021/`。
+- **报告**：`downstream/report/`（`python -m downstream.report.build --out DIR [--stage0] [--partial]`，vagen-lite 环境；`--partial` 把还没写完的评测按已完成回合计入并标出缺的回合）。主检验逐任务配对 + 噪声下限；阶段 0 页含曲线、缺回合的评测、10%–60% 清单（第 10 万步和全部检查点两种算法）、步数规则表、最后两点之差、检查点之间的起伏。网页版（私有 Artifact）：https://claude.ai/artifact/Qa1oNasyCN5pSkjg2LXhBq 。模拟数据在 `downstream_runs/checks/report_sim_20261021/`。
 - **第四步（E3）准备**：`downstream/rlinf/fsdp_7b.overrides`（7B 的三个 FSDP 设置）、`site/sitecustomize.py`（RLinf 的环境进程加台面区域顺序修正、分开记演员和价值头的梯度范数）、`run_rlinf.sh`（正式启动脚本）、`export_test.sh`（导回 StarVLA 格式 + 短评测，10-22 测通）。D7 环境：`/mnt/umm/users/yinbaiqiao/envs/rlinf-starvla-rc365`（`source downstream/envs/activate_rlinf.sh <ENV>`）。
 - **StarVLA**：`4507931` + 补丁 [downstream/patches/starvla_4507931_working.patch](../../downstream/patches/starvla_4507931_working.patch)；每个实验的 `experiment.json` 记提交号和补丁哈希。
 - **剩余空间**：`python3 downstream/quota.py`（读 `sco afs dir-quota list` 整张表里我们这一行）。
