@@ -211,6 +211,43 @@ def test_jobs_sent_on_idle_machines_are_withdrawn_while_they_wait_and_the_main_l
     assert (e2 / "job/submission.json").exists() and jobs.deleted.count("DS-B-010-s1") == 1
 
 
+def test_runs_listed_for_release_stop_at_their_next_full_state_and_wait_before_resuming(tmp_path):
+    """The user's choice of 2026-10-23 21:3x: three E2 30% runs give their machines back to the main line once they
+    have saved their next full state; afterwards they resume like any released run, but not within the hold."""
+    import time
+
+    exp = e1_exp(tmp_path, ratio="030", states=(), step=3000)
+    (exp / "job").mkdir()
+    (exp / "job/submission.json").write_text(json.dumps({"job_id": "pt-run"}))
+    (exp / "job/prepared.json").write_text(json.dumps({"pool": "h800"}))
+    jobs = FakeJobs(states={exp.name: "RUNNING"})
+    run_tools = SubmittingRuns(jobs)
+    args = ("--exps", "DS-B-030-s1", "--release-at-full-state", "DS-B-030-s1", "--resume-ratios", "030",
+            "--pool-nodes", "h800:5")
+
+    def one_pass(at=None):
+        w = watcher(tmp_path, *args, jobs=jobs, run_tools=run_tools)
+        if at:
+            w.now = lambda: at
+        w.tick()
+        w.save()
+        return w
+
+    w = one_pass()
+    assert not jobs.deleted and w.state["release"]["DS-B-030-s1"]["after"] == 0
+    assert "第 25,000 步的全状态存好后停下（机器让给主线）" in watch.matrix(w)
+    (exp / "run/full_state/steps_25000.partial").mkdir(parents=True)  # still being written
+    one_pass()
+    assert not jobs.deleted
+    (exp / "run/full_state/steps_25000.partial").rename(exp / "run/full_state/steps_25000")
+    w = one_pass()
+    assert jobs.deleted == ["DS-B-030-s1"] and list(exp.glob("job_released_*")) and not (exp / "job").exists()
+    assert w.state["release"]["DS-B-030-s1"]["full_state"] == 25000 and not run_tools.submitted  # held
+    assert any("按要求在全状态检查点停下" in n for n in w.notes)
+    one_pass(at=time.time() + 31 * 60)  # after the hold: back in, from its full state, on an idle machine
+    assert run_tools.submitted == [("B", "030", 1)] and jobs.deleted == ["DS-B-030-s1"]
+
+
 def test_e1_matrix_cells_show_each_point_and_the_mean_of_three(tmp_path):
     from test_watch_and_tasks import summary
 

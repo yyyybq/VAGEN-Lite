@@ -716,6 +716,9 @@ class Watcher:
                     continue
                 if self.run_finished(exp):
                     continue
+                done = self.state.get("release", {}).get(exp.name, {}).get("released_at")
+                if done and self.now() - done < self.a.release_hold_min * 60:  # the machine is the main line's now
+                    continue
                 pool, why = self.place8(f"{exp.name} 续训")
                 if why:
                     self.notes.append(why)
@@ -733,6 +736,39 @@ class Watcher:
         if sent:
             self.notes.append(f"续训（有空闲机器）本轮提交：{'；'.join(sent)}")
         return sent
+
+    def release_at_full_state(self) -> list:
+        """Runs of --release-at-full-state are stopped as soon as they save a full state newer than the one they had
+        when first seen here (the user's choice of 2026-10-23 21:3x: give machines back to the main line without
+        losing progress): the sco job deleted, EXP/job renamed job_released_<time>.  They resume later like any
+        released run (resume_released), not before --release-hold-min minutes, so the freed machine goes to the main
+        line's queued job.  At most --every seconds of training past the state are lost."""
+        out = []
+        book = self.state.setdefault("release", {})
+        for name in self.a.release_at_full_state:
+            exp, rec = self.experiments / name, book.setdefault(name, {})
+            if rec.get("released_at") or not (exp / "job/submission.json").exists():
+                continue
+            states = full_states(exp)
+            if "after" not in rec:
+                rec.update(after=states[-1] if states else 0, requested=utc())
+            if not states or states[-1] <= rec["after"]:
+                continue
+            st = self.job(exp)
+            if st.get("finished") or st.get("state") != "RUNNING":
+                continue
+            if self.a.dry:
+                out.append(f"{name} (would release after step {states[-1]})")
+                continue
+            res = self.jobs.delete(exp)
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            (exp / "job").rename(exp / f"job_released_{stamp}")
+            self.state["finished"].pop(str(exp), None)
+            rec.update(released_at=self.now(), released_utc=utc(), full_state=states[-1], record=f"job_released_{stamp}")
+            out.append(f"{name}（第 {states[-1]:,} 步的全状态已存好；{res}）")
+        if out:
+            self.notes.append(f"按要求在全状态检查点停下、机器让给主线：{'；'.join(out)}")
+        return out
 
     def flush_shards(self) -> None:
         """Submit the pending shards in priority order, as far as the rules allow: nothing while blocked(); at most
@@ -1035,6 +1071,7 @@ class Watcher:
                 rows.append(self.experiment_row(exp))
             else:
                 missing.append(exp_id)
+        self.release_at_full_state()
         self.flush_shards()
         self.flush_whole()
         self.withdraw_for_main_line()
@@ -1164,6 +1201,10 @@ def matrix_train(w: "Watcher", start: str, ratio: str, what: str) -> str:
     metric, fs = last_metric(exp), full_states(exp)
     lines = [f"训练到第 {metric['step']:,} 步（共 {steps:,}）" if metric and "step" in metric else "",
              f"可续的全状态：第 {fs[-1]:,} 步" if fs and not w.run_finished(exp) else ""]
+    rel = w.state.get("release", {}).get(exp.name, {})
+    if exp.name in w.a.release_at_full_state and jid and not rel.get("released_at"):
+        every = int(rec.get("full_state_interval") or 25000)
+        lines.append(f"第 {(rel.get('after', fs[-1] if fs else 0) // every + 1) * every:,} 步的全状态存好后停下（机器让给主线）")
     return _cell(f"**{state}**", f"任务 `{jid}`" if jid else (f"上一个任务记录 `{released[-1].name}`" if released else ""),
                  f"`{exp.relative_to(w.a.runs_root)}/`", "<br>".join(x for x in lines if x),
                  f"更新 {_stamp([exp / 'run/metrics.jsonl'])}" if _stamp([exp / "run/metrics.jsonl"]) else "")
@@ -1372,6 +1413,10 @@ def parser():
                     help="runs of these ratios stopped to free machines (job_released_*) resume on idle machines")
     ap.add_argument("--queue-dir", default=str(RUNS_ROOT / "queue"),
                     help="prepared 8-card jobs (*.json) submitted when a pool has an idle machine")
+    ap.add_argument("--release-at-full-state", nargs="*", default=[],
+                    help="experiments stopped once they save their next full state (machines back to the main line)")
+    ap.add_argument("--release-hold-min", type=float, default=30,
+                    help="minutes a run stopped by --release-at-full-state is not resumed")
     return ap
 
 
