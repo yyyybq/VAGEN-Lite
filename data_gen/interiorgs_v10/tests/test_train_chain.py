@@ -874,6 +874,11 @@ class ChainTest(unittest.TestCase):
             chain.rl_config()
             ps0 = calls[str(root / "rl_ps0")]
             self.assertIn("--lenient-parse", ps0)
+            self.assertNotIn("--invalid-turn-nonpositive", ps0)
+            chain.plan["rl"].update(invalid_turn_nonpositive=True)
+            chain.rl_config()
+            self.assertIn("--invalid-turn-nonpositive", calls[str(root / "rl_ps0")])
+            ps0 = calls[str(root / "rl_ps0")]
             self.assertEqual([ps0[ps0.index(f) + 1] for f in ("--format-example", "--invalid-penalty", "--group-filter",
                                                               "--keep-std-threshold", "--keep-std-floor")],
                              ["placeholder", "-0.5", "keep_by_return_std", "0.4", "1.0"])

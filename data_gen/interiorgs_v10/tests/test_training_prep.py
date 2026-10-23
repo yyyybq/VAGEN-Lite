@@ -645,6 +645,14 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual((report5["invalid_penalty"], report0["invalid_penalty"]), (-0.5, -0.1))
         self.assertNotIn("invalid_penalty_override", env0)
         self.assertEqual(TP.env_system_prompt(env5, "fov_inclusion"), TP.env_system_prompt(env0, "fov_inclusion"))
+        # 3.2 of 10-23: unreadable turns get no positive update (PPO config algorithm.invalid_turn_nonpositive_adv)
+        _, report6 = config("rl_invalid_turn", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder",
+                            invalid_turn_nonpositive=True)
+        ppo6 = yaml.safe_load((self.root / "rl_invalid_turn" / "ppo.yaml").read_text())
+        ppo0 = yaml.safe_load((self.root / "rl_strict" / "ppo.yaml").read_text())
+        self.assertTrue(ppo6["algorithm"]["invalid_turn_nonpositive_adv"] and report6["invalid_turn_nonpositive"])
+        self.assertNotIn("invalid_turn_nonpositive_adv", ppo0["algorithm"])
+        self.assertFalse(report0["invalid_turn_nonpositive"])
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

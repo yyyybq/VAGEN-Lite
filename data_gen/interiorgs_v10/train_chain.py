@@ -1021,7 +1021,7 @@ class Chain:
                 if rl.get(key) is not None:
                     args += [flag, str(rl[key])]
             for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val"),
-                              ("lenient_parse", "--lenient-parse")):
+                              ("lenient_parse", "--lenient-parse"), ("invalid_turn_nonpositive", "--invalid-turn-nonpositive")):
                 if rl.get(key):
                     args.append(flag)
             if self.plan.get("rl_runs") and run["reward_preset"]:
