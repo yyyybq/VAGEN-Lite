@@ -6,9 +6,9 @@
 
 | 文件 | 题数 | 状态题 (a) | 前向题 (b) | 逆向题 (c) |
 | --- | --- | --- | --- | --- |
-| p1_train.jsonl | 87437 | 35922（41.1%） | 43106（49.3%） | 8409（9.6%） |
+| p1_train.jsonl | 86855 | 35695（41.1%） | 42751（49.2%） | 8409（9.7%） |
 | p1_test.jsonl | 5985 | 2313（38.6%） | 2775（46.4%） | 897（15.0%） |
-| p1_probe.jsonl | 952 | 441（46.3%） | 471（49.5%） | 40（4.2%） |
+| p1_probe.jsonl | 934 | 434（46.5%） | 460（49.3%） | 40（4.3%） |
 
 三类题的规则（用户 2026-10-19）：状态题全部保留（答案平衡之后）；前向题最多是状态题的 1.2 倍；逆向题最多占题库的 15%；"动作后任务要求会满足吗"（goal_after）最多占前向题的一半；单个场景最多 8%。超出的按（题类、答案、是否变化）分层抽。
 
@@ -16,8 +16,10 @@
   - 上限：前向题 43106 道，逆向题 13946 道
 - val 场景：前向题 (b)可用 6697、留下 2775；逆向题 (c)可用 1015、留下 897；状态题 (a)可用 2313、留下 2313
   - 上限：前向题 2775 道，逆向题 897 道
-- 测试集去掉了探针集的 952 道题（两份不重叠）。
-- 探针集：952 道，每个题类 40 道，其中 goal_after 200 道、goal_now 200 道、occluded_after 全部可用的 71 道、occluded_now 全部可用的 41 道（预注册要的题类），来自 97 个 val 场景；其余题类都够；occluded_after 另有 37 道"没变化"的超过 10% 上限，没取。
+- 测试集去掉了探针集的 934 道题（两份不重叠），以及人工核对从探针去掉的 18 道。
+- p1_train.jsonl 暂扣 582 道（occluded_after 355、occluded_now 227），在 p1_train_held.jsonl；用户 2026-10-23：框判据的遮挡标签核对下来大多不对。
+- 探针集：934 道，每个题类 40 道，其中 goal_after 200 道、goal_now 200 道、occluded_after 全部可用的 71 道（人工核对后留 60 道）、occluded_now 全部可用的 41 道（人工核对后留 34 道）（预注册要的题类），来自 97 个 val 场景；其余题类都够；occluded_after 另有 37 道"没变化"的超过 10% 上限，没取。
+- 探针集的人工核对（probe_label_overrides.json）：33 道按核对的答案重标（full → partial 4、partial → none 29），18 道不该出的题去掉。
 
 ## 2. 按任务族 × 题类 × 划分的题数
 
@@ -28,10 +30,10 @@
 | absolute_positioning | 1310 | 0 | 0 | 0 | 0 | 9640 | 2686 | 6998 | 6909 | 0 | 0 | 0 | 0 | 0 | 0 | 27543 |
 | equidistance | 1477 | 0 | 0 | 2497 | 1444 | 0 | 0 | 1709 | 2577 | 0 | 0 | 0 | 0 | 0 | 0 | 9704 |
 | fov_inclusion | 1245 | 3314 | 2459 | 0 | 0 | 0 | 0 | 1550 | 2981 | 0 | 0 | 0 | 0 | 0 | 0 | 11549 |
-| occlusion_alignment | 238 | 0 | 0 | 0 | 0 | 0 | 0 | 731 | 711 | 0 | 0 | 0 | 0 | 355 | 227 | 2262 |
+| occlusion_alignment | 238 | 0 | 0 | 0 | 0 | 0 | 0 | 731 | 711 | 0 | 0 | 0 | 0 | 0 | 0 | 1680 |
 | projective_relations | 2828 | 0 | 0 | 0 | 0 | 0 | 0 | 4699 | 5724 | 0 | 0 | 2645 | 3515 | 0 | 0 | 19411 |
 | screen_occupancy | 1311 | 0 | 0 | 0 | 0 | 0 | 0 | 5083 | 5770 | 3885 | 919 | 0 | 0 | 0 | 0 | 16968 |
-| 合计 | 8409 | 3314 | 2459 | 2497 | 1444 | 9640 | 2686 | 20770 | 24672 | 3885 | 919 | 2645 | 3515 | 355 | 227 | 87437 |
+| 合计 | 8409 | 3314 | 2459 | 2497 | 1444 | 9640 | 2686 | 20770 | 24672 | 3885 | 919 | 2645 | 3515 | 0 | 0 | 86855 |
 
 **p1_test.jsonl**
 
@@ -52,10 +54,10 @@
 | absolute_positioning | 25 | 0 | 0 | 0 | 0 | 40 | 40 | 37 | 38 | 0 | 0 | 0 | 0 | 0 | 0 | 180 |
 | equidistance | 9 | 0 | 0 | 40 | 40 | 0 | 0 | 34 | 37 | 0 | 0 | 0 | 0 | 0 | 0 | 160 |
 | fov_inclusion | 2 | 40 | 40 | 0 | 0 | 0 | 0 | 34 | 36 | 0 | 0 | 0 | 0 | 0 | 0 | 152 |
-| occlusion_alignment | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 25 | 19 | 0 | 0 | 0 | 0 | 71 | 41 | 157 |
+| occlusion_alignment | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 25 | 19 | 0 | 0 | 0 | 0 | 60 | 34 | 139 |
 | projective_relations | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 35 | 36 | 0 | 0 | 40 | 40 | 0 | 0 | 154 |
 | screen_occupancy | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 35 | 34 | 40 | 40 | 0 | 0 | 0 | 0 | 149 |
-| 合计 | 40 | 40 | 40 | 40 | 40 | 40 | 40 | 200 | 200 | 40 | 40 | 40 | 40 | 71 | 41 | 952 |
+| 合计 | 40 | 40 | 40 | 40 | 40 | 40 | 40 | 200 | 200 | 40 | 40 | 40 | 40 | 60 | 34 | 934 |
 
 ## 3. 答案分布
 
@@ -78,8 +80,6 @@
 | height_bin_now | 919 | A 24.4% / B 25.8% / C 25.8% / D 24.0% | 1.0 | 0.2 223，0.4 223，0.3 223，0.5 106，0.1 89，0.7 14 |
 | left_right_after | 2645 | A 52.1% / B 47.9% | 2.1 | left 1378，right 1267 |
 | left_right_now | 3515 | A 52.4% / B 47.6% | 2.4 | left 1841，right 1674 |
-| occluded_after | 355 | A 33.2% / B 33.5% / C 33.2% | 0.2 | none 121，full 118，partial 116 |
-| occluded_now | 227 | A 33.5% / B 33.0% / C 33.5% | 0.3 | full 79，none 79，partial 69 |
 
 **p1_test.jsonl**
 
@@ -116,8 +116,8 @@
 | height_bin_now | 40 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | 0.2 10，0.4 9，0.3 9，0.5 5，0.1 4，0.8 2 |
 | left_right_after | 40 | A 50.0% / B 50.0% | 0.0 | right 20，left 20 |
 | left_right_now | 40 | A 50.0% / B 50.0% | 0.0 | right 20，left 20 |
-| occluded_after | 71 | A 32.4% / B 33.8% / C 33.8% | 0.9 | none 27，full 22，partial 22 |
-| occluded_now | 41 | A 34.1% / B 31.7% / C 34.1% | 1.6 | full 19，partial 15，none 7 |
+| occluded_after | 60 | A 38.3% / B 25.0% / C 36.7% | 8.3 | none 43，full 12，partial 5 |
+| occluded_now | 34 | A 23.5% / B 35.3% / C 41.2% | 9.8 | none 20，full 10，partial 4 |
 
 训练集和测试集里字母偏差的最大值：2.5 个百分点（探针集每类只有约 40 道，不计入；它的偏差见上表）。
 
@@ -133,7 +133,6 @@
 | p1_train.jsonl | goal_after | 20770 | 10.0% | 52.8% |
 | p1_train.jsonl | height_bin_after | 3885 | 10.1% | 64.8% |
 | p1_train.jsonl | left_right_after | 2645 | 10.0% | 0.0% |
-| p1_train.jsonl | occluded_after | 355 | 9.0% | 61.1% |
 | p1_test.jsonl | both_in_view_after | 172 | 10.5% | 66.1% |
 | p1_test.jsonl | closer_after | 160 | 10.0% | 48.5% |
 | p1_test.jsonl | distance_bin_after | 694 | 9.9% | 61.7% |
@@ -146,7 +145,7 @@
 | p1_probe.jsonl | goal_after | 200 | 10.0% | 50.0% |
 | p1_probe.jsonl | height_bin_after | 40 | 10.0% | 46.4% |
 | p1_probe.jsonl | left_right_after | 40 | 10.0% | 0.0% |
-| p1_probe.jsonl | occluded_after | 71 | 9.9% | 55.8% |
+| p1_probe.jsonl | occluded_after | 60 | 10.0% | 56.8% |
 
 ## 5. 过滤：没出的题和原因
 
@@ -269,9 +268,9 @@
 | height_bin_now | 40 | 25.0% | 25.0%（learned_options） | 15.0% | 2.5% |
 | left_right_after | 40 | 50.0% | 60.0%（learned_action） | 37.5% | 10.0% |
 | left_right_now | 40 | 50.0% | 50.0%（learned_options） | 50.0% | 0.0% |
-| occluded_after | 71 | 33.3% | 44.6%（learned_options） | 39.4% | 1.4% |
-| occluded_now | 41 | 33.3% | 46.3%（learned_action） | 14.6% | 0.0% |
-| 全部 | 952 | 40.7% |  | 36.9% | 8.1% |
+| occluded_after | 60 | 33.3% | 41.9%（option_order） | 71.7% | 1.7% |
+| occluded_now | 34 | 33.3% | 33.3%（learned_options） | 55.9% | 0.0% |
+| 全部 | 934 | 40.8% |  | 40.6% | 8.2% |
 
 ## 8. 每类两道原题
 
@@ -608,56 +607,4 @@ Answer with the option's letter.
 答案：A
 ```
 图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_9343f438cf57805a21887d88__x1.png`
-
-**occluded_after**（occlusion_alignment，terminal，`p1_e622f0e0f405`）
-
-```
-<image>
-If the camera moves sideways to the left by 0.9 meters from the current view, will the stool next to the floor lamp be hidden behind the sofa?
-(A) not hidden behind the sofa
-(B) partly hidden behind the sofa
-(C) fully hidden behind the sofa
-Answer with the option's letter.
-答案：C
-```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_b70bfa335843e19ee291552b__s4.png`
-
-**occluded_after**（occlusion_alignment，middle，`p1_e54734cba5c2`）
-
-```
-<image>
-If the camera moves forward by 0.3 meters from the current view, will the bedside table be hidden behind the wardrobe?
-(A) partly hidden behind the wardrobe
-(B) not hidden behind the wardrobe
-(C) fully hidden behind the wardrobe
-Answer with the option's letter.
-答案：B
-```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_25a608876df74330d293d746__x1.png`
-
-**occluded_now**（occlusion_alignment，start，`p1_ad900ec668c8`）
-
-```
-<image>
-In the current view, is the camera next to the wardrobe hidden behind the microphone?
-(A) partly hidden behind the microphone
-(B) not hidden behind the microphone
-(C) fully hidden behind the microphone
-Answer with the option's letter.
-答案：B
-```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_436b17f6849b8340193dd5c5__s0.png`
-
-**occluded_now**（occlusion_alignment，start，`p1_13dfcf5b2787`）
-
-```
-<image>
-In the current view, is the plant next to the coffee table hidden behind the TV cabinet?
-(A) partly hidden behind the TV cabinet
-(B) fully hidden behind the TV cabinet
-(C) not hidden behind the TV cabinet
-Answer with the option's letter.
-答案：C
-```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_3826e7b6f3f45347673c01b6__s0.png`
 

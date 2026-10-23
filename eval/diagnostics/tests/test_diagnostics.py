@@ -109,6 +109,25 @@ def test_score_and_summary():
     assert s["all"]["formats"]["letter_variant"] == 0.5
 
 
+def test_rescore_follows_the_probe_relabelled_and_dropped(tmp_path):
+    import argparse
+    import json
+
+    rows = [{"sample_id": s, "qtype": "occluded_now", "qclass": "state", "family": "f", "options": ["a", "b", "c"],
+             "messages": [{}, {"content": gold}]} for s, gold in (("1", "A"), ("2", "B"), ("3", "C"))]
+    out = tmp_path / "res"
+    out.mkdir()
+    answers = QP.score(rows, ["A", "A", "C"])
+    (out / "m.jsonl").write_text("".join(json.dumps(a) + "\n" for a in answers))
+    rows[0]["messages"][1]["content"] = "C"                      # relabelled
+    probe = tmp_path / "probe.jsonl"
+    probe.write_text("".join(json.dumps(r) + "\n" for r in rows[:1] + rows[2:]))  # question 2 dropped
+    QP.cmd_rescore(argparse.Namespace(out=str(out), probe=str(probe)))
+    new = [json.loads(l) for l in (out / "m.jsonl").read_text().splitlines()]
+    assert [a["sample_id"] for a in new] == ["1", "3"] and [a["correct"] for a in new] == [False, True]
+    assert json.loads((out / "m.json").read_text())["all"]["n"] == 2
+
+
 def test_yes_no_split_and_inverse_confusion():
     rows = [{"sample_id": str(i), "qtype": "goal_now", "qclass": "state", "family": "f", "options": [],
              "messages": [{}, {"content": "Yes" if i < 2 else "No"}]} for i in range(4)]

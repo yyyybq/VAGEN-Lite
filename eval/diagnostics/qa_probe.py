@@ -289,11 +289,14 @@ def run_one(name: str, model: str, probe: Path, out: Path, blind: bool = False) 
 
 def cmd_rescore(args: argparse.Namespace) -> None:
     """Read the saved answers again with the current parser and format rules (no GPU): OUT/<name>.jsonl and the
-    accuracies in OUT/<name>.json are rewritten; the model, timings and probe path are kept."""
+    accuracies in OUT/<name>.json are rewritten; the model, timings and probe path are kept.  Answers to questions no
+    longer in the probe (dropped by a label check) are left out; a relabelled question is scored on its new answer."""
     out = Path(args.out)
     rows = {r["sample_id"]: r for r in (json.loads(l) for l in Path(args.probe).read_text().splitlines() if l.strip())}
     for path in sorted(out.glob("*.jsonl")):
         old = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        gone = sum(a["sample_id"] not in rows for a in old)
+        old = [a for a in old if a["sample_id"] in rows]
         answers = score([rows[a["sample_id"]] for a in old], [a["output"] for a in old])
         with open(path, "w", encoding="utf-8") as f:
             for a in answers:
@@ -302,7 +305,8 @@ def cmd_rescore(args: argparse.Namespace) -> None:
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {"name": path.stem}
         meta = {k: v for k, v in meta.items() if k in ("name", "model", "probe", "images", "load_seconds", "answer_seconds")}
         meta_path.write_text(json.dumps({**meta, **summary(answers)}, indent=1))
-        print(f"{path.stem}: " + json.dumps({k: summary(answers)["all"][k] for k in ("accuracy", "noncompliant")}))
+        print(f"{path.stem}: " + json.dumps({k: summary(answers)["all"][k] for k in ("accuracy", "noncompliant")})
+              + (f" ({gone} answers to questions no longer in the probe left out)" if gone else ""))
 
 
 def models_from_eval(ev: Path, names: Sequence[str]) -> List[Tuple[str, str]]:

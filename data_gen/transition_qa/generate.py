@@ -380,6 +380,9 @@ BUILD_CONFIG: Dict[str, Any] = {
     "flip_band": (0.35, 0.65),      # share of forward questions whose answer differs from the current one
     "scene_cap": 0.08,
     "final_letter_slack": 1.10,      # after sampling, per file: <= +2.4 points for 2 options, +1.8 for 4
+    # set aside after balancing (user, 2026-10-23): the training set's occlusion questions, whose box-judged labels
+    # the hand check of the probe found mostly wrong (PROGRESS 12.18); written to <file>_held.jsonl, nothing else moves
+    "hold_qtypes": {"train": ["occluded_now", "occluded_after"]},
 }
 PROBE_CONFIG: Dict[str, Any] = {
     "per_qtype": 40,                # user, 2026-10-19: at least 40 per question type
@@ -387,6 +390,8 @@ PROBE_CONFIG: Dict[str, Any] = {
     # candidate that passed the filters (the answers then keep their natural shares)
     "per_qtype_overrides": {"goal_now": 200, "goal_after": 200, "occluded_now": "all", "occluded_after": "all"},
     "unchanged_max_share": 0.10,
+    # the user's corrections of probe labels (2026-10-23, apply_label_overrides): a file in OUT; None: none
+    "label_overrides": "probe_label_overrides.json",
 }
 ORDINAL = {"distance_bin", "height_bin"}         # options in ascending order: balance the letter
 SHUFFLED = {"occluded", "both_in_view"}          # categorical: option order drawn per question
@@ -917,6 +922,62 @@ def depth_check_occlusion(records: List[Dict[str, Any]], out: Path, cfg: Dict[st
     return kept
 
 
+OCCLUSION_PREFIX = {"full": "fully hidden", "partial": "partly hidden", "none": "not hidden"}
+
+
+def read_label_overrides(out: Path, cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The probe's label overrides (PROBE_CONFIG "label_overrides", a file in OUT), or None."""
+    name = cfg.get("label_overrides")
+    if not name:
+        return None
+    path = out / name
+    if not path.exists():
+        raise SystemExit(f"{path} missing (PROBE_CONFIG label_overrides); set it to None to build without")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["_path"] = str(path)
+    return data
+
+
+def apply_label_overrides(records: List[Dict[str, Any]], overrides: Optional[Dict[str, Any]],
+                          report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The user's corrections of probe labels (2026-10-23: the probe's occlusion questions checked by hand, PROGRESS
+    12.18): ``relabel`` {sample_id: answer value} moves the answer to the option of that value (the options and their
+    order stay); ``drop`` [sample_id] removes questions that should not be asked.  Every listed id must be among
+    ``records``."""
+    if not overrides:
+        return records
+    relabel, drop = dict(overrides.get("relabel") or {}), set(overrides.get("drop") or [])
+    ids = {r["sample_id"] for r in records}
+    missing = sorted((set(relabel) | drop) - ids)
+    if missing or set(relabel) & drop:
+        raise SystemExit(f"label overrides: {len(missing)} ids not in the probe ({missing[:3]}), "
+                         f"{len(set(relabel) & drop)} both relabelled and dropped")
+    out, moved = [], {}
+    for r in records:
+        if r["sample_id"] in drop:
+            continue
+        new = relabel.get(r["sample_id"])
+        if new is not None:
+            if r["kind"] != "occluded" or new not in OCCLUSION_PREFIX:
+                raise SystemExit(f"label overrides: {r['sample_id']} is {r['kind']} / {new}; only occlusion answers")
+            hits = [i for i, o in enumerate(r["options"]) if o.startswith(OCCLUSION_PREFIX[new] + " ")]
+            if len(hits) != 1:
+                raise SystemExit(f"label overrides: {r['sample_id']} has no single option for {new!r}")
+            moved[r["sample_id"]] = [r["answer_value"], new]
+            r = dict(r, answer="ABCD"[hits[0]], answer_value=new)
+        out.append(r)
+    report.update({"file": overrides.get("_path"), "decided": overrides.get("decided"), "relabelled": len(moved),
+                   "dropped": len(drop), "moves": dict(collections.Counter(f"{a}->{b}" for a, b in moved.values()))})
+    return out
+
+
+def hold_out(rows: List[Dict[str, Any]], qtypes: Sequence[str]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """(kept, held): questions of ``qtypes`` set aside (BUILD_CONFIG hold_qtypes; user 2026-10-23: the training
+    set's occlusion questions until their labels can be trusted)."""
+    held = [r for r in rows if r["qtype"] in set(qtypes)]
+    return [r for r in rows if r["qtype"] not in set(qtypes)], held
+
+
 def _check_scenes(records: List[Dict[str, Any]], manifest_path: str) -> Dict[str, List[Dict[str, Any]]]:
     manifest = json.loads(Path(manifest_path).read_text())
     train_scenes, val_scenes = set(manifest["train_scenes"]), set(manifest["val_scenes"])
@@ -950,10 +1011,13 @@ def cmd_probe(args: argparse.Namespace) -> None:
     taken = [shuffle_options(r) if r["kind"] in SHUFFLED else r for r in val if r["qtype"] in whole]
     report: Dict[str, Any] = {}
     picks = even_letters(probe_select(balanced + taken, cfg, rng, report), BUILD_CONFIG, rng, cap=False)
+    overrides: Dict[str, Any] = {}
+    picks = apply_label_overrides(picks, read_label_overrides(out, cfg), overrides)
     n = write_jsonl(out / "p1_probe.jsonl", (to_lf(r) for r in picks))
     stats = {"questions": n, "config": cfg, "seed": args.seed, "candidates": len(val),
              "scenes": len({r["scene"] for r in picks}), "scenes_allowed": len(scenes) if scenes else None,
-             "scenes_from": args.scenes_from, "by_qtype": report, "occlusion_depth": depth_report}
+             "scenes_from": args.scenes_from, "by_qtype": report, "occlusion_depth": depth_report,
+             "label_overrides": overrides}
     (out / "probe_stats.json").write_text(json.dumps(stats, indent=1))
     print(json.dumps({"questions": n, "short": {q: v["short"] for q, v in report.items() if v["short"]}}, indent=1))
 
@@ -971,8 +1035,11 @@ def cmd_build(args: argparse.Namespace) -> None:
     if not probe_path.exists() and not args.no_probe:
         raise SystemExit(f"{probe_path} missing: build the probe set first (generate probe), or pass --no-probe")
     probe_ids = {r["sample_id"] for r in read_jsonl(probe_path)} if probe_path.exists() else set()
-    splits["val"] = [r for r in splits["val"] if r["sample_id"] not in probe_ids]
+    # questions dropped from the probe by the user's check stay out of the test set as well
+    dropped = set((read_label_overrides(out, PROBE_CONFIG) or {}).get("drop") or [])
+    splits["val"] = [r for r in splits["val"] if r["sample_id"] not in probe_ids | dropped]
     stats["probe_excluded"] = len(probe_ids)
+    stats["probe_dropped_excluded"] = len(dropped)
     built: Dict[str, List[Dict[str, Any]]] = {}
     final = stats.setdefault("final_letter_cap_dropped", {})
     for name, rs in splits.items():
@@ -996,6 +1063,12 @@ def cmd_build(args: argparse.Namespace) -> None:
     probe_scenes = {r["scene"] for r in read_jsonl(probe_path)} if probe_path.exists() else set()
     if {r["scene"] for r in built["train"]} & ({r["scene"] for r in built["val"]} | probe_scenes):
         raise SystemExit("a scene is in both the training and the test questions")
+    for split, qtypes in (cfg.get("hold_qtypes") or {}).items():
+        name = {"train": "p1_train.jsonl", "test": "p1_test.jsonl"}[split]
+        files[name], held = hold_out(files[name], qtypes)
+        n_held = write_jsonl(out / name.replace(".jsonl", "_held.jsonl"), (to_lf(r) for r in held))
+        stats.setdefault("held", {})[name] = {"qtypes": list(qtypes), "held": n_held,
+                                              "by_qtype": dict(collections.Counter(r["qtype"] for r in held))}
     for name, rs in files.items():
         stats.setdefault("files", {})[name] = write_jsonl(out / name, (to_lf(r) for r in rs))
     if probe_path.exists():

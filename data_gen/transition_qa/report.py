@@ -101,7 +101,12 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
             if capped:
                 lines.append("  - goal 上限去掉：" + "，".join(f"{CLASS_ZH[k]} {n} 道" for k, n in sorted(capped.items())))
     if stats.get("probe_excluded"):
-        lines.append(f"- 测试集去掉了探针集的 {stats['probe_excluded']} 道题（两份不重叠）。")
+        lines.append(f"- 测试集去掉了探针集的 {stats['probe_excluded']} 道题（两份不重叠）"
+                     + (f"，以及人工核对从探针去掉的 {stats['probe_dropped_excluded']} 道" if stats.get("probe_dropped_excluded") else "")
+                     + "。")
+    for name, h in (stats.get("held") or {}).items():
+        lines.append(f"- {name} 暂扣 {h['held']} 道（" + "、".join(f"{q} {n}" for q, n in sorted(h["by_qtype"].items()))
+                     + f"），在 {name.replace('.jsonl', '_held.jsonl')}；用户 2026-10-23：框判据的遮挡标签核对下来大多不对。")
     probe_stats = out / "probe_stats.json"
     if probe_stats.exists():
         ps = json.loads(probe_stats.read_text())
@@ -109,14 +114,25 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
         by_q = ps["by_qtype"]
         short = {q: v["short"] for q, v in by_q.items() if v["short"] and over.get(q) != "all"}
         capped = {q: v["short"] for q, v in by_q.items() if v["short"] and over.get(q) == "all"}  # the unchanged cap
+        in_file = collections.Counter(r["qtype"] for r in data.get("p1_probe.jsonl", []))
+
+        def whole(q: str) -> str:
+            n = by_q[q]["picked"]
+            return f"全部可用的 {n} 道" + (f"（人工核对后留 {in_file[q]} 道）" if in_file and in_file[q] != n else "")
+
         sizes = (f"每个题类 {ps['config']['per_qtype']} 道，其中 "
-                 + "、".join(f"{q} " + (f"全部可用的 {by_q[q]['picked']} 道" if v == "all" else f"{v} 道")
+                 + "、".join(f"{q} " + (whole(q) if v == "all" else f"{v} 道")
                             for q, v in sorted(over.items())) + "（预注册要的题类）"
                  if over else f"每个题类 {ps['config']['per_qtype']} 道")
         lines.append(f"- 探针集：{ps['questions']} 道，{sizes}，来自 {ps['scenes']} 个 val 场景"
                      + (f"；不够的题类：{json.dumps(short)}" if short else "；其余题类都够")
                      + ("".join(f"；{q} 另有 {n} 道\"没变化\"的超过 10% 上限，没取" for q, n in sorted(capped.items())))
                      + "。")
+        lo = ps.get("label_overrides") or {}
+        if lo.get("relabelled") or lo.get("dropped"):
+            moves = "、".join(f"{k.replace('->', ' → ')} {n}" for k, n in sorted((lo.get("moves") or {}).items()))
+            lines.append(f"- 探针集的人工核对（{Path(lo['file']).name}）：{lo['relabelled']} 道按核对的答案重标（{moves}），"
+                         f"{lo['dropped']} 道不该出的题去掉。")
     lines.append("")
     # ------------------------------------------------------------------ family x qtype x split
     lines += ["## 2. 按任务族 × 题类 × 划分的题数", ""]

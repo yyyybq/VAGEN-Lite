@@ -350,6 +350,39 @@ def test_review_page_as_an_artifact():
     assert "META.intro" in page and page.count('class="default-intro"') == 2
 
 
+def test_probe_label_overrides_relabel_and_drop():
+    def occ(i, opts, answer, value):
+        r = _rec(i, "occluded_now", answer, value)
+        r.update(kind="occluded", options=[f"{o} behind the bed" for o in opts])
+        return r
+
+    recs = [occ(1, ["partly hidden", "not hidden", "fully hidden"], "A", "partial"),
+            occ(2, ["fully hidden", "partly hidden", "not hidden"], "A", "full"),
+            occ(3, ["not hidden", "fully hidden", "partly hidden"], "B", "full"),
+            _rec(4, "goal_now", "Yes", "")]
+    ov = {"relabel": {"id000001": "none", "id000003": "partial"}, "drop": ["id000002"], "_path": "x.json"}
+    rep = {}
+    out = GEN.apply_label_overrides(recs, ov, rep)
+    assert [r["sample_id"] for r in out] == ["id000001", "id000003", "id000004"]
+    assert (out[0]["answer"], out[0]["answer_value"]) == ("B", "none")       # the option "not hidden ..." is B
+    assert (out[1]["answer"], out[1]["answer_value"]) == ("C", "partial")
+    assert out[1]["options"] == recs[2]["options"] and recs[0]["answer"] == "A"  # options stay; the input is untouched
+    assert rep["relabelled"] == 2 and rep["dropped"] == 1 and rep["moves"] == {"partial->none": 1, "full->partial": 1}
+    assert GEN.apply_label_overrides(recs, None, {}) is recs
+    with pytest.raises(SystemExit):
+        GEN.apply_label_overrides(recs, {"drop": ["id999999"]}, {})            # an id not in the probe
+    with pytest.raises(SystemExit):
+        GEN.apply_label_overrides(recs, {"relabel": {"id000004": "none"}}, {})  # not an occlusion question
+
+
+def test_hold_out_sets_a_question_type_aside():
+    rows = [_rec(i, q, "A", "") for i, q in enumerate(["occluded_now", "goal_now", "occluded_after", "closer_now"])]
+    kept, held = GEN.hold_out(rows, ["occluded_now", "occluded_after"])
+    assert [r["qtype"] for r in kept] == ["goal_now", "closer_now"] and len(held) == 2
+    assert GEN.BUILD_CONFIG["hold_qtypes"] == {"train": ["occluded_now", "occluded_after"]}
+    assert GEN.PROBE_CONFIG["label_overrides"] == "probe_label_overrides.json"
+
+
 def test_probe_check_puts_mismatched_occluders_first():
     from data_gen.transition_qa import review as RV
 

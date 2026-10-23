@@ -56,7 +56,7 @@ eval:
   diagnostics:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <reuse.tr>/diag/failure_<set>
     qa_probe: >-
-      已跑（2026-10-21，exps/diagnostics_20261021/probe_v3d_all：sft_formal_e9、c0_p1s0_250、c0_p1d_100）。
+      已跑（2026-10-21，exps/diagnostics_20261021/probe_v3d_all：sft_formal_e9、c0_p1s0_250、c0_p1d_100）；2026-10-23 人工核对后在 934 道上重算，exps/diagnostics_20261023/probe_v3e_all。
       用户 2026-10-21 定：C0 的探针用 P1-S0 第 250 次、P1-D 第 100 次（两个 RL 的第 300 次已不在集群上），即
       python -m eval.diagnostics.sco_probe --probe /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_probe.jsonl
       --model c0_p1s0_250=<reuse.tr>/rl_run_p1s0/checkpoints/global_step_250/actor/huggingface
