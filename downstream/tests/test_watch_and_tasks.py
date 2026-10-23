@@ -379,7 +379,10 @@ def test_segmented_runs_evaluate_the_final_in_the_job_and_only_b_twice(tmp_path)
     (s / "experiment.json").write_text(json.dumps({"steps": 200000, "segmented": True, "eval_points": [200000]}))
     os.utime(s / "run/final_model/pytorch_model.pt", (OLD, OLD))
     jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("other", 1)]))})
-    w = watcher(tmp_path, "--repeat", jobs=jobs, shards=8)
+    off = watcher(tmp_path, "--repeat", jobs=jobs, shards=8)  # the user cancelled B's second evaluation (10-23)
+    assert off.repeat_targets() == [] and {e["tag"] for e in off.experiment_row(b)["evals"]} == {
+        "steps_150000", "steps_175000", "steps_200000"}
+    w = watcher(tmp_path, "--repeat", "--repeat-final", "--extra-points", jobs=jobs, shards=8)
     assert w.repeat_targets() == ["DS-B-100-s1:steps_200000"]
     rows, *_ = w.tick()
     b_states = {e["tag"]: e["state"] for e in rows[0]["evals"]}
@@ -590,13 +593,18 @@ def test_matrix_lists_the_starts_and_the_pending_rows(tmp_path):
     (s1 / "run/metrics.jsonl").write_text(json.dumps({"step": 4200, "action_dit_loss": 0.1}) + "\n")
     w = watcher(tmp_path, "--stage0", jobs=FakeJobs(), shards=8)
     text = watch.matrix(w)
-    # header, rule line, the four starts and the rows to be added
-    assert sum(line.startswith("| ") for line in text.splitlines()) == 2 + 4 + len(watch.MATRIX_PENDING)
-    row_b = next(line for line in text.splitlines() if line.startswith("| B 原始 7B"))
+    # two tables of the same rows and columns (training, evaluation): header, rule line, four starts, rows to be added
+    assert sum(line.startswith("| ") for line in text.splitlines()) == 2 * (2 + 4 + len(watch.MATRIX_PENDING))
+    train, evals = text.split("## 评测")
+    assert "## 训练" in train and train.count(watch.MATRIX_COLUMNS) == 1 and evals.count(watch.MATRIX_COLUMNS) == 1
+    row_b = next(line for line in evals.splitlines() if line.startswith("| B 原始 7B"))
     assert "**1/4 个检查点评完**" in row_b and "`pt-e0`" in row_b and "100k：总体 21.4%（15/70），空间组 20.0%（10/50）" in row_b
-    row_s = next(line for line in text.splitlines() if line.startswith("| S 动作 SFT"))
-    assert "**未提交**" in row_s and "训练到第 4200 步（共 100000）" in row_s
-    assert "r12k S0-keep（待接入）" in text and "暂不跑" in row_b
+    row_s = next(line for line in train.splitlines() if line.startswith("| S 动作 SFT"))
+    assert "**未提交**" in row_s and "训练到第 4,200 步（共 100,000）" in row_s
+    row_s_eval = next(line for line in evals.splitlines() if line.startswith("| S 动作 SFT"))
+    assert "100k：训完后由训练任务自己评" in row_s_eval and "0/1 个检查点评完" in row_s_eval
+    row_b_train = next(line for line in train.splitlines() if line.startswith("| B 原始 7B"))
+    assert "r12k S0-keep（待接入）" in evals and "暂不跑" in row_b_train and "不再训练" in row_b_train
 
 
 def test_merged_leaves_out_the_excluded_episodes(tmp_path):

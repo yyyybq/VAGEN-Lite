@@ -37,6 +37,22 @@ Rules of the user's decisions of 2026-10-22 on the stage-1 plan:
   * stage-2 gate: passed once any start's step --gate-step (100k) checkpoint, of stage 0 or stage 1, had more than 0
     successful episodes on the 9 spatial tasks; then the --gate-ratios x --gate-seeds runs whose experiment directory
     is set up for the staged plan are submitted one per free place.  The passing is kept in --state.
+
+Rules of the user's decisions of 2026-10-23 evening (after the stage-0 report):
+  * GPU order: our new jobs wait for idle machines.  Nothing is submitted while a --yield-to job (the main line,
+    interiorgs-v10-*) waits anywhere in the workspace; an 8-card job goes only to a pool with an idle machine, at most
+    --max-whole-per-pass of them per pass (the idle estimate cannot see other workspaces' jobs);
+  * E1 is evaluated at --extra-points (150k, 175k) besides its final checkpoint (200k, inside the job).  A run keeps
+    only its newest full state, so as soon as the state of such a point exists its weights are copied out
+    (downstream/train/extract_weights.py, EXP/evals_src/steps_<N>/, with --extract-python) before the next state
+    replaces it; the copy is then evaluated by one 8-card job (EXP/evals/steps_<N>/, 8 servers x 96 processes);
+  * the second evaluation of a final checkpoint ("repeat_final", B) is off unless --repeat-final is given;
+  * runs stopped to free machines (EXP/job renamed job_released_<time>) of --resume-ratios (E2) resume from their
+    newest full state when a pool has an idle machine (resume_released);
+  * prepared jobs in --queue-dir (*.json: {"run": DIR, "cards": 8, "what": ...}; DIR made by sco_job.prepare) are
+    submitted under the same rule (the RL speed test of 64 environments);
+  * docs/downstream/MATRIX.md holds two tables with the same rows and columns, training and evaluation.
+Order within a pass: 8-card evaluations, then queued jobs, then resumed runs.
 Nothing is ever deleted.  Finished jobs are remembered in --state and not queried again.
 """
 from __future__ import annotations
@@ -254,6 +270,8 @@ class Watcher:
         self.pending = []  # (priority key, shard dir, checkpoint, i, k, job name) collected in a pass
         self.pending8 = []  # (priority key, evaluation dir, checkpoint, job name): 8-card evaluations for idle machines
         self.waiting_whole = []  # the same, for our 8-card evaluations submitted but still waiting for a machine
+        self.sent8, self.sent8_pool = 0, {}  # 8-card jobs submitted in this pass (all kinds), per pool
+        self.extract_run = subprocess.run  # the weight copy (tests replace it)
 
     # ------------------------------------------------------------------------------------------- bookkeeping
     def save(self):
@@ -261,8 +279,9 @@ class Watcher:
 
     def job(self, run: Path) -> dict:
         key = str(run)
-        if key in self.state["finished"]:
-            return self.state["finished"][key]
+        cached = self.state["finished"].get(key)
+        if cached and cached.get("job_id") in (None, _job_id(run)):  # a later job of the same run is asked again
+            return cached
         st = self.jobs.status(run)
         if st.get("finished"):
             self.state["finished"][key] = st
@@ -508,7 +527,7 @@ class Watcher:
                 self.notes.append(f"{pool}：我们的 8 卡评测还有在排队的（{self.waiting8(pool)[0]}），先不提交更多")
                 continue
             else:
-                n = min(self.idle_nodes(pool) or 0, self.a.max_whole_per_pass - len(sent))
+                n = self.idle_left(pool)
             while n > 0 and todo:
                 _, evaldir, ckpt, name = todo.pop(0)
                 if self.a.dry:
@@ -517,9 +536,160 @@ class Watcher:
                     self.jobs.prepare(evaldir, 8, pool, name[:40], ["bash", str(HERE / "run_eval_ckpt.sh"), str(ckpt),
                                                                    str(evaldir / "out"), "8", "96"])
                     sent.append(f"{self.jobs.submit(evaldir)} {name} ({pool})")
+                self.sent8 += 1
+                self.sent8_pool[pool] = self.sent8_pool.get(pool, 0) + 1
                 n -= 1
         self.notes.append(f"8 卡评测（空闲机器）本轮提交 {len(sent)} 个{'：' + '；'.join(sent) if sent else ''}；"
                           f"还有 {len(todo)} 个等空闲机器")
+
+    # ------------------------------------------------------ idle machines only (the user's decisions, 10-23 evening)
+    def ours_waiting8(self, pool: str) -> list:
+        """Our 8-card jobs of any kind (evaluation, training, test) waiting for cards in `pool`."""
+        return [str(j.get("display_name")) for j in self.job_list()
+                if str(j.get("display_name") or "").startswith("downstream-") and job_cards(j) == 8
+                and j.get("state") in sco_job.WAITING_STATES and job_pool(j) == pool]
+
+    def idle_left(self, pool: str) -> int:
+        """8-card jobs that may still go to `pool` in this pass: none while one of ours already waits there (the idle
+        estimate was wrong); else its idle machines (idle_nodes, which counts our waiting 8-card evaluations) minus
+        those we sent there in this pass, and at most --max-whole-per-pass for the whole pass."""
+        if self.ours_waiting8(pool):
+            return 0
+        idle = (self.idle_nodes(pool) or 0) - self.sent8_pool.get(pool, 0)
+        return max(0, min(idle, self.a.max_whole_per_pass - self.sent8))
+
+    def can8(self, pool: str):
+        """Why no 8-card job may go to `pool` now (blocked, or no idle machine left in this pass), None if one may."""
+        reason = self.blocked(8, pool)
+        if not reason and self.idle_left(pool) <= 0:
+            reason = (f"我们的 8 卡任务在排队（{self.ours_waiting8(pool)[0]}）" if self.ours_waiting8(pool) else
+                      "本轮已提交到上限" if self.sent8 >= self.a.max_whole_per_pass else "没有空闲机器")
+        return reason
+
+    def place8(self, what: str, pools=None):
+        """(pool, None) for one 8-card job now, else (None, why)."""
+        reasons = []
+        for pool in pools or self.a.whole_pools:
+            reason = self.can8(pool)
+            if not reason:
+                return pool, None
+            reasons.append(f"{pool}：{reason}")
+        return None, f"{what}本轮不提交（" + "；".join(reasons) + "）"
+
+    def took8(self, pool: str) -> None:
+        self.sent8 += 1
+        self.sent8_pool[pool] = self.sent8_pool.get(pool, 0) + 1
+
+    # ------------------------------------------------ E1 at 150k / 175k (the user's decision 2, 2026-10-23 evening)
+    def extra_entries(self, exp: Path) -> list:
+        """The --extra-points of a segmented run of --extra-ratios: the weights copied out of the point's full state,
+        then one 8-card evaluation of the copy on an idle machine (whole_entry)."""
+        out = []
+        for step in self.a.extra_points:
+            tag = f"steps_{step}"
+            ckpt = exp / "evals_src" / tag / "checkpoints" / f"{tag}_pytorch_model.pt"
+            waiting = self.copy_weights(exp, step)
+            if waiting:
+                out.append(waiting)
+                continue
+            out.append(self.whole_entry(exp, tag, ckpt, exp / "evals", key=(1, step, start_rank(exp.name), 0),
+                                        name=f"ev8-{exp.name.lower()}-{tag.replace('_', '')}"))
+        return out
+
+    def copy_weights(self, exp: Path, step: int):
+        """None once EXP/evals_src/steps_<N>/ holds the copied weights (source.json written last); else a board entry
+        saying what it waits for.  The copy runs here, synchronously (about a minute for 16.8 GB), as soon as the
+        complete state RUN/full_state/steps_<N> exists; a state replaced before it was copied is reported."""
+        tag = f"steps_{step}"
+        dest, state = exp / "evals_src" / tag, exp / "run" / "full_state" / tag
+        entry = {"tag": tag, "finished": False, "score": None}
+        if (dest / "source.json").is_file():
+            return None
+        if not (state / "downstream_state.json").is_file():
+            newest = max((int(p.name.split("_")[1]) for p in (exp / "run/full_state").glob("steps_*")
+                          if p.is_dir() and p.name.split("_")[1].isdigit()), default=0)
+            if newest > step:
+                self.alerts.append(f"{exp.name} 第 {step // 1000}k 步的全状态已被第 {newest // 1000}k 步的替换，"
+                                   f"权重没有复制出来，这个点评不了")
+                return dict(entry, state="全状态已被替换，没复制到")
+            metric = last_metric(exp)
+            at = f"，训练到第 {metric['step']} 步" if metric and "step" in metric else ""
+            return dict(entry, state=f"等第 {step // 1000}k 步的全状态{at}")
+        if self.a.dry:
+            return dict(entry, state="dry run：会从全状态复制权重")
+        t0 = time.time()
+        try:
+            res = self.extract_run([self.a.extract_python, str(DOWNSTREAM / "train/extract_weights.py"), str(state),
+                                    str(exp / "run"), str(dest)], capture_output=True, text=True, timeout=3600,
+                                   env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+            rc, tail = res.returncode, (res.stderr or res.stdout)[-300:]
+        except Exception as exc:
+            rc, tail = -1, f"{type(exc).__name__}: {exc}"[:300]
+        if rc != 0 or not (dest / "source.json").is_file():
+            self.alerts.append(f"{exp.name} 第 {step // 1000}k 步的权重复制失败（退出码 {rc}），下一轮重试：{tail}")
+            return dict(entry, state="权重复制失败，下一轮重试")
+        self.notes.append(f"{exp.name} 第 {step // 1000}k 步：权重已从全状态复制到 evals_src/{tag}/"
+                          f"（{time.time() - t0:.0f} 秒）")
+        return None
+
+    # --------------------------------------------- prepared jobs and resumed runs, idle machines only (10-23 evening)
+    def flush_queue(self) -> list:
+        """Prepared jobs of --queue-dir, in name order, one 8-card job per idle machine (place8); each is submitted
+        once (RUN/job/submission.json)."""
+        sent = []
+        qdir = Path(self.a.queue_dir) if self.a.queue_dir else None
+        for entry in sorted(qdir.glob("*.json")) if qdir and qdir.is_dir() else []:
+            spec = json.loads(entry.read_text())
+            run = Path(spec["run"])
+            if (run / "job/submission.json").exists():
+                continue
+            if int(spec.get("cards", 8)) != 8 or not (run / "job/prepared.json").is_file():
+                self.alerts.append(f"排队任务 {entry.name}：只支持已 prepare 的 8 卡任务，没提交")
+                continue
+            prepared_pool = json.loads((run / "job/prepared.json").read_text()).get("pool")
+            pool, why = self.place8(spec.get("what", entry.stem), pools=[prepared_pool])  # the pool it was made for
+            if why:
+                self.notes.append(why)
+                break
+            sent.append(f"{spec.get('what', entry.stem)} " + ("(would)" if self.a.dry else self.jobs.submit(run)))
+            self.took8(pool)
+        if sent:
+            self.notes.append(f"排队任务本轮提交：{'；'.join(sent)}")
+        return sent
+
+    def run_finished(self, exp: Path) -> bool:
+        rec = segmented(exp)
+        steps = int(rec.get("steps", 0)) if rec else 0
+        return any(t == f"steps_{steps}" for t, _ in checkpoints(exp)) if steps else False
+
+    def resume_released(self) -> list:
+        """Runs of --resume-ratios stopped to free machines (EXP/job renamed job_released_<time>, the run not finished)
+        go back in one at a time when a pool has an idle machine (place8); run_segmented.sh resumes from the newest
+        full state."""
+        sent = []
+        for ratio in self.a.resume_ratios:
+            for s in runs.STARTS:
+                exp = self.experiments / runs.exp_id(s, ratio, 1)
+                if not segmented(exp) or (exp / "job/submission.json").exists() or not list(exp.glob("job_released_*")):
+                    continue
+                if self.run_finished(exp):
+                    continue
+                pool, why = self.place8(f"{exp.name} 续训")
+                if why:
+                    self.notes.append(why)
+                    return sent
+                if self.a.dry:
+                    sent.append(f"{exp.name} (would, {pool})")
+                else:
+                    out = self.runs.submit(s, ratio, 1, self.a.runs_root, pool=pool)
+                    if "error" in out:
+                        self.alerts.append(f"{exp.name} 续训没提交成功：{out['error'][:200]}")
+                        continue
+                    sent.append(f"{exp.name} {out.get('job')} ({pool})")
+                self.took8(pool)
+        if sent:
+            self.notes.append(f"续训（有空闲机器）本轮提交：{'；'.join(sent)}")
+        return sent
 
     def flush_shards(self) -> None:
         """Submit the pending shards in priority order, as far as the rules allow: nothing while blocked(); at most
@@ -655,7 +825,7 @@ class Watcher:
         "repeat_final": its second evaluation with the same seeds (the noise floor).  The user's decision 1 of
         2026-10-22 (second message): only start B's, as one 8-card job on an idle machine."""
         out = list(self.a.repeat)
-        for exp in sorted(self.experiments.glob("DS-*")):
+        for exp in sorted(self.experiments.glob("DS-*")) if self.a.repeat_final else []:  # off: the user, 10-23 evening
             rec = segmented(exp)
             if rec and rec.get("repeat_final"):
                 out.append(f"{exp.name}:steps_{rec['steps']}")
@@ -689,6 +859,8 @@ class Watcher:
                                                      name=f"ev8-{exp.name.lower()}-{tag.replace('_', '')}-rep"))
             elif (exp.name, tag) in repeats:
                 row["evals"].append(self.eval_entry(exp, tag, path, "_repeat", self.a.repeat_workers))
+        if rec and exp.name.split("-")[2] in self.a.extra_ratios:  # E1 at 150k / 175k (the user, 10-23 evening)
+            row["evals"] = self.extra_entries(exp) + row["evals"]
         return row
 
     def repeat_results(self):
@@ -820,6 +992,8 @@ class Watcher:
                 missing.append(exp_id)
         self.flush_shards()
         self.flush_whole()
+        self.flush_queue()
+        self.resume_released()
         rep = self.repeat_results()
         gate = self.gate()
         self.report()
@@ -920,46 +1094,101 @@ def matrix_e0(w: "Watcher", start: str) -> str:
                  "<br>".join(lines), f"更新 {_stamp(files)}" if files else "")
 
 
-def matrix_run(w: "Watcher", start: str, ratio: str, what: str) -> str:
+def full_states(exp: Path) -> list:
+    """Steps of the complete full states of a run (RUN/full_state/steps_<N>; a .partial is not one)."""
+    return sorted(int(p.name.split("_")[1]) for p in (exp / "run/full_state").glob("steps_*")
+                  if p.is_dir() and p.name.split("_")[1].isdigit())
+
+
+def matrix_train(w: "Watcher", start: str, ratio: str, what: str) -> str:
+    """Training cell of a stage-1 style run: state, job, steps, the full state it can resume from."""
     exp = w.experiments / runs.exp_id(start, ratio, 1)
     rec = segmented(exp)
     if not rec:
         return _cell(f"未开始（{what}的实验目录还没按阶段 1 的设置建）")
-    jid = _job_id(exp)
-    state = w.job(exp)["state"] if jid else "未提交"
-    metric = last_metric(exp)
-    steps = int(rec["steps"])
-    m = merged(exp / "evals" / f"steps_{steps}")
-    rep = merged(exp / "evals" / f"steps_{steps}_repeat") if rec.get("repeat_final") else None
-    agg = score(m[0]) if m else None
-    res = [f"最终 {steps // 1000}k：总体 {_rate(agg['all'])}，空间组 {_rate(agg['spatial'])}" if agg else
-           f"训练到第 {metric['step']} 步（共 {steps}）" if metric and "step" in metric else ""]
-    if rep:
-        ra = score(rep[0])
-        res.append(f"第二遍（整机）：总体 {_rate(ra['all'])}，空间组 {_rate(ra['spatial'])}")
-    files = [exp / "run/metrics.jsonl", exp / "evals" / f"steps_{steps}" / "out/episodes/summary.json"]
-    return _cell(f"**{state}**", f"任务 `{jid}`" if jid else "", f"`{exp.relative_to(w.a.runs_root)}/`",
-                 "<br>".join(r for r in res if r), f"更新 {_stamp(files)}" if _stamp(files) else "")
+    steps, jid, released = int(rec["steps"]), _job_id(exp), sorted(exp.glob("job_released_*"))
+    if w.run_finished(exp):
+        state = "训完"
+    elif jid:
+        state = w.job(exp)["state"]
+    elif released:
+        state = "已停（机器让给主线），有空闲机器时续训"
+    else:
+        state = "未提交"
+    metric, fs = last_metric(exp), full_states(exp)
+    lines = [f"训练到第 {metric['step']:,} 步（共 {steps:,}）" if metric and "step" in metric else "",
+             f"可续的全状态：第 {fs[-1]:,} 步" if fs and not w.run_finished(exp) else ""]
+    return _cell(f"**{state}**", f"任务 `{jid}`" if jid else (f"上一个任务记录 `{released[-1].name}`" if released else ""),
+                 f"`{exp.relative_to(w.a.runs_root)}/`", "<br>".join(x for x in lines if x),
+                 f"更新 {_stamp([exp / 'run/metrics.jsonl'])}" if _stamp([exp / "run/metrics.jsonl"]) else "")
+
+
+def matrix_eval(w: "Watcher", start: str, ratio: str, points=()) -> str:
+    """Evaluation cell of a stage-1 style run: each evaluated checkpoint (the extra points, then the final one, which
+    the training job evaluates itself) and, once all are in, their mean."""
+    exp = w.experiments / runs.exp_id(start, ratio, 1)
+    rec = segmented(exp)
+    if not rec:
+        return "—"
+    final = int(rec["steps"])
+    pts = [p for p in points if p < final] + [final]
+    aggs, lines, files = [], [], []
+    for p in pts:
+        d = exp / "evals" / f"steps_{p}"
+        m = merged(d)
+        files += list(d.glob("out/episodes/summary.json"))
+        if m:
+            agg = score(m[0])
+            aggs.append(agg)
+            lines.append(f"{p // 1000}k：总体 {_rate(agg['all'])}，空间组 {_rate(agg['spatial'])}")
+        elif p == final:
+            lines.append(f"{p // 1000}k：训完后由训练任务自己评")
+        elif _job_id(d):
+            lines.append(f"{p // 1000}k：评测 `{_job_id(d)}` {w.job(d)['state']}")
+        elif (exp / "evals_src" / f"steps_{p}" / "source.json").is_file():
+            lines.append(f"{p // 1000}k：权重已复制，等空闲机器评测")
+        else:
+            lines.append(f"{p // 1000}k：等第 {p // 1000}k 步的全状态，出现后复制权重")
+    if len(pts) > 1 and len(aggs) == len(pts):
+        mean = {g: 100 * sum(a[g][0] / a[g][1] for a in aggs) / len(aggs) for g in ("all", "spatial")}
+        lines.append(f"**{len(pts)} 点平均**：总体 {mean['all']:.1f}%，空间组 {mean['spatial']:.1f}%")
+    return _cell(f"**{len(aggs)}/{len(pts)} 个检查点评完**", f"`{(exp / 'evals').relative_to(w.a.runs_root)}/`",
+                 "<br>".join(lines), f"更新 {_stamp(files)}" if files else "")
+
+
+START_NAMES = {"B": "B 原始 7B", "S": "S 动作 SFT 第 9 个 epoch", "RS": "RS P-S0 第 300 次", "RD": "RD P-D 第 150 次"}
+MATRIX_COLUMNS = "| 起点 | E0 曲线 | E1 主对比 | E2 样本效率 | E3 RL | E4 种子 |"
 
 
 def matrix(w: "Watcher") -> str:
     """docs/downstream/MATRIX.md: rows are the starts (the four of now and the ones to be added), columns the
-    experiments E0-E4 (the user's decision 5 of 2026-10-22).  Rewritten by the watcher every pass."""
+    experiments E0-E4 (the user's decision 5 of 2026-10-22); two tables of the same rows and columns, training and
+    evaluation (the user's decision 6 of 2026-10-23 evening).  Rewritten by the watcher every pass."""
+    sep = "| --- | --- | --- | --- | --- | --- |"
     head = ["# 下游线实验矩阵（看板每轮自动重写，不要手改）", "",
             f"生成于 {utc()}。E0 = 阶段 0 的检查点曲线（D5 停下时保留的 2.5 万–10 万步）；E1 = 阶段 1 主对比（100% 数据、"
-            f"种子 1）；E2 = 样本效率（10%、30% 数据）；E3 = RL（PPO）；E4 = 种子（2、3）。每格：状态、任务号、结果路径、"
-            f"成功率（总体 = 34 个任务 950 回合，空间组 = 9 个空间任务 450 回合；括号里是成功回合 / 回合）、最后更新时间（UTC）。",
+            f"种子 1，评第 {'、'.join(f'{p // 1000}k' for p in w.a.extra_points)} 和最终 200k 步，主数字用三点平均）；"
+            f"E2 = 样本效率（10%、30% 数据）；E3 = RL（PPO）；E4 = 种子（2、3）。成功率：总体 = 34 个任务 944 回合，"
+            f"空间组 = 9 个空间任务 447 回合（剔除 6 个回合后）；括号里是成功回合 / 回合。时间是 UTC。",
             "路径相对于 `/mnt/umm/users/yinbaiqiao/downstream_runs/`。状态和决定见 [STATUS.md](STATUS.md)。", "",
-            "| 起点 | E0 曲线 | E1 主对比 | E2 样本效率 | E3 RL | E4 种子 |", "| --- | --- | --- | --- | --- | --- |"]
-    names = {"B": "B 原始 7B", "S": "S 动作 SFT 第 9 个 epoch", "RS": "RS P-S0 第 300 次", "RD": "RD P-D 第 150 次"}
-    rows = []
+            "## 训练", "", MATRIX_COLUMNS, sep]
+    train, evals = [], []
     for s in runs.STARTS:
-        e2 = "<br><br>".join(f"**{p}%**：{matrix_run(w, s, r, f'{p}% 数据')}" for r, p in (("010", 10), ("030", 30)))
-        rows.append(f"| {names.get(s, s)} | {matrix_e0(w, s)} | {matrix_run(w, s, '100', 'E1 ')} | {e2} | "
-                    f"未开始（1 小时实测排在阶段 1 之后、有名额时） | 暂不跑（你 10-22 的决定） |")
+        exp0 = w.experiments / runs.exp_id(s, "100", 1)
+        e0 = (_cell("不再训练：D5（10-21 开跑、10-22 停在约 11.5 万步）的检查点",
+                    f"`{(exp0 / STOPPED_RUN).relative_to(w.a.runs_root)}/`")
+              if (exp0 / STOPPED_RUN / "checkpoints").is_dir() else "—")
+        e2t = "<br><br>".join(f"**{p}%**：{matrix_train(w, s, r, f'{p}% 数据')}" for r, p in (("010", 10), ("030", 30)))
+        e2e = "<br><br>".join(f"**{p}%**：{matrix_eval(w, s, r)}" for r, p in (("010", 10), ("030", 30)))
+        train.append(f"| {START_NAMES.get(s, s)} | {e0} | {matrix_train(w, s, '100', 'E1 ')} | {e2t} | "
+                     f"未开始（第四步：先做 64 个环境的速度实测，E1 评完后每个起点 1 个 PPO） | "
+                     f"暂不跑（你 10-23 的决定：E1 结果出来后再定种子 2） |")
+        evals.append(f"| {START_NAMES.get(s, s)} | {matrix_e0(w, s)} | {matrix_eval(w, s, '100', w.a.extra_points)} | "
+                     f"{e2e} | — | — |")
     for name, note in MATRIX_PENDING:
-        rows.append(f"| {name}（待接入） | {note} | — | — | — | — |")
-    return "\n".join(head + rows) + "\n"
+        train.append(f"| {name}（待接入） | {note} | — | — | — | — |")
+        evals.append(f"| {name}（待接入） | {note} | — | — | — | — |")
+    return "\n".join(head + train + ["", "## 评测", "", MATRIX_COLUMNS, sep] + evals) + "\n"
 
 
 def board(w: Watcher, rows, missing, rep, gate) -> str:
@@ -1084,6 +1313,19 @@ def parser():
                     help="one-card shards may also go to idle machines of these pools (no placement check there)")
     ap.add_argument("--pause-file", default=str(RUNS_ROOT / "PAUSE_SUBMISSIONS"),
                     help="while this file exists nothing is submitted (e.g. on the main window's request)")
+    ap.add_argument("--extra-points", nargs="*", type=int, default=[150000, 175000],
+                    help="checkpoints of the segmented --extra-ratios runs (E1) copied out of their full states and "
+                         "evaluated by 8-card jobs, besides the final one (the user's decision 2, 2026-10-23 evening)")
+    ap.add_argument("--extra-ratios", nargs="*", default=["100"])
+    ap.add_argument("--extract-python", default="/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python",
+                    help="Python with torch and deepspeed for downstream/train/extract_weights.py")
+    ap.add_argument("--repeat-final", action="store_true",
+                    help="also evaluate a final checkpoint a second time when experiment.json says repeat_final "
+                         "(off: the user cancelled B's on 2026-10-23 evening)")
+    ap.add_argument("--resume-ratios", nargs="*", default=["010"],
+                    help="runs of these ratios stopped to free machines (job_released_*) resume on idle machines")
+    ap.add_argument("--queue-dir", default=str(RUNS_ROOT / "queue"),
+                    help="prepared 8-card jobs (*.json) submitted when a pool has an idle machine")
     return ap
 
 
