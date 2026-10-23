@@ -112,6 +112,18 @@ class AgentData:
         # Cached assistant text to step env
         self.last_assistant_text: Optional[str] = None
 
+    # round 12 freeze (vagen/invalid_turns.py): the token spans of the turns the env could not read
+    def add_generated_turn(self, n_tokens: int) -> None:
+        """A generated turn of ``n_tokens`` tokens: it takes the next response positions (mask 1)."""
+        start = len(self.response_mask)
+        self.response_mask += [1] * n_tokens
+        self.turn_span = (start, len(self.response_mask))
+
+    def end_turn(self, invalid: bool) -> None:
+        """The env's verdict on the last generated turn: an unreadable one keeps its span."""
+        if invalid and self.turn_span is not None:
+            self.invalid_spans.append(list(self.turn_span))
+
 
 # -------------------- MM helpers --------------------
 
@@ -388,9 +400,7 @@ class GymAgentLoop(AgentLoopBase):
         if len(output.token_ids)>agent_data.response_limit:
             logger.warning(f"In env:{agent_data.env_name}, generated response length {len(output.token_ids)} exceeds per-turn response_limit {agent_data.response_limit}")
         agent_data.prompt_ids += agent_data.response_ids
-        start = len(agent_data.response_mask)
-        agent_data.response_mask += [1] * len(agent_data.response_ids)
-        agent_data.turn_span = (start, len(agent_data.response_mask))
+        agent_data.add_generated_turn(len(agent_data.response_ids))
         if output.log_probs:
             agent_data.response_logprobs += output.log_probs
 
@@ -426,8 +436,7 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.traj_success = extract_success(info)
         agent_data.env_turns += 1
         agent_data.invalid_turns += int(turn_invalid(info))
-        if turn_invalid(info) and agent_data.turn_span is not None:  # round 12 freeze (vagen/invalid_turns.py)
-            agent_data.invalid_spans.append(list(agent_data.turn_span))
+        agent_data.end_turn(turn_invalid(info))  # round 12 freeze (vagen/invalid_turns.py)
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))

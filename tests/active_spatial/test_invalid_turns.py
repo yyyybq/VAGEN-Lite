@@ -67,3 +67,23 @@ def test_compute_advantage_applies_the_switch():
     assert a_on[0, 1:3].tolist() == [0.0, 0.0] and a_on[0, 0] == a_off[0, 0]  # the success's unreadable turn
     assert torch.equal(a_on[1:], a_off[1:])  # failed episodes keep their (negative) advantages
     assert "invalid_turn_metrics" in on.meta_info and "invalid_turn_metrics" not in off.meta_info
+
+
+def test_agent_loop_records_the_unreadable_turns_spans():
+    """The episode record (AgentData) as the agent loop drives it: generated turns take response positions (mask 1),
+    the env's observation tokens follow (mask 0); a turn the env judged unreadable keeps its span, which is where its
+    tokens sit in the response."""
+    from vagen.agent_loop.gym_agent_loop import AgentData, turn_invalid
+
+    d = AgentData(messages=[], image_data=[], metrics={}, request_id="r", env=None, response_limit=100, env_name="e")
+    d.add_generated_turn(5)                      # turn 1: readable
+    d.end_turn(turn_invalid({"metrics": {"turn_metrics": {"action_is_valid": True}}}))
+    d.response_mask += [0] * 7                   # the observation after turn 1
+    d.add_generated_turn(4)                      # turn 2: unreadable
+    d.end_turn(turn_invalid({"metrics": {"turn_metrics": {"action_is_valid": False}}}))
+    d.response_mask += [0] * 3
+    d.add_generated_turn(2)                      # turn 3: readable
+    d.end_turn(False)
+    assert d.invalid_spans == [[12, 16]]
+    assert d.response_mask[12:16] == [1, 1, 1, 1] and d.response_mask[11] == 0 and d.response_mask[16] == 0
+    assert spans_mask([{"spans": d.invalid_spans}], len(d.response_mask))[0].nonzero().flatten().tolist() == [12, 13, 14, 15]
