@@ -286,6 +286,10 @@ def test_stage0_band_bounds_and_fluctuation(tmp_path):
     # per task on the 30 OpenDrawer scenes both have (B: 4 of them succeed), not B's 4/50
     assert rd_b["all"]["task_mean_diff"] == pytest.approx(((6 - 4) / 30 + (10 - 14) / 20) / 2)
     assert fl["summary"]["within_all"]["pooled_abs_max"] == pytest.approx(4 / 70)
+    # the last two checkpoints (s0["flat"]) are the last within pair, same numbers
+    assert s0["flat"]["RD"]["all"]["task_task_mean_diff"] == pytest.approx(
+        next(r for r in fl["within"] if r["start"] == "RD")["all"]["task_mean_diff"])
+    assert s0["flat"]["RD"]["all"]["task_task_mean_diff"] == pytest.approx(((6 - 4) / 30 + 0) / 2)
     lines = "".join(build.stage0_lines(s0))
     assert "RD 50k（未完成） 50/70" in lines and "可能改变归类的：OpenDrawer" in lines
     html_text = page.stage0_html(s0)

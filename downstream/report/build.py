@@ -226,9 +226,8 @@ def stage0(coll, reference: str = "B") -> dict:
             keep = {t for t, i in coll.tasks.items() if stats.in_group(i, g)}
             ma = {k: v for k, v in stats.outcome_map(ea).items() if k[0] in keep}
             mb = {k: v for k, v in stats.outcome_map(eb).items() if k[0] in keep}
-            ta, tb = stats.task_counts([x for x in ea if x["task"] in keep]), stats.task_counts([x for x in eb if x["task"] in keep])
-            diffs = [tb[t][0] / tb[t][1] - ta[t][0] / ta[t][1] for t in sorted(set(ta) & set(tb)) if ta[t][1] and tb[t][1]]
-            row[g] = dict(stats.paired(mb, ma), **{"task_" + k: v for k, v in stats.task_level(diffs).items()})
+            row[g] = dict(stats.paired(mb, ma),
+                          **{"task_" + k: v for k, v in stats.task_level(stats.common_task_diffs(ma, mb)).items()})
         flat[s] = row
     all_evs = [e for e in coll.evals if e.ratio == "100" and e.seed == 1]
     return {"starts": starts, "steps": sorted({e.step for e in evs}), "curve": curve, "latest_common": latest,
