@@ -196,11 +196,11 @@ def test_noise_floor_and_task_diffs_use_only_common_episodes(tmp_path):
     exp = tmp_path / "experiments/DS-B-100-s1"
     exp.mkdir(parents=True)
     (exp / "experiment.json").write_text("{}")
-    for name, skip in (("steps_100000", None), ("steps_100000_repeat", ("LoadDishwasher", 1000))):
+    for name, skip in (("steps_100000", None), ("steps_100000_repeat", ("TurnOnMicrowave", 1000))):
         d = exp / f"evals/{name}/out/episodes"
         d.mkdir(parents=True)
         rows = [{"task": t, "seed": 1000 + i, "success": i < k, "steps": 10, "max_steps": 100, "status": "complete"}
-                for t, k in (("LoadDishwasher", 1), ("CloseFridge", 5)) for i in range(20) if (t, 1000 + i) != skip]
+                for t, k in (("TurnOnMicrowave", 1), ("CloseFridge", 5)) for i in range(20) if (t, 1000 + i) != skip]
         (d / "episodes.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
         (d / "summary.json").write_text(json.dumps({"per_task": {}}))
     coll = collect.collect(tmp_path)
