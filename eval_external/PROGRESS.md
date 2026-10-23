@@ -816,3 +816,14 @@ zoe-cf-render 有 4 台 H800 整机，只对 aigc 开放。16:50 上面没有任
 - SI-3B 超阈值的有 SAT-Syn −8.2（它有 6.5% 的回答解析不出）、SPBench-MV −3.2、SAT-Real +2.0（后两项 SI 的数都在我们的区间内）。
 
 **产物**：所有结果表都已用全部模型重算（`results/qa_step2`、`qa_paired_step2`、`mindcube_text_rule`、`scale_bias_step2`、`vsti_distance`、`vsti_direction`），报告各表已和这些文件逐项核对。
+
+## 2026-10-23 合并到 main：等代码整理完成后再做（你的第 23 条决定）
+
+**已定**：23. eval-external 等主线的代码整理宣布完成后，再合并到 main。
+
+- **为什么等**：origin/main 最新的 STATUS 写着"第十二轮批次结束，可以开始代码整理"（2026-10-22 19:05 UTC），整理期间不往 main 推送，到现在还没宣布完成。
+- **合并的内容**：只新增 eval_external/ 下的 100 个文件，64 个提交，约 2.7 万行（大部分是结果 JSON）。不改任何已有文件，不会冲突。
+- **查过敏感信息**：没有真 key，只有本地 vLLM 用的占位值（"EMPTY"、"local-vllm-no-key"）。
+- **到时候的做法**：
+  - 在临时工作树里，从最新的 origin/main 出发，用合并提交并入 eval-external，推送到 main；
+  - 主检出和整理会话的文件都不动。
