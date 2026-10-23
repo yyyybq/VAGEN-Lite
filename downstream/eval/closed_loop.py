@@ -72,6 +72,25 @@ def eval_plan_episodes(path: Path, tasks_path: Path = TASKS):
     return episodes, p
 
 
+EXCLUDED = Path(__file__).resolve().parent / "excluded_episodes.json"
+
+
+def excluded_episodes(path: Path = EXCLUDED) -> dict:
+    """The fixed exclusion list (the user's decision 1 of 2026-10-23): {"keys": {(task, seed)}, "sha256", "path"};
+    empty when the file is missing."""
+    path = Path(path)
+    if not path.is_file():
+        return {"keys": set(), "sha256": None, "path": str(path)}
+    raw = path.read_bytes()
+    keys = {(t, int(s)) for t, s in json.loads(raw)["episodes"]}
+    return {"keys": keys, "sha256": hashlib.sha256(raw).hexdigest(), "path": str(path)}
+
+
+def apply_exclusions(episodes, keys) -> list:
+    """The episodes not in the exclusion list, in their order (applied after sharding, so a shard keeps its episodes)."""
+    return [e for e in episodes if (e["task"], int(e["seed"])) not in keys]
+
+
 def state_fingerprint(env, obs) -> dict:
     """What the seed must fix: kitchen layout / style, all joint positions (robot and free objects), the instruction
     and the first camera images."""
@@ -560,6 +579,8 @@ def main() -> int:
     ap.add_argument("--no-frames", dest="frames", action="store_false",
                     help="do not write the per-episode example strip OUT/frames/<task>_s<seed>.jpg")
     ap.add_argument("--shard", default=None, help="I/K: run only shard I of K of the plan (one-card evaluation jobs)")
+    ap.add_argument("--exclusions", type=Path, default=EXCLUDED,
+                    help="the fixed exclusion list applied to an --eval-plan (empty string: none)")
     args = ap.parse_args()
     eval_plan = None
     if args.eval_plan:
@@ -576,26 +597,33 @@ def main() -> int:
     episodes = longest_first(episodes)
     if args.shard:
         episodes = shard_of(episodes, args.shard)
+    excl = excluded_episodes(args.exclusions) if (eval_plan and args.exclusions) else {"keys": set(), "sha256": None}
+    episodes = apply_exclusions(episodes, excl["keys"])
     for e in episodes:
         e.update(split=args.split, execute_steps=args.execute_steps)
         if args.frames:
             e["frames_dir"] = str(args.out / "frames")
     record = {"ckpt": args.ckpt, "servers": args.servers, "workers": args.workers,
               "stable_counter_regions": args.stable_regions, "shard": args.shard,
-              "eval_plan": eval_plan and {"path": str(args.eval_plan), "name": eval_plan["name"]}, "episodes": episodes}
+              "eval_plan": eval_plan and {"path": str(args.eval_plan), "name": eval_plan["name"]},
+              "excluded": {"sha256": excl["sha256"], "episodes": sorted([t, s] for t, s in excl["keys"])},
+              "episodes": episodes}
     resumed = []
     if (args.out / "plan.json").is_file():  # an earlier run of this evaluation stopped: run only what is missing
         old = json.loads((args.out / "plan.json").read_text())
+        old_keys = apply_exclusions(old.get("episodes", []), excl["keys"])  # an older, longer plan minus the list
         same = (old.get("ckpt") == args.ckpt and old.get("shard") == args.shard
                 and old.get("stable_counter_regions") == args.stable_regions
-                and [(e["task"], e["seed"]) for e in old.get("episodes", [])] == [(e["task"], e["seed"]) for e in episodes])
+                and [(e["task"], e["seed"]) for e in old_keys] == [(e["task"], e["seed"]) for e in episodes])
         if not same:
             print(f"[closed_loop] {args.out} holds a different evaluation: not touching it")
             return 2
-        resumed = completed_rows(args.out / "episodes.jsonl")
+        resumed = [r for r in completed_rows(args.out / "episodes.jsonl")
+                   if (r["task"], int(r["seed"])) not in excl["keys"]]
         stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         (args.out / f"resume_{stamp}.json").write_text(json.dumps(
-            {"resumed_complete": len(resumed), "servers": args.servers, "workers": args.workers}, indent=1) + "\n")
+            {"resumed_complete": len(resumed), "servers": args.servers, "workers": args.workers,
+             "excluded": record["excluded"]}, indent=1) + "\n")
     else:
         args.out.mkdir(parents=True, exist_ok=False)
         (args.out / "plan.json").write_text(json.dumps(record, indent=1) + "\n")
@@ -634,7 +662,7 @@ def main() -> int:
             memory = {"error": f"{type(exc).__name__}: {exc}"[:300]}
     summary = dict(summarize(rows, args.workers, time.monotonic() - t0), stable_counter_regions=args.stable_regions,
                    eval_plan=eval_plan["name"] if eval_plan else None, shard=args.shard, resumed_complete=len(resumed),
-                   pool=pool_stats, memory=memory)
+                   pool=pool_stats, memory=memory, excluded=record["excluded"])
     (args.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps({k: summary[k] for k in ("episodes", "complete", "successes", "wall_seconds",
                                               "episode_wall_mean_seconds", "episodes_per_hour")}))

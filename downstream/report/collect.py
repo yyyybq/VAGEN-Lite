@@ -73,6 +73,15 @@ def losses(exp_dir: Path, run: str = "run") -> list:
     return sorted({int(r["step"]): float(r["action_dit_loss"]) for r in rows if "action_dit_loss" in r}.items())
 
 
+def excluded() -> set:
+    """The fixed exclusion list (downstream/eval/excluded_episodes.json, the user's decision 1 of 2026-10-23):
+    (task, seed) pairs that never count, whatever an evaluation recorded for them."""
+    path = DOWNSTREAM / "eval/excluded_episodes.json"
+    if not path.is_file():
+        return set()
+    return {(t, int(s)) for t, s in json.loads(path.read_text())["episodes"]}
+
+
 def _evaluation(exp_dir, start, ratio, seed, step, kind, ep_dir: Path):
     summary_path = ep_dir / "summary.json"
     if not summary_path.is_file():
@@ -80,9 +89,9 @@ def _evaluation(exp_dir, start, ratio, seed, step, kind, ep_dir: Path):
     summary = json.loads(summary_path.read_text())
     if "per_task" not in summary:
         return None
-    eps = []
+    eps, skip = [], excluded()
     for r in read_jsonl(ep_dir / "episodes.jsonl"):
-        if r.get("status") != "complete":
+        if r.get("status") != "complete" or (r["task"], int(r["seed"])) in skip:
             continue
         frames = ep_dir / r["frames"] if r.get("frames") else None
         eps.append({"task": r["task"], "eval_seed": int(r["seed"]), "success": bool(r["success"]),

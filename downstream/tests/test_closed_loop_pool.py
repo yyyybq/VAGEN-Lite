@@ -154,3 +154,17 @@ def test_hung_means_no_progress_for_ten_minutes_or_too_long_in_all():
     assert not closed_loop.hung(info, now - 30, now)  # a policy call 30 s ago: still working
     assert closed_loop.hung({"started": now - 1000, "max_steps": 100}, now - 5, now)  # 1000 s > 600 + 3 x 100
     assert not closed_loop.hung({"started": now - 100, "max_steps": 100}, now - 100, now)  # scene build, reset
+
+
+def test_exclusion_list_is_applied_after_sharding(tmp_path):
+    path = tmp_path / "excluded.json"
+    path.write_text(json.dumps({"episodes": [["SearingMeat", 1044], ["DeliverStraw", 1006]]}))
+    ex = closed_loop.excluded_episodes(path)
+    assert ex["keys"] == {("SearingMeat", 1044), ("DeliverStraw", 1006)} and len(ex["sha256"]) == 64
+    eps = [{"task": "SearingMeat", "seed": 1044}, {"task": "SearingMeat", "seed": 1045}, {"task": "DeliverStraw", "seed": 1006}]
+    assert closed_loop.apply_exclusions(eps, ex["keys"]) == [{"task": "SearingMeat", "seed": 1045}]
+    assert closed_loop.excluded_episodes(tmp_path / "missing.json")["keys"] == set()
+    real = closed_loop.excluded_episodes()  # the list the user fixed on 2026-10-23
+    assert len(real["keys"]) == 5 and ("StoreLeftoversInBowl", 1003) in real["keys"]
+    full, _ = closed_loop.eval_plan_episodes(ROOT / "eval/eval_d6.json")
+    assert len(closed_loop.apply_exclusions(full, real["keys"])) == 945

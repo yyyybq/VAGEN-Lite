@@ -597,3 +597,32 @@ def test_matrix_lists_the_starts_and_the_pending_rows(tmp_path):
     row_s = next(line for line in text.splitlines() if line.startswith("| S 动作 SFT"))
     assert "**未提交**" in row_s and "训练到第 4200 步（共 100000）" in row_s
     assert "r12k S0-keep（待接入）" in text and "暂不跑" in row_b
+
+
+def test_merged_leaves_out_the_excluded_episodes(tmp_path):
+    d = tmp_path / "eval"
+    summary(d / "out/episodes", {"SearingMeat": {"n": 2, "successes": 1}, "OpenDrawer": {"n": 1, "successes": 1}},
+            outcomes=[("SearingMeat", 1044, True), ("SearingMeat", 1045, False), ("OpenDrawer", 1000, True)])
+    s, outs = watch.merged(d)
+    assert ("SearingMeat", 1044) not in outs and s["per_task"]["SearingMeat"] == {"n": 1, "successes": 0}
+    assert s["complete"] == 2 and s["successes"] == 1
+
+
+def test_queue_all_submits_every_pending_evaluation_at_once(tmp_path):
+    for s in ("B", "S"):
+        stopped_exp(tmp_path, s, steps=(25000, 75000))
+    jobs = FakeJobs()  # no machine looks idle, and one of ours is already waiting
+    jobs.listing = [eight_card("downstream-ev8-x", "QUEUEING")]
+    w = watcher(tmp_path, "--stage0", "--stage0-cards", "8", "--stage0-repeat", "--queue-all", "--yield-to",
+                "--yield-to-same-size", "--pool-nodes", "h800:0", jobs=jobs, shards=8)
+    w.tick()
+    assert len([p for p in jobs.prepared if p[1] == 8]) == 4
+    done = tmp_path / f"experiments/DS-B-100-s1/evals_{watch.STOPPED_RUN}/steps_25000"
+    summary(done / "out/episodes", {"OpenDrawer": {"n": 1, "successes": 1}}, outcomes=[("OpenDrawer", 1000, True)])
+    import shutil
+
+    shutil.rmtree(done / "job")  # finished, record gone: never submitted again
+    before = len(jobs.prepared)
+    watcher(tmp_path, "--stage0", "--stage0-cards", "8", "--stage0-repeat", "--queue-all", "--yield-to",
+            "--yield-to-same-size", "--pool-nodes", "h800:0", jobs=jobs, shards=8).tick()
+    assert not [p for p in jobs.prepared[before:] if "steps_25000" in p[3][3] and "DS-B" in p[3][3]]

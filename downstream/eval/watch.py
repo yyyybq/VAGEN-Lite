@@ -158,13 +158,31 @@ def outcomes(episodes_dir: Path) -> dict:
     return {(r["task"], r["seed"]): bool(r.get("success")) for r in rows if r.get("status") == "complete"}
 
 
+def excluded_keys() -> set:
+    """The fixed exclusion list (downstream/eval/excluded_episodes.json, the user's decision 1 of 2026-10-23)."""
+    path = HERE / "excluded_episodes.json"
+    return {(t, int(s)) for t, s in json.loads(path.read_text())["episodes"]} if path.is_file() else set()
+
+
+def without_excluded(summary: dict, outs: dict):
+    """(summary, outcomes) with the excluded episodes taken out and the counts recomputed from the outcomes."""
+    skip = excluded_keys()
+    outs = {k: v for k, v in outs.items() if (k[0], int(k[1])) not in skip}
+    per_task = {}
+    for (task, _), ok in outs.items():
+        p = per_task.setdefault(task, {"n": 0, "successes": 0})
+        p["n"] += 1
+        p["successes"] += int(ok)
+    return dict(summary, per_task=per_task, successes=sum(outs.values()), complete=len(outs)), outs
+
+
 def merged(evaldir: Path):
     """(summary, outcomes) of one evaluation: its single job (out/episodes) or all its one-card shards
-    (shards/s<I>of<K>/out/episodes) combined; None until every part has a result."""
+    (shards/s<I>of<K>/out/episodes) combined; None until every part has a result.  Excluded episodes never count."""
     single = evaldir / "out/episodes"
     if (single / "summary.json").is_file():
         s = json.loads((single / "summary.json").read_text())
-        return (s, outcomes(single)) if "per_task" in s else None
+        return without_excluded(s, outcomes(single)) if "per_task" in s else None
     parts = sorted((evaldir / "shards").glob("s*of*"))
     if not parts:
         return None
@@ -192,7 +210,7 @@ def merged(evaldir: Path):
                "complete": sum(s["complete"] for s, _ in got), "wall_seconds": max(walls),
                "episode_wall_mean_seconds": round(sum(m * n for m, n in means) / max(1, sum(n for _, n in means)), 3),
                "workers": got[0][0]["workers"], "shards": k}
-    return summary, outs
+    return without_excluded(summary, outs)
 
 
 def compare(first, other) -> dict:
@@ -412,6 +430,9 @@ class Watcher:
         evaldir = root / tag
         name = name or f"ev8-{exp.name.lower()}-stopped-{tag.replace('_', '')}"
         entry = {"tag": tag, "finished": False, "score": None}
+        done = merged(evaldir)
+        if done:  # finished, whatever happened to its job record
+            return dict(entry, finished=True, score=score(done[0]), state="8 卡评测完成")
         if (evaldir / "job/submission.json").exists():
             st = self.job(evaldir)
             m = merged(evaldir)
@@ -474,10 +495,13 @@ class Watcher:
             if reason:
                 self.notes.append(f"{pool}：8 卡评测本轮不提交：{reason}")
                 continue
-            if self.waiting8(pool):
+            if self.a.queue_all:  # the user's decision 3 of 2026-10-23: straight into the queue, no idle machine needed
+                n = len(todo)
+            elif self.waiting8(pool):
                 self.notes.append(f"{pool}：我们的 8 卡评测还有在排队的（{self.waiting8(pool)[0]}），先不提交更多")
                 continue
-            n = min(self.idle_nodes(pool) or 0, self.a.max_whole_per_pass - len(sent))
+            else:
+                n = min(self.idle_nodes(pool) or 0, self.a.max_whole_per_pass - len(sent))
             while n > 0 and todo:
                 _, evaldir, ckpt, name = todo.pop(0)
                 if self.a.dry:
@@ -550,6 +574,9 @@ class Watcher:
                         continue
                     (d / "job").rename(d / f"job_failed_{fails + 1}")
                     self.state["finished"].pop(str(d), None)
+            if score(d / "out/episodes/summary.json"):  # finished (its job record renamed or gone): never again
+                counts["done"] += 1
+                continue
             last = (bounced.get(str(d)) or [None])[-1]
             if last and self.now() - last < self.a.bounce_wait_min * 60:
                 counts["waiting"] += 1
@@ -1037,6 +1064,10 @@ def parser():
                          "submitted again (it resumes); 0: never")
     ap.add_argument("--matrix", default=str(DOWNSTREAM.parent / "docs/downstream/MATRIX.md"),
                     help="the experiment matrix rewritten every pass (empty: off)")
+    ap.add_argument("--queue-all", action="store_true",
+                    help="submit every pending 8-card evaluation to the queue at once, idle machine or not (the user's "
+                         "decision 3 of 2026-10-23; start the watcher with --yield-to --yield-to-same-size empty and "
+                         "--slots / --max-live-shards high, so only the pause file holds submissions back)")
     ap.add_argument("--max-whole-per-pass", type=int, default=1,
                     help="8-card evaluations submitted per pass at most (the idle-machine estimate cannot see other "
                          "workspaces' jobs; on 10-22 two of four went to the queue)")
