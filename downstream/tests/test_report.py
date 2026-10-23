@@ -294,3 +294,50 @@ def test_stage0_band_bounds_and_fluctuation(tmp_path):
     assert "RD 50k（未完成） 50/70" in lines and "可能改变归类的：OpenDrawer" in lines
     html_text = page.stage0_html(s0)
     assert "缺回合的评测" in html_text and "检查点之间的波动" in html_text and "补完后 22.9%–51.4%" in html_text
+
+
+def test_compare_mean_over_three_checkpoints_by_hand(tmp_path):
+    """E1's main numbers (the user's decision 2 of 2026-10-23 evening): the mean over 150k, 175k and 200k.  B is flat;
+    S gains 5 OpenDrawer successes per checkpoint; CloseFridge is equal throughout."""
+    from downstream.report import page
+
+    root = tmp_path / "runs"
+    succ = {"B": (10, 10, 10), "S": (15, 20, 25)}
+    for s, ks in succ.items():
+        exp = root / f"experiments/DS-{s}-100-s1"
+        exp.mkdir(parents=True)
+        (exp / "experiment.json").write_text("{}")
+        for step, k in zip(build.E1_POINTS, ks):
+            _write_eval(exp / f"evals/steps_{step}/out/episodes", {"OpenDrawer": (k, 50, 50), "CloseFridge": (5, 20, 20)},
+                        summary=True)
+    coll = collect.collect(root)
+    m = stats.compare_mean(coll, "100", build.E1_POINTS, [1])
+    assert m["starts"] == ["B", "S"]
+    assert m["groups"]["S"]["all"]["rates"] == pytest.approx([20 / 70, 25 / 70, 30 / 70])
+    assert m["groups"]["S"]["all"]["mean"] == pytest.approx(25 / 70) and m["groups"]["B"]["spatial"]["mean"] == pytest.approx(0.2)
+    assert m["tasks"]["S"]["OpenDrawer"] == pytest.approx(0.4)
+    d = m["vs_reference"]["S"]["groups"]
+    # per task: OpenDrawer (0.1 + 0.2 + 0.3) / 3 = 0.2, CloseFridge 0
+    assert d["all"]["task_mean_diff"] == pytest.approx(0.1) and d["spatial"]["task_mean_diff"] == pytest.approx(0.2)
+    assert d["all"]["pooled_mean_diff"] == pytest.approx(10 / 70)
+    assert [x["step"] for x in d["all"]["pooled_by_step"]] == list(build.E1_POINTS)
+    e1 = build.e1_points(coll)
+    assert e1["starts"] == ["B", "S"] and len(e1["fluctuation"]["within"]) == 2 * 3  # 150->175, 175->200, 150->200
+    s_span = next(r for r in e1["fluctuation"]["within"] if (r["start"], r["from"], r["to"]) == ("S", 150000, 200000))
+    assert s_span["all"]["diff"] == pytest.approx(10 / 70)
+    lines = "".join(build.e1_lines(e1))
+    assert "第 150k、175k、200k 步三点平均" in lines and "S 35.7%（三点 28.6% / 35.7% / 42.9%）" in lines
+    html_text = page.e1_html(e1)
+    assert "三点平均" in html_text and "训练末尾的起伏" in html_text and "<b>35.7%</b>" in html_text
+
+
+def test_the_main_report_leads_with_e1s_three_point_mean(sim, tmp_path):
+    out = build.build(sim, tmp_path / "report")
+    results = json.loads((tmp_path / "report/results.json").read_text(encoding="utf-8"))
+    e1 = results["e1"]
+    assert e1["points"] == list(build.E1_POINTS) and e1["starts"] == ["B", "S", "RS", "RD"]
+    assert set(e1["mean"]["vs_reference"]) == {"S", "RS", "RD"}
+    assert len(e1["fluctuation"]["within"]) == 4 * 3 and len(e1["fluctuation"]["between"]) == 3 * 3
+    assert results["summary_lines"][0].startswith("E1（100% 数据、训练种子 1）第 150k、175k、200k 步三点平均")
+    page_text = (tmp_path / "report/index.html").read_text(encoding="utf-8")
+    assert 'id="e1"' in page_text and "训练末尾的起伏" in page_text and out["html_bytes"] < 16 * 1024 * 1024
