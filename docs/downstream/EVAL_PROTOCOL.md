@@ -112,3 +112,22 @@
 - **噪声下限**：第 3 节。
 - **参考**：每个成功率的 95% Wilson 区间；逐回合配对的 McNemar 精确检验及 Holm 校正（每个任务一个检验）。它们把回合当成独立的，只作参考，不作结论。
 - 代码：`downstream/report/stats.py`（`task_level`、`noise_floor`、`compare`），单元测试 `downstream/tests/test_report.py`。
+
+## 5. 剔除清单（你 10-23 的决定 1）
+
+- **规则**：同一个（任务, 种子）在至少两个不同检查点的评测里让仿真进程死掉或挂住，就剔除。所有起点、E0 / E1 / E3 用同一份；**E1 的评测开始后冻结**，再加要单独报告。
+- **清单**（[downstream/eval/excluded_episodes.json](../../downstream/eval/excluded_episodes.json)）：SearingMeat 1044、StoreLeftoversInBowl 1003、PreSoakPan 1016、DeliverStraw 1006、DeliverStraw 1014。每次评测 950 → **945 回合**；空间组 450 → 447（SearingMeat 和 DeliverStraw 是空间任务）。
+- **怎么用**：
+  - `closed_loop.py` 在分片之后去掉清单里的回合，所以一个分片的回合不变；清单和它的 sha256 记在每次评测的 `plan.json`、`summary.json` 和 `resume_*.json` 里。
+  - 报告（`downstream/report/collect.py`）和看板（`watch.merged`）不计清单里的回合，不管评测有没有记下它们。清单之前完成的评测里，这 5 个回合大多也跑完了（全部失败），一律不计。
+- **证据**（10-23 00:05 UTC 为止的 9 个评测）：
+  - 每个评测第一次跑完时缺的回合，以及同一次运行里进程死掉或卡住、重跑过的回合（`attempt` ≥ 1）；
+  - 来源：各评测的 `episodes.jsonl` 和 `resume_*.json`；
+  - 明细见 [reports/E0_PARTIAL_20261023.md](reports/E0_PARTIAL_20261023.md) 第 5 节。
+  - 出事的评测个数：SearingMeat 1044 是 7 个，StoreLeftoversInBowl 1003 是 6 个，DeliverStraw 1006 是 5 个，DeliverStraw 1014 是 4 个，PreSoakPan 1016 是 4 个。
+  - 按同一规则，到这时还有 5 个也满足：LoadDishwasher 1002（4 个）、PrepareCoffee 1003（3 个）、OpenDrawer 1012、StackBowlsCabinet 1012、StirVegetables 1007（各 2 个）。它们是否加入，**等你定**；没定之前按上面 5 个执行。
+- **原因不是内存不足**：
+  - 整机评测（96 个进程，机器 1,920 GiB）内存峰值 554–631 GiB（29%–33%），单个仿真进程最多 6.3 GiB；
+  - 有内存记录的评测里，内存不足被杀 0 次；
+  - 这些回合在同时只跑几个回合的重提里都正常完成；在满载的整机评测里，第一次的进程死掉后重跑一次就完成。
+  - 进程死掉的原因未核实，最可能是仿真或渲染本身崩溃。
