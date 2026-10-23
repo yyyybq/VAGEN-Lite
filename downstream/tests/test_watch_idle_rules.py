@@ -151,14 +151,15 @@ def test_the_gate_never_sends_back_a_run_that_had_a_job(tmp_path):
     assert gate["passed"] and run_tools.submitted == [("RS", "010", 1), ("RD", "010", 1)]
 
 
-def test_suspended_main_line_jobs_count_as_waiting(tmp_path):
-    """The main line's queued one-card evaluations show as SUSPENDED in sco: we yield to them as to waiting jobs."""
+def test_only_queued_main_line_jobs_hold_us_back(tmp_path):
+    """SUSPENDED in the job list marks stopped jobs (the main line has some from 10-16 that never run again): they
+    must not hold us back for ever; queued ones (STARTING, QUEUEING, ...) do."""
     jobs = FakeJobs()
-    jobs.listing = [eight_card("interiorgs-v10-eval-val--dcks2-100", "SUSPENDED", cards=1)]
-    w = watcher(tmp_path, jobs=jobs)
-    assert "给排在前面的任务让路" in w.blocked(8, "h800") and w.yield_waiting()
-    jobs.listing = [eight_card("interiorgs-v10-eval-val--dcks2-100", "RUNNING", cards=1)]
+    jobs.listing = [eight_card("interiorgs-v10-rl-rl-run-rd", "SUSPENDED")]
     assert not watcher(tmp_path, jobs=jobs).blocked(8, "h800")
+    jobs.listing.append(eight_card("interiorgs-v10-eval-val--dcks2-100", "QUEUEING", cards=1))
+    w = watcher(tmp_path, jobs=jobs)
+    assert "给排在前面的任务让路" in w.blocked(8, "h800") and w.yield_waiting() == ["interiorgs-v10-eval-val--dcks2-100"]
 
 
 def test_e1_matrix_cells_show_each_point_and_the_mean_of_three(tmp_path):

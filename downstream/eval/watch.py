@@ -80,9 +80,9 @@ RUNS_ROOT = Path("/mnt/umm/users/yinbaiqiao/downstream_runs")
 
 STOPPED_RUN = "run_stopped_20261022"
 STAGE0_ORDER = {100000: 0, 50000: 1, 25000: 2, 75000: 2}  # the user's order for the stopped runs' checkpoints
-# a job of the main line in any of these states still wants cards: we yield to it.  The main line's queued one-card
-# evaluations show as SUSPENDED in sco (2026-10-23 19:30, when that state was not counted and E2 went back in)
-HELD_STATES = tuple(sco_job.WAITING_STATES) + ("SUSPENDED",)
+# a job of the main line in any of these states still wants cards: we yield to it.  SUSPENDED is not one: in the
+# job list it marks stopped jobs (e.g. the main line's rl-run-rd of 10-16), which never run again (checked 10-23)
+HELD_STATES = tuple(sco_job.WAITING_STATES)
 
 
 def job_cards(job: dict):
