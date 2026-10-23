@@ -65,7 +65,7 @@ from .collision_detector import CollisionDetector, CollisionResult, create_colli
 from .visibility_checker import VisibilityChecker, VisibilityResult, create_visibility_checker
 from .canonical_camera import CANONICAL_CAMERA_H1_RESIZE_V1, build_canonical_camera
 from .canonical_task_metrics import score_canonical_task, uses_canonical_backend
-from .target_visibility import OccluderSet, score_with_visibility
+from .target_visibility import OccluderSet, new_milestones, score_with_visibility
 from .reward_trace import (
     TurnRewardTrace,
     near_reward_values,
@@ -537,6 +537,7 @@ class ActiveSpatialEnv(BaseEnv):
         self.prev_pos = None
         self.prev_distance = None  # Will be set after loading target pose
         self.prev_potential_score = 0.0  # Reset potential field score
+        self._milestones_reached = set()  # round 12 freeze, V6: groups fully met so far this episode
         self.current_region_metrics = {}
         self._last_score_snapshot = {}
         self._reward_trace = None
@@ -696,6 +697,10 @@ class ActiveSpatialEnv(BaseEnv):
                 initial_total = _canonical_shaping_score(canonical_metric)
                 initial_position = initial_total
                 initial_orientation = initial_total
+                if self.config.get("milestone_rewards", None) and canonical_metric.get("progress_groups"):
+                    # V6: groups already met at the start count as reached and pay nothing
+                    new_milestones(canonical_metric["progress_groups"], self._milestones_reached,
+                                   self.config.get("milestone_rewards"))
                 self.current_region_metrics = {
                     "backend": canonical_metric["metric_version"],
                     **canonical_metric,
@@ -1467,7 +1472,8 @@ class ActiveSpatialEnv(BaseEnv):
         if self.config.get("r1_legacy_success", False):
             return score_canonical_task(self.current_item, pose)
         return score_with_visibility(self.current_item, pose, self._visibility_occluders(),
-                                     progress_version=self.config.get("progress_version", "product"))
+                                     progress_version=self.config.get("progress_version", "product"),
+                                     progress_weights=self.config.get("progress_weights", None))
 
     def _visibility_occluders(self) -> OccluderSet:
         """Occluders of the current scene (labels.json boxes + structure walls), cached per scene."""
@@ -1642,6 +1648,16 @@ class ActiveSpatialEnv(BaseEnv):
                     getattr(self.config, "enable_potential_shaping_reward", True)
                 )
                 potential_reward = potential_scaled if potential_enabled else 0.0
+                milestone_values = self.config.get("milestone_rewards", None)
+                if milestone_values:  # round 12 freeze, V6: one-off group milestones replace the potential difference
+                    groups = (canonical_metric or {}).get("progress_groups")
+                    if not groups:
+                        raise ValueError("milestone_rewards needs a grouped progress_version (progress_groups)")
+                    milestone_reward, newly = new_milestones(groups, self._milestones_reached, milestone_values)
+                    potential_reward = milestone_reward
+                    if self._reward_trace is not None:
+                        self._reward_trace.record("milestone", raw=float(len(newly)), scale=1.0,
+                                                  scaled=milestone_reward, details={"groups": newly})
                 delta_score = current_score - self.prev_potential_score
                 if self._reward_trace is not None:
                     self._reward_trace.record(
@@ -1649,7 +1665,7 @@ class ActiveSpatialEnv(BaseEnv):
                         raw=potential_raw,
                         scale=(1.0 if progress_mode == "dual" else scale),
                         scaled=potential_scaled,
-                        enabled=potential_enabled,
+                        enabled=potential_enabled and not milestone_values,  # V6: recorded, not applied
                         details={"mode": progress_mode, **potential_details},
                     )
 
