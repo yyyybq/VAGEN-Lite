@@ -1,13 +1,18 @@
 {
  "rule": "the user's decision 1 of 2026-10-23: a (task, seed) that killed or hung a simulator process in the evaluations of at least two different checkpoints is excluded; one list for every start and for E0, E1 and E3; frozen once the E1 evaluations start, later additions reported separately",
  "decided_utc": "2026-10-23T00:00:00Z",
- "episodes_per_evaluation": 945,
+ "amended": [
+  {"utc": "2026-10-23T19:16:00Z", "added": [["LoadDishwasher", 1002]],
+   "why": "the user's decision 4 of 2026-10-23 evening (after the stage-0 report): it did not complete in 7 evaluations (its process died 3 times, or the policy server had already closed)"}
+ ],
+ "episodes_per_evaluation": 944,
  "episodes": [
   ["SearingMeat", 1044],
   ["StoreLeftoversInBowl", 1003],
   ["PreSoakPan", 1016],
   ["DeliverStraw", 1006],
-  ["DeliverStraw", 1014]
+  ["DeliverStraw", 1014],
+  ["LoadDishwasher", 1002]
  ],
- "evidence": "docs/downstream/EVAL_PROTOCOL.md section 5 and docs/downstream/reports/E0_PARTIAL_20261023.md section 5"
+ "evidence": "docs/downstream/EVAL_PROTOCOL.md section 5, docs/downstream/reports/E0_PARTIAL_20261023.md section 5 and docs/downstream/reports/E0_STAGE0_20261023.md section 5"
 }

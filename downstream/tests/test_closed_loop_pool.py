@@ -164,7 +164,19 @@ def test_exclusion_list_is_applied_after_sharding(tmp_path):
     eps = [{"task": "SearingMeat", "seed": 1044}, {"task": "SearingMeat", "seed": 1045}, {"task": "DeliverStraw", "seed": 1006}]
     assert closed_loop.apply_exclusions(eps, ex["keys"]) == [{"task": "SearingMeat", "seed": 1045}]
     assert closed_loop.excluded_episodes(tmp_path / "missing.json")["keys"] == set()
-    real = closed_loop.excluded_episodes()  # the list the user fixed on 2026-10-23
-    assert len(real["keys"]) == 5 and ("StoreLeftoversInBowl", 1003) in real["keys"]
+    real = closed_loop.excluded_episodes()  # the list the user fixed on 2026-10-23 (5), LoadDishwasher 1002 added that evening
+    assert len(real["keys"]) == 6 and {("StoreLeftoversInBowl", 1003), ("LoadDishwasher", 1002)} <= real["keys"]
     full, _ = closed_loop.eval_plan_episodes(ROOT / "eval/eval_d6.json")
-    assert len(closed_loop.apply_exclusions(full, real["keys"])) == 945
+    assert len(closed_loop.apply_exclusions(full, real["keys"])) == 944
+
+
+def test_policy_servers_never_close_while_an_evaluation_runs():
+    """The user's decision 4 of 2026-10-23 (evening): StarVLA's websocket server closes itself after 30 idle minutes
+    by default, which broke late reruns (ConnectionClosedOK); run_eval_ckpt.sh starts every server with no idle
+    watchdog and stops them itself when the evaluation ends."""
+    script = (ROOT / "eval/run_eval_ckpt.sh").read_text()
+    launch = script[script.index('run_starvla_mobile.sh" server'):].split("&", 1)[0]
+    assert "--idle_timeout -1" in launch
+    launcher = (ROOT.parent / "examples/evaluate/robocasa/run_starvla_mobile.sh").read_text()
+    assert '--use_bf16 "$@"' in launcher  # the extra argument reaches server_policy.py
+    assert "trap cleanup EXIT" in script

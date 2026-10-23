@@ -21,10 +21,13 @@ PIDS=()
 cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"; }
 trap cleanup EXIT
 ADDRS=""
+# --idle_timeout -1 (StarVLA's websocket server: no idle watchdog): the server's default closes it after 30 minutes
+# without a request, which broke reruns late in an evaluation (S 50k, LoadDishwasher 1002: ConnectionClosedOK).  The
+# user's decision 4 of 2026-10-23: the servers stay up for the whole evaluation; cleanup() stops them at the end.
 for g in $(seq 0 $((SERVERS - 1))); do
   port=$((5700 + g))
   CUDA_VISIBLE_DEVICES=$g CKPT="$CKPT" PORT=$port bash "$WT/examples/evaluate/robocasa/run_starvla_mobile.sh" server \
-    > "$OUT/server_$g.log" 2>&1 &
+    --idle_timeout -1 > "$OUT/server_$g.log" 2>&1 &
   PIDS+=($!)
   ADDRS="${ADDRS:+$ADDRS,}127.0.0.1:$port"
 done
