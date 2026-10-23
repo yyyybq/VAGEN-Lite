@@ -202,24 +202,33 @@ def task_level(diffs: list, resamples: int = 2000, seed: int = 0) -> dict:
     return out
 
 
+def common_task_diffs(a: dict, b: dict) -> list:
+    """a, b: episode key (task, ...) -> success.  Per task, b's success rate minus a's over the episodes both have
+    (an episode one side lacks, e.g. one whose process died, drops out of both), in task order."""
+    per = defaultdict(lambda: [0, 0, 0])
+    for k in set(a) & set(b):
+        per[k[0]][0] += int(a[k])
+        per[k[0]][1] += int(b[k])
+        per[k[0]][2] += 1
+    return [(sb - sa) / n for _, (sa, sb, n) in sorted(per.items())]
+
+
 def noise_floor(coll) -> list:
     """Two evaluations of one checkpoint with the same seeds (first and repeat): the differences between them are
-    what the evaluation alone produces.  Per pair: the pooled success difference, the per-task differences (mean of
-    their absolute values, largest), and the episodes whose outcome differs."""
+    what the evaluation alone produces.  Per pair, on the episodes both completed: the pooled success difference,
+    the per-task differences (mean of their absolute values, largest), and the episodes whose outcome differs."""
     first = {(e.exp, e.step): e for e in coll.first()}
     out = []
     for r in (e for e in coll.evals if e.kind == "repeat"):
         a = first.get((r.exp, r.step))
         if a is None:
             continue
-        ta, tb = task_counts([dict(x, train_seed=0) for x in a.episodes]), \
-            task_counts([dict(x, train_seed=0) for x in r.episodes])
-        diffs = [tb[t][0] / tb[t][1] - ta[t][0] / ta[t][1] for t in sorted(set(ta) & set(tb)) if ta[t][1] and tb[t][1]]
         oa = {(x["task"], x["eval_seed"]): x["success"] for x in a.episodes}
         ob = {(x["task"], x["eval_seed"]): x["success"] for x in r.episodes}
         common = set(oa) & set(ob)
+        diffs = common_task_diffs(oa, ob)
         out.append({"exp": a.exp, "step": a.step,
-                    "pooled_diff": r.successes / max(1, len(r.episodes)) - a.successes / max(1, len(a.episodes)),
+                    "pooled_diff": (sum(ob[k] for k in common) - sum(oa[k] for k in common)) / max(1, len(common)),
                     "task_mean_abs_diff": sum(abs(x) for x in diffs) / len(diffs) if diffs else math.nan,
                     "task_max_abs_diff": max((abs(x) for x in diffs), default=math.nan),
                     "episodes_changed": sum(oa[k] != ob[k] for k in common), "episodes_compared": len(common),

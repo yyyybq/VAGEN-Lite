@@ -310,8 +310,9 @@ def noise(coll):
     marks = ["o", "s", "^", "D"]
     top = 0.0
     for i, (a, r) in enumerate(pairs):
-        ta, tr = stats.task_counts([dict(x, train_seed=a.seed) for x in a.episodes]), \
-            stats.task_counts([dict(x, train_seed=r.seed) for x in r.episodes])
+        keys = {(x["task"], x["eval_seed"]) for x in a.episodes} & {(x["task"], x["eval_seed"]) for x in r.episodes}
+        ta, tr = stats.task_counts([x for x in a.episodes if (x["task"], x["eval_seed"]) in keys]), \
+            stats.task_counts([x for x in r.episodes if (x["task"], x["eval_seed"]) in keys])
         common = sorted(set(ta) & set(tr))
         xs, ys = [100 * ta[t][0] / ta[t][1] for t in common], [100 * tr[t][0] / tr[t][1] for t in common]
         top = max([top] + xs + ys)
@@ -329,9 +330,7 @@ def noise(coll):
         [r.summary.get("episode_wall_mean_seconds") or 0 for _, r in pairs]
     bx.bar(names, vals, color=["#7a8291"] + ["#3569b5"] * len(pairs))
     for i, v in enumerate(vals):
-        bx.text(i, v, f"{v:.0f} s\n{v / vals[0]:.2f}x", ha="center", va="bottom", fontsize=8)
-    bx.axhline(1.5 * vals[0], color="#c2410c", lw=1, ls="--")
-    bx.text(-0.45, 1.5 * vals[0], "1.5x limit", color="#c2410c", fontsize=8, ha="left", va="bottom")
+        bx.text(i, v, f"{v:.0f} s\n{v / vals[0]:.2f}x" if vals[0] else f"{v:.0f} s", ha="center", va="bottom", fontsize=8)
     bx.set_ylabel("mean wall time per episode (s)")
     bx.set_ylim(0, max(vals) * 1.35)
     bx.grid(axis="x", visible=False)

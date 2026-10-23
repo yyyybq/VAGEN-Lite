@@ -83,7 +83,7 @@ def noise_rows(coll):
         sa, sb = a.summary.get("episode_wall_mean_seconds") or 0.0, r.summary.get("episode_wall_mean_seconds") or 0.0
         out.append({"exp": a.exp, "step": a.step, "workers": [a.workers, r.workers],
                     "successes": [a.successes, r.successes], "episodes": [len(a.episodes), len(r.episodes)],
-                    "rate_diff": r.successes / max(1, len(r.episodes)) - a.successes / max(1, len(a.episodes)),
+                    "rate_diff": (sum(ob[k] for k in common) - sum(oa[k] for k in common)) / max(1, len(common)),
                     "changed": sum(oa[k] != ob[k] for k in common), "compared": len(common),
                     "seconds": [sa, sb], "slowdown": sb / sa if sa else math.nan})
     return out
@@ -240,14 +240,13 @@ RULE_FROM, RULE_TO, RULE_P, RULE_POINTS = 50000, 100000, 0.05, 0.03
 
 
 def pair(coll, start_a, a, start_b, b, keep=None) -> dict:
-    """(start_b, checkpoint b) minus (start_a, checkpoint a), 100% data, seed 1, same scenes: pooled (McNemar) and
-    task-level (34 tasks or `keep` as the pairing unit)."""
+    """(start_b, checkpoint b) minus (start_a, checkpoint a), 100% data, seed 1, on the episodes both completed (same
+    scenes): pooled (McNemar) and task-level (34 tasks or `keep` as the pairing unit)."""
     ea, eb = stats.episodes_of(coll, start_a, "100", a, [1]), stats.episodes_of(coll, start_b, "100", b, [1])
     if keep is not None:
         ea, eb = [x for x in ea if x["task"] in keep], [x for x in eb if x["task"] in keep]
-    ta, tb = stats.task_counts(ea), stats.task_counts(eb)
-    diffs = [tb[t][0] / tb[t][1] - ta[t][0] / ta[t][1] for t in sorted(set(ta) & set(tb)) if ta[t][1] and tb[t][1]]
-    return dict(stats.paired(stats.outcome_map(eb), stats.outcome_map(ea)), **stats.task_level(diffs))
+    ma, mb = stats.outcome_map(ea), stats.outcome_map(eb)
+    return dict(stats.paired(mb, ma), **stats.task_level(stats.common_task_diffs(ma, mb)))
 
 
 def pair_diff(coll, start, a, b, keep=None) -> dict:

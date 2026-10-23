@@ -188,6 +188,28 @@ def test_step_rule_by_hand(tmp_path):
     assert rule["starts"]["RS"]["task_mean_diff"] == pytest.approx(0.4) and rule["starts"]["RS"]["p"] < 0.05
 
 
+def test_noise_floor_and_task_diffs_use_only_common_episodes(tmp_path):
+    """The repeat lacks one episode that succeeded in the first evaluation and is identical otherwise: every
+    difference is 0 (not -1/20 on that task, as when each side's task rate used all its own episodes)."""
+    assert stats.common_task_diffs({("T", 1): True, ("T", 2): False, ("U", 1): True},
+                                   {("T", 1): True, ("T", 2): True, ("U", 2): False}) == [0.5]
+    exp = tmp_path / "experiments/DS-B-100-s1"
+    exp.mkdir(parents=True)
+    (exp / "experiment.json").write_text("{}")
+    for name, skip in (("steps_100000", None), ("steps_100000_repeat", ("LoadDishwasher", 1000))):
+        d = exp / f"evals/{name}/out/episodes"
+        d.mkdir(parents=True)
+        rows = [{"task": t, "seed": 1000 + i, "success": i < k, "steps": 10, "max_steps": 100, "status": "complete"}
+                for t, k in (("LoadDishwasher", 1), ("CloseFridge", 5)) for i in range(20) if (t, 1000 + i) != skip]
+        (d / "episodes.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        (d / "summary.json").write_text(json.dumps({"per_task": {}}))
+    coll = collect.collect(tmp_path)
+    f = stats.noise_floor(coll)[0]
+    assert (f["episodes_compared"], f["episodes_changed"]) == (39, 0)
+    assert f["pooled_diff"] == 0 and f["task_max_abs_diff"] == 0 and f["task_mean_abs_diff"] == 0
+    assert build.noise_rows(coll)[0]["rate_diff"] == 0
+
+
 def _write_eval(d: Path, tasks: dict, summary: bool):
     """tasks: name -> (successes, done, planned); seeds 1000.., the first `successes` succeed."""
     d.mkdir(parents=True)
@@ -261,6 +283,8 @@ def test_stage0_band_bounds_and_fluctuation(tmp_path):
     assert b["all"]["diff"] == pytest.approx(4 / 70) and b["all"]["task_mean_diff"] == pytest.approx(0.1)
     rd_b = next(r for r in fl["between"] if (r["start"], r["step"]) == ("RD", 50000))
     assert rd_b["all"]["n"] == 50 and rd_b["all"]["diff"] == pytest.approx(-2 / 50)
+    # per task on the 30 OpenDrawer scenes both have (B: 4 of them succeed), not B's 4/50
+    assert rd_b["all"]["task_mean_diff"] == pytest.approx(((6 - 4) / 30 + (10 - 14) / 20) / 2)
     assert fl["summary"]["within_all"]["pooled_abs_max"] == pytest.approx(4 / 70)
     lines = "".join(build.stage0_lines(s0))
     assert "RD 50k（未完成） 50/70" in lines and "可能改变归类的：OpenDrawer" in lines
