@@ -212,6 +212,61 @@ def seed_tables(results) -> str:
             f'第 {results["final_step"] // 1000}k 步。</p>')
 
 
+def fluct_html(fl, title: str, note: str) -> str:
+    """Paired differences within a start (between its checkpoints) and between starts (at one checkpoint)."""
+    rows = []
+    for kind, label in (("within", "同一起点"), ("between", "同一检查点")):
+        for r in fl.get(kind, []):
+            which = (f'{E(r["start"])} {r["from"] // 1000}k → {r["to"] // 1000}k' if kind == "within" else
+                     f'{E(r["start"])} − {E(r["reference"])}，{r["step"] // 1000}k')
+            rows.append(f'<tr><td>{label}</td><td>{which}</td>'
+                        + "".join(f'<td class="n">{pts(r[g]["diff"])}<br><span class="meta">p {pval(r[g]["p"])}</span></td>'
+                                  f'<td class="n">{pts(r[g]["task_mean_diff"])}</td>' for g in ("all", "spatial")) + "</tr>")
+    if not rows:
+        return ""
+    return (f'<h3>{E(title)}</h3><div class="tablewrap"><table><thead><tr><th>比较</th><th>哪两个</th>'
+            f'<th class="n">全部：合并差（McNemar p）</th><th class="n">全部：逐任务平均差</th>'
+            f'<th class="n">空间：合并差（McNemar p）</th><th class="n">空间：逐任务平均差</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div><p class="meta">{E(note)}</p>')
+
+
+def e1_html(e1) -> str:
+    """E1 at 150k, 175k and 200k: the success rate at each and their mean (the main numbers, the user's decision 2
+    of 2026-10-23 evening), the task-level paired difference to the reference on the mean, the end fluctuation."""
+    if not e1:
+        return '<p class="empty">E1 的三个检查点（15 万、17.5 万、20 万步）还没都评完。</p>'
+    m, points = e1["mean"], e1["points"]
+    head = "".join(f'<th class="n">{p // 1000}k</th>' for p in points)
+    rows = []
+    for g in ("all", "spatial"):
+        for s in m["starts"]:
+            v = m["groups"][s][g]
+            rows.append(f'<tr><td>{E(stats.GROUP_ZH[g])}</td><td>{E(s)}</td>'
+                        + "".join(f'<td class="n">{pct(x)}</td>' for x in v["rates"])
+                        + f'<td class="n"><b>{pct(v["mean"])}</b></td></tr>')
+    rates = (f'<h3>成功率：三个检查点和三点平均</h3><div class="tablewrap"><table><thead><tr><th>任务组</th><th>起点</th>'
+             f'{head}<th class="n">三点平均</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>')
+    rows = []
+    for s, v in m["vs_reference"].items():
+        for g in ("all", "spatial"):
+            d = v["groups"][g]
+            by_step = "；".join(f'{x["step"] // 1000}k {pts(x["diff"])}（p {pval(x["p"])}）' for x in d["pooled_by_step"])
+            rows.append(f'<tr><td>{E(s)} − {E(m["reference"])}</td><td>{E(stats.GROUP_ZH[g])}</td>'
+                        f'<td class="n">{pts(d["task_mean_diff"])}<br><span class="meta">{pts(d["task_low"])} 到 '
+                        f'{pts(d["task_high"])}</span></td><td class="n">{d["tasks_up"]} / {d["tasks_down"]}</td>'
+                        f'<td class="n">{pval(d["wilcoxon_p"])}</td><td class="n">{pts(d["pooled_mean_diff"])}<br>'
+                        f'<span class="meta">{E(by_step)}</span></td></tr>')
+    vs = (f'<h3>与 {E(m["reference"])} 的配对差（三点平均）</h3><div class="tablewrap"><table><thead><tr><th>比较</th>'
+          f'<th>任务组</th><th class="n">逐任务平均差（95% 区间）</th><th class="n">任务 ↑ / ↓</th><th class="n">Wilcoxon p</th>'
+          f'<th class="n">合并差：三点平均（每点，McNemar p）</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+          f'<p class="meta">单位百分点。每个任务先算三个检查点上的配对差（同一批场景、两边都完成的回合），取平均，'
+          f'再对任务做主检验；合并差和 McNemar p 只作参考。</p>') if rows else ""
+    fluct = fluct_html(e1["fluctuation"], "训练末尾的起伏",
+                       "单位百分点，同一批场景配对。同一起点三个检查点之间（15 万 → 17.5 万 → 20 万步，以及 15 万 → 20 万步）"
+                       "的差不是起点造成的，是比较起点时的起伏尺度；起点之间的差要和它比。")
+    return rates + vs + fluct
+
+
 def stage0_html(s0) -> str:
     """Stage 0: success by checkpoint (all, spatial), the spatial tasks in the band, the last two points per start."""
     if not s0 or not s0["curve"]:
@@ -265,21 +320,9 @@ def stage0_html(s0) -> str:
                 f'<th class="n">在 {lo}%–{hi}%（全部检查点）</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
                 f'<p class="meta">每格是该起点在该任务 50 个回合上的成功率；平均是对起点取平均。全部检查点平均：每个起点每个'
                 f'检查点一个成功率，再平均；小字是缺的回合补完后的范围；"n/4 个检查点在"是四起点平均落在区间内的检查点个数。</p>')
-    fl = s0.get("fluctuation") or {}
-    rows = []
-    for kind, label in (("within", "同一起点"), ("between", "同一检查点")):
-        for r in fl.get(kind, []):
-            which = (f'{E(r["start"])} {r["from"] // 1000}k → {r["to"] // 1000}k' if kind == "within" else
-                     f'{E(r["start"])} − {E(r["reference"])}，{r["step"] // 1000}k')
-            rows.append(f'<tr><td>{label}</td><td>{which}</td>'
-                        + "".join(f'<td class="n">{pts(r[g]["diff"])}<br><span class="meta">p {pval(r[g]["p"])}</span></td>'
-                                  f'<td class="n">{pts(r[g]["task_mean_diff"])}</td>' for g in ("all", "spatial")) + "</tr>")
-    fluct = (f'<h3>检查点之间的波动和起点之间的差</h3><div class="tablewrap"><table><thead><tr><th>比较</th><th>哪两个</th>'
-             f'<th class="n">全部：合并差（McNemar p）</th><th class="n">全部：逐任务平均差</th>'
-             f'<th class="n">空间：合并差（McNemar p）</th><th class="n">空间：逐任务平均差</th></tr></thead>'
-             f'<tbody>{"".join(rows)}</tbody></table></div><p class="meta">单位百分点，同一批场景配对。同一起点的相邻'
-             f'检查点相隔 2.5 万步、学习率还高，它们之间的差不是起点造成的，可以当作只看一个检查点时的波动尺度。</p>') \
-        if rows else ""
+    fluct = fluct_html(s0.get("fluctuation") or {}, "检查点之间的波动和起点之间的差",
+                       "单位百分点，同一批场景配对。同一起点的相邻检查点相隔 2.5 万步、学习率还高，它们之间的差不是起点"
+                       "造成的，可以当作只看一个检查点时的波动尺度。")
     rows = []
     for s, r in s0["flat"].items():
         cells = ""
@@ -332,7 +375,7 @@ def render(results: dict, coll, figs: dict, examples: list) -> str:
     main = r.get("main_cmp")
     order = r.get("task_order") or []
     s0 = r.get("stage0")
-    nav = [("summary", "结论")] + ([("stage0", "阶段 0")] if s0 else []) + [
+    nav = [("summary", "结论")] + ([("e1", "E1 三点")] if not s0 else []) + ([("stage0", "阶段 0")] if s0 else []) + [
            ("metrics", "指标说明"), ("training", "训练损失"), ("checkpoints", "检查点曲线"),
            ("efficiency", "样本效率"), ("tasks", "逐任务"), ("agreement", "结果一致性"), ("noise", "评测噪声"),
            ("examples", "范例"), ("sources", "数据来源")]
@@ -352,6 +395,11 @@ def render(results: dict, coll, figs: dict, examples: list) -> str:
     parts.append(f'<section id="summary"><h2>结论</h2>{legend(coll.starts())}'
                  f'<ul class="facts">{"".join(f"<li>{E(x)}</li>" for x in r["summary_lines"])}</ul>'
                  f'<h3>{E(r.get("main_label", ""))}</h3>{group_table(main)}</section>')
+    if not s0:
+        parts.append(f'<section id="e1"><h2>E1：第 15 万、17.5 万、20 万步三点</h2><p class="prose">100% 数据、训练种子 1。'
+                     f'主数字用三个检查点的平均；三点之间的配对差是训练末尾的起伏尺度（你 10-23 晚的决定 2）。第 15 万和'
+                     f' 17.5 万步的权重从全状态复制出来另评，第 20 万步由训练任务自己评；三次评测用同一批场景（944 回合）。'
+                     f'</p>{e1_html(r.get("e1"))}</section>')
     if s0:
         parts.append(f'<section id="stage0"><h2>阶段 0：已保留检查点</h2><p class="prose">10-22 停下的四个 D5 训练'
                      f'（100% 数据、训练种子 1）各保留 2.5 万、5 万、7.5 万、10 万步四个检查点，每个都按 950 回合协议评一遍。'
@@ -391,7 +439,7 @@ def render(results: dict, coll, figs: dict, examples: list) -> str:
                         f'<th class="n">逐任务平均差（区间）</th><th class="n">结果不同的回合</th></tr></thead><tbody>{floor_rows}'
                         f'</tbody></table></div><p class="meta">同一检查点、同一批评测种子评两遍（第二遍减第一遍，百分点）。'
                         f'权重没变，差异全部来自评测本身；起点之间的差落在这个范围里就分不出来。</p>')
-    parts.append(f'<section id="noise"><h2>评测噪声与并行度</h2>{figure(figs.get("noise"), "同一检查点、同一批评测种子评两遍：左为逐任务成功率（第一遍对重复），右为平均每回合用时；虚线是 1.5 倍上限，不超过它的最大并行度会用于以后的评测。", "评测噪声")}{noise_table}</section>')
+    parts.append(f'<section id="noise"><h2>评测噪声与并行度</h2>{figure(figs.get("noise"), "同一检查点、同一批评测种子评两遍：左为逐任务成功率（第一遍对第二遍，两边都完成的回合），右为平均每回合用时。", "评测噪声")}{noise_table}</section>')
     ex_html = "".join(example_block(x) for x in examples) if examples else \
         '<p class="empty">还没有带画面的评测回合（每个回合的 8 帧画面条从 10-21 起开始记录）。</p>'
     parts.append(f'<section id="examples"><h2>范例</h2><p class="prose">{E(r.get("examples_rule", ""))}</p>{ex_html}</section>')

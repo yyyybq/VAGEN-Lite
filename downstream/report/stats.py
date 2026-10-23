@@ -183,6 +183,62 @@ def compare(coll, ratio: str, step: int, seeds, reference: str = "B") -> dict:
     return out
 
 
+def compare_mean(coll, ratio: str, steps, seeds, reference: str = "B") -> dict:
+    """Every start against `reference` on the mean over several checkpoints (the user's decision 2 of 2026-10-23
+    evening: E1 is evaluated at 150k, 175k and 200k and its main numbers are the mean of the three).  Only starts with
+    an evaluation at every step count.
+      groups[start][group]   {"rates": the success rate at each step, "mean": their mean}
+      tasks[start][task]     the mean over the steps of the task's success rate
+      vs_reference[start][group]   per task the mean over the steps of the paired difference (start minus
+                                   reference, episodes both have), then the task-level statistics over the tasks
+                                   (mean, bootstrap interval, Wilcoxon); plus the pooled difference at each step
+                                   (McNemar p, for reference) and their mean"""
+    steps = list(steps)
+    starts = [s for s in coll.starts() if all(episodes_of(coll, s, ratio, st, seeds) for st in steps)]
+    eps = {s: {st: episodes_of(coll, s, ratio, st, seeds) for st in steps} for s in starts}
+    out = {"ratio": ratio, "steps": steps, "seeds": sorted(seeds), "reference": reference, "starts": starts,
+           "groups": {}, "tasks": {}, "vs_reference": {}}
+    for s in starts:
+        out["groups"][s] = {}
+        for g in GROUPS:
+            rates = []
+            for st in steps:
+                k, n = group_counts(eps[s][st], coll.tasks)[g]
+                rates.append(k / n if n else math.nan)
+            known = [r for r in rates if not math.isnan(r)]
+            out["groups"][s][g] = {"rates": rates, "mean": sum(known) / len(known) if len(known) == len(rates) else math.nan}
+        counts = [task_counts(eps[s][st]) for st in steps]
+        out["tasks"][s] = {t: sum(c[t][0] / c[t][1] for c in counts) / len(counts)
+                           for t in coll.tasks if all(t in c and c[t][1] for c in counts)}
+    if reference not in starts:
+        return out
+    ref = {st: outcome_map(eps[reference][st]) for st in steps}
+    for s in starts:
+        if s == reference:
+            continue
+        mine = {st: outcome_map(eps[s][st]) for st in steps}
+        groups = {}
+        for g in GROUPS:
+            keep = {t for t, info in coll.tasks.items() if in_group(info, g)}
+            diffs = []
+            for t in sorted(keep):
+                per_step = []
+                for st in steps:
+                    d = common_task_diffs({k: v for k, v in ref[st].items() if k[0] == t},
+                                          {k: v for k, v in mine[st].items() if k[0] == t})
+                    if d:
+                        per_step.append(d[0])
+                if len(per_step) == len(steps):
+                    diffs.append(sum(per_step) / len(per_step))
+            pooled = [paired({k: v for k, v in mine[st].items() if k[0] in keep},
+                             {k: v for k, v in ref[st].items() if k[0] in keep}) for st in steps]
+            groups[g] = dict(task_level(diffs), pooled_by_step=[{"step": st, "diff": p["diff"], "p": p["p"], "n": p["n"]}
+                                                                for st, p in zip(steps, pooled)],
+                             pooled_mean_diff=sum(p["diff"] for p in pooled) / len(pooled))
+        out["vs_reference"][s] = {"groups": groups}
+    return out
+
+
 def task_level(diffs: list, resamples: int = 2000, seed: int = 0) -> dict:
     """The tasks as the pairing unit (the user's choice of 2026-10-22): one success-rate difference per task.
     Mean difference over tasks with a 95% bootstrap interval (resampling tasks), the sign test (tasks up vs down)

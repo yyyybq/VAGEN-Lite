@@ -172,14 +172,17 @@ def spatial_band(coll, starts, evs, latest) -> list:
     return out
 
 
-def fluctuation(coll, starts, reference: str = "B") -> dict:
+def fluctuation(coll, starts, reference: str = "B", steps=None, span: bool = False) -> dict:
     """The scale of differences that are not between starts: each start's adjacent checkpoints (same scenes; mid-
-    training, learning rate still high), against the differences between starts at one checkpoint."""
+    training, learning rate still high), against the differences between starts at one checkpoint.  `steps`: only
+    these checkpoints; `span`: also each start's first against its last checkpoint."""
     within, between = [], []
     groups = {g: {t for t, i in coll.tasks.items() if stats.in_group(i, g)} for g in ("all", "spatial")}
-    have = {s: sorted({e.step for e in coll.first() if (e.start, e.ratio, e.seed) == (s, "100", 1)}) for s in starts}
+    have = {s: sorted({e.step for e in coll.first() if (e.start, e.ratio, e.seed) == (s, "100", 1)
+                       and (steps is None or e.step in steps)}) for s in starts}
     for s in starts:
-        for a, b in zip(have[s], have[s][1:]):
+        pairs = list(zip(have[s], have[s][1:])) + ([(have[s][0], have[s][-1])] if span and len(have[s]) > 2 else [])
+        for a, b in pairs:
             within.append({"start": s, "from": a, "to": b, **{g: pair(coll, s, a, s, b, keep) for g, keep in groups.items()}})
     for step in sorted(set().union(*have.values())) if have else []:
         if step not in have.get(reference, []):
@@ -233,6 +236,49 @@ def stage0(coll, reference: str = "B") -> dict:
     return {"starts": starts, "steps": sorted({e.step for e in evs}), "curve": curve, "latest_common": latest,
             "spatial": spatial, "flat": flat, "band": BAND, "step_rule": step_rule(coll, starts),
             "evaluations": evaluation_rows(coll, all_evs), "fluctuation": fluctuation(coll, starts, reference)}
+
+
+E1_POINTS = (150000, 175000, 200000)
+
+
+def e1_points(coll, reference: str = "B"):
+    """E1 (100% data, training seed 1) at 150k, 175k and 200k (the user's decision 2 of 2026-10-23 evening): the
+    main numbers are the mean over the three checkpoints (stats.compare_mean); the paired differences between the
+    three checkpoints of each start (150k -> 175k, 175k -> 200k, 150k -> 200k) measure the fluctuation at the end of
+    training, next to the differences between starts at each checkpoint.  None until a start has all three."""
+    have = {s: {e.step for e in coll.first() if (e.start, e.ratio, e.seed) == (s, "100", 1)} for s in coll.starts()}
+    starts = [s for s in coll.starts() if set(E1_POINTS) <= have[s]]
+    if not starts:
+        return None
+    return {"points": list(E1_POINTS), "starts": starts,
+            "mean": stats.compare_mean(coll, "100", E1_POINTS, [1], reference),
+            "fluctuation": fluctuation(coll, starts, reference, steps=set(E1_POINTS), span=True)}
+
+
+def e1_lines(e1) -> list:
+    if not e1:
+        return []
+    pts = "、".join(f"{p // 1000}k" for p in e1["points"])
+    m = e1["mean"]
+    lines = []
+    for g in ("all", "spatial"):
+        parts = [f"{s} {page.pct(m['groups'][s][g]['mean'])}（三点 "
+                 + " / ".join(page.pct(r) for r in m["groups"][s][g]["rates"]) + "）" for s in m["starts"]]
+        lines.append(f"E1（100% 数据、训练种子 1）第 {pts} 步三点平均，{stats.GROUP_ZH[g]}的成功率：" + "；".join(parts) + "。")
+        diffs = [f"{s} {page.pts(v['groups'][g]['task_mean_diff'])} 个百分点（{v['groups'][g]['tasks']} 个任务，区间 "
+                 f"{page.pts(v['groups'][g]['task_low'])} 到 {page.pts(v['groups'][g]['task_high'])}；Wilcoxon p = "
+                 f"{page.pval(v['groups'][g]['wilcoxon_p'])}；三点的合并差平均 {page.pts(v['groups'][g]['pooled_mean_diff'])}）"
+                 for s, v in m["vs_reference"].items()]
+        if diffs:
+            lines.append(f"三点平均的逐任务配对差（{stats.GROUP_ZH[g]}，减 {m['reference']}）：" + "；".join(diffs) + "。")
+    fl = e1["fluctuation"]["summary"]
+    w, b = fl.get("within_all", {}), fl.get("between_all", {})
+    if w.get("pairs"):
+        lines.append(f"训练末尾的起伏：同一起点三点之间的差（{w['pairs']} 对）合并差绝对值平均 "
+                     f"{page.pts(w['pooled_abs_mean']).lstrip('+')}、最大 {page.pts(w['pooled_abs_max']).lstrip('+')} 个百分点"
+                     + (f"；同一检查点起点与 B 之差（{b['pairs']} 对）平均 {page.pts(b['pooled_abs_mean']).lstrip('+')}、最大 "
+                        f"{page.pts(b['pooled_abs_max']).lstrip('+')}" if b.get("pairs") else "") + "。")
+    return lines
 
 
 RULE_FROM, RULE_TO, RULE_P, RULE_POINTS = 50000, 100000, 0.05, 0.03
@@ -356,6 +402,8 @@ def build(runs_root: Path, out: Path, reference: str = "B", stage0_mode: bool = 
     else:
         main_label = "还没有评测结果"
     lines = stage0_lines(s0) if s0 else []
+    e1 = None if stage0_mode else e1_points(coll, reference)
+    lines = e1_lines(e1) + lines  # the main numbers first
     if not coll.first():
         lines.append("还没有完成的闭环评测。训练损失见下文；评测完成后重新生成本页即可。")
     if d5:
@@ -403,7 +451,7 @@ def build(runs_root: Path, out: Path, reference: str = "B", stage0_mode: bool = 
         "reference": reference, "d5_step": d5_step, "d5": d5, "finals": finals, "final_step": FINAL_STEP,
         "seed_tables": seed_tables, "main_cmp": main, "main_label": main_label,
         "task_order": F.task_order(coll, main) if main else [], "noise": noise, "noise_floor": floor,
-        "summary_lines": lines, "stage0": s0,
+        "summary_lines": lines, "stage0": s0, "e1": e1,
         "examples_rule": ("范例按固定规则挑选，不凭观感：同一场景（同任务、同评测种子、同训练种子）里起点结果不一致的回合，"
                           "每个起点各取同样多个“它成功、B 失败”和“B 成功、它失败”，空间任务优先，再按任务名和种子排序；"
                           "另加一个全部成功、一个全部失败的场景。每条画面是该回合等间隔的 8 帧（左侧相机），"
