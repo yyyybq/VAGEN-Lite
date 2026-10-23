@@ -793,3 +793,26 @@ zoe-cf-render 有 4 台 H800 整机，只对 aigc 开放。16:50 上面没有任
 **重启后**（07:53 UTC）：
 - 队列提交了 base-3B 的 MindCube 和 SAT-Real，都在 h800 上等卡；其余 59 项标着"RL training waits on h800, zoetrope: at most 2 of ours run"。
 - 08:05 查时，两个池里有 aigc 作业的机器全部满载（h800 17 台、zoetrope 11 台），没有空卡，这 2 个作业只能等。换池也没用，所以没有再改规则。
+
+## 2026-10-23 全部评测跑完，报告补全
+
+**结论：** 190 项全部完成，没有失败（队列 03:04 UTC 跑完最后一项后退出）。报告已补上外部模型的问答，去掉了"草稿"标记，三个问题的回答不变。问题 3 补上了问答这一面：公开空间专用模型在问答上大多明显高于基座，在我们的环境里却不涨。
+
+**外部模型的问答**（对 base-7B 逐题配对；SI-3B 对 base-3B）
+- 涨得最全面的是 VST-7B-RL（九项里八项显著更高，VSI +18.4）和 SenseNova-SI（七项显著更高，MindCube +27.2）。SI-3B 对 base-3B 也是七项显著更高。
+- SpaceR、ViLASR 主要涨在 VSI、VSTI、SPBench-MV、SAT-Syn。Video-R1 有涨有跌。
+- VSI、VSTI、SPBench-MV 三项，我们 5 个模型低于全部 6 个外部 7B 模型；SAT-Real 我们第十一轮的两个模型最高。
+- 无效回答多的格子：Video-R1 的 MMSI 43%，SpaceR 的 MMSI 23%，VST 的 MindCube 9–10%，SI-3B 的 SAT-Syn 6.5%。
+- 外部模型的距离回答没有缩小（中位数是真实值的 0.65–1.33 倍）；MindCube 诊断规则对它们没有影响；VSTI 相机运动方向它们也分不出前后，只有 SI-7B 能（+25.1 点）。
+
+**像素上限对照**（VSI-Bench）
+- 按作者自定的上限重跑，SpaceR +0.5、Video-R1 +0.3、SenseNova-SI +1.8 点，只有 SenseNova-SI 显著。
+- 和作者自己报的数比：SpaceR 45.6（差 0.4–1.0）；Video-R1 35.8 / 37.1（我们低 2.8–4.5）；SenseNova-SI 模型卡 58.1（我们低 6.8–8.5）。
+- SenseNova-SI 模型卡上的其他三项（MMSI、MindCube-Tiny、ViewSpatial）和我们的都在 1 点以内，只有 VSI 的评测设置不一样，模型卡没写怎么设的。
+
+**复现核对补充**
+- base-3B 大多对上；超阈值的有 SAT-Syn −1.7、VSTI 修正前相机位移 +10.0、MindCube-Tiny +8.3。
+- 7B 的 MindCube 解释（SI 表里的基座数其实是完整集的数）在 3B 上不成立：我们 3B 的完整集是 39.8，SI 报的 33.2 对不上，原因没查。
+- SI-3B 超阈值的有 SAT-Syn −8.2（它有 6.5% 的回答解析不出）、SPBench-MV −3.2、SAT-Real +2.0（后两项 SI 的数都在我们的区间内）。
+
+**产物**：所有结果表都已用全部模型重算（`results/qa_step2`、`qa_paired_step2`、`mindcube_text_rule`、`scale_bias_step2`、`vsti_distance`、`vsti_direction`），报告各表已和这些文件逐项核对。

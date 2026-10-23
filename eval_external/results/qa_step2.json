@@ -1,12 +1,15 @@
 {
  "base-3B": {
   "SAT-Real": {
-   "ours": null,
+   "ours": 50.0,
    "reported": 56.7,
-   "diff": null,
-   "ci95": null,
-   "unparseable_pct": null,
-   "n": null
+   "diff": -6.7,
+   "ci95": [
+    42.1,
+    57.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 150
   },
   "SAT-Syn": {
    "ours": 54.6,
@@ -42,12 +45,15 @@
    "n": 1040
   },
   "MindCube": {
-   "ours": null,
+   "ours": 39.8,
    "reported": null,
    "diff": null,
-   "ci95": null,
-   "unparseable_pct": null,
-   "n": null
+   "ci95": [
+    39.1,
+    40.4
+   ],
+   "unparseable_pct": 0.13,
+   "n": 21154
   },
   "VSI": {
    "ours": 26.8,
@@ -96,20 +102,23 @@
    "n": 5736
   },
   "VSTI 修正前": {
-   "ours": null,
+   "ours": 39.8,
    "reported": 38.6,
-   "diff": null,
-   "ci95": null,
-   "unparseable_pct": null,
-   "n": null
+   "diff": 1.2,
+   "ci95": [
+    38.5,
+    41.0
+   ],
+   "unparseable_pct": 0.0,
+   "n": 6042
   },
   "VSTI 修正前 相机位移": {
-   "ours": null,
+   "ours": 25.3,
    "reported": 15.3,
-   "diff": null,
+   "diff": 10.0,
    "ci95": null,
    "unparseable_pct": null,
-   "n": null
+   "n": 6042
   },
   "MMSI": {
    "ours": 28.2,
@@ -983,6 +992,150 @@
    "n": 319
   }
  },
+ "SI-3B": {
+  "SAT-Real": {
+   "ours": 64.0,
+   "reported": 62.0,
+   "diff": 2.0,
+   "ci95": [
+    56.1,
+    71.2
+   ],
+   "unparseable_pct": 0.0,
+   "n": 150
+  },
+  "SAT-Syn": {
+   "ours": 50.5,
+   "reported": 58.7,
+   "diff": -8.2,
+   "ci95": [
+    48.9,
+    52.0
+   ],
+   "unparseable_pct": 6.5,
+   "n": 4001
+  },
+  "ViewSpatial": {
+   "ours": 44.7,
+   "reported": 44.3,
+   "diff": 0.4,
+   "ci95": [
+    43.4,
+    46.0
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5712
+  },
+  "MindCube-Tiny": {
+   "ours": 60.2,
+   "reported": 59.3,
+   "diff": 0.9,
+   "ci95": [
+    57.2,
+    63.1
+   ],
+   "unparseable_pct": 0.0,
+   "n": 1040
+  },
+  "MindCube": {
+   "ours": 66.6,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    66.0,
+    67.2
+   ],
+   "unparseable_pct": 0.0,
+   "n": 21154
+  },
+  "VSI": {
+   "ours": 49.3,
+   "reported": 50.4,
+   "diff": -1.1,
+   "ci95": [
+    48.0,
+    50.7
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 31.4,
+   "reported": 33.0,
+   "diff": -1.6,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 50.3,
+   "reported": 53.0,
+   "diff": -2.7,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": 50.4,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    49.1,
+    51.7
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5736
+  },
+  "VSTI 相机位移": {
+   "ours": 28.6,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5736
+  },
+  "VSTI 修正前": {
+   "ours": 48.6,
+   "reported": 48.3,
+   "diff": 0.3,
+   "ci95": [
+    47.3,
+    49.8
+   ],
+   "unparseable_pct": 0.0,
+   "n": 6042
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": 32.7,
+   "reported": 32.4,
+   "diff": 0.3,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 6042
+  },
+  "MMSI": {
+   "ours": 29.0,
+   "reported": 29.9,
+   "diff": -0.9,
+   "ci95": [
+    26.3,
+    31.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 1000
+  },
+  "SPBench-MV": {
+   "ours": 61.2,
+   "reported": 64.5,
+   "diff": -3.2,
+   "ci95": [
+    55.8,
+    66.4
+   ],
+   "unparseable_pct": 0.0,
+   "n": 319
+  }
+ },
  "SI-7B": {
   "SAT-Real": {
    "ours": 68.7,
@@ -1125,6 +1278,1062 @@
    ],
    "unparseable_pct": 0.0,
    "n": 319
+  }
+ },
+ "SpaceR-7B": {
+  "SAT-Real": {
+   "ours": 55.3,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    47.3,
+    63.1
+   ],
+   "unparseable_pct": 0.0,
+   "n": 150
+  },
+  "SAT-Syn": {
+   "ours": 61.4,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    59.9,
+    62.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 4001
+  },
+  "ViewSpatial": {
+   "ours": 38.0,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    36.8,
+    39.3
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5712
+  },
+  "MindCube-Tiny": {
+   "ours": 32.6,
+   "reported": 29.9,
+   "diff": 2.7,
+   "ci95": [
+    29.8,
+    35.5
+   ],
+   "unparseable_pct": 0.29,
+   "n": 1040
+  },
+  "MindCube": {
+   "ours": 26.6,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    26.0,
+    27.2
+   ],
+   "unparseable_pct": 0.18,
+   "n": 21154
+  },
+  "VSI": {
+   "ours": 44.6,
+   "reported": 44.5,
+   "diff": 0.1,
+   "ci95": [
+    43.3,
+    46.0
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 32.0,
+   "reported": 31.4,
+   "diff": 0.6,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 39.3,
+   "reported": 39.7,
+   "diff": -0.4,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": 45.4,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    44.1,
+    46.6
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5736
+  },
+  "VSTI 相机位移": {
+   "ours": 12.7,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5736
+  },
+  "VSTI 修正前": {
+   "ours": null,
+   "reported": 43.7,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": null,
+   "reported": 12.7,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MMSI": {
+   "ours": 23.1,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    20.6,
+    25.8
+   ],
+   "unparseable_pct": 23.0,
+   "n": 1000
+  },
+  "SPBench-MV": {
+   "ours": 56.7,
+   "reported": 56.9,
+   "diff": -0.2,
+   "ci95": [
+    51.2,
+    62.0
+   ],
+   "unparseable_pct": 0.0,
+   "n": 319
+  }
+ },
+ "VideoR1-7B": {
+  "SAT-Real": {
+   "ours": 48.0,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    40.2,
+    55.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 150
+  },
+  "SAT-Syn": {
+   "ours": 55.3,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    53.8,
+    56.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 4001
+  },
+  "ViewSpatial": {
+   "ours": 37.9,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    36.6,
+    39.1
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5712
+  },
+  "MindCube-Tiny": {
+   "ours": 34.6,
+   "reported": 30.9,
+   "diff": 3.7,
+   "ci95": [
+    31.8,
+    37.6
+   ],
+   "unparseable_pct": 0.29,
+   "n": 1040
+  },
+  "MindCube": {
+   "ours": 31.9,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    31.3,
+    32.5
+   ],
+   "unparseable_pct": 0.26,
+   "n": 21154
+  },
+  "VSI": {
+   "ours": 32.6,
+   "reported": 33.4,
+   "diff": -0.8,
+   "ci95": [
+    31.4,
+    33.9
+   ],
+   "unparseable_pct": 0.06,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 28.4,
+   "reported": 31.4,
+   "diff": -3.0,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 38.9,
+   "reported": 36.8,
+   "diff": 2.1,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": 44.6,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    43.3,
+    45.9
+   ],
+   "unparseable_pct": 0.38,
+   "n": 5736
+  },
+  "VSTI 相机位移": {
+   "ours": 9.5,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5736
+  },
+  "VSTI 修正前": {
+   "ours": null,
+   "reported": 36.2,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": null,
+   "reported": 5.4,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MMSI": {
+   "ours": 24.2,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    21.6,
+    27.0
+   ],
+   "unparseable_pct": 43.0,
+   "n": 1000
+  },
+  "SPBench-MV": {
+   "ours": 40.7,
+   "reported": 40.7,
+   "diff": -0.0,
+   "ci95": [
+    35.4,
+    46.1
+   ],
+   "unparseable_pct": 0.0,
+   "n": 319
+  }
+ },
+ "ViLASR-7B": {
+  "SAT-Real": {
+   "ours": 56.0,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    48.0,
+    63.7
+   ],
+   "unparseable_pct": 0.0,
+   "n": 150
+  },
+  "SAT-Syn": {
+   "ours": 64.4,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    62.9,
+    65.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 4001
+  },
+  "ViewSpatial": {
+   "ours": 35.6,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    34.4,
+    36.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5712
+  },
+  "MindCube-Tiny": {
+   "ours": 35.1,
+   "reported": 35.1,
+   "diff": 0.0,
+   "ci95": [
+    32.3,
+    38.0
+   ],
+   "unparseable_pct": 1.73,
+   "n": 1040
+  },
+  "MindCube": {
+   "ours": 30.6,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    30.0,
+    31.2
+   ],
+   "unparseable_pct": 0.59,
+   "n": 21154
+  },
+  "VSI": {
+   "ours": 43.7,
+   "reported": 44.6,
+   "diff": -0.9,
+   "ci95": [
+    42.4,
+    45.1
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 29.4,
+   "reported": 29.9,
+   "diff": -0.5,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 41.1,
+   "reported": 45.1,
+   "diff": -4.0,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": 47.1,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    45.8,
+    48.4
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5736
+  },
+  "VSTI 相机位移": {
+   "ours": 15.5,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5736
+  },
+  "VSTI 修正前": {
+   "ours": null,
+   "reported": 46.2,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": null,
+   "reported": 15.7,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MMSI": {
+   "ours": 30.7,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    27.9,
+    33.6
+   ],
+   "unparseable_pct": 0.3,
+   "n": 1000
+  },
+  "SPBench-MV": {
+   "ours": 58.2,
+   "reported": 57.6,
+   "diff": 0.6,
+   "ci95": [
+    52.7,
+    63.5
+   ],
+   "unparseable_pct": 0.0,
+   "n": 319
+  }
+ },
+ "VST-7B-RL": {
+  "SAT-Real": {
+   "ours": 55.3,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    47.3,
+    63.1
+   ],
+   "unparseable_pct": 0.0,
+   "n": 150
+  },
+  "SAT-Syn": {
+   "ours": 64.3,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    62.8,
+    65.8
+   ],
+   "unparseable_pct": 0.0,
+   "n": 4001
+  },
+  "ViewSpatial": {
+   "ours": 49.9,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    48.6,
+    51.2
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5712
+  },
+  "MindCube-Tiny": {
+   "ours": 40.9,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    37.9,
+    43.9
+   ],
+   "unparseable_pct": 9.9,
+   "n": 1040
+  },
+  "MindCube": {
+   "ours": 37.3,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    36.6,
+    37.9
+   ],
+   "unparseable_pct": 8.78,
+   "n": 21154
+  },
+  "VSI": {
+   "ours": 56.0,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    54.6,
+    57.4
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 43.8,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 50.9,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": 48.6,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    47.3,
+    49.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5736
+  },
+  "VSTI 相机位移": {
+   "ours": 24.9,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5736
+  },
+  "VSTI 修正前": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MMSI": {
+   "ours": 33.1,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    30.3,
+    36.1
+   ],
+   "unparseable_pct": 7.5,
+   "n": 1000
+  },
+  "SPBench-MV": {
+   "ours": 66.2,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    60.8,
+    71.2
+   ],
+   "unparseable_pct": 0.0,
+   "n": 319
+  }
+ },
+ "SenseNovaSI-7B": {
+  "SAT-Real": {
+   "ours": 61.3,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    53.3,
+    68.8
+   ],
+   "unparseable_pct": 0.0,
+   "n": 150
+  },
+  "SAT-Syn": {
+   "ours": 58.8,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    57.2,
+    60.3
+   ],
+   "unparseable_pct": 0.0,
+   "n": 4001
+  },
+  "ViewSpatial": {
+   "ours": 45.1,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    43.8,
+    46.4
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5712
+  },
+  "MindCube-Tiny": {
+   "ours": 53.8,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    50.7,
+    56.8
+   ],
+   "unparseable_pct": 0.48,
+   "n": 1040
+  },
+  "MindCube": {
+   "ours": 56.6,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    55.9,
+    57.3
+   ],
+   "unparseable_pct": 0.23,
+   "n": 21154
+  },
+  "VSI": {
+   "ours": 49.6,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    48.2,
+    50.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 32.0,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 46.3,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": 49.8,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    48.5,
+    51.1
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5736
+  },
+  "VSTI 相机位移": {
+   "ours": 23.4,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5736
+  },
+  "VSTI 修正前": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MMSI": {
+   "ours": 32.6,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    29.8,
+    35.6
+   ],
+   "unparseable_pct": 0.0,
+   "n": 1000
+  },
+  "SPBench-MV": {
+   "ours": 60.0,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    54.5,
+    65.2
+   ],
+   "unparseable_pct": 0.0,
+   "n": 319
+  }
+ },
+ "SenseNovaSI-7B-ownpx": {
+  "SAT-Real": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "SAT-Syn": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "ViewSpatial": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MindCube-Tiny": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MindCube": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSI": {
+   "ours": 51.3,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    50.0,
+    52.7
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 34.0,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 46.8,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 相机位移": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MMSI": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "SPBench-MV": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  }
+ },
+ "SpaceR-7B-ownpx": {
+  "SAT-Real": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "SAT-Syn": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "ViewSpatial": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MindCube-Tiny": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MindCube": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSI": {
+   "ours": 45.2,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    43.8,
+    46.5
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 31.4,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 40.4,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 相机位移": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MMSI": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "SPBench-MV": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  }
+ },
+ "VideoR1-7B-ownpx": {
+  "SAT-Real": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "SAT-Syn": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "ViewSpatial": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MindCube-Tiny": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MindCube": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSI": {
+   "ours": 33.0,
+   "reported": null,
+   "diff": null,
+   "ci95": [
+    31.7,
+    34.3
+   ],
+   "unparseable_pct": 0.29,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 27.8,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 38.7,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 相机位移": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "MMSI": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "SPBench-MV": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
   }
  }
 }

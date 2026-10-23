@@ -442,6 +442,60 @@
     }
    }
   },
+  "SI-3B": {
+   "n": 913,
+   "accuracy": 44.0,
+   "ci95": [
+    40.8,
+    47.3
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 70.7,
+    "Backward": 33.0,
+    "Left": 26.9,
+    "Right": 22.1
+   },
+   "balanced_accuracy": 38.2,
+   "answer_share": {
+    "Forward": 52.6,
+    "Backward": 18.7,
+    "Left": 15.7,
+    "Right": 13.0
+   },
+   "answered_when_offered": {
+    "Forward": 66.6,
+    "Backward": 27.4,
+    "Left": 20.6,
+    "Right": 17.6
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 23.3,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 21.1,
+     "n_truth_Forward": 242,
+     "diff": 2.3,
+     "ci95": [
+      -8.2,
+      15.2
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 25.9,
+     "n_truth_Right": 166,
+     "when_truth_Left": 16.4,
+     "n_truth_Left": 128,
+     "diff": 9.5,
+     "ci95": [
+      -0.1,
+      18.5
+     ]
+    }
+   }
+  },
   "SI-7B": {
    "n": 913,
    "accuracy": 49.4,
@@ -492,6 +546,276 @@
      "ci95": [
       -4.6,
       14.4
+     ]
+    }
+   }
+  },
+  "SpaceR-7B": {
+   "n": 913,
+   "accuracy": 47.9,
+   "ci95": [
+    44.6,
+    51.1
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 78.0,
+    "Backward": 3.3,
+    "Left": 17.8,
+    "Right": 43.1
+   },
+   "balanced_accuracy": 35.5,
+   "answer_share": {
+    "Forward": 61.6,
+    "Backward": 2.1,
+    "Left": 10.2,
+    "Right": 26.2
+   },
+   "answered_when_offered": {
+    "Forward": 77.9,
+    "Backward": 3.0,
+    "Left": 13.4,
+    "Right": 35.3
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 3.3,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 4.5,
+     "n_truth_Forward": 242,
+     "diff": -1.2,
+     "ci95": [
+      -5.4,
+      7.1
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 38.0,
+     "n_truth_Right": 166,
+     "when_truth_Left": 42.2,
+     "n_truth_Left": 128,
+     "diff": -4.2,
+     "ci95": [
+      -15.4,
+      6.9
+     ]
+    }
+   }
+  },
+  "VideoR1-7B": {
+   "n": 913,
+   "accuracy": 51.3,
+   "ci95": [
+    48.0,
+    54.5
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 93.3,
+    "Backward": 17.6,
+    "Left": 3.0,
+    "Right": 39.1
+   },
+   "balanced_accuracy": 38.2,
+   "answer_share": {
+    "Forward": 73.6,
+    "Backward": 5.1,
+    "Left": 0.8,
+    "Right": 20.5
+   },
+   "answered_when_offered": {
+    "Forward": 93.2,
+    "Backward": 7.5,
+    "Left": 1.0,
+    "Right": 27.6
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 0.0,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 0.0,
+     "n_truth_Forward": 242,
+     "diff": 0.0,
+     "ci95": [
+      -1.6,
+      6.0
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 42.8,
+     "n_truth_Right": 166,
+     "when_truth_Left": 37.5,
+     "n_truth_Left": 128,
+     "diff": 5.3,
+     "ci95": [
+      -6.0,
+      16.2
+     ]
+    }
+   }
+  },
+  "ViLASR-7B": {
+   "n": 913,
+   "accuracy": 48.4,
+   "ci95": [
+    45.2,
+    51.7
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 70.7,
+    "Backward": 4.4,
+    "Left": 18.8,
+    "Right": 54.5
+   },
+   "balanced_accuracy": 37.1,
+   "answer_share": {
+    "Forward": 52.9,
+    "Backward": 1.8,
+    "Left": 10.8,
+    "Right": 34.5
+   },
+   "answered_when_offered": {
+    "Forward": 67.0,
+    "Backward": 2.6,
+    "Left": 14.3,
+    "Right": 46.5
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 1.7,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 1.7,
+     "n_truth_Forward": 242,
+     "diff": 0.0,
+     "ci95": [
+      -2.9,
+      7.3
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 50.6,
+     "n_truth_Right": 166,
+     "when_truth_Left": 50.0,
+     "n_truth_Left": 128,
+     "diff": 0.6,
+     "ci95": [
+      -10.8,
+      12.0
+     ]
+    }
+   }
+  },
+  "VST-7B-RL": {
+   "n": 913,
+   "accuracy": 36.7,
+   "ci95": [
+    33.6,
+    39.9
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 19.9,
+    "Backward": 25.3,
+    "Left": 61.9,
+    "Right": 45.8
+   },
+   "balanced_accuracy": 38.2,
+   "answer_share": {
+    "Forward": 16.0,
+    "Backward": 14.5,
+    "Left": 41.6,
+    "Right": 27.9
+   },
+   "answered_when_offered": {
+    "Forward": 20.2,
+    "Backward": 21.2,
+    "Left": 54.8,
+    "Right": 37.7
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 31.7,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 30.2,
+     "n_truth_Forward": 242,
+     "diff": 1.5,
+     "ci95": [
+      -10.5,
+      15.2
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 32.5,
+     "n_truth_Right": 166,
+     "when_truth_Left": 28.9,
+     "n_truth_Left": 128,
+     "diff": 3.6,
+     "ci95": [
+      -7.1,
+      13.9
+     ]
+    }
+   }
+  },
+  "SenseNovaSI-7B": {
+   "n": 913,
+   "accuracy": 45.5,
+   "ci95": [
+    42.3,
+    48.7
+   ],
+   "unparsed": 0,
+   "accuracy_by_truth": {
+    "Forward": 64.2,
+    "Backward": 0.0,
+    "Left": 31.5,
+    "Right": 45.1
+   },
+   "balanced_accuracy": 35.2,
+   "answer_share": {
+    "Forward": 52.1,
+    "Backward": 1.8,
+    "Left": 19.9,
+    "Right": 26.2
+   },
+   "answered_when_offered": {
+    "Forward": 66.0,
+    "Backward": 2.6,
+    "Left": 26.2,
+    "Right": 35.3
+   },
+   "discrimination": {
+    "forward_backward": {
+     "answer": "Backward",
+     "when_truth_Backward": 0.0,
+     "n_truth_Backward": 60,
+     "when_truth_Forward": 5.4,
+     "n_truth_Forward": 242,
+     "diff": -5.4,
+     "ci95": [
+      -9.0,
+      1.0
+     ]
+    },
+    "left_right": {
+     "answer": "Right",
+     "when_truth_Right": 30.7,
+     "n_truth_Right": 166,
+     "when_truth_Left": 28.1,
+     "n_truth_Left": 128,
+     "diff": 2.6,
+     "ci95": [
+      -8.0,
+      12.8
      ]
     }
    }

@@ -6448,5 +6448,4263 @@
     ]
    }
   }
+ },
+ {
+  "bench": "SAT-Real",
+  "model_a": "base-7B",
+  "model_b": "SpaceR-7B",
+  "n": 150,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 58.0,
+  "b": 55.33,
+  "diff": -2.67,
+  "ci95": [
+   -10.67,
+   5.33
+  ],
+  "only_a": 21,
+  "only_b": 17,
+  "mcnemar_p": 0.6271025701571489,
+  "per_type": {
+   "all": {
+    "n": 150,
+    "a": 58.0,
+    "b": 55.33,
+    "diff": -2.67,
+    "ci95": [
+     -10.67,
+     5.33
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Syn",
+  "model_a": "base-7B",
+  "model_b": "SpaceR-7B",
+  "n": 4001,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 59.09,
+  "b": 61.41,
+  "diff": 2.32,
+  "ci95": [
+   1.3,
+   3.32
+  ],
+  "only_a": 178,
+  "only_b": 271,
+  "mcnemar_p": 1.3224575569379337e-05,
+  "per_type": {
+   "all": {
+    "n": 4001,
+    "a": 59.09,
+    "b": 61.41,
+    "diff": 2.32,
+    "ci95": [
+     1.3,
+     3.32
+    ]
+   }
+  }
+ },
+ {
+  "bench": "ViewSpatial",
+  "model_a": "base-7B",
+  "model_b": "SpaceR-7B",
+  "n": 5712,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.66,
+  "b": 38.04,
+  "diff": 0.39,
+  "ci95": [
+   -0.33,
+   1.19
+  ],
+  "only_a": 244,
+  "only_b": 266,
+  "mcnemar_p": 0.3524359805650489,
+  "per_type": {
+   "Camera perspective - Object View Orientation": {
+    "n": 996,
+    "a": 30.72,
+    "b": 28.61,
+    "diff": -2.11,
+    "ci95": [
+     -3.71,
+     -0.6
+    ]
+   },
+   "Camera perspective - Relative Direction": {
+    "n": 1773,
+    "a": 46.93,
+    "b": 48.73,
+    "diff": 1.8,
+    "ci95": [
+     0.51,
+     3.16
+    ]
+   },
+   "Person perspective - Object View Orientation": {
+    "n": 996,
+    "a": 39.96,
+    "b": 41.27,
+    "diff": 1.31,
+    "ci95": [
+     -0.5,
+     3.11
+    ]
+   },
+   "Person perspective - Relative Direction": {
+    "n": 842,
+    "a": 35.87,
+    "b": 34.09,
+    "diff": -1.78,
+    "ci95": [
+     -3.92,
+     0.24
+    ]
+   },
+   "Person perspective - Scene Simulation Relative Direction": {
+    "n": 1105,
+    "a": 28.33,
+    "b": 29.5,
+    "diff": 1.18,
+    "ci95": [
+     -0.81,
+     3.26
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube-Tiny",
+  "model_a": "base-7B",
+  "model_b": "SpaceR-7B",
+  "n": 1040,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 34.23,
+  "b": 32.6,
+  "diff": -1.63,
+  "ci95": [
+   -4.04,
+   0.67
+  ],
+  "only_a": 89,
+  "only_b": 72,
+  "mcnemar_p": 0.20717984725922248,
+  "per_type": {
+   "among": {
+    "n": 590,
+    "a": 30.68,
+    "b": 29.32,
+    "diff": -1.36,
+    "ci95": [
+     -4.41,
+     1.69
+    ]
+   },
+   "around": {
+    "n": 250,
+    "a": 41.6,
+    "b": 39.6,
+    "diff": -2.0,
+    "ci95": [
+     -6.81,
+     3.2
+    ]
+   },
+   "rotation": {
+    "n": 200,
+    "a": 35.5,
+    "b": 33.5,
+    "diff": -2.0,
+    "ci95": [
+     -7.5,
+     4.0
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube",
+  "model_a": "base-7B",
+  "model_b": "SpaceR-7B",
+  "n": 21154,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 29.38,
+  "b": 26.63,
+  "diff": -2.76,
+  "ci95": [
+   -3.26,
+   -2.22
+  ],
+  "only_a": 1834,
+  "only_b": 1251,
+  "mcnemar_p": 7.801858455259608e-26,
+  "per_type": {
+   "among": {
+    "n": 18204,
+    "a": 29.22,
+    "b": 26.16,
+    "diff": -3.06,
+    "ci95": [
+     -3.61,
+     -2.46
+    ]
+   },
+   "around": {
+    "n": 1869,
+    "a": 27.45,
+    "b": 25.79,
+    "diff": -1.66,
+    "ci95": [
+     -3.16,
+     -0.21
+    ]
+   },
+   "rotation": {
+    "n": 1081,
+    "a": 35.43,
+    "b": 35.89,
+    "diff": 0.46,
+    "ci95": [
+     -1.57,
+     2.22
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSI-Bench",
+  "model_a": "base-7B",
+  "model_b": "SpaceR-7B",
+  "n": 5130,
+  "rule": "vsi8",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.58,
+  "b": 44.64,
+  "diff": 7.06,
+  "ci95": [
+   5.87,
+   8.27
+  ],
+  "per_type": {
+   "obj_appearance_order": {
+    "n": 618,
+    "a": 34.63,
+    "b": 49.51,
+    "diff": 14.89,
+    "ci95": [
+     11.17,
+     18.61
+    ]
+   },
+   "object_abs_distance": {
+    "n": 834,
+    "a": 22.6,
+    "b": 31.75,
+    "diff": 9.15,
+    "ci95": [
+     6.55,
+     11.83
+    ]
+   },
+   "object_counting": {
+    "n": 565,
+    "a": 41.35,
+    "b": 49.88,
+    "diff": 8.53,
+    "ci95": [
+     5.73,
+     11.42
+    ]
+   },
+   "object_rel_direction_easy": {
+    "n": 217,
+    "a": 46.54,
+    "b": 51.15,
+    "diff": 4.61,
+    "ci95": [
+     -2.76,
+     12.44
+    ]
+   },
+   "object_rel_direction_hard": {
+    "n": 373,
+    "a": 30.03,
+    "b": 40.75,
+    "diff": 10.72,
+    "ci95": [
+     6.43,
+     15.02
+    ]
+   },
+   "object_rel_direction_medium": {
+    "n": 378,
+    "a": 43.92,
+    "b": 46.03,
+    "diff": 2.12,
+    "ci95": [
+     -4.23,
+     8.2
+    ]
+   },
+   "object_rel_distance": {
+    "n": 710,
+    "a": 37.32,
+    "b": 39.3,
+    "diff": 1.97,
+    "ci95": [
+     -1.27,
+     5.07
+    ]
+   },
+   "object_size_estimation": {
+    "n": 953,
+    "a": 49.0,
+    "b": 61.5,
+    "diff": 12.5,
+    "ci95": [
+     10.2,
+     14.96
+    ]
+   },
+   "room_size_estimation": {
+    "n": 288,
+    "a": 46.18,
+    "b": 47.26,
+    "diff": 1.08,
+    "ci95": [
+     -3.4,
+     5.59
+    ]
+   },
+   "route_planning": {
+    "n": 194,
+    "a": 29.38,
+    "b": 31.96,
+    "diff": 2.58,
+    "ci95": [
+     -1.55,
+     6.7
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSTI-Bench",
+  "model_a": "base-7B",
+  "model_b": "SpaceR-7B",
+  "n": 5736,
+  "rule": "vsti5",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 41.47,
+  "b": 45.35,
+  "diff": 3.88,
+  "ci95": [
+   2.72,
+   4.99
+  ],
+  "per_type": {
+   "camera_obj_abs_dist": {
+    "n": 905,
+    "a": 31.06,
+    "b": 37.18,
+    "diff": 6.12,
+    "ci95": [
+     2.87,
+     9.35
+    ]
+   },
+   "camera_displacement": {
+    "n": 833,
+    "a": 9.17,
+    "b": 12.67,
+    "diff": 3.49,
+    "ci95": [
+     1.0,
+     5.94
+    ]
+   },
+   "camera_movement_direction": {
+    "n": 913,
+    "a": 45.13,
+    "b": 47.86,
+    "diff": 2.74,
+    "ci95": [
+     0.0,
+     5.37
+    ]
+   },
+   "obj_obj_relative_pos": {
+    "n": 1645,
+    "a": 68.09,
+    "b": 67.42,
+    "diff": -0.67,
+    "ci95": [
+     -2.43,
+     1.16
+    ]
+   },
+   "camera_obj_rel_dist": {
+    "n": 1440,
+    "a": 53.89,
+    "b": 61.6,
+    "diff": 7.71,
+    "ci95": [
+     5.69,
+     9.58
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MMSI",
+  "model_a": "base-7B",
+  "model_b": "SpaceR-7B",
+  "n": 1000,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 28.0,
+  "b": 23.1,
+  "diff": -4.9,
+  "ci95": [
+   -7.0,
+   -2.8
+  ],
+  "only_a": 84,
+  "only_b": 35,
+  "mcnemar_p": 8.182182568303971e-06,
+  "per_type": {
+   "Attr-Appr": {
+    "n": 66,
+    "a": 21.21,
+    "b": 13.64,
+    "diff": -7.58,
+    "ci95": [
+     -15.15,
+     0.0
+    ]
+   },
+   "Attr-Meas": {
+    "n": 64,
+    "a": 26.56,
+    "b": 20.31,
+    "diff": -6.25,
+    "ci95": [
+     -14.06,
+     0.0
+    ]
+   },
+   "MSR": {
+    "n": 198,
+    "a": 26.77,
+    "b": 23.23,
+    "diff": -3.54,
+    "ci95": [
+     -8.08,
+     1.01
+    ]
+   },
+   "Motion-Cam": {
+    "n": 74,
+    "a": 21.62,
+    "b": 5.41,
+    "diff": -16.22,
+    "ci95": [
+     -25.68,
+     -8.11
+    ]
+   },
+   "Motion-Obj": {
+    "n": 76,
+    "a": 32.89,
+    "b": 28.95,
+    "diff": -3.95,
+    "ci95": [
+     -11.84,
+     3.95
+    ]
+   },
+   "Pos-Cam-Cam": {
+    "n": 93,
+    "a": 30.11,
+    "b": 17.2,
+    "diff": -12.9,
+    "ci95": [
+     -20.43,
+     -6.45
+    ]
+   },
+   "Pos-Cam-Obj": {
+    "n": 86,
+    "a": 32.56,
+    "b": 31.4,
+    "diff": -1.16,
+    "ci95": [
+     -8.14,
+     5.81
+    ]
+   },
+   "Pos-Cam-Reg": {
+    "n": 83,
+    "a": 30.12,
+    "b": 32.53,
+    "diff": 2.41,
+    "ci95": [
+     -4.85,
+     9.64
+    ]
+   },
+   "Pos-Obj-Obj": {
+    "n": 94,
+    "a": 25.53,
+    "b": 23.4,
+    "diff": -2.13,
+    "ci95": [
+     -8.51,
+     4.26
+    ]
+   },
+   "Pos-Obj-Reg": {
+    "n": 85,
+    "a": 38.82,
+    "b": 31.76,
+    "diff": -7.06,
+    "ci95": [
+     -15.29,
+     0.0
+    ]
+   },
+   "Pos-Reg-Reg": {
+    "n": 81,
+    "a": 20.99,
+    "b": 22.22,
+    "diff": 1.23,
+    "ci95": [
+     -4.94,
+     7.41
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SPBench-MV",
+  "model_a": "base-7B",
+  "model_b": "SpaceR-7B",
+  "n": 319,
+  "rule": "types",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 42.68,
+  "b": 56.69,
+  "diff": 14.0,
+  "ci95": [
+   8.37,
+   19.38
+  ],
+  "per_type": {
+   "object_abs_distance": {
+    "n": 30,
+    "a": 10.0,
+    "b": 33.67,
+    "diff": 23.67,
+    "ci95": [
+     9.33,
+     38.0
+    ]
+   },
+   "object_counting": {
+    "n": 70,
+    "a": 51.43,
+    "b": 72.71,
+    "diff": 21.29,
+    "ci95": [
+     11.0,
+     31.86
+    ]
+   },
+   "object_rel_direction": {
+    "n": 44,
+    "a": 15.91,
+    "b": 20.45,
+    "diff": 4.55,
+    "ci95": [
+     -9.09,
+     18.18
+    ]
+   },
+   "object_rel_distance": {
+    "n": 17,
+    "a": 100.0,
+    "b": 88.24,
+    "diff": -11.76,
+    "ci95": [
+     -29.41,
+     0.0
+    ]
+   },
+   "object_size_estimation": {
+    "n": 158,
+    "a": 36.08,
+    "b": 68.35,
+    "diff": 32.28,
+    "ci95": [
+     26.71,
+     37.66
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Real",
+  "model_a": "base-7B",
+  "model_b": "VideoR1-7B",
+  "n": 150,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 58.0,
+  "b": 48.0,
+  "diff": -10.0,
+  "ci95": [
+   -18.0,
+   -2.0
+  ],
+  "only_a": 26,
+  "only_b": 11,
+  "mcnemar_p": 0.020073851919732988,
+  "per_type": {
+   "all": {
+    "n": 150,
+    "a": 58.0,
+    "b": 48.0,
+    "diff": -10.0,
+    "ci95": [
+     -18.0,
+     -2.0
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Syn",
+  "model_a": "base-7B",
+  "model_b": "VideoR1-7B",
+  "n": 4001,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 59.09,
+  "b": 55.34,
+  "diff": -3.75,
+  "ci95": [
+   -4.82,
+   -2.72
+  ],
+  "only_a": 325,
+  "only_b": 175,
+  "mcnemar_p": 1.9026939519251157e-11,
+  "per_type": {
+   "all": {
+    "n": 4001,
+    "a": 59.09,
+    "b": 55.34,
+    "diff": -3.75,
+    "ci95": [
+     -4.82,
+     -2.72
+    ]
+   }
+  }
+ },
+ {
+  "bench": "ViewSpatial",
+  "model_a": "base-7B",
+  "model_b": "VideoR1-7B",
+  "n": 5712,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.66,
+  "b": 37.87,
+  "diff": 0.21,
+  "ci95": [
+   -0.67,
+   1.21
+  ],
+  "only_a": 370,
+  "only_b": 382,
+  "mcnemar_p": 0.6883528751401755,
+  "per_type": {
+   "Camera perspective - Object View Orientation": {
+    "n": 996,
+    "a": 30.72,
+    "b": 27.91,
+    "diff": -2.81,
+    "ci95": [
+     -4.72,
+     -0.9
+    ]
+   },
+   "Camera perspective - Relative Direction": {
+    "n": 1773,
+    "a": 46.93,
+    "b": 45.85,
+    "diff": -1.07,
+    "ci95": [
+     -2.76,
+     0.73
+    ]
+   },
+   "Person perspective - Object View Orientation": {
+    "n": 996,
+    "a": 39.96,
+    "b": 46.79,
+    "diff": 6.83,
+    "ci95": [
+     4.22,
+     9.34
+    ]
+   },
+   "Person perspective - Relative Direction": {
+    "n": 842,
+    "a": 35.87,
+    "b": 36.82,
+    "diff": 0.95,
+    "ci95": [
+     -1.43,
+     3.21
+    ]
+   },
+   "Person perspective - Scene Simulation Relative Direction": {
+    "n": 1105,
+    "a": 28.33,
+    "b": 26.79,
+    "diff": -1.54,
+    "ci95": [
+     -3.53,
+     0.63
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube-Tiny",
+  "model_a": "base-7B",
+  "model_b": "VideoR1-7B",
+  "n": 1040,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 34.23,
+  "b": 34.62,
+  "diff": 0.38,
+  "ci95": [
+   -2.21,
+   3.08
+  ],
+  "only_a": 101,
+  "only_b": 105,
+  "mcnemar_p": 0.8344962831598366,
+  "per_type": {
+   "among": {
+    "n": 590,
+    "a": 30.68,
+    "b": 33.05,
+    "diff": 2.37,
+    "ci95": [
+     -0.85,
+     5.76
+    ]
+   },
+   "around": {
+    "n": 250,
+    "a": 41.6,
+    "b": 38.4,
+    "diff": -3.2,
+    "ci95": [
+     -9.6,
+     3.2
+    ]
+   },
+   "rotation": {
+    "n": 200,
+    "a": 35.5,
+    "b": 34.5,
+    "diff": -1.0,
+    "ci95": [
+     -6.5,
+     4.5
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube",
+  "model_a": "base-7B",
+  "model_b": "VideoR1-7B",
+  "n": 21154,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 29.38,
+  "b": 31.91,
+  "diff": 2.52,
+  "ci95": [
+   1.96,
+   3.09
+  ],
+  "only_a": 1702,
+  "only_b": 2236,
+  "mcnemar_p": 1.793807717089776e-17,
+  "per_type": {
+   "among": {
+    "n": 18204,
+    "a": 29.22,
+    "b": 32.42,
+    "diff": 3.19,
+    "ci95": [
+     2.59,
+     3.82
+    ]
+   },
+   "around": {
+    "n": 1869,
+    "a": 27.45,
+    "b": 24.99,
+    "diff": -2.46,
+    "ci95": [
+     -4.12,
+     -0.91
+    ]
+   },
+   "rotation": {
+    "n": 1081,
+    "a": 35.43,
+    "b": 35.34,
+    "diff": -0.09,
+    "ci95": [
+     -2.78,
+     2.59
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSI-Bench",
+  "model_a": "base-7B",
+  "model_b": "VideoR1-7B",
+  "n": 5130,
+  "rule": "vsi8",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.58,
+  "b": 32.62,
+  "diff": -4.96,
+  "ci95": [
+   -6.36,
+   -3.7
+  ],
+  "per_type": {
+   "obj_appearance_order": {
+    "n": 618,
+    "a": 34.63,
+    "b": 32.2,
+    "diff": -2.43,
+    "ci95": [
+     -6.15,
+     1.46
+    ]
+   },
+   "object_abs_distance": {
+    "n": 834,
+    "a": 22.6,
+    "b": 29.77,
+    "diff": 7.17,
+    "ci95": [
+     4.23,
+     10.28
+    ]
+   },
+   "object_counting": {
+    "n": 565,
+    "a": 41.35,
+    "b": 24.88,
+    "diff": -16.46,
+    "ci95": [
+     -19.47,
+     -13.31
+    ]
+   },
+   "object_rel_direction_easy": {
+    "n": 217,
+    "a": 46.54,
+    "b": 48.39,
+    "diff": 1.84,
+    "ci95": [
+     -3.69,
+     7.37
+    ]
+   },
+   "object_rel_direction_hard": {
+    "n": 373,
+    "a": 30.03,
+    "b": 21.45,
+    "diff": -8.58,
+    "ci95": [
+     -13.94,
+     -3.49
+    ]
+   },
+   "object_rel_direction_medium": {
+    "n": 378,
+    "a": 43.92,
+    "b": 36.51,
+    "diff": -7.41,
+    "ci95": [
+     -12.17,
+     -2.91
+    ]
+   },
+   "object_rel_distance": {
+    "n": 710,
+    "a": 37.32,
+    "b": 38.87,
+    "diff": 1.55,
+    "ci95": [
+     -1.97,
+     5.07
+    ]
+   },
+   "object_size_estimation": {
+    "n": 953,
+    "a": 49.0,
+    "b": 36.23,
+    "diff": -12.77,
+    "ci95": [
+     -15.67,
+     -9.78
+    ]
+   },
+   "room_size_estimation": {
+    "n": 288,
+    "a": 46.18,
+    "b": 35.21,
+    "diff": -10.97,
+    "ci95": [
+     -14.79,
+     -7.26
+    ]
+   },
+   "route_planning": {
+    "n": 194,
+    "a": 29.38,
+    "b": 28.35,
+    "diff": -1.03,
+    "ci95": [
+     -7.22,
+     5.15
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSTI-Bench",
+  "model_a": "base-7B",
+  "model_b": "VideoR1-7B",
+  "n": 5736,
+  "rule": "vsti5",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 41.47,
+  "b": 44.6,
+  "diff": 3.13,
+  "ci95": [
+   1.91,
+   4.35
+  ],
+  "per_type": {
+   "camera_obj_abs_dist": {
+    "n": 905,
+    "a": 31.06,
+    "b": 37.64,
+    "diff": 6.57,
+    "ci95": [
+     3.52,
+     9.55
+    ]
+   },
+   "camera_displacement": {
+    "n": 833,
+    "a": 9.17,
+    "b": 9.54,
+    "diff": 0.37,
+    "ci95": [
+     -1.51,
+     2.15
+    ]
+   },
+   "camera_movement_direction": {
+    "n": 913,
+    "a": 45.13,
+    "b": 51.26,
+    "diff": 6.13,
+    "ci95": [
+     2.74,
+     9.64
+    ]
+   },
+   "obj_obj_relative_pos": {
+    "n": 1645,
+    "a": 68.09,
+    "b": 65.47,
+    "diff": -2.61,
+    "ci95": [
+     -4.98,
+     -0.43
+    ]
+   },
+   "camera_obj_rel_dist": {
+    "n": 1440,
+    "a": 53.89,
+    "b": 59.1,
+    "diff": 5.21,
+    "ci95": [
+     2.5,
+     7.78
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MMSI",
+  "model_a": "base-7B",
+  "model_b": "VideoR1-7B",
+  "n": 1000,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 28.0,
+  "b": 24.2,
+  "diff": -3.8,
+  "ci95": [
+   -6.8,
+   -0.8
+  ],
+  "only_a": 137,
+  "only_b": 99,
+  "mcnemar_p": 0.01583868888162092,
+  "per_type": {
+   "Attr-Appr": {
+    "n": 66,
+    "a": 21.21,
+    "b": 15.15,
+    "diff": -6.06,
+    "ci95": [
+     -16.67,
+     6.06
+    ]
+   },
+   "Attr-Meas": {
+    "n": 64,
+    "a": 26.56,
+    "b": 23.44,
+    "diff": -3.12,
+    "ci95": [
+     -14.06,
+     9.38
+    ]
+   },
+   "MSR": {
+    "n": 198,
+    "a": 26.77,
+    "b": 21.72,
+    "diff": -5.05,
+    "ci95": [
+     -12.12,
+     2.02
+    ]
+   },
+   "Motion-Cam": {
+    "n": 74,
+    "a": 21.62,
+    "b": 13.51,
+    "diff": -8.11,
+    "ci95": [
+     -17.57,
+     1.35
+    ]
+   },
+   "Motion-Obj": {
+    "n": 76,
+    "a": 32.89,
+    "b": 26.32,
+    "diff": -6.58,
+    "ci95": [
+     -17.11,
+     2.63
+    ]
+   },
+   "Pos-Cam-Cam": {
+    "n": 93,
+    "a": 30.11,
+    "b": 30.11,
+    "diff": 0.0,
+    "ci95": [
+     -11.83,
+     11.83
+    ]
+   },
+   "Pos-Cam-Obj": {
+    "n": 86,
+    "a": 32.56,
+    "b": 19.77,
+    "diff": -12.79,
+    "ci95": [
+     -23.26,
+     -2.33
+    ]
+   },
+   "Pos-Cam-Reg": {
+    "n": 83,
+    "a": 30.12,
+    "b": 27.71,
+    "diff": -2.41,
+    "ci95": [
+     -12.05,
+     8.43
+    ]
+   },
+   "Pos-Obj-Obj": {
+    "n": 94,
+    "a": 25.53,
+    "b": 28.72,
+    "diff": 3.19,
+    "ci95": [
+     -6.38,
+     12.77
+    ]
+   },
+   "Pos-Obj-Reg": {
+    "n": 85,
+    "a": 38.82,
+    "b": 35.29,
+    "diff": -3.53,
+    "ci95": [
+     -14.12,
+     7.06
+    ]
+   },
+   "Pos-Reg-Reg": {
+    "n": 81,
+    "a": 20.99,
+    "b": 23.46,
+    "diff": 2.47,
+    "ci95": [
+     -8.64,
+     13.58
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SPBench-MV",
+  "model_a": "base-7B",
+  "model_b": "VideoR1-7B",
+  "n": 319,
+  "rule": "types",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 42.68,
+  "b": 40.66,
+  "diff": -2.02,
+  "ci95": [
+   -7.42,
+   3.22
+  ],
+  "per_type": {
+   "object_abs_distance": {
+    "n": 30,
+    "a": 10.0,
+    "b": 37.33,
+    "diff": 27.33,
+    "ci95": [
+     12.0,
+     43.67
+    ]
+   },
+   "object_counting": {
+    "n": 70,
+    "a": 51.43,
+    "b": 40.29,
+    "diff": -11.14,
+    "ci95": [
+     -20.29,
+     -2.71
+    ]
+   },
+   "object_rel_direction": {
+    "n": 44,
+    "a": 15.91,
+    "b": 9.09,
+    "diff": -6.82,
+    "ci95": [
+     -15.91,
+     0.0
+    ]
+   },
+   "object_rel_distance": {
+    "n": 17,
+    "a": 100.0,
+    "b": 82.35,
+    "diff": -17.65,
+    "ci95": [
+     -35.29,
+     0.0
+    ]
+   },
+   "object_size_estimation": {
+    "n": 158,
+    "a": 36.08,
+    "b": 34.24,
+    "diff": -1.84,
+    "ci95": [
+     -8.48,
+     5.06
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Real",
+  "model_a": "base-7B",
+  "model_b": "ViLASR-7B",
+  "n": 150,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 58.0,
+  "b": 56.0,
+  "diff": -2.0,
+  "ci95": [
+   -10.67,
+   6.0
+  ],
+  "only_a": 21,
+  "only_b": 18,
+  "mcnemar_p": 0.7492586247608415,
+  "per_type": {
+   "all": {
+    "n": 150,
+    "a": 58.0,
+    "b": 56.0,
+    "diff": -2.0,
+    "ci95": [
+     -10.67,
+     6.0
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Syn",
+  "model_a": "base-7B",
+  "model_b": "ViLASR-7B",
+  "n": 4001,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 59.09,
+  "b": 64.43,
+  "diff": 5.35,
+  "ci95": [
+   3.85,
+   6.75
+  ],
+  "only_a": 318,
+  "only_b": 532,
+  "mcnemar_p": 2.0694537738286723e-13,
+  "per_type": {
+   "all": {
+    "n": 4001,
+    "a": 59.09,
+    "b": 64.43,
+    "diff": 5.35,
+    "ci95": [
+     3.85,
+     6.75
+    ]
+   }
+  }
+ },
+ {
+  "bench": "ViewSpatial",
+  "model_a": "base-7B",
+  "model_b": "ViLASR-7B",
+  "n": 5712,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.66,
+  "b": 35.61,
+  "diff": -2.05,
+  "ci95": [
+   -3.08,
+   -1.07
+  ],
+  "only_a": 503,
+  "only_b": 386,
+  "mcnemar_p": 9.791457558739983e-05,
+  "per_type": {
+   "Camera perspective - Object View Orientation": {
+    "n": 996,
+    "a": 30.72,
+    "b": 25.3,
+    "diff": -5.42,
+    "ci95": [
+     -7.63,
+     -3.31
+    ]
+   },
+   "Camera perspective - Relative Direction": {
+    "n": 1773,
+    "a": 46.93,
+    "b": 46.53,
+    "diff": -0.39,
+    "ci95": [
+     -2.26,
+     1.41
+    ]
+   },
+   "Person perspective - Object View Orientation": {
+    "n": 996,
+    "a": 39.96,
+    "b": 38.86,
+    "diff": -1.1,
+    "ci95": [
+     -3.61,
+     1.31
+    ]
+   },
+   "Person perspective - Relative Direction": {
+    "n": 842,
+    "a": 35.87,
+    "b": 32.54,
+    "diff": -3.33,
+    "ci95": [
+     -5.94,
+     -0.95
+    ]
+   },
+   "Person perspective - Scene Simulation Relative Direction": {
+    "n": 1105,
+    "a": 28.33,
+    "b": 26.79,
+    "diff": -1.54,
+    "ci95": [
+     -4.34,
+     1.18
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube-Tiny",
+  "model_a": "base-7B",
+  "model_b": "ViLASR-7B",
+  "n": 1040,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 34.23,
+  "b": 35.1,
+  "diff": 0.87,
+  "ci95": [
+   -2.21,
+   4.13
+  ],
+  "only_a": 130,
+  "only_b": 139,
+  "mcnemar_p": 0.6257959069947966,
+  "per_type": {
+   "among": {
+    "n": 590,
+    "a": 30.68,
+    "b": 30.68,
+    "diff": 0.0,
+    "ci95": [
+     -3.73,
+     3.9
+    ]
+   },
+   "around": {
+    "n": 250,
+    "a": 41.6,
+    "b": 44.4,
+    "diff": 2.8,
+    "ci95": [
+     -4.4,
+     10.0
+    ]
+   },
+   "rotation": {
+    "n": 200,
+    "a": 35.5,
+    "b": 36.5,
+    "diff": 1.0,
+    "ci95": [
+     -5.5,
+     8.0
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube",
+  "model_a": "base-7B",
+  "model_b": "ViLASR-7B",
+  "n": 21154,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 29.38,
+  "b": 30.59,
+  "diff": 1.21,
+  "ci95": [
+   0.56,
+   1.9
+  ],
+  "only_a": 2320,
+  "only_b": 2576,
+  "mcnemar_p": 0.00026728007854109626,
+  "per_type": {
+   "among": {
+    "n": 18204,
+    "a": 29.22,
+    "b": 30.43,
+    "diff": 1.2,
+    "ci95": [
+     0.51,
+     1.96
+    ]
+   },
+   "around": {
+    "n": 1869,
+    "a": 27.45,
+    "b": 29.48,
+    "diff": 2.03,
+    "ci95": [
+     0.05,
+     3.96
+    ]
+   },
+   "rotation": {
+    "n": 1081,
+    "a": 35.43,
+    "b": 35.34,
+    "diff": -0.09,
+    "ci95": [
+     -2.87,
+     2.68
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSI-Bench",
+  "model_a": "base-7B",
+  "model_b": "ViLASR-7B",
+  "n": 5130,
+  "rule": "vsi8",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.58,
+  "b": 43.74,
+  "diff": 6.17,
+  "ci95": [
+   4.62,
+   7.7
+  ],
+  "per_type": {
+   "obj_appearance_order": {
+    "n": 618,
+    "a": 34.63,
+    "b": 54.69,
+    "diff": 20.06,
+    "ci95": [
+     15.86,
+     24.76
+    ]
+   },
+   "object_abs_distance": {
+    "n": 834,
+    "a": 22.6,
+    "b": 33.92,
+    "diff": 11.32,
+    "ci95": [
+     8.5,
+     14.26
+    ]
+   },
+   "object_counting": {
+    "n": 565,
+    "a": 41.35,
+    "b": 52.92,
+    "diff": 11.58,
+    "ci95": [
+     8.8,
+     14.57
+    ]
+   },
+   "object_rel_direction_easy": {
+    "n": 217,
+    "a": 46.54,
+    "b": 49.31,
+    "diff": 2.76,
+    "ci95": [
+     -3.69,
+     9.22
+    ]
+   },
+   "object_rel_direction_hard": {
+    "n": 373,
+    "a": 30.03,
+    "b": 42.9,
+    "diff": 12.87,
+    "ci95": [
+     8.04,
+     17.69
+    ]
+   },
+   "object_rel_direction_medium": {
+    "n": 378,
+    "a": 43.92,
+    "b": 45.5,
+    "diff": 1.59,
+    "ci95": [
+     -2.65,
+     5.82
+    ]
+   },
+   "object_rel_distance": {
+    "n": 710,
+    "a": 37.32,
+    "b": 41.13,
+    "diff": 3.8,
+    "ci95": [
+     -0.14,
+     7.75
+    ]
+   },
+   "object_size_estimation": {
+    "n": 953,
+    "a": 49.0,
+    "b": 59.54,
+    "diff": 10.54,
+    "ci95": [
+     7.99,
+     13.24
+    ]
+   },
+   "room_size_estimation": {
+    "n": 288,
+    "a": 46.18,
+    "b": 32.47,
+    "diff": -13.72,
+    "ci95": [
+     -19.97,
+     -7.74
+    ]
+   },
+   "route_planning": {
+    "n": 194,
+    "a": 29.38,
+    "b": 29.38,
+    "diff": 0.0,
+    "ci95": [
+     -6.19,
+     6.19
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSTI-Bench",
+  "model_a": "base-7B",
+  "model_b": "ViLASR-7B",
+  "n": 5736,
+  "rule": "vsti5",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 41.47,
+  "b": 47.06,
+  "diff": 5.6,
+  "ci95": [
+   4.41,
+   6.78
+  ],
+  "per_type": {
+   "camera_obj_abs_dist": {
+    "n": 905,
+    "a": 31.06,
+    "b": 37.16,
+    "diff": 6.1,
+    "ci95": [
+     2.75,
+     9.5
+    ]
+   },
+   "camera_displacement": {
+    "n": 833,
+    "a": 9.17,
+    "b": 15.47,
+    "diff": 6.3,
+    "ci95": [
+     3.67,
+     8.93
+    ]
+   },
+   "camera_movement_direction": {
+    "n": 913,
+    "a": 45.13,
+    "b": 48.41,
+    "diff": 3.29,
+    "ci95": [
+     0.66,
+     5.91
+    ]
+   },
+   "obj_obj_relative_pos": {
+    "n": 1645,
+    "a": 68.09,
+    "b": 66.08,
+    "diff": -2.01,
+    "ci95": [
+     -3.89,
+     -0.12
+    ]
+   },
+   "camera_obj_rel_dist": {
+    "n": 1440,
+    "a": 53.89,
+    "b": 68.19,
+    "diff": 14.31,
+    "ci95": [
+     11.81,
+     16.67
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MMSI",
+  "model_a": "base-7B",
+  "model_b": "ViLASR-7B",
+  "n": 1000,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 28.0,
+  "b": 30.7,
+  "diff": 2.7,
+  "ci95": [
+   -0.4,
+   5.6
+  ],
+  "only_a": 97,
+  "only_b": 124,
+  "mcnemar_p": 0.08006472482025578,
+  "per_type": {
+   "Attr-Appr": {
+    "n": 66,
+    "a": 21.21,
+    "b": 16.67,
+    "diff": -4.55,
+    "ci95": [
+     -10.61,
+     1.52
+    ]
+   },
+   "Attr-Meas": {
+    "n": 64,
+    "a": 26.56,
+    "b": 29.69,
+    "diff": 3.12,
+    "ci95": [
+     -6.25,
+     14.06
+    ]
+   },
+   "MSR": {
+    "n": 198,
+    "a": 26.77,
+    "b": 23.74,
+    "diff": -3.03,
+    "ci95": [
+     -9.6,
+     4.04
+    ]
+   },
+   "Motion-Cam": {
+    "n": 74,
+    "a": 21.62,
+    "b": 17.57,
+    "diff": -4.05,
+    "ci95": [
+     -13.51,
+     5.41
+    ]
+   },
+   "Motion-Obj": {
+    "n": 76,
+    "a": 32.89,
+    "b": 32.89,
+    "diff": 0.0,
+    "ci95": [
+     -9.21,
+     9.21
+    ]
+   },
+   "Pos-Cam-Cam": {
+    "n": 93,
+    "a": 30.11,
+    "b": 31.18,
+    "diff": 1.08,
+    "ci95": [
+     -8.6,
+     10.75
+    ]
+   },
+   "Pos-Cam-Obj": {
+    "n": 86,
+    "a": 32.56,
+    "b": 39.53,
+    "diff": 6.98,
+    "ci95": [
+     -3.49,
+     16.28
+    ]
+   },
+   "Pos-Cam-Reg": {
+    "n": 83,
+    "a": 30.12,
+    "b": 44.58,
+    "diff": 14.46,
+    "ci95": [
+     2.41,
+     27.71
+    ]
+   },
+   "Pos-Obj-Obj": {
+    "n": 94,
+    "a": 25.53,
+    "b": 35.11,
+    "diff": 9.57,
+    "ci95": [
+     0.0,
+     19.18
+    ]
+   },
+   "Pos-Obj-Reg": {
+    "n": 85,
+    "a": 38.82,
+    "b": 42.35,
+    "diff": 3.53,
+    "ci95": [
+     -8.26,
+     15.29
+    ]
+   },
+   "Pos-Reg-Reg": {
+    "n": 81,
+    "a": 20.99,
+    "b": 28.4,
+    "diff": 7.41,
+    "ci95": [
+     -1.23,
+     16.05
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SPBench-MV",
+  "model_a": "base-7B",
+  "model_b": "ViLASR-7B",
+  "n": 319,
+  "rule": "types",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 42.68,
+  "b": 58.23,
+  "diff": 15.54,
+  "ci95": [
+   9.93,
+   20.98
+  ],
+  "per_type": {
+   "object_abs_distance": {
+    "n": 30,
+    "a": 10.0,
+    "b": 33.33,
+    "diff": 23.33,
+    "ci95": [
+     7.32,
+     39.33
+    ]
+   },
+   "object_counting": {
+    "n": 70,
+    "a": 51.43,
+    "b": 69.57,
+    "diff": 18.14,
+    "ci95": [
+     8.43,
+     27.57
+    ]
+   },
+   "object_rel_direction": {
+    "n": 44,
+    "a": 15.91,
+    "b": 25.0,
+    "diff": 9.09,
+    "ci95": [
+     -6.82,
+     25.0
+    ]
+   },
+   "object_rel_distance": {
+    "n": 17,
+    "a": 100.0,
+    "b": 94.12,
+    "diff": -5.88,
+    "ci95": [
+     -17.65,
+     0.0
+    ]
+   },
+   "object_size_estimation": {
+    "n": 158,
+    "a": 36.08,
+    "b": 69.11,
+    "diff": 33.04,
+    "ci95": [
+     26.77,
+     39.11
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Real",
+  "model_a": "base-7B",
+  "model_b": "VST-7B-RL",
+  "n": 150,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 58.0,
+  "b": 55.33,
+  "diff": -2.67,
+  "ci95": [
+   -12.67,
+   8.0
+  ],
+  "only_a": 35,
+  "only_b": 31,
+  "mcnemar_p": 0.7122308826373508,
+  "per_type": {
+   "all": {
+    "n": 150,
+    "a": 58.0,
+    "b": 55.33,
+    "diff": -2.67,
+    "ci95": [
+     -12.67,
+     8.0
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Syn",
+  "model_a": "base-7B",
+  "model_b": "VST-7B-RL",
+  "n": 4001,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 59.09,
+  "b": 64.33,
+  "diff": 5.25,
+  "ci95": [
+   3.47,
+   6.82
+  ],
+  "only_a": 484,
+  "only_b": 694,
+  "mcnemar_p": 1.0273001621998902e-09,
+  "per_type": {
+   "all": {
+    "n": 4001,
+    "a": 59.09,
+    "b": 64.33,
+    "diff": 5.25,
+    "ci95": [
+     3.47,
+     6.82
+    ]
+   }
+  }
+ },
+ {
+  "bench": "ViewSpatial",
+  "model_a": "base-7B",
+  "model_b": "VST-7B-RL",
+  "n": 5712,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.66,
+  "b": 49.91,
+  "diff": 12.25,
+  "ci95": [
+   10.91,
+   13.64
+  ],
+  "only_a": 532,
+  "only_b": 1232,
+  "mcnemar_p": 7.089794955399885e-64,
+  "per_type": {
+   "Camera perspective - Object View Orientation": {
+    "n": 996,
+    "a": 30.72,
+    "b": 25.1,
+    "diff": -5.62,
+    "ci95": [
+     -8.13,
+     -3.21
+    ]
+   },
+   "Camera perspective - Relative Direction": {
+    "n": 1773,
+    "a": 46.93,
+    "b": 52.28,
+    "diff": 5.36,
+    "ci95": [
+     3.05,
+     7.61
+    ]
+   },
+   "Person perspective - Object View Orientation": {
+    "n": 996,
+    "a": 39.96,
+    "b": 55.32,
+    "diff": 15.36,
+    "ci95": [
+     11.95,
+     18.88
+    ]
+   },
+   "Person perspective - Relative Direction": {
+    "n": 842,
+    "a": 35.87,
+    "b": 48.93,
+    "diff": 13.06,
+    "ci95": [
+     9.38,
+     16.39
+    ]
+   },
+   "Person perspective - Scene Simulation Relative Direction": {
+    "n": 1105,
+    "a": 28.33,
+    "b": 64.34,
+    "diff": 36.02,
+    "ci95": [
+     32.22,
+     39.82
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube-Tiny",
+  "model_a": "base-7B",
+  "model_b": "VST-7B-RL",
+  "n": 1040,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 34.23,
+  "b": 40.87,
+  "diff": 6.63,
+  "ci95": [
+   3.27,
+   9.91
+  ],
+  "only_a": 131,
+  "only_b": 200,
+  "mcnemar_p": 0.00017682609071657305,
+  "per_type": {
+   "among": {
+    "n": 590,
+    "a": 30.68,
+    "b": 38.14,
+    "diff": 7.46,
+    "ci95": [
+     3.05,
+     11.69
+    ]
+   },
+   "around": {
+    "n": 250,
+    "a": 41.6,
+    "b": 49.6,
+    "diff": 8.0,
+    "ci95": [
+     0.4,
+     15.2
+    ]
+   },
+   "rotation": {
+    "n": 200,
+    "a": 35.5,
+    "b": 38.0,
+    "diff": 2.5,
+    "ci95": [
+     -6.0,
+     11.5
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube",
+  "model_a": "base-7B",
+  "model_b": "VST-7B-RL",
+  "n": 21154,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 29.38,
+  "b": 37.27,
+  "diff": 7.89,
+  "ci95": [
+   7.18,
+   8.62
+  ],
+  "only_a": 2230,
+  "only_b": 3899,
+  "mcnemar_p": 5.564536532806741e-102,
+  "per_type": {
+   "among": {
+    "n": 18204,
+    "a": 29.22,
+    "b": 37.97,
+    "diff": 8.75,
+    "ci95": [
+     7.96,
+     9.53
+    ]
+   },
+   "around": {
+    "n": 1869,
+    "a": 27.45,
+    "b": 30.07,
+    "diff": 2.62,
+    "ci95": [
+     0.43,
+     4.87
+    ]
+   },
+   "rotation": {
+    "n": 1081,
+    "a": 35.43,
+    "b": 38.02,
+    "diff": 2.59,
+    "ci95": [
+     -0.83,
+     5.92
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSI-Bench",
+  "model_a": "base-7B",
+  "model_b": "VST-7B-RL",
+  "n": 5130,
+  "rule": "vsi8",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.58,
+  "b": 56.01,
+  "diff": 18.43,
+  "ci95": [
+   16.59,
+   20.26
+  ],
+  "per_type": {
+   "obj_appearance_order": {
+    "n": 618,
+    "a": 34.63,
+    "b": 61.49,
+    "diff": 26.86,
+    "ci95": [
+     21.84,
+     31.88
+    ]
+   },
+   "object_abs_distance": {
+    "n": 834,
+    "a": 22.6,
+    "b": 41.41,
+    "diff": 18.81,
+    "ci95": [
+     15.52,
+     21.99
+    ]
+   },
+   "object_counting": {
+    "n": 565,
+    "a": 41.35,
+    "b": 64.76,
+    "diff": 23.42,
+    "ci95": [
+     19.59,
+     27.36
+    ]
+   },
+   "object_rel_direction_easy": {
+    "n": 217,
+    "a": 46.54,
+    "b": 53.0,
+    "diff": 6.45,
+    "ci95": [
+     -1.85,
+     16.13
+    ]
+   },
+   "object_rel_direction_hard": {
+    "n": 373,
+    "a": 30.03,
+    "b": 45.04,
+    "diff": 15.01,
+    "ci95": [
+     7.51,
+     22.79
+    ]
+   },
+   "object_rel_direction_medium": {
+    "n": 378,
+    "a": 43.92,
+    "b": 51.59,
+    "diff": 7.67,
+    "ci95": [
+     2.38,
+     13.23
+    ]
+   },
+   "object_rel_distance": {
+    "n": 710,
+    "a": 37.32,
+    "b": 50.85,
+    "diff": 13.52,
+    "ci95": [
+     8.87,
+     18.17
+    ]
+   },
+   "object_size_estimation": {
+    "n": 953,
+    "a": 49.0,
+    "b": 71.89,
+    "diff": 22.89,
+    "ci95": [
+     20.56,
+     25.45
+    ]
+   },
+   "room_size_estimation": {
+    "n": 288,
+    "a": 46.18,
+    "b": 63.96,
+    "diff": 17.78,
+    "ci95": [
+     13.44,
+     22.22
+    ]
+   },
+   "route_planning": {
+    "n": 194,
+    "a": 29.38,
+    "b": 43.81,
+    "diff": 14.43,
+    "ci95": [
+     4.64,
+     23.71
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSTI-Bench",
+  "model_a": "base-7B",
+  "model_b": "VST-7B-RL",
+  "n": 5736,
+  "rule": "vsti5",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 41.47,
+  "b": 48.6,
+  "diff": 7.14,
+  "ci95": [
+   5.65,
+   8.59
+  ],
+  "per_type": {
+   "camera_obj_abs_dist": {
+    "n": 905,
+    "a": 31.06,
+    "b": 36.87,
+    "diff": 5.81,
+    "ci95": [
+     2.31,
+     9.24
+    ]
+   },
+   "camera_displacement": {
+    "n": 833,
+    "a": 9.17,
+    "b": 24.89,
+    "diff": 15.71,
+    "ci95": [
+     13.08,
+     18.33
+    ]
+   },
+   "camera_movement_direction": {
+    "n": 913,
+    "a": 45.13,
+    "b": 36.69,
+    "diff": -8.43,
+    "ci95": [
+     -12.71,
+     -3.94
+    ]
+   },
+   "obj_obj_relative_pos": {
+    "n": 1645,
+    "a": 68.09,
+    "b": 67.48,
+    "diff": -0.61,
+    "ci95": [
+     -3.28,
+     2.13
+    ]
+   },
+   "camera_obj_rel_dist": {
+    "n": 1440,
+    "a": 53.89,
+    "b": 77.08,
+    "diff": 23.19,
+    "ci95": [
+     20.28,
+     26.04
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MMSI",
+  "model_a": "base-7B",
+  "model_b": "VST-7B-RL",
+  "n": 1000,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 28.0,
+  "b": 33.1,
+  "diff": 5.1,
+  "ci95": [
+   1.6,
+   8.7
+  ],
+  "only_a": 153,
+  "only_b": 204,
+  "mcnemar_p": 0.0080488442546417,
+  "per_type": {
+   "Attr-Appr": {
+    "n": 66,
+    "a": 21.21,
+    "b": 46.97,
+    "diff": 25.76,
+    "ci95": [
+     12.12,
+     40.91
+    ]
+   },
+   "Attr-Meas": {
+    "n": 64,
+    "a": 26.56,
+    "b": 37.5,
+    "diff": 10.94,
+    "ci95": [
+     -1.56,
+     25.0
+    ]
+   },
+   "MSR": {
+    "n": 198,
+    "a": 26.77,
+    "b": 19.19,
+    "diff": -7.58,
+    "ci95": [
+     -15.15,
+     0.0
+    ]
+   },
+   "Motion-Cam": {
+    "n": 74,
+    "a": 21.62,
+    "b": 31.08,
+    "diff": 9.46,
+    "ci95": [
+     0.0,
+     20.27
+    ]
+   },
+   "Motion-Obj": {
+    "n": 76,
+    "a": 32.89,
+    "b": 32.89,
+    "diff": 0.0,
+    "ci95": [
+     -13.19,
+     14.47
+    ]
+   },
+   "Pos-Cam-Cam": {
+    "n": 93,
+    "a": 30.11,
+    "b": 34.41,
+    "diff": 4.3,
+    "ci95": [
+     -8.6,
+     17.2
+    ]
+   },
+   "Pos-Cam-Obj": {
+    "n": 86,
+    "a": 32.56,
+    "b": 34.88,
+    "diff": 2.33,
+    "ci95": [
+     -10.49,
+     15.12
+    ]
+   },
+   "Pos-Cam-Reg": {
+    "n": 83,
+    "a": 30.12,
+    "b": 40.96,
+    "diff": 10.84,
+    "ci95": [
+     -4.82,
+     25.3
+    ]
+   },
+   "Pos-Obj-Obj": {
+    "n": 94,
+    "a": 25.53,
+    "b": 36.17,
+    "diff": 10.64,
+    "ci95": [
+     -1.06,
+     23.4
+    ]
+   },
+   "Pos-Obj-Reg": {
+    "n": 85,
+    "a": 38.82,
+    "b": 35.29,
+    "diff": -3.53,
+    "ci95": [
+     -16.47,
+     8.26
+    ]
+   },
+   "Pos-Reg-Reg": {
+    "n": 81,
+    "a": 20.99,
+    "b": 37.04,
+    "diff": 16.05,
+    "ci95": [
+     2.47,
+     30.86
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SPBench-MV",
+  "model_a": "base-7B",
+  "model_b": "VST-7B-RL",
+  "n": 319,
+  "rule": "types",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 42.68,
+  "b": 66.18,
+  "diff": 23.5,
+  "ci95": [
+   17.48,
+   29.43
+  ],
+  "per_type": {
+   "object_abs_distance": {
+    "n": 30,
+    "a": 10.0,
+    "b": 33.67,
+    "diff": 23.67,
+    "ci95": [
+     9.32,
+     38.33
+    ]
+   },
+   "object_counting": {
+    "n": 70,
+    "a": 51.43,
+    "b": 76.86,
+    "diff": 25.43,
+    "ci95": [
+     13.43,
+     37.71
+    ]
+   },
+   "object_rel_direction": {
+    "n": 44,
+    "a": 15.91,
+    "b": 54.55,
+    "diff": 38.64,
+    "ci95": [
+     20.4,
+     56.82
+    ]
+   },
+   "object_rel_distance": {
+    "n": 17,
+    "a": 100.0,
+    "b": 94.12,
+    "diff": -5.88,
+    "ci95": [
+     -17.65,
+     0.0
+    ]
+   },
+   "object_size_estimation": {
+    "n": 158,
+    "a": 36.08,
+    "b": 71.71,
+    "diff": 35.63,
+    "ci95": [
+     29.18,
+     41.77
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Real",
+  "model_a": "base-7B",
+  "model_b": "SenseNovaSI-7B",
+  "n": 150,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 58.0,
+  "b": 61.33,
+  "diff": 3.33,
+  "ci95": [
+   -5.33,
+   12.0
+  ],
+  "only_a": 19,
+  "only_b": 24,
+  "mcnemar_p": 0.542384011856484,
+  "per_type": {
+   "all": {
+    "n": 150,
+    "a": 58.0,
+    "b": 61.33,
+    "diff": 3.33,
+    "ci95": [
+     -5.33,
+     12.0
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Syn",
+  "model_a": "base-7B",
+  "model_b": "SenseNovaSI-7B",
+  "n": 4001,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 59.09,
+  "b": 58.76,
+  "diff": -0.32,
+  "ci95": [
+   -2.1,
+   1.45
+  ],
+  "only_a": 681,
+  "only_b": 668,
+  "mcnemar_p": 0.7438935808659136,
+  "per_type": {
+   "all": {
+    "n": 4001,
+    "a": 59.09,
+    "b": 58.76,
+    "diff": -0.32,
+    "ci95": [
+     -2.1,
+     1.45
+    ]
+   }
+  }
+ },
+ {
+  "bench": "ViewSpatial",
+  "model_a": "base-7B",
+  "model_b": "SenseNovaSI-7B",
+  "n": 5712,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.66,
+  "b": 45.1,
+  "diff": 7.44,
+  "ci95": [
+   6.23,
+   8.67
+  ],
+  "only_a": 450,
+  "only_b": 875,
+  "mcnemar_p": 7.005773180691567e-32,
+  "per_type": {
+   "Camera perspective - Object View Orientation": {
+    "n": 996,
+    "a": 30.72,
+    "b": 27.81,
+    "diff": -2.91,
+    "ci95": [
+     -5.32,
+     -0.6
+    ]
+   },
+   "Camera perspective - Relative Direction": {
+    "n": 1773,
+    "a": 46.93,
+    "b": 46.36,
+    "diff": -0.56,
+    "ci95": [
+     -2.54,
+     1.41
+    ]
+   },
+   "Person perspective - Object View Orientation": {
+    "n": 996,
+    "a": 39.96,
+    "b": 56.73,
+    "diff": 16.77,
+    "ci95": [
+     13.96,
+     19.58
+    ]
+   },
+   "Person perspective - Relative Direction": {
+    "n": 842,
+    "a": 35.87,
+    "b": 42.4,
+    "diff": 6.53,
+    "ci95": [
+     3.8,
+     9.14
+    ]
+   },
+   "Person perspective - Scene Simulation Relative Direction": {
+    "n": 1105,
+    "a": 28.33,
+    "b": 50.23,
+    "diff": 21.9,
+    "ci95": [
+     18.1,
+     25.88
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube-Tiny",
+  "model_a": "base-7B",
+  "model_b": "SenseNovaSI-7B",
+  "n": 1040,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 34.23,
+  "b": 53.75,
+  "diff": 19.52,
+  "ci95": [
+   16.06,
+   23.37
+  ],
+  "only_a": 106,
+  "only_b": 309,
+  "mcnemar_p": 4.1320717882607886e-24,
+  "per_type": {
+   "among": {
+    "n": 590,
+    "a": 30.68,
+    "b": 53.9,
+    "diff": 23.22,
+    "ci95": [
+     18.81,
+     27.97
+    ]
+   },
+   "around": {
+    "n": 250,
+    "a": 41.6,
+    "b": 65.2,
+    "diff": 23.6,
+    "ci95": [
+     16.0,
+     31.2
+    ]
+   },
+   "rotation": {
+    "n": 200,
+    "a": 35.5,
+    "b": 39.0,
+    "diff": 3.5,
+    "ci95": [
+     -5.0,
+     12.5
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube",
+  "model_a": "base-7B",
+  "model_b": "SenseNovaSI-7B",
+  "n": 21154,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 29.38,
+  "b": 56.61,
+  "diff": 27.23,
+  "ci95": [
+   26.49,
+   28.07
+  ],
+  "only_a": 1787,
+  "only_b": 7547,
+  "mcnemar_p": 0.0,
+  "per_type": {
+   "among": {
+    "n": 18204,
+    "a": 29.22,
+    "b": 54.97,
+    "diff": 25.75,
+    "ci95": [
+     24.9,
+     26.65
+    ]
+   },
+   "around": {
+    "n": 1869,
+    "a": 27.45,
+    "b": 81.27,
+    "diff": 53.83,
+    "ci95": [
+     51.1,
+     56.5
+    ]
+   },
+   "rotation": {
+    "n": 1081,
+    "a": 35.43,
+    "b": 41.63,
+    "diff": 6.2,
+    "ci95": [
+     2.87,
+     9.34
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSI-Bench",
+  "model_a": "base-7B",
+  "model_b": "SenseNovaSI-7B",
+  "n": 5130,
+  "rule": "vsi8",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 37.58,
+  "b": 49.58,
+  "diff": 12.0,
+  "ci95": [
+   10.35,
+   13.58
+  ],
+  "per_type": {
+   "obj_appearance_order": {
+    "n": 618,
+    "a": 34.63,
+    "b": 60.36,
+    "diff": 25.73,
+    "ci95": [
+     21.36,
+     30.1
+    ]
+   },
+   "object_abs_distance": {
+    "n": 834,
+    "a": 22.6,
+    "b": 31.22,
+    "diff": 8.62,
+    "ci95": [
+     5.44,
+     11.76
+    ]
+   },
+   "object_counting": {
+    "n": 565,
+    "a": 41.35,
+    "b": 59.56,
+    "diff": 18.21,
+    "ci95": [
+     14.71,
+     21.82
+    ]
+   },
+   "object_rel_direction_easy": {
+    "n": 217,
+    "a": 46.54,
+    "b": 49.77,
+    "diff": 3.23,
+    "ci95": [
+     -4.15,
+     11.06
+    ]
+   },
+   "object_rel_direction_hard": {
+    "n": 373,
+    "a": 30.03,
+    "b": 44.5,
+    "diff": 14.48,
+    "ci95": [
+     9.12,
+     19.84
+    ]
+   },
+   "object_rel_direction_medium": {
+    "n": 378,
+    "a": 43.92,
+    "b": 48.41,
+    "diff": 4.5,
+    "ci95": [
+     -1.85,
+     10.58
+    ]
+   },
+   "object_rel_distance": {
+    "n": 710,
+    "a": 37.32,
+    "b": 46.34,
+    "diff": 9.01,
+    "ci95": [
+     5.07,
+     12.96
+    ]
+   },
+   "object_size_estimation": {
+    "n": 953,
+    "a": 49.0,
+    "b": 68.46,
+    "diff": 19.45,
+    "ci95": [
+     17.3,
+     21.71
+    ]
+   },
+   "room_size_estimation": {
+    "n": 288,
+    "a": 46.18,
+    "b": 51.18,
+    "diff": 5.0,
+    "ci95": [
+     0.66,
+     9.48
+    ]
+   },
+   "route_planning": {
+    "n": 194,
+    "a": 29.38,
+    "b": 31.96,
+    "diff": 2.58,
+    "ci95": [
+     -6.19,
+     10.82
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSTI-Bench",
+  "model_a": "base-7B",
+  "model_b": "SenseNovaSI-7B",
+  "n": 5736,
+  "rule": "vsti5",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 41.47,
+  "b": 49.79,
+  "diff": 8.33,
+  "ci95": [
+   7.19,
+   9.43
+  ],
+  "per_type": {
+   "camera_obj_abs_dist": {
+    "n": 905,
+    "a": 31.06,
+    "b": 44.59,
+    "diff": 13.52,
+    "ci95": [
+     11.02,
+     16.11
+    ]
+   },
+   "camera_displacement": {
+    "n": 833,
+    "a": 9.17,
+    "b": 23.4,
+    "diff": 14.23,
+    "ci95": [
+     12.06,
+     16.46
+    ]
+   },
+   "camera_movement_direction": {
+    "n": 913,
+    "a": 45.13,
+    "b": 45.45,
+    "diff": 0.33,
+    "ci95": [
+     -2.74,
+     3.29
+    ]
+   },
+   "obj_obj_relative_pos": {
+    "n": 1645,
+    "a": 68.09,
+    "b": 67.54,
+    "diff": -0.55,
+    "ci95": [
+     -2.8,
+     1.64
+    ]
+   },
+   "camera_obj_rel_dist": {
+    "n": 1440,
+    "a": 53.89,
+    "b": 67.99,
+    "diff": 14.1,
+    "ci95": [
+     11.6,
+     16.6
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MMSI",
+  "model_a": "base-7B",
+  "model_b": "SenseNovaSI-7B",
+  "n": 1000,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 28.0,
+  "b": 32.6,
+  "diff": 4.6,
+  "ci95": [
+   1.4,
+   7.8
+  ],
+  "only_a": 121,
+  "only_b": 167,
+  "mcnemar_p": 0.00789992103466456,
+  "per_type": {
+   "Attr-Appr": {
+    "n": 66,
+    "a": 21.21,
+    "b": 30.3,
+    "diff": 9.09,
+    "ci95": [
+     -3.03,
+     21.21
+    ]
+   },
+   "Attr-Meas": {
+    "n": 64,
+    "a": 26.56,
+    "b": 34.38,
+    "diff": 7.81,
+    "ci95": [
+     -4.69,
+     20.35
+    ]
+   },
+   "MSR": {
+    "n": 198,
+    "a": 26.77,
+    "b": 16.16,
+    "diff": -10.61,
+    "ci95": [
+     -17.68,
+     -4.04
+    ]
+   },
+   "Motion-Cam": {
+    "n": 74,
+    "a": 21.62,
+    "b": 27.03,
+    "diff": 5.41,
+    "ci95": [
+     -4.05,
+     16.22
+    ]
+   },
+   "Motion-Obj": {
+    "n": 76,
+    "a": 32.89,
+    "b": 39.47,
+    "diff": 6.58,
+    "ci95": [
+     -3.95,
+     17.11
+    ]
+   },
+   "Pos-Cam-Cam": {
+    "n": 93,
+    "a": 30.11,
+    "b": 49.46,
+    "diff": 19.35,
+    "ci95": [
+     9.65,
+     30.11
+    ]
+   },
+   "Pos-Cam-Obj": {
+    "n": 86,
+    "a": 32.56,
+    "b": 50.0,
+    "diff": 17.44,
+    "ci95": [
+     4.65,
+     30.23
+    ]
+   },
+   "Pos-Cam-Reg": {
+    "n": 83,
+    "a": 30.12,
+    "b": 39.76,
+    "diff": 9.64,
+    "ci95": [
+     -2.41,
+     21.69
+    ]
+   },
+   "Pos-Obj-Obj": {
+    "n": 94,
+    "a": 25.53,
+    "b": 31.91,
+    "diff": 6.38,
+    "ci95": [
+     -4.26,
+     17.05
+    ]
+   },
+   "Pos-Obj-Reg": {
+    "n": 85,
+    "a": 38.82,
+    "b": 28.24,
+    "diff": -10.59,
+    "ci95": [
+     -23.53,
+     2.35
+    ]
+   },
+   "Pos-Reg-Reg": {
+    "n": 81,
+    "a": 20.99,
+    "b": 32.1,
+    "diff": 11.11,
+    "ci95": [
+     0.0,
+     22.22
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SPBench-MV",
+  "model_a": "base-7B",
+  "model_b": "SenseNovaSI-7B",
+  "n": 319,
+  "rule": "types",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 42.68,
+  "b": 60.0,
+  "diff": 17.32,
+  "ci95": [
+   12.1,
+   22.4
+  ],
+  "per_type": {
+   "object_abs_distance": {
+    "n": 30,
+    "a": 10.0,
+    "b": 28.0,
+    "diff": 18.0,
+    "ci95": [
+     5.33,
+     31.33
+    ]
+   },
+   "object_counting": {
+    "n": 70,
+    "a": 51.43,
+    "b": 73.86,
+    "diff": 22.43,
+    "ci95": [
+     11.86,
+     34.14
+    ]
+   },
+   "object_rel_direction": {
+    "n": 44,
+    "a": 15.91,
+    "b": 31.82,
+    "diff": 15.91,
+    "ci95": [
+     0.0,
+     31.82
+    ]
+   },
+   "object_rel_distance": {
+    "n": 17,
+    "a": 100.0,
+    "b": 94.12,
+    "diff": -5.88,
+    "ci95": [
+     -17.65,
+     0.0
+    ]
+   },
+   "object_size_estimation": {
+    "n": 158,
+    "a": 36.08,
+    "b": 72.22,
+    "diff": 36.14,
+    "ci95": [
+     30.44,
+     41.58
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Real",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 150,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 50.0,
+  "b": 64.0,
+  "diff": 14.0,
+  "ci95": [
+   4.0,
+   24.02
+  ],
+  "only_a": 19,
+  "only_b": 40,
+  "mcnemar_p": 0.008641499683281734,
+  "per_type": {
+   "all": {
+    "n": 150,
+    "a": 50.0,
+    "b": 64.0,
+    "diff": 14.0,
+    "ci95": [
+     4.0,
+     24.02
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SAT-Syn",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 4001,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 54.64,
+  "b": 50.46,
+  "diff": -4.17,
+  "ci95": [
+   -6.22,
+   -2.12
+  ],
+  "only_a": 953,
+  "only_b": 786,
+  "mcnemar_p": 6.789888652065184e-05,
+  "per_type": {
+   "all": {
+    "n": 4001,
+    "a": 54.64,
+    "b": 50.46,
+    "diff": -4.17,
+    "ci95": [
+     -6.22,
+     -2.12
+    ]
+   }
+  }
+ },
+ {
+  "bench": "ViewSpatial",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 5712,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 35.73,
+  "b": 44.7,
+  "diff": 8.96,
+  "ci95": [
+   7.53,
+   10.42
+  ],
+  "only_a": 648,
+  "only_b": 1160,
+  "mcnemar_p": 1.0621492407714956e-33,
+  "per_type": {
+   "Camera perspective - Object View Orientation": {
+    "n": 996,
+    "a": 31.43,
+    "b": 35.04,
+    "diff": 3.61,
+    "ci95": [
+     0.3,
+     7.03
+    ]
+   },
+   "Camera perspective - Relative Direction": {
+    "n": 1773,
+    "a": 43.6,
+    "b": 52.74,
+    "diff": 9.14,
+    "ci95": [
+     6.54,
+     11.62
+    ]
+   },
+   "Person perspective - Object View Orientation": {
+    "n": 996,
+    "a": 39.06,
+    "b": 61.85,
+    "diff": 22.79,
+    "ci95": [
+     19.08,
+     26.31
+    ]
+   },
+   "Person perspective - Relative Direction": {
+    "n": 842,
+    "a": 32.42,
+    "b": 29.45,
+    "diff": -2.97,
+    "ci95": [
+     -5.94,
+     0.24
+    ]
+   },
+   "Person perspective - Scene Simulation Relative Direction": {
+    "n": 1105,
+    "a": 26.52,
+    "b": 36.65,
+    "diff": 10.14,
+    "ci95": [
+     6.7,
+     13.67
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube-Tiny",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 1040,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 41.54,
+  "b": 60.19,
+  "diff": 18.65,
+  "ci95": [
+   14.52,
+   22.69
+  ],
+  "only_a": 158,
+  "only_b": 352,
+  "mcnemar_p": 5.043576024157083e-18,
+  "per_type": {
+   "among": {
+    "n": 590,
+    "a": 42.88,
+    "b": 62.54,
+    "diff": 19.66,
+    "ci95": [
+     14.23,
+     24.58
+    ]
+   },
+   "around": {
+    "n": 250,
+    "a": 46.0,
+    "b": 68.4,
+    "diff": 22.4,
+    "ci95": [
+     14.0,
+     30.4
+    ]
+   },
+   "rotation": {
+    "n": 200,
+    "a": 32.0,
+    "b": 43.0,
+    "diff": 11.0,
+    "ci95": [
+     0.5,
+     21.0
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MindCube",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 21154,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 39.77,
+  "b": 66.6,
+  "diff": 26.82,
+  "ci95": [
+   25.97,
+   27.72
+  ],
+  "only_a": 2673,
+  "only_b": 8347,
+  "mcnemar_p": 0.0,
+  "per_type": {
+   "among": {
+    "n": 18204,
+    "a": 40.78,
+    "b": 66.02,
+    "diff": 25.24,
+    "ci95": [
+     24.32,
+     26.22
+    ]
+   },
+   "around": {
+    "n": 1869,
+    "a": 33.12,
+    "b": 84.06,
+    "diff": 50.94,
+    "ci95": [
+     48.05,
+     53.83
+    ]
+   },
+   "rotation": {
+    "n": 1081,
+    "a": 34.32,
+    "b": 46.16,
+    "diff": 11.84,
+    "ci95": [
+     7.31,
+     16.47
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSI-Bench",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 5130,
+  "rule": "vsi8",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 26.82,
+  "b": 49.33,
+  "diff": 22.51,
+  "ci95": [
+   20.8,
+   24.26
+  ],
+  "per_type": {
+   "obj_appearance_order": {
+    "n": 618,
+    "a": 29.13,
+    "b": 68.12,
+    "diff": 39.0,
+    "ci95": [
+     33.98,
+     44.01
+    ]
+   },
+   "object_abs_distance": {
+    "n": 834,
+    "a": 21.74,
+    "b": 29.32,
+    "diff": 7.58,
+    "ci95": [
+     4.74,
+     10.45
+    ]
+   },
+   "object_counting": {
+    "n": 565,
+    "a": 17.42,
+    "b": 64.92,
+    "diff": 47.5,
+    "ci95": [
+     43.68,
+     51.15
+    ]
+   },
+   "object_rel_direction_easy": {
+    "n": 217,
+    "a": 49.31,
+    "b": 51.15,
+    "diff": 1.84,
+    "ci95": [
+     -7.37,
+     10.6
+    ]
+   },
+   "object_rel_direction_hard": {
+    "n": 373,
+    "a": 36.73,
+    "b": 42.9,
+    "diff": 6.17,
+    "ci95": [
+     0.54,
+     12.06
+    ]
+   },
+   "object_rel_direction_medium": {
+    "n": 378,
+    "a": 39.95,
+    "b": 46.3,
+    "diff": 6.35,
+    "ci95": [
+     -1.32,
+     14.02
+    ]
+   },
+   "object_rel_distance": {
+    "n": 710,
+    "a": 33.66,
+    "b": 50.28,
+    "diff": 16.62,
+    "ci95": [
+     11.97,
+     21.27
+    ]
+   },
+   "object_size_estimation": {
+    "n": 953,
+    "a": 15.08,
+    "b": 59.64,
+    "diff": 44.56,
+    "ci95": [
+     41.93,
+     47.16
+    ]
+   },
+   "room_size_estimation": {
+    "n": 288,
+    "a": 27.19,
+    "b": 44.13,
+    "diff": 16.94,
+    "ci95": [
+     12.22,
+     21.91
+    ]
+   },
+   "route_planning": {
+    "n": 194,
+    "a": 28.35,
+    "b": 31.44,
+    "diff": 3.09,
+    "ci95": [
+     -5.67,
+     11.34
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSTI-Bench",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 5736,
+  "rule": "vsti5",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 40.25,
+  "b": 50.43,
+  "diff": 10.18,
+  "ci95": [
+   8.83,
+   11.53
+  ],
+  "per_type": {
+   "camera_obj_abs_dist": {
+    "n": 905,
+    "a": 14.19,
+    "b": 33.54,
+    "diff": 19.35,
+    "ci95": [
+     16.85,
+     21.83
+    ]
+   },
+   "camera_displacement": {
+    "n": 833,
+    "a": 21.56,
+    "b": 28.6,
+    "diff": 7.03,
+    "ci95": [
+     3.93,
+     10.41
+    ]
+   },
+   "camera_movement_direction": {
+    "n": 913,
+    "a": 48.08,
+    "b": 44.03,
+    "diff": -4.05,
+    "ci95": [
+     -7.45,
+     -0.66
+    ]
+   },
+   "obj_obj_relative_pos": {
+    "n": 1645,
+    "a": 57.69,
+    "b": 74.59,
+    "diff": 16.9,
+    "ci95": [
+     13.98,
+     19.82
+    ]
+   },
+   "camera_obj_rel_dist": {
+    "n": 1440,
+    "a": 59.72,
+    "b": 71.39,
+    "diff": 11.67,
+    "ci95": [
+     8.61,
+     14.65
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSTI-Bench-prefix",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 6042,
+  "rule": "vsti5",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 39.77,
+  "b": 48.56,
+  "diff": 8.79,
+  "ci95": [
+   7.45,
+   10.13
+  ],
+  "per_type": {
+   "camera_obj_abs_dist": {
+    "n": 905,
+    "a": 15.7,
+    "b": 24.02,
+    "diff": 8.32,
+    "ci95": [
+     5.66,
+     10.87
+    ]
+   },
+   "camera_displacement": {
+    "n": 839,
+    "a": 25.29,
+    "b": 32.68,
+    "diff": 7.39,
+    "ci95": [
+     3.75,
+     10.82
+    ]
+   },
+   "camera_movement_direction": {
+    "n": 913,
+    "a": 48.08,
+    "b": 44.03,
+    "diff": -4.05,
+    "ci95": [
+     -7.34,
+     -0.77
+    ]
+   },
+   "obj_obj_relative_pos": {
+    "n": 1645,
+    "a": 57.69,
+    "b": 74.59,
+    "diff": 16.9,
+    "ci95": [
+     13.92,
+     20.0
+    ]
+   },
+   "camera_obj_rel_dist": {
+    "n": 1740,
+    "a": 52.07,
+    "b": 67.47,
+    "diff": 15.4,
+    "ci95": [
+     12.59,
+     18.05
+    ]
+   }
+  }
+ },
+ {
+  "bench": "MMSI",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 1000,
+  "rule": "items",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 28.2,
+  "b": 29.0,
+  "diff": 0.8,
+  "ci95": [
+   -2.8,
+   4.1
+  ],
+  "only_a": 159,
+  "only_b": 167,
+  "mcnemar_p": 0.6983050419110266,
+  "per_type": {
+   "Attr-Appr": {
+    "n": 66,
+    "a": 16.67,
+    "b": 25.76,
+    "diff": 9.09,
+    "ci95": [
+     -6.06,
+     22.77
+    ]
+   },
+   "Attr-Meas": {
+    "n": 64,
+    "a": 31.25,
+    "b": 26.56,
+    "diff": -4.69,
+    "ci95": [
+     -17.19,
+     9.38
+    ]
+   },
+   "MSR": {
+    "n": 198,
+    "a": 28.79,
+    "b": 26.26,
+    "diff": -2.53,
+    "ci95": [
+     -10.61,
+     5.56
+    ]
+   },
+   "Motion-Cam": {
+    "n": 74,
+    "a": 16.22,
+    "b": 22.97,
+    "diff": 6.76,
+    "ci95": [
+     -4.05,
+     17.57
+    ]
+   },
+   "Motion-Obj": {
+    "n": 76,
+    "a": 34.21,
+    "b": 22.37,
+    "diff": -11.84,
+    "ci95": [
+     -23.68,
+     0.0
+    ]
+   },
+   "Pos-Cam-Cam": {
+    "n": 93,
+    "a": 34.41,
+    "b": 27.96,
+    "diff": -6.45,
+    "ci95": [
+     -18.28,
+     5.38
+    ]
+   },
+   "Pos-Cam-Obj": {
+    "n": 86,
+    "a": 27.91,
+    "b": 39.53,
+    "diff": 11.63,
+    "ci95": [
+     -1.16,
+     23.26
+    ]
+   },
+   "Pos-Cam-Reg": {
+    "n": 83,
+    "a": 32.53,
+    "b": 36.14,
+    "diff": 3.61,
+    "ci95": [
+     -8.43,
+     15.66
+    ]
+   },
+   "Pos-Obj-Obj": {
+    "n": 94,
+    "a": 29.79,
+    "b": 32.98,
+    "diff": 3.19,
+    "ci95": [
+     -9.57,
+     15.96
+    ]
+   },
+   "Pos-Obj-Reg": {
+    "n": 85,
+    "a": 25.88,
+    "b": 30.59,
+    "diff": 4.71,
+    "ci95": [
+     -8.24,
+     17.65
+    ]
+   },
+   "Pos-Reg-Reg": {
+    "n": 81,
+    "a": 28.4,
+    "b": 28.4,
+    "diff": 0.0,
+    "ci95": [
+     -12.35,
+     11.11
+    ]
+   }
+  }
+ },
+ {
+  "bench": "SPBench-MV",
+  "model_a": "base-3B",
+  "model_b": "SI-3B",
+  "n": 319,
+  "rule": "types",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 40.57,
+  "b": 61.25,
+  "diff": 20.67,
+  "ci95": [
+   13.31,
+   27.54
+  ],
+  "per_type": {
+   "object_abs_distance": {
+    "n": 30,
+    "a": 24.67,
+    "b": 35.33,
+    "diff": 10.67,
+    "ci95": [
+     -6.33,
+     26.33
+    ]
+   },
+   "object_counting": {
+    "n": 70,
+    "a": 50.14,
+    "b": 93.43,
+    "diff": 43.29,
+    "ci95": [
+     32.14,
+     54.15
+    ]
+   },
+   "object_rel_direction": {
+    "n": 44,
+    "a": 22.73,
+    "b": 25.0,
+    "diff": 2.27,
+    "ci95": [
+     -6.82,
+     11.36
+    ]
+   },
+   "object_rel_distance": {
+    "n": 17,
+    "a": 82.35,
+    "b": 88.24,
+    "diff": 5.88,
+    "ci95": [
+     -17.65,
+     29.41
+    ]
+   },
+   "object_size_estimation": {
+    "n": 158,
+    "a": 22.97,
+    "b": 64.24,
+    "diff": 41.27,
+    "ci95": [
+     34.11,
+     47.85
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSI-Bench",
+  "model_a": "SpaceR-7B",
+  "model_b": "SpaceR-7B-ownpx",
+  "n": 5130,
+  "rule": "vsi8",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 44.64,
+  "b": 45.18,
+  "diff": 0.53,
+  "ci95": [
+   -0.2,
+   1.29
+  ],
+  "per_type": {
+   "obj_appearance_order": {
+    "n": 618,
+    "a": 49.51,
+    "b": 52.59,
+    "diff": 3.07,
+    "ci95": [
+     0.16,
+     6.15
+    ]
+   },
+   "object_abs_distance": {
+    "n": 834,
+    "a": 31.75,
+    "b": 30.16,
+    "diff": -1.59,
+    "ci95": [
+     -3.23,
+     -0.04
+    ]
+   },
+   "object_counting": {
+    "n": 565,
+    "a": 49.88,
+    "b": 50.42,
+    "diff": 0.55,
+    "ci95": [
+     -1.43,
+     2.55
+    ]
+   },
+   "object_rel_direction_easy": {
+    "n": 217,
+    "a": 51.15,
+    "b": 48.85,
+    "diff": -2.3,
+    "ci95": [
+     -6.45,
+     1.38
+    ]
+   },
+   "object_rel_direction_hard": {
+    "n": 373,
+    "a": 40.75,
+    "b": 40.21,
+    "diff": -0.54,
+    "ci95": [
+     -2.14,
+     0.8
+    ]
+   },
+   "object_rel_direction_medium": {
+    "n": 378,
+    "a": 46.03,
+    "b": 46.56,
+    "diff": 0.53,
+    "ci95": [
+     -0.53,
+     1.59
+    ]
+   },
+   "object_rel_distance": {
+    "n": 710,
+    "a": 39.3,
+    "b": 40.42,
+    "diff": 1.13,
+    "ci95": [
+     -1.83,
+     4.08
+    ]
+   },
+   "object_size_estimation": {
+    "n": 953,
+    "a": 61.5,
+    "b": 61.83,
+    "diff": 0.33,
+    "ci95": [
+     -0.55,
+     1.25
+    ]
+   },
+   "room_size_estimation": {
+    "n": 288,
+    "a": 47.26,
+    "b": 49.34,
+    "diff": 2.08,
+    "ci95": [
+     -0.21,
+     4.48
+    ]
+   },
+   "route_planning": {
+    "n": 194,
+    "a": 31.96,
+    "b": 31.44,
+    "diff": -0.52,
+    "ci95": [
+     -2.06,
+     1.03
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSI-Bench",
+  "model_a": "VideoR1-7B",
+  "model_b": "VideoR1-7B-ownpx",
+  "n": 5130,
+  "rule": "vsi8",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 32.62,
+  "b": 32.97,
+  "diff": 0.35,
+  "ci95": [
+   -0.52,
+   1.14
+  ],
+  "per_type": {
+   "obj_appearance_order": {
+    "n": 618,
+    "a": 32.2,
+    "b": 35.28,
+    "diff": 3.07,
+    "ci95": [
+     0.49,
+     5.5
+    ]
+   },
+   "object_abs_distance": {
+    "n": 834,
+    "a": 29.77,
+    "b": 29.64,
+    "diff": -0.13,
+    "ci95": [
+     -0.85,
+     0.52
+    ]
+   },
+   "object_counting": {
+    "n": 565,
+    "a": 24.88,
+    "b": 30.16,
+    "diff": 5.27,
+    "ci95": [
+     3.01,
+     7.65
+    ]
+   },
+   "object_rel_direction_easy": {
+    "n": 217,
+    "a": 48.39,
+    "b": 50.69,
+    "diff": 2.3,
+    "ci95": [
+     -2.76,
+     7.37
+    ]
+   },
+   "object_rel_direction_hard": {
+    "n": 373,
+    "a": 21.45,
+    "b": 15.01,
+    "diff": -6.43,
+    "ci95": [
+     -9.92,
+     -3.22
+    ]
+   },
+   "object_rel_direction_medium": {
+    "n": 378,
+    "a": 36.51,
+    "b": 36.77,
+    "diff": 0.26,
+    "ci95": [
+     -2.38,
+     2.91
+    ]
+   },
+   "object_rel_distance": {
+    "n": 710,
+    "a": 38.87,
+    "b": 38.73,
+    "diff": -0.14,
+    "ci95": [
+     -3.24,
+     2.68
+    ]
+   },
+   "object_size_estimation": {
+    "n": 953,
+    "a": 36.23,
+    "b": 35.91,
+    "diff": -0.33,
+    "ci95": [
+     -1.19,
+     0.59
+    ]
+   },
+   "room_size_estimation": {
+    "n": 288,
+    "a": 35.21,
+    "b": 32.08,
+    "diff": -3.12,
+    "ci95": [
+     -4.93,
+     -1.39
+    ]
+   },
+   "route_planning": {
+    "n": 194,
+    "a": 28.35,
+    "b": 27.84,
+    "diff": -0.52,
+    "ci95": [
+     -4.12,
+     3.09
+    ]
+   }
+  }
+ },
+ {
+  "bench": "VSI-Bench",
+  "model_a": "SenseNovaSI-7B",
+  "model_b": "SenseNovaSI-7B-ownpx",
+  "n": 5130,
+  "rule": "vsi8",
+  "rule_reproduces_overall": {
+   "a": true,
+   "b": true
+  },
+  "a": 49.58,
+  "b": 51.34,
+  "diff": 1.77,
+  "ci95": [
+   0.66,
+   2.85
+  ],
+  "per_type": {
+   "obj_appearance_order": {
+    "n": 618,
+    "a": 60.36,
+    "b": 59.39,
+    "diff": -0.97,
+    "ci95": [
+     -4.53,
+     2.59
+    ]
+   },
+   "object_abs_distance": {
+    "n": 834,
+    "a": 31.22,
+    "b": 36.02,
+    "diff": 4.8,
+    "ci95": [
+     2.66,
+     6.8
+    ]
+   },
+   "object_counting": {
+    "n": 565,
+    "a": 59.56,
+    "b": 60.92,
+    "diff": 1.36,
+    "ci95": [
+     -1.27,
+     3.86
+    ]
+   },
+   "object_rel_direction_easy": {
+    "n": 217,
+    "a": 49.77,
+    "b": 50.23,
+    "diff": 0.46,
+    "ci95": [
+     -7.37,
+     8.76
+    ]
+   },
+   "object_rel_direction_hard": {
+    "n": 373,
+    "a": 44.5,
+    "b": 44.24,
+    "diff": -0.27,
+    "ci95": [
+     -3.75,
+     2.95
+    ]
+   },
+   "object_rel_direction_medium": {
+    "n": 378,
+    "a": 48.41,
+    "b": 48.15,
+    "diff": -0.26,
+    "ci95": [
+     -4.5,
+     3.97
+    ]
+   },
+   "object_rel_distance": {
+    "n": 710,
+    "a": 46.34,
+    "b": 46.76,
+    "diff": 0.42,
+    "ci95": [
+     -3.1,
+     3.94
+    ]
+   },
+   "object_size_estimation": {
+    "n": 953,
+    "a": 68.46,
+    "b": 67.53,
+    "diff": -0.92,
+    "ci95": [
+     -2.1,
+     0.28
+    ]
+   },
+   "room_size_estimation": {
+    "n": 288,
+    "a": 51.18,
+    "b": 58.58,
+    "diff": 7.4,
+    "ci95": [
+     3.92,
+     11.01
+    ]
+   },
+   "route_planning": {
+    "n": 194,
+    "a": 31.96,
+    "b": 34.02,
+    "diff": 2.06,
+    "ci95": [
+     -2.58,
+     6.19
+    ]
+   }
+  }
  }
 ]

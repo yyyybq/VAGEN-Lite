@@ -20,6 +20,26 @@
   "diagnostic_acc": 34.23
  },
  {
+  "model": "SI-3B",
+  "bench": "MindCube",
+  "reported_overall": 66.6,
+  "n": 21154,
+  "official_acc": 66.6,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 66.6
+ },
+ {
+  "model": "SI-3B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 60.19,
+  "n": 1040,
+  "official_acc": 60.19,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 60.19
+ },
+ {
   "model": "SI-7B",
   "bench": "MindCube",
   "reported_overall": 82.79,
@@ -38,6 +58,116 @@
   "rule_applied": 0,
   "rule_applied_pct": 0.0,
   "diagnostic_acc": 73.46
+ },
+ {
+  "model": "SenseNovaSI-7B",
+  "bench": "MindCube",
+  "reported_overall": 56.61,
+  "n": 21154,
+  "official_acc": 56.61,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 56.61
+ },
+ {
+  "model": "SenseNovaSI-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 53.75,
+  "n": 1040,
+  "official_acc": 53.75,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 53.75
+ },
+ {
+  "model": "SpaceR-7B",
+  "bench": "MindCube",
+  "reported_overall": 26.63,
+  "n": 21154,
+  "official_acc": 26.63,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 26.63
+ },
+ {
+  "model": "SpaceR-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 32.6,
+  "n": 1040,
+  "official_acc": 32.6,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 32.6
+ },
+ {
+  "model": "VST-7B-RL",
+  "bench": "MindCube",
+  "reported_overall": 37.27,
+  "n": 21154,
+  "official_acc": 37.27,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 37.27
+ },
+ {
+  "model": "VST-7B-RL",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 40.87,
+  "n": 1040,
+  "official_acc": 40.87,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 40.87
+ },
+ {
+  "model": "ViLASR-7B",
+  "bench": "MindCube",
+  "reported_overall": 30.59,
+  "n": 21154,
+  "official_acc": 30.59,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 30.59
+ },
+ {
+  "model": "ViLASR-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 35.1,
+  "n": 1040,
+  "official_acc": 35.1,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 35.1
+ },
+ {
+  "model": "VideoR1-7B",
+  "bench": "MindCube",
+  "reported_overall": 31.91,
+  "n": 21154,
+  "official_acc": 31.91,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 31.91
+ },
+ {
+  "model": "VideoR1-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 34.62,
+  "n": 1040,
+  "official_acc": 34.62,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 34.62
+ },
+ {
+  "model": "base-3B",
+  "bench": "MindCube",
+  "reported_overall": 39.77,
+  "n": 21154,
+  "official_acc": 39.77,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 39.77
  },
  {
   "model": "base-3B",
