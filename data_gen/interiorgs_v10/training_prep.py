@@ -406,7 +406,7 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
 STANDARDS_FILE = Path(__file__).with_name("configs") / "rl_standards.json"
 STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "opt_package", "reward_preset",
                  "ppo_template", "env_template", "group_filter", "keep_std_threshold", "keep_std_floor",
-                 "format_example", "lenient_parse", "invalid_penalty")
+                 "format_example", "lenient_parse", "invalid_penalty", "invalid_turn_nonpositive")
 # Round 12, the dense-reward first batch (D-keep, the user's decision of 2026-10-21): which group filter the
 # package's batch goes through.  mixed_outcome (the package's) trains only on tasks whose episodes both succeed and
 # fail; keep_by_return_std (vagen/custom_filter/filter.py) fills the places still free with all-fail tasks whose
@@ -695,6 +695,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                                     getattr(args, "target_groups", None), getattr(args, "rollouts", None))
         for key, value in package.items():
             _set(ppo, key, value)
+    if getattr(args, "invalid_turn_nonpositive", False):  # round 12 freeze (the user's 3.2, vagen/invalid_turns.py)
+        _set(ppo, "algorithm.invalid_turn_nonpositive_adv", True)
     if getattr(args, "entropy_coeff", None) is not None:  # round 12 batch: the entropy bonus instead of the package's
         _set(ppo, "actor_rollout_ref.actor.entropy_coeff", float(args.entropy_coeff))
     group_filter = getattr(args, "group_filter", None)
@@ -740,6 +742,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "standard": standard or None, "ppo_template": str(args.ppo_template), "curriculum": curriculum,
               "format_example": fmt, "format_example_sft": sft_formats or None,
               "lenient_parse": bool(getattr(args, "lenient_parse", False)),
+              "invalid_turn_nonpositive": bool(getattr(args, "invalid_turn_nonpositive", False)),
               "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
@@ -1048,6 +1051,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--lenient-parse", action="store_true",
                    help="round 12 freeze: the env reads an answer leniently when the strict reading finds no action "
                         "(spaces instead of underscores, the first complete action block, a missing opening tag)")
+    c.add_argument("--invalid-turn-nonpositive", action="store_true",
+                   help="round 12 freeze: the tokens of a turn the env could not read get no positive advantage "
+                        "(vagen/invalid_turns.py; PPO config algorithm.invalid_turn_nonpositive_adv)")
     c.add_argument("--invalid-penalty", type=float, default=None,
                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")

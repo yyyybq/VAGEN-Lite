@@ -95,6 +95,10 @@ class AgentData:
         self.traj_success: bool = False
         self.env_turns: int = 0
         self.invalid_turns: int = 0  # turns whose answer the env could not parse (turn_metrics.action_is_valid)
+        # round 12 freeze (vagen/invalid_turns.py): the response positions [start, end) of the last generated turn and
+        # of every turn the env could not read
+        self.turn_span: Optional[tuple] = None
+        self.invalid_spans: List[List[int]] = []
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -185,6 +189,10 @@ class GymAgentLoop(AgentLoopBase):
         cls.apply_chat_template_kwargs = config.data.get("apply_chat_template_kwargs", {})
         cls.prompt_length = config.actor_rollout_ref.rollout.prompt_length
         cls.response_length = config.actor_rollout_ref.rollout.response_length
+        # round 12 freeze: record the unreadable turns' token spans only when the switch is on (vagen/invalid_turns.py)
+        from vagen.invalid_turns import enabled as _invalid_turns_enabled
+
+        cls.record_invalid_spans = _invalid_turns_enabled(config.get("algorithm", None))
       
         _placeholder = [{"role": "system", "content": "placeholder"}]
         if processor is not None:
@@ -316,6 +324,11 @@ class GymAgentLoop(AgentLoopBase):
                 },
             },
         )
+        if getattr(self, "record_invalid_spans", False):  # round 12 freeze: the unreadable turns' token spans
+            # a dict per sample: the trainer packs extra fields into an object array, and equal-shaped lists of
+            # lists would be broadcast into a multi-dimensional one
+            output.extra_fields["invalid_turn_spans"] = {"spans": [list(s) for s in agent_data.invalid_spans
+                                                                   if s[0] < self.response_length]}
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:
@@ -375,7 +388,9 @@ class GymAgentLoop(AgentLoopBase):
         if len(output.token_ids)>agent_data.response_limit:
             logger.warning(f"In env:{agent_data.env_name}, generated response length {len(output.token_ids)} exceeds per-turn response_limit {agent_data.response_limit}")
         agent_data.prompt_ids += agent_data.response_ids
+        start = len(agent_data.response_mask)
         agent_data.response_mask += [1] * len(agent_data.response_ids)
+        agent_data.turn_span = (start, len(agent_data.response_mask))
         if output.log_probs:
             agent_data.response_logprobs += output.log_probs
 
@@ -411,6 +426,8 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.traj_success = extract_success(info)
         agent_data.env_turns += 1
         agent_data.invalid_turns += int(turn_invalid(info))
+        if turn_invalid(info) and agent_data.turn_span is not None:  # round 12 freeze (vagen/invalid_turns.py)
+            agent_data.invalid_spans.append(list(agent_data.turn_span))
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))

@@ -1336,6 +1336,13 @@ def compute_advantage(
         advantages, returns = adv_estimator_fn(**adv_kwargs)
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
+    # round 12 freeze (the user's 3.2): tokens of turns the env could not read get no positive advantage
+    from vagen.invalid_turns import clamp_invalid_turn_advantages, enabled as invalid_turns_enabled
+
+    if invalid_turns_enabled(config) and "invalid_turn_spans" in data.non_tensor_batch:
+        data.batch["advantages"], clamp_metrics = clamp_invalid_turn_advantages(
+            data.batch["advantages"], data.batch["response_mask"], list(data.non_tensor_batch["invalid_turn_spans"]))
+        data.meta_info["invalid_turn_metrics"] = clamp_metrics
     return data
 
 
@@ -2800,6 +2807,7 @@ class RayPPOTrainer:
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                             config=self.config.algorithm,
                         )
+                        metrics.update(batch.meta_info.pop("invalid_turn_metrics", {}))  # round 12 freeze
 
                     if self.config.algorithm.adv_estimator in ["no_concat_gae_last", "no_concat_gae_first", "no_concat_gae"]:
                         batch.batch["value_mask"] = compute_value_mask(batch)
