@@ -218,6 +218,8 @@ def stage0_html(s0) -> str:
         return '<p class="empty">阶段 0 还没有评完的检查点。</p>'
     steps, starts = s0["steps"], s0["starts"]
     head = "".join(f'<th class="n">{s // 1000}k</th>' for s in steps)
+    evals = s0.get("evaluations") or []
+    short = {(r["start"], r["step"]) for r in evals if r["kind"] == "first" and r["missing"]}
     rows = []
     for g in ("all", "spatial"):
         for s in starts:
@@ -225,22 +227,59 @@ def stage0_html(s0) -> str:
             for step in steps:
                 c = s0["curve"][s].get(step)
                 k, n = c[g] if c else (0, 0)
-                cells.append(f'<td class="n">{k}/{n} = {pct(k / n)}</td>' if n else '<td class="n">—</td>')
+                mark = "*" if (s, step) in short else ""
+                cells.append(f'<td class="n">{k}/{n} = {pct(k / n)}{mark}</td>' if n else '<td class="n">—</td>')
             rows.append(f"<tr><td>{E(stats.GROUP_ZH[g])}</td><td>{E(s)}</td>{''.join(cells)}</tr>")
     curve = (f'<h3>成功率随检查点</h3><div class="tablewrap"><table><thead><tr><th>任务组</th><th>起点</th>{head}</tr>'
-             f'</thead><tbody>{"".join(rows)}</tbody></table></div>')
+             f'</thead><tbody>{"".join(rows)}</tbody></table></div>'
+             + ('<p class="meta">* 该评测缺回合，见下表。</p>' if short else ""))
+    rows = []
+    for r in evals:
+        if not r["missing"]:
+            continue
+        a = r["all"]
+        rows.append(f'<tr><td>{E(r["start"])}</td><td class="n">{r["step"] // 1000}k{"（第二遍）" if r["kind"] == "repeat" else ""}</td>'
+                    f'<td class="n">{r["episodes"]}/{r["planned"]}</td><td>{E("、".join(r["missing"]))}</td>'
+                    f'<td class="n">{pct(a["rate"])}<br><span class="meta">补完后 {pct(a["low"])}–{pct(a["high"])}</span></td>'
+                    f'<td>{"还在跑或排队" if r["partial"] else "已结束（这些回合重跑后仍失败）"}</td></tr>')
+    status = (f'<h3>缺回合的评测</h3><div class="tablewrap"><table><thead><tr><th>起点</th><th class="n">检查点</th>'
+              f'<th class="n">已完成 / 应完成</th><th>缺的回合（任务 种子）</th><th class="n">全部任务成功率</th><th>状态</th>'
+              f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div><p class="meta">应完成 = 计划回合减剔除清单。'
+              f'"补完后"是缺的回合全部失败到全部成功时的范围。</p>') if rows else ""
     lo, hi = (int(100 * x) for x in s0["band"])
     band = '<p class="empty">还没有四个起点都评过的检查点。</p>'
     if s0["latest_common"]:
         rows = []
         for x in s0["spatial"]:
             cells = "".join(f'<td class="n">{pct(x["rates"].get(s))}</td>' for s in starts)
+            rng = "" if abs(x["high_all"] - x["low_all"]) < 1e-9 else \
+                f'<br><span class="meta">{pct(x["low_all"])}–{pct(x["high_all"])}</span>'
             rows.append(f'<tr><td>{E(x["task"])}</td>{cells}<td class="n">{pct(x["mean"])}</td>'
-                        f'<td class="n {"up" if x["in_band"] else ""}">{"是" if x["in_band"] else "否"}</td></tr>')
+                        f'<td class="n {"up" if x["in_band"] else ""}">{"是" if x["in_band"] else "否"}</td>'
+                        f'<td class="n">{pct(x["mean_all"])}{rng}</td>'
+                        f'<td class="n {"up" if x["in_band_all"] else ""}">{"是" if x["in_band_all"] else "否"}'
+                        f'<br><span class="meta">{x["steps_in_band"]}/{len(x["per_step"])} 个检查点在</span></td></tr>')
         band = (f'<h3>空间任务：第 {s0["latest_common"] // 1000}k 步的成功率</h3><div class="tablewrap"><table><thead><tr>'
                 f'<th>任务</th>{"".join(f"<th class=n>{E(s)}</th>" for s in starts)}<th class="n">四起点平均</th>'
-                f'<th class="n">在 {lo}%–{hi}%</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
-                f'<p class="meta">每格是该起点在该任务 50 个回合上的成功率；平均是对起点取平均。</p>')
+                f'<th class="n">在 {lo}%–{hi}%</th><th class="n">全部检查点平均</th>'
+                f'<th class="n">在 {lo}%–{hi}%（全部检查点）</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+                f'<p class="meta">每格是该起点在该任务 50 个回合上的成功率；平均是对起点取平均。全部检查点平均：每个起点每个'
+                f'检查点一个成功率，再平均；小字是缺的回合补完后的范围；"n/4 个检查点在"是四起点平均落在区间内的检查点个数。</p>')
+    fl = s0.get("fluctuation") or {}
+    rows = []
+    for kind, label in (("within", "同一起点"), ("between", "同一检查点")):
+        for r in fl.get(kind, []):
+            which = (f'{E(r["start"])} {r["from"] // 1000}k → {r["to"] // 1000}k' if kind == "within" else
+                     f'{E(r["start"])} − {E(r["reference"])}，{r["step"] // 1000}k')
+            rows.append(f'<tr><td>{label}</td><td>{which}</td>'
+                        + "".join(f'<td class="n">{pts(r[g]["diff"])}<br><span class="meta">p {pval(r[g]["p"])}</span></td>'
+                                  f'<td class="n">{pts(r[g]["task_mean_diff"])}</td>' for g in ("all", "spatial")) + "</tr>")
+    fluct = (f'<h3>检查点之间的波动和起点之间的差</h3><div class="tablewrap"><table><thead><tr><th>比较</th><th>哪两个</th>'
+             f'<th class="n">全部：合并差（McNemar p）</th><th class="n">全部：逐任务平均差</th>'
+             f'<th class="n">空间：合并差（McNemar p）</th><th class="n">空间：逐任务平均差</th></tr></thead>'
+             f'<tbody>{"".join(rows)}</tbody></table></div><p class="meta">单位百分点，同一批场景配对。同一起点的相邻'
+             f'检查点相隔 2.5 万步、学习率还高，它们之间的差不是起点造成的，可以当作只看一个检查点时的波动尺度。</p>') \
+        if rows else ""
     rows = []
     for s, r in s0["flat"].items():
         cells = ""
@@ -271,7 +310,7 @@ def stage0_html(s0) -> str:
                   f'<th class="n">合并差</th><th class="n">McNemar p</th></tr></thead><tbody>{"".join(rows)}</tbody></table>'
                   f'</div><p class="meta">你 10-22 定的规则：四个起点的 50k 到 100k 配对差都在噪声内（p &gt; 0.05 且小于 3 个百分点）'
                   f'用 10 万步，否则 20 万。按主检验（34 个任务为配对单位）判断，合并差和 McNemar 并列参考。{verdict}</p>')
-    return curve + band + flat + steps_rule
+    return curve + status + band + flat + steps_rule + fluct
 
 
 def example_block(ex) -> str:

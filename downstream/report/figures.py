@@ -90,21 +90,25 @@ def _rate_axes(groups):
 
 
 def checkpoint_curves(coll, ratio: str = "100", seed: int = 1, groups=stats.GROUPS):
-    """Success rate at each evaluated checkpoint of the seed-`seed` runs (D5), per group, with Wilson intervals."""
+    """Success rate at each evaluated checkpoint of the seed-`seed` runs (D5), per group, with Wilson intervals.
+    An evaluation still missing episodes (collect(partial=True)) is drawn with a hollow marker."""
     evs = [e for e in coll.first() if e.ratio == ratio and e.seed == seed]
     if not evs:
         return None
     fig, axes = _rate_axes(groups)
     for g, ax in zip(groups, axes):
         for s in coll.starts():
-            pts = sorted((e.step, stats.group_counts([dict(x, train_seed=seed) for x in e.episodes], coll.tasks)[g])
-                         for e in evs if e.start == s)
-            pts = [(st, k, n) for st, (k, n) in pts if n]
+            pts = sorted((e.step, stats.group_counts([dict(x, train_seed=seed) for x in e.episodes], coll.tasks)[g],
+                          e.partial) for e in evs if e.start == s)
+            pts = [(st, k, n, part) for st, (k, n), part in pts if n]
             if not pts:
                 continue
             x = np.array([p[0] for p in pts]) / 1000
-            w = np.array([stats.wilson(k, n) for _, k, n in pts])
+            w = np.array([stats.wilson(k, n) for _, k, n, _ in pts])
             ax.plot(x, 100 * w[:, 0], "-o", color=color(s), ms=3.5, lw=1.4, label=s)
+            hollow = [i for i, p in enumerate(pts) if p[3]]
+            if hollow:
+                ax.plot(x[hollow], 100 * w[hollow, 0], "o", color=color(s), mfc="white", ms=5, lw=0)
             ax.fill_between(x, 100 * w[:, 1], 100 * w[:, 2], color=color(s), alpha=0.12, lw=0)
         ax.set_title(stats.GROUP_LABEL[g])
         ax.set_ylim(bottom=0)

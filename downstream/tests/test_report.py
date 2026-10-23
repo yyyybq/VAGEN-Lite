@@ -155,8 +155,14 @@ def test_stage0_build_reads_the_stopped_runs(tmp_path):
     for r in rule["starts"].values():
         assert r["n"] == 945 and r["within"] == (r["wilcoxon_p"] > 0.05 and abs(r["task_mean_diff"]) < 0.03)
     assert (rule["steps"] == 100000) == all(r["within"] for r in rule["starts"].values())
+    assert all({"mean_all", "low_all", "high_all", "in_band_all", "band_certain", "per_step"} <= set(x)
+               for x in s0["spatial"])
+    assert len(s0["evaluations"]) == 16 + 2 and not any(r["missing"] for r in s0["evaluations"])  # the 2 repeats at 25k
+    fl = s0["fluctuation"]
+    assert len(fl["within"]) == 4 * 3 and len(fl["between"]) == 3 * 4 and fl["summary"]["within_all"]["pairs"] == 12
     page = (tmp_path / "report0/index.html").read_text(encoding="utf-8")
     assert 'id="stage0"' in page and "最后两个检查点之差" in page and "评测噪声下限" in page and "阶段 1 的步数规则" in page
+    assert "检查点之间的波动" in page and "缺回合的评测" not in page
 
 
 def test_step_rule_by_hand(tmp_path):
@@ -180,3 +186,83 @@ def test_step_rule_by_hand(tmp_path):
     assert rule["complete"] and rule["steps"] == 200000 and rule["pooled_steps"] == 200000
     assert rule["starts"]["B"]["within"] and not rule["starts"]["RS"]["within"]
     assert rule["starts"]["RS"]["task_mean_diff"] == pytest.approx(0.4) and rule["starts"]["RS"]["p"] < 0.05
+
+
+def _write_eval(d: Path, tasks: dict, summary: bool):
+    """tasks: name -> (successes, done, planned); seeds 1000.., the first `successes` succeed."""
+    d.mkdir(parents=True)
+    (d / "plan.json").write_text(json.dumps({"episodes": [{"task": t, "seed": 1000 + i}
+                                                          for t, (_, _, n) in tasks.items() for i in range(n)]}))
+    rows = [{"task": t, "seed": 1000 + i, "success": i < k, "steps": 10, "max_steps": 100, "status": "complete"}
+            for t, (k, done, _) in tasks.items() for i in range(done)]
+    (d / "episodes.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    if summary:
+        (d / "summary.json").write_text(json.dumps({"per_task": {}}))
+
+
+def test_partial_evaluations_count_their_completed_episodes(tmp_path):
+    """collect(partial=True): an evaluation without summary.json (its job deleted, or still queued) counts with the
+    episodes it completed; every evaluation lists the planned episodes it lacks, never the excluded ones."""
+    exp = tmp_path / "experiments/DS-RD-100-s1"
+    exp.mkdir(parents=True)
+    (exp / "experiment.json").write_text("{}")
+    ev = exp / "evals"
+    _write_eval(ev / "steps_25000/out/episodes", {"OpenDrawer": (2, 3, 4), "DeliverStraw": (0, 0, 7)}, summary=True)
+    _write_eval(ev / "steps_75000/out/episodes", {"OpenDrawer": (1, 2, 4)}, summary=False)
+    _write_eval(ev / "steps_50000/shards/s1of2/out/episodes", {"OpenDrawer": (1, 2, 2)}, summary=True)
+    _write_eval(ev / "steps_50000/shards/s2of2/out/episodes", {"CloseFridge": (1, 1, 3)}, summary=False)
+    evs = collect.evaluations(exp)
+    assert [(e.step, e.partial, len(e.episodes)) for e in evs] == [(25000, False, 3)]
+    # DeliverStraw 1006 is on the exclusion list: missing in the plan's sense, but it never counts
+    assert evs[0].missing == [("OpenDrawer", 1003)] + [("DeliverStraw", 1000 + i) for i in range(7) if i != 6]
+    evs = {e.step: e for e in collect.evaluations(exp, partial=True)}
+    assert sorted(evs) == [25000, 50000, 75000]
+    e = evs[75000]
+    assert e.partial and e.successes == 1 and e.missing == [("OpenDrawer", 1002), ("OpenDrawer", 1003)]
+    assert e.summary["per_task"] == {"OpenDrawer": {"n": 2, "successes": 1}}
+    e = evs[50000]
+    assert e.partial and len(e.episodes) == 3 and e.missing == [("CloseFridge", 1001), ("CloseFridge", 1002)]
+    assert e.summary["shards"] == 2 and e.summary["per_task"]["CloseFridge"] == {"n": 1, "successes": 1}
+
+
+def test_stage0_band_bounds_and_fluctuation(tmp_path):
+    """RD 50k still lacks 20 OpenDrawer episodes: it counts with its 30; OpenDrawer's all-checkpoint average could
+    end on either side of 10%; the adjacent-checkpoint and between-start differences match hand counts."""
+    from downstream.report import page
+
+    root = tmp_path / "runs"
+    for s in ("B", "S", "RS", "RD"):
+        exp = root / f"experiments/DS-{s}-100-s1"
+        exp.mkdir(parents=True)
+        (exp / "experiment.json").write_text("{}")
+        for step in (25000, 50000):
+            tasks = {"OpenDrawer": (4, 50, 50), "CloseFridge": (10, 20, 20)}
+            if (s, step) == ("B", 50000):
+                tasks["CloseFridge"] = (14, 20, 20)
+            if (s, step) == ("RD", 50000):
+                tasks["OpenDrawer"] = (6, 30, 50)
+            _write_eval(exp / f"evals_{build.STAGE0_RUN}/steps_{step}/out/episodes", tasks,
+                        summary=(s, step) != ("RD", 50000))
+    coll = collect.collect(root, evals_name=f"evals_{build.STAGE0_RUN}", run=build.STAGE0_RUN, partial=True)
+    assert len(coll.first()) == 8 and [e.partial for e in coll.first()].count(True) == 1
+    s0 = build.stage0(coll)
+    od = next(x for x in s0["spatial"] if x["task"] == "OpenDrawer")
+    assert s0["latest_common"] == 50000 and od["mean"] == pytest.approx(0.11) and od["in_band"]
+    assert od["mean_all"] == pytest.approx(0.095) and not od["in_band_all"]
+    assert od["low_all"] == pytest.approx(0.085) and od["high_all"] == pytest.approx(0.135) and not od["band_certain"]
+    assert od["per_step"] == pytest.approx({25000: 0.08, 50000: 0.11}) and od["steps_in_band"] == 1
+    rd = next(r for r in s0["evaluations"] if (r["start"], r["step"]) == ("RD", 50000))
+    assert rd["partial"] and (rd["episodes"], rd["planned"], len(rd["missing"])) == (50, 70, 20)
+    assert rd["all"]["low"] == pytest.approx(16 / 70) and rd["all"]["high"] == pytest.approx(36 / 70)
+    assert rd["spatial"]["missing"] == 20 and rd["spatial"]["rate"] == pytest.approx(0.2)
+    fl = s0["fluctuation"]
+    assert len(fl["within"]) == 4 and len(fl["between"]) == 6
+    b = next(r for r in fl["within"] if r["start"] == "B")
+    assert b["all"]["diff"] == pytest.approx(4 / 70) and b["all"]["task_mean_diff"] == pytest.approx(0.1)
+    rd_b = next(r for r in fl["between"] if (r["start"], r["step"]) == ("RD", 50000))
+    assert rd_b["all"]["n"] == 50 and rd_b["all"]["diff"] == pytest.approx(-2 / 50)
+    assert fl["summary"]["within_all"]["pooled_abs_max"] == pytest.approx(4 / 70)
+    lines = "".join(build.stage0_lines(s0))
+    assert "RD 50k（未完成） 50/70" in lines and "可能改变归类的：OpenDrawer" in lines
+    html_text = page.stage0_html(s0)
+    assert "缺回合的评测" in html_text and "检查点之间的波动" in html_text and "补完后 22.9%–51.4%" in html_text

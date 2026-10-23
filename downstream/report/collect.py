@@ -4,7 +4,9 @@ Layout (downstream/train/runs.py, downstream/eval/watch.py, downstream/eval/clos
   <runs-root>/experiments/DS-<start>-<ratio>-s<seed>/experiment.json, run/metrics.jsonl
       evals/steps_<N>/out/episodes/{summary.json, episodes.jsonl, plan.json, frames/<task>_s<seed>.jpg}
       evals/steps_<N>_repeat/out/episodes_P<P>/...   (the noise / parallelism test)
-Only finished evaluations count (summary.json with per_task).
+Only finished evaluations count (summary.json with per_task), unless collect(partial=True): then an evaluation
+with a plan but no summary yet counts with its completed episodes (Evaluation.partial; Evaluation.missing lists the
+planned episodes not completed, for every evaluation).
 """
 from __future__ import annotations
 
@@ -39,6 +41,8 @@ class Evaluation:
     directory: Path
     summary: dict
     episodes: list = field(default_factory=list)
+    missing: list = field(default_factory=list)   # (task, seed) planned (after the exclusions) but not complete
+    partial: bool = False                         # no summary.json yet (collect(partial=True) only)
 
     @property
     def successes(self) -> int:
@@ -82,14 +86,28 @@ def excluded() -> set:
     return {(t, int(s)) for t, s in json.loads(path.read_text())["episodes"]}
 
 
-def _evaluation(exp_dir, start, ratio, seed, step, kind, ep_dir: Path):
-    summary_path = ep_dir / "summary.json"
-    if not summary_path.is_file():
+def _per_task(eps: list) -> dict:
+    out = {}
+    for x in eps:
+        t = out.setdefault(x["task"], {"n": 0, "successes": 0})
+        t["n"] += 1
+        t["successes"] += int(x["success"])
+    return out
+
+
+def _evaluation(exp_dir, start, ratio, seed, step, kind, ep_dir: Path, partial: bool = False):
+    """One evaluation directory (out/episodes).  None without summary.json, unless `partial`: then an evaluation
+    still running or stopped early counts with the episodes it has completed (partial=True), if its plan exists."""
+    summary_path, skip = ep_dir / "summary.json", excluded()
+    if summary_path.is_file():
+        summary, is_partial = json.loads(summary_path.read_text()), False
+        if "per_task" not in summary:
+            return None
+    elif partial and (ep_dir / "plan.json").is_file():
+        summary, is_partial = {"partial": True}, True
+    else:
         return None
-    summary = json.loads(summary_path.read_text())
-    if "per_task" not in summary:
-        return None
-    eps, skip = [], excluded()
+    eps = []
     for r in read_jsonl(ep_dir / "episodes.jsonl"):
         if r.get("status") != "complete" or (r["task"], int(r["seed"])) in skip:
             continue
@@ -99,32 +117,40 @@ def _evaluation(exp_dir, start, ratio, seed, step, kind, ep_dir: Path):
                     "wall_seconds": float(r.get("wall_seconds") or 0.0),
                     "instruction": (r.get("init") or {}).get("instruction"),
                     "frames": frames if frames and frames.is_file() else None})
+    if is_partial:
+        summary["per_task"] = _per_task(eps)
+    missing = []
+    if (ep_dir / "plan.json").is_file():
+        done = {(x["task"], x["eval_seed"]) for x in eps}
+        missing = [(e["task"], int(e["seed"])) for e in json.loads((ep_dir / "plan.json").read_text())["episodes"]
+                   if (e["task"], int(e["seed"])) not in skip and (e["task"], int(e["seed"])) not in done]
     return Evaluation(exp_dir.name, start, ratio, seed, step, kind, int(summary.get("workers") or 0), ep_dir,
-                      summary, eps)
+                      summary, eps, missing, is_partial)
 
 
-def _sharded(exp_dir, start, ratio, seed, step, kind, evaldir: Path):
-    """One evaluation from its one-card shards (shards/s<I>of<K>/out/episodes), None until all K have a result."""
+def _sharded(exp_dir, start, ratio, seed, step, kind, evaldir: Path, partial: bool = False):
+    """One evaluation from its one-card shards (shards/s<I>of<K>/out/episodes), None until all K have a result
+    (with `partial`: until all K have a plan)."""
     parts = sorted((evaldir / "shards").glob("s*of*"))
     if not parts:
         return None
     k = int(parts[0].name.split("of")[1])
-    pieces = [_evaluation(exp_dir, start, ratio, seed, step, kind, evaldir / "shards" / f"s{i}of{k}" / "out/episodes")
-              for i in range(1, k + 1)]
+    pieces = [_evaluation(exp_dir, start, ratio, seed, step, kind, evaldir / "shards" / f"s{i}of{k}" / "out/episodes",
+                          partial) for i in range(1, k + 1)]
     if any(p is None for p in pieces):
         return None
     eps = [x for p in pieces for x in p.episodes]
-    summary = {"per_task": {}, "shards": k, "workers": pieces[0].workers,
+    summary = {"per_task": _per_task(eps), "shards": k, "workers": pieces[0].workers,
                "episode_wall_mean_seconds": sum(x["wall_seconds"] for x in eps) / max(1, len(eps)),
                "wall_seconds": max(p.summary.get("wall_seconds") or 0 for p in pieces)}
-    for x in eps:
-        t = summary["per_task"].setdefault(x["task"], {"n": 0, "successes": 0})
-        t["n"] += 1
-        t["successes"] += int(x["success"])
-    return Evaluation(exp_dir.name, start, ratio, seed, step, kind, pieces[0].workers, evaldir, summary, eps)
+    is_partial = any(p.partial for p in pieces)
+    if is_partial:
+        summary["partial"] = True
+    return Evaluation(exp_dir.name, start, ratio, seed, step, kind, pieces[0].workers, evaldir, summary, eps,
+                      [m for p in pieces for m in p.missing], is_partial)
 
 
-def evaluations(exp_dir: Path, evals_name: str = "evals") -> list:
+def evaluations(exp_dir: Path, evals_name: str = "evals", partial: bool = False) -> list:
     parsed = parse_exp(exp_dir.name)
     if not parsed:
         return []
@@ -136,17 +162,17 @@ def evaluations(exp_dir: Path, evals_name: str = "evals") -> list:
             continue
         step = int(m[1])
         if (d / "shards").is_dir():
-            e = _sharded(exp_dir, start, ratio, seed, step, "repeat" if m[2] else "first", d)
+            e = _sharded(exp_dir, start, ratio, seed, step, "repeat" if m[2] else "first", d, partial)
             if e:
                 out.append(e)
             continue
         if m[2]:
             for ep_dir in sorted((d / "out").glob("episodes_P*")) or [d / "out/episodes"]:
-                e = _evaluation(exp_dir, start, ratio, seed, step, "repeat", ep_dir)
+                e = _evaluation(exp_dir, start, ratio, seed, step, "repeat", ep_dir, partial)
                 if e:
                     out.append(e)
         else:
-            e = _evaluation(exp_dir, start, ratio, seed, step, "first", d / "out/episodes")
+            e = _evaluation(exp_dir, start, ratio, seed, step, "first", d / "out/episodes", partial)
             if e:
                 out.append(e)
     return out
@@ -168,9 +194,11 @@ class Collection:
         return [s for s in START_ORDER if s in present] + sorted(present - set(START_ORDER))
 
 
-def collect(runs_root: Path, downstream: Path = DOWNSTREAM, evals_name: str = "evals", run: str = "run") -> Collection:
+def collect(runs_root: Path, downstream: Path = DOWNSTREAM, evals_name: str = "evals", run: str = "run",
+            partial: bool = False) -> Collection:
     """Every DS-* experiment: its training losses (EXP/<run>/metrics.jsonl) and finished evaluations (EXP/<evals_name>/).
-    The stage-0 report reads the stopped D5 runs: run="run_stopped_20261022", evals_name="evals_run_stopped_20261022"."""
+    The stage-0 report reads the stopped D5 runs: run="run_stopped_20261022", evals_name="evals_run_stopped_20261022".
+    partial=True also takes evaluations without a summary yet, with the episodes they have completed."""
     exps, loss, evs = {}, {}, []
     for exp_dir in sorted((Path(runs_root) / "experiments").glob("DS-*")):
         parsed = parse_exp(exp_dir.name)
@@ -178,5 +206,5 @@ def collect(runs_root: Path, downstream: Path = DOWNSTREAM, evals_name: str = "e
             continue
         exps[exp_dir.name] = parsed
         loss[exp_dir.name] = losses(exp_dir, run)
-        evs += evaluations(exp_dir, evals_name)
+        evs += evaluations(exp_dir, evals_name, partial)
     return Collection(Path(runs_root), task_table(downstream), exps, loss, evs)

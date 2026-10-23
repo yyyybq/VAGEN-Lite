@@ -3,6 +3,8 @@
 
     python -m downstream.report.build --out RUNS/report                      # real runs (downstream_runs)
     python -m downstream.report.build --runs-root /tmp/sim --out /tmp/sim/report   # simulated (report.simulate)
+    python -m downstream.report.build --stage0 [--partial] --out DIR         # stage 0 (stopped D5 checkpoints);
+                                                    # --partial: also evaluations still missing episodes, marked
 
 Writes OUT/index.html (self-contained: figures and example strips embedded; publishable as an Artifact),
 OUT/figures/*.png, OUT/results.json (every number on the page) and OUT/report.md (summary and figure links).
@@ -115,27 +117,103 @@ STAGE0_RUN = "run_stopped_20261022"
 BAND = (0.10, 0.60)
 
 
+def in_band(x) -> bool:
+    return BAND[0] <= x <= BAND[1]
+
+
+def evaluation_rows(coll, evs) -> list:
+    """Every stage-0 evaluation (first and repeat): episodes done of planned, the missing ones, and the success
+    counts with the range they could still take if the missing episodes ran (all fail .. all succeed)."""
+    rows = []
+    for e in sorted(evs, key=lambda e: (collect.START_ORDER.index(e.start) if e.start in collect.START_ORDER else 9,
+                                        e.step, e.kind)):
+        c = stats.group_counts([dict(x, train_seed=e.seed) for x in e.episodes], coll.tasks)
+        row = {"start": e.start, "step": e.step, "kind": e.kind, "partial": e.partial, "episodes": len(e.episodes),
+               "planned": len(e.episodes) + len(e.missing), "missing": [f"{t} {s}" for t, s in e.missing]}
+        for g in ("all", "spatial"):
+            m = sum(1 for t, _ in e.missing if t in coll.tasks and stats.in_group(coll.tasks[t], g))
+            k, n = c[g]
+            row[g] = {"k": k, "n": n, "missing": m, "rate": k / n if n else math.nan,
+                      "low": k / (n + m) if n + m else math.nan, "high": (k + m) / (n + m) if n + m else math.nan}
+        rows.append(row)
+    return rows
+
+
+def spatial_band(coll, starts, evs, latest) -> list:
+    """Per spatial task: the four-start average at `latest` (the list of 2026-10-22: 10%-60% -> E3 candidates) and
+    the average over every evaluated checkpoint of every start, with its range if the missing episodes ran, and
+    the four-start average at each checkpoint (does the task stay in the band?)."""
+    out = []
+    steps = sorted({e.step for e in evs})
+    for t in sorted(t for t, i in coll.tasks.items() if i.klass == "spatial"):
+        rates, lows, highs = {}, {}, {}
+        for e in evs:
+            k, n = stats.task_counts([dict(x, train_seed=e.seed) for x in e.episodes]).get(t, (0, 0))
+            m = sum(1 for tt, _ in e.missing if tt == t)
+            if n + m == 0:
+                continue
+            key = f"{e.start}@{e.step}"
+            rates[key], lows[key], highs[key] = (k / n if n else math.nan), k / (n + m), (k + m) / (n + m)
+        at = {s: rates[f"{s}@{latest}"] for s in starts if f"{s}@{latest}" in rates} if latest else {}
+        mean = sum(at.values()) / len(at) if at else math.nan
+        known = [v for v in rates.values() if not math.isnan(v)]
+        mean_all = sum(known) / len(known) if known else math.nan
+        low_all = sum(lows.values()) / len(lows) if lows else math.nan
+        high_all = sum(highs.values()) / len(highs) if highs else math.nan
+        per_step = {}
+        for step in steps:
+            vals = [rates.get(f"{s}@{step}") for s in starts]
+            if all(v is not None and not math.isnan(v) for v in vals):
+                per_step[step] = sum(vals) / len(vals)
+        out.append({"task": t, "rates": at, "mean": mean, "in_band": in_band(mean),
+                    "points": rates, "mean_all": mean_all, "low_all": low_all, "high_all": high_all,
+                    "in_band_all": in_band(mean_all), "band_certain": in_band(low_all) == in_band(high_all),
+                    "per_step": per_step, "steps_in_band": sum(in_band(v) for v in per_step.values())})
+    return out
+
+
+def fluctuation(coll, starts, reference: str = "B") -> dict:
+    """The scale of differences that are not between starts: each start's adjacent checkpoints (same scenes; mid-
+    training, learning rate still high), against the differences between starts at one checkpoint."""
+    within, between = [], []
+    groups = {g: {t for t, i in coll.tasks.items() if stats.in_group(i, g)} for g in ("all", "spatial")}
+    have = {s: sorted({e.step for e in coll.first() if (e.start, e.ratio, e.seed) == (s, "100", 1)}) for s in starts}
+    for s in starts:
+        for a, b in zip(have[s], have[s][1:]):
+            within.append({"start": s, "from": a, "to": b, **{g: pair(coll, s, a, s, b, keep) for g, keep in groups.items()}})
+    for step in sorted(set().union(*have.values())) if have else []:
+        if step not in have.get(reference, []):
+            continue
+        for s in starts:
+            if s != reference and step in have[s]:
+                between.append({"start": s, "reference": reference, "step": step,
+                                **{g: pair(coll, reference, step, s, step, keep) for g, keep in groups.items()}})
+    summary = {}
+    for name, rows in (("within", within), ("between", between)):
+        for g in ("all", "spatial"):
+            pooled = [abs(r[g]["diff"]) for r in rows if not math.isnan(r[g]["diff"])]
+            task = [abs(r[g]["task_mean_diff"]) for r in rows if not math.isnan(r[g]["task_mean_diff"])]
+            summary[f"{name}_{g}"] = {"pairs": len(rows), "pooled_abs_mean": sum(pooled) / len(pooled) if pooled else math.nan,
+                                      "pooled_abs_max": max(pooled, default=math.nan),
+                                      "task_abs_mean": sum(task) / len(task) if task else math.nan,
+                                      "task_abs_max": max(task, default=math.nan),
+                                      "significant": sum(1 for r in rows if r[g]["p"] < RULE_P)}
+    return {"within": within, "between": between, "summary": summary}
+
+
 def stage0(coll, reference: str = "B") -> dict:
     """Stage 0 (user, 2026-10-22): the checkpoints kept from the stopped D5 runs (100% data, seed 1).
     Success by checkpoint per start (all tasks, the 9 spatial tasks); the spatial tasks whose success averaged over
-    the four starts lies in 10%-60% at the latest checkpoint every start has; and, per start, the paired difference
-    between its last two evaluated checkpoints (same scenes), to see whether the curve has flattened."""
+    the four starts lies in 10%-60% at the latest checkpoint every start has (and averaged over every checkpoint);
+    per start, the paired difference between its last two evaluated checkpoints (same scenes), to see whether the
+    curve has flattened, and between all adjacent checkpoints against the differences between starts."""
     evs = [e for e in coll.first() if e.ratio == "100" and e.seed == 1]
     starts = [s for s in coll.starts() if any(e.start == s for e in evs)]
     curve = {s: {e.step: stats.group_counts([dict(x, train_seed=1) for x in e.episodes], coll.tasks)
                  for e in evs if e.start == s} for s in starts}
     common = stats.common_steps(coll, "100", [1])
     latest = common[-1] if common else None
-    spatial = []
-    if latest:
-        for t in sorted(t for t, i in coll.tasks.items() if i.klass == "spatial"):
-            rates = {}
-            for s in starts:
-                k, n = stats.task_counts(stats.episodes_of(coll, s, "100", latest, [1])).get(t, (0, 0))
-                if n:
-                    rates[s] = k / n
-            mean = sum(rates.values()) / len(rates) if rates else math.nan
-            spatial.append({"task": t, "rates": rates, "mean": mean, "in_band": BAND[0] <= mean <= BAND[1]})
+    spatial = spatial_band(coll, starts, evs, latest) if latest else []
     flat = {}
     for s in starts:
         steps = sorted(curve[s])
@@ -152,21 +230,29 @@ def stage0(coll, reference: str = "B") -> dict:
             diffs = [tb[t][0] / tb[t][1] - ta[t][0] / ta[t][1] for t in sorted(set(ta) & set(tb)) if ta[t][1] and tb[t][1]]
             row[g] = dict(stats.paired(mb, ma), **{"task_" + k: v for k, v in stats.task_level(diffs).items()})
         flat[s] = row
+    all_evs = [e for e in coll.evals if e.ratio == "100" and e.seed == 1]
     return {"starts": starts, "steps": sorted({e.step for e in evs}), "curve": curve, "latest_common": latest,
-            "spatial": spatial, "flat": flat, "band": BAND, "step_rule": step_rule(coll, starts)}
+            "spatial": spatial, "flat": flat, "band": BAND, "step_rule": step_rule(coll, starts),
+            "evaluations": evaluation_rows(coll, all_evs), "fluctuation": fluctuation(coll, starts, reference)}
 
 
 RULE_FROM, RULE_TO, RULE_P, RULE_POINTS = 50000, 100000, 0.05, 0.03
 
 
-def pair_diff(coll, start, a, b, keep=None) -> dict:
-    """Checkpoint b minus checkpoint a of one start (100%, seed 1), same scenes: pooled (McNemar) and task-level."""
-    ea, eb = stats.episodes_of(coll, start, "100", a, [1]), stats.episodes_of(coll, start, "100", b, [1])
+def pair(coll, start_a, a, start_b, b, keep=None) -> dict:
+    """(start_b, checkpoint b) minus (start_a, checkpoint a), 100% data, seed 1, same scenes: pooled (McNemar) and
+    task-level (34 tasks or `keep` as the pairing unit)."""
+    ea, eb = stats.episodes_of(coll, start_a, "100", a, [1]), stats.episodes_of(coll, start_b, "100", b, [1])
     if keep is not None:
         ea, eb = [x for x in ea if x["task"] in keep], [x for x in eb if x["task"] in keep]
     ta, tb = stats.task_counts(ea), stats.task_counts(eb)
     diffs = [tb[t][0] / tb[t][1] - ta[t][0] / ta[t][1] for t in sorted(set(ta) & set(tb)) if ta[t][1] and tb[t][1]]
     return dict(stats.paired(stats.outcome_map(eb), stats.outcome_map(ea)), **stats.task_level(diffs))
+
+
+def pair_diff(coll, start, a, b, keep=None) -> dict:
+    """Checkpoint b minus checkpoint a of one start (100%, seed 1), same scenes: pooled (McNemar) and task-level."""
+    return pair(coll, start, a, start, b, keep)
 
 
 def step_rule(coll, starts) -> dict:
@@ -201,10 +287,31 @@ def stage0_lines(s0) -> list:
             pts_.append(f"{step // 1000}k {page.pct(c['all'][0] / c['all'][1])}（空间 "
                         f"{page.pct(c['spatial'][0] / c['spatial'][1]) if c['spatial'][1] else '—'}）")
         lines.append(f"{s}：" + "，".join(pts_) + "。")
+    short = [r for r in s0.get("evaluations", []) if r["missing"]]
+    if short:
+        lines.append("缺回合的评测：" + "；".join(
+            f"{r['start']} {r['step'] // 1000}k{'（第二遍）' if r['kind'] == 'repeat' else ''}"
+            f"{'（未完成）' if r['partial'] else ''} {r['episodes']}/{r['planned']}，缺 {'、'.join(r['missing'])}"
+            for r in short) + "。")
     if s0["latest_common"]:
+        lo, hi = int(100 * s0["band"][0]), int(100 * s0["band"][1])
         band = [x["task"] for x in s0["spatial"] if x["in_band"]]
         lines.append(f"四个起点都评过的最后一个检查点是 {s0['latest_common'] // 1000}k；9 个空间任务里，四个起点平均成功率在 "
-                     f"{int(100 * s0['band'][0])}%–{int(100 * s0['band'][1])}% 的有 {len(band)} 个：{'、'.join(band) or '无'}。")
+                     f"{lo}%–{hi}% 的有 {len(band)} 个：{'、'.join(band) or '无'}。")
+        band_all = [x for x in s0["spatial"] if x["in_band_all"]]
+        lines.append(f"改用全部检查点（每个起点每个检查点一个成功率，再平均）：在 {lo}%–{hi}% 的有 {len(band_all)} 个："
+                     + ("、".join(f"{x['task']} {page.pct(x['mean_all'])}" for x in band_all) or "无")
+                     + ("" if all(x["band_certain"] for x in s0["spatial"]) else
+                        "；缺的回合补完后可能改变归类的："
+                        + "、".join(x["task"] for x in s0["spatial"] if not x["band_certain"])) + "。")
+    fl = (s0.get("fluctuation") or {}).get("summary") or {}
+    if fl.get("within_all", {}).get("pairs") and fl.get("between_all", {}).get("pairs"):
+        w, b = fl["within_all"], fl["between_all"]
+        lines.append(f"同一起点相邻两个检查点（{w['pairs']} 对）之差：合并差绝对值平均 {page.pts(w['pooled_abs_mean']).lstrip('+')}、"
+                     f"最大 {page.pts(w['pooled_abs_max']).lstrip('+')} 个百分点，{w['significant']} 对 McNemar p < 0.05；"
+                     f"同一检查点起点与 {s0['fluctuation']['between'][0]['reference']} 之差（{b['pairs']} 对）：平均 "
+                     f"{page.pts(b['pooled_abs_mean']).lstrip('+')}、最大 {page.pts(b['pooled_abs_max']).lstrip('+')} 个百分点，"
+                     f"{b['significant']} 对 p < 0.05。")
     for s, r in s0["flat"].items():
         lines.append(f"{s} 最后两个检查点 {r['from'] // 1000}k → {r['to'] // 1000}k：全部任务 {page.pts(r['all']['diff'])} 个百分点"
                      f"（McNemar p = {page.pval(r['all']['p'])}；逐任务平均 {page.pts(r['all']['task_task_mean_diff'])}，"
@@ -224,13 +331,13 @@ def stage0_lines(s0) -> list:
     return lines
 
 
-def build(runs_root: Path, out: Path, reference: str = "B", stage0_mode: bool = False) -> dict:
+def build(runs_root: Path, out: Path, reference: str = "B", stage0_mode: bool = False, partial: bool = False) -> dict:
     from . import figures as F
 
     if stage0_mode:
-        coll = collect.collect(runs_root, evals_name=f"evals_{STAGE0_RUN}", run=STAGE0_RUN)
+        coll = collect.collect(runs_root, evals_name=f"evals_{STAGE0_RUN}", run=STAGE0_RUN, partial=partial)
     else:
-        coll = collect.collect(runs_root)
+        coll = collect.collect(runs_root, partial=partial)
     simulated = (Path(runs_root) / "SIMULATED").exists()
     out = Path(out)
     (out / "figures").mkdir(parents=True, exist_ok=True)
@@ -329,8 +436,10 @@ def main(argv=None) -> int:
     ap.add_argument("--reference", default="B")
     ap.add_argument("--stage0", action="store_true",
                     help="stage 0: the stopped D5 runs (run_stopped_20261022, evals_run_stopped_20261022)")
+    ap.add_argument("--partial", action="store_true",
+                    help="also count evaluations without a summary yet (their completed episodes; marked on the page)")
     args = ap.parse_args(argv)
-    print(json.dumps(build(args.runs_root, args.out, args.reference, stage0_mode=args.stage0)))
+    print(json.dumps(build(args.runs_root, args.out, args.reference, stage0_mode=args.stage0, partial=args.partial)))
     return 0
 
 
