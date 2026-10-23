@@ -165,15 +165,22 @@ def excluded_keys() -> set:
 
 
 def without_excluded(summary: dict, outs: dict):
-    """(summary, outcomes) with the excluded episodes taken out and the counts recomputed from the outcomes."""
+    """(summary, outcomes) with the excluded episodes taken out: each one the outcomes hold is subtracted from the
+    summary's counts (per task, successes, complete)."""
     skip = excluded_keys()
-    outs = {k: v for k, v in outs.items() if (k[0], int(k[1])) not in skip}
-    per_task = {}
-    for (task, _), ok in outs.items():
-        p = per_task.setdefault(task, {"n": 0, "successes": 0})
-        p["n"] += 1
-        p["successes"] += int(ok)
-    return dict(summary, per_task=per_task, successes=sum(outs.values()), complete=len(outs)), outs
+    gone = {k: v for k, v in outs.items() if (k[0], int(k[1])) in skip}
+    if not gone:
+        return summary, outs
+    per_task = {t: dict(v) for t, v in summary["per_task"].items()}
+    for (task, _), ok in gone.items():
+        if task in per_task:
+            per_task[task]["n"] -= 1
+            per_task[task]["successes"] -= int(ok)
+    out = dict(summary, per_task=per_task)
+    for key, value in (("successes", sum(gone.values())), ("complete", len(gone))):
+        if key in out:
+            out[key] -= value
+    return out, {k: v for k, v in outs.items() if k not in gone}
 
 
 def merged(evaldir: Path):
