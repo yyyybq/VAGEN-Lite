@@ -583,6 +583,40 @@ class Watcher:
         self.sent8 += 1
         self.sent8_pool[pool] = self.sent8_pool.get(pool, 0) + 1
 
+    def sent_on_idle(self, name: str, run: Path, kind: str, job: str) -> None:
+        self.state.setdefault("idle_sent", {})[name] = {"run": str(run), "kind": kind, "job": job, "utc": utc()}
+
+    def withdraw_for_main_line(self) -> list:
+        """Our 8-card jobs sent under the idle-machine rule (kind "resume": a stopped run; "queue": a prepared job)
+        that still wait for cards while a main-line job waits are withdrawn: the sco job deleted, a run's record
+        renamed job_released_<time> (it resumes later the same way), a prepared job's submission.json renamed
+        submission_withdrawn_<time>.json (its prepared.json stays, so it is sent again later).  They must not take a
+        freed machine before the main line (the user's GPU order of 2026-10-23 evening)."""
+        if not self.yield_waiting():
+            return []
+        out = []
+        for name, rec in sorted(self.state.get("idle_sent", {}).items()):
+            run = Path(rec["run"])
+            if _job_id(run) != rec["job"]:
+                continue
+            st = self.job(run)
+            if st.get("finished") or st.get("state") not in sco_job.WAITING_STATES:
+                continue
+            if self.a.dry:
+                out.append(f"{name} (would withdraw)")
+                continue
+            res = self.jobs.delete(run)
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            if rec["kind"] == "resume":
+                (run / "job").rename(run / f"job_released_{stamp}")
+            else:
+                (run / "job/submission.json").rename(run / f"job/submission_withdrawn_{stamp}.json")
+            self.state["finished"].pop(str(run), None)
+            out.append(f"{name}（{res}）")
+        if out:
+            self.notes.append(f"主线有任务在排队：撤下我们按空闲机器提交、还在排队的 {len(out)} 个：{'；'.join(out)}")
+        return out
+
     # ------------------------------------------------ E1 at 150k / 175k (the user's decision 2, 2026-10-23 evening)
     def extra_entries(self, exp: Path) -> list:
         """The --extra-points of a segmented run of --extra-ratios: the weights copied out of the point's full state,
@@ -654,7 +688,12 @@ class Watcher:
             if why:
                 self.notes.append(why)
                 break
-            sent.append(f"{spec.get('what', entry.stem)} " + ("(would)" if self.a.dry else self.jobs.submit(run)))
+            if self.a.dry:
+                sent.append(f"{spec.get('what', entry.stem)} (would)")
+            else:
+                jid = self.jobs.submit(run)
+                self.sent_on_idle(entry.stem, run, "queue", jid)
+                sent.append(f"{spec.get('what', entry.stem)} {jid}")
             self.took8(pool)
         if sent:
             self.notes.append(f"排队任务本轮提交：{'；'.join(sent)}")
@@ -688,6 +727,7 @@ class Watcher:
                     if "error" in out:
                         self.alerts.append(f"{exp.name} 续训没提交成功：{out['error'][:200]}")
                         continue
+                    self.sent_on_idle(exp.name, exp, "resume", out.get("job"))
                     sent.append(f"{exp.name} {out.get('job')} ({pool})")
                 self.took8(pool)
         if sent:
@@ -997,6 +1037,7 @@ class Watcher:
                 missing.append(exp_id)
         self.flush_shards()
         self.flush_whole()
+        self.withdraw_for_main_line()
         self.flush_queue()
         self.resume_released()
         rep = self.repeat_results()

@@ -162,6 +162,55 @@ def test_only_queued_main_line_jobs_hold_us_back(tmp_path):
     assert "给排在前面的任务让路" in w.blocked(8, "h800") and w.yield_waiting() == ["interiorgs-v10-eval-val--dcks2-100"]
 
 
+class SubmittingRuns(FakeRuns):
+    """FakeRuns whose submit leaves EXP/job/submission.json, as runs.submit does."""
+    def __init__(self, jobs):
+        super().__init__()
+        self.jobs = jobs
+
+    def submit(self, start, ratio, seed, root, pool=None):
+        out = super().submit(start, ratio, seed, root, pool)
+        exp = Path(root) / "experiments" / out["exp"]
+        self.jobs.prepare(exp, 8, pool, exp.name.lower(), ["bash", "run_segmented.sh", str(exp)])
+        out["job"] = self.jobs.submit(exp)
+        return out
+
+
+def test_jobs_sent_on_idle_machines_are_withdrawn_while_they_wait_and_the_main_line_queues(tmp_path):
+    e2 = e1_exp(tmp_path, ratio="010", states=(75000,), step=77100)
+    (e2 / "job_released_20261023T191729Z").mkdir()
+    qrun = tmp_path / "RL-SPEED-64"
+    jobs = FakeJobs(states={"DS-B-010-s1": "QUEUEING", "RL-SPEED-64": "STARTING"})
+    jobs.prepare(qrun, 8, "h800", "downstream-rl-speed64", ["bash", "speed_test.sh"])
+    (tmp_path / "queue").mkdir()
+    (tmp_path / "queue/a.json").write_text(json.dumps({"run": str(qrun), "cards": 8, "what": "RL test"}))
+    run_tools = SubmittingRuns(jobs)
+    args = ("--exps", "DS-B-010-s1", "--queue-dir", str(tmp_path / "queue"), "--max-whole-per-pass", "2",
+            "--pool-nodes", "h800:3")
+    w = watcher(tmp_path, *args, jobs=jobs, run_tools=run_tools)
+    w.tick()  # idle machines, nothing of the main line queued: both go
+    w.save()
+    assert (qrun / "job/submission.json").exists() and (e2 / "job/submission.json").exists()
+    assert set(w.state["idle_sent"]) == {"a", "DS-B-010-s1"}
+    jobs.listing = [eight_card("interiorgs-v10-eval-x", "QUEUEING", cards=1)]  # the main line queues; ours still wait
+    w = watcher(tmp_path, *args, jobs=jobs, run_tools=run_tools)
+    w.tick()
+    w.save()
+    assert jobs.deleted == ["DS-B-010-s1", "RL-SPEED-64"]
+    assert not (e2 / "job").exists() and len(list(e2.glob("job_released_*"))) == 2
+    assert (qrun / "job/prepared.json").exists() and list((qrun / "job").glob("submission_withdrawn_*.json"))
+    assert len(run_tools.submitted) == 1 and any("撤下我们按空闲机器提交、还在排队的 2 个" in n for n in w.notes)
+    jobs.listing = []  # the main line is on machines again: both go back in
+    w = watcher(tmp_path, *args, jobs=jobs, run_tools=run_tools)
+    w.tick()
+    assert (qrun / "job/submission.json").exists() and len(run_tools.submitted) == 2
+    jobs.states["DS-B-010-s1"] = "RUNNING"  # a started job stays, whatever queues behind it
+    jobs.listing = [eight_card("interiorgs-v10-eval-x", "QUEUEING", cards=1)]
+    w = watcher(tmp_path, *args, jobs=jobs, run_tools=run_tools)
+    w.tick()
+    assert (e2 / "job/submission.json").exists() and jobs.deleted.count("DS-B-010-s1") == 1
+
+
 def test_e1_matrix_cells_show_each_point_and_the_mean_of_three(tmp_path):
     from test_watch_and_tasks import summary
 
