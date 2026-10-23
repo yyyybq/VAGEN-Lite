@@ -485,6 +485,36 @@ def reward_overrides(preset: str) -> Dict[str, Any]:
     return {**DENSE_S5, **DENSE_ADJUST, **(DENSE_COND if preset == "D_cond" else {})}
 
 
+def _three_numbers(text: Any, name: str) -> List[float]:
+    values = [float(x) for x in (text.split(",") if isinstance(text, str) else text)]
+    if len(values) != 3 or min(values) < 0:
+        raise SystemExit(f"{name} must be three non-negative numbers (frame, face, relation), not {text!r}")
+    return values
+
+
+def design_variant_overrides(args: argparse.Namespace, env: Dict[str, Any]) -> Dict[str, Any]:
+    """Round 12 freeze, the dense-reward design variants (the user's 10th supplement of 2026-10-23): env-config
+    overrides on top of the reward preset's (``env``, already merged): --progress-version (grouped_soft, V3),
+    --progress-weights (V1 / V2), --progress-reward-scale (the potential's scale, V4 / V5), --milestone-rewards (V6).
+    Weights and milestones need a grouped progress version and a dense preset."""
+    out: Dict[str, Any] = {}
+    if getattr(args, "progress_version", None):
+        out["progress_version"] = args.progress_version
+    version = out.get("progress_version", env.get("progress_version", "product"))
+    if getattr(args, "progress_weights", None):
+        out["progress_weights"] = _three_numbers(args.progress_weights, "--progress-weights")
+    if getattr(args, "milestone_rewards", None):
+        out["milestone_rewards"] = _three_numbers(args.milestone_rewards, "--milestone-rewards")
+    if getattr(args, "progress_reward_scale", None) is not None:
+        out["potential_field_reward_scale"] = float(args.progress_reward_scale)
+    if out and not env.get("enable_potential_shaping_reward"):
+        raise SystemExit("the progress options change the dense reward: give a dense --reward-preset (dense, D_cond)")
+    if ("progress_weights" in out or "milestone_rewards" in out) and version == "product":
+        raise SystemExit("--progress-weights / --milestone-rewards need a grouped progress version (D_cond, or "
+                         "--progress-version grouped_gated / grouped_soft)")
+    return out
+
+
 def history_overrides(mode: str, max_turns: int) -> Dict[str, Dict[str, Any]]:
     """{"env": env-config overrides, "ppo": PPO-config overrides} for a history mode."""
     if mode not in HISTORY_MODES:
@@ -626,6 +656,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         history["env"]["lenient_parse"] = True
     if getattr(args, "invalid_penalty", None) is not None:  # round 12 freeze (3.1.3): the unreadable answer's penalty
         history["env"]["invalid_penalty_override"] = float(args.invalid_penalty)
+    history["env"].update(design_variant_overrides(args, history["env"]))
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -697,6 +728,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             _set(ppo, key, value)
     if getattr(args, "invalid_turn_nonpositive", False):  # round 12 freeze (the user's 3.2, vagen/invalid_turns.py)
         _set(ppo, "algorithm.invalid_turn_nonpositive_adv", True)
+    if getattr(args, "progress_adv_weight", None) is not None:  # round 12 freeze, V8 (vagen/split_reward_adv.py)
+        if not history["env"].get("enable_potential_shaping_reward"):
+            raise SystemExit("--progress-adv-weight splits the dense reward's progress part: give a dense --reward-preset")
+        _set(ppo, "algorithm.progress_adv_weight", float(args.progress_adv_weight))
     if getattr(args, "entropy_coeff", None) is not None:  # round 12 batch: the entropy bonus instead of the package's
         _set(ppo, "actor_rollout_ref.actor.entropy_coeff", float(args.entropy_coeff))
     group_filter = getattr(args, "group_filter", None)
@@ -734,6 +769,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "test_freq": ppo["trainer"].get("test_freq"), "critic_warmup": ppo["trainer"].get("critic_warmup"),
               "reward_preset": getattr(args, "reward_preset", None) or "S0",
               "env_reward_overrides": reward_overrides(getattr(args, "reward_preset", None) or "S0"),
+              "design_variant": design_variant_overrides(args, history["env"]) or None,
+              "progress_adv_weight": getattr(args, "progress_adv_weight", None),
               "train_batch_size": (ppo.get("data") or {}).get("train_batch_size"),
               "save_freq": ppo["trainer"].get("save_freq"),
               "reserve_rows_skipped": reserve_skipped,
@@ -1057,6 +1094,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--invalid-penalty", type=float, default=None,
                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
+    c.add_argument("--progress-version", default=None, choices=["grouped_gated", "grouped_soft"],
+                   help="round 12 freeze, dense-reward variant V3: the grouped progress with the hard gate (D_cond's) "
+                        "or the soft gate (relation group times the frame group's continuous score)")
+    c.add_argument("--progress-weights", default=None,
+                   help="round 12 freeze, variants V1 / V2: the grouped progress's frame, face and relation weights, "
+                        "e.g. 0.15,0.15,0.70 (default 0.25,0.25,0.5)")
+    c.add_argument("--progress-reward-scale", type=float, default=None,
+                   help="round 12 freeze, variants V4 / V5: the progress reward's scale (env "
+                        "potential_field_reward_scale, the dense presets' 10)")
+    c.add_argument("--milestone-rewards", default=None,
+                   help="round 12 freeze, variant V6: frame, face and relation rewards paid once, the first time each "
+                        "group is fully met, instead of the per-turn progress reward, e.g. 0.5,0.5,1.0")
+    c.add_argument("--progress-adv-weight", type=float, default=None,
+                   help="round 12 freeze, variant V8: the group comparison normalises the success part (return - "
+                        "progress) and the progress part apart and adds them, the progress part weighted (e.g. 0.5); "
+                        "PPO config algorithm.progress_adv_weight, vagen/split_reward_adv.py")
     c.add_argument("--sft-trajectories", nargs="*", default=None,
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,
