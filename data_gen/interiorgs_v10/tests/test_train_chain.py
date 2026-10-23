@@ -882,6 +882,18 @@ class ChainTest(unittest.TestCase):
             self.assertEqual([ps0[ps0.index(f) + 1] for f in ("--format-example", "--invalid-penalty", "--group-filter",
                                                               "--keep-std-threshold", "--keep-std-floor")],
                              ["placeholder", "-0.5", "keep_by_return_std", "0.4", "1.0"])
+            # round 12 freeze, the dense-reward design variants: the progress options reach rl-config (lists as
+            # three comma-separated numbers)
+            for flag in ("--progress-version", "--progress-weights", "--progress-reward-scale", "--milestone-rewards"):
+                self.assertNotIn(flag, ps0)
+            chain.plan["rl"].update(progress_version="grouped_soft", progress_weights=[0.15, 0.15, 0.7],
+                                    progress_reward_scale=30.0, milestone_rewards="0.5,0.5,1.0", progress_adv_weight=0.5)
+            chain.rl_config()
+            ps0 = calls[str(root / "rl_ps0")]
+            self.assertEqual([ps0[ps0.index(f) + 1] for f in ("--progress-version", "--progress-weights",
+                                                              "--progress-reward-scale", "--milestone-rewards",
+                                                              "--progress-adv-weight")],
+                             ["grouped_soft", "0.15,0.15,0.7", "30.0", "0.5,0.5,1.0", "0.5"])
 
     def test_standard_chain_defaults(self):
         """Round 12 freeze (the user's decision 3 of 2026-10-22): a run whose plan rl names a standard gets the

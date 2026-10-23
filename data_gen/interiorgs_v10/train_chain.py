@@ -1014,12 +1014,19 @@ class Chain:
                               ("format_example", "--format-example"), ("invalid_penalty", "--invalid-penalty"),
                               ("group_filter", "--group-filter"), ("keep_std_threshold", "--keep-std-threshold"),
                               ("keep_std_floor", "--keep-std-floor"),
+                              ("progress_version", "--progress-version"),
+                              ("progress_reward_scale", "--progress-reward-scale"),
+                              ("progress_adv_weight", "--progress-adv-weight"),
                               ("critic_warmup", "--critic-warmup"),
                               ("test_freq", "--test-freq"), ("val_tasks", "--val-tasks"),
                               ("train_batch_size", "--train-batch-size"),
                               ("ppo_mini_batch_size", "--ppo-mini-batch-size"), ("save_freq", "--save-freq")):
                 if rl.get(key) is not None:
                     args += [flag, str(rl[key])]
+            for key, flag in (("progress_weights", "--progress-weights"), ("milestone_rewards", "--milestone-rewards")):
+                if rl.get(key) is not None:  # round 12 freeze, the dense-reward design variants: three numbers
+                    value = rl[key]
+                    args += [flag, ",".join(str(x) for x in value) if isinstance(value, (list, tuple)) else str(value)]
             for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val"),
                               ("lenient_parse", "--lenient-parse"), ("invalid_turn_nonpositive", "--invalid-turn-nonpositive")):
                 if rl.get(key):
