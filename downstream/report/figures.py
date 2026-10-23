@@ -120,7 +120,7 @@ def checkpoint_curves(coll, ratio: str = "100", seed: int = 1, groups=stats.GROU
         ax.set_xlabel("checkpoint (thousand steps)")
     axes[0].legend(fontsize=8)
     hollow_note = " Hollow: evaluation still missing episodes." if any(e.partial for e in evs) else ""
-    fig.suptitle(f"Success by checkpoint, {RATIO_PERCENT.get(ratio, ratio)}% data, seed {seed} (95% Wilson bands). "
+    fig.suptitle(f"Success by checkpoint, {RATIO_PERCENT.get(ratio, ratio)}% data, seed {seed} (95% Wilson bands).\n"
                  f"Learning rate still high before 200k: not a shorter run.{hollow_note}", fontsize=9, color=MUTED)
     fig.tight_layout()
     return fig
