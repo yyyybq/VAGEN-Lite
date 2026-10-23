@@ -92,6 +92,13 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # (target_visibility.PROGRESS_VERSIONS): "product" (default, every condition score multiplied, unchanged) or
     # "grouped_gated" (0.25 frame + 0.25 face + 0.5 relation, the relation group only once the target is in frame).
     progress_version: str = "product"
+    # Round 12 freeze, the dense-reward design variants (the user's 10th supplement of 2026-10-23), default off:
+    # progress_weights: the frame, face and relation weights of a grouped progress version (None: 0.25 / 0.25 / 0.5);
+    # milestone_rewards: the frame, face and relation rewards paid once, the first time in an episode each group is
+    # fully met (target_visibility.new_milestones), replacing the per-turn potential difference (needs a grouped
+    # progress version; None: the potential reward as before).
+    progress_weights: Optional[List[float]] = None
+    milestone_rewards: Optional[List[float]] = None
     potential_field_gamma: float = 1.0   # ★ Ng1999 γ for "potential" mode. 1.0 ⇒ equivalent to "delta".
     # Reward-only ablation switches.  These do not disable the potential-field
     # scorer, canonical gate, success decision, or termination.  Defaults keep

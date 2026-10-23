@@ -469,8 +469,13 @@ def rule_gates(item: Dict[str, Any], c2w: Any, occ: OccluderSet) -> Dict[str, An
 # scores, the relation group counting only when every frame condition is met (the hard gate); frame conditions keep
 # their scores (0/1 or continuous, as the canonical metric gives them).  Capped below 1 while the task is not met, so
 # the shaping score keeps its meaning (>= 0.5 exactly on success).  Success does not depend on the version.
-PROGRESS_VERSIONS = ("product", "grouped_gated")
+# Round 12 freeze, the dense-reward design variants (the user's 10th supplement of 2026-10-23): "grouped_soft" (V3) is
+# grouped_gated with a soft gate, the relation group multiplied by the frame group's continuous score instead of
+# counting only once every frame condition is met; the weights of either grouped version can be set per run
+# (env progress_weights, V1 / V2), DCOND_WEIGHTS when not.
+PROGRESS_VERSIONS = ("product", "grouped_gated", "grouped_soft")
 DCOND_WEIGHTS = {"frame": 0.25, "face": 0.25, "relation": 0.5}
+GROUP_NAMES = ("frame", "face", "relation")
 # the frame group: the objects (and, for occlusion alignment, the occluder) in front of the camera, visible, large
 # enough and inside the frame; the face group is the clearly-visible rule's progress; every other canonical
 # condition (and the left/right 45-degree rule) is the relation group
@@ -481,7 +486,9 @@ FRAME_CONDITIONS = frozenset({"objects_present", "two_objects", "in_front", "vis
 
 def progress_groups(metric: Dict[str, Any], vis: Dict[str, Any],
                     lateral: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """{frame, face, relation: group scores in [0, 1], frame_met: every frame condition of the canonical metric met}."""
+    """{frame, face, relation: group scores in [0, 1], frame_met: every frame condition of the canonical metric met,
+    face_met: every required target clearly visible (the clearly-visible rule), relation_met: every other condition of
+    the canonical metric met and, where it applies, the left/right 45-degree rule}."""
     comps = metric.get("shaping_components") or {}
     frame, relation = 1.0, 1.0
     for key, value in comps.items():
@@ -490,21 +497,41 @@ def progress_groups(metric: Dict[str, Any], vis: Dict[str, Any],
             frame *= v
         else:
             relation *= v
+    lateral_ok = True
     if lateral is not None and lateral.get("applies"):
         relation *= float(lateral["progress"])
-    frame_met = all(bool(ok) for g, ok in (metric.get("gates") or {}).items() if g in FRAME_CONDITIONS)
-    return {"frame": frame, "face": float(vis["progress"]), "relation": relation, "frame_met": frame_met}
+        lateral_ok = bool(lateral["ok"])
+    gates = metric.get("gates") or {}
+    frame_met = all(bool(ok) for g, ok in gates.items() if g in FRAME_CONDITIONS)
+    relation_met = all(bool(ok) for g, ok in gates.items() if g not in FRAME_CONDITIONS) and lateral_ok
+    return {"frame": frame, "face": float(vis["progress"]), "relation": relation, "frame_met": frame_met,
+            "face_met": bool(vis["visible"]), "relation_met": relation_met}
+
+
+def grouped_progress(groups: Dict[str, Any], version: str = "grouped_gated",
+                     weights: Optional[Sequence[float]] = None) -> float:
+    """The grouped progress in [0, 1]: weighted frame, face and relation groups (weights in that order, DCOND_WEIGHTS
+    when None), the relation group gated by every frame condition met (grouped_gated) or multiplied by the frame
+    group's continuous score (grouped_soft)."""
+    w = dict(zip(GROUP_NAMES, weights)) if weights is not None else DCOND_WEIGHTS
+    gate = groups["frame"] if version == "grouped_soft" else (1.0 if groups["frame_met"] else 0.0)
+    value = w["frame"] * groups["frame"] + w["face"] * groups["face"] + w["relation"] * groups["relation"] * gate
+    return float(min(1.0, max(0.0, value)))
 
 
 def apply_visibility(metric: Dict[str, Any], vis: Dict[str, Any],
-                     lateral: Optional[Dict[str, Any]] = None, progress_version: str = "product") -> Dict[str, Any]:
+                     lateral: Optional[Dict[str, Any]] = None, progress_version: str = "product",
+                     progress_weights: Optional[Sequence[float]] = None) -> Dict[str, Any]:
     """The canonical metric with this module's gates added: success needs every required target (and its
     reference object) clearly visible and, for left/right, the 45-degree rule; the shaping score keeps its
-    meaning (>= 0.5 exactly on success).  ``progress_version`` (PROGRESS_VERSIONS): which progress it carries."""
+    meaning (>= 0.5 exactly on success).  ``progress_version`` (PROGRESS_VERSIONS): which progress it carries;
+    ``progress_weights``: the frame, face and relation weights of a grouped version (DCOND_WEIGHTS when None)."""
     from .canonical_task_metrics_v2 import FAILING_PROGRESS_CAP
 
     if progress_version not in PROGRESS_VERSIONS:
         raise ValueError(f"progress version must be one of {PROGRESS_VERSIONS}, not {progress_version!r}")
+    if progress_weights is not None and (len(progress_weights) != 3 or min(progress_weights) < 0):
+        raise ValueError(f"progress weights must be three non-negative numbers, not {progress_weights!r}")
 
     out = dict(metric)
     gates = dict(out.get("gates") or {})
@@ -523,11 +550,9 @@ def apply_visibility(metric: Dict[str, Any], vis: Dict[str, Any],
         base = float(metric.get("shaping_score", 0.0) or 0.0)
     progress = float(min(1.0, max(0.0, float(base)))) * float(vis["progress"]) * lat_progress
     groups = None
-    if progress_version == "grouped_gated" and metric.get("shaping_components") is not None:
+    if progress_version != "product" and metric.get("shaping_components") is not None:
         groups = progress_groups(metric, vis, lateral)
-        progress = (DCOND_WEIGHTS["frame"] * groups["frame"] + DCOND_WEIGHTS["face"] * groups["face"]
-                    + DCOND_WEIGHTS["relation"] * groups["relation"] * (1.0 if groups["frame_met"] else 0.0))
-        progress = float(min(1.0, max(0.0, progress)))
+        progress = grouped_progress(groups, progress_version, progress_weights)
     if not success:
         progress = min(progress, FAILING_PROGRESS_CAP)
     out.update(success=success, gates=gates, continuous_gate_progress=progress,
@@ -540,13 +565,30 @@ def apply_visibility(metric: Dict[str, Any], vis: Dict[str, Any],
 
 
 def score_with_visibility(item: Dict[str, Any], c2w: Any, occ: Optional[OccluderSet],
-                          progress_version: str = "product") -> Dict[str, Any]:
+                          progress_version: str = "product",
+                          progress_weights: Optional[Sequence[float]] = None) -> Dict[str, Any]:
     """The env's success metric: the canonical metric plus, when ``occ`` is given, this module's rules
-    (``progress_version``: which progress the shaping score carries, PROGRESS_VERSIONS)."""
+    (``progress_version``: which progress the shaping score carries, PROGRESS_VERSIONS; ``progress_weights``: a
+    grouped version's weights)."""
     from .canonical_task_metrics import score_canonical_task
 
     metric = score_canonical_task(item, np.asarray(c2w, float))
     if occ is None:
         return metric
     return apply_visibility(metric, visibility_gates(item, c2w, occ), lateral_gate(item, c2w),
-                            progress_version=progress_version)
+                            progress_version=progress_version, progress_weights=progress_weights)
+
+
+# Round 12 freeze, V6 (the user's 10th supplement): milestone rewards instead of the potential difference: a one-off
+# reward the first time in an episode each group is fully met (frame, face, relation, in that order); groups already
+# met at the start are counted as reached and pay nothing.
+def new_milestones(groups: Dict[str, Any], reached: set, values: Sequence[float]) -> Tuple[float, list]:
+    """(reward, newly reached group names) for one pose: every group fully met now and not reached before pays its
+    value once; ``reached`` is updated in place."""
+    reward, new = 0.0, []
+    for name, value in zip(GROUP_NAMES, values):
+        if groups.get(f"{name}_met") and name not in reached:
+            reached.add(name)
+            reward += float(value)
+            new.append(name)
+    return reward, new
