@@ -22,6 +22,13 @@ from data_gen.active_spatial_sft.convert_to_qwen25vl_sft import (
 )
 
 
+def _lf_template(model_type: str) -> str:
+    """The LLaMA-Factory template of a model type (vagen/models/model_types.py; Qwen2.5-VL: qwen2_vl)."""
+    from vagen.models.model_types import get
+
+    return get(model_type).lf_template
+
+
 def read_rows(path):
     return [
         json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()
@@ -102,8 +109,13 @@ def prepare(args):
         raise ValueError("Invalid QA probability or validation fraction")
     model = Path(args.model).resolve(strict=True)
     model_type = json.loads((model / "config.json").read_text())["model_type"]
-    # The bundled LLaMA-Factory has qwen2_vl but no qwen3_vl template.
-    if model_type != "qwen2_5_vl":
+    # The bundled LLaMA-Factory has qwen2_vl but no qwen3_vl template.  The model line (2026-10-24): --model-type
+    # qwen3_vl takes the template model_matrix/sft/lf_qwen3vl.py registers (vagen/models/model_types.py); the default
+    # is Qwen2.5-VL as before.
+    wanted = getattr(args, "model_type", None) or "qwen2_5_vl"
+    if model_type != wanted:
+        raise ValueError(f"{model} is a {model_type} model, not {wanted} (--model-type)")
+    if model_type not in ("qwen2_5_vl", "qwen3_vl"):
         raise ValueError(
             "This bundled SFT recipe supports Qwen2.5-VL; Qwen3-VL needs a validated LLaMA-Factory upgrade"
         )
@@ -241,7 +253,7 @@ def prepare(args):
         "dataset": ",".join(k + "_train" for k in active),
         "eval_dataset": ",".join(k + "_val" for k in active),
         "val_size": 0.0,
-        "template": "qwen2_vl",
+        "template": _lf_template(model_type),
         "cutoff_len": args.cutoff_len,
         "mask_history": False,
         "output_dir": str(out / "model"),
@@ -315,6 +327,9 @@ def main():
         help="Rendered training manifest.jsonl",
     )
     p.add_argument("--model", required=True, help="Local Qwen2.5-VL HF checkpoint")
+    p.add_argument("--model-type", default="qwen2_5_vl", choices=("qwen2_5_vl", "qwen3_vl"),
+                   help="the model line (2026-10-24): the model's type (its config.json model_type must match); "
+                        "default Qwen2.5-VL, the recipe as before")
     p.add_argument("--out", required=True)
     p.add_argument("--qa-probability", type=float, default=0.5)
     p.add_argument("--val-fraction", type=float, default=0.1)

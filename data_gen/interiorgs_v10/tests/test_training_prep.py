@@ -663,6 +663,16 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertTrue(ppo6["algorithm"]["invalid_turn_nonpositive_adv"] and report6["invalid_turn_nonpositive"])
         self.assertNotIn("invalid_turn_nonpositive_adv", ppo0["algorithm"])
         self.assertFalse(report0["invalid_turn_nonpositive"])
+        # the model line (2026-10-24): the rollout-vs-trainer log-probability audit -- vLLM also returns the sampled
+        # tokens' log-probabilities, the update keeps the trainer's (no rollout correction); off by default
+        _, report7 = config("rl_logprob_audit", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder",
+                            rollout_log_probs=True)
+        ppo7 = yaml.safe_load((self.root / "rl_logprob_audit" / "ppo.yaml").read_text())
+        self.assertTrue(ppo7["actor_rollout_ref"]["rollout"]["calculate_log_probs"] and report7["rollout_log_probs"])
+        self.assertFalse(((ppo0.get("actor_rollout_ref") or {}).get("rollout") or {}).get("calculate_log_probs", False))
+        self.assertFalse(report0["rollout_log_probs"])
+        self.assertIsNone(((ppo7.get("algorithm") or {}).get("rollout_correction") or {}).get("rollout_is"))
+        self.assertFalse(((ppo7.get("actor_rollout_ref") or {}).get("actor") or {}).get("use_rollout_log_probs", False))
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

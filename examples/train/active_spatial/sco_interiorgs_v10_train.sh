@@ -26,7 +26,9 @@ RUN=${2:?run directory}
 # round 12 freeze: VAGEN_LITE_WORKTREE (set by the launch script of a chain run from another copy, job_sco.WORKTREE)
 WORKTREE=${VAGEN_LITE_WORKTREE:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite}
 ENV_ROOT=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
-PY=${ENV_ROOT}/bin/python
+# the model line (2026-10-24): VAGEN_LITE_PYTHON is the model type's Python (vagen/models/model_types.py, e.g. the
+# Qwen3-VL runtime venv), passed on by job_sco; unset, the vagen-lite env as before.  The render service keeps ENV_ROOT
+PY=${VAGEN_LITE_PYTHON:-${ENV_ROOT}/bin/python}
 GS_ROOT=/mnt/umm/users/yinbaiqiao/InteriorGS_ply
 # the gsplat build validated on 2026-10-07 (dense-score pilot), kept outside the code directory since round 11: the
 # checkout's experiment folders get moved into archive/ by the directory clean-up
@@ -77,6 +79,13 @@ lf_train() {  # $1 = LLaMA-Factory recipe, $2 = number of processes
   # LLaMA-Factory 0.9.3 pins transformers <= 4.52.4; vagen-lite has 4.56.1 (needed by the RL stack). The
   # trial checks that SFT runs anyway; the pin is LLaMA-Factory's own check, not a known incompatibility.
   export DISABLE_VERSION_CHECK=1
+  if [[ -n ${VAGEN_LITE_MODEL_TYPE:-} && ${VAGEN_LITE_MODEL_TYPE} != qwen2_5_vl ]]; then
+    # the model line: the model type's FSDP config and LLaMA-Factory launcher (its registrations first), in its Python
+    local cfg launcher
+    read -r cfg launcher < <("${PY}" -m vagen.models.model_types sft-launch "${VAGEN_LITE_MODEL_TYPE}")
+    "${PY}" -m accelerate.commands.launch --config_file "${cfg}" --num_processes "$2" -m "${launcher}" "$1"
+    return
+  fi
   accelerate launch --config_file examples/train/active_spatial/accelerate_fsdp_qwen25vl.yaml \
     --num_processes "$2" -m llamafactory.launcher "$1"
 }

@@ -45,6 +45,11 @@ POOLS = ("zoetrope", "h800")  # same H800 cards, specs, image and storage
 # zone and network); a job is prepared there only when asked, pick_pool never chooses it
 RENDER_POOLS = ("zoe-cf-render",)
 SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
+# the model line (2026-10-24): set in the preparing process (the training chain sets the first two from the plan's
+# model_type), these reach the job script through the launch script; the job script reads VAGEN_LITE_PYTHON (the model
+# type's Python) and VAGEN_LITE_MODEL_TYPE (its SFT launcher), the PPO trainer VAGEN_D0_3_SMOKE_DIR (the per-update
+# rollout-vs-trainer log-probability audit).  None set: every launch script as before.
+PASS_ENV = ("VAGEN_LITE_PYTHON", "VAGEN_LITE_MODEL_TYPE", "VAGEN_D0_3_SMOKE_DIR")
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 # created, no cards yet; sco spells it QUEUEING (round 12 batch: without it a job in that state counted as not waiting)
 WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUEING", "QUEUED", "WAITING", "CREATING"}
@@ -66,7 +71,9 @@ def prepare(run: Path, gpus: int, mode_args: List[str], job_dir: str = "job", po
     job.mkdir(parents=True, exist_ok=True)
     launch = job / "launch.sh"
     args = " ".join(shlex.quote(a) for a in mode_args[1:])
-    env = "" if WORKTREE == DEFAULT_WORKTREE else f"env VAGEN_LITE_WORKTREE={shlex.quote(WORKTREE)} "
+    passed = [] if WORKTREE == DEFAULT_WORKTREE else [f"VAGEN_LITE_WORKTREE={shlex.quote(WORKTREE)}"]
+    passed += [f"{k}={shlex.quote(os.environ[k])}" for k in PASS_ENV if os.environ.get(k)]
+    env = f"env {' '.join(passed)} " if passed else ""
     launch.write_text(f"#!/usr/bin/env bash\nexec {env}bash {WORKTREE}/{SCRIPT} {shlex.quote(mode_args[0])} {run} {args}\n")
     launch.chmod(0o755)
     (job / "prepared.json").write_text(json.dumps({"utc": now(), "gpus": gpus, "spec": SPECS[gpus], "pool": pool,

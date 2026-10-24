@@ -774,7 +774,32 @@ class Chain:
             raise ChainError("jobs did not succeed: " + ", ".join(f"{n} ({s})" for n, s in sorted(bad.items())))
 
     # -------------------------------------------------------------- steps
+    def model_type_env(self) -> Dict[str, str]:
+        """The model line (2026-10-24): what the plan's "model_type" (vagen/models/model_types.py; default
+        Qwen2.5-VL) gives every job through job_sco.PASS_ENV -- the type and its Python -- and with plan rl
+        "logprob_audit" the folder of the trainer's per-update rollout-vs-trainer log-probability files.  Empty for
+        Qwen2.5-VL without the audit: every job as before."""
+        from vagen.models.model_types import DEFAULT, get
+
+        env: Dict[str, str] = {}
+        name = self.plan.get("model_type")
+        if name and name != DEFAULT:
+            kind = get(name)
+            env["VAGEN_LITE_MODEL_TYPE"] = kind.name
+            if kind.python:
+                env["VAGEN_LITE_PYTHON"] = kind.python
+        if (self.plan.get("rl") or {}).get("logprob_audit"):
+            env["VAGEN_D0_3_SMOKE_DIR"] = str(self.tr / "logprob_audit")
+        return env
+
     def check_code(self) -> None:
+        if self.plan.get("model_type") and self.plan.get("model"):  # the model line: the plan's type is the model's
+            from vagen.models.model_types import check
+
+            try:
+                check(self.plan["model_type"], str(self.plan["model"]))
+            except ValueError as exc:
+                raise ChainError(str(exc))
         want = self.plan["commit"]
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
         if not head.startswith(want) and not want.startswith(head):
@@ -841,6 +866,8 @@ class Chain:
                 args.append("--keep-text")
             if self.plan.get("sft_learning_rate"):  # round 12 freeze: the short format SFT (default 1e-5)
                 args += ["--learning-rate", str(float(self.plan["sft_learning_rate"]))]
+            if self.plan.get("model_type"):  # the model line: the type's LLaMA-Factory template
+                args += ["--model-type", str(self.plan["model_type"])]
             self.sh(args, cwd=ROOT / "scripts", log=self.tr / "logs" / f"prepare_sft{'_' + group if group else ''}.log")
             if not (lf / "train.yaml").is_file():
                 raise ChainError(f"prepare_active_spatial_sft.py wrote no train.yaml in {lf}")
@@ -1030,7 +1057,8 @@ class Chain:
                     value = rl[key]
                     args += [flag, ",".join(str(x) for x in value) if isinstance(value, (list, tuple)) else str(value)]
             for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val"),
-                              ("lenient_parse", "--lenient-parse"), ("invalid_turn_nonpositive", "--invalid-turn-nonpositive")):
+                              ("lenient_parse", "--lenient-parse"), ("invalid_turn_nonpositive", "--invalid-turn-nonpositive"),
+                              ("logprob_audit", "--rollout-log-probs")):  # the model line: the log-probability audit
                 if rl.get(key):
                     args.append(flag)
             if self.plan.get("rl_runs") and run["reward_preset"]:
@@ -1735,6 +1763,7 @@ class Chain:
 
     # -------------------------------------------------------------- driver
     def run(self) -> int:
+        os.environ.update(self.model_type_env())  # the model line: read by job_sco.prepare (PASS_ENV)
         self.state["chain_pid"] = os.getpid()
         self.state["state"] = "running"
         self.save()

@@ -728,6 +728,13 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             _set(ppo, key, value)
     if getattr(args, "invalid_turn_nonpositive", False):  # round 12 freeze (the user's 3.2, vagen/invalid_turns.py)
         _set(ppo, "algorithm.invalid_turn_nonpositive_adv", True)
+    if getattr(args, "rollout_log_probs", False):
+        # the model line (2026-10-24): vLLM returns each sampled token's log-probability, so the trainer compares it
+        # with its own (vagen/ray_trainer.py: training/rollout_probs_diff_*, and with VAGEN_D0_3_SMOKE_DIR a file per
+        # update).  The update still uses the trainer's recomputed values: the rollout correction stays off
+        if ((ppo.get("algorithm") or {}).get("rollout_correction") or {}).get("rollout_is") is not None:
+            raise SystemExit("--rollout-log-probs is an audit: the template must not turn on the rollout correction")
+        _set(ppo, "actor_rollout_ref.rollout.calculate_log_probs", True)
     if getattr(args, "progress_adv_weight", None) is not None:  # round 12 freeze, V8 (vagen/split_reward_adv.py)
         if not history["env"].get("enable_potential_shaping_reward"):
             raise SystemExit("--progress-adv-weight splits the dense reward's progress part: give a dense --reward-preset")
@@ -790,6 +797,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "format_example": fmt, "format_example_sft": sft_formats or None,
               "lenient_parse": bool(getattr(args, "lenient_parse", False)),
               "invalid_turn_nonpositive": bool(getattr(args, "invalid_turn_nonpositive", False)),
+              "rollout_log_probs": bool(getattr(args, "rollout_log_probs", False)),
               "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
@@ -1105,6 +1113,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--invalid-turn-nonpositive", action="store_true",
                    help="round 12 freeze: the tokens of a turn the env could not read get no positive advantage "
                         "(vagen/invalid_turns.py; PPO config algorithm.invalid_turn_nonpositive_adv)")
+    c.add_argument("--rollout-log-probs", action="store_true",
+                   help="the model line: vLLM also returns each sampled token's log-probability, for the per-update "
+                        "comparison with the trainer's (an audit; the update is unchanged)")
     c.add_argument("--invalid-penalty", type=float, default=None,
                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
