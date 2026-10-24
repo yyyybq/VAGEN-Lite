@@ -12,8 +12,12 @@ class SmokePlansTest(unittest.TestCase):
 
         all_plans = P.plans("abc", "20261024")
         self.assertEqual(sorted(all_plans), ["m_cambrian7b_base_20261024", "m_cambrian7b_smoke_20261024",
-                                             "m_qwen25vl7b_smoke_20261024", "m_qwen3vl8b_base_20261024",
-                                             "m_qwen3vl8b_smoke_20261024"])
+                                             "m_qwen25vl7b_base_20261024", "m_qwen25vl7b_smoke_20261024",
+                                             "m_qwen3vl8b_base_20261024", "m_qwen3vl8b_smoke_20261024"])
+        qb = all_plans["m_qwen25vl7b_base_20261024"]
+        self.assertNotIn("model_type", qb)  # the default Qwen2.5-VL path
+        self.assertEqual(qb["eval"]["models"], {"m_qwen25vl7b_base_t08": {"model": P.QWEN25VL, "options": P.SAMPLED}})
+        self.assertEqual(all_plans["m_qwen3vl8b_base_20261024"]["model_type"], "qwen3_vl")
         cb, cs = all_plans["m_cambrian7b_base_20261024"], all_plans["m_cambrian7b_smoke_20261024"]
         self.assertEqual((cb["model_type"], cb["eval_only"]), ("cambrian_qwen", True))
         self.assertEqual(cb["eval"]["models"]["m_cambrian7b_base_t08"], {"model": P.CAMBRIAN, "options": P.SAMPLED})

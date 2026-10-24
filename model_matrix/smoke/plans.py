@@ -15,7 +15,9 @@ Plans (each chain runs from the worktree: VAGEN_LITE_WORKTREE=/mnt/umm/users/yin
                      log-probability audit's reference;
 - m_cambrian7b_base, m_cambrian7b_smoke: the first two for Cambrian-S-7B (the user's section 3; the line's download,
                      model_type cambrian_qwen: its SFT tool, the concat-path expansion, the evaluator's Cambrian
-                     branch).
+                     branch);
+- m_qwen25vl7b_base: the zero-shot row of the original Qwen2.5-VL-7B in the same setting, for the comparison (the
+                     user's decision 3 of 2026-10-24 22:45; the main line has no row at temperature 0.8 on these sets).
 Every job is named models-* and goes only to idle machines (plan pool "idle").  Results go to the line's own
 evaluation folders (tasks.jsonl and selection.json linked from the main line's v2 sets), so no result folder of the
 main line is written.  ``--recommit`` sets the commit of plans whose chain has not started (no progress.json): the
@@ -68,11 +70,14 @@ def smoke(tag: str, model: str, model_type, group: str, run: str, commit: str) -
     return plan
 
 
-def base_eval(tag: str, model: str, model_type: str, result: str, commit: str) -> dict:
-    return {"tr": str(RUNS / "chains" / tag), "sft_dir": str(SFT_DIR), "commit": commit, "eval_only": True,
-            "model_type": model_type, "job_prefix": "models", "pool": "idle", "max_eval_jobs": 2,
+def base_eval(tag: str, model: str, model_type, result: str, commit: str) -> dict:
+    plan = {"tr": str(RUNS / "chains" / tag), "sft_dir": str(SFT_DIR), "commit": commit, "eval_only": True,
+            "job_prefix": "models", "pool": "idle", "max_eval_jobs": 2,
             "eval_sets": {k: str(v) for k, v in EVAL_SETS.items()},
             "eval": {"options": [], "models": {result: {"model": model, "options": SAMPLED}}}}
+    if model_type:  # none: the default Qwen2.5-VL path
+        plan["model_type"] = model_type
+    return plan
 
 
 def plans(commit: str, date: str) -> dict:
@@ -87,6 +92,8 @@ def plans(commit: str, date: str) -> dict:
                                                "m_cambrian7b_base_t08", commit),
         f"m_cambrian7b_smoke_{date}": smoke(f"m_cambrian7b_smoke_{date}", CAMBRIAN, "cambrian_qwen", "csmoke",
                                             "cv4smoke", commit),
+        f"m_qwen25vl7b_base_{date}": base_eval(f"m_qwen25vl7b_base_{date}", QWEN25VL, None, "m_qwen25vl7b_base_t08",
+                                               commit),
     }
 
 
