@@ -1,14 +1,32 @@
 # 模型线状态（唯一的状态文档）
 
-最后更新：2026-10-24 18:55 UTC。
+最后更新：2026-10-24 19:45 UTC。
 
 模型线：把 Qwen3-VL-8B-Instruct 和 Cambrian-S（7B 为主）接进统一框架，在主线最高的 setting 上跑主实验和下游实验。报告在 [reports/](reports/)，实验登记表 `MATRIX.md` 第三步建。
 
 ## 1. 现在在哪一步
 
-- **第一步（盘点与核实）已完成，停下来等你确认。** 报告：[reports/STEP1_INVENTORY_20261024.md](reports/STEP1_INVENTORY_20261024.md)。
-- 等你定报告末尾"需要你决定的事"的 8 项。最要紧的是第 1 项（Cambrian-S 的权重从哪来）和第 2、3 项（Qwen3-VL 的 SFT 工具和运行环境），它们决定第二步能不能开始。
-- 第二步（接入与冒烟）在你确认后开始。
+- 第一步（盘点与核实）已完成，你 10-24 确认。报告：[reports/STEP1_INVENTORY_20261024.md](reports/STEP1_INVENTORY_20261024.md)。
+- **第二步（接入与冒烟）进行中**（10-24 19:40 起）。顺序：Qwen3-VL 接入 → Qwen3-VL 冒烟 → Qwen3-VL 的 StarVLA 骨干 → Cambrian-S 代码（权重到了再冒烟）→ Cambrian-S 的 StarVLA 骨干。下载、CPU 上的代码和 GPU 冒烟并行。
+- 报告写到 `reports/STEP2_SMOKE_<日期>.md`。
+
+## 1a. 你的决定（10-24，第一步报告之后）
+
+1. **Cambrian-S 权重**：同意在登录节点经 hf-mirror 下载 Cambrian-S-7B（32.13 GB）和 SigLIP2-so400m-patch14-384（4.58 GB），放到共享模型目录下本线的子目录（`/mnt/umm/shared_model/vagen-lite-models/hub`，HF 缓存的目录结构）；下载后核对 sha256（来源没有就核对大小和分片清单），记录来源地址、修订号、时间。只下这两样，再要下别的先问。
+2. **Qwen3-VL 的 SFT**：在现有的 LLaMA-Factory（`ca75f1e`）里用本线新文件登记 Qwen3-VL 的对话模板和多模态插件，不装新包，在 `.venv-qwen3vl-runtime` 里跑。
+3. **Qwen3-VL 的 RL 和评测**用 `.venv-qwen3vl-runtime`；主环境一个包都不改。
+4. **Cambrian-S 全做**：SFT、两个 RL 臂、评测、下游四个起点。
+5. **StarVLA 适配 Cambrian-S**（新文件加开关，用 Cambrian-S 自己的模型类和处理器；估代价不超过 4 天就直接做）。
+6. **KL 停止线用主线标准的 0.2**，和 C0、V4 一致（简报里的 1.0 是 A 组的规则，不用）。
+7. **V4 的 keep 门槛沿用 0.3318、下限 1.0**。另外用新模型的 SFT 模型回放全失败题，算出它自己的前 20% 门槛，写进报告但不用；逐次记录补进来的题数，到第 50 次平均每次不到 1 道就停下来报告。
+8. **Qwen3-VL 权重的 sha256** 放进第二步第一个 sco 任务核对。
+9. **之前定的继续有效**：每个模型 RL 两臂（S0 对照、密集为主）；密集变体在提交 RL 时按主线最新汇总取最高（现在是 V4）；SFT 用新格式；下游四个起点都做，原始模型的起点骨干一通就提；和下游同级；Qwen2.5-VL 新格式参照行排最后。
+10. **Cambrian-S 每帧 756 个 token 的开销先量再定**：主实验按估算做；下游若一个起点的训练时间超过 Qwen2.5-VL 同样任务（约 42 小时）的 3 倍，停下来报告再提。
+
+执行记录：
+
+- dense-batch2 的 6 个提交按顺序拣进 `models`（10-24 19:41），没有冲突：`aa6451e8→7fe42c0d`、`ec7682ec→f7bce387`、`991cc92d→db55eba1`、`f8ba48c5→cd812b25`、`24f1272e→21294b24`、`418927c4→0fbc32b9`。
+- worktree 的 `verl` 子模块从主 checkout 的 verl 本地克隆，检出 `a0ae85c`（没联网）。
 
 ## 2. 谁在跑
 
