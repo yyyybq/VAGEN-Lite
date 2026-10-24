@@ -124,6 +124,42 @@ class EmbedTest(unittest.TestCase):
             it.embed(ids[:1], torch.zeros(3, 3, 384, 384))
 
 
+@unittest.skipUnless(Path("/mnt/umm/users/yinbaiqiao/cambrian-s").is_dir(), "needs the Cambrian source")
+class LanguageModelBatchTest(unittest.TestCase):
+    """A small randomly initialised Cambrian language model: Qwen2Model.forward equals the Cambrian source's own loop
+    on one sample, and a left-padded batch of two equals the two samples run alone."""
+
+    def test_batch_equals_single_samples(self):
+        os.environ.setdefault("CAMBRIAN_SRC", "/mnt/umm/users/yinbaiqiao/cambrian-s")
+        from vagen.models import cambrian_register as R
+
+        from model_matrix.downstream.starvla_cambrian import language_model_forward
+
+        torch.manual_seed(0)
+        cfg = R.CambrianQwenConfig(hidden_size=32, intermediate_size=64, num_hidden_layers=2, num_attention_heads=4,
+                                   num_key_value_heads=2, vocab_size=50, max_position_embeddings=64,
+                                   connector_only=True, use_cache=False)
+        cfg._attn_implementation = "eager"
+        from cambrian.model.language_model.cambrian_qwen2 import CambrianQwenModel
+
+        inner = CambrianQwenModel(cfg).eval()
+        inner._attn_implementation = "eager"  # as the adapter's constructor sets it
+        R.CambrianForCausalLMAdapter._patch_qwen2_decoder_layers(inner)
+        a, b = torch.randn(1, 5, 32), torch.randn(1, 8, 32)
+        with torch.no_grad():
+            own = inner(inputs_embeds=b, use_cache=False, return_dict=True).last_hidden_state.reshape(1, 8, 32)
+            alone_a = language_model_forward(inner, a, None).last_hidden_state
+            alone_b = language_model_forward(inner, b, None)
+            self.assertTrue(torch.allclose(alone_b.last_hidden_state, own, atol=1e-5))  # one sample: the same
+            x = torch.cat([torch.cat([torch.zeros(1, 3, 32), a], 1), b], 0)
+            mask = torch.tensor([[0, 0, 0] + [1] * 5, [1] * 8])
+            both = language_model_forward(inner, x, mask)
+        self.assertTrue(torch.allclose(both.last_hidden_state[0, 3:], alone_a[0], atol=1e-5))
+        self.assertTrue(torch.allclose(both.last_hidden_state[1], alone_b.last_hidden_state[0], atol=1e-5))
+        self.assertTrue(torch.allclose(both.hidden_states[-1][1], alone_b.hidden_states[-1][0], atol=1e-5))
+        self.assertEqual(len(both.hidden_states), cfg.num_hidden_layers + 1)
+
+
 FAKE_STARVLA = {
     "starVLA/__init__.py": "",
     "starVLA/model/__init__.py": "",

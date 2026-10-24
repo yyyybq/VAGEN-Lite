@@ -96,6 +96,10 @@ def model_class():
             super().__init__(config)
 
         def forward(self, input_ids=None, labels=None, **kwargs):
+            if input_ids is not None and input_ids.shape[0] > 1:
+                # the Cambrian source's layer loop keeps only the batch's first sample with these Transformers
+                # (model_matrix/downstream/starvla_cambrian.py); the recipe trains one conversation per step and card
+                raise ValueError("Cambrian-S SFT needs per_device_train_batch_size / per_device_eval_batch_size 1")
             num_items = kwargs.pop("num_items_in_batch", None)
             kwargs["return_dict"] = True
             out = super().forward(input_ids=input_ids, labels=None, **kwargs)

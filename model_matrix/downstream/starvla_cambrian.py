@@ -16,7 +16,11 @@ miv_token_len = 64 = 8 x 8, with the learned newline after each row): 72 positio
 the newlines), Cambrian-S's form for one picture.
 
 Positions follow the attention mask (left padding).  The language model's hidden states are returned (no LM head:
-QwenOFT reads only the last hidden state).
+QwenOFT reads only the last hidden state).  The language model runs through Transformers' own Qwen2Model.forward
+(the Cambrian model's parent class: the same layers and rotary embedding): the Cambrian source's loop takes
+``layer_outputs[0]``, which since Transformers 4.54 (a decoder layer returns its hidden states) is the batch's first
+sample -- right for the batch of one that RL (remove-padding) and SFT use, wrong for StarVLA's batches
+(model_matrix/tests/test_starvla_cambrian.py checks both on a small model).
 """
 from __future__ import annotations
 
@@ -57,6 +61,20 @@ def view_features(features: torch.Tensor, newline: torch.Tensor, side: int) -> t
     rows = grid.permute(0, 2, 3, 1)  # (views, side, side, D)
     nl = newline.to(rows.dtype).view(1, 1, 1, d).expand(n, side, 1, d)
     return torch.cat([rows, nl], dim=2).reshape(n, side * (side + 1), d)
+
+
+def language_model_forward(inner, embeds: torch.Tensor, attention_mask: Optional[torch.Tensor]):
+    """The Cambrian model's language model on a batch: Transformers' Qwen2Model.forward (see the module docstring),
+    positions from the attention mask (left padding).  Returns last_hidden_state and hidden_states."""
+    from transformers import Qwen2Model
+    from transformers.modeling_outputs import BaseModelOutputWithPast
+
+    position_ids = None
+    if attention_mask is not None:
+        position_ids = (attention_mask.long().cumsum(-1) - 1).clamp(min=0)
+    out = Qwen2Model.forward(inner, inputs_embeds=embeds, attention_mask=attention_mask, position_ids=position_ids,
+                             use_cache=False, output_hidden_states=True, return_dict=True)
+    return BaseModelOutputWithPast(last_hidden_state=out.last_hidden_state, hidden_states=out.hidden_states)
 
 
 class CambrianVLInterface(nn.Module):
@@ -144,16 +162,9 @@ class CambrianVLInterface(nn.Module):
 
     def forward(self, input_ids=None, attention_mask=None, pixel_values=None, output_hidden_states=True,
                 return_dict=True, views_per_sample=None, **kwargs):
-        from transformers.modeling_outputs import BaseModelOutputWithPast
-
         embeds = self.embed(input_ids, pixel_values)
-        position_ids = None
-        if attention_mask is not None:
-            position_ids = (attention_mask.long().cumsum(-1) - 1).clamp(min=0)
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            out = self.model.get_model()(inputs_embeds=embeds, attention_mask=attention_mask, position_ids=position_ids,
-                                         use_cache=False, output_hidden_states=True, return_dict=True)
-        return BaseModelOutputWithPast(last_hidden_state=out.last_hidden_state, hidden_states=out.hidden_states)
+            return language_model_forward(self.model.get_model(), embeds, attention_mask)
 
     def generate(self, **kwargs):
         raise NotImplementedError("Cambrian backbone: QwenOFT does not generate text")
