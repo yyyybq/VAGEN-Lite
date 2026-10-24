@@ -734,6 +734,16 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         _set(ppo, "algorithm.progress_adv_weight", float(args.progress_adv_weight))
     if getattr(args, "entropy_coeff", None) is not None:  # round 12 batch: the entropy bonus instead of the package's
         _set(ppo, "actor_rollout_ref.actor.entropy_coeff", float(args.entropy_coeff))
+    # round 12 freeze, the weak-start stability runs (the user's 11th supplement, W3 / W4 and the checkpoint interval):
+    # over the package's and the standard's values, recorded in the report
+    if getattr(args, "kl_loss_coef", None) is not None:
+        _set(ppo, "actor_rollout_ref.actor.kl_loss_coef", float(args.kl_loss_coef))
+    if getattr(args, "actor_lr", None) is not None:
+        _set(ppo, "actor_rollout_ref.actor.optim.lr", float(args.actor_lr))
+    if getattr(args, "checkpoint_every", None):
+        for key, value in {"trainer.save_freq": int(args.checkpoint_every),
+                           "trainer.ckpt_keep_every": int(args.checkpoint_every), "trainer.ckpt_prune_to_hf": True}.items():
+            _set(ppo, key, value)
     group_filter = getattr(args, "group_filter", None)
     filter_kwargs = None
     if group_filter not in (None, *GROUP_FILTERS):
@@ -784,6 +794,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
               "entropy_coeff_override": getattr(args, "entropy_coeff", None),
+              "kl_loss_coef": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("kl_loss_coef"),
+              "actor_lr": (((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("optim") or {}).get("lr"),
+              "weak_start_overrides": {k: getattr(args, k, None) for k in ("kl_loss_coef", "actor_lr", "checkpoint_every")
+                                       if getattr(args, k, None) is not None} or None,
               "group_filter": ((ppo.get("filter") or {}).get("name") if (ppo.get("filter") or {}).get("enable") else None),
               "group_filter_kwargs": filter_kwargs,
               # the task order (data.seed); vLLM's sampling seed is 0 in this verl (RolloutConfig has no seed field)
@@ -1106,6 +1120,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--milestone-rewards", default=None,
                    help="round 12 freeze, variant V6: frame, face and relation rewards paid once, the first time each "
                         "group is fully met, instead of the per-turn progress reward, e.g. 0.5,0.5,1.0")
+    c.add_argument("--kl-loss-coef", type=float, default=None,
+                   help="round 12 freeze, weak-start run W3: the actor's KL penalty coefficient, over the package's "
+                        "(p1: 0.05)")
+    c.add_argument("--actor-lr", type=float, default=None,
+                   help="round 12 freeze, weak-start run W4: the actor's learning rate, over the package's (p1: 2e-6)")
+    c.add_argument("--checkpoint-every", type=int, default=None,
+                   help="round 12 freeze, weak-start runs: checkpoints every N updates, over the standard's save_freq "
+                        "(the standards: 50)")
     c.add_argument("--progress-adv-weight", type=float, default=None,
                    help="round 12 freeze, variant V8: the group comparison normalises the success part (return - "
                         "progress) and the progress part apart and adds them, the progress part weighted (e.g. 0.5); "

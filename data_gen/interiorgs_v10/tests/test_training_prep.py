@@ -427,6 +427,16 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual((ppo["actor_rollout_ref"]["actor"]["entropy_coeff"], report["entropy_coeff"],
                           report["entropy_coeff_override"]), (0.0, 0.0, 0.0))
         self.assertEqual(ppo["actor_rollout_ref"]["actor"]["optim"]["lr"], 2e-6)  # the rest of the package stays
+        # round 12 freeze, the weak-start runs: an entropy penalty (W2), the KL coefficient (W3), the learning rate
+        # (W4) and checkpoints every 25 updates over the standard's 50; the report records them
+        self.assertIsNone(report["weak_start_overrides"])
+        self.assertEqual((report["kl_loss_coef"], report["actor_lr"], ppo["trainer"]["save_freq"]), (0.05, 2e-6, 50))
+        ppo, report = config("rl_weak", entropy_coeff=-0.01, kl_loss_coef=0.3, actor_lr=5e-7, checkpoint_every=25)
+        a = ppo["actor_rollout_ref"]["actor"]
+        self.assertEqual((a["entropy_coeff"], a["kl_loss_coef"], a["optim"]["lr"]), (-0.01, 0.3, 5e-7))
+        self.assertEqual((ppo["trainer"]["save_freq"], ppo["trainer"]["ckpt_keep_every"]), (25, 25))
+        self.assertEqual(report["weak_start_overrides"], {"kl_loss_coef": 0.3, "actor_lr": 5e-7, "checkpoint_every": 25})
+        self.assertEqual((report["kl_loss_coef"], report["actor_lr"], report["save_freq"]), (0.3, 5e-7, 25))
 
     def test_data_scale_subsets(self):
         """Round 12 batch: nested train-scene subsets (fixed seed) with all formal tasks of their scenes for SFT and

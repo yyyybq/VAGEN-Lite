@@ -865,6 +865,14 @@ class ChainTest(unittest.TestCase):
             chain.rl_config()
             ps0 = calls[str(root / "rl_ps0")]
             self.assertEqual(ps0[ps0.index("--entropy-coeff") + 1], "0")
+            # round 12 freeze, the weak-start runs: the KL coefficient, the learning rate and the checkpoint interval
+            for flag in ("--kl-loss-coef", "--actor-lr", "--checkpoint-every"):
+                self.assertNotIn(flag, ps0)
+            chain.plan["rl"].update(kl_loss_coef=0.3, actor_lr=5e-7, checkpoint_every=25)
+            chain.rl_config()
+            ps0 = calls[str(root / "rl_ps0")]
+            self.assertEqual([ps0[ps0.index(f) + 1] for f in ("--kl-loss-coef", "--actor-lr", "--checkpoint-every")],
+                             ["0.3", "5e-07", "25"])
             # round 12 freeze: the format example, the lenient reading, the unreadable answer's penalty and the group
             # filter (D-cond + keep: its threshold in the plan) reach rl-config
             for flag in ("--format-example", "--lenient-parse", "--invalid-penalty", "--group-filter"):
