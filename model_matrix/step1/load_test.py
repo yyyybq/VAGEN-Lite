@@ -211,20 +211,28 @@ def run_cambrian_hf(path, messages, image, out):
     if pixel is None:
         raise RuntimeError("no SigLIP pixel values (see siglip_processor_error); generation skipped")
     ids = torch.tensor([expanded], device="cuda:0")
-    mask = torch.ones_like(ids)
     pv = pixel.to("cuda:0", dtype=torch.bfloat16)
-    eos = [tok.convert_tokens_to_ids("<|im_end|>"), tok.eos_token_id]
+    eos = {tok.convert_tokens_to_ids("<|im_end|>"), tok.eos_token_id}
+    # step 2: the adapter's generate() fails in the Cambrian source's KV-cache code with these Transformers
+    # (DynamicCache.get_usable_length, an older API; training never uses the cache), so decode greedily by full
+    # forwards (no cache) -- the training path -- and keep each token's log-probability for the comparison with vLLM
+    tokens, logprobs = [], []
     with torch.no_grad():
         t0 = time.time()
-        g = model.generate(input_ids=ids, attention_mask=mask, pixel_values=pv, max_new_tokens=MAX_NEW_TOKENS,
-                           do_sample=False, eos_token_id=eos)
+        cur = ids
+        for _ in range(MAX_NEW_TOKENS):
+            logits = model(input_ids=cur, pixel_values=pv, use_cache=False).logits[0, -1].float()
+            lp = torch.log_softmax(logits, dim=-1)
+            t = int(lp.argmax())
+            tokens.append(t)
+            logprobs.append(float(lp[t]))
+            if t in eos:
+                break
+            cur = torch.cat([cur, torch.tensor([[t]], device=cur.device)], dim=1)
         out["greedy_s"] = round(time.time() - t0, 2)
-        s = [model.generate(input_ids=ids, attention_mask=mask, pixel_values=pv, max_new_tokens=MAX_NEW_TOKENS,
-                            do_sample=True, temperature=0.8, top_p=0.92, top_k=0, eos_token_id=eos)
-             for _ in range(SAMPLES)]
-    n = ids.shape[1]
-    dec = lambda x: tok.decode(x[n:] if x.shape[0] > n else x, skip_special_tokens=True)
-    out["answers"] = answers(dec(g[0]), [dec(x[0]) for x in s])
+    out["greedy_tokens"], out["greedy_logprobs"] = tokens, logprobs
+    out["sampling"] = "not run: the adapter's cached generation fails (see greedy_s); greedy by full forwards"
+    out["answers"] = answers(tok.decode(tokens, skip_special_tokens=True), [])
     out["after_generate"] = gpu_state()
 
 
@@ -250,8 +258,11 @@ def run_cambrian_vllm(path, messages, image, out):
     out["after_load"] = gpu_state()
     req = {"prompt_token_ids": compact, "multi_modal_data": {"image": [image]}}
     t0 = time.time()
-    g = llm.generate([req], SamplingParams(temperature=0.0, max_tokens=MAX_NEW_TOKENS))[0]
+    g = llm.generate([req], SamplingParams(temperature=0.0, max_tokens=MAX_NEW_TOKENS, logprobs=0))[0]
     out["greedy_s"] = round(time.time() - t0, 2)
+    # step 2: each greedy token's log-probability, for the comparison with the Transformers stage
+    out["greedy_tokens"] = list(g.outputs[0].token_ids)
+    out["greedy_logprobs"] = [float(step[t].logprob) for t, step in zip(g.outputs[0].token_ids, g.outputs[0].logprobs or [])]
     s = llm.generate([req], SamplingParams(n=SAMPLES, temperature=0.8, top_p=0.92, max_tokens=MAX_NEW_TOKENS,
                                            seed=0))[0]
     out["vllm_prompt_tokens"] = len(g.prompt_token_ids)
