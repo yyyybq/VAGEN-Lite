@@ -1017,6 +1017,8 @@ class Chain:
                               ("progress_version", "--progress-version"),
                               ("progress_reward_scale", "--progress-reward-scale"),
                               ("progress_adv_weight", "--progress-adv-weight"),
+                              ("kl_loss_coef", "--kl-loss-coef"), ("actor_lr", "--actor-lr"),
+                              ("checkpoint_every", "--checkpoint-every"),
                               ("critic_warmup", "--critic-warmup"),
                               ("test_freq", "--test-freq"), ("val_tasks", "--val-tasks"),
                               ("train_batch_size", "--train-batch-size"),
