@@ -121,6 +121,15 @@ machine where only such services are left (their neighbours finished), so the ma
 service is started first and the old one deleted only once the new one runs on a busy machine with the trainer still
 waiting (Chain.repack).  PROGRESS.md lists every try.
 
+Round 12 freeze (cards, the user's decision of 2026-10-24): a run's render service may run outside sco, on a machine
+already busy with another 8-card job, so the single-card services of queued trainers keep no machine from an 8-card
+job.  RUN/renderer_external.json ({"endpoint": "http://HOST:PORT/render", ...}, written when the service is moved
+there by hand) marks it: the chain neither submits nor looks up the run's sco render service, but asks the service's
+/health every poll; after EXTERNAL_DOWN_CHECKS failed polls in a row the file is set aside
+(renderer_external.down-UTC.json, state["external_renderers"]) and the run is treated as one whose render service died
+(a new sco service; the trainer is deleted and follows if it had read the dead address).  STOP_RENDERER stops the
+service as it stops an sco one (the renderer mode's loop).
+
 Round 12 freeze (the user's decision 3 of 2026-10-22): a run whose plan rl names a standard
 (configs/rl_standards.json) gets the standard's chain settings ("chain_defaults": 32 render workers, render service
 first, render-service repack, the batch's stop rules with the 10% unreadable-answer line, 5 start-up retries counted
@@ -165,6 +174,8 @@ RENDERER_WAIT_S = 6 * 3600  # renderer_when_trainer_runs: how long a trainer wai
 # the new service may wait for a card
 REPACK_DEFAULTS = {"every_min": 30, "gap_min": 120, "wait_min": 30}
 NEXT_ENDPOINT = "renderer_endpoint_next.txt"  # the address file of the service a move starts
+EXTERNAL_RENDERER = "renderer_external.json"  # a render service run outside sco (the user's decision of 2026-10-24)
+EXTERNAL_DOWN_CHECKS = 3  # failed /health polls in a row before an external render service counts as dead
 RENDER_JOB, TRAINER_JOB = "interiorgs-v10-renderer-", "interiorgs-v10-rl-"  # sco display names (job_sco.submit)
 CARDS_PER_MACHINE = 8
 _UPDATE_LINE = re.compile(r"step:\d+ - ")
@@ -464,6 +475,30 @@ def success_rate(results: Path) -> Optional[float]:
     return float(metrics(rows)["success"]) if rows else None
 
 
+def external_renderer(run_dir: Path) -> Optional[Dict[str, Any]]:
+    """Round 12 freeze (the user's decision of 2026-10-24): the run's render service outside sco
+    (RUN/renderer_external.json), or None."""
+    f = run_dir / EXTERNAL_RENDERER
+    try:
+        info = json.loads(f.read_text()) if f.is_file() else None
+    except (OSError, ValueError):
+        return None
+    return info if isinstance(info, dict) and info.get("endpoint") else None
+
+
+def renderer_healthy(endpoint: str, timeout: float = 5.0) -> bool:
+    """Whether a render service answers its /health (endpoint: the address file's http://HOST:PORT/render)."""
+    import urllib.request
+
+    url = endpoint.strip()
+    url = (url[: -len("/render")] if url.endswith("/render") else url.rstrip("/")) + "/health"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout):
+            return True
+    except Exception:  # refused, timed out, an HTTP error: not answering
+        return False
+
+
 def stranded_hosts(view: Dict[str, Any]) -> List[str]:
     """Round 12 batch (renderer_repack): the machines of a pool view (job_sco.pool_view) whose every job is an RL
     render service whose trainer still waits for cards: moving those services would free the whole machine."""
@@ -637,6 +672,25 @@ class Chain:
         rec.append({"utc": now(), "what": what, "job_id": job_id, "reason": reason, **({"hosts": hosts} if hosts else {})})
         self.save()
         return True
+
+    def external_renderer_state(self, name: str, run_dir: Path, info: Dict[str, Any]) -> Dict[str, Any]:
+        """Round 12 freeze (the user's decision of 2026-10-24): a render service outside sco (renderer_external.json),
+        as a job state: EXTERNAL while it answers /health (and for fewer than EXTERNAL_DOWN_CHECKS failed polls in a
+        row), then EXTERNAL_DOWN (finished): the file is set aside and recorded, so the run gets an sco service again."""
+        fails = self.__dict__.setdefault("_external_fails", {})
+        if renderer_healthy(str(info["endpoint"])):
+            fails[name] = 0
+            return {"state": "EXTERNAL", "finished": False}
+        fails[name] = fails.get(name, 0) + 1
+        if fails[name] < EXTERNAL_DOWN_CHECKS:
+            return {"state": "EXTERNAL", "finished": False, "unanswered": fails[name]}
+        fails[name] = 0
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        (run_dir / EXTERNAL_RENDERER).replace(run_dir / f"renderer_external.down-{stamp}.json")
+        self.state.setdefault("external_renderers", {}).setdefault(name, []).append(
+            {"utc": now(), "endpoint": info["endpoint"], "event": f"no answer in {EXTERNAL_DOWN_CHECKS} polls"})
+        self.save()
+        return {"state": "EXTERNAL_DOWN", "finished": True}
 
     def note_hosts(self, what: str, st: Dict[str, Any]) -> Optional[List[str]]:
         """Round 12 batch (plan "record_nodes"): the machines (host IPs) a job runs or ran on, looked up once it has
@@ -1146,6 +1200,10 @@ class Chain:
             for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
                 (d / f).unlink(missing_ok=True)
 
+        def drop_job(d: Path, job_dir: str) -> None:  # an external render service (or a trainer not yet out) has no job
+            if (d / job_dir / "submission.json").exists():
+                job_sco.delete(d, job_dir)
+
         def renderer_pool_of(d: Path) -> Optional[str]:  # with renderer_first: the trainer goes where its service runs
             prepared = d / "job_renderer" / "prepared.json"
             return json.loads(prepared.read_text()).get("pool") if prepared.is_file() else None
@@ -1157,7 +1215,8 @@ class Chain:
             pool = self.job_pool(name) if new_trainer else None  # a run keeps its first pool (job_pool)
             first = self.renderer_first(run)
             lazy = self.renderer_wait(run, pool) is not None
-            if not (d / "job_renderer" / "submission.json").exists() and not lazy:
+            if (not (d / "job_renderer" / "submission.json").exists() and not lazy
+                    and external_renderer(d) is None):  # an external service: no sco one
                 submit_renderer(name, d, trainer_pool(d) if first and not new_trainer else None)
             if new_trainer and not first:  # renderer_first: the trainer follows once its service is up
                 job_sco.prepare(d, 8, self.trainer_args(run, endpoint, pool), job_dir="job_rl", pool=self.job_pool(name))
@@ -1190,17 +1249,21 @@ class Chain:
                     d = run["run_dir"]
                     lazy = self.renderer_wait(run) is not None
                     first = self.renderer_first(run)
+                    ext = external_renderer(d)  # round 12 freeze: a render service outside sco
+                    st_ext = self.external_renderer_state(name, d, ext) if ext is not None else None
                     if (first and not (d / "job_rl" / "submission.json").exists()
-                            and (d / "job_renderer" / "submission.json").exists()
                             and (d / "renderer_endpoint.txt").is_file()
-                            and job_sco.status(d, "job_renderer").get("state") == "RUNNING"):
+                            and (st_ext.get("state") == "EXTERNAL" if st_ext is not None else
+                                 (d / "job_renderer" / "submission.json").exists()
+                                 and job_sco.status(d, "job_renderer").get("state") == "RUNNING")):
                         # renderer_first: the service is up (its address written), now the trainer, in the same pool
                         job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
                                         pool=renderer_pool_of(d) or self.job_pool(name))
                         job_sco.submit(d, job_dir="job_rl")
                         self.state.setdefault("trainer_after_renderer", {}).setdefault(name, []).append(
                             {"utc": now(),
-                             "renderer": json.loads((d / "job_renderer" / "submission.json").read_text())["job_id"],
+                             "renderer": (ext["endpoint"] if st_ext is not None else
+                                          json.loads((d / "job_renderer" / "submission.json").read_text())["job_id"]),
                              "trainer": json.loads((d / "job_rl" / "submission.json").read_text())["job_id"]})
                         self.save()
                     if (d / "job_rl" / "submission.json").exists():
@@ -1214,7 +1277,9 @@ class Chain:
                             {"utc": now(), "trainer": st_rl.get("job_id"),
                              "renderer": json.loads((d / "job_renderer" / "submission.json").read_text())["job_id"]})
                         self.save()
-                    if (d / "job_renderer" / "submission.json").exists():
+                    if st_ext is not None:  # EXTERNAL; EXTERNAL_DOWN (finished) after the failed polls
+                        st_r = st_ext
+                    elif (d / "job_renderer" / "submission.json").exists():
                         st_r = job_sco.status(d, "job_renderer")
                     else:  # renderer_when_trainer_runs: not submitted while the trainer waits for cards
                         st_r = {"state": "AFTER_TRAINER_START", "finished": False}
@@ -1268,13 +1333,13 @@ class Chain:
                                        or st_rl.get("state") in job_sco.WAITING)
                             unread = not (d / "renderer_endpoint.txt").exists()
                             pool = renderer_pool_of(d)
-                            job_sco.delete(d, "job_renderer")
+                            drop_job(d, "job_renderer")
                             if not (waiting or unread):
                                 job_sco.delete(d, "job_rl")  # submitted again once the new service is up
                             submit_renderer(name, d, pool)
                             continue
                         job_sco.delete(d, "job_rl")  # the trainer needs the new render service's address
-                        job_sco.delete(d, "job_renderer")
+                        drop_job(d, "job_renderer")
                         for f in ("STOP_RENDERER", "renderer_endpoint.txt", "renderer_endpoint.tmp"):
                             (d / f).unlink(missing_ok=True)
                         if not lazy:
@@ -1291,7 +1356,7 @@ class Chain:
                         active.pop(name)
                     elif r_done:
                         (d / "STOP_RENDERER").touch()  # the render service died: the trainer cannot go on
-                        job_sco.delete(d, "job_rl")
+                        drop_job(d, "job_rl")
                         ended[name] = f"renderer {st_r.get('state')}"
                         active.pop(name)
                 for name, run in list(active.items()):  # round 11: the stop conditions (plan rl.guards)

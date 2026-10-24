@@ -7,7 +7,8 @@
 #   rl-trial   RUN RL_DIR [ENDPOINT]    1 card : the 3DGS render service and PPO on the same card
 #   renderer   RUN [WORKERS [ENDPOINT_NAME]]  1 card : the render service for a formal RL run (writes
 #                                        RUN/renderer_endpoint.txt, or RUN/ENDPOINT_NAME); WORKERS worker processes and
-#                                        requests at a time (default 12)
+#                                        requests at a time (default 12); RENDERER_GPU / RENDERER_PORT (default 0 /
+#                                        8915): the card and port, for several services on one machine
 #   rl         RUN RL_DIR ENDPOINT [WAIT_S]  8 cards: PPO, waits up to WAIT_S (default 3600) s for RUN/renderer_endpoint.txt
 #   eval       RUN EVAL NAME MODEL [PROMPT_FORMAT|- [OPTION ...]]  1 card: the render service and vLLM; one greedy
 #                                        episode per task of EVAL/tasks.jsonl (data_gen/interiorgs_v10/evaluation.py),
@@ -56,21 +57,21 @@ nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
 git -C "${WORKTREE}" rev-parse HEAD 2>/dev/null || cat "${WORKTREE}/.synced_commit" 2>/dev/null || true
 
 start_renderer() {  # $1 = gpu index, $2 = worker processes = requests at a time (default 12); leaves renderer_pid and R1_RENDER_URL
-  local workers=${2:-12}
+  local workers=${2:-12} port=${RENDERER_PORT:-8915}  # RENDERER_PORT: several services on one machine
   mkdir -p "${TORCH_EXTENSIONS_DIR}"
   [[ -d ${TORCH_EXTENSIONS_DIR}/gsplat_cuda ]] || cp -a "${VALIDATED_GSPLAT_CACHE}" "${TORCH_EXTENSIONS_DIR}/gsplat_cuda"
   bash examples/train/active_spatial/start_gs_render_http_service.sh \
-    --gs-root "${GS_ROOT}" --host 0.0.0.0 --port 8915 --gpus "$1" \
+    --gs-root "${GS_ROOT}" --host 0.0.0.0 --port "${port}" --gpus "$1" \
     --max-workers "${workers}" --max-inflight "${workers}" --admit-timeout 900 --conda-env "${ENV_ROOT}" \
     > "${RENDERER_SERVICE_LOG:-${RUN}/logs/renderer_service.log}" 2>&1 &
   renderer_pid=$!
   for _ in $(seq 1 180); do
-    "${PY}" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8915/health", timeout=2)' 2>/dev/null && break
+    "${PY}" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${port}/health', timeout=2)" 2>/dev/null && break
     kill -0 "${renderer_pid}"
     sleep 2
   done
-  "${PY}" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8915/health", timeout=2)'
-  export R1_RENDER_URL=http://127.0.0.1:8915/render
+  "${PY}" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${port}/health', timeout=2)"
+  export R1_RENDER_URL=http://127.0.0.1:${port}/render
 }
 
 lf_train() {  # $1 = LLaMA-Factory recipe, $2 = number of processes
@@ -145,7 +146,9 @@ PY
       ${PROMPT_FORMAT:+--prompt-format "${PROMPT_FORMAT}"} ${EVAL_OPTIONS[@]+"${EVAL_OPTIONS[@]}"}
     ;;
   renderer)
-    export CUDA_VISIBLE_DEVICES=0
+    # round 12 freeze (the user's decision of 2026-10-24): RENDERER_GPU / RENDERER_PORT (default 0 / 8915) let
+    # several services share a machine outside sco (train_chain's renderer_external.json)
+    export CUDA_VISIBLE_DEVICES=${RENDERER_GPU:-0}
     # round 12 batch: the chain's plan rl "renderer_workers" passes more worker processes (one scene each), so the
     # scenes of an update stay loaded; default 12.  ENDPOINT_NAME (the chain's renderer_repack): a second service,
     # started before the first one is deleted, writes its own address file (the chain renames it once the move is
@@ -153,8 +156,9 @@ PY
     ENDPOINT_NAME=${4:-renderer_endpoint.txt}
     [[ ${ENDPOINT_NAME} == renderer_endpoint.txt ]] ||
       RENDERER_SERVICE_LOG=${RUN}/logs/renderer_service-$(date -u +%Y%m%dT%H%M%SZ).log
-    start_renderer 0 "${3:-12}"
-    printf 'http://%s:8915/render\n' "$(hostname -I | awk '{print $1}')" > "${RUN}/${ENDPOINT_NAME%.txt}.tmp"
+    start_renderer "${RENDERER_GPU:-0}" "${3:-12}"
+    printf 'http://%s:%s/render\n' "$(hostname -I | awk '{print $1}')" "${RENDERER_PORT:-8915}" \
+      > "${RUN}/${ENDPOINT_NAME%.txt}.tmp"
     mv "${RUN}/${ENDPOINT_NAME%.txt}.tmp" "${RUN}/${ENDPOINT_NAME}"
     while [[ ! -e ${RUN}/STOP_RENDERER ]]; do kill -0 "${renderer_pid}"; sleep 10; done
     ;;

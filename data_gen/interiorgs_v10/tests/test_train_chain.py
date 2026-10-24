@@ -1647,6 +1647,95 @@ class ChainTest(unittest.TestCase):
             for name in "abc":
                 self.assertTrue((root / f"rl_run_{name}" / "checkpoints" / "global_step_50").is_dir())
 
+    def test_external_renderer(self):
+        """Round 12 freeze (the user's decision of 2026-10-24): a render service moved outside sco
+        (renderer_external.json) gets no sco service while it answers /health; after EXTERNAL_DOWN_CHECKS unanswered
+        polls the file is set aside and the run gets an sco service again: a queued trainer keeps its place, a running
+        one (it read the dead address) is deleted and follows the new service."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clock = {"poll": 0}
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "retries": 2, "pool": "h800",
+                             "rl": {"renderer_first": True, "renderer_workers": 32}, "rl_runs": {"x": {}, "y": {}, "z": {}}},
+                            sleep=lambda s: clock.__setitem__("poll", clock["poll"] + 1))
+            jobs = {"pt-x-rl-0": (["QUEUEING", "QUEUEING", "RUNNING", "ok"], 0),  # its service answers throughout
+                    "pt-y-rl-0": (["QUEUEING"] * 6 + ["RUNNING", "ok"], 0),       # its service never answers
+                    "pt-z-rl-0": (["RUNNING"] * 20, 0)}                            # running; its service stops at poll 4
+            schedules = {("y", "job_renderer"): [["STARTING", "RUNNING"]], ("z", "job_renderer"): [["STARTING", "RUNNING"]],
+                         ("z", "job_rl"): [["RUNNING", "ok"]]}
+            for name in "xyz":  # moved by hand: the sco service deleted, the trainer's job kept
+                d = root / f"rl_run_{name}"
+                for j in ("job_rl", "job_renderer"):
+                    (d / j).mkdir(parents=True)
+                    (d / j / "prepared.json").write_text(json.dumps({"pool": "zoetrope", "mode_args": [j]}))
+                (d / "job_rl" / "submission.json").write_text(json.dumps({"job_id": f"pt-{name}-rl-0"}))
+                (d / "job_renderer" / f"submission_pt-{name}-old_deleted.json").write_text("{}")
+                (d / "renderer_endpoint.txt").write_text(f"http://{name}:8921/render\n")
+                (d / T.EXTERNAL_RENDERER).write_text(json.dumps({"endpoint": f"http://{name}:8921/render"}))
+            events, count = [], {}
+
+            def healthy(endpoint, timeout=5.0):
+                return endpoint.startswith("http://x") or (endpoint.startswith("http://z") and clock["poll"] < 4)
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                (run / job_dir / "prepared.json").write_text(json.dumps({"pool": pool, "mode_args": list(args)}))
+                events.append(("prepare", run.name[7:], job_dir, list(args), pool))
+
+            def submit(run, job_dir="job"):
+                key = (run.name[7:], job_dir)
+                count[key] = count.get(key, 0) + 1
+                job_id = f"pt-{key[0]}-{job_dir[4:]}-{count[key]}"
+                jobs[job_id] = (schedules[key][count[key] - 1], clock["poll"])
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": job_id}))
+                events.append(("submit", key[0], job_dir, job_id, clock["poll"]))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_renderer" and (run / "STOP_RENDERER").exists():
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                sched, t0 = jobs[job_id]
+                kind = sched[min(clock["poll"] - t0, len(sched) - 1)]
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                if job_dir == "job_renderer" and kind == "RUNNING":
+                    (run / "renderer_endpoint.txt").write_text("http://10.0.0.1:8915/render\n")
+                return {"job_id": job_id, "state": kind, "finished": False}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                events.append(("delete", run.name[7:], job_dir, json.loads(receipt.read_text())["job_id"], clock["poll"]))
+                receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete), \
+                    mock.patch.object(T, "renderer_healthy", healthy):
+                chain.rl()
+
+            def seq(name):  # submissions and deletions while the run was active
+                done = {"x": 3, "y": 7, "z": max(e[-1] for e in events if e[0] == "submit")}[name]
+                return [(e[0], e[2], e[3]) for e in events if e[1] == name and e[0] != "prepare" and e[-1] <= done]
+
+            self.assertEqual(seq("x"), [])  # no sco service, the queued trainer kept
+            self.assertTrue((root / "rl_run_x" / T.EXTERNAL_RENDERER).is_file())
+            self.assertTrue((root / "rl_run_x" / "STOP_RENDERER").exists())  # the external service is stopped too
+            self.assertEqual(seq("y"), [("submit", "job_renderer", "pt-y-renderer-1")])  # down: a new sco service alone
+            self.assertEqual(next(e[-1] for e in events if e[:2] == ("submit", "y")), T.EXTERNAL_DOWN_CHECKS - 1)
+            self.assertIn(("prepare", "y", "job_renderer", ["renderer", "32"], "zoetrope"), events)  # in its pool
+            self.assertFalse((root / "rl_run_y" / T.EXTERNAL_RENDERER).exists())
+            self.assertEqual(len(list((root / "rl_run_y").glob("renderer_external.down-*.json"))), 1)
+            self.assertEqual(seq("z"), [("delete", "job_rl", "pt-z-rl-0"),  # it had read the dead address
+                                        ("submit", "job_renderer", "pt-z-renderer-1"),
+                                        ("submit", "job_rl", "pt-z-rl-1")])  # once the new service is up
+            self.assertEqual(sorted(chain.state["external_renderers"]), ["y", "z"])
+            self.assertEqual(sorted(chain.state["trainer_after_renderer"]), ["z"])
+            for name in "xyz":
+                self.assertTrue((root / f"rl_run_{name}" / "checkpoints" / "global_step_50").is_dir())
+
     def test_renderer_repack(self):
         """Round 12 batch (a new switch, the user's decision of 2026-10-21): plan rl "renderer_repack" moves a render
         service held while its trainer queues off a machine where only such services are left (10.123.72.34: the
