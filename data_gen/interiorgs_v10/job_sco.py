@@ -48,8 +48,10 @@ SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
 # the model line (2026-10-24): set in the preparing process (the training chain sets the first two from the plan's
 # model_type), these reach the job script through the launch script; the job script reads VAGEN_LITE_PYTHON (the model
 # type's Python) and VAGEN_LITE_MODEL_TYPE (its SFT launcher), the PPO trainer VAGEN_D0_3_SMOKE_DIR (the per-update
-# rollout-vs-trainer log-probability audit).  None set: every launch script as before.
-PASS_ENV = ("VAGEN_LITE_PYTHON", "VAGEN_LITE_MODEL_TYPE", "VAGEN_D0_3_SMOKE_DIR")
+# rollout-vs-trainer log-probability audit); HF_HUB_CACHE and SIGLIP_CACHE come from a model type's environment
+# (Cambrian-S: the cache with its SigLIP2, which its adapter loads by repository name).  None set: every launch script
+# as before.
+PASS_ENV = ("VAGEN_LITE_PYTHON", "VAGEN_LITE_MODEL_TYPE", "VAGEN_D0_3_SMOKE_DIR", "HF_HUB_CACHE", "SIGLIP_CACHE")
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 # created, no cards yet; sco spells it QUEUEING (round 12 batch: without it a job in that state counted as not waiting)
 WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUEING", "QUEUED", "WAITING", "CREATING"}

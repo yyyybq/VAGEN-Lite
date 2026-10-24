@@ -192,6 +192,21 @@ def compute_response_mask(data: DataProto):
     return attention_mask[:, -response_length:]
 
 
+def concat_agent_loop_manager(trainer_config):
+    """The agent-loop manager of the concat path: verl's, or (the model line, 2026-10-24) the one that
+    trainer.agent_loop_manager names as module.Class, e.g. Cambrian-S's
+    vagen.agent_loop.cambrian_concat.CambrianAgentLoopManager."""
+    path = trainer_config.get("agent_loop_manager", None)
+    if not path:
+        from verl.experimental.agent_loop import AgentLoopManager
+
+        return AgentLoopManager
+    import importlib
+
+    module_name, class_name = str(path).rsplit(".", 1)
+    return getattr(importlib.import_module(module_name), class_name)
+
+
 def _d0_13_trainer_marker(stage: str, **extra) -> None:
     out_dir = os.environ.get("VAGEN_D0_13_TIMELINE_DIR")
     if not out_dir:
@@ -2110,7 +2125,7 @@ class RayPPOTrainer:
         if self.config.actor_rollout_ref.rollout.mode == "async":
             self.async_rollout_mode = True
             if self.config.trainer.get("concat_multi_turn", True):
-                from verl.experimental.agent_loop import AgentLoopManager
+                AgentLoopManager = concat_agent_loop_manager(self.config.trainer)
             else:
                 from .agent_loop.agent_loop_no_concat import AgentLoopManager
                 self.concat_multi_turn = False

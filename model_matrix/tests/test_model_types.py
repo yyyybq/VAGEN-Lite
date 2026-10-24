@@ -26,10 +26,34 @@ class ModelTypesTest(unittest.TestCase):
         self.assertEqual(q3.python, M.QWEN3VL_RUNTIME_PYTHON)
         self.assertEqual((q3.lf_template, q3.lf_launcher), ("qwen3_vl_nothink", "model_matrix.sft.lf_launcher"))
         for kind in M.TYPES.values():  # every config the job script may get exists in the repository
-            self.assertTrue((ROOT / kind.sft_accelerate_config).is_file(), kind.sft_accelerate_config)
+            if kind.sft_accelerate_config:
+                self.assertTrue((ROOT / kind.sft_accelerate_config).is_file(), kind.sft_accelerate_config)
             self.assertEqual(kind.stop_token, "<|im_end|>")
+        cam = M.get("cambrian_qwen")
+        self.assertIsNone(cam.python)  # the vagen-lite env
+        self.assertEqual(dict(cam.env), {"HF_HUB_CACHE": M.CAMBRIAN_CACHE, "SIGLIP_CACHE": M.CAMBRIAN_CACHE})
+        self.assertEqual((q25.env, q3.env), ((), ()))
         with self.assertRaises(ValueError):
             M.get("llava")
+
+    def test_rl_overrides(self):
+        from vagen.models import model_types as M
+
+        for name in (None, "qwen2_5_vl", "qwen3_vl"):  # the Qwen configs stay as they are
+            self.assertEqual(M.rl_overrides(name, 12, 4096), {})
+        o = M.rl_overrides("cambrian_qwen", 12, 4096)
+        self.assertEqual(o["actor_rollout_ref.model.override_config.image_token_alias"], 151655)
+        self.assertEqual(o["trainer.agent_loop_manager"], "vagen.agent_loop.cambrian_concat.CambrianAgentLoopManager")
+        self.assertEqual(o["actor_rollout_ref.model.external_lib"], "vagen.models.cambrian_register")
+        self.assertEqual(o["cambrian_concat.max_images"], 12)
+        self.assertEqual(o["data.max_prompt_length"], 4096 + 756 * 12)  # vLLM's max_model_len counts 756 per frame
+        from vagen.agent_loop import cambrian_concat as C
+
+        self.assertEqual((C.TOKENS_PER_IMAGE, C.IMAGE_PAD_ID), (M.CAMBRIAN_TOKENS_PER_IMAGE, 151655))
+        out = subprocess.run([os.sys.executable, "-m", "vagen.models.model_types", "sft-launch", "cambrian_qwen"], cwd=ROOT,
+                             capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=str(ROOT)))
+        self.assertNotEqual(out.returncode, 0)  # no SFT tool yet: the job script stops, never trains with another's
+        self.assertIn("no SFT tool for cambrian_qwen", out.stderr)
 
     def test_check_reads_the_models_config(self):
         from vagen.models import model_types as M
@@ -147,6 +171,12 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(self._chain(tmp, rl={"logprob_audit": True}).job_env(),
                              {"VAGEN_D0_3_SMOKE_DIR": str(Path(tmp) / "logprob_audit")})
             self.assertEqual(self._chain(tmp, job_prefix="models").job_env(), {"VAGEN_LITE_JOB_PREFIX": "models"})
+            cache = "/mnt/umm/shared_model/vagen-lite-models/hub"
+            self.assertEqual(self._chain(tmp, model_type="cambrian_qwen").job_env(),
+                             {"VAGEN_LITE_MODEL_TYPE": "cambrian_qwen", "HF_HUB_CACHE": cache, "SIGLIP_CACHE": cache})
+            from data_gen.interiorgs_v10 import job_sco as J
+
+            self.assertTrue({"HF_HUB_CACHE", "SIGLIP_CACHE"} <= set(J.PASS_ENV))
 
     def test_idle_pool_waits_for_the_main_line_and_an_idle_machine(self):
         from model_matrix import sco_view
@@ -212,6 +242,21 @@ class ChainTest(unittest.TestCase):
                     self.assertEqual(J.submit(run), "pt-abc123")
                     self.assertIn(want, r.call_args[0][0])
 
+    def test_rl_start_model_skips_the_sft_steps(self):
+        from data_gen.interiorgs_v10 import train_chain as T
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chain = self._chain(tmp, rl_start_model="/models/cambrian")
+            self.assertEqual(chain.sft_model(), Path("/models/cambrian"))
+            ran = []
+            for step in T.STEPS:
+                setattr(chain, step, lambda s=step: ran.append(s))
+            self.assertEqual(chain.run(), 0)
+            self.assertEqual(ran, ["check_code", "rl_config", "rl", "rl_extend", "evaluate"])
+            for step in T.SFT_STEPS:
+                self.assertEqual(chain.state["steps"][step]["note"], "not planned (rl_start_model)")
+            self.assertEqual(self._chain(tmp + "/b").sft_model(), Path(tmp + "/b") / "lf" / "model")  # as before
+
     def test_check_code_refuses_another_models_type(self):
         from data_gen.interiorgs_v10 import train_chain as T
 
@@ -249,11 +294,16 @@ class ChainTest(unittest.TestCase):
             chain.rl_config()
             rl = next(a for a in calls if "rl-config" in a)
             self.assertIn("--rollout-log-probs", rl)
+            self.assertEqual(rl[rl.index("--model-type") + 1], "qwen3_vl")  # the type's PPO-config overrides
             calls.clear()
-            plain = self._chain(tmp, model="/m", sft_records=False, sft_groups={"formal": "traj.jsonl"})
+            plain = self._chain(tmp, model="/m", sft_records=False, sft_groups={"formal": "traj.jsonl"},
+                                gs_root="/ply", rl={"standard": "v10_p1_S0"})
             plain.sh = sh
             plain.sft_data()
-            self.assertNotIn("--model-type", calls[0])  # without the field: the command as before
+            self.assertNotIn("--model-type", calls[0])  # without the field: the commands as before
+            plain.sft_model = lambda: Path("/m")
+            plain.rl_config()
+            self.assertNotIn("--model-type", next(a for a in calls if "rl-config" in a))
 
 
 if __name__ == "__main__":

@@ -778,6 +778,20 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         _set(ppo, "data.sampler", curriculum)
         _set(ppo, "data.dataloader_num_workers", 0)  # verl's rule for a custom sampler
         curriculum = dict(curriculum, easy_tasks=easy, easy_draws=need)
+    type_overrides = None
+    if getattr(args, "model_type", None):  # the model line (2026-10-24): the type's own overrides, applied last
+        from vagen.models.model_types import check, rl_overrides
+
+        try:
+            check(args.model_type, model)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        type_overrides = rl_overrides(args.model_type, int(template["envs"][0].get("max_turns", 12)),
+                                      int(ppo["data"]["max_prompt_length"]))
+        if type_overrides and not ppo["trainer"].get("concat_multi_turn"):
+            raise SystemExit(f"the {args.model_type} overrides are for the concat history mode (--history-mode concat)")
+        for key, value in type_overrides.items():
+            _set(ppo, key, value)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
@@ -798,6 +812,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "lenient_parse": bool(getattr(args, "lenient_parse", False)),
               "invalid_turn_nonpositive": bool(getattr(args, "invalid_turn_nonpositive", False)),
               "rollout_log_probs": bool(getattr(args, "rollout_log_probs", False)),
+              "model_type": getattr(args, "model_type", None), "model_type_overrides": type_overrides,
               "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
@@ -1116,6 +1131,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--rollout-log-probs", action="store_true",
                    help="the model line: vLLM also returns each sampled token's log-probability, for the per-update "
                         "comparison with the trainer's (an audit; the update is unchanged)")
+    c.add_argument("--model-type", default=None,
+                   help="the model line: the start model's type (vagen/models/model_types.py, checked against its "
+                        "config.json) and its PPO-config overrides (none for the Qwen types)")
     c.add_argument("--invalid-penalty", type=float, default=None,
                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")

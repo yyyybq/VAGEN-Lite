@@ -396,6 +396,13 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
                 "CambrianForCausalLMAdapter only supports connector_only=True."
             )
 
+        # The model line (2026-10-24): with config.image_token_alias (the concat path sets 151655, <|image_pad|>, through
+        # actor_rollout_ref.model.override_config; vagen/agent_loop/cambrian_concat.py) that ordinary token marks the
+        # image positions, so the trainer's labels and decoding never meet IMAGE_TOKEN_INDEX.  Unset: as before.
+        alias = getattr(self.config, "image_token_alias", None)
+        if alias is not None and input_ids is not None:
+            input_ids = input_ids.masked_fill(input_ids == int(alias), IMAGE_TOKEN_INDEX)
+
         # Build inputs_embeds
         if inputs_embeds is None:
             has_image_tokens = (

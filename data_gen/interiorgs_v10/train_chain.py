@@ -156,6 +156,9 @@ IDLE_POLL_S = 300.0  # the model line: plan pool "idle" checks the pools this of
 DEFAULT_MAX_EVAL_JOBS = 10
 EVAL_ONLY_STEPS = ("check_code", "evaluate")
 RL_STEPS = ("rl_config", "rl", "rl_extend")
+# the model line (2026-10-24): plan "rl_start_model" skips these and starts RL from that model (plumbing smokes of a
+# new model type's RL path; the formal runs are SFT then RL)
+SFT_STEPS = ("render", "sft_data", "sft", "sft_eval", "pick_sft")
 # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
 # during startup", after "GCS cannot find the node ... registration may not be complete")
 STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
@@ -601,10 +604,12 @@ class Chain:
                 for name, spec in runs.items()}
 
     def sft_model(self) -> Path:
-        """The RL start model: the fallback after a missed signal check, else the picked SFT checkpoint, else the
-        (single) final SFT model."""
+        """The RL start model: the fallback after a missed signal check, else the plan's "rl_start_model" (the model
+        line's plumbing smokes), else the picked SFT checkpoint, else the (single) final SFT model."""
         if self.state.get("rl_model_override"):
             return Path(self.state["rl_model_override"])
+        if self.plan.get("rl_start_model"):
+            return Path(self.plan["rl_start_model"])
         decision = self.state["steps"].get("pick_sft", {}).get("decision") or {}
         if decision.get("model"):
             return Path(decision["model"])
@@ -799,7 +804,7 @@ class Chain:
     # -------------------------------------------------------------- steps
     def job_env(self) -> Dict[str, str]:
         """The model line (2026-10-24): what the plan's "model_type" (vagen/models/model_types.py; default
-        Qwen2.5-VL) gives every job through job_sco.PASS_ENV -- the type and its Python -- and with plan rl
+        Qwen2.5-VL) gives every job through job_sco.PASS_ENV -- the type, its Python and environment -- and with plan rl
         "logprob_audit" the folder of the trainer's per-update rollout-vs-trainer log-probability files; plan
         "job_prefix" names the jobs (job_sco.submit).  Empty without them: every job as before."""
         from vagen.models.model_types import DEFAULT, get
@@ -813,6 +818,7 @@ class Chain:
             env["VAGEN_LITE_MODEL_TYPE"] = kind.name
             if kind.python:
                 env["VAGEN_LITE_PYTHON"] = kind.python
+            env.update(dict(kind.env))
         if (self.plan.get("rl") or {}).get("logprob_audit"):
             env["VAGEN_D0_3_SMOKE_DIR"] = str(self.tr / "logprob_audit")
         return env
@@ -1088,6 +1094,8 @@ class Chain:
                               ("logprob_audit", "--rollout-log-probs")):  # the model line: the log-probability audit
                 if rl.get(key):
                     args.append(flag)
+            if self.plan.get("model_type"):  # the model line: the type's PPO-config overrides (model_types.rl_overrides)
+                args += ["--model-type", str(self.plan["model_type"])]
             if self.plan.get("rl_runs") and run["reward_preset"]:
                 args += ["--reward-preset", run["reward_preset"]]
             if rl.get("task_pool"):  # round 11: RL trains on tasks SFT never trained on, checked against the SFT data
@@ -1803,6 +1811,9 @@ class Chain:
                 continue
             if self.plan.get("sft_only") and step in RL_STEPS:  # round 12 batch: SFT and its evaluation only
                 self.mark(step, state="done", note="not planned (sft_only)")
+                continue
+            if self.plan.get("rl_start_model") and step in SFT_STEPS:  # the model line: RL from a given model
+                self.mark(step, state="done", note="not planned (rl_start_model)")
                 continue
             self.mark(step, state="running", started_utc=now(), error=None)
             try:
