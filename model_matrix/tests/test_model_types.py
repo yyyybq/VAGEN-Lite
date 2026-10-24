@@ -129,15 +129,79 @@ class ChainTest(unittest.TestCase):
 
         return T.Chain(dict({"tr": tmp, "sft_dir": tmp, "endpoint": 150}, **plan), sleep=lambda s: None)
 
-    def test_model_type_env(self):
+    def test_job_env(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(self._chain(tmp).model_type_env(), {})
-            self.assertEqual(self._chain(tmp, model_type="qwen2_5_vl").model_type_env(), {})
-            self.assertEqual(self._chain(tmp, model_type="qwen3_vl").model_type_env(),
+            self.assertEqual(self._chain(tmp).job_env(), {})
+            self.assertEqual(self._chain(tmp, model_type="qwen2_5_vl").job_env(), {})
+            self.assertEqual(self._chain(tmp, model_type="qwen3_vl").job_env(),
                              {"VAGEN_LITE_MODEL_TYPE": "qwen3_vl",
                               "VAGEN_LITE_PYTHON": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/.venv-qwen3vl-runtime/bin/python"})
-            self.assertEqual(self._chain(tmp, rl={"logprob_audit": True}).model_type_env(),
+            self.assertEqual(self._chain(tmp, rl={"logprob_audit": True}).job_env(),
                              {"VAGEN_D0_3_SMOKE_DIR": str(Path(tmp) / "logprob_audit")})
+            self.assertEqual(self._chain(tmp, job_prefix="models").job_env(), {"VAGEN_LITE_JOB_PREFIX": "models"})
+
+    def test_idle_pool_waits_for_the_main_line_and_an_idle_machine(self):
+        from model_matrix import sco_view
+
+        def v(pool, idle, free, main=0, ours=0):
+            return {"pool": pool, "machines": 10, "busy_machines": 10 - idle, "idle_estimate": idle,
+                    "machines_with_free_cards": free, "waiting": main + ours, "waiting_main_line": main,
+                    "waiting_downstream": 0, "waiting_ours": ours}
+
+        rounds = [  # each poll: zoetrope, h800
+            {"zoetrope": v("zoetrope", 2, 0, main=1), "h800": v("h800", 0, 3)},  # 8 cards: nothing fits
+            {"zoetrope": v("zoetrope", 1, 0), "h800": v("h800", 3, 1, ours=1)},  # ours waits on h800
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            chain = self._chain(tmp, pool="idle")
+            slept = []
+            chain.sleep = slept.append
+            state = {"i": 0}
+
+            def view(pool):
+                return rounds[min(state["i"], len(rounds) - 1)][pool]
+
+            def sleep(s):
+                slept.append(s)
+                state["i"] += 1
+
+            chain.sleep = sleep
+            with mock.patch.object(sco_view, "view", side_effect=view), \
+                    mock.patch.object(sco_view, "PAUSE", Path(tmp) / "no_pause"):
+                self.assertEqual(chain.job_pool("q3"), "zoetrope")  # an RL run: needs an idle machine
+                self.assertEqual(slept, [300.0])
+                self.assertEqual(chain.job_pool("q3"), "zoetrope")  # the run keeps its pool
+                state["i"] = 0
+                self.assertEqual(chain.job_pool(cards=1), "h800")  # one card: free cards, no main-line job waiting
+                pause = Path(tmp) / "pause"
+                pause.write_text("")
+                with mock.patch.object(sco_view, "PAUSE", pause):
+                    state["i"] = 1
+                    calls = []
+
+                    def sleep_then_resume(s):
+                        calls.append(s)
+                        pause.unlink()
+
+                    chain.sleep = sleep_then_resume
+                    self.assertEqual(chain.job_pool(cards=8), "zoetrope")
+                    self.assertEqual(calls, [300.0])  # it waited while the pause file was there
+            self.assertIsNone(chain.state["idle_pool_wait"])
+            self.assertEqual(self._chain(tmp, pool="h800").job_pool(), "h800")  # other pools as before
+
+    def test_job_names_take_the_prefix(self):
+        from data_gen.interiorgs_v10 import job_sco as J
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "rl_run_q3"
+            J.prepare(run, 8, ["rl", "/rl", "10"])
+            done = mock.Mock(returncode=0, stdout="job pt-abc123 submitted", stderr="")
+            for env, want in (({}, "--job-name=interiorgs-v10-rl-rl-run-q3"),
+                              ({"VAGEN_LITE_JOB_PREFIX": "models"}, "--job-name=models-rl-rl-run-q3")):
+                (run / "job" / "submission.json").unlink(missing_ok=True)
+                with mock.patch.dict(os.environ, env), mock.patch.object(J.subprocess, "run", return_value=done) as r:
+                    self.assertEqual(J.submit(run), "pt-abc123")
+                    self.assertIn(want, r.call_args[0][0])
 
     def test_check_code_refuses_another_models_type(self):
         from data_gen.interiorgs_v10 import train_chain as T

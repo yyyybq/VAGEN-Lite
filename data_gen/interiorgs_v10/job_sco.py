@@ -87,7 +87,10 @@ def submit(run: Path, job_dir: str = "job") -> str:
     if receipt.exists():
         return json.loads(receipt.read_text())["job_id"]
     prepared = json.loads((job / "prepared.json").read_text())
-    name = f"interiorgs-v10-{prepared['mode_args'][0]}-{run.name}".replace("_", "-")[-60:]
+    # the model line (2026-10-24): VAGEN_LITE_JOB_PREFIX names another line's jobs (the chain's plan "job_prefix"), so
+    # the job list tells them from the main line's; unset, the name as before
+    prefix = os.environ.get("VAGEN_LITE_JOB_PREFIX") or "interiorgs-v10"
+    name = f"{prefix}-{prepared['mode_args'][0]}-{run.name}".replace("_", "-")[-60:]
     command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={prepared.get('pool', POOL)}", f"--job-name={name}",
                "--priority=HIGHEST", "--quota-type=reserved", f"--container-image-url={IMAGE}",
                f"--storage-mount={MOUNT}", "--training-framework=pytorch", "--worker-nodes=1",

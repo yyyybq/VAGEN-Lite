@@ -152,6 +152,7 @@ STEP_ZH = {"check_code": "核对代码", "render": "渲染 SFT 画面", "sft_dat
            "rl": "RL（S0）", "rl_extend": "RL 续训（验证仍上升时）", "evaluate": "评测"}
 CARDS = {"render": "1", "sft": "每组 8", "sft_eval": "每个 1", "rl": "1 + 8", "rl_extend": "1 + 8", "evaluate": "每个模型 1"}
 POLL_S = 60.0
+IDLE_POLL_S = 300.0  # the model line: plan pool "idle" checks the pools this often while none fits
 DEFAULT_MAX_EVAL_JOBS = 10
 EVAL_ONLY_STEPS = ("check_code", "evaluate")
 RL_STEPS = ("rl_config", "rl", "rl_extend")
@@ -609,21 +610,45 @@ class Chain:
             return Path(decision["model"])
         return self.lf_dir("") / "model"
 
-    def job_pool(self, key: Optional[str] = None) -> Optional[str]:
+    def job_pool(self, key: Optional[str] = None, cards: int = 8) -> Optional[str]:
         """The pool for a new job: the plan's, or with "auto" the one with the fewest waiting jobs now (round 12
-        batch); with a ``key`` (an RL run) the first choice is kept, so its render service and trainer share it."""
+        batch); with a ``key`` (an RL run) the first choice is kept, so its render service and trainer share it.
+        The model line (2026-10-24, the user's rule: only idle machines, after the main line): "idle" waits until a
+        pool has no main-line job waiting, the pause file is absent and, for ``cards`` 8 (and any RL run's first job),
+        an idle machine -- for one card a machine with free cards (``idle_pool``)."""
         pool = self.plan.get("pool")
-        if pool != "auto":
+        if pool not in ("auto", "idle"):
             return pool
         from . import job_sco
 
         chosen = self.state.setdefault("run_pools", {})
         if key is not None and key in chosen:
             return chosen[key]
-        pool = job_sco.pick_pool()
+        pool = job_sco.pick_pool() if pool == "auto" else self.idle_pool(8 if key is not None else cards)
         if key is not None:
             chosen[key] = pool
         return pool
+
+    def idle_pool(self, cards: int) -> str:
+        """Plan pool "idle": the pool with the most idle machines (model_matrix.sco_view's estimate) among those
+        with no main-line job waiting and room for ``cards``, polled every IDLE_POLL_S while there is none or the
+        pause file exists; the wait is shown in the progress file."""
+        from model_matrix import sco_view
+
+        while True:
+            views = [] if sco_view.PAUSE.exists() else [sco_view.view(p) for p in sco_view.job_sco.POOLS]
+            fit = [v for v in views if "error" not in v and v["waiting_main_line"] == 0 and v["waiting_ours"] == 0
+                   and ((v["idle_estimate"] or 0) > 0 if cards == 8
+                        else (v["idle_estimate"] or 0) > 0 or v["machines_with_free_cards"] > 0)]
+            if fit:
+                best = max(fit, key=lambda v: (v["idle_estimate"] or 0, v["machines_with_free_cards"]))
+                self.state["idle_pool_wait"] = None
+                return best["pool"]
+            self.state["idle_pool_wait"] = {"since": (self.state.get("idle_pool_wait") or {}).get("since") or now(),
+                                            "cards": cards, "pause_file": sco_view.PAUSE.exists(),
+                                            "pools": views, "checked": now()}
+            self.save()
+            self.sleep(IDLE_POLL_S)
 
     def take_retry(self, key: str, what: str, job_id: Optional[str], reason: str, used: int = 0,
                    hosts: Optional[List[str]] = None) -> bool:
@@ -774,14 +799,16 @@ class Chain:
             raise ChainError("jobs did not succeed: " + ", ".join(f"{n} ({s})" for n, s in sorted(bad.items())))
 
     # -------------------------------------------------------------- steps
-    def model_type_env(self) -> Dict[str, str]:
+    def job_env(self) -> Dict[str, str]:
         """The model line (2026-10-24): what the plan's "model_type" (vagen/models/model_types.py; default
         Qwen2.5-VL) gives every job through job_sco.PASS_ENV -- the type and its Python -- and with plan rl
-        "logprob_audit" the folder of the trainer's per-update rollout-vs-trainer log-probability files.  Empty for
-        Qwen2.5-VL without the audit: every job as before."""
+        "logprob_audit" the folder of the trainer's per-update rollout-vs-trainer log-probability files; plan
+        "job_prefix" names the jobs (job_sco.submit).  Empty without them: every job as before."""
         from vagen.models.model_types import DEFAULT, get
 
         env: Dict[str, str] = {}
+        if self.plan.get("job_prefix"):
+            env["VAGEN_LITE_JOB_PREFIX"] = str(self.plan["job_prefix"])
         name = self.plan.get("model_type")
         if name and name != DEFAULT:
             kind = get(name)
@@ -924,7 +951,7 @@ class Chain:
                     run.mkdir(parents=True, exist_ok=True)
                     if not (run / "job" / "submission.json").exists():
                         job_sco.prepare(run, 1, ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options],
-                                        pool=self.job_pool())
+                                        pool=self.job_pool(cards=1))
                         job_sco.submit(run)
                     running[name] = run
                 for name, run in list(running.items()):
@@ -1763,7 +1790,7 @@ class Chain:
 
     # -------------------------------------------------------------- driver
     def run(self) -> int:
-        os.environ.update(self.model_type_env())  # the model line: read by job_sco.prepare (PASS_ENV)
+        os.environ.update(self.job_env())  # the model line: read by job_sco.prepare (PASS_ENV) and submit
         self.state["chain_pid"] = os.getpid()
         self.state["state"] = "running"
         self.save()
