@@ -33,6 +33,9 @@ export HF_HOME=/mnt/umm/users/yinbaiqiao/.cache/huggingface
 source "${WT}/examples/train/robocasa/setup_starvla_env.sh"
 set +e
 export PYTHONPATH="${DS}:${STARVLA_ROOT}"
+source "${WT}/model_matrix/downstream/cambrian_env.sh"
+# a Cambrian-S start: training and the policy server go through the Cambrian backbone entry; others: as before
+starvla_entry "$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["start"]["path"])' "${EXP}/experiment.json")"
 TIMES="${EXP}/stage_times.tsv"
 [[ -f "$TIMES" ]] || echo -e "stage\tstart_utc\tseconds\trc" > "$TIMES"
 stage() {
@@ -52,7 +55,7 @@ MON_PID=$!
 # ---- StarVLA SFT, 8 GPUs (the downstream line's train entry and DeepSpeed ZeRO-2 config) --------------------------
 cd "$STARVLA_ROOT"
 stage train accelerate launch --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml --num_processes 8 \
-  "$DS/downstream/train/train_entry.py" --config_yaml "$EXP/config.yaml" > "$EXP/train.log" 2>&1
+  ${ENTRY[@]+"${ENTRY[@]}"} "$DS/downstream/train/train_entry.py" --config_yaml "$EXP/config.yaml" > "$EXP/train.log" 2>&1
 cd "$WT"
 [[ -f "$CKPT" ]] || { echo "[smoke] no final checkpoint"; tail -60 "$EXP/train.log"; exit 4; }
 
@@ -67,8 +70,13 @@ sim() {
     NUMBA_CACHE_DIR="/tmp/ds-numba-$UID" MESA_SHADER_CACHE_DIR="/tmp/ds-mesa-$UID" "$@"
 }
 mkdir -p "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"
-CUDA_VISIBLE_DEVICES=0 CKPT="$CKPT" PORT=5678 bash "$DS/examples/evaluate/robocasa/run_starvla_mobile.sh" server \
-  --idle_timeout -1 > "$EXP/server.log" 2>&1 &
+if [[ ${#ENTRY[@]} -gt 0 ]]; then  # the server command of run_starvla_mobile.sh, through the Cambrian entry
+  (cd "$STARVLA_ROOT" && CUDA_VISIBLE_DEVICES=0 exec python "${ENTRY[0]}" deployment/model_server/server_policy.py \
+    --ckpt_path "$CKPT" --port 5678 --use_bf16 --idle_timeout -1) > "$EXP/server.log" 2>&1 &
+else
+  CUDA_VISIBLE_DEVICES=0 CKPT="$CKPT" PORT=5678 bash "$DS/examples/evaluate/robocasa/run_starvla_mobile.sh" server \
+    --idle_timeout -1 > "$EXP/server.log" 2>&1 &
+fi
 SERVER_PID=$!
 for i in $(seq 1 180); do
   python -c 'import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1",5678)))' && break

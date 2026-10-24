@@ -20,7 +20,9 @@ cd "${DS}"
 source "${WT}/examples/train/robocasa/setup_starvla_env.sh"
 set +e
 export PYTHONPATH="${DS}:${STARVLA_ROOT}"
+source "${WT}/model_matrix/downstream/cambrian_env.sh"
+starvla_entry "${START}"  # a Cambrian-S start: the Cambrian backbone entry; others: as before
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
-python "${DS}/downstream/load_test/load_in_starvla.py" --name "${NAME}" --path "${START}" \
+python ${ENTRY[@]+"${ENTRY[@]}"} "${DS}/downstream/load_test/load_in_starvla.py" --name "${NAME}" --path "${START}" \
   --config "${WT}/examples/train/robocasa/starvla_qwenoft_navigatekitchen_smoke.yaml" --out "${OUT}/load_${NAME}.json"
 echo "[backbone_load] exit $? $(date -u +%FT%TZ)"
