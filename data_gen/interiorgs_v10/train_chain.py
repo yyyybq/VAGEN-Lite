@@ -492,8 +492,9 @@ def renderer_healthy(endpoint: str, timeout: float = 5.0) -> bool:
 
     url = endpoint.strip()
     url = (url[: -len("/render")] if url.endswith("/render") else url.rstrip("/")) + "/health"
+    direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # the login node's proxy refuses (403)
     try:
-        with urllib.request.urlopen(url, timeout=timeout):
+        with direct.open(url, timeout=timeout):
             return True
     except Exception:  # refused, timed out, an HTTP error: not answering
         return False

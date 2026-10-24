@@ -1736,6 +1736,36 @@ class ChainTest(unittest.TestCase):
             for name in "xyz":
                 self.assertTrue((root / f"rl_run_{name}" / "checkpoints" / "global_step_50").is_dir())
 
+    def test_renderer_healthy_goes_direct(self):
+        """The external render service's /health is asked directly: the login node's http proxy answers 403 for
+        cluster addresses, which would have counted a live service as down."""
+        import http.server
+        import os
+        import threading
+        from unittest import mock
+
+        class Health(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200 if self.path == "/health" else 404)
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Health)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            port = server.server_address[1]
+            with mock.patch.dict(os.environ, {"http_proxy": "http://127.0.0.1:9", "HTTP_PROXY": "http://127.0.0.1:9",
+                                              "no_proxy": "", "NO_PROXY": ""}):
+                self.assertTrue(T.renderer_healthy(f"http://127.0.0.1:{port}/render\n"))
+            server.shutdown()
+            server.server_close()
+            self.assertFalse(T.renderer_healthy(f"http://127.0.0.1:{port}/render", timeout=1.0))
+        finally:
+            server.server_close()
+
     def test_renderer_repack(self):
         """Round 12 batch (a new switch, the user's decision of 2026-10-21): plan rl "renderer_repack" moves a render
         service held while its trainer queues off a machine where only such services are left (10.123.72.34: the
