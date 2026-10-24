@@ -47,8 +47,10 @@ TYPES: Dict[str, ModelType] = {
     "qwen3_vl": ModelType("qwen3_vl", QWEN3VL_RUNTIME_PYTHON, "qwen3_vl_nothink", "model_matrix.sft.lf_launcher",
                           "model_matrix/sft/accelerate_fsdp_qwen3vl.yaml"),
     # Cambrian-S-7B: the vagen-lite env, the repository's adapter (vagen/models/cambrian_register.py, FSDP) and vLLM
-    # model (cambrian_vllm.py); one <image> token per frame in the prompt, 756 positions in the model
-    "cambrian_qwen": ModelType("cambrian_qwen", None, None, None, None,
+    # model (cambrian_vllm.py); one <image> token per frame in the prompt, 756 positions in the model; its SFT
+    # through model_matrix/sft/lf_cambrian.py (template, image plugin, processor, freeze rule)
+    "cambrian_qwen": ModelType("cambrian_qwen", None, "cambrian_qwen", "model_matrix.sft.lf_launcher_cambrian",
+                               "model_matrix/sft/accelerate_fsdp_cambrian.yaml",
                                env=(("HF_HUB_CACHE", CAMBRIAN_CACHE), ("SIGLIP_CACHE", CAMBRIAN_CACHE))),
 }
 

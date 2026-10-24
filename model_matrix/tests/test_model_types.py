@@ -52,8 +52,12 @@ class ModelTypesTest(unittest.TestCase):
         self.assertEqual((C.TOKENS_PER_IMAGE, C.IMAGE_PAD_ID), (M.CAMBRIAN_TOKENS_PER_IMAGE, 151655))
         out = subprocess.run([os.sys.executable, "-m", "vagen.models.model_types", "sft-launch", "cambrian_qwen"], cwd=ROOT,
                              capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=str(ROOT)))
-        self.assertNotEqual(out.returncode, 0)  # no SFT tool yet: the job script stops, never trains with another's
-        self.assertIn("no SFT tool for cambrian_qwen", out.stderr)
+        self.assertEqual(out.stdout.split(), ["model_matrix/sft/accelerate_fsdp_cambrian.yaml",
+                                              "model_matrix.sft.lf_launcher_cambrian"])
+        # a type without an SFT tool stops the job script, never trains with another type's
+        with mock.patch.dict(M.TYPES, {"x": M.ModelType("x", None, None, None, None)}):
+            with self.assertRaisesRegex(SystemExit, "no SFT tool for x"):
+                M.main(["sft-launch", "x"])
 
     def test_check_reads_the_models_config(self):
         from vagen.models import model_types as M
@@ -144,6 +148,7 @@ class SftRecipeTest(unittest.TestCase):
 
         self.assertEqual(P._lf_template("qwen2_5_vl"), "qwen2_vl")
         self.assertEqual(P._lf_template("qwen3_vl"), "qwen3_vl_nothink")
+        self.assertEqual(P._lf_template("cambrian_qwen"), "cambrian_qwen")  # model_matrix/sft/lf_cambrian.py
         with tempfile.TemporaryDirectory() as tmp:
             model = Path(tmp) / "m"
             model.mkdir()

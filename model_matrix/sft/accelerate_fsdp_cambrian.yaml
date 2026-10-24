@@ -1,0 +1,32 @@
+# accelerate + FSDP for LLaMA-Factory full fine-tuning of Cambrian-S-7B (the model line, 2026-10-24); the Qwen2.5-VL
+# config examples/train/active_spatial/accelerate_fsdp_qwen25vl.yaml with Cambrian's classes.
+# Wrap units must hold one dtype: LLaMA-Factory upcasts trainable weights to fp32 and leaves the frozen SigLIP2 tower
+# in bf16 (model_matrix/sft/lf_cambrian.py: model.vision_tower_aux_list frozen; the projector and the row newline
+# train).  So the whole tower (SigLipVisionTransformer: patch and position embeddings, 26 encoder layers, the final
+# norm) is a unit, each of its encoder layers and each language-model layer one too, and the root unit holds only
+# trainable fp32 weights (token embedding, final norm, LM head, projector, newline).
+# cpu_ram_efficient_loading off: the adapter's constructor loads the SigLIP2 tower itself (from_pretrained), which
+# must not run on the meta device of the ranks that skip loading; every rank reads the checkpoint (8 x 16 GB of host
+# memory).
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8
+machine_rank: 0
+main_training_function: main
+rdzv_backend: static
+same_network: true
+use_cpu: false
+fsdp_config:
+  fsdp_version: 1
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_transformer_layer_cls_to_wrap: Qwen2DecoderLayer,SigLipEncoderLayer,SigLipVisionTransformer
+  fsdp_sharding_strategy: FULL_SHARD
+  fsdp_backward_prefetch: BACKWARD_PRE
+  fsdp_forward_prefetch: false
+  fsdp_state_dict_type: FULL_STATE_DICT
+  fsdp_offload_params: false
+  fsdp_sync_module_states: true
+  fsdp_use_orig_params: true
+  fsdp_cpu_ram_efficient_loading: false
