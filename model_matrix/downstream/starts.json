@@ -1,0 +1,15 @@
+{
+ "_doc": "Start weights (StarVLA backbones) of the model line's downstream runs: the downstream line's start registry in the same form (VAGEN-Lite-downstream/downstream/starts.json, not edited), one entry per start; code names B / S / RS / RD with the model in front (Q3 = Qwen3-VL-8B-Instruct, CS = Cambrian-S-7B). Paths are read only, never copied. The SFT and RL starts are added when step 3 has them.",
+ "Q3B": {
+  "role": "main",
+  "model_type": "qwen3_vl",
+  "desc": "original Qwen3-VL-8B-Instruct (HF revision 0c351dd0; four shards' sha256 checked 2026-10-24, job pt-v2kaero2)",
+  "path": "/mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b"
+ },
+ "CSB": {
+  "role": "main",
+  "model_type": "cambrian_qwen",
+  "desc": "original Cambrian-S-7B (nyu-visionx/Cambrian-S-7B, revision 556e72fd, from hf-mirror.com 2026-10-24; sizes and sha256 checked against huggingface.co's manifest)",
+  "path": "/mnt/umm/shared_model/vagen-lite-models/hub/models--nyu-visionx--Cambrian-S-7B/snapshots/556e72fded09352f6aa4e9c100c9f39e6fe0fba7"
+ }
+}

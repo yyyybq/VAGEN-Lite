@@ -68,6 +68,18 @@ def view(pool: str) -> Dict:
             "waiting_ours": sum(1 for w, _ in waiting if w.startswith(OURS))}
 
 
+def fits(v: Dict, cards: int) -> bool:
+    """Whether a job of ``cards`` may go to the pool of view ``v`` now: nothing of this line waits there, and for 8
+    cards no main-line job waits and a machine is idle; for 1 card no one-card main-line job (a render service, an
+    evaluation) waits and some machine has a free card (a main-line trainer waiting for a whole machine is not
+    delayed by a one-card job placed on a partly used machine)."""
+    if "error" in v or v["waiting_ours"]:
+        return False
+    if cards == 8:
+        return v["waiting_main_line"] == 0 and (v["idle_estimate"] or 0) > 0
+    return v["waiting_main_line_1card"] == 0 and ((v["idle_estimate"] or 0) > 0 or v["machines_with_free_cards"] > 0)
+
+
 def main() -> None:
     print(json.dumps({"pause_file": PAUSE.exists(), "pools": [view(p) for p in job_sco.POOLS]}, indent=1))
 
