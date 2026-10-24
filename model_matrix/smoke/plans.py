@@ -12,10 +12,14 @@ Plans (each chain runs from the worktree: VAGEN_LITE_WORKTREE=/mnt/umm/users/yin
                      V4: D-cond + keep, threshold 0.3318, floor 1.0, progress scale 10 / 3; checkpoint at 10), the
                      rollout-vs-trainer log-probability audit on, the update-10 checkpoint evaluated on both sets;
 - m_qwen25vl7b_smoke: the same for Qwen2.5-VL-7B from the original model: the default path end to end, and the
-                     log-probability audit's reference.
+                     log-probability audit's reference;
+- m_cambrian7b_base, m_cambrian7b_smoke: the first two for Cambrian-S-7B (the user's section 3; the line's download,
+                     model_type cambrian_qwen: its SFT tool, the concat-path expansion, the evaluator's Cambrian
+                     branch).
 Every job is named models-* and goes only to idle machines (plan pool "idle").  Results go to the line's own
 evaluation folders (tasks.jsonl and selection.json linked from the main line's v2 sets), so no result folder of the
-main line is written.
+main line is written.  ``--recommit`` sets the commit of plans whose chain has not started (no progress.json): the
+chain's check_code refuses a checkout at another commit.
 """
 from __future__ import annotations
 
@@ -29,6 +33,8 @@ V2 = E / "interiorgs_v10_r12_20261019"
 QWEN3VL = ("/mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/"
            "0c351dd01ed87e9c1b53cbc748cba10e6187ff3b")
 QWEN25VL = str(E / "interiorgs_v10_r11_20261016" / "inputs" / "base_7b")
+CAMBRIAN = ("/mnt/umm/shared_model/vagen-lite-models/hub/models--nyu-visionx--Cambrian-S-7B/snapshots/"
+            "556e72fded09352f6aa4e9c100c9f39e6fe0fba7")
 SFT_DIR = RUNS / "sft_v10_newformat_20261024"
 EVAL_SETS = {"val": RUNS / "eval_sets" / "eval_val_v2", "test": RUNS / "eval_sets" / "eval_test_v2"}
 RL_BASE = {"standard": "v10_p1_Dcond", "seed": 20261019, "task_pool": "reserve",
@@ -62,32 +68,53 @@ def smoke(tag: str, model: str, model_type, group: str, run: str, commit: str) -
     return plan
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--commit", required=True)
-    ap.add_argument("--date", default="20261024")
-    a = ap.parse_args()
-    eval_sets()
-    plans = {
-        f"m_qwen3vl8b_base_{a.date}": {
-            "tr": str(RUNS / "chains" / f"m_qwen3vl8b_base_{a.date}"), "sft_dir": str(SFT_DIR), "commit": a.commit,
-            "eval_only": True, "model_type": "qwen3_vl", "job_prefix": "models", "pool": "idle", "max_eval_jobs": 2,
+def base_eval(tag: str, model: str, model_type: str, result: str, commit: str) -> dict:
+    return {"tr": str(RUNS / "chains" / tag), "sft_dir": str(SFT_DIR), "commit": commit, "eval_only": True,
+            "model_type": model_type, "job_prefix": "models", "pool": "idle", "max_eval_jobs": 2,
             "eval_sets": {k: str(v) for k, v in EVAL_SETS.items()},
-            "eval": {"options": [], "models": {"m_qwen3vl8b_base_t08": {"model": QWEN3VL, "options": SAMPLED}}}},
-        f"m_qwen3vl8b_smoke_{a.date}": smoke(f"m_qwen3vl8b_smoke_{a.date}", QWEN3VL, "qwen3_vl", "q3smoke",
-                                             "q3v4smoke", a.commit),
-        f"m_qwen25vl7b_smoke_{a.date}": smoke(f"m_qwen25vl7b_smoke_{a.date}", QWEN25VL, None, "q25smoke",
-                                              "q25v4smoke", a.commit),
+            "eval": {"options": [], "models": {result: {"model": model, "options": SAMPLED}}}}
+
+
+def plans(commit: str, date: str) -> dict:
+    return {
+        f"m_qwen3vl8b_base_{date}": base_eval(f"m_qwen3vl8b_base_{date}", QWEN3VL, "qwen3_vl", "m_qwen3vl8b_base_t08",
+                                              commit),
+        f"m_qwen3vl8b_smoke_{date}": smoke(f"m_qwen3vl8b_smoke_{date}", QWEN3VL, "qwen3_vl", "q3smoke", "q3v4smoke",
+                                           commit),
+        f"m_qwen25vl7b_smoke_{date}": smoke(f"m_qwen25vl7b_smoke_{date}", QWEN25VL, None, "q25smoke", "q25v4smoke",
+                                            commit),
+        f"m_cambrian7b_base_{date}": base_eval(f"m_cambrian7b_base_{date}", CAMBRIAN, "cambrian_qwen",
+                                               "m_cambrian7b_base_t08", commit),
+        f"m_cambrian7b_smoke_{date}": smoke(f"m_cambrian7b_smoke_{date}", CAMBRIAN, "cambrian_qwen", "csmoke",
+                                            "cv4smoke", commit),
     }
-    for tag, plan in plans.items():
+
+
+def write(all_plans: dict, recommit: bool = False) -> None:
+    for tag, plan in all_plans.items():
         tr = Path(plan["tr"])
         tr.mkdir(parents=True, exist_ok=True)
         path = tr / "plan.json"
         if path.exists():
-            print("kept", path)
+            old = json.loads(path.read_text())
+            if recommit and not (tr / "progress.json").exists() and old.get("commit") != plan["commit"]:
+                path.write_text(json.dumps(dict(old, commit=plan["commit"]), indent=1))
+                print("recommitted", path, old.get("commit"), "->", plan["commit"])
+            else:
+                print("kept", path)
             continue
         path.write_text(json.dumps(plan, indent=1))
         print("wrote", path)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--commit", required=True)
+    ap.add_argument("--date", default="20261024")
+    ap.add_argument("--recommit", action="store_true", help="give plans not yet started this commit")
+    a = ap.parse_args()
+    eval_sets()
+    write(plans(a.commit, a.date), a.recommit)
 
 
 if __name__ == "__main__":
