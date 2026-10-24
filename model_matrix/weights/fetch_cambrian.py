@@ -6,6 +6,7 @@ manifest the HF API gives (size for every file, sha256 for the LFS ones).  Only 
     HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1 python -I fetch_cambrian.py download|verify --out RECORD_DIR
                                                              (without proxy variables: hf-mirror is reached directly,
                                                               the proxy gives HF ~0.1 MB/s; hf-mirror's API redirects)
+    python -I fetch_cambrian.py refs --out RECORD_DIR          (refs/main for offline loads by repository name)
 """
 import argparse
 import datetime
@@ -98,16 +99,32 @@ def cmd_verify(out: Path):
     print(json.dumps({r: v["all_ok"] for r, v in report["repos"].items()}), "all_ok", ok)
 
 
+def cmd_refs(out: Path):
+    """snapshot_download with a commit as revision writes no refs/main, so an offline from_pretrained by repository
+    name (the Cambrian adapter loads its vision tower as google/siglip2-so400m-patch14-384) finds no snapshot.  Write
+    refs/main = the downloaded revision (40 bytes per repository; an existing different ref is refused)."""
+    rec = {"utc": now(), "repos": {}}
+    for repo, info in json.loads((out / "manifest.json").read_text())["repos"].items():
+        ref = Path(CACHE) / f"models--{repo.replace('/', '--')}" / "refs" / "main"
+        if ref.is_file() and ref.read_text().strip() != info["revision"]:
+            raise SystemExit(f"{ref} names {ref.read_text().strip()}, not {info['revision']}")
+        ref.parent.mkdir(exist_ok=True)
+        ref.write_text(info["revision"])
+        rec["repos"][repo] = {"ref": str(ref), "revision": info["revision"]}
+    (out / "refs.json").write_text(json.dumps(rec, indent=1))
+    print(json.dumps(rec["repos"]))
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["manifest", "download", "verify"])
+    ap.add_argument("cmd", choices=["manifest", "download", "verify", "refs"])
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
-    if a.cmd != "manifest":
+    if a.cmd in ("download", "verify"):
         for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
             if os.environ.get(k):
                 raise SystemExit(f"unset {k} first (hf-mirror is reached directly)")
         if os.environ.get("HF_ENDPOINT") != ENDPOINT or os.environ.get("HF_HUB_DISABLE_XET") != "1":
             raise SystemExit(f"run with HF_ENDPOINT={ENDPOINT} HF_HUB_DISABLE_XET=1")
     a.out.mkdir(parents=True, exist_ok=True)
-    {"manifest": cmd_manifest, "download": cmd_download, "verify": cmd_verify}[a.cmd](a.out)
+    {"manifest": cmd_manifest, "download": cmd_download, "verify": cmd_verify, "refs": cmd_refs}[a.cmd](a.out)

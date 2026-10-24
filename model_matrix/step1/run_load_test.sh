@@ -14,9 +14,10 @@ ENV_ROOT=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
 PY_MAIN=${ENV_ROOT}/bin/python
 PY_Q3=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/.venv-qwen3vl-runtime/bin/python
 QWEN3VL=/mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
-# the original Cambrian-S weights are not on the cluster; the closest are the August RL checkpoints (same
-# architecture, cambrian_qwen), here the earliest one (50 updates at lr 5e-7)
-CAMBRIAN=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step50
+# step 1: the original Cambrian-S weights were not on the cluster, so the August RL checkpoints (same
+# architecture, cambrian_qwen), here the earliest one; step 2: LOAD_TEST_CAMBRIAN / LOAD_TEST_HF_HUB_CACHE name the
+# downloaded Cambrian-S-7B and the cache holding its SigLIP2
+CAMBRIAN=${LOAD_TEST_CAMBRIAN:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step50}
 mkdir -p "${OUT}/logs" "${OUT}/tmp"
 OWNER=$(stat -c %u:%g "${OUT}")
 trap 'status=$?; [[ -n ${mon_pid:-} ]] && kill "${mon_pid}" 2>/dev/null; rm -rf "${OUT}/tmp"; printf "{\"exit_status\":%s,\"ended_utc\":\"%s\"}\n" "${status}" "$(date -u +%FT%TZ)" > "${OUT}/logs/exit.json"; chown -R "${OWNER}" "${OUT}" 2>/dev/null || true; exit ${status}' EXIT
@@ -36,8 +37,8 @@ export CPATH="${WHEEL_ROOT}/include:${ENV_ROOT}/targets/x86_64-linux/include:${C
 export LIBRARY_PATH="${WHEEL_ROOT}/lib:${ENV_ROOT}/targets/x86_64-linux/lib:${LIBRARY_PATH:-}"
 export LD_LIBRARY_PATH="${WHEEL_ROOT}/lib:${ENV_ROOT}/lib:${ENV_ROOT}/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}"
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
-export HF_HOME="${OUT}/tmp/hf_home" HF_HUB_CACHE=/mnt/umm/users/yinbaiqiao/.cache/huggingface/hub
-export SIGLIP_CACHE=/mnt/umm/users/yinbaiqiao/.cache/huggingface/hub
+export HF_HOME="${OUT}/tmp/hf_home" HF_HUB_CACHE=${LOAD_TEST_HF_HUB_CACHE:-/mnt/umm/users/yinbaiqiao/.cache/huggingface/hub}
+export SIGLIP_CACHE=${LOAD_TEST_HF_HUB_CACHE:-/mnt/umm/users/yinbaiqiao/.cache/huggingface/hub}
 export VLLM_CACHE_ROOT="${OUT}/tmp/vllm" XDG_CACHE_HOME="${OUT}/tmp/xdg" TRITON_CACHE_DIR="${OUT}/tmp/triton"
 export TORCH_EXTENSIONS_DIR="${OUT}/tmp/torch_extensions"
 export CAMBRIAN_SRC=/mnt/umm/users/yinbaiqiao/cambrian-s
