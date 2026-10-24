@@ -30,8 +30,9 @@ def pool_machines(pool: str) -> Optional[int]:
 
 
 def job_cards(job: Dict) -> Optional[int]:
+    """The cards a job asks for (the job list: roles[0].resource_spec[0].limits["nvidia.com/gpu"])."""
     try:
-        return int(job["roles"][0]["limits"]["nvidia.com/gpu"])
+        return int(job["roles"][0]["resource_spec"][0]["limits"]["nvidia.com/gpu"])
     except (KeyError, IndexError, TypeError, ValueError):
         return None
 

@@ -51,6 +51,14 @@ class ModelTypesTest(unittest.TestCase):
 
 
 class JobsTest(unittest.TestCase):
+    def test_job_cards_from_the_job_list(self):
+        from model_matrix.sco_view import job_cards
+
+        spec = {"description": "8XH800-80GB", "limits": {"cpu": "112", "nvidia.com/gpu": "8"}, "name": "N4lS.Iq.I80.8"}
+        self.assertEqual(job_cards({"roles": [{"resource_spec": [spec]}]}), 8)  # as `sco acp jobs list -o json` gives it
+        self.assertEqual(job_cards({"roles": [{"resource_spec": [dict(spec, limits={"nvidia.com/gpu": "1"})]}]}), 1)
+        self.assertIsNone(job_cards({"roles": []}))
+
     def test_launch_script_passes_the_model_type_on(self):
         from data_gen.interiorgs_v10 import job_sco as J
 
