@@ -66,10 +66,10 @@
 - **看板**：`downstream/eval/watch.py`，20:49 起运行，PID 3435493，代码 `b176a89d`，每 5 分钟一轮。启动、停止、查看命令如下（在集群 worktree 里；代码更新后先 stop 再 start）：
 
 ```bash
-bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- --yield-to-same-size --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 010 030 --release-at-full-state DS-B-030-s1 DS-S-030-s1 DS-RD-030-s1
+bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- --yield-to-same-size --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 010 030 --release-at-full-state DS-B-030-s1 DS-S-030-s1 DS-RD-030-s1 DS-RS-030-s1
 ```
 
-  （10-24 04:57 起 PID 3952266，代码 `d78e29fe`，启动参数在上面那条命令后面再加 `DS-RS-030-s1`。`--release-at-full-state` 列出的实验，存好下一个全状态后由看板停下，之后至少 30 分钟不续训。）
+  （10-24 04:57 起 PID 3952266，代码 `d78e29fe`。`--release-at-full-state` 列出的实验，存好下一个全状态后由看板停下，之后至少 30 分钟不续训。）
 
 ```bash
 bash downstream/eval/watch.sh stop
