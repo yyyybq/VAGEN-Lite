@@ -269,7 +269,7 @@ def prepare(args):
         "bf16": True,
         "gradient_checkpointing": True,
         "flash_attn": "sdpa",
-        "logging_steps": 5,
+        "logging_steps": int(getattr(args, "logging_steps", 5) or 5),
         "save_steps": 200,
         **({"save_strategy": "epoch", "save_only_model": True}
            if getattr(args, "save_per_epoch", False) else {}),
@@ -341,6 +341,9 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--cutoff-len", type=int, default=16384)
     p.add_argument("--epochs", type=int, default=3, help="training epochs in the recipe (InteriorGS v10 round 10: 5)")
+    p.add_argument("--logging-steps", type=int, default=5,
+                   help="the model line: log the loss every N optimizer steps (default 5, as before; a smoke SFT of a "
+                        "few steps logs every one)")
     p.add_argument("--learning-rate", type=float, default=1e-5,
                    help="peak learning rate of the recipe (default 1e-5; InteriorGS v10 round 12 freeze: the short "
                         "format SFT of the original model uses a smaller one)")

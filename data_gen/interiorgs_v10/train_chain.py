@@ -895,6 +895,8 @@ class Chain:
                 args += ["--learning-rate", str(float(self.plan["sft_learning_rate"]))]
             if self.plan.get("model_type"):  # the model line: the type's LLaMA-Factory template
                 args += ["--model-type", str(self.plan["model_type"])]
+            if self.plan.get("sft_logging_steps"):  # the model line: a smoke SFT logs every step
+                args += ["--logging-steps", str(int(self.plan["sft_logging_steps"]))]
             self.sh(args, cwd=ROOT / "scripts", log=self.tr / "logs" / f"prepare_sft{'_' + group if group else ''}.log")
             if not (lf / "train.yaml").is_file():
                 raise ChainError(f"prepare_active_spatial_sft.py wrote no train.yaml in {lf}")

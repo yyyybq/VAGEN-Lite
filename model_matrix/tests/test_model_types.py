@@ -231,6 +231,11 @@ class ChainTest(unittest.TestCase):
             chain.sft_data()
             prep = next(a for a in calls if "prepare_active_spatial_sft.py" in a)
             self.assertEqual(prep[prep.index("--model-type") + 1], "qwen3_vl")
+            self.assertNotIn("--logging-steps", prep)
+            chain.plan["sft_logging_steps"] = 1
+            calls.clear()
+            chain.sft_data()
+            self.assertEqual(calls[0][calls[0].index("--logging-steps") + 1], "1")
             chain.sft_model = lambda: Path("/m")
             chain.rl_config()
             rl = next(a for a in calls if "rl-config" in a)
