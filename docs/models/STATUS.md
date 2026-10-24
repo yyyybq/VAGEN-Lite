@@ -1,23 +1,24 @@
 # 模型线状态（唯一的状态文档）
 
-最后更新：2026-10-24 21:55 UTC。
+最后更新：2026-10-24 22:40 UTC。
 
 模型线：把 Qwen3-VL-8B-Instruct 和 Cambrian-S（7B 为主）接进统一框架，在主线最高的 setting 上跑主实验和下游实验。报告在 [reports/](reports/)，实验登记表 `MATRIX.md` 第三步建。
 
 ## 1. 现在在哪一步
 
-结论：第二步（接入与冒烟）进行中。两个模型的代码都已接上并通过 CPU 核对；GPU 冒烟只跑完了 Qwen3-VL 的零样本评测，其余在等空闲机器。
+结论：第二步（接入与冒烟）进行中。两个模型的代码（含两个 StarVLA 骨干）都已接上并通过 CPU 核对；两个模型的零样本评测和 1 卡加载都已完成；SFT、RL 和 8 卡下游冒烟都在等空闲机器（Qwen3-VL 的 SFT 从 20:30 起等，两个池一直有主线任务在排队）。
 
 - 第一步（盘点与核实）已完成，你 10-24 确认。报告：[reports/STEP1_INVENTORY_20261024.md](reports/STEP1_INVENTORY_20261024.md)。
 - 第二步各块（顺序按你的第 5 节）：
 
 | 块 | 代码 | CPU 核对 | GPU 冒烟 |
 | --- | --- | --- | --- |
-| Qwen3-VL 接入 | 完成 | 完成：LLaMA-Factory 编码和 Qwen3-VL 自己的模板逐个 token 相同（2 条对话）；只监督回答；每帧 64 个图像 token 和处理器一致；位置编码函数和 Qwen2-VL 对图像相同，不用改 | 零样本完成；SFT 冒烟在等空闲 8 卡机器（20:30 起） |
-| Qwen3-VL 的 StarVLA 骨干 | 完成 | — | 1 卡加载完成；8 卡最小方案未提交（排在 Qwen3-VL SFT 冒烟之后） |
-| Cambrian-S 代码 | 完成（RL 拼接路径、评测分支、SFT 工具） | 完成：LLaMA-Factory 编码和 RL 训练端展开后的序列逐个 token 相同（2 条对话，2,277 和 5,008 个 token），每帧 756 个位置，像素值和 RL 处理器的相同 | 加载测试第 3 次在跑；零样本链已启动，等卡 |
-| Cambrian-S 的 StarVLA 骨干 | 未开始 | — | — |
+| Qwen3-VL 接入 | 完成 | 完成：LLaMA-Factory 编码和 Qwen3-VL 自己的模板逐个 token 相同（2 条对话）；只监督回答；每帧 64 个图像 token 和处理器一致；位置编码函数和 Qwen2-VL 对图像相同，不用改 | 零样本完成；SFT 冒烟在等空闲 8 卡机器 |
+| Qwen3-VL 的 StarVLA 骨干 | 完成（StarVLA 自带 Qwen3-VL 接口） | — | 1 卡加载通过；8 卡最小方案等 Qwen3-VL SFT 冒烟提交后自动提交 |
+| Cambrian-S 代码 | 完成（RL 拼接路径、评测分支、SFT 工具） | 完成：LLaMA-Factory 编码和 RL 训练端展开后的序列逐个 token 相同（2 条对话，2,277 和 5,008 个 token），每帧 756 个位置，像素值和 RL 处理器的相同 | 加载测试通过（HF 和 vLLM 贪心回答相同，逐词对数概率差最大 0.013）；零样本完成；SFT/RL 冒烟链等 Qwen3-VL SFT 冒烟提交后自动启动 |
+| Cambrian-S 的 StarVLA 骨干 | 完成（新接口，运行时登记） | 完成：分词器和 Qwen2.5-VL-7B 的完全相同、隐藏维 3584，动作头和动作 token 原样沿用；多相机按 Cambrian 的方式（每个视角 72 个位置）；批量前向和逐条前向相同 | 1 卡加载通过；8 卡最小方案等 Cambrian SFT 冒烟提交后自动提交 |
 
+- 自动接力（`models_runs/watchers/`，每个只在前一个提交后才动；启动训练链前先把计划的提交号设成工作树当时的 HEAD，工作树有未提交改动就不启动）：Qwen3-VL SFT 冒烟提交 → Cambrian 冒烟链启动、DS-Q3B-smoke 提交；Cambrian SFT 冒烟提交 → DS-CSB-smoke 提交；Qwen3-VL RL 冒烟提交 → Qwen2.5-VL 参照冒烟链启动。
 - 报告写到 `reports/STEP2_SMOKE_<日期>.md`（冒烟做完再写）。
 
 ## 1a. 你的决定（10-24，第一步报告之后）
@@ -47,16 +48,18 @@
 
 | 编号 | 内容 | 状态 | sco 任务 | 更新（UTC） | 卡在哪 |
 | --- | --- | --- | --- | --- | --- |
-| Q3-SMOKE-SFT | Qwen3-VL-8B SFT 冒烟：新格式 440 条对话（训练 400、验证 40），1 个 epoch | 等卡 | 未提交 | 10-24 21:47 | 两个池都有主线任务在排队（zoetrope 4 个、h800 2 个），按规则让路；20:30 起 |
-| Q3-SMOKE-RL | 从上面的 SFT 跑 RL 10 次更新（V4，带对数概率核对） | 未开始 | — | 10-24 21:47 | 等 SFT 和它的评测 |
-| Q25-SMOKE | Qwen2.5-VL-7B 同样的冒烟（对数概率核对的参照） | 未启动 | — | 10-24 21:49 | Qwen3-VL 的 RL 开始后再启动 |
-| C-SMOKE | Cambrian-S-7B 同样的冒烟 | 未启动 | — | 10-24 21:49 | 计划已写；Qwen3-VL 冒烟提交后再启动（顺序按第 5 节） |
-| DS-Q3B-smoke | 下游最小方案：原始 Qwen3-VL-8B 当 StarVLA 骨干，SFT 100 步 + 几个闭环回合 | 未提交 | — | 10-24 20:47 | 实验目录已建；排在 Q3-SMOKE-SFT 之后 |
+| Q3-SMOKE-SFT | Qwen3-VL-8B SFT 冒烟：新格式 440 条对话（训练 400、验证 40），1 个 epoch | 等卡 | 未提交 | 10-24 22:30 | 两个池都有主线任务在排队（22:29：h800 9 个、zoetrope 3 个），按规则让路；20:30 起 |
+| Q3-SMOKE-RL | 从上面的 SFT 跑 RL 10 次更新（V4，带对数概率核对） | 未开始 | — | 10-24 22:30 | 等 SFT 和它的评测 |
+| Q25-SMOKE | Qwen2.5-VL-7B 同样的冒烟（对数概率核对的参照） | 未启动 | — | 10-24 22:30 | 接力：Qwen3-VL 的 RL 冒烟提交后自动启动 |
+| C-SMOKE | Cambrian-S-7B 同样的冒烟（`m_cambrian7b_smoke_20261024`） | 未启动 | — | 10-24 22:30 | 接力：Qwen3-VL 的 SFT 冒烟提交后自动启动 |
+| DS-Q3B-smoke | 下游最小方案：原始 Qwen3-VL-8B 当 StarVLA 骨干，SFT 100 步 + 3 个任务 × 4 个种子闭环 | 未提交 | — | 10-24 22:30 | 接力：Qwen3-VL 的 SFT 冒烟提交后自动提交 |
+| DS-CSB-smoke | 同上，原始 Cambrian-S-7B | 未提交 | — | 10-24 22:30 | 实验目录已建；接力：Cambrian 的 SFT 冒烟提交后自动提交 |
 | M-qwen3vl8b-sft / -s0 / -d | Qwen3-VL-8B 正式 SFT、RL 两臂 | 未提交 | — | — | 冒烟通过后发任务清单给你确认 |
 | M-cambrians7b-sft / -s0 / -d | Cambrian-S-7B 正式 SFT、RL 两臂 | 未提交 | — | — | 同上 |
 | M-qwen25vl7b-sft / -s0 / -d | Qwen2.5-VL-7B 参照行（新格式重跑） | 未提交 | — | — | 排在两个新模型之后 |
 | DS-Q3B-100-s1 | 下游：原始 Qwen3-VL-8B | 未提交 | — | — | 等 DS-Q3B-smoke 通过，随正式清单一起确认 |
-| DS-CS*-100-s1 | 下游：Cambrian 四个起点 | 未开始 | — | — | 等 Cambrian 的 StarVLA 骨干 |
+| DS-CSB-100-s1 | 下游：原始 Cambrian-S-7B | 未提交 | — | — | 等 DS-CSB-smoke 通过，随正式清单一起确认 |
+| DS-Q3S / Q3RS / Q3RD、DS-CSS / CSRS / CSRD | 下游：两个模型的 SFT、RL 两臂起点 | 未开始 | — | — | 等第三步的检查点 |
 
 **评测**
 
@@ -68,10 +71,12 @@
 | M-qwen3vl8b-base | Qwen3-VL-8B 零样本，705 道（温度 0.8，top-p 0.92，新格式示例） | 已完成 | `pt-4kvvmez2`（验证）、`pt-fsl9tk8p`（测试） | 10-24 20:57 | 成功率：验证 413 道 0.080，测试 292 道 0.086；不合法回答率 0.000；碰撞率 0.051 / 0.038 |
 | C-LOAD-1 | Cambrian-S-7B 真权重 1 卡加载 | 已完成（部分） | `pt-b3ztrs33` | 10-24 20:54 | vLLM 能加载能生成，但图像处理器退到了替代品（下载时缓存缺 `refs/main`，已补）；HF 一级失败于同一原因 |
 | C-LOAD-2 | 同上，补 `refs/main` 后重跑 | 已完成（部分） | `pt-ifsus27t` | 10-24 21:04 | vLLM：用 SigLIP2 自己的处理器，加载 155 s、显存 47 GiB，贪心回答 `<action>move_forward\|turn_left\|</action>`；HF：加载 30 s、15.7 GiB，但 Cambrian 源码的带缓存生成在这版 Transformers 上报错（训练不走这条路） |
-| C-LOAD-3 | 同上，HF 一级改成不带缓存逐步解码，两级都记下逐词对数概率 | 在跑 | `pt-dmkux9k6` | 10-24 21:41 | — |
-| M-cambrians7b-base | Cambrian-S-7B 零样本，705 道（同上设置） | 等卡 | 链已启动 | 10-24 21:49 | — |
+| C-LOAD-3 | 同上，HF 一级改成不带缓存逐步解码，两级都记下逐词对数概率 | 已完成 | `pt-dmkux9k6` | 10-24 21:47 | 两级都正常；HF 和 vLLM 的贪心回答相同（13 个 token），逐词对数概率差最大 0.013、平均 0.002 |
+| M-cambrians7b-base | Cambrian-S-7B 零样本，705 道（温度 0.8，top-p 0.92，新格式示例） | 已完成 | `pt-62zkati2`（验证）、`pt-vwp2bl68`（测试） | 10-24 22:15 | 成功率：验证 413 道 0.065，测试 292 道 0.079；不合法回答率 0.057 / 0.051；碰撞率 0.075 / 0.082；评测用时 1,493 s / 1,142 s |
+| CSB-LOAD-1 | Cambrian-S-7B 当 StarVLA 骨干的 1 卡加载 | 失败 | `pt-7bkq0842` | 10-24 22:17 | 权重加载正确（765/765 个张量相同），批量 2 的前向报错：Cambrian 源码的层循环只取批里第一条（见第 5 节）；已改走 Transformers 自己的 Qwen2Model 前向 |
+| CSB-LOAD-2 | 同上，改后重跑 | 已完成 | `pt-z2qjr3ew` | 10-24 22:29 | 765/765 个张量相同；隐藏维 3584，动作 token 146663；前向损失 0.627、1.43 s、峰值 31.2 GB；反向放得下，峰值 40.9 GB；predict_action 输出 [1,16,12] 有限 |
 
-现在本线在 sco 上的任务：`pt-dmkux9k6`（C-LOAD-3，1 卡）。
+现在本线在 sco 上没有任务。
 
 ## 3. 权重和数据
 
@@ -114,13 +119,13 @@ Cambrian-S-7B 的配置：语言模型从 Qwen2.5-7B-Instruct 来，隐藏维 35
 | M-qwen3vl8b-sft | Qwen3-VL-8B | 原始 | SFT（C0 的数据来源和配方，新格式） | 未开始 | — |
 | M-qwen3vl8b-s0 | Qwen3-VL-8B | 本线 SFT | RL 稀疏臂（`v10_p1_S0`） | 未开始 | — |
 | M-qwen3vl8b-d | Qwen3-VL-8B | 本线 SFT | RL 密集臂（提交时按汇总选，现在是 V4） | 未开始 | — |
-| M-cambrians7b-base | Cambrian-S-7B | 原始 | 零样本，705 道，温度 0.8 | 等卡 | — |
+| M-cambrians7b-base | Cambrian-S-7B | 原始 | 零样本，705 道，温度 0.8 | 完成 | 验证 0.065，测试 0.079 |
 | M-cambrians7b-sft / -s0 / -d | Cambrian-S-7B | 同 Qwen3-VL | 同 Qwen3-VL | 未开始 | — |
 | M-qwen25vl7b-sft / -s0 / -d | Qwen2.5-VL-7B | 同上 | 同上（参照行） | 未开始 | — |
 
 ## 5. 代码和输出
 
-- worktree：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-models`，本地分支 `models`，从 `origin/main` `00363333` 开出，不跟踪远端。代码整理期间不推 main，本地小步提交。现在 HEAD `cd780637`。
+- worktree：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-models`，本地分支 `models`，从 `origin/main` `00363333` 开出，不跟踪远端。代码整理期间不推 main，本地小步提交。
 - 改动都是新文件或默认关闭的新开关；不设这些开关时，原有路径的行为不变（每个都有测试）。主要的：
   - 型号登记 `vagen/models/model_types.py`（`qwen2_5_vl` 默认、`qwen3_vl`、`cambrian_qwen`）；训练链计划字段 `model_type`，`rl-config --model-type`。
   - Qwen3-VL：`model_matrix/sft/lf_qwen3vl.py`、`lf_launcher.py`、`accelerate_fsdp_qwen3vl.yaml`、`check_lf_qwen3vl.py`。
@@ -128,8 +133,10 @@ Cambrian-S-7B 的配置：语言模型从 Qwen2.5-7B-Instruct 来，隐藏维 35
   - 对数概率核对：`rl-config --rollout-log-probs`（vLLM 返回采样 token 的对数概率，训练器逐次写对比文件；更新本身不变）。
   - 只用空闲机器：计划 `"pool": "idle"`、`model_matrix/sco_view.py`、`model_matrix/sco_job.py`；任务名前缀计划字段 `job_prefix`。
   - 计划字段 `rl_start_model`（跳过 SFT 从给定模型开始 RL，只给冒烟查管线用；正式实验都是先 SFT 后 RL）。
-  - 下游：`model_matrix/downstream/`（只读调用下游线的配方和入口，不改下游线的文件）。
-- 测试：`data_gen/interiorgs_v10/tests` + `model_matrix/tests`，10-24 21:3x 全跑 325 通过、3 跳过（之后新增的 `model_matrix/tests` 34 通过、3 跳过）。
+  - 下游：`model_matrix/downstream/`（只读调用下游线的配方和入口，不改下游线的文件）。Cambrian-S 的 StarVLA 骨干：`starvla_cambrian.py`（接口，运行时登记到 StarVLA 的 `get_vlm_model`，其他起点照旧用 StarVLA 自己的接口）、`cambrian_entry.py`（训练入口、加载测试和策略服务都经它启动）、`cambrian_env.sh`。
+  - StarVLA 环境缺 Cambrian 源码在导入时要的两个包（`ezcolorlog` 彩色日志、`open_clip` 只给 CLIP 视觉塔用）。没装任何东西：`model_matrix/downstream/shims/` 放了两个替身文件，只有 `cambrian_entry.py` 把它们放到搜索路径的最后（装了真包就用真包）；SigLIP2 这条路不用它们。
+  - Cambrian 源码的语言模型循环取 `layer_outputs[0]`，在 Transformers 4.54 以后（解码层直接返回隐藏状态）取到的是批里的第一条。批量为 1 时没问题（RL 去掉填充后总是 1，SFT 每卡每步 1 条，加载测试 1 条）；批量大于 1 就错。StarVLA 接口改走 Transformers 自己的 `Qwen2Model.forward`（同一组层和位置编码），测试里核对过：单条和 Cambrian 循环相同，左填充的 2 条批和逐条相同（Transformers 4.56.1 和 4.57.0 都测）。SFT 的模型类遇到批量大于 1 直接报错。
+- 测试：`data_gen/interiorgs_v10/tests` + `model_matrix/tests`，10-24 21:38 全跑 325 通过、3 跳过；之后 `model_matrix/tests` 22:31 45 通过、3 跳过（跳过的 3 个只在 Qwen3-VL 运行环境里跑，在那里通过）。
 - 大文件和任务输出：`/mnt/umm/users/yinbaiqiao/models_runs/`。
 - 整理窗口问到下面这些目录，一律回答"不能动"：
   - `VAGEN-Lite-models`、`models_runs/`、`cambrian-s/`；
