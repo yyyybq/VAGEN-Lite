@@ -637,9 +637,11 @@ class Chain:
 
         while True:
             views = [] if sco_view.PAUSE.exists() else [sco_view.view(p) for p in sco_view.job_sco.POOLS]
-            fit = [v for v in views if "error" not in v and v["waiting_main_line"] == 0 and v["waiting_ours"] == 0
-                   and ((v["idle_estimate"] or 0) > 0 if cards == 8
-                        else (v["idle_estimate"] or 0) > 0 or v["machines_with_free_cards"] > 0)]
+            fit = [v for v in views if "error" not in v and v["waiting_ours"] == 0
+                   and (v["waiting_main_line"] == 0 and (v["idle_estimate"] or 0) > 0 if cards == 8  # a whole machine
+                        # one card: no one-card main-line job waits there, and some machine has a free card
+                        else v["waiting_main_line_1card"] == 0
+                        and ((v["idle_estimate"] or 0) > 0 or v["machines_with_free_cards"] > 0))]
             if fit:
                 best = max(fit, key=lambda v: (v["idle_estimate"] or 0, v["machines_with_free_cards"]))
                 self.state["idle_pool_wait"] = None

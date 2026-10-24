@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 from data_gen.interiorgs_v10 import job_sco
 
@@ -29,19 +29,42 @@ def pool_machines(pool: str) -> Optional[int]:
         return None
 
 
+def job_cards(job: Dict) -> Optional[int]:
+    try:
+        return int(job["roles"][0]["limits"]["nvidia.com/gpu"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def waiting_jobs(pool: str) -> Optional[List[Tuple[str, Optional[int]]]]:
+    """(name, cards) of the workspace's jobs waiting for cards in ``pool``."""
+    jobs = job_sco.list_jobs()
+    if jobs is None:
+        return None
+    out = []
+    for j in jobs:
+        p = j.get("resource_pool")
+        if (p.get("name") if isinstance(p, dict) else p) == pool and str(j.get("state")) in job_sco.WAITING:
+            out.append((str(j.get("display_name") or ""), job_cards(j)))
+    return out
+
+
 def view(pool: str) -> Dict:
     v = job_sco.pool_view(pool)
     n = pool_machines(pool)
-    if v is None:
+    waiting = waiting_jobs(pool)
+    if v is None or waiting is None:
         return {"pool": pool, "error": "the job list or a machine could not be read"}
     used = {h: sum(int(j["cards"]) for j in js) for h, js in v["hosts"].items()}
-    waiting = v["waiting"]
+    main = [c for w, c in waiting if w.startswith("interiorgs-v10")]
     return {"pool": pool, "machines": n, "busy_machines": len(used),
             "idle_estimate": None if n is None else max(0, n - len(used)),
             "machines_with_free_cards": sum(1 for c in used.values() if c < 8),
-            "waiting": len(waiting), "waiting_main_line": sum(1 for w in waiting if w.startswith("interiorgs-v10")),
-            "waiting_downstream": sum(1 for w in waiting if w.startswith("downstream")),
-            "waiting_ours": sum(1 for w in waiting if w.startswith(OURS))}
+            "waiting": len(waiting), "waiting_main_line": len(main),
+            # a main-line job of one card (a render service, an evaluation) competes with a one-card job of ours
+            "waiting_main_line_1card": sum(1 for c in main if c != 8),
+            "waiting_downstream": sum(1 for w, _ in waiting if w.startswith("downstream")),
+            "waiting_ours": sum(1 for w, _ in waiting if w.startswith(OURS))}
 
 
 def main() -> None:

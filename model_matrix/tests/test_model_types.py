@@ -143,13 +143,14 @@ class ChainTest(unittest.TestCase):
     def test_idle_pool_waits_for_the_main_line_and_an_idle_machine(self):
         from model_matrix import sco_view
 
-        def v(pool, idle, free, main=0, ours=0):
+        def v(pool, idle, free, main=0, ours=0, main1=0):
             return {"pool": pool, "machines": 10, "busy_machines": 10 - idle, "idle_estimate": idle,
                     "machines_with_free_cards": free, "waiting": main + ours, "waiting_main_line": main,
+                    "waiting_main_line_1card": main1,
                     "waiting_downstream": 0, "waiting_ours": ours}
 
         rounds = [  # each poll: zoetrope, h800
-            {"zoetrope": v("zoetrope", 2, 0, main=1), "h800": v("h800", 0, 3)},  # 8 cards: nothing fits
+            {"zoetrope": v("zoetrope", 2, 0, main=1, main1=1), "h800": v("h800", 0, 3, main=1)},  # 8 cards: nothing fits
             {"zoetrope": v("zoetrope", 1, 0), "h800": v("h800", 3, 1, ours=1)},  # ours waits on h800
         ]
         with tempfile.TemporaryDirectory() as tmp:
