@@ -53,7 +53,12 @@ TYPES: Dict[str, ModelType] = {
     "cambrian_qwen": ModelType("cambrian_qwen", None, "cambrian_qwen", "model_matrix.sft.lf_launcher_cambrian",
                                "model_matrix/sft/accelerate_fsdp_cambrian.yaml",
                                env=(("HF_HUB_CACHE", CAMBRIAN_CACHE), ("SIGLIP_CACHE", CAMBRIAN_CACHE),
-                                    ("CAMBRIAN_SRC", CAMBRIAN_SRC))),
+                                    ("CAMBRIAN_SRC", CAMBRIAN_SRC),
+                                    # the RL trainer's attention (verl fsdp_workers reads it; the main line's
+                                    # runtime env sets eager): eager keeps a 28 x L x L fp32 matrix, 13 GiB at the
+                                    # 11k tokens of a 12-frame episode -- the first Cambrian RL smoke ran out of
+                                    # memory on it (2026-10-25 07:08); SDPA is the same attention in O(L) memory
+                                    ("TRANSFORMERS_ATTN_IMPLEMENTATION", "sdpa"))),
 }
 
 
@@ -89,11 +94,16 @@ def rl_overrides(name: Optional[str], max_turns: int, prompt_length: int) -> Dic
     <|image_pad|> (151655, the adapter's image_token_alias), the agent-loop manager that expands the compact <image>
     tokens for the trainer (vagen/agent_loop/cambrian_concat.py) with room for ``max_turns`` frames, and the prompt
     budget raised by 756 tokens per frame: vLLM's max_model_len is prompt_length + response_length and counts the
-    expanded tokens (verl's vllm_async_server)."""
+    expanded tokens (verl's vllm_async_server).  And verl's chunked, recomputed entropy (the same values; no full
+    fp32 copies of the sequence's softmax over the 152k-token vocabulary kept for the backward pass), for the
+    memory of sequences four times the Qwen ones."""
     kind = get(name)
     if kind.name != "cambrian_qwen":
         return {}
-    return {"actor_rollout_ref.model.external_lib": "vagen.models.cambrian_register",
+    return {"actor_rollout_ref.actor.entropy_from_logits_with_chunking": True,
+            "actor_rollout_ref.actor.entropy_checkpointing": True,
+            "actor_rollout_ref.ref.entropy_from_logits_with_chunking": True,
+            "actor_rollout_ref.model.external_lib": "vagen.models.cambrian_register",
             "actor_rollout_ref.model.trust_remote_code": True,
             "actor_rollout_ref.model.override_config.image_token_alias": 151655,
             "trainer.agent_loop_manager": "vagen.agent_loop.cambrian_concat.CambrianAgentLoopManager",

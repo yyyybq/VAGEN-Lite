@@ -32,7 +32,7 @@ class ModelTypesTest(unittest.TestCase):
         cam = M.get("cambrian_qwen")
         self.assertIsNone(cam.python)  # the vagen-lite env
         self.assertEqual(dict(cam.env), {"HF_HUB_CACHE": M.CAMBRIAN_CACHE, "SIGLIP_CACHE": M.CAMBRIAN_CACHE,
-                                         "CAMBRIAN_SRC": M.CAMBRIAN_SRC})
+                                         "CAMBRIAN_SRC": M.CAMBRIAN_SRC, "TRANSFORMERS_ATTN_IMPLEMENTATION": "sdpa"})
         self.assertTrue(Path(M.CAMBRIAN_SRC).is_dir() or not Path("/mnt/umm").is_dir())
         self.assertEqual((q25.env, q3.env), ((), ()))
         with self.assertRaises(ValueError):
@@ -49,6 +49,8 @@ class ModelTypesTest(unittest.TestCase):
         self.assertEqual(o["actor_rollout_ref.model.external_lib"], "vagen.models.cambrian_register")
         self.assertEqual(o["cambrian_concat.max_images"], 12)
         self.assertEqual(o["data.max_prompt_length"], 4096 + 756 * 12)  # vLLM's max_model_len counts 756 per frame
+        self.assertTrue(o["actor_rollout_ref.actor.entropy_from_logits_with_chunking"] and o["actor_rollout_ref.actor.entropy_checkpointing"])
+        self.assertTrue(o["actor_rollout_ref.ref.entropy_from_logits_with_chunking"])
         from vagen.agent_loop import cambrian_concat as C
 
         self.assertEqual((C.TOKENS_PER_IMAGE, C.IMAGE_PAD_ID), (M.CAMBRIAN_TOKENS_PER_IMAGE, 151655))
@@ -186,10 +188,12 @@ class ChainTest(unittest.TestCase):
             cache = "/mnt/umm/shared_model/vagen-lite-models/hub"
             self.assertEqual(self._chain(tmp, model_type="cambrian_qwen").job_env(),
                              {"VAGEN_LITE_MODEL_TYPE": "cambrian_qwen", "HF_HUB_CACHE": cache, "SIGLIP_CACHE": cache,
-                              "CAMBRIAN_SRC": "/mnt/umm/users/yinbaiqiao/cambrian-s"})
+                              "CAMBRIAN_SRC": "/mnt/umm/users/yinbaiqiao/cambrian-s",
+                              "TRANSFORMERS_ATTN_IMPLEMENTATION": "sdpa"})
             from data_gen.interiorgs_v10 import job_sco as J
 
-            self.assertTrue({"HF_HUB_CACHE", "SIGLIP_CACHE", "CAMBRIAN_SRC", "VAGEN_LITE_GPU_LOG"} <= set(J.PASS_ENV))
+            self.assertTrue({"HF_HUB_CACHE", "SIGLIP_CACHE", "CAMBRIAN_SRC", "VAGEN_LITE_GPU_LOG",
+                             "TRANSFORMERS_ATTN_IMPLEMENTATION"} <= set(J.PASS_ENV))
             self.assertEqual(self._chain(tmp, gpu_log=True).job_env(), {"VAGEN_LITE_GPU_LOG": "1"})
 
     def test_idle_pool_waits_for_the_main_line_and_an_idle_machine(self):

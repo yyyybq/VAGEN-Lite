@@ -160,6 +160,31 @@ class LanguageModelBatchTest(unittest.TestCase):
         self.assertTrue(torch.allclose(both.hidden_states[-1][1], alone_b.hidden_states[-1][0], atol=1e-5))
         self.assertEqual(len(both.hidden_states), cfg.num_hidden_layers + 1)
 
+    def test_sdpa_equals_eager_in_the_cambrian_loop(self):
+        """The RL trainer's Cambrian attention (TRANSFORMERS_ATTN_IMPLEMENTATION=sdpa, model_types): one unpadded
+        sequence, as remove-padding gives it, through the Cambrian source's own loop -- the same as eager."""
+        with mock.patch.dict(os.environ, {"CAMBRIAN_SRC": os.environ.get("CAMBRIAN_SRC",
+                                                                        "/mnt/umm/users/yinbaiqiao/cambrian-s")}):
+            from vagen.models import cambrian_register as R
+        from cambrian.model.language_model.cambrian_qwen2 import CambrianQwenModel
+
+        outs = {}
+        for impl in ("eager", "sdpa"):
+            torch.manual_seed(0)
+            cfg = R.CambrianQwenConfig(hidden_size=32, intermediate_size=64, num_hidden_layers=2, num_attention_heads=4,
+                                       num_key_value_heads=2, vocab_size=50, max_position_embeddings=64,
+                                       connector_only=True, use_cache=False)
+            cfg._attn_implementation = impl
+            inner = CambrianQwenModel(cfg).eval()
+            inner._attn_implementation = impl
+            R.CambrianForCausalLMAdapter._patch_qwen2_decoder_layers(inner)
+            torch.manual_seed(1)
+            x = torch.randn(1, 9, 32)
+            with torch.no_grad():
+                outs[impl] = inner(inputs_embeds=x, position_ids=torch.arange(9)[None], use_cache=False,
+                                   return_dict=True).last_hidden_state
+        self.assertTrue(torch.allclose(outs["eager"], outs["sdpa"], atol=1e-5))
+
 
 FAKE_STARVLA = {
     "starVLA/__init__.py": "",
