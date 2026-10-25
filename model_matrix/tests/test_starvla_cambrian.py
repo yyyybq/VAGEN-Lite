@@ -160,6 +160,58 @@ class LanguageModelBatchTest(unittest.TestCase):
         self.assertTrue(torch.allclose(both.hidden_states[-1][1], alone_b.hidden_states[-1][0], atol=1e-5))
         self.assertEqual(len(both.hidden_states), cfg.num_hidden_layers + 1)
 
+    def test_gradient_checkpointing_gives_the_same_gradients(self):
+        """The StarVLA interface turns on gradient checkpointing (memory): the same loss and gradients."""
+        with mock.patch.dict(os.environ, {"CAMBRIAN_SRC": os.environ.get("CAMBRIAN_SRC",
+                                                                        "/mnt/umm/users/yinbaiqiao/cambrian-s")}):
+            from vagen.models import cambrian_register as R
+        from cambrian.model.language_model.cambrian_qwen2 import CambrianQwenModel
+
+        from model_matrix.downstream.starvla_cambrian import language_model_forward
+
+        grads = {}
+        for ckpt in (False, True):
+            torch.manual_seed(0)
+            cfg = R.CambrianQwenConfig(hidden_size=32, intermediate_size=64, num_hidden_layers=2, num_attention_heads=4,
+                                       num_key_value_heads=2, vocab_size=50, max_position_embeddings=64,
+                                       connector_only=True, use_cache=False)
+            cfg._attn_implementation = "eager"
+            inner = CambrianQwenModel(cfg).train()
+            inner._attn_implementation = "eager"
+            R.CambrianForCausalLMAdapter._patch_qwen2_decoder_layers(inner)
+            if ckpt:
+                inner.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+                self.assertTrue(all(layer.gradient_checkpointing for layer in inner.layers))
+            torch.manual_seed(1)
+            x = torch.randn(2, 7, 32, requires_grad=True)
+            mask = torch.tensor([[0, 0] + [1] * 5, [1] * 7])
+            loss = language_model_forward(inner, x, mask).last_hidden_state[:, -1].pow(2).sum()
+            loss.backward()
+            grads[ckpt] = (loss.detach(), x.grad.clone(), inner.layers[0].mlp.down_proj.weight.grad.clone())
+        for a, b in zip(grads[False], grads[True]):
+            self.assertTrue(torch.allclose(a, b, atol=1e-6))
+
+    def test_gradient_checkpointing_switch(self):
+        """On by default; StarVLA's ``framework.qwenvl.enable_gradient_checkpointing: false`` turns it off."""
+        from omegaconf import OmegaConf
+
+        with mock.patch.dict(os.environ, {"CAMBRIAN_SRC": os.environ.get("CAMBRIAN_SRC",
+                                                                        "/mnt/umm/users/yinbaiqiao/cambrian-s")}):
+            from vagen.models import cambrian_register as R
+        from model_matrix.downstream import starvla_cambrian as C
+
+        for extra, calls in (({}, 1), ({"enable_gradient_checkpointing": False}, 0)):
+            model = mock.MagicMock()
+            config = OmegaConf.create({"framework": {"qwenvl": dict(base_vlm="/no/such/start", **extra)}})
+            with mock.patch.object(R.CambrianForCausalLMAdapter, "from_pretrained", return_value=model), \
+                    mock.patch("transformers.AutoTokenizer.from_pretrained"), \
+                    mock.patch("transformers.AutoImageProcessor.from_pretrained"):
+                C.CambrianVLInterface(config)
+            self.assertEqual(model.gradient_checkpointing_enable.call_count, calls)
+            if calls:
+                self.assertEqual(model.gradient_checkpointing_enable.call_args.kwargs,
+                                 {"gradient_checkpointing_kwargs": {"use_reentrant": False}})
+
     def test_sdpa_equals_eager_in_the_cambrian_loop(self):
         """The RL trainer's Cambrian attention (TRANSFORMERS_ATTN_IMPLEMENTATION=sdpa, model_types): one unpadded
         sequence, as remove-padding gives it, through the Cambrian source's own loop -- the same as eager."""
@@ -257,7 +309,8 @@ class RegisterAndEntryTest(unittest.TestCase):
             self.assertEqual((rec["name"], rec["path0"], rec["patched"]), ("__main__", str(script.parent), True))
             import importlib.util
 
-            installed = importlib.util.find_spec("ezcolorlog") is not None  # an installed package wins over the stand-in
+            spec = importlib.util.find_spec("ezcolorlog")  # an installed package wins over the stand-in
+            installed = spec is not None and "downstream/shims" not in str(spec.origin)
             self.assertEqual(rec["shim"].endswith("model_matrix/downstream/shims/ezcolorlog.py"), not installed)
 
     def test_stand_ins(self):

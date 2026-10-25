@@ -13,7 +13,9 @@ Several camera views, the Cambrian way (its "miv" form, cambrian/model/cambrian_
 images or video frames stand behind one <image>; each frame's 27 x 27 projected features are resized bilinearly to
 miv_token_len = 64 = 8 x 8, with the learned newline after each row): 72 positions per view.  Framework option
 ``framework.qwenvl.cambrian_views: si`` gives each view the single-image form instead (756 positions: 27 x 27 and
-the newlines), Cambrian-S's form for one picture.
+the newlines), Cambrian-S's form for one picture.  Gradient checkpointing (the language model and the SigLIP2
+tower) is on unless ``framework.qwenvl.enable_gradient_checkpointing: false`` (StarVLA's own switch, off by default
+for its other backbones): the same gradients, recomputed.
 
 Positions follow the attention mask (left padding).  The language model's hidden states are returned (no LM head:
 QwenOFT reads only the last hidden state).  The language model runs through Transformers' own Qwen2Model.forward
@@ -98,6 +100,12 @@ class CambrianVLInterface(nn.Module):
                 attn = "sdpa"
         self.model = R.CambrianForCausalLMAdapter.from_pretrained(path, torch_dtype=torch.bfloat16,
                                                                    attn_implementation=attn)
+        if qwenvl.get("enable_gradient_checkpointing", True):
+            # StarVLA's switch (its Gemma4 and MiniCPM-V interfaces, off there by default), on by default here: the
+            # recipe's 8 samples x 3 views per card are 24 SigLIP2 images of 729 patches each, whose activations (26
+            # trainable layers) do not fit next to the language model's; the first 8-card smoke ran out of memory in
+            # its first step (pt-xmljmr8z, 2026-10-25).  Recomputing them in the backward pass gives the same gradients
+            self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         tokenizer = AutoTokenizer.from_pretrained(path)
         tokenizer.padding_side = "left"
         image_processor = AutoImageProcessor.from_pretrained(SIGLIP_MODEL, cache_dir=SIGLIP_CACHE, local_files_only=True)
