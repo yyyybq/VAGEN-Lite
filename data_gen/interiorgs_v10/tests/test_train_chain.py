@@ -655,6 +655,22 @@ class ChainTest(unittest.TestCase):
         self.assertIn("training success below the start (0.500", T.guard_reason(ok + low, guards))
         self.assertIsNone(T.guard_reason(ok + low + line(12, succ=0.45), guards))
 
+    def test_guard_keep_fill(self):
+        """The model line (the user's decision 7): a keep run whose fills average under keep_fill_min tasks per update
+        over updates 1-keep_fill_at stops; off unless given, and a run without keep metrics (S0) never stops on it."""
+        guards = {"kl_max": 0.2, "invalid_max": 0.05, "keep_fill_min": 1.0, "keep_fill_at": 4}
+        line = lambda s, filled=None: (  # noqa: E731
+            f"(Runner) step:{s} - episode/success_rate:0.5 - actor/kl_loss:np.float64(0.01)"
+            + (f" - filter/keep/filled:{filled}" if filled is not None else "") + "\n")
+        few = "".join(line(s, f) for s, f in zip(range(1, 5), (2, 1, 0, 0)))  # 0.75 per update
+        self.assertIsNone(T.guard_reason(few[: few.index("(Runner) step:4")], guards))  # 3 updates: not yet
+        self.assertIn("keep filled 0.75 all-fail tasks per update < 1.0 (mean of updates 1-4)",
+                      T.guard_reason(few, guards))
+        self.assertIn("keep filled 0.75", T.guard_reason(few + line(5, 9), guards))  # updates after `at` do not count
+        self.assertIsNone(T.guard_reason("".join(line(s, f) for s, f in zip(range(1, 5), (2, 1, 1, 0))), guards))
+        self.assertIsNone(T.guard_reason(few, {"kl_max": 0.2}))  # off unless given
+        self.assertIsNone(T.guard_reason("".join(line(s) for s in range(1, 8)), guards))  # S0: no keep metrics
+
     def test_package_runs_with_guards(self):
         """Round 11: the package options reach rl-config; a run stopped by a guard does not fail the step and only
         its existing checkpoints are evaluated; the other run goes on to the endpoint."""

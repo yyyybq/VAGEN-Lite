@@ -56,6 +56,8 @@ unparseable answers.  Plan "rl"."guards" stop a run (only that run; its logs sta
 evaluated) on NaN in the trainer's main metrics, KL to the start model above kl_max, the share of unparseable
 answers above invalid_max (mean of the last invalid_window updates), or training success below the start (mean
 of the first start_updates) by more than success_drop in each of drop_window consecutive updates (guard_reason).
+The model line adds "keep_fill_min" (off unless given): a keep run whose fills (filter/keep/filled) average under it
+over updates 1-keep_fill_at (default 50) stops.
 
 Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
 or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
@@ -324,6 +326,13 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
         if all(v < start - drop for _, v in tail):
             return (f"training success below the start ({start:.3f}, updates 1-{n0}) by more than {drop} in each of "
                     f"updates {tail[0][0]}-{tail[-1][0]}")
+    fill_min = guards.get("keep_fill_min")  # the model line (the user's decision 7 of 2026-10-24); off unless given
+    if fill_min is not None:
+        at = int(guards.get("keep_fill_at", 50))
+        fills = [per[s]["filter/keep/filled"] for s in steps if s <= at and "filter/keep/filled" in per[s]]
+        if len(fills) >= at and sum(fills) / len(fills) < float(fill_min):
+            return (f"keep filled {sum(fills) / len(fills):.2f} all-fail tasks per update < {fill_min} "
+                    f"(mean of updates 1-{at})")
     return None
 
 
