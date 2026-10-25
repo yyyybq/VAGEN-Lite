@@ -26,21 +26,24 @@ class SmokePlansTest(unittest.TestCase):
         self.assertTrue(cs["rl"]["logprob_audit"])
         self.assertEqual(cs["rl_runs"], {"cv4smoke": {"rl": P.V4}})
         self.assertNotIn("model_type", all_plans["m_qwen25vl7b_smoke_20261024"])  # the default path
-        for plan in all_plans.values():
-            self.assertEqual((plan["pool"], plan["job_prefix"], plan["commit"]), ("idle", "models", "abc"))
+        for plan in all_plans.values():  # since 2026-10-25 the line queues (plan pool "queue")
+            self.assertEqual((plan["pool"], plan["job_prefix"], plan["commit"]), ("queue", "models", "abc"))
 
     def test_written_once_recommitted_only_before_the_start(self):
         from model_matrix.smoke import plans as P
 
         with tempfile.TemporaryDirectory() as tmp:
-            mk = lambda c: {"a": {"tr": f"{tmp}/a", "commit": c}, "b": {"tr": f"{tmp}/b", "commit": c}}
+            mk = lambda c, p="idle": {"a": {"tr": f"{tmp}/a", "commit": c, "pool": p, "x": c},
+                                      "b": {"tr": f"{tmp}/b", "commit": c, "pool": p}}
             P.write(mk("one"))
             P.write(mk("two"))  # kept
             self.assertEqual(json.loads(Path(f"{tmp}/a/plan.json").read_text())["commit"], "one")
             Path(f"{tmp}/b/progress.json").write_text("{}")  # b's chain has started
-            P.write(mk("two"), recommit=True)
-            self.assertEqual(json.loads(Path(f"{tmp}/a/plan.json").read_text())["commit"], "two")
-            self.assertEqual(json.loads(Path(f"{tmp}/b/plan.json").read_text())["commit"], "one")
+            P.write(mk("two", "queue"), recommit=True)
+            a = json.loads(Path(f"{tmp}/a/plan.json").read_text())
+            self.assertEqual((a["commit"], a["pool"], a["x"]), ("two", "queue", "one"))  # only commit and pool
+            b = json.loads(Path(f"{tmp}/b/plan.json").read_text())
+            self.assertEqual((b["commit"], b["pool"]), ("one", "idle"))
 
 
 if __name__ == "__main__":

@@ -44,6 +44,21 @@ class ScoJobTest(unittest.TestCase):
                 self.assertEqual((run / "job" / "launch.sh").read_text(), "#!/usr/bin/env bash\nexec bash /s.sh 'a b'\n")
                 self.assertEqual(sco_job.submit(run, 1, "again", ["true"]), "pt-xyz789")  # the receipt stands
                 self.assertEqual(r.call_count, 1)
+            # --pool queue: no idle wait, the pool with the fewest waiting jobs once the pause file is gone
+            run2 = Path(tmp) / "smoke"
+            pause = Path(tmp) / "pause"
+            pause.write_text("")
+            gone = lambda s: pause.unlink()
+            done2 = mock.Mock(returncode=0, stdout="job pt-q1 submitted", stderr="")
+            with mock.patch.object(sco_view, "PAUSE", pause), \
+                    mock.patch.object(sco_job.time, "sleep", side_effect=gone), \
+                    mock.patch.object(sco_job.job_sco, "pick_pool", return_value="zoetrope"), \
+                    mock.patch.object(sco_view, "view", side_effect=AssertionError("no idle check")), \
+                    mock.patch.object(sco_job.job_sco.subprocess, "run", return_value=done2) as r2:
+                self.assertEqual(sco_job.submit(run2, 8, "backbone-smoke-q3b", ["true"], pool="queue"), "pt-q1")
+                self.assertIn("--aec2-name=zoetrope", r2.call_args[0][0])
+                self.assertIn("--worker-spec=N4lS.Iq.I80.8", r2.call_args[0][0])
+            self.assertFalse(pause.exists())
             # 8 cards wait for the main line and an idle machine
             self.assertFalse(sco_view.fits(dict(free, idle_estimate=2), 8))
             self.assertTrue(sco_view.fits(dict(free, idle_estimate=2, waiting_main_line=0), 8))

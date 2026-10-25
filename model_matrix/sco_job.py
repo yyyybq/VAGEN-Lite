@@ -1,9 +1,12 @@
-"""One sco job of the model line outside the training chain (load tests, the StarVLA backbone runs), under the same
-rule as the chain's plan pool "idle" (the user's rule of 2026-10-24): it waits until a pool has no main-line job
-waiting that competes with it, a machine for it (8 cards: an idle machine; 1 card: a machine with a free card) and
-the pause file is absent; then it is submitted there, named models-<name>.
+"""One sco job of the model line outside the training chain (load tests, the StarVLA backbone runs), named
+models-<name>.  By default under the same rule as the chain's plan pool "idle" (the user's rule of 2026-10-24): it
+waits until a pool has no main-line job waiting that competes with it, a machine for it (8 cards: an idle machine;
+1 card: a machine with a free card) and the pause file is absent; then it is submitted there.  ``--pool queue`` (the
+user's "开始排队吧" of 2026-10-25) queues it as soon as the pause file is absent, in the pool with the fewest waiting
+jobs (job_sco.pick_pool), as the chain's plan pool "queue".
 
     python -m model_matrix.sco_job submit --run RUN --cards 1 --name backbone-load-q3b -- bash SCRIPT ARGS...
+    python -m model_matrix.sco_job submit --run RUN --cards 8 --name backbone-smoke-q3b --pool queue -- bash ...
     python -m model_matrix.sco_job status --run RUN
 
 RUN/job/launch.sh holds the command; RUN/job/submission.json the receipt (an existing receipt is never submitted again).
@@ -34,6 +37,14 @@ def wait_pool(cards: int, pools=None, sleep=None) -> str:
         sleep(POLL_S)
 
 
+def queue_pool(sleep=None) -> str:
+    """``--pool queue``: the pool with the fewest waiting jobs, once the pause file is absent."""
+    sleep = sleep or time.sleep
+    while sco_view.PAUSE.exists():
+        sleep(POLL_S)
+    return job_sco.pick_pool()
+
+
 def submit(run: Path, cards: int, name: str, command, pool=None) -> str:
     job = run / "job"
     receipt = job / "submission.json"
@@ -42,7 +53,7 @@ def submit(run: Path, cards: int, name: str, command, pool=None) -> str:
     job.mkdir(parents=True, exist_ok=True)
     (job / "launch.sh").write_text("#!/usr/bin/env bash\nexec " + " ".join(shlex.quote(c) for c in command) + "\n")
     (job / "launch.sh").chmod(0o755)
-    pool = pool or wait_pool(cards)
+    pool = queue_pool() if pool == "queue" else (pool or wait_pool(cards))
     cmd = [job_sco.SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={pool}",
            f"--job-name=models-{name}"[:60], "--priority=HIGHEST", "--quota-type=reserved",
            f"--container-image-url={job_sco.IMAGE}", f"--storage-mount={job_sco.MOUNT}", "--training-framework=pytorch",
@@ -65,7 +76,9 @@ def main() -> None:
     s.add_argument("--run", type=Path, required=True)
     s.add_argument("--cards", type=int, choices=sorted(job_sco.SPECS), required=True)
     s.add_argument("--name", required=True)
-    s.add_argument("--pool", choices=job_sco.POOLS, default=None, help="skip the wait and use this pool")
+    s.add_argument("--pool", choices=(*job_sco.POOLS, "queue"), default=None,
+                   help="skip the idle wait: this pool, or queue (after the pause file, the one with the fewest "
+                        "waiting jobs)")
     s.add_argument("command", nargs=argparse.REMAINDER)
     t = sub.add_parser("status")
     t.add_argument("--run", type=Path, required=True)

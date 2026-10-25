@@ -18,10 +18,11 @@ Plans (each chain runs from the worktree: VAGEN_LITE_WORKTREE=/mnt/umm/users/yin
                      branch);
 - m_qwen25vl7b_base: the zero-shot row of the original Qwen2.5-VL-7B in the same setting, for the comparison (the
                      user's decision 3 of 2026-10-24 22:45; the main line has no row at temperature 0.8 on these sets).
-Every job is named models-* and goes only to idle machines (plan pool "idle").  Results go to the line's own
-evaluation folders (tasks.jsonl and selection.json linked from the main line's v2 sets), so no result folder of the
-main line is written.  ``--recommit`` sets the commit of plans whose chain has not started (no progress.json): the
-chain's check_code refuses a checkout at another commit.
+Every job is named models-*.  Until 2026-10-25 they went only to idle machines (plan pool "idle"); since the user's
+"开始排队吧" of 2026-10-25 they queue (plan pool "queue": the pool with the fewest waiting jobs, the pause file
+obeyed).  Results go to the line's own evaluation folders (tasks.jsonl and selection.json linked from the main line's
+v2 sets), so no result folder of the main line is written.  ``--recommit`` gives plans whose chain has not started
+(no progress.json) this commit and pool: the chain's check_code refuses a checkout at another commit.
 """
 from __future__ import annotations
 
@@ -46,6 +47,8 @@ RL_BASE = {"standard": "v10_p1_Dcond", "seed": 20261019, "task_pool": "reserve",
 V4 = {"standard": "v10_p1_Dcond", "group_filter": "keep_by_return_std", "keep_std_threshold": 0.3318,
       "keep_std_floor": 1.0, "progress_reward_scale": 10.0 / 3.0}
 SAMPLED = ["--temperature", "0.8", "--top-p", "0.92", "--format-example", "action_names", "--entropy"]
+POOL = "queue"  # data_gen/interiorgs_v10/train_chain.py job_pool
+REFRESHED = ("commit", "pool")  # what --recommit sets in a plan whose chain has not started
 
 
 def eval_sets() -> None:
@@ -63,7 +66,7 @@ def smoke(tag: str, model: str, model_type, group: str, run: str, commit: str) -
             "scenes_root": "/mnt/umm/users/yinbaiqiao/InteriorGS_meta", "keep_text": True, "sft_records": False,
             "sft_epochs": 1, "sft_logging_steps": 1, "sft_groups": {group: "sft_trajectories_smoke.jsonl"},
             "eval_sets": {k: str(v) for k, v in EVAL_SETS.items()}, "select_by": "val", "max_eval_jobs": 2,
-            "pool": "idle", "retries": 1, "endpoint": 10, "rl_name": f"m_{group}",
+            "pool": POOL, "retries": 1, "endpoint": 10, "rl_name": f"m_{group}",
             "eval": {"every": 10, "options": []}, "rl": dict(RL_BASE), "rl_runs": {run: {"rl": dict(V4)}}}
     if model_type:
         plan["model_type"] = model_type
@@ -72,7 +75,7 @@ def smoke(tag: str, model: str, model_type, group: str, run: str, commit: str) -
 
 def base_eval(tag: str, model: str, model_type, result: str, commit: str) -> dict:
     plan = {"tr": str(RUNS / "chains" / tag), "sft_dir": str(SFT_DIR), "commit": commit, "eval_only": True,
-            "job_prefix": "models", "pool": "idle", "max_eval_jobs": 2,
+            "job_prefix": "models", "pool": POOL, "max_eval_jobs": 2,
             "eval_sets": {k: str(v) for k, v in EVAL_SETS.items()},
             "eval": {"options": [], "models": {result: {"model": model, "options": SAMPLED}}}}
     if model_type:  # none: the default Qwen2.5-VL path
@@ -104,9 +107,10 @@ def write(all_plans: dict, recommit: bool = False) -> None:
         path = tr / "plan.json"
         if path.exists():
             old = json.loads(path.read_text())
-            if recommit and not (tr / "progress.json").exists() and old.get("commit") != plan["commit"]:
-                path.write_text(json.dumps(dict(old, commit=plan["commit"]), indent=1))
-                print("recommitted", path, old.get("commit"), "->", plan["commit"])
+            new = {k: plan[k] for k in REFRESHED if k in plan and old.get(k) != plan[k]}
+            if recommit and not (tr / "progress.json").exists() and new:
+                path.write_text(json.dumps(dict(old, **new), indent=1))
+                print("recommitted", path, {k: [old.get(k), v] for k, v in new.items()})
             else:
                 print("kept", path)
             continue
@@ -118,7 +122,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", required=True)
     ap.add_argument("--date", default="20261024")
-    ap.add_argument("--recommit", action="store_true", help="give plans not yet started this commit")
+    ap.add_argument("--recommit", action="store_true", help="give plans not yet started this commit and pool")
     a = ap.parse_args()
     eval_sets()
     write(plans(a.commit, a.date), a.recommit)

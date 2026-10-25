@@ -620,19 +620,41 @@ class Chain:
         batch); with a ``key`` (an RL run) the first choice is kept, so its render service and trainer share it.
         The model line (2026-10-24, the user's rule: only idle machines, after the main line): "idle" waits until a
         pool has no main-line job waiting, the pause file is absent and, for ``cards`` 8 (and any RL run's first job),
-        an idle machine -- for one card a machine with free cards (``idle_pool``)."""
+        an idle machine -- for one card a machine with free cards (``idle_pool``).  The model line (2026-10-25, the
+        user's "开始排队吧"): "queue" queues at once, as "auto", but only while the pause file is absent
+        (``queue_pool``)."""
         pool = self.plan.get("pool")
-        if pool not in ("auto", "idle"):
+        if pool not in ("auto", "idle", "queue"):
             return pool
         from . import job_sco
 
         chosen = self.state.setdefault("run_pools", {})
         if key is not None and key in chosen:
             return chosen[key]
-        pool = job_sco.pick_pool() if pool == "auto" else self.idle_pool(8 if key is not None else cards)
+        if pool == "auto":
+            pool = job_sco.pick_pool()
+        elif pool == "queue":
+            pool = self.queue_pool()
+        else:
+            pool = self.idle_pool(8 if key is not None else cards)
         if key is not None:
             chosen[key] = pool
         return pool
+
+    def queue_pool(self) -> str:
+        """Plan pool "queue": job_sco.pick_pool once the pause file is absent (polled every IDLE_POLL_S; the wait is
+        shown in the progress file)."""
+        from model_matrix import sco_view
+
+        from . import job_sco
+
+        while sco_view.PAUSE.exists():
+            self.state["idle_pool_wait"] = {"since": (self.state.get("idle_pool_wait") or {}).get("since") or now(),
+                                            "pause_file": True, "checked": now()}
+            self.save()
+            self.sleep(IDLE_POLL_S)
+        self.state["idle_pool_wait"] = None
+        return job_sco.pick_pool()
 
     def idle_pool(self, cards: int) -> str:
         """Plan pool "idle": the pool with the most idle machines (model_matrix.sco_view's estimate) among those

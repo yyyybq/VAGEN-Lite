@@ -233,6 +233,33 @@ class ChainTest(unittest.TestCase):
             self.assertIsNone(chain.state["idle_pool_wait"])
             self.assertEqual(self._chain(tmp, pool="h800").job_pool(), "h800")  # other pools as before
 
+    def test_queue_pool_waits_only_for_the_pause_file(self):
+        """Plan pool "queue" (2026-10-25): the pool with the fewest waiting jobs at once, unless the pause file is
+        there; an RL run keeps its pool."""
+        from data_gen.interiorgs_v10 import job_sco
+        from model_matrix import sco_view
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chain = self._chain(tmp, pool="queue")
+            pause = Path(tmp) / "pause"
+            pause.write_text("")
+            slept = []
+
+            def sleep(s):
+                slept.append(s)
+                pause.unlink()
+
+            chain.sleep = sleep
+            with mock.patch.object(sco_view, "PAUSE", pause), \
+                    mock.patch.object(job_sco, "pick_pool", side_effect=["h800", "zoetrope"]) as pick, \
+                    mock.patch.object(sco_view, "view", side_effect=AssertionError("no idle check")):
+                self.assertEqual(chain.job_pool("q3"), "h800")
+                self.assertEqual(slept, [300.0])
+                self.assertEqual(chain.job_pool("q3"), "h800")  # the run keeps its pool
+                self.assertEqual(chain.job_pool(cards=1), "zoetrope")
+                self.assertEqual(pick.call_count, 2)
+            self.assertIsNone(chain.state["idle_pool_wait"])
+
     def test_job_names_take_the_prefix(self):
         from data_gen.interiorgs_v10 import job_sco as J
 
