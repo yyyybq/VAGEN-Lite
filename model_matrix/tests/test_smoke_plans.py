@@ -24,6 +24,7 @@ class SmokePlansTest(unittest.TestCase):
         self.assertEqual((cs["model_type"], cs["model"], cs["endpoint"], cs["sft_epochs"]),
                          ("cambrian_qwen", P.CAMBRIAN, 10, 1))
         self.assertTrue(cs["rl"]["logprob_audit"])
+        self.assertTrue(cs["gpu_log"])  # the smoke's per-card memory (job script, 2026-10-25)
         self.assertEqual(cs["rl_runs"], {"cv4smoke": {"rl": P.V4}})
         self.assertNotIn("model_type", all_plans["m_qwen25vl7b_smoke_20261024"])  # the default path
         for plan in all_plans.values():  # since 2026-10-25 the line queues (plan pool "queue")

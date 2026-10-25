@@ -48,7 +48,7 @@ V4 = {"standard": "v10_p1_Dcond", "group_filter": "keep_by_return_std", "keep_st
       "keep_std_floor": 1.0, "progress_reward_scale": 10.0 / 3.0}
 SAMPLED = ["--temperature", "0.8", "--top-p", "0.92", "--format-example", "action_names", "--entropy"]
 POOL = "queue"  # data_gen/interiorgs_v10/train_chain.py job_pool
-REFRESHED = ("commit", "pool")  # what --recommit sets in a plan whose chain has not started
+REFRESHED = ("commit", "pool", "gpu_log")  # what --recommit sets in a plan whose chain has not started
 
 
 def eval_sets() -> None:
@@ -66,7 +66,7 @@ def smoke(tag: str, model: str, model_type, group: str, run: str, commit: str) -
             "scenes_root": "/mnt/umm/users/yinbaiqiao/InteriorGS_meta", "keep_text": True, "sft_records": False,
             "sft_epochs": 1, "sft_logging_steps": 1, "sft_groups": {group: "sft_trajectories_smoke.jsonl"},
             "eval_sets": {k: str(v) for k, v in EVAL_SETS.items()}, "select_by": "val", "max_eval_jobs": 2,
-            "pool": POOL, "retries": 1, "endpoint": 10, "rl_name": f"m_{group}",
+            "pool": POOL, "gpu_log": True, "retries": 1, "endpoint": 10, "rl_name": f"m_{group}",
             "eval": {"every": 10, "options": []}, "rl": dict(RL_BASE), "rl_runs": {run: {"rl": dict(V4)}}}
     if model_type:
         plan["model_type"] = model_type

@@ -843,6 +843,8 @@ class Chain:
             env.update(dict(kind.env))
         if (self.plan.get("rl") or {}).get("logprob_audit"):
             env["VAGEN_D0_3_SMOKE_DIR"] = str(self.tr / "logprob_audit")
+        if self.plan.get("gpu_log"):  # the model line (2026-10-25): each card's memory in RUN/logs/gpu_mem_<mode>.csv
+            env["VAGEN_LITE_GPU_LOG"] = "1"
         return env
 
     def check_code(self) -> None:

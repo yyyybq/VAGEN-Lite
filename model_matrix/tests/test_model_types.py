@@ -116,6 +116,11 @@ class JobsTest(unittest.TestCase):
         self.assertIn("  accelerate launch --config_file examples/train/active_spatial/accelerate_fsdp_qwen25vl.yaml \\\n"
                       "    --num_processes \"$2\" -m llamafactory.launcher \"$1\"\n}", script)
         self.assertIn('"${PY}" -m vagen.models.model_types sft-launch "${VAGEN_LITE_MODEL_TYPE}"', script)
+        # the GPU memory log (2026-10-25): only with VAGEN_LITE_GPU_LOG, stopped by the exit trap
+        self.assertIn('if [[ -n ${VAGEN_LITE_GPU_LOG:-} ]]; then', script)
+        self.assertIn('> "${RUN}/logs/gpu_mem_${MODE}.csv"', script)
+        trap = next(line for line in script.splitlines() if line.startswith("trap '"))
+        self.assertIn('[[ -n ${gpu_log_pid:-} ]] && kill "${gpu_log_pid}" 2>/dev/null;', trap)
         self.assertEqual(subprocess.run(["bash", "-n", str(ROOT / "examples/train/active_spatial/sco_interiorgs_v10_train.sh")]).returncode, 0)
 
     def test_lf_train_picks_the_types_launcher(self):
@@ -184,7 +189,8 @@ class ChainTest(unittest.TestCase):
                               "CAMBRIAN_SRC": "/mnt/umm/users/yinbaiqiao/cambrian-s"})
             from data_gen.interiorgs_v10 import job_sco as J
 
-            self.assertTrue({"HF_HUB_CACHE", "SIGLIP_CACHE", "CAMBRIAN_SRC"} <= set(J.PASS_ENV))
+            self.assertTrue({"HF_HUB_CACHE", "SIGLIP_CACHE", "CAMBRIAN_SRC", "VAGEN_LITE_GPU_LOG"} <= set(J.PASS_ENV))
+            self.assertEqual(self._chain(tmp, gpu_log=True).job_env(), {"VAGEN_LITE_GPU_LOG": "1"})
 
     def test_idle_pool_waits_for_the_main_line_and_an_idle_machine(self):
         from model_matrix import sco_view

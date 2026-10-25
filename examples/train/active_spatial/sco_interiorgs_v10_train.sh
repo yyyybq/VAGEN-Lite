@@ -36,7 +36,7 @@ VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/gsplat_cuda_validated_20261007
 mkdir -p "${RUN}/logs"
 OWNER=$(stat -c %u:%g "${RUN}")
 # the exit record is written before ownership is handed back, so it is not left owned by root
-trap 'status=$?; [[ -n ${renderer_pid:-} ]] && kill "${renderer_pid}" 2>/dev/null; printf "{\"mode\":\"%s\",\"exit_status\":%s,\"ended_utc\":\"%s\"}\n" "${MODE}" "${status}" "$(date -u +%FT%TZ)" > "${RUN}/logs/${MODE}_exit.json"; chown -R "${OWNER}" "${RUN}" ${ALSO_OWNED:+"${ALSO_OWNED}"} 2>/dev/null || true; exit ${status}' EXIT
+trap 'status=$?; [[ -n ${renderer_pid:-} ]] && kill "${renderer_pid}" 2>/dev/null; [[ -n ${gpu_log_pid:-} ]] && kill "${gpu_log_pid}" 2>/dev/null; printf "{\"mode\":\"%s\",\"exit_status\":%s,\"ended_utc\":\"%s\"}\n" "${MODE}" "${status}" "$(date -u +%FT%TZ)" > "${RUN}/logs/${MODE}_exit.json"; chown -R "${OWNER}" "${RUN}" ${ALSO_OWNED:+"${ALSO_OWNED}"} 2>/dev/null || true; exit ${status}' EXIT
 exec > >(tee -a "${RUN}/logs/${MODE}-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).log") 2>&1
 cd "${WORKTREE}"
 export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1
@@ -56,6 +56,13 @@ export LD_LIBRARY_PATH="${CURAND_LIBRARY_DIR}:${ENV_ROOT}/lib:${ENV_ROOT}/target
 export VLLM_USE_FLASHINFER_SAMPLER=1
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
 git -C "${WORKTREE}" rev-parse HEAD 2>/dev/null || cat "${WORKTREE}/.synced_commit" 2>/dev/null || true
+# the model line (2026-10-25): with VAGEN_LITE_GPU_LOG set (plan "gpu_log"), each card's memory every 5 s in
+# RUN/logs/gpu_mem_<mode>.csv, stopped on exit (the smoke reports' per-card peaks); unset: as before
+if [[ -n ${VAGEN_LITE_GPU_LOG:-} ]]; then
+  nvidia-smi --query-gpu=timestamp,index,memory.used --format=csv,noheader,nounits -lms 5000 \
+    > "${RUN}/logs/gpu_mem_${MODE}.csv" 2>/dev/null &
+  gpu_log_pid=$!
+fi
 
 start_renderer() {  # $1 = gpu index, $2 = worker processes = requests at a time (default 12); leaves renderer_pid and R1_RENDER_URL
   local workers=${2:-12}

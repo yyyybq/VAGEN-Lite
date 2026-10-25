@@ -50,9 +50,10 @@ SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
 # type's Python) and VAGEN_LITE_MODEL_TYPE (its SFT launcher), the PPO trainer VAGEN_D0_3_SMOKE_DIR (the per-update
 # rollout-vs-trainer log-probability audit); HF_HUB_CACHE, SIGLIP_CACHE and CAMBRIAN_SRC come from a model type's
 # environment (Cambrian-S: the cache with its SigLIP2, which its adapter loads by repository name, and its source).
-# None set: every launch script as before.
+# VAGEN_LITE_GPU_LOG (plan "gpu_log") makes the job script log each card's memory.  None set: every launch script as
+# before.
 PASS_ENV = ("VAGEN_LITE_PYTHON", "VAGEN_LITE_MODEL_TYPE", "VAGEN_D0_3_SMOKE_DIR", "HF_HUB_CACHE", "SIGLIP_CACHE",
-            "CAMBRIAN_SRC")
+            "CAMBRIAN_SRC", "VAGEN_LITE_GPU_LOG")
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 # created, no cards yet; sco spells it QUEUEING (round 12 batch: without it a job in that state counted as not waiting)
 WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUEING", "QUEUED", "WAITING", "CREATING"}
