@@ -1,6 +1,6 @@
 # 模型线状态（唯一的状态文档）
 
-最后更新：2026-10-25 00:58 UTC。
+最后更新：2026-10-25 05:46 UTC。
 
 模型线：把 Qwen3-VL-8B-Instruct 和 Cambrian-S（7B 为主）接进统一框架，在主线最高的 setting 上跑主实验和下游实验。报告在 [reports/](reports/)，实验登记表 `MATRIX.md` 第三步建。
 
@@ -56,7 +56,7 @@
 
 | 编号 | 内容 | 状态 | sco 任务 | 更新（UTC） | 卡在哪 |
 | --- | --- | --- | --- | --- | --- |
-| Q3-SMOKE-SFT | Qwen3-VL-8B SFT 冒烟：新格式 440 条对话（训练 400、验证 40），1 个 epoch | 排队 | `pt-45vp0qry`（h800） | 10-25 00:55 | 00:38 提交，等卡 |
+| Q3-SMOKE-SFT | Qwen3-VL-8B SFT 冒烟：新格式 440 条对话（训练 400、验证 40），1 个 epoch | 重试排队 | `pt-45vp0qry` 失败；重试 `pt-emouoqg6`（h800） | 10-25 05:45 | 第一次 05:31 开跑（排队 4 小时 53 分），一开跑就停在导入：LLaMA-Factory 要 `transformers.utils.is_jieba_available`，Qwen3-VL 运行环境的 Transformers 4.57.6 没有了。已在本线的注册里补回（`637b72b8`），并用一个随机初始化的小模型在 CPU 上把两个型号的 SFT 训练路径各跑了 2 步，都通过。链按计划自动重提交了一次（05:33） |
 | Q3-SMOKE-RL | 从上面的 SFT 跑 RL 10 次更新（V4，带对数概率核对） | 未开始 | — | 10-25 00:55 | 等 SFT 和它的评测 |
 | Q25-SMOKE | Qwen2.5-VL-7B 同样的冒烟（对数概率核对的参照） | 未启动 | — | 10-25 00:55 | 接力：Qwen3-VL 的 RL 冒烟提交后自动启动 |
 | C-SMOKE-SFT | Cambrian-S-7B 同样的冒烟（`m_cambrian7b_smoke_20261024`）的 SFT | 排队 | `pt-ukg68gka`（h800） | 10-25 00:55 | 00:44 提交，等卡 |
@@ -88,7 +88,7 @@
 
 三个原始模型的零样本都是每题 1 局，验证集成功率的标准误约 0.013，三者之间的差都在 1.5 个标准误以内。
 
-现在本线在 sco 上的任务（都在排队）：`pt-45vp0qry`、`pt-ukg68gka`（SFT 冒烟，8 卡）；`pt-wdl14ea4`、`pt-lqa0g87p`（下游冒烟，8 卡）。
+现在本线在 sco 上的任务（都在排队）：`pt-emouoqg6`、`pt-ukg68gka`（SFT 冒烟，8 卡）；`pt-wdl14ea4`、`pt-lqa0g87p`（下游冒烟，8 卡）。
 
 ## 3. 权重和数据
 
