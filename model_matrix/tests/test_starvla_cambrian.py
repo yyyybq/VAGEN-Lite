@@ -161,13 +161,15 @@ class LanguageModelBatchTest(unittest.TestCase):
         self.assertEqual(len(both.hidden_states), cfg.num_hidden_layers + 1)
 
     def test_gradient_checkpointing_gives_the_same_gradients(self):
-        """The StarVLA interface turns on gradient checkpointing (memory): the same loss and gradients."""
+        """The StarVLA interface's gradient checkpointing (memory), from a model in eval mode as from_pretrained
+        leaves it and StarVLA keeps it: the layers are recomputed while gradients are recorded (each layer's
+        checkpoint function runs), not under no_grad, and the loss and gradients are those without checkpointing."""
         with mock.patch.dict(os.environ, {"CAMBRIAN_SRC": os.environ.get("CAMBRIAN_SRC",
                                                                         "/mnt/umm/users/yinbaiqiao/cambrian-s")}):
             from vagen.models import cambrian_register as R
         from cambrian.model.language_model.cambrian_qwen2 import CambrianQwenModel
 
-        from model_matrix.downstream.starvla_cambrian import language_model_forward
+        from model_matrix.downstream.starvla_cambrian import checkpointing_mode, dropout_rates, language_model_forward
 
         grads = {}
         for ckpt in (False, True):
@@ -176,20 +178,40 @@ class LanguageModelBatchTest(unittest.TestCase):
                                        num_key_value_heads=2, vocab_size=50, max_position_embeddings=64,
                                        connector_only=True, use_cache=False)
             cfg._attn_implementation = "eager"
-            inner = CambrianQwenModel(cfg).train()
+            inner = CambrianQwenModel(cfg).eval()
             inner._attn_implementation = "eager"
             R.CambrianForCausalLMAdapter._patch_qwen2_decoder_layers(inner)
+            self.assertEqual(dropout_rates(inner), {})
+            calls = []
             if ckpt:
                 inner.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-                self.assertTrue(all(layer.gradient_checkpointing for layer in inner.layers))
+                for layer in inner.layers:
+                    f = layer._gradient_checkpointing_func
+                    layer._gradient_checkpointing_func = lambda *a, _f=f, **k: calls.append(1) or _f(*a, **k)
+            with torch.no_grad():
+                checkpointing_mode(inner, ckpt)
+                language_model_forward(inner, torch.randn(1, 3, 32), None)
+            self.assertEqual((inner.training, len(calls)), (False, 0))  # inference: eval mode, nothing recomputed
             torch.manual_seed(1)
             x = torch.randn(2, 7, 32, requires_grad=True)
             mask = torch.tensor([[0, 0] + [1] * 5, [1] * 7])
+            checkpointing_mode(inner, ckpt)
+            self.assertEqual(inner.training, ckpt)
             loss = language_model_forward(inner, x, mask).last_hidden_state[:, -1].pow(2).sum()
             loss.backward()
+            self.assertEqual(len(calls), 2 if ckpt else 0)  # both layers went through their checkpoint function
             grads[ckpt] = (loss.detach(), x.grad.clone(), inner.layers[0].mlp.down_proj.weight.grad.clone())
         for a, b in zip(grads[False], grads[True]):
             self.assertTrue(torch.allclose(a, b, atol=1e-6))
+
+    def test_dropout_rates(self):
+        from model_matrix.downstream.starvla_cambrian import dropout_rates
+
+        m = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Dropout(0.0))
+        self.assertEqual(dropout_rates(m), {})
+        m.append(torch.nn.Dropout(0.1))
+        m[0].attention_dropout = 0.2
+        self.assertEqual(dropout_rates(m), {"2": 0.1, "0.attention_dropout": 0.2})
 
     def test_gradient_checkpointing_switch(self):
         """On by default; StarVLA's ``framework.qwenvl.enable_gradient_checkpointing: false`` turns it off."""

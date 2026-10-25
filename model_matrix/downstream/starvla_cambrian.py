@@ -79,6 +79,31 @@ def language_model_forward(inner, embeds: torch.Tensor, attention_mask: Optional
     return BaseModelOutputWithPast(last_hidden_state=out.last_hidden_state, hidden_states=out.hidden_states)
 
 
+def dropout_rates(model: nn.Module) -> dict:
+    """The non-zero dropout rates in a model: nn.Dropout modules and float ``dropout`` / ``attention_dropout``
+    attributes (Transformers' Qwen2 attention, the Cambrian source's SigLIP attention)."""
+    out = {}
+    for name, m in model.named_modules():
+        if isinstance(m, nn.Dropout) and m.p:
+            out[name] = m.p
+        for attr in ("dropout", "attention_dropout"):
+            v = getattr(m, attr, None)
+            if isinstance(v, float) and v:
+                out[f"{name}.{attr}"] = v
+    return out
+
+
+def checkpointing_mode(model: nn.Module, on: bool) -> None:
+    """Transformers (GradientCheckpointingLayer) and the Cambrian source's SigLIP encoder checkpoint a layer only in
+    training mode, but StarVLA never calls .train() and from_pretrained leaves a model in eval mode: the second 8-card
+    smoke (pt-w2mp26dk) ran out of memory the same way with the switch on.  With checkpointing on, the model is in
+    training mode while gradients are recorded and in eval mode otherwise.  Every dropout rate in it is 0 (checked at
+    load), and the Cambrian classes' other training-mode branches are in CambrianQwenForCausalLM.forward and its
+    nfp head, which this interface does not call: the mode changes nothing else."""
+    if on:
+        model.train(torch.is_grad_enabled())
+
+
 class CambrianVLInterface(nn.Module):
     def __init__(self, config, **kwargs):
         super().__init__()
@@ -100,11 +125,15 @@ class CambrianVLInterface(nn.Module):
                 attn = "sdpa"
         self.model = R.CambrianForCausalLMAdapter.from_pretrained(path, torch_dtype=torch.bfloat16,
                                                                    attn_implementation=attn)
-        if qwenvl.get("enable_gradient_checkpointing", True):
+        self.checkpointing = bool(qwenvl.get("enable_gradient_checkpointing", True))
+        if self.checkpointing:
             # StarVLA's switch (its Gemma4 and MiniCPM-V interfaces, off there by default), on by default here: the
             # recipe's 8 samples x 3 views per card are 24 SigLIP2 images of 729 patches each, whose activations (26
             # trainable layers) do not fit next to the language model's; the first 8-card smoke ran out of memory in
             # its first step (pt-xmljmr8z, 2026-10-25).  Recomputing them in the backward pass gives the same gradients
+            rates = dropout_rates(self.model)
+            if rates:
+                raise ValueError(f"gradient checkpointing switches the model to training mode; dropout in {rates}")
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         tokenizer = AutoTokenizer.from_pretrained(path)
         tokenizer.padding_side = "left"
@@ -170,6 +199,11 @@ class CambrianVLInterface(nn.Module):
 
     def forward(self, input_ids=None, attention_mask=None, pixel_values=None, output_hidden_states=True,
                 return_dict=True, views_per_sample=None, **kwargs):
+        checkpointing_mode(self.model, self.checkpointing)
+        if self.checkpointing and self.model.training and not getattr(self, "_checkpointing_logged", False):
+            n = sum(1 for m in self.model.modules() if getattr(m, "gradient_checkpointing", False) and m.training)
+            print(f"[starvla_cambrian] gradient checkpointing active in {n} modules", flush=True)
+            self._checkpointing_logged = True
         embeds = self.embed(input_ids, pixel_values)
         with torch.autocast("cuda", dtype=torch.bfloat16):
             return language_model_forward(self.model.get_model(), embeds, attention_mask)
