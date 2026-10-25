@@ -54,7 +54,11 @@ Rules of the user's decisions of 2026-10-23 evening (after the stage-0 report):
   * docs/downstream/MATRIX.md holds two tables with the same rows and columns, training and evaluation.
   * (2026-10-25) a training job that ended without evaluating its saved final checkpoint (E1 B: NCCL failed while
     shutting down, rc 1, run_segmented.sh stopped before the evaluation) leaves that checkpoint to one 8-card
-    evaluation under the same idle-machine rule (injob_entry -> whole_entry, same seeds and output folder).
+    evaluation under the same idle-machine rule (injob_entry -> whole_entry, same seeds and output folder), ahead of
+    the extra points (the job would have evaluated it at once).
+Rule of the user's decision of 2026-10-25 ("只给同一个池让路就行，不用一直让，没有卡空着为准"), --yield-pool-only:
+  * a waiting main-line job holds back only submissions to the pool it waits in, and withdraws only our jobs still
+    waiting there; idle machines of the other pool are used (the idle-machine estimate is unchanged).
 Order within a pass: 8-card evaluations, then queued jobs, then resumed runs.
 Nothing is ever deleted.  Finished jobs are remembered in --state and not queried again.
 """
@@ -99,6 +103,14 @@ def job_cards(job: dict):
 def job_pool(job: dict):
     pool = job.get("resource_pool")
     return pool.get("name") if isinstance(pool, dict) else pool
+
+
+def prepared_pool(run: Path):
+    """The pool a job of ours was prepared for (RUN/job/prepared.json), None if unknown."""
+    try:
+        return json.loads((run / "job/prepared.json").read_text()).get("pool")
+    except (OSError, ValueError):
+        return None
 
 
 def segmented(exp: Path) -> dict:
@@ -360,18 +372,20 @@ class Watcher:
     def priority_waiting(self, cards: int, pool: str = None) -> list:
         """Jobs of the user's earlier priorities still waiting for cards, which hold back a submission of `cards`
         cards: any --yield-to job anywhere in the workspace (the main line's interiorgs-v10-*, the main window's
-        condition of 2026-10-22), and --yield-to-same-size jobs (bq_tp_mmxbf16, first in the user's GPU order) of the
-        same card count (a one-card shard on a busy machine does not take a whole machine from an 8-card job) waiting
-        in `pool` (a machine of the other pool cannot run them; pool None: in any pool)."""
+        condition of 2026-10-22; with --yield-pool-only only those waiting in `pool`, the user's decision of
+        2026-10-25), and --yield-to-same-size jobs (bq_tp_mmxbf16, first in the user's GPU order) of the same card
+        count (a one-card shard on a busy machine does not take a whole machine from an 8-card job) waiting in `pool`
+        (a machine of the other pool cannot run them; pool None: in any pool)."""
         out = []
         for j in self.job_list():
             name = str(j.get("display_name") or "")
             if j.get("state") not in HELD_STATES:
                 continue
+            here = pool is None or job_pool(j) in (None, pool)
             if any(name.startswith(p) for p in self.a.yield_to):
-                out.append(name)
-            elif any(name.startswith(p) for p in self.a.yield_to_same_size) and job_cards(j) in (None, cards) \
-                    and (pool is None or job_pool(j) in (None, pool)):
+                if here or not self.a.yield_pool_only:
+                    out.append(name)
+            elif any(name.startswith(p) for p in self.a.yield_to_same_size) and job_cards(j) in (None, cards) and here:
                 out.append(name)
         return out
 
@@ -490,19 +504,24 @@ class Watcher:
         self.pending8.append((key, evaldir, path, name))
         return dict(entry, state="待提交（8 卡，等空闲机器）")
 
-    def yield_waiting(self) -> list:
-        """--yield-to jobs (the main line) waiting for cards anywhere in the workspace."""
+    def yield_waiting(self, pool: str = None) -> list:
+        """--yield-to jobs (the main line) waiting for cards anywhere in the workspace; with --yield-pool-only and a
+        pool, only those waiting in that pool (a job of ours waiting in a pool is withdrawn only for those)."""
         return [str(j.get("display_name")) for j in self.job_list() if j.get("state") in HELD_STATES
-                and any(str(j.get("display_name") or "").startswith(p) for p in self.a.yield_to)]
+                and any(str(j.get("display_name") or "").startswith(p) for p in self.a.yield_to)
+                and (pool is None or not self.a.yield_pool_only or job_pool(j) in (None, pool))]
 
     def withdraw_waiting_whole(self) -> list:
-        """While a main-line job waits, our 8-card evaluations that have not started are withdrawn (sco job deleted,
-        EVALDIR/job renamed job_withdrawn_<time>, nothing else touched) and go back to the queue: they must not take
-        a freed machine before the main line (the agreement with the main window, 2026-10-22)."""
+        """While a main-line job waits (with --yield-pool-only: in the pool ours waits in), our 8-card evaluations
+        that have not started are withdrawn (sco job deleted, EVALDIR/job renamed job_withdrawn_<time>, nothing else
+        touched) and go back to the queue: they must not take a freed machine before the main line (the agreement
+        with the main window, 2026-10-22)."""
         out = []
         if not self.waiting_whole or not self.yield_waiting():
             return out
         for key, evaldir, path, name in self.waiting_whole:
+            if not self.yield_waiting(prepared_pool(evaldir)):
+                continue
             if self.a.dry:
                 out.append(f"{name} (would withdraw)")
                 continue
@@ -511,7 +530,8 @@ class Watcher:
             self.state["finished"].pop(str(evaldir), None)
             self.pending8.append((key, evaldir, path, name))
             out.append(f"{name}（{res}）")
-        self.notes.append(f"主线有任务在排队：撤下我们还没开始的 8 卡评测 {len(out)} 个：{'；'.join(out)}")
+        if out:
+            self.notes.append(f"主线有任务在排队：撤下我们还没开始的 8 卡评测 {len(out)} 个：{'；'.join(out)}")
         return out
 
     def flush_whole(self) -> None:
@@ -591,7 +611,8 @@ class Watcher:
 
     def withdraw_for_main_line(self) -> list:
         """Our 8-card jobs sent under the idle-machine rule (kind "resume": a stopped run; "queue": a prepared job)
-        that still wait for cards while a main-line job waits are withdrawn: the sco job deleted, a run's record
+        that still wait for cards while a main-line job waits (--yield-pool-only: in their pool) are withdrawn: the
+        sco job deleted, a run's record
         renamed job_released_<time> (it resumes later the same way), a prepared job's submission.json renamed
         submission_withdrawn_<time>.json (its prepared.json stays, so it is sent again later).  They must not take a
         freed machine before the main line (the user's GPU order of 2026-10-23 evening)."""
@@ -600,7 +621,7 @@ class Watcher:
         out = []
         for name, rec in sorted(self.state.get("idle_sent", {}).items()):
             run = Path(rec["run"])
-            if _job_id(run) != rec["job"]:
+            if _job_id(run) != rec["job"] or not self.yield_waiting(prepared_pool(run)):
                 continue
             st = self.job(run)
             if st.get("finished") or st.get("state") not in sco_job.WAITING_STATES:
@@ -928,7 +949,7 @@ class Watcher:
             how = "8 卡评测完成（训练任务没评）" if (exp / "evals" / tag / "job").exists() else "任务内评测完成"
             return {"tag": tag, "finished": True, "score": score(m[0]), "state": how}
         if path is not None and self.training_over(exp):
-            key = (1, int(tag.split("_")[1]), start_rank(exp.name), 0)
+            key = (0, int(tag.split("_")[1]), start_rank(exp.name), 0)  # ahead of the extra points
             entry = self.whole_entry(exp, tag, path, exp / "evals", key=key,
                                      name=f"ev8-{exp.name.lower()}-{tag.replace('_', '')}")
             return entry if entry.get("finished") else dict(entry, state=f"训练任务没评就结束了；{entry['state']}")
@@ -1396,6 +1417,9 @@ def parser():
                     help="submit nothing while any workspace job whose name starts so is waiting for cards")
     ap.add_argument("--yield-to-same-size", nargs="*", default=["bq_tp_mmxbf16"],
                     help="submit nothing of N cards while such a job of N cards waits (unknown size: wait too)")
+    ap.add_argument("--yield-pool-only", action="store_true",
+                    help="a waiting --yield-to job holds back (and withdraws) only our jobs of the pool it waits in; "
+                         "idle machines of the other pool are used (the user's decision of 2026-10-25)")
     ap.add_argument("--stage0-cards", type=int, choices=(1, 8), default=1,
                     help="8: a stage-0 checkpoint whose shards have not started is evaluated by one 8-card job "
                          "(8 servers x 96 processes) on an idle machine of --whole-pools (the user, 10-22 16:30)")

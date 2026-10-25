@@ -299,3 +299,71 @@ def test_e1_matrix_cells_show_each_point_and_the_mean_of_three(tmp_path):
     cell = watch.matrix_eval(w, "B", "100", w.a.extra_points)
     # (14/70 + 18/70 + 22/70) / 3 = 25.7%; spatial (10/50 + 12/50 + 16/50) / 3 = 25.3%
     assert "**3/3 个检查点评完**" in cell and "**3 点平均**：总体 25.7%，空间组 25.3%" in cell
+
+
+def test_a_final_checkpoint_left_unevaluated_goes_before_the_extra_points(tmp_path):
+    exp = e1_exp(tmp_path, states=(175000,), step=200000)
+    for s in (150000, 175000):  # both copies made, both waiting for an idle machine
+        ck = exp / f"evals_src/steps_{s}/checkpoints/steps_{s}_pytorch_model.pt"
+        ck.parent.mkdir(parents=True)
+        ck.write_bytes(b"w")
+        os.utime(ck, (OLD, OLD))
+        (exp / f"evals_src/steps_{s}/source.json").write_text("{}")
+    final = exp / "run/final_model/pytorch_model.pt"
+    final.parent.mkdir(parents=True)
+    final.write_bytes(b"w")
+    os.utime(final, (OLD, OLD))
+    (exp / "job").mkdir()
+    (exp / "job/submission.json").write_text(json.dumps({"job_id": "pt-train"}))
+    jobs = FakeJobs(states={exp.name: "SUCCEEDED"})
+    watcher(tmp_path, "--exps", "DS-B-100-s1", "--pool-nodes", "h800:1", jobs=jobs).tick()
+    assert [p[2] for p in jobs.prepared] == ["ev8-ds-b-100-s1-steps200000"]
+
+
+def test_with_yield_pool_only_the_main_line_holds_back_only_its_own_pool(tmp_path):
+    """The user's decision of 2026-10-25: a main-line job waiting in zoetrope no longer holds back an evaluation on
+    an idle machine of h800; one waiting in h800 still does, and withdraws ours still waiting there."""
+    e1_exp(tmp_path)
+    jobs = FakeJobs()
+    jobs.listing = [eight_card("interiorgs-v10-rl-rl-run-cb-v1-v8", "STARTING", pool="zoetrope")]
+    args = ("--exps", "DS-B-100-s1", "--whole-pools", "h800", "zoetrope", "--pool-nodes", "h800:1", "zoetrope:1")
+    w = watcher(tmp_path, *args, jobs=jobs)  # without the switch: a main-line job waiting anywhere holds all back
+    w.extract_run = fake_extract([])
+    w.tick()
+    assert not jobs.prepared and any("zoetrope：8 卡评测本轮不提交" in n for n in w.notes)
+    w = watcher(tmp_path, *args, "--yield-pool-only", jobs=jobs)
+    w.tick()
+    assert [(p[2], p[4]) for p in jobs.prepared] == [("ev8-ds-b-100-s1-steps150000", "h800")]
+    assert any("zoetrope：8 卡评测本轮不提交：给排在前面的任务让路" in n for n in w.notes)
+    assert not any(n.startswith("h800：8 卡评测本轮不提交") for n in w.notes)
+    jobs.states["steps_150000"] = "STARTING"  # ours waits in h800 (the idle estimate was wrong)
+    w = watcher(tmp_path, *args, "--yield-pool-only", jobs=jobs)
+    w.tick()
+    assert not jobs.deleted  # the main line waits only in zoetrope
+    jobs.listing.append(eight_card("interiorgs-v10-eval-val--x", "QUEUEING", pool="h800", cards=1))
+    w = watcher(tmp_path, *args, "--yield-pool-only", jobs=jobs)
+    w.tick()
+    assert jobs.deleted == ["steps_150000"] and len(jobs.prepared) == 1  # withdrawn, not sent again while it waits
+    assert list((tmp_path / "experiments/DS-B-100-s1/evals/steps_150000").glob("job_withdrawn_*"))
+
+
+def test_with_yield_pool_only_runs_sent_on_idle_machines_are_withdrawn_only_for_their_own_pool(tmp_path):
+    e2 = e1_exp(tmp_path, ratio="010", states=(75000,), step=77100)
+    (e2 / "job_released_20261023T191729Z").mkdir()
+    jobs = FakeJobs(states={"DS-B-010-s1": "QUEUEING"})
+    run_tools = SubmittingRuns(jobs)
+    args = ("--exps", "DS-B-010-s1", "--pool-nodes", "h800:3", "zoetrope:0", "--yield-pool-only")
+    jobs.listing = [eight_card("interiorgs-v10-rl-x", "STARTING", pool="zoetrope")]
+
+    def one_pass():
+        w = watcher(tmp_path, *args, jobs=jobs, run_tools=run_tools)
+        w.tick()
+        w.save()
+
+    one_pass()
+    assert run_tools.submitted == [("B", "010", 1)] and run_tools.pools == ["h800"]
+    one_pass()
+    assert not jobs.deleted  # it waits in h800, the main line only in zoetrope
+    jobs.listing.append(eight_card("interiorgs-v10-eval-y", "QUEUEING", pool="h800", cards=1))
+    one_pass()
+    assert jobs.deleted == ["DS-B-010-s1"] and len(list(e2.glob("job_released_*"))) == 2
