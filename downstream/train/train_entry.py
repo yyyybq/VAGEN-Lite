@@ -237,6 +237,23 @@ def dry_run(args) -> int:
     return 0
 
 
+def end_process_group(dist, exit_now=os._exit) -> None:
+    """Close the process group once the run is saved and recorded.  On 2026-10-25 03:47 E1 B (DS-B-100-s1) saved its
+    final checkpoint and record, then two ranks failed inside destroy_process_group (NCCL: CUDA out of memory), so
+    training exited 1 and run_segmented.sh stopped before its evaluation.  A failed teardown now ends the process at
+    once with 0: nothing is left to save, and a normal exit would run the broken communicator's destructor again."""
+    if not dist.is_initialized():
+        return
+    dist.barrier()
+    try:
+        dist.destroy_process_group()
+    except Exception as exc:
+        print(f"[train_entry] process group teardown failed after the run was saved and recorded "
+              f"({type(exc).__name__}: {str(exc)[:200]}); exiting 0", file=sys.stderr, flush=True)
+        sys.stdout.flush()
+        exit_now(0)
+
+
 def train(args) -> int:
     os.chdir(STARVLA)
     sys.path.insert(0, str(STARVLA))
@@ -419,9 +436,7 @@ def train(args) -> int:
         (output_dir / record_name).write_text(json.dumps(record, indent=1) + "\n")
         with open(output_dir / "launches.jsonl", "a") as f:
             f.write(json.dumps(record) + "\n")
-    if dist.is_initialized():
-        dist.barrier()
-        dist.destroy_process_group()
+    end_process_group(dist)
     return 0
 
 

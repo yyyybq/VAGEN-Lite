@@ -248,6 +248,39 @@ def test_runs_listed_for_release_stop_at_their_next_full_state_and_wait_before_r
     assert run_tools.submitted == [("B", "030", 1)] and jobs.deleted == ["DS-B-030-s1"]
 
 
+def test_a_final_checkpoint_its_ended_job_did_not_evaluate_goes_to_an_idle_machine(tmp_path):
+    """2026-10-25 03:47: E1 B saved its final checkpoint, then NCCL failed while shutting down, training exited 1 and
+    run_segmented.sh stopped before evaluating (sco still said SUCCEEDED).  While the job lives the board waits for
+    the job's own evaluation; once it has ended, the checkpoint goes to one 8-card job on an idle machine."""
+    from test_watch_and_tasks import summary
+
+    exp = e1_exp(tmp_path, ratio="010", states=(175000,), step=200000)
+    final = exp / "run/final_model/pytorch_model.pt"
+    final.parent.mkdir(parents=True)
+    final.write_bytes(b"w")
+    os.utime(final, (OLD, OLD))
+    (exp / "job").mkdir()
+    (exp / "job/submission.json").write_text(json.dumps({"job_id": "pt-train"}))
+    jobs = FakeJobs(states={exp.name: "RUNNING"})  # evaluating inside the job
+    args = ("--exps", "DS-B-010-s1", "--pool-nodes", "h800:1")
+    w = watcher(tmp_path, *args, jobs=jobs)
+    rows, *_ = w.tick()
+    assert [e["state"] for e in rows[0]["evals"]] == ["由训练任务自己评（8 个策略服务 × 12 个仿真进程）"]
+    assert not jobs.prepared and "200k：训完后由训练任务自己评" in watch.matrix_eval(w, "B", "010")
+    jobs.states[exp.name] = "SUCCEEDED"  # ended without the evaluation
+    w = watcher(tmp_path, *args, jobs=jobs)
+    assert "200k：训练任务没评就结束了，等空闲机器评测（8 卡）" in watch.matrix_eval(w, "B", "010")
+    rows, *_ = w.tick()
+    assert rows[0]["evals"][0]["state"] == "训练任务没评就结束了；待提交（8 卡，等空闲机器）"
+    assert [(p[2], p[3][-4:]) for p in jobs.prepared] == [
+        ("ev8-ds-b-010-s1-steps200000", [str(final), str(exp / "evals/steps_200000/out"), "8", "96"])]
+    w = watcher(tmp_path, *args, jobs=jobs)
+    assert "200k：评测 `pt-steps_200000` RUNNING" in watch.matrix_eval(w, "B", "010")
+    summary(exp / "evals/steps_200000/out/episodes", {"OpenDrawer": {"n": 50, "successes": 9}})
+    rows, *_ = w.tick()
+    assert rows[0]["evals"][0]["state"] == "8 卡评测完成（训练任务没评）" and len(jobs.prepared) == 1
+
+
 def test_e1_matrix_cells_show_each_point_and_the_mean_of_three(tmp_path):
     from test_watch_and_tasks import summary
 

@@ -52,6 +52,9 @@ Rules of the user's decisions of 2026-10-23 evening (after the stage-0 report):
   * prepared jobs in --queue-dir (*.json: {"run": DIR, "cards": 8, "what": ...}; DIR made by sco_job.prepare) are
     submitted under the same rule (the RL speed test of 64 environments);
   * docs/downstream/MATRIX.md holds two tables with the same rows and columns, training and evaluation.
+  * (2026-10-25) a training job that ended without evaluating its saved final checkpoint (E1 B: NCCL failed while
+    shutting down, rc 1, run_segmented.sh stopped before the evaluation) leaves that checkpoint to one 8-card
+    evaluation under the same idle-machine rule (injob_entry -> whole_entry, same seeds and output folder).
 Order within a pass: 8-card evaluations, then queued jobs, then resumed runs.
 Nothing is ever deleted.  Finished jobs are remembered in --state and not queried again.
 """
@@ -910,11 +913,26 @@ class Watcher:
                 out.append(f"{exp.name}:steps_{rec['steps']}")
         return list(dict.fromkeys(out))
 
-    def injob_entry(self, exp: Path, tag: str) -> dict:
-        """An evaluation the training job runs itself (run_segmented.sh): only shown."""
+    def training_over(self, exp: Path) -> bool:
+        """No training job of the run is alive: none submitted now (EXP/job renamed job_released_*, ...) or ended."""
+        return not (exp / "job/submission.json").exists() or bool(self.job(exp).get("finished"))
+
+    def injob_entry(self, exp: Path, tag: str, path: Path = None) -> dict:
+        """An evaluation the training job runs itself (run_segmented.sh): only shown while the job lives.  If the job
+        ended without it (E1 B, 2026-10-25 03:47: the final checkpoint and record were saved, then the NCCL teardown
+        ran out of GPU memory, training exited 1 and run_segmented.sh stopped before evaluating), the checkpoint goes
+        to one 8-card evaluation on an idle machine (whole_entry: same seeds, same folder EXP/evals/<TAG>/out, where a
+        partial in-job evaluation is resumed)."""
         m = merged(exp / "evals" / tag)
-        return {"tag": tag, "finished": m is not None, "score": score(m[0]) if m else None,
-                "state": "任务内评测完成" if m else "由训练任务自己评（8 个策略服务 × 12 个仿真进程）"}
+        if m:
+            how = "8 卡评测完成（训练任务没评）" if (exp / "evals" / tag / "job").exists() else "任务内评测完成"
+            return {"tag": tag, "finished": True, "score": score(m[0]), "state": how}
+        if path is not None and self.training_over(exp):
+            key = (1, int(tag.split("_")[1]), start_rank(exp.name), 0)
+            entry = self.whole_entry(exp, tag, path, exp / "evals", key=key,
+                                     name=f"ev8-{exp.name.lower()}-{tag.replace('_', '')}")
+            return entry if entry.get("finished") else dict(entry, state=f"训练任务没评就结束了；{entry['state']}")
+        return {"tag": tag, "finished": False, "score": None, "state": "由训练任务自己评（8 个策略服务 × 12 个仿真进程）"}
 
     def experiment_row(self, exp: Path) -> dict:
         train = self.job(exp)["state"] if (exp / "job/submission.json").exists() else "未提交"
@@ -929,7 +947,7 @@ class Watcher:
         for tag, path in checkpoints(exp):
             step = int(tag.split("_")[1])
             if rec and (step == int(rec["steps"]) or rule.get("mode") != "final_only"):
-                row["evals"].append(self.injob_entry(exp, tag))
+                row["evals"].append(self.injob_entry(exp, tag, path))
             else:
                 row["evals"].append(self.eval_entry(exp, tag, path, "", str(self.workers())))
             if (exp.name, tag) in repeats and rec:  # the noise floor of a stage-1 run: one 8-card job, idle machine
@@ -1228,10 +1246,12 @@ def matrix_eval(w: "Watcher", start: str, ratio: str, points=()) -> str:
             agg = score(m[0])
             aggs.append(agg)
             lines.append(f"{p // 1000}k：总体 {_rate(agg['all'])}，空间组 {_rate(agg['spatial'])}")
-        elif p == final:
-            lines.append(f"{p // 1000}k：训完后由训练任务自己评")
         elif _job_id(d):
             lines.append(f"{p // 1000}k：评测 `{_job_id(d)}` {w.job(d)['state']}")
+        elif p == final and w.run_finished(exp) and w.training_over(exp):
+            lines.append(f"{p // 1000}k：训练任务没评就结束了，等空闲机器评测（8 卡）")
+        elif p == final:
+            lines.append(f"{p // 1000}k：训完后由训练任务自己评")
         elif (exp / "evals_src" / f"steps_{p}" / "source.json").is_file():
             lines.append(f"{p // 1000}k：权重已复制，等空闲机器评测")
         else:

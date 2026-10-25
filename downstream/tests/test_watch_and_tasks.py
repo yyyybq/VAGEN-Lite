@@ -378,6 +378,9 @@ def test_segmented_runs_evaluate_the_final_in_the_job_and_only_b_twice(tmp_path)
     s = fake_exp(tmp_path, name="DS-S-100-s1", steps=(), settled=())
     (s / "experiment.json").write_text(json.dumps({"steps": 200000, "segmented": True, "eval_points": [200000]}))
     os.utime(s / "run/final_model/pytorch_model.pt", (OLD, OLD))
+    for x in (b, s):  # both training jobs still live, evaluating their final checkpoints themselves
+        (x / "job").mkdir()
+        (x / "job/submission.json").write_text(json.dumps({"job_id": f"pt-{x.name}"}))
     jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("other", 1)]))})
     off = watcher(tmp_path, "--repeat", jobs=jobs, shards=8)  # the user cancelled B's second evaluation (10-23)
     assert off.repeat_targets() == [] and {e["tag"] for e in off.experiment_row(b)["evals"]} == {
