@@ -20,13 +20,19 @@ HAVE = (importlib.util.find_spec("llamafactory") is not None and Path(CAMBRIAN_S
 class LfCambrianTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        os.environ.setdefault("CAMBRIAN_SRC", CAMBRIAN_SRC)
-        os.environ.setdefault("DISABLE_VERSION_CHECK", "1")
+        # register() sets CAMBRIAN_SRC in this process; the environment is given back afterwards, so later tests
+        # (job_sco's launch scripts pass CAMBRIAN_SRC on) see the one they started with
+        cls._env = mock.patch.dict(os.environ, {"DISABLE_VERSION_CHECK": "1"})
+        cls._env.start()
         from model_matrix.sft import lf_cambrian
 
         lf_cambrian.register()
         lf_cambrian.register()  # idempotent
         cls.L = lf_cambrian
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._env.stop()
 
     def test_registrations(self):
         from llamafactory.data.template import TEMPLATES

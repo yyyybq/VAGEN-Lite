@@ -130,8 +130,9 @@ class LanguageModelBatchTest(unittest.TestCase):
     on one sample, and a left-padded batch of two equals the two samples run alone."""
 
     def test_batch_equals_single_samples(self):
-        os.environ.setdefault("CAMBRIAN_SRC", "/mnt/umm/users/yinbaiqiao/cambrian-s")
-        from vagen.models import cambrian_register as R
+        with mock.patch.dict(os.environ, {"CAMBRIAN_SRC": os.environ.get("CAMBRIAN_SRC",
+                                                                        "/mnt/umm/users/yinbaiqiao/cambrian-s")}):
+            from vagen.models import cambrian_register as R  # reads CAMBRIAN_SRC on import; the env is given back
 
         from model_matrix.downstream.starvla_cambrian import language_model_forward
 
