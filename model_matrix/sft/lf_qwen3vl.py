@@ -19,7 +19,21 @@ from __future__ import annotations
 TEMPLATE = "qwen3_vl_nothink"
 
 
+def transformers_compat() -> None:
+    """Names the bundled LLaMA-Factory imports that the Qwen3-VL runtime's Transformers (4.57.6) no longer has:
+    ``transformers.utils.is_jieba_available`` (llamafactory/train/sft/metric.py; renamed is_rjieba_available), given
+    back with its old meaning, whether the jieba package is installed.  The first smoke SFT (2026-10-25 05:31, job
+    pt-45vp0qry) stopped at that import."""
+    import importlib.util
+
+    import transformers.utils as tu
+
+    if not hasattr(tu, "is_jieba_available"):
+        tu.is_jieba_available = lambda: importlib.util.find_spec("jieba") is not None
+
+
 def register() -> None:
+    transformers_compat()  # before any LLaMA-Factory module is imported
     from llamafactory.data.formatter import FunctionFormatter, StringFormatter, ToolFormatter
     from llamafactory.data.mm_plugin import get_mm_plugin
     from llamafactory.data.template import TEMPLATES, register_template
