@@ -77,6 +77,19 @@ class LfCambrianTest(unittest.TestCase):
             self.assertTrue(torch.allclose(mean, ForCausalLMLoss(logits, labels, 11)))  # no count: the mean
             self.assertIsNone(cls.forward(model, input_ids=torch.zeros(1, 6, dtype=torch.long)).loss)
 
+    def test_register_needs_no_cambrian_src(self):
+        """An SFT job's environment may lack CAMBRIAN_SRC; register() sets this cluster's source path first."""
+        import subprocess
+        import sys
+
+        root = Path(__file__).resolve().parents[2]
+        env = {k: v for k, v in os.environ.items() if k != "CAMBRIAN_SRC"}
+        env.update(PYTHONPATH=str(root), DISABLE_VERSION_CHECK="1", HF_HUB_OFFLINE="1")
+        out = subprocess.run([sys.executable, "-c", "from model_matrix.sft.lf_cambrian import register; register(); "
+                              "import os; print(os.environ['CAMBRIAN_SRC'])"], capture_output=True, text=True, env=env)
+        self.assertEqual(out.returncode, 0, out.stderr[-1500:])
+        self.assertEqual(out.stdout.strip().splitlines()[-1], CAMBRIAN_SRC)
+
     def test_processor_saves_nothing(self):
         with mock.patch("vagen.models.cambrian_processor.SIGLIP_CACHE", CACHE):
             proc = self.L.CambrianSFTProcessor.from_pretrained(str(CAMBRIAN), use_fast=True)

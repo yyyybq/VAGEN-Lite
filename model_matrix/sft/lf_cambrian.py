@@ -113,11 +113,16 @@ def model_class():
 
 
 _REGISTERED = {}
+# the Cambrian source on this cluster (vagen/models/cambrian_register.py falls back to the August machine's path)
+CAMBRIAN_SRC = "/mnt/umm/users/yinbaiqiao/cambrian-s"
 
 
 def register() -> None:
     if _REGISTERED:
         return
+    import os
+
+    os.environ.setdefault("CAMBRIAN_SRC", CAMBRIAN_SRC)
     from llamafactory.data.formatter import FunctionFormatter, StringFormatter, ToolFormatter
     from llamafactory.data.mm_plugin import PLUGINS
     from llamafactory.data.template import TEMPLATES, register_template

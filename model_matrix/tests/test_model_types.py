@@ -31,7 +31,9 @@ class ModelTypesTest(unittest.TestCase):
             self.assertEqual(kind.stop_token, "<|im_end|>")
         cam = M.get("cambrian_qwen")
         self.assertIsNone(cam.python)  # the vagen-lite env
-        self.assertEqual(dict(cam.env), {"HF_HUB_CACHE": M.CAMBRIAN_CACHE, "SIGLIP_CACHE": M.CAMBRIAN_CACHE})
+        self.assertEqual(dict(cam.env), {"HF_HUB_CACHE": M.CAMBRIAN_CACHE, "SIGLIP_CACHE": M.CAMBRIAN_CACHE,
+                                         "CAMBRIAN_SRC": M.CAMBRIAN_SRC})
+        self.assertTrue(Path(M.CAMBRIAN_SRC).is_dir() or not Path("/mnt/umm").is_dir())
         self.assertEqual((q25.env, q3.env), ((), ()))
         with self.assertRaises(ValueError):
             M.get("llava")
@@ -178,10 +180,11 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(self._chain(tmp, job_prefix="models").job_env(), {"VAGEN_LITE_JOB_PREFIX": "models"})
             cache = "/mnt/umm/shared_model/vagen-lite-models/hub"
             self.assertEqual(self._chain(tmp, model_type="cambrian_qwen").job_env(),
-                             {"VAGEN_LITE_MODEL_TYPE": "cambrian_qwen", "HF_HUB_CACHE": cache, "SIGLIP_CACHE": cache})
+                             {"VAGEN_LITE_MODEL_TYPE": "cambrian_qwen", "HF_HUB_CACHE": cache, "SIGLIP_CACHE": cache,
+                              "CAMBRIAN_SRC": "/mnt/umm/users/yinbaiqiao/cambrian-s"})
             from data_gen.interiorgs_v10 import job_sco as J
 
-            self.assertTrue({"HF_HUB_CACHE", "SIGLIP_CACHE"} <= set(J.PASS_ENV))
+            self.assertTrue({"HF_HUB_CACHE", "SIGLIP_CACHE", "CAMBRIAN_SRC"} <= set(J.PASS_ENV))
 
     def test_idle_pool_waits_for_the_main_line_and_an_idle_machine(self):
         from model_matrix import sco_view

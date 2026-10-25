@@ -26,6 +26,7 @@ QWEN3VL_RUNTIME_PYTHON = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/.venv-qwen3vl-run
 # the Cambrian adapter loads its vision tower and both image processors by repository name from this cache
 CAMBRIAN_CACHE = "/mnt/umm/shared_model/vagen-lite-models/hub"
 CAMBRIAN_TOKENS_PER_IMAGE = 756  # 27 x (27 + 1): SigLIP2's 729 patches and a newline per row
+CAMBRIAN_SRC = "/mnt/umm/users/yinbaiqiao/cambrian-s"  # the Cambrian source (cambrian_register's default is another machine's)
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,8 @@ TYPES: Dict[str, ModelType] = {
     # through model_matrix/sft/lf_cambrian.py (template, image plugin, processor, freeze rule)
     "cambrian_qwen": ModelType("cambrian_qwen", None, "cambrian_qwen", "model_matrix.sft.lf_launcher_cambrian",
                                "model_matrix/sft/accelerate_fsdp_cambrian.yaml",
-                               env=(("HF_HUB_CACHE", CAMBRIAN_CACHE), ("SIGLIP_CACHE", CAMBRIAN_CACHE))),
+                               env=(("HF_HUB_CACHE", CAMBRIAN_CACHE), ("SIGLIP_CACHE", CAMBRIAN_CACHE),
+                                    ("CAMBRIAN_SRC", CAMBRIAN_SRC))),
 }
 
 
