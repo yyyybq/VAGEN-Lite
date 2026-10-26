@@ -1,33 +1,35 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-10-26 17:55 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X0–X5 一张表）；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 **E2 结果 [reports/E2_RESULTS_20261026.md](reports/E2_RESULTS_20261026.md)**、E1 结果 [reports/E1_RESULTS_20261026.md](reports/E1_RESULTS_20261026.md) 和 X0–X5 设计 [reports/X_DESIGNS_20261026.md](reports/X_DESIGNS_20261026.md)。
+最后更新：2026-10-26 22:10 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表和 T 表）；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 **X0 结果 [reports/X0_RESULTS_20261026.md](reports/X0_RESULTS_20261026.md)** 和 **T 系列设计 [reports/T_DESIGNS_20261026.md](reports/T_DESIGNS_20261026.md)**，之前的有 E2 结果、E1 结果和 X0–X5 设计。
 
 ## 1. 现在在哪一步
 
-- 第一步、第二步完成；E0、E1、**E2 完成**。E2 报告 10-26 17:55 发出。
-  - 30% 比 100% 高，四个起点都是（+7.8 到 +10.4 个百分点，p ≤ 0.006），不只 RS。
-  - 10% 和 100% 差不多。
-  - 可能是 100% 在 20 万步时没训够（只过了 0.36 个 epoch），未核实。
-- **E3**：
-  - 10:19–10:54 四个都拿到机器开跑，但都在第一次更新后报错停下。原因是 RLinf 要求存检查点的间隔是自评间隔的整数倍，我按方案设的 25 和 10 不满足（第 5 节）。
-  - 已改成每 20 次存、每 10 次自评，并在开跑前检查间隔（`b7741ce9`）。失败记录已存档，等看板重提。
-  - 现在主线在两个池都有 RL 训练排队，按规则先不交。
+- 第一步、第二步完成；E0、E1、E2 完成。
+- **X0 完成**（10-26 21:00–21:12，报告已写）：B 66.3%，S、RS、RD 都显著更低（53.9%–57.3%，p < 0.001），主要差在前后题。
+- **E3**：按你 10-26 晚的决定改从 E2 30% 的第 20 万步出发。任务清单按同一规则（四起点平均在 10%–60%）用 30% 检查点重算，剩 3 个：CoffeeSetupMug 53.5%、StackBowlsCabinet 34.5%、TurnOffStove 25.0%（OpenDrawer 82.5%、SlideDishwasherRack 70.0% 超过 60%）。4 个配置已生成并通过检查，**排队文件挂起等你确认清单**（`queue/q1_e3_*.json.hold_confirm`）。
+- **X3**：只读记录器写完，在真实仿真里核过（9 个空间任务，有无记录器结果逐位相同）；4 个 8 卡任务已排队。
+- **X4**：导出 1 个 + 评测 16 个 1 卡任务已排队（E1 模型的评测等各自导出完成）。提示格式：主线评原始 7B 和 RL 模型都用 `no_think`。
+- **X5**：清单已出（16 个未见原子任务、16 个未见组合任务，全部一次重置成功），**等你确认**后再排队。
+- **X1、X2、XE**：实验已建好，已排队（排在 X4 后面；X5 确认后排到它们前面）。X1 是只训动作头（冻结整个 `qwen_vl_interface`）。
+- **T 系列**：设计已写，**等你确认**（T1、T5、T2；T3 / T4 等路径）。
 - **E4**：取消。
-- **全状态**：已训完实验的全部删完，共 12 份，约 1.41 TB。E1 第 15 万、17.5 万步的权重副本保留。
-- **X0–X5**：设计和 X0 的 20 道样例已发你，等你确认。
 
-## 2. 在跑什么（10-26 17:50 UTC）
+## 2. 在跑什么（10-26 22:10 UTC）
 
 - 没有在跑的训练和评测。
-- **E3 排队**（`queue/e3_*.json`，按 B、RS、S、RD 的顺序，同时最多 2 个）：等主线在某个池不再排队、且那个池有空机。
-- 每个 E3 任务依次做三件事：训 100 次 PPO 更新（每 20 次存一个检查点，约 63 GB；训完只留最后一个）；导出成 StarVLA 格式；评 944 回合。重提时跳过已完成的步骤。每个约 26 小时（未核实）。
+- **排队**（`downstream_runs/queue/`，按名字顺序，前一个放不下就不往后看）：
+  1. X3 四个（8 卡，B、S、RS、RD）；
+  2. X4：导出 1 个 + 评测 16 个（1 卡）；
+  3. X1 四个、X2 八个、XE 一个（8 卡）。
+  - 挂起的：E3 四个（等你确认清单，`q1_e3_*`，确认后排在最前面，同时最多 2 个）；10-26 白天按 E1 起点准备的旧 E3 排队文件（`e3_*.held_e1start_20261026`，不会再用）。
+- 现在主线在两个池都有任务排队（h800：2 个 RL 训练；zoetrope：5 个评测），按规则都先不交。
 
 **GPU 规则**（你 10-23 晚的决定 1；10-25 约 10:00 改为只给同一个池让路）：
 - 主线（`interiorgs-v10-*`）有任务在某个池排队时，不往那个池提交；另一个池有空机照样用（你的原话："只给同一个池让路就行，不用一直让，没有卡空着为准"）；
-- 8 卡任务只投到估计有空闲机器的池；我们自己有任务在那个池排队时，不再往那个池提交；
+- 8 卡任务只投到估计有空闲机器的池；1 卡任务投到有空卡的机器；我们自己有任务在那个池排队时，不再往那个池提交；
 - 按空机提交、还在排队的任务，如果主线开始在同一个池排队，就撤回，等下次再提。已经开始跑的不动。
 
-**看板**：`downstream/eval/watch.py`，10-26 07:13 起运行，PID 3023017，代码 `770ef831`（之后的提交没有改看板的行为），每 5 分钟一轮。启动、停止、查看命令如下（在集群 worktree 里；代码更新后先 stop 再 start）：
+**看板**：`downstream/eval/watch.py`，10-26 21:49 起运行，PID 66977，代码 `712c4f27`，每 5 分钟一轮。启动、停止、查看命令如下（在集群 worktree 里；代码更新后先 stop 再 start）：
 
 ```bash
 bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- --yield-to-same-size --yield-pool-only --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 100 010 030 --whole-pools h800 zoetrope
@@ -43,21 +45,45 @@ bash downstream/eval/watch.sh status
 
 ## 3. 在等什么
 
-- **你确认 X0–X5**（第 4 节）。
-- **E3**：主线在两个池的排队清掉、有空机。
+- **你确认**：E3 的 3 个任务、X5 的两份清单、T 系列设计（第 4 节）。
+- **空机**：主线在两个池的排队清掉、有空机或空卡。
 
 ## 4. 待你决定的事
 
-1. **X0–X5**（详见 [设计](reports/X_DESIGNS_20261026.md)）：
-   - X0 的 20 道样例；
-   - X1 合并层学习率 1e-5 还是 1e-4；
-   - X4 同意导出 4 份 HF 副本（约 66 GB），并一起评原始起点；
-   - X5 改评 target50 之外的任务：未见原子任务、未见组合任务，还是两组都评。
-2. **E2 报告第 5 节的两个可选项**（都没做）：
-   - 要不要验证"100% 没训够"：把 100% 训到约 67 万步，一个起点约 1,130 卡时；
-   - E3 要不要换成 30% 的检查点出发（现在换代价最小，任务清单要重新复核）。
+1. **E3 任务清单**：CoffeeSetupMug、StackBowlsCabinet、TurnOffStove（30% 检查点四起点平均 53.5%、34.5%、25.0%）。确认后把挂起的 4 个排队文件放开。
+2. **X5 清单**（RoboCasa 1.0.1 登记表里 target50 之外的任务，按名字排序、种子 0 打乱，依次试重置，前 16 个；两组都是 16 个一次成功，没有跳过的）：
+   - 原子（主评）：AdjustWaterTemperature、PickPlaceMicrowaveToCounter、PreheatOven、AdjustToasterOvenTemperature、OpenOven、PickPlaceCabinetToCounter、OpenBlenderLid、LowerHeat、CloseFridgeDrawer、PickPlaceCounterToSink、TurnOnStove、TurnSinkSpout、TurnOnToasterOven、CloseDrawer、TurnOffSinkFaucet、CoffeeServeMug；
+   - 组合（补评）：SweetenCoffee、DivideBuffetTrays、FreezeBottledWaters、RestockPantry、MeatTransfer、MicrowaveCorrectMeal、MultistepSteaming、ServeWarmCroissant、MakeLoadedPotato、PrewashFoodAssembly、BalancedMealPrep、RemoveCuttingBoardItems、SweetSavoryToastSetup、SweetenHotChocolate、RecycleStackedYogurt、ButterOnPan。
+   - 卡时按任务时限重估（几乎全失败时每回合跑满时限）：原子每个起点约 4 卡时，组合约 16 卡时，四个起点共约 80 卡时（未核实）。
+3. **T 系列**（[设计](reports/T_DESIGNS_20261026.md)）：T2 用自己写的 LoRA 层还是装 peft；LoRA 的 alpha、学习率；T1、T5 的设计；合起来的排队顺序。
 
 ## 5. 主窗口指令与暂停 / 撤回记录（UTC）
+
+- **10-26 21:49 看板用新代码重启（PID 66977，`712c4f27`）**：
+  - 先停旧看板（PID 3023017）；
+  - 排进 X3 四个（`queue/q3_x3_*`）；放开 X4 的 17 个、X1 四个、X2 八个、XE 一个的挂起；
+  - 生成 E3 的 4 个新配置（从 `DS-<起点>-030-s1/run/final_model` 出发，3 个任务，32 个环境，每回合最多 512 步，100 次更新，都通过了检查），排队文件挂起等你确认（`q1_e3_*.json.hold_confirm`）；
+  - MATRIX：E3 改成"3 个任务、从 E2 30% 第 20 万步出发"，X 表加 XE，新增 T 表。
+  - 第一轮：两个池都有主线排队，X3 没交。
+- **10-26 21:13–21:15 看板没按顺序交了 X1-B，已撤回。**
+  - 21:13:38 看板把 X1-B（`pt-qa017r28`）交到了 h800。当时 X1 应该排在 X3、X4 后面，但它的排队文件建好时没有挂起，而 X3、X4 的还没排进去，看板按名字顺序先看到的就是它。之后 X1、X2、XE 的排队文件都先挂起，按顺序放开。
+  - 21:15:38 撤回，没有开始训练，记录改名为 `submission_withdrawn_20261026T211538Z.json`。
+- **10-26 21:00–21:12 X0 跑完**（`pt-516ffi40`，8 卡 h800，约 1.6 卡时）：510 道题，结果见 [X0 报告](reports/X0_RESULTS_20261026.md)。
+- **10-26 20:47 按你的决定 1 停下用 E1 起点的 E3。**
+  - 18:02 看板按当时的方案（从 E1 第 20 万步出发）交了 B（`pt-ca5ji5y5`，18:44 开训）和 RS（`pt-1i37skmo`，18:10 开训）。
+  - 20:47 收到改从 E2 30% 出发的决定后停下两个：B 训到第 7 次更新、RS 训到第 9 次，都还没到第一个检查点（第 20 次），没有可用的结果。共用了约 37 卡时（B 约 2.0 小时、RS 约 2.6 小时，各 8 卡）。
+  - 四个旧目录改名为 `experiments/E3-<起点>_e1start_20261026/` 存档，没有删东西；旧排队文件改名为 `e3_*.json.held_e1start_20261026`。
+- **10-26 约 20:45 你的决定（收到 E2 报告和 X0–X5 设计之后）**：
+  1. E3 改从 E2 30% 的第 20 万步出发，其余不变；任务清单用 30% 检查点按同一规则重算，报你确认后再提交；
+  2. X1 改为只训动作头（冻结视觉塔、合并层、语言模型和 `lm_head`），30% 示教、5 万步；合并层那一版先不做；
+  3. 新增对照 XE（B 起点、30% 示教、6 万步）；
+  4. X0 样例认可，正式出约 500 道；
+  5. X3、X2 按设计提交；
+  6. X4 允许导出 4 份 HF 副本，8 个模型都评 v2 验证集和评测集；
+  7. X5 主评 16 个未见原子任务，补评 16 个未见组合任务，清单先报你；
+  8. 提交顺序 E3 → X0 → X3 → X4 → X5 → X1 → X2 → XE，都按空机规则；
+  9. MATRIX 加 XE 一行、补 E2 10% 的数字；
+  - 另加 T 系列（T1 种子 2、T2 LoRA、T5 NavigateKitchen 单任务、T3 / T4 主线新权重），每项先报设计。
 
 - **10-26 17:30–17:50 E2 完成，B 10% 的全状态已删。**
   - B 10%（新训练代码）17:30 训完、自己评完；8 个 E2 评测 17:33 全部完成。

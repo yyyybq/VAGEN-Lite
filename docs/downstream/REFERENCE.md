@@ -1,6 +1,6 @@
 # 下游具身任务线：设计、规则、代码与路径（参考）
 
-最后更新：2026-10-23 20:15 UTC。现状看 [STATUS.md](STATUS.md)，各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每轮重写），评测协议看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，报告在 [reports/](reports/)。
+最后更新：2026-10-26 22:10 UTC。现状看 [STATUS.md](STATUS.md)，各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每轮重写），评测协议看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，报告在 [reports/](reports/)。
 
 ## 1. 分阶段设计（你 10-22 的指令；同日第二条指令修订）
 
@@ -9,8 +9,24 @@
 | E0 | 0 | 评测 D5 停下时保留的 16 个检查点（四个起点 × 2.5 万 / 5 万 / 7.5 万 / 10 万步），顺序：四个起点的 10 万步 → 5 万步 → B 10 万步第二遍（整机，噪声估计）→ 2.5 万和 7.5 万。全部评完后出阶段 0 报告：四条曲线（总体、空间组）、步数规则的判定、空间任务里四起点平均成功率在 10%–60% 的清单（给 E3 选任务）、评测噪声的初步估计（B 10 万步分片版和整机版之差，种子相同） | 主窗口许可 |
 | E1 | 1 | DS-{B,S,RS,RD}-100-s1 从头跑 20 万步；全状态续训。**评第 15 万、17.5 万、20 万步**（你 10-23 晚的决定 2）：第 15 万、17.5 万步的权重由看板在全状态被替换前复制到 `EXP/evals_src/steps_<N>/`，整机评测；第 20 万步在任务内评。报告主数字用三点平均，并列三点之间的配对差作为训练末尾的起伏尺度。B 的第二遍评测（repeat_final）已取消 | 10-23 00:02 已提交（你的决定 3，20 万步） |
 | E2 | 2 | DS-{B,S,RS,RD}-010-s1 和 DS-{B,S,RS,RD}-030-s1，设置同 E1（20 万步、全状态每 2.5 万步、训练任务自己评第 20 万步） | 010：10-23 00:02 提交；19:17 按你的决定 1 停下；20:22–20:34 按空机规则续训。030：10-23 20:45 按你的决定提交（B、S 在 h800，RS、RD 在 zoetrope；RD 在 zoetrope 没排上，20:54 按你的选择改投 h800），实验目录同时重建（10-21 的旧文件加 `_made_20261021` 存档） |
-| E3 | 3 | 四个起点各 1 个 PPO，从各自 E1 的第 20 万步出发（只按路径读）；**5 个任务**：SlideDishwasherRack、OpenDrawer、CoffeeSetupMug、TurnOffStove、StackBowlsCabinet（你 10-26 的决定 1：E1 复核后按规则加了 StackBowlsCabinet）；轮转和训练轮数各 2，32 个环境，更新 100 次，每 10 次 RLinf 自评、每 25 次存检查点（训完只留最后一个，约 63 GB），每个起点约 22 小时；训完导出成 StarVLA 格式（你同意，每个约 16.8 GB），用同一套 944 回合评测，RL 前的数字是 E1 第 20 万步；最多 2 个同时跑。脚本 `downstream/rlinf/run_e3.sh`（三步都能续），实验目录 `experiments/E3-<起点>/`。方案见 [reports/STEP4_RL_PLAN_20261023.md](reports/STEP4_RL_PLAN_20261023.md) | 10-26 07:13 排队（B、RS、S、RD），按空机规则提交；B 07:14 提交 |
+| E3 | 3 | 四个起点各 1 个 PPO，**从各自 E2 30% 的第 20 万步出发**（`DS-<起点>-030-s1/run/final_model`，只按路径读；你 10-26 晚的决定 1，之前是 E1 第 20 万步）；任务按同一规则（四起点平均成功率在 10%–60%）用 30% 检查点重算，**3 个：CoffeeSetupMug、StackBowlsCabinet、TurnOffStove（等你确认）**；轮转和训练轮数各 2，32 个环境，更新 100 次，每 10 次 RLinf 自评、每 20 次存检查点（训完只留最后一个，约 63 GB）；训完导出成 StarVLA 格式（每个约 16.8 GB），用同一套 944 回合评测，RL 前的数字是 E2 30% 第 20 万步；最多 2 个同时跑。脚本 `downstream/rlinf/run_e3.sh`（三步都能续），实验目录 `experiments/E3-<起点>/`；按 E1 起点建的旧目录存为 `E3-<起点>_e1start_20261026/`。方案见 [reports/STEP4_RL_PLAN_20261023.md](reports/STEP4_RL_PLAN_20261023.md) | 10-26 21:49 配置建好，排队文件挂起（`queue/q1_e3_*.json.hold_confirm`），你确认任务清单后放开 |
 | E4 | — | 种子 2、3 | **取消**（你 10-26 的决定 2）；已有的目录留着不删 |
+
+**新增实验**（你 10-26 和 10-26 晚的决定；设计 [X_DESIGNS_20261026.md](reports/X_DESIGNS_20261026.md)、[T_DESIGNS_20261026.md](reports/T_DESIGNS_20261026.md)；结果在 `downstream_runs/x/<编号>/`、`downstream_runs/t/<编号>/`，各自的 `matrix.json` 是 MATRIX 里那一行）：
+
+| 编号 | 内容 | 状态（10-26 22:10） |
+| --- | --- | --- |
+| X0 | 域内空间问答：510 道（左右、远近、前后各 170），零样本问四个起点。代码 `downstream/x/x0_qa.py`、`x0_ask.py`、`run_x0.sh` | 完成，[报告](reports/X0_RESULTS_20261026.md) |
+| X1 | 只训动作头（冻结整个 `qwen_vl_interface`），30% 示教，5 万步，评 944 回合。`experiments/X1-<起点>-030-s1` | 已排队 |
+| X2 | 1%、3% 示教（每任务 5、15 条，嵌套在 10% 里），2 个 epoch（1%：10,368 步；3%：32,080 步），评 944 回合。`experiments/X2-<起点>-{001,003}-s1` | 已排队 |
+| X3 | E1 四个最终检查点重放空间组 447 回合，加只读记录器（`closed_loop.py` 的 `end_state`，`downstream/x/x3_targets.py`，计划 `downstream/x/x3_plan.json`，脚本 `downstream/x/run_x3.sh`），判断实际操作了哪个目标；逐回合核对和 E1 评测相同 | 已排队（4 个 8 卡） |
+| X4 | E1 四个最终权重导出成 HF（`x/X4/hf/E1-<起点>-200k`，`downstream/x/run_x4_export.sh`）后，和四个原始起点在主线 v2 验证集（413）和评测集（292）上各评一次（主线评测脚本，`no_think`） | 已排队（导出 1 个 + 评测 16 个，1 卡） |
+| X5 | 未见任务：16 个原子（主评）+ 16 个组合（补评），每任务 20 回合（`downstream/x/x5_tasks.py`，清单 `x/X5/{atomic,composite}.json`） | 清单等你确认 |
+| XE | B 起点、30% 示教、6 万步（0.36 个 epoch），评 944 回合。`experiments/XE-B-030-s1` | 已排队 |
+| T1 | 种子 2：`DS-B-030-s2`、`DS-RS-030-s2` | 设计等你确认 |
+| T2 | LoRA（rank 16，语言模型注意力和前馈层），四个起点，30%，10 万步 | 设计等你确认 |
+| T5 | NavigateKitchen 单任务（500 条示教，3 个 epoch），评 100 回合 | 设计等你确认 |
+| T3 / T4 | 主线新权重：X0 问答后按 `DS-<起点>-030-s1` 的配方训练 | 等路径 |
 
 - 名额：下游所有 8 卡训练（E1、E2 的训练，RL，测试）共用 4 个，RL 至多占 2 个；1 卡分片最多 8 个；8 卡评测任务不算训练名额。你在和主窗口谈动态名额，谈妥再改。
 - 统计：逐任务配对检验（34 个任务为配对单位）+ 评测噪声下限（同一检查点两次评测之差），见 EVAL_PROTOCOL.md 第 3、4 节。配对一律只用两边都完成的回合（逐任务差也是）。
@@ -26,7 +42,8 @@
   - 主线（`interiorgs-v10-*`）有任务在某个池排队（STARTING、QUEUEING 等；SUSPENDED 是已停的旧任务，不算）时，不往那个池提交；另一个池有空机照样用（你的原话："只给同一个池让路就行，不用一直让，没有卡空着为准"）。10-25 之前是任何池有主线排队就什么都不交；
   - 8 卡任务只投到估计有空闲机器的池，每轮最多 4 个（10-23 20:34 起）；我们自己有 8 卡任务在那个池排队时不再提交；
   - 按空机提交、还在排队的任务（续训、队列里的任务、8 卡评测），主线一开始在同一个池排队就撤回，之后再提；已经开始跑的不动；
-  - 每轮的顺序是：E1 的 8 卡评测 → 队列里的任务（`downstream_runs/queue/*.json`，比如 RL 速度实测 2）→ 停下的实验续训（`job_released_*`，E2）；
+  - 每轮的顺序是：E1 的 8 卡评测 → 队列里的任务（`downstream_runs/queue/*.json`）→ 停下的实验续训（`job_released_*`，E2）；
+  - 队列按文件名顺序，前一个放不下（没有空机或空卡）就不往后看；1 卡任务（`"cards": 1`）投到有空卡的机器（已有任务的机器上的空卡，或空机），每轮最多 8 个；`"requires"` 里的文件不在就跳过、不挡后面；同一 `"group"` 同时最多 `"max_live"` 个（E3：2 个）；`"pools"` 里哪个池先有空就投哪个。挂起的排队文件改名为 `*.json.hold_*`，看板不看。现在的顺序（你 10-26 晚的决定 8）：`q1_e3`（E3）→ `q2_x0` → `q3_x3` → `q4_x4` → `q5_x5` → `q6_x1` → `q7_x2` → `q8_xe`；T 系列确认后按 T 设计第 3 条插入；
   - `PAUSE_SUBMISSIONS` 存在时一律暂停。
   - 空闲机器数是估计值：池的机器数减去有 aigc 任务的机器数；别的工作区的任务看不到，所以可能偏多。
 - 下面是更早的规则，记录在此备查：
@@ -45,7 +62,7 @@
 - **大文件**在 `/mnt/umm/users/yinbaiqiao/downstream_runs/`（不进 git）：`data/target50_{100,030,010}`（训练数据，只建链接）、`experiments/<编号>/`、`checks/`（一次性检查）、`logs/`、看板 `BOARD.md`、看板状态 `WATCH_STATE.json`、报告 `report/`、`report_stage0/`、阶段 0 报告的数字和网页 `report_stage0_20261023/`。
 - **看板** `downstream/eval/watch.py`（`downstream/eval/watch.sh start|stop|status`，代码更新后先 stop 再 start；启动参数记在 `downstream_runs/watch.args`）：10-23 20:34 起每 5 分钟一轮（`--every 300`），每 2 分钟一次分片落点检查；按第 2 节的规则提交评测、E2 续训（`--resume-ratios 010 030`）和队列里的任务；在 E1 的第 15 万、17.5 万步复制权重（`--extra-points`、`--extract-python`）；重写 `BOARD.md` 和 `docs/downstream/MATRIX.md`（训练、评测各一张表）；有新评测完成时重建结果报告。按空机提交的任务记在 `WATCH_STATE.json` 的 `idle_sent` 里。用 setsid + nohup 运行，ssh 断开后仍会继续。除了按规则删掉落在空闲机器上、排队中被撤下或卡住的评测任务，不删任何东西。
 - **训练**：`downstream/train/make_experiment.py`（建实验；E1 用 `--full-state-interval 25000 --eval-points "" --archive-suffix _stopped_20261022`，复用 DS-*-100-s1 目录，旧的 experiment.json 等改名保留；B 另加 `"repeat_final": true`）、`runs.py make|submit|list`、`train_entry.py`（全状态每 2.5 万步存一次只留最新，启动时找到全状态就续训；`trainer.stop_at` 段末退出）、`full_state.py`、`run_segmented.sh`（训到最后一步 → 任务内评测最终检查点；训练退出码不为 0 时不评）、`run_train.sh`（10-21 的旧流程）。10-25 起：存好检查点和记录后关闭 NCCL 出错，`train_entry.py` 直接以 0 退出（E1 B 遇到过）；训练任务没评就结束的最终检查点，看板按空机规则单独用一个 8 卡任务评，结果写到同一个目录。续训测试：`resume_test.sh`、`resume_kill_test.sh`、`resume_check.py`。
-- **评测**：`downstream/eval/run_eval_ckpt.sh CKPT OUT 服务数 进程数 [分片]`、`closed_loop.py`（10-22 起：仿真进程死了或卡住时它的回合重跑；重跑一个评测时只补缺的回合；每 30 秒记一次内存，`OUT/episodes/memory.csv` 和 `summary.json["memory"]`）、计划 `downstream/eval/eval_d6.json`、剔除清单 `downstream/eval/excluded_episodes.json`（6 个回合，944）。10-23 晚起策略服务以 `--idle_timeout -1` 启动，整个评测期间不因空闲关闭，结束时由脚本关。
+- **评测**：`downstream/eval/run_eval_ckpt.sh CKPT OUT 服务数 进程数 [分片]`（环境变量 `EVAL_PLAN` 换计划，默认 `eval_d6.json`）、`closed_loop.py`（10-22 起：仿真进程死了或卡住时它的回合重跑；重跑一个评测时只补缺的回合；每 30 秒记一次内存，`OUT/episodes/memory.csv` 和 `summary.json["memory"]`；计划里 `"only_spatial"` 只跑空间任务，`"end_state"` 在每回合开始和结束时调用 X3 的只读记录器，结果记在回合行的 `end_state` 里）、计划 `downstream/eval/eval_d6.json`、剔除清单 `downstream/eval/excluded_episodes.json`（6 个回合，944）。10-23 晚起策略服务以 `--idle_timeout -1` 启动，整个评测期间不因空闲关闭，结束时由脚本关。
 - **从全状态复制权重**：`downstream/train/extract_weights.py FULL_STATE RUN_DIR DEST [--dry] [--like CKPT]`（StarVLA 环境的 Python：`/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python`）。取出 DeepSpeed `mp_rank_00_model_states.pt` 里的 bf16 模型权重，按 StarVLA 检查点格式写到 `DEST/checkpoints/steps_<N>_pytorch_model.pt`，并复制 `config.yaml`、`dataset_statistics.json`，最后写 `source.json`。看板在 E1 第 15 万、17.5 万步自动调用。
 - **报告**：`downstream/report/`（`python -m downstream.report.build --out DIR [--stage0] [--partial]`，vagen-lite 环境；`--partial` 把还没写完的评测按已完成回合计入并标出缺的回合）。主检验逐任务配对 + 噪声下限；E1 有第 15 万、17.5 万、20 万步三点时，主数字是三点平均（`stats.compare_mean`、`build.e1_points`），页面有"E1 三点"一节，并列三点之间的配对差；阶段 0 页含曲线、缺回合的评测、10%–60% 清单（第 10 万步和全部检查点两种算法）、步数规则表、最后两点之差、检查点之间的起伏。网页版（私有 Artifact）：https://claude.ai/artifact/Qa1oNasyCN5pSkjg2LXhBq 。模拟数据在 `downstream_runs/checks/report_sim_20261021/`。
 - **第四步（E3）准备**：`downstream/rlinf/fsdp_7b.overrides`（7B 的三个 FSDP 设置）、`site/sitecustomize.py`（RLinf 的环境进程加台面区域顺序修正、分开记演员和价值头的梯度范数）、`run_rlinf.sh`（正式启动脚本）、`export_test.sh`（导回 StarVLA 格式 + 短评测，10-22 测通）、`speed_test.sh`（第一次速度实测，RL-SPEED-1）、`speed_test2.sh`（第二次：64 / 32 个环境，轮转 2、训练 2，RL-SPEED-2，在队列里等空机）。D7 环境：`/mnt/umm/users/yinbaiqiao/envs/rlinf-starvla-rc365`（`source downstream/envs/activate_rlinf.sh <ENV>`）。
