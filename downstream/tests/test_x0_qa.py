@@ -38,6 +38,9 @@ def test_names_and_seeds():
     assert X.display_name("wooden_spoon") == "wooden spoon"
     assert X.display_name("knife_block_main_group") == "knife block"
     assert X.display_name("paper_towel_right_group") == "paper towel"
+    assert X.display_name("paper_towel_dining_area_group") == "paper towel"  # seen in the first samples
+    assert X.display_name("utensil_set_front_group") == "utensil set"
+    assert X.display_name("outlet_room") == "outlet" and X.display_name("range hood") == "range hood"
     assert X.parse_seeds("1000-1002,1010") == [1000, 1001, 1002, 1010]
 
 

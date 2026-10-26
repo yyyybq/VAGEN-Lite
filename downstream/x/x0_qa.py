@@ -3,7 +3,7 @@
 the four start VLMs.  This file makes the questions; docs/downstream/reports/X_DESIGNS_20261026.md has the design.
 
     python downstream/x/x0_qa.py generate --tasks OpenDrawer TurnOffStove --seeds 1000-1001 --out OUT
-    python downstream/x/x0_qa.py samples --qa OUT/questions.jsonl --n 20 --out OUT/samples.html
+    python downstream/x/x0_qa.py samples --qa OUT/candidates.jsonl [OUT2/candidates.jsonl ...] --n 20 --out PAGE.html
 
 Run `generate` with the RoboCasa simulator Python (downstream/eval/sim_env.sh: `sim THREADS $SIM_PY ...`).  Each
 (task, seed) is reset exactly as the closed-loop evaluation does (gym.make('robocasa/<task>', split=target,
@@ -60,10 +60,14 @@ def parse_seeds(text: str) -> list:
     return out
 
 
+GROUP_SUFFIX = re.compile(r"_(?:(?:main|right|left|front|back|island|corner|dining_area|bottom|top|wall|side)_group"
+                          r"|room)$")
+
+
 def display_name(text: str) -> str:
-    """'wooden_spoon' -> 'wooden spoon'; fixture names lose their group suffix ('knife_block_main_group')."""
-    text = re.sub(r"_(main|right|left|room)(_group)?$", "", str(text))
-    text = re.sub(r"_(main|right|left)_group$", "", text)
+    """'wooden_spoon' -> 'wooden spoon'; fixture names lose their layout group ('knife_block_main_group',
+    'paper_towel_dining_area_group', 'utensil_set_front_group') and a trailing number."""
+    text = GROUP_SUFFIX.sub("", str(text))
     return re.sub(r"_\d+$", "", text).replace("_", " ").strip()
 
 
@@ -310,14 +314,18 @@ KIND_ZH = {"left_right": "左右", "near_far": "远近", "front_back": "前后"}
 
 
 def samples(args) -> int:
-    qa = Path(args.qa)
-    root = qa.parent
-    cands = [json.loads(line) for line in qa.read_text().splitlines() if line.strip()]
+    cands = []
+    for qa in map(Path, args.qa):  # several generate folders (parallel parts) may be pooled
+        for line in qa.read_text().splitlines():
+            if line.strip():
+                q = json.loads(line)
+                q["image_path"] = str(qa.parent / q["image"])
+                cands.append(q)
     picked = pick(cands, args.n, random.Random(args.rng_seed))
-    (root / "samples.jsonl").write_text("".join(json.dumps(q) + "\n" for q in picked))
+    Path(args.out).parent.joinpath("samples.jsonl").write_text("".join(json.dumps(q) + "\n" for q in picked))
     rows = []
     for i, q in enumerate(picked, 1):
-        img = root / q["image"]
+        img = Path(q["image_path"])
         nums = {"left_right": f"横向像素中心：{q['a']['name']} {q['a']['cx']:.0f}，{q['b']['name']} {q['b']['cx']:.0f}（图宽 256）",
                 "near_far": f"到相机的深度中位数：{q['a']['name']} {q['a']['depth']:.2f} 米，{q['b']['name']} {q['b']['depth']:.2f} 米",
                 "front_back": f"沿机器人前向的坐标：{q['a']['name']} {q['a']['forward']:.2f} 米，{q['b']['name']} {q['b']['forward']:.2f} 米"}[q["kind"]]
@@ -361,7 +369,7 @@ def main(argv=None) -> int:
     g.add_argument("--out", required=True)
     g.add_argument("--rng-seed", type=int, default=0)
     s = sub.add_parser("samples")
-    s.add_argument("--qa", required=True)
+    s.add_argument("--qa", nargs="+", required=True, help="candidates.jsonl of one or more generate folders")
     s.add_argument("--n", type=int, default=20)
     s.add_argument("--out", required=True)
     s.add_argument("--rng-seed", type=int, default=0)
