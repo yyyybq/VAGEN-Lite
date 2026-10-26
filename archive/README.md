@@ -503,3 +503,24 @@
 | scripts/check_qwen3_vl_env.py | archive/side_models/scripts/ | 2026-10-06 | Qwen3-VL 环境检查，只被上面的迁移说明引用 |
 
 README、`docs/active_spatial.md`、`docs/active_spatial_end_to_end.md` 里指向这些文档的链接已改到归档位置。
+
+## 逐文件清单（第三批，2026-10-26，冻结期代码搬动第二批：SenseNova-U1 适配代码）
+
+| 原路径 | 现位置 | 最后提交 | 说明 |
+| --- | --- | --- | --- |
+| vagen/models/sensenova_u1_plugin.py | archive/side_models/sensenova_u1/ | 2026-08-31 | vLLM 插件；原位置留一个什么都不注册的同名空壳，见下 |
+| vagen/models/sensenova_u1_processor.py | archive/side_models/sensenova_u1/ | 2026-08-31 | 图像处理与占位符展开 |
+| vagen/models/sensenova_u1_register.py | archive/side_models/sensenova_u1/ | 2026-08-31 | Transformers 注册 |
+| vagen/models/sensenova_u1_vllm.py | archive/side_models/sensenova_u1/ | 2026-08-31 | vLLM 模型类 |
+| vagen/models/u1_neo_compat.py | archive/side_models/sensenova_u1/ | 2026-08-31 | NEO 兼容层 |
+
+同一批从保留代码里删掉了只在 SenseNova-U1 检查点上才会执行的部分：
+
+- `vagen/agent_loop/agent_loop_no_concat.py`：`model_type == "neo_chat"` 时的处理器选择、多模态后处理里的 SenseNova-U1 分支和它专用的 `_expand_sensenova_u1_ids_and_mask`；
+- `vagen/agent_loop/gym_agent_loop_no_concat.py`：SenseNova-U1 的紧凑占位符分词，原来 `else` 里的两行原样保留；
+- `vagen/models/cambrian_plugin.py`：顺带注册的两个 SenseNova-U1 模型类；
+- `setup.py`：`sensenova_u1` 这个 vLLM 插件入口。
+
+**空壳的用处：** vagen-lite 环境是按旧的 `setup.py` 装的，环境里的插件登记还指向 `vagen.models.sensenova_u1_plugin`，vLLM 在每个进程里都会导入它。原位置的空壳让这次导入照常成功、什么都不注册。重装环境（`pip install -e .`）之后插件登记就没有了，那时可以删掉空壳。
+
+Cambrian-S 和 Qwen3-VL 的适配代码没有动。决定 D4 选的是 a，但 10 月 24 日起的模型线（`models` 分支）正在用它们训练 Qwen3-VL-8B 和 Cambrian-S-7B，去留要你重新定。

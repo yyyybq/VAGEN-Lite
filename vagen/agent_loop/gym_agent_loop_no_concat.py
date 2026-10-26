@@ -229,50 +229,10 @@ class GymAgentLoop(AgentLoopBase):
                     **self.apply_chat_template_kwargs,
                 ),
             )
-            # SenseNova-U1: keep compact ``<image>`` for vLLM PromptReplacement.
-            # Pre-expanding here removes the placeholder and makes vLLM assert
-            # "Failed to apply prompt replacement". FSDP expand happens later in
-            # agent_loop_no_concat postprocess.
-            is_u1 = (
-                hasattr(self.processor, "image_processor")
-                and "SenseNovaU1ImageProcessor"
-                in self.processor.image_processor.__class__.__name__
+            model_inputs = self.processor(
+                text=[raw_prompt], images=image_data, return_tensors="pt"
             )
-            if is_u1:
-                def _tokenize_u1_compact(prompt: str):
-                    from vagen.models.sensenova_u1_processor import (
-                        IMAGE_TOKEN,
-                        locate_image_placeholder,
-                    )
-
-                    ids = self.tokenizer.encode(prompt, add_special_tokens=False)
-                    bare = self.tokenizer.encode(IMAGE_TOKEN, add_special_tokens=False)
-                    # Normalize BPE-fused ``<image>\n\n`` -> bare ``<image>`` + rest
-                    # so vLLM string/token target ``<image>`` can match.
-                    out: list[int] = []
-                    rest = ids
-                    while True:
-                        idx, span, prefix, suffix = locate_image_placeholder(
-                            rest, self.tokenizer
-                        )
-                        if idx < 0:
-                            out.extend(rest)
-                            break
-                        out.extend(rest[:idx])
-                        out.extend(prefix)
-                        out.extend(bare)
-                        out.extend(suffix)
-                        rest = rest[idx + span :]
-                    return out
-
-                agent_data.turn_prompt_ids = await self.loop.run_in_executor(
-                    None, lambda: _tokenize_u1_compact(raw_prompt)
-                )
-            else:
-                model_inputs = self.processor(
-                    text=[raw_prompt], images=image_data, return_tensors="pt"
-                )
-                agent_data.turn_prompt_ids = model_inputs.pop("input_ids").squeeze(0).tolist()
+            agent_data.turn_prompt_ids = model_inputs.pop("input_ids").squeeze(0).tolist()
         else:
             if image_data:
                 raise ValueError("Environment returned images but `processor` is None.")

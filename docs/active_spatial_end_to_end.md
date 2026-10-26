@@ -67,12 +67,12 @@ QA 与轨迹是两个监督分支，不强制要求先 QA、再轨迹。默认�
 
 ## 其他模型路径
 
-主线用 **Qwen2.5-VL** 贯穿混合 SFT、Active Spatial RL 和 StarVLA，正式实验用 7B。下面两条旁支已按决定 D4 归档：文档在 `archive/side_models/docs/`，适配代码 `vagen/models/` 等第十一轮结束后随代码搬动一起归档。它们**不能直接进入当前 QwenOFT / RLinf 动作头**：
+主线用 **Qwen2.5-VL** 贯穿混合 SFT、Active Spatial RL 和 StarVLA，正式实验用 7B。下面两条旁支的文档已按决定 D4 归档到 `archive/side_models/docs/`。SenseNova-U1 的适配代码已归档到 `archive/side_models/sensenova_u1/`；Cambrian-S 的适配代码留在 `vagen/models/`，因为 10 月 24 日起的模型线在用它。它们**不能直接进入当前 QwenOFT / RLinf 动作头**：
 
 | 模型 | 仓库入口 | 外部依赖（不随 Git 分发） |
 | --- | --- | --- |
 | Cambrian-S 7B | [接入说明](../archive/side_models/docs/model_backbone_integration.md)、[新机器 smoke](../archive/side_models/docs/cambrian_s_new_server_smoke_handoff.md)、[实验记录](../archive/side_models/docs/cambrian_iteration.md)、`vagen/models/cambrian_*.py`、`examples/train/active_spatial/experiments/c8_fwdfirst_rewscale.sh` | 设置 `CAMBRIAN_SRC` 指向外部 Cambrian-S 源码，并准备独立 checkpoint |
-| SenseNova-U1 | [接入说明](../archive/side_models/docs/sensenova_u1_active_spatial.md)、`vagen/models/sensenova_u1_*.py`、`vagen/models/u1_neo_compat.py`、[1-step smoke](../examples/train/active_spatial/experiments/u1_fwdfirst_rewscale_smoke.sh)、[50-step 诊断](../examples/train/active_spatial/experiments/u1_fwdfirst_rewscale_50step.sh) | 设置 `SENSENOVA_U1_SRC` / `SENSENOVA_U1_MODEL_PATH` |
+| SenseNova-U1 | [接入说明](../archive/side_models/docs/sensenova_u1_active_spatial.md)、`archive/side_models/sensenova_u1/`（已归档）、[1-step smoke](../examples/train/active_spatial/experiments/u1_fwdfirst_rewscale_smoke.sh)、[50-step 诊断](../examples/train/active_spatial/experiments/u1_fwdfirst_rewscale_50step.sh) | 设置 `SENSENOVA_U1_SRC` / `SENSENOVA_U1_MODEL_PATH` |
 
 StarVLA 与 RLinf 也不在父仓库里：clone 到 `third_party/starVLA` 和 `third_party/RLinf`（该目录被 `.gitignore`），再按 [机器人交接](active_spatial_pipeline_robot.md) 打补丁。
 
