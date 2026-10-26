@@ -30,7 +30,7 @@ def test_questions_carry_the_right_letter_whatever_the_option_order():
         assert q["options"][" AB".index(q["answer"]) - 1] == "mug" and q["answer_text"] == "mug"
         assert "wrist camera" in q["prompt"] and q["prompt"].endswith("Answer with the letter of the correct option only.")
         q = X.question("front_back", ent("bowl", forward=0.2), ent("stove", forward=0.9), "robot0_agentview_left", rng)
-        assert q["answer_text"] == "behind it" and q["options"][" AB".index(q["answer"]) - 1] == "behind it"
+        assert q["answer_text"] == "stove" and q["options"][" AB".index(q["answer"]) - 1] == "stove"  # farther ahead
     assert X.question("left_right", ent("mug", cx=100), ent("sink", cx=110), "robot0_agentview_left", random.Random(0)) is None
 
 

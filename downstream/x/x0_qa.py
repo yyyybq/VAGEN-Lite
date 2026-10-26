@@ -16,7 +16,7 @@ entities of that image are used.  Three kinds of two-choice question per image:
     left_right   is A left or right of B in this image            |x centroid difference| >= LR_PIXELS
     near_far     which of A, B is closer to this camera           depth medians differ >= NF_METERS and >= NF_RATIO
     front_back   with the robot's facing direction as forward,    forward coordinates differ >= FB_METERS
-                 is A in front of B or behind it                  (forward: the left agent-view camera's heading)
+                 which of A, B is farther forward                 (forward: the left agent-view camera's heading)
 The option order is drawn at random, so A and B are right about equally often.  Writes OUT/images/*.png,
 OUT/candidates.jsonl (every question that passes the thresholds, with the numbers behind its answer) and
 OUT/scenes.jsonl (per reset: instruction, visible entities per camera, whether the render equals the observation).
@@ -113,13 +113,13 @@ def question(kind: str, a: dict, b: dict, camera: str, rng: random.Random):
         text = f"Which is closer to the camera that took this image: the {an} or the {bn}?"
         zh = f"{an} 和 {bn}，哪个离拍这张图的相机更近？"
         choices = [an, bn]
-    else:
+    else:  # "A in front of B" reads both ways (nearer the viewer, or farther ahead): ask which is farther ahead
         truth = answer_front_back(a, b)
-        text = (f"Taking the direction the robot is facing as forward, is the {an} in front of the {bn} "
-                f"or behind it?")
-        zh = f"以机器人面对的方向为前，{an} 在 {bn} 的前面还是后面？"
-        choices = ["in front of it", "behind it"]
-        truth = None if truth is None else ("in front of it" if truth == "front" else "behind it")
+        text = (f"Taking the direction the robot is facing as forward, which is farther forward, that is, farther "
+                f"from the robot in that direction: the {an} or the {bn}?")
+        zh = f"以机器人面对的方向为前，{an} 和 {bn} 哪个更靠前（沿这个方向离机器人更远）？"
+        choices = [an, bn]
+        truth = None if truth is None else (an if truth == "front" else bn)
     if truth is None:
         return None
     if rng.random() < 0.5:
