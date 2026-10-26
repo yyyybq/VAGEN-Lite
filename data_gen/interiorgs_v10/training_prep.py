@@ -507,6 +507,12 @@ def design_variant_overrides(args: argparse.Namespace, env: Dict[str, Any]) -> D
         out["milestone_rewards"] = _three_numbers(args.milestone_rewards, "--milestone-rewards")
     if getattr(args, "progress_reward_scale", None) is not None:
         out["potential_field_reward_scale"] = float(args.progress_reward_scale)
+    if version == "optimal" or getattr(args, "distance_tables", None):  # round 13: the optimal dense reward (B)
+        if version != "optimal" or not getattr(args, "distance_tables", None):
+            raise SystemExit("--progress-version optimal and --distance-tables go together")
+        if not Path(args.distance_tables).is_dir():
+            raise SystemExit(f"--distance-tables {args.distance_tables} is not a directory")
+        out["distance_tables_dir"] = str(Path(args.distance_tables).resolve())
     if out and not env.get("enable_potential_shaping_reward"):
         raise SystemExit("the progress options change the dense reward: give a dense --reward-preset (dense, D_cond)")
     if ("progress_weights" in out or "milestone_rewards" in out) and version == "product":
@@ -1108,9 +1114,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--invalid-penalty", type=float, default=None,
                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
-    c.add_argument("--progress-version", default=None, choices=["grouped_gated", "grouped_soft"],
+    c.add_argument("--progress-version", default=None, choices=["grouped_gated", "grouped_soft", "optimal"],
                    help="round 12 freeze, dense-reward variant V3: the grouped progress with the hard gate (D_cond's) "
-                        "or the soft gate (relation group times the frame group's continuous score)")
+                        "or the soft gate (relation group times the frame group's continuous score); round 13 (B): "
+                        "optimal, the progress from the remaining minimum number of actions (needs --distance-tables)")
+    c.add_argument("--distance-tables", default=None,
+                   help="round 13 (B): the directory of per-task distance tables (distance_table.py build) the "
+                        "optimal progress reads")
     c.add_argument("--progress-weights", default=None,
                    help="round 12 freeze, variants V1 / V2: the grouped progress's frame, face and relation weights, "
                         "e.g. 0.15,0.15,0.70 (default 0.25,0.25,0.5)")

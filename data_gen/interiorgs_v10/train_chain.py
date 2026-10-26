@@ -1070,6 +1070,7 @@ class Chain:
                               ("group_filter", "--group-filter"), ("keep_std_threshold", "--keep-std-threshold"),
                               ("keep_std_floor", "--keep-std-floor"),
                               ("progress_version", "--progress-version"),
+                              ("distance_tables", "--distance-tables"),  # round 13 (B): the optimal progress
                               ("progress_reward_scale", "--progress-reward-scale"),
                               ("progress_adv_weight", "--progress-adv-weight"),
                               ("kl_loss_coef", "--kl-loss-coef"), ("actor_lr", "--actor-lr"),

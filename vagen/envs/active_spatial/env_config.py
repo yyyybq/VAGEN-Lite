@@ -99,6 +99,12 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # progress version; None: the potential reward as before).
     progress_weights: Optional[List[float]] = None
     milestone_rewards: Optional[List[float]] = None
+    # Round 13 (the user's 12th supplement, section 3, the optimal dense reward), default off: progress_version
+    # "optimal" makes the shaping score phi = 1 - d / (d_star + optimal_progress_slack), clipped to [0, 1], 1 on
+    # success, from the task's distance table in distance_tables_dir (data_gen.interiorgs_v10.distance_table:
+    # <task_id>.npz, d = the pose's remaining minimum number of actions; a pose missing from the table counts 0).
+    distance_tables_dir: Optional[str] = None
+    optimal_progress_slack: int = 4
     potential_field_gamma: float = 1.0   # ★ Ng1999 γ for "potential" mode. 1.0 ⇒ equivalent to "delta".
     # Reward-only ablation switches.  These do not disable the potential-field
     # scorer, canonical gate, success decision, or termination.  Defaults keep

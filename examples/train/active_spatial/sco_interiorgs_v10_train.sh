@@ -18,6 +18,9 @@
 #   rl-resume-check RUN RL_DIR          1 card : a trial config (rl-config --trial) run to update 2, then a second
 #                                        process that must resume from update 2 and stop after 3; checks that and
 #                                        the retention rule (kept: updates 2 and 3) in RUN/logs/resume_check.json
+#   distance-tables RUN ARG ...         1 card (its 14 vCPUs; the GPU is not used): round 13's per-task distance
+#                                        tables, "python -m data_gen.interiorgs_v10.distance_table build --gs-root
+#                                        <GS_ROOT> ARG ..." (e.g. --rows R --out D --shard 0/8 --workers 13)
 #
 # Environment setup as in sco_dense_score_reward_only_parallel.sh. sco jobs run as root: outputs are handed
 # back to the owner of RUN on exit (and the SFT model / evaluation results, written outside RUN).
@@ -175,6 +178,10 @@ PY
     export V10_RAY_TEMP_DIR=/tmp/v10_ray_$$
     "${PY}" -m vagen.interiorgs_v10_ppo --config "${RL}/ppo.yaml" --endpoint "${ENDPOINT}"
     touch "${RUN}/STOP_RENDERER"
+    ;;
+  distance-tables)
+    # round 13 (the user's 12th supplement, sections 2.2 and 3): CPU work on a one-card job's 14 vCPUs
+    "${PY}" -m data_gen.interiorgs_v10.distance_table build --gs-root "${GS_ROOT}" "${@:3}"
     ;;
   *)
     echo "unknown mode ${MODE}" >&2

@@ -1471,9 +1471,22 @@ class ActiveSpatialEnv(BaseEnv):
         pose = self.view_engine.get_pose()
         if self.config.get("r1_legacy_success", False):
             return score_canonical_task(self.current_item, pose)
-        return score_with_visibility(self.current_item, pose, self._visibility_occluders(),
-                                     progress_version=self.config.get("progress_version", "product"),
-                                     progress_weights=self.config.get("progress_weights", None))
+        version = self.config.get("progress_version", "product")
+        metric = score_with_visibility(self.current_item, pose, self._visibility_occluders(),
+                                       progress_version="product" if version == "optimal" else version,
+                                       progress_weights=self.config.get("progress_weights", None))
+        if version == "optimal":  # round 13: the shaping score from the task's distance table (success unchanged)
+            cache = getattr(self, "_distance_tables", None)
+            if cache is None:
+                from data_gen.interiorgs_v10.distance_table import TableCache
+
+                if not self.config.get("distance_tables_dir"):
+                    raise ValueError("progress_version 'optimal' needs distance_tables_dir")
+                cache = self._distance_tables = TableCache(self.config.get("distance_tables_dir"))
+            opt = cache.progress(self.current_item, pose, bool(metric["success"]),
+                                 int(self.config.get("optimal_progress_slack", 4)))
+            metric = {**metric, **opt, "shaping_score": opt["optimal_progress"], "progress_version": "optimal"}
+        return metric
 
     def _visibility_occluders(self) -> OccluderSet:
         """Occluders of the current scene (labels.json boxes + structure walls), cached per scene."""
