@@ -1,11 +1,11 @@
 # 磁盘配额线状态（唯一的状态文档）
 
-最后更新：2026-10-26 08:50 UTC（第二步：第一、二批已执行）。
+最后更新：2026-10-26 09:30 UTC（第一、二、三批已执行；保留规则和标志约定已批；监控带标志在跑）。
 
 这条线管 `/mnt/umm/users/yinbaiqiao`（个人目录，配额 22 TB）：量、预测、提方案、按批准的清单执行，默认只读。
 
-- 报告：[reports/](reports/)。第一步报告是 [reports/DISK_INVENTORY_20261026.md](reports/DISK_INVENTORY_20261026.md)；第一、二批的执行记录是 [reports/CLEANUP_20261026.md](reports/CLEANUP_20261026.md)。
-- 保留规则：[RETENTION_POLICY.md](RETENTION_POLICY.md)；"磁盘紧张就不提交"方案：[STOP_FLAG_PROPOSAL.md](STOP_FLAG_PROPOSAL.md)（都等你批）。
+- 报告：[reports/](reports/)。第一步报告是 [reports/DISK_INVENTORY_20261026.md](reports/DISK_INVENTORY_20261026.md)；第一到三批的执行记录是 [reports/CLEANUP_20261026.md](reports/CLEANUP_20261026.md)。
+- 保留规则：[RETENTION_POLICY.md](RETENTION_POLICY.md)；"磁盘紧张就不提交"约定：[STOP_FLAG_PROPOSAL.md](STOP_FLAG_PROPOSAL.md)（都已批）；给各线的转告：[RELAY_20261026.md](RELAY_20261026.md)。
 - 脚本：仓库根目录 `disk/`，说明见 [README.md](README.md)。批次说明（批准了删什么）：[batches/](batches/)。
 - worktree：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-disk`，本地分支 `disk`，从 `origin/main` `00363333` 开出，不跟踪远端，不推送。
 - 原始结果和记录：`/mnt/umm/users/yinbaiqiao/disk_runs/`（批次记录在 `disk_runs/batches/<批次>/`，核查记录在 `disk_runs/audit/<批次>/`）。
@@ -13,11 +13,14 @@
 ## 1. 现在在哪一步
 
 - 第一步（盘点与预测）：完成，你 10-26 已答复。
-- 第二步（按批准的清单清理、保留规则、标志文件方案）：第一、二批已执行，共腾出 3,571.9 GB；保留规则和标志文件方案已写好，等你批；你批了但核查没过的 0.54 TB 交回下游线，0.06 TB 等主线确认。
+- 第二步（按批准的清单清理、保留规则、标志文件方案）：
+  - 第一、二、三批已执行，共腾出 3,864.0 GB（第三批是 SenseNova-U1 冒烟检查点，root 任务 `pt-1r0uuww1` 删除）。
+  - 保留规则和标志约定你已批，转告的话在 [RELAY_20261026.md](RELAY_20261026.md)。
+  - 你批了但核查没过的 0.54 TB 交回下游线，0.06 TB 等主线确认。
 - 第 6 项（probe_spatial、SenseNova-U1、Consistency 纳入这条线）：盘点完成，报告 [reports/SCOPE6_INVENTORY_20261026.md](reports/SCOPE6_INVENTORY_20261026.md)。
   - 3.6 TB 里约 1.81 TB 是公开下载（决定 3 不删），约 1.68 TB 是 probe_spatial 发布要用的，约 0.26 TB 是 root 属主的派生特征。
-  - 唯一候选是 SenseNova-U1 的冒烟检查点 292.1 GB（root 属主，删要提交 root sco 任务，等你批）。
-- 第三步（常驻监控）：按你的决定 5 提前开了，10-26 07:37 起在跑。
+  - 唯一候选是 SenseNova-U1 的冒烟检查点 292.1 GB（root 属主），你批了，已作为第三批删除。
+- 第三步（常驻监控）：10-26 07:37 起在跑；09:19 起带停止提交标志（`--stop-flag`）。
 
 ## 2. 汇报表
 
@@ -29,9 +32,9 @@
 | 已用（配额表） | 12 TB | 10-26 08:44 | 两位有效数字，±0.5 TB |
 | 剩余 | 10 TB | 10-26 08:44 | 22 − 配额表读数 |
 | 已用（文件系统统计） | 9.73 TB | 10-26 08:44 | 只看变化趋势 |
-| 本步已腾出 | 3.57 TB | 10-26 08:28 | 第一批 2,976.9 GB、第二批 595.0 GB |
-| 7 天内最低剩余（情形 A / B） | 8.33 / 7.36 TB | 预测于 10-26 08:44 | 都不会碰 3 TB 线 |
-| 监控 | 在跑，PID 3053041 | 10-26 07:37 起 | 见第 6 节 |
+| 本步已腾出 | 3.86 TB | 10-26 09:24 | 第一批 2,976.9 GB、第二批 595.0 GB、第三批 292.1 GB |
+| 7 天内最低剩余（情形 A / B） | 8.33 / 7.36 TB | 预测于 10-26 08:44 | 都不会碰 3 TB 线；第三批又多腾出 0.29 TB |
+| 监控 | 在跑，PID 3214666，带停止提交标志 | 10-26 09:19 起 | 见第 6 节 |
 
 ## 3. 你的决定（10-26）
 
@@ -41,9 +44,20 @@
 | 2 | 甲："满 7 天即可删"提前删 | 主线组合链续训状态在第一批；RL-SPEED-1/2 在第二批；`evals_src` 因下游看板每轮都会读、RLINF-SMOKE-1 是下游导出测试脚本的默认输入，交给下游线处理 |
 | 3 | 公开下载的模型和数据集不删 | "立刻可删"清单（0.15 TB）作废；RoboCasa365 的 `pretrain` 数据同样不删 |
 | 4 | 不问管理员，按 22 TB 用 | 剩余按 22 − 配额表读数算；文件系统统计只看趋势 |
-| 5 | 甲：现在开监控 | 07:37 已开（第 6 节）；不写停止提交的标志 |
-| 6 | probe_spatial、SenseNova-U1、Consistency 纳入这条线 | 盘点完成（`reports/SCOPE6_INVENTORY_20261026.md`）；两项等你决定 |
+| 5 | 甲：现在开监控 | 07:37 已开（第 6 节）；停止提交标志在第二轮批了以后 09:19 加上 |
+| 6 | probe_spatial、SenseNova-U1、Consistency 纳入这条线 | 盘点完成（`reports/SCOPE6_INVENTORY_20261026.md`）；其中两项在第二轮定了 |
 | 7 | （10-22 报错）没有答复 | 待你告诉在哪看到的 |
+
+10-26 第二轮（清理报告和第 6 项盘点之后），六项都选甲：
+
+| 编号 | 决定 | 执行 |
+| --- | --- | --- |
+| 保留规则 | 批，转给主线、模型线、下游 | 转告的话写在 `RELAY_20261026.md`，由你转达 |
+| 标志约定 | 批：1.5 TB 写、3 TB 删，评测不拦 | 监控 09:19 起带 `--stop-flag`；各线接入由你转达 |
+| 交回下游的 0.54 TB | 转告下游，改好代码后它自己删或叫磁盘线删 | 写在 `RELAY_20261026.md` |
+| 主线 3B 试跑 | 问主线，不要就由磁盘线归档后删 | 写在 `RELAY_20261026.md` |
+| SenseNova-U1 冒烟检查点 | 先上传 AOSS 核对，再用 1 卡 root sco 任务删 | 已完成：第三批，root 任务 `pt-1r0uuww1`，09:24 删完 292.1 GB |
+| InsScene-15K 的 root 本地特征镜像 | 不动 | — |
 
 另外：下游线 07:14–07:16 按你在那边给的决定，自己删了 11 份已训完实验的全状态（1,296.8 GB，记录 `downstream_runs/logs/delete_full_states_20261026.txt`，没有上传 AOSS），也就是我清单里的 5.2.2，从清单划掉。
 
@@ -55,7 +69,7 @@
 | b2_20261026 | RL-SPEED-1、RL-SPEED-2 的检查点 471.8 GB；StarVLA NavigateKitchen 检查点 123.3 GB | 105 | 595.0 GB | 08:27 完成，0 个不符 | 通过（`disk_runs/audit/b2/CONCLUSION.md`） | 08:28 完成 | 595.0 GB |
 | 交给下游 | E1 权重副本 134.8 GB、E0 检查点 269.6 GB、RLINF-SMOKE-1 检查点 134.8 GB | — | 539.2 GB | — | 下游代码会读，未通过 | — | — |
 | 等主线确认 | 两次 3B 试跑 62.6 GB | — | 62.6 GB | — | — | — | — |
-| 等你批 root 任务 | SenseNova-U1 冒烟检查点 `SenseNova-U1/training/RUN/sensenovau1_8b_it2i_smoke3/`（root 属主，无引用） | 87 | 292.1 GB | — | 无引用 | — | — |
+| b3_20261026 | SenseNova-U1 冒烟检查点 `SenseNova-U1/training/RUN/sensenovau1_8b_it2i_smoke3/`（root 属主） | 87 | 292.1 GB | 09:23 完成，0 个不符 | 通过（`disk_runs/audit/b3/CONCLUSION.md`） | 09:24 由 1 卡 root 任务 `pt-1r0uuww1` 删除（`disk/submit_root_delete.sh`） | 292.1 GB |
 | AOSS 测速对象 | `disk_line_speedtest_20261026/base7b_shard1.safetensors` | 1 | 3.9 GB | — | — | 08:30 已删（记录 `disk_runs/logs/aoss_speedtest_object_deleted.txt`） | 不占配额 |
 
 ## 5. 预测
@@ -75,12 +89,12 @@
 - 每天一次按一级目录记大小，写 `docs/disk/daily_top.csv` 和 `docs/disk/daily_growth.md`（哪条线涨得最快）；
 - 事件记在 `disk_runs/monitor_events.jsonl`。
 
-不写停止提交的标志（等 `STOP_FLAG_PROPOSAL.md` 批了再开）。本机另有一个监看，每 5 分钟读一次事件，有警告就报你；它随本会话停止，监控本身不受影响。
+10-26 09:19 起带 `--stop-flag`：剩余低于 1.5 TB 写 `disk_runs/flags/STOP_SUBMIT_DISK_LOW`，回到 3 TB 以上删掉（你已批的约定，见 `STOP_FLAG_PROPOSAL.md`）。本机另有一个监看，每 5 分钟读一次事件，有警告就报你；它随本会话停止，监控本身不受影响。
 
 断了用下面的命令重启（在 worktree 里执行）：
 
 ```bash
-bash disk/monitor.sh start
+bash disk/monitor.sh start --stop-flag
 ```
 
 ```bash
@@ -92,6 +106,8 @@ bash disk/monitor.sh stop
 ```
 
 ## 7. 要转告的事（不改其他线的文件）
+
+给各线的完整转告（可以直接转发）在 [RELAY_20261026.md](RELAY_20261026.md)，下面是要点。
 
 - 下游线：
   - 磁盘线已删 RL-SPEED-1、RL-SPEED-2 的检查点（先传了 AOSS，目录里留了说明文件）。
@@ -117,7 +133,7 @@ bash disk/monitor.sh stop
   2. 用整理窗口的 `scripts/cluster/audit_archived_paths.sh` 加补查，确认没人读；
   3. 删前再核对文件没变，打印完整列表和总大小再删，留逐文件记录（`disk/archive_delete.py delete --yes`）。
 - 不碰的：依赖清单和各线 STATUS 里标为在用的目录、root 属主的、别人名下的、在跑的任务。不移动目录。代码会读的，即使在批准的清单里也先不删，交回那条线。
-- 不用 GPU，不提交 sco 任务。
+- 不用 GPU，不提交 sco 任务；例外是你批过的 root 属主目录删除，用 1 卡 root 任务（`disk/submit_root_delete.sh`，先查 `PAUSE_SUBMISSIONS`），删完删掉任务记录。
 - 递归扩展属性由服务器现算：一次只发一个查询；绝不对 `/mnt/umm` 或 `/mnt/umm/users` 求和。
 - AOSS 的 `list_objects_v2` 翻页不可靠，列对象一律用 v1 的 `Marker` / `NextMarker`。
 - 通过 ssh 传给集群的命令里不能有英文撇号（会截断单引号）；带文字的文件先在本地写好再传。

@@ -9,7 +9,9 @@ Every --every seconds (default 1800):
   - remaining = 22 TB - the quota table's reading (the user's decision of 2026-10-26: "按22T正常用");
   - level 0: remaining >= 3 TB; level 1: below 3 TB; level 2: below 1.5 TB. On entering level 1 or 2 it writes the
     warning file disk_runs/WARN_DISK_LOW (what, when, numbers) and an event; when the level falls back to 0 it
-    removes that file (its own) and writes an event. It never writes the stop-submitting flag (not approved yet).
+    removes that file (its own) and writes an event. With --stop-flag (approved by the user on 2026-10-26) it also
+    writes disk_runs/flags/STOP_SUBMIT_DISK_LOW below 1.5 TB remaining and removes it at 3 TB or more; the lines'
+    submission code checks that file (docs/disk/STOP_FLAG_PROPOSAL.md).
 Once a day (the first pass after --daily-hour UTC, and at start-up if there is no snapshot yet) it reads the
 recursive byte count of every folder directly under the user folder, one at a time, appends them to
 docs/disk/daily_top.csv and rewrites docs/disk/daily_growth.md (growth per folder and per line since the previous
@@ -96,6 +98,18 @@ def one_pass(args, state):
         event("level_down", level=lv, remaining_TB=round(remaining, 1), table_used=u_disp)
         if lv == 0 and os.path.exists(warn):
             os.remove(warn)  # the monitor's own warning file
+    if args.stop_flag:  # the user's approval of 2026-10-26 (STOP_FLAG_PROPOSAL.md): set below 1.5 TB, clear at 3 TB
+        flag = os.path.join(RUNS, "flags", "STOP_SUBMIT_DISK_LOW")
+        if remaining < 1.5 and not os.path.exists(flag):
+            os.makedirs(os.path.dirname(flag), exist_ok=True)
+            with open(flag, "w") as f:
+                f.write(json.dumps({"utc": utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "table_used": u_disp,
+                                    "remaining_TB": round(remaining, 1), "set_below_TB": 1.5, "cleared_at_TB": 3.0,
+                                    "by": "disk line monitor (disk/monitor.py)"}) + "\n")
+            event("flag_set", remaining_TB=round(remaining, 1), table_used=u_disp)
+        elif remaining >= 3.0 and os.path.exists(flag):
+            os.remove(flag)  # the monitor's own flag
+            event("flag_cleared", remaining_TB=round(remaining, 1), table_used=u_disp)
     if u_disp != state.get("table_used"):
         event("table_change", old=state.get("table_used"), new=u_disp, rfbytes_TB=rb)
     state.update(level=lv, table_used=u_disp, last_pass=utcnow().isoformat())
@@ -157,6 +171,8 @@ def main():
     ap.add_argument("--every", type=int, default=1800)
     ap.add_argument("--no-xattr", action="store_true")
     ap.add_argument("--daily-hour", type=int, default=6)
+    ap.add_argument("--stop-flag", action="store_true",
+                    help="write disk_runs/flags/STOP_SUBMIT_DISK_LOW below 1.5 TB remaining, remove it at 3 TB or more")
     ap.add_argument("--csv", default=os.path.join(HERE, "..", "docs", "disk", "usage.csv"))
     ap.add_argument("--daily-csv", default=os.path.join(HERE, "..", "docs", "disk", "daily_top.csv"))
     ap.add_argument("--daily-md", default=os.path.join(HERE, "..", "docs", "disk", "daily_growth.md"))

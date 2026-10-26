@@ -61,7 +61,7 @@ def key_of(path):
     return "%s/%s" % (PREFIX, path[len(U) + 1:])
 
 
-def enumerate_item(item):
+def enumerate_item(item, include_root=False):
     root = item["root"].rstrip("/")
     inc = [re.compile(r) for r in item.get("include", [])]
     exc = [re.compile(r) for r in item.get("exclude", [])]
@@ -81,7 +81,8 @@ def enumerate_item(item):
                 continue
             row = {"item": item["id"], "path": p, "bytes": st.st_size, "mtime": st.st_mtime, "uid": st.st_uid,
                    "nlink": st.st_nlink}
-            (files if st.st_uid == ME else left).append(row)
+            mine = st.st_uid == ME or (include_root and st.st_uid == 0)
+            (files if mine else left).append(row)
     return files, left
 
 
@@ -120,7 +121,7 @@ def show(rows, title):
 def cmd_plan(spec, run, args):
     rows, left = [], []
     for item in spec["items"]:
-        f, l = enumerate_item(item)
+        f, l = enumerate_item(item, include_root=args.include_root)
         rows += f
         left += l
     with open(os.path.join(run, "plan.tsv"), "w") as f:
@@ -264,6 +265,15 @@ def cmd_delete(spec, run, args):
                     f.write(it["marker"].rstrip("\n") + "\nAOSS: fj:s3://%s/%s/<same path below /mnt/umm/users/yinbaiqiao>; "
                             "records: %s and fj:s3://%s/%s/disk_line_manifests/%s/\n" % (BUCKET, PREFIX, run, BUCKET, PREFIX, spec["batch"]))
     put_meta(c, run, spec, ["deleted.tsv"])
+    if os.getuid() == 0:  # run by a root sco job: hand the records and markers back to the folder owner
+        st = os.stat(os.path.join(U, "disk_runs"))
+        owned = [os.path.join(run, n) for n in os.listdir(run)]
+        for it in spec["items"]:
+            for d in it.get("marker_dirs", [it["root"]]):
+                owned.append(os.path.join(d, it.get("marker_name", "DELETED_TO_AOSS.txt")))
+        for p in owned:
+            if os.path.exists(p):
+                os.chown(p, st.st_uid, st.st_gid)
     print("deleted %d files, %.1f GB; record %s (copy on AOSS)" % (len(rows), freed / 1e9, log_path))
 
 
@@ -274,6 +284,8 @@ def main():
     ap.add_argument("--files", type=int, default=8, help="files uploaded at once")
     ap.add_argument("--threads", type=int, default=8, help="multipart threads per file")
     ap.add_argument("--yes", action="store_true")
+    ap.add_argument("--include-root", action="store_true",
+                    help="plan: also take root-owned files (readable, so they can be archived; only a root job can delete them)")
     args = ap.parse_args()
     for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
         os.environ.pop(k, None)

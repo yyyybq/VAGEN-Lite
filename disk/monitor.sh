@@ -16,7 +16,8 @@ case "${1:-status}" in
     shift
     if running; then echo "already running: pid $(cat "$PIDF")"; exit 0; fi
     (cd "$HERE/.." && setsid nohup "$PY" -u "$HERE/monitor.py" "$@" >> "$RUNS/logs/monitor.log" 2>&1 < /dev/null &)
-    sleep 2; running && echo "started: pid $(cat "$PIDF")" || { echo "failed to start, see $RUNS/logs/monitor.log"; exit 1; } ;;
+    old=$(cat "$PIDF" 2>/dev/null); for i in $(seq 1 15); do sleep 1; [ "$(cat "$PIDF" 2>/dev/null)" != "$old" ] && running && break; done
+    running && echo "started: pid $(cat "$PIDF")" || { echo "failed to start, see $RUNS/logs/monitor.log"; exit 1; } ;;
   stop)
     if running; then kill "$(cat "$PIDF")" && echo "stop sent to pid $(cat "$PIDF")"; else echo "not running"; fi ;;
   status)

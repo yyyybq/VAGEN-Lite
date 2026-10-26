@@ -1,0 +1,8 @@
+{
+ "batch": "b3_20261026",
+ "approved": "the user, 2026-10-26 in the disk line: scope-6 decision 1 = A (SenseNova-U1 smoke checkpoint: archive to AOSS as the user, then one 1-card root sco job deletes it by the list). Report: docs/disk/reports/SCOPE6_INVENTORY_20261026.md.",
+ "items": [
+  {"id": "s6-sensenova-smoke3", "root": "/mnt/umm/users/yinbaiqiao/SenseNova-U1/training/RUN/sensenovau1_8b_it2i_smoke3",
+   "marker": "SenseNova-U1 8B it2i smoke test 3 (2026-07-26): every file was archived to AOSS and deleted on 2026-10-26 by the disk line (the user's scope-6 decision 1 = A of 2026-10-26), through a root sco job because the files were root-owned. No code or plan referred to this run."}
+ ]
+}

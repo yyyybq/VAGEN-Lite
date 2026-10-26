@@ -3,11 +3,10 @@
 
 Three numbers and where each comes from:
 
-  quota      `sco afs dir-quota list -i VOLUME`, the row /users/yinbaiqiao, column CAPACITY QUOTA.
-             The CLI prints it rounded to two significant digits ("22 TB"). The rule behind it is set in
-             whole TiB: every quota of the volume prints as 1.1 / 5.5 / 11 / 22 TB, i.e. 1 / 5 / 10 / 20 TiB
-             (1 TiB = 1.0995 TB), so "22 TB" is taken as 20 TiB = 21,990,232,555,520 bytes.
-             --quota-bytes overrides it (until the administrator confirms the exact figure).
+  quota      `sco afs dir-quota list -i VOLUME`, the row /users/yinbaiqiao, column CAPACITY QUOTA, taken as printed
+             ("22 TB" = 22e12 bytes; the user's decision 4 of 2026-10-26). The rule behind it is probably whole TiB
+             (every quota of the volume prints as 1.1 / 5.5 / 11 / 22 TB, i.e. 1 / 5 / 10 / 20 TiB, so the exact
+             figure may be 21.99e12); quota_bytes_from_display() gives that reading. --quota-bytes overrides.
   used       quarkfs's own count of the bytes below the folder, the extended attribute
              quarkfs.dir.rfbytes of /mnt/umm/users/yinbaiqiao (exact bytes; the server sums the tree when
              asked, about one to two minutes for 13.7 million files). The quota table's USED CAPACITY
@@ -70,7 +69,8 @@ def quota_bytes_from_display(display):
 def measure(fast=False, quota_override=None):
     t0 = time.time()
     q_disp, u_disp, files = quota_table_row()
-    quota = int(quota_override) if quota_override else quota_bytes_from_display(q_disp)
+    # the user's decision 4 of 2026-10-26: use the quota as the table prints it (22 TB), not the TiB reading
+    quota = int(quota_override) if quota_override else int(parse_size(q_disp))
     rfiles = None
     if fast:
         used, source = int(parse_size(u_disp)), "quota_table_rounded"
