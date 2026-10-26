@@ -18,7 +18,8 @@ kept, the final checkpoint evaluated inside the job), run by model_matrix/downst
 The record then has the downstream line's fields (segmented, full_state_interval, eval_points, injob_eval,
 repeat_final false: only their start B repeats its final evaluation) and the start's lock (the downstream line's
 verify_starts.fingerprint: index and config sha256, shard sizes and mtimes, and each shard's first and last 4 MiB
-when readable -- the Qwen3-VL shards are root-only), which ``--check-start EXP`` compares at the start of a job.
+when readable; for the root-only Qwen3-VL snapshot, every file's size, mtime and blob name), which
+``--check-start EXP`` compares at the start of a job.
 ``--qwenvl KEY=VALUE`` (repeatable) sets framework.qwenvl.KEY in the config, e.g. the Cambrian interface's
 ``cambrian_checkpointing=vision`` (model_matrix/downstream/starvla_cambrian.py).
 """
@@ -28,6 +29,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -54,15 +56,32 @@ def _verify_starts():
     return verify_starts
 
 
+def stat_lock(path: str) -> dict:
+    """Every file of a start folder by what a non-owner can see: size and mtime (through the symlink) and the
+    symlink's target -- in a Hugging Face cache snapshot the blob name, the content's sha256 for the weight files."""
+    root = Path(path)
+    files = {}
+    for p in sorted(root.iterdir()):
+        st = p.stat()
+        files[p.name] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns,
+                         "target": os.readlink(p) if p.is_symlink() else None}
+    return {"path": str(root), "stat_only": True, "files": files}
+
+
 def lock(path: str) -> dict:
-    """The downstream line's fingerprint of a start (deep when every shard is readable, else with the mtimes only)."""
+    """The downstream line's fingerprint of a start: deep when every shard is readable, else with the mtimes; when
+    not even the index is readable (the Qwen3-VL snapshot is root-only), stat_lock."""
     vs = _verify_starts()
     try:
         return vs.fingerprint(path, deep=True)
     except PermissionError:
+        pass
+    try:
         out = vs.fingerprint(path, deep=False)
-        out["shard_mtime_ns"] = {name: (Path(path) / name).stat().st_mtime_ns for name in out["shards"]}
-        return out
+    except PermissionError:
+        return stat_lock(path)
+    out["shard_mtime_ns"] = {name: (Path(path) / name).stat().st_mtime_ns for name in out["shards"]}
+    return out
 
 
 def check_start(exp_dir: Path) -> list:
@@ -71,6 +90,14 @@ def check_start(exp_dir: Path) -> list:
     locked = rec["start"].get("lock")
     if not locked:
         return ["the experiment has no start lock"]
+    if locked.get("stat_only"):
+        try:
+            now = stat_lock(locked["path"])["files"]
+        except Exception as exc:
+            return [f"{type(exc).__name__}: {exc}"]
+        old = locked["files"]
+        return [f"{name}: {old.get(name)} -> {now.get(name)}" for name in sorted(set(old) | set(now))
+                if old.get(name) != now.get(name)]
     vs = _verify_starts()
     deep = "shard_head_tail_sha256" in locked
     try:

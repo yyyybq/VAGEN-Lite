@@ -144,6 +144,20 @@ class DownstreamToolsTest(unittest.TestCase):
             self.assertTrue(any("size 100 -> 101" in p for p in M.check_start(exp)))
             (exp / "experiment.json").write_text(json.dumps({"start": {"path": str(start)}}))
             self.assertEqual(M.check_start(exp), ["the experiment has no start lock"])
+            # an unreadable index (the root-only Qwen3-VL snapshot): what stat sees, the blob names included
+            (start / "model-1.safetensors").unlink()
+            (start / "blob").write_bytes(b"z" * 7)
+            (start / "model-1.safetensors").symlink_to(start / "blob")
+            vs = M._verify_starts()
+            with mock.patch.object(vs, "fingerprint", side_effect=PermissionError("root only")):
+                stat = M.lock(str(start))
+            self.assertTrue(stat["stat_only"])
+            self.assertEqual((stat["files"]["model-1.safetensors"]["size"],
+                              stat["files"]["model-1.safetensors"]["target"]), (7, str(start / "blob")))
+            (exp / "experiment.json").write_text(json.dumps({"start": {"path": str(start), "lock": stat}}))
+            self.assertEqual(M.check_start(exp), [])
+            (start / "blob").write_bytes(b"z" * 8)
+            self.assertEqual(len(M.check_start(exp)), 2)  # the link and its blob
 
 
 if __name__ == "__main__":
