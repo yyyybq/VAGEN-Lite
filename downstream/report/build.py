@@ -250,9 +250,26 @@ def e1_points(coll, reference: str = "B"):
     starts = [s for s in coll.starts() if set(E1_POINTS) <= have[s]]
     if not starts:
         return None
-    return {"points": list(E1_POINTS), "starts": starts,
-            "mean": stats.compare_mean(coll, "100", E1_POINTS, [1], reference),
+    mean = stats.compare_mean(coll, "100", E1_POINTS, [1], reference)
+    return {"points": list(E1_POINTS), "starts": starts, "mean": mean, "band": e1_band(coll, mean),
             "fluctuation": fluctuation(coll, starts, reference, steps=set(E1_POINTS), span=True)}
+
+
+E3_TASKS = ("CoffeeSetupMug", "OpenDrawer", "SlideDishwasherRack", "TurnOffStove")  # stage 0's list (10-23 report)
+
+
+def e1_band(coll, mean) -> list:
+    """The E3 task rule rechecked on E1 (the user's decision 5 of 2026-10-23 evening): per spatial task, each start's
+    mean over the three checkpoints, then their average over the starts; within 10%-60% -> an RL task.  "listed":
+    on stage 0's list (E3_TASKS).  Tasks without episodes for every start are left out."""
+    out = []
+    for t in sorted(t for t, i in coll.tasks.items() if i.klass == "spatial"):
+        per = {s: mean["tasks"].get(s, {}).get(t) for s in mean["starts"]}
+        if not per or any(v is None for v in per.values()):
+            continue
+        avg = sum(per.values()) / len(per)
+        out.append({"task": t, "rates": per, "mean": avg, "in_band": in_band(avg), "listed": t in E3_TASKS})
+    return out
 
 
 def e1_lines(e1) -> list:
@@ -278,6 +295,20 @@ def e1_lines(e1) -> list:
                      f"{page.pts(w['pooled_abs_mean']).lstrip('+')}、最大 {page.pts(w['pooled_abs_max']).lstrip('+')} 个百分点"
                      + (f"；同一检查点起点与 B 之差（{b['pairs']} 对）平均 {page.pts(b['pooled_abs_mean']).lstrip('+')}、最大 "
                         f"{page.pts(b['pooled_abs_max']).lstrip('+')}" if b.get("pairs") else "") + "。")
+    band = e1.get("band") or []
+    if band:
+        inside, known = [r["task"] for r in band if r["in_band"]], {r["task"] for r in band}
+        added = [t for t in inside if t not in E3_TASKS]
+        dropped = [t for t in E3_TASKS if t in known and t not in inside]
+        unknown = [t for t in E3_TASKS if t not in known]
+        change = ("和阶段 0 的清单相同" if not added and not dropped else
+                  "和阶段 0 的清单不同：" + "；".join(x for x in (f"新进区间 {'、'.join(added)}" if added else "",
+                                                       f"移出区间 {'、'.join(dropped)}" if dropped else "") if x))
+        if unknown:
+            change += f"（{'、'.join(unknown)} 没有数据）"
+        lines.append(f"E3 任务清单按同一规则复核（每个空间任务取各起点三点平均的成功率，再对 {len(e1['starts'])} 个起点平均，"
+                     f"落在 10%–60%）：" + "、".join(f"{r['task']} {page.pct(r['mean'])}" for r in band if r["in_band"])
+                     + f"；{change}。")
     return lines
 
 

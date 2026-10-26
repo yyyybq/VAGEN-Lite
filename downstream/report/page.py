@@ -264,7 +264,25 @@ def e1_html(e1) -> str:
     fluct = fluct_html(e1["fluctuation"], "训练末尾的起伏",
                        "单位百分点，同一批场景配对。同一起点三个检查点之间（15 万 → 17.5 万 → 20 万步，以及 15 万 → 20 万步）"
                        "的差不是起点造成的，是比较起点时的起伏尺度；起点之间的差要和它比。")
-    return rates + vs + fluct
+    return rates + vs + fluct + e1_band_html(e1)
+
+
+def e1_band_html(e1) -> str:
+    """The E3 task rule rechecked on E1's three-point means (build.e1_band)."""
+    band = e1.get("band") or []
+    if not band:
+        return ""
+    starts = e1["mean"]["starts"]
+    rows = []
+    for r in sorted(band, key=lambda r: -r["mean"]):
+        rows.append(f'<tr><td>{E(r["task"])}</td>' + "".join(f'<td class="n">{pct(r["rates"][s])}</td>' for s in starts)
+                    + f'<td class="n"><b>{pct(r["mean"])}</b></td><td>{"是" if r["in_band"] else "否"}</td>'
+                    f'<td>{"是" if r["listed"] else ""}</td></tr>')
+    head = "".join(f'<th class="n">{E(s)}</th>' for s in starts)
+    return (f'<h3>E3 任务清单复核</h3><div class="tablewrap"><table><thead><tr><th>空间任务</th>{head}'
+            f'<th class="n">起点平均</th><th>在 10%–60%</th><th>阶段 0 清单</th></tr></thead><tbody>{"".join(rows)}</tbody>'
+            f'</table></div><p class="meta">每个起点取三个检查点的成功率平均，再对起点平均；落在 10%–60% 的空间任务是 RL 的'
+            f'任务（你 10-23 晚的决定 5：清单变了先报告，不自行替换）。</p>')
 
 
 def stage0_html(s0) -> str:

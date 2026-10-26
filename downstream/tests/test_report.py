@@ -329,6 +329,27 @@ def test_compare_mean_over_three_checkpoints_by_hand(tmp_path):
     assert "第 150k、175k、200k 步三点平均" in lines and "S 35.7%（三点 28.6% / 35.7% / 42.9%）" in lines
     html_text = page.e1_html(e1)
     assert "三点平均" in html_text and "训练末尾的起伏" in html_text and "<b>35.7%</b>" in html_text
+    # the E3 rule on the three-point means: OpenDrawer (0.2 + 0.4) / 2 = 30%, inside 10%-60%, on stage 0's list
+    assert e1["band"] == [{"task": "OpenDrawer", "rates": {"B": pytest.approx(0.2), "S": pytest.approx(0.4)},
+                           "mean": pytest.approx(0.3), "in_band": True, "listed": True}]
+    assert ("E3 任务清单按同一规则复核" in lines and "OpenDrawer 30.0%；和阶段 0 的清单相同" in lines
+            and "CoffeeSetupMug、SlideDishwasherRack、TurnOffStove 没有数据" in lines)
+    assert "E3 任务清单复核" in html_text and "<b>30.0%</b>" in html_text
+
+
+def test_the_e3_rule_reports_tasks_that_enter_or_leave_the_band(tmp_path):
+    root = tmp_path / "runs"
+    for s, (drawer, bowls) in {"B": (60, 6), "S": (70, 8)}.items():  # OpenDrawer 65% leaves, StackBowlsCabinet 14% enters
+        exp = root / f"experiments/DS-{s}-100-s1"
+        exp.mkdir(parents=True)
+        (exp / "experiment.json").write_text("{}")
+        for step in build.E1_POINTS:
+            _write_eval(exp / f"evals/steps_{step}/out/episodes",
+                        {"OpenDrawer": (drawer, 100, 100), "StackBowlsCabinet": (bowls, 50, 50)}, summary=True)
+    e1 = build.e1_points(collect.collect(root))
+    assert [(r["task"], r["in_band"], r["listed"]) for r in e1["band"]] == [
+        ("OpenDrawer", False, True), ("StackBowlsCabinet", True, False)]
+    assert "和阶段 0 的清单不同：新进区间 StackBowlsCabinet；移出区间 OpenDrawer" in "".join(build.e1_lines(e1))
 
 
 def test_the_main_report_leads_with_e1s_three_point_mean(sim, tmp_path):
