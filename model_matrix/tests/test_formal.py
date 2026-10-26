@@ -73,6 +73,19 @@ class PlansTest(unittest.TestCase):
         self.assertEqual((ctl["rl"]["logprob_tokens"], ctl["trainer_attn"], ctl["rl_start_model"], ctl["endpoint"]),
                          (True, "sdpa", "/sft/checkpoint-7", 10))
         self.assertEqual(ctl["sft_groups"], smoke["sft_groups"])
+        diag = P.diagnostic_plans("d", "abc", "/q25/checkpoint-7", "/ctl/global_step_10/actor/huggingface")
+        q25, q3 = diag["m_qwen25vl7b_tokens_d"], diag["m_qwen3vl8b_restart_d"]
+        self.assertEqual((q25["rl_start_model"], q25["endpoint"], q25["rl"]["checkpoint_every"]),
+                         ("/q25/checkpoint-7", 3, 3))
+        self.assertNotIn("trainer_attn", q25)  # eager, the main line's
+        self.assertNotIn("model_type", q25)
+        self.assertEqual((q3["rl_start_model"], q3["endpoint"], q3["trainer_attn"], q3["model_type"]),
+                         ("/ctl/global_step_10/actor/huggingface", 2, "sdpa", "qwen3_vl"))
+        for p in (q25, q3):
+            self.assertNotIn("eval", p)  # RL only
+            self.assertTrue(p["rl"]["logprob_tokens"] and p["rl"]["logprob_audit"])
+            self.assertEqual(p["rl"]["seed"], smoke["rl"]["seed"])
+            self.assertEqual(list(p["rl_runs"].values())[0], smoke["rl_runs"]["q3v4smoke"])  # the V4 arm
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "progress.json").write_text(json.dumps(
                 {"steps": {"pick_sft": {"decision": {"model": "/sft/checkpoint-7"}}}}))

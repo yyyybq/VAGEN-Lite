@@ -3,6 +3,7 @@
 
     python -m model_matrix.formal.plans --commit HEAD sft            # the two formal SFT chains
     python -m model_matrix.formal.plans --commit HEAD sdpa-control   # the Qwen3-VL SDPA log-probability control
+    python -m model_matrix.formal.plans --commit HEAD diagnostics    # decision 19: where the gap comes from
 
 - m_<model>_formal_sft_<date> (Qwen3-VL-8B, Cambrian-S-7B): SFT and its evaluation only ("sft_only"): C0's
   conversations in the new format (train 9,802, validation 1,293), C0's recipe, 10 epochs, each epoch evaluated
@@ -34,6 +35,7 @@ FORMAT = ["--format-example", "action_names"]  # variants pass their options as 
 ACCEPT_SAMPLED = ["--samples", "4", "--temperature", "0.8", "--top-p", "0.92", "--entropy", *FORMAT]
 ACCEPT_GREEDY = ["--entropy", *FORMAT]
 SMOKE_Q3_SFT = RUNS / "chains" / "m_qwen3vl8b_smoke_20261024"
+SMOKE_Q25_SFT = RUNS / "chains" / "m_qwen25vl7b_smoke_20261024"
 REFRESHED = smoke.REFRESHED
 
 
@@ -72,6 +74,28 @@ def sdpa_control_plan(tag: str, commit: str, start: str) -> dict:
     return plan
 
 
+def diagnostic_plans(date: str, commit: str, q25_start: str, q3_start: str) -> dict:
+    """The user's decision 19 (甲) of 2026-10-26, where the Qwen3-VL probability gap comes from; RL only, no
+    evaluation, both with the per-token files:
+    - m_qwen25vl7b_tokens: the Qwen2.5-VL smoke's RL again from its SFT checkpoint, 3 updates, eager attention (the
+      main line's), the same V4 arm and seed: Qwen2.5-VL's per-token differences, by token probability;
+    - m_qwen3vl8b_restart: Qwen3-VL from the SDPA control's update-10 checkpoint, 2 updates, SDPA: in its first
+      update vLLM reads the weights from disk instead of receiving them from the trainer."""
+    out = {}
+    for tag, model, kind, run, start, attn, endpoint in (
+            (f"m_qwen25vl7b_tokens_{date}", smoke.QWEN25VL, None, "q25v4tok", q25_start, None, 3),
+            (f"m_qwen3vl8b_restart_{date}", smoke.QWEN3VL, "qwen3_vl", "q3v4restart", q3_start, "sdpa", 2)):
+        group = "q25smoke" if kind is None else "q3smoke"
+        plan = smoke.smoke(tag, model, kind, group, run, commit)
+        plan.pop("eval")  # RL only: the evaluate step is not planned
+        plan.update(rl_start_model=start, endpoint=endpoint, rl_name=f"m_{run}")
+        plan["rl"].update(logprob_tokens=True, checkpoint_every=endpoint)
+        if attn:
+            plan["trainer_attn"] = attn
+        out[tag] = plan
+    return out
+
+
 def write(all_plans: dict, recommit: bool = False) -> None:
     smoke.write(all_plans, recommit)
 
@@ -81,9 +105,13 @@ def main() -> None:
     ap.add_argument("--commit", required=True)
     ap.add_argument("--date", default="20261026")
     ap.add_argument("--recommit", action="store_true", help="give plans not yet started this commit and pool")
-    ap.add_argument("which", choices=("sft", "sdpa-control"))
+    ap.add_argument("which", choices=("sft", "sdpa-control", "diagnostics"))
     a = ap.parse_args()
-    if a.which == "sft":
+    if a.which == "diagnostics":
+        q3 = RUNS / "chains" / "m_qwen3vl8b_sdpa_control_20261026" / "rl_run_q3v4sdpa" / "checkpoints" / \
+            "global_step_10" / "actor" / "huggingface"
+        write(diagnostic_plans(a.date, a.commit, picked_model(SMOKE_Q25_SFT), str(q3)), a.recommit)
+    elif a.which == "sft":
         accept_set()
         write({f"m_qwen3vl8b_formal_sft_{a.date}": sft_plan(f"m_qwen3vl8b_formal_sft_{a.date}", smoke.QWEN3VL,
                                                              "qwen3_vl", "q3formal", a.commit),
