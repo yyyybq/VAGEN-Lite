@@ -97,6 +97,48 @@ def diagnostic_plans(date: str, commit: str, q25_start: str, q3_start: str) -> d
 
 
 C0_E9 = E / "interiorgs_v10_train_r11_20261016" / "lf_formal" / "model" / "checkpoint-1386"  # C0's picked epoch
+VARIANTS = smoke.V2 / "analysis" / "variants" / "variants.json"  # the main line's dense-variant summary
+VARIANT_RL = {"V4": {"standard": "v10_p1_Dcond", "group_filter": "keep_by_return_std", "keep_std_threshold": 0.3318,
+                     "keep_std_floor": 1.0, "progress_reward_scale": 10.0 / 3.0}}  # as the main line's dv4s2 run
+# the main line's formal RL (interiorgs_v10_train_r12y_20261024, V4's second seed), the format example aside
+RL_GUARDS = {"kl_max": 0.2, "invalid_max": 0.1, "invalid_window": 10, "success_drop": 0.1, "drop_window": 50,
+             "start_updates": 5, "keep_fill_min": 1.0, "keep_fill_at": 50}
+
+
+def best_variant(path: Path = VARIANTS) -> str:
+    """The dense variant with the highest pooled success in the main line's summary (the user's rule 9 / 1.6)."""
+    variants = json.loads(Path(path).read_text())["variants"]
+    best = max(variants.values(), key=lambda v: v["summary"]["success_pooled"])
+    return best["variant"]
+
+
+def rl_plan(tag: str, model: str, model_type: str, start: str, group: str, prefix: str, commit: str, variant: str,
+            seed: int = 20261019, endpoint: int = 300) -> dict:
+    """A formal RL pair (the user's 2.1-2.2 of 2026-10-26): S0 and the dense arm from the picked SFT epoch, the main
+    line's settings (reserve tasks, 300 updates, a checkpoint and its evaluation every 50, eager attention, the
+    stop lines of decisions 2, 6, 7), the new format example; the S0 arm on h800, the dense arm on zoetrope, each
+    render service with its trainer (rule 1.3); evaluations to the pool with the shorter queue.  No checkpoint is
+    deleted (no "retain")."""
+    if variant not in VARIANT_RL:
+        raise SystemExit(f"no RL settings for dense variant {variant}; known {sorted(VARIANT_RL)}")
+    rl = {"standard": "v10_p1_S0", "seed": seed, "task_pool": "reserve", "rows": smoke.RL_BASE["rows"],
+          "exclude": smoke.RL_BASE["exclude"], "format_example": "action_names", "guards": dict(RL_GUARDS),
+          "startup": {"retries": 5, "stall_minutes": 40}, "renderer_workers": 32, "renderer_first": True,
+          "renderer_repack": True}
+    s0, d = f"{prefix}s0", f"{prefix}d"
+    return {"tr": str(RUNS / "chains" / tag), "sft_dir": str(smoke.SFT_DIR), "commit": commit, "model": model,
+            "model_type": model_type, "rl_start_model": start, "job_prefix": "models",
+            "gs_root": "/mnt/umm/users/yinbaiqiao/InteriorGS_ply", "scenes_root": "/mnt/umm/users/yinbaiqiao/InteriorGS_meta",
+            "keep_text": True, "sft_records": False, "sft_groups": {group: "sft_trajectories.jsonl"},
+            "eval_sets": {k: str(v) for k, v in smoke.EVAL_SETS.items()}, "select_by": "val", "max_eval_jobs": 6,
+            "pool": smoke.POOL, "run_pools": {s0: "h800", d: "zoetrope"}, "gpu_log": True, "retries": 2,
+            "startup_retries_separate": True, "record_nodes": True, "endpoint": endpoint, "rl_name": f"m_{prefix}rl",
+            "eval": {"every": 50, "options": [], "stop_invalid": {"set": "val", "max": 0.10}},
+            "dense_variant": variant, "rl": rl, "rl_runs": {s0: {}, d: {"rl": dict(VARIANT_RL[variant])}}}
+
+
+FORMAL_RL = {"qwen3": ("m_qwen3vl8b", smoke.QWEN3VL, "qwen3_vl", "q3formal", "q3"),
+             "cambrian": ("m_cambrian7b", smoke.CAMBRIAN, "cambrian_qwen", "cformal", "c")}
 
 
 def accept_epoch_plans(date: str, commit: str, epochs: dict) -> dict:
@@ -144,9 +186,20 @@ def main() -> None:
     ap.add_argument("--commit", required=True)
     ap.add_argument("--date", default="20261026")
     ap.add_argument("--recommit", action="store_true", help="give plans not yet started this commit and pool")
-    ap.add_argument("which", choices=("sft", "sdpa-control", "diagnostics", "accept-epochs"))
+    ap.add_argument("which", choices=("sft", "sdpa-control", "diagnostics", "accept-epochs", "rl-qwen3", "rl-cambrian"))
+    ap.add_argument("--sft-date", default="20261026", help="rl-*: the formal SFT chain's date")
+    ap.add_argument("--seed", type=int, default=20261019, help="rl-*: the RL seed")
     a = ap.parse_args()
-    if a.which == "accept-epochs":
+    if a.which.startswith("rl-"):
+        base, model, kind, group, prefix = FORMAL_RL[a.which[3:]]
+        start = picked_model(RUNS / "chains" / f"{base}_formal_sft_{a.sft_date}")
+        variant = best_variant()
+        suffix = "" if a.seed == 20261019 else f"_s{a.seed}"
+        tag = f"{base}_formal_rl_{a.date}{suffix}"
+        write({tag: rl_plan(tag, model, kind, start, group, prefix if not suffix else f"{prefix}s2", a.commit, variant,
+                            seed=a.seed)}, a.recommit)
+        print("start", start, "dense variant", variant)
+    elif a.which == "accept-epochs":
         epochs = {}
         for tag, kind, group in ((f"m_qwen3vl8b_accept_epochs_{a.date}", "qwen3_vl", "q3formal"),
                                  (f"m_cambrian7b_accept_epochs_{a.date}", "cambrian_qwen", "cformal")):

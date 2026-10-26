@@ -643,7 +643,13 @@ class Chain:
         pool has no main-line job waiting, the pause file is absent and, for ``cards`` 8 (and any RL run's first job),
         an idle machine -- for one card a machine with free cards (``idle_pool``).  The model line (2026-10-25, the
         user's "开始排队吧"): "queue" queues at once, as "auto", but only while the pause file is absent
-        (``queue_pool``)."""
+        (``queue_pool``).  The model line (2026-10-26, the user's rule 1.3, a new switch): plan "run_pools" ({RL run
+        name: pool}) puts that run's trainer and render service in the named pool (the arms spread over both pools),
+        after the pause file is gone; every other job as before."""
+        fixed = (self.plan.get("run_pools") or {}).get(key) if key is not None else None
+        if fixed:
+            self.wait_pause()
+            return fixed
         pool = self.plan.get("pool")
         if pool not in ("auto", "idle", "queue"):
             return pool
@@ -665,9 +671,14 @@ class Chain:
     def queue_pool(self) -> str:
         """Plan pool "queue": job_sco.pick_pool once the pause file is absent (polled every IDLE_POLL_S; the wait is
         shown in the progress file)."""
-        from model_matrix import sco_view
-
         from . import job_sco
+
+        self.wait_pause()
+        return job_sco.pick_pool()
+
+    def wait_pause(self) -> None:
+        """Wait while the main line's pause file exists (polled every IDLE_POLL_S; shown in the progress file)."""
+        from model_matrix import sco_view
 
         while sco_view.PAUSE.exists():
             self.state["idle_pool_wait"] = {"since": (self.state.get("idle_pool_wait") or {}).get("since") or now(),
@@ -675,7 +686,6 @@ class Chain:
             self.save()
             self.sleep(IDLE_POLL_S)
         self.state["idle_pool_wait"] = None
-        return job_sco.pick_pool()
 
     def idle_pool(self, cards: int) -> str:
         """Plan pool "idle": the pool with the most idle machines (model_matrix.sco_view's estimate) among those

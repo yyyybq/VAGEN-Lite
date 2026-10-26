@@ -278,6 +278,34 @@ class ChainTest(unittest.TestCase):
                 self.assertEqual(pick.call_count, 2)
             self.assertIsNone(chain.state["idle_pool_wait"])
 
+    def test_run_pools_pin_each_arm(self):
+        """Plan "run_pools" (2026-10-26, the user's rule 1.3): each RL arm (trainer and render service, both asked by
+        run name) in its named pool once the pause file is gone; one-card jobs as the plan's "queue"."""
+        from data_gen.interiorgs_v10 import job_sco
+        from model_matrix import sco_view
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chain = self._chain(tmp, pool="queue", run_pools={"q3s0": "h800", "q3d": "zoetrope"})
+            pause = Path(tmp) / "pause"
+            pause.write_text("")
+            slept = []
+
+            def sleep(s):
+                slept.append(s)
+                pause.unlink()
+
+            chain.sleep = sleep
+            with mock.patch.object(sco_view, "PAUSE", pause), \
+                    mock.patch.object(job_sco, "pick_pool", return_value="h800") as pick:
+                self.assertEqual(chain.job_pool("q3d"), "zoetrope")
+                self.assertEqual(slept, [300.0])  # waited for the pause file
+                self.assertEqual(chain.job_pool("q3s0"), "h800")
+                self.assertEqual(chain.job_pool("q3d"), "zoetrope")
+                self.assertEqual(pick.call_count, 0)
+                self.assertEqual(chain.job_pool(cards=1), "h800")  # an evaluation: the shorter queue
+                self.assertEqual(pick.call_count, 1)
+                self.assertEqual(chain.job_pool("other"), "h800")  # a run not named: as before
+
     def test_job_names_take_the_prefix(self):
         from data_gen.interiorgs_v10 import job_sco as J
 

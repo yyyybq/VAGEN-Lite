@@ -62,6 +62,32 @@ class PlansTest(unittest.TestCase):
         self.assertNotIn("--samples", greedy["options"])
         self.assertEqual(plan["eval"]["extra_sets"], {"accept": str(P.ACCEPT)})
 
+    def test_rl_plan_is_the_main_lines_formal_pair(self):
+        from model_matrix.formal import plans as P
+
+        plan = P.rl_plan("t", "/m", "qwen3_vl", "/sft/e8", "q3formal", "q3", "abc", "V4")
+        self.assertEqual((plan["rl_start_model"], plan["endpoint"], plan["run_pools"]),
+                         ("/sft/e8", 300, {"q3s0": "h800", "q3d": "zoetrope"}))
+        rl = plan["rl"]
+        self.assertEqual((rl["standard"], rl["seed"], rl["task_pool"], rl["format_example"]),
+                         ("v10_p1_S0", 20261019, "reserve", "action_names"))
+        self.assertEqual({k: rl["guards"][k] for k in ("kl_max", "invalid_max", "invalid_window")}, {"kl_max": 0.2,
+                         "invalid_max": 0.1, "invalid_window": 10})
+        self.assertEqual(rl["guards"]["keep_fill_min"], 1.0)
+        self.assertEqual(plan["rl_runs"]["q3s0"], {})
+        self.assertEqual(plan["rl_runs"]["q3d"]["rl"]["keep_std_threshold"], 0.3318)
+        self.assertEqual(plan["eval"], {"every": 50, "options": [], "stop_invalid": {"set": "val", "max": 0.10}})
+        self.assertNotIn("retain", plan)
+        self.assertNotIn("trainer_attn", plan)  # eager, as the main line (decision 20)
+        self.assertNotIn("logprob_audit", rl)
+        with self.assertRaises(SystemExit):
+            P.rl_plan("t", "/m", "qwen3_vl", "/s", "g", "q3", "abc", "V9")
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "v.json"
+            f.write_text(json.dumps({"variants": {"dv1": {"variant": "V1", "summary": {"success_pooled": 0.46}},
+                                                  "dv4": {"variant": "V4", "summary": {"success_pooled": 0.48}}}}))
+            self.assertEqual(P.best_variant(f), "V4")
+
     def test_accept_epoch_plans(self):
         from model_matrix.formal import plans as P
 
