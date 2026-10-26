@@ -62,6 +62,25 @@ class PlansTest(unittest.TestCase):
         self.assertNotIn("--samples", greedy["options"])
         self.assertEqual(plan["eval"]["extra_sets"], {"accept": str(P.ACCEPT)})
 
+    def test_accept_epoch_plans(self):
+        from model_matrix.formal import plans as P
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chain = Path(tmp) / "m_x_formal_sft_d"
+            for s in (154, 308, 1540):
+                (chain / "lf_g" / "model" / f"checkpoint-{s}").mkdir(parents=True)
+            ck = P.epoch_checkpoints(chain, "g")
+        self.assertEqual({e: p.name for e, p in ck.items()}, {1: "checkpoint-154", 2: "checkpoint-308", 3: "checkpoint-1540"})
+        plans = P.accept_epoch_plans("d", "abc", {"m_q_accept_epochs_d": ("qwen3_vl", "g", 2, ck)})
+        q = plans["m_q_accept_epochs_d"]
+        self.assertEqual((q["eval_only"], q["model_type"], q["eval_sets"]), (True, "qwen3_vl", {"accept": str(P.ACCEPT)}))
+        self.assertEqual(sorted(q["eval"]["models"]), ["sft_g_e1_greedy", "sft_g_e3_greedy"])  # not the picked e2
+        self.assertEqual(q["eval"]["models"]["sft_g_e1_greedy"]["options"], P.ACCEPT_GREEDY)
+        c0 = plans["m_qwen25vl7b_c0_accept_d"]
+        self.assertNotIn("model_type", c0)
+        self.assertNotIn("--format-example", " ".join(c0["eval"]["models"]["c0_sft_formal_e9_s4"]["options"]))
+        self.assertIn("--entropy", c0["eval"]["models"]["c0_sft_formal_e9_greedy"]["options"])
+
     def test_sdpa_control_is_the_smoke_with_sdpa_and_token_logs(self):
         from model_matrix.formal import plans as P
         from model_matrix.smoke import plans as S

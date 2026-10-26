@@ -96,6 +96,45 @@ def diagnostic_plans(date: str, commit: str, q25_start: str, q3_start: str) -> d
     return out
 
 
+C0_E9 = E / "interiorgs_v10_train_r11_20261016" / "lf_formal" / "model" / "checkpoint-1386"  # C0's picked epoch
+
+
+def accept_epoch_plans(date: str, commit: str, epochs: dict) -> dict:
+    """The acceptance did not pass (2026-10-26; the user's 2.1: stop and report every epoch's success, unreadable
+    share and entropy): evaluation-only chains on the acceptance set --
+    - every other epoch of both formal SFTs greedily with the answers' entropy (results sft_<group>_e<k>_greedy, the
+      picked epoch's own run being there already);
+    - Qwen2.5-VL's C0 epoch 9 (the main line's picked SFT, its own placeholder format) sampled x4 and greedily, both
+      with entropy (results c0_sft_formal_e9_s4, c0_sft_formal_e9_greedy), for the side-by-side the user asked for.
+    ``epochs``: {chain tag: (model type, group, picked epoch, {epoch: checkpoint})}."""
+    def base(tag: str, model_type, models: dict) -> dict:
+        plan = {"tr": str(RUNS / "chains" / tag), "sft_dir": str(smoke.SFT_DIR), "commit": commit, "eval_only": True,
+                "job_prefix": "models", "pool": smoke.POOL, "max_eval_jobs": 6, "eval_sets": {"accept": str(ACCEPT)},
+                "eval": {"options": [], "models": models}}
+        if model_type:
+            plan["model_type"] = model_type
+        return plan
+
+    out = {}
+    for tag, (model_type, group, picked, ckpts) in epochs.items():
+        models = {f"sft_{group}_e{e}_greedy": {"model": str(p), "options": ACCEPT_GREEDY}
+                  for e, p in sorted(ckpts.items()) if e != picked}
+        out[tag] = base(tag, model_type, models)
+    c0 = f"m_qwen25vl7b_c0_accept_{date}"
+    out[c0] = base(c0, None, {
+        "c0_sft_formal_e9_s4": {"model": str(C0_E9), "options": ["--samples", "4", "--temperature", "0.8",
+                                                                  "--top-p", "0.92", "--entropy"]},
+        "c0_sft_formal_e9_greedy": {"model": str(C0_E9), "options": ["--entropy"]}})
+    return out
+
+
+def epoch_checkpoints(chain: Path, group: str) -> dict:
+    """{epoch: checkpoint} of a formal SFT chain (checkpoint-<step>, 154 steps per epoch, in step order)."""
+    model = chain / f"lf_{group}" / "model"
+    steps = sorted(int(p.name.split("-")[1]) for p in model.glob("checkpoint-*") if p.name.split("-")[1].isdigit())
+    return {i + 1: model / f"checkpoint-{s}" for i, s in enumerate(steps)}
+
+
 def write(all_plans: dict, recommit: bool = False) -> None:
     smoke.write(all_plans, recommit)
 
@@ -105,9 +144,17 @@ def main() -> None:
     ap.add_argument("--commit", required=True)
     ap.add_argument("--date", default="20261026")
     ap.add_argument("--recommit", action="store_true", help="give plans not yet started this commit and pool")
-    ap.add_argument("which", choices=("sft", "sdpa-control", "diagnostics"))
+    ap.add_argument("which", choices=("sft", "sdpa-control", "diagnostics", "accept-epochs"))
     a = ap.parse_args()
-    if a.which == "diagnostics":
+    if a.which == "accept-epochs":
+        epochs = {}
+        for tag, kind, group in ((f"m_qwen3vl8b_accept_epochs_{a.date}", "qwen3_vl", "q3formal"),
+                                 (f"m_cambrian7b_accept_epochs_{a.date}", "cambrian_qwen", "cformal")):
+            chain = RUNS / "chains" / tag.replace("accept_epochs", "formal_sft")
+            best = json.loads((chain / "progress.json").read_text())["steps"]["pick_sft"]["decision"]["best"]
+            epochs[tag] = (kind, group, int(best.rsplit("_e", 1)[1]), epoch_checkpoints(chain, group))
+        write(accept_epoch_plans(a.date, a.commit, epochs), a.recommit)
+    elif a.which == "diagnostics":
         q3 = RUNS / "chains" / "m_qwen3vl8b_sdpa_control_20261026" / "rl_run_q3v4sdpa" / "checkpoints" / \
             "global_step_10" / "actor" / "huggingface"
         write(diagnostic_plans(a.date, a.commit, picked_model(SMOKE_Q25_SFT), str(q3)), a.recommit)
