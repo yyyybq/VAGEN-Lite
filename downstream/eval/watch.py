@@ -69,6 +69,7 @@ import datetime
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -694,9 +695,22 @@ class Watcher:
         return None
 
     # --------------------------------------------- prepared jobs and resumed runs, idle machines only (10-23 evening)
+    def group_live(self, qdir: Path, group: str) -> list:
+        """Runs of the --queue-dir entries of `group` whose job waits or runs (the E3 runs: at most 2 at once, the
+        user's decision of 2026-10-22)."""
+        out = []
+        for entry in sorted(qdir.glob("*.json")):
+            spec = json.loads(entry.read_text())
+            run = Path(spec["run"])
+            if spec.get("group") == group and (run / "job/submission.json").exists() and not self.job(run)["finished"]:
+                out.append(spec.get("what", entry.stem))
+        return out
+
     def flush_queue(self) -> list:
         """Prepared jobs of --queue-dir, in name order, one 8-card job per idle machine (place8); each is submitted
-        once (RUN/job/submission.json)."""
+        once (RUN/job/submission.json).  An entry goes to the pool it was prepared for, or with "pools" to the first
+        of those with an idle machine (its prepared.json is rewritten for that pool); entries of one "group" have at
+        most "max_live" jobs waiting or running at once."""
         sent = []
         qdir = Path(self.a.queue_dir) if self.a.queue_dir else None
         for entry in sorted(qdir.glob("*.json")) if qdir and qdir.is_dir() else []:
@@ -707,17 +721,23 @@ class Watcher:
             if int(spec.get("cards", 8)) != 8 or not (run / "job/prepared.json").is_file():
                 self.alerts.append(f"排队任务 {entry.name}：只支持已 prepare 的 8 卡任务，没提交")
                 continue
-            prepared_pool = json.loads((run / "job/prepared.json").read_text()).get("pool")
-            pool, why = self.place8(spec.get("what", entry.stem), pools=[prepared_pool])  # the pool it was made for
+            if spec.get("group") and len(self.group_live(qdir, spec["group"])) >= int(spec.get("max_live", 1)):
+                self.notes.append(f"{spec.get('what', entry.stem)}本轮不提交：{spec['group']} 已有 "
+                                  f"{len(self.group_live(qdir, spec['group']))} 个在跑或排队（同时最多 {spec.get('max_live', 1)} 个）")
+                continue
+            prepared = json.loads((run / "job/prepared.json").read_text())
+            pool, why = self.place8(spec.get("what", entry.stem), pools=spec.get("pools") or [prepared.get("pool")])
             if why:
                 self.notes.append(why)
                 break
             if self.a.dry:
-                sent.append(f"{spec.get('what', entry.stem)} (would)")
+                sent.append(f"{spec.get('what', entry.stem)} (would, {pool})")
             else:
+                if prepared.get("pool") != pool:
+                    (run / "job/prepared.json").write_text(json.dumps(dict(prepared, pool=pool), indent=1) + "\n")
                 jid = self.jobs.submit(run)
                 self.sent_on_idle(entry.stem, run, "queue", jid)
-                sent.append(f"{spec.get('what', entry.stem)} {jid}")
+                sent.append(f"{spec.get('what', entry.stem)} {jid} ({pool})")
             self.took8(pool)
         if sent:
             self.notes.append(f"排队任务本轮提交：{'；'.join(sent)}")
@@ -1286,6 +1306,92 @@ def matrix_eval(w: "Watcher", start: str, ratio: str, points=()) -> str:
 
 START_NAMES = {"B": "B 原始 7B", "S": "S 动作 SFT 第 9 个 epoch", "RS": "RS P-S0 第 300 次", "RD": "RD P-D 第 150 次"}
 MATRIX_COLUMNS = "| 起点 | E0 曲线 | E1 主对比 | E2 样本效率 | E3 RL | E4 种子 |"
+E3_TASKS = ("SlideDishwasherRack", "OpenDrawer", "CoffeeSetupMug", "TurnOffStove", "StackBowlsCabinet")  # 10-26
+E3_UPDATES = 100
+
+
+def e3_run(w: "Watcher", start: str) -> Path:
+    """The E3 run of a start (downstream/rlinf/run_e3.sh): EXPERIMENTS/E3-<start>."""
+    return w.experiments / f"E3-{start}"
+
+
+def rl_global_step(run: Path):
+    """(update, total) of the newest RLinf training log of an E3 run (its last "Global Step: N/M" line), or None."""
+    logs = sorted(run.glob("rlinf_train_*.log"), key=lambda p: p.stat().st_mtime)
+    if not logs:
+        return None
+    with open(logs[-1], "rb") as f:
+        f.seek(max(0, logs[-1].stat().st_size - 1_000_000))
+        found = re.findall(r"Global Step:\s+(\d+)/(\d+)", f.read().decode("utf-8", "replace"))
+    return (int(found[-1][0]), int(found[-1][1])) if found else None
+
+
+def tasks_rate(summary: dict, tasks) -> list:
+    """[successes, episodes] of a finished evaluation over some tasks."""
+    per = summary.get("per_task", {})
+    return [sum(per[t]["successes"] for t in tasks if t in per), sum(per[t]["n"] for t in tasks if t in per)]
+
+
+def matrix_e3_train(w: "Watcher", start: str) -> str:
+    """Training cell of E3: the job, the stage (train / export / evaluate) and the last PPO update logged."""
+    run = e3_run(w, start)
+    if not (run / "cfg/train.yaml").is_file():
+        return "未开始"
+    jid = _job_id(run)
+    state = w.job(run)["state"] if jid else "排队等空闲机器（同时最多 2 个）"
+    final = run / f"logs/robocasa365_starvla_ppo/checkpoints/global_step_{E3_UPDATES}/actor/dcp_checkpoint/.metadata"
+    if merged(run / "evals/final"):
+        stage = "训完、导出、评完"
+    elif (run / "export/rlinf_export.json").is_file():
+        stage = "已导出，944 回合评测中"
+    elif final.is_file():
+        stage = f"训完 {E3_UPDATES} 次更新，导出中"
+    else:
+        g = rl_global_step(run)
+        stage = f"训练到第 {g[0]} / {g[1]} 次更新" if g else ""
+    return _cell(f"**{state}**", f"任务 `{jid}`" if jid else "", f"`{run.relative_to(w.a.runs_root)}/`", stage,
+                 f"更新 {_stamp(list(run.glob('rlinf_train_*.log')))}" if list(run.glob("rlinf_train_*.log")) else "")
+
+
+def matrix_e3_eval(w: "Watcher", start: str) -> str:
+    """Evaluation cell of E3: the 944-episode result after RL next to the start's E1 final checkpoint before RL
+    (all tasks, the 9 spatial tasks, the 5 RL tasks)."""
+    run = e3_run(w, start)
+    before = merged(w.experiments / runs.exp_id(start, "100", 1) / "evals/steps_200000")
+    after = merged(run / "evals/final")
+
+    def line(label, m):
+        a = score(m[0])
+        return (f"{label}：总体 {_rate(a['all'])}，空间组 {_rate(a['spatial'])}，"
+                f"RL 的 5 个任务 {_rate(tasks_rate(m[0], E3_TASKS))}")
+    if not (run / "cfg/train.yaml").is_file() and not after:
+        return "—"
+    return _cell(line("RL 后", after) if after else "RL 后：未评",
+                 line("RL 前（E1 第 20 万步）", before) if before else "")
+
+
+X_EXPERIMENTS = (  # the first wave of new experiments (the user's decision of 2026-10-26)
+    ("X0", "域内空间问答：34 个任务的重置首帧（三个相机），左右 / 前后 / 远近三类，约 500 道，零样本问四个起点"),
+    ("X1", "冻结主干：只训动作头和视觉合并层，30% 示教，5 万步，评 944 回合"),
+    ("X2", "极低数据：1%、3% 示教（每任务 5、15 条，嵌套），2 个 epoch，评 944 回合"),
+    ("X3", "落点准确率：重放 E1 四个最终检查点的空间组 447 回合，记录实际操作的目标"),
+    ("X4", "能力保留：E1 四个最终权重在主线评测集上评一次，和原始起点并排"),
+    ("X5", "未见任务：E1 四个最终检查点评 16 个未见过的组合任务，每任务 20 回合"))
+
+
+def matrix_x(w: "Watcher") -> list:
+    """One row per new experiment; its state and per-start cells come from downstream_runs/x/<X>/matrix.json
+    ({"state": ..., "B": ..., "S": ..., "RS": ..., "RD": ...}) once there is one, else its design waits."""
+    rows = []
+    for x, what in X_EXPERIMENTS:
+        f = Path(w.a.runs_root) / "x" / x / "matrix.json"
+        try:
+            rec = json.loads(f.read_text()) if f.is_file() else {}
+        except ValueError:
+            rec = {"state": f"`x/{x}/matrix.json` 读不出"}
+        rows.append(f"| {x} | {what} | {rec.get('state', '设计待你确认（10-26）')} | "
+                    + " | ".join(str(rec.get(s, "—")) for s in runs.STARTS) + " |")
+    return rows
 
 
 def matrix(w: "Watcher") -> str:
@@ -1296,7 +1402,8 @@ def matrix(w: "Watcher") -> str:
     head = ["# 下游线实验矩阵（看板每轮自动重写，不要手改）", "",
             f"生成于 {utc()}。E0 = 阶段 0 的检查点曲线（D5 停下时保留的 2.5 万–10 万步）；E1 = 阶段 1 主对比（100% 数据、"
             f"种子 1，评第 {'、'.join(f'{p // 1000}k' for p in w.a.extra_points)} 和最终 200k 步，主数字用三点平均）；"
-            f"E2 = 样本效率（10%、30% 数据）；E3 = RL（PPO）；E4 = 种子（2、3）。成功率：总体 = 34 个任务 944 回合，"
+            f"E2 = 样本效率（10%、30% 数据）；E3 = RL（PPO，5 个空间任务，从 E1 第 20 万步出发）；E4 = 种子（10-26 取消）；"
+            f"X0–X5 = 第一波新增实验。成功率：总体 = 34 个任务 944 回合，"
             f"空间组 = 9 个空间任务 447 回合（剔除 6 个回合后）；括号里是成功回合 / 回合。时间是 UTC。",
             "路径相对于 `/mnt/umm/users/yinbaiqiao/downstream_runs/`。状态和决定见 [STATUS.md](STATUS.md)。", "",
             "## 训练", "", MATRIX_COLUMNS, sep]
@@ -1309,14 +1416,15 @@ def matrix(w: "Watcher") -> str:
         e2t = "<br><br>".join(f"**{p}%**：{matrix_train(w, s, r, f'{p}% 数据')}" for r, p in (("010", 10), ("030", 30)))
         e2e = "<br><br>".join(f"**{p}%**：{matrix_eval(w, s, r)}" for r, p in (("010", 10), ("030", 30)))
         train.append(f"| {START_NAMES.get(s, s)} | {e0} | {matrix_train(w, s, '100', 'E1 ')} | {e2t} | "
-                     f"未开始（第四步：先做 64 个环境的速度实测，E1 评完后每个起点 1 个 PPO） | "
-                     f"暂不跑（你 10-23 的决定：E1 结果出来后再定种子 2） |")
+                     f"{matrix_e3_train(w, s)} | 取消（你 10-26 的决定） |")
         evals.append(f"| {START_NAMES.get(s, s)} | {matrix_e0(w, s)} | {matrix_eval(w, s, '100', w.a.extra_points)} | "
-                     f"{e2e} | — | — |")
+                     f"{e2e} | {matrix_e3_eval(w, s)} | — |")
     for name, note in MATRIX_PENDING:
         train.append(f"| {name}（待接入） | {note} | — | — | — | — |")
         evals.append(f"| {name}（待接入） | {note} | — | — | — | — |")
-    return "\n".join(head + train + ["", "## 评测", "", MATRIX_COLUMNS, sep] + evals) + "\n"
+    xs = ["", "## 新增实验（第一波，你 10-26 的决定）", "", "| 实验 | 内容 | 状态 | B | S | RS | RD |",
+          "| --- | --- | --- | --- | --- | --- | --- |"] + matrix_x(w)
+    return "\n".join(head + train + ["", "## 评测", "", MATRIX_COLUMNS, sep] + evals + xs) + "\n"
 
 
 def board(w: Watcher, rows, missing, rep, gate) -> str:

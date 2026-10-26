@@ -367,3 +367,62 @@ def test_with_yield_pool_only_runs_sent_on_idle_machines_are_withdrawn_only_for_
     jobs.listing.append(eight_card("interiorgs-v10-eval-y", "QUEUEING", pool="h800", cards=1))
     one_pass()
     assert jobs.deleted == ["DS-B-010-s1"] and len(list(e2.glob("job_released_*"))) == 2
+
+
+def e3_queue(tmp_path, jobs, starts=("B", "S", "RS", "RD")):
+    """E3 runs prepared for h800 and queued as one group of at most 2, either pool (as for the real runs)."""
+    (tmp_path / "queue").mkdir(exist_ok=True)
+    runs_ = {}
+    for i, s in enumerate(starts):
+        run = tmp_path / f"experiments/E3-{s}"
+        (run / "cfg").mkdir(parents=True)
+        (run / "cfg/train.yaml").write_text("{}")
+        jobs.prepare(run, 8, "h800", f"downstream-e3-{s.lower()}", ["bash", "run_e3.sh"])
+        (tmp_path / f"queue/e3_{i}_{s}.json").write_text(json.dumps(
+            {"run": str(run), "cards": 8, "what": f"E3 {s}", "group": "e3", "max_live": 2, "pools": ["h800", "zoetrope"]}))
+        runs_[s] = run
+    return runs_
+
+
+def test_e3_runs_go_to_any_pool_with_an_idle_machine_at_most_two_at_once(tmp_path):
+    jobs = FakeJobs()
+    runs_ = e3_queue(tmp_path, jobs)
+    args = ("--exps", "DS-B-100-s1", "--queue-dir", str(tmp_path / "queue"), "--max-whole-per-pass", "4",
+            "--whole-pools", "h800", "zoetrope", "--pool-nodes", "h800:0", "zoetrope:3", "--yield-pool-only")
+    w = watcher(tmp_path, *args, jobs=jobs)
+    w.tick()
+    sent = [s for s, run in runs_.items() if (run / "job/submission.json").exists()]
+    assert sent == ["B", "S"]  # zoetrope has the idle machines; the group allows two
+    assert all(json.loads((runs_[s] / "job/prepared.json").read_text())["pool"] == "zoetrope" for s in sent)
+    assert json.loads((runs_["RS"] / "job/prepared.json").read_text())["pool"] == "h800"
+    assert any("e3 已有 2 个在跑或排队（同时最多 2 个）" in n for n in w.notes)
+    jobs.states["E3-B"] = "SUCCEEDED"  # one ends: the next one goes
+    w = watcher(tmp_path, *args, jobs=jobs)
+    w.tick()
+    assert (runs_["RS"] / "job/submission.json").exists() and not (runs_["RD"] / "job/submission.json").exists()
+
+
+def test_e3_and_x_rows_of_the_matrix(tmp_path):
+    from test_watch_and_tasks import summary
+
+    jobs = FakeJobs()
+    runs_ = e3_queue(tmp_path, jobs, starts=("B",))
+    w = watcher(tmp_path, jobs=jobs)
+    assert "排队等空闲机器（同时最多 2 个）" in watch.matrix_e3_train(w, "B") and watch.matrix_e3_train(w, "S") == "未开始"
+    jobs.submit(runs_["B"])
+    (runs_["B"] / "rlinf_train_20261026T060000Z.log").write_text("│ Global Step:    36/100 │\n│ Global Step:    37/100 │\n")
+    assert "训练到第 37 / 100 次更新" in watch.matrix_e3_train(w, "B") and "**RUNNING**" in watch.matrix_e3_train(w, "B")
+    e1 = tmp_path / "experiments/DS-B-100-s1"
+    summary(e1 / "evals/steps_200000/out/episodes", {"OpenDrawer": {"n": 50, "successes": 20},
+                                                      "CloseFridge": {"n": 20, "successes": 4}})
+    summary(runs_["B"] / "evals/final/out/episodes", {"OpenDrawer": {"n": 50, "successes": 30},
+                                                       "CloseFridge": {"n": 20, "successes": 4}})
+    cell = watch.matrix_e3_eval(w, "B")
+    assert "RL 后：总体 48.6%（34/70），空间组 60.0%（30/50），RL 的 5 个任务 60.0%（30/50）" in cell
+    assert "RL 前（E1 第 20 万步）：总体 34.3%（24/70）" in cell and "训完、导出、评完" in watch.matrix_e3_train(w, "B")
+    text = watch.matrix(w)
+    assert "## 新增实验（第一波，你 10-26 的决定）" in text and text.count("设计待你确认（10-26）") == 6
+    (tmp_path / "x/X3").mkdir(parents=True)
+    (tmp_path / "x/X3/matrix.json").write_text(json.dumps({"state": "设计已确认，重放中", "B": "选对 80%"}))
+    row = next(line for line in watch.matrix(w).splitlines() if line.startswith("| X3 |"))
+    assert "| 设计已确认，重放中 | 选对 80% | — | — | — |" in row

@@ -596,8 +596,10 @@ def test_matrix_lists_the_starts_and_the_pending_rows(tmp_path):
     (s1 / "run/metrics.jsonl").write_text(json.dumps({"step": 4200, "action_dit_loss": 0.1}) + "\n")
     w = watcher(tmp_path, "--stage0", jobs=FakeJobs(), shards=8)
     text = watch.matrix(w)
-    # two tables of the same rows and columns (training, evaluation): header, rule line, four starts, rows to be added
-    assert sum(line.startswith("| ") for line in text.splitlines()) == 2 * (2 + 4 + len(watch.MATRIX_PENDING))
+    # two tables of the same rows and columns (training, evaluation): header, rule line, four starts, rows to be added;
+    # then the table of the new experiments X0-X5 (the user's decision of 2026-10-26)
+    assert sum(line.startswith("| ") for line in text.splitlines()) == (2 * (2 + 4 + len(watch.MATRIX_PENDING))
+                                                                         + 2 + len(watch.X_EXPERIMENTS))
     train, evals = text.split("## 评测")
     assert "## 训练" in train and train.count(watch.MATRIX_COLUMNS) == 1 and evals.count(watch.MATRIX_COLUMNS) == 1
     row_b = next(line for line in evals.splitlines() if line.startswith("| B 原始 7B"))
@@ -607,7 +609,8 @@ def test_matrix_lists_the_starts_and_the_pending_rows(tmp_path):
     row_s_eval = next(line for line in evals.splitlines() if line.startswith("| S 动作 SFT"))
     assert "100k：训完后由训练任务自己评" in row_s_eval and "0/1 个检查点评完" in row_s_eval
     row_b_train = next(line for line in train.splitlines() if line.startswith("| B 原始 7B"))
-    assert "r12k S0-keep（待接入）" in evals and "暂不跑" in row_b_train and "不再训练" in row_b_train
+    assert "r12k S0-keep（待接入）" in evals and "取消（你 10-26 的决定）" in row_b_train and "不再训练" in row_b_train
+    assert "| 未开始 | 取消" in row_b_train  # E3 not set up yet
 
 
 def test_merged_leaves_out_the_excluded_episodes(tmp_path):
