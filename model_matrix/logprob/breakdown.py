@@ -6,7 +6,9 @@ PPO pass is exp(d)).  Per group of tokens: count, mean |d|, mean d, and the shar
 audit's frac_abs_ratio_minus_1_gt_0p05).  Groups:
     turn            first answer of the episode / later answers
     place           the answer's first token / its 2nd-5th / the rest
-    image distance  sequence positions back to the nearest image token: < 50 / 50-99 / 100-199 / >= 200
+    image distance  sequence positions back to the nearest image token (DISTANCE_EDGES; the answers start about
+                    100 positions after the observation's image, behind its fixed text)
+    probability     vLLM's probability of the sampled token: < 0.5 / 0.5-0.9 / 0.9-0.99 / >= 0.99
     kind            format tokens (<action>, </action>, |, <|im_end|>) / the rest (action names, text), by the
                     tokenizer's decoding
 
@@ -25,7 +27,9 @@ from typing import Callable, Dict, List, Optional, Sequence
 import numpy as np
 
 FORMAT_PIECES = ("<action>", "</action>", "|", "<|im_end|>")
-DISTANCE_EDGES = (50, 100, 200)
+# the answers start after the observation's fixed text (about 100 positions after its image): finer steps there
+DISTANCE_EDGES = (50, 100, 120, 140, 160, 200)
+PROB_EDGES = (0.5, 0.9, 0.99)  # vLLM's probability of the sampled token
 
 
 def load(tokens_dir: Path, steps: Optional[Sequence[int]] = None) -> Dict[str, np.ndarray]:
@@ -66,6 +70,12 @@ def groups(rec: Dict[str, np.ndarray], is_format: Optional[np.ndarray]) -> Dict[
         lo = hi
     out[f"image distance: >= {lo}"] = dist >= lo
     out["image distance: no image before"] = dist < 0
+    p = np.exp(rec["rollout"].astype(np.float64))
+    lo = 0.0
+    for hi in PROB_EDGES:
+        out[f"token probability: {lo}-{hi}"] = (p >= lo) & (p < hi)
+        lo = hi
+    out[f"token probability: >= {lo}"] = p >= lo
     if is_format is not None:
         out["kind: format tokens"] = is_format
         out["kind: the rest"] = ~is_format

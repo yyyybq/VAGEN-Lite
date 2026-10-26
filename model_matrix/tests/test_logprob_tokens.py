@@ -47,6 +47,9 @@ class TokenRecordsTest(unittest.TestCase):
             self.assertEqual(got["place: first token"]["tokens"], 2)
             self.assertEqual(got["image distance: 0-49"]["tokens"], 5)
             self.assertEqual(got["kind: format tokens"]["tokens"], 2)
+            # vLLM probabilities exp(-1, -2, -0.5, -0.1, -0.2) = 0.37 0.14 0.61 0.90 0.82
+            self.assertEqual((got["token probability: 0.0-0.5"]["tokens"], got["token probability: 0.5-0.9"]["tokens"],
+                              got["token probability: 0.9-0.99"]["tokens"]), (2, 2, 1))
             # |exp(d) - 1| > 5%: d = 0.1 and -0.06 (exp(-0.06) = 0.942)
             self.assertAlmostEqual(got["all"]["share_ratio_off_5pct"], 0.4)
             self.assertAlmostEqual(got["turn: later answers"]["mean_abs"], round((0.06 + 0 + 0.01) / 3, 5), places=5)
