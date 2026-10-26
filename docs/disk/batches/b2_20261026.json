@@ -1,0 +1,16 @@
+{
+ "batch": "b2_20261026",
+ "approved": "the user, 2026-10-26 in the disk line: decision 2 = A (the 7-day list 5.1b deleted early: the RL speed-test checkpoints RL-SPEED-1 / RL-SPEED-2) and decision 1 = A (5.2.6, cleanup D9: StarVLA NavigateKitchen checkpoints). RLINF-SMOKE-1 (default input of downstream/rlinf/export_test.sh), the E1 weight copies (evals_src, read by the downstream watcher every pass) and the E0 checkpoints (listed by the watcher's stage-0 rows) are left to the downstream line.",
+ "items": [
+  {"id": "1b-RL-SPEED-1", "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/RL-SPEED-1",
+   "include": ["^logs_[^/]+/robocasa365_starvla_ppo/checkpoints/"],
+   "marker": "RL speed test 1: the checkpoints under logs_*/robocasa365_starvla_ppo/checkpoints/ were archived to AOSS and deleted on 2026-10-26 by the disk line (the user's decision 2 = A of 2026-10-26); logs, configs and measurements kept."},
+  {"id": "1b-RL-SPEED-2", "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/RL-SPEED-2",
+   "include": ["^logs_[^/]+/robocasa365_starvla_ppo/checkpoints/"],
+   "marker": "RL speed test 2: the checkpoints under logs_*/robocasa365_starvla_ppo/checkpoints/ were archived to AOSS and deleted on 2026-10-26 by the disk line (the user's decision 2 = A of 2026-10-26); logs, configs and measurements kept."},
+  {"id": "5.2.6-third_party", "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/starVLA/playground/Checkpoints",
+   "marker": "cleanup D9: the StarVLA NavigateKitchen checkpoints (from Qwen3-VL-4B-Action, not this project's weights) were archived to AOSS and deleted on 2026-10-26 by the disk line (the user's decision 1 = A of 2026-10-26). The examples/train|evaluate/robocasa NavigateKitchen scripts point here; restore from AOSS before running them."},
+  {"id": "5.2.6-playground", "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/playground/Checkpoints",
+   "marker": "cleanup D9: the StarVLA NavigateKitchen evaluation and smoke checkpoints were archived to AOSS and deleted on 2026-10-26 by the disk line (the user's decision 1 = A of 2026-10-26). The examples/train|evaluate/robocasa NavigateKitchen scripts point here; restore from AOSS before running them."}
+ ]
+}

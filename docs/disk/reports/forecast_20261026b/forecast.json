@@ -1,0 +1,40 @@
+{
+ "A": {
+  "crossings": {
+   "below_3.0_TB": null,
+   "below_1.5_TB": null,
+   "below_0.0_TB": null
+  },
+  "lowest_remaining_TB": 8.326,
+  "lowest_at": "2026-10-30T12:00Z",
+  "end_remaining_TB": 8.326,
+  "written_TB_by_line": {
+   "downstream": 0.623,
+   "models": 1.576
+  },
+  "freed_TB_by_line": {
+   "downstream": 0.27,
+   "models": 0.256
+  }
+ },
+ "B": {
+  "crossings": {
+   "below_3.0_TB": null,
+   "below_1.5_TB": null,
+   "below_0.0_TB": null
+  },
+  "lowest_remaining_TB": 7.363,
+  "lowest_at": "2026-10-30T12:00Z",
+  "end_remaining_TB": 7.363,
+  "written_TB_by_line": {
+   "downstream": 0.623,
+   "main": 0.597,
+   "models": 2.488
+  },
+  "freed_TB_by_line": {
+   "downstream": 0.27,
+   "main": 0.266,
+   "models": 0.536
+  }
+ }
+}

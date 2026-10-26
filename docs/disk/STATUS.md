@@ -1,81 +1,120 @@
 # 磁盘配额线状态（唯一的状态文档）
 
-最后更新：2026-10-26 07:20 UTC。
+最后更新：2026-10-26 08:50 UTC（第二步：第一、二批已执行）。
 
 这条线管 `/mnt/umm/users/yinbaiqiao`（个人目录，配额 22 TB）：量、预测、提方案、按批准的清单执行，默认只读。
 
-- 报告：[reports/](reports/)，最新的是第一步报告 [reports/DISK_INVENTORY_20261026.md](reports/DISK_INVENTORY_20261026.md)。
-- 脚本：仓库根目录 `disk/`，说明见 [README.md](README.md)。
+- 报告：[reports/](reports/)。第一步报告是 [reports/DISK_INVENTORY_20261026.md](reports/DISK_INVENTORY_20261026.md)；第一、二批的执行记录是 [reports/CLEANUP_20261026.md](reports/CLEANUP_20261026.md)。
+- 保留规则：[RETENTION_POLICY.md](RETENTION_POLICY.md)；"磁盘紧张就不提交"方案：[STOP_FLAG_PROPOSAL.md](STOP_FLAG_PROPOSAL.md)（都等你批）。
+- 脚本：仓库根目录 `disk/`，说明见 [README.md](README.md)。批次说明（批准了删什么）：[batches/](batches/)。
 - worktree：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-disk`，本地分支 `disk`，从 `origin/main` `00363333` 开出，不跟踪远端，不推送。
-- 原始扫描结果：`/mnt/umm/users/yinbaiqiao/disk_runs/`。
+- 原始结果和记录：`/mnt/umm/users/yinbaiqiao/disk_runs/`（批次记录在 `disk_runs/batches/<批次>/`，核查记录在 `disk_runs/audit/<批次>/`）。
 
 ## 1. 现在在哪一步
 
-**第一步（盘点与预测）做完，停下等你批**：报告末尾"需要你决定的事"共 7 项。第二步（清理、保留规则）和第三步（常驻监控）都还没开始。
+- 第一步（盘点与预测）：完成，你 10-26 已答复。
+- 第二步（按批准的清单清理、保留规则、标志文件方案）：第一、二批已执行，共腾出 3,571.9 GB；保留规则和标志文件方案已写好，等你批；你批了但核查没过的 0.54 TB 交回下游线，0.06 TB 等主线确认。
+- 第 6 项（probe_spatial、SenseNova-U1、Consistency 纳入这条线）：盘点进行中，结果放下一份报告。
+- 第三步（常驻监控）：按你的决定 5 提前开了，10-26 07:37 起在跑。
 
 ## 2. 汇报表
 
-以后每次汇报都用这张表，行列不变，只改数字和时间；没有变化不汇报。
+以后每次汇报都用这张表，行列不变，只改数字和时间；没有变化不汇报。剩余 = 22 TB − 配额表读数（你的决定 4）。
 
-| 项 | 数值 | 时间（UTC） | 来源和误差 |
+| 项 | 数值 | 时间（UTC） | 说明 |
 | --- | --- | --- | --- |
-| 配额 | 21.99 TB | 10-26 07:00 | 配额表"22 TB"，按 20 TiB 算（推断，待管理员确认） |
-| 已用（配额表） | 16 TB | 10-26 07:00 | 两位有效数字，即 15.5–16.5 TB；配额按它算 |
-| 已用（文件系统统计） | 14.23 TB | 10-26 06:57 | `quarkfs.dir.rfbytes`，精确到字节，但比配额表少 1.6–2.3 TB，原因未查清 |
-| 剩余（保守） | 5.49 TB | 10-26 07:00 | 21.99 − （配额表读数 + 0.5）；报警按这个 |
-| 剩余（估计） | 5.5–6.2 TB | 10-26 07:00 | 21.99 − （文件系统统计 + 差额 1.58–2.27） |
-| 过去 1 小时净增 | 0.31 TB | 06:06–06:57 | 文件系统统计之差，全部来自模型线 |
-| 7 天内最低剩余：情形 A / B | 3.25 / 2.16 TB | 预测于 10-26 07:00 | 报告第 4 节；B 在 10-27 02:00 跌破 3 TB |
-| 已批清单执行 | 0 / 0 TB | — | 还没有批准的清单 |
-| 监控 | 未启动 | — | 等决定 5 |
+| 配额 | 22 TB | — | 按你的决定 4 |
+| 已用（配额表） | 12 TB | 10-26 08:44 | 两位有效数字，±0.5 TB |
+| 剩余 | 10 TB | 10-26 08:44 | 22 − 配额表读数 |
+| 已用（文件系统统计） | 9.73 TB | 10-26 08:44 | 只看变化趋势 |
+| 本步已腾出 | 3.57 TB | 10-26 08:28 | 第一批 2,976.9 GB、第二批 595.0 GB |
+| 7 天内最低剩余（情形 A / B） | 8.33 / 7.36 TB | 预测于 10-26 08:44 | 都不会碰 3 TB 线 |
+| 监控 | 在跑，PID 3053041 | 10-26 07:37 起 | 见第 6 节 |
 
-## 3. 各线占用（10-26 06:34–07:03，文件系统统计）
+## 3. 你的决定（10-26）
 
-| 线 | 占用（TB） | 主要目录 | 现在写不写 |
-| --- | ---: | --- | --- |
-| 主线 | 2.95 | `VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_*` | 不写（无任务） |
-| 主线旧产物（pilot r3、R1） | 2.20 | 同上目录下 `dense_score_reward_only_pilot_parallel_r3_20261009`、`R1-*`、`r1_h1_aoss_repair_*` | 不写 |
-| 整理窗口和主 checkout 其他 | 0.76 | `VAGEN-Lite/{archive,models,third_party,data_gen,playground}`、`VAGEN-Lite/exps/{unified_eval_runs,interiorgs_qa_*}` | 不写 |
-| 下游 | 2.63（+ 借用 0.54） | `downstream_runs/`（借用 `probe_spatial/robocasa365`） | 写（2 个训练、3 个评测） |
-| 模型线 | 0.92 | `models_runs/` | 写，最快（两个正式 SFT、两个下游、两条测试链） |
-| 评测线 | 0.16 | `eval_external_assets/` | 不写 |
-| 数据线 | 0.004 | `VAGEN-Lite-data` | 不写 |
-| probe_spatial 项目（不在列出的线里） | 3.13 | `probe_spatial/`、`InsScene-15K/` | 34 个任务今早刚结束 |
-| 归属不明 | 0.47 | `SenseNova-U1/`、`Consistency/` | 不写 |
-| 共用（环境、缓存、场景数据、worktree） | 0.43 | `.cache`、`.conda`、`InteriorGS_ply` 等 | — |
-| 合计 | 14.23 | | |
+| 编号 | 决定 | 执行 |
+| --- | --- | --- |
+| 1 | 甲：批第一批清理清单 | 5.2.1、5.2.4、5.2.5 在第一批；5.2.6 在第二批；5.2.3（E0 检查点）因下游看板会读，交给下游线处理 |
+| 2 | 甲："满 7 天即可删"提前删 | 主线组合链续训状态在第一批；RL-SPEED-1/2 在第二批；`evals_src` 因下游看板每轮都会读、RLINF-SMOKE-1 是下游导出测试脚本的默认输入，交给下游线处理 |
+| 3 | 公开下载的模型和数据集不删 | "立刻可删"清单（0.15 TB）作废；RoboCasa365 的 `pretrain` 数据同样不删 |
+| 4 | 不问管理员，按 22 TB 用 | 剩余按 22 − 配额表读数算；文件系统统计只看趋势 |
+| 5 | 甲：现在开监控 | 07:37 已开（第 6 节）；不写停止提交的标志 |
+| 6 | probe_spatial、SenseNova-U1、Consistency 纳入这条线 | 盘点进行中，结果放下一份报告 |
+| 7 | （10-22 报错）没有答复 | 待你告诉在哪看到的 |
 
-## 4. 预测
+另外：下游线 07:14–07:16 按你在那边给的决定，自己删了 11 份已训完实验的全状态（1,296.8 GB，记录 `downstream_runs/logs/delete_full_states_20261026.txt`，没有上传 AOSS），也就是我清单里的 5.2.2，从清单划掉。
 
-见报告第 4 节和下图（输入 `reports/forecast_plan_20261026.json`，重算：`python disk/forecast.py docs/disk/reports/forecast_plan_20261026.json --out docs/disk/reports/forecast_20261026`）。
+## 4. 清理批次
 
-![剩余空间预测](reports/forecast_20261026/forecast.png)
+| 批次 | 内容 | 文件数 | 大小 | 上传 AOSS | 核查 | 删除 | 腾出 |
+| --- | --- | ---: | ---: | --- | --- | --- | ---: |
+| b1_20261026 | pilot r3 分片 1,692.0 GB；主线 9 个组合运行的续训状态 895.5 GB；R1 taskfix 第 50–200 步 165.9 GB；整理归档区 6 个子目录 223.5 GB | 10,583 | 2,976.9 GB | 08:20 完成，0 个不符 | 通过（`disk_runs/audit/b1/CONCLUSION.md`） | 08:24 完成 | 2,976.9 GB |
+| b2_20261026 | RL-SPEED-1、RL-SPEED-2 的检查点 471.8 GB；StarVLA NavigateKitchen 检查点 123.3 GB | 105 | 595.0 GB | 08:27 完成，0 个不符 | 通过（`disk_runs/audit/b2/CONCLUSION.md`） | 08:28 完成 | 595.0 GB |
+| 交给下游 | E1 权重副本 134.8 GB、E0 检查点 269.6 GB、RLINF-SMOKE-1 检查点 134.8 GB | — | 539.2 GB | — | 下游代码会读，未通过 | — | — |
+| 等主线确认 | 两次 3B 试跑 62.6 GB | — | 62.6 GB | — | — | — | — |
+| AOSS 测速对象 | `disk_line_speedtest_20261026/base7b_shard1.safetensors` | 1 | 3.9 GB | — | — | 08:30 已删（记录 `disk_runs/logs/aoss_speedtest_object_deleted.txt`） | 不占配额 |
 
-## 5. 清单执行情况
+## 5. 预测
 
-| 清单 | 内容 | 大小 | 状态 |
-| --- | --- | ---: | --- |
-| 5.1 立刻可删 | 评测线的公开模型和数据集下载 | 0.15 TB | 等批 |
-| 5.1b 满 7 天即可删 | 主线组合链续训状态、下游 RL 测试检查点、下游 E1 权重副本 | 1.64 TB | 等批（10-29 起陆续到期） |
-| 5.2 归档后可删 | pilot r3 分片、下游全状态、E0 检查点、R1、整理归档区、StarVLA NavigateKitchen、主线 3B 试跑 | 3.84 TB | 等批；5.2.2 等下游线确认，5.2.7 等主线确认 |
-| 整理窗口移交项 | D7b → 5.2.1；D9 → 5.2.6；其余（D5、D6、D7a、D7c、D8、D10、冒烟残留）已由整理窗口做完 | — | — |
-| AOSS 测速对象 | `fj:s3://baiqiao/disk_line_speedtest_20261026/base7b_shard1.safetensors` | 3.9 GB | 列进第一批 |
+清理后按各线最新计划重算（输入 `reports/forecast_plan_20261026b.json`，起点 08:44 配额表 12 TB）。重算命令：`python disk/forecast.py docs/disk/reports/forecast_plan_20261026b.json --out docs/disk/reports/forecast_20261026b`。
+
+![清理后的剩余空间预测](reports/forecast_20261026b/forecast.png)
+
+情形 A（在跑的和已批的）最低剩余 8.33 TB；情形 B（再加 Qwen3 的 RL、主线可能的 2 个 RL）最低 7.36 TB。曲线第二天以后变平只是因为没有已知的新计划；过去 4 天平均每天涨 2.3 TB。
 
 ## 6. 监控
 
-还没启动（等决定 5）。启动、停止、查看的命令写在这里，断了按这里重启。
+在登录节点后台跑，每 30 分钟一次：
+
+- 读配额表和文件系统统计，追加到 `docs/disk/usage.csv`；
+- 剩余低于 3 TB 写 `disk_runs/WARN_DISK_LOW` 并记事件，低于 1.5 TB 再记一次，回到 3 TB 以上时删掉这个警告文件；
+- 每天一次按一级目录记大小，写 `docs/disk/daily_top.csv` 和 `docs/disk/daily_growth.md`（哪条线涨得最快）；
+- 事件记在 `disk_runs/monitor_events.jsonl`。
+
+不写停止提交的标志（等 `STOP_FLAG_PROPOSAL.md` 批了再开）。本机另有一个监看，每 5 分钟读一次事件，有警告就报你；它随本会话停止，监控本身不受影响。
+
+断了用下面的命令重启（在 worktree 里执行）：
+
+```bash
+bash disk/monitor.sh start
+```
+
+```bash
+bash disk/monitor.sh status
+```
+
+```bash
+bash disk/monitor.sh stop
+```
 
 ## 7. 要转告的事（不改其他线的文件）
 
-- 整理窗口：`VAGEN-Lite/models/` 下 8 个登记链接已断（`interiorgs_v10_rl_r6b_qwen25vl7b_step*` 7 个、`interiorgs_v10_sft_r6b_qwen25vl7b`），目标在 10-25 主线清理时删掉了。
-- 模型线：正式 SFT 选完 epoch 后，没选中的 epoch 和 `model/` 下多存的最终模型约 0.65 TB 可清。
-- 下游线：5.1b、5.2.2、5.2.3 涉及它的目录，执行前要它确认。
-- 主线：5.1b（组合链续训状态）、5.2.7（3B 试跑）涉及它的目录。
+- 下游线：
+  - 磁盘线已删 RL-SPEED-1、RL-SPEED-2 的检查点（先传了 AOSS，目录里留了说明文件）。
+  - `evals_src`（134.8 GB）、E0 检查点（269.6 GB）、RLINF-SMOKE-1 检查点（134.8 GB）你也批了，但下游代码会读，所以磁盘线没动：
+    - 看板 `copy_weights` 只看 `evals_src/…/source.json` 在不在，不看评测是否完成，副本删了会把这个点显示成"等全状态"；
+    - 看板 `stage0_row` 按 `run_stopped_20261022/checkpoints` 里的文件列阶段 0 那几行；
+    - `downstream/rlinf/export_test.sh` 的默认输入是 RLINF-SMOKE-1 第 2 步的权重。
+  - 请下游线改好这几处后自己删，或者告诉磁盘线可以删。
+- 主线：
+  - 9 个组合运行最后一个检查点的续训状态已上传 AOSS 后删除，每个目录里写了 `RESUME_STATE_DELETED`，做法和你 10-25 的清理相同。
+  - pilot r3 的分片、R1 taskfix 第 50–200 步也已上传后删除。
+  - 两次 3B 试跑（62.6 GB）要不要删，等主线确认。
+- 整理窗口：
+  - `archive/cluster/` 下 6 个子目录（`interiorgs_v10_rounds`、`dense_score_pilot`、`r1`、`logs`、`data_intermediate`、`diagnostics_d0_u1`）已上传 AOSS 后删除，`archive/cluster/DELETED_TO_AOSS_20261026.txt` 写了去向，请更新 `archive/README.md`。
+  - `VAGEN-Lite/models/` 下 8 个登记链接已断（10-25 主线清理删了目标）。
+- 模型线：保留规则 R1、R2（见 `RETENTION_POLICY.md`）：正式 RL 的 plan 设 `"retain": "best_and_last"`；SFT 选完 epoch 后删没选中的，`model/` 下的最终模型只留一份。
 
 ## 8. 本线的规则和教训
 
-- 默认只读。删除只按你批过的清单做，清单外一个文件都不删。删前先归档到 AOSS 并逐文件核对大小（清单本地和 AOSS 各一份），再用整理窗口的 `scripts/cluster/audit_archived_paths.sh` 确认没人读，最后打印完整列表和总大小后再删。
-- 不碰的：依赖清单和各线 STATUS 里标为在用的目录、root 属主的、别人名下的、在跑的任务。不移动目录。
-- 不用 GPU，不提交 sco 任务（测 AOSS 上传要用 sco 时先问）。
-- 递归扩展属性由服务器现算：一次只发一个查询；绝不对 `/mnt/umm` 或 `/mnt/umm/users` 求和。10-26 05:55 误对整卷发过一次，文件服务器慢了约 40 分钟；查询进程卡在不可中断状态，要等服务器算完才退出。
-- AOSS 的 `list_objects_v2` 翻页不可靠（`IsTruncated` 为真却没有续页令牌），列对象一律用 v1 的 `Marker` / `NextMarker`（`disk/aoss_check.py`）。
+- 默认只读。删除只按你批过的清单做，清单外一个文件都不删。
+- 删除的流程：
+  1. 先上传 AOSS 并逐文件核对大小，清单本地和 AOSS 各一份（`disk/archive_delete.py archive`）；
+  2. 用整理窗口的 `scripts/cluster/audit_archived_paths.sh` 加补查，确认没人读；
+  3. 删前再核对文件没变，打印完整列表和总大小再删，留逐文件记录（`disk/archive_delete.py delete --yes`）。
+- 不碰的：依赖清单和各线 STATUS 里标为在用的目录、root 属主的、别人名下的、在跑的任务。不移动目录。代码会读的，即使在批准的清单里也先不删，交回那条线。
+- 不用 GPU，不提交 sco 任务。
+- 递归扩展属性由服务器现算：一次只发一个查询；绝不对 `/mnt/umm` 或 `/mnt/umm/users` 求和。
+- AOSS 的 `list_objects_v2` 翻页不可靠，列对象一律用 v1 的 `Marker` / `NextMarker`。
+- 通过 ssh 传给集群的命令里不能有英文撇号（会截断单引号）；带文字的文件先在本地写好再传。

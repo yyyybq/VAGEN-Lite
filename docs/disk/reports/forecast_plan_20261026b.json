@@ -1,0 +1,40 @@
+{
+ "title": "Free space of /users/yinbaiqiao after clean-up batches 1-2, 2026-10-26 09:00 to 11-02 09:00 UTC",
+ "start": "2026-10-26T09:00Z",
+ "days": 7,
+ "quota_bytes": 22000000000000,
+ "used_bytes": 12000000000000,
+ "note": "used_bytes = the quota-table reading of 08:44 after clean-up batches 1-2 (12 TB; decision 4: 22 TB, the table as it reads; quarkfs rfbytes 9.727 TB). Plan changes since forecast_plan_20261026.json: downstream full states deleted by the downstream line (07:14), E3 = 4 RL runs queued (B, RS, S, RD; two at a time), E4 cancelled; model line Qwen3 RL held (its decision 19), so Cambrian RL runs first; Qwen3 SFT done about 08:15.",
+ "scenarios": {
+  "A": {"include": ["A"], "label": "A: running + approved"},
+  "B": {"include": ["A", "B"], "label": "B: A + held / pending"}
+ },
+ "tasks": [
+  {"name": "models: Cambrian-S formal SFT, about 5 more epochs (31.3 GB) + final copy in model/ (31.3 GB)", "line": "models", "tags": ["A"],
+   "ramp": [["2026-10-26T09:00Z", "2026-10-26T11:30Z", 187.8e9]]},
+  {"name": "models: DS-Q3B-100-s1 full state at 25k steps, final weights", "line": "models", "tags": ["A"],
+   "step": [["2026-10-26T12:40Z", 123e9], ["2026-10-28T12:00Z", 17.6e9]]},
+  {"name": "models: DS-CSB-100-s1 full state at 25k steps, final weights", "line": "models", "tags": ["A"],
+   "step": [["2026-10-26T17:50Z", 116e9], ["2026-10-29T21:00Z", 16.6e9]]},
+  {"name": "models: Cambrian-S RL two arms (5 x 32 GB + last 128.5 GB each); best and last kept afterwards (assumed: the formal plan sets retain)", "line": "models", "tags": ["A"],
+   "ramp": [["2026-10-26T13:00Z", "2026-10-26T20:45Z", 577e9]], "step": [["2026-10-26T21:30Z", -256e9]]},
+  {"name": "models: downstream DS-Q3S from the Qwen3 SFT pick (54 h)", "line": "models", "tags": ["A"],
+   "step": [["2026-10-26T17:15Z", 123e9], ["2026-10-28T16:30Z", 17.6e9]]},
+  {"name": "models: downstream DS-CSS from the Cambrian SFT pick (86 h)", "line": "models", "tags": ["A"],
+   "step": [["2026-10-27T00:00Z", 116e9], ["2026-10-30T03:00Z", 16.6e9]]},
+  {"name": "models: downstream DS-CSRS, DS-CSRD from the Cambrian RL arms (86 h)", "line": "models", "tags": ["A"],
+   "step": [["2026-10-27T08:15Z", 232e9], ["2026-10-30T11:30Z", 33.2e9]]},
+  {"name": "downstream: E2 DS-B-010-s1 final weights", "line": "downstream", "tags": ["A"],
+   "step": [["2026-10-26T14:00Z", 16.8e9]]},
+  {"name": "downstream: E3 RL B and RS (2 x 67.4 GB checkpoints while running, last one kept, export 16.8 GB each)", "line": "downstream", "tags": ["A"],
+   "ramp": [["2026-10-26T09:00Z", "2026-10-27T07:00Z", 269.6e9]], "step": [["2026-10-27T07:00Z", -134.8e9], ["2026-10-27T07:00Z", 33.6e9]]},
+  {"name": "downstream: E3 RL S and RD", "line": "downstream", "tags": ["A"],
+   "ramp": [["2026-10-27T07:00Z", "2026-10-28T05:00Z", 269.6e9]], "step": [["2026-10-28T05:00Z", -134.8e9], ["2026-10-28T05:00Z", 33.6e9]]},
+  {"name": "models: Qwen3-VL RL two arms (held by the model line's decision 19) (5 x 35 GB + last 140 GB each); best and last kept", "line": "models", "tags": ["B"],
+   "ramp": [["2026-10-27T06:00Z", "2026-10-27T13:10Z", 630e9]], "step": [["2026-10-27T14:00Z", -280e9]]},
+  {"name": "models: downstream DS-Q3RS, DS-Q3RD after the Qwen3 RL (54 h)", "line": "models", "tags": ["B"],
+   "step": [["2026-10-27T21:00Z", 246e9], ["2026-10-29T20:00Z", 35.2e9]]},
+  {"name": "main line: up to two new 8-card RL runs (5 x 33.2 GB + last 132.7 GB each); best and last kept", "line": "main", "tags": ["B"],
+   "ramp": [["2026-10-26T12:00Z", "2026-10-26T18:15Z", 597.2e9]], "step": [["2026-10-26T19:00Z", -265.6e9]]}
+ ]
+}

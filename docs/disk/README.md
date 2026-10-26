@@ -16,5 +16,9 @@
 | `disk/forecast.py` | 按计划任务算 7 天剩余空间曲线 | `--out` 目录 |
 | `disk/aoss_check.py` | AOSS 桶的用量、归档清单核对、上传下载测速 | 只有 `upload` 子命令会在 AOSS 上建对象 |
 | `disk/run_inventory.sh` | 依次跑 xtree、walk、du | `disk_runs/raw/inventory_<时间>/` |
+| `disk/archive_delete.py` | 一个批准批次的归档和删除：`plan`（列完整清单和总大小）、`archive`（上传 AOSS、逐文件核对大小、清单本地和 AOSS 各一份）、`delete --yes`（删前再核对、打印清单、删、逐文件记录、写说明文件） | `disk_runs/batches/<批次>/`；AOSS `vagen_lite_archive/` |
+| `disk/monitor.py`、`disk/monitor.sh` | 常驻监控：每 30 分钟记配额表和文件系统统计，低于 3 TB 写警告文件，每天按一级目录记增量 | `docs/disk/usage.csv`、`daily_top.csv`、`daily_growth.md`；`disk_runs/monitor_*` |
+
+批次说明（批准了删什么、留什么、说明文件写在哪）放在 `docs/disk/batches/<批次>.json`。
 
 注意（2026-10-26 的教训）：递归扩展属性由服务器现算，代价和子树里的目录数成正比。一次只跑一个；绝不对 `/mnt/umm` 或 `/mnt/umm/users` 求和（约 1.8 亿个条目，会让文件服务器对所有人变慢，进程卡在不可中断状态直到算完）。
