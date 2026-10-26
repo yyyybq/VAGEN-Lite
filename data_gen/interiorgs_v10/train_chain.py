@@ -854,6 +854,9 @@ class Chain:
             env["VAGEN_D0_3_SMOKE_DIR"] = str(self.tr / "logprob_audit")
         if self.plan.get("gpu_log"):  # the model line (2026-10-25): each card's memory in RUN/logs/gpu_mem_<mode>.csv
             env["VAGEN_LITE_GPU_LOG"] = "1"
+        if self.plan.get("trainer_attn"):  # the model line (2026-10-26): the trainer's attention (verl fsdp_workers
+            # reads TRANSFORMERS_ATTN_IMPLEMENTATION), over the type's own; e.g. "sdpa" for the Qwen3-VL control
+            env["TRANSFORMERS_ATTN_IMPLEMENTATION"] = str(self.plan["trainer_attn"])
         return env
 
     def check_code(self) -> None:
@@ -1124,7 +1127,8 @@ class Chain:
                     args += [flag, ",".join(str(x) for x in value) if isinstance(value, (list, tuple)) else str(value)]
             for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val"),
                               ("lenient_parse", "--lenient-parse"), ("invalid_turn_nonpositive", "--invalid-turn-nonpositive"),
-                              ("logprob_audit", "--rollout-log-probs")):  # the model line: the log-probability audit
+                              ("logprob_audit", "--rollout-log-probs"),  # the model line: the log-probability audit
+                              ("logprob_tokens", "--logprob-tokens")):  # and its per-token files (2026-10-26)
                 if rl.get(key):
                     args.append(flag)
             if self.plan.get("model_type"):  # the model line: the type's PPO-config overrides (model_types.rl_overrides)

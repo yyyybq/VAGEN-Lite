@@ -195,6 +195,11 @@ class ChainTest(unittest.TestCase):
             self.assertTrue({"HF_HUB_CACHE", "SIGLIP_CACHE", "CAMBRIAN_SRC", "VAGEN_LITE_GPU_LOG",
                              "TRANSFORMERS_ATTN_IMPLEMENTATION"} <= set(J.PASS_ENV))
             self.assertEqual(self._chain(tmp, gpu_log=True).job_env(), {"VAGEN_LITE_GPU_LOG": "1"})
+            # 2026-10-26: plan "trainer_attn" sets the trainer's attention, over the type's own
+            q3 = self._chain(tmp, model_type="qwen3_vl", trainer_attn="sdpa").job_env()
+            self.assertEqual(q3["TRANSFORMERS_ATTN_IMPLEMENTATION"], "sdpa")
+            self.assertEqual(self._chain(tmp, model_type="cambrian_qwen", trainer_attn="eager").job_env()
+                             ["TRANSFORMERS_ATTN_IMPLEMENTATION"], "eager")
 
     def test_idle_pool_waits_for_the_main_line_and_an_idle_machine(self):
         from model_matrix import sco_view
@@ -339,7 +344,12 @@ class ChainTest(unittest.TestCase):
             chain.rl_config()
             rl = next(a for a in calls if "rl-config" in a)
             self.assertIn("--rollout-log-probs", rl)
+            self.assertNotIn("--logprob-tokens", rl)
             self.assertEqual(rl[rl.index("--model-type") + 1], "qwen3_vl")  # the type's PPO-config overrides
+            calls.clear()
+            chain.plan["rl"]["logprob_tokens"] = True  # 2026-10-26: the per-token files
+            chain.rl_config()
+            self.assertIn("--logprob-tokens", next(a for a in calls if "rl-config" in a))
             calls.clear()
             plain = self._chain(tmp, model="/m", sft_records=False, sft_groups={"formal": "traj.jsonl"},
                                 gs_root="/ply", rl={"standard": "v10_p1_S0"})

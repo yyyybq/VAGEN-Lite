@@ -735,6 +735,13 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         if ((ppo.get("algorithm") or {}).get("rollout_correction") or {}).get("rollout_is") is not None:
             raise SystemExit("--rollout-log-probs is an audit: the template must not turn on the rollout correction")
         _set(ppo, "actor_rollout_ref.rollout.calculate_log_probs", True)
+    if getattr(args, "logprob_tokens", False):
+        # the model line (2026-10-26, the user's decision 1): with the audit, every response token's two
+        # log-probabilities, its turn and its distance from the last image token, one file per update
+        # (vagen/logprob_tokens.py, into VAGEN_D0_3_SMOKE_DIR/tokens); the update is unchanged
+        if not getattr(args, "rollout_log_probs", False):
+            raise SystemExit("--logprob-tokens needs --rollout-log-probs (the rollout's log-probabilities)")
+        _set(ppo, "trainer.logprob_tokens", True)
     if getattr(args, "progress_adv_weight", None) is not None:  # round 12 freeze, V8 (vagen/split_reward_adv.py)
         if not history["env"].get("enable_potential_shaping_reward"):
             raise SystemExit("--progress-adv-weight splits the dense reward's progress part: give a dense --reward-preset")
@@ -812,6 +819,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "lenient_parse": bool(getattr(args, "lenient_parse", False)),
               "invalid_turn_nonpositive": bool(getattr(args, "invalid_turn_nonpositive", False)),
               "rollout_log_probs": bool(getattr(args, "rollout_log_probs", False)),
+              "logprob_tokens": bool(getattr(args, "logprob_tokens", False)),
               "model_type": getattr(args, "model_type", None), "model_type_overrides": type_overrides,
               "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
@@ -1131,6 +1139,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--rollout-log-probs", action="store_true",
                    help="the model line: vLLM also returns each sampled token's log-probability, for the per-update "
                         "comparison with the trainer's (an audit; the update is unchanged)")
+    c.add_argument("--logprob-tokens", action="store_true",
+                   help="the model line: with --rollout-log-probs, a file per update with every response token's two "
+                        "log-probabilities, turn and distance from the last image token (vagen/logprob_tokens.py)")
     c.add_argument("--model-type", default=None,
                    help="the model line: the start model's type (vagen/models/model_types.py, checked against its "
                         "config.json) and its PPO-config overrides (none for the Qwen types)")

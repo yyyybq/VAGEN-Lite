@@ -673,6 +673,17 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertFalse(report0["rollout_log_probs"])
         self.assertIsNone(((ppo7.get("algorithm") or {}).get("rollout_correction") or {}).get("rollout_is"))
         self.assertFalse(((ppo7.get("actor_rollout_ref") or {}).get("actor") or {}).get("use_rollout_log_probs", False))
+        # 2026-10-26: its per-token files (trainer.logprob_tokens, vagen/logprob_tokens.py), only with the audit
+        _, report8 = config("rl_logprob_tokens", sft_trajectories=[str(convs["placeholder"])],
+                            format_example="placeholder", rollout_log_probs=True, logprob_tokens=True)
+        ppo8 = yaml.safe_load((self.root / "rl_logprob_tokens" / "ppo.yaml").read_text())
+        self.assertTrue(ppo8["trainer"]["logprob_tokens"] and report8["logprob_tokens"])
+        self.assertNotIn("logprob_tokens", ppo7["trainer"])
+        self.assertEqual(set(ppo8["trainer"]) - set(ppo7["trainer"]), {"logprob_tokens"})  # paths aside, the same
+        self.assertEqual(ppo8["actor_rollout_ref"], ppo7["actor_rollout_ref"])
+        with self.assertRaisesRegex(SystemExit, "needs --rollout-log-probs"):
+            config("rl_logprob_tokens_alone", sft_trajectories=[str(convs["placeholder"])],
+                   format_example="placeholder", logprob_tokens=True)
 
     def test_rl_config_model_type(self):
         """The model line (2026-10-24): --model-type checks the start model's type and adds the type's PPO-config

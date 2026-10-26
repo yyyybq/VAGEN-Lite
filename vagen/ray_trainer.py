@@ -2633,6 +2633,15 @@ class RayPPOTrainer:
                                             global_step=self.global_steps,
                                         )
                                     )
+                                if d0_3_dir and self.config.trainer.get("logprob_tokens", False):
+                                    # the model line (2026-10-26): every response token's two log-probabilities
+                                    from vagen.logprob_tokens import write_logprob_tokens
+
+                                    metrics.update(
+                                        write_logprob_tokens(
+                                            batch, os.path.join(d0_3_dir, "tokens"), self.global_steps, self.tokenizer
+                                        )
+                                    )
                                 d0_4_dir = os.environ.get("VAGEN_D0_4_DIR")
                                 if d0_4_dir:
                                     metrics.update(
