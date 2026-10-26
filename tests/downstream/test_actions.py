@@ -13,7 +13,7 @@ import sys
 import unittest
 
 # Make the repo importable without installing the package.
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+REPO = next(d for d in (os.path.abspath(os.path.join(os.path.dirname(__file__), *[".."] * k)) for k in range(8)) if os.path.isfile(os.path.join(d, "setup.py")))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 

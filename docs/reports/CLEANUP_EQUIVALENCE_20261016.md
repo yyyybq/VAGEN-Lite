@@ -19,7 +19,7 @@
 
 - **套件 A**：仓库的全部测试，即 `pytest.ini` 里列出的测试目录。
 - **套件 B**：`scripts/check_active_spatial_cpu.sh` 列出的环境核心测试。
-- **固定输出**：G1–G4 四步小规模真实运行的产物，由 `scripts/cluster/golden_outputs.sh` 生成。G1 用第十轮生成配置生成 2 个场景的题；G2 在环境里每个题族回放 5 道题；G3 做场景划分和 SFT 帧列表；G4 在第八轮评测结果的副本上重算评测表。
+- **固定输出**：G1–G4 四步小规模真实运行的产物，由 `tests/regression/golden_outputs.sh` 生成。G1 用第十轮生成配置生成 2 个场景的题；G2 在环境里每个题族回放 5 道题；G3 做场景划分和 SFT 帧列表；G4 在第八轮评测结果的副本上重算评测表。
 
 ## 结果
 
@@ -39,7 +39,7 @@
 - `gen/per_scene.csv` 的 `seconds` 列，即每个场景的生成耗时。
 - `gen/scenes/0001_839920.json` 和 `gen/scenes/0002_839955.json` 里的 `timings` 和 `summary.seconds`。
 
-去掉这些字段后，3 个文件逐字段相同。判断由 `scripts/cluster/compare_golden.py` 完成。
+去掉这些字段后，3 个文件逐字段相同。判断由 `tests/regression/compare_golden.py` 完成。
 
 G4 重算的表和第八轮存档的 `table.md` 不一样，整理前后都是如此。原因是存档表由旧代码写成，第十一轮给表加了列。这里只比较整理前后两次新算出的表，二者逐字节相同。
 
@@ -66,9 +66,9 @@ G4 重算的表和第八轮存档的 `table.md` 不一样，整理前后都是�
 ## 复现
 
 ```bash
-ROOT=/tmp/psv/base_wt GOUT=/tmp/psv/base_wt/exps/_cleanup_golden_base bash scripts/cluster/golden_outputs.sh
-ROOT=$PWD GOUT=$PWD/exps/_cleanup_golden_after2 bash scripts/cluster/golden_outputs.sh
-python scripts/cluster/compare_golden.py /tmp/psv/base_wt/exps/_cleanup_golden_base exps/_cleanup_golden_after2
+ROOT=/tmp/psv/base_wt GOUT=/tmp/psv/base_wt/exps/_cleanup_golden_base bash tests/regression/golden_outputs.sh
+ROOT=$PWD GOUT=$PWD/exps/_cleanup_golden_after2 bash tests/regression/golden_outputs.sh
+python tests/regression/compare_golden.py /tmp/psv/base_wt/exps/_cleanup_golden_base exps/_cleanup_golden_after2
 ```
 
 测试日志和两边的固定输出存在集群 `exps/_cleanup_equivalence_20261016/`（主检出下）。后面每一批代码搬动之后都按同样方法再比一次。

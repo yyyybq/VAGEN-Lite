@@ -75,7 +75,7 @@ Geometry notes worth knowing:
 | run_scene.py, run_all.py, sco_*.sh | lead (integration) |
 
 Tests: `tests/test_<your_module>.py`, stdlib `unittest` (pytest is NOT
-installed), run with `python3 -m unittest discover -s data_gen/interiorgs_v10/tests -t .`
+installed), run with `python3 -m pytest tests` (the generator's tests are in `tests/datagen/` since the 2026-10 cleanup)
 from the repo root. Use the synthetic scenes; never require network or GPUs.
 Code must run on Python 3.10 (cluster) — avoid 3.11+ only syntax/APIs.
 Every rejection must be counted in a `Funnel` with a stable reason string.

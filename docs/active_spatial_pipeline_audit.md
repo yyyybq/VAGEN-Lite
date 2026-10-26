@@ -33,12 +33,12 @@ CPU 回归覆盖混合数据场景隔离、审计字段排除、失效 QA/图片
 
 ```bash
 PYTHONPATH="$PWD" /mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python -m pytest -q \
-  tests/active_spatial/test_training_handoff.py \
+  tests/training/test_training_handoff.py \
   data_gen/active_spatial_qa/test_qa_contract.py \
   data_gen/active_spatial_qa/test_position_pipeline.py \
   data_gen/active_spatial_qa/test_all_no_diagnosis.py \
-  tests/test_starvla_transfer.py vagen/envs/robocasa/tests/test_actions.py \
-  tests/active_spatial/test_r1_sft_pipeline.py
+  tests/downstream/test_starvla_transfer.py tests/downstream/test_actions.py \
+  tests/datagen/test_r1_sft_pipeline.py
 
 PYTHONPATH="$PWD/third_party/RLinf:$PWD/third_party/starVLA" \
   third_party/RLinf/.venv/bin/python -m pytest -q \

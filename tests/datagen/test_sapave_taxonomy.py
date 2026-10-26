@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file())
 sys.path.insert(0, str(ROOT))
 
 from data_gen.sapave.taxonomy import (

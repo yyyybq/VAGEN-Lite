@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One equivalence round of the cleanup (CPU only, login node, about 15 minutes):
-#   ROOT=<checkout> OUT=<new dir> bash scripts/cluster/check_round.sh
+#   ROOT=<checkout> OUT=<new dir> bash tests/regression/check_round.sh
 # Writes OUT/{suiteA.xml,suiteA.log,suiteB.xml,suiteB.log,golden/,commit.txt}. Suite A = every test root
 # (TEST_PATHS, default: the roots of the cleaned layout that exist in ROOT); suite B = scripts/check_active_spatial_cpu.sh.
 # Golden outputs come from $TOOLS/golden_outputs.sh (default: the directory of this script).
@@ -11,6 +11,7 @@ ROOT=$(realpath "${ROOT:?checkout}"); OUT=$(realpath -m "${OUT:?output dir}")
 PY=${PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python}
 mkdir -p "$OUT"; cd "$ROOT"; git rev-parse HEAD > "$OUT/commit.txt"
 DEFAULT_PATHS=""
+# the layout before the test reorganization, so a round on an older checkout runs the same suite
 for p in tests data_gen/interiorgs_v10/tests vagen/envs/robocasa/tests data_gen/active_spatial_pipeline/test_enhanced_validation.py; do
   [ -e "$p" ] && DEFAULT_PATHS="$DEFAULT_PATHS $p"
 done

@@ -24,7 +24,7 @@
 0. 同步代码（在本机执行）：
    `scp -r data_gen/interiorgs_v10 fujian:/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/`
    然后 `ssh fujian "find $R/data_gen/interiorgs_v10 -name __pycache__ -prune -exec rm -rf {} +"`（可选）。
-1. 测试：`cd $R && $PY -m unittest discover -s data_gen/interiorgs_v10/tests -t .`（应为 92 个通过）。
+1. 测试：`cd $R && $PY -m pytest tests`（2026-10 整理后测试都在 `tests/` 下；当时生成器的测试是 92 个）。
    集群是 Python 3.10–3.12，若有语法/numpy 版本问题先修。
 2. 看一眼真实数据格式：`ls $D | head; ls $D | wc -l`；任取一个场景，打印 labels.json 前 2 个对象和 structure.json 的顶层键，
    确认与 `scene.py` 的假设一致（labels: ins_id/label/bounding_box 8×{x,y,z}，Z 向上；structure: rooms[].profile, holes[] type DOOR）。

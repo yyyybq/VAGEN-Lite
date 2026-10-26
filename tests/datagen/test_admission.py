@@ -20,7 +20,7 @@ from data_gen.interiorgs_v10 import sampling
 from data_gen.interiorgs_v10.scene import load_scene
 from data_gen.interiorgs_v10.testing.synthetic_scene import write_synthetic_scenes
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file())
 SEQS = [list(s) for n in (2, 3) for s in itertools.product(C.ACTIONS, repeat=n)]
 # (scene, A id, B id, relation, terminal x, y, yaw_deg, certificate) found by search on the synthetic scenes;
 # d* of each initial state equals the certificate length (verified again in _episode).

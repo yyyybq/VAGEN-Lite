@@ -47,7 +47,7 @@
 | `examples/train/active_spatial/start_gs_render_http_service.sh`、`accelerate_fsdp_qwen25vl.yaml` | 渲染服务的启动脚本、SFT 的 accelerate 配置 |
 | `third_party/LLaMA-Factory/` | SFT 用的 LLaMA-Factory。conda 环境里的 `llamafactory` 指向这里（可编辑安装） |
 
-`third_party/RLinf/` 只有测试 `tests/active_spatial/test_training_handoff.py` 用到，本线训练不用。缺了它，那两项测试会跳过。
+`third_party/RLinf/` 只有测试 `tests/training/test_training_handoff.py` 用到，本线训练不用。缺了它，那两项测试会跳过。
 
 ### 2. 运行环境
 

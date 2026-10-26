@@ -13,7 +13,7 @@ import numpy as np
 from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file()) / "data_gen" / "active_spatial_pipeline"))
 
 from camera_sampler import (
     CameraSampler,

@@ -14,7 +14,7 @@ from data_gen.interiorgs_v10.pilot import safe_name
 from data_gen.interiorgs_v10.run_scene import RunConfig, _jsonable, generate_scene
 from data_gen.interiorgs_v10.testing.synthetic_scene import write_synthetic_scenes
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file())
 
 
 def _prepare_sft_module():

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare two rounds written by check_round.sh (cleanup equivalence check).
 
-    python scripts/cluster/compare_round.py <before round dir> <after round dir> [--moved-ok FILE] [--added-ok FILE]
+    python tests/regression/compare_round.py <before round dir> <after round dir> [--moved-ok FILE] [--added-ok FILE]
 
 Tests are matched by (test file name, class, test name), not by path, so a test that only moved directory still
 matches. Reports, for suite A and suite B: counts per outcome, tests only in one round, tests whose outcome changed.

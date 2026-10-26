@@ -7,7 +7,7 @@ import numpy as np
 
 from data_gen.interiorgs_v10 import contract as C
 from data_gen.interiorgs_v10 import difficulty as D
-from data_gen.interiorgs_v10.tests.test_difficulty import two_rooms_scene
+from test_difficulty import two_rooms_scene
 
 
 class MotionModelTest(unittest.TestCase):

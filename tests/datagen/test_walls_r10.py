@@ -19,7 +19,7 @@ from data_gen.interiorgs_v10 import difficulty as D
 from data_gen.interiorgs_v10.run_all import load_config
 from data_gen.interiorgs_v10.run_scene import RunConfig
 from data_gen.interiorgs_v10.scene import load_scene
-from data_gen.interiorgs_v10.tests.test_walls_r6 import Y_SIGN, _kitchen_and_dining
+from test_walls_r6 import Y_SIGN, _kitchen_and_dining
 from vagen.envs.active_spatial import target_visibility as TV
 from vagen.envs.active_spatial.collision_detector import (WALL_MODELS, CollisionDetector, occlusion_wall_panels,
                                                           thick_wall_segments)
@@ -30,7 +30,7 @@ try:
 except ImportError:  # pragma: no cover
     HAVE_SCIPY = False
 
-CONFIG_R10 = Path(__file__).resolve().parents[1] / "configs" / "generation_r10_20261015.json"
+CONFIG_R10 = next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file()) / "data_gen" / "interiorgs_v10" / "configs" / "generation_r10_20261015.json"
 
 
 def _ray_blocked(occ: TV.OccluderSet, origin, point) -> bool:

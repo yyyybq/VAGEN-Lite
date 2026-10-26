@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file())
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 

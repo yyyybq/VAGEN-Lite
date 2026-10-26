@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Golden outputs for the cleanup equivalence check (CPU only; the login node is fine, about 15 minutes).
-#   ROOT=<checkout to test> GOUT=<new output dir> bash scripts/cluster/golden_outputs.sh
+#   ROOT=<checkout to test> GOUT=<new output dir> bash tests/regression/golden_outputs.sh
 # G1 generates 2 scenes with the round-10 generator config; G2 replays 5 tasks per family in the env;
 # G3 builds the scene split and the SFT frame lists; G4 rebuilds the round-8 evaluation table on a copy.
-# Compare two runs with scripts/cluster/compare_golden.py (wall-time fields are ignored).
+# Compare two runs with tests/regression/compare_golden.py (wall-time fields are ignored).
 set -uo pipefail
 ROOT=${ROOT:?set ROOT to the checkout to test}
 G=$(realpath -m "${GOUT:?set GOUT to a new output directory}")

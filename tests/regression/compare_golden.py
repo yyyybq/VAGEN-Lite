@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare two golden-output directories written by golden_outputs.sh (cleanup equivalence check).
 
-    python scripts/cluster/compare_golden.py <before> <after>
+    python tests/regression/compare_golden.py <before> <after>
 
 Every file listed in either SHA256SUMS.txt is compared byte for byte. A file that differs is compared again
 with the wall-time fields removed (JSON keys "timings" and "seconds", the CSV column "seconds").

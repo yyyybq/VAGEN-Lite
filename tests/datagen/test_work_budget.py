@@ -10,8 +10,8 @@ from data_gen.interiorgs_v10 import initial_states as I
 from data_gen.interiorgs_v10.contract import stable_hash
 from data_gen.interiorgs_v10.run_all import _CLI_FIELDS, explicit_dests, load_config, merge_config
 from data_gen.interiorgs_v10.run_scene import DEFAULT_WORK_WEIGHTS, RunConfig, _jsonable, generate_scene
-from data_gen.interiorgs_v10.tests.test_allocation import _sig
-from data_gen.interiorgs_v10.tests.test_difficulty import InitialStatesTest
+from test_allocation import _sig
+from test_difficulty import InitialStatesTest
 from data_gen.interiorgs_v10.testing.synthetic_scene import write_synthetic_scenes
 
 
@@ -102,7 +102,7 @@ class ConfigFileTest(unittest.TestCase):
     def test_config_files(self):
         import dataclasses
 
-        root = Path(__file__).resolve().parents[1] / "configs"
+        root = next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file()) / "data_gen" / "interiorgs_v10" / "configs"
         old = RunConfig(**load_config(root / "generation_20261011c.json"))
         # the 20261011c file spells out the defaults, so it reproduces that run
         self.assertEqual(dataclasses.asdict(old), dataclasses.asdict(RunConfig()))

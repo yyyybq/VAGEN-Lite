@@ -19,7 +19,7 @@ from data_gen.interiorgs_v10.sampling import fov_item, projective_item
 from data_gen.interiorgs_v10.scene import load_scene
 from data_gen.interiorgs_v10.testing import synthetic_scene as S
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file())
 
 
 def _occlusion_scene(root: Path) -> Path:

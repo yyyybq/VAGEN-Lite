@@ -13,7 +13,7 @@ from data_gen.interiorgs_v10 import sampling
 from data_gen.interiorgs_v10.scene import load_scene
 from data_gen.interiorgs_v10.testing.synthetic_scene import write_synthetic_scenes
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file())
 
 
 class R1RegressionTest(unittest.TestCase):

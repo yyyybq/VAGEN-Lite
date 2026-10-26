@@ -62,7 +62,7 @@ python data_gen/interiorgs_v10/sco_interiorgs_v10.py prepare --tag <tag>
 python data_gen/interiorgs_v10/sco_interiorgs_v10.py submit  --tag <tag>
 
 # tests (stdlib unittest)
-python -m unittest discover -s data_gen/interiorgs_v10/tests -t .
+python -m pytest tests  # every test of the repository; the generator's are in tests/datagen/
 ```
 
 ## Before training on v10 rows

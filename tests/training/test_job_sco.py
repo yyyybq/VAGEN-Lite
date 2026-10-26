@@ -99,7 +99,7 @@ class JobScoTest(unittest.TestCase):
         from unittest import mock
 
         self.assertEqual(J.WORKTREE, "/mnt/umm/users/yinbaiqiao/VAGEN-Lite")
-        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        script = (next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file()) / J.SCRIPT).read_text()
         self.assertIn("\nWORKTREE=${VAGEN_LITE_WORKTREE:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite}\n", script)
         self.assertNotIn("VAGEN-Lite-r4", script)
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,14 +122,14 @@ class JobScoTest(unittest.TestCase):
         """Round 11: the validated gsplat build every render service copies lived in an experiment folder of the
         checkout, which the directory clean-up moved into archive/ (every RL and evaluation job would have
         failed at start); it now lives outside the checkout."""
-        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        script = (next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file()) / J.SCRIPT).read_text()
         line = next(l for l in script.splitlines() if l.startswith("VALIDATED_GSPLAT_CACHE="))
         self.assertEqual(line, "VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/gsplat_cuda_validated_20261007")
         self.assertFalse(line.split("=", 1)[1].startswith(J.WORKTREE + "/"))
 
     def test_outputs_outside_run_are_handed_back(self):
         """Round 8: the SFT model (LF/model) and evaluation results (EVAL/NAME) were left root-only (mode 600)."""
-        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        script = (next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file()) / J.SCRIPT).read_text()
         self.assertIn('chown -R "${OWNER}" "${RUN}" ${ALSO_OWNED:+"${ALSO_OWNED}"}', script)
         for mode, line in (("sft)", "ALSO_OWNED=${LF}"), ("eval)", "ALSO_OWNED=${EVAL}/${NAME}")):
             block = script.split(f"\n  {mode}\n", 1)[1].split(";;", 1)[0]
@@ -140,7 +140,7 @@ class JobScoTest(unittest.TestCase):
         import subprocess
         import tempfile
 
-        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        script = (next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file()) / J.SCRIPT).read_text()
         block = script.split("\n  eval)\n", 1)[1].split(";;", 1)[0]
         # the eval block as it is, without the GPU and the render service, and with the evaluation echoed
         lines = [l for l in block.splitlines() if "CUDA_VISIBLE_DEVICES" not in l and "start_renderer" not in l]
@@ -204,7 +204,7 @@ class JobScoTest(unittest.TestCase):
         import subprocess
         import tempfile
 
-        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        script = (next(p for p in Path(__file__).resolve().parents if (p / "setup.py").is_file()) / J.SCRIPT).read_text()
         block = script.split("\n  renderer)\n", 1)[1].split(";;", 1)[0]
         stubs = ('RUN=$2\nhostname() { echo 10.1.2.3; }\n'
                  'start_renderer() { echo "$2 ${RENDERER_SERVICE_LOG:-default}" > "${RUN}/started"; renderer_pid=$$; }\n')

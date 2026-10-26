@@ -16,7 +16,7 @@ from data_gen.interiorgs_v10 import initial_states as I
 from data_gen.interiorgs_v10.contract import stable_hash
 from data_gen.interiorgs_v10.run_scene import RunConfig, _jsonable, generate_scene
 from data_gen.interiorgs_v10.sampling import projective_item
-from data_gen.interiorgs_v10.tests.test_difficulty import scan_endpoints, two_rooms_scene
+from test_difficulty import scan_endpoints, two_rooms_scene
 from data_gen.interiorgs_v10.testing.synthetic_scene import write_synthetic_scenes
 
 # generate_scene(two_rooms, RunConfig(target_tasks_per_scene=6)) recorded with the code of commit
