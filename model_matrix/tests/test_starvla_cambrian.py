@@ -204,6 +204,32 @@ class LanguageModelBatchTest(unittest.TestCase):
         for a, b in zip(grads[False], grads[True]):
             self.assertTrue(torch.allclose(a, b, atol=1e-6))
 
+    def test_vision_only_checkpointing(self):
+        """framework.qwenvl.cambrian_checkpointing: vision keeps checkpointing in the vision tower only."""
+        from model_matrix.downstream.starvla_cambrian import limit_checkpointing
+
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gradient_checkpointing = True
+
+        def tree():
+            root = torch.nn.Module()
+            root.model = Layer()
+            root.model.layers = torch.nn.ModuleList([Layer(), Layer()])
+            root.model.vision_tower_aux_list = torch.nn.ModuleList([torch.nn.Module()])
+            root.model.vision_tower_aux_list[0].vision_tower = torch.nn.Module()
+            root.model.vision_tower_aux_list[0].vision_tower.encoder = Layer()
+            return root
+
+        self.assertEqual(limit_checkpointing(tree(), "all"), 4)
+        t = tree()
+        self.assertEqual(limit_checkpointing(t, "vision"), 1)
+        self.assertEqual([m.gradient_checkpointing for m in (t.model, *t.model.layers)], [False, False, False])
+        self.assertTrue(t.model.vision_tower_aux_list[0].vision_tower.encoder.gradient_checkpointing)
+        with self.assertRaises(ValueError):
+            limit_checkpointing(tree(), "language")
+
     def test_dropout_rates(self):
         from model_matrix.downstream.starvla_cambrian import dropout_rates
 

@@ -57,7 +57,9 @@ evaluated) on NaN in the trainer's main metrics, KL to the start model above kl_
 answers above invalid_max (mean of the last invalid_window updates), or training success below the start (mean
 of the first start_updates) by more than success_drop in each of drop_window consecutive updates (guard_reason).
 The model line adds "keep_fill_min" (off unless given): a keep run whose fills (filter/keep/filled) average under it
-over updates 1-keep_fill_at (default 50) stops.
+over updates 1-keep_fill_at (default 50) stops; and plan eval "stop_invalid" ({"set", "max"}, off unless given):
+each checkpoint is evaluated on that set while the runs train, and a run whose greedy evaluation has more than "max"
+unreadable turns stops the same way (stop_invalid_rule, watch_checkpoints).
 
 Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
 or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
@@ -475,6 +477,16 @@ def success_rate(results: Path) -> Optional[float]:
 
     rows = [json.loads(l) for l in (results / "results.jsonl").read_text().splitlines() if l.strip()]
     return float(metrics(rows)["success"]) if rows else None
+
+
+def result_metrics(results: Path) -> Optional[Dict[str, Any]]:
+    """evaluation.metrics of a complete result folder, None without complete results."""
+    if not (results / "done.json").is_file() or not (results / "results.jsonl").is_file():
+        return None
+    from .evaluation import metrics
+
+    rows = [json.loads(l) for l in (results / "results.jsonl").read_text().splitlines() if l.strip()]
+    return metrics(rows) if rows else None
 
 
 def stranded_hosts(view: Dict[str, Any]) -> List[str]:
@@ -1404,6 +1416,7 @@ class Chain:
                         self.state.setdefault("guard_stops", {})[name] = {"reason": reason, "utc": now()}
                         ended[name] = f"stopped: {reason}"
                         active.pop(name)
+                self.watch_checkpoints(active, ended)  # the model line: plan eval "stop_invalid"
                 self.repack(runs, active, states)  # round 12 batch: plan rl "renderer_repack"
                 self.mark(step, jobs={**states, **{f"{n}/ended": v for n, v in ended.items()}})
                 self.signal_check(runs)
@@ -1426,6 +1439,82 @@ class Chain:
                if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir() and n not in stopped]
         if bad:
             raise ChainError("RL runs without a checkpoint at update " + str(endpoint) + ": " + ", ".join(bad))
+
+    def stop_invalid_rule(self) -> Optional[Dict[str, Any]]:
+        """The model line (the user's decision 2 of 2026-10-26, a new switch): plan eval "stop_invalid" ({"set":
+        validation set name, default select_by; "max": 0.10}) evaluates every RL checkpoint the evaluate step would
+        (every "every" updates) on that set while the runs train, and stops a run whose greedy evaluation has more than
+        "max" unreadable turns (evaluation.metrics invalid_rate), as a guard stops it (state guard_stops; its logs and
+        checkpoints stay, the evaluate step evaluates the checkpoints it reached).  The training-time stop line on
+        sampled answers (rl guards invalid_max) is unchanged."""
+        ev = self.plan.get("eval") or {}
+        rule = ev.get("stop_invalid")
+        if not rule:
+            return None
+        sets = self.eval_sets()
+        name = rule.get("set") or self.plan.get("select_by") or next(iter(sets))
+        if name not in sets:
+            raise ChainError(f"eval stop_invalid: {name!r} is not one of the eval sets {sorted(sets)}")
+        return {"set": name, "dir": sets[name], "max": float(rule.get("max", 0.10)), "every": int(ev.get("every", 50)),
+                "single": len(sets) == 1 and not self.plan.get("eval_sets")}
+
+    def watch_checkpoints(self, active: Dict[str, Dict[str, Any]], ended: Dict[str, str]) -> None:
+        """One poll of plan eval "stop_invalid" (stop_invalid_rule) over the running RL runs: a saved checkpoint
+        (latest_checkpointed_iteration.txt has reached it) gets the evaluate step's own job (the same folder, result
+        name and options, so the evaluate step later finds it done or adopts it); a complete result over the line
+        stops its run.  A failed evaluation is left to the evaluate step and does not stop anything."""
+        rule = self.stop_invalid_rule()
+        if not rule or not active:
+            return
+        from . import job_sco
+
+        options = list((self.plan.get("eval") or {}).get("options") or [])
+        watch = self.state.setdefault("checkpoint_watch", {})
+        for name, run in list(active.items()):
+            d = run["run_dir"]
+            try:
+                saved = int((d / "checkpoints" / "latest_checkpointed_iteration.txt").read_text().strip())
+            except (OSError, ValueError):
+                continue
+            for s in range(rule["every"], saved + 1, rule["every"]):
+                result = f"{name}_{s:03d}" if name else f"v10_rl_{s:03d}"
+                rec = watch.setdefault(f"{name}/{s}", {"result": result})
+                if rec.get("invalid") is not None or rec.get("failed"):
+                    continue
+                hf = d / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface"
+                ev_run = self.tr / "eval_runs" / (result if rule["single"] else f"{rule['set']}__{result}")
+                m = result_metrics(rule["dir"] / result)
+                if m is not None:
+                    if (ev_run / "job" / "submission.json").exists():
+                        job_sco.delete(ev_run)
+                    rec.update(invalid=m["invalid_rate"], success=m["success"], utc=now())
+                    if m["invalid_rate"] is not None and m["invalid_rate"] > rule["max"]:
+                        reason = (f"greedy evaluation of update {s} on {rule['set']}: unreadable turns "
+                                  f"{m['invalid_rate']:.3f} > {rule['max']}")
+                        (d / "STOP_RENDERER").touch()
+                        job_sco.delete(d, "job_rl")
+                        self.state.setdefault("guard_stops", {})[name] = {"reason": reason, "utc": now()}
+                        ended[name] = f"stopped: {reason}"
+                        active.pop(name)
+                        break
+                    continue
+                if not (hf / "config.json").is_file():
+                    continue
+                if not (ev_run / "job" / "submission.json").exists():
+                    ev_run.mkdir(parents=True, exist_ok=True)
+                    job_sco.prepare(ev_run, 1, ["eval", str(rule["dir"]), result, str(hf), "-",
+                                                *self.run_eval_options(options, run)], pool=self.job_pool(cards=1))
+                    job_sco.submit(ev_run)
+                    rec["job_id"] = json.loads((ev_run / "job" / "submission.json").read_text())["job_id"]
+                    continue
+                st = job_sco.status(ev_run)
+                if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
+                    job_sco.delete(ev_run)  # without results: submitted once more (it goes on from its results)
+                    drop_partial_line(rule["dir"] / result / "results.jsonl")
+                    rec["retries"] = rec.get("retries", 0) + 1
+                    if rec["retries"] > 1:  # then left to the evaluate step
+                        rec["failed"] = st.get("state")
+        self.save()
 
     def startup_settings(self, run: Dict[str, Any]) -> Dict[str, Any]:
         return {**STARTUP_DEFAULTS, **dict(run["rl"].get("startup") or {})}

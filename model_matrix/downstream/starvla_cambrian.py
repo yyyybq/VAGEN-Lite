@@ -15,7 +15,8 @@ miv_token_len = 64 = 8 x 8, with the learned newline after each row): 72 positio
 ``framework.qwenvl.cambrian_views: si`` gives each view the single-image form instead (756 positions: 27 x 27 and
 the newlines), Cambrian-S's form for one picture.  Gradient checkpointing (the language model and the SigLIP2
 tower) is on unless ``framework.qwenvl.enable_gradient_checkpointing: false`` (StarVLA's own switch, off by default
-for its other backbones): the same gradients, recomputed.
+for its other backbones): the same gradients, recomputed.  ``framework.qwenvl.cambrian_checkpointing: vision``
+keeps it only in the SigLIP2 tower (limit_checkpointing).
 
 Positions follow the attention mask (left padding).  The language model's hidden states are returned (no LM head:
 QwenOFT reads only the last hidden state).  The language model runs through Transformers' own Qwen2Model.forward
@@ -93,6 +94,27 @@ def dropout_rates(model: nn.Module) -> dict:
     return out
 
 
+CHECKPOINT_SCOPES = ("all", "vision")
+
+
+def limit_checkpointing(model: nn.Module, scope: str) -> int:
+    """framework.qwenvl.cambrian_checkpointing (the user's decision 4 of 2026-10-26): "all" (the default) keeps
+    gradient checkpointing everywhere it was turned on (the language model and the SigLIP2 encoder); "vision" turns
+    it off outside the vision tower (the language model's ~300 tokens per sample keep their activations, its forward
+    is not run twice).  The gradients are the same either way.  Returns the modules left checkpointing."""
+    if scope not in CHECKPOINT_SCOPES:
+        raise ValueError(f"framework.qwenvl.cambrian_checkpointing must be one of {CHECKPOINT_SCOPES}")
+    left = 0
+    for name, m in model.named_modules():
+        if not getattr(m, "gradient_checkpointing", False):
+            continue
+        if scope == "vision" and "vision_tower" not in name:
+            m.gradient_checkpointing = False
+        else:
+            left += 1
+    return left
+
+
 def checkpointing_mode(model: nn.Module, on: bool) -> None:
     """Transformers (GradientCheckpointingLayer) and the Cambrian source's SigLIP encoder checkpoint a layer only in
     training mode, but StarVLA never calls .train() and from_pretrained leaves a model in eval mode: the second 8-card
@@ -126,6 +148,9 @@ class CambrianVLInterface(nn.Module):
         self.model = R.CambrianForCausalLMAdapter.from_pretrained(path, torch_dtype=torch.bfloat16,
                                                                    attn_implementation=attn)
         self.checkpointing = bool(qwenvl.get("enable_gradient_checkpointing", True))
+        scope = str(qwenvl.get("cambrian_checkpointing", "all"))
+        if scope not in CHECKPOINT_SCOPES:
+            raise ValueError(f"framework.qwenvl.cambrian_checkpointing must be one of {CHECKPOINT_SCOPES}")
         if self.checkpointing:
             # StarVLA's switch (its Gemma4 and MiniCPM-V interfaces, off there by default), on by default here: the
             # recipe's 8 samples x 3 views per card are 24 SigLIP2 images of 729 patches each, whose activations (26
@@ -135,6 +160,7 @@ class CambrianVLInterface(nn.Module):
             if rates:
                 raise ValueError(f"gradient checkpointing switches the model to training mode; dropout in {rates}")
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+            limit_checkpointing(self.model, scope)
         tokenizer = AutoTokenizer.from_pretrained(path)
         tokenizer.padding_side = "left"
         image_processor = AutoImageProcessor.from_pretrained(SIGLIP_MODEL, cache_dir=SIGLIP_CACHE, local_files_only=True)

@@ -743,6 +743,97 @@ class ChainTest(unittest.TestCase):
             chain.evaluate()
             self.assertEqual(sorted(jobs), ["val400__pd_050", "val400__ps0_050", "val400__ps0_100"])
 
+    def test_stop_invalid_watches_checkpoints_while_training(self):
+        """The model line (the user's decision 2 of 2026-10-26): plan eval "stop_invalid" evaluates each saved
+        checkpoint on the set while the runs train (the evaluate step's job folder and result name) and stops a run
+        whose greedy evaluation has more than "max" unreadable turns; a failed evaluation is tried once more, then left
+        to the evaluate step; without the switch nothing is submitted."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            val = root / "val"
+            val.mkdir()
+            plan = {"tr": tmp, "sft_dir": str(root / "sft"), "endpoint": 100, "gs_root": "/ply",
+                    "sft_groups": {"formal": "sft_trajectories.jsonl"}, "rl": {"guards": {"kl_max": 0.2}},
+                    "rl_runs": {"s0": {}, "d": {}}, "eval_sets": {"val": str(val), "test": str(root / "test")},
+                    "eval": {"every": 50, "stop_invalid": {"set": "val", "max": 0.10}}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            runs = chain.rl_runs()
+            for name, run in runs.items():
+                ck = run["run_dir"] / "checkpoints"
+                (ck / "global_step_50" / "actor" / "huggingface").mkdir(parents=True)
+                (ck / "global_step_50" / "actor" / "huggingface" / "config.json").write_text("{}")
+                (ck / "latest_checkpointed_iteration.txt").write_text("50")
+            submitted, deleted, states = [], [], {}
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                submitted.append((run.name, list(args)))
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}"}))
+
+            def status(run, job_dir="job"):
+                return states.get(run.name, {"state": "RUNNING", "finished": False})
+
+            def delete(run, job_dir="job"):
+                deleted.append((run.name, job_dir))
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            def result(name, invalid_turns):
+                d = val / name
+                d.mkdir()
+                row = {"index": 0, "task_type": "fov_inclusion", "d_star": 3, "success": False, "actions": 10,
+                       "turns": 10, "collisions": 0, "invalid_turns": invalid_turns, "actions_to_success": None}
+                (d / "results.jsonl").write_text(json.dumps(row) + "\n")
+                (d / "done.json").write_text("{}")
+
+            active, ended = dict(runs), {}
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.watch_checkpoints(active, ended)
+                self.assertEqual(sorted(n for n, _ in submitted), ["val__d_050", "val__s0_050"])
+                args = dict(submitted)["val__d_050"]
+                self.assertEqual(args[:5], ["eval", str(val), "d_050", str(runs["d"]["run_dir"] / "checkpoints" /
+                                                                          "global_step_50" / "actor" / "huggingface"), "-"])
+                chain.watch_checkpoints(active, ended)  # still running: nothing new
+                self.assertEqual(len(submitted), 2)
+                result("d_050", 2)  # 20% unreadable turns
+                result("s0_050", 1)  # 10%: not over the line
+                chain.watch_checkpoints(active, ended)
+            self.assertEqual(sorted(active), ["s0"])
+            self.assertIn("greedy evaluation of update 50 on val: unreadable turns 0.200 > 0.1",
+                          chain.state["guard_stops"]["d"]["reason"])
+            self.assertIn(("rl_run_d", "job_rl"), deleted)
+            self.assertTrue((runs["d"]["run_dir"] / "STOP_RENDERER").exists())
+            self.assertEqual(chain.state["checkpoint_watch"]["s0/50"]["invalid"], 0.1)
+            self.assertIn(("val__s0_050", "job"), deleted)  # the finished job is deleted, as eval_jobs does
+            # a failed evaluation: once more, then the evaluate step's
+            (runs["s0"]["run_dir"] / "checkpoints" / "global_step_100" / "actor" / "huggingface").mkdir(parents=True)
+            (runs["s0"]["run_dir"] / "checkpoints" / "global_step_100" / "actor" / "huggingface" / "config.json").write_text("{}")
+            (runs["s0"]["run_dir"] / "checkpoints" / "latest_checkpointed_iteration.txt").write_text("100")
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.watch_checkpoints(active, ended)
+                states["val__s0_100"] = {"state": "FAILED", "finished": True}
+                chain.watch_checkpoints(active, ended)  # failed: deleted
+                chain.watch_checkpoints(active, ended)  # submitted again
+                chain.watch_checkpoints(active, ended)  # failed again: left to the evaluate step
+                chain.watch_checkpoints(active, ended)
+            self.assertEqual([n for n, _ in submitted].count("val__s0_100"), 2)
+            self.assertEqual(chain.state["checkpoint_watch"]["s0/100"]["failed"], "FAILED")
+            self.assertEqual(sorted(active), ["s0"])
+            off = T.Chain(dict(plan, tr=str(root / "off"), eval={"every": 50}), sleep=lambda s: None)
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                n = len(submitted)
+                off.watch_checkpoints(dict(off.rl_runs()), {})
+                self.assertEqual(len(submitted), n)
+            with self.assertRaises(T.ChainError):
+                T.Chain(dict(plan, eval={"stop_invalid": {"set": "nope"}}), sleep=lambda s: None).stop_invalid_rule()
+
     def test_startup_problem_and_job_logs(self):
         """Round 12 (the user's decision 5): which trainer jobs count as failed or stuck at Ray start-up."""
         failed = "ray init kwargs: {}\nException: The current node timed out during startup. This could happen ...\n"
