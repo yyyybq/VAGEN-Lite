@@ -26,13 +26,17 @@ import subprocess
 import tarfile
 from pathlib import Path
 
+from vagen import config as _config
+
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_ENV = "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite"
-SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
-IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"
-MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
-POOL = "zoetrope"
-WORKER_SPEC = "N4lS.Iq.I80.1"  # one H800 (14 vCPU)
+RUNTIME_ENV = _config.path("conda_env")
+SCO = _config.cluster("sco.bin")
+IMAGE = _config.cluster("sco.image")
+MOUNT = _config.cluster("sco.storage_mount")
+POOL = _config.cluster("sco.default_pool")
+WORKSPACE = _config.cluster("sco.workspace")
+WORKER_SPEC = _config.cluster("sco.worker_specs")[1]  # one H800 (14 vCPU)
+TORCH_EXTENSIONS_DIR = _config.path("torch_extensions_renderer")  # the render jobs' compile cache
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 
 
@@ -64,7 +68,7 @@ exec > >(tee -a "$PILOT/job/logs/render-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).l
 cd "$SRC" && tar -xzf {archive}
 RUNTIME_ENV={RUNTIME_ENV}
 export PYTHONPATH="$SRC" PYTHONDONTWRITEBYTECODE=1 PATH="$RUNTIME_ENV/bin:$PATH" CUDA_VISIBLE_DEVICES=0
-export VAGEN_GSPLAT_PREBUILT=1 TORCH_EXTENSIONS_DIR=/mnt/umm/users/yinbaiqiao/.cache/torch_extensions_jumpbox_renderer
+export VAGEN_GSPLAT_PREBUILT=1 TORCH_EXTENSIONS_DIR={TORCH_EXTENSIONS_DIR}
 export CC=$RUNTIME_ENV/bin/x86_64-conda-linux-gnu-gcc CXX=$RUNTIME_ENV/bin/x86_64-conda-linux-gnu-g++
 export CUDA_HOME=$RUNTIME_ENV TORCH_CUDA_ARCH_LIST=9.0 OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 NO_PROXY='*' no_proxy='*'
 export CPATH="$RUNTIME_ENV/targets/x86_64-linux/include:${{CPATH:-}}"
@@ -88,7 +92,7 @@ def submit(pilot: Path) -> None:
         return
     subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=job, check=True)
     name = "interiorgs-v10-pilot-render-" + pilot.name.replace("_", "-")[-40:]
-    command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={POOL}",
+    command = [SCO, "acp", "jobs", "create", f"--workspace-name={WORKSPACE}", f"--aec2-name={POOL}",
                f"--job-name={name}", "--priority=HIGHEST", "--quota-type=reserved",
                f"--container-image-url={IMAGE}", f"--storage-mount={MOUNT}", "--training-framework=pytorch",
                "--worker-nodes=1", f"--worker-spec={WORKER_SPEC}", f"--command=bash {job}/launch.sh"]
@@ -104,7 +108,7 @@ def submit(pilot: Path) -> None:
 
 
 def describe(job_id: str) -> dict:
-    res = subprocess.run([SCO, "acp", "jobs", "describe", "--workspace-name=aigc", "-o", "json", job_id],
+    res = subprocess.run([SCO, "acp", "jobs", "describe", f"--workspace-name={WORKSPACE}", "-o", "json", job_id],
                          capture_output=True, text=True, check=True)
     return json.loads(res.stdout)
 
@@ -122,7 +126,7 @@ def stop(pilot: Path) -> None:
     if state in FINISHED:
         print(json.dumps({"job_id": job_id, "state": state, "action": "none"}))
         return
-    res = subprocess.run([SCO, "acp", "jobs", "stop", "--workspace-name=aigc", job_id], capture_output=True, text=True)
+    res = subprocess.run([SCO, "acp", "jobs", "stop", f"--workspace-name={WORKSPACE}", job_id], capture_output=True, text=True)
     (pilot / "job" / "stop.log").write_text(res.stdout + "\n" + res.stderr)
     print(json.dumps({"job_id": job_id, "state_before": state, "stop_rc": res.returncode}))
 
@@ -132,8 +136,8 @@ def delete(pilot: Path) -> None:
     job_id = json.loads(receipt.read_text())["job_id"]
     state = describe(job_id).get("state")
     if state not in FINISHED | {"SUSPENDED"}:
-        subprocess.run([SCO, "acp", "jobs", "stop", "--workspace-name=aigc", job_id], capture_output=True, text=True)
-    res = subprocess.run([SCO, "acp", "jobs", "delete", "--workspace-name=aigc", job_id], capture_output=True, text=True)
+        subprocess.run([SCO, "acp", "jobs", "stop", f"--workspace-name={WORKSPACE}", job_id], capture_output=True, text=True)
+    res = subprocess.run([SCO, "acp", "jobs", "delete", f"--workspace-name={WORKSPACE}", job_id], capture_output=True, text=True)
     (pilot / "job" / "delete.log").write_text(res.stdout + "\n" + res.stderr)
     if res.returncode == 0:  # a later submit creates a new job
         receipt.rename(receipt.with_name(f"submission_{job_id}_deleted.json"))

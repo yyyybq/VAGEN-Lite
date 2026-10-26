@@ -1,0 +1,13 @@
+# 统一配置：sco 任务提交（整理第二阶段，2026-10）。代码通过 vagen.config.cluster("sco.<键>") 读取。
+# 当前取值由 tests/test_config.py 钉住。
+sco:
+  bin: /mnt/umm/users/yinbaiqiao/.sco/bin/sco                  # sco 命令行
+  workspace: aigc                                              # --workspace-name
+  image: registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617    # --container-image-url
+  storage_mount: 019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm # --storage-mount：共享盘挂到 /mnt/umm
+  default_pool: zoetrope                                       # --aec2-name 的默认值
+  pools: [zoetrope, h800]                                      # 同样的 H800、规格、镜像和存储
+  render_pools: [zoe-cf-render]                                # 只给 RL 渲染服务用，自动选池时不会选它
+  worker_specs:                                                # 卡数 -> --worker-spec（H800，每卡 14 个 vCPU）
+    1: N4lS.Iq.I80.1
+    8: N4lS.Iq.I80.8

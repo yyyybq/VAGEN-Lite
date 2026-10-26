@@ -1,0 +1,249 @@
+# models: collected from the manifest.json files of the cluster's fixed layout (cleanup phase 2).
+# Do not edit by hand; regenerate with
+#   python scripts/cluster/collect_manifests.py --root /mnt/umm/users/yinbaiqiao/VAGEN-Lite --out configs
+generated_by: scripts/cluster/collect_manifests.py
+root: /mnt/umm/users/yinbaiqiao/VAGEN-Lite
+models:
+- name: interiorgs_v10_sft_r5_qwen25vl3b
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r5_20261014/trial/sft_trial_run/model
+  link: models/interiorgs_v10_sft_r5_qwen25vl3b
+  size_KB: 68370996
+  created: '2026-10-16T11:03:26Z'
+  source_run: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r5_20261014/trial
+  note: 'round 5 one-card trial: Qwen2.5-VL-3B SFT; used by the round-10 one-card RL pilots'
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/interiorgs_v10_sft_r5_qwen25vl3b/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 2048
+  num_hidden_layers: 36
+  safetensors_shards: 4
+  safetensors_bytes: 14999292032
+  pt_files: 1
+  pt_bytes: 1465
+- name: cambrian_c4_clean_d0pass_20260822_h800_r5_full_step960
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c4_clean_d0pass_20260822_h800_r5_full_step960
+  size_KB: 31450612
+  created: '2026-10-16T11:03:26Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c4_clean_d0pass_20260822_h800_r5_full_step960/manifest.json
+  model_type: cambrian_qwen
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 32189419408
+- name: cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step100
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step100
+  size_KB: 31450612
+  created: '2026-10-16T11:03:26Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step100/manifest.json
+  model_type: cambrian_qwen
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 32189419408
+- name: cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step1000
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step1000
+  size_KB: 31450612
+  created: '2026-10-16T11:03:27Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step1000/manifest.json
+  model_type: cambrian_qwen
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 32189419408
+- name: cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step50
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step50
+  size_KB: 31450612
+  created: '2026-10-16T11:03:27Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step50/manifest.json
+  model_type: cambrian_qwen
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 32189419408
+- name: dense_score_pilot_r3_S0_step100
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S0/checkpoints/global_step_100/actor/huggingface
+  link: models/historical/dense_score_pilot_r3_S0_step100
+  size_KB: 32406980
+  created: '2026-10-16T11:03:28Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/dense_score_pilot_r3_S0_step100/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: dense_score_pilot_r3_S0_step150
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S0/checkpoints/global_step_150/actor/huggingface
+  link: models/historical/dense_score_pilot_r3_S0_step150
+  size_KB: 32406980
+  created: '2026-10-16T11:03:28Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/dense_score_pilot_r3_S0_step150/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: dense_score_pilot_r3_S1_step100
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S1/checkpoints/global_step_100/actor/huggingface
+  link: models/historical/dense_score_pilot_r3_S1_step100
+  size_KB: 32406980
+  created: '2026-10-16T11:03:28Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/dense_score_pilot_r3_S1_step100/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: dense_score_pilot_r3_S1_step150
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S1/checkpoints/global_step_150/actor/huggingface
+  link: models/historical/dense_score_pilot_r3_S1_step150
+  size_KB: 32406980
+  created: '2026-10-16T11:03:29Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/dense_score_pilot_r3_S1_step150/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: dense_score_pilot_r3_S5_step100
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S5/checkpoints/global_step_100/actor/huggingface
+  link: models/historical/dense_score_pilot_r3_S5_step100
+  size_KB: 32406980
+  created: '2026-10-16T11:03:29Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/dense_score_pilot_r3_S5_step100/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: dense_score_pilot_r3_S5_step150
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S5/checkpoints/global_step_150/actor/huggingface
+  link: models/historical/dense_score_pilot_r3_S5_step150
+  size_KB: 32406980
+  created: '2026-10-16T11:03:29Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/dense_score_pilot_r3_S5_step150/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: qwen_v50_clean_d0pass_20260824_full_step100
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/qwen_v50_clean_d0pass_20260824_full_step100
+  size_KB: 32406980
+  created: '2026-10-16T11:03:30Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/qwen_v50_clean_d0pass_20260824_full_step100/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: qwen_v50_clean_d0pass_20260824_full_step50
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/qwen_v50_clean_d0pass_20260824_full_step50
+  size_KB: 32406980
+  created: '2026-10-16T11:03:30Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/qwen_v50_clean_d0pass_20260824_full_step50/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: qwen_v50_clean_d0pass_20260824_full_step700
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/qwen_v50_clean_d0pass_20260824_full_step700
+  size_KB: 32406980
+  created: '2026-10-16T11:03:31Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/qwen_v50_clean_d0pass_20260824_full_step700/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: r1_clean_projective_v0_taskfix_step250
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0-taskfix/formal/checkpoints/global_step_250/actor/huggingface
+  link: models/historical/r1_clean_projective_v0_taskfix_step250
+  size_KB: 32406980
+  created: '2026-10-16T11:03:31Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/r1_clean_projective_v0_taskfix_step250/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: v46_qwen25vl7b_step200
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/unified_eval_runs/frozen_ckpts/v46_step200
+  link: models/historical/v46_qwen25vl7b_step200
+  size_KB: 32406984
+  created: '2026-10-16T11:03:31Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/v46_qwen25vl7b_step200/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: v50_qwen25vl7b_step150
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/unified_eval_runs/frozen_ckpts/v50_step150
+  link: models/historical/v50_qwen25vl7b_step150
+  size_KB: 32406984
+  created: '2026-10-16T11:03:32Z'
+  note: historical weight (decision D10); see docs/reports/PHASE1_INVENTORY_20261015.md
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/v50_qwen25vl7b_step150/manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 7
+  safetensors_bytes: 33168747240
+- name: Qwen2.5-VL-3B-Instruct
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/.cache/huggingface/hub/models--Qwen--Qwen2.5-VL-3B-Instruct/snapshots/66285546d2b821cf421d4f5eb2576359d3770cd3
+  link: models/base/Qwen2.5-VL-3B-Instruct
+  size_KB: 60
+  created: '2026-10-16T11:12:38Z'
+  note: base model (HF hub snapshot); the manifest sits beside the link so the HF cache stays untouched
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/base/Qwen2.5-VL-3B-Instruct.manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 2048
+  num_hidden_layers: 36
+  safetensors_shards: 2
+  safetensors_bytes: 7509337976
+- name: Qwen2.5-VL-7B-Instruct
+  kind: model
+  path: /mnt/umm/users/yinbaiqiao/.cache/huggingface/hub/models--Qwen--Qwen2.5-VL-7B-Instruct/snapshots/cc594898137f460bfe9f0759e9844b3ce807cfb5
+  link: models/base/Qwen2.5-VL-7B-Instruct
+  size_KB: 68
+  created: '2026-10-16T11:12:38Z'
+  note: base model (HF hub snapshot); the manifest sits beside the link so the HF cache stays untouched
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/base/Qwen2.5-VL-7B-Instruct.manifest.json
+  model_type: qwen2_5_vl
+  hidden_size: 3584
+  num_hidden_layers: 28
+  safetensors_shards: 5
+  safetensors_bytes: 16584414560

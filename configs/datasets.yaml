@@ -1,0 +1,66 @@
+# datasets: collected from the manifest.json files of the cluster's fixed layout (cleanup phase 2).
+# Do not edit by hand; regenerate with
+#   python scripts/cluster/collect_manifests.py --root /mnt/umm/users/yinbaiqiao/VAGEN-Lite --out configs
+generated_by: scripts/cluster/collect_manifests.py
+root: /mnt/umm/users/yinbaiqiao/VAGEN-Lite
+datasets:
+- name: interiorgs_v10_eval_c_278
+  kind: dataset
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r7_20261014/eval_c
+  link: data/releases/interiorgs_v10_eval_c_278
+  size_KB: 1124
+  created: '2026-10-16T11:03:23Z'
+  source_run: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r7_20261014
+  note: 278 test tasks after the depth check (round 7); results of 10 models in results/interiorgs_v10_r8_eval2
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/data/releases/interiorgs_v10_eval_c_278/manifest.json
+  jsonl_line_counts:
+    base_qwen25vl7b/results.jsonl: 278
+    r1_final/results.jsonl: 278
+    tasks.jsonl: 278
+    v10_sft/results.jsonl: 278
+  splits: null
+- name: interiorgs_v10_tasks_r10
+  kind: dataset
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_gen_r10_20261015
+  link: data/releases/interiorgs_v10_tasks_r10
+  size_KB: 7148956
+  created: '2026-10-16T11:03:15Z'
+  code_commit: b598f1e4d51efed5ce3104195f1274027a248182
+  note: 'round 10 generator (thick walls, generation_r10_20261015.json): formal + reserve tasks, split_manifest, sft frame
+    lists'
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/data/releases/interiorgs_v10_tasks_r10/manifest.json
+  jsonl_line_counts:
+    output/tasks.jsonl: 13091
+    output/tasks_reserve.jsonl: 14433
+    sft/frames.jsonl: 78520
+    sft/rows.jsonl: 23316
+    sft/sft_trajectories.jsonl: 23316
+    sft/sft_trajectories_formal.jsonl: 11095
+    sft/task_registry.jsonl: 23316
+    sft_r11/frames.jsonl: 40739
+    sft_r11/rows.jsonl: 11095
+    sft_r11/task_registry.jsonl: 11095
+  splits:
+    interiorgs_v10_release_v2: 1
+    physical_scene_group: 1
+    interiorgs_v10: 1
+- name: interiorgs_v10_tasks_r6b
+  kind: dataset
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_gen_r6b_20261014
+  link: data/releases/interiorgs_v10_tasks_r6b
+  size_KB: 3666880
+  created: '2026-10-16T11:03:22Z'
+  code_commit: 9215427e228b2f6ad2dd27f4c521c326d5683f31
+  note: round 6b generator (generation_r6_20261014.json); data of the first SFT/RL (interiorgs_v10_train_20261014)
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/data/releases/interiorgs_v10_tasks_r6b/manifest.json
+  jsonl_line_counts:
+    output/tasks.jsonl: 13094
+    output/tasks_reserve.jsonl: 14443
+    sft/frames.jsonl: 39617
+    sft/rows.jsonl: 11768
+    sft/sft_trajectories.jsonl: 11768
+    sft/task_registry.jsonl: 11768
+  splits:
+    interiorgs_v10_release_v2: 1
+    physical_scene_group: 1
+    interiorgs_v10: 1

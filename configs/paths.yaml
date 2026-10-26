@@ -1,0 +1,26 @@
+# 统一配置：路径（整理第二阶段，2026-10）。
+# 两套路径：cluster 是集群 fujian 上的实际位置，local 是本机。用环境变量 VAGEN_PROFILE 选，默认 cluster。
+# 代码通过 vagen.config.path("<键>") 读取；shell 脚本用 python -m vagen.config get paths.<键>。
+# 改这里的值会改变提交出去的任务，tests/test_config.py 钉住了当前取值，改动要同时改那里。
+profiles:
+  cluster:
+    user_root: /mnt/umm/users/yinbaiqiao                        # 本用户在共享盘上的根目录
+    repo: /mnt/umm/users/yinbaiqiao/VAGEN-Lite                   # 集群检出，sco 任务从这里启动（VAGEN_LITE_WORKTREE 可改）
+    conda_env: /mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite  # 主环境：训练、出题、评测
+    scenes_meta: /mnt/umm/users/yinbaiqiao/InteriorGS_meta       # 1,000 个场景的元数据镜像
+    scenes_ply: /mnt/umm/users/yinbaiqiao/InteriorGS_ply         # 3DGS 场景文件
+    aoss_conf: /mnt/umm/users/yinbaiqiao/aoss/petreloss.conf     # AOSS 客户端配置
+    gsplat_cache: /mnt/umm/users/yinbaiqiao/gsplat_cuda_validated_20261007     # 验证过的 gsplat 编译产物（渲染服务复制它）
+    torch_extensions_renderer: /mnt/umm/users/yinbaiqiao/.cache/torch_extensions_jumpbox_renderer  # 试点渲染任务的编译缓存
+    hf_home: /mnt/umm/users/yinbaiqiao/.cache/huggingface        # Hugging Face 缓存（基座权重、EASI 数据集）
+  local:
+    # 本机没有集群数据；需要时把对应的键填上。值为 null 的键被读取时会报错并说明是哪个键。
+    user_root: null
+    repo: null
+    conda_env: null
+    scenes_meta: null
+    scenes_ply: null
+    aoss_conf: null
+    gsplat_cache: null
+    torch_extensions_renderer: null
+    hf_home: null

@@ -30,21 +30,24 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-DEFAULT_WORKTREE = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite"  # the cluster checkout, the code directory since round 6
+from vagen import config as _config
+
+DEFAULT_WORKTREE = _config.path("repo")  # the cluster checkout, the code directory since round 6
 # Round 12 freeze (the user's section 4 of 2026-10-22): VAGEN_LITE_WORKTREE names another code directory (a copy of the
 # checkout the code reorganization does not touch); its jobs start from there and the job script gets the same
 # variable.  Unset: the checkout above, and every launch script as before.
 WORKTREE = os.environ.get("VAGEN_LITE_WORKTREE") or DEFAULT_WORKTREE
 SCRIPT = "examples/train/active_spatial/sco_interiorgs_v10_train.sh"
-SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
-IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"
-MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
-POOL = "zoetrope"
-POOLS = ("zoetrope", "h800")  # same H800 cards, specs, image and storage
+SCO = _config.cluster("sco.bin")
+IMAGE = _config.cluster("sco.image")
+MOUNT = _config.cluster("sco.storage_mount")
+POOL = _config.cluster("sco.default_pool")
+WORKSPACE = _config.cluster("sco.workspace")
+POOLS = tuple(_config.cluster("sco.pools"))  # same H800 cards, specs, image and storage
 # round 12 batch (the user's decision of 2026-10-20): a pool for the RL render services only (4 machines, same cards,
 # zone and network); a job is prepared there only when asked, pick_pool never chooses it
-RENDER_POOLS = ("zoe-cf-render",)
-SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
+RENDER_POOLS = tuple(_config.cluster("sco.render_pools"))
+SPECS = {int(k): v for k, v in _config.cluster("sco.worker_specs").items()}  # H800 cards, 14 vCPU each
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 # created, no cards yet; sco spells it QUEUEING (round 12 batch: without it a job in that state counted as not waiting)
 WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUEING", "QUEUED", "WAITING", "CREATING"}
@@ -81,7 +84,7 @@ def submit(run: Path, job_dir: str = "job") -> str:
         return json.loads(receipt.read_text())["job_id"]
     prepared = json.loads((job / "prepared.json").read_text())
     name = f"interiorgs-v10-{prepared['mode_args'][0]}-{run.name}".replace("_", "-")[-60:]
-    command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={prepared.get('pool', POOL)}", f"--job-name={name}",
+    command = [SCO, "acp", "jobs", "create", f"--workspace-name={WORKSPACE}", f"--aec2-name={prepared.get('pool', POOL)}", f"--job-name={name}",
                "--priority=HIGHEST", "--quota-type=reserved", f"--container-image-url={IMAGE}",
                f"--storage-mount={MOUNT}", "--training-framework=pytorch", "--worker-nodes=1",
                f"--worker-spec={prepared['spec']}", f"--command=bash {job}/launch.sh"]
@@ -96,7 +99,7 @@ def submit(run: Path, job_dir: str = "job") -> str:
 
 
 def describe(job_id: str) -> dict:
-    res = subprocess.run([SCO, "acp", "jobs", "describe", "--workspace-name=aigc", "-o", "json", job_id],
+    res = subprocess.run([SCO, "acp", "jobs", "describe", f"--workspace-name={WORKSPACE}", "-o", "json", job_id],
                          capture_output=True, text=True)
     return json.loads(res.stdout) if res.returncode == 0 else {"state": "NOT_FOUND"}
 
@@ -121,7 +124,7 @@ def waiting_by_pool(jobs: List[dict], pools=POOLS) -> dict:
 
 def pick_pool(pools=POOLS) -> str:
     """The pool with the fewest waiting jobs right now (ties and a failed listing: the first of ``pools``)."""
-    res = subprocess.run([SCO, "acp", "jobs", "list", "--workspace-name=aigc", "--page-size", "500", "-o", "json"],
+    res = subprocess.run([SCO, "acp", "jobs", "list", f"--workspace-name={WORKSPACE}", "--page-size", "500", "-o", "json"],
                          capture_output=True, text=True)
     try:
         jobs = json.loads(res.stdout) if res.returncode == 0 else None
@@ -138,7 +141,7 @@ def list_jobs(max_pages: int = 100) -> Optional[List[dict]]:
     later pages), None when a page cannot be read."""
     jobs: dict = {}
     for page in range(1, max_pages + 1):
-        res = subprocess.run([SCO, "acp", "jobs", "list", "--workspace-name=aigc", "--page-size", "500",
+        res = subprocess.run([SCO, "acp", "jobs", "list", f"--workspace-name={WORKSPACE}", "--page-size", "500",
                               "--page-token", str(page), "-o", "json"], capture_output=True, text=True)
         try:
             batch = json.loads(res.stdout) if res.returncode == 0 else None
@@ -158,7 +161,7 @@ def worker_hosts(text: str) -> List[Tuple[int, str]]:
 
 
 def job_hosts(job_id: str) -> List[Tuple[int, str]]:
-    res = subprocess.run([SCO, "acp", "jobs", "get-workers", "--workspace-name=aigc", job_id], capture_output=True,
+    res = subprocess.run([SCO, "acp", "jobs", "get-workers", f"--workspace-name={WORKSPACE}", job_id], capture_output=True,
                          text=True)
     return worker_hosts(res.stdout) if res.returncode == 0 else []
 
@@ -196,8 +199,8 @@ def delete(run: Path, job_dir: str = "job") -> dict:
     rc = 0
     if state != "NOT_FOUND":
         if state not in FINISHED | {"SUSPENDED"}:
-            subprocess.run([SCO, "acp", "jobs", "stop", "--workspace-name=aigc", job_id], capture_output=True, text=True)
-        rc = subprocess.run([SCO, "acp", "jobs", "delete", "--workspace-name=aigc", job_id], capture_output=True,
+            subprocess.run([SCO, "acp", "jobs", "stop", f"--workspace-name={WORKSPACE}", job_id], capture_output=True, text=True)
+        rc = subprocess.run([SCO, "acp", "jobs", "delete", f"--workspace-name={WORKSPACE}", job_id], capture_output=True,
                             text=True).returncode
     if rc == 0:
         receipt.rename(receipt.with_name(f"submission_{job_id}_deleted.json"))

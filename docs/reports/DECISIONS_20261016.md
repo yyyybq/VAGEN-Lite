@@ -13,10 +13,10 @@
 | D5 | 推荐：文本 12 维动作路线代码归档，49 GiB smoke 检查点删除 | |
 | D6 | 推荐：导出 `R1-clean-Projective-v0-taskfix` 第 250 步 HF actor 后删除全部分片；冻结数据、发布 json、报告归档 | |
 | D7a | 推荐：`interiorgs_v10_train_20261014/rl_run` 只留 7 个 HF actor 和日志；按新增第 3 条，第 250 步的续训状态也保留 | |
-| D7b | **先出结论报告，不删** | 见 [DENSE_SCORE_PILOT_R3_CONCLUSION_20261016.md](DENSE_SCORE_PILOT_R3_CONCLUSION_20261016.md) |
+| D7b | **先出结论报告，不删** | 见 [DENSE_SCORE_PILOT_R3_CONCLUSION_20261016.md](DENSE_SCORE_PILOT_R3_CONCLUSION_20261016.md)。2026-10-26 由磁盘线先传 AOSS 再删（用户 10-26 的决定），记录见 `archive/README.md` |
 | D7c | 推荐：第五轮试跑只留 3B SFT 模型，删 RL 试跑分片 | |
 | D8 | 推荐：`cjepa`、`spatial-training-room`、`ele` 移到 `~/` | 不重装可编辑包；CLUSTER.md 记录 |
-| D9 | 推荐：StarVLA NavigateKitchen 检查点保留到下游冒烟后 | |
+| D9 | 推荐：StarVLA NavigateKitchen 检查点保留到下游冒烟后 | 2026-10-26 由磁盘线先传 AOSS 再删；示例脚本指向的目录现在是空的，要用先从 AOSS 恢复 |
 | D10 | 推荐：历史主线权重登记进 `models/historical/` | |
 | D11 | **"自有 QA" = `interiorgs_qa`**，含三部分：① 仿 8 个 benchmark 的 51 个子任务（训练和测试都有）；② 专门为训练造的简单 Yes/No QA；③ 专门为测试造的 RPA（Read / Perception / Action）QA | `data_gen/active_spatial_qa` 的成功谓词 Yes/No 转换器是 RPA 的 Read 测试（COVERAGE.md 第 1 节），**不归档**；三部分在 DATA.md / EVAL.md 里分开写 |
 | D12 | 推荐：删除 mkdocs / readthedocs 配置，README 重写 | |

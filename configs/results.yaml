@@ -1,0 +1,65 @@
+# results: collected from the manifest.json files of the cluster's fixed layout (cleanup phase 2).
+# Do not edit by hand; regenerate with
+#   python scripts/cluster/collect_manifests.py --root /mnt/umm/users/yinbaiqiao/VAGEN-Lite --out configs
+generated_by: scripts/cluster/collect_manifests.py
+root: /mnt/umm/users/yinbaiqiao/VAGEN-Lite
+results:
+- name: interiorgs_v10_r8_eval2
+  kind: result
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r8_20261014/eval2
+  link: results/interiorgs_v10_r8_eval2
+  size_KB: 264760
+  created: '2026-10-16T11:03:34Z'
+  source_run: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r8_20261014
+  note: 'round 8: all 10 models on the 278-task eval set, with per-step trajectories; table.md'
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/results/interiorgs_v10_r8_eval2/manifest.json
+  report_files:
+  - base_qwen25vl7b/done.json
+  - base_qwen25vl7b/model.json
+  - manifest.json
+  - paired.json
+  - r1_final/done.json
+  - r1_final/model.json
+  - table.json
+  - table.md
+  - v10_rl_050/done.json
+  - v10_rl_050/model.json
+  - v10_rl_100/done.json
+  - v10_rl_100/model.json
+  - v10_rl_150/done.json
+  - v10_rl_150/model.json
+  - v10_rl_200/done.json
+  - v10_rl_200/model.json
+  - v10_rl_250/done.json
+  - v10_rl_250/model.json
+  - v10_sft_e1/done.json
+  - v10_sft_e1/model.json
+  - v10_sft_e2/done.json
+  - v10_sft_e2/model.json
+  - v10_sft_e3/done.json
+  - v10_sft_e3/model.json
+- name: interiorgs_v10_r9_eval_diag
+  kind: result
+  path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r9_20261015/eval_diag
+  link: results/interiorgs_v10_r9_eval_diag
+  size_KB: 217624
+  created: '2026-10-16T11:03:35Z'
+  source_run: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r9_20261015
+  note: 'round 9: diagnostic evaluation D1-D7 (rule switches) of SFT epoch 3'
+  manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/results/interiorgs_v10_r9_eval_diag/manifest.json
+  report_files:
+  - D1/done.json
+  - D1/model.json
+  - D2/done.json
+  - D2/model.json
+  - D3/done.json
+  - D3/model.json
+  - D4/done.json
+  - D4/model.json
+  - D5/done.json
+  - D5/model.json
+  - D6/done.json
+  - D6/model.json
+  - D7/done.json
+  - D7/model.json
+  - manifest.json

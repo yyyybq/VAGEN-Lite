@@ -24,15 +24,19 @@ import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from vagen import config as _config
+
 ROOT = Path(__file__).resolve().parents[2]
 # Metadata mirror of all 1,000 scenes (fetch_interiorgs_metadata --source aoss). The older
 # /mnt/umm/users/yinbaiqiao/InteriorGS holds only 100 scenes and is not readable by this user.
-SCENES_ROOT = Path("/mnt/umm/users/yinbaiqiao/InteriorGS_meta")
-ENV_PY = Path("/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python")
-SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
-IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"
-MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
-WORKER_SPEC = "N4lS.Iq.I80.1"
+SCENES_ROOT = Path(_config.path("scenes_meta"))
+ENV_PY = Path(_config.path("conda_env")) / "bin" / "python"
+SCO = _config.cluster("sco.bin")
+IMAGE = _config.cluster("sco.image")
+MOUNT = _config.cluster("sco.storage_mount")
+WORKER_SPEC = _config.cluster("sco.worker_specs")[1]
+POOL = _config.cluster("sco.default_pool")
+WORKSPACE = _config.cluster("sco.workspace")
 
 
 def now() -> str:
@@ -117,7 +121,7 @@ def submit(tag: str) -> None:
         return
     subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=package, check=True)
     job_name = f"interiorgs-v10-gen-{tag}"
-    command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", "--aec2-name=zoetrope",
+    command = [SCO, "acp", "jobs", "create", f"--workspace-name={WORKSPACE}", f"--aec2-name={POOL}",
                f"--job-name={job_name}", "--priority=HIGHEST", "--quota-type=reserved",
                f"--container-image-url={IMAGE}", f"--storage-mount={MOUNT}", "--training-framework=pytorch",
                "--worker-nodes=1", f"--worker-spec={WORKER_SPEC}", f"--command=bash {package}/launch.sh"]
@@ -136,7 +140,7 @@ def submit(tag: str) -> None:
 def status(tag: str) -> None:
     receipt = run_dir(tag) / "control" / "submission.json"
     job_id = json.loads(receipt.read_text())["job_id"]
-    result = subprocess.run([SCO, "acp", "jobs", "describe", "--workspace-name=aigc", "-o", "json", job_id],
+    result = subprocess.run([SCO, "acp", "jobs", "describe", f"--workspace-name={WORKSPACE}", "-o", "json", job_id],
                             capture_output=True, text=True, check=True)
     job = json.loads(result.stdout)
     print(json.dumps({"job_id": job_id, "state": job.get("state"), "start_time": job.get("start_time"),

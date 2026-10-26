@@ -1,0 +1,9 @@
+test_dense_score_preflight
+test_dense_score_validation_analysis
+test_gate_aligned_shaping
+test_r1_legacy_configs
+test_r5_production_backward
+test_renderer_microbenchmark
+test_task_context_pairing
+test_r1_clean_projective_v0
+test_r1_projective_projection_frontier

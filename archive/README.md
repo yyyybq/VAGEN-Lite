@@ -17,6 +17,10 @@
 | side_models/ | Cambrian-S、SenseNova-U1、Qwen3-VL 三条旁支模型的文档和 Qwen3-VL 环境检查脚本（决定 D4 选 a）。适配代码 `vagen/models/` 还在原位：核心训练循环里有按模型类型才走到的分支会导入它，要连同这些分支一起移走，放在第十一轮结束后的代码搬动批次。`.venv-qwen3vl` 留在集群磁盘上，4 个 Cambrian 历史权重留在 `models/historical/`（D10） | 主线只用 Qwen2.5-VL，正式实验用 7B |
 | cluster/（只在集群，不入 git） | 实验残留、旧评测结果、日志，见 cluster/MANIFEST_moves_20261016.tsv | — |
 
+**2026-10-26 更新（磁盘线）：** `archive/cluster/` 下的 `interiorgs_v10_rounds`、`dense_score_pilot`、`r1`、`logs`、`data_intermediate`、`diagnostics_d0_u1` 六个子目录已上传 AOSS 后从集群删除，按用户 10-26 的决定 1 选 A。AOSS 路径是 `fj:s3://baiqiao/vagen_lite_archive/` 加上它们在 `/mnt/umm/users/yinbaiqiao` 下的相对路径，记录在 `archive/cluster/DELETED_TO_AOSS_20261026.txt` 和 `/mnt/umm/users/yinbaiqiao/disk_runs/batches/b1_20261026/`。兼容链接指向的 `clean_runs_aug`、`results_legacy`、`experiments_legacy_runs` 还在集群上。决定 D7b（dense-score pilot r3）和 D9（StarVLA NavigateKitchen 检查点）也由磁盘线先传 AOSS 再删；NavigateKitchen 示例脚本指向的目录现在是空的，要跑先从 AOSS 恢复。
+
+下面这段写于 10-16，其中前四个类目的压缩包已随上述目录一起移到 AOSS。
+
 集群 `archive/cluster/` 里小文件多的类目（logs、results_legacy、data_intermediate、experiments_legacy_runs、r1、diagnostics_d0_u1、misc）已按条目压成 `<条目>.tar.gz`，原目录在压缩成功后删除。122 个条目从 41.6 GB 压到 19.8 GB，每条的压缩前后大小和 SHA-256 见 `cluster/MANIFEST_compressed_20261016.tsv`。还原一条：`tar -xzf <条目>.tar.gz -C <所在目录>`。存权重的大目录（clean_runs_aug、dense_score_pilot、interiorgs_v10_rounds、_pending_delete）没有压缩：内容主要是浮点张量，压不了多少还很费时。
 
 ## 逐文件清单（第一批，2026-10-16）

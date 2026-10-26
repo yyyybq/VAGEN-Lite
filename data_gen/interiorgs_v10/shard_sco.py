@@ -26,14 +26,17 @@ import tarfile
 from pathlib import Path
 from typing import Dict, List
 
+from vagen import config as _config
+
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_ENV = "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite"
-SCO = "/mnt/umm/users/yinbaiqiao/.sco/bin/sco"
-IMAGE = "registry.cn-fz-01.fjscms.com/ccr_fj2/wc-dev:260617"
-MOUNT = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
-POOL = "zoetrope"
-WORKER_SPEC = "N4lS.Iq.I80.1"  # one H800, 14 vCPU
-SCENES_ROOT = "/mnt/umm/users/yinbaiqiao/InteriorGS_meta"
+RUNTIME_ENV = _config.path("conda_env")
+SCO = _config.cluster("sco.bin")
+IMAGE = _config.cluster("sco.image")
+MOUNT = _config.cluster("sco.storage_mount")
+POOL = _config.cluster("sco.default_pool")
+WORKSPACE = _config.cluster("sco.workspace")
+WORKER_SPEC = _config.cluster("sco.worker_specs")[1]  # one H800, 14 vCPU
+SCENES_ROOT = _config.path("scenes_meta")
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 
 
@@ -91,7 +94,7 @@ def submit(out: Path, job_dir: str = "job") -> Dict[str, str]:
     jobs: Dict[str, str] = {}
     for shard in prepared["job_shards"]:
         name = f"interiorgs-v10-gen-{out.name}-{job_dir}-s{shard}".replace("_", "-")[-60:]
-        command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={POOL}",
+        command = [SCO, "acp", "jobs", "create", f"--workspace-name={WORKSPACE}", f"--aec2-name={POOL}",
                    f"--job-name={name}", "--priority=HIGHEST", "--quota-type=reserved",
                    f"--container-image-url={IMAGE}", f"--storage-mount={MOUNT}", "--training-framework=pytorch",
                    "--worker-nodes=1", f"--worker-spec={WORKER_SPEC}",
@@ -108,7 +111,7 @@ def submit(out: Path, job_dir: str = "job") -> Dict[str, str]:
 
 
 def describe(job_id: str) -> dict:
-    res = subprocess.run([SCO, "acp", "jobs", "describe", "--workspace-name=aigc", "-o", "json", job_id],
+    res = subprocess.run([SCO, "acp", "jobs", "describe", f"--workspace-name={WORKSPACE}", "-o", "json", job_id],
                          capture_output=True, text=True)
     if res.returncode != 0:
         return {"state": "NOT_FOUND"}
@@ -130,8 +133,8 @@ def delete(out: Path, job_dir: str = "job") -> Dict[str, int]:
             codes[shard] = 0
             continue
         if state not in FINISHED | {"SUSPENDED"}:
-            subprocess.run([SCO, "acp", "jobs", "stop", "--workspace-name=aigc", jid], capture_output=True, text=True)
-        res = subprocess.run([SCO, "acp", "jobs", "delete", "--workspace-name=aigc", jid], capture_output=True,
+            subprocess.run([SCO, "acp", "jobs", "stop", f"--workspace-name={WORKSPACE}", jid], capture_output=True, text=True)
+        res = subprocess.run([SCO, "acp", "jobs", "delete", f"--workspace-name={WORKSPACE}", jid], capture_output=True,
                              text=True)
         codes[shard] = res.returncode
     if all(c == 0 for c in codes.values()):

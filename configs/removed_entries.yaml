@@ -1,0 +1,20 @@
+# 从固定位置撤下的登记项（手写）。它们的数据已经不在集群上，这里记下是什么、何时、为什么，免得以后找。
+# 生成的 datasets.yaml / models.yaml / results.yaml 只列还在的项。
+removed:
+  - names:
+      - interiorgs_v10_sft_r6b_qwen25vl7b
+      - interiorgs_v10_rl_r6b_qwen25vl7b_step50
+      - interiorgs_v10_rl_r6b_qwen25vl7b_step100
+      - interiorgs_v10_rl_r6b_qwen25vl7b_step150
+      - interiorgs_v10_rl_r6b_qwen25vl7b_step175
+      - interiorgs_v10_rl_r6b_qwen25vl7b_step200
+      - interiorgs_v10_rl_r6b_qwen25vl7b_step225
+      - interiorgs_v10_rl_r6b_qwen25vl7b_step250
+    kind: model
+    what: 第六轮 b 数据上的第一次 SFT（Qwen2.5-VL-7B，LLaMA-Factory 全参数，3 个 epoch）和它之后的 PPO 的 7 个 HF 检查点
+    was_at: exps/vagen_active_spatial/interiorgs_v10_train_20261014/{lf/model,rl_run/checkpoints/global_step_*/actor/huggingface}
+    removed_on: "2026-10-25"
+    why: 主线 10-25 的磁盘清理（用户批准的选项 A 第 6 类和 train_20261014/lf/model）删除，删前没有上传 AOSS
+    found_by: 磁盘线 2026-10-26 的盘点（disk 分支 docs/disk/reports/DISK_INVENTORY_20261026.md 第 3 节）
+    still_available: 这些模型在 278 题评测集上的全部结果和逐步轨迹，见 results/interiorgs_v10_r8_eval2
+    links_removed_on: "2026-10-26"
