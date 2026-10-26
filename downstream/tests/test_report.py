@@ -72,7 +72,7 @@ def test_build_writes_a_complete_page(sim, tmp_path):
     assert out["html_bytes"] < 16 * 1024 * 1024
     results = json.loads((tmp_path / "report/results.json").read_text(encoding="utf-8"))
     assert results["main_label"].startswith("第三步，100% 数据") and results["noise"][0]["compared"] == 944
-    assert results["d5_step"] == 200000 and len(results["summary_lines"]) >= 8
+    assert results["d5_step"] is None and len(results["summary_lines"]) >= 8  # 200k is the final step, not "D5"
 
 
 def test_collect_merges_one_card_shards(tmp_path):
@@ -360,5 +360,8 @@ def test_the_main_report_leads_with_e1s_three_point_mean(sim, tmp_path):
     assert set(e1["mean"]["vs_reference"]) == {"S", "RS", "RD"}
     assert len(e1["fluctuation"]["within"]) == 4 * 3 and len(e1["fluctuation"]["between"]) == 3 * 3
     assert results["summary_lines"][0].startswith("E1（100% 数据、训练种子 1）第 150k、175k、200k 步三点平均")
+    # the final step is reported once, as the final one, not again as an intermediate "D5" checkpoint
+    assert not any(x.startswith("D5 第 200k 步") or x.startswith("这是中间检查点") for x in results["summary_lines"])
+    assert results["d5_step"] is None
     page_text = (tmp_path / "report/index.html").read_text(encoding="utf-8")
     assert 'id="e1"' in page_text and "训练末尾的起伏" in page_text and out["html_bytes"] < 16 * 1024 * 1024

@@ -417,6 +417,8 @@ def build(runs_root: Path, out: Path, reference: str = "B", stage0_mode: bool = 
     out = Path(out)
     (out / "figures").mkdir(parents=True, exist_ok=True)
     d5_step = d5_point(coll)
+    if not stage0_mode and d5_step is not None and d5_step >= FINAL_STEP:
+        d5_step = None  # E1 reuses the DS-*-100-s1 folders: their last common step is the final one, reported below
     d5 = stats.compare(coll, "100", d5_step, [1], reference) if d5_step else None
     finals = {} if stage0_mode else {r: stats.compare(coll, r, FINAL_STEP, final_seeds(coll, r), reference)
                                      for r in ("010", "030", "100") if final_seeds(coll, r)}
