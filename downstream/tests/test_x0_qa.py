@@ -44,6 +44,60 @@ def test_names_and_seeds():
     assert X.parse_seeds("1000-1002,1010") == [1000, 1001, 1002, 1010]
 
 
+def cand(kind, task, cam, a_kind, b_kind, answer="A", i=0):
+    a, b = ent("mug", key=f"a{i}"), ent("sink", key=f"b{i}")
+    a["kind"], b["kind"] = a_kind, b_kind
+    return {"kind": kind, "camera": cam, "task": task, "seed": 1000, "question": "Which?", "options": ["mug", "sink"],
+            "answer": answer, "answer_text": "mug" if answer == "A" else "sink", "a": a, "b": b,
+            "prompt": X.make_prompt(cam, "Which?", ["mug", "sink"])}
+
+
+def test_select_puts_object_questions_first_and_alternates_letters():
+    cands = []
+    for i in range(6):
+        cands.append(cand("near_far", f"T{i}", "robot0_agentview_left", "object", "fixture", i=i))
+    for i in range(10):
+        cands.append(cand("near_far", f"U{i}", "robot0_agentview_right", "fixture", "fixture", i=100 + i))
+    chosen = X.select(cands, 8, random.Random(0))
+    assert len(chosen) == 8 and sum(q["object_question"] for q in chosen) == 6  # every object question, then fixtures
+    assert [q["answer"] for q in chosen] == list("ABABABAB")
+    for q in chosen:  # the option under the letter is still the right one, and the prompt shows the new order
+        assert q["options"]["AB".index(q["answer"])] == q["answer_text"]
+        assert f"A. {q['options'][0]}\nB. {q['options'][1]}" in q["prompt"]
+    assert len({q["id"] for q in chosen}) == 8
+
+
+def test_parse_letter_and_scene_parts():
+    assert X.parse_letter("A") == "A" and X.parse_letter("B.") == "B" and X.parse_letter("(B) behind it") == "B"
+    assert X.parse_letter("Answer: A") == "A" and X.parse_letter("The answer is B") == "B"
+    assert X.parse_letter("A or B") is None and X.parse_letter("<action>move_forward</action>") is None
+    pairs = X.scene_pairs(["T1", "T2"], [1, 2, 3], "2/4")
+    assert pairs == [("T1", 2), ("T2", 3)]  # indices 1 and 5 of the six pairs
+    assert sorted(sum((X.scene_pairs(["T1", "T2"], [1, 2, 3], f"{i}/4") for i in range(1, 5)), [])) == \
+        sorted(X.scene_pairs(["T1", "T2"], [1, 2, 3]))
+
+
+def test_analyze_accuracy_interval_unparsed_and_mcnemar():
+    qs = [{"id": f"q{i}", "kind": X.KINDS[i % 3], "answer": "A", "object_question": i < 6} for i in range(30)]
+    answers = {"B": {f"q{i}": ("A" if i < 15 else "B") for i in range(30)},
+               "RS": {f"q{i}": ("A" if i < 27 else None) for i in range(30)}}
+    res = X.analyze(qs, answers)
+    assert res["B"]["all"]["accuracy"] == 0.5 and res["RS"]["all"]["correct"] == 27
+    assert res["RS"]["all"]["unparsed"] == 3 and abs(res["RS"]["all"]["unparsed_rate"] - 0.1) < 1e-9
+    lo, hi = res["RS"]["all"]["ci"]
+    assert 0.73 < lo < 0.75 and 0.96 < hi < 0.98  # Wilson 95% for 27 / 30
+    vs = res["RS"]["all"]["vs_reference"]
+    assert vs["only_model"] == 12 and vs["only_reference"] == 0 and vs["p"] < 0.001
+    assert X.mcnemar_exact(0, 0) == 1.0 and abs(X.mcnemar_exact(1, 1) - 1.0) < 1e-12
+    assert res["RS"]["object"]["n"] == 6 and res["RS"]["fixture_only"]["n"] == 24
+
+
+def test_the_job_script_parses():
+    import subprocess
+
+    assert subprocess.run(["bash", "-n", str(ROOT / "x/run_x0.sh")], capture_output=True).returncode == 0
+
+
 def test_pick_spreads_over_kinds_and_balances_answers():
     rng = random.Random(1)
     cands = []

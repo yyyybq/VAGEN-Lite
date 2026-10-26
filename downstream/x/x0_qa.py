@@ -129,12 +129,24 @@ def question(kind: str, a: dict, b: dict, camera: str, rng: random.Random):
     if rng.random() < 0.5:
         choices = choices[::-1]
     letter = "AB"[choices.index(truth)]
-    prompt = (f"This image is from {CAMERA_EN[camera]}. {text}\nA. {choices[0]}\nB. {choices[1]}\n"
-              "Answer with the letter of the correct option only.")
+    prompt = make_prompt(camera, text, choices)
+    keys = ("key", "name", "kind", "pixels", "cx", "cy", "depth", "forward")
     return {"kind": kind, "camera": camera, "question": text, "question_zh": zh, "options": choices,
             "answer": letter, "answer_text": truth, "prompt": prompt,
-            "a": {k: a[k] for k in ("key", "name", "pixels", "cx", "cy", "depth", "forward")},
-            "b": {k: b[k] for k in ("key", "name", "pixels", "cx", "cy", "depth", "forward")}}
+            "a": {k: a.get(k) for k in keys}, "b": {k: b.get(k) for k in keys}}
+
+
+def make_prompt(camera: str, text: str, options) -> str:
+    return (f"This image is from {CAMERA_EN[camera]}. {text}\nA. {options[0]}\nB. {options[1]}\n"
+            "Answer with the letter of the correct option only.")
+
+
+def with_letter(q: dict, letter: str) -> dict:
+    """The same question with its options ordered so that the right answer has `letter`."""
+    if q["answer"] == letter:
+        return q
+    options = q["options"][::-1]
+    return dict(q, options=options, answer=letter, prompt=make_prompt(q["camera"], q["question"], options))
 
 
 # ---------------------------------------------------------------------------------------------- simulator side
@@ -239,6 +251,21 @@ def scene_questions(task: str, seed: int, out: Path, rng: random.Random) -> tupl
         env.close()
 
 
+def seen_tasks() -> list:
+    """The 34 tasks of the closed-loop evaluation (atomic_seen + composite_seen of target50)."""
+    rows = json.loads((WORKTREE / "downstream/demos/target50_tasks.json").read_text())["tasks"]
+    return [r["task"] for r in rows if r["group"] in ("atomic_seen", "composite_seen")]
+
+
+def scene_pairs(tasks, seeds, part: str = None) -> list:
+    """(task, seed) pairs in order; with part "I/K" every K-th pair from the I-th (parallel generate processes)."""
+    pairs = [(t, s) for t in tasks for s in seeds]
+    if part:
+        i, k = (int(x) for x in part.split("/"))
+        pairs = pairs[i - 1::k]
+    return pairs
+
+
 def generate(args) -> int:
     sys.path.insert(0, str(WORKTREE))
     from downstream.eval import closed_loop
@@ -246,23 +273,136 @@ def generate(args) -> int:
     closed_loop.stable_counter_regions()
     out = Path(args.out)
     (out / "images").mkdir(parents=True, exist_ok=True)
-    rng = random.Random(args.rng_seed)
+    tasks = seen_tasks() if args.tasks == ["seen34"] else args.tasks
     with open(out / "candidates.jsonl", "a") as qf, open(out / "scenes.jsonl", "a") as sf:
-        for task in args.tasks:
-            for seed in parse_seeds(args.seeds):
-                t = time.time()
-                try:
-                    scene, qs = scene_questions(task, seed, out, rng)
-                except Exception as exc:  # one bad reset is reported, not fatal
-                    sf.write(json.dumps({"task": task, "seed": seed, "error": f"{type(exc).__name__}: {exc}"[:300]}) + "\n")
-                    continue
-                scene["seconds"] = round(time.time() - t, 1)
-                scene["candidates"] = len(qs)
-                sf.write(json.dumps(scene) + "\n")
-                for q in qs:
-                    qf.write(json.dumps(q) + "\n")
-                print(f"{task} {seed}: {len(qs)} candidate questions, {scene['seconds']} s", flush=True)
+        for task, seed in scene_pairs(tasks, parse_seeds(args.seeds), args.part):
+            # one random stream per scene: the questions do not depend on how the scenes are split over processes
+            rng = random.Random(f"{task}:{seed}:{args.rng_seed}")
+            t = time.time()
+            try:
+                scene, qs = scene_questions(task, seed, out, rng)
+            except Exception as exc:  # one bad reset is reported, not fatal
+                sf.write(json.dumps({"task": task, "seed": seed, "error": f"{type(exc).__name__}: {exc}"[:300]}) + "\n")
+                continue
+            scene["seconds"] = round(time.time() - t, 1)
+            scene["candidates"] = len(qs)
+            sf.write(json.dumps(scene) + "\n")
+            for q in qs:
+                qf.write(json.dumps(q) + "\n")
+            qf.flush()
+            sf.flush()
+            print(f"{task} {seed}: {len(qs)} candidate questions, {scene['seconds']} s", flush=True)
     return 0
+
+
+# ---------------------------------------------------------------------------------------- the question set
+def involves_object(q: dict) -> bool:
+    return "object" in (q["a"].get("kind"), q["b"].get("kind"))
+
+
+def question_id(q: dict) -> str:
+    return f"{q['task']}_s{q['seed']}_{q['camera']}_{q['kind']}_{q['a']['key']}_{q['b']['key']}"
+
+
+def spread(pool: list, n: int, rng: random.Random) -> list:
+    """Up to n questions taken one per (task, seed, camera) group in turn, so no scene dominates."""
+    groups = {}
+    for q in pool:
+        groups.setdefault((q["task"], q["seed"], q["camera"]), []).append(q)
+    keys = sorted(groups)
+    rng.shuffle(keys)
+    for k in keys:
+        rng.shuffle(groups[k])
+    out = []
+    while len(out) < n and any(groups[k] for k in keys):
+        for k in keys:
+            if len(out) >= n:
+                break
+            if groups[k]:
+                out.append(groups[k].pop())
+    return out
+
+
+def select(cands: list, per_kind: int, rng: random.Random) -> list:
+    """The final set (the user's decision 4 of 2026-10-26): per kind up to per_kind questions, as many involving a
+    movable object as the thresholds allow, then fixture-only ones; spread over scenes and cameras; the right
+    option alternates A / B within each kind."""
+    out = []
+    for kind in KINDS:
+        pool = [q for q in cands if q["kind"] == kind]
+        chosen = spread([q for q in pool if involves_object(q)], per_kind, rng)
+        chosen += spread([q for q in pool if not involves_object(q)], per_kind - len(chosen), rng)
+        for i, q in enumerate(chosen):
+            q = with_letter(q, "AB"[i % 2])
+            out.append(dict(q, id=question_id(q), object_question=involves_object(q)))
+    return out
+
+
+def select_cmd(args) -> int:
+    cands = []
+    for qa in map(Path, args.qa):
+        for line in qa.read_text().splitlines():
+            if line.strip():
+                q = json.loads(line)
+                q["image_path"] = str(qa.parent / q["image"])
+                cands.append(q)
+    chosen = select(cands, args.per_kind, random.Random(args.rng_seed))
+    Path(args.out).write_text("".join(json.dumps(q) + "\n" for q in chosen))
+    stats = {k: {"questions": sum(1 for q in chosen if q["kind"] == k),
+                 "object": sum(1 for q in chosen if q["kind"] == k and q["object_question"]),
+                 "candidates": sum(1 for q in cands if q["kind"] == k),
+                 "object_candidates": sum(1 for q in cands if q["kind"] == k and involves_object(q))} for k in KINDS}
+    Path(args.out).with_suffix(".stats.json").write_text(json.dumps(stats, indent=1) + "\n")
+    print(json.dumps(stats))
+    return 0
+
+
+# ------------------------------------------------------------------------------------------------ analysis
+def wilson(k: int, n: int, z: float = 1.96):
+    if n == 0:
+        return (float("nan"), float("nan"))
+    p = k / n
+    d = 1 + z * z / n
+    c = (p + z * z / (2 * n)) / d
+    h = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / d
+    return (max(0.0, c - h), min(1.0, c + h))
+
+
+def mcnemar_exact(b: int, c: int) -> float:
+    """Two-sided exact McNemar p (binomial, p = 0.5) for the discordant counts b, c."""
+    import math
+
+    n = b + c
+    if n == 0:
+        return 1.0
+    k = min(b, c)
+    tail = sum(math.comb(n, i) for i in range(k + 1)) / 2 ** n
+    return min(1.0, 2 * tail)
+
+
+def analyze(questions: list, answers: dict, reference: str = "B") -> dict:
+    """answers: {model: {question id: parsed letter or None}}.  Per model and kind (and all): accuracy with its 95%
+    Wilson interval, the share of answers that could not be parsed (counted as wrong), and against the reference
+    model, paired by question, the exact McNemar p."""
+    out = {}
+    groups = {"all": questions, **{k: [q for q in questions if q["kind"] == k] for k in KINDS},
+              "object": [q for q in questions if q.get("object_question")],
+              "fixture_only": [q for q in questions if not q.get("object_question")]}
+    for model, ans in answers.items():
+        out[model] = {}
+        for g, qs in groups.items():
+            right = [ans.get(q["id"]) == q["answer"] for q in qs]
+            unparsed = sum(1 for q in qs if ans.get(q["id"]) is None)
+            k, n = sum(right), len(qs)
+            row = {"n": n, "correct": k, "accuracy": k / n if n else float("nan"), "ci": wilson(k, n),
+                   "unparsed": unparsed, "unparsed_rate": unparsed / n if n else float("nan")}
+            if model != reference and reference in answers:
+                ref = answers[reference]
+                only_m = sum(1 for q in qs if ans.get(q["id"]) == q["answer"] and ref.get(q["id"]) != q["answer"])
+                only_r = sum(1 for q in qs if ref.get(q["id"]) == q["answer"] and ans.get(q["id"]) != q["answer"])
+                row["vs_reference"] = {"only_model": only_m, "only_reference": only_r, "p": mcnemar_exact(only_m, only_r)}
+            out[model][g] = row
+    return out
 
 
 # ------------------------------------------------------------------------------------------- picking and review
@@ -360,21 +500,70 @@ def samples(args) -> int:
     return 0
 
 
+def parse_letter(text: str):
+    """The option letter of a model's reply ('A' / 'B'), None if it names neither or both."""
+    t = re.sub(r"<[^>]*>", " ", str(text or "")).strip()
+    found = set(re.findall(r"\b([AB])\b", t))
+    if len(found) > 1:  # names both options
+        return None
+    m = re.match(r"^\W*(?:answer\s*[:：]?\s*|option\s*)?\(?([AB])\)?(?:[\s.,:)\]]|$)", t, flags=re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    return found.pop() if found else None
+
+
+def analyze_cmd(args) -> int:
+    questions = [json.loads(line) for line in Path(args.questions).read_text().splitlines() if line.strip()]
+    answers = {}
+    for spec in args.answers:
+        model, path = spec.split("=", 1)
+        answers[model] = {}
+        for line in Path(path).read_text().splitlines():
+            if line.strip():
+                r = json.loads(line)
+                answers[model][r["id"]] = parse_letter(r.get("reply"))
+    res = analyze(questions, answers, args.reference)
+    Path(args.out).write_text(json.dumps(res, indent=1) + "\n")
+    lines = ["| 起点 | 题型 | 题数 | 准确率（95% 区间） | 解析不出 | 与 B 比（只对 / B 只对，McNemar p） |",
+             "| --- | --- | ---: | --- | ---: | --- |"]
+    zh = {"all": "全部", **KIND_ZH, "object": "含物体的题", "fixture_only": "只有设施的题"}
+    for model, rows in res.items():
+        for g, r in rows.items():
+            vs = r.get("vs_reference")
+            lines.append(f"| {model} | {zh[g]} | {r['n']} | {100 * r['accuracy']:.1f}%（{100 * r['ci'][0]:.1f}–"
+                         f"{100 * r['ci'][1]:.1f}%） | {100 * r['unparsed_rate']:.1f}% | "
+                         + (f"{vs['only_model']} / {vs['only_reference']}，p = {vs['p']:.3g}" if vs else "—") + " |")
+    Path(args.out).with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n".join(lines))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("generate")
-    g.add_argument("--tasks", nargs="+", required=True)
+    g.add_argument("--tasks", nargs="+", required=True, help="task names, or seen34 for the 34 evaluation tasks")
     g.add_argument("--seeds", required=True)
     g.add_argument("--out", required=True)
+    g.add_argument("--part", default=None, help="I/K: every K-th (task, seed) pair from the I-th")
     g.add_argument("--rng-seed", type=int, default=0)
     s = sub.add_parser("samples")
     s.add_argument("--qa", nargs="+", required=True, help="candidates.jsonl of one or more generate folders")
     s.add_argument("--n", type=int, default=20)
     s.add_argument("--out", required=True)
     s.add_argument("--rng-seed", type=int, default=0)
+    c = sub.add_parser("select")
+    c.add_argument("--qa", nargs="+", required=True)
+    c.add_argument("--per-kind", type=int, default=170)
+    c.add_argument("--out", required=True)
+    c.add_argument("--rng-seed", type=int, default=0)
+    a = sub.add_parser("analyze")
+    a.add_argument("--questions", required=True)
+    a.add_argument("--answers", nargs="+", required=True, help="MODEL=answers.jsonl (lines with id and reply)")
+    a.add_argument("--reference", default="B")
+    a.add_argument("--out", required=True)
     args = ap.parse_args(argv)
-    return generate(args) if args.cmd == "generate" else samples(args)
+    return {"generate": generate, "samples": samples, "select": select_cmd, "analyze": analyze_cmd}[args.cmd](args)
 
 
 if __name__ == "__main__":
