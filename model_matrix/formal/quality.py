@@ -73,7 +73,7 @@ def block_quality(run: Path, block: int = 25) -> Dict[str, Dict]:
 
 
 def report(results: Dict[str, Dict[str, Dict]]) -> str:
-    lines = ["| 臂 | 更新 | 回答数 | 读不出 | 读不出的形式 | 表外名字（个数 / 最多的） |", "| --- | --- | --- | --- | --- | --- |"]
+    lines = ["| 臂 | 更新 | 回答数 | 按动作表严格读不出（含超过 5 个动作；判定用训练端自己的读不出比例） | 形式 | 表外名字（个数 / 最多的） |", "| --- | --- | --- | --- | --- | --- |"]
     for run, blocks in results.items():
         for k, b in blocks.items():
             forms = "，".join(f"{f} {n}" for f, n in b["forms"].items()) or "—"
