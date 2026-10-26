@@ -3,7 +3,7 @@
 
 Must NOT import robocasa or gymnasium. Run with:
 
-    python vagen/envs/robocasa/tests/test_actions.py
+    python tests/downstream/test_actions.py
 """
 
 from __future__ import annotations

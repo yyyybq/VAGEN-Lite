@@ -1,6 +1,6 @@
 """Tests for workstream F (new task families + canonical v2 judges).
 
-Run: cd <repo> && python3 -m unittest discover -s data_gen/interiorgs_v10/tests -t .
+Run: cd <repo> && python3 -m pytest tests/datagen/test_families.py
 """
 
 import json
