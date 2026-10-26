@@ -13,7 +13,7 @@ OUT="${2:?}"; SERVERS="${3:?}"; WORKERS="${4:?}"; SHARD="${5:-}"
 SHARD_ARGS=(); [[ -n "$SHARD" ]] && SHARD_ARGS=(--shard "$SHARD")
 WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WT/downstream/eval/sim_env.sh"
-PLAN="$WT/downstream/eval/eval_d6.json"
+PLAN="${EVAL_PLAN:-$WT/downstream/eval/eval_d6.json}"  # EVAL_PLAN: another fixed plan (X3: downstream/x/x3_plan.json)
 export PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export NO_PROXY='*' no_proxy='*' STARVLA_ROOT HF_HOME=/mnt/umm/users/yinbaiqiao/.cache/huggingface
 mkdir -p "$OUT"

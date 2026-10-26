@@ -58,16 +58,18 @@ def plan(tasks, seeds, horizon_of=None):
 def eval_plan_episodes(path: Path, tasks_path: Path = TASKS):
     """(episodes, plan dict) of a fixed evaluation plan (downstream/eval/eval_d6.json): every task of the plan's
     groups with the plan's `seeds`; the spatial tasks (plan `spatial_tasks` file, key "spatial") with `seeds_spatial`
-    when the plan has it."""
+    when the plan has it.  A plan with "only_spatial" keeps only the spatial tasks (X3: downstream/x/x3_plan.json)."""
     p = json.loads(Path(path).read_text())
     task_rows = json.loads(Path(tasks_path).read_text())["tasks"]
     horizon_of = {t["task"]: int(t["horizon"]) for t in task_rows}
     spatial = set()
-    if p.get("seeds_spatial"):
+    if p.get("seeds_spatial") or p.get("only_spatial"):
         spatial = set(json.loads((WORKTREE / p["spatial_tasks"]).read_text())["spatial"])
     episodes = []
     for t in (row["task"] for row in task_rows if row["group"] in p["groups"]):
-        seeds = p["seeds_spatial"] if t in spatial else p["seeds"]
+        if p.get("only_spatial") and t not in spatial:
+            continue
+        seeds = p["seeds_spatial"] if t in spatial and p.get("seeds_spatial") else p["seeds"]
         episodes += plan([t], parse_seeds(seeds), horizon_of)
     return episodes, p
 
@@ -261,6 +263,41 @@ def _safe(fn):
     return call
 
 
+def _record(fn, *args):
+    """fn(*args), or {"error": ...}: recording must never stop or change an episode."""
+    try:
+        return fn(*args)
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"[:300]}
+
+
+def _load_x3_targets():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("x3_targets", WORKTREE / "downstream/x/x3_targets.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class EndState:
+    """X3: the read-only record of a spatial task's candidate targets (downstream/x/x3_targets.py) right after reset
+    and after the episode's last step, kept in the episode row as end_state = {"start", "end"}.  Never raises: a
+    failure becomes {"error": ...} in the record."""
+
+    def __init__(self, task: str, env, load=_load_x3_targets):
+        self.task, self.module = task, _record(load)
+        self.start = self._call("start", env)
+
+    def _call(self, name: str, env):
+        if isinstance(self.module, dict):  # the recorder did not load: its error is the record
+            return self.module
+        return _record(getattr(self.module, name), self.task, env)
+
+    def finish(self, env) -> dict:
+        return {"start": self.start, "end": self._call("end", env)}
+
+
 def run_episode(spec: dict) -> dict:
     """One episode; while it runs, INFLIGHT/<pid>.json names it, so the main process can tell which episode a worker
     that died was running (multiprocessing loses that task and would otherwise wait for it forever)."""
@@ -310,6 +347,7 @@ def _run_episode(spec: dict) -> dict:
         out["reset_seconds"] = round(time.monotonic() - started, 2)
         out["init"] = state_fingerprint(env, obs)
         out["init_qpos"] = initial_qpos(env)
+        end_state = EndState(spec["task"], env) if spec.get("end_state") else None
         recorder = FrameRecorder(Path(spec["frames_dir"]) / f"{spec['task']}_s{spec['seed']}.jpg") \
             if spec.get("frames_dir") else None
         record = _safe(recorder.add) if recorder else (lambda *a: None)
@@ -334,6 +372,8 @@ def _run_episode(spec: dict) -> dict:
                    truncated=bool(truncated), step_limit=steps >= spec["max_steps"],
                    inference_mean_seconds=round(float(np.mean(latencies)), 4) if latencies else None,
                    status="complete")
+        if end_state is not None:  # after the last step: the episode is over
+            out["end_state"] = end_state.finish(env)
         if recorder:
             try:
                 out.update(recorder.save(success))
@@ -603,6 +643,8 @@ def main() -> int:
         e.update(split=args.split, execute_steps=args.execute_steps)
         if args.frames:
             e["frames_dir"] = str(args.out / "frames")
+        if eval_plan and eval_plan.get("end_state"):
+            e["end_state"] = True
     record = {"ckpt": args.ckpt, "servers": args.servers, "workers": args.workers,
               "stable_counter_regions": args.stable_regions, "shard": args.shard,
               "eval_plan": eval_plan and {"path": str(args.eval_plan), "name": eval_plan["name"]},

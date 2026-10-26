@@ -1,0 +1,13 @@
+{
+ "_doc": "X3 (the user's decision 5 of 2026-10-26): the spatial episodes of the fixed evaluation eval_d6.json replayed with the read-only target recorder (downstream/x/x3_targets.py).  Everything that decides an episode is as in eval_d6.json (target kitchens, seeds 1000-1049, task horizons, 16-step chunks, stable counter regions, the frozen exclusion list), so each episode should end as in the E1 evaluation; only the 9 spatial tasks are run (450 - 3 excluded = 447 episodes) and each row carries end_state.",
+ "name": "x3_spatial50_end_state",
+ "split": "target",
+ "seeds": "1000-1019",
+ "seeds_spatial": "1000-1049",
+ "execute_steps": 16,
+ "groups": ["atomic_seen", "composite_seen"],
+ "spatial_tasks": "downstream/demos/spatial_tasks.json",
+ "stable_counter_regions": true,
+ "only_spatial": true,
+ "end_state": true
+}
