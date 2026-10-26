@@ -267,6 +267,27 @@ def e1_html(e1) -> str:
     return rates + vs + fluct + e1_band_html(e1)
 
 
+def e2_html(rv) -> str:
+    """E2 within each start: 10% and 30% minus 100% at the final step, same scenes (build.ratio_vs_full)."""
+    if not rv:
+        return ""
+    rows = []
+    for s, by in rv.items():
+        for r, row in sorted(by.items()):
+            for g in ("all", "spatial"):
+                d = row[g]
+                rows.append(f'<tr><td>{E(s)}</td><td>{int(r)}% − 100%</td><td>{E(stats.GROUP_ZH[g])}</td>'
+                            f'<td class="n">{pct(d["rate_b"])} → {pct(d["rate_a"])}</td>'
+                            f'<td class="n">{pts(d["task_mean_diff"])}<br><span class="meta">{pts(d["task_low"])} 到 '
+                            f'{pts(d["task_high"])}</span></td><td class="n">{d["tasks_up"]} / {d["tasks_down"]}</td>'
+                            f'<td class="n">{pval(d["wilcoxon_p"])}</td><td class="n">{pval(d["p"])}</td></tr>')
+    return (f'<h3>E2：同一起点，少量数据减 100% 数据（第 20 万步）</h3><div class="tablewrap"><table><thead><tr><th>起点</th>'
+            f'<th>比较</th><th>任务组</th><th class="n">成功率（100% → 少量）</th><th class="n">逐任务平均差（95% 区间）</th>'
+            f'<th class="n">任务 ↑ / ↓</th><th class="n">Wilcoxon p</th><th class="n">McNemar p</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div><p class="meta">单位百分点，同一批场景配对。20 万步时 100% 数据'
+            f'只过了约 0.36 个 epoch，30% 约 1.18 个，10% 约 3.6 个。</p>')
+
+
 def e1_band_html(e1) -> str:
     """The E3 task rule rechecked on E1's three-point means (build.e1_band)."""
     band = e1.get("band") or []
@@ -417,7 +438,7 @@ def render(results: dict, coll, figs: dict, examples: list) -> str:
         parts.append(f'<section id="e1"><h2>E1：第 15 万、17.5 万、20 万步三点</h2><p class="prose">100% 数据、训练种子 1。'
                      f'主数字用三个检查点的平均；三点之间的配对差是训练末尾的起伏尺度（你 10-23 晚的决定 2）。第 15 万和'
                      f' 17.5 万步的权重从全状态复制出来另评，第 20 万步由训练任务自己评；三次评测用同一批场景（944 回合）。'
-                     f'</p>{e1_html(r.get("e1"))}</section>')
+                     f'</p>{e1_html(r.get("e1"))}{e2_html(r.get("e2"))}</section>')
     if s0:
         parts.append(f'<section id="stage0"><h2>阶段 0：已保留检查点</h2><p class="prose">10-22 停下的四个 D5 训练'
                      f'（100% 数据、训练种子 1）各保留 2.5 万、5 万、7.5 万、10 万步四个检查点，每个都按 950 回合协议评一遍。'

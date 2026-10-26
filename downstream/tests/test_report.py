@@ -73,6 +73,7 @@ def test_build_writes_a_complete_page(sim, tmp_path):
     results = json.loads((tmp_path / "report/results.json").read_text(encoding="utf-8"))
     assert results["main_label"].startswith("第三步，100% 数据") and results["noise"][0]["compared"] == 944
     assert results["d5_step"] is None and len(results["summary_lines"]) >= 8  # 200k is the final step, not "D5"
+    assert set(results["e2"]) == {"B", "S", "RS", "RD"} and set(results["e2"]["RS"]) == {"010", "030"}
 
 
 def test_collect_merges_one_card_shards(tmp_path):
@@ -335,6 +336,28 @@ def test_compare_mean_over_three_checkpoints_by_hand(tmp_path):
     assert ("E3 任务清单按同一规则复核" in lines and "OpenDrawer 30.0%；和阶段 0 的清单相同" in lines
             and "CoffeeSetupMug、SlideDishwasherRack、TurnOffStove 没有数据" in lines)
     assert "E3 任务清单复核" in html_text and "<b>30.0%</b>" in html_text
+
+
+def test_e2_compares_each_smaller_ratio_with_100_percent_within_a_start(tmp_path):
+    """The user's question of 2026-10-26: is 30% above 100% for every start or only for RS?  Same start, same final
+    step, same scenes: S gains 10 OpenDrawer successes at 30%, CloseFridge is unchanged."""
+    from downstream.report import page
+
+    root = tmp_path / "runs"
+    for ratio, drawer in (("100", 10), ("030", 20)):
+        exp = root / f"experiments/DS-S-{ratio}-s1"
+        exp.mkdir(parents=True)
+        (exp / "experiment.json").write_text("{}")
+        _write_eval(exp / f"evals/steps_{build.FINAL_STEP}/out/episodes",
+                    {"OpenDrawer": (drawer, 50, 50), "CloseFridge": (5, 20, 20)}, summary=True)
+    rv = build.ratio_vs_full(collect.collect(root))
+    assert list(rv) == ["S"] and list(rv["S"]) == ["030"]
+    d = rv["S"]["030"]
+    assert d["all"]["rate_b"] == pytest.approx(15 / 70) and d["all"]["rate_a"] == pytest.approx(25 / 70)
+    assert d["all"]["task_mean_diff"] == pytest.approx(0.1) and d["spatial"]["task_mean_diff"] == pytest.approx(0.2)
+    lines = "".join(build.e2_lines(rv))
+    assert "E2 30% 数据减 100% 数据" in lines and "S +10.0" in lines and "21.4% → 35.7%" in lines
+    assert "30% − 100%" in page.e2_html(rv) and "0.36 个 epoch" in page.e2_html(rv)
 
 
 def test_the_e3_rule_reports_tasks_that_enter_or_leave_the_band(tmp_path):

@@ -312,6 +312,51 @@ def e1_lines(e1) -> list:
     return lines
 
 
+E2_RATIOS = ("010", "030")
+
+
+def ratio_vs_full(coll, step: int = None) -> dict:
+    """E2 against E1 within each start (the user's question of 2026-10-26: is 30% above 100% for every start or only
+    for RS?): each smaller ratio minus 100% at the same final step, training seed 1, on the episodes both completed
+    (same scenes); pooled (McNemar) and task-level (the tasks as pairing unit), all 34 tasks and the 9 spatial.
+    {start: {ratio: {group: {...}}}}, only starts with both evaluations."""
+    step = step or FINAL_STEP
+    groups = {g: {t for t, i in coll.tasks.items() if stats.in_group(i, g)} for g in ("all", "spatial")}
+    out = {}
+    for s in coll.starts():
+        full = stats.episodes_of(coll, s, "100", step, [1])
+        for r in E2_RATIOS:
+            small = stats.episodes_of(coll, s, r, step, [1])
+            if not full or not small:
+                continue
+            row = {}
+            for g, keep in groups.items():
+                mf = stats.outcome_map([x for x in full if x["task"] in keep])
+                ms = stats.outcome_map([x for x in small if x["task"] in keep])
+                row[g] = dict(stats.paired(ms, mf), **stats.task_level(stats.common_task_diffs(mf, ms)))
+            out.setdefault(s, {})[r] = row
+    return out
+
+
+def e2_lines(rv) -> list:
+    if not rv:
+        return []
+    lines = []
+    for r in E2_RATIOS:
+        for g in ("all", "spatial"):
+            parts = []
+            for s, by in rv.items():
+                if r not in by:
+                    continue
+                d = by[r][g]
+                parts.append(f"{s} {page.pts(d['task_mean_diff'])}（区间 {page.pts(d['task_low'])} 到 {page.pts(d['task_high'])}，"
+                             f"Wilcoxon p = {page.pval(d['wilcoxon_p'])}；成功率 {page.pct(d['rate_b'])} → {page.pct(d['rate_a'])}）")
+            if parts:
+                lines.append(f"E2 {collect.RATIO_PERCENT[r]}% 数据减 100% 数据（同一起点、第 {FINAL_STEP // 1000}k 步、同一批场景，"
+                             f"{stats.GROUP_ZH[g]}，逐任务平均差，百分点）：" + "；".join(parts) + "。")
+    return lines
+
+
 RULE_FROM, RULE_TO, RULE_P, RULE_POINTS = 50000, 100000, 0.05, 0.03
 
 
@@ -436,7 +481,8 @@ def build(runs_root: Path, out: Path, reference: str = "B", stage0_mode: bool = 
         main_label = "还没有评测结果"
     lines = stage0_lines(s0) if s0 else []
     e1 = None if stage0_mode else e1_points(coll, reference)
-    lines = e1_lines(e1) + lines  # the main numbers first
+    e2 = None if stage0_mode else ratio_vs_full(coll)
+    lines = e1_lines(e1) + e2_lines(e2) + lines  # the main numbers first
     if not coll.first():
         lines.append("还没有完成的闭环评测。训练损失见下文；评测完成后重新生成本页即可。")
     if d5:
@@ -484,7 +530,7 @@ def build(runs_root: Path, out: Path, reference: str = "B", stage0_mode: bool = 
         "reference": reference, "d5_step": d5_step, "d5": d5, "finals": finals, "final_step": FINAL_STEP,
         "seed_tables": seed_tables, "main_cmp": main, "main_label": main_label,
         "task_order": F.task_order(coll, main) if main else [], "noise": noise, "noise_floor": floor,
-        "summary_lines": lines, "stage0": s0, "e1": e1,
+        "summary_lines": lines, "stage0": s0, "e1": e1, "e2": e2,
         "examples_rule": ("范例按固定规则挑选，不凭观感：同一场景（同任务、同评测种子、同训练种子）里起点结果不一致的回合，"
                           "每个起点各取同样多个“它成功、B 失败”和“B 成功、它失败”，空间任务优先，再按任务名和种子排序；"
                           "另加一个全部成功、一个全部失败的场景。每条画面是该回合等间隔的 8 帧（左侧相机），"
