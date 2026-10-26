@@ -4,7 +4,9 @@
   "P0": {"name": "benchmark-style QA (仿 benchmark 的 QA)", "path": null},
   "P1": {"name": "transition QA (转移题)", "path": null},
   "P2": {"name": "round-11 SFT action trajectories (动作轨迹)",
-         "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/sft_trajectories.jsonl"}
+         "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/sft_trajectories.jsonl"},
+  "P2f": {"name": "format SFT conversations (格式 SFT 的短对话: 440 one- or two-turn conversations from P2 with real action names, training_prep format-sft, format SFT v2)",
+          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/format_sft_v2a/sft_trajectories_format.jsonl"}
  },
  "models": {
   "base_7b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b",
@@ -20,12 +22,15 @@
   "note": "The standard's chain settings apply (rl_standards.json chain_defaults). The D member is the current dense reward; whether the matrix uses D-cond instead is decided after the dense reward's second batch."
  },
  "groups": {
-  "A": {"status": "planned", "pools": [], "sft": "format SFT of the original 7B (the user's 3.1.4): a few hundred short conversations from P2 shown with real action names (training_prep format-sft), 1-2 epochs, a small learning rate; accepted when 200 train tasks x 4 episodes at temperature 0.8 have at most 1% unreadable answers and a success rate near the original model's 5-9%",
+  "A": {"status": "closed", "pools": [], "sft": "format SFT of the original 7B (the user's 3.1.4): a few hundred short conversations from P2 shown with real action names (training_prep format-sft), 1-2 epochs, a small learning rate; accepted when 200 train tasks x 4 episodes at temperature 0.8 have at most 1% unreadable answers and a success rate near the original model's 5-9%",
         "start": "base_7b", "format_example": "action_names",
         "rl_rules": "signal check at update 25 (mixed tasks >= 10%), KL stop 1.0, the 10% unreadable line, extension to 600 at update 300 by the existing rule; if it collapses again, stop and report, change nothing",
-        "next": "its S0 / D pair and D-cond + keep in the dense reward's second batch"},
-  "B": {"status": "planned", "pools": ["P0"], "sft": "P0 only, 10 epochs, picked on the v2 validation set", "start": "base_7b",
-        "format_example": "action_names"},
+        "next": "its S0 / D pair and D-cond + keep in the dense reward's second batch",
+        "closed": "2026-10-26, the user's decision 74 (13th supplement): not run.  Weak starts lost the answer format in every setting tried (round 12 A from the original 7B, A from format SFT v1 epoch 2, A v2 from format SFT v2 epoch 1, the stability controls W0-W5): every RL was stopped by the 10% unreadable line between updates 10 and 55, without a checkpoint; format supervision inside RL is not implemented.  Kept as a finding (STATUS, the weak-start section)."},
+  "B": {"status": "planned", "name": "B'", "pools": ["P0", "P2f"],
+        "sft": "P0 plus a few action samples (P2f, the format SFT's conversations: start with its 440 and add more only if the format is not stable), 10 epochs, picked on the v2 validation set",
+        "start": "base_7b", "format_example": "action_names",
+        "changed": "2026-10-26, the user's decision 75 (13th supplement): was P0 only.  A P0-only start never sees an action answer, so like the closed group A it would start RL without the action format, and every such start lost its format in RL; P2f adds the format SFT's short action conversations, their number set by format stability."},
   "C": {"status": "planned", "pools": ["P0", "P2"], "sft": "P0 + P2, 10 epochs, picked on the v2 validation set", "start": "base_7b",
         "format_example": "action_names"},
   "D": {"status": "planned", "pools": ["P0", "P1", "P2"], "sft": "P0 + P1 + P2 (the three kinds kept apart, one run), 10 epochs, picked on the v2 validation set",

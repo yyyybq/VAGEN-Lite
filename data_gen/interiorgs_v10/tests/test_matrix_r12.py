@@ -1,5 +1,7 @@
 """The experiment matrix registered in main (configs/matrix_r12.json, round 12 freeze, the user's 3.3 of 2026-10-22):
-groups A-E planned and C0 done, every group an S0 / D pair of one standard recipe, the P0 / P1 paths left empty."""
+groups B-E planned, A closed and C0 done, every group an S0 / D pair of one standard recipe, the P0 / P1 paths left
+empty.  Round 13 (the user's decisions 74-75 of 2026-10-26): A closed (weak starts lose the format), B is B' (P0 plus
+the format SFT's action conversations P2f)."""
 
 import json
 import unittest
@@ -18,9 +20,12 @@ class MatrixTest(unittest.TestCase):
         g = self.m["groups"]
         self.assertEqual(sorted(g), ["A", "B", "C", "C0", "D", "E"])
         self.assertEqual({k: v["status"] for k, v in g.items()},
-                         {"A": "planned", "B": "planned", "C": "planned", "D": "planned", "E": "planned", "C0": "done"})
+                         {"A": "closed", "B": "planned", "C": "planned", "D": "planned", "E": "planned", "C0": "done"})
         self.assertEqual([g[k]["pools"] for k in ("B", "C", "D", "E", "C0")],
-                         [["P0"], ["P0", "P2"], ["P0", "P1", "P2"], ["P0", "P1", "P2"], ["P2"]])
+                         [["P0", "P2f"], ["P0", "P2"], ["P0", "P1", "P2"], ["P0", "P1", "P2"], ["P2"]])
+        self.assertTrue(g["A"]["closed"].startswith("2026-10-26") and g["B"]["changed"].startswith("2026-10-26"))
+        self.assertEqual(g["B"]["name"], "B'")
+        self.assertTrue(self.m["pools"]["P2f"]["path"].endswith("format_sft_v2a/sft_trajectories_format.jsonl"))
         self.assertEqual((g["A"]["start"], g["C0"]["start"]), ("base_7b", "sft_e9"))
         for k in "ABCDE":  # new data shows the future data's format example; C0 trained on the old text
             self.assertEqual(g[k]["format_example"], "action_names", k)
