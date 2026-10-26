@@ -81,7 +81,8 @@ def base_pose(k) -> list:
 
 
 def doors(k) -> dict:
-    """Every fixture with a door state (drawers, hinge cabinets): its largest opening (0..1) and its x, y."""
+    """Every fixture with a door state (drawers, hinge cabinets): its largest opening (0..1), its x, y and its height
+    z (the drawers of one stack share x, y)."""
     out = {}
     for name, f in k.fixtures.items():
         get = getattr(f, "get_door_state", None)
@@ -93,7 +94,7 @@ def doors(k) -> dict:
             continue
         if state:
             out[name] = {"type": type(f).__name__, "open": _r(max(float(v) for v in state.values())),
-                         "xy": [_r(f.pos[0], 3), _r(f.pos[1], 3)]}
+                         "xy": [_r(f.pos[0], 3), _r(f.pos[1], 3)], "z": _r(f.pos[2], 3)}
     return out
 
 
@@ -239,9 +240,10 @@ def decide(task: str, start_rec: dict, end_rec: dict) -> dict:
         chosen, deltas = most_changed(before, after, lambda a, b: b - a, OPEN_MIN)
         out.update(chosen=chosen, opened=deltas)
         if chosen is not None:
-            d = start_rec["doors"][chosen]
+            d, t = start_rec["doors"][chosen], start_rec["doors"].get(start_rec["target"], {})
             out.update(chosen_type=d["type"],
-                       chosen_side="left" if lateral(start_rec["base"], d["xy"]) > 0 else "right")
+                       chosen_side="left" if lateral(start_rec["base"], d["xy"]) > 0 else "right",
+                       same_stack_as_target=bool(t) and math.dist(d["xy"], t["xy"]) < 0.02)
         if task == "DeliverStraw":
             out["straw"] = end_rec.get("straw")
     elif task in ("TurnOffStove", "SearingMeat"):
@@ -283,9 +285,11 @@ def decide(task: str, start_rec: dict, end_rec: dict) -> dict:
         out.update(chosen=start_rec["target"] if inside == 2 else None, bowls_in_cabinet=inside, order=order)
     elif task == "NavigateKitchen":
         fx = {n: f for n, f in end_rec["fixtures"].items() if "dist" in f}
-        near = min(fx, key=lambda n: (fx[n]["dist"], n)) if fx else None
+        order = sorted(fx, key=lambda n: (fx[n]["dist"], n))
+        near = order[0] if order else None
         out.update(chosen=near if near is not None and fx[near]["dist"] <= NEAR_M else None, nearest=near,
                    nearest_dist=fx[near]["dist"] if near else None,
+                   second_dist=fx[order[1]]["dist"] if len(order) > 1 else None,  # close to nearest_dist: ambiguous
                    target_dist=fx.get(start_rec["target"], {}).get("dist"), at_start_fixture=near == start_rec["src"])
     else:
         raise ValueError(f"not a spatial task: {task}")

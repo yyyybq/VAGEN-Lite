@@ -23,16 +23,20 @@ def door(open_, xy=(0.0, 0.0), kind="Drawer"):
 def test_open_drawer_takes_the_door_opened_most_and_its_side():
     base = [0.0, 0.0, 0.0]  # facing +x: +y is the robot's left
     start = {"base": base, "target": "drawer_L", "side": "left",
-             "doors": {"drawer_L": door(0.0, (0.5, 0.4)), "drawer_R": door(0.0, (0.5, -0.4)),
-                       "cab": door(0.0, (0.6, 0.0), "HingeCabinet")}}
-    end = {"doors": {"drawer_L": door(0.30), "drawer_R": door(0.02), "cab": door(0.0)}}
+             "doors": {"drawer_L": door(0.0, (0.5, 0.4)), "drawer_L_low": door(0.0, (0.5, 0.4)),
+                       "drawer_R": door(0.0, (0.5, -0.4)), "cab": door(0.0, (0.6, 0.0), "HingeCabinet")}}
+    end = {"doors": {"drawer_L": door(0.30), "drawer_L_low": door(0.0), "drawer_R": door(0.02), "cab": door(0.0)}}
     d = x3.decide("OpenDrawer", start, end)
     assert d["chosen"] == "drawer_L" and d["correct"] and d["chosen_side"] == "left"
-    end = {"doors": {"drawer_L": door(0.01), "drawer_R": door(0.96), "cab": door(0.2)}}
+    end = {"doors": {"drawer_L": door(0.01), "drawer_L_low": door(0.0), "drawer_R": door(0.96), "cab": door(0.2)}}
     d = x3.decide("OpenDrawer", start, end)
     assert d["chosen"] == "drawer_R" and not d["correct"] and d["chosen_side"] == "right"
-    end = {"doors": {"drawer_L": door(0.04), "drawer_R": door(0.0), "cab": door(0.0)}}  # nothing past 5%
-    d = x3.decide("OpenDrawer", start, end)
+    assert not d["same_stack_as_target"]
+    end = {"doors": {"drawer_L": door(0.0), "drawer_L_low": door(0.5), "drawer_R": door(0.0), "cab": door(0.0)}}
+    d = x3.decide("OpenDrawer", start, end)  # the right side and stack, another drawer of it
+    assert d["chosen"] == "drawer_L_low" and not d["correct"] and d["same_stack_as_target"] and d["chosen_side"] == "left"
+    end = {"doors": {"drawer_L": door(0.04), "drawer_L_low": door(0.0), "drawer_R": door(0.0), "cab": door(0.0)}}
+    d = x3.decide("OpenDrawer", start, end)  # nothing past 5%
     assert d["chosen"] is None and not d["correct"]
 
 
@@ -93,7 +97,7 @@ def test_navigation_takes_the_nearest_placement_point_within_half_a_meter():
     fx = {"sink": {"type": "Sink", "dist": 0.15}, "stove": {"type": "Stove", "dist": 2.0},
           "fridge": {"type": "FridgeSideBySide", "error": "x"}}
     d = x3.decide("NavigateKitchen", s, {"fixtures": fx})
-    assert d["correct"] and d["target_dist"] == 0.15 and not d["at_start_fixture"]
+    assert d["correct"] and d["target_dist"] == 0.15 and not d["at_start_fixture"] and d["second_dist"] == 2.0
     fx["sink"]["dist"], fx["stove"]["dist"] = 1.5, 0.1
     d = x3.decide("NavigateKitchen", s, {"fixtures": fx})
     assert d["chosen"] == "stove" and d["at_start_fixture"] and not d["correct"]

@@ -1347,7 +1347,8 @@ def matrix_eval(w: "Watcher", start: str, ratio: str, points=()) -> str:
 
 START_NAMES = {"B": "B 原始 7B", "S": "S 动作 SFT 第 9 个 epoch", "RS": "RS P-S0 第 300 次", "RD": "RD P-D 第 150 次"}
 MATRIX_COLUMNS = "| 起点 | E0 曲线 | E1 主对比 | E2 样本效率 | E3 RL | E4 种子 |"
-E3_TASKS = ("SlideDishwasherRack", "OpenDrawer", "CoffeeSetupMug", "TurnOffStove", "StackBowlsCabinet")  # 10-26
+E3_TASKS = ("CoffeeSetupMug", "StackBowlsCabinet", "TurnOffStove")  # 10-26 evening: 10%-60% on the E2 30% checkpoints
+E3_SOURCE = ("030", "E2 30% 第 20 万步")  # E3 starts from DS-<start>-030-s1 at 200k (the user's decision of 10-26 evening)
 E3_UPDATES = 100
 
 
@@ -1395,41 +1396,47 @@ def matrix_e3_train(w: "Watcher", start: str) -> str:
 
 
 def matrix_e3_eval(w: "Watcher", start: str) -> str:
-    """Evaluation cell of E3: the 944-episode result after RL next to the start's E1 final checkpoint before RL
-    (all tasks, the 9 spatial tasks, the 5 RL tasks)."""
+    """Evaluation cell of E3: the 944-episode result after RL next to the start's source checkpoint before RL
+    (E3_SOURCE; all tasks, the 9 spatial tasks, the RL tasks)."""
     run = e3_run(w, start)
-    before = merged(w.experiments / runs.exp_id(start, "100", 1) / "evals/steps_200000")
+    before = merged(w.experiments / runs.exp_id(start, E3_SOURCE[0], 1) / "evals/steps_200000")
     after = merged(run / "evals/final")
 
     def line(label, m):
         a = score(m[0])
         return (f"{label}：总体 {_rate(a['all'])}，空间组 {_rate(a['spatial'])}，"
-                f"RL 的 5 个任务 {_rate(tasks_rate(m[0], E3_TASKS))}")
+                f"RL 的 {len(E3_TASKS)} 个任务 {_rate(tasks_rate(m[0], E3_TASKS))}")
     if not (run / "cfg/train.yaml").is_file() and not after:
         return "—"
     return _cell(line("RL 后", after) if after else "RL 后：未评",
-                 line("RL 前（E1 第 20 万步）", before) if before else "")
+                 line(f"RL 前（{E3_SOURCE[1]}）", before) if before else "")
 
 
 X_EXPERIMENTS = (  # the first wave of new experiments (the user's decision of 2026-10-26)
     ("X0", "域内空间问答：34 个任务的重置首帧（三个相机），左右 / 前后 / 远近三类，约 500 道，零样本问四个起点"),
-    ("X1", "冻结主干：只训动作头和视觉合并层，30% 示教，5 万步，评 944 回合"),
+    ("X1", "冻结主干：只训动作头（视觉塔、合并层、语言模型、lm_head 冻结），30% 示教，5 万步，评 944 回合"),
     ("X2", "极低数据：1%、3% 示教（每任务 5、15 条，嵌套），2 个 epoch，评 944 回合"),
     ("X3", "落点准确率：重放 E1 四个最终检查点的空间组 447 回合，记录实际操作的目标"),
-    ("X4", "能力保留：E1 四个最终权重在主线评测集上评一次，和原始起点并排"),
-    ("X5", "未见任务：E1 四个最终检查点评 16 个未见过的组合任务，每任务 20 回合"))
+    ("X4", "能力保留：E1 四个最终权重和四个原始起点，在主线 v2 验证集（413 道）和评测集（292 道）上各评一次"),
+    ("X5", "未见任务：E1 四个最终检查点评 16 个未见原子任务（主）和 16 个未见组合任务（补），每任务 20 回合"),
+    ("XE", "对照：B 起点、30% 示教、6 万步（0.36 个 epoch，学习率按 6 万步衰减），其余同 E2，评 944 回合"))
+T_EXPERIMENTS = (  # new training runs (the user's decision of 2026-10-26 evening)
+    ("T1", "种子 2：B、RS 各训一个 30% 示教 20 万步（DS-<起点>-030-s2），和种子 1 并排"),
+    ("T2", "LoRA：语言模型注意力和前馈层 rank 16，视觉塔、合并层冻结，动作头全训；四个起点，30% 示教，10 万步"),
+    ("T5", "NavigateKitchen 单任务：全部人类示教，四个起点，3 个 epoch，评 100 回合（种子 1000–1099）"),
+    ("T3/T4", "主线新权重：给出路径后先做 X0 问答，再按 DS-<起点>-030-s1 的配方训练（起点表加一行）"))
 
 
-def matrix_x(w: "Watcher") -> list:
-    """One row per new experiment; its state and per-start cells come from downstream_runs/x/<X>/matrix.json
+def matrix_x(w: "Watcher", table=X_EXPERIMENTS, folder: str = "x") -> list:
+    """One row per new experiment; its state and per-start cells come from downstream_runs/<folder>/<X>/matrix.json
     ({"state": ..., "B": ..., "S": ..., "RS": ..., "RD": ...}) once there is one, else its design waits."""
     rows = []
-    for x, what in X_EXPERIMENTS:
-        f = Path(w.a.runs_root) / "x" / x / "matrix.json"
+    for x, what in table:
+        f = Path(w.a.runs_root) / folder / x.split("/")[0] / "matrix.json"
         try:
             rec = json.loads(f.read_text()) if f.is_file() else {}
         except ValueError:
-            rec = {"state": f"`x/{x}/matrix.json` 读不出"}
+            rec = {"state": f"`{folder}/{x}/matrix.json` 读不出"}
         rows.append(f"| {x} | {what} | {rec.get('state', '设计待你确认（10-26）')} | "
                     + " | ".join(str(rec.get(s, "—")) for s in runs.STARTS) + " |")
     return rows
@@ -1443,8 +1450,8 @@ def matrix(w: "Watcher") -> str:
     head = ["# 下游线实验矩阵（看板每轮自动重写，不要手改）", "",
             f"生成于 {utc()}。E0 = 阶段 0 的检查点曲线（D5 停下时保留的 2.5 万–10 万步）；E1 = 阶段 1 主对比（100% 数据、"
             f"种子 1，评第 {'、'.join(f'{p // 1000}k' for p in w.a.extra_points)} 和最终 200k 步，主数字用三点平均）；"
-            f"E2 = 样本效率（10%、30% 数据）；E3 = RL（PPO，5 个空间任务，从 E1 第 20 万步出发）；E4 = 种子（10-26 取消）；"
-            f"X0–X5 = 第一波新增实验。成功率：总体 = 34 个任务 944 回合，"
+            f"E2 = 样本效率（10%、30% 数据）；E3 = RL（PPO，{len(E3_TASKS)} 个空间任务，从 {E3_SOURCE[1]}出发）；"
+            f"E4 = 种子（10-26 取消）；X0–X5、XE = 第一波新增实验；T 系列 = 新增训练。成功率：总体 = 34 个任务 944 回合，"
             f"空间组 = 9 个空间任务 447 回合（剔除 6 个回合后）；括号里是成功回合 / 回合。时间是 UTC。",
             "路径相对于 `/mnt/umm/users/yinbaiqiao/downstream_runs/`。状态和决定见 [STATUS.md](STATUS.md)。", "",
             "## 训练", "", MATRIX_COLUMNS, sep]
@@ -1463,8 +1470,9 @@ def matrix(w: "Watcher") -> str:
     for name, note in MATRIX_PENDING:
         train.append(f"| {name}（待接入） | {note} | — | — | — | — |")
         evals.append(f"| {name}（待接入） | {note} | — | — | — | — |")
-    xs = ["", "## 新增实验（第一波，你 10-26 的决定）", "", "| 实验 | 内容 | 状态 | B | S | RS | RD |",
-          "| --- | --- | --- | --- | --- | --- | --- |"] + matrix_x(w)
+    xhead = ["| 实验 | 内容 | 状态 | B | S | RS | RD |", "| --- | --- | --- | --- | --- | --- | --- |"]
+    xs = (["", "## 新增实验（第一波，你 10-26 的决定）", ""] + xhead + matrix_x(w)
+          + ["", "## 新增训练（T 系列，你 10-26 晚的决定）", ""] + xhead + matrix_x(w, T_EXPERIMENTS, "t"))
     return "\n".join(head + train + ["", "## 评测", "", MATRIX_COLUMNS, sep] + evals + xs) + "\n"
 
 

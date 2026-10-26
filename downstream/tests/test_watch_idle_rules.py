@@ -421,20 +421,24 @@ def test_e3_and_x_rows_of_the_matrix(tmp_path):
     jobs.submit(runs_["B"])
     (runs_["B"] / "rlinf_train_20261026T060000Z.log").write_text("│ Global Step:    36/100 │\n│ Global Step:    37/100 │\n")
     assert "训练到第 37 / 100 次更新" in watch.matrix_e3_train(w, "B") and "**RUNNING**" in watch.matrix_e3_train(w, "B")
-    e1 = tmp_path / "experiments/DS-B-100-s1"
-    summary(e1 / "evals/steps_200000/out/episodes", {"OpenDrawer": {"n": 50, "successes": 20},
-                                                      "CloseFridge": {"n": 20, "successes": 4}})
-    summary(runs_["B"] / "evals/final/out/episodes", {"OpenDrawer": {"n": 50, "successes": 30},
+    source = tmp_path / "experiments/DS-B-030-s1"  # E3 starts from E2 30% at 200k (10-26 evening)
+    summary(source / "evals/steps_200000/out/episodes", {"CoffeeSetupMug": {"n": 50, "successes": 20},
+                                                          "CloseFridge": {"n": 20, "successes": 4}})
+    summary(runs_["B"] / "evals/final/out/episodes", {"CoffeeSetupMug": {"n": 50, "successes": 30},
                                                        "CloseFridge": {"n": 20, "successes": 4}})
     cell = watch.matrix_e3_eval(w, "B")
-    assert "RL 后：总体 48.6%（34/70），空间组 60.0%（30/50），RL 的 5 个任务 60.0%（30/50）" in cell
-    assert "RL 前（E1 第 20 万步）：总体 34.3%（24/70）" in cell and "训完、导出、评完" in watch.matrix_e3_train(w, "B")
+    assert "RL 后：总体 48.6%（34/70），空间组 60.0%（30/50），RL 的 3 个任务 60.0%（30/50）" in cell
+    assert "RL 前（E2 30% 第 20 万步）：总体 34.3%（24/70）" in cell and "训完、导出、评完" in watch.matrix_e3_train(w, "B")
     text = watch.matrix(w)
-    assert "## 新增实验（第一波，你 10-26 的决定）" in text and text.count("设计待你确认（10-26）") == 6
+    assert "## 新增实验（第一波，你 10-26 的决定）" in text and "## 新增训练（T 系列，你 10-26 晚的决定）" in text
+    assert text.count("设计待你确认（10-26）") == len(watch.X_EXPERIMENTS) + len(watch.T_EXPERIMENTS) == 11
     (tmp_path / "x/X3").mkdir(parents=True)
     (tmp_path / "x/X3/matrix.json").write_text(json.dumps({"state": "设计已确认，重放中", "B": "选对 80%"}))
-    row = next(line for line in watch.matrix(w).splitlines() if line.startswith("| X3 |"))
-    assert "| 设计已确认，重放中 | 选对 80% | — | — | — |" in row
+    (tmp_path / "t/T3").mkdir(parents=True)
+    (tmp_path / "t/T3/matrix.json").write_text(json.dumps({"state": "等主线给路径"}))
+    lines = watch.matrix(w).splitlines()
+    assert "| 设计已确认，重放中 | 选对 80% | — | — | — |" in next(x for x in lines if x.startswith("| X3 |"))
+    assert "| 等主线给路径 | — |" in next(x for x in lines if x.startswith("| T3/T4 |"))
 
 
 def test_one_card_queue_jobs_wait_for_what_they_need_and_take_only_free_cards(tmp_path):
