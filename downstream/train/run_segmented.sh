@@ -11,7 +11,8 @@
 # final checkpoint is evaluated in the job; E0 covers 25k-100k): train to the end, then evaluate the final checkpoint.
 # Started again (the same job relaunched, or resubmitted), it continues: checkpoints that exist are not retrained,
 # finished evaluations are not repeated (an interrupted one resumes), training resumes from the full state.
-# Writes only under EXP: run/, evals/steps_P/out/, train.log, segments.log, stage_times.tsv.
+# Writes only under EXP: run/, evals/steps_P/out/, train.log, segments.log, stage_times.tsv, gpu.csv (GPU memory and
+# use every 10 s; added 2026-10-26 for X1's memory report).
 # Usage: run_segmented.sh EXP
 set -uo pipefail
 EXP="${1:?Usage: run_segmented.sh EXP_DIR}"
@@ -51,6 +52,9 @@ checks() {
 
 log "exp=$EXP points=$(python3 "$FS" points "$EXP")"
 nvidia-smi --query-gpu=index,name,driver_version --format=csv,noheader
+nvidia-smi --query-gpu=timestamp,index,memory.used,utilization.gpu --format=csv,noheader -lms 10000 >> "$EXP/gpu.csv" &
+GPU_PID=$!
+trap 'kill $GPU_PID 2>/dev/null' EXIT
 checks || { log "checks failed: stop"; exit 3; }
 for P in $(python3 "$FS" points "$EXP"); do
   CK="$(python3 "$FS" ckpt "$EXP" "$P")"
