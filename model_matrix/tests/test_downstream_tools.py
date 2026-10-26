@@ -67,7 +67,7 @@ class ScoJobTest(unittest.TestCase):
 
 class DownstreamToolsTest(unittest.TestCase):
     def test_scripts_parse(self):
-        for f in ("backbone_load.sh", "backbone_smoke.sh"):
+        for f in ("backbone_load.sh", "backbone_smoke.sh", "run_full.sh", "eval_ckpt.sh"):
             self.assertEqual(subprocess.run(["bash", "-n", str(ROOT / "model_matrix" / "downstream" / f)]).returncode, 0)
 
     def test_starts(self):
@@ -94,6 +94,56 @@ class DownstreamToolsTest(unittest.TestCase):
                              recipe["datasets"]["vla_data"]["per_device_batch_size"])
             with self.assertRaises(FileExistsError):
                 M.build("Q3B", SMOKE_DATA, exp, steps=100, save_interval=100, log_every=10, seed=1)
+            self.assertNotIn("segmented", rec)  # a smoke folder as before
+
+    @unittest.skipUnless((DS / "downstream" / "train" / "make_experiment.py").is_file() and SMOKE_DATA.is_dir(),
+                         "needs the downstream worktree and its step-2 data")
+    def test_full_run_has_the_downstream_stage1_fields(self):
+        """DS-B-100-s1's form (make_experiment --full-state-interval 25000 --eval-points 200000), the start locked,
+        --qwenvl keys in the config; full_state.py (the downstream line's) reads the record."""
+        import yaml
+
+        from model_matrix.downstream import make_config as M
+
+        with tempfile.TemporaryDirectory() as tmp:
+            exp = Path(tmp) / "DS-CSB-100-s1"
+            rec = M.build("CSB", SMOKE_DATA, exp, steps=200000, save_interval=25000, log_every=100, seed=1,
+                          full_state_interval=25000, eval_points=[200000], qwenvl={"cambrian_checkpointing": "vision"})
+            cfg = yaml.safe_load((exp / "config.yaml").read_text())
+            self.assertEqual((cfg["trainer"]["full_state_interval"], cfg["trainer"]["eval_points"],
+                              cfg["trainer"]["save_interval"], cfg["trainer"]["logging_frequency"]),
+                             (25000, [], 25000, 100))  # as DS-B-100-s1's config
+            self.assertEqual(cfg["framework"]["qwenvl"]["cambrian_checkpointing"], "vision")
+            for key, value in (("segmented", True), ("full_state_interval", 25000), ("eval_points", [200000]),
+                               ("repeat_final", False), ("injob_eval", {"servers": 8, "workers": 96}),
+                               ("global_batch", 64), ("data", {"dir": str(SMOKE_DATA)})):
+                self.assertEqual(rec[key], value)
+            self.assertEqual(M.check_start(exp), [])
+            fs = subprocess.run(["python3", str(DS / "downstream" / "train" / "full_state.py"), "points", str(exp)],
+                                capture_output=True, text=True)
+            self.assertEqual(fs.stdout.split(), ["200000"])
+            with self.assertRaises(SystemExit):  # make_experiment's rule: the interval divides the points
+                M.build("CSB", SMOKE_DATA, Path(tmp) / "bad", steps=200000, save_interval=30000, log_every=100,
+                        seed=1, full_state_interval=25000, eval_points=[200000])
+
+    @unittest.skipUnless((DS / "downstream" / "verify_starts.py").is_file(), "needs the downstream worktree")
+    def test_check_start_sees_a_changed_shard(self):
+        from model_matrix.downstream import make_config as M
+
+        with tempfile.TemporaryDirectory() as tmp:
+            start = Path(tmp) / "start"
+            start.mkdir()
+            (start / "config.json").write_text("{}")
+            (start / "model.safetensors.index.json").write_text(json.dumps({"weight_map": {"w": "model-1.safetensors"}}))
+            (start / "model-1.safetensors").write_bytes(b"x" * 100)
+            exp = Path(tmp) / "exp"
+            exp.mkdir()
+            (exp / "experiment.json").write_text(json.dumps({"start": {"path": str(start), "lock": M.lock(str(start))}}))
+            self.assertEqual(M.check_start(exp), [])
+            (start / "model-1.safetensors").write_bytes(b"y" * 101)
+            self.assertTrue(any("size 100 -> 101" in p for p in M.check_start(exp)))
+            (exp / "experiment.json").write_text(json.dumps({"start": {"path": str(start)}}))
+            self.assertEqual(M.check_start(exp), ["the experiment has no start lock"])
 
 
 if __name__ == "__main__":
