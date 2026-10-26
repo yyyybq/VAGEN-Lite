@@ -4,7 +4,9 @@
 #   1. train: UPDATES (100) PPO updates on the tasks of RUN/cfg (made by scripts/prepare_rlinf_robocasa.py prepare from
 #      the start's E1 final checkpoint, read by path; the 5 spatial tasks of the user's decision 1 of 2026-10-26),
 #      32 environments, rollout and update epochs 2, actor learning rate 5e-6, gradient clip 1.0, RLinf's own
-#      evaluation every 10 updates (8 environments), a checkpoint every 25 updates (about 63 GB each).  A relaunch
+#      evaluation every 10 updates (8 environments), a checkpoint every 20 updates (about 63 GB each; RLinf asserts
+#      that the checkpoint interval is a multiple of the evaluation interval, so the plan's 25 failed all four runs
+#      after their first update on 2026-10-26; the intervals are checked here before RLinf starts).  A relaunch
 #      resumes from the newest complete checkpoint (runner.resume_dir).  Once the last update is saved, the older
 #      checkpoints are deleted (the plan of 2026-10-23: only the newest and the last are kept).
 #   2. export: the last actor to the StarVLA format with scripts/export_rlinf_starvla.py, RUN/export (about 16.8 GB;
@@ -13,7 +15,7 @@
 #      processes, RUN/evals/final/out: the same evaluation as the start's E1 final checkpoint before RL.
 # Writes only under RUN: e3.log, logs/, export/, evals/, e3_summary.json (the stages' return codes, at the end).
 # Usage: run_e3.sh ENV RUN SOURCE_PT
-#   (MAIN_CHECKOUT, STARVLA_SETUP, EXPORT_PY and E3_UPDATES only change for the tests)
+#   (MAIN_CHECKOUT, STARVLA_SETUP, EXPORT_PY, E3_UPDATES, E3_SAVE_EVERY and E3_EVAL_EVERY only change for the tests)
 set -uo pipefail
 ENV="${1:?Usage: run_e3.sh ENV RUN SOURCE_PT}"
 RUN="${2:?}"
@@ -22,6 +24,13 @@ WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MAIN="${MAIN_CHECKOUT:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite}"
 SETUP="${STARVLA_SETUP:-$WT/examples/train/robocasa/setup_starvla_env.sh}"
 UPDATES="${E3_UPDATES:-100}"
+SAVE_EVERY="${E3_SAVE_EVERY:-20}"
+EVAL_EVERY="${E3_EVAL_EVERY:-10}"
+if (( SAVE_EVERY % EVAL_EVERY != 0 || UPDATES % SAVE_EVERY != 0 )); then  # RLinf's check_progress, before any card
+  echo "[e3] checkpoint interval $SAVE_EVERY must be a multiple of the evaluation interval $EVAL_EVERY and divide" \
+       "the $UPDATES updates: stop" | tee -a "$RUN/e3.log"
+  exit 6
+fi
 CKPTS="$RUN/logs/robocasa365_starvla_ppo/checkpoints"
 FINAL="$CKPTS/global_step_$UPDATES"
 POLICY="$RUN/export/checkpoints/policy.pt"
@@ -49,7 +58,8 @@ else
   [[ -n "$last" ]] && RESUME=("runner.resume_dir=$last")
   log "train: $UPDATES updates${last:+, resuming from $last}"
   RLINF_TAG="train_$(date -u +%Y%m%dT%H%M%SZ)" bash "$WT/downstream/rlinf/run_rlinf.sh" "$ENV" "$RUN" \
-    "runner.max_epochs=$UPDATES" "runner.max_steps=$UPDATES" runner.save_interval=25 runner.val_check_interval=10 \
+    "runner.max_epochs=$UPDATES" "runner.max_steps=$UPDATES" "runner.save_interval=$SAVE_EVERY" \
+    "runner.val_check_interval=$EVAL_EVERY" \
     env.train.total_num_envs=32 env.train.rollout_epoch=2 algorithm.update_epoch=2 actor.optim.lr=5e-6 \
     actor.optim.clip_grad=1.0 env.eval.total_num_envs=8 "runner.logger.log_path=$RUN/logs" "${RESUME[@]}" \
     >> "$RUN/e3.log" 2>&1

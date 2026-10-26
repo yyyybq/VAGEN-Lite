@@ -68,7 +68,7 @@ def test_a_fresh_run_trains_keeps_the_last_checkpoint_exports_and_evaluates(tmp_
     assert res.returncode == 0, res.stdout + res.stderr
     train, export, ev = calls(run)
     assert train.startswith("train_") and train.split()[1:3] == ["ENVDIR", str(run)]
-    for o in ("runner.max_epochs=100", "runner.max_steps=100", "runner.save_interval=25", "runner.val_check_interval=10",
+    for o in ("runner.max_epochs=100", "runner.max_steps=100", "runner.save_interval=20", "runner.val_check_interval=10",
               "env.train.total_num_envs=32", "env.train.rollout_epoch=2", "algorithm.update_epoch=2",
               "actor.optim.lr=5e-6", "actor.optim.clip_grad=1.0", "env.eval.total_num_envs=8",
               f"runner.logger.log_path={run}/logs"):
@@ -100,6 +100,17 @@ def test_a_relaunch_resumes_from_the_newest_complete_checkpoint_and_redoes_a_hal
     train = calls(run)[0]
     assert f"runner.resume_dir={ckpts}/global_step_50" in train.split()
     assert (run / "export/rlinf_export.json").exists() and "removed a half-written export" in (run / "e3.log").read_text()
+
+
+def test_intervals_rlinf_would_reject_stop_before_any_card_is_used(tmp_path):
+    """2026-10-26: checkpoints every 25 updates and evaluation every 10 failed all four E3 runs after their first
+    update (RLinf asserts save_interval % val_check_interval == 0); such intervals now stop at once."""
+    wt, run, env = tree(tmp_path)
+    for bad in ({"E3_SAVE_EVERY": "25"}, {"E3_SAVE_EVERY": "30"}):  # 25 % 10; 100 % 30
+        res = subprocess.run(["bash", str(wt / "downstream/rlinf/run_e3.sh"), "ENVDIR", str(run), "/src/policy.pt"],
+                             capture_output=True, text=True, env=dict(env, **bad))
+        assert res.returncode == 6 and not calls(run)
+    assert "must be a multiple of the evaluation interval" in (run / "e3.log").read_text()
 
 
 def test_a_training_that_ends_without_the_last_checkpoint_stops_before_the_export(tmp_path):
