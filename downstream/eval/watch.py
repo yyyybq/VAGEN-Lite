@@ -292,6 +292,7 @@ class Watcher:
         self.pending8 = []  # (priority key, evaluation dir, checkpoint, job name): 8-card evaluations for idle machines
         self.waiting_whole = []  # the same, for our 8-card evaluations submitted but still waiting for a machine
         self.sent8, self.sent8_pool = 0, {}  # 8-card jobs submitted in this pass (all kinds), per pool
+        self.sent1, self.sent1_pool = 0, {}  # one-card queue jobs submitted in this pass, per pool
         self.extract_run = subprocess.run  # the weight copy (tests replace it)
 
     # ------------------------------------------------------------------------------------------- bookkeeping
@@ -720,15 +721,21 @@ class Watcher:
             run = Path(spec["run"])
             if (run / "job/submission.json").exists():
                 continue
-            if int(spec.get("cards", 8)) != 8 or not (run / "job/prepared.json").is_file():
-                self.alerts.append(f"排队任务 {entry.name}：只支持已 prepare 的 8 卡任务，没提交")
+            cards = int(spec.get("cards", 8))
+            if cards not in (1, 8) or not (run / "job/prepared.json").is_file():
+                self.alerts.append(f"排队任务 {entry.name}：只支持已 prepare 的 1 卡或 8 卡任务，没提交")
+                continue
+            missing = [p for p in spec.get("requires", []) if not Path(p).exists()]
+            if missing:  # not ready yet (X4's evaluations wait for their export); later entries are not held back
+                self.notes.append(f"{spec.get('what', entry.stem)}本轮不提交：还缺 {Path(missing[0]).name}")
                 continue
             if spec.get("group") and len(self.group_live(qdir, spec["group"])) >= int(spec.get("max_live", 1)):
                 self.notes.append(f"{spec.get('what', entry.stem)}本轮不提交：{spec['group']} 已有 "
                                   f"{len(self.group_live(qdir, spec['group']))} 个在跑或排队（同时最多 {spec.get('max_live', 1)} 个）")
                 continue
             prepared = json.loads((run / "job/prepared.json").read_text())
-            pool, why = self.place8(spec.get("what", entry.stem), pools=spec.get("pools") or [prepared.get("pool")])
+            place = self.place8 if cards == 8 else self.place1
+            pool, why = place(spec.get("what", entry.stem), pools=spec.get("pools") or [prepared.get("pool")])
             if why:
                 self.notes.append(why)
                 break
@@ -740,10 +747,42 @@ class Watcher:
                 jid = self.jobs.submit(run)
                 self.sent_on_idle(entry.stem, run, "queue", jid)
                 sent.append(f"{spec.get('what', entry.stem)} {jid} ({pool})")
-            self.took8(pool)
+            if cards == 8:
+                self.took8(pool)
+            else:
+                self.sent1 += 1
+                self.sent1_pool[pool] = self.sent1_pool.get(pool, 0) + 1
         if sent:
             self.notes.append(f"排队任务本轮提交：{'；'.join(sent)}")
         return sent
+
+    def ours_waiting1(self, pool: str) -> list:
+        """Our one-card queue jobs (not the evaluation shards) waiting for a card in `pool`."""
+        return [str(j.get("display_name")) for j in self.job_list()
+                if str(j.get("display_name") or "").startswith("downstream-")
+                and not str(j.get("display_name")).startswith("downstream-ev") and job_cards(j) == 1
+                and j.get("state") in sco_job.WAITING_STATES and job_pool(j) == pool]
+
+    def place1(self, what: str, pools=None):
+        """(pool, None) for one one-card queue job now, else (None, why).  Same main-line rule as the 8-card jobs;
+        a card counts as free on a machine that already runs something (room) or on an idle machine (8 each); none
+        while one of ours waits there; at most --max-ones-per-pass per pass (X4's evaluations, 2026-10-26)."""
+        reasons = []
+        for pool in pools or self.a.whole_pools:
+            reason = self.blocked(1, pool)
+            if not reason and self.ours_waiting1(pool):
+                reason = f"我们的 1 卡任务在排队（{self.ours_waiting1(pool)[0]}）"
+            if not reason and self.sent1 >= self.a.max_ones_per_pass:
+                reason = "本轮 1 卡任务已提交到上限"
+            if not reason:
+                free = self.room(pool) + sco_job.CARDS_PER_MACHINE * (self.idle_nodes(pool) or 0) \
+                    - self.sent1_pool.get(pool, 0)
+                if free <= 0:
+                    reason = "没有空卡"
+            if not reason:
+                return pool, None
+            reasons.append(f"{pool}：{reason}")
+        return None, f"{what}本轮不提交（" + "；".join(reasons) + "）"
 
     def run_finished(self, exp: Path) -> bool:
         rec = segmented(exp)
@@ -1545,6 +1584,8 @@ def parser():
                     help="submit every pending 8-card evaluation to the queue at once, idle machine or not (the user's "
                          "decision 3 of 2026-10-23; start the watcher with --yield-to --yield-to-same-size empty and "
                          "--slots / --max-live-shards high, so only the pause file holds submissions back)")
+    ap.add_argument("--max-ones-per-pass", type=int, default=8,
+                    help="one-card queue jobs (X4's evaluations) submitted per pass at most")
     ap.add_argument("--max-whole-per-pass", type=int, default=1,
                     help="8-card evaluations submitted per pass at most (the idle-machine estimate cannot see other "
                          "workspaces' jobs; on 10-22 two of four went to the queue)")

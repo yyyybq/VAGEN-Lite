@@ -435,3 +435,34 @@ def test_e3_and_x_rows_of_the_matrix(tmp_path):
     (tmp_path / "x/X3/matrix.json").write_text(json.dumps({"state": "设计已确认，重放中", "B": "选对 80%"}))
     row = next(line for line in watch.matrix(w).splitlines() if line.startswith("| X3 |"))
     assert "| 设计已确认，重放中 | 选对 80% | — | — | — |" in row
+
+
+def test_one_card_queue_jobs_wait_for_what_they_need_and_take_only_free_cards(tmp_path):
+    """X4 (2026-10-26): its evaluations are one-card jobs; each E1 model's waits for its export; free cards are those
+    on machines already running something plus whole idle machines; the main line in that pool holds them back."""
+    from test_watch_and_tasks import busy_view
+
+    jobs = FakeJobs(views={"h800": busy_view(("10.0.0.1", [("other", 6)]))})  # 2 free cards, no idle machine
+    (tmp_path / "queue").mkdir()
+    done = tmp_path / "x/X4/hf/E1-B-200k/starvla_export.json"
+    runs_ = []
+    for i, req in enumerate([[str(done)], [], [], []]):
+        run = tmp_path / f"x/X4/ev{i}"
+        run.mkdir(parents=True)
+        jobs.prepare(run, 1, "h800", f"x4-ev{i}", ["bash", "eval.sh"])
+        (tmp_path / f"queue/q4_x4_{i}.json").write_text(json.dumps(
+            {"run": str(run), "cards": 1, "what": f"X4 {i}", "requires": req, "pools": ["h800"]}))
+        runs_.append(run)
+    args = ("--exps", "DS-B-100-s1", "--pool-nodes", "h800:0", "--yield-pool-only")
+    w = watcher(tmp_path, *args, jobs=jobs)
+    w.tick()
+    sent = [r.name for r in runs_ if (r / "job/submission.json").exists()]
+    assert sent == ["ev1", "ev2"]  # ev0 waits for its export, ev3 finds no free card left
+    assert any("还缺 starvla_export.json" in n for n in w.notes) and any("没有空卡" in n for n in w.notes)
+    jobs.listing = [eight_card("interiorgs-v10-eval-x", "QUEUEING", pool="h800", cards=1)]  # the main line queues
+    done.parent.mkdir(parents=True)
+    done.write_text("{}")
+    jobs.views["h800"] = busy_view(("10.0.0.1", [("other", 4)]))
+    w = watcher(tmp_path, *args, jobs=jobs)
+    w.tick()
+    assert not (runs_[0] / "job/submission.json").exists() and any("给排在前面的任务让路" in n for n in w.notes)
