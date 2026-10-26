@@ -44,6 +44,31 @@ class AcceptanceTest(unittest.TestCase):
                 A.accept(ev, "m")
 
 
+class QualityTest(unittest.TestCase):
+    def test_answers_and_blocks(self):
+        from model_matrix.formal import quality as Q
+
+        obs = ("<|im_start|>user\n[Observation]:\n<image>\nRespond with only the action:\n"
+               "<action>move_forward|turn_left|</action>\n<|im_end|>\n")
+        out = ("<action>move_backward|</action><|im_end|>" + obs + "<|im_start|>assistant\n<action>action|</action><|im_end|>"
+               + obs + "<|im_start|>assistant\n<action>turn_left|turn_left|turn_left|turn_left|turn_left|turn_left|</action>"
+               "<|im_end|>")
+        self.assertEqual(Q.answers(out), ["<action>move_backward|</action>", "<action>action|</action>",
+                                          "<action>" + "turn_left|" * 6 + "</action>"])  # the example is not an answer
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "rl_run_q3d"
+            (run / "rollout_data").mkdir(parents=True)
+            for u in (1, 2, 26):
+                (run / "rollout_data" / f"{u}.jsonl").write_text(json.dumps({"output": out}) + "\n")
+            got = Q.block_quality(run)
+        self.assertEqual(sorted(got), ["1-25", "26-50"])
+        b = got["1-25"]
+        self.assertEqual((b["updates"], b["answers"], b["unreadable"], b["names_outside"]), (2, 6, 4, 2))
+        self.assertEqual(b["names_outside_top"], {"action": 2})
+        self.assertEqual(b["forms"], {"format_example_copied": 2, "too_many_or_other": 2})  # evaluation's own forms
+        self.assertIn("| q3d | 1-25（2 次） | 6 |", Q.report({"q3d": got}))
+
+
 class PlansTest(unittest.TestCase):
     def test_formal_sft_plan(self):
         from model_matrix.formal import plans as P
