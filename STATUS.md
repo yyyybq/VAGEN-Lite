@@ -5,7 +5,7 @@
 ## 1. 整理任务（把仓库整理成可发布版本，把 7 步流程穿起来）
 
 - **第一阶段（盘点与方案）** 已完成：[docs/reports/PHASE1_INVENTORY_20261015.md](docs/reports/PHASE1_INVENTORY_20261015.md)。你的决定记录在 [docs/reports/DECISIONS_20261016.md](docs/reports/DECISIONS_20261016.md)。
-- **第二阶段（整理）** 在分支 `cleanup/20261016` 上做，独立检出 `~/VAGEN-Lite-cleanup-wt`。分支停在 `9af4796c`，已推送，包含 main 的全部提交，**还没有合并回 main**。
+- **第二阶段（整理）** 在分支 `cleanup/20261016` 上做，独立检出 `~/VAGEN-Lite-cleanup-wt`。分支的代码停在 `9af4796c`（之后只有报告和 STATUS 的提交），已推送，包含 main 的全部提交，**还没有合并回 main**。
   - **10 月 16 日：**
     - 第一批归档 807 个无人引用的文件，提交 `52eb7944`；
     - D4 的文档部分，提交 `efc6928e`；
