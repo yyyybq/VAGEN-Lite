@@ -369,6 +369,15 @@ def test_with_yield_pool_only_runs_sent_on_idle_machines_are_withdrawn_only_for_
     assert jobs.deleted == ["DS-B-010-s1"] and len(list(e2.glob("job_released_*"))) == 2
 
 
+def test_the_queue_folder_follows_the_runs_root(tmp_path):
+    """2026-10-26: the queue folder's fixed default made the tests of this file read the real queue and leave a fake
+    submission in a real E3 run; it now lies under --runs-root unless given."""
+    assert watcher(tmp_path).a.queue_dir == str(tmp_path / "queue")
+    assert watcher(tmp_path, "--queue-dir", str(tmp_path / "q2")).a.queue_dir == str(tmp_path / "q2")
+    assert watch.Watcher(watch.parser().parse_args(["--state", str(tmp_path / "s.json")]), jobs=FakeJobs()).a.queue_dir \
+        == str(watch.RUNS_ROOT / "queue")
+
+
 def e3_queue(tmp_path, jobs, starts=("B", "S", "RS", "RD")):
     """E3 runs prepared for h800 and queued as one group of at most 2, either pool (as for the real runs)."""
     (tmp_path / "queue").mkdir(exist_ok=True)

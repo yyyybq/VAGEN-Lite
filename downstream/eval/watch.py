@@ -281,6 +281,8 @@ class Watcher:
     def __init__(self, args, jobs=sco_job, free_space=quota.free_space, run_tools=runs, now=time.time):
         self.a, self.jobs, self.free_space, self.runs, self.now = args, jobs, free_space, run_tools, now
         self.experiments = args.runs_root / "experiments"
+        if getattr(args, "queue_dir", None) is None:
+            args.queue_dir = str(Path(args.runs_root) / "queue")
         self.state = json.loads(args.state.read_text()) if args.state.is_file() else {}
         self.state.setdefault("finished", {})
         self.alerts, self.notes = [], []
@@ -1563,8 +1565,9 @@ def parser():
                          "(off: the user cancelled B's on 2026-10-23 evening)")
     ap.add_argument("--resume-ratios", nargs="*", default=["010"],
                     help="runs of these ratios stopped to free machines (job_released_*) resume on idle machines")
-    ap.add_argument("--queue-dir", default=str(RUNS_ROOT / "queue"),
-                    help="prepared 8-card jobs (*.json) submitted when a pool has an idle machine")
+    ap.add_argument("--queue-dir", default=None,
+                    help="prepared 8-card jobs (*.json) submitted when a pool has an idle machine (default: queue/ "
+                         "under --runs-root; a fixed default let the tests read the real queue on 2026-10-26)")
     ap.add_argument("--release-at-full-state", nargs="*", default=[],
                     help="experiments stopped once they save their next full state (machines back to the main line)")
     ap.add_argument("--release-hold-min", type=float, default=30,
