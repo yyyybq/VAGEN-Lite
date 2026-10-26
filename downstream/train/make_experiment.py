@@ -48,7 +48,7 @@ def code_state() -> dict:
 
 def build_config(recipe: dict, *, exp_dir: Path, exp_id: str, start_path: str, data_dir: Path, seed: int,
                  steps: int, save_interval: int, log_every: int, full_state_interval: int = 0,
-                 eval_points=()) -> dict:
+                 eval_points=(), freeze_modules: str = "") -> dict:
     import copy
 
     cfg = copy.deepcopy(recipe)
@@ -60,6 +60,8 @@ def build_config(recipe: dict, *, exp_dir: Path, exp_id: str, start_path: str, d
     data["mixture_spec"] = json.loads((data_dir / "mixture_spec.json").read_text())
     trainer = cfg["trainer"]
     trainer.update(max_train_steps=int(steps), save_interval=int(save_interval), logging_frequency=int(log_every))
+    if freeze_modules:  # X1 (the user's decision 2 of 2026-10-26): StarVLA's own freeze_backbones / LR-group filter
+        trainer["freeze_modules"] = str(freeze_modules)
     if full_state_interval:
         trainer.update(full_state_interval=int(full_state_interval),
                        eval_points=[int(p) for p in eval_points if 0 < int(p) < int(steps)])
@@ -99,6 +101,9 @@ def main(argv=None) -> int:
     ap.add_argument("--repeat-final", action="store_true",
                     help="the final checkpoint gets a second evaluation, same seeds, as one 8-card job on an idle "
                          "machine (the noise floor; only start B, the user's decision of 2026-10-22)")
+    ap.add_argument("--freeze-modules", default="",
+                    help="comma-separated module paths StarVLA freezes (trainer.freeze_modules), e.g. "
+                         "qwen_vl_interface = the whole VLM, so only the action head trains (X1)")
     args = ap.parse_args(argv)
     points = [int(p) for p in args.eval_points.split(",") if p.strip()]
     for v in [args.full_state_interval] + points:
@@ -132,7 +137,8 @@ def main(argv=None) -> int:
     recipe = yaml.safe_load(args.recipe.read_text())
     cfg = build_config(recipe, exp_dir=exp_dir, exp_id=args.exp_id, start_path=start["path"], data_dir=args.data,
                        seed=args.seed, steps=args.steps, save_interval=args.save_interval, log_every=args.log_every,
-                       full_state_interval=args.full_state_interval, eval_points=points)
+                       full_state_interval=args.full_state_interval, eval_points=points,
+                       freeze_modules=args.freeze_modules)
     (exp_dir / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
     sys.path.insert(0, str(WORKTREE / "scripts"))
     from prepare_starvla_transfer import inspect_checkpoint
@@ -150,6 +156,7 @@ def main(argv=None) -> int:
                  "train_episodes": sum(len(d["train_ids"]) for d in split["datasets"]),
                  "train_frames": sum(d["frames"]["train"] for d in split["datasets"])},
         "steps": args.steps, "save_interval": args.save_interval, "gpus": args.gpus,
+        **({"freeze_modules": args.freeze_modules} if args.freeze_modules else {}),
         **({"segmented": True, "full_state_interval": args.full_state_interval,
             "eval_points": sorted({p for p in points if 0 < p <= args.steps} | {args.steps}),
             "injob_eval": {"servers": 8, "workers": 96}, "repeat_final": bool(args.repeat_final)}

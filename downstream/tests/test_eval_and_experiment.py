@@ -117,6 +117,19 @@ def test_build_config_only_fills_the_per_experiment_fields(tmp_path):
     assert recipe["framework"]["qwenvl"]["base_vlm"] is None  # the recipe itself is not modified
 
 
+def test_build_config_freezes_the_named_modules_only_when_asked(tmp_path):
+    """X1 (the user's decision 2 of 2026-10-26): only the action head trains = the whole qwen_vl_interface frozen."""
+    import yaml
+
+    recipe = yaml.safe_load((ROOT / "train/recipe.yaml").read_text())
+    data = write_data(tmp_path, ["OpenDrawer"])
+    kw = dict(exp_dir=tmp_path / "exp", exp_id="X1-B-030-s1", start_path="/starts/B", data_dir=data, seed=1,
+              steps=50000, save_interval=25000, log_every=100)
+    assert make_experiment.build_config(recipe, **kw)["trainer"].get("freeze_modules", "") == ""
+    cfg = make_experiment.build_config(recipe, freeze_modules="qwen_vl_interface", **kw)
+    assert cfg["trainer"]["freeze_modules"] == "qwen_vl_interface" and cfg["trainer"]["max_train_steps"] == 50000
+
+
 def test_build_config_rejects_a_mismatched_mixture(tmp_path):
     import yaml
 

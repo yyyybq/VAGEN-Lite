@@ -116,6 +116,42 @@ def step2(out: Path, n_train: int = 100, n_val: int = 20, data_root: Path = DATA
     return {"path": str(out), **manifest["totals"], "sha256": sha256(out)}
 
 
+SMALL_FRACTIONS = {"001": 5, "003": 15}  # X2 (the user's decision of 2026-10-26): 5 and 15 demos per task
+
+
+def small(out_dir: Path, data_root: Path = DATA_ROOT, fractions=None) -> dict:
+    """X2's manifests target50_001 / _003 only (the existing ones are not rewritten): the same RoboCasa permutation
+    as the 10% / 30% subsets (episodes.jsonl order, random.seed(0) shuffle), first N per task, so 1% c 3% c 10%."""
+    fractions = fractions or SMALL_FRACTIONS
+    tables = {tag: [] for tag in fractions}
+    ten = []
+    for task in task_table():
+        source = source_of(task, data_root)
+        eps = episodes(source)
+        order = [int(e["episode_index"]) for e in eps]
+        for tag, n in fractions.items():
+            tables[tag].append(entry(task, source, official_subset(order, n) or sorted(order), [], eps))
+        ten.append(set(official_subset(order, FRACTIONS["010"]) or order))
+    tags = sorted(fractions)
+    checks = {f"{a}_in_{b}": all(set(x["train_ids"]) <= set(y["train_ids"]) for x, y in zip(tables[a], tables[b]))
+              for a, b in zip(tags, tags[1:])}
+    checks[f"{tags[-1]}_in_010"] = all(set(x["train_ids"]) <= t for x, t in zip(tables[tags[-1]], ten))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary = {}
+    for tag, rows in tables.items():
+        manifest = {"name": f"target50_{tag}", "data_root": str(data_root),
+                    "rule": (f"RoboCasa 1.0.1 permutation of the 10%/30% subsets: episodes.jsonl order, "
+                             f"random.seed({OFFICIAL_SEED}) shuffle, first {fractions[tag]}"),
+                    "nesting": checks, "tasks": rows,
+                    "totals": {"tasks": len(rows), "episodes": sum(len(r["train_ids"]) for r in rows),
+                               "frames": sum(r["frames"]["train"] for r in rows)}}
+        path = out_dir / f"target50_{tag}.json"
+        path.write_text(json.dumps(manifest, indent=1) + "\n")
+        summary[tag] = {"path": str(path), **manifest["totals"], "sha256": sha256(path)}
+    summary["nesting"] = checks
+    return summary
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -123,8 +159,11 @@ def main(argv=None) -> int:
     a.add_argument("--out-dir", type=Path, default=HERE / "manifests")
     b = sub.add_parser("step2")
     b.add_argument("--out", type=Path, default=HERE / "manifests/step2_smoke.json")
+    c = sub.add_parser("small", help="X2: target50_001 and target50_003 only")
+    c.add_argument("--out-dir", type=Path, default=HERE / "manifests")
     args = ap.parse_args(argv)
-    result = target50(args.out_dir) if args.cmd == "target50" else step2(args.out)
+    result = {"target50": lambda: target50(args.out_dir), "step2": lambda: step2(args.out),
+              "small": lambda: small(args.out_dir)}[args.cmd]()
     print(json.dumps(result, indent=1))
     return 0
 
