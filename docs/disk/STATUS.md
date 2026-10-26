@@ -14,7 +14,9 @@
 
 - 第一步（盘点与预测）：完成，你 10-26 已答复。
 - 第二步（按批准的清单清理、保留规则、标志文件方案）：第一、二批已执行，共腾出 3,571.9 GB；保留规则和标志文件方案已写好，等你批；你批了但核查没过的 0.54 TB 交回下游线，0.06 TB 等主线确认。
-- 第 6 项（probe_spatial、SenseNova-U1、Consistency 纳入这条线）：盘点进行中，结果放下一份报告。
+- 第 6 项（probe_spatial、SenseNova-U1、Consistency 纳入这条线）：盘点完成，报告 [reports/SCOPE6_INVENTORY_20261026.md](reports/SCOPE6_INVENTORY_20261026.md)。
+  - 3.6 TB 里约 1.81 TB 是公开下载（决定 3 不删），约 1.68 TB 是 probe_spatial 发布要用的，约 0.26 TB 是 root 属主的派生特征。
+  - 唯一候选是 SenseNova-U1 的冒烟检查点 292.1 GB（root 属主，删要提交 root sco 任务，等你批）。
 - 第三步（常驻监控）：按你的决定 5 提前开了，10-26 07:37 起在跑。
 
 ## 2. 汇报表
@@ -40,7 +42,7 @@
 | 3 | 公开下载的模型和数据集不删 | "立刻可删"清单（0.15 TB）作废；RoboCasa365 的 `pretrain` 数据同样不删 |
 | 4 | 不问管理员，按 22 TB 用 | 剩余按 22 − 配额表读数算；文件系统统计只看趋势 |
 | 5 | 甲：现在开监控 | 07:37 已开（第 6 节）；不写停止提交的标志 |
-| 6 | probe_spatial、SenseNova-U1、Consistency 纳入这条线 | 盘点进行中，结果放下一份报告 |
+| 6 | probe_spatial、SenseNova-U1、Consistency 纳入这条线 | 盘点完成（`reports/SCOPE6_INVENTORY_20261026.md`）；两项等你决定 |
 | 7 | （10-22 报错）没有答复 | 待你告诉在哪看到的 |
 
 另外：下游线 07:14–07:16 按你在那边给的决定，自己删了 11 份已训完实验的全状态（1,296.8 GB，记录 `downstream_runs/logs/delete_full_states_20261026.txt`，没有上传 AOSS），也就是我清单里的 5.2.2，从清单划掉。
@@ -53,6 +55,7 @@
 | b2_20261026 | RL-SPEED-1、RL-SPEED-2 的检查点 471.8 GB；StarVLA NavigateKitchen 检查点 123.3 GB | 105 | 595.0 GB | 08:27 完成，0 个不符 | 通过（`disk_runs/audit/b2/CONCLUSION.md`） | 08:28 完成 | 595.0 GB |
 | 交给下游 | E1 权重副本 134.8 GB、E0 检查点 269.6 GB、RLINF-SMOKE-1 检查点 134.8 GB | — | 539.2 GB | — | 下游代码会读，未通过 | — | — |
 | 等主线确认 | 两次 3B 试跑 62.6 GB | — | 62.6 GB | — | — | — | — |
+| 等你批 root 任务 | SenseNova-U1 冒烟检查点 `SenseNova-U1/training/RUN/sensenovau1_8b_it2i_smoke3/`（root 属主，无引用） | 87 | 292.1 GB | — | 无引用 | — | — |
 | AOSS 测速对象 | `disk_line_speedtest_20261026/base7b_shard1.safetensors` | 1 | 3.9 GB | — | — | 08:30 已删（记录 `disk_runs/logs/aoss_speedtest_object_deleted.txt`） | 不占配额 |
 
 ## 5. 预测
