@@ -58,6 +58,12 @@ class AgentState(Enum):
     TERMINATED = "terminated"
 
 
+def turn_invalid(info: Any) -> bool:
+    """Whether the env could not parse the turn's answer (its turn_metrics.action_is_valid is False)."""
+    tm = ((info or {}).get("metrics") or {}).get("turn_metrics") or {} if isinstance(info, dict) else {}
+    return "action_is_valid" in tm and not bool(tm["action_is_valid"])
+
+
 class AgentData:
     """Container for all mutable trajectory state."""
     def __init__(
@@ -88,6 +94,7 @@ class AgentData:
         self.env_rewards: List[float] = []
         self.traj_success: bool = False
         self.env_turns: int = 0
+        self.invalid_turns: int = 0  # turns whose answer the env could not parse (turn_metrics.action_is_valid)
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -216,6 +223,7 @@ class GymAgentLoop(AgentLoopBase):
         _ep_task_type    = info.get("task_type", "unknown") if info else "unknown"
         _ep_scene_id     = info.get("scene_id",  "unknown") if info else "unknown"
         _ep_init_score   = float(info.get("initial_potential_score", 0.0)) if info else 0.0
+        _ep_task_id      = str(info.get("task_id") or "") if info else ""
 
         messages: List[Dict[str, Any]] = []
         image_data: List[Image.Image] = []
@@ -246,6 +254,7 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.task_type  = _ep_task_type
         agent_data.scene_id   = _ep_scene_id
         agent_data.initial_score = _ep_init_score
+        agent_data.task_id = _ep_task_id
 
         # State machine: always GENERATE -> INTERACT, and decide termination inside INTERACT
         state = AgentState.PENDING
@@ -295,11 +304,15 @@ class GymAgentLoop(AgentLoopBase):
                     "traj_success":       float(agent_data.traj_success),
                     "task_type":          agent_data.task_type,
                     "scene_id":           agent_data.scene_id,
+                    # round 12, the dense-reward first batch: which task (keep_by_return_std looks up its d*)
+                    "task_id":            getattr(agent_data, "task_id", ""),
                     "initial_score":      agent_data.initial_score,
                     "final_score":        agent_data.final_score,
                     "score_improvement":  agent_data.final_score - agent_data.initial_score,
                     "n_primitive_steps":  agent_data.n_primitive_steps,
                     "n_turns":            agent_data.env_turns,
+                    # the share of the episode's turns with an unparseable answer (transition/invalid_action_rate)
+                    "invalid_action":     agent_data.invalid_turns / max(1, agent_data.env_turns),
                 },
             },
         )
@@ -397,6 +410,7 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.env_rewards.append(float(reward))
         agent_data.traj_success = extract_success(info)
         agent_data.env_turns += 1
+        agent_data.invalid_turns += int(turn_invalid(info))
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))

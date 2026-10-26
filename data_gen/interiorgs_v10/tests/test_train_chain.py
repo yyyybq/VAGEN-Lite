@@ -11,6 +11,11 @@ RL_LOG = """(TaskRunner pid=1) step:0 - val-aux/active_spatial/traj_success/mean
 (TaskRunner pid=1) step:1 - episode/success_rate:0.125 - timing_s/step:153.2
 (TaskRunner pid=1) step:2 - episode/success_rate:0.25 - timing_s/step:89.0 - val-aux/active_spatial/traj_success/mean@4:np.float64(0.0625)
 """
+# Round 12 freeze: a plan naming a standard gets the standard's chain settings (configs/rl_standards.json
+# chain_defaults); tests of the chain's own behaviour pin its built-in settings (no render-service-first flow, no
+# repack, no stop rules, the render service's own worker count, 2 start-up retries).
+CHAIN_BUILT_IN = {"renderer_first": False, "renderer_repack": False, "guards": None, "renderer_workers": None,
+                  "startup": {"retries": 2, "stall_minutes": 40}}
 
 
 class ProgressTest(unittest.TestCase):
@@ -133,7 +138,7 @@ class ChainTest(unittest.TestCase):
             (ev / "v10_rl_050" / "done.json").write_text("{}")  # evaluated before: no new job
             prepared, deleted, fail = {}, [], set()
 
-            def prepare(run, gpus, args, job_dir="job"):
+            def prepare(run, gpus, args, job_dir="job", pool=None):
                 prepared[run.name] = (gpus, args)
                 (run / job_dir).mkdir(parents=True, exist_ok=True)
 
@@ -214,10 +219,17 @@ class ChainTest(unittest.TestCase):
             self.assertIn("--keep-text", formal)
             self.assertEqual(formal[formal.index("--out") + 1], str(root / "lf_formal"))
             self.assertEqual(calls[2][calls[2].index("--out") + 1], str(root / "lf_formal_reserve"))
+            # round 12 freeze: plan sft_learning_rate reaches the recipe (the short format SFT)
+            self.assertNotIn("--learning-rate", formal)
+            chain.plan["sft_learning_rate"] = 2e-6
+            calls.clear()
+            chain.sft_data()
+            self.assertEqual(calls[1][calls[1].index("--learning-rate") + 1], "2e-06")
+            del chain.plan["sft_learning_rate"]
             # sft: one 8-card job per group, both submitted before waiting
             prepared, deleted = {}, []
 
-            def prepare(run, gpus, args, job_dir="job"):
+            def prepare(run, gpus, args, job_dir="job", pool=None):
                 prepared[run.name] = (gpus, args)
                 (run / job_dir).mkdir(parents=True, exist_ok=True)
 
@@ -332,7 +344,7 @@ class ChainTest(unittest.TestCase):
             rl = {"history_mode": "concat", "critic_warmup": 10, "train_batch_size": 24, "ppo_mini_batch_size": 16,
                   "save_freq": 50, "no_internal_val": True}
             chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 100, "ppo_template": "/S0.yaml", "gs_root": "/ply",
-                             "eval_sets": {"val400": str(val), "test": str(test)},
+                             "pool": "h800", "eval_sets": {"val400": str(val), "test": str(test)},
                              "rl_runs": {"rs0": {"reward_preset": "S0", "rl": rl}, "rd": {"reward_preset": "dense", "rl": rl}},
                              "eval": {"every": 50, "variants": [{"suffix": "_s4", "sets": ["val400"],
                                                                  "options": ["--samples", "4", "--temperature", "0.8"],
@@ -356,11 +368,12 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(by_out[str(root / "rl_rs0")][by_out[str(root / "rl_rs0")].index("--reward-preset") + 1], "S0")
 
             # PPO: rs0 finishes, rd's render service dies; rs0 is not stopped, the step fails naming rd
-            prepared, deleted = {}, []
+            prepared, deleted, pools = {}, [], set()
             polls = {"n": 0}
 
-            def prepare(run, gpus, args, job_dir="job"):
+            def prepare(run, gpus, args, job_dir="job", pool=None):
                 prepared[(run.name, job_dir)] = (gpus, args)
+                pools.add(pool)
                 (run / job_dir).mkdir(parents=True, exist_ok=True)
 
             def submit(run, job_dir="job"):
@@ -388,6 +401,7 @@ class ChainTest(unittest.TestCase):
                 self.assertNotIn("rs0", str(err.exception))
                 self.assertEqual(prepared[("rl_run_rs0", "job_rl")], (8, ["rl", str(root / "rl_rs0"), "100"]))
                 self.assertEqual(prepared[("rl_run_rd", "job_renderer")], (1, ["renderer"]))
+                self.assertEqual(pools, {"h800"})  # the plan's pool reaches every job (round 11: zoetrope was full)
                 self.assertEqual(sorted(set(deleted)), [("rl_run_rd", "job_renderer"), ("rl_run_rd", "job_rl"),
                                                         ("rl_run_rs0", "job_renderer"), ("rl_run_rs0", "job_rl")])
                 self.assertTrue((root / "rl_run_rs0" / "STOP_RENDERER").exists())
@@ -425,6 +439,942 @@ class ChainTest(unittest.TestCase):
             self.assertIn("**RL rd：**", md)
             self.assertIn("| 1-25 | 0.50（8） |", md)
 
+    def test_block_stats(self):
+        """Round 11: per 25 updates, training success, the share of tasks with both outcomes, reward, entropy, KL."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "rollout_data"
+            d.mkdir()
+            ep = lambda fam, task, ok, score: json.dumps({"task_type": fam, "scene_id": "s", "gts": {"t": task},  # noqa: E731
+                                                          "traj_success": ok, "score": score}) + "\n"
+            (d / "1.jsonl").write_text(ep("fov_inclusion", 1, True, 5.0) + ep("fov_inclusion", 1, False, -1.0)
+                                       + ep("equidistance", 2, True, 5.0) + ep("equidistance", 2, True, 4.0))
+            (d / "2.jsonl").write_text(ep("fov_inclusion", 1, False, -1.0) + ep("fov_inclusion", 1, False, -1.0))
+            (d / "26.jsonl").write_text(ep("fov_inclusion", 1, True, 5.0) + ep("fov_inclusion", 1, False, 0.0))
+            log = ("(Runner) step:1 - actor/entropy:np.float64(0.5) - actor/kl_loss:np.float64(0.001) - actor/ppo_kl:0.0\n"
+                   "step:2 - actor/entropy:0.3 - actor/kl_loss:0.003 - actor/ppo_kl:0.002\nstep:26 - actor/entropy:0.2\n")
+            got = T.block_stats(d, log)
+            self.assertEqual(list(got), ["1-25", "26-50"])
+            b = got["1-25"]
+            self.assertEqual((b["updates"], b["episodes"], b["tasks"]), (2, 6, 3))  # task 1 in update 1, 2 in 1, 1 in 2
+            self.assertEqual((b["success"], b["mixed_share"], b["reward_mean"]), (0.5, round(1 / 3, 4), round(11 / 6, 4)))
+            self.assertEqual((b["entropy"], b["kl"], b["ppo_kl"]), (0.4, 0.002, 0.001))
+            self.assertEqual(b["families"]["fov_inclusion"], {"success": 0.25, "episodes": 4})
+            self.assertEqual((got["26-50"]["mixed_share"], got["26-50"]["kl"]), (1.0, None))
+            self.assertEqual(T.block_stats(Path(tmp) / "missing"), {})
+
+    def test_reserve_tasks_signal_check_and_fallback(self):
+        """Round 11, the user's decisions: RL on the reserve tasks (checked against the SFT conversations and the depth
+        flags); at update 25 each run needs 40-60% training success and >= 30% mixed tasks, else the runs stop, move
+        to rl_attempts/ and RL restarts from the fallback SFT checkpoint; a second miss stops the chain."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def chain_for(root):
+            rl = {"history_mode": "concat", "critic_warmup": 10, "train_batch_size": 24, "save_freq": 50,
+                  "no_internal_val": True, "task_pool": "reserve", "rows": "/rl_rows/rows.jsonl", "exclude": "/flags.json",
+                  "signal_check": {"at": 25, "success_min": 0.4, "success_max": 0.6, "mixed_min": 0.3}}
+            chain = T.Chain({"tr": str(root), "sft_dir": str(root / "sft"), "endpoint": 50, "ppo_template": "/S0.yaml",
+                             "gs_root": "/ply", "sft_groups": {"formal": "sft_trajectories.jsonl"}, "rl": rl,
+                             "rl_runs": {"rs0": {"reward_preset": "S0"}, "rd": {"reward_preset": "dense"}},
+                             "rl_fallback_model": "/lf/model/checkpoint-924"}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_formal_e9", "model": "/lf/model/checkpoint-1386",
+                                                            "select_by": "val400", "scores": {"sft_formal_e9": 0.42}}
+            return chain
+
+        def jobs(chain, outcomes):
+            """job_sco stand-ins: the trainer of attempt k writes 25 updates of rollouts with outcome pattern
+            outcomes[k-1] (per task of 4 episodes), then the endpoint checkpoint."""
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            def status(run, job_dir="job"):
+                if job_dir == "job_renderer":
+                    return {"state": "RUNNING", "finished": False}
+                d = run / "rollout_data"
+                if not d.is_dir():
+                    d.mkdir(parents=True)
+                    pattern = outcomes[int(chain.state.get("rl_attempt", 1)) - 1]
+                    for step in range(1, 26):
+                        rows = [{"task_type": "fov_inclusion", "scene_id": "s", "gts": {"t": t}, "traj_success": ok,
+                                 "score": 5.0 if ok else -0.5} for t, oks in enumerate(pattern) for ok in oks]
+                        (d / f"{step}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+                    return {"state": "RUNNING", "finished": False}
+                (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                return {"state": "SUCCEEDED", "finished": True}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            return mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete)
+
+        memorised = [[True] * 4] * 4                                    # 100% success, no task with both outcomes
+        learnable = [[True, False, True, False], [True, True, False, False], [False] * 4, [True] * 4]  # 50%, 50% mixed
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = chain_for(root)
+            calls = []
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.rl_config()
+            rd = next(c for c in calls if c[c.index("--out") + 1] == str(root / "rl_rd"))
+            self.assertEqual(rd[rd.index("--rows") + 1], "/rl_rows/rows.jsonl")
+            self.assertEqual(rd[rd.index("--task-pool") + 1], "reserve")
+            self.assertEqual(rd[rd.index("--sft-trajectories") + 1], str(root / "sft" / "sft_trajectories.jsonl"))
+            self.assertEqual(rd[rd.index("--exclude") + 1], "/flags.json")
+            self.assertEqual(rd[rd.index("--model") + 1], str(Path("/lf/model/checkpoint-1386")))
+            calls.clear()
+            with jobs(chain, [memorised, learnable]):
+                chain.rl()
+            checks = chain.state["signal_checks"]
+            self.assertEqual([c["ok"] for c in checks], [False, True])
+            self.assertEqual(checks[0]["runs"]["rs0"]["success"], 1.0)
+            self.assertEqual(checks[0]["runs"]["rs0"]["mixed_share"], 0.0)
+            self.assertEqual((checks[1]["runs"]["rd"]["success"], checks[1]["runs"]["rd"]["mixed_share"]), (0.5, 0.5))
+            self.assertEqual(checks[1]["model"], str(Path("/lf/model/checkpoint-924")))
+            # the missed attempt is kept aside; the restart was configured from the fallback checkpoint
+            self.assertTrue((root / "rl_attempts" / "attempt1_rs0_run" / "rollout_data" / "25.jsonl").is_file())
+            self.assertEqual({c[c.index("--model") + 1] for c in calls}, {str(Path("/lf/model/checkpoint-924"))})
+            self.assertTrue((root / "rl_run_rd" / "checkpoints" / "global_step_50").is_dir())
+            md = T.render_markdown(chain.state)
+            self.assertIn("没通过", md)
+            self.assertIn("rs0 训练成功率 1.000、有成有败的题 0.000（不满足）", md)
+        with tempfile.TemporaryDirectory() as tmp:  # a second miss stops the chain
+            chain = chain_for(Path(tmp))
+            chain.sh = lambda args, **k: None
+            with jobs(chain, [memorised, memorised]):
+                with self.assertRaises(T.ChainError) as err:
+                    chain.rl()
+            self.assertIn("missed again", str(err.exception))
+            self.assertEqual([c["ok"] for c in chain.state["signal_checks"]], [False, False])
+
+    def test_signal_check_on_mixed_share_only(self):
+        """Round 12 batch (RL from the original model): a signal check with only mixed_min ignores the training
+        success; without a fallback start model a miss stops RL with a clear reason."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def run(pattern):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply",
+                                 "rl": {"signal_check": {"at": 25, "mixed_min": 0.10}},
+                                 "rl_runs": {"as0": {}, "ad": {}}}, sleep=lambda s: None)
+
+                def prepare(run_dir, gpus, args, job_dir="job", pool=None):
+                    (run_dir / job_dir).mkdir(parents=True, exist_ok=True)
+
+                def submit(run_dir, job_dir="job"):
+                    (run_dir / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run_dir.name}-{job_dir}"}))
+
+                def status(run_dir, job_dir="job"):
+                    if job_dir == "job_renderer":
+                        return {"state": "RUNNING", "finished": False}
+                    d = run_dir / "rollout_data"
+                    if not d.is_dir():
+                        d.mkdir(parents=True)
+                        for step in range(1, 26):
+                            rows = [{"task_type": "fov_inclusion", "scene_id": f"s{t}", "gts": None, "traj_success": ok}
+                                    for t, oks in enumerate(pattern) for ok in oks]
+                            (d / f"{step}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+                        return {"state": "RUNNING", "finished": False}
+                    (run_dir / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"state": "SUCCEEDED", "finished": True}
+
+                def delete(run_dir, job_dir="job"):
+                    receipt = run_dir / job_dir / "submission.json"
+                    if receipt.exists():
+                        receipt.replace(receipt.with_name("submission_deleted.json"))
+
+                with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                    try:
+                        chain.rl()
+                        return chain.state["signal_checks"], None
+                    except T.ChainError as exc:
+                        return chain.state["signal_checks"], str(exc)
+
+        # 1 success in 80 episodes (1%), but 1 of 10 tasks mixed (10%): passes
+        rare = [[True] + [False] * 7] + [[False] * 8] * 9
+        checks, err = run(rare)
+        self.assertIsNone(err)
+        self.assertTrue(checks[0]["ok"])
+        self.assertAlmostEqual(checks[0]["runs"]["as0"]["success"], 1 / 80, places=4)
+        self.assertEqual(checks[0]["runs"]["as0"]["mixed_share"], 0.1)
+        checks, err = run([[False] * 8] * 10)  # nothing ever succeeds: no task is mixed
+        self.assertFalse(checks[0]["ok"])
+        self.assertIn("signal check missed, RL stopped (no fallback start model)", err)
+
+    def test_variants_on_extra_sets_with_sft_epochs(self):
+        """Round 11: SFT epoch checkpoints evaluated on a set of training tasks only (plan eval extra_sets)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for step in (154, 308, 1386):
+                (root / "lf_formal" / "model" / f"checkpoint-{step}").mkdir(parents=True)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "sft_groups": {"formal": "x.jsonl"},
+                             "eval_sets": {"val400": str(root / "val400")},
+                             "eval": {"every": 50, "extra_sets": {"train200": str(root / "train200")},
+                                      "variants": [{"suffix": "", "sets": ["train200"],
+                                                    "models": ["sft_formal_e1", "sft_formal_e3"]}]}},
+                            sleep=lambda s: None)
+            got = {}
+            chain.eval_jobs = lambda step, j: got.update(j)
+            chain.tables = lambda: None
+            chain.evaluate()
+            self.assertEqual(got["train200__sft_formal_e1"][:3], (root / "train200", "sft_formal_e1",
+                                                                  str(root / "lf_formal" / "model" / "checkpoint-154")))
+            self.assertEqual(got["train200__sft_formal_e3"][2], str(root / "lf_formal" / "model" / "checkpoint-1386"))
+            self.assertFalse(any(k.startswith("train200__") and "rl" in k for k in got))  # only the listed models
+            self.assertFalse(any(k.startswith("val400__sft_formal") for k in got))
+            self.assertIsNone(chain.sft_epoch_model("sft_formal_e9"))
+
+    def test_guard_reason(self):
+        """Round 11: the user's stop conditions for the optimisation-package runs."""
+        guards = {"kl_max": 0.2, "invalid_max": 0.05, "invalid_window": 3, "success_drop": 0.10, "drop_window": 4,
+                  "start_updates": 2}
+        line = lambda s, succ=0.5, kl=0.01, inv=0.0, extra="": (  # noqa: E731
+            f"(Runner) step:{s} - episode/success_rate:{succ} - actor/kl_loss:np.float64({kl}) - "
+            f"transition/invalid_action_rate/mean:{inv}{extra}\n")
+        ok = "".join(line(s) for s in range(1, 8))
+        self.assertIsNone(T.guard_reason(ok, guards))
+        self.assertIsNone(T.guard_reason("", guards))
+        self.assertIn("NaN in actor/pg_loss at update 3",
+                      T.guard_reason(ok + line(3, extra=" - actor/pg_loss:np.float64(nan)"), guards))
+        self.assertIsNone(T.guard_reason(ok + line(8, extra=" - val-core/x:nan"), guards))  # other metrics: not a stop
+        self.assertIn("KL to the start model 0.250", T.guard_reason(ok + line(8, kl=0.25), guards))
+        self.assertIsNone(T.guard_reason(ok + line(8, kl=0.15), guards))
+        # unparseable answers: the mean of the last 3 updates
+        self.assertIsNone(T.guard_reason(ok + line(8, inv=0.12), guards))  # (0 + 0 + 0.12) / 3 = 0.04
+        self.assertIn("unparseable answers 0.070", T.guard_reason(ok + line(8, inv=0.1) + line(9, inv=0.11), guards))
+        # training success 0.5 at the start; 4 consecutive updates below 0.4 stop the run, 3 do not
+        low = "".join(line(s, succ=0.35) for s in range(8, 12))
+        self.assertIn("training success below the start (0.500", T.guard_reason(ok + low, guards))
+        self.assertIsNone(T.guard_reason(ok + low + line(12, succ=0.45), guards))
+
+    def test_package_runs_with_guards(self):
+        """Round 11: the package options reach rl-config; a run stopped by a guard does not fail the step and only
+        its existing checkpoints are evaluated; the other run goes on to the endpoint."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rl = {"history_mode": "concat", "save_freq": 50, "no_internal_val": True, "task_pool": "reserve",
+                  "rows": "/rl_rows.jsonl", "opt_package": "p1", "candidates": 24, "target_groups": 12,
+                  "guards": {"kl_max": 0.2}}
+            chain = T.Chain({"tr": tmp, "sft_dir": str(root / "sft"), "endpoint": 100, "ppo_template": "/S0.yaml",
+                             "gs_root": "/ply", "sft_groups": {"formal": "sft_trajectories.jsonl"}, "rl": rl,
+                             "rl_runs": {"ps0": {"reward_preset": "S0"}, "pd": {"reward_preset": "dense"}},
+                             "eval_sets": {"val400": str(root / "val400")}, "eval": {"every": 50}}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_formal_e9", "model": "/lf/e9",
+                                                            "select_by": "val400", "scores": {"sft_formal_e9": 0.42}}
+            calls = []
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.rl_config()
+            ps0 = next(c for c in calls if c[c.index("--out") + 1] == str(root / "rl_ps0"))
+            for flag, value in (("--opt-package", "p1"), ("--candidates", "24"), ("--target-groups", "12"),
+                                ("--task-pool", "reserve")):
+                self.assertEqual(ps0[ps0.index(flag) + 1], value)
+            self.assertNotIn("--rollouts", ps0)
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            polls = {"n": 0}
+
+            def status(run, job_dir="job"):
+                if job_dir == "job_renderer":
+                    return {"state": "RUNNING", "finished": False}
+                polls["n"] += 1
+                logs = run / "logs"
+                logs.mkdir(exist_ok=True)
+                if run.name == "rl_run_pd":  # KL runs away after its first checkpoint
+                    (run / "checkpoints" / "global_step_50" / "actor" / "huggingface").mkdir(parents=True, exist_ok=True)
+                    (logs / "rl-1.log").write_text("step:60 - actor/kl_loss:np.float64(0.31)\n")
+                    return {"state": "RUNNING", "finished": False}
+                (logs / "rl-1.log").write_text("step:1 - actor/kl_loss:np.float64(0.01)\n")
+                if polls["n"] > 3:
+                    for st in (50, 100):
+                        (run / "checkpoints" / f"global_step_{st}" / "actor" / "huggingface").mkdir(parents=True, exist_ok=True)
+                    return {"state": "SUCCEEDED", "finished": True}
+                return {"state": "RUNNING", "finished": False}
+
+            deleted = []
+
+            def delete(run, job_dir="job"):
+                deleted.append((run.name, job_dir))
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.rl()  # does not raise: pd was stopped by a guard, ps0 reached the endpoint
+            self.assertIn("KL to the start model 0.310", chain.state["guard_stops"]["pd"]["reason"])
+            self.assertIn(("rl_run_pd", "job_rl"), deleted)
+            self.assertTrue((root / "rl_run_pd" / "STOP_RENDERER").exists())
+            self.assertIn("**RL pd 被自动停止**", T.render_markdown(chain.state))
+            jobs = {}
+            chain.eval_jobs = lambda step, j: jobs.update(j)
+            chain.tables = lambda: None
+            chain.evaluate()
+            self.assertEqual(sorted(jobs), ["val400__pd_050", "val400__ps0_050", "val400__ps0_100"])
+
+    def test_startup_problem_and_job_logs(self):
+        """Round 12 (the user's decision 5): which trainer jobs count as failed or stuck at Ray start-up."""
+        failed = "ray init kwargs: {}\nException: The current node timed out during startup. This could happen ...\n"
+        self.assertIn("ended FAILED at Ray start-up (timed out during startup)",
+                      T.startup_problem(failed, "FAILED", True, None, 2400))
+        self.assertIsNone(T.startup_problem("Traceback ...\nKeyError: 'x'\n", "FAILED", True, None, 2400))  # other errors
+        self.assertIsNone(T.startup_problem(failed + "step:1 - x:1\n", "FAILED", True, None, 2400))  # past the start-up
+        self.assertIsNone(T.startup_problem("", "SUCCEEDED", True, None, 2400))
+        hung = "INFO worker.py:2024 -- Started a local Ray instance.\n"
+        self.assertIn("no output for 41 minutes", T.startup_problem(hung, "RUNNING", False, 41 * 60, 2400))
+        self.assertIsNone(T.startup_problem(hung, "RUNNING", False, 39 * 60, 2400))
+        self.assertIsNone(T.startup_problem(hung + "(TaskRunner) step:3 - a:1\n", "RUNNING", False, 3600, 2400))
+        self.assertIsNone(T.startup_problem("", "PENDING", False, None, 2400))  # queued: not counted
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "logs").mkdir()
+            for name in ("rl-20261017T115911Z-pt-1-worker-0.log", "rl-20261017T121226Z-pt-2-worker-0.log",
+                         "renderer-20261017T121226Z-pt-3-worker-0.log"):
+                (d / "logs" / name).write_text("x")
+            got = [p.name for p in T.job_logs(d, "rl", "2026-10-17T12:12:00+00:00")]
+            self.assertEqual(got, ["rl-20261017T121226Z-pt-2-worker-0.log"])  # the earlier attempt's log is not this job's
+            self.assertEqual(len(T.job_logs(d, "rl", None)), 2)
+            self.assertEqual(T.job_logs(d / "none", "rl", None), [])
+
+    def test_startup_resubmission(self):
+        """Round 12: a trainer that fails at Ray start-up, then one silent for 40 minutes, are deleted and submitted
+        again (the run then reaches its endpoint); a run silent a third time after 2 resubmissions is given up and
+        the step fails; the render services are not touched; PROGRESS.md lists the resubmissions."""
+        import datetime
+        import time
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def run_chain(root, scripts):
+            """scripts: {run name: [behaviour of its 1st, 2nd, ... trainer job]}, behaviours "ray_fail", "hang", "ok"."""
+            clock = {"t": time.time()}
+            chain = T.Chain({"tr": str(root), "sft_dir": str(root / "sft"), "endpoint": 50, "gs_root": "/ply",
+                             "startup_retries_separate": False,
+                             "rl": {"standard": "v10_p1_S0", **CHAIN_BUILT_IN}, "rl_runs": {n: {} for n in scripts}},
+                            sleep=lambda s: clock.__setitem__("t", clock["t"] + 20 * 60), clock=lambda: clock["t"])
+            submitted = {n: 0 for n in scripts}
+            deleted = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                name = run.name[len("rl_run_"):]
+                if job_dir == "job_rl":
+                    submitted[name] += 1
+                job_id = f"pt-{name}-{job_dir}-{submitted[name]}"
+                (run / job_dir / "submission.json").write_text(json.dumps(
+                    {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "job_id": job_id}))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_renderer":
+                    done = (run / "STOP_RENDERER").exists()
+                    return {"job_id": job_id, "state": "SUCCEEDED" if done else "RUNNING", "finished": done}
+                name = run.name[len("rl_run_"):]
+                kind = scripts[name][submitted[name] - 1]
+                log = run / "logs" / f"rl-{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}-{job_id}-worker-0.log"
+                log.parent.mkdir(exist_ok=True)
+                if not any(p.name.endswith(f"{job_id}-worker-0.log") for p in log.parent.glob("rl-*.log")):
+                    log.write_text({"ray_fail": "Exception: The current node timed out during startup.\n",
+                                    "hang": "INFO worker.py:2024 -- Started a local Ray instance.\n",
+                                    "ok": "(TaskRunner) step:1 - episode/success_rate:0.4\n"}[kind])
+                if kind == "ray_fail":
+                    return {"job_id": job_id, "state": "FAILED", "finished": True}
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                return {"job_id": job_id, "state": "RUNNING", "finished": False}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    deleted.append(json.loads(receipt.read_text())["job_id"])
+                    receipt.replace(receipt.with_name(f"submission_{deleted[-1]}_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                try:
+                    chain.rl()
+                    err = None
+                except T.ChainError as exc:
+                    err = exc
+            return chain, submitted, deleted, err
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chain, submitted, deleted, err = run_chain(Path(tmp), {"a": ["ray_fail", "hang", "ok"], "b": ["ok"]})
+            self.assertIsNone(err)
+            self.assertEqual(submitted, {"a": 3, "b": 1})
+            retries = chain.state["startup_retries"]["a"]
+            self.assertEqual([r["job_id"] for r in retries], ["pt-a-job_rl-1", "pt-a-job_rl-2"])
+            self.assertEqual([r["new_job_id"] for r in retries], ["pt-a-job_rl-2", "pt-a-job_rl-3"])
+            self.assertIn("timed out during startup", retries[0]["reason"])
+            self.assertIn("no output for", retries[1]["reason"])
+            self.assertNotIn("b", chain.state["startup_retries"])
+            self.assertFalse(any("job_renderer" in j for j in deleted[:2]))  # the render service kept running
+            self.assertIn("**RL a 启动失败，第 2 次自动重新提交**", T.render_markdown(chain.state))
+        with tempfile.TemporaryDirectory() as tmp:
+            chain, submitted, _, err = run_chain(Path(tmp), {"c": ["hang", "hang", "hang"], "b": ["ok"]})
+            self.assertEqual(submitted, {"c": 3, "b": 1})  # 2 resubmissions, then given up
+            self.assertIn("start-up: no output for", str(err))
+            self.assertTrue((Path(tmp) / "rl_run_b" / "checkpoints" / "global_step_50").is_dir())
+
+    def test_standard_and_seed_reach_rl_config(self):
+        """Round 12: plan rl "standard" and "seed" reach rl-config (no --ppo-template then, and --reward-preset only
+        when a run names one)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": str(root / "sft"), "endpoint": 300, "gs_root": "/ply",
+                             "rl": {"standard": "v10_p1_S0", "seed": 20261019, "rows": "/rows.jsonl", "task_pool": "reserve"},
+                             "rl_runs": {"ps0": {}, "pd": {"rl": {"standard": "v10_p1_D"}}}}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_formal_e9", "model": "/lf/e9"}
+            calls = {}
+            chain.sh = lambda args, **k: calls.__setitem__(args[args.index("--out") + 1], args)
+            chain.rl_config()
+            ps0, pd = calls[str(root / "rl_ps0")], calls[str(root / "rl_pd")]
+            self.assertEqual((ps0[ps0.index("--standard") + 1], pd[pd.index("--standard") + 1]), ("v10_p1_S0", "v10_p1_D"))
+            self.assertEqual((ps0[ps0.index("--seed") + 1], pd[pd.index("--seed") + 1]), ("20261019", "20261019"))
+            for args in (ps0, pd):
+                self.assertNotIn("--ppo-template", args)
+                self.assertNotIn("--reward-preset", args)
+                self.assertNotIn("--curriculum-easy-updates", args)
+            # round 12 batch: the easy-first options reach rl-config
+            chain.plan["rl"].update(curriculum_easy_updates=50, curriculum_max_dstar=3)
+            chain.rl_config()
+            ps0 = calls[str(root / "rl_ps0")]
+            self.assertEqual((ps0[ps0.index("--curriculum-easy-updates") + 1], ps0[ps0.index("--curriculum-max-dstar") + 1]),
+                             ("50", "3"))
+            self.assertNotIn("--entropy-coeff", ps0)
+            # round 12 batch: the entropy bonus reaches rl-config, 0 included
+            chain.plan["rl"].update(entropy_coeff=0)
+            chain.rl_config()
+            ps0 = calls[str(root / "rl_ps0")]
+            self.assertEqual(ps0[ps0.index("--entropy-coeff") + 1], "0")
+            # round 12 freeze: the format example, the lenient reading, the unreadable answer's penalty and the group
+            # filter (D-cond + keep: its threshold in the plan) reach rl-config
+            for flag in ("--format-example", "--lenient-parse", "--invalid-penalty", "--group-filter"):
+                self.assertNotIn(flag, ps0)
+            chain.plan["rl"].update(format_example="placeholder", lenient_parse=True, invalid_penalty=-0.5,
+                                    group_filter="keep_by_return_std", keep_std_threshold=0.4, keep_std_floor=1.0)
+            chain.rl_config()
+            ps0 = calls[str(root / "rl_ps0")]
+            self.assertIn("--lenient-parse", ps0)
+            self.assertEqual([ps0[ps0.index(f) + 1] for f in ("--format-example", "--invalid-penalty", "--group-filter",
+                                                              "--keep-std-threshold", "--keep-std-floor")],
+                             ["placeholder", "-0.5", "keep_by_return_std", "0.4", "1.0"])
+
+    def test_standard_chain_defaults(self):
+        """Round 12 freeze (the user's decision 3 of 2026-10-22): a run whose plan rl names a standard gets the
+        standard's chain settings (32 render workers, render service first, repack, the batch's stop rules with the
+        10% line, 5 start-up retries counted apart) for each setting the plan does not give; without a standard
+        nothing changes."""
+        from data_gen.interiorgs_v10 import training_prep as TP
+
+        defaults = TP.load_chain_defaults()
+        self.assertEqual({k: defaults["rl"][k] for k in ("renderer_workers", "renderer_first", "renderer_repack")},
+                         {"renderer_workers": 32, "renderer_first": True, "renderer_repack": True})
+        self.assertEqual((defaults["rl"]["guards"]["invalid_max"], defaults["rl"]["startup"]["retries"]), (0.1, 5))
+        self.assertNotIn("chain_defaults", TP.load_standards())
+        with tempfile.TemporaryDirectory() as tmp:
+            base = {"tr": tmp, "sft_dir": tmp, "endpoint": 300, "gs_root": "/ply"}
+            chain = T.Chain({**base, "rl": {"standard": "v10_p1_S0", "guards": {"kl_max": 1.0}},
+                             "rl_runs": {"s0": {}, "d": {"rl": {"standard": "v10_p1_D", "renderer_workers": 12,
+                                                                "startup": {"stall_minutes": 60}}}}},
+                            sleep=lambda s: None)
+            runs = chain.rl_runs()
+            s0, d = runs["s0"]["rl"], runs["d"]["rl"]
+            self.assertEqual((s0["renderer_workers"], s0["renderer_first"], s0["renderer_repack"]), (32, True, True))
+            self.assertEqual(s0["guards"], {**defaults["rl"]["guards"], "kl_max": 1.0})  # the plan's value wins
+            self.assertEqual(s0["startup"], {"retries": 5, "stall_minutes": 40})
+            self.assertEqual((d["renderer_workers"], d["startup"]), (12, {"retries": 5, "stall_minutes": 60}))
+            self.assertTrue(chain.plan["startup_retries_separate"])
+            plain = T.Chain({**base, "rl": {"guards": {"kl_max": 1.0}}, "rl_runs": {"a": {}}}, sleep=lambda s: None)
+            self.assertEqual(plain.rl_runs()["a"]["rl"], {"guards": {"kl_max": 1.0}})
+            self.assertNotIn("startup_retries_separate", plain.plan)
+            # an explicit "no guards" stays
+            off = T.Chain({**base, "rl": {"standard": "v10_p1_S0", "guards": None}}, sleep=lambda s: None)
+            self.assertIsNone(off.rl_runs()[""]["rl"]["guards"])
+
+    def test_eval_only_plan(self):
+        """Round 12: an eval_only plan runs check_code and evaluate only, on the listed models and variants."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = {"tr": tmp, "sft_dir": tmp, "eval_only": True,
+                    "eval_sets": {"val_oa": str(root / "val_oa"), "test_oa": str(root / "test_oa")},
+                    "eval": {"models": {"sft_formal_e9": {"model": "/m/e9"}, "r1_final": {"model": "/m/r1", "prompt_format": "r1"}},
+                             "extra_sets": {"val400": str(root / "val400")},
+                             "variants": [{"suffix": "_s4", "sets": ["val400"], "models": ["sft_formal_e9"],
+                                           "options": ["--samples", "4"]}]}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            chain.check_code = lambda: None
+            got = {}
+            chain.eval_jobs = lambda step, j: got.update(j)
+            chain.tables = lambda: None
+            self.assertEqual(chain.run(), 0)
+            self.assertEqual(sorted(got), ["test_oa__r1_final", "test_oa__sft_formal_e9", "val400__sft_formal_e9_s4",
+                                           "val_oa__r1_final", "val_oa__sft_formal_e9"])
+            self.assertEqual(got["val_oa__r1_final"][3], "r1")
+            self.assertEqual(got["val400__sft_formal_e9_s4"][4], ["--samples", "4"])
+            steps = chain.state["steps"]
+            self.assertEqual(steps["rl"]["note"], "not planned (eval_only)")
+            self.assertTrue(all(steps[s]["state"] == "done" for s in T.STEPS))
+
+    def test_code_changes(self):
+        """Round 12: uncommitted changes under docs/ (another session's documents) do not stop the chain; any other
+        tracked change does; the verl submodule pointer is ignored as before."""
+        changed, ignored = T.code_changes([" M verl", " M docs/interiorgs_qa/audit/site_20261014.sh"])
+        self.assertEqual((changed, ignored), ([], [" M docs/interiorgs_qa/audit/site_20261014.sh"]))
+        changed, _ = T.code_changes([" M data_gen/interiorgs_v10/train_chain.py", "M  docs/x.md",
+                                     "R  docs/a.md -> data_gen/a.py", " D vagen/env.py"])
+        self.assertEqual(changed, [" M data_gen/interiorgs_v10/train_chain.py", "R  docs/a.md -> data_gen/a.py",
+                                   " D vagen/env.py"])
+        self.assertEqual(T.code_changes([]), ([], []))
+
+    def test_sft_only_chain_with_chosen_epochs(self):
+        """Round 12 batch (the data-scale curve): no sft-records call, only epochs 2/4/.. evaluated, only on the
+        validation set, the pick among them, then the pick alone on the test set; no RL step, no RL checkpoint."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for e in range(1, 5):
+                (root / "lf_s100" / "model" / f"checkpoint-{e * 10}").mkdir(parents=True)
+            (root / "sft").mkdir()
+            (root / "sft" / "traj_s100.jsonl").write_text("{}\n")
+            plan = {"tr": tmp, "sft_dir": str(root / "sft"), "commit": "x", "model": "/base", "sft_epochs": 4,
+                    "sft_groups": {"s100": "traj_s100.jsonl"}, "sft_records": False, "sft_only": True,
+                    "sft_eval_epochs": [2, 4], "sft_eval_sets": ["val"], "select_by": "val",
+                    "eval_sets": {"val": str(root / "val"), "test": str(root / "test")},
+                    "eval": {"variants": [{"suffix": "", "sets": ["test"], "models": ["sft_pick"]}]}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            calls = []
+
+            def sh(args, **k):
+                calls.append(args)
+                if "prepare_active_spatial_sft.py" in args:
+                    (root / "lf_s100" / "train.yaml").write_text("x")
+
+            chain.sh = sh
+            chain.sft_data()
+            self.assertFalse(any("sft-records" in a for a in calls))  # the conversation files exist already
+            self.assertTrue(any(str(root / "sft" / "traj_s100.jsonl") in a for a in calls))
+            jobs = {}
+            chain.eval_jobs = lambda step, j: jobs.update(j)
+            chain.tables = lambda: None
+            chain.sft_eval()
+            self.assertEqual(sorted(jobs), ["val__sft_s100_e2", "val__sft_s100_e4"])
+            for name, rate in (("sft_s100_e2", 0.40), ("sft_s100_e4", 0.38)):
+                d = root / "val" / name
+                d.mkdir(parents=True)
+                (d / "done.json").write_text("{}")
+                rows = [{"success": i < rate * 100, "task_type": "fov_inclusion", "d_star": 3, "turns": 1, "actions": 1,
+                         "collisions": 0, "invalid_turns": 0, "actions_to_success": 1} for i in range(100)]
+                (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            chain.pick_sft()
+            decision = chain.state["steps"]["pick_sft"]["decision"]
+            self.assertEqual((decision["best"], decision["model"]), ("sft_s100_e2", str(root / "lf_s100" / "model" / "checkpoint-20")))
+            self.assertEqual(decision["other_sets"], {})  # no test numbers for the unpicked epochs
+            jobs.clear()
+            chain.evaluate()
+            self.assertEqual(sorted(jobs), ["test__sft_s100_e2"])  # only the pick on the test set, no RL checkpoint
+            for step in T.STEPS:  # the RL steps are skipped by run()
+                setattr(chain, step, lambda: None)
+            chain.state["steps"] = {s: {"state": "pending"} for s in T.STEPS}
+            self.assertEqual(chain.run(), 0)
+            self.assertEqual(chain.state["steps"]["rl"]["note"], "not planned (sft_only)")
+
+    def test_auto_pool_and_queue_times(self):
+        """Round 12 batch: plan "pool": "auto" asks job_sco.pick_pool for every new job, an RL run's render service
+        and trainer share the first choice; the time a job waited for cards is kept and shown."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "pool": "auto"}, sleep=lambda s: None)
+            picks = iter(["zoetrope", "h800", "zoetrope"])
+            with mock.patch.object(job_sco, "pick_pool", side_effect=lambda: next(picks)):
+                self.assertEqual(chain.job_pool("p1s0"), "zoetrope")
+                self.assertEqual(chain.job_pool("p1s0"), "zoetrope")  # the run keeps its pool
+                self.assertEqual(chain.job_pool("p1d"), "h800")
+                self.assertEqual(chain.job_pool(), "zoetrope")  # an evaluation job: picked anew
+            self.assertEqual(T.Chain({"tr": tmp, "sft_dir": tmp, "pool": "h800"}).job_pool("x"), "h800")
+            run = root / "rl_run_p1s0"
+            (run / "job_rl").mkdir(parents=True)
+            (run / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope"}))
+            chain.note_queue("rl/p1s0/rl", run, "job_rl", {"job_id": "pt-1", "create_time": "2026-10-20T01:00:00Z",
+                                                          "start_time": "2026-10-20T01:42:00Z"})
+            chain.note_queue("rl/p1s0/rl", run, "job_rl", {"job_id": "pt-2", "create_time": None})  # unknown: skipped
+            q = chain.state["queue"]
+            self.assertEqual(q["pt-1"], {"what": "rl/p1s0/rl", "pool": "zoetrope", "created": "2026-10-20T01:00:00Z",
+                                         "started": "2026-10-20T01:42:00Z", "queued_s": 2520})
+            self.assertNotIn("pt-2", q)
+            self.assertIn("| rl/p1s0/rl | pt-1 | zoetrope | 42 | 已开始 |", T.render_markdown(chain.state))
+
+    def test_record_nodes_and_separate_startup_retries(self):
+        """Round 12 batch (the user's decision of 2026-10-21): with plan "record_nodes" every trainer and render
+        service gets its machines looked up once (state["job_hosts"]) and the resubmission records carry them; with
+        "startup_retries_separate" a run resubmitted 3 times at start-up (limit 5) still has plan "retries" 2 for a
+        trainer that fails after its first update, without it the same run fails; without "record_nodes" nothing is
+        looked up."""
+        import datetime
+        import time
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def run_chain(root, script, separate, record=True):
+            clock = {"t": time.time()}
+            plan = {"tr": str(root), "sft_dir": str(root / "sft"), "endpoint": 50, "gs_root": "/ply", "retries": 2,
+                    "rl": {"standard": "v10_p1_S0", **CHAIN_BUILT_IN, "startup": {"retries": 5, "stall_minutes": 40}},
+                    "rl_runs": {"a": {}}, "startup_retries_separate": bool(separate)}
+            if record:
+                plan["record_nodes"] = True
+            chain = T.Chain(plan, sleep=lambda s: clock.__setitem__("t", clock["t"] + 20 * 60), clock=lambda: clock["t"])
+            submitted = {"n": 0}
+            looked_up = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                if job_dir == "job_rl":
+                    submitted["n"] += 1
+                job_id = f"pt-{job_dir}-{submitted['n']}"
+                (run / job_dir / "submission.json").write_text(json.dumps(
+                    {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "job_id": job_id}))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_renderer":
+                    done = (run / "STOP_RENDERER").exists()
+                    return {"job_id": job_id, "state": "SUCCEEDED" if done else "RUNNING", "finished": done}
+                kind = script[submitted["n"] - 1]
+                log = run / "logs" / f"rl-{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}-{job_id}-worker-0.log"
+                log.parent.mkdir(exist_ok=True)
+                if not any(p.name.endswith(f"{job_id}-worker-0.log") for p in log.parent.glob("rl-*.log")):
+                    log.write_text("Exception: The current node timed out during startup.\n" if kind == "ray_fail"
+                                   else "(TaskRunner) step:1 - episode/success_rate:0.4\n")
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                return {"job_id": job_id, "state": "FAILED", "finished": True}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name(f"submission_{json.loads(receipt.read_text())['job_id']}_deleted.json"))
+
+            def machines(job_id):
+                looked_up.append(job_id)
+                return [f"10.0.0.{job_id.rsplit('-', 1)[1]}"]
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete), \
+                    mock.patch.object(T, "job_machines", side_effect=machines):
+                try:
+                    chain.rl()
+                    err = None
+                except T.ChainError as exc:
+                    err = exc
+            return chain, submitted["n"], looked_up, err
+
+        script = ["ray_fail", "ray_fail", "ray_fail", "mid_fail", "ok"]
+        with tempfile.TemporaryDirectory() as tmp:
+            chain, n, looked_up, err = run_chain(Path(tmp), script, separate=True)
+            self.assertIsNone(err)
+            self.assertEqual(n, 5)  # 3 start-up resubmissions, then 1 after the failure past the first update
+            starts = chain.state["startup_retries"]["a"]
+            self.assertEqual([r["hosts"] for r in starts], [["10.0.0.1"], ["10.0.0.2"], ["10.0.0.3"]])
+            self.assertEqual([(r["what"], r["hosts"]) for r in chain.state["job_retries"]["rl/a"]],
+                             [("trainer", ["10.0.0.4"])])
+            hosts = chain.state["job_hosts"]
+            self.assertEqual(sorted(k for k in hosts if "job_rl" in k), [f"pt-job_rl-{i}" for i in range(1, 6)])
+            self.assertEqual(hosts["pt-job_rl-2"]["what"], "rl/a/rl")
+            self.assertEqual(len(looked_up), len(set(looked_up)))  # each job looked up once
+        with tempfile.TemporaryDirectory() as tmp:  # start-up resubmissions count against plan "retries": as before
+            chain, n, _, err = run_chain(Path(tmp), script, separate=False)
+            self.assertIsInstance(err, T.ChainError)
+            self.assertEqual(n, 4)
+        with tempfile.TemporaryDirectory() as tmp:  # no "record_nodes": nothing looked up, records as before
+            chain, n, looked_up, err = run_chain(Path(tmp), ["ray_fail", "ok"], separate=True, record=False)
+            self.assertIsNone(err)
+            self.assertEqual(looked_up, [])
+            self.assertNotIn("job_hosts", chain.state)
+            self.assertNotIn("hosts", chain.state["startup_retries"]["a"][0])
+
+    def test_evaluation_jobs_waiting_for_cards_show_their_state(self):
+        """The user's section 2.2 of 2026-10-22: an evaluation job still waiting for its card is recorded with its own
+        state (QUEUEING / STARTING), not as RUNNING; once it runs and ends, as before."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "m").mkdir()
+            (root / "m" / "config.json").write_text("{}")
+            res = root / "val" / "r1"
+            res.mkdir(parents=True)
+            states = iter(["QUEUEING", "STARTING", "RUNNING", "SUCCEEDED"])
+            seen = []
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp},
+                            sleep=lambda s: seen.append(dict(chain.state["steps"]["evaluate"]["jobs"])))
+
+            def status(run, job_dir="job"):
+                s = next(states)
+                if s == "SUCCEEDED":
+                    (res / "done.json").write_text("{}")
+                return {"job_id": "pt-e", "state": s, "finished": s == "SUCCEEDED"}
+
+            with mock.patch.multiple(job_sco, status=status,
+                                     prepare=lambda run, *a, **k: (run / "job").mkdir(parents=True, exist_ok=True),
+                                     submit=lambda run, job_dir="job": (run / "job" / "submission.json").write_text("{}"),
+                                     delete=lambda run, job_dir="job": (run / "job" / "submission.json").unlink(missing_ok=True)):
+                chain.eval_jobs("evaluate", {"val__r1": (root / "val", "r1", str(root / "m"), None, [])})
+            self.assertEqual([s["val__r1"] for s in seen], ["QUEUEING", "STARTING", "RUNNING"])
+            self.assertEqual(chain.state["steps"]["evaluate"]["jobs"]["val__r1"], "SUCCEEDED")
+
+    def test_retries_of_failed_jobs(self):
+        """Round 12 batch (the user's rule): plan "retries": 2 resubmits a failed RL trainer (it resumes), a dead
+        render service (with its trainer), an SFT job (model folder moved aside) and an evaluation job (going on from
+        its results); a third failure fails the step; without the option nothing is resubmitted."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def rl_chain(root, script, retries=2):
+            """script: per run, the outcomes of its successive trainer / renderer jobs."""
+            chain = T.Chain({"tr": str(root), "sft_dir": str(root), "endpoint": 50, "gs_root": "/ply", "retries": retries,
+                             "rl_runs": {n: {} for n in script}}, sleep=lambda s: None)
+            count = {}
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                key = (run.name, job_dir)
+                count[key] = count.get(key, 0) + 1
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}-{count[key]}"}))
+
+            def status(run, job_dir="job"):
+                name = run.name[len("rl_run_"):]
+                n = count[(run.name, job_dir)]
+                kind = script[name][job_dir][min(n, len(script[name][job_dir])) - 1]
+                if kind == "ok" and job_dir == "job_rl":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": f"x{n}", "state": "SUCCEEDED", "finished": True}
+                if kind == "run":
+                    if job_dir == "job_renderer" and (run / "STOP_RENDERER").exists():
+                        return {"job_id": f"x{n}", "state": "SUCCEEDED", "finished": True}
+                    return {"job_id": f"x{n}", "state": "RUNNING", "finished": False}
+                return {"job_id": f"x{n}", "state": "FAILED", "finished": True}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            return chain, count, mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chain, count, patch = rl_chain(Path(tmp), {
+                "a": {"job_rl": ["fail", "fail", "ok"], "job_renderer": ["run"]},          # the trainer fails twice
+                "b": {"job_rl": ["run", "ok"], "job_renderer": ["fail", "run"]}})          # the render service dies
+            with patch:
+                chain.rl()
+            self.assertEqual(count[("rl_run_a", "job_rl")], 3)
+            self.assertEqual((count[("rl_run_b", "job_renderer")], count[("rl_run_b", "job_rl")]), (2, 2))
+            self.assertEqual([r["what"] for r in chain.state["job_retries"]["rl/a"]], ["trainer", "trainer"])
+            self.assertEqual([r["what"] for r in chain.state["job_retries"]["rl/b"]], ["renderer"])
+            self.assertIn("**rl/a 失败，第 2 次自动重新提交**", T.render_markdown(chain.state))
+        with tempfile.TemporaryDirectory() as tmp:  # a third failure: given up, the step fails
+            chain, count, patch = rl_chain(Path(tmp), {"a": {"job_rl": ["fail"] * 3, "job_renderer": ["run"]}})
+            with patch, self.assertRaises(T.ChainError):
+                chain.rl()
+            self.assertEqual(count[("rl_run_a", "job_rl")], 3)
+        with tempfile.TemporaryDirectory() as tmp:  # no "retries": as before
+            chain, count, patch = rl_chain(Path(tmp), {"a": {"job_rl": ["fail", "ok"], "job_renderer": ["run"]}}, retries=0)
+            with patch, self.assertRaises(T.ChainError):
+                chain.rl()
+            self.assertEqual(count[("rl_run_a", "job_rl")], 1)
+
+        # SFT: the failed run's model folder is kept aside and the job resubmitted
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "retries": 2, "sft_groups": {"s050": "x.jsonl"}}, sleep=lambda s: None)
+            (root / "lf_s050" / "model" / "checkpoint-5").mkdir(parents=True)
+            states = iter(["FAILED", "SUCCEEDED"])
+
+            def status(run, job_dir="job"):
+                s = next(states)
+                if s == "SUCCEEDED":
+                    model = root / "lf_s050" / "model"
+                    model.mkdir(parents=True, exist_ok=True)
+                    (model / "config.json").write_text("{}")
+                    (model / "model.safetensors").write_text("")
+                return {"job_id": "pt-s", "state": s, "finished": True}
+
+            submitted = []
+            with mock.patch.multiple(job_sco, prepare=lambda *a, **k: None, status=status,
+                                     submit=lambda run, job_dir="job": (submitted.append(run.name), (run / "job").mkdir(parents=True, exist_ok=True),
+                                                                        (run / "job" / "submission.json").write_text('{"job_id": "pt-s"}')),
+                                     delete=lambda run, job_dir="job": (run / "job" / "submission.json").unlink(missing_ok=True)):
+                chain.sft()
+            self.assertEqual(submitted, ["sft_s050", "sft_s050"])
+            self.assertTrue((root / "lf_s050" / "model_failed_1" / "checkpoint-5").is_dir())
+
+        # evaluation: the rerun goes on from the results written (a cut-off last line dropped)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "retries": 2}, sleep=lambda s: None)
+            (root / "m").mkdir()
+            (root / "m" / "config.json").write_text("{}")
+            res = root / "val" / "r1"
+            res.mkdir(parents=True)
+            (res / "results.jsonl").write_text('{"index": 0}\n{"index": 1, "succ')
+            states = iter(["FAILED", "SUCCEEDED"])
+            submitted = []
+
+            def status(run, job_dir="job"):
+                s = next(states)
+                if s == "SUCCEEDED":
+                    self.assertEqual((res / "results.jsonl").read_text(), '{"index": 0}\n')  # the partial line went
+                    (res / "done.json").write_text("{}")
+                return {"job_id": "pt-e", "state": s, "finished": True}
+
+            def submit(run, job_dir="job"):
+                submitted.append(run.name)
+                (run / "job" / "submission.json").write_text("{}")
+
+            with mock.patch.multiple(job_sco, status=status, submit=submit,
+                                     prepare=lambda run, *a, **k: (run / "job").mkdir(parents=True, exist_ok=True),
+                                     delete=lambda run, job_dir="job": (run / "job" / "submission.json").unlink(missing_ok=True)):
+                chain.eval_jobs("evaluate", {"val__r1": (root / "val", "r1", str(root / "m"), None, [])})
+            self.assertEqual(submitted, ["val__r1", "val__r1"])
+            self.assertEqual(len(chain.state["job_retries"]["evaluate/val__r1"]), 1)
+
+    def test_extension_by_validation(self):
+        """Round 12 batch (RL from the original model): after the endpoint, the checkpoints are evaluated on the
+        validation set; a run whose endpoint checkpoint is the best and min_gain above the one at "vs" goes on to
+        "to", the other stops; evaluate covers each run up to its own last update."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 300, "select_by": "val",
+                             "eval_sets": {"val": str(root / "val"), "test": str(root / "test")}, "eval": {"every": 50},
+                             "rl": {"extend": {"to": 600, "vs": 200, "min_gain": 0.02}},
+                             "rl_runs": {"as0": {}, "ad": {}}}, sleep=lambda s: None)
+            curves = {"as0": [0.05, 0.08, 0.10, 0.12, 0.13, 0.15],   # still rising: 0.15 - 0.12 >= 0.02
+                      "ad": [0.05, 0.08, 0.10, 0.14, 0.13, 0.15]}   # 0.15 - 0.14 < 0.02: stop
+            for name in curves:
+                for s in range(50, 301, 50):
+                    (root / f"rl_run_{name}" / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface").mkdir(parents=True)
+            evaluated = {}
+
+            def eval_jobs(step, jobs):
+                evaluated.update(jobs)
+                for key, (d, result, model, fmt, opts) in jobs.items():
+                    name, s = result.rsplit("_", 1)
+                    rate = curves[name][int(s) // 50 - 1]
+                    out = d / result
+                    out.mkdir(parents=True, exist_ok=True)
+                    rows = [{"success": i < round(rate * 100), "task_type": "fov_inclusion", "d_star": 3, "turns": 1,
+                             "actions": 1, "collisions": 0, "invalid_turns": 0, "actions_to_success": 1} for i in range(100)]
+                    (out / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+                    (out / "done.json").write_text("{}")
+
+            chain.eval_jobs = eval_jobs
+            extended = []
+            chain._ppo_runs = lambda step, endpoint, only=None: extended.append((step, endpoint, sorted(only or [])))
+            chain.rl_extend()
+            self.assertEqual(sorted(evaluated), sorted(f"val__{n}_{s:03d}" for n in curves for s in range(50, 301, 50)))
+            decisions = chain.state["steps"]["rl_extend"]["decisions"]
+            self.assertEqual((decisions["as0"]["extend_to"], decisions["ad"]["extend_to"]), (600, None))
+            self.assertEqual(extended, [("rl_extend", 600, ["as0"])])
+            self.assertEqual((chain.final_update("as0"), chain.final_update("ad"), chain.final_update()), (600, 300, 300))
+            self.assertIn("**RL as0 是否接着训**", T.render_markdown(chain.state))
+            self.assertIn("接着训到 600 次", T.render_markdown(chain.state))
+            chain.rl_extend()  # decided once: no second evaluation round
+            self.assertEqual(len(extended), 2)
+            for s in range(350, 601, 50):
+                (root / "rl_run_as0" / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface").mkdir(parents=True)
+            jobs = {}
+            chain.eval_jobs = lambda step, j: jobs.update(j)
+            chain.tables = lambda: None
+            chain.evaluate()
+            self.assertIn("test__as0_600", jobs)
+            self.assertIn("test__ad_300", jobs)
+            self.assertNotIn("test__ad_350", jobs)
+        with tempfile.TemporaryDirectory() as tmp:  # no extension rule: the legacy step, not planned
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 300, "rl_runs": {"p1s0": {}}}, sleep=lambda s: None)
+            chain.rl_extend()
+            self.assertEqual(chain.state["steps"]["rl_extend"]["note"], "not planned")
+
+    def test_retention_best_and_last(self):
+        """Round 12 batch (disk): after evaluate, every RL checkpoint but the best on the validation set and the last
+        is deleted, and every SFT epoch but the picked one (with the final weights); a run with an unevaluated
+        checkpoint is left alone; an SFT this chain did not train is never touched."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outside = root / "elsewhere" / "lf_formal" / "model" / "checkpoint-1386"
+            outside.mkdir(parents=True)
+
+            def write(result, rate):
+                out = root / "val" / result
+                out.mkdir(parents=True, exist_ok=True)
+                rows = [{"success": i < round(rate * 100), "task_type": "fov_inclusion", "d_star": 3, "turns": 1,
+                         "actions": 1, "collisions": 0, "invalid_turns": 0, "actions_to_success": 1} for i in range(100)]
+                (out / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+                (out / "done.json").write_text("{}")
+
+            tr = root / "tr"
+            for name, rates in (("s100s0", [0.40, 0.46, 0.44]), ("s100d", [0.41, 0.42, 0.40])):
+                for k, s in enumerate((50, 100, 150)):
+                    (tr / f"rl_run_{name}" / "checkpoints" / f"global_step_{s}" / "actor").mkdir(parents=True)
+                    if not (name == "s100d" and s == 150):  # s100d's last checkpoint has no result yet
+                        write(f"{name}_{s:03d}", rates[k])
+            model = tr / "lf_s100" / "model"
+            for e in (2, 4, 6):
+                (model / f"checkpoint-{e * 10}").mkdir(parents=True)
+            (model / "model-00001-of-00002.safetensors").write_text("")
+            (model / "config.json").write_text("{}")
+            chain = T.Chain({"tr": str(tr), "sft_dir": tmp, "endpoint": 150, "select_by": "val", "retain": "best_and_last",
+                             "eval_sets": {"val": str(root / "val")}, "eval": {"every": 50},
+                             "sft_groups": {"s100": "x.jsonl"}, "rl_runs": {"s100s0": {}, "s100d": {}}}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_s100_e4", "model": str(model / "checkpoint-40"),
+                                                            "select_by": "val", "scores": {}}
+            chain.retain()
+            left = sorted(p.name for p in (tr / "rl_run_s100s0" / "checkpoints").iterdir())
+            self.assertEqual(left, ["global_step_100", "global_step_150"])  # best (100) and last (150)
+            self.assertEqual(len(list((tr / "rl_run_s100d" / "checkpoints").iterdir())), 3)  # not all evaluated
+            self.assertEqual(sorted(p.name for p in model.iterdir()), ["checkpoint-40", "config.json"])
+            self.assertTrue(outside.is_dir())
+            r = chain.state["retained"]
+            self.assertEqual(r["s100s0"], {"kept": [100, 150], "deleted": [50], "best": 100})
+            self.assertIn("skipped", r["s100d"])
+            self.assertEqual(r["sft_s100"], {"kept": "checkpoint-40", "deleted_epochs": [1, 3]})  # epochs count the checkpoints
+            self.assertIn("**保留规则 s100s0：** 留 [100, 150]，删 [50]", T.render_markdown(chain.state))
+            # an SFT start from another chain (round 11's) is never touched
+            chain2 = T.Chain({"tr": str(tr), "sft_dir": tmp, "endpoint": 150, "select_by": "val", "retain": "best_and_last",
+                              "eval_sets": {"val": str(root / "val")}, "sft_groups": {"formal": "x.jsonl"}}, sleep=lambda s: None)
+            chain2.state["steps"]["pick_sft"]["decision"] = {"model": str(outside), "best": "sft_formal_e9", "select_by": "val",
+                                                             "scores": {}}
+            chain2.retain()
+            self.assertTrue(outside.is_dir())
+
     def test_wait_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp}, sleep=lambda s: None)
@@ -435,6 +1385,437 @@ class ChainTest(unittest.TestCase):
             with self.assertRaises(T.ChainError):  # the render service dies while PPO runs
                 chain.wait_jobs("rl", {"rl": lambda: {"state": "RUNNING", "finished": False},
                                        "renderer": lambda: {"state": "FAILED", "finished": True}}, "rl")
+
+    def test_renderer_when_trainer_runs(self):
+        """Round 12 batch (a new switch): with plan rl "renderer_when_trainer_runs" a run's render service is submitted
+        only once its trainer has its cards and the trainer is told how long to wait for it; a trainer submitted
+        before the switch keeps its job (only its launch script gets the wait); a failed trainer's service is stopped
+        and the next trainer gets a new one once it runs; without the switch the trainer's arguments are unchanged."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "retries": 2, "pool": "h800",
+                             "rl": {"renderer_when_trainer_runs": {"trainer_wait_s": 7200}},
+                             "rl_runs": {"a": {}, "b": {}, "c": {"rl": {"renderer_when_trainer_runs": {
+                                 "trainer_wait_s": 7200, "renderer_pool": "zoe-cf-render"}}}}}, sleep=lambda s: None)
+            b = root / "rl_run_b"  # submitted before the switch, still waiting; its render service already deleted
+            (b / "job_rl").mkdir(parents=True)
+            (b / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-b-old"}))
+            (b / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope",
+                                                                   "mode_args": ["rl", str(root / "rl_b"), "50"]}))
+            trainer = {"a": iter(["STARTING", "STARTING", "RUNNING", "FAILED", "STARTING", "RUNNING", "ok"]),
+                       "b": iter(["STARTING", "RUNNING", "RUNNING", "ok"]),
+                       "c": iter(["STARTING", "RUNNING", "ok"])}
+            events, count = [], {}
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                events.append(("prepare", run.name[7:], job_dir, list(args), pool))
+
+            def submit(run, job_dir="job"):
+                count[(run.name, job_dir)] = count.get((run.name, job_dir), 0) + 1
+                job_id = f"pt-{run.name[7:]}-{job_dir[4:]}-{count[(run.name, job_dir)]}"
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": job_id}))
+                events.append(("submit", run.name[7:], job_dir))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_renderer":
+                    done = (run / "STOP_RENDERER").exists()
+                    return {"job_id": job_id, "state": "SUCCEEDED" if done else "RUNNING", "finished": done}
+                kind = next(trainer[run.name[7:]])
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                return {"job_id": job_id, "state": kind, "finished": kind == "FAILED"}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    events.append(("delete", run.name[7:], job_dir))
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.rl()
+            a = [e for e in events if e[1] == "a"]
+            self.assertEqual([e[0] + " " + e[2] for e in a], [
+                "prepare job_rl", "submit job_rl",                          # no render service while it queues
+                "prepare job_renderer", "submit job_renderer",              # the trainer runs: its service
+                "delete job_rl", "delete job_renderer",                     # the trainer failed: both go
+                "prepare job_rl", "submit job_rl",                          # resubmitted (resumes), no service yet
+                "prepare job_renderer", "submit job_renderer",              # running again: a new service
+                "delete job_rl", "delete job_renderer"])                    # the end of the step
+            self.assertEqual(a[0][3], ["rl", str(root / "rl_a"), "50", "7200"])
+            bev = [e for e in events if e[1] == "b"]
+            self.assertEqual(bev[0], ("prepare", "b", "job_rl", ["rl", str(root / "rl_b"), "50", "7200"], "zoetrope"))
+            self.assertNotIn(("submit", "b", "job_rl"), bev)  # the waiting job is kept, with its place in the queue
+            self.assertEqual([e[0] + " " + e[2] for e in bev[1:3]], ["prepare job_renderer", "submit job_renderer"])
+            self.assertEqual(bev[1][4], "zoetrope")  # the render service goes to its trainer's pool
+            cev = [e for e in events if e[1] == "c" and e[0] == "prepare"]
+            self.assertEqual([(e[2], e[4]) for e in cev], [("job_rl", "h800"), ("job_renderer", "zoe-cf-render")])
+            self.assertEqual([r["trainer"] for r in chain.state["renderer_on_trainer_start"]["a"]], ["pt-a-rl-1", "pt-a-rl-2"])
+            self.assertTrue((root / "rl_run_b" / "checkpoints" / "global_step_50").is_dir())
+
+            plain = T.Chain({"tr": tmp, "sft_dir": tmp, "rl_runs": {"x": {}}})
+            self.assertEqual(plain.trainer_args(plain.rl_runs()["x"], 50), ["rl", str(root / "rl_x"), "50"])
+            on = T.Chain({"tr": tmp, "sft_dir": tmp, "rl": {"renderer_when_trainer_runs": True}, "rl_runs": {"x": {}}})
+            self.assertEqual(on.trainer_args(on.rl_runs()["x"], 50)[-1], str(T.RENDERER_WAIT_S))
+            # "pools": only for a trainer in one of them (given, else its prepared job's pool)
+            only = T.Chain({"tr": tmp, "sft_dir": tmp, "rl": {"renderer_when_trainer_runs": {"pools": ["h800"]}},
+                            "rl_runs": {"x": {}}})
+            x = only.rl_runs()["x"]
+            self.assertEqual(only.renderer_wait(x, "h800"), T.RENDERER_WAIT_S)
+            self.assertIsNone(only.renderer_wait(x, "zoetrope"))
+            self.assertIsNone(only.renderer_wait(x))  # no prepared trainer yet: no pool known
+            (x["run_dir"] / "job_rl").mkdir(parents=True)
+            (x["run_dir"] / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope"}))
+            self.assertEqual(only.trainer_args(x, 50), ["rl", str(root / "rl_x"), "50"])
+            (x["run_dir"] / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "h800"}))
+            self.assertEqual(only.trainer_args(x, 50)[-1], str(T.RENDERER_WAIT_S))
+
+    def test_renderer_workers(self):
+        """Round 12 batch (a new option): plan rl "renderer_workers" gives the render services that many worker
+        processes (the entry script's renderer argument), for services submitted with the trainer or once it runs; a
+        service still waiting for its card gets the count in its launch script (job kept), a running one is left
+        alone; without the option the arguments are unchanged."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(T.Chain({"tr": tmp, "sft_dir": tmp, "rl_runs": {"x": {}}}).renderer_args(
+                {"rl": {}}), ["renderer"])
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "pool": "h800",
+                             "rl": {"renderer_workers": 32},
+                             "rl_runs": {"new": {}, "lazy": {"rl": {"renderer_workers": 32,
+                                                                 "renderer_when_trainer_runs": {"trainer_wait_s": 600}}},
+                                         "queued": {}, "running": {}}}, sleep=lambda s: None)
+            for name, state in (("queued", "STARTING"), ("running", "RUNNING")):  # submitted before the option
+                d = root / f"rl_run_{name}"
+                for j, args in (("job_rl", ["rl", str(root / f"rl_{name}"), "50"]), ("job_renderer", ["renderer"])):
+                    (d / j).mkdir(parents=True)
+                    (d / j / "submission.json").write_text(json.dumps({"job_id": f"pt-{name}-{j}", "state": state}))
+                    (d / j / "prepared.json").write_text(json.dumps({"pool": "zoetrope", "mode_args": args}))
+            trainer = {"new": iter(["RUNNING", "ok"]), "lazy": iter(["STARTING", "RUNNING", "ok"]),
+                       "queued": iter(["STARTING", "ok"]), "running": iter(["RUNNING", "ok"])}
+            prepared = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                prepared.append((run.name[7:], job_dir, list(args), pool))
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            def status(run, job_dir="job"):
+                sub = json.loads((run / job_dir / "submission.json").read_text())
+                if job_dir == "job_renderer":
+                    if (run / "STOP_RENDERER").exists():
+                        return {"job_id": sub["job_id"], "state": "SUCCEEDED", "finished": True}
+                    return {"job_id": sub["job_id"], "state": sub.get("state", "RUNNING"), "finished": False}
+                kind = next(trainer[run.name[7:]])
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": sub["job_id"], "state": "SUCCEEDED", "finished": True}
+                return {"job_id": sub["job_id"], "state": kind, "finished": False}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.rl()
+            renderers = {(n, tuple(a), p) for n, j, a, p in prepared if j == "job_renderer"}
+            self.assertEqual(renderers, {("new", ("renderer", "32"), "h800"), ("lazy", ("renderer", "32"), "h800"),
+                                         ("queued", ("renderer", "32"), "zoetrope")})  # "running" left alone
+            self.assertNotIn("running", {n for n, j, a, p in prepared})
+
+    def test_renderer_first(self):
+        """Round 12 batch (a new switch): plan rl "renderer_first" submits the render service first and the trainer only
+        once the service runs with its address written (in the service's pool, without the lazy wait); a trainer queued
+        before the switch keeps its place and gets its service at once in its own pool; a failed trainer is resubmitted
+        with the service kept; a service that dies while its trainer still queues is resubmitted alone."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clock = {"poll": 0}
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "retries": 2, "pool": "h800",
+                             "rl": {"renderer_first": True, "renderer_workers": 32,
+                                    "renderer_when_trainer_runs": {"trainer_wait_s": 600}},  # ignored with renderer_first
+                             "rl_runs": {"a": {}, "b": {}, "c": {}}},
+                            sleep=lambda s: clock.__setitem__("poll", clock["poll"] + 1))
+            schedules = {("a", "job_renderer"): [["STARTING", "RUNNING"]],
+                         ("a", "job_rl"): [["STARTING", "FAILED"], ["RUNNING", "ok"]],
+                         ("b", "job_renderer"): [["RUNNING"]],
+                         ("c", "job_renderer"): [["STARTING", "RUNNING", "RUNNING", "FAILED"], ["RUNNING"]],
+                         # sco's spelling of a queued job (job_sco.WAITING lacked it: the queued trainer was deleted)
+                         ("c", "job_rl"): [["QUEUEING", "QUEUEING", "QUEUEING", "QUEUEING", "RUNNING", "ok"]]}
+            jobs = {"pt-b-rl-0": (["STARTING", "RUNNING", "ok"], 0)}
+            b = root / "rl_run_b"  # a trainer queued before the switch, without a render service
+            (b / "job_rl").mkdir(parents=True)
+            (b / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-b-rl-0"}))
+            (b / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope", "mode_args": ["rl", "x", "50"]}))
+            events, count = [], {}
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                (run / job_dir / "prepared.json").write_text(json.dumps({"pool": pool, "mode_args": list(args)}))
+                events.append(("prepare", run.name[7:], job_dir, list(args), pool))
+
+            def submit(run, job_dir="job"):
+                key = (run.name[7:], job_dir)
+                count[key] = count.get(key, 0) + 1
+                job_id = f"pt-{key[0]}-{job_dir[4:]}-{count[key]}"
+                jobs[job_id] = (schedules[key][count[key] - 1], clock["poll"])
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": job_id}))
+                events.append(("submit", key[0], job_dir, job_id, clock["poll"]))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_renderer" and (run / "STOP_RENDERER").exists():
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                sched, t0 = jobs[job_id]
+                kind = sched[min(clock["poll"] - t0, len(sched) - 1)]
+                if kind == "ok":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                if job_dir == "job_renderer" and kind == "RUNNING":  # the service writes its address once up
+                    (run / "renderer_endpoint.txt").write_text("http://10.0.0.1:8915/render\n")
+                return {"job_id": job_id, "state": kind, "finished": kind == "FAILED"}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    events.append(("delete", run.name[7:], job_dir, json.loads(receipt.read_text())["job_id"], clock["poll"]))
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.rl()
+            end = max(e[-1] for e in events if e[0] == "submit")
+
+            def seq(name):  # submissions and deletions before the end of the step
+                return [(e[0], e[2], e[3]) for e in events if e[1] == name and e[0] != "prepare" and e[-1] <= end]
+
+            self.assertEqual(seq("a"), [("submit", "job_renderer", "pt-a-renderer-1"),  # the service first
+                                        ("submit", "job_rl", "pt-a-rl-1"),             # once it is up
+                                        ("delete", "job_rl", "pt-a-rl-1"),             # the trainer failed:
+                                        ("submit", "job_rl", "pt-a-rl-2")])            # again, the service kept
+            a_up = next(e[-1] for e in events if e[:4] == ("submit", "a", "job_rl", "pt-a-rl-1"))
+            self.assertGreater(a_up, next(e[-1] for e in events if e[:3] == ("submit", "a", "job_renderer")))
+            a_rl = [e for e in events if e[:3] == ("prepare", "a", "job_rl")]
+            self.assertEqual([(e[3], e[4]) for e in a_rl], [(["rl", str(root / "rl_a"), "50"], "h800")] * 2)  # no wait
+            self.assertEqual(seq("b"), [("submit", "job_renderer", "pt-b-renderer-1")])  # the queued trainer is kept
+            self.assertIn(("prepare", "b", "job_renderer", ["renderer", "32"], "zoetrope"), events)  # in its pool
+            self.assertEqual(seq("c"), [("submit", "job_renderer", "pt-c-renderer-1"),
+                                        ("submit", "job_rl", "pt-c-rl-1"),
+                                        ("delete", "job_renderer", "pt-c-renderer-1"),  # died, the trainer queued:
+                                        ("submit", "job_renderer", "pt-c-renderer-2")])  # the service alone again
+            self.assertEqual(sorted(chain.state["trainer_after_renderer"]), ["a", "c"])
+            for name in "abc":
+                self.assertTrue((root / f"rl_run_{name}" / "checkpoints" / "global_step_50").is_dir())
+
+    def test_renderer_repack(self):
+        """Round 12 batch (a new switch, the user's decision of 2026-10-21): plan rl "renderer_repack" moves a render
+        service held while its trainer queues off a machine where only such services are left (10.123.72.34: the
+        100-scene pair's two services alone for hours after the single-card jobs around them ended).  The new service
+        starts first; the old one is deleted only once the new one runs on a busy machine with room and the trainer
+        still waits (its address file then replaces the old one); otherwise the new one is deleted and the old one
+        stays.  The pools are looked at every every_min minutes, a run is moved at most once per gap_min."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def render(name, job_id):
+            return {"job_id": job_id, "name": f"interiorgs-v10-renderer-rl-run-{name}", "cards": 1}
+
+        h1, h2, h3 = "10.0.0.1", "10.0.0.2", "10.0.0.3"
+        names = ["a", "c", "d", "e", "f", "g"]  # all on h1, their trainers waiting
+        view = {"hosts": {h1: [render(n, f"pt-{n}-old") for n in names],
+                          h2: [{"job_id": "pt-other", "name": "someone-4card", "cards": 2}, render("y", "pt-y-old")],
+                          h3: [render("b", "pt-b-old"), {"job_id": "pt-ev", "name": "interiorgs-v10-eval-val-m", "cards": 1}],
+                          "10.0.0.4": [{"job_id": "pt-big", "name": "big", "cards": 8}],
+                          "10.0.0.5": [render("z", "pt-z-old")]},  # z's trainer waits too
+                "waiting": [f"interiorgs-v10-rl-rl-run-{n}" for n in names + ["b", "z"]] + ["someone-else"]}
+        # h1 and h5 hold only services of waiting trainers; h3 has an evaluation, h2 a job and y (its trainer runs)
+        self.assertEqual(T.stranded_hosts(view), [h1, "10.0.0.5"])
+        self.assertEqual(T.repack_room(view, h1), {h2: 5, h3: 6})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clock = {"t": 0.0}
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply",
+                             "rl": {"renderer_repack": True, "renderer_workers": 32},
+                             "rl_runs": {n: {} for n in names + ["b"]}},
+                            sleep=lambda s: None, clock=lambda: clock["t"])
+            runs = chain.rl_runs()
+            for n in names + ["b"]:
+                d = runs[n]["run_dir"]
+                for j, job_id in (("job_renderer", f"pt-{n}-old"), ("job_rl", f"pt-{n}-rl")):
+                    (d / j).mkdir(parents=True)
+                    (d / j / "submission.json").write_text(json.dumps({"job_id": job_id}))
+                    (d / j / "prepared.json").write_text(json.dumps({"pool": "zoetrope", "mode_args": [j]}))
+                (d / "renderer_endpoint.txt").write_text(f"http://old-{n}:8915/render\n")
+            jobs, hosts, events, looks = {f"pt-{n}-rl": "QUEUEING" for n in names + ["b"]}, {}, [], []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                (run / job_dir / "prepared.json").write_text(json.dumps({"pool": pool, "mode_args": list(args)}))
+                events.append(("prepare", run.name[7:], job_dir, list(args), pool))
+
+            def submit(run, job_dir="job"):
+                job_id = f"pt-{run.name[7:]}-new"
+                jobs[job_id] = "QUEUEING"
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": job_id}))
+                events.append(("submit", run.name[7:], job_dir, job_id))
+                return job_id
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                state = jobs.get(job_id, "RUNNING")
+                return {"job_id": job_id, "state": state, "finished": state in job_sco.FINISHED}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                job_id = json.loads(receipt.read_text())["job_id"]
+                events.append(("delete", run.name[7:], job_dir, job_id))
+                receipt.replace(receipt.with_name(f"submission_{job_id}_deleted.json"))
+                return {"job_id": job_id, "delete_rc": 0}
+
+            def up(name, host):  # the new service runs on host and has written its address
+                jobs[f"pt-{name}-new"] = "RUNNING"
+                hosts[f"pt-{name}-new"] = [(1, host)]
+                (runs[name]["run_dir"] / T.NEXT_ENDPOINT).write_text(f"http://new-{name}:8915/render\n")
+
+            states = {f"{n}/{j}": s for n in names + ["b"] for j, s in (("rl", "QUEUEING"), ("renderer", "RUNNING"))}
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete,
+                                     pool_view=lambda pool: looks.append(pool) or view,
+                                     job_hosts=lambda job_id: hosts.get(job_id, [])):
+                chain.repack(runs, runs, states)  # t = 0: one look at the pool, a move for every run on h1
+                self.assertEqual(looks, ["zoetrope"])
+                self.assertEqual(sorted(e[1] for e in events if e[0] == "submit"), sorted(names))  # not b (h3)
+                self.assertIn(("prepare", "a", "job_renderer_next", ["renderer", "32", T.NEXT_ENDPOINT], "zoetrope"),
+                              events)
+                clock["t"] = 120.0
+                up("a", h2)                                # a: up on a busy machine, trainer waiting: moved
+                states["c/rl"] = jobs["pt-c-rl"] = "RUNNING"  # c: the trainer got its cards first
+                up("d", "10.0.0.9")                        # d: landed on a machine that was not busy
+                jobs["pt-f-new"] = "FAILED"                # f: the new service failed
+                chain.repack(runs, runs, states)
+                self.assertEqual(looks, ["zoetrope"])      # the next look comes after every_min
+                clock["t"] = 31 * 60.0                     # e: still no card after wait_min; g: the run ended
+                # the next look (every_min after the first): the others were moved lately (gap_min), b is not stranded
+                chain.repack(runs, {n: r for n, r in runs.items() if n != "g"}, states)
+                self.assertEqual(looks, ["zoetrope", "zoetrope"])
+                clock["t"] = 40 * 60.0
+                chain.repack(runs, runs, states)
+                self.assertEqual(looks, ["zoetrope", "zoetrope"])
+            self.assertEqual(sum(e[0] == "submit" for e in events), len(names))  # nothing more after the first look
+            moves = {n: m[-1] for n, m in chain.state["renderer_moves"].items()}
+            self.assertEqual(moves["a"]["result"], "moved")
+            self.assertEqual((moves["a"]["from_host"], moves["a"]["to_host"]), (h1, h2))
+            a = runs["a"]["run_dir"]
+            self.assertEqual((a / "renderer_endpoint.txt").read_text(), "http://new-a:8915/render\n")
+            self.assertEqual(json.loads((a / "job_renderer" / "submission.json").read_text())["job_id"], "pt-a-new")
+            self.assertTrue((a / "job_renderer" / "submission_pt-a-old_deleted.json").exists())
+            self.assertFalse((a / "job_renderer_next" / "submission.json").exists())
+            self.assertIn("trainer got its cards first", moves["c"]["result"])
+            self.assertIn("landed on 10.0.0.9", moves["d"]["result"])
+            self.assertIn("ended FAILED", moves["f"]["result"])
+            self.assertIn("no card for the new render service in 30 minutes", moves["e"]["result"])
+            self.assertIn("the run ended", moves["g"]["result"])
+            for n in "cdefg":  # the old service stays, the new one is gone
+                d = runs[n]["run_dir"]
+                self.assertTrue(moves[n]["result"].startswith("cancelled: "))
+                self.assertEqual((d / "renderer_endpoint.txt").read_text(), f"http://old-{n}:8915/render\n")
+                self.assertEqual(json.loads((d / "job_renderer" / "submission.json").read_text())["job_id"], f"pt-{n}-old")
+                self.assertFalse((d / "job_renderer_next" / "submission.json").exists())
+                self.assertFalse((d / T.NEXT_ENDPOINT).exists())
+            self.assertEqual([e for e in events if e[0] == "delete" and e[2] == "job_renderer"],
+                             [("delete", "a", "job_renderer", "pt-a-old")])
+            self.assertNotIn("b", chain.state["renderer_moves"])
+            md = T.render_markdown(chain.state)
+            self.assertIn("**RL a 的渲染服务挪机器**", md)
+            self.assertIn("pt-a-old（10.0.0.1，机器上只剩等卡训练的渲染服务）→ pt-a-new（10.0.0.2）；已挪走", md)
+            self.assertIn("没挪：the trainer got its cards first", md)
+            # without the switch nothing is looked at
+            plain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "rl_runs": {"b": {}}},
+                            sleep=lambda s: None, clock=lambda: 1e9)
+            with mock.patch.object(job_sco, "pool_view", side_effect=AssertionError("looked")):
+                plain.repack(plain.rl_runs(), plain.rl_runs(), states)
+
+    def test_guard_stopped_run_stays_stopped_after_a_restart(self):
+        """A run stopped by a guard is not submitted again when the chain is started again (round 12 batch: a restart
+        had submitted it anew and taken its ended render service for a dead one); the other runs go on."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply",
+                             "rl_runs": {"stopped": {}, "going": {}}}, sleep=lambda s: None)
+            chain.state["guard_stops"] = {"stopped": {"reason": "unparseable answers 0.052 > 0.05", "utc": "x"}}
+            d = root / "rl_run_stopped" / "job_renderer"  # its render service ended when it was stopped
+            d.mkdir(parents=True)
+            (d / "submission.json").write_text(json.dumps({"job_id": "pt-old"}))
+            submitted = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                submitted.append((run.name, job_dir))
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if job_dir == "job_rl":
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+                return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=lambda *a, **k: None):
+                chain.rl()
+            self.assertEqual(sorted(submitted), [("rl_run_going", "job_renderer"), ("rl_run_going", "job_rl")])
+            self.assertNotIn("rl/stopped", chain.state.get("job_retries") or {})
+
+    def test_waiting_for_the_renderer_is_not_startup_silence(self):
+        """renderer_when_trainer_runs: a running trainer still waiting for its render service's address is not silent
+        at start-up; silence counts from the address being written."""
+        import os
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            clock = {"t": time.time()}
+
+            def setup(rl):
+                chain = T.Chain({"tr": tmp, "sft_dir": tmp, "rl": rl, "rl_runs": {"x": {}}}, clock=lambda: clock["t"])
+                run = chain.rl_runs()["x"]
+                (run["run_dir"] / "job_rl").mkdir(parents=True, exist_ok=True)
+                (run["run_dir"] / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-x"}))
+                return chain, run
+
+            st = {"job_id": "pt-x", "state": "RUNNING", "finished": False}
+            lazy, run = setup({"renderer_when_trainer_runs": True})
+            plain, plain_run = setup({})
+            self.assertIsNone(lazy.startup_check("x", run, st))
+            self.assertIsNone(plain.startup_check("x", plain_run, st))
+            clock["t"] += 3 * 3600
+            self.assertIsNone(lazy.startup_check("x", run, st))  # three hours waiting for the service
+            self.assertIn("no output for 180 minutes", plain.startup_check("x", plain_run, st))
+            address = run["run_dir"] / "renderer_endpoint.txt"
+            address.write_text("http://10.0.0.1:8915/render\n")
+            os.utime(address, (clock["t"] - 10 * 60, clock["t"] - 10 * 60))
+            self.assertIsNone(lazy.startup_check("x", run, st))
+            os.utime(address, (clock["t"] - 41 * 60, clock["t"] - 41 * 60))
+            self.assertIn("no output for 41 minutes", lazy.startup_check("x", run, st))
 
 
 if __name__ == "__main__":

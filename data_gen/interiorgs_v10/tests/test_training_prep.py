@@ -103,6 +103,11 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(lf["num_train_epochs"], 3)  # the default; round 10 trains 5 (--epochs)
         prep.prepare(Namespace(out=str(self.root / "lf_e5"), allow_unreviewed_trajectories=True, epochs=5, **common))
         self.assertEqual(yaml.safe_load((self.root / "lf_e5" / "train.yaml").read_text())["num_train_epochs"], 5)
+        # round 12 freeze: the format SFT's smaller learning rate (default 1e-5)
+        self.assertEqual(lf["learning_rate"], 1e-5)
+        prep.prepare(Namespace(out=str(self.root / "lf_lr"), allow_unreviewed_trajectories=True, learning_rate=2e-6,
+                               **common))
+        self.assertEqual(yaml.safe_load((self.root / "lf_lr" / "train.yaml").read_text())["learning_rate"], 2e-6)
         prep.prepare(Namespace(out=str(self.root / "lf_steps"), allow_unreviewed_trajectories=True, **common))
         self.assertNotIn("save_strategy", yaml.safe_load((self.root / "lf_steps" / "train.yaml").read_text()))
         # round 10: --keep-text keeps every message as the env shows it (the system prompt and later user turns
@@ -164,10 +169,13 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(ppo["actor_rollout_ref"]["rollout"]["tensor_model_parallel_size"], 1)
         self.assertEqual(ppo["actor_rollout_ref"]["model"]["path"], "/models/m")
         self.assertEqual(ppo["data"]["train_files"], str((out / "train_env.yaml").resolve()))
-        # the RL system prompt is the SFT one; a different reward in the env would show
+        # the RL system prompt is the SFT one; a different reward in the env would show (round 12 freeze: the env
+        # shows the format example of the policy's SFT export, which rl-config takes by default)
+        from data_gen.interiorgs_v10.release import format_example
+
         policy = load_policy()
         cfg = yaml.safe_load((Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml").read_text())
-        cfg = cfg["envs"][0]["config"]
+        cfg = dict(cfg["envs"][0]["config"], prompt_format_example=format_example(policy))
         types = ["projective_relations", "occlusion_alignment", "fov_inclusion"]
         self.assertEqual(TP.prompt_mismatches(cfg, types, policy), [])
         self.assertEqual(TP.prompt_mismatches(dict(cfg, format_reward=0.01), types, policy), sorted(types))
@@ -205,8 +213,13 @@ class TrainingPrepTest(unittest.TestCase):
             outs[preset] = out
         envs = {p: yaml.safe_load((o / "train_env.yaml").read_text())["envs"][0]["config"] for p, o in outs.items()}
         ppo = yaml.safe_load((outs["dense"] / "ppo.yaml").read_text())
-        for key, value in TP.DENSE_S5.items():
+        for key, value in TP.reward_overrides("dense").items():
             self.assertEqual(envs["dense"][key], value)
+        # the S5 shaping, then the round-11 adjustments: progress term x10, the two terms that never pay off
+        self.assertEqual((envs["dense"]["potential_field_gamma"], envs["dense"]["potential_field_reward_scale"]), (0.99, 10.0))
+        self.assertTrue(envs["dense"]["enable_potential_shaping_reward"])
+        self.assertFalse(envs["dense"]["enable_near_success_reward"])
+        self.assertFalse(envs["dense"]["enable_visibility_shaping_reward"])
         self.assertFalse(envs["S0"]["enable_potential_shaping_reward"])
         differ = sorted(k for k in set(envs["S0"]) | set(envs["dense"]) if envs["S0"].get(k) != envs["dense"].get(k)
                         and k != "jsonl_path")
@@ -221,6 +234,272 @@ class TrainingPrepTest(unittest.TestCase):
         # the system prompt is the same for both presets (and matches the SFT one; rl-config checks it)
         types = ["projective_relations", "equidistance"]
         self.assertEqual(TP.prompt_mismatches(envs["dense"], types, load_policy()), [])
+
+    def test_rl_config_optimisation_package(self):
+        """Round 11: the optimisation package on top of the run's settings: GRPO without a value network, only
+        mixed-outcome tasks (24 candidates, 12 trained on), 8 episodes per task, lr 2e-6, KL coefficient 0.05,
+        entropy bonus 0.01; sizes can be made smaller for a one-card pilot; it needs the concat history mode."""
+        import yaml
+
+        sft = self.root / "sft_rl_pkg"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        template = self.root / "ppo_template_pkg.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False, "critic_warmup": 10},
+            "filter": {"enable": False, "name": "reward_variance", "filter_kwargs": {"topk": 0.2}},
+            "actor_rollout_ref": {"model": {"path": "old"},
+                                  "actor": {"ppo_mini_batch_size": 8, "optim": {"lr": 5e-7}, "kl_loss_coef": 0.3,
+                                            "entropy_coeff": 0.005, "use_kl_loss": True},
+                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4, "agent": {"num_workers": 8}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+
+        def config(out_name, **kw):
+            args = dict(rows=str(sft / "rows.jsonl"), env_template=str(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"),
+                        ppo_template=str(template), gs_root="/ply", model="/m", name="t",
+                        run_root=str(self.root / f"run_{out_name}"), val_limit=1, trial=False, out=str(self.root / out_name),
+                        history_mode="concat", train_batch_size=24, ppo_mini_batch_size=12, critic_warmup=10)
+            args.update(kw)
+            TP.cmd_rl_config(Namespace(**args))
+            return yaml.safe_load((self.root / out_name / "ppo.yaml").read_text()), \
+                json.loads((self.root / out_name / "rl_config_report.json").read_text())
+
+        ppo, report = config("rl_pkg", opt_package="p1")
+        a = ppo["actor_rollout_ref"]
+        self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["algorithm"]["norm_adv_by_std_in_grpo"]), ("grpo", True))
+        self.assertEqual((a["rollout"]["n"], ppo["data"]["train_batch_size"], a["actor"]["ppo_mini_batch_size"]), (8, 24, 12))
+        self.assertEqual(ppo["filter"], {"enable": True, "name": "mixed_outcome", "filter_kwargs": {"target_groups": 12}})
+        self.assertEqual((a["actor"]["optim"]["lr"], a["actor"]["kl_loss_coef"], a["actor"]["entropy_coeff"]), (2e-6, 0.05, 0.01))
+        self.assertEqual(ppo["trainer"]["critic_warmup"], 0)
+        self.assertTrue(ppo["trainer"]["concat_multi_turn"])
+        self.assertEqual(report["opt_package"], "p1")
+        self.assertEqual(report["opt_package_overrides"]["data.train_batch_size"], 24)
+        # a one-card pilot: smaller sizes, the same algorithm and step sizes
+        ppo, _ = config("rl_pkg_pilot", opt_package="p1", candidates=6, target_groups=2, trial=True)
+        self.assertEqual((ppo["data"]["train_batch_size"], ppo["filter"]["filter_kwargs"]["target_groups"],
+                          ppo["actor_rollout_ref"]["actor"]["ppo_mini_batch_size"], ppo["actor_rollout_ref"]["rollout"]["n"]),
+                         (6, 2, 2, 8))
+        with self.assertRaises(ValueError):
+            TP.package_overrides("p1", candidates=4, target_groups=6)
+        with self.assertRaises(ValueError):
+            TP.package_overrides("p9")
+        with self.assertRaises(SystemExit):  # GRPO over whole episodes needs the concat mode
+            config("rl_pkg_noconcat", opt_package="p1", history_mode="none")
+        # without the package nothing changes
+        ppo, report = config("rl_nopkg")
+        self.assertEqual(ppo["algorithm"]["adv_estimator"], "gae")
+        self.assertIsNone(report["opt_package"])
+
+    def test_rl_config_standards_and_seed(self):
+        """Round 12: named standard configurations (configs/rl_standards.json, the package with S0 and with the dense
+        reward; p2 with 48 candidates) fix the recipe's options and the repository's PPO template; an explicit
+        option against the standard is refused; --seed sets the task order (data.seed) and nothing in the rollout
+        config (this verl's RolloutConfig has no seed: the first round-12 start failed on it)."""
+        import yaml
+
+        standards = TP.load_standards()
+        self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_Dcond",
+                                             "v10_p1_S0", "v10_p1_S0_keep", "v10_p2_D", "v10_p2_S0"])
+        for name, std in standards.items():
+            self.assertLessEqual(set(std), set(TP.STANDARD_KEYS), name)
+            for key in ("ppo_template", "env_template"):
+                self.assertTrue((Path(TP.__file__).parent / std[key]).is_file(), (name, key))
+            self.assertEqual(std["reward_preset"], "D_cond" if "_Dcond" in name else "dense" if "_D" in name else "S0")
+        # the dense reward's first batch: the filter, thresholds and floors of the three runs
+        self.assertEqual({n: (standards[n]["group_filter"], standards[n]["keep_std_threshold"], standards[n]["keep_std_floor"])
+                          for n in ("v10_p1_D_keep_177", "v10_p1_D_keep_100", "v10_p1_S0_keep")},
+                         {"v10_p1_D_keep_177": ("keep_by_return_std", 0.335, 1.77),
+                          "v10_p1_D_keep_100": ("keep_by_return_std", 0.335, 1.0),
+                          "v10_p1_S0_keep": ("keep_by_return_std", 0.134, 1.77)})
+        self.assertEqual({**TP.OPT_PACKAGES["p2"], "candidates": 24}, TP.OPT_PACKAGES["p1"])  # p2 = p1 with 48 candidates
+        # the repository template parses to the round-11 template (only a header comment added)
+        repo_template = yaml.safe_load((Path(TP.__file__).with_name("configs") / "ppo_template_v10.yaml").read_text())
+        self.assertEqual((repo_template["data"]["seed"], repo_template["algorithm"]["adv_estimator"]), (20260930, "no_concat_gae"))
+        self.assertNotIn("seed", repo_template["actor_rollout_ref"]["rollout"])
+
+        sft = self.root / "sft_rl_std"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        rows = [json.loads(l) for l in (sft / "rows.jsonl").read_text().splitlines() if l.strip()]
+        for r in rows:  # the train rows become reserve rows (what the standards train on)
+            r["reserve"] = r["split"] == "train"
+        (sft / "rows_reserve.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+        def config(out_name, **kw):
+            args = dict(rows=str(sft / "rows_reserve.jsonl"), gs_root="/ply", model="/m", name="t",
+                        run_root=str(self.root / f"run_{out_name}"), val_limit=1, trial=False, out=str(self.root / out_name))
+            args.update(kw)
+            TP.cmd_rl_config(Namespace(**args))
+            return (yaml.safe_load((self.root / out_name / "ppo.yaml").read_text()),
+                    yaml.safe_load((self.root / out_name / "train_env.yaml").read_text())["envs"][0]["config"],
+                    json.loads((self.root / out_name / "rl_config_report.json").read_text()))
+
+        ppo, env, report = config("rl_std_d", standard="v10_p1_D", seed=7)
+        a = ppo["actor_rollout_ref"]
+        self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["data"]["train_batch_size"], a["rollout"]["n"],
+                          ppo["filter"]["filter_kwargs"]["target_groups"]), ("grpo", 24, 8, 12))
+        self.assertTrue(ppo["trainer"]["concat_multi_turn"])
+        self.assertEqual((ppo["trainer"]["save_freq"], ppo["trainer"]["test_freq"]), (50, -1))
+        self.assertEqual(ppo["data"]["seed"], 7)
+        self.assertNotIn("seed", a["rollout"])  # RolloutConfig(**rollout) must not get an unknown field
+        self.assertEqual(env["potential_field_reward_scale"], 10.0)  # the dense reward
+        self.assertEqual((report["standard"], report["seed"], report["task_pool"], report["reward_preset"]),
+                         ("v10_p1_D", {"data": 7, "rollout": 0}, "reserve", "dense"))
+        self.assertEqual(report["train"], sum(1 for r in rows if r["reserve"]))
+        self.assertTrue(report["ppo_template"].endswith("ppo_template_v10.yaml"))
+        # no seed: the template's (task order 20260930, sampling 0), as in round 11
+        ppo, env, report = config("rl_std_s0", standard="v10_p2_S0")
+        self.assertEqual(report["seed"], {"data": 20260930, "rollout": 0})
+        self.assertEqual((ppo["data"]["train_batch_size"], ppo["filter"]["filter_kwargs"]["target_groups"]), (48, 12))
+        self.assertFalse(env.get("enable_potential_shaping_reward", False))
+        # an option against the standard is refused; options the standard does not name stay free
+        with self.assertRaises(SystemExit):
+            config("rl_std_bad", standard="v10_p1_S0", reward_preset="dense")
+        with self.assertRaises(SystemExit):
+            config("rl_std_bad2", standard="v10_p1_S0", history_mode="none")
+        with self.assertRaises(SystemExit):
+            config("rl_std_unknown", standard="v10_p9_S0")
+        ppo, _, _ = config("rl_std_same", standard="v10_p1_S0", reward_preset="S0", save_freq=50)  # agreeing: fine
+        self.assertEqual(ppo["data"]["train_batch_size"], 24)
+        self.assertEqual(ppo["filter"]["name"], "mixed_outcome")
+        # the dense-reward first batch: the keep_by_return_std filter with its threshold, floor and task file
+        ppo, _, report = config("rl_keep", standard="v10_p1_D", group_filter="keep_by_return_std",
+                                keep_std_threshold=0.33, keep_std_floor=1.77)
+        kw = ppo["filter"]["filter_kwargs"]
+        self.assertEqual((ppo["filter"]["name"], kw["target_groups"], kw["std_threshold"], kw["std_floor"]),
+                         ("keep_by_return_std", 12, 0.33, 1.77))
+        self.assertEqual(Path(kw["rows"]), (self.root / "rl_keep" / "train.jsonl").resolve())
+        self.assertEqual((report["group_filter"], report["group_filter_kwargs"]["std_threshold"]), ("keep_by_return_std", 0.33))
+        ppo, env, report = config("rl_keep_std", standard="v10_p1_S0_keep")  # a standard names the filter
+        self.assertEqual((ppo["filter"]["name"], ppo["filter"]["filter_kwargs"]["std_threshold"],
+                          ppo["filter"]["filter_kwargs"]["std_floor"], report["reward_preset"]),
+                         ("keep_by_return_std", 0.134, 1.77, "S0"))
+        with self.assertRaises(SystemExit):  # a threshold is required
+            config("rl_keep_bad", standard="v10_p1_D", group_filter="keep_by_return_std")
+        with self.assertRaises(SystemExit):  # it fills the package's batch
+            config("rl_keep_bad2", ppo_template=str(Path(TP.__file__).with_name("configs") / "ppo_template_v10.yaml"),
+                   env_template=str(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"),
+                   group_filter="keep_by_return_std", keep_std_threshold=0.3)
+        with self.assertRaises(SystemExit):  # neither a template nor a standard
+            config("rl_no_template")
+
+    def test_rl_config_curriculum(self):
+        """Round 12 batch: --curriculum-easy-updates N puts the easy-first sampler into the PPO config (the first N
+        updates draw only tasks with d* <= max_dstar) and turns the dataloader workers off (verl's rule); it refuses
+        when the train rows have too few easy tasks."""
+        import yaml
+
+        sft = self.root / "sft_rl_curr"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        rows = [json.loads(l) for l in (sft / "rows.jsonl").read_text().splitlines() if l.strip()]
+        for r in rows:  # the train rows become reserve rows (what the standard trains on)
+            r["reserve"] = r["split"] == "train"
+        (sft / "rows_reserve.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        easy = sum(1 for r in rows if r["split"] == "train" and int(r["difficulty"]["d_star"]) <= 3)
+        self.assertGreater(easy, 0)
+
+        def config(out_name, **kw):
+            args = dict(rows=str(sft / "rows_reserve.jsonl"), gs_root="/ply", model="/m", name="t", standard="v10_p1_S0",
+                        run_root=str(self.root / f"run_{out_name}"), val_limit=1, trial=False, out=str(self.root / out_name))
+            args.update(kw)
+            TP.cmd_rl_config(Namespace(**args))
+            return (yaml.safe_load((self.root / out_name / "ppo.yaml").read_text()),
+                    json.loads((self.root / out_name / "rl_config_report.json").read_text()))
+
+        # one candidate per update here, so that the synthetic rows have enough easy tasks
+        ppo, report = config("rl_curr", curriculum_easy_updates=easy, curriculum_max_dstar=3, candidates=1, target_groups=1)
+        self.assertEqual(ppo["data"]["sampler"], {"class_path": "pkg://vagen.curriculum_sampler",
+                                                  "class_name": "DifficultyCurriculumSampler", "easy_updates": easy,
+                                                  "max_dstar": 3})
+        self.assertEqual(ppo["data"]["dataloader_num_workers"], 0)
+        self.assertEqual((report["curriculum"]["easy_tasks"], report["curriculum"]["easy_draws"]), (easy, easy))
+        with self.assertRaises(SystemExit):  # more easy draws than easy tasks
+            config("rl_curr_bad", curriculum_easy_updates=easy + 1, candidates=1, target_groups=1)
+        ppo, report = config("rl_nocurr")  # without the option nothing changes
+        self.assertIsNone(report["curriculum"])
+        self.assertNotEqual((ppo["data"].get("sampler") or {}).get("class_name"), "DifficultyCurriculumSampler")
+        # round 12 batch: --entropy-coeff replaces the package's entropy bonus (0 included); without it, the package's
+        self.assertEqual((ppo["actor_rollout_ref"]["actor"]["entropy_coeff"], report["entropy_coeff"],
+                          report["entropy_coeff_override"]), (0.01, 0.01, None))
+        ppo, report = config("rl_noent", entropy_coeff=0.0)
+        self.assertEqual((ppo["actor_rollout_ref"]["actor"]["entropy_coeff"], report["entropy_coeff"],
+                          report["entropy_coeff_override"]), (0.0, 0.0, 0.0))
+        self.assertEqual(ppo["actor_rollout_ref"]["actor"]["optim"]["lr"], 2e-6)  # the rest of the package stays
+
+    def test_data_scale_subsets(self):
+        """Round 12 batch: nested train-scene subsets (fixed seed) with all formal tasks of their scenes for SFT and
+        only their scenes' reserve tasks for RL; an arm with one subset's task count over every scene."""
+        records, rows = [], []
+        counts = {f"sc{i:02d}": 2 + i % 5 for i in range(10)}  # 2..6 train records per scene
+        for s, n in counts.items():
+            for k in range(n):
+                records.append({"id": f"{s}_{k}", "scene_id": s, "split": "train"})
+            rows.append({"task_id": f"{s}_r", "scene_id": s, "split": "train", "reserve": True})
+            rows.append({"task_id": f"{s}_f", "scene_id": s, "split": "train", "reserve": False})
+        records += [{"id": f"v{k}", "scene_id": "val0", "split": "val"} for k in range(3)]
+        rows += [{"task_id": "v_f", "scene_id": "val0", "split": "val", "reserve": False},
+                 {"task_id": "v_r", "scene_id": "val0", "split": "val", "reserve": True}]
+        res = TP.build_subsets(records, rows, [2, 4, 8], equal_tasks_of=4, flagged=["sc03_r"], seed=7)
+        sub = res["subsets"]
+        self.assertEqual(sorted(sub), ["s002", "s004", "s008", "w10"])
+        order = res["scene_order"]
+        self.assertEqual(sorted(order), sorted(counts))
+        self.assertEqual(sub["s002"]["scenes"], sorted(order[:2]))
+        self.assertTrue(set(sub["s002"]["scenes"]) < set(sub["s004"]["scenes"]) < set(sub["s008"]["scenes"]))  # nested
+        for name, s in sub.items():
+            self.assertEqual(sum(1 for r in s["sft"] if r["split"] == "val"), 3)  # every val record stays
+            train_scenes = {r["scene_id"] for r in s["sft"] if r["split"] == "train"}
+            self.assertLessEqual(train_scenes, set(s["scenes"]))
+            reserve = [r for r in s["rows"] if r["reserve"]]
+            self.assertTrue(all(r["scene_id"] in s["scenes"] and r["split"] == "train" for r in reserve))
+            self.assertNotIn("sc03_r", {r["task_id"] for r in reserve})  # flagged tasks never reach RL
+            self.assertNotIn("v_r", {r["task_id"] for r in s["rows"]})
+            self.assertIn("v_f", {r["task_id"] for r in s["rows"]})  # rl-config needs the formal val rows
+        self.assertEqual(sub["s004"]["train_records"], sum(counts[s] for s in order[:4]))
+        w = sub["w10"]
+        self.assertEqual(w["train_records"], sub["s004"]["train_records"])  # same task count, all scenes
+        per = {}
+        for r in w["sft"]:
+            if r["split"] == "train":
+                per[r["scene_id"]] = per.get(r["scene_id"], 0) + 1
+        self.assertEqual(len(per), 10)
+        self.assertLessEqual(max(per.values()) - min(per.values()), 2)
+        self.assertEqual(res, TP.build_subsets(list(reversed(records)), rows, [2, 4, 8], 4, ["sc03_r"], seed=7))  # fixed
+        self.assertNotEqual(TP.build_subsets(records, rows, [2], seed=8)["scene_order"], order)
+        with self.assertRaises(ValueError):
+            TP.build_subsets(records, rows, [11])
+        # quotas: as even as capacities allow
+        self.assertEqual(TP.spread_quota({"a": 1, "b": 5, "c": 5}, 9, seed=1), {"a": 1, "b": 4, "c": 4})
+        with self.assertRaises(ValueError):
+            TP.spread_quota({"a": 1}, 2)
+        # the command: files per subset, the source SFT folder linked in
+        out = self.root / "subsets_cmd"
+        src = self.root / "subsets_src"
+        src.mkdir()
+        (src / "frames.jsonl").write_text("")
+        (src / "split_manifest.json").write_text("{}")
+        (src / "traj.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+        (src / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        flags = src / "flags.json"
+        flags.write_text(json.dumps({"flagged_task_ids": ["sc03_r"]}))
+        import os
+
+        try:  # symbolic links need a privilege on Windows; the cluster (Linux) has them
+            os.symlink(src / "frames.jsonl", self.root / "symlink_probe")
+            can_link = True
+        except OSError:
+            can_link = False
+        TP.cmd_subsets(Namespace(trajectories=str(src / "traj.jsonl"), rows=str(src / "rows.jsonl"), exclude=str(flags),
+                                 sizes="2,4", equal_tasks_of=4, seed=7, link_from=str(src) if can_link else None,
+                                 out=str(out)))
+        summary = json.loads((out / "subsets.json").read_text())
+        self.assertEqual(summary["subsets"]["s004"]["train_records"], sub["s004"]["train_records"])
+        self.assertEqual(len((out / "sft_trajectories_w10.jsonl").read_text().splitlines()), w["train_records"] + 3)
+        self.assertTrue((out / "rows_s002.jsonl").is_file())
+        if can_link:
+            self.assertTrue((out / "frames.jsonl").exists() and (out / "split_manifest.json").exists())
 
     def test_rl_config_trains_on_formal_tasks_only(self):
         """Reserve rows (sft-frames --include-reserve) are SFT-only: rl-config leaves them out of train and val."""
@@ -251,6 +530,121 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertFalse(any(r.get("reserve") for r in TP._jsonl(out / "val.jsonl")))
         report = json.loads((out / "rl_config_report.json").read_text())
         self.assertEqual(report["reserve_rows_skipped"], sum(1 for r in marked if r["reserve"]))
+        self.assertEqual(report["task_pool"], "formal")
+
+        # round 11: --task-pool reserve trains on the reserve tasks only (val stays formal); the SFT conversations
+        # and the depth-check flags are checked against the train tasks
+        reserve = [r for r in marked if r["split"] == "train" and r["reserve"]]
+        formal = [r for r in marked if r["split"] == "train" and not r["reserve"]]
+        sft_conv = self.root / "sft_conv_formal.jsonl"
+        sft_conv.write_text("".join(json.dumps({"source_task_id": r["task_id"]}) + "\n" for r in formal))
+        flags = self.root / "depth_flags.json"
+        flags.write_text(json.dumps({"flagged_task_ids": ["not_a_train_task"]}))
+
+        def config(out_name, **kw):
+            TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
+                Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
+                gs_root="/ply", model="/m", name="t", run_root=str(self.root / "rl_run_pool"), val_limit=0,
+                trial=False, out=str(self.root / out_name), **kw))
+            return self.root / out_name
+
+        out = config("rl_pool_reserve", task_pool="reserve", sft_trajectories=[str(sft_conv)], exclude=str(flags))
+        self.assertEqual([r["task_id"] for r in TP._jsonl(out / "train.jsonl")], [r["task_id"] for r in reserve])
+        self.assertTrue(reserve)
+        self.assertFalse(any(r.get("reserve") for r in TP._jsonl(out / "val.jsonl")))
+        report = json.loads((out / "rl_config_report.json").read_text())
+        self.assertEqual((report["task_pool"], report["sft_overlap"], report["sft_tasks_checked"],
+                          report["depth_flagged_in_train"], report["depth_flagged_checked"]),
+                         ("reserve", 0, len(formal), 0, 1))
+        self.assertEqual(sum(report["by_family_train"].values()), len(reserve))
+        # a train task that SFT trained on, or one the depth check flagged, stops the configuration
+        with self.assertRaises(SystemExit):
+            config("rl_pool_formal_vs_sft", task_pool="formal", sft_trajectories=[str(sft_conv)])
+        flags.write_text(json.dumps({"flagged_task_ids": [reserve[0]["task_id"]]}))
+        with self.assertRaises(SystemExit):
+            config("rl_pool_flagged", task_pool="reserve", exclude=str(flags))
+
+    def test_rl_config_format_example(self):
+        """Round 12 freeze (the user's 3.1.1): --format-example sets the env's format line (placeholder names or
+        real action names; default the SFT export's); the start model's SFT conversations must show the same text."""
+        import yaml
+
+        from vagen.envs.active_spatial import prompt as P
+
+        sft = self.root / "sft_rl_format"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        rows = [dict(r, reserve=(r["split"] == "train" and i % 2 == 1)) for i, r in enumerate(TP._jsonl(sft / "rows.jsonl"))]
+        (sft / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        template = self.root / "ppo_template_format.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False},
+            "actor_rollout_ref": {"model": {"path": "old"}, "actor": {"ppo_mini_batch_size": 8},
+                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4, "agent": {"num_workers": 8}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+        formal = [r for r in rows if r["split"] == "train" and not r["reserve"]]
+        convs = {}
+        for fmt in P.FORMAT_EXAMPLES:  # the first user turn ends with the format text, as release._user_turn writes it
+            block = P.format_prompt["no_think"](max_actions_per_step=5, action_sep="|", add_example=True,
+                                                format_example=fmt)
+            convs[fmt] = self.root / f"sft_conv_{fmt}.jsonl"
+            convs[fmt].write_text("".join(json.dumps({"source_task_id": r["task_id"], "conversations": [
+                {"role": "system", "content": "s"}, {"role": "user", "content": "[Initial Observation]:\n<image>\n" + block},
+                {"role": "assistant", "content": "<action>move_forward|</action>"}]}) + "\n" for r in formal))
+        self.assertEqual(TP.sft_format_examples([convs["placeholder"]]), ["placeholder"])
+        self.assertEqual(TP.sft_format_examples([convs["action_names"]]), ["action_names"])
+        self.assertEqual(TP.sft_format_examples([convs["placeholder"], convs["action_names"]]),
+                         ["action_names", "placeholder"])
+
+        def config(out_name, **kw):
+            TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
+                Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
+                gs_root="/ply", model="/m", name="t", run_root=str(self.root / f"run_{out_name}"), val_limit=0,
+                trial=False, out=str(self.root / out_name), task_pool="reserve", **kw))
+            out = self.root / out_name
+            return (yaml.safe_load((out / "train_env.yaml").read_text())["envs"][0]["config"],
+                    json.loads((out / "rl_config_report.json").read_text()))
+
+        # the start model's SFT conversations with the old text: the placeholder, given explicitly (the default is
+        # the policy's, real action names since the round-12 freeze); nothing new in the env config
+        from data_gen.interiorgs_v10.release import format_example as policy_format_example
+
+        self.assertEqual(policy_format_example(load_policy()), "action_names")
+        env, report = config("rl_fmt_default", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder")
+        self.assertNotIn("prompt_format_example", env)
+        self.assertEqual((report["format_example"], report["format_example_sft"]), ("placeholder", ["placeholder"]))
+        # by default, real action names, for a start model whose SFT conversations show them
+        env, report = config("rl_fmt_names", sft_trajectories=[str(convs["action_names"])])
+        self.assertEqual(env["prompt_format_example"], "action_names")
+        self.assertEqual((report["format_example"], report["format_example_sft"]), ("action_names", ["action_names"]))
+        self.assertIn("Response format: <action>move_forward|turn_left|</action>",
+                      TP.env_system_prompt(env, "fov_inclusion"))
+        # refused: the RL text against the start model's conversations, or (no conversations) against the policy
+        with self.assertRaises(SystemExit):
+            config("rl_fmt_wrong", sft_trajectories=[str(convs["placeholder"])])
+        with self.assertRaises(SystemExit):
+            config("rl_fmt_wrong2", sft_trajectories=[str(convs["action_names"])], format_example="placeholder")
+        with self.assertRaises(SystemExit):
+            config("rl_fmt_policy", format_example="placeholder")
+        # round 12 freeze (the user's 3.1.2): --lenient-parse turns on the env's lenient reading, nothing else
+        env, report = config("rl_lenient", sft_trajectories=[str(convs["placeholder"])], lenient_parse=True,
+                             format_example="placeholder")
+        self.assertTrue(env["lenient_parse"])
+        self.assertTrue(report["lenient_parse"])
+        env0, report0 = config("rl_strict", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder")
+        self.assertNotIn("lenient_parse", env0)
+        self.assertFalse(report0["lenient_parse"])
+        self.assertEqual({k: v for k, v in env.items() if k not in ("lenient_parse", "jsonl_path")},
+                         {k: v for k, v in env0.items() if k != "jsonl_path"})
+        self.assertIn("lenient_parse", TP.STANDARD_KEYS)
+        # 3.1.3: --invalid-penalty sets the penalty the env applies; the prompt (checked against the SFT one) keeps -0.1
+        env5, report5 = config("rl_invalid", sft_trajectories=[str(convs["placeholder"])], invalid_penalty=-0.5,
+                               format_example="placeholder")
+        self.assertEqual((env5["invalid_penalty_override"], env5["invalid_format_penalty"]), (-0.5, -0.1))
+        self.assertEqual((report5["invalid_penalty"], report0["invalid_penalty"]), (-0.5, -0.1))
+        self.assertNotIn("invalid_penalty_override", env0)
+        self.assertEqual(TP.env_system_prompt(env5, "fov_inclusion"), TP.env_system_prompt(env0, "fov_inclusion"))
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

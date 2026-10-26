@@ -11,6 +11,8 @@ share it):
     # per model, a one-card sco job (sco_interiorgs_v10_train.sh eval RUN EVAL NAME MODEL [PROMPT_FORMAT]):
     python -m data_gen.interiorgs_v10.evaluation run --eval EVAL --name NAME --model HF_DIR
     python -m data_gen.interiorgs_v10.evaluation table --eval EVAL     # EVAL/table.md, EVAL/table.json
+    python -m data_gen.interiorgs_v10.evaluation terminal --eval EVAL  # round 12 batch: EVAL/terminal.md / .json:
+                                                                        # end progress, conditions met, collisions
     # round 7: drop tasks flagged by the rendered-depth check, refill from the same family and d* band
     python -m data_gen.interiorgs_v10.evaluation replace --eval EVAL --flagged depth_check_summary.json \
         --run RUN/output --split-manifest RUN/split_manifest.json --out EVAL2
@@ -24,13 +26,20 @@ collision rate (blocked moves per action) and invalid-answer rate (turns whose a
 Round 11: ``run --samples N --temperature T --top-p P`` runs N sampled episodes per task, as in RL training
 (temperature 0.8, top-p 0.92), instead of one greedy episode; each row carries its ``sample`` number and the
 metrics add the share of tasks with at least one success (``pass_at_n``) and the mean over the N episodes.
+
+Round 12: ``top-up --eval V1 --family F --target N --split S ... --out V2`` keeps every task of V1 and adds
+reserve tasks of family F from the same split (not flagged by the depth check, replayed in the env: success exactly
+at d*, no collision; d* bands evened out) until V2 has N tasks of F (or the reserve runs out); ``--family-out``
+also writes F's tasks of V2 alone, to evaluate existing models on them only.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
+import re
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -49,8 +58,20 @@ def band_name(d: int) -> str:
     return "other"
 
 
-def _jsonl(path: Path) -> List[Dict[str, Any]]:
-    return [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
+def _jsonl(path: Path, partial_ok: bool = False) -> List[Dict[str, Any]]:
+    """The rows of a JSON-lines file.  With ``partial_ok`` a last line that does not parse is left out: a results file
+    another chain's evaluation job is still writing (round 12 batch: a table over a shared evaluation folder failed on
+    such a line)."""
+    lines = [l for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = []
+    for i, line in enumerate(lines):
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            if partial_ok and i == len(lines) - 1:
+                break
+            raise
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +177,95 @@ def cmd_replace(args: argparse.Namespace) -> None:
     print(json.dumps({k: v for k, v in summary.items() if k not in ("swaps", "task_ids")}, indent=1))
 
 
+def reserve_rows(run: Path, split_manifest: Path, split: str) -> List[Dict[str, Any]]:
+    """Round 12: the reserve tasks (tasks_reserve.jsonl) of one split as published rows."""
+    from .release import finalize_task_row, split_lookup
+
+    lookup = split_lookup(json.loads(Path(split_manifest).read_text()))
+    path = Path(run) / "tasks_reserve.jsonl"
+    return [finalize_task_row(r, split) for r in (_jsonl(path) if path.is_file() else [])
+            if lookup.get(str(r["scene_id"])) == split]
+
+
+def balanced_order(rows: Sequence[Dict[str, Any]], existing: Counter, seed: int = SEED) -> List[Dict[str, Any]]:
+    """``rows`` in the order a top-up takes them: each next one from the d* band with the fewest tasks so far
+    (``existing`` counts the set's tasks per band), random within a band (``seed``)."""
+    rng = random.Random(seed)
+    bands: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in sorted(rows, key=lambda r: r["task_id"]):
+        bands[band_name(int(r["difficulty"]["d_star"]))].append(r)
+    for v in bands.values():
+        rng.shuffle(v)
+    counts = Counter(existing)
+    order = []
+    while any(bands.values()):
+        b = min((b for b in sorted(bands) if bands[b]), key=lambda b: (counts[b], b))
+        order.append(bands[b].pop(0))
+        counts[b] += 1
+    return order
+
+
+def top_up(tasks: Sequence[Dict[str, Any]], pool: Sequence[Dict[str, Any]], family: str, target: int,
+           replay_fn: Callable[[Sequence[Dict[str, Any]]], Sequence[Dict[str, Any]]],
+           flagged: Sequence[str] = (), seed: int = SEED) -> Dict[str, Any]:
+    """Round 12 (the user's decision for the occlusion family): add tasks of ``family`` from ``pool`` (reserve
+    tasks of the same split) until the set has ``target`` of them: flagged tasks and tasks already in the set are
+    never taken; candidates in balanced_order (d* bands evened out), each replayed in the env (``replay_fn``, rows
+    -> records with "ok") and taken only if the replay succeeds exactly at d* without a collision.  The set's other
+    tasks stay as they are."""
+    have = {r["task_id"] for r in tasks}
+    flagged = set(flagged)
+    existing = Counter(band_name(int(r["difficulty"]["d_star"])) for r in tasks if r["task_type"] == family)
+    want = max(0, int(target) - sum(existing.values()))
+    cands = [r for r in pool if r["task_type"] == family and r["task_id"] not in have and r["task_id"] not in flagged]
+    order = balanced_order(cands, existing, seed)
+    added: List[Dict[str, Any]] = []
+    replayed: List[Dict[str, Any]] = []
+    i = 0
+    while len(added) < want and i < len(order):
+        batch = order[i:i + want - len(added)]
+        i += len(batch)
+        results = {r["task_id"]: r for r in replay_fn(batch)}
+        for row in batch:
+            rec = results.get(row["task_id"]) or {"task_id": row["task_id"], "ok": False, "error": "not replayed"}
+            replayed.append(rec)
+            if rec.get("ok"):
+                added.append(row)
+    return {"tasks": list(tasks) + added, "added": added, "replayed": replayed, "wanted": want,
+            "candidates": len(cands), "family_before": dict(existing),
+            "family_after": dict(existing + Counter(band_name(int(r["difficulty"]["d_star"])) for r in added))}
+
+
+def cmd_top_up(args: argparse.Namespace) -> None:
+    from . import replay_env
+
+    split = args.split
+    tasks = _jsonl(Path(args.eval) / "tasks.jsonl")
+    pool = reserve_rows(Path(args.run), Path(args.split_manifest), split)
+    rules = replay_env.template_rules(Path(args.env_template))
+    res = top_up(tasks, pool, args.family, args.target,
+                 lambda rows: replay_env.replay(rows, Path(args.scenes_root), rules),
+                 sorted(flagged_ids(getattr(args, "exclude", None))), args.seed)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in res["tasks"]))
+    summary = {"version": VERSION, "seed": args.seed, "source": str(args.eval), "split": split, "family": args.family,
+               "target": args.target, "tasks": len(res["tasks"]), "source_tasks": len(tasks),
+               "family_before": res["family_before"], "family_after": res["family_after"],
+               "reserve_candidates": res["candidates"], "wanted": res["wanted"], "added": len(res["added"]),
+               "replayed": len(res["replayed"]), "replay_failed": [r for r in res["replayed"] if not r.get("ok")],
+               "added_task_ids": [r["task_id"] for r in res["added"]], "task_ids": [r["task_id"] for r in res["tasks"]]}
+    (out / "selection.json").write_text(json.dumps(summary, indent=1))
+    if getattr(args, "family_out", None):  # the family's tasks alone (to evaluate existing models on them only)
+        fam = Path(args.family_out)
+        fam.mkdir(parents=True, exist_ok=True)
+        rows = [r for r in res["tasks"] if r["task_type"] == args.family]
+        (fam / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        (fam / "selection.json").write_text(json.dumps({**summary, "tasks": len(rows), "subset_of": str(out),
+                                                        "task_ids": [r["task_id"] for r in rows]}, indent=1))
+    print(json.dumps({k: v for k, v in summary.items() if k not in ("task_ids", "added_task_ids")}, indent=1))
+
+
 # ---------------------------------------------------------------------------
 # run (one card: the render service and vLLM)
 # ---------------------------------------------------------------------------
@@ -185,6 +295,10 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         out["max_consecutive_collisions"] = 0  # blocked moves still cost -0.15 each
     if getattr(args, "collision_feedback", False):
         out["collision_feedback_detail"] = True
+    if getattr(args, "format_example", None):  # round 12 freeze: the format text the model trained with
+        out["prompt_format_example"] = args.format_example
+    if getattr(args, "lenient_parse", False):  # round 12 freeze: the lenient reading of the answers
+        out["lenient_parse"] = True
     return out
 
 
@@ -283,6 +397,8 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         seen = {"frame": keep(images[0], turns), "user": obs["obs_str"]}
         if getattr(policy, "last_prompt_tokens", None) is not None:
             seen["prompt_tokens"] = policy.last_prompt_tokens
+        if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
+            seen.update(entropy=round(float(policy.last_entropy), 5), tokens=int(policy.last_tokens or 0))
         obs, reward, done, step_info = env.step(text)
         turns += 1
         parsed = list(step_info.get("actions") or [])
@@ -324,9 +440,32 @@ def _image_url(image: Any) -> Dict[str, Any]:
     return {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()}}
 
 
+# Round 12 freeze (the user's 3.1.4 of 2026-10-22, the format SFT's acceptance): the token entropy of the answers, as
+# the RL logs report it (the entropy of the temperature-scaled next-token distribution, averaged over the answer's
+# tokens), estimated from the ENTROPY_TOP_K most likely tokens vLLM returns (raw log-probabilities, renormalised
+# after the temperature; the tail beyond them is left out, a slight underestimate).
+ENTROPY_TOP_K = 20
+
+
+def top_logprob_entropy(positions: Sequence[Sequence[float]], temperature: float) -> Optional[float]:
+    """The mean entropy (nats) over the answer's tokens of the temperature-scaled distribution renormalised over each
+    position's given raw log-probabilities (temperature 0 or less: the model's own, 1)."""
+    t = float(temperature) if temperature and temperature > 0 else 1.0
+    out = []
+    for lps in positions:
+        if not lps:
+            continue
+        z = [float(lp) / t for lp in lps]
+        m = max(z)
+        w = [math.exp(v - m) for v in z]
+        s = sum(w)
+        out.append(-sum((x / s) * math.log(x / s) for x in w if x > 0))
+    return sum(out) / len(out) if out else None
+
+
 class VllmPolicy:  # pragma: no cover - needs a GPU
     def __init__(self, model: str, gpu_memory_utilization: float = 0.6, max_model_len: int = 8192,
-                 max_images: int = 1, temperature: float = 0.0, top_p: float = 1.0) -> None:
+                 max_images: int = 1, temperature: float = 0.0, top_p: float = 1.0, entropy: bool = False) -> None:
         from vllm import LLM
 
         self.llm = LLM(model=model, gpu_memory_utilization=gpu_memory_utilization, max_model_len=max_model_len,
@@ -334,16 +473,25 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
                        trust_remote_code=False)
         self.last_prompt_tokens: Optional[int] = None
         self.temperature, self.top_p = float(temperature), float(top_p)
+        self.entropy = bool(entropy)  # round 12 freeze: the answers' token entropy (last_entropy, last_tokens)
+        self.last_entropy: Optional[float] = None
+        self.last_tokens: Optional[int] = None
 
     def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
                  as_sft: bool = False, seed: Optional[int] = None) -> str:
         from vllm import SamplingParams
 
         params = SamplingParams(temperature=self.temperature, top_p=self.top_p, seed=seed, max_tokens=384,
-                                stop=["</action>"], include_stop_str_in_output=True)
+                                stop=["</action>"], include_stop_str_in_output=True,
+                                **({"logprobs": ENTROPY_TOP_K} if self.entropy else {}))
         out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft), sampling_params=params,
                             use_tqdm=False)
         self.last_prompt_tokens = len(out[0].prompt_token_ids)
+        if self.entropy:
+            steps = out[0].outputs[0].logprobs or []
+            self.last_entropy = top_logprob_entropy([[lp.logprob for lp in pos.values()] for pos in steps],
+                                                    self.temperature)
+            self.last_tokens = len(steps)
         return out[0].outputs[0].text
 
 
@@ -366,7 +514,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     policy = VllmPolicy(args.model, max_model_len=16384 if args.history else 8192,
                         max_images=int(args.max_turns) if args.history else 1,
                         temperature=float(args.temperature) if sampled else 0.0,
-                        top_p=float(args.top_p) if sampled else 1.0)
+                        top_p=float(args.top_p) if sampled else 1.0, entropy=bool(getattr(args, "entropy", False)))
     (out / "model.json").write_text(json.dumps({"name": args.name, "model": args.model, "version": VERSION,
                                                 "prompt_format": cfg["prompt_format"], "greedy": not sampled,
                                                 "samples": int(args.samples) if sampled else 1,
@@ -376,6 +524,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                                                 "env_switches": switches, "max_turns": int(args.max_turns),
                                                 "history": bool(args.history),
                                                 "sft_text": bool(args.sft_text),
+                                                "entropy": bool(getattr(args, "entropy", False)),
                                                 "load_seconds": round(time.time() - t0, 1)}, indent=1))
     done = ({(r["index"], r.get("sample")) for r in _jsonl(out / "results.jsonl")}
             if (out / "results.jsonl").exists() else set())
@@ -406,6 +555,17 @@ def sampling_mode(args: argparse.Namespace) -> bool:
 # ---------------------------------------------------------------------------
 # table
 # ---------------------------------------------------------------------------
+def token_entropy(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """{"entropy": token-weighted mean of the recorded answers' entropy, "entropy_tokens"} when run --entropy recorded
+    it (round 12 freeze), else {}."""
+    pairs = [(float(t["entropy"]), int(t.get("tokens") or 0)) for r in rows for t in (r.get("trajectory") or [])
+             if t.get("entropy") is not None]
+    tokens = sum(n for _, n in pairs)
+    if not pairs or not tokens:
+        return {}
+    return {"entropy": round(sum(e * n for e, n in pairs) / tokens, 5), "entropy_tokens": tokens}
+
+
 def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     ok = [r for r in rows if "error" not in r]
     succ = [r for r in ok if r["success"]]
@@ -434,6 +594,11 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                                if succ else None),
         "collision_rate": round(sum(r["collisions"] for r in ok) / actions, 4) if actions else None,
         "invalid_rate": round(sum(r["invalid_turns"] for r in ok) / turns, 4) if turns else None,
+        # round 12 freeze: the stop line's measure (per episode the share of unreadable turns, averaged) and, with
+        # run --entropy, the answers' token entropy weighted by their tokens (the RL logs' actor/entropy)
+        "invalid_episode_mean": (round(sum(r["invalid_turns"] / r["turns"] for r in ok if r["turns"]) /
+                                       sum(1 for r in ok if r["turns"]), 4) if any(r["turns"] for r in ok) else None),
+        **token_entropy(ok),
         "ended_by": dict(sorted(ended.items())) if ended else None,
         # used up the action or turn limit (with or without meeting the task at the last action)
         "used_limit": sum(ended[k] for k in LIMIT_ENDS) if ended else None,
@@ -442,6 +607,95 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 LIMIT_ENDS = ("max_primitive_steps", "max_primitive_steps_success", "max_turns")
+
+# Round 12 batch (the user's decision of 2026-10-21): the success conditions of each family as the evaluation rows name
+# them (failed_gates, v2 sets); "target_a_clearly_visible" and "reference_a_clearly_visible" are one condition (the
+# prefix is the object's role in the task) and count once.
+FAMILY_CONDITIONS: Dict[str, Tuple[str, ...]] = {
+    "absolute_positioning": ("distance", "in_front", "inside_frame", "min_area", "visible", "a_clearly_visible"),
+    "equidistance": ("equidistant", "in_front", "inside_frame", "min_area", "visible", "a_clearly_visible",
+                     "b_clearly_visible"),
+    "fov_inclusion": ("fully_in_frame", "in_front", "inside_frame", "min_area", "visible", "a_clearly_visible",
+                      "b_clearly_visible"),
+    "occlusion_alignment": ("occluder_in_front", "occluder_inside_frame", "occluder_min_area", "occluder_visible",
+                            "target_hidden", "target_in_front", "target_in_view_direction", "b_clearly_visible"),
+    "projective_relations": ("in_front", "inside_frame", "lateral_within_45deg", "margin", "min_area", "relation",
+                             "visible", "a_clearly_visible", "b_clearly_visible"),
+    "screen_occupancy": ("in_front", "inside_frame", "min_area", "occupancy", "vertical_contained", "visible",
+                         "a_clearly_visible"),
+}
+
+
+VALID_ACTIONS = ("move_forward", "move_backward", "move_left", "move_right", "turn_left", "turn_right")
+
+
+def unreadable_form(answer: str) -> str:
+    """Round 12 batch (the user's decision 22): the form of an answer the env could not read: no <action> tag, an
+    empty action, the format example copied (action1, action, ...), spaces instead of underscores (turn left), or
+    another made-up name; "other" when every name is a real action (e.g. contradictory moves)."""
+    m = re.search(r"<action>(.*?)</action>", answer or "", re.S)
+    if not m:
+        return "no_action_tag"
+    acts = [a.strip() for a in m.group(1).split("|") if a.strip()]
+    if not acts:
+        return "empty_action"
+    bad = [a for a in acts if a not in VALID_ACTIONS]
+    if any(re.fullmatch(r"action\d*|\.\.\.", a) for a in bad):
+        return "format_example_copied"
+    if any(a.replace(" ", "_") in VALID_ACTIONS for a in bad):
+        return "space_instead_of_underscore"
+    return "made_up_name" if bad else "other"
+
+
+def unreadable_forms(rows: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+    """{form: count} of the unreadable answers (turns not valid) in the recorded trajectories."""
+    forms = Counter(unreadable_form(str(t.get("answer") or "")) for r in rows if "error" not in r
+                    for t in (r.get("trajectory") or []) if not t.get("valid", True))
+    return dict(forms.most_common())
+
+
+def condition_name(gate: str) -> str:
+    """One name per success condition: the role prefix of a clearly-visible condition dropped."""
+    for role in ("target_", "reference_"):
+        if gate.startswith(role) and gate.endswith("_clearly_visible") and len(gate) == len(role) + len("a_clearly_visible"):
+            return gate[len(role):]
+    return gate
+
+
+def terminal_metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Round 12 batch (the user's decision of 2026-10-21): how close the episodes end to success, from the recorded
+    trajectories: the progress (0..1, the env's distance from meeting every success condition) of the last pose,
+    averaged over the successful and over the failed episodes, and per family the share of its success conditions
+    met at the end.  Rows without a recorded trajectory are left out; None when none has one."""
+    ok = [r for r in rows if "error" not in r and "trajectory" in r]
+    if not ok:
+        return {"episodes": 0, "progress_end_success": None, "progress_end_fail": None, "conditions_met_share": None,
+                "conditions_met_by_family": {}}
+
+    def end(r: Dict[str, Any]) -> Tuple[float, set]:
+        traj = r.get("trajectory") or []
+        last = traj[-1] if traj else (r.get("start") or {})
+        return float(last.get("progress") or 0.0), {condition_name(g) for g in (last.get("failed_gates") or [])}
+
+    mean = lambda xs: round(sum(xs) / len(xs), 4) if xs else None  # noqa: E731
+    prog = {True: [], False: []}
+    by_family: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: {"all": [], "failed": []})
+    for r in ok:
+        p, failed = end(r)
+        success = bool(r.get("success"))
+        prog[success].append(p)
+        conds = FAMILY_CONDITIONS.get(r.get("task_type"))
+        if conds:
+            met = 1.0 if success else 1.0 - len(failed & set(conds)) / len(conds)
+            by_family[r["task_type"]]["all"].append(met)
+            if not success:
+                by_family[r["task_type"]]["failed"].append(met)
+    every = [m for v in by_family.values() for m in v["all"]]
+    return {"episodes": len(ok), "progress_end_success": mean(prog[True]), "progress_end_fail": mean(prog[False]),
+            "conditions_met_share": mean(every),
+            "conditions_met_by_family": {k: {"conditions": len(FAMILY_CONDITIONS[k]), "met_share": mean(v["all"]),
+                                             "met_share_failed": mean(v["failed"]), "episodes": len(v["all"])}
+                                         for k, v in sorted(by_family.items())}}
 
 
 def sign_test(b: int, c: int) -> float:
@@ -486,7 +740,9 @@ def cmd_table(args: argparse.Namespace) -> None:
     ev = Path(args.eval)
     models = {}
     for d in sorted(p for p in ev.iterdir() if (p / "results.jsonl").exists()):
-        models[d.name] = metrics(_jsonl(d / "results.jsonl"))
+        rows = _jsonl(d / "results.jsonl", partial_ok=True)  # other chains' jobs may still be writing theirs
+        if rows:
+            models[d.name] = metrics(rows)
     (ev / "table.json").write_text(json.dumps(models, indent=1))
     families = sorted({f for m in models.values() for f in m["success_by_family"]})
     bands = [f"{lo}-{hi}" for lo, hi in BANDS]
@@ -506,6 +762,34 @@ def cmd_table(args: argparse.Namespace) -> None:
             cells[1] = f"{m['tasks']}×{m['samples']}"
         lines.append("| " + " | ".join(cells) + " |")
     (ev / "table.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n".join(lines))
+
+
+def cmd_terminal(args: argparse.Namespace) -> None:
+    """Round 12 batch: terminal_metrics and the collision rate of every result folder of an evaluation set, into
+    terminal.json and terminal.md (table.json / table.md stay as they are)."""
+    ev = Path(args.eval)
+    models = {}
+    for d in sorted(p for p in ev.iterdir() if (p / "results.jsonl").exists()):
+        rows = _jsonl(d / "results.jsonl", partial_ok=True)
+        if rows:
+            models[d.name] = {**terminal_metrics(rows), "success": metrics(rows)["success"],
+                              "collision_rate": metrics(rows)["collision_rate"],
+                              "unreadable_share": metrics(rows)["invalid_rate"], "unreadable_forms": unreadable_forms(rows)}
+    (ev / "terminal.json").write_text(json.dumps(models, indent=1))
+    families = list(FAMILY_CONDITIONS)
+    head = ["模型", "题数", "成功率", "终点进度分（成功的题）", "终点进度分（失败的题）", "终点满足的条件比例", "碰撞率",
+            "读不出动作的回合比例", "读不出的形式"] + [f"{f} 满足比例（失败的题）" for f in families]
+    fmt = lambda v: "—" if v is None else f"{v:.3f}"  # noqa: E731
+    lines = ["| " + " | ".join(head) + " |", "| " + " | ".join("---" for _ in head) + " |"]
+    for name, m in models.items():
+        fam = m["conditions_met_by_family"]
+        cells = [name, str(m["episodes"]), fmt(m["success"]), fmt(m["progress_end_success"]),
+                 fmt(m["progress_end_fail"]), fmt(m["conditions_met_share"]), fmt(m["collision_rate"]),
+                 fmt(m["unreadable_share"]), "，".join(f"{k} {v}" for k, v in m["unreadable_forms"].items()) or "—"]
+        cells += [fmt((fam.get(f) or {}).get("met_share_failed")) for f in families]
+        lines.append("| " + " | ".join(cells) + " |")
+    (ev / "terminal.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 
 
@@ -533,6 +817,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
     r.add_argument("--no-collision-end", action="store_true", help="3 blocked moves in a row no longer end the task")
     r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
+    r.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
+                   help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
+    r.add_argument("--entropy", action="store_true",
+                   help="round 12 freeze: record each answer's token entropy (top-20 log-probabilities, after the "
+                        "temperature), as the RL logs report it")
+    r.add_argument("--lenient-parse", action="store_true",
+                   help="round 12 freeze: read answers leniently when the strict reading finds no action")
     r.add_argument("--history", action=argparse.BooleanOptionalAction, default=True,
                    help="every model call gets all earlier turns, exactly as in SFT (round-10 default; --no-history "
                         "for a single-turn input)")
@@ -547,6 +838,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "round-10 export keeps the env's text, so this is only for models of those rounds")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
+    m = sub.add_parser("terminal", help="round 12 batch: end progress, conditions met at the end, collision rate")
+    m.add_argument("--eval", required=True)
     c = sub.add_parser("compare", help="task-by-task comparison against a base result folder")
     c.add_argument("--base", required=True, help="a result folder (with results.jsonl)")
     c.add_argument("--other", required=True, nargs="+")
@@ -559,9 +852,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     x.add_argument("--split", default="test")
     x.add_argument("--seed", type=int, default=SEED)
     x.add_argument("--out", required=True)
+    u = sub.add_parser("top-up", help="round 12: add one family's reserve tasks of the split, replayed, up to a target")
+    u.add_argument("--eval", required=True, help="the evaluation folder to start from (tasks.jsonl; it stays as it is)")
+    u.add_argument("--family", required=True)
+    u.add_argument("--target", type=int, required=True, help="tasks of the family wanted in the new set")
+    u.add_argument("--run", required=True, help="run_all output directory (tasks_reserve.jsonl)")
+    u.add_argument("--split-manifest", required=True)
+    u.add_argument("--split", required=True)
+    u.add_argument("--exclude", default=None, help="depth_check_summary.json: its flagged tasks are never taken")
+    u.add_argument("--scenes-root", required=True, help="InteriorGS scene folders for the replay")
+    u.add_argument("--env-template", default=str(Path(__file__).with_name("configs") / "rl_env_v10_S0.yaml"),
+                   help="the env rules of the replay")
+    u.add_argument("--seed", type=int, default=SEED)
+    u.add_argument("--out", required=True)
+    u.add_argument("--family-out", default=None, help="also write the family's tasks of the new set alone here")
     args = ap.parse_args(argv)
     {"select": cmd_select, "run": cmd_run, "table": cmd_table, "replace": cmd_replace,
-     "compare": cmd_compare}[args.cmd](args)
+     "compare": cmd_compare, "top-up": cmd_top_up, "terminal": cmd_terminal}[args.cmd](args)
     return 0
 
 

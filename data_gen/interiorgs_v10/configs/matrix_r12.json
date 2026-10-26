@@ -1,0 +1,38 @@
+{
+ "_doc": "The experiment matrix of InteriorGS v10, registered in main as planned (round 12 freeze, the user's 3.3 of 2026-10-22). Every group is an S0 / D pair of one standard RL recipe (configs/rl_standards.json) from one start model: same tasks (reserve train tasks), seed, number of updates, stop rules and checkpoints, reported side by side (the pairing rule of 2026-10-21). Data pools: P0 benchmark-style QA (only 230 sample questions exist; the full bank is pending, path left empty), P1 transition QA (built on the transition-qa branch in the VAGEN-Lite-data worktree, not in main yet, path left empty), P2 the round-11 SFT action trajectories (9,802 train conversations). The executable plans come later from the transition-qa branch's data_gen/sft_mixture/matrix_plan.py once it is merged; this file fixes what each group is. New data shows the format example of the future data (admission policy: action_names); C0 trained on the placeholder text.",
+ "pools": {
+  "P0": {"name": "benchmark-style QA (仿 benchmark 的 QA)", "path": null},
+  "P1": {"name": "transition QA (转移题)", "path": null},
+  "P2": {"name": "round-11 SFT action trajectories (动作轨迹)",
+         "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/sft_trajectories.jsonl"}
+ },
+ "models": {
+  "base_7b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b",
+  "sft_e9": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386"
+ },
+ "rl": {
+  "pair": {"S0": "v10_p1_S0", "D": "v10_p1_D"},
+  "seed": 20261019, "task_pool": "reserve", "updates": 300, "eval_every": 50,
+  "rows": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/rl_rows/rows.jsonl",
+  "exclude": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json",
+  "eval_sets": {"val": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2",
+                "test": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2"},
+  "note": "The standard's chain settings apply (rl_standards.json chain_defaults). The D member is the current dense reward; whether the matrix uses D-cond instead is decided after the dense reward's second batch."
+ },
+ "groups": {
+  "A": {"status": "planned", "pools": [], "sft": "format SFT of the original 7B (the user's 3.1.4): a few hundred short conversations from P2 shown with real action names (training_prep format-sft), 1-2 epochs, a small learning rate; accepted when 200 train tasks x 4 episodes at temperature 0.8 have at most 1% unreadable answers and a success rate near the original model's 5-9%",
+        "start": "base_7b", "format_example": "action_names",
+        "rl_rules": "signal check at update 25 (mixed tasks >= 10%), KL stop 1.0, the 10% unreadable line, extension to 600 at update 300 by the existing rule; if it collapses again, stop and report, change nothing",
+        "next": "its S0 / D pair and D-cond + keep in the dense reward's second batch"},
+  "B": {"status": "planned", "pools": ["P0"], "sft": "P0 only, 10 epochs, picked on the v2 validation set", "start": "base_7b",
+        "format_example": "action_names"},
+  "C": {"status": "planned", "pools": ["P0", "P2"], "sft": "P0 + P2, 10 epochs, picked on the v2 validation set", "start": "base_7b",
+        "format_example": "action_names"},
+  "D": {"status": "planned", "pools": ["P0", "P1", "P2"], "sft": "P0 + P1 + P2 (the three kinds kept apart, one run), 10 epochs, picked on the v2 validation set",
+        "start": "base_7b", "format_example": "action_names"},
+  "E": {"status": "planned", "pools": ["P0", "P1", "P2"], "sft": "the same model as D", "start": "base_7b", "format_example": "action_names",
+        "rl_prompt": "free_think (with thinking text; exploratory, after D; dropped when more than 20% of the answers are unreadable in its first 50 updates)"},
+  "C0": {"status": "done", "pools": ["P2"], "sft": "round 11's SFT, epoch 9 (no new training)", "start": "sft_e9", "format_example": "placeholder",
+         "results": "R12-P1-S0 / R12-P1-D (interiorgs_v10_train_r12a_20261019): S0 update 250 48.4% / 42.1%, D update 100 45.3% / 44.5% on v2 validation / test (start 40.9% / 37.7%); the dense reward's first batch (interiorgs_v10_train_r12k_20261021) starts here too"}
+ }
+}

@@ -69,6 +69,8 @@
       "blocked_turn_share": 0.5,
       "blocked_turn_seed": 20261016,
       "blocked_turn_max_action_share": 0.03,
+      "format_example": "action_names",
+      "note_round12_format_example": "2026-10-22 (round 12 freeze, the user's 3.1.1): the format line of the prompt shows real action names, <action>move_forward|turn_left|</action>, the default for future data and training (rl-config takes its default from here). The SFT data of rounds 10-12 and every model trained on it used the placeholder text <action>action1|action2|...|</action> (no key here): rebuild it with \"format_example\": \"placeholder\", and give RL from those models --format-example placeholder (rl-config checks it against the start model's SFT conversations).",
       "note_round11": "2026-10-16: blocked turns in the escape style (decision 5 of round 11): the blocked attempt, then a move the collision detector picks to leave the obstacle, then the shortest path from there; planned by training_prep sft-frames --scenes-root, at most 3% of the SFT actions. Round 10 used style continue (the blocked attempt, then the old shortest path), share 0.2, seed 20261015.",
       "system_prompt": {
         "step_translation": 0.3,

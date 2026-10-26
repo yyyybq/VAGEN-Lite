@@ -689,7 +689,7 @@ def s3_realize(r: Runner):
                     return "point_depth_margin"
                 labs = ["A", "B"] if g.rng.random() < 0.5 else ["B", "A"]
                 tag = f"pts{labs[0]}{labs[1]}"
-                img = g.bank.save_marked(vid, tag, lambda im: draw_points(im, pts, labs))
+                img = g.bank.save_marked(vid, tag, lambda im, k: draw_points(im, pts, labs, k=k))
                 closer = labs[int(np.argmin(dp))]
                 g.emit("S3", [st, "SITE-C04"], bench_of(st), "image", [vid], [img], BL_DEPTH, {}, ["A", "B"], closer,
                        "mc", gt_record("BL-02", points={labs[0]: pts[0], labs[1]: pts[1]}, depths=dict(zip(labs, dp))),
@@ -942,6 +942,9 @@ def perturb_box(box, size: int, rng) -> Optional[Tuple[float, float, float, floa
     return None
 
 
+BOX_COLORS = [(230, 30, 40), (30, 110, 230)]   # box A red, box B blue (redraw_marks.py uses the same)
+
+
 def s6_realize(r: Runner):
     g = r.g
 
@@ -966,8 +969,7 @@ def s6_realize(r: Runner):
             labels = ["A", "B"]
             correct = "A" if g.rng.random() < 0.5 else "B"
             boxes = [true, fake] if correct == "A" else [fake, true]
-            img = g.bank.save_marked(vid, f"loc{correct}", lambda im: draw_boxes(im, boxes, labels,
-                                                                               [(230, 30, 40), (30, 110, 230)]))
+            img = g.bank.save_marked(vid, f"loc{correct}", lambda im, k: draw_boxes(im, boxes, labels, BOX_COLORS, k=k))
             g.emit("S6", ["BL-05", "SITE-C03"], "BLINK", "image", [vid], [img], BL_LOC, {"x": bare(n[0])},
                    ["A", "B"], correct, "mc", gt_record("BL-05", true_box=true, distractor=fake, iou=round(iou(true, fake), 3)),
                    [g.obj_entry(o, n[0], "target", n[1])], {"drawn_boxes": {"A": boxes[0], "B": boxes[1]}},

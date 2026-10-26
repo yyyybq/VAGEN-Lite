@@ -3,7 +3,9 @@
     R1_RENDER_URL=http://HOST:PORT/render python -m vagen.interiorgs_v10_ppo --config RL/ppo.yaml --endpoint 250
 
 Round 10: the config may use verl's concat multi-turn mode (one sequence per episode, ``trainer.concat_multi_turn``
-with ``adv_estimator: gae``) or the no-concat mode (``no_concat_gae``); ``history_mode`` checks the pair.
+with ``adv_estimator: gae``) or the no-concat mode (``no_concat_gae``); ``history_mode`` checks the pair.  Round 11
+(the optimisation package): the concat mode also with ``adv_estimator: grpo`` (the episodes of one task compared
+with each other instead of a value network).
 
 The optimizer and scheduler keep the config's horizon (``trainer.total_training_steps``); ``--endpoint``
 only stops ``fit`` after that many updates, so a later run with a larger endpoint and ``resume_mode: auto``
@@ -102,7 +104,7 @@ class EndpointTrainer(RayPPOTrainer):
 # Round 10: the two ways an episode's earlier turns reach the model (training_prep.history_overrides).
 # Each turn a separate sample (the no-concat agent loop, its own GAE) or one sequence per episode
 # (verl's multi-turn concat mode with plain GAE); the advantage estimator must match the mode.
-MODES = {("no_concat_gae", False): "no_concat", ("gae", True): "concat"}
+MODES = {("no_concat_gae", False): "no_concat", ("gae", True): "concat", ("grpo", True): "concat"}
 
 
 def history_mode(cfg) -> str:

@@ -5,8 +5,10 @@
 #   sft-trial  RUN LF_DIR [MAX_STEPS]   1 card : LLaMA-Factory through accelerate + FSDP (the formal path, 1 process)
 #   sft        RUN LF_DIR               8 cards: the formal SFT (FSDP, full fine-tune, vision tower frozen)
 #   rl-trial   RUN RL_DIR [ENDPOINT]    1 card : the 3DGS render service and PPO on the same card
-#   renderer   RUN                      1 card : the render service for a formal RL run (writes RUN/renderer_endpoint.txt)
-#   rl         RUN RL_DIR ENDPOINT      8 cards: PPO, waits for RUN/renderer_endpoint.txt
+#   renderer   RUN [WORKERS [ENDPOINT_NAME]]  1 card : the render service for a formal RL run (writes
+#                                        RUN/renderer_endpoint.txt, or RUN/ENDPOINT_NAME); WORKERS worker processes and
+#                                        requests at a time (default 12)
+#   rl         RUN RL_DIR ENDPOINT [WAIT_S]  8 cards: PPO, waits up to WAIT_S (default 3600) s for RUN/renderer_endpoint.txt
 #   eval       RUN EVAL NAME MODEL [PROMPT_FORMAT|- [OPTION ...]]  1 card: the render service and vLLM; one greedy
 #                                        episode per task of EVAL/tasks.jsonl (data_gen/interiorgs_v10/evaluation.py),
 #                                        results in EVAL/NAME; OPTIONs go to "evaluation.py run" (round 9 switches,
@@ -21,11 +23,14 @@
 set -euo pipefail
 MODE=${1:?mode}
 RUN=${2:?run directory}
-WORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite
+# round 12 freeze: VAGEN_LITE_WORKTREE (set by the launch script of a chain run from another copy, job_sco.WORKTREE)
+WORKTREE=${VAGEN_LITE_WORKTREE:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite}
 ENV_ROOT=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
 PY=${ENV_ROOT}/bin/python
 GS_ROOT=/mnt/umm/users/yinbaiqiao/InteriorGS_ply
-VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_20261007/torch_extensions/gsplat_cuda
+# the gsplat build validated on 2026-10-07 (dense-score pilot), kept outside the code directory since round 11: the
+# checkout's experiment folders get moved into archive/ by the directory clean-up
+VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/gsplat_cuda_validated_20261007
 mkdir -p "${RUN}/logs"
 OWNER=$(stat -c %u:%g "${RUN}")
 # the exit record is written before ownership is handed back, so it is not left owned by root
@@ -50,13 +55,14 @@ export VLLM_USE_FLASHINFER_SAMPLER=1
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
 git -C "${WORKTREE}" rev-parse HEAD 2>/dev/null || cat "${WORKTREE}/.synced_commit" 2>/dev/null || true
 
-start_renderer() {  # $1 = gpu index; leaves renderer_pid and R1_RENDER_URL
+start_renderer() {  # $1 = gpu index, $2 = worker processes = requests at a time (default 12); leaves renderer_pid and R1_RENDER_URL
+  local workers=${2:-12}
   mkdir -p "${TORCH_EXTENSIONS_DIR}"
   [[ -d ${TORCH_EXTENSIONS_DIR}/gsplat_cuda ]] || cp -a "${VALIDATED_GSPLAT_CACHE}" "${TORCH_EXTENSIONS_DIR}/gsplat_cuda"
   bash examples/train/active_spatial/start_gs_render_http_service.sh \
     --gs-root "${GS_ROOT}" --host 0.0.0.0 --port 8915 --gpus "$1" \
-    --max-workers 12 --max-inflight 12 --admit-timeout 900 --conda-env "${ENV_ROOT}" \
-    > "${RUN}/logs/renderer_service.log" 2>&1 &
+    --max-workers "${workers}" --max-inflight "${workers}" --admit-timeout 900 --conda-env "${ENV_ROOT}" \
+    > "${RENDERER_SERVICE_LOG:-${RUN}/logs/renderer_service.log}" 2>&1 &
   renderer_pid=$!
   for _ in $(seq 1 180); do
     "${PY}" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8915/health", timeout=2)' 2>/dev/null && break
@@ -140,16 +146,26 @@ PY
     ;;
   renderer)
     export CUDA_VISIBLE_DEVICES=0
-    start_renderer 0
-    printf 'http://%s:8915/render\n' "$(hostname -I | awk '{print $1}')" > "${RUN}/renderer_endpoint.tmp"
-    mv "${RUN}/renderer_endpoint.tmp" "${RUN}/renderer_endpoint.txt"
+    # round 12 batch: the chain's plan rl "renderer_workers" passes more worker processes (one scene each), so the
+    # scenes of an update stay loaded; default 12.  ENDPOINT_NAME (the chain's renderer_repack): a second service,
+    # started before the first one is deleted, writes its own address file (the chain renames it once the move is
+    # decided) and its own service log
+    ENDPOINT_NAME=${4:-renderer_endpoint.txt}
+    [[ ${ENDPOINT_NAME} == renderer_endpoint.txt ]] ||
+      RENDERER_SERVICE_LOG=${RUN}/logs/renderer_service-$(date -u +%Y%m%dT%H%M%SZ).log
+    start_renderer 0 "${3:-12}"
+    printf 'http://%s:8915/render\n' "$(hostname -I | awk '{print $1}')" > "${RUN}/${ENDPOINT_NAME%.txt}.tmp"
+    mv "${RUN}/${ENDPOINT_NAME%.txt}.tmp" "${RUN}/${ENDPOINT_NAME}"
     while [[ ! -e ${RUN}/STOP_RENDERER ]]; do kill -0 "${renderer_pid}"; sleep 10; done
     ;;
   rl)
     RL=${3:?RL config directory}
     ENDPOINT=${4:?endpoint}
+    # round 12 batch: the chain's renderer_when_trainer_runs switch submits the render service once this job has
+    # its cards and passes a longer wait; default an hour
+    RENDERER_WAIT_S=${5:-3600}
     export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-    for _ in $(seq 1 720); do [[ -s ${RUN}/renderer_endpoint.txt ]] && break; sleep 5; done
+    for _ in $(seq 1 $((RENDERER_WAIT_S / 5))); do [[ -s ${RUN}/renderer_endpoint.txt ]] && break; sleep 5; done
     export R1_RENDER_URL
     R1_RENDER_URL=$(<"${RUN}/renderer_endpoint.txt")
     export V10_RAY_TEMP_DIR=/tmp/v10_ray_$$

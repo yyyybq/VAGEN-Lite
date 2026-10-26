@@ -45,6 +45,7 @@ from .utils import (
     safe_open_rgb,
     parse_free_think,
     parse_actions,
+    lenient_actions,
     check_actions,
     ALLOWED_ACTIONS,
     ACTION_SPACE_PRESETS,
@@ -372,7 +373,29 @@ class ActiveSpatialEnv(BaseEnv):
         return params
     
     def _default_parse_func(self, response: str, **kwargs) -> Dict[str, Any]:
-        """Default parse function for action parsing."""
+        """Default parse function for action parsing; with the config's lenient_parse (round 12 freeze, the user's
+        3.1.2) an answer the strict reading finds no action in is read leniently (utils.lenient_actions), and the
+        result names the rule that read it ("lenient_read")."""
+        rst = ActiveSpatialEnv._strict_parse_func(self, response, **kwargs)
+        if rst["actions"] or not bool(getattr(getattr(self, "config", None), "lenient_parse", False)):
+            return rst
+        read = lenient_actions(response or "", sep=kwargs.get("action_sep", "|"),
+                               allowed=getattr(self, "_allowed_actions", None))
+        if read is None:
+            return rst
+        rule, names = read
+        return dict(rst, format_correct=True, actions=names[: kwargs.get("max_actions", 5)], parse_error="",
+                    missing_action_tag=False, empty_action_body=False, unknown_action_name=False,
+                    lenient_read=rule)
+
+    def _invalid_penalty(self) -> float:
+        """The penalty of an unreadable answer: the config's invalid_penalty_override when set (round 12 freeze, the
+        user's 3.1.3), else invalid_format_penalty (the value the system prompt shows)."""
+        override = self.config.get("invalid_penalty_override", None)
+        return float(self.config.invalid_format_penalty if override is None else override)
+
+    def _strict_parse_func(self, response: str, **kwargs) -> Dict[str, Any]:
+        """The strict reading (every answer before round 12's lenient switch)."""
         response_text = response or ""
         response_lower = response_text.lower()
         action_tag_count = response_lower.count("<action>")
@@ -923,6 +946,8 @@ class ActiveSpatialEnv(BaseEnv):
                 "missing_action_tag": bool(rst.get("missing_action_tag", False)),
                 "empty_action_body": bool(rst.get("empty_action_body", False)),
                 "unknown_action_name": bool(rst.get("unknown_action_name", False)),
+                # round 12 freeze: read only by the lenient reading (config lenient_parse)
+                "lenient_read": bool(rst.get("lenient_read")),
                 "truncated_before_action": bool(rst.get("truncated_before_action", False)),
                 "multiple_action_tag": bool(rst.get("multiple_action_tag", False)),
             },
@@ -1130,8 +1155,8 @@ class ActiveSpatialEnv(BaseEnv):
                 info["is_format_rewarded"] = True
                 info["is_format_penalized"] = False
             else:
-                self.reward += self.config.invalid_format_penalty
-                self._reward_trace.record("invalid", raw=1.0, scale=self.config.invalid_format_penalty)
+                self.reward += self._invalid_penalty()
+                self._reward_trace.record("invalid", raw=1.0, scale=self._invalid_penalty())
                 info["is_format_rewarded"] = False
                 info["is_format_penalized"] = True
                 info["format_penalty_reason"] = rst.get("parse_error") or "non_strict_protocol"
@@ -1140,10 +1165,10 @@ class ActiveSpatialEnv(BaseEnv):
             self._reward_trace.add_override(
                 "hard_invalid_reward_assignment",
                 previous_reward=float(self.reward),
-                assigned_reward=float(self.config.invalid_format_penalty),
+                assigned_reward=float(self._invalid_penalty()),
             )
-            self.reward = self.config.invalid_format_penalty
-            self._reward_trace.record("invalid", raw=1.0, scale=self.config.invalid_format_penalty)
+            self.reward = self._invalid_penalty()
+            self._reward_trace.record("invalid", raw=1.0, scale=self._invalid_penalty())
             self.consecutive_invalid_count += 1
             self.invalid_action_count += 1
             info["is_format_rewarded"] = False
@@ -1441,7 +1466,8 @@ class ActiveSpatialEnv(BaseEnv):
         pose = self.view_engine.get_pose()
         if self.config.get("r1_legacy_success", False):
             return score_canonical_task(self.current_item, pose)
-        return score_with_visibility(self.current_item, pose, self._visibility_occluders())
+        return score_with_visibility(self.current_item, pose, self._visibility_occluders(),
+                                     progress_version=self.config.get("progress_version", "product"))
 
     def _visibility_occluders(self) -> OccluderSet:
         """Occluders of the current scene (labels.json boxes + structure walls), cached per scene."""
@@ -2066,6 +2092,7 @@ class ActiveSpatialEnv(BaseEnv):
             max_actions_per_step=self.config.max_actions_per_step,
             action_sep=self.config.action_sep,
             add_example=init_obs,
+            format_example=self.config.get("prompt_format_example", "placeholder"),
         )
         obs_str += "\n" + format_prompt_text
         
@@ -2175,6 +2202,7 @@ class ActiveSpatialEnv(BaseEnv):
             max_actions_per_step=self.config.max_actions_per_step,
             action_sep=self.config.action_sep,
             add_example=init_obs,
+            format_example=self.config.get("prompt_format_example", "placeholder"),
         )
         obs_str += "\n" + format_prompt_text
         

@@ -51,9 +51,87 @@ class EvaluationTest(unittest.TestCase):
             d = Path(tmp) / "sft"
             d.mkdir()
             (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            # round 12 batch: other chains' jobs still writing into the shared folder (a half-written last line, an
+            # empty file) do not stop the table; a bad line before the last still does
+            busy = Path(tmp) / "busy"
+            busy.mkdir()
+            (busy / "results.jsonl").write_text(json.dumps(rows[0]) + "\n" + json.dumps(rows[1])[:30])
+            (Path(tmp) / "new").mkdir()
+            (Path(tmp) / "new" / "results.jsonl").write_text("")
             E.cmd_table(type("A", (), {"eval": tmp})())
             table = (Path(tmp) / "table.md").read_text(encoding="utf-8")
+            (busy / "results.jsonl").write_text(json.dumps(rows[1])[:30] + "\n" + json.dumps(rows[0]) + "\n")
+            with self.assertRaises(json.JSONDecodeError):
+                E.cmd_table(type("A", (), {"eval": tmp})())
         self.assertIn("| sft | 2 | 0.500 |", table)
+        self.assertIn("| busy | 1 | 1.000 |", table)
+        self.assertNotIn("| new |", table)
+
+    def test_terminal_metrics(self):
+        """Round 12 batch: how close the episodes end to success: the last pose's progress over the successful and the
+        failed episodes, the share of the family's success conditions met at the end (a role prefix of a clearly-visible
+        condition does not make it another one); rows without a recorded trajectory are left out."""
+        base = {"collisions": 0, "actions": 2, "turns": 1, "invalid_turns": 0, "d_star": 2, "actions_to_success": None}
+        rows = [dict(base, task_type="absolute_positioning", success=True, actions_to_success=2,
+                     start={"progress": 0.1, "failed_gates": ["distance"]},
+                     trajectory=[{"progress": 0.7, "failed_gates": [], "met": True}]),
+                dict(base, task_type="absolute_positioning", success=False, collisions=1,
+                     start={"progress": 0.1, "failed_gates": ["distance"]},
+                     trajectory=[{"progress": 0.2, "failed_gates": ["distance", "target_a_clearly_visible"]}]),
+                dict(base, task_type="equidistance", success=False, turns=0, actions=0,
+                     start={"progress": 0.05, "failed_gates": ["equidistant", "reference_b_clearly_visible", "visible"]},
+                     trajectory=[]),
+                dict(base, task_type="equidistance", success=True, actions_to_success=2)]  # an old row: no trajectory
+        self.assertEqual(E.condition_name("target_a_clearly_visible"), "a_clearly_visible")
+        self.assertEqual(E.condition_name("reference_b_clearly_visible"), "b_clearly_visible")
+        self.assertEqual(E.condition_name("target_in_front"), "target_in_front")
+        m = E.terminal_metrics(rows)
+        self.assertEqual(m["episodes"], 3)
+        self.assertEqual((m["progress_end_success"], m["progress_end_fail"]), (0.7, 0.125))
+        fam = m["conditions_met_by_family"]
+        self.assertEqual(fam["absolute_positioning"], {"conditions": 6, "met_share": 0.8333, "met_share_failed": 0.6667,
+                                                       "episodes": 2})
+        self.assertEqual(fam["equidistance"]["met_share"], round(1 - 3 / 7, 4))
+        self.assertEqual(m["conditions_met_share"], round((1 + 4 / 6 + 4 / 7) / 3, 4))
+        self.assertIsNone(E.terminal_metrics(rows[3:])["progress_end_fail"])
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "model_a"
+            d.mkdir()
+            (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            E.cmd_terminal(type("A", (), {"eval": tmp})())
+            out = json.loads((Path(tmp) / "terminal.json").read_text())
+            table = (Path(tmp) / "terminal.md").read_text(encoding="utf-8")
+        self.assertEqual(out["model_a"]["progress_end_fail"], 0.125)
+        self.assertEqual(out["model_a"]["collision_rate"], round(1 / 6, 4))
+        self.assertIn("| model_a | 3 |", table)
+
+    def test_unreadable_forms(self):
+        """Round 12 batch (the user's decision 22): the forms of the answers the env could not read, and their share
+        per result folder in terminal.json / terminal.md."""
+        self.assertEqual(E.unreadable_form("<action>action1|action2|</action>"), "format_example_copied")
+        self.assertEqual(E.unreadable_form("<action>|</action>"), "empty_action")
+        self.assertEqual(E.unreadable_form("<action>turn left</action>"), "space_instead_of_underscore")
+        self.assertEqual(E.unreadable_form("<action>look_down|</action>"), "made_up_name")
+        self.assertEqual(E.unreadable_form("I will move forward"), "no_action_tag")
+        self.assertEqual(E.unreadable_form("<action>move_forward|move_backward|</action>"), "other")
+        base = {"task_type": "absolute_positioning", "success": False, "collisions": 0, "actions": 1, "d_star": 2,
+                "actions_to_success": None, "turns": 2, "invalid_turns": 1,
+                "start": {"progress": 0.1, "failed_gates": ["distance"]}}
+        turn = {"progress": 0.1, "failed_gates": ["distance"]}
+        rows = [dict(base, trajectory=[dict(turn, answer="<action>action1|</action>", valid=False),
+                                       dict(turn, answer="<action>move_forward|</action>", valid=True)]),
+                dict(base, trajectory=[dict(turn, answer="<action>action1|</action>", valid=False),
+                                       dict(turn, answer="<action>move_left|</action>", valid=True)])]
+        self.assertEqual(E.unreadable_forms(rows), {"format_example_copied": 2})
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "m"
+            d.mkdir()
+            (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            E.cmd_terminal(type("A", (), {"eval": tmp})())
+            out = json.loads((Path(tmp) / "terminal.json").read_text())
+            table = (Path(tmp) / "terminal.md").read_text(encoding="utf-8")
+        self.assertEqual((out["m"]["unreadable_share"], out["m"]["unreadable_forms"]), (0.5, {"format_example_copied": 2}))
+        self.assertIn("format_example_copied 2", table)
 
     def test_run_episode_records_the_trajectory(self):
         from PIL import Image
@@ -336,6 +414,83 @@ class EvaluationTest(unittest.TestCase):
         self.assertIn(swap["in"], {"t0020", "t0022"})          # same family and d* band (1-3), unflagged
         self.assertIsNone(next(s for s in res["swaps"] if s["out"] == "t0010")["in"])
         self.assertEqual(res, E.replace_flagged(picked, ["t0001", "t0010", "t0021"], list(reversed(pool)), seed=3))
+
+    def test_top_up_a_family_from_reserve_tasks(self):
+        """Round 12: the occlusion family topped up from the split's reserve tasks: flagged tasks and tasks already
+        in the set never taken, d* bands evened out, only tasks whose replay succeeds; the old tasks stay."""
+        oa = "occlusion_alignment"
+        v1 = [_row(i, "projective_relations", 2) for i in range(3)] + [_row(10 + i, oa, 5) for i in range(2)]
+        pool = ([_row(100 + i, oa, 2) for i in range(2)] + [_row(110, oa, 5)] + [_row(120 + i, oa, 8) for i in range(3)]
+                + [_row(130, oa, 8), _row(10, oa, 5), _row(140, "equidistance", 2)])  # flagged, already in, other family
+        failed = {"t0100"}  # a band 1-3 task, surely in the first batch
+        calls = []
+
+        def replay(rows):
+            calls.append([r["task_id"] for r in rows])
+            return [{"task_id": r["task_id"], "ok": r["task_id"] not in failed} for r in rows]
+
+        res = E.top_up(v1, pool, oa, 6, replay, flagged=["t0130"], seed=4)
+        self.assertEqual([r["task_id"] for r in res["tasks"][:5]], [r["task_id"] for r in v1])  # unchanged, first
+        added = [r["task_id"] for r in res["added"]]
+        self.assertEqual(len(added), 4)
+        self.assertFalse({"t0130", "t0010", "t0140", "t0100"} & set(added))
+        # v1 has 2 tasks in band 4-6: the first picks come from 1-3 and 7-8
+        self.assertEqual(sorted(E.band_name(r["difficulty"]["d_star"]) for r in res["added"][:2]), ["1-3", "7-8"])
+        self.assertEqual(res["family_after"], {"1-3": 1, "4-6": 3, "7-8": 2})  # the failed task's place went to 4-6
+        self.assertEqual(res["candidates"], 6)
+        self.assertEqual(res["wanted"], 4)
+        self.assertEqual([r["task_id"] for r in res["replayed"] if not r["ok"]], ["t0100"])
+        self.assertEqual((len(calls[0]), calls[1]), (4, ["t0110"]))  # replayed in batches of what is still missing
+        # not enough reserve tasks: everything that replays is taken
+        short = E.top_up(v1, pool, oa, 20, replay, flagged=["t0130"], seed=4)
+        self.assertEqual(len(short["added"]), 5)
+        self.assertEqual(short["wanted"], 18)
+        self.assertEqual(E.top_up(v1, pool, oa, 2, replay)["added"], [])  # already at the target
+
+    def test_top_up_command_reads_the_split_reserve(self):
+        """Round 12: top-up takes the reserve tasks of the split only (tasks_reserve.jsonl) and writes the new set
+        and, with --family-out, the family's tasks alone."""
+        from argparse import Namespace
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import replay_env
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "output"
+            run.mkdir()
+            base = {"target_object": {}, "target_region": {}, "init_camera": {}, "camera_model_version": "m",
+                    "canonical_task_metric_version": "c", "action_protocol_version": "a"}
+            reserve = [dict(base, task_id=f"r{i}", scene_id="v0" if i < 3 else "t0", task_type="occlusion_alignment",
+                            difficulty={"d_star": 3 + i}) for i in range(5)]
+            (run / "tasks_reserve.jsonl").write_text("".join(json.dumps(r) + "\n" for r in reserve))
+            manifest = Path(tmp) / "split.json"
+            manifest.write_text(json.dumps({"version": 2, "train_scenes": [], "val_scenes": ["v0"], "test_scenes": ["t0"]}))
+            v1 = Path(tmp) / "v1"
+            v1.mkdir()
+            (v1 / "tasks.jsonl").write_text(json.dumps(dict(base, task_id="f1", scene_id="v0", task_type="equidistance",
+                                                            difficulty={"d_star": 4}, split="val")) + "\n")
+            env = Path(tmp) / "env.yaml"
+            env.write_text("envs:\n- config: {wall_model: thick, jsonl_path: x}\n")
+            replayed = []
+
+            def fake_replay(rows, scenes_root, env_config=None):
+                replayed.append((sorted(r["task_id"] for r in rows), env_config))
+                return [{"task_id": r["task_id"], "ok": True} for r in rows]
+
+            with mock.patch.object(replay_env, "replay", fake_replay):
+                E.cmd_top_up(Namespace(eval=str(v1), family="occlusion_alignment", target=10, run=str(run),
+                                       split_manifest=str(manifest), split="val", exclude=None, scenes_root="/meta",
+                                       env_template=str(env), seed=1, out=str(Path(tmp) / "v2"),
+                                       family_out=str(Path(tmp) / "v2_oa")))
+            v2 = [json.loads(l) for l in (Path(tmp) / "v2" / "tasks.jsonl").read_text().splitlines()]
+            self.assertEqual([r["task_id"] for r in v2[:1]], ["f1"])
+            self.assertEqual(sorted(r["task_id"] for r in v2[1:]), ["r0", "r1", "r2"])  # the val scene's reserve only
+            self.assertTrue(all(r["split"] == "val" for r in v2))
+            self.assertEqual(replayed[0][1], {"wall_model": "thick"})  # the template's rules, not its dataset keys
+            sel = json.loads((Path(tmp) / "v2" / "selection.json").read_text())
+            self.assertEqual((sel["added"], sel["reserve_candidates"], sel["wanted"]), (3, 3, 10))
+            oa = [json.loads(l) for l in (Path(tmp) / "v2_oa" / "tasks.jsonl").read_text().splitlines()]
+            self.assertEqual(sorted(r["task_id"] for r in oa), ["r0", "r1", "r2"])
 
 
 if __name__ == "__main__":

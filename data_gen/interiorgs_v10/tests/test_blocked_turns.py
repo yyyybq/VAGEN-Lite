@@ -37,7 +37,9 @@ class BlockedTurnTest(unittest.TestCase):
         cls.scene_dir = scene_dir
         cfg = RunConfig(target_tasks_per_scene=8, wall_model="thick", visibility_rule="env", require_structure_walls=True)
         cls.rows = _jsonable(generate_scene(scene_dir, scene_dir.name, cfg))["rows"]
-        cls.cfg = RC.env_config(TEMPLATE, "http://127.0.0.1:1/render")
+        # round 12 freeze: the env shows the policy's format example, as rl-config writes it into the RL env
+        cls.cfg = dict(RC.env_config(TEMPLATE, "http://127.0.0.1:1/render"),
+                       prompt_format_example=R.format_example(load_policy()))
         cls.cfg["gs_root"] = str(scene_dir.parent)
         cls.patch = mock.patch("vagen.envs.active_spatial.env.ActiveSpatialEnv._render_image", lambda self: FRAME.copy())
         cls.patch.start()
@@ -151,7 +153,9 @@ class EscapeTurnTest(unittest.TestCase):
         cls.scene_dir = write_synthetic_scenes(cls.root / "scenes", with_walls=True)["two_rooms_walls"]
         cfg = RunConfig(target_tasks_per_scene=10, wall_model="thick", visibility_rule="env", require_structure_walls=True)
         cls.rows = _jsonable(generate_scene(cls.scene_dir, cls.scene_dir.name, cfg))["rows"]
-        cls.cfg = RC.env_config(TEMPLATE, "http://127.0.0.1:1/render")
+        # round 12 freeze: the env shows the policy's format example, as rl-config writes it into the RL env
+        cls.cfg = dict(RC.env_config(TEMPLATE, "http://127.0.0.1:1/render"),
+                       prompt_format_example=R.format_example(load_policy()))
         cls.cfg["gs_root"] = str(cls.scene_dir.parent)
         cls.patch = mock.patch("vagen.envs.active_spatial.env.ActiveSpatialEnv._render_image", lambda self: FRAME.copy())
         cls.patch.start()
@@ -227,6 +231,11 @@ class EscapeTurnTest(unittest.TestCase):
                           conv[k + 2]["content"])
             self.assertIn("Environment Feedback: Action executed.", conv[k + 4]["content"])
             self.assertEqual(R.scan_leakage(rec, self.policy), [])
+        # every record binds to its parent in the task registry (prepare_active_spatial_sft.py refuses a mismatch;
+        # the first round-11 chain run stopped there: the escape records hashed the row without its plan)
+        registry = {r["task_id"]: r for r in TP._jsonl(sft / "task_registry.jsonl")}
+        self.assertEqual([r["source_task_id"] for r in records
+                          if r["source_task_sha256"] != registry[r["source_task_id"]]["source_task_sha256"]], [])
         rep = json.loads((sft / "sft_records_report.json").read_text())
         self.assertEqual(rep["blocked_turns"], len(inserted))
         self.assertEqual(rep["assistant_actions"], sum(r["total_actions"] for r in records))

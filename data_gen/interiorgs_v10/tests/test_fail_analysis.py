@@ -58,6 +58,53 @@ class FailAnalysisTest(unittest.TestCase):
             table = out.with_suffix(".md").read_text(encoding="utf-8")
             self.assertIn("| 第十轮 | 4 | 3 | 1（25.0%） | 1（25.0%） | 1（25.0%） |", table)
 
+    def test_backing_off_is_not_oscillation(self):
+        """Round 11: the move away from an obstacle right after a blocked move is what the blocked-turn samples
+        teach; it no longer counts as a flip of the oscillating mode."""
+        fb = "blocked: move_backward (blocked by wall)."
+        t = lambda acts, blocked=0, user="": dict(turn(acts, ["a", "b"], 0.3), collisions=blocked, user=user)  # noqa: E731
+        back_off = [t(["move_backward"], blocked=1), t(["move_forward"], user=fb),
+                    t(["move_backward"], blocked=1), t(["move_forward"], user=fb)]
+        self.assertTrue(F.backs_off(back_off[0], back_off[1]))
+        self.assertEqual(F.flips(back_off), 1)  # only turn 2 -> 3 (move_forward then move_backward) is a flip
+        self.assertNotEqual(F.mode(row(0, "f", False, traj=back_off)), "oscillating")
+        # without a blocked move the same alternation is oscillation; a reversal of an unblocked move too
+        free = [t(["move_backward"]), t(["move_forward"]), t(["move_backward"]), t(["move_forward"])]
+        self.assertEqual(F.flips(free), 3)
+        self.assertEqual(F.mode(row(0, "f", False, traj=free)), "oscillating")
+        other = [t(["move_backward", "move_left"], blocked=1), t(["move_right"], user=fb)]
+        self.assertFalse(F.backs_off(other[0], other[1]))  # move_right undoes move_left, not the blocked move_backward
+        self.assertEqual(F.flips(other), 1)
+        # feedback without named moves (older rules): the last action of the blocked turn is taken as blocked
+        self.assertTrue(F.backs_off(t(["turn_left", "move_left"], blocked=1), t(["move_right"], user="Action blocked by collision.")))
+
+    def test_blocked_reaction_and_focus(self):
+        """Round 11: the turn after a blocked move (repeat / back off / blocked again) and the three conditions."""
+        fb = "Environment Feedback: 1 of 2 actions executed; blocked: move_backward (blocked by wall).\n"
+        traj = [dict(turn(["move_forward", "move_backward"], ["inside_frame", "min_area"], 0.2), collisions=1, user="x"),
+                dict(turn(["move_forward"], ["inside_frame"], 0.3), collisions=0, user=fb),          # backs off
+                dict(turn(["move_left"], ["target_a_clearly_visible"], 0.3), collisions=1, user="ok"),
+                dict(turn(["move_right"], ["target_a_clearly_visible", "occluder_clearly_visible"], 0.3),
+                     collisions=1, user="blocked: move_left (blocked by sofa)."),                    # backs off, blocked again
+                dict(turn(["move_right"], ["min_area", "inside_frame"], 0.3), collisions=0,
+                     user="blocked: move_right (blocked by sofa)."),                                 # repeats
+                dict(turn(["turn_left"], ["inside_frame"], 0.3), collisions=1, user="")]             # no next turn
+        self.assertEqual(F.blocked_in_feedback(fb), ["move_backward"])
+        self.assertEqual(F.blocked_in_feedback("Action executed."), [])
+        self.assertEqual([F.focus_of(g) for g in ("inside_frame", "reference_b_clearly_visible", "occluder_clearly_visible",
+                                                  "min_area", "equidistant")],
+                         ["目标不在画面里", "没有一个面看清楚", None, "目标太小", None])
+        rep = F.analyse([row(0, "equidistance", False, traj=traj), row(1, "equidistance", True, traj=traj[:2])])
+        b = rep["equidistance"]["blocked_reaction"]
+        self.assertEqual((b["turns"], b["named"], b["repeat"], b["back_off"], b["blocked_again"]), (4, 4, 1, 3, 1))
+        self.assertEqual(b["blocked_again_share"], 0.25)
+        self.assertEqual(rep["all"]["focus_at_end"], {"目标不在画面里": 1, "没有一个面看清楚": 0, "目标太小": 0})
+        self.assertEqual(rep["all"]["near_misses"], 1)
+        self.assertEqual(rep["all"]["focus_near_miss"], {"目标不在画面里": 1, "没有一个面看清楚": 0, "目标太小": 0})
+        md = F.markdown({"m": rep})
+        self.assertIn("| m | 4 | 1（25.0%） | 3（75.0%） | 1（25.0%） |", md)
+        self.assertIn("| m | 1 | 1 | 0 | 0 | 1 | 1 | 0 | 0 |", md)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -121,6 +121,196 @@ def reward_variance_filter(data_proto: DataProto, metrics, **kwargs) -> tuple[Da
     return filtered_data, metrics
 
 
+@register_filter("mixed_outcome")
+def mixed_outcome_filter(data_proto: DataProto, metrics, **kwargs) -> tuple[DataProto, dict]:
+    """InteriorGS v10, round 11 (the optimisation package): train only on the groups (the episodes of one task)
+    whose episodes both succeed and fail (``traj_success``); a group that all succeeds or all fails gives a group
+    comparison nothing to learn from.
+
+    The update draws more tasks than it trains on (data.train_batch_size candidates).  Taken in draw order
+    (meta_info["uid_draw_order"], uid -> position; else the order of first appearance), the first
+    ``target_groups`` candidates are the nominal batch; each of them that all succeeds or all fails is dropped and
+    replaced by the next mixed group among the extra candidates (the refill; at most the number of extra
+    candidates).  If no group is mixed, the nominal batch is kept with its advantages set to zero (the update
+    then only applies the entropy and KL terms).
+
+    kwargs: target_groups (default: all candidates), success_key (default "traj_success").
+    Metrics (filter/mixed/): candidates, nominal, kept, dropped_all_success and dropped_all_fail (among the
+    nominal batch), refilled, shortfall (target - kept), mixed_share (of all candidates), empty_fallback.
+    """
+    import numpy as np
+
+    key = kwargs.get("success_key", "traj_success")
+    uids = [str(u) for u in data_proto.non_tensor_batch["uid"]]
+    success = np.asarray(data_proto.non_tensor_batch[key], dtype=float) > 0.5
+    draw = data_proto.meta_info.get("uid_draw_order") or {}
+    groups: dict = {}
+    for i, u in enumerate(uids):
+        groups.setdefault(u, []).append(i)
+    first = {u: idx[0] for u, idx in groups.items()}
+    ordered = sorted(groups, key=lambda u: (draw.get(u, len(draw) + first[u]), first[u]))
+    target = int(kwargs.get("target_groups") or 0) or len(ordered)
+
+    def kind(u: str) -> str:
+        s = success[groups[u]]
+        return "mixed" if s.any() and not s.all() else ("all_success" if s.all() else "all_fail")
+
+    kinds = {u: kind(u) for u in ordered}
+    nominal, extra = ordered[:target], ordered[target:]
+    kept = [u for u in nominal if kinds[u] == "mixed"]
+    refill = [u for u in extra if kinds[u] == "mixed"][: max(0, target - len(kept))]
+    keep = kept + refill
+    fallback = not keep
+    if fallback:
+        keep = list(nominal)
+    filtered = data_proto.select_idxs(sorted(i for u in keep for i in groups[u]))
+    if fallback and "advantages" in filtered.batch.keys():
+        filtered.batch["advantages"] = filtered.batch["advantages"] * 0.0
+    if metrics is not None:
+        n_mixed = sum(1 for k in kinds.values() if k == "mixed")
+        metrics.update({
+            "filter/mixed/candidates": len(ordered), "filter/mixed/nominal": len(nominal),
+            "filter/mixed/kept": 0 if fallback else len(keep),
+            "filter/mixed/dropped_all_success": sum(1 for u in nominal if kinds[u] == "all_success"),
+            "filter/mixed/dropped_all_fail": sum(1 for u in nominal if kinds[u] == "all_fail"),
+            "filter/mixed/refilled": len(refill),
+            "filter/mixed/shortfall": target - (0 if fallback else len(keep)),
+            "filter/mixed/mixed_share": n_mixed / max(1, len(ordered)),
+            "filter/mixed/empty_fallback": float(fallback),
+        })
+    return filtered, metrics
+
+
+_MIN_STEPS: dict = {}  # task file -> {task_id: difficulty.d_star}
+
+
+def _min_steps(rows: str) -> dict:
+    """{task_id: the task's minimum number of moves (difficulty.d_star)} of an RL task file, read once per file."""
+    import json
+
+    if rows not in _MIN_STEPS:
+        table = {}
+        try:
+            with open(rows, encoding="utf-8") as fh:
+                for line in fh:
+                    if line.strip():
+                        r = json.loads(line)
+                        d_star = (r.get("difficulty") or {}).get("d_star")
+                        if r.get("task_id") is not None and d_star is not None:
+                            table[str(r["task_id"])] = int(d_star)
+        except OSError:
+            table = {}
+        _MIN_STEPS[rows] = table
+    return _MIN_STEPS[rows]
+
+
+@register_filter("keep_by_return_std")
+def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple[DataProto, dict]:
+    """InteriorGS v10, round 12, the dense-reward first batch (D-keep, the user's decision of 2026-10-21): the
+    mixed_outcome selection first (the nominal batch's tasks whose episodes both succeed and fail, refilled from the
+    extra candidates); places still free then go to tasks whose episodes all failed, in decreasing order of the spread
+    of their episode returns, and only those whose spread is at least ``std_threshold``: their return differences
+    (penalties, and the progress reward under a dense reward) are trained on instead of dropping the task.
+
+    The spread is what the group comparison (verl's GRPO) divides by: the standard deviation (n - 1) of the task's
+    episode returns (the sum of each episode's token-level rewards).  The advantages of a filled task are multiplied by
+    (spread + eps) / (max(spread, ``std_floor``) + eps), as if the comparison divided by at least ``std_floor``, so a
+    small return difference counts in proportion to its size instead of being scaled up to the size of a success
+    against a failure.  Without any task left (none mixed, none above the threshold) the nominal batch is kept with
+    zero advantages, as in mixed_outcome.
+
+    kwargs: target_groups, std_threshold (required), std_floor (default 0: no floor), rows (optional: the run's task
+    file, for the filled tasks' minimum step count by the per-episode "task_id"), success_key (default
+    "traj_success").  Metrics: those of mixed_outcome (filter/mixed/..., counting the mixed tasks only), and
+    filter/keep/: all_fail and all_fail_above_threshold (candidates), filled, kept_total, shortfall,
+    filled_std_mean / _min / _max, filled_adv_scale_mean, filled_below_floor (filled tasks whose spread is under the
+    floor, so scaled down), filled_family/<family> (count), filled_min_steps_mean.
+    """
+    from collections import Counter
+
+    import numpy as np
+    import torch
+
+    key = kwargs.get("success_key", "traj_success")
+    threshold = float(kwargs["std_threshold"])
+    floor = float(kwargs.get("std_floor") or 0.0)
+    eps = 1e-6  # the epsilon of verl's GRPO normalisation
+    uids = [str(u) for u in data_proto.non_tensor_batch["uid"]]
+    success = np.asarray(data_proto.non_tensor_batch[key], dtype=float) > 0.5
+    reward_key = "token_level_rewards" if "token_level_rewards" in data_proto.batch.keys() else "token_level_scores"
+    returns = data_proto.batch[reward_key].sum(dim=-1).detach().float().cpu()
+    draw = data_proto.meta_info.get("uid_draw_order") or {}
+    groups: dict = {}
+    for i, u in enumerate(uids):
+        groups.setdefault(u, []).append(i)
+    first = {u: idx[0] for u, idx in groups.items()}
+    ordered = sorted(groups, key=lambda u: (draw.get(u, len(draw) + first[u]), first[u]))
+    rank = {u: k for k, u in enumerate(ordered)}
+    target = int(kwargs.get("target_groups") or 0) or len(ordered)
+
+    def kind(u: str) -> str:
+        s = success[groups[u]]
+        return "mixed" if s.any() and not s.all() else ("all_success" if s.all() else "all_fail")
+
+    kinds = {u: kind(u) for u in ordered}
+    nominal, extra = ordered[:target], ordered[target:]
+    kept = [u for u in nominal if kinds[u] == "mixed"]
+    refill = [u for u in extra if kinds[u] == "mixed"][: max(0, target - len(kept))]
+    spread = {u: (float(torch.std(returns[groups[u]])) if len(groups[u]) > 1 else 0.0)
+              for u in ordered if kinds[u] == "all_fail"}
+    eligible = sorted((u for u, s in spread.items() if s >= threshold), key=lambda u: (-spread[u], rank[u]))
+    filled = eligible[: max(0, target - len(kept) - len(refill))]
+    keep = kept + refill + filled
+    fallback = not keep
+    if fallback:
+        keep = list(nominal)
+    index = sorted(i for u in keep for i in groups[u])
+    filtered = data_proto.select_idxs(index)
+    scale = {u: (spread[u] + eps) / (max(spread[u], floor) + eps) for u in filled}
+    if "advantages" in filtered.batch.keys():
+        adv = filtered.batch["advantages"]
+        if fallback:
+            filtered.batch["advantages"] = adv * 0.0
+        elif scale:
+            pos = {i: j for j, i in enumerate(index)}
+            factor = torch.ones(len(index), dtype=adv.dtype)
+            for u, f in scale.items():
+                for i in groups[u]:
+                    factor[pos[i]] = f
+            filtered.batch["advantages"] = adv * factor.to(adv.device).unsqueeze(-1)
+    if metrics is not None:
+        mixed = kept + refill
+        n_mixed = sum(1 for k in kinds.values() if k == "mixed")
+        stds = [spread[u] for u in filled]
+        metrics.update({
+            "filter/mixed/candidates": len(ordered), "filter/mixed/nominal": len(nominal),
+            "filter/mixed/kept": len(mixed),
+            "filter/mixed/dropped_all_success": sum(1 for u in nominal if kinds[u] == "all_success"),
+            "filter/mixed/dropped_all_fail": sum(1 for u in nominal if kinds[u] == "all_fail"),
+            "filter/mixed/refilled": len(refill), "filter/mixed/shortfall": target - len(mixed),
+            "filter/mixed/mixed_share": n_mixed / max(1, len(ordered)), "filter/mixed/empty_fallback": float(fallback),
+            "filter/keep/all_fail": len(spread), "filter/keep/all_fail_above_threshold": len(eligible),
+            "filter/keep/filled": len(filled), "filter/keep/kept_total": 0 if fallback else len(keep),
+            "filter/keep/shortfall": target - (0 if fallback else len(keep)),
+            "filter/keep/filled_std_mean": float(np.mean(stds)) if stds else 0.0,
+            "filter/keep/filled_std_min": float(np.min(stds)) if stds else 0.0,
+            "filter/keep/filled_std_max": float(np.max(stds)) if stds else 0.0,
+            "filter/keep/filled_adv_scale_mean": float(np.mean(list(scale.values()))) if scale else 0.0,
+            "filter/keep/filled_below_floor": sum(1 for u in filled if spread[u] < floor),  # scaled down by the floor
+        })
+        family = data_proto.non_tensor_batch.get("task_type")
+        if family is not None:
+            for fam, count in Counter(str(family[groups[u][0]]) for u in filled).items():
+                metrics[f"filter/keep/filled_family/{fam}"] = count
+        task_ids = data_proto.non_tensor_batch.get("task_id")
+        if kwargs.get("rows") and task_ids is not None and filled:
+            table = _min_steps(str(kwargs["rows"]))
+            steps = [table[str(task_ids[groups[u][0]])] for u in filled if str(task_ids[groups[u][0]]) in table]
+            if steps:
+                metrics["filter/keep/filled_min_steps_mean"] = float(np.mean(steps))
+    return filtered, metrics
+
+
 @register_filter("reward_variance_top_p")
 def reward_variance_top_p_filter(data_proto: DataProto, metrics, **kwargs) -> tuple[DataProto, dict]:
     """A filter that selects samples using top-p (nucleus) sampling based on reward variance.

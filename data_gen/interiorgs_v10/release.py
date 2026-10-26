@@ -244,10 +244,18 @@ def _prompt_module():
     return P
 
 
+def format_example(policy: Mapping[str, Any]) -> str:
+    """The export's format example (round 12 freeze, the user's 3.1.1): "placeholder" when the policy names none,
+    the text of every SFT set up to round 12; "action_names" shows real action names (prompt.FORMAT_EXAMPLES)."""
+    return str(policy["sft"]["export"].get("format_example", "placeholder"))
+
+
 def protocol_system_prompt(task_type: str, policy: Mapping[str, Any]) -> str:
     """The runtime system prompt for this protocol (same text the RL env shows)."""
     exp = policy["sft"]["export"]
     kwargs = dict(exp["system_prompt"])
+    if "format_example" in exp:
+        kwargs["format_example"] = format_example(policy)
     return _prompt_module().system_prompt(format=exp["prompt_format"], task_type=task_type, **kwargs)
 
 
@@ -255,7 +263,8 @@ def _format_block(policy: Mapping[str, Any], first: bool) -> str:
     exp = policy["sft"]["export"]
     P = _prompt_module()
     fn = P.format_prompt.get(exp["prompt_format"], P.format_prompt["no_think"])
-    return fn(max_actions_per_step=exp["max_actions_per_turn"], action_sep="|", add_example=first)
+    return fn(max_actions_per_step=exp["max_actions_per_turn"], action_sep="|", add_example=first,
+              format_example=format_example(policy))
 
 
 def runtime_poses(raw_row: Mapping[str, Any]) -> List[np.ndarray]:
@@ -690,7 +699,8 @@ def _escape_record(raw_row: Mapping[str, Any], images: Mapping[str, str], policy
     actions = list(cert[: bounds[t]]) + [plan["move"], plan["escape"]] + path
     record: Dict[str, Any] = {
         "id": f"sft_{tid}", "source_task_id": tid, "parent_task_id": tid,
-        "source_task_sha256": row_digest({k2: v for k2, v in raw_row.items() if k2 != "blocked_plan"}),
+        # the row as published in rows.jsonl, plan included: the task registry is written from those rows
+        "source_task_sha256": row_digest(dict(raw_row)),
         "source_versions": {k2: raw_row.get(k2) for k2 in VERSION_KEYS},
         "scene_id": str(raw_row["scene_id"]), "split": raw_row["split"], "task_type": raw_row.get("task_type"),
         "task_description": desc, "success": True,
