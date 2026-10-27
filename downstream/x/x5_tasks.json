@@ -1,0 +1,169 @@
+{
+ "_doc": "X5 (the user's decision 7 of 2026-10-26, lists confirmed 10-27): RoboCasa 1.0.1 tasks outside target50, chosen by downstream/x/x5_tasks.py (registry minus target50, sorted by name, random.Random(0) shuffle, first 16 per kind that reset); horizon = RoboCasa's task horizon.",
+ "sources": [
+  "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X5/atomic.json",
+  "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X5/composite.json"
+ ],
+ "tasks": [
+  {
+   "task": "AdjustWaterTemperature",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "PickPlaceMicrowaveToCounter",
+   "group": "unseen_atomic",
+   "horizon": 750
+  },
+  {
+   "task": "PreheatOven",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "AdjustToasterOvenTemperature",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "OpenOven",
+   "group": "unseen_atomic",
+   "horizon": 300
+  },
+  {
+   "task": "PickPlaceCabinetToCounter",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "OpenBlenderLid",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "LowerHeat",
+   "group": "unseen_atomic",
+   "horizon": 750
+  },
+  {
+   "task": "CloseFridgeDrawer",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "PickPlaceCounterToSink",
+   "group": "unseen_atomic",
+   "horizon": 600
+  },
+  {
+   "task": "TurnOnStove",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "TurnSinkSpout",
+   "group": "unseen_atomic",
+   "horizon": 300
+  },
+  {
+   "task": "TurnOnToasterOven",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "CloseDrawer",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "TurnOffSinkFaucet",
+   "group": "unseen_atomic",
+   "horizon": 300
+  },
+  {
+   "task": "CoffeeServeMug",
+   "group": "unseen_atomic",
+   "horizon": 450
+  },
+  {
+   "task": "SweetenCoffee",
+   "group": "unseen_composite",
+   "horizon": 1950
+  },
+  {
+   "task": "DivideBuffetTrays",
+   "group": "unseen_composite",
+   "horizon": 7200
+  },
+  {
+   "task": "FreezeBottledWaters",
+   "group": "unseen_composite",
+   "horizon": 3900
+  },
+  {
+   "task": "RestockPantry",
+   "group": "unseen_composite",
+   "horizon": 2550
+  },
+  {
+   "task": "MeatTransfer",
+   "group": "unseen_composite",
+   "horizon": 3450
+  },
+  {
+   "task": "MicrowaveCorrectMeal",
+   "group": "unseen_composite",
+   "horizon": 1500
+  },
+  {
+   "task": "MultistepSteaming",
+   "group": "unseen_composite",
+   "horizon": 3450
+  },
+  {
+   "task": "ServeWarmCroissant",
+   "group": "unseen_composite",
+   "horizon": 1800
+  },
+  {
+   "task": "MakeLoadedPotato",
+   "group": "unseen_composite",
+   "horizon": 3000
+  },
+  {
+   "task": "PrewashFoodAssembly",
+   "group": "unseen_composite",
+   "horizon": 1650
+  },
+  {
+   "task": "BalancedMealPrep",
+   "group": "unseen_composite",
+   "horizon": 1500
+  },
+  {
+   "task": "RemoveCuttingBoardItems",
+   "group": "unseen_composite",
+   "horizon": 750
+  },
+  {
+   "task": "SweetSavoryToastSetup",
+   "group": "unseen_composite",
+   "horizon": 4050
+  },
+  {
+   "task": "SweetenHotChocolate",
+   "group": "unseen_composite",
+   "horizon": 2100
+  },
+  {
+   "task": "RecycleStackedYogurt",
+   "group": "unseen_composite",
+   "horizon": 2100
+  },
+  {
+   "task": "ButterOnPan",
+   "group": "unseen_composite",
+   "horizon": 1350
+  }
+ ]
+}
