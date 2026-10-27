@@ -1,0 +1,516 @@
+{
+ "seed": 20261027,
+ "rule": "stratified by (family, d*), largest-remainder allocation, random.Random(f'{seed}:{family}:{d_star}').shuffle(sorted ids) per stratum",
+ "pool": 10798,
+ "pool_source": {
+  "rows": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/rl_rows/rows.jsonl",
+  "exclude": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json",
+  "flagged": 1580,
+  "equals_q3d_train": true
+ },
+ "tasks": 3000,
+ "backups": 300,
+ "sha256": {
+  "b3000.txt": "1d3b340810e8c137df203b17bd2e39a72103fe94a37c97fc537b1da24e59bc60",
+  "b3000_backup300.txt": "c5e1b4521876bd82ce47739b3a623cf3d53dfa5b84cacea7b95dcbb3963ceeea",
+  "calib10.txt": "4dd143c5f42fd53e6d48eb022e9f9e67948955d66b0c9c3c557bbfb5f7f3d115"
+ },
+ "by_family": {
+  "absolute_positioning": {
+   "pool": 2294,
+   "tasks": 637,
+   "pool_share": 0.2124,
+   "tasks_share": 0.2123
+  },
+  "equidistance": {
+   "pool": 1552,
+   "tasks": 432,
+   "pool_share": 0.1437,
+   "tasks_share": 0.144
+  },
+  "fov_inclusion": {
+   "pool": 1414,
+   "tasks": 393,
+   "pool_share": 0.131,
+   "tasks_share": 0.131
+  },
+  "occlusion_alignment": {
+   "pool": 157,
+   "tasks": 43,
+   "pool_share": 0.0145,
+   "tasks_share": 0.0143
+  },
+  "projective_relations": {
+   "pool": 3274,
+   "tasks": 909,
+   "pool_share": 0.3032,
+   "tasks_share": 0.303
+  },
+  "screen_occupancy": {
+   "pool": 2107,
+   "tasks": 586,
+   "pool_share": 0.1951,
+   "tasks_share": 0.1953
+  }
+ },
+ "by_d_star": {
+  "1": {
+   "pool": 1413,
+   "tasks": 392,
+   "pool_share": 0.1309,
+   "tasks_share": 0.1307
+  },
+  "2": {
+   "pool": 854,
+   "tasks": 237,
+   "pool_share": 0.0791,
+   "tasks_share": 0.079
+  },
+  "3": {
+   "pool": 1257,
+   "tasks": 349,
+   "pool_share": 0.1164,
+   "tasks_share": 0.1163
+  },
+  "4": {
+   "pool": 854,
+   "tasks": 237,
+   "pool_share": 0.0791,
+   "tasks_share": 0.079
+  },
+  "5": {
+   "pool": 1195,
+   "tasks": 333,
+   "pool_share": 0.1107,
+   "tasks_share": 0.111
+  },
+  "6": {
+   "pool": 1447,
+   "tasks": 402,
+   "pool_share": 0.134,
+   "tasks_share": 0.134
+  },
+  "7": {
+   "pool": 3169,
+   "tasks": 880,
+   "pool_share": 0.2935,
+   "tasks_share": 0.2933
+  },
+  "8": {
+   "pool": 609,
+   "tasks": 170,
+   "pool_share": 0.0564,
+   "tasks_share": 0.0567
+  }
+ },
+ "strata": [
+  {
+   "family": "absolute_positioning",
+   "d_star": 1,
+   "pool": 356,
+   "tasks": 99,
+   "backups": 10
+  },
+  {
+   "family": "absolute_positioning",
+   "d_star": 2,
+   "pool": 275,
+   "tasks": 76,
+   "backups": 8
+  },
+  {
+   "family": "absolute_positioning",
+   "d_star": 3,
+   "pool": 325,
+   "tasks": 90,
+   "backups": 9
+  },
+  {
+   "family": "absolute_positioning",
+   "d_star": 4,
+   "pool": 358,
+   "tasks": 99,
+   "backups": 10
+  },
+  {
+   "family": "absolute_positioning",
+   "d_star": 5,
+   "pool": 452,
+   "tasks": 126,
+   "backups": 13
+  },
+  {
+   "family": "absolute_positioning",
+   "d_star": 6,
+   "pool": 332,
+   "tasks": 92,
+   "backups": 9
+  },
+  {
+   "family": "absolute_positioning",
+   "d_star": 7,
+   "pool": 171,
+   "tasks": 48,
+   "backups": 5
+  },
+  {
+   "family": "absolute_positioning",
+   "d_star": 8,
+   "pool": 25,
+   "tasks": 7,
+   "backups": 1
+  },
+  {
+   "family": "equidistance",
+   "d_star": 1,
+   "pool": 132,
+   "tasks": 37,
+   "backups": 4
+  },
+  {
+   "family": "equidistance",
+   "d_star": 2,
+   "pool": 32,
+   "tasks": 9,
+   "backups": 1
+  },
+  {
+   "family": "equidistance",
+   "d_star": 3,
+   "pool": 79,
+   "tasks": 22,
+   "backups": 2
+  },
+  {
+   "family": "equidistance",
+   "d_star": 4,
+   "pool": 48,
+   "tasks": 13,
+   "backups": 1
+  },
+  {
+   "family": "equidistance",
+   "d_star": 5,
+   "pool": 110,
+   "tasks": 31,
+   "backups": 3
+  },
+  {
+   "family": "equidistance",
+   "d_star": 6,
+   "pool": 337,
+   "tasks": 94,
+   "backups": 9
+  },
+  {
+   "family": "equidistance",
+   "d_star": 7,
+   "pool": 692,
+   "tasks": 192,
+   "backups": 19
+  },
+  {
+   "family": "equidistance",
+   "d_star": 8,
+   "pool": 122,
+   "tasks": 34,
+   "backups": 3
+  },
+  {
+   "family": "fov_inclusion",
+   "d_star": 1,
+   "pool": 195,
+   "tasks": 54,
+   "backups": 5
+  },
+  {
+   "family": "fov_inclusion",
+   "d_star": 2,
+   "pool": 40,
+   "tasks": 11,
+   "backups": 1
+  },
+  {
+   "family": "fov_inclusion",
+   "d_star": 3,
+   "pool": 78,
+   "tasks": 22,
+   "backups": 2
+  },
+  {
+   "family": "fov_inclusion",
+   "d_star": 4,
+   "pool": 39,
+   "tasks": 11,
+   "backups": 1
+  },
+  {
+   "family": "fov_inclusion",
+   "d_star": 5,
+   "pool": 89,
+   "tasks": 25,
+   "backups": 2
+  },
+  {
+   "family": "fov_inclusion",
+   "d_star": 6,
+   "pool": 192,
+   "tasks": 53,
+   "backups": 5
+  },
+  {
+   "family": "fov_inclusion",
+   "d_star": 7,
+   "pool": 649,
+   "tasks": 180,
+   "backups": 18
+  },
+  {
+   "family": "fov_inclusion",
+   "d_star": 8,
+   "pool": 132,
+   "tasks": 37,
+   "backups": 4
+  },
+  {
+   "family": "occlusion_alignment",
+   "d_star": 1,
+   "pool": 16,
+   "tasks": 4,
+   "backups": 0
+  },
+  {
+   "family": "occlusion_alignment",
+   "d_star": 2,
+   "pool": 2,
+   "tasks": 1,
+   "backups": 0
+  },
+  {
+   "family": "occlusion_alignment",
+   "d_star": 3,
+   "pool": 4,
+   "tasks": 1,
+   "backups": 0
+  },
+  {
+   "family": "occlusion_alignment",
+   "d_star": 4,
+   "pool": 2,
+   "tasks": 1,
+   "backups": 0
+  },
+  {
+   "family": "occlusion_alignment",
+   "d_star": 5,
+   "pool": 12,
+   "tasks": 3,
+   "backups": 0
+  },
+  {
+   "family": "occlusion_alignment",
+   "d_star": 6,
+   "pool": 25,
+   "tasks": 7,
+   "backups": 1
+  },
+  {
+   "family": "occlusion_alignment",
+   "d_star": 7,
+   "pool": 73,
+   "tasks": 20,
+   "backups": 2
+  },
+  {
+   "family": "occlusion_alignment",
+   "d_star": 8,
+   "pool": 23,
+   "tasks": 6,
+   "backups": 1
+  },
+  {
+   "family": "projective_relations",
+   "d_star": 1,
+   "pool": 274,
+   "tasks": 76,
+   "backups": 8
+  },
+  {
+   "family": "projective_relations",
+   "d_star": 2,
+   "pool": 239,
+   "tasks": 66,
+   "backups": 7
+  },
+  {
+   "family": "projective_relations",
+   "d_star": 3,
+   "pool": 332,
+   "tasks": 92,
+   "backups": 9
+  },
+  {
+   "family": "projective_relations",
+   "d_star": 4,
+   "pool": 197,
+   "tasks": 55,
+   "backups": 6
+  },
+  {
+   "family": "projective_relations",
+   "d_star": 5,
+   "pool": 260,
+   "tasks": 72,
+   "backups": 7
+  },
+  {
+   "family": "projective_relations",
+   "d_star": 6,
+   "pool": 292,
+   "tasks": 81,
+   "backups": 8
+  },
+  {
+   "family": "projective_relations",
+   "d_star": 7,
+   "pool": 1404,
+   "tasks": 390,
+   "backups": 39
+  },
+  {
+   "family": "projective_relations",
+   "d_star": 8,
+   "pool": 276,
+   "tasks": 77,
+   "backups": 8
+  },
+  {
+   "family": "screen_occupancy",
+   "d_star": 1,
+   "pool": 440,
+   "tasks": 122,
+   "backups": 12
+  },
+  {
+   "family": "screen_occupancy",
+   "d_star": 2,
+   "pool": 266,
+   "tasks": 74,
+   "backups": 7
+  },
+  {
+   "family": "screen_occupancy",
+   "d_star": 3,
+   "pool": 439,
+   "tasks": 122,
+   "backups": 12
+  },
+  {
+   "family": "screen_occupancy",
+   "d_star": 4,
+   "pool": 210,
+   "tasks": 58,
+   "backups": 6
+  },
+  {
+   "family": "screen_occupancy",
+   "d_star": 5,
+   "pool": 272,
+   "tasks": 76,
+   "backups": 8
+  },
+  {
+   "family": "screen_occupancy",
+   "d_star": 6,
+   "pool": 269,
+   "tasks": 75,
+   "backups": 8
+  },
+  {
+   "family": "screen_occupancy",
+   "d_star": 7,
+   "pool": 180,
+   "tasks": 50,
+   "backups": 5
+  },
+  {
+   "family": "screen_occupancy",
+   "d_star": 8,
+   "pool": 31,
+   "tasks": 9,
+   "backups": 1
+  }
+ ],
+ "calib10": [
+  {
+   "task_id": "v10_ad50d3a62a2580382b6d9371",
+   "family": "projective_relations",
+   "d_star": 1,
+   "wanted_d_star": 1,
+   "far_failures_in_q3_records": 16
+  },
+  {
+   "task_id": "v10_1dd4d500cc0e80e28e2ec026",
+   "family": "fov_inclusion",
+   "d_star": 2,
+   "wanted_d_star": 2,
+   "far_failures_in_q3_records": 16
+  },
+  {
+   "task_id": "v10_0e5308eef5ae9193c6205559",
+   "family": "equidistance",
+   "d_star": 3,
+   "wanted_d_star": 3,
+   "far_failures_in_q3_records": 16
+  },
+  {
+   "task_id": "v10_5dc3630bbcf85a657f4c8b59",
+   "family": "screen_occupancy",
+   "d_star": 4,
+   "wanted_d_star": 4,
+   "far_failures_in_q3_records": 16
+  },
+  {
+   "task_id": "v10_2b69d02300d9670bb2792b6c",
+   "family": "occlusion_alignment",
+   "d_star": 5,
+   "wanted_d_star": 5,
+   "far_failures_in_q3_records": 16
+  },
+  {
+   "task_id": "v10_63d886441cfd12218b6e2a58",
+   "family": "absolute_positioning",
+   "d_star": 6,
+   "wanted_d_star": 6,
+   "far_failures_in_q3_records": 16
+  },
+  {
+   "task_id": "v10_1d13d93a82d0adb034524b1e",
+   "family": "projective_relations",
+   "d_star": 8,
+   "wanted_d_star": 8,
+   "far_failures_in_q3_records": 16
+  },
+  {
+   "task_id": "v10_0378551ce49acf00a68be2f2",
+   "family": "equidistance",
+   "d_star": 7,
+   "wanted_d_star": 7,
+   "far_failures_in_q3_records": 16
+  },
+  {
+   "task_id": "v10_0bf31c6cf5a8ce29f6a23647",
+   "family": "fov_inclusion",
+   "d_star": 6,
+   "wanted_d_star": 6,
+   "far_failures_in_q3_records": 16
+  },
+  {
+   "task_id": "v10_4788ed3400707e9131b6a5a1",
+   "family": "absolute_positioning",
+   "d_star": 8,
+   "wanted_d_star": 8,
+   "far_failures_in_q3_records": 16
+  }
+ ]
+}
