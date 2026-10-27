@@ -1,38 +1,34 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-10-26 22:10 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表和 T 表）；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 **X0 结果 [reports/X0_RESULTS_20261026.md](reports/X0_RESULTS_20261026.md)** 和 **T 系列设计 [reports/T_DESIGNS_20261026.md](reports/T_DESIGNS_20261026.md)**，之前的有 E2 结果、E1 结果和 X0–X5 设计。
+最后更新：2026-10-27 03:55 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表和 T 表）；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 **X4 结果 [reports/X4_RESULTS_20261027.md](reports/X4_RESULTS_20261027.md)**，之前的有 X0 结果、T 系列设计、E2 结果、E1 结果和 X0–X5 设计。
 
 ## 1. 现在在哪一步
 
-- 第一步、第二步完成；E0、E1、E2 完成。
-- **X0 完成**（10-26 21:00–21:12，报告已写）：B 66.3%，S、RS、RD 都显著更低（53.9%–57.3%，p < 0.001），主要差在前后题。
-- **E3**：按你 10-26 晚的决定改从 E2 30% 的第 20 万步出发。任务清单按同一规则（四起点平均在 10%–60%）用 30% 检查点重算，剩 3 个：CoffeeSetupMug 53.5%、StackBowlsCabinet 34.5%、TurnOffStove 25.0%（OpenDrawer 82.5%、SlideDishwasherRack 70.0% 超过 60%）。4 个配置已生成并通过检查，**排队文件挂起等你确认清单**（`queue/q1_e3_*.json.hold_confirm`）。
-- **X3**：只读记录器写完，在真实仿真里核过（9 个空间任务，有无记录器结果逐位相同）；4 个 8 卡任务已排队。
-- **X4**：导出 1 个 + 评测 16 个 1 卡任务已排队（E1 模型的评测等各自导出完成）。提示格式：主线评原始 7B 和 RL 模型都用 `no_think`。
-- **X5**：清单已出（16 个未见原子任务、16 个未见组合任务，全部一次重置成功），**等你确认**后再排队。
-- **X1、X2、XE**：实验已建好，已排队（排在 X4 后面；X5 确认后排到它们前面）。X1 是只训动作头（冻结整个 `qwen_vl_interface`）。
-- **T 系列**：设计已写，**等你确认**（T1、T5、T2；T3 / T4 等路径）。
+- 第一步、第二步完成；E0、E1、E2 完成；**X0、X4 完成**。
+- **X4 结果**：四个 E1 模型在主线 v2 验证集、评测集上都是 0%，每一步回答都无效（退化成重复的空格或"1"），原有能力全部丢失；导出已核对无误（报告已写）。
+- **X3**：B、S、RS 跑完，447 个回合逐回合和 E1 原评测相同；RD 在跑。NavigateKitchen 的判断规则 10-27 改过一次（叠放设施共用放置点），只影响统计，不用重跑。
+- **E3**：你 10-27 确认了 3 个任务，排队文件已放开，排在最前面（同时最多 2 个）。
+- **X5**：你 10-27 确认了清单，4 个 8 卡评测已排队。
+- **X1、X2、XE**：X1 只训动作头，实测每步约 0.32 秒（全量微调 0.75 秒），显存峰值 25.4 GB / 80 GB。10-27 03:19 为给 zoetrope 腾机器停了 X1 的 S、RS、RD 和 X2-RS-1%，撤回了 X2-B-3% 和 X2-RD-1%（第 5 节），都已重新排队，会从头训。
+- **T 系列**：你 10-27 确认。T1 两个、T5 四个（3 个 epoch = 3,063 步）、T2 的短任务已排队；T2 正式 4 个挂起，等短任务核对通过；T3 / T4 等路径。
 - **E4**：取消。
 
-## 2. 在跑什么（10-26 22:10 UTC）
+## 2. 在跑什么（10-27 03:55 UTC）
 
-- 没有在跑的训练和评测。
-- **排队**（`downstream_runs/queue/`，按名字顺序，前一个放不下就不往后看）：
-  1. X3 四个（8 卡，B、S、RS、RD）；
-  2. X4：导出 1 个 + 评测 16 个（1 卡）；
-  3. X1 四个、X2 八个、XE 一个（8 卡）。
-  - 挂起的：E3 四个（等你确认清单，`q1_e3_*`，确认后排在最前面，同时最多 2 个）；10-26 白天按 E1 起点准备的旧 E3 排队文件（`e3_*.held_e1start_20261026`，不会再用）。
-- 现在主线在两个池都有任务排队（h800：2 个 RL 训练；zoetrope：5 个评测），按规则都先不交。
+- 在跑：X1-B（zoetrope）、X2-B-1%（zoetrope）、X2-S-1%（h800）、X3-RD（h800）。
+- **排队**（`downstream_runs/queue/`，按名字顺序，前一个放不下就不往后看）：E3 四个 → X5 四个 → X1 三个 → X2 六个 → T1 两个 → T5 四个 → XE → T2 短任务；挂起的：T2 正式 4 个（`*.json.hold_short`）。
+- **zoetrope 暂停使用**（你 10-27 03:1x 的要求，给 `flux2-allen5000-mixed-4x8` 腾 4 台机器）：排队文件都只投 h800（原来的池记在 `pools_before_zoetrope_hold_20261027`），看板 `--whole-pools h800`。你说恢复时再改回来。
+- **h800 也在让路**：pt-wk1tllx7（同一个 flux2 任务在 h800 的那份）在 h800 排队期间，看板不往 h800 交新任务（`--yield-to` 加了 `flux2-allen5000-mixed-4x8`），正在跑的不动。
 
 **GPU 规则**（你 10-23 晚的决定 1；10-25 约 10:00 改为只给同一个池让路）：
 - 主线（`interiorgs-v10-*`）有任务在某个池排队时，不往那个池提交；另一个池有空机照样用（你的原话："只给同一个池让路就行，不用一直让，没有卡空着为准"）；
 - 8 卡任务只投到估计有空闲机器的池；1 卡任务投到有空卡的机器；我们自己有任务在那个池排队时，不再往那个池提交；
 - 按空机提交、还在排队的任务，如果主线开始在同一个池排队，就撤回，等下次再提。已经开始跑的不动。
 
-**看板**：`downstream/eval/watch.py`，10-26 21:49 起运行，PID 66977，代码 `712c4f27`，每 5 分钟一轮。启动、停止、查看命令如下（在集群 worktree 里；代码更新后先 stop 再 start）：
+**看板**：`downstream/eval/watch.py`，10-27 03:22 起运行，PID 531449，代码 `eea08829`，每 5 分钟一轮。启动、停止、查看命令如下（在集群 worktree 里；代码更新后先 stop 再 start；zoetrope 恢复后把 `--whole-pools` 改回 `h800 zoetrope`、去掉 `flux2-allen5000-mixed-4x8`）：
 
 ```bash
-bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- --yield-to-same-size --yield-pool-only --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 100 010 030 --whole-pools h800 zoetrope
+bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- flux2-allen5000-mixed-4x8 --yield-to-same-size --yield-pool-only --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 100 010 030 --whole-pools h800
 ```
 
 ```bash
@@ -45,19 +41,31 @@ bash downstream/eval/watch.sh status
 
 ## 3. 在等什么
 
-- **你确认**：E3 的 3 个任务、X5 的两份清单、T 系列设计（第 4 节）。
-- **空机**：主线在两个池的排队清掉、有空机或空卡。
+- **你说 zoetrope 什么时候可以再用**（第 2 节）。
+- **空机**：h800 上的 flux2 任务开跑或撤掉、主线不在排队、有空机。
+- T2 短任务的核对结果（跑完后报你每步时间和显存，再放开正式 4 个）。
 
 ## 4. 待你决定的事
 
-1. **E3 任务清单**：CoffeeSetupMug、StackBowlsCabinet、TurnOffStove（30% 检查点四起点平均 53.5%、34.5%、25.0%）。确认后把挂起的 4 个排队文件放开。
-2. **X5 清单**（RoboCasa 1.0.1 登记表里 target50 之外的任务，按名字排序、种子 0 打乱，依次试重置，前 16 个；两组都是 16 个一次成功，没有跳过的）：
-   - 原子（主评）：AdjustWaterTemperature、PickPlaceMicrowaveToCounter、PreheatOven、AdjustToasterOvenTemperature、OpenOven、PickPlaceCabinetToCounter、OpenBlenderLid、LowerHeat、CloseFridgeDrawer、PickPlaceCounterToSink、TurnOnStove、TurnSinkSpout、TurnOnToasterOven、CloseDrawer、TurnOffSinkFaucet、CoffeeServeMug；
-   - 组合（补评）：SweetenCoffee、DivideBuffetTrays、FreezeBottledWaters、RestockPantry、MeatTransfer、MicrowaveCorrectMeal、MultistepSteaming、ServeWarmCroissant、MakeLoadedPotato、PrewashFoodAssembly、BalancedMealPrep、RemoveCuttingBoardItems、SweetSavoryToastSetup、SweetenHotChocolate、RecycleStackedYogurt、ButterOnPan。
-   - 卡时按任务时限重估（几乎全失败时每回合跑满时限）：原子每个起点约 4 卡时，组合约 16 卡时，四个起点共约 80 卡时（未核实）。
-3. **T 系列**（[设计](reports/T_DESIGNS_20261026.md)）：T2 用自己写的 LoRA 层还是装 peft；LoRA 的 alpha、学习率；T1、T5 的设计；合起来的排队顺序。
+1. **zoetrope 何时恢复**（现在我们完全不往 zoetrope 交）。
+2. **X4 之后要不要量损伤程度**：E1 模型在主线上全是 0%，起点之间比不出"保留了多少"。可以改看 E1 模型在主线答案上的词元损失（困惑度），能分出损伤程度；没做。
 
 ## 5. 主窗口指令与暂停 / 撤回记录（UTC）
+
+- **10-27 03:17–03:22 你的要求："停一下zoetrope上的downstream，目标是空出来四个节点让pt-wk1tllx7能够开始"。**
+  - 查到 pt-wk1tllx7（`flux2-allen5000-mixed-4x8-090000`，4 台 × 8 卡，wangruisi1）登记在 **h800**；同名的另一份 pt-yaf4pwue 在 zoetrope 排队。
+  - 当时我们在 zoetrope 有 6 台机器在跑、1 个在排队。03:19 停了进度最少的 4 个，都还没到第一个全状态检查点，停了就要从头训：X1-S（`pt-t6ixt229`，第 10,000 步）、X1-RS（`pt-gcw3pqr6`，9,900 步）、X1-RD（`pt-5wyexvl3`，9,800 步）、X2-RS-1%（`pt-r7h9ajii`，1,500 步）。撤回了排队的 X2-B-3%（`pt-cx1433l1`）。提交记录改名为 `submission_{released,withdrawn}_zoetrope_20261027T031938Z.json`，排队文件留着，会重新提交。
+  - 留下 X1-B（17,500 步）和 X2-B-1%（快到第一个全状态）。
+  - 03:20 空出的 4 台机器（10.123.72.31、.36、.38、.77）被 pt-yaf4pwue 用上。
+  - 看板：先停，03:21 用 `--whole-pools h800` 重启，排队文件都改成只投 h800；03:22 再把 `flux2-allen5000-mixed-4x8` 加进让路名单，pt-wk1tllx7 在 h800 排队期间不往 h800 交新任务。重启后第一轮撤回了我们在 h800 还没开跑的 X2-RD-1%（`pt-jfd6mkqj`）。
+- **10-27 03:05 你确认 E3、X5 清单和 T 系列（都按我的建议），"提交吧"**：
+  - E3 的 4 个排队文件放开；
+  - X5：4 个 8 卡评测排队（`downstream/x/x5_plan.json`，32 个任务 × 20 回合）；
+  - T1：重建 DS-B-030-s2、DS-RS-030-s2（10-21 建过、从没跑过，旧文件加 `_made_20261021` 存档），排队；
+  - T5：NavigateKitchen 示教清单 `navigate_100`（500 条、72,786 帧），每个 epoch 1,021 个 batch，3 个 epoch 共 3,063 步，4 个排队；
+  - T2：自己写的 LoRA（`downstream/train/lora.py`；rank 16、alpha 32、dropout 0.05、学习率 1e-4，可训练的只有 LoRA 和动作头），短任务排队，正式 4 个挂起。
+- **10-27 01:25 X4 跑完，结果是 0%**：四个 E1 模型的回答全部退化（见 [X4 报告](reports/X4_RESULTS_20261027.md)）。核对过导出：张量名一致、抽查的张量逐位相同、vLLM 加载无缺。
+- **10-26 23:18–10-27 03:00 看板夜里按空机规则交的**：X3 四个（B 23:18、S / RS 23:49、RD 00:59），X4 导出 + 16 个评测（00:59–01:25，都已完成），X1 四个（01:31–02:22），X2 1% 四个（02:22–03:00），X2-B-3%（03:00）。X2-S-1% 先交到 zoetrope（`pt-2x5yx48a`），还没开跑时主线在 zoetrope 排队，02:28 被看板撤回，02:34 改交 h800。
 
 - **10-26 21:49 看板用新代码重启（PID 66977，`712c4f27`）**：
   - 先停旧看板（PID 3023017）；
