@@ -56,6 +56,10 @@ unparseable answers.  Plan "rl"."guards" stop a run (only that run; its logs sta
 evaluated) on NaN in the trainer's main metrics, KL to the start model above kl_max, the share of unparseable
 answers above invalid_max (mean of the last invalid_window updates), or training success below the start (mean
 of the first start_updates) by more than success_drop in each of drop_window consecutive updates (guard_reason).
+The model line adds "keep_fill_min" (off unless given): a keep run whose fills (filter/keep/filled) average under it
+over updates 1-keep_fill_at (default 50) stops; and plan eval "stop_invalid" ({"set", "max"}, off unless given):
+each checkpoint is evaluated on that set while the runs train, and a run whose greedy evaluation has more than "max"
+unreadable turns stops the same way (stop_invalid_rule, watch_checkpoints).
 
 Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
 or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
@@ -161,9 +165,13 @@ STEP_ZH = {"check_code": "核对代码", "render": "渲染 SFT 画面", "sft_dat
            "rl": "RL（S0）", "rl_extend": "RL 续训（验证仍上升时）", "evaluate": "评测"}
 CARDS = {"render": "1", "sft": "每组 8", "sft_eval": "每个 1", "rl": "1 + 8", "rl_extend": "1 + 8", "evaluate": "每个模型 1"}
 POLL_S = 60.0
+IDLE_POLL_S = 300.0  # the model line: plan pool "idle" checks the pools this often while none fits
 DEFAULT_MAX_EVAL_JOBS = 10
 EVAL_ONLY_STEPS = ("check_code", "evaluate")
 RL_STEPS = ("rl_config", "rl", "rl_extend")
+# the model line (2026-10-24): plan "rl_start_model" skips these and starts RL from that model (plumbing smokes of a
+# new model type's RL path; the formal runs are SFT then RL)
+SFT_STEPS = ("render", "sft_data", "sft", "sft_eval", "pick_sft")
 # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
 # during startup", after "GCS cannot find the node ... registration may not be complete")
 STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
@@ -331,6 +339,13 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
         if all(v < start - drop for _, v in tail):
             return (f"training success below the start ({start:.3f}, updates 1-{n0}) by more than {drop} in each of "
                     f"updates {tail[0][0]}-{tail[-1][0]}")
+    fill_min = guards.get("keep_fill_min")  # the model line (the user's decision 7 of 2026-10-24); off unless given
+    if fill_min is not None:
+        at = int(guards.get("keep_fill_at", 50))
+        fills = [per[s]["filter/keep/filled"] for s in steps if s <= at and "filter/keep/filled" in per[s]]
+        if len(fills) >= at and sum(fills) / len(fills) < float(fill_min):
+            return (f"keep filled {sum(fills) / len(fills):.2f} all-fail tasks per update < {fill_min} "
+                    f"(mean of updates 1-{at})")
     return None
 
 
@@ -500,6 +515,16 @@ def renderer_healthy(endpoint: str, timeout: float = 5.0) -> bool:
         return False
 
 
+def result_metrics(results: Path) -> Optional[Dict[str, Any]]:
+    """evaluation.metrics of a complete result folder, None without complete results."""
+    if not (results / "done.json").is_file() or not (results / "results.jsonl").is_file():
+        return None
+    from .evaluation import metrics
+
+    rows = [json.loads(l) for l in (results / "results.jsonl").read_text().splitlines() if l.strip()]
+    return metrics(rows) if rows else None
+
+
 def stranded_hosts(view: Dict[str, Any]) -> List[str]:
     """Round 12 batch (renderer_repack): the machines of a pool view (job_sco.pool_view) whose every job is an RL
     render service whose trainer still waits for cards: moving those services would free the whole machine."""
@@ -636,30 +661,86 @@ class Chain:
                 for name, spec in runs.items()}
 
     def sft_model(self) -> Path:
-        """The RL start model: the fallback after a missed signal check, else the picked SFT checkpoint, else the
-        (single) final SFT model."""
+        """The RL start model: the fallback after a missed signal check, else the plan's "rl_start_model" (the model
+        line's plumbing smokes), else the picked SFT checkpoint, else the (single) final SFT model."""
         if self.state.get("rl_model_override"):
             return Path(self.state["rl_model_override"])
+        if self.plan.get("rl_start_model"):
+            return Path(self.plan["rl_start_model"])
         decision = self.state["steps"].get("pick_sft", {}).get("decision") or {}
         if decision.get("model"):
             return Path(decision["model"])
         return self.lf_dir("") / "model"
 
-    def job_pool(self, key: Optional[str] = None) -> Optional[str]:
+    def job_pool(self, key: Optional[str] = None, cards: int = 8) -> Optional[str]:
         """The pool for a new job: the plan's, or with "auto" the one with the fewest waiting jobs now (round 12
-        batch); with a ``key`` (an RL run) the first choice is kept, so its render service and trainer share it."""
+        batch); with a ``key`` (an RL run) the first choice is kept, so its render service and trainer share it.
+        The model line (2026-10-24, the user's rule: only idle machines, after the main line): "idle" waits until a
+        pool has no main-line job waiting, the pause file is absent and, for ``cards`` 8 (and any RL run's first job),
+        an idle machine -- for one card a machine with free cards (``idle_pool``).  The model line (2026-10-25, the
+        user's "开始排队吧"): "queue" queues at once, as "auto", but only while the pause file is absent
+        (``queue_pool``).  The model line (2026-10-26, the user's rule 1.3, a new switch): plan "run_pools" ({RL run
+        name: pool}) puts that run's trainer and render service in the named pool (the arms spread over both pools),
+        after the pause file is gone; every other job as before."""
+        fixed = (self.plan.get("run_pools") or {}).get(key) if key is not None else None
+        if fixed:
+            self.wait_pause()
+            return fixed
         pool = self.plan.get("pool")
-        if pool != "auto":
+        if pool not in ("auto", "idle", "queue"):
             return pool
         from . import job_sco
 
         chosen = self.state.setdefault("run_pools", {})
         if key is not None and key in chosen:
             return chosen[key]
-        pool = job_sco.pick_pool()
+        if pool == "auto":
+            pool = job_sco.pick_pool()
+        elif pool == "queue":
+            pool = self.queue_pool()
+        else:
+            pool = self.idle_pool(8 if key is not None else cards)
         if key is not None:
             chosen[key] = pool
         return pool
+
+    def queue_pool(self) -> str:
+        """Plan pool "queue": job_sco.pick_pool once the pause file is absent (polled every IDLE_POLL_S; the wait is
+        shown in the progress file)."""
+        from . import job_sco
+
+        self.wait_pause()
+        return job_sco.pick_pool()
+
+    def wait_pause(self) -> None:
+        """Wait while the main line's pause file exists (polled every IDLE_POLL_S; shown in the progress file)."""
+        from model_matrix import sco_view
+
+        while sco_view.PAUSE.exists():
+            self.state["idle_pool_wait"] = {"since": (self.state.get("idle_pool_wait") or {}).get("since") or now(),
+                                            "pause_file": True, "checked": now()}
+            self.save()
+            self.sleep(IDLE_POLL_S)
+        self.state["idle_pool_wait"] = None
+
+    def idle_pool(self, cards: int) -> str:
+        """Plan pool "idle": the pool with the most idle machines (model_matrix.sco_view's estimate) among those
+        with no main-line job waiting and room for ``cards``, polled every IDLE_POLL_S while there is none or the
+        pause file exists; the wait is shown in the progress file."""
+        from model_matrix import sco_view
+
+        while True:
+            views = [] if sco_view.PAUSE.exists() else [sco_view.view(p) for p in sco_view.job_sco.POOLS]
+            fit = [v for v in views if sco_view.fits(v, cards)]
+            if fit:
+                best = max(fit, key=lambda v: (v["idle_estimate"] or 0, v["machines_with_free_cards"]))
+                self.state["idle_pool_wait"] = None
+                return best["pool"]
+            self.state["idle_pool_wait"] = {"since": (self.state.get("idle_pool_wait") or {}).get("since") or now(),
+                                            "cards": cards, "pause_file": sco_view.PAUSE.exists(),
+                                            "pools": views, "checked": now()}
+            self.save()
+            self.sleep(IDLE_POLL_S)
 
     def take_retry(self, key: str, what: str, job_id: Optional[str], reason: str, used: int = 0,
                    hosts: Optional[List[str]] = None) -> bool:
@@ -829,7 +910,40 @@ class Chain:
             raise ChainError("jobs did not succeed: " + ", ".join(f"{n} ({s})" for n, s in sorted(bad.items())))
 
     # -------------------------------------------------------------- steps
+    def job_env(self) -> Dict[str, str]:
+        """The model line (2026-10-24): what the plan's "model_type" (vagen/models/model_types.py; default
+        Qwen2.5-VL) gives every job through job_sco.PASS_ENV -- the type, its Python and environment -- and with plan rl
+        "logprob_audit" the folder of the trainer's per-update rollout-vs-trainer log-probability files; plan
+        "job_prefix" names the jobs (job_sco.submit).  Empty without them: every job as before."""
+        from vagen.models.model_types import DEFAULT, get
+
+        env: Dict[str, str] = {}
+        if self.plan.get("job_prefix"):
+            env["VAGEN_LITE_JOB_PREFIX"] = str(self.plan["job_prefix"])
+        name = self.plan.get("model_type")
+        if name and name != DEFAULT:
+            kind = get(name)
+            env["VAGEN_LITE_MODEL_TYPE"] = kind.name
+            if kind.python:
+                env["VAGEN_LITE_PYTHON"] = kind.python
+            env.update(dict(kind.env))
+        if (self.plan.get("rl") or {}).get("logprob_audit"):
+            env["VAGEN_D0_3_SMOKE_DIR"] = str(self.tr / "logprob_audit")
+        if self.plan.get("gpu_log"):  # the model line (2026-10-25): each card's memory in RUN/logs/gpu_mem_<mode>.csv
+            env["VAGEN_LITE_GPU_LOG"] = "1"
+        if self.plan.get("trainer_attn"):  # the model line (2026-10-26): the trainer's attention (verl fsdp_workers
+            # reads TRANSFORMERS_ATTN_IMPLEMENTATION), over the type's own; e.g. "sdpa" for the Qwen3-VL control
+            env["TRANSFORMERS_ATTN_IMPLEMENTATION"] = str(self.plan["trainer_attn"])
+        return env
+
     def check_code(self) -> None:
+        if self.plan.get("model_type") and self.plan.get("model"):  # the model line: the plan's type is the model's
+            from vagen.models.model_types import check
+
+            try:
+                check(self.plan["model_type"], str(self.plan["model"]))
+            except ValueError as exc:
+                raise ChainError(str(exc))
         want = self.plan["commit"]
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
         if not head.startswith(want) and not want.startswith(head):
@@ -896,6 +1010,10 @@ class Chain:
                 args.append("--keep-text")
             if self.plan.get("sft_learning_rate"):  # round 12 freeze: the short format SFT (default 1e-5)
                 args += ["--learning-rate", str(float(self.plan["sft_learning_rate"]))]
+            if self.plan.get("model_type"):  # the model line: the type's LLaMA-Factory template
+                args += ["--model-type", str(self.plan["model_type"])]
+            if self.plan.get("sft_logging_steps"):  # the model line: a smoke SFT logs every step
+                args += ["--logging-steps", str(int(self.plan["sft_logging_steps"]))]
             self.sh(args, cwd=ROOT / "scripts", log=self.tr / "logs" / f"prepare_sft{'_' + group if group else ''}.log")
             if not (lf / "train.yaml").is_file():
                 raise ChainError(f"prepare_active_spatial_sft.py wrote no train.yaml in {lf}")
@@ -952,7 +1070,7 @@ class Chain:
                     run.mkdir(parents=True, exist_ok=True)
                     if not (run / "job" / "submission.json").exists():
                         job_sco.prepare(run, 1, ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options],
-                                        pool=self.job_pool())
+                                        pool=self.job_pool(cards=1))
                         job_sco.submit(run)
                     running[name] = run
                 for name, run in list(running.items()):
@@ -1086,9 +1204,13 @@ class Chain:
                     value = rl[key]
                     args += [flag, ",".join(str(x) for x in value) if isinstance(value, (list, tuple)) else str(value)]
             for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val"),
-                              ("lenient_parse", "--lenient-parse"), ("invalid_turn_nonpositive", "--invalid-turn-nonpositive")):
+                              ("lenient_parse", "--lenient-parse"), ("invalid_turn_nonpositive", "--invalid-turn-nonpositive"),
+                              ("logprob_audit", "--rollout-log-probs"),  # the model line: the log-probability audit
+                              ("logprob_tokens", "--logprob-tokens")):  # and its per-token files (2026-10-26)
                 if rl.get(key):
                     args.append(flag)
+            if self.plan.get("model_type"):  # the model line: the type's PPO-config overrides (model_types.rl_overrides)
+                args += ["--model-type", str(self.plan["model_type"])]
             if self.plan.get("rl_runs") and run["reward_preset"]:
                 args += ["--reward-preset", run["reward_preset"]]
             if rl.get("task_pool"):  # round 11: RL trains on tasks SFT never trained on, checked against the SFT data
@@ -1371,6 +1493,7 @@ class Chain:
                         self.state.setdefault("guard_stops", {})[name] = {"reason": reason, "utc": now()}
                         ended[name] = f"stopped: {reason}"
                         active.pop(name)
+                self.watch_checkpoints(active, ended)  # the model line: plan eval "stop_invalid"
                 self.repack(runs, active, states)  # round 12 batch: plan rl "renderer_repack"
                 self.mark(step, jobs={**states, **{f"{n}/ended": v for n, v in ended.items()}})
                 self.signal_check(runs)
@@ -1393,6 +1516,82 @@ class Chain:
                if not (r["run_dir"] / "checkpoints" / f"global_step_{endpoint}").is_dir() and n not in stopped]
         if bad:
             raise ChainError("RL runs without a checkpoint at update " + str(endpoint) + ": " + ", ".join(bad))
+
+    def stop_invalid_rule(self) -> Optional[Dict[str, Any]]:
+        """The model line (the user's decision 2 of 2026-10-26, a new switch): plan eval "stop_invalid" ({"set":
+        validation set name, default select_by; "max": 0.10}) evaluates every RL checkpoint the evaluate step would
+        (every "every" updates) on that set while the runs train, and stops a run whose greedy evaluation has more than
+        "max" unreadable turns (evaluation.metrics invalid_rate), as a guard stops it (state guard_stops; its logs and
+        checkpoints stay, the evaluate step evaluates the checkpoints it reached).  The training-time stop line on
+        sampled answers (rl guards invalid_max) is unchanged."""
+        ev = self.plan.get("eval") or {}
+        rule = ev.get("stop_invalid")
+        if not rule:
+            return None
+        sets = self.eval_sets()
+        name = rule.get("set") or self.plan.get("select_by") or next(iter(sets))
+        if name not in sets:
+            raise ChainError(f"eval stop_invalid: {name!r} is not one of the eval sets {sorted(sets)}")
+        return {"set": name, "dir": sets[name], "max": float(rule.get("max", 0.10)), "every": int(ev.get("every", 50)),
+                "single": len(sets) == 1 and not self.plan.get("eval_sets")}
+
+    def watch_checkpoints(self, active: Dict[str, Dict[str, Any]], ended: Dict[str, str]) -> None:
+        """One poll of plan eval "stop_invalid" (stop_invalid_rule) over the running RL runs: a saved checkpoint
+        (latest_checkpointed_iteration.txt has reached it) gets the evaluate step's own job (the same folder, result
+        name and options, so the evaluate step later finds it done or adopts it); a complete result over the line
+        stops its run.  A failed evaluation is left to the evaluate step and does not stop anything."""
+        rule = self.stop_invalid_rule()
+        if not rule or not active:
+            return
+        from . import job_sco
+
+        options = list((self.plan.get("eval") or {}).get("options") or [])
+        watch = self.state.setdefault("checkpoint_watch", {})
+        for name, run in list(active.items()):
+            d = run["run_dir"]
+            try:
+                saved = int((d / "checkpoints" / "latest_checkpointed_iteration.txt").read_text().strip())
+            except (OSError, ValueError):
+                continue
+            for s in range(rule["every"], saved + 1, rule["every"]):
+                result = f"{name}_{s:03d}" if name else f"v10_rl_{s:03d}"
+                rec = watch.setdefault(f"{name}/{s}", {"result": result})
+                if rec.get("invalid") is not None or rec.get("failed"):
+                    continue
+                hf = d / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface"
+                ev_run = self.tr / "eval_runs" / (result if rule["single"] else f"{rule['set']}__{result}")
+                m = result_metrics(rule["dir"] / result)
+                if m is not None:
+                    if (ev_run / "job" / "submission.json").exists():
+                        job_sco.delete(ev_run)
+                    rec.update(invalid=m["invalid_rate"], success=m["success"], utc=now())
+                    if m["invalid_rate"] is not None and m["invalid_rate"] > rule["max"]:
+                        reason = (f"greedy evaluation of update {s} on {rule['set']}: unreadable turns "
+                                  f"{m['invalid_rate']:.3f} > {rule['max']}")
+                        (d / "STOP_RENDERER").touch()
+                        job_sco.delete(d, "job_rl")
+                        self.state.setdefault("guard_stops", {})[name] = {"reason": reason, "utc": now()}
+                        ended[name] = f"stopped: {reason}"
+                        active.pop(name)
+                        break
+                    continue
+                if not (hf / "config.json").is_file():
+                    continue
+                if not (ev_run / "job" / "submission.json").exists():
+                    ev_run.mkdir(parents=True, exist_ok=True)
+                    job_sco.prepare(ev_run, 1, ["eval", str(rule["dir"]), result, str(hf), "-",
+                                                *self.run_eval_options(options, run)], pool=self.job_pool(cards=1))
+                    job_sco.submit(ev_run)
+                    rec["job_id"] = json.loads((ev_run / "job" / "submission.json").read_text())["job_id"]
+                    continue
+                st = job_sco.status(ev_run)
+                if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
+                    job_sco.delete(ev_run)  # without results: submitted once more (it goes on from its results)
+                    drop_partial_line(rule["dir"] / result / "results.jsonl")
+                    rec["retries"] = rec.get("retries", 0) + 1
+                    if rec["retries"] > 1:  # then left to the evaluate step
+                        rec["failed"] = st.get("state")
+        self.save()
 
     def startup_settings(self, run: Dict[str, Any]) -> Dict[str, Any]:
         return {**STARTUP_DEFAULTS, **dict(run["rl"].get("startup") or {})}
@@ -1802,6 +2001,7 @@ class Chain:
 
     # -------------------------------------------------------------- driver
     def run(self) -> int:
+        os.environ.update(self.job_env())  # the model line: read by job_sco.prepare (PASS_ENV) and submit
         self.state["chain_pid"] = os.getpid()
         self.state["state"] = "running"
         self.save()
@@ -1814,6 +2014,9 @@ class Chain:
                 continue
             if self.plan.get("sft_only") and step in RL_STEPS:  # round 12 batch: SFT and its evaluation only
                 self.mark(step, state="done", note="not planned (sft_only)")
+                continue
+            if self.plan.get("rl_start_model") and step in SFT_STEPS:  # the model line: RL from a given model
+                self.mark(step, state="done", note="not planned (rl_start_model)")
                 continue
             self.mark(step, state="running", started_utc=now(), error=None)
             try:

@@ -463,14 +463,39 @@ def top_logprob_entropy(positions: Sequence[Sequence[float]], temperature: float
     return sum(out) / len(out) if out else None
 
 
+def cambrian_request(wrapper: Any, system: str, earlier: Sequence[Tuple[str, Any, str]], user_text: str, image: Any,
+                     as_sft: bool = False) -> Dict[str, Any]:
+    """The model line (2026-10-24): one Cambrian-S call as vLLM takes it -- the same chat as chat_messages, through
+    the model's chat template with one compact <image> token per frame (CambrianProcessorWrapper, as the RL agent
+    loop builds it; vLLM's Cambrian processor expands each to 756 positions) and the frames in their order."""
+    messages = chat_messages(system, earlier, user_text, image, lambda im: {"type": "image"}, as_sft)
+    text = wrapper.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    ids = wrapper(text=[text], return_tensors=None)["input_ids"][0]
+    images = [im for _, im, _ in earlier] + [image]
+    if sum(1 for t in ids if t == wrapper.image_token_id) != len(images):
+        raise ValueError("the <image> tokens and the frames differ")
+    return {"prompt_token_ids": ids, "multi_modal_data": {"image": images}}
+
+
 class VllmPolicy:  # pragma: no cover - needs a GPU
     def __init__(self, model: str, gpu_memory_utilization: float = 0.6, max_model_len: int = 8192,
                  max_images: int = 1, temperature: float = 0.0, top_p: float = 1.0, entropy: bool = False) -> None:
         from vllm import LLM
 
+        from vagen.models.model_types import of_checkpoint
+
+        self.cambrian = None
+        if of_checkpoint(model) == "cambrian_qwen":  # the model line: compact <image> tokens (cambrian_request)
+            from transformers import AutoTokenizer
+
+            from vagen.models.cambrian_plugin import register
+            from vagen.models.cambrian_processor import CambrianProcessorWrapper
+
+            register()  # the vLLM model and its config in this process (the plugin entry point does the workers)
+            self.cambrian = CambrianProcessorWrapper(AutoTokenizer.from_pretrained(model))
         self.llm = LLM(model=model, gpu_memory_utilization=gpu_memory_utilization, max_model_len=max_model_len,
                        enforce_eager=True, enable_prefix_caching=True, limit_mm_per_prompt={"image": max_images},
-                       trust_remote_code=False)
+                       trust_remote_code=self.cambrian is not None)
         self.last_prompt_tokens: Optional[int] = None
         self.temperature, self.top_p = float(temperature), float(top_p)
         self.entropy = bool(entropy)  # round 12 freeze: the answers' token entropy (last_entropy, last_tokens)
@@ -484,8 +509,12 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
         params = SamplingParams(temperature=self.temperature, top_p=self.top_p, seed=seed, max_tokens=384,
                                 stop=["</action>"], include_stop_str_in_output=True,
                                 **({"logprobs": ENTROPY_TOP_K} if self.entropy else {}))
-        out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft), sampling_params=params,
-                            use_tqdm=False)
+        if self.cambrian is not None:
+            out = self.llm.generate([cambrian_request(self.cambrian, system, earlier, user_text, image, as_sft)],
+                                    sampling_params=params, use_tqdm=False)
+        else:
+            out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft),
+                                sampling_params=params, use_tqdm=False)
         self.last_prompt_tokens = len(out[0].prompt_token_ids)
         if self.entropy:
             steps = out[0].outputs[0].logprobs or []

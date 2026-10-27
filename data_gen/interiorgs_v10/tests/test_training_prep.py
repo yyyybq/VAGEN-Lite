@@ -663,6 +663,83 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertTrue(ppo6["algorithm"]["invalid_turn_nonpositive_adv"] and report6["invalid_turn_nonpositive"])
         self.assertNotIn("invalid_turn_nonpositive_adv", ppo0["algorithm"])
         self.assertFalse(report0["invalid_turn_nonpositive"])
+        # the model line (2026-10-24): the rollout-vs-trainer log-probability audit -- vLLM also returns the sampled
+        # tokens' log-probabilities, the update keeps the trainer's (no rollout correction); off by default
+        _, report7 = config("rl_logprob_audit", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder",
+                            rollout_log_probs=True)
+        ppo7 = yaml.safe_load((self.root / "rl_logprob_audit" / "ppo.yaml").read_text())
+        self.assertTrue(ppo7["actor_rollout_ref"]["rollout"]["calculate_log_probs"] and report7["rollout_log_probs"])
+        self.assertFalse(((ppo0.get("actor_rollout_ref") or {}).get("rollout") or {}).get("calculate_log_probs", False))
+        self.assertFalse(report0["rollout_log_probs"])
+        self.assertIsNone(((ppo7.get("algorithm") or {}).get("rollout_correction") or {}).get("rollout_is"))
+        self.assertFalse(((ppo7.get("actor_rollout_ref") or {}).get("actor") or {}).get("use_rollout_log_probs", False))
+        # 2026-10-26: its per-token files (trainer.logprob_tokens, vagen/logprob_tokens.py), only with the audit
+        _, report8 = config("rl_logprob_tokens", sft_trajectories=[str(convs["placeholder"])],
+                            format_example="placeholder", rollout_log_probs=True, logprob_tokens=True)
+        ppo8 = yaml.safe_load((self.root / "rl_logprob_tokens" / "ppo.yaml").read_text())
+        self.assertTrue(ppo8["trainer"]["logprob_tokens"] and report8["logprob_tokens"])
+        self.assertNotIn("logprob_tokens", ppo7["trainer"])
+        self.assertEqual(set(ppo8["trainer"]) - set(ppo7["trainer"]), {"logprob_tokens"})  # paths aside, the same
+        self.assertEqual(ppo8["actor_rollout_ref"], ppo7["actor_rollout_ref"])
+        with self.assertRaisesRegex(SystemExit, "needs --rollout-log-probs"):
+            config("rl_logprob_tokens_alone", sft_trajectories=[str(convs["placeholder"])],
+                   format_example="placeholder", logprob_tokens=True)
+
+    def test_rl_config_model_type(self):
+        """The model line (2026-10-24): --model-type checks the start model's type and adds the type's PPO-config
+        overrides last -- none for the Qwen types; Cambrian-S's for the concat path (vagen/models/model_types.py)."""
+        import yaml
+
+        sft = self.root / "sft_rl_type"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        template = self.root / "ppo_template_type.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "grpo"}, "data": {"train_batch_size": 12, "max_prompt_length": 4096},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False},
+            "actor_rollout_ref": {"model": {"path": "old", "override_config": {}}, "actor": {"ppo_mini_batch_size": 8},
+                                  "rollout": {"n": 4, "agent": {"num_workers": 8}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+        model = self.root / "cambrian_model"
+        model.mkdir()
+        (model / "config.json").write_text(json.dumps({"model_type": "cambrian_qwen"}))
+
+        def config(out_name, **kw):
+            args = dict(rows=str(sft / "rows.jsonl"), env_template=str(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"),
+                        ppo_template=str(template), gs_root="/ply", model=str(model), name="t",
+                        run_root=str(self.root / "run_type"), val_limit=1, trial=False, out=str(self.root / out_name),
+                        history_mode="concat")
+            args.update(kw)
+            TP.cmd_rl_config(Namespace(**args))
+            return yaml.safe_load((self.root / out_name / "ppo.yaml").read_text()), \
+                json.loads((self.root / out_name / "rl_config_report.json").read_text())
+
+        plain, report0 = config("rl_type_none")
+        self.assertEqual((report0["model_type"], report0["model_type_overrides"]), (None, None))
+        ppo, report = config("rl_type_cambrian", model_type="cambrian_qwen")
+        m = ppo["actor_rollout_ref"]["model"]
+        self.assertEqual((m["external_lib"], m["trust_remote_code"], m["override_config"]),
+                         ("vagen.models.cambrian_register", True, {"image_token_alias": 151655}))
+        self.assertEqual(ppo["trainer"]["agent_loop_manager"], "vagen.agent_loop.cambrian_concat.CambrianAgentLoopManager")
+        self.assertEqual(ppo["cambrian_concat"], {"max_images": 12})  # the env template's max_turns
+        self.assertEqual(ppo["data"]["max_prompt_length"], 4096 + 756 * 12)
+        self.assertEqual(report["model_type"], "cambrian_qwen")
+        self.assertEqual(report["model_type_overrides"]["cambrian_concat.max_images"], 12)
+        for key in ("algorithm", "filter", "critic"):  # nothing else changes
+            self.assertEqual(ppo.get(key), plain.get(key))
+        self.assertEqual(ppo["actor_rollout_ref"]["rollout"], plain["actor_rollout_ref"]["rollout"])
+        self.assertEqual({k: v for k, v in ppo["trainer"].items() if k != "agent_loop_manager"},
+                         {k: v for k, v in plain["trainer"].items()})
+        qwen, report_q = config("rl_type_qwen3", model_type="qwen3_vl", model="/m")  # unreadable folder: passes
+        self.assertEqual(report_q["model_type_overrides"], {})
+        self.assertEqual((qwen["trainer"], qwen["algorithm"], qwen["data"]["max_prompt_length"]),
+                         (plain["trainer"], plain["algorithm"], 4096))
+        self.assertEqual(qwen["actor_rollout_ref"]["model"]["override_config"], {})
+        self.assertNotIn("cambrian_concat", qwen)
+        with self.assertRaisesRegex(SystemExit, "is a cambrian_qwen model, not qwen3_vl"):
+            config("rl_type_wrong", model_type="qwen3_vl")
+        with self.assertRaisesRegex(SystemExit, "concat history mode"):
+            config("rl_type_no_concat", model_type="cambrian_qwen", history_mode="none")
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

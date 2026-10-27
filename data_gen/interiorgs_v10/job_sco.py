@@ -45,6 +45,15 @@ POOLS = ("zoetrope", "h800")  # same H800 cards, specs, image and storage
 # zone and network); a job is prepared there only when asked, pick_pool never chooses it
 RENDER_POOLS = ("zoe-cf-render",)
 SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
+# the model line (2026-10-24): set in the preparing process (the training chain sets the first two from the plan's
+# model_type), these reach the job script through the launch script; the job script reads VAGEN_LITE_PYTHON (the model
+# type's Python) and VAGEN_LITE_MODEL_TYPE (its SFT launcher), the PPO trainer VAGEN_D0_3_SMOKE_DIR (the per-update
+# rollout-vs-trainer log-probability audit); HF_HUB_CACHE, SIGLIP_CACHE and CAMBRIAN_SRC come from a model type's
+# environment (Cambrian-S: the cache with its SigLIP2, which its adapter loads by repository name, and its source).
+# VAGEN_LITE_GPU_LOG (plan "gpu_log") makes the job script log each card's memory.  None set: every launch script as
+# before.
+PASS_ENV = ("VAGEN_LITE_PYTHON", "VAGEN_LITE_MODEL_TYPE", "VAGEN_D0_3_SMOKE_DIR", "HF_HUB_CACHE", "SIGLIP_CACHE",
+            "CAMBRIAN_SRC", "VAGEN_LITE_GPU_LOG", "TRANSFORMERS_ATTN_IMPLEMENTATION")
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 # created, no cards yet; sco spells it QUEUEING (round 12 batch: without it a job in that state counted as not waiting)
 WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUEING", "QUEUED", "WAITING", "CREATING"}
@@ -66,7 +75,9 @@ def prepare(run: Path, gpus: int, mode_args: List[str], job_dir: str = "job", po
     job.mkdir(parents=True, exist_ok=True)
     launch = job / "launch.sh"
     args = " ".join(shlex.quote(a) for a in mode_args[1:])
-    env = "" if WORKTREE == DEFAULT_WORKTREE else f"env VAGEN_LITE_WORKTREE={shlex.quote(WORKTREE)} "
+    passed = [] if WORKTREE == DEFAULT_WORKTREE else [f"VAGEN_LITE_WORKTREE={shlex.quote(WORKTREE)}"]
+    passed += [f"{k}={shlex.quote(os.environ[k])}" for k in PASS_ENV if os.environ.get(k)]
+    env = f"env {' '.join(passed)} " if passed else ""
     launch.write_text(f"#!/usr/bin/env bash\nexec {env}bash {WORKTREE}/{SCRIPT} {shlex.quote(mode_args[0])} {run} {args}\n")
     launch.chmod(0o755)
     (job / "prepared.json").write_text(json.dumps({"utc": now(), "gpus": gpus, "spec": SPECS[gpus], "pool": pool,
@@ -80,7 +91,10 @@ def submit(run: Path, job_dir: str = "job") -> str:
     if receipt.exists():
         return json.loads(receipt.read_text())["job_id"]
     prepared = json.loads((job / "prepared.json").read_text())
-    name = f"interiorgs-v10-{prepared['mode_args'][0]}-{run.name}".replace("_", "-")[-60:]
+    # the model line (2026-10-24): VAGEN_LITE_JOB_PREFIX names another line's jobs (the chain's plan "job_prefix"), so
+    # the job list tells them from the main line's; unset, the name as before
+    prefix = os.environ.get("VAGEN_LITE_JOB_PREFIX") or "interiorgs-v10"
+    name = f"{prefix}-{prepared['mode_args'][0]}-{run.name}".replace("_", "-")[-60:]
     command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={prepared.get('pool', POOL)}", f"--job-name={name}",
                "--priority=HIGHEST", "--quota-type=reserved", f"--container-image-url={IMAGE}",
                f"--storage-mount={MOUNT}", "--training-framework=pytorch", "--worker-nodes=1",

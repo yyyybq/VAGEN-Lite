@@ -30,7 +30,9 @@ RUN=${2:?run directory}
 # round 12 freeze: VAGEN_LITE_WORKTREE (set by the launch script of a chain run from another copy, job_sco.WORKTREE)
 WORKTREE=${VAGEN_LITE_WORKTREE:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite}
 ENV_ROOT=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
-PY=${ENV_ROOT}/bin/python
+# the model line (2026-10-24): VAGEN_LITE_PYTHON is the model type's Python (vagen/models/model_types.py, e.g. the
+# Qwen3-VL runtime venv), passed on by job_sco; unset, the vagen-lite env as before.  The render service keeps ENV_ROOT
+PY=${VAGEN_LITE_PYTHON:-${ENV_ROOT}/bin/python}
 GS_ROOT=/mnt/umm/users/yinbaiqiao/InteriorGS_ply
 # the gsplat build validated on 2026-10-07 (dense-score pilot), kept outside the code directory since round 11: the
 # checkout's experiment folders get moved into archive/ by the directory clean-up
@@ -38,7 +40,7 @@ VALIDATED_GSPLAT_CACHE=/mnt/umm/users/yinbaiqiao/gsplat_cuda_validated_20261007
 mkdir -p "${RUN}/logs"
 OWNER=$(stat -c %u:%g "${RUN}")
 # the exit record is written before ownership is handed back, so it is not left owned by root
-trap 'status=$?; [[ -n ${renderer_pid:-} ]] && kill "${renderer_pid}" 2>/dev/null; printf "{\"mode\":\"%s\",\"exit_status\":%s,\"ended_utc\":\"%s\"}\n" "${MODE}" "${status}" "$(date -u +%FT%TZ)" > "${RUN}/logs/${MODE}_exit.json"; chown -R "${OWNER}" "${RUN}" ${ALSO_OWNED:+"${ALSO_OWNED}"} 2>/dev/null || true; exit ${status}' EXIT
+trap 'status=$?; [[ -n ${renderer_pid:-} ]] && kill "${renderer_pid}" 2>/dev/null; [[ -n ${gpu_log_pid:-} ]] && kill "${gpu_log_pid}" 2>/dev/null; printf "{\"mode\":\"%s\",\"exit_status\":%s,\"ended_utc\":\"%s\"}\n" "${MODE}" "${status}" "$(date -u +%FT%TZ)" > "${RUN}/logs/${MODE}_exit.json"; chown -R "${OWNER}" "${RUN}" ${ALSO_OWNED:+"${ALSO_OWNED}"} 2>/dev/null || true; exit ${status}' EXIT
 exec > >(tee -a "${RUN}/logs/${MODE}-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).log") 2>&1
 cd "${WORKTREE}"
 export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1
@@ -58,6 +60,13 @@ export LD_LIBRARY_PATH="${CURAND_LIBRARY_DIR}:${ENV_ROOT}/lib:${ENV_ROOT}/target
 export VLLM_USE_FLASHINFER_SAMPLER=1
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
 git -C "${WORKTREE}" rev-parse HEAD 2>/dev/null || cat "${WORKTREE}/.synced_commit" 2>/dev/null || true
+# the model line (2026-10-25): with VAGEN_LITE_GPU_LOG set (plan "gpu_log"), each card's memory every 5 s in
+# RUN/logs/gpu_mem_<mode>.csv, stopped on exit (the smoke reports' per-card peaks); unset: as before
+if [[ -n ${VAGEN_LITE_GPU_LOG:-} ]]; then
+  nvidia-smi --query-gpu=timestamp,index,memory.used --format=csv,noheader,nounits -lms 5000 \
+    > "${RUN}/logs/gpu_mem_${MODE}.csv" 2>/dev/null &
+  gpu_log_pid=$!
+fi
 
 start_renderer() {  # $1 = gpu index, $2 = worker processes = requests at a time (default 12); leaves renderer_pid and R1_RENDER_URL
   local workers=${2:-12} port=${RENDERER_PORT:-8915}  # RENDERER_PORT: several services on one machine
@@ -81,6 +90,13 @@ lf_train() {  # $1 = LLaMA-Factory recipe, $2 = number of processes
   # LLaMA-Factory 0.9.3 pins transformers <= 4.52.4; vagen-lite has 4.56.1 (needed by the RL stack). The
   # trial checks that SFT runs anyway; the pin is LLaMA-Factory's own check, not a known incompatibility.
   export DISABLE_VERSION_CHECK=1
+  if [[ -n ${VAGEN_LITE_MODEL_TYPE:-} && ${VAGEN_LITE_MODEL_TYPE} != qwen2_5_vl ]]; then
+    # the model line: the model type's FSDP config and LLaMA-Factory launcher (its registrations first), in its Python
+    local cfg launcher
+    read -r cfg launcher < <("${PY}" -m vagen.models.model_types sft-launch "${VAGEN_LITE_MODEL_TYPE}")
+    "${PY}" -m accelerate.commands.launch --config_file "${cfg}" --num_processes "$2" -m "${launcher}" "$1"
+    return
+  fi
   accelerate launch --config_file examples/train/active_spatial/accelerate_fsdp_qwen25vl.yaml \
     --num_processes "$2" -m llamafactory.launcher "$1"
 }

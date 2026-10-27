@@ -734,6 +734,20 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             _set(ppo, key, value)
     if getattr(args, "invalid_turn_nonpositive", False):  # round 12 freeze (the user's 3.2, vagen/invalid_turns.py)
         _set(ppo, "algorithm.invalid_turn_nonpositive_adv", True)
+    if getattr(args, "rollout_log_probs", False):
+        # the model line (2026-10-24): vLLM returns each sampled token's log-probability, so the trainer compares it
+        # with its own (vagen/ray_trainer.py: training/rollout_probs_diff_*, and with VAGEN_D0_3_SMOKE_DIR a file per
+        # update).  The update still uses the trainer's recomputed values: the rollout correction stays off
+        if ((ppo.get("algorithm") or {}).get("rollout_correction") or {}).get("rollout_is") is not None:
+            raise SystemExit("--rollout-log-probs is an audit: the template must not turn on the rollout correction")
+        _set(ppo, "actor_rollout_ref.rollout.calculate_log_probs", True)
+    if getattr(args, "logprob_tokens", False):
+        # the model line (2026-10-26, the user's decision 1): with the audit, every response token's two
+        # log-probabilities, its turn and its distance from the last image token, one file per update
+        # (vagen/logprob_tokens.py, into VAGEN_D0_3_SMOKE_DIR/tokens); the update is unchanged
+        if not getattr(args, "rollout_log_probs", False):
+            raise SystemExit("--logprob-tokens needs --rollout-log-probs (the rollout's log-probabilities)")
+        _set(ppo, "trainer.logprob_tokens", True)
     if getattr(args, "progress_adv_weight", None) is not None:  # round 12 freeze, V8 (vagen/split_reward_adv.py)
         if not history["env"].get("enable_potential_shaping_reward"):
             raise SystemExit("--progress-adv-weight splits the dense reward's progress part: give a dense --reward-preset")
@@ -777,6 +791,20 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         _set(ppo, "data.sampler", curriculum)
         _set(ppo, "data.dataloader_num_workers", 0)  # verl's rule for a custom sampler
         curriculum = dict(curriculum, easy_tasks=easy, easy_draws=need)
+    type_overrides = None
+    if getattr(args, "model_type", None):  # the model line (2026-10-24): the type's own overrides, applied last
+        from vagen.models.model_types import check, rl_overrides
+
+        try:
+            check(args.model_type, model)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        type_overrides = rl_overrides(args.model_type, int(template["envs"][0].get("max_turns", 12)),
+                                      int(ppo["data"]["max_prompt_length"]))
+        if type_overrides and not ppo["trainer"].get("concat_multi_turn"):
+            raise SystemExit(f"the {args.model_type} overrides are for the concat history mode (--history-mode concat)")
+        for key, value in type_overrides.items():
+            _set(ppo, key, value)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
@@ -796,6 +824,9 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "format_example": fmt, "format_example_sft": sft_formats or None,
               "lenient_parse": bool(getattr(args, "lenient_parse", False)),
               "invalid_turn_nonpositive": bool(getattr(args, "invalid_turn_nonpositive", False)),
+              "rollout_log_probs": bool(getattr(args, "rollout_log_probs", False)),
+              "logprob_tokens": bool(getattr(args, "logprob_tokens", False)),
+              "model_type": getattr(args, "model_type", None), "model_type_overrides": type_overrides,
               "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
@@ -1111,6 +1142,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--invalid-turn-nonpositive", action="store_true",
                    help="round 12 freeze: the tokens of a turn the env could not read get no positive advantage "
                         "(vagen/invalid_turns.py; PPO config algorithm.invalid_turn_nonpositive_adv)")
+    c.add_argument("--rollout-log-probs", action="store_true",
+                   help="the model line: vLLM also returns each sampled token's log-probability, for the per-update "
+                        "comparison with the trainer's (an audit; the update is unchanged)")
+    c.add_argument("--logprob-tokens", action="store_true",
+                   help="the model line: with --rollout-log-probs, a file per update with every response token's two "
+                        "log-probabilities, turn and distance from the last image token (vagen/logprob_tokens.py)")
+    c.add_argument("--model-type", default=None,
+                   help="the model line: the start model's type (vagen/models/model_types.py, checked against its "
+                        "config.json) and its PPO-config overrides (none for the Qwen types)")
     c.add_argument("--invalid-penalty", type=float, default=None,
                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")

@@ -1,0 +1,29 @@
+# accelerate + FSDP for LLaMA-Factory full fine-tuning of Qwen3-VL (the model line, 2026-10-24); the Qwen2.5-VL
+# config examples/train/active_spatial/accelerate_fsdp_qwen25vl.yaml with Qwen3-VL's classes.
+# Wrap units must hold one dtype: LLaMA-Factory upcasts trainable weights to fp32 and leaves the frozen vision encoder
+# in bf16 (model_matrix/sft/lf_qwen3vl.py: pos_embed, patch_embed, blocks and the deepstack mergers frozen, the
+# merger trains).  So every vision block, the patch embedding, each patch merger (the trainable merger and the frozen
+# deepstack ones are the same class, one unit each) and each embedding (the frozen vision position embedding; the
+# token embedding) get units of their own, and the root unit holds only trainable fp32 weights.
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8
+machine_rank: 0
+main_training_function: main
+rdzv_backend: static
+same_network: true
+use_cpu: false
+fsdp_config:
+  fsdp_version: 1
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_transformer_layer_cls_to_wrap: Qwen3VLTextDecoderLayer,Qwen3VLVisionBlock,Qwen3VLVisionPatchEmbed,Qwen3VLVisionPatchMerger,Embedding
+  fsdp_sharding_strategy: FULL_SHARD
+  fsdp_backward_prefetch: BACKWARD_PRE
+  fsdp_forward_prefetch: false
+  fsdp_state_dict_type: FULL_STATE_DICT
+  fsdp_offload_params: false
+  fsdp_sync_module_states: true
+  fsdp_use_orig_params: true
+  fsdp_cpu_ram_efficient_loading: true
