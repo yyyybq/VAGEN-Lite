@@ -1,7 +1,6 @@
-"""The experiment matrix registered in main (configs/matrix_r12.json, round 12 freeze, the user's 3.3 of 2026-10-22):
-groups B-E planned, A closed and C0 done, every group an S0 / D pair of one standard recipe, the P0 / P1 paths left
-empty.  Round 13 (the user's decisions 74-75 of 2026-10-26): A closed (weak starts lose the format), B is B' (P0 plus
-the format SFT's action conversations P2f)."""
+"""The experiment matrix (configs/matrix_r12.json): registered in round 12 (the user's 3.3 of 2026-10-22), moved to
+Qwen3-VL-8B by the user's 14th supplement of 2026-10-27 (decision 78): groups B-E planned on Qwen3 with two seeds,
+A closed, C0 the Qwen3 SFT epoch 8 (running); every group an S0 / dense pair; P0 / P1 paths left empty."""
 
 import json
 import unittest
@@ -20,28 +19,35 @@ class MatrixTest(unittest.TestCase):
         g = self.m["groups"]
         self.assertEqual(sorted(g), ["A", "B", "C", "C0", "D", "E"])
         self.assertEqual({k: v["status"] for k, v in g.items()},
-                         {"A": "closed", "B": "planned", "C": "planned", "D": "planned", "E": "planned", "C0": "done"})
+                         {"A": "closed", "B": "planned", "C": "planned", "D": "planned", "E": "planned", "C0": "running"})
         self.assertEqual([g[k]["pools"] for k in ("B", "C", "D", "E", "C0")],
-                         [["P0", "P2f"], ["P0", "P2"], ["P0", "P1", "P2"], ["P0", "P1", "P2"], ["P2"]])
-        self.assertTrue(g["A"]["closed"].startswith("2026-10-26") and g["B"]["changed"].startswith("2026-10-26"))
+                         [["P0", "P2f"], ["P0", "P2q"], ["P0", "P1", "P2q"], ["P0", "P1", "P2q"], ["P2q"]])
         self.assertEqual(g["B"]["name"], "B'")
-        self.assertTrue(self.m["pools"]["P2f"]["path"].endswith("format_sft_v2a/sft_trajectories_format.jsonl"))
-        self.assertEqual((g["A"]["start"], g["C0"]["start"]), ("base_7b", "sft_e9"))
-        for k in "ABCDE":  # new data shows the future data's format example; C0 trained on the old text
+        for k in ("A", "B", "C", "D", "E"):
+            self.assertEqual(g[k]["start"], "base_qwen3", k)
             self.assertEqual(g[k]["format_example"], "action_names", k)
-        self.assertEqual(g["C0"]["format_example"], "placeholder")
+        for k in ("B", "C", "D", "E", "C0"):
+            self.assertGreaterEqual(g[k]["seeds"], 2, k)
+        self.assertEqual((g["C0"]["start"], g["C0"]["format_example"]), ("sft_q3_e8", "action_names"))
+        self.assertTrue(g["A"]["closed"].startswith("2026-10-26"))
 
-    def test_pools_and_pair(self):
+    def test_models_pools_and_pair(self):
+        self.assertEqual(self.m["model_type"], "qwen3_vl")
+        self.assertIn("Qwen3-VL-8B-Instruct", self.m["models"]["base_qwen3"])
+        self.assertTrue(self.m["models"]["sft_q3_e8"].endswith("lf_q3formal/model/checkpoint-1232"))
         self.assertIsNone(self.m["pools"]["P0"]["path"])
         self.assertIsNone(self.m["pools"]["P1"]["path"])
-        self.assertTrue(self.m["pools"]["P2"]["path"].endswith("interiorgs_v10_r11_20261016/sft/sft_trajectories.jsonl"))
+        self.assertTrue(self.m["pools"]["P2q"]["path"].endswith("sft_v10_newformat_20261024/sft_trajectories.jsonl"))
+        self.assertTrue(self.m["pools"]["P2f"]["path"].endswith("format_sft_v2a/sft_trajectories_format.jsonl"))
         standards = TP.load_standards()
         pair = self.m["rl"]["pair"]
         s0, d = standards[pair["S0"]], standards[pair["D"]]
-        self.assertEqual((s0["reward_preset"], d["reward_preset"]), ("S0", "dense"))
+        self.assertEqual((s0["reward_preset"], d["reward_preset"]), ("S0", "D_cond"))
         self.assertEqual({k: v for k, v in s0.items() if k != "reward_preset"},
                          {k: v for k, v in d.items() if k != "reward_preset"})  # a pair differs only in the reward
-        self.assertEqual(self.m["rl"]["seed"], 20261019)
+        self.assertEqual(self.m["rl"]["dense"]["variant"], "V4")
+        self.assertEqual(self.m["rl"]["seeds"], [20261019, 20261021])
+        self.assertEqual(self.m["rl"]["guards"]["kl_max"], 1.0)
 
 
 if __name__ == "__main__":

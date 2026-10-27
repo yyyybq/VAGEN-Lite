@@ -1,43 +1,139 @@
 {
- "_doc": "The experiment matrix of InteriorGS v10, registered in main as planned (round 12 freeze, the user's 3.3 of 2026-10-22). Every group is an S0 / D pair of one standard RL recipe (configs/rl_standards.json) from one start model: same tasks (reserve train tasks), seed, number of updates, stop rules and checkpoints, reported side by side (the pairing rule of 2026-10-21). Data pools: P0 benchmark-style QA (only 230 sample questions exist; the full bank is pending, path left empty), P1 transition QA (built on the transition-qa branch in the VAGEN-Lite-data worktree, not in main yet, path left empty), P2 the round-11 SFT action trajectories (9,802 train conversations). The executable plans come later from the transition-qa branch's data_gen/sft_mixture/matrix_plan.py once it is merged; this file fixes what each group is. New data shows the format example of the future data (admission policy: action_names); C0 trained on the placeholder text.",
+ "_doc": "The experiment matrix of InteriorGS v10 (registered in round 12; moved to Qwen3-VL-8B by the user's 14th supplement of 2026-10-27, decision 78: every new experiment on Qwen3-VL-8B). Every group is an S0 / dense pair of one standard RL recipe (configs/rl_standards.json) from one start model, at least two seeds (decision 80: differences count only paired by seed; with fewer than two seeds they are 'not confirmed'): same tasks (reserve train tasks), seeds, number of updates, stop rules and checkpoints, reported side by side; whether a run stays stable is reported as a result of its own. Data pools: P0 benchmark-style QA (path left empty, the bank is pending), P1 transition QA (path left empty, on the transition-qa branch), P2 the round-11 SFT action trajectories, P2q the same conversations in the new format (real action names) that the Qwen3 SFT trained on, P2f the format SFT's short action conversations. All new data shows real action names (format_example action_names). The Qwen2.5-VL matrix (round 12, C0 on Qwen2.5) is closed: report REPORT_QWEN25_DENSE_20261027.md.",
  "pools": {
-  "P0": {"name": "benchmark-style QA (仿 benchmark 的 QA)", "path": null},
-  "P1": {"name": "transition QA (转移题)", "path": null},
-  "P2": {"name": "round-11 SFT action trajectories (动作轨迹)",
-         "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/sft_trajectories.jsonl"},
-  "P2f": {"name": "format SFT conversations (格式 SFT 的短对话: 440 one- or two-turn conversations from P2 with real action names, training_prep format-sft, format SFT v2)",
-          "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/format_sft_v2a/sft_trajectories_format.jsonl"}
+  "P0": {
+   "name": "benchmark-style QA (仿 benchmark 的 QA)",
+   "path": null
+  },
+  "P1": {
+   "name": "transition QA (转移题)",
+   "path": null
+  },
+  "P2": {
+   "name": "round-11 SFT action trajectories (动作轨迹)",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/sft_trajectories.jsonl"
+  },
+  "P2f": {
+   "name": "format SFT conversations (格式 SFT 的短对话: 440 one- or two-turn conversations from P2 with real action names, training_prep format-sft, format SFT v2)",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/format_sft_v2a/sft_trajectories_format.jsonl"
+  },
+  "P2q": {
+   "name": "round-11 SFT action trajectories in the new format (动作轨迹，新格式：真实动作名)",
+   "path": "/mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024/sft_trajectories.jsonl"
+  }
  },
  "models": {
-  "base_7b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b",
-  "sft_e9": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386"
+  "base_qwen3": "/mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b",
+  "sft_q3_e8": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232",
+  "base_7b_qwen25": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/base_7b",
+  "sft_e9_qwen25": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386"
  },
  "rl": {
-  "pair": {"S0": "v10_p1_S0", "D": "v10_p1_D"},
-  "seed": 20261019, "task_pool": "reserve", "updates": 300, "eval_every": 50,
+  "pair": {
+   "S0": "v10_p1_S0",
+   "D": "v10_p1_Dcond"
+  },
+  "task_pool": "reserve",
+  "updates": 300,
+  "eval_every": 50,
   "rows": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/rl_rows/rows.jsonl",
   "exclude": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json",
-  "eval_sets": {"val": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2",
-                "test": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2"},
-  "note": "The standard's chain settings apply (rl_standards.json chain_defaults). The D member is the current dense reward; whether the matrix uses D-cond instead is decided after the dense reward's second batch."
+  "eval_sets": {
+   "val": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2",
+   "test": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2"
+  },
+  "note": "The standard's chain settings apply (rl_standards.json chain_defaults); runs set model_type qwen3_vl so the chain uses the Qwen3 runtime (vagen/models/model_types.py).",
+  "dense": {
+   "variant": "V4",
+   "progress_reward_scale": 3.3333333333333335,
+   "group_filter": "keep_by_return_std",
+   "keep_std_threshold": 0.3318,
+   "keep_std_floor": 1.0,
+   "note": "decision 79: the Qwen3 dense baseline is V4 for now (the D_cond standard with the progress scale / 3 and keep); DCK (threshold 0.892, floor 1.0) runs too, and the baseline is set by three checks: neither side lower, failed tasks end closer, no drift"
+  },
+  "seeds": [
+   20261019,
+   20261021
+  ],
+  "guards": {
+   "invalid_max": 0.1,
+   "kl_max": 1.0,
+   "attention": "eager",
+   "note": "decision 78: the main line's standard (round-11 package, 32 render workers, render first, the 10% unreadable line, the KL 1.0 line, eager attention)"
+  }
  },
  "groups": {
-  "A": {"status": "closed", "pools": [], "sft": "format SFT of the original 7B (the user's 3.1.4): a few hundred short conversations from P2 shown with real action names (training_prep format-sft), 1-2 epochs, a small learning rate; accepted when 200 train tasks x 4 episodes at temperature 0.8 have at most 1% unreadable answers and a success rate near the original model's 5-9%",
-        "start": "base_7b", "format_example": "action_names",
-        "rl_rules": "signal check at update 25 (mixed tasks >= 10%), KL stop 1.0, the 10% unreadable line, extension to 600 at update 300 by the existing rule; if it collapses again, stop and report, change nothing",
-        "next": "its S0 / D pair and D-cond + keep in the dense reward's second batch",
-        "closed": "2026-10-26, the user's decision 74 (13th supplement): not run.  Weak starts lost the answer format in every setting tried (round 12 A from the original 7B, A from format SFT v1 epoch 2, A v2 from format SFT v2 epoch 1, the stability controls W0-W5): every RL was stopped by the 10% unreadable line between updates 10 and 55, without a checkpoint; format supervision inside RL is not implemented.  Kept as a finding (STATUS, the weak-start section)."},
-  "B": {"status": "planned", "name": "B'", "pools": ["P0", "P2f"],
-        "sft": "P0 plus a few action samples (P2f, the format SFT's conversations: start with its 440 and add more only if the format is not stable), 10 epochs, picked on the v2 validation set",
-        "start": "base_7b", "format_example": "action_names",
-        "changed": "2026-10-26, the user's decision 75 (13th supplement): was P0 only.  A P0-only start never sees an action answer, so like the closed group A it would start RL without the action format, and every such start lost its format in RL; P2f adds the format SFT's short action conversations, their number set by format stability."},
-  "C": {"status": "planned", "pools": ["P0", "P2"], "sft": "P0 + P2, 10 epochs, picked on the v2 validation set", "start": "base_7b",
-        "format_example": "action_names"},
-  "D": {"status": "planned", "pools": ["P0", "P1", "P2"], "sft": "P0 + P1 + P2 (the three kinds kept apart, one run), 10 epochs, picked on the v2 validation set",
-        "start": "base_7b", "format_example": "action_names"},
-  "E": {"status": "planned", "pools": ["P0", "P1", "P2"], "sft": "the same model as D", "start": "base_7b", "format_example": "action_names",
-        "rl_prompt": "free_think (with thinking text; exploratory, after D; dropped when more than 20% of the answers are unreadable in its first 50 updates)"},
-  "C0": {"status": "done", "pools": ["P2"], "sft": "round 11's SFT, epoch 9 (no new training)", "start": "sft_e9", "format_example": "placeholder",
-         "results": "R12-P1-S0 / R12-P1-D (interiorgs_v10_train_r12a_20261019): S0 update 250 48.4% / 42.1%, D update 100 45.3% / 44.5% on v2 validation / test (start 40.9% / 37.7%); the dense reward's first batch (interiorgs_v10_train_r12k_20261021) starts here too"}
- }
+  "A": {
+   "status": "closed",
+   "pools": [],
+   "sft": "format SFT of the original 7B (the user's 3.1.4): a few hundred short conversations from P2 shown with real action names (training_prep format-sft), 1-2 epochs, a small learning rate; accepted when 200 train tasks x 4 episodes at temperature 0.8 have at most 1% unreadable answers and a success rate near the original model's 5-9%",
+   "start": "base_qwen3",
+   "format_example": "action_names",
+   "rl_rules": "signal check at update 25 (mixed tasks >= 10%), KL stop 1.0, the 10% unreadable line, extension to 600 at update 300 by the existing rule; if it collapses again, stop and report, change nothing",
+   "next": "its S0 / D pair and D-cond + keep in the dense reward's second batch",
+   "closed": "2026-10-26, the user's decision 74 (13th supplement): not run.  Weak starts lost the answer format in every setting tried (round 12 A from the original 7B, A from format SFT v1 epoch 2, A v2 from format SFT v2 epoch 1, the stability controls W0-W5): every RL was stopped by the 10% unreadable line between updates 10 and 55, without a checkpoint; format supervision inside RL is not implemented.  Kept as a finding (STATUS, the weak-start section).  Not reopened on Qwen3-VL (decision 78); the Qwen3 weak start of the 14th supplement (3.3, format SFT then S0 / V4) is a separate run, not group A."
+  },
+  "B": {
+   "status": "planned",
+   "name": "B'",
+   "pools": [
+    "P0",
+    "P2f"
+   ],
+   "sft": "P0 plus a few action samples (P2f, the format SFT's conversations: start with its 440 and add more only if the format is not stable), 10 epochs, picked on the v2 validation set",
+   "start": "base_qwen3",
+   "format_example": "action_names",
+   "changed": "2026-10-26, the user's decision 75 (13th supplement): was P0 only.  A P0-only start never sees an action answer, so like the closed group A it would start RL without the action format, and every such start lost its format in RL; P2f adds the format SFT's short action conversations, their number set by format stability.",
+   "seeds": 2
+  },
+  "C": {
+   "status": "planned",
+   "pools": [
+    "P0",
+    "P2q"
+   ],
+   "sft": "P0 + P2q, 10 epochs, picked on the v2 validation set",
+   "start": "base_qwen3",
+   "format_example": "action_names",
+   "seeds": 2
+  },
+  "D": {
+   "status": "planned",
+   "pools": [
+    "P0",
+    "P1",
+    "P2q"
+   ],
+   "sft": "P0 + P1 + P2q (the three kinds kept apart, one run), 10 epochs, picked on the v2 validation set",
+   "start": "base_qwen3",
+   "format_example": "action_names",
+   "seeds": 2
+  },
+  "E": {
+   "status": "planned",
+   "pools": [
+    "P0",
+    "P1",
+    "P2q"
+   ],
+   "sft": "the same model as D",
+   "start": "base_qwen3",
+   "format_example": "action_names",
+   "rl_prompt": "free_think (with thinking text; exploratory, after D; dropped when more than 20% of the answers are unreadable in its first 50 updates)",
+   "seeds": 2
+  },
+  "C0": {
+   "status": "running",
+   "pools": [
+    "P2q"
+   ],
+   "sft": "the model line's Qwen3-VL SFT, epoch 8 (no new training)",
+   "start": "sft_q3_e8",
+   "format_example": "action_names",
+   "seeds": 2,
+   "results": "seed 20261019 (the model line's chain m_qwen3vl8b_formal_rl_20261026): S0 stopped at update 150 by the unreadable line (made-up 'done'), V4 300 updates, picked update 300 48.9% on the 705 v2 tasks vs SFT 44.3%; seed 20261021 running (m_qwen3vl8b_formal_rl_20261027_s20261021); DCK seed 20261019 by the main line (interiorgs_v10_train_q3dck_20261027)",
+   "qwen25": "the Qwen2.5-VL C0 (round 11 SFT epoch 9, placeholder format): S0 / D / DCK on two seeds, V4 / DCK on five; report REPORT_QWEN25_DENSE_20261027.md"
+  }
+ },
+ "model_type": "qwen3_vl"
 }
