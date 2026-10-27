@@ -291,8 +291,11 @@ def cmd_probe_occlusion(args: argparse.Namespace) -> None:
         frames.update({f["frame_id"]: f for f in GEN.read_jsonl(extra / "frames.jsonl")})
     align = {r["sample_id"]: r for r in GEN.read_jsonl(judge / "alignment.jsonl")}
     judged = {r["sample_id"]: r for r in GEN.read_jsonl(judge / "results.jsonl") if "error" not in r}
+    qtypes, families = set(args.qtypes.split(",")), set(f for f in args.families.split(",") if f)
+    answers = set(a for a in args.answers.split(",") if a)
     probe = [r for r in GEN.read_jsonl(out / "p1_probe.jsonl")
-             if r["qtype"].startswith("occluded") and r["answer_value"] in ("full", "partial")]
+             if r["qtype"] in qtypes and (not families or r["family"] in families)
+             and (not answers or r["answer_value"] in answers)]
     picks = order_for_check(probe, {s: a["status"] for s, a in align.items()}, args.seed)
 
     def save(img: Any, name: str) -> str:
@@ -324,7 +327,8 @@ def cmd_probe_occlusion(args: argparse.Namespace) -> None:
                        "boxed": boxed, "post_frame": None, "originals": r["images"],
                        "objects": {s: e.get("ref") for s, e in zip("AB", row["target_object"]["objects"])},
                        "tag": f"遮挡物：{GROUP_ZH.get(group, '其他')}（{al['b_label']}）· {STATUS_ZH.get(al['status'], al['status'])}",
-                       "occluder_status": al["status"], "extra_images": extra, "fix_choices": FIX_CHOICES})
+                       "occluder_status": al["status"], "extra_images": extra,
+                       "fix_choices": args.fix.split(",") if args.fix else FIX_CHOICES})
     GEN.write_jsonl(d / "sample.jsonl", sample)
     print(json.dumps({"questions": len(sample), "flagged_first": sum(s["occluder_status"] != "ok" for s in sample),
                       "by_answer": collections.Counter(s["answer_value"] for s in sample),
@@ -529,6 +533,10 @@ def main() -> None:
     po.add_argument("--dir", default="review_probe_occ")
     po.add_argument("--extra", action="append", default=[], help="a folder of extra tasks (rows.jsonl, frames.jsonl)")
     po.add_argument("--near-tol", type=float, default=0.15, help="the depth judge's near-face tolerance for the picture")
+    po.add_argument("--qtypes", default="occluded_now,occluded_after", help="the probe's question types to check")
+    po.add_argument("--families", default="", help="only these task families (comma-separated; default all)")
+    po.add_argument("--answers", default="full,partial", help="only these answer values (empty: all)")
+    po.add_argument("--fix", default="", help="the right-answer choices of a wrong verdict (default FIX_CHOICES)")
     po.add_argument("--seed", type=int, default=20261021)
     po.set_defaults(func=cmd_probe_occlusion)
     b = sub.add_parser("page")

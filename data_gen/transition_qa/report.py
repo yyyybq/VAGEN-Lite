@@ -105,8 +105,10 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
                      + (f"，以及人工核对从探针去掉的 {stats['probe_dropped_excluded']} 道" if stats.get("probe_dropped_excluded") else "")
                      + "。")
     for name, h in (stats.get("held") or {}).items():
-        lines.append(f"- {name} 暂扣 {h['held']} 道（" + "、".join(f"{q} {n}" for q, n in sorted(h["by_qtype"].items()))
-                     + f"），在 {name.replace('.jsonl', '_held.jsonl')}；用户 2026-10-23：框判据的遮挡标签核对下来大多不对。")
+        parts = h.get("by_family_qtype") or h["by_qtype"]
+        lines.append(f"- {name} 暂扣 {h['held']} 道（" + "、".join(f"{q} {n}" for q, n in sorted(parts.items()))
+                     + f"），在 {name.replace('.jsonl', '_held.jsonl')}：答案来自遮挡的框判据（遮挡题和遮挡任务的 goal 题），"
+                     "用户核对探针时发现这个判据的标签大多不对（2026-10-23、10-27）。")
     probe_stats = out / "probe_stats.json"
     if probe_stats.exists():
         ps = json.loads(probe_stats.read_text())

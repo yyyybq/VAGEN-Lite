@@ -6,8 +6,8 @@
 
 | 文件 | 题数 | 状态题 (a) | 前向题 (b) | 逆向题 (c) |
 | --- | --- | --- | --- | --- |
-| p1_train.jsonl | 86855 | 35695（41.1%） | 42751（49.2%） | 8409（9.7%） |
-| p1_test.jsonl | 5985 | 2313（38.6%） | 2775（46.4%） | 897（15.0%） |
+| p1_train.jsonl | 85413 | 34984（41.0%） | 42020（49.2%） | 8409（9.8%） |
+| p1_test.jsonl | 5942 | 2311（38.9%） | 2734（46.0%） | 897（15.1%） |
 | p1_probe.jsonl | 934 | 434（46.5%） | 460（49.3%） | 40（4.3%） |
 
 三类题的规则（用户 2026-10-19）：状态题全部保留（答案平衡之后）；前向题最多是状态题的 1.2 倍；逆向题最多占题库的 15%；"动作后任务要求会满足吗"（goal_after）最多占前向题的一半；单个场景最多 8%。超出的按（题类、答案、是否变化）分层抽。
@@ -17,7 +17,8 @@
 - val 场景：前向题 (b)可用 6697、留下 2775；逆向题 (c)可用 1015、留下 897；状态题 (a)可用 2313、留下 2313
   - 上限：前向题 2775 道，逆向题 897 道
 - 测试集去掉了探针集的 934 道题（两份不重叠），以及人工核对从探针去掉的 18 道。
-- p1_train.jsonl 暂扣 582 道（occluded_after 355、occluded_now 227），在 p1_train_held.jsonl；用户 2026-10-23：框判据的遮挡标签核对下来大多不对。
+- p1_train.jsonl 暂扣 2024 道（occlusion_alignment/goal_after 731、occlusion_alignment/goal_now 711、occlusion_alignment/occluded_after 355、occlusion_alignment/occluded_now 227），在 p1_train_held.jsonl：答案来自遮挡的框判据（遮挡题和遮挡任务的 goal 题），用户核对探针时发现这个判据的标签大多不对（2026-10-23、10-27）。
+- p1_test.jsonl 暂扣 43 道（occlusion_alignment/goal_after 41、occlusion_alignment/goal_now 2），在 p1_test_held.jsonl：答案来自遮挡的框判据（遮挡题和遮挡任务的 goal 题），用户核对探针时发现这个判据的标签大多不对（2026-10-23、10-27）。
 - 探针集：934 道，每个题类 40 道，其中 goal_after 200 道、goal_now 200 道、occluded_after 全部可用的 71 道（人工核对后留 60 道）、occluded_now 全部可用的 41 道（人工核对后留 34 道）（预注册要的题类），来自 97 个 val 场景；其余题类都够；occluded_after 另有 37 道"没变化"的超过 10% 上限，没取。
 - 探针集的人工核对（probe_label_overrides.json）：33 道按核对的答案重标（full → partial 4、partial → none 29），18 道不该出的题去掉。
 
@@ -30,10 +31,10 @@
 | absolute_positioning | 1310 | 0 | 0 | 0 | 0 | 9640 | 2686 | 6998 | 6909 | 0 | 0 | 0 | 0 | 0 | 0 | 27543 |
 | equidistance | 1477 | 0 | 0 | 2497 | 1444 | 0 | 0 | 1709 | 2577 | 0 | 0 | 0 | 0 | 0 | 0 | 9704 |
 | fov_inclusion | 1245 | 3314 | 2459 | 0 | 0 | 0 | 0 | 1550 | 2981 | 0 | 0 | 0 | 0 | 0 | 0 | 11549 |
-| occlusion_alignment | 238 | 0 | 0 | 0 | 0 | 0 | 0 | 731 | 711 | 0 | 0 | 0 | 0 | 0 | 0 | 1680 |
+| occlusion_alignment | 238 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 238 |
 | projective_relations | 2828 | 0 | 0 | 0 | 0 | 0 | 0 | 4699 | 5724 | 0 | 0 | 2645 | 3515 | 0 | 0 | 19411 |
 | screen_occupancy | 1311 | 0 | 0 | 0 | 0 | 0 | 0 | 5083 | 5770 | 3885 | 919 | 0 | 0 | 0 | 0 | 16968 |
-| 合计 | 8409 | 3314 | 2459 | 2497 | 1444 | 9640 | 2686 | 20770 | 24672 | 3885 | 919 | 2645 | 3515 | 0 | 0 | 86855 |
+| 合计 | 8409 | 3314 | 2459 | 2497 | 1444 | 9640 | 2686 | 20039 | 23961 | 3885 | 919 | 2645 | 3515 | 0 | 0 | 85413 |
 
 **p1_test.jsonl**
 
@@ -42,10 +43,10 @@
 | absolute_positioning | 140 | 0 | 0 | 0 | 0 | 694 | 361 | 510 | 386 | 0 | 0 | 0 | 0 | 0 | 0 | 2091 |
 | equidistance | 144 | 0 | 0 | 160 | 160 | 0 | 0 | 83 | 57 | 0 | 0 | 0 | 0 | 0 | 0 | 604 |
 | fov_inclusion | 122 | 172 | 252 | 0 | 0 | 0 | 0 | 88 | 96 | 0 | 0 | 0 | 0 | 0 | 0 | 730 |
-| occlusion_alignment | 33 | 0 | 0 | 0 | 0 | 0 | 0 | 41 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 76 |
+| occlusion_alignment | 33 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 33 |
 | projective_relations | 294 | 0 | 0 | 0 | 0 | 0 | 0 | 322 | 221 | 0 | 0 | 139 | 354 | 0 | 0 | 1330 |
 | screen_occupancy | 164 | 0 | 0 | 0 | 0 | 0 | 0 | 336 | 277 | 230 | 147 | 0 | 0 | 0 | 0 | 1154 |
-| 合计 | 897 | 172 | 252 | 160 | 160 | 694 | 361 | 1380 | 1039 | 230 | 147 | 139 | 354 | 0 | 0 | 5985 |
+| 合计 | 897 | 172 | 252 | 160 | 160 | 694 | 361 | 1339 | 1037 | 230 | 147 | 139 | 354 | 0 | 0 | 5942 |
 
 **p1_probe.jsonl**
 
@@ -74,8 +75,8 @@
 | closer_now | 1444 | A 50.0% / B 50.0% | 0.0 | b 734，a 710 |
 | distance_bin_after | 9640 | A 24.8% / B 25.2% / C 25.2% / D 24.8% | 0.2 | 2.0 2060，2.5 1937，3.0 1548，1.5 1456，3.5 914，1.0 745 |
 | distance_bin_now | 2686 | A 24.8% / B 24.3% / C 26.2% / D 24.6% | 1.2 | 2.5 669，2.0 532，3.0 493，1.5 468，3.5 195，1.0 152 |
-| goal_after | 20770 | Yes 49.7% / No 50.3% | 0.3 | no 10454，yes 10316 |
-| goal_now | 24672 | Yes 47.6% / No 52.4% | 2.4 | no 12923，yes 11749 |
+| goal_after | 20039 | Yes 49.7% / No 50.3% | 0.3 | no 10084，yes 9955 |
+| goal_now | 23961 | Yes 47.6% / No 52.4% | 2.4 | no 12547，yes 11414 |
 | height_bin_after | 3885 | A 25.6% / B 25.8% / C 25.0% / D 23.5% | 1.5 | 0.3 932，0.2 923，0.4 819，0.5 511，0.1 334，0.7 101 |
 | height_bin_now | 919 | A 24.4% / B 25.8% / C 25.8% / D 24.0% | 1.0 | 0.2 223，0.4 223，0.3 223，0.5 106，0.1 89，0.7 14 |
 | left_right_after | 2645 | A 52.1% / B 47.9% | 2.1 | left 1378，right 1267 |
@@ -92,8 +93,8 @@
 | closer_now | 160 | A 50.0% / B 50.0% | 0.0 | b 84，a 76 |
 | distance_bin_after | 694 | A 24.8% / B 25.2% / C 25.1% / D 24.9% | 0.2 | 2.5 145，2.0 126，3.0 114，1.5 86，3.5 73，1.0 53 |
 | distance_bin_now | 361 | A 25.5% / B 24.1% / C 26.3% / D 24.1% | 1.3 | 2.5 90，3.0 76，1.5 61，2.0 59，3.5 30，4.0 28 |
-| goal_after | 1380 | Yes 50.0% / No 50.0% | 0.0 | yes 690，no 690 |
-| goal_now | 1039 | Yes 47.6% / No 52.4% | 2.4 | no 544，yes 495 |
+| goal_after | 1339 | Yes 50.0% / No 50.0% | 0.0 | no 670，yes 669 |
+| goal_now | 1037 | Yes 47.6% / No 52.4% | 2.4 | no 543，yes 494 |
 | height_bin_after | 230 | A 24.8% / B 26.1% / C 25.2% / D 23.9% | 1.1 | 0.2 53，0.3 50，0.4 45，0.1 29，0.5 24，0.8 12 |
 | height_bin_now | 147 | A 24.5% / B 25.9% / C 25.9% / D 23.8% | 1.2 | 0.3 35，0.2 34，0.4 31，0.1 22，0.5 12，0.6 4 |
 | left_right_after | 139 | A 52.5% / B 47.5% | 2.5 | left 73，right 66 |
@@ -130,13 +131,13 @@
 | p1_train.jsonl | both_in_view_after | 3314 | 10.0% | 65.4% |
 | p1_train.jsonl | closer_after | 2497 | 10.0% | 45.5% |
 | p1_train.jsonl | distance_bin_after | 9640 | 10.0% | 65.0% |
-| p1_train.jsonl | goal_after | 20770 | 10.0% | 52.8% |
+| p1_train.jsonl | goal_after | 20039 | 10.2% | 53.1% |
 | p1_train.jsonl | height_bin_after | 3885 | 10.1% | 64.8% |
 | p1_train.jsonl | left_right_after | 2645 | 10.0% | 0.0% |
 | p1_test.jsonl | both_in_view_after | 172 | 10.5% | 66.1% |
 | p1_test.jsonl | closer_after | 160 | 10.0% | 48.5% |
 | p1_test.jsonl | distance_bin_after | 694 | 9.9% | 61.7% |
-| p1_test.jsonl | goal_after | 1380 | 9.8% | 53.8% |
+| p1_test.jsonl | goal_after | 1339 | 9.9% | 54.2% |
 | p1_test.jsonl | height_bin_after | 230 | 8.7% | 66.0% |
 | p1_test.jsonl | left_right_after | 139 | 8.6% | 0.0% |
 | p1_probe.jsonl | both_in_view_after | 40 | 10.0% | 51.9% |
@@ -243,13 +244,13 @@
 | closer_now | 160 | 50.0% | 52.8%（learned_options） | 53.8% | 0.6% |
 | distance_bin_after | 694 | 25.0% | 24.4%（learned_options） | 22.0% | 12.1% |
 | distance_bin_now | 361 | 25.0% | 26.6%（first_option） | 13.9% | 35.7% |
-| goal_after | 1380 | 50.0% | 52.8%（learned_action） | 50.0% | 0.0% |
-| goal_now | 1039 | 50.0% | 52.4%（learned_action） | 52.4% | 0.0% |
+| goal_after | 1339 | 50.0% | 52.9%（learned_action） | 50.0% | 0.0% |
+| goal_now | 1037 | 50.0% | 52.4%（learned_action） | 52.4% | 0.0% |
 | height_bin_after | 230 | 25.0% | 28.3%（learned_options） | 23.5% | 14.3% |
 | height_bin_now | 147 | 25.0% | 25.9%（learned_options） | 16.3% | 0.7% |
 | left_right_after | 139 | 50.0% | 52.5%（learned_options） | 46.0% | 8.6% |
 | left_right_now | 354 | 50.0% | 52.3%（learned_options） | 51.4% | 0.8% |
-| 全部 | 5985 | 38.5% |  | 35.7% | 9.4% |
+| 全部 | 5942 | 38.4% |  | 35.7% | 9.4% |
 
 **p1_probe.jsonl**
 
@@ -262,8 +263,8 @@
 | closer_now | 40 | 50.0% | 50.0%（learned_options） | 50.0% | 2.5% |
 | distance_bin_after | 40 | 25.0% | 25.0%（first_option） | 27.5% | 15.0% |
 | distance_bin_now | 40 | 25.0% | 27.5%（first_option） | 15.0% | 32.5% |
-| goal_after | 200 | 50.0% | 49.5%（learned_action） | 50.0% | 0.0% |
-| goal_now | 200 | 50.0% | 50.0%（learned_action） | 50.0% | 0.0% |
+| goal_after | 200 | 50.0% | 49.2%（learned_action） | 50.0% | 0.0% |
+| goal_now | 200 | 50.0% | 49.8%（learned_action） | 50.0% | 0.0% |
 | height_bin_after | 40 | 25.0% | 30.0%（first_option） | 22.5% | 15.0% |
 | height_bin_now | 40 | 25.0% | 25.0%（learned_options） | 15.0% | 2.5% |
 | left_right_after | 40 | 50.0% | 60.0%（learned_action） | 37.5% | 10.0% |
@@ -464,45 +465,45 @@ Answer with the option's letter.
 ```
 图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_ad44b6e59c5b02755203f85f__s4.png`
 
-**goal_after**（equidistance，terminal，`p1_2252abc0ec96`）
+**goal_after**（absolute_positioning，middle，`p1_23b8a322ab73`）
 
 ```
 <image>
-Task: Move to a spot that is equally far from the dishwasher and the electric cooker (measured to their nearest sides), with both of them in view.
+Task: Move to a spot about 2.5 meters away from the table (measured to its nearest side), keeping the table in view.
+If the camera moves backward by 0.3 meters from the current view, will the task's requirement be met? Answer Yes or No.
+答案：No
+```
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_edadccaf335b676c1f4bc0ae__s4.png`
+
+**goal_after**（absolute_positioning，middle，`p1_b5a15a64fd59`）
+
+```
+<image>
+Task: Move to a spot about 2.5 meters away from the floor lamp (measured to its nearest side), keeping the floor lamp in view.
 If the camera moves sideways to the left by 0.3 meters from the current view, will the task's requirement be met? Answer Yes or No.
 答案：Yes
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_482cd9940abb9c4ce2c21e8b__s6.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_c7bf0254fac1bcb4c2d982e8__s6.png`
 
-**goal_after**（screen_occupancy，terminal，`p1_aee4cd67abe0`）
-
-```
-<image>
-Task: Move so that the dining table is fully visible from top to bottom and its height fills about 15% of the image height.
-If the camera moves backward by 0.3 meters from the current view, will the task's requirement be met? Answer Yes or No.
-答案：Yes
-```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_24c247c6b11da7019ea9b7ee__x2.png`
-
-**goal_now**（projective_relations，middle，`p1_8e24cbbaee91`）
+**goal_now**（equidistance，start，`p1_9226da31b85d`）
 
 ```
 <image>
-Task: Move so that the wardrobe appears to the right of the chair next to the projection screen in your view.
+Task: Move to a spot that is equally far from the sofa next to the TV and the plant (measured to their nearest sides), with both of them in view.
 In the current view, is the task's requirement already met? Answer Yes or No.
 答案：No
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_a99120089e90853a93ead160__s1.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_b76157698e2f3f2084f5da35__s0.png`
 
-**goal_now**（screen_occupancy，interior，`p1_167c21ea8664`）
+**goal_now**（projective_relations，middle，`p1_17201c8d36db`）
 
 ```
 <image>
-Task: Move so that the easel is fully visible from top to bottom and its height fills about 60% of the image height.
+Task: Move so that the TV appears to the right of the flowers in your view.
 In the current view, is the task's requirement already met? Answer Yes or No.
-答案：Yes
+答案：No
 ```
-图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261018/interior/frames/plain/v10_6e6289d7f3552a322928cfba__i0.png`
+图：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/frames/plain/v10_28aac59150ee5ba553664a05__s4.png`
 
 **height_bin_after**（screen_occupancy，start，`p1_3f204df4378c`）
 

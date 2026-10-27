@@ -380,9 +380,13 @@ BUILD_CONFIG: Dict[str, Any] = {
     "flip_band": (0.35, 0.65),      # share of forward questions whose answer differs from the current one
     "scene_cap": 0.08,
     "final_letter_slack": 1.10,      # after sampling, per file: <= +2.4 points for 2 options, +1.8 for 4
-    # set aside after balancing (user, 2026-10-23): the training set's occlusion questions, whose box-judged labels
-    # the hand check of the probe found mostly wrong (PROGRESS 12.18); written to <file>_held.jsonl, nothing else moves
-    "hold_qtypes": {"train": ["occluded_now", "occluded_after"]},
+    # set aside after balancing, written to <file>_held.jsonl, nothing else moves (hold_out).  User, 2026-10-23: the
+    # training set's occlusion questions, whose box-judged labels the hand check of the probe found mostly wrong
+    # (PROGRESS 12.18); 2026-10-27: also the goal questions of occlusion tasks, whose success is the same box judge
+    # (training and test sets; the probe's are checked by hand instead, PROGRESS 12.19)
+    "hold": {"train": [{"qtypes": ["occluded_now", "occluded_after"]},
+                       {"qtypes": ["goal_now", "goal_after"], "families": ["occlusion_alignment"]}],
+             "test": [{"qtypes": ["goal_now", "goal_after"], "families": ["occlusion_alignment"]}]},
 }
 PROBE_CONFIG: Dict[str, Any] = {
     "per_qtype": 40,                # user, 2026-10-19: at least 40 per question type
@@ -971,11 +975,15 @@ def apply_label_overrides(records: List[Dict[str, Any]], overrides: Optional[Dic
     return out
 
 
-def hold_out(rows: List[Dict[str, Any]], qtypes: Sequence[str]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """(kept, held): questions of ``qtypes`` set aside (BUILD_CONFIG hold_qtypes; user 2026-10-23: the training
-    set's occlusion questions until their labels can be trusted)."""
-    held = [r for r in rows if r["qtype"] in set(qtypes)]
-    return [r for r in rows if r["qtype"] not in set(qtypes)], held
+def hold_out(rows: List[Dict[str, Any]], rules: Sequence[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """(kept, held): a question is held when a rule matches it: its qtype among the rule's ``qtypes`` and, if the
+    rule names ``families``, its task family among them (BUILD_CONFIG hold; user 2026-10-23 / 2026-10-27: labels
+    that come from the box occlusion judge, until they can be trusted)."""
+    def held(r: Dict[str, Any]) -> bool:
+        return any(r["qtype"] in rule["qtypes"] and (not rule.get("families") or r["family"] in rule["families"])
+                   for rule in rules)
+
+    return [r for r in rows if not held(r)], [r for r in rows if held(r)]
 
 
 def _check_scenes(records: List[Dict[str, Any]], manifest_path: str) -> Dict[str, List[Dict[str, Any]]]:
@@ -1063,12 +1071,13 @@ def cmd_build(args: argparse.Namespace) -> None:
     probe_scenes = {r["scene"] for r in read_jsonl(probe_path)} if probe_path.exists() else set()
     if {r["scene"] for r in built["train"]} & ({r["scene"] for r in built["val"]} | probe_scenes):
         raise SystemExit("a scene is in both the training and the test questions")
-    for split, qtypes in (cfg.get("hold_qtypes") or {}).items():
+    for split, rules in (cfg.get("hold") or {}).items():
         name = {"train": "p1_train.jsonl", "test": "p1_test.jsonl"}[split]
-        files[name], held = hold_out(files[name], qtypes)
+        files[name], held = hold_out(files[name], rules)
         n_held = write_jsonl(out / name.replace(".jsonl", "_held.jsonl"), (to_lf(r) for r in held))
-        stats.setdefault("held", {})[name] = {"qtypes": list(qtypes), "held": n_held,
-                                              "by_qtype": dict(collections.Counter(r["qtype"] for r in held))}
+        stats.setdefault("held", {})[name] = {
+            "rules": rules, "held": n_held, "by_qtype": dict(collections.Counter(r["qtype"] for r in held)),
+            "by_family_qtype": dict(collections.Counter(f"{r['family']}/{r['qtype']}" for r in held))}
     for name, rs in files.items():
         stats.setdefault("files", {})[name] = write_jsonl(out / name, (to_lf(r) for r in rs))
     if probe_path.exists():

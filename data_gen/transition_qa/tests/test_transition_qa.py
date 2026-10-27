@@ -375,11 +375,15 @@ def test_probe_label_overrides_relabel_and_drop():
         GEN.apply_label_overrides(recs, {"relabel": {"id000004": "none"}}, {})  # not an occlusion question
 
 
-def test_hold_out_sets_a_question_type_aside():
-    rows = [_rec(i, q, "A", "") for i, q in enumerate(["occluded_now", "goal_now", "occluded_after", "closer_now"])]
-    kept, held = GEN.hold_out(rows, ["occluded_now", "occluded_after"])
-    assert [r["qtype"] for r in kept] == ["goal_now", "closer_now"] and len(held) == 2
-    assert GEN.BUILD_CONFIG["hold_qtypes"] == {"train": ["occluded_now", "occluded_after"]}
+def test_hold_out_sets_question_types_and_family_goals_aside():
+    rows = [_rec(i, q, "A", "") for i, q in enumerate(["occluded_now", "goal_now", "occluded_after", "closer_now", "goal_after"])]
+    rows[1]["family"] = rows[2]["family"] = "occlusion_alignment"             # an occlusion task's goal question
+    rules = GEN.BUILD_CONFIG["hold"]["train"]
+    kept, held = GEN.hold_out(rows, rules)
+    assert [r["qtype"] for r in kept] == ["closer_now", "goal_after"]       # goal_after of another family stays
+    assert [r["qtype"] for r in held] == ["occluded_now", "goal_now", "occluded_after"]
+    kept, held = GEN.hold_out(rows, GEN.BUILD_CONFIG["hold"]["test"])
+    assert [r["qtype"] for r in held] == ["goal_now"] and len(kept) == 4
     assert GEN.PROBE_CONFIG["label_overrides"] == "probe_label_overrides.json"
 
 

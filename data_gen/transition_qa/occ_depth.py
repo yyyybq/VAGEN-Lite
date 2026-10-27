@@ -127,9 +127,11 @@ def cmd_prepare(args: argparse.Namespace) -> None:
         rows.update({r["task_id"]: r for r in GEN.read_jsonl(Path(extra) / "rows.jsonl")})
         frames.update({f["frame_id"]: f for f in GEN.read_jsonl(Path(extra) / "frames.jsonl")})
     want = set(x for x in args.ids.split(",") if x) if args.ids else None
+    # --ids: those questions, of any kind (2026-10-27: the goal questions of occlusion tasks, judged by the same box);
+    # otherwise the occlusion candidates with the given answers
     recs = [r for p in sorted((out / "raw").glob("*.jsonl")) for r in GEN.read_jsonl(p)
-            if r["kind"] == "occluded" and (want is None or r["sample_id"] in want)
-            and (want is not None or r["answer_value"] in args.answers.split(","))]
+            if (r["sample_id"] in want if want is not None
+                else r["kind"] == "occluded" and r["answer_value"] in args.answers.split(","))]
     todo, tasks = [], {}
     for r in recs:
         f = frames[GEN.frame_id_of(r["images"][0])]
