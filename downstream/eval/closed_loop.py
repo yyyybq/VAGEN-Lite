@@ -58,9 +58,10 @@ def plan(tasks, seeds, horizon_of=None):
 def eval_plan_episodes(path: Path, tasks_path: Path = TASKS):
     """(episodes, plan dict) of a fixed evaluation plan (downstream/eval/eval_d6.json): every task of the plan's
     groups with the plan's `seeds`; the spatial tasks (plan `spatial_tasks` file, key "spatial") with `seeds_spatial`
-    when the plan has it.  A plan with "only_spatial" keeps only the spatial tasks (X3: downstream/x/x3_plan.json)."""
+    when the plan has it.  A plan with "only_spatial" keeps only the spatial tasks (X3: downstream/x/x3_plan.json);
+    one with "tasks_file" takes its tasks (rows with task, group, horizon) from that file instead of target50 (X5)."""
     p = json.loads(Path(path).read_text())
-    task_rows = json.loads(Path(tasks_path).read_text())["tasks"]
+    task_rows = json.loads((WORKTREE / p["tasks_file"] if p.get("tasks_file") else Path(tasks_path)).read_text())["tasks"]
     horizon_of = {t["task"]: int(t["horizon"]) for t in task_rows}
     spatial = set()
     if p.get("seeds_spatial") or p.get("only_spatial"):

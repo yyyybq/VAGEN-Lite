@@ -6,8 +6,11 @@ one by one as the closed-loop evaluation does (target split, seed 1000, stable c
 an error; those N, in that order, are the list.  Failures are kept with their error.
 
     python downstream/x/x5_tasks.py --kind atomic --n 16 --out OUT/atomic.json
+    python downstream/x/x5_tasks.py --rows-from OUT/atomic.json OUT/composite.json --out downstream/x/x5_tasks.json
 
-Run with the RoboCasa simulator Python (downstream/eval/sim_env.sh).  OUT is rewritten after every try.
+Run with the RoboCasa simulator Python (downstream/eval/sim_env.sh).  OUT is rewritten after every try.  --rows-from
+(any Python) turns list files into the task file of the X5 evaluation plan (downstream/x/x5_plan.json): one row per
+chosen task, {"task", "group": "unseen_<kind>", "horizon"} (RoboCasa's task horizon, as target50_tasks.json has it).
 """
 from __future__ import annotations
 
@@ -50,12 +53,32 @@ def try_reset(task: str) -> dict:
             env.close()
 
 
+def task_rows(lists) -> list:
+    """Evaluation rows of the chosen tasks of X5 list files, in list order: {task, group "unseen_<kind>", horizon}."""
+    rows = []
+    for rec in lists:
+        horizon = {t["task"]: int(t["horizon"]) for t in rec["tried"] if t.get("ok")}
+        rows += [{"task": t, "group": f"unseen_{rec['kind']}", "horizon": horizon[t]} for t in rec["list"]]
+    return rows
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--kind", choices=("atomic", "composite"), required=True)
+    ap.add_argument("--kind", choices=("atomic", "composite"))
     ap.add_argument("--n", type=int, default=16)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--rows-from", nargs="+", help="X5 list files: write the evaluation task file to --out instead")
     args = ap.parse_args(argv)
+    if args.rows_from:
+        lists = [json.loads(Path(p).read_text()) for p in args.rows_from]
+        Path(args.out).write_text(json.dumps({
+            "_doc": "X5 (the user's decision 7 of 2026-10-26, lists confirmed 10-27): RoboCasa 1.0.1 tasks outside "
+                    "target50, chosen by downstream/x/x5_tasks.py (registry minus target50, sorted by name, "
+                    "random.Random(0) shuffle, first 16 per kind that reset); horizon = RoboCasa's task horizon.",
+            "sources": [str(p) for p in args.rows_from], "tasks": task_rows(lists)}, indent=1) + "\n")
+        return 0
+    if not args.kind:
+        ap.error("give --kind (or --rows-from)")
     sys.path.insert(0, str(WORKTREE))
     from downstream.eval import closed_loop
     from robocasa.utils import dataset_registry as R

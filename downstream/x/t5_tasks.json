@@ -1,0 +1,6 @@
+{
+ "_doc": "T5 (the user's decision of 2026-10-27): NavigateKitchen only, with its RoboCasa 1.0.1 horizon (as in downstream/demos/target50_tasks.json).",
+ "tasks": [
+  {"task": "NavigateKitchen", "group": "t5_navigate", "horizon": 450}
+ ]
+}

@@ -46,9 +46,22 @@ def code_state() -> dict:
             "dirty_downstream_files": dirty.splitlines() if dirty else []}
 
 
+def parse_lora(text: str) -> dict:
+    """T2: "rank=16,alpha=32,dropout=0.05,lr=1e-4" -> trainer.lora (downstream/train/lora.py via train_entry.py)."""
+    if not text:
+        return {}
+    out = {k.strip(): float(v) for k, v in (part.split("=") for part in text.split(",") if part.strip())}
+    missing = {"rank", "alpha", "lr"} - set(out)
+    if missing or set(out) - {"rank", "alpha", "dropout", "lr"}:
+        raise ValueError(f"--lora needs rank, alpha, lr (and optionally dropout): {text}")
+    out["rank"] = int(out["rank"])
+    out.setdefault("dropout", 0.0)
+    return out
+
+
 def build_config(recipe: dict, *, exp_dir: Path, exp_id: str, start_path: str, data_dir: Path, seed: int,
                  steps: int, save_interval: int, log_every: int, full_state_interval: int = 0,
-                 eval_points=(), freeze_modules: str = "") -> dict:
+                 eval_points=(), freeze_modules: str = "", lora: dict = None) -> dict:
     import copy
 
     cfg = copy.deepcopy(recipe)
@@ -62,6 +75,10 @@ def build_config(recipe: dict, *, exp_dir: Path, exp_id: str, start_path: str, d
     trainer.update(max_train_steps=int(steps), save_interval=int(save_interval), logging_frequency=int(log_every))
     if freeze_modules:  # X1 (the user's decision 2 of 2026-10-26): StarVLA's own freeze_backbones / LR-group filter
         trainer["freeze_modules"] = str(freeze_modules)
+    if lora:  # T2 (the user's decision of 2026-10-27): our own LoRA, train_entry.py freezes everything else itself
+        if freeze_modules:
+            raise ValueError("--lora freezes the model itself; do not combine it with --freeze-modules")
+        trainer["lora"] = dict(lora)
     if full_state_interval:
         trainer.update(full_state_interval=int(full_state_interval),
                        eval_points=[int(p) for p in eval_points if 0 < int(p) < int(steps)])
@@ -104,6 +121,10 @@ def main(argv=None) -> int:
     ap.add_argument("--freeze-modules", default="",
                     help="comma-separated module paths StarVLA freezes (trainer.freeze_modules), e.g. "
                          "qwen_vl_interface = the whole VLM, so only the action head trains (X1)")
+    ap.add_argument("--lora", default="", help="T2: LoRA on the language model, e.g. rank=16,alpha=32,dropout=0.05,lr=1e-4 "
+                                               "(trainer.lora; only LoRA and the action head train)")
+    ap.add_argument("--eval-plan", default="", help="recorded in experiment.json: the plan of the in-job evaluation "
+                                                    "when it is not eval_d6.json (the job sets EVAL_PLAN; T5)")
     args = ap.parse_args(argv)
     points = [int(p) for p in args.eval_points.split(",") if p.strip()]
     for v in [args.full_state_interval] + points:
@@ -138,7 +159,7 @@ def main(argv=None) -> int:
     cfg = build_config(recipe, exp_dir=exp_dir, exp_id=args.exp_id, start_path=start["path"], data_dir=args.data,
                        seed=args.seed, steps=args.steps, save_interval=args.save_interval, log_every=args.log_every,
                        full_state_interval=args.full_state_interval, eval_points=points,
-                       freeze_modules=args.freeze_modules)
+                       freeze_modules=args.freeze_modules, lora=parse_lora(args.lora))
     (exp_dir / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
     sys.path.insert(0, str(WORKTREE / "scripts"))
     from prepare_starvla_transfer import inspect_checkpoint
@@ -157,6 +178,8 @@ def main(argv=None) -> int:
                  "train_frames": sum(d["frames"]["train"] for d in split["datasets"])},
         "steps": args.steps, "save_interval": args.save_interval, "gpus": args.gpus,
         **({"freeze_modules": args.freeze_modules} if args.freeze_modules else {}),
+        **({"lora": parse_lora(args.lora)} if args.lora else {}),
+        **({"eval_plan": args.eval_plan} if args.eval_plan else {}),
         **({"segmented": True, "full_state_interval": args.full_state_interval,
             "eval_points": sorted({p for p in points if 0 < p <= args.steps} | {args.steps}),
             "injob_eval": {"servers": 8, "workers": 96}, "repeat_final": bool(args.repeat_final)}

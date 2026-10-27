@@ -4,6 +4,8 @@
     python downstream/demos/subsets.py target50 --out-dir downstream/demos/manifests
         -> target50_100.json (all human demos of the 50 target tasks), target50_030.json, target50_010.json
     python downstream/demos/subsets.py step2 --out downstream/demos/manifests/step2_smoke.json
+    python downstream/demos/subsets.py single --task NavigateKitchen --name navigate_100 \
+        --out downstream/demos/manifests/navigate_100.json      (T5: one task's row of target50_100)
 
 target50_010 / _030 follow RoboCasa 1.0.1's own definition of its 10% / 30% target subsets
 (robocasa/utils/groot_utils/groot_dataset.py:get_subset_demos_filter_key, filter_key "50_demos" / "150_demos",
@@ -152,6 +154,22 @@ def small(out_dir: Path, data_root: Path = DATA_ROOT, fractions=None) -> dict:
     return summary
 
 
+def single(task: str, source: Path, out: Path, name: str) -> dict:
+    """T5 (the user's decision of 2026-10-27): one task's row of an existing manifest (all its demonstrations in
+    target50_100), unchanged, as a manifest of its own."""
+    src = json.loads(Path(source).read_text())
+    rows = [r for r in src["tasks"] if r["task"] == task]
+    if len(rows) != 1:
+        raise ValueError(f"{task}: {len(rows)} rows in {source}")
+    manifest = {"name": name, "data_root": src["data_root"],
+                "rule": f"the {task} row of {Path(source).name} ({src['rule']})", "source_manifest": str(source),
+                "source_manifest_sha256": sha256(Path(source)), "tasks": rows,
+                "totals": {"tasks": 1, "episodes": len(rows[0]["train_ids"]), "frames": rows[0]["frames"]["train"]}}
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(manifest, indent=1) + "\n")
+    return {"path": str(out), **manifest["totals"], "sha256": sha256(out)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -161,9 +179,15 @@ def main(argv=None) -> int:
     b.add_argument("--out", type=Path, default=HERE / "manifests/step2_smoke.json")
     c = sub.add_parser("small", help="X2: target50_001 and target50_003 only")
     c.add_argument("--out-dir", type=Path, default=HERE / "manifests")
+    d = sub.add_parser("single", help="T5: one task's row of a manifest as its own manifest")
+    d.add_argument("--task", required=True)
+    d.add_argument("--source", type=Path, default=HERE / "manifests/target50_100.json")
+    d.add_argument("--name", required=True)
+    d.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
     result = {"target50": lambda: target50(args.out_dir), "step2": lambda: step2(args.out),
-              "small": lambda: small(args.out_dir)}[args.cmd]()
+              "small": lambda: small(args.out_dir),
+              "single": lambda: single(args.task, args.source, args.out, args.name)}[args.cmd]()
     print(json.dumps(result, indent=1))
     return 0
 

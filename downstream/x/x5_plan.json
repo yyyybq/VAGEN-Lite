@@ -1,0 +1,10 @@
+{
+ "_doc": "X5 (the user's decision 7 of 2026-10-26, lists confirmed 10-27): the E1 final checkpoints on 32 tasks our SFT never saw (downstream/x/x5_tasks.json: 16 atomic, the main result, and 16 composite, the supplement), 20 episodes each with evaluation seeds 1000-1019 = 640 episodes; target kitchens, RoboCasa's task horizons, one policy call per 16-step chunk, stable counter regions, as in eval_d6.json.",
+ "name": "x5_unseen32_seeds20",
+ "split": "target",
+ "seeds": "1000-1019",
+ "execute_steps": 16,
+ "groups": ["unseen_atomic", "unseen_composite"],
+ "tasks_file": "downstream/x/x5_tasks.json",
+ "stable_counter_regions": true
+}

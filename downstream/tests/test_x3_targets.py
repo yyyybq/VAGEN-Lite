@@ -106,6 +106,18 @@ def test_navigation_takes_the_nearest_placement_point_within_half_a_meter():
     assert d["chosen"] is None and d["nearest"] == "stove"
 
 
+def test_stacked_fixtures_share_a_placement_point():
+    """X3 B, NavigateKitchen 1008 (a success): the microwave hangs over the oven and their placement points differ by
+    0.3 mm, so the nearest fixture alone would name the oven."""
+    s = {"target": "microwave", "src": "drawer"}
+    fx = {"oven": {"dist": 0.0364}, "microwave": {"dist": 0.0367}, "drawer": {"dist": 3.0}}
+    d = x3.decide("NavigateKitchen", s, {"fixtures": fx})
+    assert d["correct"] and d["nearest"] == "oven" and d["tied"] == ["oven", "microwave"]
+    s["target"] = "sink"  # somewhere else: the nearest is still the choice
+    d = x3.decide("NavigateKitchen", s, {"fixtures": dict(fx, sink={"dist": 1.0})})
+    assert d["chosen"] == "oven" and not d["correct"]
+
+
 def test_recorded_only_tasks_decide_too():
     s = {"base": [0, 0, 0], "target": "drawer_F", "doors": {"drawer_F": door(0.0, (0.5, 0.0))}}
     d = x3.decide("DeliverStraw", s, {"doors": {"drawer_F": door(0.6)}, "straw": {"grasped": True}})

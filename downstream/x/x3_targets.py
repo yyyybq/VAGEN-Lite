@@ -53,6 +53,8 @@ KNOB_MIN = 0.10   # rad (about 6 degrees): a knob was turned when it moved more 
 RACK_MIN = 0.05   # the dishwasher rack moved when its position changed by more than 5% of its range
 MOVED_M = 0.02    # m: the mug was moved when its position changed by more than this
 NEAR_M = 0.50     # m: NavigateKitchen, the robot is at a fixture when its base is this close to its placement point
+TIE_M = 0.10      # m: placement points within this of the nearest count as the same spot (stacked fixtures share one:
+                  # a microwave over an oven, a hood over a stovetop)
 NAV_CLASSES = ("CoffeeMachine", "Toaster", "ToasterOven", "Stove", "Stovetop", "OpenCabinet", "Microwave", "Sink",
                "Hood", "Oven", "FridgeFrenchDoor", "FridgeSideBySide", "FridgeBottomFreezer", "Dishwasher",
                "ElectricKettle", "StandMixer")  # NavigateKitchen's target classes (kitchen_navigate.py)
@@ -287,10 +289,12 @@ def decide(task: str, start_rec: dict, end_rec: dict) -> dict:
         fx = {n: f for n, f in end_rec["fixtures"].items() if "dist" in f}
         order = sorted(fx, key=lambda n: (fx[n]["dist"], n))
         near = order[0] if order else None
-        out.update(chosen=near if near is not None and fx[near]["dist"] <= NEAR_M else None, nearest=near,
-                   nearest_dist=fx[near]["dist"] if near else None,
-                   second_dist=fx[order[1]]["dist"] if len(order) > 1 else None,  # close to nearest_dist: ambiguous
-                   target_dist=fx.get(start_rec["target"], {}).get("dist"), at_start_fixture=near == start_rec["src"])
+        tied = [n for n in order if fx[n]["dist"] <= fx[near]["dist"] + TIE_M] if near else []
+        at = start_rec["target"] if start_rec["target"] in tied else near  # the target, when it shares the spot
+        out.update(chosen=at if near is not None and fx[near]["dist"] <= NEAR_M else None, nearest=near,
+                   nearest_dist=fx[near]["dist"] if near else None, tied=tied if len(tied) > 1 else [],
+                   second_dist=fx[order[1]]["dist"] if len(order) > 1 else None,
+                   target_dist=fx.get(start_rec["target"], {}).get("dist"), at_start_fixture=start_rec["src"] in tied)
     else:
         raise ValueError(f"not a spatial task: {task}")
     out["correct"] = out["chosen"] is not None and out["chosen"] == out["target"]

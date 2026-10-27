@@ -1,0 +1,11 @@
+{
+ "_doc": "T5 (the user's decision of 2026-10-27): the final checkpoint of each NavigateKitchen-only run on NavigateKitchen, 100 episodes (evaluation seeds 1000-1099), target kitchens, horizon 450, one policy call per 16-step chunk, stable counter regions; each episode records the robot base's distance to every fixture's placement point at the end (X3's read-only recorder, end_state).",
+ "name": "t5_navigate100_end_state",
+ "split": "target",
+ "seeds": "1000-1099",
+ "execute_steps": 16,
+ "groups": ["t5_navigate"],
+ "tasks_file": "downstream/x/t5_tasks.json",
+ "stable_counter_regions": true,
+ "end_state": true
+}

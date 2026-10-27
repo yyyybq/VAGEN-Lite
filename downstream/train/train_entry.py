@@ -32,10 +32,18 @@ Full state and segments (stage 1, the user's decisions of 2026-10-22; downstream
   trainer.log_batch_digest true   OUTPUT/batch_digests.jsonl: per batch, a hash of rank 0's actions and instructions
                                   (the resume test compares them with an uninterrupted run)
 Each launch appends a line to OUTPUT/launches.jsonl.
+
+LoRA (T2, the user's decision of 2026-10-27; downstream/train/lora.py):
+  trainer.lora {rank, alpha, dropout, lr}  right after the model is built, the language model's projections get LoRA
+                                  matrices, everything but LoRA and the action head is frozen, the optimizer gets two
+                                  groups (LoRA at lr, the action head at learning_rate.action_model), and the
+                                  weights-only checkpoints (steps_*, final_model) are written with LoRA merged into
+                                  plain weights; the full state keeps LoRA apart for resuming.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -268,6 +276,10 @@ def train(args) -> int:
     cfg = load_config(args.config_yaml, args.overrides)
     seed = int(cfg.seed)
     seg = segment_settings(cfg.trainer)
+    lora_cfg = dict(cfg.trainer.get("lora") or {})  # T2: LoRA on the language model (downstream/train/lora.py)
+    if lora_cfg and cfg.trainer.get("freeze_modules"):
+        raise ValueError("trainer.lora freezes the model itself; trainer.freeze_modules must be empty")
+    merge = {"ctx": contextlib.nullcontext}  # LoRA: the weights-only checkpoints are written merged
     force_bf16_loading()
     seed_dataset(seed)
     rank0 = (not dist.is_initialized()) or dist.get_rank() == 0
@@ -320,7 +332,8 @@ def train(args) -> int:
         out = None
         if not seg["full_every"] or step in seg["eval_points"]:
             t = time.time()
-            out = original_save(self)
+            with merge["ctx"]():
+                out = original_save(self)
             record["timings"].setdefault("checkpoint_seconds", []).append(round(time.time() - t, 1))
         if seg["full_every"] and step % seg["full_every"] == 0:
             save_full(self, step)
@@ -345,7 +358,8 @@ def train(args) -> int:
 
     def _finalize_training(self):
         t = time.time()
-        out = original_finalize(self)
+        with merge["ctx"]():
+            out = original_finalize(self)
         record["timings"]["final_save_seconds"] = round(time.time() - t, 1)
         return out
 
@@ -382,6 +396,15 @@ def train(args) -> int:
         raise RuntimeError(f"backbone not loaded in bf16: {dtypes}")
     record.update(backbone_dtypes=dtypes, rng_sha_before_build=rng_before,
                   action_head_init_sha=tensor_sha(vla.action_model.parameters()))
+    if lora_cfg:
+        import lora as L
+
+        record["lora"] = L.wrap(vla, rank=int(lora_cfg["rank"]), alpha=float(lora_cfg["alpha"]),
+                                dropout=float(lora_cfg.get("dropout", 0.0)), seed=seed)
+        record["lora"].update(L.freeze(vla), lr=float(lora_cfg["lr"]))
+        action_lr = float(cfg.trainer.learning_rate.action_model)
+        T.build_param_lr_groups = lambda model, cfg: L.param_groups(model, float(lora_cfg["lr"]), action_lr)
+        merge["ctx"] = lambda: L.merged(vla)
     t0 = time.time()
     dataloader = T.prepare_data(cfg=cfg, accelerator=T.accelerator, output_dir=output_dir)
     record["timings"]["data_seconds"] = round(time.time() - t0, 1)
@@ -425,7 +448,8 @@ def train(args) -> int:
             # the segment's end was reached before (e.g. killed between its two saves): only the missing checkpoint
             if trainer.completed_steps in seg["eval_points"] and not (
                     output_dir / "checkpoints" / f"steps_{trainer.completed_steps}_pytorch_model.pt").is_file():
-                original_save(trainer)
+                with merge["ctx"]():
+                    original_save(trainer)
             raise SegmentDone(trainer.completed_steps)
         trainer.train()
     except SegmentDone as done:
