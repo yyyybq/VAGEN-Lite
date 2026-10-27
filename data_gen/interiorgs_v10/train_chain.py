@@ -59,7 +59,11 @@ of the first start_updates) by more than success_drop in each of drop_window con
 The model line adds "keep_fill_min" (off unless given): a keep run whose fills (filter/keep/filled) average under it
 over updates 1-keep_fill_at (default 50) stops; and plan eval "stop_invalid" ({"set", "max"}, off unless given):
 each checkpoint is evaluated on that set while the runs train, and a run whose greedy evaluation has more than "max"
-unreadable turns stops the same way (stop_invalid_rule, watch_checkpoints).
+unreadable turns stops the same way (stop_invalid_rule, watch_checkpoints).  Plan "suspended_grace_min" (the model
+line, 2026-10-27; off unless given): a job sco shows SUSPENDED counts as ended only once the same job has shown it
+for that many minutes (suspended_over).  When another user stops a job in a pool, sco marks the jobs waiting there
+SUSPENDED for a few seconds and then puts them back (10-27 14:43 and 15:50 on zoetrope); without the switch such a
+job counts as ended at once, is deleted and resubmitted, and loses its place in the queue and one of its retries.
 
 Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
 or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
@@ -676,6 +680,24 @@ class Chain:
         self.wait_pause()
         return job_sco.pick_pool()
 
+    def suspended_over(self, st: Dict[str, Any]) -> bool:
+        """Whether a job counts as ended by being SUSPENDED: at once, or with plan "suspended_grace_min" only once the
+        same job has shown SUSPENDED for that many minutes (state["suspended_seen"]: job id -> first seen, dropped
+        when the job shows anything else)."""
+        job, seen = st.get("job_id"), self.state.setdefault("suspended_seen", {})
+        if st.get("state") != "SUSPENDED":
+            seen.pop(job, None)
+            return False
+        grace = self.plan.get("suspended_grace_min")
+        if grace is None:
+            return True
+        first = seen.setdefault(job, time.time())
+        return time.time() - first >= 60 * float(grace)
+
+    def job_gone(self, st: Dict[str, Any]) -> bool:
+        """A job that finished, was deleted (NOT_FOUND) or stays SUSPENDED (suspended_over)."""
+        return bool(st.get("finished")) or st.get("state") == "NOT_FOUND" or self.suspended_over(st)
+
     def wait_pause(self) -> None:
         """Wait while the main line's pause file exists (polled every IDLE_POLL_S; shown in the progress file)."""
         from model_matrix import sco_view
@@ -815,7 +837,7 @@ class Chain:
             for name, s in states.items():
                 if name != main and s.get("finished") and s.get("state") != "SUCCEEDED":
                     raise ChainError(f"job {name} ended {s.get('state')} while {main} was running")
-                if s.get("state") in ("NOT_FOUND", "SUSPENDED"):  # deleted, or stopped by someone / the pool
+                if s.get("state") == "NOT_FOUND" or self.suspended_over(s):  # deleted, or stopped by someone / the pool
                     raise ChainError(f"job {name} is {s.get('state')}")
             self.sleep(POLL_S)
 
@@ -831,7 +853,7 @@ class Chain:
                 for name, run in list(pending.items()):
                     st = job_sco.status(run)
                     self.note_queue(f"{step}/{name}", run, "job", st)
-                    done = st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND")
+                    done = self.job_gone(st)
                     if done and st.get("state") != "SUCCEEDED" and self.take_retry(
                             f"{step}/{name}", step, st.get("job_id"), f"ended {st.get('state')}"):
                         job_sco.delete(run)
@@ -1022,7 +1044,7 @@ class Chain:
                     st = job_sco.status(run)
                     states[name] = str(st.get("state") or "RUNNING")
                     self.note_queue(f"{step}/{name}", run, "job", st)
-                    if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
+                    if self.job_gone(st):
                         eval_dir, result = jobs[name][0], jobs[name][1]
                         if not (eval_dir / result / "done.json").exists() and self.take_retry(
                                 f"{step}/{name}", "evaluation", st.get("job_id"), f"ended {st.get('state')} without results"):
@@ -1367,8 +1389,8 @@ class Chain:
                             ended[name] = f"start-up: {problem} (after {limit} resubmissions)"
                             active.pop(name)
                             continue
-                    rl_done = st_rl.get("finished") or st_rl.get("state") in ("NOT_FOUND", "SUSPENDED")
-                    r_done = st_r.get("finished") or st_r.get("state") in ("NOT_FOUND", "SUSPENDED")
+                    rl_done = self.job_gone(st_rl)
+                    r_done = self.job_gone(st_r)
                     reached = (d / "checkpoints" / f"global_step_{endpoint}").is_dir()
                     used = (0 if self.plan.get("startup_retries_separate")  # start-up resubmissions: their own limit
                             else len((self.state.get("startup_retries") or {}).get(name, [])))
@@ -1518,7 +1540,7 @@ class Chain:
                     rec["job_id"] = json.loads((ev_run / "job" / "submission.json").read_text())["job_id"]
                     continue
                 st = job_sco.status(ev_run)
-                if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
+                if self.job_gone(st):
                     job_sco.delete(ev_run)  # without results: submitted once more (it goes on from its results)
                     drop_partial_line(rule["dir"] / result / "results.jsonl")
                     rec["retries"] = rec.get("retries", 0) + 1
@@ -1656,7 +1678,7 @@ class Chain:
             reason = "the old render service ended or was replaced meanwhile"
         elif states.get(f"{name}/rl") not in job_sco.WAITING:
             reason = "the trainer got its cards first (the old render service serves it)"
-        elif st.get("finished") or st.get("state") in ("NOT_FOUND", "SUSPENDED"):
+        elif self.job_gone(st):
             reason = f"the new render service ended {st.get('state')}"
         elif st.get("state") == "RUNNING" and nxt.is_file() and nxt.read_text().strip():
             rows = job_sco.job_hosts(str(st.get("job_id")))
