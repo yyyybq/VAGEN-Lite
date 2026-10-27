@@ -68,7 +68,7 @@ def test_a_fresh_run_trains_keeps_the_last_checkpoint_exports_and_evaluates(tmp_
     assert res.returncode == 0, res.stdout + res.stderr
     train, export, ev = calls(run)
     assert train.startswith("train_") and train.split()[1:3] == ["ENVDIR", str(run)]
-    for o in ("runner.max_epochs=100", "runner.max_steps=100", "runner.save_interval=20", "runner.val_check_interval=10",
+    for o in ("runner.max_epochs=100", "runner.max_steps=100", "runner.save_interval=20", "runner.val_check_interval=-1",
               "env.train.total_num_envs=32", "env.train.rollout_epoch=2", "algorithm.update_epoch=2",
               "actor.optim.lr=5e-6", "actor.optim.clip_grad=1.0", "env.eval.total_num_envs=8",
               f"runner.logger.log_path={run}/logs"):
@@ -104,13 +104,40 @@ def test_a_relaunch_resumes_from_the_newest_complete_checkpoint_and_redoes_a_hal
 
 def test_intervals_rlinf_would_reject_stop_before_any_card_is_used(tmp_path):
     """2026-10-26: checkpoints every 25 updates and evaluation every 10 failed all four E3 runs after their first
-    update (RLinf asserts save_interval % val_check_interval == 0); such intervals now stop at once."""
+    update (RLinf asserts save_interval % val_check_interval == 0 when its evaluation is on); such intervals now stop
+    at once.  With the evaluation off (-1, the default since 10-27) only the checkpoint interval must divide 100."""
     wt, run, env = tree(tmp_path)
-    for bad in ({"E3_SAVE_EVERY": "25"}, {"E3_SAVE_EVERY": "30"}):  # 25 % 10; 100 % 30
+    for bad in ({"E3_SAVE_EVERY": "25", "E3_EVAL_EVERY": "10"}, {"E3_SAVE_EVERY": "30"}):  # 25 % 10; 100 % 30
         res = subprocess.run(["bash", str(wt / "downstream/rlinf/run_e3.sh"), "ENVDIR", str(run), "/src/policy.pt"],
                              capture_output=True, text=True, env=dict(env, **bad))
         assert res.returncode == 6 and not calls(run)
     assert "must be a multiple of the evaluation interval" in (run / "e3.log").read_text()
+    res = subprocess.run(["bash", str(wt / "downstream/rlinf/run_e3.sh"), "ENVDIR", str(run), "/src/policy.pt"],
+                         capture_output=True, text=True, env=dict(env, E3_SAVE_EVERY="25"))
+    assert res.returncode == 0 and "runner.save_interval=25" in calls(run)[0].split()
+
+
+STALLED_STUB = """#!/usr/bin/env bash
+echo "$RLINF_TAG $*" >> "$2/calls.txt"
+printf 'Global Step:    1/100 | Progress\\r' > "$2/rlinf_$RLINF_TAG.log"
+python3 -c 'import time; time.sleep(120)' e3_stub_hung_rlinf
+"""
+
+
+def test_the_watchdog_ends_a_training_without_new_updates(tmp_path):
+    """2026-10-27: E3-B and E3-RS hung for two hours with the cards held; a training whose log shows no new
+    "Global Step" for the stall time is stopped and the job ends with exit code 7 before export and evaluation."""
+    wt, run, env = tree(tmp_path)
+    (wt / "downstream/rlinf/run_rlinf.sh").write_text(STALLED_STUB)
+    t = __import__("time").time()
+    res = launch(wt, run, dict(env, E3_STALL_SEC="3", E3_WATCH_EVERY="1", E3_KILL_PATTERN="e3_stub_hung_rlinf"))
+    assert res.returncode == 7, res.stdout + res.stderr
+    assert __import__("time").time() - t < 60  # not the stub's 120 s
+    stalled = list(run.glob("stalled_train_*.json"))
+    assert len(stalled) == 1 and json.loads(stalled[0].read_text())["last_update"] == "1"
+    log = (run / "e3.log").read_text()
+    assert "watchdog: no new PPO update" in log and "ended by the watchdog" in log
+    assert len(calls(run)) == 1 and not (run / "export").exists()
 
 
 def test_a_training_that_ends_without_the_last_checkpoint_stops_before_the_export(tmp_path):
