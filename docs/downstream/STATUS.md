@@ -1,34 +1,33 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-10-27 03:55 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表和 T 表）；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 **X4 结果 [reports/X4_RESULTS_20261027.md](reports/X4_RESULTS_20261027.md)**，之前的有 X0 结果、T 系列设计、E2 结果、E1 结果和 X0–X5 设计。
+最后更新：2026-10-27 04:55 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表和 T 表）；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 **X4 结果 [reports/X4_RESULTS_20261027.md](reports/X4_RESULTS_20261027.md)**（10-27 补了困惑度一节），之前的有 X0 结果、T 系列设计、E2 结果、E1 结果和 X0–X5 设计。
 
 ## 1. 现在在哪一步
 
 - 第一步、第二步完成；E0、E1、E2 完成；**X0、X4 完成**。
-- **X4 结果**：四个 E1 模型在主线 v2 验证集、评测集上都是 0%，每一步回答都无效（退化成重复的空格或"1"），原有能力全部丢失；导出已核对无误（报告已写）。
+- **X4 结果**：四个 E1 模型在主线 v2 验证集、评测集上都是 0%，每一步回答都无效（退化成重复的空格或"1"）；导出已核对无误。10-27 补测主线专家答案的每词元损失：原始起点 0.48–0.74 奈特，E1 模型 13.8–29.8；损伤 RD 最小（+13.2）、B 最大（+29.4），但四个都是彻底崩坏。
 - **X3**：B、S、RS 跑完，447 个回合逐回合和 E1 原评测相同；RD 在跑。NavigateKitchen 的判断规则 10-27 改过一次（叠放设施共用放置点），只影响统计，不用重跑。
-- **E3**：你 10-27 确认了 3 个任务，排队文件已放开，排在最前面（同时最多 2 个）。
-- **X5**：你 10-27 确认了清单，4 个 8 卡评测已排队。
-- **X1、X2、XE**：X1 只训动作头，实测每步约 0.32 秒（全量微调 0.75 秒），显存峰值 25.4 GB / 80 GB。10-27 03:19 为给 zoetrope 腾机器停了 X1 的 S、RS、RD 和 X2-RS-1%，撤回了 X2-B-3% 和 X2-RD-1%（第 5 节），都已重新排队，会从头训。
-- **T 系列**：你 10-27 确认。T1 两个、T5 四个（3 个 epoch = 3,063 步）、T2 的短任务已排队；T2 正式 4 个挂起，等短任务核对通过；T3 / T4 等路径。
+- **E3**：B、RS 10-27 04:2x 开始（同时最多 2 个），S、RD 排队。
+- **X5**：B 已交（zoetrope），其余排队。
+- **X1、X2、XE**：X1 只训动作头，实测每步约 0.32 秒（全量微调 0.75 秒），显存峰值 25.4 GB / 80 GB。10-27 03:19 为给 zoetrope 腾机器停了 X1 的 S、RS、RD 和 X2-RS-1%，撤回了 X2-B-3% 和 X2-RD-1%，都已重新排队，会从头训。
+- **T 系列**：T1 两个、T5 四个（3 个 epoch = 3,063 步）、T2 的短任务已排队；T2 正式 4 个挂起，等短任务核对通过；T3 / T4 等路径。
 - **E4**：取消。
 
-## 2. 在跑什么（10-27 03:55 UTC）
+## 2. 在跑什么（10-27 04:55 UTC）
 
-- 在跑：X1-B（zoetrope）、X2-B-1%（zoetrope）、X2-S-1%（h800）、X3-RD（h800）。
-- **排队**（`downstream_runs/queue/`，按名字顺序，前一个放不下就不往后看）：E3 四个 → X5 四个 → X1 三个 → X2 六个 → T1 两个 → T5 四个 → XE → T2 短任务；挂起的：T2 正式 4 个（`*.json.hold_short`）。
-- **zoetrope 暂停使用**（你 10-27 03:1x 的要求，给 `flux2-allen5000-mixed-4x8` 腾 4 台机器）：排队文件都只投 h800（原来的池记在 `pools_before_zoetrope_hold_20261027`），看板 `--whole-pools h800`。你说恢复时再改回来。
-- **h800 也在让路**：pt-wk1tllx7（同一个 flux2 任务在 h800 的那份）在 h800 排队期间，看板不往 h800 交新任务（`--yield-to` 加了 `flux2-allen5000-mixed-4x8`），正在跑的不动。
+- 在跑或已交：E3-B（h800）、E3-RS（zoetrope）、X5-B（zoetrope）、X1-B（zoetrope）、X2-B-1%（zoetrope）、X2-S-1%（h800）、X3-RD（h800）。
+- **排队**（`downstream_runs/queue/`，按名字顺序，前一个放不下就不往后看）：E3 两个 → X5 三个 → X1 三个 → X2 六个 → T1 两个 → T5 四个 → XE → T2 短任务；挂起的：T2 正式 4 个（`*.json.hold_short`）。
+- **zoetrope 10-27 04:22 恢复**（你的话"zoetrope 可以恢复了"）：排队文件改回两个池都能投，看板 `--whole-pools h800 zoetrope`，去掉了给 flux2 的让路。pt-wk1tllx7 当时还在 h800 排队（它的同名任务 pt-yaf4pwue 在 zoetrope 跑），我们不再给它让路。
 
 **GPU 规则**（你 10-23 晚的决定 1；10-25 约 10:00 改为只给同一个池让路）：
 - 主线（`interiorgs-v10-*`）有任务在某个池排队时，不往那个池提交；另一个池有空机照样用（你的原话："只给同一个池让路就行，不用一直让，没有卡空着为准"）；
 - 8 卡任务只投到估计有空闲机器的池；1 卡任务投到有空卡的机器；我们自己有任务在那个池排队时，不再往那个池提交；
 - 按空机提交、还在排队的任务，如果主线开始在同一个池排队，就撤回，等下次再提。已经开始跑的不动。
 
-**看板**：`downstream/eval/watch.py`，10-27 03:22 起运行，PID 531449，代码 `eea08829`，每 5 分钟一轮。启动、停止、查看命令如下（在集群 worktree 里；代码更新后先 stop 再 start；zoetrope 恢复后把 `--whole-pools` 改回 `h800 zoetrope`、去掉 `flux2-allen5000-mixed-4x8`）：
+**看板**：`downstream/eval/watch.py`，10-27 04:22 起运行，PID 609685，代码 `8c623811`，每 5 分钟一轮。启动、停止、查看命令如下（在集群 worktree 里；代码更新后先 stop 再 start）：
 
 ```bash
-bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- flux2-allen5000-mixed-4x8 --yield-to-same-size --yield-pool-only --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 100 010 030 --whole-pools h800
+bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- --yield-to-same-size --yield-pool-only --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 100 010 030 --whole-pools h800 zoetrope
 ```
 
 ```bash
@@ -41,16 +40,19 @@ bash downstream/eval/watch.sh status
 
 ## 3. 在等什么
 
-- **你说 zoetrope 什么时候可以再用**（第 2 节）。
-- **空机**：h800 上的 flux2 任务开跑或撤掉、主线不在排队、有空机。
+- **空机**：排队的任务按顺序等空机。
 - T2 短任务的核对结果（跑完后报你每步时间和显存，再放开正式 4 个）。
+- X3-RD 跑完后出 X3 报告。
 
 ## 4. 待你决定的事
 
-1. **zoetrope 何时恢复**（现在我们完全不往 zoetrope 交）。
-2. **X4 之后要不要量损伤程度**：E1 模型在主线上全是 0%，起点之间比不出"保留了多少"。可以改看 E1 模型在主线答案上的词元损失（困惑度），能分出损伤程度；没做。
+- 暂无。
 
 ## 5. 主窗口指令与暂停 / 撤回记录（UTC）
+
+- **10-27 04:22–04:41 你的决定："zoetrope 可以恢复了，困惑度也测一下"。**
+  - 04:22 恢复 zoetrope（第 2 节）。看板这一轮交了 E3-B（`pt-4yi06kvx`，h800）、E3-RS（`pt-ooglvui2`，zoetrope）、X5-B（`pt-lb55e2kh`，zoetrope）。
+  - 困惑度：8 个 1 卡任务（`downstream/x/run_x4_ppl.sh`），04:3x 交出，04:41 前都完成，结果写进 [X4 报告](reports/X4_RESULTS_20261027.md)。
 
 - **10-27 03:17–03:22 你的要求："停一下zoetrope上的downstream，目标是空出来四个节点让pt-wk1tllx7能够开始"。**
   - 查到 pt-wk1tllx7（`flux2-allen5000-mixed-4x8-090000`，4 台 × 8 卡，wangruisi1）登记在 **h800**；同名的另一份 pt-yaf4pwue 在 zoetrope 排队。

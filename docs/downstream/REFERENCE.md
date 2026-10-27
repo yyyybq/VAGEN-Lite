@@ -1,6 +1,6 @@
 # 下游具身任务线：设计、规则、代码与路径（参考）
 
-最后更新：2026-10-27 03:55 UTC。现状看 [STATUS.md](STATUS.md)，各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每轮重写），评测协议看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，报告在 [reports/](reports/)。
+最后更新：2026-10-27 04:55 UTC。现状看 [STATUS.md](STATUS.md)，各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每轮重写），评测协议看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，报告在 [reports/](reports/)。
 
 ## 1. 分阶段设计（你 10-22 的指令；同日第二条指令修订）
 
@@ -20,7 +20,7 @@
 | X1 | 只训动作头（冻结整个 `qwen_vl_interface`），30% 示教，5 万步，评 944 回合。`experiments/X1-<起点>-030-s1` | B 在跑；S、RS、RD 10-27 03:19 停下后重新排队 |
 | X2 | 1%、3% 示教（每任务 5、15 条，嵌套在 10% 里），2 个 epoch（1%：10,368 步；3%：32,080 步），评 944 回合。`experiments/X2-<起点>-{001,003}-s1` | 1% 的 B、S 在跑，其余排队 |
 | X3 | E1 四个最终检查点重放空间组 447 回合，加只读记录器（`closed_loop.py` 的 `end_state`，`downstream/x/x3_targets.py`，计划 `downstream/x/x3_plan.json`，脚本 `downstream/x/run_x3.sh`），判断实际操作了哪个目标；逐回合核对和 E1 评测相同 | B、S、RS 完成（447 回合逐回合相同），RD 在跑 |
-| X4 | E1 四个最终权重导出成 HF（`x/X4/hf/E1-<起点>-200k`，`downstream/x/run_x4_export.sh`）后，和四个原始起点在主线 v2 验证集（413）和评测集（292）上各评一次（主线评测脚本，`no_think`）；统计 `downstream/x/x4_analyze.py` | 完成，[报告](reports/X4_RESULTS_20261027.md)：E1 模型全是 0% |
+| X4 | E1 四个最终权重导出成 HF（`x/X4/hf/E1-<起点>-200k`，`downstream/x/run_x4_export.sh`）后，和四个原始起点在主线 v2 验证集（413）和评测集（292）上各评一次（主线评测脚本，`no_think`）；统计 `downstream/x/x4_analyze.py` | 完成，[报告](reports/X4_RESULTS_20261027.md)：E1 模型全是 0%；10-27 补测专家答案的损失（`downstream/x/x4_ppl.py`）：损伤 RD 最小、B 最大 |
 | X5 | 未见任务：16 个原子（主评）+ 16 个组合（补评），每任务 20 回合（选法 `downstream/x/x5_tasks.py`，任务文件 `downstream/x/x5_tasks.json`，计划 `downstream/x/x5_plan.json`，脚本 `downstream/x/run_x5.sh`，统计 `downstream/x/x5_analyze.py`） | 4 个 8 卡评测排队 |
 | XE | B 起点、30% 示教、6 万步（0.36 个 epoch），评 944 回合。`experiments/XE-B-030-s1` | 排队 |
 | T1 | 种子 2：`DS-B-030-s2`、`DS-RS-030-s2`（同 30% 配方，种子 2） | 2 个排队 |
