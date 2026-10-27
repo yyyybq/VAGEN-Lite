@@ -1,6 +1,6 @@
 # 磁盘配额线状态（唯一的状态文档）
 
-最后更新：2026-10-27 02:30 UTC（配额表 02:21 回落到 15 TB：主线第 13 轮第一批开始按 retain 删）。
+最后更新：2026-10-27 05:45 UTC（本机监看按你的话已停；集群上的监控照常运行）。
 
 这条线管 `/mnt/umm/users/yinbaiqiao`（个人目录，配额 22 TB）：量、预测、提方案、按批准的清单执行，默认只读。
 
@@ -107,7 +107,7 @@
 - 每天一次按一级目录记大小，写 `docs/disk/daily_top.csv` 和 `docs/disk/daily_growth.md`（哪条线涨得最快）；
 - 事件记在 `disk_runs/monitor_events.jsonl`。
 
-10-26 09:19 起带 `--stop-flag`：剩余低于 1.5 TB 写 `disk_runs/flags/STOP_SUBMIT_DISK_LOW`，回到 3 TB 以上删掉（你已批的约定，见 `STOP_FLAG_PROPOSAL.md`）。本机另有一个监看，每 5 分钟读一次事件，有警告就报你；它随本会话停止，监控本身不受影响。
+10-26 09:19 起带 `--stop-flag`：剩余低于 1.5 TB 写 `disk_runs/flags/STOP_SUBMIT_DISK_LOW`，回到 3 TB 以上删掉（你已批的约定，见 `STOP_FLAG_PROPOSAL.md`）。本机的监看（每 5 分钟读一次事件、有变化就报你）按你 10-27 的话已停；集群上的监控照常运行，事件和读数仍记在 `disk_runs/monitor_events.jsonl` 和 `docs/disk/usage.csv`。
 
 断了用下面的命令重启（在 worktree 里执行）：
 
