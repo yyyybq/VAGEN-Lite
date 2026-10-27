@@ -113,6 +113,45 @@ class PlansTest(unittest.TestCase):
                                                   "dv4": {"variant": "V4", "summary": {"success_pooled": 0.48}}}}))
             self.assertEqual(P.best_variant(f), "V4")
 
+    def test_second_seed_and_the_cambrian_dense_rerun(self):
+        """The user's decisions 2 and 3 of 2026-10-27."""
+        from model_matrix.formal import plans as P
+
+        first = P.formal_rl_plans("rl-qwen3", "20261026", "abc", "/sft/e8", "V4")
+        self.assertEqual(list(first), ["m_qwen3vl8b_formal_rl_20261026"])  # the first seed's tag and runs as before
+        self.assertEqual(sorted(first["m_qwen3vl8b_formal_rl_20261026"]["rl_runs"]), ["q3d", "q3s0"])
+        (tag, two), = P.formal_rl_plans("rl-qwen3", "20261027", "abc", "/sft/e8", "V4", seed=20261021).items()
+        self.assertEqual(tag, "m_qwen3vl8b_formal_rl_20261027_s20261021")
+        self.assertEqual((two["run_pools"], two["rl"]["seed"], two["rl_start_model"], two["rl_name"]),
+                         ({"q3s2s0": "h800", "q3s2d": "zoetrope"}, 20261021, "/sft/e8", "m_q3s2rl"))
+        one = first["m_qwen3vl8b_formal_rl_20261026"]
+        for key in ("eval", "endpoint", "model", "model_type", "sft_groups", "dense_variant"):  # only the seed moves
+            self.assertEqual(two[key], one[key])
+        self.assertEqual({k: v for k, v in two["rl"].items() if k != "seed"},
+                         {k: v for k, v in one["rl"].items() if k != "seed"})
+        self.assertEqual(two["rl_runs"]["q3s2d"], one["rl_runs"]["q3d"])
+        self.assertEqual(two["rl"]["guards"]["keep_fill_min"], 1.0)
+
+        (tag, crd), = P.formal_rl_plans("rl-cambrian-dense", "20261027", "abc", "/sft/e5", "V4").items()
+        self.assertEqual(tag, "m_cambrian7b_formal_rl_20261027_dense")
+        self.assertEqual((crd["run_pools"], crd["rl"]["seed"], crd["model_type"], crd["sft_groups"]),
+                         ({"crd": "zoetrope"}, 20261019, "cambrian_qwen", {"cformal": "sft_trajectories.jsonl"}))
+        self.assertEqual(crd["rl_runs"], {"crd": {"rl": P.VARIANT_RL["V4"]}})
+        self.assertEqual(crd["rl_runs"]["crd"]["rl"]["keep_std_threshold"], 0.3318)
+        self.assertEqual(crd["rl_runs"]["crd"]["rl"]["keep_std_floor"], 1.0)
+        g = crd["rl"]["guards"]
+        self.assertNotIn("keep_fill_min", g)  # the fill rule off
+        self.assertEqual(g, {k: v for k, v in P.RL_GUARDS.items() if k not in ("keep_fill_min", "keep_fill_at")})
+        self.assertEqual(crd["eval"]["stop_invalid"], {"set": "val", "max": 0.10})  # both unreadable lines kept
+        self.assertEqual(P.RL_GUARDS["keep_fill_min"], 1.0)  # the shared stop lines untouched
+        # what the chain runs: the standard's chain defaults under the run's settings do not bring the rule back
+        from data_gen.interiorgs_v10 import train_chain as T
+
+        merged = T.with_chain_defaults({**crd["rl"], **crd["rl_runs"]["crd"]["rl"]},
+                                       T.standard_chain_defaults(crd).get("rl"))
+        self.assertNotIn("keep_fill_min", merged["guards"])
+        self.assertEqual(merged["guards"]["invalid_max"], 0.1)
+
     def test_accept_epoch_plans(self):
         from model_matrix.formal import plans as P
 

@@ -74,7 +74,10 @@ class DownstreamToolsTest(unittest.TestCase):
         starts = json.loads((ROOT / "model_matrix" / "downstream" / "starts.json").read_text())
         self.assertEqual({k: v["model_type"] for k, v in starts.items() if not k.startswith("_")},
                          {"Q3B": "qwen3_vl", "CSB": "cambrian_qwen", "Q3S": "qwen3_vl", "Q3RD": "qwen3_vl",
-                          "CSS": "cambrian_qwen"})
+                          "CSS": "cambrian_qwen", "Q3RS": "qwen3_vl", "CSRS": "cambrian_qwen"})
+        for key, step in (("Q3RS", 150), ("CSRS", 122)):  # the registry names where the arm drifted (decision 4)
+            self.assertIn(f"第 {step} 次走样停下", starts[key]["label"])
+            self.assertIn("global_step_100/actor/huggingface", starts[key]["path"])
 
     @unittest.skipUnless((DS / "downstream" / "train" / "make_experiment.py").is_file() and SMOKE_DATA.is_dir(),
                          "needs the downstream worktree and its step-2 data")

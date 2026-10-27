@@ -29,5 +29,19 @@
   "model_type": "cambrian_qwen",
   "desc": "Cambrian-S-7B after the model line's formal SFT (as Q3S), epoch 5 picked by validation (chain m_cambrian7b_formal_sft_20261026); the user's decision 23 of 2026-10-27",
   "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_sft_20261026/lf_cformal/model/checkpoint-770"
+ },
+ "Q3RS": {
+  "role": "main",
+  "model_type": "qwen3_vl",
+  "label": "S0 第 100 次（该臂第 150 次走样停下）",
+  "desc": "Qwen3-VL-8B after the formal RL S0 arm, update 100 (the arm was stopped by format drift at update 150; chain m_qwen3vl8b_formal_rl_20261026); the user's decision 4 of 2026-10-27",
+  "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_100/actor/huggingface"
+ },
+ "CSRS": {
+  "role": "main",
+  "model_type": "cambrian_qwen",
+  "label": "S0 第 100 次（该臂第 122 次走样停下）",
+  "desc": "Cambrian-S-7B after the formal RL S0 arm, update 100 (the arm was stopped by format drift at update 122; chain m_cambrian7b_formal_rl_20261026); the user's decision 4 of 2026-10-27",
+  "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261026/rl_run_cs0/checkpoints/global_step_100/actor/huggingface"
  }
 }
