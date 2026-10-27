@@ -73,7 +73,8 @@ class DownstreamToolsTest(unittest.TestCase):
     def test_starts(self):
         starts = json.loads((ROOT / "model_matrix" / "downstream" / "starts.json").read_text())
         self.assertEqual({k: v["model_type"] for k, v in starts.items() if not k.startswith("_")},
-                         {"Q3B": "qwen3_vl", "CSB": "cambrian_qwen"})
+                         {"Q3B": "qwen3_vl", "CSB": "cambrian_qwen", "Q3S": "qwen3_vl", "Q3RD": "qwen3_vl",
+                          "CSS": "cambrian_qwen"})
 
     @unittest.skipUnless((DS / "downstream" / "train" / "make_experiment.py").is_file() and SMOKE_DATA.is_dir(),
                          "needs the downstream worktree and its step-2 data")
