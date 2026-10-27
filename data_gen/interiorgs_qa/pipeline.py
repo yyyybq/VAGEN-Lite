@@ -174,6 +174,28 @@ def cmd_render(a: argparse.Namespace) -> None:
     qf.close()
 
 
+def claim_scene(sd: Path, who: str, stale_s: float) -> bool:
+    """Take scene folder ``sd`` for this worker (exclusive create of claim.json); False if another live worker has it."""
+    c = sd / "claim.json"
+    for _ in range(2):
+        try:
+            fd = os.open(c, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            try:
+                age = time.time() - c.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            if age < stale_s or (sd / "done.json").exists():
+                return False
+            c.unlink(missing_ok=True)     # stale: its worker is gone
+            continue
+        with os.fdopen(fd, "w") as f:
+            json.dump({"utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "worker": who,
+                       "host": os.uname().nodename, "pid": os.getpid()}, f)
+        return True
+    return False
+
+
 def cmd_bank(a: argparse.Namespace) -> None:
     """Question bank for full-scale generation: every scene of a shard, per-scene quotas, no answer balancing.
 
@@ -182,6 +204,11 @@ def cmd_bank(a: argparse.Namespace) -> None:
     ever reach (999) means "every combo": the rare groups and the video tours. Each scene is written to
     OUT/scenes/<scene>/ (questions.jsonl, views.jsonl, stats.json) and marked done.json last, so a re-run of the same
     command skips finished scenes and redoes an interrupted one (resume); ``--shard i/n`` takes scenes i, i+n, ...
+
+    ``--claim``: the workers share the whole scenes file instead of fixed shards; a worker takes a scene by creating
+    OUT/scenes/<scene>/claim.json (exclusive create), so a worker that starts late (busy pool) takes what is left and
+    no scene waits for one particular job. A claim older than ``--claim-stale-h`` hours without done.json belongs to
+    a worker that died and is taken over. ``--shard i/n`` then only sets where in the list a worker starts.
     """
     from . import common, views
     from .render import CachedRenderer, GSRenderer, ProxyRenderer
@@ -192,7 +219,11 @@ def cmd_bank(a: argparse.Namespace) -> None:
     plan = json.loads(Path(a.plan).read_text())
     scenes = [l.strip() for l in Path(a.scenes_file).read_text().splitlines() if l.strip()]
     i, n = (int(x) for x in a.shard.split("/"))
-    mine = scenes[i::n]
+    if a.claim:
+        start = i * len(scenes) // n
+        mine = scenes[start:] + scenes[:start]
+    else:
+        mine = scenes[i::n]
     split = load_split(SPLIT_MANIFEST)
     out = Path(a.out)
     (out / "scenes").mkdir(parents=True, exist_ok=True)
@@ -204,6 +235,8 @@ def cmd_bank(a: argparse.Namespace) -> None:
         if (sd / "done.json").exists():
             continue
         sd.mkdir(parents=True, exist_ok=True)
+        if a.claim and not claim_scene(sd, a.shard, a.claim_stale_h * 3600):
+            continue
         for f in ("views.jsonl", "error.json"):
             if (sd / f).exists():
                 (sd / f).unlink()
@@ -321,6 +354,8 @@ def main() -> int:
     b.add_argument("--plan", required=True, help="per-scene quotas, object cap (configs/bank_plan_*.json)")
     b.add_argument("--out", required=True)
     b.add_argument("--shard", default="0/1", help="i/n: scenes i, i+n, i+2n, ... of the scenes file")
+    b.add_argument("--claim", action="store_true", help="share the scenes file: take scenes by claim files, not by shard")
+    b.add_argument("--claim-stale-h", type=float, default=3.0, help="a claim older than this without done.json is taken over")
     b.add_argument("--groups", default="")
     b.add_argument("--size", type=int, default=512)
     b.add_argument("--proxy", action="store_true")

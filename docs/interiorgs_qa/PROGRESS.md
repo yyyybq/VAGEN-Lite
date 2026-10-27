@@ -51,16 +51,40 @@
   其中 15 道用户在重画前已标（S3、S6 的 13 道和 M4 的 0de912d6d2d13a84、1216ea829f811aa3），B1 汇总时这些题的"256 下能否认出"按旧图记录，
   单独列出。题库试跑目录（`exps/interiorgs_qa_bank_trial_20261015*`）里的标记图没有重画，全量生成用新代码。
 
+- 2026-10-27 用户结束标注："检查了快 100 道都没有问题……认为生成没问题"，要求做 scaling，生成最终版训练集和测试集，
+  并且和转换过来的 benchmark task 严格对应。B1：数据库里网页第 5 版的题有 87 道已标（S1–S6、M1–M3 全部，M4 6 道），
+  标出问题的 3 道都是单题：M4 1216ea829f811aa3（256 下字母看不清，已在第 5 版修好）、S3 2fc3520ccdbda7fb（画面里有两处花和花瓶，
+  有歧义）、S5 ae1a2f9ce61d6fa0（一处花在墙后，框落在墙上，答案判错）。没有整组性问题，按用户决定不做 B2、B3 的校准，阈值不变。
+- 2026-10-27 benchmark 任务严格对应：`tasks.py` 列出有题的 46 个任务（COVERAGE.md 里能做的 48 项去掉 MindCube 的两个设置标签），
+  每个任务记下 benchmark 和 benchmark 自己的类别名（VSI `question_type`、MMSI `question_type`（lmms-eval 写法）、MindCube 题号前缀、
+  ViewSpatial `question_type`、EmbSpatial `relation`（下方是 `under`）、3DSRBench `category`、BLINK 子集），取自缓存的 benchmark 数据和
+  lmms-eval 任务代码。`tasks.check` 要求每道题只属于一个任务，且 benchmark、组、原格式排版、答案类型都和任务一致；
+  `sample.py` 遇到任何不一致就停，输出的每一行带上任务；`export_lf.py` 的审计行带任务；`export_test.py` 按 benchmark 分文件写评测集，
+  每题带 benchmark 的类别；`evaluate.py` 另按 benchmark 自己的类别出表。`docs/interiorgs_qa/audit/check_tasks.py` 核对任务表和
+  COVERAGE 判断一致，并检查已生成的题：样题、试跑题库和新题库已完成的场景共 880 道全部通过（只有用户去掉的四个任务的旧题不计）。
+- 2026-10-27 全量题库开始生成（B4）：`exps/interiorgs_qa_bank_20261027/`，1000 个场景（test 100、val 100、train 800，按这个顺序，
+  场景表 `configs/bank_scenes_20261027.txt`），题库计划 `bank_plan_20261015.json`。资源池忙：8 个分片只有 3 个拿到卡，
+  另外 5 个排队的删掉，改成 5 个"认领"模式的任务（`pipeline bank --claim`：共用一张场景表，谁先拿到卡谁领下一个没人做的场景，
+  `scenes/<场景>/claim.json`，3 小时没完成的认领可被接手），共用分片 3–7 的 625 个场景（`configs/bank_scenes_20261027_claim.txt`）。
+  存储：`/mnt/umm` 剩 21 TB。
+
 ## 2. 正在运行什么
 
-没有。全量生成按要求没有跑。
+全量题库生成（2026-10-27 19:31 UTC 起）：分片任务 `exps/interiorgs_qa_jobs/bank_20261027_s0`–`s2`（固定分片 0–2/8），
+认领任务 `bank_20261027_c0`–`c4`。每个场景约 220 秒；8 张卡同时跑约 8 小时。查进度：数 `scenes/*/done.json`。
+完成后：`pipeline bank-merge`，然后按第 3 节的 B5 做。
 
 ## 3. 下一步
 
+**B5（全量完成后）**：`bank-merge` → `sample.py`（`sampling_plan_20261015.json`；训练集按 Act-SFT 每轮图片输入次数 24,564 抽，
+评测集是 val / test 场景里的全部题，受答案上限和物体上限约束）→ `export_lf.py`（256 和 512 两份训练数据，带 val）→
+`export_test.py`（val / test 按 benchmark 分文件）→ `lf_tokens.py` 核对 token → 报告：每个 benchmark 任务在题库、训练、val、test
+里的题数，test 没有题的任务单列。
+
+以下是标注前的计划，留作记录。
+
 **标注期间的规矩（用户 2026-10-15）**：不改标注网页、不改这 240 道样题。用户中途报告某组有整组性问题时：改代码，
 只重新生成那一组的样题，替换网页里那一组（其他组和已有标注不动），并告诉用户替换了哪几道（旧题号 → 新题号）。
-
-**现在：等用户交回标注。** 标注在网页里自动保存，不需要导出文件；用户说"标完了"后，我用 ArtifactData 读集合 `labels`。
 
 **用户交回标注以后（B1–B5，计划）：**
 

@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
+from . import tasks
 from .qa import answer_target, excluded, parse_exclude, render
 
 ACT_RECIPE = Path("/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_20261014/lf/train.yaml")
@@ -93,7 +94,8 @@ def video_key(q: Dict[str, Any]) -> Tuple[str, Tuple[str, ...]]:
 
 def build_records(items: Sequence[Tuple[Path, Dict[str, Any]]], res: int, seed: int,
                   families: Sequence[str] = TRAIN_FAMILIES) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """LLaMA-Factory records and an audit row per record (question ids, kind, image inputs)."""
+    """LLaMA-Factory records and an audit row per record (question ids, benchmark tasks, kind, image inputs); a question
+    that does not match its benchmark task (tasks.check) stops the export."""
     records, audit = [], []
     videos: "OrderedDict[Tuple[str, Tuple[str, ...]], List[Tuple[Path, Dict[str, Any]]]]" = OrderedDict()
     for run, q in items:
@@ -106,7 +108,7 @@ def build_records(items: Sequence[Tuple[Path, Dict[str, Any]]], res: int, seed: 
         records.append({"messages": [{"role": "user", "content": user},
                                      {"role": "assistant", "content": answer_text(q, fam)}],
                         "images": imgs, "videos": []})
-        audit.append({"kind": q["media"], "qids": [q["qid"]], "groups": [q["group"]], "families": [fam],
+        audit.append({"kind": q["media"], "qids": [q["qid"]], "groups": [q["group"]], "tasks": [tasks.check(q)], "families": [fam],
                       "image_inputs": len(imgs), "scene_id": q["scene_id"]})
     for key, qs in videos.items():
         run0, q0 = qs[0]
@@ -120,6 +122,7 @@ def build_records(items: Sequence[Tuple[Path, Dict[str, Any]]], res: int, seed: 
             msgs.append({"role": "assistant", "content": answer_text(q, fam)})
         records.append({"messages": msgs, "images": [], "videos": [frames]})
         audit.append({"kind": "video", "qids": [q["qid"] for _, q in qs], "groups": [q["group"] for _, q in qs],
+                      "tasks": [tasks.check(q) for _, q in qs],
                       "families": fams, "image_inputs": len(frames), "scene_id": q0["scene_id"]})
     return records, audit
 

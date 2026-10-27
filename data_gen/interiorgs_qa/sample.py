@@ -22,10 +22,14 @@ Rules (user decisions of 2026-10-15, values in the plan file):
   takes more than ``answer_cap`` of the questions (``answer_cap_binary`` for two-option types); numeric answers
   are not capped;
 * object cap: one object appears in at most ``object_cap`` questions of one group in one scene (training;
-  ``eval_object_cap`` for evaluation).
+  ``eval_object_cap`` for evaluation);
+* benchmark tasks (tasks.py): every bank question must belong to exactly one benchmark task and match it (benchmark,
+  group, prompt layout, answer kind); one mismatch stops the run. Each output line carries its task, i.e. the
+  benchmark and the benchmark's own category, so training and test questions map 1:1 to rows of the benchmarks.
 
-Output: SEL/{train,val,test}.jsonl (one line per question: run_dir and the question record; export_lf.py and
-evaluate.py read them), SEL/summary.json and SEL/summary.md (counts, image inputs, tokens, answer shares).
+Output: SEL/{train,val,test}.jsonl (one line per question: run_dir, the question record and its task; export_lf.py,
+export_test.py and evaluate.py read them), SEL/summary.json and SEL/summary.md (counts per group and per benchmark
+task, image inputs, tokens, answer shares).
 """
 
 from __future__ import annotations
@@ -37,6 +41,8 @@ import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from . import tasks
 
 RARE_DEFAULT = ("M3", "M6", "M8", "M9", "M10", "M11", "V5", "V6")
 TEMPLATE_FAMILY = {"ES-01": "ES-relation", "ES-02": "ES-relation", "ES-03": "ES-relation", "ES-04": "ES-relation"}
@@ -210,6 +216,21 @@ def summarise(name: str, sel: List[Tuple[str, Dict[str, Any]]], conversations: i
                            "p90": round(sorted(pitch)[9 * len(pitch) // 10], 1)} if pitch else None)}
 
 
+def line(run_dir: str, q: Dict[str, Any]) -> str:
+    return json.dumps({"run_dir": run_dir, "question": q, "task": tasks.record(q["subtasks"][0])}) + "\n"
+
+
+def task_table(bank: List[Tuple[str, Dict[str, Any]]], sel: Dict[str, List[Tuple[str, Dict[str, Any]]]]) -> Dict[str, Any]:
+    """Every benchmark task (tasks.TASKS, benchmark by benchmark) with its questions in the bank and in each split."""
+    supply: Dict[str, Counter] = defaultdict(Counter)
+    for _, q in bank:
+        supply[q["subtasks"][0]][q["split"]] += 1
+    n = {s: Counter(q["subtasks"][0] for _, q in v) for s, v in sel.items()}
+    keys = list(tasks.TASKS)
+    order = sorted(keys, key=lambda k: (tasks.BENCHMARKS.index(tasks.TASKS[k].benchmark), keys.index(k)))
+    return {k: dict(tasks.record(k), bank=dict(supply[k]), **{s: n[s][k] for s in sel}) for k in order}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bank", action="append", required=True)
@@ -220,6 +241,14 @@ def main() -> int:
     rng = random.Random(plan.get("seed", 20261015))
     rare = set(plan.get("rare_groups", RARE_DEFAULT))
     items = load_bank(a.bank)
+    mismatches = []
+    for _, q in items:
+        try:
+            tasks.check(q)
+        except tasks.TaskMismatch as e:
+            mismatches.append(str(e))
+    if mismatches:
+        raise SystemExit(f"{len(mismatches)} bank questions do not match their benchmark task, e.g.\n" + "\n".join(mismatches[:20]))
     by_split: Dict[str, List[Tuple[str, Dict[str, Any]]]] = defaultdict(list)
     for it in items:
         by_split[it[1]["split"]].append(it)
@@ -272,6 +301,7 @@ def main() -> int:
 
     # ---------------- evaluation: every question of val / test scenes under the same caps
     ev = plan.get("eval", {})
+    sels: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {"train": train_sel}
     for split in ("val", "test"):
         pk = Picker(int(plan.get("eval_object_cap", 3)))
         cand = by_split.get(split, [])
@@ -284,8 +314,10 @@ def main() -> int:
         es, d = cap_answers(es, plan["answer_cap"], plan["answer_cap_binary"], pk)
         summary[split] = summarise(split, es)
         summary[split]["dropped_by_answer_cap"] = d
-        (out / f"{split}.jsonl").write_text("".join(json.dumps({"run_dir": r, "question": q}) + "\n" for r, q in es))
-    (out / "train.jsonl").write_text("".join(json.dumps({"run_dir": r, "question": q}) + "\n" for r, q in train_sel))
+        sels[split] = es
+    for split, s in sels.items():
+        (out / f"{split}.jsonl").write_text("".join(line(r, q) for r, q in s))
+    summary["by_task"] = task_table(items, sels)
     (out / "summary.json").write_text(json.dumps(summary, indent=1, ensure_ascii=False))
     lines = ["# 抽样结果", ""]
     for split in ("train", "val", "test"):
@@ -298,6 +330,15 @@ def main() -> int:
             sh = "；".join(f"{t}: {x[0]} {x[1]:.0%} ({x[2]})" for t, x in b["top_answer_share"].items())
             lines.append(f"| {g} | {b['questions']} | {b['scenes']} | {sh} |")
         lines.append("")
+    lines += ["## 按 benchmark 任务（tasks.py；类别名与 benchmark 自己的数据一致）", "",
+              "| benchmark | 类别 | 任务 | 定义 | 题库（train / val / test 场景） | 训练 | val | test |",
+              "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for k, r in summary["by_task"].items():
+        bank = " / ".join(str(r["bank"].get(s, 0)) for s in ("train", "val", "test"))
+        flag = "" if r["test"] else " **（test 无题）**"
+        lines.append(f"| {r['benchmark']} | {r['category']} | {k} | {'一致' if r['definition'] == tasks.SAME else '有差异'} | "
+                     f"{bank} | {r['train']} | {r['val']} | {r['test']}{flag} |")
+    lines.append("")
     (out / "summary.md").write_text("\n".join(lines))
     print(json.dumps({k: {kk: summary[k][kk] for kk in ("questions", "scenes", "image_inputs", "video_conversations")}
                       for k in ("train", "val", "test") if k in summary}))
