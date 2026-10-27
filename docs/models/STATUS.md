@@ -367,6 +367,12 @@
 - 照常跑，不提交新任务。DS-CSRD 提交前先报磁盘读数；读数到 19 TB 立即报告。
 - 可腾空间的清单交磁盘线，本线自己不删：`reports/DISK_RECLAIM_20261027.md`，共约 1.24 TB，其中本线 0.63 TB，Qwen3-VL 的 0.60 TB 要主线点头。
 - 18:06 的读数：配额 17 TB，细读数 13.90 TB。
+- **清单已执行（磁盘线做的，你批的 b4、b5 都选甲）。** 两批都先上传 AOSS（0 个不符）再删：
+  - b4（本线部分）：265 个文件、634.0 GB，19:29 删。
+  - b5（Qwen3-VL 部分）：261 个文件、602.4 GB，19:36 删。
+  - 每个改过的位置有说明文件（`DELETED_TO_AOSS_20261027.txt` 或 `RESUME_STATE_DELETED`），写了 AOSS 位置 `fj:s3://baiqiao/vagen_lite_archive/<相对路径>`。逐文件记录在 `disk_runs/batches/b{4,5}_20261027/deleted.tsv`。
+  - 配额读数降到 14 TB（20:04）。
+  - 20:10 本线核对：7 个下游实验的起点锁都通过（`--check-start` 没有问题，包括还没开始的 DS-CSRS）；Qwen3 SFT `checkpoint-1232`、Cambrian `checkpoint-770`、`q3d` 第 300 次的 `actor/huggingface/` 都在。
 
 ### 1o. 第 24 条（10-27 13:45 你选甲）
 
