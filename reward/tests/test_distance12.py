@@ -129,6 +129,27 @@ class Distance12Test(unittest.TestCase):
         lines = [json.loads(l) for l in (out / "summary.jsonl").read_text().splitlines()]
         self.assertEqual(len(lines), 3)
 
+    def test_cli_shards_fill_their_share(self):
+        ids, backups = [r["task_id"] for r in self.rows[:4]], [r["task_id"] for r in self.rows[4:5]]
+        out = self.root / "cli_shards"
+        rows_path = self.root / "rows_s.jsonl"
+        rows_path.write_text("".join(json.dumps(r) + "\n" for r in self.rows))
+        (self.root / "ids_s.txt").write_text("".join(t + "\n" for t in ids))
+        (self.root / "backup_s.txt").write_text("".join(t + "\n" for t in backups))
+        finals = []
+        for shard in ("0/2", "1/2"):
+            D12.main(["build", "--rows", str(rows_path), "--task-ids", str(self.root / "ids_s.txt"), "--out", str(out),
+                      "--gs-root", str(self.gs_root), "--backup-ids", str(self.root / "backup_s.txt"), "--fill",
+                      "--shard", shard, "--depth", "3", "--workers", "2"])
+            tag = shard.replace("/", "of")
+            done = json.loads((out / f"DONE_{tag}.json").read_text())
+            mine = [t for t in ids if DT.in_shard(t, shard)]
+            self.assertEqual(done["tasks"], len(mine))
+            self.assertEqual(done["final"], len(mine))
+            finals += (out / f"final_ids_{tag}.txt").read_text().split()
+            self.assertTrue((out / f"summary_{tag}.jsonl").is_file())
+        self.assertEqual(sorted(finals), sorted(ids))
+
     def test_cli_replaces_over_limit_tasks(self):
         ids, backups = [r["task_id"] for r in self.rows[:2]], [r["task_id"] for r in self.rows[2:4]]
         out = self.root / "cli_over"

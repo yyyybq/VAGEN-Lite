@@ -16,8 +16,12 @@ rule, backward search and file format, so the env's TableCache reads it unchange
 * per task: states per level, the process's peak memory, CPU seconds of each part, the prefilter used.
 
     python -m reward.distance12 build --rows ROWS --task-ids FILE --out DIR --gs-root DIR
-        [--backup-ids FILE --target N] [--depth 12] [--max-states 6000000] [--judge-cpu-hours 8]
-        [--prefilter loose|strict] [--workers N] [--check-all]
+        [--backup-ids FILE (--target N | --fill)] [--shard i/n] [--depth 12] [--max-states 6000000]
+        [--judge-cpu-hours 8] [--prefilter loose|strict] [--workers N] [--check-all]
+
+With --shard i/n (two machines) each job builds the tasks and backups hashing to i and fills its own share
+(--fill: as many tables as its tasks); its files carry the suffix _iofn (summary, progress, final_ids, replacements,
+DONE), and a resumed run reads every shard's summary.
     python -m reward.distance12 compare A_DIR B_DIR [--task-ids FILE]
     python -m reward.distance12 count-prefilter --rows ROWS --task-ids FILE --gs-root DIR [--depth 12]
     python -m reward.distance12 check-prefilter --rows ROWS --task-ids FILE --gs-root DIR [--workers N]
@@ -25,8 +29,8 @@ rule, backward search and file format, so the env's TableCache reads it unchange
 (--gs-root on the cluster: /mnt/umm/users/yinbaiqiao/InteriorGS_ply, the launch script's GS_ROOT.)
 
 OUT/summary.jsonl gets one line per task built or over the limit, OUT/progress.json the running totals; with
-``--target`` OUT/final_ids.txt (the tasks with tables, ``target`` of them) and OUT/replacements.json are written at
-the end, and OUT/DONE.json marks the set complete.
+``--target`` / ``--fill`` OUT/final_ids.txt (the tasks with tables) and OUT/replacements.json are written at the
+end, and OUT/DONE.json marks the set complete.
 """
 
 from __future__ import annotations
@@ -45,8 +49,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 
 from data_gen.interiorgs_v10.difficulty import FastGeometry, to_c2w
-from data_gen.interiorgs_v10.distance_table import (backward_distances, load, may_succeed, reachable_graph, save,
-                                                    table_path)
+from data_gen.interiorgs_v10.distance_table import (backward_distances, in_shard, load, may_succeed, reachable_graph,
+                                                    save, table_path)
 
 VERSION = "reward_distance12_v1"  # the arrays are the main line's interiorgs_v10_distance_table_v1 layout
 DEFAULT_DEPTH = 12
@@ -202,14 +206,16 @@ def run_build(args: argparse.Namespace) -> None:
 
     rows_all = [json.loads(l) for l in Path(args.rows).read_text().splitlines() if l.strip()]
     by_id = {r["task_id"]: r for r in rows_all}
-    primary = [by_id[t] for t in _read_ids(args.task_ids)]
-    backups = [by_id[t] for t in _read_ids(args.backup_ids)]
+    primary = [by_id[t] for t in _read_ids(args.task_ids) if in_shard(t, args.shard)]
+    backups = [by_id[t] for t in _read_ids(args.backup_ids) if in_shard(t, args.shard)]
+    target = len(primary) if args.fill else args.target
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    log_path, prog_path = out / "summary.jsonl", out / "progress.json"
+    tag = f"_{args.shard.replace('/', 'of')}" if args.shard else ""
+    log_path, prog_path = out / f"summary{tag}.jsonl", out / f"progress{tag}.json"
     done: Dict[str, Dict[str, Any]] = {}
-    if log_path.is_file():  # resume: tasks already recorded keep their record
-        for l in log_path.read_text().splitlines():
+    for p in sorted(out.glob("summary*.jsonl")):  # resume: tasks already recorded (by any shard) keep their record
+        for l in p.read_text().splitlines():
             if l.strip():
                 r = json.loads(l)
                 if r.get("status") in ("ok", "over_states", "over_time"):
@@ -238,22 +244,28 @@ def run_build(args: argparse.Namespace) -> None:
                     cpu_hours += float((rec.get("cpu_seconds") or {}).get("total")
                                        or sum((rec.get("cpu_seconds") or {}).values())) / 3600
             log.flush()
-            st = defaultdict(int)
-            for r in done.values():
-                st[r["status"]] += 1
             prog_path.write_text(json.dumps({"utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stage": stage,
-                                             "stage_done": n, "stage_todo": len(todo), "recorded": dict(st),
-                                             "cpu_hours": round(cpu_hours, 1),
+                                             "shard": args.shard, "stage_done": n, "stage_todo": len(todo),
+                                             "recorded": counts(), "cpu_hours": round(cpu_hours, 1),
                                              "wall_hours": round((time.time() - t0) / 3600, 2)}, indent=1))
+
+    mine = {r["task_id"] for r in primary + backups}
+
+    def counts() -> Dict[str, int]:
+        st: Dict[str, int] = defaultdict(int)
+        for t, r in done.items():
+            if t in mine:
+                st[r["status"]] += 1
+        return dict(st)
 
     with Pool(args.workers, maxtasksperchild=1) as pool, open(log_path, "a") as log:
         run(primary, pool, log, "primary")
         final = [r for r in primary if done.get(r["task_id"], {}).get("status") == "ok"]
         replacements = []
-        if args.target:
+        if target:
             used = {r["task_id"] for r in primary}
             failed = [r for r in primary if done.get(r["task_id"], {}).get("status") != "ok"]
-            while len(final) < args.target and failed:
+            while len(final) < target and failed:
                 wave = []
                 for f in failed:
                     b = pick_backup(f, backups, used)
@@ -274,15 +286,13 @@ def run_build(args: argparse.Namespace) -> None:
                         final.append(b)
                     else:
                         failed.append(f)
-            (out / "final_ids.txt").write_text("".join(t + "\n" for t in sorted(r["task_id"] for r in final)))
-            (out / "replacements.json").write_text(json.dumps(replacements, indent=1))
-    st = defaultdict(int)
-    for r in done.values():
-        st[r["status"]] += 1
-    summary = {"utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "tasks": len(primary), "recorded": dict(st),
-               "final": len(final), "target": args.target, "replacements": len(replacements) if args.target else 0,
-               "cpu_hours": round(cpu_hours, 1), "wall_hours": round((time.time() - t0) / 3600, 2), "options": opts}
-    (out / "DONE.json").write_text(json.dumps(summary, indent=1))
+            (out / f"final_ids{tag}.txt").write_text("".join(t + "\n" for t in sorted(r["task_id"] for r in final)))
+            (out / f"replacements{tag}.json").write_text(json.dumps(replacements, indent=1))
+    summary = {"utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "shard": args.shard, "tasks": len(primary),
+               "recorded": counts(), "final": len(final), "target": target,
+               "replacements": len(replacements), "cpu_hours": round(cpu_hours, 1),
+               "wall_hours": round((time.time() - t0) / 3600, 2), "options": opts}
+    (out / f"DONE{tag}.json").write_text(json.dumps(summary, indent=1))
     print(json.dumps(summary))
 
 
@@ -377,7 +387,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     b.add_argument("--task-ids", required=True)
     b.add_argument("--out", required=True)
     b.add_argument("--backup-ids", default=None)
-    b.add_argument("--target", type=int, default=None)
+    b.add_argument("--target", type=int, default=None, help="replace over-limit tasks until N tables")
+    b.add_argument("--fill", action="store_true", help="--target = the number of (this shard's) tasks")
+    b.add_argument("--shard", default=None, help="i/n: only the tasks and backups hashing to i (distance_table's rule)")
     b.add_argument("--gs-root", required=True)
     b.add_argument("--depth", type=int, default=DEFAULT_DEPTH)
     b.add_argument("--max-states", type=int, default=DEFAULT_MAX_STATES)
