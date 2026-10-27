@@ -901,3 +901,20 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - `PREREG_D_vs_C.md`：开头加"定稿后的修正"那一行，3.3 的题数、起点、最小差改写；
   - `DIAG3_PROBE.md` 开头、`P1_DATASET_CARD.md`、`P1_STATS.md`（`report` 加了暂扣和人工核对的行）、`DATA_CONTRACT.md`（第 2、6.4、9 节）、`RECIPES.md`、`OCCLUSION_JUDGE.md` 第 5.1 节、`configs/matrix_v2/C0.yaml`。
 - **测试**：`apply_label_overrides`、`hold_out`、`rescore` 跳过去掉的题，共 3 个新测试。
+
+### 12.19 进矩阵前的准备：遮挡任务的 goal 题暂扣、探针 goal 题核对页、和 main 同步（用户 2026-10-27：都按推荐）
+
+用户问 P1 离进矩阵还差多少；我列了三件：合并分支（含训练链补丁）、约 1,300 卡时的 GPU、一个新发现的风险——遮挡任务的 goal 题（"任务完成了没有"）用的也是遮挡的框判据。用户定：都按推荐。
+- **遮挡任务的 goal 题暂扣**：`BUILD_CONFIG` 的 `hold_qtypes` 改成 `hold`，规则可以限定任务族。
+  - 暂扣的题：训练集 1,442 道（`goal_now` 711、`goal_after` 731），测试集 43 道。
+  - 重建后逐题核对，只少了这些题：训练集 86,855 → 85,413，测试集 5,985 → 5,942（逆向题因此占 15.1%，15% 的上限在暂扣之前算），探针不变。核对之前的文件在 `pre_goal_hold/`。
+  - 配方重建（8 分钟，共享盘慢）：D 仍是 177 + 9,802 + 9,802，它的 P1 里原来有 160 道这种题，现在没有了。
+- **探针的 44 道遮挡任务 goal 题**（`goal_now` 19、`goal_after` 25；Yes、No 各 22）做成核对页：https://claude.ai/artifact/Q84iD9Ac6ALRDrhyyqW1nG（私有）。
+  - 判定存在页面自己的库，collection `verdicts`；判"错"时另存"正确答案应为"（应为 Yes / 应为 No / 不该出这道题）。
+  - 新渲染了 44 张：单卡 `pt-t9davcgl`，19 秒，已删。
+  - 遮挡物和框对不上的 29 道排在前面。
+  - 代码：`occ_depth prepare --ids` 收任何题；`review probe-occlusion` 加了 `--qtypes`、`--families`、`--answers`、`--fix`。
+- **P0**：先用 177 条样题开跑，全量以后再说（用户定）。
+- **和 main 同步**：合入 `f8e43d40`（`0efaf894`，没有冲突）。两个冻结期补丁这次直接打得上，训练链 41 个测试通过（main 33 个 + 补丁 8 个）。
+- **合并和批卡**：由用户在冻结期定；本分支不动 main，不提交训练级别的 GPU 任务。
+- 测试：本分支的 5 个测试文件 82 个通过；合并 main 后全部登记的测试 552 个通过、5 个跳过、1 个失败（还是要读主工作树里 `third_party/starVLA` 的那个）。

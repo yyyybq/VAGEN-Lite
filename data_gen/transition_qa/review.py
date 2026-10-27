@@ -255,7 +255,8 @@ def cmd_occluders(args: argparse.Namespace) -> None:
 # 41 "fully hidden" ones have an occluder whose box does not match the render (occ_judge alignment)
 # =============================================================================
 FIX_CHOICES = ["完全挡住", "部分挡住", "没有挡住", "不该出这道题"]
-STATUS_ZH = {"ok": "遮挡物和框对得上", "in_front": "框前另有东西", "see_through": "框里大半是空的", "mixed": "对不上（混合）"}
+STATUS_ZH = {"ok": "遮挡物和框对得上", "in_front": "框前另有东西", "see_through": "框里大半是空的", "mixed": "对不上（混合）",
+             "too_small": "遮挡物在画面里太小"}
 
 
 def order_for_check(questions: List[Dict[str, Any]], status: Dict[str, str], seed: int) -> List[Dict[str, Any]]:

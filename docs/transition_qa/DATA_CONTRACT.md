@@ -31,8 +31,8 @@
 
 | 文件 | 内容 | 划分 |
 | --- | --- | --- |
-| `p1_train.jsonl` | 训练题（2026-10-23 起不含遮挡题，见 `p1_train_held.jsonl`） | 只有 train 场景（745 个） |
-| `p1_train_held.jsonl` | 暂扣的训练题（用户 2026-10-23，`BUILD_CONFIG` 的 `hold_qtypes`）：582 道遮挡题（`occluded_now` 227、`occluded_after` 355），框判据的标签核对下来大多不对；不进训练集，留着等能核对的时候 | 只有 train 场景 |
+| `p1_train.jsonl` | 训练题（2026-10-23 起不含遮挡题，2026-10-27 起也不含遮挡任务的 goal 题，见 `p1_train_held.jsonl`） | 只有 train 场景（745 个） |
+| `p1_train_held.jsonl`、`p1_test_held.jsonl` | 暂扣的题（`BUILD_CONFIG` 的 `hold`）：训练集 582 道遮挡题（用户 2026-10-23）和 1,442 道遮挡任务的 goal 题（2026-10-27），测试集 43 道遮挡任务的 goal 题。答案都来自遮挡的框判据，核对下来大多不对；不进训练集，留着等能核对的时候 | 只有 train 场景 |
 | `p1_test.jsonl` | 测试题；混合 SFT 的 P1 验证集从这里分层抽 300 道 | 只有 val 场景（97 个），不含探针题 |
 | `p1_probe.jsonl` | 探针集（诊断 3）：934 道，见第 6.4 节 | 只有 val 场景；第十二轮 v2 验证集的场景（就是全部 97 个 val 场景） |
 | `blind/<test 或 probe>/<名字>.json(l)` | 不看图的基线（`qa_probe run --no-images`）：原版 7B 只拿到题干和选项时的回答和准确率；`report` 把它写进 `P1_STATS.md` 第 7 节 | |
@@ -231,6 +231,7 @@ LLaMA-Factory 只读 `messages`、`images`、`videos`（`dataset_info.json` 的 
 | 2026-10-19 | `exps/transition_qa_20261019` | 全部可用帧 | 第 6.3 节 | 600 道，每类 40 道（遮挡、视野的选项顺序没打乱） |
 | 2026-10-20 | `exps/transition_qa_20261019b`（这一版的文件在 `pre_depth_check/`） | 全部可用帧 | 第 6.3 节；答案在题干格里平衡，逆向题 2 × 2 选项，距离 / 高度窗口重新分配（第 5 节） | 1,041 道 |
 | 2026-10-21 | `exps/transition_qa_20261019b`（这一版的文件在 `pre_probe_check/`） | 同上 | 同上，加遮挡题的渲染深度核对（第 5 节第 0 条） | 952 道 |
-| 2026-10-23（现用） | `exps/transition_qa_20261019b` | 同上 | 同上；训练集的遮挡题暂扣（`hold_qtypes`） | 934 道：人工核对重标 33 道、去掉 18 道（第 6.4 节） |
+| 2026-10-23 | `exps/transition_qa_20261019b`（这一版的训练、测试集在 `pre_goal_hold/`） | 同上 | 同上；训练集的遮挡题暂扣（`hold`） | 934 道：人工核对重标 33 道、去掉 18 道（第 6.4 节） |
+| 2026-10-27（现用） | `exps/transition_qa_20261019b` | 同上 | 同上；遮挡任务的 goal 题也暂扣（训练集 1,442、测试集 43） | 同上；遮挡任务的 44 道 goal 题人工核对中 |
 
 2026-10-19 和 2026-10-20 两版的候选题（`raw`）只差逆向题的选项；同一道题的 `sample_id` 不变。
