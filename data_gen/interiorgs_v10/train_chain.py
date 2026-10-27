@@ -829,6 +829,7 @@ class Chain:
         limit = int(self.plan.get("max_eval_jobs", DEFAULT_MAX_EVAL_JOBS))
         queue = list(jobs.items())
         running: Dict[str, Path] = {}
+        states: Dict[str, str] = {}  # each running job's latest state (one still waiting for its card is not running)
         ended: Dict[str, str] = {}
         failed: List[str] = []
         try:
@@ -844,6 +845,7 @@ class Chain:
                     running[name] = run
                 for name, run in list(running.items()):
                     st = job_sco.status(run)
+                    states[name] = str(st.get("state") or "RUNNING")
                     self.note_queue(f"{step}/{name}", run, "job", st)
                     if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
                         eval_dir, result = jobs[name][0], jobs[name][1]
@@ -858,7 +860,7 @@ class Chain:
                         ended[name] = st.get("state")
                         job_sco.delete(run)
                         running.pop(name)
-                self.mark(step, jobs={**{n: "RUNNING" for n in running}, **ended, "queued": len(queue)})
+                self.mark(step, jobs={**{n: states.get(n, "RUNNING") for n in running}, **ended, "queued": len(queue)})
                 if queue or running:
                     self.sleep(POLL_S)
         finally:  # a failed submission or poll leaves no job behind

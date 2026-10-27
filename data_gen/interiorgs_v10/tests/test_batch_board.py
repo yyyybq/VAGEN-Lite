@@ -100,6 +100,8 @@ class BatchBoardTest(unittest.TestCase):
                               "rl_runs": {"x": {"last_update": 100, "seconds_per_update_mean_last10": 120}},
                               "job_retries": {"rl/x": [{"reason": "trainer ended FAILED"}]}})
         failed = chain("f", {"state": "failed", "steps": {"sft": {"state": "failed", "error": "ChainError: boom"}}})
+        eval_wait = chain("ev", {"state": "running", "steps": {"evaluate": {"state": "running", "jobs": {
+            "val__a_050": "SUCCEEDED", "val__a_100": "STARTING", "test__a_100": "QUEUEING", "queued": 0}}}})
         sft_wait = chain("w", {"state": "running", "steps": {"sft": {"state": "running", "jobs": {"s050": "RUNNING"}}},
                                "queue": {"pt-9": {"what": "sft/s050", "queued_s": 600, "started": None}}})
         self.result("v2", "val", "d_050", {"v1"})
@@ -121,7 +123,18 @@ class BatchBoardTest(unittest.TestCase):
             {"id": "E4", "name": "完成", "chain": done, "runs": {"s": "S0", "d": "D"}, "controls": {"s": "sftc", "d": "sftc"},
              "sft_group": "g", "sft_control": "sftc"},
             {"id": "E5", "name": "没开始", "chain": str(self.root / "none")},
-            {"id": "E6", "name": "SFT 等卡", "chain": sft_wait}]}
+            {"id": "E6", "name": "SFT 等卡", "chain": sft_wait},
+            {"id": "E7", "name": "评测等卡", "chain": eval_wait}]}
+        # a trainer deleted while it waited (moved to another pool): its queue record no longer counts as waiting
+        moved = chain("mv", {"state": "running", "plan": {"endpoint": 300},
+                             "steps": {"rl": {"state": "running", "jobs": {"y/rl": "QUEUEING", "y/renderer": "RUNNING"}}},
+                             "queue": {"pt-old": {"what": "rl/y/rl", "queued_s": 43000, "started": None},
+                                       "pt-new": {"what": "rl/y/rl", "queued_s": 300, "started": None}}})
+        (Path(moved) / "rl_run_y" / "job_rl").mkdir(parents=True)
+        (Path(moved) / "rl_run_y" / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-new"}))
+        self.assertIn("1 个在排队（最长 0.1 小时）", B.experiment_row({"chain": moved}, self.sets, now)["queue"])
+        (Path(queued) / "rl_run_as0" / "job_rl").mkdir(parents=True)  # the queued trainer's receipt: still its job
+        (Path(queued) / "rl_run_as0" / "job_rl" / "submission.json").write_text(json.dumps({"job_id": "pt-1"}))
         md = B.render(manifest, now)
         self.assertIn("| E1 | 排队 | 排队中 | RL |", md)
         self.assertIn("1 个在排队（最长 2.0 小时）", md)
@@ -132,6 +145,7 @@ class BatchBoardTest(unittest.TestCase):
         self.assertIn("失败原因：ChainError: boom", md)
         self.assertIn("| E5 | 没开始 | 未启动 |", md)
         self.assertIn("| E6 | SFT 等卡 | 排队中 | SFT |", md)  # the SFT step lists waiting jobs as running
+        self.assertIn("| E7 | 评测等卡 | 排队中 | 评测 |", md)  # the evaluations left all wait for cards
         self.assertIn("SFT 挑出 sft_g_e2", md)
         self.assertIn("S0（s）挑出 s_050", md)
         self.assertIn("D 对 S0", md)

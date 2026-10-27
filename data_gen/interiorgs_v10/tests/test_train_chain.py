@@ -1060,6 +1060,38 @@ class ChainTest(unittest.TestCase):
             self.assertNotIn("job_hosts", chain.state)
             self.assertNotIn("hosts", chain.state["startup_retries"]["a"][0])
 
+    def test_evaluation_jobs_waiting_for_cards_show_their_state(self):
+        """The user's section 2.2 of 2026-10-22: an evaluation job still waiting for its card is recorded with its own
+        state (QUEUEING / STARTING), not as RUNNING; once it runs and ends, as before."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "m").mkdir()
+            (root / "m" / "config.json").write_text("{}")
+            res = root / "val" / "r1"
+            res.mkdir(parents=True)
+            states = iter(["QUEUEING", "STARTING", "RUNNING", "SUCCEEDED"])
+            seen = []
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp},
+                            sleep=lambda s: seen.append(dict(chain.state["steps"]["evaluate"]["jobs"])))
+
+            def status(run, job_dir="job"):
+                s = next(states)
+                if s == "SUCCEEDED":
+                    (res / "done.json").write_text("{}")
+                return {"job_id": "pt-e", "state": s, "finished": s == "SUCCEEDED"}
+
+            with mock.patch.multiple(job_sco, status=status,
+                                     prepare=lambda run, *a, **k: (run / "job").mkdir(parents=True, exist_ok=True),
+                                     submit=lambda run, job_dir="job": (run / "job" / "submission.json").write_text("{}"),
+                                     delete=lambda run, job_dir="job": (run / "job" / "submission.json").unlink(missing_ok=True)):
+                chain.eval_jobs("evaluate", {"val__r1": (root / "val", "r1", str(root / "m"), None, [])})
+            self.assertEqual([s["val__r1"] for s in seen], ["QUEUEING", "STARTING", "RUNNING"])
+            self.assertEqual(chain.state["steps"]["evaluate"]["jobs"]["val__r1"], "SUCCEEDED")
+
     def test_retries_of_failed_jobs(self):
         """Round 12 batch (the user's rule): plan "retries": 2 resubmits a failed RL trainer (it resumes), a dead
         render service (with its trainer), an SFT job (model folder moved aside) and an evaluation job (going on from
