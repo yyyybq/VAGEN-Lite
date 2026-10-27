@@ -1,20 +1,20 @@
 {
  "batch": "b5_20261027",
- "approved": "PENDING: needs the user's approval in the disk line AND the main line's consent (Qwen3-VL assets were handed to the main line by the model line's decision 24). Source: VAGEN-Lite-models docs/models/reports/DISK_RECLAIM_20261027.md (models 9f35c89a). This batch: the Qwen3-VL part of classes 1, 3, 4, 5.",
+ "approved": "the user, 2026-10-27 in the disk line: RECLAIM_20261027.md decision 2 = A (the user approves directly; the main line, owner of the Qwen3-VL assets since the model line's decision 24, gets the record afterwards). Source: VAGEN-Lite-models docs/models/reports/DISK_RECLAIM_20261027.md (models 9f35c89a). This batch: the Qwen3-VL part of classes 1, 3, 4, 5.",
  "items": [
   {"id": "q1-qwen3-sft-epochs", "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model",
    "include": ["^checkpoint-(154|308|462|616|770|924|1078|1386|1540)/"],
    "marker_name": "DELETED_TO_AOSS_20261027.txt",
-   "marker": "Qwen3-VL formal SFT: the epochs not picked (checkpoint-154, 308, 462, 616, 770, 924, 1078, 1386, 1540 = epochs 1-7, 9, 10) were archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 1, approved by the user and the main line). Kept: checkpoint-1232 (epoch 8, the pick, start of the seed-20261021 RL arms and DS-Q3S) and the top-level final model (= epoch 10)."},
+   "marker": "Qwen3-VL formal SFT: the epochs not picked (checkpoint-154, 308, 462, 616, 770, 924, 1078, 1386, 1540 = epochs 1-7, 9, 10) were archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 1, approved by the user; the main line informed afterwards). Kept: checkpoint-1232 (epoch 8, the pick, start of the seed-20261021 RL arms and DS-Q3S) and the top-level final model (= epoch 10)."},
   {"id": "q3-qwen3-smoke-sft", "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_smoke_20261024/lf_q3smoke", "min_bytes": 1048576,
-   "marker": "Qwen3-VL step-2 smoke SFT (400 dialogues, 1 epoch): every file over 1 MB (the model, twice) was archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 3, approved by the user and the main line). Configs, logs and trainer state stay."},
+   "marker": "Qwen3-VL step-2 smoke SFT (400 dialogues, 1 epoch): every file over 1 MB (the model, twice) was archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 3, approved by the user; the main line informed afterwards). Configs, logs and trainer state stay."},
   {"id": "q4-q3s0-step150-resume", "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_150",
    "include": ["^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$", "^data\\.pt$"], "marker_name": "RESUME_STATE_DELETED",
-   "marker": "FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 4, approved by the user and the main line); actor/huggingface kept; not resumable from here."},
+   "marker": "FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 4, approved by the user; the main line informed afterwards); actor/huggingface kept; not resumable from here."},
   {"id": "q4-q3d-step300-resume", "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3d/checkpoints/global_step_300",
    "include": ["^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$", "^data\\.pt$"], "marker_name": "RESUME_STATE_DELETED",
-   "marker": "FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 4, approved by the user and the main line); actor/huggingface kept (start of DS-Q3RD); not resumable from here."},
+   "marker": "FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 4, approved by the user; the main line informed afterwards); actor/huggingface kept (start of DS-Q3RD); not resumable from here."},
   {"id": "q5-ds-q3b-smoke", "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-Q3B-smoke-s1", "min_bytes": 1048576,
-   "marker": "DS-Q3B-smoke-s1 (100-step 8-card smoke): every file over 1 MB (mainly run/final_model/pytorch_model.pt) was archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 5, approved by the user and the main line). Logs and results stay."}
+   "marker": "DS-Q3B-smoke-s1 (100-step 8-card smoke): every file over 1 MB (mainly run/final_model/pytorch_model.pt) was archived to AOSS and deleted on 2026-10-27 by the disk line (DISK_RECLAIM_20261027.md class 5, approved by the user; the main line informed afterwards). Logs and results stay."}
  ]
 }

@@ -1,0 +1,216 @@
+{
+ "batch": "b6_20261027",
+ "approved": "the user, 2026-10-27 in the disk line: RECLAIM_20261027.md decision 3 = A (Qwen2.5-VL dropped by the main line; keep only what is needed: delete classes A, B, C, D) and decision 4 = A (the four old Cambrian copies in models/historical).",
+ "items": [
+  {
+   "id": "B-r12zd-cb_v1_v4-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v1_v4/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r12zd_20261024 cb_v1_v4 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "B-r12zd-cb_v1_v5-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v1_v5/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r12zd_20261024 cb_v1_v5 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "B-r12zd-cb_v1_v5_v8-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v1_v5_v8/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r12zd_20261024 cb_v1_v5_v8 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "B-r12zd-cb_v1_v7-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v1_v7/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r12zd_20261024 cb_v1_v7 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "B-r12zd-cb_v4_floor-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v4_floor/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r12zd_20261024 cb_v4_floor step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "B-r12zd-cb_v4_v7-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v4_v7/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r12zd_20261024 cb_v4_v7 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "B-r12ze-cb_v4_floors2-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ze_20261025/rl_run_cb_v4_floors2/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r12ze_20261025 cb_v4_floors2 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "A-r13c1-c1dck-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c1_20261026/rl_run_c1dck/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13c1_20261026 c1dck step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "A-r13c1-c1s0-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c1_20261026/rl_run_c1s0/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13c1_20261026 c1s0 step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "A-r13c2-c2dck-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c2_20261026/rl_run_c2dck/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13c2_20261026 c2dck step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "A-r13c2-c2s0-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c2_20261026/rl_run_c2s0/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13c2_20261026 c2s0 step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "B-r13c2-c2s0-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c2_20261026/rl_run_c2s0/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r13c2_20261026 c2s0 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "A-r13c3-m3dck-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c3_20261026/rl_run_m3dck/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13c3_20261026 m3dck step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "A-r13c3-m3s0-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c3_20261026/rl_run_m3s0/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13c3_20261026 m3s0 step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "B-r13c3-m3s0-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c3_20261026/rl_run_m3s0/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r13c3_20261026 m3s0 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "A-r13d-dcks3-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dcks3/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13d_20261026 dcks3 step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "A-r13d-dcks4-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dcks4/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13d_20261026 dcks4 step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "B-r13d-dcks4-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dcks4/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r13d_20261026 dcks4 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "A-r13d-dcks5-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dcks5/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13d_20261026 dcks5 step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "A-r13d-dv4s3-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dv4s3/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13d_20261026 dv4s3 step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "B-r13d-dv4s3-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dv4s3/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r13d_20261026 dv4s3 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "A-r13d-dv4s4-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dv4s4/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13d_20261026 dv4s4 step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "B-r13d-dv4s4-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dv4s4/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r13d_20261026 dv4s4 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "A-r13d-dv4s5-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dv4s5/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Round 13 (Qwen2.5-VL) r13d_20261026 dv4s5 step 300: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class A, the user's decision 3 = A: the main line moved to Qwen3-VL). Not resumable from here."
+  },
+  {
+   "id": "B-r13d-dv4s5-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dv4s5/checkpoints/global_step_300/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "Qwen2.5-VL r13d_20261026 dv4s5 step 300 (the run's last checkpoint, not its best on the validation set): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class B, the user's decision 3 = A). The run's best checkpoint stays; configs and tokenizer files stay."
+  },
+  {
+   "id": "D-r12-pilot_invalid_turn_3b_run",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/pilot_invalid_turn_3b_run/checkpoints",
+   "min_bytes": 1048576,
+   "marker": "Round-12 Qwen2.5-VL-3B pilot pilot_invalid_turn_3b_run: every checkpoint file over 1 MB was archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class D, the user's decision 3 = A)."
+  },
+  {
+   "id": "D-r12-pilot_v8_3b_run",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/pilot_v8_3b_run/checkpoints",
+   "min_bytes": 1048576,
+   "marker": "Round-12 Qwen2.5-VL-3B pilot pilot_v8_3b_run: every checkpoint file over 1 MB was archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class D, the user's decision 3 = A)."
+  }
+ ]
+}

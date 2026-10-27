@@ -1,6 +1,6 @@
 {
  "batch": "b4_20261027",
- "approved": "PENDING: needs the user's approval in the disk line. Source: the model line's list VAGEN-Lite-models docs/models/reports/DISK_RECLAIM_20261027.md (models 9f35c89a, the user's model-line decision 26 = A of 2026-10-27: hand the list to the disk line, the model line deletes nothing). This batch: the model line's own part (Cambrian-S and the Qwen2.5-VL reference rows), classes 2, 3, 4, 5.",
+ "approved": "the user, 2026-10-27 in the disk line: RECLAIM_20261027.md decision 1 = A. Source: the model line's list VAGEN-Lite-models docs/models/reports/DISK_RECLAIM_20261027.md (models 9f35c89a, the user's model-line decision 26 = A of 2026-10-27: hand the list to the disk line, the model line deletes nothing). This batch: the model line's own part (Cambrian-S and the Qwen2.5-VL reference rows), classes 2, 3, 4, 5.",
  "items": [
   {"id": "m2-cambrian-sft-epochs", "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_sft_20261026/lf_cformal/model",
    "include": ["^checkpoint-(154|308|462|616|924|1078|1232|1386|1540)/"],

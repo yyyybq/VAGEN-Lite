@@ -1,0 +1,114 @@
+{
+ "batch": "b7_20261027",
+ "approved": "the user, 2026-10-27 in the disk line: RECLAIM_20261027.md decision 3 = A (Qwen2.5-VL dropped by the main line; keep only what is needed: delete classes A, B, C, D) and decision 4 = A (the four old Cambrian copies in models/historical).",
+ "items": [
+  {
+   "id": "C-dense-r3-S0-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S0/checkpoints/global_step_100/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "dense-score pilot r3 branch S0 step 100 (target of models/historical/dense_score_pilot_r3_S0_step100) (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-dense-r3-S0-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S0/checkpoints/global_step_150/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "dense-score pilot r3 branch S0 step 150 (target of models/historical/dense_score_pilot_r3_S0_step150) (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-dense-r3-S1-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S1/checkpoints/global_step_100/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "dense-score pilot r3 branch S1 step 100 (target of models/historical/dense_score_pilot_r3_S1_step100) (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-dense-r3-S1-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S1/checkpoints/global_step_150/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "dense-score pilot r3 branch S1 step 150 (target of models/historical/dense_score_pilot_r3_S1_step150) (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-dense-r3-S5-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S5/checkpoints/global_step_100/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "dense-score pilot r3 branch S5 step 100 (target of models/historical/dense_score_pilot_r3_S5_step100) (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-dense-r3-S5-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/dense_score_reward_only_pilot_parallel_r3_20261009/branches/S5/checkpoints/global_step_150/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "dense-score pilot r3 branch S5 step 150 (target of models/historical/dense_score_pilot_r3_S5_step150) (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-hist-qwen_v50_clean_d0pass_20260824_full_step50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/qwen_v50_clean_d0pass_20260824_full_step50",
+   "min_bytes": 1048576,
+   "marker": "registry copy models/historical/qwen_v50_clean_d0pass_20260824_full_step50 (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-hist-qwen_v50_clean_d0pass_20260824_full_step100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/qwen_v50_clean_d0pass_20260824_full_step100",
+   "min_bytes": 1048576,
+   "marker": "registry copy models/historical/qwen_v50_clean_d0pass_20260824_full_step100 (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-hist-qwen_v50_clean_d0pass_20260824_full_step700",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/qwen_v50_clean_d0pass_20260824_full_step700",
+   "min_bytes": 1048576,
+   "marker": "registry copy models/historical/qwen_v50_clean_d0pass_20260824_full_step700 (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-frozen-v46_step200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/unified_eval_runs/frozen_ckpts/v46_step200",
+   "min_bytes": 1048576,
+   "marker": "frozen checkpoint v46_step200 (target of models/historical/v46_qwen25vl7b_step200) (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-frozen-v50_step150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/unified_eval_runs/frozen_ckpts/v50_step150",
+   "min_bytes": 1048576,
+   "marker": "frozen checkpoint v50_step150 (target of models/historical/v50_qwen25vl7b_step150) (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-r1taskfix-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0-taskfix/formal/checkpoints/global_step_250/actor/huggingface",
+   "min_bytes": 1048576,
+   "marker": "R1 taskfix formal step 250 (target of models/historical/r1_clean_projective_v0_taskfix_step250) (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-r1h1-v46restore",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/r1_h1_aoss_repair_20260905/r1_canonical_dev_eval32_20260915/model_restore/v46_step250_hf",
+   "min_bytes": 1048576,
+   "marker": "R1 h1 repair: restored v46 step 250 copy (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "C-act2qa-v50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/data_gen/active_spatial_qa/artifacts/act2qa_real_canary_20260919T0618/models/act_qwen_v50_step50",
+   "min_bytes": 1048576,
+   "marker": "QA line act2qa canary: v50 step 50 copy (Qwen2.5-VL-7B, before round 10): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md class C, the user's decision 3 = A). Configs and tokenizer files stay; download from AOSS to use it."
+  },
+  {
+   "id": "H-cambrian_c4_clean_d0pass_20260822_h800_r5_full_step960",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c4_clean_d0pass_20260822_h800_r5_full_step960",
+   "min_bytes": 1048576,
+   "marker": "registry copy models/historical/cambrian_c4_clean_d0pass_20260822_h800_r5_full_step960 (Cambrian, August 2026): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md decision 4 = A). Configs stay; download from AOSS to use it."
+  },
+  {
+   "id": "H-cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step50",
+   "min_bytes": 1048576,
+   "marker": "registry copy models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step50 (Cambrian, August 2026): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md decision 4 = A). Configs stay; download from AOSS to use it."
+  },
+  {
+   "id": "H-cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step100",
+   "min_bytes": 1048576,
+   "marker": "registry copy models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step100 (Cambrian, August 2026): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md decision 4 = A). Configs stay; download from AOSS to use it."
+  },
+  {
+   "id": "H-cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step1000",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step1000",
+   "min_bytes": 1048576,
+   "marker": "registry copy models/historical/cambrian_c8_clean_d0pass_20260824_sco_renderer_r3_full_step1000 (Cambrian, August 2026): the weight files were archived to AOSS and deleted on 2026-10-27 by the disk line (RECLAIM_20261027.md decision 4 = A). Configs stay; download from AOSS to use it."
+  }
+ ]
+}

@@ -104,7 +104,7 @@ def main():
         print(json.dumps(r))
     else:
         tb = lambda b: "%.2f TB (%.2f TiB)" % (b / 1e12, b / TIB)
-        print("配额 quota    : %s   [quota table %r, read as whole TiB]" % (tb(r["quota_bytes"]), r["table_quota"]))
+        print("配额 quota    : %s   [quota table %r, taken as printed (decision 4)]" % (tb(r["quota_bytes"]), r["table_quota"]))
         print("已用 used     : %s   [%s; quota table says %r, %s files]" % (tb(r["used_bytes"]), r["used_source"], r["table_used"], r["table_files"]))
         print("剩余 remaining: %s" % tb(r["remaining_bytes"]))
         print("(%s, %.0f s)" % (r["utc"], r["seconds"]))
