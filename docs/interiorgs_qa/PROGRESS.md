@@ -87,7 +87,14 @@
   时报 "Couldn't cast … to null"，训练会读不进来）。实测 token（`lf_tokens.py`，无截断）：256 每轮 251 万（视觉 159 万），
   512 每轮 728 万（视觉 637 万）。
 
+- 2026-10-28 训练和 test 集评测完成（报告第 6 节）：训练 pt-vkamp7w5 38 分钟（510 步，loss 2.11→0.04，val loss 0.18 左右不变），
+  模型 `exps/interiorgs_qa_final_20261028/lf_256/model`；评测 `exps/interiorgs_qa_eval_20261028/`（基座 pt-mw58pnxb、QA-SFT pt-a2qmufge），
+  对照表 `compare_base_vs_sft256_test.md`（新模块 `compare.py`）。原格式 VSI 0.32→0.48，其余 benchmark +18 到 +47 个百分点；
+  VSI 相对方向没有学好（easy 原格式 53%→39%）。
+
 ## 2. 正在运行什么
+
+没有。以下是 2026-10-28 训练时的记录。
 
 用户 2026-10-28 要求：把 lf_256 的训练提交成 SCO 任务（Act-SFT 配方，8 卡），训完用 test 集评测。
 
