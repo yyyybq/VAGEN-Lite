@@ -8,7 +8,7 @@ task's depth-12 graph), and a fresh search from that pose with the env's rule, a
 no success within the bound, the bound is wrong there and the table is right; if it does, the table is wrong.
 
     python -m reward.check_goal_bound --rows ROWS --task-ids FILE --new DIR --goal DIR --gs-root DIR --out OUT.json
-        [--workers 12]
+        [--workers 4]
 """
 
 import argparse
@@ -78,7 +78,7 @@ def main():
     ap.add_argument("--goal", required=True)
     ap.add_argument("--gs-root", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--workers", type=int, default=12)
+    ap.add_argument("--workers", type=int, default=4)  # the login node: at most 4 cores a task
     args = ap.parse_args()
     ids = [l.strip() for l in Path(args.task_ids).read_text().splitlines() if l.strip()]
     rows = {}

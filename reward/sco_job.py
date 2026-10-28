@@ -1,5 +1,7 @@
-"""Reward line: run one of this line's modules (reward.<module>) as a one-card sco job, the user's login-node rule of
-2026-10-28 (replays, analyses, multi-process or minutes-long Python never run on the login node).  Modelled on
+"""Reward line: run one of this line's modules (reward.<module>) as a one-card sco job.  The user's login-node rule of
+2026-10-28 (as corrected the same day): data making, batch rendering and batch scoring go to sco; replays, analyses
+and tests may run on the login node at no more than 4 cores a task (processes x threads, after checking the cores in
+use), and a task that needs more than 4 cores for long comes here.  Modelled on
 data_gen/interiorgs_qa/sco.py, which only runs interiorgs_qa modules: the job settings (image, mount, card spec, sco)
 are v10's, imported; ``prepare`` freezes the code (data_gen/interiorgs_v10, vagen, reward) into JOB/source.tar.gz,
 so editing the worktree later cannot change a queued job.  The job has 14 vCPUs; the launch script caps every

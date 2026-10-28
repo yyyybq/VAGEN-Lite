@@ -12,7 +12,7 @@
 4. The start's d equals d*, the table reaches depth 12.
 
     python -m reward.check_2a --rows ROWS --task-ids FILE --new DIR --old DIR --goal DIR --outside FILE [FILE...]
-        --gs-root DIR --out OUT.json [--per-task 5] [--workers 12]
+        --gs-root DIR --out OUT.json [--per-task 5] [--workers 4]
 """
 
 import argparse
@@ -83,7 +83,7 @@ def main():
     ap.add_argument("--gs-root", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--per-task", type=int, default=5)
-    ap.add_argument("--workers", type=int, default=12)
+    ap.add_argument("--workers", type=int, default=4)  # the login node: at most 4 cores a task
     ap.add_argument("--seed", type=int, default=20261027)
     args = ap.parse_args()
     from data_gen.interiorgs_v10 import distance_table as DT

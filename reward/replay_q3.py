@@ -15,7 +15,7 @@ For every recorded episode of the given tasks (every EVERY-th update):
   under the run's own reward.
 
     python -m reward.replay_q3 --run RUN_DIR --env-yaml TRAIN_ENV.yaml --rows ROWS --task-ids FILE --tables DIR
-        --out OUT [--old-tables DIR] [--every 1] [--max-update N] [--workers 12] [--no-returns]
+        --out OUT [--old-tables DIR] [--every 1] [--max-update N] [--workers 4] [--no-returns]
 
 --max-update N keeps the updates 1..N (the user's rule 5: a training run's first 2 updates, every table lookup and
 the time to read each task's table as the env's TableCache does, distance_table.load).
@@ -175,7 +175,7 @@ def main():
     ap.add_argument("--old-tables", default=None)
     ap.add_argument("--every", type=int, default=1)
     ap.add_argument("--max-update", type=int, default=None)
-    ap.add_argument("--workers", type=int, default=12)
+    ap.add_argument("--workers", type=int, default=4)  # the login node: at most 4 cores a task
     ap.add_argument("--no-returns", action="store_true")
     args = ap.parse_args()
 
