@@ -15,7 +15,7 @@ import heapq
 import itertools
 import math
 from collections import Counter
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -23,7 +23,7 @@ from . import mv
 from .common import Combo, GenCtx, bare, cap, single_pool
 from .geom import CAMERA_HEIGHT_M, angle_diff_deg, box_distance, camera_K, point_in_polygon, polygon_area, pose_yaw_pitch
 from .qa import Phrasing
-from .single import Runner, pick_subtask
+from .single import Runner
 from .scene_ctx import face_visible_grid
 from .visible import RECOGNISABLE_AREA
 
@@ -289,6 +289,24 @@ def num_answer(x: float, nd: int) -> str:
     return f"{x:.{nd}f}" if nd else str(int(round(x)))
 
 
+def each_subtask(r: Runner, group: str, one: Callable[[str], Optional[str]]) -> Optional[str]:
+    """One question of every subtask of ``group`` that still has quota, from the same video (VSI-Bench asks every
+    question type about a video). ``one(st)`` makes one question of ``st`` and returns None, or returns why it could
+    not. Until 2026-10-28 a video gave one question of the subtask with the largest remaining quota, and with equal
+    quotas (bank mode: 999 each) that was always the first one listed: the full bank of 2026-10-27 had no
+    VSI-direction-hard question at all and few relative distances and room sizes."""
+    made, reasons = False, []
+    for st in SUBTASKS[group]:
+        if r.need[st] <= 0:
+            continue
+        why = one(st)
+        if why is None:
+            made = True
+        else:
+            reasons.append(why)
+    return None if made or not reasons else reasons[0]
+
+
 # =============================================================================
 # V1 count
 # =============================================================================
@@ -347,49 +365,51 @@ def v2_realize(r: Runner):
             return "fewer_than_2_unique_objects"
         if not emit:
             return None
-        st = pick_subtask(r, SUBTASKS["V2"])
-        if st is None:
-            return None
-        if st == "VSI-distance-absolute":
-            pairs = list(itertools.combinations(ids, 2))
-            g.rng.shuffle(pairs)
-            for a, b in pairs:
-                d = box_distance(ctx.obb[a], ctx.obb[b])
-                if d < 0.3:
-                    continue
-                q = f"Measuring from the closest point of each object, what is the distance between the {names[a]} and the {names[b]} (in meters)?"
-                fam = vsi_fam(q, [f"How far apart are the {names[a]} and the {names[b]} at their closest points, in metres?",
-                                  f"What is the gap in metres between the {names[a]} and the {names[b]}?",
-                                  f"Give the shortest distance between the {names[a]} and the {names[b]} in meters."],
-                              f"Estimate, in metres, the space separating the {names[a]} from the {names[b]} where they come nearest.", True)
-                emit_video(g, v, "V2", [st, "SITE-C04"], fam, None, num_answer(d, 1), "numeric",
-                           gt("两个三维框之间的精确最近距离（框内采样取最小点对距离的极限），保留 1 位小数；只用房间里、且视频里只有一个的物体类别。",
-                              "VSI 在框内均匀采样取最小点对距离，这里取精确值（差异只在采样误差）；框来自 InteriorGS 标注。", distance_m=round(d, 3)),
-                           [g.obj_entry(a, "the " + names[a], "object"), g.obj_entry(b, "the " + names[b], "object")])
-                r.take(st)
-                return None
-            return "no_distance_pair"
-        thr = 0.30 if ctx.room_area(v.room) > 40 else 0.15
-        g.rng.shuffle(ids)
-        for x in ids:
-            others = [o for o in ids if o != x]
-            for cand in itertools.combinations(others, 4):
-                ds = [box_distance(ctx.obb[x], ctx.obb[c]) for c in cand]
-                if min(abs(p - q) for p, q in itertools.combinations(ds, 2)) < thr:
-                    continue
-                keys = [names[c] for c in cand]
-                ans = names[cand[int(np.argmin(ds))]]
-                q = f"Measuring from the closest point of each object, which of these objects ({', '.join(keys)}) is the closest to the {names[x]}?"
-                fam = vsi_fam(q, [f"Which object is nearest to the {names[x]}?", f"Of the listed objects, which one is closest to the {names[x]} (closest points)?",
-                                  f"Pick the object with the smallest distance to the {names[x]}."],
-                              f"Find the object that sits nearest the {names[x]}.", False)
-                emit_video(g, v, "V2", [st, "SITE-C04"], fam, keys, ans, "mc",
-                           gt(f"候选物体到参照物的三维框最近距离；按官方规则候选距离两两相差 ≥{int(thr * 100)} cm（房间 >40 m² 用 30 cm，否则 15 cm）。",
-                              "定义与 VSI 一致（框级距离）；框来自 InteriorGS 标注。", distances_m=dict(zip(keys, [round(d, 3) for d in ds]))),
-                           [g.obj_entry(x, "the " + names[x], "reference")] + [g.obj_entry(c, "the " + names[c], "candidate") for c in cand])
-                r.take(st)
-                return None
-        return "no_relative_distance_set"
+
+        def one(st: str) -> Optional[str]:
+            if st == "VSI-distance-absolute":
+                pairs = list(itertools.combinations(ids, 2))
+                g.rng.shuffle(pairs)
+                for a, b in pairs:
+                    d = box_distance(ctx.obb[a], ctx.obb[b])
+                    if d < 0.3:
+                        continue
+                    q = f"Measuring from the closest point of each object, what is the distance between the {names[a]} and the {names[b]} (in meters)?"
+                    fam = vsi_fam(q, [f"How far apart are the {names[a]} and the {names[b]} at their closest points, in metres?",
+                                      f"What is the gap in metres between the {names[a]} and the {names[b]}?",
+                                      f"Give the shortest distance between the {names[a]} and the {names[b]} in meters."],
+                                  f"Estimate, in metres, the space separating the {names[a]} from the {names[b]} where they come nearest.", True)
+                    emit_video(g, v, "V2", [st, "SITE-C04"], fam, None, num_answer(d, 1), "numeric",
+                               gt("两个三维框之间的精确最近距离（框内采样取最小点对距离的极限），保留 1 位小数；只用房间里、且视频里只有一个的物体类别。",
+                                  "VSI 在框内均匀采样取最小点对距离，这里取精确值（差异只在采样误差）；框来自 InteriorGS 标注。", distance_m=round(d, 3)),
+                               [g.obj_entry(a, "the " + names[a], "object"), g.obj_entry(b, "the " + names[b], "object")])
+                    r.take(st)
+                    return None
+                return "no_distance_pair"
+            thr = 0.30 if ctx.room_area(v.room) > 40 else 0.15
+            xs = list(ids)
+            g.rng.shuffle(xs)
+            for x in xs:
+                others = [o for o in ids if o != x]
+                for cand in itertools.combinations(others, 4):
+                    ds = [box_distance(ctx.obb[x], ctx.obb[c]) for c in cand]
+                    if min(abs(p - q) for p, q in itertools.combinations(ds, 2)) < thr:
+                        continue
+                    keys = [names[c] for c in cand]
+                    ans = names[cand[int(np.argmin(ds))]]
+                    q = f"Measuring from the closest point of each object, which of these objects ({', '.join(keys)}) is the closest to the {names[x]}?"
+                    fam = vsi_fam(q, [f"Which object is nearest to the {names[x]}?", f"Of the listed objects, which one is closest to the {names[x]} (closest points)?",
+                                      f"Pick the object with the smallest distance to the {names[x]}."],
+                                  f"Find the object that sits nearest the {names[x]}.", False)
+                    emit_video(g, v, "V2", [st, "SITE-C04"], fam, keys, ans, "mc",
+                               gt(f"候选物体到参照物的三维框最近距离；按官方规则候选距离两两相差 ≥{int(thr * 100)} cm（房间 >40 m² 用 30 cm，否则 15 cm）。",
+                                  "定义与 VSI 一致（框级距离）；框来自 InteriorGS 标注。", distances_m=dict(zip(keys, [round(d, 3) for d in ds]))),
+                               [g.obj_entry(x, "the " + names[x], "reference")] + [g.obj_entry(c, "the " + names[c], "candidate") for c in cand])
+                    r.take(st)
+                    return None
+            return "no_relative_distance_set"
+
+        return each_subtask(r, "V2", one)
 
     return realize
 
@@ -406,35 +426,36 @@ def v3_realize(r: Runner):
         names = v.unique_names()
         if not emit:
             return None
-        st = pick_subtask(r, SUBTASKS["V3"])
-        if st is None:
-            return None
-        if st == "VSI-size-object":
-            if not names:
-                return "no_unique_object"
-            o = g.rng.choice(list(names))
-            cm = ctx.obb[o].longest_edge * 100.0
-            q = f"What is the length of the longest dimension (length, width, or height) of the {names[o]}, measured in centimeters?"
-            fam = vsi_fam(q, [f"How long is the longest side of the {names[o]}, in centimetres?",
-                              f"Give the largest dimension of the {names[o]} in cm.",
-                              f"In centimeters, what is the {names[o]}'s biggest extent (length, width or height)?"],
-                          f"Estimate the {names[o]}'s greatest dimension in centimetres.", True)
-            emit_video(g, v, "V3", [st, "SITE-C04"], fam, None, num_answer(cm, 0), "numeric",
-                       gt("物体三维框（按原始 8 角点恢复的带旋转框）的最长边，单位厘米。", "与 VSI 定义一致（最长边）；VSI 的框来自其点云标注。", longest_edge_cm=round(cm, 1)),
-                       [g.obj_entry(o, "the " + names[o], "object")])
+
+        def one(st: str) -> Optional[str]:
+            if st == "VSI-size-object":
+                if not names:
+                    return "no_unique_object"
+                o = g.rng.choice(list(names))
+                cm = ctx.obb[o].longest_edge * 100.0
+                q = f"What is the length of the longest dimension (length, width, or height) of the {names[o]}, measured in centimeters?"
+                fam = vsi_fam(q, [f"How long is the longest side of the {names[o]}, in centimetres?",
+                                  f"Give the largest dimension of the {names[o]} in cm.",
+                                  f"In centimeters, what is the {names[o]}'s biggest extent (length, width or height)?"],
+                              f"Estimate the {names[o]}'s greatest dimension in centimetres.", True)
+                emit_video(g, v, "V3", [st, "SITE-C04"], fam, None, num_answer(cm, 0), "numeric",
+                           gt("物体三维框（按原始 8 角点恢复的带旋转框）的最长边，单位厘米。", "与 VSI 定义一致（最长边）；VSI 的框来自其点云标注。", longest_edge_cm=round(cm, 1)),
+                           [g.obj_entry(o, "the " + names[o], "object")])
+                r.take(st)
+                return None
+            area = ctx.room_area(v.room)
+            q = "What is the size of this room (in square meters)? \nIf multiple rooms are shown, estimate the size of the combined space."
+            fam = vsi_fam(q, ["How many square metres is this room?", "Estimate the floor area of the room in the video (m^2).",
+                              "What is the area of this room in square meters?"],
+                          "Judging from the walk-through, what floor area does the room cover, in square metres?", True)
+            emit_video(g, v, "V3", [st, "SITE-C04"], fam, None, num_answer(area, 1), "numeric",
+                       gt("房间轮廓（structure.json 的 profile）的多边形面积，单位平方米；视频只在这一个房间里走。",
+                          "VSI 用场景点云的 alpha-shape 估计面积；这里用房间轮廓，定义不同（通常更接近建筑面积）。", area_m2=round(area, 2)),
+                       [])
             r.take(st)
             return None
-        area = ctx.room_area(v.room)
-        q = "What is the size of this room (in square meters)? \nIf multiple rooms are shown, estimate the size of the combined space."
-        fam = vsi_fam(q, ["How many square metres is this room?", "Estimate the floor area of the room in the video (m^2).",
-                          "What is the area of this room in square meters?"],
-                      "Judging from the walk-through, what floor area does the room cover, in square metres?", True)
-        emit_video(g, v, "V3", [st, "SITE-C04"], fam, None, num_answer(area, 1), "numeric",
-                   gt("房间轮廓（structure.json 的 profile）的多边形面积，单位平方米；视频只在这一个房间里走。",
-                      "VSI 用场景点云的 alpha-shape 估计面积；这里用房间轮廓，定义不同（通常更接近建筑面积）。", area_m2=round(area, 2)),
-                   [])
-        r.take(st)
-        return None
+
+        return each_subtask(r, "V3", one)
 
     return realize
 
@@ -454,53 +475,54 @@ def v4_realize(r: Runner):
             return "fewer_than_3_unique_objects"
         if not emit:
             return None
-        st = pick_subtask(r, SUBTASKS["V4"])
-        if st is None:
-            return None
-        trips = list(itertools.permutations(ids, 3))
-        g.rng.shuffle(trips)
-        for p, f, z in trips:
-            P, F, Z = (ctx.obb[o].center for o in (p, f, z))
-            if min(np.linalg.norm(P[:2] - F[:2]), np.linalg.norm(P[:2] - Z[:2])) < 0.8:
-                continue
-            ang = mv.bearing_from(P, F, Z)
-            np_, nf, nz = names[p], names[f], names[z]
-            if st == "VSI-direction-easy":
-                if not (30 <= ang <= 150 or 210 <= ang <= 330):
+
+        def one(st: str) -> Optional[str]:
+            trips = list(itertools.permutations(ids, 3))
+            g.rng.shuffle(trips)
+            for p, f, z in trips:
+                P, F, Z = (ctx.obb[o].center for o in (p, f, z))
+                if min(np.linalg.norm(P[:2] - F[:2]), np.linalg.norm(P[:2] - Z[:2])) < 0.8:
                     continue
-                ans = "right" if ang < 180 else "left"
-                q = f"If I am standing by the {np_} and facing the {nf}, is the {nz} to the left or the right of the {nf}?"
-                keys = ["left", "right"]
-                desc = "以'站在 P、面向 F'为前方，Z 的方位角在 30°–150° 为右、210°–330° 为左，其余（接近前后）不出题。"
-            elif st == "VSI-direction-medium":
-                if angle_diff_deg(ang, 0) < 20 or min(angle_diff_deg(ang, 135), angle_diff_deg(ang, 225)) < 10:
-                    continue
-                ans = "back" if 135 <= ang <= 225 else ("right" if ang < 180 else "left")
-                q = (f"If I am standing by the {np_} and facing the {nf}, is the {nz} to my left, right, or back?\n"
-                     "An object is to my back if I would have to turn at least 135 degrees in order to face it.")
-                keys = ["left", "right", "back"]
-                desc = "需要转身至少 135° 才能面向的为'后'（官方定义）；离 135°/225° 分界 <10° 或离正前方 <20° 不出题。"
-            else:
-                ans = mv.quadrant(ang, 10.0)
-                if ans is None:
-                    continue
-                q = (f"If I am standing by the {np_} and facing the {nf}, is the {nz} to my front-left, front-right, back-left, or back-right?\n"
-                     "The directions refer to the quadrants of a Cartesian plane (if I am standing at the origin and facing along the positive y-axis).")
-                keys = ["front-left", "front-right", "back-left", "back-right"]
-                desc = "以 P 为原点、P→F 为 +y 轴的四个象限；离坐标轴 <10° 不出题。"
-            t = [f"Imagine standing at the {np_}, looking toward the {nf}. Where is the {nz}?",
-                 f"Facing the {nf} from the {np_}, in which direction lies the {nz}?",
-                 f"From the {np_}, with the {nf} straight ahead, locate the {nz}."]
-            h = f"Put yourself next to the {np_} with your eyes on the {nf}. The {nz} is"
-            fam = vsi_fam(q, t, h, False)
-            emit_video(g, v, "V4", [st, "SITE-C02"], fam, keys, ans, "mc",
-                       gt(desc + " 位置用三维框中心。", "VSI 原题对三档也做角度边界过滤，具体阈值未公开；这里的边界阈值为本项目自定。",
-                          bearing_deg=round(ang, 1)),
-                       [g.obj_entry(p, "the " + np_, "stand_by"), g.obj_entry(f, "the " + nf, "facing"),
-                        g.obj_entry(z, "the " + nz, "query")])
-            r.take(st)
-            return None
-        return "no_direction_triple"
+                ang = mv.bearing_from(P, F, Z)
+                np_, nf, nz = names[p], names[f], names[z]
+                if st == "VSI-direction-easy":
+                    if not (30 <= ang <= 150 or 210 <= ang <= 330):
+                        continue
+                    ans = "right" if ang < 180 else "left"
+                    q = f"If I am standing by the {np_} and facing the {nf}, is the {nz} to the left or the right of the {nf}?"
+                    keys = ["left", "right"]
+                    desc = "以'站在 P、面向 F'为前方，Z 的方位角在 30°–150° 为右、210°–330° 为左，其余（接近前后）不出题。"
+                elif st == "VSI-direction-medium":
+                    if angle_diff_deg(ang, 0) < 20 or min(angle_diff_deg(ang, 135), angle_diff_deg(ang, 225)) < 10:
+                        continue
+                    ans = "back" if 135 <= ang <= 225 else ("right" if ang < 180 else "left")
+                    q = (f"If I am standing by the {np_} and facing the {nf}, is the {nz} to my left, right, or back?\n"
+                         "An object is to my back if I would have to turn at least 135 degrees in order to face it.")
+                    keys = ["left", "right", "back"]
+                    desc = "需要转身至少 135° 才能面向的为'后'（官方定义）；离 135°/225° 分界 <10° 或离正前方 <20° 不出题。"
+                else:
+                    ans = mv.quadrant(ang, 10.0)
+                    if ans is None:
+                        continue
+                    q = (f"If I am standing by the {np_} and facing the {nf}, is the {nz} to my front-left, front-right, back-left, or back-right?\n"
+                         "The directions refer to the quadrants of a Cartesian plane (if I am standing at the origin and facing along the positive y-axis).")
+                    keys = ["front-left", "front-right", "back-left", "back-right"]
+                    desc = "以 P 为原点、P→F 为 +y 轴的四个象限；离坐标轴 <10° 不出题。"
+                t = [f"Imagine standing at the {np_}, looking toward the {nf}. Where is the {nz}?",
+                     f"Facing the {nf} from the {np_}, in which direction lies the {nz}?",
+                     f"From the {np_}, with the {nf} straight ahead, locate the {nz}."]
+                h = f"Put yourself next to the {np_} with your eyes on the {nf}. The {nz} is"
+                fam = vsi_fam(q, t, h, False)
+                emit_video(g, v, "V4", [st, "SITE-C02"], fam, keys, ans, "mc",
+                           gt(desc + " 位置用三维框中心。", "VSI 原题对三档也做角度边界过滤，具体阈值未公开；这里的边界阈值为本项目自定。",
+                              bearing_deg=round(ang, 1)),
+                           [g.obj_entry(p, "the " + np_, "stand_by"), g.obj_entry(f, "the " + nf, "facing"),
+                            g.obj_entry(z, "the " + nz, "query")])
+                r.take(st)
+                return None
+            return "no_direction_triple"
+
+        return each_subtask(r, "V4", one)
 
     return realize
 

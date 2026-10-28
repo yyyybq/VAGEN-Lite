@@ -1,6 +1,6 @@
 """Draw the training set and the evaluation sets from the question bank (pipeline bank), in one pass.
 
-    python -m data_gen.interiorgs_qa.sample --bank BANK [--bank BANK2 ...] --plan configs/sampling_plan_20261015.json --out SEL
+    python -m data_gen.interiorgs_qa.sample --bank BANK [--bank BANK2 ...] [--exclude RULES] --plan configs/sampling_plan_20261015.json --out SEL
 
 Generation and sampling are separate: the bank holds every question the generator made, unbalanced; this script
 alone decides what goes into training and evaluation, over the whole bank at once. (Balancing inside the
@@ -74,13 +74,20 @@ def video_key(q: Dict[str, Any]) -> Tuple[str, Tuple[str, ...]]:
     return q["scene_id"], tuple(q["views"])
 
 
-def load_bank(dirs: Sequence[str]) -> List[Tuple[str, Dict[str, Any]]]:
+def load_bank(dirs: Sequence[str], exclude: str = "") -> List[Tuple[str, Dict[str, Any]]]:
+    """Questions of the banks, without those matched by ``exclude`` (qa.parse_exclude rules, BANK_SUFFIX:GROUP[:SUBTASK]:
+    e.g. a bank's video groups when a later bank redid them)."""
+    from .qa import excluded, parse_exclude
+
+    rules = parse_exclude(exclude)
     out = []
     for d in dirs:
         p = Path(d).resolve()
         for l in (p / "questions.jsonl").read_text().splitlines():
             if l.strip():
-                out.append((str(p), json.loads(l)))
+                q = json.loads(l)
+                if not excluded(p, q, rules):
+                    out.append((str(p), q))
     return out
 
 
@@ -234,13 +241,14 @@ def task_table(bank: List[Tuple[str, Dict[str, Any]]], sel: Dict[str, List[Tuple
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bank", action="append", required=True)
+    ap.add_argument("--exclude", default="", help="BANK_SUFFIX:GROUP[:SUBTASK],... questions of a bank that a later bank replaced")
     ap.add_argument("--plan", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     plan = json.loads(Path(a.plan).read_text())
     rng = random.Random(plan.get("seed", 20261015))
     rare = set(plan.get("rare_groups", RARE_DEFAULT))
-    items = load_bank(a.bank)
+    items = load_bank(a.bank, a.exclude)
     mismatches = []
     for _, q in items:
         try:

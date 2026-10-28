@@ -68,11 +68,19 @@
   `scenes/<场景>/claim.json`，3 小时没完成的认领可被接手），共用分片 3–7 的 625 个场景（`configs/bank_scenes_20261027_claim.txt`）。
   存储：`/mnt/umm` 剩 21 TB。
 
+- 2026-10-28 全量题库完成：1000 个场景全部完成、0 个出错，59,095 道题（train 46,948、val 6,001、test 6,146），89 GB，
+  平均每场景 171 秒；`check_tasks.py` 全部通过。但 VSI-direction-hard 一道都没有：每段视频只出一道题，取剩余配额最多的子任务，
+  配额都是 999 时总取列表里第一个（easy），而一个场景只有 1–2 段视频；同样原因相对距离（46 道训练题）和房间面积偏少。
+  修正（`video.py` 的 `each_subtask`）：每段视频对每个还有配额的子任务各出一道（VSI 本来就对一段视频问多种题）。
+  只重跑视频组 V1–V6：`exps/interiorgs_qa_bank_20261028_video/`（8 个认领任务 `bankvideo_20261028_c0`–`c7`，1000 个场景）；
+  抽样时用 `sample.py --exclude` 去掉旧题库的 V1–V6。前 28 个场景：方向题 easy 9、medium 11、hard 10，每段视频 1–9 道题。
+  最终抽样用 `configs/sampling_plan_20261028_final.json`：同 `sampling_plan_20261015.json`，只是训练预算按 Act-SFT 的
+  24,564 次图片输入整数取用，不再按"有题的 train 场景占比"缩小（那是试跑用的设置）。
+
 ## 2. 正在运行什么
 
-全量题库生成（2026-10-27 19:31 UTC 起）：分片任务 `exps/interiorgs_qa_jobs/bank_20261027_s0`–`s2`（固定分片 0–2/8），
-认领任务 `bank_20261027_c0`–`c4`。每个场景约 220 秒；8 张卡同时跑约 8 小时。查进度：数 `scenes/*/done.json`。
-完成后：`pipeline bank-merge`，然后按第 3 节的 B5 做。
+视频组重跑（2026-10-28 04:18 UTC 起）：`exps/interiorgs_qa_jobs/bankvideo_20261028_c0`–`c7`，每场景约 60–130 秒，预计约 3 小时。
+完成后：`bank-merge`，然后按第 3 节的 B5 做（两个题库一起抽样，旧题库排除 V1–V6）。
 
 ## 3. 下一步
 
