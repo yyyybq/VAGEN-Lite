@@ -160,11 +160,15 @@ bash disk/monitor.sh stop
   3. 删前再核对文件没变，打印完整列表和总大小再删，留逐文件记录（`disk/archive_delete.py delete --yes`）。
 - 不碰的：依赖清单和各线 STATUS 里标为在用的目录、root 属主的、别人名下的、在跑的任务。不移动目录。代码会读的，即使在批准的清单里也先不删，交回那条线。
 - 不用 GPU。你批过的 root 属主目录删除，用 1 卡 root 任务（`disk/submit_root_delete.sh`，先查 `PAUSE_SUBMISSIONS`），删完删掉任务记录。
-- **登录节点只跑轻活（你 10-28 的规定，用户级 `CLAUDE.md`）**：
-  - 登录节点上可以跑：常驻监控 `monitor.py`（已改成 `nice -n 19`、单线程，10-28 起在跑的那个已调成 `nice` 19）、`quota.py`、sco 查询、看日志、几秒钟的检查。
-  - 改用 1 卡 sco 任务的：上传 AOSS（`archive_delete.py archive`）、大范围扫描（`xtree.py`、`walk.py`、`freeable.py`）、写死路径核查里的大批 grep、压缩。下一批要做时先写好提交脚本（照 `submit_root_delete.sh`），跑完删掉任务。
-  - 登录节点上跑任何 Python 前先设 `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false`，不开进程池。
-  - 10-26、10-27 两轮的上传和扫描是在登录节点上跑的，那时还没有这条规定。
+- **登录节点的核数上限（你 10-28 的规定，用户级 `CLAUDE.md`；同日补充放宽）**：账号配额 14 个核，所有窗口共用。
+  - 常驻监控 `monitor.py`：用 `nice -n 19`、单线程起（`monitor.sh` 已改）；10-26 起在跑的那个已调成 `nice` 19。
+  - 扫描（`xtree.py`、`walk.py`、`freeable.py`）、写死路径核查、`quota.py` 可以在登录节点上跑，但：
+    - 每个任务最多 4 个核（进程数 × 每个进程的线程数）；
+    - 线程环境变量设好（`OMP_NUM_THREADS` 等，加 `TOKENIZERS_PARALLELISM=false`）；
+    - 开跑前用 `/sys/fs/cgroup/cpu.stat` 看已用核数，"已用 + 这个任务"不超过 12 个核；
+    - 超过几分钟的加 `nice -n 19`。
+  - 上传 AOSS：`archive_delete.py archive` 默认 `--files 8 --threads 8`（最多 64 个线程），在登录节点上要降到 4 个核以内，比如 `--files 2 --threads 2`，速度会明显变慢。大批量（几百 GB 以上）改用 1 卡 sco 任务（14 个 vCPU），先写好提交脚本（照 `submit_root_delete.sh`），跑完删掉任务。
+  - 10-26、10-27 两轮的上传（8 个文件 × 8 线程）是在这条规定之前跑的。
 - 递归扩展属性由服务器现算：一次只发一个查询；绝不对 `/mnt/umm` 或 `/mnt/umm/users` 求和。
 - AOSS 的 `list_objects_v2` 翻页不可靠，列对象一律用 v1 的 `Marker` / `NextMarker`。
 - 通过 ssh 传给集群的命令里不能有英文撇号（会截断单引号）；带文字的文件先在本地写好再传。
