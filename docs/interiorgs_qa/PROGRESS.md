@@ -77,12 +77,26 @@
   最终抽样用 `configs/sampling_plan_20261028_final.json`：同 `sampling_plan_20261015.json`，只是训练预算按 Act-SFT 的
   24,564 次图片输入整数取用，不再按"有题的 train 场景占比"缩小（那是试跑用的设置）。
 
+- 2026-10-28 视频组重跑完成：1000 个场景 0 出错，6,518 道视频题（第一遍 3,661），12.9 张卡·小时，19 GB；VSI 10 个任务都有题
+  （方向 hard 训练题库 502）。
+- 2026-10-28 B5 完成，最终数据 `exps/interiorgs_qa_final_20261028/`，报告 [`REPORT_20261028.md`](REPORT_20261028.md)：
+  训练 12,238 道题（10,879 条记录，图片输入 23,841 次，视频对话 262 段），val 5,412 道，test 5,590 道（场景 785 / 99 / 99）；
+  46 个任务在训练和 test 里都有题；11 个任务 test 少于 30 道（MindCube Around / Among 为主）；val 里 MindCube around-q2 为 0。
+  过程中又修了两处：抽样改为各任务轮流取题（`sample.interleave`；原来按任务依次取，Among 四种题共用 5 个物体，物体上限被前面的任务
+  用光，among-q5 训练题为 0）；训练文件里视频对话均匀插入（`export_lf.spread_videos`；原来视频都在末尾，LLaMA-Factory 分块推断列类型
+  时报 "Couldn't cast … to null"，训练会读不进来）。实测 token（`lf_tokens.py`，无截断）：256 每轮 251 万（视觉 159 万），
+  512 每轮 728 万（视觉 637 万）。
+
 ## 2. 正在运行什么
 
-视频组重跑（2026-10-28 04:18 UTC 起）：`exps/interiorgs_qa_jobs/bankvideo_20261028_c0`–`c7`，每场景约 60–130 秒，预计约 3 小时。
-完成后：`bank-merge`，然后按第 3 节的 B5 做（两个题库一起抽样，旧题库排除 V1–V6）。
+没有。所有 SCO 任务都已结束。
 
 ## 3. 下一步
+
+**等用户决定**（报告第 5 节）：训练用 256 还是 512（推荐 256）；要不要另外导出更大的训练集做规模实验（推荐等主对照结果）。
+用户决定后：按选定分辨率用 `lf_<分辨率>/train.yaml` 训练；评测用 `evaluate.py --selection …/selection/test.jsonl`。
+
+以下 B1–B5 已完成，留作记录。
 
 **B5（全量完成后）**：`bank-merge` → `sample.py`（`sampling_plan_20261015.json`；训练集按 Act-SFT 每轮图片输入次数 24,564 抽，
 评测集是 val / test 场景里的全部题，受答案上限和物体上限约束）→ `export_lf.py`（256 和 512 两份训练数据，带 val）→

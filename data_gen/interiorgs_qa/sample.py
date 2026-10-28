@@ -22,7 +22,8 @@ Rules (user decisions of 2026-10-15, values in the plan file):
   takes more than ``answer_cap`` of the questions (``answer_cap_binary`` for two-option types); numeric answers
   are not capped;
 * object cap: one object appears in at most ``object_cap`` questions of one group in one scene (training;
-  ``eval_object_cap`` for evaluation);
+  ``eval_object_cap`` for evaluation); questions are taken in turns over the subtasks, so subtasks whose questions
+  share objects share the cap;
 * benchmark tasks (tasks.py): every bank question must belong to exactly one benchmark task and match it (benchmark,
   group, prompt layout, answer kind); one mismatch stops the run. Each output line carries its task, i.e. the
   benchmark and the benchmark's own category, so training and test questions map 1:1 to rows of the benchmarks.
@@ -118,33 +119,54 @@ def round_robin(cands: List[Tuple[str, Dict[str, Any]]], target: int, picker: Pi
                 rng: random.Random) -> List[Tuple[str, Dict[str, Any]]]:
     """Up to ``target`` questions, cycling over answers (least-used answer first) so answers stay as even as the
     supply allows; numeric questions are taken in random order."""
-    by_ans: Dict[Optional[str], List[Tuple[str, Dict[str, Any]]]] = defaultdict(list)
-    for c in cands:
-        by_ans[answer_key(c[1])].append(c)
-    for v in by_ans.values():
-        rng.shuffle(v)
-    got: List[Tuple[str, Dict[str, Any]]] = []
-    count: Counter = Counter()
-    while len(got) < target:
-        live = [a for a, v in by_ans.items() if v]
-        if not live:
-            break
-        live.sort(key=lambda a: (count[a], rng.random()))
-        progressed = False
+    return interleave({"_": cands}, {"_": target}, ["_"], picker, rng)
+
+
+class AnswerCycler:
+    """The candidates of one subtask, handed out one at a time: least-used answer first, a candidate that breaks the
+    object cap is dropped."""
+
+    def __init__(self, cands: List[Tuple[str, Dict[str, Any]]], rng: random.Random) -> None:
+        self.rng = rng
+        self.by_ans: Dict[Optional[str], List[Tuple[str, Dict[str, Any]]]] = defaultdict(list)
+        for c in cands:
+            self.by_ans[answer_key(c[1])].append(c)
+        for v in self.by_ans.values():
+            rng.shuffle(v)
+        self.count: Counter = Counter()
+
+    def take_one(self, picker: Picker) -> Optional[Tuple[str, Dict[str, Any]]]:
+        live = [a for a, v in self.by_ans.items() if v]
+        live.sort(key=lambda a: (self.count[a], self.rng.random()))
         for a in live:
-            while by_ans[a]:
-                c = by_ans[a].pop()
+            while self.by_ans[a]:
+                c = self.by_ans[a].pop()
                 if picker.ok(c[1]):
                     picker.take(c[1])
-                    got.append(c)
-                    count[a] += 1
-                    progressed = True
-                    break
-            if progressed:
-                break
-        if not progressed:
-            break
-    return got
+                    self.count[a] += 1
+                    return c
+        return None
+
+
+def interleave(by_sub: Dict[str, List[Tuple[str, Dict[str, Any]]]], targets: Dict[str, int], order: Sequence[str],
+               picker: Picker, rng: random.Random) -> List[Tuple[str, Dict[str, Any]]]:
+    """Up to ``targets[k]`` questions of every subtask k, one question per subtask per turn (in ``order``), so that
+    subtasks whose questions share objects share the object cap. Filling one subtask after another let the first
+    use it up: MindCube's four Among questions all use the same five objects, and in the final sampling of
+    2026-10-28 MC-among-q5 got no training question at all."""
+    cyc = {k: AnswerCycler(by_sub[k], rng) for k in order}
+    got: Dict[str, int] = Counter()
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    active = [k for k in order if targets.get(k, 0) > 0]
+    while active:
+        for k in list(active):
+            c = cyc[k].take_one(picker) if got[k] < targets[k] else None
+            if c is None:
+                active.remove(k)
+                continue
+            got[k] += 1
+            out.append(c)
+    return out
 
 
 def cap_answers(sel: List[Tuple[str, Dict[str, Any]]], cap: float, cap_binary: float,
@@ -296,9 +318,8 @@ def main() -> int:
     supply = {k: len(v) for k, v in by_sub.items()}
     weight = {k: statistics.mean(image_inputs(q) for _, q in v) for k, v in by_sub.items()}
     targets = water_fill(supply, weight, rest_budget)
-    sel: List[Tuple[str, Dict[str, Any]]] = []
-    for k in sorted(by_sub, key=lambda k: supply[k]):      # scarce subtasks pick their objects first
-        sel += round_robin(by_sub[k], targets[k], picker, rng)
+    # turns over the subtasks, scarce subtasks first in every turn
+    sel = interleave(by_sub, targets, sorted(by_sub, key=lambda k: supply[k]), picker, rng)
     sel, sdrop = cap_answers(sel, plan["answer_cap"], plan["answer_cap_binary"], picker)
     train_sel = sel + video_sel
     summary["train_targets"] = {"video_scenes": len(video_scenes), "video_conversations": n_conv,
@@ -316,9 +337,8 @@ def main() -> int:
         by_sub = defaultdict(list)
         for it in cand:
             by_sub[it[1]["subtasks"][0]].append(it)
-        es: List[Tuple[str, Dict[str, Any]]] = []
-        for k in sorted(by_sub, key=lambda k: len(by_sub[k])):
-            es += round_robin(by_sub[k], ev.get("max_per_subtask") or 10 ** 9, pk, rng)
+        cap = ev.get("max_per_subtask") or 10 ** 9
+        es = interleave(by_sub, {k: cap for k in by_sub}, sorted(by_sub, key=lambda k: len(by_sub[k])), pk, rng)
         es, d = cap_answers(es, plan["answer_cap"], plan["answer_cap_binary"], pk)
         summary[split] = summarise(split, es)
         summary[split]["dropped_by_answer_cap"] = d

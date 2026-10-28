@@ -124,7 +124,22 @@ def build_records(items: Sequence[Tuple[Path, Dict[str, Any]]], res: int, seed: 
         audit.append({"kind": "video", "qids": [q["qid"] for _, q in qs], "groups": [q["group"] for _, q in qs],
                       "tasks": [tasks.check(q) for _, q in qs],
                       "families": fams, "image_inputs": len(frames), "scene_id": q0["scene_id"]})
-    return records, audit
+    return spread_videos(records, audit)
+
+
+def spread_videos(records: List[Dict[str, Any]], audit: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Put the video conversations evenly between the image records (same order otherwise). LLaMA-Factory converts the
+    file in chunks (datasets.map: writer batches of 1,000 rows, one shard per preprocessing worker) and each chunk takes
+    the type of its ``videos`` column from its own rows; a chunk without any video gets the type "null" and cannot be
+    joined with the others ("Couldn't cast array of type list<item: list<item: string>> to null", final export of
+    2026-10-28, where the videos came last)."""
+    vid = [i for i, a in enumerate(audit) if a["kind"] == "video"]
+    if not vid or len(vid) == len(records):
+        return records, audit
+    img = [i for i, a in enumerate(audit) if a["kind"] != "video"]
+    keyed = [((j + 0.5) / len(img), i) for j, i in enumerate(img)] + [((k + 0.5) / len(vid), i) for k, i in enumerate(vid)]
+    order = [i for _, i in sorted(keyed)]
+    return [records[i] for i in order], [audit[i] for i in order]
 
 
 DATASET_INFO = {"formatting": "sharegpt", "columns": {"messages": "messages", "images": "images", "videos": "videos"},
