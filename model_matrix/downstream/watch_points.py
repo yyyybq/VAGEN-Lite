@@ -8,7 +8,8 @@ the same steps through the Cambrian entry) into EXP/evals/steps_<N>/out.  The la
 training job (run_full.sh).  The excluded episodes (downstream/eval/excluded_episodes.json) are taken out when the
 results are summarized, as the downstream line does.
 
-    python -m model_matrix.downstream.watch_points --exp EXP [--exp EXP ...] [--points 150000,175000] [--every 600]
+    python -m model_matrix.downstream.watch_points --exp EXP [--exp EXP ...] [--points 150000,175000] [--every 600] \
+        [--pool queue|h800|zoetrope]
 
 Polls until every point is copied and evaluated (or missed: its state replaced before the copy); writes
 EXP/evals_src/watch.json and a line per action to stdout.  One evaluation job per point, submitted again once if
@@ -51,15 +52,23 @@ def finished(out: Path) -> bool:
 
 class Watcher:
     def __init__(self, exps: List[Path], points=POINTS, extract: Callable = None, submit: Callable = None,
-                 status: Callable = None, delete: Callable = None, log: Callable = print):
+                 status: Callable = None, delete: Callable = None, log: Callable = print, pool: str = "queue"):
         from data_gen.interiorgs_v10 import job_sco
-        from model_matrix import sco_job
 
         self.exps, self.points, self.log = [Path(e) for e in exps], tuple(points), log
         self.extract = extract or self._extract
-        self.submit = submit or (lambda run, name, cmd: sco_job.submit(run, 8, name, cmd, pool="queue"))
+        self.submit = submit or (lambda run, name, cmd: self._submit(run, name, cmd, pool))
         self.status = status or (lambda run: job_sco.status(run))
         self.delete = delete or (lambda run: job_sco.delete(run))
+
+    @staticmethod
+    def _submit(run: Path, name: str, cmd: List[str], pool: str, sleep: Callable = time.sleep) -> str:
+        """sco_job.submit; a fixed pool first waits for the pause file to go ("queue" waits inside sco_job)."""
+        from model_matrix import sco_job, sco_view
+
+        while pool != "queue" and sco_view.PAUSE.exists():
+            sleep(sco_job.POLL_S)
+        return sco_job.submit(run, 8, name, cmd, pool=pool)
 
     @staticmethod
     def _extract(state: Path, run: Path, dest: Path, log: Path) -> int:
@@ -141,9 +150,12 @@ def main() -> None:
     ap.add_argument("--exp", action="append", type=Path, required=True)
     ap.add_argument("--points", default=",".join(str(p) for p in POINTS))
     ap.add_argument("--every", type=float, default=600.0)
+    ap.add_argument("--pool", default="queue", choices=("queue", "h800", "zoetrope"),
+                    help="the evaluation jobs' pool: the one with fewer waiting jobs (default), or a fixed one "
+                         "(the user's decision 28 of 2026-10-28: h800); a fixed pool also waits for the pause file")
     a = ap.parse_args()
     Watcher(a.exp, [int(p) for p in a.points.split(",") if p.strip()],
-            log=lambda m: print(m, flush=True)).run(a.every)
+            log=lambda m: print(m, flush=True), pool=a.pool).run(a.every)
 
 
 if __name__ == "__main__":

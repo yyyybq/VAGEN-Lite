@@ -649,12 +649,17 @@ class Chain:
         user's "开始排队吧"): "queue" queues at once, as "auto", but only while the pause file is absent
         (``queue_pool``).  The model line (2026-10-26, the user's rule 1.3, a new switch): plan "run_pools" ({RL run
         name: pool}) puts that run's trainer and render service in the named pool (the arms spread over both pools),
-        after the pause file is gone; every other job as before."""
+        after the pause file is gone; every other job as before.  The model line (2026-10-28, the user's decision
+        28): plan pool "queue:<pool>" puts every other job (the evaluations) in that pool, also after the pause file
+        is gone."""
         fixed = (self.plan.get("run_pools") or {}).get(key) if key is not None else None
         if fixed:
             self.wait_pause()
             return fixed
         pool = self.plan.get("pool")
+        if isinstance(pool, str) and pool.startswith("queue:"):
+            self.wait_pause()
+            return pool.split(":", 1)[1]
         if pool not in ("auto", "idle", "queue"):
             return pool
         from . import job_sco

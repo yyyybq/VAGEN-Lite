@@ -43,5 +43,12 @@
   "label": "S0 第 100 次（该臂第 122 次走样停下）",
   "desc": "Cambrian-S-7B after the formal RL S0 arm, update 100 (the arm was stopped by format drift at update 122; chain m_cambrian7b_formal_rl_20261026); the user's decision 4 of 2026-10-27",
   "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261026/rl_run_cs0/checkpoints/global_step_100/actor/huggingface"
+ },
+ "CSRD": {
+  "role": "main",
+  "model_type": "cambrian_qwen",
+  "label": "密集臂重跑第 50 次（该臂第 129 次走样停下）",
+  "desc": "Cambrian-S-7B after the dense-arm rerun (V4, seed 20261019, fill rule off; chain m_cambrian7b_formal_rl_20261027_dense), update 50 picked by validation (0.472 vs 0.467 at update 100; the arm was stopped by format drift at update 129); the user's decision 5 of 2026-10-27 (supplement)",
+  "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261027_dense/rl_run_crd/checkpoints/global_step_50/actor/huggingface"
  }
 }

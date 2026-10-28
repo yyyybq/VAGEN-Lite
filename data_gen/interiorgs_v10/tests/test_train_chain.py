@@ -1145,6 +1145,13 @@ class ChainTest(unittest.TestCase):
                 self.assertEqual(chain.job_pool("p1d"), "h800")
                 self.assertEqual(chain.job_pool(), "zoetrope")  # an evaluation job: picked anew
             self.assertEqual(T.Chain({"tr": tmp, "sft_dir": tmp, "pool": "h800"}).job_pool("x"), "h800")
+            # the model line (the user's decision 28 of 2026-10-28): "queue:<pool>" waits for the pause file, then
+            # that pool for every job without a run_pools entry; run_pools still win for their runs
+            fixed = T.Chain({"tr": tmp, "sft_dir": tmp, "pool": "queue:h800", "run_pools": {"a": "zoetrope"}})
+            with mock.patch.object(fixed, "wait_pause") as waited:
+                self.assertEqual((fixed.job_pool(cards=1), fixed.job_pool("b"), fixed.job_pool("a")),
+                                 ("h800", "h800", "zoetrope"))
+                self.assertEqual(waited.call_count, 3)
             run = root / "rl_run_p1s0"
             (run / "job_rl").mkdir(parents=True)
             (run / "job_rl" / "prepared.json").write_text(json.dumps({"pool": "zoetrope"}))

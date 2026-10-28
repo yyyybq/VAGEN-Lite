@@ -69,6 +69,28 @@ class WatchPointsTest(unittest.TestCase):
             self.assertIn("steps_200000", rec["175000"]["missed"])
             self.assertEqual(calls["extract"], ["steps_150000"])
 
+    def test_fixed_pool_waits_for_the_pause_file(self):
+        """The user's decision 28 (2026-10-28): --pool h800 sends every evaluation there, once the pause file is gone;
+        the default "queue" leaves the choice (and the pause wait) to sco_job as before."""
+        from unittest import mock
+
+        from model_matrix import sco_job, sco_view
+        from model_matrix.downstream.watch_points import Watcher
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pause = Path(tmp) / "pause"
+            pause.write_text("")
+            slept, sent = [], []
+            with mock.patch.object(sco_view, "PAUSE", pause), \
+                    mock.patch.object(sco_job, "submit", side_effect=lambda run, cards, name, cmd, pool=None:
+                                      sent.append((cards, name, pool)) or "pt-1"):
+                gone = lambda s: (slept.append(s), pause.unlink())
+                self.assertEqual(Watcher._submit(Path(tmp), "n", ["true"], "h800", sleep=gone), "pt-1")
+                self.assertEqual((slept, sent), ([sco_job.POLL_S], [(8, "n", "h800")]))
+                pause.write_text("")
+                Watcher._submit(Path(tmp), "q", ["true"], "queue", sleep=gone)  # no wait here: sco_job's own
+                self.assertEqual((len(slept), sent[-1]), (1, (8, "q", "queue")))
+
 
 if __name__ == "__main__":
     unittest.main()
