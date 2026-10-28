@@ -89,7 +89,15 @@
 
 ## 2. 正在运行什么
 
-没有。所有 SCO 任务都已结束。
+用户 2026-10-28 要求：把 lf_256 的训练提交成 SCO 任务（Act-SFT 配方，8 卡），训完用 test 集评测。
+
+- 训练：`exps/interiorgs_qa_train_20261028`（`job_sco.py prepare --gpus 8 --pool zoetrope -- sft …/lf_256`，作业 pt-vkamp7w5，
+  10:09 UTC 提交）。配方与 Act-SFT 只差数据路径（另两项像素上限在 256 下等于默认值）；模型写到 `lf_256/model`。
+  Act-SFT 自己的训练在 8 卡上约 38 分钟；这里 val 4,956 条（Act-SFT 1,358 条），每 200 步评一次，预计 40–70 分钟。
+- 基座模型在同一 test 集上的评测（对照用）：`exps/interiorgs_qa_jobs/eval_base_test_20261028`（单卡，作业 pt-mw58pnxb），
+  结果 `exps/interiorgs_qa_eval_20261028/base_test_256/`。
+- 训练完成后：用 `data_gen.interiorgs_qa.sco` 提交单卡评测，模型 `lf_256/model`，`--selection …/selection/test.jsonl --res 256
+  --families orig,h1`，结果 `exps/interiorgs_qa_eval_20261028/sft256_test_256/`。
 
 ## 3. 下一步
 
