@@ -10,9 +10,9 @@ Before submitting:
   describe) minus the machines running any job of this workspace minus the jobs waiting in the pool.  Other
   workspaces' jobs are not seen, so the estimate can be too high (a job may then wait).
 
-The job (as root in its container) gives the files back to the owner of reward_runs every 30 minutes and at exit,
-and picks its worker count from the container's CPU quota and memory limit (3 GB a worker; 1.9 GB measured at
-depth 12).
+The job (as root in its container) gives the files back to the owner of reward_runs every 30 minutes and at exit
+(the exit trap also ends that loop, so nothing outlives the build), and picks its worker count from the container's
+CPU quota and memory limit (3 GB a worker; 1.6-3.0 GB measured at depth 12).
 
     python -m reward.submit_2b --prefilter strict|loose [--dry] [--force-shards 1|2] [--pool h800|zoetrope]
 
@@ -49,8 +49,9 @@ cd "$W" || exit 1
 mkdir -p "$RR/tables/b3000" "$RR/tables/eval705"
 OWNER=$(stat -c %u:%g "$RR")
 fix_owner() {{ chown -R "$OWNER" "$RR/tables/b3000" "$RR/tables/eval705" "$JOB" 2>/dev/null; }}
-trap fix_owner EXIT
 ( while true; do sleep 1800; fix_owner; done ) &
+LOOP=$!
+trap 'kill $LOOP 2>/dev/null; fix_owner' EXIT
 Q=$(cut -d' ' -f1 /sys/fs/cgroup/cpu.max 2>/dev/null || echo max)
 P=$(cut -d' ' -f2 /sys/fs/cgroup/cpu.max 2>/dev/null || echo 100000)
 if [ "$Q" = max ]; then CPUS=$(getconf _NPROCESSORS_ONLN); else CPUS=$((Q / P)); fi
