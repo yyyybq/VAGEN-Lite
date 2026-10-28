@@ -2,11 +2,14 @@
 # Reward line: start a training chain from this worktree (the main line's R12/scripts/start_chain_dr2.sh with the
 # worktree as the code directory, no SFT takeover: the plan names rl_start_model).  VAGEN_LITE_WORKTREE makes the
 # chain's sco jobs start here too; the plan's commit becomes the worktree's HEAD, and the worktree must be clean.
+# The chain is a resident process on the login node: one thread per library and nice -n 19 (the user's login-node
+# rule of 2026-10-28).
 #   bash reward/start_chain_b.sh TR/plan_template.json
 set -euo pipefail
 C=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-reward
 cd "$C"
 export PYTHONPATH=$C PYTHONDONTWRITEBYTECODE=1 VAGEN_LITE_WORKTREE=$C
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
 PY=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python
 PLAN_SRC=$1
 TR=$($PY -c "import json,sys; print(json.load(open(sys.argv[1]))['tr'])" "$PLAN_SRC")
@@ -30,7 +33,7 @@ assert not missing, missing
 print("plan ok, commit", p["commit"][:8], "job_prefix", p.get("job_prefix"), "pool", p.get("pool"),
       "run_pools", p.get("run_pools"), "runs", {n: (r.get("rl") or {}) for n, r in p["rl_runs"].items()})
 PY
-setsid nohup $PY -m data_gen.interiorgs_v10.train_chain run --plan "$TR/plan.json" >> "$TR/chain.log" 2>&1 < /dev/null &
+setsid nohup nice -n 19 $PY -m data_gen.interiorgs_v10.train_chain run --plan "$TR/plan.json" >> "$TR/chain.log" 2>&1 < /dev/null &
 echo "chain pid $!"
 sleep 5
 $PY -m data_gen.interiorgs_v10.train_chain status --dir "$TR" | head -16
