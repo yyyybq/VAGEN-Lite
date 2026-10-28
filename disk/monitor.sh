@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start / stop / status of the resident disk monitor (disk/monitor.py) on the login node.
-#   bash disk/monitor.sh start [monitor.py options]   # detached (setsid nohup); log disk_runs/logs/monitor.log
+#   bash disk/monitor.sh start [monitor.py options]   # detached (setsid nohup nice -n 19, one thread: the login node has 14 cores for the account; the user's rule of 2026-10-28); log disk_runs/logs/monitor.log
 #   bash disk/monitor.sh stop                         # SIGTERM; it finishes the current query, then exits
 #   bash disk/monitor.sh status                       # pid, heartbeat, last row of usage.csv, warning file
 set -u
@@ -15,7 +15,7 @@ case "${1:-status}" in
   start)
     shift
     if running; then echo "already running: pid $(cat "$PIDF")"; exit 0; fi
-    (cd "$HERE/.." && setsid nohup "$PY" -u "$HERE/monitor.py" "$@" >> "$RUNS/logs/monitor.log" 2>&1 < /dev/null &)
+    (cd "$HERE/.." && OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false setsid nohup nice -n 19 "$PY" -u "$HERE/monitor.py" "$@" >> "$RUNS/logs/monitor.log" 2>&1 < /dev/null &)
     old=$(cat "$PIDF" 2>/dev/null); for i in $(seq 1 15); do sleep 1; [ "$(cat "$PIDF" 2>/dev/null)" != "$old" ] && running && break; done
     running && echo "started: pid $(cat "$PIDF")" || { echo "failed to start, see $RUNS/logs/monitor.log"; exit 1; } ;;
   stop)

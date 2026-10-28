@@ -159,7 +159,12 @@ bash disk/monitor.sh stop
   2. 用整理窗口的 `scripts/cluster/audit_archived_paths.sh` 加补查，确认没人读；
   3. 删前再核对文件没变，打印完整列表和总大小再删，留逐文件记录（`disk/archive_delete.py delete --yes`）。
 - 不碰的：依赖清单和各线 STATUS 里标为在用的目录、root 属主的、别人名下的、在跑的任务。不移动目录。代码会读的，即使在批准的清单里也先不删，交回那条线。
-- 不用 GPU，不提交 sco 任务；例外是你批过的 root 属主目录删除，用 1 卡 root 任务（`disk/submit_root_delete.sh`，先查 `PAUSE_SUBMISSIONS`），删完删掉任务记录。
+- 不用 GPU。你批过的 root 属主目录删除，用 1 卡 root 任务（`disk/submit_root_delete.sh`，先查 `PAUSE_SUBMISSIONS`），删完删掉任务记录。
+- **登录节点只跑轻活（你 10-28 的规定，用户级 `CLAUDE.md`）**：
+  - 登录节点上可以跑：常驻监控 `monitor.py`（已改成 `nice -n 19`、单线程，10-28 起在跑的那个已调成 `nice` 19）、`quota.py`、sco 查询、看日志、几秒钟的检查。
+  - 改用 1 卡 sco 任务的：上传 AOSS（`archive_delete.py archive`）、大范围扫描（`xtree.py`、`walk.py`、`freeable.py`）、写死路径核查里的大批 grep、压缩。下一批要做时先写好提交脚本（照 `submit_root_delete.sh`），跑完删掉任务。
+  - 登录节点上跑任何 Python 前先设 `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false`，不开进程池。
+  - 10-26、10-27 两轮的上传和扫描是在登录节点上跑的，那时还没有这条规定。
 - 递归扩展属性由服务器现算：一次只发一个查询；绝不对 `/mnt/umm` 或 `/mnt/umm/users` 求和。
 - AOSS 的 `list_objects_v2` 翻页不可靠，列对象一律用 v1 的 `Marker` / `NextMarker`。
 - 通过 ssh 传给集群的命令里不能有英文撇号（会截断单引号）；带文字的文件先在本地写好再传。
