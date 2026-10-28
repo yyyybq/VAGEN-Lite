@@ -13,7 +13,7 @@
   - 尺寸 Qwen3-VL-8B-Instruct；底座 `/mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`（4 个分片 17.5 GB，完整；权重文件只有 root 可读，只能在 sco 任务里读）。
   - 所有 Qwen3 RL 的起点（SFT 第 8 个 epoch）：`/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232`。
   - RS（S0 第 100 次，种子 20261019；这一臂第 150 次因读不出的回答超过 10% 被停）：`/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_100/actor/huggingface`。
-  - RD：密集 V4 和 DCK 两个候选，三种子比较 10-28 出结果后由你定，主窗口再给路径。
+  - RD（你 10-28 定 V4 为 Qwen3 的密集基线；V4 种子 20261019 第 300 次，主线验证 50.4%、测试 46.9%，合并 705 题 48.9%）：`/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3d/checkpoints/global_step_300/actor/huggingface`。RS 合并 45.7%。主线 10-28 清理 Qwen3 检查点时这两份都保留，路径不变（主窗口 10-28 回复）。
 - **Qwen3 闸门**（你 10-28 任务书第 6 节，原文照录；这条标准现在定死，到时不改）：
   - Qwen3 的上游权重（RS 或 RD）到了，先做 X0、X0b、G0、线性探针，不做训练。
   - 远迁移在 Qwen3 上重做的条件：在 X0 这类换画面的空间问答上，RS 或 RD 比 Qwen3 自己的底座高 10 个百分点以上，且没有偏答、G0 没有通用能力损失。
