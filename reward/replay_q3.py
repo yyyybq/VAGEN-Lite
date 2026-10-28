@@ -15,7 +15,10 @@ For every recorded episode of the given tasks (every EVERY-th update):
   under the run's own reward.
 
     python -m reward.replay_q3 --run RUN_DIR --env-yaml TRAIN_ENV.yaml --rows ROWS --task-ids FILE --tables DIR
-        --out OUT [--old-tables DIR] [--every 1] [--workers 12] [--no-returns]
+        --out OUT [--old-tables DIR] [--every 1] [--max-update N] [--workers 12] [--no-returns]
+
+--max-update N keeps the updates 1..N (the user's rule 5: a training run's first 2 updates, every table lookup and
+the time to read each task's table as the env's TableCache does, distance_table.load).
 
 OUT/replays.jsonl (one line per update and task), OUT/summary.json.
 """
@@ -92,10 +95,14 @@ def worker(args):
 
     env_o._calculate_canonical_metric = recorded
     out, outside = [], []
+    import time
+
     for gi, g in enumerate(groups):
         tid = g["row"]["task_id"]
         try:
+            t_load = time.perf_counter()
             new = DT.load(DT.table_path(Path(tables), tid))
+            load_s = time.perf_counter() - t_load
             old = DT.load(DT.table_path(Path(old_tables), tid)) if old_tables and \
                 DT.table_path(Path(old_tables), tid).is_file() else None
             rets = {name: [] for name in envs}
@@ -134,7 +141,8 @@ def worker(args):
                                             "depth_of_new": int(de)})
             rec = {"update": g["update"], "task_id": tid, "task_type": g["row"]["task_type"],
                    "d_star": int(g["row"]["difficulty"]["d_star"]), "success": [e["success"] for e in g["episodes"]],
-                   "logged": [e["score"] for e in g["episodes"]], "coverage": dict(cov), "missing_examples": missing}
+                   "logged": [e["score"] for e in g["episodes"]], "coverage": dict(cov), "missing_examples": missing,
+                   "table_load_seconds": round(load_s, 4), "table_states": int(len(new["keys"]))}
             if do_returns:
                 logged = rec["logged"]
                 rec["check"] = [abs(l - o) < 1e-6 for l, o in zip(logged, rets["own"])]
@@ -166,6 +174,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--old-tables", default=None)
     ap.add_argument("--every", type=int, default=1)
+    ap.add_argument("--max-update", type=int, default=None)
     ap.add_argument("--workers", type=int, default=12)
     ap.add_argument("--no-returns", action="store_true")
     args = ap.parse_args()
@@ -177,7 +186,10 @@ def main():
             r = json.loads(l)
             if r["task_id"] in ids:
                 rows[r["task_id"]] = r
-    files = sorted(Path(args.run, "rollout_data").glob("*.jsonl"), key=lambda p: int(p.stem))[::args.every]
+    files = sorted(Path(args.run, "rollout_data").glob("*.jsonl"), key=lambda p: int(p.stem))
+    if args.max_update:
+        files = [f for f in files if int(f.stem) <= args.max_update]
+    files = files[::args.every]
     groups = []
     for f in files:
         by = defaultdict(list)
@@ -220,7 +232,11 @@ def main():
                "groups": len(groups), "episodes": sum(len(g["episodes"]) for g in groups), "errors": len(res) - len(ok),
                "error_examples": [x["error"] for x in res if "error" in x][:5], "coverage": dict(cov),
                "coverage_by_task": {t: dict(v) for t, v in sorted(by_task.items())},
-               "outside_old_distinct": len({(x["task_id"], x["key"]) for x in outside})}
+               "outside_old_distinct": len({(x["task_id"], x["key"]) for x in outside}),
+               "table_load_seconds": ({"tables": len(ok), "mean": round(float(np.mean([x["table_load_seconds"] for x in ok])), 4),
+                                       "max": round(float(np.max([x["table_load_seconds"] for x in ok])), 4),
+                                       "total": round(float(np.sum([x["table_load_seconds"] for x in ok])), 2)}
+                                      if ok else None)}
     if not args.no_returns:
         checks = [c for x in ok for c in x["check"]]
         summary["own_replay_matches_logged"] = [sum(checks), len(checks)]
