@@ -1,9 +1,9 @@
 # 转移题、混合 SFT、输出格式开关、诊断、实验矩阵：总报告
 
-2026-10-21（第五版，加上第五批：遮挡物核对、遮挡题的渲染深度核对、重建和探针重跑；之后按你定的改了预登记并定稿，跑了 C0 的探针；又试了按深度图重做遮挡判据，没过校准，按你的选择量了遮挡物的框；最后按你对探针遮挡题的人工核对改了探针和训练集）。任务说明：用户 2026-10-17 的提示词（第 0–8 节）、2026-10-19 的三批要求和 2026-10-20 的要求。
+2026-10-21（第五版，加上第五批：遮挡物核对、遮挡题的渲染深度核对、重建和探针重跑；之后按你定的改了预登记并定稿，跑了 C0 的探针；又试了按深度图重做遮挡判据，没过校准，按你的选择量了遮挡物的框；又按你对探针遮挡题的人工核对改了探针和训练集；2026-10-27、10-28 暂扣了遮挡任务的 goal 题，按你对这类 goal 题的核对改了探针，并开始筛选场景）。任务说明：用户 2026-10-17 的提示词（第 0–8 节）、2026-10-19 的三批要求和 2026-10-20 的要求。
 
 - 代码和文档都在分支 `transition-qa`（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data`），只在本地，没有推送，没有合并到 main。
-- 分支和 main 保持同步（最近一次合入 main `2b54b45d`）；合并到 main 由你在冻结期触发。
+- 分支和 main 保持同步（最近一次合入 main `f8e43d40`）；合并到 main 由你在冻结期触发。
 - 逐步记录见 `PROGRESS.md`（第二批在第 10 节，第三批在第 11 节，第四批在第 12 节），改动清单见 `CHANGES.md`。
 - 字段和规则见 `DATA_CONTRACT.md`，题型见 `P1_QTYPES.md`，数据集卡片见 `P1_DATASET_CARD.md`。
 
@@ -31,6 +31,8 @@
     - 探针里这类 goal 题 44 道做成核对页等你核：https://claude.ai/artifact/Q84iD9Ac6ALRDrhyyqW1nG；
     - P0 先用 177 条样题；分支已和 main 同步到 `f8e43d40`，两个训练链补丁直接打得上。
     - 剩下的是你的事：核这 44 道、在冻结期合并、批约 1,300 卡时。
+12. **探针的 goal 题核对**（2026-10-28）：44 道遮挡任务的 goal 题核下来错 23、有歧义 1。按你的答案（其中 12 道按我的建议）重标 7 道、去掉 17 道：探针 934 → 917 道，训练、测试集不变；预登记开头的修正加了这一次。重新判分后结论不变：goal 题答案是 Yes 时只答对 0%–20%，C0 和 SFT e9 没有差异。重建在登录节点上跑（SCO 两小时没排上，你定的）。
+13. **场景筛选**（2026-10-28，新任务，优先）：1,000 个场景按物体标签归类，清单页 https://claude.ai/artifact/A5UDzK4r3o9Ckb7NhkRqKz：建议排除 57 个（含科技馆）、你定 65 个、建议保留 878 个，等你选。
 
 ## 第四批的结论（2026-10-20）
 
@@ -171,6 +173,8 @@
 
 **已定（2026-10-21）：遮挡判据维持现状。** 深度图判据没过校准（`OCCLUSION_JUDGE.md`）。你选了：QA 仍用框判据 + 第一次深度核对，环境判分不改，先量清遮挡物的框和渲染对不上的情况交给主线（已量，第 6 节有清单）。B.2、C、D 没有做。
 
+**已定（2026-10-28）：探针里 44 道遮挡任务的 goal 题**核完了：错 23、有歧义 1，重标 7 道、去掉 17 道，预登记写明（`PROGRESS.md` 12.20）。
+
 **已定（2026-10-21）：探针的 78 道"完全 / 部分"遮挡题人工核一遍**（其中 38 道的遮挡物和框对不上）。页面 https://claude.ai/artifact/LEjgxnfwqV23d8gXaRCsnf，核完了（2026-10-23）：错 51 道，33 道重标、18 道去掉，预登记写明；训练集的遮挡题暂扣（`PROGRESS.md` 12.18）。
 
 还没定的：
@@ -182,14 +186,15 @@
 3. **P0 全量题库什么时候生成**：由你通知。你 2026-10-27 定了先用 177 条样题开跑矩阵。
 4. **（可选）E 组正式跑之前，先用 `--trial` 在 GPU 上试 6,144 的回答上限**：一条序列最长从 8,192 变成 10,240 个词元，显存没试过。
 5. **（主线的事，冻结期再议）RL 的遮挡判分仍按框算**：本分支只给题库的遮挡标签加了深度核对；RL 环境和评测的遮挡判分（`canonical_task_metrics_v2.occlusion_silhouette`）没动。要不要也加深度核对（例如生成遮挡任务时就核对终点位姿）由主线定。
+6. **场景筛选**：清单页 https://claude.ai/artifact/A5UDzK4r3o9Ckb7NhkRqKz 等你选（建议排除 57、你定 65）。定完我列出要改的地方（P1 题库、探针、测试集；主线的任务和评测集由你定）再动手。
 
 ## 3. 风险和局限
 
 - **P0 很小**：只有 230 道样题，B 组几乎等于不做 SFT；P0 的验证集来自 train 场景。
-- **goal 题占比高**：`goal_now` 占状态题 68.6%、`goal_after` 占前向题 48.1%，两类合计占训练集 51.9%（45,438 / 87,525）。探针显示现有模型在这类题上只会答 No；D 组练了以后能否改过来，看 D 的探针结果。
+- **goal 题占比高**：`goal_now` 占状态题 68.5%、`goal_after` 占前向题 47.7%，两类合计占训练集 51.5%（44,000 / 85,413）。探针显示现有模型在这类题上只会答 No；D 组练了以后能否改过来，看 D 的探针结果。
 - **遮挡题少、答案不均，遮挡物按实心包围盒算**：
-  - 遮挡族只占正式题的 2.8%：训练集里 `occluded_now` 267 道、`occluded_after` 412 道；测试集没有（全部进了探针集）。
-  - 探针的 `occluded_now` 答案是完全 46 / 部分 24 / 没有 7，总答"完全"能得 59.7%，所以用平衡准确率。
+  - 遮挡族只占正式题的 2.8%；训练集的遮挡题（582 道）和遮挡任务的 goal 题（1,442 道）都已暂扣，测试集没有遮挡题（全部进了探针集）。
+  - 探针的遮挡两类人工核对后 94 道：完全 22 / 部分 9 / 没有 63，总答"没有"在 `occluded_after` 上就能得 71.7%，所以用平衡准确率。
   - 敞开的、镂空的或不规则的遮挡物会让答案和画面不符（第 2 节第 1 条）。
 - **左右前向题的答案几乎从不改变**：转身不改变两个物体的左右顺序。这是物理事实，照实保留。
 - **逆向题的动作分布**：动作来自最短路径；按选项格配平后，训练集以转身、侧移 2 次为多。逆向题只有 9.6%（配平去掉的多），没碰到 15% 的上限。
@@ -209,14 +214,15 @@
 | 什么 | 在哪（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data` 下） |
 | --- | --- |
 | 转移题生成器、测试 | `data_gen/transition_qa/`（`generate.py` raw / probe / build、`extra_tasks.py`、`interior.py`、`review.py`、`report.py`） |
-| 题库（现行，2026-10-21） | `exps/transition_qa_20261019b/`（`p1_train/test/probe.jsonl`、`stats.json`、`probe_stats.json`、`shortcuts.md`、`blind/`、`raw/`；遮挡题的深度核对 `occ_depth_all/`；2026-10-20 那一版在 `pre_depth_check/`；遮挡物核对页和结果 `review_occluders/`） |
+| 题库（现行，2026-10-28） | `exps/transition_qa_20261019b/`（`p1_train/test/probe.jsonl`、暂扣的 `p1_train_held.jsonl` / `p1_test_held.jsonl`、`probe_label_overrides.json`、`stats.json`、`probe_stats.json`、`shortcuts.md`、`blind/`、`raw/`；遮挡题的深度核对 `occ_depth_all/`；之前各版在 `pre_depth_check/`、`pre_probe_check/`、`pre_goal_hold/`、`pre_goal_check/`；核对页的数据和结果 `review_occluders/`、`review_probe_occ/`、`review_probe_goal_occ/`） |
 | 题库（2026-10-19，保留） | `exps/transition_qa_20261019/`（有捷径；含 v2 新增遮挡题的帧 `extra_oa15/`、核对页和核对结果 `review/`） |
 | 题库（2026-10-18，保留） | `exps/transition_qa_20261018/`（含内部状态的图 `interior/`、核对题 `review/`） |
 | 遮挡判据 | `vagen/envs/active_spatial/occlusion_depth.py`（深度图判据）、`data_gen/transition_qa/occ_judge.py`；`exps/transition_qa_20261019b/occ_judge_check34/`（34 道校准）、`occ_judge_all/`（2,249 道的深度图、对齐测量、任务清单）；`OCCLUSION_JUDGE.md` |
+| 场景筛选（2026-10-28，等你选） | `exps/scene_screen_20261028/`（物体标签特征、分类规则、清单页 https://claude.ai/artifact/A5UDzK4r3o9Ckb7NhkRqKz） |
 | 混合配方构建器、配置、矩阵 plan 生成 | `data_gen/sft_mixture/`（`build.py`、`matrix_plan.py`） |
 | 矩阵的混合数据 | `exps/sft_mixture_matrix_v2_20261018/{B,C,D,D_noP0}`（2026-10-20 用新题库重建；旧的配方表 `recipes_bank1019.*`） |
 | 诊断代码、测试 | `eval/diagnostics/` |
-| 诊断结果 | `exps/diagnostics_20261018/`（失败拆解、旧探针、`format_check`）、`exps/diagnostics_20261019/`（第二版探针、诊断 2、C0 的失败拆解）、`exps/diagnostics_20261020/probe_v3_all/`（第三版探针、不看图的基线、`curve.md`、`curve.png`）、`exps/diagnostics_20261021/probe_v3d_all/`、`probe_v3d_common/`（深度核对之后的探针：952 道 5 个模型和 C0 的两个 RL 检查点，877 道 23 个检查点） |
+| 诊断结果 | `exps/diagnostics_20261018/`（失败拆解、旧探针、`format_check`）、`exps/diagnostics_20261019/`（第二版探针、诊断 2、C0 的失败拆解）、`exps/diagnostics_20261020/probe_v3_all/`（第三版探针、不看图的基线、`curve.md`、`curve.png`）、`exps/diagnostics_20261021/probe_v3d_all/`、`probe_v3d_common/`（深度核对之后的探针：952 道 5 个模型和 C0 的两个 RL 检查点，877 道 23 个检查点）；`exps/diagnostics_20261023/probe_v3e_*`（遮挡题核对后：934 / 868 道）、`exps/diagnostics_20261028/probe_v3f_*`（goal 题核对后：917 / 851 道，现行） |
 | 矩阵配置 | `configs/matrix_v2/`（A–E、C0、`vars.yaml`、README） |
 | 改动的现有文件 | `CHANGES.md` 第 1 节 |
 | 文档 | `docs/transition_qa/`：本报告、`PROGRESS.md`、`DATA_CONTRACT.md`、`P1_QTYPES.md`、`P1_STATS.md`、`RECIPES.md`、`DIAG_BASELINE.md`、`DIAG3_PROBE.md`、`CHANGES.md`、两张探针曲线图 |

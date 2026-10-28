@@ -372,7 +372,12 @@ def test_probe_label_overrides_relabel_and_drop():
     with pytest.raises(SystemExit):
         GEN.apply_label_overrides(recs, {"drop": ["id999999"]}, {})            # an id not in the probe
     with pytest.raises(SystemExit):
-        GEN.apply_label_overrides(recs, {"relabel": {"id000004": "none"}}, {})  # not an occlusion question
+        GEN.apply_label_overrides(recs, {"relabel": {"id000004": "none"}}, {})  # a goal question takes yes / no
+    recs[3]["kind"], recs[3]["answer_value"] = "goal", "yes"
+    rep = {}
+    out = GEN.apply_label_overrides(recs, {"relabel": {"id000004": "no"}, "checks": [{"date": "2026-10-28"}]}, rep)
+    assert (out[3]["answer"], out[3]["answer_value"]) == ("No", "no")
+    assert rep["checks"] == [{"date": "2026-10-28"}] and rep["moves"] == {"yes->no": 1}  # each check goes to the report
 
 
 def test_hold_out_sets_question_types_and_family_goals_aside():

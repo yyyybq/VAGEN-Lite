@@ -8,7 +8,7 @@
 | --- | --- | --- | --- | --- |
 | p1_train.jsonl | 85413 | 34984（41.0%） | 42020（49.2%） | 8409（9.8%） |
 | p1_test.jsonl | 5942 | 2311（38.9%） | 2734（46.0%） | 897（15.1%） |
-| p1_probe.jsonl | 934 | 434（46.5%） | 460（49.3%） | 40（4.3%） |
+| p1_probe.jsonl | 917 | 428（46.7%） | 449（49.0%） | 40（4.4%） |
 
 三类题的规则（用户 2026-10-19）：状态题全部保留（答案平衡之后）；前向题最多是状态题的 1.2 倍；逆向题最多占题库的 15%；"动作后任务要求会满足吗"（goal_after）最多占前向题的一半；单个场景最多 8%。超出的按（题类、答案、是否变化）分层抽。
 
@@ -16,11 +16,11 @@
   - 上限：前向题 43106 道，逆向题 13946 道
 - val 场景：前向题 (b)可用 6697、留下 2775；逆向题 (c)可用 1015、留下 897；状态题 (a)可用 2313、留下 2313
   - 上限：前向题 2775 道，逆向题 897 道
-- 测试集去掉了探针集的 934 道题（两份不重叠），以及人工核对从探针去掉的 18 道。
+- 测试集去掉了探针集的 917 道题（两份不重叠），以及人工核对从探针去掉的 35 道。
 - p1_train.jsonl 暂扣 2024 道（occlusion_alignment/goal_after 731、occlusion_alignment/goal_now 711、occlusion_alignment/occluded_after 355、occlusion_alignment/occluded_now 227），在 p1_train_held.jsonl：答案来自遮挡的框判据（遮挡题和遮挡任务的 goal 题），用户核对探针时发现这个判据的标签大多不对（2026-10-23、10-27）。
 - p1_test.jsonl 暂扣 43 道（occlusion_alignment/goal_after 41、occlusion_alignment/goal_now 2），在 p1_test_held.jsonl：答案来自遮挡的框判据（遮挡题和遮挡任务的 goal 题），用户核对探针时发现这个判据的标签大多不对（2026-10-23、10-27）。
-- 探针集：934 道，每个题类 40 道，其中 goal_after 200 道、goal_now 200 道、occluded_after 全部可用的 71 道（人工核对后留 60 道）、occluded_now 全部可用的 41 道（人工核对后留 34 道）（预注册要的题类），来自 97 个 val 场景；其余题类都够；occluded_after 另有 37 道"没变化"的超过 10% 上限，没取。
-- 探针集的人工核对（probe_label_overrides.json）：33 道按核对的答案重标（full → partial 4、partial → none 29），18 道不该出的题去掉。
+- 探针集：917 道，每个题类 40 道，其中 goal_after 200 道（人工核对后留 189 道）、goal_now 200 道（人工核对后留 194 道）、occluded_after 全部可用的 71 道（人工核对后留 60 道）、occluded_now 全部可用的 41 道（人工核对后留 34 道）（预注册要的题类），来自 97 个 val 场景；其余题类都够；occluded_after 另有 37 道"没变化"的超过 10% 上限，没取。
+- 探针集的人工核对（probe_label_overrides.json）：40 道按核对的答案重标（full → partial 4、no → yes 2、partial → none 29、yes → no 5），35 道不该出的题去掉；2026-10-23 核对答“完全 / 部分挡住”的 78 道遮挡题：对 27、错 51，重标 33、去掉 18；2026-10-28 核对遮挡任务的 44 道 goal 题：对 20、错 23、有歧义 1，重标 7、去掉 17。
 
 ## 2. 按任务族 × 题类 × 划分的题数
 
@@ -55,10 +55,10 @@
 | absolute_positioning | 25 | 0 | 0 | 0 | 0 | 40 | 40 | 37 | 38 | 0 | 0 | 0 | 0 | 0 | 0 | 180 |
 | equidistance | 9 | 0 | 0 | 40 | 40 | 0 | 0 | 34 | 37 | 0 | 0 | 0 | 0 | 0 | 0 | 160 |
 | fov_inclusion | 2 | 40 | 40 | 0 | 0 | 0 | 0 | 34 | 36 | 0 | 0 | 0 | 0 | 0 | 0 | 152 |
-| occlusion_alignment | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 25 | 19 | 0 | 0 | 0 | 0 | 60 | 34 | 139 |
+| occlusion_alignment | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 14 | 13 | 0 | 0 | 0 | 0 | 60 | 34 | 122 |
 | projective_relations | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 35 | 36 | 0 | 0 | 40 | 40 | 0 | 0 | 154 |
 | screen_occupancy | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 35 | 34 | 40 | 40 | 0 | 0 | 0 | 0 | 149 |
-| 合计 | 40 | 40 | 40 | 40 | 40 | 40 | 40 | 200 | 200 | 40 | 40 | 40 | 40 | 60 | 34 | 934 |
+| 合计 | 40 | 40 | 40 | 40 | 40 | 40 | 40 | 189 | 194 | 40 | 40 | 40 | 40 | 60 | 34 | 917 |
 
 ## 3. 答案分布
 
@@ -111,8 +111,8 @@
 | closer_now | 40 | A 50.0% / B 50.0% | 0.0 | a 20，b 20 |
 | distance_bin_after | 40 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | 2.5 8，2.0 8，3.5 6，1.5 5，3.0 4，1.0 3 |
 | distance_bin_now | 40 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | 2.5 10，2.0 9，1.5 8，3.0 5，4.0 3，1.0 2 |
-| goal_after | 200 | Yes 50.0% / No 50.0% | 0.0 | no 100，yes 100 |
-| goal_now | 200 | Yes 50.0% / No 50.0% | 0.0 | no 100，yes 100 |
+| goal_after | 189 | Yes 50.3% / No 49.7% | 0.3 | yes 95，no 94 |
+| goal_now | 194 | Yes 49.0% / No 51.0% | 1.0 | no 99，yes 95 |
 | height_bin_after | 40 | A 27.5% / B 22.5% / C 25.0% / D 25.0% | 2.5 | 0.3 10，0.4 8，0.2 7，0.1 6，0.6 4，0.5 3 |
 | height_bin_now | 40 | A 25.0% / B 25.0% / C 25.0% / D 25.0% | 0.0 | 0.2 10，0.4 9，0.3 9，0.5 5，0.1 4，0.8 2 |
 | left_right_after | 40 | A 50.0% / B 50.0% | 0.0 | right 20，left 20 |
@@ -143,7 +143,7 @@
 | p1_probe.jsonl | both_in_view_after | 40 | 10.0% | 51.9% |
 | p1_probe.jsonl | closer_after | 40 | 5.0% | 50.0% |
 | p1_probe.jsonl | distance_bin_after | 40 | 10.0% | 42.9% |
-| p1_probe.jsonl | goal_after | 200 | 10.0% | 50.0% |
+| p1_probe.jsonl | goal_after | 189 | 10.6% | 50.8% |
 | p1_probe.jsonl | height_bin_after | 40 | 10.0% | 46.4% |
 | p1_probe.jsonl | left_right_after | 40 | 10.0% | 0.0% |
 | p1_probe.jsonl | occluded_after | 60 | 10.0% | 56.8% |
@@ -263,15 +263,15 @@
 | closer_now | 40 | 50.0% | 50.0%（learned_options） | 50.0% | 2.5% |
 | distance_bin_after | 40 | 25.0% | 25.0%（first_option） | 27.5% | 15.0% |
 | distance_bin_now | 40 | 25.0% | 27.5%（first_option） | 15.0% | 32.5% |
-| goal_after | 200 | 50.0% | 49.2%（learned_action） | 50.0% | 0.0% |
-| goal_now | 200 | 50.0% | 49.8%（learned_action） | 50.0% | 0.0% |
+| goal_after | 189 | 50.0% | 49.2%（learned_action） | 49.7% | 0.0% |
+| goal_now | 194 | 50.0% | 49.7%（learned_action） | 51.0% | 0.0% |
 | height_bin_after | 40 | 25.0% | 30.0%（first_option） | 22.5% | 15.0% |
 | height_bin_now | 40 | 25.0% | 25.0%（learned_options） | 15.0% | 2.5% |
 | left_right_after | 40 | 50.0% | 60.0%（learned_action） | 37.5% | 10.0% |
 | left_right_now | 40 | 50.0% | 50.0%（learned_options） | 50.0% | 0.0% |
 | occluded_after | 60 | 33.3% | 41.9%（option_order） | 71.7% | 1.7% |
 | occluded_now | 34 | 33.3% | 33.3%（learned_options） | 55.9% | 0.0% |
-| 全部 | 934 | 40.8% |  | 40.6% | 8.2% |
+| 全部 | 917 | 40.7% |  | 40.6% | 8.4% |
 
 ## 8. 每类两道原题
 

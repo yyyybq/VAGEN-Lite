@@ -118,12 +118,15 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
         capped = {q: v["short"] for q, v in by_q.items() if v["short"] and over.get(q) == "all"}  # the unchanged cap
         in_file = collections.Counter(r["qtype"] for r in data.get("p1_probe.jsonl", []))
 
+        def checked(q: str, n: int) -> str:  # the user's checks drop questions after the picking (2026-10-23, 10-28)
+            return f"（人工核对后留 {in_file[q]} 道）" if in_file and in_file[q] != n else ""
+
         def whole(q: str) -> str:
             n = by_q[q]["picked"]
-            return f"全部可用的 {n} 道" + (f"（人工核对后留 {in_file[q]} 道）" if in_file and in_file[q] != n else "")
+            return f"全部可用的 {n} 道" + checked(q, n)
 
         sizes = (f"每个题类 {ps['config']['per_qtype']} 道，其中 "
-                 + "、".join(f"{q} " + (whole(q) if v == "all" else f"{v} 道")
+                 + "、".join(f"{q} " + (whole(q) if v == "all" else f"{v} 道" + checked(q, v))
                             for q, v in sorted(over.items())) + "（预注册要的题类）"
                  if over else f"每个题类 {ps['config']['per_qtype']} 道")
         lines.append(f"- 探针集：{ps['questions']} 道，{sizes}，来自 {ps['scenes']} 个 val 场景"
@@ -133,8 +136,12 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
         lo = ps.get("label_overrides") or {}
         if lo.get("relabelled") or lo.get("dropped"):
             moves = "、".join(f"{k.replace('->', ' → ')} {n}" for k, n in sorted((lo.get("moves") or {}).items()))
+            # one clause per check (2026-10-28: a second check, of the occlusion tasks' goal questions)
+            checks = "".join(f"；{c['date']} 核对{c.get('what_zh') or c['what']}：对 {c['right']}、错 {c['wrong']}"
+                             + (f"、有歧义 {c['ambiguous']}" if c.get("ambiguous") else "")
+                             + f"，重标 {c['relabel']}、去掉 {c['drop']}" for c in lo.get("checks") or [])
             lines.append(f"- 探针集的人工核对（{Path(lo['file']).name}）：{lo['relabelled']} 道按核对的答案重标（{moves}），"
-                         f"{lo['dropped']} 道不该出的题去掉。")
+                         f"{lo['dropped']} 道不该出的题去掉{checks}。")
     lines.append("")
     # ------------------------------------------------------------------ family x qtype x split
     lines += ["## 2. 按任务族 × 题类 × 划分的题数", ""]

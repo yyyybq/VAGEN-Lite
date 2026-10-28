@@ -927,6 +927,7 @@ def depth_check_occlusion(records: List[Dict[str, Any]], out: Path, cfg: Dict[st
 
 
 OCCLUSION_PREFIX = {"full": "fully hidden", "partial": "partly hidden", "none": "not hidden"}
+GOAL_ANSWER = {"yes": "Yes", "no": "No"}
 
 
 def read_label_overrides(out: Path, cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -945,9 +946,10 @@ def read_label_overrides(out: Path, cfg: Dict[str, Any]) -> Optional[Dict[str, A
 def apply_label_overrides(records: List[Dict[str, Any]], overrides: Optional[Dict[str, Any]],
                           report: Dict[str, Any]) -> List[Dict[str, Any]]:
     """The user's corrections of probe labels (2026-10-23: the probe's occlusion questions checked by hand, PROGRESS
-    12.18): ``relabel`` {sample_id: answer value} moves the answer to the option of that value (the options and their
-    order stay); ``drop`` [sample_id] removes questions that should not be asked.  Every listed id must be among
-    ``records``."""
+    12.18; 2026-10-28: the goal questions of occlusion tasks, 12.20): ``relabel`` {sample_id: answer value} moves the
+    answer to the option of that value (the options and their order stay), or for a goal question sets Yes / No;
+    ``drop`` [sample_id] removes questions that should not be asked.  Every listed id must be among ``records``;
+    ``checks`` (one entry per check: date, counts) is passed to the report."""
     if not overrides:
         return records
     relabel, drop = dict(overrides.get("relabel") or {}), set(overrides.get("drop") or [])
@@ -962,16 +964,21 @@ def apply_label_overrides(records: List[Dict[str, Any]], overrides: Optional[Dic
             continue
         new = relabel.get(r["sample_id"])
         if new is not None:
-            if r["kind"] != "occluded" or new not in OCCLUSION_PREFIX:
-                raise SystemExit(f"label overrides: {r['sample_id']} is {r['kind']} / {new}; only occlusion answers")
-            hits = [i for i, o in enumerate(r["options"]) if o.startswith(OCCLUSION_PREFIX[new] + " ")]
-            if len(hits) != 1:
-                raise SystemExit(f"label overrides: {r['sample_id']} has no single option for {new!r}")
+            if r["kind"] == "occluded" and new in OCCLUSION_PREFIX:
+                hits = [i for i, o in enumerate(r["options"]) if o.startswith(OCCLUSION_PREFIX[new] + " ")]
+                if len(hits) != 1:
+                    raise SystemExit(f"label overrides: {r['sample_id']} has no single option for {new!r}")
+                answer = "ABCD"[hits[0]]
+            elif r["kind"] == "goal" and new in GOAL_ANSWER:  # 2026-10-28: the goal questions of occlusion tasks
+                answer = GOAL_ANSWER[new]
+            else:
+                raise SystemExit(f"label overrides: {r['sample_id']} is {r['kind']} / {new}; only occlusion and goal answers")
             moved[r["sample_id"]] = [r["answer_value"], new]
-            r = dict(r, answer="ABCD"[hits[0]], answer_value=new)
+            r = dict(r, answer=answer, answer_value=new)
         out.append(r)
     report.update({"file": overrides.get("_path"), "decided": overrides.get("decided"), "relabelled": len(moved),
-                   "dropped": len(drop), "moves": dict(collections.Counter(f"{a}->{b}" for a, b in moved.values()))})
+                   "dropped": len(drop), "moves": dict(collections.Counter(f"{a}->{b}" for a, b in moved.values())),
+                   "checks": overrides.get("checks")})
     return out
 
 
