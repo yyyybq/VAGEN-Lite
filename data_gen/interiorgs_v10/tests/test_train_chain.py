@@ -1280,6 +1280,79 @@ class ChainTest(unittest.TestCase):
             self.assertEqual([s["val__r1"] for s in seen], ["QUEUEING", "STARTING", "RUNNING"])
             self.assertEqual(chain.state["steps"]["evaluate"]["jobs"]["val__r1"], "SUCCEEDED")
 
+    def test_suspended_grace(self):
+        """The model line (2026-10-27): with plan "suspended_grace_min" a job sco shows SUSPENDED for a moment (the
+        jobs waiting in a pool when another user stops one there) is not ended; one that stays SUSPENDED is, after the
+        grace; without the switch SUSPENDED ends a job at once, as before."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply"}, sleep=lambda s: None)
+            sus = {"job_id": "pt-a", "state": "SUSPENDED", "finished": False}
+            self.assertTrue(chain.job_gone(sus))
+            self.assertTrue(chain.job_gone({"job_id": "pt-b", "state": "NOT_FOUND"}))
+            self.assertFalse(chain.job_gone({"job_id": "pt-c", "state": "QUEUEING", "finished": False}))
+            chain.plan["suspended_grace_min"] = 5
+            clock = [1000.0]
+            with mock.patch.object(T.time, "time", side_effect=lambda: clock[0]):
+                self.assertFalse(chain.job_gone(sus))  # first seen
+                clock[0] += 240
+                self.assertFalse(chain.job_gone(sus))
+                self.assertFalse(chain.job_gone(dict(sus, state="STARTING")))  # back in the queue: forgotten
+                clock[0] += 120
+                self.assertFalse(chain.job_gone(sus))  # counted again from here
+                clock[0] += 301
+                self.assertTrue(chain.job_gone(sus))
+                self.assertTrue(chain.job_gone({"job_id": "pt-d", "state": "FAILED", "finished": True}))
+
+        def run(grace):
+            """An RL run whose trainer shows SUSPENDED at the first poll, then trains to the end; no retries."""
+            with tempfile.TemporaryDirectory() as tmp:
+                plan = {"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "rl_runs": {"a": {}}}
+                if grace is not None:
+                    plan["suspended_grace_min"] = grace
+                chain = T.Chain(plan, sleep=lambda s: None)
+                polls, submitted = [], []
+
+                def prepare(run, gpus, args, job_dir="job", pool=None):
+                    (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+                def submit(run, job_dir="job"):
+                    submitted.append(job_dir)
+                    (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{job_dir}"}))
+
+                def status(run, job_dir="job"):
+                    if job_dir == "job_renderer":
+                        done = (run / "STOP_RENDERER").exists()
+                        return {"job_id": "pt-r", "state": "SUCCEEDED" if done else "RUNNING", "finished": done}
+                    polls.append(1)
+                    if len(polls) == 1:
+                        return {"job_id": "pt-t", "state": "SUSPENDED", "finished": False}
+                    (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": "pt-t", "state": "SUCCEEDED", "finished": True}
+
+                def delete(run, job_dir="job"):
+                    receipt = run / job_dir / "submission.json"
+                    if receipt.exists():
+                        receipt.replace(receipt.with_name("submission_deleted.json"))
+
+                with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                    try:
+                        chain.rl()
+                        error = None
+                    except T.ChainError as exc:
+                        error = str(exc)
+                return error, submitted.count("job_rl"), chain.state.get("job_retries")
+
+        error, trainers, retries = run(5)
+        self.assertEqual((error, trainers), (None, 1))  # the moment of SUSPENDED did not end it
+        self.assertFalse(retries)
+        error, trainers, _ = run(None)
+        self.assertIsNotNone(error)  # as before: ended at once, and without retries the step fails
+        self.assertEqual(trainers, 1)
+
     def test_retries_of_failed_jobs(self):
         """Round 12 batch (the user's rule): plan "retries": 2 resubmits a failed RL trainer (it resumes), a dead
         render service (with its trainer), an SFT job (model folder moved aside) and an evaluation job (going on from
