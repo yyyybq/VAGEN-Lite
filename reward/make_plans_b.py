@@ -2,8 +2,9 @@
 
 The plan is the Qwen3 two-arm plan (models_runs/chains/m_qwen3vl8b_formal_rl_20261026/plan.json) with only these
 keys changed: tr, rl_name, job_prefix (rw), eval_sets (the line's own result folders, linked to the main line's v2
-sets), rl.rows (the subset rows file), rl_runs (the four arms), run_pools, and commit (COMMIT_PLACEHOLDER, which
-reward/start_chain_b.sh replaces by the worktree's HEAD).  No "retain": checkpoints are deleted only by hand, after
+sets), rl.rows (the subset rows file), rl_runs (the four arms), run_pools (two a pool), suspended_grace_min (10, the
+main line's value since 4512b319), and commit (COMMIT_PLACEHOLDER, which reward/start_chain_b.sh replaces by the
+worktree's HEAD).  No "retain": checkpoints are deleted only by hand, after
 the results are in a report and the user has the list (the user's rule 7).
 
 The rows file is the RL rows file with the reserve training rows cut to the 3,000 tasks that have tables (every
@@ -40,7 +41,9 @@ def main():
     ap.add_argument("--keep-o", type=float, required=True)
     ap.add_argument("--tr", required=True)
     ap.add_argument("--seed", type=int, default=20261019)
-    ap.add_argument("--pools", default=None, help="run=pool,... (default: the template's pool for every run)")
+    ap.add_argument("--pools", default="rw_o=h800,rw_g=h800,rw_s0=zoetrope,rw_ok=zoetrope",
+                    help="run=pool,... (default: the main comparison O / G on h800, S0 / O-keep on zoetrope, two a "
+                         "pool as the main line suggested on 2026-10-28)")
     args = ap.parse_args()
 
     final = sorted({l.strip() for f in args.final_ids for l in Path(f).read_text().splitlines() if l.strip()})
@@ -74,10 +77,9 @@ def main():
                       "depth-12 tables) and O-keep on the same 3,000 reserve tasks, Qwen3 SFT epoch 8, one seed."))
     plan["rl"] = dict(plan["rl"], rows=str(rows_out), seed=args.seed)
     plan["rl_runs"] = arms(tables, args.keep_o)
-    if args.pools:
-        plan["run_pools"] = dict(x.split("=") for x in args.pools.split(","))
-    else:
-        plan.pop("run_pools", None)
+    plan["run_pools"] = dict(x.split("=") for x in args.pools.split(","))
+    # the main line's setting (4512b319): a job sco shows SUSPENDED for less than 10 minutes is still waiting
+    plan["suspended_grace_min"] = 10
     for k in ("rows", "exclude"):
         assert Path(plan["rl"][k]).exists(), plan["rl"][k]
     for s in plan["eval_sets"].values():
