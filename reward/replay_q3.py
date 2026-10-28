@@ -7,6 +7,7 @@ For every recorded episode of the given tasks (every EVERY-th update):
 * coverage: every pose the env scores (each call of _calculate_canonical_metric: the start and each primitive
   action, which is where the optimal progress looks its table up) looked up in TABLES, and in OLD when given: in
   the table or not, the table's d, and whether d is guaranteed exact (d <= depth - the pose's depth from the start);
+  and the env's optimal progress at that pose against phi(lookup(table, pose)) computed here (phi_mismatch);
   poses outside OLD go to OUT/outside_old.jsonl (for the re-search check of step 2a);
 * returns (unless --no-returns): the return under O (the run's env + progress_version optimal + TABLES, slack 4,
   the run's own progress coefficient) as the logged return + (replay under O - replay under the run's own config),
@@ -87,10 +88,13 @@ def worker(args):
     env_o = envs["O"]
     orig = env_o._calculate_canonical_metric
 
+    phis = []  # (the env's optimal progress, its success) at each recorded pose
+
     def recorded():
         m = orig()
         if m is not None:
             seen.append(np.asarray(env_o.view_engine.get_pose(), float).copy())
+            phis.append((m.get("optimal_progress"), bool(m.get("success"))))
         return m
 
     env_o._calculate_canonical_metric = recorded
@@ -112,6 +116,7 @@ def worker(args):
                 for name, env in envs.items():
                     if name == "O":
                         seen.clear()
+                        phis.clear()
                     env.reset(seed=gi)
                     assert env.current_item["task_id"] == tid
                     total = 0.0
@@ -129,6 +134,11 @@ def worker(args):
                 cov["in_new"] += int(found.sum())
                 cov["unreached_new"] += int((found & (d == -1)).sum())
                 cov["not_guaranteed_exact"] += int((found & (d >= 0) & (d > DEPTH - dep)).sum())
+                d_star = int(g["row"]["difficulty"]["d_star"])
+                for p, (phi_env, ok) in zip(poses, phis):  # the env's phi against the table read here
+                    phi_off = DT.phi(DT.lookup(new, p), d_star, 4, ok)
+                    cov["phi_checked"] += 1
+                    cov["phi_mismatch"] += int(phi_env is None or abs(float(phi_env) - phi_off) > 1e-9)
                 for p, k, f in zip(poses, keys, found):
                     if not f and len(missing) < 3:
                         missing.append(p.tolist())

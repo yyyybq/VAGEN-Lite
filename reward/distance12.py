@@ -347,13 +347,15 @@ def _judge_chunk(args: Tuple[Dict[str, Any], str, np.ndarray, np.ndarray]) -> Li
 
 
 def run_check_prefilter(args: argparse.Namespace) -> None:
-    """The 2a check of the prefilters: judge every state the loose prefilter skips (chunks over ``--workers``
-    processes) and count the successful ones (must be 0); also how many states the strict rule skips on top."""
+    """The prefilter check: judge every state the ``--prefilter`` rule skips (loose: the main line's may_succeed, the
+    2a check; strict: what the 2b tables used) in chunks over ``--workers`` processes and count the successful ones
+    (must be 0); also how many states each rule passes.  One JSON line a task to stdout and to ``--out``."""
     from multiprocessing import Pool
 
     from data_gen.interiorgs_v10.scene import load_scene
 
     rows = {json.loads(l)["task_id"]: json.loads(l) for l in Path(args.rows).read_text().splitlines() if l.strip()}
+    sink = open(args.out, "a") if args.out else None
     with Pool(args.workers) as pool:
         for t in _read_ids(args.task_ids):
             row = rows[t]
@@ -366,15 +368,18 @@ def run_check_prefilter(args: argparse.Namespace) -> None:
             c2w = to_c2w(P, R)
             loose, _ = prefilter_mask(row, c2w, "loose")
             strict, rule = prefilter_mask(row, c2w, "strict")
-            rest = np.flatnonzero(~loose)
+            rest = np.flatnonzero(~(strict if args.prefilter == "strict" else loose))
             parts = [(row, args.gs_root, rest[k:k + args.chunk], c2w[rest[k:k + args.chunk]])
                      for k in range(0, len(rest), args.chunk)]
             hits = [i for part in pool.imap_unordered(_judge_chunk, parts) for i in part]
-            print(json.dumps({"task_id": t, "task_type": row["task_type"], "d_star": _stratum(row)[1],
-                              "states": int(len(keys)), "loose_pass": int(loose.sum()), "strict_pass": int(strict.sum()),
-                              "strict_rule": rule, "loose_skipped_judged": int(len(rest)),
-                              "loose_skipped_successful": len(hits), "seconds": round(time.perf_counter() - c0, 1)}),
-                  flush=True)
+            rec = {"task_id": t, "task_type": row["task_type"], "d_star": _stratum(row)[1], "states": int(len(keys)),
+                   "loose_pass": int(loose.sum()), "strict_pass": int(strict.sum()), "strict_rule": rule,
+                   "checked_prefilter": args.prefilter, f"{args.prefilter}_skipped_judged": int(len(rest)),
+                   f"{args.prefilter}_skipped_successful": len(hits), "seconds": round(time.perf_counter() - c0, 1)}
+            print(json.dumps(rec), flush=True)
+            if sink:
+                sink.write(json.dumps(rec) + "\n")
+                sink.flush()
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -413,6 +418,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     k.add_argument("--depth", type=int, default=DEFAULT_DEPTH)
     k.add_argument("--workers", type=int, default=12)
     k.add_argument("--chunk", type=int, default=20000)
+    k.add_argument("--prefilter", choices=("loose", "strict"), default="loose", help="whose skipped states to judge")
+    k.add_argument("--out", default=None, help="also append the JSON lines to this file")
     args = ap.parse_args(argv)
     {"build": run_build, "compare": run_compare, "count-prefilter": run_count_prefilter,
      "check-prefilter": run_check_prefilter}[args.cmd](args)
