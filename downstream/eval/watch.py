@@ -1422,14 +1422,22 @@ X_EXPERIMENTS = (  # the first wave of new experiments (the user's decision of 2
     ("XE", "对照：B 起点、30% 示教、6 万步（0.36 个 epoch，学习率按 6 万步衰减），其余同 E2，评 944 回合"))
 T_EXPERIMENTS = (  # new training runs (the user's decision of 2026-10-26 evening)
     ("T1", "种子 2：B、RS 各训一个 30% 示教 20 万步（DS-<起点>-030-s2），和种子 1 并排"),
-    ("T2", "LoRA：语言模型注意力和前馈层 rank 16，视觉塔、合并层冻结，动作头全训；四个起点，30% 示教，10 万步"),
+    ("T2", "LoRA：语言模型注意力和前馈层 rank 16，视觉塔、合并层冻结，动作头全训；B、RS 两个起点（10-28 去掉 S、RD），"
+           "30% 示教，10 万步"),
     ("T5", "NavigateKitchen 单任务：全部人类示教，四个起点，3 个 epoch，评 100 回合（种子 1000–1099）"),
     ("T3/T4", "主线新权重：给出路径后先做 X0 问答，再按 DS-<起点>-030-s1 的配方训练（起点表加一行）"))
+R2_EXPERIMENTS = (  # the second round (the user's task book of 2026-10-28); designs first, then the user confirms
+    ("Q0", "原始 Qwen3-VL 底座跑 X0 的 510 道题（同一提示、贪心解码），和 Qwen2.5 的 B 逐题配对；尺寸由你定"),
+    ("G0", "通用能力检查：X0 的 384 张 RoboCasa 图上约 300 道和空间无关的题（物体、数量、开关、颜色或材质），"
+           "B、S、RS、RD 和 Qwen3 底座"),
+    ("N", "Active Spatial 六类任务搬进 RoboCasa（近迁移，权重不动）：N1 零样本（四个原始起点，之后加 Qwen3），"
+          "N2 少样本（100 / 300 / 1,000 条示教，LoRA 适配）"),
+    ("C1", "共训（只做 B）：DS-B-030-s1 的配方加 Active Spatial 文字损失（总损失 = 动作损失 + λ × 文字损失），20 万步"))
 
 
-def matrix_x(w: "Watcher", table=X_EXPERIMENTS, folder: str = "x") -> list:
+def matrix_x(w: "Watcher", table=X_EXPERIMENTS, folder: str = "x", pending: str = "设计待你确认（10-26）") -> list:
     """One row per new experiment; its state and per-start cells come from downstream_runs/<folder>/<X>/matrix.json
-    ({"state": ..., "B": ..., "S": ..., "RS": ..., "RD": ...}) once there is one, else its design waits."""
+    ({"state": ..., "B": ..., "S": ..., "RS": ..., "RD": ...}) once there is one, else `pending`."""
     rows = []
     for x, what in table:
         f = Path(w.a.runs_root) / folder / x.split("/")[0] / "matrix.json"
@@ -1437,7 +1445,7 @@ def matrix_x(w: "Watcher", table=X_EXPERIMENTS, folder: str = "x") -> list:
             rec = json.loads(f.read_text()) if f.is_file() else {}
         except ValueError:
             rec = {"state": f"`{folder}/{x}/matrix.json` 读不出"}
-        rows.append(f"| {x} | {what} | {rec.get('state', '设计待你确认（10-26）')} | "
+        rows.append(f"| {x} | {what} | {rec.get('state', pending)} | "
                     + " | ".join(str(rec.get(s, "—")) for s in runs.STARTS) + " |")
     return rows
 
@@ -1451,7 +1459,8 @@ def matrix(w: "Watcher") -> str:
             f"生成于 {utc()}。E0 = 阶段 0 的检查点曲线（D5 停下时保留的 2.5 万–10 万步）；E1 = 阶段 1 主对比（100% 数据、"
             f"种子 1，评第 {'、'.join(f'{p // 1000}k' for p in w.a.extra_points)} 和最终 200k 步，主数字用三点平均）；"
             f"E2 = 样本效率（10%、30% 数据）；E3 = RL（PPO，{len(E3_TASKS)} 个空间任务，从 {E3_SOURCE[1]}出发）；"
-            f"E4 = 种子（10-26 取消）；X0–X5、XE = 第一波新增实验；T 系列 = 新增训练。成功率：总体 = 34 个任务 944 回合，"
+            f"E4 = 种子（10-26 取消）；X0–X5、XE = 第一波新增实验；T 系列 = 新增训练；Q0、G0、N、C1 = 第二轮（10-28 任务书）。"
+            f"成功率：总体 = 34 个任务 944 回合，"
             f"空间组 = 9 个空间任务 447 回合（剔除 6 个回合后）；括号里是成功回合 / 回合。时间是 UTC。",
             "路径相对于 `/mnt/umm/users/yinbaiqiao/downstream_runs/`。状态和决定见 [STATUS.md](STATUS.md)。", "",
             "## 训练", "", MATRIX_COLUMNS, sep]
@@ -1472,7 +1481,9 @@ def matrix(w: "Watcher") -> str:
         evals.append(f"| {name}（待接入） | {note} | — | — | — | — |")
     xhead = ["| 实验 | 内容 | 状态 | B | S | RS | RD |", "| --- | --- | --- | --- | --- | --- | --- |"]
     xs = (["", "## 新增实验（第一波，你 10-26 的决定）", ""] + xhead + matrix_x(w)
-          + ["", "## 新增训练（T 系列，你 10-26 晚的决定）", ""] + xhead + matrix_x(w, T_EXPERIMENTS, "t"))
+          + ["", "## 新增训练（T 系列，你 10-26 晚的决定）", ""] + xhead + matrix_x(w, T_EXPERIMENTS, "t")
+          + ["", "## 第二轮（你 10-28 的任务书）", ""] + xhead
+          + matrix_x(w, R2_EXPERIMENTS, "x", pending="设计待你确认（10-28）"))
     return "\n".join(head + train + ["", "## 评测", "", MATRIX_COLUMNS, sep] + evals + xs) + "\n"
 
 

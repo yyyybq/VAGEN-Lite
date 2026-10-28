@@ -597,10 +597,12 @@ def test_matrix_lists_the_starts_and_the_pending_rows(tmp_path):
     w = watcher(tmp_path, "--stage0", jobs=FakeJobs(), shards=8)
     text = watch.matrix(w)
     # two tables of the same rows and columns (training, evaluation): header, rule line, four starts, rows to be added;
-    # then the tables of the new experiments X0-X5 and XE and of the T runs (the user's decisions of 2026-10-26)
+    # then the tables of the new experiments X0-X5 and XE and of the T runs (the user's decisions of 2026-10-26) and of
+    # the second round (Q0, G0, N, C1: the user's task book of 2026-10-28)
     assert sum(line.startswith("| ") for line in text.splitlines()) == (2 * (2 + 4 + len(watch.MATRIX_PENDING))
                                                                          + 2 + len(watch.X_EXPERIMENTS)
-                                                                         + 2 + len(watch.T_EXPERIMENTS))
+                                                                         + 2 + len(watch.T_EXPERIMENTS)
+                                                                         + 2 + len(watch.R2_EXPERIMENTS))
     train, evals = text.split("## 评测")
     assert "## 训练" in train and train.count(watch.MATRIX_COLUMNS) == 1 and evals.count(watch.MATRIX_COLUMNS) == 1
     row_b = next(line for line in evals.splitlines() if line.startswith("| B 原始 7B"))
