@@ -1,6 +1,25 @@
 # 下游具身任务线：设计、规则、代码与路径（参考）
 
-最后更新：2026-10-27 08:55 UTC。现状看 [STATUS.md](STATUS.md)，各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每轮重写），评测协议看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，报告在 [reports/](reports/)。
+最后更新：2026-10-28 10:20 UTC。现状看 [STATUS.md](STATUS.md)，各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每轮重写），评测协议看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)，报告在 [reports/](reports/)。
+
+## 0. 第二轮（你 10-28 的任务书）
+
+- **收口**：Qwen2.5 上的远迁移到此收口，E3 跑完、X2（1% + 3%）报完即可；不再新开超过 300 卡时的 Qwen2.5 实验，超过的先问你。
+- **新增四项**（Q0、G0、N 系列、C1）都只新增文件，代码放 `downstream/`，结果放 `downstream_runs/`。每项先交一页设计（数据、步数、卡时、成功标准），你确认后再提交；工程类的（N 系列、C1）先做最小冒烟再铺开。MATRIX 第三张表是这四行。
+- **排队**：E3 → X2 3% 余下的 → T5 → XE → T2 短任务 → T2 正式（只做 B、RS）→ Q0 / G0 / X0b / 诊断（都很小，有空卡就插）→ N 系列 → C1。E3 的 S、RD 照排，同时最多 2 个。
+  - T1（种子 2）推迟，等 Qwen3 闸门：排队文件改名 `q8_t1_*.json.hold_qwen3_gate_20261028`；看板 10-28 06:50、09:02 已经提交的两个（`pt-i6v6ea3s`、`pt-vwb70oqh`）09:48 停下，记录 `job/postponed_20261028T094823Z.json`，目录保留。
+  - T2 去掉 S、RD：排队文件改名 `q9_t2_{2_S,4_RD}.json.dropped_20261028`。
+- **Qwen3 权重**（主窗口 10-28 回复，只按路径读）：
+  - 尺寸 Qwen3-VL-8B-Instruct；底座 `/mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`（4 个分片 17.5 GB，完整；权重文件只有 root 可读，只能在 sco 任务里读）。
+  - 所有 Qwen3 RL 的起点（SFT 第 8 个 epoch）：`/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232`。
+  - RS（S0 第 100 次，种子 20261019；这一臂第 150 次因读不出的回答超过 10% 被停）：`/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_100/actor/huggingface`。
+  - RD：密集 V4 和 DCK 两个候选，三种子比较 10-28 出结果后由你定，主窗口再给路径。
+- **Qwen3 闸门**（你 10-28 任务书第 6 节，原文照录；这条标准现在定死，到时不改）：
+  - Qwen3 的上游权重（RS 或 RD）到了，先做 X0、X0b、G0、线性探针，不做训练。
+  - 远迁移在 Qwen3 上重做的条件：在 X0 这类换画面的空间问答上，RS 或 RD 比 Qwen3 自己的底座高 10 个百分点以上，且没有偏答、G0 没有通用能力损失。
+  - 过了，先用 LoRA 和短预算重做，不再一上来全量 20 万步；没过，远迁移不再做，下游主张走近迁移（N 系列）或共训（C1）。
+- **汇报**：每天 UTC 09:00 前一份汇总（训练和评测分开两张表，只改状态和时间），结果类报告单独发；G0 的结果出来后转给主窗口。
+- 任务书第 0 节说"上一条提示词里的事照做"（X0b 上游画面版和上游提示格式版、参数距离、特征线性探针、第一波诊断汇总报告含 RS−B / RD−B / S−B 方向表、E3 结果报告、X2 1% + 3% 报告）：那条提示词没有到下游这个窗口，10-28 已请你重发或确认我按名字拟的设计。
 
 ## 1. 分阶段设计（你 10-22 的指令；同日第二条指令修订）
 
@@ -14,18 +33,18 @@
 
 **新增实验**（你 10-26 和 10-26 晚的决定；设计 [X_DESIGNS_20261026.md](reports/X_DESIGNS_20261026.md)、[T_DESIGNS_20261026.md](reports/T_DESIGNS_20261026.md)；结果在 `downstream_runs/x/<编号>/`、`downstream_runs/t/<编号>/`，各自的 `matrix.json` 是 MATRIX 里那一行）：
 
-| 编号 | 内容 | 状态（10-27 03:55） |
+| 编号 | 内容 | 状态（10-28 10:20） |
 | --- | --- | --- |
 | X0 | 域内空间问答：510 道（左右、远近、前后各 170），零样本问四个起点。代码 `downstream/x/x0_qa.py`、`x0_ask.py`、`run_x0.sh` | 完成，[报告](reports/X0_RESULTS_20261026.md) |
-| X1 | 只训动作头（冻结整个 `qwen_vl_interface`），30% 示教，5 万步，评 944 回合。`experiments/X1-<起点>-030-s1` | B 在跑；S、RS、RD 10-27 03:19 停下后重新排队 |
-| X2 | 1%、3% 示教（每任务 5、15 条，嵌套在 10% 里），2 个 epoch（1%：10,368 步；3%：32,080 步），评 944 回合。`experiments/X2-<起点>-{001,003}-s1` | 1% 的 B、S 在跑，其余排队 |
-| X3 | E1 四个最终检查点重放空间组 447 回合，加只读记录器（`closed_loop.py` 的 `end_state`，`downstream/x/x3_targets.py`，计划 `downstream/x/x3_plan.json`，脚本 `downstream/x/run_x3.sh`），判断实际操作了哪个目标；逐回合核对和 E1 评测相同 | B、S、RS 完成（447 回合逐回合相同），RD 在跑 |
+| X1 | 只训动作头（冻结整个 `qwen_vl_interface`），30% 示教，5 万步，评 944 回合。`experiments/X1-<起点>-030-s1` | 完成（10-27 18:53）：总体 B 0.1%、S 1.3%、RS 1.4%、RD 1.7% |
+| X2 | 1%、3% 示教（每任务 5、15 条，嵌套在 10% 里），2 个 epoch（1%：10,368 步；3%：32,080 步），评 944 回合。`experiments/X2-<起点>-{001,003}-s1` | 1% 四个完成；3% 的 B、S、RS 完成，RD 在跑 |
+| X3 | E1 四个最终检查点重放空间组 447 回合，加只读记录器（`closed_loop.py` 的 `end_state`，`downstream/x/x3_targets.py`，计划 `downstream/x/x3_plan.json`，脚本 `downstream/x/run_x3.sh`），判断实际操作了哪个目标；逐回合核对和 E1 评测相同 | 完成（10-27 04:31）：逐回合相同（RD 1 个回合重放时被放弃）；结果 `x/X3/results/` |
 | X4 | E1 四个最终权重导出成 HF（`x/X4/hf/E1-<起点>-200k`，`downstream/x/run_x4_export.sh`）后，和四个原始起点在主线 v2 验证集（413）和评测集（292）上各评一次（主线评测脚本，`no_think`）；统计 `downstream/x/x4_analyze.py` | 完成，[报告](reports/X4_RESULTS_20261027.md)：E1 模型全是 0%；10-27 补测专家答案的损失（`downstream/x/x4_ppl.py`）：损伤 RD 最小、B 最大 |
-| X5 | 未见任务：16 个原子（主评）+ 16 个组合（补评），每任务 20 回合（选法 `downstream/x/x5_tasks.py`，任务文件 `downstream/x/x5_tasks.json`，计划 `downstream/x/x5_plan.json`，脚本 `downstream/x/run_x5.sh`，统计 `downstream/x/x5_analyze.py`） | 4 个 8 卡评测排队 |
+| X5 | 未见任务：16 个原子（主评）+ 16 个组合（补评），每任务 20 回合（选法 `downstream/x/x5_tasks.py`，任务文件 `downstream/x/x5_tasks.json`，计划 `downstream/x/x5_plan.json`，脚本 `downstream/x/run_x5.sh`，统计 `downstream/x/x5_analyze.py`） | 完成（10-27 11:52）；结果 `x/X5/results/` |
 | XE | B 起点、30% 示教、6 万步（0.36 个 epoch），评 944 回合。`experiments/XE-B-030-s1` | 排队 |
-| T1 | 种子 2：`DS-B-030-s2`、`DS-RS-030-s2`（同 30% 配方，种子 2） | 2 个排队 |
-| T2 | LoRA：`downstream/train/lora.py`（语言模型 28 层的 q、k、v、o、gate、up、down 投影，rank 16、alpha 32、dropout 0.05、学习率 1e-4；可训练的只有 LoRA 和动作头；评测用的检查点存成合并后的普通权重），`make_experiment.py --lora`，`train_entry.py` 的 `trainer.lora`；四个起点，30%，10 万步。短任务 `experiments/T2-B-030-short`（200 步，`downstream/train/run_t2_short.sh` + `lora_check.py`） | 短任务排队；正式 4 个挂起（`*.json.hold_short`） |
-| T5 | NavigateKitchen 单任务（清单 `downstream/demos/manifests/navigate_100.json`，500 条示教），3 个 epoch = 3,063 步，训练任务内评 100 回合（`downstream/x/t5_plan.json`，带 X3 记录器；任务的 `EVAL_PLAN` 环境变量），统计 `downstream/x/t5_analyze.py`。`experiments/T5-<起点>-nav-s1` | 4 个排队 |
+| T1 | 种子 2：`DS-B-030-s2`、`DS-RS-030-s2`（同 30% 配方，种子 2） | 推迟，等 Qwen3 闸门（10-28，见第 0 节） |
+| T2 | LoRA：`downstream/train/lora.py`（语言模型 28 层的 q、k、v、o、gate、up、down 投影，rank 16、alpha 32、dropout 0.05、学习率 1e-4；可训练的只有 LoRA 和动作头；评测用的检查点存成合并后的普通权重），`make_experiment.py --lora`，`train_entry.py` 的 `trainer.lora`；B、RS 两个起点（10-28 去掉 S、RD），30%，10 万步。短任务 `experiments/T2-B-030-short`（200 步，`downstream/train/run_t2_short.sh` + `lora_check.py`） | 短任务排队；正式 B、RS 挂起（`*.json.hold_short`） |
+| T5 | NavigateKitchen 单任务（清单 `downstream/demos/manifests/navigate_100.json`，500 条示教），3 个 epoch = 3,063 步，训练任务内评 100 回合（`downstream/x/t5_plan.json`，带 X3 记录器；任务的 `EVAL_PLAN` 环境变量），统计 `downstream/x/t5_analyze.py`。`experiments/T5-<起点>-nav-s1` | B 10-28 09:57 提交，其余排队 |
 | T3 / T4 | 主线新权重：X0 问答后按 `DS-<起点>-030-s1` 的配方训练 | 等路径 |
 
 - 名额：下游所有 8 卡训练（E1、E2 的训练，RL，测试）共用 4 个，RL 至多占 2 个；1 卡分片最多 8 个；8 卡评测任务不算训练名额。你在和主窗口谈动态名额，谈妥再改。
@@ -43,7 +62,7 @@
   - 8 卡任务只投到估计有空闲机器的池，每轮最多 4 个（10-23 20:34 起）；我们自己有 8 卡任务在那个池排队时不再提交；
   - 按空机提交、还在排队的任务（续训、队列里的任务、8 卡评测），主线一开始在同一个池排队就撤回，之后再提；已经开始跑的不动；
   - 每轮的顺序是：E1 的 8 卡评测 → 队列里的任务（`downstream_runs/queue/*.json`）→ 停下的实验续训（`job_released_*`，E2）；
-  - 队列按文件名顺序，前一个放不下（没有空机或空卡）就不往后看；1 卡任务（`"cards": 1`）投到有空卡的机器（已有任务的机器上的空卡，或空机），每轮最多 8 个；`"requires"` 里的文件不在就跳过、不挡后面；同一 `"group"` 同时最多 `"max_live"` 个（E3：2 个）；`"pools"` 里哪个池先有空就投哪个。挂起的排队文件改名为 `*.json.hold_*`，看板不看。现在的顺序（你 10-26 晚的决定 8）：`q1_e3`（E3）→ `q2_x0` → `q3_x3` → `q4_x4` → `q5_x5` → `q6_x1` → `q7_x2` → `q8_xe`；T 系列确认后按 T 设计第 3 条插入；
+  - 队列按文件名顺序，前一个放不下（没有空机或空卡）就不往后看；1 卡任务（`"cards": 1`）投到有空卡的机器（已有任务的机器上的空卡，或空机），每轮最多 8 个；`"requires"` 里的文件不在就跳过、不挡后面；同一 `"group"` 同时最多 `"max_live"` 个（E3：2 个）；`"pools"` 里哪个池先有空就投哪个。挂起的排队文件改名为 `*.json.hold_*`，看板不看。现在的顺序（你 10-26 晚的决定 8，10-28 任务书第 1 节调整）：`q1_e3`（E3）→ `q2_x0` → `q3_x3` → `q4_x4` → `q5_x5` → `q6_x1` → `q7_x2` → `q8_t5` → `q8_xe` → `q9_t2_0_short` → `q9_t2_{1_B,3_RS}`（等短任务核对）；T1 挂起，T2 的 S、RD 去掉；第二轮的 Q0 / G0 等小任务确认后插在后面（有空卡就插），N、C1 在最后；
   - `PAUSE_SUBMISSIONS` 存在时一律暂停。
   - 空闲机器数是估计值：池的机器数减去有 aigc 任务的机器数；别的工作区的任务看不到，所以可能偏多。
 - 下面是更早的规则，记录在此备查：
