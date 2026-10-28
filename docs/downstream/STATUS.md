@@ -22,10 +22,14 @@
 - 8 卡任务只投到估计有空闲机器的池；1 卡任务投到有空卡的机器；我们自己有任务在那个池排队时，不再往那个池提交；
 - 按空机提交、还在排队的任务，如果主线开始在同一个池排队，就撤回，等下次再提。已经开始跑的不动。
 
-**看板**：`downstream/eval/watch.py`，10-28 10:08 起运行，PID 2808450，代码 `df3355f7`，每 5 分钟一轮。启动、停止、查看命令如下（在集群 worktree 里；代码更新后先 stop 再 start，start 一定要带全部参数：不带参数会把 `watch.args` 清空，10-28 出过一次）：
+**看板**：`downstream/eval/watch.py`，10-28 10:38 起运行，PID 2841300，代码 `7a1771ee`，每 5 分钟一轮。按你 10-28 的登录节点规则，看板和它启动的一切（sco、结果报告）都以 nice 19、每个进程 1 个线程运行。代码更新后用 `restart`（沿用保存的参数）；`start` 必须带全部参数，不带参数会被拒绝（10-28 出过一次清空参数的事）。命令如下（在集群 worktree 里）：
 
 ```bash
 bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- --yield-to-same-size --yield-pool-only --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 100 010 030 --whole-pools h800 zoetrope
+```
+
+```bash
+bash downstream/eval/watch.sh restart
 ```
 
 ```bash
