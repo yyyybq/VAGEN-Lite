@@ -1,4 +1,5 @@
-"""Submit / inspect / delete a one-GPU SCO job (zoetrope pool) that runs a data_gen.interiorgs_qa module.
+"""Submit / inspect / delete an SCO job (zoetrope pool) that runs a data_gen.interiorgs_qa module: one GPU, or eight
+with ``prepare --gpus 8`` (only for jobs that use them, e.g. easi_job with ``--nproc 8``).
 
 The job settings (image, mount, pool, card spec, CLI) are v10's (data_gen/interiorgs_v10/pilot_sco.py),
 imported, not copied.  ``prepare`` freezes the code into JOB/source.tar.gz and writes JOB/launch.sh.
@@ -28,7 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 GS_ROOT = "/mnt/umm/users/yinbaiqiao/InteriorGS_ply"
 
 
-def prepare(job: Path, module_args: List[str]) -> None:
+SPECS = {1: WORKER_SPEC, 8: "N4lS.Iq.I80.8"}   # H800 cards, as in data_gen/interiorgs_v10/job_sco.py
+
+
+def prepare(job: Path, module_args: List[str], gpus: int = 1) -> None:
     job.mkdir(parents=True, exist_ok=True)
     archive = job / "source.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
@@ -52,7 +56,7 @@ mkdir -p "$SRC" "$JOB/logs"
 exec > >(tee -a "$JOB/logs/run-$(date -u +%Y%m%dT%H%M%SZ)-$(hostname).log") 2>&1
 cd "$SRC" && tar -xzf {archive}
 RUNTIME_ENV={RUNTIME_ENV}
-export PYTHONPATH="$SRC" PYTHONDONTWRITEBYTECODE=1 PATH="$RUNTIME_ENV/bin:$PATH" CUDA_VISIBLE_DEVICES=0
+export PYTHONPATH="$SRC" PYTHONDONTWRITEBYTECODE=1 PATH="$RUNTIME_ENV/bin:$PATH" CUDA_VISIBLE_DEVICES={",".join(str(i) for i in range(gpus))}
 export VAGEN_GSPLAT_PREBUILT=1 TORCH_EXTENSIONS_DIR=/mnt/umm/users/yinbaiqiao/.cache/torch_extensions_jumpbox_renderer
 export CC=$RUNTIME_ENV/bin/x86_64-conda-linux-gnu-gcc CXX=$RUNTIME_ENV/bin/x86_64-conda-linux-gnu-g++
 export CUDA_HOME=$RUNTIME_ENV TORCH_CUDA_ARCH_LIST=9.0 OMP_NUM_THREADS=4 PYTHONUNBUFFERED=1 NO_PROXY='*' no_proxy='*'
@@ -70,7 +74,7 @@ echo JOB_DONE
     digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()  # noqa: E731
     (job / "SHA256SUMS").write_text(f"{digest(archive)}  source.tar.gz\n{digest(launch)}  launch.sh\n")
     (job / "prepared.json").write_text(json.dumps({"utc": now(), "module": module, "args": rest, "pool": POOL,
-                                                   "worker_spec": WORKER_SPEC}, indent=1))
+                                                   "worker_spec": SPECS[gpus], "gpus": gpus}, indent=1))
     print(json.dumps({"launch": str(launch)}))
 
 
@@ -80,10 +84,11 @@ def submit(job: Path, name: str) -> None:
         print(json.loads(receipt.read_text())["job_id"])
         return
     subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=job, check=True)
+    spec = json.loads((job / "prepared.json").read_text()).get("worker_spec", WORKER_SPEC)
     command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={POOL}",
                f"--job-name={name}", "--priority=HIGHEST", "--quota-type=reserved",
                f"--container-image-url={IMAGE}", f"--storage-mount={MOUNT}", "--training-framework=pytorch",
-               "--worker-nodes=1", f"--worker-spec={WORKER_SPEC}", f"--command=bash {job}/launch.sh"]
+               "--worker-nodes=1", f"--worker-spec={spec}", f"--command=bash {job}/launch.sh"]
     (job / "submission_intent.json").write_text(json.dumps({"utc": now(), "command": command}, indent=1))
     res = subprocess.run(command, capture_output=True, text=True)
     (job / "submit.log").write_text(res.stdout + "\n" + res.stderr)
@@ -120,6 +125,7 @@ def main() -> None:
     ap.add_argument("action", choices=("prepare", "submit", "status", "delete"))
     ap.add_argument("--job", required=True, type=Path)
     ap.add_argument("--name", default=None, help="job name (submit)")
+    ap.add_argument("--gpus", type=int, choices=sorted(SPECS), default=1, help="cards (prepare); 8 only for jobs that use them")
     import sys
     argv = sys.argv[1:]
     module_args = argv[argv.index("--") + 1:] if "--" in argv else []
@@ -129,7 +135,7 @@ def main() -> None:
     job = args.job.resolve()
     if args.action == "prepare":
         margs = [a for a in args.module_args if a != "--"]
-        prepare(job, margs)
+        prepare(job, margs, args.gpus)
     elif args.action == "submit":
         submit(job, args.name or ("interiorgs-qa-" + job.name.replace("_", "-")[-40:]))
     elif args.action == "status":

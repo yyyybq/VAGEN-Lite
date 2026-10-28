@@ -94,7 +94,19 @@
 
 ## 2. 正在运行什么
 
-没有。以下是 2026-10-28 训练时的记录。
+用户 2026-10-28 要求：用 `scripts/easi_eval.py` 在 8 个原 benchmark（EASI-8）上评测 QA-SFT，提交成 SCO 任务，和基座、Act-SFT 对比。
+
+- 新的提交方式：`python -m data_gen.interiorgs_qa.sco prepare --job JOB --gpus 8 -- easi_job --name NAME --model DIR --out OUT`
+  （`easi_job.py` 调用不改动的 `scripts/easi_eval.py`，离线数据缓存同 `sco_active_spatial_eval_entry.sh`；8 张卡数据并行）。
+- 三个模型，同一份代码、同一天跑，结果在 `exps/interiorgs_qa_easi_20261028/<名字>/easi_results.json`：
+  QA-SFT `qasft256_e3`（`lf_256/model`，作业 pt-cmds7w2p）；基座 `base7b`（`qwen25vl7b_pretrained_cc594898`，pt-bm5obgyk）；
+  Act-SFT `actsft_r11_e9`（第十一轮 SFT 第 9 个 epoch `interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386`，pt-t1hy337m）。
+  选 Act-SFT 的理由：和训练预算对齐的第八轮 3 个 epoch 模型（`interiorgs_v10_train_20261014/lf/model`）已被清理删除，只剩训练数据；
+  现存的是第十轮第 5 个 epoch（checkpoint-770）和第十一轮第 9 个 epoch（checkpoint-1386，v10 线目前最好的 SFT、后续 RL 的起点）。
+  基座 8 月有过一次 EASI 结果（`easi_results/qwen_pretrain_baseline`，同一个 cc594898），这次在同一份代码下重跑，旧结果只作核对。
+- 冒烟测试：单卡、每个 benchmark 3 道题（pt-46lie0ib，`exps/interiorgs_qa_easi_20261028_smoke`）。
+
+以下是 2026-10-28 训练时的记录。
 
 用户 2026-10-28 要求：把 lf_256 的训练提交成 SCO 任务（Act-SFT 配方，8 卡），训完用 test 集评测。
 
