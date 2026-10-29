@@ -10,6 +10,8 @@ out: exps/sft_mixture_matrix_v2_20261018
 seed: 20261018
 split_manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/split_manifest.json
 task_rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/rows.jsonl
+# the 128 scenes the user excluded as too marginal (2026-10-29, docs/transition_qa/SCENE_SCREEN.md) leave P0, P1 and P2
+exclude_scenes: configs/scene_screen/scene_exclusions_20261029.json
 base_recipe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/train.yaml
 train_overrides:
   num_train_epochs: 10

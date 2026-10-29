@@ -18,6 +18,8 @@ recipe table.  Rules:
   group, P1 by question type, P2 by task family) with the config's seed.
 * ``draw_as: OTHER``: draw each pool with another recipe's seed, so a recipe that drops a pool keeps exactly the
   other recipe's rows of the pools it shares (matrix D_noP0 = D without P0).
+* ``exclude_scenes: FILE`` (a JSON file with an "excluded" list of scene ids; user 2026-10-29, the scene screen):
+  the rows of those scenes leave every pool, training and validation, before any count or draw.
 """
 
 from __future__ import annotations
@@ -226,6 +228,9 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
     seed = int(cfg.get("seed", 0))
     pools: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     notes: List[str] = []
+    excluded_scenes = (set(json.loads(Path(cfg["exclude_scenes"]).read_text(encoding="utf-8"))["excluded"])
+                       if cfg.get("exclude_scenes") else set())
+    excluded: Dict[str, Dict[str, int]] = {}
     for name in POOLS:
         spec = (cfg.get("pools") or {}).get(name)
         if not spec:
@@ -237,10 +242,18 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
         check_scenes(name, "val", va, scenes[val_split], val_split)
         if val_split != "val":
             notes.append(f"{name} 的验证行来自 {val_split} 场景（{spec.get('val_scenes_reason', '配置指定')}），不是 val 场景")
+        if excluded_scenes:
+            excluded[name] = {"train": sum(r["scene"] in excluded_scenes for r in tr),
+                              "val": sum(r["scene"] in excluded_scenes for r in va)}
+            tr = [r for r in tr if r["scene"] not in excluded_scenes]
+            va = [r for r in va if r["scene"] not in excluded_scenes]
         overlap = {r["source_id"] for r in tr} & {r["source_id"] for r in va}
         if overlap:
             raise MixtureError(f"{name}: {len(overlap)} rows in both train and val, e.g. {sorted(overlap)[:3]}")
         pools[name] = {"train": tr, "val": va}
+    if excluded_scenes:
+        notes.append(f"排除了 {len(excluded_scenes)} 个场景（{Path(cfg['exclude_scenes']).name}）的行：" + "；".join(
+            f"{p} 训练 {c['train']}、验证 {c['val']}" for p, c in excluded.items()) + "（上表的可用条数是排除之后的）")
     # validation rows: the same for every recipe
     val_rows: Dict[str, List[Dict[str, Any]]] = {}
     for name, n in (cfg.get("val") or {}).items():
@@ -294,7 +307,8 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
         table.append(entry)
     (out / "recipes.json").write_text(json.dumps(table, indent=1, ensure_ascii=False))
     (out / "recipes.md").write_text(recipe_table(cfg, table, pools, val_rows, notes), encoding="utf-8")
-    return {"recipes": [t["recipe"] for t in table], "pools": {k: {s: len(v[s]) for s in v} for k, v in pools.items()}}
+    return {"recipes": [t["recipe"] for t in table], "pools": {k: {s: len(v[s]) for s in v} for k, v in pools.items()},
+            "excluded": excluded}
 
 
 def recipe_table(cfg: Dict[str, Any], table: Sequence[Dict[str, Any]], pools: Dict[str, Any],

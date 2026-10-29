@@ -91,6 +91,18 @@ def test_build_writes_tagged_pools_and_per_pool_eval(tmp_path):
     assert res["pools"]["P2"] == {"train": 20, "val": 5}
 
 
+def test_excluded_scenes_leave_every_pool(tmp_path):
+    cfg = _setup(tmp_path)
+    (tmp_path / "ex.json").write_text(json.dumps({"excluded": ["s2"]}))
+    cfg["exclude_scenes"] = str(tmp_path / "ex.json")
+    res = B.build(cfg)
+    p1 = B.read_jsonl(tmp_path / "out" / "D" / "P1_train.jsonl")
+    assert len(p1) == 10 and {r["scene"] for r in p1} == {"s1"}   # P1 rows of s2 never drawn
+    assert res["pools"]["P1"] == {"train": 20, "val": 10}
+    assert res["excluded"]["P1"] == {"train": 20, "val": 0} and res["excluded"]["P2"] == {"train": 0, "val": 0}
+    assert "排除了 1 个场景" in (tmp_path / "out" / "recipes.md").read_text(encoding="utf-8")
+
+
 def test_rows_keep_the_source_conversation(tmp_path):
     cfg = _setup(tmp_path)
     B.build(cfg)

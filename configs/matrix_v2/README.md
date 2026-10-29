@@ -31,9 +31,10 @@
 
 每组的 RL 都是一对：`{pkg}s0`（修正包 + 稀疏奖励 S0）和 `{pkg}d`（修正包 + 密集奖励 D）。
 
-- **P0**：仿 8 个 benchmark 的 QA，现在只有 230 道样题（177 条记录）。全量题库可用时（用户通知），改 `data_gen/sft_mixture/configs/mixture_matrix_v2_20261018.yaml` 的 P0 路径，重新构建。
-- **P1**：转移题。D 用 9,802 道，和 P2 的轨迹条数一样多（用户 2026-10-18 的决定），从 2026-10-20 重建的题库 `exps/transition_qa_20261019b` 里抽（修掉了只看文字就能答的捷径，`docs/transition_qa/DIAG3_PROBE.md`）。
-- **P2**：第十一轮的 SFT 动作轨迹，train 9,802 条，只来自正式题。
+- **P0**：仿 8 个 benchmark 的 QA，现在只有 230 道样题（177 条记录，去掉边缘场景后 164 条）。全量题库可用时（用户通知），改 `data_gen/sft_mixture/configs/mixture_matrix_v2_20261018.yaml` 的 P0 路径，重新构建。
+- **P1**：转移题。D 用 9,075 道（2026-10-29 去掉边缘场景后；之前 9,802 道），和 P2 的轨迹条数一样多（用户 2026-10-18 的决定），从 2026-10-20 重建的题库 `exps/transition_qa_20261019b` 里抽（修掉了只看文字就能答的捷径，`docs/transition_qa/DIAG3_PROBE.md`）。
+- **P2**：第十一轮的 SFT 动作轨迹，train 9,802 条，去掉边缘场景后 9,075 条，只来自正式题。
+- **边缘场景**（用户 2026-10-29）：128 个场景（`configs/scene_screen/scene_exclusions_20261029.json`）从 P0、P1、P2、RL 题和评测集里都去掉了，见 `docs/transition_qa/SCENE_SCREEN.md`。
 - 各组的条数见 `docs/transition_qa/RECIPES.md`。
 
 ## C0 和矩阵的 SFT 配方（核对于 2026-10-19）
@@ -53,14 +54,14 @@ B、C、D 的 `train.yaml` 和主线的 `lf_formal/train.yaml` 逐项比较：
 | 模型、全参数、冻结视觉塔、模板 qwen2_vl、cutoff 16,384 | 同 | 同 | 无 |
 | 学习率 1e-5 余弦、warmup 3%、每卡 1 条 × 梯度累积 8 × 8 卡 = 每步 64 条、bf16、梯度检查点、种子 42 | 同 | 同 | 无 |
 | 10 个 epoch、每个 epoch 存一次 | 同 | 同 | 无 |
-| 训练数据 | `trajectory_train`（9,802 条） | 各组的池；P2 的 9,802 条和主线**逐条相同、顺序相同**（对话和图片） | 组间差别就在这里 |
-| 验证集 | `trajectory_val`（全部 1,293 条 val 轨迹） | P0 20 / P1 300 / P2 300，每个池分别算（`eval_on_each_dataset`）；P2 的 300 条是那 1,293 条的子集 | 只影响验证损失，不影响训练 |
+| 训练数据 | `trajectory_train`（9,802 条） | 各组的池；P2 是主线那 9,802 条去掉边缘场景的 727 条，其余**逐条相同、顺序相同**（对话和图片） | 组间差别就在这里 |
+| 验证集 | `trajectory_val`（全部 1,293 条 val 轨迹） | P0 17 / P1 300 / P2 300，每个池分别算（`eval_on_each_dataset`）；P2 的 300 条是那 1,293 条去掉边缘场景后（1,169 条）的子集 | 只影响验证损失，不影响训练 |
 | `image_max_pixels` / `video_max_pixels` | 不写（LLaMA-Factory 默认 768×768 / 256×256） | 65,536（256×256） | 动作帧是 256×256，两边都不缩放；P0 的样题导出也是 256 |
 | 输出目录、`val_size`（0 / 不写，默认 0） | — | — | 无 |
-| 挑 epoch | 第十一轮按 val400（398 道）挑：e9 41.96% | 按 eval_val_v2（413 道）挑 | 规则相同（成功率最高、打平取更早），题集多了 15 道遮挡题 |
+| 挑 epoch | 第十一轮按 val400（398 道）挑：e9 41.96% | 按 eval_val_v2_screened（382 道）挑 | 规则相同（成功率最高、打平取更早），题集不同：v2 多了 15 道遮挡题，又去掉了边缘场景 |
 
-- **每个 epoch 的步数随数据量变**：主线 154 步，C 156 步（9,979 条），D 310 步（19,781 条）；warmup 按比例，同样是 3%。
-- **C 和 C0 的比较**：两者的训练数据只差 P0 的 177 条。所以 C − C0 主要是 P0 的作用，另含 SFT 重训的随机性和挑 epoch 用的题集不同。
+- **每个 epoch 的步数随数据量变**：主线 154 步，C 145 步（9,239 条），D 287 步（18,314 条；2026-10-29 去掉边缘场景后）；warmup 按比例，同样是 3%。
+- **C 和 C0 的比较**：两者的训练数据差在 P0 的 164 条，以及 2026-10-29 起 C 去掉了 128 个边缘场景（P2 少 727 条，RL 题也去掉这些场景）。所以 C − C0 是 P0 和去掉边缘场景合起来的作用，另含 SFT 重训的随机性和挑 epoch 用的题集不同。
 
 ## 所有组相同的设置
 
@@ -72,19 +73,19 @@ B、C、D 的 `train.yaml` 和主线的 `lf_formal/train.yaml` 逐项比较：
   - 验证损失：每个池分别算。
 - **RL：**
   - 成对：每组两个，`rl.standard` 分别是 `{rl_package}_S0`、`{rl_package}_D`，两者只差奖励（第十二轮第 2 条）；
-  - 任务和种子：只用 train 后备题，去掉深度核对标出的题；种子 20261019，所有组、所有 RL 都一样；
+  - 任务和种子：只用 train 后备题，去掉深度核对标出的题和 128 个边缘场景（`exps/matrix_inputs_20261029/rl_rows`）；种子 20261019，所有组、所有 RL 都一样；
   - 长度和检查点：300 次更新，每 50 次存检查点；
   - 停止条件：同第十一轮修正包，E 组另设；H800 启动失败自动重交，最多 2 次（第十二轮第 5 条）；
   - 回答上限：一条序列模式下整个 episode 4,096 个词元，**只有 E 是 6,144**；
   - 日志：`transition/think_rate` 记含思考文字的回答比例，所有组都记，只输出动作的组应接近 0。
 - **评测：**
-  - 题集：第十二轮的 v2 题集。
-    - `val` = `interiorgs_v10_r12_20261019/eval_val_v2`，413 道，第十一轮的 val400 加 15 道遮挡题，挑模型用；
-    - `test` = `eval_test_v2`，292 道，279 加 13 道遮挡题，只记录。
+  - 题集：第十二轮的 v2 题集去掉 128 个边缘场景（用户 2026-10-29）。
+    - `val` = `exps/matrix_inputs_20261029/eval_val_v2_screened`，382 道：第十二轮的 eval_val_v2（413 道）去掉边缘场景的 31 道，不补，挑模型用；
+    - `test` = `exps/matrix_inputs_20261029/eval_test_v2_screened`，292 道：eval_test_v2 去掉边缘场景的 59 道，从留下的测试场景里同族同难度档补回（回放检查过；遮挡族没有可补的题，13 个名额给了另外五族，遮挡族 29 道），只记录。
   - 频率：SFT 每个 epoch、RL 每 50 次各评一次。
   - 诊断：
     - 失败拆解：`eval/diagnostics/failure_breakdown.py`；
-    - P1 探针：`qa_probe.py`，用 `exps/transition_qa_20261019b/p1_probe.jsonl`（1,041 道：`goal_now`、`goal_after` 各 200，`occluded_now`、`occluded_after` 取全部的 77、124，其余每类 40）；
+    - P1 探针：`qa_probe.py`，用 `exps/transition_qa_20261019b/p1_probe.jsonl`（838 道，2026-10-29：`goal_now` 176、`goal_after` 171，`occluded_now`、`occluded_after` 33、58，其余每类 30–40）；
     - 基线：失败拆解看 `docs/transition_qa/DIAG_BASELINE.md`，探针看 `DIAG3_PROBE.md`。
 
 ## 用卡估计（按第十一轮实测）
@@ -92,7 +93,7 @@ B、C、D 的 `train.yaml` 和主线的 `lf_formal/train.yaml` 逐项比较：
 - **SFT：** 第十一轮 9,802 条轨迹 10 个 epoch，8 卡训练 1 小时 44 分，算上排队、读写约 4.5 小时。
   - C 组和它同量，约 4.5 小时；
   - D 组样本多一倍、P1 每条很短，估约 6 小时；
-  - B 组只有 177 条，十几分钟；
+  - B 组只有 164 条，十几分钟；
   - C0 不训练。
 - **SFT 每个 epoch 的评测：** 10 个 epoch × 2 个题集 = 每组 20 个单卡任务，并行 10 个，约 1 小时。
 - **RL：**

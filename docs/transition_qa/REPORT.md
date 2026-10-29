@@ -1,6 +1,6 @@
 # 转移题、混合 SFT、输出格式开关、诊断、实验矩阵：总报告
 
-2026-10-21（第五版，加上第五批：遮挡物核对、遮挡题的渲染深度核对、重建和探针重跑；之后按你定的改了预登记并定稿，跑了 C0 的探针；又试了按深度图重做遮挡判据，没过校准，按你的选择量了遮挡物的框；又按你对探针遮挡题的人工核对改了探针和训练集；2026-10-27、10-28 暂扣了遮挡任务的 goal 题，按你对这类 goal 题的核对改了探针，并开始筛选场景）。任务说明：用户 2026-10-17 的提示词（第 0–8 节）、2026-10-19 的三批要求和 2026-10-20 的要求。
+2026-10-21（第五版，加上第五批：遮挡物核对、遮挡题的渲染深度核对、重建和探针重跑；之后按你定的改了预登记并定稿，跑了 C0 的探针；又试了按深度图重做遮挡判据，没过校准，按你的选择量了遮挡物的框；又按你对探针遮挡题的人工核对改了探针和训练集；2026-10-27、10-28 暂扣了遮挡任务的 goal 题，按你对这类 goal 题的核对改了探针，并开始筛选场景；2026-10-29 按你的选择去掉了 128 个边缘场景）。任务说明：用户 2026-10-17 的提示词（第 0–8 节）、2026-10-19 的三批要求和 2026-10-20 的要求。
 
 - 代码和文档都在分支 `transition-qa`（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data`），只在本地，没有推送，没有合并到 main。
 - 分支和 main 保持同步（最近一次合入 main `f8e43d40`）；合并到 main 由你在冻结期触发。
@@ -32,7 +32,10 @@
     - P0 先用 177 条样题；分支已和 main 同步到 `f8e43d40`，两个训练链补丁直接打得上。
     - 剩下的是你的事：核这 44 道、在冻结期合并、批约 1,300 卡时。
 12. **探针的 goal 题核对**（2026-10-28）：44 道遮挡任务的 goal 题核下来错 23、有歧义 1。按你的答案（其中 12 道按我的建议）重标 7 道、去掉 17 道：探针 934 → 917 道，训练、测试集不变；预登记开头的修正加了这一次。重新判分后结论不变：goal 题答案是 Yes 时只答对 0%–20%，C0 和 SFT e9 没有差异。重建在登录节点上跑（SCO 两小时没排上，你定的）。
-13. **场景筛选**（2026-10-28，新任务，优先）：1,000 个场景按物体标签归类，清单页 https://claude.ai/artifact/A5UDzK4r3o9Ckb7NhkRqKz：建议排除 57 个（含科技馆）、你定 65 个、建议保留 878 个，等你选。
+13. **场景筛选**（2026-10-28 至 29，`SCENE_SCREEN.md`）：1,000 个场景按物体标签归类，清单页 https://claude.ai/artifact/A5UDzK4r3o9Ckb7NhkRqKz；你选完排除 128 个场景。按你定的 1a、2b、3a：
+    - 题库按场景删题（训练 78,786、测试 5,313、探针 838，其余题逐题不变），探针重新判分后结论不变，预登记加了修正；
+    - 配方去掉这些场景（D 164 + 9,075 + 9,075），矩阵的 RL 题也去掉这些场景；
+    - 评测集换成去掉这些场景的版本：验证 382 道，测试补回 292 道（遮挡族没有可补的题，13 个名额给了别的族）。
 
 ## 第四批的结论（2026-10-20）
 
@@ -175,6 +178,8 @@
 
 **已定（2026-10-28）：探针里 44 道遮挡任务的 goal 题**核完了：错 23、有歧义 1，重标 7 道、去掉 17 道，预登记写明（`PROGRESS.md` 12.20）。
 
+**已定（2026-10-29）：去掉 128 个边缘场景**（你在清单页上选的）：题库按场景删题，评测集也去掉（测试集补回 292 道），矩阵的 P0、P2、RL 题也去掉（`SCENE_SCREEN.md`，`PROGRESS.md` 12.21）。
+
 **已定（2026-10-21）：探针的 78 道"完全 / 部分"遮挡题人工核一遍**（其中 38 道的遮挡物和框对不上）。页面 https://claude.ai/artifact/LEjgxnfwqV23d8gXaRCsnf，核完了（2026-10-23）：错 51 道，33 道重标、18 道去掉，预登记写明；训练集的遮挡题暂扣（`PROGRESS.md` 12.18）。
 
 还没定的：
@@ -186,10 +191,13 @@
 3. **P0 全量题库什么时候生成**：由你通知。你 2026-10-27 定了先用 177 条样题开跑矩阵。
 4. **（可选）E 组正式跑之前，先用 `--trial` 在 GPU 上试 6,144 的回答上限**：一条序列最长从 8,192 变成 10,240 个词元，显存没试过。
 5. **（主线的事，冻结期再议）RL 的遮挡判分仍按框算**：本分支只给题库的遮挡标签加了深度核对；RL 环境和评测的遮挡判分（`canonical_task_metrics_v2.occlusion_silhouette`）没动。要不要也加深度核对（例如生成遮挡任务时就核对终点位姿）由主线定。
-6. **场景筛选**：清单页 https://claude.ai/artifact/A5UDzK4r3o9Ckb7NhkRqKz 等你选（建议排除 57、你定 65）。定完我列出要改的地方（P1 题库、探针、测试集；主线的任务和评测集由你定）再动手。
+6. **测试集遮挡族的 13 个名额**：现在补给了另外五族（遮挡族 29 道）；也可以用出题器在留下的测试场景里新出遮挡题补（`SCENE_SCREEN.md` 第 3 节）。
+7. **C0 在补进来的 59 道上补跑**：要从 AOSS 取回 C0 第 300 次的两个检查点（约 30 GB），再跑两个单卡推理评测；补跑之前 D − C0 只能在 233 道原题上比。
+8. **主线要不要也用这份场景清单、换评测集**：合并时定；清单 `configs/scene_screen/scene_exclusions_20261029.json` 可以直接用。
 
 ## 3. 风险和局限
 
+- **评测集换了**（2026-10-29）：矩阵用去掉边缘场景的 v2 评测集（验证 382、测试 292，其中 59 道是补的），成功率和第十二轮、C0 的数不完全可比；C0 要在补的 59 道上补跑。场景类型是按物体标签推的，清单里仍可能漏掉边缘场景。
 - **P0 很小**：只有 230 道样题，B 组几乎等于不做 SFT；P0 的验证集来自 train 场景。
 - **goal 题占比高**：`goal_now` 占状态题 68.5%、`goal_after` 占前向题 47.7%，两类合计占训练集 51.5%（44,000 / 85,413）。探针显示现有模型在这类题上只会答 No；D 组练了以后能否改过来，看 D 的探针结果。
 - **遮挡题少、答案不均，遮挡物按实心包围盒算**：
@@ -214,15 +222,15 @@
 | 什么 | 在哪（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data` 下） |
 | --- | --- |
 | 转移题生成器、测试 | `data_gen/transition_qa/`（`generate.py` raw / probe / build、`extra_tasks.py`、`interior.py`、`review.py`、`report.py`） |
-| 题库（现行，2026-10-28） | `exps/transition_qa_20261019b/`（`p1_train/test/probe.jsonl`、暂扣的 `p1_train_held.jsonl` / `p1_test_held.jsonl`、`probe_label_overrides.json`、`stats.json`、`probe_stats.json`、`shortcuts.md`、`blind/`、`raw/`；遮挡题的深度核对 `occ_depth_all/`；之前各版在 `pre_depth_check/`、`pre_probe_check/`、`pre_goal_hold/`、`pre_goal_check/`；核对页的数据和结果 `review_occluders/`、`review_probe_occ/`、`review_probe_goal_occ/`） |
+| 题库（现行，2026-10-29） | `exps/transition_qa_20261019b/`（`p1_train/test/probe.jsonl`、暂扣的 `p1_train_held.jsonl` / `p1_test_held.jsonl`、`probe_label_overrides.json`、`stats.json`、`probe_stats.json`、`shortcuts.md`、`blind/`、`raw/`；遮挡题的深度核对 `occ_depth_all/`；之前各版在 `pre_depth_check/`、`pre_probe_check/`、`pre_goal_hold/`、`pre_goal_check/`、`pre_scene_screen/`；核对页的数据和结果 `review_occluders/`、`review_probe_occ/`、`review_probe_goal_occ/`） |
 | 题库（2026-10-19，保留） | `exps/transition_qa_20261019/`（有捷径；含 v2 新增遮挡题的帧 `extra_oa15/`、核对页和核对结果 `review/`） |
 | 题库（2026-10-18，保留） | `exps/transition_qa_20261018/`（含内部状态的图 `interior/`、核对题 `review/`） |
 | 遮挡判据 | `vagen/envs/active_spatial/occlusion_depth.py`（深度图判据）、`data_gen/transition_qa/occ_judge.py`；`exps/transition_qa_20261019b/occ_judge_check34/`（34 道校准）、`occ_judge_all/`（2,249 道的深度图、对齐测量、任务清单）；`OCCLUSION_JUDGE.md` |
-| 场景筛选（2026-10-28，等你选） | `exps/scene_screen_20261028/`（物体标签特征、分类规则、清单页 https://claude.ai/artifact/A5UDzK4r3o9Ckb7NhkRqKz） |
+| 场景筛选（2026-10-29 定） | 清单 `configs/scene_screen/scene_exclusions_20261029.json`；脚本 `data_gen/scene_screen/`；`exps/scene_screen_20261028/`（特征、分类、清单页的选择）；去掉这些场景的 RL 题和评测集 `exps/matrix_inputs_20261029/`；`SCENE_SCREEN.md` |
 | 混合配方构建器、配置、矩阵 plan 生成 | `data_gen/sft_mixture/`（`build.py`、`matrix_plan.py`） |
 | 矩阵的混合数据 | `exps/sft_mixture_matrix_v2_20261018/{B,C,D,D_noP0}`（2026-10-20 用新题库重建；旧的配方表 `recipes_bank1019.*`） |
 | 诊断代码、测试 | `eval/diagnostics/` |
-| 诊断结果 | `exps/diagnostics_20261018/`（失败拆解、旧探针、`format_check`）、`exps/diagnostics_20261019/`（第二版探针、诊断 2、C0 的失败拆解）、`exps/diagnostics_20261020/probe_v3_all/`（第三版探针、不看图的基线、`curve.md`、`curve.png`）、`exps/diagnostics_20261021/probe_v3d_all/`、`probe_v3d_common/`（深度核对之后的探针：952 道 5 个模型和 C0 的两个 RL 检查点，877 道 23 个检查点）；`exps/diagnostics_20261023/probe_v3e_*`（遮挡题核对后：934 / 868 道）、`exps/diagnostics_20261028/probe_v3f_*`（goal 题核对后：917 / 851 道，现行） |
+| 诊断结果 | `exps/diagnostics_20261018/`（失败拆解、旧探针、`format_check`）、`exps/diagnostics_20261019/`（第二版探针、诊断 2、C0 的失败拆解）、`exps/diagnostics_20261020/probe_v3_all/`（第三版探针、不看图的基线、`curve.md`、`curve.png`）、`exps/diagnostics_20261021/probe_v3d_all/`、`probe_v3d_common/`（深度核对之后的探针：952 道 5 个模型和 C0 的两个 RL 检查点，877 道 23 个检查点）；`exps/diagnostics_20261023/probe_v3e_*`（遮挡题核对后：934 / 868 道）、`exps/diagnostics_20261028/probe_v3f_*`（goal 题核对后：917 / 851 道）、`exps/diagnostics_20261029/probe_v3g_*`（去掉边缘场景后：838 / 772 道，现行） |
 | 矩阵配置 | `configs/matrix_v2/`（A–E、C0、`vars.yaml`、README） |
 | 改动的现有文件 | `CHANGES.md` 第 1 节 |
 | 文档 | `docs/transition_qa/`：本报告、`PROGRESS.md`、`DATA_CONTRACT.md`、`P1_QTYPES.md`、`P1_STATS.md`、`RECIPES.md`、`DIAG_BASELINE.md`、`DIAG3_PROBE.md`、`CHANGES.md`、两张探针曲线图 |

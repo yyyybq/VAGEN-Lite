@@ -359,6 +359,11 @@ def cmd_raw(args: argparse.Namespace) -> None:
 # =============================================================================
 # build: balance, ratio, caps, split, export
 # =============================================================================
+REPO = Path(__file__).resolve().parents[2]
+# InteriorGS scenes the user excluded as too marginal (2026-10-29, docs/transition_qa/SCENE_SCREEN.md), relative to the
+# repository: their questions are dropped after every random step of probe and build, so every other question stays
+# as it was (drop_scenes).  None: none
+SCENE_EXCLUSIONS = "configs/scene_screen/scene_exclusions_20261029.json"
 BUILD_CONFIG: Dict[str, Any] = {
     # class rules of 2026-10-19 (user): every state question is kept (after the answer balance); forward questions
     # at most 1.2 x the state questions; inverse questions at most 15% of the bank; the scene cap stays 8%.
@@ -387,6 +392,7 @@ BUILD_CONFIG: Dict[str, Any] = {
     "hold": {"train": [{"qtypes": ["occluded_now", "occluded_after"]},
                        {"qtypes": ["goal_now", "goal_after"], "families": ["occlusion_alignment"]}],
              "test": [{"qtypes": ["goal_now", "goal_after"], "families": ["occlusion_alignment"]}]},
+    "exclude_scenes": SCENE_EXCLUSIONS,
 }
 PROBE_CONFIG: Dict[str, Any] = {
     "per_qtype": 40,                # user, 2026-10-19: at least 40 per question type
@@ -396,6 +402,7 @@ PROBE_CONFIG: Dict[str, Any] = {
     "unchanged_max_share": 0.10,
     # the user's corrections of probe labels (2026-10-23, apply_label_overrides): a file in OUT; None: none
     "label_overrides": "probe_label_overrides.json",
+    "exclude_scenes": SCENE_EXCLUSIONS,
 }
 ORDINAL = {"distance_bin", "height_bin"}         # options in ascending order: balance the letter
 SHUFFLED = {"occluded", "both_in_view"}          # categorical: option order drawn per question
@@ -982,6 +989,22 @@ def apply_label_overrides(records: List[Dict[str, Any]], overrides: Optional[Dic
     return out
 
 
+def read_scene_exclusions(cfg: Dict[str, Any]) -> Tuple[Optional[str], set]:
+    """(path, scene ids) of the configured scene exclusion list (cfg "exclude_scenes", relative to the repository or
+    absolute; its "excluded" list), or (None, empty set)."""
+    name = cfg.get("exclude_scenes")
+    if not name:
+        return None, set()
+    path = Path(name) if Path(name).is_absolute() else REPO / name
+    return str(path), set(json.loads(path.read_text(encoding="utf-8"))["excluded"])
+
+
+def drop_scenes(rows: List[Dict[str, Any]], scenes: set) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """(kept, dropped): the rows of ``scenes`` are dropped, the others keep their order (2026-10-29: applied after
+    every random step, so the rest of a file stays as it was)."""
+    return [r for r in rows if r["scene"] not in scenes], [r for r in rows if r["scene"] in scenes]
+
+
 def hold_out(rows: List[Dict[str, Any]], rules: Sequence[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """(kept, held): a question is held when a rule matches it: its qtype among the rule's ``qtypes`` and, if the
     rule names ``families``, its task family among them (BUILD_CONFIG hold; user 2026-10-23 / 2026-10-27: labels
@@ -1028,11 +1051,17 @@ def cmd_probe(args: argparse.Namespace) -> None:
     picks = even_letters(probe_select(balanced + taken, cfg, rng, report), BUILD_CONFIG, rng, cap=False)
     overrides: Dict[str, Any] = {}
     picks = apply_label_overrides(picks, read_label_overrides(out, cfg), overrides)
+    ex_path, ex_scenes = read_scene_exclusions(cfg)
+    picks, gone = drop_scenes(picks, ex_scenes)
     n = write_jsonl(out / "p1_probe.jsonl", (to_lf(r) for r in picks))
     stats = {"questions": n, "config": cfg, "seed": args.seed, "candidates": len(val),
              "scenes": len({r["scene"] for r in picks}), "scenes_allowed": len(scenes) if scenes else None,
              "scenes_from": args.scenes_from, "by_qtype": report, "occlusion_depth": depth_report,
-             "label_overrides": overrides}
+             "label_overrides": overrides,
+             # build keeps these out of the test set too (dropped_ids), so the test set draws from the same questions
+             "scene_exclusion": {"file": ex_path, "scenes": len(ex_scenes), "dropped": len(gone),
+                                 "by_qtype": dict(collections.Counter(r["qtype"] for r in gone)),
+                                 "dropped_ids": sorted(r["sample_id"] for r in gone)}}
     (out / "probe_stats.json").write_text(json.dumps(stats, indent=1))
     print(json.dumps({"questions": n, "short": {q: v["short"] for q, v in report.items() if v["short"]}}, indent=1))
 
@@ -1050,11 +1079,16 @@ def cmd_build(args: argparse.Namespace) -> None:
     if not probe_path.exists() and not args.no_probe:
         raise SystemExit(f"{probe_path} missing: build the probe set first (generate probe), or pass --no-probe")
     probe_ids = {r["sample_id"] for r in read_jsonl(probe_path)} if probe_path.exists() else set()
-    # questions dropped from the probe by the user's check stay out of the test set as well
+    # questions dropped from the probe by the user's check stay out of the test set as well, and so do the probe's
+    # questions of excluded scenes (2026-10-29): the test set then draws from the same questions as before
     dropped = set((read_label_overrides(out, PROBE_CONFIG) or {}).get("drop") or [])
-    splits["val"] = [r for r in splits["val"] if r["sample_id"] not in probe_ids | dropped]
+    probe_stats = out / "probe_stats.json"
+    scene_gone = set(((json.loads(probe_stats.read_text()) if probe_stats.exists() else {}).get("scene_exclusion")
+                      or {}).get("dropped_ids") or [])
+    splits["val"] = [r for r in splits["val"] if r["sample_id"] not in probe_ids | dropped | scene_gone]
     stats["probe_excluded"] = len(probe_ids)
     stats["probe_dropped_excluded"] = len(dropped)
+    stats["probe_scene_dropped_excluded"] = len(scene_gone)
     built: Dict[str, List[Dict[str, Any]]] = {}
     final = stats.setdefault("final_letter_cap_dropped", {})
     for name, rs in splits.items():
@@ -1078,6 +1112,11 @@ def cmd_build(args: argparse.Namespace) -> None:
     probe_scenes = {r["scene"] for r in read_jsonl(probe_path)} if probe_path.exists() else set()
     if {r["scene"] for r in built["train"]} & ({r["scene"] for r in built["val"]} | probe_scenes):
         raise SystemExit("a scene is in both the training and the test questions")
+    ex_path, ex_scenes = read_scene_exclusions(cfg)
+    excl = stats.setdefault("scene_exclusion", {"file": ex_path, "scenes": len(ex_scenes)})
+    for name in list(files):  # before the hold, so the held files lose these scenes too
+        files[name], gone = drop_scenes(files[name], ex_scenes)
+        excl[name] = {"dropped": len(gone), "by_qtype": dict(collections.Counter(r["qtype"] for r in gone))}
     for split, rules in (cfg.get("hold") or {}).items():
         name = {"train": "p1_train.jsonl", "test": "p1_test.jsonl"}[split]
         files[name], held = hold_out(files[name], rules)

@@ -18,7 +18,7 @@ rl:   # 第十二轮第 2 条：每次 RL 实验成对跑，S0 和 D 同一个�
     "{pkg}s0": "{rl_package}_S0"   # data_gen/interiorgs_v10/configs/rl_standards.json：修正包 + 稀疏奖励
     "{pkg}d": "{rl_package}_D"     # 修正包 + 密集奖励
   seed: 20261019
-  tasks: train 后备题（task_pool reserve），去掉深度核对标出的题
+  tasks: train 后备题（task_pool reserve），去掉深度核对标出的题和 128 个边缘场景（2026-10-29）
   updates: 300
   output_format: action_only
   guards: {kl_max: 0.2, invalid_max: 0.05, invalid_window: 10, success_drop: 0.10, drop_window: 50, start_updates: 5}
@@ -29,8 +29,8 @@ rl:   # 第十二轮第 2 条：每次 RL 实验成对跑，S0 和 D 同一个�
 
 eval:
   sets:
-    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2    # 413 道 = val400 + 15 道遮挡题
-    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2  # 292 道 = 279 + 13 道遮挡题
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened    # 382 道：eval_val_v2（413 道）去掉 128 个边缘场景的 31 道（用户 2026-10-29），不补
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened  # 292 道：eval_test_v2 去掉这些场景的 59 道，同族同难度档补回；遮挡族没有可补的题，13 个名额给了另外五族（exps/matrix_inputs_20261029/eval_test_v2_screened/selection.json）
   every: 50
   diagnostics:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
@@ -46,8 +46,8 @@ train_chain_plan:   # 照第十二轮的 plan（interiorgs_v10_train_r12a_202610
   scenes_root: /mnt/umm/users/yinbaiqiao/InteriorGS_meta
   sft_groups: {mix: sft_trajectories.jsonl}   # 只给 rl-config 查 RL 题和 SFT 题不重合（A 没有 SFT，这项检查不会拦）
   eval_sets:
-    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2
-    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened
   select_by: val
   max_eval_jobs: 10
   pool: h800
@@ -57,7 +57,7 @@ train_chain_plan:   # 照第十二轮的 plan（interiorgs_v10_train_r12a_202610
     standard: "{rl_package}_S0"
     seed: 20261019
     task_pool: reserve
-    rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/rl_rows/rows.jsonl
+    rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl   # 第十一轮的 RL 行去掉 128 个边缘场景（2026-10-29），主线的文件不动
     exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
     guards: {kl_max: 0.2, invalid_max: 0.05, invalid_window: 10, success_drop: 0.10, drop_window: 50, start_updates: 5}
     startup: {retries: 2, stall_minutes: 40}

@@ -380,6 +380,20 @@ def test_probe_label_overrides_relabel_and_drop():
     assert rep["checks"] == [{"date": "2026-10-28"}] and rep["moves"] == {"yes->no": 1}  # each check goes to the report
 
 
+def test_scene_exclusion_drops_whole_scenes_and_keeps_the_rest(tmp_path):
+    rows = [_rec(i, "closer_now", "A", "", scene=s) for i, s in enumerate(["s1", "s2", "s1", "s3"])]
+    kept, gone = GEN.drop_scenes(rows, {"s1"})
+    assert [r["sample_id"] for r in kept] == ["id000001", "id000003"] and len(gone) == 2  # order kept
+    p = tmp_path / "ex.json"
+    p.write_text(json.dumps({"excluded": ["s1", "s3"]}))
+    assert GEN.read_scene_exclusions({"exclude_scenes": str(p)}) == (str(p), {"s1", "s3"})
+    assert GEN.read_scene_exclusions({}) == (None, set())
+    name = GEN.BUILD_CONFIG["exclude_scenes"]
+    assert name == GEN.PROBE_CONFIG["exclude_scenes"] and (GEN.REPO / name).exists()  # the tracked list
+    path, scenes = GEN.read_scene_exclusions(GEN.BUILD_CONFIG)
+    assert "0204_840158" in scenes  # the science museum (user, 2026-10-28)
+
+
 def test_hold_out_sets_question_types_and_family_goals_aside():
     rows = [_rec(i, q, "A", "") for i, q in enumerate(["occluded_now", "goal_now", "occluded_after", "closer_now", "goal_after"])]
     rows[1]["family"] = rows[2]["family"] = "occlusion_alignment"             # an occlusion task's goal question

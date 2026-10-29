@@ -21,6 +21,8 @@ STANDARDS = ROOT / "data_gen" / "interiorgs_v10" / "configs" / "rl_standards.jso
 GROUPS = ("A", "B", "C", "D", "E")       # groups that train; C0 reuses round 12
 PACKAGES = ("v10_p1", "v10_p2")
 V2 = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/"
+# 2026-10-29: the v2 sets without the 128 excluded scenes (the test set topped up to 292)
+SCREENED = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/"
 
 # the plan fields train_chain.py reads (checked against its source below, so a renamed field fails here)
 PLAN_KEYS = {"tr", "sft_dir", "commit", "model", "ppo_template", "gs_root", "scenes_root", "keep_text", "sft_epochs",
@@ -87,7 +89,8 @@ def test_round12_rules(cfgs):
         p = MP.plan(g)
         assert c["rl"]["pair"] == {"p1s0": "v10_p1_S0", "p1d": "v10_p1_D"} and c["rl"]["seed"] == p["rl"]["seed"]
         seeds.add(p["rl"]["seed"])
-        assert p["eval_sets"] == {"val": V2 + "eval_val_v2", "test": V2 + "eval_test_v2"} and p["select_by"] == "val"
+        assert p["eval_sets"] == {"val": SCREENED + "eval_val_v2_screened", "test": SCREENED + "eval_test_v2_screened"}
+        assert p["select_by"] == "val" and p["rl"]["rows"] == SCREENED + "rl_rows/rows.jsonl"
         assert p["rl"]["startup"] == {"retries": 2, "stall_minutes": 40}
         assert "ppo_template" not in p                                       # the standard names it
     assert len(seeds) == 1                                                   # one seed for every group and run
@@ -157,7 +160,7 @@ def test_d_nop0_is_d_without_p0():
     alt, d = MP.load_group("D_noP0"), MP.load_group("D")
     pa, pd = MP.plan("D_noP0"), MP.plan("D")
     assert {k for k in pd if pa.get(k) != pd.get(k)} == {"tr", "rl_name"}           # same SFT / RL / eval settings
-    assert alt["data"]["train_rows"] == {"P0": 0, "P1": 9802, "P2": 9802}
+    assert alt["data"]["train_rows"] == {"P0": 0, "P1": 9075, "P2": 9075}            # 2026-10-29: without the excluded scenes
     assert {k: v for k, v in alt.items() if k not in ("group", "description", "status", "data", "train_chain_plan",
                                                         "needs_chain_support")} == \
         {k: v for k, v in d.items() if k not in ("group", "description", "status", "data", "train_chain_plan",
@@ -183,7 +186,12 @@ def test_c0_reuses_the_round12_pair():
         r12 = json.loads(path.read_text())
         assert r12["tr"] == r["tr"]
         assert r12["rl"]["standard"] == f"{package}_S0" and r12["rl_runs"] == pair(package)
-        for key in ("seed", "task_pool", "rows", "exclude", "guards", "startup"):  # the same RL as every matrix group
+        for key in ("seed", "task_pool", "exclude", "guards", "startup"):  # the same RL as every matrix group
             assert r12["rl"][key] == d["rl"][key], (package, key)
-        for key in ("endpoint", "eval_sets", "eval", "sft_dir", "model"):
+        # 2026-10-29 (the user's scene screen): the matrix takes round 12's RL rows and eval sets without the 128
+        # excluded scenes (exps/matrix_inputs_20261029); C0 keeps its own
+        assert r12["rl"]["rows"].endswith("interiorgs_v10_r11_20261016/rl_rows/rows.jsonl")
+        assert d["rl"]["rows"] == SCREENED + "rl_rows/rows.jsonl"
+        assert r12["eval_sets"] == {"val": V2 + "eval_val_v2", "test": V2 + "eval_test_v2"}
+        for key in ("endpoint", "eval", "sft_dir", "model"):
             assert r12[key] == d[key], (package, key)

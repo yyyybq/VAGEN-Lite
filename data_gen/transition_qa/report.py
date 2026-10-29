@@ -104,6 +104,11 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
         lines.append(f"- 测试集去掉了探针集的 {stats['probe_excluded']} 道题（两份不重叠）"
                      + (f"，以及人工核对从探针去掉的 {stats['probe_dropped_excluded']} 道" if stats.get("probe_dropped_excluded") else "")
                      + "。")
+    ex = stats.get("scene_exclusion") or {}
+    if ex.get("scenes"):  # 2026-10-29: the user's scene screen
+        parts = "、".join(f"{name} {v['dropped']} 道" for name, v in ex.items() if isinstance(v, dict))
+        lines.append(f"- 场景排除（{Path(ex['file']).name}，用户 2026-10-29）：{ex['scenes']} 个场景的题在抽样、配平之后去掉"
+                     f"（{parts}，暂扣之前），其余题逐题不变。")
     for name, h in (stats.get("held") or {}).items():
         parts = h.get("by_family_qtype") or h["by_qtype"]
         lines.append(f"- {name} 暂扣 {h['held']} 道（" + "、".join(f"{q} {n}" for q, n in sorted(parts.items()))
@@ -118,17 +123,22 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
         capped = {q: v["short"] for q, v in by_q.items() if v["short"] and over.get(q) == "all"}  # the unchanged cap
         in_file = collections.Counter(r["qtype"] for r in data.get("p1_probe.jsonl", []))
 
-        def checked(q: str, n: int) -> str:  # the user's checks drop questions after the picking (2026-10-23, 10-28)
-            return f"（人工核对后留 {in_file[q]} 道）" if in_file and in_file[q] != n else ""
+        # the user's checks (2026-10-23, 10-28) and the scene exclusion (10-29) drop questions after the picking
+        after = "人工核对、去掉排除场景后" if (ps.get("scene_exclusion") or {}).get("dropped") else "人工核对后"
+
+        def checked(q: str, n: int) -> str:
+            return f"（{after}留 {in_file[q]} 道）" if in_file and in_file[q] != n else ""
 
         def whole(q: str) -> str:
             n = by_q[q]["picked"]
             return f"全部可用的 {n} 道" + checked(q, n)
 
-        sizes = (f"每个题类 {ps['config']['per_qtype']} 道，其中 "
-                 + "、".join(f"{q} " + (whole(q) if v == "all" else f"{v} 道" + checked(q, v))
-                            for q, v in sorted(over.items())) + "（预注册要的题类）"
-                 if over else f"每个题类 {ps['config']['per_qtype']} 道")
+        base = ps["config"]["per_qtype"]
+        others = [n for q, n in in_file.items() if q not in over]
+        per = f"每个题类 {base} 道" + (f"（去掉排除场景后 {min(others)}–{max(others)} 道）" if others and min(others) < base else "")
+        sizes = (f"{per}，其中 " + "、".join(f"{q} " + (whole(q) if v == "all" else f"{v} 道" + checked(q, v))
+                                          for q, v in sorted(over.items())) + "（预注册要的题类）"
+                 if over else per)
         lines.append(f"- 探针集：{ps['questions']} 道，{sizes}，来自 {ps['scenes']} 个 val 场景"
                      + (f"；不够的题类：{json.dumps(short)}" if short else "；其余题类都够")
                      + ("".join(f"；{q} 另有 {n} 道\"没变化\"的超过 10% 上限，没取" for q, n in sorted(capped.items())))
@@ -142,6 +152,10 @@ def write(out: Path, md: Path) -> Dict[str, Any]:
                              + f"，重标 {c['relabel']}、去掉 {c['drop']}" for c in lo.get("checks") or [])
             lines.append(f"- 探针集的人工核对（{Path(lo['file']).name}）：{lo['relabelled']} 道按核对的答案重标（{moves}），"
                          f"{lo['dropped']} 道不该出的题去掉{checks}。")
+        pse = ps.get("scene_exclusion") or {}
+        if pse.get("dropped"):
+            lines.append(f"- 探针集去掉了排除场景的 {pse['dropped']} 道（"
+                         + "、".join(f"{q} {n}" for q, n in sorted(pse["by_qtype"].items())) + "），在人工核对之后。")
     lines.append("")
     # ------------------------------------------------------------------ family x qtype x split
     lines += ["## 2. 按任务族 × 题类 × 划分的题数", ""]
