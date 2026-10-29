@@ -105,6 +105,18 @@
   现存的是第十轮第 5 个 epoch（checkpoint-770）和第十一轮第 9 个 epoch（checkpoint-1386，v10 线目前最好的 SFT、后续 RL 的起点）。
   基座 8 月有过一次 EASI 结果（`easi_results/qwen_pretrain_baseline`，同一个 cc594898），这次在同一份代码下重跑，旧结果只作核对。
 - 冒烟测试：单卡、每个 benchmark 3 道题（pt-46lie0ib，`exps/interiorgs_qa_easi_20261028_smoke`）。
+- 2026-10-29 进展：
+  - 冒烟测试发现 5 个 benchmark（MMSI、ViewSpatial、SITE、BLINK、3DSRBench）的数据不在离线缓存里（缓存里有同一版本的处理后数据，
+    原始 Hub 快照被清掉了）。经跳板机代理下载到 `~/.cache/huggingface/hub`（共约 86 GB，SITE 65 GB；4 线程、nice 19），已全部下完。
+  - 8 卡任务在 SITE 缺数据时出错后挂住（一个进程报错，其余 7 个在 NCCL 里一直等），QA-SFT 从 19:27、基座从 04:02 空占 8 张卡；
+    Act-SFT 的 8 卡任务一直 SUSPENDED。三个都删了（已完成的 VSI、MMSI、MindCube、ViewSpatial 保留）。
+  - 按用户建议改成单卡任务（每个模型 × 每个 benchmark 一个，zoetrope 空卡上立即开跑）：13 个全部成功。
+  - SITE 的图片和视频要从 15 个 zip 解到 `~/.cache/huggingface/sitebench/data`；那个目录 8 月被不完整地解过一次，lmms-eval 见目录
+    存在就不再解，所以 SITE 一直缺文件。`site_extract.py`（单卡 SCO 任务，目录是 root 的）把缺的文件补全；第一次因多进程同时建
+    目录报错，已修，重跑中（pt-x1o2gcb4）。完成后三个模型的 SITE 各一个单卡任务。
+  - 同一模型的几个任务同一秒启动时，lmms-eval 的结果文件同名互相覆盖：Act-SFT 的 MindCube 结果被 BLINK 覆盖，单独重跑（pt-xfrj7xgd）。
+  - Act-SFT 在 MindCube-Tiny 只有 4.1%：它答 `<answer>选项文字</answer>`，官方提取要选项字母，几乎全判错；其他 benchmark 格式正常。
+  - 对照表 `exps/interiorgs_qa_easi_20261028/compare_partial.md`（`easi_compare.py`，用 EASI 自己的打分代码）。
 
 以下是 2026-10-28 训练时的记录。
 
