@@ -33,8 +33,15 @@ def main() -> int:
     ap.add_argument("--stack-dump", type=int, default=0, metavar="SECONDS",
                     help="diagnosis: every Python process of the run prints all thread stacks to stderr every SECONDS "
                          "(a sitecustomize.py on PYTHONPATH); used to find where SITE video runs stalled (2026-10-29)")
+    ap.add_argument("--start-delay", type=int, default=0, metavar="SECONDS",
+                    help="wait before starting: give the jobs of one checkpoint different delays, because lmms-eval names "
+                         "its result file after the start second and two runs of one checkpoint started in the same "
+                         "second overwrite each other's results (Act-SFT MindCube, 2026-10-29)")
     a = ap.parse_args()
-    gpus = [g for g in os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",") if g.strip()]
+    if a.start_delay:
+        import time
+        time.sleep(a.start_delay)
+    gpus =[g for g in os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",") if g.strip()]
     nproc = a.nproc or len(gpus)
     env = dict(os.environ, HF_HOME=HF_HOME, TRANSFORMERS_CACHE=f"{HF_HOME}/hub",
                HF_DATASETS_CACHE=f"{HF_HOME}/datasets_easi_shared", HF_HUB_OFFLINE="1", HF_DATASETS_OFFLINE="1",

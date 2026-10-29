@@ -94,7 +94,12 @@
 
 ## 2. 正在运行什么
 
-没有（2026-10-29 EASI-8 全部完成）。下面是当时的记录。
+用户 2026-10-29 要求：在 EASI-8 上评测 QA-SFT 的 checkpoint-170（第 1 轮）和 checkpoint-340（第 2 轮），看少训几轮能不能保住提高、减少 SITE 的退步。
+18 个单卡任务（2 个 checkpoint × 9 个 lmms-eval 任务，SITE 拆成图片和视频），`exps/interiorgs_qa_jobs/easi1_qasft_ck{170,340}_*_20261030`，
+结果在 `exps/interiorgs_qa_easi_20261028/qasft256_ck{170,340}/`。同一 checkpoint 的任务按 `--start-delay` 错开启动秒数，避免结果文件同名覆盖。
+预计约 3 小时（SITE 视频和 VSI 最慢）。
+
+以下是 EASI-8 三模型评测时的记录（2026-10-29 已完成）。
 
 用户 2026-10-28 要求：用 `scripts/easi_eval.py` 在 8 个原 benchmark（EASI-8）上评测 QA-SFT，提交成 SCO 任务，和基座、Act-SFT 对比。
 
