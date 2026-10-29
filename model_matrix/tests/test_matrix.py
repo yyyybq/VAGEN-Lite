@@ -30,6 +30,19 @@ class MatrixTest(unittest.TestCase):
             (done / "summary.json").write_text("{}")
             self.assertEqual(M.train_state(exp), "训完、评完")
 
+    def test_stopped(self):
+        import json
+        from model_matrix.downstream import matrix as M
+
+        with tempfile.TemporaryDirectory() as tmp:
+            exp = Path(tmp) / "DS-X-100-s1"
+            exp.mkdir()
+            self.assertEqual(M.stopped(exp), {})
+            (exp / "train.log").write_text("x\r 75%|...| 149902/200000 [1:00:00<1:00:00, 1.3it/s]\r")
+            (exp / "stopped.json").write_text(json.dumps({"step": 149902, "note": "按要求停"}, ensure_ascii=False),
+                                              encoding="utf-8")
+            self.assertEqual(M.train_state(exp), "停训：第 149,902 步（按要求停）")
+
     def test_rows(self):
         from model_matrix.downstream import matrix as M
 

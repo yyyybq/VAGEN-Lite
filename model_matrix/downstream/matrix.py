@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import re
 import sys
 from pathlib import Path
@@ -52,11 +53,21 @@ def diff_cell(cmp: dict) -> str:
             f"空间 {100 * s['diff']:+.1f}（p {s['p']:.2g}）")
 
 
+def stopped(exp: Path) -> dict:
+    """EXP/stopped.json, written by this line when a run was stopped for good before its last step:
+    {"step": the last step trained, "note": who stopped it, when and why}; {} for a run not stopped."""
+    f = exp / "stopped.json"
+    return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+
+
 def train_state(exp: Path) -> str:
-    """The training state from the run's own files: done (its final evaluation summary), the last step in
-    train.log, or not started."""
+    """The training state from the run's own files: done (its final evaluation summary), stopped (stopped.json),
+    the last step in train.log, or not started."""
     if (exp / "evals" / "steps_200000" / "out" / "episodes" / "summary.json").is_file():
         return "训完、评完"
+    stop = stopped(exp)
+    if stop:
+        return f"停训：第 {stop['step']:,} 步（{stop['note']}）"
     log = exp / "train.log"
     if log.is_file():
         with open(log, "rb") as f:
@@ -99,8 +110,11 @@ def build() -> str:
         exp = roots[line] / "experiments" / f"DS-{code}-100-s1"
         have = {e.step for e in coll.first() if (e.start, e.ratio, e.seed) == (code, "100", 1)}
         cells, rates = [], {"all": [], "spatial": []}
+        stop = stopped(exp) if line == "本线" else {}
         for st in POINTS:
-            if st in have:
+            if st not in have and stop and stop["step"] < st:
+                cells.append("停训，未到")
+            elif st in have:
                 g = S.group_counts(S.episodes_of(coll, code, "100", st, {1}), coll.tasks)
                 cells.append(point_cell(g))
                 for k in rates:
