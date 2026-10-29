@@ -122,13 +122,15 @@ def best_variant(path: Path = VARIANTS) -> str:
 
 
 def rl_plan(tag: str, model: str, model_type: str, start: str, group: str, prefix: str, commit: str, variant: str,
-            seed: int = 20261019, endpoint: int = 300, arms: tuple = ("s0", "d"), guards: dict = None) -> dict:
+            seed: int = 20261019, endpoint: int = 300, arms: tuple = ("s0", "d"), guards: dict = None,
+            extra_arms: dict = None) -> dict:
     """A formal RL pair (the user's 2.1-2.2 of 2026-10-26): S0 and the dense arm from the picked SFT epoch, the main
     line's settings (reserve tasks, 300 updates, a checkpoint and its evaluation every 50, eager attention, the
     stop lines of decisions 2, 6, 7), the new format example; the S0 arm on h800, the dense arm on zoetrope, each
     render service with its trainer (rule 1.3); evaluations to the pool with the shorter queue.  No checkpoint is
     deleted (no "retain").  ``arms`` plans only some of the two (runs <prefix>s0, <prefix>d); ``guards`` replaces
-    the stop lines (RL_GUARDS)."""
+    the stop lines (RL_GUARDS); ``extra_arms`` {suffix: (pool, rl settings)} adds S0 runs <prefix><suffix> with
+    those settings over the plan's."""
     if variant not in VARIANT_RL:
         raise SystemExit(f"no RL settings for dense variant {variant}; known {sorted(VARIANT_RL)}")
     rl = {"standard": "v10_p1_S0", "seed": seed, "task_pool": "reserve", "rows": smoke.RL_BASE["rows"],
@@ -138,6 +140,8 @@ def rl_plan(tag: str, model: str, model_type: str, start: str, group: str, prefi
           "renderer_repack": True}
     arm_runs = {"s0": (f"{prefix}s0", "h800", {}), "d": (f"{prefix}d", "zoetrope", {"rl": dict(VARIANT_RL[variant])})}
     runs = {arm_runs[a][0]: arm_runs[a] for a in arms}
+    for suffix, (pool, settings) in (extra_arms or {}).items():
+        runs[f"{prefix}{suffix}"] = (f"{prefix}{suffix}", pool, {"rl": dict(settings)})
     return {"tr": str(RUNS / "chains" / tag), "sft_dir": str(smoke.SFT_DIR), "commit": commit, "model": model,
             "model_type": model_type, "rl_start_model": start, "job_prefix": "models",
             "gs_root": "/mnt/umm/users/yinbaiqiao/InteriorGS_ply", "scenes_root": "/mnt/umm/users/yinbaiqiao/InteriorGS_meta",
@@ -152,11 +156,31 @@ def rl_plan(tag: str, model: str, model_type: str, start: str, group: str, prefi
 FORMAL_RL = {"qwen3": ("m_qwen3vl8b", smoke.QWEN3VL, "qwen3_vl", "q3formal", "q3"),
              "cambrian": ("m_cambrian7b", smoke.CAMBRIAN, "cambrian_qwen", "cformal", "c")}
 NO_FILL_RULE = {k: v for k, v in RL_GUARDS.items() if not k.startswith("keep_fill")}  # decision 3 of 2026-10-27
+# decision 33 of 2026-10-29: two S0 arms that change one setting each against the drift of cs0 (the same seed), the
+# KL penalty or the learning rate (the p1 standard's 0.05 and 2e-6; training_prep --kl-loss-coef / --actor-lr)
+STAB_ARMS = {"skl": ("h800", {"kl_loss_coef": 0.15}), "slr": ("zoetrope", {"actor_lr": 1e-6})}
+LATER_RULES = {"pool": "queue:h800", "suspended_grace_min": 10}  # decisions 28 (evaluations on h800) and 25
 
 
 def formal_rl_plans(which: str, date: str, commit: str, start: str, variant: str, seed: int = 20261019) -> dict:
     """{tag: plan} of the rl-* commands: rl-qwen3 / rl-cambrian the pair (another seed: tag _s<seed>, runs
-    <prefix>s2s0 / <prefix>s2d), rl-cambrian-dense Cambrian's dense arm alone without the fill rule (run crd)."""
+    <prefix>s2s0 / <prefix>s2d), rl-cambrian-dense Cambrian's dense arm alone without the fill rule (run crd).
+    Decision 33 of 2026-10-29, both with the later rules (LATER_RULES): rl-cambrian-s2 Cambrian's pair for another
+    seed with the dense arm as crd (the fill rule off; runs cs2s0 / cs2d), rl-cambrian-stab the two S0 arms of
+    STAB_ARMS (runs cskl / cslr, tag _stab)."""
+    if which == "rl-cambrian-s2":
+        if seed == 20261019:
+            raise SystemExit("rl-cambrian-s2 is the pair for another seed (--seed)")
+        base, model, kind, group, prefix = FORMAL_RL["cambrian"]
+        tag = f"{base}_formal_rl_{date}_s{seed}"
+        return {tag: {**rl_plan(tag, model, kind, start, group, f"{prefix}s2", commit, variant, seed=seed,
+                                guards=NO_FILL_RULE), **LATER_RULES}}
+    if which == "rl-cambrian-stab":
+        base, model, kind, group, prefix = FORMAL_RL["cambrian"]
+        tag = f"{base}_formal_rl_{date}_stab"
+        plan = rl_plan(tag, model, kind, start, group, prefix, commit, variant, seed=seed, arms=(),
+                       guards=NO_FILL_RULE, extra_arms=STAB_ARMS)
+        return {tag: {**plan, **LATER_RULES, "rl_name": f"m_{prefix}stabrl"}}
     if which == "rl-cambrian-dense":
         base, model, kind, group, _ = FORMAL_RL["cambrian"]
         tag = f"{base}_formal_rl_{date}_dense"
@@ -215,13 +239,13 @@ def main() -> None:
     ap.add_argument("--date", default="20261026")
     ap.add_argument("--recommit", action="store_true", help="give plans not yet started this commit and pool")
     ap.add_argument("which", choices=("sft", "sdpa-control", "diagnostics", "accept-epochs", "rl-qwen3", "rl-cambrian",
-                                      "rl-cambrian-dense"))
+                                      "rl-cambrian-dense", "rl-cambrian-s2", "rl-cambrian-stab"))
     ap.add_argument("--sft-date", default="20261026", help="rl-*: the formal SFT chain's date")
     ap.add_argument("--seed", type=int, default=20261019, help="rl-*: the RL seed")
     ap.add_argument("--variant", default=None, help="rl-*: the dense variant (default: the main line's best)")
     a = ap.parse_args()
     if a.which.startswith("rl-"):
-        base = FORMAL_RL["cambrian" if a.which == "rl-cambrian-dense" else a.which[3:]][0]
+        base = FORMAL_RL["cambrian" if a.which.startswith("rl-cambrian") else a.which[3:]][0]
         start = picked_model(RUNS / "chains" / f"{base}_formal_sft_{a.sft_date}")
         variant = a.variant or best_variant()
         plans = formal_rl_plans(a.which, a.date, a.commit, start, variant, a.seed)

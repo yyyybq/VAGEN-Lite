@@ -152,6 +152,44 @@ class PlansTest(unittest.TestCase):
         self.assertNotIn("keep_fill_min", merged["guards"])
         self.assertEqual(merged["guards"]["invalid_max"], 0.1)
 
+    def test_decision_33_cambrian_arms(self):
+        """Decision 33 of 2026-10-29: Cambrian's second-seed pair (the dense arm as crd) and two S0 arms that change
+        only the KL penalty or the learning rate; evaluations on h800, the SUSPENDED grace (decisions 28, 25)."""
+        from data_gen.interiorgs_v10 import train_chain as T
+        from model_matrix.formal import plans as P
+
+        (tag, crd), = P.formal_rl_plans("rl-cambrian-dense", "20261027", "abc", "/sft/e5", "V4").items()
+        (tag, s2), = P.formal_rl_plans("rl-cambrian-s2", "20261030", "abc", "/sft/e5", "V4", seed=20261021).items()
+        self.assertEqual(tag, "m_cambrian7b_formal_rl_20261030_s20261021")
+        self.assertEqual((s2["run_pools"], s2["rl"]["seed"], s2["rl_start_model"], s2["model_type"], s2["rl_name"]),
+                         ({"cs2s0": "h800", "cs2d": "zoetrope"}, 20261021, "/sft/e5", "cambrian_qwen", "m_cs2rl"))
+        self.assertEqual(s2["rl_runs"], {"cs2s0": {}, "cs2d": crd["rl_runs"]["crd"]})  # the dense arm as crd
+        self.assertEqual(s2["rl"]["guards"], crd["rl"]["guards"])  # the fill rule off
+        self.assertEqual((s2["pool"], s2["suspended_grace_min"]), ("queue:h800", 10))
+        for key in ("eval", "endpoint", "model", "sft_groups", "dense_variant", "eval_sets"):
+            self.assertEqual(s2[key], crd[key])
+        self.assertEqual({k: v for k, v in s2["rl"].items() if k != "seed"},
+                         {k: v for k, v in crd["rl"].items() if k != "seed"})
+        with self.assertRaises(SystemExit):  # the first seed's pair is not this command
+            P.formal_rl_plans("rl-cambrian-s2", "20261030", "abc", "/sft/e5", "V4")
+
+        (tag, st), = P.formal_rl_plans("rl-cambrian-stab", "20261030", "abc", "/sft/e5", "V4").items()
+        self.assertEqual(tag, "m_cambrian7b_formal_rl_20261030_stab")
+        self.assertEqual((st["run_pools"], st["rl"]["seed"], st["rl"]["standard"], st["rl_name"]),
+                         ({"cskl": "h800", "cslr": "zoetrope"}, 20261019, "v10_p1_S0", "m_cstabrl"))
+        self.assertEqual(st["rl_runs"], {"cskl": {"rl": {"kl_loss_coef": 0.15}}, "cslr": {"rl": {"actor_lr": 1e-6}}})
+        self.assertEqual((st["pool"], st["suspended_grace_min"], st["endpoint"]), ("queue:h800", 10, 300))
+        self.assertEqual({k: v for k, v in st["rl"].items() if k != "guards"},
+                         {k: v for k, v in crd["rl"].items() if k != "guards"})  # S0 as cs0: same seed, settings
+        for run, key, value in (("cskl", "kl_loss_coef", 0.15), ("cslr", "actor_lr", 1e-6)):
+            merged = T.with_chain_defaults({**st["rl"], **st["rl_runs"][run]["rl"]},
+                                           T.standard_chain_defaults(st).get("rl"))
+            self.assertEqual(merged[key], value)  # what the chain hands to training_prep rl-config
+            self.assertEqual(merged["standard"], "v10_p1_S0")
+            self.assertNotIn("group_filter", merged)
+        self.assertEqual(P.formal_rl_plans("rl-qwen3", "20261026", "abc", "/s", "V4")["m_qwen3vl8b_formal_rl_20261026"]
+                         ["pool"], P.smoke.POOL)  # the earlier commands unchanged
+
     def test_accept_epoch_plans(self):
         from model_matrix.formal import plans as P
 
