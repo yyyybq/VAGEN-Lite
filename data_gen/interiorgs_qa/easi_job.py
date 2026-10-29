@@ -30,6 +30,9 @@ def main() -> int:
     ap.add_argument("--benchmarks", default="easi_8")
     ap.add_argument("--nproc", type=int, default=0, help="GPUs (default: all visible)")
     ap.add_argument("--limit", type=int, default=None, help="smoke test: questions per benchmark")
+    ap.add_argument("--stack-dump", type=int, default=0, metavar="SECONDS",
+                    help="diagnosis: every Python process of the run prints all thread stacks to stderr every SECONDS "
+                         "(a sitecustomize.py on PYTHONPATH); used to find where SITE video runs stalled (2026-10-29)")
     a = ap.parse_args()
     gpus = [g for g in os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",") if g.strip()]
     nproc = a.nproc or len(gpus)
@@ -42,6 +45,13 @@ def main() -> int:
     if a.limit:
         cmd += ["--limit", str(a.limit)]
     Path(a.out).mkdir(parents=True, exist_ok=True)
+    if a.stack_dump:
+        d = Path(a.out) / f"_stack_dump_{os.getpid()}"
+        d.mkdir(exist_ok=True)
+        (d / "sitecustomize.py").write_text(
+            "import faulthandler, sys\n"
+            f"faulthandler.dump_traceback_later({a.stack_dump}, repeat=True, file=sys.stderr)\n")
+        env["PYTHONPATH"] = str(d) + os.pathsep + env.get("PYTHONPATH", "")
     print("$", " ".join(cmd), flush=True)
     return subprocess.run(cmd, cwd=ROOT, env=env).returncode
 
