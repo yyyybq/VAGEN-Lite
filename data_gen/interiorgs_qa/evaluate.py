@@ -18,8 +18,10 @@ and the circular score. Numeric VSI questions are scored with MRA.
 Summary: by group, by benchmark and by wording group (and resolution), each number with its question count and
 a 95% interval (Wilson for accuracies, mean +- 1.96 standard errors for MRA), next to the chance level (the
 mean of 1 / number of options; M6 counts as 50% because its answers are only "front-left" or "front-right",
-user decision of 2026-10-15). The results are for the report only: not shown on the review site, not used to
-filter questions.
+user decision of 2026-10-15). Each benchmark is also broken down by its own categories (tasks.py: VSI-Bench
+question types, MMSI-Bench question types, MindCube rotation / around / among, 3DSRBench categories, EmbSpatial
+relations, ViewSpatial question types, BLINK subsets), so every number lines up with a row of that benchmark's report.
+The results are for the report only: not shown on the review site, not used to filter questions.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .export_lf import image_path, load_runs, load_selection
 from .qa import render
 from .scoring import circular_variants, score
+from .tasks import BENCHMARKS, TASKS
 
 CIRCULAR = ("MMSI-Bench", "3DSRBench")
 CHANCE_OVERRIDE = {"M6": 0.5}
@@ -143,6 +146,8 @@ def summarise(questions: Dict[str, Dict[str, Any]], reqs: List[Dict[str, Any]]) 
         q = questions[qid]
         row = {"qid": qid, "family": fam, "res": res, "group": q["group"], "benchmark": q["benchmark"],
                "subtask": q["subtasks"][0], "chance": chance(q)}
+        t = TASKS.get(row["subtask"])
+        row["category"] = t.category if t else row["subtask"]
         if "MRA" in s.get("plain", {}):
             row["mra"] = s["plain"]["MRA"]
         elif "plain" in s:
@@ -180,7 +185,10 @@ def summarise(questions: Dict[str, Dict[str, Any]], reqs: List[Dict[str, Any]]) 
                           "official": official_merge(rs),
                           "by_group": {g: block([r for r in rs if r["group"] == g]) for g in sorted({r["group"] for r in rs},
                                        key=lambda x: (x[0] != "S", x[0] != "M", int(x[1:])))},
-                          "by_benchmark": {b: block([r for r in rs if r["benchmark"] == b]) for b in sorted({r["benchmark"] for r in rs})}}
+                          "by_benchmark": {b: block([r for r in rs if r["benchmark"] == b]) for b in sorted({r["benchmark"] for r in rs})},
+                          "by_category": {f"{b} | {c}": block([r for r in rs if r["benchmark"] == b and r["category"] == c])
+                                          for b, c in sorted({(r["benchmark"], r["category"]) for r in rs},
+                                                             key=lambda bc: (BENCHMARKS.index(bc[0]) if bc[0] in BENCHMARKS else 99, bc[1]))}}
     return {"summary": summary, "rows": rows}
 
 
@@ -197,11 +205,7 @@ def summarise(questions: Dict[str, Dict[str, Any]], reqs: List[Dict[str, Any]]) 
 #   number for 3DSRBench) is given next to it.
 # Intervals: Wilson for one accuracy over all questions, a bootstrap over questions (within each task) for means of
 # task scores.
-VSI_TASKS = {"VSI-count": "object_counting", "VSI-distance-absolute": "object_abs_distance",
-             "VSI-size-object": "object_size_estimation", "VSI-size-room": "room_size_estimation",
-             "VSI-distance-relative": "object_rel_distance", "VSI-route": "route_planning",
-             "VSI-order": "obj_appearance_order", "VSI-direction-easy": "object_rel_direction",
-             "VSI-direction-medium": "object_rel_direction", "VSI-direction-hard": "object_rel_direction"}
+VSI_TASKS = {k: t.main for k, t in TASKS.items() if t.benchmark == "VSI-Bench"}   # direction levels share one task
 MINDCUBE_TRANSLATION = ("MC-translation-transitive",)
 APPENDIX_GROUPS = ("M6", "M10", "M11", "V6")   # too few questions: appendix only, no conclusions (decision 5)
 
@@ -318,6 +322,9 @@ def markdown(res: Dict[str, Any], title: str) -> str:
         if app:
             lines += ["", "### 附录：题太少的组（只列题数和区间，不单独下结论）", "", "| 组 | 结果 |", "| --- | --- |"]
             lines += [f"| {g} | {fmt(b)} |" for g, b in app]
+        if s.get("by_category"):
+            lines += ["", "### 按 benchmark 自己的类别", "", "| benchmark | 类别 | 结果 |", "| --- | --- | --- |"]
+            lines += [f"| {k.split(' | ')[0]} | {k.split(' | ')[1]} | {fmt(b)} |" for k, b in s["by_category"].items()]
         lines.append("")
     return "\n".join(lines)
 

@@ -34,6 +34,32 @@ FORMAT_CONFIGS = {
     }
 }
 
+# Round 12 freeze (the user's 3.1.1 of 2026-10-22): what the format line shows between the action tags.
+# "placeholder" (default) is the text every model up to round 12 trained with, <action>action1|action2|...|</action>;
+# RL runs copied those names into their answers (cluster_runs/FORMAT_DRIFT_R12.md).  "action_names" shows real
+# action names, <action>move_forward|turn_left|</action> (move_forward alone when one action is allowed per step);
+# both exist in every action space.  The system prompt's "Response format" line shows the same.
+FORMAT_EXAMPLES = ("placeholder", "action_names")
+
+
+def action_format_line(action_sep: str = "|", max_actions: int = 5, format_example: str = "placeholder") -> str:
+    """The format line of the action tags for the format example setting."""
+    if format_example == "placeholder":
+        return f"<action>action1{action_sep}action2{action_sep}...{action_sep}</action>"
+    if format_example != "action_names":
+        raise ValueError(f"format example must be one of {FORMAT_EXAMPLES}, not {format_example!r}")
+    names = ("move_forward", "turn_left")[: 1 if int(max_actions) <= 1 else 2]
+    return "<action>" + "".join(n + action_sep for n in names) + "</action>"
+
+
+def _response_format(format_config, action_sep: str, max_actions: int, format_example: str) -> str:
+    """The system prompt's "Response format" text: the format's own (placeholder) or with real action names."""
+    text = format_config["format"]
+    if format_example == "placeholder":
+        return text
+    return text.replace("<action>...</action>", action_format_line(action_sep, max_actions, format_example))
+
+
 # Action descriptions for the agent.
 # NOTE: kept as a legacy single-action constant for backward compatibility
 # with any external code that imports it. The runtime system prompt now
@@ -147,6 +173,8 @@ def system_prompt(**kwargs):
     enable_done = bool(kwargs.get("enable_explicit_done", True))
 
     format_config = FORMAT_CONFIGS.get(selected_format, FORMAT_CONFIGS["free_think"])
+    response_format = _response_format(format_config, action_sep, max_actions,
+                                       str(kwargs.get("format_example", "placeholder")))
 
     actions_block = _action_descriptions(
         max_actions=max_actions,
@@ -213,7 +241,7 @@ Step sizes: translation = {step_translation:.2f} meters, rotation = {step_rotati
 
 {format_config['description']}
 
-Response format: {format_config['format']}
+Response format: {response_format}
 
 Example:
 {format_config['example']}
@@ -238,7 +266,7 @@ ACTION NAMES (exact spelling required, lowercase with underscores): move_forward
 
 {format_config['description']}
 
-Response format: {format_config['format']}
+Response format: {response_format}
 
 Example:
 {format_config['example']}
@@ -303,10 +331,11 @@ def format_prompt_free_think(**kwargs):
     max_actions = kwargs.get("max_actions_per_step", 5)
     action_sep = kwargs.get("action_sep", "|")
     add_example = kwargs.get("add_example", True)
+    action_line = action_format_line(action_sep, max_actions, kwargs.get("format_example", "placeholder"))
     
     prompt = f"""Respond in the following format:
 <think>Your reasoning process</think>
-<action>action1{action_sep}action2{action_sep}...{action_sep}</action>
+{action_line}
 
 You can take up to {max_actions} actions per step.
 """
@@ -319,9 +348,10 @@ def format_prompt_no_think(**kwargs):
     max_actions = kwargs.get("max_actions_per_step", 5)
     action_sep = kwargs.get("action_sep", "|")
     add_example = kwargs.get("add_example", True)
+    action_line = action_format_line(action_sep, max_actions, kwargs.get("format_example", "placeholder"))
     
     prompt = f"""Respond with only the action:
-<action>action1{action_sep}action2{action_sep}...{action_sep}</action>
+{action_line}
 
 You can take up to {max_actions} actions per step.
 """
@@ -334,10 +364,11 @@ def format_prompt_grounding(**kwargs):
     max_actions = kwargs.get("max_actions_per_step", 5)
     action_sep = kwargs.get("action_sep", "|")
     add_example = kwargs.get("add_example", True)
+    action_line = action_format_line(action_sep, max_actions, kwargs.get("format_example", "placeholder"))
     
     prompt = f"""Respond in the following format:
 <think><observation>What you see</observation><reasoning>Your reasoning</reasoning></think>
-<action>action1{action_sep}action2{action_sep}...{action_sep}</action>
+{action_line}
 
 You can take up to {max_actions} actions per step.
 """
@@ -350,10 +381,11 @@ def format_prompt_worldmodeling(**kwargs):
     max_actions = kwargs.get("max_actions_per_step", 5)
     action_sep = kwargs.get("action_sep", "|")
     add_example = kwargs.get("add_example", True)
+    action_line = action_format_line(action_sep, max_actions, kwargs.get("format_example", "placeholder"))
     
     prompt = f"""Respond in the following format:
 <think><reasoning>Your reasoning</reasoning><prediction>Expected outcome</prediction></think>
-<action>action1{action_sep}action2{action_sep}...{action_sep}</action>
+{action_line}
 
 You can take up to {max_actions} actions per step.
 """
@@ -366,10 +398,11 @@ def format_prompt_grounding_worldmodeling(**kwargs):
     max_actions = kwargs.get("max_actions_per_step", 5)
     action_sep = kwargs.get("action_sep", "|")
     add_example = kwargs.get("add_example", True)
+    action_line = action_format_line(action_sep, max_actions, kwargs.get("format_example", "placeholder"))
     
     prompt = f"""Respond in the following format:
 <think><observation>What you see</observation><reasoning>Your reasoning</reasoning><prediction>Expected outcome</prediction></think>
-<action>action1{action_sep}action2{action_sep}...{action_sep}</action>
+{action_line}
 
 You can take up to {max_actions} actions per step.
 """

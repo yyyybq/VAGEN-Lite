@@ -250,7 +250,7 @@ def prepare(args):
         "per_device_train_batch_size": 1,
         "per_device_eval_batch_size": 1,
         "gradient_accumulation_steps": 8,
-        "learning_rate": 1e-5,
+        "learning_rate": float(getattr(args, "learning_rate", 1e-5) or 1e-5),
         "num_train_epochs": int(getattr(args, "epochs", 3) or 3),
         "lr_scheduler_type": "cosine",
         "warmup_ratio": 0.03,
@@ -326,6 +326,9 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--cutoff-len", type=int, default=16384)
     p.add_argument("--epochs", type=int, default=3, help="training epochs in the recipe (InteriorGS v10 round 10: 5)")
+    p.add_argument("--learning-rate", type=float, default=1e-5,
+                   help="peak learning rate of the recipe (default 1e-5; InteriorGS v10 round 12 freeze: the short "
+                        "format SFT of the original model uses a smaller one)")
     p.add_argument("--save-per-epoch", action="store_true",
                    help="save the model (weights only, no optimizer state) at the end of every epoch "
                         "instead of every 200 steps (InteriorGS v10, decision of 2026-10-14)")

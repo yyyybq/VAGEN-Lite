@@ -23,7 +23,8 @@
 set -euo pipefail
 MODE=${1:?mode}
 RUN=${2:?run directory}
-WORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite
+# round 12 freeze: VAGEN_LITE_WORKTREE (set by the launch script of a chain run from another copy, job_sco.WORKTREE)
+WORKTREE=${VAGEN_LITE_WORKTREE:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite}
 ENV_ROOT=/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite
 PY=${ENV_ROOT}/bin/python
 GS_ROOT=/mnt/umm/users/yinbaiqiao/InteriorGS_ply

@@ -1,6 +1,30 @@
 # InteriorGS v10 训练线：运行时依赖和可归档目录
 
-2026-10-19（第十二轮）写，给代码整理和实验矩阵交接用。
+2026-10-19（第十二轮）写，给代码整理和实验矩阵交接用。2026-10-22 按第十二轮结束、冻结期的状态更新（见下面的"第十二轮结束时的补充"，以及第一部分里标了 10-22 的行）。
+
+## 第十二轮结束时的补充（2026-10-22）
+
+1. **密集奖励第二批从单独的副本跑，代码整理不碰它。**
+   - 副本：`/mnt/umm/users/yinbaiqiao/VAGEN-Lite-r12dense`，主仓库的 git worktree（detached，定在第十二轮最后推上 main 的那次提交），`verl` 子模块已初始化在同一提交 `a0ae85c`。
+   - 它的训练链用 `VAGEN_LITE_WORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-r12dense` 启动，sco 任务从副本启动（`job_sco.WORKTREE`）。
+   - **整理时不要**删掉、移动这个目录，也不要对主仓库运行会摘掉它的 `git worktree remove` / `prune`。
+   - 副本要读主 checkout 里的这些东西，第二批跑完前不能移动：
+     - 第一部分第 2 节的运行环境（conda 环境、sco、gsplat 编译结果）；
+     - 第 3 节的数据：第十一轮 SFT 数据、RL 训练题、深度核对结果、v2 评测集；
+     - 第 4 节的模型：原始 7B、SFT 第 9 个 epoch；
+     - 下面第 3 条的 LLaMA-Factory；
+     - 第二批自己的训练链目录和格式 SFT 的数据目录，它们放在 `E/` 下，名字带 `r12l` / `r12m` 或 `format_sft`。
+2. **新增的运行时文件**都在第一部分第 1 节已列的目录里，路径不变：
+   - 格式示例、宽松解析、无效回答扣分、D-cond 进度三个开关的代码：`vagen/envs/active_spatial/` 的 `prompt.py`、`utils.py`、`env.py`、`env_config.py`、`target_visibility.py`；
+   - 补进全失败题的过滤器：`vagen/custom_filter/filter.py` 的 `keep_by_return_std`；
+   - 配置：`data_gen/interiorgs_v10/configs/` 下的 `rl_standards.json`（多了第一批三个标准、`v10_p1_Dcond` 和 `chain_defaults`）、`admission_v2.json`（多了 `format_example`）、`matrix_r12.json`（矩阵登记）。
+3. **conda 环境里的 `llamafactory` 是可编辑安装，指向主 checkout 的 `third_party/LLaMA-Factory/src/llamafactory`。** 所有 SFT 任务都从那里导入，不管从哪个副本启动。整理时不能移动或改名 `third_party/LLaMA-Factory/`，除非同时重装（`pip install -e`）。
+4. **第十二轮的监控在登录节点上常驻。**
+   - 守护进程 `E/interiorgs_v10_r12_20261019/scripts/r12_guard.sh`，用同目录的 `start_guard_r12.sh` 启动；它每 5 分钟重启看板循环、记录事件。
+   - 事件记录在 `E/interiorgs_v10_r12_20261019/monitor/events.jsonl` 和 `heartbeat`。
+   - 第二批也用它们。要停先停守护进程（`pkill -f '^bash .*r12_guard.sh$'`），不要只移动脚本。
+   - 下游线的暂停开关是文件 `/mnt/umm/users/yinbaiqiao/downstream_runs/PAUSE_SUBMISSIONS`：有这个文件时下游线不提交新任务。
+5. **检查点归档。** 2026-10-21 起，较早的检查点在 AOSS 上，路径是 `fj:s3://baiqiao/vagen_lite_archive/<原相对路径>`。清单和脚本在 `/mnt/umm/users/yinbaiqiao/aoss_archive_manifests/`，这个目录不能删。第十二轮各链按 `retain: best_and_last` 只留了最好和最后的检查点。
 
 **规则：** 第一部分列出的目录和文件，是训练链和评测任务运行时要读或要写的。整理时不能移动、改名或删除；路径写死在代码、脚本、plan 或训练链的进度文件里，移走后正在跑或以后重跑的任务会在启动时失败。第十一轮就出过一次：整理任务把 gsplat 编译结果移进 `archive/`，见 `data_gen/interiorgs_v10/cluster_runs/REPORT_R11_20261016.md` 第九节。第二部分列出的目录，本线运行时已经不用，可以归档，但报告里引用了其中的结果，归档时要保留可读的副本和清单。
 
@@ -10,7 +34,7 @@
 
 ### 1. 代码
 
-集群上唯一的代码目录是 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite`。`data_gen/interiorgs_v10/job_sco.py` 的 `WORKTREE` 写死了这个路径，每个 sco 任务都从这里启动；训练链开始时会核对它和 plan 里的代码提交号是否一致。
+集群上的主代码目录是 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite`。`data_gen/interiorgs_v10/job_sco.py` 的 `WORKTREE` 默认就是这个路径，每个 sco 任务都从这里启动；训练链开始时会核对它是不是自己所在的目录，以及代码提交号是否和 plan 一致。（10-22）环境变量 `VAGEN_LITE_WORKTREE` 可以换成别的副本，密集奖励第二批用它，见上面的补充第 1 条。
 
 | 路径 | 用途 |
 | --- | --- |
@@ -55,17 +79,18 @@
 | `E/interiorgs_v10_train_r11p_20261017/rl_run_ps0/checkpoints/global_step_300` | **第十一轮的最终模型**（P-S0 第 300 次） |
 | `E/interiorgs_v10_train_r11p_20261017/rl_run_*/`、`E/interiorgs_v10_train_r11_20261016/rl_run_*/` | 第十一轮其余 RL 的检查点（浏览页和对照评测用） |
 | `E/interiorgs_v10_train_r12*_20261019/rl_run_*/` | 第十二轮成对 RL 的检查点 |
+| `E/interiorgs_v10_train_r12{c,f,g,h,i,j,k}_*/rl_run_*/`、`E/interiorgs_v10_train_r12ds*_20261020/`、`E/interiorgs_v10_train_r12dw745_20261020/` | （10-22）第十二轮批次和密集奖励第一批（`r12k_20261021`）的检查点：按 `retain: best_and_last` 只留了最好和最后的；数据规模的 SFT 检查点在各自链目录的 `lf_*/model/` |
 
 ### 5. 训练链目录
 
-`E/interiorgs_v10_train_r11_20261016/`、`E/interiorgs_v10_train_r11p_20261017/`、`E/interiorgs_v10_train_r12a_20261019/`、`E/interiorgs_v10_train_r12b_20261019/`、`E/interiorgs_v10_train_r12e_20261019/` 都要保留。里面的 `plan.json` 和 `progress.json` 记录了用到的代码提交号和每一步的状态；训练链从断点重跑要读它们，第十二轮的启动脚本也从第十一轮链的 `progress.json` 复制 SFT 步骤。
+`E/interiorgs_v10_train_r11_20261016/`、`E/interiorgs_v10_train_r11p_20261017/`、`E/interiorgs_v10_train_r12a_20261019/`、`E/interiorgs_v10_train_r12b_20261019/`、`E/interiorgs_v10_train_r12e_20261019/` 都要保留。（10-22）第十二轮批次的训练链 `E/interiorgs_v10_train_r12{c,f,g,h,i,j}_2026102*/`、`r12ds050/ds100/ds200/ds400/dw745_20261020/` 和密集奖励第一批 `r12k_20261021/` 也要保留，第二批的链目录同样。里面的 `plan.json` 和 `progress.json` 记录了用到的代码提交号和每一步的状态；训练链从断点重跑要读它们，第十二轮的启动脚本也从第十一轮链的 `progress.json` 复制 SFT 步骤。
 
 ### 6. 分析和浏览页
 
 报告引用的结果都在这些目录里：
 
 - `E/interiorgs_v10_r11_20261016/` 下的 `analysis/`、`browser/`、`diag_sampling/`、`scripts/`；
-- `E/interiorgs_v10_r12_20261019/` 下的 `analysis/`、`scripts/`；
+- `E/interiorgs_v10_r12_20261019/` 下的 `analysis/`、`scripts/`、`monitor/`（10-22：格式漂移、宽松解析、D-cond、数据规模、密集奖励第一批的分析脚本和结果，看板的事件记录）；
 - 本机的 `exps/interiorgs_v10_eval_browser_r11_20261017/`。
 
 ## 二、可以归档（本线运行时不再用）

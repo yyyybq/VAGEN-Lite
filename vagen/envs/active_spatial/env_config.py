@@ -88,6 +88,10 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # "potential" : r_t = scale·(γ·Φ_t − Φ_{t-1})        ★ v18_potential: true Ng1999 potential-based
     # "dual"      : r_t = α_p·(pos_t − pos_{t-1}) + α_o·(ori_t − ori_{t-1})  ★ v18_dual: decoupled channels
     potential_field_progress_mode: str = "delta"
+    # Round 12 freeze (the user's decision of 2026-10-22, D-cond): the progress the canonical shaping score carries
+    # (target_visibility.PROGRESS_VERSIONS): "product" (default, every condition score multiplied, unchanged) or
+    # "grouped_gated" (0.25 frame + 0.25 face + 0.5 relation, the relation group only once the target is in frame).
+    progress_version: str = "product"
     potential_field_gamma: float = 1.0   # ★ Ng1999 γ for "potential" mode. 1.0 ⇒ equivalent to "delta".
     # Reward-only ablation switches.  These do not disable the potential-field
     # scorer, canonical gate, success decision, or termination.  Defaults keep
@@ -182,6 +186,14 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     
     # ====== Invalid Action Configuration ======
     invalid_format_penalty: float = -0.1  # Penalty for invalid format/actions
+    # Round 12 freeze (the user's 3.1.2): when the strict reading finds no action, read the answer leniently
+    # (utils.lenient_actions: spaces instead of underscores, the first complete action block, a missing opening
+    # tag).  Default off: every answer is read as before.
+    lenient_parse: bool = False
+    # Round 12 freeze (the user's 3.1.3): the penalty the env applies to an answer it reads no action in, when set
+    # (e.g. -0.5); None (default): invalid_format_penalty.  The system prompt keeps showing invalid_format_penalty,
+    # the SFT conversations' text, as it does not show the dense reward's progress term either.
+    invalid_penalty_override: Optional[float] = None
     max_consecutive_invalid_actions: int = 3  # Terminate episode after this many consecutive invalid actions
     premature_done_penalty: float = -0.3  # Penalty when 'done' is called without reaching the target
     
@@ -204,6 +216,11 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # prompt's Rewards block list the reward terms this env applies.  The SFT export's system_prompt.reward_text
     # (and any non-default reward setting) must match.
     prompt_reward_text: str = "legacy"
+    # Round 12 freeze (the user's 3.1.1): the format line shows "placeholder" names (default, the text every model up
+    # to round 12 trained with: action1|action2|...) or real "action_names" (prompt.FORMAT_EXAMPLES).  The SFT
+    # export's format_example must match (training_prep rl-config checks it against the start model's SFT
+    # conversations).
+    prompt_format_example: str = "placeholder"
     history_window_size: int = 1  # Observations retained, including the current frame
     max_actions_per_step: int = 5  # Maximum actions allowed per step
     action_sep: str = "|"  # Separator for multiple actions
@@ -278,6 +295,8 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
             enable_explicit_done=getattr(self, "enable_explicit_done", True),
             # round 9: "actual" lists the reward terms below instead of the legacy lines
             reward_text=getattr(self, "prompt_reward_text", "legacy"),
+            # round 12 freeze: placeholder or real action names in the "Response format" line
+            format_example=getattr(self, "prompt_format_example", "placeholder"),
             max_consecutive_invalid_actions=self.max_consecutive_invalid_actions,
             enable_step_penalty=self.enable_step_penalty,
             step_penalty=self.step_penalty,

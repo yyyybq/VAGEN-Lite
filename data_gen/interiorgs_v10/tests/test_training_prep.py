@@ -103,6 +103,11 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(lf["num_train_epochs"], 3)  # the default; round 10 trains 5 (--epochs)
         prep.prepare(Namespace(out=str(self.root / "lf_e5"), allow_unreviewed_trajectories=True, epochs=5, **common))
         self.assertEqual(yaml.safe_load((self.root / "lf_e5" / "train.yaml").read_text())["num_train_epochs"], 5)
+        # round 12 freeze: the format SFT's smaller learning rate (default 1e-5)
+        self.assertEqual(lf["learning_rate"], 1e-5)
+        prep.prepare(Namespace(out=str(self.root / "lf_lr"), allow_unreviewed_trajectories=True, learning_rate=2e-6,
+                               **common))
+        self.assertEqual(yaml.safe_load((self.root / "lf_lr" / "train.yaml").read_text())["learning_rate"], 2e-6)
         prep.prepare(Namespace(out=str(self.root / "lf_steps"), allow_unreviewed_trajectories=True, **common))
         self.assertNotIn("save_strategy", yaml.safe_load((self.root / "lf_steps" / "train.yaml").read_text()))
         # round 10: --keep-text keeps every message as the env shows it (the system prompt and later user turns
@@ -164,10 +169,13 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(ppo["actor_rollout_ref"]["rollout"]["tensor_model_parallel_size"], 1)
         self.assertEqual(ppo["actor_rollout_ref"]["model"]["path"], "/models/m")
         self.assertEqual(ppo["data"]["train_files"], str((out / "train_env.yaml").resolve()))
-        # the RL system prompt is the SFT one; a different reward in the env would show
+        # the RL system prompt is the SFT one; a different reward in the env would show (round 12 freeze: the env
+        # shows the format example of the policy's SFT export, which rl-config takes by default)
+        from data_gen.interiorgs_v10.release import format_example
+
         policy = load_policy()
         cfg = yaml.safe_load((Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml").read_text())
-        cfg = cfg["envs"][0]["config"]
+        cfg = dict(cfg["envs"][0]["config"], prompt_format_example=format_example(policy))
         types = ["projective_relations", "occlusion_alignment", "fov_inclusion"]
         self.assertEqual(TP.prompt_mismatches(cfg, types, policy), [])
         self.assertEqual(TP.prompt_mismatches(dict(cfg, format_reward=0.01), types, policy), sorted(types))
@@ -291,13 +299,13 @@ class TrainingPrepTest(unittest.TestCase):
         import yaml
 
         standards = TP.load_standards()
-        self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_S0",
-                                             "v10_p1_S0_keep", "v10_p2_D", "v10_p2_S0"])
+        self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_Dcond",
+                                             "v10_p1_S0", "v10_p1_S0_keep", "v10_p2_D", "v10_p2_S0"])
         for name, std in standards.items():
             self.assertLessEqual(set(std), set(TP.STANDARD_KEYS), name)
             for key in ("ppo_template", "env_template"):
                 self.assertTrue((Path(TP.__file__).parent / std[key]).is_file(), (name, key))
-            self.assertEqual(std["reward_preset"], "dense" if "_D" in name else "S0")
+            self.assertEqual(std["reward_preset"], "D_cond" if "_Dcond" in name else "dense" if "_D" in name else "S0")
         # the dense reward's first batch: the filter, thresholds and floors of the three runs
         self.assertEqual({n: (standards[n]["group_filter"], standards[n]["keep_std_threshold"], standards[n]["keep_std_floor"])
                           for n in ("v10_p1_D_keep_177", "v10_p1_D_keep_100", "v10_p1_S0_keep")},
@@ -555,6 +563,88 @@ class TrainingPrepTest(unittest.TestCase):
         flags.write_text(json.dumps({"flagged_task_ids": [reserve[0]["task_id"]]}))
         with self.assertRaises(SystemExit):
             config("rl_pool_flagged", task_pool="reserve", exclude=str(flags))
+
+    def test_rl_config_format_example(self):
+        """Round 12 freeze (the user's 3.1.1): --format-example sets the env's format line (placeholder names or
+        real action names; default the SFT export's); the start model's SFT conversations must show the same text."""
+        import yaml
+
+        from vagen.envs.active_spatial import prompt as P
+
+        sft = self.root / "sft_rl_format"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        rows = [dict(r, reserve=(r["split"] == "train" and i % 2 == 1)) for i, r in enumerate(TP._jsonl(sft / "rows.jsonl"))]
+        (sft / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        template = self.root / "ppo_template_format.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False},
+            "actor_rollout_ref": {"model": {"path": "old"}, "actor": {"ppo_mini_batch_size": 8},
+                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4, "agent": {"num_workers": 8}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+        formal = [r for r in rows if r["split"] == "train" and not r["reserve"]]
+        convs = {}
+        for fmt in P.FORMAT_EXAMPLES:  # the first user turn ends with the format text, as release._user_turn writes it
+            block = P.format_prompt["no_think"](max_actions_per_step=5, action_sep="|", add_example=True,
+                                                format_example=fmt)
+            convs[fmt] = self.root / f"sft_conv_{fmt}.jsonl"
+            convs[fmt].write_text("".join(json.dumps({"source_task_id": r["task_id"], "conversations": [
+                {"role": "system", "content": "s"}, {"role": "user", "content": "[Initial Observation]:\n<image>\n" + block},
+                {"role": "assistant", "content": "<action>move_forward|</action>"}]}) + "\n" for r in formal))
+        self.assertEqual(TP.sft_format_examples([convs["placeholder"]]), ["placeholder"])
+        self.assertEqual(TP.sft_format_examples([convs["action_names"]]), ["action_names"])
+        self.assertEqual(TP.sft_format_examples([convs["placeholder"], convs["action_names"]]),
+                         ["action_names", "placeholder"])
+
+        def config(out_name, **kw):
+            TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
+                Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
+                gs_root="/ply", model="/m", name="t", run_root=str(self.root / f"run_{out_name}"), val_limit=0,
+                trial=False, out=str(self.root / out_name), task_pool="reserve", **kw))
+            out = self.root / out_name
+            return (yaml.safe_load((out / "train_env.yaml").read_text())["envs"][0]["config"],
+                    json.loads((out / "rl_config_report.json").read_text()))
+
+        # the start model's SFT conversations with the old text: the placeholder, given explicitly (the default is
+        # the policy's, real action names since the round-12 freeze); nothing new in the env config
+        from data_gen.interiorgs_v10.release import format_example as policy_format_example
+
+        self.assertEqual(policy_format_example(load_policy()), "action_names")
+        env, report = config("rl_fmt_default", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder")
+        self.assertNotIn("prompt_format_example", env)
+        self.assertEqual((report["format_example"], report["format_example_sft"]), ("placeholder", ["placeholder"]))
+        # by default, real action names, for a start model whose SFT conversations show them
+        env, report = config("rl_fmt_names", sft_trajectories=[str(convs["action_names"])])
+        self.assertEqual(env["prompt_format_example"], "action_names")
+        self.assertEqual((report["format_example"], report["format_example_sft"]), ("action_names", ["action_names"]))
+        self.assertIn("Response format: <action>move_forward|turn_left|</action>",
+                      TP.env_system_prompt(env, "fov_inclusion"))
+        # refused: the RL text against the start model's conversations, or (no conversations) against the policy
+        with self.assertRaises(SystemExit):
+            config("rl_fmt_wrong", sft_trajectories=[str(convs["placeholder"])])
+        with self.assertRaises(SystemExit):
+            config("rl_fmt_wrong2", sft_trajectories=[str(convs["action_names"])], format_example="placeholder")
+        with self.assertRaises(SystemExit):
+            config("rl_fmt_policy", format_example="placeholder")
+        # round 12 freeze (the user's 3.1.2): --lenient-parse turns on the env's lenient reading, nothing else
+        env, report = config("rl_lenient", sft_trajectories=[str(convs["placeholder"])], lenient_parse=True,
+                             format_example="placeholder")
+        self.assertTrue(env["lenient_parse"])
+        self.assertTrue(report["lenient_parse"])
+        env0, report0 = config("rl_strict", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder")
+        self.assertNotIn("lenient_parse", env0)
+        self.assertFalse(report0["lenient_parse"])
+        self.assertEqual({k: v for k, v in env.items() if k not in ("lenient_parse", "jsonl_path")},
+                         {k: v for k, v in env0.items() if k != "jsonl_path"})
+        self.assertIn("lenient_parse", TP.STANDARD_KEYS)
+        # 3.1.3: --invalid-penalty sets the penalty the env applies; the prompt (checked against the SFT one) keeps -0.1
+        env5, report5 = config("rl_invalid", sft_trajectories=[str(convs["placeholder"])], invalid_penalty=-0.5,
+                               format_example="placeholder")
+        self.assertEqual((env5["invalid_penalty_override"], env5["invalid_format_penalty"]), (-0.5, -0.1))
+        self.assertEqual((report5["invalid_penalty"], report0["invalid_penalty"]), (-0.5, -0.1))
+        self.assertNotIn("invalid_penalty_override", env0)
+        self.assertEqual(TP.env_system_prompt(env5, "fov_inclusion"), TP.env_system_prompt(env0, "fov_inclusion"))
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

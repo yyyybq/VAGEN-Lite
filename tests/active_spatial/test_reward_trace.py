@@ -214,6 +214,19 @@ def test_invalid_action_override_and_termination_are_audited():
     assert trace["processing"]["overrides"][0]["kind"] == "hard_invalid_reward_assignment"
 
 
+def test_invalid_penalty_override_applies_and_keeps_the_prompt():
+    """Round 12 freeze (the user's 3.1.3): invalid_penalty_override is the penalty of an unreadable answer; the system
+    prompt keeps showing invalid_format_penalty (the SFT text); unset, nothing changes."""
+    env, _ = make_env([(0.1, 0.08, 0.02)], max_consecutive_invalid_actions=1, invalid_penalty_override=-0.5)
+    _, reward, done, info = env.step("not an action")
+    assert reward == -0.5
+    assert info["reward_trace"]["components"]["invalid"]["applied"] == -0.5
+    assert env.config.system_prompt_arguments("fov_inclusion")["invalid_format_penalty"] == -0.2
+    plain, _ = make_env([(0.1, 0.08, 0.02)], max_consecutive_invalid_actions=1)
+    assert plain.config.invalid_penalty_override is None
+    assert plain.step("<action></action>")[1] == -0.2
+
+
 def test_post_render_low_info_adjustment_is_not_hidden_in_a_residual():
     env, _ = make_env(
         [(0.1, 0.08, 0.02), (0.1, 0.08, 0.02)],

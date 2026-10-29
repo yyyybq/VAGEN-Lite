@@ -1,6 +1,6 @@
 """Draw the training set and the evaluation sets from the question bank (pipeline bank), in one pass.
 
-    python -m data_gen.interiorgs_qa.sample --bank BANK [--bank BANK2 ...] --plan configs/sampling_plan_20261015.json --out SEL
+    python -m data_gen.interiorgs_qa.sample --bank BANK [--bank BANK2 ...] [--exclude RULES] --plan configs/sampling_plan_20261015.json --out SEL
 
 Generation and sampling are separate: the bank holds every question the generator made, unbalanced; this script
 alone decides what goes into training and evaluation, over the whole bank at once. (Balancing inside the
@@ -22,10 +22,15 @@ Rules (user decisions of 2026-10-15, values in the plan file):
   takes more than ``answer_cap`` of the questions (``answer_cap_binary`` for two-option types); numeric answers
   are not capped;
 * object cap: one object appears in at most ``object_cap`` questions of one group in one scene (training;
-  ``eval_object_cap`` for evaluation).
+  ``eval_object_cap`` for evaluation); questions are taken in turns over the subtasks, so subtasks whose questions
+  share objects share the cap;
+* benchmark tasks (tasks.py): every bank question must belong to exactly one benchmark task and match it (benchmark,
+  group, prompt layout, answer kind); one mismatch stops the run. Each output line carries its task, i.e. the
+  benchmark and the benchmark's own category, so training and test questions map 1:1 to rows of the benchmarks.
 
-Output: SEL/{train,val,test}.jsonl (one line per question: run_dir and the question record; export_lf.py and
-evaluate.py read them), SEL/summary.json and SEL/summary.md (counts, image inputs, tokens, answer shares).
+Output: SEL/{train,val,test}.jsonl (one line per question: run_dir, the question record and its task; export_lf.py,
+export_test.py and evaluate.py read them), SEL/summary.json and SEL/summary.md (counts per group and per benchmark
+task, image inputs, tokens, answer shares).
 """
 
 from __future__ import annotations
@@ -37,6 +42,8 @@ import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from . import tasks
 
 RARE_DEFAULT = ("M3", "M6", "M8", "M9", "M10", "M11", "V5", "V6")
 TEMPLATE_FAMILY = {"ES-01": "ES-relation", "ES-02": "ES-relation", "ES-03": "ES-relation", "ES-04": "ES-relation"}
@@ -68,13 +75,20 @@ def video_key(q: Dict[str, Any]) -> Tuple[str, Tuple[str, ...]]:
     return q["scene_id"], tuple(q["views"])
 
 
-def load_bank(dirs: Sequence[str]) -> List[Tuple[str, Dict[str, Any]]]:
+def load_bank(dirs: Sequence[str], exclude: str = "") -> List[Tuple[str, Dict[str, Any]]]:
+    """Questions of the banks, without those matched by ``exclude`` (qa.parse_exclude rules, BANK_SUFFIX:GROUP[:SUBTASK]:
+    e.g. a bank's video groups when a later bank redid them)."""
+    from .qa import excluded, parse_exclude
+
+    rules = parse_exclude(exclude)
     out = []
     for d in dirs:
         p = Path(d).resolve()
         for l in (p / "questions.jsonl").read_text().splitlines():
             if l.strip():
-                out.append((str(p), json.loads(l)))
+                q = json.loads(l)
+                if not excluded(p, q, rules):
+                    out.append((str(p), q))
     return out
 
 
@@ -105,33 +119,54 @@ def round_robin(cands: List[Tuple[str, Dict[str, Any]]], target: int, picker: Pi
                 rng: random.Random) -> List[Tuple[str, Dict[str, Any]]]:
     """Up to ``target`` questions, cycling over answers (least-used answer first) so answers stay as even as the
     supply allows; numeric questions are taken in random order."""
-    by_ans: Dict[Optional[str], List[Tuple[str, Dict[str, Any]]]] = defaultdict(list)
-    for c in cands:
-        by_ans[answer_key(c[1])].append(c)
-    for v in by_ans.values():
-        rng.shuffle(v)
-    got: List[Tuple[str, Dict[str, Any]]] = []
-    count: Counter = Counter()
-    while len(got) < target:
-        live = [a for a, v in by_ans.items() if v]
-        if not live:
-            break
-        live.sort(key=lambda a: (count[a], rng.random()))
-        progressed = False
+    return interleave({"_": cands}, {"_": target}, ["_"], picker, rng)
+
+
+class AnswerCycler:
+    """The candidates of one subtask, handed out one at a time: least-used answer first, a candidate that breaks the
+    object cap is dropped."""
+
+    def __init__(self, cands: List[Tuple[str, Dict[str, Any]]], rng: random.Random) -> None:
+        self.rng = rng
+        self.by_ans: Dict[Optional[str], List[Tuple[str, Dict[str, Any]]]] = defaultdict(list)
+        for c in cands:
+            self.by_ans[answer_key(c[1])].append(c)
+        for v in self.by_ans.values():
+            rng.shuffle(v)
+        self.count: Counter = Counter()
+
+    def take_one(self, picker: Picker) -> Optional[Tuple[str, Dict[str, Any]]]:
+        live = [a for a, v in self.by_ans.items() if v]
+        live.sort(key=lambda a: (self.count[a], self.rng.random()))
         for a in live:
-            while by_ans[a]:
-                c = by_ans[a].pop()
+            while self.by_ans[a]:
+                c = self.by_ans[a].pop()
                 if picker.ok(c[1]):
                     picker.take(c[1])
-                    got.append(c)
-                    count[a] += 1
-                    progressed = True
-                    break
-            if progressed:
-                break
-        if not progressed:
-            break
-    return got
+                    self.count[a] += 1
+                    return c
+        return None
+
+
+def interleave(by_sub: Dict[str, List[Tuple[str, Dict[str, Any]]]], targets: Dict[str, int], order: Sequence[str],
+               picker: Picker, rng: random.Random) -> List[Tuple[str, Dict[str, Any]]]:
+    """Up to ``targets[k]`` questions of every subtask k, one question per subtask per turn (in ``order``), so that
+    subtasks whose questions share objects share the object cap. Filling one subtask after another let the first
+    use it up: MindCube's four Among questions all use the same five objects, and in the final sampling of
+    2026-10-28 MC-among-q5 got no training question at all."""
+    cyc = {k: AnswerCycler(by_sub[k], rng) for k in order}
+    got: Dict[str, int] = Counter()
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    active = [k for k in order if targets.get(k, 0) > 0]
+    while active:
+        for k in list(active):
+            c = cyc[k].take_one(picker) if got[k] < targets[k] else None
+            if c is None:
+                active.remove(k)
+                continue
+            got[k] += 1
+            out.append(c)
+    return out
 
 
 def cap_answers(sel: List[Tuple[str, Dict[str, Any]]], cap: float, cap_binary: float,
@@ -210,16 +245,40 @@ def summarise(name: str, sel: List[Tuple[str, Dict[str, Any]]], conversations: i
                            "p90": round(sorted(pitch)[9 * len(pitch) // 10], 1)} if pitch else None)}
 
 
+def line(run_dir: str, q: Dict[str, Any]) -> str:
+    return json.dumps({"run_dir": run_dir, "question": q, "task": tasks.record(q["subtasks"][0])}) + "\n"
+
+
+def task_table(bank: List[Tuple[str, Dict[str, Any]]], sel: Dict[str, List[Tuple[str, Dict[str, Any]]]]) -> Dict[str, Any]:
+    """Every benchmark task (tasks.TASKS, benchmark by benchmark) with its questions in the bank and in each split."""
+    supply: Dict[str, Counter] = defaultdict(Counter)
+    for _, q in bank:
+        supply[q["subtasks"][0]][q["split"]] += 1
+    n = {s: Counter(q["subtasks"][0] for _, q in v) for s, v in sel.items()}
+    keys = list(tasks.TASKS)
+    order = sorted(keys, key=lambda k: (tasks.BENCHMARKS.index(tasks.TASKS[k].benchmark), keys.index(k)))
+    return {k: dict(tasks.record(k), bank=dict(supply[k]), **{s: n[s][k] for s in sel}) for k in order}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bank", action="append", required=True)
+    ap.add_argument("--exclude", default="", help="BANK_SUFFIX:GROUP[:SUBTASK],... questions of a bank that a later bank replaced")
     ap.add_argument("--plan", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     plan = json.loads(Path(a.plan).read_text())
     rng = random.Random(plan.get("seed", 20261015))
     rare = set(plan.get("rare_groups", RARE_DEFAULT))
-    items = load_bank(a.bank)
+    items = load_bank(a.bank, a.exclude)
+    mismatches = []
+    for _, q in items:
+        try:
+            tasks.check(q)
+        except tasks.TaskMismatch as e:
+            mismatches.append(str(e))
+    if mismatches:
+        raise SystemExit(f"{len(mismatches)} bank questions do not match their benchmark task, e.g.\n" + "\n".join(mismatches[:20]))
     by_split: Dict[str, List[Tuple[str, Dict[str, Any]]]] = defaultdict(list)
     for it in items:
         by_split[it[1]["split"]].append(it)
@@ -259,9 +318,8 @@ def main() -> int:
     supply = {k: len(v) for k, v in by_sub.items()}
     weight = {k: statistics.mean(image_inputs(q) for _, q in v) for k, v in by_sub.items()}
     targets = water_fill(supply, weight, rest_budget)
-    sel: List[Tuple[str, Dict[str, Any]]] = []
-    for k in sorted(by_sub, key=lambda k: supply[k]):      # scarce subtasks pick their objects first
-        sel += round_robin(by_sub[k], targets[k], picker, rng)
+    # turns over the subtasks, scarce subtasks first in every turn
+    sel = interleave(by_sub, targets, sorted(by_sub, key=lambda k: supply[k]), picker, rng)
     sel, sdrop = cap_answers(sel, plan["answer_cap"], plan["answer_cap_binary"], picker)
     train_sel = sel + video_sel
     summary["train_targets"] = {"video_scenes": len(video_scenes), "video_conversations": n_conv,
@@ -272,20 +330,22 @@ def main() -> int:
 
     # ---------------- evaluation: every question of val / test scenes under the same caps
     ev = plan.get("eval", {})
+    sels: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {"train": train_sel}
     for split in ("val", "test"):
         pk = Picker(int(plan.get("eval_object_cap", 3)))
         cand = by_split.get(split, [])
         by_sub = defaultdict(list)
         for it in cand:
             by_sub[it[1]["subtasks"][0]].append(it)
-        es: List[Tuple[str, Dict[str, Any]]] = []
-        for k in sorted(by_sub, key=lambda k: len(by_sub[k])):
-            es += round_robin(by_sub[k], ev.get("max_per_subtask") or 10 ** 9, pk, rng)
+        cap = ev.get("max_per_subtask") or 10 ** 9
+        es = interleave(by_sub, {k: cap for k in by_sub}, sorted(by_sub, key=lambda k: len(by_sub[k])), pk, rng)
         es, d = cap_answers(es, plan["answer_cap"], plan["answer_cap_binary"], pk)
         summary[split] = summarise(split, es)
         summary[split]["dropped_by_answer_cap"] = d
-        (out / f"{split}.jsonl").write_text("".join(json.dumps({"run_dir": r, "question": q}) + "\n" for r, q in es))
-    (out / "train.jsonl").write_text("".join(json.dumps({"run_dir": r, "question": q}) + "\n" for r, q in train_sel))
+        sels[split] = es
+    for split, s in sels.items():
+        (out / f"{split}.jsonl").write_text("".join(line(r, q) for r, q in s))
+    summary["by_task"] = task_table(items, sels)
     (out / "summary.json").write_text(json.dumps(summary, indent=1, ensure_ascii=False))
     lines = ["# 抽样结果", ""]
     for split in ("train", "val", "test"):
@@ -298,6 +358,15 @@ def main() -> int:
             sh = "；".join(f"{t}: {x[0]} {x[1]:.0%} ({x[2]})" for t, x in b["top_answer_share"].items())
             lines.append(f"| {g} | {b['questions']} | {b['scenes']} | {sh} |")
         lines.append("")
+    lines += ["## 按 benchmark 任务（tasks.py；类别名与 benchmark 自己的数据一致）", "",
+              "| benchmark | 类别 | 任务 | 定义 | 题库（train / val / test 场景） | 训练 | val | test |",
+              "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for k, r in summary["by_task"].items():
+        bank = " / ".join(str(r["bank"].get(s, 0)) for s in ("train", "val", "test"))
+        flag = "" if r["test"] else " **（test 无题）**"
+        lines.append(f"| {r['benchmark']} | {r['category']} | {k} | {'一致' if r['definition'] == tasks.SAME else '有差异'} | "
+                     f"{bank} | {r['train']} | {r['val']} | {r['test']}{flag} |")
+    lines.append("")
     (out / "summary.md").write_text("\n".join(lines))
     print(json.dumps({k: {kk: summary[k][kk] for kk in ("questions", "scenes", "image_inputs", "video_conversations")}
                       for k in ("train", "val", "test") if k in summary}))

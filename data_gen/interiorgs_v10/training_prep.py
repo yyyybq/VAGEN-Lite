@@ -372,7 +372,7 @@ CONCAT_RESPONSE_LENGTH = 4096  # 12 turns x (81 image tokens + ~150 text + the a
 #   enable_visibility_shaping_reward off  inactive for v10 tasks (it needs a single target centre): off says so.
 # The system prompt stays the SFT one for both (its reward lines describe the sparse terms), so the two runs
 # differ only in the reward.
-REWARD_PRESETS = ("S0", "dense")
+REWARD_PRESETS = ("S0", "dense", "D_cond")
 TASK_POOLS = ("formal", "reserve")  # which train tasks RL takes (round 11: reserve, the tasks SFT never saw)
 # The output format of RL (docs/transition_qa, step 6): action_only keeps the template's prompt (the SFT one, actions
 # only); think_action shows the free_think prompt (think, then the action) to a model trained on actions only (the
@@ -410,7 +410,8 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
 # refused.  Template paths are relative to this package.
 STANDARDS_FILE = Path(__file__).with_name("configs") / "rl_standards.json"
 STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "opt_package", "reward_preset",
-                 "ppo_template", "env_template", "group_filter", "keep_std_threshold", "keep_std_floor")
+                 "ppo_template", "env_template", "group_filter", "keep_std_threshold", "keep_std_floor",
+                 "format_example", "lenient_parse", "invalid_penalty")
 # Round 12, the dense-reward first batch (D-keep, the user's decision of 2026-10-21): which group filter the
 # package's batch goes through.  mixed_outcome (the package's) trains only on tasks whose episodes both succeed and
 # fail; keep_by_return_std (vagen/custom_filter/filter.py) fills the places still free with all-fail tasks whose
@@ -420,9 +421,17 @@ GROUP_FILTERS = ("mixed_outcome", "keep_by_return_std")
 
 
 def load_standards(path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
-    """{name: rl-config options} of the named standard configurations (keys starting with "_" are notes)."""
+    """{name: rl-config options} of the named standard configurations (keys starting with "_" are notes;
+    "chain_defaults" is the standard's chain settings, load_chain_defaults)."""
     data = json.loads(Path(path or STANDARDS_FILE).read_text(encoding="utf-8"))
-    return {k: v for k, v in data.items() if not k.startswith("_")}
+    return {k: v for k, v in data.items() if not k.startswith("_") and k != "chain_defaults"}
+
+
+def load_chain_defaults(path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
+    """Round 12 freeze (the user's decision 3 of 2026-10-22): {"rl": run settings, "plan": plan settings} the
+    training chain gives every run whose plan rl names a standard, under the plan's own values."""
+    data = json.loads(Path(path or STANDARDS_FILE).read_text(encoding="utf-8"))
+    return dict(data.get("chain_defaults") or {})
 
 
 def apply_standard(args: argparse.Namespace, name: str, standards: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -467,11 +476,18 @@ DENSE_ADJUST: Dict[str, Any] = {"potential_field_reward_scale": 10.0, "enable_ne
                                 "enable_visibility_shaping_reward": False}
 
 
+# Round 12 freeze (the user's decision of 2026-10-22): D_cond is the dense reward with the grouped, gated progress
+# (target_visibility.PROGRESS_VERSIONS, docs/dense_reward_dcond.md): same potential, same scale and discount.
+DENSE_COND: Dict[str, Any] = {"progress_version": "grouped_gated"}
+
+
 def reward_overrides(preset: str) -> Dict[str, Any]:
     """Env-config overrides of a reward preset."""
     if preset not in REWARD_PRESETS:
         raise ValueError(f"reward preset must be one of {REWARD_PRESETS}, not {preset!r}")
-    return {} if preset == "S0" else {**DENSE_S5, **DENSE_ADJUST}
+    if preset == "S0":
+        return {}
+    return {**DENSE_S5, **DENSE_ADJUST, **(DENSE_COND if preset == "D_cond" else {})}
 
 
 def history_overrides(mode: str, max_turns: int) -> Dict[str, Dict[str, Any]]:
@@ -503,6 +519,33 @@ def env_system_prompt(env_cfg: Dict[str, Any], task_type: str) -> str:
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
     c = ActiveSpatialEnvConfig(**{k: v for k, v in env_cfg.items() if k in keys})
     return P.system_prompt(**c.system_prompt_arguments(task_type))  # every setting the env itself passes
+
+
+def sft_format_examples(paths: Sequence[Path], max_actions: int = 5, action_sep: str = "|") -> List[str]:
+    """Which format example (prompt.FORMAT_EXAMPLES) the SFT conversations show: the format line of the first user
+    turn of each file's first record.  Round 12 freeze (the user's 3.1.1): an RL run must show the text its start
+    model trained with.  Files whose first turn shows neither are left out."""
+    from vagen.envs.active_spatial import prompt as P
+
+    found = set()
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            line = fh.readline()
+        if not line.strip():
+            continue
+        turns = json.loads(line).get("conversations") or []
+        text = next((str(t.get("content", "")) for t in turns if t.get("role") == "user"), "")
+        found |= {f for f in P.FORMAT_EXAMPLES if P.action_format_line(action_sep, max_actions, f) in text}
+    return sorted(found)
+
+
+def with_format_example(policy: Dict[str, Any], format_example: str) -> Dict[str, Any]:
+    """The policy with its SFT export's format example set (the prompt check after the SFT data decided it)."""
+    import copy
+
+    policy = copy.deepcopy(policy)
+    policy["sft"]["export"]["format_example"] = format_example
+    return policy
 
 
 def prompt_mismatches(env_cfg: Dict[str, Any], task_types: Sequence[str], policy: Dict[str, Any]) -> List[str]:
@@ -569,6 +612,30 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         raise SystemExit(f"--output-format must be one of {sorted(OUTPUT_FORMATS)}")
     if OUTPUT_FORMATS[output_format]:  # applied to the written env configs only; the prompt check uses the template
         history["env"]["prompt_format"] = OUTPUT_FORMATS[output_format]
+    # round 12 freeze (the user's 3.1.1): the format line shows placeholder or real action names.  Default: the SFT
+    # export's (admission policy); the start model's SFT conversations, when given, must show the same text, and
+    # then decide it for the system prompt check too.
+    from vagen.envs.active_spatial.prompt import FORMAT_EXAMPLES
+
+    from .release import format_example as policy_format_example
+
+    policy = load_policy()
+    fmt = getattr(args, "format_example", None) or policy_format_example(policy)
+    if fmt not in FORMAT_EXAMPLES:
+        raise SystemExit(f"--format-example must be one of {FORMAT_EXAMPLES}, not {fmt!r}")
+    tcfg = template["envs"][0]["config"]
+    sft_formats = sft_format_examples([Path(p) for p in getattr(args, "sft_trajectories", None) or []],
+                                      int(tcfg.get("max_actions_per_step", 5)), str(tcfg.get("action_sep", "|")))
+    if sft_formats and sft_formats != [fmt]:
+        raise SystemExit(f"the SFT conversations show the {sft_formats} format example, the RL config would show "
+                         f"{fmt!r}: give --format-example {sft_formats[0]} (or the conversations the start model "
+                         "trained on)")
+    if fmt != str(tcfg.get("prompt_format_example", "placeholder")):
+        history["env"]["prompt_format_example"] = fmt
+    if getattr(args, "lenient_parse", False):  # round 12 freeze (the user's 3.1.2): the env's lenient reading
+        history["env"]["lenient_parse"] = True
+    if getattr(args, "invalid_penalty", None) is not None:  # round 12 freeze (3.1.3): the unreadable answer's penalty
+        history["env"]["invalid_penalty_override"] = float(args.invalid_penalty)
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -579,7 +646,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                                train_size=len(selected), **history["env"])
         env_paths[split] = out / f"{split}_env.yaml"
         env_paths[split].write_text(yaml.safe_dump(env, sort_keys=False))
-    mismatches = prompt_mismatches(template["envs"][0]["config"], [r["task_type"] for r in rows], load_policy())
+    mismatches = prompt_mismatches(dict(tcfg, prompt_format_example=fmt), [r["task_type"] for r in rows],
+                                   with_format_example(policy, fmt) if sft_formats else policy)
     if mismatches:
         raise SystemExit(f"RL and SFT system prompts differ for {mismatches}")
     ppo = yaml.safe_load(Path(args.ppo_template).read_text())
@@ -686,6 +754,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "task_pool": pool,
               "opt_package": getattr(args, "opt_package", None), "opt_package_overrides": package,
               "standard": standard or None, "ppo_template": str(args.ppo_template), "curriculum": curriculum,
+              "format_example": fmt, "format_example_sft": sft_formats or None,
+              "lenient_parse": bool(getattr(args, "lenient_parse", False)),
+              "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
+                                  else float(tcfg.get("invalid_format_penalty", -0.1))),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
               "entropy_coeff_override": getattr(args, "entropy_coeff", None),
               "group_filter": ((ppo.get("filter") or {}).get("name") if (ppo.get("filter") or {}).get("enable") else None),
@@ -783,6 +855,120 @@ def build_subsets(records: Sequence[Dict[str, Any]], rows: Sequence[Dict[str, An
     return out
 
 
+# Round 12 freeze (the user's 3.1.4 of 2026-10-22): the format SFT of the original 7B, which RL from the original model
+# needs before it (its answers collapse into made-up action names, cluster_runs/FORMAT_DRIFT_R12.md): a few hundred
+# short conversations (1-2 assistant turns) from the existing SFT conversations, shown with the format example of the
+# future data (prompt.FORMAT_EXAMPLES, release.format_example), trained 1-2 epochs with a small learning rate.
+FORMAT_SFT_SEED = 20261022
+
+
+def format_sft_records(records: Sequence[Dict[str, Any]], policy: Dict[str, Any], count: int, val_count: int,
+                       max_turns: int = 2, format_example: str = "action_names",
+                       seed: int = FORMAT_SFT_SEED) -> Dict[str, Any]:
+    """{"records": the chosen conversations rewritten to ``format_example``, "report"}.  A conversation qualifies
+    with 1..``max_turns`` assistant turns; ``count`` train and ``val_count`` val ones are drawn at random (seed),
+    spread over the task families in proportion.  The rewrite replaces the system prompt and each user turn's format
+    text exactly (the texts the SFT export wrote with the policy's own format example); a conversation whose texts do
+    not match is left out and counted."""
+    import copy
+    import random
+
+    from .release import _format_block, format_example as policy_format_example, protocol_system_prompt
+
+    old_example = policy_format_example(policy)
+    new_policy = copy.deepcopy(policy)
+    new_policy["sft"]["export"]["format_example"] = format_example
+    old_blocks = {first: _format_block(policy, first) for first in (True, False)}
+    new_blocks = {first: _format_block(new_policy, first) for first in (True, False)}
+    skipped = Counter()
+
+    def rewrite(rec):
+        conv = copy.deepcopy(rec["conversations"])
+        t = str(rec.get("task_type") or "")
+        if conv[0]["role"] != "system" or conv[0]["content"] != protocol_system_prompt(t, policy):
+            skipped["system_prompt_differs"] += 1
+            return None
+        conv[0]["content"] = protocol_system_prompt(t, new_policy)
+        users = [m for m in conv if m["role"] == "user"]
+        for k, m in enumerate(users):
+            first = k == 0
+            if not m["content"].endswith("\n" + old_blocks[first]) or m["content"].count(old_blocks[first]) != 1:
+                skipped["format_text_differs"] += 1
+                return None
+            m["content"] = m["content"][: -len(old_blocks[first])] + new_blocks[first]
+        return dict(rec, conversations=conv, format_example=format_example)
+
+    def turns(rec):
+        return sum(1 for m in rec.get("conversations") or [] if m.get("role") == "assistant")
+
+    eligible = {"train": [], "val": []}
+    for rec in records:
+        if rec.get("split") in eligible and 1 <= turns(rec) <= max_turns:
+            eligible[rec["split"]].append(rec)
+    rng = random.Random(seed)
+    chosen, by_family = [], {}
+    for split, want in (("train", count), ("val", val_count)):
+        pool = sorted(eligible[split], key=lambda r: str(r.get("id")))
+        rng.shuffle(pool)
+        families = sorted({str(r.get("task_type")) for r in pool})
+        quota = {f: round(want * sum(1 for r in pool if str(r.get("task_type")) == f) / max(1, len(pool)))
+                 for f in families}
+        picked = []
+        for f in families:  # in proportion to the family's share of the eligible conversations
+            for rec in [r for r in pool if str(r.get("task_type")) == f]:
+                if sum(1 for p in picked if str(p.get("task_type")) == f) >= quota[f]:
+                    break
+                new = rewrite(rec)
+                if new is not None:
+                    picked.append(new)
+        for rec in pool:  # rounding: fill up to the number asked for
+            if len(picked) >= want:
+                break
+            if all(p.get("id") != rec.get("id") for p in picked):
+                new = rewrite(rec)
+                if new is not None:
+                    picked.append(new)
+        picked = picked[:want]
+        chosen += picked
+        by_family[split] = dict(Counter(str(r.get("task_type")) for r in picked))
+    report = {"source_records": len(records), "eligible": {k: len(v) for k, v in eligible.items()},
+              "max_assistant_turns": max_turns, "train": by_family.get("train") and sum(by_family["train"].values()),
+              "val": by_family.get("val") and sum(by_family["val"].values()), "by_family": by_family,
+              "assistant_turns": dict(Counter(turns(r) for r in chosen)), "format_example": format_example,
+              "source_format_example": old_example, "skipped": dict(skipped), "seed": seed}
+    return {"records": chosen, "report": report}
+
+
+def cmd_format_sft(args: argparse.Namespace) -> None:
+    """Round 12 freeze: the format SFT's conversations (sft_trajectories_format.jsonl) in --out, with the source SFT
+    folder's frames, split manifest and task registry linked in (a folder the chain uses with "sft_records": false)."""
+    import os
+
+    from .admission import load_policy
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    # the source conversations keep the format text they were exported with (rounds 10-12: the placeholder, which the
+    # policy no longer names): the policy with that example is the one their texts are checked against
+    policy = load_policy()
+    found = sft_format_examples([Path(args.trajectories)])
+    if len(found) == 1:
+        policy = with_format_example(policy, found[0])
+    res = format_sft_records(_jsonl(Path(args.trajectories)), policy, int(args.count), int(args.val_count),
+                             int(args.max_turns), args.format_example, int(args.seed))
+    if len(res["records"]) < int(args.count) + int(args.val_count):
+        raise SystemExit(f"only {len(res['records'])} conversations qualify: {res['report']}")
+    _write_jsonl(out / "sft_trajectories_format.jsonl", res["records"])
+    if args.link_from:
+        src = Path(args.link_from).resolve()
+        for name in ("frames.jsonl", "frames", "split_manifest.json", "task_registry.jsonl"):
+            if (src / name).exists() and not (out / name).exists():
+                os.symlink(src / name, out / name)
+    report = dict(res["report"], trajectories=str(args.trajectories))
+    (out / "format_sft_report.json").write_text(json.dumps(report, indent=1))
+    print(json.dumps(report, indent=1))
+
+
 def cmd_subsets(args: argparse.Namespace) -> None:
     """Round 12: the data-scale subsets as files (sft_trajectories_<name>.jsonl, rows_<name>.jsonl, subsets.json)
     in --out, with the source SFT folder's frames, split manifest and task registry linked in (an SFT folder the
@@ -871,6 +1057,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--task-pool", choices=TASK_POOLS, default=None,
                    help="round 11: the train tasks RL takes: formal (rounds 6-10, the default) or reserve (rows from sft-frames "
                         "--include-reserve; the rule since round 11: RL trains on tasks SFT never trained on)")
+    c.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
+                   help="round 12 freeze: the format line shows placeholder names (action1|action2|...) or real "
+                        "action names; default the SFT export's (admission policy), and it must match the SFT "
+                        "conversations given with --sft-trajectories")
+    c.add_argument("--lenient-parse", action="store_true",
+                   help="round 12 freeze: the env reads an answer leniently when the strict reading finds no action "
+                        "(spaces instead of underscores, the first complete action block, a missing opening tag)")
+    c.add_argument("--invalid-penalty", type=float, default=None,
+                   help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
+                        "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
     c.add_argument("--sft-trajectories", nargs="*", default=None,
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,
@@ -910,9 +1106,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     u.add_argument("--seed", type=int, default=SUBSET_SEED)
     u.add_argument("--link-from", default=None, help="the source SFT folder: link its frames, manifest and registry")
     u.add_argument("--out", required=True)
+    x = sub.add_parser("format-sft", help="round 12 freeze: the short format SFT conversations (the user's 3.1.4)")
+    x.add_argument("--trajectories", required=True, help="the SFT conversations (sft_trajectories.jsonl, with split)")
+    x.add_argument("--count", type=int, default=400, help="train conversations")
+    x.add_argument("--val-count", type=int, default=40, help="val conversations (the SFT's evaluation loss)")
+    x.add_argument("--max-turns", type=int, default=2, help="at most this many assistant turns")
+    x.add_argument("--format-example", default="action_names", choices=["placeholder", "action_names"])
+    x.add_argument("--seed", type=int, default=FORMAT_SFT_SEED)
+    x.add_argument("--link-from", default=None, help="the source SFT folder: link its frames, manifest and registry")
+    x.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     {"sft-frames": cmd_sft_frames, "sft-records": cmd_sft_records, "rl-config": cmd_rl_config,
-     "subsets": cmd_subsets}[args.cmd](args)
+     "subsets": cmd_subsets, "format-sft": cmd_format_sft}[args.cmd](args)
     return 0
 
 

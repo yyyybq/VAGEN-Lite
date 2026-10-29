@@ -110,9 +110,12 @@ def _normalize_ws(s: str) -> str:
 
 def parse_actions(actions_blob: str,
                   sep: str = "|",
-                  allow_trailing_empty: bool = True) -> Tuple[bool, List[ParsedAction]]:
+                  allow_trailing_empty: bool = True,
+                  lenient: bool = False) -> Tuple[bool, List[ParsedAction]]:
     """
     Parse action string like 'action1|action2|...|' into list of ParsedAction.
+    ``lenient`` (round 12 freeze, the env's lenient_parse): a name written with spaces instead of underscores
+    ("turn left") is read as the name with underscores.
     
     Returns:
         Tuple of (format_ok, actions_list)
@@ -131,10 +134,54 @@ def parse_actions(actions_blob: str,
         if m:
             actions.append(ParsedAction(name=m.group(1).lower(), arg=None))
             continue
+        if lenient:  # round 12 freeze: "turn left" -> turn_left
+            m = re.fullmatch(r"([A-Za-z_]\w*)", re.sub(r"\s+", "_", tok))
+            if m:
+                actions.append(ParsedAction(name=m.group(1).lower(), arg=None))
+                continue
         # Invalid token
         return False, []
     
     return True, actions
+
+
+# Round 12 freeze (the user's 3.1.2 of 2026-10-22): the lenient reading of an answer the strict one finds no action
+# in (the env's lenient_parse, default off).  The strict reading (parse_free_think) takes the text from the first
+# opening tag to the first closing one and fails on a name with spaces or an answer without its opening tag.
+_ACTION_OPEN = re.compile(r"<?\s*action\s*>", re.IGNORECASE)
+_ACTION_CLOSE = re.compile(r"<\s*/\s*action\s*>", re.IGNORECASE)
+_FIRST_COMPLETE_BLOCK = re.compile(r"<\s*action\s*>((?:(?!<\s*action\s*>).)*?)<\s*/\s*action\s*>",
+                                   re.DOTALL | re.IGNORECASE)
+LENIENT_RULES = ("spaces", "first_block", "missing_opening_tag")
+
+
+def lenient_actions(response: str, sep: str = "|",
+                    allowed: Optional[set] = None) -> Optional[Tuple[str, List[str]]]:
+    """(rule, action names) of the lenient reading, None when it reads no action either.  Tried in order:
+
+    - "spaces": the strict reading's action text with spaces instead of underscores in the names ("turn left");
+    - "first_block": the first complete <action>...</action> block, one with no other opening tag inside (the text
+      after it is ignored);
+    - "missing_opening_tag": an answer with a closing </action> and no opening tag: the text before the closing tag
+      (after a </think>, if any).
+
+    Every name must be an allowed action (check_actions) and at least one must be read."""
+    text = response or ""
+    candidates = []
+    ft = parse_free_think(text)
+    if ft["ok"]:
+        candidates.append(("spaces", ft["actions_blob"]))
+    m = _FIRST_COMPLETE_BLOCK.search(text)
+    if m:
+        candidates.append(("first_block", m.group(1)))
+    if _ACTION_CLOSE.search(text) and not _ACTION_OPEN.search(_ACTION_CLOSE.sub(" ", text)):
+        head = _ACTION_CLOSE.split(text, 1)[0]
+        candidates.append(("missing_opening_tag", re.split(r"</think>", head, flags=re.IGNORECASE)[-1]))
+    for rule, blob in candidates:
+        ok, parsed = parse_actions(blob, sep=sep, lenient=True)
+        if ok and parsed and check_actions(parsed, allowed=allowed):
+            return rule, [a.name for a in parsed]
+    return None
 
 
 # Allowed actions for active spatial navigation
