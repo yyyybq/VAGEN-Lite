@@ -45,3 +45,4 @@ def test_rates_pairing_and_checkpoints(tmp_path):
     assert abs(v["all"]["task_mean_diff"] - (0.5 + 1 / 3 + 0.25) / 3) < 1e-3
     md = X.markdown(res)
     assert "## 1%：成功率" in md and "| 1% | RS |" in md and "| 30% |" not in md  # no RS at 30%: no pairing row
+    assert X._pct(X.rate(42, 944)).startswith("4.4%（42/944")  # 4.449%: printed from k / n, not the rounded rate

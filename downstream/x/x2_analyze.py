@@ -104,10 +104,12 @@ def analyze(experiments: Path, group_of: dict, spatial: set, excluded=frozenset(
 
 
 def _pct(r) -> str:
+    """From k / n itself, not the rate rounded to 4 places: 42 / 944 = 4.449% is 4.4%, the rounded 0.0445 printed 4.5%
+    (the first version of the X2 report, corrected 10-29)."""
     if not r or not r.get("n"):
         return "—"
     lo, hi = r["ci95"]
-    return f"{100 * r['rate']:.1f}%（{r['k']}/{r['n']}，{100 * lo:.1f}–{100 * hi:.1f}）"
+    return f"{100 * r['k'] / r['n']:.1f}%（{r['k']}/{r['n']}，{100 * lo:.1f}–{100 * hi:.1f}）"
 
 
 def _diff(r) -> str:
