@@ -52,7 +52,7 @@ eval:
   sets:
     val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2    # 413 道
     test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2  # 292 道
-    # 2026-10-29：矩阵的其他组改用去掉 128 个边缘场景的评测集（exps/matrix_inputs_20261029：val 382、test 292）；C0 在新测试集的 292 道里有 233 道的结果，补进来的 59 道要另跑（C0 第 300 次的检查点已移到 AOSS）
+    # 2026-10-29：矩阵的其他组改用去掉 128 个边缘场景的评测集（exps/matrix_inputs_20261029：val 382、test 292）；C0 在新测试集上的结果：233 道原有的加 59 道 2026-10-29 补跑的，在 exps/matrix_inputs_20261029/eval_test_v2_screened/c0_p1{s0,d}_300
   every: 50   # 第十二轮训练链自己评测
   diagnostics:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <reuse.tr>/diag/failure_<set>
