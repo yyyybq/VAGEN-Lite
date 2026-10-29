@@ -11,6 +11,7 @@ back to their owner at exit (jobs run as root).
     python -m reward.sco_job prepare --job JOB [--chown DIR ...] -- <module> <args>
     python -m reward.sco_job submit --job JOB --name NAME [--pool h800|zoetrope]
     python -m reward.sco_job status --job JOB
+    python -m reward.sco_job watch --job JOB --name NAME [--grace-min 10]   (SUSPENDED 10 minutes: delete, resubmit)
     python -m reward.sco_job delete --job JOB        (after the results are read: the user's rule, delete the job)
 
 Job names are rw-<NAME>.  On the login node itself this module only writes files and calls sco.
@@ -106,9 +107,38 @@ def delete(job: Path) -> None:
     print(json.dumps({"job_id": job_id, "state_before": state, "delete_rc": rc}))
 
 
+def watch(job: Path, name: str, pool: str = None, grace_min: float = 10.0, every_s: int = 60) -> None:
+    """Follow the job until it finishes.  A SUSPENDED state held for ``grace_min`` minutes means sco stopped the job
+    (it does not come back), so it is deleted and submitted again: the user's rule of 2026-10-29 for single check
+    and replay jobs, as the training chain's suspended_grace_min.  Each resubmission goes to JOB/resubmissions.jsonl.
+    A monitoring process (run it with nice -n 19 on the login node)."""
+    import time
+
+    first = None
+    while True:
+        receipt = json.loads((job / "submission.json").read_text())
+        state = describe(receipt["job_id"]).get("state")
+        if (job / "done").exists() or state in FINISHED:
+            print(json.dumps({"job_id": receipt["job_id"], "state": state, "done_marker": (job / "done").exists()}))
+            return
+        if state == "SUSPENDED":
+            first = first or time.time()
+            if time.time() - first >= 60 * grace_min:
+                delete(job)
+                submit(job, name, pool)
+                new = json.loads((job / "submission.json").read_text())["job_id"]
+                with open(job / "resubmissions.jsonl", "a") as f:
+                    f.write(json.dumps({"utc": now(), "suspended": receipt["job_id"], "new": new}) + "\n")
+                first = None
+        else:
+            first = None
+        time.sleep(every_s)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=("prepare", "submit", "status", "delete"))
+    ap.add_argument("action", choices=("prepare", "submit", "status", "delete", "watch"))
+    ap.add_argument("--grace-min", type=float, default=10.0, help="watch: minutes SUSPENDED before resubmitting")
     ap.add_argument("--job", required=True, type=Path)
     ap.add_argument("--name", default=None)
     ap.add_argument("--pool", choices=("h800", "zoetrope"), default=None)
@@ -122,6 +152,8 @@ def main() -> None:
         submit(job, args.name or job.name, args.pool)
     elif args.action == "status":
         status(job)
+    elif args.action == "watch":
+        watch(job, args.name or job.name, args.pool, args.grace_min)
     else:
         delete(job)
 

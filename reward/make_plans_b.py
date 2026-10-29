@@ -8,10 +8,14 @@ worktree's HEAD).  No "retain": checkpoints are deleted only by hand, after
 the results are in a report and the user has the list (the user's rule 7).
 
 The rows file is the RL rows file with the reserve training rows cut to the 3,000 tasks that have tables (every
-other row kept: the formal validation rows feed the RL's validation set), as the main line's C1 subset did.
+other row kept: the formal validation rows feed the RL's validation set), as the main line's C1 subset did; one
+file (--rows-out) for both waves.
+
+The user's decision of 2026-10-29: two waves of two runs, each its own chain (--arms): rw_o + rw_s0 first, then
+rw_g + rw_ok once the first wave is evaluated and cleaned up; one run of each wave on each pool.
 
     python -m reward.make_plans_b --final-ids FILE [FILE ...] --tables DIR --keep-o THRESHOLD --tr DIR
-        [--seed 20261019] [--pools rw_s0=h800,rw_g=h800,rw_o=zoetrope,rw_ok=zoetrope]
+        --arms rw_o,rw_s0 [--rows-out FILE] [--seed 20261019] [--pools rw_o=h800,rw_s0=zoetrope,...]
 """
 
 import argparse
@@ -42,9 +46,12 @@ def main():
     ap.add_argument("--tr", required=True)
     ap.add_argument("--seed", type=int, default=20261019)
     ap.add_argument("--pools", default="rw_o=h800,rw_g=h800,rw_s0=zoetrope,rw_ok=zoetrope",
-                    help="run=pool,... (default: the main comparison O / G on h800, S0 / O-keep on zoetrope, two a "
-                         "pool as the main line suggested on 2026-10-28)")
+                    help="run=pool,... (default: O and G on h800, S0 and O-keep on zoetrope: each wave of the user's "
+                         "2026-10-29 order, rw_o + rw_s0 then rw_g + rw_ok, has one run on each pool)")
+    ap.add_argument("--arms", required=True, help="the runs of this chain, e.g. rw_o,rw_s0 (first wave)")
+    ap.add_argument("--rows-out", default=str(RR / "tasks/rows_b3000.jsonl"))
     args = ap.parse_args()
+    wanted = [a for a in args.arms.split(",") if a]
 
     final = sorted({l.strip() for f in args.final_ids for l in Path(f).read_text().splitlines() if l.strip()})
     assert len(final) == 3000, f"{len(final)} final tasks, not 3,000"
@@ -54,30 +61,38 @@ def main():
     keep = set(final)
     tr = Path(args.tr)
     tr.mkdir(parents=True, exist_ok=True)
-    rows_out = tr / "rows_b3000.jsonl"
-    n_res, n_all = 0, 0
-    with open(rows_out, "w") as f:
-        for l in Path(ROWS).read_text().splitlines():
-            if not l.strip():
+    rows_out = Path(args.rows_out)
+    lines, n_res = [], 0
+    for l in Path(ROWS).read_text().splitlines():
+        if not l.strip():
+            continue
+        r = json.loads(l)
+        if r.get("reserve") and r.get("split") == "train":
+            if r["task_id"] not in keep:
                 continue
-            r = json.loads(l)
-            if r.get("reserve") and r.get("split") == "train":
-                if r["task_id"] not in keep:
-                    continue
-                n_res += 1
-            f.write(l + "\n")
-            n_all += 1
+            n_res += 1
+        lines.append(l + "\n")
     assert n_res == 3000, n_res
+    text = "".join(lines)
+    if rows_out.exists():  # the second wave reuses the first wave's file: it must be the same
+        assert rows_out.read_text() == text, f"{rows_out} differs from the rows these tasks give"
+    else:
+        rows_out.write_text(text)
+    n_all = len(lines)
 
     plan = json.loads(Path(TEMPLATE).read_text())
     plan.pop("dense_variant", None)
     plan.update(tr=str(tr), commit="COMMIT_PLACEHOLDER", rl_name="rw_b", job_prefix="rw",
                 eval_sets={"val": str(RR / "eval_sets/eval_val_v2"), "test": str(RR / "eval_sets/eval_test_v2")},
                 note=("Reward line, task B (docs/reward/PREREG_B.md): S0, G (= V4), O (optimal progress from the "
-                      "depth-12 tables) and O-keep on the same 3,000 reserve tasks, Qwen3 SFT epoch 8, one seed."))
+                      "depth-12 tables) and O-keep on the same 3,000 reserve tasks, Qwen3 SFT epoch 8, one seed; "
+                      f"this chain runs {', '.join(wanted)} (the user's two waves of 2026-10-29)."))
     plan["rl"] = dict(plan["rl"], rows=str(rows_out), seed=args.seed)
-    plan["rl_runs"] = arms(tables, args.keep_o)
-    plan["run_pools"] = dict(x.split("=") for x in args.pools.split(","))
+    every = arms(tables, args.keep_o)
+    assert set(wanted) <= set(every), wanted
+    plan["rl_runs"] = {a: every[a] for a in wanted}
+    pools = dict(x.split("=") for x in args.pools.split(","))
+    plan["run_pools"] = {a: pools[a] for a in wanted}
     # the main line's setting (4512b319): a job sco shows SUSPENDED for less than 10 minutes is still waiting
     plan["suspended_grace_min"] = 10
     for k in ("rows", "exclude"):
