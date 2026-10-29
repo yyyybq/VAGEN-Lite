@@ -39,6 +39,15 @@
    "marker": "DS-CSB-100-s1: trained to 200k, the 150k / 175k / 200k points evaluated; full state steps_175000 (resume only) archived to AOSS and deleted on 2026-10-29 by the disk line (retention rule R3; the model line's list DISK_RECLAIM_20261029.md table 1; the user's approval). run/final_model stays."
   },
   {
+   "id": "R3-DS-Q3RS-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-Q3RS-100-s1/run/full_state",
+   "include": [
+    "^steps_175000/"
+   ],
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "DS-Q3RS-100-s1: trained to 200k, the 150k / 175k / 200k points evaluated; full state steps_175000 (resume only) archived to AOSS and deleted on 2026-10-29 by the disk line (retention rule R3; the model line's list DISK_RECLAIM_20261029.md table 1; the user's approval). run/final_model stays."
+  },
+  {
    "id": "R4-DS-Q3B-100-s1",
    "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-Q3B-100-s1/evals_src",
    "include": [
