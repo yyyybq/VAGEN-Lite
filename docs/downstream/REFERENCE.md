@@ -14,6 +14,7 @@
   - 所有 Qwen3 RL 的起点（SFT 第 8 个 epoch）：`/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232`。
   - RS（S0 第 100 次，种子 20261019；这一臂第 150 次因读不出的回答超过 10% 被停）：`/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_100/actor/huggingface`。
   - RD（你 10-28 定 V4 为 Qwen3 的密集基线；V4 种子 20261019 第 300 次，主线验证 50.4%、测试 46.9%，合并 705 题 48.9%）：`/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3d/checkpoints/global_step_300/actor/huggingface`。RS 合并 45.7%。主线 10-28 清理 Qwen3 检查点时这两份都保留，路径不变（主窗口 10-28 回复）。
+  - 主窗口 10-29 为"V4 起点让下游变差"的复核另给了三个起点（下游做不做等你定；都只按路径读）：V4 种子 20261022 第 250 次（`interiorgs_v10_train_q3s3_20261027/rl_run_qw3v4s3/checkpoints/global_step_250/actor/huggingface`，705 道 49.9%）；DCK 种子 20261021 第 300 次（`interiorgs_v10_train_q3s2dck_20261027/rl_run_qw3dcks2/checkpoints/global_step_300/actor/huggingface`，51.2%）；S0-keep 种子 20261019 第 150 次（`interiorgs_v10_train_q3s0k_20261029/rl_run_qw3s0k1/checkpoints/global_step_150/actor/huggingface`，48.9%）。前缀都是 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/`。
 - **Qwen3 闸门**（你 10-28 任务书第 6 节，原文照录；这条标准现在定死，到时不改）：
   - Qwen3 的上游权重（RS 或 RD）到了，先做 X0、X0b、G0、线性探针，不做训练。
   - 远迁移在 Qwen3 上重做的条件：在 X0 这类换画面的空间问答上，RS 或 RD 比 Qwen3 自己的底座高 10 个百分点以上，且没有偏答、G0 没有通用能力损失。
