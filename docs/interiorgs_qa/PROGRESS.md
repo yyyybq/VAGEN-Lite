@@ -94,6 +94,8 @@
 
 ## 2. 正在运行什么
 
+没有（2026-10-29 EASI-8 全部完成）。下面是当时的记录。
+
 用户 2026-10-28 要求：用 `scripts/easi_eval.py` 在 8 个原 benchmark（EASI-8）上评测 QA-SFT，提交成 SCO 任务，和基座、Act-SFT 对比。
 
 - 新的提交方式：`python -m data_gen.interiorgs_qa.sco prepare --job JOB --gpus 8 -- easi_job --name NAME --model DIR --out OUT`
@@ -117,6 +119,9 @@
   - 同一模型的几个任务同一秒启动时，lmms-eval 的结果文件同名互相覆盖：Act-SFT 的 MindCube 结果被 BLINK 覆盖，单独重跑（pt-xfrj7xgd）。
   - Act-SFT 在 MindCube-Tiny 只有 4.1%：它答 `<answer>选项文字</answer>`，官方提取要选项字母，几乎全判错；其他 benchmark 格式正常。
   - 对照表 `exps/interiorgs_qa_easi_20261028/compare_partial.md`（`easi_compare.py`，用 EASI 自己的打分代码）。
+- 2026-10-29 EASI-8 完成（报告第 7 节）：SITE 视频在全量上正常跑（约 3 小时 / 模型；此前三次全量停在开头的原因没有复现）。
+  EASI-8 平均 QA-SFT 48.3、基座 43.1（与 8 月逐项相同）、Act-SFT 37.3；QA-SFT 在 VSI +11.4、MMSI +6.0、MindCube +19.7、ViewSpatial +12.2，
+  BLINK / 3DSRBench / EmbSpatial 基本不变，SITE −6.2。Act-SFT 的 MindCube 4.1 是格式问题（按文字匹配 38.1）。对照表 `exps/interiorgs_qa_easi_20261028/compare_easi8.md`。
 
 以下是 2026-10-28 训练时的记录。
 
