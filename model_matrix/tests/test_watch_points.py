@@ -193,6 +193,43 @@ class WatchPointsTest(unittest.TestCase):
                 stat.write_text(next(reads))
                 self.assertAlmostEqual(W.cores_in_use(5.0, sleep=advance), 4.0)  # 20 s of CPU in 5 s
 
+    def test_suspended_grace(self):
+        """--suspended-grace-min (2026-10-29): an evaluation job SUSPENDED for a moment (sco, when another user's job
+        in the pool is stopped) is waited for, not deleted and resubmitted; one SUSPENDED for longer than the grace
+        ends as before; without the switch SUSPENDED ends it at once."""
+        from unittest import mock
+
+        from model_matrix.downstream import watch_points as W
+
+        w = W.Watcher([], (150000,), log=lambda m: None, suspended_grace_min=10)
+        p, clock = {}, [1000.0]
+        tick = lambda: clock[0]
+        self.assertTrue(w.suspended_wait(p, {"state": "SUSPENDED"}, tick))
+        clock[0] += 300
+        self.assertTrue(w.suspended_wait(p, {"state": "SUSPENDED"}, tick))
+        self.assertFalse(w.suspended_wait(p, {"state": "STARTING"}, tick))  # back in the queue: forgotten
+        self.assertNotIn("suspended_since", p)
+        self.assertTrue(w.suspended_wait(p, {"state": "SUSPENDED"}, tick))
+        clock[0] += 601
+        self.assertFalse(w.suspended_wait(p, {"state": "SUSPENDED"}, tick))  # past the grace: it ends
+        self.assertFalse(W.Watcher([], (150000,), log=lambda m: None).suspended_wait({}, {"state": "SUSPENDED"}, tick))
+
+        with tempfile.TemporaryDirectory() as tmp:  # in a poll: a blip does not resubmit
+            exp = Path(tmp) / "DS-X-100-s1"
+            (exp / "evals_src" / "steps_150000").mkdir(parents=True)
+            (exp / "evals_src" / "steps_150000" / "source.json").write_text("{}")
+            (exp / "experiment.json").write_text(json.dumps({"start": {"path": "/start"}}))
+            ev = exp / "evals" / "steps_150000" / "job"
+            ev.mkdir(parents=True)
+            (ev / "submission.json").write_text("{}")
+            states = iter(["SUSPENDED", "STARTING", "RUNNING"])
+            deleted = []
+            w = W.Watcher([exp], (150000,), submit=lambda *a: "pt-x", status=lambda run: {"state": next(states)},
+                          delete=lambda run: deleted.append(run), log=lambda m: None, suspended_grace_min=10)
+            for _ in range(3):
+                w.poll()
+            self.assertEqual(deleted, [])
+
     def test_fixed_pool_waits_for_the_pause_file(self):
         """The user's decision 28 (2026-10-28): --pool h800 sends every evaluation there, once the pause file is gone;
         the default "queue" leaves the choice (and the pause wait) to sco_job as before."""

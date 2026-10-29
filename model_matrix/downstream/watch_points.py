@@ -81,11 +81,12 @@ def finished(out: Path) -> bool:
 class Watcher:
     def __init__(self, exps: List[Path], points=POINTS, extract: Callable = None, submit: Callable = None,
                  status: Callable = None, delete: Callable = None, log: Callable = print, pool: str = "queue",
-                 extract_on: str = "local"):
+                 extract_on: str = "local", suspended_grace_min: float = None):
         from data_gen.interiorgs_v10 import job_sco
 
         self.exps, self.points, self.log = [Path(e) for e in exps], tuple(points), log
         self.extract_on = extract_on
+        self.suspended_grace_min = suspended_grace_min
         if extract:
             self.extract = extract
         elif extract_on == "sco":  # the user's login-node rule of 2026-10-28: the copy runs as a 1-card job
@@ -229,6 +230,8 @@ class Watcher:
                     self.log(f"{now()} {exp.name} {n}: evaluation submitted {job}")
                     continue
                 st = self.status(ev)
+                if self.suspended_wait(p, st):
+                    continue
                 if st.get("finished") or st.get("state") in ("SUSPENDED", "NOT_FOUND"):
                     self.delete(ev)
                     if len(p.get("jobs", [])) >= 2:
@@ -238,6 +241,19 @@ class Watcher:
                         self.log(f"{now()} {exp.name} {n}: evaluation ended {st.get('state')} without a result; again")
             self.save(exp, rec)
         return done
+
+    def suspended_wait(self, p: Dict, st: Dict, clock: Callable = time.time) -> bool:
+        """With ``suspended_grace_min`` (--suspended-grace-min; off unless given): an evaluation job sco shows
+        SUSPENDED is still waited for until it has shown that for so many minutes (p["suspended_since"]); sco marks
+        the jobs waiting in a pool SUSPENDED for a moment when another user's job there is stopped (h800,
+        2026-10-29 06:03) and puts them back.  True while it is to be waited for."""
+        if st.get("state") != "SUSPENDED":
+            p.pop("suspended_since", None)
+            return False
+        if self.suspended_grace_min is None:
+            return False
+        since = p.setdefault("suspended_since", clock())
+        return clock() - since < 60 * self.suspended_grace_min
 
     def run(self, every: float, sleep: Callable = time.sleep) -> None:
         while not self.poll():
@@ -256,9 +272,13 @@ def main() -> None:
     ap.add_argument("--extract-on", default="local", choices=("local", "sco"),
                     help="where the weight copy runs: here (default) or as a 1-card sco job in --pool (the user's "
                          "login-node rule of 2026-10-28)")
+    ap.add_argument("--suspended-grace-min", type=float, default=None,
+                    help="an evaluation job SUSPENDED for less than this many minutes is still waited for (off "
+                         "unless given; the chain's suspended_grace_min)")
     a = ap.parse_args()
     Watcher(a.exp, [int(p) for p in a.points.split(",") if p.strip()],
-            log=lambda m: print(m, flush=True), pool=a.pool, extract_on=a.extract_on).run(a.every)
+            log=lambda m: print(m, flush=True), pool=a.pool, extract_on=a.extract_on,
+            suspended_grace_min=a.suspended_grace_min).run(a.every)
 
 
 if __name__ == "__main__":
