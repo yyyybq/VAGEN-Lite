@@ -2,7 +2,7 @@
 
 最后更新：2026-10-28 17:10 UTC。
 
-模型线：把 Qwen3-VL-8B-Instruct 和 Cambrian-S（7B 为主）接进统一框架，在主线最高的 setting 上跑主实验和下游实验。报告在 [reports/](reports/)，实验登记表 `MATRIX.md` 第三步建。
+模型线：把 Qwen3-VL-8B-Instruct 和 Cambrian-S（7B 为主）接进统一框架，在主线最高的 setting 上跑主实验和下游实验。报告在 [reports/](reports/)，下游的实验登记表是 [MATRIX.md](MATRIX.md)（`python -m model_matrix.downstream.matrix --out docs/models/MATRIX.md` 生成，每出一个点重写一次）。
 
 ## 1. 现在在哪一步
 
