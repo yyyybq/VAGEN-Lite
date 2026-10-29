@@ -21,6 +21,7 @@
 
 - `think_action` 时，写出的 `train_env.yaml` / `val_env.yaml` 用 `prompt_format: free_think`。
 - 系统提示一致性检查仍然对模板做，所以 RL 提示和 SFT 提示只差输出格式那几行。测试把那几行换回去，得到的提示逐字相同。
+  - 2026-10-29 起，main 的格式样例会把 Response format 行里的 `<action>...</action>` 换成真实动作名，测试改成按环境实际显示的那一行换回去。
 - 报告 `rl_config_report.json` 加 `output_format`、`rl_prompt_format` 两项。
 
 ### 1.2 `rl-config --max-response-length N`
@@ -136,6 +137,26 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
 
 **2026-10-21 第四次**：main 又加了 23 个提交（第十二轮批次：`renderer_repack`、启动失败最多重交 5 次、分组过滤 `keep_by_return_std` 及其 rl-config 参数、评测的读不出率等），合进本分支（`a5c5f2fc`，没有冲突；本分支在 `gym_agent_loop.py` 加的 `transition/think_rate` 保留）后两个补丁都打不上了。同样按三方合并挪到 main `2b54b45d`：只有 1 处文字冲突（模块说明里两边各加的段落），两边都保留；0002 直接打上。
 
+**2026-10-27**：合入 main `f8e43d40`（`0efaf894`，没有冲突），两个补丁直接打得上。
+
+**2026-10-29 第五次**：main 又加了 29 个提交，合进本分支（`1c641d63`）：
+- 第十二轮冻结期 10-22 的 18 个：格式样例、宽松读取、读不出的罚分、D-cond、标准的训练链默认设置、原始 7B 的格式 SFT、实验矩阵登记等；
+- interiorgs_qa 的 11 个。
+
+合并时 `training_prep.py` 的 `rl-config` 有 1 处文字冲突。两边各加了开关（本分支的 `--output-format`，main 的 `--format-example`、`--lenient-parse`、`--invalid-penalty`），写的是 env 配置里不同的键，两边都保留。
+
+合并后补丁 0001 打不上了，因为 main 的 6 个提交改了 `train_chain.py`。同样按三方合并挪到 main `8ab5c4d5`：
+- 文字冲突 2 处：
+  - 模块说明里两边各加的段落，两边都保留；
+  - `evaluate` 给 RL 检查点的评测参数：main 改成每个 RL 自己的 `run_options`（带上它训练时的格式样例和宽松读取），补丁在同一行填 `eval.rl_prompt_format`，合成 `(模型, rl_prompt_format, run_options)`。
+- 0002 直接打上。
+- **语义上对不上的一处，要改的是矩阵的 plan，补丁不用改**：
+  - main 把格式样例（提示里示范动作写法的那一行）的默认值改成真实动作名 `action_names`（`configs/admission_v2.json`，用户 10-22 的 3.1.1）。
+  - rl-config 默认用它，并拿 `--sft-trajectories` 给的 SFT 对话核对格式行，对不上就拒。
+  - 矩阵各组的 plan 没写 `format_example`，`sft_groups` 指向第十一轮的 SFT 轨迹，那是旧写法（`placeholder`）。
+  - 所以合并、打补丁之后，每组的 rl_config 步都会被拒。用 D 组的参数实跑过：退出码 1；加 `--format-example placeholder` 就通过。
+  - 怎么改等用户定（`REPORT.md` 第 2 节）。
+
 | 补丁 | 内容 | 改的文件 |
 | --- | --- | --- |
 | `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
@@ -170,7 +191,7 @@ python -m pytest -q data_gen/interiorgs_v10/tests/test_train_chain.py data_gen/i
 python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打完补丁的提交> --out <TR>/plan.json
 ```
 
-- 已核对（2026-10-21，main `2b54b45d`）：两个补丁按顺序打到 main 的 `train_chain.py` 上没有冲突，结果和三方合并得到的文件逐字相同；在合并了 main 的本分支上，两个测试文件 40 个测试全部通过（main 原有 32 个、新加 8 个）。main 再改 `train_chain.py` 的话，合并前要重新核对一次。
+- 已核对（2026-10-29，main `8ab5c4d5`）：两个补丁按顺序打到合并了 main 的本分支上没有冲突，结果和三方合并得到的文件逐字相同；本分支的 `train_chain.py` 和 main 的逐字相同。两个测试文件 42 个测试全部通过（main 原有 34 个、新加 8 个）。main 再改 `train_chain.py` 的话，合并前要重新核对一次。
 - 要先合并本分支再打补丁（就是上面的顺序）：`diagnostics` 步用到本分支的 `eval/diagnostics`，只有 main 的代码时它的 4 个测试会因为找不到模块而失败。
 - 对正在跑的训练链的影响：
   - 打了补丁，旧 plan 没有这些字段，行为不变；

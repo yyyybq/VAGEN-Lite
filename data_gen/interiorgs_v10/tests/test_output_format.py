@@ -90,16 +90,24 @@ class OutputFormatTest(unittest.TestCase):
         self.assertEqual((rep["output_format"], rep["rl_prompt_format"]), ("think_action", "free_think"))
 
     def test_rl_prompt_differs_from_sft_only_in_the_format_text(self):
-        from vagen.envs.active_spatial.prompt import FORMAT_CONFIGS
+        from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+        from vagen.envs.active_spatial.prompt import FORMAT_CONFIGS, _response_format
 
         policy = load_policy()
         types = ["projective_relations", "equidistance", "occlusion_alignment"]
         self.assertEqual(TP.prompt_mismatches(self.env("action_only"), types, policy), [])
         self.assertEqual(TP.prompt_mismatches(self.env("think_action"), types, policy), sorted(types))
+        # the "Response format" line as the env shows it, with the run's format example (round 12 freeze, 3.1.1)
+        cfg = self.env("think_action")
+        a = ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items()
+                                      if k in ActiveSpatialEnvConfig.__dataclass_fields__}).system_prompt_arguments()
+        shown = {f: dict(FORMAT_CONFIGS[f], format=_response_format(FORMAT_CONFIGS[f], a["action_sep"],
+                                                                    a["max_actions_per_step"], a["format_example"]))
+                 for f in ("free_think", "no_think")}
         for t in types:
             think = TP.env_system_prompt(self.env("think_action"), t)
             for key in ("description", "format", "example"):
-                think = think.replace(FORMAT_CONFIGS["free_think"][key], FORMAT_CONFIGS["no_think"][key])
+                think = think.replace(shown["free_think"][key], shown["no_think"][key])
             self.assertEqual(think, TP.env_system_prompt(self.env("action_only"), t))
 
     def test_unknown_format_is_refused(self):
