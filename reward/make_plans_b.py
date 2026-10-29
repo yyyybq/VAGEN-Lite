@@ -11,8 +11,8 @@ The rows file is the RL rows file with the reserve training rows cut to the 3,00
 other row kept: the formal validation rows feed the RL's validation set), as the main line's C1 subset did; one
 file (--rows-out) for both waves.
 
-The user's decision of 2026-10-29: two waves of two runs, each its own chain (--arms): rw_o + rw_s0 first, then
-rw_g + rw_ok once the first wave is evaluated and cleaned up; one run of each wave on each pool.
+The user's decisions of 2026-10-29: two waves of two runs, each its own chain (--arms): rw_o + rw_s0 first (rw_o on
+h800, rw_s0 on zoetrope), then rw_g + rw_ok, both on zoetrope, once the first wave is evaluated and cleaned up.
 
     python -m reward.make_plans_b --final-ids FILE [FILE ...] --tables DIR --keep-o THRESHOLD --tr DIR
         --arms rw_o,rw_s0 [--rows-out FILE] [--seed 20261019] [--pools rw_o=h800,rw_s0=zoetrope,...]
@@ -45,9 +45,10 @@ def main():
     ap.add_argument("--keep-o", type=float, required=True)
     ap.add_argument("--tr", required=True)
     ap.add_argument("--seed", type=int, default=20261019)
-    ap.add_argument("--pools", default="rw_o=h800,rw_g=h800,rw_s0=zoetrope,rw_ok=zoetrope",
-                    help="run=pool,... (default: O and G on h800, S0 and O-keep on zoetrope: each wave of the user's "
-                         "2026-10-29 order, rw_o + rw_s0 then rw_g + rw_ok, has one run on each pool)")
+    ap.add_argument("--pools", default="rw_o=h800,rw_s0=zoetrope,rw_g=zoetrope,rw_ok=zoetrope",
+                    help="run=pool,... (default: the user's decisions of 2026-10-29: the first wave rw_o on h800 and "
+                         "rw_s0 on zoetrope, as submitted; the second wave rw_g + rw_ok on zoetrope, the user's later "
+                         "rule that this round's new submissions go to zoetrope)")
     ap.add_argument("--arms", required=True, help="the runs of this chain, e.g. rw_o,rw_s0 (first wave)")
     ap.add_argument("--rows-out", default=str(RR / "tasks/rows_b3000.jsonl"))
     args = ap.parse_args()
