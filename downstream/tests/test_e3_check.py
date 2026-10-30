@@ -2,6 +2,7 @@
 they read the raw numbers differently, the episode list, the summary and report, and the job script's order of
 steps (stand-ins for the server, the simulator environment and e3_check.py)."""
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "rlinf"))
@@ -32,6 +34,29 @@ def test_raw_numbers_read_differently():
     assert E.read_differently([0] * 6 + [0.3] + [0] * 4 + [0.2]) == {"gripper": True, "mode": True}  # >0 but <0.5
     assert E.read_differently([0] * 6 + [0.7] + [0] * 4 + [0.9]) == {"gripper": False, "mode": False}
     assert E.read_differently([0] * 6 + [-0.2] + [0] * 4 + [-1.0]) == {"gripper": False, "mode": False}
+
+
+def test_rlinf_rollout_noise_follows_the_min_max_scale(tmp_path):
+    run = tmp_path / "run"
+    (run / "final_model").mkdir(parents=True)
+    (run / "dataset_statistics.json").write_text(json.dumps({"new_embodiment": {"action": {
+        "min": [-1.0] * 10 + [0.0, -1.0], "max": [1.0] * 10 + [0.0, 1.0]}}}))
+    scale = E.noise_scale(str(run / "final_model/pytorch_model.pt"))
+    assert scale == [1.0] * 10 + [0.0, 1.0]  # the torso never moves in the data: no noise on it
+    rng = np.random.default_rng(0)
+    draws = np.array([E.with_noise(np.zeros(12), scale, rng) for _ in range(4000)])
+    assert np.allclose(draws[:, 10], 0.0) and abs(draws[:, 0].std() - math.exp(-2.5)) < 0.005
+    assert E.RLINF_STD == pytest.approx(math.exp(-2.5))
+
+
+def test_cells_parse_and_noise_specs():
+    assert E.parse_cells("") == E.CELLS
+    assert E.parse_cells("noise/target,noise/pretrain") == (("noise", "target"), ("noise", "pretrain"))
+    with pytest.raises(ValueError):
+        E.parse_cells("noise/train")
+    eps = E.episodes_for([1000], cells=(("noise", "pretrain"), ("gym", "target")), noise_scale=[1.0] * 12)
+    assert [e["cell"] for e in eps] == ["noise/pretrain"] * 3 + ["gym/target"] * 3
+    assert eps[0]["noise_scale"] == [1.0] * 12 and "noise_scale" not in eps[3]
 
 
 def test_episode_list_covers_the_four_cells():
@@ -94,8 +119,8 @@ def test_job_script_runs_the_steps_in_order(tmp_path):
     port = free_port()
     env = dict(os.environ, PROBE_PORT=str(port), SERVER_SCRIPT=str(tmp_path / "server.sh"))
     out = tmp_path / "out"
-    res = subprocess.run(["bash", str(wt / "downstream/rlinf/run_e3_check.sh"), str(out), "/ckpt.pt", "1000-1001", "3"],
-                         capture_output=True, text=True, env=env, timeout=120)
+    res = subprocess.run(["bash", str(wt / "downstream/rlinf/run_e3_check.sh"), str(out), "/ckpt.pt", "1000-1001", "3",
+                          "noise/target"], capture_output=True, text=True, env=env, timeout=120)
     assert res.returncode == 0, res.stdout + res.stderr
     calls = [json.loads(x) for x in (out / "calls.jsonl").read_text().splitlines()]
     names = [c[0] for c in calls]
@@ -103,3 +128,4 @@ def test_job_script_runs_the_steps_in_order(tmp_path):
     run = next(c for c in calls if c[0] == "run")
     assert run[run.index("--servers") + 1] == f"127.0.0.1:{port}" and run[run.index("--seeds") + 1] == "1000-1001"
     assert run[run.index("--workers") + 1] == "3" and run[run.index("--ckpt") + 1] == "/ckpt.pt"
+    assert run[run.index("--cells") + 1] == "noise/target"

@@ -53,6 +53,11 @@ import closed_loop  # noqa: E402
 
 TASKS = ("CoffeeSetupMug", "StackBowlsCabinet", "TurnOffStove")
 CELLS = (("gym", "target"), ("gym", "pretrain"), ("rlinf", "target"), ("rlinf", "pretrain"))
+# the second round of the check (2026-10-30 evening): RLinf's StarVLA wrapper samples the executed actions in its
+# training rollouts whatever the config says (predict_action_batch: mode "train" sets do_sample True), from a Gaussian
+# around the mean in the normalised action space with std exp(actor_logstd), initialised at exp(-2.5) = 0.082
+NOISE_CELLS = (("noise", "target"), ("noise", "pretrain"))
+RLINF_STD = 0.0820849986238988  # exp(-2.5)
 MAX_STEPS = 512  # E3's max_episode_steps
 CAMERAS = ("robot0_agentview_left", "robot0_agentview_right", "robot0_eye_in_hand")
 OBS_PAIRS = [("CoffeeSetupMug", s) for s in range(1000, 1007)] + [("StackBowlsCabinet", s) for s in range(1000, 1007)] \
@@ -94,6 +99,23 @@ def rlinf_flat(vector):
     return np.asarray(vector, dtype=np.float64)
 
 
+def noise_scale(ckpt: str) -> list:
+    """Per action dimension, what a unit of RLinf's normalised noise is in the environment's action: (max - min) / 2
+    of the checkpoint's min-max statistics (run/dataset_statistics.json, new_embodiment), the scale RLinf's
+    unnormalize_actions_for_env applies to a sampled normalised action."""
+    stats = json.loads((Path(ckpt).resolve().parents[1] / "dataset_statistics.json").read_text())
+    act = next(iter(stats.values()))["action"]
+    return [(hi - lo) / 2.0 for lo, hi in zip(act["min"], act["max"])]
+
+
+def with_noise(vector, scale, rng, std: float = RLINF_STD):
+    """vector + N(0, std * scale) per dimension (RLinf's sampled rollout action)."""
+    import numpy as np
+
+    v = np.asarray(vector, dtype=np.float64)
+    return v + rng.normal(0.0, 1.0, size=v.shape) * std * np.asarray(scale, dtype=np.float64)
+
+
 def read_differently(vector) -> dict:
     """Whether robosuite reads the raw gripper / mode numbers differently from the thresholded ones: the gripper
     closes on a positive number (sign) where the gym path opens it below 0.5; base mode is on above zero where the
@@ -127,15 +149,18 @@ def run_episode(spec: dict) -> dict:
         genv = env.unwrapped
         steps, success, diff = 0, False, {"gripper": 0, "mode": 0}
         raw_g, raw_m = [], []
+        rng = np.random.default_rng(int(spec["seed"]) * 100 + TASKS.index(spec["task"]))  # the noise cells' draws
         while steps < spec["max_steps"] and not success:
             closed_loop._heartbeat()
             response = policy.predict_action({"examples": [contract.example(obs)], "do_sample": False})
             for vector in contract.actions(response["data"]["actions"])[:min(spec["execute_steps"], spec["max_steps"] - steps)]:
+                if spec["path"] == "noise":  # RLinf's sampled action: the mean plus its rollout noise
+                    vector = with_noise(vector, spec["noise_scale"], rng)
                 d = read_differently(vector)
                 diff = {k: diff[k] + int(d[k]) for k in diff}
                 raw_g.append(float(vector[GRIPPER]))
                 raw_m.append(float(vector[MODE]))
-                if spec["path"] == "gym":
+                if spec["path"] in ("gym", "noise"):
                     obs, _r, _te, _tr, info = env.step(gym_action(vector, env.action_space))
                     success = bool(info.get("success", False))
                 else:
@@ -171,10 +196,21 @@ def run_episode(spec: dict) -> dict:
     return out
 
 
-def episodes_for(seeds, cells=CELLS, tasks=TASKS, states_dir=None) -> list:
-    return [{"task": t, "seed": s, "path": p, "split": sp, "max_steps": MAX_STEPS, "execute_steps": 16,
-             "states_dir": states_dir, "cell": f"{p}/{sp}"}
+def episodes_for(seeds, cells=CELLS, tasks=TASKS, states_dir=None, noise_scale=None) -> list:
+    return [dict({"task": t, "seed": s, "path": p, "split": sp, "max_steps": MAX_STEPS, "execute_steps": 16,
+                  "states_dir": states_dir, "cell": f"{p}/{sp}"}, **({"noise_scale": noise_scale} if p == "noise" else {}))
             for p, sp in cells for t in tasks for s in seeds]
+
+
+def parse_cells(text: str):
+    """"gym/target,noise/pretrain" -> (("gym", "target"), ("noise", "pretrain")); empty: the four first cells."""
+    if not text:
+        return CELLS
+    out = tuple(tuple(c.split("/")) for c in text.split(",") if c.strip())
+    known = set(CELLS) | set(NOISE_CELLS)
+    if not out or any(c not in known for c in out):
+        raise ValueError(f"cells must be among {sorted('/'.join(c) for c in known)}: {text}")
+    return out
 
 
 def run_cmd(args) -> int:
@@ -188,7 +224,10 @@ def run_cmd(args) -> int:
             r = json.loads(line)
             if r.get("status") == "complete":
                 done.add((r["cell"], r["task"], r["seed"]))
-    eps = [e for e in episodes_for(parse_seeds(args.seeds), states_dir=str(out / "states"))
+    cells = parse_cells(args.cells)
+    scale = noise_scale(args.ckpt) if any(p == "noise" for p, _ in cells) else None
+    eps = [e for e in episodes_for(parse_seeds(args.seeds), cells=cells, states_dir=str(out / "states"),
+                                   noise_scale=scale)
            if (e["cell"], e["task"], e["seed"]) not in done]
     inflight = run_dir / "inflight"
     inflight.mkdir(exist_ok=True)
@@ -344,7 +383,8 @@ def summarize(rows: list) -> dict:
     import x0_qa
 
     out = {}
-    for cell in dict.fromkeys(f"{p}/{s}" for p, s in CELLS):
+    present = {r.get("cell") for r in rows}
+    for cell in [f"{p}/{s}" for p, s in CELLS + NOISE_CELLS if f"{p}/{s}" in present or (p, s) in CELLS]:
         cr = [r for r in rows if r.get("cell") == cell and r.get("status") == "complete"]
         per = {}
         for task in TASKS + ("all",):
@@ -400,6 +440,7 @@ def main(argv=None) -> int:
     r.add_argument("--ckpt", required=True)
     r.add_argument("--servers", required=True)
     r.add_argument("--seeds", default="1000-1009")
+    r.add_argument("--cells", default="", help="e.g. noise/target,noise/pretrain (default: the four first cells)")
     r.add_argument("--workers", type=int, default=12)
     r.add_argument("--starvla-root", default=str(WORKTREE / "third_party/starVLA"))
     r.add_argument("--out", required=True)
