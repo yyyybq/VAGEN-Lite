@@ -59,9 +59,33 @@ def parse_lora(text: str) -> dict:
     return out
 
 
+def parse_cotrain(text: str) -> dict:
+    """C1: "lambda=0.1,diag_every=10,skip_final_save=1" -> trainer.cotrain (downstream/train/cotrain_entry.py), with
+    the text sources of cotrain_text.py written out so the config says what was read."""
+    if not text:
+        return {}
+    out = {}
+    for part in text.split(","):
+        if not part.strip():
+            continue
+        k, v = (x.strip() for x in part.split("="))
+        out[k] = float(v) if k == "lambda" else int(v)
+    unknown = set(out) - {"lambda", "diag_every", "skip_final_save", "max_tokens", "seed"}
+    if "lambda" not in out or unknown:
+        raise ValueError(f"--cotrain needs lambda (and optionally diag_every, skip_final_save, max_tokens, seed): {text}")
+    if "skip_final_save" in out:
+        out["skip_final_save"] = bool(out["skip_final_save"])
+    sys.path.insert(0, str(HERE))
+    import cotrain_text
+
+    out["sources"] = dict(cotrain_text.SOURCES)
+    out["mix"] = "even ranks traj, odd ranks qa (1:1)"
+    return out
+
+
 def build_config(recipe: dict, *, exp_dir: Path, exp_id: str, start_path: str, data_dir: Path, seed: int,
                  steps: int, save_interval: int, log_every: int, full_state_interval: int = 0,
-                 eval_points=(), freeze_modules: str = "", lora: dict = None) -> dict:
+                 eval_points=(), freeze_modules: str = "", lora: dict = None, cotrain: dict = None) -> dict:
     import copy
 
     cfg = copy.deepcopy(recipe)
@@ -79,6 +103,10 @@ def build_config(recipe: dict, *, exp_dir: Path, exp_id: str, start_path: str, d
         if freeze_modules:
             raise ValueError("--lora freezes the model itself; do not combine it with --freeze-modules")
         trainer["lora"] = dict(lora)
+    if cotrain:  # C1 (the user's decision of 2026-10-30): a text loss beside the action loss, cotrain_entry.py
+        if lora or freeze_modules:
+            raise ValueError("--cotrain trains the whole model: no --lora or --freeze-modules with it")
+        trainer["cotrain"] = dict(cotrain)
     if full_state_interval:
         trainer.update(full_state_interval=int(full_state_interval),
                        eval_points=[int(p) for p in eval_points if 0 < int(p) < int(steps)])
@@ -125,6 +153,8 @@ def main(argv=None) -> int:
                                                "(trainer.lora; only LoRA and the action head train)")
     ap.add_argument("--eval-plan", default="", help="recorded in experiment.json: the plan of the in-job evaluation "
                                                     "when it is not eval_d6.json (the job sets EVAL_PLAN; T5)")
+    ap.add_argument("--cotrain", default="", help="C1: a text loss beside the action loss, e.g. lambda=0.1,diag_every=10 "
+                                                  "(trainer.cotrain; run with downstream/train/cotrain_entry.py)")
     args = ap.parse_args(argv)
     points = [int(p) for p in args.eval_points.split(",") if p.strip()]
     for v in [args.full_state_interval] + points:
@@ -159,7 +189,8 @@ def main(argv=None) -> int:
     cfg = build_config(recipe, exp_dir=exp_dir, exp_id=args.exp_id, start_path=start["path"], data_dir=args.data,
                        seed=args.seed, steps=args.steps, save_interval=args.save_interval, log_every=args.log_every,
                        full_state_interval=args.full_state_interval, eval_points=points,
-                       freeze_modules=args.freeze_modules, lora=parse_lora(args.lora))
+                       freeze_modules=args.freeze_modules, lora=parse_lora(args.lora),
+                       cotrain=parse_cotrain(args.cotrain))
     (exp_dir / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
     sys.path.insert(0, str(WORKTREE / "scripts"))
     from prepare_starvla_transfer import inspect_checkpoint
@@ -179,6 +210,7 @@ def main(argv=None) -> int:
         "steps": args.steps, "save_interval": args.save_interval, "gpus": args.gpus,
         **({"freeze_modules": args.freeze_modules} if args.freeze_modules else {}),
         **({"lora": parse_lora(args.lora)} if args.lora else {}),
+        **({"cotrain": parse_cotrain(args.cotrain)} if args.cotrain else {}),
         **({"eval_plan": args.eval_plan} if args.eval_plan else {}),
         **({"segmented": True, "full_state_interval": args.full_state_interval,
             "eval_points": sorted({p for p in points if 0 < p <= args.steps} | {args.steps}),
