@@ -288,6 +288,8 @@ class Watcher:
         self.alerts, self.notes = [], []
         self.disk = None
         self._hold, self._jobs, self._views, self._rooms = None, None, {}, {}
+        self._jobs_ok = False  # whether the job list of this pass could be read (an empty list may be a failed one)
+        self._uncertain_now = False  # a submission of this pass had an unknown outcome: no more submissions this pass
         self.pending = []  # (priority key, shard dir, checkpoint, i, k, job name) collected in a pass
         self.pending8 = []  # (priority key, evaluation dir, checkpoint, job name): 8-card evaluations for idle machines
         self.waiting_whole = []  # the same, for our 8-card evaluations submitted but still waiting for a machine
@@ -332,7 +334,12 @@ class Watcher:
         self.jobs.prepare(run, self.a.cards, pool, name[:40],
                           ["bash", str(HERE / "run_eval_ckpt.sh"), str(ckpt), str(run / "out"), str(self.a.servers),
                            str(workers)])
-        return f"submitted {self.jobs.submit(run)} ({pool}, workers {workers})"
+        try:
+            jid = self.jobs.submit(run)
+        except sco_job.SubmitUncertain as exc:
+            self.on_uncertain(exc)
+            return "提交结果不明，核对中"
+        return f"submitted {jid} ({pool}, workers {workers})"
 
     # ------------------------------------------------------------------------------- one-card shards (2026-10-22)
     def held(self) -> bool:
@@ -353,8 +360,57 @@ class Watcher:
 
     def job_list(self):
         if self._jobs is None:
-            self._jobs = self.jobs.list_jobs() or []
+            jobs = self.jobs.list_jobs()
+            self._jobs_ok = jobs is not None
+            self._jobs = jobs or []
         return self._jobs
+
+    # ------------------------------------------------------------------- uncertain submissions (2026-10-30 22:45)
+    def on_uncertain(self, exc) -> None:
+        """A submission sco may or may not have made (sco_job.SubmitUncertain): remember its run for
+        settle_uncertain() and stop submitting for this pass (sco itself may be down).  Before 2026-10-30 this
+        exited the watcher, which then stayed down until a person restarted it."""
+        self._uncertain_now = True
+        run = str(getattr(exc, "run", "") or "")
+        listed = self.state.setdefault("uncertain", [])
+        if run and run not in listed:
+            listed.append(run)
+        self.alerts.append(f"提交结果不明：{Path(run).name or run}（{exc}）。本轮不再提交；之后按任务列表核对，找到就认领，"
+                           f"{sco_job.RESOLVE_AFTER_MIN:g} 分钟后还没有就清掉标记重交")
+
+    def settle_uncertain(self) -> list:
+        """Runs with RUN/job/submit_uncertain.json (those on_uncertain() remembered and those of --queue-dir
+        entries): sco_job.resolve_uncertain adopts the job the job list shows, or clears the mark
+        RESOLVE_AFTER_MIN minutes after the attempt so the run is submitted again; the rest stay on the board."""
+        runs_ = list(dict.fromkeys(self.state.get("uncertain", [])))
+        qdir = Path(self.a.queue_dir) if self.a.queue_dir else None
+        for entry in sorted(qdir.glob("*.json")) if qdir and qdir.is_dir() else []:
+            run = str(json.loads(entry.read_text()).get("run") or "")
+            if run and (Path(run) / "job" / sco_job.UNCERTAIN).exists() and run not in runs_:
+                runs_.append(run)
+        keep, done = [], []
+        for run in runs_:
+            if not (Path(run) / "job" / sco_job.UNCERTAIN).exists():
+                continue
+            jobs = self.job_list()
+            res = sco_job.resolve_uncertain(Path(run), jobs if self._jobs_ok else None)
+            name = Path(run).name
+            if res is None:
+                continue
+            kind, detail = res
+            if kind == "adopted":
+                self.notes.append(f"提交结果不明的 {name}：任务列表里找到了 {detail}，已认领")
+            elif kind == "cleared":
+                self.notes.append(f"提交结果不明的 {name}：{sco_job.RESOLVE_AFTER_MIN:g} 分钟内任务列表里没有，标记已清掉，重新排队")
+            elif kind == "ambiguous":
+                keep.append(run)
+                self.alerts.append(f"提交结果不明的 {name}：任务列表里有 {len(detail)} 个同名任务（{', '.join(detail)}），要人来定")
+            else:
+                keep.append(run)
+                self.alerts.append(f"提交结果不明的 {name}：还在核对（任务列表{'' if self._jobs_ok else '读不出'}）")
+            done.append((name, kind))
+        self.state["uncertain"] = keep
+        return done
 
     def view(self, pool: str):
         if pool not in self._views:
@@ -397,6 +453,8 @@ class Watcher:
         """Why nothing of `cards` cards may be submitted (to `pool`, None: anywhere) in this pass, None if allowed."""
         if self.a.pause_file and Path(self.a.pause_file).exists():
             return f"暂停提交（{self.a.pause_file} 存在）"
+        if self._uncertain_now:
+            return "本轮有一次提交结果不明，暂停提交"
         if self.held():
             return "等密集奖励第一批上机器"
         waiting = self.priority_waiting(cards, pool)
@@ -721,6 +779,9 @@ class Watcher:
             run = Path(spec["run"])
             if (run / "job/submission.json").exists():
                 continue
+            if (run / "job" / sco_job.UNCERTAIN).exists():  # settle_uncertain() has not adopted or cleared it yet
+                self.notes.append(f"{spec.get('what', entry.stem)}本轮不提交：上次提交结果不明，还在核对")
+                continue
             cards = int(spec.get("cards", 8))
             if cards not in (1, 8) or not (run / "job/prepared.json").is_file():
                 self.alerts.append(f"排队任务 {entry.name}：只支持已 prepare 的 1 卡或 8 卡任务，没提交")
@@ -744,7 +805,11 @@ class Watcher:
             else:
                 if prepared.get("pool") != pool:
                     (run / "job/prepared.json").write_text(json.dumps(dict(prepared, pool=pool), indent=1) + "\n")
-                jid = self.jobs.submit(run)
+                try:
+                    jid = self.jobs.submit(run)
+                except sco_job.SubmitUncertain as exc:
+                    self.on_uncertain(exc)
+                    break
                 self.sent_on_idle(entry.stem, run, "queue", jid)
                 sent.append(f"{spec.get('what', entry.stem)} {jid} ({pool})")
             if cards == 8:
@@ -1160,6 +1225,7 @@ class Watcher:
         self.guard()  # first: shards that started on an idle machine since the last look
         self.held()
         self.disk_ok()  # read once per pass, so the board always shows the free space (and its alarm)
+        self.settle_uncertain()  # before anything is submitted: adopt or clear earlier uncertain submissions
         if self.a.stage0 and self.a.shards:
             for s in runs.STARTS:
                 exp = self.experiments / runs.exp_id(s, "100", 1)
@@ -1171,14 +1237,21 @@ class Watcher:
                 rows.append(self.experiment_row(exp))
             else:
                 missing.append(exp_id)
-        self.release_at_full_state()
-        self.flush_shards()
-        self.flush_whole()
-        self.withdraw_for_main_line()
-        self.flush_queue()
-        self.resume_released()
+        try:  # a submission sco may or may not have made stops this pass's submitting, not the watcher
+            self.release_at_full_state()
+            self.flush_shards()
+            self.flush_whole()
+            self.withdraw_for_main_line()
+            self.flush_queue()
+            self.resume_released()
+        except sco_job.SubmitUncertain as exc:
+            self.on_uncertain(exc)
         rep = self.repeat_results()
-        gate = self.gate()
+        try:
+            gate = self.gate()
+        except sco_job.SubmitUncertain as exc:
+            self.on_uncertain(exc)
+            gate = None
         self.report()
         self.save()
         return rows, missing, rep, gate

@@ -12,6 +12,8 @@ outputs are not root-owned.  Same image, mount and card specs as the training li
 prepare(..., as_root=True) (2026-10-30, only for jobs that must read the root-only Qwen3-VL snapshot in
 /mnt/umm/shared_model, as the model line's jobs do) runs the payload as the container's root instead; such a
 payload gives what it writes back to the owner itself (run_qa_batch.sh does).
+A create whose outcome is unknown (2026-10-30) leaves RUN/job/submit_uncertain.json and raises SubmitUncertain;
+resolve_uncertain() later adopts the job from the job list or, if none appeared within 10 minutes, clears the mark.
 """
 from __future__ import annotations
 
@@ -208,21 +210,91 @@ def alone_on_machine(view, job_id: str, own_prefix: str = "downstream-ev"):
     return None
 
 
+UNCERTAIN = "submit_uncertain.json"
+RESOLVE_AFTER_MIN = 10.0
+
+
+class SubmitUncertain(SystemExit):
+    """A create whose outcome is unknown: sco failed or did not print exactly one job id (2026-10-30 22:45 its DNS
+    lookup timed out, and the watcher, which let this exit, stayed down until a person restarted it).  submit()
+    leaves RUN/job/submit_uncertain.json and refuses that run until resolve_uncertain() adopts the job it finds or
+    clears the mark.  A SystemExit, so the command line stops as before; the watcher catches it and goes on."""
+
+    def __init__(self, run, message: str):
+        super().__init__(message)
+        self.run = Path(run)
+
+
+def parse_utc(text):
+    try:
+        t = datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=datetime.timezone.utc)
+
+
 def submit(run: Path) -> str:
     job = run / "job"
     receipt = job / "submission.json"
     if receipt.exists():
         return json.loads(receipt.read_text())["job_id"]
+    if (job / UNCERTAIN).exists():
+        raise SubmitUncertain(run, f"{job / UNCERTAIN}: an earlier submission is uncertain; resolve_uncertain() "
+                                   "settles it from the job list")
     prepared = json.loads((job / "prepared.json").read_text())
     command = create_command(job, prepared)
+    tried = now()
     res = subprocess.run(command, capture_output=True, text=True)
     (job / "submit.log").write_text(res.stdout + "\n" + res.stderr)
     ids = set(re.findall(r"pt-[a-z0-9]+", res.stdout))
     if res.returncode != 0 or len(ids) != 1:
-        raise SystemExit("submission uncertain; read job/submit.log and the job list before any retry")
+        (job / UNCERTAIN).write_text(json.dumps({"utc": tried, "job_name": f"downstream-{prepared['name']}",
+                                                 "returncode": res.returncode, "ids": sorted(ids),
+                                                 "command": command}, indent=1) + "\n")
+        raise SubmitUncertain(run, "submission uncertain; read job/submit.log and the job list before any retry")
     job_id = ids.pop()
     receipt.write_text(json.dumps({"utc": now(), "job_id": job_id, "command": command}, indent=1) + "\n")
     return job_id
+
+
+def resolve_uncertain(run: Path, jobs, at=None, wait_min: float = RESOLVE_AFTER_MIN):
+    """Settle an uncertain submission of `run` (RUN/job/submit_uncertain.json) from a job list (list_jobs(); None
+    when it could not be read).  Returns
+        ("adopted", id)     exactly one job of the run's name created since a minute before the attempt: its receipt
+                            (job/submission.json) is written and the mark becomes submit_uncertain_adopted_<time>.json
+        ("cleared", None)   no such job wait_min minutes after the attempt: the mark becomes
+                            submit_uncertain_cleared_<time>.json, so the next submit() tries again
+        ("pending", None)   no such job yet, or no job list
+        ("ambiguous", ids)  more than one: the mark stays for a person to settle
+    or None when the run has no mark."""
+    job = Path(run) / "job"
+    mark = job / UNCERTAIN
+    if not mark.exists():
+        return None
+    rec = json.loads(mark.read_text())
+    tried = parse_utc(rec.get("utc"))
+    at = at or datetime.datetime.now(datetime.timezone.utc)
+    if jobs is None or tried is None:
+        return ("pending", None)
+    since = tried - datetime.timedelta(minutes=1)
+
+    def recent(j) -> bool:
+        t = parse_utc(j.get("create_time"))
+        return t is not None and t >= since
+
+    hits = sorted(str(j.get("name")) for j in jobs if j.get("display_name") == rec.get("job_name") and recent(j))
+    stamp = at.strftime("%Y%m%dT%H%M%SZ")
+    if len(hits) > 1:
+        return ("ambiguous", hits)
+    if hits:
+        (job / "submission.json").write_text(json.dumps({"utc": now(), "job_id": hits[0], "command": rec.get("command"),
+                                                         "adopted_after_uncertain": rec.get("utc")}, indent=1) + "\n")
+        mark.rename(job / f"submit_uncertain_adopted_{stamp}.json")
+        return ("adopted", hits[0])
+    if at - tried >= datetime.timedelta(minutes=wait_min):
+        mark.rename(job / f"submit_uncertain_cleared_{stamp}.json")
+        return ("cleared", None)
+    return ("pending", None)
 
 
 def status(run: Path) -> dict:
