@@ -38,6 +38,10 @@ def main() -> int:
                          "its result file after the start second and two runs of one checkpoint started in the same "
                          "second overwrite each other's results (Act-SFT MindCube, 2026-10-29)")
     a = ap.parse_args()
+    if not a.stack_dump and a.benchmarks in ("site", "site_video", "easi_8"):
+        # empirical (2026-10-29/30): every one-card SITE video run without the stack-dump thread stalled before its
+        # first answer (5 of 5), every run with it finished (5 of 5); the cause is not known
+        a.stack_dump = 900
     if a.start_delay:
         import time
         time.sleep(a.start_delay)

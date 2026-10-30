@@ -94,6 +94,9 @@
 
 ## 2. 正在运行什么
 
+没有（2026-10-30 第 1、2 轮 checkpoint 的 EASI-8 完成，报告第 8 节：EASI-8 平均 46.2 / 48.1 / 48.3；SITE 在第 1 轮就降 4.7 分，
+少训几轮不能解决；`easi_job.py` 对 SITE 视频默认打开 `--stack-dump`（不带的 5 次全停、带的 5 次全完成））。下面是当时的记录。
+
 用户 2026-10-29 要求：在 EASI-8 上评测 QA-SFT 的 checkpoint-170（第 1 轮）和 checkpoint-340（第 2 轮），看少训几轮能不能保住提高、减少 SITE 的退步。
 18 个单卡任务（2 个 checkpoint × 9 个 lmms-eval 任务，SITE 拆成图片和视频），`exps/interiorgs_qa_jobs/easi1_qasft_ck{170,340}_*_20261030`，
 结果在 `exps/interiorgs_qa_easi_20261028/qasft256_ck{170,340}/`。同一 checkpoint 的任务按 `--start-delay` 错开启动秒数，避免结果文件同名覆盖。
