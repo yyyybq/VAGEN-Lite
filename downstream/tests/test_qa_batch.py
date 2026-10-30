@@ -266,6 +266,7 @@ def test_qwen3_gate_follows_the_three_fixed_rules():
     exactly_ten = dict(q0, Q3RS=row(0.60, p=0.01))
     assert QR.gate(exactly_ten, g0)["Q3RS"]["rule1"]  # 10.0 points counts
     assert QR.gate(q0, None)["gate"] is None  # G0 not in yet: undecided
+    assert QR.gate(None, None)["gate"] is None  # Qwen3 not asked yet: undecided, not failed
 
 
 def test_g0_sample_notes_for_every_kind():

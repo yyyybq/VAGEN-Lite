@@ -56,7 +56,10 @@ def gate(q0: dict, g0: dict) -> dict:
                   "unparsed_rate": unparsed, "rule2": bool(r2), "rule3": r3,
                   "passes": bool(r1 and r2 and r3) if r3 is not None else None}
     passes = [v.get("passes") for v in out.values() if v.get("available")]
-    out["gate"] = True if any(p is True for p in passes) else (None if any(p is None for p in passes) else False)
+    if not passes:
+        out["gate"] = None  # Qwen3's answers are not in yet
+    else:
+        out["gate"] = True if any(p is True for p in passes) else (None if any(p is None for p in passes) else False)
     return out
 
 
@@ -72,7 +75,10 @@ def table(res: dict, groups, title: str, extra=None) -> list:
         cells = [f"{pct(r[g]['accuracy'])}（{pct(r[g]['ci'][0])}–{pct(r[g]['ci'][1])}）" if g in r else "—" for g in groups]
         vs = r["all"].get("vs_reference")
         ref = f"{vs['only_model']} / {vs['only_reference']}，p = {vs['p']:.3g}" if vs else "—"
-        lines.append(f"| {m} | " + " | ".join(cells) + f" | {pct(r['all'].get('unparsed_rate'))} | {ref} |")
+        un = r["all"].get("unparsed_rate")
+        if un is None and r["all"].get("n"):  # G0's rows count the unparsed replies
+            un = r["all"].get("unparsed", 0) / r["all"]["n"]
+        lines.append(f"| {m} | " + " | ".join(cells) + f" | {pct(un)} | {ref} |")
     return lines + [""]
 
 
