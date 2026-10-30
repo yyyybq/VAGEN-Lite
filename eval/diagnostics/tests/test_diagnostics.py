@@ -345,7 +345,7 @@ def test_compare_single_results_and_errors(tmp_path):
     assert res["goal_after"]["pooled"]["diff"] == 0.2 and res["goal_after"]["pooled"]["failed"] == ["p"]  # p 0.5
     assert res["occlusion"]["pooled"]["failed"] == ["size", "sign"]                       # 0 has no sign
     assert QP.make_pairs(["a0", "a1"], ["b"]) == [("S0", "a0", "b"), ("D", "a1", "b")]
-    assert QP.parse_group("D=a,b") == ("D", ["a", "b"]) and QP.parse_group("x") == ("x", ["x"])
+    assert QP.parse_group("D=a,b") == ("D", [("", ["a", "b"])]) and QP.parse_group("x") == ("x", [("", ["x"])])
     with pytest.raises(ValueError):
         QP.parse_group("a,b,c")
     (tmp_path / "sub").mkdir()                                                            # results in another folder
@@ -359,3 +359,80 @@ def test_compare_single_results_and_errors(tmp_path):
     write_result(tmp_path, "other", [dict(r, answer="C") if r["sample_id"] == "o2" else r for r in rows], lambda r: True)
     with pytest.raises(ValueError, match="another type or answer"):
         QP.compare(probe, tmp_path, ("A", ["other"]), ("B", ["y"]), "t")
+
+
+# pre-registration v3 (the user, 2026-10-30): two seeds per group, pairs of the same seed and side, the sign over seeds
+def test_parse_group_with_seeds():
+    assert QP.parse_group("D=20261019:a,b;20261021:c,d") == ("D", [("20261019", ["a", "b"]), ("20261021", ["c", "d"])])
+    assert QP.parse_group("a,b;c,d") == ("a-b-c-d", [("seed1", ["a", "b"]), ("seed2", ["c", "d"])])
+    assert QP.parse_group("C0=s1:sub/a,/abs/b") == ("C0", [("s1", ["sub/a", "/abs/b"])])   # folders in result names
+    for bad in ("D=a,b;c", "D=x:a,b;x:c,d", "D=a,b;c,d;e,f", "D=a,b,c;d,e"):
+        with pytest.raises(ValueError):
+            QP.parse_group(bad)
+
+
+def test_seed_pairs_go_by_seed_and_side():
+    two = [("s1", ["a1", "a2"]), ("s2", ["a3", "a4"])]
+    other = [("s1", ["b1", "b2"]), ("s2", ["b3", "b4"])]
+    pairs = QP.make_seed_pairs(two, other)
+    assert pairs == [("s1/S0", "a1", "b1", "s1", "S0"), ("s1/D", "a2", "b2", "s1", "D"),
+                     ("s2/S0", "a3", "b3", "s2", "S0"), ("s2/D", "a4", "b4", "s2", "D")]
+    assert QP.seed_groups(pairs) == {"s1": [0, 1], "s2": [2, 3]}
+    assert QP.make_seed_pairs(two, [("", ["y"])])[1] == ("s1/D", "a2", "y", "s1", "D")     # a single result serves all
+    assert QP.make_seed_pairs([("", ["y"])], two)[2] == ("s2/S0", "y", "a3", "s2", "S0")
+    one = QP.make_seed_pairs([("", ["a", "b"])], [("20261019", ["c", "d"])])              # one seed each: as v2
+    assert one == [("S0", "a", "c", "20261019", "S0"), ("D", "b", "d", "20261019", "D")] and QP.seed_groups(one) == {}
+    for b in ([("", ["b1", "b2"])],                                    # one seed against two
+              [("s1", ["b1", "b2"]), ("s3", ["b3", "b4"])]):            # seeds that do not match
+        with pytest.raises(ValueError):
+            QP.make_seed_pairs(two, b)
+    with pytest.raises(ValueError):
+        QP.make_seed_pairs([("s1", ["a", "b"])], [("s2", ["c", "d"])])
+
+
+def test_compare_two_seeds_sign_over_the_seeds(tmp_path):
+    import json
+
+    probe, rows = small_probe(tmp_path)
+    # the goal questions each result answers right (indices).  goal_now, A - B per pair: seed 1 S0 +0.6, D -0.2;
+    # seed 2 S0 +0.2, D +0.2: one pair is negative but both seeds are +0.2.  goal_after: seed 1 +0.8 / +0.8, seed 2
+    # -0.1 / -0.1: the seeds differ in sign.  Occlusion: D results right on full and partial, C results on none.
+    right = {"d1s0": (set(range(6)), set(range(8))), "d1d": (set(), set(range(8))), "d2s0": ({0, 1}, set()),
+             "d2d": ({0, 1}, set()), "c1s0": (set(), set()), "c1d": ({0, 1}, set()), "c2s0": (set(), {9}),
+             "c2d": (set(), {9})}
+    for name, (now, after) in right.items():
+        occ = ("full", "partial") if name.startswith("d") else ("none",)
+        write_result(tmp_path, name, rows, lambda r, now=now, after=after, occ=occ:
+                     (r["qtype"] == "goal_now" and int(r["sample_id"][8:]) in now)
+                     or (r["qtype"] == "goal_after" and int(r["sample_id"][10:]) in after) or r["answer_value"] in occ)
+    QP.main(["compare", "--probe", str(probe), "--out", str(tmp_path), "--reps", "200",
+             "--a", "D=20261019:d1s0,d1d;20261021:d2s0,d2d", "--b", "C=20261019:c1s0,c1d;20261021:c2s0,c2d"])
+    res = json.loads((tmp_path / "compare_D_vs_C.json").read_text(encoding="utf-8"))
+    assert res["rules"]["same_sign_over"] == "seeds"
+    assert [(p["pair"], p["a"], p["b"]) for p in res["pairs"]] == [
+        ("20261019/S0", "d1s0", "c1s0"), ("20261019/D", "d1d", "c1d"),
+        ("20261021/S0", "d2s0", "c2s0"), ("20261021/D", "d2d", "c2d")]
+    g = res["goal_now"]
+    assert [x["diff"] for x in g["per_pair"]] == pytest.approx([0.6, -0.2, 0.2, 0.2])
+    assert [(s["seed"], s["n"]) for s in g["per_seed"]] == [("20261019", 20), ("20261021", 20)]
+    assert [s["diff"] for s in g["per_seed"]] == pytest.approx([0.2, 0.2])
+    assert [(s["only_a"], s["only_b"], s["p"]) for s in g["per_seed"]] == [(6, 2, QP.mcnemar(6, 2)), (4, 0, QP.mcnemar(4, 0))]
+    assert (g["pooled"]["n"], g["pooled"]["only_a"], g["pooled"]["only_b"]) == (40, 10, 2)
+    assert g["pooled"]["diff"] == pytest.approx(0.2) and g["pooled"]["p"] == QP.mcnemar(10, 2) < 0.05
+    assert g["pooled"]["verdict"] == "difference"                                   # both seeds positive
+    assert QP.verdict(0.2, [0.6, -0.2, 0.2, 0.2], 0.10, p=0.04)["failed"] == ["sign"]  # over the four pairs: no
+    a = res["goal_after"]
+    assert [s["diff"] for s in a["per_seed"]] == pytest.approx([0.8, -0.1])
+    assert a["pooled"]["diff"] == pytest.approx(0.35) and a["pooled"]["p"] < 0.05 and a["pooled"]["failed"] == ["sign"]
+    o = res["occlusion"]
+    assert o["pooled"]["n"] == 48 and [s["n"] for s in o["per_seed"]] == [24, 24]
+    assert [s["diff"] for s in o["per_seed"]] == pytest.approx([1 / 3, 1 / 3])
+    assert o["per_seed"][0]["ci"] == pytest.approx([1 / 3, 1 / 3]) and o["pooled"]["verdict"] == "difference"
+    md = (tmp_path / "compare_D_vs_C.md").read_text(encoding="utf-8")
+    assert "且两个种子的差同号" in md and "种子 20261019 +20.0（S0 +60.0、D -20.0）" in md
+    assert "| `goal_now` | 种子 20261019 S0 | 10 |" in md and "| `goal_now` | 种子 20261021（两对） | 20 |" in md
+    assert "| 种子 20261019（两对） | 24 |" in md and "没达到：两个种子的差不同号或为 0" in md
+    assert md.count("**有差异**") == 4                                              # goal_now and occlusion
+    with pytest.raises(ValueError):                                                 # the seeds must match
+        QP.main(["compare", "--probe", str(probe), "--out", str(tmp_path),
+                 "--a", "D=20261019:d1s0,d1d;20261021:d2s0,d2d", "--b", "C=20261019:c1s0,c1d;20261022:c2s0,c2d"])

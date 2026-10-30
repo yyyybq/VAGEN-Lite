@@ -221,4 +221,12 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
   - 新文件 `test_matrix_v3.py` 8 个：各组和 `vars.yaml`、和主线的登记、和混合配置、和集群上建好的数据一致；A 关闭；名字不和已有的重复；C0 的检查点都在。
   - `data_gen/sft_mixture/tests` 共 27 个，全部通过。
 - **预登记**：第三版 2026-10-30 定稿，替换了 `PREREG_D_vs_C.md`；旧版（Qwen2.5）在 `PREREG_D_vs_C_v2_qwen25.md`。
+- **`eval/diagnostics/qa_probe.py` 的 `compare`**（2026-10-30，按预登记第三版）：
+  - 一组可以写两个种子：`GROUP=SEED1:S0,D;SEED2:S0,D`，种子标签可省（seed1、seed2）；
+  - 配对是同一种子、同一侧，两组的种子标签要相同；单个结果仍对上另一组的每一对；
+  - 每个种子另报两对的平均差、McNemar、自助法的置信区间；合起来的差是所有对的平均，McNemar 用所有"题 × RL"，自助法用同一组抽样；
+  - "同号"按两个种子算（每个种子的差是两对的平均）；只有一个种子时照旧按 S0、D 两对算；
+  - JSON 多了 `per_seed`、每对的 `seed` / `side` 和 `rules.same_sign_over`；Markdown 多了每个种子的行。
+  - 测试：`test_diagnostics.py` 加 3 个（写法、配对规则、两个种子的端到端：一对为负但两个种子同号判"有差异"，两个种子反号判不过），共 23 个通过。
+  - 兼容：10-29 的三个 C0 比较用新代码在 /tmp 重跑，旧 JSON 的每一项都相同。
 - 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对。
