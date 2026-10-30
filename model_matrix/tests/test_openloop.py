@@ -63,6 +63,39 @@ class OpenLoopTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 O.eval_data(folder)
 
+    def test_perturbations(self):
+        """Decision 36 of 2026-10-30: mild changes of every image, of the same size and kind."""
+        from PIL import Image
+
+        from model_matrix.downstream import openloop as O
+
+        grad = np.tile(np.arange(64, dtype=np.uint8)[None, :, None] * 4, (48, 1, 3))  # 48x64 RGB, not uniform
+        pil = Image.fromarray(grad)
+        for way in O.PERTURB:
+            p = O.perturbed(pil, way)
+            self.assertEqual((p.size, p.mode), (pil.size, pil.mode))
+            self.assertFalse(np.array_equal(np.asarray(p), grad), way)
+            a = O.perturbed(grad, way)
+            self.assertEqual((a.shape, a.dtype), (grad.shape, grad.dtype))
+            self.assertFalse(np.array_equal(a, grad), way)
+        self.assertEqual(int(grad[0, 1, 0]), 4)  # the original untouched
+        batch = [{"image": [pil, grad], "lang": "x"}, {"image": pil, "lang": "y"}]
+        jpeg = O.with_images(batch, "jpeg")
+        self.assertEqual(len(jpeg[0]["image"]), 2)
+        self.assertIs(batch[0]["image"][0], pil)
+        self.assertEqual(jpeg[1]["image"].size, pil.size)  # one image, not a list
+        with self.assertRaises(ValueError):
+            O.perturbed(pil, "noise")
+        self.assertEqual(O.parse_ways("images,jpeg,blur,color"), ("images", "jpeg", "blur", "color"))
+        self.assertEqual(O.parse_ways(",".join(O.WAYS)), O.WAYS)
+        for bad in ("jpeg,images", "images,jpeg,jpeg", "images,noise", ""):
+            with self.assertRaises(ValueError):
+                O.parse_ways(bad)
+        e, j = O.Errors(), O.Errors()
+        e.add(np.full((1, 2, 3), 0.1), np.zeros((1, 2, 3)))
+        j.add(np.full((1, 2, 3), 0.2), np.zeros((1, 2, 3)))
+        self.assertAlmostEqual(O.summarize({"images": e, "jpeg": j})["jpeg"]["ratio_to_images"], 4.0)
+
     def test_errors(self):
         from model_matrix.downstream import openloop as O
 

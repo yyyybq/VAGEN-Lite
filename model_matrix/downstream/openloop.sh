@@ -16,6 +16,7 @@ export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 NUMEXPR_NUM_TH
 CKPTS=()
 for c in "$@"; do CKPTS+=(--ckpt "$c"); done
 [[ -n "${EVAL_DATA:-}" ]] && CKPTS+=(--eval-data "$EVAL_DATA")
+[[ -n "${WAYS:-}" ]] && CKPTS+=(--ways "$WAYS")  # decision 36: e.g. images,jpeg,blur,color
 cd "$STARVLA_ROOT"
 source "$MWT/examples/train/robocasa/setup_starvla_env.sh" > /dev/null
 set +e

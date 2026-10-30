@@ -15,12 +15,18 @@ diffusion noise (torch seeded per batch): the images as they are ("images"), eve
 ("black"), and the batch's images moved one sample on ("shuffled": real images of another sample).  Per checkpoint
 and way: the mean squared error of the normalized actions (mse) and the trainer's mse_score form (the batch's
 Euclidean distance over its number of values, averaged over batches).  Writes OUT.json.
+
+``--ways`` picks the ways (default the three above); the user's decision 36 of 2026-10-30 adds mild perturbations of
+every image (PERTURB): re-encoded as JPEG at quality 30 ("jpeg"), a Gaussian blur of radius 1 ("blur"), brightness
+x1.15 and contrast x0.85 ("color") -- how much a checkpoint's error grows under small image changes such as those
+between the recorded demonstration videos and the simulator's live frames.
 """
 from __future__ import annotations
 
 import argparse
 import copy
 import hashlib
+import io
 import json
 import sys
 import time
@@ -31,6 +37,29 @@ import numpy as np
 
 DS_TRAIN = Path("/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream/downstream/train")
 WAYS = ("images", "black", "shuffled")
+PERTURB = ("jpeg", "blur", "color")
+ALL_WAYS = WAYS + PERTURB
+
+
+def perturbed(image, way: str):
+    """``image`` (PIL image or array) changed by one of PERTURB, of the same size and kind."""
+    from PIL import Image, ImageEnhance, ImageFilter
+
+    array = isinstance(image, np.ndarray)
+    im = Image.fromarray(image) if array else image
+    if way == "jpeg":
+        buf = io.BytesIO()
+        im.convert("RGB").save(buf, "JPEG", quality=30)
+        buf.seek(0)
+        out = Image.open(buf).convert(im.mode)
+        out.load()
+    elif way == "blur":
+        out = im.filter(ImageFilter.GaussianBlur(radius=1.0))
+    elif way == "color":
+        out = ImageEnhance.Contrast(ImageEnhance.Brightness(im).enhance(1.15)).enhance(0.85)
+    else:
+        raise ValueError(f"unknown perturbation {way}; known {PERTURB}")
+    return np.asarray(out, dtype=image.dtype) if array else out
 
 
 def blank_like(image):
@@ -55,9 +84,21 @@ def with_images(examples: List[dict], way: str) -> List[dict]:
             raise ValueError("shuffled needs at least two samples in a batch")
         for i, e in enumerate(out):
             e["image"] = examples[(i + 1) % len(examples)]["image"]
+    elif way in PERTURB:
+        for e in out:
+            e["image"] = ([perturbed(im, way) for im in e["image"]] if isinstance(e["image"], list)
+                          else perturbed(e["image"], way))
     else:
-        raise ValueError(f"unknown way {way}; known {WAYS}")
+        raise ValueError(f"unknown way {way}; known {ALL_WAYS}")
     return out
+
+
+def parse_ways(text: str) -> tuple:
+    """--ways: "images" first (the ratios are to it), then any of the others, each once."""
+    ways = tuple(w.strip() for w in text.split(",") if w.strip())
+    if not ways or ways[0] != "images" or len(set(ways)) != len(ways) or any(w not in ALL_WAYS for w in ways):
+        raise ValueError(f"--ways {text!r}: images first, then any of {ALL_WAYS[1:]}, each once")
+    return ways
 
 
 def positions(length: int, samples: int, seed: int) -> List[int]:
@@ -89,8 +130,8 @@ class Errors:
 def summarize(errors: Dict[str, Errors]) -> dict:
     out = {way: e.summary() for way, e in errors.items()}
     base = out["images"]["mse"]
-    for way in WAYS[1:]:
-        if way in out:
+    for way in out:
+        if way != "images":
             out[way]["ratio_to_images"] = out[way]["mse"] / base if base else None
     return out
 
@@ -165,20 +206,20 @@ def load_samples(config_yaml: str, samples: int, seed: int, other=None):
                       **stats}
 
 
-def evaluate(ckpt: str, examples: List[dict], batch: int, seed: int) -> dict:
+def evaluate(ckpt: str, examples: List[dict], batch: int, seed: int, ways=WAYS) -> dict:
     import torch
     from starVLA.model.framework.base_framework import baseframework
 
     t0 = time.time()
     model = baseframework.from_pretrained(ckpt).to(torch.bfloat16).to("cuda").eval()
     load_s = time.time() - t0
-    errors = {way: Errors() for way in WAYS}
+    errors = {way: Errors() for way in ways}
     t0 = time.time()
     with torch.no_grad():
         for b in range(0, len(examples), batch):
             chunk = examples[b:b + batch]
             target = np.array([e["action"] for e in chunk])
-            for way in WAYS:
+            for way in ways:
                 seed_all(seed * 7919 + b)  # the same diffusion noise for every way and checkpoint
                 out = model.predict_action(examples=with_images(chunk, way), use_ddim=True, num_ddim_steps=20)
                 errors[way].add(out["normalized_actions"], target)
@@ -199,18 +240,22 @@ def main() -> int:
     ap.add_argument("--samples", type=int, default=256)
     ap.add_argument("--batch", type=int, default=8)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--ways", default=",".join(WAYS),
+                    help="comma-separated, images first; known: " + ",".join(ALL_WAYS) +
+                         " (decision 36: the perturbations)")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
+    ways = parse_ways(a.ways)
     ckpts = dict(c.split("=", 1) for c in a.ckpt)
     examples, data = load_samples(a.data_config, a.samples, a.seed, a.eval_data)
     record = {"data_config": a.data_config, "eval_data": a.eval_data, "samples": a.samples, "batch": a.batch,
               "seed": a.seed, "data": data,
-              "ways": list(WAYS), "checkpoints": {}}
+              "ways": list(ways), "checkpoints": {}}
     for label, ckpt in ckpts.items():
-        record["checkpoints"][label] = evaluate(ckpt, examples, a.batch, a.seed)
+        record["checkpoints"][label] = evaluate(ckpt, examples, a.batch, a.seed, ways)
         a.out.write_text(json.dumps(record, indent=1) + "\n")  # after every checkpoint
         r = record["checkpoints"][label]
-        print(label, {w: round(r[w]["mse"], 5) for w in WAYS}, flush=True)
+        print(label, {w: round(r[w]["mse"], 5) for w in ways}, flush=True)
     return 0
 
 
