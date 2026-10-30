@@ -118,6 +118,17 @@ run's render service first and its trainer only once the service is up (running,
 cards never wait for one; a failed trainer is resubmitted with the service kept, a service that dies before its
 trainer has read the address is resubmitted alone.  It takes precedence over renderer_when_trainer_runs.
 
+Round 12 batch (submission order, the user's decision of 2026-10-30): plan "rl" "renderer_after_trainer":
+{"trainer_wait_s": N} submits each run's trainer and right after it its render service, and the next run's trainer
+only after that service, so none of the chain's own trainers queues between an earlier trainer and its service (on
+h800, 10-30, with every trainer submitted at once and each service only once its trainer had its cards, four trainers
+held 32 cards for hours while their services queued behind the chain's next two trainers and the jobs submitted in
+between).  The trainer waits up to N seconds (default 6 hours) for the service's address.  A failed trainer is
+resubmitted with its service kept (queued or running, it keeps its place); a service that dies while its trainer
+queues, or before the trainer has read its address, is resubmitted alone; one that dies after the trainer has read it
+takes the trainer with it and the two go again, trainer first.  renderer_first takes precedence over it, and it over
+renderer_when_trainer_runs.
+
 Round 12 batch (render speed): plan "rl" "renderer_workers": N gives a run's render service N worker processes (one
 scene each) taking N requests at a time instead of 12, so the scenes of an update stay loaded instead of being read
 again from the shared disk for about every second request.  A render service still waiting for its card gets the
@@ -1360,8 +1371,9 @@ class Chain:
             new_trainer = not (d / "job_rl" / "submission.json").exists()
             pool = self.job_pool(name) if new_trainer else None  # a run keeps its first pool (job_pool)
             first = self.renderer_first(run)
-            lazy = self.renderer_wait(run, pool) is not None
-            if (not (d / "job_renderer" / "submission.json").exists() and not lazy
+            after = self.renderer_after(run)
+            lazy = self.renderer_lazy(run, pool)
+            if (not (d / "job_renderer" / "submission.json").exists() and not lazy and not after
                     and external_renderer(d) is None):  # an external service: no sco one
                 submit_renderer(name, d, trainer_pool(d) if first and not new_trainer else None)
             if new_trainer and not first:  # renderer_first: the trainer follows once its service is up
@@ -1375,6 +1387,10 @@ class Chain:
                 if old.get("mode_args") != self.trainer_args(run, endpoint):
                     job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
                                     pool=old.get("pool") or self.job_pool(name))
+            if (after and not (d / "job_renderer" / "submission.json").exists()
+                    and external_renderer(d) is None):
+                # renderer_after_trainer: the service right behind its trainer, before the next run's trainer
+                submit_renderer(name, d, trainer_pool(d))
             if run["rl"].get("renderer_workers") and (d / "job_renderer" / "submission.json").exists():
                 # a render service submitted before plan rl "renderer_workers" was set, still waiting for its card: its
                 # launch script (read when the job starts) gets the new count; the job keeps its place in the queue
@@ -1393,8 +1409,9 @@ class Chain:
                 states = {}
                 for name, run in list(active.items()):
                     d = run["run_dir"]
-                    lazy = self.renderer_wait(run) is not None
+                    lazy = self.renderer_lazy(run)
                     first = self.renderer_first(run)
+                    after = self.renderer_after(run)
                     ext = external_renderer(d)  # round 12 freeze: a render service outside sco
                     st_ext = self.external_renderer_state(name, d, ext) if ext is not None else None
                     if (first and not (d / "job_rl" / "submission.json").exists()
@@ -1483,6 +1500,18 @@ class Chain:
                             if not (waiting or unread):
                                 job_sco.delete(d, "job_rl")  # submitted again once the new service is up
                             submit_renderer(name, d, pool)
+                            continue
+                        if after:  # renderer_after_trainer: a new service; the trainer goes too only if it has read
+                            # the dead one's address, and then first, the service right behind it
+                            waiting = st_rl.get("state") in job_sco.WAITING
+                            unread = not (d / "renderer_endpoint.txt").exists()
+                            drop_job(d, "job_renderer")
+                            if not (waiting or unread):
+                                job_sco.delete(d, "job_rl")
+                                job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
+                                                pool=self.job_pool(name))
+                                job_sco.submit(d, job_dir="job_rl")
+                            submit_renderer(name, d, trainer_pool(d))
                             continue
                         job_sco.delete(d, "job_rl")  # the trainer needs the new render service's address
                         drop_job(d, "job_renderer")
@@ -1626,13 +1655,28 @@ class Chain:
         precedence over renderer_when_trainer_runs."""
         return bool(run["rl"].get("renderer_first"))
 
+    def renderer_after(self, run: Dict[str, Any]) -> bool:
+        """Round 12 batch (a new switch, the user's decision of 2026-10-30): plan rl "renderer_after_trainer":
+        {"trainer_wait_s": N} submits a run's trainer and right after it its render service, before the next run's
+        trainer, so the chain's own later trainers never queue between a trainer and its service; the trainer waits up
+        to N seconds (default 6 hours) for the address.  renderer_first takes precedence over it."""
+        return bool(run["rl"].get("renderer_after_trainer")) and not self.renderer_first(run)
+
+    def renderer_lazy(self, run: Dict[str, Any], pool: Optional[str] = None) -> bool:
+        """renderer_when_trainer_runs in effect: the render service is submitted once the trainer has its cards."""
+        return not self.renderer_after(run) and self.renderer_wait(run, pool) is not None
+
     def renderer_wait(self, run: Dict[str, Any], pool: Optional[str] = None) -> Optional[int]:
         """Round 12 batch (a new switch): plan rl "renderer_when_trainer_runs": {"trainer_wait_s": N, "pools": [...]}
         submits a run's render service only once its trainer has its cards, so no card is held while the trainer
         waits for a whole node (one busy card on a node keeps every 8-card job off it); the trainer waits up to N
         seconds (default 6 hours) for the service's address.  With "pools", only for a trainer in one of them (where a
         single card is found quickly; ``pool``, else the trainer's prepared job).  A failed trainer's service is stopped
-        with it and its next trainer gets a new one.  None: the render service goes with the trainer, as before."""
+        with it and its next trainer gets a new one.  None: the render service goes with the trainer, as before.
+        With renderer_after_trainer: its trainer_wait_s (default 6 hours), whatever the pool."""
+        if self.renderer_after(run):
+            opt = run["rl"]["renderer_after_trainer"]
+            return int((opt if isinstance(opt, dict) else {}).get("trainer_wait_s", RENDERER_WAIT_S))
         opt = run["rl"].get("renderer_when_trainer_runs")
         if not opt or self.renderer_first(run):
             return None
