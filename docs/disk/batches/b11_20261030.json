@@ -1,0 +1,15 @@
+{
+ "batch": "b11_20261030",
+ "approved": "PENDING: the user's approval in the disk line.",
+ "items": [
+  {
+   "id": "R4-DS-Q3S-100-s1-175k",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-Q3S-100-s1/evals_src",
+   "include": [
+    "^steps_175000/"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261030.txt",
+   "marker": "DS-Q3S-100-s1: the evals_src weight copy of point 175000 (evaluated, watch.json; the rerun of OpenDrawer seed 1012 is no longer needed: that episode joined the excluded list on 10-30) archived to AOSS and deleted by the disk line (retention rule R4; DISK_RECLAIM_20261029.md table 1b; the user's approval). watch.json stays."
+  }
+ ]
+}
