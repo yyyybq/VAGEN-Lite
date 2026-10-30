@@ -225,6 +225,28 @@ def test_g0_selection_balances_answers():
     assert len(chosen) == 60 and len(by["counting"]) == 10
 
 
+def test_qwen3_gate_follows_the_three_fixed_rules():
+    import qa_report as QR
+
+    def row(acc, p=None, share=0.5, unparsed=0.0):
+        r = {"all": {"accuracy": acc, "unparsed_rate": unparsed}, "a_share": {k: share for k in QR.KINDS}}
+        if p is not None:
+            r["all"]["vs_reference"] = {"p": p, "only_model": 1, "only_reference": 0}
+        return r
+    q0 = {"Q3B": row(0.50), "Q3RS": row(0.62, p=0.001), "Q3RD": row(0.55, p=0.2)}
+    g0 = {"Q3B": {"all": {"accuracy": 0.72}}, "Q3RS": {"all": {"accuracy": 0.70, "vs_reference": {"p": 0.3}}},
+          "Q3RD": {"all": {"accuracy": 0.60, "vs_reference": {"p": 0.01}}}}
+    g = QR.gate(q0, g0)
+    assert g["Q3RS"]["rule1"] and g["Q3RS"]["rule2"] and g["Q3RS"]["rule3"] and g["Q3RS"]["passes"]
+    assert not g["Q3RD"]["rule1"] and g["Q3RD"]["rule3"] is False and g["gate"] is True
+    assert g["Q3RS"]["diff_points"] == pytest.approx(12.0)
+    biased = dict(q0, Q3RS=row(0.62, p=0.001, share=0.65))
+    assert QR.gate(biased, g0)["Q3RS"]["rule2"] is False and QR.gate(biased, g0)["gate"] is False
+    exactly_ten = dict(q0, Q3RS=row(0.60, p=0.01))
+    assert QR.gate(exactly_ten, g0)["Q3RS"]["rule1"]  # 10.0 points counts
+    assert QR.gate(q0, None)["gate"] is None  # G0 not in yet: undecided
+
+
 def test_g0_scene_reading_skips_unreadable_lines(tmp_path):
     d = tmp_path / "part1"
     d.mkdir()
