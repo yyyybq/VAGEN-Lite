@@ -8,7 +8,8 @@ the A appears to the left / right of the B in your view.") in RoboCasa scenes, e
 
 generate, per scene (X0's scenes in order, every K-th from the I-th; reset as the closed-loop evaluation does):
   1. camera A placed and checked against the upstream camera pose (n_env.Scene.camera_matches);
-  2. every base pose reachable from the start in the upstream actions (breadth first, at most MAX_DEPTH actions and
+  2. every base pose reachable from the start in the upstream actions (breadth first, at most MAX_DEPTH = 12 actions,
+     the main line's validation budget of primitive actions per episode, max_episode_steps in its val_env.yaml, and
      MAX_STATES poses; poses equal to 5 cm and one heading step count once; a move whose pose collides is blocked);
   3. ordered pairs of entities with names unique in the scene, both relations, in a seeded random order: the
      reachable poses in breadth-first order are judged with the upstream box judge and 45-degree rule; the first
@@ -37,7 +38,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1]))
 import n_env as N  # noqa: E402
 
-MAX_DEPTH = 30
+MAX_DEPTH = 12  # the main line's validation env: max_episode_steps 12 primitive actions per episode (val_env.yaml)
 MAX_STATES = 15000
 MIN_ACTIONS = 2
 MAX_PAIRS = 40
@@ -231,9 +232,22 @@ def page(args) -> int:
                 r["_dir"] = g
                 recs.append(r)
     inst = [r for r in recs if r.get("instance")][:args.n]
+    episodes = {}
+    if getattr(args, "episodes", None) and Path(args.episodes).is_file():
+        for line in Path(args.episodes).read_text().splitlines():
+            if line.strip():
+                e = json.loads(line)
+                episodes[e.get("scene_id")] = e
     rows = []
     for i, r in enumerate(inst, 1):
         x = r["instance"]
+        ep = episodes.get(x["scene_id"])
+        ep_txt = ""
+        if ep:
+            ep_txt = (f'<p class="meta">模型的回合：{"成功" if ep.get("success") else "未成功"}，{ep.get("turns")} 轮、'
+                      f'{ep.get("steps")} 个动作、被挡 {ep.get("blocked")} 次、读不出 {ep.get("invalid_turns")} 轮；'
+                      f'第一轮回答：{html.escape(str((ep.get("turn_log") or [{}])[0].get("reply", ""))[:200])}'
+                      f'{html.escape(ep.get("error", ""))}</p>')
         sj, uj = x["start_judge"], x["success_judge"]
         g = uj["gates"] or {}
         gate_txt = "；".join(f"{k} {'✓' if v else '✗'}" for k, v in g.items())
@@ -252,7 +266,7 @@ def page(args) -> int:
             f'<p class="meta">起点的判定：成功 {sj["success"]}；左右间隔 {fmt(sj["relation_margin_px"])}；夹角 {fmt(sj["lateral_angle_deg"])}°；'
             f'可见比例 {fmt((sj["visible_fraction"] or {}).get("a"))} / {fmt((sj["visible_fraction"] or {}).get("b"))}</p>'
             f'<p class="meta">搜索：可达位姿 {r.get("reachable")}（被挡 {r.get("blocked")}，到上限 {r.get("capped")}），'
-            f'相机 A 自检误差 {fmt(r.get("camera_check"))}</p></section>')
+            f'相机 A 自检误差 {fmt(r.get("camera_check"))}</p>{ep_txt}</section>')
     style = ("<style>:root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#6b6a65;--line:#dedbd2;--accent:#a3402a}"
              "@media (prefers-color-scheme: dark){:root:not([data-theme=light]){--bg:#171716;--fg:#ecebe6;--muted:#a19f97;"
              "--line:#3a3935;--accent:#e08a6f;color-scheme:dark}}:root[data-theme=dark]{--bg:#171716;--fg:#ecebe6;"
@@ -286,6 +300,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("page")
     p.add_argument("--gen", nargs="+", required=True)
     p.add_argument("--n", type=int, default=20)
+    p.add_argument("--episodes", default=None, help="n_episode.py's episodes.jsonl: add each instance's episode")
     p.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     return {"generate": generate, "page": page}[args.cmd](args)

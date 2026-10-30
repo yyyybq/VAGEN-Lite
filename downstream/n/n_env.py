@@ -182,6 +182,15 @@ class Scene:
         self._place_camera()
         self.entities = self._entities(x0_qa.scene_entities(self.k))
         self.geom_entity = {g: e["key"] for e in self.entities for g in e["geoms"]}
+        cats = {c.get("name"): str((c.get("info") or {}).get("cat") or c.get("name"))
+                for c in getattr(self.k, "object_cfgs", [])}
+        self.prefix_names = {}  # geom-name prefix of every object and fixture -> what the feedback calls it
+        for key, obj in self.k.objects.items():
+            self.prefix_names[getattr(obj, "naming_prefix", f"{key}_")] = x0_qa.display_name(cats.get(key, key))
+        for key, fx in self.k.fixtures.items():
+            nat = getattr(fx, "nat_lang", None)
+            self.prefix_names[getattr(fx, "naming_prefix", f"{key}_")] = x0_qa.display_name(
+                key if not nat or nat == key else nat)
 
     def close(self):
         self.env.close()
@@ -219,6 +228,16 @@ class Scene:
             key = self.geom_entity.get(other)
             return key or self.geom_names[other] or "object"
         return None
+
+    def owner(self, hit: str) -> str:
+        """What a blocking geom belongs to, as the feedback names it ("counter", "fridge", ...)."""
+        for e in self.entities:
+            if e["key"] == hit:
+                return e["name"]
+        best = max((p for p in self.prefix_names if hit.startswith(p)), key=len, default=None)
+        if best is not None:
+            return self.prefix_names[best] or "object"
+        return "wall" if hit.startswith("wall") else "object"
 
     def try_action(self, pose, action: str):
         """(new pose, None) or (the old pose, what blocked it); the simulator is left at the returned pose."""
