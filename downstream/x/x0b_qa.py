@@ -48,6 +48,7 @@ def main_qa_module(main: Path = MAIN):
     """data_gen/interiorgs_qa/qa.py of the main checkout (standard library only), loaded by path, not copied."""
     spec = importlib.util.spec_from_file_location("main_interiorgs_qa", Path(main) / "data_gen/interiorgs_qa/qa.py")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod  # its dataclasses look their module up there
     spec.loader.exec_module(mod)
     return mod
 

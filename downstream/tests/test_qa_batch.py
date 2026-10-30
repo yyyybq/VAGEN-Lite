@@ -155,7 +155,8 @@ def test_tagged_layout_and_its_parsing():
 def test_main_qa_module_loads_by_path(tmp_path):
     f = tmp_path / "data_gen/interiorgs_qa/qa.py"
     f.parent.mkdir(parents=True)
-    f.write_text("STYLES = {'mindcube': lambda q, o: 'X' + q}\n")
+    f.write_text("import dataclasses\n@dataclasses.dataclass\nclass P:\n    a: int = 0\n"
+                 "STYLES = {'mindcube': lambda q, o: 'X' + q}\n")  # a dataclass, as the real qa.py has
     assert XB.main_qa_module(tmp_path).STYLES["mindcube"]("q", []) == "Xq"
 
 
