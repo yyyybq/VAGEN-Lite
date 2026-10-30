@@ -1,0 +1,86 @@
+{
+ "batch": "b13_20261030",
+ "approved": "PENDING: the user's approval in the disk line.",
+ "items": [
+  {
+   "id": "R1-q3c3_20261029-qw3c3s0-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3c3_20261029/rl_run_qw3c3s0/checkpoints/global_step_200",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Last checkpoint of a finished main-line Qwen3 run (chain finished incl. evaluation): FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  },
+  {
+   "id": "R1-q3c3_20261029-qw3c3v4-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3c3_20261029/rl_run_qw3c3v4/checkpoints/global_step_200",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Last checkpoint of a finished main-line Qwen3 run (chain finished incl. evaluation): FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  },
+  {
+   "id": "R1-q3s0k_20261029-qw3s0k1-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s0k_20261029/rl_run_qw3s0k1/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Last checkpoint of a finished main-line Qwen3 run (chain finished incl. evaluation): FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  },
+  {
+   "id": "R1-q3s0k_20261029-qw3s0k2-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s0k_20261029/rl_run_qw3s0k2/checkpoints/global_step_250",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Last checkpoint of a finished main-line Qwen3 run (chain finished incl. evaluation): FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  },
+  {
+   "id": "R1-q3s45_20261028-qw3s0s4-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s45_20261028/rl_run_qw3s0s4/checkpoints/global_step_200",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Last checkpoint of a finished main-line Qwen3 run (chain finished incl. evaluation): FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  },
+  {
+   "id": "R1-q3s45_20261028-qw3s0s5-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s45_20261028/rl_run_qw3s0s5/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Last checkpoint of a finished main-line Qwen3 run (chain finished incl. evaluation): FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  },
+  {
+   "id": "R1-q3s45_20261028-qw3v4s4-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s45_20261028/rl_run_qw3v4s4/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Last checkpoint of a finished main-line Qwen3 run (chain finished incl. evaluation): FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  },
+  {
+   "id": "R1-q3s45_20261028-qw3v4s5-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s45_20261028/rl_run_qw3v4s5/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Last checkpoint of a finished main-line Qwen3 run (chain finished incl. evaluation): FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  }
+ ]
+}

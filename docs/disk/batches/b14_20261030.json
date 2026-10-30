@@ -1,0 +1,70 @@
+{
+ "batch": "b14_20261030",
+ "approved": "PENDING: the user's approval in the disk line.",
+ "items": [
+  {
+   "id": "R3-T5-B-nav-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-B-nav-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "T5-B-nav-s1: training and its evaluation finished (job SUCCEEDED, MATRIX.md, summary.json); the full state (resume only) archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-T5-S-nav-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-S-nav-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "T5-S-nav-s1: training and its evaluation finished (job SUCCEEDED, MATRIX.md, summary.json); the full state (resume only) archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-T5-RS-nav-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-RS-nav-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "T5-RS-nav-s1: training and its evaluation finished (job SUCCEEDED, MATRIX.md, summary.json); the full state (resume only) archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-T5-RD-nav-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-RD-nav-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "T5-RD-nav-s1: training and its evaluation finished (job SUCCEEDED, MATRIX.md, summary.json); the full state (resume only) archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-X2-RD-003-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-RD-003-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "X2-RD-003-s1: training and its evaluation finished (job SUCCEEDED, MATRIX.md, summary.json); the full state (resume only) archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-XE-B-030-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/XE-B-030-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "XE-B-030-s1: training and its evaluation finished (job SUCCEEDED, MATRIX.md, summary.json); the full state (resume only) archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-T2-B-030-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-B-030-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "T2-B-030-s1: training and its evaluation finished (job SUCCEEDED, MATRIX.md, summary.json); the full state (resume only) archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-T2-RS-030-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-RS-030-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "T2-RS-030-s1: training and its evaluation finished (job SUCCEEDED, MATRIX.md, summary.json); the full state (resume only) archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-T2-B-030-short",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-B-030-short/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "T2-B-030-short: training and its evaluation finished (job SUCCEEDED, MATRIX.md, summary.json); the full state (resume only) archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-E3-S",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-S/logs/robocasa365_starvla_ppo/checkpoints/global_step_100/actor/dcp_checkpoint",
+   "marker": "E3-S (RLinf, finished and evaluated): the distributed resume checkpoint archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). actor/model_state_dict and export/checkpoints/policy.pt stay."
+  },
+  {
+   "id": "R3-E3-RD",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-RD/logs/robocasa365_starvla_ppo/checkpoints/global_step_100/actor/dcp_checkpoint",
+   "marker": "E3-RD (RLinf, finished and evaluated): the distributed resume checkpoint archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R3, the user's approval). actor/model_state_dict and export/checkpoints/policy.pt stay."
+  }
+ ]
+}

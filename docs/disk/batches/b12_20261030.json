@@ -1,0 +1,36 @@
+{
+ "batch": "b12_20261030",
+ "approved": "PENDING: the user's approval in the disk line.",
+ "items": [
+  {
+   "id": "R1-m_cambrian7b_formal_rl_20261030_stab-cskl-100",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261030_stab/rl_run_cskl/checkpoints/global_step_100",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Cambrian arm stopped (drift), no resume planned: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  },
+  {
+   "id": "R1-m_cambrian7b_formal_rl_20261030_stab-cslr-250",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261030_stab/rl_run_cslr/checkpoints/global_step_250",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Cambrian arm stopped (drift), no resume planned: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  },
+  {
+   "id": "R1-m_cambrian7b_formal_rl_20261030_s20261021-cs2s0-100",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261030_s20261021/rl_run_cs2s0/checkpoints/global_step_100",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED",
+   "marker": "Cambrian arm stopped (drift), no resume planned; its huggingface weights are still to be evaluated: FSDP shards, optimizer, extra state and data.pt archived to AOSS and deleted on 2026-10-30 by the disk line (retention rule R1, the user's approval). actor/huggingface stays; not resumable from here."
+  }
+ ]
+}
