@@ -11,7 +11,9 @@
 #           and G0, their hidden states on X0's questions, and the Qwen3 parameter distances
 # Both end with the analysis of whatever answers exist so far (analysis step below; rerun it alone with STAGE
 # analyze).  Every step skips what is already done, so a relaunch goes on.  Models and weights are read by path,
-# nothing is copied.  Writes only under OUT.
+# nothing is copied.  Writes only under OUT.  The qwen3 job runs as the container's root (sco_job.prepare
+# as_root: the Qwen3-VL base snapshot in /mnt/umm/shared_model is readable by root only, as the model line's jobs
+# read it); run as root, this script gives everything under OUT back to the owner (OWNER_UID:OWNER_GID) when it ends.
 # Usage: run_qa_batch.sh OUT qwen25|qwen3|analyze
 set -uo pipefail
 OUT="${1:?Usage: run_qa_batch.sh OUT qwen25|qwen3|analyze}"; STAGE="${2:?}"
@@ -23,7 +25,12 @@ mkdir -p "$OUT"/{g0,x0b1,x0b2,answers,hidden,pd,results}
 log() { echo "[qa] $* $(date -u +%FT%TZ)" | tee -a "$OUT/qa_$STAGE.log"; }
 cd "$WT"
 source "$WT/downstream/eval/sim_env.sh"
-trap 'rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"' EXIT
+OWNER="${OWNER_UID:-20325}:${OWNER_GID:-20325}"
+finish() {
+  rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"
+  if [[ $(id -u) -eq 0 ]]; then chown -R "$OWNER" "$OUT"; fi
+}
+trap finish EXIT
 export PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 NO_PROXY='*' no_proxy='*' TOKENIZERS_PARALLELISM=false
 export HF_HOME=/mnt/umm/users/yinbaiqiao/.cache/huggingface OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
 

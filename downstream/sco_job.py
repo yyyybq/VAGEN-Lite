@@ -9,6 +9,9 @@
 RUN_DIR/job/ holds launch.sh (what the worker runs), prepared.json, submission.json (the job id) and worker.log.
 The payload runs as the shared-filesystem owner (examples/train/active_spatial/sco_run_as_artifact_owner.sh), so
 outputs are not root-owned.  Same image, mount and card specs as the training line's job_sco.py.
+prepare(..., as_root=True) (2026-10-30, only for jobs that must read the root-only Qwen3-VL snapshot in
+/mnt/umm/shared_model, as the model line's jobs do) runs the payload as the container's root instead; such a
+payload gives what it writes back to the owner itself (run_qa_batch.sh does).
 """
 from __future__ import annotations
 
@@ -36,9 +39,10 @@ def now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def launch_script(job: Path, payload: List[str], worktree: Path = WORKTREE) -> str:
+def launch_script(job: Path, payload: List[str], worktree: Path = WORKTREE, as_root: bool = False) -> str:
     cmd = " ".join(shlex.quote(a) for a in payload)
     log = job / "worker.log"
+    run = cmd if as_root else f"bash {shlex.quote(str(worktree / RUN_AS_OWNER))} {cmd}"
     return (
         "#!/usr/bin/env bash\n"
         "set -uo pipefail\n"
@@ -46,14 +50,14 @@ def launch_script(job: Path, payload: List[str], worktree: Path = WORKTREE) -> s
         f"exec > >(tee -a {shlex.quote(str(log))}) 2>&1\n"
         'echo "[launch] host=$(hostname) date=$(date -u +%FT%TZ) uid=$(id -u)"\n'
         "nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true\n"
-        f"bash {shlex.quote(str(worktree / RUN_AS_OWNER))} {cmd}\n"
+        f"{run}\n"
         "rc=$?\n"
         'echo "[launch] rc=$rc date=$(date -u +%FT%TZ)"\n'
         f"echo $rc > {shlex.quote(str(job / 'exit_code'))}\n"
     )
 
 
-def prepare(run: Path, gpus: int, pool: str, name: str, payload: List[str]) -> Path:
+def prepare(run: Path, gpus: int, pool: str, name: str, payload: List[str], as_root: bool = False) -> Path:
     if gpus not in SPECS:
         raise ValueError(f"gpus must be one of {sorted(SPECS)}")
     if pool not in POOLS:
@@ -67,11 +71,13 @@ def prepare(run: Path, gpus: int, pool: str, name: str, payload: List[str]) -> P
         raise FileExistsError(f"{job} was already submitted; use a new run directory")
     job.mkdir(parents=True, exist_ok=True)
     launch = job / "launch.sh"
-    launch.write_text(launch_script(job, payload))
+    launch.write_text(launch_script(job, payload, as_root=as_root))
     launch.chmod(0o755)
-    (job / "prepared.json").write_text(json.dumps({"utc": now(), "gpus": gpus, "spec": SPECS[gpus], "pool": pool,
-                                                   "name": name, "payload": payload, "worktree": str(WORKTREE),
-                                                   "code": code_state(WORKTREE)}, indent=1) + "\n")
+    rec = {"utc": now(), "gpus": gpus, "spec": SPECS[gpus], "pool": pool, "name": name, "payload": payload,
+           "worktree": str(WORKTREE), "code": code_state(WORKTREE)}
+    if as_root:
+        rec["as_root"] = True
+    (job / "prepared.json").write_text(json.dumps(rec, indent=1) + "\n")
     return launch
 
 

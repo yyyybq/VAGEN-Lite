@@ -21,6 +21,15 @@ def test_prepare_writes_launch_and_receipt_fields(tmp_path):
     assert "commit" in prepared["code"]
 
 
+def test_as_root_runs_the_payload_without_the_owner_switch(tmp_path):
+    launch = sco_job.prepare(tmp_path / "run", 1, "h800", "qa-qwen3", ["bash", "run.sh", "/out"], as_root=True)
+    text = launch.read_text()
+    assert "sco_run_as_artifact_owner.sh" not in text and "\nbash run.sh /out\n" in text
+    assert json.loads((tmp_path / "run/job/prepared.json").read_text())["as_root"] is True
+    sco_job.prepare(tmp_path / "run2", 1, "h800", "qa-qwen25", ["true"])
+    assert "as_root" not in json.loads((tmp_path / "run2/job/prepared.json").read_text())
+
+
 def test_main_prepare_takes_the_payload_after_double_dash(tmp_path, capsys):
     run = tmp_path / "run"
     assert sco_job.main(["prepare", "--run", str(run), "--gpus", "1", "--pool", "h800", "--name", "step1-load",
