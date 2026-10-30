@@ -1885,8 +1885,12 @@ class ChainTest(unittest.TestCase):
                     events.append(("delete", run.name[7:], job_dir, json.loads(receipt.read_text())["job_id"], clock["poll"]))
                     receipt.replace(receipt.with_name("submission_deleted.json"))
 
-            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+            gaps = []
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete), \
+                    mock.patch.object(T.time, "sleep", gaps.append):
                 chain.rl()
+            # sco keeps create times to the second: the ordered submissions go ORDER_GAP_S apart (3 pairs, 1 retry)
+            self.assertEqual(gaps, [T.ORDER_GAP_S] * 7)
 
             # one trainer, its service, then the next trainer
             self.assertEqual([(e[1], e[2]) for e in events if e[0] == "submit" and e[-1] == 0],

@@ -120,7 +120,8 @@ trainer has read the address is resubmitted alone.  It takes precedence over ren
 
 Round 12 batch (submission order, the user's decision of 2026-10-30): plan "rl" "renderer_after_trainer":
 {"trainer_wait_s": N} submits each run's trainer and right after it its render service, and the next run's trainer
-only after that service, so none of the chain's own trainers queues between an earlier trainer and its service (on
+only after that service (ORDER_GAP_S seconds apart: sco keeps create times to the second), so none of the chain's
+own trainers queues between an earlier trainer and its service (on
 h800, 10-30, with every trainer submitted at once and each service only once its trainer had its cards, four trainers
 held 32 cards for hours while their services queued behind the chain's next two trainers and the jobs submitted in
 between).  The trainer waits up to N seconds (default 6 hours) for the service's address.  A failed trainer is
@@ -193,6 +194,7 @@ STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node
                            "raylet failed to start")
 STARTUP_DEFAULTS = {"retries": 2, "stall_minutes": 40}
 RENDERER_WAIT_S = 6 * 3600  # renderer_when_trainer_runs: how long a trainer waits for its render service
+ORDER_GAP_S = 2  # renderer_after_trainer: seconds between the submissions it orders (sco's create time is to the second)
 # renderer_repack: minutes between looks at the pools, between two moves of one run's render service, and how long
 # the new service may wait for a card
 REPACK_DEFAULTS = {"every_min": 30, "gap_min": 120, "wait_min": 30}
@@ -1390,7 +1392,9 @@ class Chain:
             if (after and not (d / "job_renderer" / "submission.json").exists()
                     and external_renderer(d) is None):
                 # renderer_after_trainer: the service right behind its trainer, before the next run's trainer
+                time.sleep(ORDER_GAP_S)
                 submit_renderer(name, d, trainer_pool(d))
+                time.sleep(ORDER_GAP_S)
             if run["rl"].get("renderer_workers") and (d / "job_renderer" / "submission.json").exists():
                 # a render service submitted before plan rl "renderer_workers" was set, still waiting for its card: its
                 # launch script (read when the job starts) gets the new count; the job keeps its place in the queue
@@ -1511,6 +1515,7 @@ class Chain:
                                 job_sco.prepare(d, 8, self.trainer_args(run, endpoint), job_dir="job_rl",
                                                 pool=self.job_pool(name))
                                 job_sco.submit(d, job_dir="job_rl")
+                                time.sleep(ORDER_GAP_S)
                             submit_renderer(name, d, trainer_pool(d))
                             continue
                         job_sco.delete(d, "job_rl")  # the trainer needs the new render service's address
