@@ -12,7 +12,9 @@ other row kept: the formal validation rows feed the RL's validation set), as the
 file (--rows-out) for both waves.
 
 The user's decisions of 2026-10-29: two waves of two runs, each its own chain (--arms): rw_o + rw_s0 first (rw_o on
-h800, rw_s0 on zoetrope), then rw_g + rw_ok, both on zoetrope, once the first wave is evaluated and cleaned up.
+h800, rw_s0 on zoetrope), then rw_g + rw_ok, both on zoetrope, once the first wave is evaluated and cleaned up.  The
+second seed's pair (PREREG section 4: S0 and the better O arm, --seed 20261021) comes after the second wave is
+evaluated and cleaned up, as rw_s2s0 + rw_s2o or rw_s2ok, on zoetrope.
 
     python -m reward.make_plans_b --final-ids FILE [FILE ...] --tables DIR --keep-o THRESHOLD --tr DIR
         --arms rw_o,rw_s0 [--rows-out FILE] [--seed 20261019] [--pools rw_o=h800,rw_s0=zoetrope,...]
@@ -31,11 +33,14 @@ V4 = {"standard": "v10_p1_Dcond", "group_filter": "keep_by_return_std", "keep_st
 
 
 def arms(tables, keep_o):
+    """The four arms, and their second-seed copies (PREREG_B section 4: seed 20261021 for S0 and the better O arm)
+    named as the main line names its second seed (model_matrix/formal/plans.py: run names <prefix>s2<arm>), so their
+    result folders (rw_s2s0_050 ...) never share a name with the first seed's."""
     o = {"standard": "v10_p1_Dcond", "progress_version": "optimal", "distance_tables": str(tables),
          "progress_reward_scale": 10.0 / 3.0}
-    return {"rw_s0": {}, "rw_g": {"rl": dict(V4)}, "rw_o": {"rl": dict(o)},
-            "rw_ok": {"rl": dict(o, group_filter="keep_by_return_std", keep_std_threshold=float(keep_o),
-                                 keep_std_floor=1.0)}}
+    ok = dict(o, group_filter="keep_by_return_std", keep_std_threshold=float(keep_o), keep_std_floor=1.0)
+    return {"rw_s0": {}, "rw_g": {"rl": dict(V4)}, "rw_o": {"rl": dict(o)}, "rw_ok": {"rl": dict(ok)},
+            "rw_s2s0": {}, "rw_s2o": {"rl": dict(o)}, "rw_s2ok": {"rl": dict(ok)}}
 
 
 def main():
@@ -45,7 +50,8 @@ def main():
     ap.add_argument("--keep-o", type=float, required=True)
     ap.add_argument("--tr", required=True)
     ap.add_argument("--seed", type=int, default=20261019)
-    ap.add_argument("--pools", default="rw_o=h800,rw_s0=zoetrope,rw_g=zoetrope,rw_ok=zoetrope",
+    ap.add_argument("--pools", default="rw_o=h800,rw_s0=zoetrope,rw_g=zoetrope,rw_ok=zoetrope,"
+                                       "rw_s2s0=zoetrope,rw_s2o=zoetrope,rw_s2ok=zoetrope",
                     help="run=pool,... (default: the user's decisions of 2026-10-29: the first wave rw_o on h800 and "
                          "rw_s0 on zoetrope, as submitted; the second wave rw_g + rw_ok on zoetrope, the user's later "
                          "rule that this round's new submissions go to zoetrope)")
@@ -86,8 +92,9 @@ def main():
     plan.update(tr=str(tr), commit="COMMIT_PLACEHOLDER", rl_name="rw_b", job_prefix="rw",
                 eval_sets={"val": str(RR / "eval_sets/eval_val_v2"), "test": str(RR / "eval_sets/eval_test_v2")},
                 note=("Reward line, task B (docs/reward/PREREG_B.md): S0, G (= V4), O (optimal progress from the "
-                      "depth-12 tables) and O-keep on the same 3,000 reserve tasks, Qwen3 SFT epoch 8, one seed; "
-                      f"this chain runs {', '.join(wanted)} (the user's two waves of 2026-10-29)."))
+                      "depth-12 tables) and O-keep on the same 3,000 reserve tasks, Qwen3 SFT epoch 8; "
+                      f"this chain runs {', '.join(wanted)} with seed {args.seed} (the user's waves of 2026-10-29; "
+                      "20261021 is PREREG section 4's second seed)."))
     plan["rl"] = dict(plan["rl"], rows=str(rows_out), seed=args.seed)
     every = arms(tables, args.keep_o)
     assert set(wanted) <= set(every), wanted
