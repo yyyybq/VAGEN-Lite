@@ -125,8 +125,20 @@ def main():
                                    "fires": bool((c["both"]["p"] < SEED2_P and ahead) or
                                                  ("test" in c and c["test"]["diff_points"] >= SEED2_TEST_POINTS)),
                                    "p_below_but_behind": bool(c["both"]["p"] < SEED2_P and not ahead)}
+    better = None  # PREREG section 4: the better O arm, view 2 as section 4 reads it ((b) when S0 stopped)
+    v4 = view2.get("b") or {}
+    arms_o = [a for a in ("O", "OK") if (v4.get("comparisons") or {}).get(f"{a}-S0")]
+    if len(arms_o) == 2:
+        c = {a: v4["comparisons"][f"{a}-S0"] for a in arms_o}
+        rate = {a: c[a]["both"]["a"] for a in arms_o}
+        if rate["O"] != rate["OK"]:
+            pick, why = max(arms_o, key=lambda a: rate[a]), "higher success on both sets together"
+        else:
+            pick, why = min(arms_o, key=lambda a: c[a]["both"]["p"]), "same success; smaller p against S0"
+        better = {"arm": pick, "why": why, "both_sets": rate, "p_against_s0": {a: c[a]["both"]["p"] for a in arms_o},
+                  "updates": {a: v4["picks"][a] for a in arms_o}}
     out = {"sets": sets, "select_by": sel, "stops": stops, "checkpoints": table, "view1": view1, "view2": view2,
-           "seed2": seed2}
+           "seed2": seed2, "better_o_arm": better}
     Path(args.out).write_text(json.dumps(out, indent=1))
 
     pct = lambda x: "—" if x is None else f"{100 * x:.1f}%"  # noqa: E731
@@ -170,6 +182,11 @@ def main():
             L.append(f"| {NAMES[arm]}（{v}） | {s['p_both']:.3f} | {s['diff_both']:+.1f} | "
                      f"{'—' if s['diff_test'] is None else format(s['diff_test'], '+.1f')} | "
                      f"{'是' if s['fires'] else '否'}{'（p < 0.1 但落后）' if s['p_below_but_behind'] else ''} |")
+    if better:
+        L += ["", f"更好的 O 臂（第 4 节：同口径合并成功率高的，相同取对 S0 的 p 小的）：**{NAMES[better['arm']]}**"
+                  f"（O 第 {better['updates']['O']} 次 {pct(better['both_sets']['O'])}，"
+                  f"O-keep 第 {better['updates']['OK']} 次 {pct(better['both_sets']['OK'])}；"
+                  f"对 S0 的 p {better['p_against_s0']['O']:.3f} / {better['p_against_s0']['OK']:.3f}）"]
     Path(args.out).with_suffix(".md").write_text("\n".join(L) + "\n", encoding="utf-8")
     print("\n".join(L))
 
