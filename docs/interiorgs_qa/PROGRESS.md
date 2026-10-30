@@ -94,6 +94,9 @@
 
 ## 2. 正在运行什么
 
+没有（2026-10-30 第 1、2 轮 checkpoint 的 EASI-8 完成，报告第 8 节：EASI-8 平均 46.2 / 48.1 / 48.3；SITE 在第 1 轮就降 4.7 分，
+少训几轮不能解决；`easi_job.py` 对 SITE 视频默认打开 `--stack-dump`（不带的 5 次全停、带的 5 次全完成））。下面是当时的记录。
+
 用户 2026-10-29 要求：在 EASI-8 上评测 QA-SFT 的 checkpoint-170（第 1 轮）和 checkpoint-340（第 2 轮），看少训几轮能不能保住提高、减少 SITE 的退步。
 18 个单卡任务（2 个 checkpoint × 9 个 lmms-eval 任务，SITE 拆成图片和视频），`exps/interiorgs_qa_jobs/easi1_qasft_ck{170,340}_*_20261030`，
 结果在 `exps/interiorgs_qa_easi_20261028/qasft256_ck{170,340}/`。同一 checkpoint 的任务按 `--start-delay` 错开启动秒数，避免结果文件同名覆盖。
@@ -141,6 +144,10 @@
   --families orig,h1`，结果 `exps/interiorgs_qa_eval_20261028/sft256_test_256/`。
 
 ## 3. 下一步
+
+**用户决定（2026-10-30，报告第 8 节）**：最终 QA-SFT 用第 3 轮（`exps/interiorgs_qa_final_20261028/lf_256/model`）；SITE 的退步
+（EASI-8 里 −6.2 分）先不处理，报告如实写。现在没有待办。之后若要处理 SITE，方向是重训时混入通用的多来源空间问答或指令数据
+（少训几轮已证明不管用：第 1 轮就降了 4.7 分）。
 
 **用户决定（2026-10-28，报告第 5 节）**：训练用 256，和 Act-SFT 一致（`exps/interiorgs_qa_final_20261028/lf_256/train.yaml`）；
 更大的训练集等主对照结果出来再说，现在不导出（题库够抽约 3.9 倍；导出时抽样程序要加"视频场景也出单图、多图题"的选项）。
