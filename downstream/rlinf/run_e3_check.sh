@@ -9,6 +9,8 @@
 # Usage: run_e3_check.sh OUT [CKPT] [SEEDS] [WORKERS] [CELLS]
 #   CELLS (2026-10-30 evening, the second round): e.g. noise/target,noise/pretrain, added to the same OUT (obs and
 #   rejudge are done already, so only these cells run; the report covers every cell)
+#   SERVER_ARGS (the third round, size256/target,size256/pretrain): extra policy-server options, word-split, e.g.
+#   "--config_override datasets.vla_data.obs_image_size=null" (a server that does not resize the frames)
 # (PROBE_PORT and SERVER_SCRIPT only change for the tests.)
 set -uo pipefail
 OUT="${1:?Usage: run_e3_check.sh OUT [CKPT] [SEEDS] [WORKERS] [CELLS]}"
@@ -26,7 +28,9 @@ log() { echo "[e3_check] $* $(date -u +%FT%TZ)" | tee -a "$OUT/e3_check.log"; }
 PIDS=()
 cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"; }
 trap cleanup EXIT
-CUDA_VISIBLE_DEVICES=0 CKPT="$CKPT" PORT=$PORT bash "$SERVER_SCRIPT" server --idle_timeout -1 > "$OUT/server.log" 2>&1 &
+# shellcheck disable=SC2086  # SERVER_ARGS is a list of options
+CUDA_VISIBLE_DEVICES=0 CKPT="$CKPT" PORT=$PORT bash "$SERVER_SCRIPT" server --idle_timeout -1 ${SERVER_ARGS:-} \
+  >> "$OUT/server.log" 2>&1 &
 PIDS+=($!)
 for i in $(seq 1 180); do
   python3 -c 'import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1",int(sys.argv[1]))))' "$PORT" && break

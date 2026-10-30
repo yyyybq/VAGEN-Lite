@@ -26,7 +26,9 @@ run: the start E3-B began from, greedy, on the three E3 tasks x SEEDS in four ce
 evaluation), rlinf (12 numbers unchanged)} x split {target, pretrain}, at most 512 control steps (E3's horizon),
 episodes in parallel on one policy server per GPU (closed_loop's workers, retries and hang handling).  Per episode:
 success, steps, and how often the raw gripper / mode numbers would be read differently by the two paths.  The
-final simulator state of failed rlinf-path episodes is saved (OUT/states/).
+final simulator state of failed rlinf-path episodes is saved (OUT/states/).  Later rounds add cells to the same OUT
+with --cells: noise/* (RLinf's rollout noise on the mean action) and size256/* (the frames at 256 x 256, unresized,
+as RLinf passes them; these need a server started with NO_RESIZE_OVERRIDE, run_e3_check.sh's SERVER_ARGS).
 rejudge: up to 20 of those failed episodes: a fresh environment of the same task, seed and split, the saved state
 set, RoboCasa's success check read again (our judgment) and compared with RLinf's (it said failure).
 report: OUT/report.json and report.md (success per cell and task with 95% Wilson intervals, the two factors, the
@@ -58,6 +60,15 @@ CELLS = (("gym", "target"), ("gym", "pretrain"), ("rlinf", "target"), ("rlinf", 
 # around the mean in the normalised action space with std exp(actor_logstd), initialised at exp(-2.5) = 0.082
 NOISE_CELLS = (("noise", "target"), ("noise", "pretrain"))
 RLINF_STD = 0.0820849986238988  # exp(-2.5)
+# the third round (2026-10-30 night): RLinf's StarVLA wrapper reads the training image size from
+# datasets.vla_data.image_size or default_image_resolution (rlinf/models/embodiment/starvla/utils/vlm_preprocess.py,
+# get_train_image_size), but StarVLA checkpoints keep it in obs_image_size, so RLinf hands the policy the environment's
+# 256 x 256 frames (E3's camera_heights / widths) where the model was trained, and our evaluation feeds it, at
+# 224 x 224.  These cells pass the 256 x 256 frames unchanged to a policy server that does not resize them either
+# (started with --config_override datasets.vla_data.obs_image_size=null): RLinf's image path on our pipeline.
+SIZE_CELLS = (("size256", "target"), ("size256", "pretrain"))
+RAW_SIZE = (256, 256)
+NO_RESIZE_OVERRIDE = "--config_override datasets.vla_data.obs_image_size=null"
 MAX_STEPS = 512  # E3's max_episode_steps
 CAMERAS = ("robot0_agentview_left", "robot0_agentview_right", "robot0_eye_in_hand")
 OBS_PAIRS = [("CoffeeSetupMug", s) for s in range(1000, 1007)] + [("StackBowlsCabinet", s) for s in range(1000, 1007)] \
@@ -160,7 +171,7 @@ def run_episode(spec: dict) -> dict:
                 diff = {k: diff[k] + int(d[k]) for k in diff}
                 raw_g.append(float(vector[GRIPPER]))
                 raw_m.append(float(vector[MODE]))
-                if spec["path"] in ("gym", "noise"):
+                if spec["path"] in ("gym", "noise", "size256"):  # size256: only the frames' size differs
                     obs, _r, _te, _tr, info = env.step(gym_action(vector, env.action_space))
                     success = bool(info.get("success", False))
                 else:
@@ -207,10 +218,63 @@ def parse_cells(text: str):
     if not text:
         return CELLS
     out = tuple(tuple(c.split("/")) for c in text.split(",") if c.strip())
-    known = set(CELLS) | set(NOISE_CELLS)
+    known = set(CELLS) | set(NOISE_CELLS) | set(SIZE_CELLS)
     if not out or any(c not in known for c in out):
         raise ValueError(f"cells must be among {sorted('/'.join(c) for c in known)}: {text}")
     return out
+
+
+def initializer_for(cells):
+    """The pool's worker initializer: the size256 cells need their own server and contract (_init_worker_raw), so
+    they cannot share a run with the other cells."""
+    raw = [p == "size256" for p, _ in cells]
+    if any(raw) and not all(raw):
+        raise ValueError("the size256 cells need a server that does not resize: run them without the other cells")
+    return _init_worker_raw if all(raw) else closed_loop._init_worker
+
+
+def check_raw_server(metadata, ckpt, contract):
+    """vagen's verify_server, except that the server must not resize the frames (no training image size in its
+    metadata, i.e. started with NO_RESIZE_OVERRIDE)."""
+    from vagen.envs.robocasa.utils.actions import GYM_SLICES
+
+    served = metadata.get("ckpt_path")
+    if not served or Path(served).resolve() != Path(ckpt).resolve():
+        raise ValueError(f"Server is serving a different checkpoint: {served}")
+    if metadata.get("action_chunk_size") != contract.horizon:
+        raise ValueError("Server action horizon differs from checkpoint config")
+    if list(metadata.get("action_keys", [])) != list(GYM_SLICES):
+        raise ValueError("Server action order differs from PandaOmron")
+    if metadata.get("training_obs_image_size"):
+        raise ValueError(f"Server resizes frames to {metadata['training_obs_image_size']}; start it with "
+                         f"{NO_RESIZE_OVERRIDE}")
+
+
+def _init_worker_raw(ckpt: str, servers, starvla_root: str, stable_regions: bool = True, inflight: str = None):
+    """closed_loop._init_worker for the size256 cells: the contract passes the frames at RAW_SIZE (its resize is then
+    none) and the server is checked by check_raw_server.  Never raises (the error is kept for every episode)."""
+    import dataclasses
+
+    worker = mp.current_process()._identity[0] if mp.current_process()._identity else 1
+    server = servers[(worker - 1) % len(servers)]
+    closed_loop._STATE.update(server=server, worker=worker, inflight=inflight)
+    try:
+        if stable_regions:
+            import robocasa.wrappers.gym_wrapper  # noqa: F401  (imports RoboCasa before patching it)
+            closed_loop.stable_counter_regions()
+        sys.path.insert(0, str(WORKTREE))
+        sys.path.insert(0, starvla_root)
+        from deployment.model_server.tools.websocket_policy_client import WebsocketClientPolicy
+        from vagen.envs.robocasa.starvla_contract import PolicyContract, checkpoint_config
+
+        config, _ = checkpoint_config(ckpt)
+        contract = dataclasses.replace(PolicyContract.from_config(config), image_size=RAW_SIZE)
+        host, port = server.split(":")
+        policy = WebsocketClientPolicy(host, int(port))
+        check_raw_server(policy.get_server_metadata(), ckpt, contract)
+        closed_loop._STATE.update(contract=contract, policy=policy)
+    except Exception as exc:
+        closed_loop._STATE["init_error"] = f"{type(exc).__name__}: {exc}"[:500]
 
 
 def run_cmd(args) -> int:
@@ -225,6 +289,7 @@ def run_cmd(args) -> int:
             if r.get("status") == "complete":
                 done.add((r["cell"], r["task"], r["seed"]))
     cells = parse_cells(args.cells)
+    init = initializer_for(cells)
     scale = noise_scale(args.ckpt) if any(p == "noise" for p, _ in cells) else None
     eps = [e for e in episodes_for(parse_seeds(args.seeds), cells=cells, states_dir=str(out / "states"),
                                    noise_scale=scale)
@@ -233,7 +298,7 @@ def run_cmd(args) -> int:
     inflight.mkdir(exist_ok=True)
     ctx = mp.get_context("spawn")
     # closed_loop.run_all keys episodes by (task, seed): run the cells one after another
-    with ctx.Pool(args.workers, initializer=closed_loop._init_worker,
+    with ctx.Pool(args.workers, initializer=init,
                   initargs=(args.ckpt, args.servers.split(","), args.starvla_root, True, str(inflight))) as pool, \
             open(rows_path, "a") as f:
         for cell in dict.fromkeys(e["cell"] for e in eps):
@@ -384,7 +449,7 @@ def summarize(rows: list) -> dict:
 
     out = {}
     present = {r.get("cell") for r in rows}
-    for cell in [f"{p}/{s}" for p, s in CELLS + NOISE_CELLS if f"{p}/{s}" in present or (p, s) in CELLS]:
+    for cell in [f"{p}/{s}" for p, s in CELLS + NOISE_CELLS + SIZE_CELLS if f"{p}/{s}" in present or (p, s) in CELLS]:
         cr = [r for r in rows if r.get("cell") == cell and r.get("status") == "complete"]
         per = {}
         for task in TASKS + ("all",):

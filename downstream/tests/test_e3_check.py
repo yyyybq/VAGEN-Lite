@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -57,6 +58,37 @@ def test_cells_parse_and_noise_specs():
     eps = E.episodes_for([1000], cells=(("noise", "pretrain"), ("gym", "target")), noise_scale=[1.0] * 12)
     assert [e["cell"] for e in eps] == ["noise/pretrain"] * 3 + ["gym/target"] * 3
     assert eps[0]["noise_scale"] == [1.0] * 12 and "noise_scale" not in eps[3]
+
+
+def test_size256_cells_need_their_own_server_and_contract():
+    """The third round (2026-10-30 night): RLinf's frames reach the policy at 256 x 256, not resized to 224."""
+    cells = E.parse_cells("size256/target,size256/pretrain")
+    assert cells == E.SIZE_CELLS and E.RAW_SIZE == (256, 256)
+    assert E.initializer_for(cells) is E._init_worker_raw
+    assert E.initializer_for(E.CELLS) is E.closed_loop._init_worker
+    with pytest.raises(ValueError):
+        E.initializer_for((("size256", "target"), ("gym", "target")))
+    eps = E.episodes_for([1000], cells=cells)
+    assert [e["cell"] for e in eps] == ["size256/target"] * 3 + ["size256/pretrain"] * 3
+    assert E.summarize([row("size256/target", "CoffeeSetupMug", 1000, False)])["size256/target"]["all"]["n"] == 1
+
+
+def test_the_raw_server_must_not_resize(tmp_path):
+    sys.path.insert(0, str(ROOT.parent))
+    from vagen.envs.robocasa.utils.actions import GYM_SLICES
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    contract = SimpleNamespace(horizon=16, image_size=E.RAW_SIZE)
+    meta = {"ckpt_path": str(ckpt), "action_chunk_size": 16, "action_keys": list(GYM_SLICES),
+            "training_obs_image_size": None}
+    E.check_raw_server(meta, str(ckpt), contract)
+    with pytest.raises(ValueError, match="obs_image_size=null"):
+        E.check_raw_server(dict(meta, training_obs_image_size=[224, 224]), str(ckpt), contract)
+    with pytest.raises(ValueError, match="different checkpoint"):
+        E.check_raw_server(dict(meta, ckpt_path=str(tmp_path / "other.pt")), str(ckpt), contract)
+    with pytest.raises(ValueError, match="horizon"):
+        E.check_raw_server(dict(meta, action_chunk_size=8), str(ckpt), contract)
 
 
 def test_episode_list_covers_the_four_cells():
@@ -129,3 +161,21 @@ def test_job_script_runs_the_steps_in_order(tmp_path):
     assert run[run.index("--servers") + 1] == f"127.0.0.1:{port}" and run[run.index("--seeds") + 1] == "1000-1001"
     assert run[run.index("--workers") + 1] == "3" and run[run.index("--ckpt") + 1] == "/ckpt.pt"
     assert run[run.index("--cells") + 1] == "noise/target"
+
+
+def test_job_script_passes_extra_server_options(tmp_path):
+    wt = tmp_path / "wt"
+    (wt / "downstream/eval").mkdir(parents=True)
+    (wt / "downstream/rlinf").mkdir(parents=True)
+    shutil.copy(ROOT / "rlinf/run_e3_check.sh", wt / "downstream/rlinf/run_e3_check.sh")
+    (wt / "downstream/eval/sim_env.sh").write_text(SIM_ENV)
+    (wt / "downstream/rlinf/e3_check.py").write_text(STUB)
+    (tmp_path / "server.sh").write_text(SERVER.replace("#!/usr/bin/env bash\n",
+                                                       '#!/usr/bin/env bash\necho "$@" > "$ARGS_FILE"\n', 1))
+    env = dict(os.environ, PROBE_PORT=str(free_port()), SERVER_SCRIPT=str(tmp_path / "server.sh"),
+               ARGS_FILE=str(tmp_path / "args.txt"), SERVER_ARGS=E.NO_RESIZE_OVERRIDE)
+    res = subprocess.run(["bash", str(wt / "downstream/rlinf/run_e3_check.sh"), str(tmp_path / "out"), "/ckpt.pt",
+                          "1000", "2", "size256/target"], capture_output=True, text=True, env=env, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert (tmp_path / "args.txt").read_text().split() == \
+        ["server", "--idle_timeout", "-1", "--config_override", "datasets.vla_data.obs_image_size=null"]
