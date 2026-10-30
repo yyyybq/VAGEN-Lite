@@ -253,7 +253,7 @@ def a_share(questions, ans) -> dict:
 def analyze_cmd(args) -> int:
     questions = [json.loads(line) for line in Path(args.questions).read_text().splitlines() if line.strip()]
     answers, form = {}, {}
-    options = {q["id"]: q["options"] for q in questions}
+    options = {q["id"]: q.get("options") or [] for q in questions}
     for spec in args.answers:
         model, path = spec.split("=", 1)
         rows = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
