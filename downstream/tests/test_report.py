@@ -12,6 +12,16 @@ pytest.importorskip("matplotlib")
 pytest.importorskip("PIL")
 from downstream.report import build, collect, simulate, stats  # noqa: E402
 
+EXCLUDED_UNTIL_1030 = {("SearingMeat", 1044), ("StoreLeftoversInBowl", 1003), ("PreSoakPan", 1016),
+                       ("DeliverStraw", 1006), ("DeliverStraw", 1014), ("LoadDishwasher", 1002)}
+
+
+@pytest.fixture
+def list_until_1030(monkeypatch):
+    """The hand-counted trees below use OpenDrawer seeds 1000-1049; the exclusion list as it was before OpenDrawer
+    1012 joined it (2026-10-30) keeps their counts exact: the statistics are what they test, not the list."""
+    monkeypatch.setattr(collect, "excluded", lambda: set(EXCLUDED_UNTIL_1030))
+
 
 def test_wilson_and_exact_tests_match_hand_values():
     r, lo, hi = stats.wilson(10, 20)
@@ -166,7 +176,7 @@ def test_stage0_build_reads_the_stopped_runs(tmp_path):
     assert "检查点之间的波动" in page and "缺回合的评测" not in page
 
 
-def test_step_rule_by_hand(tmp_path):
+def test_step_rule_by_hand(tmp_path, list_until_1030):
     """Two tasks; B and S equal at 50k and 100k (within), RS and RD gain 40 points on both tasks (not within)."""
     root = tmp_path / "runs"
     tasks = {"OpenDrawer": 50, "CloseFridge": 20}
@@ -248,7 +258,7 @@ def test_partial_evaluations_count_their_completed_episodes(tmp_path):
     assert e.summary["shards"] == 2 and e.summary["per_task"]["CloseFridge"] == {"n": 1, "successes": 1}
 
 
-def test_stage0_band_bounds_and_fluctuation(tmp_path):
+def test_stage0_band_bounds_and_fluctuation(tmp_path, list_until_1030):
     """RD 50k still lacks 20 OpenDrawer episodes: it counts with its 30; OpenDrawer's all-checkpoint average could
     end on either side of 10%; the adjacent-checkpoint and between-start differences match hand counts."""
     from downstream.report import page
@@ -297,7 +307,7 @@ def test_stage0_band_bounds_and_fluctuation(tmp_path):
     assert "缺回合的评测" in html_text and "检查点之间的波动" in html_text and "补完后 22.9%–51.4%" in html_text
 
 
-def test_compare_mean_over_three_checkpoints_by_hand(tmp_path):
+def test_compare_mean_over_three_checkpoints_by_hand(tmp_path, list_until_1030):
     """E1's main numbers (the user's decision 2 of 2026-10-23 evening): the mean over 150k, 175k and 200k.  B is flat;
     S gains 5 OpenDrawer successes per checkpoint; CloseFridge is equal throughout."""
     from downstream.report import page
@@ -338,7 +348,7 @@ def test_compare_mean_over_three_checkpoints_by_hand(tmp_path):
     assert "E3 任务清单复核" in html_text and "<b>30.0%</b>" in html_text
 
 
-def test_e2_compares_each_smaller_ratio_with_100_percent_within_a_start(tmp_path):
+def test_e2_compares_each_smaller_ratio_with_100_percent_within_a_start(tmp_path, list_until_1030):
     """The user's question of 2026-10-26: is 30% above 100% for every start or only for RS?  Same start, same final
     step, same scenes: S gains 10 OpenDrawer successes at 30%, CloseFridge is unchanged."""
     from downstream.report import page
