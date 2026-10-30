@@ -50,12 +50,12 @@ def test_simulated_tree_reads_back(sim):
     coll = collect.collect(sim)
     assert len(coll.experiments) == 36 and coll.starts() == ["B", "S", "RS", "RD"]
     assert len(coll.first()) == 4 * 8 + 8 + 24 and len([e for e in coll.evals if e.kind == "repeat"]) == 2
-    assert all(len(e.episodes) == 944 for e in coll.first())  # 950 minus the 6 excluded (decisions of 2026-10-23)
+    assert all(len(e.episodes) == 943 for e in coll.first())  # 950 minus the 7 excluded (10-23, OpenDrawer 1012 on 10-30)
     assert stats.common_steps(coll, "100", [1])[-1] == 200000
     cmp = stats.compare(coll, "100", 200000, [1, 2, 3])
-    assert cmp["groups"]["B"]["all"][1] == 3 * 944 and cmp["groups"]["B"]["spatial"][1] == 3 * 447
+    assert cmp["groups"]["B"]["all"][1] == 3 * 943 and cmp["groups"]["B"]["spatial"][1] == 3 * 446
     rs = cmp["vs_reference"]["RS"]
-    assert rs["groups"]["all"]["n"] == 2832 and len(rs["tasks"]) == 34
+    assert rs["groups"]["all"]["n"] == 3 * 943 and len(rs["tasks"]) == 34
     assert all(0 <= t["p_holm"] <= 1 for t in rs["tasks"].values())
 
 
@@ -71,7 +71,7 @@ def test_build_writes_a_complete_page(sim, tmp_path):
     assert "模拟数据" in page and page.startswith("<title>RoboCasa 起点对照</title>")
     assert out["html_bytes"] < 16 * 1024 * 1024
     results = json.loads((tmp_path / "report/results.json").read_text(encoding="utf-8"))
-    assert results["main_label"].startswith("第三步，100% 数据") and results["noise"][0]["compared"] == 944
+    assert results["main_label"].startswith("第三步，100% 数据") and results["noise"][0]["compared"] == 943
     assert results["d5_step"] is None and len(results["summary_lines"]) >= 8  # 200k is the final step, not "D5"
     assert set(results["e2"]) == {"B", "S", "RS", "RD"} and set(results["e2"]["RS"]) == {"010", "030"}
 
@@ -118,7 +118,7 @@ def test_task_level_pairs_by_task():
 
 def test_noise_floor_of_a_repeated_checkpoint(sim):
     floor = stats.noise_floor(collect.collect(sim))
-    assert len(floor) == 2 and all(f["episodes_compared"] == 944 for f in floor)
+    assert len(floor) == 2 and all(f["episodes_compared"] == 943 for f in floor)
     f = floor[0]
     assert f["task_level"]["tasks"] == 34 and 0 <= f["task_mean_abs_diff"] <= f["task_max_abs_diff"] <= 1
 
@@ -148,13 +148,13 @@ def test_stage0_build_reads_the_stopped_runs(tmp_path):
     assert s0["steps"] == [25000, 50000, 75000, 100000] and s0["latest_common"] == 100000
     assert s0["starts"] == ["B", "S", "RS", "RD"] and len(s0["spatial"]) == 9
     assert all(x["in_band"] == (0.1 <= x["mean"] <= 0.6) for x in s0["spatial"])
-    assert all((r["from"], r["to"]) == (75000, 100000) and r["all"]["n"] == 944 and r["spatial"]["n"] == 447
+    assert all((r["from"], r["to"]) == (75000, 100000) and r["all"]["n"] == 943 and r["spatial"]["n"] == 446
                for r in s0["flat"].values())
     assert results["finals"] == {} and results["main_label"].startswith("阶段 0") and len(results["noise_floor"]) == 2
     rule = s0["step_rule"]
     assert rule["complete"] and set(rule["starts"]) == {"B", "S", "RS", "RD"} and rule["steps"] in (100000, 200000)
     for r in rule["starts"].values():
-        assert r["n"] == 944 and r["within"] == (r["wilcoxon_p"] > 0.05 and abs(r["task_mean_diff"]) < 0.03)
+        assert r["n"] == 943 and r["within"] == (r["wilcoxon_p"] > 0.05 and abs(r["task_mean_diff"]) < 0.03)
     assert (rule["steps"] == 100000) == all(r["within"] for r in rule["starts"].values())
     assert all({"mean_all", "low_all", "high_all", "in_band_all", "band_certain", "per_step"} <= set(x)
                for x in s0["spatial"])

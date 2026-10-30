@@ -341,11 +341,16 @@ def _run_episode(spec: dict) -> dict:
 
     contract, policy = _STATE["contract"], _STATE["policy"]
     env = None
+    probe = Probe(PROBE_DIR, spec["task"], spec["seed"]) if PROBE_DIR else None
     started = time.monotonic()
     try:
+        if probe:
+            probe.arm()
         env = gym.make(f"robocasa/{spec['task']}", enable_render=True, split=spec["split"], seed=spec["seed"])
         obs, _ = env.reset(seed=spec["seed"])
         out["reset_seconds"] = round(time.monotonic() - started, 2)
+        if probe:
+            probe.log("reset", 0, out["reset_seconds"], env)
         out["init"] = state_fingerprint(env, obs)
         out["init_qpos"] = initial_qpos(env)
         end_state = EndState(spec["task"], env) if spec.get("end_state") else None
@@ -357,14 +362,23 @@ def _run_episode(spec: dict) -> dict:
         terminated = truncated = False
         while steps < spec["max_steps"] and not (success or terminated or truncated):
             _heartbeat()
+            if probe:
+                probe.arm()
             t = time.monotonic()
             response = policy.predict_action({"examples": [contract.example(obs)], "do_sample": False})
             latencies.append(time.monotonic() - t)
             actions = contract.actions(response["data"]["actions"])
             calls += 1
+            if probe:
+                probe.log("policy", calls, latencies[-1])
             for vector in actions[:min(spec["execute_steps"], spec["max_steps"] - steps)]:
+                if probe:
+                    probe.arm()
+                    t = time.monotonic()
                 obs, reward, terminated, truncated, info = env.step(gym_action(vector, env.action_space))
                 steps += 1
+                if probe:
+                    probe.log("step", steps, time.monotonic() - t, env)
                 success = success or bool(info.get("success", False))
                 if success or terminated or truncated:
                     break
@@ -385,6 +399,8 @@ def _run_episode(spec: dict) -> dict:
     finally:
         if env is not None:
             env.close()
+        if probe:
+            probe.close()
     out["wall_seconds"] = round(time.monotonic() - started, 2)
     return out
 
@@ -406,12 +422,62 @@ def pid_alive(pid: int) -> bool:
 
 def hang_limit(max_steps) -> float:
     """Seconds after which a running episode counts as hung: 10 minutes of reset plus 3 s per control step, about 4x
-    the slowest measured (0.81 s per step with 96 processes on one machine, 2026-10-22)."""
+    the slowest measured (0.81 s per step with 96 processes on one machine, 2026-10-22).  CLOSED_LOOP_HANG_LIMIT_SECONDS
+    replaces it (2026-10-30, only for the diagnostics run of an episode that hangs)."""
+    if os.environ.get("CLOSED_LOOP_HANG_LIMIT_SECONDS"):
+        return float(os.environ["CLOSED_LOOP_HANG_LIMIT_SECONDS"])
     return 600.0 + 3.0 * float(max_steps or 0)
 
 
-STALL_SECONDS = 600.0  # no progress (policy call) for this long: hung.  A policy call comes every 16 control steps
-# (13 s at 0.81 s per step); the longest gap is the scene build and reset at the start, up to about 2 minutes measured
+STALL_SECONDS = float(os.environ.get("CLOSED_LOOP_STALL_SECONDS", "600"))  # no progress (policy call) for this
+# long: hung.  A policy call comes every 16 control steps (13 s at 0.81 s per step); the longest gap is the scene build
+# and reset at the start, up to about 2 minutes measured.  The variable only changes for the diagnostics run.
+
+PROBE_DIR = os.environ.get("CLOSED_LOOP_PROBE_DIR")  # diagnostics of a hanging episode (2026-10-30), default off
+PROBE_DUMP_SECONDS = float(os.environ.get("CLOSED_LOOP_STALL_DUMP", "120"))
+
+
+class Probe:
+    """Per-episode diagnostics, only with CLOSED_LOOP_PROBE_DIR set (the user's request of 2026-10-30: why OpenDrawer
+    seed 1012 keeps hanging its simulator process).  Every policy call and every simulator step is timed and written
+    with the simulator's contact count, largest joint speed and simulated time to PROBE_DIR/<task>_s<seed>_p<pid>.csv;
+    a reset, call or step that takes longer than CLOSED_LOOP_STALL_DUMP seconds (120) dumps every thread's Python stack
+    to PROBE_DIR/stacks_<pid>.log (faulthandler, re-armed before each one, so the dump names where it is stuck)."""
+
+    def __init__(self, root, task: str, seed: int):
+        import faulthandler
+
+        self.fh = faulthandler
+        root = Path(root)
+        root.mkdir(parents=True, exist_ok=True)
+        self.rows = open(root / f"{task}_s{seed}_p{os.getpid()}.csv", "w")
+        self.rows.write("utc_seconds,phase,index,seconds,ncon,max_abs_qvel,sim_time\n")
+        self.stacks = open(root / f"stacks_{os.getpid()}.log", "a")
+        self.stacks.write(f"=== {task} seed {seed} pid {os.getpid()} started {time.time():.0f}\n")
+        self.stacks.flush()
+
+    def arm(self) -> None:
+        self.fh.dump_traceback_later(PROBE_DUMP_SECONDS, repeat=True, file=self.stacks)
+
+    def log(self, phase: str, index: int, seconds: float, env=None) -> None:
+        ncon = qvel = sim_time = ""
+        if env is not None:
+            try:
+                import numpy as np
+
+                inner = getattr(env, "unwrapped", env)
+                data = getattr(inner, "env", inner).sim.data
+                ncon, qvel, sim_time = int(data.ncon), round(float(np.abs(np.asarray(data.qvel)).max()), 4), \
+                    round(float(data.time), 4)
+            except Exception:  # diagnostics never stop an episode
+                pass
+        self.rows.write(f"{time.time():.3f},{phase},{index},{seconds:.4f},{ncon},{qvel},{sim_time}\n")
+        self.rows.flush()
+
+    def close(self) -> None:
+        self.fh.cancel_dump_traceback_later()
+        self.rows.close()
+        self.stacks.close()
 
 
 def hung(info: dict, marker_mtime: float, now: float, stall: float = STALL_SECONDS) -> bool:

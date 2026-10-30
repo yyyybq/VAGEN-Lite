@@ -136,7 +136,7 @@ def test_the_x3_plan_is_the_spatial_part_of_the_fixed_evaluation():
     assert set(spatial) == set(x3.SPATIAL)
     assert mine == [e for e in full if e["task"] in spatial] and len(mine) == 450
     keys = closed_loop.excluded_episodes()["keys"]
-    assert len(closed_loop.apply_exclusions(mine, keys)) == 447
+    assert len(closed_loop.apply_exclusions(mine, keys)) == 446  # 447 until OpenDrawer 1012 was excluded (10-30)
     assert p["end_state"] and p["split"] == "target" and p["execute_steps"] == 16 and p["stable_counter_regions"]
 
 

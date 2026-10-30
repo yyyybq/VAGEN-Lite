@@ -164,10 +164,12 @@ def test_exclusion_list_is_applied_after_sharding(tmp_path):
     eps = [{"task": "SearingMeat", "seed": 1044}, {"task": "SearingMeat", "seed": 1045}, {"task": "DeliverStraw", "seed": 1006}]
     assert closed_loop.apply_exclusions(eps, ex["keys"]) == [{"task": "SearingMeat", "seed": 1045}]
     assert closed_loop.excluded_episodes(tmp_path / "missing.json")["keys"] == set()
-    real = closed_loop.excluded_episodes()  # the list the user fixed on 2026-10-23 (5), LoadDishwasher 1002 added that evening
-    assert len(real["keys"]) == 6 and {("StoreLeftoversInBowl", 1003), ("LoadDishwasher", 1002)} <= real["keys"]
+    real = closed_loop.excluded_episodes()  # the list the user fixed on 2026-10-23 (5), LoadDishwasher 1002 added that
+    # evening, OpenDrawer 1012 on 2026-10-30 (the user's decision: kick it out, find out separately why it hangs)
+    assert len(real["keys"]) == 7 and {("StoreLeftoversInBowl", 1003), ("LoadDishwasher", 1002),
+                                       ("OpenDrawer", 1012)} <= real["keys"]
     full, _ = closed_loop.eval_plan_episodes(ROOT / "eval/eval_d6.json")
-    assert len(closed_loop.apply_exclusions(full, real["keys"])) == 944
+    assert len(closed_loop.apply_exclusions(full, real["keys"])) == 943
 
 
 def test_policy_servers_never_close_while_an_evaluation_runs():

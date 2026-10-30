@@ -3,16 +3,19 @@
  "decided_utc": "2026-10-23T00:00:00Z",
  "amended": [
   {"utc": "2026-10-23T19:16:00Z", "added": [["LoadDishwasher", 1002]],
-   "why": "the user's decision 4 of 2026-10-23 evening (after the stage-0 report): it did not complete in 7 evaluations (its process died 3 times, or the policy server had already closed)"}
+   "why": "the user's decision 4 of 2026-10-23 evening (after the stage-0 report): it did not complete in 7 evaluations (its process died 3 times, or the policy server had already closed)"},
+  {"utc": "2026-10-30T08:00:00Z", "added": [["OpenDrawer", 1012]],
+   "why": "the user's decision of 2026-10-30 (kick it out and go on with the experiments; why it hangs is checked separately): its worker was killed as hung 3 times and the episode given up in the X3 replay of E1-RD 200k and in the E3-RD evaluation, and again in the model line's DS-Q3S 175k evaluation; evaluations from here on have 943 episodes (the spatial group 446); earlier results are compared on the episodes both sides have, as always"}
  ],
- "episodes_per_evaluation": 944,
+ "episodes_per_evaluation": 943,
  "episodes": [
   ["SearingMeat", 1044],
   ["StoreLeftoversInBowl", 1003],
   ["PreSoakPan", 1016],
   ["DeliverStraw", 1006],
   ["DeliverStraw", 1014],
-  ["LoadDishwasher", 1002]
+  ["LoadDishwasher", 1002],
+  ["OpenDrawer", 1012]
  ],
- "evidence": "docs/downstream/EVAL_PROTOCOL.md section 5, docs/downstream/reports/E0_PARTIAL_20261023.md section 5 and docs/downstream/reports/E0_STAGE0_20261023.md section 5"
+ "evidence": "docs/downstream/EVAL_PROTOCOL.md section 5, docs/downstream/reports/E0_PARTIAL_20261023.md section 5 and docs/downstream/reports/E0_STAGE0_20261023.md section 5; OpenDrawer 1012: docs/downstream/reports/X3_RESULTS_20261029.md and E3_RESULTS_20261029.md"
 }

@@ -113,14 +113,15 @@
 - **参考**：每个成功率的 95% Wilson 区间；逐回合配对的 McNemar 精确检验及 Holm 校正（每个任务一个检验）。它们把回合当成独立的，只作参考，不作结论。
 - 代码：`downstream/report/stats.py`（`task_level`、`noise_floor`、`compare`），单元测试 `downstream/tests/test_report.py`。
 
-## 5. 剔除清单（你 10-23 的决定 1；同日晚的决定 4 加了一个）
+## 5. 剔除清单（你 10-23 的决定 1；同日晚的决定 4 加了一个；10-30 又加了一个）
 
 - **规则**：同一个（任务, 种子）在至少两个不同检查点的评测里让仿真进程死掉或挂住，就剔除。所有起点、E0 / E1 / E3 用同一份；**E1 的评测开始后冻结**：已于 10-25 03:47 UTC 冻结（第一次 E1 评测是 S 第 20 万步的任务内评测），再加要单独报告。
 - **清单**（[downstream/eval/excluded_episodes.json](../../downstream/eval/excluded_episodes.json)）：
   - 10-23 早定的 5 个：SearingMeat 1044、StoreLeftoversInBowl 1003、PreSoakPan 1016、DeliverStraw 1006、DeliverStraw 1014。
   - 10-23 晚加的 1 个：LoadDishwasher 1002。它在 7 次评测里没跑完：6 次是进程连死 3 次，1 次是重试时策略服务已因空闲 30 分钟关掉。
-  - 合计 6 个，每次评测 950 → **944 回合**；空间组 450 → 447（SearingMeat 和 DeliverStraw 是空间任务，LoadDishwasher 不是）。
-- **按同一规则也满足、但没加入的 7 个**：OpenDrawer 1012、StackBowlsCabinet 1012、PrepareCoffee 1003、StirVegetables 1007、CloseBlenderLid 1005、StackBowlsCabinet 1013、StackBowlsCabinet 1021。它们的进程出过事，但重试都跑完了。证据见阶段 0 报告第 5 节。
+  - **10-30 加的 1 个：OpenDrawer 1012**（你 10-30 的决定："先把它踢掉，然后正常推进实验"；为什么会让仿真进程反复卡死，另外单独查）。它在 X3 对 E1-RD 第 20 万步的重放和 E3-RD 的评测里都是进程连续 3 次被判卡死、最后放弃，模型线的 DS-Q3S 第 17.5 万步评测里也一样；E1-RD 第 20 万步原来的评测里它跑完了，所以不是每次都卡。
+  - 合计 7 个，10-30 起每次评测 950 → **943 回合**；空间组 450 → 446（OpenDrawer 是空间任务）。10-30 之前的结果数字不改（944、447），和新结果比时照常只用两边都有的回合。
+- **按同一规则也满足、但没加入的 6 个**（OpenDrawer 1012 已于 10-30 加入）：StackBowlsCabinet 1012、PrepareCoffee 1003、StirVegetables 1007、CloseBlenderLid 1005、StackBowlsCabinet 1013、StackBowlsCabinet 1021。它们的进程出过事，但重试都跑完了。证据见阶段 0 报告第 5 节。
 - **策略服务不再因空闲关闭**（10-23 晚的决定 4）：`run_eval_ckpt.sh` 用 `--idle_timeout -1` 启动 StarVLA 的服务，整个评测期间都不关（包括补回合期间）；评测结束时由脚本自己关。
 - **怎么用**：
   - `closed_loop.py` 在分片之后去掉清单里的回合，所以一个分片的回合不变；清单和它的 sha256 记在每次评测的 `plan.json`、`summary.json` 和 `resume_*.json` 里。
