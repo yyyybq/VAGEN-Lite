@@ -225,6 +225,15 @@ def test_g0_selection_balances_answers():
     assert len(chosen) == 60 and len(by["counting"]) == 10
 
 
+def test_g0_scene_reading_skips_unreadable_lines(tmp_path):
+    d = tmp_path / "part1"
+    d.mkdir()
+    (d / "scenes.jsonl").write_text(json.dumps({"task": "T", "seed": 1}) + "\n" + "\x00" * 40 + "\n{broken\n\n"
+                                    + json.dumps({"task": "T", "seed": 2}) + "\n")
+    scenes, bad = G.read_scenes([d])
+    assert [s["seed"] for s in scenes] == [1, 2] and bad == 1
+
+
 def test_g0_parsing_and_analysis():
     two = {"id": "e1", "kind": "existence", "options": ["no", "yes"], "answer": "B", "answer_text": "yes"}
     cnt = {"id": "c1", "kind": "counting", "options": None, "answer": "2", "answer_text": "2"}

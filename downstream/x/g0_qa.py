@@ -301,12 +301,25 @@ def select(cands: list, total: int, rng: random.Random, targets=None) -> list:
     return chosen
 
 
-def select_cmd(args) -> int:
-    scenes = []
-    for g in args.gen:
-        for line in (Path(g) / "scenes.jsonl").read_text().splitlines():
-            if line.strip():
+def read_scenes(gen_dirs) -> tuple:
+    """(scene records, unreadable lines) of generate folders; a line that is not JSON (e.g. zero bytes the shared
+    file system shows while another host is still writing) is counted and left out."""
+    scenes, bad = [], 0
+    for g in gen_dirs:
+        for line in (Path(g) / "scenes.jsonl").read_text(errors="replace").splitlines():
+            if not line.strip("\x00 \t"):
+                continue
+            try:
                 scenes.append(json.loads(line))
+            except ValueError:
+                bad += 1
+    return scenes, bad
+
+
+def select_cmd(args) -> int:
+    scenes, bad = read_scenes(args.gen)
+    if bad:
+        print(f"[g0] {bad} unreadable lines left out")
     bad = [(s["task"], s["seed"], cam) for s in scenes if "error" not in s
            for cam, v in s["views"].items() if not v["same_as_x0"]]
     errors = [(s["task"], s["seed"], s["error"]) for s in scenes if "error" in s]
