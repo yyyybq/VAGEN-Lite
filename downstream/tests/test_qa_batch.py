@@ -247,6 +247,14 @@ def test_qwen3_gate_follows_the_three_fixed_rules():
     assert QR.gate(q0, None)["gate"] is None  # G0 not in yet: undecided
 
 
+def test_g0_sample_notes_for_every_kind():
+    assert G.sample_note({"kind": "existence", "negative": "pear"}) == "目标：pear（场景里没有）"
+    assert G.sample_note({"kind": "existence", "target": {"name": "mug", "pixels": 900}}) == "目标：mug（900 像素）"
+    assert "场景里没有：pear" in G.sample_note({"kind": "identification", "target": {"name": "mug", "pixels": 9},
+                                                "negative": "pear"})
+    assert G.sample_note({"kind": "counting", "targets": [{"pixels": 500}, {"pixels": 700}]}) == "每个 500 像素，700 像素"
+
+
 def test_g0_scene_reading_skips_unreadable_lines(tmp_path):
     d = tmp_path / "part1"
     d.mkdir()

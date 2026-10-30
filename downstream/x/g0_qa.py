@@ -439,6 +439,18 @@ def annotate(q: dict) -> str:
 KIND_ZH = {"existence": "存在", "identification": "辨认", "open_closed": "开合", "counting": "数量"}
 
 
+def sample_note(q: dict) -> str:
+    """The numbers behind a sample's answer, for the review page."""
+    t = q.get("target") or {}
+    if q["kind"] == "existence":
+        return f"目标：{t['name']}（{t['pixels']} 像素）" if t else f"目标：{q.get('negative')}（场景里没有）"
+    if q["kind"] == "identification":
+        return f"在图里：{t.get('name')}（{t.get('pixels')} 像素）；场景里没有：{q.get('negative')}"
+    if q["kind"] == "open_closed":
+        return f"开合程度 {q.get('openness')}（≥ 0.5 开，≤ 0.05 关）"
+    return "每个 " + "，".join(f"{e['pixels']} 像素" for e in q.get("targets", []))
+
+
 def samples_cmd(args) -> int:
     qs = [json.loads(line) for line in Path(args.questions).read_text().splitlines() if line.strip()]
     rng = random.Random(args.rng_seed)
@@ -450,11 +462,7 @@ def samples_cmd(args) -> int:
     picked = picked[:args.n]
     rows = []
     for i, q in enumerate(picked, 1):
-        note = {"existence": f"目标：{q.get('target', {}).get('name', q.get('negative'))}" + (
-                    f"（{q['target']['pixels']} 像素）" if q.get("target") else "（场景里没有）"),
-                "identification": f"在图里：{q['target']['name']}（{q['target']['pixels']} 像素）；场景里没有：{q['negative']}",
-                "open_closed": f"开合程度 {q.get('openness')}（≥ 0.5 开，≤ 0.05 关）",
-                "counting": "每个 " + "，".join(f"{e['pixels']} 像素" for e in q.get("targets", []))}[q["kind"]]
+        note = sample_note(q)
         clean = "data:image/png;base64," + base64.b64encode(Path(q["image_path"]).read_bytes()).decode()
         rows.append(f'<section><h2>{i}. {KIND_ZH[q["kind"]]} · {html.escape(q["task"])} 种子 {q["seed"]} · '
                     f'{x0_qa.CAMERA_ZH[q["camera"]]}</h2><div class="imgs"><figure><img src="{clean}" alt="原图">'
