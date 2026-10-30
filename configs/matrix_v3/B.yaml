@@ -25,7 +25,7 @@ sft:
   cards: 8
   recipe: 主线 Qwen3 SFT 的配方（lf_q3formal/train.yaml：模板 qwen3_vl_nothink，学习率 1e-5 余弦，warmup 3%，每步 64 条，冻结视觉塔）
   select: 每个 epoch 在 val（eval_val_v2_screened，382 道）上评测（不采样），挑成功率最高的，打平取更早的
-  format_stability: P2f 先全用（366 条）；RL 里格式不稳（读不出的回答碰到 10% 线）再加，加多少由用户定
+  format_stability: P2f 先全用（366 条）；B′ 任何一个 RL 被 10% 线停下就算格式不稳（用户 2026-10-30 定），加多少 P2f、重训 B′ 的 SFT 由用户定
 
 rl:
   start: SFT 挑出的检查点

@@ -220,5 +220,5 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
   - `test_build.py` 加 2 个：新池的文件、标签和配方表的列；格式核对对旧写法和别的题族的系统提示都会停；
   - 新文件 `test_matrix_v3.py` 8 个：各组和 `vars.yaml`、和主线的登记、和混合配置、和集群上建好的数据一致；A 关闭；名字不和已有的重复；C0 的检查点都在。
   - `data_gen/sft_mixture/tests` 共 27 个，全部通过。
-- **预登记**：修订稿 `PREREG_D_vs_C_v3_draft.md`，等用户看过再替换定稿。
+- **预登记**：第三版 2026-10-30 定稿，替换了 `PREREG_D_vs_C.md`；旧版（Qwen2.5）在 `PREREG_D_vs_C_v2_qwen25.md`。
 - 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对。

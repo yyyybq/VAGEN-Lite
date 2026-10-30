@@ -77,5 +77,5 @@
    - 格式核对用的 SFT 对话：`chain.sft_dir` = P2q 的 `sft_trajectories.jsonl`；
    - 名字用 `m3_*`，不和已有的结果名重复。
 3. C0 在去掉边缘场景的题集上补齐：测试集补进来的 59 道补跑，P1 探针在 Qwen3 C0 的检查点上跑。都是单卡推理，用 Qwen3 的运行时。
-4. 预登记按第三版改：修订稿 `docs/transition_qa/PREREG_D_vs_C_v3_draft.md`，等用户看过再替换定稿。
+4. 预登记：第三版 2026-10-30 定稿（`docs/transition_qa/PREREG_D_vs_C.md`）。开跑前把 `qa_probe compare` 改成按种子和侧配对、"同号"按两个种子算（只补实现）。
 5. 批卡：约 900–1,000 卡时，由用户在冻结期定。
