@@ -1496,7 +1496,7 @@ def matrix(w: "Watcher") -> str:
     xs = (["", "## 新增实验（第一波，你 10-26 的决定）", ""] + xhead + matrix_x(w)
           + ["", "## 新增训练（T 系列，你 10-26 晚的决定）", ""] + xhead + matrix_x(w, T_EXPERIMENTS, "t")
           + ["", "## 第二轮（你 10-28 的任务书）", ""] + xhead
-          + matrix_x(w, R2_EXPERIMENTS, "x", pending="设计待你确认（10-28）"))
+          + matrix_x(w, R2_EXPERIMENTS, "x", pending="设计已确认（10-30），未开始"))
     return "\n".join(head + train + ["", "## 评测", "", MATRIX_COLUMNS, sep] + evals + xs) + "\n"
 
 

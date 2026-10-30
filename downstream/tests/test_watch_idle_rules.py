@@ -432,9 +432,9 @@ def test_e3_and_x_rows_of_the_matrix(tmp_path):
     text = watch.matrix(w)
     assert "## 新增实验（第一波，你 10-26 的决定）" in text and "## 新增训练（T 系列，你 10-26 晚的决定）" in text
     assert text.count("设计待你确认（10-26）") == len(watch.X_EXPERIMENTS) + len(watch.T_EXPERIMENTS) == 11
-    # the second round (the user's task book of 2026-10-28): Q0, G0, N, C1, each waiting for its design's confirmation
-    assert "## 第二轮（你 10-28 的任务书）" in text and text.count("设计待你确认（10-28）") == 4  # Q0, G0, N, C1
-    assert [x for x, *_ in watch.R2_EXPERIMENTS] == ["Q0", "G0", "N", "C1", "V4"]  # V4: the recheck of 10-30
+    # the second round (the user's task book of 2026-10-28, designs confirmed 2026-10-30): seven rows and V4
+    assert "## 第二轮（你 10-28 的任务书）" in text and text.count("设计已确认（10-30），未开始") == 7
+    assert [x for x, *_ in watch.R2_EXPERIMENTS] == ["Q0", "G0", "X0b", "PD", "LP", "N", "C1", "V4"]  # V4: the recheck
     assert "已定（10-30）：两个 8 卡训练排队" in next(x for x in text.splitlines() if x.startswith("| V4 |"))
     assert "B、RS 两个起点（10-28 去掉 S、RD）" in next(x for x in text.splitlines() if x.startswith("| T2 |"))
     (tmp_path / "x/X3").mkdir(parents=True)
