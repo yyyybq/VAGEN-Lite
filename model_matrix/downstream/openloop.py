@@ -107,17 +107,51 @@ def seed_all(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def load_samples(config_yaml: str, samples: int, seed: int):
-    """The examples at the chosen positions of the run's training data, and a digest of where they come from."""
+def eval_data(folder) -> tuple:
+    """--eval-data: a folder in the downstream line's prepared layout (downstream/demos/prepare_data.py): the
+    data_root_dir (its train/) and the mixture_spec the run's data section is pointed at."""
+    folder = Path(folder)
+    spec = json.loads((folder / "mixture_spec.json").read_text())
+    if not spec or any(len(row) != 3 for row in spec):
+        raise ValueError(f"{folder}/mixture_spec.json: expected [[<Task>/lerobot, weight, robot tag], ...]")
+    if not (folder / "train").is_dir():
+        raise ValueError(f"{folder} has no train/ folder")
+    return str(folder / "train"), spec
+
+
+def build(module, data_cfg):
+    return module.get_vla_dataset(data_cfg=data_cfg,
+                                  balance_dataset_weights=data_cfg.get("balance_dataset_weights", False),
+                                  balance_trajectory_weights=data_cfg.get("balance_trajectory_weights", False))
+
+
+def load_samples(config_yaml: str, samples: int, seed: int, other=None):
+    """The examples at the chosen positions of the run's training data -- or, with ``other`` (--eval-data), of that
+    folder's data normalized with the training data's merged statistics, as the model was trained -- and a digest
+    of where they come from."""
+    import tempfile
+
     sys.path.insert(0, str(DS_TRAIN))
     import train_entry as TE  # the downstream line's (read only)
 
     cfg = TE.load_config(config_yaml, None)
     data_cfg = cfg.datasets.vla_data
     module = TE.seed_dataset(int(cfg.seed))
-    dataset = module.get_vla_dataset(data_cfg=data_cfg,
-                                     balance_dataset_weights=data_cfg.get("balance_dataset_weights", False),
-                                     balance_trajectory_weights=data_cfg.get("balance_trajectory_weights", False))
+    dataset = build(module, data_cfg)
+    stats = {}
+    saved = Path(config_yaml).parent / "dataset_statistics.json"  # what the run saved and the policy server reads
+    if saved.is_file():
+        tmp = Path(tempfile.mkdtemp()) / "dataset_statistics.json"
+        dataset.save_dataset_statistics(tmp)
+        stats["training_stats_equal_saved"] = json.loads(tmp.read_text()) == json.loads(saved.read_text())
+    if other is not None:
+        root, spec = eval_data(other)
+        data_cfg.data_root_dir, data_cfg.mixture_spec = root, spec
+        merged = dataset.merged_metadata
+        dataset = build(module, data_cfg)
+        for d in dataset.datasets:  # normalize as in training, not with the other folder's own statistics
+            d.set_transforms_metadata(merged[d.tag])
+        stats.update(eval_data=str(other), eval_tasks=len(spec), normalized_with="the training data's merged statistics")
     chosen = positions(len(dataset), samples, seed)
     where, examples = [], []
     index = {id(d): i for i, d in enumerate(dataset.datasets)}
@@ -127,7 +161,8 @@ def load_samples(config_yaml: str, samples: int, seed: int):
         seed_all(seed * 1_000_003 + p)  # the transforms' randomness, the same in every invocation
         examples.append(dataset[p])
     digest = hashlib.sha256(json.dumps(where).encode()).hexdigest()[:16]
-    return examples, {"length": len(dataset), "positions_sha": digest, "first": where[:4], "dataset_seed": int(cfg.seed)}
+    return examples, {"length": len(dataset), "positions_sha": digest, "first": where[:4], "dataset_seed": int(cfg.seed),
+                      **stats}
 
 
 def evaluate(ckpt: str, examples: List[dict], batch: int, seed: int) -> dict:
@@ -157,6 +192,9 @@ def evaluate(ckpt: str, examples: List[dict], batch: int, seed: int) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-config", required=True, help="the run config.yaml whose training data are sampled")
+    ap.add_argument("--eval-data", default=None,
+                    help="sample this prepared folder (prepare_data.py layout) instead, normalized with the training "
+                         "data's statistics (decision 35: demonstrations from scenes the training never saw)")
     ap.add_argument("--ckpt", action="append", required=True, help="LABEL=CHECKPOINT.pt (repeatable)")
     ap.add_argument("--samples", type=int, default=256)
     ap.add_argument("--batch", type=int, default=8)
@@ -164,8 +202,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     ckpts = dict(c.split("=", 1) for c in a.ckpt)
-    examples, data = load_samples(a.data_config, a.samples, a.seed)
-    record = {"data_config": a.data_config, "samples": a.samples, "batch": a.batch, "seed": a.seed, "data": data,
+    examples, data = load_samples(a.data_config, a.samples, a.seed, a.eval_data)
+    record = {"data_config": a.data_config, "eval_data": a.eval_data, "samples": a.samples, "batch": a.batch,
+              "seed": a.seed, "data": data,
               "ways": list(WAYS), "checkpoints": {}}
     for label, ckpt in ckpts.items():
         record["checkpoints"][label] = evaluate(ckpt, examples, a.batch, a.seed)

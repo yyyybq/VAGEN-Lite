@@ -44,6 +44,25 @@ class OpenLoopTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             O.positions(10, 11, 1)
 
+    def test_eval_data(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from model_matrix.downstream import openloop as O
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            spec = [["CloseFridge/lerobot", 1.0, "panda_omron_robocasa365"]]
+            (folder / "mixture_spec.json").write_text(json.dumps(spec))
+            with self.assertRaises(ValueError):  # no train/ yet
+                O.eval_data(folder)
+            (folder / "train").mkdir()
+            self.assertEqual(O.eval_data(folder), (str(folder / "train"), spec))
+            (folder / "mixture_spec.json").write_text(json.dumps([["CloseFridge/lerobot", 1.0]]))
+            with self.assertRaises(ValueError):
+                O.eval_data(folder)
+
     def test_errors(self):
         from model_matrix.downstream import openloop as O
 
