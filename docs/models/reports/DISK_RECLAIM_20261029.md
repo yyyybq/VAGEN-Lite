@@ -28,6 +28,16 @@
 | --- | --- | --- |
 | `DS-Q3S-100-s1/evals_src/steps_175000` | 17.9 GB | 本线决定 30 原来要用它补跑 OpenDrawer 种子 1012；10-30 下游线按用户的决定把这个回合加进了剔除清单，不用补了（10-30 09:10 从第 2 表移来） |
 
+## 1c. 10-30 21:55 新增、现在就用不上的（3 项，288 GB；没删）
+
+三个因走样被停止线停下的 Cambrian RL 臂，最后一个检查点里的续训状态（`actor/` 下的 `model_*`、`optim_*`、`extra_state_*` 等，除 `huggingface/` 以外的文件，各约 96 GB）。这些臂不会再续训；评测只读 `huggingface/`，已经评完或要评的都不受影响。和磁盘线 b9 用的保留规则 R1 同一类（已结束 RL 运行最后一个检查点的续训状态）。路径在 `models_runs/chains/` 下：
+
+| 路径 | 大小 | 为什么用不上 |
+| --- | --- | --- |
+| `m_cambrian7b_formal_rl_20261030_stab/rl_run_cskl/checkpoints/global_step_100/actor/`（除 `huggingface/`） | 96 GB | cskl 10-30 16:14 第 139 次走样停下；第 50、100 次检查点已评完 |
+| `m_cambrian7b_formal_rl_20261030_stab/rl_run_cslr/checkpoints/global_step_250/actor/`（除 `huggingface/`） | 96 GB | cslr 10-30 20:46 第 270 次走样停下；第 50–250 次检查点已评完 |
+| `m_cambrian7b_formal_rl_20261030_s20261021/rl_run_cs2s0/checkpoints/global_step_100/actor/`（除 `huggingface/`） | 96 GB | cs2s0 10-30 12:29 第 130 次走样停下。它的检查点评测要等同链的 cs2d 训完，评测只读 `huggingface/` |
+
 ## 2. 要等一件事的（1 项，17.9 GB）
 
 | 路径 | 大小 | 等什么 |
