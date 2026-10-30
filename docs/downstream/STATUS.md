@@ -1,10 +1,13 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-10-30 07:30 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-30 的 [T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-10-30 08:55 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-30 的 [T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
-- 第一步、第二步完成；E0、E1、E2、**E3** 完成；**X0–X5、XE、T5、T2** 完成。**下游线现在没有任务在跑，也没有排队的**；接下来的都等你的决定（第 4 节）。
+- 第一步、第二步完成；E0、E1、E2、**E3** 完成；**X0–X5、XE、T5、T2** 完成。
+- **10-30 你的决定，已执行**：
+  - V4 复核先做两个：DS-Q3V4S3-100-s1（V4 种子 20261022 第 250 次）、DS-Q3DCKS2-100-s1（DCK 种子 20261021 第 300 次），按模型线 DS-Q3RD-100-s1 的 E1 协议（配置逐行比过，只差起点），08:42 交出。
+  - OpenDrawer 种子 1012 并行两件事：已从剔除清单踢掉（10-30 起每次评测 943 回合，空间组 446；提交 `b254d90a`），实验照常推进；查原因的 1 卡诊断任务 08:43 开跑。
 - **T2**（[报告](reports/T2_RESULTS_20261030.md)）：LoRA（30%，10 万步）B 12.6%、RS 13.3%，RS − B +0.7（p = 0.56）；比全量微调低 22–23 个百分点，比只训动作头高约 12 个百分点。
 - **10-28 任务书**（REFERENCE 第 0 节）：Qwen2.5 远迁移收口；新增 Q0、G0、N 系列、C1，四份设计已交，等你确认；T1 推迟、T2 只做 B 和 RS；Qwen3 闸门写进 REFERENCE。
 - **第一波诊断汇总**（[报告](reports/FIRST_WAVE_SUMMARY_20261029.md)）：主线起点在 RoboCasa 上没有稳定的好处；RS 在下游成功率上有小而方向一致的优势（9 个设定 7 个为正，+1.1 到 +3.7），单独显著的只有 E1 和 E2 10%；空间问答（X0）三个都显著更差，选对目标（X3）RD 更差。
@@ -13,17 +16,18 @@
 - **X1、X2、X3、X5、T5**：报告 10-29 01:3x 已交（[X1](reports/X1_RESULTS_20261029.md)、[X2](reports/X2_RESULTS_20261029.md)、[X3](reports/X3_RESULTS_20261029.md)、[X5](reports/X5_RESULTS_20261029.md)、[T5](reports/T5_RESULTS_20261029.md)）。
 - **T 系列**：T5、T2 完成；T1 推迟；T3 / T4 等路径。
 
-## 2. 在跑什么（10-30 07:20 UTC）
+## 2. 在跑什么（10-30 08:45 UTC）
 
-- 在跑：没有。T2 正式 RS 10-29 22:14 评完，B 23:33 评完（B 的第一次提交 `pt-n31fekiq` 10-29 06:01 在排队时被别人停了，记录改名 `job/submission_suspended_20261029T060103Z.json`，08:44 重交的 `pt-ppptwv1i` 跑完）。
-- **排队**：没有。挂起的：T1 两个（`*.hold_qwen3_gate_20261028`）；去掉的：T2 的 S、RD（`*.dropped_20261028`）。第二轮的任务等设计确认后再放进队列。
+- **V4 复核**：DS-Q3DCKS2-100-s1 `pt-w2t0xe9b`（h800，08:43 开跑）；DS-Q3V4S3-100-s1 `pt-qrdl4abe`（zoetrope，排队）。payload 是模型线的 `run_full.sh`（它的 Qwen3 入口，底下是我们的 `train_entry.py` 和评测）；每个约 44 小时训练加任务内评测，开跑后约 2 天出结果（估计）。15 万、17.5 万步由模型线的 `watch_points`（我们起的一份，PID 1768868，nice 19，复制权重走 1 卡 sco 任务，评测投 zoetrope；日志 `downstream_runs/v4_recheck/watch_points.log`）复制后评测。
+- **OpenDrawer 1012 诊断**：`pt-jhwj97iu`（h800，1 卡，08:43 开跑），E1-RD 第 20 万步，先单独跑这个回合，再和 12 个同任务回合一起跑（每个进程约 1 个 CPU，接近整机评测的负载）；诊断开关打开（每步计时、接触数、卡住时记 Python 调用栈），卡住的时限放宽到 1 小时。结果在 `downstream_runs/checks/probe_opendrawer_1012_20261030/out/`。
+- **排队**：没有别的。挂起的：T1 两个（`*.hold_qwen3_gate_20261028`）；去掉的：T2 的 S、RD（`*.dropped_20261028`）。第二轮的任务等设计确认后再放进队列。
 
 **GPU 规则**（你 10-23 晚的决定 1；10-25 约 10:00 改为只给同一个池让路）：
 - 主线（`interiorgs-v10-*`）有任务在某个池排队时，不往那个池提交；另一个池有空机照样用（你的原话："只给同一个池让路就行，不用一直让，没有卡空着为准"）；
 - 8 卡任务只投到估计有空闲机器的池；1 卡任务投到有空卡的机器；我们自己有任务在那个池排队时，不再往那个池提交；
 - 按空机提交、还在排队的任务，如果主线开始在同一个池排队，就撤回，等下次再提。已经开始跑的不动。
 
-**看板**：`downstream/eval/watch.py`，10-28 10:38 起运行，PID 2841300，代码 `7a1771ee`，每 5 分钟一轮。按你 10-28 的登录节点规则，看板和它启动的一切（sco、结果报告）都以 nice 19、每个进程 1 个线程运行。代码更新后用 `restart`（沿用保存的参数）；`start` 必须带全部参数，不带参数会被拒绝（10-28 出过一次清空参数的事）。命令如下（在集群 worktree 里）：
+**看板**：`downstream/eval/watch.py`，10-30 08:4x 起运行（`restart`），PID 1773176，代码 `74e0567c`，每 5 分钟一轮。按你 10-28 的登录节点规则，看板和它启动的一切（sco、结果报告）都以 nice 19、每个进程 1 个线程运行。代码更新后用 `restart`（沿用保存的参数）；`start` 必须带全部参数，不带参数会被拒绝（10-28 出过一次清空参数的事）。命令如下（在集群 worktree 里）：
 
 ```bash
 bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- --yield-to-same-size --yield-pool-only --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 100 010 030 --whole-pools h800 zoetrope
@@ -43,14 +47,20 @@ bash downstream/eval/watch.sh status
 
 ## 3. 在等什么
 
-- 你对四份设计、V4 复核、OpenDrawer 种子 1012 的决定（第 4 节）。在这之前下游线没有要跑的任务。
+- OpenDrawer 1012 诊断的结果（约 1–1.5 小时后），出来后写成短报告。
+- V4 复核两个训练（开跑后约 2 天）；结果和模型线的 DS-Q3B、DS-Q3RD 配对后报你，并发给主窗口。S0-keep（种子 20261019 第 150 次，路径已核对）暂不做，看前两个的结果再定。
+- 你对四份设计的决定（第 4 节）。
 
 ## 4. 待你决定的事
 
-- **主窗口 10-29 请下游线复核"V4 起点让下游变差"**（模型线 E1 协议的结果：DS-Q3RD 比 DS-Q3B 总体 −3.2、p 0.032，空间组 −4.9、p 0.016）：要我们用 E1 协议（100%、20 万步、三点评测）再训三个 Qwen3 起点，即 V4 种子 20261022 第 250 次、DCK 种子 20261021 第 300 次、S0-keep 种子 20261019 第 150 次（主窗口 10-29 晚给的路径：`interiorgs_v10_train_q3s0k_20261029/rl_run_qw3s0k1/checkpoints/global_step_150/actor/huggingface`，705 道 48.9%，训满 300 次没走样，会一直保留；三个路径都核对过）。这和你 10-28 定死的 Qwen3 闸门冲突（"不做训练""不再一上来全量 20 万步"），而且三个约 1,300 卡时（每个约 44 小时训练加三次评测，约 430 卡时；按模型线的实际时长估）。我没有交，等你定。
 - 四份设计：Q0 / G0（含闸门判定细则）、C1（λ 和文字批次，两组候选，建议 A；DS-B-030-s1 的 X4 用不写副本的办法）、N 系列（相机、可见性规则）、X0b / 参数距离 / 线性探针 / 诊断汇总（按名字拟的，上一条提示词没到这个窗口，可以重发）。
 
 ## 5. 主窗口指令与暂停 / 撤回记录（UTC）
+
+- **10-30 你的决定**（"V4复核先做两个 ，OpenDrawer 种子 1012并行做两个事情，一个是先把它踢掉，然后正常推进实验，另外一个是看他为什么会让仿真进程反复死掉"）：
+  - 剔除清单加 OpenDrawer 1012（`b254d90a`），评测从此 943 回合；以前的数字不改，比较照常只用两边都有的回合。模型线的工具按路径读这份清单，已通知它，它按新清单重算 MATRIX，各项最多变 0.2 个百分点，结论不变（模型线提交 `01cec67a`）。模型线还提到 RinseSinkBasin 种子 1005 在它的 DS-Q3RD 第 17.5 万步评测里也出过一次同样的事。
+  - 诊断：`closed_loop.py` 的诊断开关（默认关）、`run_probe_episode.sh`、1 卡任务 `pt-jhwj97iu`。
+  - V4 复核：`downstream/x/v4_recheck.py`（用模型线的配置生成器，起点登记表放在 `downstream_runs/v4_recheck/starts.json`，不改模型线的文件），两个 8 卡任务按看板规则交出；已告诉主窗口。看板加了 MATRIX 第二轮表的 V4 一行（`74e0567c`），10-30 08:4x 用 `restart` 重启。
 
 - **10-29 21:2x 模型线按你在它窗口的新要求恢复了三个 Cambrian 下游任务**（你的原话："Cambrian的上游结果看起来还不错？那你可以继续跑，跑多样的上游和下游，因为我我现在有多余的卡了，可以继续跑"）：DS-CSS（`pt-hfpnu2ae`，我 08:53 停的）和 DS-CSRS 从第 12.5 万步、DS-CSRD 从第 7.5 万步的全状态接上（`sco acp jobs start`，任务号不变）。
 - **10-29 21:3x–22:00 补交 E3、XE 报告和第一波诊断汇总**（原定 E3 评完后，约 11:50 出，晚了约 10 小时）；`downstream/x/e3_analyze.py`。
