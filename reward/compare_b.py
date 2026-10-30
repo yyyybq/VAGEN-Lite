@@ -42,16 +42,22 @@ def load_arm(sets, run):
     return {u: v for u, v in sorted(found.items()) if set(v) == set(sets)}
 
 
+def success(rows):
+    """The success rate from the counts, unrounded (metrics() rounds to 4 places, which can flip the shown digit)."""
+    ok = [r for r in rows if "error" not in r]
+    return sum(bool(r["success"]) for r in ok) / len(ok) if ok else None
+
+
 def rates(by_set):
     out, solved, n = {}, 0, 0
     for s, rows in by_set.items():
         m = metrics(rows)
         k = sum(bool(r["success"]) for r in rows if "error" not in r)
-        out[s] = {"success": m["success"], "episodes": m["episodes"], "errors": m["errors"],
+        out[s] = {"success": success(rows), "episodes": m["episodes"], "errors": m["errors"],
                   "collision_rate": m["collision_rate"], "invalid_rate": m["invalid_rate"]}
         solved += k
         n += m["episodes"]
-    out["both"] = {"success": round(solved / n, 4) if n else None, "episodes": n}
+    out["both"] = {"success": solved / n if n else None, "episodes": n}
     return out
 
 
@@ -60,7 +66,7 @@ def compare(a, b):
     out, wa, wb = {}, 0, 0
     for s in a:
         pr = paired(b[s], a[s])  # base = b: only_other = tasks only a solved
-        ra, rb = metrics(a[s])["success"], metrics(b[s])["success"]
+        ra, rb = success(a[s]), success(b[s])
         out[s] = {"a": ra, "b": rb, "diff_points": round(100 * (ra - rb), 2), "only_a": pr["only_other"],
                   "only_b": pr["only_base"], "tasks": pr["tasks"], "p": pr["p"]}
         wa += pr["only_other"]
@@ -75,7 +81,7 @@ def best(arm_results, sel, limit=None):
     cand = {u: r for u, r in arm_results.items() if limit is None or u <= limit}
     if not cand:
         return None
-    return max(cand, key=lambda u: (metrics(cand[u][sel])["success"], -u))
+    return max(cand, key=lambda u: (success(cand[u][sel]), -u))
 
 
 def main():
