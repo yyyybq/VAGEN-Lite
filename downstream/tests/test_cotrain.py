@@ -103,7 +103,7 @@ def test_train_step_adds_lambda_times_text_loss_once():
             return contextlib.nullcontext()
 
         def backward(self, loss):
-            self.losses.append(float(loss))
+            self.losses.append(float(loss.detach()))
             loss.backward()
 
         def clip_grad_norm_(self, params, v):
@@ -115,6 +115,9 @@ def test_train_step_adds_lambda_times_text_loss_once():
     class Model:
         def forward(self, batch):
             return {"action_loss": (w_action * 1.0) ** 2}
+
+        def parameters(self):
+            return iter([w_action])
 
     T = type("T", (), {"_unwrap_model": staticmethod(lambda acc, m: vla)})
     trainer = type("Trainer", (), {})()
