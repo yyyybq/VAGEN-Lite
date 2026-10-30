@@ -65,6 +65,17 @@ def test_main_asks_what_is_missing_and_writes_hidden_states(tmp_path, monkeypatc
     assert json.loads(Path(str(out) + ".meta.json").read_text())["processor"] == "/proc"
 
 
+def test_starvla_checkpoint_vlm_weights_get_hf_names(tmp_path):
+    torch = pytest.importorskip("torch")
+    pt = tmp_path / "pytorch_model.pt"
+    torch.save({"qwen_vl_interface.model.model.language_model.layers.0.w": torch.ones(2),
+                "qwen_vl_interface.model.lm_head.weight": torch.zeros(3), "action_model.head.w": torch.ones(1)}, pt)
+    state = Q.starvla_vlm_state(str(pt))
+    assert sorted(state) == ["lm_head.weight", "model.language_model.layers.0.w"]
+    torch.save({"model": {"qwen_vl_interface.model.x": torch.ones(1)}}, pt)
+    assert list(Q.starvla_vlm_state(str(pt))) == ["x"]
+
+
 def test_a_failing_smoke_test_stops_with_3(tmp_path, monkeypatch):
     qf = tmp_path / "q.jsonl"
     fake_questions(qf)

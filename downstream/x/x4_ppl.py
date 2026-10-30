@@ -71,7 +71,9 @@ def answer_spans(ids) -> list:
 
 
 def score(model_path: Path, out: Path, limit: int = None, trajectories: Path = TRAJECTORIES,
-          processor_path: Path = PROCESSOR) -> int:
+          processor_path: Path = PROCESSOR, starvla_pt: Path = None) -> int:
+    """starvla_pt (2026-10-30, C1's comparisons: DS-B-030-s1 without a copy): the architecture from model_path, every
+    weight then replaced in memory by the StarVLA checkpoint's VLM (q0_ask.starvla_vlm_state)."""
     import torch
     from PIL import Image
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
@@ -85,7 +87,15 @@ def score(model_path: Path, out: Path, limit: int = None, trajectories: Path = T
                 continue
     processor = AutoProcessor.from_pretrained(str(processor_path))
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(str(model_path), torch_dtype=torch.bfloat16,
-                                                               attn_implementation="sdpa").cuda().eval()
+                                                               attn_implementation="sdpa")
+    if starvla_pt:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import q0_ask
+
+        missing, unexpected = model.load_state_dict(q0_ask.starvla_vlm_state(str(starvla_pt)), strict=False)
+        if missing or unexpected:
+            raise RuntimeError(f"{starvla_pt}: {len(missing)} missing, {len(unexpected)} unexpected weights")
+    model = model.cuda().eval()
     out.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with open(out, "a") as f, torch.no_grad():
@@ -231,11 +241,13 @@ def main(argv=None) -> int:
     s.add_argument("--model", type=Path, required=True)
     s.add_argument("--out", type=Path, required=True)
     s.add_argument("--limit", type=int, default=None)
+    s.add_argument("--starvla-pt", type=Path, default=None,
+                   help="a StarVLA pytorch_model.pt whose VLM replaces --model's weights in memory")
     a = sub.add_parser("analyze")
     a.add_argument("--dir", type=Path, required=True)
     args = ap.parse_args(argv)
     if args.cmd == "score":
-        print(json.dumps({"scored": score(args.model, args.out, args.limit)}))
+        print(json.dumps({"scored": score(args.model, args.out, args.limit, starvla_pt=args.starvla_pt)}))
     else:
         res = analyze(args.dir)
         print(json.dumps({k: v["perplexity"] for k, v in res["models"].items()}))

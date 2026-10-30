@@ -86,7 +86,25 @@ def done_ids(path: Path) -> set:
     return {json.loads(line)["id"] for line in Path(path).read_text().splitlines() if line.strip()}
 
 
-def load(name: str):
+STARVLA_PREFIX = "qwen_vl_interface.model."
+
+
+def starvla_vlm_state(pt: str) -> dict:
+    """The VLM weights of a StarVLA checkpoint (pytorch_model.pt, memory-mapped), named as the HF model names them
+    (StarVLA's "qwen_vl_interface.model." prefix removed; the action head left out).  Nothing is written."""
+    import torch
+
+    sd = torch.load(pt, map_location="cpu", mmap=True, weights_only=True)
+    for key in ("state_dict", "module", "model"):
+        if isinstance(sd, dict) and key in sd and isinstance(sd[key], dict):
+            sd = sd[key]
+    return {k[len(STARVLA_PREFIX):]: v for k, v in sd.items() if k.startswith(STARVLA_PREFIX)}
+
+
+def load(name: str, starvla_pt: str = None):
+    """(processor, model, processor folder).  With starvla_pt: the family's architecture from `name`'s folder, then
+    every weight replaced by the StarVLA checkpoint's VLM (C1's comparisons: DS-B-030-s1, C1; read into memory only,
+    no copy); a weight the checkpoint lacks or a name the model lacks stops it."""
     import torch
     from transformers import AutoProcessor
 
@@ -96,7 +114,14 @@ def load(name: str):
         from transformers import Qwen2_5_VLForConditionalGeneration as cls
     else:
         from transformers import AutoModelForImageTextToText as cls
-    model = cls.from_pretrained(model_path(name), torch_dtype=torch.bfloat16).to("cuda").eval()
+    model = cls.from_pretrained(model_path(name), torch_dtype=torch.bfloat16)
+    if starvla_pt:
+        state = starvla_vlm_state(starvla_pt)
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        if missing or unexpected:
+            raise RuntimeError(f"{starvla_pt}: {len(missing)} weights missing (e.g. {missing[:3]}), "
+                               f"{len(unexpected)} unexpected (e.g. {unexpected[:3]})")
+    model = model.to("cuda").eval()
     return processor, model, proc_dir
 
 
@@ -149,12 +174,15 @@ def main(argv=None) -> int:
     ap.add_argument("--ask", type=pair, action="append", default=[], help="QUESTIONS.jsonl=ANSWERS.jsonl")
     ap.add_argument("--hidden", type=pair, action="append", default=[], help="QUESTIONS.jsonl=HIDDEN.npz")
     ap.add_argument("--smoke", type=int, default=0, help="ask the first N questions of the first set first")
+    ap.add_argument("--starvla-pt", default=None, help="a StarVLA pytorch_model.pt whose VLM replaces the model's "
+                                                       "weights in memory (--model gives the architecture)")
     args = ap.parse_args(argv)
     import numpy as np
 
     t0 = time.time()
-    processor, model, proc_dir = load(args.model)
-    meta = {"model": args.model, "path": model_path(args.model), "processor": proc_dir, "family": family(args.model)}
+    processor, model, proc_dir = load(args.model, args.starvla_pt) if args.starvla_pt else load(args.model)
+    meta = {"model": args.model, "path": args.starvla_pt or model_path(args.model), "processor": proc_dir,
+            "family": family(args.model)}
     print(f"[q0_ask] {args.model}: loaded in {time.time() - t0:.0f} s (processor {proc_dir})", flush=True)
     if args.smoke and args.ask:
         qs = load_questions(args.ask[0][0])[:args.smoke]
