@@ -70,6 +70,12 @@ analysis() {
     for x in "${args[@]}"; do [[ $x == Q3* ]] && q3a+=("$x"); done
     (( ${#q3a[@]} )) && "$VLM_PY" downstream/x/x0b_qa.py analyze --questions "$OUT/$v/questions.jsonl" \
       --answers "${q3a[@]}" "${flag[@]}" --reference Q3B --out "$OUT/results/${v}_vs_Q3B.json" >> "$OUT/qa_$STAGE.log" 2>&1
+    if [[ $v == x0b2 ]]; then  # the lenient reading too: the option's words inside the tags count (2026-10-30)
+      "$VLM_PY" downstream/x/x0b_qa.py analyze --questions "$OUT/$v/questions.jsonl" --answers "${args[@]}" \
+        --option-text --reference B --out "$OUT/results/x0b2_text_vs_B.json" >> "$OUT/qa_$STAGE.log" 2>&1
+      (( ${#q3a[@]} )) && "$VLM_PY" downstream/x/x0b_qa.py analyze --questions "$OUT/$v/questions.jsonl" \
+        --answers "${q3a[@]}" --option-text --reference Q3B --out "$OUT/results/x0b2_text_vs_Q3B.json" >> "$OUT/qa_$STAGE.log" 2>&1
+    fi
   done
   (( ${#g[@]} )) && "$VLM_PY" downstream/x/g0_qa.py analyze --questions "$OUT/g0/questions.jsonl" --answers "${g[@]}" \
     --out "$OUT/results/g0.json" >> "$OUT/qa_$STAGE.log" 2>&1

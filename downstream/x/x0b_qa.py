@@ -215,6 +215,23 @@ def parse_tagged(text: str):
     return x0_qa.parse_letter(text)
 
 
+def parse_tagged_text(text: str, options):
+    """The lenient reading of X0b-2 (2026-10-30: S, RS and RD put the option's words in the tags, not its letter):
+    the letter as parse_tagged reads it, else the option whose text equals what is inside <answer>...</answer>
+    (case, spaces and a final period ignored)."""
+    import re
+
+    letter = parse_tagged(text)
+    if letter:
+        return letter
+    m = re.search(r"<answer>(.*?)</answer>", str(text or ""), flags=re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None
+    inner = " ".join(m.group(1).strip().rstrip(".").lower().split())
+    hits = [i for i, o in enumerate(options) if " ".join(str(o).lower().split()) == inner]
+    return "AB"[hits[0]] if len(hits) == 1 else None
+
+
 def tagged_ok(text: str) -> bool:
     """The reply is exactly the requested form: <answer>X. option</answer> (surrounding spaces allowed)."""
     import re
@@ -236,11 +253,15 @@ def a_share(questions, ans) -> dict:
 def analyze_cmd(args) -> int:
     questions = [json.loads(line) for line in Path(args.questions).read_text().splitlines() if line.strip()]
     answers, form = {}, {}
+    options = {q["id"]: q["options"] for q in questions}
     for spec in args.answers:
         model, path = spec.split("=", 1)
         rows = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
-        parse = parse_tagged if args.tagged else x0_qa.parse_letter
-        answers[model] = {r["id"]: parse(r.get("reply")) for r in rows}
+        if args.option_text:
+            answers[model] = {r["id"]: parse_tagged_text(r.get("reply"), options.get(r["id"], [])) for r in rows}
+        else:
+            parse = parse_tagged if args.tagged else x0_qa.parse_letter
+            answers[model] = {r["id"]: parse(r.get("reply")) for r in rows}
         if args.tagged:
             form[model] = sum(1 for r in rows if tagged_ok(r.get("reply"))) / len(rows) if rows else float("nan")
     res = x0_qa.analyze(questions, answers, args.reference)
@@ -270,6 +291,8 @@ def main(argv=None) -> int:
     a.add_argument("--answers", nargs="+", required=True, help="MODEL=answers.jsonl")
     a.add_argument("--reference", default="B")
     a.add_argument("--tagged", action="store_true", help="replies in the <answer> layout (X0b-2)")
+    a.add_argument("--option-text", action="store_true",
+                   help="X0b-2 read leniently: the option's words inside <answer> count as that option")
     a.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     return {"bank": bank_cmd, "format": format_cmd, "analyze": analyze_cmd}[args.cmd](args)

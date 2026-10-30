@@ -163,6 +163,16 @@ def test_tagged_layout_and_its_parsing():
     assert share["left_right"] == 1.0 and share["near_far"] == 0.0 and math.isnan(share["front_back"])
 
 
+def test_lenient_reading_accepts_the_option_words_in_the_tags():
+    opts = ["left", "right"]
+    assert XB.parse_tagged_text("<answer>Right</answer>", opts) == "B"
+    assert XB.parse_tagged_text("<answer> left. </answer>", opts) == "A"
+    assert XB.parse_tagged_text("<answer>A. left</answer>", opts) == "A"  # the letter still counts
+    assert XB.parse_tagged_text("<answer>move_backward</answer>", opts) is None
+    assert XB.parse_tagged_text("<answer>cutting board</answer>", ["cutting board", "sink"]) == "A"
+    assert XB.parse_tagged_text("Right", opts) is None  # no tags, no letter
+
+
 def test_main_qa_module_loads_by_path(tmp_path):
     f = tmp_path / "data_gen/interiorgs_qa/qa.py"
     f.parent.mkdir(parents=True)

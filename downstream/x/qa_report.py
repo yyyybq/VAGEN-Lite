@@ -124,7 +124,8 @@ def main(argv=None) -> int:
         lines += ["格式遵从率 / 回答 A 的比例 / 存在题回答 yes 的比例：" + "；".join(
             f"{m} {pct(v['all']['compliance'])} / {pct(v['all']['a_share'])} / {pct(v['all']['yes_share'])}"
             for m, v in g0.items()), ""]
-    for v, name in (("x0b1", "X0b-1（InteriorGS 画面）"), ("x0b2", "X0b-2（主线带标签的问法）")):
+    for v, name in (("x0b1", "X0b-1（InteriorGS 画面）"), ("x0b2", "X0b-2（主线带标签的问法，只认字母）"),
+                    ("x0b2_text", "X0b-2（宽松读法：标签里写选项的文字也算）")):
         lines += [f"## {name}", ""] + table(load(r / f"{v}_vs_B.json"), ("all",) + KINDS, name)
         lines += ["和 Qwen3 底座比：", ""] + table(load(r / f"{v}_vs_Q3B.json"), ("all",) + KINDS, name)
     lines += ["## 线性探针（X0 的题，按场景分组 5 折）", ""] + probe_table(load(r / "probe.json"))
