@@ -1432,20 +1432,25 @@ R2_EXPERIMENTS = (  # the second round (the user's task book of 2026-10-28); des
            "B、S、RS、RD 和 Qwen3 底座"),
     ("N", "Active Spatial 六类任务搬进 RoboCasa（近迁移，权重不动）：N1 零样本（四个原始起点，之后加 Qwen3），"
           "N2 少样本（100 / 300 / 1,000 条示教，LoRA 适配）"),
-    ("C1", "共训（只做 B）：DS-B-030-s1 的配方加 Active Spatial 文字损失（总损失 = 动作损失 + λ × 文字损失），20 万步"))
+    ("C1", "共训（只做 B）：DS-B-030-s1 的配方加 Active Spatial 文字损失（总损失 = 动作损失 + λ × 文字损失），20 万步"),
+    ("V4", "V4 复核（你 10-30 的决定）：Qwen3 的两个上游起点（V4 种子 20261022 第 250 次、DCK 种子 20261021 第 300 次）"
+           "按 E1 协议（100%、20 万步、三点评测），和模型线的 DS-Q3B、DS-Q3RD 配对；格子里写的是状态，四列起点不适用",
+     "已定（10-30）：两个 8 卡训练排队"))
 
 
 def matrix_x(w: "Watcher", table=X_EXPERIMENTS, folder: str = "x", pending: str = "设计待你确认（10-26）") -> list:
     """One row per new experiment; its state and per-start cells come from downstream_runs/<folder>/<X>/matrix.json
-    ({"state": ..., "B": ..., "S": ..., "RS": ..., "RD": ...}) once there is one, else `pending`."""
+    ({"state": ..., "B": ..., "S": ..., "RS": ..., "RD": ...}) once there is one, else `pending` (or the row's own
+    third element)."""
     rows = []
-    for x, what in table:
+    for x, what, *own in table:
+        pending_here = own[0] if own else pending
         f = Path(w.a.runs_root) / folder / x.split("/")[0] / "matrix.json"
         try:
             rec = json.loads(f.read_text()) if f.is_file() else {}
         except ValueError:
             rec = {"state": f"`{folder}/{x}/matrix.json` 读不出"}
-        rows.append(f"| {x} | {what} | {rec.get('state', pending)} | "
+        rows.append(f"| {x} | {what} | {rec.get('state', pending_here)} | "
                     + " | ".join(str(rec.get(s, "—")) for s in runs.STARTS) + " |")
     return rows
 
