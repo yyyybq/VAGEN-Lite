@@ -67,7 +67,7 @@ class ScoJobTest(unittest.TestCase):
 
 class DownstreamToolsTest(unittest.TestCase):
     def test_scripts_parse(self):
-        for f in ("backbone_load.sh", "backbone_smoke.sh", "run_full.sh", "eval_ckpt.sh"):
+        for f in ("backbone_load.sh", "backbone_smoke.sh", "run_full.sh", "eval_ckpt.sh", "openloop.sh"):
             self.assertEqual(subprocess.run(["bash", "-n", str(ROOT / "model_matrix" / "downstream" / f)]).returncode, 0)
 
     def test_starts(self):
