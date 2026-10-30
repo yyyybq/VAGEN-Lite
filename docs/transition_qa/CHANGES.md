@@ -197,3 +197,28 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
   - 打了补丁，旧 plan 没有这些字段，行为不变；
   - 第 11 步 `diagnostics` 记成 "not planned"；
   - 已有的 progress.json 会多一个 `diagnostics` 步，状态 pending。
+
+## 7. 矩阵第三版（Qwen3-VL-8B，2026-10-30）：混合数据构建器和配置
+
+用户 2026-10-30 选 (a)：按主线 10-27 的登记分两步做（qwen3-main `d530b546` 的 `configs/matrix_r12.json`：决定 74、75、78–80）。这一步是 SFT 数据和组的定义，没有改主线的任何现有文件。
+
+- **`data_gen/sft_mixture/build.py`**：
+  - 认两个新池 P2q、P2f（`POOLS`、`POOL_ZH`），读法和 P2 一样（`kind: sft_trajectories`），每行的 `pool` 写池自己的名字；
+  - 配置里出现不认识的池就停；
+  - 池可以写 `format_example`（`action_names` / `placeholder`）：每条对话的系统提示和每个用户回合的格式行，都要和 RL 环境在这个格式样例下显示的逐字相同（`release.protocol_system_prompt` / `_format_block`），否则停。行仍然原样复制，不改写；
+  - 配方表的列按配置里有的池排。第二版的配置有 P0、P1、P2，表和以前一样。
+- **新配置** `data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261030.yaml`：
+  - 内容：B′ = P0 + P2f，C = P0 + P2q，D = P0 + P1 + P2q，E 同 D，D_noP0；
+  - 种子同第二版；配方用模型线的 Qwen3 SFT 配方；去掉 128 个边缘场景。
+  - 产物在 `exps/sft_mixture_matrix_v3_qwen3_20261030`，条数见 `RECIPES.md`。
+- **`configs/matrix_v3/`**：
+  - 各组的定义（`vars.yaml`、`A`–`E`、`C0`、`D_noP0`、`README.md`）。A 关闭；B′ 的经过和风险写在 `B.yaml`；C0 是模型线的两个种子。
+  - RL 写的是 S0 / V4、两个种子、读不出 10%、KL 1.0、eager。
+  - `chain.plan` 是 `null`：训练链的部分等 qwen3-main 合进 main。
+- **`configs/matrix_v2/README.md`**：开头注明第二版已关闭。`matrix_plan` 和补丁的测试仍用第二版。
+- **测试**：
+  - `test_build.py` 加 2 个：新池的文件、标签和配方表的列；格式核对对旧写法和别的题族的系统提示都会停；
+  - 新文件 `test_matrix_v3.py` 8 个：各组和 `vars.yaml`、和主线的登记、和混合配置、和集群上建好的数据一致；A 关闭；名字不和已有的重复；C0 的检查点都在。
+  - `data_gen/sft_mixture/tests` 共 27 个，全部通过。
+- **预登记**：修订稿 `PREREG_D_vs_C_v3_draft.md`，等用户看过再替换定稿。
+- 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对。

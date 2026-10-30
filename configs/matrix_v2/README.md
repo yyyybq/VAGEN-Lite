@@ -1,5 +1,7 @@
 # 实验矩阵第二版（A–E 和 C0）
 
+> **已关闭（2026-10-30）**：主线 10-27 的决定 78 规定新实验一律用 Qwen3-VL-8B，Qwen2.5 的矩阵关闭。用户 2026-10-30 选择按主线的登记改做第三版（`configs/matrix_v3`）。本目录留作记录，`matrix_plan` 和补丁的测试仍用它；现行的是第三版。
+
 > **名字提醒**：`v10_p1` / `v10_p2` 是 **RL 修正包**的名字（`data_gen/interiorgs_v10/configs/rl_standards.json` 里的优化设置：GRPO、每次更新抽多少候选题等），和**数据池** P1（转移题）/ P2（第十一轮的 SFT 动作轨迹）**无关**。
 
 每组一个 YAML：`A.yaml` … `E.yaml`、`C0.yaml`。写清数据配方、SFT、RL、评测集。说明见 `docs/transition_qa/PROGRESS.md` 第 7、9、10 节。

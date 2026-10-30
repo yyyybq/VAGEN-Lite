@@ -138,6 +138,64 @@ def test_media_must_be_absolute_existing_files(tmp_path):
         B.check_media("missing", [{"images": [str(tmp_path / "b.png")], "videos": []}])
 
 
+def _shown(format_example: str):
+    """The system prompt and the two format blocks the RL env shows (projective_relations) for a format example."""
+    from data_gen.interiorgs_v10.admission import load_policy
+    from data_gen.interiorgs_v10.release import _format_block, protocol_system_prompt
+    from data_gen.interiorgs_v10.training_prep import with_format_example
+
+    pol = with_format_example(load_policy(), format_example)
+    return protocol_system_prompt("projective_relations", pol), _format_block(pol, True), _format_block(pol, False)
+
+
+def _env_traj(i: int, format_example: str):
+    system, first, later = _shown(format_example)
+    return {"messages": [{"role": "system", "content": system}, {"role": "user", "content": "<image>obs\n" + first},
+                         {"role": "assistant", "content": "<action>move_forward|</action>"},
+                         {"role": "user", "content": "<image>obs\n" + later},
+                         {"role": "assistant", "content": "<action>turn_left|</action>"}],
+            "images": [f"/f/v10_{i:024x}__s0.png", f"/f/v10_{i:024x}__s1.png"]}
+
+
+def test_other_action_pools_get_their_own_files_tags_and_columns(tmp_path):
+    """The Qwen3 matrix (2026-10-30): P2q and P2f are read like P2, tagged with their own names, and the recipe
+    table has a column for every pool of the config."""
+    cfg = _setup(tmp_path)
+    pools = cfg["pools"]
+    pools["P2q"] = pools.pop("P2")
+    B.write_jsonl(tmp_path / "short_train.jsonl", [_env_traj(i, "action_names") for i in range(4)])
+    B.write_jsonl(tmp_path / "short_val.jsonl", [_env_traj(i, "action_names") for i in range(20, 22)])
+    pools["P2f"] = {"kind": "sft_trajectories", "train": str(tmp_path / "short_train.jsonl"),
+                    "val": str(tmp_path / "short_val.jsonl"), "format_example": "action_names"}
+    cfg["val"] = {"P0": "all", "P1": 4, "P2q": 3, "P2f": "all"}
+    cfg["recipes"] = {"B": {"pools": {"P0": "all", "P2f": "all"}},
+                      "D": {"pools": {"P0": "all", "P1": {"times": 1.0, "of": "P2q"}, "P2q": 10}}}
+    res = B.build(cfg)
+    b, d = tmp_path / "out" / "B", tmp_path / "out" / "D"
+    assert set(json.loads((b / "dataset_info.json").read_text())) == {"P0_train", "P2f_train", "P0_val", "P1_val",
+                                                                       "P2q_val", "P2f_val"}
+    assert {r["pool"] for r in B.read_jsonl(b / "P2f_train.jsonl")} == {"P2f"}
+    assert len(B.read_jsonl(d / "P1_train.jsonl")) == 10 and {r["pool"] for r in B.read_jsonl(d / "P2q_train.jsonl")} == {"P2q"}
+    table = (tmp_path / "out" / "recipes.md").read_text(encoding="utf-8")
+    assert "| 组 | 输出格式 | P0 | P1 | P2q | P2f |" in table and "格式样例 action_names" in table
+    assert res["pools"]["P2f"] == {"train": 4, "val": 2}
+    cfg["pools"]["P3"] = dict(pools["P2f"])
+    with pytest.raises(SystemExit):                       # a pool the builder does not know
+        B.build(cfg)
+
+
+def test_format_example_check_needs_the_env_text(tmp_path):
+    rows = [dict(B.row("P2f", _env_traj(i, "action_names"), f"v10_{i:024x}", "s1", "projective_relations", {}))
+            for i in range(3)]
+    B.check_format("P2f", "train", rows, "action_names")
+    with pytest.raises(SystemExit):                       # the round-11 placeholder text
+        B.check_format("P2", "train", [B.row("P2", _env_traj(0, "placeholder"), "v10_0", "s1",
+                                             "projective_relations", {})], "action_names")
+    wrong_family = [B.row("P2f", _env_traj(0, "action_names"), "v10_0", "s1", "equidistance", {})]
+    with pytest.raises(SystemExit):                       # another family's system prompt
+        B.check_format("P2f", "train", wrong_family, "action_names")
+
+
 def test_counts():
     avail = {"P0": 230, "P1": 35039, "P2": 9802}
     assert B.resolve_counts({"pools": {"P0": "all", "P1": {"times": 0.5, "of": "P2"}, "P2": "all"}}, avail) == \

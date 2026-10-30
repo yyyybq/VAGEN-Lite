@@ -1,0 +1,69 @@
+# 矩阵第三版（Qwen3-VL-8B）B′ 组：P0 + P2f（格式 SFT 的短对话）；之后 RL。说明见 configs/matrix_v3/README.md。
+# 主线决定 75（2026-10-26）：原来的 B 只用 P0 做 SFT，起点没见过动作回答，和关闭的 A 组一样会在 RL 里丢格式，
+# 所以加上 P2f；P2f 先全用，格式不稳再加。
+# P2f 的 440 条里 400 条来自 train 场景、40 条来自 val 场景：按场景划分只有前者能进训练，再去掉边缘场景里的 34 条，
+# 训练用 366 条；val 场景的 38 条（去掉边缘场景后）作验证损失，每组都算。
+group: B
+name: B′
+status: planned
+description: B′：P0 加格式 SFT 的短对话（主线决定 75，2026-10-26）；之后 RL
+model_type: qwen3_vl
+format_example: action_names
+output_format: action_only
+changed: 2026-10-26 主线决定 75：原来只用 P0；P0 的起点没见过动作回答，加 P2f，条数按格式是否稳定来定（先全用）
+
+data:
+  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261030.yaml
+  recipe: B
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261030/B
+  train_rows: {P0: 164, P1: 0, P2q: 0, P2f: 366}
+  val_rows: {P0: 17, P1: 300, P2q: 300, P2f: 38}
+
+sft:
+  base_model: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+  epochs: 10
+  cards: 8
+  recipe: 主线 Qwen3 SFT 的配方（lf_q3formal/train.yaml：模板 qwen3_vl_nothink，学习率 1e-5 余弦，warmup 3%，每步 64 条，冻结视觉塔）
+  select: 每个 epoch 在 val（eval_val_v2_screened，382 道）上评测（不采样），挑成功率最高的，打平取更早的
+  format_stability: P2f 先全用（366 条）；RL 里格式不稳（读不出的回答碰到 10% 线）再加，加多少由用户定
+
+rl:
+  start: SFT 挑出的检查点
+  pair: {s0: v10_p1_S0, d: v10_p1_Dcond}
+  dense: {variant: V4, progress_reward_scale: 3.3333333333333335, group_filter: keep_by_return_std, keep_std_threshold: 0.3318, keep_std_floor: 1.0}
+  seeds: [20261019, 20261021]
+  task_pool: reserve
+  rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl
+  exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
+  updates: 300
+  output_format: action_only
+  guards: {invalid_max: 0.10, kl_max: 1.0}
+  attention: eager
+  risk: >-
+    B′ 只有 366 条短的动作对话（每条一到两个助手回合），动作格式可能学得浅。从格式 SFT 起步的 RL 都没稳住：
+    Qwen2.5 上（格式 SFT v1、v2 和稳定性对照共 13 个 RL，其中 10 个的起点用的就是 P2f 这批对话）都在第 10 到 55 次更新之间
+    被 10% 线停下；Qwen3 上（主线 REPORT_QWEN3_DENSE_20261028：同一批对话的格式 SFT 第 1 个 epoch，采样熵 0.157）
+    S0、V4 两臂都在第 60 到 90 次更新走样。
+    B′ 多了 P0、训练 10 个 epoch，起点不同，但格式可能同样不稳；不稳时按决定 75 加 P2f 的条数。
+
+eval:
+  sets:
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened
+  every: 50
+  diagnostics:
+    failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
+    qa_probe: P1 探针（838 道），SFT 各 epoch 和每个 RL 的各检查点；Qwen3 的模型要用 Qwen3 的运行时，等 qwen3-main
+
+chain:
+  plan: null
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m3_b
+  rl_name: v10_rl_m3_b
+  sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
+  sft_groups: {mix: sft_trajectories.jsonl}
+  needs_chain_support:
+    sft_lf_dirs: {mix: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261030/B}
+    diagnostics_after_eval: true
+  needs_qwen3_main: [model_type qwen3_vl, attention eager, 密集一侧 V4 的设置, 两个种子各一对 RL, 补丁 0001 / 0002 对合并后的训练链重新核对]
+
+estimate: {sft: 8 卡十几分钟（530 条）, rl: 4 个，每个 1 + 8 卡约 5.5 小时（格式不稳时会提早停下）, evaluate: 4 个 RL 各 6 个检查点 × 2 个题集}

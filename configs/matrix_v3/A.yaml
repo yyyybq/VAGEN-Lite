@@ -1,0 +1,18 @@
+# 矩阵第三版（Qwen3-VL-8B）A 组：关闭，不跑。说明见 configs/matrix_v3/README.md。
+group: A
+status: closed
+description: 原来是"原始模型（先做格式 SFT）直接 RL"；关闭
+closed: >-
+  主线决定 74（2026-10-26，第十三次补充）：不跑。弱起点在试过的所有设置下都丢格式：第十二轮 A 组从原始 7B 起步，
+  A 组从格式 SFT v1 第 2 个 epoch、v2 第 1 个 epoch 起步，以及稳定性对照 W0–W5，每个 RL 都在第 10 到 55 次更新之间
+  被 10% 的读不出线停下，没留下检查点；RL 里混格式监督没有实现。决定 78（2026-10-27）换到 Qwen3-VL-8B 后也不重开；
+  主线第十四次补充的 Qwen3 弱起点是另一组实验，不是 A 组（它的 S0、V4 两臂也在第 60 到 90 次更新走样，
+  REPORT_QWEN3_DENSE_20261028）。
+counted: 第十二轮在 5 条训练链里从格式 SFT 起步的 13 个 RL（r12n 3 个、r12p 5 个、r12z 3 个、r12za 1 个、r12zc 1 个），
+  停在第 10–55 次更新（本分支 2026-10-30 按各链的 progress.json 数的）
+model_type: qwen3_vl
+format_example: action_names
+data: null
+sft: null
+rl: null
+chain: {plan: null}

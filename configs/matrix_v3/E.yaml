@@ -1,0 +1,59 @@
+# 矩阵第三版（Qwen3-VL-8B）E 组（探索性，排在 D 之后）：SFT 与 D 相同、共用 D 挑出的 SFT 模型；RL 时换 free_think 提示。
+# 用户 2026-10-18 的决定（第二版起不变）：RL 前 50 次更新里读不出的回答超过 20% 就放弃；回答上限 6,144。说明见 configs/matrix_v3/README.md。
+group: E
+status: planned
+description: SFT 同 D；RL 用 free_think 提示（探索性，排在 D 之后）
+model_type: qwen3_vl
+format_example: action_names
+output_format: think_action   # SFT 只输出动作（同 D）；RL 和评测用 free_think 提示
+
+data:
+  same_as: D
+
+sft:
+  same_as: D
+
+rl:
+  start: D 组挑出的 SFT 检查点
+  pair: {s0: v10_p1_S0, d: v10_p1_Dcond}
+  dense: {variant: V4, progress_reward_scale: 3.3333333333333335, group_filter: keep_by_return_std, keep_std_threshold: 0.3318, keep_std_floor: 1.0}
+  seeds: [20261019, 20261021]
+  task_pool: reserve
+  rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl
+  exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
+  updates: 300
+  output_format: think_action   # rl-config --output-format think_action（本分支加的选项），两个 RL 都用
+  guards: {invalid_max: 0.20, kl_max: 1.0}   # 读不出的回答 20% 线只查前 50 次更新（补丁 0001 的 invalid_until）；KL 同其他组
+  invalid_until: 50
+  attention: eager
+  abandon_rule: 前 50 次更新里，读不出的回答（transition/invalid_action_rate，最近 10 次的平均）超过 20% 就停
+  max_response_length: 6144   # 只对 E；其他组 4096
+  think_share: transition/think_rate
+
+eval:
+  sets:
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened
+  every: 50
+  prompt_format: free_think   # RL 检查点用 free_think 提示评测
+  diagnostics:
+    failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
+    format_check: python -m eval.diagnostics.format_check --eval <set> --out <TR>/diag/format_<set>
+    qa_probe: P1 探针（838 道），每个 RL 的各检查点；Qwen3 的模型要用 Qwen3 的运行时，等 qwen3-main
+
+chain:
+  plan: null
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m3_e
+  rl_name: v10_rl_m3_e
+  sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
+  sft_groups: {mix: sft_trajectories.jsonl}
+  needs_chain_support:
+    start_model: {from_chain: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m3_d}   # D 组挑出的 SFT 检查点
+    rl_output_format: think_action
+    guards_invalid_until: 50
+    eval_rl_prompt_format: free_think
+    rl_max_response_length: 6144
+    diagnostics_after_eval: true
+  needs_qwen3_main: [model_type qwen3_vl, attention eager, 密集一侧 V4 的设置, 两个种子各一对 RL, 补丁 0001 / 0002 对合并后的训练链重新核对, Qwen3 运行时下 free_think 提示和 6,144 的回答上限先试几次更新]
+
+estimate: {rl: 4 个，每个 1 + 8 卡约 5.5 小时（回答变长后会更慢）, evaluate: 4 个 RL 各 6 个检查点 × 2 个题集}

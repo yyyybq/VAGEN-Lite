@@ -14,7 +14,7 @@
 
 | 术语 | 含义 |
 | --- | --- |
-| 池（pool） | 混合 SFT 的数据来源。**P0**：仿 8 个 benchmark 的 QA 样题（`exps/interiorgs_qa_lf_20261015/sample_256`，230 道，177 条记录）；**P1**：本题库的转移题；**P2**：第十一轮正式 SFT 的动作轨迹（`interiorgs_v10_train_r11_20261016/lf_formal`，train 9,802 条） |
+| 池（pool） | 混合 SFT 的数据来源。**P0**：仿 8 个 benchmark 的 QA 样题（`exps/interiorgs_qa_lf_20261015/sample_256`，230 道，177 条记录）；**P1**：本题库的转移题；**P2**：第十一轮正式 SFT 的动作轨迹（`interiorgs_v10_train_r11_20261016/lf_formal`，train 9,802 条）；矩阵第三版（Qwen3，2026-10-30）另有 **P2q**：同一批轨迹的新格式版（真实动作名，模型线 `lf_q3formal`），和 **P2f**：格式 SFT v2 的短对话（`interiorgs_v10_train_r12o_20261023/lf_format`，train 场景 400 条、val 场景 40 条） |
 | 任务族（family） | 题目所属任务的类型，6 个：`projective_relations` 投影（A 在 B 左边 / 右边）、`equidistance` 等距、`absolute_positioning` 绝对距离、`occlusion_alignment` 遮挡、`fov_inclusion` 视野（两个都在画面里）、`screen_occupancy` 屏幕占比 |
 | 大类（qclass） | `state` 状态题（问当前画面）、`forward` 前向题（问"做了某个动作之后"）、`inverse` 逆向题（给前后两张图，问做了什么动作） |
 | 题类（qtype） | 15 个，见第 4 节；名字 = 量 + `_now` / `_after` / `_between` |
@@ -86,11 +86,13 @@
 | 字段 | 含义 |
 | --- | --- |
 | `messages`、`images`、`videos` | 原样复制自来源，不合并、不改写（P2 的对话和图与主线 `trajectory_train.jsonl` 逐条相同、顺序相同） |
-| `pool` | `P0` / `P1` / `P2` |
+| `pool` | `P0` / `P1` / `P2` / `P2q` / `P2f` |
 | `source_id` | P0：`p0_<题号>`；P1：`sample_id`；P2：任务号 |
 | `scene` | 场景号（P2 从帧文件名找到任务，再从第十一轮 `rows.jsonl` 找场景） |
 | `stratum` | 分层抽样的层：P0 题组（`S1`–`S8`），P1 题类，P2 任务族 |
 | `meta` | JSON：P0 `{groups, kind, qids, questions}`，P1 `{family, qclass, qtype, task_id, questions}`，P2 `{family, task_id, turns}` |
+
+池写了 `format_example` 时（第三版的 P2q、P2f 是 `action_names`），构建时逐条核对系统提示和每个用户回合的格式行和 RL 环境显示的逐字相同，对不上就停；行照样不改写。
 
 LLaMA-Factory 只读 `messages`、`images`、`videos`（`dataset_info.json` 的 `columns`）；每个池单独一个数据集，`eval_on_each_dataset: true` 给出每个池的验证损失。
 

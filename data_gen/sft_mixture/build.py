@@ -20,6 +20,12 @@ recipe table.  Rules:
   other recipe's rows of the pools it shares (matrix D_noP0 = D without P0).
 * ``exclude_scenes: FILE`` (a JSON file with an "excluded" list of scene ids; user 2026-10-29, the scene screen):
   the rows of those scenes leave every pool, training and validation, before any count or draw.
+* Action pools besides P2 (the Qwen3 matrix, user 2026-10-30, after the main line's registration of 2026-10-27):
+  P2q, round 11's conversations in the new format (real action names), and P2f, the format SFT's short
+  conversations; both are LF exports read like P2 (kind ``sft_trajectories``).
+* ``format_example: action_names`` (or ``placeholder``) on an action pool: every row's system prompt and the
+  format text of each user turn must be the text the RL env shows with that format example
+  (release.protocol_system_prompt / _format_block); any other row stops the build.  Rows are still never rewritten.
 """
 
 from __future__ import annotations
@@ -36,8 +42,9 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 
 import yaml
 
-POOLS = ("P0", "P1", "P2")
-POOL_ZH = {"P0": "P0 仿 benchmark 的 QA", "P1": "P1 转移题", "P2": "P2 SFT 动作轨迹"}
+POOLS = ("P0", "P1", "P2", "P2q", "P2f")
+POOL_ZH = {"P0": "P0 仿 benchmark 的 QA", "P1": "P1 转移题", "P2": "P2 SFT 动作轨迹",
+           "P2q": "P2q SFT 动作轨迹（新格式：真实动作名）", "P2f": "P2f 格式 SFT 的短对话（真实动作名）"}
 DATASET_INFO = {"formatting": "sharegpt",
                 "columns": {"messages": "messages", "images": "images", "videos": "videos"},
                 "tags": {"role_tag": "role", "content_tag": "content", "user_tag": "user",
@@ -104,18 +111,18 @@ def load_p1(spec: Dict[str, Any], split: str) -> List[Dict[str, Any]]:
     return out
 
 
-def load_p2(spec: Dict[str, Any], split: str, tasks: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+def load_p2(spec: Dict[str, Any], split: str, tasks: Dict[str, Dict[str, Any]], name: str = "P2") -> List[Dict[str, Any]]:
     """SFT trajectory rows (messages + images only): the task, its scene and family from the frame names."""
     out = []
     for r in read_jsonl(Path(spec[split])):
         ids = {m.group(1) for p in r.get("images") or [] for m in [FRAME_TASK.search(str(p))] if m}
         if len(ids) != 1:
-            raise MixtureError(f"P2 {split}: a row whose frames name {sorted(ids)} tasks")
+            raise MixtureError(f"{name} {split}: a row whose frames name {sorted(ids)} tasks")
         tid = ids.pop()
         task = tasks.get(tid)
         if task is None:
-            raise MixtureError(f"P2 {split}: task {tid} is not in task_rows")
-        out.append(row("P2", r, tid, task["scene_id"], task["task_type"],
+            raise MixtureError(f"{name} {split}: task {tid} is not in task_rows")
+        out.append(row(name, r, tid, task["scene_id"], task["task_type"],
                        {"task_id": tid, "family": task["task_type"],
                         "turns": sum(1 for m in r["messages"] if m["role"] == "assistant")}))
     return out
@@ -128,8 +135,36 @@ def load_pool(name: str, spec: Dict[str, Any], split: str, tasks: Dict[str, Dict
     if kind == "transition_qa":
         return load_p1(spec, split)
     if kind == "sft_trajectories":
-        return load_p2(spec, split, tasks)
+        return load_p2(spec, split, tasks, name)
     raise MixtureError(f"pool {name}: unknown kind {kind!r}")
+
+
+def check_format(name: str, split: str, rows: Sequence[Dict[str, Any]], format_example: str) -> None:
+    """Action rows show the RL env's text for ``format_example``: the system prompt of their task family and, at the
+    end of each user turn, the format block (the first turn's with the example), each exactly once."""
+    from data_gen.interiorgs_v10.admission import load_policy
+    from data_gen.interiorgs_v10.release import _format_block, protocol_system_prompt
+    from data_gen.interiorgs_v10.training_prep import with_format_example
+
+    policy = with_format_example(load_policy(), format_example)
+    blocks = {first: _format_block(policy, first) for first in (True, False)}
+    system: Dict[str, str] = {}
+    bad = collections.Counter()
+    for r in rows:
+        family = r["stratum"]
+        if family not in system:
+            system[family] = protocol_system_prompt(family, policy)
+        msgs = r["messages"]
+        if not msgs or msgs[0]["role"] != "system" or msgs[0]["content"] != system[family]:
+            bad["system prompt"] += 1
+            continue
+        users = [m for m in msgs if m["role"] == "user"]
+        if not users or not all(m["content"].endswith("\n" + blocks[k == 0]) and m["content"].count(blocks[k == 0]) == 1
+                                for k, m in enumerate(users)):
+            bad["format text"] += 1
+    if bad:
+        raise MixtureError(f"{name} {split}: {sum(bad.values())} of {len(rows)} rows do not show the {format_example} "
+                           f"format example the RL env shows ({dict(bad)})")
 
 
 def check_media(name: str, rows: Sequence[Dict[str, Any]]) -> None:
@@ -231,6 +266,9 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
     excluded_scenes = (set(json.loads(Path(cfg["exclude_scenes"]).read_text(encoding="utf-8"))["excluded"])
                        if cfg.get("exclude_scenes") else set())
     excluded: Dict[str, Dict[str, int]] = {}
+    unknown = sorted(set(cfg.get("pools") or {}) - set(POOLS))
+    if unknown:
+        raise MixtureError(f"unknown pools {unknown} (known: {', '.join(POOLS)})")
     for name in POOLS:
         spec = (cfg.get("pools") or {}).get(name)
         if not spec:
@@ -242,6 +280,11 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
         check_scenes(name, "val", va, scenes[val_split], val_split)
         if val_split != "val":
             notes.append(f"{name} 的验证行来自 {val_split} 场景（{spec.get('val_scenes_reason', '配置指定')}），不是 val 场景")
+        if spec.get("format_example"):  # the text the RL env shows (Qwen3 matrix: real action names)
+            check_format(name, "train", tr, str(spec["format_example"]))
+            check_format(name, "val", va, str(spec["format_example"]))
+            notes.append(f"{name} 每条对话的系统提示和每个用户回合的格式行，都和 RL 环境在格式样例 "
+                         f"{spec['format_example']} 下显示的逐字相同（构建时逐条核对）")
         if excluded_scenes:
             excluded[name] = {"train": sum(r["scene"] in excluded_scenes for r in tr),
                               "val": sum(r["scene"] in excluded_scenes for r in va)}
@@ -313,22 +356,25 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
 
 def recipe_table(cfg: Dict[str, Any], table: Sequence[Dict[str, Any]], pools: Dict[str, Any],
                  val_rows: Dict[str, List[Dict[str, Any]]], notes: Sequence[str]) -> str:
+    cols = [p for p in POOLS if p in pools]
+    extra = "".join(clause for p, clause in (("P2q", "，P2q 同 P2（新格式）"),
+                                             ("P2f", "，P2f 一条是一到两轮的短对话（格式 SFT 从 P2 的对话里截的）"))
+                    if p in cols)
     lines = [f"# 配方表：{cfg.get('name', '')}", "",
              f"由 `python -m data_gen.sft_mixture.build --config ...` 生成。数字是样本条数（一条 = 一段对话）："
-             "P0、P1 一条是一道题（P0 的视频题一条含同一段视频的几道题），P2 一条是一整条动作轨迹（多回合）。", "",
+             f"P0、P1 一条是一道题（P0 的视频题一条含同一段视频的几道题），P2 一条是一整条动作轨迹（多回合）{extra}。", "",
              "## 池子", ""]
     lines += ["| 池 | 可用训练条数 | 可用验证条数 | 每个配方都用的验证条数 |", "| --- | --- | --- | --- |"]
-    for p in POOLS:
-        if p in pools:
-            lines.append(f"| {POOL_ZH[p]} | {len(pools[p]['train'])} | {len(pools[p]['val'])} | {len(val_rows.get(p, []))} |")
+    for p in cols:
+        lines.append(f"| {POOL_ZH[p]} | {len(pools[p]['train'])} | {len(pools[p]['val'])} | {len(val_rows.get(p, []))} |")
     lines += ["", "## 配方", "",
-              "| 组 | 输出格式 | P0 | P1 | P2 | 训练条数合计 | 助手回合 | 图片（含视频帧） | 说明 |",
-              "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+              "| 组 | 输出格式 | " + " | ".join(cols) + " | 训练条数合计 | 助手回合 | 图片（含视频帧） | 说明 |",
+              "| --- | --- | " + " | ".join("---" for _ in cols) + " | --- | --- | --- | --- |"]
     for t in table:
         c = t["counts"]
         s = t.get("summary") or {}
         tr = [s[k] for k in s if k.endswith("_train")]
-        lines.append(f"| {t['recipe']} | {t.get('output_format') or '–'} | {c.get('P0', 0)} | {c.get('P1', 0)} | {c.get('P2', 0)} | "
+        lines.append(f"| {t['recipe']} | {t.get('output_format') or '–'} | " + " | ".join(str(c.get(p, 0)) for p in cols) + " | "
                      f"{sum(x['rows'] for x in tr)} | {sum(x['assistant_turns'] for x in tr)} | {sum(x['images'] for x in tr)} | "
                      f"{t.get('note') or t.get('description') or ''} |")
     if notes:

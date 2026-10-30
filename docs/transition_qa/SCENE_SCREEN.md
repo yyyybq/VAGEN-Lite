@@ -64,7 +64,7 @@
 | --- | --- | --- |
 | P1 题库（`data_gen/transition_qa/generate.py`） | `PROBE_CONFIG`、`BUILD_CONFIG` 的 `exclude_scenes`：在抽样、配平、排字母、人工核对之后删题，所以其余题逐题不变；探针去掉的 id 记在 `probe_stats.json`，`build` 也把它们挡在测试集外，测试集从同一批题里抽 | `exps/transition_qa_20261019b`（之前的在 `pre_scene_screen/`） |
 | 探针的已有回答 | 只重新判分（`qa_probe rescore`，去掉的题不计） | `exps/diagnostics_20261029/probe_v3g_all`、`probe_v3g_common`（772 道） |
-| 混合配方（`data_gen/sft_mixture/build.py`） | 配置的 `exclude_scenes`：读进 P0、P1、P2 之后、抽样之前去掉这些场景的行；D 的 P1 仍和 P2 一样多 | `exps/sft_mixture_matrix_v2_20261018`（B 164；C 164 + 9,075；D 164 + 9,075 + 9,075） |
+| 混合配方（`data_gen/sft_mixture/build.py`） | 配置的 `exclude_scenes`：读进 P0、P1、P2 之后、抽样之前去掉这些场景的行；D 的 P1 仍和 P2 一样多 | `exps/sft_mixture_matrix_v2_20261018`（B 164；C 164 + 9,075；D 164 + 9,075 + 9,075）；第三版（Qwen3，2026-10-30）同样去掉：`exps/sft_mixture_matrix_v3_qwen3_20261030`（B′ 164 + 366；C 164 + 9,075；D 164 + 9,075 + 9,075） |
 | 矩阵的 RL 题 | 第十一轮的 RL 行（主线的 `rl_rows/rows.jsonl`）复制一份去掉这些场景，矩阵配置的 `rl.rows` 指过去；深度核对的排除（`rl.exclude`）不变 | `exps/matrix_inputs_20261029/rl_rows` |
 | 评测集 | 验证集去掉这些场景（382 道）；测试集去掉后补回 292 道（第 0 节第 4 条），矩阵配置的 `eval_sets` 指过去 | `exps/matrix_inputs_20261029/eval_{val,test}_v2_screened`（各有 `selection.json`：去掉、换进的每一道和回放结果） |
 
@@ -95,5 +95,6 @@ python data_gen/scene_screen/exclusions.py
 # 题库、配方、矩阵输入
 python -m data_gen.transition_qa.generate probe ... && python -m data_gen.transition_qa.generate build ...
 python -m data_gen.sft_mixture.build --config data_gen/sft_mixture/configs/mixture_matrix_v2_20261018.yaml
+python -m data_gen.sft_mixture.build --config data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261030.yaml   # 第三版（Qwen3）
 python data_gen/scene_screen/matrix_inputs.py
 ```
