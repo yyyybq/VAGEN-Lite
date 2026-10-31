@@ -257,3 +257,13 @@ def test_short_run_check(tmp_path):
     assert res["4_memory_peak_mib"] == 63500 and res["5_last_layer_grad_ratio"]["mean"] == pytest.approx(0.5)
     assert res["3_seconds_per_step"]["slower_by"] == pytest.approx(0.9 / 0.7 - 1)
     assert res["2_lm_head_gradient"]["diagnosed_steps"] == 20
+
+
+def test_segmented_runs_take_the_training_entry_from_train_entry_variable():
+    """C1's formal run (2026-10-31) goes through run_segmented.sh with TRAIN_ENTRY=cotrain_entry.py; without the
+    variable the script launches train_entry.py as before."""
+    text = (ROOT / "train/run_segmented.sh").read_text()
+    assert 'TRAIN_ENTRY="${TRAIN_ENTRY:-$WT/downstream/train/train_entry.py}"' in text
+    launch = text[text.index("accelerate launch"):]
+    assert launch.index('"$TRAIN_ENTRY"') < launch.index("--config_yaml")
+    assert "downstream/train/train_entry.py\" --config_yaml" not in text

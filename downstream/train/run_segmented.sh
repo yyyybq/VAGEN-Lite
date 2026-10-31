@@ -14,9 +14,12 @@
 # Writes only under EXP: run/, evals/steps_P/out/, train.log, segments.log, stage_times.tsv, gpu.csv (GPU memory and
 # use every 10 s; added 2026-10-26 for X1's memory report).
 # Usage: run_segmented.sh EXP
+#   TRAIN_ENTRY (2026-10-31, C1): the training entry instead of downstream/train/train_entry.py, e.g.
+#   downstream/train/cotrain_entry.py (train_entry.py plus the text loss of the config's trainer.cotrain).
 set -uo pipefail
 EXP="${1:?Usage: run_segmented.sh EXP_DIR}"
 WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TRAIN_ENTRY="${TRAIN_ENTRY:-$WT/downstream/train/train_entry.py}"
 STARVLA_ROOT=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/starVLA
 FS="$WT/downstream/train/full_state.py"
 log() { echo "[segmented] $* $(date -u +%FT%TZ)" | tee -a "$EXP/segments.log"; }
@@ -32,7 +35,7 @@ train_to() {  # train_to P: one training segment, in its own shell with the Star
     export PYTHONPATH="$WT:$STARVLA_ROOT"
     cd "$STARVLA_ROOT"
     accelerate launch --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml --num_processes 8 \
-      "$WT/downstream/train/train_entry.py" --config_yaml "$EXP/config.yaml" "trainer.stop_at=$1" \
+      "$TRAIN_ENTRY" --config_yaml "$EXP/config.yaml" "trainer.stop_at=$1" \
       ${TRAIN_EXTRA:-} >> "$EXP/train.log" 2>&1
   )
 }
