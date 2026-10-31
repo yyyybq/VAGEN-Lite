@@ -96,6 +96,8 @@ def make_train_step(T, cfg_cotrain: dict, text_batches_for):
                 if cuda:
                     metrics["mem_after_action_gib"] = torch.cuda.memory_allocated() / gib
                 text_loss = answer_loss(vlm, text_inputs)
+                if cuda:
+                    metrics["mem_after_text_gib"] = torch.cuda.memory_allocated() / gib
                 total_loss = action_loss + lam * text_loss
             if diag_every and step % diag_every == 0:
                 head = [vlm.lm_head.weight]
@@ -115,15 +117,16 @@ def make_train_step(T, cfg_cotrain: dict, text_batches_for):
         # (metrics are written by the main process only)
         peak = torch.cuda.max_memory_allocated() / gib if cuda else 0.0
         mine = torch.tensor([float(text_loss.detach()), 1.0 if source == "qa" else 0.0, peak,
-                             float(text_inputs["input_ids"].shape[-1])], device=self.accelerator.device)
-        both = self.accelerator.gather(mine).reshape(-1, 4).float().cpu()
+                             float(text_inputs["input_ids"].shape[-1]), float(getattr(batches, "too_long", 0))],
+                            device=self.accelerator.device)
+        both = self.accelerator.gather(mine).reshape(-1, 5).float().cpu()
         qa = both[:, 1] > 0.5
         metrics.update({"action_dit_loss": action_loss.item(), "text_loss": float(both[:, 0].mean()),
                         "text_loss_traj": float(both[~qa, 0].mean()) if (~qa).any() else float("nan"),
                         "text_loss_qa": float(both[qa, 0].mean()) if qa.any() else float("nan"),
                         "total_loss": total_loss.item(), "text_tokens": int((text_inputs["labels"] != -100).sum()),
                         "text_index": int(index), "mem_peak_gib_max": float(both[:, 2].max()),
-                        "text_len_max": int(both[:, 3].max())})
+                        "text_len_max": int(both[:, 3].max()), "text_too_long_total": int(both[:, 4].sum())})
         return metrics
 
     return _train_step

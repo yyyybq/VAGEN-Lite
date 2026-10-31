@@ -67,7 +67,12 @@ def test_text_batches_skip_samples_without_answers(tmp_path):
     tb = CT.TextBatches(FakeProcessor(), rank=0, world=2, seed=1,
                         sources={"traj": tmp_path / "traj.jsonl", "qa": tmp_path / "qa.jsonl"})
     name, i, inputs = tb.at(0)
-    assert name == "traj" and int((inputs["labels"] != CT.IGNORE).sum()) == 2
+    assert name == "traj" and int((inputs["labels"] != CT.IGNORE).sum()) == 2 and tb.too_long == 0
+    short = CT.TextBatches(FakeProcessor(), rank=0, world=2, seed=1, max_tokens=3,
+                           sources={"traj": tmp_path / "traj.jsonl", "qa": tmp_path / "qa.jsonl"})
+    with pytest.raises(RuntimeError):
+        short.at(0)  # every sample is longer than three tokens
+    assert short.too_long == 100  # each one passed over is counted
     tb_qa = CT.TextBatches(FakeProcessor(), rank=1, world=2, seed=1,
                            sources={"traj": tmp_path / "traj.jsonl", "qa": tmp_path / "qa.jsonl"})
     with pytest.raises(RuntimeError):
@@ -144,7 +149,7 @@ def test_train_step_adds_lambda_times_text_loss_once():
     assert m["action_dit_loss"] == pytest.approx(4.0) and m["text_loss_qa"] == pytest.approx(text)
     assert m["grad_lm_head_text"] > 0 and m["grad_lm_head_action"] == 0.0 and m["text_index"] == 4
     assert m["grad_last_layer_action"] == 0.0 and m["grad_last_layer_text"] > 0
-    assert m["text_len_max"] == 3 and "mem_peak_gib_max" in m
+    assert m["text_len_max"] == 3 and "mem_peak_gib_max" in m and m["text_too_long_total"] == 0
     assert not getattr(vlm, "_c1_checkpointing", False)  # off unless asked
 
     calls = []

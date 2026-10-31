@@ -87,6 +87,7 @@ class TextBatches:
         self.processor, self.rank, self.world, self.seed, self.max_tokens = processor, rank, world, seed, max_tokens
         self.records = {k: load_records(v) for k, v in (sources or SOURCES).items()}
         self.sizes = {k: len(v) for k, v in self.records.items()}
+        self.too_long = 0  # samples passed over for exceeding max_tokens (2026-10-31: C1 caps the length for memory)
 
     def encode(self, rec: dict):
         import torch
@@ -106,6 +107,9 @@ class TextBatches:
         for offset in range(100):
             name, i = pick(step, self.rank, self.world, self.sizes, self.seed, offset)
             inputs = self.encode(self.records[name][i])
-            if inputs["input_ids"].shape[1] <= self.max_tokens and int((inputs["labels"] != IGNORE).sum()) > 0:
+            if inputs["input_ids"].shape[1] > self.max_tokens:
+                self.too_long += 1
+                continue
+            if int((inputs["labels"] != IGNORE).sum()) > 0:
                 return name, i, inputs
         raise RuntimeError(f"no usable text sample near step {step} for rank {self.rank}")
