@@ -293,7 +293,10 @@ FAKE_STARVLA = {
     "starVLA/model/modules/vlm/__init__.py": "def get_vlm_model(config):\n    return 'original'\n",
     "starVLA/model/framework/__init__.py": "",
     "starVLA/model/framework/VLM4A/__init__.py": "",
-    "starVLA/model/framework/VLM4A/QwenOFT.py": "from starVLA.model.modules.vlm import get_vlm_model\n",
+    "starVLA/model/framework/VLM4A/QwenOFT.py": ("from starVLA.model.modules.vlm import get_vlm_model\n\n\n"
+                                                 "class Qwenvl_OFT:\n"
+                                                 "    def predict_action(self, examples=None, **kwargs):\n"
+                                                 "        return examples, kwargs\n"),
 }
 
 
@@ -334,6 +337,31 @@ class RegisterAndEntryTest(unittest.TestCase):
                 for k in [k for k in sys.modules if k.startswith("starVLA")]:
                     del sys.modules[k]
                 sys.modules.update(saved)
+
+    def test_register_with_the_eval_jpeg_switch(self):
+        """Decision 39 of 2026-10-31: MODEL_LINE_EVAL_JPEG wraps QwenOFT's predict_action, once; unset, nothing."""
+        from model_matrix.downstream import starvla_cambrian as C
+
+        for value, want in (("", None), ("75", 75)):
+            with tempfile.TemporaryDirectory() as tmp:
+                self.fake(tmp)
+                saved = {k: v for k, v in sys.modules.items() if k.startswith("starVLA")}
+                for k in saved:
+                    del sys.modules[k]
+                sys.path.insert(0, tmp)
+                try:
+                    with mock.patch.dict(os.environ, {C.EVAL_JPEG: value}):
+                        C.register()
+                        C.register()  # once
+                    import starVLA.model.framework.VLM4A.QwenOFT as oft
+
+                    self.assertEqual(getattr(oft.Qwenvl_OFT.predict_action, "_model_line_jpeg", None), want)
+                    self.assertTrue(hasattr(oft.get_vlm_model, "_original"))
+                finally:
+                    sys.path.remove(tmp)
+                    for k in [k for k in sys.modules if k.startswith("starVLA")]:
+                        del sys.modules[k]
+                    sys.modules.update(saved)
 
     def test_entry_runs_the_script_as_python_would(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -391,6 +419,88 @@ class RegisterAndEntryTest(unittest.TestCase):
             self.assertEqual(out[:2], [f"1 {CACHE}", "0 none"])
         for f in ("backbone_load.sh", "backbone_smoke.sh", "cambrian_env.sh"):
             self.assertEqual(subprocess.run(["bash", "-n", str(ROOT / "model_matrix" / "downstream" / f)]).returncode, 0)
+
+
+class EvalJpegTest(unittest.TestCase):
+    """The evaluation-time JPEG switch (decision 39 of 2026-10-31)."""
+
+    def test_quality(self):
+        from model_matrix.downstream import starvla_cambrian as C
+
+        self.assertIsNone(C.eval_jpeg_quality({}))
+        self.assertIsNone(C.eval_jpeg_quality({C.EVAL_JPEG: " "}))
+        self.assertEqual(C.eval_jpeg_quality({C.EVAL_JPEG: "75"}), 75)
+        for bad in ("0", "96", "high"):
+            with self.assertRaises(ValueError):
+                C.eval_jpeg_quality({C.EVAL_JPEG: bad})
+
+    def test_frames_and_examples(self):
+        import numpy as np
+        from PIL import Image
+
+        from model_matrix.downstream import starvla_cambrian as C
+
+        rng = np.random.default_rng(0)
+        smooth = np.tile(np.arange(64, dtype=np.uint8)[None, :, None] * 4, (48, 1, 3))
+        a = np.clip(smooth.astype(int) + rng.integers(-20, 20, smooth.shape), 0, 255).astype(np.uint8)  # detail
+        err = {}
+        for q in (30, 90):
+            b = C.jpeg_frame(a, q)
+            self.assertEqual((b.shape, b.dtype), (a.shape, a.dtype))
+            err[q] = float(np.mean((b.astype(float) - a) ** 2))
+        self.assertGreater(err[30], err[90])
+        self.assertGreater(err[90], 0)
+        pil = Image.fromarray(a)
+        p = C.jpeg_frame(pil, 75)
+        self.assertEqual((p.size, p.mode), (pil.size, pil.mode))
+        self.assertTrue(np.array_equal(np.asarray(p), C.jpeg_frame(a, 75)))
+        examples = [{"image": [a, pil], "lang": "x", "state": 1}, {"image": a, "lang": "y"}]
+        out = C.jpeg_examples(examples, 75)
+        self.assertIs(examples[0]["image"][0], a)  # the caller's examples untouched
+        self.assertTrue(np.array_equal(out[0]["image"][0], C.jpeg_frame(a, 75)))
+        self.assertEqual(out[0]["image"][1].size, pil.size)
+        self.assertTrue(np.array_equal(out[1]["image"], C.jpeg_frame(a, 75)))  # one image, not a list
+        self.assertEqual((out[0]["lang"], out[0]["state"]), ("x", 1))
+        single = C.jpeg_examples({"image": [a], "lang": "z"}, 75)  # one example, as predict_action allows
+        self.assertTrue(isinstance(single, dict) and np.array_equal(single["image"][0], C.jpeg_frame(a, 75)))
+
+    def test_wrapper(self):
+        import io as _io
+        from contextlib import redirect_stdout
+
+        import numpy as np
+
+        from model_matrix.downstream import starvla_cambrian as C
+
+        class Framework:
+            def predict_action(self, examples=None, **kwargs):
+                """the framework's own docstring"""
+                return examples, kwargs
+
+            def forward(self, x):
+                return x
+
+        forward = Framework.forward
+        C.jpeg_before_predict(Framework, 40)
+        wrapped = Framework.predict_action
+        C.jpeg_before_predict(Framework, 40)  # once per class
+        self.assertIs(Framework.predict_action, wrapped)
+        self.assertIs(Framework.forward, forward)  # training's path untouched
+        self.assertEqual((wrapped._model_line_jpeg, wrapped.__doc__), (40, "the framework's own docstring"))
+        a = np.tile(np.arange(64, dtype=np.uint8)[None, :, None] * 4, (48, 1, 3))
+        a[::3, ::5] = 255
+        ex = [{"image": [a, a], "lang": "x"}]
+        buf = _io.StringIO()
+        with redirect_stdout(buf):
+            got, kw = Framework().predict_action(examples=ex, use_ddim=True)
+            got2, _ = Framework().predict_action(ex)  # positional
+        self.assertEqual(kw, {"use_ddim": True})
+        for g in (got, got2):
+            self.assertTrue(np.array_equal(g[0]["image"][0], C.jpeg_frame(a, 40)))
+            self.assertFalse(np.array_equal(g[0]["image"][0], a))
+        self.assertIs(ex[0]["image"][0], a)
+        self.assertEqual(buf.getvalue().count("MODEL_LINE_EVAL_JPEG=40"), 1)  # printed for the first request only
+        self.assertIn("(48, 64, 3)", buf.getvalue())
 
 
 if __name__ == "__main__":

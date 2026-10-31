@@ -28,6 +28,7 @@ sample -- right for the batch of one that RL (remove-padding) and SFT use, wrong
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Optional
@@ -124,6 +125,89 @@ def checkpointing_mode(model: nn.Module, on: bool) -> None:
     nfp head, which this interface does not call: the mode changes nothing else."""
     if on:
         model.train(torch.is_grad_enabled())
+
+
+EVAL_JPEG = "MODEL_LINE_EVAL_JPEG"  # the user's decision 39 of 2026-10-31: JPEG quality of the evaluation switch
+
+
+def eval_jpeg_quality(environ=os.environ) -> Optional[int]:
+    """MODEL_LINE_EVAL_JPEG: unset or empty is off; otherwise a JPEG quality from 1 to 95."""
+    raw = (environ.get(EVAL_JPEG) or "").strip()
+    if not raw:
+        return None
+    quality = int(raw)
+    if not 1 <= quality <= 95:
+        raise ValueError(f"{EVAL_JPEG}={raw}: a JPEG quality from 1 to 95")
+    return quality
+
+
+def jpeg_frame(image, quality: int):
+    """``image`` (an array or a PIL image) encoded once as JPEG at ``quality`` and decoded, of the same size and kind
+    (PIL's default 4:2:0 chroma subsampling, as the demonstrations' yuv420p video)."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    array = isinstance(image, np.ndarray)
+    im = Image.fromarray(image) if array else image
+    buf = io.BytesIO()
+    im.convert("RGB").save(buf, "JPEG", quality=int(quality))
+    buf.seek(0)
+    out = Image.open(buf).convert(im.mode)
+    out.load()
+    return np.asarray(out, dtype=image.dtype) if array else out
+
+
+def jpeg_examples(examples, quality: int):
+    """A policy request's examples (a list of dicts, or one dict) with every image through jpeg_frame; the caller's
+    examples are left as they are."""
+    def one(e):
+        e = dict(e)
+        im = e.get("image")
+        if isinstance(im, (list, tuple)):
+            e["image"] = [jpeg_frame(x, quality) for x in im]
+        elif im is not None:
+            e["image"] = jpeg_frame(im, quality)
+        return e
+
+    return one(examples) if isinstance(examples, dict) else [one(e) for e in examples]
+
+
+def jpeg_before_predict(cls, quality: int) -> None:
+    """The user's decision 39 of 2026-10-31, evaluation only: ``cls.predict_action`` -- the policy server's call
+    (StarVLA's policy_wrapper), which training does not use -- first passes every image of the request through JPEG
+    at ``quality``, at the size the client sent it, before StarVLA resizes it to the training resolution.  The
+    closed-loop evaluation's live renders then carry compression artifacts like those of the demonstration videos
+    (x264 crf 23) the model was trained on.  Once per class; the first call prints the images' sizes."""
+    import functools
+
+    import numpy as np
+
+    if getattr(cls.predict_action, "_model_line_jpeg", None) is not None:
+        return
+    original = cls.predict_action
+    logged = []
+
+    @functools.wraps(original)
+    def predict_action(self, *args, **kwargs):
+        if "examples" in kwargs:
+            kwargs["examples"] = jpeg_examples(kwargs["examples"], quality)
+            first = kwargs["examples"]
+        else:
+            args = (jpeg_examples(args[0], quality),) + args[1:]
+            first = args[0]
+        if not logged:
+            e = first if isinstance(first, dict) else first[0]
+            ims = e.get("image")
+            ims = ims if isinstance(ims, (list, tuple)) else [ims]
+            print(f"[starvla_cambrian] {EVAL_JPEG}={quality}: every image through JPEG before predict_action "
+                  f"(first request: {[tuple(np.asarray(x).shape) for x in ims]})", flush=True)
+            logged.append(True)
+        return original(self, *args, **kwargs)
+
+    predict_action._model_line_jpeg = quality
+    cls.predict_action = predict_action
 
 
 class CambrianVLInterface(nn.Module):
@@ -240,9 +324,15 @@ class CambrianVLInterface(nn.Module):
 
 def register() -> None:
     """StarVLA's get_vlm_model (and QwenOFT's own reference to it) gives CambrianVLInterface for a Cambrian-S start,
-    StarVLA's interface for every other start."""
+    StarVLA's interface for every other start.  With MODEL_LINE_EVAL_JPEG set (decision 39, evaluation only),
+    QwenOFT's predict_action first passes the request's images through JPEG (jpeg_before_predict)."""
     import starVLA.model.modules.vlm as vlm
 
+    quality = eval_jpeg_quality()
+    if quality is not None:
+        import starVLA.model.framework.VLM4A.QwenOFT as oft
+
+        jpeg_before_predict(oft.Qwenvl_OFT, quality)
     if getattr(vlm.get_vlm_model, "_model_line_cambrian", False):
         return
     original = vlm.get_vlm_model
