@@ -142,6 +142,7 @@ bash disk/monitor.sh stop
 给各线的完整转告（可以直接转发）：第一轮在 [RELAY_20261026.md](RELAY_20261026.md)，第二轮在 [RELAY_20261027.md](RELAY_20261027.md)，下面是第一轮的要点。
 - 下游线（10-31 05:1x 回话）：b14 核对无误，要用的起点（DS-{B,S,RS,RD}-030-s1 的 run/final_model）和 E3 的导出都在。以后下游训完、评完的实验按 R3 由磁盘线处理：磁盘线定期查出清单交你批，批了再归档、删除；下游自己的脚本不删文件。
 - 主线（10-31 回话，更正磁盘线）：b13 的三条链 q3s45、q3s0k、q3c3 都设了 `retain: best_and_last`，中间检查点评完已自动清掉（progress.json 的 retained 有 4、2、2 条）；磁盘线 10-31 告诉主线"这几条链没设 retain"是错的，b13 本身只删了最后检查点的续训状态，没错。真正没设 retain 的是 10-27、10-28 的 q3、q3s2dck、q3s3、q3dck、q3weak、q3fmt，它们的中间检查点在主线自己的清单里（主线第 85 条，31 项、782.2 GiB，`interiorgs_v10_q3_20261027/monitor/cleanup_q3_dryrun_20261031.txt`），删不删、要不要归档等你在主线定，定了主线告诉磁盘线。q3abl 设了 retain。
+- **暂不列进待删清单（模型线 10-31 告知，评完它再说）**：`models_runs/downstream/experiments/DS-CSS-100-s1/evals_src/steps_150000/`（16.3 GB，评测任务 pt-2oaccrlf；评完后可按 R4 处理）、`DS-CSB-100-s1/run/final_model/`（16.3 GB，评测任务 pt-vbdyiybe）。模型线第 39 条：在闭环里重评，每帧先压成 JPEG 质量 80。
 
 - 下游线：
   - 磁盘线已删 RL-SPEED-1、RL-SPEED-2 的检查点（先传了 AOSS，目录里留了说明文件）。
