@@ -10,10 +10,17 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "n"))
+sys.path.insert(0, str(ROOT / "tests"))
 import n_env as N  # noqa: E402
 import n_episode as E  # noqa: E402
+from test_n_gen import isolate_main_modules  # noqa: E402
 
 UPSTREAM = (N.MAIN / "vagen/envs/active_spatial/prompt.py").is_file() and E.VAL_ENV.is_file()
+
+
+@pytest.fixture(autouse=True)
+def isolated():  # the main checkout's vagen (n_env) and the worktree's (other tests) kept apart
+    yield from isolate_main_modules()
 
 
 def test_feedback_reads_like_the_env():
@@ -82,9 +89,10 @@ class FakeScene:
     def owner(self, hit):
         return hit
 
-    def judge(self, item, pose, a, b, render=True):
+    def judge(self, item, pose, render=True):
         ok = pose[0] >= 0.6 - 1e-9 and abs(pose[2]) < 1e-9
-        return {"success": ok, "visible": {"a": 0.1, "b": 0.1}, "metric": {"relation_margin_px": 20.0},
+        return {"success": ok, "visible": {"a": 0.1, "b": 0.1},
+                "metric": {"relation_margin_px": 20.0, "shaping_score": 0.2 + max(0.0, pose[0])},
                 "lateral": {"angle_deg": 5.0}}
 
 
@@ -97,6 +105,9 @@ def run(monkeypatch, replies):
     monkeypatch.setattr(E, "system_text", lambda cfg, t: "SYS")
     monkeypatch.setattr(E, "user_text", lambda cfg, first, pose, task, fb="": f"{first}|{fb}")
     monkeypatch.setattr(E, "allowed_actions", lambda cfg: set(N.ACTIONS))
+    monkeypatch.setattr(N, "box_judge", lambda item, pose: {"success": False, "metric": {"shaping_score": 0.1},
+                                                            "lateral": {}})
+    monkeypatch.setattr(N, "measurements", lambda item, j: {"relation_margin_px": j["metric"]["relation_margin_px"]})
 
     def parse(text, cfg, allowed):
         acts = [a for a in text.split(",") if a in N.ACTIONS]
@@ -114,6 +125,9 @@ def test_success_mid_turn_stops_the_turn(monkeypatch):
     rec, frames, calls = run(monkeypatch, ["move_forward,move_forward,turn_left"])
     assert rec["success"] and rec["end"] == "success" and rec["steps"] == 2 and rec["turns"] == 1
     assert rec["turn_log"][0]["executed"] == ["move_forward", "move_forward"]  # turn_left never ran
+    assert rec["max_shaping_score"] == pytest.approx(0.8)  # the best judge along the way (x = 0.6)
+    assert rec["instance_id"] == "T_s1" and rec["task_type"] == "projective_relations"
+    assert rec["final_judge"]["measurements"] == {"relation_margin_px": 20.0}
 
 
 def test_a_wall_blocks_the_feedback_says_so_and_three_bad_replies_end_it(monkeypatch):
