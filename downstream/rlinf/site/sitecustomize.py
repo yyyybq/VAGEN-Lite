@@ -2,8 +2,8 @@
 
 Python imports `sitecustomize` at the start of every process whose path holds this folder; downstream/rlinf/run_rlinf.sh
 puts it on PYTHONPATH, so the driver, every Ray worker and every environment process load it (forked ones inherit
-it).  With DOWNSTREAM_RL_HOOKS=1 it waits for two modules and patches them right after they are imported; RLinf's and
-RoboCasa's files are not changed:
+it).  With DOWNSTREAM_RL_HOOKS=1 it waits for these modules and patches them right after they are imported; RLinf's
+and RoboCasa's files are not changed:
 
   robocasa.models.fixtures.counter       Counter.get_reset_regions gets the fixed region order (the same patch as
                                          the evaluation, downstream/eval/closed_loop.stable_counter_regions), so a
@@ -13,6 +13,13 @@ RoboCasa's files are not changed:
                                          value head's parameters and of all other (actor) parameters separately,
                                          before clipping, summed over the FSDP ranks; rank 0 appends them to
                                          $DOWNSTREAM_GRAD_LOG (jsonl)
+  rlinf.models.embodiment.starvla.utils.vlm_preprocess
+                                         get_train_image_size falls back to datasets.vla_data.obs_image_size when
+                                         the checkpoint config has neither image_size nor default_image_resolution
+                                         (the user's decision 2 of 2026-10-31: StarVLA checkpoints keep the training
+                                         size in obs_image_size, so RLinf fed E3's policies the 256 x 256 frames
+                                         unresized; reports/E3_CHECK_20261030.md).  DOWNSTREAM_RL_IMAGE_SIZE_FIX=0
+                                         leaves it out (the control run of the check).
 
 Every patch writes one line to $DOWNSTREAM_RL_HOOK_LOG (pid, module, time), so a run shows that it took effect.
 """
@@ -101,8 +108,39 @@ def patch_fsdp_manager(module) -> None:
     _note(module.__name__, patch="FSDPModelManager.optimizer_step grad norms by group")
 
 
+def obs_image_size(starvla_model):
+    """The (height, width) a StarVLA checkpoint was trained at, from its config's datasets.vla_data.obs_image_size
+    (StarVLA's own predict_action reads it there), or None."""
+    cfg = getattr(starvla_model, "config", None)
+    vla_data = getattr(getattr(cfg, "datasets", None), "vla_data", None) if cfg is not None else None
+    size = getattr(vla_data, "obs_image_size", None) if vla_data is not None else None
+    if size is None:
+        return None
+    try:
+        values = [int(v) for v in size]
+    except (TypeError, ValueError):
+        return None
+    return (values[0], values[1]) if len(values) == 2 else None
+
+
+def patch_vlm_preprocess(module) -> None:
+    original = module.get_train_image_size
+    if getattr(original, "downstream_obs_image_size", False):
+        return
+
+    def get_train_image_size(starvla_model):
+        size = original(starvla_model)
+        return size if size else obs_image_size(starvla_model)
+
+    get_train_image_size.downstream_obs_image_size = True
+    module.get_train_image_size = get_train_image_size
+    _note(module.__name__, patch="get_train_image_size falls back to datasets.vla_data.obs_image_size")
+
+
 HOOKS = {"robocasa.models.fixtures.counter": patch_counter,
          "rlinf.hybrid_engines.fsdp.fsdp_model_manager": patch_fsdp_manager}
+if os.environ.get("DOWNSTREAM_RL_IMAGE_SIZE_FIX", "1") != "0":
+    HOOKS["rlinf.models.embodiment.starvla.utils.vlm_preprocess"] = patch_vlm_preprocess
 
 
 class PostImportHook(importlib.abc.MetaPathFinder):

@@ -118,3 +118,32 @@ def test_overrides_file_holds_the_three_smoke_settings():
                      "++actor.fsdp_config.wrap_policy.transformer_layer_cls_to_wrap="
                      "[Qwen2_5_VLDecoderLayer,Qwen2_5_VLVisionBlock]",
                      "actor.fsdp_config.gradient_checkpointing=true"]
+
+
+def test_image_size_patch_falls_back_to_obs_image_size(tmp_path, monkeypatch):
+    """The user's decision 2 of 2026-10-31: RLinf's StarVLA wrapper read the training image size only from
+    image_size / default_image_resolution; StarVLA checkpoints keep it in obs_image_size."""
+    monkeypatch.setenv("DOWNSTREAM_RL_HOOK_LOG", str(tmp_path / "hooks.jsonl"))
+    site = load_site()
+    assert "rlinf.models.embodiment.starvla.utils.vlm_preprocess" in site.HOOKS
+
+    def ns(**kw):
+        return types.SimpleNamespace(**kw)
+
+    def model(**vla):
+        return ns(config=ns(datasets=ns(vla_data=ns(**vla))))
+
+    module = types.ModuleType("rlinf.models.embodiment.starvla.utils.vlm_preprocess")
+    module.get_train_image_size = lambda m: getattr(m.config.datasets.vla_data, "image_size", None)
+    site.patch_vlm_preprocess(module)
+    assert module.get_train_image_size(model(obs_image_size=[224, 224])) == (224, 224)  # ours: the fallback
+    assert module.get_train_image_size(model(image_size=(192, 192), obs_image_size=[224, 224])) == (192, 192)
+    assert module.get_train_image_size(model()) is None
+    assert module.get_train_image_size(ns(config=None)) is None
+    patched = module.get_train_image_size
+    site.patch_vlm_preprocess(module)  # a second time changes nothing
+    assert module.get_train_image_size is patched
+    assert "obs_image_size" in (tmp_path / "hooks.jsonl").read_text()
+
+    monkeypatch.setenv("DOWNSTREAM_RL_IMAGE_SIZE_FIX", "0")  # the control run of the check leaves it out
+    assert "rlinf.models.embodiment.starvla.utils.vlm_preprocess" not in load_site().HOOKS
