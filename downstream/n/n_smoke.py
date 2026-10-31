@@ -3,8 +3,13 @@
 images, the success-pose images and the judge's numbers): instances of the upstream projective task ("Move so that
 the A appears to the left / right of the B in your view.") in RoboCasa scenes, each proven solvable.
 
-    python downstream/n/n_smoke.py generate --x0 X0_QUESTIONS.jsonl --out GEN --part I/K   # simulator Python
+    python downstream/n/n_smoke.py generate --x0 X0_QUESTIONS.jsonl --out GEN --part I/K [--hide-robot]  # simulator
     python downstream/n/n_smoke.py page --gen GEN1 [GEN2 ...] --n 20 --out PAGE.html
+    python downstream/n/n_smoke.py views --scenes TASK:SEED ... --out VIEWS.html                     # simulator
+
+--hide-robot (2026-10-31): camera A's renders leave the robot out (n_env.Scene hide_robot; the first smoke showed
+the arm in the middle of every frame).  views: each scene's start view with the robot drawn and left out, side by
+side, with the share of the segmentation image the robot covers.
 
 generate, per scene (X0's scenes in order, every K-th from the I-th; reset as the closed-loop evaluation does):
   1. camera A placed and checked against the upstream camera pose (n_env.Scene.camera_matches);
@@ -157,10 +162,10 @@ def generate(args) -> int:
             if found >= args.per_part or (task, seed) in done:
                 continue
             t0 = time.time()
-            rec = {"task": task, "seed": seed}
+            rec = {"task": task, "seed": seed, "hide_robot": bool(getattr(args, "hide_robot", False))}
             scene = None
             try:
-                scene = N.Scene(task, seed)
+                scene = N.Scene(task, seed, hide_robot=rec["hide_robot"])
                 rec["camera_check"] = scene.camera_matches(scene.start)
                 rec["entities"] = len(scene.entities)
                 reach = reachable(scene)
@@ -278,14 +283,61 @@ def page(args) -> int:
              "figure{margin:0;flex:1 1 300px;min-width:0}img{width:100%;max-width:512px;height:auto;border:1px solid var(--line)}"
              "figcaption,.meta{color:var(--muted);font-size:13px}.desc{border-left:3px solid var(--accent);padding-left:10px}</style>")
     n_scenes = len(recs)
+    hidden = any(r.get("hide_robot") for r in recs)
+    robot_txt = "渲染时不画机器人（它仍参与碰撞）" if hidden else "画面里有机器人自己的手臂和机身"
     intro = (f"<h1>N 冒烟：左右关系 {len(inst)} 个实例</h1><p class=\"meta\">在 {n_scenes} 个 RoboCasa 场景里找实例（X0 的场景，"
              "评测种子），每个都用上游的动作（前后左右 0.3 米、左右转 20°）从起点做广度优先搜索，确认能到达成功位姿；"
              "判定是主线的投影判定和 45° 规则，可见性按你定的改成分割图（A、B 各占画面至少 0.3%）。相机 A：离地 1.5 米、水平、"
-             "水平视场 90°。</p>")
+             f"水平视场 90°；{robot_txt}。</p>")
     Path(args.out).write_text(f"<title>N 冒烟样例</title><meta name=\"claude:viewport-fit-sides\" content=\"cover\">"
                               f"{style}{intro}{''.join(rows)}", encoding="utf-8")
     print(json.dumps({"scenes": n_scenes, "instances": len(inst),
                       "errors": sum(1 for r in recs if r.get("error"))}))
+    return 0
+
+
+def views(args) -> int:
+    """Camera A at each scene's start with the robot drawn and with it left out, side by side; the share of the
+    segmentation image the robot covers in each.  Writes OUT and OUT's folder/views/<scene>_{shown,hidden}.png."""
+    import numpy as np
+    from PIL import Image
+
+    sys.path.insert(0, str(HERE.parents[1]))
+    from downstream.eval import closed_loop
+
+    closed_loop.stable_counter_regions()
+    out = Path(args.out)
+    imgdir = out.parent / "views"
+    imgdir.mkdir(parents=True, exist_ok=True)
+    stats, rows = [], []
+    for spec in args.scenes:
+        task, seed = spec.rsplit(":", 1)
+        scene = N.Scene(task, int(seed))
+        try:
+            share = {}
+            for hide in (False, True):
+                scene.hide_robot = hide
+                img, seg = scene.render(scene.start)
+                share[hide] = float(np.isin(seg, scene.robot_ids).mean())
+                Image.fromarray(img).save(imgdir / f"{task}_s{seed}_{'hidden' if hide else 'shown'}.png")
+        finally:
+            scene.close()
+        stats.append({"task": task, "seed": int(seed), "robot_share_shown": share[False],
+                      "robot_share_hidden": share[True]})
+        rows.append(f'<section><h2>{html.escape(task)} · 种子 {seed}</h2><div class="imgs">'
+                    f'<figure><img src="{b64(imgdir / f"{task}_s{seed}_shown.png")}" alt="画机器人">'
+                    f'<figcaption>现在（画机器人）：机器人占分割图 {share[False]:.1%}</figcaption></figure>'
+                    f'<figure><img src="{b64(imgdir / f"{task}_s{seed}_hidden.png")}" alt="不画机器人">'
+                    f'<figcaption>不画机器人：机器人占分割图 {share[True]:.1%}</figcaption></figure></div></section>')
+    style = ("<style>body{font:15px/1.6 system-ui,'PingFang SC','Noto Sans CJK SC',sans-serif;max-width:1040px;"
+             "margin:0 auto;padding-block:24px;padding-left:max(16px,env(safe-area-inset-left,0px));"
+             "padding-right:max(16px,env(safe-area-inset-right,0px));background:#fbfaf7;color:#1d1d1b}"
+             ".imgs{display:flex;flex-wrap:wrap;gap:12px}figure{margin:0;flex:1 1 300px;min-width:0}"
+             "img{width:100%;max-width:512px;height:auto}figcaption{color:#6b6a65;font-size:13px}</style>")
+    out.write_text(f"<title>相机 A 对比</title><meta name=\"claude:viewport-fit-sides\" content=\"cover\">{style}"
+                   "<h1>相机 A：画不画机器人</h1>" + "".join(rows), encoding="utf-8")
+    (out.with_suffix(".json")).write_text(json.dumps(stats, indent=1) + "\n")
+    print(json.dumps(stats))
     return 0
 
 
@@ -297,13 +349,17 @@ def main(argv=None) -> int:
     g.add_argument("--out", required=True)
     g.add_argument("--part", default=None)
     g.add_argument("--per-part", type=int, default=3, help="stop after this many instances")
+    g.add_argument("--hide-robot", action="store_true", help="camera A's renders leave the robot out")
+    v = sub.add_parser("views")
+    v.add_argument("--scenes", nargs="+", required=True, help="TASK:SEED ...")
+    v.add_argument("--out", required=True)
     p = sub.add_parser("page")
     p.add_argument("--gen", nargs="+", required=True)
     p.add_argument("--n", type=int, default=20)
     p.add_argument("--episodes", default=None, help="n_episode.py's episodes.jsonl: add each instance's episode")
     p.add_argument("--out", required=True)
     args = ap.parse_args(argv)
-    return {"generate": generate, "page": page}[args.cmd](args)
+    return {"generate": generate, "page": page, "views": views}[args.cmd](args)
 
 
 if __name__ == "__main__":

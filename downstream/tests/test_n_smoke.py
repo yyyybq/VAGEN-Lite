@@ -1,6 +1,8 @@
 """N series smoke (downstream/n, 2026-10-30): the upstream actions on base poses, camera A's upstream pose, the
 upstream judge on a hand-made left/right scene (needs the main checkout), the segmentation shares, the breadth-first
-search and the instance choice on a stand-in scene."""
+search and the instance choice on a stand-in scene; 2026-10-31: the robot left out of camera A's renders, and the job
+script's per-part time limit and comparison views."""
+import json
 import math
 import random
 import sys
@@ -108,3 +110,76 @@ def test_instance_needs_two_actions_and_a_start_that_fails(monkeypatch):
     inst = S.find_instance(sc, st, random.Random(0))
     assert inst is not None and inst["depth"] == 2 and inst["path"] == ["move_forward", "move_forward"]
     assert inst["success_pose"][0] == pytest.approx(0.6) and inst["start_judge"]["success"] is False
+
+
+def test_robot_hidden_moves_the_robot_out_of_the_drawn_groups_and_back():
+    """2026-10-31: the first smoke showed the arm in the middle of every camera A frame (camera and arm ride on the
+    same base); hide_robot renders without the robot's geoms (they still collide)."""
+    from types import SimpleNamespace
+
+    class Sim:
+        _render_context_offscreen = None
+
+        def render(self, **kw):  # robosuite makes the offscreen context on the first render
+            if self._render_context_offscreen is None:
+                self._render_context_offscreen = SimpleNamespace(
+                    vopt=SimpleNamespace(geomgroup=np.array([1, 1, 1, 0, 0, 1], dtype=np.uint8)))
+
+    sim, model = Sim(), SimpleNamespace(geom_group=np.array([0, 1, 1, 0, 2]))
+    ids = np.array([1, 3])
+    with N.robot_hidden(sim, model, ids):
+        assert model.geom_group.tolist() == [0, 5, 1, 5, 2]
+        assert sim._render_context_offscreen.vopt.geomgroup[N.HIDE_GROUP] == 0
+    assert model.geom_group.tolist() == [0, 1, 1, 0, 2]
+    assert sim._render_context_offscreen.vopt.geomgroup[N.HIDE_GROUP] == 1
+    with pytest.raises(RuntimeError):
+        with N.robot_hidden(sim, model, ids):
+            raise RuntimeError("render failed")
+    assert model.geom_group.tolist() == [0, 1, 1, 0, 2]  # put back after an error too
+    with N.robot_hidden(sim, model, ids, hide=False):
+        assert model.geom_group.tolist() == [0, 1, 1, 0, 2]
+
+
+STUB = """import json, sys, time
+from pathlib import Path
+cmd = sys.argv[1]
+out = Path(sys.argv[sys.argv.index("--out") + 1])
+with open(out.parent / "calls.jsonl" if cmd != "generate" else out / "calls.jsonl", "a") as f:
+    f.write(json.dumps(sys.argv[1:]) + "\n")
+if cmd == "generate":
+    if sys.argv[sys.argv.index("--part") + 1].startswith("2/"):
+        time.sleep(60)  # a hung part
+    (out / "instances.jsonl").write_text(json.dumps({"task": "T", "seed": 1, "instance": {}}) + "\n")
+else:
+    out.write_text("<p>page</p>")
+"""
+
+
+def test_smoke_job_kills_a_hung_part_hides_the_robot_and_makes_the_views(tmp_path):
+    import os
+    import shutil
+    import subprocess
+
+    from test_run_probe_episode import SIM_ENV
+
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    (wt / "downstream/eval").mkdir(parents=True)
+    shutil.copy(ROOT / "n/run_n_smoke.sh", wt / "downstream/n/run_n_smoke.sh")
+    (wt / "downstream/n/n_smoke.py").write_text(STUB)
+    (wt / "downstream/eval/sim_env.sh").write_text(SIM_ENV)
+    (tmp_path / "x0.jsonl").write_text("")
+    out = tmp_path / "out"
+    env = dict(os.environ, N_X0=str(tmp_path / "x0.jsonl"), HIDE_ROBOT="1", PART_TIMEOUT="3",
+               VIEWS_SCENES="CoffeeSetupMug:1012 PreSoakPan:1013")
+    res = subprocess.run(["bash", str(wt / "downstream/n/run_n_smoke.sh"), str(out), "3", "1"], capture_output=True,
+                         text=True, env=env, timeout=50)
+    assert res.returncode == 0, res.stdout + res.stderr
+    log = (out / "n_smoke.log").read_text()
+    assert "part 2 rc=137" in log and "part 1 rc=0" in log and "page rc=0" in log and "views rc=0" in log
+    gen = json.loads((out / "gen/part1/calls.jsonl").read_text().splitlines()[0])
+    assert "--hide-robot" in gen and gen[gen.index("--x0") + 1] == str(tmp_path / "x0.jsonl")
+    calls = [json.loads(x) for x in (out / "calls.jsonl").read_text().splitlines()]
+    views = next(c for c in calls if c[0] == "views")
+    assert views[views.index("--scenes") + 1: views.index("--out")] == ["CoffeeSetupMug:1012", "PreSoakPan:1013"]
+    assert (out / "page.html").is_file() and (out / "views.html").is_file()

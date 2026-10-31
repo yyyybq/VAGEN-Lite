@@ -13,6 +13,10 @@ environment (gym.make('robocasa/<task>', split='target', seed=s) reset as the cl
   the floor straight over the rotation axis, level, looking along the heading, rendered at 320 x 240 with a vertical
   field of view of 73.74 degrees (90 degrees horizontally) and resized to 256 x 256: the geometry of the upstream
   canonical H1 camera (native K fx = fy = 320, 640 x 480, resized to 256 x 256).
+  hide_robot (2026-10-31, after the smoke showed the arm in the middle of every frame: the camera rides on the same
+  base): camera A's renders, RGB and segmentation alike, leave out the robot's geoms (they are moved to geom group
+  HIDE_GROUP, which the renderer is told not to draw, and put back after the render), as the upstream camera has no
+  body; collisions still use them.
 * Collision: after a move, any contact deeper than 1 mm between a robot geom (robot0_*, mobilebase0_*, gripper0_*)
   and anything but the floor blocks it (the pose goes back); the feedback names the other geom's entity.
 * Entities: X0's (objects by category, compact fixtures); a box is the union of its visible geoms' world boxes
@@ -26,6 +30,7 @@ environment (gym.make('robocasa/<task>', split='target', seed=s) reset as the cl
 """
 from __future__ import annotations
 
+import contextlib
 import importlib
 import math
 import sys
@@ -44,6 +49,7 @@ FOVY_DEG = math.degrees(2 * math.atan(RENDER_H / RENDER_W))  # 73.74: 90 degrees
 OUT_SIZE = 256
 MIN_VISIBLE_FRACTION = 0.003  # the upstream MIN_FACE_AREA_FRACTION, on the segmentation image
 ROBOT_PREFIXES = ("robot0_", "mobilebase0_", "gripper0_")
+HIDE_GROUP = 5  # the geom group the robot is moved to while camera A renders with hide_robot (not drawn then)
 FLOOR_PREFIXES = ("floor_",)
 PENETRATION_M = 1e-3
 ACTIONS = ("move_forward", "move_backward", "move_left", "move_right", "turn_left", "turn_right")
@@ -143,10 +149,32 @@ def visible_fractions(seg_ids, entities_geoms: dict) -> dict:
 
 
 # ------------------------------------------------------------------------------------------- simulator side
+@contextlib.contextmanager
+def robot_hidden(sim, model, robot_ids, hide: bool = True):
+    """While the block runs, the robot's geoms are in HIDE_GROUP and the offscreen renderer (robosuite's MjSim keeps
+    one, made by its first render) draws no geom of that group; both are put back afterwards.  No-op unless hide."""
+    if not hide or len(robot_ids) == 0:
+        yield
+        return
+    ctx = getattr(sim, "_render_context_offscreen", None)
+    if ctx is None:  # robosuite makes the context on the first render
+        sim.render(camera_name=CAM_NAME, width=8, height=8)
+        ctx = sim._render_context_offscreen
+    groups = model.geom_group[robot_ids].copy()
+    drawn = int(ctx.vopt.geomgroup[HIDE_GROUP])
+    model.geom_group[robot_ids] = HIDE_GROUP
+    ctx.vopt.geomgroup[HIDE_GROUP] = 0
+    try:
+        yield
+    finally:
+        model.geom_group[robot_ids] = groups
+        ctx.vopt.geomgroup[HIDE_GROUP] = drawn
+
+
 class Scene:
     """One reset RoboCasa scene with the base, camera A and the entities (see the module text)."""
 
-    def __init__(self, task: str, seed: int, split: str = "target"):
+    def __init__(self, task: str, seed: int, split: str = "target", hide_robot: bool = False):
         import gymnasium as gym
         import mujoco
         import numpy as np
@@ -154,7 +182,7 @@ class Scene:
 
         import x0_qa
 
-        self.task, self.seed = task, seed
+        self.task, self.seed, self.hide_robot = task, seed, bool(hide_robot)
         self.env = gym.make(f"robocasa/{task}", enable_render=True, split=split, seed=seed)
         self.env.reset(seed=seed)
         self.k = self.env.unwrapped.env
@@ -176,6 +204,7 @@ class Scene:
         names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, g) or "" for g in range(m.ngeom)]
         self.geom_names = names
         self.robot = np.array([n.startswith(ROBOT_PREFIXES) for n in names])
+        self.robot_ids = np.flatnonzero(self.robot)
         self.floor = np.array([n.startswith(FLOOR_PREFIXES) for n in names])
         self.cam = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, CAM_NAME)
         self.start = self.pose()
@@ -273,8 +302,10 @@ class Scene:
         np = self.np
         if pose is not None:
             self.set_pose(pose)
-        rgb = self.k.sim.render(camera_name=CAM_NAME, width=RENDER_W, height=RENDER_H)
-        seg = np.asarray(self.k.sim.render(camera_name=CAM_NAME, width=RENDER_W, height=RENDER_H, segmentation=True))
+        with robot_hidden(self.k.sim, self.m, self.robot_ids, self.hide_robot):
+            rgb = self.k.sim.render(camera_name=CAM_NAME, width=RENDER_W, height=RENDER_H)
+            seg = np.asarray(self.k.sim.render(camera_name=CAM_NAME, width=RENDER_W, height=RENDER_H,
+                                               segmentation=True))
         geom = np.where(seg[..., 0] == 5, seg[..., 1], -1) if seg.ndim == 3 else seg
         img = Image.fromarray(np.ascontiguousarray(np.asarray(rgb)[::-1])).resize((OUT_SIZE, OUT_SIZE), Image.BILINEAR)
         return np.asarray(img), np.ascontiguousarray(geom[::-1])
