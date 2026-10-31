@@ -25,6 +25,11 @@ instances of n_gen.py collect (GEN/instances_eval.jsonl, one per line, keyed by 
 part files; each episode renders camera A with or without the robot as its instance was made (hide_robot), and also
 records the highest upstream shaping score reached (the box judge's, after the start and every executed action) and
 the numbers behind the gates at the end.
+Each episode runs in its own process forked from the main one (which has the simulator modules imported already):
+it writes its record to OUT/rows/<instance>.json and leaves with os._exit, never closing the environment, since
+RoboCasa's env.close() and the finalizers that free the same OSMesa context can hang for good (the closed-loop
+evaluation saw it, and N1's trial generation in 6 of 12 scenes).  An episode past --timeout seconds (default 900) is
+killed and recorded as an error.
 """
 from __future__ import annotations
 
@@ -34,10 +39,12 @@ import dataclasses
 import io
 import json
 import multiprocessing as mp
+import os
 import socket
 import struct
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -245,19 +252,27 @@ def strip_image(frames, size: int = 128):
 
 
 _W = {}
+EPISODE_TIMEOUT = 900.0
 
 
 def _init(port: int):
+    """In the main process, before any episode is forked: the counter-region fix, the model client, the upstream
+    config, and the simulator modules imported once (the forked episodes start with them)."""
     from downstream.eval import closed_loop
 
     closed_loop.stable_counter_regions()
     _W["ask"] = asker(port)
     _W["cfg"], _W["entry"] = upstream_config()
+    import gymnasium  # noqa: F401
+    import mujoco  # noqa: F401
+    import robocasa.wrappers.gym_wrapper  # noqa: F401
+
+    import x0_qa  # noqa: F401
 
 
 def _one(job):
+    """One episode in this process (the environment is left open: see the module text)."""
     inst, out = job
-    scene = None
     t0 = time.time()
     try:
         scene = N.Scene(inst["task"], inst["seed"], hide_robot=bool(inst.get("hide_robot", False)))
@@ -269,11 +284,63 @@ def _one(job):
 
         rec = {"instance_id": inst_id(inst), "scene_id": inst.get("scene_id"), "task_type": inst.get("task_type"),
                "error": f"{type(exc).__name__}: {exc}"[:400], "traceback": traceback.format_exc()[-1500:]}
-    finally:
-        if scene is not None:
-            scene.close()
     rec["seconds"] = round(time.time() - t0, 1)
     return rec
+
+
+def row_file(out, inst) -> Path:
+    return Path(out) / "rows" / f"{inst_id(inst)}.json"
+
+
+def _episode_process(inst, out, run=None) -> None:
+    """The forked child: one episode, its record written to OUT/rows/<instance>.json, then os._exit (no close, no
+    finalizers)."""
+    code = 1
+    try:
+        rec = (run or _one)((inst, out))
+        path = row_file(out, inst)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(rec, default=str) + "\n")
+        os.replace(tmp, path)
+        code = 0
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
+
+
+def run_all(todo, out, workers: int, timeout: float = EPISODE_TIMEOUT, run=None, poll: float = 0.5):
+    """Each instance's episode in its own forked process, at most `workers` at once; yields every record as it is
+    done.  A process past `timeout` seconds is killed; an episode without a record (killed, or its process died) gets
+    an error record."""
+    ctx = mp.get_context("fork")
+    queue, running = deque(todo), {}
+    while queue or running:
+        while queue and len(running) < workers:
+            inst = queue.popleft()
+            p = ctx.Process(target=_episode_process, args=(inst, str(out), run))
+            p.start()
+            running[inst_id(inst)] = (inst, p, time.time())
+        for iid, (inst, p, t0) in list(running.items()):
+            late = time.time() - t0 > timeout
+            if p.is_alive() and not late:
+                continue
+            if p.is_alive():
+                p.kill()
+            p.join()
+            path = row_file(out, inst)
+            if path.is_file():
+                rec = json.loads(path.read_text())
+                path.unlink()
+            else:
+                why = f"killed after {timeout:.0f} s" if late else f"its process ended with code {p.exitcode}"
+                rec = {"instance_id": iid, "scene_id": inst.get("scene_id"), "task_type": inst.get("task_type"),
+                       "error": f"no record: {why}", "seconds": round(time.time() - t0, 1)}
+            del running[iid]
+            yield rec
+        if running:
+            time.sleep(poll)
 
 
 def load_instances(paths, limit: int):
@@ -299,6 +366,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--limit", type=int, default=20)
+    ap.add_argument("--timeout", type=float, default=EPISODE_TIMEOUT, help="seconds an episode may take")
     args = ap.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -306,13 +374,13 @@ def main(argv=None) -> int:
     if (out / "episodes.jsonl").is_file():
         done = {inst_id(json.loads(x)) for x in (out / "episodes.jsonl").read_text().splitlines() if x.strip()}
     todo = [i for i in load_instances(args.instances, args.limit) if inst_id(i) not in done]
-    ctx = mp.get_context("spawn")
-    with ctx.Pool(args.workers, initializer=_init, initargs=(args.port,)) as pool, open(out / "episodes.jsonl", "a") as f:
-        for rec in pool.imap_unordered(_one, [(i, str(out)) for i in todo]):
+    _init(args.port)
+    with open(out / "episodes.jsonl", "a") as f:
+        for rec in run_all(todo, out, args.workers, args.timeout):
             f.write(json.dumps(rec, default=str) + "\n")
             f.flush()
             print(f"[n_episode] {rec.get('instance_id')}: success={rec.get('success')} turns={rec.get('turns')} "
-                  f"{rec.get('error', '')}", flush=True)
+                  f"({rec.get('seconds')} s) {rec.get('error', '')}", flush=True)
     return 0
 
 

@@ -25,7 +25,9 @@ scene (one process per scene; run_n_gen.sh kills it after the scene's time limit
      instance's near_threshold (empty = it can be done with room to spare).  One instance per task type and scene;
      past --soft-limit seconds no new candidate is started.
   Writes GEN/scenes/<task>_s<seed>.json after every task type ("complete" once all six are done; a killed process
-  leaves the types it finished), and GEN/images/<task>_s<seed>_<type>_{start,shortest,best}.png (camera A).
+  leaves the types it finished), and GEN/images/<task>_s<seed>_<type>_{start,shortest,best}.png (camera A).  The
+  process then leaves with os._exit without closing the environment (RoboCasa's env.close() can hang for good: 6 of
+  the trial's 12 scenes did).
 collect: --per-family instances per type from the scene files, the tasks taken in turn in a seeded order (each type
   spreads over the tasks); writes GEN/instances_eval.jsonl (one instance per line: the episode runner's input) and
   GEN/summary.json (per type: instances found / taken, tasks, near-threshold count, parameters, shortest actions;
@@ -251,11 +253,15 @@ def scene_cmd(args) -> int:
 
         rec["error"] = f"{type(exc).__name__}: {exc}"[:400]
         rec["traceback"] = traceback.format_exc()[-1500:]
-    finally:
-        if scene is not None:
-            scene.close()
     rec["seconds"] = round(time.time() - t0, 1)
     write_json(path, rec)
+    # 2026-10-31: RoboCasa's env.close() (and the finalizers that free the same OSMesa context) can hang for good
+    # after a finished scene, as in the closed-loop evaluation; the trial's processes did it in 6 of 12 scenes.  The
+    # record is written, so the process leaves without closing or running finalizers; the OS frees everything.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if scene is not None:
+        os._exit(0)
     return 0
 
 

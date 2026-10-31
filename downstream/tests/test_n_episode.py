@@ -145,3 +145,27 @@ def test_a_wall_blocks_the_feedback_says_so_and_three_bad_replies_end_it(monkeyp
 def test_step_budget_ends_the_episode(monkeypatch):
     rec, _, _ = run(monkeypatch, ["move_left,move_right,move_left,move_right,move_left"])
     assert rec["end"] == "steps" and rec["steps"] == 12 and not rec["success"]
+
+
+def test_each_episode_runs_in_its_own_process_late_ones_are_killed_and_dead_ones_recorded(tmp_path):
+    """2026-10-31: env.close() can hang for good after an episode, so each episode is a forked process that writes its
+    record and leaves with os._exit; the parent kills one past the time limit and records a missing record."""
+    import os
+    import time
+
+    def run_one(job):
+        inst, out = job
+        if inst["instance_id"] == "hangs":
+            time.sleep(60)
+        if inst["instance_id"] == "dies":
+            raise RuntimeError("simulator crashed")
+        return {"instance_id": inst["instance_id"], "success": True, "seconds": 0.1, "pid": os.getpid()}
+
+    todo = [{"instance_id": k, "scene_id": "T_s1", "task_type": "fov_inclusion"} for k in ("ok", "hangs", "dies", "ok2")]
+    t0 = time.time()
+    recs = {r["instance_id"]: r for r in E.run_all(todo, tmp_path, workers=3, timeout=3, run=run_one, poll=0.1)}
+    assert time.time() - t0 < 30 and set(recs) == {"ok", "hangs", "dies", "ok2"}
+    assert recs["ok"]["success"] is True and recs["ok"]["pid"] != os.getpid() and recs["ok"]["pid"] != recs["ok2"]["pid"]
+    assert recs["hangs"]["error"] == "no record: killed after 3 s" and recs["hangs"]["task_type"] == "fov_inclusion"
+    assert recs["dies"]["error"] == "no record: its process ended with code 1"
+    assert not list((tmp_path / "rows").glob("*"))  # every record moved into the caller's hands
