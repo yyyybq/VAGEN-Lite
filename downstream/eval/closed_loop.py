@@ -312,10 +312,33 @@ def run_episode(spec: dict) -> dict:
     finally:
         _STATE["marker"] = None
         if marker is not None:
-            try:
-                marker.unlink()
-            except OSError:
-                pass
+            for p in (marker, row_path(marker)):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+
+def row_path(marker: Path) -> Path:
+    """INFLIGHT/<pid>.row.json beside the marker INFLIGHT/<pid>.json: the episode's row, saved before env.close()."""
+    marker = Path(marker)
+    return marker.with_name(marker.stem + ".row.json")
+
+
+def _save_before_close(out: dict) -> None:
+    """The finished episode's row goes to row_path(marker) and the marker gets "closing" (now) before env.close(),
+    which can hang (2026-10-31: in OSMesa's context free, mujoco/osmesa via robosuite's _destroy_sim; the full-load
+    probe of 450 episodes found 5 stuck there until the watchdog killed them 30 minutes later, and each was run
+    again).  run_all then kills a close that takes longer than CLOSE_SECONDS and keeps the saved row."""
+    marker = _STATE.get("marker")
+    if marker is None:
+        return
+    try:
+        row_path(marker).write_text(json.dumps(out, default=str))
+        info = json.loads(Path(marker).read_text())
+        Path(marker).write_text(json.dumps(dict(info, closing=time.time())))
+    except (OSError, ValueError):  # the row is only a safeguard; the episode goes on to close as before
+        pass
 
 
 def _heartbeat(every: float = 15.0) -> None:
@@ -398,6 +421,7 @@ def _run_episode(spec: dict) -> dict:
         out.update(status="error", error=f"{type(exc).__name__}: {exc}"[:500], traceback=traceback.format_exc()[-2000:])
     finally:
         if env is not None:
+            _save_before_close(dict(out, wall_seconds=round(time.monotonic() - started, 2)))
             env.close()
         if probe:
             probe.close()
@@ -432,6 +456,9 @@ def hang_limit(max_steps) -> float:
 STALL_SECONDS = float(os.environ.get("CLOSED_LOOP_STALL_SECONDS", "600"))  # no progress (policy call) for this
 # long: hung.  A policy call comes every 16 control steps (13 s at 0.81 s per step); the longest gap is the scene build
 # and reset at the start, up to about 2 minutes measured.  The variable only changes for the diagnostics run.
+
+CLOSE_SECONDS = float(os.environ.get("CLOSED_LOOP_CLOSE_SECONDS", "120"))  # an env.close() after the episode's
+# row was saved (_save_before_close) that takes longer than this is killed and the saved row kept (2026-10-31)
 
 PROBE_DIR = os.environ.get("CLOSED_LOOP_PROBE_DIR")  # diagnostics of a hanging episode (2026-10-30), default off
 PROBE_DUMP_SECONDS = float(os.environ.get("CLOSED_LOOP_STALL_DUMP", "120"))
@@ -572,15 +599,20 @@ class MemoryMonitor:
 
 
 def run_all(pool, episodes, write, inflight: Path, retries: int = 2, poll: float = 30.0, alive=pid_alive,
-            now=time.time, kill=os.kill, sleep=time.sleep, run=None, monitor=None) -> dict:
+            now=time.time, kill=os.kill, sleep=time.sleep, run=None, monitor=None,
+            close_seconds: float = CLOSE_SECONDS) -> dict:
     """Run every episode on `pool` (apply_async), passing each finished row to write().  A worker process that dies
     (killed for memory, a simulator crash) loses its episode: multiprocessing replaces the worker but never reports
     the task.  Every `poll` seconds the INFLIGHT markers are read; an episode whose worker is dead is run again (at
     most `retries` times, then recorded as an error), and a worker that hung() (no policy call for STALL_SECONDS, or
-    longer than hang_limit() in all) is killed first.  Returns counts of the retries, kills and episodes given up."""
+    longer than hang_limit() in all) is killed first.  A worker whose marker says "closing" (its row saved before
+    env.close(), _save_before_close) for longer than close_seconds is killed, and the saved row is written instead of
+    running the episode again (2026-10-31).  Returns counts of the retries, kills, recovered rows and episodes given
+    up."""
     run = run or run_episode
     key = lambda e: (e["task"], e["seed"])  # noqa: E731
-    pending, tries, stats = {}, {}, {"retried": 0, "killed_hung": 0, "given_up": 0}
+    pending, tries = {}, {}
+    stats = {"retried": 0, "killed_hung": 0, "given_up": 0, "killed_closing": 0, "recovered": 0}
 
     def submit(e):
         pending[key(e)] = (e, pool.apply_async(run, (e,)))
@@ -597,12 +629,21 @@ def run_all(pool, episodes, write, inflight: Path, retries: int = 2, poll: float
                     row = dict(e, status="error", error=f"{type(exc).__name__}: {exc}"[:500], wall_seconds=0.0)
                 write(row)
         for m in sorted(Path(inflight).glob("*.json")):
+            if m.name.endswith(".row.json"):
+                continue
             try:
                 pid, info, mtime = int(m.stem), json.loads(m.read_text()), m.stat().st_mtime
             except (OSError, ValueError):
                 continue
             if alive(pid):
-                if hung(info, mtime, now()):
+                closing = info.get("closing")
+                if closing is not None and now() - float(closing) > close_seconds:
+                    try:
+                        kill(pid, 9)
+                        stats["killed_closing"] += 1
+                    except OSError:
+                        pass
+                elif hung(info, mtime, now()):
                     try:
                         kill(pid, 9)
                         stats["killed_hung"] += 1
@@ -614,7 +655,23 @@ def run_all(pool, episodes, write, inflight: Path, retries: int = 2, poll: float
             except OSError:
                 pass
             k = (info["task"], info["seed"])
+            saved = row_path(m)
+            row = None
+            if saved.is_file():
+                try:
+                    row = json.loads(saved.read_text())
+                except (OSError, ValueError):
+                    row = None
+                try:
+                    saved.unlink()
+                except OSError:
+                    pass
             if k not in pending or pending[k][1].ready():
+                continue
+            if row is not None and (row.get("task"), row.get("seed")) == k:
+                pending.pop(k)
+                stats["recovered"] += 1
+                write(dict(row, recovered="its worker hung in env.close() after the episode; the row was saved before"))
                 continue
             e = pending.pop(k)[0]
             tries[k] = tries.get(k, 0) + 1

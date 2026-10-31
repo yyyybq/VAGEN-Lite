@@ -34,6 +34,15 @@ class FakePool:
         what = self.script[(e["task"], e["seed"])].pop(0)
         if what == "ok":
             return Result(dict(e, status="complete", success=False, steps=10))
+        if what in ("closehang", "closedead"):  # the row saved, then env.close() hangs (or the worker died there)
+            self.pid += 1
+            marker = self.inflight / f"{self.pid}.json"
+            marker.write_text(json.dumps({"task": e["task"], "seed": e["seed"], "started": 1e9, "max_steps": 100,
+                                          "closing": 0.0}))
+            closed_loop.row_path(marker).write_text(json.dumps(dict(e, status="complete", success=True, steps=7)))
+            if what == "closedead":
+                self.dead.add(self.pid)
+            return Result()
         self.pid += 1
         started = 0.0 if what == "hang" else 1e9
         (self.inflight / f"{self.pid}.json").write_text(json.dumps({"task": e["task"], "seed": e["seed"],
@@ -62,7 +71,7 @@ def run(tmp_path, script, retries=2):
 def test_a_dead_worker_episode_runs_again(tmp_path):
     pool, rows, stats = run(tmp_path, {("A", 1): ["ok"], ("B", 2): ["die", "ok"]})
     assert sorted((r["task"], r["status"]) for r in rows) == [("A", "complete"), ("B", "complete")]
-    assert stats == {"retried": 1, "killed_hung": 0, "given_up": 0}
+    assert stats == {"retried": 1, "killed_hung": 0, "given_up": 0, "killed_closing": 0, "recovered": 0}
     assert ("B", 2, 1) in pool.calls and not list((tmp_path / "inflight").glob("*.json"))
 
 
@@ -70,12 +79,49 @@ def test_an_episode_that_keeps_killing_its_worker_is_given_up(tmp_path):
     pool, rows, stats = run(tmp_path, {("A", 1): ["ok"], ("C", 3): ["die", "die", "die"]})
     by = {r["task"]: r for r in rows}
     assert by["A"]["status"] == "complete" and by["C"]["status"] == "error" and "died 3 times" in by["C"]["error"]
-    assert stats == {"retried": 2, "killed_hung": 0, "given_up": 1}
+    assert stats == {"retried": 2, "killed_hung": 0, "given_up": 1, "killed_closing": 0, "recovered": 0}
 
 
 def test_a_hung_worker_is_killed_and_its_episode_run_again(tmp_path):
     pool, rows, stats = run(tmp_path, {("H", 4): ["hang", "ok"]})
     assert [r["status"] for r in rows] == ["complete"] and stats["killed_hung"] == 1 and stats["retried"] == 1
+
+
+def test_a_worker_stuck_closing_its_environment_is_killed_and_its_saved_row_kept(tmp_path):
+    """2026-10-31: env.close() hung in OSMesa's context free after 5 of 450 finished episodes of the full-load probe;
+    the watchdog killed each after 30 minutes and the episode ran again."""
+    pool, rows, stats = run(tmp_path, {("A", 1): ["ok"], ("S", 5): ["closehang"], ("D", 6): ["closedead"]})
+    by = {r["task"]: r for r in rows}
+    assert by["S"]["status"] == "complete" and by["S"]["success"] is True and "env.close()" in by["S"]["recovered"]
+    assert by["D"]["steps"] == 7 and "recovered" in by["D"] and "recovered" not in by["A"]
+    assert stats["killed_closing"] == 1 and stats["recovered"] == 2 and stats["retried"] == 0
+    assert [c for c in pool.calls if c[0] in ("S", "D")] == [("S", 5, 0), ("D", 6, 0)]  # never run again
+    assert not list((tmp_path / "inflight").iterdir())
+
+
+def test_the_row_is_saved_before_close_and_removed_after_a_clean_close(tmp_path, monkeypatch):
+    marker = tmp_path / "123.json"
+    marker.write_text(json.dumps({"task": "T", "seed": 1, "started": 5.0}))
+    monkeypatch.setitem(closed_loop._STATE, "marker", marker)
+    closed_loop._save_before_close({"task": "T", "seed": 1, "status": "complete"})
+    assert json.loads(closed_loop.row_path(marker).read_text())["status"] == "complete"
+    info = json.loads(marker.read_text())
+    assert info["task"] == "T" and info["started"] == 5.0 and info["closing"] > 0
+    monkeypatch.setitem(closed_loop._STATE, "marker", None)
+    closed_loop._save_before_close({"task": "T"})  # no marker: nothing to do
+
+    run_dir = tmp_path / "inflight"
+    run_dir.mkdir()
+    monkeypatch.setitem(closed_loop._STATE, "inflight", str(run_dir))
+
+    def fake(spec):
+        closed_loop._save_before_close({"task": spec["task"], "seed": spec["seed"]})
+        assert len(list(run_dir.glob("*.row.json"))) == 1
+        return {"status": "complete"}
+
+    monkeypatch.setattr(closed_loop, "_run_episode", fake)
+    assert closed_loop.run_episode({"task": "T", "seed": 1})["status"] == "complete"
+    assert not list(run_dir.iterdir())  # a clean close leaves neither the marker nor the row
 
 
 def test_hang_limit_and_completed_rows(tmp_path):
