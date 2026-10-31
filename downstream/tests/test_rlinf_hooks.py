@@ -133,8 +133,12 @@ def test_image_size_patch_falls_back_to_obs_image_size(tmp_path, monkeypatch):
     def model(**vla):
         return ns(config=ns(datasets=ns(vla_data=ns(**vla))))
 
+    def rlinf_original(m):  # RLinf's reading: image_size (or default_image_resolution), None without a config
+        vla = getattr(getattr(getattr(m, "config", None), "datasets", None), "vla_data", None)
+        return getattr(vla, "image_size", None)
+
     module = types.ModuleType("rlinf.models.embodiment.starvla.utils.vlm_preprocess")
-    module.get_train_image_size = lambda m: getattr(m.config.datasets.vla_data, "image_size", None)
+    module.get_train_image_size = rlinf_original
     site.patch_vlm_preprocess(module)
     assert module.get_train_image_size(model(obs_image_size=[224, 224])) == (224, 224)  # ours: the fallback
     assert module.get_train_image_size(model(image_size=(192, 192), obs_image_size=[224, 224])) == (192, 192)
