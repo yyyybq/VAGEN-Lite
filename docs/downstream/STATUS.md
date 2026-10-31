@@ -1,6 +1,6 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-10-31 02:05 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（进行中）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-10-31 02:05 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
@@ -31,7 +31,7 @@
 - **T2**（[报告](reports/T2_RESULTS_20261030.md)）：LoRA（30%，10 万步）B 12.6%、RS 13.3%，RS − B +0.7（p = 0.56）；比全量微调低 22–23 个百分点，比只训动作头高约 12 个百分点。
 - **10-28 任务书**（REFERENCE 第 0 节）：Qwen2.5 远迁移收口；新增 Q0、G0、N 系列、C1，四份设计已交，等你确认；T1 推迟、T2 只做 B 和 RS；Qwen3 闸门写进 REFERENCE。
 - **第一波诊断汇总**（[报告](reports/FIRST_WAVE_SUMMARY_20261029.md)）：主线起点在 RoboCasa 上没有稳定的好处；RS 在下游成功率上有小而方向一致的优势（9 个设定 7 个为正，+1.1 到 +3.7），单独显著的只有 E1 和 E2 10%；空间问答（X0）三个都显著更差，选对目标（X3）RD 更差。
-- **E3**（[报告](reports/E3_RESULTS_20261029.md)）：RL 后 B −0.9（p = 0.46）、RS +0.4（p = 0.81）、S −3.5（p = 0.004）、RD −3.1（p = 0.013），变差主要在 RL 没训的任务上；训练时采样回合的成功率只有 0%–2%，原因未核实。
+- **E3**（[报告](reports/E3_RESULTS_20261029.md)）：RL 后 B −0.9（p = 0.46）、RS +0.4（p = 0.81）、S −3.5（p = 0.004）、RD −3.1（p = 0.013），变差主要在 RL 没训的任务上；训练时采样回合的成功率只有 0%–2%，原因已查明：RLinf 没把画面缩到训练尺寸（见 E3 核查）。
 - **XE**（[报告](reports/XE_RESULTS_20261029.md)）：30% 数据训到 0.36 个 epoch 是 26.9%，和 100% 数据 0.36 个 epoch 的 26.8% 一样，比 30% 训到约 1.18 个 epoch 低 7.3：E2 里 30% 比 100% 好是因为训练轮数。
 - **X1、X2、X3、X5、T5**：报告 10-29 01:3x 已交（[X1](reports/X1_RESULTS_20261029.md)、[X2](reports/X2_RESULTS_20261029.md)、[X3](reports/X3_RESULTS_20261029.md)、[X5](reports/X5_RESULTS_20261029.md)、[T5](reports/T5_RESULTS_20261029.md)）。
 - **T 系列**：T5、T2 完成；T1 推迟；T3 / T4 等路径。
