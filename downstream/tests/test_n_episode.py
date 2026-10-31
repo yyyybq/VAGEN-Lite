@@ -1,6 +1,8 @@
 """N series episodes (downstream/n/n_episode.py, 2026-10-30): the upstream conversation text (needs the main
 checkout), the strict reading of replies, the feedback, the socket framing, and the turn loop on a stand-in scene
 (blocked moves, success mid-turn, three unreadable turns, the step budget)."""
+import json
+import os
 import socket
 import sys
 import threading
@@ -169,3 +171,55 @@ def test_each_episode_runs_in_its_own_process_late_ones_are_killed_and_dead_ones
     assert recs["hangs"]["error"] == "no record: killed after 3 s" and recs["hangs"]["task_type"] == "fov_inclusion"
     assert recs["dies"]["error"] == "no record: its process ended with code 1"
     assert not list((tmp_path / "rows").glob("*"))  # every record moved into the caller's hands
+
+
+SERVER_STUB = r"""import socket, sys, time
+port = int(sys.argv[sys.argv.index("--port") + 1])
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("127.0.0.1", port))
+s.listen(4); s.settimeout(1); end = time.time() + 30
+while time.time() < end:
+    try:
+        s.accept()[0].close()
+    except OSError:
+        pass
+"""
+EPISODE_STUB = r"""import json, sys
+from pathlib import Path
+out = Path(sys.argv[sys.argv.index("--out") + 1])
+(out / "argv.json").write_text(json.dumps(sys.argv[1:]))
+with open(out / "episodes.jsonl", "a") as f:
+    f.write(json.dumps({"instance_id": "a", "success": True}) + "\n")
+    f.write(json.dumps({"instance_id": "b", "success": False}) + "\n")
+"""
+
+
+def test_episode_job_takes_an_n1_instance_file(tmp_path):
+    """run_n_episodes.sh with N1's instance file: all instances (LIMIT 0), the given port, no smoke page; run as a
+    normal user it leaves ownership alone (as root it hands OUT back to OWNER_UID)."""
+    import shutil
+    import subprocess
+
+    from test_run_probe_episode import SIM_ENV, free_port
+
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    (wt / "downstream/eval").mkdir(parents=True)
+    shutil.copy(ROOT / "n/run_n_episodes.sh", wt / "downstream/n/run_n_episodes.sh")
+    (wt / "downstream/n/n_policy_server.py").write_text(SERVER_STUB)
+    (wt / "downstream/n/n_episode.py").write_text(EPISODE_STUB)
+    (wt / "downstream/n/n_smoke.py").write_text("raise SystemExit('the smoke page must not be made for N1')\n")
+    (wt / "downstream/eval/sim_env.sh").write_text(SIM_ENV)
+    gen = tmp_path / "instances_eval.jsonl"
+    gen.write_text('{"instance_id": "a"}\n{"instance_id": "b"}\n')
+    out = tmp_path / "out"
+    port = free_port()
+    env = dict(os.environ, N_VLM_PY=sys.executable, N_PORT=str(port), OWNER_UID="12345", OWNER_GID="12345")
+    res = subprocess.run(["bash", str(wt / "downstream/n/run_n_episodes.sh"), str(out), str(gen), "Q3B", "3", "0"],
+                         capture_output=True, text=True, env=env, timeout=60)
+    assert res.returncode == 0, res.stdout + res.stderr
+    argv = json.loads((out / "argv.json").read_text())
+    assert argv[argv.index("--instances") + 1] == str(gen) and argv[argv.index("--limit") + 1] == "0"
+    assert argv[argv.index("--port") + 1] == str(port) and argv[argv.index("--workers") + 1] == "3"
+    log = (out / "n_episodes.log").read_text()
+    assert "server ready (Q3B on" in log and "1 successes of 2" in log and "page rc" not in log
+    assert (out / "episodes.jsonl").stat().st_uid == os.getuid()  # not root: ownership untouched

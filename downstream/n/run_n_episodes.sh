@@ -6,6 +6,9 @@
 # Usage: run_n_episodes.sh OUT GEN MODEL [WORKERS] [LIMIT]
 #   GEN: the smoke's generation folder (GEN/part*/instances.jsonl; the review page is made too), or N1's instance file
 #   (n_gen.py collect's instances_eval.jsonl; LIMIT 0 = all).  N_PORT: the model server's port (default 5800).
+#   Qwen3 models: the job runs as the container's root (sco_job.prepare as_root; the Qwen3-VL base snapshot is readable
+#   by root only), and this script then gives everything under OUT back to OWNER_UID:OWNER_GID (default 20325) when
+#   it ends, as run_qa_batch.sh does.
 set -uo pipefail
 OUT="${1:?Usage: run_n_episodes.sh OUT GEN MODEL [WORKERS] [LIMIT]}"; GEN="${2:?}"; MODEL="${3:?}"
 WORKERS="${4:-4}"; LIMIT="${5:-20}"
@@ -19,7 +22,13 @@ export HF_HOME=/mnt/umm/users/yinbaiqiao/.cache/huggingface
 mkdir -p "$OUT"
 log() { echo "[n-episodes] $* $(date -u +%FT%TZ)" | tee -a "$OUT/n_episodes.log"; }
 PIDS=()
-cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"; }
+OWNER="${OWNER_UID:-20325}:${OWNER_GID:-20325}"
+cleanup() {
+  for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done
+  wait 2>/dev/null
+  rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"
+  if [[ $(id -u) -eq 0 ]]; then chown -R "$OWNER" "$OUT"; fi
+}
 trap cleanup EXIT
 CUDA_VISIBLE_DEVICES=0 "$VLM_PY" downstream/n/n_policy_server.py --model "$MODEL" --port "$PORT" > "$OUT/server.log" 2>&1 &
 PIDS+=($!)
