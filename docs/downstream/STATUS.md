@@ -1,6 +1,6 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-10-31 06:05 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 的 [C1 短任务](reports/C1_SHORT_20261031.md)（等你定正式任务）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)（等你定相机 A 画不画机器人）、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-10-31 07:20 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 的 [C1 短任务](reports/C1_SHORT_20261031.md)（等你定正式任务）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)（等你定相机 A 画不画机器人）、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
@@ -58,9 +58,13 @@
 - **X1、X2、X3、X5、T5**：报告 10-29 01:3x 已交（[X1](reports/X1_RESULTS_20261029.md)、[X2](reports/X2_RESULTS_20261029.md)、[X3](reports/X3_RESULTS_20261029.md)、[X5](reports/X5_RESULTS_20261029.md)、[T5](reports/T5_RESULTS_20261029.md)）。
 - **T 系列**：T5、T2 完成；T1 推迟；T3 / T4 等路径。
 
-## 2. 在跑什么（10-31 06:05 UTC）
+## 2. 在跑什么（10-31 07:20 UTC）
 
-- **V4 复核**：DS-Q3DCKS2-100-s1 `pt-w2t0xe9b`（h800，08:43 开跑，19:30 在第 49,201 步，约 1.28 步/秒）；DS-Q3V4S3-100-s1 `pt-qrdl4abe`（zoetrope，12:34 开跑，19:30 在第 31,562 步）。payload 是模型线的 `run_full.sh`；按现在的速度 DCKS2 约 11-01 04:00 UTC、V4S3 约 11-01 08:00 UTC 训完，再加任务内评测（估计）。15 万、17.5 万步由我们起的模型线 `watch_points`（PID 1768868）复制后评测。
+- **V4 复核**：
+  - DS-Q3DCKS2-100-s1 `pt-w2t0xe9b`：h800，10-30 08:43 开跑，10-31 07:17 在第 103,300 步；
+  - DS-Q3V4S3-100-s1 `pt-qrdl4abe`：zoetrope，10-30 12:34 开跑，07:16 在第 85,300 步。
+  - 两个都约 1.27 步/秒，DCKS2 约 11-01 04:30 UTC、V4S3 约 11-01 08:20 UTC 训完，之后还有任务内评测（估计）。
+  - payload 是模型线的 `run_full.sh`。15 万、17.5 万步由我们起的模型线 `watch_points`（PID 1768868）复制后评测。
 - **排队**：没有。h800 上主线有任务在排队，按规则只往 zoetrope 交。
 - 挂起的：T1 两个（`*.hold_qwen3_gate_20261028`）；去掉的：T2 的 S、RD（`*.dropped_20261028`）。
 
