@@ -1,0 +1,130 @@
+{
+ "batch": "b15_20261031",
+ "approved": "the user, 2026-10-31: main-line decision 96 = A (\"甲，交给磁盘线先归档再删\") and to the disk line \"按甲执行\"; list cleanup_q3_dryrun_20261031.txt; archive to AOSS, check references, then delete; q3abl untouched.",
+ "items": [
+  {
+   "id": "Q96-q3dck_20261027-qw3dck-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3dck_20261027/rl_run_qw3dck/checkpoints/global_step_50",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3dck_20261027-qw3dck-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3dck_20261027/rl_run_qw3dck/checkpoints/global_step_150",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3dck_20261027-qw3dck-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3dck_20261027/rl_run_qw3dck/checkpoints/global_step_200",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3dck_20261027-qw3dck-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3dck_20261027/rl_run_qw3dck/checkpoints/global_step_250",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s2dck_20261027-qw3dcks2-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s2dck_20261027/rl_run_qw3dcks2/checkpoints/global_step_50",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s2dck_20261027-qw3dcks2-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s2dck_20261027/rl_run_qw3dcks2/checkpoints/global_step_100",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s2dck_20261027-qw3dcks2-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s2dck_20261027/rl_run_qw3dcks2/checkpoints/global_step_150",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s2dck_20261027-qw3dcks2-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s2dck_20261027/rl_run_qw3dcks2/checkpoints/global_step_200",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s2dck_20261027-qw3dcks2-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s2dck_20261027/rl_run_qw3dcks2/checkpoints/global_step_250",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s3_20261027-qw3s0s3-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s3_20261027/rl_run_qw3s0s3/checkpoints/global_step_50",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s3_20261027-qw3s0s3-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s3_20261027/rl_run_qw3s0s3/checkpoints/global_step_100",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s3_20261027-qw3s0s3-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s3_20261027/rl_run_qw3s0s3/checkpoints/global_step_150",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s3_20261027-qw3s0s3-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s3_20261027/rl_run_qw3s0s3/checkpoints/global_step_250",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s3_20261027-qw3v4s3-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s3_20261027/rl_run_qw3v4s3/checkpoints/global_step_50",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s3_20261027-qw3v4s3-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s3_20261027/rl_run_qw3v4s3/checkpoints/global_step_100",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s3_20261027-qw3v4s3-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s3_20261027/rl_run_qw3v4s3/checkpoints/global_step_150",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s3_20261027-qw3v4s3-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s3_20261027/rl_run_qw3v4s3/checkpoints/global_step_200",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3s3_20261027-qw3dcks3-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3s3_20261027/rl_run_qw3dcks3/checkpoints/global_step_100",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3weak_20261028-qw3ws0-25",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3weak_20261028/rl_run_qw3ws0/checkpoints/global_step_25",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3weak_20261028-qw3ws0-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3weak_20261028/rl_run_qw3ws0/checkpoints/global_step_50",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3weak_20261028-qw3wv4-25",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3weak_20261028/rl_run_qw3wv4/checkpoints/global_step_25",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3weak_20261028-qw3wv4-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3weak_20261028/rl_run_qw3wv4/checkpoints/global_step_50",
+   "marker": "Intermediate checkpoint of a Qwen3 run without retain (neither the run's pick nor its last): archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A, the user: 甲，交给磁盘线先归档再删)."
+  },
+  {
+   "id": "Q96-q3fmt-checkpoint-14",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fmt_20261027/lf_q3fmt/model/checkpoint-14",
+   "marker": "Format SFT epoch checkpoint-14: archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A). checkpoint-7 (the Qwen3 SFT pick, start of every Qwen3 RL) stays."
+  },
+  {
+   "id": "Q96-q3fmt-final-weights",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fmt_20261027/lf_q3fmt/model",
+   "include": [
+    "^(model\\-00001\\-of\\-00007\\.safetensors|model\\-00002\\-of\\-00007\\.safetensors|model\\-00003\\-of\\-00007\\.safetensors|model\\-00004\\-of\\-00007\\.safetensors|model\\-00005\\-of\\-00007\\.safetensors|model\\-00006\\-of\\-00007\\.safetensors|model\\-00007\\-of\\-00007\\.safetensors|model\\.safetensors\\.index\\.json)$"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261031.txt",
+   "marker": "The final weights of the format SFT (model-0000[1-7]-of-00007.safetensors, model.safetensors.index.json) were archived to AOSS and deleted on 2026-10-31 by the disk line (main-line decision 96 = A); this folder holds no top-level weights any more. checkpoint-7 stays (the pick, start of every Qwen3 RL and of downstream G0)."
+  }
+ ]
+}
