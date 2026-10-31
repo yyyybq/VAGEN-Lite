@@ -277,6 +277,13 @@ def test_gen_job_kills_a_slow_scene_records_it_and_skips_done_scenes(tmp_path):
     again = subprocess.run(["bash", str(wt / "downstream/n/run_n_gen.sh"), str(out), "2", "3", "7"],
                            capture_output=True, text=True, env=env, timeout=60)
     assert again.returncode == 0 and len((out / "calls.jsonl").read_text().splitlines()) == 2  # nothing redone
+    out2 = tmp_path / "out2"
+    (out2 / "scenes").mkdir(parents=True)
+    sliced = subprocess.run(["bash", str(wt / "downstream/n/run_n_gen.sh"), str(out2), "2", "3", "7"],
+                            capture_output=True, text=True, env=dict(env, SCENE_SLICE="2/2"), timeout=60)
+    assert sliced.returncode == 0
+    calls2 = [json.loads(x) for x in (out2 / "calls.jsonl").read_text().splitlines()]
+    assert [c[c.index("--task") + 1] for c in calls2] == ["Fast"]  # the 2nd of every 2: Fast only
 
 
 def test_episode_loader_reads_the_smoke_parts_and_n1_instances(tmp_path):

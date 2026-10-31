@@ -6,7 +6,8 @@
 # scene file.  Then collect (OUT/instances_eval.jsonl, summary.json) and the review page (OUT/page.html).  Every step
 # skips what is done.  Writes only under OUT.
 # Usage: run_n_gen.sh OUT [WORKERS] [N_SCENES] [PER_FAMILY]
-# Environment: SCENE_TIMEOUT (default 1500 s), SOFT_LIMIT (default 1000 s: no new candidate after it), N_X0.
+# Environment: SCENE_TIMEOUT (default 1500 s), SOFT_LIMIT (default 1000 s: no new candidate after it), N_X0,
+#   SCENE_SLICE "I/K": only every K-th of the N_SCENES from the I-th (1-based), so K jobs can share OUT.
 set -uo pipefail
 OUT="${1:?Usage: run_n_gen.sh OUT [WORKERS] [N_SCENES] [PER_FAMILY]}"; WORKERS="${2:-12}"; N_SCENES="${3:-120}"
 PER_FAMILY="${4:-50}"
@@ -20,7 +21,11 @@ export PYTHONDONTWRITEBYTECODE=1
 mkdir -p "$OUT/scenes" "$OUT/logs"
 log() { echo "[n-gen] $* $(date -u +%FT%TZ)" | tee -a "$OUT/n_gen.log"; }
 mapfile -t SCENES < <(sim 1 "$SIM_PY" downstream/n/n_gen.py scenes --x0 "$X0" --n "$N_SCENES")
-log "${#SCENES[@]} scenes, $WORKERS at a time, at most $SCENE_TIMEOUT s each (no new candidate after $SOFT_LIMIT s)"
+if [[ -n ${SCENE_SLICE:-} ]]; then
+  first="${SCENE_SLICE%/*}"; step="${SCENE_SLICE#*/}"; ALL=("${SCENES[@]}"); SCENES=()
+  for ((j = first - 1; j < ${#ALL[@]}; j += step)); do SCENES+=("${ALL[$j]}"); done
+fi
+log "${#SCENES[@]} scenes${SCENE_SLICE:+ (slice $SCENE_SLICE)}, $WORKERS at a time, at most $SCENE_TIMEOUT s each (no new candidate after $SOFT_LIMIT s)"
 
 worker() {  # worker I takes scenes I, I + WORKERS, ...
   local i=$1 j spec task seed sid t0 rc
