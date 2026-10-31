@@ -33,14 +33,35 @@ def grad_norm(loss, params) -> float:
     return total ** 0.5
 
 
-def enable_checkpointing(vlm) -> None:
+def enable_checkpointing(vlm) -> int:
     """Activation checkpointing on the VLM (its vision blocks and language layers recompute their activations in the
     backward pass): the same gradients for less memory.  2026-10-31: the first short run ran out of memory at its
-    third step (rank 7, 70.2 GiB allocated) with the action batch and one text sample in one backward."""
+    third step (rank 7, 70.2 GiB allocated) with the action batch and one text sample in one backward.  Returns how
+    many modules now checkpoint (logged, to see that it took)."""
     vlm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     if getattr(vlm, "config", None) is not None:
         vlm.config.use_cache = False
     vlm._c1_checkpointing = True
+    return sum(1 for m in vlm.modules() if getattr(m, "gradient_checkpointing", False) is True) \
+        if hasattr(vlm, "modules") else 0
+
+
+def answer_loss(vlm, text_inputs: dict):
+    """The text loss on the answer tokens only: logits are made only at the positions whose next token carries a label
+    (transformers' logits_to_keep with the positions), and the mean cross-entropy over them taken: the model's own
+    shifted loss with labels, without the [sequence x vocabulary] logits of every position (about 1.2 GiB in fp32
+    for a 2,000-token trajectory; 2026-10-31: the second short run ran out of memory allocating exactly that).
+    One sample per process (TextBatches); a batch of more falls back to the model's own loss."""
+    import torch
+
+    inputs = dict(text_inputs)
+    labels = inputs.pop("labels")
+    if labels.shape[0] != 1:
+        return vlm(**inputs, labels=labels, use_cache=False).loss
+    targets = labels[0, 1:]
+    keep = (targets != -100).nonzero(as_tuple=True)[0]
+    logits = vlm(**inputs, use_cache=False, logits_to_keep=keep).logits[0]
+    return torch.nn.functional.cross_entropy(logits.float(), targets[keep])
 
 
 def make_train_step(T, cfg_cotrain: dict, text_batches_for):
@@ -59,16 +80,22 @@ def make_train_step(T, cfg_cotrain: dict, text_batches_for):
         source, index, text_inputs = batches.at(step)
         vla = T._unwrap_model(self.accelerator, self.model)
         vlm = vla.qwen_vl_interface.model
-        if checkpointing and not getattr(vlm, "_c1_checkpointing", False):
-            enable_checkpointing(vlm)
-        text_inputs = {k: v.to(self.accelerator.device) for k, v in text_inputs.items()}
         metrics = {}
+        if checkpointing and not getattr(vlm, "_c1_checkpointing", False):
+            metrics["checkpointing_modules"] = enable_checkpointing(vlm)
+        text_inputs = {k: v.to(self.accelerator.device) for k, v in text_inputs.items()}
+        cuda = torch.cuda.is_available()
+        if cuda:  # memory of this step (2026-10-31: the short runs ran out of it)
+            torch.cuda.reset_peak_memory_stats()
+        gib = 2.0 ** 30
         with self.accelerator.accumulate(self.model):
             self.optimizer.zero_grad()
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 output_dict = self.model.forward(batch_vla)
                 action_loss = output_dict["action_loss"]
-                text_loss = vlm(**text_inputs, use_cache=False).loss
+                if cuda:
+                    metrics["mem_after_action_gib"] = torch.cuda.memory_allocated() / gib
+                text_loss = answer_loss(vlm, text_inputs)
                 total_loss = action_loss + lam * text_loss
             if diag_every and step % diag_every == 0:
                 head = [vlm.lm_head.weight]
@@ -84,15 +111,19 @@ def make_train_step(T, cfg_cotrain: dict, text_batches_for):
             self.optimizer.step()
             if self.accelerator.sync_gradients:
                 self.lr_scheduler.step()
-        # every process's text loss, so the log has both sources (metrics are written by the main process only)
-        mine = torch.tensor([float(text_loss.detach()), 1.0 if source == "qa" else 0.0], device=self.accelerator.device)
-        both = self.accelerator.gather(mine).reshape(-1, 2).float().cpu()
+        # every process's text loss, peak memory and sample length, so the log has both sources and the worst card
+        # (metrics are written by the main process only)
+        peak = torch.cuda.max_memory_allocated() / gib if cuda else 0.0
+        mine = torch.tensor([float(text_loss.detach()), 1.0 if source == "qa" else 0.0, peak,
+                             float(text_inputs["input_ids"].shape[-1])], device=self.accelerator.device)
+        both = self.accelerator.gather(mine).reshape(-1, 4).float().cpu()
         qa = both[:, 1] > 0.5
         metrics.update({"action_dit_loss": action_loss.item(), "text_loss": float(both[:, 0].mean()),
                         "text_loss_traj": float(both[~qa, 0].mean()) if (~qa).any() else float("nan"),
                         "text_loss_qa": float(both[qa, 0].mean()) if qa.any() else float("nan"),
                         "total_loss": total_loss.item(), "text_tokens": int((text_inputs["labels"] != -100).sum()),
-                        "text_index": int(index)})
+                        "text_index": int(index), "mem_peak_gib_max": float(both[:, 2].max()),
+                        "text_len_max": int(both[:, 3].max())})
         return metrics
 
     return _train_step

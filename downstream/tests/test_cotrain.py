@@ -89,9 +89,14 @@ def test_train_step_adds_lambda_times_text_loss_once():
             self.lm_head = head
             self.model = type("M", (), {"language_model": type("L", (), {"layers": [last]})()})()
 
-        def forward(self, input_ids=None, labels=None, use_cache=None, **kw):
-            x = torch.ones(1, 1)
-            return type("O", (), {"loss": (head(last(x)) - 3.0).pow(2).sum()})()
+        def forward(self, input_ids=None, labels=None, use_cache=None, logits_to_keep=None, **kw):
+            """Logits over a two-word vocabulary at every position (word 1 favoured by head(last(1))), only at
+            logits_to_keep's positions when given, as transformers' models do."""
+            self.kept = logits_to_keep
+            z = head(last(torch.ones(1, 1)))
+            rows = torch.cat([z * 0.0, z], dim=-1).expand(input_ids.shape[1], 2)
+            logits = rows if logits_to_keep is None else rows[logits_to_keep]
+            return type("O", (), {"logits": logits.unsqueeze(0), "loss": None})()
 
     vlm = VLM()
     vla = type("V", (), {"qwen_vl_interface": type("Q", (), {"model": vlm})()})()
@@ -125,25 +130,55 @@ def test_train_step_adds_lambda_times_text_loss_once():
     trainer.optimizer = type("O", (), {"zero_grad": lambda s: None, "step": lambda s: None})()
     trainer.lr_scheduler = type("S", (), {"step": lambda s: None})()
     trainer.config = type("C", (), {"trainer": type("Tr", (), {"gradient_clipping": 1.0})()})()
-    batch = type("B", (), {"at": lambda s, step: ("qa", 4, {"input_ids": torch.tensor([[1]]),
-                                                             "labels": torch.tensor([[1]])})})()
+    # three tokens, the answer being the last two (the label of position t + 1 is predicted at position t)
+    batch = type("B", (), {"at": lambda s, step: ("qa", 4, {"input_ids": torch.tensor([[7, 8, 9]]),
+                                                             "labels": torch.tensor([[-100, 1, 0]])})})()
     step = CE.make_train_step(T, {"lambda": 0.1, "diag_every": 1}, lambda tr: batch)
     m = step(trainer, batch_vla=None)
-    text = float((head(last(torch.ones(1, 1))) - 3.0).pow(2).sum())
+    z = float(head(last(torch.ones(1, 1))))
+    row = torch.tensor([[0.0, z]])
+    text = float((torch.nn.functional.cross_entropy(row, torch.tensor([1]))
+                  + torch.nn.functional.cross_entropy(row, torch.tensor([0]))) / 2)
+    assert vlm.kept.tolist() == [0, 1]  # logits only where the next token is an answer token
     assert trainer.accelerator.losses == [pytest.approx(4.0 + 0.1 * text)]
     assert m["action_dit_loss"] == pytest.approx(4.0) and m["text_loss_qa"] == pytest.approx(text)
     assert m["grad_lm_head_text"] > 0 and m["grad_lm_head_action"] == 0.0 and m["text_index"] == 4
     assert m["grad_last_layer_action"] == 0.0 and m["grad_last_layer_text"] > 0
+    assert m["text_len_max"] == 3 and "mem_peak_gib_max" in m
     assert not getattr(vlm, "_c1_checkpointing", False)  # off unless asked
 
     calls = []
     vlm.gradient_checkpointing_enable = lambda **kw: calls.append(kw)
     vlm.config = type("Cfg", (), {"use_cache": True})()
     step = CE.make_train_step(T, {"lambda": 0.1, "gradient_checkpointing": True}, lambda tr: batch)
-    step(trainer, batch_vla=None)
-    step(trainer, batch_vla=None)
+    first = step(trainer, batch_vla=None)
+    second = step(trainer, batch_vla=None)
     assert calls == [{"gradient_checkpointing_kwargs": {"use_reentrant": False}}]  # once, before the first step
     assert vlm.config.use_cache is False
+    assert "checkpointing_modules" in first and "checkpointing_modules" not in second
+
+
+def test_answer_loss_equals_the_models_own_shifted_loss():
+    """2026-10-31: answer_loss makes logits only where the next token carries a label; the number is the standard
+    shifted mean cross-entropy over the labelled tokens."""
+    torch = pytest.importorskip("torch")
+    import cotrain_entry as CE
+
+    torch.manual_seed(0)
+    table = torch.randn(5, 4)  # position -> logits over a four-word vocabulary
+
+    class VLM:
+        def __call__(self, input_ids=None, labels=None, use_cache=None, logits_to_keep=None, **kw):
+            logits = table[: input_ids.shape[1]]
+            if labels is not None:  # the model's own loss: shift, ignore -100, mean
+                loss = torch.nn.functional.cross_entropy(logits[:-1], labels[0, 1:], ignore_index=-100)
+                return type("O", (), {"loss": loss, "logits": logits.unsqueeze(0)})()
+            return type("O", (), {"logits": logits[logits_to_keep].unsqueeze(0), "loss": None})()
+
+    inputs = {"input_ids": torch.zeros(1, 5, dtype=torch.long), "labels": torch.tensor([[-100, -100, 2, 3, 1]])}
+    own = VLM()(input_ids=inputs["input_ids"], labels=inputs["labels"]).loss
+    assert float(CE.answer_loss(VLM(), inputs)) == pytest.approx(float(own))
+    assert "labels" in inputs  # the caller's dict is left as it was
 
 
 # ---------------------------------------------------------------------------------------- config and check
