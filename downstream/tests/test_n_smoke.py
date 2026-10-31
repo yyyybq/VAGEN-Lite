@@ -140,7 +140,7 @@ def test_robot_hidden_moves_the_robot_out_of_the_drawn_groups_and_back():
         assert model.geom_group.tolist() == [0, 1, 1, 0, 2]
 
 
-STUB = """import json, sys, time
+STUB = r"""import json, sys, time
 from pathlib import Path
 cmd = sys.argv[1]
 out = Path(sys.argv[sys.argv.index("--out") + 1])
