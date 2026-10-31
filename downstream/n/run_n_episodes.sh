@@ -3,9 +3,11 @@
 # downstream/n/n_policy_server.py (the StarVLA environment's Python, GPU 0) and downstream/n/n_episode.py (the
 # simulator's Python, WORKERS episodes at a time), then the review page with the episodes (OUT/page.html).
 # Resumable (episodes already in OUT/episodes.jsonl are skipped).  Writes only under OUT.
-# Usage: run_n_episodes.sh OUT GEN_DIR MODEL [WORKERS] [LIMIT]
+# Usage: run_n_episodes.sh OUT GEN MODEL [WORKERS] [LIMIT]
+#   GEN: the smoke's generation folder (GEN/part*/instances.jsonl; the review page is made too), or N1's instance file
+#   (n_gen.py collect's instances_eval.jsonl; LIMIT 0 = all).  N_PORT: the model server's port (default 5800).
 set -uo pipefail
-OUT="${1:?Usage: run_n_episodes.sh OUT GEN_DIR MODEL [WORKERS] [LIMIT]}"; GEN="${2:?}"; MODEL="${3:?}"
+OUT="${1:?Usage: run_n_episodes.sh OUT GEN MODEL [WORKERS] [LIMIT]}"; GEN="${2:?}"; MODEL="${3:?}"
 WORKERS="${4:-4}"; LIMIT="${5:-20}"
 WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VLM_PY="${N_VLM_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python}"
@@ -26,9 +28,12 @@ for i in $(seq 1 180); do
   sleep 5
 done
 log "server ready ($MODEL on $PORT)"
-sim 1 "$SIM_PY" downstream/n/n_episode.py --instances "$GEN"/part*/instances.jsonl --port "$PORT" --out "$OUT" \
+if [[ -f $GEN ]]; then INST=("$GEN"); else INST=("$GEN"/part*/instances.jsonl); fi
+sim 1 "$SIM_PY" downstream/n/n_episode.py --instances "${INST[@]}" --port "$PORT" --out "$OUT" \
   --workers "$WORKERS" --limit "$LIMIT" > "$OUT/episodes.log" 2>&1
 log "episodes rc=$? $(grep -c '"success": true' "$OUT/episodes.jsonl" 2>/dev/null) successes of $(wc -l < "$OUT/episodes.jsonl" 2>/dev/null)"
-sim 1 "$SIM_PY" downstream/n/n_smoke.py page --gen "$GEN"/part* --n "$LIMIT" --episodes "$OUT/episodes.jsonl" \
-  --out "$OUT/page.html" >> "$OUT/n_episodes.log" 2>&1
-log "page rc=$?"
+if [[ ! -f $GEN ]]; then
+  sim 1 "$SIM_PY" downstream/n/n_smoke.py page --gen "$GEN"/part* --n "$LIMIT" --episodes "$OUT/episodes.jsonl" \
+    --out "$OUT/page.html" >> "$OUT/n_episodes.log" 2>&1
+  log "page rc=$?"
+fi

@@ -20,6 +20,11 @@ the RL env RS and RD were trained with), built with the upstream functions loade
     and 12 turns.
 OUT/episodes.jsonl gets one line per episode (success, turns, primitive steps, blocked and invalid counts, the poses,
 every reply and its actions, the judge at the end); OUT/frames/<scene>.png the camera-A frame of every turn.
+N1 (the user's decision 3 of 2026-10-31): any of the six task types (n_env.Scene.judge with the item's own rule), the
+instances of n_gen.py collect (GEN/instances_eval.jsonl, one per line, keyed by instance_id) as well as the smoke's
+part files; each episode renders camera A with or without the robot as its instance was made (hide_robot), and also
+records the highest upstream shaping score reached (the box judge's, after the start and every executed action) and
+the numbers behind the gates at the end.
 """
 from __future__ import annotations
 
@@ -152,9 +157,14 @@ def asker(port: int, host: str = "127.0.0.1"):
 
 
 # ------------------------------------------------------------------------------------------- an episode
+def shaping(j: dict) -> float:
+    m = j["metric"]
+    return float(m.get("shaping_score", m.get("score")) or 0.0)
+
+
 def run_episode(scene, inst: dict, ask, cfg, entry: dict) -> dict:
     """One episode (see the module text); returns its record and the frames of every turn."""
-    item, a_key, b_key = inst["item"], inst["a"]["key"], inst["b"]["key"]
+    item = inst["item"]
     allowed = allowed_actions(cfg)
     system = system_text(cfg, item["task_type"])
     max_turns = int(entry.get("max_turns", 12))
@@ -163,6 +173,7 @@ def run_episode(scene, inst: dict, ask, cfg, entry: dict) -> dict:
     pose = tuple(scene.start)
     fb, invalid, steps, success, blocked_n = "", 0, 0, False, 0
     turns, frames, end = [], [], "turns"
+    best_shaping = shaping(N.box_judge(item, pose))
     for t in range(max_turns):
         img, _ = scene.render(pose)
         frames.append(img)
@@ -188,7 +199,9 @@ def run_episode(scene, inst: dict, ask, cfg, entry: dict) -> dict:
                 blocked_n += 1
             else:
                 pose = new
-                if scene.judge(item, pose, a_key, b_key)["success"]:
+                j = scene.judge(item, pose)
+                best_shaping = max(best_shaping, shaping(j))
+                if j["success"]:
                     success = True
                     break
             if steps >= budget:
@@ -202,14 +215,24 @@ def run_episode(scene, inst: dict, ask, cfg, entry: dict) -> dict:
         if steps >= budget:
             end = "steps"
             break
-    final = scene.judge(item, pose, a_key, b_key)
-    out = {"scene_id": inst["scene_id"], "success": success, "end": end, "turns": len(turns), "steps": steps,
+    final = scene.judge(item, pose)
+    meas = {k: (list(v) if isinstance(v, tuple) else v) for k, v in N.measurements(item, final).items()}
+    out = {"instance_id": inst_id(inst), "scene_id": inst["scene_id"], "task_type": item["task_type"],
+           "success": success, "end": end, "turns": len(turns), "steps": steps,
            "blocked": blocked_n, "invalid_turns": sum(1 for r in turns if not r["actions"]),
-           "final_pose": list(pose), "final_judge": {"success": final["success"], "visible": final["visible"],
-                                                     "margin": final["metric"].get("relation_margin_px"),
-                                                     "lateral_deg": final["lateral"].get("angle_deg")},
+           "max_shaping_score": best_shaping, "final_pose": list(pose),
+           "final_judge": {"success": final["success"], "visible": final["visible"],
+                           "gates": final["metric"].get("gates"), "measurements": meas,
+                           "shaping_score": shaping(final),
+                           "margin": final["metric"].get("relation_margin_px"),
+                           "lateral_deg": final["lateral"].get("angle_deg")},
            "turn_log": turns}
     return out, frames
+
+
+def inst_id(inst: dict) -> str:
+    """N1 instances have their own id (several task types per scene); the smoke's had one per scene."""
+    return str(inst.get("instance_id") or inst["scene_id"])
 
 
 def strip_image(frames, size: int = 128):
@@ -237,15 +260,15 @@ def _one(job):
     scene = None
     t0 = time.time()
     try:
-        scene = N.Scene(inst["task"], inst["seed"])
+        scene = N.Scene(inst["task"], inst["seed"], hide_robot=bool(inst.get("hide_robot", False)))
         rec, frames = run_episode(scene, inst, _W["ask"], _W["cfg"], _W["entry"])
         (Path(out) / "frames").mkdir(parents=True, exist_ok=True)
-        strip_image(frames).save(Path(out) / "frames" / f"{inst['scene_id']}.png")
+        strip_image(frames).save(Path(out) / "frames" / f"{inst_id(inst)}.png")
     except Exception as exc:
         import traceback
 
-        rec = {"scene_id": inst.get("scene_id"), "error": f"{type(exc).__name__}: {exc}"[:400],
-               "traceback": traceback.format_exc()[-1500:]}
+        rec = {"instance_id": inst_id(inst), "scene_id": inst.get("scene_id"), "task_type": inst.get("task_type"),
+               "error": f"{type(exc).__name__}: {exc}"[:400], "traceback": traceback.format_exc()[-1500:]}
     finally:
         if scene is not None:
             scene.close()
@@ -254,13 +277,18 @@ def _one(job):
 
 
 def load_instances(paths, limit: int):
+    """The smoke's part files ({"task", "seed", "hide_robot", "instance": {...}} per scene) or N1's
+    instances_eval.jsonl (one instance per line, with instance_id, task, seed, hide_robot)."""
     out = []
     for p in paths:
         for line in Path(p).read_text().splitlines():
             if line.strip():
                 r = json.loads(line)
-                if r.get("instance"):
-                    out.append(dict(r["instance"], task=r["task"], seed=r["seed"]))
+                if r.get("instance_id") and r.get("item"):
+                    out.append(r)
+                elif r.get("instance"):
+                    out.append(dict(r["instance"], task=r["task"], seed=r["seed"],
+                                    hide_robot=bool(r.get("hide_robot", False))))
     return out[:limit] if limit else out
 
 
@@ -276,14 +304,14 @@ def main(argv=None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     done = set()
     if (out / "episodes.jsonl").is_file():
-        done = {json.loads(x)["scene_id"] for x in (out / "episodes.jsonl").read_text().splitlines() if x.strip()}
-    todo = [i for i in load_instances(args.instances, args.limit) if i["scene_id"] not in done]
+        done = {inst_id(json.loads(x)) for x in (out / "episodes.jsonl").read_text().splitlines() if x.strip()}
+    todo = [i for i in load_instances(args.instances, args.limit) if inst_id(i) not in done]
     ctx = mp.get_context("spawn")
     with ctx.Pool(args.workers, initializer=_init, initargs=(args.port,)) as pool, open(out / "episodes.jsonl", "a") as f:
         for rec in pool.imap_unordered(_one, [(i, str(out)) for i in todo]):
             f.write(json.dumps(rec, default=str) + "\n")
             f.flush()
-            print(f"[n_episode] {rec.get('scene_id')}: success={rec.get('success')} turns={rec.get('turns')} "
+            print(f"[n_episode] {rec.get('instance_id')}: success={rec.get('success')} turns={rec.get('turns')} "
                   f"{rec.get('error', '')}", flush=True)
     return 0
 

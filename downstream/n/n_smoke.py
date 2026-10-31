@@ -92,10 +92,11 @@ def path_to(states: dict, key) -> list:
 
 def gate_numbers(j: dict) -> dict:
     m = j["metric"]
+    vis = j.get("visible")  # {A's key: share, B's key: share}, in the item's order
     return {"success": j["success"], "gates": m.get("gates"), "relation_margin_px": m.get("relation_margin_px"),
             "inside_frame_fraction_min": m.get("inside_frame_fraction_min"),
             "lateral_angle_deg": j["lateral"].get("angle_deg"), "lateral_ok": j["lateral"].get("ok"),
-            "visible_fraction": j.get("visible")}
+            "visible_fraction": dict(zip("ab", vis.values())) if vis else vis}
 
 
 def find_instance(scene, states: dict, rng: random.Random, log=print):
@@ -108,7 +109,7 @@ def find_instance(scene, states: dict, rng: random.Random, log=print):
         item = N.projective_item(sid, a, b, rel, scene.start)
         start_box = N.box_judge(item, scene.start)
         if start_box["success"]:
-            start_full = scene.judge(item, scene.start, a["key"], b["key"])
+            start_full = scene.judge(item, scene.start)
             if start_full["success"]:
                 continue
         checks = 0
@@ -116,10 +117,10 @@ def find_instance(scene, states: dict, rng: random.Random, log=print):
             pose, depth = states[k][0], states[k][1]
             if depth < MIN_ACTIONS or not N.box_judge(item, pose)["success"]:
                 continue
-            full = scene.judge(item, pose, a["key"], b["key"])
+            full = scene.judge(item, pose)
             checks += 1
             if full["success"]:
-                start_full = scene.judge(item, scene.start, a["key"], b["key"])
+                start_full = scene.judge(item, scene.start)
                 return {"item": item, "a": a, "b": b, "relation": rel, "success_key": k, "success_pose": pose,
                         "depth": depth, "path": path_to(states, k), "start_judge": gate_numbers(start_full),
                         "success_judge": gate_numbers(full), "render_checks": checks}

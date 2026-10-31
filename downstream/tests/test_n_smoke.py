@@ -13,8 +13,15 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "n"))
+sys.path.insert(0, str(ROOT / "tests"))
 import n_env as N  # noqa: E402
 import n_smoke as S  # noqa: E402
+from test_n_gen import isolate_main_modules  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def isolated():  # the main checkout's vagen (n_env) and the worktree's (other tests) kept apart
+    yield from isolate_main_modules()
 
 
 def test_actions_follow_the_heading():
@@ -86,7 +93,7 @@ class FakeScene:
     def collision(self):
         return "wall" if self.pose[0] >= 0.65 else None
 
-    def judge(self, item, pose, a_key, b_key, render=True):
+    def judge(self, item, pose, render=True):
         ok = pose[0] > 0.5 and abs(pose[2]) < 1e-6
         return {"success": ok, "metric": {"gates": {}}, "lateral": {}, "visible": {"a": 0.01, "b": 0.01}}
 

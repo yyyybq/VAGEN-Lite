@@ -27,6 +27,16 @@ environment (gym.make('robocasa/<task>', split='target', seed=s) reset as the cl
   rule (target_visibility.lateral_gate), and A and B each with at least 0.3% of the image in the segmentation image
   (the upstream MIN_FACE_AREA_FRACTION) instead of the InteriorGS face rule.  The upstream modules are loaded from the
   main checkout by path (their package __init__ is not run).
+* N1 (the user's decision 3 of 2026-10-31): the six task types of the design.  Left / right keeps the canonical v1
+  item above; equidistance, absolute distance, occlusion, both-in-view and screen occupancy are the upstream
+  generator's own items (data_gen/interiorgs_v10/families/<type>.build_item, with its tuple rules: heights, gaps)
+  judged by the upstream canonical v2 judges (score_canonical_task dispatches on the item's metric version).  The
+  segmentation rule applies to the targets the upstream env requires to be clearly visible
+  (target_visibility.REQUIRED_VISIBLE_SLOTS: both objects, the one object, or for occlusion only the occluder, whose
+  target is hidden by its own judge).  No margin is added to any threshold; margins() / near_threshold() say which
+  gates a success pose passes only narrowly (NEAR_BANDS), for the separate count the user asked for.  Camera A leaves
+  the robot out (hide_robot, the user's choice) and objects get plain names (natural_name: "kettle non electric" ->
+  "kettle").
 """
 from __future__ import annotations
 
@@ -55,21 +65,49 @@ PENETRATION_M = 1e-3
 ACTIONS = ("move_forward", "move_backward", "move_left", "move_right", "turn_left", "turn_right")
 NATIVE_K = [[320.0, 0.0, 320.0], [0.0, 320.0, 240.0], [0.0, 0.0, 1.0]]
 METRIC_V1 = "canonical_spatial_task_h1_v1"
+# N1's six task types, in the design's order (reports/N_DESIGN_20261028.md section 1)
+FAMILIES = ("projective_relations", "equidistance", "absolute_positioning", "occlusion_alignment", "fov_inclusion",
+            "screen_occupancy")
+# Plain names for RoboCasa categories that read badly in an instruction (the user's decision 3 of 2026-10-31); a
+# name left out stays as X0 wrote it.
+NATURAL_NAMES = {
+    "kettle non electric": "kettle", "jug wide opening": "jug", "oil and vinegar bottle": "oil bottle",
+    "bottled water": "water bottle", "bottled drink": "drink bottle", "canned food": "food can",
+    "boxed food": "food box", "boxed drink": "drink box", "tupperware": "food container", "reamer": "juicer",
+    "sandwich bread": "bread", "cream cheese stick": "cream cheese", "bar soap": "bar of soap",
+}
 
 
-def upstream(module: str, package_dir: Path, name: str):
-    """A module of the main checkout loaded by path inside a stand-in package (relative imports work, the
-    package's __init__ is not run).  E.g. upstream("canonical_task_metrics", MAIN/'vagen/envs/active_spatial',
-    "as_up")."""
-    if name not in sys.modules:
-        pkg = types.ModuleType(name)
-        pkg.__path__ = [str(package_dir)]
-        sys.modules[name] = pkg
-    return importlib.import_module(f"{name}.{module}")
+def natural_name(name: str) -> str:
+    return NATURAL_NAMES.get(str(name).strip(), str(name).strip())
+
+
+def main_packages(dotted: str) -> None:
+    """Stand-in packages for a package of the main checkout and its parents ("vagen", "vagen.envs", ...): modules
+    load by path under their real names, so relative and absolute imports both work, and no package __init__ runs.
+    A real package of the same name imported before (from somewhere else) is refused rather than mixed in."""
+    parts = dotted.split(".")
+    for i in range(1, len(parts) + 1):
+        name, path = ".".join(parts[:i]), MAIN.joinpath(*parts[:i])
+        mod = sys.modules.get(name)
+        if mod is None:
+            mod = types.ModuleType(name)
+            mod.__path__ = [str(path)]
+            sys.modules[name] = mod
+        elif str(path) not in list(getattr(mod, "__path__", [])):
+            raise RuntimeError(f"{name} is already imported from {getattr(mod, '__path__', None)}, not {path}")
 
 
 def active_spatial(module: str):
-    return upstream(module, MAIN / "vagen/envs/active_spatial", "n_up_active_spatial")
+    main_packages("vagen.envs.active_spatial")
+    return importlib.import_module(f"vagen.envs.active_spatial.{module}")
+
+
+def family_module(task_type: str):
+    """The upstream generator's family module (build_item, tuple_ok, describe, constants)."""
+    main_packages("vagen.envs.active_spatial")
+    main_packages("data_gen.interiorgs_v10.families")
+    return importlib.import_module(f"data_gen.interiorgs_v10.families.{task_type}")
 
 
 # ------------------------------------------------------------------------------------------ poses (pure)
@@ -129,14 +167,113 @@ def entry(e: dict) -> dict:
             "center": list(e["center"])}
 
 
+def upstream_obj(e: dict):
+    """An entity as the upstream generator's contract.Obj (id = our key, label = its name, no referring phrase, so
+    the instruction says "the <name>")."""
+    import numpy as np
+
+    family_module("common")
+    contract = importlib.import_module("data_gen.interiorgs_v10.contract")
+    return contract.Obj(id=str(e["key"]), label=str(e["name"]), aabb_min=np.asarray(e["bbox_min"], float),
+                        aabb_max=np.asarray(e["bbox_max"], float))
+
+
+def make_item(task_type: str, scene: str, ents: list, params: dict, start_pose) -> dict:
+    """The item of one N1 instance: left / right as in the smoke (canonical v1), the other five the upstream
+    family's build_item (canonical v2; raises ValueError when the upstream tuple rules refuse the objects)."""
+    if task_type == "projective_relations":
+        a, b = ents
+        return projective_item(scene, a, b, params["relation"], start_pose)
+    fam = family_module(task_type)
+    return fam.build_item(scene, [upstream_obj(e) for e in ents], dict(params), c2w_of(start_pose))
+
+
 def box_judge(item: dict, pose) -> dict:
-    """The upstream canonical metric and 45-degree rule at a pose (no rendering)."""
+    """The upstream canonical metric and 45-degree rule at a pose (no rendering); the rule applies to left / right
+    only (lateral_gate says so for the rest)."""
     ctm = active_spatial("canonical_task_metrics")
     tv = active_spatial("target_visibility")
     c2w = c2w_of(pose)
     metric = ctm.score_canonical_task(item, c2w)
     lat = tv.lateral_gate(item, c2w)
     return {"success": bool(metric["success"] and lat["ok"]), "metric": metric, "lateral": lat}
+
+
+def required_keys(item: dict) -> list:
+    """Keys of the targets the upstream env requires to be clearly visible in a success frame."""
+    tv = active_spatial("target_visibility")
+    objs = item["target_object"]["objects"]
+    return [str(objs[s]["id"]) for s in tv.REQUIRED_VISIBLE_SLOTS.get(item["task_type"], (0,)) if s < len(objs)]
+
+
+# Gates a success pose may pass only narrowly (the user's decision 3 of 2026-10-31: no margin added, such instances
+# counted apart).  (threshold, comfortable value): a measurement between the two is "near"; the first three are the
+# smoke report's bands.  Tolerance gates (distance, equal distance, occupancy) are near in the outer fifth of their
+# band.
+NEAR_BANDS = {
+    "inside_frame": (0.5, 0.6), "visible": (0.003, 0.006), "relation_margin_px": (12.0, 30.0),
+    "lateral_angle_deg": (45.0, 40.0), "fully_in_frame": (0.95, 0.97), "vertical_inside": (0.95, 0.97),
+    "target_hidden": (0.85, 0.88), "target_in_frame": (0.80, 0.84),
+}
+TOLERANCE_NEAR = 0.8
+
+
+def _slack(value, band) -> float:
+    """0 at the threshold, 1 at (or past) the comfortable value, by a straight line in between."""
+    if value is None:
+        return 0.0
+    thr, comfortable = band
+    return max(0.0, min(1.0, (float(value) - thr) / (comfortable - thr)))
+
+
+def measurements(item: dict, j: dict) -> dict:
+    """The numbers behind each thresholded gate of a judge result (n_env.Scene.judge or box_judge), by gate name."""
+    m, t = j["metric"], item["task_type"]
+    out = {}
+    objs = m.get("objects") or []
+    if t == "occlusion_alignment":
+        out["inside_frame"] = objs[1].get("inside_frame_fraction") if len(objs) > 1 else None
+        out["target_hidden"] = m.get("target_hidden_fraction")
+        out["target_in_frame"] = m.get("target_in_frame_fraction")
+    elif t == "fov_inclusion":
+        out["fully_in_frame"] = m.get("inside_frame_fraction_min")
+    else:
+        out["inside_frame"] = m.get("inside_frame_fraction_min")
+    if t == "projective_relations":
+        out["relation_margin_px"] = m.get("relation_margin_px")
+        out["lateral_angle_deg"] = (j.get("lateral") or {}).get("angle_deg")
+    elif t == "absolute_positioning":
+        out["distance"] = (m.get("distance_error_m"), m.get("distance_tolerance_m"))
+    elif t == "equidistance":
+        out["equidistant"] = (m.get("distance_difference_m"), m.get("equidistance_tolerance_m"))
+    elif t == "screen_occupancy":
+        occ, k = m.get("occupancy"), m.get("required_occupancy")
+        out["occupancy"] = (abs(occ - k) if occ is not None and k is not None else None, m.get("occupancy_tolerance"))
+        out["vertical_inside"] = m.get("vertical_inside_fraction")
+    vis = j.get("visible")
+    if vis:
+        out["visible"] = min(vis[k] for k in required_keys(item))
+    return out
+
+
+def margins(item: dict, j: dict) -> dict:
+    """{gate: slack in [0, 1]} (see NEAR_BANDS; 1 = passed comfortably)."""
+    out = {}
+    for name, v in measurements(item, j).items():
+        if isinstance(v, tuple):  # (error, tolerance): near in the outer fifth of the band
+            err, tol = v
+            out[name] = 0.0 if err is None or not tol else \
+                max(0.0, min(1.0, (tol - err) / ((1.0 - TOLERANCE_NEAR) * tol)))
+        elif name == "lateral_angle_deg":  # at most 45 degrees: near above 40
+            out[name] = 1.0 if v is None else _slack(-v, (-45.0, -40.0))
+        else:
+            out[name] = _slack(v, NEAR_BANDS[name])
+    return out
+
+
+def near_threshold(item: dict, j: dict) -> list:
+    """The gates a passing pose passes only narrowly (slack below 1), sorted."""
+    return sorted(k for k, s in margins(item, j).items() if s < 1.0)
 
 
 def visible_fractions(seg_ids, entities_geoms: dict) -> dict:
@@ -174,7 +311,7 @@ def robot_hidden(sim, model, robot_ids, hide: bool = True):
 class Scene:
     """One reset RoboCasa scene with the base, camera A and the entities (see the module text)."""
 
-    def __init__(self, task: str, seed: int, split: str = "target", hide_robot: bool = False):
+    def __init__(self, task: str, seed: int, split: str = "target", hide_robot: bool = True):
         import gymnasium as gym
         import mujoco
         import numpy as np
@@ -215,11 +352,12 @@ class Scene:
                 for c in getattr(self.k, "object_cfgs", [])}
         self.prefix_names = {}  # geom-name prefix of every object and fixture -> what the feedback calls it
         for key, obj in self.k.objects.items():
-            self.prefix_names[getattr(obj, "naming_prefix", f"{key}_")] = x0_qa.display_name(cats.get(key, key))
+            self.prefix_names[getattr(obj, "naming_prefix", f"{key}_")] = natural_name(
+                x0_qa.display_name(cats.get(key, key)))
         for key, fx in self.k.fixtures.items():
             nat = getattr(fx, "nat_lang", None)
-            self.prefix_names[getattr(fx, "naming_prefix", f"{key}_")] = x0_qa.display_name(
-                key if not nat or nat == key else nat)
+            self.prefix_names[getattr(fx, "naming_prefix", f"{key}_")] = natural_name(x0_qa.display_name(
+                key if not nat or nat == key else nat))
 
     def close(self):
         self.env.close()
@@ -335,7 +473,7 @@ class Scene:
                 lo, hi = np.minimum(lo, pts.min(0)), np.maximum(hi, pts.max(0))
                 used.append(g)
             if used and np.all(np.isfinite(lo)):
-                out.append(dict(key=e["key"], name=e["name"], kind=e["kind"], geoms=set(used),
+                out.append(dict(key=e["key"], name=natural_name(e["name"]), kind=e["kind"], geoms=set(used),
                                 bbox_min=[float(v) for v in lo], bbox_max=[float(v) for v in hi],
                                 center=[float(v) for v in (lo + hi) / 2]))
         counts = {}
@@ -343,16 +481,18 @@ class Scene:
             counts[e["name"]] = counts.get(e["name"], 0) + 1
         return [e for e in out if counts[e["name"]] == 1]
 
-    def judge(self, item: dict, pose, a_key: str, b_key: str, render: bool = True) -> dict:
-        """The success rule at a pose: the upstream box judge and 45-degree rule, and (render) the
-        segmentation visibility of A and B."""
+    def judge(self, item: dict, pose, render: bool = True) -> dict:
+        """The success rule at a pose: the upstream box judge (and 45-degree rule for left / right), and (render)
+        the segmentation visibility of the item's objects ({key: share of the image}), of which the required ones
+        (required_keys) need MIN_VISIBLE_FRACTION each."""
         out = box_judge(item, pose)
         out["visible"] = None
         if render:
             _, seg = self.render(pose)
-            geoms = {e["key"]: e["geoms"] for e in self.entities if e["key"] in (a_key, b_key)}
+            keys = [str(o["id"]) for o in item["target_object"]["objects"]]
+            geoms = {e["key"]: e["geoms"] for e in self.entities if e["key"] in keys}
             frac = visible_fractions(seg, geoms)
-            out["visible"] = {"a": frac[a_key], "b": frac[b_key]}
-            out["success"] = bool(out["success"] and frac[a_key] >= MIN_VISIBLE_FRACTION
-                                  and frac[b_key] >= MIN_VISIBLE_FRACTION)
+            out["visible"] = {k: frac.get(k, 0.0) for k in keys}
+            out["success"] = bool(out["success"] and all(out["visible"][k] >= MIN_VISIBLE_FRACTION
+                                                         for k in required_keys(item)))
         return out
