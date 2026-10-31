@@ -18,6 +18,8 @@ log "train $EXP"
   export PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
   export WANDB_MODE=disabled WANDB_DISABLED=true NO_PROXY='*' no_proxy='*' STARVLA_ROOT
   export HF_HOME=/mnt/umm/users/yinbaiqiao/.cache/huggingface
+  # 2026-10-31: the first short run ran out of memory with 4.4 GiB reserved but unallocated (fragmentation)
+  export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
   source "$WT/examples/train/robocasa/setup_starvla_env.sh" > /dev/null
   set +e
   export PYTHONPATH="$WT:$STARVLA_ROOT"

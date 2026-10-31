@@ -33,13 +33,25 @@ def grad_norm(loss, params) -> float:
     return total ** 0.5
 
 
+def enable_checkpointing(vlm) -> None:
+    """Activation checkpointing on the VLM (its vision blocks and language layers recompute their activations in the
+    backward pass): the same gradients for less memory.  2026-10-31: the first short run ran out of memory at its
+    third step (rank 7, 70.2 GiB allocated) with the action batch and one text sample in one backward."""
+    vlm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    if getattr(vlm, "config", None) is not None:
+        vlm.config.use_cache = False
+    vlm._c1_checkpointing = True
+
+
 def make_train_step(T, cfg_cotrain: dict, text_batches_for):
     """A replacement for VLATrainer._train_step (T: starVLA.training.train_starvla).  text_batches_for(trainer)
-    returns the process's cotrain_text.TextBatches (built once)."""
+    returns the process's cotrain_text.TextBatches (built once).  With cfg_cotrain gradient_checkpointing, the VLM's
+    activation checkpointing is switched on before the first step (enable_checkpointing)."""
     import torch
 
     lam = float(cfg_cotrain["lambda"])
     diag_every = int(cfg_cotrain.get("diag_every", 0))
+    checkpointing = bool(cfg_cotrain.get("gradient_checkpointing", False))
 
     def _train_step(self, batch_vla, batch_vlm=None):
         batches = text_batches_for(self)
@@ -47,6 +59,8 @@ def make_train_step(T, cfg_cotrain: dict, text_batches_for):
         source, index, text_inputs = batches.at(step)
         vla = T._unwrap_model(self.accelerator, self.model)
         vlm = vla.qwen_vl_interface.model
+        if checkpointing and not getattr(vlm, "_c1_checkpointing", False):
+            enable_checkpointing(vlm)
         text_inputs = {k: v.to(self.accelerator.device) for k, v in text_inputs.items()}
         metrics = {}
         with self.accelerator.accumulate(self.model):

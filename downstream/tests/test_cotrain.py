@@ -134,6 +134,16 @@ def test_train_step_adds_lambda_times_text_loss_once():
     assert m["action_dit_loss"] == pytest.approx(4.0) and m["text_loss_qa"] == pytest.approx(text)
     assert m["grad_lm_head_text"] > 0 and m["grad_lm_head_action"] == 0.0 and m["text_index"] == 4
     assert m["grad_last_layer_action"] == 0.0 and m["grad_last_layer_text"] > 0
+    assert not getattr(vlm, "_c1_checkpointing", False)  # off unless asked
+
+    calls = []
+    vlm.gradient_checkpointing_enable = lambda **kw: calls.append(kw)
+    vlm.config = type("Cfg", (), {"use_cache": True})()
+    step = CE.make_train_step(T, {"lambda": 0.1, "gradient_checkpointing": True}, lambda tr: batch)
+    step(trainer, batch_vla=None)
+    step(trainer, batch_vla=None)
+    assert calls == [{"gradient_checkpointing_kwargs": {"use_reentrant": False}}]  # once, before the first step
+    assert vlm.config.use_cache is False
 
 
 # ---------------------------------------------------------------------------------------- config and check
@@ -142,6 +152,7 @@ def test_cotrain_option_parsing():
 
     co = ME.parse_cotrain("lambda=0.1,diag_every=10,skip_final_save=1")
     assert co["lambda"] == 0.1 and co["diag_every"] == 10 and co["skip_final_save"] is True
+    assert ME.parse_cotrain("lambda=0.1,gradient_checkpointing=1")["gradient_checkpointing"] is True
     assert co["sources"] == CT.SOURCES and "1:1" in co["mix"]
     assert ME.parse_cotrain("") == {}
     with pytest.raises(ValueError):

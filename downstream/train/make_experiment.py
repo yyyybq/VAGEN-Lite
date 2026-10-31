@@ -70,11 +70,13 @@ def parse_cotrain(text: str) -> dict:
             continue
         k, v = (x.strip() for x in part.split("="))
         out[k] = float(v) if k == "lambda" else int(v)
-    unknown = set(out) - {"lambda", "diag_every", "skip_final_save", "max_tokens", "seed"}
+    unknown = set(out) - {"lambda", "diag_every", "skip_final_save", "max_tokens", "seed", "gradient_checkpointing"}
     if "lambda" not in out or unknown:
-        raise ValueError(f"--cotrain needs lambda (and optionally diag_every, skip_final_save, max_tokens, seed): {text}")
-    if "skip_final_save" in out:
-        out["skip_final_save"] = bool(out["skip_final_save"])
+        raise ValueError("--cotrain needs lambda (and optionally diag_every, skip_final_save, max_tokens, seed, "
+                         f"gradient_checkpointing): {text}")
+    for flag in ("skip_final_save", "gradient_checkpointing"):  # 2026-10-31: checkpointing after the short run's OOM
+        if flag in out:
+            out[flag] = bool(out[flag])
     sys.path.insert(0, str(HERE))
     import cotrain_text
 
