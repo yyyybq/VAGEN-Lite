@@ -53,6 +53,10 @@ def test_metrics_read_from_the_runners_log_line():
           "[INFO] {'eval/success_once': 0.2333, 'eval/num_episodes': 30}\n"
     assert RE.read_metrics(log) == {"eval/success_once": 0.2333, "eval/num_episodes": 30}
     assert RE.read_metrics("nothing here") is None
+    real = ("{'eval/episode_len': array(424.53333, dtype=float32), 'eval/reward': array(0.00146664, dtype=float32), "
+            "'eval/success_once': array(0.36666667, dtype=float32), 'eval/num_trajectories': 30}")  # 2026-10-31
+    m = RE.read_metrics("x\n" + real + "\n")
+    assert m["eval/success_once"] == 0.36666667 and m["eval/num_trajectories"] == 30 and m["eval/reward"] == 0.00146664
 
 
 STUB = """import json, os, sys
@@ -86,6 +90,7 @@ def test_job_script_runs_fixed_then_control_and_reports(tmp_path):
     assert [s["fix"] for s in seen] == ["1", "0"] and all(s["hooks"] == "1" for s in seen)
     rep = json.loads((out / "report.json").read_text())
     assert rep["fixed"]["metrics"]["eval/success_once"] == 0.2333 and rep["control"]["rc"] == "0"
+    assert set(rep) == {"fixed", "control"}  # the script's own rlinf_eval.log is no run
     again = subprocess.run(["bash", str(ROOT / "rlinf/run_rlinf_eval.sh"), str(out), "60"], capture_output=True,
                            text=True, env=env, timeout=120)
     assert again.returncode == 0 and len((out / "seen.jsonl").read_text().splitlines()) == 2  # done runs are kept

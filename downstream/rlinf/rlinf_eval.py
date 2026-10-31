@@ -70,14 +70,16 @@ def make_cmd(args) -> int:
 
 
 METRICS_LINE = re.compile(r"(\{['\"]eval/[^{}]*\})")
+# RLinf logs numpy scalars: {'eval/success_once': array(0.36666667, dtype=float32), ...} (2026-10-31)
+NUMPY_SCALAR = re.compile(r"(?:np\.|numpy\.)?(?:array|float\d*|int\d*)\(\s*([-+0-9.eE]+|nan|inf)\s*(?:,\s*dtype=[\w.]+\s*)?\)")
 
 
 def read_metrics(log_text: str):
-    """The last {'eval/...': value, ...} dict a run logged, or None."""
+    """The last {'eval/...': value, ...} dict a run logged (numpy scalars read as numbers), or None."""
     found = None
     for m in METRICS_LINE.finditer(log_text):
         try:
-            found = ast.literal_eval(m.group(1))
+            found = ast.literal_eval(NUMPY_SCALAR.sub(r"\1", m.group(1)))
         except (ValueError, SyntaxError):
             continue
     return found
@@ -86,11 +88,11 @@ def read_metrics(log_text: str):
 def report_cmd(args) -> int:
     out = Path(args.out)
     runs = {}
-    for log in sorted(out.glob("rlinf_*.log")):
-        name = log.stem[len("rlinf_"):]
-        metrics = read_metrics(log.read_text(errors="replace"))
-        rc_file = out / f"rc_{name}.txt"
-        runs[name] = {"metrics": metrics, "rc": rc_file.read_text().strip() if rc_file.exists() else None}
+    for rc_file in sorted(out.glob("rc_*.txt")):  # the runs run_rlinf_eval.sh finished (not its own rlinf_eval.log)
+        name = rc_file.stem[len("rc_"):]
+        log = out / f"rlinf_{name}.log"
+        metrics = read_metrics(log.read_text(errors="replace")) if log.is_file() else None
+        runs[name] = {"metrics": metrics, "rc": rc_file.read_text().strip()}
     (out / "report.json").write_text(json.dumps(runs, indent=1) + "\n")
     lines = ["| 运行 | 退出码 | 成功率（RLinf 的 success_once） | 其他指标 |", "| --- | --- | --- | --- |"]
     for name, r in runs.items():
