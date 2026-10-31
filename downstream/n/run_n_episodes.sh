@@ -6,6 +6,8 @@
 # Usage: run_n_episodes.sh OUT GEN MODEL [WORKERS] [LIMIT]
 #   GEN: the smoke's generation folder (GEN/part*/instances.jsonl; the review page is made too), or N1's instance file
 #   (n_gen.py collect's instances_eval.jsonl; LIMIT 0 = all).  N_PORT: the model server's port (default 5800).
+#   N_VAL_ENV: the main line's validation config whose prompt the model sees (default n_episode.py's VAL_ENV, the
+#   Qwen2.5 one; the Qwen3 models get their own chain's, n_episode.VAL_ENV_QWEN3).
 #   Qwen3 models: the job runs as the container's root (sco_job.prepare as_root; the Qwen3-VL base snapshot is readable
 #   by root only), and this script then gives everything under OUT back to OWNER_UID:OWNER_GID (default 20325) when
 #   it ends, as run_qa_batch.sh does.
@@ -38,8 +40,10 @@ for i in $(seq 1 180); do
 done
 log "server ready ($MODEL on $PORT)"
 if [[ -f $GEN ]]; then INST=("$GEN"); else INST=("$GEN"/part*/instances.jsonl); fi
+VAL=()
+[[ -n ${N_VAL_ENV:-} ]] && VAL=(--val-env "$N_VAL_ENV")
 sim 1 "$SIM_PY" downstream/n/n_episode.py --instances "${INST[@]}" --port "$PORT" --out "$OUT" \
-  --workers "$WORKERS" --limit "$LIMIT" > "$OUT/episodes.log" 2>&1
+  --workers "$WORKERS" --limit "$LIMIT" ${VAL[@]+"${VAL[@]}"} > "$OUT/episodes.log" 2>&1
 log "episodes rc=$? $(grep -c '"success": true' "$OUT/episodes.jsonl" 2>/dev/null) successes of $(wc -l < "$OUT/episodes.jsonl" 2>/dev/null)"
 if [[ ! -f $GEN ]]; then
   sim 1 "$SIM_PY" downstream/n/n_smoke.py page --gen "$GEN"/part* --n "$LIMIT" --episodes "$OUT/episodes.jsonl" \

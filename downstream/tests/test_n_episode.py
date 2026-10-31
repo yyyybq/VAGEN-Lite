@@ -223,3 +223,25 @@ def test_episode_job_takes_an_n1_instance_file(tmp_path):
     log = (out / "n_episodes.log").read_text()
     assert "server ready (Q3B on" in log and "1 successes of 2" in log and "page rc" not in log
     assert (out / "episodes.jsonl").stat().st_uid == os.getuid()  # not root: ownership untouched
+    assert "--val-env" not in argv  # the default prompt unless N_VAL_ENV says otherwise
+    out2 = tmp_path / "out2"
+    res = subprocess.run(["bash", str(wt / "downstream/n/run_n_episodes.sh"), str(out2), str(gen), "Q3B", "3", "0"],
+                         capture_output=True, text=True, env=dict(env, N_VAL_ENV="/q3/val_env.yaml"), timeout=60)
+    assert res.returncode == 0, res.stdout + res.stderr
+    argv2 = json.loads((out2 / "argv.json").read_text())
+    assert argv2[argv2.index("--val-env") + 1] == "/q3/val_env.yaml"
+
+
+@pytest.mark.skipif(not (UPSTREAM and E.VAL_ENV_QWEN3.is_file()), reason="needs the main checkout and the Qwen3 chain")
+def test_qwen3_models_get_their_chains_prompt():
+    """N1: the Qwen3 models see the prompt of their own RL chain (RS's and RD's give the same text): the response-format
+    example names real actions instead of placeholders, in the system prompt and the turns."""
+    cfg, _ = E.upstream_config()
+    q3, _ = E.upstream_config(E.VAL_ENV_QWEN3)
+    assert q3.get("prompt_format_example") == "action_names" and cfg.get("prompt_format_example", "placeholder") != "action_names"
+    task = "Move so that both the mug and the kettle are fully in your view."
+    first_25, first_q3 = (E.user_text(c, True, (1.0, 2.0, 0.0), task) for c in (cfg, q3))
+    assert "<action>action1|action2|...|</action>" in first_25 and "<action>move_forward|turn_left|</action>" in first_q3
+    assert first_25.replace("action1|action2|...|", "move_forward|turn_left|") == first_q3  # nothing else differs
+    s25, sq3 = E.system_text(cfg, "fov_inclusion"), E.system_text(q3, "fov_inclusion")
+    assert "move_forward|turn_left|" in sq3 and "move_forward|turn_left|" not in s25

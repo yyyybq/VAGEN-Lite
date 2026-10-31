@@ -53,6 +53,10 @@ sys.path.insert(0, str(HERE.parents[1]))
 import n_env as N  # noqa: E402
 
 VAL_ENV = N.MAIN / "exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_ps0/val_env.yaml"
+# The Qwen3 models' own: the main line's Qwen3 RL chain (RS = rl_q3s0, RD = rl_q3d; both the same prompt).  Its prompt
+# differs from VAL_ENV's in one place, prompt_format_example: action_names (the first turn's format example names real
+# actions); the other differences are reward shaping, which an evaluation does not use.  --val-env picks it (N1).
+VAL_ENV_QWEN3 = Path("/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_q3d/val_env.yaml")
 
 
 # --------------------------------------------------------------------------------------- the upstream text
@@ -255,14 +259,14 @@ _W = {}
 EPISODE_TIMEOUT = 900.0
 
 
-def _init(port: int):
+def _init(port: int, val_env: Path = VAL_ENV):
     """In the main process, before any episode is forked: the counter-region fix, the model client, the upstream
-    config, and the simulator modules imported once (the forked episodes start with them)."""
+    config (val_env), and the simulator modules imported once (the forked episodes start with them)."""
     from downstream.eval import closed_loop
 
     closed_loop.stable_counter_regions()
     _W["ask"] = asker(port)
-    _W["cfg"], _W["entry"] = upstream_config()
+    _W["cfg"], _W["entry"] = upstream_config(Path(val_env))
     import gymnasium  # noqa: F401
     import mujoco  # noqa: F401
     import robocasa.wrappers.gym_wrapper  # noqa: F401
@@ -367,6 +371,8 @@ def main(argv=None) -> int:
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--timeout", type=float, default=EPISODE_TIMEOUT, help="seconds an episode may take")
+    ap.add_argument("--val-env", type=Path, default=VAL_ENV,
+                    help=f"the main line's validation config whose prompt the model sees (Qwen3 models: {VAL_ENV_QWEN3})")
     args = ap.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -374,7 +380,8 @@ def main(argv=None) -> int:
     if (out / "episodes.jsonl").is_file():
         done = {inst_id(json.loads(x)) for x in (out / "episodes.jsonl").read_text().splitlines() if x.strip()}
     todo = [i for i in load_instances(args.instances, args.limit) if inst_id(i) not in done]
-    _init(args.port)
+    _init(args.port, args.val_env)
+    print(f"[n_episode] {len(todo)} episodes, prompt from {args.val_env}", flush=True)
     with open(out / "episodes.jsonl", "a") as f:
         for rec in run_all(todo, out, args.workers, args.timeout):
             f.write(json.dumps(rec, default=str) + "\n")
