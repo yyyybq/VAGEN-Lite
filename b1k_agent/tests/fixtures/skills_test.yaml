@@ -1,0 +1,16 @@
+# TEST-ONLY skill catalog (mock episodes): one sub-skill marked available/verified so planning,
+# DONE and re-planning paths are exercised. Not a statement about any real executor.
+executor: test
+skills:
+  - name: __full_task__
+    tasks: ["*"]
+    instruction_template: "{task_prompt}"
+    description: Run the executor on the whole task.
+    available: true
+  - name: press_power
+    tasks: ["*"]
+    instruction_template: "Press the power button of the radio."
+    description: Press the radio's power button.
+    ends_when: the radio display is lit
+    available: true
+    verified: true

@@ -1,0 +1,4 @@
+base: L3_goal.yaml
+run: {name: L4_recover}
+modules:
+  recover: {enabled: true, impl: scripted, params: {}}

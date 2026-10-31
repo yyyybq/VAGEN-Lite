@@ -1,0 +1,11 @@
+# Budget-matched control (task spec 6.3): "no commander, same retries, fixed retry rule".
+# Same loop limits as S7/L4 (retries, replans, check interval) but no strong model:
+#   check.rule  (proprioception stall -> FAILED no_progress; never claims DONE)
+#   recover.scripted (same primitives and per-failure bounds)
+# Compare against S7_min_loop / L4_recover on the same (task, instance, seed) set; any gain of the
+# strong-model configs over this one is not explained by extra retries or extra time.
+base: L0_exec_only.yaml
+run: {name: C_budget_matched}
+modules:
+  check:   {enabled: true, impl: rule, params: {stall_window_steps: 240}}
+  recover: {enabled: true, impl: scripted, params: {}}

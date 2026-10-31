@@ -1,0 +1,4 @@
+base: L2_plan_check.yaml
+run: {name: L3_goal}
+modules:
+  goal: {enabled: true, impl: bddl, params: {low_risk_fraction: 0.05}}

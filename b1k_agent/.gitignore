@@ -1,0 +1,8 @@
+# The parent VAGEN-Lite .gitignore excludes every "data/" directory; ours holds code.
+!data/
+.pytest_cache/
+__pycache__/
+*.pyc
+# run outputs never go into git (they live under /nas/baiqiao/b1k_runs/logs and local disk)
+runs/
+b1k_local_logs/
