@@ -162,6 +162,40 @@ def test_train_step_adds_lambda_times_text_loss_once():
     assert vlm.config.use_cache is False
     assert "checkpointing_modules" in first and "checkpointing_modules" not in second
 
+    # the user's option B (2026-10-31): only the text forward checkpoints
+    blk = torch.nn.Module()
+    blk.gradient_checkpointing = False
+    seen = []
+    vlm2 = VLM()
+    vlm2.blk = blk
+    vlm2.config = type("Cfg", (), {"use_cache": True})()
+
+    def enable(**kw):
+        blk.gradient_checkpointing = True
+
+    vlm2.gradient_checkpointing_enable = enable
+    text_forward = vlm2.forward
+
+    def watched(*a, **kw):
+        seen.append(("text", blk.gradient_checkpointing))
+        return text_forward(*a, **kw)
+
+    vlm2.forward = watched
+
+    class Model2(Model):
+        def forward(self, batch):
+            seen.append(("action", blk.gradient_checkpointing))
+            return super().forward(batch)
+
+    vla2 = type("V", (), {"qwen_vl_interface": type("Q", (), {"model": vlm2})()})()
+    T2 = type("T", (), {"_unwrap_model": staticmethod(lambda acc, m: vla2)})
+    trainer.model = Model2()
+    step = CE.make_train_step(T2, {"lambda": 0.1, "gradient_checkpointing": True, "checkpoint_scope": "text"},
+                              lambda tr: batch)
+    assert step(trainer, batch_vla=None)["checkpointing_modules"] == 1
+    step(trainer, batch_vla=None)
+    assert seen == [("action", False), ("text", True)] * 2
+
 
 def test_answer_loss_equals_the_models_own_shifted_loss():
     """2026-10-31: answer_loss makes logits only where the next token carries a label; the number is the standard
@@ -193,6 +227,9 @@ def test_cotrain_option_parsing():
     co = ME.parse_cotrain("lambda=0.1,diag_every=10,skip_final_save=1")
     assert co["lambda"] == 0.1 and co["diag_every"] == 10 and co["skip_final_save"] is True
     assert ME.parse_cotrain("lambda=0.1,gradient_checkpointing=1")["gradient_checkpointing"] is True
+    assert ME.parse_cotrain("lambda=0.1,gradient_checkpointing=1,checkpoint_scope=text")["checkpoint_scope"] == "text"
+    with pytest.raises(ValueError):
+        ME.parse_cotrain("lambda=0.1,checkpoint_scope=vision")
     assert co["sources"] == CT.SOURCES and "1:1" in co["mix"]
     assert ME.parse_cotrain("") == {}
     with pytest.raises(ValueError):

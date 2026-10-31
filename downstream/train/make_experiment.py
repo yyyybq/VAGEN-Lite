@@ -69,11 +69,12 @@ def parse_cotrain(text: str) -> dict:
         if not part.strip():
             continue
         k, v = (x.strip() for x in part.split("="))
-        out[k] = float(v) if k == "lambda" else int(v)
-    unknown = set(out) - {"lambda", "diag_every", "skip_final_save", "max_tokens", "seed", "gradient_checkpointing"}
-    if "lambda" not in out or unknown:
+        out[k] = float(v) if k == "lambda" else (v if k == "checkpoint_scope" else int(v))
+    unknown = set(out) - {"lambda", "diag_every", "skip_final_save", "max_tokens", "seed", "gradient_checkpointing",
+                          "checkpoint_scope"}
+    if "lambda" not in out or unknown or out.get("checkpoint_scope", "all") not in ("all", "text"):
         raise ValueError("--cotrain needs lambda (and optionally diag_every, skip_final_save, max_tokens, seed, "
-                         f"gradient_checkpointing): {text}")
+                         f"gradient_checkpointing, checkpoint_scope=all|text): {text}")
     for flag in ("skip_final_save", "gradient_checkpointing"):  # 2026-10-31: checkpointing after the short run's OOM
         if flag in out:
             out[flag] = bool(out[flag])

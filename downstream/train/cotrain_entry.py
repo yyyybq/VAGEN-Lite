@@ -42,8 +42,18 @@ def enable_checkpointing(vlm) -> int:
     if getattr(vlm, "config", None) is not None:
         vlm.config.use_cache = False
     vlm._c1_checkpointing = True
-    return sum(1 for m in vlm.modules() if getattr(m, "gradient_checkpointing", False) is True) \
-        if hasattr(vlm, "modules") else 0
+    vlm._c1_gc_modules = [m for m in vlm.modules() if getattr(m, "gradient_checkpointing", False) is True] \
+        if hasattr(vlm, "modules") else []
+    return len(vlm._c1_gc_modules)
+
+
+def set_checkpointing(vlm, on: bool) -> None:
+    """Switch the checkpointing of the modules enable_checkpointing found on or off.  transformers' checkpointed
+    layers decide at each forward call (GradientCheckpointingLayer reads its gradient_checkpointing flag), so a
+    forward run with it off keeps its activations for the backward as usual, one run with it on recomputes them: with
+    checkpoint_scope "text" (2026-10-31, the user's option B) only the text forward is checkpointed."""
+    for m in getattr(vlm, "_c1_gc_modules", []):
+        m.gradient_checkpointing = on
 
 
 def answer_loss(vlm, text_inputs: dict):
@@ -67,12 +77,14 @@ def answer_loss(vlm, text_inputs: dict):
 def make_train_step(T, cfg_cotrain: dict, text_batches_for):
     """A replacement for VLATrainer._train_step (T: starVLA.training.train_starvla).  text_batches_for(trainer)
     returns the process's cotrain_text.TextBatches (built once).  With cfg_cotrain gradient_checkpointing, the VLM's
-    activation checkpointing is switched on before the first step (enable_checkpointing)."""
+    activation checkpointing is switched on before the first step (enable_checkpointing); checkpoint_scope "all"
+    (default) checkpoints both forwards, "text" only the text one (set_checkpointing around the two forwards)."""
     import torch
 
     lam = float(cfg_cotrain["lambda"])
     diag_every = int(cfg_cotrain.get("diag_every", 0))
     checkpointing = bool(cfg_cotrain.get("gradient_checkpointing", False))
+    text_only = checkpointing and str(cfg_cotrain.get("checkpoint_scope", "all")) == "text"
 
     def _train_step(self, batch_vla, batch_vlm=None):
         batches = text_batches_for(self)
@@ -91,10 +103,14 @@ def make_train_step(T, cfg_cotrain: dict, text_batches_for):
         with self.accelerator.accumulate(self.model):
             self.optimizer.zero_grad()
             with torch.autocast("cuda", dtype=torch.bfloat16):
+                if text_only:
+                    set_checkpointing(vlm, False)
                 output_dict = self.model.forward(batch_vla)
                 action_loss = output_dict["action_loss"]
                 if cuda:
                     metrics["mem_after_action_gib"] = torch.cuda.memory_allocated() / gib
+                if text_only:
+                    set_checkpointing(vlm, True)
                 text_loss = answer_loss(vlm, text_inputs)
                 if cuda:
                     metrics["mem_after_text_gib"] = torch.cuda.memory_allocated() / gib
