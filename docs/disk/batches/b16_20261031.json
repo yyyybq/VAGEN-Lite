@@ -1,0 +1,60 @@
+{
+ "batch": "b16_20261031",
+ "approved": "PENDING: the user's approval in the disk line.",
+ "items": [
+  {
+   "id": "R3-DS-CSS-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSS-100-s1/run/full_state",
+   "include": [
+    "^steps_175000/"
+   ],
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "DS-CSS-100-s1: trained (job SUCCEEDED), the 150k / 175k / 200k points evaluated; full state steps_175000 (resume only) archived to AOSS and deleted on 2026-10-31 by the disk line (R3; the model line's list table 1d; the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R3-DS-CSRS-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSRS-100-s1/run/full_state",
+   "include": [
+    "^steps_175000/"
+   ],
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "DS-CSRS-100-s1: trained (job SUCCEEDED), the 150k / 175k / 200k points evaluated; full state steps_175000 (resume only) archived to AOSS and deleted on 2026-10-31 by the disk line (R3; the model line's list table 1d; the user's approval). run/final_model stays."
+  },
+  {
+   "id": "R4-DS-CSS-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSS-100-s1/evals_src",
+   "include": [
+    "^steps_(175000)/"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261031.txt",
+   "marker": "DS-CSS-100-s1: evals_src weight copies of points 175000, evaluated (watch.json), archived to AOSS and deleted on 2026-10-31 by the disk line (R4; table 1d; the user's approval). watch.json stays."
+  },
+  {
+   "id": "R4-DS-CSRS-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSRS-100-s1/evals_src",
+   "include": [
+    "^steps_(150000|175000)/"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261031.txt",
+   "marker": "DS-CSRS-100-s1: evals_src weight copies of points 150000, 175000, evaluated (watch.json), archived to AOSS and deleted on 2026-10-31 by the disk line (R4; table 1d; the user's approval). watch.json stays."
+  },
+  {
+   "id": "R4-DS-CSRD-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSRD-100-s1/evals_src",
+   "include": [
+    "^steps_(150000|175000)/"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261031.txt",
+   "marker": "DS-CSRD-100-s1: evals_src weight copies of points 150000, 175000, evaluated (watch.json), archived to AOSS and deleted on 2026-10-31 by the disk line (R4; table 1d; the user's approval). watch.json stays."
+  },
+  {
+   "id": "R4-DS-Q3RD-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-Q3RD-100-s1/evals_src",
+   "include": [
+    "^steps_(175000)/"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261031.txt",
+   "marker": "DS-Q3RD-100-s1: evals_src weight copies of points 175000, evaluated (watch.json), archived to AOSS and deleted on 2026-10-31 by the disk line (R4; table 1d; the user's approval). watch.json stays."
+  }
+ ]
+}
