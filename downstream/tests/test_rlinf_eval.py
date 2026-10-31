@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,8 +60,10 @@ from pathlib import Path
 out = Path(sys.argv[sys.argv.index("--config-path") + 1]).parent
 fix = os.environ.get("DOWNSTREAM_RL_IMAGE_SIZE_FIX", "1")
 (out / "seen.jsonl").open("a").write(json.dumps({"argv": sys.argv[1:], "fix": fix,
-                                                 "hooks": os.environ.get("DOWNSTREAM_RL_HOOKS")}) + "\\n")
+                                                 "hooks": os.environ.get("DOWNSTREAM_RL_HOOKS"),
+                                                 "unbuffered": os.environ.get("PYTHONUNBUFFERED")}) + "\\n")
 rate = 0.2333 if fix != "0" else 0.0333
+print("[INFO RLinf] RLinf is running on a cluster with 1 node and 1 accelerator.")
 print({"eval/success_once": rate, "eval/num_episodes": 30})
 """
 
@@ -86,3 +89,43 @@ def test_job_script_runs_fixed_then_control_and_reports(tmp_path):
     again = subprocess.run(["bash", str(ROOT / "rlinf/run_rlinf_eval.sh"), str(out), "60"], capture_output=True,
                            text=True, env=env, timeout=120)
     assert again.returncode == 0 and len((out / "seen.jsonl").read_text().splitlines()) == 2  # done runs are kept
+    assert seen[0]["unbuffered"] == "1"
+
+
+STALLING = """import json, os, sys, time
+from pathlib import Path
+out = Path(sys.argv[sys.argv.index("--config-path") + 1]).parent
+fix = os.environ.get("DOWNSTREAM_RL_IMAGE_SIZE_FIX", "1")
+(out / f"pid_{fix}.txt").write_text(str(os.getpid()))
+if fix != "0":
+    print("Started a local Ray instance.", flush=True)
+    time.sleep(60)  # never gets to RLinf's cluster line
+print("[INFO RLinf] RLinf is running on a cluster with 1 node and 1 accelerator.", flush=True)
+print({"eval/success_once": 0.0333, "eval/num_episodes": 30})
+"""
+
+
+def test_a_run_without_rlinfs_cluster_line_is_diagnosed_and_stopped(tmp_path):
+    out = tmp_path / "out"
+    (out / "cfg").mkdir(parents=True)
+    (out / "cfg/eval.yaml").write_text("runner: {}\n")
+    stub = tmp_path / "rlinf_stub.py"
+    stub.write_text(STALLING)
+    wrapper = tmp_path / "py"
+    wrapper.write_text(f"#!/usr/bin/env bash\nif [[ $1 == *eval_embodied_agent.py ]]; then shift; "
+                       f"exec {sys.executable} {stub} \"$@\"; fi\nexec {sys.executable} \"$@\"\n")
+    wrapper.chmod(0o755)
+    ray_tmp = tmp_path / "ray"
+    (ray_tmp / "session_latest/logs").mkdir(parents=True)
+    (ray_tmp / "session_latest/logs/raylet.out").write_text("waiting\n")
+    env = dict(os.environ, ENV=str(tmp_path / "noenv"), RLINF_ROOT=str(tmp_path / "rlinf"), RLINF_PY=str(wrapper),
+               STALL="4", RAY_TMP=str(ray_tmp))
+    res = subprocess.run(["bash", str(ROOT / "rlinf/run_rlinf_eval.sh"), str(out), "60"], capture_output=True,
+                         text=True, env=env, timeout=50)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert (out / "rc_fixed.txt").read_text().strip() == "stalled" and (out / "rc_control.txt").read_text().strip() == "0"
+    assert (out / "diag_fixed/ps.txt").is_file() and (out / "diag_fixed/ray_logs/raylet.out").is_file()
+    pid = int((out / "pid_1.txt").read_text())
+    with pytest.raises(OSError):  # the stalled run's process is gone
+        os.kill(pid, 0)
+    assert not (out / "diag_control").exists()
