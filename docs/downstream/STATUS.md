@@ -1,10 +1,18 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-10-31 07:20 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 的 [C1 短任务](reports/C1_SHORT_20261031.md)（等你定正式任务）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)（等你定相机 A 画不画机器人）、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-10-31 11:30 UTC。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
 - 第一步、第二步完成；E0、E1、E2、**E3** 完成；**X0–X5、XE、T5、T2** 完成。
+- **10-31 你的七条决定（REFERENCE 第 0 节），执行中：**
+  1. **C1 按乙跑正式任务。** 乙的短任务 `C1-B-030-short5`（10:13–10:23，约 1.3 卡时）放得下：PyTorch 显存峰值 73.6 GiB（nvidia-smi 读到 79.1 GiB，含缓存），但没有变快，每步 1.91 秒（甲 1.90）。正式任务 `C1-B-030-s1` `pt-mfgymyvf`（h800）10:38 开跑：配置和 DS-B-030-s1 只差文字损失一段（λ 0.1、每步 8 条、文字样本至多 1,800 个 token、只给文字那一路开梯度检查点），20 万步，训完任务内评 944 回合。第 100 步每步 1.92 秒、峰值 72.5 GiB；按每步 1.9 秒，训练约 840 卡时，加评测约 905，在批的 910 以内，余量很小，每段都推算一次。每 2.5 万步报一次每步时间、显存峰值、两个损失、跳过的长轨迹比例（`downstream/train/c1_progress.py`，定时检查每 2 小时一次；第一段约 11-01 00:00 UTC）。
+  2. **E3 修复已做，验证在排队。** 钩子 `054556af`：`get_train_image_size` 找不到原字段时退回 `obs_image_size`。RLinf 里不更新参数的评测，第一次 `pt-covhh7fh`（10:25–11:07，约 0.7 卡时）卡在 RLinf 建集群那一步：E3 训练时 ray 起来 22 秒后就有集群信息，这次 40 分钟没有，删了。加了看门狗（`b0ee7fb7`：15 分钟内没建好集群就留进程树、py-spy 调用栈和 Ray 日志，然后停掉），11:11 重新排队（`q13_e3_rlinf_eval_2`）。一页说明已发主窗口（[全文](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)）；主窗口核对后回复主线 RL 不受影响，只有直接跑主线仓库的 `examples/train/robocasa/run_rlinf_starvla.sh` 会碰到。验证结果出来后补发。
+  3. **N1 代码已写，生成试跑在排队。** 六类任务（左右沿用冒烟的写法，另外五类用主线生成器自己的 `build_item` 和主线 v2 判定）、相机 A 不画机器人、每个场景单独一个进程并限时（超时记下、跳过、以后也不再试）、物体名改通顺（如 "kettle non electric" → "kettle"）、门槛附近的实例单独标出（`ff23c6a0`、`fa177e0b`、`f113ea8e`，测试 296 个通过）。试跑 `q14_n3_n1_check`：12 个场景，量每个场景的时间和各类的产出，然后定正式生成的规模，再报你评测的卡时和回合数。
+  4. **T1 取消**：两个排队文件改名 `*.cancelled_20261031`，`t/T1/matrix.json` 标"取消"，目录保留。
+  5. **OpenDrawer 1012 不放回**：评测照旧 943 回合（空间组 446）。
+  6. **V4 复核**：照常训练，训完评三点（15 万、17.5 万由模型线的 `watch_points` 复制后评，20 万在任务内评），再和 DS-Q3B、DS-Q3RD 逐任务配对，发你和主窗口。
+  7. **问答批次一页已发主窗口**（[全文](reports/FOR_MAIN_QA_20261031.md)）。
 - **10-30 晚你确认四份设计并另加两件（REFERENCE 第 0 节），执行中**（优先级：问答和诊断插空 → N 冒烟、C1 短任务 → N1 → C1 正式 → N2）：
   - **问答批次完成，Qwen3 闸门没过**（[报告](reports/QA_BATCH_RESULTS_20261030.md)；批次 1 `pt-8v1wvqar` 20:47–21:18、批次 2 `pt-0u5od5jr` 22:28–22:47，各 1 卡，合计约 0.8 卡时）：
     - X0 上 Q3RS 64.1%、Q3RD 67.8%，比 Q3B 的 75.7% 低 11.6 和 7.8 个百分点；G0 上也显著低（75.3%、78.3%，Q3B 86.7%）。按任务书：远迁移不再做，下游主张走 N 系列或 C1。T1 的排队文件继续暂停。
@@ -58,14 +66,15 @@
 - **X1、X2、X3、X5、T5**：报告 10-29 01:3x 已交（[X1](reports/X1_RESULTS_20261029.md)、[X2](reports/X2_RESULTS_20261029.md)、[X3](reports/X3_RESULTS_20261029.md)、[X5](reports/X5_RESULTS_20261029.md)、[T5](reports/T5_RESULTS_20261029.md)）。
 - **T 系列**：T5、T2 完成；T1 推迟；T3 / T4 等路径。
 
-## 2. 在跑什么（10-31 07:20 UTC）
+## 2. 在跑什么（10-31 11:30 UTC）
 
+- **C1 正式任务** `C1-B-030-s1` `pt-mfgymyvf`：h800，10:38 开跑，11:13 在第 1,000 步，每步约 1.9 秒，预计约 11-05 中午训完（估计），再做任务内评测。
 - **V4 复核**：
-  - DS-Q3DCKS2-100-s1 `pt-w2t0xe9b`：h800，10-30 08:43 开跑，10-31 07:17 在第 103,300 步；
-  - DS-Q3V4S3-100-s1 `pt-qrdl4abe`：zoetrope，10-30 12:34 开跑，07:16 在第 85,300 步。
+  - DS-Q3DCKS2-100-s1 `pt-w2t0xe9b`：h800，10-30 08:43 开跑，10-31 11:14 在第 121,600 步；
+  - DS-Q3V4S3-100-s1 `pt-qrdl4abe`：zoetrope，10-30 12:34 开跑，11:14 在第 103,500 步。
   - 两个都约 1.27 步/秒，DCKS2 约 11-01 04:30 UTC、V4S3 约 11-01 08:20 UTC 训完，之后还有任务内评测（估计）。
   - payload 是模型线的 `run_full.sh`。15 万、17.5 万步由我们起的模型线 `watch_points`（PID 1768868）复制后评测。
-- **排队**：没有。h800 上主线有任务在排队，按规则只往 zoetrope 交。
+- **排队**：E3 验证第二次（`q13_e3_rlinf_eval_2`，1 卡）、N1 生成试跑（`q14_n3_n1_check`，1 卡）。
 - 挂起的：T1 两个（`*.hold_qwen3_gate_20261028`）；去掉的：T2 的 S、RD（`*.dropped_20261028`）。
 
 **GPU 规则**（你 10-23 晚的决定 1；10-25 约 10:00 改为只给同一个池让路）：
