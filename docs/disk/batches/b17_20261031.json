@@ -1,0 +1,15 @@
+{
+ "batch": "b17_20261031",
+ "approved": "PENDING: the user's confirmation in the disk line.",
+ "items": [
+  {
+   "id": "R3-DS-CSRD-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSRD-100-s1/run/full_state",
+   "include": [
+    "^steps_175000/"
+   ],
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "DS-CSRD-100-s1: trained to 200k (job SUCCEEDED 2026-10-31 16:25, the 200k point evaluated in the job), the 150k / 175k points evaluated; full state steps_175000 (resume only) archived to AOSS and deleted by the disk line (R3; the model line's table 1e, its decision 44 = A; the user's approval). run/final_model stays."
+  }
+ ]
+}
