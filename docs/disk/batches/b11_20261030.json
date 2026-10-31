@@ -1,6 +1,6 @@
 {
  "batch": "b11_20261030",
- "approved": "PENDING: the user's approval in the disk line.",
+ "approved": "the user, 2026-10-31 in the disk line: all A (b11 + b12, b13, b14; archive to AOSS then delete in one 1-card sco job, order b14, b13, b12, b11; tell the model line, the main line and the downstream line).",
  "items": [
   {
    "id": "R4-DS-Q3S-100-s1-175k",
