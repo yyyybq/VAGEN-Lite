@@ -37,20 +37,22 @@ EASI_8_JOBS = ("vsi_bench", "mmsi_bench", "mindcube_tiny", "viewspatial", "site_
 def easi(a: argparse.Namespace) -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
+    own = out / a.name  # handed back to the login user when the job ends (job script ALSO_OWNED); OUT itself is not
+    own.mkdir(exist_ok=True)
     env = dict(os.environ, HF_HOME=HF_HOME, TRANSFORMERS_CACHE=f"{HF_HOME}/hub",
                HF_DATASETS_CACHE=f"{HF_HOME}/datasets_easi_shared", HF_HUB_OFFLINE="1", HF_DATASETS_OFFLINE="1",
                NO_PROXY="*", no_proxy="*", TOKENIZERS_PARALLELISM="false")
     # EASI runs "accelerate launch ... -m lmms_eval" by name, and the job script puts the vagen-lite env first on PATH:
     # its accelerate runs lmms-eval in vagen-lite, whose Transformers does not know Qwen3-VL (smoke 2026-11-01). An
     # "accelerate" in this Python (the model type's, e.g. the Qwen3-VL runtime venv over vagen-lite) goes first.
-    bin_dir = out / f"_bin_{os.getpid()}"
+    bin_dir = own / f"_bin_{os.getpid()}"
     bin_dir.mkdir(exist_ok=True)
     (bin_dir / "accelerate").write_text(f"#!{sys.executable}\nfrom accelerate.commands.accelerate_cli import main\n"
                                         "raise SystemExit(main())\n")
     (bin_dir / "accelerate").chmod(0o755)
     env["PATH"] = os.pathsep.join([str(bin_dir), str(Path(sys.executable).parent), env.get("PATH", "")])
     if a.benchmark.startswith("site"):
-        d = out / f"_stack_dump_{os.getpid()}"
+        d = own / f"_stack_dump_{os.getpid()}"
         d.mkdir(exist_ok=True)
         (d / "sitecustomize.py").write_text("import faulthandler, sys\n"
                                             f"faulthandler.dump_traceback_later({STACK_DUMP_S}, repeat=True, "
@@ -65,12 +67,19 @@ def easi(a: argparse.Namespace) -> int:
     print("$", " ".join(cmd), flush=True)
     rc = subprocess.run(cmd, cwd=WORKTREE, env=env).returncode
     result = out / a.name / "easi_results.json"
-    scores = json.loads(result.read_text()).get("scores", {}) if result.is_file() else {}
-    if rc == 0 and scores.get(a.benchmark) is not None:  # a smoke run (--limit) says so: never a full result
+    payload = json.loads(result.read_text()) if result.is_file() else {}
+    scores = payload.get("scores") or {}
+    # EASI files a SITE part's score as "site" (easi_eval.py then calls the run incomplete and exits 1): the part's
+    # own score; the EASI-8 SITE comes from both parts' lmms-eval files together (EASI's adapter, as easi_compare.py)
+    key = "site" if a.benchmark in ("site_image", "site_video") else a.benchmark
+    if scores.get(key) is not None and (rc == 0 or key != a.benchmark):  # a smoke run (--limit) says so
         (out / a.name / "done.json").write_text(json.dumps({"benchmark": a.benchmark, "model": a.model,
                                                             "model_type": a.model_type, "limit": a.limit,
-                                                            "score": scores[a.benchmark]}) + "\n")
-    return rc
+                                                            "score": scores[key],
+                                                            "sub_scores": (payload.get("subScores") or {}).get(key)})
+                                                + "\n")
+        return 0
+    return rc or 1
 
 
 def main() -> int:
