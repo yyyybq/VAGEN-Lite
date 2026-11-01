@@ -1,0 +1,15 @@
+{
+ "batch": "b18_20261101",
+ "approved": "PENDING: the user's confirmation in the disk line.",
+ "items": [
+  {
+   "id": "R4-DS-CSS-100-s1-150k",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSS-100-s1/evals_src",
+   "include": [
+    "^steps_150000/"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261101.txt",
+   "marker": "DS-CSS-100-s1: the evals_src weight copy of point 150000 (evaluated 10-30; the JPEG re-evaluation of the model line's decision 39 finished 10-31) archived to AOSS and deleted by the disk line (R4; the model line's table 1f, its decision 45 = A; the user's confirmation). watch.json stays."
+  }
+ ]
+}
