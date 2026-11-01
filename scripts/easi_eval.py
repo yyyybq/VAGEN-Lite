@@ -150,7 +150,7 @@ def main() -> int:
         if len(parts) < 2:
             print(f"[error] Invalid --add value: {item}", file=sys.stderr)
             return 2
-        if len(parts) >= 3 and parts[-1] in {"qwen2_5_vl", "cambrians"}:
+        if len(parts) >= 3 and parts[-1] in {"qwen2_5_vl", "qwen3_vl", "cambrians"}:  # qwen3_vl: lmms-eval's class
             name, model_type = parts[0], parts[-1]
             raw_path = ":".join(parts[1:-1])
         else:

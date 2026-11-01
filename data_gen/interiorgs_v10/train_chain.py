@@ -71,7 +71,10 @@ last entropy_window updates (the user's line: 0.3 in 5); "vision_token_crashes" 
 2026-10-29: a run whose trainer ends N times in a row (the user's 2) with the Qwen3-VL image-token crash
 (vision_token_crash: a drifted policy writes image placeholder tokens, so the M-RoPE position ids or the image features
 no longer match the sequence) is stopped as a guard stops it instead of being resubmitted (vision_crash_stop; every
-failed attempt in state "trainer_crashes"); the checkpoints it reached are evaluated.
+failed attempt in state "trainer_crashes"); the checkpoints it reached are evaluated.  Plan "qa_eval" (decision 2 甲 of
+2026-11-01, off unless given; qa_jobs): the evaluate step also evaluates the named models on EASI benchmarks, one
+single-card job a model and benchmark (job script mode qa, data_gen.interiorgs_v10.qa_eval, the model type's Python),
+in the same queue as the action evaluations.
 
 Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
 or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
@@ -853,6 +856,32 @@ class Chain:
                     f"(last: {last[-1]['crash'][:120]})")
         return None
 
+    def qa_jobs(self, models: Dict[str, Tuple[str, Optional[str], Sequence[str]]]) -> Dict[str, Tuple[Any, ...]]:
+        """Plan "qa_eval" (decision 2 甲 of 2026-11-01; off unless given): {"out": folder, "easi": a list of EASI
+        benchmark keys or "easi_8" (SITE as its image and video parts, qa_eval.EASI_8_JOBS), "models": result names
+        among the evaluate step's models (default: the plan's eval "models"), "limit": questions a benchmark (a
+        smoke test; give it its own folder)} -- the evaluate step's jobs {"qa_<benchmark>__<name>":
+        (out/<benchmark>, name, model, None, options, "qa")}, one single-card job a model and benchmark
+        (data_gen.interiorgs_v10.qa_eval easi with the plan's model type); out/<benchmark>/<name>/done.json marks
+        one as done."""
+        qa = self.plan.get("qa_eval")
+        if not qa:
+            return {}
+        from .qa_eval import EASI_8, EASI_8_JOBS
+
+        benchmarks = list(EASI_8_JOBS) if qa.get("easi") == "easi_8" else list(qa.get("easi") or [])
+        unknown = [b for b in benchmarks if b not in EASI_8 + EASI_8_JOBS]
+        names = list(qa.get("models") or (self.plan.get("eval") or {}).get("models") or {})
+        missing = [n for n in names if n not in models]
+        if unknown or missing:
+            raise ChainError(f"qa_eval: benchmarks not in EASI-8 {unknown}; models the evaluate step lacks {missing}")
+        kind = str(self.plan.get("model_type") or "qwen2_5_vl")
+        out = Path(qa["out"])
+        limit = ["--limit", str(qa["limit"])] if qa.get("limit") else []
+        return {f"qa_{b}__{n}": (out / b, n, models[n][0], None,
+                                 ["easi", "--benchmark", b, "--model-type", kind, *limit], "qa")
+                for b in benchmarks for n in names}
+
     def external_renderer_state(self, name: str, run_dir: Path, info: Dict[str, Any]) -> Dict[str, Any]:
         """Round 12 freeze (the user's decision of 2026-10-24): a render service outside sco (renderer_external.json),
         as a job state: EXTERNAL while it answers /health (and for fewer than EXTERNAL_DOWN_CHECKS failed polls in a
@@ -1147,7 +1176,8 @@ class Chain:
     def eval_jobs(self, step: str, jobs: Dict[str, Tuple[Path, str, str, Optional[str], Sequence[str]]]) -> None:
         """Single-card evaluation jobs {run name: (eval set folder, result name, model, prompt format, options)},
         at most max_eval_jobs at a time; a result folder with done.json is not evaluated again; every job is
-        deleted when it ends; incomplete results fail the step."""
+        deleted when it ends; incomplete results fail the step.  A sixth element names another job script mode
+        (qa_jobs: "qa", whose arguments are the folder, the result name, the model and the options)."""
         from . import job_sco
 
         jobs = {n: j for n, j in jobs.items() if not (j[0] / j[1] / "done.json").exists()}
@@ -1163,12 +1193,13 @@ class Chain:
         try:
             while queue or running:
                 while queue and len(running) < limit:
-                    name, (eval_dir, result, model, prompt_format, options) = queue.pop(0)
+                    name, (eval_dir, result, model, prompt_format, options, *mode) = queue.pop(0)
                     run = self.tr / "eval_runs" / name
                     run.mkdir(parents=True, exist_ok=True)
                     if not (run / "job" / "submission.json").exists():
-                        job_sco.prepare(run, 1, ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options],
-                                        pool=self.job_pool(cards=1))
+                        args = ([mode[0], str(eval_dir), result, str(model), *options] if mode else
+                                ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options])
+                        job_sco.prepare(run, 1, args, pool=self.job_pool(cards=1))
                         job_sco.submit(run)
                     running[name] = run
                 for name, run in list(running.items()):
@@ -2049,6 +2080,7 @@ class Chain:
         jobs = {(name if single else f"{set_name}__{name}"): (eval_dir, name, model, prompt_format, opts)
                 for set_name, eval_dir in sets.items() for name, (model, prompt_format, opts) in models.items()}
         extra = {k: Path(v) for k, v in (ev.get("extra_sets") or {}).items()}  # round 11: sets only variants use
+        jobs.update(self.qa_jobs(models))  # Qwen3 main line: plan "qa_eval"
         jobs.update(self.variant_jobs(ev, {**sets, **extra}, models, rl_names))
         self.eval_jobs("evaluate", jobs)
         self.tables()

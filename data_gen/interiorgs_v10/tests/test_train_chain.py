@@ -671,6 +671,61 @@ class ChainTest(unittest.TestCase):
         self.assertIsNone(T.guard_reason(few, {"kl_max": 0.2}))  # off unless given
         self.assertIsNone(T.guard_reason("".join(line(s) for s in range(1, 8)), guards))  # S0: no keep metrics
 
+    def test_qa_eval_jobs(self):
+        """Decision 2 甲 (2026-11-01): plan "qa_eval" adds one job a model and EASI benchmark to the evaluate step's
+        queue, submitted in job script mode qa with the plan's model type; a scored one (done.json) is skipped; the
+        action evaluations are unchanged; without the switch nothing is added."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for m in ("base", "sft"):
+                (root / m).mkdir()
+                (root / m / "config.json").write_text("{}")
+            plan = {"tr": tmp, "sft_dir": str(root / "sft_data"), "eval_only": True, "model_type": "qwen3_vl",
+                    "eval_sets": {"val": str(root / "val")},
+                    "eval": {"models": {"base": {"model": str(root / "base")}, "sft": {"model": str(root / "sft")}}},
+                    "qa_eval": {"out": str(root / "easi"), "easi": ["vsi_bench", "site"]}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            got = {}
+            chain.eval_jobs = lambda step, j: got.update(j)
+            chain.tables = lambda: None
+            chain.evaluate()
+            self.assertEqual(sorted(got), ["qa_site__base", "qa_site__sft", "qa_vsi_bench__base", "qa_vsi_bench__sft",
+                                           "val__base", "val__sft"])
+            self.assertEqual(got["qa_site__sft"], (root / "easi" / "site", "sft", str(root / "sft"), None,
+                                                   ["easi", "--benchmark", "site", "--model-type", "qwen3_vl"], "qa"))
+            self.assertEqual(len(got["val__sft"]), 5)  # the action evaluation as before
+            with self.assertRaises(T.ChainError):
+                T.Chain({**plan, "qa_eval": {"out": tmp, "easi": ["mmbench"]}}, sleep=lambda s: None).qa_jobs({})
+            self.assertEqual(T.Chain({**plan, "qa_eval": None}, sleep=lambda s: None).qa_jobs({}), {})
+            prepared = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                prepared.append(list(args))
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}"}))
+                out, name = (root / "easi" / "site", "sft") if run.name == "qa_site__sft" else (None, None)
+                if out:
+                    (out / name).mkdir(parents=True)
+                    (out / name / "done.json").write_text("{}")
+
+            def delete(run, job_dir="job"):
+                pass
+
+            (root / "easi" / "vsi_bench" / "base").mkdir(parents=True)
+            (root / "easi" / "vsi_bench" / "base" / "done.json").write_text("{}")  # scored before: skipped
+            chain = T.Chain(plan, sleep=lambda s: None)
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, delete=delete,
+                                     status=lambda run, job_dir="job": {"state": "SUCCEEDED", "finished": True}):
+                chain.eval_jobs("evaluate", {k: v for k, v in got.items() if k in ("qa_site__sft", "qa_vsi_bench__base")})
+            self.assertEqual(prepared, [["qa", str(root / "easi" / "site"), "sft", str(root / "sft"), "easi",
+                                         "--benchmark", "site", "--model-type", "qwen3_vl"]])
+
     def test_guard_entropy(self):
         """The user's decision 99 (2026-11-01): entropy above entropy_max in each of the last entropy_window updates
         stops the run; one update at or under the line resets it; off unless given."""
