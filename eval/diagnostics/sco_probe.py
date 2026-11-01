@@ -9,7 +9,13 @@ Writes RUN/job/launch.sh and RUN/job/prepared.json in the format of data_gen/int
 --submit, submits through job_sco.submit (status / delete with job_sco.py as usual).  The environment block is the
 one of examples/train/active_spatial/sco_interiorgs_v10_train.sh; sco jobs run as root, so RUN is handed back to
 its owner on exit.  Results go to RUN/probe/<name>.json(l).  ``--python`` runs the probe with another Python (the
-model type's runtime, as the job script's VAGEN_LITE_PYTHON; default the vagen-lite env).
+model type's runtime, as the job script's VAGEN_LITE_PYTHON; default that variable when set, else the vagen-lite
+env).
+
+The training chain's diagnostics step (patch 0002) calls prepare() with the plan's "pool" in the chain's process: a
+pool mode of the chain ("auto", "queue", "idle") is not an sco pool and becomes the pool with the fewest waiting
+jobs now (job_sco.pick_pool); the chain sets VAGEN_LITE_PYTHON from the plan's model_type (Qwen3-VL: its runtime),
+so its probes run in that Python (matrix v3, 2026-11-01).
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import shlex
 from pathlib import Path
 
@@ -24,6 +31,7 @@ from data_gen.interiorgs_v10 import job_sco
 
 CHECKOUT = Path(__file__).resolve().parents[2]
 ENV_ROOT = "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite"
+CHAIN_POOL_MODES = ("auto", "queue", "idle")  # train_chain plan "pool" modes, not sco pools
 
 LAUNCH = """#!/usr/bin/env bash
 set -euo pipefail
@@ -55,7 +63,11 @@ git -C {checkout} rev-parse HEAD || true
 def prepare(run: Path, probe: str, from_eval: str = "", names: str = "", models=(), pool: str = None,
             out_dir: str = None, blind: bool = False, python: str = None) -> Path:
     """RUN/job/launch.sh and prepared.json; results go to ``out_dir`` (default RUN/probe), handed back to the owner.
-    ``python``: the probe's Python (default the vagen-lite env's)."""
+    ``pool``: an sco pool, or a chain pool mode (CHAIN_POOL_MODES: the pool with the fewest waiting jobs now).
+    ``python``: the probe's Python (default VAGEN_LITE_PYTHON when set, else the vagen-lite env's)."""
+    if pool in CHAIN_POOL_MODES:
+        pool = job_sco.pick_pool()
+    python = python or os.environ.get("VAGEN_LITE_PYTHON") or None
     run = run.resolve()
     job = run / "job"
     job.mkdir(parents=True, exist_ok=True)

@@ -438,12 +438,13 @@ def test_compare_two_seeds_sign_over_the_seeds(tmp_path):
                  "--a", "D=20261019:d1s0,d1d;20261021:d2s0,d2d", "--b", "C=20261019:c1s0,c1d;20261022:c2s0,c2d"])
 
 
-def test_sco_probe_python(tmp_path):
+def test_sco_probe_python(tmp_path, monkeypatch):
     """sco_probe --python: the probe runs with that Python (Qwen3-VL: its runtime); without it the launch is unchanged."""
     import json
 
     from eval.diagnostics import sco_probe as SP
 
+    monkeypatch.delenv("VAGEN_LITE_PYTHON", raising=False)
     probe = tmp_path / "probe.jsonl"
     probe.write_text("")
     plain = SP.prepare(tmp_path / "a", str(probe), models=["m=/x"]).read_text()
@@ -455,3 +456,27 @@ def test_sco_probe_python(tmp_path):
     assert text.replace("'/venv q3/bin/python'", "$ENV_ROOT/bin/python").replace("/b/", "/a/").replace("/b\n", "/a\n") \
         == plain
     assert json.loads((tmp_path / "b" / "job" / "prepared.json").read_text())["python"] == q3
+
+
+def test_sco_probe_from_chain(tmp_path, monkeypatch):
+    """The chain's diagnostics step: VAGEN_LITE_PYTHON (the plan's model type) is the default Python, and a chain pool
+    mode becomes the pool with the fewest waiting jobs; an sco pool and an explicit --python stay as given."""
+    import json
+
+    from data_gen.interiorgs_v10 import job_sco
+    from eval.diagnostics import sco_probe as SP
+
+    probe = tmp_path / "probe.jsonl"
+    probe.write_text("")
+    monkeypatch.setenv("VAGEN_LITE_PYTHON", "/q3/bin/python")
+    monkeypatch.setattr(job_sco, "pick_pool", lambda pools=job_sco.POOLS: "h800")
+    text = SP.prepare(tmp_path / "a", str(probe), models=["m=/x"], pool="queue").read_text()
+    assert "\n/q3/bin/python -m eval.diagnostics.qa_probe run --probe " in text
+    prepared = json.loads((tmp_path / "a" / "job" / "prepared.json").read_text())
+    assert (prepared["pool"], prepared["python"]) == ("h800", "/q3/bin/python")
+    for mode in SP.CHAIN_POOL_MODES:
+        SP.prepare(tmp_path / mode, str(probe), models=["m=/x"], pool=mode)
+        assert json.loads((tmp_path / mode / "job" / "prepared.json").read_text())["pool"] == "h800"
+    SP.prepare(tmp_path / "z", str(probe), models=["m=/x"], pool="zoetrope", python="/other/python")
+    prepared = json.loads((tmp_path / "z" / "job" / "prepared.json").read_text())
+    assert (prepared["pool"], prepared["python"]) == ("zoetrope", "/other/python")
