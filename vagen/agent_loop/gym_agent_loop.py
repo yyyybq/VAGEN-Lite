@@ -100,6 +100,8 @@ class AgentData:
         self.turn_span: Optional[tuple] = None
         self.invalid_spans: List[List[int]] = []
         self.progress_return: float = 0.0  # round 12 freeze, V8: the env's applied progress reward, summed
+        # reward line (2026-11-01, vagen/turn_credit.py): every turn's span, reward and progress score
+        self.turn_records: List[Dict[str, Any]] = []
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -210,6 +212,10 @@ class GymAgentLoop(AgentLoopBase):
         from vagen.split_reward_adv import weight as _split_weight
 
         cls.record_reward_parts = _split_weight(config.get("algorithm", None)) is not None
+        # reward line (2026-11-01): every turn's record only with the per-turn credit estimator (vagen/turn_credit.py)
+        from vagen.turn_credit import selected as _turn_credit_selected
+
+        cls.record_turn_records = _turn_credit_selected(config)
 
         _placeholder = [{"role": "system", "content": "placeholder"}]
         if processor is not None:
@@ -348,6 +354,11 @@ class GymAgentLoop(AgentLoopBase):
                                                                    if s[0] < self.response_length]}
         if getattr(self, "record_reward_parts", False):  # round 12 freeze, V8 (vagen/split_reward_adv.py)
             output.extra_fields["reward_parts"] = {"progress": float(agent_data.progress_return)}
+        if getattr(self, "record_turn_records", False):  # reward line (2026-11-01): the per-turn credit's input
+            from vagen.turn_credit import episode_record
+
+            output.extra_fields["turn_records"] = episode_record(agent_data.initial_score, agent_data.turn_records,
+                                                                 self.response_length)
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:
@@ -448,6 +459,11 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.env_turns += 1
         agent_data.invalid_turns += int(turn_invalid(info))
         agent_data.end_turn(turn_invalid(info))  # round 12 freeze (vagen/invalid_turns.py)
+        if getattr(self, "record_turn_records", False):  # reward line (2026-11-01, vagen/turn_credit.py)
+            from vagen.turn_credit import turn_record
+
+            agent_data.turn_records.append(turn_record(agent_data.turn_span, reward, info, agent_data.traj_success,
+                                                       not turn_invalid(info)))
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))

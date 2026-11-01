@@ -181,6 +181,40 @@ def mixed_outcome_filter(data_proto: DataProto, metrics, **kwargs) -> tuple[Data
     return filtered, metrics
 
 
+@register_filter("nominal")
+def nominal_filter(data_proto: DataProto, metrics, **kwargs) -> tuple[DataProto, dict]:
+    """Reward line (2026-11-01, the per-turn credit, vagen/turn_credit.py): train on the nominal batch whatever the
+    outcomes -- the first ``target_groups`` candidates in draw order (meta_info["uid_draw_order"], else first
+    appearance), all-success and all-fail tasks included; the extra candidates are dropped.  The update keeps
+    mixed_outcome's size (target_groups tasks) without its selection by outcome.
+
+    kwargs: target_groups (default: all candidates), success_key (default "traj_success").  Metrics (filter/nominal/):
+    candidates, kept, mixed, all_success, all_fail (among the kept)."""
+    import numpy as np
+
+    key = kwargs.get("success_key", "traj_success")
+    uids = [str(u) for u in data_proto.non_tensor_batch["uid"]]
+    success = np.asarray(data_proto.non_tensor_batch[key], dtype=float) > 0.5
+    draw = data_proto.meta_info.get("uid_draw_order") or {}
+    groups: dict = {}
+    for i, u in enumerate(uids):
+        groups.setdefault(u, []).append(i)
+    first = {u: idx[0] for u, idx in groups.items()}
+    ordered = sorted(groups, key=lambda u: (draw.get(u, len(draw) + first[u]), first[u]))
+    target = int(kwargs.get("target_groups") or 0) or len(ordered)
+    keep = ordered[:target]
+    filtered = data_proto.select_idxs(sorted(i for u in keep for i in groups[u]))
+    if metrics is not None:
+        kinds = []
+        for u in keep:
+            s = success[groups[u]]
+            kinds.append("mixed" if s.any() and not s.all() else ("all_success" if s.all() else "all_fail"))
+        metrics.update({"filter/nominal/candidates": len(ordered), "filter/nominal/kept": len(keep),
+                        "filter/nominal/mixed": kinds.count("mixed"), "filter/nominal/all_success": kinds.count("all_success"),
+                        "filter/nominal/all_fail": kinds.count("all_fail")})
+    return filtered, metrics
+
+
 _MIN_STEPS: dict = {}  # task file -> {task_id: difficulty.d_star}
 
 

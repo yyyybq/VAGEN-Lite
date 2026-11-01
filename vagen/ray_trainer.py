@@ -2846,6 +2846,7 @@ class RayPPOTrainer:
                         )
                         metrics.update(batch.meta_info.pop("invalid_turn_metrics", {}))  # round 12 freeze
                         metrics.update(batch.meta_info.pop("split_adv_metrics", {}))  # round 12 freeze, V8
+                        metrics.update(batch.meta_info.pop("turn_credit_metrics", {}))  # reward line, turn_credit
 
                     if self.config.algorithm.adv_estimator in ["no_concat_gae_last", "no_concat_gae_first", "no_concat_gae"]:
                         batch.batch["value_mask"] = compute_value_mask(batch)

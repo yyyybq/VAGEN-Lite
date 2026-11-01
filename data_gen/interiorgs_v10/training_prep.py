@@ -412,7 +412,7 @@ STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "o
 # fail; keep_by_return_std (vagen/custom_filter/filter.py) fills the places still free with all-fail tasks whose
 # episode returns spread at least keep_std_threshold (standard deviation, n - 1), their group comparison dividing
 # by at least keep_std_floor.
-GROUP_FILTERS = ("mixed_outcome", "keep_by_return_std")
+GROUP_FILTERS = ("mixed_outcome", "keep_by_return_std", "nominal")  # nominal: reward line 2026-11-01, every outcome
 
 
 def load_standards(path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
@@ -514,7 +514,10 @@ def design_variant_overrides(args: argparse.Namespace, env: Dict[str, Any]) -> D
             raise SystemExit(f"--distance-tables {args.distance_tables} is not a directory")
         out["distance_tables_dir"] = str(Path(args.distance_tables).resolve())
     if out and not env.get("enable_potential_shaping_reward"):
-        raise SystemExit("the progress options change the dense reward: give a dense --reward-preset (dense, D_cond)")
+        # reward line (2026-11-01): the per-turn credit reads the table's progress score with the S0 reward (the env's
+        # progress reward off); only the score's version and tables, nothing that shapes a reward
+        if not (getattr(args, "turn_credit", None) and set(out) <= {"progress_version", "distance_tables_dir"}):
+            raise SystemExit("the progress options change the dense reward: give a dense --reward-preset (dense, D_cond)")
     if ("progress_weights" in out or "milestone_rewards" in out) and version == "product":
         raise SystemExit("--progress-weights / --milestone-rewards need a grouped progress version (D_cond, or "
                          "--progress-version grouped_gated / grouped_soft)")
@@ -752,6 +755,23 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         if not history["env"].get("enable_potential_shaping_reward"):
             raise SystemExit("--progress-adv-weight splits the dense reward's progress part: give a dense --reward-preset")
         _set(ppo, "algorithm.progress_adv_weight", float(args.progress_adv_weight))
+    turn_credit = None
+    if getattr(args, "turn_credit", None):  # reward line (2026-11-01): the per-turn credit (vagen/turn_credit.py)
+        from vagen.turn_credit import ESTIMATOR, settings as turn_credit_settings
+
+        turn_credit = json.loads(args.turn_credit) if isinstance(args.turn_credit, str) else dict(args.turn_credit)
+        try:
+            turn_credit_settings({"turn_credit": turn_credit})
+        except (ValueError, TypeError) as exc:
+            raise SystemExit(f"--turn-credit: {exc}")
+        if history["env"].get("enable_potential_shaping_reward"):
+            raise SystemExit("--turn-credit adds the progress term itself: give the S0 reward (no dense --reward-preset)")
+        if history["env"].get("progress_version") != "optimal" or not history["env"].get("distance_tables_dir"):
+            raise SystemExit("--turn-credit reads the table's progress score: --progress-version optimal --distance-tables DIR")
+        if not ppo["trainer"].get("concat_multi_turn"):
+            raise SystemExit("--turn-credit needs the concat history mode (one sequence an episode, the turns' spans)")
+        _set(ppo, "algorithm.adv_estimator", ESTIMATOR)
+        _set(ppo, "algorithm.turn_credit", turn_credit)
     if getattr(args, "entropy_coeff", None) is not None:  # round 12 batch: the entropy bonus instead of the package's
         _set(ppo, "actor_rollout_ref.actor.entropy_coeff", float(args.entropy_coeff))
     # round 12 freeze, the weak-start stability runs (the user's 11th supplement, W3 / W4 and the checkpoint interval):
@@ -776,6 +796,12 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         filter_kwargs = dict(package["filter.filter_kwargs"], std_threshold=float(args.keep_std_threshold),
                              std_floor=float(getattr(args, "keep_std_floor", None) or 0.0),
                              rows=str((out / "train.jsonl").resolve()))  # the filled tasks' d* in the metrics
+        _set(ppo, "filter.name", group_filter)
+        _set(ppo, "filter.filter_kwargs", filter_kwargs)
+    if group_filter == "nominal":  # reward line (2026-11-01): the nominal batch, every outcome kept
+        if not package:
+            raise SystemExit("--group-filter nominal keeps the package's nominal batch: it needs --opt-package")
+        filter_kwargs = dict(package["filter.filter_kwargs"])
         _set(ppo, "filter.name", group_filter)
         _set(ppo, "filter.filter_kwargs", filter_kwargs)
     curriculum = None
@@ -815,6 +841,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "env_reward_overrides": reward_overrides(getattr(args, "reward_preset", None) or "S0"),
               "design_variant": design_variant_overrides(args, history["env"]) or None,
               "progress_adv_weight": getattr(args, "progress_adv_weight", None),
+              "turn_credit": turn_credit,
+              "adv_estimator": (ppo.get("algorithm") or {}).get("adv_estimator"),
               "train_batch_size": (ppo.get("data") or {}).get("train_batch_size"),
               "save_freq": ppo["trainer"].get("save_freq"),
               "reserve_rows_skipped": reserve_skipped,
@@ -1182,6 +1210,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="round 12 freeze, variant V8: the group comparison normalises the success part (return - "
                         "progress) and the progress part apart and adds them, the progress part weighted (e.g. 0.5); "
                         "PPO config algorithm.progress_adv_weight, vagen/split_reward_adv.py")
+    c.add_argument("--turn-credit", default=None,
+                   help="reward line (2026-11-01): the per-turn credit estimator with these settings, a JSON object "
+                        "(scale, gamma, baseline none / turn_index, episode_weight, min_positive_mass, neg_clip); "
+                        "PPO config algorithm.adv_estimator turn_credit and algorithm.turn_credit, vagen/turn_credit.py; "
+                        "needs the S0 reward with --progress-version optimal --distance-tables")
     c.add_argument("--sft-trajectories", nargs="*", default=None,
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,

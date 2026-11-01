@@ -1221,6 +1221,8 @@ class Chain:
                               ("ppo_mini_batch_size", "--ppo-mini-batch-size"), ("save_freq", "--save-freq")):
                 if rl.get(key) is not None:
                     args += [flag, str(rl[key])]
+            if rl.get("turn_credit") is not None:  # reward line (2026-11-01): the per-turn credit's settings, JSON
+                args += ["--turn-credit", json.dumps(rl["turn_credit"])]
             for key, flag in (("progress_weights", "--progress-weights"), ("milestone_rewards", "--milestone-rewards")):
                 if rl.get(key) is not None:  # round 12 freeze, the dense-reward design variants: three numbers
                     value = rl[key]
