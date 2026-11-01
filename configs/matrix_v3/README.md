@@ -71,11 +71,11 @@
 
 ## 启动前要做的
 
-1. qwen3-main（和 dense-batch2）合进 main，本分支同步；补丁 0001 / 0002 对合并后的训练链重新核对。
+1. qwen3-main（和 dense-batch2）合进 main，本分支同步；补丁 0001 / 0002 对合并后的训练链重新核对。2026-11-01 已对 qwen3-main `b6606bac` 预演：合并只有 1 处冲突，补丁按它挪好在 `docs/transition_qa/patches/qwen3_main_b6606bac/`（`CHANGES.md` 第 6 节）。
 2. 训练链部分：`matrix_plan` 接第三版，每组每个种子生成 plan。
    - 要写进 plan 的：`model_type: qwen3_vl`、`attention: eager`、V4 的设置、停止线；
    - 格式核对用的 SFT 对话：`chain.sft_dir` = P2q 的 `sft_trajectories.jsonl`；
    - 名字用 `m3_*`，不和已有的结果名重复。
-3. C0 在去掉边缘场景的题集上补齐：测试集补进来的 59 道补跑，P1 探针在 Qwen3 C0 的检查点上跑。都是单卡推理，用 Qwen3 的运行时。
+3. ~~C0 在去掉边缘场景的题集上补齐~~：2026-11-01 已做（59 道补跑、P1 探针、失败拆解；`configs/matrix_v3/C0.yaml`）。
 4. 预登记：第三版 2026-10-30 定稿（`docs/transition_qa/PREREG_D_vs_C.md`）。探针比较 `qa_probe compare` 已按它改好：按种子和侧配对，"同号"按两个种子算（2026-10-30）。
 5. 批卡：约 900–1,000 卡时，由用户在冻结期定。

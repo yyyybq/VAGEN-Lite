@@ -157,6 +157,17 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
   - 所以合并、打补丁之后，每组的 rl_config 步都会被拒。用 D 组的参数实跑过：退出码 1；加 `--format-example placeholder` 就通过。
   - 怎么改等用户定（`REPORT.md` 第 2 节）。
 
+**2026-11-01 预演 qwen3-main（用户选"两件都先做"）**：main 还停在 `dde3d192`，qwen3-main（`b6606bac`，比 main 多 88 个提交）还没合进来。
+在 `/tmp` 的临时克隆里预演，原仓库和各工作树都没动：
+- 本分支合入 qwen3-main：只冲突 1 个文件 `vagen/agent_loop/gym_agent_loop.py`，两处，两边在同一位置各加了几行：
+  - 本分支加的是思考文字计数 `think_turns`，qwen3-main 加的是 `turn_span`、`invalid_spans`、`progress_return` 和 `end_turn()`；两边都保留。
+  - 合并后全部登记的测试：699 个通过、8 个跳过、1 个失败。失败的是要读主工作树 `third_party/starVLA` 的那个，一直如此。
+- 补丁挪到 qwen3-main 的 `train_chain.py`（三方合并）：
+  - 0001 有 3 处冲突，都是同一件事：模型线 10-24 加了 plan `rl_start_model`（一个路径，跳过 SFT、从它起 RL），和补丁的 `start_model` 重叠。补丁的还收 `{"from_chain": TR}`，E 组靠它从 D 组挑出的检查点起步。
+  - 处理：两个键并存，各管各的。`SFT_STEPS` 留一份、注释写上两个键；`sft_model()` 先看 `rl_start_model` 再看 `start_model`；`run()` 两个跳过判断各自保留。
+  - 0002 直接打上。两个训练链测试文件 48 个测试全部通过（qwen3-main 40 + 补丁 8）。
+  - 挪好的补丁在 `docs/transition_qa/patches/qwen3_main_b6606bac/`。qwen3-main 进 main 时如果训练链没再改，就用这两份。
+
 | 补丁 | 内容 | 改的文件 |
 | --- | --- | --- |
 | `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
@@ -229,4 +240,5 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
   - JSON 多了 `per_seed`、每对的 `seed` / `side` 和 `rules.same_sign_over`；Markdown 多了每个种子的行。
   - 测试：`test_diagnostics.py` 加 3 个（写法、配对规则、两个种子的端到端：一对为负但两个种子同号判"有差异"，两个种子反号判不过），共 23 个通过。
   - 兼容：10-29 的三个 C0 比较用新代码在 /tmp 重跑，旧 JSON 的每一项都相同。
-- 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对。
+- **`eval/diagnostics/sco_probe.py --python`**（2026-11-01）：用别的 Python 跑探针，比如 Qwen3-VL 的运行时 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite/.venv-qwen3vl-runtime/bin/python`（vLLM 0.11.0）。不给时启动脚本和原来逐字相同，有测试核对。
+- 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对（2026-11-01 已对 `b6606bac` 预演，见第 6 节）。

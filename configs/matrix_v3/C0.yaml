@@ -46,9 +46,11 @@ eval:
   sets:
     val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2    # 413 道（主线评的）
     test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2  # 292 道
-  screened_pending: >-
-    矩阵用去掉边缘场景的题集（val 382、test 292）。val 的 382 道和 test 留下的 233 道可以从主线已有的逐题结果取；
-    test 补进来的 59 道要用 Qwen3 的运行时补跑（单卡推理，每个检查点一个任务），P1 探针也一样。等 qwen3-main 合进 main 后做。
+  screened: >-
+    2026-11-01 补齐（用户选"两件都先做"）：val 的 382 道和 test 留下的 233 道取模型线已有的逐题结果，test 补进来的 59 道
+    用 qwen3-main 副本的代码和 Qwen3 运行时补跑（30 道对照全部一致）。结果 exps/matrix_inputs_20261029/eval_{test,val}_v2_screened/c0q3_*，
+    汇总 eval_test_v2_screened/c0q3_summary.json；P1 探针 exps/diagnostics_20261101/probe_v3g_q3/；失败拆解
+    exps/diagnostics_20261101/failure_c0q3_{test,val}.*。数字在 docs/transition_qa/PREREG_D_vs_C.md 第 3.1、3.3、3.4 节。
 
 needs_chain_support: {}   # 不跑训练链
-estimate: {gpu: 只有补跑的推理：59 道测试题和 P1 探针（838 道），每个检查点一个单卡任务}
+estimate: {gpu: 已用：2026-11-01 七个单卡推理任务（5 个评测各约 10 分钟、2 个探针），已删}

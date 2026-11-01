@@ -1087,3 +1087,31 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - 两个种子的端到端：`goal_now` 四对是 +60、−20、+20、+20 个百分点，两个种子都是 +20，判"有差异"（按四对的号就判不过）；`goal_after` 两个种子 +80、−10，判不过。
 - **兼容**：10-29 的三个 C0 比较（C0 对 SFT e9 等），用新代码在 /tmp 按原参数重跑，旧 JSON 里的每一项都相同，判定都是"没有差异"；原来的结果文件没动。
 - **文档**：预登记 3.3 节的命令、`configs/matrix_v3/README.md` 第 4 条、`CHANGES.md` 第 7 节、`REPORT.md` 第 2 节。
+
+### 12.27 预演 qwen3-main 合并；Qwen3 C0 在去掉边缘场景的题集上补齐（用户 2026-11-01）
+
+用户问 P1 交付进展。我报告：main 两天没动，qwen3-main 还没合进 main，第三版的训练链部分卡在这里。并提议先做两件不用等合并的事；用户选"两件都先做"。
+- **预演合并**（`/tmp` 的临时克隆，原仓库不动）：
+  - qwen3-main `b6606bac` 比 main 多 88 个提交；合进本分支只冲突 `gym_agent_loop.py` 1 个文件，两边都保留；
+  - 合并后全部登记的测试 699 个通过、8 个跳过、1 个失败（已知的 starVLA 测试）。
+  - 补丁 0001 在 qwen3-main 上有 3 处冲突，都因为模型线 10-24 加的 `rl_start_model` 和补丁的 `start_model` 重叠：两个键并存。0002 直接打上。48 个训练链测试通过。
+  - 挪好的补丁存在 `docs/transition_qa/patches/qwen3_main_b6606bac/`（`CHANGES.md` 第 6 节）。
+- **C0（Qwen3）补跑**：
+  - 用 qwen3-main 副本 `VAGEN-Lite-r12dense` 的代码和 Qwen3 运行时（只读）；设置照模型线当时的（贪心、`no_think`、格式样例 `action_names`、12 回合）。
+  - 5 个单卡评测：`pt-82rpdy6h`、`pt-80acbunp`、`pt-l1wpdgs3`、`pt-8oh2c56b`、`pt-il1ugeca`，zoetrope，各约 10 分钟，已删。
+  - 题集：Qwen2.5 那次的 89 道（59 道新题 + 30 道对照）。
+  - 对照：5 个模型 × 30 道全部一致；轨迹只有帧文件名不同。
+  - 合起来：四个 RL 在测试集 292 道上 46.2%，SFT 第 8 个 epoch 44.9%；
+    各模型见预登记 3.1，汇总 `eval_test_v2_screened/c0q3_summary.json`。
+- **探针**（838 道）：
+  - 给 `sco_probe` 加了 `--python`，探针在 Qwen3 运行时下跑：`pt-5gaficd5`（6 个模型）、`pt-xyd8ybyl`（不看图），已删。
+  - 原始 Qwen3 46.3%，不看图 43.3%；SFT 第 8 个 epoch 46.1%；
+    四个 RL 45.8%–48.3%；随机 40.8%。
+  - goal 题答案是 Yes 时：原始模型答对 0% / 3%，C0 的模型 8%–23%。
+  - 按种子配对的比较（第一次用在真实数据上）：四个 RL 对 SFT 起点，三项都没有差异。
+- **失败拆解**（测试集）：只差一个条件的失败里，差"关系"的占 50%–54%（5 个模型）。
+  - 种子 20261019 的 S0（第 150 次，被停下）有 45 局因连续输出无效被停下，其余模型 0–2 局。
+- **文档**：预登记的 C0 那几处填上（3.1、3.3、3.4；第 7 条改成"已补齐"，规则没变）；`configs/matrix_v3/C0.yaml`、README；`CHANGES.md` 第 6、7 节；`REPORT.md`。
+- **交接文档**：用户要把近七天的进展交给其他窗口，写在 https://claude.ai/artifact/78NsYg1M5b78mkpfMooTpi 。
+- **测试**：诊断测试 24 个通过（新加 1 个：`--python`）。
+- **没做的**：没推送，没动 main 和主工作树；训练链部分仍等 qwen3-main 合进 main。

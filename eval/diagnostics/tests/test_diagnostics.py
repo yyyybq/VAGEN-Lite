@@ -436,3 +436,22 @@ def test_compare_two_seeds_sign_over_the_seeds(tmp_path):
     with pytest.raises(ValueError):                                                 # the seeds must match
         QP.main(["compare", "--probe", str(probe), "--out", str(tmp_path),
                  "--a", "D=20261019:d1s0,d1d;20261021:d2s0,d2d", "--b", "C=20261019:c1s0,c1d;20261022:c2s0,c2d"])
+
+
+def test_sco_probe_python(tmp_path):
+    """sco_probe --python: the probe runs with that Python (Qwen3-VL: its runtime); without it the launch is unchanged."""
+    import json
+
+    from eval.diagnostics import sco_probe as SP
+
+    probe = tmp_path / "probe.jsonl"
+    probe.write_text("")
+    plain = SP.prepare(tmp_path / "a", str(probe), models=["m=/x"]).read_text()
+    assert "\n$ENV_ROOT/bin/python -m eval.diagnostics.qa_probe run --probe " in plain
+    assert "python" not in json.loads((tmp_path / "a" / "job" / "prepared.json").read_text())
+    q3 = "/venv q3/bin/python"
+    text = SP.prepare(tmp_path / "b", str(probe), models=["m=/x"], python=q3).read_text()
+    assert "\n'/venv q3/bin/python' -m eval.diagnostics.qa_probe run --probe " in text
+    assert text.replace("'/venv q3/bin/python'", "$ENV_ROOT/bin/python").replace("/b/", "/a/").replace("/b\n", "/a\n") \
+        == plain
+    assert json.loads((tmp_path / "b" / "job" / "prepared.json").read_text())["python"] == q3
