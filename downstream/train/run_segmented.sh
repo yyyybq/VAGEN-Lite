@@ -16,10 +16,17 @@
 # Usage: run_segmented.sh EXP
 #   TRAIN_ENTRY (2026-10-31, C1): the training entry instead of downstream/train/train_entry.py, e.g.
 #   downstream/train/cotrain_entry.py (train_entry.py plus the text loss of the config's trainer.cotrain).
+#   ACCEL_CONFIG (2026-11-01, C1's restart): the accelerate config instead of StarVLA's
+#   starVLA/config/deepseeds/deepspeed_zero2.yaml, e.g. downstream/train/ds/accelerate_zero2_buckets2e8.yaml.
+#   TRAIN_RETRIES (2026-11-01, default 0): a training segment that fails is launched again this many times, after
+#   killing what is left of it and waiting RETRY_WAIT seconds (default 60); it resumes from the newest full state
+#   (C1's first formal run died of one out-of-memory step at 22,789, with no full state yet).
 set -uo pipefail
 EXP="${1:?Usage: run_segmented.sh EXP_DIR}"
 WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TRAIN_ENTRY="${TRAIN_ENTRY:-$WT/downstream/train/train_entry.py}"
+ACCEL_CONFIG="${ACCEL_CONFIG:-starVLA/config/deepseeds/deepspeed_zero2.yaml}"
+TRAIN_RETRIES="${TRAIN_RETRIES:-0}"; RETRY_WAIT="${RETRY_WAIT:-60}"
 STARVLA_ROOT=/mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/starVLA
 FS="$WT/downstream/train/full_state.py"
 log() { echo "[segmented] $* $(date -u +%FT%TZ)" | tee -a "$EXP/segments.log"; }
@@ -34,7 +41,7 @@ train_to() {  # train_to P: one training segment, in its own shell with the Star
     set +e
     export PYTHONPATH="$WT:$STARVLA_ROOT"
     cd "$STARVLA_ROOT"
-    accelerate launch --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml --num_processes 8 \
+    accelerate launch --config_file "$ACCEL_CONFIG" --num_processes 8 \
       "$TRAIN_ENTRY" --config_yaml "$EXP/config.yaml" "trainer.stop_at=$1" \
       ${TRAIN_EXTRA:-} >> "$EXP/train.log" 2>&1
   )
@@ -62,12 +69,23 @@ checks || { log "checks failed: stop"; exit 3; }
 for P in $(python3 "$FS" points "$EXP"); do
   CK="$(python3 "$FS" ckpt "$EXP" "$P")"
   if [[ ! -f "$CK" ]]; then
-    log "train to $P"
-    t0=$(date +%s)
-    train_to "$P"
-    rc=$?
-    stage "train_to_$P" "$t0" "$rc"
-    [[ $rc -ne 0 ]] && { log "training to $P failed rc=$rc: stop"; exit $rc; }
+    tries=0
+    while :; do
+      log "train to $P"
+      t0=$(date +%s)
+      train_to "$P"
+      rc=$?
+      stage "train_to_$P" "$t0" "$rc"
+      [[ $rc -eq 0 ]] && break
+      if (( tries >= TRAIN_RETRIES )); then
+        log "training to $P failed rc=$rc: stop"; exit $rc
+      fi
+      tries=$((tries + 1))
+      log "training to $P failed rc=$rc: launch $tries of $TRAIN_RETRIES again in ${RETRY_WAIT} s (from the newest full state)"
+      pkill -9 -f -- "--config_yaml $EXP/config.yaml" 2>/dev/null
+      sleep "$RETRY_WAIT"
+      echo "[segmented] memory before the relaunch: $(nvidia-smi --query-gpu=memory.used --format=csv,noheader 2>/dev/null | tr '\n' ' ')" >> "$EXP/segments.log"
+    done
     [[ -f "$CK" ]] || { log "training to $P ended without $CK: stop"; exit 5; }
   fi
   MODE="$(python3 "$FS" eval-mode "$EXP" "$P")"

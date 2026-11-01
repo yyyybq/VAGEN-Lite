@@ -24,7 +24,8 @@ log "train $EXP"
   set +e
   export PYTHONPATH="$WT:$STARVLA_ROOT"
   cd "$STARVLA_ROOT"
-  accelerate launch --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml --num_processes 8 \
+  # ACCEL_CONFIG (2026-11-01): another accelerate config, e.g. downstream/train/ds/accelerate_zero2_buckets2e8.yaml
+  accelerate launch --config_file "${ACCEL_CONFIG:-starVLA/config/deepseeds/deepspeed_zero2.yaml}" --num_processes 8 \
     "$WT/downstream/train/cotrain_entry.py" --config_yaml "$EXP/config.yaml" >> "$EXP/train.log" 2>&1
 )
 rc=$?

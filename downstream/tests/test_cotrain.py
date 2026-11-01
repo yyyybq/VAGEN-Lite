@@ -267,3 +267,101 @@ def test_segmented_runs_take_the_training_entry_from_train_entry_variable():
     launch = text[text.index("accelerate launch"):]
     assert launch.index('"$TRAIN_ENTRY"') < launch.index("--config_yaml")
     assert "downstream/train/train_entry.py\" --config_yaml" not in text
+
+
+SEG_FS = r"""import sys
+cmd, exp = sys.argv[1], sys.argv[2]
+if cmd == "points":
+    print("100")
+elif cmd == "ckpt":
+    print(exp + "/ck_" + sys.argv[3])
+else:
+    print("done")
+"""
+SEG_ACCEL = r"""#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+exp = Path(sys.argv[sys.argv.index("--config_yaml") + 1]).parent
+calls = exp / "accel_calls.jsonl"
+n = len(calls.read_text().splitlines()) if calls.exists() else 0
+with open(calls, "a") as f:
+    f.write(json.dumps(sys.argv[1:]) + "\n")
+if n == 0 or os.environ.get("ALWAYS_FAIL"):
+    sys.exit(1)  # the first segment dies (the out-of-memory step)
+(exp / "ck_100").write_text("weights")
+"""
+
+
+def segmented_tree(tmp_path):
+    """A stand-in worktree for run_segmented.sh: full_state.py, the checks, accelerate and nvidia-smi."""
+    import os
+    import shutil
+
+    wt = tmp_path / "wt"
+    (wt / "downstream/train").mkdir(parents=True)
+    (wt / "downstream/demos").mkdir(parents=True)
+    (wt / "examples/train/robocasa").mkdir(parents=True)
+    shutil.copy(ROOT / "train/run_segmented.sh", wt / "downstream/train/run_segmented.sh")
+    (wt / "downstream/train/full_state.py").write_text(SEG_FS)
+    (wt / "downstream/verify_starts.py").write_text("")
+    (wt / "downstream/demos/prepare_data.py").write_text("")
+    (wt / "examples/train/robocasa/setup_starvla_env.sh").write_text("")
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "accelerate").write_text(SEG_ACCEL.replace("/usr/bin/env python3", sys.executable))
+    (bin_ / "nvidia-smi").write_text("#!/bin/sh\necho 1000 MiB\n")
+    (bin_ / "python").write_text(f"#!/bin/sh\nexec {sys.executable} \"$@\"\n")
+    for f in bin_.iterdir():
+        f.chmod(0o755)
+    exp = tmp_path / "EXP"
+    exp.mkdir()
+    (exp / "experiment.json").write_text(json.dumps({"start": {"name": "B"}, "data": {"dir": "/nowhere"}}))
+    (exp / "config.yaml").write_text("trainer: {}\n")
+    env = dict(os.environ, PATH=f"{bin_}:{os.environ['PATH']}", RETRY_WAIT="0")
+    return wt, exp, env
+
+
+def test_segmented_relaunches_a_failed_segment_with_the_given_accelerate_config(tmp_path):
+    """2026-11-01, C1's restart: TRAIN_RETRIES relaunches a segment that dies (it resumes from the newest full state),
+    ACCEL_CONFIG picks the accelerate config (the 2e8-element DeepSpeed buckets)."""
+    import subprocess
+
+    wt, exp, env = segmented_tree(tmp_path)
+    cfg = str(ROOT / "train/ds/accelerate_zero2_buckets2e8.yaml")
+    res = subprocess.run(["bash", str(wt / "downstream/train/run_segmented.sh"), str(exp)], capture_output=True,
+                         text=True, env=dict(env, TRAIN_RETRIES="1", ACCEL_CONFIG=cfg), timeout=60)
+    assert res.returncode == 0, res.stdout + res.stderr
+    calls = [json.loads(x) for x in (exp / "accel_calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 2 and all(c[c.index("--config_file") + 1] == cfg for c in calls)
+    log = (exp / "segments.log").read_text()
+    assert "launch 1 of 1 again" in log and "memory before the relaunch: 1000 MiB" in log
+    assert log.splitlines()[-1].startswith("[segmented] done")
+    rows = [x.split("\t") for x in (exp / "stage_times.tsv").read_text().splitlines()]
+    assert [r[3] for r in rows] == ["1", "0"]
+
+
+def test_segmented_stops_after_its_retries(tmp_path):
+    import subprocess
+
+    wt, exp, env = segmented_tree(tmp_path)
+    res = subprocess.run(["bash", str(wt / "downstream/train/run_segmented.sh"), str(exp)], capture_output=True,
+                         text=True, env=dict(env, ALWAYS_FAIL="1"), timeout=60)
+    assert res.returncode == 1
+    calls = [json.loads(x) for x in (exp / "accel_calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 1  # TRAIN_RETRIES 0 by default: as before
+    assert calls[0][calls[0].index("--config_file") + 1] == "starVLA/config/deepseeds/deepspeed_zero2.yaml"
+    assert "training to 100 failed rc=1: stop" in (exp / "segments.log").read_text()
+
+
+def test_c1_deepspeed_config_differs_from_starvlas_only_in_the_buckets():
+    ours = json.loads((ROOT / "train/ds/ds_config_zero2_buckets2e8.json").read_text())
+    star = Path("/mnt/umm/users/yinbaiqiao/VAGEN-Lite/third_party/starVLA/starVLA/config/deepseeds/ds_config.yaml")
+    assert ours["zero_optimization"]["reduce_bucket_size"] == 2e8 and ours["zero_optimization"]["allgather_bucket_size"] == 2e8
+    accel = (ROOT / "train/ds/accelerate_zero2_buckets2e8.yaml").read_text()
+    assert "/downstream/train/ds/ds_config_zero2_buckets2e8.json" in accel and "num_processes: 8" in accel
+    if star.is_file():
+        theirs = json.loads(star.read_text())
+        for d in (ours, theirs):
+            d["zero_optimization"].pop("reduce_bucket_size")
+            d["zero_optimization"].pop("allgather_bucket_size")
+        assert ours == theirs

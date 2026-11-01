@@ -1,0 +1,14 @@
+# C1's restart (the user's decision of 2026-11-01): StarVLA's starVLA/config/deepseeds/deepspeed_zero2.yaml with its
+# DeepSpeed config swapped for ds_config_zero2_buckets2e8.json (StarVLA's ds_config.yaml with the reduce and allgather
+# buckets at 2e8 elements instead of 5e8; everything else the same).  The first formal run ran out of memory at step
+# 22,789 when ZeRO-2 re-allocated its 2.11 GiB gradient partition with the 5e8-element buckets also alive.
+# Used through run_segmented.sh / run_cotrain_short.sh ACCEL_CONFIG.
+compute_environment: LOCAL_MACHINE
+debug: false
+deepspeed_config:
+  deepspeed_config_file: "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-downstream/downstream/train/ds/ds_config_zero2_buckets2e8.json"
+  deepspeed_multinode_launcher: standard
+  zero3_init_flag: false
+distributed_type: DEEPSPEED
+num_machines: 1
+num_processes: 8
