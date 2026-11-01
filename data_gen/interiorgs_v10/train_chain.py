@@ -155,6 +155,15 @@ Round 12 freeze (the user's decision 3 of 2026-10-22): a run whose plan rl names
 first, render-service repack, the batch's stop rules with the 10% unreadable-answer line, 5 start-up retries counted
 apart) for every setting the plan does not give; the plan's values win, key by key inside "guards" and "startup".
 
+Experiment matrix v2 (branch transition-qa, docs/transition_qa/CHANGES.md section 5): plan "sft_lf_dirs"
+({group: LLaMA-Factory folder}) trains a group on a folder built elsewhere (data_gen/sft_mixture): "render" and
+"sft_data" only check it (train.yaml, its output_dir <folder>/model, "sft_epochs", one save per epoch); the SFT,
+its per-epoch evaluation and the pick then use that folder.  Plan "start_model" (a model path, or {"from_chain":
+TR} for that chain's picked SFT checkpoint) skips render to pick_sft and starts RL from it.  Plan "rl" options
+"output_format" and "max_response_length" reach rl-config; "rl"."guards"."invalid_until" checks the share of
+unparseable answers only up to that update; plan "eval"."rl_prompt_format" evaluates the RL checkpoints with that
+prompt format.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -187,6 +196,8 @@ EVAL_ONLY_STEPS = ("check_code", "evaluate")
 RL_STEPS = ("rl_config", "rl", "rl_extend")
 # the model line (2026-10-24): plan "rl_start_model" skips these and starts RL from that model (plumbing smokes of a
 # new model type's RL path; the formal runs are SFT then RL)
+# matrix v2 (branch transition-qa): plan "start_model" (a path, or {"from_chain": TR} for that chain's picked
+# SFT checkpoint) skips them too
 SFT_STEPS = ("render", "sft_data", "sft", "sft_eval", "pick_sft")
 # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
 # during startup", after "GCS cannot find the node ... registration may not be complete")
@@ -344,9 +355,10 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
     if kl is not None and kl > kl_max:
         return f"KL to the start model {kl:.3f} > {kl_max} at update {steps[-1]}"
     w = int(guards.get("invalid_window", 10))
+    until = guards.get("invalid_until")  # matrix v2 (group E): checked only up to this update
     inv = [per[s]["transition/invalid_action_rate/mean"] for s in steps[-w:] if "transition/invalid_action_rate/mean" in per[s]]
     inv_max = float(guards.get("invalid_max", 0.05))
-    if len(inv) >= w and sum(inv) / len(inv) > inv_max:
+    if (until is None or steps[-1] <= int(until)) and len(inv) >= w and sum(inv) / len(inv) > inv_max:
         return f"unparseable answers {sum(inv) / len(inv):.3f} > {inv_max} (mean of updates {steps[-w]}-{steps[-1]})"
     succ = [(s, per[s]["episode/success_rate"]) for s in steps if "episode/success_rate" in per[s]]
     n0, nd, drop = int(guards.get("start_updates", 5)), int(guards.get("drop_window", 50)), float(guards.get("success_drop", 0.10))
@@ -656,7 +668,49 @@ class Chain:
         return dict(groups) if groups else {"": "sft_trajectories.jsonl"}
 
     def lf_dir(self, group: str) -> Path:
+        given = (self.plan.get("sft_lf_dirs") or {}).get(group)  # matrix v2: a folder built elsewhere
+        if given:
+            return Path(given)
         return self.tr / (f"lf_{group}" if group else "lf")
+
+    def lf_given(self) -> bool:
+        """Matrix v2: every SFT group trains on a LLaMA-Factory folder named in plan "sft_lf_dirs"."""
+        given = self.plan.get("sft_lf_dirs") or {}
+        return bool(given) and all(g in given for g in self.sft_groups())
+
+    def check_lf_dir(self, group: str) -> Dict[str, Any]:
+        """A folder of plan "sft_lf_dirs" trains as the chain would: train.yaml present, its output_dir is
+        <folder>/model (where the per-epoch evaluation and the pick look), the plan's epochs, one save per epoch."""
+        import yaml
+
+        lf = self.lf_dir(group)
+        if not (lf / "train.yaml").is_file():
+            raise ChainError(f"sft_lf_dirs: no train.yaml in {lf}")
+        cfg = yaml.safe_load((lf / "train.yaml").read_text())
+        if Path(str(cfg.get("output_dir"))).resolve() != (lf / "model").resolve():
+            raise ChainError(f"sft_lf_dirs: {lf}/train.yaml writes to {cfg.get('output_dir')}, not {lf / 'model'}")
+        if self.plan.get("sft_epochs") is not None and float(cfg.get("num_train_epochs", -1)) != float(self.plan["sft_epochs"]):
+            raise ChainError(f"sft_lf_dirs: {lf} trains {cfg.get('num_train_epochs')} epochs, the plan {self.plan['sft_epochs']}")
+        if cfg.get("save_strategy") != "epoch":
+            raise ChainError(f"sft_lf_dirs: {lf} does not save every epoch (save_strategy {cfg.get('save_strategy')})")
+        return {"dir": str(lf), "epochs": cfg.get("num_train_epochs"), "datasets": cfg.get("dataset")}
+
+    def start_model(self) -> Optional[Path]:
+        """Matrix v2: plan "start_model": a model path, or {"from_chain": TR}, the picked SFT checkpoint of that
+        chain (group E starts from group D's)."""
+        start = self.plan.get("start_model")
+        if not start:
+            return None
+        if isinstance(start, dict):
+            other = Path(start["from_chain"]) / "progress.json"
+            if not other.exists():
+                raise ChainError(f"start_model: {other} does not exist")
+            pick = (json.loads(other.read_text()).get("steps") or {}).get("pick_sft") or {}
+            model = (pick.get("decision") or {}).get("model")
+            if not model:
+                raise ChainError(f"start_model: {start['from_chain']} has not picked its SFT checkpoint yet")
+            return Path(model)
+        return Path(start)
 
     def eval_sets(self) -> Dict[str, Path]:
         sets = self.plan.get("eval_sets")
@@ -679,11 +733,15 @@ class Chain:
 
     def sft_model(self) -> Path:
         """The RL start model: the fallback after a missed signal check, else the plan's "rl_start_model" (the model
-        line's plumbing smokes), else the picked SFT checkpoint, else the (single) final SFT model."""
+        line's plumbing smokes), else the plan's "start_model" (matrix v2), else the picked SFT checkpoint, else the
+        (single) final SFT model."""
         if self.state.get("rl_model_override"):
             return Path(self.state["rl_model_override"])
         if self.plan.get("rl_start_model"):
             return Path(self.plan["rl_start_model"])
+        start = self.start_model()  # matrix v2: no SFT in this chain
+        if start is not None:
+            return start
         decision = self.state["steps"].get("pick_sft", {}).get("decision") or {}
         if decision.get("model"):
             return Path(decision["model"])
@@ -999,6 +1057,9 @@ class Chain:
         from . import pilot_sco
         from .pilot import safe_name
 
+        if self.lf_given():  # matrix v2: the SFT data comes ready-made; its images are checked by the builder
+            self.mark("render", note="SFT data built elsewhere (sft_lf_dirs); nothing to render")
+            return
         frames = [json.loads(l) for l in (self.sft_dir / "frames.jsonl").read_text().splitlines() if l.strip()]
         plain = self.sft_dir / "frames" / "plain"
 
@@ -1027,12 +1088,21 @@ class Chain:
 
     def sft_data(self) -> None:
         py = sys.executable
+        given = self.plan.get("sft_lf_dirs") or {}
+        checked = {g: self.check_lf_dir(g) for g in self.sft_groups() if g in given}  # matrix v2: ready-made folders
+        if checked:
+            self.mark("sft_data", lf_dirs=checked)
+        if self.lf_given():  # sft-records would rewrite sft_dir's conversations, which these folders do not use
+            self.mark("sft_data", note="SFT data built elsewhere (sft_lf_dirs)")
+            return
         if self.plan.get("sft_records", True):  # round 12 batch: false = the conversation files exist already
             records = [py, "-m", "data_gen.interiorgs_v10.training_prep", "sft-records", "--dir", str(self.sft_dir)]
             if self.plan.get("scenes_root"):  # round 10: inserted blocked turns need the scenes' collision detectors
                 records += ["--scenes-root", str(self.plan["scenes_root"])]
             self.sh(records, log=self.tr / "logs" / "sft_records.log")
         for group, trajectory in self.sft_groups().items():
+            if group in given:
+                continue
             if not (self.sft_dir / trajectory).is_file():
                 raise ChainError(f"sft-records wrote no {trajectory} for group {group or 'default'}")
             lf = self.lf_dir(group)
@@ -1260,7 +1330,12 @@ class Chain:
                 if rl.get(key) is not None:  # round 11: the optimisation package; round 12 batch: easy tasks first,
                     # the entropy bonus (0 is passed too)
                     args += [flag, str(rl[key])]
+            for key, flag in (("output_format", "--output-format"), ("max_response_length", "--max-response-length")):
+                if rl.get(key) is not None:  # matrix v2, group E: the free_think prompt and a longer answer budget
+                    args += [flag, str(rl[key])]
             self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
+        if self.plan.get("start_model"):
+            self.mark("rl_config", start_model=str(self.sft_model()))
 
     def rl(self) -> None:
         if not self.plan.get("rl_runs"):
@@ -1970,7 +2045,7 @@ class Chain:
                 hf = ckpts / f"global_step_{s}" / "actor" / "huggingface"
                 if run_name in (self.state.get("guard_stops") or {}) and not hf.is_dir():
                     continue  # a run stopped by a guard: the checkpoints it reached
-                models[name] = (str(hf), None, run_options)
+                models[name] = (str(hf), ev.get("rl_prompt_format"), run_options)  # matrix v2: E evaluates with free_think
                 rl_names.append(name)
         models.update({name: (m["model"], m.get("prompt_format"), list(m.get("options", options)))
                        for name, m in (ev.get("models") or {}).items()})
@@ -2088,6 +2163,9 @@ class Chain:
                 continue
             if self.plan.get("rl_start_model") and step in SFT_STEPS:  # the model line: RL from a given model
                 self.mark(step, state="done", note="not planned (rl_start_model)")
+                continue
+            if self.plan.get("start_model") and step in SFT_STEPS:  # matrix v2: RL starts from a given model
+                self.mark(step, state="done", note="not planned (start_model)")
                 continue
             self.mark(step, state="running", started_utc=now(), error=None)
             try:
