@@ -262,3 +262,17 @@ index e9a3c6e5b82e1e65198f6c46a2e569ce30ced383..6c06242b5f13794b5263b9ecf2fa2774
      def sft_epoch_model(self, name: str) -> Optional[Path]:
          """The checkpoint of an SFT epoch by its result name ("sft_<group>_e<k>", "sft_e<k>" for the single group)."""
          for group in self.sft_groups():
+diff --git a/model_matrix/tests/test_model_types.py b/model_matrix/tests/test_model_types.py
+index 8e854ee30af311bcbc8dae4f933e43fdbce26d05..173e1909049a5918fed6a49b491cd1505eaa2ba3 100644
+--- a/model_matrix/tests/test_model_types.py
++++ b/model_matrix/tests/test_model_types.py
+@@ -330,7 +330,8 @@ class ChainTest(unittest.TestCase):
+             for step in T.STEPS:
+                 setattr(chain, step, lambda s=step: ran.append(s))
+             self.assertEqual(chain.run(), 0)
+-            self.assertEqual(ran, ["check_code", "rl_config", "rl", "rl_extend", "evaluate"])
++            # the transition-QA matrix patch 0002 adds step 11 diagnostics ("not planned" without plan diagnostics)
++            self.assertEqual(ran, ["check_code", "rl_config", "rl", "rl_extend", "evaluate", "diagnostics"])
+             for step in T.SFT_STEPS:
+                 self.assertEqual(chain.state["steps"][step]["note"], "not planned (rl_start_model)")
+             self.assertEqual(self._chain(tmp + "/b").sft_model(), Path(tmp + "/b") / "lf" / "model")  # as before
