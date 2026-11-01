@@ -31,3 +31,24 @@ format_check_sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20
 # 探针集（补丁 0002 的 diagnostics 步）
 p1_probe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_probe.jsonl
 p0_probe: null
+# 训练链（matrix_plan --version 3 生成 plan 用；用户 2026-11-01 决定 B：集成分支 matrix-v3，工作树 VAGEN-Lite-matrix）
+chain:
+  worktree: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix   # 训练链和它的任务都从这里跑（VAGEN_LITE_WORKTREE），输出也只写在这里
+  eval_sets:   # 上面 eval 的两个题集复制到 matrix 工作树（tasks.jsonl 逐字节相同），评测结果写在这里
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/eval_val_v2_screened
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/eval_test_v2_screened
+  job_prefix: m3
+  gs_root: /mnt/umm/users/yinbaiqiao/InteriorGS_ply
+  scenes_root: /mnt/umm/users/yinbaiqiao/InteriorGS_meta
+  pool: queue              # 主线的暂停文件在时不交（模型线的做法），不插队；bq_tp_mmxbf16、bq-ready-* 不碰（决定 52）
+  retries: 8               # 主线 10-31 起的做法（PD5 同）
+  suspended_grace_min: 10
+  max_eval_jobs: 6
+  retain: best_and_last    # 评测和诊断之后只留每个 RL 最好的和最后的检查点、挑出的 SFT epoch
+  rl:                      # 主线当前 Qwen3 链的提交方式（PD5，2026-11-01）
+    renderer_workers: 32
+    renderer_first: false
+    renderer_repack: true
+    renderer_after_trainer: {trainer_wait_s: 43200}
+  trainer_attn: eager      # 决定 78；Qwen3 运行时没有 flash-attn，不写也是 eager，这里写明
+  dense_baseline: null     # 密集一侧的基线等用户转达主线的答复再填（2026-11-01）；null 时是占位，训练链停在 RL 配置

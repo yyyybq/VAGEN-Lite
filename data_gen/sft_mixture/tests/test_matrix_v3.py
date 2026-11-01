@@ -131,20 +131,110 @@ def test_built_mixtures_have_the_configured_rows(cfgs, vars_):
         assert y["output_dir"] == str((out / g / "model").resolve()) and y["save_strategy"] == "epoch"
 
 
-def test_chain_part_waits_for_qwen3_main(cfgs, vars_):
+def test_chain_part(cfgs, vars_):
+    """C and D have plans on matrix-v3 (the user's decision B of 2026-11-01, matrix_plan --version 3); B', E and
+    D_noP0 still wait."""
     names = set()
     for g in WITH_RL:
         ch = cfgs[g]["chain"]
-        assert ch["plan"] is None, g                   # no executable plan before qwen3-main is in main
-        assert ch["sft_dir"] == vars_["format_check_sft_dir"] and ch["sft_groups"] == {"mix": "sft_trajectories.jsonl"}
-        assert "_m3_" in ch["tr"] and ch["rl_name"].startswith("v10_rl_m3_"), g
+        assert ch["sft_dir"] == vars_["format_check_sft_dir"], g
+        assert "_m3_" in ch["tr"] or "/m3_" in ch["tr"], g
+        assert ch["rl_name"].startswith("v10_rl_m3_"), g
         names |= {ch["tr"], ch["rl_name"]}
         for key in ch["needs_chain_support"]:
             assert key in MP.CHAIN_FIELDS, (g, key)     # the fields patches 0001 / 0002 read
-        if g in TRAINED:
-            assert ch["needs_chain_support"]["sft_lf_dirs"] == {"mix": cfgs[g]["data"]["lf_dir"]}, g
+        if g in MP.V3_GROUPS:
+            sft = f"m3{g.lower()}"
+            assert ch["plan"] == "matrix_plan v3" and ch["sft_groups"] == {sft: "sft_trajectories.jsonl"}, g
+            assert ch["tr"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/m3_{g.lower()}", g
+            assert ch["sft_lf_dir"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/sft/{g}", g
+            assert ch["needs_chain_support"]["sft_lf_dirs"] == {sft: ch["sft_lf_dir"]}, g
+            assert Path(ch["sft_lf_dir"]).name == Path(cfgs[g]["data"]["lf_dir"]).name   # the copy of data.lf_dir
+        else:
+            assert ch["plan"] is None and ch["sft_groups"] == {"mix": "sft_trajectories.jsonl"}, g
+            if g in TRAINED:
+                assert ch["needs_chain_support"]["sft_lf_dirs"] == {"mix": cfgs[g]["data"]["lf_dir"]}, g
     assert len(names) == 2 * len(WITH_RL)              # every chain and run name is new
-    assert cfgs["E"]["chain"]["needs_chain_support"]["start_model"] == {"from_chain": cfgs["D"]["chain"]["tr"]}
+    first_d = f"{cfgs['D']['chain']['tr']}_s{vars_['rl']['seeds'][0]}"
+    assert cfgs["E"]["chain"]["needs_chain_support"]["start_model"] == {"from_chain": first_d}
+    assert vars_["chain"]["eval_sets"] == {k: f"{vars_['chain']['worktree']}/exps/matrix_v3/{Path(v).name}"
+                                         for k, v in vars_["eval"].items() if k in ("val", "test")}
+    assert vars_["chain"]["dense_baseline"] is None and vars_["chain"]["trainer_attn"] == REGISTERED["attention"]
+
+
+SHA = "0" * 40
+
+
+def test_v3_plans_for_c_and_d(vars_):
+    """One plan per group and seed: the first seed trains the SFT, the second starts from its pick; each trains
+    one S0 / dense pair with the registration's stop lines, on the screened sets; every name is new."""
+    names = set()
+    for g in MP.V3_GROUPS:
+        first, second = (MP.plan_v3(g, s, SHA) for s in REGISTERED["seeds"])
+        for p, seed in zip((first, second), REGISTERED["seeds"]):
+            assert (p["model"], p["model_type"], p["commit"]) == (REGISTERED["base_qwen3"], "qwen3_vl", SHA)
+            assert p["trainer_attn"] == "eager" and p["endpoint"] == 300 and p["pool"] == "queue"
+            assert (p["rl"]["standard"], p["rl"]["seed"]) == (REGISTERED["pair"]["s0"], seed)
+            assert p["rl"]["guards"] == REGISTERED["guards"] and p["rl"]["format_example"] == "action_names"
+            assert (p["rl"]["rows"], p["rl"]["exclude"]) == (vars_["rl"]["rows"], vars_["rl"]["exclude"])
+            assert p["eval_sets"] == vars_["chain"]["eval_sets"] and p["select_by"] == "val"
+            assert p["eval"] == {"every": 50, "options": []} and p["retain"] == "best_and_last"
+            assert p["diagnostics"] == {"failure_breakdown": True, "probes": {"P1": vars_["p1_probe"], "P0": None}}
+            assert p["tr"].startswith(vars_["chain"]["worktree"] + "/exps/matrix_v3/")
+            assert p["sft_dir"] == vars_["format_check_sft_dir"]
+            s0, d = p["rl_runs"]
+            assert p["rl_runs"][s0] == {} and MP.dense_pending(p) == [d]   # the dense side waits for the user
+            names |= {p["tr"], p["rl_name"], s0, d}
+        sft = f"m3{g.lower()}"
+        assert first["sft_lf_dirs"] == {sft: f"{vars_['chain']['worktree']}/exps/matrix_v3/sft/{g}"}
+        assert first["sft_epochs"] == 10 and "start_model" not in first
+        assert second["start_model"] == {"from_chain": first["tr"]} and "sft_lf_dirs" not in second
+        assert first["sft_groups"] == second["sft_groups"] == {sft: "sft_trajectories.jsonl"}
+    assert len(names) == 4 * 2 * len(MP.V3_GROUPS)
+
+
+def test_v3_dense_side():
+    p = MP.plan_v3("D", 20261019, SHA, dense="registered")
+    assert p["rl_runs"]["m3ds1d"]["rl"] == {"standard": REGISTERED["pair"]["d"],
+                                          **{k: v for k, v in REGISTERED["dense"].items() if k != "variant"}}
+    assert MP.dense_pending(p) == []
+    given = {"standard": "v10_p1_D", "progress_reward_scale": 3.3333333333333335}
+    assert MP.plan_v3("C", 20261021, SHA, dense=json.dumps(given))["rl_runs"]["m3cs2d"]["rl"] == given
+    for bad in ({"standard": "no_such_standard"}, {"progress_reward_scale": 1.0}):
+        with pytest.raises(SystemExit):
+            MP.plan_v3("C", 20261019, SHA, dense=bad)
+    for args in (("B", 20261019, SHA), ("E", 20261019, SHA), ("C", 1, SHA), ("C", 20261019, "abc123")):
+        with pytest.raises(SystemExit):
+            MP.plan_v3(*args)
+
+
+def test_v3_plan_in_the_patched_chain(tmp_path):
+    """The plan as qwen3-main's chain with patches 0001 / 0002 reads it: the runs get the standard's chain settings
+    under the plan's stop lines, the first seed trains on the given folder, the second starts from the first's pick,
+    the jobs get Qwen3's runtime and eager attention; the placeholder is refused by rl-config."""
+    from data_gen.interiorgs_v10 import train_chain as TC
+    from data_gen.interiorgs_v10.training_prep import load_standards
+
+    first = MP.plan_v3("D", 20261019, SHA)
+    first["tr"] = str(tmp_path / "first")
+    chain = TC.Chain(first, sleep=lambda s: None)
+    runs = chain.rl_runs()
+    assert list(runs) == ["m3ds1s0", "m3ds1d"]
+    s0 = runs["m3ds1s0"]["rl"]
+    assert (s0["guards"]["kl_max"], s0["guards"]["invalid_max"], s0["guards"]["invalid_window"]) == (1.0, 0.1, 10)
+    assert s0["renderer_workers"] == 32 and s0["renderer_first"] is False and s0["startup"]["retries"] == 5
+    assert chain.lf_given() and chain.lf_dir("m3d") == Path(first["sft_lf_dirs"]["m3d"])
+    env = chain.job_env()
+    assert env["VAGEN_LITE_MODEL_TYPE"] == "qwen3_vl" and env["TRANSFORMERS_ATTN_IMPLEMENTATION"] == "eager"
+    assert env["VAGEN_LITE_JOB_PREFIX"] == "m3" and env["VAGEN_LITE_PYTHON"].endswith("/.venv-qwen3vl-runtime/bin/python")
+    assert MP.DENSE_PENDING not in load_standards()
+    second = MP.plan_v3("D", 20261021, SHA)
+    second.update(tr=str(tmp_path / "second"), start_model={"from_chain": first["tr"]})
+    with pytest.raises(TC.ChainError):                 # the first seed has not picked yet
+        TC.Chain(second, sleep=lambda s: None).sft_model()
+    (tmp_path / "first").mkdir()
+    (tmp_path / "first" / "progress.json").write_text(json.dumps({"steps": {"pick_sft": {"decision": {"model": "/m/e7"}}}}))
+    assert TC.Chain(second, sleep=lambda s: None).sft_model() == Path("/m/e7")
 
 
 def test_c0_is_the_qwen3_sft_and_its_seed_pairs(cfgs):

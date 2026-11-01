@@ -43,15 +43,15 @@ eval:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
     qa_probe: P1 探针（838 道），SFT 各 epoch 和每个 RL 的各检查点；Qwen3 的模型要用 Qwen3 的运行时，等 qwen3-main
 
-chain:
-  plan: null
-  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m3_c
-  rl_name: v10_rl_m3_c
+chain:   # 用户 2026-11-01 决定 B：在集成分支 matrix-v3 上先跑（不等 qwen3-main 进 main）
+  plan: matrix_plan v3   # python -m data_gen.sft_mixture.matrix_plan --version 3 --group C --commit SHA --out '{tr}/plan.json'
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c            # 每个种子一条链：<tr>_s<种子>；第一个种子的链训 SFT，第二个从它挑出的检查点起步
+  rl_name: v10_rl_m3_c     # 加 _s1 / _s2；RL 运行 m3cs1s0、m3cs1d、m3cs2s0、m3cs2d
   sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
-  sft_groups: {mix: sft_trajectories.jsonl}
+  sft_groups: {m3c: sft_trajectories.jsonl}   # SFT 的结果名 sft_m3c_e<k>
+  sft_lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/C   # data.lf_dir 的复制（数据文件逐字节相同，train.yaml 只改了两条路径）
   needs_chain_support:
-    sft_lf_dirs: {mix: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261030/C}
+    sft_lf_dirs: {m3c: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/C}
     diagnostics_after_eval: true
-  needs_qwen3_main: [model_type qwen3_vl, attention eager, 密集一侧 V4 的设置, 两个种子各一对 RL, 补丁 0001 / 0002 对合并后的训练链重新核对]
 
 estimate: {sft: 8 卡约 2.5 小时（10 个 epoch，9,239 条）, rl: 4 个，每个 1 + 8 卡约 5.5 小时, evaluate: 4 个 RL 各 6 个检查点 × 2 个题集}

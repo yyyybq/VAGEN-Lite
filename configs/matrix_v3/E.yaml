@@ -48,7 +48,7 @@ chain:
   sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
   sft_groups: {mix: sft_trajectories.jsonl}
   needs_chain_support:
-    start_model: {from_chain: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m3_d}   # D 组挑出的 SFT 检查点
+    start_model: {from_chain: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019}   # D 组挑出的 SFT 检查点（D 第一个种子的链，2026-11-01）
     rl_output_format: think_action
     guards_invalid_until: 50
     eval_rl_prompt_format: free_think
