@@ -51,7 +51,7 @@ class MatrixFieldsTest(unittest.TestCase):
             for step in T.STEPS:
                 setattr(chain, step, lambda step=step: calls.append(step))
             self.assertEqual(chain.run(), 0)
-            self.assertEqual(calls, ["check_code", "rl_config", "rl", "rl_extend", "evaluate"])
+            self.assertEqual(calls, ["check_code", "rl_config", "rl", "rl_extend", "evaluate", "diagnostics"])
             for s in T.SFT_STEPS:
                 self.assertEqual(chain.state["steps"][s]["note"], "not planned (start_model)")
             self.assertEqual(chain.sft_model(), Path("/models/base_7b"))
@@ -123,6 +123,80 @@ class MatrixFieldsTest(unittest.TestCase):
             self.assertEqual(got["val__p1s0_050"][3], "free_think")
             self.assertEqual(got["val__p1s0_100"][3], "free_think")
             self.assertIsNone(got["val__base"][3])  # a listed model keeps its own format
+
+
+class DiagnosticsStepTest(unittest.TestCase):
+    """Patch 0002: the diagnostics step (failure breakdown, probe jobs for every evaluated model, curves)."""
+
+    def test_probes_every_evaluated_model(self):
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+        from eval.diagnostics import sco_probe
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lf = write_lf(root / "mix_D")
+            for step in (154, 308):
+                (lf / "model" / f"checkpoint-{step}").mkdir(parents=True)
+            tr = root / "tr"
+            for s in (50, 100):
+                (tr / "rl_run_p1s0" / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface").mkdir(parents=True)
+            plan = {"tr": str(tr), "sft_dir": str(root), "endpoint": 100, "sft_groups": {"mix": "x.jsonl"},
+                    "sft_lf_dirs": {"mix": str(lf)}, "eval_sets": {"val": str(root / "val")}, "rl_runs": {"p1s0": {}},
+                    "eval": {"every": 50}, "diagnostics": {"probes": {"P1": str(root / "p1_probe.jsonl"), "P0": None},
+                                                          "models_per_job": 3},
+                    "retain": "best_and_last"}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"select_by": "val", "scores": {"sft_mix_e1": 0.3, "sft_mix_e2": 0.4},
+                                                            "best": "sft_mix_e2", "model": str(lf / "model" / "checkpoint-308"),
+                                                            "other_sets": {}}
+            calls, prepared = [], {}
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.retain = lambda: calls.append(["retain"])  # main's retention: after the probes
+
+            def prepare(run, probe, models=(), pool=None, out_dir=None, **k):
+                prepared[run.name] = ([m.split("=", 1)[0] for m in models], out_dir)
+                (run / "job").mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": "pt-" + run.name}))
+
+            def status(run, job_dir="job"):
+                names, out_dir = prepared[run.name]
+                for n in names:
+                    Path(out_dir).mkdir(parents=True, exist_ok=True)
+                    (Path(out_dir) / f"{n}.json").write_text("{}")
+                return {"state": "SUCCEEDED", "finished": True}
+
+            def delete(run, job_dir="job"):
+                receipt = run / job_dir / "submission.json"
+                receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, submit=submit, status=status, delete=delete), \
+                    mock.patch.object(sco_probe, "prepare", prepare):
+                chain.diagnostics()
+                self.assertEqual(calls[0][2:], ["eval.diagnostics.failure_breakdown", "--eval", str(root / "val"),
+                                                "--out", str(tr / "diag" / "failure_val")])
+                self.assertEqual(sorted(n for names, _ in prepared.values() for n in names),
+                                 ["p1s0_050", "p1s0_100", "sft_mix_e1", "sft_mix_e2"])
+                self.assertEqual(len(prepared), 2)  # 4 models, 3 per job; the null P0 probe is skipped
+                self.assertTrue(all(o == str(tr / "diag" / "probe_P1") for _, o in prepared.values()))
+                self.assertEqual(chain.retain_after(), "diagnostics")
+                self.assertEqual(calls[-1], ["retain"])
+                curve = calls[-2]
+                self.assertIn("SFT_mix=sft_mix_e1:1,sft_mix_e2:2", curve)
+                self.assertIn("RL_p1s0=sft_mix_e2:0,p1s0_050:50,p1s0_100:100", curve)
+                prepared.clear()
+                chain.diagnostics()  # every model has results: no new job
+                self.assertEqual(prepared, {})
+
+    def test_not_planned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 100}, sleep=lambda s: None)
+            chain.diagnostics()
+            self.assertEqual(chain.state["steps"]["diagnostics"]["note"], "not planned")
+            self.assertEqual(chain.retain_after(), "evaluate")  # no diagnostics step: right after evaluate
 
 
 if __name__ == "__main__":

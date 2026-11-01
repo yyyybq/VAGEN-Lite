@@ -70,7 +70,7 @@ class ChainTest(unittest.TestCase):
             self.assertIn("失败", (Path(tmp) / "PROGRESS.md").read_text(encoding="utf-8"))
             calls.clear()
             self.assertEqual(make().run(), 0)  # a new run continues at the failed step
-            self.assertEqual(calls, ["sft", "sft_eval", "pick_sft", "rl_config", "rl", "rl_extend", "evaluate"])
+            self.assertEqual(calls, ["sft", "sft_eval", "pick_sft", "rl_config", "rl", "rl_extend", "evaluate", "diagnostics"])
             self.assertEqual(json.loads((Path(tmp) / "progress.json").read_text())["state"], "done")
 
     def test_progress_without_the_new_steps(self):
