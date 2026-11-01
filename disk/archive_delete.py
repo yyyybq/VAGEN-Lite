@@ -9,7 +9,8 @@ A batch is a JSON spec (docs/disk/batches/<batch>.json):
               "min_bytes": 0,                                               # optional: skip smaller files
               "marker": "what was deleted and why (optional)",
               "marker_name": "DELETED_TO_AOSS.txt",                        # optional
-              "marker_dirs": ["folders that get the marker file"]}]}       # optional, default: [root]
+              "marker_dirs": ["folders that get the marker file"]}],       # optional, default: [root]
+   "protected_ok": "the user's words"}   # only if the batch touches docs/disk/PROTECTED_PATHS.tsv (plan/delete refuse otherwise)
 
 Phases (each re-reads the spec; nothing is deleted before `delete`):
   plan     list every file (no symlinks; files of another owner, root's included, are left and listed), write
@@ -33,6 +34,9 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import protected  # noqa: E402  paths other lines depend on (docs/disk/PROTECTED_PATHS.tsv)
 
 U = "/mnt/umm/users/yinbaiqiao"
 BUCKET = "baiqiao"
@@ -132,7 +136,8 @@ def cmd_plan(spec, run, args):
         for r in left:
             f.write("%s\t%s\t%d\t%d\n" % (r["item"], r["path"], r["bytes"], r["uid"]))
     show(rows, "plan of batch %s" % spec["batch"])
-    linked = [r for r in rows if r["nlink"] > 1]
+    protected.refuse_unless_ok(spec, rows)
+    linked =[r for r in rows if r["nlink"] > 1]
     print("files with other hard links (deleting this link frees nothing): %d, %.1f GB" % (len(linked), sum(r["bytes"] for r in linked) / 1e9))
     print("files of another owner, left: %d (left_other_owner.tsv)" % len(left))
 
@@ -204,6 +209,7 @@ def cmd_archive(spec, run, args):
 
 def cmd_delete(spec, run, args):
     rows = read_plan(run)
+    protected.refuse_unless_ok(spec, rows)
     man = {}
     for line in open(os.path.join(run, "manifest.jsonl")):
         m = json.loads(line)

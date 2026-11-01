@@ -1,6 +1,6 @@
 # 磁盘配额线状态（唯一的状态文档）
 
-最后更新：2026-11-01 07:20 UTC（b17 DS-CSRD 全状态 114.2 GB 已上传 AOSS 并删除）。
+最后更新：2026-11-01 UTC（记下 P1 线交接文档的别删清单，删除工具碰到就拒绝；b18 等你确认）。
 
 这条线管 `/mnt/umm/users/yinbaiqiao`（个人目录，配额 22 TB）：量、预测、提方案、按批准的清单执行，默认只读。
 
@@ -144,6 +144,7 @@ bash disk/monitor.sh stop
 给各线的完整转告（可以直接转发）：第一轮在 [RELAY_20261026.md](RELAY_20261026.md)，第二轮在 [RELAY_20261027.md](RELAY_20261027.md)，下面是第一轮的要点。
 - 下游线（10-31 05:1x 回话）：b14 核对无误，要用的起点（DS-{B,S,RS,RD}-030-s1 的 run/final_model）和 E3 的导出都在。以后下游训完、评完的实验按 R3 由磁盘线处理：磁盘线定期查出清单交你批，批了再归档、删除；下游自己的脚本不删文件。
 - 主线（10-31 回话，更正磁盘线）：b13 的三条链 q3s45、q3s0k、q3c3 都设了 `retain: best_and_last`，中间检查点评完已自动清掉（progress.json 的 retained 有 4、2、2 条）；磁盘线 10-31 告诉主线"这几条链没设 retain"是错的，b13 本身只删了最后检查点的续训状态，没错。真正没设 retain 的是 10-27、10-28 的 q3、q3s2dck、q3s3、q3dck、q3weak、q3fmt，它们的中间检查点在主线自己的清单里（主线第 85 条，31 项、782.2 GiB，`interiorgs_v10_q3_20261027/monitor/cleanup_q3_dryrun_20261031.txt`），删不删、要不要归档等你在主线定，定了主线告诉磁盘线。q3abl 设了 retain。
+- P1 线（转移题线，11-01 交接文档，你转来）：它依赖、请别删的路径见第 8 节和 [PROTECTED_PATHS.tsv](PROTECTED_PATHS.tsv)；它的工作树 `VAGEN-Lite-data` 别切分支、提交或改文件。
 - **暂不列进待删清单（模型线 10-31 告知，评完它再说）**：`models_runs/downstream/experiments/DS-CSS-100-s1/evals_src/steps_150000/`（16.3 GB，评测任务 pt-2oaccrlf；评完后可按 R4 处理）、`DS-CSB-100-s1/run/final_model/`（16.3 GB，评测任务 pt-vbdyiybe）。模型线第 39 条：在闭环里重评，每帧先压成 JPEG 质量 80。
 
 - 下游线：
@@ -170,6 +171,10 @@ bash disk/monitor.sh stop
   2. 用整理窗口的 `scripts/cluster/audit_archived_paths.sh` 加补查，确认没人读；
   3. 删前再核对文件没变，打印完整列表和总大小再删，留逐文件记录（`disk/archive_delete.py delete --yes`）。
 - 不碰的：依赖清单和各线 STATUS 里标为在用的目录、root 属主的、别人名下的、在跑的任务。不移动目录。代码会读的，即使在批准的清单里也先不删，交回那条线。
+- **其他线依赖的路径，删前先问你（你 11-01 的规定）**：表在 [PROTECTED_PATHS.tsv](PROTECTED_PATHS.tsv)，来源是 P1 线（转移题线）交接文档"给其他窗口的注意事项"一节。
+  - 内容：模型线的 `models_runs/sft_v10_newformat_20261024`、`models_runs/chains/m_qwen3vl8b_formal_*`、`models_runs/eval_sets`；主线的 r12o `lf_format`、r12 `format_sft_v2a`、r11 `sft`、`VAGEN-Lite-r12dense`、`.venv-qwen3vl-runtime`；QA 线的 `interiorgs_qa_lf_20261015/sample_256`；P1 自己的工作树 `VAGEN-Lite-data`（含 `exps/c0_restore_20261029`，66 GB，你 10-29 说先留着）。
+  - 哪个批次涉及这些路径，先单独问你，即使那条线已经批了。`archive_delete.py` 的 `plan` 和 `delete` 碰到这些路径就拒绝，你同意后把你的原话写进批次说明的 `protected_ok` 才能跑。
+  - 11-01 对过以前的记录：b5、b9 删过 `m_qwen3vl8b_formal_*` 里的东西，都是在这张表出来以前、按当时批的清单删的。删的是 C0 四个 RL 检查点（q3s0 第 150 步，q3d、q3s2s0、q3s2d 第 300 步）的续训状态，每个 105.2 GB；还有 SFT 没选中的 epoch，其中 154、308、462、616 在 10-28 已取回。P1 要用的都还在：四个 RL 检查点的 HF 权重（各 35.1 GB）、SFT `checkpoint-1232`（34.0 GB）、对话和 `train.yaml`。别的行没有批次碰过；b18 也不碰。
 - 不用 GPU。你批过的 root 属主目录删除，用 1 卡 root 任务（`disk/submit_root_delete.sh`，先查 `PAUSE_SUBMISSIONS`），删完删掉任务记录。
 - **登录节点的核数上限（你 10-28 的规定，用户级 `CLAUDE.md`；同日补充放宽）**：账号配额 14 个核，所有窗口共用。
   - 常驻监控 `monitor.py`：用 `nice -n 19`、单线程起（`monitor.sh` 已改）；10-26 起在跑的那个已调成 `nice` 19。

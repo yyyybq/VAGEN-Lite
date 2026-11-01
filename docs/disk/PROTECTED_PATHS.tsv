@@ -1,0 +1,11 @@
+pattern	owner	listed_by	why
+/mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024	model line	P1 handover 2026-11-01	P2q images (the third mixture's image paths point here), dialogues for checking format lines
+/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_*	model line / main line	P1 handover 2026-11-01	lf_q3formal dialogues, SFT recipe, C0 SFT model checkpoint-1232; C0's 4 RL checkpoints (q3s0 step 150, q3d / q3s2s0 / q3s2d step 300), used by the preregistration and the probes
+/mnt/umm/users/yinbaiqiao/models_runs/eval_sets	model line	P1 handover 2026-11-01	Qwen3 C0 per-question results (eval_val_v2 / eval_test_v2)
+/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12o_20261023/lf_format	main line	P1 handover 2026-11-01	P2f (B' short dialogues)
+/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/format_sft_v2a	main line	P1 handover 2026-11-01	P2f (B' short dialogues)
+/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft	main line	P1 handover 2026-11-01	question ids and scene split of every mixture; P2f images
+/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_lf_20261015/sample_256	QA line	P1 handover 2026-11-01	P0's 230 sample questions
+/mnt/umm/users/yinbaiqiao/VAGEN-Lite-r12dense	main line	P1 handover 2026-11-01	code of the 11-01 Qwen3 evaluations and probes (read-only)
+/mnt/umm/users/yinbaiqiao/VAGEN-Lite/.venv-qwen3vl-runtime	main line	P1 handover 2026-11-01	runtime of the 11-01 Qwen3 evaluations and probes (read-only)
+/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data	P1 (transition-qa)	P1 handover 2026-11-01	P1's worktree: exps/c0_restore_20261029 (66 GB, the user 10-29: keep for now), question bank, probes, matrices, diagnostics

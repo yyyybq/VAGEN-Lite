@@ -17,6 +17,7 @@
 | `disk/aoss_check.py` | AOSS 桶的用量、归档清单核对、上传下载测速 | 只有 `upload` 子命令会在 AOSS 上建对象 |
 | `disk/run_inventory.sh` | 依次跑 xtree、walk、du | `disk_runs/raw/inventory_<时间>/` |
 | `disk/archive_delete.py` | 一个批准批次的归档和删除：`plan`（列完整清单和总大小）、`archive`（上传 AOSS、逐文件核对大小、清单本地和 AOSS 各一份）、`delete --yes`（删前再核对、打印清单、删、逐文件记录、写说明文件） | `disk_runs/batches/<批次>/`；AOSS `vagen_lite_archive/` |
+| `disk/protected.py` | 其他线依赖、删前要先问你的路径（[PROTECTED_PATHS.tsv](PROTECTED_PATHS.tsv)）：`archive_delete.py` 的 `plan` 和 `delete` 碰到就拒绝，除非批次说明里写了 `protected_ok`（你的原话）；`records` 子命令拿所有批次的删除、恢复记录和没执行的计划对这张表 | 不写 |
 | `disk/monitor.py`、`disk/monitor.sh` | 常驻监控：每 30 分钟记配额表和文件系统统计，低于 3 TB 写警告文件，每天按一级目录记增量 | `docs/disk/usage.csv`、`daily_top.csv`、`daily_growth.md`；`disk_runs/monitor_*` |
 
 批次说明（批准了删什么、留什么、说明文件写在哪）放在 `docs/disk/batches/<批次>.json`。
