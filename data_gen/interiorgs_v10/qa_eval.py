@@ -40,6 +40,15 @@ def easi(a: argparse.Namespace) -> int:
     env = dict(os.environ, HF_HOME=HF_HOME, TRANSFORMERS_CACHE=f"{HF_HOME}/hub",
                HF_DATASETS_CACHE=f"{HF_HOME}/datasets_easi_shared", HF_HUB_OFFLINE="1", HF_DATASETS_OFFLINE="1",
                NO_PROXY="*", no_proxy="*", TOKENIZERS_PARALLELISM="false")
+    # EASI runs "accelerate launch ... -m lmms_eval" by name, and the job script puts the vagen-lite env first on PATH:
+    # its accelerate runs lmms-eval in vagen-lite, whose Transformers does not know Qwen3-VL (smoke 2026-11-01). An
+    # "accelerate" in this Python (the model type's, e.g. the Qwen3-VL runtime venv over vagen-lite) goes first.
+    bin_dir = out / f"_bin_{os.getpid()}"
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / "accelerate").write_text(f"#!{sys.executable}\nfrom accelerate.commands.accelerate_cli import main\n"
+                                        "raise SystemExit(main())\n")
+    (bin_dir / "accelerate").chmod(0o755)
+    env["PATH"] = os.pathsep.join([str(bin_dir), str(Path(sys.executable).parent), env.get("PATH", "")])
     if a.benchmark.startswith("site"):
         d = out / f"_stack_dump_{os.getpid()}"
         d.mkdir(exist_ok=True)
