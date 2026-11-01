@@ -2784,6 +2784,7 @@ class RayPPOTrainer:
                             _log_transition_metric("unknown_action_name", "transition/unknown_action_name_rate")
                             _log_transition_metric("truncated_before_action", "transition/truncated_before_action_rate")
                             _log_transition_metric("multiple_action_tag", "transition/multiple_action_tag_rate")
+                            _log_transition_metric("think_rate", "transition/think_rate")
                             _log_transition_metric("env_exception", "transition/env_exception_rate")
                             _log_transition_metric("strict_action_tag_rate", "transition/strict_action_tag_rate")
                             _log_transition_metric("tool_call_rate", "transition/tool_call_rate")

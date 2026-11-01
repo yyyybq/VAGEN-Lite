@@ -1,0 +1,56 @@
+# 矩阵第三版（Qwen3-VL-8B）C0 组：主线，不新训练。SFT = 模型线的 Qwen3 正式 SFT（只练 P2q）第 8 个 epoch；
+# RL = 从它起步的 S0 / V4，按种子成对，结果取模型线和主线的训练链。说明见 configs/matrix_v3/README.md。
+group: C0
+status: done   # 两个种子的 S0 / V4 都跑完了（2026-10-28，REPORT_QWEN3_DENSE_20261028）
+description: 主线：Qwen3 正式 SFT 第 8 个 epoch（只练 P2q）+ 按种子成对的 RL；不新训练
+model_type: qwen3_vl
+format_example: action_names
+output_format: action_only
+
+data:
+  recipe: 主线（模型线 m_qwen3vl8b_formal_sft_20261026 的 lf_q3formal，只有 P2q）
+  lf_dir: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal
+  train_rows: {P0: 0, P1: 0, P2q: 9802}   # 没有去掉边缘场景（主线的数据）；C、D 的 P2q 是这 9,802 条去掉 727 条
+  val_rows: {P2q: 1293}
+
+sft:
+  model: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232
+  epoch: 8
+  epochs_trained: 10
+  recipe_check: 和 B′–D 的 train.yaml 相同的配方（矩阵的 base_recipe 就是它）；不同的只有数据、验证集、输出目录和 image_max_pixels（256×256 的帧两边都不缩放）
+
+rl:
+  start: sft.model
+  pair: {s0: v10_p1_S0, d: v10_p1_Dcond}
+  dense: {variant: V4, progress_reward_scale: 3.3333333333333335, group_filter: keep_by_return_std, keep_std_threshold: 0.3318, keep_std_floor: 1.0}
+  seeds: [20261019, 20261021]
+  task_pool: reserve
+  tasks: train 后备题（主线的 rl_rows，没有去掉边缘场景），去掉深度核对标出的题
+  updates: 300
+  guards_used: >-
+    两对的 plan 都是 {kl_max 0.2, invalid_max 0.1, invalid_window 10, success_drop 0.1, drop_window 50, start_updates 5,
+    keep_fill_min 1.0, keep_fill_at 50}。KL 线是 0.2，矩阵按主线后来定的标准写 1.0；主线记录第一对两边 KL 最高 0.04，
+    两条线都没碰到（第二对没有查）。
+
+runs:   # 按种子；第三个种子和 DCK 是主线另跑的（REPORT_QWEN3_DENSE_20261028），矩阵按种子配对只用这两个种子
+  "20261019":
+    chain: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026
+    s0: {run: rl_run_q3s0, ended: 第 150 次被 10% 线停下（编造的"done"等宣布完成的动作名）, checkpoints: [50, 100, 150]}
+    d: {run: rl_run_q3d, ended: 300 次, checkpoints: [50, 100, 150, 200, 250, 300]}
+  "20261021":
+    chain: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021
+    s0: {run: rl_run_q3s2s0, ended: 300 次, checkpoints: [50, 100, 150, 200, 250, 300]}
+    d: {run: rl_run_q3s2d, ended: 300 次, checkpoints: [50, 100, 150, 200, 250, 300]}
+
+eval:
+  sets:
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2    # 413 道（主线评的）
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_test_v2  # 292 道
+  screened: >-
+    2026-11-01 补齐（用户选"两件都先做"）：val 的 382 道和 test 留下的 233 道取模型线已有的逐题结果，test 补进来的 59 道
+    用 qwen3-main 副本的代码和 Qwen3 运行时补跑（30 道对照全部一致）。结果 exps/matrix_inputs_20261029/eval_{test,val}_v2_screened/c0q3_*，
+    汇总 eval_test_v2_screened/c0q3_summary.json；P1 探针 exps/diagnostics_20261101/probe_v3g_q3/；失败拆解
+    exps/diagnostics_20261101/failure_c0q3_{test,val}.*。数字在 docs/transition_qa/PREREG_D_vs_C.md 第 3.1、3.3、3.4 节。
+
+needs_chain_support: {}   # 不跑训练链
+estimate: {gpu: 已用：2026-11-01 七个单卡推理任务（5 个评测各约 10 分钟、2 个探针），已删}

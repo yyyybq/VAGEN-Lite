@@ -1,0 +1,263 @@
+diff --git a/data_gen/interiorgs_v10/tests/test_train_chain.py b/data_gen/interiorgs_v10/tests/test_train_chain.py
+index 2c4a721ecf5f2a19c53b4eb7956afd3bcb7cbdf9..39d310fd6678d993944d97fb4f1267b8e857f9ed 100644
+--- a/data_gen/interiorgs_v10/tests/test_train_chain.py
++++ b/data_gen/interiorgs_v10/tests/test_train_chain.py
+@@ -70,7 +70,7 @@ class ChainTest(unittest.TestCase):
+             self.assertIn("失败", (Path(tmp) / "PROGRESS.md").read_text(encoding="utf-8"))
+             calls.clear()
+             self.assertEqual(make().run(), 0)  # a new run continues at the failed step
+-            self.assertEqual(calls, ["sft", "sft_eval", "pick_sft", "rl_config", "rl", "rl_extend", "evaluate"])
++            self.assertEqual(calls, ["sft", "sft_eval", "pick_sft", "rl_config", "rl", "rl_extend", "evaluate", "diagnostics"])
+             self.assertEqual(json.loads((Path(tmp) / "progress.json").read_text())["state"], "done")
+ 
+     def test_progress_without_the_new_steps(self):
+diff --git a/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py b/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
+index f34df3d0f58b4b968c5aafde0d6d3a885b2c3e55..c71112911cb4db4489981f8857ff3c20bad793b2 100644
+--- a/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
++++ b/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
+@@ -51,7 +51,7 @@ class MatrixFieldsTest(unittest.TestCase):
+             for step in T.STEPS:
+                 setattr(chain, step, lambda step=step: calls.append(step))
+             self.assertEqual(chain.run(), 0)
+-            self.assertEqual(calls, ["check_code", "rl_config", "rl", "rl_extend", "evaluate"])
++            self.assertEqual(calls, ["check_code", "rl_config", "rl", "rl_extend", "evaluate", "diagnostics"])
+             for s in T.SFT_STEPS:
+                 self.assertEqual(chain.state["steps"][s]["note"], "not planned (start_model)")
+             self.assertEqual(chain.sft_model(), Path("/models/base_7b"))
+@@ -125,5 +125,79 @@ class MatrixFieldsTest(unittest.TestCase):
+             self.assertIsNone(got["val__base"][3])  # a listed model keeps its own format
+ 
+ 
++class DiagnosticsStepTest(unittest.TestCase):
++    """Patch 0002: the diagnostics step (failure breakdown, probe jobs for every evaluated model, curves)."""
++
++    def test_probes_every_evaluated_model(self):
++        from unittest import mock
++
++        from data_gen.interiorgs_v10 import job_sco
++        from eval.diagnostics import sco_probe
++
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            lf = write_lf(root / "mix_D")
++            for step in (154, 308):
++                (lf / "model" / f"checkpoint-{step}").mkdir(parents=True)
++            tr = root / "tr"
++            for s in (50, 100):
++                (tr / "rl_run_p1s0" / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface").mkdir(parents=True)
++            plan = {"tr": str(tr), "sft_dir": str(root), "endpoint": 100, "sft_groups": {"mix": "x.jsonl"},
++                    "sft_lf_dirs": {"mix": str(lf)}, "eval_sets": {"val": str(root / "val")}, "rl_runs": {"p1s0": {}},
++                    "eval": {"every": 50}, "diagnostics": {"probes": {"P1": str(root / "p1_probe.jsonl"), "P0": None},
++                                                          "models_per_job": 3},
++                    "retain": "best_and_last"}
++            chain = T.Chain(plan, sleep=lambda s: None)
++            chain.state["steps"]["pick_sft"]["decision"] = {"select_by": "val", "scores": {"sft_mix_e1": 0.3, "sft_mix_e2": 0.4},
++                                                            "best": "sft_mix_e2", "model": str(lf / "model" / "checkpoint-308"),
++                                                            "other_sets": {}}
++            calls, prepared = [], {}
++            chain.sh = lambda args, **k: calls.append(args)
++            chain.retain = lambda: calls.append(["retain"])  # main's retention: after the probes
++
++            def prepare(run, probe, models=(), pool=None, out_dir=None, **k):
++                prepared[run.name] = ([m.split("=", 1)[0] for m in models], out_dir)
++                (run / "job").mkdir(parents=True, exist_ok=True)
++
++            def submit(run, job_dir="job"):
++                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": "pt-" + run.name}))
++
++            def status(run, job_dir="job"):
++                names, out_dir = prepared[run.name]
++                for n in names:
++                    Path(out_dir).mkdir(parents=True, exist_ok=True)
++                    (Path(out_dir) / f"{n}.json").write_text("{}")
++                return {"state": "SUCCEEDED", "finished": True}
++
++            def delete(run, job_dir="job"):
++                receipt = run / job_dir / "submission.json"
++                receipt.replace(receipt.with_name("submission_deleted.json"))
++
++            with mock.patch.multiple(job_sco, submit=submit, status=status, delete=delete), \
++                    mock.patch.object(sco_probe, "prepare", prepare):
++                chain.diagnostics()
++                self.assertEqual(calls[0][2:], ["eval.diagnostics.failure_breakdown", "--eval", str(root / "val"),
++                                                "--out", str(tr / "diag" / "failure_val")])
++                self.assertEqual(sorted(n for names, _ in prepared.values() for n in names),
++                                 ["p1s0_050", "p1s0_100", "sft_mix_e1", "sft_mix_e2"])
++                self.assertEqual(len(prepared), 2)  # 4 models, 3 per job; the null P0 probe is skipped
++                self.assertTrue(all(o == str(tr / "diag" / "probe_P1") for _, o in prepared.values()))
++                self.assertEqual(chain.retain_after(), "diagnostics")
++                self.assertEqual(calls[-1], ["retain"])
++                curve = calls[-2]
++                self.assertIn("SFT_mix=sft_mix_e1:1,sft_mix_e2:2", curve)
++                self.assertIn("RL_p1s0=sft_mix_e2:0,p1s0_050:50,p1s0_100:100", curve)
++                prepared.clear()
++                chain.diagnostics()  # every model has results: no new job
++                self.assertEqual(prepared, {})
++
++    def test_not_planned(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 100}, sleep=lambda s: None)
++            chain.diagnostics()
++            self.assertEqual(chain.state["steps"]["diagnostics"]["note"], "not planned")
++            self.assertEqual(chain.retain_after(), "evaluate")  # no diagnostics step: right after evaluate
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
+index 9370d7b74fa6d86fe8628e5e46139eb791b3ec6e..13cbb5445194a85df5f0b3827a9f8398fee9e289 100644
+--- a/data_gen/interiorgs_v10/train_chain.py
++++ b/data_gen/interiorgs_v10/train_chain.py
+@@ -135,6 +135,13 @@ TR} for that chain's picked SFT checkpoint) skips render to pick_sft and starts
+ unparseable answers only up to that update; plan "eval"."rl_prompt_format" evaluates the RL checkpoints with that
+ prompt format.
+ 
++11. ``diagnostics``  matrix v2 (plan "diagnostics": {"failure_breakdown": true, "probes": {"P1": probe.jsonl, "P0":
++                   null}, "models_per_job": 6}): the failure breakdown of every evaluation set (CPU,
++                   eval.diagnostics.failure_breakdown) and every probe for every evaluated model (every SFT epoch,
++                   the start model, every RL checkpoint, the plan's eval models): single-card jobs of
++                   eval.diagnostics.sco_probe, results in TR/diag/probe_<name>/ (a model with results is not asked
++                   again), then the curves (qa_probe curve).  A probe set left null is skipped (P0 until it exists).
++
+ A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
+ logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
+ continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
+@@ -155,14 +162,18 @@ from pathlib import Path
+ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+-STEPS = ("check_code", "render", "sft_data", "sft", "sft_eval", "pick_sft", "rl_config", "rl", "rl_extend", "evaluate")
++STEPS = ("check_code", "render", "sft_data", "sft", "sft_eval", "pick_sft", "rl_config", "rl", "rl_extend", "evaluate",
++         "diagnostics")
+ STEP_ZH = {"check_code": "核对代码", "render": "渲染 SFT 画面", "sft_data": "SFT 对话和数据", "sft": "SFT（7B）",
+            "sft_eval": "SFT 每个 epoch 评测", "pick_sft": "按验证集挑 SFT 检查点", "rl_config": "RL 配置",
+-           "rl": "RL（S0）", "rl_extend": "RL 续训（验证仍上升时）", "evaluate": "评测"}
+-CARDS = {"render": "1", "sft": "每组 8", "sft_eval": "每个 1", "rl": "1 + 8", "rl_extend": "1 + 8", "evaluate": "每个模型 1"}
++           "rl": "RL（S0）", "rl_extend": "RL 续训（验证仍上升时）", "evaluate": "评测",
++           "diagnostics": "诊断（失败拆解、探针）"}
++CARDS = {"render": "1", "sft": "每组 8", "sft_eval": "每个 1", "rl": "1 + 8", "rl_extend": "1 + 8", "evaluate": "每个模型 1",
++         "diagnostics": "每个探针任务 1"}
++DEFAULT_MODELS_PER_PROBE_JOB = 6  # about 3.5 minutes per 7B model on one H800 (2026-10-19)
+ POLL_S = 60.0
+ DEFAULT_MAX_EVAL_JOBS = 10
+-EVAL_ONLY_STEPS = ("check_code", "evaluate")
++EVAL_ONLY_STEPS = ("check_code", "evaluate", "diagnostics")
+ RL_STEPS = ("rl_config", "rl", "rl_extend")
+ SFT_STEPS = ("render", "sft_data", "sft", "sft_eval", "pick_sft")  # skipped with plan "start_model" (matrix v2)
+ # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
+@@ -1708,9 +1719,14 @@ class Chain:
+         jobs.update(self.variant_jobs(ev, {**sets, **extra}, models, rl_names))
+         self.eval_jobs("evaluate", jobs)
+         self.tables()
+-        if self.plan.get("retain") == "best_and_last":  # round 12 batch: disk
++        if self.plan.get("retain") == "best_and_last" and self.retain_after() == "evaluate":  # round 12 batch: disk
+             self.retain()
+ 
++    def retain_after(self) -> str:
++        """The step after which the retention rule deletes checkpoints: evaluate, or diagnostics when the plan has
++        one (its probes need every evaluated checkpoint; patch 0002)."""
++        return "diagnostics" if self.plan.get("diagnostics") else "evaluate"
++
+     def retain(self) -> None:
+         """Delete the checkpoints the plan's retention rule does not keep (see the module docstring)."""
+         import shutil
+@@ -1788,6 +1804,99 @@ class Chain:
+                     jobs[f"{set_name}__{result}"] = (sets[set_name], result, model, prompt_format, list(v.get("options") or []))
+         return jobs
+ 
++    def evaluated_models(self) -> Dict[str, str]:
++        """{result name: model path} of what the chain evaluated: every SFT epoch of every group (sft_<group>_e<k>),
++        the start model of a start_model plan ("start"), every RL checkpoint that exists, the plan's eval models."""
++        ev = self.plan.get("eval") or {}
++        out: Dict[str, str] = {}
++        if not self.plan.get("eval_only"):
++            if self.plan.get("start_model"):
++                out["start"] = str(self.sft_model())
++            elif self.plan.get("sft_groups"):
++                for group in self.sft_groups():
++                    for epoch, path in epoch_checkpoints(self.lf_dir(group) / "model"):
++                        out[f"sft_{group}_e{epoch}"] = str(path)
++            every = int(ev.get("every", 50))
++            for run_name, run in self.rl_runs().items():
++                for s in range(every, self.final_update() + 1, every):
++                    hf = run["run_dir"] / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface"
++                    if hf.is_dir():
++                        out[f"{run_name}_{s:03d}" if run_name else f"v10_rl_{s:03d}"] = str(hf)
++        out.update({name: m["model"] for name, m in (ev.get("models") or {}).items()})
++        return out
++
++    def probe_chains(self, names: Sequence[str]) -> List[str]:
++        """qa_probe curve chains: each SFT group by epoch; each RL run by update from its start (the picked SFT
++        checkpoint or "start"); the other models in a row."""
++        pick = (self.state["steps"].get("pick_sft", {}).get("decision") or {}).get("best")
++        start = "start" if "start" in names else pick if pick in names else None
++        chains, used = [], set()
++        if not self.plan.get("eval_only"):
++            for group in (self.sft_groups() if self.plan.get("sft_groups") and not self.plan.get("start_model") else []):
++                pts = [(n, int(n.rsplit("_e", 1)[1])) for n in names if n.startswith(f"sft_{group}_e")]
++                if pts:
++                    chains.append(f"SFT_{group}=" + ",".join(f"{n}:{e}" for n, e in sorted(pts, key=lambda x: x[1])))
++                    used.update(n for n, _ in pts)
++            for run_name in self.rl_runs():
++                prefix = f"{run_name}_" if run_name else "v10_rl_"
++                pts = sorted((n, int(n[len(prefix):])) for n in names if n.startswith(prefix) and n[len(prefix):].isdigit())
++                if pts:
++                    head = [f"{start}:0"] if start else []
++                    chains.append(f"RL_{run_name or 'rl'}=" + ",".join(head + [f"{n}:{s}" for n, s in pts]))
++                    used.update(n for n, _ in pts)
++        rest = [n for n in names if n not in used and n != start]
++        if rest:
++            chains.append("MODELS=" + ",".join(f"{n}:{i}" for i, n in enumerate(rest)))
++        return chains
++
++    def diagnostics(self) -> None:
++        from eval.diagnostics import sco_probe
++
++        from . import job_sco
++
++        diag = self.plan.get("diagnostics")
++        if not diag:
++            self.mark("diagnostics", note="not planned")
++            return
++        out = self.tr / "diag"
++        py = sys.executable
++        if diag.get("failure_breakdown", True):
++            for set_name, eval_dir in self.eval_sets().items():
++                self.sh([py, "-m", "eval.diagnostics.failure_breakdown", "--eval", str(eval_dir),
++                         "--out", str(out / f"failure_{set_name}")], log=self.tr / "logs" / f"failure_{set_name}.log")
++        models = self.evaluated_models()
++        probes = {k: v for k, v in (diag.get("probes") or {}).items() if v}  # null: not there yet (P0)
++        per_job = int(diag.get("models_per_job", DEFAULT_MODELS_PER_PROBE_JOB))
++        runs: Dict[str, Path] = {}
++        for probe_name, probe in probes.items():
++            results = out / f"probe_{probe_name}"
++            todo = [n for n in models if not (results / f"{n}.json").exists()]
++            for i in range(0, len(todo), per_job):
++                run = out / "probe_runs" / f"{probe_name}_{i // per_job}"
++                run.mkdir(parents=True, exist_ok=True)
++                if not (run / "job" / "submission.json").exists():
++                    sco_probe.prepare(run, str(probe), models=[f"{n}={models[n]}" for n in todo[i:i + per_job]],
++                                      pool=self.plan.get("pool"), out_dir=str(results))
++                    job_sco.submit(run)
++                runs[run.name] = run
++        if runs:
++            self.mark("diagnostics", job_ids={n: json.loads((r / "job" / "submission.json").read_text())["job_id"]
++                                              for n, r in runs.items()})
++            self.wait_all("diagnostics", runs)
++        for probe_name, probe in probes.items():
++            results = out / f"probe_{probe_name}"
++            missing = [n for n in models if not (results / f"{n}.json").exists()]
++            if missing:
++                raise ChainError(f"probe {probe_name}: no results for {missing[:5]}")
++            chains = self.probe_chains(list(models))
++            if chains:
++                self.sh([py, "-m", "eval.diagnostics.qa_probe", "curve", "--out", str(results),
++                         "--probe-name", f"{probe_name} ({probe})", *[a for c in chains for a in ("--chain", c)]],
++                        log=self.tr / "logs" / f"probe_curve_{probe_name}.log")
++        self.mark("diagnostics", models=len(models), probes=sorted(probes))
++        if self.plan.get("retain") == "best_and_last" and self.retain_after() == "diagnostics":
++            self.retain()  # kept until the probes had every evaluated checkpoint
++
+     def sft_epoch_model(self, name: str) -> Optional[Path]:
+         """The checkpoint of an SFT epoch by its result name ("sft_<group>_e<k>", "sft_e<k>" for the single group)."""
+         for group in self.sft_groups():

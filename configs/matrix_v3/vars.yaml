@@ -1,0 +1,33 @@
+# 矩阵第三版（Qwen3-VL-8B）所有组共用的设置。各组 YAML 照抄这些值，data_gen/sft_mixture/tests/test_matrix_v3.py
+# 核对它们和这里一致、和主线 10-27 的登记（configs/matrix_r12.json，qwen3-main d530b546）一致。
+registration: configs/matrix_r12.json @ qwen3-main d530b546（用户第十四次补充第 5 节，决定 78–80，2026-10-27；A、B′ 是决定 74、75，2026-10-26）
+model_type: qwen3_vl
+base_qwen3: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+format_example: action_names
+mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261030.yaml
+mixture_out: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261030
+sft_recipe: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/train.yaml
+rl:
+  pair: {s0: v10_p1_S0, d: v10_p1_Dcond}
+  dense:   # 决定 79：密集一侧暂用 V4（D_cond 标准，进度奖励 ÷ 3，加补题）；DCK 也跑，三项检查之后再定基线
+    variant: V4
+    progress_reward_scale: 3.3333333333333335
+    group_filter: keep_by_return_std
+    keep_std_threshold: 0.3318
+    keep_std_floor: 1.0
+  seeds: [20261019, 20261021]   # 决定 80：组间差别只按种子配对算，不到两个种子算"未确认"
+  task_pool: reserve
+  rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl   # 第十一轮的 RL 行去掉 128 个边缘场景（2026-10-29）
+  exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
+  updates: 300
+  guards: {invalid_max: 0.10, kl_max: 1.0}   # 决定 78 的标准停止线；其余照标准配置的训练链默认值（chain_defaults）
+  attention: eager                            # 决定 78
+eval:
+  val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened    # 382 道
+  test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened  # 292 道
+  every: 50
+# 训练链部分到时要用的：rl-config 拿它核对 RL 题和 SFT 题不重合、格式行一致（P2q 的对话，新格式）
+format_check_sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
+# 探针集（补丁 0002 的 diagnostics 步）
+p1_probe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_probe.jsonl
+p0_probe: null

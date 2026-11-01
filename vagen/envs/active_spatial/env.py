@@ -25,6 +25,7 @@
 # - Reward = Δscore (positive when improving, negative when regressing)
 
 import time
+import re
 import asyncio
 import json
 import numpy as np
@@ -403,6 +404,9 @@ class ActiveSpatialEnv(BaseEnv):
         has_action_close = "</action>" in response_lower
         truncated_before_action = bool(has_action_tag and not has_action_close)
         multiple_action_tag = action_tag_count > 1
+        # thinking text: a non-empty <think> block, closed or cut off (matrix group E, transition-qa branch)
+        think_match = re.search(r"<think>(.*?)(?:</think>|$)", response_text, re.DOTALL | re.IGNORECASE)
+        has_think = bool(think_match and think_match.group(1).strip())
 
         def _result(format_correct: bool, actions: list[str], think: str, parse_error: str) -> Dict[str, Any]:
             has_tool_call = "<tool_call>" in response_lower
@@ -421,6 +425,7 @@ class ActiveSpatialEnv(BaseEnv):
                 "has_strict_action_tag": bool(has_action_tag) and not has_tool_call,
                 "fallback_parse": bool(parse_error == "tool_call_protocol" or (has_tool_call and format_correct is False and len(actions) > 0)),
                 "strict_parse_success": bool(format_correct and has_action_tag and not has_tool_call and len(actions) > 0),
+                "has_think": has_think,
             }
 
         ft = parse_free_think(response_text)
@@ -955,6 +960,7 @@ class ActiveSpatialEnv(BaseEnv):
                 "lenient_read": bool(rst.get("lenient_read")),
                 "truncated_before_action": bool(rst.get("truncated_before_action", False)),
                 "multiple_action_tag": bool(rst.get("multiple_action_tag", False)),
+                "has_think": bool(rst.get("has_think", False)),
             },
             "traj_metrics": {
                 "success": False,

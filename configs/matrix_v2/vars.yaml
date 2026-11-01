@@ -1,0 +1,14 @@
+# 矩阵第二版的变量：各组 YAML 里的 {rl_package} 和 {pkg}（用户 2026-10-19：RL 标准名做成变量）。
+# 用法：python -m data_gen.sft_mixture.matrix_plan --group D [--rl-package v10_p2] --out plan.json
+#
+# rl_package：RL 标准的前缀。每组的 RL 是一对：<rl_package>_S0（稀疏奖励）和 <rl_package>_D（密集奖励），
+#   定义在 data_gen/interiorgs_v10/configs/rl_standards.json；matrix_plan 核对两个都存在、只差奖励。
+# pkg：rl_package 去掉 "v10_" 的短名（p1、p2），用在 RL 的目录名里（rl_run_p1s0、rl_run_p1d）。
+#
+# 注意：v10_p1 / v10_p2 是 RL 修正包（优化设置：GRPO、每次更新抽多少候选题等）的名字，
+# 和数据池 P1（转移题）/ P2（第十一轮的 SFT 动作轨迹）无关。
+rl_package: v10_p1   # 主线第十二轮决定 8（2026-10-19）：标准仍是 v10_p1；p2（48 道候选题）只作更新效率的消融
+
+# 探针集（补丁 0002 的 diagnostics 步、matrix_plan --chain-patch 用）。P0 探针到位后填 p0_probe。
+p1_probe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_probe.jsonl
+p0_probe: null

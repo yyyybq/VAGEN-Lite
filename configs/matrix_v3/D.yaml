@@ -1,0 +1,58 @@
+# 矩阵第三版（Qwen3-VL-8B）D 组：P0 + P1 + P2q，三种样本分开、同一次 SFT；之后 RL。说明见 configs/matrix_v3/README.md。
+# 用户 2026-10-30 选 (a)：按主线 10-27 的登记分两步做。这一步是 SFT 数据和组的定义；RL 和训练链的部分
+# （Qwen3 运行时、V4 / DCK、eager）等 qwen3-main 合进 main 之后再接，到时生成可执行的 plan（chain.plan 现在是 null）。
+group: D
+status: planned
+description: P0 + 转移题 + 动作轨迹（新格式），三种样本分开，同一次训练；之后 RL
+model_type: qwen3_vl
+format_example: action_names
+output_format: action_only
+
+data:
+  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261030.yaml
+  recipe: D
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261030/D
+  train_rows: {P0: 164, P1: 9075, P2q: 9075}       # 去掉 128 个边缘场景后；P1 和 P2q 一样多；P0、P1 的行和第二版 D 逐条相同
+  val_rows: {P0: 17, P1: 300, P2q: 300, P2f: 38}   # 每组相同；每个池单独算验证损失
+
+sft:
+  base_model: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+  epochs: 10
+  cards: 8
+  recipe: 主线 Qwen3 SFT 的配方（lf_q3formal/train.yaml：模板 qwen3_vl_nothink，学习率 1e-5 余弦，warmup 3%，每步 64 条，冻结视觉塔）
+  select: 每个 epoch 在 val（eval_val_v2_screened，382 道）上评测（不采样），挑成功率最高的，打平取更早的
+
+rl:   # 每个种子一对（S0 和密集一侧），同一个起点、同一批题、同样的更新次数和停止线
+  start: SFT 挑出的检查点
+  pair: {s0: v10_p1_S0, d: v10_p1_Dcond}
+  dense: {variant: V4, progress_reward_scale: 3.3333333333333335, group_filter: keep_by_return_std, keep_std_threshold: 0.3318, keep_std_floor: 1.0}
+  seeds: [20261019, 20261021]
+  task_pool: reserve
+  rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl
+  exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
+  updates: 300
+  output_format: action_only
+  guards: {invalid_max: 0.10, kl_max: 1.0}
+  attention: eager
+
+eval:
+  sets:
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened    # 382 道，挑模型用
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened  # 292 道，只记录
+  every: 50
+  diagnostics:
+    failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
+    qa_probe: P1 探针（exps/transition_qa_20261019b/p1_probe.jsonl，838 道），SFT 各 epoch 和每个 RL 的各检查点；Qwen3 的模型要用 Qwen3 的运行时，等 qwen3-main
+
+chain:   # 训练链部分：等 qwen3-main 合进 main（用户 2026-10-30）
+  plan: null
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m3_d
+  rl_name: v10_rl_m3_d
+  sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024   # P2q 的对话（新格式）：rl-config 核对格式行、RL 题和 SFT 题不重合
+  sft_groups: {mix: sft_trajectories.jsonl}
+  needs_chain_support:   # 补丁 0001 / 0002 的字段
+    sft_lf_dirs: {mix: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261030/D}
+    diagnostics_after_eval: true
+  needs_qwen3_main: [model_type qwen3_vl, attention eager, 密集一侧 V4 的设置, 两个种子各一对 RL, 补丁 0001 / 0002 对合并后的训练链重新核对]
+
+estimate: {sft: 8 卡约 4 小时（10 个 epoch，18,314 条）, rl: 两个种子 × 一对 = 4 个，每个 1 + 8 卡约 5.5 小时（Qwen3 C0 实测每次更新 59–66 秒）, evaluate: 4 个 RL 各 6 个检查点 × 2 个题集}

@@ -1,0 +1,284 @@
+<title>InteriorGS 场景筛选</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* A review sheet: a sticky tally with the live cost of the current choices, then three tiers of scene groups.
+   Each scene card: a frame (or the floor plan), the facts behind its type, what uses it, and exclude / keep. */
+:root {
+  --bg: #f1f0ec; --surface: #ffffff; --ink: #1d2126; --muted: #5d6670; --line: #d9d6cf; --accent: #2f5d7c;
+  --out: #a8402f; --out-bg: #f6e4df; --keep: #2d6f4b; --keep-bg: #e2f0e7; --open: #8a6a12; --open-bg: #f4ecd2;
+  --chip: #ebe8e1; --plan-bg: #e9e7e1;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181b; --surface: #1d2125; --ink: #e5e7e9; --muted: #9aa3ac; --line: #30363c; --accent: #86b6d6;
+    --out: #f0927f; --out-bg: #3c211c; --keep: #79cf9c; --keep-bg: #183224; --open: #e3bf62; --open-bg: #362d15;
+    --chip: #2a3036; --plan-bg: #262b30; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15181b; --surface: #1d2125; --ink: #e5e7e9; --muted: #9aa3ac; --line: #30363c; --accent: #86b6d6;
+  --out: #f0927f; --out-bg: #3c211c; --keep: #79cf9c; --keep-bg: #183224; --open: #e3bf62; --open-bg: #362d15;
+  --chip: #2a3036; --plan-bg: #262b30; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.6;
+       padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+       padding-block: 0 56px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 22px; }
+header.intro { padding-block: 26px 0; display: grid; gap: 10px; }
+h1 { font-size: 1.6rem; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.25rem; margin: 0; text-wrap: balance; }
+h3 { font-size: 1.05rem; margin: 0; text-wrap: balance; }
+.intro p, .note p { margin: 0; color: var(--muted); max-width: 72ch; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 0.88rem; min-width: 640px; }
+th, td { border-bottom: 1px solid var(--line); padding: 6px 10px; text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 500; }
+.tally { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line);
+         padding-block: 10px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-variant-numeric: tabular-nums; }
+.tally .n { font-weight: 700; }
+.tally .out { color: var(--out); } .tally .keep { color: var(--keep); } .tally .open { color: var(--open); }
+.tally .cost { flex-basis: 100%; color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
+.tally .tools { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+button { font: inherit; font-size: 0.86rem; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--line);
+         background: var(--surface); color: var(--ink); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.status { font-size: 0.76rem; color: var(--muted); flex-basis: 100%; line-height: 1.4; }
+section.tier { display: grid; gap: 16px; }
+.tierhead { display: grid; gap: 4px; border-left: 4px solid var(--accent); padding-left: 12px; }
+.tierhead p { margin: 0; color: var(--muted); max-width: 72ch; }
+.tier[data-tier="A"] .tierhead { border-color: var(--out); }
+.tier[data-tier="B"] .tierhead { border-color: var(--open); }
+.tier[data-tier="C"] .tierhead { border-color: var(--keep); }
+.group { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.ghead { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+.ghead .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ghead .rule { flex-basis: 100%; color: var(--muted); font-size: 0.86rem; }
+.ghead .gtools { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: grid; grid-template-rows: auto 1fr; min-width: 0; background: var(--surface); }
+.card[data-state="exclude"] { border-color: var(--out); box-shadow: 0 0 0 1px var(--out) inset; }
+.card[data-state="keep"] { border-color: var(--keep); }
+.card[data-state="open"] { border-color: var(--open); border-style: dashed; }
+.shot { position: relative; aspect-ratio: 4 / 3; max-width: 100%; background: var(--plan-bg); display: grid; place-items: center; overflow: hidden; }
+.shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot img.plan { object-fit: contain; padding: 10px; image-rendering: pixelated; }
+.shot .tag { position: absolute; left: 6px; bottom: 6px; font-size: 0.72rem; background: var(--surface); color: var(--muted); padding: 1px 6px; border-radius: 6px; }
+.body { padding: 10px 12px 12px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.idline { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sid { font-family: var(--font-mono); font-size: 0.86rem; font-weight: 600; }
+.chip { background: var(--chip); font-size: 0.74rem; padding: 1px 7px; border-radius: 999px; color: var(--muted); }
+.chip.split-test { color: var(--accent); }
+.facts, .use { font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.labels { display: flex; flex-wrap: wrap; gap: 4px; }
+.labels span { font-size: 0.74rem; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
+.why { font-size: 0.8rem; color: var(--open); }
+.toggle { display: flex; gap: 6px; }
+.toggle button { flex: 1; }
+.toggle button[aria-pressed="true"][data-v="exclude"] { background: var(--out-bg); color: var(--out); border-color: var(--out); font-weight: 600; }
+.toggle button[aria-pressed="true"][data-v="keep"] { background: var(--keep-bg); color: var(--keep); border-color: var(--keep); font-weight: 600; }
+details.homes summary { cursor: pointer; font-weight: 600; }
+.homegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 14px; margin-top: 10px; }
+.homerow { display: flex; gap: 8px; align-items: center; font-size: 0.82rem; font-variant-numeric: tabular-nums; padding: 2px 0; border-bottom: 1px dashed var(--line); min-width: 0; }
+.homerow .sid { font-size: 0.8rem; }
+.homerow .f { color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.homerow label { display: flex; gap: 4px; align-items: center; color: var(--out); }
+.note textarea { width: 100%; min-height: 90px; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.export textarea { width: 100%; min-height: 140px; font-family: var(--font-mono); font-size: 0.76rem; }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <h1>InteriorGS 场景筛选：先过一遍清单</h1>
+    <p id="intro"></p>
+    <div class="tablewrap"><table id="impact"></table></div>
+  </header>
+  <div class="tally" id="tally"></div>
+  <main id="tiers" style="display:grid; gap:30px"></main>
+  <section class="note">
+    <h3>备注</h3>
+    <p>要另外排除或保留的类别、规则哪里分错了，都可以写在这里。</p>
+    <textarea id="note" placeholder="例如：健身房也不要；第 0029 号是售楼处，算展厅。"></textarea>
+  </section>
+  <section class="export" id="exportbox" hidden>
+    <h3>结果（复制失败时手动复制）</h3>
+    <textarea id="exporttext" readonly></textarea>
+  </section>
+</div>
+
+<script>
+const DATA = /*DATA*/null;
+(function () {
+  const M = DATA.meta, SCENES = DATA.scenes, HOMES = DATA.homes;
+  const ALL = SCENES.concat(HOMES);
+  const BY = Object.fromEntries(ALL.map((s) => [s.id, s]));
+  const PRESET = { A: "exclude", B: "open", C: "keep" };
+  const SPLIT = { train: "训练", val: "验证", test: "测试" };
+  const KEY = "interiorgs-scene-screen-20261028";
+  let choice = {}, note = "", status = "";
+
+  const fmt = (x) => x.toLocaleString("zh-CN");
+  const stateOf = (id) => choice[id] || PRESET[BY[id].ti];
+  function load() { try { const v = JSON.parse(localStorage.getItem(KEY) || "{}"); choice = v.choice || {}; note = v.note || ""; } catch (e) { choice = {}; } }
+  function persist() { try { localStorage.setItem(KEY, JSON.stringify({ choice, note })); } catch (e) {} }
+
+  // ------------------------------------------------------------------ intro and the cost table
+  document.getElementById("intro").textContent = M.intro;
+  const T = M.tierTotals;
+  const cols = [["scenes", "场景"], ["train", "训练"], ["val", "验证"], ["test", "测试"], ["sft", "SFT 任务"], ["rl", "RL 训练任务"],
+                ["ev", "评测·验证"], ["et", "评测·测试"], ["p1", "P1 题"]];
+  const rowsHtml = [["A", "建议排除"], ["B", "你定"], ["C", "建议保留"], ["all", "全部"]].map(([k, name]) =>
+    `<tr><td>${name}</td>${cols.map(([c]) => `<td>${fmt(T[k][c])}</td>`).join("")}</tr>`).join("");
+  document.getElementById("impact").innerHTML = `<thead><tr><th>档</th>${cols.map(([, n]) => `<th>${n}</th>`).join("")}</tr></thead><tbody>${rowsHtml}</tbody>`;
+
+  // ------------------------------------------------------------------ cards
+  const tiersEl = document.getElementById("tiers");
+  function card(s) {
+    const el = document.createElement("article");
+    el.className = "card"; el.dataset.id = s.id;
+    const shot = s.img ? `<img loading="lazy" src="${s.img}" alt="${s.id} 的一张渲染图"><span class="tag">渲染帧</span>`
+                       : `<img class="plan" loading="lazy" src="${s.occ}" alt="${s.id} 的俯视占用图"><span class="tag">俯视占用图（没有渲染帧）</span>`;
+    const u = s.u;
+    el.innerHTML = `<div class="shot">${shot}</div><div class="body">
+      <div class="idline"><span class="sid">${s.id}</span><span class="chip ${s.sp === "test" ? "split-test" : ""}">${SPLIT[s.sp]}</span><span class="chip">${M.names[s.ty]}</span></div>
+      <div class="facts">${fmt(s.ar)} m² · ${s.rm} 间 · ${fmt(s.ob)} 件，结构和灯以外 ${fmt(s.co)} 件</div>
+      <div class="labels">${s.top.map(([k, n]) => `<span>${k} ${n}</span>`).join("")}</div>
+      ${s.why.length ? `<div class="why">${s.why.join("；")}</div>` : ""}
+      <div class="use">SFT 任务 ${u.sft} · RL 任务 ${u.rl} · 评测 ${u.ev} / ${u.et} · P1 题 ${u.p1}</div>
+      <div class="toggle"><button data-v="exclude" aria-pressed="false">排除</button><button data-v="keep" aria-pressed="false">保留</button></div></div>`;
+    el.querySelectorAll(".toggle button").forEach((b) => b.addEventListener("click", () => setChoice([s.id], b.dataset.v)));
+    return el;
+  }
+  const TIER_TEXT = M.tierText;
+  ["A", "B", "C"].forEach((ti) => {
+    const sec = document.createElement("section");
+    sec.className = "tier"; sec.dataset.tier = ti;
+    sec.innerHTML = `<div class="tierhead"><h2>${TIER_TEXT[ti][0]}</h2><p>${TIER_TEXT[ti][1]}</p></div>`;
+    const types = [...new Set(SCENES.filter((s) => s.ti === ti).map((s) => s.ty))];
+    types.sort((a, b) => SCENES.filter((s) => s.ti === ti && s.ty === b).length - SCENES.filter((s) => s.ti === ti && s.ty === a).length);
+    types.forEach((ty) => {
+      const members = SCENES.filter((s) => s.ti === ti && s.ty === ty);
+      const g = document.createElement("div");
+      g.className = "group";
+      g.innerHTML = `<div class="ghead"><h3>${M.names[ty]}</h3><span class="count">${members.length} 个</span>
+        <span class="gtools"><button data-g="exclude">这组全排除</button><button data-g="keep">这组全保留</button><button data-g="reset">恢复建议</button></span>
+        <span class="rule">${M.rules[ty] || ""}</span></div><div class="cards"></div>`;
+      const ids = members.map((s) => s.id);
+      g.querySelectorAll(".gtools button").forEach((b) => b.addEventListener("click", () => setChoice(ids, b.dataset.g === "reset" ? null : b.dataset.g)));
+      const box = g.querySelector(".cards");
+      members.forEach((s) => box.appendChild(card(s)));
+      sec.appendChild(g);
+    });
+    if (ti === "C") {
+      const d = document.createElement("details");
+      d.className = "group homes";
+      d.innerHTML = `<summary>住宅 ${HOMES.length} 个（规则和面积都没有异常，默认保留；要排除哪个就勾上）</summary><div class="homegrid"></div>`;
+      const grid = d.querySelector(".homegrid");
+      HOMES.forEach((h) => {
+        const r = document.createElement("div");
+        r.className = "homerow"; r.dataset.id = h.id;
+        r.innerHTML = `<span class="sid">${h.id}</span><span class="f">${SPLIT[h.sp]} · ${fmt(h.ar)} m² · ${h.rm} 间 · ${fmt(h.co)} 件</span><label><input type="checkbox"> 排除</label>`;
+        r.querySelector("input").addEventListener("change", (e) => setChoice([h.id], e.target.checked ? "exclude" : null));
+        grid.appendChild(r);
+      });
+      sec.appendChild(d);
+    }
+    tiersEl.appendChild(sec);
+  });
+
+  // ------------------------------------------------------------------ state, tally, store
+  function paint(id) {
+    const st = stateOf(id);
+    document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => {
+      if (el.classList.contains("homerow")) { el.querySelector("input").checked = st === "exclude"; return; }
+      el.dataset.state = st;
+      el.querySelectorAll(".toggle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === st)));
+    });
+  }
+  function tally() {
+    const c = { exclude: 0, keep: 0, open: 0 }, cost = { sft: 0, rl: 0, ev: 0, et: 0, p1: 0, train: 0, val: 0, test: 0 };
+    ALL.forEach((s) => {
+      const st = stateOf(s.id); c[st] += 1;
+      if (st === "exclude") { ["sft", "rl", "ev", "et", "p1"].forEach((k) => cost[k] += s.u[k]); cost[s.sp] += 1; }
+    });
+    document.getElementById("tally").innerHTML = `
+      <span>排除 <span class="n out">${c.exclude}</span></span><span>保留 <span class="n keep">${c.keep}</span></span>
+      <span>还没定 <span class="n open">${c.open}</span></span>
+      <span class="tools"><button class="primary" id="copy">复制结果</button></span>
+      <span class="cost">排除后少：场景 训练 ${cost.train} / 验证 ${cost.val} / 测试 ${cost.test}；SFT 任务 ${fmt(cost.sft)} / ${fmt(M.totals.sft)}，RL 任务 ${fmt(cost.rl)} / ${fmt(M.totals.rl)}，评测 ${cost.ev} / ${M.totals.ev}（验证）、${cost.et} / ${M.totals.et}（测试），P1 题 ${fmt(cost.p1)} / ${fmt(M.totals.p1)}。</span>
+      <span class="status">${status}</span>`;
+    document.getElementById("copy").addEventListener("click", exportData);
+  }
+  let remote = null;
+  const writing = {}, dirty = {}, pending = new Set();
+  async function flush(id) {
+    if (writing[id]) { dirty[id] = true; return; }
+    writing[id] = true;
+    try {
+      if (id === "note") await remote.collection("notes").doc("general").set({ text: note, saved_utc: new Date().toISOString() });
+      else await remote.collection("decisions").doc(id).set({ scene: id, decision: choice[id] || null, preset: PRESET[BY[id].ti],
+                                                             type: BY[id].ty, tier: BY[id].ti, saved_utc: new Date().toISOString() });
+    } catch (e) { status = "云端保存失败（" + ((e && e.code) || "unknown") + "）：选择还在这个浏览器里，最后请点“复制结果”发给我。"; }
+    writing[id] = false;
+    if (dirty[id]) { dirty[id] = false; return flush(id); }
+    pending.delete(id);
+  }
+  async function saveAll(ids) {
+    if (!remote) return;
+    ids.forEach((id) => pending.add(id));
+    for (const id of ids) { await flush(id); }
+    tally();
+  }
+  function setChoice(ids, v) {
+    ids.forEach((id) => { if (v) choice[id] = v; else delete choice[id]; paint(id); });
+    persist(); tally(); saveAll(ids);
+  }
+  const noteEl = document.getElementById("note");
+  let noteTimer = null;
+  noteEl.addEventListener("input", () => { note = noteEl.value; persist(); clearTimeout(noteTimer); noteTimer = setTimeout(() => saveAll(["note"]), 800); });
+  function exportData() {
+    const decisions = {};
+    ALL.forEach((s) => { decisions[s.id] = stateOf(s.id); });
+    const text = JSON.stringify({ page: "interiorgs-scene-screen", made: M.made, decisions, note }, null, 0);
+    const box = document.getElementById("exportbox"), ta = document.getElementById("exporttext");
+    const show = () => { box.hidden = false; ta.value = text; ta.focus(); ta.select(); status = "复制没成功：结果在页面最下面，全选复制即可。"; tally(); };
+    try { navigator.clipboard.writeText(text).then(() => { status = "结果已复制。"; tally(); }, show); } catch (e) { show(); }
+  }
+  function connect() {
+    if (!window.claude || !window.claude.use) { status = "没连上云端：选择只存在这个浏览器里，最后请点“复制结果”。"; tally(); return; }
+    window.claude.use("db").then((db) => {
+      if (!db) { status = "没连上云端：选择只存在这个浏览器里，最后请点“复制结果”。"; tally(); return; }
+      remote = db;
+      let first = true;
+      db.collection("decisions").onSnapshot((snap) => {
+        const seen = new Set();
+        snap.docs.forEach((d) => {
+          seen.add(d.id);
+          if (pending.has(d.id) || d.metadata.hasPendingWrites || !BY[d.id]) return;
+          const v = (d.data() || {}).decision;
+          if (v) choice[d.id] = v; else delete choice[d.id];
+        });
+        if (first) {
+          first = false;
+          const local = Object.keys(choice).filter((id) => !seen.has(id));
+          if (local.length) saveAll(local);
+          status = "选择会自动存到云端，手机和电脑看到的是同一份。";
+        }
+        persist(); ALL.forEach((s) => paint(s.id)); tally();
+      }, () => { remote = null; status = "云端连接断了：之后的选择只存在这个浏览器里，最后请点“复制结果”。"; tally(); });
+      db.collection("notes").doc("general").get().then((d) => {
+        const t = d && d.exists ? (d.data() || {}).text : null;
+        if (t && !noteEl.value) { note = t; noteEl.value = t; persist(); }
+      }).catch(() => {});
+    }).catch(() => {});
+  }
+  load();
+  noteEl.value = note;
+  ALL.forEach((s) => paint(s.id));
+  tally();
+  connect();
+})();
+</script>
