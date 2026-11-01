@@ -240,6 +240,23 @@ class EstimatorAndFilterTest(unittest.TestCase):
         with self.assertRaises(KeyError):
             fn(data=data, config=cfg, gamma=1.0, lam=1.0)
 
+    def test_ppo_entry_point_accepts_the_estimator(self):
+        # the runner checks (adv_estimator, concat) before training: the smoke of 11-01 failed here
+        from omegaconf import OmegaConf
+
+        from vagen.interiorgs_v10_ppo import history_mode
+        from verl.trainer.ppo.utils import need_critic
+
+        def cfg(est, concat):
+            return OmegaConf.create({"algorithm": {"adv_estimator": est}, "trainer": {"concat_multi_turn": concat},
+                                     "critic": {"enable": None}})
+
+        self.assertEqual(history_mode(cfg("turn_credit", True)), "concat")
+        self.assertEqual(history_mode(cfg("grpo", True)), "concat")  # unchanged
+        with self.assertRaises(ValueError):
+            history_mode(cfg("turn_credit", False))
+        self.assertFalse(need_critic(cfg("turn_credit", True)))  # no value network
+
     def test_nominal_filter_keeps_every_outcome(self):
         from verl import DataProto
 

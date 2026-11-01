@@ -105,6 +105,9 @@ class EndpointTrainer(RayPPOTrainer):
 # Each turn a separate sample (the no-concat agent loop, its own GAE) or one sequence per episode
 # (verl's multi-turn concat mode with plain GAE); the advantage estimator must match the mode.
 MODES = {("no_concat_gae", False): "no_concat", ("gae", True): "concat", ("grpo", True): "concat"}
+# Reward line (phase 2, vagen/turn_credit.py): the per-turn credit needs the concat mode (the turns' token spans in
+# one sequence per episode); only a config that selects it reaches this pair.
+MODES[("turn_credit", True)] = "concat"
 
 
 def history_mode(cfg) -> str:
