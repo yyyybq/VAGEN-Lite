@@ -330,7 +330,8 @@ class ChainTest(unittest.TestCase):
             for step in T.STEPS:
                 setattr(chain, step, lambda s=step: ran.append(s))
             self.assertEqual(chain.run(), 0)
-            self.assertEqual(ran, ["check_code", "rl_config", "rl", "rl_extend", "evaluate"])
+            # the transition-QA matrix patch 0002 adds step 11 diagnostics ("not planned" without plan diagnostics)
+            self.assertEqual(ran, ["check_code", "rl_config", "rl", "rl_extend", "evaluate", "diagnostics"])
             for step in T.SFT_STEPS:
                 self.assertEqual(chain.state["steps"][step]["note"], "not planned (rl_start_model)")
             self.assertEqual(self._chain(tmp + "/b").sft_model(), Path(tmp + "/b") / "lf" / "model")  # as before
