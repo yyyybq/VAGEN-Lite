@@ -3,7 +3,7 @@
 25k steps the time per step, the GPU memory peak and the two losses).
 
     python downstream/train/c1_progress.py --exp EXP [--every 25000] [--reference DS-B-030-s1 dir]
-                                           [--eval-card-hours 65] [--approved 910]
+                                           [--eval-card-hours 65] [--approved 910] [--earlier-card-hours 0]
 
 From EXP/run/metrics.jsonl (a row every 100 steps, with its wall-clock time), EXP/gpu.csv (nvidia-smi every 10 s) and
 EXP/job/worker.log (the job's start and end lines), one row per finished window of `every` steps:
@@ -22,7 +22,8 @@ EXP/job/worker.log (the job's start and end lines), one row per finished window 
                      skipped ones), as in the short run's 57 / 857.
 Rows logged twice (a relaunch redoes the steps after its full state) count once, the later launch's.  Card-hours: spent
 so far (8 x the job's wall time from worker.log) and projected (spent + the remaining steps x the last window's
-s_per_step x 8 + the in-job evaluation's estimate) against the approved number.
+s_per_step x 8 + the in-job evaluation's estimate) against the approved number; --earlier-card-hours (an earlier
+failed run of the same experiment, e.g. the first formal run lost to the OOM of 2026-10-31) is added to both totals.
 Writes EXP/progress/progress.json and progress.md and prints the json.
 """
 from __future__ import annotations
@@ -178,7 +179,7 @@ def card_hours(runs: list, rows: list, now: float) -> float:
 
 
 def progress(exp: Path, every: int = 25000, reference: Path = REFERENCE, eval_card_hours: float = 65.0,
-             approved: float = 910.0, now: float = None) -> dict:
+             approved: float = 910.0, now: float = None, earlier_card_hours: float = 0.0) -> dict:
     exp = Path(exp)
     rec = json.loads((exp / "experiment.json").read_text())
     steps = int(rec["steps"])
@@ -191,13 +192,15 @@ def progress(exp: Path, every: int = 25000, reference: Path = REFERENCE, eval_ca
     spent = card_hours(runs, rows, now)
     last_step = rows[-1]["step"] if rows else 0
     pace = wins[-1]["s_per_step"] if wins and not math.isnan(wins[-1]["s_per_step"]) else None
-    projected = spent + CARDS * (steps - last_step) * pace / 3600.0 + eval_card_hours \
+    projected = earlier_card_hours + spent + CARDS * (steps - last_step) * pace / 3600.0 + eval_card_hours \
         if pace and last_step < steps else None  # training done: the evaluation is in spent already
     return {"exp": str(exp), "steps": steps, "every": every, "last_logged_step": last_step,
             "last_logged_utc": datetime.datetime.fromtimestamp(rows[-1]["time"], datetime.timezone.utc)
             .strftime("%Y-%m-%dT%H:%MZ") if rows else None,
             "launches": (rows[-1]["_launch"] + 1) if rows else 0, "job_runs": len(runs),
-            "card_hours_spent": spent, "card_hours_projected": projected, "eval_card_hours_estimate": eval_card_hours,
+            "card_hours_spent": spent, "card_hours_earlier": earlier_card_hours,
+            "card_hours_spent_total": earlier_card_hours + spent,
+            "card_hours_projected": projected, "eval_card_hours_estimate": eval_card_hours,
             "card_hours_approved": approved, "reference": str(reference), "windows": wins}
 
 
@@ -208,10 +211,14 @@ def fmt(x, nd=2) -> str:
 
 
 def markdown(p: dict) -> str:
+    earlier = p.get("card_hours_earlier") or 0
+    spent = (f"这次已用 {fmt(p['card_hours_spent'], 0)}，加上之前失败的约 {fmt(earlier, 0)}，合计 "
+             f"{fmt(p['card_hours_spent'] + earlier, 0)}" if earlier else f"已用 {fmt(p['card_hours_spent'], 0)}")
     lines = [f"# C1 进度（{Path(p['exp']).name}）", "",
              f"最后记录：第 {p['last_logged_step']:,} 步（{p['last_logged_utc'] or '—'} UTC），共 {p['steps']:,} 步。"
-             f"卡时：已用 {fmt(p['card_hours_spent'], 0)}，按最近一段的每步时间推算全程约 "
-             f"{fmt(p['card_hours_projected'], 0)}（含任务内评测估计 {fmt(p['eval_card_hours_estimate'], 0)}），"
+             f"卡时：{spent}，按最近一段的每步时间推算全程约 "
+             f"{fmt(p['card_hours_projected'], 0)}（含任务内评测估计 {fmt(p['eval_card_hours_estimate'], 0)}"
+             + ("、之前失败的那次" if earlier else "") + "），"
              f"批的是 {fmt(p['card_hours_approved'], 0)}。", "",
              "| 步数段 | 结束（UTC） | 每步秒数（含保存） | 中位数 | 显存峰值 torch（GiB） | 显存峰值 nvidia-smi（GiB） "
              "| 动作损失 | 基线动作损失 | 文字损失 | 轨迹 | QA | 跳过的长轨迹 |",
@@ -241,8 +248,10 @@ def main(argv=None) -> int:
     ap.add_argument("--reference", type=Path, default=REFERENCE)
     ap.add_argument("--eval-card-hours", type=float, default=65.0)
     ap.add_argument("--approved", type=float, default=910.0)
+    ap.add_argument("--earlier-card-hours", type=float, default=0.0)
     args = ap.parse_args(argv)
-    p = progress(args.exp, args.every, args.reference, args.eval_card_hours, args.approved)
+    p = progress(args.exp, args.every, args.reference, args.eval_card_hours, args.approved,
+                 earlier_card_hours=args.earlier_card_hours)
     out = args.exp / "progress"
     out.mkdir(exist_ok=True)
     (out / "progress.json").write_text(json.dumps(p, indent=1, ensure_ascii=False) + "\n")

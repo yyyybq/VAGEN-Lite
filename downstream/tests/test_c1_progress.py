@@ -97,3 +97,19 @@ def test_main_writes_json_and_markdown_and_handles_a_run_not_started(tmp_path):
     assert q["windows"] == [] and q["card_hours_projected"] is None and q["last_logged_step"] == 0
     assert "None" not in CP.markdown(q)
     assert math.isnan(CP.mean([None, float("nan")]))
+
+
+def test_an_earlier_failed_run_counts_in_both_totals(tmp_path):
+    """The rerun after the OOM of 2026-10-31: the first run's card-hours join the spent and the projected totals."""
+    exp = make_run(tmp_path)
+    now = 1000 + 2.0 * 2500 + 600 + 2.5 * 1100 + 50
+    a = CP.progress(exp, every=1000, reference=tmp_path / "REF", now=now)
+    b = CP.progress(exp, every=1000, reference=tmp_path / "REF", now=now, earlier_card_hours=101)
+    assert b["card_hours_spent"] == pytest.approx(a["card_hours_spent"]) and b["card_hours_earlier"] == 101
+    assert b["card_hours_spent_total"] == pytest.approx(a["card_hours_spent"] + 101)
+    assert b["card_hours_projected"] == pytest.approx(a["card_hours_projected"] + 101)
+    assert "加上之前失败的约 101" in CP.markdown(b) and "之前失败" not in CP.markdown(a)
+    assert CP.main(["--exp", str(exp), "--every", "1000", "--reference", str(tmp_path / "REF"),
+                    "--earlier-card-hours", "101", "--approved", "1050"]) == 0
+    p = json.loads((exp / "progress/progress.json").read_text())
+    assert p["card_hours_earlier"] == 101 and p["card_hours_approved"] == 1050
