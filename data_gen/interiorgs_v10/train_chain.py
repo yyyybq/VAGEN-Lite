@@ -2057,7 +2057,7 @@ class Chain:
     def evaluate(self) -> None:
         ev = self.plan.get("eval")
         sets = self.eval_sets()
-        if not ev or not sets:
+        if not ev or not (sets or self.plan.get("qa_eval")):  # qa_eval alone: QA of models evaluated elsewhere
             self.mark("evaluate", note="not planned")
             return
         every = int(ev.get("every", 50))

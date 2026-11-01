@@ -701,6 +701,12 @@ class ChainTest(unittest.TestCase):
             with self.assertRaises(T.ChainError):
                 T.Chain({**plan, "qa_eval": {"out": tmp, "easi": ["mmbench"]}}, sleep=lambda s: None).qa_jobs({})
             self.assertEqual(T.Chain({**plan, "qa_eval": None}, sleep=lambda s: None).qa_jobs({}), {})
+            qa_only = T.Chain({k: v for k, v in plan.items() if k != "eval_sets"}, sleep=lambda s: None)
+            only = {}
+            qa_only.eval_jobs = lambda step, j: only.update(j)
+            qa_only.tables = lambda: None
+            qa_only.evaluate()  # no action sets: the QA jobs alone (models evaluated elsewhere)
+            self.assertEqual(sorted(only), ["qa_site__base", "qa_site__sft", "qa_vsi_bench__base", "qa_vsi_bench__sft"])
             prepared = []
 
             def prepare(run, gpus, args, job_dir="job", pool=None):
