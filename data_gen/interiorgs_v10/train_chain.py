@@ -1223,6 +1223,8 @@ class Chain:
                     args += [flag, str(rl[key])]
             if rl.get("turn_credit") is not None:  # reward line (2026-11-01): the per-turn credit's settings, JSON
                 args += ["--turn-credit", json.dumps(rl["turn_credit"])]
+            if rl.get("table_near"):  # reward line (phase 2): the distance table's neighbour-cell fallback
+                args += ["--table-near"]
             for key, flag in (("progress_weights", "--progress-weights"), ("milestone_rewards", "--milestone-rewards")):
                 if rl.get(key) is not None:  # round 12 freeze, the dense-reward design variants: three numbers
                     value = rl[key]

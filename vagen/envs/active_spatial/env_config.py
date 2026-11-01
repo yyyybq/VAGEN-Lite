@@ -105,6 +105,9 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # <task_id>.npz, d = the pose's remaining minimum number of actions; a pose missing from the table counts 0).
     distance_tables_dir: Optional[str] = None
     optimal_progress_slack: int = 4
+    # Reward line (phase 2, direction 1), default off: a pose missing from the table takes the smallest reachable
+    # distance among its 26 neighbour cells (data_gen.interiorgs_v10.distance_table_near).
+    optimal_progress_near: bool = False
     potential_field_gamma: float = 1.0   # ★ Ng1999 γ for "potential" mode. 1.0 ⇒ equivalent to "delta".
     # Reward-only ablation switches.  These do not disable the potential-field
     # scorer, canonical gate, success decision, or termination.  Defaults keep

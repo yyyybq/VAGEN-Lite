@@ -513,10 +513,15 @@ def design_variant_overrides(args: argparse.Namespace, env: Dict[str, Any]) -> D
         if not Path(args.distance_tables).is_dir():
             raise SystemExit(f"--distance-tables {args.distance_tables} is not a directory")
         out["distance_tables_dir"] = str(Path(args.distance_tables).resolve())
+    if getattr(args, "table_near", False):  # reward line (phase 2): the table's neighbour-cell fallback
+        if version != "optimal":
+            raise SystemExit("--table-near needs --progress-version optimal --distance-tables")
+        out["optimal_progress_near"] = True
     if out and not env.get("enable_potential_shaping_reward"):
         # reward line (2026-11-01): the per-turn credit reads the table's progress score with the S0 reward (the env's
-        # progress reward off); only the score's version and tables, nothing that shapes a reward
-        if not (getattr(args, "turn_credit", None) and set(out) <= {"progress_version", "distance_tables_dir"}):
+        # progress reward off); only the score's version, tables and lookup, nothing that shapes a reward
+        if not (getattr(args, "turn_credit", None)
+                and set(out) <= {"progress_version", "distance_tables_dir", "optimal_progress_near"}):
             raise SystemExit("the progress options change the dense reward: give a dense --reward-preset (dense, D_cond)")
     if ("progress_weights" in out or "milestone_rewards" in out) and version == "product":
         raise SystemExit("--progress-weights / --milestone-rewards need a grouped progress version (D_cond, or "
@@ -1189,6 +1194,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--distance-tables", default=None,
                    help="round 13 (B): the directory of per-task distance tables (distance_table.py build) the "
                         "optimal progress reads")
+    c.add_argument("--table-near", action="store_true",
+                   help="reward line (phase 2): a pose missing from its table takes the smallest reachable distance "
+                        "of its 26 neighbour cells (env optimal_progress_near, distance_table_near.py); needs "
+                        "--progress-version optimal")
     c.add_argument("--progress-weights", default=None,
                    help="round 12 freeze, variants V1 / V2: the grouped progress's frame, face and relation weights, "
                         "e.g. 0.15,0.15,0.70 (default 0.25,0.25,0.5)")
@@ -1212,7 +1221,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "PPO config algorithm.progress_adv_weight, vagen/split_reward_adv.py")
     c.add_argument("--turn-credit", default=None,
                    help="reward line (2026-11-01): the per-turn credit estimator with these settings, a JSON object "
-                        "(scale, gamma, baseline none / turn_index, episode_weight, min_positive_mass, neg_clip); "
+                        "(scale, gamma, turn_reward, baseline batch_mean / turn_index / none, turn_weight, "
+                        "episode_weight, episode_norm batch / none, neg_clip, min_positive_mass, stall_penalty; "
+                        "dump_dir, dump_updates: the smoke's span check); "
                         "PPO config algorithm.adv_estimator turn_credit and algorithm.turn_credit, vagen/turn_credit.py; "
                         "needs the S0 reward with --progress-version optimal --distance-tables")
     c.add_argument("--sft-trajectories", nargs="*", default=None,

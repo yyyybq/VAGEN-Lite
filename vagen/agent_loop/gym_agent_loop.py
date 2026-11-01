@@ -102,6 +102,7 @@ class AgentData:
         self.progress_return: float = 0.0  # round 12 freeze, V8: the env's applied progress reward, summed
         # reward line (2026-11-01, vagen/turn_credit.py): every turn's span, reward and progress score
         self.turn_records: List[Dict[str, Any]] = []
+        self.turn_d0: Optional[int] = None  # the start pose's table distance (phase 2, the stall penalty)
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -286,6 +287,10 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.scene_id   = _ep_scene_id
         agent_data.initial_score = _ep_init_score
         agent_data.task_id = _ep_task_id
+        if getattr(self, "record_turn_records", False):  # reward line (phase 2): the start pose's table distance
+            from vagen.turn_credit import reset_distance
+
+            agent_data.turn_d0 = reset_distance(info)
 
         # State machine: always GENERATE -> INTERACT, and decide termination inside INTERACT
         state = AgentState.PENDING
@@ -358,7 +363,7 @@ class GymAgentLoop(AgentLoopBase):
             from vagen.turn_credit import episode_record
 
             output.extra_fields["turn_records"] = episode_record(agent_data.initial_score, agent_data.turn_records,
-                                                                 self.response_length)
+                                                                 self.response_length, agent_data.turn_d0)
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:

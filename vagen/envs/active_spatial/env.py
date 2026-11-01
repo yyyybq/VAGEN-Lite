@@ -1480,6 +1480,8 @@ class ActiveSpatialEnv(BaseEnv):
             if cache is None:
                 from data_gen.interiorgs_v10.distance_table import TableCache
 
+                if self.config.get("optimal_progress_near", False):  # reward line (phase 2): neighbour-cell fallback
+                    from data_gen.interiorgs_v10.distance_table_near import NearTableCache as TableCache
                 if not self.config.get("distance_tables_dir"):
                     raise ValueError("progress_version 'optimal' needs distance_tables_dir")
                 cache = self._distance_tables = TableCache(self.config.get("distance_tables_dir"))
