@@ -1,16 +1,10 @@
 {
  "batch": "b24_20261102",
- "approved": "PENDING: the user's approval of the planned list (round-4 decision 2 = B).",
+ "approved": "the user, 2026-11-02, in the disk line: b24 = A (\"2甲\"), docs/disk/reports/CLEANUP4_20261102.md section 3.1; the two downstream starts registered in model_matrix/downstream/starts.json stay: cs0 step 100 (CSRS), crd step 50 (CSRD)",
  "items": [
   {
    "id": "CAM-20261026-cd-50",
    "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261026/rl_run_cd/checkpoints/global_step_50",
-   "marker_name": "DELETED_TO_AOSS_20261102.txt",
-   "marker": "Cambrian-S RL weights kept by the model line (Cambrian closed 11-01, its decision 45): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
-  },
-  {
-   "id": "CAM-20261026-cs0-100",
-   "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261026/rl_run_cs0/checkpoints/global_step_100",
    "marker_name": "DELETED_TO_AOSS_20261102.txt",
    "marker": "Cambrian-S RL weights kept by the model line (Cambrian closed 11-01, its decision 45): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
   },
@@ -23,12 +17,6 @@
   {
    "id": "CAM-20261027_dense-crd-100",
    "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261027_dense/rl_run_crd/checkpoints/global_step_100",
-   "marker_name": "DELETED_TO_AOSS_20261102.txt",
-   "marker": "Cambrian-S RL weights kept by the model line (Cambrian closed 11-01, its decision 45): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
-  },
-  {
-   "id": "CAM-20261027_dense-crd-50",
-   "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261027_dense/rl_run_crd/checkpoints/global_step_50",
    "marker_name": "DELETED_TO_AOSS_20261102.txt",
    "marker": "Cambrian-S RL weights kept by the model line (Cambrian closed 11-01, its decision 45): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
   },
