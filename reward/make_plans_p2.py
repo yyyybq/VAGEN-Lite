@@ -13,6 +13,9 @@ Designs (rl-config options on top of the base plan's rl, standard v10_p1_S0):
   (vagen/turn_credit.py defaults: shaping alone, batch-standardised, weight 0.5; the episode term the S0 return's
   GRPO advantage, batch-standardised); the neighbour fallback; every one of the 24 candidates in the update
   (nominal filter, target_groups 24).
+* ``jsrl``  direction 2, guided sampling, first round (docs/reward/reports/DESIGN_JSRL_20261102.md): S0 as rw_s0
+  (reward, GRPO, standard filter) with the guide (vagen/jsrl_guide.py defaults: the brief's stages, d* >= 6 or
+  equidistance, the SFT data's turns) on the b3000 tables.  Runs rw_jss (smoke), rw_js1.
 
 Run names are never reused (evaluation result names are shared with the main line): the smoke is rw_tcs (endpoint 10,
 no evaluation), the first-round runs rw_tc1 and rw_tc2 (the user's decision of 2026-11-02: rw_tc2 the turn term
@@ -34,7 +37,8 @@ TABLES = RR / "tables/b3000"
 
 def designs(tables):
     return {"tc": {"progress_version": "optimal", "distance_tables": str(tables), "turn_credit": {},
-                   "table_near": True, "group_filter": "nominal", "target_groups": 24}}
+                   "table_near": True, "group_filter": "nominal", "target_groups": 24},
+            "jsrl": {"jsrl_guide": {"tables": str(tables)}}}
 
 
 def main():
@@ -78,7 +82,8 @@ def main():
         assert Path(plan["rl"][k]).exists(), plan["rl"][k]
     for s in plan["eval_sets"].values():
         assert Path(s, "tasks.jsonl").exists(), s
-    assert Path(base["distance_tables"]).is_dir(), base["distance_tables"]
+    for tables in (base.get("distance_tables"), (base.get("jsrl_guide") or {}).get("tables")):
+        assert tables is None or Path(tables).is_dir(), tables
     tr.mkdir(parents=True, exist_ok=True)
     (tr / "plan_template.json").write_text(json.dumps(plan, indent=1))
     print(json.dumps({"tr": str(tr), "runs": rls, "endpoint": plan["endpoint"],

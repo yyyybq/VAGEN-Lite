@@ -777,6 +777,20 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             raise SystemExit("--turn-credit needs the concat history mode (one sequence an episode, the turns' spans)")
         _set(ppo, "algorithm.adv_estimator", ESTIMATOR)
         _set(ppo, "algorithm.turn_credit", turn_credit)
+    jsrl_guide = None
+    if getattr(args, "jsrl_guide", None):  # reward line (phase 2, direction 2): guided sampling (vagen/jsrl_guide.py)
+        from vagen.jsrl_guide import KEY as JSRL_KEY, settings as jsrl_settings
+
+        jsrl_guide = json.loads(args.jsrl_guide) if isinstance(args.jsrl_guide, str) else dict(args.jsrl_guide)
+        try:
+            jsrl_settings(jsrl_guide)
+        except (ValueError, TypeError) as exc:
+            raise SystemExit(f"--jsrl-guide: {exc}")
+        if not Path(jsrl_guide["tables"]).is_dir():
+            raise SystemExit(f"--jsrl-guide: no tables directory {jsrl_guide['tables']}")
+        if not ppo["trainer"].get("concat_multi_turn"):
+            raise SystemExit("--jsrl-guide needs the concat history mode (the guide's turns are the episode's history)")
+        _set(ppo, f"algorithm.{JSRL_KEY}", jsrl_guide)
     if getattr(args, "entropy_coeff", None) is not None:  # round 12 batch: the entropy bonus instead of the package's
         _set(ppo, "actor_rollout_ref.actor.entropy_coeff", float(args.entropy_coeff))
     # round 12 freeze, the weak-start stability runs (the user's 11th supplement, W3 / W4 and the checkpoint interval):
@@ -847,6 +861,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "design_variant": design_variant_overrides(args, history["env"]) or None,
               "progress_adv_weight": getattr(args, "progress_adv_weight", None),
               "turn_credit": turn_credit,
+              "jsrl_guide": jsrl_guide,
               "adv_estimator": (ppo.get("algorithm") or {}).get("adv_estimator"),
               "train_batch_size": (ppo.get("data") or {}).get("train_batch_size"),
               "save_freq": ppo["trainer"].get("save_freq"),
@@ -1226,6 +1241,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "dump_dir, dump_updates: the smoke's span check); "
                         "PPO config algorithm.adv_estimator turn_credit and algorithm.turn_credit, vagen/turn_credit.py; "
                         "needs the S0 reward with --progress-version optimal --distance-tables")
+    c.add_argument("--jsrl-guide", default=None,
+                   help="reward line (phase 2, direction 2): guided sampling with these settings, a JSON object "
+                        "(tables: the distance tables' directory, required; stages [[first, last, fraction], ...]; "
+                        "min_d_star; families; max_per_turn); PPO config algorithm.jsrl_guide, vagen/jsrl_guide.py; "
+                        "needs the concat history mode")
     c.add_argument("--sft-trajectories", nargs="*", default=None,
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,

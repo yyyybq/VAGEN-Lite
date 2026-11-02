@@ -2497,6 +2497,8 @@ class RayPPOTrainer:
 
                 # pass global_steps to trace
                 gen_batch.meta_info["global_steps"] = self.global_steps
+                if self.config.algorithm.get("jsrl_guide", None):  # reward line (direction 2): the guide's stage
+                    gen_batch.non_tensor_batch["global_step"] = np.full(len(gen_batch), self.global_steps, dtype=object)
                 gen_batch_output = gen_batch.repeat(
                     repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True
                 )

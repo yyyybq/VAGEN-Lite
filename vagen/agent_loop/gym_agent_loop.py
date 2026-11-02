@@ -217,6 +217,10 @@ class GymAgentLoop(AgentLoopBase):
         from vagen.turn_credit import selected as _turn_credit_selected
 
         cls.record_turn_records = _turn_credit_selected(config)
+        # reward line (phase 2, direction 2): guide turns before the policy's on training episodes (vagen/jsrl_guide.py)
+        from vagen.jsrl_guide import from_config as _jsrl_guide
+
+        cls.jsrl_guide = _jsrl_guide(config)
 
         _placeholder = [{"role": "system", "content": "placeholder"}]
         if processor is not None:
@@ -291,6 +295,11 @@ class GymAgentLoop(AgentLoopBase):
             from vagen.turn_credit import reset_distance
 
             agent_data.turn_d0 = reset_distance(info)
+        guide = None
+        if getattr(self, "jsrl_guide", None) and kwargs.get("global_step") is not None:  # training batches only
+            from vagen.jsrl_guide import run_guide
+
+            guide = await run_guide(self.jsrl_guide, agent_data, int(kwargs["global_step"]), **kwargs)
 
         # State machine: always GENERATE -> INTERACT, and decide termination inside INTERACT
         state = AgentState.PENDING
@@ -364,6 +373,8 @@ class GymAgentLoop(AgentLoopBase):
 
             output.extra_fields["turn_records"] = episode_record(agent_data.initial_score, agent_data.turn_records,
                                                                  self.response_length, agent_data.turn_d0)
+        if guide is not None:  # reward line (direction 2): the guide's record, in the rollout dumps
+            output.extra_fields["reward_extra_info"].update(guide)
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:

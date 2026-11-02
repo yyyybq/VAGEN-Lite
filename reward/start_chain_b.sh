@@ -6,7 +6,7 @@
 # rule of 2026-10-28).
 #   bash reward/start_chain_b.sh TR/plan_template.json
 set -euo pipefail
-C=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-reward
+C=$(cd "$(dirname "$0")/.." && pwd)  # the worktree this script is in (VAGEN-Lite-reward, or -reward-jsrl for direction 2)
 cd "$C"
 export PYTHONPATH=$C PYTHONDONTWRITEBYTECODE=1 VAGEN_LITE_WORKTREE=$C
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
@@ -28,6 +28,7 @@ p = json.load(open(sys.argv[1]))
 assert "PLACEHOLDER" not in json.dumps(p), "a placeholder is left in the plan"
 need = [*p["eval_sets"].values(), p["sft_dir"], p["rl"]["rows"], p["rl"]["exclude"], p["rl_start_model"]]
 need += [r["rl"]["distance_tables"] for r in p["rl_runs"].values() if (r.get("rl") or {}).get("distance_tables")]
+need += [r["rl"]["jsrl_guide"]["tables"] for r in p["rl_runs"].values() if (r.get("rl") or {}).get("jsrl_guide")]
 missing = [n for n in need if not Path(n).exists()]
 assert not missing, missing
 print("plan ok, commit", p["commit"][:8], "job_prefix", p.get("job_prefix"), "pool", p.get("pool"),

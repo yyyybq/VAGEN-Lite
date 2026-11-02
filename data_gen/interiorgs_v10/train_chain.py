@@ -1225,6 +1225,8 @@ class Chain:
                 args += ["--turn-credit", json.dumps(rl["turn_credit"])]
             if rl.get("table_near"):  # reward line (phase 2): the distance table's neighbour-cell fallback
                 args += ["--table-near"]
+            if rl.get("jsrl_guide") is not None:  # reward line (phase 2, direction 2): guided sampling's settings, JSON
+                args += ["--jsrl-guide", json.dumps(rl["jsrl_guide"])]
             for key, flag in (("progress_weights", "--progress-weights"), ("milestone_rewards", "--milestone-rewards")):
                 if rl.get(key) is not None:  # round 12 freeze, the dense-reward design variants: three numbers
                     value = rl[key]
