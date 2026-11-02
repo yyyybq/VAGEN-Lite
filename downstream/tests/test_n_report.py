@@ -51,6 +51,79 @@ def test_report_pairs_each_model_with_its_generations_base(tmp_path):
     assert math.isnan(R.build(gen, tmp_path / "none", ["B"])["models"]["B"]["rates"]["all"]["rate"])
 
 
+def test_rl_starts_pair_with_the_sft_start_they_grew_from(tmp_path):
+    gen, ev = tmp_path / "gen", tmp_path / "eval"
+    ids = [f"S{k}_fov_inclusion" for k in range(6)]
+    write(gen / "instances_eval.jsonl", [{"instance_id": i, "task_type": "fov_inclusion", "near_threshold": []}
+                                         for i in ids])
+    write(ev / "S/episodes.jsonl", [ep(i, k < 4) for k, i in enumerate(ids)])
+    write(ev / "RS/episodes.jsonl", [ep(i, k < 1) for k, i in enumerate(ids)])
+    write(ev / "Q3RD/episodes.jsonl", [ep(i, True) for i in ids])
+    rep = R.build(gen, ev, ["B", "S", "RS", "Q3RD"])
+    rs = rep["models"]["RS"]
+    assert rs["versus_sft"]["base"] == "S" and rs["versus_sft"]["all"]["only_b"] == 3
+    assert rs["versus_sft"]["all"]["diff"] == pytest.approx(-3 / 6)
+    assert "versus" not in rs  # B has no episodes
+    assert "versus_sft" not in rep["models"]["S"] and "versus_sft" not in rep["models"]["Q3RD"]  # no Q3S
+    assert R.sft_of("RD") == "S" and R.sft_of("Q3RS") == "Q3S" and R.sft_of("B") is None
+    assert "RL 和 SFT 配对" in R.markdown(rep) and "| RS | S |" in R.markdown(rep)
+
+
+def two_sets(tmp_path, second_ids=None):
+    sets = []
+    for name, rs_wins in (("one", 3), ("two", 0)):
+        gen, ev = tmp_path / f"gen_{name}", tmp_path / f"eval_{name}"
+        ids = second_ids if (second_ids and name == "two") else [f"{name}{k}_equidistance" for k in range(10)]
+        write(gen / "instances_eval.jsonl", [{"instance_id": i, "task_type": "equidistance",
+                                             "near_threshold": ["margin"] if k < 2 else []} for k, i in enumerate(ids)])
+        write(ev / "S/episodes.jsonl", [ep(i, k < 2) for k, i in enumerate(ids)])
+        write(ev / "RS/episodes.jsonl", [ep(i, k < 2 + rs_wins) for k, i in enumerate(ids)])
+        sets.append((name, gen, ev))
+    return sets
+
+
+def test_sets_are_reported_apart_and_merged(tmp_path):
+    sets = two_sets(tmp_path)
+    rep = R.build_sets(sets, ["S", "RS"])
+    assert set(rep["sets"]) == {"one", "two"} and rep["combined"]["instances"] == 20
+    assert rep["combined"]["near_threshold"] == 4
+    comb = rep["combined"]["models"]["RS"]
+    assert comb["rates"]["all"]["k"] == 7 and comb["versus_sft"]["all"]["only_a"] == 3
+    assert rep["sets"]["one"]["models"]["RS"]["versus_sft"]["all"]["diff"] == pytest.approx(0.3)
+    assert rep["sets"]["two"]["models"]["RS"]["versus_sft"]["all"]["diff"] == 0
+    a = rep["agreement"]["RS"]["versus_sft"]
+    assert a["gap"] == pytest.approx(0.3) and 0 < a["p"] < 1
+    assert rep["agreement"]["S"] == {}
+    md = R.markdown_sets(rep)
+    assert md.startswith("# N 系列合并结果（20 个实例：one 10 个、two 10 个）")
+    assert "两套之差" in md and "## 合并的 20 个实例" in md and "### 成功率" in md
+    assert R.agree({"n": 5, "only_a": 0, "only_b": 0, "diff": 0.0},
+                   {"n": 5, "only_a": 0, "only_b": 0, "diff": 0.0})["p"] == 1.0
+    assert math.isnan(R.agree({"n": 0}, {"n": 5})["gap"])
+
+
+def test_an_instance_in_two_sets_is_an_error(tmp_path):
+    sets = two_sets(tmp_path, second_ids=[f"one{k}_equidistance" for k in range(10)])
+    with pytest.raises(ValueError, match="10 instance ids in two sets"):
+        R.build_sets(sets, ["S", "RS"])
+
+
+def test_main_with_two_sets_needs_out_and_writes_the_merged_report(tmp_path):
+    sets = two_sets(tmp_path)
+    gens, evs = [str(s[1]) for s in sets], [str(s[2]) for s in sets]
+    with pytest.raises(SystemExit):
+        R.main(["--gen", *gens, "--eval", *evs, "--models", "S", "RS"])
+    with pytest.raises(SystemExit):
+        R.main(["--gen", *gens, "--eval", evs[0], "--models", "S", "RS", "--out", str(tmp_path / "o")])
+    out = tmp_path / "merged"
+    assert R.main(["--gen", *gens, "--eval", *evs, "--names", "N1", "N1b", "--models", "S", "RS",
+                   "--out", str(out)]) == 0
+    rep = json.loads((out / "report.json").read_text())
+    assert set(rep["sets"]) == {"N1", "N1b"} and rep["combined"]["models"]["RS"]["rates"]["all"]["n"] == 20
+    assert (out / "report.md").read_text().startswith("# N 系列合并结果（20 个实例：N1 10 个、N1b 10 个）")
+    assert not (sets[0][2] / "report.json").exists()
+
+
 def test_main_writes_the_report(tmp_path):
     gen, ev = tmp_path / "gen", tmp_path / "eval"
     write(gen / "instances_eval.jsonl", [{"instance_id": "a_fov_inclusion", "task_type": "fov_inclusion",
