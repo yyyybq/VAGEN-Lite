@@ -1215,3 +1215,29 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - 结果在 `exps/matrix_v3/e_trial_dpick_20261102/report.md`。按规矩 E 先停，等用户定。
 - **h800**：主实验 19:08 UTC 转告了用户的新规矩：排队中的任务可以转到 h800。转不转、转哪几个，等用户确认。
 - **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；matrix-v3 没有新提交。
+
+### 12.31 D 组的 4 个 RL 转到 h800（用户 11-02 晚："只转 D 的 4 个"）
+
+- **来由**：主实验 19:08 UTC 转告了用户的新规矩：排队中的任务可以转到 h800。用户在本会话选了只转 D 的 4 个。C 排队的 3 个留在 zoetrope，其中 `m3cs1d` 在队首，它那条链里的 `m3cs1s0` 正在训练。
+- **做法**：用 `exps/matrix_v3/watch/m3_poolmove.py`，先空跑核对，再对每条 D 链执行：
+  - 停链（SIGTERM）。链没有信号处理，所以它退出时删任务的那段不会跑。
+  - 再查一遍，每个训练都还在排队、没有开始时间。
+  - 先放 `STOP_RENDERER`，再删训练，等渲染服务自己结束后把它也删掉。
+  - 两个任务目录挪到 `rl_run_*/pool_move_20261102/`。
+  - plan 的池改成 h800：旧 plan 留作 `plan_zoetrope_20261102.json`，`plan_edit.json` 记一笔。
+  - 重启链。链按"训练 → 2 秒后它的渲染服务 → 下一个训练"的顺序重交。
+  - 只改了池，代码和其他设置都没动。
+  - 记录在每条链的 `pool_move_20261102.json`，汇总在 `exps/matrix_v3/pool_move_20261102.json`。
+- **结果**（19:41–19:43 UTC）：
+
+  | RL | 旧训练 / 渲染服务（zoetrope，已删） | 新训练 / 渲染服务（h800） | 拿到卡（UTC） |
+  | --- | --- | --- | --- |
+  | `m3ds1s0` | `pt-1buuw3dx` / `pt-ttqwqjyt` | `pt-yi911klj` / `pt-4g4co9p7` | 19:41:55 / 19:42:04 |
+  | `m3ds1d` | `pt-r4q0qy4p` / `pt-kf316om5` | `pt-ga1wuyfk` / `pt-6netapmw` | 19:42:03 / 19:42:04 |
+  | `m3ds2s0` | `pt-mweuz8ri` / `pt-0z2lfser` | `pt-8ofsuxus` / `pt-k9vxvjxo` | 19:42:56 / 19:43:03 |
+  | `m3ds2d` | `pt-gvldmedg` / `pt-0jkmr1pe` | `pt-miqqbeib` / `pt-9iahgnw3` | 19:43:03 / 19:43:03 |
+
+  - 8 个新任务提交后几秒内都拿到了卡。旧的 8 个已查过，都不在了（NOT_FOUND）。zoetrope 空出了 4 张卡。
+  - 19:52 UTC：4 个训练都在启动，模型已读入、vLLM 在起，还没到第一次更新。渲染服务的 /health 正常。
+- **zoetrope**：`m3cs1d` 在 19:50:51 拿到卡。还在排队的只剩 C 第二个种子的两个（`m3cs2s0`、`m3cs2d`）。19:55 h800 估计还有 4 台空机器。
+- **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；matrix-v3 没有新提交。
