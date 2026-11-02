@@ -1,6 +1,6 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-11-02 04:50 UTC（只投 zoetrope；[C1 第一段](reports/C1_PROGRESS.md)；[V4 复核结果](reports/V4_RECHECK_20261101.md)；每日汇总 [DAILY_20261101](daily/DAILY_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-11-02 05:00 UTC（V4 大文件已由磁盘线删除；只投 zoetrope；[C1 第一段](reports/C1_PROGRESS.md)；[V4 复核结果](reports/V4_RECHECK_20261101.md)；每日汇总 [DAILY_20261101](daily/DAILY_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
@@ -19,7 +19,7 @@
      - 三条 RL 都从 Q3S 出发（已核实）。Q3S 和 Q3B 一样（差 0.0），稀疏 RL 的 Q3RS 低 0.8（p = 0.88）。所以下降出在稠密奖励 RL 这一步。
      - 掉的主要是单步任务（Q3RD −4.3、V4S3 −5.5），多步任务不显著。Q3RD 在空间组的 −4.9，V4S3 没复现（−2.2，p = 0.30）。
      - 每个起点只训了一次下游，种子间波动没测过（未核实）。
-     - 共约 750 卡时。两条的 `run/full_state`（各 117 GB）和 `evals_src`（各 34 GB）删不删，等你批。
+     - 共约 750 卡时。两条的 `run/full_state` 和 `evals_src` 里的权重副本，11-02 04:38 由磁盘线按你批的 b21 先传 AOSS 再删（321.7 GB，见第 5 节）。
   7. **问答批次一页已发主窗口**（[全文](reports/FOR_MAIN_QA_20261031.md)）。
 - **10-30 晚你确认四份设计并另加两件（REFERENCE 第 0 节），执行中**（优先级：问答和诊断插空 → N 冒烟、C1 短任务 → N1 → C1 正式 → N2）：
   - **问答批次完成，Qwen3 闸门没过**（[报告](reports/QA_BATCH_RESULTS_20261030.md)；批次 1 `pt-8v1wvqar` 20:47–21:18、批次 2 `pt-0u5od5jr` 22:28–22:47，各 1 卡，合计约 0.8 卡时）：
@@ -123,11 +123,6 @@ bash downstream/eval/watch.sh status
 
 ## 4. 待你决定的事
 
-- **V4 复核两条剩下的大文件。** 两条各留：
-  - `run/full_state`：117 GB，第 17.5 万步的续训状态，训练已结束；
-  - `evals_src`：34 GB，第 15 万、17.5 万步抽出的权重，已评完。
-
-  两条合计约 302 GB。建议删掉，只留 `run/final_model`（各 17 GB）和评测结果。可以直接删，也可以交给磁盘线照 b14 的办法先传 AOSS 再删。
 - **N2（少样本）做不做、做哪几个起点。**
 - **N1 结果要不要转给主窗口。**
 - **删不删 3 个已经没用的 SUSPENDED sco 任务**（`pt-vwb70oqh`、`pt-i6v6ea3s`、`pt-n31fekiq`，见第 2 节"11-02 起只投 zoetrope"）。只删 sco 上的任务记录，不动文件。
@@ -135,6 +130,12 @@ bash downstream/eval/watch.sh status
 ## 5. 主窗口指令与暂停 / 撤回记录（UTC）
 
 - **11-02 04:3x 主窗口转告你的指示：没开跑的 sco 任务都改投 zoetrope，以后新交的也投 zoetrope。** 已执行：看板 04:40 起只投 zoetrope（`07946d1d`）。我们没有排队的任务，正在跑的 C1 不动。3 个挂起的任务已经没用，删除要你批。
+
+- **11-02 04:38 磁盘线（你在磁盘线批的第四轮决定 1 = 甲，批次 b21）删了 V4 复核两条剩下的大文件**，删前都上传了 AOSS，逐个核对大小，0 个不符。共 58 个文件、321.7 GB；用的是 zoetrope 的 1 卡任务 `pt-emznzyg9`（04:35–04:38）。
+  - 删了：DS-Q3V4S3-100-s1、DS-Q3DCKS2-100-s1 各自的 `run/full_state/steps_175000`（各 125.1 GB），以及 `evals_src` 里第 15 万、17.5 万步的权重副本（各 35.7 GB，都已评完）。
+  - 留着：`run/final_model`（各 17 GB）、`evals` 里三个点的结果、`evals_src/watch.json` 和抽权重的日志；`full_state/`、`evals_src/` 里各有说明文件，写着 AOSS 位置。
+  - 记录在 `disk_runs/batches/b21_20261102/deleted.tsv`。配额表 18 → 17 TB。
+  - 我核对过：清单上 58 个路径都在这两条的上述目录里，没有别的；`final_model` 和三个点的评测结果都在，看板正常。
 
 - **10-31 04:48 磁盘线（你批的 b14 甲）删了下游已训完、已评完实验的续训状态**，删前都上传了 AOSS，逐个核对大小，0 个不符。共 207 个文件、915.1 GB。
   - 删了：
