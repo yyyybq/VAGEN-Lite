@@ -1115,3 +1115,48 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
 - **交接文档**：用户要把近七天的进展交给其他窗口，写在 https://claude.ai/artifact/78NsYg1M5b78mkpfMooTpi 。
 - **测试**：诊断测试 24 个通过（新加 1 个：`--python`）。
 - **没做的**：没推送，没动 main 和主工作树；训练链部分仍等 qwen3-main 合进 main。
+
+### 12.28 集成分支 matrix-v3；第一批 C、D 起跑；E 组试跑（用户 2026-11-01 决定 A–E，11-02 改用全量 P0）
+
+用户 11-01 晚定了 A–E（主工作树不改、不快进 main、不推送、GPU 走 SCO；允许在新工作树 `VAGEN-Lite-matrix` 里写入）。
+- **A**（11-01 收尾）：上一轮已做完（`ac926145`，见 12.27）。
+- **B 集成分支** `matrix-v3`（工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix`，从 qwen3-main `b6606bac` 开出；verl 子模块从本地模块按 `a0ae85c7` 克隆，没联网）：
+  - 合入 transition-qa（`19291e73`，只冲突 `gym_agent_loop.py`，两边都保留）；补丁 0001 `dc81dcc8`、0002 `e4fafbec`；`matrix_plan --version 3`、配置的链部分、E 组试跑脚本 `eval/diagnostics/e_trial.py`（`c5ceb851`）。
+  - 第一次全量测试多 1 个失败：模型线的链步骤测试没算补丁 0002 的第 11 步（行为不变）。用户选 1：改它的预期（`32a3ea6d`），写进补丁 0002（本分支 `3027ac92`，合入为 `120331b6`）。第二次全量测试：715 个通过、8 个跳过、1 个失败（starVLA）。
+  - 11-02 合入 qwen3-main 新头 `93dcf25a`（`a9a2ac7b`）：没有冲突；先在临时检出里测（727 / 8 / starVLA）再快进。P0 的视频要靠它的 Qwen3-VL 视频写法（`9e4b054c`）。
+- **P0 改用全量**（用户 11-02："改用全量 P0"，代替决定 E 的 164 条样题）：
+  - 本分支 `22fb9e74`：新混合配置 `mixture_matrix_v3_qwen3_20261102`，只换 P0（`exps/interiorgs_qa_final_20261028/lf_256`）和它的验证（val 场景 300 条）。在登录节点上构建（1 个进程、nice 19，6 分钟）。
+  - 行数：P0 10,144（去掉边缘场景的 735 条；11,458 道题，698 个 train 场景，视频 240 条），C 19,219、D 28,294、B′ 10,510。
+  - P1、P2q、P2f 四个组都和样题版逐字节相同；P0 没有 val、test 和被排除场景的行，图片和帧都在（`verify_fullp0.json`）。
+  - 合入 matrix-v3 为 `03035318`：只冲突 C、D 链配置的 `sft_lf_dirs` 一行，保留 matrix-v3 的。数据复制逐字节核过；样题版的复制挪到 `exps/matrix_v3/sft_p0sample_20261030`。
+  - 视频在 CPU 上核过两次（`exps/matrix_v3/checks/`）：样题的 24 条全部，全量的 248 条按题组抽 24 条。编码和 Qwen3-VL 自己的处理器逐 token 相同；SFT 的 collator 加小 Qwen3-VL 的 bf16 训练步全过。
+  - 第四次全量测试（`03035318`，限 4 个核，27 分钟）：727 个通过、8 个跳过、1 个失败（starVLA）。
+- **C 第一批起跑**（11-02 04:42 UTC）：
+  - 链 `exps/matrix_v3/m3_c_s20261019`、`m3_d_s20261019`，plan 由 `matrix_plan --version 3 --seed 20261019 --commit 03035318` 生成，`check_code` 通过。
+  - 池：用户 11-02 的规矩（主线转告）：没开跑的任务都投 zoetrope。生成的 `pool: queue` 改成 `zoetrope`（`plan_edit.json`）。固定池不等主线的暂停文件，起链前查过没有。
+  - 训练：
+
+    | 组 | 步骤 | 任务 | 卡 | 池 | 状态（11-02 05:10 UTC） |
+    | --- | --- | --- | --- | --- | --- |
+    | C | SFT（19,219 条 × 10 个 epoch，约 4 小时） | `pt-x75fk8c2` | 8 | zoetrope | 排队 |
+    | D | SFT（28,294 条 × 10 个 epoch，约 6 小时） | `pt-6516qgcb` | 8 | zoetrope | 排队 |
+    | C、D | RL（每组一对 S0 / 密集） | — | 1 + 8 | — | 等挑出 SFT 和密集一侧的设置 |
+
+  - 评测：
+
+    | 内容 | 任务 | 卡 | 状态 |
+    | --- | --- | --- | --- |
+    | SFT 每个 epoch × 2 个题集 | 链自动提交 | 1 | 等 SFT |
+    | E 组试跑 | `pt-xigp4l92` | 1 | 完成，约 22 分钟，已结束 |
+
+  - 密集一侧还是占位：链挑完 SFT 后停在 rl_config。种子 20261021 的两条链在第一个种子挑出 SFT 后再起。
+- **D E 组试跑**（Qwen3 SFT 第 8 个 epoch，`free_think` 提示，每局 6,144 个词元，验证集每族 8 道，48 局）：
+  - 读不出的回答：按局平均 24.5%（RL 停止线的算法），按回合 14.3%（286 回合里 41 个）：超过 20% 线，按用户的规矩 E 先停。
+  - 读不出的形式：空回答 14 个；用 `<tool_call>` 代替 `<action>` 27 个（有的前面带一句推理）。31 局一个都没有；10 局连着 3 个，局被提前停下，按局平均就是被这些局拉高的。
+  - 没有一个回答带 `<think>`。每回合平均 31.7 个词元，中位 9；读得出的平均 10.3。只有 1 个回合写到上限（5,971 个词元）。成功率 35.4%。
+  - 结果在 `exps/matrix_v3/e_trial_20261101/report.md`；任务已结束（SUCCEEDED）。
+- **E 文档**：预登记加了两条说明（遮挡族标探索性；P0 用全量）；`RECIPES.md` 第三版换成全量 P0，样题版留在后面；`CHANGES.md` 第 6、7 节；`REPORT.md`；`configs/matrix_v3/README.md`。
+- **主线转告、等用户确认的**：
+  - 第 9 项（甲）：矩阵 RL 加熵线（`entropy_max` 0.3、`entropy_window` 5）和 `vision_token_crashes` 2。重写 plan 时写进 `rl.guards`，预登记写明来由。
+  - 池：以后的 plan 写 zoetrope。
+- **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；矩阵 RL 的 plan 等密集一侧的设置。
