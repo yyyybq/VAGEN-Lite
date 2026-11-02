@@ -1,6 +1,6 @@
 # 磁盘配额线状态（唯一的状态文档）
 
-最后更新：2026-11-02 06:00 UTC（第四轮做完：第一类 b19–b22 1,637.1 GB、第二类 b23–b24 1,543.7 GB 都已上传 AOSS 并删除；sco 任务改投 zoetrope）。
+最后更新：2026-11-02 19:15 UTC（第四轮做完：第一类 b19–b22 1,637.1 GB、第二类 b23–b24 1,543.7 GB 都已上传 AOSS 并删除；sco 任务投池规则 19:08 放宽，见第 8 节）。
 
 这条线管 `/mnt/umm/users/yinbaiqiao`（个人目录，配额 22 TB）：量、预测、提方案、按批准的清单执行，默认只读。
 
@@ -178,7 +178,7 @@ bash disk/monitor.sh stop
   - 内容：模型线的 `models_runs/sft_v10_newformat_20261024`、`models_runs/chains/m_qwen3vl8b_formal_*`、`models_runs/eval_sets`；主线的 r12o `lf_format`、r12 `format_sft_v2a`、r11 `sft`、`VAGEN-Lite-r12dense`、`.venv-qwen3vl-runtime`；QA 线的 `interiorgs_qa_lf_20261015/sample_256`；P1 自己的工作树 `VAGEN-Lite-data`（含 `exps/c0_restore_20261029`，66 GB，你 10-29 说先留着）。
   - 哪个批次涉及这些路径，先单独问你，即使那条线已经批了。`archive_delete.py` 的 `plan` 和 `delete` 碰到这些路径就拒绝，你同意后把你的原话写进批次说明的 `protected_ok` 才能跑。
   - 11-01 对过以前的记录：b5、b9 删过 `m_qwen3vl8b_formal_*` 里的东西，都是在这张表出来以前、按当时批的清单删的。删的是 C0 四个 RL 检查点（q3s0 第 150 步，q3d、q3s2s0、q3s2d 第 300 步）的续训状态，每个 105.2 GB；还有 SFT 没选中的 epoch，其中 154、308、462、616 在 10-28 已取回。P1 要用的都还在：四个 RL 检查点的 HF 权重（各 35.1 GB）、SFT `checkpoint-1232`（34.0 GB）、对话和 `train.yaml`。别的行没有批次碰过；b18 也不碰。
-- **sco 任务投 zoetrope（你 11-02 的指示，主实验转告）**：磁盘线的上传、删除任务都投 zoetrope（`bash disk/submit_archive_delete_job.sh zoetrope BATCH ...`），不再投 h800。
+- **sco 任务投哪个池（你 11-02 的指示，主实验转告）**：上午定的是一律投 zoetrope；19:08 起放宽，排队中的任务可以转到 h800。磁盘线以后的上传、删除任务，提交前看 h800 和 zoetrope 哪个排队少就投哪个（`bash disk/submit_archive_delete_job.sh POOL BATCH ...`），拿不准就问你。
 - 不用 GPU。你批过的 root 属主目录删除，用 1 卡 root 任务（`disk/submit_root_delete.sh`，先查 `PAUSE_SUBMISSIONS`），删完删掉任务记录。
 - **登录节点的核数上限（你 10-28 的规定，用户级 `CLAUDE.md`；同日补充放宽）**：账号配额 14 个核，所有窗口共用。
   - 常驻监控 `monitor.py`：用 `nice -n 19`、单线程起（`monitor.sh` 已改）；10-26 起在跑的那个已调成 `nice` 19。
