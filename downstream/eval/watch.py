@@ -331,6 +331,8 @@ class Watcher:
         if self.a.dry:
             return f"would submit (workers {workers})"
         pool = self.jobs.pick_pool()
+        if pool not in self.a.pools:
+            pool = self.a.pools[0]
         self.jobs.prepare(run, self.a.cards, pool, name[:40],
                           ["bash", str(HERE / "run_eval_ckpt.sh"), str(ckpt), str(run / "out"), str(self.a.servers),
                            str(workers)])
@@ -467,7 +469,7 @@ class Watcher:
     def open_pool(self, cards: int = 8):
         """(pool, None) of the pool an 8-card job may go to now (not blocked; fewer waiting jobs first), or (None, why)."""
         reasons = {}
-        for pool in sorted(sco_job.POOLS, key=lambda p: sum(1 for j in self.job_list()
+        for pool in sorted(self.a.pools, key=lambda p: sum(1 for j in self.job_list()
                                                              if j.get("state") in sco_job.WAITING_STATES
                                                              and job_pool(j) == p)):
             reasons[pool] = self.blocked(cards, pool)
@@ -604,7 +606,7 @@ class Watcher:
         if not self.pending8:
             return
         todo, sent = sorted(self.pending8, key=lambda x: x[0]), []
-        for pool in self.a.whole_pools:
+        for pool in self.allowed(self.a.whole_pools):
             reason = self.blocked(8, pool)
             if reason:
                 self.notes.append(f"{pool}：8 卡评测本轮不提交：{reason}")
@@ -654,10 +656,16 @@ class Watcher:
                       "本轮已提交到上限" if self.sent8 >= self.a.max_whole_per_pass else "没有空闲机器")
         return reason
 
+    def allowed(self, pools) -> list:
+        """`pools` without those outside --pools (the user's instruction of 2026-11-02: every new job to zoetrope);
+        none left: --whole-pools within --pools, else --pools."""
+        return [p for p in pools if p in self.a.pools] \
+            or [p for p in self.a.whole_pools if p in self.a.pools] or list(self.a.pools)
+
     def place8(self, what: str, pools=None):
         """(pool, None) for one 8-card job now, else (None, why)."""
         reasons = []
-        for pool in pools or self.a.whole_pools:
+        for pool in self.allowed(pools or self.a.whole_pools):
             reason = self.can8(pool)
             if not reason:
                 return pool, None
@@ -833,7 +841,7 @@ class Watcher:
         a card counts as free on a machine that already runs something (room) or on an idle machine (8 each); none
         while one of ours waits there; at most --max-ones-per-pass per pass (X4's evaluations, 2026-10-26)."""
         reasons = []
-        for pool in pools or self.a.whole_pools:
+        for pool in self.allowed(pools or self.a.whole_pools):
             reason = self.blocked(1, pool)
             if not reason and self.ours_waiting1(pool):
                 reason = f"我们的 1 卡任务在排队（{self.ours_waiting1(pool)[0]}）"
@@ -934,7 +942,7 @@ class Watcher:
             if live >= self.a.max_live_shards:
                 left = f"同时最多 {self.a.max_live_shards} 个 1 卡任务，已到上限"
             else:
-                pool = max(sco_job.POOLS, key=self.room)
+                pool = max(self.a.pools, key=self.room)
                 if self.room(pool) <= 0 and self.a.idle_ok_pools:
                     pool = self.a.idle_ok_pools[0]  # the user's go-ahead (10-22 16:30): idle machines there are fine
                     self._rooms[pool] = self.room(pool) + 1
@@ -1678,6 +1686,10 @@ def parser():
                     help="8: a stage-0 checkpoint whose shards have not started is evaluated by one 8-card job "
                          "(8 servers x 96 processes) on an idle machine of --whole-pools (the user, 10-22 16:30)")
     ap.add_argument("--whole-pools", nargs="*", default=["h800"], help="pools for the 8-card evaluations")
+    ap.add_argument("--pools", nargs="+", default=list(sco_job.POOLS),
+                    help="the only pools anything is submitted to; a queue entry's \"pools\", --whole-pools and the "
+                         "one-card shards are cut down to them (the user's instruction of 2026-11-02: every new job "
+                         "to zoetrope, --pools zoetrope)")
     ap.add_argument("--stage0-repeat", nargs="*", default=["DS-B-100-s1:steps_100000"],
                     help="stage-0 checkpoints evaluated a second time as one 8-card job (noise estimate)")
     ap.add_argument("--stall-min", type=float, default=90,

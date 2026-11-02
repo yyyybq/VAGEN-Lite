@@ -325,7 +325,7 @@ def main(argv=None) -> int:
     ap.add_argument("action", choices=["prepare", "submit", "status", "delete"])
     ap.add_argument("--run", type=Path, required=True)
     ap.add_argument("--gpus", type=int, default=1)
-    ap.add_argument("--pool", default="h800")
+    ap.add_argument("--pool", default="zoetrope")  # the user's instruction of 2026-11-02: new jobs to zoetrope
     ap.add_argument("--name", default="job")
     args = ap.parse_args(argv)
     if args.action == "prepare":
