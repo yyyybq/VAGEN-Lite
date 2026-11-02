@@ -1,0 +1,204 @@
+{
+ "batch": "b23_20261102",
+ "approved": "PENDING: the user's approval of the planned list (round-4 decision 2 = B).",
+ "items": [
+  {
+   "id": "Q25-r12r_20261023-dcks2-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12r_20261023/rl_run_dcks2/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12r_20261023-dcs2-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12r_20261023/rl_run_dcs2/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12t_20261023-dv1-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12t_20261023/rl_run_dv1/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12t_20261023-dv2-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12t_20261023/rl_run_dv2/checkpoints/global_step_200",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12t_20261023-dv3-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12t_20261023/rl_run_dv3/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12t_20261023-dv4-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12t_20261023/rl_run_dv4/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12t_20261023-dv5-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12t_20261023/rl_run_dv5/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12t_20261023-dv6-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12t_20261023/rl_run_dv6/checkpoints/global_step_150",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12t_20261023-dv7-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12t_20261023/rl_run_dv7/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12u_20261023-dv8-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12u_20261023/rl_run_dv8/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12y_20261024-dv4s2-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12y_20261024/rl_run_dv4s2/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12zd_20261024-cb_v1_v4-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v1_v4/checkpoints/global_step_200",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12zd_20261024-cb_v1_v5-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v1_v5/checkpoints/global_step_200",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12zd_20261024-cb_v1_v5_v8-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v1_v5_v8/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12zd_20261024-cb_v1_v7-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v1_v7/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12zd_20261024-cb_v1_v8-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v1_v8/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12zd_20261024-cb_v4_floor-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v4_floor/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12zd_20261024-cb_v4_v7-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12zd_20261024/rl_run_cb_v4_v7/checkpoints/global_step_200",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12ze_20261025-cb_v4_floors2-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ze_20261025/rl_run_cb_v4_floors2/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r12ze_20261025-cb_v4_v7s2-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ze_20261025/rl_run_cb_v4_v7s2/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13c1_20261026-c1dck-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c1_20261026/rl_run_c1dck/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13c1_20261026-c1s0-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c1_20261026/rl_run_c1s0/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13c2_20261026-c2dck-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c2_20261026/rl_run_c2dck/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13c2_20261026-c2s0-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c2_20261026/rl_run_c2s0/checkpoints/global_step_200",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13c3_20261026-m3dck-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c3_20261026/rl_run_m3dck/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13c3_20261026-m3s0-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c3_20261026/rl_run_m3s0/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13c3sft_20261026-lf_s200r-checkpoint-420",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13c3sft_20261026/lf_s200r/model/checkpoint-420",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13d_20261026-dcks3-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dcks3/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13d_20261026-dcks4-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dcks4/checkpoints/global_step_150",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13d_20261026-dcks5-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dcks5/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13d_20261026-dv4s3-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dv4s3/checkpoints/global_step_200",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13d_20261026-dv4s4-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dv4s4/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  },
+  {
+   "id": "Q25-r13d_20261026-dv4s5-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r13d_20261026/rl_run_dv4s5/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "Qwen2.5-VL weights kept after round 2 (Qwen2.5 dropped; outside the training line's dependency list): archived to AOSS and deleted on 2026-11-02 by the disk line (round-4 decision 2 = B, the user's approval of the planned list). Its evaluation results stay where they were written."
+  }
+ ]
+}
