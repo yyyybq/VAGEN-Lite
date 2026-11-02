@@ -1,6 +1,6 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-11-02 06:10 UTC（[C1 第二段](reports/C1_PROGRESS.md)；V4 大文件已由磁盘线删除；只投 zoetrope；[V4 复核结果](reports/V4_RECHECK_20261101.md)；每日汇总 [DAILY_20261101](daily/DAILY_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-11-02 08:20 UTC（每日汇总 [DAILY_20261102](daily/DAILY_20261102.md)；C1 4.5 万步后变慢到约 1.35 秒/步；[C1 第二段](reports/C1_PROGRESS.md)；V4 大文件已由磁盘线删除；只投 zoetrope；[V4 复核结果](reports/V4_RECHECK_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
@@ -74,14 +74,15 @@
 - **X1、X2、X3、X5、T5**：报告 10-29 01:3x 已交（[X1](reports/X1_RESULTS_20261029.md)、[X2](reports/X2_RESULTS_20261029.md)、[X3](reports/X3_RESULTS_20261029.md)、[X5](reports/X5_RESULTS_20261029.md)、[T5](reports/T5_RESULTS_20261029.md)）。
 - **T 系列**：T5、T2 完成；T1 推迟；T3 / T4 等路径。
 
-## 2. 在跑什么（11-02 06:10 UTC）
+## 2. 在跑什么（11-02 08:20 UTC）
 
 - **C1 正式任务重跑** `C1-B-030-s1` `pt-a2loxfl9`：07:40 提交，12:57 在 h800 开跑。
   - 第一段（第 0–25,000 步）11-01 21:32、第二段（第 25,000–50,000 步）11-02 06:08 走完，[报告](reports/C1_PROGRESS.md)都已发你。
     - 第二段：每步 1.24 秒（最后 5,000 步 1.30 秒，原因未核实）；PyTorch 峰值 72.5 GiB；动作损失 0.053，DS-B-030-s1 同一段 0.048；文字损失轨迹 0.019、QA 0.016，基本都记住了；跳过长轨迹 5.9%；没有自动接着训过。
-    - 推算合计约 716 卡时，按 1.30 秒约 736（未核实）。约 11-04 09:45–12:10 训完。
+    - 推算合计约 716 卡时，按 1.30 秒约 736（未核实）。
+    - **第 45,000 步起慢慢变慢**：每 2,500 步的每步秒数中位数从约 1.20 升到 1.30–1.37，模型计算时间跟着升，文字样本长度没变，原因未查到。11-02 08:17 到第 55,741 步；按最近约 1.35 秒（含存续训状态）手算合计约 750 卡时、约 11-04 14:30 训完（未核实），回到 1.24 秒则约 716、约 11-04 10:30。
   - 续训状态每 5,000 步存一次（每次约 68 秒、110 GiB，只留最新一份，已核实）。
-  - 每 2.5 万步的报告由定时任务每 2 小时查一次，卡时算上第一次丢掉的 100.65；第三段约 11-02 14:45 走完。
+  - 每 2.5 万步的报告由定时任务每 2 小时查一次，卡时算上第一次丢掉的 100.65；第三段约 11-02 15:00–15:30 走完。
   - 第一次 `pt-mfgymyvf` 10-31 23:13 显存不够失败，目录 `C1-B-030-s1_oom_20261031`。
 - **V4 复核**：两条都训完、评完，任务都已结束。
   - DCKS2 `pt-w2t0xe9b` 07:34 评完；V4S3 `pt-qrdl4abe` 11:28 评完。
@@ -120,8 +121,8 @@ bash downstream/eval/watch.sh status
 
 ## 3. 在等什么
 
-- C1 正式任务重跑 `pt-a2loxfl9`：第三段（第 50,000–75,000 步）约 11-02 14:45 走完，之后每 2.5 万步报一次；约 11-04 09:45–12:10 训完，然后任务内评测。
-- 下一份每日汇总：11-02 09:00 UTC 前。
+- C1 正式任务重跑 `pt-a2loxfl9`：第三段（第 50,000–75,000 步）约 11-02 15:00–15:30 走完，之后每 2.5 万步报一次；约 11-04 10:30–14:30 训完，然后任务内评测。
+- 下一份每日汇总：11-03 09:00 UTC 前。
 
 ## 4. 待你决定的事
 
