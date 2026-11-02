@@ -9,7 +9,8 @@ Reads GEN/instances_eval.jsonl (n_gen.py collect) and EVAL/<model>/episodes.json
   * paired against the base model of the same generation (S, RS, RD against B; Q3S, Q3RS, Q3RD against Q3B) and each
     RL start against the SFT start it grew from (RS, RD against S; Q3RS, Q3RD against Q3S), on the instances both
     have: the episodes only one of the two solved, the difference with its 95% interval and McNemar's exact p (the
-    overall comparison is the main one; the six task types are exploratory, with Holm's adjustment over the six);
+    overall comparison is the main one, also with a 95% interval from resampling whole scenes; the six task types are
+    exploratory, with Holm's adjustment over the six);
   * the same overall comparisons on the near-threshold instances (n_gen: even the most comfortable success pose passes
     some gate only narrowly) and on the rest, apart (the user's decision: no margin, counted apart);
   * behaviour: unreadable turns per turn, blocked actions per executed action, turns per episode, the mean of the
@@ -27,6 +28,7 @@ import collections
 import importlib.util
 import json
 import math
+import random
 import sys
 from pathlib import Path
 
@@ -71,6 +73,26 @@ def rate(succ: dict, ids) -> dict:
 def compare(succ: dict, base: dict, ids) -> dict:
     keep = set(ids)
     return stats.paired({i: v for i, v in succ.items() if i in keep}, {i: v for i, v in base.items() if i in keep})
+
+
+def scene_interval(succ: dict, ref: dict, insts: dict, ids, draws: int = 2000, seed: int = 20261102) -> tuple:
+    """95% percentile interval of the paired difference with whole scenes resampled (one scene's instances share its
+    kitchen, so they are not independent); (nan, nan) without pairs."""
+    groups = collections.defaultdict(lambda: [0, 0])
+    for i in ids:
+        if i in succ and i in ref:
+            g = groups[insts[i].get("scene_id", i)]
+            g[0] += int(succ[i]) - int(ref[i])
+            g[1] += 1
+    groups = list(groups.values())
+    if not groups:
+        return (math.nan, math.nan)
+    rng, k, diffs = random.Random(seed), len(groups), []
+    for _ in range(draws):
+        pick = [groups[rng.randrange(k)] for _ in range(k)]
+        diffs.append(sum(p[0] for p in pick) / sum(p[1] for p in pick))
+    diffs.sort()
+    return (diffs[int(0.025 * draws)], diffs[int(0.975 * draws) - 1])
 
 
 def agree(a: dict, b: dict) -> dict:
@@ -146,7 +168,9 @@ def summarize(insts: dict, recs: dict, models=MODELS) -> dict:
         adj = stats.holm([per_type[t]["p"] for t in types])
         for t, p in zip(types, adj):
             per_type[t]["p_holm"] = p
-        return {"base": ref, "all": compare(succ[m], succ[ref], list(insts)), "near": compare(succ[m], succ[ref], near),
+        whole = compare(succ[m], succ[ref], list(insts))
+        whole["scene_low"], whole["scene_high"] = scene_interval(succ[m], succ[ref], insts, list(insts))
+        return {"base": ref, "all": whole, "near": compare(succ[m], succ[ref], near),
                 "clear": compare(succ[m], succ[ref], clear), "per_type": per_type}
 
     for m in models:
@@ -202,9 +226,12 @@ def pair_tables(rep: dict, key: str, label: str, h: str) -> list:
         return []
     types = list(rep["per_type"])
     lines = ["", f"{h} {label}（百分点；括号里是 95% 区间、只有一方成功的回合数、精确 McNemar p）", "",
-             "| 模型 | 对照 | 全部 | 门槛附近 | 其余 |", "| --- | --- | --- | --- | --- |"]
+             "| 模型 | 对照 | 全部 | 全部，按场景重抽的 95% 区间 | 门槛附近 | 其余 |",
+             "| --- | --- | --- | --- | --- | --- |"]
     for m, v in rows:
-        lines.append(f"| {m} | {v['base']} | {diff_cell(v['all'])} | {diff_cell(v['near'])} | {diff_cell(v['clear'])} |")
+        lo, hi = v["all"].get("scene_low", math.nan), v["all"].get("scene_high", math.nan)
+        lines.append(f"| {m} | {v['base']} | {diff_cell(v['all'])} | {pct(lo)} 到 {pct(hi)} | {diff_cell(v['near'])} | "
+                     f"{diff_cell(v['clear'])} |")
     lines += ["", "按任务类型（探索性，p 是六类内 Holm 校正后的）：", "",
               "| 模型 | 对照 | " + " | ".join(TYPE_ZH[t] for t in types) + " |", "| --- | --- |" + " --- |" * len(types)]
     for m, v in rows:
@@ -242,6 +269,8 @@ def markdown(rep: dict, title: str = None, head: str = "#") -> str:
     lines += ["", "- 配对：同一个实例上两个模型各跑一回合（贪心解码，所以每个模型每个实例只有一个结果）。"
                   "S、RS、RD 对 B，Q3S、Q3RS、Q3RD 对 Q3B；RS、RD 对 S，Q3RS、Q3RD 对 Q3S。"
                   "差值 = 模型成功率 − 对照成功率；“a 对 b”= 只有模型成功的回合数对只有对照成功的回合数。",
+              "- 按场景重抽：同一个场景（同一个任务、同一个重置种子）的几个实例共用一个厨房，不独立；把场景整个有放回地"
+              "重抽 2,000 次，取配对差的第 2.5 和第 97.5 百分位。它比按实例算的区间宽多少，反映场景之间的差别有多大。",
               "- 门槛附近：生成实例时，连余量最大的成功位姿也只是勉强过某道门槛（框在画面内 0.5–0.6、可见 0.3%–0.6%、"
               "左右间隔 12–30 像素、夹角 40°–45°、容差的最外 1/5 等，见 `n_env.NEAR_BANDS`）。",
               "- 塑形分：主线判定给的 0–1 分（过所有门槛时 ≥ 0.5），回合里每执行一个动作算一次，取最高。",

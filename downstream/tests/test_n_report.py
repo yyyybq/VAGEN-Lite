@@ -89,6 +89,8 @@ def test_sets_are_reported_apart_and_merged(tmp_path):
     assert rep["combined"]["near_threshold"] == 4
     comb = rep["combined"]["models"]["RS"]
     assert comb["rates"]["all"]["k"] == 7 and comb["versus_sft"]["all"]["only_a"] == 3
+    whole = comb["versus_sft"]["all"]
+    assert whole["scene_low"] <= whole["diff"] <= whole["scene_high"]
     assert rep["sets"]["one"]["models"]["RS"]["versus_sft"]["all"]["diff"] == pytest.approx(0.3)
     assert rep["sets"]["two"]["models"]["RS"]["versus_sft"]["all"]["diff"] == 0
     a = rep["agreement"]["RS"]["versus_sft"]
@@ -100,6 +102,17 @@ def test_sets_are_reported_apart_and_merged(tmp_path):
     assert R.agree({"n": 5, "only_a": 0, "only_b": 0, "diff": 0.0},
                    {"n": 5, "only_a": 0, "only_b": 0, "diff": 0.0})["p"] == 1.0
     assert math.isnan(R.agree({"n": 0}, {"n": 5})["gap"])
+
+
+def test_scene_interval_resamples_whole_scenes():
+    insts = {f"{s}_{k}": {"scene_id": s} for s in ("a", "b", "c") for k in range(2)}
+    ref = {i: False for i in insts}
+    assert R.scene_interval({i: True for i in insts}, ref, insts, list(insts)) == (1.0, 1.0)
+    succ = {i: i.startswith("a") for i in insts}  # one scene in three solved, both of its instances
+    lo, hi = R.scene_interval(succ, ref, insts, list(insts), draws=500)
+    assert lo == 0.0 and (hi == pytest.approx(2 / 3) or hi == 1.0)  # a draw without scene a is common, 2+ of it not rare
+    assert R.scene_interval(succ, ref, insts, list(insts), draws=500) == (lo, hi)  # fixed seed
+    assert all(math.isnan(x) for x in R.scene_interval({}, ref, insts, list(insts)))
 
 
 def test_an_instance_in_two_sets_is_an_error(tmp_path):
