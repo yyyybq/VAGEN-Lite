@@ -1,6 +1,6 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-11-01 21:35 UTC（[C1 第一段](reports/C1_PROGRESS.md)；[V4 复核结果](reports/V4_RECHECK_20261101.md)；每日汇总 [DAILY_20261101](daily/DAILY_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-11-02 04:50 UTC（只投 zoetrope；[C1 第一段](reports/C1_PROGRESS.md)；[V4 复核结果](reports/V4_RECHECK_20261101.md)；每日汇总 [DAILY_20261101](daily/DAILY_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
@@ -88,15 +88,20 @@
 - **排队**：只有 C1。N1 生成试跑 `pt-ednim0g1`（11:16–11:25，约 0.15 卡时）12 个场景做完：左右、等距、绝对距离、同框各 12 个，画面占比 10 个，遮挡 6 个；有 6 个场景做完后卡在关环境（和闭环评测里见过的一样），已改成不关环境、写完结果直接退出（`fc1545dc`），回合也改成每回合一个进程。B 在试跑实例上的 64 个回合 `pt-fchw1k4m`（11:35–11:41）：0 个成功，没有出错，用来估评测的卡时。
 - 挂起的：T1 两个（`*.hold_qwen3_gate_20261028`）；去掉的：T2 的 S、RD（`*.dropped_20261028`）。
 
+**11-02 起只投 zoetrope**（你 11-02 的指示，主窗口 04:3x 转告："所有窗口还没开跑的 sco 任务都改投 zoetrope 分区（以后新交的也投 zoetrope）"）：
+- 看板 04:40 重启，加 `--pools zoetrope --whole-pools zoetrope`（`07946d1d`，测试 311 个通过）。排队文件里的 "pools"、8 卡评测、1 卡分片、续训都只投 zoetrope；手工用的 `sco_job.py prepare` 默认池也改成 zoetrope。
+- 正在跑的 C1（`pt-a2loxfl9`，h800）不动。
+- 我们名下 3 个 SUSPENDED 的任务都已经没用，不占卡：`pt-vwb70oqh`（DS-RS-030-s2）和 `pt-i6v6ea3s`（DS-B-030-s2）是 10-31 取消的 T1；`pt-n31fekiq`（T2-B-030-s1）10-29 已经换成 `pt-ppptwv1i` 在 zoetrope 跑完。我想删掉这三个 sco 任务（不动任何文件），被自动模式拦下了，等你定。
+
 **GPU 规则**（你 10-23 晚的决定 1；10-25 约 10:00 改为只给同一个池让路）：
 - 主线（`interiorgs-v10-*`）有任务在某个池排队时，不往那个池提交；另一个池有空机照样用（你的原话："只给同一个池让路就行，不用一直让，没有卡空着为准"）；
 - 8 卡任务只投到估计有空闲机器的池；1 卡任务投到有空卡的机器；我们自己有任务在那个池排队时，不再往那个池提交；
 - 按空机提交、还在排队的任务，如果主线开始在同一个池排队，就撤回，等下次再提。已经开始跑的不动。
 
-**看板**：`downstream/eval/watch.py`，10-30 23:22 起运行（`restart`），PID 2740293，代码 `7750bacd`，每 5 分钟一轮。22:45 它因提交 C1 时 sco 出错而退出（见上）。`7750bacd` 改了这种情况的处理：提交结果不明时留下标记，本轮不再提交，看板继续运行；之后按任务列表核对，找到任务就认领，10 分钟后还没有就清掉标记重交。测试 270 个通过。按你 10-28 的登录节点规则，看板和它启动的一切（sco、结果报告）都以 nice 19、每个进程 1 个线程运行。代码更新后用 `restart`（沿用保存的参数）；`start` 必须带全部参数，不带参数会被拒绝（10-28 出过一次清空参数的事）。命令如下（在集群 worktree 里）：
+**看板**：`downstream/eval/watch.py`，11-02 04:40 起运行（只投 zoetrope，见上），PID 510455，代码 `07946d1d`，每 5 分钟一轮。之前 10-30 23:22 起是 PID 2740293、代码 `7750bacd`。22:45 它因提交 C1 时 sco 出错而退出（见上）。`7750bacd` 改了这种情况的处理：提交结果不明时留下标记，本轮不再提交，看板继续运行；之后按任务列表核对，找到任务就认领，10 分钟后还没有就清掉标记重交。测试 270 个通过。按你 10-28 的登录节点规则，看板和它启动的一切（sco、结果报告）都以 nice 19、每个进程 1 个线程运行。代码更新后用 `restart`（沿用保存的参数）；`start` 必须带全部参数，不带参数会被拒绝（10-28 出过一次清空参数的事）。命令如下（在集群 worktree 里）：
 
 ```bash
-bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- --yield-to-same-size --yield-pool-only --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 100 010 030 --whole-pools h800 zoetrope
+bash downstream/eval/watch.sh start --every 300 --stage0 --stage0-cards 8 --yield-to interiorgs-v10- --yield-to-same-size --yield-pool-only --slots 99 --max-live-shards 999 --max-whole-per-pass 4 --resume-ratios 100 010 030 --whole-pools zoetrope --pools zoetrope
 ```
 
 ```bash
@@ -125,8 +130,11 @@ bash downstream/eval/watch.sh status
   两条合计约 302 GB。建议删掉，只留 `run/final_model`（各 17 GB）和评测结果。可以直接删，也可以交给磁盘线照 b14 的办法先传 AOSS 再删。
 - **N2（少样本）做不做、做哪几个起点。**
 - **N1 结果要不要转给主窗口。**
+- **删不删 3 个已经没用的 SUSPENDED sco 任务**（`pt-vwb70oqh`、`pt-i6v6ea3s`、`pt-n31fekiq`，见第 2 节"11-02 起只投 zoetrope"）。只删 sco 上的任务记录，不动文件。
 
 ## 5. 主窗口指令与暂停 / 撤回记录（UTC）
+
+- **11-02 04:3x 主窗口转告你的指示：没开跑的 sco 任务都改投 zoetrope，以后新交的也投 zoetrope。** 已执行：看板 04:40 起只投 zoetrope（`07946d1d`）。我们没有排队的任务，正在跑的 C1 不动。3 个挂起的任务已经没用，删除要你批。
 
 - **10-31 04:48 磁盘线（你批的 b14 甲）删了下游已训完、已评完实验的续训状态**，删前都上传了 AOSS，逐个核对大小，0 个不符。共 207 个文件、915.1 GB。
   - 删了：
