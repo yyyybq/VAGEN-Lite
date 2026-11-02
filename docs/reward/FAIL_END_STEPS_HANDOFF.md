@@ -57,6 +57,7 @@ python -m reward.fail_end_steps --result DIR [--result DIR ...] --tables TABLES 
 - eval_test_v2_screened 这个目录是一个视图：
   - 233 道和 eval_test_v2 的题逐字段完全相同，直接链接到 eval705 的表；
   - 另外 59 道是新题，表是 11-02 用一个单卡 zoetrope 任务新建的，放在 `reward_runs/tables/screened59`。
+  - screened59 的 AOSS 副本在 `fj:s3://baiqiao/vagen_lite_archive/reward_runs/tables/screened59`（62 个文件，大小逐个核过；清单 `aoss_archive_manifests/manifest_20261102T220934Z.jsonl`）。
 - 上面路径的根目录都是 `/mnt/umm/users/yinbaiqiao/`。
 
 ## 新的评测集怎么建表
@@ -66,11 +67,20 @@ python -m reward.distance12 build --rows SET/tasks.jsonl --task-ids IDS.txt --ou
     --depth 12 --prefilter strict --workers N
 ```
 
-- 平均每道题约 0.38 CPU 小时。705 道共约 270 CPU 小时：一个 8 卡任务约 2.5 小时，单卡约 22 小时。59 道在单卡任务上 [实测时间待填]。
+- 平均每道题约 0.38 CPU 小时。705 道共约 270 CPU 小时：一个 8 卡任务约 2.5 小时，单卡约 22 小时。
+  - 筛选集的 59 道在一个单卡 zoetrope 任务上实测 12.7 CPU 小时、1.6 小时，每道约 0.22 CPU 小时。
 - 这是造数据，要用 sco 提交，不在登录节点上跑。本线的单卡提交工具是 `reward/sco_job.py`，用法写在文件开头。
 - `reward/distance12.py` 不在上面三个文件里。主线要自己建表，就再拿这一个文件，或者让本线来建。
 
 ## 核对过的
 
-- 在 B 的 rw_s0 第 150 次的 379 个失败局上，加 --no-near 后和 B 的 fail_end_d 逐局完全一样。
-- 在筛选集上 [待填：用一份 c0q3 结果端到端跑过一次，重放一致数、四类的数目]。
+- 在 B 的 rw_s0 第 150 次的 379 个失败局上，加 --no-near 后和 B 的 fail_end_d 逐局完全一样（改成按题号定位之后又核了一次）。
+- 在筛选集上，用两份已有的结果端到端跑过（`VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened/` 下的 c0q3_s1s0_150 和 c0q3_sft_e8），4 个进程共用 22 秒：
+
+  | 结果 | 失败局 | 重放一致 | 出错 | 终点 d 平均（中位） | 这些题的 d\* 平均 | 相邻格给出 | 不可达 / 查不到 |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | c0q3_s1s0_150 | 168 | 168 | 0 | 5.69（4.5） | 5.51 | 1 | 0 / 0 |
+  | c0q3_sft_e8 | 161 | 161 | 0 | 6.39（6.0） | 5.34 | 4 | 0 / 0 |
+
+- 这两份结果是从两次评测拼起来的，其中 59 道新题的 index 指向另一份题目文件。所以工具改成按 task_id 在题目文件里找行号来 reset，不再用 index（commit `7f4407b6`）。没改之前这 59 道题会 reset 到别的题上。
+- 这两个文件夹没有 done.json，工具会拒绝没有 done.json 的结果。核对时我在临时目录里拷了一份，补了一个空的 done.json，原文件没动。主线自己的评测结果都有 done.json。
