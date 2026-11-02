@@ -1285,3 +1285,17 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - 要不要改，等用户定。`e_trial.py` 说明里"和 RL 的拼接模式一样"那句不对，已在 `CHANGES.md` 第 7 节更正。
 - **文档**：预登记加第 4 条说明（E 从 C0 的 SFT 起步，只和 C0 比，两者的差别和每回合的上限）；`configs/matrix_v3/E.yaml`、`README.md`、`REPORT.md`、`CHANGES.md` 跟着改；`test_matrix_v3.py` 改成核对 E 的起点是 C0 的 SFT。
 - **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；matrix-v3 没有新提交。
+
+### 12.34 12 个 RL 的状态；C 种子 1 的 S0 第一次图像 token 崩溃（11-02 20:50 UTC）
+
+- **`m3cs1s0`**：
+  - 训练 `pt-gvuvkurx` 在第 96 次更新前后，于 20:34 UTC 以 FAILED 结束。日志里是 Qwen3-VL 的图像 token 崩溃（`get_rope_index` 形状对不上：`[3, 4774]` 对 `[3, 4768]`）。
+  - 链把它记进 `trainer_crashes`，这是连续第 1 次（停止线是连续 2 次），于是用 8 次重试里的 1 次重交了 `pt-8ccxykb1`。新任务从第 50 次的检查点接着训，第 51–96 次要重跑。
+- **E 的第一批更新**（`m3es1s0`，第 1–4 次）：
+  - 读不出的回答：第 1 次 21.5%，第 2 次 0.6%；带思考的回答约 0。
+  - 训练成功率 31–44%；每次更新 60–90 秒；没有显存不足。
+- **各 RL 到的更新次数**：
+  - C：`m3cs1d` 31；`m3cs2s0` 24；`m3cs2d` 23。
+  - D：`m3ds1s0` 49；`m3ds1d` 47；`m3ds2s0` 48；`m3ds2d` 42。D 的每次更新约 52–63 秒，开头几次慢的情况过去了。
+  - E：`m3es1s0` 4；`m3es1d`、`m3es2s0`、`m3es2d` 在 h800 排队。
+  - 没有停止线停下的 RL。
