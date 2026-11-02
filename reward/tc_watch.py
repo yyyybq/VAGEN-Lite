@@ -125,11 +125,13 @@ def main():
     for run in plan["rl_runs"]:
         base = chain / f"rl_run_{run}"
         per = log_metrics(list((base / "logs").glob("rl-*.log")))
-        ended += int((base / "logs" / "rl_exit.json").is_file())
+        finished = (base / "logs" / "rl_exit.json").is_file()
+        ended += int(finished)
         done = sorted(int(p.stem) for p in (base / "rollout_data").glob("*.jsonl")) if (base / "rollout_data").is_dir() else []
         done = [u for u in done if u in per]  # both the dump and the log line written
         fails = {}
-        for u in done[:-1] if len(done) > 1 else []:  # the newest dump may still be being written
+        # the newest dump may still be being written, unless the trainer has exited
+        for u in done if finished else (done[:-1] if len(done) > 1 else []):
             s0p, gp = REFERENCE["rw_s0"] / f"{u}.jsonl", REFERENCE["rw_g"] / f"{u}.jsonl"
             if not (s0p.is_file() and gp.is_file()):
                 continue
