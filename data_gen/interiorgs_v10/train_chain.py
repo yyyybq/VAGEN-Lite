@@ -65,6 +65,17 @@ for that many minutes (suspended_over).  When another user stops a job in a pool
 SUSPENDED for a few seconds and then puts them back (10-27 14:43 and 15:50 on zoetrope); without the switch such a
 job counts as ended at once, is deleted and resubmitted, and loses its place in the queue and one of its retries.
 
+Qwen3 main line (the user's decision 99 of 2026-11-01; two guards, off unless given): plan "rl"."guards"
+"entropy_max" (with "entropy_window", default 5) stops a run whose actor entropy is above entropy_max in each of the
+last entropy_window updates (the user's line: 0.3 in 5); "vision_token_crashes" (N) is the user's rule 91 of
+2026-10-29: a run whose trainer ends N times in a row (the user's 2) with the Qwen3-VL image-token crash
+(vision_token_crash: a drifted policy writes image placeholder tokens, so the M-RoPE position ids or the image features
+no longer match the sequence) is stopped as a guard stops it instead of being resubmitted (vision_crash_stop; every
+failed attempt in state "trainer_crashes"); the checkpoints it reached are evaluated.  Plan "qa_eval" (decision 2 甲 of
+2026-11-01, off unless given; qa_jobs): the evaluate step also evaluates the named models on EASI benchmarks, one
+single-card job a model and benchmark (job script mode qa, data_gen.interiorgs_v10.qa_eval, the model type's Python),
+in the same queue as the action evaluations.
+
 Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
 or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
 submitted again, at most "retries" (default 2) times per run (startup_problem; the render service keeps running);
@@ -386,7 +397,40 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
         if len(fills) >= at and sum(fills) / len(fills) < float(fill_min):
             return (f"keep filled {sum(fills) / len(fills):.2f} all-fail tasks per update < {fill_min} "
                     f"(mean of updates 1-{at})")
+    ent_max = guards.get("entropy_max")  # the user's decision 99 of 2026-11-01; off unless given
+    if ent_max is not None:
+        ew = int(guards.get("entropy_window", 5))
+        ent = [(s, per[s]["actor/entropy"]) for s in steps[-ew:] if "actor/entropy" in per[s]]
+        if len(ent) >= ew and all(v > float(ent_max) for _, v in ent):
+            return (f"entropy above {ent_max} in each of updates {ent[0][0]}-{ent[-1][0]} ("
+                    + ", ".join(f"{v:.3f}" for _, v in ent) + ")")
     return None
+
+
+VISION_TOKEN_CRASHES = (
+    re.compile(r"RuntimeError: shape mismatch: value tensor of shape \[3, \d+\] cannot be broadcast to indexing "
+               r"result of shape \[3, \d+\]"),
+    re.compile(r"ValueError: Image features and image tokens do not match"))
+
+
+def vision_token_crash(log_text: str) -> Optional[str]:
+    """The user's rule 91 (2026-10-29): the crash a drifted Qwen3-VL run's trainer ends with once its generated text
+    holds image placeholder tokens -- the three rows of M-RoPE position ids no longer fit the sequence (qw3s0k2 five
+    times, qw3c3v4 at 20:41), or the image features no longer fit the image tokens (qw3c3v4 at 20:59); the two count
+    as one kind.  The last such line of a trainer log, or None."""
+    found = None
+    for line in log_text.splitlines():
+        if any(p.search(line) for p in VISION_TOKEN_CRASHES):
+            found = line.strip()
+    return found[:200] if found else None
+
+
+def read_tail(path: Path, size: int = 2_000_000) -> str:
+    """The last ``size`` bytes of a (trainer) log as text."""
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        f.seek(max(0, f.tell() - size))
+        return f.read().decode(errors="ignore")
 
 
 def block_stats(rollout_dir: Path, log_text: str = "", block: int = 25) -> Dict[str, Dict[str, Any]]:
@@ -859,6 +903,54 @@ class Chain:
         self.save()
         return True
 
+    def vision_crash_stop(self, name: str, run: Dict[str, Any], st: Dict[str, Any]) -> Optional[str]:
+        """Plan rl guards "vision_token_crashes" (N; off unless given), the user's rule 91 (decision 99 of 2026-11-01:
+        in the chain): a trainer that ended before the endpoint is recorded once (state["trainer_crashes"][name]: its
+        job, its newest log and that log's image-token crash line, or None when the log is not new); the reason to
+        stop the run when the last N attempts all ended with the crash, else None."""
+        n = int((run["rl"].get("guards") or {}).get("vision_token_crashes") or 0)
+        if not n:
+            return None
+        rec = self.state.setdefault("trainer_crashes", {}).setdefault(name, [])
+        job = st.get("job_id")
+        if not any(r.get("job_id") == job for r in rec):
+            logs = sorted((run["run_dir"] / "logs").glob("rl-*.log"))
+            new = logs and logs[-1].name not in {r.get("log") for r in rec}
+            rec.append({"utc": now(), "job_id": job, "state": st.get("state"), "log": logs[-1].name if new else None,
+                        "crash": vision_token_crash(read_tail(logs[-1])) if new else None})
+            self.save()
+        last = rec[-n:]
+        if len(last) == n and all(r.get("crash") for r in last):
+            return (f"rule 91: {n} trainer attempts in a row ended with the Qwen3-VL image-token crash "
+                    f"(last: {last[-1]['crash'][:120]})")
+        return None
+
+    def qa_jobs(self, models: Dict[str, Tuple[str, Optional[str], Sequence[str]]]) -> Dict[str, Tuple[Any, ...]]:
+        """Plan "qa_eval" (decision 2 甲 of 2026-11-01; off unless given): {"out": folder, "easi": a list of EASI
+        benchmark keys or "easi_8" (SITE as its image and video parts, qa_eval.EASI_8_JOBS), "models": result names
+        among the evaluate step's models (default: the plan's eval "models"), "limit": questions a benchmark (a
+        smoke test; give it its own folder)} -- the evaluate step's jobs {"qa_<benchmark>__<name>":
+        (out/<benchmark>, name, model, None, options, "qa")}, one single-card job a model and benchmark
+        (data_gen.interiorgs_v10.qa_eval easi with the plan's model type); out/<benchmark>/<name>/done.json marks
+        one as done."""
+        qa = self.plan.get("qa_eval")
+        if not qa:
+            return {}
+        from .qa_eval import EASI_8, EASI_8_JOBS
+
+        benchmarks = list(EASI_8_JOBS) if qa.get("easi") == "easi_8" else list(qa.get("easi") or [])
+        unknown = [b for b in benchmarks if b not in EASI_8 + EASI_8_JOBS]
+        names = list(qa.get("models") or (self.plan.get("eval") or {}).get("models") or {})
+        missing = [n for n in names if n not in models]
+        if unknown or missing:
+            raise ChainError(f"qa_eval: benchmarks not in EASI-8 {unknown}; models the evaluate step lacks {missing}")
+        kind = str(self.plan.get("model_type") or "qwen2_5_vl")
+        out = Path(qa["out"])
+        limit = ["--limit", str(qa["limit"])] if qa.get("limit") else []
+        return {f"qa_{b}__{n}": (out / b, n, models[n][0], None,
+                                 ["easi", "--benchmark", b, "--model-type", kind, *limit], "qa")
+                for b in benchmarks for n in names}
+
     def external_renderer_state(self, name: str, run_dir: Path, info: Dict[str, Any]) -> Dict[str, Any]:
         """Round 12 freeze (the user's decision of 2026-10-24): a render service outside sco (renderer_external.json),
         as a job state: EXTERNAL while it answers /health (and for fewer than EXTERNAL_DOWN_CHECKS failed polls in a
@@ -1165,7 +1257,8 @@ class Chain:
     def eval_jobs(self, step: str, jobs: Dict[str, Tuple[Path, str, str, Optional[str], Sequence[str]]]) -> None:
         """Single-card evaluation jobs {run name: (eval set folder, result name, model, prompt format, options)},
         at most max_eval_jobs at a time; a result folder with done.json is not evaluated again; every job is
-        deleted when it ends; incomplete results fail the step."""
+        deleted when it ends; incomplete results fail the step.  A sixth element names another job script mode
+        (qa_jobs: "qa", whose arguments are the folder, the result name, the model and the options)."""
         from . import job_sco
 
         jobs = {n: j for n, j in jobs.items() if not (j[0] / j[1] / "done.json").exists()}
@@ -1181,12 +1274,13 @@ class Chain:
         try:
             while queue or running:
                 while queue and len(running) < limit:
-                    name, (eval_dir, result, model, prompt_format, options) = queue.pop(0)
+                    name, (eval_dir, result, model, prompt_format, options, *mode) = queue.pop(0)
                     run = self.tr / "eval_runs" / name
                     run.mkdir(parents=True, exist_ok=True)
                     if not (run / "job" / "submission.json").exists():
-                        job_sco.prepare(run, 1, ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options],
-                                        pool=self.job_pool(cards=1))
+                        args = ([mode[0], str(eval_dir), result, str(model), *options] if mode else
+                                ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options])
+                        job_sco.prepare(run, 1, args, pool=self.job_pool(cards=1))
                         job_sco.submit(run)
                     running[name] = run
                 for name, run in list(running.items()):
@@ -1568,6 +1662,14 @@ class Chain:
                     reached = (d / "checkpoints" / f"global_step_{endpoint}").is_dir()
                     used = (0 if self.plan.get("startup_retries_separate")  # start-up resubmissions: their own limit
                             else len((self.state.get("startup_retries") or {}).get(name, [])))
+                    crash_stop = self.vision_crash_stop(name, run, st_rl) if rl_done and not reached else None
+                    if crash_stop:  # rule 91: stopped as a guard stops a run, instead of a resubmission
+                        (d / "STOP_RENDERER").touch()
+                        job_sco.delete(d, "job_rl")
+                        self.state.setdefault("guard_stops", {})[name] = {"reason": crash_stop, "utc": now()}
+                        ended[name] = f"stopped: {crash_stop}"
+                        active.pop(name)
+                        continue
                     if rl_done and not reached and self.take_retry(  # round 12 batch: resume from the last checkpoint
                             f"rl/{name}", "trainer", st_rl.get("job_id"), f"trainer ended {st_rl.get('state')}", used,
                             hosts_rl):
@@ -2041,7 +2143,7 @@ class Chain:
     def evaluate(self) -> None:
         ev = self.plan.get("eval")
         sets = self.eval_sets()
-        if not ev or not sets:
+        if not ev or not (sets or self.plan.get("qa_eval")):  # qa_eval alone: QA of models evaluated elsewhere
             self.mark("evaluate", note="not planned")
             return
         every = int(ev.get("every", 50))
@@ -2064,6 +2166,7 @@ class Chain:
         jobs = {(name if single else f"{set_name}__{name}"): (eval_dir, name, model, prompt_format, opts)
                 for set_name, eval_dir in sets.items() for name, (model, prompt_format, opts) in models.items()}
         extra = {k: Path(v) for k, v in (ev.get("extra_sets") or {}).items()}  # round 11: sets only variants use
+        jobs.update(self.qa_jobs(models))  # Qwen3 main line: plan "qa_eval"
         jobs.update(self.variant_jobs(ev, {**sets, **extra}, models, rl_names))
         self.eval_jobs("evaluate", jobs)
         self.tables()

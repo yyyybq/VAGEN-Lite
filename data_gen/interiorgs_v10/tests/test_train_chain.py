@@ -671,6 +671,175 @@ class ChainTest(unittest.TestCase):
         self.assertIsNone(T.guard_reason(few, {"kl_max": 0.2}))  # off unless given
         self.assertIsNone(T.guard_reason("".join(line(s) for s in range(1, 8)), guards))  # S0: no keep metrics
 
+    def test_qa_eval_jobs(self):
+        """Decision 2 甲 (2026-11-01): plan "qa_eval" adds one job a model and EASI benchmark to the evaluate step's
+        queue, submitted in job script mode qa with the plan's model type; a scored one (done.json) is skipped; the
+        action evaluations are unchanged; without the switch nothing is added."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for m in ("base", "sft"):
+                (root / m).mkdir()
+                (root / m / "config.json").write_text("{}")
+            plan = {"tr": tmp, "sft_dir": str(root / "sft_data"), "eval_only": True, "model_type": "qwen3_vl",
+                    "eval_sets": {"val": str(root / "val")},
+                    "eval": {"models": {"base": {"model": str(root / "base")}, "sft": {"model": str(root / "sft")}}},
+                    "qa_eval": {"out": str(root / "easi"), "easi": ["vsi_bench", "site"]}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            got = {}
+            chain.eval_jobs = lambda step, j: got.update(j)
+            chain.tables = lambda: None
+            chain.evaluate()
+            self.assertEqual(sorted(got), ["qa_site__base", "qa_site__sft", "qa_vsi_bench__base", "qa_vsi_bench__sft",
+                                           "val__base", "val__sft"])
+            self.assertEqual(got["qa_site__sft"], (root / "easi" / "site", "sft", str(root / "sft"), None,
+                                                   ["easi", "--benchmark", "site", "--model-type", "qwen3_vl"], "qa"))
+            self.assertEqual(len(got["val__sft"]), 5)  # the action evaluation as before
+            with self.assertRaises(T.ChainError):
+                T.Chain({**plan, "qa_eval": {"out": tmp, "easi": ["mmbench"]}}, sleep=lambda s: None).qa_jobs({})
+            self.assertEqual(T.Chain({**plan, "qa_eval": None}, sleep=lambda s: None).qa_jobs({}), {})
+            qa_only = T.Chain({k: v for k, v in plan.items() if k != "eval_sets"}, sleep=lambda s: None)
+            only = {}
+            qa_only.eval_jobs = lambda step, j: only.update(j)
+            qa_only.tables = lambda: None
+            qa_only.evaluate()  # no action sets: the QA jobs alone (models evaluated elsewhere)
+            self.assertEqual(sorted(only), ["qa_site__base", "qa_site__sft", "qa_vsi_bench__base", "qa_vsi_bench__sft"])
+            prepared = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                prepared.append(list(args))
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}"}))
+                out, name = (root / "easi" / "site", "sft") if run.name == "qa_site__sft" else (None, None)
+                if out:
+                    (out / name).mkdir(parents=True)
+                    (out / name / "done.json").write_text("{}")
+
+            def delete(run, job_dir="job"):
+                pass
+
+            (root / "easi" / "vsi_bench" / "base").mkdir(parents=True)
+            (root / "easi" / "vsi_bench" / "base" / "done.json").write_text("{}")  # scored before: skipped
+            chain = T.Chain(plan, sleep=lambda s: None)
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, delete=delete,
+                                     status=lambda run, job_dir="job": {"state": "SUCCEEDED", "finished": True}):
+                chain.eval_jobs("evaluate", {k: v for k, v in got.items() if k in ("qa_site__sft", "qa_vsi_bench__base")})
+            self.assertEqual(prepared, [["qa", str(root / "easi" / "site"), "sft", str(root / "sft"), "easi",
+                                         "--benchmark", "site", "--model-type", "qwen3_vl"]])
+
+    def test_guard_entropy(self):
+        """The user's decision 99 (2026-11-01): entropy above entropy_max in each of the last entropy_window updates
+        stops the run; one update at or under the line resets it; off unless given."""
+        guards = {"kl_max": 1.0, "entropy_max": 0.3, "entropy_window": 5}
+        line = lambda s, e: f"(Runner) step:{s} - actor/kl_loss:np.float64(0.01) - actor/entropy:np.float64({e})\n"  # noqa: E731
+        calm = "".join(line(s, 0.08) for s in range(1, 11))
+        high4 = "".join(line(s, 0.35 + 0.1 * (s - 11)) for s in range(11, 15))
+        self.assertIsNone(T.guard_reason(calm + high4, guards))  # 4 updates over the line: not yet
+        self.assertEqual(T.guard_reason(calm + high4 + line(15, 0.9), guards),
+                         "entropy above 0.3 in each of updates 11-15 (0.350, 0.450, 0.550, 0.650, 0.900)")
+        self.assertIsNone(T.guard_reason(calm + high4 + line(15, 0.3) + line(16, 0.8), guards))  # 0.3 is not above
+        self.assertIsNone(T.guard_reason(calm + high4 + line(15, 0.9), {"kl_max": 1.0}))  # off unless given
+        self.assertIn("updates 12-14", T.guard_reason(calm + high4[: high4.index("(Runner) step:14")]
+                                                      + line(14, 0.5), {**guards, "entropy_window": 3}))
+
+    def test_vision_token_crash(self):
+        """The user's rule 91: the two Qwen3-VL image-token crash lines (as in qw3s0k2's and qw3c3v4's trainer logs)
+        count as one kind; other errors do not."""
+        mrope = ("RuntimeError: shape mismatch: value tensor of shape [3, 4816] cannot be broadcast to indexing result "
+                 "of shape [3, 4768]")
+        feats = "ValueError: Image features and image tokens do not match: tokens: 576, features 640"
+        self.assertEqual(T.vision_token_crash("step:200 - x:1\n" + mrope + "\n"), mrope)
+        self.assertEqual(T.vision_token_crash("ray.exceptions.RayTaskError(ValueError): ...\n    " + feats + "\n"), feats)
+        self.assertEqual(T.vision_token_crash(mrope + "\n" + feats + "\n"), feats)  # the last one
+        self.assertIsNone(T.vision_token_crash("RuntimeError: CUDA out of memory\n"))
+        self.assertIsNone(T.vision_token_crash(mrope.replace("[3, 4816]", "[4, 4816]") + "\n"))  # not position ids
+
+    def test_rule_91_stops_a_run_after_two_image_token_crashes(self):
+        """The user's rule 91 in the chain (decision 99): a trainer ending with the image-token crash is resubmitted
+        once; a second crash in a row stops the run as a guard does (no further retry, the step does not fail, the
+        checkpoints it reached are evaluated); a crash that a crash-free failure separates does not count, and
+        without the guard every failure is a retry."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        crash = ("RuntimeError: shape mismatch: value tensor of shape [3, 4801] cannot be broadcast to indexing result "
+                 "of shape [3, 4768]\n")
+        for guard, ends, stopped in ((2, [crash, crash], True), (2, [crash, "Killed\n", crash, None], False),
+                                     (None, [crash, crash, None], False)):
+            with self.subTest(guard=guard, ends=len(ends)), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                guards = {"kl_max": 1.0, **({"vision_token_crashes": guard} if guard else {})}
+                chain = T.Chain({"tr": tmp, "sft_dir": str(root / "sft"), "endpoint": 100, "ppo_template": "/S0.yaml",
+                                 "gs_root": "/ply", "sft_groups": {"formal": "sft_trajectories.jsonl"}, "retries": 8,
+                                 "rl": {"save_freq": 50, "task_pool": "reserve", "rows": "/rl_rows.jsonl",
+                                        "guards": guards},
+                                 "rl_runs": {"s0": {"reward_preset": "S0"}, "d": {"reward_preset": "dense"}},
+                                 "eval_sets": {"val": str(root / "val")}, "eval": {"every": 50}}, sleep=lambda s: None)
+                chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_formal_e9", "model": "/lf/e9",
+                                                                "select_by": "val", "scores": {"sft_formal_e9": 0.42}}
+                chain.sh = lambda args, **k: None
+                chain.rl_config()
+                attempts = {"n": 0}
+
+                def prepare(run, gpus, args, job_dir="job", pool=None):
+                    (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+                def submit(run, job_dir="job"):
+                    if run.name == "rl_run_d" and job_dir == "job_rl":
+                        attempts["n"] += 1
+                    (run / job_dir / "submission.json").write_text(
+                        json.dumps({"job_id": f"pt-{run.name}-{job_dir}-{attempts['n']}"}))
+
+                def status(run, job_dir="job"):
+                    if job_dir == "job_renderer":
+                        return {"state": "RUNNING", "finished": False}
+                    job = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                    logs = run / "logs"
+                    logs.mkdir(exist_ok=True)
+                    ck = run / "checkpoints"
+                    if run.name == "rl_run_d":
+                        (ck / "global_step_50" / "actor" / "huggingface").mkdir(parents=True, exist_ok=True)
+                        end = ends[min(attempts["n"], len(ends)) - 1]
+                        if end is None:  # the last attempt reaches the endpoint
+                            (ck / "global_step_100" / "actor" / "huggingface").mkdir(parents=True, exist_ok=True)
+                            return {"job_id": job, "state": "SUCCEEDED", "finished": True}
+                        (logs / f"rl-{attempts['n']:02d}.log").write_text("(Runner) step:60 - x:1\n" + end)
+                        return {"job_id": job, "state": "FAILED", "finished": True}
+                    for s in (50, 100):
+                        (ck / f"global_step_{s}" / "actor" / "huggingface").mkdir(parents=True, exist_ok=True)
+                    return {"job_id": job, "state": "SUCCEEDED", "finished": True}
+
+                def delete(run, job_dir="job"):
+                    receipt = run / job_dir / "submission.json"
+                    if receipt.exists():
+                        receipt.replace(receipt.with_name("submission_deleted.json"))
+
+                with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                    chain.rl()  # never raises: d is stopped or reaches the endpoint
+                stops = chain.state.get("guard_stops") or {}
+                if stopped:
+                    self.assertIn("rule 91: 2 trainer attempts in a row ended with the Qwen3-VL image-token crash",
+                                  stops["d"]["reason"])
+                    self.assertEqual(attempts["n"], 2)
+                    self.assertEqual(len(chain.state["job_retries"]["rl/d"]), 1)
+                    self.assertTrue((root / "rl_run_d" / "STOP_RENDERER").exists())
+                    jobs = {}
+                    chain.eval_jobs = lambda step, j: jobs.update(j)
+                    chain.tables = lambda: None
+                    chain.evaluate()
+                    self.assertEqual(sorted(jobs), ["val__d_050", "val__s0_050", "val__s0_100"])
+                else:
+                    self.assertNotIn("d", stops)
+                    self.assertEqual(attempts["n"], len(ends))
+                crashes = [r["crash"] is not None for r in (chain.state.get("trainer_crashes") or {}).get("d", [])]
+                self.assertEqual(crashes, [e == crash for e in ends if e is not None] if guard else [])
+
     def test_package_runs_with_guards(self):
         """Round 11: the package options reach rl-config; a run stopped by a guard does not fail the step and only
         its existing checkpoints are evaluated; the other run goes on to the endpoint."""

@@ -164,6 +164,17 @@ PY
     "${PY}" -m data_gen.interiorgs_v10.evaluation run --eval "${EVAL}" --name "${NAME}" --model "${MODEL}" \
       ${PROMPT_FORMAT:+--prompt-format "${PROMPT_FORMAT}"} ${EVAL_OPTIONS[@]+"${EVAL_OPTIONS[@]}"}
     ;;
+  qa)
+    # Qwen3 main line (decision 2 of 2026-11-01): a QA evaluation of one model (plan "qa_eval", train_chain.qa_jobs),
+    # data_gen.interiorgs_v10.qa_eval in the model type's Python; $6 its command (easi), then its options
+    OUT=${3:?benchmark output folder}
+    NAME=${4:?model name}
+    ALSO_OWNED=${OUT}/${NAME}  # the results folder, outside RUN
+    MODEL=${5:?Hugging Face model folder}
+    export CUDA_VISIBLE_DEVICES=0
+    "${PY}" -m data_gen.interiorgs_v10.qa_eval "${6:?qa_eval command}" --name "${NAME}" --model "${MODEL}" \
+      --out "${OUT}" "${@:7}"
+    ;;
   renderer)
     # round 12 freeze (the user's decision of 2026-10-24): RENDERER_GPU / RENDERER_PORT (default 0 / 8915) let
     # several services share a machine outside sco (train_chain's renderer_external.json)
