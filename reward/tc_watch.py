@@ -85,7 +85,17 @@ def block_row(per, us, fails):
     row["s0_all_fail_tasks"] = sum(f["s0_all_fail"] for f in fails)
     row["of_them_success_here"] = sum(f["here"] for f in fails)
     row["of_them_success_rw_g"] = sum(f["rw_g"] for f in fails)
+    row.update(same_tasks_success(fails))
     return row
+
+
+def same_tasks_success(fails):
+    """Training success on the same tasks and updates: here, rw_s0, rw_g (episodes)."""
+    s = np.sum([f["succ"] for f in fails], axis=0) if fails else None
+    if s is None or not s[3]:
+        return {}
+    return {"succ_here": round(float(s[0] / s[3]), 4), "succ_rw_s0": round(float(s[1] / s[3]), 4),
+            "succ_rw_g": round(float(s[2] / s[3]), 4)}
 
 
 def first50(per):
@@ -128,7 +138,9 @@ def main():
             here = cached(cache, f"{run}/{u}", base / "rollout_data" / f"{u}.jsonl")
             af = [t for t, n in s0.items() if n == 0]
             fails[u] = {"s0_all_fail": len(af), "here": sum(here.get(t, 0) > 0 for t in af),
-                        "rw_g": sum(g.get(t, 0) > 0 for t in af), "same_tasks": set(s0) == set(here)}
+                        "rw_g": sum(g.get(t, 0) > 0 for t in af), "same_tasks": set(s0) == set(here),
+                        # the same tasks' successes (out of 8 episodes each) here, in rw_s0 and in rw_g
+                        "succ": [sum(here.values()), sum(s0.values()), sum(g.values()), 8 * len(here)]}
         blocks = []
         full = [u for u in sorted(fails)]
         for k in range(0, len(full) // BLOCK):
@@ -139,8 +151,10 @@ def main():
         n_alerts += len(al)
         last = max(per) if per else 0
         inv10 = [per[s][INVALID] for s in sorted(per)[-WINDOW:] if INVALID in per[s]]
+        rest = full[len(blocks) * BLOCK:]
         out[run] = {"updates_logged": last, "invalid_mean_last10": round(float(np.mean(inv10)), 4) if inv10 else None,
                     "alerts": al, "blocks": blocks,
+                    "open_block": block_row(per, rest, [fails[u] for u in rest]) if rest else None,
                     "tasks_differ_from_rw_s0": [u for u, f in fails.items() if not f["same_tasks"]],
                     "first50_distributions": first50(per)}
     cache_path.write_text(json.dumps(cache))
@@ -149,12 +163,14 @@ def main():
     print(text)
     if args.out:
         Path(args.out).write_text(text)
-        cols = ["updates", "invalid", "entropy", "kl_max", "success", "turn_share", "late_pos", "flip", "tied",
-                "s0_all_fail_tasks", "of_them_success_here", "of_them_success_rw_g", "seconds"]
+        cols = ["updates", "invalid", "entropy", "kl_max", "success", "succ_rw_s0", "succ_rw_g", "turn_share",
+                "late_pos", "flip", "tied", "s0_all_fail_tasks", "of_them_success_here", "of_them_success_rw_g", "seconds"]
         L = []
         for run, v in out.items():
             L += [f"## {run}", "", "| " + " | ".join(cols) + " |", "|" + " --- |" * len(cols)]
-            L += ["| " + " | ".join(str(b.get(c)) for c in cols) + " |" for b in v["blocks"]]
+            L += ["| " + " | ".join(str(b.get(c)) for c in cols) + " |"
+                  for b in v["blocks"] + ([dict(v["open_block"], updates=v["open_block"]["updates"] + " (open)")]
+                                          if v["open_block"] else [])]
             L.append("")
         Path(args.out).with_suffix(".md").write_text("\n".join(L), encoding="utf-8")
 
