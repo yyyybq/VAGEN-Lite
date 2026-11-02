@@ -1182,3 +1182,36 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
 - **本分支的配置**：`configs/matrix_v3/vars.yaml` 和 B′、C、D、D_noP0、E 的 `rl.guards` 加了两条线，`test_matrix_v3.py` 跟着改；matrix-v3 的链部分（`pool`、`dense_baseline`）等这批链跑完再改。
 - **文档**：预登记加第 3 条说明（RL 设置和两条新停止线），另两处跟着改；`CHANGES.md`、`REPORT.md`、`configs/matrix_v3/README.md`。
 - **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；matrix-v3 没有新提交。
+
+### 12.30 第一批 RL 起跑；E 组在 D 挑出的 SFT 上重跑（11-02）
+
+- **SFT 跑完、挑出**（按验证集成功率挑；两个题集都是去掉边缘场景的版本）：
+  - C（`pt-x75fk8c2`，10:43 UTC 拿到卡，训练约 3.9 小时）：挑 `sft_m3c_e4`（`checkpoint-1204`），验证 41.6%、测试 38.7%。10 个 epoch 里验证 32.5%–41.6%，测试 34.3%–40.4%。
+  - D（`pt-6516qgcb`，11:10 UTC 拿到卡，训练约 5.2 小时）：挑 `sft_m3d_e9`（`checkpoint-3987`），验证 43.5%、测试 40.1%。验证 29.6%–43.5%，测试 34.3%–40.4%。
+  - 8B 带视频的 SFT 在 GPU 上跑通了，两组都训完了 10 个 epoch。
+- **RL**：值守脚本 17:11 UTC 用新 plan 重跑 C 的第一个种子，并起它的第二个种子；18:21 对 D 做了同样的事。每个 RL 先交训练，2 秒后交它的渲染服务。
+
+  | 链 | RL | 训练（8 卡） | 渲染服务（1 卡） | 池 | 状态（11-02 19:09 UTC） |
+  | --- | --- | --- | --- | --- | --- |
+  | `m3_c_s20261019` | `m3cs1s0`（S0） | `pt-gvuvkurx` | `pt-326zlipx` | zoetrope | 18:30 拿到卡；到第 30 次更新，最近 10 次的训练成功率平均 41.6%，每次更新约 68 秒 |
+  | | `m3cs1d`（V4） | `pt-kio3zp83` | `pt-tnq72dio` | zoetrope | 训练从 17:11 排队，渲染在跑 |
+  | `m3_c_s20261021` | `m3cs2s0`（S0） | `pt-m4pvem4t` | `pt-gqv3nfaq` | zoetrope | 同上 |
+  | | `m3cs2d`（V4） | `pt-sdt8otff` | `pt-7dybec9x` | zoetrope | 同上 |
+  | `m3_d_s20261019` | `m3ds1s0`（S0） | `pt-1buuw3dx` | `pt-ttqwqjyt` | zoetrope | 训练从 18:22 排队，渲染在跑 |
+  | | `m3ds1d`（V4） | `pt-r4q0qy4p` | `pt-kf316om5` | zoetrope | 同上 |
+  | `m3_d_s20261021` | `m3ds2s0`（S0） | `pt-mweuz8ri` | `pt-0z2lfser` | zoetrope | 同上 |
+  | | `m3ds2d`（V4） | `pt-gvldmedg` | `pt-0jkmr1pe` | zoetrope | 同上 |
+
+- **E 组重跑**（在 D 挑出的 `sft_m3d_e9` 上，同样用 `free_think` 提示、每局 6,144 个词元、验证集每族 8 道，共 48 局；任务 `pt-x6h3k8aq`，18:22–18:32，已结束）：
+  - 读不出的回答：按回合 64.5%（228 个里 147 个），按局平均 82.0%，都远超 20% 线。成功率 10.4%。
+  - 回答的形式（括号里是 11-01 在 SFT 第 8 个 epoch 上试跑的数，共 286 个回合）：
+    - 带 `<action>`：81（245）；
+    - `<tool_call>动作|</action>`，只是开头的标签写错：42（13）；
+    - `<tool_call>` 后面跟一段话：57（13）；
+    - 别的自由文字：27（1），有的像问答题的回答，在描述画面；
+    - 空回答：21（14）。
+  - 就算把只写错开头标签的也算读得出，D 上仍有 46%（105 个）读不出。
+  - 两次试跑都没有一个回答带 `<think>`。D 上每回合平均 17.0 个词元，中位 9。
+  - 结果在 `exps/matrix_v3/e_trial_dpick_20261102/report.md`。按规矩 E 先停，等用户定。
+- **h800**：主实验 19:08 UTC 转告了用户的新规矩：排队中的任务可以转到 h800。转不转、转哪几个，等用户确认。
+- **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；matrix-v3 没有新提交。
