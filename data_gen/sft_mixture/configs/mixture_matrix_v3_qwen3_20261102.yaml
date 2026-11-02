@@ -1,0 +1,77 @@
+# The SFT data of the experiment matrix on Qwen3-VL-8B (configs/matrix_v3; the user chose 2026-10-30 to follow the
+# main line's registration of 2026-10-27, configs/matrix_r12.json on qwen3-main d530b546, the user's 14th supplement
+# section 5, decisions 74-80):
+#   A closed (decision 74) | B' P0 + P2f (decision 75) | C P0 + P2q | D P0 + P1 + P2q | E = D's SFT, RL with the
+#   free_think prompt | D_noP0 D without P0 (an alternative, not scheduled).
+# P2q is round 11's SFT conversations in the new format (real action names), the LF export the Qwen3 SFT of the
+# model line trained on (C0 of this matrix); P2f is the format SFT v2's short conversations (1-2 assistant turns, real
+# action names).  Both are checked row by row against the text the RL env shows with format example action_names.
+# Same seed as matrix v2 (20261018), so D's P1 draws exactly the rows of the Qwen2.5 version; the action
+# pool changes.  base_recipe is the model line's Qwen3 SFT recipe (template qwen3_vl_nothink, lr 1e-5, 10 epochs).
+# Full P0 (the user's word of 2026-11-02, "改用全量 P0", for the first batch C / D instead of the 164 sample rows):
+# the same as mixture_matrix_v3_qwen3_20261030.yaml except pools.P0 = the final QA export of data_gen/interiorgs_qa
+# (docs/interiorgs_qa/REPORT_20261028.md, resolution 256 as the user chose there; its train / val / test scenes follow
+# the Act-SFT split) and 300 P0 validation rows from val scenes, as many as P1 and P2q.  P1, P2q and P2f draw the
+# same rows as before (each pool has its own seed per recipe).
+name: matrix_v3_qwen3_20261102
+out: exps/sft_mixture_matrix_v3_qwen3_20261102
+seed: 20261018
+split_manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/split_manifest.json
+task_rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/rows.jsonl
+# the 128 scenes the user excluded as too marginal (2026-10-29, docs/transition_qa/SCENE_SCREEN.md) leave every pool
+exclude_scenes: configs/scene_screen/scene_exclusions_20261029.json
+base_recipe: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/train.yaml
+train_overrides:
+  num_train_epochs: 10
+pools:
+  P0:
+    kind: interiorgs_qa_lf
+    dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256   # train 785 scenes, val 99
+    train: qa_train.jsonl
+    val: qa_val.jsonl
+    exclude_groups: [S7]   # the user dropped the parallel / perpendicular group (2026-10-15); the final export has none
+  P1:
+    kind: transition_qa
+    train: exps/transition_qa_20261019b/p1_train.jsonl
+    val: exps/transition_qa_20261019b/p1_test.jsonl
+  P2q:   # round 11's 9,802 / 1,293 conversations, new format; the same tasks as P2 of matrix v2
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/trajectory_val.jsonl
+    format_example: action_names
+  P2f:   # format SFT v2 (interiorgs_v10_r12_20261019/format_sft_v2a): 400 conversations of train scenes, 40 of val scenes
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12o_20261023/lf_format/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12o_20261023/lf_format/trajectory_val.jsonl
+    format_example: action_names
+val:
+  P0: 300
+  P1: 300
+  P2q: 300
+  P2f: all
+recipes:
+  A:
+    description: 关闭，不跑（用户决定 74，2026-10-26：弱起点在试过的所有设置下都丢格式）
+    output_format: action_only
+    pools: {}
+  B:
+    description: B′：P0 加格式 SFT 的短对话（用户决定 75，2026-10-26；P2f 先全用，格式不稳再加）
+    output_format: action_only
+    pools: {P0: all, P2f: all}
+  C:
+    description: P0 + 动作轨迹（新格式）
+    output_format: action_only
+    pools: {P0: all, P2q: all}
+  D:
+    description: P0 + 转移题 + 动作轨迹（新格式），三种样本分开，同一次训练
+    output_format: action_only
+    pools: {P0: all, P1: {times: 1.0, of: P2q}, P2q: all}
+  E:
+    same_as: D
+    description: RL 时换 free_think 提示（探索性，排在 D 之后；RL 前 50 次更新读不出的回答超过 20% 就放弃）
+    output_format: action_only（RL 时 free_think）
+  D_noP0:   # 备选：D 去掉 P0，P1 和 P2q 的行和 D 逐条相同；只写配置，不排期
+    description: 转移题 + 动作轨迹（新格式），不含 P0（备选，不排期）
+    output_format: action_only
+    draw_as: D
+    pools: {P1: {times: 1.0, of: P2q}, P2q: all}

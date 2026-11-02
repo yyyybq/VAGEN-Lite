@@ -7,11 +7,11 @@ format_example: action_names
 output_format: action_only
 
 data:
-  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261030.yaml
+  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261102.yaml
   recipe: D_noP0
-  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261030/D_noP0
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261102/D_noP0
   train_rows: {P0: 0, P1: 9075, P2q: 9075}
-  val_rows: {P0: 17, P1: 300, P2q: 300, P2f: 38}
+  val_rows: {P0: 300, P1: 300, P2q: 300, P2f: 38}
 
 sft:
   base_model: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
@@ -49,7 +49,7 @@ chain:
   sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
   sft_groups: {mix: sft_trajectories.jsonl}
   needs_chain_support:
-    sft_lf_dirs: {mix: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261030/D_noP0}
+    sft_lf_dirs: {mix: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261102/D_noP0}
     diagnostics_after_eval: true
   needs_qwen3_main: [model_type qwen3_vl, attention eager, 密集一侧 V4 的设置, 两个种子各一对 RL, 补丁 0001 / 0002 对合并后的训练链重新核对]
 
