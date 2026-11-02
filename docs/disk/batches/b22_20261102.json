@@ -1,0 +1,15 @@
+{
+ "batch": "b22_20261102",
+ "approved": "the user, 2026-11-02, in the disk line: round-4 decision 1 = A (\"1甲\"), docs/disk/reports/CLEANUP4_20261102.md section 1 item 4",
+ "items": [
+  {
+   "id": "R2-q3c3sft-unpicked-epochs",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3c3sft_20261028/lf_q3s200/model",
+   "include": [
+    "^checkpoint-(42|84|126|168|210|252|336|378)/"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "SFT q3s200: the 8 unpicked epoch checkpoints (checkpoint-42/84/126/168/210/252/336/378) archived to AOSS and deleted on 2026-11-02 by the disk line (retention rule R2, the user's approval). Kept: checkpoint-420 (epoch 10, the SFT pick), checkpoint-294 (epoch 7, start of the q3c3 and q3c3start RL) and the final model in this folder."
+  }
+ ]
+}

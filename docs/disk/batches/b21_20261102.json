@@ -1,0 +1,36 @@
+{
+ "batch": "b21_20261102",
+ "approved": "the user, 2026-11-02, in the disk line: round-4 decision 1 = A (\"1甲\"), docs/disk/reports/CLEANUP4_20261102.md section 1 item 3",
+ "items": [
+  {
+   "id": "R3-DS-Q3V4S3-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-Q3V4S3-100-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "DS-Q3V4S3-100-s1: training finished and its 150k / 175k / 200k evaluations are done (summary.json with per_task); the full state (resume only) archived to AOSS and deleted on 2026-11-02 by the disk line (retention rule R3; the downstream line proposed it, the user approved). run/final_model stays."
+  },
+  {
+   "id": "R4-DS-Q3V4S3-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-Q3V4S3-100-s1/evals_src",
+   "include": [
+    "^steps_\\d+/"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "DS-Q3V4S3-100-s1: the evaluated weight copies steps_150000 / steps_175000 archived to AOSS and deleted on 2026-11-02 by the disk line (retention rule R4; the downstream line proposed it, the user approved). watch.json stays, so the watcher does not evaluate these points again."
+  },
+  {
+   "id": "R3-DS-Q3DCKS2-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-Q3DCKS2-100-s1/run/full_state",
+   "marker_name": "FULL_STATE_DELETED_TO_AOSS.txt",
+   "marker": "DS-Q3DCKS2-100-s1: training finished and its 150k / 175k / 200k evaluations are done (summary.json with per_task); the full state (resume only) archived to AOSS and deleted on 2026-11-02 by the disk line (retention rule R3; the downstream line proposed it, the user approved). run/final_model stays."
+  },
+  {
+   "id": "R4-DS-Q3DCKS2-100-s1",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-Q3DCKS2-100-s1/evals_src",
+   "include": [
+    "^steps_\\d+/"
+   ],
+   "marker_name": "DELETED_TO_AOSS_20261102.txt",
+   "marker": "DS-Q3DCKS2-100-s1: the evaluated weight copies steps_150000 / steps_175000 archived to AOSS and deleted on 2026-11-02 by the disk line (retention rule R4; the downstream line proposed it, the user approved). watch.json stays, so the watcher does not evaluate these points again."
+  }
+ ]
+}
