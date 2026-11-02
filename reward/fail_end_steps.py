@@ -3,7 +3,8 @@ evaluation episodes end, for any evaluation result, given by path; for the main 
 
 The evaluation records each turn's answer but not the pose after the last one, so every failed episode of a result
 is replayed without rendering in the evaluation's env (the template, default configs/rl_env_v10_S0.yaml, with the
-result's prompt format and env switches from its model.json): env.reset on the task's index, one env.step per
+result's prompt format and env switches from its model.json): env.reset on the task's line in the tasks file (found
+by its task_id, so a result assembled from several evaluations works too), one env.step per
 recorded answer, checked turn by turn against the record (task met after the turn, blocked moves).  The last pose is
 looked up in the task's distance table:
 
@@ -71,10 +72,15 @@ def worker(args):
 
     env._render = fake_render
     cache = DT.TableCache(tables)
+    # the task's line in the tasks file by its id (a result folder assembled from several evaluations can carry
+    # another file's indices)
+    position = {}
+    for i, line in enumerate(l for l in Path(tasks_path).read_text().splitlines() if l.strip()):
+        position.setdefault(json.loads(line)["task_id"], i)
     out = []
     for r in items:
         try:
-            env.reset(seed=int(r["index"]))
+            env.reset(seed=position[r["task_id"]])
             assert env.current_item["task_id"] == r["task_id"], (env.current_item["task_id"], r["task_id"])
             met, blocked = [], []
             for t in r["trajectory"]:
