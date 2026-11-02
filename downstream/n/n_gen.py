@@ -3,13 +3,16 @@
 each proven solvable from its start; camera A without the robot, plain object names, no margin added to any threshold
 (near-threshold instances are marked for a separate count).
 
-    python downstream/n/n_gen.py scenes --x0 X0_QUESTIONS.jsonl [--n 120]           # the scene order, one per line
-    python downstream/n/n_gen.py scene --task T --seed S --out GEN [--soft-limit 1000] # simulator; one scene
-    python downstream/n/n_gen.py collect --out GEN [--per-family 50]
+    python downstream/n/n_gen.py scenes --x0 X0_QUESTIONS.jsonl [--n 120] [--seeds-from 3000 --per-task 7]
+    python downstream/n/n_gen.py scene --task T --seed S --out GEN [--soft-limit 1000] [--rng-seed 20261031]
+    python downstream/n/n_gen.py collect --out GEN [--per-family 50] [--rng-seed 20261031]
     python downstream/n/n_gen.py page --out GEN [--per-family 4] --page PAGE.html
 
 scenes: X0's scenes (the closed-loop evaluation's resets, seeds from 1000) with the tasks taken in turn, so the
-  first n spread over the tasks.
+  first n spread over the tasks.  With --seeds-from S --per-task K (N1's second set, the user's decision 3 of
+  2026-11-02: new scenes, new seeds), X0's tasks with the new resets S .. S + K - 1 instead, the tasks in turn.
+--rng-seed (default SEED, N1's) seeds the candidate order of scene and the task order of collect; the second set
+  takes its own.
 scene (one process per scene; run_n_gen.sh kills it after the scene's time limit and records the scene as skipped):
   1. the scene reset as the closed-loop evaluation does, camera A placed and checked (n_env.Scene, robot hidden);
   2. the base poses reachable from the start (n_smoke.reachable: breadth first, at most 12 actions, 15,000 poses);
@@ -79,6 +82,12 @@ def scene_order(x0_path: Path, n: int = 0) -> list:
         out += [(t, lists[t][i]) for t in sorted(lists) if i < len(lists[t])]
         i += 1
     return out[:n] if n else out
+
+
+def new_scene_order(x0_path: Path, seeds_from: int, per_task: int) -> list:
+    """X0's tasks with the resets seeds_from .. seeds_from + per_task - 1 (none of them X0's), the tasks in turn."""
+    tasks = sorted({json.loads(x)["task"] for x in Path(x0_path).read_text().splitlines() if x.strip()})
+    return [(t, seeds_from + i) for i in range(per_task) for t in tasks]
 
 
 # ------------------------------------------------------------------------------------------- candidates
@@ -223,7 +232,7 @@ def scene_cmd(args) -> int:
     t0 = time.time()
     deadline = t0 + args.soft_limit
     rec = {"task": args.task, "seed": args.seed, "scene_id": sid, "hide_robot": True, "complete": False,
-           "instances": {}, "tallies": {}, "seconds_by_type": {}}
+           "rng_seed": args.rng_seed, "instances": {}, "tallies": {}, "seconds_by_type": {}}
     scene = None
     try:
         scene = N.Scene(args.task, args.seed, hide_robot=True)
@@ -237,7 +246,7 @@ def scene_cmd(args) -> int:
         write_json(path, rec)
         for t in args.families:
             t1 = time.time()
-            inst, tally = find(scene, states, order, t, random.Random(f"{SEED}:{sid}:{t}"), deadline)
+            inst, tally = find(scene, states, order, t, random.Random(f"{args.rng_seed}:{sid}:{t}"), deadline)
             if inst is not None:
                 save_images(scene, inst, out)
             rec["instances"][t] = inst
@@ -282,7 +291,7 @@ def collect(out: Path, per_family: int = 50, seed: int = SEED) -> dict:
     rng = random.Random(seed)
     tasks = sorted({s["task"] for s in scenes})
     rng.shuffle(tasks)
-    chosen, summary = [], {"per_family": per_family, "scenes": len(scenes), "families": {}}
+    chosen, summary = [], {"per_family": per_family, "rng_seed": seed, "scenes": len(scenes), "families": {}}
     for t in N.FAMILIES:
         pool = collections.defaultdict(list)
         for s in sorted(scenes, key=lambda s: s["seed"]):
@@ -313,9 +322,11 @@ def collect(out: Path, per_family: int = 50, seed: int = SEED) -> dict:
         scenes_without_instance=[s["scene_id"] for s in scenes if not any((s.get("instances") or {}).values())],
         setup_seconds=sorted(s.get("seconds_setup") for s in scenes if s.get("seconds_setup") is not None),
         scene_seconds=sorted(s.get("seconds") for s in scenes if s.get("seconds") is not None))
-    with open(out / "instances_eval.jsonl", "w") as f:
+    tmp = out / "instances_eval.jsonl.tmp"  # two jobs sharing GEN may collect at once
+    with open(tmp, "w") as f:
         for x in chosen:
             f.write(json.dumps(x, default=str) + "\n")
+    os.replace(tmp, out / "instances_eval.jsonl")
     write_json(out / "summary.json", summary)
     return summary
 
@@ -396,28 +407,34 @@ def main(argv=None) -> int:
     a = sub.add_parser("scenes")
     a.add_argument("--x0", required=True)
     a.add_argument("--n", type=int, default=0)
+    a.add_argument("--seeds-from", type=int, default=None)
+    a.add_argument("--per-task", type=int, default=0)
     s = sub.add_parser("scene")
     s.add_argument("--task", required=True)
     s.add_argument("--seed", type=int, required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--soft-limit", type=float, default=1000.0)
     s.add_argument("--families", nargs="+", default=list(N.FAMILIES))
+    s.add_argument("--rng-seed", type=int, default=SEED)
     c = sub.add_parser("collect")
     c.add_argument("--out", required=True)
     c.add_argument("--per-family", type=int, default=50)
+    c.add_argument("--rng-seed", type=int, default=SEED)
     p = sub.add_parser("page")
     p.add_argument("--out", required=True)
     p.add_argument("--page", required=True)
     p.add_argument("--per-family", type=int, default=4)
     args = ap.parse_args(argv)
     if args.cmd == "scenes":
-        for t, sd in scene_order(Path(args.x0), args.n):
+        order = (new_scene_order(Path(args.x0), args.seeds_from, args.per_task) if args.seeds_from is not None
+                 else scene_order(Path(args.x0)))
+        for t, sd in order[:args.n] if args.n else order:
             print(f"{t}:{sd}")
         return 0
     if args.cmd == "scene":
         return scene_cmd(args)
     if args.cmd == "collect":
-        print(json.dumps(collect(Path(args.out), args.per_family), default=str))
+        print(json.dumps(collect(Path(args.out), args.per_family, args.rng_seed), default=str))
         return 0
     return page(Path(args.out), Path(args.page), args.per_family)
 

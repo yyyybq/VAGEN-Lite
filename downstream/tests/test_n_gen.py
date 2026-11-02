@@ -230,14 +230,19 @@ def test_collect_spreads_each_type_over_the_tasks(tmp_path):
     assert s["families"]["absolute_positioning"]["taken"] == 3 and s["families"]["occlusion_alignment"]["taken"] == 0
     assert s["scenes_skipped_for_time"] == [{"scene_id": "D_s1000", "rc": 137, "seconds": 1500}]
     assert s["families"]["absolute_positioning"]["params"] == {'{"distance_m": 1.5}': 3}
+    assert s["rng_seed"] == G.SEED and not (tmp_path / "instances_eval.jsonl.tmp").exists()
+    other = G.collect(tmp_path, per_family=4, seed=20261102)  # another seed: another task order, same counts
+    assert other["rng_seed"] == 20261102 and other["families"]["equidistance"]["taken"] == 4
 
 
-STUB = r"""import json, sys, time
+STUB = r"""import json, os, sys, time
 from pathlib import Path
 cmd = sys.argv[1]
 def arg(k):
     return sys.argv[sys.argv.index(k) + 1]
 if cmd == "scenes":
+    if os.environ.get("STUB_SCENES_ARGS"):
+        Path(os.environ["STUB_SCENES_ARGS"]).write_text(" ".join(sys.argv[1:]))
     print("Slow:1000\nFast:1001\nDone:1002")
 elif cmd == "scene":
     out = Path(arg("--out"))
@@ -249,6 +254,9 @@ elif cmd == "scene":
 else:
     out = Path(arg("--out"))
     (out / f"{cmd}.done").write_text(" ".join(sys.argv[1:]))
+    if cmd == "collect":
+        n = len(list((out / "scenes").glob("*.json")))
+        (out / "instances_eval.jsonl").write_text("".join(json.dumps({"i": k}) + "\n" for k in range(n)))
 """
 
 
@@ -284,6 +292,44 @@ def test_gen_job_kills_a_slow_scene_records_it_and_skips_done_scenes(tmp_path):
     assert sliced.returncode == 0
     calls2 = [json.loads(x) for x in (out2 / "calls.jsonl").read_text().splitlines()]
     assert [c[c.index("--task") + 1] for c in calls2] == ["Fast"]  # the 2nd of every 2: Fast only
+    # every scene of the first run's list is done or skipped: its collection is the final one; the slice's is not
+    assert (out / "instances_final.jsonl").read_text() == (out / "instances_eval.jsonl").read_text()
+    assert len((out / "instances_final.jsonl").read_text().splitlines()) == 3
+    assert (out2 / "instances_eval.jsonl").is_file() and not (out2 / "instances_final.jsonl").exists()
+    assert all("--rng-seed" not in c for c in calls + calls2)  # N1's default seed unless N_RNG_SEED
+
+
+def test_gen_job_new_resets_and_rng_seed(tmp_path):
+    """N1's second set (the user's decision 3 of 2026-11-02): new resets and a new seed reach scenes, scene, collect."""
+    from test_run_probe_episode import SIM_ENV
+
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    (wt / "downstream/eval").mkdir(parents=True)
+    (wt / "downstream/n/run_n_gen.sh").write_text((ROOT / "n/run_n_gen.sh").read_text())
+    (wt / "downstream/n/n_gen.py").write_text(STUB)
+    (wt / "downstream/eval/sim_env.sh").write_text(SIM_ENV)
+    out = tmp_path / "out"
+    env = dict(os.environ, N_X0=str(tmp_path / "x0.jsonl"), SCENE_TIMEOUT="3", SOFT_LIMIT="2", N_SEEDS_FROM="3000",
+               N_PER_TASK="7", N_RNG_SEED="20261102", STUB_SCENES_ARGS=str(tmp_path / "scenes_args"))
+    res = subprocess.run(["bash", str(wt / "downstream/n/run_n_gen.sh"), str(out), "3", "0", "50"],
+                         capture_output=True, text=True, env=env, timeout=60)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert (tmp_path / "scenes_args").read_text().endswith("--n 0 --seeds-from 3000 --per-task 7")
+    calls = [json.loads(x) for x in (out / "calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 3 and all(c[c.index("--rng-seed") + 1] == "20261102" for c in calls)
+    assert (out / "collect.done").read_text().endswith("--per-family 50 --rng-seed 20261102")
+    assert (out / "instances_final.jsonl").is_file()
+    bad = subprocess.run(["bash", str(wt / "downstream/n/run_n_gen.sh"), str(tmp_path / "o3"), "1", "0"],
+                         capture_output=True, text=True, env={k: v for k, v in env.items() if k != "N_PER_TASK"},
+                         timeout=60)
+    assert bad.returncode != 0 and "N_PER_TASK" in bad.stderr
+
+
+def test_new_scene_order_takes_x0s_tasks_with_new_resets(tmp_path):
+    x0 = tmp_path / "x0.jsonl"
+    x0.write_text("".join(json.dumps({"task": t, "seed": s}) + "\n" for t, s in [("B", 1001), ("A", 1003), ("B", 1002)]))
+    assert G.new_scene_order(x0, 3000, 2) == [("A", 3000), ("B", 3000), ("A", 3001), ("B", 3001)]
 
 
 def test_episode_loader_reads_the_smoke_parts_and_n1_instances(tmp_path):
