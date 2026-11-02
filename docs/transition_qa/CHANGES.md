@@ -285,7 +285,7 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
   - 11-02 用户确认 V4、两条新停止线和 zoetrope。matrix-v3 停在 `03035318` 不动（链的任务从它的工作树跑），所以四条链的 plan 由 `exps/matrix_v3/watch/m3_rlplan.py` 写：`--dense registered` 生成，再把池改成 zoetrope、`rl.guards` 加 `entropy_max` 0.3、`entropy_window` 5、`vision_token_crashes` 2，每条链的 `plan_edit.json` 记着。第一个种子的旧 plan 留作 `plan_placeholder_20261102.json`，新旧只差密集一侧和停止线；
   - 两条链的 rl-config 在临时目录里用原始 Qwen3 空跑过（`exps/matrix_v3/dry_rlconfig_20261102/`）：S0 和 V4 只差奖励和补题方式，RL 题逐字节相同（C、D 也相同，10,124 条）；
   - 值守脚本 `exps/matrix_v3/watch/m3_watch.py`（登录节点，nice 19，一个线程，每 5 分钟）：第一个种子的链停在 RL 配置时用新 plan 再跑；它挑出 SFT 后起第二个种子的链；D 挑出后在它上面重跑 E 的试跑。启动前核对 HEAD、暂停文件和核数，别的情况只记下、留给会话；
-  - matrix-v3 的 `vars.yaml` 链部分（`pool: zoetrope`、`dense_baseline: registered`）等这批链跑完再改；本分支的 `vars.yaml` 和各组的 `rl.guards` 已加两条线，合并后生成的 plan 自带；
+  - matrix-v3 的 `vars.yaml` 链部分（`pool: zoetrope`、`dense_baseline: registered`）等这批链跑完再改；本分支的 `vars.yaml` 和各组的 `rl.guards` 已加两条线，合并后生成的 plan 自带。试算合并（`git merge-tree`，11-02）没有冲突；合并后 matrix-v3 的两条 plan 测试（`pool` 是 queue、停止线等于登记）要跟着链部分一起改；
   - 链写的一切都在 matrix 工作树的 `exps/matrix_v3/` 下：C、D 的 SFT 数据和两个评测集是 VAGEN-Lite-data 那份的复制（逐字节相同）。
 - **`eval/diagnostics/e_trial.py`**（matrix-v3，`c5ceb851`）：E 组的单卡试跑。评测流程加 free_think 提示、RL 的采样，每回合可生成本局 6,144 个词元里还剩的部分（和 RL 的拼接模式一样），而不是评测的每回合 384；限时 45 分钟。
 - 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对（2026-11-01 已对 `b6606bac` 预演，见第 6 节）。
