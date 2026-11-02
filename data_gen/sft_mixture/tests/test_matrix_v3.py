@@ -147,7 +147,8 @@ def test_chain_part_waits_for_qwen3_main(cfgs, vars_):
         if g in TRAINED:
             assert ch["needs_chain_support"]["sft_lf_dirs"] == {"mix": cfgs[g]["data"]["lf_dir"]}, g
     assert len(names) == 2 * len(WITH_RL)              # every chain and run name is new
-    assert cfgs["E"]["chain"]["needs_chain_support"]["start_model"] == {"from_chain": cfgs["D"]["chain"]["tr"]}
+    # the user, 2026-11-02 ("从 C0 起步"): E starts from C0's SFT, not from D's pick
+    assert cfgs["E"]["chain"]["needs_chain_support"]["start_model"] == cfgs["C0"]["sft"]["model"]
 
 
 def test_c0_is_the_qwen3_sft_and_its_seed_pairs(cfgs):

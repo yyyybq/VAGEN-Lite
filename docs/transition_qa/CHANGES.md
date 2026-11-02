@@ -287,5 +287,12 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
   - 值守脚本 `exps/matrix_v3/watch/m3_watch.py`（登录节点，nice 19，一个线程，每 5 分钟）：第一个种子的链停在 RL 配置时用新 plan 再跑；它挑出 SFT 后起第二个种子的链；D 挑出后在它上面重跑 E 的试跑。启动前核对 HEAD、暂停文件和核数，别的情况只记下、留给会话；
   - matrix-v3 的 `vars.yaml` 链部分（`pool: zoetrope`、`dense_baseline: registered`）等这批链跑完再改；本分支的 `vars.yaml` 和各组的 `rl.guards` 已加两条线，合并后生成的 plan 自带。试算合并（`git merge-tree`，11-02）没有冲突；合并后 matrix-v3 的两条 plan 测试（`pool` 是 queue、停止线等于登记）要跟着链部分一起改；
   - 链写的一切都在 matrix 工作树的 `exps/matrix_v3/` 下：C、D 的 SFT 数据和两个评测集是 VAGEN-Lite-data 那份的复制（逐字节相同）。
-- **`eval/diagnostics/e_trial.py`**（matrix-v3，`c5ceb851`）：E 组的单卡试跑。评测流程加 free_think 提示、RL 的采样，每回合可生成本局 6,144 个词元里还剩的部分（和 RL 的拼接模式一样），而不是评测的每回合 384；限时 45 分钟。
+- **`eval/diagnostics/e_trial.py`**（matrix-v3，`c5ceb851`）：E 组的单卡试跑。评测流程加 free_think 提示、RL 的采样，每回合可生成本局 6,144 个词元里还剩的部分，而不是评测的每回合 384；限时 45 分钟。当时以为这和 RL 的拼接模式一样，11-02 核对：不一样，见下一条。
+- **E 组的 plan 和每回合的上限**（11-02 用户："从 C0 起步"）：
+  - matrix-v3 的 `matrix_plan --version 3` 只写 C、D，matrix-v3 又不能提交，所以由 `exps/matrix_v3/watch/m3_eplan.py` 写：
+    - 取 D 第二个种子的 plan，换上 E.yaml 的字段：起点 C0 的 SFT、`rl.output_format` think_action、`rl.max_response_length` 6,144、读不出线 20% 只查前 50 次、评测用 free_think；
+    - 名字用 `v3_names` 给 E 的；其余字段逐项核对，和模板相同。
+  - 合并后 `matrix_plan` 要加上 E（起点写 C0 的 SFT）。
+  - 每回合的上限：RL 的 `gym_agent_loop.py` 每回合限 `min(response_length_per_turn, max_response_length)`。E 的 env 配置里 `response_length_per_turn` 是 384（各组相同），所以 E 的 RL 每回合最多 384 个词元，12 回合最多 4,608，6,144 碰不到。
+    - 要让 E 每回合能用剩下的预算，rl-config 得加一个每回合上限的选项（改代码），等用户定。
 - 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对（2026-11-01 已对 `b6606bac` 预演，见第 6 节）。

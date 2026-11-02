@@ -1,8 +1,9 @@
-# 矩阵第三版（Qwen3-VL-8B）E 组（探索性，排在 D 之后）：SFT 与 D 相同、共用 D 挑出的 SFT 模型；RL 时换 free_think 提示。
+# 矩阵第三版（Qwen3-VL-8B）E 组（探索性）：不训 SFT，从 C0 的 SFT（主线 Qwen3 正式 SFT 第 8 个 epoch）起步；RL 时换 free_think 提示。
+# 用户 2026-11-02 改定（"从 C0 起步"）：原定共用 D 挑出的 SFT，它在 free_think 提示下有 64.5% 的回合读不出。
 # 用户 2026-10-18 的决定（第二版起不变）：RL 前 50 次更新里读不出的回答超过 20% 就放弃；回答上限 6,144。说明见 configs/matrix_v3/README.md。
 group: E
 status: planned
-description: SFT 同 D；RL 用 free_think 提示（探索性，排在 D 之后）
+description: 从 C0 的 SFT 起步；RL 用 free_think 提示（探索性；2026-11-02 起，原定 SFT 同 D）
 model_type: qwen3_vl
 format_example: action_names
 output_format: think_action   # SFT 只输出动作（同 D）；RL 和评测用 free_think 提示
@@ -14,7 +15,7 @@ sft:
   same_as: D
 
 rl:
-  start: D 组挑出的 SFT 检查点
+  start: C0 的 SFT（/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232；用户 2026-11-02 改定，原定 D 组挑出的 SFT 检查点）
   pair: {s0: v10_p1_S0, d: v10_p1_Dcond}
   dense: {variant: V4, progress_reward_scale: 3.3333333333333335, group_filter: keep_by_return_std, keep_std_threshold: 0.3318, keep_std_floor: 1.0}
   seeds: [20261019, 20261021]
@@ -27,7 +28,7 @@ rl:
   invalid_until: 50
   attention: eager
   abandon_rule: 前 50 次更新里，读不出的回答（transition/invalid_action_rate，最近 10 次的平均）超过 20% 就停
-  max_response_length: 6144   # 只对 E；其他组 4096
+  max_response_length: 6144   # 只对 E；其他组 4096。RL 每回合仍限 384 个词元（env 的 response_length_per_turn，各组相同），12 回合最多 4,608，这个总上限碰不到（2026-11-02 核对）
   think_share: transition/think_rate
 
 eval:
@@ -48,7 +49,7 @@ chain:
   sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
   sft_groups: {mix: sft_trajectories.jsonl}
   needs_chain_support:
-    start_model: {from_chain: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m3_d}   # D 组挑出的 SFT 检查点
+    start_model: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232   # C0 的 SFT（用户 2026-11-02："从 C0 起步"）
     rl_output_format: think_action
     guards_invalid_until: 50
     eval_rl_prompt_format: free_think

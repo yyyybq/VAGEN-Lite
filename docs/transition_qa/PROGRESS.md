@@ -1256,3 +1256,32 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - D 的 4 个在 h800，到第 5–7 次更新。前几次更新每次约 80–170 秒；`m3cs1s0` 第 30 次前后约 65 秒一次。之后再看。
   - C 第二个种子的两个在 h800 启动。
   - 没有重交，也没有停止线停下的 RL。
+
+### 12.33 E 组从 C0 的 SFT 起步（用户 11-02："从 C0 起步"）
+
+- **plan**：用 `exps/matrix_v3/watch/m3_eplan.py` 写。
+  - 为什么不用生成器：matrix-v3 的生成器只写 C、D（"E comes later"），matrix-v3 又不能提交。
+  - 做法：取 D 第二个种子的 plan（同样不训 SFT、从给定模型起步），换上 E.yaml 的字段和生成器给 E 的名字（`m3es{1,2}s0` / `m3es{1,2}d`，`v10_rl_m3_e_s{1,2}`）；其余字段逐项核对，和模板相同。
+  - 起点 `m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232`，在磁盘线的保护清单上。
+  - 链目录 `exps/matrix_v3/m3_e_s20261019`、`m3_e_s20261021`，池 h800。
+- **空跑 rl-config**（`exps/matrix_v3/dry_rlconfig_e_20261102/`）：四个 RL 都通过。
+  - E 的 S0 对 D 的 S0：只差起点、提示（`free_think` 对 `no_think`）和总上限（6,144 对 4,096）。
+  - E 的 S0 对 V4：只差密集奖励和补题方式。
+  - RL 题逐字节相同：10,124 条，两个种子也相同。
+  - 空跑工具对"从给定模型起步"的 plan 先出过错：它写的假挑选记录缺 `select_by`，进度页渲染时报错。改了工具，在新目录里重跑；训练链本身没问题。
+- **起链**：20:26–20:27 UTC，`exps/matrix_v3/watch/m3_estart.py` 先后起两条链（核对 HEAD、暂停文件和核数）。按"训练 → 渲染服务 → 下一个训练"提交，记录在各链的 `start.json`：
+
+  | RL | 训练（8 卡） | 渲染服务（1 卡） | 池 | 状态（20:30 UTC） |
+  | --- | --- | --- | --- | --- |
+  | `m3es1s0`（S0） | `pt-y0f7kwee` | `pt-ufzgoacw` | h800 | 20:26 拿到卡，启动中 |
+  | `m3es1d`（V4） | `pt-lodjeovb` | `pt-yg9d6ycj` | h800 | 训练排队，渲染在跑 |
+  | `m3es2s0`（S0） | `pt-gfxk9zgu` | `pt-ogxzu7jj` | h800 | 排队 |
+  | `m3es2d`（V4） | `pt-dr63cjqw` | `pt-sqt68vii` | h800 | 排队 |
+
+- **每回合的上限**（起链后核对出来的）：
+  - RL 的 `gym_agent_loop.py` 每回合限 `min(response_length_per_turn, max_response_length)`。E 的 env 配置里 `response_length_per_turn` 是 384，和各组一样，所以 E 每回合最多 384 个词元。
+  - 12 回合最多 4,608 个，6,144 的总上限碰不到。
+  - 试跑每回合可用本局剩下的预算；C0 的 SFT 上 286 个回合里只有 1 个超过 384。
+  - 要不要改，等用户定。`e_trial.py` 说明里"和 RL 的拼接模式一样"那句不对，已在 `CHANGES.md` 第 7 节更正。
+- **文档**：预登记加第 4 条说明（E 从 C0 的 SFT 起步，只和 C0 比，两者的差别和每回合的上限）；`configs/matrix_v3/E.yaml`、`README.md`、`REPORT.md`、`CHANGES.md` 跟着改；`test_matrix_v3.py` 改成核对 E 的起点是 C0 的 SFT。
+- **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；matrix-v3 没有新提交。
