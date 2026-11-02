@@ -1,6 +1,6 @@
 # 模型线状态（唯一的状态文档）
 
-最后更新：2026-11-02 05:00 UTC。
+最后更新：2026-11-02 06:05 UTC。
 
 模型线：把 Qwen3-VL-8B-Instruct 和 Cambrian-S（7B 为主）接进统一框架，在主线最高的 setting 上跑主实验和下游实验。报告在 [reports/](reports/)，下游的实验登记表是 [MATRIX.md](MATRIX.md)（`python -m model_matrix.downstream.matrix --out docs/models/MATRIX.md` 生成，每出一个点重写一次）。
 
@@ -25,7 +25,7 @@
 - **cs2d 按决定 40 接着训（第 1zl 节）：** 10-31 07:18 重启链，两个任务当即拿到卡，从第 50 次的检查点接上，07:38 在跑。10-30 晚它的两个任务在 sco 上消失（你说不是你删的）；同一时段 22:17–23:46，主线的链 `interiorgs_v10_train_q3abl_20261030` 也有 9 个任务变成 NOT_FOUND，看来是集群那边的事，具体原因没查清。
 - **决定 39、43 的结果（第 1zn 节）：三个 Cambrian 起点在评测时压成 JPEG 后都回升（DS-CSS 2.4→7.0%，DS-CSRS 1.0→4.7%，DS-CSRD 1.1→3.3%，都显著），DS-CSB 不变；压缩后和 DS-CSB 的差距仍有 5.5–9.2 个百分点，RL 起点更大。最初：评测时把每帧压成 JPEG 80，DS-CSS 第 15 万步从 2.4% 升到 7.0%（+4.6，p 1.8e-9）；对照 DS-CSB 从 13.1% 变成 12.5%（p 0.62），不变。压缩痕迹解释了 DS-CSS 和 DS-CSB 差距的一半左右，两边都压缩时 DS-CSS 仍低 5.5。** 做法（第 1zl 节）： 加了评测时把每帧压成 JPEG 的开关（提交 `7ff22d0e`）。质量用 80：在 256 的干净仿真画面上，它的失真和示范录像的 x264 CRF 23 相当。开关实际是在 224 上压的，在那里 85 才对上，80 偏重约 1.2 dB；两个评测都保留 80。DS-CSS 第 15 万步、DS-CSB 第 20 万步各一个 8 卡评测，h800 上，各约 3.5 小时。
 - **待你定：决定 46（sco 上的残留记录 pt-k9c8kbl3）。** 它是 q3s2d 的第一个渲染服务（zoetrope），10-27 19:26 按你的话把 q3s2d 改投 h800 时链对它调过 stop + delete，delete 返回 0、回执已改名，但 sco 上一直留着 SUSPENDED 记录，不占卡。q3s2d 训完第 300 次，链已结束，它的训练任务和 h800 上的替代渲染服务都不在了。11-01 22:3x 我要删这条记录，被本窗口的自动权限分类器拦下。甲（推荐）：你允许后我删，或你自己删 `sco acp jobs delete --workspace-name=aigc pt-k9c8kbl3`，不涉及任何文件；乙：留着，不占卡，只是任务列表里多一行。
-- **磁盘线第四轮 b20（你 11-02 在磁盘线批的"1甲"）：** cs2d 第 100 次检查点的续训状态（FSDP 分片、优化器、extra_state、data.pt，25 个文件、96.4 GB）11-02 04:51 归档 AOSS 后删除，记录 `disk_runs/batches/b20_20261102/deleted.tsv`。我 04:57 核对过：`actor/huggingface`（32.1 GB）还在，cs2d_100 的 705 道评测结果都在；从这里不能再续训。配额表读 17 TB。Cambrian 其他 RL 权重（17 个检查点、545.7 GB）等你在磁盘线定第四轮决定 2，本线不动。
+- **磁盘线第四轮 b20（你 11-02 在磁盘线批的"1甲"）：** cs2d 第 100 次检查点的续训状态（FSDP 分片、优化器、extra_state、data.pt，25 个文件、96.4 GB）11-02 04:51 归档 AOSS 后删除，记录 `disk_runs/batches/b20_20261102/deleted.tsv`。我 04:57 核对过：`actor/huggingface`（32.1 GB）还在，cs2d_100 的 705 道评测结果都在；从这里不能再续训。配额表读 17 TB。Cambrian 其他 RL 权重：你 11-02 在磁盘线直接批了（第四轮决定 2 乙、再 2 甲），b24 在 06:00 前归档 AOSS 后删除 14 个检查点（276 个文件、449.9 GB）：cs0 50、cd 50、crd 100、cs2s0 50/100、cs2d 50/100、cskl 50/100、cslr 50–250（含 Cambrian 最好的 cslr 第 200 次，现在只在 AOSS 上，用 `disk/restore_from_aoss.py b24_20261102 --match REGEX` 可拉回）。我 06:01 核对过：两个下游起点 cs0 第 100 次、crd 第 50 次和 SFT `checkpoint-770` 都在，`starts.json` 的四个路径都能用；16 个检查点的 705 道评测结果都在。配额表读 16 TB。
 - **主实验 11-02 转告你的指示：** 所有还没开跑的 sco 任务改投 zoetrope，以后新交的也投 zoetrope（本线原来按决定 28 乙把评测投 h800）。本线现在没有待交的任务。
 - 决定 45 甲（你 11-01："按甲来吧，先到此为止"）：Cambrian 下游到此为止，总结报告 [reports/CAMBRIAN_DOWNSTREAM_20261101.md](reports/CAMBRIAN_DOWNSTREAM_20261101.md)；DS-CSS 第 15 万步的副本（16.3 GB，可腾空间清单第 1f 表）07:25 转告磁盘线，磁盘线 21:56 执行 b18：先传 AOSS、4 个文件逐个核对大小，再删（记录 `disk_runs/batches/b18_20261101/deleted.tsv`）。我 21:59 核对过：目录只剩说明文件和 `watch.json`，第 20 万步最终权重、三个点和 JPEG 评测的结果都在；配额表读 18 TB。本线现在没有任务在跑。
 
