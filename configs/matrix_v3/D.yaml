@@ -32,7 +32,7 @@ rl:   # 每个种子一对（S0 和密集一侧），同一个起点、同一批
   exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
   updates: 300
   output_format: action_only
-  guards: {invalid_max: 0.10, kl_max: 1.0}
+  guards: {invalid_max: 0.10, kl_max: 1.0, entropy_max: 0.3, entropy_window: 5, vision_token_crashes: 2}
   attention: eager
 
 eval:

@@ -23,7 +23,7 @@ rl:
   exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
   updates: 300
   output_format: think_action   # rl-config --output-format think_action（本分支加的选项），两个 RL 都用
-  guards: {invalid_max: 0.20, kl_max: 1.0}   # 读不出的回答 20% 线只查前 50 次更新（补丁 0001 的 invalid_until）；KL 同其他组
+  guards: {invalid_max: 0.20, kl_max: 1.0, entropy_max: 0.3, entropy_window: 5, vision_token_crashes: 2}   # 读不出的回答 20% 线只查前 50 次更新（补丁 0001 的 invalid_until）；KL 和 11-02 的两条线同其他组
   invalid_until: 50
   attention: eager
   abandon_rule: 前 50 次更新里，读不出的回答（transition/invalid_action_rate，最近 10 次的平均）超过 20% 就停

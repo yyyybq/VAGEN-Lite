@@ -1160,3 +1160,25 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - 第 9 项（甲）：矩阵 RL 加熵线（`entropy_max` 0.3、`entropy_window` 5）和 `vision_token_crashes` 2。重写 plan 时写进 `rl.guards`，预登记写明来由。
   - 池：以后的 plan 写 zoetrope。
 - **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；矩阵 RL 的 plan 等密集一侧的设置。
+
+### 12.29 RL 设置按用户确认写进 plan；值守脚本（用户 2026-11-02："按这个写"）
+
+用户确认上一轮要决定的两件都按推荐：密集一侧用登记的 V4、加主线转告的两条停止线、池写 zoetrope；E 组等 D 挑出 SFT 后在它上面重跑同样的试跑再定。
+- **plan**（matrix-v3 停在 `03035318` 不动，链的任务从它的工作树跑）：
+  - `exps/matrix_v3/watch/m3_rlplan.py`：`matrix_plan --version 3 --dense registered` 生成，再把 `pool` 改成 zoetrope、`rl.guards` 加 `entropy_max` 0.3、`entropy_window` 5、`vision_token_crashes` 2，记进 `plan_edit.json`。
+  - 第一个种子的两条链（C、D）：新 plan 写成 `plan.json`，旧的留作 `plan_placeholder_20261102.json`，核过新旧只差密集一侧和停止线。在跑的链进程启动时就读完了 plan，不受影响；它挑完 SFT 后照旧停在 RL 配置。
+  - 第二个种子（20261021）的两条链：plan 已写好（`m3_c_s20261021`、`m3_d_s20261021`，从第一个种子挑出的 SFT 起步），还没起。
+- **空跑 rl-config**（`exps/matrix_v3/dry_rlconfig_20261102/`；用原始 Qwen3 代替挑出的 SFT，各约 20 秒，没提交任务）：
+  - 两条链的四个 RL 都通过。
+  - S0 和 V4 只差奖励（势能整形打开、比例 3.33、接近成功奖励 0.5、γ 0.99、`grouped_gated`）和补题方式（`keep_by_return_std`，门槛 0.3318、下限 1.0）。
+  - RL 题逐字节相同，C、D 也相同（10,124 条）；四个 RL 的停止线都是标准默认值加这两条。
+- **值守脚本** `exps/matrix_v3/watch/m3_watch.py`（11-02 10:00 UTC 起；登录节点，nice 19，一个线程，每 5 分钟看一次，最长 96 小时；日志 `watch.log`，状态 `watch_state.json`）：
+  - 第一个种子的链停在 RL 配置、原因是密集占位时：用新 plan 再跑（重做 RL 配置，S0 / V4 一起开始）；
+  - 第一个种子挑出 SFT 后：起第二个种子的链；
+  - D 挑出 SFT 后：在它上面重跑 E 的试跑（同样每族 8 道、单卡、zoetrope），任务结束后写报告。
+  - 每次启动前核对 HEAD 是 `03035318`、没有 docs/ 以外的改动、主线暂停文件不在、核数够；别的情况（链在别处失败等）只记下，留给会话。
+  - 在假目录上核过它的 10 种判断（`test_m3_watch.py`），都对；测试时没起任何东西。
+- **SFT**：两个任务 11-02 09:36 UTC 拿到卡，10:04 还在 STARTING（容器启动中），训练还没开始；真 8B 带视频的 GPU 训练步仍没验证。
+- **本分支的配置**：`configs/matrix_v3/vars.yaml` 和 B′、C、D、D_noP0、E 的 `rl.guards` 加了两条线，`test_matrix_v3.py` 跟着改；matrix-v3 的链部分（`pool`、`dense_baseline`）等这批链跑完再改。
+- **文档**：预登记加第 3 条说明（RL 设置和两条新停止线），另两处跟着改；`CHANGES.md`、`REPORT.md`、`configs/matrix_v3/README.md`。
+- **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；matrix-v3 没有新提交。

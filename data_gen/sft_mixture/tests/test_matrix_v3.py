@@ -34,6 +34,9 @@ REGISTERED = {
     "P2f": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/format_sft_v2a",
 }
 
+# the two stop lines the user confirmed on 2026-11-02 for every matrix RL (decision 9 甲, relayed by the main line)
+GUARDS_1102 = {"entropy_max": 0.3, "entropy_window": 5, "vision_token_crashes": 2}
+
 
 def load(group):
     return yaml.safe_load((MATRIX / f"{group}.yaml").read_text(encoding="utf-8"))
@@ -72,7 +75,7 @@ def test_rl_follows_the_registration(cfgs, vars_):
     s0, d = standards[REGISTERED["pair"]["s0"]], standards[REGISTERED["pair"]["d"]]
     assert {k for k in set(s0) | set(d) if s0.get(k) != d.get(k)} == {"reward_preset"}   # the pair differs only in the reward
     assert vars_["rl"]["pair"] == REGISTERED["pair"] and vars_["rl"]["dense"] == REGISTERED["dense"]
-    assert vars_["rl"]["seeds"] == REGISTERED["seeds"] and vars_["rl"]["guards"] == REGISTERED["guards"]
+    assert vars_["rl"]["seeds"] == REGISTERED["seeds"] and vars_["rl"]["guards"] == {**REGISTERED["guards"], **GUARDS_1102}
     assert vars_["rl"]["attention"] == REGISTERED["attention"]
     for g in WITH_RL + ("C0",):
         rl = cfgs[g]["rl"]
@@ -81,7 +84,7 @@ def test_rl_follows_the_registration(cfgs, vars_):
         if g != "C0":                                  # C0 is the main line's runs (its own rows and stop lines)
             for key in ("rows", "exclude", "updates", "attention"):
                 assert rl[key] == vars_["rl"][key], (g, key)
-            assert rl["guards"] == (vars_["rl"]["guards"] if g != "E" else {"invalid_max": 0.20, "kl_max": 1.0}), g
+            assert rl["guards"] == (vars_["rl"]["guards"] if g != "E" else {**vars_["rl"]["guards"], "invalid_max": 0.20}), g
     e = cfgs["E"]["rl"]
     assert (e["invalid_until"], e["max_response_length"], e["output_format"]) == (50, 6144, "think_action")
     assert all("max_response_length" not in cfgs[g]["rl"] for g in ("B", "C", "D", "D_noP0"))
