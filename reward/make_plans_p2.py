@@ -15,9 +15,12 @@ Designs (rl-config options on top of the base plan's rl, standard v10_p1_S0):
   (nominal filter, target_groups 24).
 
 Run names are never reused (evaluation result names are shared with the main line): the smoke is rw_tcs (endpoint 10,
-no evaluation), the first-round run rw_tc1.
+no evaluation), the first-round runs rw_tc1 and rw_tc2 (the user's decision of 2026-11-02: rw_tc2 the turn term
+alone, episode_weight 0, otherwise as rw_tc1; both in one chain, like task B's waves).
 
     python -m reward.make_plans_p2 --design tc --run rw_tcs --endpoint 10 --tr DIR [--pool zoetrope] [--seed 20261019]
+    python -m reward.make_plans_p2 --design tc --run rw_tc1 --run rw_tc2 --run-turn-credit rw_tc2 '{"episode_weight": 0}' \
+        --endpoint 150 --tr DIR --pool zoetrope
 """
 
 import argparse
@@ -37,35 +40,48 @@ def designs(tables):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--design", required=True, choices=sorted(designs(TABLES)))
-    ap.add_argument("--run", required=True, help="the run's name (never one used before), e.g. rw_tcs, rw_tc1")
+    ap.add_argument("--run", action="append", required=True,
+                    help="a run's name (never one used before), e.g. rw_tcs, rw_tc1; repeat for runs in one chain")
     ap.add_argument("--endpoint", type=int, required=True, help="10 for the smoke, 150 for the screening run")
     ap.add_argument("--tr", required=True)
     ap.add_argument("--pool", default="zoetrope")
     ap.add_argument("--seed", type=int, default=20261019)
     ap.add_argument("--turn-credit", default=None, help="JSON settings over the design's (default: the estimator's)")
+    ap.add_argument("--run-turn-credit", nargs=2, action="append", default=[], metavar=("RUN", "JSON"),
+                    help="JSON settings over --turn-credit for one run")
     args = ap.parse_args()
     used = {n for p in RR.glob("runs/*/plan.json") for n in json.loads(p.read_text()).get("rl_runs", {})}
-    assert args.run not in used, f"{args.run} was already used by a chain under {RR / 'runs'}"
+    assert len(set(args.run)) == len(args.run), args.run
+    for run in args.run:
+        assert run not in used, f"{run} was already used by a chain under {RR / 'runs'}"
+    per_run = {name: json.loads(s) for name, s in args.run_turn_credit}
+    assert set(per_run) <= set(args.run), f"--run-turn-credit for runs not in --run: {sorted(set(per_run) - set(args.run))}"
     tr = Path(args.tr)
     assert not (tr / "plan.json").exists(), f"{tr} already has a plan"
     plan = json.loads(TEMPLATE.read_text())
-    rl = dict(designs(TABLES)[args.design])
+    base = dict(designs(TABLES)[args.design])
     if args.turn_credit:
-        rl["turn_credit"] = dict(rl["turn_credit"], **json.loads(args.turn_credit))
+        base["turn_credit"] = dict(base["turn_credit"], **json.loads(args.turn_credit))
+    rls = {}
+    for run in args.run:
+        rl = dict(base)
+        if run in per_run:
+            rl["turn_credit"] = dict(rl["turn_credit"], **per_run[run])
+        rls[run] = rl
     plan.update(tr=str(tr), commit="COMMIT_PLACEHOLDER", rl_name="rw_p2", endpoint=int(args.endpoint),
-                rl_runs={args.run: {"rl": rl}}, run_pools={args.run: args.pool},
-                note=(f"Reward line, phase 2 (the user's brief of 2026-11-01), design {args.design}: run {args.run}, "
-                      f"endpoint {args.endpoint}, seed {args.seed}; task B's first-wave plan otherwise (same 3,000 "
-                      "tasks, start, evaluation sets), so it compares with rw_s0 and rw_g."))
+                rl_runs={run: {"rl": rl} for run, rl in rls.items()}, run_pools={run: args.pool for run in args.run},
+                note=(f"Reward line, phase 2 (the user's brief of 2026-11-01), design {args.design}: runs "
+                      f"{', '.join(args.run)}, endpoint {args.endpoint}, seed {args.seed}; task B's first-wave plan "
+                      "otherwise (same 3,000 tasks, start, evaluation sets), so it compares with rw_s0 and rw_g."))
     plan["rl"] = dict(plan["rl"], seed=args.seed)
     for k in ("rows", "exclude"):
         assert Path(plan["rl"][k]).exists(), plan["rl"][k]
     for s in plan["eval_sets"].values():
         assert Path(s, "tasks.jsonl").exists(), s
-    assert Path(rl["distance_tables"]).is_dir(), rl["distance_tables"]
+    assert Path(base["distance_tables"]).is_dir(), base["distance_tables"]
     tr.mkdir(parents=True, exist_ok=True)
     (tr / "plan_template.json").write_text(json.dumps(plan, indent=1))
-    print(json.dumps({"tr": str(tr), "run": args.run, "endpoint": plan["endpoint"], "rl": rl,
+    print(json.dumps({"tr": str(tr), "runs": rls, "endpoint": plan["endpoint"],
                       "run_pools": plan["run_pools"], "seed": plan["rl"]["seed"]}, indent=1))
 
 
