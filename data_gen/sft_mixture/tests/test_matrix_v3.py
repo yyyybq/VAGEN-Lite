@@ -14,7 +14,7 @@ from data_gen.sft_mixture import matrix_plan as MP
 
 ROOT = Path(__file__).resolve().parents[3]
 MATRIX = ROOT / "configs" / "matrix_v3"
-MIXTURE = ROOT / "data_gen" / "sft_mixture" / "configs" / "mixture_matrix_v3_qwen3_20261030.yaml"
+MIXTURE = ROOT / "data_gen" / "sft_mixture" / "configs" / "mixture_matrix_v3_qwen3_20261102.yaml"
 MIXTURE_V2 = ROOT / "data_gen" / "sft_mixture" / "configs" / "mixture_matrix_v2_20261018.yaml"
 STANDARDS = ROOT / "data_gen" / "interiorgs_v10" / "configs" / "rl_standards.json"
 GROUPS = ("A", "B", "C", "C0", "D", "D_noP0", "E")
@@ -110,7 +110,7 @@ def test_data_recipes_match_the_mixture_config(cfgs, vars_, mix):
         if g in REGISTERED["pools"]:
             assert used == REGISTERED["pools"][g], g
         assert c["data"]["lf_dir"] == f"{vars_['mixture_out']}/{g}" and c["data"]["mixture_config"] == vars_["mixture_config"]
-        assert c["data"]["val_rows"] == {"P0": 17, "P1": 300, "P2q": 300, "P2f": 38}
+        assert c["data"]["val_rows"] == {"P0": 300, "P1": 300, "P2q": 300, "P2f": 38}
         assert c["sft"]["base_model"] == vars_["base_qwen3"] and c["sft"]["epochs"] == 10
     assert mix["recipes"]["D"]["pools"]["P1"] == {"times": 1.0, "of": "P2q"}
     assert mix["recipes"]["D_noP0"]["draw_as"] == "D"

@@ -4,8 +4,8 @@ registration: configs/matrix_r12.json @ qwen3-main d530b546（用户第十四次
 model_type: qwen3_vl
 base_qwen3: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
 format_example: action_names
-mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261030.yaml
-mixture_out: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261030
+mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261102.yaml
+mixture_out: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261102
 sft_recipe: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/train.yaml
 rl:
   pair: {s0: v10_p1_S0, d: v10_p1_Dcond}
