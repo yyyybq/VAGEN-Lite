@@ -102,4 +102,4 @@
 - 代码都在 worktree `VAGEN-Lite-models` 的本地分支 `models`，没推：开环检查 `model_matrix/downstream/openloop.py` / `openloop.sh`，评测开关 `model_matrix/downstream/starvla_cambrian.py`（`MODEL_LINE_EVAL_JPEG`），测试 `model_matrix/tests/test_openloop.py`、`test_starvla_cambrian.py`。
 - 分析输出：`R/analysis/openloop_20261030/`（开环三次）、`R/analysis/jpeg_match_20261031/`（JPEG 质量匹配）、`R/analysis/jpeg_eval_20261031/`（闭环压缩检查）。
 - 评测任务都由本线按下游评测的提交方式交，跑完后 sco 记录已清。
-- 磁盘：三个下游的全状态和已评完的权重副本，按你批的决定 42、44 由磁盘线归档 AOSS 后删除（b16、b17）；DS-CSS 第 15 万步的副本按决定 45 由磁盘线归档 AOSS 后删除（b18，11-01 21:56）。各下游第 20 万步的最终权重留着。
+- 磁盘：三个下游的全状态和已评完的权重副本，按你批的决定 42、44 由磁盘线归档 AOSS 后删除（b16、b17）；DS-CSS 第 15 万步的副本按决定 45 由磁盘线归档 AOSS 后删除（b18，11-01 21:56）。各下游第 20 万步的最终权重按你 11-03 的话（只让带预测损失的结果进论文）由磁盘线归档 AOSS 后删除（b29，11-03 23:14）；要再用得先从 AOSS 拉回。
