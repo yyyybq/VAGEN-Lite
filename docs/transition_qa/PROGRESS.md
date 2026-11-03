@@ -1464,3 +1464,11 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - SFT 挑出的 epoch：C、D 各 32 GiB。
 - **副本**：分析结果和 4 个分析脚本复制到本分支 `docs/transition_qa/matrix_v3/`。原件在 matrix 工作树的 `exps/` 下，不在 git 里。
 - **没做的**：没推送，没动 main、主工作树和 VAGEN-Lite-eval；matrix-v3 没有新提交；没有提交 GPU 任务，没有删东西。
+
+### 12.40 矩阵第三版收尾（用户 11-03："收尾"）
+
+- 报告第 2 节第 1 条，用户选了推荐项：矩阵第三版就此收尾，C 的 RL 不补跑，不再用卡。
+- `REPORT.md` 第 2 节：这条移到"已定"，其余各条往前挪一位（补丁 0002 的修正和合并是第 1 条，检查点的续训部分是第 2 条），只在补跑时才有的选项去掉了。
+- 核对：P1 没有在跑的监控进程，也没有定时任务。
+- 11-03 14:48 磁盘线删了 `exps/interiorgs_qa_final_20261028/lf_256/model`（Qwen2.5 SFT 的权重，第六轮 b28，AOSS 上有）。P1 只用这个目录里的 jsonl 题目行，它们都还在；P1 的配置没有引用这批权重。
+- 没做的：没推送，没动 main、主工作树和 VAGEN-Lite-eval；matrix-v3 没有新提交；没有提交 GPU 任务，没有删东西。
