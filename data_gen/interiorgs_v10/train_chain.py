@@ -74,7 +74,7 @@ no longer match the sequence) is stopped as a guard stops it instead of being re
 failed attempt in state "trainer_crashes"); the checkpoints it reached are evaluated.  Plan "qa_eval" (decision 2 甲 of
 2026-11-01, off unless given; qa_jobs): the evaluate step also evaluates the named models on EASI benchmarks, one
 single-card job a model and benchmark (job script mode qa, data_gen.interiorgs_v10.qa_eval, the model type's Python),
-in the same queue as the action evaluations.
+in the same queue as the action evaluations; its "p0" (2026-11-03) adds the P0 line's in-domain QA, one job a model.
 
 Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
 or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
@@ -860,10 +860,11 @@ class Chain:
         """Plan "qa_eval" (decision 2 甲 of 2026-11-01; off unless given): {"out": folder, "easi": a list of EASI
         benchmark keys or "easi_8" (SITE as its image and video parts, qa_eval.EASI_8_JOBS), "models": result names
         among the evaluate step's models (default: the plan's eval "models"), "limit": questions a benchmark (a
-        smoke test; give it its own folder)} -- the evaluate step's jobs {"qa_<benchmark>__<name>":
-        (out/<benchmark>, name, model, None, options, "qa")}, one single-card job a model and benchmark
-        (data_gen.interiorgs_v10.qa_eval easi with the plan's model type); out/<benchmark>/<name>/done.json marks
-        one as done."""
+        smoke test; give it its own folder), "p0": a P0 question selection (the in-domain QA, the user's matrix v3
+        follow-up of 2026-11-03; optional, "p0_res" its resolution, default 256)} -- the evaluate step's jobs
+        {"qa_<benchmark>__<name>": (out/<benchmark>, name, model, None, options, "qa")}, one single-card job a model
+        and benchmark (data_gen.interiorgs_v10.qa_eval easi, or p0 for "p0", with the plan's model type);
+        out/<benchmark>/<name>/done.json marks one as done."""
         qa = self.plan.get("qa_eval")
         if not qa:
             return {}
@@ -878,9 +879,14 @@ class Chain:
         kind = str(self.plan.get("model_type") or "qwen2_5_vl")
         out = Path(qa["out"])
         limit = ["--limit", str(qa["limit"])] if qa.get("limit") else []
-        return {f"qa_{b}__{n}": (out / b, n, models[n][0], None,
+        jobs = {f"qa_{b}__{n}": (out / b, n, models[n][0], None,
                                  ["easi", "--benchmark", b, "--model-type", kind, *limit], "qa")
                 for b in benchmarks for n in names}
+        if qa.get("p0"):
+            jobs.update({f"qa_p0__{n}": (out / "p0", n, models[n][0], None,
+                                         ["p0", "--selection", str(qa["p0"]), "--res", str(qa.get("p0_res", 256)),
+                                          "--model-type", kind, *limit], "qa") for n in names})
+        return jobs
 
     def external_renderer_state(self, name: str, run_dir: Path, info: Dict[str, Any]) -> Dict[str, Any]:
         """Round 12 freeze (the user's decision of 2026-10-24): a render service outside sco (renderer_external.json),

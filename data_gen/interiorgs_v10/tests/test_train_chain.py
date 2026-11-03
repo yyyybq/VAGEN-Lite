@@ -698,6 +698,15 @@ class ChainTest(unittest.TestCase):
             self.assertEqual(got["qa_site__sft"], (root / "easi" / "site", "sft", str(root / "sft"), None,
                                                    ["easi", "--benchmark", "site", "--model-type", "qwen3_vl"], "qa"))
             self.assertEqual(len(got["val__sft"]), 5)  # the action evaluation as before
+            # 2026-11-03: "p0" adds the in-domain QA, one job a model, in the qa_eval p0 command
+            sel = str(root / "test.jsonl")
+            p0 = T.Chain({**plan, "qa_eval": {"out": str(root / "easi"), "easi": [], "p0": sel}},
+                         sleep=lambda s: None).qa_jobs({"base": (str(root / "base"), None, []),
+                                                        "sft": (str(root / "sft"), None, [])})
+            self.assertEqual(sorted(p0), ["qa_p0__base", "qa_p0__sft"])
+            self.assertEqual(p0["qa_p0__sft"], (root / "easi" / "p0", "sft", str(root / "sft"), None,
+                                                ["p0", "--selection", sel, "--res", "256", "--model-type", "qwen3_vl"],
+                                                "qa"))
             with self.assertRaises(T.ChainError):
                 T.Chain({**plan, "qa_eval": {"out": tmp, "easi": ["mmbench"]}}, sleep=lambda s: None).qa_jobs({})
             self.assertEqual(T.Chain({**plan, "qa_eval": None}, sleep=lambda s: None).qa_jobs({}), {})

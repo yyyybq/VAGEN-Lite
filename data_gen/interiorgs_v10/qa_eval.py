@@ -14,6 +14,15 @@ stalled without it, 5 of 5, and finished with it, 5 of 5; the cause is not known
 OUT/BENCH), so two benchmarks of one model never share lmms-eval's result files.  Results: OUT/NAME/easi_results.json
 and EASI's logs; OUT/NAME/done.json once the benchmark has its score (the chain's mark that the job is done; a smoke
 run's records its --limit, so a smoke's output folder is never a full run's).
+
+The in-domain QA (the user's matrix v3 follow-up of 2026-11-03, section 2: plan "qa_eval" "p0"): the P0 line's own
+evaluation (data_gen.interiorgs_qa.evaluate: vLLM greedy, the model's chat template, the benchmarks' own scoring) of
+one model on a P0 question selection, in the same Python:
+
+    python -m data_gen.interiorgs_v10.qa_eval p0 --name NAME --model HF_DIR --out OUT/p0 --selection SEL.jsonl \
+        [--res 256] [--model-type qwen3_vl] [--limit N]
+
+Results: OUT/NAME/summary.json, summary.md and predictions.jsonl; OUT/NAME/done.json once summary.json is written.
 """
 
 from __future__ import annotations
@@ -82,6 +91,27 @@ def easi(a: argparse.Namespace) -> int:
     return rc or 1
 
 
+def p0(a: argparse.Namespace) -> int:
+    own = Path(a.out) / a.name
+    own.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(WORKTREE), os.environ.get("PYTHONPATH", "")]),
+               HF_HUB_OFFLINE="1", NO_PROXY="*", no_proxy="*", TOKENIZERS_PARALLELISM="false")
+    cmd = [sys.executable, "-m", "data_gen.interiorgs_qa.evaluate", "--model", a.model, "--selection", a.selection,
+           "--res", a.res, "--out", str(own)]
+    if a.limit:
+        cmd += ["--limit", str(a.limit)]
+    print("$", " ".join(cmd), flush=True)
+    rc = subprocess.run(cmd, cwd=WORKTREE, env=env).returncode
+    summary = own / "summary.json"
+    if rc != 0 or not summary.is_file():
+        return rc or 1
+    res = json.loads(summary.read_text())
+    (own / "done.json").write_text(json.dumps({"benchmark": "p0", "model": a.model, "model_type": a.model_type,
+                                               "selection": a.selection, "res": a.res, "limit": a.limit,
+                                               "meta": res.get("meta")}) + "\n")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -92,8 +122,16 @@ def main() -> int:
     e.add_argument("--benchmark", required=True, help="one EASI benchmark key (vsi_bench, site, ...)")
     e.add_argument("--model-type", default="qwen3_vl", choices=("qwen2_5_vl", "qwen3_vl"))
     e.add_argument("--limit", type=int, default=None, help="smoke test: questions (done.json records the limit)")
+    q = sub.add_parser("p0")
+    q.add_argument("--name", required=True, help="the model's name in the results")
+    q.add_argument("--model", required=True, help="HF model folder")
+    q.add_argument("--out", required=True, help="the output folder (one subfolder a model)")
+    q.add_argument("--selection", required=True, help="a P0 question selection (selection/test.jsonl)")
+    q.add_argument("--res", default="256", help="image resolution, as data_gen.interiorgs_qa.evaluate --res")
+    q.add_argument("--model-type", default="qwen3_vl", choices=("qwen2_5_vl", "qwen3_vl"))
+    q.add_argument("--limit", type=int, default=None, help="smoke test: questions (done.json records the limit)")
     a = ap.parse_args()
-    return easi(a)
+    return easi(a) if a.cmd == "easi" else p0(a)
 
 
 if __name__ == "__main__":
