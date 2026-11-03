@@ -1,6 +1,6 @@
 # InteriorGS v10 训练线：运行时依赖和可归档目录
 
-2026-10-19（第十二轮）写，给代码整理和实验矩阵交接用。2026-10-22 按第十二轮结束、冻结期的状态更新（见下面的"第十二轮结束时的补充"，以及第一部分里标了 10-22 的行）。
+2026-10-19（第十二轮）写，给代码整理和实验矩阵交接用。2026-10-22 按第十二轮结束、冻结期的状态更新（见下面的"第十二轮结束时的补充"，以及第一部分里标了 10-22 的行）。2026-11-03 记下磁盘线删掉的 Qwen2.5 权重（见"2026-11-03 补充"）。
 
 ## 第十二轮结束时的补充（2026-10-22）
 
@@ -27,6 +27,16 @@
 5. **检查点归档。** 2026-10-21 起，较早的检查点在 AOSS 上，路径是 `fj:s3://baiqiao/vagen_lite_archive/<原相对路径>`。清单和脚本在 `/mnt/umm/users/yinbaiqiao/aoss_archive_manifests/`，这个目录不能删。第十二轮各链按 `retain: best_and_last` 只留了最好和最后的检查点。
 
 **规则：** 第一部分列出的目录和文件，是训练链和评测任务运行时要读或要写的。整理时不能移动、改名或删除；路径写死在代码、脚本、plan 或训练链的进度文件里，移走后正在跑或以后重跑的任务会在启动时失败。第十一轮就出过一次：整理任务把 gsplat 编译结果移进 `archive/`，见 `data_gen/interiorgs_v10/cluster_runs/REPORT_R11_20261016.md` 第九节。第二部分列出的目录，本线运行时已经不用，可以归档，但报告里引用了其中的结果，归档时要保留可读的副本和清单。
+
+## 2026-11-03 补充：多数 Qwen2.5 权重已只在 AOSS 上
+
+1. **用户 11-03 批准磁盘线第六轮 b28（"1甲"），并说下面这些依赖清单里的检查点不再按"不能移动"处理。** 磁盘线 14:48 先逐文件核对 AOSS 副本（0 个不符），再删掉盘上的：
+   - 第十二轮 RL 检查点 17 个：r12b `p2d` 200 / 250、`p2s0` 250；r12ds100 `s100d` 50、`s100s0` 50；r12ds400 `s400d` 100、`s400s0` 50；r12f `c3d` 300、`c3s0` 150；r12g `cud` 250、`cus0` 200；r12j `e1e0s0` 50；r12k `dk100` 200、`dk177` 250、`s0keep` 100；r12m `dc` 50、`dck` 300；
+   - `E/R1-clean-Projective-v0/formal/checkpoints/global_step_250`、`E/interiorgs_v10_train_r10_20261015/lf_formal/model/checkpoint-770`、3B 试跑 `E/interiorgs_v10_r5_20261014/trial/sft_trial_run/model`（连同 `checkpoint-30`）；
+   - `E/interiorgs_v10_r11_20261016/inputs/` 下的硬链接副本 `r1_final`、`r10_sft_e5`、`qwen25vl3b_sft_trial_r5`：目录还在，里面只剩说明文件 `DELETED_TO_AOSS_20261103.txt`。
+2. **盘上还留着：** 原始 7B（`inputs/base_7b`）和 `inputs/ppo_template_S0.yaml`、第十一轮 SFT `checkpoint-1386`、r11p `ps0` 300 和 `pd` 150（下游线的起点）、r12a `p1d` 100 和 `p1s0` 250（P1 matrix_v2 的 `C0.yaml` 读它们）、r12o `lf_format`。
+3. **10-26 以来磁盘线各批还删过本线别的检查点。** 哪一份还在盘上，以 `/mnt/umm/users/yinbaiqiao/disk_runs/batches/*/deleted.tsv` 为准，第一部分第 4 节的表只说明内容。
+4. **用到已删的检查点时先从 AOSS 拉回。** 路径是 `fj:s3://baiqiao/vagen_lite_archive/<相对 /mnt/umm/users/yinbaiqiao 的路径>`，用 `VAGEN-Lite-disk/disk/restore_from_aoss.py`，33 GB 一份约 1 分钟。重跑第十一、十二轮的链、浏览页或对照评测之前，先拉回它们读的检查点。
 
 以下路径都在集群 fujian 上。`E` 指 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial`。
 
