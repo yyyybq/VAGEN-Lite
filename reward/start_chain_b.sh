@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Reward line: start a training chain from this worktree (the main line's R12/scripts/start_chain_dr2.sh with the
-# worktree as the code directory, no SFT takeover: the plan names rl_start_model).  VAGEN_LITE_WORKTREE makes the
+# worktree as the code directory, no SFT takeover: the plan names rl_start_model; or, direction 3, an SFT-only plan
+# with its base model and sft_dir).  VAGEN_LITE_WORKTREE makes the
 # chain's sco jobs start here too; the plan's commit becomes the worktree's HEAD, and the worktree must be clean.
 # The chain is a resident process on the login node: one thread per library and nice -n 19 (the user's login-node
 # rule of 2026-10-28).
@@ -26,12 +27,15 @@ import json, sys
 from pathlib import Path
 p = json.load(open(sys.argv[1]))
 assert "PLACEHOLDER" not in json.dumps(p), "a placeholder is left in the plan"
-need = [*p["eval_sets"].values(), p["sft_dir"], p["rl"]["rows"], p["rl"]["exclude"], p["rl_start_model"]]
-need += [r["rl"]["distance_tables"] for r in p["rl_runs"].values() if (r.get("rl") or {}).get("distance_tables")]
+rl, runs = p.get("rl") or {}, p.get("rl_runs") or {}
+need = [*p["eval_sets"].values(), p["sft_dir"]] + [rl[k] for k in ("rows", "exclude") if rl.get(k)]
+need += [p[k] for k in ("rl_start_model", "model") if p.get(k)]  # an SFT-only plan (direction 3) names the base model
+need += [p["sft_dir"] + "/" + t for t in (p.get("sft_groups") or {}).values()]
+need += [r["rl"]["distance_tables"] for r in runs.values() if (r.get("rl") or {}).get("distance_tables")]
 missing = [n for n in need if not Path(n).exists()]
 assert not missing, missing
 print("plan ok, commit", p["commit"][:8], "job_prefix", p.get("job_prefix"), "pool", p.get("pool"),
-      "run_pools", p.get("run_pools"), "runs", {n: (r.get("rl") or {}) for n, r in p["rl_runs"].items()})
+      "run_pools", p.get("run_pools"), "sft_only", p.get("sft_only"), "runs", {n: (r.get("rl") or {}) for n, r in runs.items()})
 PY
 setsid nohup nice -n 19 $PY -m data_gen.interiorgs_v10.train_chain run --plan "$TR/plan.json" >> "$TR/chain.log" 2>&1 < /dev/null &
 echo "chain pid $!"

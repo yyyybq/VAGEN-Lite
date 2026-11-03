@@ -31,6 +31,20 @@ FORMAT_CONFIGS = {
         "description": "You should first give your thought process, and then your answer.",
         "format": "<think>...</think><action>...</action>",
         "example": """<think>The target object appears to be ahead and to the right. I will move forward to close the distance first, then adjust orientation.</think><action>move_forward|move_forward|turn_right|</action>"""
+    },
+    # Reward line, phase 2 direction 3 (docs/reward/reports/PLAN_DIR3_20261103.md): a fixed-form statement about
+    # the current view before the action; the truth is vagen/statement_truth.py (its DIST_EDGES_M are the 1.6 m and
+    # 2.6 m below).  Used only with prompt_format "observe".
+    "observe": {
+        "description": """Before your action, write one statement about the current view in this fixed form, for example:
+<observe>where=A:in_view,B:left; face=A:yes,B:no; dist=mid; missing=clear,relation</observe>
+- where: for each task object, where it is: in_view, left, right or behind. A is the first object the task names, B the second (an occlusion task: only the object to hide, as A). Example: where=A:in_view,B:left
+- face: for each object that must be seen clearly (an occlusion task: the object in front, as B), yes if it is seen clearly, else no. Example: face=A:yes,B:no
+- dist: your horizontal distance to object A: near, mid or far. A distance task: closer than the requested distance, at it, or beyond it; other tasks: under 1.6 m, 1.6 to 2.6 m, over 2.6 m.
+- missing: which groups of success conditions are not met yet, in this order: frame (the objects in front of you, visible, large enough and inside the frame), clear (seen clearly), relation (the requested distance, relation, size or position); none when every condition is met.
+Then give your action.""",
+        "format": "<observe>where=A:in_view; face=A:yes; dist=mid; missing=relation</observe><action>...</action>",
+        "example": """<observe>where=A:left; face=A:no; dist=far; missing=frame,clear,relation</observe><action>turn_left|</action>"""
     }
 }
 
@@ -411,6 +425,24 @@ You can take up to {max_actions} actions per step.
     return prompt
 
 
+def format_prompt_observe(**kwargs):
+    """Reward line, phase 2 direction 3: the statement, then the action (prompt_format "observe")."""
+    max_actions = kwargs.get("max_actions_per_step", 5)
+    action_sep = kwargs.get("action_sep", "|")
+    add_example = kwargs.get("add_example", True)
+    action_line = action_format_line(action_sep, max_actions, kwargs.get("format_example", "placeholder"))
+
+    prompt = f"""Respond with the statement, then the action:
+<observe>where=A:in_view; face=A:yes; dist=mid; missing=relation</observe>
+{action_line}
+
+You can take up to {max_actions} actions per step.
+"""
+    if add_example:
+        prompt += f"\nExample: {FORMAT_CONFIGS['observe']['example']}"
+    return prompt
+
+
 # Mapping of prompt formats to their corresponding format functions
 format_prompt = {
     "free_think": format_prompt_free_think,
@@ -418,4 +450,5 @@ format_prompt = {
     "grounding": format_prompt_grounding,
     "worldmodeling": format_prompt_worldmodeling,
     "grounding_worldmodeling": format_prompt_grounding_worldmodeling,
+    "observe": format_prompt_observe,
 }
