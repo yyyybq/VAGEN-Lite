@@ -28,6 +28,12 @@ turn_index, turn_weight 1, episode_norm none, neg_clip 3, min_positive_mass 0.4.
 The agent loop records each turn ({span, reward, phi_after, d_after, success, valid}, ``extra_fields["turn_records"]``)
 when the estimator is selected.  Pure functions (torch / numpy); vagen/custom_advantage/turn_credit.py registers the
 estimator.
+
+Phase 2 direction 3 (PLAN_DIR3_20261103.md section 4): with ``turn_term: "statement"`` the turn's value is its
+statement's accuracy (0..1, vagen/statement_truth.py: the env's statement_record) and T acts on the statement's own
+tokens (the record's statement_span; the whole answer when the answer has no readable statement), so the statement
+score never reaches the action tokens; with episode_norm "none" every token keeps verl's GRPO advantage of the S0
+return, the S0 run's.
 """
 
 from __future__ import annotations
@@ -41,9 +47,10 @@ import torch
 ESTIMATOR = "turn_credit"
 DEFAULTS = {"scale": 10.0 / 3.0, "gamma": 0.99, "turn_reward": False, "baseline": "batch_mean", "turn_weight": 0.5,
             "episode_weight": 1.0, "episode_norm": "batch", "neg_clip": 0.0, "min_positive_mass": 0.0,
-            "stall_penalty": 0.0, "eps": 1e-6, "dump_dir": None, "dump_updates": 0}
+            "stall_penalty": 0.0, "eps": 1e-6, "dump_dir": None, "dump_updates": 0, "turn_term": "shaping"}
 BASELINES = ("batch_mean", "turn_index", "none")
 EPISODE_NORMS = ("batch", "none")
+TURN_TERMS = ("shaping", "statement")
 LATE_TURN = 3  # turns 4+ (0-based index 3 on)
 
 
@@ -63,6 +70,10 @@ def settings(config: Any) -> Dict[str, Any]:
         raise ValueError(f"turn_credit.baseline must be one of {BASELINES}, not {out['baseline']!r}")
     if out["episode_norm"] not in EPISODE_NORMS:
         raise ValueError(f"turn_credit.episode_norm must be one of {EPISODE_NORMS}, not {out['episode_norm']!r}")
+    if out["turn_term"] not in TURN_TERMS:
+        raise ValueError(f"turn_credit.turn_term must be one of {TURN_TERMS}, not {out['turn_term']!r}")
+    if out["turn_term"] == "statement" and (out["turn_reward"] or out["stall_penalty"]):
+        raise ValueError("turn_credit.turn_term statement takes neither turn_reward nor stall_penalty")
     for k in ("scale", "gamma", "turn_weight", "episode_weight", "neg_clip", "min_positive_mass", "stall_penalty", "eps"):
         out[k] = float(out[k])
     out["turn_reward"] = bool(out["turn_reward"])
@@ -92,21 +103,29 @@ def reset_distance(info: Optional[Dict[str, Any]]) -> Optional[int]:
 
 
 def turn_record(span: Optional[Sequence[int]], reward: float, info: Optional[Dict[str, Any]], success: bool,
-                valid: bool) -> Dict[str, Any]:
+                valid: bool, statement_span: Optional[Sequence[int]] = None) -> Dict[str, Any]:
     """What the agent loop keeps of one turn: its answer's response positions [start, end), the env reward, the env's
     progress score and table distance after the turn, whether the task is met and whether the answer was readable.
 
     The score is the turn-end pose's (info current_region_metrics optimal_progress, the table's phi); only without it
     the env's current_potential_score, which the env leaves at the previous turn's value on the turn that uses up the
-    step budget (replay of rw_s0: 4.4% of the failed turns, every one of them such a last turn)."""
+    step budget (replay of rw_s0: 4.4% of the failed turns, every one of them such a last turn).
+
+    Direction 3: with the env's statement_record (info["statement"]) also the statement's accuracy and its token
+    positions (``statement_span``, the agent loop's; None: no readable statement, the whole answer)."""
     info = info if isinstance(info, dict) else {}
     rm = info.get("current_region_metrics")
     phi = rm.get("optimal_progress") if isinstance(rm, dict) else None
     if phi is None:
         phi = info.get("current_potential_score")
-    return {"span": [int(span[0]), int(span[1])] if span else [0, 0], "reward": float(reward),
-            "phi_after": float(phi) if phi is not None else 0.0, "d_after": _distance(rm),
-            "success": bool(success), "valid": bool(valid)}
+    out = {"span": [int(span[0]), int(span[1])] if span else [0, 0], "reward": float(reward),
+           "phi_after": float(phi) if phi is not None else 0.0, "d_after": _distance(rm),
+           "success": bool(success), "valid": bool(valid)}
+    statement = info.get("statement")
+    if isinstance(statement, dict):
+        out["statement_accuracy"] = float(statement.get("accuracy") or 0.0)
+        out["statement_span"] = [int(statement_span[0]), int(statement_span[1])] if statement_span else list(out["span"])
+    return out
 
 
 def episode_record(phi0: float, turns: Sequence[Dict[str, Any]], response_length: int,
@@ -117,7 +136,11 @@ def episode_record(phi0: float, turns: Sequence[Dict[str, Any]], response_length
     out = []
     for t in turns:
         s, e = t["span"]
-        out.append(dict(t, span=[min(int(s), response_length), min(int(e), response_length)]))
+        clipped = dict(t, span=[min(int(s), response_length), min(int(e), response_length)])
+        if "statement_span" in t:
+            s, e = t["statement_span"]
+            clipped["statement_span"] = [min(int(s), response_length), min(int(e), response_length)]
+        out.append(clipped)
     return {"phi0": float(phi0), "d0": d0, "turns": out}
 
 
@@ -131,9 +154,12 @@ def stalled(record: Dict[str, Any]) -> List[bool]:
 
 
 def turn_values(record: Dict[str, Any], scale: float, gamma: float, turn_reward: bool = False,
-                stall_penalty: float = 0.0) -> List[float]:
+                stall_penalty: float = 0.0, term: str = "shaping") -> List[float]:
     """The values of one episode's turns: scale * (gamma * phi_{t+1} - phi_t) (phi_{t+1} = 1 on success), plus the
-    env reward with turn_reward, minus stall_penalty on a stalled turn."""
+    env reward with turn_reward, minus stall_penalty on a stalled turn; with ``term`` "statement" the statement's
+    accuracy (a turn without a statement record: 0)."""
+    if term == "statement":
+        return [float(t.get("statement_accuracy") or 0.0) for t in record.get("turns") or []]
     phi = float(record.get("phi0") or 0.0)
     stall = stalled(record) if stall_penalty else []
     out = []
@@ -213,7 +239,8 @@ def turn_advantages(records: Sequence[Dict[str, Any]], uids: Sequence[Any], cfg:
 
     ``lengths``: per episode and turn the number of answer tokens (the positive / negative mass is counted in tokens,
     as the token-mean loss weighs them); default 1 a turn."""
-    values = [turn_values(r, cfg["scale"], cfg["gamma"], cfg["turn_reward"], cfg["stall_penalty"]) for r in records]
+    values = [turn_values(r, cfg["scale"], cfg["gamma"], cfg["turn_reward"], cfg["stall_penalty"],
+                          cfg.get("turn_term", "shaping")) for r in records]
     base = baselines(values, uids, cfg["baseline"])
     cen = [[c - b for c, b in zip(cs, bs)] for cs, bs in zip(values, base)]
     flat = np.asarray([x for xs in cen for x in xs], dtype=np.float64)
@@ -282,10 +309,12 @@ def combine_metrics(z: Sequence[Sequence[float]], ep: Sequence[float], cfg: Dict
 def token_advantages(records: Sequence[Dict[str, Any]], uids: Sequence[Any], response_mask: torch.Tensor,
                      episode_returns: Sequence[float], cfg: Dict[str, Any]) -> Tuple[torch.Tensor, Dict[str, float]]:
     """The (batch, response length) advantages: every answer token (response_mask) gets episode_weight x E of its
-    episode, each turn's span also turn_weight x its T; tokens outside every span get only the episode term."""
+    episode, each turn's span also turn_weight x its T; tokens outside every span get only the episode term.  With
+    turn_term "statement" the span is the turn's statement_span."""
     bs, length = response_mask.shape
-    spans = [[[max(0, int(t["span"][0])), min(length, int(t["span"][1]))] for t in (r.get("turns") or [])]
-             for r in records]
+    key = "statement_span" if cfg.get("turn_term", "shaping") == "statement" else "span"
+    spans = [[[max(0, int(t.get(key, t["span"])[0])), min(length, int(t.get(key, t["span"])[1]))]
+              for t in (r.get("turns") or [])] for r in records]
     lengths = [[max(0, e - s) for s, e in sp] for sp in spans]
     z, metrics = turn_advantages(records, uids, cfg, lengths)
     ep, ep_metrics = episode_terms(episode_returns, uids, cfg)

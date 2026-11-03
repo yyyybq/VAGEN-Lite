@@ -182,6 +182,22 @@ def parse_statement(text: str) -> Optional[Dict[str, Any]]:
     return out
 
 
+def statement_token_count(tokenizer: Any, token_ids: Sequence[int]) -> int:
+    """How many leading tokens of a generated answer hold its statement: the fewest whose decoded text contains
+    "</observe>" (a token that also starts the action tag counts with the statement); 0 without one."""
+    ids = list(token_ids)
+    if "</observe>" not in tokenizer.decode(ids, skip_special_tokens=True):
+        return 0
+    lo, hi = 1, len(ids)
+    while lo < hi:  # the decoded prefix only grows with more tokens
+        mid = (lo + hi) // 2
+        if "</observe>" in tokenizer.decode(ids[:mid], skip_special_tokens=True):
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+
+
 def score_statement(parsed: Optional[Dict[str, Any]], t: Dict[str, Any]) -> Dict[str, Any]:
     """Per field whether the statement is right (a field missing or unreadable is wrong) and the accuracy (right
     fields / 4); readable is False without an <observe> block."""

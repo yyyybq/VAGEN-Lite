@@ -979,7 +979,15 @@ class ActiveSpatialEnv(BaseEnv):
         
         prev_E = self.view_engine.get_pose()
         prev_pos = prev_E[:3, 3].copy()
-        
+        if self.config.get("statement_record", False):  # reward line, direction 3: the statement about the seen frame
+            from vagen.statement_truth import parse_statement, score_statement, truth as statement_truth
+
+            seen = statement_truth(item, prev_E, self._visibility_occluders())
+            scored = score_statement(parse_statement(action_str), seen)
+            info["statement"] = dict(scored, truth={k: seen[k] for k in ("where", "face", "dist", "missing")})
+            metrics["turn_metrics"]["statement_accuracy"] = scored["accuracy"]
+            metrics["turn_metrics"]["statement_readable"] = scored["readable"]
+
         # Track collisions in this step
         step_collisions = []
         collision_suffix = ""

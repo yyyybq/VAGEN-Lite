@@ -7,7 +7,7 @@
 # rule of 2026-10-28).
 #   bash reward/start_chain_b.sh TR/plan_template.json
 set -euo pipefail
-C=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-reward
+C=$(cd "$(dirname "$0")/.." && pwd)  # the worktree this script is in (VAGEN-Lite-reward, -reward-jsrl or -reward-stmt)
 cd "$C"
 export PYTHONPATH=$C PYTHONDONTWRITEBYTECODE=1 VAGEN_LITE_WORKTREE=$C
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false

@@ -587,6 +587,27 @@ def with_format_example(policy: Dict[str, Any], format_example: str) -> Dict[str
     return policy
 
 
+def with_prompt_format(policy: Dict[str, Any], prompt_format: str) -> Dict[str, Any]:
+    """Reward line, direction 3: the policy with its SFT export's prompt format set ("observe": the statement SFT
+    data, reward/build_statement_sft.py, which rewrote the export's conversations to that format)."""
+    import copy
+
+    policy = copy.deepcopy(policy)
+    policy["sft"]["export"]["prompt_format"] = prompt_format
+    return policy
+
+
+def sft_prompt_formats(paths: Sequence[Path]) -> List[str]:
+    """The prompt formats the SFT conversation files name (each file's first record's "prompt_format")."""
+    found = set()
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            line = fh.readline()
+        if line.strip() and json.loads(line).get("prompt_format"):
+            found.add(str(json.loads(line)["prompt_format"]))
+    return sorted(found)
+
+
 def prompt_mismatches(env_cfg: Dict[str, Any], task_types: Sequence[str], policy: Dict[str, Any]) -> List[str]:
     """Task types whose RL system prompt differs from the SFT conversations' (release.protocol_system_prompt)."""
     from .release import protocol_system_prompt
@@ -671,6 +692,13 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     if getattr(args, "invalid_penalty", None) is not None:  # round 12 freeze (3.1.3): the unreadable answer's penalty
         history["env"]["invalid_penalty_override"] = float(args.invalid_penalty)
     history["env"].update(design_variant_overrides(args, history["env"]))
+    statement = bool(getattr(args, "statement", False))
+    if statement:  # reward line, direction 3: the statement format and its score (vagen/statement_truth.py)
+        history["env"].update(prompt_format="observe", statement_record=True)
+    sft_paths = [Path(p) for p in getattr(args, "sft_trajectories", None) or []]
+    if sft_paths and ("observe" in sft_prompt_formats(sft_paths)) != statement:
+        raise SystemExit(f"the SFT conversations' prompt formats are {sft_prompt_formats(sft_paths)}: the statement "
+                         "SFT data (observe) goes with --statement, and only it")
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -681,8 +709,11 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                                train_size=len(selected), **history["env"])
         env_paths[split] = out / f"{split}_env.yaml"
         env_paths[split].write_text(yaml.safe_dump(env, sort_keys=False))
-    mismatches = prompt_mismatches(dict(tcfg, prompt_format_example=fmt), [r["task_type"] for r in rows],
-                                   with_format_example(policy, fmt) if sft_formats else policy)
+    check_policy = with_format_example(policy, fmt) if sft_formats else policy
+    check_env = dict(tcfg, prompt_format_example=fmt)
+    if statement:  # direction 3: the observe system prompt on both sides
+        check_policy, check_env["prompt_format"] = with_prompt_format(check_policy, "observe"), "observe"
+    mismatches = prompt_mismatches(check_env, [r["task_type"] for r in rows], check_policy)
     if mismatches:
         raise SystemExit(f"RL and SFT system prompts differ for {mismatches}")
     ppo = yaml.safe_load(Path(args.ppo_template).read_text())
@@ -766,12 +797,15 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
 
         turn_credit = json.loads(args.turn_credit) if isinstance(args.turn_credit, str) else dict(args.turn_credit)
         try:
-            turn_credit_settings({"turn_credit": turn_credit})
+            term = turn_credit_settings({"turn_credit": turn_credit})["turn_term"]
         except (ValueError, TypeError) as exc:
             raise SystemExit(f"--turn-credit: {exc}")
         if history["env"].get("enable_potential_shaping_reward"):
             raise SystemExit("--turn-credit adds the progress term itself: give the S0 reward (no dense --reward-preset)")
-        if history["env"].get("progress_version") != "optimal" or not history["env"].get("distance_tables_dir"):
+        if term == "statement":  # direction 3: the turn term is the statement's score, no table needed
+            if not statement:
+                raise SystemExit("--turn-credit turn_term statement scores the statements: it needs --statement")
+        elif history["env"].get("progress_version") != "optimal" or not history["env"].get("distance_tables_dir"):
             raise SystemExit("--turn-credit reads the table's progress score: --progress-version optimal --distance-tables DIR")
         if not ppo["trainer"].get("concat_multi_turn"):
             raise SystemExit("--turn-credit needs the concat history mode (one sequence an episode, the turns' spans)")
@@ -847,6 +881,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "design_variant": design_variant_overrides(args, history["env"]) or None,
               "progress_adv_weight": getattr(args, "progress_adv_weight", None),
               "turn_credit": turn_credit,
+              "statement": statement,
               "adv_estimator": (ppo.get("algorithm") or {}).get("adv_estimator"),
               "train_batch_size": (ppo.get("data") or {}).get("train_batch_size"),
               "save_freq": ppo["trainer"].get("save_freq"),
@@ -1226,6 +1261,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "dump_dir, dump_updates: the smoke's span check); "
                         "PPO config algorithm.adv_estimator turn_credit and algorithm.turn_credit, vagen/turn_credit.py; "
                         "needs the S0 reward with --progress-version optimal --distance-tables")
+    c.add_argument("--statement", action="store_true",
+                   help="reward line, direction 3: the env shows the observe prompt format (a statement before each "
+                        "action) and scores each statement (statement_record, vagen/statement_truth.py); the start "
+                        "model's SFT conversations must be the statement data (prompt_format observe)")
     c.add_argument("--sft-trajectories", nargs="*", default=None,
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,

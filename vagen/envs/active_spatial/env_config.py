@@ -237,6 +237,10 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # export's format_example must match (training_prep rl-config checks it against the start model's SFT
     # conversations).
     prompt_format_example: str = "placeholder"
+    # Reward line, phase 2 direction 3 (vagen/statement_truth.py): score each answer's <observe> statement against
+    # the frame the model saw (the pose before the turn's actions) into info["statement"] and the turn metrics.
+    # Default off: nothing is computed.
+    statement_record: bool = False
     history_window_size: int = 1  # Observations retained, including the current frame
     max_actions_per_step: int = 5  # Maximum actions allowed per step
     action_sep: str = "|"  # Separator for multiple actions

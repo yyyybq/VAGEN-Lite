@@ -103,6 +103,8 @@ class AgentData:
         # reward line (2026-11-01, vagen/turn_credit.py): every turn's span, reward and progress score
         self.turn_records: List[Dict[str, Any]] = []
         self.turn_d0: Optional[int] = None  # the start pose's table distance (phase 2, the stall penalty)
+        # reward line, direction 3 (vagen/statement_truth.py): the env's score of each answer's statement
+        self.statement_scores: List[Dict[str, Any]] = []
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -364,6 +366,14 @@ class GymAgentLoop(AgentLoopBase):
 
             output.extra_fields["turn_records"] = episode_record(agent_data.initial_score, agent_data.turn_records,
                                                                  self.response_length, agent_data.turn_d0)
+        if (env_config or {}).get("statement_record"):  # reward line, direction 3: the episode's statement scores
+            from vagen.statement_truth import FIELDS
+
+            scores = agent_data.statement_scores
+            mean = lambda key: sum(float(s.get(key) or 0) for s in scores) / len(scores) if scores else 0.0  # noqa: E731
+            output.extra_fields["reward_extra_info"].update(
+                {"statement_accuracy": mean("accuracy"), "statement_readable": mean("readable"),
+                 **{f"statement_{k}": mean(k) for k in FIELDS}})
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:
@@ -464,11 +474,20 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.env_turns += 1
         agent_data.invalid_turns += int(turn_invalid(info))
         agent_data.end_turn(turn_invalid(info))  # round 12 freeze (vagen/invalid_turns.py)
+        statement = info.get("statement") if isinstance(info, dict) else None
+        statement_span = None
+        if isinstance(statement, dict):  # reward line, direction 3: the env's score of this answer's statement
+            agent_data.statement_scores.append(statement)
+            if statement.get("readable") and getattr(self, "record_turn_records", False) and agent_data.turn_span:
+                from vagen.statement_truth import statement_token_count
+
+                k = statement_token_count(self.tokenizer, agent_data.response_ids)
+                statement_span = [agent_data.turn_span[0], agent_data.turn_span[0] + k] if k else None
         if getattr(self, "record_turn_records", False):  # reward line (2026-11-01, vagen/turn_credit.py)
             from vagen.turn_credit import turn_record
 
             agent_data.turn_records.append(turn_record(agent_data.turn_span, reward, info, agent_data.traj_success,
-                                                       not turn_invalid(info)))
+                                                       not turn_invalid(info), statement_span))
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))
