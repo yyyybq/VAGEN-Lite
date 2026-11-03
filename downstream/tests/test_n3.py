@@ -310,3 +310,14 @@ def test_model_job_per_tier_workers_and_dropping_corrupted_episodes(tmp_path):
     assert (tmp_path / "n3/calls").read_text().split() == [f"{n3}/c/S|4|sphere", f"{n3}/e/S|12|robot"]
     assert (c / "episodes.jsonl").read_text() == '{"instance_id": "ok"}\n' and (c / "frames_corrupted/bad.0.png").exists()
     assert 'tier c: {"dropped": 1, "kept": 1}' in (tmp_path / "n3/n3_S.log").read_text()
+
+
+def test_report_figure_draws_rl_minus_sft_per_tier(tmp_path):
+    pytest.importorskip("matplotlib")
+    import n3_report as NR
+
+    pair = {"n": 10, "diff": 0.05, "low": 0.01, "high": 0.09, "only_a": 3, "only_b": 1, "p": 0.6}
+    rep = {"tiers": {t: {"pairs": {"RD-S": pair, "Q3RD-Q3S": dict(pair, diff=-0.02, low=-0.05, high=0.01)}}
+                     for t, _ in NR.FIG_TIERS}}
+    assert NR.figure(rep, tmp_path) == ["n3_ladder.png", "n3_ladder.svg"]
+    assert (tmp_path / "n3_ladder.png").stat().st_size > 1000

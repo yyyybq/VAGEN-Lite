@@ -159,17 +159,55 @@ def markdown(rep: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+FIG_TIERS = (("a", "(a) upstream as is"), ("c", "(c) RoboCasa, upstream body"),
+             ("d_on_c", "(d) N1, same instances as (c)"),
+             ("e", "(e) robot's own camera"))
+FIG_PAIRS = (("RS-S", "RS − S", "#d9822b"), ("RD-S", "RD − S", "#2f9a6a"), ("Q3RS-Q3S", "Q3RS − Q3S", "#e8a65c"),
+             ("Q3RD-Q3S", "Q3RD − Q3S", "#6cbf96"))
+
+
+def figure(rep: dict, out: Path) -> list:
+    """RL minus SFT per tier with its paired 95% interval (one row per tier, one marker per pairing)."""
+    sys.path.insert(0, str(HERE.parent / "report"))
+    import n_figures as NF
+
+    plt = NF.plt_setup()
+    fig, ax = plt.subplots(figsize=(6.4, 3.6))
+    for k, (key, label, color) in enumerate(FIG_PAIRS):
+        for row, (tier, _) in enumerate(FIG_TIERS):
+            c = rep["tiers"][tier]["pairs"].get(key)
+            if not c or not c.get("n"):
+                continue
+            y = row + (k - 1.5) * 0.17
+            ax.errorbar([100 * c["diff"]], [y], xerr=[[100 * (c["diff"] - c["low"])], [100 * (c["high"] - c["diff"])]],
+                        fmt="o", color=color, ms=4.5, elinewidth=1.1, capsize=2, label=label if row == 0 else None)
+    ax.axvline(0, color="#66707c", lw=0.8)
+    ax.set_yticks(range(len(FIG_TIERS)))
+    ax.set_yticklabels([lab for _, lab in FIG_TIERS])
+    ax.invert_yaxis()
+    ax.set_xlabel("RL − SFT success (percentage points, paired 95% interval)")
+    ax.grid(axis="x", color="#e4e7eb", lw=0.7)
+    ax.legend(fontsize=8, loc="lower right", ncol=2)
+    fig.tight_layout()
+    files = NF.save(fig, out, "n3_ladder")
+    plt.close(fig)
+    return files
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--n3", type=Path, required=True)
     ap.add_argument("--exclude", type=Path, nargs="*", default=[])
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--figure", action="store_true", help="also DIR/n3_ladder.png and .svg")
     args = ap.parse_args(argv)
     rep = build(args.n3, R.excluded(args.exclude))
     out = args.out or args.n3
     out.mkdir(parents=True, exist_ok=True)
     (out / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False) + "\n")
     (out / "report.md").write_text(markdown(rep), encoding="utf-8")
+    if args.figure:
+        figure(rep, out)
     print(json.dumps({t: {k: round(v.get("diff", math.nan), 4) for k, v in tab["pairs"].items()}
                       for t, tab in rep["tiers"].items()}))
     return 0
