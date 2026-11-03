@@ -11,10 +11,13 @@ changes to N1's RoboCasa side, as a subclass of n_env.Scene (n_env itself is lef
   centre is already inside a box (as upstream).  RoboCasa's walls are geoms, so they count as boxes.  The robot is
   still posed (renders hide it) but its own contacts no longer block anything.
 * camera "robot" (tier e, the robot's own camera): the height and the vertical field of view that the robot's own
-  robot0_agentview_center camera has right after the reset (measured, not assumed), kept level, looking along the
-  heading, over the rotation axis; rendered at 320 x 240 and resized to 256 x 256 as camera A.  The judge follows:
-  every item gets the native intrinsics of that camera (640 x 480, fy = 240 / tan(fovy / 2), fx = fy, centre
-  (320, 240)), and the prompt's pose line shows the new height.  The settings are n_env's module values
+  camera has right after the reset (ROBOT_CAMERA, robot0_agentview_left: one of the two views the StarVLA policy
+  sees, its right twin the same; measured 2026-11-03: 1.75 m above the floor, vertical field of view 60 degrees,
+  tilted 32.5 degrees down), kept level (the user's choice), looking along the heading, over the rotation axis;
+  rendered at 320 x 240 and resized to 256 x 256 as camera A (a vertical 60 degrees is about 75 degrees across the
+  4:3 render, against camera A's 90).  The judge follows: every item gets the native intrinsics of that camera
+  (640 x 480, fy = 240 / tan(fovy / 2), fx = fy, centre (320, 240)), and the prompt's pose line shows the new
+  height.  The settings are n_env's module values
   (CAM_HEIGHT_M, FOVY_DEG, NATIVE_K, make_item) set by use_camera() once per process (each generation scene and each
   evaluation episode is a process of its own).
 
@@ -37,6 +40,7 @@ import n_env as N  # noqa: E402
 UPSTREAM_RADIUS_M, UPSTREAM_MARGIN_M = 0.15, 0.05  # CollisionDetector(camera_radius, safety_margin) defaults
 COLLISIONS = ("robot", "sphere")
 CAMERAS = ("A", "robot")
+ROBOT_CAMERA = "robot0_agentview_left"
 _MAKE_ITEM = N.make_item
 
 
@@ -100,7 +104,9 @@ class Scene(N.Scene):
 
     def _place_camera(self) -> None:
         m, d = self.m, self.d
-        self.robot_camera = {"height_m": float(d.cam_xpos[self.cam][2]), "fovy_deg": float(m.cam_fovy[self.cam])}
+        rc = self.mj.mj_name2id(m, self.mj.mjtObj.mjOBJ_CAMERA, ROBOT_CAMERA)
+        self.robot_camera = {"camera": ROBOT_CAMERA, "height_m": float(d.cam_xpos[rc][2]),
+                             "fovy_deg": float(m.cam_fovy[rc])}
         if self.camera_mode == "robot":
             v = self.camera_values or self.robot_camera
             use_camera(v["height_m"], v["fovy_deg"])
