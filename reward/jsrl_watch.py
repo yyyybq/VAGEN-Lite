@@ -89,9 +89,12 @@ def main():
     for run in plan["rl_runs"]:
         base = chain / f"rl_run_{run}"
         per = log_metrics(list((base / "logs").glob("rl-*.log")))
-        ended += int((base / "logs" / "rl_exit.json").is_file())
+        finished = (base / "logs" / "rl_exit.json").is_file()
+        ended += int(finished)
         done = sorted(int(p.stem) for p in (base / "rollout_data").glob("*.jsonl")) if (base / "rollout_data").is_dir() else []
-        done = [u for u in done if u in per][:-1]  # the newest dump may still be being written
+        done = [u for u in done if u in per]
+        if not finished:  # the newest dump may still be being written
+            done = done[:-1]
         data = {}
         for u in done:
             here = episodes(base / "rollout_data" / f"{u}.jsonl")
