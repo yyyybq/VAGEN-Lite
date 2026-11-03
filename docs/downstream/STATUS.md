@@ -1,10 +1,16 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-11-03 18:5x UTC（**矩阵 v3 的 13 个起点按 N1 的做法在评**（18:47 交，在 zoetrope 排队，第 2 节）；[C1 第六段](reports/C1_PROGRESS.md)（17:30 报）：每步 1.23 秒，推算合计约 716 卡时，约 11-04 09:45 训完；[N2 完成](reports/N2_RESULTS_20261103.md)、[N3 完成](reports/N3_RESULTS_20261103.md)，三件事等你定（见 N3 报告末尾）；[你 11-03 六条决定的执行情况](reports/PROGRESS_20261103.md)：7 个 SUSPENDED 记录已删；三张图在 [figures/](figures/)；C1 训完后的评测脚本就绪；磁盘 18 / 22 TB，多出的 4 TB 是 P1 矩阵和奖励线写的；**发现模拟器偶尔渲染出彩色噪点**，N1 去掉受影响的 20 个实例后结论不变；每日汇总 [DAILY_20261103](daily/DAILY_20261103.md)；[N1 加固完成，合并 600 个实例](reports/N1_MERGED_20261102.md)：RL 对 SFT 四个都不显著，N1 的"RS 比 S 低 4.7"没复现、已撤回；你 11-02 晚的七条决定，执行中：[N2 卡时和排队顺序](reports/N2_PLAN_20261102.md)、[N3 设计](reports/N3_DESIGN_20261102.md)等你批；[论文素材清单](reports/PAPER_MATERIALS_20261102.md)；V4 大文件已由磁盘线删除；只投 zoetrope；[V4 复核结果](reports/V4_RECHECK_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-11-03 23:1x UTC（**[矩阵 v3 的 13 个起点按 N1 的做法评完了](reports/NM_RESULTS_20261103.md)**：RL 对自己的 SFT 起点都不到 5 个百分点、方向不一致；下游看不出 D 比 C 好；D 种子 1 的 V4 掉到 8.0%；[C1 第六段](reports/C1_PROGRESS.md)（17:30 报）：每步 1.23 秒，推算合计约 716 卡时，约 11-04 09:45 训完；[N2 完成](reports/N2_RESULTS_20261103.md)、[N3 完成](reports/N3_RESULTS_20261103.md)，三件事等你定（见 N3 报告末尾）；[你 11-03 六条决定的执行情况](reports/PROGRESS_20261103.md)：7 个 SUSPENDED 记录已删；三张图在 [figures/](figures/)；C1 训完后的评测脚本就绪；磁盘 18 / 22 TB，多出的 4 TB 是 P1 矩阵和奖励线写的；**发现模拟器偶尔渲染出彩色噪点**，N1 去掉受影响的 20 个实例后结论不变；每日汇总 [DAILY_20261103](daily/DAILY_20261103.md)；[N1 加固完成，合并 600 个实例](reports/N1_MERGED_20261102.md)：RL 对 SFT 四个都不显著，N1 的"RS 比 S 低 4.7"没复现、已撤回；你 11-02 晚的七条决定，执行中：[N2 卡时和排队顺序](reports/N2_PLAN_20261102.md)、[N3 设计](reports/N3_DESIGN_20261102.md)等你批；[论文素材清单](reports/PAPER_MATERIALS_20261102.md)；V4 大文件已由磁盘线删除；只投 zoetrope；[V4 复核结果](reports/V4_RECHECK_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
 - 第一步、第二步完成；E0、E1、E2、**E3** 完成；**X0–X5、XE、T5、T2** 完成。
+- **矩阵 v3 的 13 个起点按 N1 的做法评完（[结果](reports/NM_RESULTS_20261103.md)，11-03 23:1x 发你、交主线）。** 600 个实例，权重不动。
+  - 7 个 RL 对各自 SFT 起点：−4.3 到 +4.3 个百分点。两个显著升（D 种子 2 S0、C 种子 2 V4），一个显著降（D 种子 1 V4），四个看不出。
+  - V4 对 S0：C 种子 2 +4.7，D 两个种子 −6.8、−3.3。
+  - D 对 C：四个 RL 格子简单平均 −1.5（C 种子 1 的 V4 按你定的规则用 C-SFT 代替）。
+  - 旧 E 单独列（自由思考提示，已废弃）。
+  - 13 个任务都正常结束，约 10.6 卡时；剔除坏画面实例后结论不变。
 - **11-03 你的六条决定（[执行情况](reports/PROGRESS_20261103.md)）：**
   1. **N2 完成（[结果](reports/N2_RESULTS_20261103.md)），下面是开头的记录。** 示教生成 `pt-gl442khp`、`pt-pmfmf3s8`（11:13–12:17，zoetrope，约 2.2 卡时）：260 个新场景（重置种子 2000–2009）出了 1,253 条，用得上 1,142 条（69 条最后一帧判不成功、42 条有坏画面）。100 / 300 / 1,000 三档嵌套，1,000 档里遮挡只有 89 条，其余五类各 182–183。示教每轮最多 3 个动作（你批的；我 11-02 说"主线 SFT 就是 3 个"说错了，主线是 5 个）。LoRA 用我们自己的训练脚本（`downstream/n/n2_train.py`，和评测服务同一个环境、同一个对话模板），不用 LLaMA-Factory。冒烟 `pt-nn08upop`（12:20 开跑）：B 用 100 条训，评 60 个实例。
   2. **N3 完成（[结果](reports/N3_RESULTS_20261103.md)）**，按你说的做：(b) 去掉；(a) 用现成结果（Qwen3 三个的主线逐题结果都在，0 卡时）；(c) 先重核 600 个实例在上游相机球规则下能不能做成；(e) 机器人自己相机实测离地 1.75 米、竖直视场 60°，保持水平。
@@ -96,9 +102,13 @@
 - **X1、X2、X3、X5、T5**：报告 10-29 01:3x 已交（[X1](reports/X1_RESULTS_20261029.md)、[X2](reports/X2_RESULTS_20261029.md)、[X3](reports/X3_RESULTS_20261029.md)、[X5](reports/X5_RESULTS_20261029.md)、[T5](reports/T5_RESULTS_20261029.md)）。
 - **T 系列**：T5、T2 完成；T1 推迟；T3 / T4 等路径。
 
-## 2. 在跑什么（11-03 18:5x UTC）
+## 2. 在跑什么（11-03 23:1x UTC）
 
-- **矩阵 v3 起点按 N1 的做法评，13 个 1 卡任务在跑**（zoetrope，18:47 交；19:2x 还在排队，STARTING 是排队状态，zoetrope 24 个在排、前面 11 个；`downstream_runs/n/nm_20261103/`，任务号在 `submit_20261103.json`，`pt-6ihk17bw` 等）：主实验 18:4x 发来的 13 个检查点（C：SFT 第 4 个 epoch、种子 1 S0 第 50 次、种子 2 S0 第 100 次、种子 2 V4 第 50 次；D：SFT 第 9 个 epoch、四个 RL 都是第 300 次；E：种子 1 V4 和种子 2 S0 第 200 次，另两个第 300 次），登记在 `downstream/n/nm_starts.json`（`c25f9f6e`），检查通过。已回主实验一句估算。
+- 现在没有在跑的 N 系列任务。
+- **矩阵 v3 的 13 个评测任务已跑完**：18:47 交到 zoetrope，排了约 3 小时，21:38–22:46 跑完，13 个都是 SUCCEEDED，每个 600 回合，约 10.6 卡时。
+  - 回合在 `downstream_runs/n/nm_20261103/`，任务号在 `submit_20261103.json`。
+  - 表在 `report/`，剔除坏画面实例的版本在 `report_clean/`。
+  - 旧 E 的归档标记在 `51ee2d07`，D 对 C 的配对在 `ebfa8600`。
 
 - **N2 完成（[结果](reports/N2_RESULTS_20261103.md)，15:4x 发你）**：底座 100 条就跳到约 15.5% 后到顶；Qwen2.5 的 S、RS、RD 到 1,000 条还在涨（20%–21%），Qwen3 的 300 条后不涨；主线训练的优势 100 条时抹平、1,000 条时 Qwen2.5 又高 4–6 个点；RL 对 SFT 各档都分不开。8 个任务 14:46–15:17 都正常结束；坏画面回合两轮重跑（`run_n2_repair.sh`，4 个、1 个进程）后只剩 1 个实例的 11 个回合。合计约 25.5 卡时。
 - **N3 完成（[结果](reports/N3_RESULTS_20261103.md)，16:0x 发你）**：稠密 RL 的优势在 RoboCasa 场景里还在（换上游相机球碰撞：RD − S +5.8，Q3RD − Q3S +4.3），换成机器人的身体就没了（同样 585 个实例 +2.1、+0.5；掉的 3.8 两个区间都不含 0），因为 RL 策略多转身、机器人原地转身一半被挡；稀疏 RL 的优势丢在从上游到 RoboCasa 那一步；机器人相机不改变结论。评测 8 个任务 15:20–15:45、坏回合重跑 15:47–15:51 都正常；约 11 卡时。
@@ -168,7 +178,9 @@ bash downstream/eval/watch.sh status
 
 ## 3. 在等什么
 
-- **矩阵 v3 起点按 N1 的做法评：你批了（11-03 晚：两个 SFT 起点一起评，路径到了就提交），18:47 已提交（见第 2 节），跑完按 N1 的表交主线、报你。** 主实验 19:3x 确认：新 E 叫 E2（P1 的 SFT `pt-cv6nm7kx` 在 h800 排队，权重将在 `sft/E2/model/checkpoint-<步数>`）；E2、B′、D_noP0 三个只有 SFT 的用 C、D 的验证提示（no_think + action_names），`nm_starts` 对没有 RL 链的组默认就是它（`adafac68`，矩阵的 B 记作 `Bp-SFT`）。旧 E 的 4 个 RL 按你的话作废，报告里单独一节标"自由思考提示，已废弃"。E2、B′、D_noP0 路径到了是否直接交，等你定（每个约 0.8 卡时）。 13 个起点：主线挑的 RL 至多 11 个（C 第 1 个种子的 V4 没有存盘），加 C、D 的 SFT 起点（`sft/C/model/checkpoint-1204`、`sft/D/model/checkpoint-3987`）；E 的 SFT 起点就是 N1 的 Q3S，底座用 N1 的 Q3B，都不重评。合并的 600 个实例，每个起点一个 zoetrope 的 1 卡任务，约 9–12.5 卡时（未核实）；E1 远迁移不做；结果按 N1 的表交主线。代码就绪、测过（`nm_starts.py`、`run_nm.sh`、`nm_report.py`，`76d8386a`）：每个模型看自己训练链的验证提示（和主线 / 矩阵代码渲染出来逐字相同），跑完扫坏画面、用 4 个进程重跑坏回合；拿各 RL 最新一步试做的登记表检查通过。
+- **E2、B′、D_noP0 三个 SFT 起点交不交，等你定（第 4 节）。**
+  - 主实验 19:3x 说，E2 的 SFT `pt-cv6nm7kx` 在 h800 排队，权重将在 `sft/E2/model/checkpoint-<步数>`；现在的状态未核实。
+  - 三个都用 C、D 的验证提示（no_think + action_names，主实验确认过）。代码就绪（`adafac68`），矩阵的 B 记作 `Bp-SFT`。
 - C1 正式任务重跑 `pt-a2loxfl9`：第六段（第 125,000–150,000 步）11-03 16:42 走完、17:30 已报；第七段约 11-04 01:15 走完；约 11-04 09:45 训完（慢到 1.30 秒约 10:45），然后任务内评测。训完前排好 X3、X4（导出一份副本）、X0 的队（你 11-02 晚决定 5）。
 - C1 训完（约 11-04 09:40）、任务内评测完：依次交 X3（`run_x3.sh C1-B-030-s1`、`DS-B-030-s1`，各 8 卡）和 X4 / X0（`run_c1_post.sh`，1 卡）。11-04 07:23 和 09:00 两次检查时查剩余空间，不足 100 GB 先报你（现在约 4 TB）。
 - 你定：N2、N3 转不转主窗口；N3 (a) 档要不要不带历史重评（约 6–9 卡时）；N1 的 75 个坏画面回合要不要重跑（约 1–2 卡时）。
@@ -176,6 +188,7 @@ bash downstream/eval/watch.sh status
 
 ## 4. 待你决定的事
 
+- **E2、B′、D_noP0 三个 SFT 起点**：路径到了是否直接按 N1 的做法评，每个约 0.8 卡时，结果补进矩阵的下游表。
 - **N1 里画面坏了的 75 个回合**（20 个实例 × 部分模型）：在新进程里重跑（8 个模型都跑这 20 个，约 1–2 卡时，未核实），还是论文里只报"剔除这 20 个实例"的敏感性分析（已算好，结论不变）。
 - **N3 (a) 档的对话历史**：主线 v2 评测给模型看全部历史轮次，N 系列只给当前一轮。要不要把 6 个模型在 v2 两套题上不带历史再评一遍（约 6–9 卡时，未核实）。
 
