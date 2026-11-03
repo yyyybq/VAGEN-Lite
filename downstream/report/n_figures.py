@@ -41,7 +41,7 @@ V4_LINES = (("Q3B", "Q3B  base (model line)", "#7a8291", "-", "o"),
             ("Q3DCKS2", "DCKS2  DCK recipe", "#8e5bb5", "--", "^"))
 
 
-def wilson(k: int, n: int, z: float = 1.959964) -> tuple:
+def wilson(k: int, n: int, z: float = 1.96) -> tuple:  # the reports' z (n_report, qa_report)
     if n == 0:
         return float("nan"), float("nan"), float("nan")
     p = k / n
