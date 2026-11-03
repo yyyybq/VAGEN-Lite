@@ -1,0 +1,51 @@
+{
+ "batch": "b29_20261103",
+ "approved": "PENDING: the user's confirmation in the disk window (relayed by the model line 11-03 ~20:00, its table 1g).",
+ "items": [
+  {
+   "id": "CAM-sft-lf_cformal-final",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_sft_20261026/lf_cformal/model",
+   "marker_name": "DELETED_TO_AOSS_b29.txt",
+   "marker": "Cambrian-S training weights, SFT final weights (epoch 10) (model line reclaim table 1g; the user 11-03: only the predictive-loss results go into the final paper): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/models_runs/chains/m_cambrian7b_formal_sft_20261026/lf_cformal/model) and deleted by the disk line, batch b29_20261103 (time in disk_runs/batches/b29_20261103/deleted.tsv), on the user's approval of the planned list. Evaluation results and logs stay. Only the 7 top-level model-*.safetensors; checkpoint-770/ (SFT epoch 5) stays.",
+   "include": [
+    "^model-\\d+-of-\\d+\\.safetensors$"
+   ]
+  },
+  {
+   "id": "CAM-rl-cs0-100-hf",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261026/rl_run_cs0/checkpoints/global_step_100/actor/huggingface",
+   "marker_name": "DELETED_TO_AOSS_b29.txt",
+   "marker": "Cambrian-S training weights, cs0 step 100 (start of DS-CSRS) (model line reclaim table 1g; the user 11-03: only the predictive-loss results go into the final paper): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/models_runs/chains/m_cambrian7b_formal_rl_20261026/rl_run_cs0/checkpoints/global_step_100/actor/huggingface) and deleted by the disk line, batch b29_20261103 (time in disk_runs/batches/b29_20261103/deleted.tsv), on the user's approval of the planned list. Evaluation results and logs stay."
+  },
+  {
+   "id": "CAM-rl-crd-50-hf",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261027_dense/rl_run_crd/checkpoints/global_step_50/actor/huggingface",
+   "marker_name": "DELETED_TO_AOSS_b29.txt",
+   "marker": "Cambrian-S training weights, crd step 50 (start of DS-CSRD) (model line reclaim table 1g; the user 11-03: only the predictive-loss results go into the final paper): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/models_runs/chains/m_cambrian7b_formal_rl_20261027_dense/rl_run_crd/checkpoints/global_step_50/actor/huggingface) and deleted by the disk line, batch b29_20261103 (time in disk_runs/batches/b29_20261103/deleted.tsv), on the user's approval of the planned list. Evaluation results and logs stay."
+  },
+  {
+   "id": "DS-CSB-100-s1-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSB-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b29.txt",
+   "marker": "Cambrian-S training weights, downstream final model (step 200k) (model line reclaim table 1g; the user 11-03: only the predictive-loss results go into the final paper): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/models_runs/downstream/experiments/DS-CSB-100-s1/run/final_model) and deleted by the disk line, batch b29_20261103 (time in disk_runs/batches/b29_20261103/deleted.tsv), on the user's approval of the planned list. Evaluation results and logs stay."
+  },
+  {
+   "id": "DS-CSS-100-s1-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSS-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b29.txt",
+   "marker": "Cambrian-S training weights, downstream final model (step 200k) (model line reclaim table 1g; the user 11-03: only the predictive-loss results go into the final paper): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/models_runs/downstream/experiments/DS-CSS-100-s1/run/final_model) and deleted by the disk line, batch b29_20261103 (time in disk_runs/batches/b29_20261103/deleted.tsv), on the user's approval of the planned list. Evaluation results and logs stay."
+  },
+  {
+   "id": "DS-CSRS-100-s1-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSRS-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b29.txt",
+   "marker": "Cambrian-S training weights, downstream final model (step 200k) (model line reclaim table 1g; the user 11-03: only the predictive-loss results go into the final paper): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/models_runs/downstream/experiments/DS-CSRS-100-s1/run/final_model) and deleted by the disk line, batch b29_20261103 (time in disk_runs/batches/b29_20261103/deleted.tsv), on the user's approval of the planned list. Evaluation results and logs stay."
+  },
+  {
+   "id": "DS-CSRD-100-s1-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/downstream/experiments/DS-CSRD-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b29.txt",
+   "marker": "Cambrian-S training weights, downstream final model (step 200k) (model line reclaim table 1g; the user 11-03: only the predictive-loss results go into the final paper): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/models_runs/downstream/experiments/DS-CSRD-100-s1/run/final_model) and deleted by the disk line, batch b29_20261103 (time in disk_runs/batches/b29_20261103/deleted.tsv), on the user's approval of the planned list. Evaluation results and logs stay."
+  }
+ ]
+}
