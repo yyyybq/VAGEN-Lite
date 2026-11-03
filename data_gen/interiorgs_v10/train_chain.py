@@ -166,6 +166,12 @@ Round 12 freeze (the user's decision 3 of 2026-10-22): a run whose plan rl names
 first, render-service repack, the batch's stop rules with the 10% unreadable-answer line, 5 start-up retries counted
 apart) for every setting the plan does not give; the plan's values win, key by key inside "guards" and "startup".
 
+Experiment matrix v2 (branch transition-qa, docs/transition_qa/CHANGES.md section 5; ported to the Qwen3 main line
+2026-11-03 for the QA RL pilot's SFT control, the user's OK of that day): plan "sft_lf_dirs" ({group: LLaMA-Factory
+folder}) trains a group on a folder built elsewhere: "render" and "sft_data" only check it (train.yaml, its
+output_dir <folder>/model, "sft_epochs", one save per epoch); the SFT, its per-epoch evaluation and the pick then use
+that folder.  The model it trains from is its train.yaml's model_name_or_path.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -700,7 +706,32 @@ class Chain:
         return dict(groups) if groups else {"": "sft_trajectories.jsonl"}
 
     def lf_dir(self, group: str) -> Path:
+        given = (self.plan.get("sft_lf_dirs") or {}).get(group)  # matrix v2: a folder built elsewhere
+        if given:
+            return Path(given)
         return self.tr / (f"lf_{group}" if group else "lf")
+
+    def lf_given(self) -> bool:
+        """Matrix v2: every SFT group trains on a LLaMA-Factory folder named in plan "sft_lf_dirs"."""
+        given = self.plan.get("sft_lf_dirs") or {}
+        return bool(given) and all(g in given for g in self.sft_groups())
+
+    def check_lf_dir(self, group: str) -> Dict[str, Any]:
+        """A folder of plan "sft_lf_dirs" trains as the chain would: train.yaml present, its output_dir is
+        <folder>/model (where the per-epoch evaluation and the pick look), the plan's epochs, one save per epoch."""
+        import yaml
+
+        lf = self.lf_dir(group)
+        if not (lf / "train.yaml").is_file():
+            raise ChainError(f"sft_lf_dirs: no train.yaml in {lf}")
+        cfg = yaml.safe_load((lf / "train.yaml").read_text())
+        if Path(str(cfg.get("output_dir"))).resolve() != (lf / "model").resolve():
+            raise ChainError(f"sft_lf_dirs: {lf}/train.yaml writes to {cfg.get('output_dir')}, not {lf / 'model'}")
+        if self.plan.get("sft_epochs") is not None and float(cfg.get("num_train_epochs", -1)) != float(self.plan["sft_epochs"]):
+            raise ChainError(f"sft_lf_dirs: {lf} trains {cfg.get('num_train_epochs')} epochs, the plan {self.plan['sft_epochs']}")
+        if cfg.get("save_strategy") != "epoch":
+            raise ChainError(f"sft_lf_dirs: {lf} does not save every epoch (save_strategy {cfg.get('save_strategy')})")
+        return {"dir": str(lf), "epochs": cfg.get("num_train_epochs"), "datasets": cfg.get("dataset")}
 
     def eval_sets(self) -> Dict[str, Path]:
         sets = self.plan.get("eval_sets")
@@ -1097,6 +1128,9 @@ class Chain:
         from . import pilot_sco
         from .pilot import safe_name
 
+        if self.lf_given():  # matrix v2: the SFT data comes ready-made; its images are checked by the builder
+            self.mark("render", note="SFT data built elsewhere (sft_lf_dirs); nothing to render")
+            return
         frames = [json.loads(l) for l in (self.sft_dir / "frames.jsonl").read_text().splitlines() if l.strip()]
         plain = self.sft_dir / "frames" / "plain"
 
@@ -1125,12 +1159,21 @@ class Chain:
 
     def sft_data(self) -> None:
         py = sys.executable
+        given = self.plan.get("sft_lf_dirs") or {}
+        checked = {g: self.check_lf_dir(g) for g in self.sft_groups() if g in given}  # matrix v2: ready-made folders
+        if checked:
+            self.mark("sft_data", lf_dirs=checked)
+        if self.lf_given():  # sft-records would rewrite sft_dir's conversations, which these folders do not use
+            self.mark("sft_data", note="SFT data built elsewhere (sft_lf_dirs)")
+            return
         if self.plan.get("sft_records", True):  # round 12 batch: false = the conversation files exist already
             records = [py, "-m", "data_gen.interiorgs_v10.training_prep", "sft-records", "--dir", str(self.sft_dir)]
             if self.plan.get("scenes_root"):  # round 10: inserted blocked turns need the scenes' collision detectors
                 records += ["--scenes-root", str(self.plan["scenes_root"])]
             self.sh(records, log=self.tr / "logs" / "sft_records.log")
         for group, trajectory in self.sft_groups().items():
+            if group in given:
+                continue
             if not (self.sft_dir / trajectory).is_file():
                 raise ChainError(f"sft-records wrote no {trajectory} for group {group or 'default'}")
             lf = self.lf_dir(group)

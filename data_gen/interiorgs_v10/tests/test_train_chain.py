@@ -671,6 +671,41 @@ class ChainTest(unittest.TestCase):
         self.assertIsNone(T.guard_reason(few, {"kl_max": 0.2}))  # off unless given
         self.assertIsNone(T.guard_reason("".join(line(s) for s in range(1, 8)), guards))  # S0: no keep metrics
 
+    def test_sft_lf_dirs(self):
+        """Matrix v2's plan "sft_lf_dirs" (ported 2026-11-03, P1's test): a group trains on a ready-made
+        LLaMA-Factory folder; render and sft_data only check it (no render job, no sft-records, no prepare script)."""
+        import yaml
+
+        def write_lf(folder, epochs=10, output_dir=None, save="epoch"):
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "train.yaml").write_text(yaml.safe_dump({"output_dir": str(output_dir or folder / "model"),
+                                                               "num_train_epochs": epochs, "save_strategy": save,
+                                                               "dataset": "P0_train,P1_train,P2_train"}))
+            return folder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lf = write_lf(root / "mix_D")
+            plan = {"tr": str(root / "tr"), "sft_dir": str(root / "sft"), "endpoint": 300, "sft_epochs": 10,
+                    "sft_groups": {"mix": "sft_trajectories.jsonl"}, "sft_lf_dirs": {"mix": str(lf)}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            self.assertEqual(chain.lf_dir("mix"), lf)
+            self.assertTrue(chain.lf_given())
+            calls = []
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.render()  # no frames.jsonl needed, no render job
+            chain.sft_data()  # no sft-records (it would rewrite sft_dir), no prepare script
+            self.assertEqual(calls, [])
+            steps = chain.state["steps"]
+            self.assertIn("sft_lf_dirs", steps["render"]["note"])
+            self.assertEqual(steps["sft_data"]["lf_dirs"]["mix"]["dir"], str(lf))
+            for bad in ({"epochs": 5}, {"output_dir": root / "elsewhere"}, {"save": "steps"}):
+                write_lf(lf, **bad)
+                with self.assertRaises(T.ChainError):
+                    chain.sft_data()
+            self.assertFalse(T.Chain({k: v for k, v in plan.items() if k != "sft_lf_dirs"},
+                                     sleep=lambda s: None).lf_given())
+
     def test_qa_eval_jobs(self):
         """Decision 2 甲 (2026-11-01): plan "qa_eval" adds one job a model and EASI benchmark to the evaluate step's
         queue, submitted in job script mode qa with the plan's model type; a scored one (done.json) is skipped; the
