@@ -24,10 +24,15 @@ import n_episode as E  # noqa: E402
 
 
 def camera_of(insts: list):
-    """(mode, values or None) shared by all instances; SystemExit when they differ."""
+    """(mode, values or None) shared by all instances, the height to 0.1 mm and the field of view to 0.01 degree (each
+    scene measures its own robot camera: 1.75 m to within 1e-8, 11-03's first tier-e run stopped on that);
+    SystemExit when they differ beyond that."""
     def key(i):
         c = i.get("camera") or {"mode": "A"}
-        return json.dumps({k: c.get(k) for k in ("mode", "height_m", "fovy_deg")}, sort_keys=True)
+        return json.dumps({"mode": c.get("mode"),
+                           "height_m": None if c.get("height_m") is None else round(float(c["height_m"]), 4),
+                           "fovy_deg": None if c.get("fovy_deg") is None else round(float(c["fovy_deg"]), 2)},
+                          sort_keys=True)
 
     keys = {key(i) for i in insts}
     if len(keys) > 1:

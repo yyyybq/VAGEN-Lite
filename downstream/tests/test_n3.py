@@ -277,3 +277,36 @@ def test_report_tiers_pairings_and_the_c_against_d_gap(tmp_path):
     assert "## (c) RoboCasa + 上游身体" in md and "| RS-S |" in md
     ex = NR.build(n3, exclude={"I0"}, a=a, d_dirs=[d])
     assert ex["tiers"]["c"]["models"]["S"]["n"] == 7 and ex["excluded"] == ["I0"]
+
+
+def test_camera_heights_measured_per_scene_count_as_one_camera():
+    """11-03: each scene measures its own robot camera (1.75 m to within 1e-8); the first tier-e run stopped on it."""
+    cams = [{"camera": {"mode": "robot", "height_m": 1.75 + d, "fovy_deg": 60.0}} for d in (1.6e-8, 1.7e-8, 0.0)]
+    assert NE.camera_of(cams) == ("robot", {"height_m": 1.75, "fovy_deg": 60.0})
+    with pytest.raises(SystemExit):
+        NE.camera_of(cams + [{"camera": {"mode": "robot", "height_m": 1.76, "fovy_deg": 60.0}}])
+
+
+def test_model_job_per_tier_workers_and_dropping_corrupted_episodes(tmp_path):
+    from PIL import Image
+
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    for f in ("run_n3.sh", "n_repair.py", "n_frames.py"):
+        (wt / "downstream/n" / f).write_text((ROOT / "n" / f).read_text())
+    (wt / "downstream/n/run_n3_episodes.sh").write_text(
+        'mkdir -p "$1"; echo "$1|$4|$N3_COLLISION" >> "$(dirname "$(dirname "$1")")/calls"\n')
+    c = tmp_path / "n3/c/S"
+    (c / "frames").mkdir(parents=True)
+    (c / "episodes.jsonl").write_text('{"instance_id": "ok"}\n{"instance_id": "bad"}\n')
+    Image.fromarray(np.zeros((8, 8, 3), np.uint8)).save(c / "frames/ok.png")
+    Image.fromarray(np.random.default_rng(0).integers(0, 256, (8, 8, 3)).astype(np.uint8)).save(c / "frames/bad.png")
+    env = dict({k: v for k, v in os.environ.items() if k != "N_VAL_ENV"}, N3_DROP_CORRUPTED="1",
+               N_VLM_PY=sys.executable)
+    res = subprocess.run(["bash", str(wt / "downstream/n/run_n3.sh"), str(tmp_path / "n3"), "S", "/c.jsonl",
+                          "/e.jsonl", "c:4 e:12"], capture_output=True, text=True, env=env, timeout=60)
+    assert res.returncode == 0, res.stdout + res.stderr
+    n3 = str(tmp_path / "n3")
+    assert (tmp_path / "n3/calls").read_text().split() == [f"{n3}/c/S|4|sphere", f"{n3}/e/S|12|robot"]
+    assert (c / "episodes.jsonl").read_text() == '{"instance_id": "ok"}\n' and (c / "frames_corrupted/bad.0.png").exists()
+    assert 'tier c: {"dropped": 1, "kept": 1}' in (tmp_path / "n3/n3_S.log").read_text()

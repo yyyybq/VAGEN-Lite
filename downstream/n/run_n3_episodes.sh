@@ -42,7 +42,9 @@ VAL=()
 [[ -n ${N_VAL_ENV:-} ]] && VAL=(--val-env "$N_VAL_ENV")
 sim 1 "$SIM_PY" downstream/n/n3_episode.py --collision "${N3_COLLISION:-robot}" --instances "$INST" --port "$PORT" \
   --out "$OUT" --workers "$WORKERS" --limit "$LIMIT" ${VAL[@]+"${VAL[@]}"} > "$OUT/episodes.log" 2>&1
-log "episodes rc=$? $(grep -c '"success": true' "$OUT/episodes.jsonl" 2>/dev/null) successes of $(wc -l < "$OUT/episodes.jsonl" 2>/dev/null)"
+rc=$?
+log "episodes rc=$rc $(grep -c '"success": true' "$OUT/episodes.jsonl" 2>/dev/null) successes of $(wc -l < "$OUT/episodes.jsonl" 2>/dev/null)"
 mkdir -p "$OUT/.scan/$MODEL" && ln -sfn "$OUT/frames" "$OUT/.scan/$MODEL/frames"
 "$VLM_PY" downstream/n/n_frames.py scan --eval "$OUT/.scan" --out "$OUT/frames_scan.json" >> "$OUT/n_episodes.log" 2>&1
 rm -rf "$OUT/.scan"
+exit $rc  # the episode runner's (11-03: a run that stopped before any episode ended with 0)
