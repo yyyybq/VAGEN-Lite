@@ -1,0 +1,67 @@
+{
+ "tr": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/accept_20261103",
+ "commit": "4ae8504d68a0dbad0590da7a65493cfb4b9ff956",
+ "eval_only": true,
+ "model_type": "qwen3_vl",
+ "sft_dir": "/mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024",
+ "job_prefix": "m3",
+ "pool": "queue",
+ "max_eval_jobs": 3,
+ "retries": 4,
+ "suspended_grace_min": 10,
+ "gpu_log": true,
+ "eval_sets": {
+  "accept": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/eval_accept_reserve200"
+ },
+ "rl": {
+  "rows": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl",
+  "exclude": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json"
+ },
+ "eval": {
+  "models": {
+   "sft_m3c_e4_s4": {
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/C/model/checkpoint-1204",
+    "options": [
+     "--samples",
+     "4",
+     "--temperature",
+     "0.8",
+     "--top-p",
+     "0.92",
+     "--entropy",
+     "--format-example",
+     "action_names"
+    ]
+   },
+   "sft_m3d_e9_s4": {
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/D/model/checkpoint-3987",
+    "options": [
+     "--samples",
+     "4",
+     "--temperature",
+     "0.8",
+     "--top-p",
+     "0.92",
+     "--entropy",
+     "--format-example",
+     "action_names"
+    ]
+   },
+   "c0q3_sft_e8_s4": {
+    "model": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232",
+    "options": [
+     "--samples",
+     "4",
+     "--temperature",
+     "0.8",
+     "--top-p",
+     "0.92",
+     "--entropy",
+     "--format-example",
+     "action_names"
+    ]
+   }
+  }
+ },
+ "note": "A.2 (the user, 2026-11-03): the sampled acceptance of C epoch 4, D epoch 9 and C0 epoch 8 on the main line's 200 reserve tasks x 4 at T 0.8, top-p 0.92 (pass: entropy <= 0.06, unreadable <= 1%)"
+}
