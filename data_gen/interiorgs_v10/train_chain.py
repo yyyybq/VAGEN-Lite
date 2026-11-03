@@ -177,10 +177,11 @@ prompt format.
 
 11. ``diagnostics``  matrix v2 (plan "diagnostics": {"failure_breakdown": true, "probes": {"P1": probe.jsonl, "P0":
                    null}, "models_per_job": 6}): the failure breakdown of every evaluation set (CPU,
-                   eval.diagnostics.failure_breakdown) and every probe for every evaluated model (every SFT epoch,
-                   the start model, every RL checkpoint, the plan's eval models): single-card jobs of
-                   eval.diagnostics.sco_probe, results in TR/diag/probe_<name>/ (a model with results is not asked
-                   again), then the curves (qa_probe curve).  A probe set left null is skipped (P0 until it exists).
+                   eval.diagnostics.failure_breakdown over this chain's own result folders, into TR/diag/) and
+                   every probe for every evaluated model (every SFT epoch, the start model, every RL checkpoint, the
+                   plan's eval models): single-card jobs of eval.diagnostics.sco_probe, results in
+                   TR/diag/probe_<name>/ (a model with results is not asked again), then the curves (qa_probe
+                   curve).  A probe set left null is skipped (P0 until it exists).
 
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
@@ -2310,12 +2311,19 @@ class Chain:
             self.mark("diagnostics", note="not planned")
             return
         out = self.tr / "diag"
+        out.mkdir(parents=True, exist_ok=True)  # failure_breakdown writes into it and does not create it
         py = sys.executable
+        models = self.evaluated_models()
         if diag.get("failure_breakdown", True):
             for set_name, eval_dir in self.eval_sets().items():
+                # this chain's result folders only: an evaluation folder shared by several chains (matrix v3) also
+                # holds the others' models, some of them still being written
+                names = [n for n in models if (eval_dir / n / "results.jsonl").is_file()]
+                if not names:
+                    raise ChainError(f"failure breakdown {set_name}: no results of this chain's models in {eval_dir}")
                 self.sh([py, "-m", "eval.diagnostics.failure_breakdown", "--eval", str(eval_dir),
-                         "--out", str(out / f"failure_{set_name}")], log=self.tr / "logs" / f"failure_{set_name}.log")
-        models = self.evaluated_models()
+                         "--names", ",".join(names), "--out", str(out / f"failure_{set_name}")],
+                        log=self.tr / "logs" / f"failure_{set_name}.log")
         probes = {k: v for k, v in (diag.get("probes") or {}).items() if v}  # null: not there yet (P0)
         per_job = int(diag.get("models_per_job", DEFAULT_MODELS_PER_PROBE_JOB))
         runs: Dict[str, Path] = {}

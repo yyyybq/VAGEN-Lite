@@ -2,6 +2,8 @@
 sft_lf_dirs, start_model, rl output_format / max_response_length, guards invalid_until, eval rl_prompt_format."""
 
 import json
+import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -142,6 +144,9 @@ class DiagnosticsStepTest(unittest.TestCase):
             tr = root / "tr"
             for s in (50, 100):
                 (tr / "rl_run_p1s0" / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface").mkdir(parents=True)
+            for name in ("sft_mix_e1", "sft_mix_e2", "p1s0_050", "p1s0_100"):
+                (root / "val" / name).mkdir(parents=True)
+                (root / "val" / name / "results.jsonl").write_text("")
             plan = {"tr": str(tr), "sft_dir": str(root), "endpoint": 100, "sft_groups": {"mix": "x.jsonl"},
                     "sft_lf_dirs": {"mix": str(lf)}, "eval_sets": {"val": str(root / "val")}, "rl_runs": {"p1s0": {}},
                     "eval": {"every": 50}, "diagnostics": {"probes": {"P1": str(root / "p1_probe.jsonl"), "P0": None},
@@ -177,6 +182,7 @@ class DiagnosticsStepTest(unittest.TestCase):
                     mock.patch.object(sco_probe, "prepare", prepare):
                 chain.diagnostics()
                 self.assertEqual(calls[0][2:], ["eval.diagnostics.failure_breakdown", "--eval", str(root / "val"),
+                                                "--names", "sft_mix_e1,sft_mix_e2,p1s0_050,p1s0_100",
                                                 "--out", str(tr / "diag" / "failure_val")])
                 self.assertEqual(sorted(n for names, _ in prepared.values() for n in names),
                                  ["p1s0_050", "p1s0_100", "sft_mix_e1", "sft_mix_e2"])
@@ -190,6 +196,29 @@ class DiagnosticsStepTest(unittest.TestCase):
                 prepared.clear()
                 chain.diagnostics()  # every model has results: no new job
                 self.assertEqual(prepared, {})
+
+    def test_failure_breakdown_reads_only_this_chains_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tr = root / "tr"
+            (tr / "rl_run_p1s0" / "checkpoints" / "global_step_50" / "actor" / "huggingface").mkdir(parents=True)
+            for name in ("p1s0_050", "other_050"):  # other_050: another chain's model in the shared folder
+                (root / "val" / name).mkdir(parents=True)
+                (root / "val" / name / "results.jsonl").write_text("")
+            plan = {"tr": str(tr), "sft_dir": str(root), "endpoint": 50, "start_model": str(root / "start"),
+                    "eval_sets": {"val": str(root / "val")}, "rl_runs": {"p1s0": {}}, "eval": {"every": 50},
+                    "diagnostics": {"probes": {}}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            calls = []
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.diagnostics()
+            self.assertTrue((tr / "diag").is_dir())  # failure_breakdown writes into it and does not create it
+            self.assertEqual(calls, [[sys.executable, "-m", "eval.diagnostics.failure_breakdown", "--eval",
+                                      str(root / "val"), "--names", "p1s0_050",  # "start" has no results here
+                                      "--out", str(tr / "diag" / "failure_val")]])
+            shutil.rmtree(root / "val" / "p1s0_050")
+            with self.assertRaises(T.ChainError):  # none of this chain's models: never every folder
+                chain.diagnostics()
 
     def test_not_planned(self):
         with tempfile.TemporaryDirectory() as tmp:
