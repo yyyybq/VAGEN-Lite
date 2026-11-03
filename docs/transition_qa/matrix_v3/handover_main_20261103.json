@@ -1,0 +1,880 @@
+{
+ "readings": {
+  "prereg": "(the pre-registration's section 2, the main metric): each RL's update-300 checkpoint; a run stopped by a\n  stop line its last checkpoint; a run stopped before its first checkpoint (m3cs1d) its SFT start;",
+  "best_val": "(the main line's Qwen3 reports; exploratory in the pre-registration): each RL's checkpoint with the\n  highest success on the validation set (382 tasks), ties to the earlier, and that checkpoint's test success."
+ },
+ "test_set": "eval_test_v2_screened (292 tasks)",
+ "val_set": "eval_val_v2_screened (382 tasks)",
+ "runs": [
+  {
+   "group": "C",
+   "seed": 1,
+   "side": "S0",
+   "run": "m3cs1s0",
+   "prereg": {
+    "result": "m3cs1s0_050",
+    "test": 0.5274,
+    "val": 0.4791,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/rl_run_m3cs1s0/checkpoints/global_step_50/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3cs1s0_050",
+    "val": 0.4791,
+    "test": 0.5274,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/rl_run_m3cs1s0/checkpoints/global_step_50/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3cs1s0_050": 0.4791
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "C",
+   "seed": 1,
+   "side": "V4",
+   "run": "m3cs1d",
+   "prereg": {
+    "result": "sft_m3c_e4",
+    "test": 0.387,
+    "val": 0.4162,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/C/model/checkpoint-1204",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "sft_m3c_e4",
+    "val": 0.4162,
+    "test": 0.387,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/C/model/checkpoint-1204",
+    "checkpoints_on_val": {},
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "C",
+   "seed": 2,
+   "side": "S0",
+   "run": "m3cs2s0",
+   "prereg": {
+    "result": "m3cs2s0_100",
+    "test": 0.4452,
+    "val": 0.4581,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2s0/checkpoints/global_step_100/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3cs2s0_050",
+    "val": 0.4607,
+    "test": 0.476,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2s0/checkpoints/global_step_50/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3cs2s0_050": 0.4607,
+     "m3cs2s0_100": 0.4581
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "C",
+   "seed": 2,
+   "side": "V4",
+   "run": "m3cs2d",
+   "prereg": {
+    "result": "m3cs2d_050",
+    "test": 0.4418,
+    "val": 0.4188,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2d/checkpoints/global_step_50/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3cs2d_050",
+    "val": 0.4188,
+    "test": 0.4418,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2d/checkpoints/global_step_50/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3cs2d_050": 0.4188
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "D",
+   "seed": 1,
+   "side": "S0",
+   "run": "m3ds1s0",
+   "prereg": {
+    "result": "m3ds1s0_300",
+    "test": 0.5171,
+    "val": 0.4921,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1s0/checkpoints/global_step_300/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3ds1s0_300",
+    "val": 0.4921,
+    "test": 0.5171,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1s0/checkpoints/global_step_300/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3ds1s0_050": 0.4634,
+     "m3ds1s0_100": 0.4738,
+     "m3ds1s0_150": 0.4555,
+     "m3ds1s0_200": 0.466,
+     "m3ds1s0_250": 0.466,
+     "m3ds1s0_300": 0.4921
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "D",
+   "seed": 1,
+   "side": "V4",
+   "run": "m3ds1d",
+   "prereg": {
+    "result": "m3ds1d_300",
+    "test": 0.5034,
+    "val": 0.4764,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1d/checkpoints/global_step_300/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3ds1d_250",
+    "val": 0.4843,
+    "test": 0.5068,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1d/checkpoints/global_step_250/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3ds1d_050": 0.4712,
+     "m3ds1d_100": 0.4476,
+     "m3ds1d_150": 0.4712,
+     "m3ds1d_200": 0.4529,
+     "m3ds1d_250": 0.4843,
+     "m3ds1d_300": 0.4764
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "D",
+   "seed": 2,
+   "side": "S0",
+   "run": "m3ds2s0",
+   "prereg": {
+    "result": "m3ds2s0_300",
+    "test": 0.4795,
+    "val": 0.4555,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2s0/checkpoints/global_step_300/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3ds2s0_300",
+    "val": 0.4555,
+    "test": 0.4795,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2s0/checkpoints/global_step_300/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3ds2s0_050": 0.445,
+     "m3ds2s0_100": 0.4293,
+     "m3ds2s0_150": 0.4241,
+     "m3ds2s0_200": 0.4476,
+     "m3ds2s0_250": 0.445,
+     "m3ds2s0_300": 0.4555
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "D",
+   "seed": 2,
+   "side": "V4",
+   "run": "m3ds2d",
+   "prereg": {
+    "result": "m3ds2d_300",
+    "test": 0.4829,
+    "val": 0.4791,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2d/checkpoints/global_step_300/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3ds2d_300",
+    "val": 0.4791,
+    "test": 0.4829,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2d/checkpoints/global_step_300/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3ds2d_050": 0.4686,
+     "m3ds2d_100": 0.4424,
+     "m3ds2d_150": 0.4555,
+     "m3ds2d_200": 0.4555,
+     "m3ds2d_250": 0.4764,
+     "m3ds2d_300": 0.4791
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "E",
+   "seed": 1,
+   "side": "S0",
+   "run": "m3es1s0",
+   "prereg": {
+    "result": "m3es1s0_300",
+    "test": 0.5,
+    "val": 0.4948,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1s0/checkpoints/global_step_300/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3es1s0_300",
+    "val": 0.4948,
+    "test": 0.5,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1s0/checkpoints/global_step_300/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3es1s0_050": 0.4372,
+     "m3es1s0_100": 0.4372,
+     "m3es1s0_150": 0.4738,
+     "m3es1s0_200": 0.4791,
+     "m3es1s0_250": 0.4843,
+     "m3es1s0_300": 0.4948
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "E",
+   "seed": 1,
+   "side": "V4",
+   "run": "m3es1d",
+   "prereg": {
+    "result": "m3es1d_200",
+    "test": 0.4658,
+    "val": 0.4529,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1d/checkpoints/global_step_200/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3es1d_150",
+    "val": 0.4817,
+    "test": 0.4795,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1d/checkpoints/global_step_150/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3es1d_050": 0.4555,
+     "m3es1d_100": 0.4607,
+     "m3es1d_150": 0.4817,
+     "m3es1d_200": 0.4529
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "E",
+   "seed": 2,
+   "side": "S0",
+   "run": "m3es2s0",
+   "prereg": {
+    "result": "m3es2s0_200",
+    "test": 0.4966,
+    "val": 0.4424,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2s0/checkpoints/global_step_200/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3es2s0_150",
+    "val": 0.4738,
+    "test": 0.5068,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2s0/checkpoints/global_step_150/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3es2s0_050": 0.4372,
+     "m3es2s0_100": 0.4555,
+     "m3es2s0_150": 0.4738,
+     "m3es2s0_200": 0.4424
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "E",
+   "seed": 2,
+   "side": "V4",
+   "run": "m3es2d",
+   "prereg": {
+    "result": "m3es2d_300",
+    "test": 0.476,
+    "val": 0.4948,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2d/checkpoints/global_step_300/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "m3es2d_200",
+    "val": 0.5105,
+    "test": 0.4897,
+    "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2d/checkpoints/global_step_200/actor/huggingface",
+    "checkpoints_on_val": {
+     "m3es2d_050": 0.4476,
+     "m3es2d_100": 0.4686,
+     "m3es2d_150": 0.4974,
+     "m3es2d_200": 0.5105,
+     "m3es2d_250": 0.4974,
+     "m3es2d_300": 0.4948
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "C0",
+   "seed": 1,
+   "side": "S0",
+   "run": "c0q3_s1s0",
+   "prereg": {
+    "result": "c0q3_s1s0_150",
+    "test": 0.4247,
+    "val": 0.4476,
+    "model": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_150/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "c0q3_s1s0_150",
+    "val": 0.4476,
+    "test": 0.4247,
+    "model": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_150/actor/huggingface",
+    "checkpoints_on_val": {
+     "c0q3_s1s0_150": 0.4476
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "C0",
+   "seed": 1,
+   "side": "V4",
+   "run": "c0q3_s1d",
+   "prereg": {
+    "result": "c0q3_s1d_300",
+    "test": 0.4897,
+    "val": 0.4974,
+    "model": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3d/checkpoints/global_step_300/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "c0q3_s1d_300",
+    "val": 0.4974,
+    "test": 0.4897,
+    "model": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3d/checkpoints/global_step_300/actor/huggingface",
+    "checkpoints_on_val": {
+     "c0q3_s1d_300": 0.4974
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "C0",
+   "seed": 2,
+   "side": "S0",
+   "run": "c0q3_s2s0",
+   "prereg": {
+    "result": "c0q3_s2s0_300",
+    "test": 0.4692,
+    "val": 0.4817,
+    "model": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2s0/checkpoints/global_step_300/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "c0q3_s2s0_300",
+    "val": 0.4817,
+    "test": 0.4692,
+    "model": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2s0/checkpoints/global_step_300/actor/huggingface",
+    "checkpoints_on_val": {
+     "c0q3_s2s0_300": 0.4817
+    },
+    "model_on_disk": true
+   }
+  },
+  {
+   "group": "C0",
+   "seed": 2,
+   "side": "V4",
+   "run": "c0q3_s2d",
+   "prereg": {
+    "result": "c0q3_s2d_300",
+    "test": 0.4658,
+    "val": 0.4974,
+    "model": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2d/checkpoints/global_step_300/actor/huggingface",
+    "model_on_disk": true
+   },
+   "best_val": {
+    "result": "c0q3_s2d_300",
+    "val": 0.4974,
+    "test": 0.4658,
+    "model": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2d/checkpoints/global_step_300/actor/huggingface",
+    "checkpoints_on_val": {
+     "c0q3_s2d_300": 0.4974
+    },
+    "model_on_disk": true
+   }
+  }
+ ],
+ "groups": {
+  "C": {
+   "prereg": 0.4504,
+   "best_val": 0.4581
+  },
+  "D": {
+   "prereg": 0.4957,
+   "best_val": 0.4966
+  },
+  "E": {
+   "prereg": 0.4846,
+   "best_val": 0.494
+  },
+  "C0": {
+   "prereg": 0.4624,
+   "best_val": 0.4624
+  }
+ },
+ "sft_starts": {
+  "C": "sft_m3c_e4",
+  "D": "sft_m3d_e9",
+  "E": "c0q3_sft_e8",
+  "C0": "c0q3_sft_e8"
+ },
+ "probe": {
+  "sft_m3c_e4": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/sft_m3c_e4.jsonl",
+   "all": 0.5107398568019093,
+   "occ_balanced": 0.34040404040404043,
+   "occ": {
+    "full": 0.45454545454545453,
+    "partial": 0.0,
+    "none": 0.5666666666666667
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5681818181818182,
+   "goal_now_by": {
+    "yes": 0.1724137931034483,
+    "no": 0.9550561797752809
+   },
+   "goal_after": 0.5029239766081871,
+   "goal_after_by": {
+    "yes": 0.05813953488372093,
+    "no": 0.9529411764705882
+   }
+  },
+  "m3cs1s0_050": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/m3cs1s0_050.jsonl",
+   "all": 0.5346062052505967,
+   "occ_balanced": 0.353030303030303,
+   "occ": {
+    "full": 0.4090909090909091,
+    "partial": 0.0,
+    "none": 0.65
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5568181818181818,
+   "goal_now_by": {
+    "yes": 0.20689655172413793,
+    "no": 0.898876404494382
+   },
+   "goal_after": 0.52046783625731,
+   "goal_after_by": {
+    "yes": 0.11627906976744186,
+    "no": 0.9294117647058824
+   }
+  },
+  "m3cs2s0_100": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2s0_100.jsonl",
+   "all": 0.5107398568019093,
+   "occ_balanced": 0.3252525252525253,
+   "occ": {
+    "full": 0.4090909090909091,
+    "partial": 0.0,
+    "none": 0.5666666666666667
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5340909090909091,
+   "goal_now_by": {
+    "yes": 0.21839080459770116,
+    "no": 0.8426966292134831
+   },
+   "goal_after": 0.5263157894736842,
+   "goal_after_by": {
+    "yes": 0.11627906976744186,
+    "no": 0.9411764705882353
+   }
+  },
+  "m3cs2d_050": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2d_050.jsonl",
+   "all": 0.5059665871121718,
+   "occ_balanced": 0.3156565656565657,
+   "occ": {
+    "full": 0.36363636363636365,
+    "partial": 0.0,
+    "none": 0.5833333333333334
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5284090909090909,
+   "goal_now_by": {
+    "yes": 0.19540229885057472,
+    "no": 0.8539325842696629
+   },
+   "goal_after": 0.5146198830409356,
+   "goal_after_by": {
+    "yes": 0.10465116279069768,
+    "no": 0.9294117647058824
+   }
+  },
+  "sft_m3d_e9": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/diag/probe_P1/sft_m3d_e9.jsonl",
+   "all": 0.639618138424821,
+   "occ_balanced": 0.31026936026936025,
+   "occ": {
+    "full": 0.13636363636363635,
+    "partial": 0.1111111111111111,
+    "none": 0.6833333333333333
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.7102272727272727,
+   "goal_now_by": {
+    "yes": 0.7126436781609196,
+    "no": 0.7078651685393258
+   },
+   "goal_after": 0.6842105263157895,
+   "goal_after_by": {
+    "yes": 0.7441860465116279,
+    "no": 0.6235294117647059
+   }
+  },
+  "m3ds1s0_300": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/diag/probe_P1/m3ds1s0_300.jsonl",
+   "all": 0.616945107398568,
+   "occ_balanced": 0.26212121212121214,
+   "occ": {
+    "full": 0.13636363636363635,
+    "partial": 0.0,
+    "none": 0.65
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.6761363636363636,
+   "goal_now_by": {
+    "yes": 0.5747126436781609,
+    "no": 0.7752808988764045
+   },
+   "goal_after": 0.6666666666666666,
+   "goal_after_by": {
+    "yes": 0.6976744186046512,
+    "no": 0.6352941176470588
+   }
+  },
+  "m3ds1d_300": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/diag/probe_P1/m3ds1d_300.jsonl",
+   "all": 0.6348448687350835,
+   "occ_balanced": 0.372053872053872,
+   "occ": {
+    "full": 0.22727272727272727,
+    "partial": 0.2222222222222222,
+    "none": 0.6666666666666666
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.7045454545454546,
+   "goal_now_by": {
+    "yes": 0.6896551724137931,
+    "no": 0.7191011235955056
+   },
+   "goal_after": 0.695906432748538,
+   "goal_after_by": {
+    "yes": 0.7209302325581395,
+    "no": 0.6705882352941176
+   }
+  },
+  "m3ds2s0_300": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/diag/probe_P1/m3ds2s0_300.jsonl",
+   "all": 0.6420047732696897,
+   "occ_balanced": 0.33215488215488215,
+   "occ": {
+    "full": 0.09090909090909091,
+    "partial": 0.2222222222222222,
+    "none": 0.6833333333333333
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.7102272727272727,
+   "goal_now_by": {
+    "yes": 0.6436781609195402,
+    "no": 0.7752808988764045
+   },
+   "goal_after": 0.695906432748538,
+   "goal_after_by": {
+    "yes": 0.7558139534883721,
+    "no": 0.6352941176470588
+   }
+  },
+  "m3ds2d_300": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/diag/probe_P1/m3ds2d_300.jsonl",
+   "all": 0.6288782816229117,
+   "occ_balanced": 0.3087542087542087,
+   "occ": {
+    "full": 0.18181818181818182,
+    "partial": 0.1111111111111111,
+    "none": 0.6333333333333333
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.7159090909090909,
+   "goal_now_by": {
+    "yes": 0.6551724137931034,
+    "no": 0.7752808988764045
+   },
+   "goal_after": 0.6900584795321637,
+   "goal_after_by": {
+    "yes": 0.7674418604651163,
+    "no": 0.611764705882353
+   }
+  },
+  "m3es1s0_300": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/diag/probe_P1/m3es1s0_300.jsonl",
+   "all": 0.4677804295942721,
+   "occ_balanced": 0.4346801346801346,
+   "occ": {
+    "full": 0.6818181818181818,
+    "partial": 0.2222222222222222,
+    "none": 0.4
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5284090909090909,
+   "goal_now_by": {
+    "yes": 0.11494252873563218,
+    "no": 0.9325842696629213
+   },
+   "goal_after": 0.4853801169590643,
+   "goal_after_by": {
+    "yes": 0.09302325581395349,
+    "no": 0.8823529411764706
+   }
+  },
+  "m3es1d_200": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/diag/probe_P1/m3es1d_200.jsonl",
+   "all": 0.48329355608591884,
+   "occ_balanced": 0.4636363636363636,
+   "occ": {
+    "full": 0.5909090909090909,
+    "partial": 0.3333333333333333,
+    "none": 0.4666666666666667
+   },
+   "unreadable": 0.002386634844868735,
+   "goal_now": 0.5397727272727273,
+   "goal_now_by": {
+    "yes": 0.13793103448275862,
+    "no": 0.9325842696629213
+   },
+   "goal_after": 0.5029239766081871,
+   "goal_after_by": {
+    "yes": 0.11627906976744186,
+    "no": 0.8941176470588236
+   }
+  },
+  "m3es2s0_200": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/diag/probe_P1/m3es2s0_200.jsonl",
+   "all": 0.45704057279236276,
+   "occ_balanced": 0.3055555555555555,
+   "occ": {
+    "full": 0.5,
+    "partial": 0.3333333333333333,
+    "none": 0.08333333333333333
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5284090909090909,
+   "goal_now_by": {
+    "yes": 0.14942528735632185,
+    "no": 0.898876404494382
+   },
+   "goal_after": 0.5321637426900585,
+   "goal_after_by": {
+    "yes": 0.16279069767441862,
+    "no": 0.9058823529411765
+   }
+  },
+  "m3es2d_300": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/diag/probe_P1/m3es2d_300.jsonl",
+   "all": 0.4713603818615752,
+   "occ_balanced": 0.37087542087542086,
+   "occ": {
+    "full": 0.3181818181818182,
+    "partial": 0.4444444444444444,
+    "none": 0.35
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5397727272727273,
+   "goal_now_by": {
+    "yes": 0.14942528735632185,
+    "no": 0.9213483146067416
+   },
+   "goal_after": 0.543859649122807,
+   "goal_after_by": {
+    "yes": 0.20930232558139536,
+    "no": 0.8823529411764706
+   }
+  },
+  "c0q3_sft_e8": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/diagnostics_20261101/probe_v3g_q3/c0q3_sft_e8.jsonl",
+   "all": 0.4606205250596659,
+   "occ_balanced": 0.35589225589225587,
+   "occ": {
+    "full": 0.5454545454545454,
+    "partial": 0.2222222222222222,
+    "none": 0.3
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5625,
+   "goal_now_by": {
+    "yes": 0.20689655172413793,
+    "no": 0.9101123595505618
+   },
+   "goal_after": 0.5087719298245614,
+   "goal_after_by": {
+    "yes": 0.1511627906976744,
+    "no": 0.8705882352941177
+   }
+  },
+  "c0q3_s1s0_150": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/diagnostics_20261101/probe_v3g_q3/c0q3_s1s0_150.jsonl",
+   "all": 0.4677804295942721,
+   "occ_balanced": 0.33080808080808083,
+   "occ": {
+    "full": 0.4090909090909091,
+    "partial": 0.3333333333333333,
+    "none": 0.25
+   },
+   "unreadable": 0.0011933174224343676,
+   "goal_now": 0.5738636363636364,
+   "goal_now_by": {
+    "yes": 0.22988505747126436,
+    "no": 0.9101123595505618
+   },
+   "goal_after": 0.5263157894736842,
+   "goal_after_by": {
+    "yes": 0.16279069767441862,
+    "no": 0.8941176470588236
+   }
+  },
+  "c0q3_s1d_300": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/diagnostics_20261101/probe_v3g_q3/c0q3_s1d_300.jsonl",
+   "all": 0.45823389021479716,
+   "occ_balanced": 0.3611111111111111,
+   "occ": {
+    "full": 0.5,
+    "partial": 0.3333333333333333,
+    "none": 0.25
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5227272727272727,
+   "goal_now_by": {
+    "yes": 0.13793103448275862,
+    "no": 0.898876404494382
+   },
+   "goal_after": 0.4853801169590643,
+   "goal_after_by": {
+    "yes": 0.08139534883720931,
+    "no": 0.8941176470588236
+   }
+  },
+  "c0q3_s2s0_300": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/diagnostics_20261101/probe_v3g_q3/c0q3_s2s0_300.jsonl",
+   "all": 0.48329355608591884,
+   "occ_balanced": 0.44696969696969696,
+   "occ": {
+    "full": 0.5909090909090909,
+    "partial": 0.3333333333333333,
+    "none": 0.4166666666666667
+   },
+   "unreadable": 0.0,
+   "goal_now": 0.5568181818181818,
+   "goal_now_by": {
+    "yes": 0.19540229885057472,
+    "no": 0.9101123595505618
+   },
+   "goal_after": 0.5263157894736842,
+   "goal_after_by": {
+    "yes": 0.11627906976744186,
+    "no": 0.9411764705882353
+   }
+  },
+  "c0q3_s2d_300": {
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/diagnostics_20261101/probe_v3g_q3/c0q3_s2d_300.jsonl",
+   "all": 0.4713603818615752,
+   "occ_balanced": 0.40437710437710433,
+   "occ": {
+    "full": 0.5909090909090909,
+    "partial": 0.2222222222222222,
+    "none": 0.4
+   },
+   "unreadable": 0.0011933174224343676,
+   "goal_now": 0.5340909090909091,
+   "goal_now_by": {
+    "yes": 0.20689655172413793,
+    "no": 0.8539325842696629
+   },
+   "goal_after": 0.5380116959064327,
+   "goal_after_by": {
+    "yes": 0.19767441860465115,
+    "no": 0.8823529411764706
+   }
+  }
+ },
+ "failure_breakdown": {
+  "summary": "rest.json sets.test['3.4'] (pre-registration 3.4, test) and sets.val['3.4'] (val)",
+  "per_chain": {
+   "m3_c_s20261019": {
+    "test": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/failure_test.json",
+    "val": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/failure_val.json"
+   },
+   "m3_c_s20261021": {
+    "test": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/failure_test.json",
+    "val": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/failure_val.json"
+   },
+   "m3_d_s20261019": {
+    "test": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/diag/failure_test.json",
+    "val": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/diag/failure_val.json"
+   },
+   "m3_d_s20261021": {
+    "test": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/diag/failure_test.json",
+    "val": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/diag/failure_val.json"
+   },
+   "m3_e_s20261019": {
+    "test": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/diag/failure_test.json",
+    "val": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/diag/failure_val.json"
+   },
+   "m3_e_s20261021": {
+    "test": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/diag/failure_test.json",
+    "val": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/diag/failure_val.json"
+   }
+  }
+ },
+ "weights_read_only": {
+  "sft": {
+   "C (epoch 4)": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/C/model/checkpoint-1204",
+   "D (epoch 9)": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/D/model/checkpoint-3987",
+   "C0 / E start (epoch 8)": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232"
+  },
+  "rl": {
+   "m3cs1s0_050": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/rl_run_m3cs1s0/checkpoints/global_step_50/actor/huggingface",
+   "sft_m3c_e4": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/C/model/checkpoint-1204",
+   "m3cs2s0_100": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2s0/checkpoints/global_step_100/actor/huggingface",
+   "m3cs2d_050": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2d/checkpoints/global_step_50/actor/huggingface",
+   "m3ds1s0_300": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1s0/checkpoints/global_step_300/actor/huggingface",
+   "m3ds1d_300": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1d/checkpoints/global_step_300/actor/huggingface",
+   "m3ds2s0_300": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2s0/checkpoints/global_step_300/actor/huggingface",
+   "m3ds2d_300": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2d/checkpoints/global_step_300/actor/huggingface",
+   "m3es1s0_300": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1s0/checkpoints/global_step_300/actor/huggingface",
+   "m3es1d_200": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1d/checkpoints/global_step_200/actor/huggingface",
+   "m3es2s0_200": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2s0/checkpoints/global_step_200/actor/huggingface",
+   "m3es2d_300": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2d/checkpoints/global_step_300/actor/huggingface",
+   "c0q3_s1s0_150": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_150/actor/huggingface",
+   "c0q3_s1d_300": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3d/checkpoints/global_step_300/actor/huggingface",
+   "c0q3_s2s0_300": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2s0/checkpoints/global_step_300/actor/huggingface",
+   "c0q3_s2d_300": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2d/checkpoints/global_step_300/actor/huggingface",
+   "m3cs2s0_050": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2s0/checkpoints/global_step_50/actor/huggingface",
+   "m3ds1d_250": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1d/checkpoints/global_step_250/actor/huggingface",
+   "m3es1d_150": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1d/checkpoints/global_step_150/actor/huggingface",
+   "m3es2s0_150": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2s0/checkpoints/global_step_150/actor/huggingface",
+   "m3es2d_200": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2d/checkpoints/global_step_200/actor/huggingface"
+  },
+  "new_cells": {
+   "D_noP0 SFT (every epoch kept until the pick)": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/D_noP0/model",
+   "B' SFT (every epoch kept until the pick)": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/B/model"
+  }
+ }
+}
