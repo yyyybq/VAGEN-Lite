@@ -9,15 +9,19 @@ scene: n_gen.py scene (one scene's instances, one per task type) with n3_env's c
   height and field of view, level; tier e); every instance records the camera it was made with (instance "camera").
   collect and page are n_gen.py's own.
 recheck-scene: for each instance of FILE in this scene (tier c: the merged 600; "robot" re-checks them under N1's own
-  rule in a fresh process), the poses reachable from the start under the rule (n3_env.reachable, at most 12 actions,
-  15,000 poses), scanned breadth first with the box judge; each pose that passes it is judged in full (rendering,
-  at most MAX_CHECKS per instance): the first full success at >= 1 action makes the instance solvable under the rule,
-  with that shortest path.  Its camera-A frame there is checked for colour noise (n_frames: a corrupted render can
-  pass or fail the judge falsely), and so is the start frame.  Writes DIR/scenes/<scene>.json, then leaves with
+  rule in a fresh process), first its own shortest path (found under N1's rule) is replayed under the rule (replay):
+  if no move is blocked and the full rule holds somewhere along it, the instance is solvable ("via": "path", the first
+  such pose).  Otherwise the poses reachable from the start under the rule (n3_env.reachable, at most 12 actions,
+  MAX_STATES poses, one search per scene) are scanned breadth first with the box judge; each pose that passes it is
+  judged in full (rendering, at most MAX_CHECKS per instance): the first full success at >= 1 action makes it
+  solvable ("via": "search").  A search that was capped or ran out of checks without a success proves nothing
+  (collected as "unknown", not "unsolvable"; 11-03's first run capped every scene at 15,000 poses under the sphere).
+  The camera-A frame at the success pose is checked for colour noise (n_frames: a corrupted render can pass or fail
+  the judge falsely), and so is the start frame.  Writes DIR/scenes/<scene>.json, then leaves with
   os._exit (RoboCasa's close can hang, as in n_gen).
 recheck-collect: DIR/instances_checked.jsonl (FILE's instances, each with its "recheck"), DIR/solvable.jsonl (those
   solvable under the rule with clean frames: the evaluation's instances) and DIR/summary.json (per type: solvable,
-  unsolvable, corrupted, missing scenes).
+  unsolvable, unknown, corrupted, missing scenes).
 """
 from __future__ import annotations
 
@@ -39,6 +43,9 @@ import n_gen as G  # noqa: E402
 import n_smoke as S  # noqa: E402
 
 MAX_CHECKS = 24
+# poses searched per scene when an instance's own path fails: the sphere lets the camera pass over counters, so its
+# reachable area is far larger than the robot's (11-03's first try: 15,000, every scene capped)
+MAX_STATES = {"sphere": 120000, "robot": 15000}
 
 
 def read_jsonl(path) -> list:
@@ -63,10 +70,33 @@ def scene_cmd(args) -> int:
 
 
 # ---------------------------------------------------------------------------------------- tier (c)
+def frame_record(scene, item, pose, j) -> dict:
+    img, _ = scene.render(pose)
+    return {"pose": list(pose), "visible": j["visible"], "chroma": round(F.chroma(img), 2)}
+
+
+def replay(scene, inst: dict) -> dict:
+    """The instance's own shortest path (found under N1's rule) replayed under the scene's rule: blocked at which
+    action, or the first pose along it where the full rule holds (solvable, via "path"), or neither."""
+    item, pose = inst["item"], tuple(inst["start_pose"])
+    path = list((inst.get("shortest") or {}).get("path") or [])
+    for k, action in enumerate(path):
+        new = N.apply_action(pose, action)
+        if scene.blocked(pose, new):
+            return {"solvable": False, "blocked_at": k + 1, "blocked_action": action}
+        pose = new
+        if N.box_judge(item, pose)["success"]:
+            j = scene.judge(item, pose)
+            if j["success"]:
+                return dict(frame_record(scene, item, pose, j), solvable=True, via="path", actions=k + 1,
+                            path=path[:k + 1])
+    return {"solvable": False, "path_without_success": len(path)}
+
+
 def recheck_instance(scene, states: dict, order: list, inst: dict) -> dict:
-    """Solvable under the scene's rule?  See the module text."""
+    """Solvable under the scene's rule, searched over the reachable poses (see the module text)."""
     item = inst["item"]
-    checks, out = 0, {"solvable": False, "checks": 0}
+    checks, out = 0, {"solvable": False, "checks": 0, "via": "search"}
     for k in order:
         pose, depth = states[k][0], states[k][1]
         if depth < 1 or not N.box_judge(item, pose)["success"]:
@@ -77,9 +107,7 @@ def recheck_instance(scene, states: dict, order: list, inst: dict) -> dict:
         j = scene.judge(item, pose)
         checks += 1
         if j["success"]:
-            img, _ = scene.render(pose)
-            out.update(solvable=True, actions=depth, path=S.path_to(states, k), pose=list(pose),
-                       visible=j["visible"], chroma=round(F.chroma(img), 2))
+            out.update(frame_record(scene, item, pose, j), solvable=True, actions=depth, path=S.path_to(states, k))
             break
     out["checks"] = checks
     return out
@@ -103,13 +131,18 @@ def recheck_scene(args) -> int:
         rec["start_chroma"] = round(F.chroma(start_img), 2)
         if args.collision == "sphere":
             rec["start_inside"] = scene.sphere_hit(scene.start, scene.start)
-        reach = N3.reachable(scene)
-        states = reach["states"]
-        rec.update(reachable=len(states), blocked=reach["blocked"], capped=reach["capped"],
-                   seconds_setup=round(time.time() - t0, 1))
-        order = sorted(states, key=lambda k: states[k][1])
+        rec["seconds_setup"] = round(time.time() - t0, 1)
+        reach = None
         for inst in insts:
-            rec["instances"][inst["instance_id"]] = recheck_instance(scene, states, order, inst)
+            r = replay(scene, inst)
+            if not r["solvable"]:  # the own path is blocked or never succeeds: search (one search per scene)
+                if reach is None:
+                    reach = N3.reachable(scene, max_states=MAX_STATES[args.collision])
+                    states = reach["states"]
+                    order = sorted(states, key=lambda k: states[k][1])
+                    rec.update(reachable=len(states), blocked=reach["blocked"], capped=reach["capped"])
+                r = dict(recheck_instance(scene, states, order, inst), replay=r, capped=reach["capped"])
+            rec["instances"][inst["instance_id"]] = r
         rec["complete"] = True
     except Exception as exc:  # recorded, not fatal for the job
         import traceback
@@ -152,7 +185,14 @@ def recheck_collect(instances: Path, out: Path) -> dict:
             r = dict(s["instances"].get(inst["instance_id"]) or {"status": "missing"})
             r["clean"] = clean(r, s.get("start_chroma"))
             r["start_inside"] = s.get("start_inside")
-            r["status"] = "corrupted" if not r["clean"] else ("solvable" if r.get("solvable") else "unsolvable")
+            if not r["clean"]:
+                r["status"] = "corrupted"
+            elif r.get("solvable"):
+                r["status"] = "solvable"
+            elif r.get("capped") or r.get("stopped"):  # a search that did not see every pose proves nothing
+                r["status"] = "unknown"
+            else:
+                r["status"] = "unsolvable"
         per[inst["task_type"]][r["status"]] += 1
         rows.append(dict(inst, recheck=r))
         if r["status"] == "solvable":

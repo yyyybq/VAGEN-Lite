@@ -114,25 +114,50 @@ def test_recheck_finds_the_shortest_success_and_caps_the_checks(monkeypatch):
     assert not r["solvable"] and r["stopped"] == "checks" and r["checks"] == 1
 
 
+def test_replay_follows_the_own_path_until_blocked_or_solved(monkeypatch):
+    """The instance's own path first: solvable at the first pose where the rule holds, or where a move is blocked."""
+    class WallScene(FakeScene):
+        def blocked(self, pose, new):
+            return new[0] >= 0.95  # a wall in front
+
+    monkeypatch.setattr(N, "box_judge", lambda item, pose: {"success": pose[0] > 0.2})
+    inst = {"item": {}, "start_pose": [0.0, 0.0, 0.0], "shortest": {"path": ["move_forward"] * 3}}
+    r = NG.replay(WallScene(), inst)
+    assert r["solvable"] and r["via"] == "path" and r["actions"] == 2 and r["path"] == ["move_forward"] * 2
+
+    class FarScene(WallScene):
+        def judge(self, item, pose, render=True):
+            return {"success": pose[0] > 1.0, "visible": {}}
+
+    r = NG.replay(FarScene(), dict(inst, shortest={"path": ["move_forward"] * 4}))
+    assert r == {"solvable": False, "blocked_at": 4, "blocked_action": "move_forward"}
+    r = NG.replay(FarScene(), inst)  # three steps, never blocked, never solved
+    assert r == {"solvable": False, "path_without_success": 3}
+
+
 def test_collect_marks_solvable_unsolvable_corrupted_and_missing(tmp_path):
     insts = [{"instance_id": f"T_s{s}_{t}", "scene_id": f"T_s{s}", "task": "T", "seed": s, "task_type": t}
-             for s in (1, 2, 3) for t in ("equidistance", "occlusion_alignment")]
+             for s in (1, 2, 3, 4) for t in ("equidistance", "occlusion_alignment")]
     (tmp_path / "inst.jsonl").write_text("".join(json.dumps(x) + "\n" for x in insts))
     (tmp_path / "out/scenes").mkdir(parents=True)
     (tmp_path / "out/scenes/T_s1.json").write_text(json.dumps({
         "scene_id": "T_s1", "complete": True, "collision": "sphere", "start_chroma": 0.4, "start_inside": None,
         "instances": {"T_s1_equidistance": {"solvable": True, "actions": 3, "chroma": 0.5},
-                      "T_s1_occlusion_alignment": {"solvable": False, "checks": 4}}}))
+                      "T_s1_occlusion_alignment": {"solvable": False, "checks": 4, "capped": False}}}))
     (tmp_path / "out/scenes/T_s2.json").write_text(json.dumps({
         "scene_id": "T_s2", "complete": True, "collision": "sphere", "start_chroma": 40.0,
         "instances": {"T_s2_equidistance": {"solvable": True, "chroma": 0.5}}}))
+    (tmp_path / "out/scenes/T_s4.json").write_text(json.dumps({  # searches that did not see every pose
+        "scene_id": "T_s4", "complete": True, "collision": "sphere", "start_chroma": 0.4,
+        "instances": {"T_s4_equidistance": {"solvable": False, "capped": True},
+                      "T_s4_occlusion_alignment": {"solvable": False, "capped": False, "stopped": "checks"}}}))
     s = NG.recheck_collect(tmp_path / "inst.jsonl", tmp_path / "out")
-    assert s["status"] == {"solvable": 1, "unsolvable": 1, "corrupted": 2, "missing": 2}
+    assert s["status"] == {"solvable": 1, "unsolvable": 1, "corrupted": 2, "missing": 2, "unknown": 2}
     assert s["missing_scenes"] == ["T_s3"] and s["collision"] == ["sphere"]
     solv = [json.loads(x) for x in (tmp_path / "out/solvable.jsonl").read_text().splitlines()]
     assert [x["instance_id"] for x in solv] == ["T_s1_equidistance"]
     checked = [json.loads(x) for x in (tmp_path / "out/instances_checked.jsonl").read_text().splitlines()]
-    assert len(checked) == 6 and checked[0]["recheck"]["status"] == "solvable"
+    assert len(checked) == 8 and checked[0]["recheck"]["status"] == "solvable"
 
 
 STUB = r"""import json, os, sys, time
