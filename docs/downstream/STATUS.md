@@ -176,6 +176,8 @@ bash downstream/eval/watch.sh status
 
 ## 5. 主窗口指令与暂停 / 撤回记录（UTC）
 
+- **11-03 14:3x 磁盘线通知（你 11-03 批的 b28）：** `starts.json` 的两个备用起点 R10S5（r10 checkpoint-770）、R1（R1-clean-Projective-v0 global_step_250）的权重已从集群删掉，只在 AOSS 上，要用时磁盘线的 `restore_from_aoss.py` 一个约 1 分钟拉回。下游没在用它们；S、RS、RD 留着。下游的 Qwen2.5 StarVLA 模型（DS-*-s1 等 58 项、1,178 GB）13:29 已上传 AOSS、没删，按你的"2乙"等 C1 训完再定；C1 训完后的 X3、X4、X0 要读 `DS-B-030-s1/run/final_model` 和它的评测结果，到时磁盘线来问时我会列上。`starts.json` 里这两条先不改（在跑的 N2 / N3 任务会读这个文件）。
+
 - **11-02 23:5x 撤回 N1 的一条结论：** "RS 比 S 低 4.7（p = 0.013）"在 N1 加固的新 300 个实例上没有复现（+1.7），合并 600 后 −1.5（p = 0.28）。N1_RESULTS 文首、论文素材清单第 2 条、N3 设计都已改；撤回已转主窗口。
 
 - **11-02 20:1x 你的七条决定**（REFERENCE 第 0 节）：N1 转主窗口、删 3 个 SUSPENDED 任务记录（都已做）；N2 先报卡时（已报）；N1 加固（在跑）；N3 先交设计（已交）；C1 训完按设计评；论文素材清单（已交）；排队 N1 加固 → N2 → N3；新提交投 zoetrope。
