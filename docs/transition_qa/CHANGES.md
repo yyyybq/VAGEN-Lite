@@ -294,5 +294,5 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
     - 名字用 `v3_names` 给 E 的；其余字段逐项核对，和模板相同。
   - 合并后 `matrix_plan` 要加上 E（起点写 C0 的 SFT）。
   - 每回合的上限：RL 的 `gym_agent_loop.py` 每回合限 `min(response_length_per_turn, max_response_length)`。E 的 env 配置里 `response_length_per_turn` 是 384（各组相同），所以 E 的 RL 每回合最多 384 个词元，12 回合最多 4,608，6,144 碰不到。
-    - 要让 E 每回合能用剩下的预算，rl-config 得加一个每回合上限的选项（改代码），等用户定。
+    - 要让 E 每回合能用剩下的预算，rl-config 得加一个每回合上限的选项（改代码）；11-03 用户定保留，不加。
 - 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对（2026-11-01 已对 `b6606bac` 预演，见第 6 节）。
