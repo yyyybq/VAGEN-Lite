@@ -172,7 +172,7 @@ def figure(rep: dict, out: Path) -> list:
     import n_figures as NF
 
     plt = NF.plt_setup()
-    fig, ax = plt.subplots(figsize=(6.4, 3.6))
+    fig, ax = plt.subplots(figsize=(6.6, 4.0))
     for k, (key, label, color) in enumerate(FIG_PAIRS):
         for row, (tier, _) in enumerate(FIG_TIERS):
             c = rep["tiers"][tier]["pairs"].get(key)
@@ -187,7 +187,7 @@ def figure(rep: dict, out: Path) -> list:
     ax.invert_yaxis()
     ax.set_xlabel("RL − SFT success (percentage points, paired 95% interval)")
     ax.grid(axis="x", color="#e4e7eb", lw=0.7)
-    ax.legend(fontsize=8, loc="lower right", ncol=2)
+    ax.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.45, -0.2), ncol=4)
     fig.tight_layout()
     files = NF.save(fig, out, "n3_ladder")
     plt.close(fig)
