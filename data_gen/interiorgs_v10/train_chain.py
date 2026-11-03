@@ -1163,6 +1163,7 @@ class Chain:
                               ("progress_reward_scale", "--progress-reward-scale"),
                               ("progress_adv_weight", "--progress-adv-weight"),
                               ("kl_loss_coef", "--kl-loss-coef"), ("actor_lr", "--actor-lr"),
+                              ("nfp_loss_coef", "--nfp-loss-coef"),  # the model line, decision 47 乙 (2026-11-03)
                               ("checkpoint_every", "--checkpoint-every"),
                               ("critic_warmup", "--critic-warmup"),
                               ("test_freq", "--test-freq"), ("val_tasks", "--val-tasks"),

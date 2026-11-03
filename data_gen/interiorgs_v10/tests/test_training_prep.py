@@ -740,6 +740,25 @@ class TrainingPrepTest(unittest.TestCase):
             config("rl_type_wrong", model_type="qwen3_vl")
         with self.assertRaisesRegex(SystemExit, "concat history mode"):
             config("rl_type_no_concat", model_type="cambrian_qwen", history_mode="none")
+        # the model line (2026-11-03, decision 47 乙): Cambrian-S's next-frame prediction loss, next to the type's
+        # overrides; without the option nothing of it
+        self.assertIsNone(report["nfp_overrides"])
+        self.assertNotIn("model_line_nfp", ppo["actor_rollout_ref"]["model"]["override_config"])
+        nfp, report_n = config("rl_type_nfp", model_type="cambrian_qwen", nfp_loss_coef=1.0)
+        self.assertEqual(nfp["actor_rollout_ref"]["model"]["override_config"],
+                         {"image_token_alias": 151655, "model_line_nfp": True})
+        self.assertEqual(nfp["actor_rollout_ref"]["actor"]["nfp_loss_coef"], 1.0)
+        self.assertEqual(report_n["nfp_overrides"], {"actor_rollout_ref.model.override_config.model_line_nfp": True,
+                                                     "actor_rollout_ref.actor.nfp_loss_coef": 1.0})
+        self.assertEqual({k: v for k, v in nfp["actor_rollout_ref"]["actor"].items() if k != "nfp_loss_coef"},
+                         ppo["actor_rollout_ref"]["actor"])
+        for key in ("algorithm", "trainer", "cambrian_concat"):
+            self.assertEqual(nfp.get(key), ppo.get(key))
+        self.assertEqual(nfp["data"]["max_prompt_length"], ppo["data"]["max_prompt_length"])
+        with self.assertRaisesRegex(SystemExit, "Cambrian-S's, not qwen3_vl"):
+            config("rl_type_nfp_qwen", model_type="qwen3_vl", model="/m", nfp_loss_coef=1.0)
+        with self.assertRaisesRegex(SystemExit, "must be positive"):
+            config("rl_type_nfp_zero", model_type="cambrian_qwen", nfp_loss_coef=0.0)
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

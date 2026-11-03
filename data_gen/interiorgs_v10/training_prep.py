@@ -799,6 +799,18 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             raise SystemExit(f"the {args.model_type} overrides are for the concat history mode (--history-mode concat)")
         for key, value in type_overrides.items():
             _set(ppo, key, value)
+    nfp = None
+    if getattr(args, "nfp_loss_coef", None) is not None:  # the model line (2026-11-03, the user's decision 47 乙)
+        from vagen.models.model_types import nfp_overrides
+
+        try:
+            nfp = nfp_overrides(getattr(args, "model_type", None), args.nfp_loss_coef)
+        except ValueError as exc:
+            raise SystemExit(f"--nfp-loss-coef: {exc}")
+        if not ppo["trainer"].get("concat_multi_turn"):
+            raise SystemExit("--nfp-loss-coef predicts each frame's next one inside a sequence: --history-mode concat")
+        for key, value in nfp.items():
+            _set(ppo, key, value)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
@@ -821,6 +833,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "rollout_log_probs": bool(getattr(args, "rollout_log_probs", False)),
               "logprob_tokens": bool(getattr(args, "logprob_tokens", False)),
               "model_type": getattr(args, "model_type", None), "model_type_overrides": type_overrides,
+              "nfp_overrides": nfp,
               "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
@@ -1165,6 +1178,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "(p1: 0.05)")
     c.add_argument("--actor-lr", type=float, default=None,
                    help="round 12 freeze, weak-start run W4: the actor's learning rate, over the package's (p1: 2e-6)")
+    c.add_argument("--nfp-loss-coef", type=float, default=None,
+                   help="the model line (the user's decision 47 乙 of 2026-11-03): Cambrian-S's next-frame prediction "
+                        "loss on the concat path with this coefficient (vagen/models/cambrian_nfp.py; needs "
+                        "--model-type cambrian_qwen)")
     c.add_argument("--checkpoint-every", type=int, default=None,
                    help="round 12 freeze, weak-start runs: checkpoints every N updates, over the standard's save_freq "
                         "(the standards: 50)")

@@ -111,6 +111,19 @@ def rl_overrides(name: Optional[str], max_turns: int, prompt_length: int) -> Dic
             "data.max_prompt_length": int(prompt_length) + CAMBRIAN_TOKENS_PER_IMAGE * int(max_turns)}
 
 
+def nfp_overrides(name: Optional[str], coef: float) -> Dict[str, Any]:
+    """The PPO-config overrides of Cambrian-S's next-frame prediction loss on the concat path (the model line, the
+    user's decision 47 乙 of 2026-11-03; vagen/models/cambrian_nfp.py): the adapter's head and loss (config
+    model_line_nfp, also on the reference model, which never trains) and the actor's coefficient for it
+    (verl dp_actor, actor/nfp_loss).  Only for Cambrian-S."""
+    if get(name).name != "cambrian_qwen":
+        raise ValueError(f"the next-frame prediction loss is Cambrian-S's, not {name or DEFAULT}'s")
+    if not float(coef) > 0:
+        raise ValueError(f"the next-frame prediction loss coefficient must be positive, not {coef}")
+    return {"actor_rollout_ref.model.override_config.model_line_nfp": True,
+            "actor_rollout_ref.actor.nfp_loss_coef": float(coef)}
+
+
 def main(argv=None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) == 2 and args[0] == "sft-launch":

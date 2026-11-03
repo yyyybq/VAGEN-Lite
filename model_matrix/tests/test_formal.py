@@ -190,6 +190,28 @@ class PlansTest(unittest.TestCase):
         self.assertEqual(P.formal_rl_plans("rl-qwen3", "20261026", "abc", "/s", "V4")["m_qwen3vl8b_formal_rl_20261026"]
                          ["pool"], P.smoke.POOL)  # the earlier commands unchanged
 
+    def test_decision_47_nfp_arm(self):
+        """Decision 47 乙 of 2026-11-03: one S0 arm as cs0 (start, seed, settings) with the next-frame prediction loss;
+        the trainer, its render service and the evaluations on h800 (the user's choice); no renderer_first."""
+        from data_gen.interiorgs_v10 import train_chain as T
+        from model_matrix.formal import plans as P
+
+        (_, st), = P.formal_rl_plans("rl-cambrian-stab", "20261030", "abc", "/sft/e5", "V4").items()
+        (tag, nf), = P.formal_rl_plans("rl-cambrian-nfp", "20261103", "abc", "/sft/e5", "V4").items()
+        self.assertEqual(tag, "m_cambrian7b_formal_rl_20261103_nfp")
+        self.assertEqual((nf["run_pools"], nf["rl_runs"], nf["rl_name"], nf["rl_start_model"], nf["model_type"]),
+                         ({"csnfp": "h800"}, {"csnfp": {"rl": {"nfp_loss_coef": 1.0}}}, "m_cnfprl", "/sft/e5",
+                          "cambrian_qwen"))
+        self.assertEqual((nf["pool"], nf["suspended_grace_min"], nf["endpoint"]), ("queue:h800", 10, 300))
+        self.assertIs(nf["rl"]["renderer_first"], False)
+        self.assertEqual({k: v for k, v in nf["rl"].items() if k != "renderer_first"},
+                         {k: v for k, v in st["rl"].items() if k != "renderer_first"})  # S0 as cs0 and the stab arms
+        for key in ("eval", "model", "sft_groups", "eval_sets", "record_nodes", "retries"):
+            self.assertEqual(nf[key], st[key])
+        merged = T.with_chain_defaults({**nf["rl"], **nf["rl_runs"]["csnfp"]["rl"]},
+                                       T.standard_chain_defaults(nf).get("rl"))
+        self.assertEqual((merged["nfp_loss_coef"], merged["standard"], merged["seed"]), (1.0, "v10_p1_S0", 20261019))
+
     def test_accept_epoch_plans(self):
         from model_matrix.formal import plans as P
 

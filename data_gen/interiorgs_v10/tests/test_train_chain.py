@@ -973,13 +973,19 @@ class ChainTest(unittest.TestCase):
             ps0 = calls[str(root / "rl_ps0")]
             self.assertEqual(ps0[ps0.index("--entropy-coeff") + 1], "0")
             # round 12 freeze, the weak-start runs: the KL coefficient, the learning rate and the checkpoint interval
-            for flag in ("--kl-loss-coef", "--actor-lr", "--checkpoint-every"):
+            for flag in ("--kl-loss-coef", "--actor-lr", "--checkpoint-every", "--nfp-loss-coef"):
                 self.assertNotIn(flag, ps0)
             chain.plan["rl"].update(kl_loss_coef=0.3, actor_lr=5e-7, checkpoint_every=25)
             chain.rl_config()
             ps0 = calls[str(root / "rl_ps0")]
             self.assertEqual([ps0[ps0.index(f) + 1] for f in ("--kl-loss-coef", "--actor-lr", "--checkpoint-every")],
                              ["0.3", "5e-07", "25"])
+            # the model line (2026-11-03, decision 47 乙): Cambrian-S's next-frame prediction loss
+            chain.plan["rl"].update(nfp_loss_coef=1.0)
+            chain.rl_config()
+            ps0 = calls[str(root / "rl_ps0")]
+            self.assertEqual(ps0[ps0.index("--nfp-loss-coef") + 1], "1.0")
+            chain.plan["rl"].pop("nfp_loss_coef")
             # round 12 freeze: the format example, the lenient reading, the unreadable answer's penalty and the group
             # filter (D-cond + keep: its threshold in the plan) reach rl-config
             for flag in ("--format-example", "--lenient-parse", "--invalid-penalty", "--group-filter"):

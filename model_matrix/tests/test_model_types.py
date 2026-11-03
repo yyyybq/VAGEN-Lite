@@ -38,6 +38,20 @@ class ModelTypesTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             M.get("llava")
 
+    def test_nfp_overrides(self):
+        """Decision 47 乙 of 2026-11-03: the next-frame prediction loss's overrides, Cambrian-S only."""
+        from vagen.models import model_types as M
+
+        self.assertEqual(M.nfp_overrides("cambrian_qwen", 1.0),
+                         {"actor_rollout_ref.model.override_config.model_line_nfp": True,
+                          "actor_rollout_ref.actor.nfp_loss_coef": 1.0})
+        for name in (None, "qwen2_5_vl", "qwen3_vl"):
+            with self.assertRaisesRegex(ValueError, "Cambrian-S's"):
+                M.nfp_overrides(name, 1.0)
+        for coef in (0, -1.0):
+            with self.assertRaisesRegex(ValueError, "positive"):
+                M.nfp_overrides("cambrian_qwen", coef)
+
     def test_rl_overrides(self):
         from vagen.models import model_types as M
 

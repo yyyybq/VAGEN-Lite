@@ -41,6 +41,7 @@ from transformers.generation.utils import GenerateOutput
 from transformers.modeling_outputs import CausalLMOutputWithPast, TokenClassifierOutput
 
 from vagen.models.cambrian_miv import build_cambrian_visual_features
+from vagen.models.cambrian_nfp import build_head, concat_nfp_loss, concat_nfp_pairs
 
 # Cambrian-S imports Qwen2 classes from the transformers package root. Some
 # Transformers builds expose them only from transformers.models.qwen2, so make
@@ -119,6 +120,13 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
                 if not isinstance(vt_list, nn.ModuleList):
                     inner_model.vision_tower_aux_list = nn.ModuleList(vt_list)
                     print("[cambrian_register] Converted vision_tower_aux_list → nn.ModuleList")
+
+        # The model line (2026-11-03, the user's decision 47 乙): config model_line_nfp gives the model Cambrian-S's
+        # next-frame prediction head for the concat path (vagen/models/cambrian_nfp.py) without the LFP checkpoints'
+        # nfp_head config, which would also switch on their MIV input (build_cambrian_visual_features).  The head is
+        # saved as model.nfp_head.*, which the vLLM model skips (cambrian_vllm.load_weights).
+        if getattr(config, "model_line_nfp", False) and inner_model is not None and not hasattr(inner_model, "nfp_head"):
+            inner_model.nfp_head = build_head(config.hidden_size, config.mm_hidden_size)
 
     @staticmethod
     def _patch_qwen2_decoder_layers(inner_model) -> None:
@@ -205,6 +213,7 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
         self,
         input_ids: torch.Tensor,     # (bs, seq_len) with IMAGE_TOKEN_INDEX=-200 blocks
         pixel_values: torch.Tensor,  # (total_images, C, H, W)
+        return_raw: bool = False,
     ) -> torch.Tensor:               # inputs_embeds (bs, seq_len, hidden_dim)
         """
         GPU-compatible image embedding.
@@ -214,6 +223,9 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
         3. Append image_newline tokens (one per row of the 27×27 grid → 27×28=756 tokens).
         4. Embed text tokens (clamp -200 → 0 to avoid OOB).
         5. Scatter visual features into -200 positions in-place.
+
+        With ``return_raw`` (the model line's NFP loss, 2026-11-03) also the SigLIP features of step 1, in the order
+        the frames are scattered: (inputs_embeds, (total_images, si_token_len, vis_dim)).
         """
         cfg = self.config
         si_token_len: int = cfg.si_token_len           # 729
@@ -228,6 +240,7 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
         # 1. Encode -------------------------------------------------------
         image_aux_features_list = self.encode_images([pixel_values])
         image_features = image_aux_features_list[0]  # (N, si_token_len, vis_dim)
+        raw_features = image_features
 
         # 2. Project -------------------------------------------------------
         proj_dtype = self.get_model().mm_projector[0].weight.dtype
@@ -281,6 +294,8 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
                 )
                 img_global_idx += 1
 
+        if return_raw:
+            return token_embeds, raw_features
         return token_embeds  # (bs, seq_len, hidden_dim)
 
     # ------------------------------------------------------------------
@@ -404,13 +419,21 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
             input_ids = input_ids.masked_fill(input_ids == int(alias), IMAGE_TOKEN_INDEX)
 
         # Build inputs_embeds
+        # The model line's NFP loss (2026-11-03): in training, with config model_line_nfp, the frames' SigLIP features
+        # and their positions are kept for it (vagen/models/cambrian_nfp.py)
+        concat_nfp = bool(getattr(self.config, "model_line_nfp", False)) and self.training
+        nfp_raw, nfp_image_ids = None, None
         if inputs_embeds is None:
             has_image_tokens = (
                 input_ids is not None
                 and (input_ids == IMAGE_TOKEN_INDEX).any()
             )
             if pixel_values is not None and has_image_tokens:
-                inputs_embeds = self._embed_multimodal_batch(input_ids, pixel_values)
+                if concat_nfp:
+                    inputs_embeds, nfp_raw = self._embed_multimodal_batch(input_ids, pixel_values, return_raw=True)
+                    nfp_image_ids = input_ids
+                else:
+                    inputs_embeds = self._embed_multimodal_batch(input_ids, pixel_values)
                 input_ids = None
             elif input_ids is not None:
                 inputs_embeds = self.get_model().embed_tokens(input_ids.clamp(min=0))
@@ -470,6 +493,21 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
                 nfp_loss_mask.to(hidden_states.dtype),
             )
 
+        # The model line's NFP loss on the concat path (2026-11-03): consecutive frames of each sequence
+        nfp_stats = None
+        if nfp_aux_loss is None and nfp_raw is not None:
+            si_side_len = int(self.config.si_token_len ** 0.5)
+            mm_use_newline = getattr(self.config, "mm_use_im_newline_token", True)
+            per_image = si_side_len * (si_side_len + 1) if mm_use_newline else si_side_len ** 2
+            pairs = concat_nfp_pairs(nfp_image_ids, position_ids, per_image)
+            nfp_aux_loss, nfp_stats = concat_nfp_loss(
+                hidden_states, pairs, nfp_raw, self.model.nfp_head, side=si_side_len, newline=mm_use_newline,
+                mse_weight=float(getattr(self.config, "nfp_mse_loss_weight", 0.1)),
+                cos_weight=float(getattr(self.config, "nfp_cosine_loss_weight", 0.1)))
+            if not getattr(self, "_model_line_nfp_logged", False):
+                print(f"[cambrian_register] model-line NFP loss active: {nfp_stats} loss={float(nfp_aux_loss):.4f}")
+                self._model_line_nfp_logged = True
+
         # Combine: in RL training labels=None so lm_loss=None; nfp_aux_loss
         # is returned in the `loss` field for dp_actor to read and accumulate.
         combined_loss = lm_loss if lm_loss is not None else nfp_aux_loss
@@ -478,13 +516,16 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
             out = (logits,) + outputs[1:]
             return (combined_loss,) + out if combined_loss is not None else out
 
-        return CausalLMOutputWithPast(
+        result = CausalLMOutputWithPast(
             loss=combined_loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+        if nfp_stats is not None:
+            result.nfp_stats = nfp_stats  # read by verl's dp_actor (actor/nfp_*)
+        return result
 
     # ------------------------------------------------------------------
     # generate
