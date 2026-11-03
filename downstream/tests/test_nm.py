@@ -25,13 +25,15 @@ VAL = {"prompt_format": "no_think", "prompt_format_example": "action_names", "ma
 def test_entries_are_named_from_where_the_weights_lie():
     e = S.entry(RL.format(g="d", c=9, k=1, r="d", n=300) + "/")
     assert e["name"] == "D-s1-V4" and e["group"] == "D" and e["seed"] == 1 and e["reward"] == "V4"
-    assert e["step"] == 300 and e["sft"] == "D-SFT" and e["base"] == "Q3B"
+    assert e["step"] == 300 and e["sft"] == "D-SFT" and e["base"] == "Q3B" and e["main_name"] == "m3ds1d_300"
     assert e["val_env"] == M + "/m3_d_s20261019/rl_m3ds1d/val_env.yaml" and not e["path"].endswith("/")
-    e = S.entry(RL.format(g="e", c=9, k=2, r="s0", n=150))
+    e = S.entry(RL.format(g="e", c=9, k=2, r="s0", n=50))
     assert e["name"] == "E-s2-S0" and e["sft"] == "Q3S"  # E's RL grew from the main line's formal SFT (N1's Q3S)
-    e = S.entry(M + "/sft/C/model/checkpoint-1204", matrix=M)
+    assert e["main_name"] == "m3es2s0_050"
+    e = S.entry(M + "/sft/C/model/checkpoint-1204", matrix=M)  # no chain folder for C under M here
     assert e["name"] == "C-SFT" and e["reward"] == "SFT" and e["seed"] is None and e["sft"] is None
-    assert e["val_env"].endswith("/rl_m3cs1s0/val_env.yaml")
+    assert e["val_env"] == S.QWEN3_VAL_ENV and "main_name" not in e
+    assert S.entry(M + "/sft/D_noP0/model/checkpoint-9", matrix=M)["name"] == "D_noP0-SFT"
     with pytest.raises(ValueError):
         S.entry("/elsewhere/checkpoint-5")
     with pytest.raises(ValueError, match="D-s1-V4"):
@@ -79,6 +81,11 @@ def test_check_finds_missing_weights_prompts_and_sft_starts(tmp_path):
         weights(Path(e["path"]))
     assert starts[2]["val_env"] == starts[0]["val_env"]
     assert S.check(starts) == []
+    other = tmp_path / "q3.yaml"
+    val_env(other, prompt_format="free_think")
+    archived = [dict(starts[0], archived="old"), dict(starts[1], archived="old", val_env=str(other))]
+    assert any("group D (archived)" in p for p in S.check(archived + [starts[2]]))
+    assert S.check([dict(starts[0], archived="old", val_env=str(other)), starts[2]]) == []  # apart from the rest
     val_env(Path(starts[1]["val_env"]), prompt_format="free_think")
     (Path(starts[2]["path"]) / "preprocessor_config.json").unlink()
     problems = S.check(starts[:2] + [starts[2]])
@@ -91,7 +98,7 @@ def test_cli_make_check_val_env(tmp_path, capsys):
     p = RL.format(g="c", c=9, k=1, r="s0", n=50).replace(M, m)
     weights(Path(p))
     f = tmp_path / "s.json"
-    assert S.main(["make", "--paths", p, "--out", str(f), "--note", "主线：C 挑 50"]) == 0
+    assert S.main(["make", "--paths", p, "--out", str(f), "--matrix", m, "--note", "主线：C 挑 50"]) == 0
     data = json.loads(f.read_text())
     assert data["note"] == "主线：C 挑 50" and data["starts"][0]["name"] == "C-s1-S0"
     assert S.main(["check", "--starts", str(f)]) == 1  # no val_env, and C-SFT is not there
@@ -99,6 +106,18 @@ def test_cli_make_check_val_env(tmp_path, capsys):
     assert S.main(["val-env", "C-s1-S0", "--starts", str(f)]) == 0
     assert capsys.readouterr().out.strip() == data["starts"][0]["val_env"]
     assert S.main(["val-env", "X", "--starts", str(f)]) == 2
+    q = m + "/sft/E/model/checkpoint-7"
+    assert S.main(["make", "--paths", q, "--out", str(f), "--matrix", m, "--append", "--note", "新 E",
+                   "--val-env", f"E-SFT={tmp_path / 'q.yaml'}", "--archived", "C-s1-S0=已废弃"]) == 0
+    data = json.loads(f.read_text())
+    assert [e["name"] for e in data["starts"]] == ["C-s1-S0", "E-SFT"] and data["note"] == "主线：C 挑 50\n新 E"
+    assert data["starts"][0]["archived"] == "已废弃" and data["starts"][1]["val_env"] == str(tmp_path / "q.yaml")
+    with pytest.raises(ValueError):  # E-SFT twice
+        S.main(["make", "--paths", q, "--out", str(f), "--matrix", m, "--append"])
+    with pytest.raises(KeyError):
+        S.main(["make", "--out", str(f), "--append", "--archived", "X=y"])
+    with pytest.raises(ValueError):
+        S.main(["make", "--out", str(f), "--append", "--archived", "C-s1-S0"])
 
 
 def test_submit_prints_without_go_and_prepares_root_jobs_with_it(tmp_path, monkeypatch):
@@ -161,23 +180,42 @@ def test_report_pairs_rl_with_its_sft_start_and_v4_with_s0(tmp_path):
     assert m["C-s1-V4"]["versus_s0"]["base"] == "C-s1-S0" and m["C-s1-V4"]["versus_s0"]["all"]["only_a"] == 1
     assert m["E-s1-S0"]["versus_sft"]["base"] == "Q3S" and m["E-s1-S0"]["versus_sft"]["all"]["diff"] == pytest.approx(0.2)
     assert "versus_sft" not in m["C-SFT"] and "versus" in m["C-SFT"] and "versus_s0" not in m["C-s1-S0"]
-    md = NR.markdown(rep)
-    assert "## 总览" in md and "| C | SFT | 3/10" in md and "对 C-SFT +20.0" in md and "| E | S0 |" in md
-    assert "同组同种子 V4 对 S0" in md and "| C-s1-V4 | C-s1-S0 |" in md and "E 对 Q3S" in md
     rep = NR.build(inst, nm, starts, n1, exclude={ids[0]})
     assert rep["instances"] == 9 and rep["models"]["C-SFT"]["rates"]["all"]["k"] == 2
+
+
+def test_archived_starts_are_reported_apart(tmp_path):
+    ids, inst, n1, nm, starts = report_fixture(tmp_path)
+    starts[0]["archived"] = "自由思考提示，已废弃"  # the old E
+    full = NR.build_all(inst, nm, starts, n1)
+    assert list(full["main"]["models"]) == ["Q3B", "Q3S", "C-SFT", "C-s1-S0", "C-s1-V4"]
+    arch = full["archived"]["自由思考提示，已废弃"]
+    assert list(arch["models"]) == ["Q3B", "Q3S", "E-s1-S0"]
+    assert arch["models"]["E-s1-S0"]["versus_sft"]["all"]["diff"] == pytest.approx(0.2)
+    md = NR.markdown(full, "主线：C 种子 1 的 V4 没有检查点")
+    main_part, arch_part = md.split("## 已归档：自由思考提示，已废弃（探索性，不进主表）")
+    assert "## 总览" in main_part and "| C | SFT | 3/10" in main_part and "`m3cs1s0_050` 5/10" in main_part
+    assert "对 C-SFT +20.0" in main_part and "| E |" not in main_part and "E-s1-S0" not in main_part
+    assert "同组同种子 V4 对 S0" in main_part and "| C-s1-V4 | C-s1-S0 |" in main_part
+    assert "- 主线说明：主线：C 种子 1 的 V4 没有检查点" in main_part
+    assert "| E | S0 | `m3es1s0_300` 4/10" in arch_part and "| E-s1-S0 | Q3S |" in arch_part
+    assert NR.main_name({"path": RL.format(g="d", c=9, k=2, r="d", n=7)}) == "m3ds2d_007"
+    assert NR.main_name({"path": M + "/sft/C/model/checkpoint-1204"}) is None
 
 
 def test_report_main_and_a_twice_played_instance(tmp_path):
     ids, inst, n1, nm, starts = report_fixture(tmp_path)
     f = tmp_path / "s.json"
-    f.write_text(json.dumps({"starts": starts}))
+    starts[0]["archived"] = "旧"
+    f.write_text(json.dumps({"note": "说明", "starts": starts}))
     scan = tmp_path / "scan.json"
     scan.write_text(json.dumps({"evals": {"x": {"instances": {ids[9]: {}}}}}))
     out = tmp_path / "rep"
     assert NR.main(["--instances", str(inst), "--eval", str(nm), "--n1", *map(str, n1), "--starts", str(f),
                     "--exclude", str(scan), "--out", str(out)]) == 0
-    assert json.loads((out / "report.json").read_text())["instances"] == 9 and (out / "report.md").is_file()
+    rep = json.loads((out / "report.json").read_text())
+    assert rep["main"]["instances"] == 9 and rep["archived"]["旧"]["instances"] == 9
+    assert "主线说明：说明" in (out / "report.md").read_text()
     write(nm / "C-SFT/episodes.jsonl", [ep(ids[0], True), ep(ids[0], False)])
     with pytest.raises(ValueError, match="C-SFT"):
         NR.build(inst, nm, starts, n1)

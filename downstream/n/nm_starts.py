@@ -2,7 +2,8 @@
 """The main line's matrix v3 starts evaluated N1's way (the user, 2026-11-03 evening: the picks of groups C, D and E,
 two seeds x S0 / V4 each, plus C's and D's SFT starts; frozen weights, the merged 600 instances; no far transfer).
 
-    python downstream/n/nm_starts.py make --paths P1 P2 ... [--out downstream/n/nm_starts.json]
+    python downstream/n/nm_starts.py make --paths P1 P2 ... [--out downstream/n/nm_starts.json] [--append]
+                                         [--val-env NAME=PATH ...] [--archived NAME=LABEL ...] [--note TEXT]
     python downstream/n/nm_starts.py check [--starts FILE]
     python downstream/n/nm_starts.py val-env NAME [--starts FILE]
     python downstream/n/nm_starts.py submit --out NM --instances FILE [--names ...] [--pool zoetrope] [--go]
@@ -11,8 +12,14 @@ make: one entry per weight folder (read by path, never copied), named from where
   * RL: exps/matrix_v3/m3_<g>_s<chain>/rl_run_m3<g>s<k><s0|d>/checkpoints/global_step_<n>/actor/huggingface ->
     "<G>-s<k>-<S0|V4>" (the runs' "d" is the dense V4 reward), its prompt the run's own rl_m3<g>s<k><s0|d>/val_env.yaml,
     its SFT start "<G>-SFT" for C and D and Q3S for E (E's RL grew from the main line's formal SFT epoch 8, N1's Q3S);
-  * SFT: exps/matrix_v3/sft/<G>/model/checkpoint-<n> -> "<G>-SFT", its prompt the group's seed-1 S0 run's val_env.
-  Every entry: base Q3B (all are Qwen3-VL-8B).  Writes the entries in the order given.
+  * SFT: exps/matrix_v3/sft/<G>/model/checkpoint-<n> -> "<G>-SFT", its prompt the group's seed-1 S0 run's val_env,
+    or, for a group without an RL chain, the main line's Qwen3 RL chain's (QWEN3_VAL_ENV: no_think + action_names,
+    the same text as C's and D's).
+  Every entry: base Q3B (all are Qwen3-VL-8B); an RL entry also the main line's name of its pick (main_name, e.g.
+  m3cs1s0_050).  Writes the entries in the order given; --append adds them to the file's entries (a name twice is an
+  error).  --val-env NAME=PATH gives an entry another prompt (2026-11-03: the new E, an SFT on P0 + P1 without RL,
+  must not take the old E chain's free_think one); --archived NAME=LABEL marks an entry (new or already in the file)
+  as archived, which nm_report.py reports apart under LABEL (2026-11-03: the old E's four RL, "自由思考提示，已废弃").
 check: every entry's weights (safetensors, config.json, preprocessor_config.json), its val_env, the prompt fields of
   its val_env against its group's others (prompt_format, prompt_format_example, max_actions_per_step, action_space,
   max_episode_steps), and that the SFT it names is an entry or Q3S; exit 1 on any problem.
@@ -36,7 +43,9 @@ STARTS = HERE / "nm_starts.json"
 MATRIX = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3"
 RL_RE = re.compile(r"/m3_(?P<g>[a-z])_s(?P<chain>\d+)/rl_run_m3(?P=g)s(?P<k>\d)(?P<r>s0|d)/checkpoints/"
                    r"global_step_(?P<n>\d+)/actor/huggingface/?$")
-SFT_RE = re.compile(r"/sft/(?P<G>[A-Z])/model/checkpoint-(?P<n>\d+)/?$")
+SFT_RE = re.compile(r"/sft/(?P<G>[^/]+)/model/checkpoint-(?P<n>\d+)/?$")
+# n_episode.VAL_ENV_QWEN3 (the main line's Qwen3 RL chain; N1's Q3 models): its prompt renders as C's and D's
+QWEN3_VAL_ENV = "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_q3d/val_env.yaml"
 REWARD = {"s0": "S0", "d": "V4"}
 SFT_OF_GROUP = {"C": "C-SFT", "D": "D-SFT", "E": "Q3S"}
 PROMPT_FIELDS = ("prompt_format", "prompt_format_example", "max_actions_per_step", "action_space", "max_episode_steps")
@@ -50,23 +59,42 @@ def entry(path: str, matrix: str = MATRIX) -> dict:
         val_env = str(Path(path).parents[3].parent / f"rl_m3{g}s{k}{r}" / "val_env.yaml")
         return {"name": f"{g.upper()}-s{k}-{REWARD[r]}", "path": path, "val_env": val_env, "group": g.upper(),
                 "seed": k, "reward": REWARD[r], "step": int(m["n"]), "sft": SFT_OF_GROUP.get(g.upper()),
-                "base": "Q3B"}
+                "base": "Q3B", "main_name": f"m3{g}s{k}{r}_{int(m['n']):03d}"}
     m = SFT_RE.search(path)
     if m:
         g = m["G"].lower()
         chains = sorted(Path(matrix).glob(f"m3_{g}_s*"))
-        val_env = str((chains[0] if chains else Path(matrix) / f"m3_{g}_s?") / f"rl_m3{g}s1s0" / "val_env.yaml")
+        val_env = str(chains[0] / f"rl_m3{g}s1s0" / "val_env.yaml") if chains else QWEN3_VAL_ENV
         return {"name": f"{m['G']}-SFT", "path": path, "val_env": val_env, "group": m["G"], "seed": None,
                 "reward": "SFT", "step": int(m["n"]), "sft": None, "base": "Q3B"}
     raise ValueError(f"not a matrix v3 RL or SFT weight folder: {path}")
 
 
-def make(paths, matrix: str = MATRIX) -> list:
-    out = [entry(p, matrix) for p in paths]
+def pairs(items, what: str) -> dict:
+    """["NAME=VALUE", ...] -> {NAME: VALUE}."""
+    out = {}
+    for x in items or ():
+        name, sep, value = x.partition("=")
+        if not sep or not name or not value:
+            raise ValueError(f"{what}: {x!r} is not NAME=VALUE")
+        out[name] = value
+    return out
+
+
+def make(paths, matrix: str = MATRIX, existing=(), val_env=None, archived=None) -> list:
+    """existing + one entry per path; val_env / archived: {name: prompt path / label} for any of them."""
+    out = list(existing) + [entry(p, matrix) for p in paths]
     names = [e["name"] for e in out]
     dup = sorted({n for n in names if names.count(n) > 1})
     if dup:
         raise ValueError(f"two weight folders for {', '.join(dup)}")
+    for what, given in (("val_env", val_env or {}), ("archived", archived or {})):
+        unknown = sorted(set(given) - set(names))
+        if unknown:
+            raise KeyError(f"{what} for {', '.join(unknown)}, which are not entries")
+        for e in out:
+            if e["name"] in given:
+                e[what] = given[e["name"]]
     return out
 
 
@@ -115,11 +143,11 @@ def check(starts) -> list:
         fields[e["name"]] = prompt_fields(e["val_env"])
         if e.get("sft") and e["sft"] not in names and e["sft"] != "Q3S":
             problems.append(f"{e['name']}: its SFT start {e['sft']} is not evaluated")
-    for g in sorted({e["group"] for e in starts}):
+    for g, arch in sorted({(e["group"], bool(e.get("archived"))) for e in starts}):  # archived ones apart
         seen = {json.dumps(fields[e["name"]], sort_keys=True) for e in starts
-                if e["group"] == g and e["name"] in fields}
+                if e["group"] == g and bool(e.get("archived")) == arch and e["name"] in fields}
         if len(seen) > 1:
-            problems.append(f"group {g}: the prompt fields differ: {sorted(seen)}")
+            problems.append(f"group {g}{' (archived)' if arch else ''}: the prompt fields differ: {sorted(seen)}")
     return problems
 
 
@@ -148,8 +176,12 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("make")
-    a.add_argument("--paths", nargs="+", required=True)
+    a.add_argument("--paths", nargs="*", default=[])
     a.add_argument("--out", type=Path, default=STARTS)
+    a.add_argument("--append", action="store_true", help="keep the entries (and note) already in --out")
+    a.add_argument("--matrix", default=MATRIX, help="where the RL chains lie (an SFT start's prompt)")
+    a.add_argument("--val-env", nargs="*", default=[], metavar="NAME=PATH")
+    a.add_argument("--archived", nargs="*", default=[], metavar="NAME=LABEL")
     a.add_argument("--note", default="", help="the main line's one-line note, kept in the file")
     a = sub.add_parser("check")
     a.add_argument("--starts", type=Path, default=STARTS)
@@ -165,10 +197,13 @@ def main(argv=None) -> int:
     a.add_argument("--go", action="store_true")
     args = ap.parse_args(argv)
     if args.cmd == "make":
-        starts = make(args.paths)
-        args.out.write_text(json.dumps({"note": args.note, "starts": starts}, indent=1, ensure_ascii=False) + "\n")
+        old = json.loads(args.out.read_text()) if args.append and args.out.is_file() else {"note": "", "starts": []}
+        starts = make(args.paths, args.matrix, existing=old["starts"], val_env=pairs(args.val_env, "--val-env"),
+                      archived=pairs(args.archived, "--archived"))
+        note = "\n".join(x for x in (old.get("note", ""), args.note) if x)
+        args.out.write_text(json.dumps({"note": note, "starts": starts}, indent=1, ensure_ascii=False) + "\n")
         for e in starts:
-            print(f"{e['name']:10s} step {e['step']:>5}  {e['path']}")
+            print(f"{e['name']:10s} step {e['step']:>5}  {e['path']}{'  [' + e['archived'] + ']' if e.get('archived') else ''}")
         return 0
     starts = load(args.starts)
     if args.cmd == "check":
