@@ -1,0 +1,354 @@
+{
+ "batch": "b27_20261103",
+ "approved": "PENDING: deletion not approved. Upload to AOSS approved by the user 2026-11-03 (把它们全都上传到aoss).",
+ "items": [
+  {
+   "id": "DS-B-010-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-010-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-B-010-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-B-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-B-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-B-100-s1-evals_src-steps_150000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-100-s1/evals_src/steps_150000",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-B-100-s1/evals_src/steps_150000) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-B-100-s1-evals_src-steps_175000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-100-s1/evals_src/steps_175000",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-B-100-s1/evals_src/steps_175000) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-B-100-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-B-100-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-B-100-s1-run_stopped_20261022-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-100-s1/run_stopped_20261022/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-B-100-s1/run_stopped_20261022/checkpoints) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RD-010-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-010-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RD-010-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RD-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RD-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RD-100-s1-evals_src-steps_150000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-100-s1/evals_src/steps_150000",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RD-100-s1/evals_src/steps_150000) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RD-100-s1-evals_src-steps_175000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-100-s1/evals_src/steps_175000",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RD-100-s1/evals_src/steps_175000) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RD-100-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RD-100-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RD-100-s1-run_stopped_20261022-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-100-s1/run_stopped_20261022/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RD-100-s1/run_stopped_20261022/checkpoints) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RS-010-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-010-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RS-010-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RS-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RS-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RS-100-s1-evals_src-steps_150000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-100-s1/evals_src/steps_150000",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RS-100-s1/evals_src/steps_150000) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RS-100-s1-evals_src-steps_175000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-100-s1/evals_src/steps_175000",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RS-100-s1/evals_src/steps_175000) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RS-100-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RS-100-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-RS-100-s1-run_stopped_20261022-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-100-s1/run_stopped_20261022/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-RS-100-s1/run_stopped_20261022/checkpoints) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-S-010-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-010-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-S-010-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-S-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-S-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-S-100-s1-evals_src-steps_150000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-100-s1/evals_src/steps_150000",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-S-100-s1/evals_src/steps_150000) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-S-100-s1-evals_src-steps_175000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-100-s1/evals_src/steps_175000",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-S-100-s1/evals_src/steps_175000) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-S-100-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-S-100-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "DS-S-100-s1-run_stopped_20261022-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-100-s1/run_stopped_20261022/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/DS-S-100-s1/run_stopped_20261022/checkpoints) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "E3-B-export-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-B/export/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/E3-B/export/checkpoints) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "E3-B-logs-robocasa365_starvla_ppo-100",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-B/logs/robocasa365_starvla_ppo/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/E3-B/logs/robocasa365_starvla_ppo/checkpoints/global_step_100) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "E3-RD-export-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-RD/export/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/E3-RD/export/checkpoints) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "E3-RD-logs-robocasa365_starvla_ppo-100",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-RD/logs/robocasa365_starvla_ppo/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/E3-RD/logs/robocasa365_starvla_ppo/checkpoints/global_step_100) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "E3-RS-export-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-RS/export/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/E3-RS/export/checkpoints) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "E3-RS-logs-robocasa365_starvla_ppo-100",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-RS/logs/robocasa365_starvla_ppo/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/E3-RS/logs/robocasa365_starvla_ppo/checkpoints/global_step_100) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "E3-S-export-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-S/export/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/E3-S/export/checkpoints) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "E3-S-logs-robocasa365_starvla_ppo-100",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-S/logs/robocasa365_starvla_ppo/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/E3-S/logs/robocasa365_starvla_ppo/checkpoints/global_step_100) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "STEP2-RS-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/STEP2-RS-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/STEP2-RS-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "T2-B-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-B-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/T2-B-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "T2-B-030-short-run-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-B-030-short/run/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/T2-B-030-short/run/checkpoints) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "T2-B-030-short-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-B-030-short/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/T2-B-030-short/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "T2-RS-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-RS-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/T2-RS-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "T5-B-nav-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-B-nav-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/T5-B-nav-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "T5-RD-nav-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-RD-nav-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/T5-RD-nav-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "T5-RS-nav-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-RS-nav-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/T5-RS-nav-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "T5-S-nav-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-S-nav-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/T5-S-nav-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X1-B-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X1-B-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X1-B-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X1-RD-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X1-RD-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X1-RD-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X1-RS-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X1-RS-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X1-RS-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X1-S-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X1-S-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X1-S-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X2-B-001-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-B-001-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X2-B-001-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X2-B-003-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-B-003-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X2-B-003-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X2-RD-001-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-RD-001-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X2-RD-001-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X2-RD-003-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-RD-003-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X2-RD-003-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X2-RS-001-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-RS-001-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X2-RS-001-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X2-RS-003-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-RS-003-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X2-RS-003-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X2-S-001-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-S-001-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X2-S-001-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "X2-S-003-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-S-003-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/X2-S-003-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "XE-B-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/XE-B-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/experiments/XE-B-030-s1/run/final_model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "x-X4-hf-E1-B-200k",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X4/hf/E1-B-200k",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/x/X4/hf/E1-B-200k) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "x-X4-hf-E1-RD-200k",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X4/hf/E1-RD-200k",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/x/X4/hf/E1-RD-200k) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "x-X4-hf-E1-RS-200k",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X4/hf/E1-RS-200k",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/x/X4/hf/E1-RS-200k) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "x-X4-hf-E1-S-200k",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X4/hf/E1-S-200k",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "downstream StarVLA model on the Qwen2.5-VL backbone: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/downstream_runs/x/X4/hf/E1-S-200k) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  }
+ ]
+}

@@ -1,0 +1,183 @@
+{
+ "batch": "b25_20261103",
+ "approved": "PENDING: deletion not approved. Upload to AOSS approved by the user 2026-11-03 (把它们全都上传到aoss).",
+ "items": [
+  {
+   "id": "R1-clean-Projective-v0-formal-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0/formal/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0/formal/checkpoints/global_step_250) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r11_20261016-inputs-qwen25vl3b_sft_trial_r5",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/qwen25vl3b_sft_trial_r5",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/qwen25vl3b_sft_trial_r5) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r11_20261016-inputs-r10_sft_e5",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/r10_sft_e5",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/r10_sft_e5) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r11_20261016-inputs-r1_final",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/r1_final",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/inputs/r1_final) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r5_20261014-trial-sft_trial_run",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r5_20261014/trial/sft_trial_run/model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r5_20261014/trial/sft_trial_run/model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list.",
+   "exclude": [
+    "^checkpoint-\\d+/"
+   ]
+  },
+  {
+   "id": "r5_20261014-trial-sft_trial_run-checkpoint-30",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r5_20261014/trial/sft_trial_run/model/checkpoint-30",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r5_20261014/trial/sft_trial_run/model/checkpoint-30) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r10_20261015-checkpoint-770",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r10_20261015/lf_formal/model/checkpoint-770",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r10_20261015/lf_formal/model/checkpoint-770) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r11_20261016-checkpoint-1386",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11_20261016/lf_formal/model/checkpoint-1386) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r11p_20261017-pd-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_pd/checkpoints/global_step_150",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_pd/checkpoints/global_step_150) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r11p_20261017-ps0-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_ps0/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r11p_20261017/rl_run_ps0/checkpoints/global_step_300) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12a_20261019-p1d-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12a_20261019/rl_run_p1d/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12a_20261019/rl_run_p1d/checkpoints/global_step_100) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12a_20261019-p1s0-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12a_20261019/rl_run_p1s0/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12a_20261019/rl_run_p1s0/checkpoints/global_step_250) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12b_20261019-p2d-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12b_20261019/rl_run_p2d/checkpoints/global_step_200",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12b_20261019/rl_run_p2d/checkpoints/global_step_200) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12b_20261019-p2d-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12b_20261019/rl_run_p2d/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12b_20261019/rl_run_p2d/checkpoints/global_step_250) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12b_20261019-p2s0-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12b_20261019/rl_run_p2s0/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12b_20261019/rl_run_p2s0/checkpoints/global_step_250) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12ds100_20261020-s100d-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ds100_20261020/rl_run_s100d/checkpoints/global_step_50",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ds100_20261020/rl_run_s100d/checkpoints/global_step_50) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12ds100_20261020-s100s0-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ds100_20261020/rl_run_s100s0/checkpoints/global_step_50",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ds100_20261020/rl_run_s100s0/checkpoints/global_step_50) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12ds400_20261020-s400d-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ds400_20261020/rl_run_s400d/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ds400_20261020/rl_run_s400d/checkpoints/global_step_100) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12ds400_20261020-s400s0-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ds400_20261020/rl_run_s400s0/checkpoints/global_step_50",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12ds400_20261020/rl_run_s400s0/checkpoints/global_step_50) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12f_20261020-c3d-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12f_20261020/rl_run_c3d/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12f_20261020/rl_run_c3d/checkpoints/global_step_300) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12f_20261020-c3s0-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12f_20261020/rl_run_c3s0/checkpoints/global_step_150",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12f_20261020/rl_run_c3s0/checkpoints/global_step_150) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12g_20261020-cud-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12g_20261020/rl_run_cud/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12g_20261020/rl_run_cud/checkpoints/global_step_250) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12g_20261020-cus0-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12g_20261020/rl_run_cus0/checkpoints/global_step_200",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12g_20261020/rl_run_cus0/checkpoints/global_step_200) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12j_20261021-e1e0s0-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12j_20261021/rl_run_e1e0s0/checkpoints/global_step_50",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12j_20261021/rl_run_e1e0s0/checkpoints/global_step_50) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12k_20261021-dk100-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12k_20261021/rl_run_dk100/checkpoints/global_step_200",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12k_20261021/rl_run_dk100/checkpoints/global_step_200) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12k_20261021-dk177-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12k_20261021/rl_run_dk177/checkpoints/global_step_250",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12k_20261021/rl_run_dk177/checkpoints/global_step_250) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12k_20261021-s0keep-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12k_20261021/rl_run_s0keep/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12k_20261021/rl_run_s0keep/checkpoints/global_step_100) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12m_20261022-dc-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12m_20261022/rl_run_dc/checkpoints/global_step_50",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12m_20261022/rl_run_dc/checkpoints/global_step_50) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "r12m_20261022-dck-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12m_20261022/rl_run_dck/checkpoints/global_step_300",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "Qwen2.5-VL weights (Qwen2.5 dropped 10-27; the user 11-03: basically not needed any more): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12m_20261022/rl_run_dck/checkpoints/global_step_300) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  }
+ ]
+}

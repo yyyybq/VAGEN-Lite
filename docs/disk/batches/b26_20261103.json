@@ -1,0 +1,42 @@
+{
+ "batch": "b26_20261103",
+ "approved": "PENDING: deletion not approved. Upload to AOSS approved by the user 2026-11-03 (把它们全都上传到aoss).",
+ "items": [
+  {
+   "id": "cluster-experiments_legacy_runs",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/archive/cluster/experiments_legacy_runs",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "legacy run tarball: archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/archive/cluster/experiments_legacy_runs) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list.",
+   "include": [
+    "^u1_step32_diagnostic_snapshot\\.tar\\.gz$"
+   ]
+  },
+  {
+   "id": "interiorgs_qa_final_20261028-lf_256",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256/model",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "QA line Qwen2.5-VL SFT (interiorgs_qa final 10-28): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256/model) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list.",
+   "exclude": [
+    "^checkpoint-\\d+/"
+   ]
+  },
+  {
+   "id": "interiorgs_qa_final_20261028-lf_256-checkpoint-170",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256/model/checkpoint-170",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "QA line Qwen2.5-VL SFT (interiorgs_qa final 10-28): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256/model/checkpoint-170) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "interiorgs_qa_final_20261028-lf_256-checkpoint-340",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256/model/checkpoint-340",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "QA line Qwen2.5-VL SFT (interiorgs_qa final 10-28): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256/model/checkpoint-340) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  },
+  {
+   "id": "interiorgs_qa_final_20261028-lf_256-checkpoint-510",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256/model/checkpoint-510",
+   "marker_name": "DELETED_TO_AOSS_20261103.txt",
+   "marker": "QA line Qwen2.5-VL SFT (interiorgs_qa final 10-28): archived to AOSS (fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256/model/checkpoint-510) and deleted on 2026-11-03 by the disk line on the user's approval of the planned list."
+  }
+ ]
+}
