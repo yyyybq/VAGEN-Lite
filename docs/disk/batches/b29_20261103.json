@@ -1,6 +1,6 @@
 {
  "batch": "b29_20261103",
- "approved": "PENDING: the user's confirmation in the disk window (relayed by the model line 11-03 ~20:00, its table 1g).",
+ "approved": "the user 2026-11-03 in the disk window: \"确认删\" (decision 1 of the 20:11 report: b29 = the model line's table 1g, 45 files 160.9 GB; the user's word in the model line: \"可以把现有的-S的训练权重都删掉了，我只要有predictive loss的结果进入最终论文\"; lf_cformal/model/checkpoint-770 stays)",
  "items": [
   {
    "id": "CAM-sft-lf_cformal-final",
