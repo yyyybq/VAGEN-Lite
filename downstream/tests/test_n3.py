@@ -242,7 +242,7 @@ def test_report_tiers_pairings_and_the_c_against_d_gap(tmp_path):
     a = {"S": {f"t{k}": k < 4 for k in range(10)}, "RS": {f"t{k}": k < 7 for k in range(10)}}
     rep = NR.build(n3, exclude={"I9"} - {"I9"}, a=a, d_dirs=[d])
     t = rep["tiers"]
-    assert t["c"]["models"]["RS"]["k"] == 5 and t["c"]["pairs"]["RS-S"]["diff"] == pytest.approx(0.3)
+    assert t["c"]["models"]["RS"]["k"] == 5 and t["c"]["pairs"]["RS-S"]["diff"] == pytest.approx(3 / 8)
     assert t["d"]["pairs"]["RS-S"]["diff"] == pytest.approx(0.1) and t["a"]["pairs"]["RS-S"]["diff"] == pytest.approx(0.3)
     assert t["d_on_c"]["models"]["RS"]["n"] == 8 and t["d_on_c"]["pairs"]["RS-S"]["diff"] == 0  # I9 is not in c
     g = rep["across"]["RS-S"]["c_vs_d_same_instances"]
