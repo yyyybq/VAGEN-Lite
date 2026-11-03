@@ -145,3 +145,18 @@ def test_main_writes_the_report(tmp_path):
     assert R.main(["--gen", str(gen), "--eval", str(ev), "--models", "B"]) == 0
     assert json.loads((ev / "report.json").read_text())["models"]["B"]["rates"]["all"]["k"] == 1
     assert (ev / "report.md").read_text().startswith("# N1 结果")
+
+
+def test_instances_with_corrupted_frames_can_be_left_out(tmp_path):
+    """2026-11-03 (n_frames.py): the merged report without the instances whose evaluation frames were colour noise."""
+    sets = two_sets(tmp_path)
+    scan = tmp_path / "scan.json"
+    scan.write_text(json.dumps({"evals": {"a": {"instances": {"one0_equidistance": {"S": {}}}},
+                                          "b": {"instances": {"two9_equidistance": {"RS": {}}}}}}))
+    plain = tmp_path / "ids.txt"
+    plain.write_text("one1_equidistance\n\n")
+    ex = R.excluded([scan, plain])
+    assert ex == {"one0_equidistance", "two9_equidistance", "one1_equidistance"}
+    rep = R.build_sets(sets, ["S", "RS"], exclude=ex)
+    assert rep["combined"]["instances"] == 17 and rep["sets"]["one"]["instances"] == 8
+    assert rep["combined"]["models"]["S"]["rates"]["all"]["k"] == 2  # one0, one1 (successes) are out

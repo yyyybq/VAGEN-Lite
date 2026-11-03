@@ -121,9 +121,10 @@ def behaviour(recs: list) -> dict:
             "ends": dict(collections.Counter(r.get("end") for r in recs))}
 
 
-def load(gen: Path, evals: Path, models=MODELS) -> tuple:
-    """(instances by id, model -> its episodes on them) of one set."""
-    insts = {x["instance_id"]: x for x in read_jsonl(Path(gen) / "instances_eval.jsonl")}
+def load(gen: Path, evals: Path, models=MODELS, exclude=()) -> tuple:
+    """(instances by id, model -> its episodes on them) of one set, without the instance ids in exclude."""
+    insts = {x["instance_id"]: x for x in read_jsonl(Path(gen) / "instances_eval.jsonl")
+             if x["instance_id"] not in exclude}
     recs = {m: [r for r in read_jsonl(Path(evals) / m / "episodes.jsonl") if r.get("instance_id") in insts]
             for m in models}
     return insts, recs
@@ -182,13 +183,13 @@ def summarize(insts: dict, recs: dict, models=MODELS) -> dict:
     return out
 
 
-def build(gen: Path, evals: Path, models=MODELS) -> dict:
-    return summarize(*load(gen, evals, models), models)
+def build(gen: Path, evals: Path, models=MODELS, exclude=()) -> dict:
+    return summarize(*load(gen, evals, models, exclude), models)
 
 
-def build_sets(sets, models=MODELS) -> dict:
+def build_sets(sets, models=MODELS, exclude=()) -> dict:
     """sets: [(name, gen, eval)].  Each set apart, all of them merged, and with two sets their agreement."""
-    parts = {name: load(g, e, models) for name, g, e in sets}
+    parts = {name: load(g, e, models, exclude) for name, g, e in sets}
     out = {"sets": {n: summarize(*p, models) for n, p in parts.items()},
            "combined": summarize(*merge(parts.values()), models)}
     if len(parts) == 2:
@@ -309,6 +310,19 @@ def markdown_sets(rep: dict) -> str:
             + markdown(comb, f"合并的 {comb['instances']} 个实例（门槛附近 {comb['near_threshold']} 个）", "##"))
 
 
+def excluded(paths) -> set:
+    """Instance ids from n_frames.py scan reports (.json: every instance with a corrupted frame in any evaluation) or
+    plain files (one id per line)."""
+    out = set()
+    for p in paths:
+        text = Path(p).read_text()
+        if str(p).endswith(".json"):
+            out |= {i for r in json.loads(text)["evals"].values() for i in r["instances"]}
+        else:
+            out |= {x.strip() for x in text.splitlines() if x.strip()}
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gen", type=Path, nargs="+", required=True)
@@ -316,12 +330,16 @@ def main(argv=None) -> int:
     ap.add_argument("--names", nargs="+", default=None, help="one name per set (default: the EVAL folders' names)")
     ap.add_argument("--models", nargs="+", default=list(MODELS))
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--exclude", type=Path, nargs="*", default=[],
+                    help="instance ids to leave out: n_frames.py scan reports (every instance with a corrupted frame) "
+                         "or files of one id per line")
     args = ap.parse_args(argv)
+    exclude = excluded(args.exclude)
     if len(args.gen) != len(args.eval):
         ap.error("one --eval per --gen")
     if len(args.gen) == 1:
         out = args.out or args.eval[0]
-        rep = build(args.gen[0], args.eval[0], args.models)
+        rep = build(args.gen[0], args.eval[0], args.models, exclude)
         md, summary = markdown(rep), rep
     else:
         if args.out is None:
@@ -330,7 +348,7 @@ def main(argv=None) -> int:
         if len(names) != len(args.gen) or len(set(names)) != len(names):
             ap.error("one distinct --names entry per set")
         out = args.out
-        rep = build_sets(list(zip(names, args.gen, args.eval)), args.models)
+        rep = build_sets(list(zip(names, args.gen, args.eval)), args.models, exclude)
         md, summary = markdown_sets(rep), rep["combined"]
     out.mkdir(parents=True, exist_ok=True)
     (out / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False) + "\n")
