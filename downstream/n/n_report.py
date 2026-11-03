@@ -143,7 +143,14 @@ def merge(parts) -> tuple:
     return insts, dict(recs)
 
 
-def summarize(insts: dict, recs: dict, models=MODELS) -> dict:
+def default_refs(models=MODELS) -> dict:
+    """{pairing: {model: its reference}}: N1's pairings (PAIRINGS)."""
+    return {"versus": {m: base_of(m) for m in models if base_of(m) != m},
+            "versus_sft": {m: sft_of(m) for m in models if sft_of(m)}}
+
+
+def summarize(insts: dict, recs: dict, models=MODELS, refs=None) -> dict:
+    """refs: {pairing: {model: reference}} (default_refs); a pairing is made when the reference has episodes."""
     by_type = collections.defaultdict(list)
     for i, x in insts.items():
         by_type[x["task_type"]].append(i)
@@ -174,12 +181,11 @@ def summarize(insts: dict, recs: dict, models=MODELS) -> dict:
         return {"base": ref, "all": whole, "near": compare(succ[m], succ[ref], near),
                 "clear": compare(succ[m], succ[ref], clear), "per_type": per_type}
 
-    for m in models:
-        b, s = base_of(m), sft_of(m)
-        if m != b and succ.get(b):
-            out["models"][m]["versus"] = pair(m, b)
-        if s and succ.get(s):
-            out["models"][m]["versus_sft"] = pair(m, s)
+    for key, ref_of in (default_refs(models) if refs is None else refs).items():
+        for m in models:
+            ref = ref_of.get(m)
+            if ref and ref != m and succ.get(ref):
+                out["models"][m][key] = pair(m, ref)
     return out
 
 
@@ -246,7 +252,10 @@ def pair_tables(rep: dict, key: str, label: str, h: str) -> list:
     return lines
 
 
-def markdown(rep: dict, title: str = None, head: str = "#") -> str:
+PAIR_NOTE = "S、RS、RD 对 B，Q3S、Q3RS、Q3RD 对 Q3B；RS、RD 对 S，Q3RS、Q3RD 对 Q3S。"
+
+
+def markdown(rep: dict, title: str = None, head: str = "#", pairings=PAIRINGS, pair_note: str = PAIR_NOTE) -> str:
     types = list(rep["per_type"])
     h = head + "#"
     title = title or f"N1 结果（{rep['instances']} 个实例，门槛附近 {rep['near_threshold']} 个）"
@@ -256,7 +265,7 @@ def markdown(rep: dict, title: str = None, head: str = "#") -> str:
              "| --- |" + " ---: |" * (len(types) + 1)]
     for m, r in rep["models"].items():
         lines.append(f"| {m} | " + " | ".join(cell(r["rates"][t]) for t in types + ["all"]) + " |")
-    for key, label in PAIRINGS:
+    for key, label in pairings:
         lines += pair_tables(rep, key, label, h)
     lines += ["", f"{h} 行为", "",
               "| 模型 | 回合 | 读不出的轮次占比 | 被挡的动作占比 | 平均轮数 | 最高塑形分（平均） | 结束方式 | 出错 / 缺 |",
@@ -268,7 +277,7 @@ def markdown(rep: dict, title: str = None, head: str = "#") -> str:
                      f"{b['turns_per_episode']:.1f} | {b['max_shaping_mean']:.3f} | {ends} | "
                      f"{len(r['errors'])} / {len(r['missing'])} |")
     lines += ["", "- 配对：同一个实例上两个模型各跑一回合（贪心解码，所以每个模型每个实例只有一个结果）。"
-                  "S、RS、RD 对 B，Q3S、Q3RS、Q3RD 对 Q3B；RS、RD 对 S，Q3RS、Q3RD 对 Q3S。"
+                  + pair_note +
                   "差值 = 模型成功率 − 对照成功率；“a 对 b”= 只有模型成功的回合数对只有对照成功的回合数。",
               "- 按场景重抽：同一个场景（同一个任务、同一个重置种子）的几个实例共用一个厨房，不独立；把场景整个有放回地"
               "重抽 2,000 次，取配对差的第 2.5 和第 97.5 百分位。它比按实例算的区间宽多少，反映场景之间的差别有多大。",

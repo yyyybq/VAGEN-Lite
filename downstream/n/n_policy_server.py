@@ -9,6 +9,7 @@ base64 in order, "max_new_tokens": N}; the answer {"reply": text}: the model's c
 prompt, greedy decoding.  Models and processors as q0_ask.py (read by path).  One request at a time.
 --adapter (N2, the user's decision 1 of 2026-11-03): a LoRA adapter of n2_train.py added to the model's weights in
 memory after loading (n2_train.merge_adapter; nothing written).
+The matrix v3 starts of nm_starts.json (nm_starts.py, 2026-11-03) are models too, by their names there.
 """
 from __future__ import annotations
 
@@ -24,7 +25,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "x"))
 import n_episode as E  # noqa: E402
+import nm_starts  # noqa: E402
 import q0_ask  # noqa: E402
+
+nm_starts.register(q0_ask)
 
 
 def answer(processor, model, req: dict) -> str:
