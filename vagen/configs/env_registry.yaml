@@ -7,6 +7,8 @@ env_registry:
   # Active Spatial Navigation (local, in-process)
   ActiveSpatial: vagen.envs.active_spatial.active_spatial_env.ActiveSpatialGymEnv
   SpatialMCQ: vagen.envs.spatial_mcq.spatial_mcq_env.SpatialMCQEnv
+  # Single-turn P0 question answering (the Qwen3 main line's QA RL pilot, 2026-11-03)
+  P0QA: vagen.envs.p0_qa.p0_qa_env.P0QAEnv
   # Remote environment client (generic, reusable for any remote env)
   RemoteEnv: vagen.envs_remote.GymImageEnvClient
   RoboCasa: vagen.envs.robocasa.robocasa_env.RoboCasaEnv

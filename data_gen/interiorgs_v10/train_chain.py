@@ -75,6 +75,12 @@ failed attempt in state "trainer_crashes"); the checkpoints it reached are evalu
 2026-11-01, off unless given; qa_jobs): the evaluate step also evaluates the named models on EASI benchmarks, one
 single-card job a model and benchmark (job script mode qa, data_gen.interiorgs_v10.qa_eval, the model type's Python),
 in the same queue as the action evaluations; its "p0" (2026-11-03) adds the P0 line's in-domain QA, one job a model.
+The QA RL pilot (the user's instruction of 2026-11-03): a run whose plan rl has "env": "p0_qa" trains on P0 questions
+(rl-config by data_gen.interiorgs_v10.qa_rl from rl "rows" / "val_rows", with rl "seed", "candidates",
+"target_groups", "response_length", "save_freq"); it needs no render service, so none is submitted and its trainer
+finds a placeholder address (renderer_endpoint.txt "none").  It needs plan "rl_runs".  qa_eval "easi_models" /
+"p0_models" name the models of each kind (default: "models"); a checkpoint a guard-stopped run never reached is left
+out.
 
 Round 12 (the user's decisions): an RL trainer that ends at Ray start-up (STARTUP_FAILURE_MARKERS in its log)
 or writes nothing for plan "rl"."startup"."stall_minutes" (default 40) before its first update is deleted and
@@ -904,7 +910,16 @@ class Chain:
         benchmarks = list(EASI_8_JOBS) if qa.get("easi") == "easi_8" else list(qa.get("easi") or [])
         unknown = [b for b in benchmarks if b not in EASI_8 + EASI_8_JOBS]
         names = list(qa.get("models") or (self.plan.get("eval") or {}).get("models") or {})
-        missing = [n for n in names if n not in models]
+        easi_names = list(qa.get("easi_models") or names)  # 2026-11-03: the QA RL pilot names each kind's models
+        p0_names = list(qa.get("p0_models") or names)
+        stopped = set(self.state.get("guard_stops") or {})
+
+        def reached(n: str) -> bool:  # a checkpoint a guard-stopped run never reached is not evaluated (evaluate)
+            run, _, step = n.rpartition("_")
+            return not (run in stopped and step.isdigit())
+
+        wanted = [n for n in dict.fromkeys(easi_names + p0_names) if n in models or reached(n)]
+        missing = [n for n in wanted if n not in models]
         if unknown or missing:
             raise ChainError(f"qa_eval: benchmarks not in EASI-8 {unknown}; models the evaluate step lacks {missing}")
         kind = str(self.plan.get("model_type") or "qwen2_5_vl")
@@ -912,11 +927,11 @@ class Chain:
         limit = ["--limit", str(qa["limit"])] if qa.get("limit") else []
         jobs = {f"qa_{b}__{n}": (out / b, n, models[n][0], None,
                                  ["easi", "--benchmark", b, "--model-type", kind, *limit], "qa")
-                for b in benchmarks for n in names}
+                for b in benchmarks for n in easi_names if n in models}
         if qa.get("p0"):
             jobs.update({f"qa_p0__{n}": (out / "p0", n, models[n][0], None,
                                          ["p0", "--selection", str(qa["p0"]), "--res", str(qa.get("p0_res", 256)),
-                                          "--model-type", kind, *limit], "qa") for n in names})
+                                          "--model-type", kind, *limit], "qa") for n in p0_names if n in models})
         return jobs
 
     def external_renderer_state(self, name: str, run_dir: Path, info: Dict[str, Any]) -> Dict[str, Any]:
@@ -1350,9 +1365,32 @@ class Chain:
         self.mark("pick_sft", decision={"select_by": select_by, "scores": scores, "best": best,
                                         "model": candidates[best], "other_sets": others})
 
+    def qa_env(self, run: Dict[str, Any]) -> bool:
+        """The QA RL pilot (2026-11-03): a run on P0 questions (plan rl "env": "p0_qa"), without a render service."""
+        env = run["rl"].get("env")
+        if env not in (None, "p0_qa"):
+            raise ChainError(f"rl env must be p0_qa or absent (the action env), not {env!r}")
+        return env == "p0_qa"
+
     def rl_config(self) -> None:
         for name, run in self.rl_runs().items():
             rl = run["rl"]
+            if self.qa_env(run):  # the QA RL pilot: its own rl-config (data_gen.interiorgs_v10.qa_rl)
+                if not self.plan.get("rl_runs"):
+                    raise ChainError("rl env p0_qa needs plan rl_runs")
+                if not rl.get("rows") or not rl.get("val_rows"):
+                    raise ChainError("rl env p0_qa needs rl rows and val_rows (qa_rl rows files)")
+                args = [sys.executable, "-m", "data_gen.interiorgs_v10.qa_rl", "rl-config", "--rows", str(rl["rows"]),
+                        "--val-rows", str(rl["val_rows"]), "--model", str(self.sft_model()),
+                        "--name", self.plan.get("rl_name", "v10_qa_rl") + (f"_{name}" if name else ""),
+                        "--run-root", str(run["run_dir"]), "--out", str(run["rl_dir"])]
+                for key, flag in (("seed", "--seed"), ("candidates", "--candidates"),
+                                  ("target_groups", "--target-groups"), ("response_length", "--response-length"),
+                                  ("save_freq", "--save-freq")):
+                    if rl.get(key) is not None:
+                        args += [flag, str(rl[key])]
+                self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
+                continue
             args = [sys.executable, "-m", "data_gen.interiorgs_v10.training_prep", "rl-config",
                     "--rows", str(rl.get("rows") or self.sft_dir / "rows.jsonl"),
                     "--gs-root", self.plan["gs_root"], "--model", str(self.sft_model()),
@@ -1518,7 +1556,10 @@ class Chain:
             first = self.renderer_first(run)
             after = self.renderer_after(run)
             lazy = self.renderer_lazy(run, pool)
-            if (not (d / "job_renderer" / "submission.json").exists() and not lazy and not after
+            qa = self.qa_env(run)  # the QA RL pilot: no render service, a placeholder address for the trainer
+            if qa:
+                (d / "renderer_endpoint.txt").write_text("none\n")
+            if (not (d / "job_renderer" / "submission.json").exists() and not lazy and not after and not qa
                     and external_renderer(d) is None):  # an external service: no sco one
                 submit_renderer(name, d, trainer_pool(d) if first and not new_trainer else None)
             if new_trainer and not first:  # renderer_first: the trainer follows once its service is up
@@ -1589,6 +1630,8 @@ class Chain:
                         self.save()
                     if st_ext is not None:  # EXTERNAL; EXTERNAL_DOWN (finished) after the failed polls
                         st_r = st_ext
+                    elif self.qa_env(run):  # the QA RL pilot: no render service to watch
+                        st_r = {"state": "NOT_NEEDED", "finished": False}
                     elif (d / "job_renderer" / "submission.json").exists():
                         st_r = job_sco.status(d, "job_renderer")
                     else:  # renderer_when_trainer_runs: not submitted while the trainer waits for cards

@@ -671,6 +671,68 @@ class ChainTest(unittest.TestCase):
         self.assertIsNone(T.guard_reason(few, {"kl_max": 0.2}))  # off unless given
         self.assertIsNone(T.guard_reason("".join(line(s) for s in range(1, 8)), guards))  # S0: no keep metrics
 
+    def test_qa_rl_runs(self):
+        """The QA RL pilot (2026-11-03): rl "env": "p0_qa" runs get qa_rl's rl-config, no render service (a
+        placeholder address for the trainer), and qa_eval names each kind's checkpoints, a stopped run's unreached
+        ones left out."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clock = {"poll": 0}
+            plan = {"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "retries": 2, "pool": "h800",
+                    "rl_start_model": str(root / "start"),
+                    "rl": {"env": "p0_qa", "rows": str(root / "rows.jsonl"), "val_rows": str(root / "val.jsonl"),
+                           "candidates": 64, "target_groups": 32, "response_length": 256},
+                    "rl_runs": {"s1": {"rl": {"seed": 20261019}}, "s2": {"rl": {"seed": 20261021}}}}
+            chain = T.Chain(plan, sleep=lambda s: clock.__setitem__("poll", clock["poll"] + 1))
+            calls = []
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.rl_config()
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[0][1:4], ["-m", "data_gen.interiorgs_v10.qa_rl", "rl-config"])
+            a = calls[0]
+            self.assertEqual(a[a.index("--model") + 1], str(root / "start"))
+            self.assertEqual((a[a.index("--seed") + 1], a[a.index("--candidates") + 1], a[a.index("--target-groups") + 1],
+                              a[a.index("--response-length") + 1]), ("20261019", "64", "32", "256"))
+            events = []
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+                (run / job_dir / "prepared.json").write_text(json.dumps({"pool": pool, "mode_args": list(args)}))
+                events.append(("prepare", job_dir))
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+                events.append(("submit", job_dir))
+
+            def status(run, job_dir="job"):
+                job_id = json.loads((run / job_dir / "submission.json").read_text())["job_id"]
+                if clock["poll"] < 2:
+                    return {"job_id": job_id, "state": "RUNNING", "finished": False}
+                (run / "checkpoints" / "global_step_50").mkdir(parents=True, exist_ok=True)
+                return {"job_id": job_id, "state": "SUCCEEDED", "finished": True}
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=lambda *a, **k: None):
+                chain.rl()
+            self.assertEqual(sorted(set(events)), [("prepare", "job_rl"), ("submit", "job_rl")])  # no render service
+            for run in chain.rl_runs().values():
+                self.assertEqual((run["run_dir"] / "renderer_endpoint.txt").read_text(), "none\n")
+            # qa_eval: EASI on some checkpoints, P0 on others; s2 stopped by a guard before 100
+            chain.state["guard_stops"] = {"s2": {"reason": "entropy"}}
+            chain.plan["qa_eval"] = {"out": str(root / "qa"), "easi": ["blink"], "p0": str(root / "p0.jsonl"),
+                                     "easi_models": ["s1_100", "s2_100"], "p0_models": ["s1_050", "s1_100", "s2_050"]}
+            models = {n: (str(root / n), None, []) for n in ("s1_050", "s1_100", "s2_050")}
+            jobs = chain.qa_jobs(models)
+            self.assertEqual(sorted(jobs), ["qa_blink__s1_100", "qa_p0__s1_050", "qa_p0__s1_100", "qa_p0__s2_050"])
+            chain.state["guard_stops"] = {}
+            with self.assertRaises(T.ChainError):  # a running run's missing checkpoint is an error
+                chain.qa_jobs(models)
+            with self.assertRaises(T.ChainError):
+                T.Chain({**plan, "rl": {**plan["rl"], "env": "robocasa"}}, sleep=lambda s: None).rl_config()
+
     def test_sft_lf_dirs(self):
         """Matrix v2's plan "sft_lf_dirs" (ported 2026-11-03, P1's test): a group trains on a ready-made
         LLaMA-Factory folder; render and sft_data only check it (no render job, no sft-records, no prepare script)."""
