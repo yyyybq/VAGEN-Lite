@@ -47,6 +47,15 @@ MAIN_TASKS = ("OpenDrawer", "TurnOffStove", "SlideDishwasherRack", "CoffeeSetupM
 RECORDED_ONLY = ("DeliverStraw", "PrepareCoffee", "SearingMeat")
 SPATIAL = MAIN_TASKS + RECORDED_ONLY
 STARTS = ("B", "S", "RS", "RD")
+# C1's comparisons (the user's decision 5 of 2026-11-02 and 5 of 2026-11-03): a folder named by an experiment replays
+# that experiment's final checkpoint; C1 is also paired with DS-B-030-s1, its run without the text data.
+EXPERIMENTS = ("DS-B-030-s1", "C1-B-030-s1")
+PAIRS = {"C1-B-030-s1": "DS-B-030-s1"}
+
+
+def experiment_of(start: str) -> str:
+    """The experiment whose final checkpoint a folder replays: B, S, RS, RD the E1 runs, others by name."""
+    return start if start in EXPERIMENTS else f"DS-{start}-100-s1"
 
 OPEN_MIN = 0.05   # a door or drawer was opened when its opening grew by more than 5% of its range
 KNOB_MIN = 0.10   # rad (about 6 degrees): a knob was turned when it moved more than this
@@ -379,14 +388,14 @@ def paired(table: dict, ref: dict, tasks=MAIN_TASKS) -> dict:
 
 
 def analyze(x3: Path, experiments: Path, out: Path) -> dict:
-    res = {"identity": {}, "starts": {}, "recorded_only": {}, "vs_B": {}}
+    res = {"identity": {}, "starts": {}, "recorded_only": {}, "vs_B": {}, "pairs": {}}
     tables = {}
-    for s in STARTS:
+    for s in STARTS + EXPERIMENTS:
         path = x3 / s / "out/episodes/episodes.jsonl"
         if not path.is_file():
             continue
         replay = read_rows(path)
-        original = read_rows(experiments / f"DS-{s}-100-s1/evals/steps_200000/out/episodes/episodes.jsonl")
+        original = read_rows(experiments / experiment_of(s) / "evals/steps_200000/out/episodes/episodes.jsonl")
         res["identity"][s] = identity(replay, original)
         tables[s] = episode_table(replay)
         res["starts"][s] = summarize(tables[s])
@@ -394,6 +403,9 @@ def analyze(x3: Path, experiments: Path, out: Path) -> dict:
     for s in tables:
         if s != "B" and "B" in tables:
             res["vs_B"][s] = paired(tables[s], tables["B"])
+    for s, ref in PAIRS.items():
+        if s in tables and ref in tables:
+            res["pairs"][f"{s} vs {ref}"] = paired(tables[s], tables[ref])
     out.mkdir(parents=True, exist_ok=True)
     (out / "results.json").write_text(json.dumps(res, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     with open(out / "episodes.jsonl", "w", encoding="utf-8") as f:
@@ -425,6 +437,11 @@ def markdown(res: dict) -> str:
         lines.append(f"| {s} | {a['episodes']} | {_pct(a['correct'])} | {_pct(a['correct_and_success'])} | "
                      f"{_pct(a['success'])} | {a['failures']['wrong_target']} | {a['failures']['nothing_chosen']} | "
                      f"{a['failures']['right_target_not_finished']} | {p} |")
+    if res.get("pairs"):
+        lines += ["", "## 配对：选对目标（6 个主表任务，逐回合 McNemar）", "",
+                  "| 比较 | 配对回合 | 只有前者选对 | 只有后者选对 | p |", "| --- | ---: | ---: | ---: | ---: |"]
+        for name, pr in res["pairs"].items():
+            lines.append(f"| {name} | {pr['pairs']} | {pr['only_this']} | {pr['only_ref']} | {pr['p']} |")
     lines += ["", "## 逐任务：选对目标的比例", "", "| 任务 | " + " | ".join(res["starts"]) + " |",
               "| --- |" + " ---: |" * len(res["starts"])]
     for t in MAIN_TASKS:

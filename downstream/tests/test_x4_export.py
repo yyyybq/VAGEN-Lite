@@ -33,3 +33,20 @@ def test_each_model_is_exported_once_and_a_half_export_is_redone(tmp_path):
         assert (hf / f"E1-{s}-200k/starvla_export.json").read_text() == f"/runs/DS-{s}-100-s1/run/final_model/pytorch_model.pt"
     log = (hf / "export.log").read_text()
     assert "B: done before" in log and "S: removed a half-written export" in log
+
+
+def test_one_named_checkpoint_is_exported_alone(tmp_path):
+    """C1 (the user's decision 5 of 2026-11-03): run_x4_export.sh HF NAME CKPT exports only that one."""
+    main = tmp_path / "main"
+    (main / "scripts").mkdir(parents=True)
+    (main / "scripts/export_starvla_backbone.py").write_text(STUB)
+    hf = tmp_path / "hf"
+    env = {"X4_MAIN": str(main), "X4_RUNS": "/runs", "X4_PY": sys.executable, "PATH": "/usr/bin:/bin"}
+    res = subprocess.run(["bash", str(ROOT / "x/run_x4_export.sh"), str(hf), "C1-B-030-200k", "/exp/C1/final.pt"],
+                         capture_output=True, text=True, env=env)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert sorted(p.name for p in hf.iterdir() if p.is_dir()) == ["C1-B-030-200k"]
+    assert (hf / "C1-B-030-200k/starvla_export.json").read_text() == "/exp/C1/final.pt"
+    again = subprocess.run(["bash", str(ROOT / "x/run_x4_export.sh"), str(hf), "C1-B-030-200k", "/exp/C1/final.pt"],
+                           capture_output=True, text=True, env=env)
+    assert again.returncode == 0 and "C1-B-030-200k: done before" in (hf / "export.log").read_text()

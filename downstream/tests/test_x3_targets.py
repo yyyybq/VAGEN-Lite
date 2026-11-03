@@ -230,3 +230,37 @@ def test_run_script_replays_the_e1_final_checkpoint_with_the_x3_plan(tmp_path):
     res = subprocess.run(["bash", str(ROOT / "x/run_x3.sh"), "RD", str(tmp_path / "X3")], capture_output=True,
                          text=True, env=env)
     assert res.returncode == 6 and "no checkpoint" in res.stdout
+
+
+def test_c1_and_its_reference_replay_their_own_checkpoints_and_are_paired(tmp_path):
+    """C1's comparisons (the user's decision 5 of 2026-11-03): folders named by experiment, C1 paired with DS-B-030-s1."""
+    assert x3.experiment_of("RS") == "DS-RS-100-s1" and x3.experiment_of("C1-B-030-s1") == "C1-B-030-s1"
+    exps, xdir = tmp_path / "experiments", tmp_path / "X3"
+    plan = {"DS-B-030-s1": [(1000, False, 0.3), (1001, False, 0.5)],
+            "C1-B-030-s1": [(1000, True, 0.97), (1001, False, 0.5)]}
+    for s, eps in plan.items():
+        orig = exps / s / "evals/steps_200000/out/episodes/episodes.jsonl"
+        orig.parent.mkdir(parents=True)
+        orig.write_text("".join(json.dumps(row("SlideDishwasherRack", seed, ok)) + "\n" for seed, ok, _ in eps))
+        rep = xdir / s / "out/episodes/episodes.jsonl"
+        rep.parent.mkdir(parents=True)
+        rep.write_text("".join(json.dumps(row("SlideDishwasherRack", seed, ok, end_state=rack_state("out", 0.5, a)))
+                               + "\n" for seed, ok, a in eps))
+    res = x3.analyze(xdir, exps, xdir / "results")
+    assert res["identity"]["C1-B-030-s1"]["same"] == 2 and list(res["starts"]) == ["DS-B-030-s1", "C1-B-030-s1"]
+    assert res["pairs"] == {"C1-B-030-s1 vs DS-B-030-s1": {"pairs": 2, "only_this": 1, "only_ref": 0, "p": 1.0}}
+    assert "| C1-B-030-s1 vs DS-B-030-s1 | 2 | 1 | 0 | 1.0 |" in (xdir / "results/results.md").read_text(encoding="utf-8")
+
+
+def test_run_script_takes_an_experiment_name(tmp_path):
+    runs = tmp_path / "experiments"
+    ckpt = runs / "C1-B-030-s1/run/final_model/pytorch_model.pt"
+    ckpt.parent.mkdir(parents=True)
+    ckpt.write_text("w")
+    fake = tmp_path / "eval.sh"
+    fake.write_text('echo "$1|$2" > "$(dirname "$0")/called"\n')
+    env = dict(os.environ, X3_RUNS=str(runs), X3_EVAL=str(fake))
+    res = subprocess.run(["bash", str(ROOT / "x/run_x3.sh"), "C1-B-030-s1", str(tmp_path / "X3")], capture_output=True,
+                         text=True, env=env)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert (tmp_path / "called").read_text().strip() == f"{ckpt}|{tmp_path / 'X3/C1-B-030-s1/out'}"

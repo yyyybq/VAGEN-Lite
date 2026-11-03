@@ -5,6 +5,8 @@
 # X3/<start>/out, 8 policy servers and 96 simulator processes as in the E1 evaluation; then the analysis of every start
 # done so far (x3_targets.py analyze: the per-episode identity check against the E1 evaluation, the target table) into
 # X3/results.  Resumable: closed_loop.py runs only the episodes still missing.
+# C1's comparisons (the user's decision 5 of 2026-11-03): START may also be an experiment name (DS-B-030-s1,
+# C1-B-030-s1): that experiment's final checkpoint, in X3/<name>/out.
 # Usage: run_x3.sh START [X3_DIR]
 set -uo pipefail
 S="${1:?Usage: run_x3.sh START [X3_DIR]}"
@@ -12,7 +14,11 @@ WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUNS="${X3_RUNS:-/mnt/umm/users/yinbaiqiao/downstream_runs/experiments}"  # X3_* only change for the tests
 X3="${2:-/mnt/umm/users/yinbaiqiao/downstream_runs/x/X3}"
 EVAL="${X3_EVAL:-$WT/downstream/eval/run_eval_ckpt.sh}"
-CKPT="$RUNS/DS-$S-100-s1/run/final_model/pytorch_model.pt"
+case $S in
+  *-*) EXPN="$S" ;;
+  *) EXPN="DS-$S-100-s1" ;;
+esac
+CKPT="$RUNS/$EXPN/run/final_model/pytorch_model.pt"
 [[ -f "$CKPT" ]] || { echo "[x3] $S: no checkpoint $CKPT"; exit 6; }
 echo "[x3] $S: $CKPT $(date -u +%FT%TZ)"
 EVAL_PLAN="$WT/downstream/x/x3_plan.json" bash "$EVAL" "$CKPT" "$X3/$S/out" 8 96

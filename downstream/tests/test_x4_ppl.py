@@ -58,7 +58,8 @@ def test_run_script_scores_on_one_gpu_then_analyzes(tmp_path):
     fake.write_text("import sys, json, pathlib\na = sys.argv[1:]\n"
                     "if a[1] == 'score':\n"
                     "    out = pathlib.Path(a[a.index('--out') + 1]); out.write_text(json.dumps({'i': 0, 'tokens': 4, 'nll_sum': 1.0, 'correct': 2, 'turns': 1, 'turns_exact': 0}) + '\\n')\n"
-                    "    print(json.dumps({'scored': 1, 'model': a[a.index('--model') + 1]}))\n"
+                    "    pt = a[a.index('--starvla-pt') + 1] if '--starvla-pt' in a else None\n"
+                    "    print(json.dumps({'scored': 1, 'model': a[a.index('--model') + 1], 'starvla': pt}))\n"
                     "else:\n    pathlib.Path(a[a.index('--dir') + 1], 'analyzed').write_text('yes')\n")
     wrapper = tmp_path / "py.sh"
     wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fake}" "$@"\n')
@@ -69,3 +70,7 @@ def test_run_script_scores_on_one_gpu_then_analyzes(tmp_path):
     assert res.returncode == 0, res.stdout + res.stderr
     assert (tmp_path / "ppl/orig-S.jsonl").is_file() and (tmp_path / "ppl/analyzed").read_text() == "yes"
     assert '"model": "/models/S"' in (tmp_path / "ppl/orig-S.log").read_text()
+    assert "--starvla-pt" not in (tmp_path / "ppl/orig-S.log").read_text()
+    res = subprocess.run(["bash", str(ROOT / "x/run_x4_ppl.sh"), "ref", "/models/B", str(tmp_path / "ppl")],
+                         capture_output=True, text=True, env=dict(env, X4_STARVLA_PT="/exp/final.pt"))
+    assert res.returncode == 0 and '"starvla": "/exp/final.pt"' in (tmp_path / "ppl/ref.log").read_text()
