@@ -1,6 +1,6 @@
 {
  "batch": "b28_20261103",
- "approved": "PENDING: the user's approval of this list (round 6, Qwen2.5 weights; on AOSS since b25 / b26 11-03 13:17).",
+ "approved": "the user 2026-11-03 ~14:00 UTC in the disk window, replying to the round-6 report: \"1甲 2乙\" (1甲 = approve b28 as listed, 28 items, 962.1 GB planned / 827.0 GB freed; the dependency-list rule no longer applies to these Qwen2.5 checkpoints; 2乙 = b27 downstream stays, upload only)",
  "items": [
   {
    "id": "R1-clean-Projective-v0-formal-250",
