@@ -4,7 +4,7 @@
 
 - **任务**：密集奖励的重新设计。第一个任务 B（最优密集奖励）：把进度分换成真实剩余步数（φ = 1 − d ÷ (d\* + 4)，d 查距离表），回答"进度分换成真实距离，成功率涨不涨"（10-30 收口：不涨）。
 - **第二阶段**（用户 11-01 的任务书，方案 `reports/PLAN_PHASE2_20261101.md`）：只做机制上不同于"改整条轨迹得多少分"的设计。方向 1 逐回合信用分配先跑，方向 2 引导式采样，方向 3 感知陈述最后做。筛选：一个种子 150 次，第 50 / 100 / 150 次合并 705 道的平均比 rw_g、rw_s0 高 3 个点以上、三个检查点至少两个同向，才进第二轮。
-- **代码**：worktree `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-reward`，分支 `reward-design`，从 `qwen3-main` 的 `d530b546` 开出，不推送。本线的新代码放在 `reward/`，文档放在 `docs/reward/`；主线代码一行不改。
+- **代码**：worktree `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-reward`，分支 `reward-design`，从 `qwen3-main` 的 `d530b546` 开出，不推送。本线的新代码放在 `reward/`，文档放在 `docs/reward/`；主线代码一行不改。方向 2 的代码在 `VAGEN-Lite-reward-jsrl`（分支 reward-jsrl），方向 3 的 RL 代码在 `VAGEN-Lite-reward-stmt`（分支 reward-stmt，从 5d7e892c 开出）；跑着任务的 worktree 不改代码。
 - **输出**：`/mnt/umm/users/yinbaiqiao/reward_runs/`（tasks/、tables/、runs/、eval_sets/、analysis/、logs/）。
 - **交接和规则**：
   - 主线交接文件 `docs/REWARD_LINE_HANDOFF.md`（10-27，在本机主线 worktree `VAGEN-Lite-dense/docs/` 里）；
@@ -33,6 +33,8 @@
 | rw_tcs2 | 同 rw_tcs（入口修好后重交；失败不重试，出错就停下看） | 训练链 rw_p2_smoke2（zoetrope，提交号 1cecf88e）：**冒烟通过**，10 次跑完，检查点在，sco 任务已由训练链删掉。逐回合 token 范围、训练端和离线的优势都核对一致（方案报告第 3b 节）；每次更新约 82 秒 | 11-01 21:43 |
 | rw_tc1 | 方向 1 第一轮：同 rw_tcs（权重 0.5，用户 11-02 决定 3 甲），150 次，每 50 次存检查点 | 训练链 rw_p2_r1（zoetrope，提交号 7febc41b），和 rw_tc2 同一条链：**训完 150 次**，第 41 次报过一次 1% 读不出警（没停）；训练中慢慢一回合塞更多动作（1.7 → 3.1）。sco 任务已由训练链删掉 | 11-03 01:03 |
 | rw_tc2 | 纯逐回合臂（用户 11-02 加）：整局项权重 0，其余同 rw_tc1 | 同上：**训完 150 次**，没报过警 | 11-03 01:03 |
+| rw_st_sft | 方向 3 带陈述的 SFT：C0 的配方（Qwen3-VL-8B，10 个 epoch，8 卡），数据 `sft_statement`（observe 格式），按验证集挑 epoch | 训练链 `runs/rw_st_sft`（zoetrope，提交号 5d7e892c）：**训完、评完**，挑出 e5（checkpoint-770）。训练 10:54–13:28（排队 64 分钟），20 个评测 13:28–16:22；约 35 卡时。sco 任务已由训练链删掉 | 11-03 16:22 |
+| rw_sts1 | 方向 3 冒烟：rw_st1 的设置（S0 + 陈述 token 单独的优势，权重 0.5），起点 e5，种子 20261019，b3000；10 次，不评测，失败不重试，前 3 次写出优势明细 | 训练链 `runs/rw_p2_stsmoke`（worktree VAGEN-Lite-reward-stmt，提交号 c51a2c66）：18:01 交出，渲染服务已开始，训练任务在 zoetrope 排队 | 11-03 18:06 |
 | 表 screened59 | eval_test_v2_screened（P1 的筛选后测试集，292 道）里 eval705 没有的 59 道；另外 233 道和 eval_test_v2 逐字段相同，直接用 eval705 的表 | 建完：59 / 59，12.7 CPU 小时、1.6 小时（单卡 zoetrope 任务 pt-jbmtff9a，跑完已删）。视图 `tables/eval_test_v2_screened`（233 个链到 eval705 + 59 个链到 screened59）；screened59 已传 AOSS，大小逐个核过 | 11-02 22:10 |
 
 ### 评测
@@ -46,6 +48,7 @@
 | rw_s2s0、rw_s2ok 的评测 | 同上 | 评完：两个运行第 50–300 次 × 两个集合（第三节；总报告 `reports/STEP4_B_RESULTS_20261030.md`） | 10-30 21:05 |
 | rw_tc1、rw_tc2 的评测 | 第 50 / 100 / 150 次 × 两个集合（旧的 705 道），和同种子的 rw_g、rw_s0 同次比；筛选后的测试集从第二轮起同时报 | **评完，两个都没过**（报告 `reports/ROUND1_P2_20261103.md`）：rw_tc1 三次平均 35.9%（对 rw_g −11.8、对 rw_s0 −8.1，明显更差）；rw_tc2 46.3%（−1.4 / +2.3，分不出）。rw_tc2 失败局终点真实剩余步数 5.29，rw_g 5.87、rw_s0 5.92 | 11-03 01:03 |
 | rw_jss | 方向 2（引导式采样）冒烟：S0 + 向导（设计稿 `DESIGN_JSRL_20261102.md`），起点、种子、题同 rw_s0；10 次，不评测，失败不重试 | 训练链 rw_p2_jsmoke（zoetrope，worktree VAGEN-Lite-reward-jsrl，提交号 e3e55e9a）：**冒烟通过**，10 次跑完，训练任务和渲染服务正常退出，sco 任务已删。前 3 次的核对（`reward/jsrl_smoke_check.py`）576 局全部对上：向导记录合规则、提示里的向导回合就是计划、同题 8 局前缀相同、接手时表距离 = d\* − k、记录的回报只含策略回合。前 9 次：51% 的局被引导，向导动作占全部动作 22%，没有中途停下的 | 11-03 01:16 |
+| 带陈述 SFT 的评测 | 10 个 epoch × 两个集合，贪心，observe 格式；另按模型看到的那一帧给陈述打分（不渲染重放） | **评完**（报告 `reports/SFT_STATEMENT_20261103.md`）：e5 导航 44.1% / 43.1%，C0 e8 43.3% / 45.6%，合并 −0.6、逐题 89 对 93，分不出；陈述全部读得出，准确率 62.4% / 61.9%（每题型固定答 52.7% / 53.0%），"还差哪个条件"不比固定答好 | 11-03 18:06 |
 | rw_js1 | 方向 2 第一轮：同 rw_jss，150 次，第 50 / 100 / 150 次评两个集合，和 rw_g、rw_s0 同次比 | 训练链 rw_p2_js1（zoetrope，提交号 9a528b2a）：**训完 150 次、评完，分不出**（报告 `reports/ROUND1_JSRL_20261103.md`）：三次平均 45.5%，对 rw_g −2.2、对 rw_s0 +1.5；撤掉向导后难题出成功的比两个对照少；没报过警。sco 任务已由训练链删掉 | 11-03 04:22 |
 
 ## 2. 训练记录（每 25 次更新一行）
@@ -173,6 +176,7 @@
 | 运行 | 检查点 | 验证集 | 评测集 | 合并 | 对 G（差 / 逐题胜负 / p） | 对 S0（差 / 逐题胜负 / p） | 失败题终点 d | 碰撞率 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | （起点）Qwen3 SFT 第 8 个 epoch | — | 43.3% | 45.6% | 44.3% | — | — | — | — |
+| （方向 3 起点）带陈述的 SFT 第 5 个 epoch | — | 44.1% | 43.1% | 43.7% | — | — | — | 0.096 / 0.096 |
 | rw_s0 | 第 50 次 | 39.7% | 41.1% | 40.3% | — | — | 6.20 | 0.109 / 0.103 |
 | rw_s0 | 第 100 次 | 46.2% | 44.5% | 45.5% | — | — | 5.76 | 0.128 / 0.112 |
 | rw_s0 | 第 150 次（验证集最好） | 48.2% | 43.5% | 46.2% | — | — | 5.75 | 0.105 / 0.092 |
@@ -212,7 +216,7 @@
 
 ## 4. 需要用户决定的事
 
-现在没有要用户定的事。带陈述的 SFT 在跑（训练链 `runs/rw_st_sft`）；挑出 epoch 以后，按方案交第一轮 rw_st0 + rw_st1 之前先报用户。
+**待定（11-03 18:06 报出，`reports/SFT_STATEMENT_20261103.md` 第 4 节）：** 冒烟 rw_sts1 核对通过以后第一轮怎么交。甲（推荐）通过就直接交 rw_st0 + rw_st1，交出后报；乙 核对结果先报，点头再交。
 
 **用户 11-03 的决定三**：SFT"甲，照模板交"（09:50 交出）。删除脚本用户 09:41 执行完（11 个检查点 912.0 GB，`deletions/20261103_phase2_checkpoints.tsv`）。
 
@@ -399,4 +403,8 @@
 | 11-03 09:41 | 用户执行了删除脚本：11 个检查点 912.0 GB，记录 `deletions/20261103_phase2_checkpoints.tsv` |
 | 11-03 09:42 | 用户答"甲，照模板交"。提交前配额 18 / 22 TB，没有暂停文件、没有磁盘停交标记，登录节点已用 0.5 核，worktree 干净（5d7e892c）。训练链 `runs/rw_st_sft` 启动（pid 2280145）；画面已有，渲染一步跳过；数据转换 09:43–09:50 |
 | 11-03 09:50 | SFT 任务 pt-7b0etwqv 交到 zoetrope（`queue` 选的排队短的池），状态 STARTING（在等卡；10:40 时 zoetrope 上唯一一个 STARTING 的任务）。10 个 epoch 的检查点约 32 GB 一个 |
-| 11-03 10:55 | RL 那边的代码写完、测完，放在新 worktree `VAGEN-Lite-reward-stmt`（分支 reward-stmt，从 5d7e892c 开，提交 c51a2c66）：SFT 的评测任务读 `VAGEN-Lite-reward` 的代码，跑的时候不能改。环境开关 statement_record（按模型看到的那一帧给陈述打分）、智能体循环记陈述的 token 范围、估计器的陈述项（只作用在陈述 token 上，动作照 S0 的 GRPO）、rl-config `--statement`。89 个测试都过；环境自检（C0 e8 测试集 292 局、1,871 个回合）：照真值写的陈述全部 1.0，改远近的全部 0.75，重放和记录一致；rl-config 试跑：rw_st0 和 rw_s0 的配置只差 observe 格式和 statement_record，rw_st1 再多陈述估计器，三种不配套的组合都会拒绝 |
+| 11-03 10:53 | RL 那边的代码写完、测完，放在新 worktree `VAGEN-Lite-reward-stmt`（分支 reward-stmt，从 5d7e892c 开，提交 c51a2c66）：SFT 的评测任务读 `VAGEN-Lite-reward` 的代码，跑的时候不能改。环境开关 statement_record（按模型看到的那一帧给陈述打分）、智能体循环记陈述的 token 范围、估计器的陈述项（只作用在陈述 token 上，动作照 S0 的 GRPO）、rl-config `--statement`。89 个测试都过；环境自检（C0 e8 测试集 292 局、1,871 个回合）：照真值写的陈述全部 1.0，改远近的全部 0.75，重放和记录一致；rl-config 试跑：rw_st0 和 rw_s0 的配置只差 observe 格式和 statement_record，rw_st1 再多陈述估计器，三种不配套的组合都会拒绝 |
+| 11-03 13:28 | 带陈述的 SFT 训完：pt-7b0etwqv 10:54 开始（在 zoetrope 排队 64 分钟），1,540 步，验证损失 0.302（第 1,400 步）；8 卡 2 小时 34 分，约 20.5 卡时 |
+| 11-03 16:22 | 20 个评测跑完（14.5 卡时），训练链按验证集挑出 e5（44.1%），sco 任务已删。陈述准确率另用 `reward/statement_eval.py score` 重放算（`analysis/16_statement_sft/`，每个结果约 1 分钟，4 核）：705 局重放全部和记录一致 |
+| 11-03 18:01 | 冒烟 rw_sts1 交出（训练链 `runs/rw_p2_stsmoke`，worktree VAGEN-Lite-reward-stmt，提交号 c51a2c66，`pool: queue` 选了 zoetrope）。交出前配额 19 / 22 TB，没有暂停文件、没有磁盘停交标记，登录节点已用 2.0 核。生成的配置核过：observe + statement_record，turn_credit（statement / none），系统提示和 SFT 一致 |
+| 11-03 18:06 | SFT 结果报告 `reports/SFT_STATEMENT_20261103.md`：导航和 C0 e8 分不出（合并 43.7% 对 44.3%，逐题 89 对 93）；陈述全部读得出，准确率 62.4% / 61.9%，比每题型固定答高约 9 个点，"还差哪个条件"不比固定答好；1 个决定（冒烟过了第一轮怎么交） |
