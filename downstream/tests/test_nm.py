@@ -40,6 +40,22 @@ def test_entries_are_named_from_where_the_weights_lie():
         S.make([RL.format(g="d", c=9, k=1, r="d", n=250), RL.format(g="d", c=9, k=1, r="d", n=300)])
 
 
+def test_sft_only_chains_are_not_rl_chains(tmp_path):
+    """The matrix's SFT-only folders (m3_e2_sft, m3_b_sft, m3_dn_sft) must not pass for a seed's RL chain."""
+    m = tmp_path / "exps/matrix_v3"
+    for d in ("m3_e2_sft", "m3_b_sft", "m3_dn_sft", "m3_d_s20261019", "m3_d_s20261021"):
+        (m / d).mkdir(parents=True)
+    e2 = S.entry(f"{m}/sft/E2/model/checkpoint-40", matrix=str(m))
+    assert e2["name"] == "E2-SFT" and e2["group"] == "E2" and e2["val_env"] == S.QWEN3_VAL_ENV
+    bp = S.entry(f"{m}/sft/B/model/checkpoint-40", matrix=str(m))
+    assert bp["name"] == "Bp-SFT" and bp["group"] == "B′" and bp["val_env"] == S.QWEN3_VAL_ENV
+    assert S.entry(f"{m}/sft/D_noP0/model/checkpoint-40", matrix=str(m))["val_env"] == S.QWEN3_VAL_ENV
+    d = S.entry(f"{m}/sft/D/model/checkpoint-3987", matrix=str(m))
+    assert d["val_env"] == f"{m}/m3_d_s20261019/rl_m3ds1s0/val_env.yaml"
+    assert [S.job_name(n) for n in ("C-SFT", "D_noP0-SFT", "Bp-SFT", "E2-SFT")] == \
+        ["nm-c-sft", "nm-d-nop0-sft", "nm-bp-sft", "nm-e2-sft"]
+
+
 def test_the_starts_become_q0_ask_models(tmp_path):
     f = tmp_path / "s.json"
     f.write_text(json.dumps({"starts": [{"name": "D-s1-V4", "path": "/w/d"}, {"name": "C-SFT", "path": "/w/c"}]}))

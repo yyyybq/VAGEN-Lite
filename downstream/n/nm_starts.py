@@ -12,9 +12,11 @@ make: one entry per weight folder (read by path, never copied), named from where
   * RL: exps/matrix_v3/m3_<g>_s<chain>/rl_run_m3<g>s<k><s0|d>/checkpoints/global_step_<n>/actor/huggingface ->
     "<G>-s<k>-<S0|V4>" (the runs' "d" is the dense V4 reward), its prompt the run's own rl_m3<g>s<k><s0|d>/val_env.yaml,
     its SFT start "<G>-SFT" for C and D and Q3S for E (E's RL grew from the main line's formal SFT epoch 8, N1's Q3S);
-  * SFT: exps/matrix_v3/sft/<G>/model/checkpoint-<n> -> "<G>-SFT", its prompt the group's seed-1 S0 run's val_env,
-    or, for a group without an RL chain, the main line's Qwen3 RL chain's (QWEN3_VAL_ENV: no_think + action_names,
-    the same text as C's and D's).
+  * SFT: exps/matrix_v3/sft/<G>/model/checkpoint-<n> -> "<G>-SFT", its prompt the group's seed-1 S0 run's val_env
+    (an RL chain is m3_<g>_s<digits>; the SFT-only chains m3_b_sft, m3_e2_sft, m3_dn_sft are not), or, for a group
+    without an RL chain, the main line's Qwen3 RL chain's (QWEN3_VAL_ENV: no_think + action_names, the same text as
+    C's and D's; the main line confirmed it for E2, B' and D_noP0 on 2026-11-03).  The matrix's B is the main line's
+    B': named "Bp-SFT" (plain "B" is N1's Qwen2.5 base), group "B′".
   Every entry: base Q3B (all are Qwen3-VL-8B); an RL entry also the main line's name of its pick (main_name, e.g.
   m3cs1s0_050).  Writes the entries in the order given; --append adds them to the file's entries (a name twice is an
   error).  --val-env NAME=PATH gives an entry another prompt (2026-11-03: the new E, an SFT on P0 + P1 without RL,
@@ -48,6 +50,8 @@ SFT_RE = re.compile(r"/sft/(?P<G>[^/]+)/model/checkpoint-(?P<n>\d+)/?$")
 QWEN3_VAL_ENV = "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_q3d/val_env.yaml"
 REWARD = {"s0": "S0", "d": "V4"}
 SFT_OF_GROUP = {"C": "C-SFT", "D": "D-SFT", "E": "Q3S"}
+SFT_NAME = {"B": "Bp"}  # an SFT folder's group -> the start's name stem
+GROUP_LABEL = {"B": "B′"}  # -> the group as the main line writes it
 PROMPT_FIELDS = ("prompt_format", "prompt_format_example", "max_actions_per_step", "action_space", "max_episode_steps")
 
 
@@ -62,11 +66,12 @@ def entry(path: str, matrix: str = MATRIX) -> dict:
                 "base": "Q3B", "main_name": f"m3{g}s{k}{r}_{int(m['n']):03d}"}
     m = SFT_RE.search(path)
     if m:
-        g = m["G"].lower()
-        chains = sorted(Path(matrix).glob(f"m3_{g}_s*"))
+        G = m["G"]
+        g = G.lower()
+        chains = [c for c in sorted(Path(matrix).glob(f"m3_{g}_s*")) if re.fullmatch(rf"m3_{re.escape(g)}_s\d+", c.name)]
         val_env = str(chains[0] / f"rl_m3{g}s1s0" / "val_env.yaml") if chains else QWEN3_VAL_ENV
-        return {"name": f"{m['G']}-SFT", "path": path, "val_env": val_env, "group": m["G"], "seed": None,
-                "reward": "SFT", "step": int(m["n"]), "sft": None, "base": "Q3B"}
+        return {"name": f"{SFT_NAME.get(G, G)}-SFT", "path": path, "val_env": val_env, "group": GROUP_LABEL.get(G, G),
+                "seed": None, "reward": "SFT", "step": int(m["n"]), "sft": None, "base": "Q3B"}
     raise ValueError(f"not a matrix v3 RL or SFT weight folder: {path}")
 
 
@@ -151,6 +156,11 @@ def check(starts) -> list:
     return problems
 
 
+def job_name(name: str) -> str:
+    """The sco job's name: lower-case letters, digits and hyphens only (D_noP0-SFT -> nm-d-nop0-sft)."""
+    return "nm-" + re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")
+
+
 def submit(starts, out: Path, instances: Path, names=None, pool: str = "zoetrope", go: bool = False,
            workers: int = 12, repair_workers: int = 4) -> list:
     sys.path.insert(0, str(HERE.parent))
@@ -166,7 +176,7 @@ def submit(starts, out: Path, instances: Path, names=None, pool: str = "zoetrope
         run = Path(out) / f"{n}_job"
         row = {"name": n, "run": str(run), "payload": payload}
         if go:
-            sco_job.prepare(run, 1, pool, f"nm-{n.lower()}", payload, as_root=True)
+            sco_job.prepare(run, 1, pool, job_name(n), payload, as_root=True)
             row["job_id"] = sco_job.submit(run)
         done.append(row)
     return done
