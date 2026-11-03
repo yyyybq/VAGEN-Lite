@@ -135,8 +135,8 @@ def test_built_mixtures_have_the_configured_rows(cfgs, vars_):
 
 
 def test_chain_part(cfgs, vars_):
-    """C and D have plans on matrix-v3 (the user's decision B of 2026-11-01, matrix_plan --version 3); B', E and
-    D_noP0 still wait."""
+    """C and D have plans on matrix-v3 (the user's decision B of 2026-11-01, matrix_plan --version 3), and so has
+    D_noP0, a cell after matrix v3 (the user, 2026-11-03); B' and E still wait."""
     names = set()
     for g in WITH_RL:
         ch = cfgs[g]["chain"]
@@ -146,10 +146,12 @@ def test_chain_part(cfgs, vars_):
         names |= {ch["tr"], ch["rl_name"]}
         for key in ch["needs_chain_support"]:
             assert key in MP.CHAIN_FIELDS, (g, key)     # the fields patches 0001 / 0002 read
-        if g in MP.V3_GROUPS:
-            sft = f"m3{g.lower()}"
-            assert ch["plan"] == "matrix_plan v3" and ch["sft_groups"] == {sft: "sft_trajectories.jsonl"}, g
-            assert ch["tr"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/m3_{g.lower()}", g
+        if g in MP.V3_GROUPS or g in MP.V3_CELLS:
+            code = MP.V3_CELLS[g][0] if g in MP.V3_CELLS else g.lower()
+            sft = f"m3{code}"
+            assert ch["plan"] == ("matrix_plan v3 cell" if g in MP.V3_CELLS else "matrix_plan v3"), g
+            assert ch["sft_groups"] == {sft: "sft_trajectories.jsonl"}, g
+            assert ch["tr"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/m3_{code}", g
             assert ch["sft_lf_dir"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/sft/{g}", g
             assert ch["needs_chain_support"]["sft_lf_dirs"] == {sft: ch["sft_lf_dir"]}, g
             assert Path(ch["sft_lf_dir"]).name == Path(cfgs[g]["data"]["lf_dir"]).name   # the copy of data.lf_dir
@@ -195,6 +197,65 @@ def test_v3_plans_for_c_and_d(vars_):
         assert second["start_model"] == {"from_chain": first["tr"]} and "sft_lf_dirs" not in second
         assert first["sft_groups"] == second["sft_groups"] == {sft: "sft_trajectories.jsonl"}
     assert len(names) == 4 * 2 * len(MP.V3_GROUPS)
+
+
+def test_v3_cells(tmp_path, monkeypatch):
+    """D_noP0 after matrix v3 (the user, 2026-11-03): an SFT-only chain that keeps every epoch, then one chain per seed
+    from the picked epoch; each chain evaluates in its own copies of the two sets; every name is new."""
+    import os
+    from unittest import mock
+
+    from data_gen.interiorgs_v10 import train_chain as TC
+
+    v = MP.v3_vars()
+    first_batch = {MP.plan_v3(g, s, SHA)[k] for g in MP.V3_GROUPS for s in REGISTERED["seeds"] for k in ("tr", "rl_name")}
+    sft = MP.plan_v3_cell_sft("D_noP0", SHA)
+    assert sft["tr"] == f"{v['chain']['worktree']}/exps/matrix_v3/m3_dn_sft" and sft["sft_only"] is True
+    assert sft["sft_lf_dirs"] == {"m3dn": f"{v['chain']['worktree']}/exps/matrix_v3/sft/D_noP0"} and sft["sft_epochs"] == 10
+    assert not {"rl_runs", "retain", "diagnostics", "start_model"} & set(sft)   # every epoch stays for the sampling check
+    assert sft["eval_sets"] == {k: f"{sft['tr']}/{Path(p).name}" for k, p in v["chain"]["eval_sets"].items()}
+    start = "/m/sft_m3dn_e7"
+    rls = [MP.plan_v3_cell_rl("D_noP0", s, SHA, start, dense="registered") for s in REGISTERED["seeds"]]
+    names = {sft["tr"], sft["rl_name"]}
+    for k, (p, seed) in enumerate(zip(rls, REGISTERED["seeds"]), 1):
+        assert p["tr"].endswith(f"/m3_dn_s{seed}") and p["start_model"] == start and "sft_lf_dirs" not in p
+        assert list(p["rl_runs"]) == [f"m3dns{k}s0", f"m3dns{k}d"] and p["rl"]["seed"] == seed
+        assert p["rl_runs"][f"m3dns{k}d"]["rl"]["standard"] == REGISTERED["pair"]["d"]
+        assert p["rl"]["guards"] == {**REGISTERED["guards"], **GUARDS_1102} and p["retain"] == "best_and_last"
+        assert p["eval_sets"] == {k2: f"{p['tr']}/{Path(x).name}" for k2, x in v["chain"]["eval_sets"].items()}
+        names |= {p["tr"], p["rl_name"], *p["rl_runs"]}
+    assert len(names) == 2 + 2 * 4 and not names & first_batch
+    for bad in (("D_noP0", 20261019, SHA, None), ("D_noP0", 20261019, SHA, "relative/path"), ("C", 20261019, SHA, start)):
+        with pytest.raises(SystemExit):
+            MP.plan_v3_cell_rl(*bad)
+    with pytest.raises(SystemExit):
+        MP.plan_v3_cell_sft("C", SHA)
+    # the SFT-only chain runs SFT, its evaluation and the pick, no RL step
+    sft["tr"] = str(tmp_path / "sft")
+    chain = TC.Chain(sft, sleep=lambda s: None)
+    calls = []
+    for step in TC.STEPS:
+        setattr(chain, step, lambda s=step: calls.append(s))
+    with mock.patch.dict(os.environ):                # run() puts the chain's job environment into os.environ
+        assert chain.run() == 0
+    assert calls == ["check_code", "render", "sft_data", "sft", "sft_eval", "pick_sft", "evaluate", "diagnostics"]
+    assert chain.state["steps"]["rl"]["note"] == "not planned (sft_only)"
+    # an RL chain starts from the given checkpoint; its set copies are made byte for byte
+    rl = dict(rls[0], tr=str(tmp_path / "s1"))
+    assert TC.Chain(rl, sleep=lambda s: None).sft_model() == Path(start)
+    shared = tmp_path / "shared"
+    for k2 in v["chain"]["eval_sets"]:
+        (shared / k2).mkdir(parents=True)
+        (shared / k2 / "tasks.jsonl").write_text(f'{{"set": "{k2}"}}\n')
+    rl["eval_sets"] = {k2: str(tmp_path / "s1" / k2) for k2 in v["chain"]["eval_sets"]}
+    monkeypatch.setattr(MP, "v3_vars", lambda: {**v, "chain": {**v["chain"], "eval_sets": {
+        k2: str(shared / k2) for k2 in v["chain"]["eval_sets"]}}})
+    MP.v3_prepare_sets(rl)
+    assert all((Path(f) / "tasks.jsonl").read_bytes() == (shared / k2 / "tasks.jsonl").read_bytes()
+               for k2, f in rl["eval_sets"].items())
+    (Path(rl["eval_sets"]["val"]) / "tasks.jsonl").write_text("changed\n")
+    with pytest.raises(SystemExit):                  # a copy already there is checked, never replaced
+        MP.v3_prepare_sets(rl)
 
 
 def test_v3_dense_side():
