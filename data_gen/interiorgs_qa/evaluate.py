@@ -7,8 +7,11 @@
 
 Inference: vLLM (greedy, at most 512 new tokens), the model's own chat template with its default system
 prompt (the same one LLaMA-Factory's qwen2_vl template uses in training), images first and then the question,
-exactly as export_lf.py writes training records. A video question gets its 32 frames as one video. The
-prompt length vLLM reports is stored per request, so the visual-token counts can be checked against training.
+exactly as export_lf.py writes training records. A video question gets its 32 frames as one video; for Qwen3-VL,
+whose vLLM processor needs a video's metadata, with the metadata LLaMA-Factory gives a list of frames in training
+(model_matrix/sft/lf_qwen3vl.py): the frames as given, indices 0..n-1, fps --video-fps (LLaMA-Factory's video_fps,
+default 2.0). The prompt length vLLM reports is stored per request, so the visual-token counts can be checked
+against training.
 
 Scoring (scoring.py): every question in the original benchmark format ("orig", evaluation group 1) and in the
 held-out wording ("h1", evaluation group 2). MMSI-Bench and 3DSRBench questions are also asked once per rotation
@@ -39,6 +42,16 @@ from .scoring import circular_variants, score
 
 CIRCULAR = ("MMSI-Bench", "3DSRBench")
 CHANCE_OVERRIDE = {"M6": 0.5}
+
+
+def video_input(frames, model_type: str, fps: float):
+    """A video's vLLM input: its frames, and for Qwen3-VL (vLLM 0.11 fails on a Qwen3-VL video without metadata) the
+    metadata LLaMA-Factory gives a list of frames in training: frames as given, indices 0..n-1, its video_fps."""
+    if model_type != "qwen3_vl":
+        return frames
+    n = len(frames)
+    return frames, {"fps": fps, "frames_indices": list(range(n)), "total_num_frames": n, "duration": n / fps,
+                    "do_sample_frames": False}
 
 
 def wilson(k: float, n: int, z: float = 1.96) -> Tuple[Optional[float], Optional[float]]:
@@ -93,7 +106,8 @@ def build_requests(items, families: Sequence[str], res: int) -> List[Dict[str, A
     return reqs
 
 
-def run_vllm(model: str, reqs: List[Dict[str, Any]], max_model_len: int, max_tokens: int) -> None:
+def run_vllm(model: str, reqs: List[Dict[str, Any]], max_model_len: int, max_tokens: int,
+             video_fps: float = 2.0) -> None:
     import os
 
     os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")   # greedy decoding; avoids a kernel compile
@@ -103,6 +117,7 @@ def run_vllm(model: str, reqs: List[Dict[str, Any]], max_model_len: int, max_tok
     from vllm import LLM, SamplingParams
 
     proc = AutoProcessor.from_pretrained(model)
+    model_type = json.loads((Path(model) / "config.json").read_text()).get("model_type", "")
     llm = LLM(model=model, max_model_len=max_model_len, gpu_memory_utilization=0.85, seed=0,
               limit_mm_per_prompt={"image": 4, "video": 1})
     params = SamplingParams(temperature=0.0, max_tokens=max_tokens)
@@ -110,7 +125,8 @@ def run_vllm(model: str, reqs: List[Dict[str, Any]], max_model_len: int, max_tok
     for r in reqs:
         if r["media"] == "video":
             content = [{"type": "video"}, {"type": "text", "text": r["text"]}]
-            mm = {"video": np.stack([np.array(Image.open(f).convert("RGB")) for f in r["files"]])}
+            mm = {"video": video_input(np.stack([np.array(Image.open(f).convert("RGB")) for f in r["files"]]),
+                                       model_type, video_fps)}
         else:
             content = [{"type": "image"} for _ in r["files"]] + [{"type": "text", "text": r["text"]}]
             mm = {"image": [Image.open(f).convert("RGB") for f in r["files"]]}
@@ -332,6 +348,8 @@ def main() -> int:
     ap.add_argument("--families", default="orig,h1")
     ap.add_argument("--max-model-len", type=int, default=12288)
     ap.add_argument("--max-tokens", type=int, default=512)
+    ap.add_argument("--video-fps", type=float, default=2.0,
+                    help="a video's fps for Qwen3-VL (LLaMA-Factory's video_fps in training, its default 2.0)")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--title", default="同域评测")
     ap.add_argument("--out", required=True)
@@ -345,12 +363,12 @@ def main() -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    run_vllm(a.model, reqs, a.max_model_len, a.max_tokens)
+    run_vllm(a.model, reqs, a.max_model_len, a.max_tokens, a.video_fps)
     (out / "predictions.jsonl").write_text("".join(json.dumps({k: v for k, v in r.items() if k != "files"},
                                                               ensure_ascii=False) + "\n" for r in reqs))
     res = summarise(questions, reqs)
     res["meta"] = {"model": a.model, "questions": len(items), "requests": len(reqs), "families": fams,
-                   "resolutions": a.res, "seconds": round(time.time() - t0, 1)}
+                   "resolutions": a.res, "video_fps": a.video_fps, "seconds": round(time.time() - t0, 1)}
     (out / "summary.json").write_text(json.dumps(res, indent=1, ensure_ascii=False))
     (out / "summary.md").write_text(markdown(res, a.title))
     print(json.dumps(res["meta"]))
