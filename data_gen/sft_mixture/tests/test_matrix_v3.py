@@ -17,8 +17,8 @@ MATRIX = ROOT / "configs" / "matrix_v3"
 MIXTURE = ROOT / "data_gen" / "sft_mixture" / "configs" / "mixture_matrix_v3_qwen3_20261102.yaml"
 MIXTURE_V2 = ROOT / "data_gen" / "sft_mixture" / "configs" / "mixture_matrix_v2_20261018.yaml"
 STANDARDS = ROOT / "data_gen" / "interiorgs_v10" / "configs" / "rl_standards.json"
-GROUPS = ("A", "B", "C", "C0", "D", "D_noP0", "E", "E2")   # E2: E as redefined on 2026-11-03
-TRAINED = ("B", "C", "D", "D_noP0", "E2")    # groups with their own SFT data
+GROUPS = ("A", "B", "C", "C0", "Cr", "D", "D_noP0", "E", "E2")   # E2: E as redefined on 2026-11-03; Cr: C again
+TRAINED = ("B", "C", "Cr", "D", "D_noP0", "E2")    # groups that train an SFT (Cr on C's data)
 WITH_RL = ("B", "C", "D", "D_noP0", "E")
 # the registration (qwen3-main d530b546, configs/matrix_r12.json): what each group is
 REGISTERED = {
@@ -115,7 +115,8 @@ def test_data_recipes_match_the_mixture_config(cfgs, vars_, mix):
         if g in REGISTERED["pools"] and not own:
             assert used == REGISTERED["pools"][g], g
         if not own:
-            assert c["data"]["lf_dir"] == f"{vars_['mixture_out']}/{g}" and c["data"]["mixture_config"] == vars_["mixture_config"]
+            assert c["data"]["lf_dir"] == f"{vars_['mixture_out']}/{c['data']['recipe']}"
+            assert c["data"]["mixture_config"] == vars_["mixture_config"]
         assert c["data"]["val_rows"] == {"P0": 300, "P1": 300, "P2q": 300, "P2f": 38}
         assert c["sft"]["base_model"] == vars_["base_qwen3"] and c["sft"]["epochs"] == 10
     assert mix["recipes"]["D"]["pools"]["P1"] == {"times": 1.0, "of": "P2q"}
@@ -161,6 +162,21 @@ def test_e2_after_matrix_v3(cfgs, vars_, mix):
     assert ch["sft_lf_dir"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/sft/E2"
     assert ch["needs_chain_support"]["sft_lf_dirs"] == {"m3e2": ch["sft_lf_dir"]}
     assert cfgs["E"]["status"].startswith("archived")
+
+
+def test_c_retrain_after_matrix_v3(cfgs, vars_):
+    """Part C (the user, 2026-11-03): C's SFT trained again on C's data and recipe so that every epoch goes through the
+    sampling check; no RL until the user decides; names of its own."""
+    c, orig = cfgs["Cr"], cfgs["C"]
+    assert c["data"] == orig["data"] and c["rl"] is None
+    for key in ("base_model", "epochs", "cards"):
+        assert c["sft"][key] == orig["sft"][key], key
+    ch, och = c["chain"], orig["chain"]
+    assert ch["plan"] == "matrix_plan v3 cell" and ch["sft_groups"] == {"m3cr": "sft_trajectories.jsonl"}
+    assert ch["tr"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/m3_cr" and MP.V3_CELLS["Cr"] == ("cr", 0)
+    assert ch["sft_lf_dir"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/sft/Cr" and ch["sft_dir"] == och["sft_dir"]
+    assert ch["needs_chain_support"]["sft_lf_dirs"] == {"m3cr": ch["sft_lf_dir"]}
+    assert not {ch["tr"], ch["rl_name"], *ch["sft_groups"]} & {och["tr"], och["rl_name"], *och["sft_groups"]}
 
 
 def test_built_mixtures_have_the_configured_rows(cfgs, vars_):
@@ -286,6 +302,11 @@ def test_v3_cells(tmp_path, monkeypatch):
     assert e2["sft_only"] is True and e2["rl"]["seed"] == REGISTERED["seeds"][0]
     with pytest.raises(SystemExit):
         MP.plan_v3_cell_rl("E2", 20261019, SHA, start, dense="registered")
+    cr = MP.plan_v3_cell_sft("Cr", SHA)               # part C (11-03): C's SFT again; no RL chain until the user decides
+    assert cr["tr"].endswith("/m3_cr_sft") and cr["sft_lf_dirs"] == {"m3cr": f"{v['chain']['worktree']}/exps/matrix_v3/sft/Cr"}
+    assert cr["sft_only"] is True and cr["sft_epochs"] == 10
+    with pytest.raises(SystemExit):
+        MP.plan_v3_cell_rl("Cr", 20261019, SHA, start, dense="registered")
     with pytest.raises(SystemExit):
         MP.v3_names("C", None)                        # the first batch's chains always have a seed
     # the SFT-only chain runs SFT, its evaluation and the pick, no RL step

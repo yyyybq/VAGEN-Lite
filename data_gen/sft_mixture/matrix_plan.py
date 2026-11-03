@@ -28,7 +28,8 @@ vars.yaml chain.dense_baseline.  Groups C and D first; B' and E later.
 The cells added once matrix v3 was done (V3_CELLS; the user, 2026-11-03; exploratory, PREREG_D_vs_C.md notes 6
 and 7): ``--sft-chain`` writes the SFT-only chain (every epoch evaluated on val and test and kept); the epoch is picked
 outside the chain, by the sampling check first and then val; ``--start`` writes one chain per seed from that epoch
-(E2, E as redefined on 2026-11-03, has no RL: its SFT-only chain is all).
+(E2, E as redefined on 2026-11-03, has no RL: its SFT-only chain is all; nor, until the user decides, has Cr: C's SFT
+trained again so that every epoch goes through the sampling check, part C of 2026-11-03).
 Each of these chains evaluates in its own copies of the two screened sets (TR/<set folder>, tasks.jsonl copied when
 the plan is written): chains sharing a set folder read each other's results while they are being written (11-03).
 """
@@ -182,7 +183,8 @@ MATRIX_V3 = ROOT / "configs" / "matrix_v3"
 V3_GROUPS = ("C", "D")  # the first batch (the user, 2026-11-01); B' and E later
 # the cells added once matrix v3 was done (the user, 2026-11-03; exploratory): {group: (short name, seeds)}
 V3_CELLS = {"D_noP0": ("dn", 2), "B": ("b", 1),   # B': RL only when an epoch passes, one seed
-            "E2": ("e2", 0)}                    # E as redefined on 2026-11-03: SFT only, no RL
+            "E2": ("e2", 0),                    # E as redefined on 2026-11-03: SFT only, no RL
+            "Cr": ("cr", 0)}                    # C's SFT again (part C, 2026-11-03); RL once the user has seen it
 # the dense side's rl until the user relays the main line's answer on its baseline: not a standard, so rl-config
 # refuses it and the chain stops at its rl_config step (SFT, its evaluation and the pick are done by then); the plan
 # is then written again with the baseline (--dense) and the chain run again, which redoes rl_config and starts both

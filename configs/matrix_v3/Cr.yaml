@@ -1,0 +1,46 @@
+# 补充工作 C（用户 2026-11-03 选甲）：C 的 SFT 原样重训一遍，每个 epoch 都做采样验收。
+# 为什么：C 第 4 个 epoch 的采样验收没过（熵 0.106 > 0.06）；要看第 6–9 个 epoch 里有没有过线、且验证集和原来第 4 个（41.6%）
+# 相差 ≤ 2 个点的，但这几个 epoch 的权重 11-03 已删。数据、配方、种子（42）都和 C 的相同（exps/matrix_v3/sft/C 的复制，
+# 数据文件逐字节相同，train.yaml 只改了两条路径）。GPU 上的训练不能逐位复现，重训的第 4 个 epoch 用来看差多少。
+# RL 等用户看过验收结果再定。配置名 Cr，结果名 sft_m3cr_e<k>，和 C 的（sft_m3c_e<k>）分开。说明见 configs/matrix_v3/README.md。
+group: Cr
+name: C 重训（2026-11-03）
+status: planned   # 只训 SFT；RL 等验收结果再定（用户 2026-11-03 选甲）
+description: C 的 SFT 原样重训，每个 epoch 做采样验收；RL 之后再定
+model_type: qwen3_vl
+format_example: action_names
+output_format: action_only
+
+data:   # 和 C 的相同
+  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261102.yaml
+  recipe: C
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261102/C
+  train_rows: {P0: 10144, P1: 0, P2q: 9075}   # P0 全量（用户 2026-11-02）
+  val_rows: {P0: 300, P1: 300, P2q: 300, P2f: 38}
+
+sft:
+  base_model: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+  epochs: 10
+  cards: 8
+  recipe: 和 C 的相同（exps/matrix_v3/sft/C/train.yaml：种子 42，模板 qwen3_vl_nothink，学习率 1e-5 余弦，warmup 3%，每步 64 条，冻结视觉塔）
+  select: 每个 epoch 做采样验收（后备题 200 道 × 4 次、温度 0.8；熵 ≤ 0.06、读不出 ≤ 1%）。补充工作 C 看第 6–9 个 epoch 里过线、且 val（eval_val_v2_screened，382 道，不采样）和 C 原来第 4 个的 41.6% 相差 ≤ 2 个点的；结果报给用户和主线，再定 RL
+
+rl: null   # RL 等验收结果出来再定（用户 2026-11-03 选甲）
+
+eval:
+  sets:
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened
+  note: 每个 epoch 评验证集、测试集（贪心，链自己的题集复制里）
+
+chain:   # 用户 2026-11-03：矩阵第三版之后的格子，在 matrix-v3 上跑
+  plan: matrix_plan v3 cell   # --sft-chain 写只训 SFT 的链（<tr>_sft，每个 epoch 都留）；RL 链等用户定
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr
+  rl_name: v10_rl_m3_cr
+  sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
+  sft_groups: {m3cr: sft_trajectories.jsonl}   # SFT 的结果名 sft_m3cr_e<k>
+  sft_lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr   # exps/matrix_v3/sft/C 的复制（数据文件逐字节相同，train.yaml 只改了两条路径）
+  needs_chain_support:
+    sft_lf_dirs: {m3cr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr}
+
+estimate: {sft: 8 卡约 4 小时（10 个 epoch，19,219 条；C 上次 30.8 卡时）, eval: 每个 epoch 验证、测试各一个单卡任务（20 个，约 10 卡时）, accept: 10 个 epoch 各一个单卡任务约 40 分钟（约 7 卡时）}
