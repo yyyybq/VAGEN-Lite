@@ -3,20 +3,23 @@
 # 所以加上 P2f；P2f 先全用，格式不稳再加。
 # P2f 的 440 条里 400 条来自 train 场景、40 条来自 val 场景：按场景划分只有前者能进训练，再去掉边缘场景里的 34 条，
 # 训练用 366 条；val 场景的 38 条（去掉边缘场景后）作验证损失，每组都算。
+# 用户 2026-11-03 改定（矩阵第三版之后的格子，探索性；预登记"矩阵第三版之后加的"第 6、7 条）：P2f 换成主线的 2,000 段格式对话，
+# 去掉边缘场景后 1,795 条（P2f2k，主线的 format_sft_2k_screened）；只训 SFT，每个 epoch 评验证集、测试集并做采样验收，
+# 有 epoch 过验收线才从挑出的 epoch 跑一对 S0 / V4（只用种子 20261019），没有就不跑 RL。
 group: B
 name: B′
-status: planned
-description: B′：P0 加格式 SFT 的短对话（主线决定 75，2026-10-26）；之后 RL
+status: planned   # 探索性（用户 2026-11-03：矩阵第三版之后的格子）
+description: B′：P0 加主线的格式对话（去掉边缘场景后 1,795 条；用户 2026-11-03，探索性）；只训 SFT，有 epoch 过采样验收才跑一对 RL
 model_type: qwen3_vl
 format_example: action_names
 output_format: action_only
 changed: 2026-10-26 主线决定 75：原来只用 P0；P0 的起点没见过动作回答，加 P2f，条数按格式是否稳定来定（先全用）
 
-data:
-  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_20261102.yaml
+data:   # 2026-11-03 起（之前：mixture_matrix_v3_qwen3_20261102.yaml 的 B，P0 10,144 + P2f 366，没有训练过）
+  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_bp_20261103.yaml
   recipe: B
-  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261102/B
-  train_rows: {P0: 10144, P1: 0, P2q: 0, P2f: 366}
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft_mixture_bp_20261103/B
+  train_rows: {P0: 10144, P1: 0, P2q: 0, P2f: 0, P2f2k: 1795}
   val_rows: {P0: 300, P1: 300, P2q: 300, P2f: 38}
 
 sft:
@@ -24,7 +27,7 @@ sft:
   epochs: 10
   cards: 8
   recipe: 主线 Qwen3 SFT 的配方（lf_q3formal/train.yaml：模板 qwen3_vl_nothink，学习率 1e-5 余弦，warmup 3%，每步 64 条，冻结视觉塔）
-  select: 每个 epoch 在 val（eval_val_v2_screened，382 道）上评测（不采样），挑成功率最高的，打平取更早的
+  select: 先过采样验收（后备题 200 道 × 4 次、温度 0.8；熵 ≤ 0.06、读不出 ≤ 1%），合格的 epoch 里按 val（eval_val_v2_screened，382 道，不采样）挑成功率最高的，打平取更早的；一个都不合格就不跑 RL（预登记第 6、7 条，用户 2026-11-03）
   format_stability: P2f 先全用（366 条）；B′ 任何一个 RL 被 10% 线停下就算格式不稳（用户 2026-10-30 定），加多少 P2f、重训 B′ 的 SFT 由用户定
 
 rl:
@@ -55,15 +58,15 @@ eval:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
     qa_probe: P1 探针（838 道），SFT 各 epoch 和每个 RL 的各检查点；Qwen3 的模型要用 Qwen3 的运行时，等 qwen3-main
 
-chain:
-  plan: null
-  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_m3_b
-  rl_name: v10_rl_m3_b
+chain:   # 用户 2026-11-03：矩阵第三版之后的格子，在 matrix-v3 上跑
+  plan: matrix_plan v3 cell   # --sft-chain 写只训 SFT 的链（<tr>_sft，每个 epoch 都留）；有 epoch 过验收时 --start 写种子 20261019 的 RL 链
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b   # 每条链在自己的文件夹里另有两个题集的复制
+  rl_name: v10_rl_m3_b     # 加 _sft / _s1；RL 运行 m3bs1s0、m3bs1d
   sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
-  sft_groups: {mix: sft_trajectories.jsonl}
+  sft_groups: {m3b: sft_trajectories.jsonl}   # SFT 的结果名 sft_m3b_e<k>
+  sft_lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/B   # data.lf_dir 的复制（数据文件逐字节相同，train.yaml 只改了两条路径）
   needs_chain_support:
-    sft_lf_dirs: {mix: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/sft_mixture_matrix_v3_qwen3_20261102/B}
+    sft_lf_dirs: {m3b: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/B}
     diagnostics_after_eval: true
-  needs_qwen3_main: [model_type qwen3_vl, attention eager, 密集一侧 V4 的设置, 两个种子各一对 RL, 补丁 0001 / 0002 对合并后的训练链重新核对]
 
-estimate: {sft: 8 卡约 2 小时（10 个 epoch，10,510 条）, rl: 4 个，每个 1 + 8 卡约 5.5 小时（格式不稳时会提早停下）, evaluate: 4 个 RL 各 6 个检查点 × 2 个题集}
+estimate: {sft: 8 卡约 2.3 小时（10 个 epoch，11,939 条）, accept: 10 个 epoch 各一个单卡任务约 40 分钟, rl: 只在有 epoch 过验收时跑一对（种子 20261019）, 合计: 约 25 卡时不含 RL（用户 2026-11-03 的估计）}

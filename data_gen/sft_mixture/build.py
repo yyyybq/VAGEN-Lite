@@ -22,7 +22,8 @@ recipe table.  Rules:
   the rows of those scenes leave every pool, training and validation, before any count or draw.
 * Action pools besides P2 (the Qwen3 matrix, user 2026-10-30, after the main line's registration of 2026-10-27):
   P2q, round 11's conversations in the new format (real action names), and P2f, the format SFT's short
-  conversations; both are LF exports read like P2 (kind ``sft_trajectories``).
+  conversations; both are LF exports read like P2 (kind ``sft_trajectories``).  P2f2k (the user, 2026-11-03: B' as a
+  cell after matrix v3): the main line's 2,000 format conversations without the excluded scenes, read the same way.
 * ``format_example: action_names`` (or ``placeholder``) on an action pool: every row's system prompt and the
   format text of each user turn must be the text the RL env shows with that format example
   (release.protocol_system_prompt / _format_block); any other row stops the build.  Rows are still never rewritten.
@@ -42,9 +43,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 
 import yaml
 
-POOLS = ("P0", "P1", "P2", "P2q", "P2f")
+POOLS = ("P0", "P1", "P2", "P2q", "P2f", "P2f2k")
 POOL_ZH = {"P0": "P0 仿 benchmark 的 QA", "P1": "P1 转移题", "P2": "P2 SFT 动作轨迹",
-           "P2q": "P2q SFT 动作轨迹（新格式：真实动作名）", "P2f": "P2f 格式 SFT 的短对话（真实动作名）"}
+           "P2q": "P2q SFT 动作轨迹（新格式：真实动作名）", "P2f": "P2f 格式 SFT 的短对话（真实动作名）",
+           "P2f2k": "P2f2k 主线的格式对话（2,000 段去掉边缘场景，真实动作名）"}
 DATASET_INFO = {"formatting": "sharegpt",
                 "columns": {"messages": "messages", "images": "images", "videos": "videos"},
                 "tags": {"role_tag": "role", "content_tag": "content", "user_tag": "user",
@@ -358,7 +360,8 @@ def recipe_table(cfg: Dict[str, Any], table: Sequence[Dict[str, Any]], pools: Di
                  val_rows: Dict[str, List[Dict[str, Any]]], notes: Sequence[str]) -> str:
     cols = [p for p in POOLS if p in pools]
     extra = "".join(clause for p, clause in (("P2q", "，P2q 同 P2（新格式）"),
-                                             ("P2f", "，P2f 一条是一到两轮的短对话（格式 SFT 从 P2 的对话里截的）"))
+                                             ("P2f", "，P2f 一条是一到两轮的短对话（格式 SFT 从 P2 的对话里截的）"),
+                                             ("P2f2k", "，P2f2k 同样是一到两轮的短对话（主线 11-01 生成）"))
                     if p in cols)
     lines = [f"# 配方表：{cfg.get('name', '')}", "",
              f"由 `python -m data_gen.sft_mixture.build --config ...` 生成。数字是样本条数（一条 = 一段对话）："

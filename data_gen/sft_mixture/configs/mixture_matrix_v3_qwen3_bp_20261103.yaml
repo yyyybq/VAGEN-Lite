@@ -1,0 +1,54 @@
+# B′ of the experiment matrix on Qwen3-VL-8B as a cell after matrix v3 (the user, 2026-11-03; exploratory, PREREG
+# notes 6 and 7): P0 10,144 + the main line's format conversations instead of P2f's 366.
+# The conversations are the main line's format_sft_2k (interiorgs_v10_matrix_q3_20261101: 1-2 assistant turns, real
+# action names, the six actions 1/6 each, byte-identical to the same conversations in P2q) without the 128 excluded
+# scenes, as every pool of matrix v3 (format_sft_2k_screened: train 1,795 of 2,000, val 181 of 200; the main line's
+# screen_report.json), exported to LLaMA-Factory by the chain's own export (prepare_active_spatial_sft.py, as the
+# chain's sft_data step runs it, into exps/matrix_v3/format_sft_2k_screened_lf).
+# Everything else is mixture_matrix_v3_qwen3_20261102.yaml: the seed, the split, the scene exclusion, the recipe, P0
+# and the validation rows (300 P0, 300 P1, 300 P2q, P2f's 38: the same validation loss as C and D).
+name: matrix_v3_qwen3_bp_20261103
+out: exps/matrix_v3/sft_mixture_bp_20261103
+seed: 20261018
+split_manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/split_manifest.json
+task_rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/rows.jsonl
+exclude_scenes: configs/scene_screen/scene_exclusions_20261029.json
+base_recipe: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/train.yaml
+train_overrides:
+  num_train_epochs: 10
+pools:
+  P0:
+    kind: interiorgs_qa_lf
+    dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256   # train 785 scenes, val 99
+    train: qa_train.jsonl
+    val: qa_val.jsonl
+    exclude_groups: [S7]
+  P1:   # validation rows only; the bank lives in the transition-qa worktree
+    kind: transition_qa
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_test.jsonl
+  P2q:
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/trajectory_val.jsonl
+    format_example: action_names
+  P2f:
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12o_20261023/lf_format/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12o_20261023/lf_format/trajectory_val.jsonl
+    format_example: action_names
+  P2f2k:   # the main line's format_sft_2k_screened, exported here (see the top)
+    kind: sft_trajectories
+    train: exps/matrix_v3/format_sft_2k_screened_lf/trajectory_train.jsonl
+    val: exps/matrix_v3/format_sft_2k_screened_lf/trajectory_val.jsonl
+    format_example: action_names
+val:
+  P0: 300
+  P1: 300
+  P2q: 300
+  P2f: all
+recipes:
+  B:
+    description: B′（矩阵第三版之后的格子，探索性，用户 2026-11-03）：P0 加主线的格式对话（去掉边缘场景后 1,795 条）
+    output_format: action_only
+    pools: {P0: all, P2f2k: all}

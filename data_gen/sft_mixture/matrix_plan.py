@@ -180,7 +180,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 MATRIX_V3 = ROOT / "configs" / "matrix_v3"
 V3_GROUPS = ("C", "D")  # the first batch (the user, 2026-11-01); B' and E later
 # the cells added once matrix v3 was done (the user, 2026-11-03; exploratory): {group: (short name, seeds)}
-V3_CELLS = {"D_noP0": ("dn", 2)}
+V3_CELLS = {"D_noP0": ("dn", 2), "B": ("b", 1)}   # B': RL only when an epoch passes, one seed
 # the dense side's rl until the user relays the main line's answer on its baseline: not a standard, so rl-config
 # refuses it and the chain stops at its rl_config step (SFT, its evaluation and the pick are done by then); the plan
 # is then written again with the baseline (--dense) and the chain run again, which redoes rl_config and starts both

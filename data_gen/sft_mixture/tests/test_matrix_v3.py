@@ -30,7 +30,7 @@ REGISTERED = {
     "seeds": [20261019, 20261021],
     "guards": {"invalid_max": 0.10, "kl_max": 1.0},
     "attention": "eager",
-    "pools": {"B": {"P0", "P2f"}, "C": {"P0", "P2q"}, "D": {"P0", "P1", "P2q"}},
+    "pools": {"B": {"P0", "P2f"}, "C": {"P0", "P2q"}, "D": {"P0", "P1", "P2q"}},   # B': the user changed it on 11-03
     "P2f": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/format_sft_v2a",
 }
 
@@ -107,12 +107,15 @@ def test_data_recipes_match_the_mixture_config(cfgs, vars_, mix):
     assert mix["recipes"]["A"]["pools"] == {} and mix["recipes"]["E"]["same_as"] == "D"
     for g in TRAINED:
         c = cfgs[g]
-        recipe = mix["recipes"][c["data"]["recipe"]]
+        own = g == "B"                                 # B' after matrix v3 (the user, 2026-11-03): its own mixture
+        recipe = (yaml.safe_load((ROOT / c["data"]["mixture_config"]).read_text(encoding="utf-8")) if own else mix)[
+            "recipes"][c["data"]["recipe"]]
         used = {p for p, n in c["data"]["train_rows"].items() if n}
         assert used == set(recipe["pools"]), g
-        if g in REGISTERED["pools"]:
+        if g in REGISTERED["pools"] and not own:
             assert used == REGISTERED["pools"][g], g
-        assert c["data"]["lf_dir"] == f"{vars_['mixture_out']}/{g}" and c["data"]["mixture_config"] == vars_["mixture_config"]
+        if not own:
+            assert c["data"]["lf_dir"] == f"{vars_['mixture_out']}/{g}" and c["data"]["mixture_config"] == vars_["mixture_config"]
         assert c["data"]["val_rows"] == {"P0": 300, "P1": 300, "P2q": 300, "P2f": 38}
         assert c["sft"]["base_model"] == vars_["base_qwen3"] and c["sft"]["epochs"] == 10
     assert mix["recipes"]["D"]["pools"]["P1"] == {"times": 1.0, "of": "P2q"}
@@ -120,23 +123,45 @@ def test_data_recipes_match_the_mixture_config(cfgs, vars_, mix):
     assert mix["recipes"]["D_noP0"]["pools"] == {k: v for k, v in mix["recipes"]["D"]["pools"].items() if k != "P0"}
 
 
+def test_b_prime_after_matrix_v3(cfgs, vars_, mix):
+    """B' as a cell after matrix v3 (the user, 2026-11-03): P0 and the main line's screened format conversations
+    instead of P2f; everything else -- seed, split, scene exclusion, recipe, P0 and the validation rows -- as the
+    first batch's mixture."""
+    c = cfgs["B"]
+    bp = yaml.safe_load((ROOT / c["data"]["mixture_config"]).read_text(encoding="utf-8"))
+    assert c["data"]["train_rows"] == {"P0": 10144, "P1": 0, "P2q": 0, "P2f": 0, "P2f2k": 1795}
+    assert bp["recipes"] == {"B": {**bp["recipes"]["B"], "pools": {"P0": "all", "P2f2k": "all"}}}
+    for key in ("seed", "split_manifest", "task_rows", "exclude_scenes", "base_recipe", "train_overrides", "val"):
+        assert bp[key] == mix[key], key
+    assert {k: v for k, v in bp["pools"].items() if k not in ("P1", "P2f2k")} == \
+        {k: v for k, v in mix["pools"].items() if k != "P1"}
+    assert {k: v for k, v in bp["pools"]["P1"].items() if k not in ("train", "val")} == \
+        {k: v for k, v in mix["pools"]["P1"].items() if k not in ("train", "val")}
+    assert all(bp["pools"]["P1"][k].endswith(mix["pools"]["P1"][k]) for k in ("train", "val"))   # the same bank
+    assert bp["pools"]["P2f2k"]["format_example"] == "action_names"
+    assert c["data"]["lf_dir"] == f"{vars_['chain']['worktree']}/{bp['out']}/B"
+
+
 def test_built_mixtures_have_the_configured_rows(cfgs, vars_):
     out = Path(vars_["mixture_out"])
     if not out.is_dir():                              # the built data lives on the cluster
         pytest.skip(f"{out} not here")
     for g in TRAINED:
-        rec = json.loads((out / g / "recipe.json").read_text(encoding="utf-8"))
+        lf = Path(cfgs[g]["data"]["lf_dir"])           # B' (11-03) is built in the matrix worktree
+        if not lf.is_dir():
+            continue
+        rec = json.loads((lf / "recipe.json").read_text(encoding="utf-8"))
         want = {p: n for p, n in cfgs[g]["data"]["train_rows"].items() if n}
         assert rec["counts"] == want, g
         assert {k[: -len("_val")]: v["rows"] for k, v in rec["summary"].items() if k.endswith("_val")} == cfgs[g]["data"]["val_rows"]
-        y = yaml.safe_load((out / g / "train.yaml").read_text())
+        y = yaml.safe_load((lf / "train.yaml").read_text())
         assert y["model_name_or_path"] == vars_["base_qwen3"] and y["template"] == "qwen3_vl_nothink"
-        assert y["output_dir"] == str((out / g / "model").resolve()) and y["save_strategy"] == "epoch"
+        assert y["output_dir"] == str((lf / "model").resolve()) and y["save_strategy"] == "epoch"
 
 
 def test_chain_part(cfgs, vars_):
-    """C and D have plans on matrix-v3 (the user's decision B of 2026-11-01, matrix_plan --version 3), and so has
-    D_noP0, a cell after matrix v3 (the user, 2026-11-03); B' and E still wait."""
+    """C and D have plans on matrix-v3 (the user's decision B of 2026-11-01, matrix_plan --version 3), and so have
+    D_noP0 and B', the cells after matrix v3 (the user, 2026-11-03); E ran from plans written by hand."""
     names = set()
     for g in WITH_RL:
         ch = cfgs[g]["chain"]
@@ -230,6 +255,11 @@ def test_v3_cells(tmp_path, monkeypatch):
             MP.plan_v3_cell_rl(*bad)
     with pytest.raises(SystemExit):
         MP.plan_v3_cell_sft("C", SHA)
+    b = MP.plan_v3_cell_sft("B", SHA)                 # B': one seed, RL only from a passing epoch
+    assert b["tr"].endswith("/m3_b_sft") and b["sft_lf_dirs"] == {"m3b": f"{v['chain']['worktree']}/exps/matrix_v3/sft/B"}
+    assert list(MP.plan_v3_cell_rl("B", 20261019, SHA, start, dense="registered")["rl_runs"]) == ["m3bs1s0", "m3bs1d"]
+    with pytest.raises(SystemExit):
+        MP.plan_v3_cell_rl("B", 20261021, SHA, start, dense="registered")
     # the SFT-only chain runs SFT, its evaluation and the pick, no RL step
     sft["tr"] = str(tmp_path / "sft")
     chain = TC.Chain(sft, sleep=lambda s: None)
