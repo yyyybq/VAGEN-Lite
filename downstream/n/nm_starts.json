@@ -109,7 +109,8 @@
    "reward": "S0",
    "step": 300,
    "sft": "Q3S",
-   "base": "Q3B"
+   "base": "Q3B",
+   "archived": "自由思考提示，已废弃"
   },
   {
    "name": "E-s1-V4",
@@ -120,7 +121,8 @@
    "reward": "V4",
    "step": 200,
    "sft": "Q3S",
-   "base": "Q3B"
+   "base": "Q3B",
+   "archived": "自由思考提示，已废弃"
   },
   {
    "name": "E-s2-S0",
@@ -131,7 +133,8 @@
    "reward": "S0",
    "step": 200,
    "sft": "Q3S",
-   "base": "Q3B"
+   "base": "Q3B",
+   "archived": "自由思考提示，已废弃"
   },
   {
    "name": "E-s2-V4",
@@ -142,7 +145,8 @@
    "reward": "V4",
    "step": 300,
    "sft": "Q3S",
-   "base": "Q3B"
+   "base": "Q3B",
+   "archived": "自由思考提示，已废弃"
   }
  ]
 }
