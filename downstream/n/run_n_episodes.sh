@@ -8,6 +8,7 @@
 #   (n_gen.py collect's instances_eval.jsonl; LIMIT 0 = all).  N_PORT: the model server's port (default 5800).
 #   N_VAL_ENV: the main line's validation config whose prompt the model sees (default n_episode.py's VAL_ENV, the
 #   Qwen2.5 one; the Qwen3 models get their own chain's, n_episode.VAL_ENV_QWEN3).
+#   N_ADAPTER (N2): a LoRA adapter of n2_train.py the server merges into MODEL in memory.
 #   Qwen3 models: the job runs as the container's root (sco_job.prepare as_root; the Qwen3-VL base snapshot is readable
 #   by root only), and this script then gives everything under OUT back to OWNER_UID:OWNER_GID (default 20325) when
 #   it ends, as run_qa_batch.sh does.
@@ -32,13 +33,15 @@ cleanup() {
   if [[ $(id -u) -eq 0 ]]; then chown -R "$OWNER" "$OUT"; fi
 }
 trap cleanup EXIT
-CUDA_VISIBLE_DEVICES=0 "$VLM_PY" downstream/n/n_policy_server.py --model "$MODEL" --port "$PORT" > "$OUT/server.log" 2>&1 &
+ADAPTER=()
+[[ -n ${N_ADAPTER:-} ]] && ADAPTER=(--adapter "$N_ADAPTER")
+CUDA_VISIBLE_DEVICES=0 "$VLM_PY" downstream/n/n_policy_server.py --model "$MODEL" --port "$PORT" ${ADAPTER[@]+"${ADAPTER[@]}"} > "$OUT/server.log" 2>&1 &
 PIDS+=($!)
 for i in $(seq 1 180); do
   python3 -c 'import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1",int(sys.argv[1]))))' "$PORT" && break
   sleep 5
 done
-log "server ready ($MODEL on $PORT)"
+log "server ready ($MODEL${N_ADAPTER:+ + $N_ADAPTER} on $PORT)"
 if [[ -f $GEN ]]; then INST=("$GEN"); else INST=("$GEN"/part*/instances.jsonl); fi
 VAL=()
 [[ -n ${N_VAL_ENV:-} ]] && VAL=(--val-env "$N_VAL_ENV")

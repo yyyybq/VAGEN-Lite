@@ -2,10 +2,13 @@
 """N series: one VLM behind a socket for n_episode.py (run with the StarVLA environment's Python on one GPU).
 
     python downstream/n/n_policy_server.py --model B --port 5800
+    python downstream/n/n_policy_server.py --model B --port 5800 --adapter RUN/adapters/100/adapter.pt   (N2)
 
 A request is length-prefixed JSON {"messages": chat-template messages (image parts without data), "images": PNG
 base64 in order, "max_new_tokens": N}; the answer {"reply": text}: the model's chat template with the generation
 prompt, greedy decoding.  Models and processors as q0_ask.py (read by path).  One request at a time.
+--adapter (N2, the user's decision 1 of 2026-11-03): a LoRA adapter of n2_train.py added to the model's weights in
+memory after loading (n2_train.merge_adapter; nothing written).
 """
 from __future__ import annotations
 
@@ -40,9 +43,14 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", required=True, choices=q0_ask.MODELS)
     ap.add_argument("--port", type=int, default=5800)
+    ap.add_argument("--adapter", default=None, help="N2: a LoRA adapter (n2_train.py adapter.pt) merged in memory")
     args = ap.parse_args(argv)
     t0 = time.time()
     processor, model, proc_dir = q0_ask.load(args.model)
+    if args.adapter:
+        import n2_train
+
+        print(f"[n_policy] adapter {args.adapter}: {n2_train.merge_adapter(model, args.adapter)} modules merged", flush=True)
     print(f"[n_policy] {args.model} loaded in {time.time() - t0:.0f} s (processor {proc_dir})", flush=True)
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
