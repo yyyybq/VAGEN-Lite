@@ -212,11 +212,9 @@
 
 ## 4. 需要用户决定的事
 
-（11-03 08:48 随 `reports/PLAN_DIR3_20261103.md` 第 10 节提出）
+现在没有要用户定的事。带陈述的 SFT 在跑（训练链 `runs/rw_st_sft`）；挑出 epoch 以后，按方案交第一轮 rw_st0 + rw_st1 之前先报用户。
 
-1. 提交带陈述的 SFT（训练链 `runs/rw_st_sft`，模板已写好、没启动；约 33 卡时，比方案多约 6 卡时，因为提示变长了）：**甲（推荐）**照模板交；乙 每个 epoch 只评验证集，挑出的 epoch 再评测试集（约省 3.5 卡时）。
-
-还等用户执行的：`reward_runs/deletions/delete_20261103_phase2_checkpoints.sh`（11 个检查点 912.0 GB，含 rw_tcs2 冒烟，11-02 那个脚本不用再跑）。
+**用户 11-03 的决定三**：SFT"甲，照模板交"（09:50 交出）。删除脚本用户 09:41 执行完（11 个检查点 912.0 GB，`deletions/20261103_phase2_checkpoints.tsv`）。
 
 **用户 11-03 的决定二**（`PLAN_DIR3_20261103.md` 第 9 节，答复"1甲 2甲 3甲 4甲 5甲"）：本线训带陈述的 SFT；陈述四项（远近按成功容差 / 1.6、2.6 米）；陈述 token 单独的优势、动作照 S0；第一轮 rw_st0 + rw_st1；QA 用 EASI-8 + P1 探针。
 
@@ -398,3 +396,7 @@
 | 11-03 08:05 | 用户答"1甲 2甲 3甲 4甲 5甲"（方向 3 方案照推荐）。开始写方向 3 的代码 |
 | 11-03 08:29 | 真值核对都过（`reward/statement_check.py`，`analysis/15_statement_check/`）：C0 e8 两个集合 705 局重放 5,382 帧，"还差哪个条件 / 看清 / 做成"0 处不一致；C0 SFT 28,654 个回合画面全有位姿，最后一帧 11,029 / 11,095 按今天的规则算成功（66 段只差看清：规则 10-16 以后改过）；两个物体的题题面都先说 a；远近三分位 1.59 / 2.60 米，定 1.6 / 2.6 |
 | 11-03 08:48 | 带陈述的 SFT 数据建好（`reward/build_statement_sft.py` → `reward_runs/sft_statement/`）：11,095 段全改写、0 跳过，28,654 条陈述（约 29 token 一条）；新提示格式 observe（原格式不变，相关测试 53 个都过）；LLaMA-Factory 转换试过，train.yaml 和 C0 除路径外相同。提交号 2b7820ea。提示变长，每段训练文本多约 43%，SFT 估约 33 卡时（方案 26–27）。SFT 训练链模板 `runs/rw_st_sft/plan_template.json`，等用户点头再交 |
+| 11-03 09:41 | 用户执行了删除脚本：11 个检查点 912.0 GB，记录 `deletions/20261103_phase2_checkpoints.tsv` |
+| 11-03 09:42 | 用户答"甲，照模板交"。提交前配额 18 / 22 TB，没有暂停文件、没有磁盘停交标记，登录节点已用 0.5 核，worktree 干净（5d7e892c）。训练链 `runs/rw_st_sft` 启动（pid 2280145）；画面已有，渲染一步跳过；数据转换 09:43–09:50 |
+| 11-03 09:50 | SFT 任务 pt-7b0etwqv 交到 zoetrope（`queue` 选的排队短的池），状态 STARTING（在等卡；10:40 时 zoetrope 上唯一一个 STARTING 的任务）。10 个 epoch 的检查点约 32 GB 一个 |
+| 11-03 10:55 | RL 那边的代码写完、测完，放在新 worktree `VAGEN-Lite-reward-stmt`（分支 reward-stmt，从 5d7e892c 开，提交 c51a2c66）：SFT 的评测任务读 `VAGEN-Lite-reward` 的代码，跑的时候不能改。环境开关 statement_record（按模型看到的那一帧给陈述打分）、智能体循环记陈述的 token 范围、估计器的陈述项（只作用在陈述 token 上，动作照 S0 的 GRPO）、rl-config `--statement`。89 个测试都过；环境自检（C0 e8 测试集 292 局、1,871 个回合）：照真值写的陈述全部 1.0，改远近的全部 0.75，重放和记录一致；rl-config 试跑：rw_st0 和 rw_s0 的配置只差 observe 格式和 statement_record，rw_st1 再多陈述估计器，三种不配套的组合都会拒绝 |
