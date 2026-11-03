@@ -201,10 +201,22 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
 - 训练链从这个工作树跑：起链时设 `VAGEN_LITE_WORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix`（`check_code` 核对它等于链所在的检出）。
   - 链在跑时，这个工作树里只改 `docs/`；代码要改，等链跑完。
 
+**2026-11-03 补丁 0002 的两处修正（用户："现在做"）**：矩阵第三版的 6 条链 11-03 停在最后两步（`PROGRESS.md` 12.35），其中两处是 0002 的问题：
+- 失败拆解往 `TR/diag/` 写结果时，这个目录还没建：探针的运行目录要到后面才建，测试里目录已经在。现在诊断步骤先建 `TR/diag/`。
+- 失败拆解读题集结果目录里的所有模型。矩阵第三版 6 条链共用一个题集目录，所以读到了别的链正在写的结果。
+  - 现在只读本链评测过的模型：`--names` 取 `evaluated_models()` 里在这个题集有结果的。
+  - 一个都没有就让链停下，不会退回去读全部。
+- 改在 matrix-v3 `9a90c309`。两份补丁副本（本目录和 `qwen3_main_b6606bac/`）按同样的改动重做：
+  - 在 `/tmp` 的临时仓库里，把基准文件依次打上 0001、旧的 0002 和这次的改动，再用 `git diff --full-index` 导出。
+  - 变的只有 `train_chain.py` 和 `tests/test_train_chain_matrix.py` 改后的 blob 号，改前的不变。
+  - 新的 0002 在各自的基准加 0001 上都打得上；`qwen3_main_b6606bac/` 的两份在 qwen3-main 现在的头 `22a0fc62` 上也打得上。
+- 测试：`test_train_chain_matrix.py` 的诊断测试改成要 `--names`，另加 1 个测试：建了目录、不读别的链的结果、一个都没有时停下。
+- 没改的：`m3_c_s20261021` 的评测汇总也是在共用目录里碰上别的链在写。那一步是主线的 `evaluation table`，不在补丁里。
+
 | 补丁 | 内容 | 改的文件 |
 | --- | --- | --- |
 | `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
-| `0002-train-chain-diagnostics-step.patch` | 第 7 个字段：新的第 11 步 `diagnostics`，评测之后跑失败拆解和探针（P1；P0 探针到位后同样接入）；有它时 main 的 `retain` 清理挪到它之后 | `train_chain.py`（在 0001 之上约 120 行），`tests/test_train_chain.py`（1 行：步骤多了一个），`tests/test_train_chain_matrix.py`（加 2 个测试） |
+| `0002-train-chain-diagnostics-step.patch` | 第 7 个字段：新的第 11 步 `diagnostics`，评测之后跑失败拆解（只读本链的结果）和探针（P1；P0 探针到位后同样接入）；有它时 main 的 `retain` 清理挪到它之后 | `train_chain.py`（在 0001 之上约 120 行），`tests/test_train_chain.py`（1 行：步骤多了一个），`tests/test_train_chain_matrix.py`（加 3 个测试） |
 
 ### 6.1 每个字段谁写、谁读
 

@@ -12,10 +12,19 @@ index 69f7fbc31a83caa49669e37472a34f5f4a55568e..2169c544a03882c2eea15dcc0584b481
  
      def test_progress_without_the_new_steps(self):
 diff --git a/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py b/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
-index f34df3d0f58b4b968c5aafde0d6d3a885b2c3e55..c71112911cb4db4489981f8857ff3c20bad793b2 100644
+index f34df3d0f58b4b968c5aafde0d6d3a885b2c3e55..38db8970b2e94b7d4f5a5404990d3c71210b6b05 100644
 --- a/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
 +++ b/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
-@@ -51,7 +51,7 @@ class MatrixFieldsTest(unittest.TestCase):
+@@ -2,6 +2,8 @@
+ sft_lf_dirs, start_model, rl output_format / max_response_length, guards invalid_until, eval rl_prompt_format."""
+ 
+ import json
++import shutil
++import sys
+ import tempfile
+ import unittest
+ from pathlib import Path
+@@ -51,7 +53,7 @@ class MatrixFieldsTest(unittest.TestCase):
              for step in T.STEPS:
                  setattr(chain, step, lambda step=step: calls.append(step))
              self.assertEqual(chain.run(), 0)
@@ -24,7 +33,7 @@ index f34df3d0f58b4b968c5aafde0d6d3a885b2c3e55..c71112911cb4db4489981f8857ff3c20
              for s in T.SFT_STEPS:
                  self.assertEqual(chain.state["steps"][s]["note"], "not planned (start_model)")
              self.assertEqual(chain.sft_model(), Path("/models/base_7b"))
-@@ -125,5 +125,79 @@ class MatrixFieldsTest(unittest.TestCase):
+@@ -125,5 +127,106 @@ class MatrixFieldsTest(unittest.TestCase):
              self.assertIsNone(got["val__base"][3])  # a listed model keeps its own format
  
  
@@ -45,6 +54,9 @@ index f34df3d0f58b4b968c5aafde0d6d3a885b2c3e55..c71112911cb4db4489981f8857ff3c20
 +            tr = root / "tr"
 +            for s in (50, 100):
 +                (tr / "rl_run_p1s0" / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface").mkdir(parents=True)
++            for name in ("sft_mix_e1", "sft_mix_e2", "p1s0_050", "p1s0_100"):
++                (root / "val" / name).mkdir(parents=True)
++                (root / "val" / name / "results.jsonl").write_text("")
 +            plan = {"tr": str(tr), "sft_dir": str(root), "endpoint": 100, "sft_groups": {"mix": "x.jsonl"},
 +                    "sft_lf_dirs": {"mix": str(lf)}, "eval_sets": {"val": str(root / "val")}, "rl_runs": {"p1s0": {}},
 +                    "eval": {"every": 50}, "diagnostics": {"probes": {"P1": str(root / "p1_probe.jsonl"), "P0": None},
@@ -80,6 +92,7 @@ index f34df3d0f58b4b968c5aafde0d6d3a885b2c3e55..c71112911cb4db4489981f8857ff3c20
 +                    mock.patch.object(sco_probe, "prepare", prepare):
 +                chain.diagnostics()
 +                self.assertEqual(calls[0][2:], ["eval.diagnostics.failure_breakdown", "--eval", str(root / "val"),
++                                                "--names", "sft_mix_e1,sft_mix_e2,p1s0_050,p1s0_100",
 +                                                "--out", str(tr / "diag" / "failure_val")])
 +                self.assertEqual(sorted(n for names, _ in prepared.values() for n in names),
 +                                 ["p1s0_050", "p1s0_100", "sft_mix_e1", "sft_mix_e2"])
@@ -94,6 +107,29 @@ index f34df3d0f58b4b968c5aafde0d6d3a885b2c3e55..c71112911cb4db4489981f8857ff3c20
 +                chain.diagnostics()  # every model has results: no new job
 +                self.assertEqual(prepared, {})
 +
++    def test_failure_breakdown_reads_only_this_chains_results(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            tr = root / "tr"
++            (tr / "rl_run_p1s0" / "checkpoints" / "global_step_50" / "actor" / "huggingface").mkdir(parents=True)
++            for name in ("p1s0_050", "other_050"):  # other_050: another chain's model in the shared folder
++                (root / "val" / name).mkdir(parents=True)
++                (root / "val" / name / "results.jsonl").write_text("")
++            plan = {"tr": str(tr), "sft_dir": str(root), "endpoint": 50, "start_model": str(root / "start"),
++                    "eval_sets": {"val": str(root / "val")}, "rl_runs": {"p1s0": {}}, "eval": {"every": 50},
++                    "diagnostics": {"probes": {}}}
++            chain = T.Chain(plan, sleep=lambda s: None)
++            calls = []
++            chain.sh = lambda args, **k: calls.append(args)
++            chain.diagnostics()
++            self.assertTrue((tr / "diag").is_dir())  # failure_breakdown writes into it and does not create it
++            self.assertEqual(calls, [[sys.executable, "-m", "eval.diagnostics.failure_breakdown", "--eval",
++                                      str(root / "val"), "--names", "p1s0_050",  # "start" has no results here
++                                      "--out", str(tr / "diag" / "failure_val")]])
++            shutil.rmtree(root / "val" / "p1s0_050")
++            with self.assertRaises(T.ChainError):  # none of this chain's models: never every folder
++                chain.diagnostics()
++
 +    def test_not_planned(self):
 +        with tempfile.TemporaryDirectory() as tmp:
 +            chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 100}, sleep=lambda s: None)
@@ -105,24 +141,25 @@ index f34df3d0f58b4b968c5aafde0d6d3a885b2c3e55..c71112911cb4db4489981f8857ff3c20
  if __name__ == "__main__":
      unittest.main()
 diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
-index e9a3c6e5b82e1e65198f6c46a2e569ce30ced383..6c06242b5f13794b5263b9ecf2fa2774e5291fb2 100644
+index e9a3c6e5b82e1e65198f6c46a2e569ce30ced383..ff1870fe53ada34f5b152d26b85b67fa8097b531 100644
 --- a/data_gen/interiorgs_v10/train_chain.py
 +++ b/data_gen/interiorgs_v10/train_chain.py
-@@ -164,6 +164,13 @@ TR} for that chain's picked SFT checkpoint) skips render to pick_sft and starts
+@@ -164,6 +164,14 @@ TR} for that chain's picked SFT checkpoint) skips render to pick_sft and starts
  unparseable answers only up to that update; plan "eval"."rl_prompt_format" evaluates the RL checkpoints with that
  prompt format.
  
 +11. ``diagnostics``  matrix v2 (plan "diagnostics": {"failure_breakdown": true, "probes": {"P1": probe.jsonl, "P0":
 +                   null}, "models_per_job": 6}): the failure breakdown of every evaluation set (CPU,
-+                   eval.diagnostics.failure_breakdown) and every probe for every evaluated model (every SFT epoch,
-+                   the start model, every RL checkpoint, the plan's eval models): single-card jobs of
-+                   eval.diagnostics.sco_probe, results in TR/diag/probe_<name>/ (a model with results is not asked
-+                   again), then the curves (qa_probe curve).  A probe set left null is skipped (P0 until it exists).
++                   eval.diagnostics.failure_breakdown over this chain's own result folders, into TR/diag/) and
++                   every probe for every evaluated model (every SFT epoch, the start model, every RL checkpoint, the
++                   plan's eval models): single-card jobs of eval.diagnostics.sco_probe, results in
++                   TR/diag/probe_<name>/ (a model with results is not asked again), then the curves (qa_probe
++                   curve).  A probe set left null is skipped (P0 until it exists).
 +
  A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
  logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
  continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
-@@ -184,15 +191,19 @@ from pathlib import Path
+@@ -184,15 +192,19 @@ from pathlib import Path
  from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
  
  ROOT = Path(__file__).resolve().parents[2]
@@ -146,7 +183,7 @@ index e9a3c6e5b82e1e65198f6c46a2e569ce30ced383..6c06242b5f13794b5263b9ecf2fa2774
  RL_STEPS = ("rl_config", "rl", "rl_extend")
  # the model line (2026-10-24): plan "rl_start_model" skips these and starts RL from that model (plumbing smokes of a
  # new model type's RL path; the formal runs are SFT then RL)
-@@ -2056,9 +2067,14 @@ class Chain:
+@@ -2056,9 +2068,14 @@ class Chain:
          jobs.update(self.variant_jobs(ev, {**sets, **extra}, models, rl_names))
          self.eval_jobs("evaluate", jobs)
          self.tables()
@@ -162,7 +199,7 @@ index e9a3c6e5b82e1e65198f6c46a2e569ce30ced383..6c06242b5f13794b5263b9ecf2fa2774
      def retain(self) -> None:
          """Delete the checkpoints the plan's retention rule does not keep (see the module docstring)."""
          import shutil
-@@ -2136,6 +2152,99 @@ class Chain:
+@@ -2136,6 +2153,106 @@ class Chain:
                      jobs[f"{set_name}__{result}"] = (sets[set_name], result, model, prompt_format, list(v.get("options") or []))
          return jobs
  
@@ -221,12 +258,19 @@ index e9a3c6e5b82e1e65198f6c46a2e569ce30ced383..6c06242b5f13794b5263b9ecf2fa2774
 +            self.mark("diagnostics", note="not planned")
 +            return
 +        out = self.tr / "diag"
++        out.mkdir(parents=True, exist_ok=True)  # failure_breakdown writes into it and does not create it
 +        py = sys.executable
++        models = self.evaluated_models()
 +        if diag.get("failure_breakdown", True):
 +            for set_name, eval_dir in self.eval_sets().items():
++                # this chain's result folders only: an evaluation folder shared by several chains (matrix v3) also
++                # holds the others' models, some of them still being written
++                names = [n for n in models if (eval_dir / n / "results.jsonl").is_file()]
++                if not names:
++                    raise ChainError(f"failure breakdown {set_name}: no results of this chain's models in {eval_dir}")
 +                self.sh([py, "-m", "eval.diagnostics.failure_breakdown", "--eval", str(eval_dir),
-+                         "--out", str(out / f"failure_{set_name}")], log=self.tr / "logs" / f"failure_{set_name}.log")
-+        models = self.evaluated_models()
++                         "--names", ",".join(names), "--out", str(out / f"failure_{set_name}")],
++                        log=self.tr / "logs" / f"failure_{set_name}.log")
 +        probes = {k: v for k, v in (diag.get("probes") or {}).items() if v}  # null: not there yet (P0)
 +        per_job = int(diag.get("models_per_job", DEFAULT_MODELS_PER_PROBE_JOB))
 +        runs: Dict[str, Path] = {}
