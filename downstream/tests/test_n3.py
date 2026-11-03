@@ -176,3 +176,79 @@ def test_recheck_job_runs_each_scene_once_and_skips_a_slow_one(tmp_path):
     again = subprocess.run(["bash", str(wt / "downstream/n/run_n3_recheck.sh"), str(out), str(tmp_path / "inst.jsonl"),
                             "sphere", "2"], capture_output=True, text=True, env=env, timeout=60)
     assert again.returncode == 0 and len((out / "calls.jsonl").read_text().splitlines()) == 3  # nothing redone
+
+
+def test_gen_job_makes_tier_e_scenes_with_the_robot_camera(tmp_path):
+    """run_n_gen.sh N_CAMERA=robot: scenes by n3_gen.py scene --camera robot; collect and page stay n_gen.py's."""
+    from test_n_gen import STUB as GEN_STUB
+    from test_run_probe_episode import SIM_ENV
+
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    (wt / "downstream/eval").mkdir(parents=True)
+    (wt / "downstream/n/run_n_gen.sh").write_text((ROOT / "n/run_n_gen.sh").read_text())
+    (wt / "downstream/n/n_gen.py").write_text(GEN_STUB)
+    (wt / "downstream/n/n3_gen.py").write_text(GEN_STUB.replace('cmd = sys.argv[1]', 'cmd = sys.argv[1]\n'
+                                                                'open(sys.argv[sys.argv.index("--out") + 1] + "/n3", "a").write(cmd + "\n")'))
+    (wt / "downstream/eval/sim_env.sh").write_text(SIM_ENV)
+    out = tmp_path / "out"
+    env = dict(os.environ, N_X0=str(tmp_path / "x0.jsonl"), SCENE_TIMEOUT="3", SOFT_LIMIT="2", N_CAMERA="robot")
+    res = subprocess.run(["bash", str(wt / "downstream/n/run_n_gen.sh"), str(out), "3", "0", "50"],
+                         capture_output=True, text=True, env=env, timeout=60)
+    assert res.returncode == 0, res.stdout + res.stderr
+    calls = [json.loads(x) for x in (out / "calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 3 and all(c[:3] == ["scene", "--camera", "robot"] for c in calls)
+    assert (out / "n3").read_text().split() == ["scene"] * 3 and (out / "collect.done").is_file()
+
+
+def test_model_job_runs_its_tiers_with_their_rules(tmp_path):
+    """run_n3.sh: tier c (sphere) only for the six SFT / RL models, tier e (N1's rule) for all; Q3 models' prompt."""
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    (wt / "downstream/n/run_n3.sh").write_text((ROOT / "n/run_n3.sh").read_text())
+    (wt / "downstream/n/run_n3_episodes.sh").write_text(
+        'mkdir -p "$1"; echo "$1|$2|$3|$4|$5|$N3_COLLISION|${N_VAL_ENV:-}" >> "$(dirname "$(dirname "$1")")/calls"\n'
+        'echo \'{"success": true}\' >> "$1/episodes.jsonl"\n')
+    env = {k: v for k, v in os.environ.items() if k != "N_VAL_ENV"}
+    for model in ("B", "Q3RS"):
+        res = subprocess.run(["bash", str(wt / "downstream/n/run_n3.sh"), str(tmp_path / "n3"), model, "/c.jsonl",
+                              "/e.jsonl"], capture_output=True, text=True, env=dict(env, N_VAL_ENV_QWEN3="/q3.yaml"),
+                             timeout=60)
+        assert res.returncode == 0, res.stdout + res.stderr
+    calls = (tmp_path / "n3/calls").read_text().split()
+    n3 = str(tmp_path / "n3")
+    assert calls == [f"{n3}/e/B|/e.jsonl|B|12|0|robot|", f"{n3}/c/Q3RS|/c.jsonl|Q3RS|12|0|sphere|/q3.yaml",
+                     f"{n3}/e/Q3RS|/e.jsonl|Q3RS|12|0|robot|/q3.yaml"]
+    assert "tier c: B is not in it" in (tmp_path / "n3/n3_B.log").read_text()
+
+
+def test_report_tiers_pairings_and_the_c_against_d_gap(tmp_path):
+    import n3_report as NR
+
+    def write(d, model, wins, ids):
+        (d / model).mkdir(parents=True, exist_ok=True)
+        (d / model / "episodes.jsonl").write_text("".join(json.dumps({"instance_id": i, "success": i in wins}) + "\n"
+                                                          for i in ids))
+
+    ids = [f"I{k}" for k in range(10)]
+    n3 = tmp_path / "n3"
+    write(n3 / "c", "S", ids[:2], ids[:8])  # tier c: only 8 instances solvable under the sphere
+    write(n3 / "c", "RS", ids[:5], ids[:8])
+    write(n3 / "e", "B", [], ids)
+    write(n3 / "e", "S", ids[:3], ids)
+    d = tmp_path / "n1"
+    write(d, "S", ids[:4], ids)
+    write(d, "RS", ids[:4] + ["I9"], ids)
+    a = {"S": {f"t{k}": k < 4 for k in range(10)}, "RS": {f"t{k}": k < 7 for k in range(10)}}
+    rep = NR.build(n3, exclude={"I9"} - {"I9"}, a=a, d_dirs=[d])
+    t = rep["tiers"]
+    assert t["c"]["models"]["RS"]["k"] == 5 and t["c"]["pairs"]["RS-S"]["diff"] == pytest.approx(0.3)
+    assert t["d"]["pairs"]["RS-S"]["diff"] == pytest.approx(0.1) and t["a"]["pairs"]["RS-S"]["diff"] == pytest.approx(0.3)
+    assert t["d_on_c"]["models"]["RS"]["n"] == 8 and t["d_on_c"]["pairs"]["RS-S"]["diff"] == 0  # I9 is not in c
+    g = rep["across"]["RS-S"]["c_vs_d_same_instances"]
+    assert g["n"] == 8 and g["gap"] == pytest.approx(0.375) and g["low"] <= g["gap"] <= g["high"]
+    assert "a_vs_c" in rep["across"]["RS-S"] and "S-B" in t["e"]["pairs"]
+    md = NR.markdown(rep)
+    assert "## (c) RoboCasa + 上游身体" in md and "| RS-S |" in md
+    ex = NR.build(n3, exclude={"I0"}, a=a, d_dirs=[d])
+    assert ex["tiers"]["c"]["models"]["S"]["n"] == 7 and ex["excluded"] == ["I0"]
