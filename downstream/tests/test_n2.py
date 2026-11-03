@@ -260,3 +260,33 @@ def test_colour_noise_is_told_from_renders_and_scanned_per_episode(tmp_path):
     rep = F.scan([tmp_path / "ev"])["evals"][str(tmp_path / "ev")]
     assert rep["tiles"] == 6 and rep["corrupted_tiles"] == 2 and rep["episodes"] == 1
     assert rep["instances"] == {"T_s1_equidistance": {"S": {"corrupted": 2, "tiles": 3, "first": 1}}}
+
+
+# ------------------------------------------------------------------------------------------ n2_report
+def test_report_tiers_pairings_and_exclusion(tmp_path):
+    import n2_report as NR
+
+    def write(path, wins, ids):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps({"instance_id": i, "success": i in wins}) + "\n" for i in ids))
+
+    ids = [f"I{k}" for k in range(10)]
+    runs, n2 = tmp_path / "runs", tmp_path / "n2"
+    for m, w0 in (("B", []), ("S", ids[:2]), ("RS", ids[:1])):
+        write(runs / "n/n1_eval_20261031" / m / "episodes.jsonl", w0, ids[:5])
+        write(runs / "n/n1b_eval_20261102" / m / "episodes.jsonl", [], ids[5:])
+    write(n2 / "B/eval/100/episodes.jsonl", ids[:1], ids)
+    write(n2 / "B/eval/1000/episodes.jsonl", ids[:4], ids)
+    write(n2 / "S/eval/100/episodes.jsonl", ids[:5], ids)
+    write(n2 / "RS/eval/100/episodes.jsonl", ids[:6], ids)
+    rep = NR.build(NR.load(n2, runs))
+    assert rep["rates"]["S"]["0"]["k"] == 2 and rep["rates"]["S"]["100"]["k"] == 5
+    assert rep["vs_tier0"]["S"]["100"]["diff"] == pytest.approx(0.3)
+    assert rep["vs_base"]["S"]["100"]["diff"] == pytest.approx(0.4) and "1000" not in rep["vs_base"]["S"]
+    assert rep["vs_sft"]["RS"]["100"]["diff"] == pytest.approx(0.1) and rep["vs_sft"]["RS"]["0"]["diff"] == pytest.approx(-0.1)
+    assert rep["fewer_vs_base_1000"]["S"]["100"]["diff"] == pytest.approx(0.1)
+    assert "Q3S" not in rep["vs_sft"] or not rep["vs_sft"]["Q3S"]
+    md = NR.markdown(rep)
+    assert "| S | 2/10（20.0%" in md and "## 同一档 RL 减 SFT" in md
+    ex = NR.build(NR.load(n2, runs, exclude={"I0"}), {"I0"})
+    assert ex["rates"]["S"]["100"] == dict(ex["rates"]["S"]["100"], k=4, n=9) and ex["excluded"] == ["I0"]
