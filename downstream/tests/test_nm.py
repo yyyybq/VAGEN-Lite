@@ -219,6 +219,23 @@ def test_archived_starts_are_reported_apart(tmp_path):
     assert NR.main_name({"path": M + "/sft/C/model/checkpoint-1204"}) is None
 
 
+def test_d_pairs_with_c_of_the_same_seed_and_reward(tmp_path):
+    ids, inst, n1, nm, starts = report_fixture(tmp_path)
+    write(nm / "D-SFT/episodes.jsonl", [ep(i, k < 1) for k, i in enumerate(ids)])
+    write(nm / "D-s1-S0/episodes.jsonl", [ep(i, k < 7) for k, i in enumerate(ids)])
+    write(nm / "D-s2-V4/episodes.jsonl", [ep(i, k < 4) for k, i in enumerate(ids)])
+    starts += [S.entry(M + "/sft/D/model/checkpoint-3987", M), S.entry(RL.format(g="d", c=9, k=1, r="s0", n=300)),
+               S.entry(RL.format(g="d", c=9, k=2, r="d", n=300))]
+    m = NR.build(inst, nm, starts, n1)["models"]
+    assert m["D-SFT"]["versus_c"]["base"] == "C-SFT" and m["D-SFT"]["versus_c"]["all"]["diff"] == pytest.approx(-0.2)
+    assert m["D-s1-S0"]["versus_c"]["base"] == "C-s1-S0" and m["D-s1-S0"]["versus_c"]["all"]["only_a"] == 2
+    # no C seed-2 V4 here: C-SFT stands in, as the user decided for the matrix's C seed-1 V4
+    assert m["D-s2-V4"]["versus_c"]["base"] == "C-SFT" and m["D-s2-V4"]["versus_c"]["all"]["diff"] == pytest.approx(0.1)
+    assert not any("versus_c" in m[n] for n in ("C-SFT", "C-s1-S0", "C-s1-V4", "E-s1-S0"))
+    md = NR.markdown(NR.build_all(inst, nm, starts, n1))
+    assert "### D 对 C（同一种子、同一种奖励；SFT 对 SFT）" in md and "| D-s2-V4 | C-SFT |" in md
+
+
 def test_report_main_and_a_twice_played_instance(tmp_path):
     ids, inst, n1, nm, starts = report_fixture(tmp_path)
     f = tmp_path / "s.json"

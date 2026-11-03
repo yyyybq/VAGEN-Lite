@@ -11,7 +11,9 @@ resampling interval; near-threshold and the rest; behaviour), with three pairing
   * versus: every model against the base Q3B;
   * versus_sft: every RL start against the SFT start it grew from (C against C-SFT, D against D-SFT, the old E
     against Q3S, the main line's formal SFT epoch 8; N1's Q3RS and Q3RD against Q3S);
-  * versus_s0: each V4 start against the S0 start of the same group and seed.
+  * versus_s0: each V4 start against the S0 start of the same group and seed;
+  * versus_c: each D start against the C start of the same seed and reward (the matrix's 3.1 comparison; SFT against
+    SFT); C has no seed-1 V4 checkpoint (stopped at update 47), and as the user decided for the matrix, C-SFT stands in.
 An overview first: per group and reward, each seed's success (with the main line's name of the pick) and its
 difference from the SFT start.  Archived starts (nm_starts.json "archived": LABEL; 2026-11-03: the old E's four RL,
 "自由思考提示，已废弃") are reported apart, one section per label with Q3B and Q3S, never in the main tables.
@@ -35,9 +37,11 @@ N1_EVALS = (Path("/mnt/umm/users/yinbaiqiao/downstream_runs/n/n1_eval_20261031")
 N1_MODELS = ("Q3B", "Q3S", "Q3RS", "Q3RD")
 PAIRINGS = (("versus", "和底座 Q3B 配对"),
             ("versus_sft", "RL 和它的 SFT 起点配对（对照列是 SFT 起点）"),
-            ("versus_s0", "同组同种子 V4 对 S0"))
+            ("versus_s0", "同组同种子 V4 对 S0"),
+            ("versus_c", "D 对 C（同一种子、同一种奖励；SFT 对 SFT）"))
 PAIR_NOTE = ("全部对 Q3B；C 的 RL 对 C-SFT，D 的对 D-SFT，旧 E 的对 Q3S（旧 E 的 RL 从主线正式 SFT 第 8 轮起步，就是 N1 的"
-             " Q3S）；N1 的 Q3RS、Q3RD 对 Q3S；V4 对同组同种子的 S0。")
+             " Q3S）；N1 的 Q3RS、Q3RD 对 Q3S；V4 对同组同种子的 S0；D 对同种子同奖励的 C（C 种子 1 的 V4 没有检查点，"
+             "按用户定的用 C-SFT 代替）。")
 
 
 def order(starts) -> list:
@@ -57,12 +61,18 @@ def refs(starts, models) -> dict:
     by = {(e["group"], e.get("seed"), e["reward"]): e["name"] for e in starts}
     out = {"versus": {m: "Q3B" for m in models if m != "Q3B"},
            "versus_sft": {"Q3RS": "Q3S", "Q3RD": "Q3S"},
-           "versus_s0": {}}
+           "versus_s0": {},
+           "versus_c": {}}
     for e in starts:
         if e.get("sft"):
             out["versus_sft"][e["name"]] = e["sft"]
         if e["reward"] == "V4" and (e["group"], e.get("seed"), "S0") in by:
             out["versus_s0"][e["name"]] = by[(e["group"], e.get("seed"), "S0")]
+        if e["group"] == "D":
+            # a C cell without a checkpoint takes C's SFT start (the user's rule for the matrix: C seed 1 V4)
+            c = by.get(("C", e.get("seed"), e["reward"])) or (by.get(("C", None, "SFT")) if e["reward"] != "SFT" else None)
+            if c:
+                out["versus_c"][e["name"]] = c
     return out
 
 
