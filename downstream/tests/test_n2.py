@@ -51,6 +51,20 @@ def demo(t, k, n_actions=5, ok=True, scene=None):
             "item": {"task_description": f"do {t}"}, "path_frames": frames}
 
 
+def write_frames(gen, demos, noisy=()):
+    """Each demonstration's frames as small PNGs: a smooth gradient, or colour noise for the ids in noisy."""
+    import numpy as np
+    from PIL import Image
+
+    rng = np.random.default_rng(0)
+    (gen / "path_frames").mkdir(parents=True, exist_ok=True)
+    for d in demos:
+        for f in d["path_frames"]:
+            img = (rng.integers(0, 256, (16, 16, 3)) if d["instance_id"] in noisy and f["action"] is None else
+                   np.tile(np.arange(16)[None, :, None] * 8, (16, 1, 3)))
+            Image.fromarray(img.astype(np.uint8)).save(gen / f["image"])
+
+
 def test_order_is_nested_even_over_types_and_ignores_the_input_order():
     demos = [demo(t, k) for t in N.FAMILIES for k in range(1 if t == "occlusion_alignment" else 4)]
     order = D.demo_order(demos, seed=5)
@@ -76,9 +90,12 @@ def test_build_writes_nested_conversations_per_generation(tmp_path, stub_prompts
     gen.mkdir()
     demos = [demo(t, k) for t in N.FAMILIES for k in range(3)]
     demos += [demo("equidistance", 9, ok=False)]  # its path never succeeds: not used
+    demos += [demo("fov_inclusion", 8)]  # its first frame is colour noise: not used
     write_jsonl(gen / "instances_final.jsonl", demos)
+    write_frames(gen, demos, noisy={"fov_inclusion_8"})
     s = D.build(gen, tmp_path / "out", sizes=(6, 12), max_per_turn=3, configs={"qwen25": "c25", "qwen3": "c3"})
-    assert s["found"] == 19 and s["usable"] == 18 and s["sizes"]["6"]["per_type"] == {t: 1 for t in N.FAMILIES}
+    assert s["found"] == 20 and s["path_succeeds"] == 19 and s["corrupted_frames"] == 1 and s["usable"] == 18
+    assert s["corrupted_per_type"] == {"fov_inclusion": 1} and s["sizes"]["6"]["per_type"] == {t: 1 for t in N.FAMILIES}
     assert s["sizes"]["12"]["actions_per_turn"] == {1: 12, 2: 24}  # tl tl | mf mf | ml
     six = [json.loads(x) for x in (tmp_path / "out/qwen25/demos_6.jsonl").read_text().splitlines()]
     twelve = [json.loads(x) for x in (tmp_path / "out/qwen25/demos_12.jsonl").read_text().splitlines()]
@@ -101,7 +118,9 @@ def test_build_writes_nested_conversations_per_generation(tmp_path, stub_prompts
 def test_build_refuses_evaluation_scenes_and_too_few_demonstrations(tmp_path, stub_prompts):
     gen = tmp_path / "gen"
     gen.mkdir()
-    write_jsonl(gen / "instances_final.jsonl", [demo(t, k) for t in N.FAMILIES for k in range(2)])
+    demos = [demo(t, k) for t in N.FAMILIES for k in range(2)]
+    write_jsonl(gen / "instances_final.jsonl", demos)
+    write_frames(gen, demos)
     write_jsonl(tmp_path / "eval.jsonl", [{"scene_id": "S1"}])
     with pytest.raises(SystemExit, match="evaluation scenes"):
         D.build(gen, tmp_path / "o1", sizes=(6,), exclude=[tmp_path / "eval.jsonl"], configs={"qwen25": "c"})
@@ -221,3 +240,23 @@ def test_job_qwen3_variant_and_a_failed_training_skips_its_evaluation(tmp_path):
     assert [x["train"] for x in log if "train" in x] == ["/data/qwen3/demos_fail.jsonl", "/data/qwen3/demos_100.jsonl"]
     evals = [x for x in log if "eval" in x]
     assert [Path(x["eval"]).name for x in evals] == ["100"] and evals[0]["val_env"] == "/q3.yaml"
+
+
+# ------------------------------------------------------------------------------------------- n_frames
+def test_colour_noise_is_told_from_renders_and_scanned_per_episode(tmp_path):
+    import numpy as np
+    from PIL import Image
+
+    import n_frames as F
+
+    rng = np.random.default_rng(1)
+    smooth = np.tile(np.arange(32)[None, :, None] * 6, (32, 1, 3)).astype(np.uint8)
+    marble = np.repeat(rng.integers(150, 255, (32, 32, 1)), 3, axis=2).astype(np.uint8)  # grey speckle: no colour
+    noise = rng.integers(0, 256, (32, 32, 3)).astype(np.uint8)
+    assert F.chroma(smooth) == 0 and F.chroma(marble) == 0 and F.chroma(noise) > 3 * F.CORRUPT
+    for model, tiles in (("S", [smooth, noise, noise]), ("RS", [smooth, marble, smooth])):
+        (tmp_path / "ev" / model / "frames").mkdir(parents=True)
+        Image.fromarray(np.concatenate(tiles, axis=1)).save(tmp_path / "ev" / model / "frames/T_s1_equidistance.png")
+    rep = F.scan([tmp_path / "ev"])["evals"][str(tmp_path / "ev")]
+    assert rep["tiles"] == 6 and rep["corrupted_tiles"] == 2 and rep["episodes"] == 1
+    assert rep["instances"] == {"T_s1_equidistance": {"S": {"corrupted": 2, "tiles": 3, "first": 1}}}

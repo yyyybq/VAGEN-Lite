@@ -11,7 +11,8 @@ instances: N1's and its second set's instances as one file (DIR/instances_600.js
   smoke's subset, the first --smoke-per-family of each type in file order (DIR/instances_smoke.jsonl).
 build: the demonstrations from GEN (n_gen.py with --path-frames: one instance per type and scene, its shortest path
   with camera A's frame at every pose, cut at the first success).  A demonstration is kept when its last frame
-  succeeds and its scene is none of --exclude's (the evaluation's; stops otherwise).  One fixed order (--seed): each
+  succeeds, none of its frames is colour noise (n_frames.corrupted: a broken render state of the generation, found
+  2026-11-03) and its scene is none of --exclude's (the evaluation's; stops otherwise).  One fixed order (--seed): each
   type's demonstrations shuffled, then the types taken in turn (n_env.FAMILIES order), a type that runs out
   (occlusion) skipped from then on; each size is the first n of that order, so the sizes are nested and every prefix
   is as even over the types as the counts allow.
@@ -40,6 +41,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import n_env as N  # noqa: E402
+import n_frames as F  # noqa: E402
 
 SEED = 20261103
 SIZES = (100, 300, 1000)
@@ -146,7 +148,11 @@ def build(gen: Path, out: Path, sizes=SIZES, max_per_turn: int = 3, exclude=(), 
     clash = sorted({d["scene_id"] for d in found} & eval_scenes)
     if clash:
         raise SystemExit(f"{len(clash)} demonstration scenes are evaluation scenes (e.g. {clash[:3]})")
-    demos = [d for d in found if usable(d)]
+    ok = [d for d in found if usable(d)]
+    # 2026-11-03: some renders of the generation are colour noise (n_frames.py); a demonstration with any such
+    # frame is left out (its frames and the judge at them came from the same broken process state)
+    bad = {d["instance_id"] for d in ok if any(F.corrupted(gen / f["image"]) for f in d["path_frames"])}
+    demos = [d for d in ok if d["instance_id"] not in bad]
     order = demo_order(demos, seed)
     if len(order) < max(sizes):
         raise SystemExit(f"only {len(order)} usable demonstrations for the largest size {max(sizes)}")
@@ -157,7 +163,10 @@ def build(gen: Path, out: Path, sizes=SIZES, max_per_turn: int = 3, exclude=(), 
           "actions": [f["action"] for f in d["path_frames"][1:]],
           "turns": chunk_action_runs([f["action"] for f in d["path_frames"][1:]], max_per_turn)} for d in order],
         indent=0) + "\n")
-    summary = {"gen": str(src), "found": len(found), "usable": len(demos), "seed": seed, "max_per_turn": max_per_turn,
+    summary = {"gen": str(src), "found": len(found), "path_succeeds": len(ok), "corrupted_frames": len(bad),
+               "corrupted_per_type": dict(collections.Counter(d["task_type"] for d in ok
+                                                              if d["instance_id"] in bad)),
+               "usable": len(demos), "seed": seed, "max_per_turn": max_per_turn,
                "chunking": "action_runs", "excluded_scene_files": [str(p) for p in exclude],
                "found_per_type": dict(collections.Counter(d["task_type"] for d in found)),
                "usable_per_type": dict(collections.Counter(d["task_type"] for d in demos)),

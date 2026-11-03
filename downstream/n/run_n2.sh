@@ -11,6 +11,8 @@
 #   TIERS default "100 300 1000"; LIMIT 0 = all instances.
 #   Qwen3 models: the job runs as the container's root (sco_job.prepare as_root; their base is readable by root only),
 #   and everything under RUN is given back to OWNER_UID:OWNER_GID (default 20325) when the job ends.
+#   At the end every evaluation frame is checked for colour noise (n_frames.py scan: RUN/frames_scan.json); the
+#   simulator runs without the Mesa shader cache (see below).
 set -uo pipefail
 RUN="${1:?Usage: run_n2.sh RUN MODEL DATA INSTANCES [TIERS] [WORKERS] [LIMIT]}"; MODEL="${2:?}"; DATA="${3:?}"
 INSTANCES="${4:?}"; TIERS="${5:-100 300 1000}"; WORKERS="${6:-12}"; LIMIT="${7:-0}"
@@ -28,6 +30,9 @@ trap 'if [[ $(id -u) -eq 0 ]]; then chown -R "$OWNER" "$RUN"; fi' EXIT
 export PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 NUMEXPR_NUM_THREADS=4
 export HF_HOME=/mnt/umm/users/yinbaiqiao/.cache/huggingface
+# 2026-11-03: some simulator renders came out as colour noise (n_frames.py); the jobs' simulator processes share one
+# Mesa shader cache, the suspected cause, so it is off here (the cache only saves compile time)
+export MESA_SHADER_CACHE_DISABLE=true MESA_GLSL_CACHE_DISABLE=true
 cd "$WT"
 log "$MODEL ($VARIANT), tiers $TIERS, instances $INSTANCES (limit $LIMIT)"
 rc_all=0
@@ -44,4 +49,5 @@ for n in $TIERS; do
   N_ADAPTER="$A/adapter.pt" bash downstream/n/run_n_episodes.sh "$RUN/eval/$n" "$INSTANCES" "$MODEL" "$WORKERS" "$LIMIT"
   log "evaluate $n rc=$? $(grep -c '"success": true' "$RUN/eval/$n/episodes.jsonl" 2>/dev/null) successes of $(wc -l < "$RUN/eval/$n/episodes.jsonl" 2>/dev/null)"
 done
+"$VLM_PY" downstream/n/n_frames.py scan --eval "$RUN/eval" --out "$RUN/frames_scan.json" >> "$RUN/n2.log" 2>&1
 exit $rc_all
