@@ -71,11 +71,12 @@ def test_check_finds_missing_weights_prompts_and_sft_starts(tmp_path):
     paths = [RL.format(g="d", c=9, k=1, r="s0", n=300).replace(M, m),
              RL.format(g="d", c=9, k=1, r="d", n=300).replace(M, m),
              m + "/sft/D/model/checkpoint-3987"]
-    starts = S.make(paths, matrix=m)
-    for e in starts:
-        weights(Path(e["path"]))
+    starts = S.make(paths[:2], matrix=m)
     val_env(Path(starts[0]["val_env"]))
     val_env(Path(starts[1]["val_env"]))
+    starts.append(S.entry(paths[2], matrix=m))  # the SFT start takes its group's seed-1 S0 prompt
+    for e in starts:
+        weights(Path(e["path"]))
     assert starts[2]["val_env"] == starts[0]["val_env"]
     assert S.check(starts) == []
     val_env(Path(starts[1]["val_env"]), prompt_format="free_think")
