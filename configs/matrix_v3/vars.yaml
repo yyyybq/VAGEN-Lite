@@ -20,7 +20,7 @@ rl:
   rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl   # 第十一轮的 RL 行去掉 128 个边缘场景（2026-10-29）
   exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
   updates: 300
-  guards: {invalid_max: 0.10, kl_max: 1.0}   # 决定 78 的标准停止线；其余照标准配置的训练链默认值（chain_defaults）
+  guards: {invalid_max: 0.10, kl_max: 1.0, entropy_max: 0.3, entropy_window: 5, vision_token_crashes: 2}   # 决定 78 的标准停止线，加 11-02 的熵线和图像 token 崩溃线（主线转告的第 9 项甲，用户确认）；其余照标准配置的训练链默认值（chain_defaults）
   attention: eager                            # 决定 78
 eval:
   val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened    # 382 道

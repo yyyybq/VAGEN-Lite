@@ -168,10 +168,55 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
   - 0002 直接打上。两个训练链测试文件 48 个测试全部通过（qwen3-main 40 + 补丁 8）。
   - 挪好的补丁在 `docs/transition_qa/patches/qwen3_main_b6606bac/`。qwen3-main 进 main 时如果训练链没再改，就用这两份。
 
+**2026-11-01 集成分支 matrix-v3（用户决定 B，不等 qwen3-main 进 main）**：
+- 分支 `matrix-v3` 从 qwen3-main 的头 `b6606bac` 开出（和预演时同一个提交，不用重新预演），工作树 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix`。
+  - verl 子模块原来是空的（训练任务从这个工作树读 `verl/`）：从主仓库本地的模块按同一提交 `a0ae85c7` 克隆进来，没联网，没改主仓库的设置。
+- 合入 transition-qa（`19291e73`）：和预演一样，只冲突 `gym_agent_loop.py` 两处，两边都保留。
+- 两个补丁按 `patches/qwen3_main_b6606bac/` 原样打上，各一个提交：0001 = `dc81dcc8`，0002 = `e4fafbec`；训练链两个测试文件 48 个通过。
+- 之后又合入 transition-qa 的 `f334b6bf`（`af4dc0e0`，`sco_probe` 的两处修正，见第 7 节），加上 `matrix_plan --version 3`、配置和 E 组试跑脚本（`c5ceb851`）。
+- 第一次全量测试（`c5ceb851`）：714 个通过、8 个跳过、2 个失败。除了一直就有的 starVLA，多出 1 个：
+  - 模型线的 `model_matrix/tests/test_model_types.py::ChainTest::test_rl_start_model_skips_the_sft_steps` 列出 plan 有 `rl_start_model` 时链跑的 5 步，没有补丁 0002 加的第 11 步"诊断"。
+  - 行为不变：plan 没写 `diagnostics` 时这一步只记"not planned"。没打补丁的 qwen3-main 上这条测试通过。11-01 预演只跑了没打补丁的合并和训练链两个测试文件，所以没发现。
+  - 用户选 1（2026-11-01）：把这一步加进那条测试的预期（`32a3ea6d`），并写进补丁 0002（transition-qa `3027ac92`）。新 0002 在干净的 `b6606bac` 上接着 0001 打，4 个文件和 matrix-v3 逐字节相同。
+- 第二次全量测试（`120331b6`，限 4 个核）：715 个通过、8 个跳过、1 个失败（一直就有的 starVLA）。
+- 11-02 合入 qwen3-main 的新头 `93dcf25a`（主线在 `b6606bac` 之后的 7 个提交；合并提交 `a9a2ac7b`，matrix-v3 快进到它）：
+  - 两边都改的只有 `train_chain.py` 和它的测试文件，git 自动合并，没有冲突；补丁 0001 / 0002 在干净的 `93dcf25a` 上照样能打。
+  - 先在临时检出里合并、跑全量测试（限 4 个核）：727 个通过、8 个跳过、1 个失败（一直就有的 starVLA），多出的 12 个通过是主线新加的测试。测试过后 matrix-v3 才快进。
+  - 第一批必须有它：C、D 的 164 条 P0 样题里有 22 条带视频（P0_val 17 条里 2 条），每条一段 32 帧；改用的全量 P0 里有 248 条（见下）。
+    旧代码按 Qwen2-VL 的写法把一段视频写成一个视觉块；Qwen3-VL 要每两帧一块，块前写时间。主线的 `9e4b054c` 改了这一点。
+    （之前说"只有全量 P0 有视频"是错的：样题也有。）
+  - CPU 上核对过（`exps/matrix_v3/checks/`）：
+    - 24 条视频记录的编码和 Qwen3-VL 自己的处理器逐 token 相同，像素和网格也相同；
+    - 用 SFT 的 collator 加一个随机初始化的小 Qwen3-VL（真实的切块和位置编码，窄、两层）跑 bf16 前向、反向，全部通过：单条、两段视频同批、视频和动作记录同批都试了；
+    - 位置编码三维齐全，视频 / 图片占位数等于视觉特征数，损失有限，视觉塔有梯度。
+    - 真模型在 GPU 上带视频的训练步还没跑过：第一批的 SFT 就是第一次。
+  - 主线的两条新停止线（熵、第 91 条）只在 plan 的 `rl.guards` 写了才生效。主线 11-02 转告：用户批了第 9 项（甲），矩阵 RL 也加熵线（`entropy_max` 0.3、`entropy_window` 5）和 `vision_token_crashes` 2。11-02 用户在本分支确认（同时确认密集一侧用 V4），四条链的 plan 都写进了 `rl.guards`（见第 7 节 `matrix_plan --version 3` 一条），预登记写明是 11-02 确认的、在矩阵 RL 开跑前加入。
+- 11-02 P0 改用全量（用户改定；transition-qa `22fb9e74`，合入 matrix-v3 为 `03035318`）：
+  - 新混合配置 `mixture_matrix_v3_qwen3_20261102`，和 10-30 的只差 P0（`exps/interiorgs_qa_final_20261028/lf_256`）和 P0 的验证条数（val 场景 300 条）。在登录节点上构建（1 个进程、nice 19，6 分钟）。
+  - 行数：P0 10,144（去掉边缘场景的 735 条），B′ 10,510、C 19,219、D 28,294、D_noP0 18,150。
+  - P1、P2q、P2f 的文件四个组都和样题版逐字节相同，`train.yaml` 只差两条路径；P0 没有 val、test 和被排除场景的行，图片和视频帧都在。
+  - 合并只冲突 C、D 链配置里 `sft_lf_dirs` 一行，保留 matrix-v3 的（本工作树里的复制）。复制逐字节核过，样题版的复制挪到 `exps/matrix_v3/sft_p0sample_20261030`（没有训练过）。
+  - 全量 P0 有 248 条视频记录（训练 240、验证 8，每段 32 帧，一条最多 10 道题）。按题组抽 24 条，同样在 CPU 上核对：编码 24 条全对，训练步 8 批全过（`exps/matrix_v3/checks/video_check_fullp0.json`）。
+  - 第四次全量测试（`03035318`，限 4 个核）：727 个通过、8 个跳过、1 个失败（一直就有的 starVLA）。
+- 训练链从这个工作树跑：起链时设 `VAGEN_LITE_WORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix`（`check_code` 核对它等于链所在的检出）。
+  - 链在跑时，这个工作树里只改 `docs/`；代码要改，等链跑完。
+
+**2026-11-03 补丁 0002 的两处修正（用户："现在做"）**：矩阵第三版的 6 条链 11-03 停在最后两步（`PROGRESS.md` 12.35），其中两处是 0002 的问题：
+- 失败拆解往 `TR/diag/` 写结果时，这个目录还没建：探针的运行目录要到后面才建，测试里目录已经在。现在诊断步骤先建 `TR/diag/`。
+- 失败拆解读题集结果目录里的所有模型。矩阵第三版 6 条链共用一个题集目录，所以读到了别的链正在写的结果。
+  - 现在只读本链评测过的模型：`--names` 取 `evaluated_models()` 里在这个题集有结果的。
+  - 一个都没有就让链停下，不会退回去读全部。
+- 改在 matrix-v3 `9a90c309`。两份补丁副本（本目录和 `qwen3_main_b6606bac/`）按同样的改动重做：
+  - 在 `/tmp` 的临时仓库里，把基准文件依次打上 0001、旧的 0002 和这次的改动，再用 `git diff --full-index` 导出。
+  - 变的只有 `train_chain.py` 和 `tests/test_train_chain_matrix.py` 改后的 blob 号，改前的不变。
+  - 新的 0002 在各自的基准加 0001 上都打得上；`qwen3_main_b6606bac/` 的两份在 qwen3-main 现在的头 `22a0fc62` 上也打得上。
+- 测试：`test_train_chain_matrix.py` 的诊断测试改成要 `--names`，另加 1 个测试：建了目录、不读别的链的结果、一个都没有时停下。
+- 没改的：`m3_c_s20261021` 的评测汇总也是在共用目录里碰上别的链在写。那一步是主线的 `evaluation table`，不在补丁里。
+
 | 补丁 | 内容 | 改的文件 |
 | --- | --- | --- |
 | `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
-| `0002-train-chain-diagnostics-step.patch` | 第 7 个字段：新的第 11 步 `diagnostics`，评测之后跑失败拆解和探针（P1；P0 探针到位后同样接入）；有它时 main 的 `retain` 清理挪到它之后 | `train_chain.py`（在 0001 之上约 120 行），`tests/test_train_chain.py`（1 行：步骤多了一个），`tests/test_train_chain_matrix.py`（加 2 个测试） |
+| `0002-train-chain-diagnostics-step.patch` | 第 7 个字段：新的第 11 步 `diagnostics`，评测之后跑失败拆解（只读本链的结果）和探针（P1；P0 探针到位后同样接入）；有它时 main 的 `retain` 清理挪到它之后 | `train_chain.py`（在 0001 之上约 120 行），`tests/test_train_chain.py`（1 行：步骤多了一个），`tests/test_train_chain_matrix.py`（加 3 个测试） |
 
 ### 6.1 每个字段谁写、谁读
 
@@ -241,4 +286,25 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
   - 测试：`test_diagnostics.py` 加 3 个（写法、配对规则、两个种子的端到端：一对为负但两个种子同号判"有差异"，两个种子反号判不过），共 23 个通过。
   - 兼容：10-29 的三个 C0 比较用新代码在 /tmp 重跑，旧 JSON 的每一项都相同。
 - **`eval/diagnostics/sco_probe.py --python`**（2026-11-01）：用别的 Python 跑探针，比如 Qwen3-VL 的运行时 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite/.venv-qwen3vl-runtime/bin/python`（vLLM 0.11.0）。不给时启动脚本和原来逐字相同，有测试核对。
+- **`sco_probe` 从 Qwen3 训练链里用**（2026-11-01，`f334b6bf`）：补丁 0002 的诊断步在链的进程里调 `prepare`，传 plan 的 `pool`。
+  - qwen3-main 的 plan 池可以是链的模式（`auto` / `queue` / `idle`），不是 sco 的池名，原样传会提交失败；现在换成此刻排队最少的池。
+  - 链按 plan 的 `model_type` 设好 `VAGEN_LITE_PYTHON`，现在它就是探针的默认 Python（Qwen3 要用它的运行时）。
+  - `--python` 仍优先；两样都没有时启动脚本不变。训练链代码没改。
+- **`matrix_plan --version 3`**（matrix-v3 分支，`c5ceb851`）：每组每个种子一个 plan，先做 C、D。
+  - 第一个种子（20261019）的链训 SFT（`sft_lf_dirs`），第二个种子（20261021）从它挑出的检查点起步（`start_model: {from_chain}`）；
+  - 每条链一对 S0 / 密集，名字 `m3_<组>_s<种子>`、`sft_m3<组>_e<k>`、`m3<组>s<k>s0` / `m3<组>s<k>d`，任务名前缀 `m3`；
+  - 密集一侧在用户转达主线的答复前是占位 `PENDING_dense_baseline`：rl-config 不认它，链挑完 SFT 后停在 RL 配置；填上后重写 plan、再跑链，两侧一起开始；
+  - 11-02 用户确认 V4、两条新停止线和 zoetrope。matrix-v3 停在 `03035318` 不动（链的任务从它的工作树跑），所以四条链的 plan 由 `exps/matrix_v3/watch/m3_rlplan.py` 写：`--dense registered` 生成，再把池改成 zoetrope、`rl.guards` 加 `entropy_max` 0.3、`entropy_window` 5、`vision_token_crashes` 2，每条链的 `plan_edit.json` 记着。第一个种子的旧 plan 留作 `plan_placeholder_20261102.json`，新旧只差密集一侧和停止线；
+  - 两条链的 rl-config 在临时目录里用原始 Qwen3 空跑过（`exps/matrix_v3/dry_rlconfig_20261102/`）：S0 和 V4 只差奖励和补题方式，RL 题逐字节相同（C、D 也相同，10,124 条）；
+  - 值守脚本 `exps/matrix_v3/watch/m3_watch.py`（登录节点，nice 19，一个线程，每 5 分钟）：第一个种子的链停在 RL 配置时用新 plan 再跑；它挑出 SFT 后起第二个种子的链；D 挑出后在它上面重跑 E 的试跑。启动前核对 HEAD、暂停文件和核数，别的情况只记下、留给会话；
+  - matrix-v3 的 `vars.yaml` 链部分（`pool: zoetrope`、`dense_baseline: registered`）等这批链跑完再改；本分支的 `vars.yaml` 和各组的 `rl.guards` 已加两条线，合并后生成的 plan 自带。试算合并（`git merge-tree`，11-02）没有冲突；合并后 matrix-v3 的两条 plan 测试（`pool` 是 queue、停止线等于登记）要跟着链部分一起改；
+  - 链写的一切都在 matrix 工作树的 `exps/matrix_v3/` 下：C、D 的 SFT 数据和两个评测集是 VAGEN-Lite-data 那份的复制（逐字节相同）。
+- **`eval/diagnostics/e_trial.py`**（matrix-v3，`c5ceb851`）：E 组的单卡试跑。评测流程加 free_think 提示、RL 的采样，每回合可生成本局 6,144 个词元里还剩的部分，而不是评测的每回合 384；限时 45 分钟。当时以为这和 RL 的拼接模式一样，11-02 核对：不一样，见下一条。
+- **E 组的 plan 和每回合的上限**（11-02 用户："从 C0 起步"）：
+  - matrix-v3 的 `matrix_plan --version 3` 只写 C、D，matrix-v3 又不能提交，所以由 `exps/matrix_v3/watch/m3_eplan.py` 写：
+    - 取 D 第二个种子的 plan，换上 E.yaml 的字段：起点 C0 的 SFT、`rl.output_format` think_action、`rl.max_response_length` 6,144、读不出线 20% 只查前 50 次、评测用 free_think；
+    - 名字用 `v3_names` 给 E 的；其余字段逐项核对，和模板相同。
+  - 合并后 `matrix_plan` 要加上 E（起点写 C0 的 SFT）。
+  - 每回合的上限：RL 的 `gym_agent_loop.py` 每回合限 `min(response_length_per_turn, max_response_length)`。E 的 env 配置里 `response_length_per_turn` 是 384（各组相同），所以 E 的 RL 每回合最多 384 个词元，12 回合最多 4,608，6,144 碰不到。
+    - 要让 E 每回合能用剩下的预算，rl-config 得加一个每回合上限的选项（改代码）；11-03 用户定保留，不加。
 - 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对（2026-11-01 已对 `b6606bac` 预演，见第 6 节）。
