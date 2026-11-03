@@ -1,0 +1,45 @@
+# 矩阵第三版之后的格子 E（用户 2026-11-03 重定义；主线转达，用户在 P1 这边确认"按转达提交"）：P0 10,144 + P1 9,075 的 SFT，
+# 不含动作轨迹，不做 RL，挑出的权重送下游。原来的 E（free_think 提示的 RL，configs/matrix_v3/E.yaml）作废，归档为探索性。
+# 配置名 E2、结果名 sft_m3e2_e<k>，和旧 E 的运行名（m3es*）分开。P0 和 C、D 的逐条相同，P1 和 D 的逐条相同（draw_as D）。
+# 挑 epoch 按预登记"矩阵第三版之后加的"第 6 条：先过采样验收，合格的里面按验证集挑。说明见 configs/matrix_v3/README.md。
+group: E2
+name: E（2026-11-03 重定义）
+status: planned   # 只训 SFT（用户 2026-11-03）
+description: P0 + 转移题，不含动作轨迹；只训 SFT，按采样验收和验证集挑 epoch，权重送下游
+model_type: qwen3_vl
+format_example: action_names
+output_format: action_only
+
+data:
+  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_e2_20261103.yaml
+  recipe: E2
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft_mixture_e2_20261103/E2
+  train_rows: {P0: 10144, P1: 9075, P2q: 0, P2f: 0}
+  val_rows: {P0: 300, P1: 300, P2q: 300, P2f: 38}
+
+sft:
+  base_model: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+  epochs: 10
+  cards: 8
+  recipe: 主线 Qwen3 SFT 的配方（lf_q3formal/train.yaml：模板 qwen3_vl_nothink，学习率 1e-5 余弦，warmup 3%，每步 64 条，冻结视觉塔）
+  select: 先过采样验收（后备题 200 道 × 4 次、温度 0.8；熵 ≤ 0.06、读不出 ≤ 1%），合格的 epoch 里按 val（eval_val_v2_screened，382 道，不采样）挑成功率最高的，打平取更早的；一个都不合格就报给用户（预登记第 6 条，用户 2026-11-03）
+
+rl: null   # 不做 RL（用户 2026-11-03）
+
+eval:
+  sets:
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened
+  note: 每个 epoch 评验证集、测试集（贪心，链自己的题集复制里）；问答评测（EASI-8、同域问答、P1 探针）由主线做（用户 2026-11-03，主线转达）
+
+chain:   # 用户 2026-11-03：矩阵第三版之后的格子，在 matrix-v3 上跑
+  plan: matrix_plan v3 cell   # --sft-chain 写只训 SFT 的链（<tr>_sft，每个 epoch 都留）；没有 RL 链
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e2
+  rl_name: v10_rl_m3_e2
+  sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024
+  sft_groups: {m3e2: sft_trajectories.jsonl}   # SFT 的结果名 sft_m3e2_e<k>
+  sft_lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2   # data.lf_dir 的复制（数据文件逐字节相同，train.yaml 只改了两条路径）
+  needs_chain_support:
+    sft_lf_dirs: {m3e2: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2}
+
+estimate: {sft: 8 卡约 4 小时（10 个 epoch，19,219 条，和 C 的条数相同，约 30 卡时）, accept: 10 个 epoch 各一个单卡任务约 40 分钟（约 7 卡时）}

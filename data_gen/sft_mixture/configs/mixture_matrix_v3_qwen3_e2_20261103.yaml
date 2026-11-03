@@ -1,0 +1,46 @@
+# E as redefined on 2026-11-03 (the user, relayed by the main line and confirmed in the P1 session: "按转达提交"; a cell
+# after matrix v3, configs/matrix_v3/E2.yaml): P0 10,144 + P1 9,075, no action trajectories, SFT only, the picked
+# weights for the downstream line.  P1 draws D's rows (draw_as D: the same 9,075 rows, 1.0 x P2q in D); P0 is every
+# row, as in C and D.  Everything else is mixture_matrix_v3_qwen3_20261102.yaml: the seed, the split, the scene
+# exclusion, the recipe and the validation rows (300 P0, 300 P1, 300 P2q, P2f's 38: the same validation loss as C, D).
+name: matrix_v3_qwen3_e2_20261103
+out: exps/matrix_v3/sft_mixture_e2_20261103
+seed: 20261018
+split_manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/split_manifest.json
+task_rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/rows.jsonl
+exclude_scenes: configs/scene_screen/scene_exclusions_20261029.json
+base_recipe: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/train.yaml
+train_overrides:
+  num_train_epochs: 10
+pools:
+  P0:
+    kind: interiorgs_qa_lf
+    dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256   # train 785 scenes, val 99
+    train: qa_train.jsonl
+    val: qa_val.jsonl
+    exclude_groups: [S7]
+  P1:   # the bank lives in the transition-qa worktree
+    kind: transition_qa
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_test.jsonl
+  P2q:   # validation rows only
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/trajectory_val.jsonl
+    format_example: action_names
+  P2f:   # validation rows only
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12o_20261023/lf_format/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12o_20261023/lf_format/trajectory_val.jsonl
+    format_example: action_names
+val:
+  P0: 300
+  P1: 300
+  P2q: 300
+  P2f: all
+recipes:
+  E2:
+    description: E（用户 2026-11-03 重定义）：P0 + 转移题，不含动作轨迹；只训 SFT，挑出的权重送下游
+    output_format: action_only
+    draw_as: D   # P1: D's rows
+    pools: {P0: all, P1: 9075}

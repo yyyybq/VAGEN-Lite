@@ -17,8 +17,8 @@ MATRIX = ROOT / "configs" / "matrix_v3"
 MIXTURE = ROOT / "data_gen" / "sft_mixture" / "configs" / "mixture_matrix_v3_qwen3_20261102.yaml"
 MIXTURE_V2 = ROOT / "data_gen" / "sft_mixture" / "configs" / "mixture_matrix_v2_20261018.yaml"
 STANDARDS = ROOT / "data_gen" / "interiorgs_v10" / "configs" / "rl_standards.json"
-GROUPS = ("A", "B", "C", "C0", "D", "D_noP0", "E")
-TRAINED = ("B", "C", "D", "D_noP0")          # groups with their own SFT data
+GROUPS = ("A", "B", "C", "C0", "D", "D_noP0", "E", "E2")   # E2: E as redefined on 2026-11-03
+TRAINED = ("B", "C", "D", "D_noP0", "E2")    # groups with their own SFT data
 WITH_RL = ("B", "C", "D", "D_noP0", "E")
 # the registration (qwen3-main d530b546, configs/matrix_r12.json): what each group is
 REGISTERED = {
@@ -107,7 +107,7 @@ def test_data_recipes_match_the_mixture_config(cfgs, vars_, mix):
     assert mix["recipes"]["A"]["pools"] == {} and mix["recipes"]["E"]["same_as"] == "D"
     for g in TRAINED:
         c = cfgs[g]
-        own = g == "B"                                 # B' after matrix v3 (the user, 2026-11-03): its own mixture
+        own = g in ("B", "E2")                         # the cells after matrix v3 (the user, 2026-11-03): own mixtures
         recipe = (yaml.safe_load((ROOT / c["data"]["mixture_config"]).read_text(encoding="utf-8")) if own else mix)[
             "recipes"][c["data"]["recipe"]]
         used = {p for p, n in c["data"]["train_rows"].items() if n}
@@ -140,6 +140,27 @@ def test_b_prime_after_matrix_v3(cfgs, vars_, mix):
     assert all(bp["pools"]["P1"][k].endswith(mix["pools"]["P1"][k]) for k in ("train", "val"))   # the same bank
     assert bp["pools"]["P2f2k"]["format_example"] == "action_names"
     assert c["data"]["lf_dir"] == f"{vars_['chain']['worktree']}/{bp['out']}/B"
+
+
+def test_e2_after_matrix_v3(cfgs, vars_, mix):
+    """E as redefined on 2026-11-03 (the user; E2, a cell after matrix v3): P0 and D's P1 rows, no action
+    trajectories, SFT only, no RL; the first batch's mixture otherwise."""
+    c = cfgs["E2"]
+    e2 = yaml.safe_load((ROOT / c["data"]["mixture_config"]).read_text(encoding="utf-8"))
+    assert c["data"]["train_rows"] == {"P0": 10144, "P1": 9075, "P2q": 0, "P2f": 0} and c["rl"] is None
+    assert cfgs["D"]["data"]["train_rows"]["P1"] == 9075   # D's P1 count, drawn the same way (draw_as D)
+    assert e2["recipes"] == {"E2": {**e2["recipes"]["E2"], "draw_as": "D", "pools": {"P0": "all", "P1": 9075}}}
+    for key in ("seed", "split_manifest", "task_rows", "exclude_scenes", "base_recipe", "train_overrides", "val"):
+        assert e2[key] == mix[key], key
+    assert {k: v for k, v in e2["pools"].items() if k != "P1"} == {k: v for k, v in mix["pools"].items() if k != "P1"}
+    assert all(e2["pools"]["P1"][k].endswith(mix["pools"]["P1"][k]) for k in ("train", "val"))   # the same bank
+    assert c["data"]["lf_dir"] == f"{vars_['chain']['worktree']}/{e2['out']}/E2"
+    ch = c["chain"]
+    assert ch["plan"] == "matrix_plan v3 cell" and ch["sft_groups"] == {"m3e2": "sft_trajectories.jsonl"}
+    assert ch["tr"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/m3_e2" and MP.V3_CELLS["E2"][1] == 0
+    assert ch["sft_lf_dir"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/sft/E2"
+    assert ch["needs_chain_support"]["sft_lf_dirs"] == {"m3e2": ch["sft_lf_dir"]}
+    assert cfgs["E"]["status"].startswith("archived")
 
 
 def test_built_mixtures_have_the_configured_rows(cfgs, vars_):
@@ -260,6 +281,13 @@ def test_v3_cells(tmp_path, monkeypatch):
     assert list(MP.plan_v3_cell_rl("B", 20261019, SHA, start, dense="registered")["rl_runs"]) == ["m3bs1s0", "m3bs1d"]
     with pytest.raises(SystemExit):
         MP.plan_v3_cell_rl("B", 20261021, SHA, start, dense="registered")
+    e2 = MP.plan_v3_cell_sft("E2", SHA)               # E (11-03): SFT only, no RL chain at all
+    assert e2["tr"].endswith("/m3_e2_sft") and e2["sft_lf_dirs"] == {"m3e2": f"{v['chain']['worktree']}/exps/matrix_v3/sft/E2"}
+    assert e2["sft_only"] is True and e2["rl"]["seed"] == REGISTERED["seeds"][0]
+    with pytest.raises(SystemExit):
+        MP.plan_v3_cell_rl("E2", 20261019, SHA, start, dense="registered")
+    with pytest.raises(SystemExit):
+        MP.v3_names("C", None)                        # the first batch's chains always have a seed
     # the SFT-only chain runs SFT, its evaluation and the pick, no RL step
     sft["tr"] = str(tmp_path / "sft")
     chain = TC.Chain(sft, sleep=lambda s: None)
