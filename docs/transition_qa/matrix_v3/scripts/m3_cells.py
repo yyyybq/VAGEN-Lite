@@ -10,7 +10,7 @@ chain to the RL chains, unattended.
    pass (entropy <= 0.06, unreadable turns <= 1%) the best on val (the SFT chain's own scores), ties to the earlier;
    none passing -> no RL, the cell stops there for the user;
 3. a pick -> one RL chain per seed of the cell (matrix_plan --start the picked checkpoint, the registered V4) at the
-   worktree's HEAD, started.
+   worktree's HEAD, started; a cell without seeds (E2, E as redefined on 2026-11-03) stops at the pick.
 A chain that fails stops its cell (logged; nothing is restarted here).  State: <tr>_sft/cell_state.json; log:
 exps/matrix_v3/watch/cells.log.
 """
@@ -77,7 +77,7 @@ def chain_state(tr: Path) -> str:
 
 
 def sft_tr(group: str) -> Path:
-    return Path(MP.v3_names(group, int(MP.v3_vars()["rl"]["seeds"][0]))["sft_tr"])
+    return Path(MP.v3_names(group, None)["sft_tr"])
 
 
 def load(group: str) -> dict:
@@ -160,8 +160,13 @@ def step(group: str) -> bool:
             else:
                 pick = ranked[0]
                 model = st["epochs"][str(pick)] if str(pick) in st["epochs"] else st["epochs"][pick]
-                commit = head()
                 seeds = [int(x) for x in MP.v3_vars()["rl"]["seeds"]][:MP.V3_CELLS[group][1]]
+                if not seeds:                         # E2: no RL (the user, 2026-11-03)
+                    st.update(stage="picked", pick=pick, pick_model=model)
+                    log(f"{group}: picked epoch {pick} ({model}; passing {passing}); no RL for this cell")
+                    save(group, st)
+                    return True
+                commit = head()
                 rl = {}
                 for seed in seeds:
                     plan = MP.plan_v3_cell_rl(group, seed, commit, model, dense="registered")
@@ -170,7 +175,7 @@ def step(group: str) -> bool:
                 st.update(stage="rl_started", pick=pick, pick_model=model, rl=rl, rl_commit=commit)
                 log(f"{group}: picked epoch {pick} ({model}; passing {passing}); RL chains {[r['tr'] for r in rl.values()]}")
     save(group, st)
-    return st["stage"] in ("failed", "no_pick", "rl_started")
+    return st["stage"] in ("failed", "no_pick", "rl_started", "picked")
 
 
 def watch(groups) -> None:
