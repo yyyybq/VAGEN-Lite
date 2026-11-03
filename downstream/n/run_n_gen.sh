@@ -14,6 +14,8 @@
 #   resets S .. S + K - 1 instead of X0's scenes; N_RNG_SEED: the candidate and collection seed (default n_gen's).
 #   N_PATH_FRAMES=1 (N2's demonstrations, the user's decision 1 of 2026-11-03): every scene also saves every frame of
 #   its instances' shortest paths (n_gen.py scene --path-frames).
+#   N_CAMERA=robot (N3 tier e, the user's decision 2 of 2026-11-03): the scenes are made by n3_gen.py scene --camera
+#   robot (the robot's own camera height and field of view, level); collect and page stay n_gen.py's.
 set -uo pipefail
 OUT="${1:?Usage: run_n_gen.sh OUT [WORKERS] [N_SCENES] [PER_FAMILY]}"; WORKERS="${2:-12}"; N_SCENES="${3:-120}"
 PER_FAMILY="${4:-50}"
@@ -26,6 +28,8 @@ RNG=()
 [[ -n ${N_RNG_SEED:-} ]] && RNG=(--rng-seed "$N_RNG_SEED")
 PF=()
 [[ ${N_PATH_FRAMES:-0} == 1 ]] && PF=(--path-frames)
+SCENE_CMD=(downstream/n/n_gen.py scene)
+[[ -n ${N_CAMERA:-} ]] && SCENE_CMD=(downstream/n/n3_gen.py scene --camera "$N_CAMERA")
 cd "$WT"
 source "$WT/downstream/eval/sim_env.sh"
 trap 'rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"' EXIT
@@ -57,7 +61,7 @@ worker() {  # worker I takes scenes I, I + WORKERS, ...
     spec="${SCENES[$j]}"; task="${spec%:*}"; seed="${spec##*:}"; sid="${task}_s${seed}"
     scene_done "$sid" && continue
     t0=$(date +%s)
-    sim 1 timeout -s KILL "$SCENE_TIMEOUT" "$SIM_PY" downstream/n/n_gen.py scene --task "$task" --seed "$seed" \
+    sim 1 timeout -s KILL "$SCENE_TIMEOUT" "$SIM_PY" "${SCENE_CMD[@]}" --task "$task" --seed "$seed" \
       --out "$OUT" --soft-limit "$SOFT_LIMIT" ${RNG[@]+"${RNG[@]}"} ${PF[@]+"${PF[@]}"} >> "$OUT/logs/$sid.log" 2>&1
     rc=$?
     if [[ $rc -ne 0 ]]; then
