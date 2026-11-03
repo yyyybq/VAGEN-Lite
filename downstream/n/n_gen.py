@@ -4,7 +4,7 @@ each proven solvable from its start; camera A without the robot, plain object na
 (near-threshold instances are marked for a separate count).
 
     python downstream/n/n_gen.py scenes --x0 X0_QUESTIONS.jsonl [--n 120] [--seeds-from 3000 --per-task 7]
-    python downstream/n/n_gen.py scene --task T --seed S --out GEN [--soft-limit 1000] [--rng-seed 20261031]
+    python downstream/n/n_gen.py scene --task T --seed S --out GEN [--soft-limit 1000] [--rng-seed 20261031] [--path-frames]
     python downstream/n/n_gen.py collect --out GEN [--per-family 50] [--rng-seed 20261031]
     python downstream/n/n_gen.py page --out GEN [--per-family 4] --page PAGE.html
 
@@ -28,7 +28,8 @@ scene (one process per scene; run_n_gen.sh kills it after the scene's time limit
      instance's near_threshold (empty = it can be done with room to spare).  One instance per task type and scene;
      past --soft-limit seconds no new candidate is started.
   Writes GEN/scenes/<task>_s<seed>.json after every task type ("complete" once all six are done; a killed process
-  leaves the types it finished), and GEN/images/<task>_s<seed>_<type>_{start,shortest,best}.png (camera A).  The
+  leaves the types it finished), and GEN/images/<task>_s<seed>_<type>_{start,shortest,best}.png (camera A); with
+  --path-frames (N2's demonstrations) also every frame of the shortest path (save_path_frames).  The
   process then leaves with os._exit without closing the environment (RoboCasa's env.close() can hang for good: 6 of
   the trial's 12 scenes did).
 collect: --per-family instances per type from the scene files, the tasks taken in turn in a seeded order (each type
@@ -214,6 +215,29 @@ def save_images(scene, inst: dict, out: Path) -> None:
         inst["marks"][tag] = marks
 
 
+def save_path_frames(scene, inst: dict, out: Path) -> None:
+    """N2's demonstrations (the user's decisions 1-2 of 2026-11-02, 1 of 2026-11-03): camera A's frame at the start
+    and after every action of the shortest path, each with the success rule there (n_env.Scene.judge); the path stops
+    at the first pose that succeeds (an evaluation episode ends there; the search skips poses under MIN_ACTIONS, so
+    the first action's pose may already succeed).  inst["path_frames"]: [{"pose", "action" (None at the start),
+    "image", "success"}]; images in GEN/path_frames/<instance>_p<k>.png."""
+    from PIL import Image
+
+    item, pose = inst["item"], tuple(inst["start_pose"])
+    frames = []
+    for k, action in enumerate([None] + list(inst["shortest"]["path"])):
+        if action is not None:
+            pose = N.apply_action(pose, action)  # the breadth-first search's own steps (none of them blocked)
+        img, _ = scene.render(pose)
+        name = f"{inst['instance_id']}_p{k:02d}.png"
+        Image.fromarray(img).save(out / "path_frames" / name)
+        ok = bool(scene.judge(item, pose)["success"]) if action is not None else bool(inst["start_judge"]["success"])
+        frames.append({"pose": list(pose), "action": action, "image": f"path_frames/{name}", "success": ok})
+        if ok:
+            break
+    inst["path_frames"] = frames
+
+
 def write_json(path: Path, obj) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, default=str) + "\n")
@@ -227,6 +251,8 @@ def scene_cmd(args) -> int:
     out = Path(args.out)
     (out / "scenes").mkdir(parents=True, exist_ok=True)
     (out / "images").mkdir(parents=True, exist_ok=True)
+    if args.path_frames:
+        (out / "path_frames").mkdir(parents=True, exist_ok=True)
     sid = f"{args.task}_s{args.seed}"
     path = out / "scenes" / f"{sid}.json"
     t0 = time.time()
@@ -249,6 +275,8 @@ def scene_cmd(args) -> int:
             inst, tally = find(scene, states, order, t, random.Random(f"{args.rng_seed}:{sid}:{t}"), deadline)
             if inst is not None:
                 save_images(scene, inst, out)
+                if args.path_frames:
+                    save_path_frames(scene, inst, out)
             rec["instances"][t] = inst
             rec["tallies"][t] = dict(tally)
             rec["seconds_by_type"][t] = round(time.time() - t1, 1)
@@ -416,6 +444,7 @@ def main(argv=None) -> int:
     s.add_argument("--soft-limit", type=float, default=1000.0)
     s.add_argument("--families", nargs="+", default=list(N.FAMILIES))
     s.add_argument("--rng-seed", type=int, default=SEED)
+    s.add_argument("--path-frames", action="store_true", help="N2: also every frame of the shortest path")
     c = sub.add_parser("collect")
     c.add_argument("--out", required=True)
     c.add_argument("--per-family", type=int, default=50)

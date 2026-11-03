@@ -203,6 +203,26 @@ def test_find_skips_candidates_whose_start_succeeds_and_stops_at_the_deadline(mo
     assert inst is None and tally["stopped_time"] == 1
 
 
+def test_path_frames_follow_the_shortest_path_and_stop_at_the_first_success(tmp_path):
+    """N2's demonstrations: one frame at the start and after every action, cut where the rule first holds."""
+    class RenderScene(FakeScene):
+        def render(self, pose=None):
+            return np.full((4, 4, 3), int(round(pose[0] * 100)) % 255, np.uint8), None
+
+        def judge(self, item, pose, render=True):
+            return {"success": pose[0] > 0.5}  # 2 forward steps (0.6 m) succeed; the path goes on to 0.9 m
+
+    (tmp_path / "path_frames").mkdir()
+    inst = {"instance_id": "T_s1_equidistance", "item": {}, "start_pose": [0.0, 0.0, 0.0],
+            "start_judge": {"success": False}, "shortest": {"path": ["move_forward"] * 3}}
+    G.save_path_frames(RenderScene(), inst, tmp_path)
+    pf = inst["path_frames"]
+    assert [f["action"] for f in pf] == [None, "move_forward", "move_forward"]
+    assert [f["success"] for f in pf] == [False, False, True] and pf[-1]["pose"][0] == pytest.approx(0.6)
+    assert [f["image"] for f in pf] == [f"path_frames/T_s1_equidistance_p0{k}.png" for k in range(3)]
+    assert all((tmp_path / f["image"]).is_file() for f in pf)
+
+
 def scene_file(out, task, seed, families):
     insts = {t: {"instance_id": f"{task}_s{seed}_{t}", "task": task, "seed": seed, "task_type": t,
                  "params": {"distance_m": 1.5} if t == "absolute_positioning" else {},
@@ -297,6 +317,7 @@ def test_gen_job_kills_a_slow_scene_records_it_and_skips_done_scenes(tmp_path):
     assert len((out / "instances_final.jsonl").read_text().splitlines()) == 3
     assert (out2 / "instances_eval.jsonl").is_file() and not (out2 / "instances_final.jsonl").exists()
     assert all("--rng-seed" not in c for c in calls + calls2)  # N1's default seed unless N_RNG_SEED
+    assert all("--path-frames" not in c for c in calls + calls2)  # N2's path frames only with N_PATH_FRAMES=1
 
 
 def test_gen_job_new_resets_and_rng_seed(tmp_path):
@@ -311,13 +332,15 @@ def test_gen_job_new_resets_and_rng_seed(tmp_path):
     (wt / "downstream/eval/sim_env.sh").write_text(SIM_ENV)
     out = tmp_path / "out"
     env = dict(os.environ, N_X0=str(tmp_path / "x0.jsonl"), SCENE_TIMEOUT="3", SOFT_LIMIT="2", N_SEEDS_FROM="3000",
-               N_PER_TASK="7", N_RNG_SEED="20261102", STUB_SCENES_ARGS=str(tmp_path / "scenes_args"))
+               N_PER_TASK="7", N_RNG_SEED="20261102", STUB_SCENES_ARGS=str(tmp_path / "scenes_args"),
+               N_PATH_FRAMES="1")
     res = subprocess.run(["bash", str(wt / "downstream/n/run_n_gen.sh"), str(out), "3", "0", "50"],
                          capture_output=True, text=True, env=env, timeout=60)
     assert res.returncode == 0, res.stdout + res.stderr
     assert (tmp_path / "scenes_args").read_text().endswith("--n 0 --seeds-from 3000 --per-task 7")
     calls = [json.loads(x) for x in (out / "calls.jsonl").read_text().splitlines()]
     assert len(calls) == 3 and all(c[c.index("--rng-seed") + 1] == "20261102" for c in calls)
+    assert all("--path-frames" in c for c in calls)
     assert (out / "collect.done").read_text().endswith("--per-family 50 --rng-seed 20261102")
     assert (out / "instances_final.jsonl").is_file()
     bad = subprocess.run(["bash", str(wt / "downstream/n/run_n_gen.sh"), str(tmp_path / "o3"), "1", "0"],

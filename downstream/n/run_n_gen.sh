@@ -12,6 +12,8 @@
 #   SCENE_SLICE "I/K": only every K-th of the N_SCENES from the I-th (1-based), so K jobs can share OUT.
 #   N_SEEDS_FROM S with N_PER_TASK K (N1's second set, the user's decision 3 of 2026-11-02): X0's tasks with the new
 #   resets S .. S + K - 1 instead of X0's scenes; N_RNG_SEED: the candidate and collection seed (default n_gen's).
+#   N_PATH_FRAMES=1 (N2's demonstrations, the user's decision 1 of 2026-11-03): every scene also saves every frame of
+#   its instances' shortest paths (n_gen.py scene --path-frames).
 set -uo pipefail
 OUT="${1:?Usage: run_n_gen.sh OUT [WORKERS] [N_SCENES] [PER_FAMILY]}"; WORKERS="${2:-12}"; N_SCENES="${3:-120}"
 PER_FAMILY="${4:-50}"
@@ -22,6 +24,8 @@ NEW=()
 [[ -n ${N_SEEDS_FROM:-} ]] && NEW=(--seeds-from "$N_SEEDS_FROM" --per-task "${N_PER_TASK:?N_PER_TASK with N_SEEDS_FROM}")
 RNG=()
 [[ -n ${N_RNG_SEED:-} ]] && RNG=(--rng-seed "$N_RNG_SEED")
+PF=()
+[[ ${N_PATH_FRAMES:-0} == 1 ]] && PF=(--path-frames)
 cd "$WT"
 source "$WT/downstream/eval/sim_env.sh"
 trap 'rm -rf "/tmp/ds-numba-$UID" "/tmp/ds-mesa-$UID"' EXIT
@@ -54,7 +58,7 @@ worker() {  # worker I takes scenes I, I + WORKERS, ...
     scene_done "$sid" && continue
     t0=$(date +%s)
     sim 1 timeout -s KILL "$SCENE_TIMEOUT" "$SIM_PY" downstream/n/n_gen.py scene --task "$task" --seed "$seed" \
-      --out "$OUT" --soft-limit "$SOFT_LIMIT" ${RNG[@]+"${RNG[@]}"} >> "$OUT/logs/$sid.log" 2>&1
+      --out "$OUT" --soft-limit "$SOFT_LIMIT" ${RNG[@]+"${RNG[@]}"} ${PF[@]+"${PF[@]}"} >> "$OUT/logs/$sid.log" 2>&1
     rc=$?
     if [[ $rc -ne 0 ]]; then
       printf '{"task": "%s", "seed": %s, "rc": %s, "seconds": %s}\n' "$task" "$seed" "$rc" "$(( $(date +%s) - t0 ))" \
