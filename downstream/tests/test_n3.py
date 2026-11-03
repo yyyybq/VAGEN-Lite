@@ -189,7 +189,7 @@ def test_gen_job_makes_tier_e_scenes_with_the_robot_camera(tmp_path):
     (wt / "downstream/n/run_n_gen.sh").write_text((ROOT / "n/run_n_gen.sh").read_text())
     (wt / "downstream/n/n_gen.py").write_text(GEN_STUB)
     (wt / "downstream/n/n3_gen.py").write_text(GEN_STUB.replace('cmd = sys.argv[1]', 'cmd = sys.argv[1]\n'
-                                                                'open(sys.argv[sys.argv.index("--out") + 1] + "/n3", "a").write(cmd + "\n")'))
+                                                                'open(sys.argv[sys.argv.index("--out") + 1] + "/n3", "a").write(cmd + chr(10))'))
     (wt / "downstream/eval/sim_env.sh").write_text(SIM_ENV)
     out = tmp_path / "out"
     env = dict(os.environ, N_X0=str(tmp_path / "x0.jsonl"), SCENE_TIMEOUT="3", SOFT_LIMIT="2", N_CAMERA="robot")
