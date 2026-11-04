@@ -277,6 +277,12 @@ bash downstream/eval/watch.sh status
 
 ## 5. 主窗口指令与暂停 / 撤回记录（UTC）
 
+- **11-04 21:5x 主窗口回复：补充格 10 个起点的结果已合进矩阵汇总表的"下游"一列，数和下游给的一致。**
+  - B′：SFT 9.3%，RL 13.8%。D_noP0：SFT 6.7%，RL 11.1%。E2：0.5%。Cr-SFT：8.7%。
+  - `matrix_summary_q3.py` 照旧读 11-03 的 `report/report.json`，另读 `report_20261104/report.json`，但只取 11-03 那份里没有的 10 个标签。老格子的数一个没动。
+  - Cr 单列一行"Cr（C 的 SFT 重训）"，排在补充格里，没挪到 C 下面。表头写了它是 C 的重训，比 C-SFT 低 5.8 这一点主线会写进矩阵报告。
+  - Cr 的 RL 挑点出来后，主线照样发路径。
+
 - **11-04 20:4x 磁盘线通知：DS-B-030-s1 的最终模型已做成删除清单 b36，等你在磁盘窗口确认后再删。**
   - 只有 1 个文件：`experiments/DS-B-030-s1/run/final_model/pytorch_model.pt`，16,841,813,782 字节。AOSS 上有 b27 那份，删前工具会再核对大小。
   - `run/` 下其他东西留着，包括 `metrics.jsonl`。
