@@ -1,6 +1,6 @@
 {
  "batch": "b34_20261104",
- "approved": "PENDING: the main line (主实验, 11-04 ~18:2x) says the smoke checkpoint is no longer used; deletion needs the user's word in the disk window",
+ "approved": "the user 2026-11-04 ~19:40 UTC in the disk window: \"1甲 2甲\" (reply to the 18:3x report; quota table 20/22 TB, below the 3 TB warning). 2甲 = archive to AOSS first, then delete (the iron rule; not the main line's no-archive suggestion); b34 = the main line's QA RL smoke3 checkpoint global_step_10, 49 files 140.3 GB",
  "items": [
   {
    "id": "MAIN-q3qarlsmoke3-smoke-10",
