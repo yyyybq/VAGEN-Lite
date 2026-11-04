@@ -47,6 +47,10 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1
 export NO_PROXY='*' no_proxy='*' WANDB_MODE=offline
 export PYTHONPATH="${WORKTREE}/verl:${WORKTREE}/scripts:${WORKTREE}:${PYTHONPATH:-}"
 export TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+# Ray answers the first driver's registration only once every worker it prestarts for it (one a CPU, 112 on 8
+# cards, all importing from /mnt/umm at once) has registered: the QA RL smoke's trainer hung in ray.init twice on
+# 2026-11-04 (the driver in RegisterClient, 15 workers up); without the prestart, workers start on demand
+export RAY_prestart_worker_first_driver=0
 export TORCH_CUDA_ARCH_LIST=9.0
 export CC=${ENV_ROOT}/bin/x86_64-conda-linux-gnu-gcc CXX=${ENV_ROOT}/bin/x86_64-conda-linux-gnu-g++
 export TORCH_EXTENSIONS_DIR=${RUN}/torch_extensions_${MODE}
