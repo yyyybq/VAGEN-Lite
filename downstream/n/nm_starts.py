@@ -12,8 +12,8 @@ make: one entry per weight folder (read by path, never copied), named from where
   * RL: exps/matrix_v3/m3_<g>_s<chain>/rl_run_m3<g>s<k><s0|d>/checkpoints/global_step_<n>/actor/huggingface ->
     "<G>-s<k>-<S0|V4>" (the runs' "d" is the dense V4 reward), its prompt the run's own rl_m3<g>s<k><s0|d>/val_env.yaml,
     its SFT start "<G>-SFT" (Q3S for E: E's RL grew from the main line's formal SFT epoch 8, N1's Q3S).  <g> is one or
-    more letters, the SFT folder's name in lower case except the chains' "dn", which is D_noP0 (RL_GROUP; the
-    matrix's supplementary cells, 2026-11-04);
+    more letters, the SFT folder's name in lower case except where RL_GROUP says otherwise: the chains' "dn" is
+    D_noP0 and "cr" is Cr (the matrix's supplementary cells, 2026-11-04);
   * SFT: exps/matrix_v3/sft/<G>/model/checkpoint-<n> -> "<G>-SFT", its prompt the group's seed-1 S0 run's val_env
     (an RL chain is m3_<g>_s<digits>; the SFT-only chains m3_b_sft, m3_e2_sft, m3_dn_sft, m3_cr_sft are not), or, for a
     group without an RL chain (E2, Cr), the main line's Qwen3 RL chain's (QWEN3_VAL_ENV: no_think + action_names, the
@@ -51,7 +51,7 @@ SFT_RE = re.compile(r"/sft/(?P<G>[^/]+)/model/checkpoint-(?P<n>\d+)/?$")
 # n_episode.VAL_ENV_QWEN3 (the main line's Qwen3 RL chain; N1's Q3 models): its prompt renders as C's and D's
 QWEN3_VAL_ENV = "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_q3d/val_env.yaml"
 REWARD = {"s0": "S0", "d": "V4"}
-RL_GROUP = {"dn": "D_noP0"}  # an RL chain's letters -> its SFT folder's group, where not just the upper case
+RL_GROUP = {"dn": "D_noP0", "cr": "Cr"}  # an RL chain's letters -> its SFT folder, where not just the upper case
 SFT_OF_GROUP = {"E": "Q3S"}  # an RL group whose SFT start is not its own "<name>-SFT"
 SFT_NAME = {"B": "Bp"}  # an SFT folder's group -> the start's name stem
 GROUP_LABEL = {"B": "B′"}  # -> the group as the main line writes it

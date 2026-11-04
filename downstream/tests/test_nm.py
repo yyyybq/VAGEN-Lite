@@ -75,6 +75,12 @@ def test_b_prime_and_d_nop0_rl_runs(tmp_path):
     assert d["val_env"] == f"{m}/m3_dn_s20261019/rl_m3dns1s0/val_env.yaml"
     cr = S.entry(f"{m}/sft/Cr/model/checkpoint-2107", matrix=str(m))  # m3_cr_sft is not an RL chain
     assert cr["name"] == "Cr-SFT" and cr["group"] == "Cr" and cr["val_env"] == S.QWEN3_VAL_ENV
+    (m / "m3_cr_s20261019").mkdir()  # Cr's RL chains (the user, 11-04 19:50): its SFT then takes their prompt
+    cr = S.entry(f"{m}/sft/Cr/model/checkpoint-2107", matrix=str(m))
+    assert cr["val_env"] == f"{m}/m3_cr_s20261019/rl_m3crs1s0/val_env.yaml"
+    e = S.entry(RL.format(g="cr", c=9, k=2, r="d", n=300))
+    assert e["name"] == "Cr-s2-V4" and e["group"] == "Cr" and e["sft"] == "Cr-SFT" and e["main_name"] == "m3crs2d_300"
+    assert S.job_name(e["name"]) == "nm-cr-s2-v4"
 
 
 def test_the_starts_become_q0_ask_models(tmp_path):
