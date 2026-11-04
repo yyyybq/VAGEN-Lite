@@ -10,24 +10,31 @@ positions 0..n-1.  The checkpoint's adapter (bf16, eval mode, no gradient) embed
 alias as image positions, _embed_multimodal_batch keeping the frames' SigLIP features), its language model gives the
 last hidden states, and every consecutive pair is scored as in training (cambrian_nfp.concat_nfp_pairs /
 concat_nfp_loss, the config's weights): the head's mean squared error and cosine distance to the next frame's 8 x 8
-SigLIP grid, and the same for the copy baseline (the current frame's grid as the prediction).  Unlike training, the
-frames and the answers between them are the SFT trajectories', not the policy's own.
+SigLIP grid, and the same for two baselines that need no model: the copy baseline (the current frame's grid as the
+prediction) and, decision 51 甲 of 2026-11-04, the average-frame baseline (one grid, the mean of every pair's target
+over the set, as the prediction of every pair: it uses neither the current frame nor the action, and over the set it
+is the best constant prediction for the squared error).  Unlike training, the frames and the answers between them are
+the SFT trajectories', not the policy's own.
 
     python -m model_matrix.formal.nfp_heldout --model CKPT/actor/huggingface --out OUT [--limit N]
 
-OUT/pairs.jsonl: one line per pair (episode, k: frame k predicts frame k + 1, the answer between them, mse, cos,
-copy_mse, copy_cos, and loss / copy_loss weighted as in training); OUT/summary.json: the counts, the means over the
-pairs, the share of pairs where the head's loss is below the copy baseline's, quantiles, and the checks (the head's
-and a vision-tower weight are the checkpoint's: a head left at its initialisation would score as an untrained one).
+OUT/pairs.jsonl: one line per pair (episode, k: frame k predicts frame k + 1, the answer between them; mse, cos and
+loss weighted as in training for the head, copy_* and avg_* for the baselines); OUT/summary.json: the counts, the means
+over the pairs and over the episodes, the shares of pairs where the head's loss is below each baseline's, the same by
+kind of pair (the frame unchanged, or the answer's actions: translations / turns), the spread and quantiles, and the
+checks (the head's and a vision-tower weight are the checkpoint's: a head left at its initialisation would score as an
+untrained one).
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
+import statistics
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 TRAJ_VAL = Path("/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_sft_20261026/lf_cformal/"
                 "trajectory_val.jsonl")
@@ -35,8 +42,10 @@ IMAGE_TOKEN_ID = 151665  # the compact <image> (CambrianProcessorWrapper)
 IMAGE_PAD_ID = 151655  # <|image_pad|>, the adapter's image_token_alias
 TOKENS_PER_IMAGE = 756  # 27 x (27 + 1)
 KEYS = ("mse", "cos", "copy_mse", "copy_cos", "loss", "copy_loss")
+AVG_KEYS = ("avg_mse", "avg_cos", "avg_loss")  # decision 51 甲
 CHECKED = ("model.nfp_head.2.weight", "model.vision_tower_aux_list.0.vision_tower.vision_model.embeddings."
            "patch_embedding.weight")
+ACTION = re.compile(r"\b(move_forward|move_backward|move_left|move_right|turn_left|turn_right)\b")
 
 
 def training_env() -> Dict[str, str]:
@@ -69,9 +78,16 @@ def answers(messages) -> List[str]:
     return [m["content"] for m in messages if m.get("role") == "assistant"]
 
 
-def score_episode(model, ids, pixel_values) -> List[Dict[str, float]]:
+def loss_weights(cfg) -> Tuple[float, float]:
+    """The MSE and cosine weights of the loss, as the adapter reads them (cambrian_register)."""
+    return float(getattr(cfg, "nfp_mse_loss_weight", 0.1)), float(getattr(cfg, "nfp_cosine_loss_weight", 0.1))
+
+
+def score_episode(model, ids, pixel_values, targets: Optional[list] = None) -> List[Dict[str, float]]:
     """The statistics of every consecutive frame pair of one expanded episode (ids (1, L) with the alias, pixel_values
-    (frames, 3, H, W)), as the adapter's training forward computes its loss (cambrian_register), one pair at a time."""
+    (frames, 3, H, W)), as the adapter's training forward computes its loss (cambrian_register), one pair at a time.
+    With ``targets`` a list, each pair's target (the next frame's 8 x 8 SigLIP grid, (64, d) float32 on the CPU) is
+    appended to it, for the average-frame baseline (avg_baseline)."""
     import torch
 
     from vagen.models import cambrian_nfp as N
@@ -80,8 +96,7 @@ def score_episode(model, ids, pixel_values) -> List[Dict[str, float]]:
     side = int(cfg.si_token_len ** 0.5)
     newline = getattr(cfg, "mm_use_im_newline_token", True)
     per_image = side * (side + 1) if newline else side * side
-    mse_w = float(getattr(cfg, "nfp_mse_loss_weight", 0.1))
-    cos_w = float(getattr(cfg, "nfp_cosine_loss_weight", 0.1))
+    mse_w, cos_w = loss_weights(cfg)
     mapped = ids.masked_fill(ids == int(cfg.image_token_alias), N.IMAGE_TOKEN_INDEX)
     pos = torch.arange(ids.shape[1], device=ids.device)[None]
     embeds, raw = model._embed_multimodal_batch(mapped, pixel_values, return_raw=True)
@@ -94,7 +109,40 @@ def score_episode(model, ids, pixel_values) -> List[Dict[str, float]]:
                                     mse_weight=mse_w, cos_weight=cos_w)
         rows.append({**{k: v for k, v in s.items() if k != "pairs"}, "loss": float(loss),
                      "copy_loss": mse_w * s["copy_mse"] + cos_w * s["copy_cos"]})
+        if targets is not None:  # the same grid concat_nfp_loss scores against
+            targets.append(N._grid_targets(raw[[pair[3]]].detach(), side)[0].float().cpu())
     return rows
+
+
+def avg_baseline(rows: List[dict], targets: Sequence, mse_weight: float = 0.1, cos_weight: float = 0.1):
+    """Decision 51 甲: the average-frame baseline.  One grid, the mean of every pair's target, is the prediction of
+    every pair; avg_mse / avg_cos / avg_loss are added to the rows (the head's losses, cambrian_nfp._losses).  Returns
+    the grid (None without pairs)."""
+    import torch
+
+    from vagen.models import cambrian_nfp as N
+
+    if len(rows) != len(targets):
+        raise ValueError(f"{len(rows)} pairs, {len(targets)} targets")
+    if not rows:
+        return None
+    avg = torch.stack(list(targets)).mean(0)
+    for row, target in zip(rows, targets):
+        mse, cos = N._losses(avg[None], target[None])
+        row["avg_mse"], row["avg_cos"] = float(mse), float(cos)
+        row["avg_loss"] = mse_weight * row["avg_mse"] + cos_weight * row["avg_cos"]
+    return avg
+
+
+def pair_kind(row: dict) -> str:
+    """unchanged (the next frame's grid is this one's, e.g. a blocked move); else by the answer's actions: move
+    (translations only), turn (turns only), both, none (no action read)."""
+    if row["copy_mse"] < 1e-6:
+        return "unchanged"
+    acts = {a.split("_")[0] for a in ACTION.findall(row.get("answer") or "")}
+    if not acts:
+        return "none"
+    return acts.pop() if len(acts) == 1 else "both"
 
 
 def quantiles(values: Sequence[float], qs=(0.1, 0.25, 0.5, 0.75, 0.9)) -> Dict[str, float]:
@@ -102,22 +150,37 @@ def quantiles(values: Sequence[float], qs=(0.1, 0.25, 0.5, 0.75, 0.9)) -> Dict[s
     return {f"q{int(q * 100)}": v[min(len(v) - 1, int(q * len(v)))] for q in qs} if v else {}
 
 
+def _block(rows: List[dict], keys: Sequence[str]) -> dict:
+    """The pairs' count, means and the shares where the head is below each baseline."""
+    n = len(rows)
+    out = {"pairs": n, "mean": {k: sum(r[k] for r in rows) / n for k in keys}}
+    for base in ("copy", "avg"):
+        if f"{base}_loss" in keys:
+            out[f"head_below_{base}"] = {k: sum(r[k] < r[f"{base}_{k}"] for r in rows) / n for k in ("loss", "mse", "cos")}
+    return out
+
+
 def summarize(rows: List[dict], episodes: int, one_frame: int) -> dict:
     """The counts, the means over the pairs and over the episodes (each episode's pairs averaged first, as one
-    training micro-batch holds one), the head against the copy baseline, the quantiles."""
+    training micro-batch holds one), the head against the baselines, the same by kind of pair, spread and quantiles."""
     out = {"episodes": episodes, "one_frame_episodes": one_frame, "pairs": len(rows)}
     if not rows:
         return out
-    out["mean"] = {k: sum(r[k] for r in rows) / len(rows) for k in KEYS}
+    keys = KEYS + (AVG_KEYS if all("avg_loss" in r for r in rows) else ())
+    out.update({k: v for k, v in _block(rows, keys).items() if k != "pairs"})
     by_ep: Dict[int, List[dict]] = {}
     for r in rows:
         by_ep.setdefault(r["episode"], []).append(r)
     out["episode_mean"] = {k: sum(sum(r[k] for r in rs) / len(rs) for rs in by_ep.values()) / len(by_ep)
-                           for k in KEYS}
-    out["head_below_copy"] = {k: sum(r[k] < r[f"copy_{k}"] for r in rows) / len(rows) for k in ("loss", "mse", "cos")}
-    still = [r for r in rows if r["copy_mse"] < 1e-6]  # the frame did not change (e.g. only blocked moves)
-    out["unchanged_frame_pairs"] = len(still)
-    out["quantiles"] = {k: quantiles([r[k] for r in rows]) for k in ("loss", "copy_loss")}
+                           for k in keys}
+    out["unchanged_frame_pairs"] = sum(r["copy_mse"] < 1e-6 for r in rows)  # e.g. only blocked moves
+    kinds: Dict[str, List[dict]] = {}
+    for r in rows:
+        kinds.setdefault(pair_kind(r), []).append(r)
+    out["by_kind"] = {k: _block(rs, keys) for k, rs in sorted(kinds.items())}
+    losses = [k for k in ("loss", "copy_loss", "avg_loss") if k in keys]
+    out["spread"] = {k: statistics.pstdev([r[k] for r in rows]) for k in losses}
+    out["quantiles"] = {k: quantiles([r[k] for r in rows]) for k in losses}
     return out
 
 
@@ -173,8 +236,9 @@ def main() -> None:
     load_s = time.time() - t0
 
     rows: List[dict] = []
+    targets: list = []
     episodes = one_frame = 0
-    with open(a.data) as src, open(a.out / "pairs.jsonl", "w") as dst:
+    with open(a.data) as src:
         for i, line in enumerate(src):
             if a.limit is not None and i >= a.limit:
                 break
@@ -193,20 +257,22 @@ def main() -> None:
                     images.append(im.convert("RGB"))
             pix = proc.preprocess_images(images)["pixel_values"].to("cuda:0", dtype=torch.bfloat16)
             with torch.no_grad():
-                scored = score_episode(model, torch.tensor([expand(ids)], device="cuda:0"), pix)
+                scored = score_episode(model, torch.tensor([expand(ids)], device="cuda:0"), pix, targets)
             if len(scored) != frames - 1:
                 raise SystemExit(f"episode {i}: {len(scored)} pairs scored for {frames} frames")
             said = answers(r["messages"])
-            for k, s in enumerate(scored):
-                row = {"episode": i, "k": k, "answer": said[k], **s}
-                rows.append(row)
-                dst.write(json.dumps(row) + "\n")
+            rows.extend({"episode": i, "k": k, "answer": said[k], **s} for k, s in enumerate(scored))
+    avg_baseline(rows, targets, *loss_weights(model.config))
+    with open(a.out / "pairs.jsonl", "w") as dst:
+        for row in rows:
+            dst.write(json.dumps(row) + "\n")
     summary = {"model": str(a.model), "data": str(a.data), "limit": a.limit, "checks": checks,
                "attn_implementation": getattr(model.config, "_attn_implementation", None),
                "load_s": round(load_s, 1), "score_s": round(time.time() - t0 - load_s, 1),
                **summarize(rows, episodes, one_frame)}
     (a.out / "summary.json").write_text(json.dumps(summary, indent=1))
-    print(json.dumps({k: summary.get(k) for k in ("episodes", "pairs", "mean", "head_below_copy", "checks")}))
+    print(json.dumps({k: summary.get(k) for k in ("episodes", "pairs", "mean", "head_below_copy", "head_below_avg",
+                                                  "checks")}))
 
 
 if __name__ == "__main__":

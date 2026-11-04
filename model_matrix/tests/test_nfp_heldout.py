@@ -71,6 +71,64 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual((s["quantiles"]["loss"]["q10"], s["quantiles"]["loss"]["q50"], s["quantiles"]["loss"]["q90"]),
                          (0.15, 0.26, 0.37))
         self.assertEqual(H.summarize([], 2, 2), {"episodes": 2, "one_frame_episodes": 2, "pairs": 0})
+        self.assertNotIn("head_below_avg", s)  # rows without the average-frame baseline (decision 48's first run)
+        self.assertEqual(set(s["by_kind"]), {"none", "unchanged"})
+        self.assertAlmostEqual(s["spread"]["copy_loss"], float(torch.tensor([0.24, 0.0, 0.19]).std(unbiased=False)),
+                               places=6)
+
+    def test_with_the_average_frame_baseline_and_kinds(self):
+        rows = [dict(r) for r in self.ROWS]
+        for r, avg, answer in zip(rows, (0.20, 0.10, 0.30), ("<action>turn_left|</action>",
+                                                              "<action>move_forward|</action>",
+                                                              "<action>move_left|turn_right|</action>")):
+            r.update(avg_loss=avg, avg_mse=10 * avg, avg_cos=0.5, answer=answer)
+        s = H.summarize(rows, episodes=4, one_frame=1)
+        self.assertAlmostEqual(s["mean"]["avg_loss"], 0.2)
+        self.assertEqual({k: round(v, 6) for k, v in s["head_below_avg"].items()},  # 0.15 < 0.2; 0.26 < 0.3
+                         {"loss": round(2 / 3, 6), "mse": round(2 / 3, 6), "cos": 0.0})
+        self.assertEqual({k: b["pairs"] for k, b in s["by_kind"].items()}, {"turn": 1, "unchanged": 1, "both": 1})
+        self.assertEqual(s["by_kind"]["turn"]["head_below_avg"]["loss"], 1.0)
+        self.assertEqual(s["by_kind"]["unchanged"]["head_below_copy"]["loss"], 0.0)
+        self.assertIn("avg_loss", s["quantiles"])
+
+
+class AvgBaselineTest(unittest.TestCase):
+    """Decision 51 甲 of 2026-11-04: one grid, the mean of every pair's target, as every pair's prediction."""
+
+    def test_by_hand(self):
+        import torch.nn.functional as F
+
+        torch.manual_seed(0)
+        targets = [torch.randn(64, 5) for _ in range(3)]
+        rows = [{} for _ in targets]
+        avg = H.avg_baseline(rows, targets, 0.1, 0.1)
+        self.assertTrue(torch.allclose(avg, (targets[0] + targets[1] + targets[2]) / 3))
+        for row, t in zip(rows, targets):
+            mse = float(((avg - t) ** 2).mean())
+            cos = float((1 - F.cosine_similarity(avg, t, dim=-1)).mean())
+            self.assertAlmostEqual(row["avg_mse"], mse, places=5)
+            self.assertAlmostEqual(row["avg_cos"], cos, places=5)
+            self.assertAlmostEqual(row["avg_loss"], 0.1 * mse + 0.1 * cos, places=6)
+        same = [{} for _ in range(2)]
+        H.avg_baseline(same, [targets[0], targets[0].clone()])
+        self.assertAlmostEqual(same[1]["avg_mse"], 0.0, places=6)
+        self.assertAlmostEqual(same[1]["avg_cos"], 0.0, places=5)
+        self.assertIsNone(H.avg_baseline([], []))
+        with self.assertRaises(ValueError):
+            H.avg_baseline([{}], [])
+
+
+class PairKindTest(unittest.TestCase):
+    def test_kinds(self):
+        def row(answer, copy_mse=1.0):
+            return {"answer": answer, "copy_mse": copy_mse}
+
+        self.assertEqual(H.pair_kind(row("<action>turn_left|</action>", 0.0)), "unchanged")
+        self.assertEqual(H.pair_kind(row("<action>move_forward|move_left|</action>")), "move")
+        self.assertEqual(H.pair_kind(row("<action>turn_right|turn_right|</action>")), "turn")
+        self.assertEqual(H.pair_kind(row("<action>move_back|turn_left|move_right|</action>")), "both")
+        self.assertEqual(H.pair_kind(row("go ahead")), "none")
+        self.assertEqual(H.pair_kind({"copy_mse": 1.0}), "none")
 
 
 class WeightCheckTest(unittest.TestCase):

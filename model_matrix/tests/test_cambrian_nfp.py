@@ -284,9 +284,16 @@ class AdapterForwardTest(unittest.TestCase):
         ids, pos, pix = self.batch(4)
         out = a(input_ids=ids, position_ids=pos, pixel_values=pix)
         a.eval()
+        targets = []
         with torch.no_grad():
-            rows = H.score_episode(a, ids, pix)
+            rows = H.score_episode(a, ids, pix, targets)
         self.assertEqual(len(rows), 3)
+        # decision 51 甲: each pair's target as concat_nfp_loss scores it (the next frame's 8 x 8 grid)
+        with torch.no_grad():
+            _, raw = a._embed_multimodal_batch(ids.masked_fill(ids == self.ALIAS, I), pix, return_raw=True)
+        self.assertEqual([tuple(x.shape) for x in targets], [(64, self.D)] * 3)
+        for k, target in enumerate(targets):
+            self.assertTrue(torch.allclose(target, grid_by_hand(raw[k + 1], 27, self.D).float(), atol=1e-6))
         for k in ("mse", "cos", "copy_mse", "copy_cos"):
             self.assertAlmostEqual(sum(r[k] for r in rows) / 3, out.nfp_stats[k], places=5)
         self.assertAlmostEqual(sum(r["loss"] for r in rows) / 3, float(out.loss), places=5)
