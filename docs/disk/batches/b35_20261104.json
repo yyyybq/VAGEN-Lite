@@ -1,0 +1,15 @@
+{
+ "batch": "b35_20261104",
+ "approved": "PENDING: the main line (主实验, 11-04 20:1x) found the top-level weights of qa_sft_ctrl_20261103/model sha256-identical to checkpoint-155 (Q/analysis/qarl_fix_20261104/ctrl_sft_dup_sha256.txt); deletion needs the user's word in the disk window",
+ "items": [
+  {
+   "id": "MAIN-qa_sft_ctrl-top-weights",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_q3_20261027/qa_sft_ctrl_20261103/model",
+   "include": [
+    "^model-0000[1-7]-of-00007\\.safetensors$"
+   ],
+   "marker_name": "TOP_WEIGHTS_DELETED_TO_AOSS_b35.txt",
+   "marker": "The seven top-level weight shards of this control SFT (model-0000N-of-00007.safetensors) were the same files as checkpoint-155/ (sha256 identical, checked by the main line 11-04 20:06-20:10, Q/analysis/qarl_fix_20261104/ctrl_sft_dup_sha256.txt). They were archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b35. Use checkpoint-155/ (what every evaluation used). The config, tokenizer and index files here stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  }
+ ]
+}

@@ -1,0 +1,12 @@
+{
+ "batch": "b36_20261104",
+ "approved": "PENDING: the downstream line (11-04 20:2x) relays the user's \"都按建议执行\" (downstream window ~20:15) on its advice that DS-B-030-s1's final model is no longer needed; deletion needs the user's word in the disk window",
+ "items": [
+  {
+   "id": "DS-B-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b36.txt",
+   "marker": "Final model of downstream run DS-B-030-s1 (pytorch_model.pt), kept out of b31 while C1's X3 / X0 / X4 read it; those are done. Archived to AOSS in b27 (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>), size checked again and deleted by the disk line, batch b36. run/metrics.jsonl and the rest of run/ stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  }
+ ]
+}
