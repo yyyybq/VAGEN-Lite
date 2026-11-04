@@ -166,14 +166,14 @@ def test_e2_after_matrix_v3(cfgs, vars_, mix):
 
 def test_c_retrain_after_matrix_v3(cfgs, vars_):
     """Part C (the user, 2026-11-03): C's SFT trained again on C's data and recipe so that every epoch goes through the
-    sampling check; no RL until the user decides; names of its own."""
+    sampling check; RL from its pick with C's RL block and two seeds (the user, 2026-11-04); names of its own."""
     c, orig = cfgs["Cr"], cfgs["C"]
-    assert c["data"] == orig["data"] and c["rl"] is None
+    assert c["data"] == orig["data"] and c["rl"] == orig["rl"]
     for key in ("base_model", "epochs", "cards"):
         assert c["sft"][key] == orig["sft"][key], key
     ch, och = c["chain"], orig["chain"]
     assert ch["plan"] == "matrix_plan v3 cell" and ch["sft_groups"] == {"m3cr": "sft_trajectories.jsonl"}
-    assert ch["tr"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/m3_cr" and MP.V3_CELLS["Cr"] == ("cr", 0)
+    assert ch["tr"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/m3_cr" and MP.V3_CELLS["Cr"] == ("cr", 2)
     assert ch["sft_lf_dir"] == f"{vars_['chain']['worktree']}/exps/matrix_v3/sft/Cr" and ch["sft_dir"] == och["sft_dir"]
     assert ch["needs_chain_support"]["sft_lf_dirs"] == {"m3cr": ch["sft_lf_dir"]}
     assert not {ch["tr"], ch["rl_name"], *ch["sft_groups"]} & {och["tr"], och["rl_name"], *och["sft_groups"]}
@@ -302,11 +302,18 @@ def test_v3_cells(tmp_path, monkeypatch):
     assert e2["sft_only"] is True and e2["rl"]["seed"] == REGISTERED["seeds"][0]
     with pytest.raises(SystemExit):
         MP.plan_v3_cell_rl("E2", 20261019, SHA, start, dense="registered")
-    cr = MP.plan_v3_cell_sft("Cr", SHA)               # part C (11-03): C's SFT again; no RL chain until the user decides
+    cr = MP.plan_v3_cell_sft("Cr", SHA)               # part C (11-03): C's SFT again; RL from its pick, two seeds (11-04)
     assert cr["tr"].endswith("/m3_cr_sft") and cr["sft_lf_dirs"] == {"m3cr": f"{v['chain']['worktree']}/exps/matrix_v3/sft/Cr"}
     assert cr["sft_only"] is True and cr["sft_epochs"] == 10
-    with pytest.raises(SystemExit):
-        MP.plan_v3_cell_rl("Cr", 20261019, SHA, start, dense="registered")
+    crs = [MP.plan_v3_cell_rl("Cr", s, SHA, start, dense="registered") for s in REGISTERED["seeds"]]
+    for k, (p, seed) in enumerate(zip(crs, REGISTERED["seeds"]), 1):
+        c = MP.plan_v3("C", seed, SHA, "registered")   # C's chain of that seed: the same RL, other names and start
+        assert p["tr"].endswith(f"/m3_cr_s{seed}") and p["start_model"] == start
+        assert list(p["rl_runs"]) == [f"m3crs{k}s0", f"m3crs{k}d"] and p["rl"] == c["rl"]
+        assert p["rl_runs"][f"m3crs{k}d"] == c["rl_runs"][f"m3cs{k}d"]
+        assert (p["retain"], p["diagnostics"], p["endpoint"]) == (c["retain"], c["diagnostics"], c["endpoint"])
+    cr_names = {x for p in crs for x in (p["tr"], p["rl_name"], *p["rl_runs"])}
+    assert len(cr_names) == 2 * 4 and not cr_names & (names | first_batch)
     with pytest.raises(SystemExit):
         MP.v3_names("C", None)                        # the first batch's chains always have a seed
     # the SFT-only chain runs SFT, its evaluation and the pick, no RL step
