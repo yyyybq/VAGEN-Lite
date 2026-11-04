@@ -1,0 +1,16 @@
+{
+ "batch": "b33_20261104",
+ "approved": "PENDING: the model line relayed the user's decision 53 甲 (11-04, model-line window: \"都按甲执行\"); the disk line executes only after the user confirms in the disk window",
+ "items": [
+  {
+   "id": "R1-m_cambrian7b_formal_rl_20261104b_nfp01-csnfp01-50",
+   "root": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_cambrian7b_formal_rl_20261104b_nfp01/rl_run_csnfp01/checkpoints/global_step_50",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED_TO_AOSS_b33.txt",
+   "marker": "Step-50 checkpoint of the finished Cambrian-S nfp arm csnfp01 (NFP loss 0.1; stopped at step 72 by the drift stop line; step 50 evaluated on the 705 questions): FSDP shards, optimizer, extra state and data.pt archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b33 (the model line's table 1i, the user's decision 53). actor/huggingface and the metadata files stay; not resumable from here. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  }
+ ]
+}
