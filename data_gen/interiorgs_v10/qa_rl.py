@@ -18,6 +18,9 @@ evenly over the agent-loop workers, and the template's 48 do not divide the pilo
 on it), so the agent loop gets the most workers up to the template's that divide them (32); parallelism only.  The
 template also keeps its own copy of the env registry, made before P0QA was added to vagen/configs/env_registry.yaml
 (the pilot's first trainers, 2026-11-04: "Unknown env: P0QA"), so ppo.yaml's registry gets P0QA from that file.
+vLLM's multimodal processor cache is off (mm_processor_cache_gb 0): the eight answers of a question share one image,
+and vllm 0.11.0's cache lost one between its check and its lookup (the pilot's qrl_s1 at update 144, 2026-11-04:
+"Expected a cached item for mm_hash"); without it every request runs the HF processor, so the inputs are the same.
 
 rows: one row per LLaMA-Factory record of a P0 SFT file (the records the SFT trains on: the prompt, its images and the
 gold answer exactly as the SFT shows them), matched to its question in P0's selection (by the export's audit file, row
@@ -189,6 +192,8 @@ def rl_config(rows: Path, val_rows: Path, model: str, name: str, run_root: Path,
     TP._set(ppo, "data.max_response_length", int(response_length))  # one answer, not twelve turns
     # the template's env registry is a copy without P0QA; the agent loop looks the env up there
     TP._set(ppo, "env_registry." + ENV_NAME, yaml.safe_load(ENV_REGISTRY.read_text())["env_registry"][ENV_NAME])
+    # vllm 0.11.0's multimodal processor cache can lose an image the eight answers share (see the docstring)
+    TP._set(ppo, "actor_rollout_ref.rollout.engine_kwargs.vllm.mm_processor_cache_gb", 0)
     for key, value in {"trainer.save_freq": save_freq, "trainer.ckpt_keep_every": save_freq,
                        "trainer.ckpt_prune_to_hf": True, "trainer.val_before_train": False,
                        "trainer.test_freq": -1}.items():
