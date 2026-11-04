@@ -1699,3 +1699,22 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
 - **挑出的权重**（只读，都在 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/` 下）：
   - B′ 第 10 个 `B/model/checkpoint-1870`；D_noP0 第 8 个 `D_noP0/model/checkpoint-2272`。已告诉主线。
   - 没挑中的 epoch 都还留着；四格都挑完再问用户删不删，删前先告诉磁盘线。
+
+### 12.48 B′、D_noP0 没挑中的 SFT epoch 先传 AOSS 再删（用户 11-04 选甲）
+
+- **用户 11-04 选甲**：先传 AOSS，核对无误再删，记录交给磁盘线。
+  - 原因：配额用了 20 / 22 TB，6 个新 RL 还要再写约 1.3 TB（每个 RL 跑到 300 次更新约 296 GiB）。
+- **范围**（`exps/matrix_v3/sft/<格>/model/`）：每格 9 个没挑中的 epoch，加顶层那份重复的权重（7 个分片 + 索引），合计 394 个文件、680.2 GB（633.4 GiB）。
+  - 留下：B′ 的 `checkpoint-1870`、D_noP0 的 `checkpoint-2272`，它们是 RL 的起点，也是下游线登记的 SFT 起点；顶层其余 18 个小文件也留着。
+  - 事先查过：受保护清单、磁盘线的批次记录里都没有这些路径；文件都归我们、可以删、没有符号链接。
+- **上传**（07:42–07:56 UTC）：用 10-21 配额事故时的归档工具 `aoss_archive_manifests/archive_aoss_r12.py`，在登录节点跑，4 个线程、nice 19，平均 828 MB/s。
+  - 开跑前登录节点合计用 1.4 / 14 核；跑的时候 4.0 / 14（含磁盘线自己的上传），这个进程不到 1 个核。
+  - 去处 `fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite-matrix/exps/matrix_v3/sft/<格>/model/...`，manifest `manifest_20261104T074206Z.jsonl`。
+  - 另外按清单逐个核对：394 个文件都在 manifest 里，大小都一致。
+- **删除**（07:57–08:00）：
+  - 删前又查一次：196 个还活着的任务没有一个引用这些目录；两格的 SFT 链和验收链都已结束；登录节点上没有进程用它们。
+  - 工具第二遍又核对了每个文件的大小（manifest `manifest_20261104T075824Z.jsonl`），两格都全部一致才删；没有删不掉的文件。
+  - 删后核对：要删的都不在了，要留的都在。配额 20 → 19 / 22 TB（只显示到整 TB）。
+- **记录**：`exps/matrix_v3/sft/archive_20261104/archive_20261104.json`（清单、两份 manifest、释放量），和脚本一起复制在 `docs/transition_qa/matrix_v3/archive_20261104/`。已发给磁盘线。
+- **取回**：按 manifest 从同一路径下载，不用重训。
+- E2、Cr 没挑中的 epoch 都还在，等它们挑完再问用户。
