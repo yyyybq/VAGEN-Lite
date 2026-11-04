@@ -16,8 +16,7 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 PYTHONPAT
 export NO_PROXY='*' no_proxy='*' TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 NUMEXPR_NUM_THREADS=8
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HOME="${OUT}/tmp/hf_home" XDG_CACHE_HOME="${OUT}/tmp/xdg"
-export HF_HUB_CACHE=/mnt/umm/users/yinbaiqiao/.cache/huggingface/hub SIGLIP_CACHE=/mnt/umm/users/yinbaiqiao/.cache/huggingface/hub
-export CAMBRIAN_SRC=/mnt/umm/users/yinbaiqiao/cambrian-s
+# the model cache (SigLIP2) and the Cambrian source: the trainer's, set by nfp_heldout.training_env (model_types)
 git -C "${WT}" rev-parse HEAD || true
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
 rc=0

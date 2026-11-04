@@ -39,6 +39,15 @@ CHECKED = ("model.nfp_head.2.weight", "model.vision_tower_aux_list.0.vision_towe
            "patch_embedding.weight")
 
 
+def training_env() -> Dict[str, str]:
+    """The RL trainer's environment for Cambrian-S (vagen/models/model_types.py): the line's cache, from which the
+    adapter loads SigLIP2 by repository name, and the Cambrian source (11-04: the job's first try pointed at a cache
+    without SigLIP2)."""
+    from vagen.models.model_types import get
+
+    return dict(get("cambrian_qwen").env)
+
+
 def expand(ids: Sequence[int], image_id: int = IMAGE_TOKEN_ID, alias: int = IMAGE_PAD_ID,
            per_image: int = TOKENS_PER_IMAGE) -> List[int]:
     """The compact ids with every <image> as per_image alias positions (cambrian_concat's expansion)."""
@@ -139,6 +148,7 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="only the first N episodes (a check)")
     a = ap.parse_args()
 
+    os.environ.update(training_env())  # before anything imports huggingface_hub or the Cambrian source
     import torch
 
     torch.set_num_threads(int(os.environ.get("OMP_NUM_THREADS", "4")))

@@ -102,6 +102,19 @@ class JobScriptTest(unittest.TestCase):
         sh = Path(H.__file__).with_suffix(".sh")
         self.assertEqual(subprocess.run(["bash", "-n", str(sh)]).returncode, 0)
 
+    def test_the_trainers_cache(self):
+        """11-04: the first job set a cache without SigLIP2 and failed loading the vision tower."""
+        from vagen.models import model_types as M
+
+        env = H.training_env()
+        self.assertEqual((env["HF_HUB_CACHE"], env["SIGLIP_CACHE"], env["CAMBRIAN_SRC"]),
+                         (M.CAMBRIAN_CACHE, M.CAMBRIAN_CACHE, M.CAMBRIAN_SRC))
+        sh = Path(H.__file__).with_suffix(".sh").read_text()
+        for name in ("HF_HUB_CACHE=", "SIGLIP_CACHE=", "CAMBRIAN_SRC="):
+            self.assertNotIn(name, sh)  # only the model type's
+        if Path(M.CAMBRIAN_CACHE).is_dir():
+            self.assertTrue((Path(M.CAMBRIAN_CACHE) / "models--google--siglip2-so400m-patch14-384").is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()
