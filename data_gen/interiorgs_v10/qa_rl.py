@@ -15,7 +15,9 @@ env, train.jsonl / val.jsonl, ppo.yaml, rl_config_report.json), with the standar
 training) and the pilot's sizes: 64 candidate questions an update (the package's 24), the first 32 mixed ones trained
 (its 12: the same half), one turn, at most 256 answer tokens.  verl splits an update's prompts (candidates x answers)
 evenly over the agent-loop workers, and the template's 48 do not divide the pilot's 512 (the smoke of 2026-11-04 failed
-on it), so the agent loop gets the most workers up to the template's that divide them (32); parallelism only.
+on it), so the agent loop gets the most workers up to the template's that divide them (32); parallelism only.  The
+template also keeps its own copy of the env registry, made before P0QA was added to vagen/configs/env_registry.yaml
+(the pilot's first trainers, 2026-11-04: "Unknown env: P0QA"), so ppo.yaml's registry gets P0QA from that file.
 
 rows: one row per LLaMA-Factory record of a P0 SFT file (the records the SFT trains on: the prompt, its images and the
 gold answer exactly as the SFT shows them), matched to its question in P0's selection (by the export's audit file, row
@@ -139,6 +141,7 @@ def check(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
 
 ENV_NAME = "P0QA"
 PPO_TEMPLATE = Path(__file__).with_name("configs") / "ppo_template_v10.yaml"
+ENV_REGISTRY = Path(__file__).resolve().parents[2] / "vagen/configs/env_registry.yaml"
 
 
 def env_yaml(rows_path: Path, n: int, response_length: int) -> Dict[str, Any]:
@@ -184,6 +187,8 @@ def rl_config(rows: Path, val_rows: Path, model: str, name: str, run_root: Path,
     for key, value in TP.history_overrides("concat", 1)["ppo"].items():  # standard v10_p1_S0: the concat agent loop
         TP._set(ppo, key, value)
     TP._set(ppo, "data.max_response_length", int(response_length))  # one answer, not twelve turns
+    # the template's env registry is a copy without P0QA; the agent loop looks the env up there
+    TP._set(ppo, "env_registry." + ENV_NAME, yaml.safe_load(ENV_REGISTRY.read_text())["env_registry"][ENV_NAME])
     for key, value in {"trainer.save_freq": save_freq, "trainer.ckpt_keep_every": save_freq,
                        "trainer.ckpt_prune_to_hf": True, "trainer.val_before_train": False,
                        "trainer.test_freq": -1}.items():
