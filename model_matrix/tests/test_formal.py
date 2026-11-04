@@ -229,6 +229,29 @@ class PlansTest(unittest.TestCase):
                                        T.standard_chain_defaults(n1).get("rl"))
         self.assertEqual((merged["nfp_loss_coef"], merged["standard"], merged["seed"]), (0.1, "v10_p1_S0", 20261019))
 
+    def test_decision_52_nfp01lr_arm(self):
+        """Decision 52 甲 of 2026-11-04: csnfp01 again with cslr's learning rate (1e-6), nothing else changed."""
+        from data_gen.interiorgs_v10 import train_chain as T
+        from model_matrix.formal import plans as P
+
+        (_, st), = P.formal_rl_plans("rl-cambrian-stab", "20261030", "abc", "/sft/e5", "V4").items()
+        (_, n1), = P.formal_rl_plans("rl-cambrian-nfp01", "20261104", "abc", "/sft/e5", "V4").items()
+        (tag, lr), = P.formal_rl_plans("rl-cambrian-nfp01lr", "20261104", "abc", "/sft/e5", "V4").items()
+        self.assertEqual(tag, "m_cambrian7b_formal_rl_20261104_nfp01lr")
+        self.assertEqual((lr["run_pools"], lr["rl_runs"], lr["rl_name"], lr["tr"].rsplit("/", 1)[1]),
+                         ({"csnfp01lr": "h800"}, {"csnfp01lr": {"rl": {"nfp_loss_coef": 0.1, "actor_lr": 1e-6}}},
+                          "m_cnfp01lrrl", tag))
+        self.assertEqual(set(lr), set(n1))
+        for key in set(n1) - {"tr", "run_pools", "rl_runs", "rl_name"}:
+            self.assertEqual(lr[key], n1[key], key)
+        merged = T.with_chain_defaults({**lr["rl"], **lr["rl_runs"]["csnfp01lr"]["rl"]},
+                                       T.standard_chain_defaults(lr).get("rl"))
+        cslr = T.with_chain_defaults({**st["rl"], **st["rl_runs"]["cslr"]["rl"]}, T.standard_chain_defaults(st).get("rl"))
+        self.assertEqual((merged["nfp_loss_coef"], merged["actor_lr"], merged["standard"], merged["seed"]),
+                         (0.1, cslr["actor_lr"], "v10_p1_S0", 20261019))
+        self.assertEqual({k: v for k, v in merged.items() if k not in ("nfp_loss_coef", "renderer_first")},
+                         {k: v for k, v in cslr.items() if k != "renderer_first"})  # otherwise cslr's settings
+
     def test_accept_epoch_plans(self):
         from model_matrix.formal import plans as P
 

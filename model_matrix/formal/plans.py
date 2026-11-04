@@ -8,6 +8,7 @@
     python -m model_matrix.formal.plans --commit HEAD --date D rl-cambrian-dense   # Cambrian's dense arm again
     python -m model_matrix.formal.plans --commit HEAD --date D rl-cambrian-nfp     # decision 47 乙: S0 + NFP loss
     python -m model_matrix.formal.plans --commit HEAD --date D rl-cambrian-nfp01   # decision 49 甲: coefficient 0.1
+    python -m model_matrix.formal.plans --commit HEAD --date D rl-cambrian-nfp01lr # decision 52 甲: and cslr's lr
 
 - m_<model>_formal_sft_<date> (Qwen3-VL-8B, Cambrian-S-7B): SFT and its evaluation only ("sft_only"): C0's
   conversations in the new format (train 9,802, validation 1,293), C0's recipe, 10 epochs, each epoch evaluated
@@ -169,6 +170,11 @@ NFP_ARMS = {"snfp": ("h800", {"nfp_loss_coef": 1.0})}
 # decision 49 甲 of 2026-11-04: the same arm with the coefficient 0.1, nothing else changed (with cs0's 0 and csnfp's
 # 1.0 a dose comparison; csnfp drifted from update 44); everything on h800 as csnfp (the user: "都按甲执行")
 NFP01_ARMS = {"snfp01": ("h800", {"nfp_loss_coef": 0.1})}
+# decision 52 甲 of 2026-11-04: csnfp01 with cslr's learning rate (1e-6), nothing else changed, against cslr (at that
+# rate cs0's drift came at update 263 instead of 122; csnfp01's came at about 53); everything on h800 as csnfp01
+NFP01LR_ARMS = {"snfp01lr": ("h800", {**NFP01_ARMS["snfp01"][1], **STAB_ARMS["slr"][1]})}
+NFP_DOSES = {"rl-cambrian-nfp": ("", NFP_ARMS), "rl-cambrian-nfp01": ("01", NFP01_ARMS),
+             "rl-cambrian-nfp01lr": ("01lr", NFP01LR_ARMS)}
 
 
 def formal_rl_plans(which: str, date: str, commit: str, start: str, variant: str, seed: int = 20261019) -> dict:
@@ -179,13 +185,14 @@ def formal_rl_plans(which: str, date: str, commit: str, start: str, variant: str
     STAB_ARMS (runs cskl / cslr, tag _stab).  Decision 47 乙 of 2026-11-03, with the later rules: rl-cambrian-nfp
     the S0 arm of NFP_ARMS (run csnfp, tag _nfp), its render service queued with its trainer (no renderer_first: one
     run, so the service goes in just before the trainer instead of the trainer waiting for a running service).
-    Decision 49 甲 of 2026-11-04: rl-cambrian-nfp01 the same with NFP01_ARMS (run csnfp01, tag _nfp01)."""
-    if which in ("rl-cambrian-nfp", "rl-cambrian-nfp01"):
+    Decision 49 甲 of 2026-11-04: rl-cambrian-nfp01 the same with NFP01_ARMS (run csnfp01, tag _nfp01); decision 52
+    甲: rl-cambrian-nfp01lr with NFP01LR_ARMS (run csnfp01lr, tag _nfp01lr)."""
+    if which in NFP_DOSES:
         base, model, kind, group, prefix = FORMAL_RL["cambrian"]
-        dose = "01" if which.endswith("01") else ""
+        dose, arms = NFP_DOSES[which]
         tag = f"{base}_formal_rl_{date}_nfp{dose}"
         plan = rl_plan(tag, model, kind, start, group, prefix, commit, variant, seed=seed, arms=(),
-                       guards=NO_FILL_RULE, extra_arms=NFP01_ARMS if dose else NFP_ARMS)
+                       guards=NO_FILL_RULE, extra_arms=arms)
         plan["rl"]["renderer_first"] = False
         return {tag: {**plan, **LATER_RULES, "rl_name": f"m_{prefix}nfp{dose}rl"}}
     if which == "rl-cambrian-s2":
@@ -260,7 +267,7 @@ def main() -> None:
     ap.add_argument("--recommit", action="store_true", help="give plans not yet started this commit and pool")
     ap.add_argument("which", choices=("sft", "sdpa-control", "diagnostics", "accept-epochs", "rl-qwen3", "rl-cambrian",
                                       "rl-cambrian-dense", "rl-cambrian-s2", "rl-cambrian-stab", "rl-cambrian-nfp",
-                                      "rl-cambrian-nfp01"))
+                                      "rl-cambrian-nfp01", "rl-cambrian-nfp01lr"))
     ap.add_argument("--sft-date", default="20261026", help="rl-*: the formal SFT chain's date")
     ap.add_argument("--seed", type=int, default=20261019, help="rl-*: the RL seed")
     ap.add_argument("--variant", default=None, help="rl-*: the dense variant (default: the main line's best)")
