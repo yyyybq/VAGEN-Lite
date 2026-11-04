@@ -206,8 +206,29 @@ PY
     for _ in $(seq 1 $((RENDERER_WAIT_S / 5))); do [[ -s ${RUN}/renderer_endpoint.txt ]] && break; sleep 5; done
     export R1_RENDER_URL
     R1_RENDER_URL=$(<"${RUN}/renderer_endpoint.txt")
-    export V10_RAY_TEMP_DIR=/tmp/v10_ray_$$
-    "${PY}" -m vagen.interiorgs_v10_ppo --config "${RL}/ppo.yaml" --endpoint "${ENDPOINT}"
+    # Ray's raylet has 30 s (hard-coded in this Ray) to register with the GCS; on a slow shared disk it may miss
+    # them and the trainer ends at once ("timed out during startup": the QA RL smoke, 2026-11-04 11:12, after five
+    # hours in the queue).  Such a start is tried again in this job, up to RAY_START_TRIES (default 3) times, instead
+    # of the chain resubmitting it to the back of the queue; a trainer that reached an update, or ended otherwise,
+    # ends the job as before
+    tries=${RAY_START_TRIES:-3}
+    for try in $(seq 1 "${tries}"); do
+      export V10_RAY_TEMP_DIR=/tmp/v10_ray_$$_${try}
+      try_log=/tmp/v10_rl_try_$$_${try}.log
+      set +e
+      "${PY}" -m vagen.interiorgs_v10_ppo --config "${RL}/ppo.yaml" --endpoint "${ENDPOINT}" 2>&1 | tee "${try_log}"
+      status=${PIPESTATUS[0]}
+      set -e
+      [[ ${status} -eq 0 ]] && break
+      if (( try < tries )) && ! grep -q -E 'step:[0-9]+ - ' "${try_log}" &&
+        grep -q -E 'timed out during startup|Failed to connect to GCS|raylet failed to start' "${try_log}"; then
+        echo "[sco_interiorgs_v10_train] Ray start-up failed (try ${try} of ${tries}); trying again in this job"
+        pkill -9 -f "${V10_RAY_TEMP_DIR}" || true  # what is left of this try's Ray (its command lines name the dir)
+        sleep 30
+        continue
+      fi
+      exit "${status}"
+    done
     touch "${RUN}/STOP_RENDERER"
     ;;
   distance-tables)
