@@ -1,0 +1,12 @@
+{
+ "batch": "b34_20261104",
+ "approved": "PENDING: the main line (主实验, 11-04 ~18:2x) says the smoke checkpoint is no longer used; deletion needs the user's word in the disk window",
+ "items": [
+  {
+   "id": "MAIN-q3qarlsmoke3-smoke-10",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3qarlsmoke3_20261104/rl_run_smoke/checkpoints/global_step_10",
+   "marker_name": "DELETED_TO_AOSS_b34.txt",
+   "marker": "Step-10 checkpoint of the main line's QA RL smoke run q3qarlsmoke3 (pipeline check only; its step-10 evaluations are kept elsewhere under Q/eval_test_v2_screened/smoke_010 and Q/qa_rl_20261103/smoke_qa): HF weights, FSDP shards and optimizer archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b34. logs, rollout_data and job_rl stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  }
+ ]
+}
