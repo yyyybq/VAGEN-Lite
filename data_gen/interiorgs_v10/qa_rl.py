@@ -13,7 +13,9 @@ env, train.jsonl / val.jsonl, ppo.yaml, rl_config_report.json), with the standar
 (standard v10_p1_S0: the concat agent loop, package p1 -- GRPO, 8 answers a question, only mixed groups trained, lr
 2e-6, KL loss 0.05, entropy bonus 0.01 --, a checkpoint every 50 updates cut to its HF weights, no validation inside
 training) and the pilot's sizes: 64 candidate questions an update (the package's 24), the first 32 mixed ones trained
-(its 12: the same half), one turn, at most 256 answer tokens.
+(its 12: the same half), one turn, at most 256 answer tokens.  verl splits an update's prompts (candidates x answers)
+evenly over the agent-loop workers, and the template's 48 do not divide the pilot's 512 (the smoke of 2026-11-04 failed
+on it), so the agent loop gets the most workers up to the template's that divide them (32); parallelism only.
 
 rows: one row per LLaMA-Factory record of a P0 SFT file (the records the SFT trains on: the prompt, its images and the
 gold answer exactly as the SFT shows them), matched to its question in P0's selection (by the export's audit file, row
@@ -191,11 +193,18 @@ def rl_config(rows: Path, val_rows: Path, model: str, name: str, run_root: Path,
     package = TP.package_overrides("p1", candidates, target_groups)
     for key, value in package.items():
         TP._set(ppo, key, value)
+    # verl's agent loop chunks an update's prompts evenly over its workers (DataProto.chunk): the template's 48 suit the
+    # action runs' 24 or 48 candidates x 8 answers, not the pilot's 64 x 8 = 512
+    prompts = int(package["data.train_batch_size"]) * int(package["actor_rollout_ref.rollout.n"])
+    most = int(ppo["actor_rollout_ref"]["rollout"]["agent"]["num_workers"])
+    workers = max(w for w in range(1, most + 1) if prompts % w == 0)
+    TP._set(ppo, "actor_rollout_ref.rollout.agent.num_workers", workers)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"env": ENV_NAME, "train": counts["train"], "val": counts["val"], "model": model, "seed": seed,
               "standard_like": "v10_p1_S0", "opt_package": "p1", "opt_package_overrides": package,
               "candidates": candidates, "target_groups": target_groups, "response_length": response_length,
-              "save_freq": save_freq, "ppo_template": str(PPO_TEMPLATE), "rows": str(rows), "val_rows": str(val_rows)}
+              "agent_workers": workers, "save_freq": save_freq, "ppo_template": str(PPO_TEMPLATE), "rows": str(rows),
+              "val_rows": str(val_rows)}
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1) + "\n")
     return report
 
