@@ -11,12 +11,14 @@ two seeds x S0 / V4 each, plus C's and D's SFT starts; frozen weights, the merge
 make: one entry per weight folder (read by path, never copied), named from where it lies in VAGEN-Lite-matrix:
   * RL: exps/matrix_v3/m3_<g>_s<chain>/rl_run_m3<g>s<k><s0|d>/checkpoints/global_step_<n>/actor/huggingface ->
     "<G>-s<k>-<S0|V4>" (the runs' "d" is the dense V4 reward), its prompt the run's own rl_m3<g>s<k><s0|d>/val_env.yaml,
-    its SFT start "<G>-SFT" for C and D and Q3S for E (E's RL grew from the main line's formal SFT epoch 8, N1's Q3S);
+    its SFT start "<G>-SFT" (Q3S for E: E's RL grew from the main line's formal SFT epoch 8, N1's Q3S).  <g> is one or
+    more letters, the SFT folder's name in lower case except the chains' "dn", which is D_noP0 (RL_GROUP; the
+    matrix's supplementary cells, 2026-11-04);
   * SFT: exps/matrix_v3/sft/<G>/model/checkpoint-<n> -> "<G>-SFT", its prompt the group's seed-1 S0 run's val_env
-    (an RL chain is m3_<g>_s<digits>; the SFT-only chains m3_b_sft, m3_e2_sft, m3_dn_sft are not), or, for a group
-    without an RL chain, the main line's Qwen3 RL chain's (QWEN3_VAL_ENV: no_think + action_names, the same text as
-    C's and D's; the main line confirmed it for E2, B' and D_noP0 on 2026-11-03).  The matrix's B is the main line's
-    B': named "Bp-SFT" (plain "B" is N1's Qwen2.5 base), group "B′".
+    (an RL chain is m3_<g>_s<digits>; the SFT-only chains m3_b_sft, m3_e2_sft, m3_dn_sft, m3_cr_sft are not), or, for a
+    group without an RL chain (E2, Cr), the main line's Qwen3 RL chain's (QWEN3_VAL_ENV: no_think + action_names, the
+    same text as C's and D's; the main line confirmed it for E2, B' and D_noP0 on 2026-11-03).  The matrix's B is the
+    main line's B': named "Bp" ("Bp-SFT", "Bp-s1-S0"; plain "B" is N1's Qwen2.5 base), group "B′".
   Every entry: base Q3B (all are Qwen3-VL-8B); an RL entry also the main line's name of its pick (main_name, e.g.
   m3cs1s0_050).  Writes the entries in the order given; --append adds them to the file's entries (a name twice is an
   error).  --val-env NAME=PATH gives an entry another prompt (2026-11-03: the new E, an SFT on P0 + P1 without RL,
@@ -43,13 +45,14 @@ HERE = Path(__file__).resolve().parent
 WT = HERE.parents[1]
 STARTS = HERE / "nm_starts.json"
 MATRIX = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3"
-RL_RE = re.compile(r"/m3_(?P<g>[a-z])_s(?P<chain>\d+)/rl_run_m3(?P=g)s(?P<k>\d)(?P<r>s0|d)/checkpoints/"
+RL_RE = re.compile(r"/m3_(?P<g>[a-z]+)_s(?P<chain>\d+)/rl_run_m3(?P=g)s(?P<k>\d)(?P<r>s0|d)/checkpoints/"
                    r"global_step_(?P<n>\d+)/actor/huggingface/?$")
 SFT_RE = re.compile(r"/sft/(?P<G>[^/]+)/model/checkpoint-(?P<n>\d+)/?$")
 # n_episode.VAL_ENV_QWEN3 (the main line's Qwen3 RL chain; N1's Q3 models): its prompt renders as C's and D's
 QWEN3_VAL_ENV = "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_q3d/val_env.yaml"
 REWARD = {"s0": "S0", "d": "V4"}
-SFT_OF_GROUP = {"C": "C-SFT", "D": "D-SFT", "E": "Q3S"}
+RL_GROUP = {"dn": "D_noP0"}  # an RL chain's letters -> its SFT folder's group, where not just the upper case
+SFT_OF_GROUP = {"E": "Q3S"}  # an RL group whose SFT start is not its own "<name>-SFT"
 SFT_NAME = {"B": "Bp"}  # an SFT folder's group -> the start's name stem
 GROUP_LABEL = {"B": "B′"}  # -> the group as the main line writes it
 PROMPT_FIELDS = ("prompt_format", "prompt_format_example", "max_actions_per_step", "action_space", "max_episode_steps")
@@ -60,14 +63,16 @@ def entry(path: str, matrix: str = MATRIX) -> dict:
     m = RL_RE.search(path)
     if m:
         g, k, r = m["g"], int(m["k"]), m["r"]
+        G = RL_GROUP.get(g, g.upper())
+        stem = SFT_NAME.get(G, G)
         val_env = str(Path(path).parents[3].parent / f"rl_m3{g}s{k}{r}" / "val_env.yaml")
-        return {"name": f"{g.upper()}-s{k}-{REWARD[r]}", "path": path, "val_env": val_env, "group": g.upper(),
-                "seed": k, "reward": REWARD[r], "step": int(m["n"]), "sft": SFT_OF_GROUP.get(g.upper()),
+        return {"name": f"{stem}-s{k}-{REWARD[r]}", "path": path, "val_env": val_env, "group": GROUP_LABEL.get(G, G),
+                "seed": k, "reward": REWARD[r], "step": int(m["n"]), "sft": SFT_OF_GROUP.get(G, f"{stem}-SFT"),
                 "base": "Q3B", "main_name": f"m3{g}s{k}{r}_{int(m['n']):03d}"}
     m = SFT_RE.search(path)
     if m:
         G = m["G"]
-        g = G.lower()
+        g = next((c for c, grp in RL_GROUP.items() if grp == G), G.lower())  # its RL chains' letters
         chains = [c for c in sorted(Path(matrix).glob(f"m3_{g}_s*")) if re.fullmatch(rf"m3_{re.escape(g)}_s\d+", c.name)]
         val_env = str(chains[0] / f"rl_m3{g}s1s0" / "val_env.yaml") if chains else QWEN3_VAL_ENV
         return {"name": f"{SFT_NAME.get(G, G)}-SFT", "path": path, "val_env": val_env, "group": GROUP_LABEL.get(G, G),

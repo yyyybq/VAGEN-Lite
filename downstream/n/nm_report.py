@@ -9,11 +9,13 @@ two evaluation folders (their episodes on the same 600 instances, nothing played
 (success per task type with the 95% Wilson interval; paired differences with McNemar's exact p and the scene
 resampling interval; near-threshold and the rest; behaviour), with three pairings:
   * versus: every model against the base Q3B;
-  * versus_sft: every RL start against the SFT start it grew from (C against C-SFT, D against D-SFT, the old E
-    against Q3S, the main line's formal SFT epoch 8; N1's Q3RS and Q3RD against Q3S);
+  * versus_sft: every RL start against the SFT start it grew from (C against C-SFT, D against D-SFT, B′ against
+    Bp-SFT, D_noP0 against D_noP0-SFT, the old E against Q3S, the main line's formal SFT epoch 8; N1's Q3RS and Q3RD
+    against Q3S);
   * versus_s0: each V4 start against the S0 start of the same group and seed;
   * versus_c: each D start against the C start of the same seed and reward (the matrix's 3.1 comparison; SFT against
     SFT); C has no seed-1 V4 checkpoint (stopped at update 47), and as the user decided for the matrix, C-SFT stands in.
+    The supplementary cells (B′, D_noP0, E2, Cr) never: the pre-registration reports them apart, outside D's comparisons.
 An overview first: per group and reward, each seed's success (with the main line's name of the pick) and its
 difference from the SFT start.  Archived starts (nm_starts.json "archived": LABEL; 2026-11-03: the old E's four RL,
 "自由思考提示，已废弃") are reported apart, one section per label with Q3B and Q3S, never in the main tables.
@@ -39,9 +41,10 @@ PAIRINGS = (("versus", "和底座 Q3B 配对"),
             ("versus_sft", "RL 和它的 SFT 起点配对（对照列是 SFT 起点）"),
             ("versus_s0", "同组同种子 V4 对 S0"),
             ("versus_c", "D 对 C（同一种子、同一种奖励；SFT 对 SFT）"))
-PAIR_NOTE = ("全部对 Q3B；C 的 RL 对 C-SFT，D 的对 D-SFT，旧 E 的对 Q3S（旧 E 的 RL 从主线正式 SFT 第 8 轮起步，就是 N1 的"
-             " Q3S）；N1 的 Q3RS、Q3RD 对 Q3S；V4 对同组同种子的 S0；D 对同种子同奖励的 C（C 种子 1 的 V4 没有检查点，"
-             "按用户定的用 C-SFT 代替）。")
+PAIR_NOTE = ("全部对 Q3B；C 的 RL 对 C-SFT，D 的对 D-SFT，B′ 的对 Bp-SFT，D_noP0 的对 D_noP0-SFT，旧 E 的对 Q3S（旧 E 的"
+             " RL 从主线正式 SFT 第 8 轮起步，就是 N1 的 Q3S）；N1 的 Q3RS、Q3RD 对 Q3S；V4 对同组同种子的 S0；D 对同种子同"
+             "奖励的 C（C 种子 1 的 V4 没有检查点，按用户定的用 C-SFT 代替）。B′、D_noP0、E2、Cr 按预登记各自单独报告，"
+             "不进 D 对 C 的比较。")
 
 
 def order(starts) -> list:

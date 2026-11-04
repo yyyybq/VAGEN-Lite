@@ -56,6 +56,27 @@ def test_sft_only_chains_are_not_rl_chains(tmp_path):
         ["nm-c-sft", "nm-d-nop0-sft", "nm-bp-sft", "nm-e2-sft"]
 
 
+def test_b_prime_and_d_nop0_rl_runs(tmp_path):
+    """The supplementary cells' RL (2026-11-04): m3_b_s* -> "Bp-*" in group B′, m3_dn_s* (two letters) -> D_noP0."""
+    e = S.entry(RL.format(g="b", c=9, k=1, r="s0", n=300))
+    assert e["name"] == "Bp-s1-S0" and e["group"] == "B′" and e["sft"] == "Bp-SFT" and e["main_name"] == "m3bs1s0_300"
+    assert e["val_env"] == M + "/m3_b_s20261019/rl_m3bs1s0/val_env.yaml"
+    e = S.entry(RL.format(g="dn", c=9, k=1, r="d", n=300))
+    assert e["name"] == "D_noP0-s1-V4" and e["group"] == "D_noP0" and e["sft"] == "D_noP0-SFT" and e["seed"] == 1
+    assert e["main_name"] == "m3dns1d_300" and e["val_env"] == M + "/m3_dn_s20261019/rl_m3dns1d/val_env.yaml"
+    assert S.job_name(e["name"]) == "nm-d-nop0-s1-v4" and NR.main_name({"path": e["path"]}) == "m3dns1d_300"
+    with pytest.raises(ValueError):  # a run's name carries its chain's letters
+        S.entry(M + "/m3_dn_s20261019/rl_run_m3ds1d/checkpoints/global_step_300/actor/huggingface")
+    m = tmp_path / "exps/matrix_v3"
+    for d in ("m3_dn_sft", "m3_dn_s20261019", "m3_dn_s20261021", "m3_cr_sft"):
+        (m / d).mkdir(parents=True)
+    d = S.entry(f"{m}/sft/D_noP0/model/checkpoint-2272", matrix=str(m))  # its RL chains are m3_dn_s*
+    assert d["name"] == "D_noP0-SFT" and d["group"] == "D_noP0"
+    assert d["val_env"] == f"{m}/m3_dn_s20261019/rl_m3dns1s0/val_env.yaml"
+    cr = S.entry(f"{m}/sft/Cr/model/checkpoint-2107", matrix=str(m))  # m3_cr_sft is not an RL chain
+    assert cr["name"] == "Cr-SFT" and cr["group"] == "Cr" and cr["val_env"] == S.QWEN3_VAL_ENV
+
+
 def test_the_starts_become_q0_ask_models(tmp_path):
     f = tmp_path / "s.json"
     f.write_text(json.dumps({"starts": [{"name": "D-s1-V4", "path": "/w/d"}, {"name": "C-SFT", "path": "/w/c"}]}))
@@ -234,6 +255,27 @@ def test_d_pairs_with_c_of_the_same_seed_and_reward(tmp_path):
     assert not any("versus_c" in m[n] for n in ("C-SFT", "C-s1-S0", "C-s1-V4", "E-s1-S0"))
     md = NR.markdown(NR.build_all(inst, nm, starts, n1))
     assert "### D 对 C（同一种子、同一种奖励；SFT 对 SFT）" in md and "| D-s2-V4 | C-SFT |" in md
+
+
+def test_supplementary_cells_pair_with_their_own_sft_and_stay_out_of_d_against_c(tmp_path):
+    ids, inst, n1, nm, starts = report_fixture(tmp_path)
+    news = [S.entry(M + "/sft/B/model/checkpoint-1870", M), S.entry(RL.format(g="b", c=9, k=1, r="s0", n=300)),
+            S.entry(RL.format(g="b", c=9, k=1, r="d", n=300)), S.entry(M + "/sft/D_noP0/model/checkpoint-2272", M),
+            S.entry(RL.format(g="dn", c=9, k=1, r="s0", n=300)), S.entry(RL.format(g="dn", c=9, k=1, r="d", n=300)),
+            S.entry(M + "/sft/E2/model/checkpoint-3010", M), S.entry(M + "/sft/Cr/model/checkpoint-2107", M)]
+    for k, e in enumerate(news):  # 1, 2, ... 8 successes of 10
+        write(nm / e["name"] / "episodes.jsonl", [ep(i, j <= k) for j, i in enumerate(ids)])
+    m = NR.build(inst, nm, starts + news, n1)["models"]
+    assert m["Bp-s1-S0"]["versus_sft"]["base"] == "Bp-SFT"
+    assert m["Bp-s1-S0"]["versus_sft"]["all"]["diff"] == pytest.approx(0.1)
+    assert m["Bp-s1-V4"]["versus_s0"]["base"] == "Bp-s1-S0"
+    assert m["D_noP0-s1-V4"]["versus_sft"]["base"] == "D_noP0-SFT"
+    assert m["D_noP0-s1-V4"]["versus_s0"]["base"] == "D_noP0-s1-S0"
+    assert not any("versus_c" in m[e["name"]] for e in news)
+    assert not any("versus_sft" in m[n] for n in ("Bp-SFT", "D_noP0-SFT", "E2-SFT", "Cr-SFT"))
+    md = NR.markdown(NR.build_all(inst, nm, starts + news, n1))
+    assert "| B′ | S0 | `m3bs1s0_300` 2/10" in md and "| D_noP0 | V4 | `m3dns1d_300` 6/10" in md
+    assert "| E2 | SFT | 7/10" in md and "| Cr | SFT | 8/10" in md
 
 
 def test_report_main_and_a_twice_played_instance(tmp_path):
