@@ -5,7 +5,8 @@ chain to the RL chains, unattended.
     nohup python exps/matrix_v3/watch/m3_cells.py watch D_noP0 ... &   # every 10 minutes, for each cell:
 
 1. its SFT-only chain done -> one evaluation-only chain on the cell's own copy of the main line's acceptance set: every
-   epoch sampled x4 at temperature 0.8, top-p 0.92, with the token entropy (results sft_<group>_e<k>_s4);
+   epoch sampled x4 at temperature 0.8, top-p 0.92, with the token entropy (results sft_<group>_e<k>_s4), its one-card
+   jobs in pool zoetrope (ACCEPT_POOL, the user's 甲 of 2026-11-04);
 2. that chain done -> the main line's accept_summary (VAGEN-Lite-q3dev, read only); the pick: among the epochs that
    pass (entropy <= 0.06, unreadable turns <= 1%) the best on val (the SFT chain's own scores), ties to the earlier;
    none passing -> no RL, the cell stops there for the user;
@@ -29,6 +30,8 @@ PY = "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python"
 ACCEPT_SET = M3 / "eval_accept_reserve200"         # the copy of the main line's set (watch/m3_accept.py)
 SUMMARY = Path("/mnt/umm/users/yinbaiqiao/VAGEN-Lite-q3dev")
 SAMPLED = ["--samples", "4", "--temperature", "0.8", "--top-p", "0.92", "--entropy", "--format-example", "action_names"]
+ACCEPT_POOL = "zoetrope"  # the user, 2026-11-04 (甲): a one-card job starts there on any free card, while h800 queues
+                          # it behind every 8-card job submitted before it
 LOG = M3 / "watch" / "cells.log"
 ENV = {**os.environ, "VAGEN_LITE_WORKTREE": str(W), "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
        "OPENBLAS_NUM_THREADS": "1", "NUMEXPR_NUM_THREADS": "1", "TOKENIZERS_PARALLELISM": "false",
@@ -128,7 +131,7 @@ def step(group: str) -> bool:
             commit = head()
             plan = {"tr": str(tr.parent / f"{tr.name}_accept"), "commit": commit, "eval_only": True,
                     "model_type": v["model_type"], "sft_dir": v["format_check_sft_dir"],
-                    "job_prefix": v["chain"]["job_prefix"], "pool": v["chain"]["pool"], "max_eval_jobs": 5,
+                    "job_prefix": v["chain"]["job_prefix"], "pool": ACCEPT_POOL, "max_eval_jobs": 5,
                     "retries": 4, "suspended_grace_min": 10, "gpu_log": True, "eval_sets": {"accept": str(acc_set)},
                     "rl": {"rows": v["rl"]["rows"], "exclude": v["rl"]["exclude"]},
                     "eval": {"models": {f"sft_{sft_group}_e{e}_s4": {"model": str(p), "options": SAMPLED}
