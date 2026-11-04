@@ -21,6 +21,11 @@ Cambrian-S's two-layer MLP (hidden -> hidden -> 1152, GELU) with its initialisat
 
 The head runs in every training forward, also on an episode with one frame (weighted 0 there), so every rank's
 backward pass meets it (FSDP's gradient reduction needs the same parameters on every rank).
+
+The statistics (frame pairs, the unweighted MSE / cosine distance, the copy baseline's) reach verl's dp_actor beside
+the forward's output (keep_stats / take_stats): FSDP (torch 2.8) rebuilds the output from its dataclass fields
+before the backward pass (_register_pre_backward_hooks -> _apply_to_tensors) and drops any other attribute, which
+lost csnfp's statistics (2026-11-04).
 """
 from __future__ import annotations
 
@@ -140,3 +145,22 @@ def nfp_metrics(aux_value: float, stats: Optional[Dict[str, float]], coef: float
     for k, v in (stats or {}).items():
         out[f"actor/nfp_{k}"] = float(v)
     return out
+
+
+_KEPT: Optional[Dict[str, float]] = None  # the last training forward's statistics (keep_stats / take_stats)
+
+
+def keep_stats(stats: Optional[Dict[str, float]]) -> None:
+    """The adapter: keep one training forward's statistics for the actor (take_stats)."""
+    global _KEPT
+    _KEPT = None if stats is None else dict(stats)
+
+
+def take_stats(output=None) -> Optional[Dict[str, float]]:
+    """The actor, right after its forward: that forward's statistics -- the output's own nfp_stats where it still
+    has them (no FSDP), else the kept ones -- and none are kept after, so a forward that keeps none (the LFP path,
+    the other models) never reads stale ones."""
+    global _KEPT
+    kept, _KEPT = _KEPT, None
+    own = getattr(output, "nfp_stats", None)
+    return own if own is not None else kept

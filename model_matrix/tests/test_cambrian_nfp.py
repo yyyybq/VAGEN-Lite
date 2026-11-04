@@ -150,6 +150,19 @@ class LossTest(unittest.TestCase):
                           m["actor/nfp_loss_active"]), (0.2, 3.0, 1.0, 0.7, 1.0))
 
 
+class KeptStatsTest(unittest.TestCase):
+    """The statistics reach dp_actor beside the output (2026-11-04: FSDP dropped csnfp's on the output)."""
+
+    def test_taken_once(self):
+        N.take_stats()
+        N.keep_stats({"pairs": 2.0, "mse": 1.0})
+        self.assertEqual(N.take_stats(SimpleNamespace()), {"pairs": 2.0, "mse": 1.0})
+        self.assertIsNone(N.take_stats(SimpleNamespace()))  # a later forward that keeps none reads none
+        N.keep_stats({"pairs": 1.0})
+        self.assertEqual(N.take_stats(SimpleNamespace(nfp_stats={"pairs": 3.0})), {"pairs": 3.0})  # the output's own
+        self.assertIsNone(N.take_stats())
+
+
 class FakeInner(nn.Module):
     """The adapter's inner model, small: embeddings, projector, newline, a one-layer stand-in for the decoder and the
     model line's head."""
@@ -242,6 +255,77 @@ class AdapterForwardTest(unittest.TestCase):
         ids, pos, pix = self.batch(1)
         out = a(input_ids=ids, position_ids=pos, pixel_values=pix)
         self.assertEqual((float(out.loss), out.nfp_stats), (0.0, {"pairs": 0.0}))
+
+    def test_statistics_survive_the_rebuilt_output(self):
+        """Before the backward pass FSDP (torch 2.8, _register_pre_backward_hooks) passes the output through
+        _apply_to_tensors, which rebuilds the dataclass from its fields: nfp_stats is gone, the kept copy is there."""
+        from torch.distributed.utils import _apply_to_tensors
+
+        a = self.make()
+        for frames, pairs in ((3, 2.0), (1, 0.0)):
+            N.take_stats()
+            ids, pos, pix = self.batch(frames)
+            out = a(input_ids=ids, position_ids=pos, pixel_values=pix)
+            want = dict(out.nfp_stats)
+            rebuilt = _apply_to_tensors(lambda t: t.view_as(t), out)
+            self.assertFalse(hasattr(rebuilt, "nfp_stats"))  # how csnfp's statistics were lost
+            stats = N.take_stats(rebuilt)
+            self.assertEqual((stats, stats["pairs"]), (want, pairs))
+        # the one-frame episode is then no loss in the metrics
+        self.assertEqual(N.nfp_metrics(float(rebuilt.loss), stats, 1.0, 1.0),
+                         {"actor/nfp_loss_active": 0.0, "actor/nfp_pairs": 0.0})
+
+    def test_heldout_scoring_matches_training(self):
+        """model_matrix/formal/nfp_heldout.score_episode (decision 48 甲): per pair, from the adapter's own pieces in
+        eval mode; averaged over the pairs it is the training forward's statistics and loss."""
+        from model_matrix.formal import nfp_heldout as H
+
+        a = self.make()
+        ids, pos, pix = self.batch(4)
+        out = a(input_ids=ids, position_ids=pos, pixel_values=pix)
+        a.eval()
+        with torch.no_grad():
+            rows = H.score_episode(a, ids, pix)
+        self.assertEqual(len(rows), 3)
+        for k in ("mse", "cos", "copy_mse", "copy_cos"):
+            self.assertAlmostEqual(sum(r[k] for r in rows) / 3, out.nfp_stats[k], places=5)
+        self.assertAlmostEqual(sum(r["loss"] for r in rows) / 3, float(out.loss), places=5)
+        for r in rows:
+            self.assertAlmostEqual(r["copy_loss"], 0.1 * r["copy_mse"] + 0.1 * r["copy_cos"], places=6)
+        N.take_stats()
+
+    def test_eval_forward_keeps_nothing(self):
+        a = self.make()
+        a.eval()
+        N.take_stats()
+        ids, pos, pix = self.batch(3)
+        self.assertIsNone(N.take_stats(a(input_ids=ids, position_ids=pos, pixel_values=pix)))
+
+    def test_statistics_under_fsdp(self):
+        """The adapter wrapped in FSDP (one CPU process, gloo), as the actor's training forward runs it."""
+        import tempfile
+
+        import torch.distributed as dist
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+        if dist.is_initialized():
+            self.skipTest("a process group is already set up")
+        ids, pos, pix = self.batch(3)
+        want = dict(self.make()(input_ids=ids, position_ids=pos, pixel_values=pix).nfp_stats)
+        N.take_stats()
+        with tempfile.TemporaryDirectory() as d:
+            dist.init_process_group("gloo", init_method=f"file://{d}/pg", rank=0, world_size=1)
+            try:
+                m = FSDP(self.make(), device_id=torch.device("cpu"))
+                out = m(input_ids=ids, position_ids=pos, pixel_values=pix)
+                self.assertFalse(hasattr(out, "nfp_stats"))  # FSDP dropped it, as in csnfp's training
+                stats = N.take_stats(out)
+                self.assertEqual(set(stats), set(want))
+                for k, v in want.items():
+                    self.assertAlmostEqual(stats[k], v, places=5)
+                out.loss.backward()
+            finally:
+                dist.destroy_process_group()
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ from transformers.generation.utils import GenerateOutput
 from transformers.modeling_outputs import CausalLMOutputWithPast, TokenClassifierOutput
 
 from vagen.models.cambrian_miv import build_cambrian_visual_features
-from vagen.models.cambrian_nfp import build_head, concat_nfp_loss, concat_nfp_pairs
+from vagen.models.cambrian_nfp import build_head, concat_nfp_loss, concat_nfp_pairs, keep_stats
 
 # Cambrian-S imports Qwen2 classes from the transformers package root. Some
 # Transformers builds expose them only from transformers.models.qwen2, so make
@@ -504,6 +504,7 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
                 hidden_states, pairs, nfp_raw, self.model.nfp_head, side=si_side_len, newline=mm_use_newline,
                 mse_weight=float(getattr(self.config, "nfp_mse_loss_weight", 0.1)),
                 cos_weight=float(getattr(self.config, "nfp_cosine_loss_weight", 0.1)))
+            keep_stats(nfp_stats)  # for verl's dp_actor: FSDP drops the output's attribute (cambrian_nfp.take_stats)
             if not getattr(self, "_model_line_nfp_logged", False):
                 print(f"[cambrian_register] model-line NFP loss active: {nfp_stats} loss={float(nfp_aux_loss):.4f}")
                 self._model_line_nfp_logged = True
@@ -524,7 +525,7 @@ class CambrianForCausalLMAdapter(CambrianQwenForCausalLM):
             attentions=outputs.attentions,
         )
         if nfp_stats is not None:
-            result.nfp_stats = nfp_stats  # read by verl's dp_actor (actor/nfp_*)
+            result.nfp_stats = nfp_stats  # without FSDP; under FSDP dp_actor reads the kept copy (take_stats)
         return result
 
     # ------------------------------------------------------------------
