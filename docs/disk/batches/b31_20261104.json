@@ -1,0 +1,325 @@
+{
+ "batch": "b31_20261104",
+ "approved": "PENDING: deletion not approved (the user's 11-03 \"2乙\": b27 stays until C1 trains; this subset is offered early because the quota is below the warning line)",
+ "note": "b27 minus DS-B-030-s1-run-final_model, x-X4-hf-E1-B-200k, x-X4-hf-E1-RD-200k, x-X4-hf-E1-RS-200k, x-X4-hf-E1-S-200k",
+ "items": [
+  {
+   "id": "DS-B-010-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-010-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-B-100-s1-evals_src-steps_150000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-100-s1/evals_src/steps_150000",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-B-100-s1-evals_src-steps_175000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-100-s1/evals_src/steps_175000",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-B-100-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-B-100-s1-run_stopped_20261022-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-B-100-s1/run_stopped_20261022/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RD-010-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-010-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RD-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RD-100-s1-evals_src-steps_150000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-100-s1/evals_src/steps_150000",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RD-100-s1-evals_src-steps_175000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-100-s1/evals_src/steps_175000",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RD-100-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RD-100-s1-run_stopped_20261022-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RD-100-s1/run_stopped_20261022/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RS-010-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-010-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RS-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RS-100-s1-evals_src-steps_150000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-100-s1/evals_src/steps_150000",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RS-100-s1-evals_src-steps_175000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-100-s1/evals_src/steps_175000",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RS-100-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-RS-100-s1-run_stopped_20261022-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-RS-100-s1/run_stopped_20261022/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-S-010-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-010-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-S-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-S-100-s1-evals_src-steps_150000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-100-s1/evals_src/steps_150000",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-S-100-s1-evals_src-steps_175000",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-100-s1/evals_src/steps_175000",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-S-100-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-100-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "DS-S-100-s1-run_stopped_20261022-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/DS-S-100-s1/run_stopped_20261022/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "E3-B-export-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-B/export/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "E3-B-logs-robocasa365_starvla_ppo-100",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-B/logs/robocasa365_starvla_ppo/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "E3-RD-export-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-RD/export/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "E3-RD-logs-robocasa365_starvla_ppo-100",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-RD/logs/robocasa365_starvla_ppo/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "E3-RS-export-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-RS/export/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "E3-RS-logs-robocasa365_starvla_ppo-100",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-RS/logs/robocasa365_starvla_ppo/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "E3-S-export-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-S/export/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "E3-S-logs-robocasa365_starvla_ppo-100",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/E3-S/logs/robocasa365_starvla_ppo/checkpoints/global_step_100",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "STEP2-RS-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/STEP2-RS-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "T2-B-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-B-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "T2-B-030-short-run-checkpoints",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-B-030-short/run/checkpoints",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "T2-B-030-short-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-B-030-short/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "T2-RS-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T2-RS-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "T5-B-nav-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-B-nav-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "T5-RD-nav-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-RD-nav-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "T5-RS-nav-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-RS-nav-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "T5-S-nav-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/T5-S-nav-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X1-B-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X1-B-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X1-RD-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X1-RD-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X1-RS-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X1-RS-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X1-S-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X1-S-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X2-B-001-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-B-001-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X2-B-003-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-B-003-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X2-RD-001-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-RD-001-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X2-RD-003-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-RD-003-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X2-RS-001-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-RS-001-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X2-RS-003-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-RS-003-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X2-S-001-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-S-001-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "X2-S-003-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/X2-S-003-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "XE-B-030-s1-run-final_model",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/experiments/XE-B-030-s1/run/final_model",
+   "marker_name": "DELETED_TO_AOSS_b31.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b31 (b27 minus the items kept for C1). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  }
+ ]
+}

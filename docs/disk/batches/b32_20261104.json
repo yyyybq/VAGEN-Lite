@@ -1,0 +1,30 @@
+{
+ "batch": "b32_20261104",
+ "approved": "PENDING: deletion not approved (part of b27, the user's 11-03 \"2乙\")",
+ "items": [
+  {
+   "id": "x-X4-hf-E1-B-200k",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X4/hf/E1-B-200k",
+   "marker_name": "DELETED_TO_AOSS_b32.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b32 (E1 HF exports for X4; the downstream line no longer reads them). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "x-X4-hf-E1-RD-200k",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X4/hf/E1-RD-200k",
+   "marker_name": "DELETED_TO_AOSS_b32.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b32 (E1 HF exports for X4; the downstream line no longer reads them). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "x-X4-hf-E1-RS-200k",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X4/hf/E1-RS-200k",
+   "marker_name": "DELETED_TO_AOSS_b32.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b32 (E1 HF exports for X4; the downstream line no longer reads them). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "x-X4-hf-E1-S-200k",
+   "root": "/mnt/umm/users/yinbaiqiao/downstream_runs/x/X4/hf/E1-S-200k",
+   "marker_name": "DELETED_TO_AOSS_b32.txt",
+   "marker": "Archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>, uploaded and size-checked in batch b27 on 2026-11-03) and deleted by the disk line, batch b32 (E1 HF exports for X4; the downstream line no longer reads them). Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  }
+ ]
+}
