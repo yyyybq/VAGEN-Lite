@@ -1,6 +1,6 @@
 {
  "batch": "b30_20261104",
- "approved": "PENDING: the model line relayed the user's decision 50 甲 (11-04, model-line window: \"都按甲执行\"); the disk line executes only after the user confirms in the disk window",
+ "approved": "the user 2026-11-04 ~07:15 UTC in the disk window: \"1甲 2甲\" (reply to the 07:1x report; quota table 20/22 TB, below the 3 TB warning). 1甲 = delete b30 as listed (the model line's table 1h, the user's decision 50 甲 there; 25 files 96.6 GB; actor/huggingface and the metadata files stay)",
  "items": [
   {
    "id": "R1-m_cambrian7b_formal_rl_20261103_nfp-csnfp-50",

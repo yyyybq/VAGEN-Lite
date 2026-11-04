@@ -1,6 +1,6 @@
 {
  "batch": "b31_20261104",
- "approved": "PENDING: deletion not approved (the user's 11-03 \"2乙\": b27 stays until C1 trains; this subset is offered early because the quota is below the warning line)",
+ "approved": "the user 2026-11-04 ~07:15 UTC in the disk window: \"1甲 2甲\" (reply to the 07:1x report; quota table 20/22 TB, below the 3 TB warning). 2甲 = delete b31 and b32 now, before C1 finishes (replaces 11-03 \"2乙\" for these items); b31 = b27 minus DS-B-030-s1/run/final_model and the E1 exports, 53 items 93 files 1,094.7 GB",
  "note": "b27 minus DS-B-030-s1-run-final_model, x-X4-hf-E1-B-200k, x-X4-hf-E1-RD-200k, x-X4-hf-E1-RS-200k, x-X4-hf-E1-S-200k",
  "items": [
   {
