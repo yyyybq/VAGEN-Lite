@@ -212,6 +212,23 @@ class PlansTest(unittest.TestCase):
                                        T.standard_chain_defaults(nf).get("rl"))
         self.assertEqual((merged["nfp_loss_coef"], merged["standard"], merged["seed"]), (1.0, "v10_p1_S0", 20261019))
 
+    def test_decision_49_nfp01_arm(self):
+        """Decision 49 甲 of 2026-11-04: csnfp again with the coefficient 0.1, nothing else changed."""
+        from data_gen.interiorgs_v10 import train_chain as T
+        from model_matrix.formal import plans as P
+
+        (_, nf), = P.formal_rl_plans("rl-cambrian-nfp", "20261103", "abc", "/sft/e5", "V4").items()
+        (tag, n1), = P.formal_rl_plans("rl-cambrian-nfp01", "20261104", "abc", "/sft/e5", "V4").items()
+        self.assertEqual(tag, "m_cambrian7b_formal_rl_20261104_nfp01")
+        self.assertEqual((n1["run_pools"], n1["rl_runs"], n1["rl_name"], n1["tr"].rsplit("/", 1)[1]),
+                         ({"csnfp01": "h800"}, {"csnfp01": {"rl": {"nfp_loss_coef": 0.1}}}, "m_cnfp01rl", tag))
+        self.assertEqual(set(n1), set(nf))
+        for key in set(nf) - {"tr", "run_pools", "rl_runs", "rl_name"}:
+            self.assertEqual(n1[key], nf[key], key)
+        merged = T.with_chain_defaults({**n1["rl"], **n1["rl_runs"]["csnfp01"]["rl"]},
+                                       T.standard_chain_defaults(n1).get("rl"))
+        self.assertEqual((merged["nfp_loss_coef"], merged["standard"], merged["seed"]), (0.1, "v10_p1_S0", 20261019))
+
     def test_accept_epoch_plans(self):
         from model_matrix.formal import plans as P
 
