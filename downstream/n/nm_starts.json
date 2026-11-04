@@ -1,5 +1,5 @@
 {
- "note": "主实验 2026-11-03 晚发的矩阵 v3 C、D、E 挑出的检查点（用户 11-03 第 3.3 条；挑法：第 300 次，被停下的用最后一个检查点；C 种子 1 的 V4 第 47 次就停了、没有检查点，主线按用户定的用 C 的 SFT 代替）",
+ "note": "主实验 2026-11-03 晚发的矩阵 v3 C、D、E 挑出的检查点（用户 11-03 第 3.3 条；挑法：第 300 次，被停下的用最后一个检查点；C 种子 1 的 V4 第 47 次就停了、没有检查点，主线按用户定的用 C 的 SFT 代替）\n主实验 11-04 转来的矩阵补充格（P1 交接 handover_cells_20261104）：B′、D_noP0、E2、Cr 的 SFT 挑点（先过采样验收，再按验证集挑）；B′ 种子 1、D_noP0 两个种子的 RL 按预登记口径取第 300 次。用户 11-04 晚批准提交。",
  "starts": [
   {
    "name": "C-SFT",
@@ -147,6 +147,122 @@
    "sft": "Q3S",
    "base": "Q3B",
    "archived": "自由思考提示，已废弃"
+  },
+  {
+   "name": "Bp-SFT",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/B/model/checkpoint-1870",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b_s20261019/rl_m3bs1s0/val_env.yaml",
+   "group": "B′",
+   "seed": null,
+   "reward": "SFT",
+   "step": 1870,
+   "sft": null,
+   "base": "Q3B"
+  },
+  {
+   "name": "Bp-s1-S0",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b_s20261019/rl_run_m3bs1s0/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b_s20261019/rl_m3bs1s0/val_env.yaml",
+   "group": "B′",
+   "seed": 1,
+   "reward": "S0",
+   "step": 300,
+   "sft": "Bp-SFT",
+   "base": "Q3B",
+   "main_name": "m3bs1s0_300"
+  },
+  {
+   "name": "Bp-s1-V4",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b_s20261019/rl_run_m3bs1d/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b_s20261019/rl_m3bs1d/val_env.yaml",
+   "group": "B′",
+   "seed": 1,
+   "reward": "V4",
+   "step": 300,
+   "sft": "Bp-SFT",
+   "base": "Q3B",
+   "main_name": "m3bs1d_300"
+  },
+  {
+   "name": "D_noP0-SFT",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/D_noP0/model/checkpoint-2272",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/rl_m3dns1s0/val_env.yaml",
+   "group": "D_noP0",
+   "seed": null,
+   "reward": "SFT",
+   "step": 2272,
+   "sft": null,
+   "base": "Q3B"
+  },
+  {
+   "name": "D_noP0-s1-S0",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/rl_run_m3dns1s0/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/rl_m3dns1s0/val_env.yaml",
+   "group": "D_noP0",
+   "seed": 1,
+   "reward": "S0",
+   "step": 300,
+   "sft": "D_noP0-SFT",
+   "base": "Q3B",
+   "main_name": "m3dns1s0_300"
+  },
+  {
+   "name": "D_noP0-s1-V4",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/rl_run_m3dns1d/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/rl_m3dns1d/val_env.yaml",
+   "group": "D_noP0",
+   "seed": 1,
+   "reward": "V4",
+   "step": 300,
+   "sft": "D_noP0-SFT",
+   "base": "Q3B",
+   "main_name": "m3dns1d_300"
+  },
+  {
+   "name": "D_noP0-s2-S0",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/rl_run_m3dns2s0/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/rl_m3dns2s0/val_env.yaml",
+   "group": "D_noP0",
+   "seed": 2,
+   "reward": "S0",
+   "step": 300,
+   "sft": "D_noP0-SFT",
+   "base": "Q3B",
+   "main_name": "m3dns2s0_300"
+  },
+  {
+   "name": "D_noP0-s2-V4",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/rl_run_m3dns2d/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/rl_m3dns2d/val_env.yaml",
+   "group": "D_noP0",
+   "seed": 2,
+   "reward": "V4",
+   "step": 300,
+   "sft": "D_noP0-SFT",
+   "base": "Q3B",
+   "main_name": "m3dns2d_300"
+  },
+  {
+   "name": "E2-SFT",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-3010",
+   "val_env": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_q3d/val_env.yaml",
+   "group": "E2",
+   "seed": null,
+   "reward": "SFT",
+   "step": 3010,
+   "sft": null,
+   "base": "Q3B"
+  },
+  {
+   "name": "Cr-SFT",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-2107",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261019/rl_m3crs1s0/val_env.yaml",
+   "group": "Cr",
+   "seed": null,
+   "reward": "SFT",
+   "step": 2107,
+   "sft": null,
+   "base": "Q3B"
   }
  ]
 }
