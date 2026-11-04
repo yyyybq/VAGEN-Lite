@@ -142,12 +142,53 @@ class LossTest(unittest.TestCase):
         self.assertEqual(N.nfp_metrics(0.5, None, 1.0, 0.25),
                          {"actor/nfp_loss": 0.5, "actor/nfp_loss_scaled": 0.125, "actor/nfp_loss_coef": 1.0,
                           "actor/image_gen_loss_coef": 1.0, "actor/nfp_loss_active": 1.0})
-        # an episode without a pair: not a loss
-        self.assertEqual(N.nfp_metrics(0.0, {"pairs": 0.0}, 1.0, 0.25),
-                         {"actor/nfp_loss_active": 0.0, "actor/nfp_pairs": 0.0})
-        m = N.nfp_metrics(0.2, {"pairs": 3.0, "mse": 1.0, "cos": 0.5, "copy_mse": 2.0, "copy_cos": 0.7}, 1.0, 1.0)
+        # an episode without a pair: no loss, zeros, the same keys as an episode with pairs
+        none = N.nfp_metrics(0.0, {"pairs": 0.0}, 0.1, 0.25)
+        m = N.nfp_metrics(0.2, {"pairs": 3.0, "mse": 1.0, "cos": 0.5, "copy_mse": 2.0, "copy_cos": 0.7}, 0.1, 1.0)
+        self.assertEqual(set(none), set(m))
+        self.assertEqual({k: v for k, v in none.items() if "coef" not in k}, {k: 0.0 for k in none if "coef" not in k})
         self.assertEqual((m["actor/nfp_loss"], m["actor/nfp_pairs"], m["actor/nfp_mse"], m["actor/nfp_copy_cos"],
-                          m["actor/nfp_loss_active"]), (0.2, 3.0, 1.0, 0.7, 1.0))
+                          m["actor/nfp_loss_active"], m["actor/nfp_loss_coef"]), (0.2, 3.0, 1.0, 0.7, 1.0, 0.1))
+
+    def test_metrics_through_verls_reduction(self):
+        """2026-11-04: csnfp01 stopped three times in verl's averaging of the eight workers' metrics (np.mean of lists
+        of different lengths), the workers having different numbers of one-frame episodes.  Every micro-batch now
+        gives the same keys; the mean over the episodes with a pair is a logged mean over nfp_loss_active's."""
+        from verl.protocol import DataProto
+        from verl.utils.metric import reduce_metrics
+        from verl.utils.py_functional import append_to_dict
+
+        def worker(stats_list):
+            metrics = {}
+            for stats in stats_list:
+                append_to_dict(metrics, N.nfp_metrics(0.5 if stats.get("pairs") else 0.0, stats, 0.1, 1.0))
+            return DataProto(meta_info={"metrics": metrics})
+
+        pair = {"pairs": 2.0, "mse": 1.0, "cos": 0.4, "copy_mse": 1.5, "copy_cos": 0.3}
+        none = {"pairs": 0.0}
+        # four micro-batches per worker, as every worker gets the same number; 0, 1 or 3 of them one-frame episodes
+        workers = [worker([pair] * 4), worker([none] + [pair] * 3), worker([none] * 3 + [dict(pair, mse=3.0)])]
+        out = reduce_metrics(DataProto.concat(workers).meta_info["metrics"])
+        active = out["actor/nfp_loss_active"]
+        self.assertAlmostEqual(active, 8 / 12)
+        self.assertAlmostEqual(out["actor/nfp_mse"] / active, (7 * 1.0 + 3.0) / 8)
+        self.assertAlmostEqual(out["actor/nfp_loss"] / active, 0.5)
+        self.assertAlmostEqual(out["actor/nfp_loss_coef"], 0.1)
+
+        # the earlier key sets (the statistics left out for a one-frame episode) fail there, as in the training
+        def old(stats):
+            if not stats.get("pairs"):
+                return {"actor/nfp_loss_active": 0.0, "actor/nfp_pairs": 0.0}
+            return {"actor/nfp_loss_active": 1.0, **{f"actor/nfp_{k}": v for k, v in stats.items()}}
+
+        lists = []
+        for stats_list in ([pair] * 4, [none] + [pair] * 3):
+            metrics = {}
+            for stats in stats_list:
+                append_to_dict(metrics, old(stats))
+            lists.append(DataProto(meta_info={"metrics": metrics}))
+        with self.assertRaises(ValueError):
+            reduce_metrics(DataProto.concat(lists).meta_info["metrics"])
 
 
 class KeptStatsTest(unittest.TestCase):
@@ -272,8 +313,8 @@ class AdapterForwardTest(unittest.TestCase):
             stats = N.take_stats(rebuilt)
             self.assertEqual((stats, stats["pairs"]), (want, pairs))
         # the one-frame episode is then no loss in the metrics
-        self.assertEqual(N.nfp_metrics(float(rebuilt.loss), stats, 1.0, 1.0),
-                         {"actor/nfp_loss_active": 0.0, "actor/nfp_pairs": 0.0})
+        m = N.nfp_metrics(float(rebuilt.loss), stats, 1.0, 1.0)
+        self.assertEqual((m["actor/nfp_loss_active"], m["actor/nfp_pairs"], m["actor/nfp_loss"]), (0.0, 0.0, 0.0))
 
     def test_heldout_scoring_matches_training(self):
         """model_matrix/formal/nfp_heldout.score_episode (decision 48 甲): per pair, from the adapter's own pieces in

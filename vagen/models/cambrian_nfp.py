@@ -133,17 +133,25 @@ def concat_nfp_loss(hidden_states: torch.Tensor, pairs: Sequence[Tuple[int, int,
     return loss, stats
 
 
+NFP_STATS = ("pairs", "mse", "cos", "copy_mse", "copy_cos")  # concat_nfp_loss's statistics
+
+
 def nfp_metrics(aux_value: float, stats: Optional[Dict[str, float]], coef: float,
                 loss_scale_factor: float) -> Dict[str, float]:
     """The actor's metrics for one micro-batch's auxiliary loss (verl dp_actor).  Without statistics (the LFP path)
-    as before; with them, an episode without a pair counts as inactive (its zero-weighted head pass is no loss), and
-    a pair's statistics are logged as actor/nfp_<name>."""
-    if stats is not None and not stats.get("pairs"):
-        return {"actor/nfp_loss_active": 0.0, "actor/nfp_pairs": 0.0}
+    as before.  With them, the same keys for every micro-batch: verl joins each worker's per-key lists and averages
+    them with np.mean (DataProto.concat, reduce_metrics), which fails on lists of different lengths -- an earlier
+    version left the statistics out for an episode without a pair and stopped csnfp01 three times (2026-11-04).  Such
+    an episode (its head pass weighted 0, no loss) gives actor/nfp_loss_active 0 and 0 for the loss and every
+    statistic, so the mean over the episodes with a pair is a logged mean divided by actor/nfp_loss_active's."""
     out = {"actor/nfp_loss": aux_value, "actor/nfp_loss_scaled": aux_value * coef * loss_scale_factor,
            "actor/nfp_loss_coef": coef, "actor/image_gen_loss_coef": coef, "actor/nfp_loss_active": 1.0}
-    for k, v in (stats or {}).items():
-        out[f"actor/nfp_{k}"] = float(v)
+    if stats is None:
+        return out
+    active = bool(stats.get("pairs"))
+    out["actor/nfp_loss_active"] = 1.0 if active else 0.0
+    for k in NFP_STATS:
+        out[f"actor/nfp_{k}"] = float(stats.get(k, 0.0)) if active else 0.0
     return out
 
 
