@@ -1,0 +1,170 @@
+{
+ "utc": "2026-11-04 20:29:09",
+ "why": "the user, 2026-11-04: 甲 (两件都做: E2 and Cr's unpicked SFT epochs to AOSS, checked, then deleted)",
+ "aoss": "fj:s3://baiqiao/vagen_lite_archive/VAGEN-Lite-matrix/exps/matrix_v3/sft/<cell>/model/...",
+ "tool": "/mnt/umm/users/yinbaiqiao/aoss_archive_manifests/archive_aoss_r12.py (size check per file; phase 1 upload, phase 2 --delete after a second size check)",
+ "manifests": [
+  "manifest_20261104T201401Z.jsonl",
+  "manifest_20261104T202815Z.jsonl"
+ ],
+ "groups": {
+  "E2": {
+   "kept": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-3010",
+   "kept_other": 18,
+   "archived_deleted": [
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-301",
+     34012021046
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-602",
+     34012033316
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-903",
+     34012044601
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-1204",
+     34012056893
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-1505",
+     34012068378
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-1806",
+     34012080695
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-2107",
+     34012092077
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-2408",
+     34012104479
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-2709",
+     34012115890
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/model-00001-of-00007.safetensors",
+     4863262184
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/model-00002-of-00007.safetensors",
+     4832049608
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/model-00003-of-00007.safetensors",
+     4999856632
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/model-00004-of-00007.safetensors",
+     4832049680
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/model-00005-of-00007.safetensors",
+     4832049672
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/model-00006-of-00007.safetensors",
+     4999856656
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/model-00007-of-00007.safetensors",
+     4636923552
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/model.safetensors.index.json",
+     67795
+    ]
+   ],
+   "files": 197,
+   "bytes": 340104733154,
+   "all_gone": true,
+   "keep_present": true
+  },
+  "Cr": {
+   "kept": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-2107",
+   "kept_other": 18,
+   "archived_deleted": [
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-301",
+     34012021049
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-602",
+     34012033327
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-903",
+     34012044614
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-1204",
+     34012056928
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-1505",
+     34012068420
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-1806",
+     34012080730
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-2408",
+     34012104469
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-2709",
+     34012115804
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-3010",
+     34012128345
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/model-00001-of-00007.safetensors",
+     4863262184
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/model-00002-of-00007.safetensors",
+     4832049608
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/model-00003-of-00007.safetensors",
+     4999856632
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/model-00004-of-00007.safetensors",
+     4832049680
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/model-00005-of-00007.safetensors",
+     4832049672
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/model-00006-of-00007.safetensors",
+     4999856656
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/model-00007-of-00007.safetensors",
+     4636923552
+    ],
+    [
+     "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/model.safetensors.index.json",
+     67795
+    ]
+   ],
+   "files": 197,
+   "bytes": 340104769465,
+   "all_gone": true,
+   "keep_present": true
+  }
+ },
+ "freed_gb": 680.2,
+ "freed_gib": 633.5
+}
