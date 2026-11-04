@@ -16,8 +16,10 @@ reward/tc_watch.py does for direction 1.
 
     python -m reward.stmt_watch --chain RR/runs/rw_p2_st1 [--out FILE.json]
 
-Prints one line "STATE runs=<n> blocks=<b> alerts=<a> ended=<e>" first (for the local watcher), then the summary
-JSON; --out also writes it (and FILE.md, the blocks as a table).  Caches each update's sums in
+Prints one line "STATE runs=<n> blocks=<b> alerts=<a> ended=<e> evals=<v> stops=<s>" first (for the local watcher;
+evals = the chain's finished greedy val evaluations of saved checkpoints, plan eval "stop_invalid", stops = runs the
+chain stopped), then the summary JSON; --out also writes it (and FILE.md, the blocks as a table, then each run's
+checkpoint evaluations and stop).  Caches each update's sums in
 CHAIN/stmt_watch_cache.json (redone when the dump's size or time changes).  CPU, one process.
 """
 
@@ -111,6 +113,11 @@ def main():
     plan = json.loads((chain / "plan.json").read_text())
     cache_path = Path(args.cache) if args.cache else chain / "stmt_watch_cache.json"
     cache = json.loads(cache_path.read_text()) if cache_path.is_file() else {}
+    # the chain's greedy val evaluations of saved checkpoints (plan eval "stop_invalid") and its stops of a run
+    progress = json.loads((chain / "progress.json").read_text()) if (chain / "progress.json").is_file() else {}
+    evals = {k: v for k, v in (progress.get("checkpoint_watch") or {}).items()
+             if v.get("invalid") is not None or v.get("failed")}
+    stops = progress.get("guard_stops") or {}
     out, n_blocks, n_alerts, ended = {}, 0, 0, 0
     for run in plan["rl_runs"]:
         base = chain / f"rl_run_{run}"
@@ -139,9 +146,12 @@ def main():
         out[run] = {"updates_logged": max(per) if per else 0,
                     "invalid_mean_last10": round(float(np.mean(inv10)), 4) if inv10 else None,
                     "alerts": al, "blocks": blocks, "open_block": block_row(per, rest, sums, refs) if rest else None,
-                    "tasks_differ_from_rw_s0": differ}
+                    "tasks_differ_from_rw_s0": differ,
+                    "checkpoint_evals": {k.split("/")[1]: v for k, v in evals.items() if k.split("/")[0] == run},
+                    "chain_stop": stops.get(run)}
     cache_path.write_text(json.dumps(cache))
-    print(f"STATE runs={len(out)} blocks={n_blocks} alerts={n_alerts} ended={ended}")
+    print(f"STATE runs={len(out)} blocks={n_blocks} alerts={n_alerts} ended={ended} evals={len(evals)} "
+          f"stops={len(stops)}")
     text = json.dumps(out, indent=1)
     print(text)
     if args.out:
@@ -156,6 +166,11 @@ def main():
             L += ["| " + " | ".join(str(b.get(c)) for c in cols) + " |"
                   for b in v["blocks"] + ([dict(v["open_block"], updates=v["open_block"]["updates"] + " (open)")]
                                           if v["open_block"] else [])]
+            L += [""] + [f"- val (greedy) at update {s}: success {r.get('success')}, unreadable {r.get('invalid')}"
+                         + (f", failed {r['failed']}" if r.get("failed") else "")
+                         for s, r in sorted(v["checkpoint_evals"].items(), key=lambda x: int(x[0]))]
+            if v["chain_stop"]:
+                L.append(f"- stopped by the chain: {v['chain_stop'].get('reason')} ({v['chain_stop'].get('utc')})")
             L.append("")
         Path(args.out).with_suffix(".md").write_text("\n".join(L), encoding="utf-8")
 
