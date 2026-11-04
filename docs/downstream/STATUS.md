@@ -1,6 +1,6 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-11-04 01:3x UTC（[C1 第七段](reports/C1_PROGRESS.md)（01:35 报）：每步 1.22 秒，推算合计约 716 卡时，约 11-04 09:40 训完，动作损失比 DS-B-030-s1 只高 0.0013；**[矩阵 v3 的 13 个起点按 N1 的做法评完了](reports/NM_RESULTS_20261103.md)**（11-03 23:1x）：RL 对自己的 SFT 起点都不到 5 个百分点、方向不一致；下游看不出 D 比 C 好；D 种子 1 的 V4 掉到 8.0%；[N2 完成](reports/N2_RESULTS_20261103.md)、[N3 完成](reports/N3_RESULTS_20261103.md)，三件事等你定（见 N3 报告末尾）；[你 11-03 六条决定的执行情况](reports/PROGRESS_20261103.md)：7 个 SUSPENDED 记录已删；三张图在 [figures/](figures/)；C1 训完后的评测脚本就绪；磁盘 18 / 22 TB，多出的 4 TB 是 P1 矩阵和奖励线写的；**发现模拟器偶尔渲染出彩色噪点**，N1 去掉受影响的 20 个实例后结论不变；每日汇总 [DAILY_20261103](daily/DAILY_20261103.md)；[N1 加固完成，合并 600 个实例](reports/N1_MERGED_20261102.md)：RL 对 SFT 四个都不显著，N1 的"RS 比 S 低 4.7"没复现、已撤回；你 11-02 晚的七条决定，执行中：[N2 卡时和排队顺序](reports/N2_PLAN_20261102.md)、[N3 设计](reports/N3_DESIGN_20261102.md)等你批；[论文素材清单](reports/PAPER_MATERIALS_20261102.md)；V4 大文件已由磁盘线删除；只投 zoetrope；[V4 复核结果](reports/V4_RECHECK_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-11-04 06:4x UTC（**矩阵补充格 B′、D_noP0 的 SFT 路径到了，交不交等你定（第 4 节）**；[C1 第七段](reports/C1_PROGRESS.md)（01:35 报）：每步 1.22 秒，推算合计约 716 卡时，约 11-04 09:40 训完，动作损失比 DS-B-030-s1 只高 0.0013；**[矩阵 v3 的 13 个起点按 N1 的做法评完了](reports/NM_RESULTS_20261103.md)**（11-03 23:1x）：RL 对自己的 SFT 起点都不到 5 个百分点、方向不一致；下游看不出 D 比 C 好；D 种子 1 的 V4 掉到 8.0%；[N2 完成](reports/N2_RESULTS_20261103.md)、[N3 完成](reports/N3_RESULTS_20261103.md)，三件事等你定（见 N3 报告末尾）；[你 11-03 六条决定的执行情况](reports/PROGRESS_20261103.md)：7 个 SUSPENDED 记录已删；三张图在 [figures/](figures/)；C1 训完后的评测脚本就绪；磁盘 18 / 22 TB，多出的 4 TB 是 P1 矩阵和奖励线写的；**发现模拟器偶尔渲染出彩色噪点**，N1 去掉受影响的 20 个实例后结论不变；每日汇总 [DAILY_20261103](daily/DAILY_20261103.md)；[N1 加固完成，合并 600 个实例](reports/N1_MERGED_20261102.md)：RL 对 SFT 四个都不显著，N1 的"RS 比 S 低 4.7"没复现、已撤回；你 11-02 晚的七条决定，执行中：[N2 卡时和排队顺序](reports/N2_PLAN_20261102.md)、[N3 设计](reports/N3_DESIGN_20261102.md)等你批；[论文素材清单](reports/PAPER_MATERIALS_20261102.md)；V4 大文件已由磁盘线删除；只投 zoetrope；[V4 复核结果](reports/V4_RECHECK_20261101.md)）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
@@ -184,9 +184,11 @@ bash downstream/eval/watch.sh status
 
 ## 3. 在等什么
 
-- **E2、B′、D_noP0 三个 SFT 起点交不交，等你定（第 4 节）。**
-  - 主实验 19:3x 说，E2 的 SFT `pt-cv6nm7kx` 在 h800 排队，权重将在 `sft/E2/model/checkpoint-<步数>`；现在的状态未核实。
-  - 三个都用 C、D 的验证提示（no_think + action_names，主实验确认过）。代码就绪（`adafac68`），矩阵的 B 记作 `Bp-SFT`。
+- **矩阵补充格的 SFT 起点交不交，等你定（第 4 节）。B′、D_noP0 的路径 11-04 06:4x 到了**（主实验转来，数字出自 P1 06:3x 的通报，我没核对）：
+  - `Bp-SFT`：B′ 第 10 个 epoch，`VAGEN-Lite-matrix/exps/matrix_v3/sft/B/model/checkpoint-1870`；P1 报验证集 31.9%、测试集 32.2%，采样验收只有第 9、10 个 epoch 过线。
+  - `D_noP0-SFT`：D_noP0 第 8 个 epoch，`…/sft/D_noP0/model/checkpoint-2272`；P1 报验证集 40.3%、测试集 42.1%，第 7–10 个 epoch 过线。
+  - 已试过（只读、临时文件已删）：两份权重齐全，`nm_starts.py make` 和 `check` 通过。Bp-SFT 用 B′ 自己 RL 链（`m3_b_s20261019/rl_m3bs1s0`）的验证提示；D_noP0 的 RL 链目录叫 `m3_dn_s*`，名字对不上，所以 D_noP0-SFT 落到主线 Qwen3 RL 链的提示。我核对过，这两份和 C、D、B′、D_noP0 各条 RL 链的提示字段完全一样。
+  - 还会来：E2、Cr 的 SFT（P1 挑完后发）；B′（1 个种子 S0 + V4，04:33 起跑）和 D_noP0（2 个种子各 S0 + V4，04:59 起跑）的 RL 挑点。B′ 和 D_noP0 的 RL 挑点按现在的代码认不出（D_noP0 的目录是两个字母，B′ 会被叫成 B、也没有对应的 SFT 起点），评之前要先改 `nm_starts.py`，补测试。
 - C1 正式任务重跑 `pt-a2loxfl9`：第七段（第 150,000–175,000 步）11-04 01:11 走完、01:35 已报；第八段（最后一段）约 11-04 09:40 训完（慢到 1.30 秒约 10:15），11:23 那次检查报，然后任务内评测。训完前排好 X3、X4（导出一份副本）、X0 的队（你 11-02 晚决定 5）。
 - C1 训完（约 11-04 09:40）、任务内评测完：依次交 X3（`run_x3.sh C1-B-030-s1`、`DS-B-030-s1`，各 8 卡）和 X4 / X0（`run_c1_post.sh`，1 卡）。11-04 07:23 和 09:00 两次检查时查剩余空间，不足 100 GB 先报你（现在约 4 TB）。
 - 你定：N2、N3 转不转主窗口；N3 (a) 档要不要不带历史重评（约 6–9 卡时）；N1 的 75 个坏画面回合要不要重跑（约 1–2 卡时）。
@@ -194,7 +196,7 @@ bash downstream/eval/watch.sh status
 
 ## 4. 待你决定的事
 
-- **E2、B′、D_noP0 三个 SFT 起点**：路径到了是否直接按 N1 的做法评，每个约 0.8 卡时，结果补进矩阵的下游表。主实验转述：你 11-03 第二份指示第 4 节把这三个列进了下游清单（"出来后补"），P1 挑完 epoch 后发路径。
+- **矩阵补充格的 SFT 起点（B′、D_noP0 的路径已到，E2、Cr 后面来）**：交不交、要不要路径一到就交。按 N1 的做法评（权重不动、600 个实例），每个约 0.8 卡时，各一个 1 卡任务投 zoetrope，拿到卡后约 1 小时；评完补进矩阵的下游表，交主线。主实验转述：你 11-03 第二份指示第 4 节把 E2、B′、D_noP0 列进了下游清单（"出来后补"）。这是转述，要你在这里点头才交。
 - **N1 里画面坏了的 75 个回合**（20 个实例 × 部分模型）：在新进程里重跑（8 个模型都跑这 20 个，约 1–2 卡时，未核实），还是论文里只报"剔除这 20 个实例"的敏感性分析（已算好，结论不变）。
 - **N3 (a) 档的对话历史**：主线 v2 评测给模型看全部历史轮次，N 系列只给当前一轮。要不要把 6 个模型在 v2 两套题上不带历史再评一遍（约 6–9 卡时，未核实）。
 
