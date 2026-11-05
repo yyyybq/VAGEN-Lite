@@ -107,6 +107,13 @@ def markdown(rep: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def ylabel(rep: dict) -> str:
+    """The figure's axis label with the instances it is drawn on (600, or fewer in an excluded version: the most any
+    model and tier has)."""
+    n = max((r["n"] for by in rep["rates"].values() for r in by.values()), default=0)
+    return f"Success on {n} instances (%)"
+
+
 def figure(rep: dict, out: Path) -> list:
     sys.path.insert(0, str(HERE.parent / "report"))
     import n_figures as NF
@@ -130,7 +137,7 @@ def figure(rep: dict, out: Path) -> list:
         ax.set_title(gen, loc="left", fontweight="bold")
         ax.grid(axis="y", color="#e4e7eb", lw=0.7)
         ax.legend(fontsize=8, loc="upper left")
-    axes[0].set_ylabel("Success on 600 instances (%)")
+    axes[0].set_ylabel(ylabel(rep))
     fig.tight_layout()
     files = NF.save(fig, out, "n2_curve")
     plt.close(fig)
