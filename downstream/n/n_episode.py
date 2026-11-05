@@ -10,8 +10,10 @@ the RL env RS and RD were trained with), built with the upstream functions loade
   * each turn one user message: init_observation_template (first turn) or action_template (with the feedback), the
     image placeholder, "Current camera pose: " + format_pose6_deg(c2w_extrinsic_to_se3(c2w), normalize_zero), the
     task, then format_prompt["no_think"] (the example only on the first turn);
-  * history_window_size 1: the model sees the system prompt and the current user message only (the main line's
-    agent loop keeps one observation);
+  * history_window_size 1: the model sees the system prompt and the current user message only.  (Corrected
+    2026-11-05: this is not the RL models' training input.  RS, RD and the Qwen3 pair were trained with GRPO and
+    concat_multi_turn, one sequence per episode, so every call saw all earlier turns, as in SFT.  The main-line
+    evaluation's --no-history input is the one here: N3 tier a without history, N3_NOHIST_20261105.md.)
   * a reply is read like the env's strict parser (utils.parse_free_think, parse_actions, check_actions against the
     strafe actions; at most 5 actions); an unreadable reply executes nothing and 3 in a row end the episode;
   * the actions run one by one; a blocked one stays (feedback "<k> of <n> actions executed; blocked: <action>
