@@ -7,8 +7,9 @@ the main line's "RL beats SFT" goes away on the way to RoboCasa.
 Tiers (each RL start against the SFT start it grew from, same generation: RS, RD against S; Q3RS, Q3RD against Q3S):
   a  the main line's own v2 validation (413) and test (292) tasks, upstream scenes, renderer and body: X4's per-task
      results for S, RS, RD (orig-*), the model line's for Q3S, Q3RS, Q3RD (sft_q3formal_e8, q3s0_100, q3d_300); paired
-     by task.  (The main line's v2 evaluation shows the model every earlier turn; the N series, as the RL validation
-     env, only the current one.)
+     by task.  (The main line's v2 evaluation shows the model every earlier turn, as its SFT and its RL training did
+     (GRPO, concat_multi_turn); the N series shows only the current one.  Corrected 2026-11-05: this used to say the
+     N series did so "as the RL validation env".)
   c  N1's merged instances solvable under the upstream camera sphere (N3/recheck_sphere/solvable.jsonl), that rule:
      N3/c/<model>/episodes.jsonl; paired by instance.
   d  N1 as it is (the merged 600: n1_eval_20261031 and n1b_eval_20261102); also on tier c's instances only, so that
