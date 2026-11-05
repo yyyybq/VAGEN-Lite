@@ -238,3 +238,98 @@ def test_ask_job_runs_the_family_and_counts_the_answers(tmp_path):
     bad = subprocess.run(["bash", str(wt / "downstream/n/run_n_qa_ask.sh"), str(out), "other"], capture_output=True,
                          text=True, timeout=60)
     assert bad.returncode == 2
+
+
+class GridScene:
+    """A robot that may not go beyond x = 0.25 (so moving forward from the start is blocked)."""
+
+    def __init__(self):
+        self.pose, self.checked = (0.0, 0.0, 0.0), 0
+
+    def set_pose(self, pose):
+        self.pose = tuple(pose)
+
+    def collision(self):
+        self.checked += 1
+        return "wall" if self.pose[0] > 0.25 else None
+
+
+def test_search_keeps_every_edge_and_costs_count_to_the_nearest_success():
+    s = GridScene()
+    states, edges, capped = Q.search(s, (0.0, 0.0, 0.0), max_depth=4, max_states=10000)
+    k0 = N.pose_key((0.0, 0.0, 0.0))
+    assert not capped and edges[k0]["move_forward"] is None and s.pose == (0.0, 0.0, 0.0)
+    assert edges[k0]["move_left"] == N.pose_key((0.0, 0.3, 0.0))
+    inst = {"instance_id": "I", "start_pose": [0.0, 0.0, 0.0]}
+    r = Q.first_actions(states, edges, capped, inst, lambda pose: pose[1] >= 0.55)
+    c = r["cost"]
+    assert r["start_dist"] == 2 and c["move_left"] == 2
+    assert c["move_forward"] == 3 and r["blocked"] == ["move_forward"]  # a blocked first action wastes one
+    assert c["move_backward"] == 3 and c["move_right"] == 4
+    assert r["goal_poses"] > 0 and r["poses"] == len(states)
+    _, _, capped = Q.search(GridScene(), (0.0, 0.0, 0.0), max_depth=4, max_states=5)
+    assert capped
+
+
+def test_first_action_asks_a_shortest_start_against_one_at_least_two_longer():
+    import collections
+    import random
+    inst = {"instance_id": "I", "description": "Move so that the bowl is left of the cup.",
+            "shortest": {"path": ["move_left", "move_left"], "actions": 2}}
+    cost = {"move_forward": 4, "move_backward": 3, "move_left": 3, "move_right": 5, "turn_left": None, "turn_right": 4}
+    skipped = collections.Counter()
+    q = Q.first_action_question(inst, {"instance_id": "I"}, {"cost": cost, "blocked": ["move_forward"]},
+                                random.Random(0), skipped)
+    assert q["numbers"]["optimal"] == ["move_backward", "move_left"] and q["numbers"]["best"] == "move_left"
+    assert q["options"]["AB".index(q["answer"])] == "move left"
+    assert q["numbers"]["other"] in ("move_right", "turn_left")  # 5 >= 3 + 2, or no success reachable through it
+    assert "in the fewest actions?" in q["prompt"]
+    near = dict(cost, move_right=4, turn_left=4)
+    assert Q.first_action_question(inst, {}, {"cost": near}, random.Random(0), skipped) is None
+    assert Q.first_action_question(inst, {}, {"cost": {a: None for a in cost}}, random.Random(0), skipped) is None
+    assert skipped == {"first_action: no action clearly worse": 1, "first_action: no success reachable": 1}
+
+
+def test_object_kinds_can_be_asked_on_the_success_view(tmp_path):
+    a, b = box("obj_a", "bowl", 1.0), box("obj_b", "cup", 2.0)
+    i = inst("K_s5_equidistance", "equidistance", [a, b], {}, {})
+    i["marks"]["shortest"] = {"a": [200.0, 100.0], "b": [100.0, 100.0]}
+    i["shortest"] = {"pose": [1.4, 0.0, 0.0], "actions": 3, "path": ["move_forward"] * 3,
+                     "judge": {"visible": {"obj_a": 0.02, "obj_b": 0.02}}}
+    i["images"]["shortest"] = "images/K_s5_equidistance_shortest.png"
+    gen = tmp_path / "gen"
+    (gen / "images").mkdir(parents=True)
+    for tag in ("start", "shortest"):
+        (gen / f"images/K_s5_equidistance_{tag}.png").write_bytes(b"png")
+    qs, skipped = Q.make_questions([i], Q.image_paths([i], [gen]), {}, seed=1, object_image="shortest",
+                                   object_images=Q.image_paths([i], [gen], "shortest"),
+                                   kinds=("left_right", "near_far", "best_action"))
+    by = {q["kind"]: q for q in qs}
+    assert set(by) == {"left_right", "near_far"} and {q["image_tag"] for q in qs} == {"shortest"}
+    assert by["left_right"]["image_path"].endswith("_shortest.png")
+    assert by["near_far"]["numbers"]["distance_m"] == {"bowl": 0.2, "cup": 0.6}  # from the success pose x = 1.4
+    assert skipped == {"best_action: no truth": 1}
+    start_only, _ = Q.make_questions([i], Q.image_paths([i], [gen]), {}, seed=1, kinds=("left_right",))
+    assert start_only == []  # nothing visible at the start
+
+
+def test_truth_job_also_runs_the_search_mode(tmp_path):
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    (wt / "downstream/eval").mkdir(parents=True)
+    (wt / "downstream/n/run_n_qa_truth.sh").write_text((ROOT / "n/run_n_qa_truth.sh").read_text())
+    (wt / "downstream/n/n_qa.py").write_text(TRUTH_STUB.replace('a[0] == "truth"', 'a[0] in ("truth", "paths")'))
+    (wt / "downstream/eval/sim_env.sh").write_text('SIM_PY=python3\nsim() { shift; "$@"; }\n')
+    inst = tmp_path / "i.jsonl"
+    inst.write_text("".join(json.dumps({"scene_id": s}) + "\n" for s in ("A_s1", "bad")))
+    out = tmp_path / "out"
+    env = dict(os.environ, N_QA_SIM_PY=sys.executable)
+    res = subprocess.run(["bash", str(wt / "downstream/n/run_n_qa_truth.sh"), str(inst), str(out), "2", "30", "paths"],
+                         capture_output=True, text=True, env=env, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert [json.loads(x)["instance_id"] for x in (out / "paths.jsonl").read_text().splitlines()] == ["A_s1_x"]
+    assert (out / "failed_paths.txt").read_text().split() == ["bad", "rc=3"] and not (out / "failed.txt").exists()
+    assert "done: 1 instances, 1 scenes failed" in (out / "paths.log").read_text()
+    bad = subprocess.run(["bash", str(wt / "downstream/n/run_n_qa_truth.sh"), str(inst), str(out), "2", "30", "x"],
+                         capture_output=True, text=True, env=env, timeout=60)
+    assert bad.returncode == 2

@@ -3,8 +3,11 @@
 start image of N1's merged 600 instances, asked zero-shot to the eight models, then paired with their N1 episodes.
 
     python downstream/n/n_qa.py truth   --instances I.jsonl --scene SID --out DIR        # simulator Python, per scene
+    python downstream/n/n_qa.py paths   --instances I.jsonl --scene SID --out DIR        # simulator Python, per scene
     python downstream/n/n_qa.py collect --truth DIR --out TRUTH.jsonl
-    python downstream/n/n_qa.py make    --instances I.jsonl --gen GEN [GEN ...] --truth TRUTH.jsonl --out DIR
+    python downstream/n/n_qa.py make    --instances I.jsonl --gen GEN [GEN ...] [--truth TRUTH.jsonl]
+                                        [--paths PATHS.jsonl] [--object-image start|shortest|best] [--kinds K ...]
+                                        --out DIR
     python downstream/n/n_qa.py samples --questions Q.jsonl --n 20 --out PAGE.html
     python downstream/n/n_qa.py analyze --questions Q.jsonl --answers M=A.jsonl [...] --episodes EVAL [EVAL ...]
                                         --instances I.jsonl --out DIR
@@ -13,7 +16,12 @@ truth: every instance of the scene, from its start pose, each of the six actions
   (n_env.Scene, N1's robot body; the robot hidden as in the episodes): blocked or not (n_env.Scene.try_action) and the
   shaping score after it (n_env.box_judge, the score the episodes record as max_shaping_score; a blocked action leaves
   the pose and the score where they were).  DIR/<SID>.jsonl.
-make: three kinds of question, in X0's two-choice layout (a prompt naming the camera, two lettered options, "Answer
+paths (11-05, after the first truth: at 423 of the 600 starts no single step changes the shaping score): the search
+  the instances were generated with (n_smoke.reachable's: poses reachable from the start in at most MAX_DEPTH
+  actions, MAX_STATES poses, a move blocked when its new pose collides), keeping every edge; then per instance, with
+  the box judge as the goal, the fewest actions to finish after each first action (a blocked first action wastes one
+  step).  DIR/<SID>.jsonl.
+make: kinds of question, in X0's two-choice layout (a prompt naming the camera, two lettered options, "Answer
   with the letter of the correct option only."), the right letter drawn at random (seeded):
     left_right   "is the <A> to the left or to the right of the <B>?": both objects of the instance visible at the
                  start (segmentation share >= n_env.MIN_VISIBLE_FRACTION and a visible-pixel centre in the stored
@@ -24,9 +32,14 @@ make: three kinds of question, in X0's two-choice layout (a prompt naming the ca
                  stored renders do not keep);
     best_action  "which single action brings the robot closer to finishing the task?" (the instance's own task
                  text): the action whose one step raises the shaping score the most against one drawn at random from
-                 those at least DELTA below it; only where the best one raises the start score by at least DELTA.
+                 those at least DELTA below it; only where the best one raises the start score by at least DELTA;
+    first_action "which action should the robot take first to finish the task in the fewest actions?" (paths): an
+                 action that starts a shortest way (the recorded shortest path's first one when it is such) against
+                 one that makes the way at least 2 actions longer or reaches no success within the search.
   The names are the instance's object names (n_env.natural_name); an instance whose two names are the same is left
-  out of the two object kinds.  DIR/questions.jsonl, DIR/summary.json.
+  out of the two object kinds.  --object-image asks the object kinds on another view of the instance (shortest or
+  best: its success images, where both objects are visible by construction) instead of the start; the action kinds
+  are always asked on the start image.  DIR/questions.jsonl, DIR/summary.json.
 samples: N questions spread over the kinds and task types, as a review page: the image (with the two objects marked
   for the object kinds), the prompt, the right answer and the numbers behind it.
 analyze: two readings of a reply: strict (x0_qa.parse_letter: the option letter alone) and lenient (also a reply that
@@ -56,7 +69,7 @@ import n_env as N  # noqa: E402
 LR_PIXELS = 30.0  # X0's left/right margin on a 256-px image
 NF_METERS, NF_RATIO = 0.2, 1.2  # X0's near/far margins
 DELTA = 0.02  # best_action: the least rise over the start, and the least gap to the other option
-KINDS = ("left_right", "near_far", "best_action")
+KINDS = ("left_right", "near_far", "best_action", "first_action")
 ACTION_TEXT = {"move_forward": "move forward", "move_backward": "move backward", "move_left": "move left",
                "move_right": "move right", "turn_left": "turn left", "turn_right": "turn right"}
 CAMERA_TEXT = "This image is from the robot's camera."
@@ -122,6 +135,110 @@ def collect_cmd(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------------------------------------- paths
+MAX_DEPTH, MAX_STATES = 12, 15000  # n_smoke.reachable's, which the instances were generated with
+
+
+def search(scene, start, max_depth: int = MAX_DEPTH, max_states: int = MAX_STATES) -> tuple:
+    """Breadth first over the poses reachable from start, as n_smoke.reachable (pose_key states, a move blocked
+    when its new pose collides, at most max_depth actions and max_states poses), also keeping every edge:
+    ({key: (pose, depth)}, {key: {action: key, or None when blocked}}, capped)."""
+    k0 = N.pose_key(start)
+    states, edges, blocked = {k0: (tuple(start), 0)}, {}, set()
+    queue, capped = collections.deque([k0]), False
+    while queue:
+        k = queue.popleft()
+        pose, depth = states[k]
+        if depth >= max_depth:
+            continue
+        out = {}
+        for a in N.ACTIONS:
+            new = tuple(N.apply_action(pose, a))
+            nk = N.pose_key(new)
+            if nk in blocked:
+                out[a] = None
+            elif nk in states:
+                out[a] = nk
+            else:
+                scene.set_pose(new)
+                if scene.collision() is not None:
+                    blocked.add(nk)
+                    out[a] = None
+                else:
+                    states[nk] = (new, depth + 1)
+                    out[a] = nk
+                    queue.append(nk)
+                    if len(states) >= max_states:
+                        capped = True
+                        break
+        edges[k] = out
+        if capped:
+            break
+    scene.set_pose(start)
+    return states, edges, capped
+
+
+def to_goal(states: dict, edges: dict, goal) -> dict:
+    """{key: fewest actions from it to any goal key} over the kept edges (keys with no path left out)."""
+    rev = collections.defaultdict(list)
+    for k, out in edges.items():
+        for nk in out.values():
+            if nk is not None:
+                rev[nk].append(k)
+    dist = {k: 0 for k in goal}
+    queue = collections.deque(goal)
+    while queue:
+        k = queue.popleft()
+        for p in rev[k]:
+            if p not in dist:
+                dist[p] = dist[k] + 1
+                queue.append(p)
+    return dist
+
+
+def first_actions(states: dict, edges: dict, capped: bool, inst: dict, success) -> dict:
+    """Per action from the start: the fewest actions to finish the instance when it is taken first (a blocked one
+    leaves the robot where it is: 1 + the start's own distance); None if no pose passing success(pose) is
+    reachable through it within the search."""
+    k0 = N.pose_key(inst["start_pose"])
+    goal = [k for k, (pose, _) in states.items() if success(pose)]
+    dist = to_goal(states, edges, goal)
+    out = {}
+    for a, nk in edges.get(k0, {}).items():
+        if nk is None:
+            out[a] = None if k0 not in dist else 1 + dist[k0]
+        else:
+            out[a] = None if nk not in dist else 1 + dist[nk]
+    return {"instance_id": inst["instance_id"], "cost": out, "start_dist": dist.get(k0),
+            "blocked": [a for a, nk in edges.get(k0, {}).items() if nk is None], "goal_poses": len(goal),
+            "poses": len(states), "capped": capped}
+
+
+def paths_cmd(args) -> int:
+    """Per scene: the search from the start, then per instance first_actions with the box judge as the goal."""
+    insts = [r for r in read_jsonl(args.instances) if r["scene_id"] == args.scene]
+    if not insts:
+        print(f"[n_qa] no instance of {args.scene}")
+        return 2
+    args.out.mkdir(parents=True, exist_ok=True)
+    rows = {}
+    groups = collections.defaultdict(list)  # the robot setting and start as n_episode builds them
+    for i in insts:
+        groups[(bool(i.get("hide_robot", False)), N.pose_key(i["start_pose"]))].append(i)
+    for (hide, _), group in sorted(groups.items()):
+        scene = N.Scene(group[0]["task"], int(group[0]["seed"]), hide_robot=hide)
+        try:
+            states, edges, capped = search(scene, tuple(group[0]["start_pose"]), args.max_depth, args.max_states)
+        finally:
+            scene.close()
+        for inst in group:
+            rows[inst["instance_id"]] = first_actions(states, edges, capped, inst,
+                                                      lambda pose, item=inst["item"]: N.box_judge(item, pose)["success"])
+    write_jsonl(args.out / f"{args.scene}.jsonl", [rows[i["instance_id"]] for i in insts])
+    print(f"[n_qa] {args.scene}: {len(rows)} instances")
+    return 0
+
+
 # -------------------------------------------------------------------------------------------------- make
 def footprint_distance(pose, obj: dict) -> float:
     """Horizontal distance from the camera (over the pose's x, y) to the object's box footprint; 0 inside it."""
@@ -132,13 +249,20 @@ def footprint_distance(pose, obj: dict) -> float:
     return math.hypot(dx, dy)
 
 
-def visible_pair(inst: dict):
-    """The two objects if both are visible at the start (share and stored centre) and named apart, else None."""
+def view_of(inst: dict, tag: str) -> tuple:
+    """(pose, judge numbers, marks) of an instance's start or of its shortest / best success pose."""
+    if tag == "start":
+        return inst["start_pose"], inst.get("start_judge") or {}, (inst.get("marks") or {}).get("start") or {}
+    return inst[tag]["pose"], inst[tag].get("judge") or {}, (inst.get("marks") or {}).get(tag) or {}
+
+
+def visible_pair(inst: dict, tag: str = "start"):
+    """The two objects if both are visible in the view (share and stored centre) and named apart, else None."""
     objs = inst.get("objects") or []
     if len(objs) != 2:
         return None
-    marks = (inst.get("marks") or {}).get("start") or {}
-    vis = (inst.get("start_judge") or {}).get("visible") or {}
+    _, judge, marks = view_of(inst, tag)
+    vis = judge.get("visible") or {}
     if "a" not in marks or "b" not in marks:
         return None
     if any(vis.get(o["key"], 0.0) < N.MIN_VISIBLE_FRACTION for o in objs):
@@ -158,69 +282,121 @@ def two_choice(stem: str, options: list, right: int, rng: random.Random) -> tupl
     return prompt, shown, letter
 
 
-def make_questions(insts: list, images: dict, truth: dict, seed: int = 20261105, delta: float = DELTA) -> tuple:
+def object_questions(inst: dict, common: dict, tag: str, rng: random.Random, skipped) -> list:
+    """left_right and near_far on the two objects in one view (tag: start, shortest or best)."""
+    pair = visible_pair(inst, tag)
+    if pair is None:
+        skipped["object kinds: not two visible, differently named objects"] += 1
+        return []
+    out, iid = [], inst["instance_id"]
+    objs, names, (ma, mb) = pair
+    dx = ma[0] - mb[0]
+    if abs(dx) >= LR_PIXELS:
+        subj = rng.randrange(2)
+        other = 1 - subj
+        left = (dx < 0) if subj == 0 else (dx > 0)  # the subject's centre left of the other's
+        stem = f"{CAMERA_TEXT} In this image, is the {names[subj]} to the left or to the right of the {names[other]}?"
+        prompt, shown, letter = two_choice(stem, ["left", "right"], 0 if left else 1, rng)
+        out.append(dict(common, id=f"{iid}::left_right", kind="left_right", prompt=prompt, options=shown,
+                        answer=letter, numbers={"dx_px": round(dx, 1), "subject": names[subj], "other": names[other]}))
+    else:
+        skipped["left_right: centres closer than 30 px"] += 1
+    pose = view_of(inst, tag)[0]
+    da, db = (footprint_distance(pose, o) for o in objs)
+    near = 0 if da < db else 1
+    dn, dfar = min(da, db), max(da, db)
+    if dfar - dn >= NF_METERS and dfar >= NF_RATIO * max(dn, 1e-9):
+        stem = f"{CAMERA_TEXT} Which of these objects is closer to the camera?"
+        prompt, shown, letter = two_choice(stem, [f"the {names[0]}", f"the {names[1]}"], near, rng)
+        out.append(dict(common, id=f"{iid}::near_far", kind="near_far", prompt=prompt, options=shown,
+                        answer=letter, numbers={"distance_m": {names[0]: round(da, 3), names[1]: round(db, 3)}}))
+    else:
+        skipped["near_far: distances too close"] += 1
+    return out
+
+
+def first_action_question(inst: dict, common: dict, p: dict, rng: random.Random, skipped):
+    """first_action: an action that starts a shortest way to a box success (search's costs) against one that makes
+    the way at least 2 actions longer (or reaches no success within the search)."""
+    cost = p["cost"]
+    known = {a: c for a, c in cost.items() if c is not None}
+    if not known:
+        skipped["first_action: no success reachable"] += 1
+        return None
+    d = min(known.values())
+    optimal = [a for a in N.ACTIONS if cost.get(a) == d]
+    worse = [a for a in N.ACTIONS if a in cost and (cost[a] is None or cost[a] >= d + 2)]
+    if not worse:
+        skipped["first_action: no action clearly worse"] += 1
+        return None
+    recorded = ((inst.get("shortest") or {}).get("path") or [None])[0]
+    best = recorded if recorded in optimal else optimal[0]
+    other = rng.choice(worse)
+    stem = (f"{CAMERA_TEXT} The robot's task: {inst['description']}\n"
+            "Which action should the robot take first to finish the task in the fewest actions?")
+    prompt, shown, letter = two_choice(stem, [ACTION_TEXT[best], ACTION_TEXT[other]], 0, rng)
+    return dict(common, id=f"{inst['instance_id']}::first_action", kind="first_action", prompt=prompt, options=shown,
+                answer=letter, numbers={"cost": cost, "fewest": d, "optimal": optimal, "best": best, "other": other,
+                                        "blocked": p.get("blocked"), "recorded_first": recorded,
+                                        "recorded_actions": (inst.get("shortest") or {}).get("actions")})
+
+
+def make_questions(insts: list, images: dict, truth: dict, seed: int = 20261105, delta: float = DELTA,
+                   paths=None, object_image: str = "start", object_images=None, kinds=KINDS) -> tuple:
+    """images: start image per instance; object_images: the object_image view's (default the start's).  paths:
+    paths_cmd's rows per instance (for first_action)."""
     rng = random.Random(seed)
     qs, skipped = [], collections.Counter()
+    object_images = images if object_images is None else object_images
     for inst in insts:
         iid = inst["instance_id"]
-        common = {"instance_id": iid, "task_type": inst["task_type"], "image_path": images.get(iid)}
-        if not common["image_path"]:
-            skipped["no image"] += 1
-            continue
-        pair = visible_pair(inst)
-        if pair is None:
-            skipped["object kinds: not two visible, differently named objects"] += 1
-        else:
-            objs, names, (ma, mb) = pair
-            dx = ma[0] - mb[0]
-            if abs(dx) >= LR_PIXELS:
-                subj = rng.randrange(2)
-                other = 1 - subj
-                left = (dx < 0) if subj == 0 else (dx > 0)  # the subject's centre left of the other's
-                stem = f"{CAMERA_TEXT} In this image, is the {names[subj]} to the left or to the right of the {names[other]}?"
-                prompt, shown, letter = two_choice(stem, ["left", "right"], 0 if left else 1, rng)
-                qs.append(dict(common, id=f"{iid}::left_right", kind="left_right", prompt=prompt, options=shown,
-                               answer=letter, numbers={"dx_px": round(dx, 1), "subject": names[subj],
-                                                       "other": names[other]}))
+        start = {"instance_id": iid, "task_type": inst["task_type"], "image_path": images.get(iid), "image_tag": "start"}
+        view = dict(start, image_path=object_images.get(iid), image_tag=object_image)
+        if {"left_right", "near_far"} & set(kinds):
+            if view["image_path"]:
+                qs += [q for q in object_questions(inst, view, object_image, rng, skipped) if q["kind"] in kinds]
             else:
-                skipped["left_right: centres closer than 30 px"] += 1
-            da, db = (footprint_distance(inst["start_pose"], o) for o in objs)
-            near, far = (0, 1) if da < db else (1, 0)
-            dn, dfar = min(da, db), max(da, db)
-            if dfar - dn >= NF_METERS and dfar >= NF_RATIO * max(dn, 1e-9):
-                stem = f"{CAMERA_TEXT} Which of these objects is closer to the camera?"
-                prompt, shown, letter = two_choice(stem, [f"the {names[0]}", f"the {names[1]}"], near, rng)
-                qs.append(dict(common, id=f"{iid}::near_far", kind="near_far", prompt=prompt, options=shown,
-                               answer=letter, numbers={"distance_m": {names[0]: round(da, 3), names[1]: round(db, 3)}}))
+                skipped[f"object kinds: no {object_image} image"] += 1
+        if not start["image_path"]:
+            skipped["action kinds: no start image"] += 1
+            continue
+        if "best_action" in kinds:
+            t = truth.get(iid)
+            if t is None:
+                skipped["best_action: no truth"] += 1
             else:
-                skipped["near_far: distances too close"] += 1
-        t = truth.get(iid)
-        if t is None:
-            skipped["best_action: no truth"] += 1
-            continue
-        scores = {a: v["shaping"] for a, v in t["actions"].items()}
-        best = max(scores, key=lambda a: (scores[a], -N.ACTIONS.index(a)))
-        lower = [a for a in N.ACTIONS if scores[a] <= scores[best] - delta]
-        if scores[best] < t["start_shaping"] + delta or not lower:
-            skipped["best_action: no action rises enough or none clearly worse"] += 1
-            continue
-        other = rng.choice(lower)
-        stem = (f"{CAMERA_TEXT} The robot's task: {inst['description']}\n"
-                "Which single action brings the robot closer to finishing the task?")
-        prompt, shown, letter = two_choice(stem, [ACTION_TEXT[best], ACTION_TEXT[other]], 0, rng)
-        qs.append(dict(common, id=f"{iid}::best_action", kind="best_action", prompt=prompt, options=shown,
-                       answer=letter, numbers={"start": round(t["start_shaping"], 4),
-                                               "after": {a: round(s, 4) for a, s in scores.items()},
-                                               "blocked": [a for a, v in t["actions"].items() if v["blocked"]],
-                                               "best": best, "other": other}))
+                scores = {a: v["shaping"] for a, v in t["actions"].items()}
+                best = max(scores, key=lambda a: (scores[a], -N.ACTIONS.index(a)))
+                lower = [a for a in N.ACTIONS if scores[a] <= scores[best] - delta]
+                if scores[best] < t["start_shaping"] + delta or not lower:
+                    skipped["best_action: no action rises enough or none clearly worse"] += 1
+                else:
+                    other = rng.choice(lower)
+                    stem = (f"{CAMERA_TEXT} The robot's task: {inst['description']}\n"
+                            "Which single action brings the robot closer to finishing the task?")
+                    prompt, shown, letter = two_choice(stem, [ACTION_TEXT[best], ACTION_TEXT[other]], 0, rng)
+                    qs.append(dict(start, id=f"{iid}::best_action", kind="best_action", prompt=prompt, options=shown,
+                                   answer=letter, numbers={"start": round(t["start_shaping"], 4),
+                                                           "after": {a: round(s, 4) for a, s in scores.items()},
+                                                           "blocked": [a for a, v in t["actions"].items() if v["blocked"]],
+                                                           "best": best, "other": other}))
+        if "first_action" in kinds and paths is not None:
+            p = paths.get(iid)
+            if p is None:
+                skipped["first_action: no search"] += 1
+            else:
+                q = first_action_question(inst, start, p, rng, skipped)
+                if q:
+                    qs.append(q)
     return qs, dict(skipped)
 
 
-def image_paths(insts: list, gens) -> dict:
-    """instance id -> absolute path of its start image, from whichever generation folder holds it."""
+def image_paths(insts: list, gens, tag: str = "start") -> dict:
+    """instance id -> absolute path of its image of one view (start, shortest, best), from whichever generation
+    folder holds it."""
     out = {}
     for inst in insts:
-        rel = (inst.get("images") or {}).get("start") or f"images/{inst['instance_id']}_start.png"
+        rel = (inst.get("images") or {}).get(tag) or f"images/{inst['instance_id']}_{tag}.png"
         for g in gens:
             p = Path(g) / rel
             if p.is_file():
@@ -231,14 +407,19 @@ def image_paths(insts: list, gens) -> dict:
 
 def make_cmd(args) -> int:
     insts = read_jsonl(args.instances)
-    truth = {r["instance_id"]: r for r in read_jsonl(args.truth)}
-    qs, skipped = make_questions(insts, image_paths(insts, args.gen), truth, args.seed, args.delta)
+    truth = {r["instance_id"]: r for r in read_jsonl(args.truth)} if args.truth else {}
+    paths = {r["instance_id"]: r for r in read_jsonl(args.paths)} if args.paths else None
+    kinds = tuple(args.kinds or KINDS)
+    qs, skipped = make_questions(insts, image_paths(insts, args.gen), truth, args.seed, args.delta, paths=paths,
+                                 object_image=args.object_image,
+                                 object_images=image_paths(insts, args.gen, args.object_image), kinds=kinds)
     args.out.mkdir(parents=True, exist_ok=True)
     write_jsonl(args.out / "questions.jsonl", qs)
     summary = {"instances": len(insts), "questions": len(qs),
                "per_kind": dict(collections.Counter(q["kind"] for q in qs)),
-               "right_letter_A": {k: sum(q["answer"] == "A" for q in qs if q["kind"] == k) for k in KINDS},
-               "skipped": skipped, "seed": args.seed, "delta": args.delta}
+               "right_letter_A": {k: sum(q["answer"] == "A" for q in qs if q["kind"] == k) for k in kinds},
+               "skipped": skipped, "seed": args.seed, "delta": args.delta, "kinds": list(kinds),
+               "object_image": args.object_image}
     (args.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps(summary))
     return 0
@@ -275,8 +456,8 @@ def marked_image(q: dict, inst: dict) -> str:
 
     img = Image.open(q["image_path"]).convert("RGB").resize((512, 512))
     d = ImageDraw.Draw(img)
-    if q["kind"] != "best_action":
-        marks = inst["marks"]["start"]
+    if q["kind"] in ("left_right", "near_far"):
+        marks = inst["marks"][q.get("image_tag", "start")]
         for letter, obj in zip("ab", inst["objects"]):
             if letter in marks:
                 x, y = marks[letter][0] * 2, marks[letter][1] * 2
@@ -447,13 +628,23 @@ def main(argv=None) -> int:
     t.add_argument("--instances", type=Path, required=True)
     t.add_argument("--scene", required=True)
     t.add_argument("--out", type=Path, required=True)
+    p = sub.add_parser("paths")
+    p.add_argument("--instances", type=Path, required=True)
+    p.add_argument("--scene", required=True)
+    p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--max-depth", type=int, default=MAX_DEPTH)
+    p.add_argument("--max-states", type=int, default=MAX_STATES)
     c = sub.add_parser("collect")
     c.add_argument("--truth", type=Path, required=True)
     c.add_argument("--out", type=Path, required=True)
     m = sub.add_parser("make")
     m.add_argument("--instances", type=Path, required=True)
     m.add_argument("--gen", type=Path, nargs="+", required=True)
-    m.add_argument("--truth", type=Path, required=True)
+    m.add_argument("--truth", type=Path, default=None, help="truth's rows (best_action)")
+    m.add_argument("--paths", type=Path, default=None, help="paths' rows (first_action)")
+    m.add_argument("--object-image", choices=("start", "shortest", "best"), default="start",
+                   help="the view the two object kinds are asked on")
+    m.add_argument("--kinds", nargs="*", choices=KINDS, default=None)
     m.add_argument("--out", type=Path, required=True)
     m.add_argument("--seed", type=int, default=20261105)
     m.add_argument("--delta", type=float, default=DELTA)
@@ -470,7 +661,7 @@ def main(argv=None) -> int:
     a.add_argument("--instances", type=Path, required=True)
     a.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
-    return {"truth": truth_cmd, "collect": collect_cmd, "make": make_cmd, "samples": samples_cmd,
+    return {"truth": truth_cmd, "paths": paths_cmd, "collect": collect_cmd, "make": make_cmd, "samples": samples_cmd,
             "analyze": analyze_cmd}[args.cmd](args)
 
 
