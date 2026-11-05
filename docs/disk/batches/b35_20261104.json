@@ -1,6 +1,6 @@
 {
  "batch": "b35_20261104",
- "approved": "PENDING: the main line (主实验, 11-04 20:1x) found the top-level weights of qa_sft_ctrl_20261103/model sha256-identical to checkpoint-155 (Q/analysis/qarl_fix_20261104/ctrl_sft_dup_sha256.txt); deletion needs the user's word in the disk window",
+ "approved": "the user 2026-11-05 ~07:10 UTC in the disk window: \"都选甲\" (reply to the 04:4x report; quota table 19/22 TB, 3 TB left). b35 甲 = archive to AOSS first, then delete: the seven top-level weight shards of qa_sft_ctrl_20261103/model (7 files 34.0 GB, sha256-identical to checkpoint-155); checkpoint-155/ and the small top-level files stay",
  "items": [
   {
    "id": "MAIN-qa_sft_ctrl-top-weights",

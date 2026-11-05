@@ -1,6 +1,6 @@
 {
  "batch": "b36_20261104",
- "approved": "PENDING: the downstream line (11-04 20:2x) relays the user's \"都按建议执行\" (downstream window ~20:15) on its advice that DS-B-030-s1's final model is no longer needed; deletion needs the user's word in the disk window",
+ "approved": "the user 2026-11-05 ~07:10 UTC in the disk window: \"都选甲\" (reply to the 04:4x report; quota table 19/22 TB, 3 TB left). b36 甲 = confirm the delete (the downstream line relayed the user's \"都按建议执行\"): DS-B-030-s1 run/final_model/pytorch_model.pt, 1 file 16.8 GB, on AOSS since b27 (size checked again before the delete); run/metrics.jsonl and the rest of run/ stay",
  "items": [
   {
    "id": "DS-B-030-s1-run-final_model",
