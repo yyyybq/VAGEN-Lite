@@ -129,7 +129,7 @@ def test_three_kinds_of_question_and_their_rules(tmp_path):
 
 def test_samples_take_turns_over_kinds_and_task_types():
     qs = [{"id": f"{t}{k}{i}", "kind": k, "task_type": t} for k in Q.KINDS for t in ("p", "q") for i in range(3)]
-    got = Q.pick_samples(qs, 6, seed=0)
+    got = Q.pick_samples(qs, 2 * len(Q.KINDS), seed=0)
     assert [q["kind"] for q in got] == list(Q.KINDS) * 2
     assert {q["task_type"] for q in got if q["kind"] == "near_far"} == {"p", "q"}
     assert len(Q.pick_samples(qs, 100)) == len(qs)
