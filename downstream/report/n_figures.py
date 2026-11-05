@@ -3,10 +3,12 @@
 English (the cluster has no CJK font), 95% Wilson intervals; DIR/figures.json keeps every number plotted.
 
     python downstream/report/n_figures.py --out DIR [--runs /mnt/umm/users/yinbaiqiao/downstream_runs]
+                                          [--n1-report n/n1_merged_n1fix_20261105/report.json]
 
 n1_by_type: N1 and its second set merged (600 instances, 100 per task type): success per task type and overall for
   the eight models, one panel per generation (Qwen2.5-VL-7B: B, S, RS, RD; Qwen3-VL-8B: Q3B, Q3S, Q3RS, Q3RD), the
-  same colour for the same role in both (n/n1_merged_20261102/report.json, "combined").
+  same colour for the same role in both (--n1-report, "combined"; default n/n1_merged_20261102/report.json, and since
+  the user's task book of 11-05, item 2, the report after N1's broken episodes were played again).
 qa_heatmap: single-image question answering, the eight models x three question sets (X0: RoboCasa frames, 510
   two-choice spatial questions; X0b-1: InteriorGS frames, 510 two-choice spatial questions; G0: 300 non-spatial
   recognition questions), each cell the accuracy and its k / n (x/QA_20261030/results: q0_vs_B.json, x0b1_vs_B.json,
@@ -73,8 +75,11 @@ def save(fig, out: Path, name: str) -> list:
 
 
 # ------------------------------------------------------------------------------------------------- data
-def n1_data(runs: Path) -> dict:
-    comb = json.loads((runs / "n/n1_merged_20261102/report.json").read_text())["combined"]
+N1_REPORT = "n/n1_merged_20261102/report.json"
+
+
+def n1_data(runs: Path, report: str = N1_REPORT) -> dict:
+    comb = json.loads((runs / report).read_text())["combined"]
     out = {}
     for _, models in GENERATIONS:
         for m in models:
@@ -200,9 +205,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--runs", type=Path, default=RUNS)
+    ap.add_argument("--n1-report", default=N1_REPORT, help="N1's merged report, relative to --runs")
     args = ap.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=True)
-    n1, qa, v4 = n1_data(args.runs), qa_data(args.runs), v4_data(args.runs)
+    n1, qa, v4 = n1_data(args.runs, args.n1_report), qa_data(args.runs), v4_data(args.runs)
     files = n1_by_type(n1, args.out) + qa_heatmap(qa, args.out) + v4_curve(v4, args.out)
     rec = {"n1_by_type": {m: {g: {"k": k, "n": n, "rate": k / n, "wilson": wilson(k, n)[1:]} for g, (k, n) in c.items()}
                           for m, c in n1.items()},
@@ -211,7 +217,7 @@ def main(argv=None) -> int:
            "v4_curve": {"points": v4["points"],
                         "counts": {m: [{"k": k, "n": n, "rate": k / n, "wilson": wilson(k, n)[1:]} for k, n in c]
                                    for m, c in v4["counts"].items()}},
-           "sources": {"n1_by_type": "n/n1_merged_20261102/report.json",
+           "sources": {"n1_by_type": args.n1_report,
                        "qa_heatmap": [f"x/QA_20261030/results/{f}" for _, f, _ in QA_SETS],
                        "v4_curve": "v4_recheck/report.json"}}
     (args.out / "figures.json").write_text(json.dumps(rec, indent=1) + "\n")

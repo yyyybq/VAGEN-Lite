@@ -47,3 +47,15 @@ def test_three_figures_and_their_numbers(tmp_path):
     assert rec["qa_heatmap"]["G0"]["Q3RD"] == {"k": 220, "n": 300, "rate": 220 / 300,
                                                "wilson": list(F.wilson(220, 300)[1:])}
     assert [c["k"] for c in rec["v4_curve"]["counts"]["Q3DCKS2"]] == [270, 275, 272]
+
+
+def test_n1_figure_can_take_another_merged_report(tmp_path):
+    """11-05 (task book item 2): the N1 panel from the merged report after N1's broken episodes were played again."""
+    runs = fake_runs(tmp_path / "runs")
+    other = runs / "n/n1_merged_n1fix_20261105"
+    other.mkdir(parents=True)
+    rep = json.loads((runs / "n/n1_merged_20261102/report.json").read_text())
+    rep["combined"]["models"]["B"]["rates"]["equidistance"]["k"] = 50
+    (other / "report.json").write_text(json.dumps(rep))
+    assert F.n1_data(runs)["B"]["equidistance"] == (4, 100)
+    assert F.n1_data(runs, "n/n1_merged_n1fix_20261105/report.json")["B"]["equidistance"] == (50, 100)
