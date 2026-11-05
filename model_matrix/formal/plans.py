@@ -9,6 +9,7 @@
     python -m model_matrix.formal.plans --commit HEAD --date D rl-cambrian-nfp     # decision 47 乙: S0 + NFP loss
     python -m model_matrix.formal.plans --commit HEAD --date D rl-cambrian-nfp01   # decision 49 甲: coefficient 0.1
     python -m model_matrix.formal.plans --commit HEAD --date D rl-cambrian-nfp01lr # decision 52 甲: and cslr's lr
+    python -m model_matrix.formal.plans --commit HEAD --date D rl-cambrian-nfp01lrh # decision 54 丙: pretrained head
 
 - m_<model>_formal_sft_<date> (Qwen3-VL-8B, Cambrian-S-7B): SFT and its evaluation only ("sft_only"): C0's
   conversations in the new format (train 9,802, validation 1,293), C0's recipe, 10 epochs, each epoch evaluated
@@ -173,8 +174,25 @@ NFP01_ARMS = {"snfp01": ("h800", {"nfp_loss_coef": 0.1})}
 # decision 52 甲 of 2026-11-04: csnfp01 with cslr's learning rate (1e-6), nothing else changed, against cslr (at that
 # rate cs0's drift came at update 263 instead of 122; csnfp01's came at about 53); everything on h800 as csnfp01
 NFP01LR_ARMS = {"snfp01lr": ("h800", {**NFP01_ARMS["snfp01"][1], **STAB_ARMS["slr"][1]})}
+# decision 54 丙 of 2026-11-05: csnfp01lr again, its start the SFT start with a head first trained alone on the SFT
+# frame pairs (model_matrix/formal/nfp_head_pretrain: checkpoint-770's weights as links, the head as one more shard);
+# planned only once that head beat the average frame on the held-out pairs (the user's condition, head_start)
+NFP01LRH_ARMS = {"snfp01lrh": ("h800", dict(NFP01LR_ARMS["snfp01lr"][1]))}
+HEAD_RUN = RUNS / "nfp_head_pretrain_20261105" / "full" / "run"
 NFP_DOSES = {"rl-cambrian-nfp": ("", NFP_ARMS), "rl-cambrian-nfp01": ("01", NFP01_ARMS),
-             "rl-cambrian-nfp01lr": ("01lr", NFP01LR_ARMS)}
+             "rl-cambrian-nfp01lr": ("01lr", NFP01LR_ARMS), "rl-cambrian-nfp01lrh": ("01lrh", NFP01LRH_ARMS)}
+
+
+def head_start(run: Path = HEAD_RUN) -> str:
+    """Decision 54 丙: the start model nfp_head_pretrain built in ``run`` (start/), only from a full run (no --limit)
+    whose held-out gate passed."""
+    summary = json.loads((run / "heldout" / "summary.json").read_text())
+    if summary.get("limit") is not None or summary.get("gate") is not True:
+        raise SystemExit(f"no RL arm: {run} is a check run or its head did not pass the held-out gate")
+    start = run / "start"
+    if not (start / "model-nfp-head.safetensors").is_file():
+        raise SystemExit(f"no start model with the head in {start}")
+    return str(start)
 
 
 def formal_rl_plans(which: str, date: str, commit: str, start: str, variant: str, seed: int = 20261019) -> dict:
@@ -186,7 +204,8 @@ def formal_rl_plans(which: str, date: str, commit: str, start: str, variant: str
     the S0 arm of NFP_ARMS (run csnfp, tag _nfp), its render service queued with its trainer (no renderer_first: one
     run, so the service goes in just before the trainer instead of the trainer waiting for a running service).
     Decision 49 甲 of 2026-11-04: rl-cambrian-nfp01 the same with NFP01_ARMS (run csnfp01, tag _nfp01); decision 52
-    甲: rl-cambrian-nfp01lr with NFP01LR_ARMS (run csnfp01lr, tag _nfp01lr)."""
+    甲: rl-cambrian-nfp01lr with NFP01LR_ARMS (run csnfp01lr, tag _nfp01lr); decision 54 丙: rl-cambrian-nfp01lrh with
+    NFP01LRH_ARMS (run csnfp01lrh, tag _nfp01lrh), ``start`` then the pretrained head's (head_start)."""
     if which in NFP_DOSES:
         base, model, kind, group, prefix = FORMAL_RL["cambrian"]
         dose, arms = NFP_DOSES[which]
@@ -267,7 +286,7 @@ def main() -> None:
     ap.add_argument("--recommit", action="store_true", help="give plans not yet started this commit and pool")
     ap.add_argument("which", choices=("sft", "sdpa-control", "diagnostics", "accept-epochs", "rl-qwen3", "rl-cambrian",
                                       "rl-cambrian-dense", "rl-cambrian-s2", "rl-cambrian-stab", "rl-cambrian-nfp",
-                                      "rl-cambrian-nfp01", "rl-cambrian-nfp01lr"))
+                                      "rl-cambrian-nfp01", "rl-cambrian-nfp01lr", "rl-cambrian-nfp01lrh"))
     ap.add_argument("--sft-date", default="20261026", help="rl-*: the formal SFT chain's date")
     ap.add_argument("--seed", type=int, default=20261019, help="rl-*: the RL seed")
     ap.add_argument("--variant", default=None, help="rl-*: the dense variant (default: the main line's best)")
@@ -275,6 +294,8 @@ def main() -> None:
     if a.which.startswith("rl-"):
         base = FORMAL_RL["cambrian" if a.which.startswith("rl-cambrian") else a.which[3:]][0]
         start = picked_model(RUNS / "chains" / f"{base}_formal_sft_{a.sft_date}")
+        if a.which == "rl-cambrian-nfp01lrh":  # decision 54 丙: the SFT start with the pretrained head
+            start = head_start()
         variant = a.variant or best_variant()
         plans = formal_rl_plans(a.which, a.date, a.commit, start, variant, a.seed)
         write(plans, a.recommit)

@@ -252,6 +252,38 @@ class PlansTest(unittest.TestCase):
         self.assertEqual({k: v for k, v in merged.items() if k not in ("nfp_loss_coef", "renderer_first")},
                          {k: v for k, v in cslr.items() if k != "renderer_first"})  # otherwise cslr's settings
 
+    def test_decision_54_nfp01lrh_arm(self):
+        """Decision 54 丙 of 2026-11-05: csnfp01lr again from the start with the pretrained head, planned only once the
+        head passed the held-out gate."""
+        from model_matrix.formal import plans as P
+
+        (_, lr), = P.formal_rl_plans("rl-cambrian-nfp01lr", "20261104", "abc", "/sft/e5", "V4").items()
+        (tag, h), = P.formal_rl_plans("rl-cambrian-nfp01lrh", "20261105", "abc", "/head/start", "V4").items()
+        self.assertEqual(tag, "m_cambrian7b_formal_rl_20261105_nfp01lrh")
+        self.assertEqual((h["run_pools"], h["rl_runs"], h["rl_name"], h["rl_start_model"], h["tr"].rsplit("/", 1)[1]),
+                         ({"csnfp01lrh": "h800"}, {"csnfp01lrh": {"rl": {"nfp_loss_coef": 0.1, "actor_lr": 1e-6}}},
+                          "m_cnfp01lrhrl", "/head/start", tag))
+        self.assertEqual(set(h), set(lr))
+        for key in set(lr) - {"tr", "run_pools", "rl_runs", "rl_name", "rl_start_model"}:
+            self.assertEqual(h[key], lr[key], key)
+        self.assertEqual(h["rl_runs"]["csnfp01lrh"], lr["rl_runs"]["csnfp01lr"])
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            (run / "heldout").mkdir()
+            (run / "start").mkdir()
+            for summary in ({"limit": None, "gate": False}, {"limit": 100, "gate": True}, {"limit": None}):
+                (run / "heldout" / "summary.json").write_text(json.dumps(summary))
+                with self.assertRaises(SystemExit):
+                    P.head_start(run)
+            (run / "heldout" / "summary.json").write_text(json.dumps({"limit": None, "gate": True}))
+            with self.assertRaises(SystemExit):  # passed, but no head in the start
+                P.head_start(run)
+            (run / "start" / "model-nfp-head.safetensors").write_bytes(b"x")
+            self.assertEqual(P.head_start(run), str(run / "start"))
+        from model_matrix.formal import nfp_head_pretrain as NP
+
+        self.assertEqual(NP.HEAD_SHARD, "model-nfp-head.safetensors")
+
     def test_accept_epoch_plans(self):
         from model_matrix.formal import plans as P
 
