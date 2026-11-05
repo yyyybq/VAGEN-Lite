@@ -31,6 +31,28 @@ class FakeScene:
     def owner(self, hit):
         return "wall"
 
+    def close(self):
+        pass
+
+
+def test_truth_builds_one_scene_per_robot_setting_like_the_episodes(monkeypatch, tmp_path):
+    made = []
+
+    def scene(task, seed, hide_robot=None):
+        made.append((task, seed, hide_robot))
+        return FakeScene(blocked=())
+
+    monkeypatch.setattr(N, "Scene", scene)
+    monkeypatch.setattr(N, "box_judge", lambda item, pose: {"metric": {"shaping_score": 0.1}})
+    rows = [{"instance_id": f"T_s7_{k}", "scene_id": "T_s7", "task": "T", "seed": "7", "item": {},
+             "start_pose": [0, 0, 0], **({"hide_robot": True} if k == "b" else {})} for k in "abc"]
+    rows.append(dict(rows[0], instance_id="U_s1_a", scene_id="U_s1"))
+    Q.write_jsonl(tmp_path / "i.jsonl", rows)
+    assert Q.main(["truth", "--instances", str(tmp_path / "i.jsonl"), "--scene", "T_s7", "--out", str(tmp_path / "t")]) == 0
+    assert made == [("T", 7, False), ("T", 7, True)]  # n_episode's default: the robot shown
+    assert [r["instance_id"] for r in Q.read_jsonl(tmp_path / "t/T_s7.jsonl")] == ["T_s7_a", "T_s7_b", "T_s7_c"]
+    assert Q.main(["truth", "--instances", str(tmp_path / "i.jsonl"), "--scene", "none", "--out", str(tmp_path / "t")]) == 2
+
 
 def test_one_step_scores_each_action_and_keeps_blocked_ones_at_the_start(monkeypatch):
     monkeypatch.setattr(N, "box_judge", lambda item, pose: {"metric": {"shaping_score": 0.5 + 0.1 * pose[0]}})
