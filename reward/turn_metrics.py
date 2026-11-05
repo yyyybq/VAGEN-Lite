@@ -96,9 +96,11 @@ def worker(args):
             tables = []
             for c in caches:
                 try:
-                    tables.append(c.get(r["task_id"]))
+                    t = c.get(r["task_id"])
                 except Exception:  # not in this folder
-                    pass
+                    t = None
+                if t is not None:  # TableCache.get gives None for a task the folder lacks
+                    tables.append(t)
             if not tables:
                 out.append({"task_id": r["task_id"], "skipped": "no table"})
                 continue
