@@ -51,7 +51,7 @@ RL_PAIRS = (("RD", "RS"), ("Q3RD", "Q3RS"))  # the two RL rewards on one start (
 TIER_ZH = {"a": "(a) 上游原样", "a_nohist": "(a) 上游原样，不带对话历史", "c": "(c) RoboCasa + 上游身体",
            "d": "(d) N1 原样", "d_on_c": "(d) 只取 (c) 的实例", "f": "(f) N1 的身体，原地转身不算碰撞",
            "e": "(e) 机器人自己的相机"}
-SIDE_BY_SIDE = ("a", "a_nohist", "c", "d_on_c", "f", "d", "e")
+SIDE_BY_SIDE = ("a", "a_nohist", "c", "f", "d_on_c", "d", "e")  # (f) between (c) and (d): only turns differ from (d)
 DRAWS, SEED = 2000, 20261103
 
 
@@ -228,8 +228,8 @@ def markdown(rep: dict) -> str:
 
 
 FIG_TIERS = (("a", "(a) upstream as is"), ("a_nohist", "(a) upstream, current turn only"),
-             ("c", "(c) RoboCasa, upstream body"), ("d_on_c", "(d) N1, same instances as (c)"),
-             ("f", "(f) N1 body, turns never blocked"), ("e", "(e) robot's own camera"))
+             ("c", "(c) RoboCasa, upstream body"), ("f", "(f) N1 body, turns never blocked"),
+             ("d_on_c", "(d) N1, same instances as (c)"), ("e", "(e) robot's own camera"))
 FIG_PAIRS = (("RS-S", "RS − S", "#d9822b"), ("RD-S", "RD − S", "#2f9a6a"), ("Q3RS-Q3S", "Q3RS − Q3S", "#e8a65c"),
              ("Q3RD-Q3S", "Q3RD − Q3S", "#6cbf96"))
 
