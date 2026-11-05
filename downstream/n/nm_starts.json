@@ -1,5 +1,5 @@
 {
- "note": "主实验 2026-11-03 晚发的矩阵 v3 C、D、E 挑出的检查点（用户 11-03 第 3.3 条；挑法：第 300 次，被停下的用最后一个检查点；C 种子 1 的 V4 第 47 次就停了、没有检查点，主线按用户定的用 C 的 SFT 代替）\n主实验 11-04 转来的矩阵补充格（P1 交接 handover_cells_20261104）：B′、D_noP0、E2、Cr 的 SFT 挑点（先过采样验收，再按验证集挑）；B′ 种子 1、D_noP0 两个种子的 RL 按预登记口径取第 300 次。用户 11-04 晚批准提交。",
+ "note": "主实验 2026-11-03 晚发的矩阵 v3 C、D、E 挑出的检查点（用户 11-03 第 3.3 条；挑法：第 300 次，被停下的用最后一个检查点；C 种子 1 的 V4 第 47 次就停了、没有检查点，主线按用户定的用 C 的 SFT 代替）\n主实验 11-04 转来的矩阵补充格（P1 交接 handover_cells_20261104）：B′、D_noP0、E2、Cr 的 SFT 挑点（先过采样验收，再按验证集挑）；B′ 种子 1、D_noP0 两个种子的 RL 按预登记口径取第 300 次。用户 11-04 晚批准提交。\n11-05：Cr 的 4 个 RL 按预登记口径（种子 1 S0、V4 第 250 次，种子 2 S0 第 300 次、V4 第 200 次，都对 Cr-SFT）；主线问答 RL 试点的两个 RL（第 300 次，从 Q3S 起步，评测用主线 Qwen3 RL 链的动作提示，对 Q3S）。用户 11-05 批准（“1 交；2 甲”）。",
  "starts": [
   {
    "name": "C-SFT",
@@ -263,6 +263,78 @@
    "step": 2107,
    "sft": null,
    "base": "Q3B"
+  },
+  {
+   "name": "Cr-s1-S0",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261019/rl_run_m3crs1s0/checkpoints/global_step_250/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261019/rl_m3crs1s0/val_env.yaml",
+   "group": "Cr",
+   "seed": 1,
+   "reward": "S0",
+   "step": 250,
+   "sft": "Cr-SFT",
+   "base": "Q3B",
+   "main_name": "m3crs1s0_250"
+  },
+  {
+   "name": "Cr-s1-V4",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261019/rl_run_m3crs1d/checkpoints/global_step_250/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261019/rl_m3crs1d/val_env.yaml",
+   "group": "Cr",
+   "seed": 1,
+   "reward": "V4",
+   "step": 250,
+   "sft": "Cr-SFT",
+   "base": "Q3B",
+   "main_name": "m3crs1d_250"
+  },
+  {
+   "name": "Cr-s2-S0",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_run_m3crs2s0/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_m3crs2s0/val_env.yaml",
+   "group": "Cr",
+   "seed": 2,
+   "reward": "S0",
+   "step": 300,
+   "sft": "Cr-SFT",
+   "base": "Q3B",
+   "main_name": "m3crs2s0_300"
+  },
+  {
+   "name": "Cr-s2-V4",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_run_m3crs2d/checkpoints/global_step_200/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_m3crs2d/val_env.yaml",
+   "group": "Cr",
+   "seed": 2,
+   "reward": "V4",
+   "step": 200,
+   "sft": "Cr-SFT",
+   "base": "Q3B",
+   "main_name": "m3crs2d_200"
+  },
+  {
+   "name": "QRL-s1",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3qarl_20261104/rl_run_qrl_s1/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_q3d/val_env.yaml",
+   "group": "QA-RL",
+   "seed": 1,
+   "reward": "GRPO",
+   "step": 300,
+   "sft": "Q3S",
+   "base": "Q3B",
+   "main_name": "qrl_s1_300"
+  },
+  {
+   "name": "QRL-s2",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3qarl_20261104/rl_run_qrl_s2/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_q3d/val_env.yaml",
+   "group": "QA-RL",
+   "seed": 2,
+   "reward": "GRPO",
+   "step": 300,
+   "sft": "Q3S",
+   "base": "Q3B",
+   "main_name": "qrl_s2_300"
   }
  ]
 }
