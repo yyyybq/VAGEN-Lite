@@ -282,12 +282,22 @@ def test_first_action_asks_a_shortest_start_against_one_at_least_two_longer():
                                 random.Random(0), skipped)
     assert q["numbers"]["optimal"] == ["move_backward", "move_left"] and q["numbers"]["best"] == "move_left"
     assert q["options"]["AB".index(q["answer"])] == "move left"
-    assert q["numbers"]["other"] in ("move_right", "turn_left")  # 5 >= 3 + 2, or no success reachable through it
+    # blocked at the start, 5 >= 3 + 2, or no success reachable through it
+    assert q["numbers"]["other"] in ("move_forward", "move_right", "turn_left")
     assert "in the fewest actions?" in q["prompt"]
     near = dict(cost, move_right=4, turn_left=4)
     assert Q.first_action_question(inst, {}, {"cost": near}, random.Random(0), skipped) is None
+    only_blocked = Q.first_action_question(inst, {}, {"cost": near, "blocked": ["move_forward"]}, random.Random(0), skipped)
+    assert only_blocked["numbers"]["other"] == "move_forward"  # one step worse, but blocked (the 11-06 task book)
     assert Q.first_action_question(inst, {}, {"cost": {a: None for a in cost}}, random.Random(0), skipped) is None
     assert skipped == {"first_action: no action clearly worse": 1, "first_action: no success reachable": 1}
+
+
+def test_samples_can_be_counted_per_kind():
+    qs = [{"id": f"{t}{k}{i}", "kind": k, "task_type": t} for k in Q.KINDS for t in ("p", "q") for i in range(8)]
+    got = Q.pick_by_kind(qs, {"left_right": "5", "near_far": "5", "first_action": "10"})
+    assert [q["kind"] for q in got] == ["left_right"] * 5 + ["near_far"] * 5 + ["first_action"] * 10
+    assert {q["task_type"] for q in got if q["kind"] == "first_action"} == {"p", "q"}
 
 
 def test_object_kinds_can_be_asked_on_the_success_view(tmp_path):

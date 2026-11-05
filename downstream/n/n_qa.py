@@ -317,15 +317,21 @@ def object_questions(inst: dict, common: dict, tag: str, rng: random.Random, ski
 
 def first_action_question(inst: dict, common: dict, p: dict, rng: random.Random, skipped):
     """first_action: an action that starts a shortest way to a box success (search's costs) against one that makes
-    the way at least 2 actions longer (or reaches no success within the search)."""
+    the way at least 2 actions longer, reaches no success within the search, or is blocked at the start (the user's
+    task book of 2026-11-06: "干扰项取让最短走法至少多 2 步或会被挡的动作")."""
     cost = p["cost"]
+    blocked = set(p.get("blocked") or [])
     known = {a: c for a, c in cost.items() if c is not None}
     if not known:
         skipped["first_action: no success reachable"] += 1
         return None
     d = min(known.values())
-    optimal = [a for a in N.ACTIONS if cost.get(a) == d]
-    worse = [a for a in N.ACTIONS if a in cost and (cost[a] is None or cost[a] >= d + 2)]
+    optimal = [a for a in N.ACTIONS if cost.get(a) == d and a not in blocked]
+    if not optimal:
+        skipped["first_action: no success reachable"] += 1
+        return None
+    worse = [a for a in N.ACTIONS if a in cost and a not in optimal
+             and (cost[a] is None or cost[a] >= d + 2 or a in blocked)]
     if not worse:
         skipped["first_action: no action clearly worse"] += 1
         return None
@@ -448,6 +454,15 @@ def pick_samples(qs: list, n: int, seed: int = 0) -> list:
     return out
 
 
+def pick_by_kind(qs: list, counts: dict, seed: int = 0) -> list:
+    """counts {kind: n}: n questions of each kind (taken in turn from its task types), kinds in KINDS order."""
+    out = []
+    for k in KINDS:
+        if counts.get(k):
+            out += pick_samples([q for q in qs if q["kind"] == k], int(counts[k]), seed)
+    return out
+
+
 def marked_image(q: dict, inst: dict) -> str:
     import base64
     import io
@@ -471,7 +486,8 @@ def marked_image(q: dict, inst: dict) -> str:
 def samples_cmd(args) -> int:
     qs = read_jsonl(args.questions)
     insts = {r["instance_id"]: r for r in read_jsonl(args.instances)}
-    picked = pick_samples(qs, args.n, args.seed)
+    picked = (pick_by_kind(qs, dict(kv.split("=") for kv in args.counts), args.seed) if args.counts
+              else pick_samples(qs, args.n, args.seed))
     cards = []
     for k, q in enumerate(picked, 1):
         cards.append(
@@ -652,6 +668,7 @@ def main(argv=None) -> int:
     s.add_argument("--questions", type=Path, required=True)
     s.add_argument("--instances", type=Path, required=True)
     s.add_argument("--n", type=int, default=20)
+    s.add_argument("--counts", nargs="*", default=None, help="KIND=N per kind (instead of --n spread over the kinds)")
     s.add_argument("--seed", type=int, default=0)
     s.add_argument("--out", type=Path, required=True)
     a = sub.add_parser("analyze")
