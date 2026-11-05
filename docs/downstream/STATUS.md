@@ -1,6 +1,6 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-11-05 16:3x UTC（**你 11-05 的任务书，执行中（第 4 节）**：第 1、9 条已发主窗口，第 10 条记为常规；**第 2 条 N1 坏画面重跑完成**，[报告](reports/N1_REPAIR_20261105.md)经独立核对后 15:2x 发你、交主线，p 的几处变化 15:5x 补发主线；**第 3、4、5、6、8 条算完**，五份短报告（[(a) 不带历史](reports/N3_NOHIST_20261105.md)、[(f) 档](reports/N3_TIER_F_20261105.md)、[RD − RS](reports/N3_RD_RS_20261105.md)、[终点指标](reports/N_TERMINAL_20261105.md)、[先后退偏向](reports/N2_BACKWARD_20261105.md)）在独立核对，核完发你、交主线；**第 7 条等你定**：按原设计只出得了 101 道题，样例和甲 / 乙两个做法 15:3x 已发你，甲的代码已备好、没投任务；任务书到现在约 8.2 卡时（预算约 15）；N1、N2、N3 报告和论文素材清单在按新数改，三张图已按干净数据重画）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-11-05 16:36 UTC（**你 11-05 的任务书，执行中（第 4 节）**：第 1、9 条已发主窗口，第 10 条记为常规；**第 2 条 N1 坏画面重跑**，[报告](reports/N1_REPAIR_20261105.md)经独立核对后 15:2x 发你、交主线，p 的几处变化 15:5x 补发主线；**第 3、4、5、6、8 条做完**，五份短报告（[(a) 不带历史](reports/N3_NOHIST_20261105.md)、[(f) 档](reports/N3_TIER_F_20261105.md)、[RD − RS](reports/N3_RD_RS_20261105.md)、[终点指标](reports/N_TERMINAL_20261105.md)、[先后退偏向](reports/N2_BACKWARD_20261105.md)）经两轮独立核对，16:36 发你、交主线；N1、N2、N3 报告和论文素材清单已按新数改完，三张图已按干净数据重画；**收口汇总草稿已写**（[DOWNSTREAM_CLOSEOUT_20261105](reports/DOWNSTREAM_CLOSEOUT_20261105.md)），第 7 条那一行等你定；**第 7 条等你定出题方式**：按原设计只出得了 101 道题，样例和甲 / 乙两个做法 15:3x 已发你，甲的代码已备好、没投任务；任务书到现在约 8.2 卡时（预算约 15））。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
@@ -118,7 +118,7 @@
 - **X1、X2、X3、X5、T5**：报告 10-29 01:3x 已交（[X1](reports/X1_RESULTS_20261029.md)、[X2](reports/X2_RESULTS_20261029.md)、[X3](reports/X3_RESULTS_20261029.md)、[X5](reports/X5_RESULTS_20261029.md)、[T5](reports/T5_RESULTS_20261029.md)）。
 - **T 系列**：T5、T2 完成；T1 推迟；T3 / T4 等路径。
 
-## 2. 在跑什么（11-05 16:3x UTC）
+## 2. 在跑什么（11-05 16:36 UTC）
 
 - **现在下游没有在跑的任务。** 任务书第 3、4、7 条的任务都跑完了：(a) 档不带历史 12 个（14:10–14:34，约 3.9 卡时），(f) 档 6 个（14:34–15:16，约 3.5 卡时），第 7 条的单步真值 1 个（15:17–15:29，约 0.2 卡时），都是 SUCCEEDED。
 - 以下是 08:3x 的记录。
@@ -282,9 +282,10 @@ bash downstream/eval/watch.sh status
   - 第 9 条已做：已发主窗口"下游列 5 个百分点以内在 SFT 重训噪声内，判 D 对 C 需要 SFT 重复"。
   - 第 10 条记为常规：以后主线来的矩阵起点，空跑通过就直接交，评完交主线并报你。
   - 第 2 条完成并发出（N1_REPAIR_20261105）。
-  - 第 3、4、5、6、8 条算完，短报告在独立核对；第 6 条的宽松成功先写进 EVAL_PROTOCOL 第 6 节（`d8478dd5`）再算，只用一个定义。
+  - 第 3、4、5、6、8 条做完，五份短报告经两轮独立核对后 16:36 发你、交主线；第 6 条的宽松成功先写进 EVAL_PROTOCOL 第 6 节（`d8478dd5`，15:33）再算（15:35），只用一个定义。
+  - N1、N2、N3 报告和素材清单已按新数改完（第 26–30 条是新加的）；三张图已按干净数据重画。
   - 第 7 条等你定出题方式（见上）。
-  - 全部做完后出"下游线实验收口"汇总。
+  - "下游线实验收口"汇总草稿已写（DOWNSTREAM_CLOSEOUT_20261105），第 7 条做完后补那一行、定稿发你。
   - 以前的三件（N2、N3 转主窗口，N1 的 75 个坏画面回合，N3 (a) 档的对话历史）都在这份任务书里定了，下面留着原文作记录。
 - **你 11-05 已定、已执行的**（原话"1 交；2 甲； 3 甲；4 换"）：
   1. Cr 的 4 个 RL：07:15 交，07:55 前评完（第 2 节）。

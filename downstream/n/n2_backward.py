@@ -4,14 +4,16 @@ move-backward-first bias; analysis only, nothing retrained).
 
     python downstream/n/n2_backward.py --n2 N2 --instances I.jsonl [--exclude IDS ...] --out DIR
 
-The instances whose recorded shortest path (n_gen.py's: the first success pose its search found, and the path to it)
-starts with move_backward against the rest.  In each part and tier (0 = the model as it is, N1 and its second set;
+The instances whose recorded shortest path (n_gen.py's: the first success pose of at least 2 actions its search found,
+and the path to it; the search tries the actions in n_env.ACTIONS order, so among equally short paths the one that
+starts with move_backward is kept whenever moving forward is blocked) starts with move_backward against the rest.  In each part and tier (0 = the model as it is, N1 and its second set;
 100, 300, 1,000 demonstrations, n2_report.py's): each model's success; each trained start against its generation's
 base and each RL start against its SFT start (n_report.compare, paired on the part's instances); whether the two
 parts give the same difference (n_report.agree: z test, the parts taken as independent sets).  Per model, tier and
-part: the share of episodes whose first action (the first one executed) is the shortest path's first action ("first
-step optimal": a lower bound, as another path just as short may start with another action) and the share whose first
-action is move_backward.  --exclude: n_report.excluded's files, left out everywhere.  DIR/report.json, report.md.
+part: the share of episodes whose first action (the first action of the first readable reply, a blocked one included)
+is the recorded shortest path's first action ("first step optimal": roughly a lower bound, as another path just as
+short may start with another action; not where a single other action already succeeds, which the generator's 2-action
+minimum leaves out) and the share whose first action is move_backward.  --exclude: n_report.excluded's files, left out everywhere.  DIR/report.json, report.md.
 """
 from __future__ import annotations
 
@@ -129,7 +131,9 @@ def markdown(rep: dict) -> str:
                 lines.append(f"| {m} | {tier_name(n)} | {R.diff_cell(rep[key]['backward'][m].get(n, {}))} | "
                              f"{R.diff_cell(rep[key]['other'][m].get(n, {}))} | "
                              f"{R.gap_cell(rep['gap'][key].get(m, {}).get(n))} | {R.diff_cell(by[n])} |")
-    lines += ["", "## 第一步", "", "第一步最优 = 第一个执行的动作就是记录的最短路径的第一步（下限：别的同样短的路径可能换个动作开头）。", "",
+    lines += ["", "## 第一步", "", "第一步最优 = 回合里第一个读得出的回复的第一个动作（被挡住的也算），就是记录的最短走法的第一步。"
+              "大体是下限：别的一样短的走法可能换个动作开头；例外是一个别的动作一步就能做成、而记录的第一步一步做不成的实例"
+              "（生成器只认至少 2 个动作的走法）。", "",
               "| 模型 | 档 | 第一步最优：后退部分 | 第一步最优：其余 | 第一步后退：后退部分 | 第一步后退：其余 |",
               "| --- | --- | --- | --- | --- | --- |"]
 
