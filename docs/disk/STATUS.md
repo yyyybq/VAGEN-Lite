@@ -473,7 +473,8 @@ bash disk/monitor.sh stop
   - 11-01 对过以前的记录：b5、b9 删过 `m_qwen3vl8b_formal_*` 里的东西，都是在这张表出来以前、按当时批的清单删的。删的是 C0 四个 RL 检查点（q3s0 第 150 步，q3d、q3s2s0、q3s2d 第 300 步）的续训状态，每个 105.2 GB；还有 SFT 没选中的 epoch，其中 154、308、462、616 在 10-28 已取回。P1 要用的都还在：四个 RL 检查点的 HF 权重（各 35.1 GB）、SFT `checkpoint-1232`（34.0 GB）、对话和 `train.yaml`。别的行没有批次碰过；b18 也不碰。
 - **Cambrian SFT `checkpoint-770` 不进任何批次，要动先问模型线（模型线 11-05 08:1x 提醒）**：
   - 路径：`models_runs/chains/m_cambrian7b_formal_sft_20261026/lf_cformal/model/checkpoint-770`，31.3 GB。
-  - 决定 54 丙的起点目录 `models_runs/nfp_head_pretrain_20261105/full/run/start/` 里的权重，是指向它各文件的符号链接，不是副本。预测头过了门槛，新 RL 臂就从这个目录起训。
+  - 决定 54 丙的起点目录是 `models_runs/nfp_head_pretrain_20261105/full/run/start/`，里面的权重是指向它各文件的符号链接，不是副本。预测头过了门槛，新 RL 臂就从这个目录起训。
+  - 08:2x 查过：`check/run/start/` 已经在了，它的文件是 07:52 建的、指向 checkpoint-770 的符号链接；`full/run/start/` 还没建。
   - 别处指过来的符号链接，`archive_delete.py plan` 查不出来（它只查硬链接）。所以删前核查要扫到这种起点目录，或者先问使用它的那条线。
 - **sco 任务投哪个池（你 11-02 的指示，主实验转告）**：上午定的是一律投 zoetrope；19:08 起放宽，排队中的任务可以转到 h800。磁盘线以后的上传、删除任务，提交前看 h800 和 zoetrope 哪个排队少就投哪个（`bash disk/submit_archive_delete_job.sh POOL BATCH ...`），拿不准就问你。
 - 不用 GPU。你批过的 root 属主目录删除，用 1 卡 root 任务（`disk/submit_root_delete.sh`，先查 `PAUSE_SUBMISSIONS`），删完删掉任务记录。
