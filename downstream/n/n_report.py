@@ -320,13 +320,13 @@ def markdown_sets(rep: dict) -> str:
 
 
 def excluded(paths) -> set:
-    """Instance ids from n_frames.py scan reports (.json: every instance with a corrupted frame in any evaluation) or
-    plain files (one id per line)."""
+    """Instance ids from n_frames.py scan reports (.json: every instance with a corrupted frame in any evaluation, and
+    since 11-05 every one with a broken frame; the hints are not taken) or plain files (one id per line)."""
     out = set()
     for p in paths:
         text = Path(p).read_text()
         if str(p).endswith(".json"):
-            out |= {i for r in json.loads(text)["evals"].values() for i in r["instances"]}
+            out |= {i for r in json.loads(text)["evals"].values() for i in (*r["instances"], *r.get("broken", {}))}
         else:
             out |= {x.strip() for x in text.splitlines() if x.strip()}
     return out
@@ -340,8 +340,8 @@ def main(argv=None) -> int:
     ap.add_argument("--models", nargs="+", default=list(MODELS))
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--exclude", type=Path, nargs="*", default=[],
-                    help="instance ids to leave out: n_frames.py scan reports (every instance with a corrupted frame) "
-                         "or files of one id per line")
+                    help="instance ids to leave out: n_frames.py scan reports (every instance with a corrupted or, "
+                         "since 11-05, broken frame) or files of one id per line")
     args = ap.parse_args(argv)
     exclude = excluded(args.exclude)
     if len(args.gen) != len(args.eval):

@@ -6,7 +6,9 @@
 # count only buys CPUs: 14 vCPU per H800).  WORKERS may be a list, e.g. 48,96: the whole plan then runs once per value,
 # one after the other (parallelism test), into OUT/episodes_P<n>/ with OUT/gpu_util_P<n>.csv; a single value writes
 # OUT/episodes/ and OUT/gpu_util.csv.  Optional 5th argument SHARD "I/K": run only shard I of K of the plan (the
-# one-card evaluation jobs of 2026-10-22; each shard has its own OUT).  Writes only under OUT.
+# one-card evaluation jobs of 2026-10-22; each shard has its own OUT).  After each run the episodes' example strips are
+# scanned for broken renders (downstream/n/n_frames.py thumbs: OUT/frames_scan.json, or OUT/frames_scan_P<n>.json).
+# Writes only under OUT.
 set -uo pipefail
 CKPT="${1:?Usage: run_eval_ckpt.sh CKPT OUT SERVERS WORKERS [SHARD]}"
 OUT="${2:?}"; SERVERS="${3:?}"; WORKERS="${4:?}"; SHARD="${5:-}"
@@ -53,5 +55,10 @@ for W in "${PLIST[@]}"; do
   r=$?; (( r )) && rc=$r
   kill "$GPID" 2>/dev/null
   echo "[eval] <<< workers=$W rc=$r $(date -u +%T) $(head -c 400 "$OUT/episodes$SUFFIX/summary.json" 2>/dev/null | tr -d '\n')"
+  # The user's plan 甲 of 2026-11-05 (frame rescan): the example strips of broken renders (near-black, upside down)
+  # are only recorded, in OUT/frames_scan$SUFFIX.json; the exclusion list stays and nothing is played again.
+  env OMP_NUM_THREADS=1 "$SIM_PY" "$WT/downstream/n/n_frames.py" thumbs --eval "$OUT/episodes$SUFFIX" \
+    --out "$OUT/frames_scan$SUFFIX.json" >> "$OUT/closed_loop$SUFFIX.log" 2>&1 \
+    && echo "[eval] frames: $(grep -a 'with a broken frame' "$OUT/closed_loop$SUFFIX.log" | tail -n 1)"
 done
 exit $rc
