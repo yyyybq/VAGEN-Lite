@@ -333,7 +333,7 @@ def test_model_job_tier_f_runs_the_six_on_tier_c_instances_with_free_turns(tmp_p
     assert (tmp_path / "n3/n3_B.log").read_text().count("tier f: B is not in it") == 2
 
 
-class FakeScene(N3.Scene):
+class TouchingScene(N3.Scene):
     """N3.Scene without the simulator: every pose touches something (as if the base stood in a counter)."""
 
     def __init__(self, collision):
@@ -348,13 +348,13 @@ class FakeScene(N3.Scene):
 
 def test_free_turns_are_never_blocked_and_moves_keep_n1s_rule():
     pose = (1.0, 2.0, 0.0)
-    s = FakeScene("robot_free_turn")
+    s = TouchingScene("robot_free_turn")
     new, hit = s.try_action(pose, "turn_left")
     assert hit is None and new == N.apply_action(pose, "turn_left") and s.posed[-1] == tuple(new)
     assert s.try_action(pose, "move_forward") == (pose, "counter") and s.posed[-1] == pose  # N1's rule, put back
     assert s.blocked(pose, N.apply_action(pose, "turn_right")) is False
     assert s.blocked(pose, N.apply_action(pose, "move_left")) is True
-    robot = FakeScene("robot")
+    robot = TouchingScene("robot")
     assert robot.try_action(pose, "turn_left") == (pose, "counter")  # N1 itself blocks the turn
     assert "robot_free_turn" in N3.COLLISIONS
 
