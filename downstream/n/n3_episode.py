@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """N3 (the transfer ladder; the user's decision 2 of 2026-11-03): n_episode.py with n3_env's scene, for tier (c)
-(the upstream camera-sphere collision) and tier (e) (the robot's own camera).
+(the upstream camera-sphere collision), tier (e) (the robot's own camera) and, since 11-05, tier (f) (N1's robot body
+with turns never blocked).
 
-    python downstream/n/n3_episode.py --collision sphere|robot --instances FILE [n_episode.py's other options]
+    python downstream/n/n3_episode.py --collision sphere|robot|robot_free_turn --instances FILE [n_episode.py's options]
 
 The camera is the instances' own: tier (e)'s carry the one they were made with (n3_gen.py scene: "camera"), N1's
 carry none (camera A).  All instances of one run must share it (stops otherwise); it is set in this process before

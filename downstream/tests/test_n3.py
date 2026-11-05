@@ -298,9 +298,10 @@ def test_model_job_per_tier_workers_and_dropping_corrupted_episodes(tmp_path):
         'mkdir -p "$1"; echo "$1|$4|$N3_COLLISION" >> "$(dirname "$(dirname "$1")")/calls"\n')
     c = tmp_path / "n3/c/S"
     (c / "frames").mkdir(parents=True)
-    (c / "episodes.jsonl").write_text('{"instance_id": "ok"}\n{"instance_id": "bad"}\n')
-    Image.fromarray(np.zeros((8, 8, 3), np.uint8)).save(c / "frames/ok.png")
+    (c / "episodes.jsonl").write_text('{"instance_id": "ok"}\n{"instance_id": "bad"}\n{"instance_id": "dark"}\n')
+    Image.fromarray(np.full((8, 8, 3), 128, np.uint8)).save(c / "frames/ok.png")
     Image.fromarray(np.random.default_rng(0).integers(0, 256, (8, 8, 3)).astype(np.uint8)).save(c / "frames/bad.png")
+    Image.fromarray(np.zeros((8, 8, 3), np.uint8)).save(c / "frames/dark.png")  # near-black: broken since 11-05
     env = dict({k: v for k, v in os.environ.items() if k != "N_VAL_ENV"}, N3_DROP_CORRUPTED="1",
                N_VLM_PY=sys.executable)
     res = subprocess.run(["bash", str(wt / "downstream/n/run_n3.sh"), str(tmp_path / "n3"), "S", "/c.jsonl",
@@ -309,7 +310,53 @@ def test_model_job_per_tier_workers_and_dropping_corrupted_episodes(tmp_path):
     n3 = str(tmp_path / "n3")
     assert (tmp_path / "n3/calls").read_text().split() == [f"{n3}/c/S|4|sphere", f"{n3}/e/S|12|robot"]
     assert (c / "episodes.jsonl").read_text() == '{"instance_id": "ok"}\n' and (c / "frames_corrupted/bad.0.png").exists()
-    assert 'tier c: {"dropped": 1, "kept": 1}' in (tmp_path / "n3/n3_S.log").read_text()
+    assert 'tier c: {"dropped": 2, "kept": 1}' in (tmp_path / "n3/n3_S.log").read_text()
+
+
+def test_model_job_tier_f_runs_the_six_on_tier_c_instances_with_free_turns(tmp_path):
+    """11-05 (task book item 4): tier f, tier c's instances, N1's body with turns never blocked; a tier given twice
+    plays the broken episodes again at the second worker count."""
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    (wt / "downstream/n/run_n3.sh").write_text((ROOT / "n/run_n3.sh").read_text())
+    (wt / "downstream/n/run_n3_episodes.sh").write_text(
+        'mkdir -p "$1"; echo "$1|$2|$4|$N3_COLLISION|${N_VAL_ENV:-}" >> "$(dirname "$(dirname "$1")")/calls"\n')
+    env = {k: v for k, v in os.environ.items() if k != "N_VAL_ENV"}
+    for model in ("B", "Q3RD"):
+        res = subprocess.run(["bash", str(wt / "downstream/n/run_n3.sh"), str(tmp_path / "n3"), model, "/c.jsonl",
+                              "/e.jsonl", "f:12 f:4"], capture_output=True, text=True,
+                             env=dict(env, N_VAL_ENV_QWEN3="/q3.yaml"), timeout=60)
+        assert res.returncode == 0, res.stdout + res.stderr
+    n3 = str(tmp_path / "n3")
+    assert (tmp_path / "n3/calls").read_text().split() == [
+        f"{n3}/f/Q3RD|/c.jsonl|12|robot_free_turn|/q3.yaml", f"{n3}/f/Q3RD|/c.jsonl|4|robot_free_turn|/q3.yaml"]
+    assert (tmp_path / "n3/n3_B.log").read_text().count("tier f: B is not in it") == 2
+
+
+class FakeScene(N3.Scene):
+    """N3.Scene without the simulator: every pose touches something (as if the base stood in a counter)."""
+
+    def __init__(self, collision):
+        self.collision_mode, self.posed = collision, []
+
+    def set_pose(self, pose):
+        self.posed.append(tuple(pose))
+
+    def collision(self):
+        return "counter"
+
+
+def test_free_turns_are_never_blocked_and_moves_keep_n1s_rule():
+    pose = (1.0, 2.0, 0.0)
+    s = FakeScene("robot_free_turn")
+    new, hit = s.try_action(pose, "turn_left")
+    assert hit is None and new == N.apply_action(pose, "turn_left") and s.posed[-1] == tuple(new)
+    assert s.try_action(pose, "move_forward") == (pose, "counter") and s.posed[-1] == pose  # N1's rule, put back
+    assert s.blocked(pose, N.apply_action(pose, "turn_right")) is False
+    assert s.blocked(pose, N.apply_action(pose, "move_left")) is True
+    robot = FakeScene("robot")
+    assert robot.try_action(pose, "turn_left") == (pose, "counter")  # N1 itself blocks the turn
+    assert "robot_free_turn" in N3.COLLISIONS
 
 
 def test_report_figure_draws_rl_minus_sft_per_tier(tmp_path):
@@ -321,3 +368,40 @@ def test_report_figure_draws_rl_minus_sft_per_tier(tmp_path):
                      for t, _ in NR.FIG_TIERS}}
     assert NR.figure(rep, tmp_path) == ["n3_ladder.png", "n3_ladder.svg"]
     assert (tmp_path / "n3_ladder.png").stat().st_size > 1000
+
+
+def test_report_adds_no_history_tier_f_and_the_two_rl_against_each_other(tmp_path):
+    """11-05 (task book items 3-5): tier a without the dialogue history, tier f, RD against RS in every tier, the
+    across-tier gaps on the same instances or tasks, and each model's own f - d and a_nohist - a."""
+    import n3_report as NR
+
+    def write(d, model, wins, ids):
+        (d / model).mkdir(parents=True, exist_ok=True)
+        (d / model / "episodes.jsonl").write_text("".join(json.dumps({"instance_id": i, "success": i in wins}) + "\n"
+                                                          for i in ids))
+
+    ids = [f"I{k}" for k in range(10)]
+    n3 = tmp_path / "n3"
+    for m, w in (("S", 2), ("RS", 3), ("RD", 6)):
+        write(n3 / "c", m, ids[:w], ids[:8])
+        write(n3 / "f", m, ids[:w + 1], ids[:8])
+    d = tmp_path / "n1"
+    for m, w in (("S", 2), ("RS", 2), ("RD", 3)):
+        write(d, m, ids[:w], ids)
+    a = {m: {f"t{k}": k < w for k in range(10)} for m, w in (("S", 4), ("RS", 7), ("RD", 6))}
+    nh = {m: {f"t{k}": k < w for k in range(10)} for m, w in (("S", 4), ("RS", 4), ("RD", 5))}
+    rep = NR.build(n3, a=a, d_dirs=[d], a_nohist=nh)
+    t = rep["tiers"]
+    assert t["c"]["pairs"]["RD-RS"]["diff"] == pytest.approx(3 / 8)
+    assert t["f"]["pairs"]["RD-S"]["diff"] == pytest.approx(4 / 8)
+    assert t["a_nohist"]["pairs"]["RS-S"]["diff"] == 0 and t["e"]["models"] == {}
+    row = rep["across"]["RS-S"]
+    assert row["a_vs_a_nohist_same_tasks"]["gap"] == pytest.approx(0.3) and row["f_vs_d_same_instances"]["n"] == 8
+    assert rep["across"]["RD-RS"]["c_vs_d_same_instances"]["n"] == 8 and "a_nohist_vs_c" in row
+    pm = rep["per_model"]
+    assert pm["f_minus_d"]["S"]["diff"] == pytest.approx(1 / 8)
+    assert pm["a_nohist_minus_a"]["RS"]["diff"] == pytest.approx(-0.3)
+    md = NR.markdown(rep)
+    assert "## RL 减 SFT 和两种 RL 之间，各档并排" in md and "| RD-RS |" in md and "## (f) N1 的身体" in md
+    assert "## 每个模型自己" in md and "## (e)" not in md  # an empty tier is left out
+    assert NR.tier_a_nohist(tmp_path / "none") == {}

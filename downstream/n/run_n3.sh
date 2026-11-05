@@ -5,12 +5,16 @@
 #      collision rule (N3_COLLISION=sphere); S, RS, RD, Q3S, Q3RS, Q3RD only (the design's six);
 #   e  tier (e)'s instances (n3_gen.py scene with the robot's own camera; the camera comes with them), N1's collision
 #      rule; all eight models.
+#   f  (the user's task book of 2026-11-05, item 4) tier c's instances, N1's robot body but turning in place never
+#      blocked (N3_COLLISION=robot_free_turn); the same six models as c.
 # Usage: run_n3.sh N3 MODEL C_INSTANCES E_INSTANCES [TIERS] [WORKERS]   (TIERS default "c e"; a tier the model is not
 #   in is skipped).  The Q3 models get their own validation config (N_VAL_ENV, as in N1) and run as the container's
 #   root; everything under N3/<tier>/<MODEL> is given back to its owner by run_n3_episodes.sh.
 #   A tier may carry its own number of episodes at once ("c:4 e:12"; else WORKERS).  N3_DROP_CORRUPTED=1: before each
 #   tier, the episodes with corrupted frames already in its folder are moved aside (n_repair.py drop; nothing deleted),
-#   so the resumable runner plays them again (11-03: corrupted frames showed with 12 at once).
+#   so the resumable runner plays them again (11-03: corrupted frames showed with 12 at once); since 11-05 the
+#   episodes with a near-black frame too (n_repair.py --broken, the user's plan 甲).  A tier given twice ("f:12 f:4")
+#   with N3_DROP_CORRUPTED=1 runs at 12, then plays the broken episodes again at 4.
 set -uo pipefail
 N3="${1:?Usage: run_n3.sh N3 MODEL C_INSTANCES E_INSTANCES [TIERS] [WORKERS]}"; MODEL="${2:?}"; CI="${3:?}"; EI="${4:?}"
 TIERS="${5:-c e}"; WORKERS="${6:-12}"
@@ -28,10 +32,12 @@ for spec in $TIERS; do
     c) [[ " S RS RD Q3S Q3RS Q3RD " == *" $MODEL "* ]] || { log "tier c: $MODEL is not in it"; continue; }
        INST="$CI"; COLL=sphere ;;
     e) INST="$EI"; COLL=robot ;;
+    f) [[ " S RS RD Q3S Q3RS Q3RD " == *" $MODEL "* ]] || { log "tier f: $MODEL is not in it"; continue; }
+       INST="$CI"; COLL=robot_free_turn ;;
     *) log "unknown tier $t"; rc_all=2; continue ;;
   esac
   if [[ ${N3_DROP_CORRUPTED:-0} == 1 && -f $N3/$t/$MODEL/episodes.jsonl ]]; then
-    log "tier $t: $("${N_VLM_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python}" "$WT/downstream/n/n_repair.py" drop --out "$N3/$t/$MODEL")"
+    log "tier $t: $("${N_VLM_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python}" "$WT/downstream/n/n_repair.py" drop --out "$N3/$t/$MODEL" --broken)"
   fi
   N3_COLLISION=$COLL bash "$WT/downstream/n/run_n3_episodes.sh" "$N3/$t/$MODEL" "$INST" "$MODEL" "$w" 0
   rc=$?

@@ -10,6 +10,10 @@ changes to N1's RoboCasa side, as a subclass of n_env.Scene (n_env itself is lef
   camera_radius 0.15 m plus safety_margin 0.05 m.  A turn keeps the centre where it is, so it is blocked only when the
   centre is already inside a box (as upstream).  RoboCasa's walls are geoms, so they count as boxes.  The robot is
   still posed (renders hide it) but its own contacts no longer block anything.
+* collision "robot_free_turn" (tier f, the user's task book of 2026-11-05, item 4): N1's robot body, except that
+  turning in place is never blocked; a move (forward, back, left, right) is checked as in N1, by the robot's contacts
+  at its end pose.  A turn can leave the base or the arm inside a counter; the next move is then blocked as long as
+  its end pose still touches it (the move's rule taken literally, as N1's).
 * camera "robot" (tier e, the robot's own camera): the height and the vertical field of view that the robot's own
   camera has right after the reset (ROBOT_CAMERA, robot0_agentview_left: one of the two views the StarVLA policy
   sees, its right twin the same; measured 2026-11-03: 1.75 m above the floor, vertical field of view 60 degrees,
@@ -38,7 +42,8 @@ sys.path.insert(0, str(HERE.parents[1]))
 import n_env as N  # noqa: E402
 
 UPSTREAM_RADIUS_M, UPSTREAM_MARGIN_M = 0.15, 0.05  # CollisionDetector(camera_radius, safety_margin) defaults
-COLLISIONS = ("robot", "sphere")
+COLLISIONS = ("robot", "sphere", "robot_free_turn")
+TURNS = ("turn_left", "turn_right")
 CAMERAS = ("A", "robot")
 ROBOT_CAMERA = "robot0_agentview_left"
 _MAKE_ITEM = N.make_item
@@ -144,6 +149,10 @@ class Scene(N.Scene):
         return self.geom_entity.get(g) or self.geom_names[g] or "object"
 
     def try_action(self, pose, action: str):
+        if self.collision_mode == "robot_free_turn" and action in TURNS:
+            new = N.apply_action(pose, action)
+            self.set_pose(new)
+            return new, None
         if self.collision_mode != "sphere":
             return super().try_action(pose, action)
         new = N.apply_action(pose, action)
@@ -157,6 +166,8 @@ class Scene(N.Scene):
         if self.collision_mode == "sphere":
             return self.sphere_hit(pose, new) is not None
         self.set_pose(new)
+        if self.collision_mode == "robot_free_turn" and pose[0] == new[0] and pose[1] == new[1]:
+            return False  # a turn (apply_action keeps x and y exactly)
         return self.collision() is not None
 
 
