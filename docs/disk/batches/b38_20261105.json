@@ -1,6 +1,6 @@
 {
  "batch": "b38_20261105",
- "approved": "PENDING: the main line (主实验, 11-05 14:1x) relays the user's \"2 甲\" there (hand the step-300 resume states of qrl_s1 / qrl_s2 to the disk line, keep the HF weights); deletion needs the user's word in the disk window",
+ "approved": "the user 2026-11-05 ~16:25 UTC in the disk window: \"删\" (reply to the 14:3x report, whose only decision was b38; quota table 18/22 TB). = 甲: archive to AOSS first, then delete b38 as listed (the main line's list, the user's \"2 甲\" there; q3qarl qrl_s1 / qrl_s2 step-300 resume states, 52 files 210.4 GB; actor/huggingface, COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay)",
  "items": [
   {
    "id": "MAIN-q3qarl-qrl_s1-300",
