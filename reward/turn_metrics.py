@@ -208,12 +208,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         for lab, part in zip(labels, pool.imap(worker, jobs)):
             per[lab] += part
     out = {lab: summarize(v) for lab, v in sorted(per.items())}
-    Path(a.out).write_text(json.dumps({"tables": a.tables, "results": out, "episodes": dict(sorted(per.items()))},
-                                      indent=1))
+    merged_eps = defaultdict(list)  # one checkpoint over its sets (validation + test)
+    for lab, v in per.items():
+        merged_eps[lab.split("|")[0]] += v
+    merged = {lab: summarize(v) for lab, v in sorted(merged_eps.items())}
+    Path(a.out).write_text(json.dumps({"tables": a.tables, "results": out, "merged": merged,
+                                       "episodes": dict(sorted(per.items()))}, indent=1))
     cols = ("success_rate", "error_rate", "recovery_rate", "stall_rate", "success_with_error", "success_without_error",
             "collision_per_action", "turn_share", "success_actions_over_dstar_mean")
     L = ["| 结果 | 局数 | " + " | ".join(cols) + " |", "|" + " --- |" * (len(cols) + 2)]
-    for lab, s in out.items():
+    for lab, s in list(merged.items()) + list(out.items()):  # merged sets first, then each set
         L.append(f"| {lab} | {s['replayed']} | " + " | ".join("—" if s[c] is None else f"{s[c]}" for c in cols) + " |")
     Path(a.out).with_suffix(".md").write_text("\n".join(L) + "\n", encoding="utf-8")
     print("\n".join(L))
