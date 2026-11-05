@@ -827,6 +827,17 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             und_mix = ppo_block(args.und_mix, model=model, run_root=run_root)
         except (ValueError, OSError) as exc:
             raise SystemExit(f"--und-mix: {exc}")
+        # what the trainer's mixer would refuse at its start, refused here before any job is submitted
+        actor, trainer = ppo["actor_rollout_ref"]["actor"], ppo["trainer"]
+        gpus = int(trainer.get("n_gpus_per_node", 8)) * int(trainer.get("nnodes", 1))
+        fsdp = actor.get("fsdp_config") or {}
+        problems = [p for p, bad in (
+            (f"batch_size {und_mix['batch_size']} does not split over {gpus} GPUs", und_mix["batch_size"] % gpus),
+            ("the actor's Ulysses sequence parallelism", int(fsdp.get("ulysses_sequence_parallel_size", 1)) != 1),
+            ("fp16 training (a loss scaler)", str(fsdp.get("dtype", "bfloat16")) in ("float16", "fp16")),
+            (f"actor strategy {actor.get('strategy')!r}", actor.get("strategy") not in (None, "fsdp"))) if bad]
+        if problems:
+            raise SystemExit(f"--und-mix does not work with {'; '.join(problems)}")
         _set(ppo, "actor_rollout_ref.actor.und_mix", und_mix)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),

@@ -34,9 +34,13 @@ class RlConfigUndMixTest(unittest.TestCase):
             r["reserve"] = r["split"] == "train"
         cls.rows = sft / "rows_reserve.jsonl"
         cls.rows.write_text("".join(json.dumps(r) + "\n" for r in rows))
-        cls.pool = cls.root / "pool"  # only its manifest is read here
+        cls.pool = cls.root / "pool"  # its manifest and the file it hashes are what rl-config reads
         cls.pool.mkdir()
-        (cls.pool / "manifest.json").write_text(json.dumps({"rows": 40, "pool_sha256": "ab" * 32}))
+        (cls.pool / "pool.jsonl").write_text("".join(json.dumps({"und_index": i}) + "\n" for i in range(40)))
+        import hashlib
+
+        cls.sha = hashlib.sha256((cls.pool / "pool.jsonl").read_bytes()).hexdigest()
+        (cls.pool / "manifest.json").write_text(json.dumps({"rows": 40, "pool_sha256": cls.sha}))
 
     @classmethod
     def tearDownClass(cls):
@@ -65,7 +69,7 @@ class RlConfigUndMixTest(unittest.TestCase):
         self.assertEqual(block, {"enable": True, "pool": str(self.pool.resolve()), "interval": 2, "weight": 0.1,
                                  "batch_size": 32, "micro_batch_size": 1, "seed": 20261105, "tokenizer": "/m/start",
                                  "log_dir": str((self.root / "runs" / "same").resolve() / "und_mix"), "pool_rows": 40,
-                                 "pool_sha256": "ab" * 32})
+                                 "pool_sha256": self.sha})
         self.assertEqual(rep1.pop("und_mix"), block)
         # file paths aside (the out folders differ), the two configs are the same
         dump = lambda d: json.dumps(d, sort_keys=True).replace("/mixed/", "/X/").replace("/plain/", "/X/")  # noqa: E731
@@ -73,9 +77,16 @@ class RlConfigUndMixTest(unittest.TestCase):
         self.assertEqual(dump(rep1), dump(rep0))
 
     def test_bad_requests_stop_rl_config(self):
-        for bad in ({"pool": str(self.pool), "lr": 1}, {"batch_size": 32}, {"pool": str(self.pool), "batch_size": 64}):
+        # unknown key, no pool, more samples than rows (also the default 128 here), and 12 samples on 8 GPUs
+        for bad in ({"pool": str(self.pool), "lr": 1}, {"batch_size": 32}, {"pool": str(self.pool), "batch_size": 64},
+                    {"pool": str(self.pool)}, {"pool": str(self.pool), "batch_size": 12}):
             with self.assertRaises(SystemExit, msg=bad):
                 self.config("bad", und_mix=json.dumps(bad))
+        # a .json file holding the request works like the request itself
+        req = self.root / "req.json"
+        req.write_text(json.dumps({"pool": str(self.pool), "batch_size": 32}))
+        ppo, _, _ = self.config("from_file", und_mix=str(req))
+        self.assertEqual(ppo["actor_rollout_ref"]["actor"]["und_mix"]["batch_size"], 32)
 
 
 class ChainUndMixTest(unittest.TestCase):
@@ -99,6 +110,11 @@ class ChainUndMixTest(unittest.TestCase):
             i = strip.index("--und-mix")
             del strip[i:i + 2]
             self.assertEqual(len(strip), len(plain))
+            # a request given as a file's path reaches rl-config as that path
+            chain.plan["rl_runs"]["mixed"]["rl"]["und_mix"] = "/plans/und_mix.json"
+            chain.rl_config()
+            mixed = calls[str(root / "rl_mixed")]
+            self.assertEqual(mixed[mixed.index("--und-mix") + 1], "/plans/und_mix.json")
 
 
 if __name__ == "__main__":

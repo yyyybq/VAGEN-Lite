@@ -1439,7 +1439,8 @@ class Chain:
                 if rl.get(key) is not None:  # matrix v2, group E: the free_think prompt and a longer answer budget
                     args += [flag, str(rl[key])]
             if rl.get("und_mix"):  # the reward line (2026-11-05): understanding batches in the actor's update
-                args += ["--und-mix", json.dumps(rl["und_mix"], sort_keys=True)]
+                value = rl["und_mix"]  # a request, or the path of a .json file holding one
+                args += ["--und-mix", value if isinstance(value, str) else json.dumps(value, sort_keys=True)]
             self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
         if self.plan.get("start_model"):
             self.mark("rl_config", start_model=str(self.sft_model()))

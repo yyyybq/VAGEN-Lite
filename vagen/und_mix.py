@@ -24,6 +24,8 @@ Off unless the PPO config's actor.und_mix.enable is true: verl's dp_actor builds
         [--questions X0=QUESTIONS.jsonl ...] --out POOL
     python -m vagen.und_mix check --pool POOL --model MODEL [--rows N] --out FILE.json   # CPU, LLaMA-Factory path
     python -m vagen.und_mix counts --pool POOL --log RUN/und_mix/steps.jsonl --out FILE.json   # draws per row
+    python -m vagen.und_mix refloss --pool POOL --model START --first-batch RUN/und_mix/first_batch_rank0.json \
+        [--limit N --videos-first] --out FILE.json   # transformers' own loss of those rows against the trainer's
 """
 from __future__ import annotations
 
@@ -43,7 +45,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-DEFAULTS = {"interval": 2, "weight": 0.1, "batch_size": 32, "micro_batch_size": 1, "seed": 20261105}
+# batch_size 128 = 16 a GPU on 8 (the user's decision 1 of 2026-11-05); micro_batch_size stays 1: the trainer's eager
+# attention would let packed samples see each other, and an image row beside a video row would run the vision tower
+# twice on that rank only, which puts FSDP's all-gathers out of step across ranks
+DEFAULTS = {"interval": 2, "weight": 0.1, "batch_size": 128, "micro_batch_size": 1, "seed": 20261105}
 REQUEST_KEYS = set(DEFAULTS) | {"pool"}
 POOL_DATASET = "und_pool"
 IGNORE_INDEX = -100
@@ -97,13 +102,24 @@ def ppo_block(request: Any, model: str, run_root: Any) -> Dict[str, Any]:
         block[key] = float(value) if key == "weight" else int(value)
         if isinstance(value, bool) or (key != "weight" and int(value) != value):
             raise ValueError(f"{key} must be a number, not {value!r}")
-    if block["interval"] < 1 or block["batch_size"] < 1 or block["micro_batch_size"] < 1 or not block["weight"] > 0:
-        raise ValueError(f"interval, batch_size and micro_batch_size must be at least 1, weight above 0: {block}")
+    if block["interval"] < 1 or block["batch_size"] < 1 or not block["weight"] > 0 or block["seed"] < 0:
+        raise ValueError(f"interval and batch_size must be at least 1, weight above 0, seed not negative: {block}")
+    if block["micro_batch_size"] != 1:
+        raise ValueError("micro_batch_size must be 1 (see DEFAULTS)")
     if block["batch_size"] > manifest["rows"]:
         raise ValueError(f"batch_size {block['batch_size']} is more than the pool's {manifest['rows']} rows")
+    check_pool_files(pool, manifest)
     block.update(tokenizer=str(model), log_dir=str(Path(run_root).resolve() / "und_mix"), pool_rows=manifest["rows"],
                  pool_sha256=manifest["pool_sha256"])
     return block
+
+
+def check_pool_files(pool: Path, manifest: Dict[str, Any]) -> None:
+    """The pool's files are the ones its manifest hashed (pool.jsonl, and the recipe and dataset_info when listed)."""
+    files = {"pool.jsonl": manifest["pool_sha256"], **(manifest.get("files_sha256") or {})}
+    changed = [name for name, digest in files.items() if _sha256(Path(pool) / name) != digest]
+    if changed:
+        raise ValueError(f"{pool}: {changed} changed since prepare wrote the manifest")
 
 
 # ---------------------------------------------------------------------------------------------------- the pool
@@ -151,11 +167,14 @@ def _row_identity(r: Dict[str, Any]) -> Dict[str, set]:
 
 def prepare(sft_dir: Path, datasets: Sequence[str], held: Sequence[Tuple[str, Path]], out: Path) -> Dict[str, Any]:
     """Copy the SFT folder's rows of ``datasets`` into OUT/pool.jsonl (each with und_index / und_dataset / und_line),
-    minus every row that shares a question id, a task, a scene or an image with a held-out set, and every row without
-    an image or a video (LLaMA-Factory's collator would add a blank image the actor cannot place).  Also writes
-    OUT/dataset_info.json (one dataset, und_pool, with the SFT datasets' own columns and tags), OUT/lf_recipe.yaml
-    (the SFT's train.yaml, read for the template, cutoff and pixel limits) and OUT/manifest.json."""
+    minus every row that shares a question id, a task, a scene or an image with a held-out set, every row without an
+    image or a video (LLaMA-Factory's collator would add a blank image the actor cannot place) and every row with both
+    (the vision tower would run twice on one rank).  Also writes OUT/dataset_info.json (one dataset, und_pool, with the
+    SFT datasets' own columns and tags), OUT/lf_recipe.yaml (the SFT's train.yaml, read for the template, cutoff and
+    pixel limits) and OUT/manifest.json.  An OUT that already holds a pool is refused (runs record its hash)."""
     sft_dir, out = Path(sft_dir), Path(out)
+    if (out / "manifest.json").exists():
+        raise ValueError(f"{out} already holds a pool; prepare writes a new folder")
     info = json.loads((sft_dir / "dataset_info.json").read_text())
     attrs = []
     for d in datasets:
@@ -169,6 +188,7 @@ def prepare(sft_dir: Path, datasets: Sequence[str], held: Sequence[Tuple[str, Pa
     kept: List[Dict[str, Any]] = []
     excluded: Dict[str, Counter] = {s["name"]: Counter() for s in sets}
     excluded["no_media"] = Counter()
+    excluded["image_and_video"] = Counter()
     per_dataset: Dict[str, Dict[str, int]] = {}
     sources: Dict[str, Dict[str, Any]] = {}
     for d in datasets:
@@ -190,6 +210,9 @@ def prepare(sft_dir: Path, datasets: Sequence[str], held: Sequence[Tuple[str, Pa
             if not ident["images"]:
                 excluded["no_media"]["rows"] += 1
                 hit = True
+            if r.get("images") and r.get("videos"):
+                excluded["image_and_video"]["rows"] += 1
+                hit = True
             if hit:
                 continue
             kept.append(dict(r, und_index=len(kept), und_dataset=d, und_line=line_no))
@@ -207,14 +230,17 @@ def prepare(sft_dir: Path, datasets: Sequence[str], held: Sequence[Tuple[str, Pa
                              for s, (_, p) in zip(sets, held)},
                 "excluded": {k: dict(v) for k, v in excluded.items()},
                 "lf_recipe": {"file": str(sft_dir / "train.yaml"), "sha256": _sha256(sft_dir / "train.yaml")},
+                "files_sha256": {name: _sha256(out / name) for name in ("lf_recipe.yaml", "dataset_info.json")},
                 "videos": sum(1 for r in kept if r.get("videos"))}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False))
     return manifest
 
 
 def load_pool(pool: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """The pool's rows and manifest, after checking its files against the manifest's hashes."""
     pool = Path(pool)
     manifest = json.loads((pool / "manifest.json").read_text())
+    check_pool_files(pool, manifest)
     rows = _jsonl(pool / "pool.jsonl")
     if len(rows) != manifest["rows"] or any(r["und_index"] != i for i, r in enumerate(rows)):
         raise ValueError(f"{pool / 'pool.jsonl'} does not match its manifest ({len(rows)} rows, {manifest['rows']} listed)")
@@ -372,8 +398,12 @@ def mix_gradients(params: Sequence[Any], und_backward: Callable[[], float], redu
                   ) -> Dict[str, float]:
     """Sets the policy gradient (in ``params``' .grad) aside, runs ``und_backward`` (which adds the understanding
     term's gradient into .grad and returns its loss sum on this rank), measures both terms (summed over the ranks by
-    ``reduce``) and leaves their sum in .grad.  Returns the norms before clipping, their shares of the total norm
-    and their cosine."""
+    ``reduce``) and leaves their sum in .grad.  When the understanding term is not finite (its loss or its squared
+    norm, the same on every rank after the reduce) it is dropped and the policy gradient alone goes back, so the
+    optimizer still steps and the next batch is another one.  Returns the norms before clipping and three readings
+    of the two terms' parts: grad_share_* = a term's norm over the total's (they need not add up to 1),
+    grad_mag_share_* = a term's norm over the sum of the two norms (they add up to 1), grad_proj_share_* = a term's
+    projection on the total over the total's squared norm (they add up to 1); and the cosine of the two terms."""
     stash = {}
     for p in params:
         if p.grad is not None:
@@ -390,16 +420,36 @@ def mix_gradients(params: Sequence[Any], und_backward: Callable[[], float], redu
         if g_u is not None and g_p is not None:
             dot += _dot(g_u, g_p)
     sq_u, sq_p, dot, loss_sum = reduce([sq_u, sq_p, dot, float(loss_sum)])
-    for p, g in stash.items():
-        if p.grad is None:
-            p.grad = g
-        else:
-            p.grad.add_(g)
-    n_u, n_p = math.sqrt(max(sq_u, 0.0)), math.sqrt(max(sq_p, 0.0))
-    total = math.sqrt(max(sq_u + sq_p + 2 * dot, 0.0))
-    return {"grad_norm_policy": n_p, "grad_norm_und": n_u, "grad_norm_total": total,
+    # the understanding side only: a non-finite policy gradient is the actor's own business (it skips the step and
+    # the chain's NaN guard sees it), as without the switch
+    finite = math.isfinite(sq_u) and math.isfinite(loss_sum)
+    for p in params:
+        g = stash.get(p)
+        if not finite:
+            p.grad = g  # the policy gradient alone
+        elif g is not None:
+            if p.grad is None:
+                p.grad = g
+            else:
+                p.grad.add_(g)
+    n_p = math.sqrt(max(sq_p, 0.0))
+    if not finite:
+        return {"finite": False, "grad_norm_policy": n_p, "loss_sum": loss_sum}
+    n_u = math.sqrt(max(sq_u, 0.0))
+    tot2 = max(sq_u + sq_p + 2 * dot, 0.0)
+    total = math.sqrt(tot2)
+    both = n_u + n_p
+    return {"finite": True, "grad_norm_policy": n_p, "grad_norm_und": n_u, "grad_norm_total": total,
             "grad_share_policy": n_p / total if total > 0 else 0.0, "grad_share_und": n_u / total if total > 0 else 0.0,
+            "grad_mag_share_policy": n_p / both if both > 0 else 0.0,
+            "grad_mag_share_und": n_u / both if both > 0 else 0.0,
+            "grad_proj_share_policy": (sq_p + dot) / tot2 if tot2 > 0 else 0.0,
+            "grad_proj_share_und": (sq_u + dot) / tot2 if tot2 > 0 else 0.0,
             "grad_cos_policy_und": dot / (n_u * n_p) if n_u > 0 and n_p > 0 else 0.0, "loss_sum": loss_sum}
+
+
+MEASURES = ("grad_norm_policy", "grad_norm_und", "grad_share_policy", "grad_share_und", "grad_mag_share_policy",
+            "grad_mag_share_und", "grad_proj_share_policy", "grad_proj_share_und", "grad_cos_policy_und")
 
 
 class UndMixer:
@@ -434,17 +484,18 @@ class UndMixer:
         self.rows, self.manifest = load_pool(Path(self.cfg["pool"]))
         if self.cfg.get("pool_sha256") and self.cfg["pool_sha256"] != self.manifest["pool_sha256"]:
             raise ValueError(f"und_mix: the pool {self.cfg['pool']} changed since the PPO config was written")
-        self.lf = lf
+        if int(self.cfg.get("micro_batch_size", 1)) != 1:
+            raise ValueError("und_mix: micro_batch_size must be 1 (see DEFAULTS)")
+        # built now, at the actor's start, so that an import, path or tokenizer problem stops the job before its first
+        # rollout instead of after it
+        self.lf = lf if lf is not None else LFPath(Path(self.cfg["pool"]), self.cfg["tokenizer"])
         self.log_dir = Path(self.cfg["log_dir"]) if self.cfg.get("log_dir") else None
         if self.log_dir is not None:
             self.log_dir.mkdir(parents=True, exist_ok=True)
         self.first_batch_written = False
         self.update_counts = Counter()
 
-    # the pieces a test replaces
     def _lf(self) -> LFPath:
-        if self.lf is None:
-            self.lf = LFPath(Path(self.cfg["pool"]), self.cfg["tokenizer"])
         return self.lf
 
     def _reduce(self, values: List[Any]) -> List[float]:
@@ -485,10 +536,28 @@ class UndMixer:
         if isinstance(self.actor.actor_module, FSDP):  # what _optimizer_step does first: every shard reduced
             repair_unreduced_fsdp1_grad_shards_(self.actor.actor_module)
 
+    def _write(self, name: str, text: str, mode: str = "w") -> None:
+        """A log file of the mixer; a failed write warns and never stops training (it runs between collectives)."""
+        if self.log_dir is None:
+            return
+        try:
+            with (self.log_dir / name).open(mode) as f:
+                f.write(text)
+        except OSError as exc:
+            print(f"und_mix: could not write {self.log_dir / name}: {exc}", flush=True)
+
     def _log(self, record: Dict[str, Any]) -> None:
-        if self.rank == 0 and self.log_dir is not None:
-            with (self.log_dir / "steps.jsonl").open("a") as f:
-                f.write(json.dumps(record) + "\n")
+        if self.rank == 0:
+            self._write("steps.jsonl", json.dumps(record) + "\n", mode="a")
+
+    def _skipped(self, k: int, t0: float, reason: str, params: Sequence[Any], extra: Dict[str, Any]) -> Dict[str, float]:
+        """An optimizer step without an understanding term (not its turn, or its batch dropped on every rank)."""
+        norm = math.sqrt(max(self._reduce([sum(_dot(p.grad, p.grad) for p in params if p.grad is not None)])[0], 0.0))
+        self._log({"utc": _utc(), "opt_step": k, "inserted": False, "reason": reason, "grad_norm_policy": norm,
+                   **extra, "seconds": time.time() - t0})
+        return {"actor/und_inserted": 0.0, "actor/und_dropped": float(reason != "interval"), "actor/und_samples": 0.0,
+                "actor/und_tokens": 0.0, "actor/und_opt_step": float(k), "actor/grad_norm_policy": norm,
+                "actor/und_seconds": time.time() - t0}
 
     def before_optimizer_step(self) -> Dict[str, float]:
         import torch
@@ -499,65 +568,70 @@ class UndMixer:
         self._repair()
         self.update_counts["opt_steps"] += 1
         if k % int(self.cfg["interval"]):
-            norm = math.sqrt(max(self._reduce([sum(_dot(p.grad, p.grad) for p in params if p.grad is not None)])[0],
-                                 0.0))
-            self._log({"utc": _utc(), "opt_step": k, "inserted": False, "grad_norm_policy": norm,
-                       "seconds": time.time() - t0})
-            return {"actor/und_inserted": 0.0, "actor/und_samples": 0.0, "actor/und_tokens": 0.0,
-                    "actor/und_opt_step": float(k), "actor/grad_norm_policy": norm, "actor/grad_norm_und": 0.0,
-                    "actor/grad_share_policy": 1.0, "actor/grad_share_und": 0.0, "actor/grad_cos_policy_und": 0.0,
-                    "actor/und_seconds": time.time() - t0}
+            return self._skipped(k, t0, "interval", params, {})
         batch_rows = draws(int(self.cfg["seed"]), k, len(self.rows), int(self.cfg["batch_size"]))
         mine = rank_slice(batch_rows, self.rank, self.world)
         lf = self._lf()
-        features = lf.features([self.rows[i] for i in mine])
-        m = int(self.cfg["micro_batch_size"])
-        prepared = [rl_micro_batch(lf.collate(features[i:i + m])) for i in range(0, len(features), m)]
+        # this rank's samples; a failure here (a row LLaMA-Factory cannot read, say) is counted, and every rank then
+        # leaves the batch out together instead of the others waiting in the next collective
+        prepared, error = [], None
+        try:
+            features = lf.features([self.rows[i] for i in mine])
+            prepared = [rl_micro_batch(lf.collate([f])) for f in features]
+        except Exception as exc:  # noqa: BLE001 - reported below, on every rank
+            error = f"{type(exc).__name__}: {exc}"
+            self._write(f"errors_rank{self.rank}.jsonl", json.dumps(
+                {"utc": _utc(), "opt_step": k, "rows": mine, "error": error}) + "\n", mode="a")
         n_local = sum(float(mask.sum()) for _, mask in prepared)
-        n_global = self._reduce([n_local])[0]
+        n_global, n_failed = self._reduce([n_local, float(error is not None)])
+        if n_failed:
+            return self._skipped(k, t0, "data", params, {"failed_ranks": int(n_failed), "draws": batch_rows})
         # FSDP averages the ranks' gradients: weight x world / (all answer tokens) makes the sum weight x the
         # gradient of the token mean over the whole batch
         scale = float(self.cfg["weight"]) * self.world / max(n_global, 1.0)
         device = self._device()
+        nll_rows: List[float] = []
 
         def und_backward() -> float:
-            total = 0.0
             for inputs, mask in prepared:
                 moved = {k2: (v.to(device) if torch.is_tensor(v) else v) for k2, v in inputs.items()}
                 _, log_prob = self.actor._forward_micro_batch(moved, temperature=1.0, calculate_entropy=False)
                 nll = -(log_prob * mask.to(log_prob.device)).sum()
                 (nll * scale).backward()
-                total += float(nll.detach())
+                nll_rows.append(float(nll.detach()))
             self._repair()  # the understanding gradient's shards reduced too, before they are measured and added
-            return total
+            return sum(nll_rows)
 
         stats = mix_gradients(params, und_backward, self._reduce)
+        if not stats["finite"]:
+            self._log({"utc": _utc(), "opt_step": k, "inserted": False, "reason": "nonfinite", "draws": batch_rows,
+                       "grad_norm_policy": stats["grad_norm_policy"], "seconds": time.time() - t0})
+            return {"actor/und_inserted": 0.0, "actor/und_dropped": 1.0, "actor/und_samples": 0.0,
+                    "actor/und_tokens": 0.0, "actor/und_opt_step": float(k),
+                    "actor/grad_norm_policy": stats["grad_norm_policy"], "actor/und_seconds": time.time() - t0}
         und_loss = stats["loss_sum"] / max(n_global, 1.0)
         seconds = time.time() - t0
-        if not self.first_batch_written and self.log_dir is not None:  # the answer-mask check, every rank its own
+        if not self.first_batch_written:  # the answer-mask check and each row's loss, every rank its own
             samples = []
             for j, (inputs, mask) in enumerate(prepared):
-                for i in range(inputs["input_ids"].shape[0]):
-                    row = self.rows[mine[j * m + i]]
-                    got, want = answer_text(lf.tokenizer, inputs, mask, i), expected_answer_text(row)
-                    samples.append({"und_index": row["und_index"], "source_id": row.get("source_id"),
-                                    "dataset": row.get("und_dataset"), "answer_tokens": int(mask[i].sum()),
-                                    "tokens": int(inputs["attention_mask"][i].sum()), "decoded": got,
-                                    "expected": want, "match": got == want})
-            (self.log_dir / f"first_batch_rank{self.rank}.json").write_text(json.dumps(
-                {"opt_step": k, "samples": samples}, indent=1, ensure_ascii=False))
+                row = self.rows[mine[j]]
+                got, want = answer_text(lf.tokenizer, inputs, mask), expected_answer_text(row)
+                samples.append({"und_index": row["und_index"], "source_id": row.get("source_id"),
+                                "dataset": row.get("und_dataset"), "answer_tokens": int(mask.sum()),
+                                "tokens": int(inputs["attention_mask"].sum()), "nll_sum": nll_rows[j],
+                                "decoded": got, "expected": want, "match": got == want})
+            self._write(f"first_batch_rank{self.rank}.json", json.dumps({"opt_step": k, "samples": samples}, indent=1,
+                                                                         ensure_ascii=False))
             self.first_batch_written = True
         self.update_counts["inserted"] += 1
         self._log({"utc": _utc(), "opt_step": k, "inserted": True, "draws": batch_rows,
                    "source_ids": [self.rows[i].get("source_id") for i in batch_rows], "und_loss": und_loss,
                    "und_tokens": n_global, "samples": len(batch_rows), "weight": float(self.cfg["weight"]),
-                   **{key: stats[key] for key in ("grad_norm_policy", "grad_norm_und", "grad_norm_total",
-                                                  "grad_share_policy", "grad_share_und", "grad_cos_policy_und")},
+                   "grad_norm_total": stats["grad_norm_total"], **{key: stats[key] for key in MEASURES},
                    "seconds": seconds})
-        return {"actor/und_inserted": 1.0, "actor/und_samples": float(len(batch_rows)), "actor/und_tokens": n_global,
-                "actor/und_opt_step": float(k), "actor/und_loss": und_loss,
-                **{f"actor/{key}": stats[key] for key in ("grad_norm_policy", "grad_norm_und", "grad_share_policy",
-                                                           "grad_share_und", "grad_cos_policy_und")},
+        return {"actor/und_inserted": 1.0, "actor/und_dropped": 0.0, "actor/und_samples": float(len(batch_rows)),
+                "actor/und_tokens": n_global, "actor/und_opt_step": float(k), "actor/und_loss": und_loss,
+                **{f"actor/{key}": stats[key] for key in MEASURES},
                 "actor/grad_norm_total_preclip": stats["grad_norm_total"], "actor/und_seconds": seconds}
 
     def end_of_update(self) -> Dict[str, float]:
@@ -636,6 +710,10 @@ def counts(pool: Path, log: Path) -> Dict[str, Any]:
     steps: Dict[int, Dict[str, Any]] = {}
     for rec in _jsonl(log):
         if rec.get("inserted"):
+            wrong = [i for i, sid in zip(rec["draws"], rec.get("source_ids") or [])
+                     if i >= len(rows) or rows[i].get("source_id") != sid]
+            if wrong:
+                raise ValueError(f"step {rec['opt_step']} of {log} drew other rows than {pool} holds (e.g. {wrong[:3]})")
             steps[int(rec["opt_step"])] = rec
     per_row = Counter(i for rec in steps.values() for i in rec["draws"])
     hist = Counter(per_row.get(i, 0) for i in range(len(rows)))
@@ -646,6 +724,61 @@ def counts(pool: Path, log: Path) -> Dict[str, Any]:
             "rows_drawn": len(per_row), "draws_per_row_histogram": {str(k): v for k, v in sorted(hist.items())},
             "draws_by_dataset": dict(by_dataset),
             "per_row": {rows[i]["source_id"]: n for i, n in sorted(per_row.items())}}
+
+
+def reference_nll(pool: Path, model: str, samples: Sequence[Dict[str, Any]], device: str = "cpu",
+                  dtype: str = "bfloat16") -> List[Dict[str, Any]]:
+    """Each sample's summed NLL over its answer tokens from transformers' own forward of the model on the same
+    LLaMA-Factory batch (the collator's three M-RoPE rows, its attention mask and pixels, as the SFT trained): the
+    reference that the actor's _forward_micro_batch (remove-padding, the RL path's four position rows) must match for
+    understanding samples.  ``samples``: first_batch_rank<r>.json's, whose nll_sum the trainer logged."""
+    import torch
+    from transformers import AutoModelForImageTextToText
+
+    rows, _ = load_pool(pool)
+    lf = LFPath(Path(pool), model)
+    net = AutoModelForImageTextToText.from_pretrained(model, torch_dtype=getattr(torch, dtype),
+                                                      attn_implementation="eager").to(device).eval()
+    out = []
+    for s in samples:
+        row = rows[int(s["und_index"])]
+        batch = lf.collate(lf.features([row]))
+        extra = {k: v.to(device) for k, v in batch.items()
+                 if k not in ("input_ids", "attention_mask", "labels", "position_ids", "rope_deltas")}
+        with torch.no_grad():
+            logits = net(input_ids=batch["input_ids"].to(device), attention_mask=batch["attention_mask"].to(device),
+                         position_ids=batch["position_ids"].to(device), use_cache=False, **extra).logits.float()
+        target = batch["labels"][0, 1:].to(device)
+        keep = target != IGNORE_INDEX
+        logp = torch.log_softmax(logits[0, :-1][keep], dim=-1)
+        nll = float(-logp.gather(-1, target[keep][:, None]).sum())
+        out.append({"und_index": int(s["und_index"]), "source_id": row.get("source_id"), "answer_tokens": int(keep.sum()),
+                    "reference_nll_sum": nll, "trainer_nll_sum": s.get("nll_sum"),
+                    "difference": (s["nll_sum"] - nll) if s.get("nll_sum") is not None else None})
+    return out
+
+
+def cmd_refloss(args: argparse.Namespace) -> None:
+    samples = json.loads(Path(args.first_batch).read_text())["samples"]
+    rows = select_samples(samples, args.limit, args.videos_first, Path(args.pool))
+    got = reference_nll(Path(args.pool), args.model, rows, device=args.device, dtype=args.dtype)
+    diffs = [abs(r["difference"]) / max(r["answer_tokens"], 1) for r in got if r["difference"] is not None]
+    summary = {"utc": _utc(), "first_batch": args.first_batch, "model": args.model, "device": args.device,
+               "dtype": args.dtype, "rows": got,
+               "max_abs_difference_per_token": max(diffs) if diffs else None,
+               "mean_abs_difference_per_token": statistics.mean(diffs) if diffs else None}
+    Path(args.out).write_text(json.dumps(summary, indent=1, ensure_ascii=False))
+    print(json.dumps({k: v for k, v in summary.items() if k != "rows"}, indent=1))
+
+
+def select_samples(samples: Sequence[Dict[str, Any]], limit: int, videos_first: bool, pool: Path
+                   ) -> List[Dict[str, Any]]:
+    """The samples to recompute: video rows first when asked (the path RL never takes), then the rest in order."""
+    if videos_first:
+        rows, _ = load_pool(pool)
+        video = [s for s in samples if rows[int(s["und_index"])].get("videos")]
+        samples = video + [s for s in samples if s not in video]
+    return list(samples[:limit] if limit > 0 else samples)
 
 
 def cmd_counts(args: argparse.Namespace) -> None:
@@ -677,6 +810,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     n.add_argument("--log", required=True)
     n.add_argument("--out", default=None)
     n.set_defaults(func=cmd_counts)
+    r = sub.add_parser("refloss", help="transformers' own loss on a run's first batch, against the trainer's")
+    r.add_argument("--pool", required=True)
+    r.add_argument("--model", required=True, help="the start model (the first batch comes before any step)")
+    r.add_argument("--first-batch", required=True, help="RUN/und_mix/first_batch_rank<r>.json")
+    r.add_argument("--limit", type=int, default=0, help="this many samples (0: all)")
+    r.add_argument("--videos-first", action="store_true")
+    r.add_argument("--device", default="cpu")
+    r.add_argument("--dtype", default="bfloat16")
+    r.add_argument("--out", required=True)
+    r.set_defaults(func=cmd_refloss)
     args = ap.parse_args(argv)
     args.func(args)
 

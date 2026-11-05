@@ -52,6 +52,11 @@ def make_sft(root: Path):
                       {"role": "assistant", "content": "A"}],
          "images": [], "videos": [], "pool": "P0", "source_id": "p0_dddd0000", "scene": "0004_000004",
          "stratum": "T", "meta": json.dumps({"qids": ["dddd0000"], "questions": 1})},
+        {"messages": [{"role": "user", "content": "<image>\n<video>\nSame room?\nAnswer Yes or No."},
+                      {"role": "assistant", "content": "No"}],
+         "images": [img("both_i", (5, 5, 5))], "videos": [[img(f"both_v{i}", (9, 9, 9)) for i in range(2)]],
+         "pool": "P0", "source_id": "p0_eeee0000", "scene": "0005_000005", "stratum": "IV",
+         "meta": json.dumps({"qids": ["eeee0000"], "questions": 1})},
     ]
     p1 = [
         {"messages": [{"role": "user", "content": "First image: <image>\nWhat did the camera do?\n(A) left (B) right"},
@@ -94,19 +99,33 @@ class PoolTest(unittest.TestCase):
     def test_prepare_drops_every_overlap_and_rows_without_media(self):
         rows, manifest = U.load_pool(self.pool)
         kept = [r["source_id"] for r in rows]
-        # P0: c shares an image with X0, d has no picture; P1: rows 0 (scene), 1 (task), 2 (question id) held out
+        # P0: c shares an image with X0, d has no picture, e has both pictures and a video; P1: rows 0 (scene),
+        # 1 (task), 2 (question id) held out
         self.assertEqual(kept, ["p0_aaaa0000", "p0_bbbb1111", "p1_000000000003", "p1_000000000004", "p1_000000000005"])
         self.assertEqual([r["und_index"] for r in rows], list(range(5)))
         self.assertEqual([r["und_dataset"] for r in rows], ["P0_train"] * 2 + ["P1_train"] * 3)
-        self.assertEqual(manifest["per_dataset"], {"P0_train": {"rows": 4, "kept": 2, "excluded": 2},
+        self.assertEqual(manifest["per_dataset"], {"P0_train": {"rows": 5, "kept": 2, "excluded": 3},
                                                    "P1_train": {"rows": 6, "kept": 3, "excluded": 3}})
         self.assertEqual(manifest["excluded"], {"P1_probe": {"scenes": 1, "tasks": 1, "ids": 1},
-                                                "X0": {"images": 1}, "no_media": {"rows": 1}})
+                                                "X0": {"images": 1}, "no_media": {"rows": 1},
+                                                "image_and_video": {"rows": 1}})
         self.assertEqual(manifest["videos"], 1)
         self.assertEqual(json.loads((self.pool / "dataset_info.json").read_text()),
                          {U.POOL_DATASET: dict(ATTRS, file_name="pool.jsonl")})
         self.assertEqual((self.pool / "lf_recipe.yaml").read_text(), RECIPE)
         self.assertEqual(manifest["held_out"]["X0"]["questions"], 2)
+        self.assertEqual(sorted(manifest["files_sha256"]), ["dataset_info.json", "lf_recipe.yaml"])
+
+    def test_prepare_never_overwrites_a_pool_and_edits_are_caught(self):
+        with self.assertRaises(ValueError):
+            U.prepare(self.sft, ["P0_train"], [], self.pool)
+        lines = (self.pool / "pool.jsonl").read_text().splitlines()
+        lines[0] = lines[0].replace('"B"', '"A"')  # same row count, another answer
+        (self.pool / "pool.jsonl").write_text("\n".join(lines) + "\n")
+        with self.assertRaises(ValueError):
+            U.load_pool(self.pool)
+        with self.assertRaises(ValueError):
+            U.ppo_block({"pool": str(self.pool), "batch_size": 4}, model="/m", run_root=self.root)
 
     def test_prepare_refuses_datasets_with_other_columns(self):
         info = json.loads((self.sft / "dataset_info.json").read_text())
@@ -132,7 +151,9 @@ class PoolTest(unittest.TestCase):
         for bad in ({"pool": str(self.pool), "batch_size": 4, "lr": 1}, {"batch_size": 4},
                     {"pool": str(self.root / "nowhere"), "batch_size": 4}, {"pool": str(self.pool), "batch_size": 4,
                                                                             "weight": 0},
-                    {"pool": str(self.pool), "batch_size": 2.5}, {"pool": str(self.pool), "batch_size": True}):
+                    {"pool": str(self.pool), "batch_size": 2.5}, {"pool": str(self.pool), "batch_size": True},
+                    {"pool": str(self.pool), "batch_size": 4, "micro_batch_size": 2},
+                    {"pool": str(self.pool), "batch_size": 4, "seed": -1}):
             with self.assertRaises(ValueError, msg=bad):
                 U.ppo_block(bad, model="/m", run_root=self.root)
 
@@ -146,6 +167,11 @@ class PoolTest(unittest.TestCase):
         self.assertEqual((got["batches"], got["draws"], got["rows_drawn"]), (2, 4, 4))
         self.assertEqual(got["draws_per_row_histogram"], {"0": 1, "1": 4})
         self.assertEqual(got["draws_by_dataset"], {"P0_train": 2, "P1_train": 2})
+        # a log of another pool: its rows' ids do not match
+        log.write_text(json.dumps({"opt_step": 0, "inserted": True, "draws": [0, 1],
+                                   "source_ids": ["p0_aaaa0000", "p1_other"]}) + "\n")
+        with self.assertRaises(ValueError):
+            U.counts(self.pool, log)
 
 
 class DrawTest(unittest.TestCase):
@@ -297,6 +323,12 @@ class MixerTest(unittest.TestCase):
         first = json.loads((self.root / "run" / "und_mix" / "first_batch_rank0.json").read_text())
         self.assertEqual([s["und_index"] for s in first["samples"]], rows)
         self.assertEqual({s["answer_tokens"] for s in first["samples"]}, {2})
+        per_row = -ref.log_probs(ids)[:, -2:].sum(dim=1)
+        self.assertEqual(len(first["samples"]), 4)
+        for s, want in zip(first["samples"], per_row.tolist()):  # each row's loss, for the reference check
+            self.assertAlmostEqual(s["nll_sum"], want, places=4)
+        self.assertAlmostEqual(out["actor/grad_mag_share_und"] + out["actor/grad_mag_share_policy"], 1.0, places=6)
+        self.assertAlmostEqual(out["actor/grad_proj_share_und"] + out["actor/grad_proj_share_policy"], 1.0, places=6)
         actor.actor_optimizer.step()
         actor.actor_optimizer.zero_grad()
         # step 1: no understanding batch, only the policy norm
@@ -316,6 +348,51 @@ class MixerTest(unittest.TestCase):
         self.assertEqual([(r["opt_step"], r["inserted"]) for r in log], [(0, True), (1, False), (2, True)])
         self.assertEqual(log[0]["draws"], rows)
         self.assertEqual(log[2]["draws"], U.draws(20261105, 2, 9, 4))
+
+    def test_a_nonfinite_understanding_term_is_dropped_and_the_count_moves_on(self):
+        actor = _ToyActor()
+        mixer = self._mixer(actor)
+        params = list(actor.actor_module.parameters())
+        policy = [torch.randn_like(p) for p in params]
+        for p, g in zip(params, policy):
+            p.grad = g.clone()
+        real = actor._forward_micro_batch
+        actor._forward_micro_batch = lambda mb, temperature, calculate_entropy=False: (
+            None, real(mb, temperature)[1] * float("inf"))
+        out = mixer.before_optimizer_step()
+        self.assertEqual((out["actor/und_inserted"], out["actor/und_dropped"]), (0.0, 1.0))
+        for p, g in zip(params, policy):  # the policy gradient alone, untouched
+            self.assertTrue(torch.equal(p.grad, g))
+        actor.actor_optimizer.step()  # the step happens, so the next insertion (k = 2) draws other rows
+        actor._forward_micro_batch = real
+        for p in params:
+            p.grad = torch.zeros_like(p)
+        self.assertEqual(mixer.before_optimizer_step()["actor/und_inserted"], 0.0)  # k = 1: not its turn
+        log = [json.loads(l) for l in (self.root / "run" / "und_mix" / "steps.jsonl").read_text().splitlines()]
+        self.assertEqual([(r["opt_step"], r["inserted"], r["reason"]) for r in log], [(0, False, "nonfinite"),
+                                                                                   (1, False, "interval")])
+
+    def test_a_row_that_fails_skips_the_batch_on_every_rank(self):
+        actor = _ToyActor()
+        lf = _ToyLF()
+        bad = U.draws(20261105, 0, 9, 4)[2]
+        real = lf.features
+        lf.features = lambda rows: [(_ for _ in ()).throw(ValueError("unreadable"))
+                                    if r["und_index"] == bad else real([r])[0] for r in rows]
+        block = U.ppo_block({"pool": str(self.pool), "batch_size": 4}, model="/m", run_root=self.root / "run")
+        mixer = U.UndMixer(block, actor, lf=lf)
+        params = list(actor.actor_module.parameters())
+        for p in params:
+            p.grad = torch.ones_like(p)
+        out = mixer.before_optimizer_step()
+        self.assertEqual((out["actor/und_inserted"], out["actor/und_dropped"]), (0.0, 1.0))
+        self.assertEqual(actor.calls, [])  # no understanding forward at all
+        for p in params:
+            self.assertTrue(torch.equal(p.grad, torch.ones_like(p)))
+        errors = (self.root / "run" / "und_mix" / "errors_rank0.jsonl").read_text()
+        self.assertIn("unreadable", errors)
+        log = json.loads((self.root / "run" / "und_mix" / "steps.jsonl").read_text().splitlines()[-1])
+        self.assertEqual((log["reason"], log["failed_ranks"]), ("data", 1))
 
     def test_interval_three_and_refusals(self):
         actor = _ToyActor()
