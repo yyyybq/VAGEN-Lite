@@ -87,6 +87,23 @@ def test_rebuild_reads_an_evaluation_folder_with_the_box_judge(monkeypatch, tmp_
     assert "## 配对：c-d" in T.markdown(rep)
 
 
+def test_lenient_success_sits_beside_the_formal_one():
+    def row(m, i, ok, top):
+        return {"model": m, "instance_id": f"I{i}", "success": ok, "max_shaping": top}
+    c = [row("S", i, i == 0, 0.6 if i < 2 else 0.1) for i in range(4)] + \
+        [row("RS", i, i in (0, 1), 0.7 if i < 3 else 0.2) for i in range(4)]
+    d = [row("S", i, False, 0.1) for i in range(4)] + [row("RS", i, i == 0, 0.9 if i == 0 else 0.0) for i in range(4)]
+    part = T.lenient_part({"c": c, "d": d}, [("c", "d")], exclude={"I3"})
+    s = part["sets"]["c"]
+    assert s["formal"]["models"]["S"]["k"] == 1 and s["lenient"]["models"]["S"]["k"] == 2
+    assert s["lenient"]["models"]["RS"]["k"] == 3 and s["lenient"]["pairs"]["RS-S"]["only_a"] == 1
+    g = part["pairs"]["c-d"]["RS-S"]
+    assert g["formal"]["n"] == 3 and g["lenient"]["gap"] == pytest.approx(0.0)  # c: RS-S +1/3 lenient; d: +1/3 too
+    assert g["formal"]["gap"] == pytest.approx(0.0)
+    md = "\n".join(T.lenient_markdown(part))
+    assert "### 同一批实例上两档之差：c-d" in md and "| RS-S |" in md
+
+
 def test_distribution_and_sign_test():
     d = T.dist([0.1, 0.2, 0.5, 0.9])
     assert d["median"] == pytest.approx(0.35) and d["q25"] == pytest.approx(0.175) and d["at_least_half"] == 2

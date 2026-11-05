@@ -20,7 +20,9 @@ report: per set and model, successes and failures apart: max_shaping_score (mean
   that passed every box gate of the canonical metric, the upper half being reserved for those), and, over the
   episodes whose rebuild holds, the highest score before the first block (an episode never blocked: its maximum);
   --pair A=B: per model, the two sets on their common instances: the mean difference of max_shaping_score with a 95%
-  interval (whole scenes resampled) and the sign test (exact binomial).  DIR/report.json, DIR/report.md.
+  interval (whole scenes resampled) and the sign test (exact binomial).  Also the one lenient success of
+  EVAL_PROTOCOL section 6 (max_shaping_score >= 0.5) beside the formal one: per set n3_report.tier_table's rates and
+  pairings, per pair the same-instance gaps (n3_report.paired_gap).  DIR/report.json, DIR/report.md.
 """
 from __future__ import annotations
 
@@ -191,10 +193,40 @@ def paired(a: dict, b: dict, scenes: dict, draws: int = 2000, seed: int = 202611
             "a_higher": up, "b_higher": down, "p": binom_two_sided(up, up + down)}
 
 
+def by_model(rows: list, key) -> dict:
+    """{model: {instance: key(row)}}."""
+    out = collections.defaultdict(dict)
+    for r in rows:
+        out[r["model"]][r["instance_id"]] = key(r)
+    return dict(out)
+
+
+def lenient(r: dict) -> bool:
+    """EVAL_PROTOCOL section 6: a visited pose passed the canonical box geometry (shaping >= 0.5)."""
+    return r["max_shaping"] >= 0.5
+
+
+def lenient_part(sets: dict, pairs=(), exclude=()) -> dict:
+    """Formal and lenient success side by side: per set n3_report.tier_table (rates, RL against SFT, the two RL
+    against each other, trained against base), per pair A=B the same-instance gaps of those differences."""
+    import n3_report as N3R
+
+    keep = {n: [r for r in rows if r["instance_id"] not in exclude] for n, rows in sets.items()}
+    succ = {n: {"formal": by_model(rows, lambda r: bool(r["success"])), "lenient": by_model(rows, lenient)}
+            for n, rows in keep.items()}
+    out = {"sets": {n: {k: N3R.tier_table(v) for k, v in s.items()} for n, s in succ.items()}, "pairs": {}}
+    combos = [(m, R.sft_of(m)) for m in N3R.RL] + list(N3R.RL_PAIRS)
+    for a, b in pairs:
+        if a in succ and b in succ:
+            out["pairs"][f"{a}-{b}"] = {f"{m}-{ref}": {k: N3R.paired_gap(succ[a][k], succ[b][k], m, ref)
+                                                       for k in ("formal", "lenient")} for m, ref in combos}
+    return out
+
+
 def build(sets: dict, pairs=(), exclude=(), scenes=None) -> dict:
     """sets: {name: rows (rebuild's)}."""
     scenes = scenes or {}
-    rep = {"sets": {}, "pairs": {}, "excluded": sorted(exclude)}
+    rep = {"sets": {}, "pairs": {}, "excluded": sorted(exclude), "lenient": lenient_part(sets, pairs, exclude)}
     for name, rows in sets.items():
         rows = [r for r in rows if r["instance_id"] not in exclude]
         by = collections.defaultdict(list)
@@ -254,7 +286,30 @@ def markdown(rep: dict) -> str:
             lines.append(f"| {m} | {c['n']} | {f3(c['mean_a'])} | {f3(c['mean_b'])} | {c['diff']:+.3f}（{c['low']:+.3f} 到 "
                          f"{c['high']:+.3f}） | {c['a_higher']} : {c['b_higher']} | {c['p']:.3g} |")
         lines.append("")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines + lenient_markdown(rep.get("lenient") or {})) + "\n"
+
+
+def lenient_markdown(part: dict) -> list:
+    if not part:
+        return []
+    import n3_report as N3R
+
+    lines = ["## 宽松成功（EVAL_PROTOCOL 第 6 节），和正式成功并排", "",
+             "宽松成功 = 走到过通过全部盒判定门槛的位姿（塑形分 ≥ 0.5），不要求画面可见和 45 度规则；只作参考。", ""]
+    for name, s in part["sets"].items():
+        lines += [f"### {name}", "", "| 模型 | 正式成功 | 宽松成功 |", "| --- | --- | --- |"]
+        for m, r in s["formal"]["models"].items():
+            lines.append(f"| {m} | {R.cell(r)} | {R.cell(s['lenient']['models'][m])} |")
+        lines += ["", "| 配对 | 正式成功之差 | 宽松成功之差 |", "| --- | --- | --- |"]
+        for k, c in s["formal"]["pairs"].items():
+            lines.append(f"| {k} | {N3R.diff_cell(c)} | {N3R.diff_cell(s['lenient']['pairs'].get(k))} |")
+        lines.append("")
+    for name, by in part["pairs"].items():
+        lines += [f"### 同一批实例上两档之差：{name}", "", "| 配对 | 正式成功 | 宽松成功 |", "| --- | --- | --- |"]
+        for k, g in by.items():
+            lines.append(f"| {k} | {N3R.gap_cell(g['formal'])} | {N3R.gap_cell(g['lenient'])} |")
+        lines.append("")
+    return lines
 
 
 def report_cmd(args) -> int:
