@@ -136,6 +136,41 @@ def test_check_finds_missing_weights_prompts_and_sft_starts(tmp_path):
     assert any("D-SFT is not evaluated" in p for p in S.check(starts[:2]))
 
 
+QA_SPEC = [{"name": "QRL-s1", "path": "/e/rl_run_qrl_s1/checkpoints/global_step_300/actor/huggingface/",
+            "group": "QA-RL", "reward": "GRPO", "seed": 1, "step": 300, "sft": "Q3S", "main_name": "qrl_s1_300"},
+           {"name": "QACTL-SFT", "path": "/e/qa_sft_ctrl/model/checkpoint-155", "group": "QA-SFT", "reward": "SFT",
+            "step": 155, "sft": "Q3S"}]
+
+
+def test_spec_entries_for_weights_outside_the_matrix(tmp_path):
+    """--spec (2026-11-04, the main line's QA RL pilot): entries given in full, the action prompt by default."""
+    out = S.make([], existing=[{"name": "C-SFT", "path": "/w/c"}], specs=QA_SPEC)
+    assert [e["name"] for e in out] == ["C-SFT", "QRL-s1", "QACTL-SFT"]
+    q = out[1]
+    assert q["val_env"] == S.QWEN3_VAL_ENV and q["base"] == "Q3B" and q["main_name"] == "qrl_s1_300"
+    assert not q["path"].endswith("/") and q["sft"] == "Q3S" and q["seed"] == 1 and q["step"] == 300
+    assert "main_name" not in out[2] and out[2]["seed"] is None
+    with pytest.raises(ValueError, match="sft"):  # sft must be stated, even as null
+        S.from_spec({k: v for k, v in QA_SPEC[0].items() if k != "sft"})
+    with pytest.raises(ValueError, match="group"):
+        S.from_spec(dict(QA_SPEC[0], group=""))
+    assert S.from_spec(dict(QA_SPEC[0], sft=None))["sft"] is None
+    assert S.from_spec(dict(QA_SPEC[0], val_env="/v.yaml"))["val_env"] == "/v.yaml"
+    with pytest.raises(ValueError, match="QRL-s1"):  # a name twice
+        S.make([], specs=QA_SPEC + [QA_SPEC[0]])
+    val_env(tmp_path / "q3.yaml")
+    for e in out[1:]:
+        e["path"] = str(tmp_path / e["name"])
+        weights(Path(e["path"]))
+        e["val_env"] = str(tmp_path / "q3.yaml")
+    assert S.check(out[1:]) == []  # Q3S, the SFT they name, is N1's
+    f, sp = tmp_path / "s.json", tmp_path / "spec.json"
+    sp.write_text(json.dumps(QA_SPEC))
+    assert S.main(["make", "--spec", str(sp), "--out", str(f)]) == 0
+    assert [e["name"] for e in json.loads(f.read_text())["starts"]] == ["QRL-s1", "QACTL-SFT"]
+    assert S.main(["check", "--starts", str(f)]) == 1  # their weights are not there
+
+
 def test_cli_make_check_val_env(tmp_path, capsys):
     m = str(tmp_path / "exps/matrix_v3")
     p = RL.format(g="c", c=9, k=1, r="s0", n=50).replace(M, m)
@@ -282,6 +317,19 @@ def test_supplementary_cells_pair_with_their_own_sft_and_stay_out_of_d_against_c
     md = NR.markdown(NR.build_all(inst, nm, starts + news, n1))
     assert "| B′ | S0 | `m3bs1s0_300` 2/10" in md and "| D_noP0 | V4 | `m3dns1d_300` 6/10" in md
     assert "| E2 | SFT | 7/10" in md and "| Cr | SFT | 8/10" in md
+
+
+def test_spec_entries_pair_with_the_sft_they_state(tmp_path):
+    ids, inst, n1, nm, starts = report_fixture(tmp_path)
+    spec = [S.from_spec(s) for s in QA_SPEC]
+    write(nm / "QRL-s1/episodes.jsonl", [ep(i, k < 3) for k, i in enumerate(ids)])
+    write(nm / "QACTL-SFT/episodes.jsonl", [ep(i, False) for i in ids])
+    m = NR.build(inst, nm, starts + spec, n1)["models"]
+    assert m["QRL-s1"]["versus_sft"]["base"] == "Q3S"
+    assert m["QRL-s1"]["versus_sft"]["all"]["diff"] == pytest.approx(0.1)  # 3/10 against Q3S's 2/10
+    assert m["QACTL-SFT"]["versus_sft"]["base"] == "Q3S" and "versus_c" not in m["QRL-s1"]
+    md = NR.markdown(NR.build_all(inst, nm, starts + spec, n1))
+    assert "| QA-RL | GRPO | `qrl_s1_300` 3/10" in md and "| QA-SFT | SFT | 0/10" in md
 
 
 def test_report_main_and_a_twice_played_instance(tmp_path):

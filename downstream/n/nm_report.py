@@ -11,7 +11,8 @@ resampling interval; near-threshold and the rest; behaviour), with three pairing
   * versus: every model against the base Q3B;
   * versus_sft: every RL start against the SFT start it grew from (C against C-SFT, D against D-SFT, B′ against
     Bp-SFT, D_noP0 against D_noP0-SFT, Cr against Cr-SFT, the old E against Q3S, the main line's formal SFT epoch 8;
-    N1's Q3RS and Q3RD against Q3S);
+    N1's Q3RS and Q3RD against Q3S); an entry given in full (nm_starts --spec) against the sft it states (2026-11-04:
+    the QA RL pilot and its QA-SFT control against Q3S, their common start);
   * versus_s0: each V4 start against the S0 start of the same group and seed;
   * versus_c: each D start against the C start of the same seed and reward (the matrix's 3.1 comparison; SFT against
     SFT); C has no seed-1 V4 checkpoint (stopped at update 47), and as the user decided for the matrix, C-SFT stands in.
@@ -44,7 +45,8 @@ PAIRINGS = (("versus", "和底座 Q3B 配对"),
 PAIR_NOTE = ("全部对 Q3B；C 的 RL 对 C-SFT，D 的对 D-SFT，B′ 的对 Bp-SFT，D_noP0 的对 D_noP0-SFT，Cr 的对 Cr-SFT，"
              "旧 E 的对 Q3S（旧 E 的 RL 从主线正式 SFT 第 8 轮起步，就是 N1 的 Q3S）；N1 的 Q3RS、Q3RD 对 Q3S；V4 对同组"
              "同种子的 S0；D 对同种子同奖励的 C（C 种子 1 的 V4 没有检查点，按用户定的用 C-SFT 代替）。B′、D_noP0、E2、Cr "
-             "按预登记各自单独报告，不进 D 对 C 的比较。")
+             "按预登记各自单独报告，不进 D 对 C 的比较。另外登记的起点（如问答 RL 试点和它的问答 SFT 对照）对它写明的 SFT"
+             " 起点。")
 
 
 def order(starts) -> list:

@@ -2,8 +2,8 @@
 """The main line's matrix v3 starts evaluated N1's way (the user, 2026-11-03 evening: the picks of groups C, D and E,
 two seeds x S0 / V4 each, plus C's and D's SFT starts; frozen weights, the merged 600 instances; no far transfer).
 
-    python downstream/n/nm_starts.py make --paths P1 P2 ... [--out downstream/n/nm_starts.json] [--append]
-                                         [--val-env NAME=PATH ...] [--archived NAME=LABEL ...] [--note TEXT]
+    python downstream/n/nm_starts.py make --paths P1 P2 ... [--spec FILE] [--out downstream/n/nm_starts.json]
+                                         [--append] [--val-env NAME=PATH ...] [--archived NAME=LABEL ...] [--note TEXT]
     python downstream/n/nm_starts.py check [--starts FILE]
     python downstream/n/nm_starts.py val-env NAME [--starts FILE]
     python downstream/n/nm_starts.py submit --out NM --instances FILE [--names ...] [--pool zoetrope] [--go]
@@ -24,6 +24,10 @@ make: one entry per weight folder (read by path, never copied), named from where
   error).  --val-env NAME=PATH gives an entry another prompt (2026-11-03: the new E, an SFT on P0 + P1 without RL,
   must not take the old E chain's free_think one); --archived NAME=LABEL marks an entry (new or already in the file)
   as archived, which nm_report.py reports apart under LABEL (2026-11-03: the old E's four RL, "自由思考提示，已废弃").
+  --spec FILE: entries given in full, for weights outside the matrix's layout (2026-11-04: the main line's QA RL pilot,
+  whose chain's own val_env is the QA environment, not the action one): a JSON list of objects with name, path, group,
+  reward and sft (Q3S or another entry; null for none), optional seed, step and main_name; the prompt is QWEN3_VAL_ENV
+  unless val_env is given; base Q3B.  They come after the --paths entries.
 check: every entry's weights (safetensors, config.json, preprocessor_config.json), its val_env, the prompt fields of
   its val_env against its group's others (prompt_format, prompt_format_example, max_actions_per_step, action_space,
   max_episode_steps), and that the SFT it names is an entry or Q3S; exit 1 on any problem.
@@ -80,6 +84,22 @@ def entry(path: str, matrix: str = MATRIX) -> dict:
     raise ValueError(f"not a matrix v3 RL or SFT weight folder: {path}")
 
 
+SPEC_NEEDS = ("name", "path", "group", "reward", "sft")
+
+
+def from_spec(spec: dict) -> dict:
+    """An entry given in full (--spec); sft must be stated, even as null, so that no pairing is left out silently."""
+    missing = [k for k in SPEC_NEEDS if k not in spec or (k != "sft" and not spec[k])]
+    if missing:
+        raise ValueError(f"spec entry {spec.get('name', '?')}: missing {', '.join(missing)}")
+    out = {"name": spec["name"], "path": str(spec["path"]).rstrip("/"), "val_env": spec.get("val_env") or QWEN3_VAL_ENV,
+           "group": spec["group"], "seed": spec.get("seed"), "reward": spec["reward"], "step": spec.get("step"),
+           "sft": spec["sft"], "base": spec.get("base", "Q3B")}
+    if spec.get("main_name"):
+        out["main_name"] = spec["main_name"]
+    return out
+
+
 def pairs(items, what: str) -> dict:
     """["NAME=VALUE", ...] -> {NAME: VALUE}."""
     out = {}
@@ -91,9 +111,9 @@ def pairs(items, what: str) -> dict:
     return out
 
 
-def make(paths, matrix: str = MATRIX, existing=(), val_env=None, archived=None) -> list:
-    """existing + one entry per path; val_env / archived: {name: prompt path / label} for any of them."""
-    out = list(existing) + [entry(p, matrix) for p in paths]
+def make(paths, matrix: str = MATRIX, existing=(), val_env=None, archived=None, specs=()) -> list:
+    """existing + one entry per path + one per spec; val_env / archived: {name: prompt path / label} for any of them."""
+    out = list(existing) + [entry(p, matrix) for p in paths] + [from_spec(s) for s in specs]
     names = [e["name"] for e in out]
     dup = sorted({n for n in names if names.count(n) > 1})
     if dup:
@@ -192,6 +212,7 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("make")
     a.add_argument("--paths", nargs="*", default=[])
+    a.add_argument("--spec", type=Path, default=None, help="a JSON list of entries given in full (see make)")
     a.add_argument("--out", type=Path, default=STARTS)
     a.add_argument("--append", action="store_true", help="keep the entries (and note) already in --out")
     a.add_argument("--matrix", default=MATRIX, help="where the RL chains lie (an SFT start's prompt)")
@@ -213,18 +234,21 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "make":
         old = json.loads(args.out.read_text()) if args.append and args.out.is_file() else {"note": "", "starts": []}
+        specs = json.loads(args.spec.read_text()) if args.spec else []
         starts = make(args.paths, args.matrix, existing=old["starts"], val_env=pairs(args.val_env, "--val-env"),
-                      archived=pairs(args.archived, "--archived"))
+                      archived=pairs(args.archived, "--archived"), specs=specs)
         note = "\n".join(x for x in (old.get("note", ""), args.note) if x)
         args.out.write_text(json.dumps({"note": note, "starts": starts}, indent=1, ensure_ascii=False) + "\n")
         for e in starts:
-            print(f"{e['name']:10s} step {e['step']:>5}  {e['path']}{'  [' + e['archived'] + ']' if e.get('archived') else ''}")
+            print(f"{e['name']:10s} step {str(e.get('step') or '-'):>5}  {e['path']}"
+                  f"{'  [' + e['archived'] + ']' if e.get('archived') else ''}")
         return 0
     starts = load(args.starts)
     if args.cmd == "check":
         problems = check(starts)
         for e in starts:
-            print(f"{e['name']:10s} {e['reward']:4s} step {e['step']:>5}  sft {e.get('sft') or '-':6s} {e['path']}")
+            print(f"{e['name']:10s} {e['reward']:4s} step {str(e.get('step') or '-'):>5}  sft {e.get('sft') or '-':6s} "
+                  f"{e['path']}")
         for p in problems:
             print("PROBLEM", p)
         return 1 if problems else 0
