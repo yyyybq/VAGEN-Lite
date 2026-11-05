@@ -83,11 +83,11 @@ def loss_weights(cfg) -> Tuple[float, float]:
     return float(getattr(cfg, "nfp_mse_loss_weight", 0.1)), float(getattr(cfg, "nfp_cosine_loss_weight", 0.1))
 
 
-def score_episode(model, ids, pixel_values, targets: Optional[list] = None) -> List[Dict[str, float]]:
-    """The statistics of every consecutive frame pair of one expanded episode (ids (1, L) with the alias, pixel_values
-    (frames, 3, H, W)), as the adapter's training forward computes its loss (cambrian_register), one pair at a time.
-    With ``targets`` a list, each pair's target (the next frame's 8 x 8 SigLIP grid, (64, d) float32 on the CPU) is
-    appended to it, for the average-frame baseline (avg_baseline)."""
+def episode_forward(model, ids, pixel_values):
+    """One expanded episode (ids (1, L) with the alias, pixel_values (frames, 3, H, W)) through the adapter's own pieces
+    as its training forward runs them (cambrian_register): the last hidden states (1, L, h), the frames' SigLIP
+    features (frames, side * side, d), the consecutive frame pairs (cambrian_nfp.concat_nfp_pairs), side and newline.
+    score_episode scores the pairs; nfp_head_pretrain (decision 54 丙) keeps the head's input and target of each."""
     import torch
 
     from vagen.models import cambrian_nfp as N
@@ -96,15 +96,26 @@ def score_episode(model, ids, pixel_values, targets: Optional[list] = None) -> L
     side = int(cfg.si_token_len ** 0.5)
     newline = getattr(cfg, "mm_use_im_newline_token", True)
     per_image = side * (side + 1) if newline else side * side
-    mse_w, cos_w = loss_weights(cfg)
     mapped = ids.masked_fill(ids == int(cfg.image_token_alias), N.IMAGE_TOKEN_INDEX)
     pos = torch.arange(ids.shape[1], device=ids.device)[None]
     embeds, raw = model._embed_multimodal_batch(mapped, pixel_values, return_raw=True)
     hidden = model.model(inputs_embeds=embeds, position_ids=pos, use_cache=False, return_dict=True)[0]
     if hidden.dim() == 2:
         hidden = hidden.unsqueeze(0)
+    return hidden, raw, N.concat_nfp_pairs(mapped, pos, per_image), side, newline
+
+
+def score_episode(model, ids, pixel_values, targets: Optional[list] = None) -> List[Dict[str, float]]:
+    """The statistics of every consecutive frame pair of one expanded episode (ids (1, L) with the alias, pixel_values
+    (frames, 3, H, W)), as the adapter's training forward computes its loss (cambrian_register), one pair at a time.
+    With ``targets`` a list, each pair's target (the next frame's 8 x 8 SigLIP grid, (64, d) float32 on the CPU) is
+    appended to it, for the average-frame baseline (avg_baseline)."""
+    from vagen.models import cambrian_nfp as N
+
+    mse_w, cos_w = loss_weights(model.config)
+    hidden, raw, pairs, side, newline = episode_forward(model, ids, pixel_values)
     rows = []
-    for pair in N.concat_nfp_pairs(mapped, pos, per_image):
+    for pair in pairs:
         loss, s = N.concat_nfp_loss(hidden, [pair], raw, model.model.nfp_head, side=side, newline=newline,
                                     mse_weight=mse_w, cos_weight=cos_w)
         rows.append({**{k: v for k, v in s.items() if k != "pairs"}, "loss": float(loss),
