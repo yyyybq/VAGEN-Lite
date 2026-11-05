@@ -819,6 +819,15 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             raise SystemExit(f"the {args.model_type} overrides are for the concat history mode (--history-mode concat)")
         for key, value in type_overrides.items():
             _set(ppo, key, value)
+    und_mix = None
+    if getattr(args, "und_mix", None):  # the reward line (2026-11-05): understanding batches in the actor's update
+        from vagen.und_mix import ppo_block
+
+        try:
+            und_mix = ppo_block(args.und_mix, model=model, run_root=run_root)
+        except (ValueError, OSError) as exc:
+            raise SystemExit(f"--und-mix: {exc}")
+        _set(ppo, "actor_rollout_ref.actor.und_mix", und_mix)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True, "output_format": output_format,
@@ -859,6 +868,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "depth_flagged_checked": len(flagged), "depth_flagged_in_train": len(flagged_in_train),
               "train_scenes": len({r["scene_id"] for r in parts["train"]}),
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
+    if und_mix:  # only with the option, so that a report without it stays as it was
+        report["und_mix"] = und_mix
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
 
@@ -1208,6 +1219,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--max-response-length", type=int, default=None,
                    help=f"concat history mode: the answer budget of one episode in tokens (default {CONCAT_RESPONSE_LENGTH}); "
                         "matrix group E uses 6144 for thinking text")
+    c.add_argument("--und-mix", default=None,
+                   help="the reward line (2026-11-05): understanding batches in the actor's update, a JSON object "
+                        "(or a .json file) with pool (python -m vagen.und_mix prepare) and optionally interval, "
+                        "weight, batch_size, micro_batch_size, seed; written to actor_rollout_ref.actor.und_mix")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--seed", type=int, default=None,
                    help="round 12: the run's seed, the order of the tasks (data.seed); the template's otherwise")

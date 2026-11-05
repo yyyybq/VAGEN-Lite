@@ -1438,6 +1438,8 @@ class Chain:
             for key, flag in (("output_format", "--output-format"), ("max_response_length", "--max-response-length")):
                 if rl.get(key) is not None:  # matrix v2, group E: the free_think prompt and a longer answer budget
                     args += [flag, str(rl[key])]
+            if rl.get("und_mix"):  # the reward line (2026-11-05): understanding batches in the actor's update
+                args += ["--und-mix", json.dumps(rl["und_mix"], sort_keys=True)]
             self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
         if self.plan.get("start_model"):
             self.mark("rl_config", start_model=str(self.sft_model()))
@@ -2330,6 +2332,22 @@ class Chain:
                                       pool=self.plan.get("pool"), out_dir=str(results))
                     job_sco.submit(run)
                 runs[run.name] = run
+        dq = diag.get("downstream_qa")  # the reward line (2026-11-05): X0 / G0 with the downstream line's own scripts
+        if dq:
+            from eval.diagnostics import sco_downstream_qa
+
+            sco_downstream_qa.check(dq)
+            dq_out = out / "downstream_qa"
+            todo = [n for n in models if not sco_downstream_qa.answered(dq_out, n, dq)]
+            per = int(dq.get("models_per_job", per_job))
+            for i in range(0, len(todo), per):
+                batch = todo[i:i + per]
+                run = out / "downstream_qa_runs" / sco_downstream_qa.run_name(batch)
+                run.mkdir(parents=True, exist_ok=True)
+                if not (run / "job" / "submission.json").exists():
+                    sco_downstream_qa.prepare(run, dq, {n: models[n] for n in batch}, self.plan.get("pool"), dq_out)
+                    job_sco.submit(run)
+                runs[run.name] = run
         if runs:
             self.mark("diagnostics", job_ids={n: json.loads((r / "job" / "submission.json").read_text())["job_id"]
                                               for n, r in runs.items()})
@@ -2344,6 +2362,15 @@ class Chain:
                 self.sh([py, "-m", "eval.diagnostics.qa_probe", "curve", "--out", str(results),
                          "--probe-name", f"{probe_name} ({probe})", *[a for c in chains for a in ("--chain", c)]],
                         log=self.tr / "logs" / f"probe_curve_{probe_name}.log")
+        if dq:
+            missing = [n for n in models if not sco_downstream_qa.answered(dq_out, n, dq)]
+            if missing:
+                raise ChainError(f"downstream_qa: no complete answers for {missing[:5]}")
+            try:
+                sco_downstream_qa.analyze(dq_out, list(models), dq, logs=self.tr / "logs")
+            except RuntimeError as exc:
+                raise ChainError(f"downstream_qa: {exc}")
+            self.mark("diagnostics", downstream_qa=sorted(dq["sets"]))
         self.mark("diagnostics", models=len(models), probes=sorted(probes))
         if self.plan.get("retain") == "best_and_last" and self.retain_after() == "diagnostics":
             self.retain()  # kept until the probes had every evaluated checkpoint
