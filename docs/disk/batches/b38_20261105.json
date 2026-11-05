@@ -1,0 +1,28 @@
+{
+ "batch": "b38_20261105",
+ "approved": "PENDING: the main line (主实验, 11-05 14:1x) relays the user's \"2 甲\" there (hand the step-300 resume states of qrl_s1 / qrl_s2 to the disk line, keep the HF weights); deletion needs the user's word in the disk window",
+ "items": [
+  {
+   "id": "MAIN-q3qarl-qrl_s1-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3qarl_20261104/rl_run_qrl_s1/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^actor/fsdp_config\\.json$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED_TO_AOSS_b38.txt",
+   "marker": "Step-300 (last) checkpoint of the main line's finished QA RL pilot run qrl_s1 (chain interiorgs_v10_train_q3qarl_20261104, progress done): FSDP shards, optimizer, extra state, actor/fsdp_config.json and data.pt archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b38 (the main line's list, the user's \"2 甲\" there). actor/huggingface (what every evaluation reads), COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay; latest_checkpointed_iteration.txt still says 300 but this checkpoint is no longer resumable. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "MAIN-q3qarl-qrl_s2-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3qarl_20261104/rl_run_qrl_s2/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^actor/fsdp_config\\.json$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED_TO_AOSS_b38.txt",
+   "marker": "Step-300 (last) checkpoint of the main line's finished QA RL pilot run qrl_s2 (chain interiorgs_v10_train_q3qarl_20261104, progress done): FSDP shards, optimizer, extra state, actor/fsdp_config.json and data.pt archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b38 (the main line's list, the user's \"2 甲\" there). actor/huggingface (what every evaluation reads), COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay; latest_checkpointed_iteration.txt still says 300 but this checkpoint is no longer resumable. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  }
+ ]
+}
