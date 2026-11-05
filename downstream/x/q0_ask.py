@@ -3,7 +3,7 @@
 2026-10-30: Q0, G0, X0b and the linear probe, on the four Qwen2.5 starts and four Qwen3 models).
 
     python downstream/x/q0_ask.py --model Q3B --ask Q.jsonl=ANSWERS.jsonl [--ask Q2.jsonl=A2.jsonl ...]
-                                  [--hidden Q.jsonl=HIDDEN.npz] [--smoke 2]
+                                  [--hidden Q.jsonl=HIDDEN.npz] [--smoke 2] [--model-path HF_FOLDER]
 
 A question line needs "id", "prompt" and "image_path" (or "images": a list of paths); "max_new_tokens" is optional
 (default 16, as X0).  Models (MODELS; read by path, never copied): the Qwen2.5-VL-7B starts B, S, RS, RD from
@@ -15,6 +15,9 @@ in ANSWERS are skipped, so a rerun asks only what is missing.  --hidden writes, 
 hidden state after the layers at a quarter, half, three quarters and all of the language model's depth (float16,
 HIDDEN.npz: ids, layers, h [n, 4, d]).  --smoke N first asks the first N questions of the first set and stops with
 exit 3 if the model cannot answer.  Run with the StarVLA environment's Python (transformers 4.57) on one GPU.
+--model-path (2026-11-05, for the reward line's X0 / G0 questions): another HF folder of --model's family is loaded
+instead of --model's weights, read by path; --model then only gives the family (its model class, and the base whose
+processor is used when the folder has no preprocessor_config.json), and the answers' meta records the folder.
 """
 from __future__ import annotations
 
@@ -55,9 +58,10 @@ def model_path(name: str, starts: Path = DOWNSTREAM / "starts.json") -> str:
     return json.loads(Path(starts).read_text())[name]["path"]
 
 
-def processor_dir(name: str, starts: Path = DOWNSTREAM / "starts.json") -> str:
-    """The model's own folder if it has its image processor settings, otherwise its family's base model."""
-    own = Path(model_path(name, starts))
+def processor_dir(name: str, starts: Path = DOWNSTREAM / "starts.json", path: str = None) -> str:
+    """The model's own folder (or `path`, another folder of its family) if it has its image processor settings,
+    otherwise its family's base model."""
+    own = Path(path or model_path(name, starts))
     if (own / "preprocessor_config.json").is_file():
         return str(own)
     return model_path("Q3B" if family(name) == "qwen3" else "B", starts)
@@ -101,20 +105,21 @@ def starvla_vlm_state(pt: str) -> dict:
     return {k[len(STARVLA_PREFIX):]: v for k, v in sd.items() if k.startswith(STARVLA_PREFIX)}
 
 
-def load(name: str, starvla_pt: str = None):
+def load(name: str, starvla_pt: str = None, path: str = None):
     """(processor, model, processor folder).  With starvla_pt: the family's architecture from `name`'s folder, then
     every weight replaced by the StarVLA checkpoint's VLM (C1's comparisons: DS-B-030-s1, C1; read into memory only,
-    no copy); a weight the checkpoint lacks or a name the model lacks stops it."""
+    no copy); a weight the checkpoint lacks or a name the model lacks stops it.  With path: that HF folder of
+    `name`'s family instead of `name`'s own (read by path, no copy)."""
     import torch
     from transformers import AutoProcessor
 
-    proc_dir = processor_dir(name)
+    proc_dir = processor_dir(name, path=path)
     processor = AutoProcessor.from_pretrained(proc_dir)
     if family(name) == "qwen2.5":  # the class X0 used for these four
         from transformers import Qwen2_5_VLForConditionalGeneration as cls
     else:
         from transformers import AutoModelForImageTextToText as cls
-    model = cls.from_pretrained(model_path(name), torch_dtype=torch.bfloat16)
+    model = cls.from_pretrained(path or model_path(name), torch_dtype=torch.bfloat16)
     if starvla_pt:
         state = starvla_vlm_state(starvla_pt)
         missing, unexpected = model.load_state_dict(state, strict=False)
@@ -176,14 +181,24 @@ def main(argv=None) -> int:
     ap.add_argument("--smoke", type=int, default=0, help="ask the first N questions of the first set first")
     ap.add_argument("--starvla-pt", default=None, help="a StarVLA pytorch_model.pt whose VLM replaces the model's "
                                                        "weights in memory (--model gives the architecture)")
+    ap.add_argument("--model-path", default=None, help="another HF folder of --model's family, loaded instead of "
+                                                       "--model's weights (--model gives the family)")
     args = ap.parse_args(argv)
+    if args.starvla_pt and args.model_path:
+        ap.error("--starvla-pt and --model-path do not go together")
     import numpy as np
 
     t0 = time.time()
-    processor, model, proc_dir = load(args.model, args.starvla_pt) if args.starvla_pt else load(args.model)
-    meta = {"model": args.model, "path": args.starvla_pt or model_path(args.model), "processor": proc_dir,
-            "family": family(args.model)}
-    print(f"[q0_ask] {args.model}: loaded in {time.time() - t0:.0f} s (processor {proc_dir})", flush=True)
+    if args.starvla_pt:
+        processor, model, proc_dir = load(args.model, args.starvla_pt)
+    elif args.model_path:
+        processor, model, proc_dir = load(args.model, path=args.model_path)
+    else:
+        processor, model, proc_dir = load(args.model)
+    meta = {"model": args.model, "path": args.starvla_pt or args.model_path or model_path(args.model),
+            "processor": proc_dir, "family": family(args.model)}
+    print(f"[q0_ask] {args.model}: loaded in {time.time() - t0:.0f} s (weights {meta['path']}, processor {proc_dir})",
+          flush=True)
     if args.smoke and args.ask:
         qs = load_questions(args.ask[0][0])[:args.smoke]
         try:

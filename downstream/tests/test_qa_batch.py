@@ -65,6 +65,29 @@ def test_main_asks_what_is_missing_and_writes_hidden_states(tmp_path, monkeypatc
     assert json.loads(Path(str(out) + ".meta.json").read_text())["processor"] == "/proc"
 
 
+def test_another_folder_of_the_family_by_path(tmp_path, monkeypatch):
+    """2026-11-05 (the reward line's X0 / G0 questions): --model-path loads another HF folder of --model's family."""
+    ckpt = tmp_path / "ckpt"
+    ckpt.mkdir()
+    assert Q.processor_dir("Q3B", path=str(ckpt)) == Q.QWEN3["Q3B"]  # no processor files: the family's base
+    (ckpt / "preprocessor_config.json").write_text("{}")
+    assert Q.processor_dir("Q3B", path=str(ckpt)) == str(ckpt)
+    qf = tmp_path / "q.jsonl"
+    fake_questions(qf, 2)
+    out = tmp_path / "a.jsonl"
+    calls = []
+    monkeypatch.setattr(Q, "load", lambda name, starvla_pt=None, path=None:
+                        calls.append((name, starvla_pt, path)) or ("proc", "model", str(ckpt)))
+    monkeypatch.setattr(Q, "ask", lambda p, m, q: "A")
+    assert Q.main(["--model", "Q3B", "--model-path", str(ckpt), "--ask", f"{qf}={out}"]) == 0
+    assert calls == [("Q3B", None, str(ckpt))] and len(out.read_text().splitlines()) == 2
+    meta = json.loads(Path(str(out) + ".meta.json").read_text())
+    assert meta["path"] == str(ckpt) and meta["family"] == "qwen3" and meta["model"] == "Q3B"
+    with pytest.raises(SystemExit):
+        Q.main(["--model", "Q3B", "--model-path", str(ckpt), "--starvla-pt", "/x.pt", "--ask", f"{qf}={out}"])
+    assert len(calls) == 1  # refused before loading anything
+
+
 def test_starvla_checkpoint_vlm_weights_get_hf_names(tmp_path):
     torch = pytest.importorskip("torch")
     pt = tmp_path / "pytorch_model.pt"
