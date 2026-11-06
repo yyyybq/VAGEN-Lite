@@ -33,10 +33,15 @@ cleanup() {
 trap cleanup EXIT
 CUDA_VISIBLE_DEVICES=0 "$VLM_PY" downstream/n/n_policy_server.py --model "$MODEL" --port "$PORT" > "$OUT/server.log" 2>&1 &
 PIDS+=($!)
+ready=0
 for i in $(seq 1 180); do
-  python3 -c 'import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1",int(sys.argv[1]))))' "$PORT" && break
+  python3 -c 'import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1",int(sys.argv[1]))))' "$PORT" && { ready=1; break; }
   sleep 5
 done
+if (( ! ready )); then  # 11-06: no episodes against a server that never came up (they would all be error rows)
+  log "server NOT ready after 15 min ($MODEL on $PORT); see $OUT/server.log"
+  exit 3
+fi
 log "server ready ($MODEL on $PORT); collision ${N3_COLLISION:-robot}; history ${N_HISTORY:-0}"
 VAL=()
 [[ -n ${N_VAL_ENV:-} ]] && VAL=(--val-env "$N_VAL_ENV")

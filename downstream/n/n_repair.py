@@ -12,7 +12,9 @@ drop: every episode of OUT/episodes.jsonl whose frame strip OUT/frames/<instance
   on N-series strips (near-black); the row records the rules and tiles under "broken".
   --instances: also these instances' episodes, whatever their strips show (judged broken by looking at the frames,
   e.g. an upside-down tile that is only a hint on N-series strips); the row gets "named": true.
-  Without the two options nothing changes (run_nm.sh, run_n2_repair.sh).
+  --errors (2026-11-06, tier g): also the error rows (no episode: a server failure, a killed process), which the
+  resumable runner would otherwise never play again; the row gets "error_dropped": true.
+  Without the options nothing changes (run_nm.sh, run_n2_repair.sh).
 11-03: the corruption showed only in the real jobs (12 simulator processes at once), not in a diagnostic job with 4
 (pt-88mtzres); run_n2_repair.sh plays the dropped episodes again with fewer at once.
 """
@@ -30,7 +32,7 @@ sys.path.insert(0, str(HERE))
 import n_frames as F  # noqa: E402
 
 
-def drop(out: Path, threshold: float = F.CORRUPT, broken: bool = False, instances=()) -> dict:
+def drop(out: Path, threshold: float = F.CORRUPT, broken: bool = False, instances=(), errors: bool = False) -> dict:
     out = Path(out)
     path = out / "episodes.jsonl"
     if not path.is_file():
@@ -43,7 +45,7 @@ def drop(out: Path, threshold: float = F.CORRUPT, broken: bool = False, instance
         ts = F.tiles(F.image(strip)) if strip.is_file() else []
         bad = sum(F.chroma(t) > threshold for t in ts)
         rules = F.defects(ts, "png")["broken"] if broken and ts else {}
-        if bad or rules or r.get("instance_id") in named:
+        if bad or rules or r.get("instance_id") in named or (errors and r.get("error")):
             gone.append((r, strip, bad, len(ts), rules))
         else:
             keep.append(r)
@@ -57,6 +59,8 @@ def drop(out: Path, threshold: float = F.CORRUPT, broken: bool = False, instance
                     row["broken"] = rules
                 if r.get("instance_id") in named:
                     row["named"] = True
+                if errors and r.get("error"):
+                    row["error_dropped"] = True
                 f.write(json.dumps(row, default=str) + "\n")
                 if not strip.is_file():
                     continue
@@ -78,8 +82,9 @@ def main(argv=None) -> int:
     d.add_argument("--threshold", type=float, default=F.CORRUPT)
     d.add_argument("--broken", action="store_true", help="also the episodes with a near-black tile (n_frames' rules)")
     d.add_argument("--instances", nargs="*", default=[], help="also these instances' episodes (judged broken by eye)")
+    d.add_argument("--errors", action="store_true", help="also the error rows (played again by the resumable runner)")
     args = ap.parse_args(argv)
-    print(json.dumps(drop(args.out, args.threshold, args.broken, args.instances)))
+    print(json.dumps(drop(args.out, args.threshold, args.broken, args.instances, args.errors)))
     return 0
 
 

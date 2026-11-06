@@ -88,6 +88,12 @@ def test_drop_can_take_near_black_and_named_episodes_too(tmp_path):
     assert sorted(p.name for p in (d / "frames_corrupted").iterdir()) == ["b.0.png", "c.0.png", "d.0.png"]
     assert NR.main(["drop", "--out", str(d), "--broken", "--instances", "a"]) == 0
     assert (d / "episodes.jsonl").read_text() == ""
+    # 11-06: error rows (no episode) go out only with --errors
+    (d / "episodes.jsonl").write_text('{"instance_id": "e", "error": "RuntimeError: server error"}\n{"instance_id": "f"}\n')
+    assert NR.drop(d, broken=True) == {"dropped": 0, "kept": 2}
+    assert NR.drop(d, broken=True, errors=True) == {"dropped": 1, "kept": 1}
+    last = json.loads((d / "episodes_corrupted.jsonl").read_text().splitlines()[-1])
+    assert last["instance_id"] == "e" and last["error_dropped"] is True
 
 
 N1_STUB = r"""#!/usr/bin/env bash

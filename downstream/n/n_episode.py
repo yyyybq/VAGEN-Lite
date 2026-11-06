@@ -214,14 +214,16 @@ def run_episode(scene, inst: dict, ask, cfg, entry: dict, history: bool = False)
         user = user_text(cfg, t == 0, pose, item["task_description"], fb)
         if history:
             reply = ask(chat_history(system, earlier, user), list(frames), per_turn)
-            earlier.append((user, reply))
         else:
             reply = ask(chat(system, user), [img], per_turn)
+        if getattr(ask, "error", None):  # a server failure (out of memory on a long history, say) is not the
+            # model's answer: the episode ends as an error row, which run_n3.sh moves aside and plays again (11-06)
+            raise RuntimeError(f"server error at turn {t + 1}: {ask.error}")
+        if history:
+            earlier.append((user, reply))
         actions, err = parse(reply, cfg, allowed)
         rec = {"turn": t + 1, "reply": reply, "actions": actions, "parse_error": err, "pose_before": list(pose),
                "prompt_tokens": getattr(ask, "prompt_tokens", None)}
-        if getattr(ask, "error", None):  # a server failure (out of memory on a long history, say), not the model's
-            rec["server_error"] = ask.error
         if not actions:
             invalid += 1
             fb = "Action had no effect."

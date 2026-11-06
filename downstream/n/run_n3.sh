@@ -19,7 +19,8 @@
 #   A tier may carry its own number of episodes at once ("c:4 e:12"; else WORKERS).  N3_DROP_CORRUPTED=1: before each
 #   tier, the episodes with corrupted frames already in its folder are moved aside (n_repair.py drop; nothing deleted),
 #   so the resumable runner plays them again (11-03: corrupted frames showed with 12 at once); since 11-05 the
-#   episodes with a near-black frame too (n_repair.py --broken, the user's plan 甲).  A tier given twice ("f:12 f:4")
+#   episodes with a near-black frame too (n_repair.py --broken, the user's plan 甲); since 11-06 the error rows too
+#   (--errors: a server failure or a killed episode, never played again by the resumable runner otherwise).  A tier given twice ("f:12 f:4")
 #   with N3_DROP_CORRUPTED=1 runs at 12, then plays the broken episodes again at 4.
 set -uo pipefail
 N3="${1:?Usage: run_n3.sh N3 MODEL C_INSTANCES E_INSTANCES [TIERS] [WORKERS]}"; MODEL="${2:?}"; CI="${3:?}"; EI="${4:?}"
@@ -49,7 +50,7 @@ for spec in $TIERS; do
     *) log "unknown tier $t"; rc_all=2; continue ;;
   esac
   if [[ ${N3_DROP_CORRUPTED:-0} == 1 && -f $N3/$t/$MODEL/episodes.jsonl ]]; then
-    res=$("${N_VLM_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python}" "$WT/downstream/n/n_repair.py" drop --out "$N3/$t/$MODEL" --broken)
+    res=$("${N_VLM_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python}" "$WT/downstream/n/n_repair.py" drop --out "$N3/$t/$MODEL" --broken --errors)
     log "tier $t: $res"
     # 11-06: nothing dropped and every instance has its episode -> no server is loaded only to play nothing
     if [[ $res == *'"dropped": 0,'* && -f $INST ]] && (( $(grep -c . "$N3/$t/$MODEL/episodes.jsonl") >= $(grep -c . "$INST") )); then
