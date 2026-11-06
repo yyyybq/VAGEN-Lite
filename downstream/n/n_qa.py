@@ -594,6 +594,16 @@ def episodes_of(dirs, model: str) -> dict:
     return out
 
 
+def FIRST_ACTION_GROUPS(num: dict) -> tuple:
+    """first_action's extra strata (11-06): 445 of the first 600 right answers were move_backward and most
+    distractors blocked, so answered-right against answered-wrong is also split by the right action and by the kind of
+    distractor (num: instance id -> the question's numbers)."""
+    return (("answer move_backward", lambda i: num[i].get("best") == "move_backward"),
+            ("answer other", lambda i: num[i].get("best") != "move_backward"),
+            ("distractor blocked", lambda i: num[i].get("other_kind") == "blocked"),
+            ("distractor longer", lambda i: num[i].get("other_kind") == "longer"))
+
+
 def analyze(qs: list, answers: dict, episodes: dict, insts: dict) -> dict:
     """answers: {model: {question id: reply}}; episodes: {model: {instance id: row}}."""
     rep = {"models": {}, "pairs": {}}
@@ -608,13 +618,15 @@ def analyze(qs: list, answers: dict, episodes: dict, insts: dict) -> dict:
                 ok = {q["instance_id"]: got[q["id"]] == q["answer"] for q in kq}
                 right[(m, reading, kind)] = ok
                 ep = episodes.get(m, {})
+                num = {q["instance_id"]: q.get("numbers") or {} for q in kq}
                 row = {"n": len(kq), "correct": sum(ok.values()), "unparsed": sum(v is None for v in got.values()),
                        "accuracy": sum(ok.values()) / len(kq) if kq else float("nan"), "groups": {}}
                 for name, sel in (("all", lambda i: True),
                                   *[(f"length {b}", (lambda b: lambda i: band_of(insts[i]["shortest"]["actions"]) == b)(b))
                                     for b, _, _ in LENGTH_BANDS],
                                   ("near threshold", lambda i: bool(insts[i].get("near_threshold"))),
-                                  ("clear", lambda i: not insts[i].get("near_threshold"))):
+                                  ("clear", lambda i: not insts[i].get("near_threshold")),
+                                  *(FIRST_ACTION_GROUPS(num) if kind == "first_action" else ())):
                     cell = {}
                     for side, want in (("right", True), ("wrong", False)):
                         ids = [i for i, v in ok.items() if v is want and sel(i) and i in ep]

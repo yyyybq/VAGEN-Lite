@@ -158,6 +158,15 @@ def test_readings_and_the_analysis_of_answer_against_do():
     assert pair == {"n": 4, "a_succeeds_b_fails": 2, "b_succeeds_a_fails": 1, "p": pytest.approx(1.0)}
     assert Q.binom_two_sided(0, 6) == pytest.approx(2 / 64)
     assert "## strict/near_far" in Q.markdown(rep)
+    fa = [{"id": f"I{k}::first_action", "instance_id": f"I{k}", "kind": "first_action", "options": ["a", "b"],
+           "answer": "A", "numbers": {"best": "move_backward" if k < 3 else "turn_left",
+                                      "other_kind": "blocked" if k % 2 else "longer"}} for k in range(6)]
+    rep = Q.analyze(fa, {"M": {q["id"]: ("A" if k < 4 else "B") for k, q in enumerate(fa)}}, eps, insts)
+    g = rep["models"]["M"]["strict/first_action"]["groups"]
+    assert g["answer move_backward"]["right"]["n"] == 3 and g["answer other"]["right"]["n"] == 1
+    assert g["answer other"]["wrong"]["n"] == 2 and g["distractor blocked"]["right"]["n"] == 2
+    assert g["distractor longer"]["wrong"] == {"n": 1, "success": 1, "max_shaping": pytest.approx(0.4)}
+    assert "answer move_backward" not in rep["models"]["M"]["strict/near_far"]["groups"]
 
 
 def test_samples_page_marks_the_objects(tmp_path):
