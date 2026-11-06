@@ -827,3 +827,43 @@ zoe-cf-render 有 4 台 H800 整机，只对 aigc 开放。16:50 上面没有任
 - **到时候的做法**：
   - 在临时工作树里，从最新的 origin/main 出发，用合并提交并入 eval-external，推送到 main；
   - 主检出和整理会话的文件都不动。
+
+## 2026-11-06 matrix v3 的 QA 迁移评测（任务 2026-11-05）
+
+**任务**：用这个框架评测 matrix v3 的 Qwen3-VL-8B 模型，拆开 P0、P1、动作 SFT、环境 RL 对公开空间 QA 分数的作用。三批：
+- 第 1 批：原始模型，C0、C、D、E2 的 SFT；
+- 第 2 批：Cr、D_noP0、B′ 的 SFT，加各格 seed 20261019 的 S0 / V4 预注册 checkpoint；
+- 第 3 批：seed 20261021 的 RL。
+
+第一批跑完先报结果，等你说再跑第二批。
+
+**已定（2026-11-06 你选"按推荐"）**：
+24. MindCube-Tiny 主列用 EASI 的 1,040 题，和公开榜同一套题；另把官方 1,050 题版并列。新 benchmark `MindCube-Tiny-1050` = EASI 的 1,040 行原样，加 10 行按 EASI 的做法从官方文件重建的题；同一次运行算两个分。
+25. SAT-Syn 用 array/SAT 的 val 切分（4,001 题）。
+26. SAT-Real 主分照旧（一种选项顺序）。另加轮换分：`SAT-Real-swap` 把选项倒过来再答一次，两种顺序都对才算对。
+27. 原始模型的复现参照：
+    - VSI、MMSI、MindCube-Tiny、ViewSpatial 对 EASI 榜（55.29 / 31.1 / 29.42 / 42.2）；
+    - SAT-Real、SAT-Syn、修正前 VSTI 对 SI 论文（52.7 / 43.6 / 43.3）。SAT-Syn 43.6 低于随机水平，只作参考。
+    - 用官方计分比，差 1.5 分以上查原因。
+28. 环境：`eval_external_assets/envs/eval-external-q3`，在 eval-external 上叠一层，只加 transformers 4.57.6（`logs/make_env_q3.sh`）。
+29. 后端：HF transformers + SDPA，贪心解码，和 Qwen2.5 的评测一路。VLMEvalKit 用它自带的 Qwen3VLChat，只把注意力换成 SDPA；lmms-eval 用 qwen3_vl。
+30. 解析：宽松解析作主表，各后端的官方计分并列；"解析不出"单列（`qa_transfer/lenient.py`）。
+31. 配对检验：按对错计分的题做精确 McNemar，VSI、VSTI 只算选择题部分；差的区间用配对 bootstrap。六项平均里 MindCube 用全集，Tiny 单列。
+32. 已归档的旧 E 不评。C 的 seed-1 V4 的预注册模型就是 C SFT 本身，不另评，也不进 RL 平均。外部参照用 SI-7B。
+
+**代码**（都在本分支）：
+- `adapters/models.py`：新增 qwen3_vl 家族、绝对路径来源、`include` 和 `python_for`。
+- `adapters/registry_matrix_v3.yaml`：由 `tools/matrix_v3_registry.py` 从两份 handover 记录生成，路径都照记录原样，并记下两份记录的 sha256。
+- `qa_transfer/benchmarks.py`：新增 Qwen3 的配置和两个新 benchmark。
+- `qa_transfer/vlmeval_launch.py`：新增 Qwen3VLChatSDPA，并登记 1,050 题表。
+- `qa_transfer/pixel_log.py`：加上 Qwen3 的 16 像素 patch。
+- `qa_transfer/lenient.py`，以及汇总报告 `qa_transfer/matrix_report.py`。
+- `qa_transfer/make_mindcube_tiny1050.py`、`lmms_tasks/sat_swap_ee/`。
+- 队列按模型家族选 Python，并把任务里建的视图交还给用户。
+
+**核对**：
+- 宽松解析在 step2 的 SI-7B、base-7B、ours-RL-150 上，逐题分数都复算出了官方总分；两个后端的 MRA 复刻和官方逐题一致（VSI 2,640/2,640，VSTI 1,738/1,738）。
+- 1,050 题表里，从官方文件重建的 1,040 行和 EASI 原表逐字段一致。
+- 原始模型的权重只有 root 能读，视图和哈希在 SCO 任务里建（`runs/prep/mv3_view_raw`）。
+
+**进度**：21:24 UTC 起，队列 `logs/queue_mv3_raw.sh`（stage mv3）先跑原始模型的 10 项，再加 SI-7B 的两项新 benchmark。其余 4 个 SFT 的视图和哈希由 `runs/prep/mv3_view_b1` 准备。

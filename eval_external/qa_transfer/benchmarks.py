@@ -29,6 +29,31 @@ LMMS_QWEN25VL_ARGS = {"max_num_frames": 32, "attn_implementation": "sdpa"}
 # Our task variants (lmms_tasks/*.yaml): each includes the original task and changes only what its header says.
 LMMS_INCLUDE = Path(__file__).resolve().parent / "lmms_tasks"
 
+# Qwen3-VL (added 2026-11-06 for the matrix-v3 checkpoints).  VLMEvalKit: its own Qwen3VLChat as EASI v0.2.2's
+# "Qwen3-VL-8B-Instruct" entry configures it (no pixel arguments, so qwen_vl_utils' Qwen3 defaults; the dataset's
+# own prompt), except that it runs on Hugging Face transformers with SDPA attention instead of vLLM (the entry's
+# use_vllm) or flash-attn (its HF path), and decodes greedily (the view's generation_config, do_sample false) instead
+# of the entry's sampling (temperature 0.7, presence penalty 1.5), with the same max_new_tokens 2048 as the Qwen2.5
+# runs.  Qwen3VLChat passes temperature / top_p / top_k to generate(), which greedy decoding ignores.
+VLMEVAL_QWEN3VL = {
+    "class": "Qwen3VLChatSDPA",
+    "use_custom_prompt": False,
+    "use_vllm": False,
+    "max_new_tokens": 2048,
+    "repetition_penalty": 1.0,
+}
+VLMEVAL_DECODING_QWEN3VL = {"max_new_tokens": 2048, "do_sample": False, "repetition_penalty": 1.0,
+                            "ignored_by_greedy": {"temperature": 0.01, "top_p": 0.8, "top_k": 20}}
+# lmms-eval: its qwen3_vl model (chat version, as the qwen2_5_vl runs) with the same frames and attention
+LMMS_QWEN3VL_ARGS = {"max_num_frames": 32, "attn_implementation": "sdpa"}
+FAMILY_BACKENDS = {  # family -> (VLMEvalKit model config, its decoding record, lmms-eval model, lmms-eval args)
+    "qwen2_5_vl": (VLMEVAL_QWEN25VL, VLMEVAL_DECODING, "qwen2_5_vl", LMMS_QWEN25VL_ARGS),
+    "qwen3_vl": (VLMEVAL_QWEN3VL, VLMEVAL_DECODING_QWEN3VL, "qwen3_vl", LMMS_QWEN3VL_ARGS),
+}
+# MindCube-Tiny with the 10 items of MindCube's own tiny set that EASI's table lacks (qa_transfer/
+# make_mindcube_tiny1050.py writes the table and registers nothing; vlmeval_launch registers the name).
+MINDCUBE_TINY1050 = "MindCubeBench_tiny1050_raw_qa"
+
 BENCHMARKS = {
     # name used in eval_external tables -> backend and backend-specific settings
     "VSI-Bench": {
@@ -62,6 +87,17 @@ BENCHMARKS = {
         "data_cfg": {"class": "MindCubeBench", "dataset": "MindCubeBench_tiny_raw_qa"}, "frames": None, "items": 1040,
         "metric": "accuracy",
         "source": {"questions": "lmms-lab-si/EASI-Leaderboard-Data@52bb1dd MindCubeBench_tiny_raw_qa.tsv"},
+        "prompt": {"impl": "vlmeval.dataset.MindCubeBench.build_prompt (raw QA)"},
+    },
+    "MindCube-Tiny-1050": {
+        "backend": "vlmevalkit", "data": MINDCUBE_TINY1050,
+        # EASI's 1,040 rows unchanged plus the 10 rows of MindCube_tinybench.jsonl it lacks (all among items of
+        # scene 94e4f0e8...), built the way EASI built the others; the 1,040-item score is the same run without them
+        "data_cfg": {"class": "MindCubeBench", "dataset": MINDCUBE_TINY1050}, "frames": None, "items": 1050,
+        "metric": "accuracy",
+        "source": {"questions": "LMUData/MindCubeBench_tiny1050_raw_qa.tsv = EASI MindCubeBench_tiny_raw_qa.tsv (1,040) + "
+                                "10 rows from MLL-Lab/MindCube@9c941b4 data/raw/MindCube_tinybench.jsonl "
+                                "(qa_transfer/make_mindcube_tiny1050.py)"},
         "prompt": {"impl": "vlmeval.dataset.MindCubeBench.build_prompt (raw QA)"},
     },
     "MindCube": {
@@ -116,5 +152,14 @@ BENCHMARKS = {
                               "once with seed 42)"},
         "prompt": {"impl": "lmms_eval/tasks/sat/utils.py sat_doc_to_text",
                    "post": "Please answer directly with only the letter of the correct option and nothing else."},
+    },
+    "SAT-Real-swap": {
+        # SAT-Real with each item's options in reversed order (correct letter moved accordingly); with SAT-Real
+        # it gives the circular score (right in both orders), the protocol of the SAT paper (each item twice,
+        # options swapped).  Only the option order differs from SAT-Real.
+        "backend": "lmms_eval", "task": "sat_swap_ee", "frames": None, "items": 150,
+        "metric": "accuracy (2 options, order reversed)",
+        "source": {"dataset": "nv-njb/SAT@85f0ea8 as SAT-Real, options reversed by lmms_tasks/sat_swap_ee/utils.py"},
+        "prompt": {"impl": "lmms_eval/tasks/sat/utils.py sat_doc_to_text (same as SAT-Real)"},
     },
 }

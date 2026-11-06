@@ -1,0 +1,672 @@
+# Written by eval_external/tools/matrix_v3_registry.py from the matrix-v3 handover records (sources below);
+# do not edit by hand.  Paths are the handovers' own; every checkpoint is read-only.
+generated_utc: '2026-11-06T21:13:22+00:00'
+sources:
+- path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/docs/transition_qa/matrix_v3/handover_main_20261103.json
+  sha256: 5046fbb672367c524a53035adbd6c3ac4f61e3f96a54bc5624f061e71356473d
+  mtime_utc: '2026-11-03T19:05:44.436836+00:00'
+- path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/handover_cells_20261104/handover_cells_20261104.json
+  sha256: 335f66f9d02e42646100f903eb8891b0551f85d07a1556309a096ff1c15dda2c
+  mtime_utc: '2026-11-06T04:06:05.984480+00:00'
+models:
+  qwen3vl-8B:
+    source: path
+    path: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+    repo: Qwen/Qwen3-VL-8B-Instruct
+    revision: 0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+    family: qwen3_vl
+    params: 8B
+    cell: raw
+    kind: raw
+    note: raw Qwen3-VL-8B-Instruct (shared snapshot; weights root-only, read in sco jobs)
+  sft_m3c_e4:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/C/model/checkpoint-1204
+    family: qwen3_vl
+    params: 8B
+    cell: C
+    kind: sft
+    note: 'C SFT: P0 + P2q 9,075, epoch 4'
+  sft_m3d_e9:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/D/model/checkpoint-3987
+    family: qwen3_vl
+    params: 8B
+    cell: D
+    kind: sft
+    note: 'D SFT: P0 + P1 + P2q 9,075, epoch 9'
+  c0q3_sft_e8:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232
+    family: qwen3_vl
+    params: 8B
+    cell: C0
+    kind: sft
+    note: 'C0 SFT: P2q 9,802 rows (the model line''s Qwen3 formal SFT, edge scenes kept), epoch 8'
+  sft_m3b_e10:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/B/model/checkpoint-1870
+    family: qwen3_vl
+    params: 8B
+    cell: B'
+    kind: sft
+    note: 'B'' SFT: P0 + 1,795 mainline format dialogues, epoch 10'
+  sft_m3dn_e8:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/D_noP0/model/checkpoint-2272
+    family: qwen3_vl
+    params: 8B
+    cell: D_noP0
+    kind: sft
+    note: 'D_noP0 SFT: P1 + P2q 9,075, epoch 8'
+  sft_m3e2_e10:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-3010
+    family: qwen3_vl
+    params: 8B
+    cell: E2
+    kind: sft
+    note: 'E2 SFT: P0 + P1, no action trajectories, epoch 10 (QA upper bound; no RL)'
+  sft_m3cr_e7:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Cr/model/checkpoint-2107
+    family: qwen3_vl
+    params: 8B
+    cell: Cr
+    kind: sft
+    note: 'Cr SFT: C retrained (same data, recipe and seed), epoch 7'
+  m3cs1s0_050:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/rl_run_m3cs1s0/checkpoints/global_step_50/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: C
+    kind: rl
+    seed: 20261019
+    side: S0
+    sft_start: sft_m3c_e4
+    archived: false
+    note: C RL S0 seed 20261019 (m3cs1s0), pre-registered checkpoint m3cs1s0_050, from sft_m3c_e4
+  m3cs2s0_100:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2s0/checkpoints/global_step_100/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: C
+    kind: rl
+    seed: 20261021
+    side: S0
+    sft_start: sft_m3c_e4
+    archived: false
+    note: C RL S0 seed 20261021 (m3cs2s0), pre-registered checkpoint m3cs2s0_100, from sft_m3c_e4
+  m3cs2d_050:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2d/checkpoints/global_step_50/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: C
+    kind: rl
+    seed: 20261021
+    side: V4
+    sft_start: sft_m3c_e4
+    archived: false
+    note: C RL V4 seed 20261021 (m3cs2d), pre-registered checkpoint m3cs2d_050, from sft_m3c_e4
+  m3ds1s0_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1s0/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: D
+    kind: rl
+    seed: 20261019
+    side: S0
+    sft_start: sft_m3d_e9
+    archived: false
+    note: D RL S0 seed 20261019 (m3ds1s0), pre-registered checkpoint m3ds1s0_300, from sft_m3d_e9
+  m3ds1d_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1d/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: D
+    kind: rl
+    seed: 20261019
+    side: V4
+    sft_start: sft_m3d_e9
+    archived: false
+    note: D RL V4 seed 20261019 (m3ds1d), pre-registered checkpoint m3ds1d_300, from sft_m3d_e9
+  m3ds2s0_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2s0/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: D
+    kind: rl
+    seed: 20261021
+    side: S0
+    sft_start: sft_m3d_e9
+    archived: false
+    note: D RL S0 seed 20261021 (m3ds2s0), pre-registered checkpoint m3ds2s0_300, from sft_m3d_e9
+  m3ds2d_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2d/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: D
+    kind: rl
+    seed: 20261021
+    side: V4
+    sft_start: sft_m3d_e9
+    archived: false
+    note: D RL V4 seed 20261021 (m3ds2d), pre-registered checkpoint m3ds2d_300, from sft_m3d_e9
+  m3es1s0_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1s0/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: E
+    kind: rl
+    seed: 20261019
+    side: S0
+    sft_start: c0q3_sft_e8
+    archived: true
+    note: E RL S0 seed 20261019 (m3es1s0), pre-registered checkpoint m3es1s0_300, from c0q3_sft_e8
+  m3es1d_200:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1d/checkpoints/global_step_200/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: E
+    kind: rl
+    seed: 20261019
+    side: V4
+    sft_start: c0q3_sft_e8
+    archived: true
+    note: E RL V4 seed 20261019 (m3es1d), pre-registered checkpoint m3es1d_200, from c0q3_sft_e8
+  m3es2s0_200:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2s0/checkpoints/global_step_200/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: E
+    kind: rl
+    seed: 20261021
+    side: S0
+    sft_start: c0q3_sft_e8
+    archived: true
+    note: E RL S0 seed 20261021 (m3es2s0), pre-registered checkpoint m3es2s0_200, from c0q3_sft_e8
+  m3es2d_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2d/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: E
+    kind: rl
+    seed: 20261021
+    side: V4
+    sft_start: c0q3_sft_e8
+    archived: true
+    note: E RL V4 seed 20261021 (m3es2d), pre-registered checkpoint m3es2d_300, from c0q3_sft_e8
+  c0q3_s1s0_150:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_150/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: C0
+    kind: rl
+    seed: 20261019
+    side: S0
+    sft_start: c0q3_sft_e8
+    archived: false
+    note: C0 RL S0 seed 20261019 (c0q3_s1s0), pre-registered checkpoint c0q3_s1s0_150, from c0q3_sft_e8
+  c0q3_s1d_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3d/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: C0
+    kind: rl
+    seed: 20261019
+    side: V4
+    sft_start: c0q3_sft_e8
+    archived: false
+    note: C0 RL V4 seed 20261019 (c0q3_s1d), pre-registered checkpoint c0q3_s1d_300, from c0q3_sft_e8
+  c0q3_s2s0_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2s0/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: C0
+    kind: rl
+    seed: 20261021
+    side: S0
+    sft_start: c0q3_sft_e8
+    archived: false
+    note: C0 RL S0 seed 20261021 (c0q3_s2s0), pre-registered checkpoint c0q3_s2s0_300, from c0q3_sft_e8
+  c0q3_s2d_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2d/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: C0
+    kind: rl
+    seed: 20261021
+    side: V4
+    sft_start: c0q3_sft_e8
+    archived: false
+    note: C0 RL V4 seed 20261021 (c0q3_s2d), pre-registered checkpoint c0q3_s2d_300, from c0q3_sft_e8
+  m3bs1s0_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b_s20261019/rl_run_m3bs1s0/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: B'
+    kind: rl
+    seed: 20261019
+    side: S0
+    sft_start: sft_m3b_e10
+    archived: false
+    note: B' RL S0 seed 20261019 (m3bs1s0), pre-registered checkpoint m3bs1s0_300, from sft_m3b_e10
+  m3bs1d_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b_s20261019/rl_run_m3bs1d/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: B'
+    kind: rl
+    seed: 20261019
+    side: V4
+    sft_start: sft_m3b_e10
+    archived: false
+    note: B' RL V4 seed 20261019 (m3bs1d), pre-registered checkpoint m3bs1d_300, from sft_m3b_e10
+  m3dns1s0_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/rl_run_m3dns1s0/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: D_noP0
+    kind: rl
+    seed: 20261019
+    side: S0
+    sft_start: sft_m3dn_e8
+    archived: false
+    note: D_noP0 RL S0 seed 20261019 (m3dns1s0), pre-registered checkpoint m3dns1s0_300, from sft_m3dn_e8
+  m3dns1d_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/rl_run_m3dns1d/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: D_noP0
+    kind: rl
+    seed: 20261019
+    side: V4
+    sft_start: sft_m3dn_e8
+    archived: false
+    note: D_noP0 RL V4 seed 20261019 (m3dns1d), pre-registered checkpoint m3dns1d_300, from sft_m3dn_e8
+  m3dns2s0_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/rl_run_m3dns2s0/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: D_noP0
+    kind: rl
+    seed: 20261021
+    side: S0
+    sft_start: sft_m3dn_e8
+    archived: false
+    note: D_noP0 RL S0 seed 20261021 (m3dns2s0), pre-registered checkpoint m3dns2s0_300, from sft_m3dn_e8
+  m3dns2d_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/rl_run_m3dns2d/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: D_noP0
+    kind: rl
+    seed: 20261021
+    side: V4
+    sft_start: sft_m3dn_e8
+    archived: false
+    note: D_noP0 RL V4 seed 20261021 (m3dns2d), pre-registered checkpoint m3dns2d_300, from sft_m3dn_e8
+  m3crs1s0_250:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261019/rl_run_m3crs1s0/checkpoints/global_step_250/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: Cr
+    kind: rl
+    seed: 20261019
+    side: S0
+    sft_start: sft_m3cr_e7
+    archived: false
+    note: Cr RL S0 seed 20261019 (m3crs1s0), pre-registered checkpoint m3crs1s0_250, from sft_m3cr_e7
+  m3crs1d_250:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261019/rl_run_m3crs1d/checkpoints/global_step_250/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: Cr
+    kind: rl
+    seed: 20261019
+    side: V4
+    sft_start: sft_m3cr_e7
+    archived: false
+    note: Cr RL V4 seed 20261019 (m3crs1d), pre-registered checkpoint m3crs1d_250, from sft_m3cr_e7
+  m3crs2s0_300:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_run_m3crs2s0/checkpoints/global_step_300/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: Cr
+    kind: rl
+    seed: 20261021
+    side: S0
+    sft_start: sft_m3cr_e7
+    archived: false
+    note: Cr RL S0 seed 20261021 (m3crs2s0), pre-registered checkpoint m3crs2s0_300, from sft_m3cr_e7
+  m3crs2d_200:
+    source: path
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_run_m3crs2d/checkpoints/global_step_200/actor/huggingface
+    family: qwen3_vl
+    params: 8B
+    cell: Cr
+    kind: rl
+    seed: 20261021
+    side: V4
+    sft_start: sft_m3cr_e7
+    archived: false
+    note: Cr RL V4 seed 20261021 (m3crs2d), pre-registered checkpoint m3crs2d_200, from sft_m3cr_e7
+matrix:
+  runs:
+  - cell: C
+    seed: 20261019
+    side: S0
+    run: m3cs1s0
+    prereg: m3cs1s0_050
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/rl_run_m3cs1s0/checkpoints/global_step_50/actor/huggingface
+    sft: sft_m3c_e4
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: C
+    seed: 20261019
+    side: V4
+    run: m3cs1d
+    prereg: sft_m3c_e4
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/C/model/checkpoint-1204
+    sft: sft_m3c_e4
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: true
+  - cell: C
+    seed: 20261021
+    side: S0
+    run: m3cs2s0
+    prereg: m3cs2s0_100
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2s0/checkpoints/global_step_100/actor/huggingface
+    sft: sft_m3c_e4
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: C
+    seed: 20261021
+    side: V4
+    run: m3cs2d
+    prereg: m3cs2d_050
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/rl_run_m3cs2d/checkpoints/global_step_50/actor/huggingface
+    sft: sft_m3c_e4
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: D
+    seed: 20261019
+    side: S0
+    run: m3ds1s0
+    prereg: m3ds1s0_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1s0/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3d_e9
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: D
+    seed: 20261019
+    side: V4
+    run: m3ds1d
+    prereg: m3ds1d_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1d/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3d_e9
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: D
+    seed: 20261021
+    side: S0
+    run: m3ds2s0
+    prereg: m3ds2s0_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2s0/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3d_e9
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: D
+    seed: 20261021
+    side: V4
+    run: m3ds2d
+    prereg: m3ds2d_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261021/rl_run_m3ds2d/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3d_e9
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: E
+    seed: 20261019
+    side: S0
+    run: m3es1s0
+    prereg: m3es1s0_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1s0/checkpoints/global_step_300/actor/huggingface
+    sft: c0q3_sft_e8
+    from: handover_main_20261103.json
+    archived: true
+    prereg_is_sft: false
+  - cell: E
+    seed: 20261019
+    side: V4
+    run: m3es1d
+    prereg: m3es1d_200
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261019/rl_run_m3es1d/checkpoints/global_step_200/actor/huggingface
+    sft: c0q3_sft_e8
+    from: handover_main_20261103.json
+    archived: true
+    prereg_is_sft: false
+  - cell: E
+    seed: 20261021
+    side: S0
+    run: m3es2s0
+    prereg: m3es2s0_200
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2s0/checkpoints/global_step_200/actor/huggingface
+    sft: c0q3_sft_e8
+    from: handover_main_20261103.json
+    archived: true
+    prereg_is_sft: false
+  - cell: E
+    seed: 20261021
+    side: V4
+    run: m3es2d
+    prereg: m3es2d_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_e_s20261021/rl_run_m3es2d/checkpoints/global_step_300/actor/huggingface
+    sft: c0q3_sft_e8
+    from: handover_main_20261103.json
+    archived: true
+    prereg_is_sft: false
+  - cell: C0
+    seed: 20261019
+    side: S0
+    run: c0q3_s1s0
+    prereg: c0q3_s1s0_150
+    path: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_150/actor/huggingface
+    sft: c0q3_sft_e8
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: C0
+    seed: 20261019
+    side: V4
+    run: c0q3_s1d
+    prereg: c0q3_s1d_300
+    path: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3d/checkpoints/global_step_300/actor/huggingface
+    sft: c0q3_sft_e8
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: C0
+    seed: 20261021
+    side: S0
+    run: c0q3_s2s0
+    prereg: c0q3_s2s0_300
+    path: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2s0/checkpoints/global_step_300/actor/huggingface
+    sft: c0q3_sft_e8
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: C0
+    seed: 20261021
+    side: V4
+    run: c0q3_s2d
+    prereg: c0q3_s2d_300
+    path: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261027_s20261021/rl_run_q3s2d/checkpoints/global_step_300/actor/huggingface
+    sft: c0q3_sft_e8
+    from: handover_main_20261103.json
+    archived: false
+    prereg_is_sft: false
+  - cell: B'
+    seed: 20261019
+    side: S0
+    run: m3bs1s0
+    prereg: m3bs1s0_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b_s20261019/rl_run_m3bs1s0/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3b_e10
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  - cell: B'
+    seed: 20261019
+    side: V4
+    run: m3bs1d
+    prereg: m3bs1d_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_b_s20261019/rl_run_m3bs1d/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3b_e10
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  - cell: D_noP0
+    seed: 20261019
+    side: S0
+    run: m3dns1s0
+    prereg: m3dns1s0_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/rl_run_m3dns1s0/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3dn_e8
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  - cell: D_noP0
+    seed: 20261019
+    side: V4
+    run: m3dns1d
+    prereg: m3dns1d_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/rl_run_m3dns1d/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3dn_e8
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  - cell: D_noP0
+    seed: 20261021
+    side: S0
+    run: m3dns2s0
+    prereg: m3dns2s0_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/rl_run_m3dns2s0/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3dn_e8
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  - cell: D_noP0
+    seed: 20261021
+    side: V4
+    run: m3dns2d
+    prereg: m3dns2d_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/rl_run_m3dns2d/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3dn_e8
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  - cell: Cr
+    seed: 20261019
+    side: S0
+    run: m3crs1s0
+    prereg: m3crs1s0_250
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261019/rl_run_m3crs1s0/checkpoints/global_step_250/actor/huggingface
+    sft: sft_m3cr_e7
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  - cell: Cr
+    seed: 20261019
+    side: V4
+    run: m3crs1d
+    prereg: m3crs1d_250
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261019/rl_run_m3crs1d/checkpoints/global_step_250/actor/huggingface
+    sft: sft_m3cr_e7
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  - cell: Cr
+    seed: 20261021
+    side: S0
+    run: m3crs2s0
+    prereg: m3crs2s0_300
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_run_m3crs2s0/checkpoints/global_step_300/actor/huggingface
+    sft: sft_m3cr_e7
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  - cell: Cr
+    seed: 20261021
+    side: V4
+    run: m3crs2d
+    prereg: m3crs2d_200
+    path: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_run_m3crs2d/checkpoints/global_step_200/actor/huggingface
+    sft: sft_m3cr_e7
+    from: handover_cells_20261104.json
+    archived: false
+    prereg_is_sft: false
+  batches:
+    1:
+    - qwen3vl-8B
+    - c0q3_sft_e8
+    - sft_m3c_e4
+    - sft_m3d_e9
+    - sft_m3e2_e10
+    2:
+    - sft_m3cr_e7
+    - sft_m3dn_e8
+    - sft_m3b_e10
+    - m3cs1s0_050
+    - m3ds1s0_300
+    - m3ds1d_300
+    - c0q3_s1s0_150
+    - c0q3_s1d_300
+    - m3bs1s0_300
+    - m3bs1d_300
+    - m3dns1s0_300
+    - m3dns1d_300
+    - m3crs1s0_250
+    - m3crs1d_250
+    3:
+    - m3cs2s0_100
+    - m3cs2d_050
+    - m3ds2s0_300
+    - m3ds2d_300
+    - c0q3_s2s0_300
+    - c0q3_s2d_300
+    - m3dns2s0_300
+    - m3dns2d_300
+    - m3crs2s0_300
+    - m3crs2d_200

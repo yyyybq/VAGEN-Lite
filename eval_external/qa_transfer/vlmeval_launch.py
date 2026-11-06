@@ -12,6 +12,8 @@ are not modified; the class is registered into vlmeval.vlm before run.py starts.
 from __future__ import annotations
 
 import contextlib
+import json
+import os
 import runpy
 import sys
 from pathlib import Path
@@ -20,8 +22,15 @@ import transformers
 import vlmeval.vlm
 from vlmeval.vlm import Qwen2VLChat
 
+from eval_external.qa_transfer.benchmarks import MINDCUBE_TINY1050
+
 VLMEVAL_RUN = Path(vlmeval.__file__).resolve().parent.parent / "run.py"
-MODEL_CLASSES = (transformers.Qwen2_5_VLForConditionalGeneration, transformers.Qwen2VLForConditionalGeneration)
+# Qwen3VLChat (2026-11-06) loads through AutoModelForImageTextToText, also with flash_attention_2 written into its
+# code; Qwen3VLForConditionalGeneration exists from transformers 4.57 on (the eval-external-q3 env).
+MODEL_CLASSES = tuple(c for c in (transformers.Qwen2_5_VLForConditionalGeneration,
+                                  transformers.Qwen2VLForConditionalGeneration,
+                                  transformers.AutoModelForImageTextToText,
+                                  getattr(transformers, "Qwen3VLForConditionalGeneration", None)) if c is not None)
 
 
 @contextlib.contextmanager
@@ -60,6 +69,37 @@ class Qwen2VLChatSDPA(Qwen2VLChat):
 
 
 vlmeval.vlm.Qwen2VLChatSDPA = Qwen2VLChatSDPA
+
+if hasattr(vlmeval.vlm, "Qwen3VLChat"):
+    class Qwen3VLChatSDPA(vlmeval.vlm.Qwen3VLChat):
+        """Qwen3VLChat (EASI v0.2.2) with SDPA attention instead of flash_attention_2; nothing else changes."""
+        ATTN = "sdpa"
+
+        def __init__(self, *args, **kwargs):
+            with attention_override(self.ATTN):
+                super().__init__(*args, **kwargs)
+            model = getattr(self, "model", None)
+            print(f"[eval_external] {self.model_path}: attention "
+                  f"{getattr(getattr(model, 'config', None), '_attn_implementation', None)}, "
+                  f"dtype {getattr(model, 'dtype', None)}, do_sample "
+                  f"{getattr(getattr(model, 'generation_config', None), 'do_sample', None)}", flush=True)
+
+    vlmeval.vlm.Qwen3VLChatSDPA = Qwen3VLChatSDPA
+
+
+def register_tables() -> None:
+    """Our extra question tables (benchmarks.MINDCUBE_TINY1050): VLMEvalKit finds a table by its class's
+    DATASET_URL / DATASET_MD5; the file is already in $LMUData, so the URL is never fetched."""
+    from vlmeval.dataset.mindcubebench import MindCubeBench
+
+    lmu = Path(os.environ.get("LMUData", "/mnt/umm/users/yinbaiqiao/eval_external_assets/LMUData"))
+    info = lmu / f"{MINDCUBE_TINY1050}.json"
+    if info.exists():
+        MindCubeBench.DATASET_URL[MINDCUBE_TINY1050] = f"file://{lmu / (MINDCUBE_TINY1050 + '.tsv')}"
+        MindCubeBench.DATASET_MD5[MINDCUBE_TINY1050] = json.loads(info.read_text())["md5"]
+
+
+register_tables()
 
 if __name__ == "__main__":
     from eval_external.qa_transfer import pixel_log

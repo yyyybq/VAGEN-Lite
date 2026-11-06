@@ -60,8 +60,13 @@ def run_dir(stage: str, model: str, bench: str) -> Path:  # QA run folders (kept
 
 def _qa_collect(rd: Path) -> None:
     from eval_external.qa_transfer.collect import collect
+    from eval_external.qa_transfer.lenient import rescore_run
 
     collect(rd)
+    try:  # 2026-11-06: per-item lenient re-score (lenient.json); a failure here is logged, the run stays done
+        rescore_run(rd)
+    except Exception:
+        (rd / "lenient_error.txt").write_text(traceback.format_exc())
 
 
 def _ownenv_collect(rd: Path) -> None:
@@ -94,11 +99,21 @@ def item(stage: str, model: str, kind: str) -> Item:
                     ["python", "-m", "eval_external.closed_loop.esi_format_check", "run", "--models", *ESI_MODELS],
                     lambda: (rd / "items.json").exists(), _esi_collect, also_own=(str(rd),))
     if kind in BENCHMARKS:
+        from eval_external.adapters import models as M
+
         rd = run_dir(stage, model, kind)
+        reg = M.load_registry()
+        family = M.entry(model, reg)["family"]
+        # qwen3_vl (2026-11-06): its own interpreter (transformers 4.57.6), and the view and weight hash a job may
+        # build as root are handed back with the run folder
+        python = "python" if family == "qwen2_5_vl" else M.python_for(model, reg)
+        own = () if family == "qwen2_5_vl" else (str(M.view_dir(model, reg)),
+                                                 str(Path(reg["root"]) / "model_hashes" / f"{model}.json"))
         return Item(rd, f"{stage}-{kind}-{model}",
-                    ["python", "-m", "eval_external.qa_transfer.run_qa", "--model", model, "--bench", kind,
+                    [python, "-m", "eval_external.qa_transfer.run_qa", "--model", model, "--bench", kind,
                      "--run-dir", str(rd)],
-                    lambda: (J.ROOT / "data_prep" / f"{kind.replace('@', '_at_')}.json").exists(), _qa_collect)
+                    lambda: (J.ROOT / "data_prep" / f"{kind.replace('@', '_at_')}.json").exists(), _qa_collect,
+                    also_own=own)
     base, _, task_set = kind.partition("@")  # "WalkerBench-lenient@extra300": the extra300 task set
     if base in ("WalkerBench", "WalkerBench-blind", "WalkerBench-lenient"):
         variant = base.partition("-")[2]  # "", "blind" or "lenient"

@@ -36,6 +36,10 @@ def prepare_vlmevalkit(bench: dict) -> dict:
     from vlmeval.dataset import build_dataset
     from vlmeval.dataset.video_dataset_config import supported_video_datasets
 
+    from eval_external.qa_transfer.vlmeval_launch import register_tables
+
+    register_tables()  # our extra tables (MindCube-Tiny-1050), as in the jobs
+
     name = bench["data"]
     ds = supported_video_datasets[name]() if name in supported_video_datasets else build_dataset(name)
     return {"items": len(ds.data), "data_file": getattr(ds, "data_file", None),

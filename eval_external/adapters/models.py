@@ -10,6 +10,14 @@ A view is ROOT/model_views/<code>/:
   decodes the same way whatever a backend leaves unset (Qwen's own file says repetition_penalty 1.05).
 The weight hash is the sha256 of the sorted "file sha256" lines of the *.safetensors files; it is cached in
 ROOT/model_hashes/<code>.json and recomputed when a file's size or mtime changes.
+
+Families (2026-11-06): qwen2_5_vl (every model up to step 2) and qwen3_vl (the matrix-v3 Qwen3-VL-8B checkpoints and
+their raw model).  A family fixes the architecture a view must have, the Python that runs it (FAMILY_PYTHON: Qwen3-VL
+needs transformers >= 4.57, which the eval-external env does not have) and whether the Qwen2.5 pixel limits are
+written into the processor files (only qwen2_5_vl; Qwen3-VL's processors keep their own files, which are the same
+for every matrix checkpoint and its raw model, and both backends resize Qwen3-VL inputs with qwen_vl_utils before
+the processor, do_resize False).  registry.yaml may name further registry files under `include` (the matrix-v3 list
+is written by tools/matrix_v3_registry.py from the matrix handover records).
 """
 
 from __future__ import annotations
@@ -26,7 +34,14 @@ HERE = Path(__file__).resolve().parent
 EVAL_ROOT = HERE.parent
 REGISTRY = HERE / "registry.yaml"
 ASSETS = EVAL_ROOT / "assets.yaml"
-FAMILY_ARCH = {"qwen2_5_vl": "Qwen2_5_VLForConditionalGeneration"}
+FAMILY_ARCH = {"qwen2_5_vl": "Qwen2_5_VLForConditionalGeneration", "qwen3_vl": "Qwen3VLForConditionalGeneration"}
+# The interpreter that runs a family's jobs.  eval-external-q3 = eval-external plus transformers 4.57.6 (the version
+# the matrix-v3 checkpoints were saved with), made by eval_external_assets/logs/make_env_q3.sh.
+FAMILY_PYTHON = {
+    "qwen2_5_vl": "/mnt/umm/users/yinbaiqiao/.conda/envs/eval-external/bin/python",
+    "qwen3_vl": "/mnt/umm/users/yinbaiqiao/eval_external_assets/envs/eval-external-q3/bin/python",
+}
+PIXEL_FAMILIES = ("qwen2_5_vl",)  # families whose processor files get PIXELS
 VIEW_DTYPE = "bfloat16"
 GREEDY_KEYS = ("bos_token_id", "eos_token_id", "pad_token_id")
 TRAINING_STATE = ("optimizer", "scheduler", "rng_state", "trainer_state", "training_args")  # not linked into views
@@ -48,8 +63,23 @@ ATTN_KEYS = ("attn_implementation", "_attn_implementation")
 
 
 def load_registry(path: Path = REGISTRY) -> dict:
+    """registry.yaml plus the models of every file it lists under `include` (paths relative to it); a code
+    defined twice is an error."""
     with open(path) as f:
-        return yaml.safe_load(f)
+        reg = yaml.safe_load(f)
+    for name in reg.get("include") or []:
+        with open(path.parent / name) as f:
+            extra = yaml.safe_load(f) or {}
+        dup = set(extra.get("models") or {}) & set(reg["models"])
+        if dup:
+            raise ValueError(f"{name}: model codes already defined: {sorted(dup)}")
+        reg["models"].update(extra.get("models") or {})
+    return reg
+
+
+def python_for(code: str, reg: dict | None = None) -> str:
+    """The interpreter a job of this model runs with (FAMILY_PYTHON)."""
+    return FAMILY_PYTHON[entry(code, reg)["family"]]
 
 
 def entry(code: str, reg: dict | None = None) -> dict:
@@ -67,6 +97,11 @@ def source_dir(code: str, reg: dict | None = None) -> Path:
         return Path(reg["hf_home"]) / "hub" / name / "snapshots" / e["revision"]
     if e["source"] == "local":
         return Path(reg["vagen_exps"]) / e["path"]
+    if e["source"] == "path":  # an absolute folder (matrix-v3 checkpoints, the shared Qwen3-VL snapshot)
+        p = Path(e["path"])
+        if not p.is_absolute():
+            raise ValueError(f"{code}: source path needs an absolute path, got {p}")
+        return p
     if e["source"] == "asset":
         with open(ASSETS) as f:
             assets = yaml.safe_load(f)
@@ -78,7 +113,7 @@ def origin(code: str, reg: dict | None = None) -> str:
     """repo@revision for downloaded models, the path for ours."""
     reg = reg or load_registry()
     e = entry(code, reg)
-    if e["source"] == "hf_cache":
+    if e["source"] == "hf_cache" or (e["source"] == "path" and e.get("repo")):
         return f"{e['repo']}@{e['revision']}"
     if e["source"] == "asset":
         with open(ASSETS) as f:
@@ -118,7 +153,8 @@ def build_view(code: str, reg: dict | None = None) -> Path:
             continue
         if p.name in PROCESSOR_FILES:
             proc = json.loads(p.read_text())
-            new = dict(proc) if e.get("pixels") == "own" else {**proc, **PIXELS}  # "own": the published limits
+            own = e.get("pixels") == "own" or e["family"] not in PIXEL_FAMILIES  # "own": the published limits
+            new = dict(proc) if own else {**proc, **PIXELS}
             if "image_processor_type" in proc and proc["image_processor_type"] not in KNOWN_IMAGE_PROCESSORS:
                 new["image_processor_type"] = "Qwen2VLImageProcessor"  # e.g. Video-R1's Qwen2_5_VLImageProcessor
             diff = {k: [proc.get(k), new[k]] for k in sorted(new) if proc.get(k) != new[k] and k in proc}

@@ -3,9 +3,13 @@
 #   hf_cache  a snapshot in $HF_HOME/hub at a pinned revision
 #   asset     a download made by tools/fetch_assets.py (its name in ../assets.yaml)
 #   local     one of our checkpoints, under vagen_exps (never written to)
+#   path      an absolute folder, never written to (added 2026-11-06 for the matrix-v3 Qwen3-VL checkpoints)
 hf_home: /mnt/umm/users/yinbaiqiao/.cache/huggingface
 root: /mnt/umm/users/yinbaiqiao/eval_external_assets
 vagen_exps: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial
+# further registry files (models only): the matrix-v3 list, written from the matrix handovers by
+# tools/matrix_v3_registry.py
+include: [registry_matrix_v3.yaml]
 
 models:
   base-7B:
