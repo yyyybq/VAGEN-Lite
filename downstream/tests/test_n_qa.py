@@ -391,8 +391,10 @@ def test_sample_note_explains_the_first_action_distractor():
     note = Q.sample_note(q)
     assert "最短 3 步" in note and "5 步以内" in note and "move_left、turn_left" in note
     assert "move_forward：起点处被挡（原地不动，至少 4 步）" in note and "实例记录的最短走法是 None 步（不一致）" in note
-    q["numbers"]["recorded_actions"] = 3
-    assert "最短 3 步，和实例记录的最短走法一致" in Q.sample_note(q)
+    q["numbers"].update(recorded_actions=3, recorded_first="move_left")
+    note = Q.sample_note(q)
+    assert "最短 3 步，和实例记录的最短走法一致" in note and "按盒子判据（不看可见性）" in note
+    assert "记录的、渲染核对过的最短走法第一步是 move_left（即答案）" in note
     q["numbers"].update(other="move_right", other_kind="longer", other_at_least=6)
     assert "move_right：走它至少要 6 步。" in Q.sample_note(q)
     assert Q.sample_note({"kind": "left_right", "numbers": {}}) == ""
@@ -442,4 +444,46 @@ def test_make_leaves_out_flagged_first_action_and_baselines_read_only_options(tm
           {"options": ["move left", "move backward"], "answer": "B", "numbers": {"blocked": []}}]
     tb = Q.text_baselines(fa)  # each rule gets one of the two: q1 by avoiding forward / the blocked one, q2 by backward
     assert tb["never move forward, else A"] == 0.5 and tb["move backward when offered, else A"] == 0.5
-    assert tb["the option not blocked at the start, else A"] == 0.5
+    assert tb["simulator: the option not blocked at the start, else A"] == 0.5
+
+
+def test_baselines_per_stratum_majority_left_one_out_and_pick_rates():
+    def q(i, opts, ans, best, other, blocked=()):
+        return {"id": f"I{i}::first_action", "instance_id": f"I{i}", "kind": "first_action", "options": opts,
+                "answer": ans, "numbers": {"best": best, "other": other, "blocked": list(blocked)}}
+    fa = [q(0, ["move backward", "move forward"], "A", "move_backward", "move_forward", ["move_forward"]),
+          q(1, ["move forward", "move backward"], "B", "move_backward", "move_forward", ["move_forward"]),
+          q(2, ["move backward", "move forward"], "A", "move_backward", "move_forward", ["move_forward"]),
+          q(3, ["turn left", "move backward"], "A", "turn_left", "move_backward")]
+    # leave one out over the same option pair: I0..I2 each see the other two say "move backward"; I3 sees nothing
+    assert Q.majority_loo(fa, lambda x: frozenset(x["options"])) == 1.0
+    b = Q.baselines(fa)["first_action"]
+    assert b["all"]["n"] == 4 and b["answer other"]["n"] == 1 and b["move_backward as distractor"]["n"] == 1
+    assert b["all"]["move backward when offered, else A"] == 0.75 and b["answer other"]["move backward when offered, else A"] == 0.0
+    assert b["all"]["always A"] == 0.75 and "simulator: the option not blocked at the start, else A" in b["all"]
+    got = {"I0::first_action": "A", "I1::first_action": "A", "I2::first_action": None, "I3::first_action": "B"}
+    pk = Q.pick_rates(fa, got)
+    assert pk["A"] == 2 / 3 and pk["move backward when offered"] == 2 / 3 and pk["move forward when offered"] == 0.5
+    nf = [{"kind": "near_far", "options": ["the bowl", "the cup"], "answer": "A"},
+          {"kind": "near_far", "options": ["the cup", "the bowl"], "answer": "B"},
+          {"kind": "near_far", "options": ["the bowl", "the cup"], "answer": "B"}]
+    nb = Q.baselines(nf)["near_far"]
+    assert nb["always A"] == 1 / 3 and nb["object-name majority (leave-one-out)"] == 1 / 3  # ties answer A
+
+
+def test_analyze_gives_strata_accuracy_and_pairs_within_answer_other():
+    def q(i, best):
+        return {"id": f"I{i}::first_action", "instance_id": f"I{i}", "kind": "first_action",
+                "options": [Q.ACTION_TEXT[best], "move forward"], "answer": "A",
+                "numbers": {"best": best, "other": "move_forward", "other_kind": "blocked", "blocked": ["move_forward"]}}
+    qs = [q(0, "move_backward"), q(1, "move_backward"), q(2, "turn_left"), q(3, "move_left")]
+    insts = {f"I{k}": {"shortest": {"actions": 3}, "near_threshold": []} for k in range(4)}
+    ans = {"M": {x["id"]: "A" for x in qs}, "W": {x["id"]: ("A" if x["numbers"]["best"] == "move_backward" else "B") for x in qs}}
+    eps = {"M": {f"I{k}": {"success": k >= 2} for k in range(4)}, "W": {f"I{k}": {"success": False} for k in range(4)}}
+    rep = Q.analyze(qs, ans, eps, insts)
+    sa = rep["models"]["W"]["strict/first_action"]["strata_accuracy"]
+    assert sa["answer move_backward"] == {"n": 2, "correct": 2} and sa["answer other"] == {"n": 2, "correct": 0}
+    assert rep["pairs"]["strict/first_action[answer other]/M>W"] == {"n": 2, "a_succeeds_b_fails": 2,
+                                                                     "b_succeeds_a_fails": 0, "p": pytest.approx(0.5)}
+    md = Q.markdown(rep)
+    assert "first_action 的基线" in md and "| W | 2/4 | 2/2 | 0/2 | 0/0 |" in md

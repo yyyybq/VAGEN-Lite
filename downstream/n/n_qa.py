@@ -61,7 +61,11 @@ analyze: two readings of a reply: strict (x0_qa.parse_letter: the option letter 
   success rate and mean max_shaping_score on the instances answered right against those answered wrong, also within
   the shortest path's length (2-3 / 4-5 / 6+ actions) and near-threshold or not, and for first_action within the
   right action (move_backward or other) and the kind of distractor (blocked or longer); text-only baselines for
-  first_action (no image, no task: "move backward when offered", "never move forward", "the option not blocked");
+  first_action per stratum (no image, no task: always A, "move backward when offered", "never move forward", the
+  option pair's majority answer left one out; and, as a reference using simulator information, "the option not
+  blocked"), the always-A rate per kind and the object-name majority for near_far; per model the share of A answers
+  and, for first_action, the accuracy per stratum and how often it takes move backward / forward when offered; the
+  cross-model pairs of first_action also within "answer other";
   across models, on the instances where
   A answers right and B wrong, how often A succeeds and B fails against how often B succeeds and A fails (exact
   binomial test, as McNemar's).  DIR/report.json, DIR/report.md.
@@ -644,7 +648,8 @@ def sample_note(q: dict) -> str:
     rec = n.get("recorded_actions")
     same = "，和实例记录的最短走法一致" if rec == n["fewest"] else f"；实例记录的最短走法是 {rec} 步（不一致）"
     return (f"<p>搜索：最短 {n['fewest']} 步{same}（搜索的步数在 {n.get('exact_up_to')} 步以内都准确）；"
-            f"最短走法的第一步可以是 {html.escape('、'.join(n['optimal']))}；"
+            f"按盒子判据（不看可见性），最短走法的第一步可以是 {html.escape('、'.join(n['optimal']))}；"
+            f"记录的、渲染核对过的最短走法第一步是 {html.escape(str(n.get('recorded_first')))}（即答案）；"
             f"干扰项 {html.escape(n['other'])}：{why}。</p>")
 
 
@@ -665,8 +670,9 @@ def samples_cmd(args) -> int:
     page = ("<!doctype html><meta charset='utf-8'><title>N 系列问答样例</title>"
             "<style>body{font-family:sans-serif;max-width:900px;margin:auto;padding:16px}section{border-bottom:1px solid #ccc;"
             "padding:12px 0}pre{white-space:pre-wrap;background:#f6f6f6;padding:8px}</style>"
-            f"<h1>N 系列问答样例（{len(picked)} 道）</h1><p>红圈：两个物体在该题所用画面上的可见像素中心（模型看到的图里没有圈）。"
-            "第一步题的图是起始画面，不画圈。</p>"
+            f"<h1>N 系列问答样例（{len(picked)} 道）</h1>"
+            + (Path(args.note).read_text(encoding="utf-8") if args.note else "")
+            + "<p>红圈：两个物体在该题所用画面上的可见像素中心（模型看到的图里没有圈）。第一步题的图是起始画面，不画圈。</p>"
             + "".join(cards))
     Path(args.out).write_text(page, encoding="utf-8")
     write_jsonl(Path(args.out).with_suffix(".jsonl"), picked)
@@ -723,13 +729,37 @@ def episodes_of(dirs, model: str) -> dict:
 
 
 def FIRST_ACTION_GROUPS(num: dict) -> tuple:
-    """first_action's extra strata (11-06): 446 of 600 right answers are move_backward (the recorded paths break
-    ties in ACTIONS order and move_forward is blocked at 574 starts), so answered-right against answered-wrong is also
-    split by the right action and by the kind of distractor (num: instance id -> the question's numbers)."""
+    """first_action's extra strata (11-06): in the audited set 401 of 539 right answers are move_backward
+    (move_forward is blocked at 178 of 184 starts; the recorded path starts with move_backward at 401 of the 405
+    questions where it is shortest by the box judge), so answered-right against answered-wrong is also split by the
+    right action and by the kind of distractor (num: instance id -> the question's numbers).  The reading of
+    first_action rests on "answer other", where a backward habit does not help."""
     return (("answer move_backward", lambda i: num[i].get("best") == "move_backward"),
             ("answer other", lambda i: num[i].get("best") != "move_backward"),
             ("distractor blocked", lambda i: num[i].get("other_kind") == "blocked"),
             ("distractor longer", lambda i: num[i].get("other_kind") == "longer"))
+
+
+FIRST_ACTION_STRATA = {"all": lambda q: True,
+                       "answer move_backward": lambda q: q["numbers"].get("best") == "move_backward",
+                       "answer other": lambda q: q["numbers"].get("best") != "move_backward",
+                       "move_backward as distractor": lambda q: q["numbers"].get("other") == "move_backward"}
+
+
+def letter_of(q: dict, text: str):
+    return "AB"[q["options"].index(text)] if text in q["options"] else None
+
+
+def pick_rates(qs: list, got: dict) -> dict:
+    """How often a model answers A, and for first_action how often it takes move backward / move forward when
+    offered (got: question id -> the letter read, or None)."""
+    out = {"A": mean(got[q["id"]] == "A" for q in qs if got.get(q["id"]))}
+    if qs and qs[0]["kind"] == "first_action":
+        for name, text in (("move backward when offered", ACTION_TEXT["move_backward"]),
+                           ("move forward when offered", ACTION_TEXT["move_forward"])):
+            off = [q for q in qs if text in q["options"] and got.get(q["id"])]
+            out[name] = mean(got[q["id"]] == letter_of(q, text) for q in off)
+    return out
 
 
 def analyze(qs: list, answers: dict, episodes: dict, insts: dict) -> dict:
@@ -748,7 +778,12 @@ def analyze(qs: list, answers: dict, episodes: dict, insts: dict) -> dict:
                 ep = episodes.get(m, {})
                 num = {q["instance_id"]: q.get("numbers") or {} for q in kq}
                 row = {"n": len(kq), "correct": sum(ok.values()), "unparsed": sum(v is None for v in got.values()),
-                       "accuracy": sum(ok.values()) / len(kq) if kq else float("nan"), "groups": {}}
+                       "accuracy": sum(ok.values()) / len(kq) if kq else float("nan"), "groups": {},
+                       "picks": pick_rates(kq, got) if kq else {}}
+                if kind == "first_action":
+                    row["strata_accuracy"] = {s: {"n": len(sel), "correct": sum(ok[q["instance_id"]] for q in sel)}
+                                              for s, f in FIRST_ACTION_STRATA.items()
+                                              for sel in [[q for q in kq if f(q)]]}
                 for name, sel in (("all", lambda i: True),
                                   *[(f"length {b}", (lambda b: lambda i: band_of(insts[i]["shortest"]["actions"]) == b)(b))
                                     for b, _, _ in LENGTH_BANDS],
@@ -762,32 +797,48 @@ def analyze(qs: list, answers: dict, episodes: dict, insts: dict) -> dict:
                                       "max_shaping": mean(float(ep[i].get("max_shaping_score") or 0.0) for i in ids)}
                     row["groups"][name] = cell
                 rep["models"][m][f"{reading}/{kind}"] = row
-    rep["first_action_text_baselines"] = text_baselines([q for q in qs if q["kind"] == "first_action"])
+    rep["baselines"] = baselines(qs)
+    other = {q["instance_id"] for q in qs if q["kind"] == "first_action" and FIRST_ACTION_STRATA["answer other"](q)}
     models = list(answers)
     for reading in ("strict", "lenient"):
-        for kind in KINDS:
+        for kind, label, keep in [(k, k, None) for k in KINDS] + [("first_action", "first_action[answer other]", other)]:
             for a in models:
                 for b in models:
                     if a == b:
                         continue
                     ra, rb = right.get((a, reading, kind), {}), right.get((b, reading, kind), {})
                     ea, eb = episodes.get(a, {}), episodes.get(b, {})
-                    ids = [i for i in ra if ra.get(i) and rb.get(i) is False and i in ea and i in eb]
+                    ids = [i for i in ra if ra.get(i) and rb.get(i) is False and i in ea and i in eb
+                           and (keep is None or i in keep)]
                     a_only = sum(bool(ea[i].get("success")) and not eb[i].get("success") for i in ids)
                     b_only = sum(bool(eb[i].get("success")) and not ea[i].get("success") for i in ids)
-                    rep["pairs"][f"{reading}/{kind}/{a}>{b}"] = {"n": len(ids), "a_succeeds_b_fails": a_only,
-                                                                 "b_succeeds_a_fails": b_only,
-                                                                 "p": binom_two_sided(a_only, a_only + b_only)}
+                    rep["pairs"][f"{reading}/{label}/{a}>{b}"] = {"n": len(ids), "a_succeeds_b_fails": a_only,
+                                                                  "b_succeeds_a_fails": b_only,
+                                                                  "p": binom_two_sided(a_only, a_only + b_only)}
     return rep
 
 
+def majority_loo(qs: list, key) -> float:
+    """Accuracy of answering each question with the option text most often right among the OTHER questions with the
+    same key (no image, no task; ties and unseen keys answer A)."""
+    seen = collections.defaultdict(collections.Counter)
+    for q in qs:
+        seen[key(q)][q["options"]["AB".index(q["answer"])]] += 1
+    hit = 0
+    for q in qs:
+        c = seen[key(q)].copy()
+        c[q["options"]["AB".index(q["answer"])]] -= 1
+        best = [o for o in q["options"] if c[o] == max(c[o] for o in q["options"])]
+        guess = "AB"[q["options"].index(best[0])] if len(best) == 1 else "A"
+        hit += guess == q["answer"]
+    return hit / len(qs) if qs else float("nan")
+
+
 def text_baselines(fa: list) -> dict:
-    """Accuracy on first_action questions of rules that read only the two options (no image, no task text)."""
+    """Accuracy on first_action questions of rules that read only the two options (no image, no task text), and of
+    one that also knows which actions are blocked at the start (simulator information, an upper reference)."""
     def score(rule):
         return sum(rule(q) == q["answer"] for q in fa) / len(fa) if fa else float("nan")
-
-    def letter_of(q, text):
-        return "AB"[q["options"].index(text)] if text in q["options"] else None
 
     def backward(q):
         return letter_of(q, ACTION_TEXT["move_backward"]) or "A"
@@ -800,17 +851,36 @@ def text_baselines(fa: list) -> dict:
         b = {ACTION_TEXT[a] for a in (q["numbers"].get("blocked") or [])}
         free = [k for k, o in enumerate(q["options"]) if o not in b]
         return "AB"[free[0]] if len(free) == 1 else "A"
-    return {"n": len(fa), "move backward when offered, else A": score(backward),
+    return {"n": len(fa), "always A": score(lambda q: "A"),
+            "move backward when offered, else A": score(backward),
             "never move forward, else A": score(not_forward),
-            "the option not blocked at the start, else A": score(not_blocked)}
+            "option-pair majority (leave-one-out)": majority_loo(fa, lambda q: frozenset(q["options"])),
+            "simulator: the option not blocked at the start, else A": score(not_blocked)}
+
+
+def baselines(qs: list) -> dict:
+    """Per kind the always-A rate; near_far also the object-name majority (leave-one-out); first_action the
+    text_baselines per stratum."""
+    out = {}
+    for kind in KINDS:
+        kq = [q for q in qs if q["kind"] == kind]
+        if not kq:
+            continue
+        if kind == "first_action":
+            out[kind] = {s: text_baselines([q for q in kq if f(q)]) for s, f in FIRST_ACTION_STRATA.items()}
+        else:
+            out[kind] = {"n": len(kq), "always A": sum(q["answer"] == "A" for q in kq) / len(kq)}
+            if kind == "near_far":
+                out[kind]["object-name majority (leave-one-out)"] = majority_loo(kq, lambda q: frozenset(q["options"]))
+    return out
 
 
 def markdown(rep: dict) -> str:
     lines = ["# N 系列\"会答是否会做\"（自动生成）", "",
              "每格：答对实例上 N1 回合的成功数 / 实例数（平均最高塑形分） 对 答错实例上的同样数字。", ""]
     for key in sorted({k for r in rep["models"].values() for k in r}):
-        lines += [f"## {key}", "", "| 模型 | 正确率 | 读不出 | 全部：答对 | 全部：答错 | 门槛附近：答对 | 门槛附近：答错 |",
-                  "| --- | ---: | ---: | --- | --- | --- | --- |"]
+        lines += [f"## {key}", "", "| 模型 | 正确率 | 读不出 | 选 A 的比例 | 全部：答对 | 全部：答错 | 门槛附近：答对 | 门槛附近：答错 |",
+                  "| --- | ---: | ---: | ---: | --- | --- | --- | --- |"]
         for m, r in rep["models"].items():
             row = r.get(key)
             if not row:
@@ -819,9 +889,10 @@ def markdown(rep: dict) -> str:
             def cell(c):
                 return f"{c['success']}/{c['n']}（{c['max_shaping']:.3f}）" if c["n"] else "—"
             g = row["groups"]
+            a_rate = (row.get("picks") or {}).get("A", float("nan"))
             lines.append(f"| {m} | {row['correct']}/{row['n']}（{100 * row['accuracy']:.1f}%） | {row['unparsed']} | "
-                         f"{cell(g['all']['right'])} | {cell(g['all']['wrong'])} | {cell(g['near threshold']['right'])} | "
-                         f"{cell(g['near threshold']['wrong'])} |")
+                         f"{100 * a_rate:.1f}% | {cell(g['all']['right'])} | {cell(g['all']['wrong'])} | "
+                         f"{cell(g['near threshold']['right'])} | {cell(g['near threshold']['wrong'])} |")
         lines.append("")
         if key.endswith("/first_action"):
             strata = ("answer move_backward", "answer other", "distractor blocked", "distractor longer")
@@ -834,13 +905,32 @@ def markdown(rep: dict) -> str:
                 cells = [f"{g[s][side]['success']}/{g[s][side]['n']}" if g[s][side]["n"] else "—"
                          for s in strata for side in ("right", "wrong")]
                 lines.append(f"| {m} | " + " | ".join(cells) + " |")
+            lines += ["", "| 模型 | 全部 | 答案后退 | 答案其他 | 后退是干扰项 | 有后退时选后退 | 有前进时选前进 |",
+                      "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+            for m, r in rep["models"].items():
+                row = r.get(key) or {}
+                sa = row.get("strata_accuracy")
+                if not sa:
+                    continue
+                pk = row.get("picks") or {}
+                cells = [f"{v['correct']}/{v['n']}" for v in sa.values()]
+                lines.append(f"| {m} | " + " | ".join(cells) + f" | {100 * pk.get('move backward when offered', float('nan')):.1f}% | "
+                             f"{100 * pk.get('move forward when offered', float('nan')):.1f}% |")
             lines.append("")
-    tb = rep.get("first_action_text_baselines")
-    if tb and tb.get("n"):
-        lines += [f"## first_action 只看两个选项文字的基线（{tb['n']} 道）", ""]
-        lines += [f"- {k}：{100 * v:.1f}%" for k, v in tb.items() if k != "n"] + [""]
+    for kind, b in (rep.get("baselines") or {}).items():
+        if kind == "first_action":
+            lines += ["## first_action 的基线（不看图、不读任务）", "",
+                      "| 层 | 道数 | 总选 A | 有后退就选后退 | 不选前进 | 选项对多数（留一） | 仿真：选不被挡的（非纯文字） |",
+                      "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+            for s, v in b.items():
+                vals = [v[k] for k in ("always A", "move backward when offered, else A", "never move forward, else A",
+                                       "option-pair majority (leave-one-out)",
+                                       "simulator: the option not blocked at the start, else A")]
+                lines.append(f"| {s} | {v['n']} | " + " | ".join(f"{100 * x:.1f}%" for x in vals) + " |")
+            lines.append("")
+        else:
+            lines += [f"## {kind} 的基线（{b['n']} 道）", ""] + [f"- {k}：{100 * v:.1f}%" for k, v in b.items() if k != "n"] + [""]
     return "\n".join(lines) + "\n"
-
 
 
 def analyze_cmd(args) -> int:
@@ -899,6 +989,7 @@ def main(argv=None) -> int:
     s.add_argument("--n", type=int, default=20)
     s.add_argument("--counts", nargs="*", default=None, help="KIND=N per kind (instead of --n spread over the kinds)")
     s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--note", default=None, help="an HTML fragment put at the top of the page (counts, caveats)")
     s.add_argument("--out", type=Path, required=True)
     a = sub.add_parser("analyze")
     a.add_argument("--questions", type=Path, required=True)
