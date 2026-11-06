@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""N series, "can it answer, can it do" (the user's task book of 2026-11-05, item 7): two-choice questions on the
-start image of N1's merged 600 instances, asked zero-shot to the eight models, then paired with their N1 episodes.
+"""N series, "can it answer, can it do" (the user's task book of 2026-11-05, item 7; option 甲 of 11-06): two-choice
+questions on N1's merged 600 instances, asked zero-shot to the eight models, then paired with their episodes.  Option
+甲 asks the object kinds on the shortest path's end image and first_action on the start image.
 
     python downstream/n/n_qa.py truth   --instances I.jsonl --scene SID --out DIR        # simulator Python, per scene
     python downstream/n/n_qa.py paths   --instances I.jsonl --scene SID --out DIR        # simulator Python, per scene
     python downstream/n/n_qa.py collect --truth DIR --out TRUTH.jsonl
+    python downstream/n/n_qa.py audit   --instances I.jsonl --paths PATHS.jsonl [--paths-other P2.jsonl]
+                                        --episodes EVAL [EVAL ...] --out AUDIT.jsonl
     python downstream/n/n_qa.py make    --instances I.jsonl --gen GEN [GEN ...] [--truth TRUTH.jsonl]
-                                        [--paths PATHS.jsonl] [--object-image start|shortest|best] [--kinds K ...]
-                                        --out DIR
+                                        [--paths PATHS.jsonl] [--exclude AUDIT.jsonl] [--object-image start|shortest|best]
+                                        [--kinds K ...] --out DIR
     python downstream/n/n_qa.py samples --questions Q.jsonl --n 20 --out PAGE.html
     python downstream/n/n_qa.py analyze --questions Q.jsonl --answers M=A.jsonl [...] --episodes EVAL [EVAL ...]
                                         --instances I.jsonl --out DIR
@@ -35,17 +38,31 @@ make: kinds of question, in X0's two-choice layout (a prompt naming the camera, 
                  those at least DELTA below it; only where the best one raises the start score by at least DELTA;
     first_action "which action should the robot take first to finish the task in the fewest actions?" (paths): an
                  action that starts a shortest way (the recorded shortest path's first one when it is such) against
-                 one that makes the way at least 2 actions longer or reaches no success within the search.
+                 one blocked at the start or one that makes the way at least 2 actions longer (a free one first);
+                 a capped search's costs count only up to its exact depth (first_action_question).  --exclude leaves
+                 out the instances audit flagged.
   The names are the instance's object names (n_env.natural_name); an instance whose two names are the same is left
   out of the two object kinds.  --object-image asks the object kinds on another view of the instance (shortest or
-  best: its success images, where both objects are visible by construction) instead of the start; the action kinds
-  are always asked on the start image.  DIR/questions.jsonl, DIR/summary.json.
+  best: its success images; only the targets the task requires are visible there by construction, so the visibility
+  rule above still applies) instead of the start; the action kinds are always asked on the start image.
+  DIR/questions.jsonl, DIR/summary.json.
+audit (11-06, after the design check): first_action truths that the recorded episodes or the generator contradict.
+  Per start (scene, robot setting, start pose): the actions N1's episodes tried from that pose (a turn starting there:
+  its first attempted action, or all of them when all were blocked) against the search's blocked set; the two search
+  runs' costs (--paths-other); per instance the recorded shortest path against the search (its first action costing
+  more than its length, or the start further than it), all flagging the whole start.  Per instance only: the search's
+  fewest (box judge only) differing from the recorded shortest length (the generator also required the targets to be
+  visible and at least 2 actions), so the box-judge truth is not verified there.  AUDIT.jsonl: one row per flagged
+  instance with its reasons.
 samples: N questions spread over the kinds and task types, as a review page: the image (with the two objects marked
   for the object kinds), the prompt, the right answer and the numbers behind it.
 analyze: two readings of a reply: strict (x0_qa.parse_letter: the option letter alone) and lenient (also a reply that
   is one option's text, or names exactly one option's text).  Per model, kind and reading: accuracy; the N1 episodes'
   success rate and mean max_shaping_score on the instances answered right against those answered wrong, also within
-  the shortest path's length (2-3 / 4-5 / 6+ actions) and near-threshold or not; across models, on the instances where
+  the shortest path's length (2-3 / 4-5 / 6+ actions) and near-threshold or not, and for first_action within the
+  right action (move_backward or other) and the kind of distractor (blocked or longer); text-only baselines for
+  first_action (no image, no task: "move backward when offered", "never move forward", "the option not blocked");
+  across models, on the instances where
   A answers right and B wrong, how often A succeeds and B fails against how often B succeeds and A fails (exact
   binomial test, as McNemar's).  DIR/report.json, DIR/report.md.
 """
@@ -249,6 +266,95 @@ def paths_cmd(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------------------------------------- audit
+def _blocked_names(turn: dict) -> list:
+    return [b[0] if isinstance(b, (list, tuple)) else b for b in turn.get("blocked") or []]
+
+
+def start_observations(inst: dict, rows) -> dict:
+    """{action: {"free", "blocked"}} seen from the instance's start pose (its pose_key) in recorded episodes: a turn
+    that starts there tells its first attempted action, or every attempted action when all were blocked."""
+    k0 = N.pose_key(inst["start_pose"])
+    obs = collections.defaultdict(set)
+    for r in rows:
+        for t in r.get("turn_log") or []:
+            if not t.get("pose_before") or N.pose_key(t["pose_before"]) != k0:
+                continue
+            ex, bl = list(t.get("executed") or []), _blocked_names(t)
+            if not ex:
+                continue
+            if not bl:
+                obs[ex[0]].add("free")
+            elif len(bl) == len(ex):
+                for a in ex:
+                    obs[a].add("blocked")
+            elif ex[0] not in bl:
+                obs[ex[0]].add("free")
+            elif ex.count(ex[0]) == 1:
+                obs[ex[0]].add("blocked")
+    return obs
+
+
+def audit(insts: list, paths: dict, episodes: dict, other=None) -> dict:
+    """{instance id: [reasons]} for the flagged instances (see the module text).  episodes: {instance id: [rows]}."""
+    groups = collections.defaultdict(list)
+    for i in insts:
+        groups[(i["scene_id"], bool(i.get("hide_robot", False)), N.pose_key(i["start_pose"]))].append(i)
+    flags = {}
+    for members in groups.values():
+        start_flags = []
+        blocked = set((paths.get(members[0]["instance_id"]) or {}).get("blocked") or [])
+        obs = collections.defaultdict(set)
+        for i in members:
+            for a, v in start_observations(i, episodes.get(i["instance_id"], [])).items():
+                obs[a] |= v
+        for a in sorted(obs):
+            if ("free" in obs[a] and a in blocked) or ("blocked" in obs[a] and a not in blocked):
+                start_flags.append(f"start blocking differs from the episodes: {a} ({'/'.join(sorted(obs[a]))} in "
+                                   f"episodes, {'blocked' if a in blocked else 'free'} in the search)")
+        for i in members:
+            p = paths.get(i["instance_id"])
+            if p is None:
+                continue
+            sh = i.get("shortest") or {}
+            n_rec, first = sh.get("actions"), (sh.get("path") or [None])[0]
+            c = (p.get("cost") or {}).get(first)
+            if n_rec is not None and ((c is not None and c > n_rec) or (p.get("start_dist") or 0) > n_rec):
+                start_flags.append(f"{i['instance_id']}: the search costs the recorded {n_rec}-action path more")
+            if other is not None and i["instance_id"] in other and other[i["instance_id"]].get("cost") != p.get("cost"):
+                start_flags.append(f"{i['instance_id']}: the two search runs differ")
+        for i in members:
+            p = paths.get(i["instance_id"]) or {}
+            own = []
+            sd, n_rec = p.get("start_dist"), (i.get("shortest") or {}).get("actions")
+            if sd is not None and n_rec is not None and sd != n_rec:
+                own.append(f"box-judge shortest {sd} differs from the recorded {n_rec}")
+            if start_flags or own:
+                flags[i["instance_id"]] = start_flags + own
+    return flags
+
+
+def audit_cmd(args) -> int:
+    insts = read_jsonl(args.instances)
+    paths = {r["instance_id"]: r for r in read_jsonl(args.paths)}
+    other = {r["instance_id"]: r for r in read_jsonl(args.paths_other)} if args.paths_other else None
+    eps = collections.defaultdict(list)
+    for d in args.episodes:
+        for f in sorted(Path(d).glob("*/episodes.jsonl")):
+            for r in read_jsonl(f):
+                if not r.get("error"):
+                    eps[r["instance_id"]].append(r)
+    flags = audit(insts, paths, eps, other)
+    write_jsonl(args.out, [{"instance_id": i, "reasons": v} for i, v in flags.items()])
+    kinds = collections.Counter()
+    for v in flags.values():
+        for r in v:
+            kinds["start blocking differs" if r.startswith("start blocking") else
+                  "box-judge shortest differs" if r.startswith("box-judge") else r.split(": ", 1)[-1].split(" more")[0]] += 1
+    print(json.dumps({"instances": len(insts), "flagged": len(flags), "reasons": dict(kinds)}))
+    return 0
+
+
 # -------------------------------------------------------------------------------------------------- make
 def footprint_distance(pose, obj: dict) -> float:
     """Horizontal distance from the camera (over the pose's x, y) to the object's box footprint; 0 inside it."""
@@ -283,6 +389,19 @@ def visible_pair(inst: dict, tag: str = "start"):
     return objs, names, (marks["a"], marks["b"])
 
 
+def pair_problem(inst: dict, tag: str) -> str:
+    """Why visible_pair gives None (for the skip counts)."""
+    objs = inst.get("objects") or []
+    if len(objs) != 2:
+        return "not two objects"
+    _, judge, marks = view_of(inst, tag)
+    if "a" not in marks or "b" not in marks:
+        return "no stored marks for both"
+    if any((judge.get("visible") or {}).get(o["key"], 0.0) < N.MIN_VISIBLE_FRACTION for o in objs):
+        return "an object below the visible share"
+    return "the same name"
+
+
 def two_choice(stem: str, options: list, right: int, rng: random.Random) -> tuple:
     """(prompt, options in their drawn order, the right letter)."""
     order = [0, 1] if rng.random() < 0.5 else [1, 0]
@@ -296,7 +415,7 @@ def object_questions(inst: dict, common: dict, tag: str, rng: random.Random, ski
     """left_right and near_far on the two objects in one view (tag: start, shortest or best)."""
     pair = visible_pair(inst, tag)
     if pair is None:
-        skipped["object kinds: not two visible, differently named objects"] += 1
+        skipped[f"object kinds: {pair_problem(inst, tag)}"] += 1
         return []
     out, iid = [], inst["instance_id"]
     objs, names, (ma, mb) = pair
@@ -374,7 +493,7 @@ def first_action_question(inst: dict, common: dict, p: dict, rng: random.Random,
 
 
 def make_questions(insts: list, images: dict, truth: dict, seed: int = 20261105, delta: float = DELTA,
-                   paths=None, object_image: str = "start", object_images=None, kinds=KINDS) -> tuple:
+                   paths=None, object_image: str = "start", object_images=None, kinds=KINDS, exclude=None) -> tuple:
     """images: start image per instance; object_images: the object_image view's (default the start's).  paths:
     paths_cmd's rows per instance (for first_action)."""
     rng = random.Random(seed)
@@ -414,7 +533,9 @@ def make_questions(insts: list, images: dict, truth: dict, seed: int = 20261105,
                                                            "best": best, "other": other}))
         if "first_action" in kinds and paths is not None:
             p = paths.get(iid)
-            if p is None:
+            if exclude and iid in exclude:
+                skipped["first_action: flagged by audit"] += 1
+            elif p is None:
                 skipped["first_action: no search"] += 1
             else:
                 q = first_action_question(inst, start, p, rng, skipped)
@@ -441,17 +562,21 @@ def make_cmd(args) -> int:
     insts = read_jsonl(args.instances)
     truth = {r["instance_id"]: r for r in read_jsonl(args.truth)} if args.truth else {}
     paths = {r["instance_id"]: r for r in read_jsonl(args.paths)} if args.paths else None
+    exclude = {r["instance_id"] for r in read_jsonl(args.exclude)} if args.exclude else None
     kinds = tuple(args.kinds or KINDS)
     qs, skipped = make_questions(insts, image_paths(insts, args.gen), truth, args.seed, args.delta, paths=paths,
                                  object_image=args.object_image,
-                                 object_images=image_paths(insts, args.gen, args.object_image), kinds=kinds)
+                                 object_images=image_paths(insts, args.gen, args.object_image), kinds=kinds,
+                                 exclude=exclude)
     args.out.mkdir(parents=True, exist_ok=True)
     write_jsonl(args.out / "questions.jsonl", qs)
     summary = {"instances": len(insts), "questions": len(qs),
                "per_kind": dict(collections.Counter(q["kind"] for q in qs)),
                "right_letter_A": {k: sum(q["answer"] == "A" for q in qs if q["kind"] == k) for k in kinds},
                "skipped": skipped, "seed": args.seed, "delta": args.delta, "kinds": list(kinds),
-               "object_image": args.object_image}
+               "object_image": args.object_image, "exclude": str(args.exclude) if args.exclude else None,
+               "first_action_right": dict(collections.Counter(q["numbers"]["best"] for q in qs
+                                                              if q["kind"] == "first_action"))}
     (args.out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps(summary))
     return 0
@@ -514,8 +639,11 @@ def sample_note(q: dict) -> str:
     if q["kind"] != "first_action":
         return ""
     n = q["numbers"]
-    why = ("起点处被挡（原地不动，至少 " if n.get("other_kind") == "blocked" else "走它至少要 ") + f"{n.get('other_at_least')} 步）"
-    return (f"<p>搜索：最短 {n['fewest']} 步（搜索的步数在 {n.get('exact_up_to')} 步以内都准确）；"
+    why = (f"起点处被挡（原地不动，至少 {n.get('other_at_least')} 步）" if n.get("other_kind") == "blocked"
+           else f"走它至少要 {n.get('other_at_least')} 步")
+    rec = n.get("recorded_actions")
+    same = "，和实例记录的最短走法一致" if rec == n["fewest"] else f"；实例记录的最短走法是 {rec} 步（不一致）"
+    return (f"<p>搜索：最短 {n['fewest']} 步{same}（搜索的步数在 {n.get('exact_up_to')} 步以内都准确）；"
             f"最短走法的第一步可以是 {html.escape('、'.join(n['optimal']))}；"
             f"干扰项 {html.escape(n['other'])}：{why}。</p>")
 
@@ -595,9 +723,9 @@ def episodes_of(dirs, model: str) -> dict:
 
 
 def FIRST_ACTION_GROUPS(num: dict) -> tuple:
-    """first_action's extra strata (11-06): 445 of the first 600 right answers were move_backward and most
-    distractors blocked, so answered-right against answered-wrong is also split by the right action and by the kind of
-    distractor (num: instance id -> the question's numbers)."""
+    """first_action's extra strata (11-06): 446 of 600 right answers are move_backward (the recorded paths break
+    ties in ACTIONS order and move_forward is blocked at 574 starts), so answered-right against answered-wrong is also
+    split by the right action and by the kind of distractor (num: instance id -> the question's numbers)."""
     return (("answer move_backward", lambda i: num[i].get("best") == "move_backward"),
             ("answer other", lambda i: num[i].get("best") != "move_backward"),
             ("distractor blocked", lambda i: num[i].get("other_kind") == "blocked"),
@@ -634,6 +762,7 @@ def analyze(qs: list, answers: dict, episodes: dict, insts: dict) -> dict:
                                       "max_shaping": mean(float(ep[i].get("max_shaping_score") or 0.0) for i in ids)}
                     row["groups"][name] = cell
                 rep["models"][m][f"{reading}/{kind}"] = row
+    rep["first_action_text_baselines"] = text_baselines([q for q in qs if q["kind"] == "first_action"])
     models = list(answers)
     for reading in ("strict", "lenient"):
         for kind in KINDS:
@@ -650,6 +779,30 @@ def analyze(qs: list, answers: dict, episodes: dict, insts: dict) -> dict:
                                                                  "b_succeeds_a_fails": b_only,
                                                                  "p": binom_two_sided(a_only, a_only + b_only)}
     return rep
+
+
+def text_baselines(fa: list) -> dict:
+    """Accuracy on first_action questions of rules that read only the two options (no image, no task text)."""
+    def score(rule):
+        return sum(rule(q) == q["answer"] for q in fa) / len(fa) if fa else float("nan")
+
+    def letter_of(q, text):
+        return "AB"[q["options"].index(text)] if text in q["options"] else None
+
+    def backward(q):
+        return letter_of(q, ACTION_TEXT["move_backward"]) or "A"
+
+    def not_forward(q):
+        f = letter_of(q, ACTION_TEXT["move_forward"])
+        return ("B" if f == "A" else "A") if f else "A"
+
+    def not_blocked(q):
+        b = {ACTION_TEXT[a] for a in (q["numbers"].get("blocked") or [])}
+        free = [k for k, o in enumerate(q["options"]) if o not in b]
+        return "AB"[free[0]] if len(free) == 1 else "A"
+    return {"n": len(fa), "move backward when offered, else A": score(backward),
+            "never move forward, else A": score(not_forward),
+            "the option not blocked at the start, else A": score(not_blocked)}
 
 
 def markdown(rep: dict) -> str:
@@ -670,7 +823,24 @@ def markdown(rep: dict) -> str:
                          f"{cell(g['all']['right'])} | {cell(g['all']['wrong'])} | {cell(g['near threshold']['right'])} | "
                          f"{cell(g['near threshold']['wrong'])} |")
         lines.append("")
+        if key.endswith("/first_action"):
+            strata = ("answer move_backward", "answer other", "distractor blocked", "distractor longer")
+            lines += ["| 模型 | 答案后退：答对 | 答案后退：答错 | 答案其他：答对 | 答案其他：答错 | 干扰被挡：答对 | "
+                      "干扰被挡：答错 | 干扰更长：答对 | 干扰更长：答错 |", "| --- " * 9 + "|"]
+            for m, r in rep["models"].items():
+                g = (r.get(key) or {}).get("groups") or {}
+                if strata[0] not in g:
+                    continue
+                cells = [f"{g[s][side]['success']}/{g[s][side]['n']}" if g[s][side]["n"] else "—"
+                         for s in strata for side in ("right", "wrong")]
+                lines.append(f"| {m} | " + " | ".join(cells) + " |")
+            lines.append("")
+    tb = rep.get("first_action_text_baselines")
+    if tb and tb.get("n"):
+        lines += [f"## first_action 只看两个选项文字的基线（{tb['n']} 道）", ""]
+        lines += [f"- {k}：{100 * v:.1f}%" for k, v in tb.items() if k != "n"] + [""]
     return "\n".join(lines) + "\n"
+
 
 
 def analyze_cmd(args) -> int:
@@ -705,11 +875,18 @@ def main(argv=None) -> int:
     c = sub.add_parser("collect")
     c.add_argument("--truth", type=Path, required=True)
     c.add_argument("--out", type=Path, required=True)
+    au = sub.add_parser("audit")
+    au.add_argument("--instances", type=Path, required=True)
+    au.add_argument("--paths", type=Path, required=True)
+    au.add_argument("--paths-other", type=Path, default=None, help="another run of paths (the runs should agree)")
+    au.add_argument("--episodes", type=Path, nargs="+", required=True, help="N1's evaluation folders (<MODEL>/episodes.jsonl)")
+    au.add_argument("--out", type=Path, required=True)
     m = sub.add_parser("make")
     m.add_argument("--instances", type=Path, required=True)
     m.add_argument("--gen", type=Path, nargs="+", required=True)
     m.add_argument("--truth", type=Path, default=None, help="truth's rows (best_action)")
     m.add_argument("--paths", type=Path, default=None, help="paths' rows (first_action)")
+    m.add_argument("--exclude", type=Path, default=None, help="audit's rows: no first_action for these instances")
     m.add_argument("--object-image", choices=("start", "shortest", "best"), default="start",
                    help="the view the two object kinds are asked on")
     m.add_argument("--kinds", nargs="*", choices=KINDS, default=None)
@@ -730,8 +907,8 @@ def main(argv=None) -> int:
     a.add_argument("--instances", type=Path, required=True)
     a.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
-    return {"truth": truth_cmd, "paths": paths_cmd, "collect": collect_cmd, "make": make_cmd, "samples": samples_cmd,
-            "analyze": analyze_cmd}[args.cmd](args)
+    return {"truth": truth_cmd, "paths": paths_cmd, "collect": collect_cmd, "audit": audit_cmd, "make": make_cmd,
+            "samples": samples_cmd, "analyze": analyze_cmd}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -121,7 +121,8 @@ def test_three_kinds_of_question_and_their_rules(tmp_path):
     assert ba["options"]["AB".index(ba["answer"])] == "move forward" and ba["numbers"]["best"] == "move_forward"
     assert ba["numbers"]["other"] in ("move_backward", "move_left", "move_right", "turn_left", "turn_right")
     assert "The robot's task: Move so that the bowl is left of the cup." in ba["prompt"]
-    assert skipped["object kinds: not two visible, differently named objects"] == 3
+    assert (skipped["object kinds: the same name"], skipped["object kinds: not two objects"],
+            skipped["object kinds: an object below the visible share"]) == (1, 1, 1)
     assert skipped["best_action: no action rises enough or none clearly worse"] == 1  # K_s3: +0.01 only
     assert skipped["best_action: no truth"] == 2
     assert Q.footprint_distance((1.1, 0.0, 0.0), box("o", "x", 1.0)) == 0.0  # inside the footprint
@@ -389,7 +390,56 @@ def test_sample_note_explains_the_first_action_distractor():
                                              "other": "move_forward", "other_kind": "blocked", "other_at_least": 4}}
     note = Q.sample_note(q)
     assert "最短 3 步" in note and "5 步以内" in note and "move_left、turn_left" in note
-    assert "move_forward：起点处被挡（原地不动，至少 4 步）" in note
+    assert "move_forward：起点处被挡（原地不动，至少 4 步）" in note and "实例记录的最短走法是 None 步（不一致）" in note
+    q["numbers"]["recorded_actions"] = 3
+    assert "最短 3 步，和实例记录的最短走法一致" in Q.sample_note(q)
     q["numbers"].update(other="move_right", other_kind="longer", other_at_least=6)
-    assert "move_right：走它至少要 6 步）" in Q.sample_note(q)
+    assert "move_right：走它至少要 6 步。" in Q.sample_note(q)
     assert Q.sample_note({"kind": "left_right", "numbers": {}}) == ""
+
+
+def test_audit_flags_starts_the_episodes_or_the_generator_contradict():
+    def I(iid, scene, pose, n, first):
+        return {"instance_id": iid, "scene_id": scene, "start_pose": list(pose), "hide_robot": True,
+                "shortest": {"actions": n, "path": [first] * n}}
+    insts = [I("A_p", "A", (0, 0, 0), 3, "move_left"), I("A_q", "A", (0, 0, 0), 4, "move_left"),
+             I("B_p", "B", (5, 5, 0), 2, "move_right"), I("C_p", "C", (9, 9, 0), 5, "turn_left"),
+             I("D_p", "D", (1, 1, 0), 3, "move_left")]
+    cost = {a: 9 for a in N.ACTIONS}
+    paths = {"A_p": {"cost": dict(cost, move_left=3), "start_dist": 3, "blocked": ["move_forward"]},
+             "A_q": {"cost": dict(cost, move_left=4), "start_dist": 4, "blocked": ["move_forward"]},
+             "B_p": {"cost": dict(cost, move_right=2), "start_dist": 2, "blocked": ["move_forward"]},
+             "C_p": {"cost": dict(cost, turn_left=6), "start_dist": 4, "blocked": []},       # recorded path costs more
+             "D_p": {"cost": dict(cost, move_left=2), "start_dist": 2, "blocked": []}}       # box shortest 2 < 3
+    turn = lambda pose, ex, bl=(): {"pose_before": list(pose), "executed": list(ex), "blocked": [[b, "x"] for b in bl]}
+    episodes = {"A_p": [{"turn_log": [turn((0, 0, 0), ["move_forward"])]}],                 # free in the episodes
+                "B_p": [{"turn_log": [turn((5, 5, 0), ["move_forward", "move_left"], ["move_forward"]),
+                                      turn((7, 7, 0), ["turn_left"], ["turn_left"])]}]}      # agrees; other pose ignored
+    flags = Q.audit(insts, paths, episodes)
+    assert set(flags) == {"A_p", "A_q", "C_p", "D_p"}  # A's start (both instances), C's recorded path, D's box shortest
+    assert "move_forward (free in episodes, blocked in the search)" in flags["A_q"][0]
+    assert "the search costs the recorded 5-action path more" in flags["C_p"][0]
+    assert flags["D_p"] == ["box-judge shortest 2 differs from the recorded 3"]
+    other = {"B_p": {"cost": dict(cost, move_right=3)}}
+    assert "B_p: the two search runs differ" in Q.audit(insts, paths, episodes, other)["B_p"]
+    obs = Q.start_observations(insts[2], episodes["B_p"])
+    assert obs == {"move_forward": {"blocked"}}
+    amb = [{"turn_log": [turn((5, 5, 0), ["move_left", "move_left"], ["move_left"])]}]  # which one was blocked?
+    assert Q.start_observations(insts[2], amb) == {}
+
+
+def test_make_leaves_out_flagged_first_action_and_baselines_read_only_options(tmp_path):
+    insts, gen, truth = fixtures(tmp_path)
+    paths = {i["instance_id"]: {"cost": dict({a: 9 for a in N.ACTIONS}, move_backward=4), "blocked": ["move_forward"],
+                                "exact_up_to": 12} for i in insts}
+    qs, skipped = Q.make_questions(insts, Q.image_paths(insts, [gen]), truth, seed=1, paths=paths,
+                                   kinds=("first_action",), exclude={"K_s1_equidistance"})
+    assert {q["instance_id"] for q in qs} == {"K_s2_fov_inclusion", "K_s3_absolute_positioning", "K_s4_equidistance"}
+    assert skipped["first_action: flagged by audit"] == 1
+    tb = Q.text_baselines(qs)
+    assert tb["n"] == 3 and tb["move backward when offered, else A"] == 1.0
+    fa = [{"options": ["move forward", "turn left"], "answer": "B", "numbers": {"blocked": ["move_forward"]}},
+          {"options": ["move left", "move backward"], "answer": "B", "numbers": {"blocked": []}}]
+    tb = Q.text_baselines(fa)  # each rule gets one of the two: q1 by avoiding forward / the blocked one, q2 by backward
+    assert tb["never move forward, else A"] == 0.5 and tb["move backward when offered, else A"] == 0.5
+    assert tb["the option not blocked at the start, else A"] == 0.5
