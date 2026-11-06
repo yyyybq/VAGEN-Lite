@@ -27,6 +27,7 @@ import collections
 import json
 import math
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -279,9 +280,15 @@ def relabel(md: str, g_name: str = "带历史", d_name: str = "不带", ref: str
     differences) keeps its meaning: the --g side's difference minus the --d side's."""
     if (g_name, d_name, ref, title) == ("带历史", "不带", "N1", None):
         return md
-    sp = " " if ref.isascii() else ""  # "改变 N1 的结论" but "改变 (c) 档的结论"
-    md = md.replace("带减不带", "\0DID\0").replace("N1 的结论", f"{ref}{sp}的结论").replace("N1 主表", f"{ref}{sp}主表")
-    md = md.replace("带历史", g_name).replace("不带", d_name).replace("\0DID\0", f"{g_name}减{d_name}")
+
+    def name(x):  # marked, so a space goes in only where the name meets a Chinese character with an ASCII edge
+        return f"\x01{x}\x02"
+    md = md.replace("带减不带", "\0DID\0").replace("N1 的结论", f"{name(ref)}的结论").replace("N1 主表", f"{name(ref)}主表")
+    md = md.replace("带历史", name(g_name)).replace("不带", name(d_name))
+    md = md.replace("\0DID\0", f"{name(g_name)}减{name(d_name)}")
+    md = re.sub(r"(?<=[一-鿿])\x01(?=[ -~])", " ", md)  # "只 (c) 档成功", "减 (d) 档"
+    md = re.sub(r"(?<=[ -~])\x02(?=[一-鿿])", " ", md)  # "(c) − (d) 的结论"
+    md = md.replace("\x01", "").replace("\x02", "")
     if title:
         md = md.replace(md.splitlines()[0], f"# {title}", 1)
     return md

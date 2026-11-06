@@ -96,6 +96,9 @@ def test_relabel_for_two_tiers_and_no_gc_line_without_bases(tmp_path):
     assert G.main(["--g", str(g), "--d", str(d), "--models", "Q3S", "Q3RS", "--g-name", "(c) 档带历史",
                    "--d-name", "(c) 档不带", "--ref-name", "(c) 档", "--title", "(g-c)", "--out", str(out)]) == 0
     md = (out / "report.md").read_text(encoding="utf-8")
-    assert md.startswith("# (g-c)") and "(c) 档带历史减(c) 档不带" in md and "改变 (c) 档的结论" in md
+    assert md.startswith("# (g-c)") and "(c) 档带历史减 (c) 档不带" in md and "改变 (c) 档的结论" in md
+    assert "只 (c) 档带历史成功" in md
     assert "(g-c) 的条件" not in md and "N1" not in md
     assert G.relabel("x 带减不带 带历史 不带 N1 的结论") == "x 带减不带 带历史 不带 N1 的结论"
+    two = G.relabel("只带历史成功 | 带减不带 | 改变 N1 的结论", "(c) 档", "(d) 档", "(c) − (d)")
+    assert two == "只 (c) 档成功 | (c) 档减 (d) 档 | 改变 (c) − (d) 的结论"
