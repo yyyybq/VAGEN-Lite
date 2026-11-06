@@ -221,7 +221,10 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
 
     kwargs: target_groups, std_threshold (required), std_floor (default 0: no floor), rows (optional: the run's task
     file, for the filled tasks' minimum step count by the per-episode "task_id"), success_key (default
-    "traj_success").  Metrics: those of mixed_outcome (filter/mixed/..., counting the mixed tasks only), and
+    "traj_success"), exclude_return_keys (optional; group G of matrix v3, the user's choice of 2026-11-06: per-episode
+    sums carried in reward_extra_info, e.g. "pointing_return", taken off the returns before the spread decides which
+    all-fail tasks are eligible and in which order, so the selection is the one without those terms; the advantage
+    scale keeps the full spread, which is what the group comparison divides by).  Metrics: those of mixed_outcome (filter/mixed/..., counting the mixed tasks only), and
     filter/keep/: all_fail and all_fail_above_threshold (candidates), filled, kept_total, shortfall,
     filled_std_mean / _min / _max, filled_adv_scale_mean, filled_below_floor (filled tasks whose spread is under the
     floor, so scaled down), filled_family/<family> (count), filled_min_steps_mean.
@@ -239,6 +242,12 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
     success = np.asarray(data_proto.non_tensor_batch[key], dtype=float) > 0.5
     reward_key = "token_level_rewards" if "token_level_rewards" in data_proto.batch.keys() else "token_level_scores"
     returns = data_proto.batch[reward_key].sum(dim=-1).detach().float().cpu()
+    sel_returns = returns.clone()  # the returns the selection reads (exclude_return_keys taken off)
+    for name in [str(k) for k in (kwargs.get("exclude_return_keys") or [])]:
+        part = data_proto.non_tensor_batch.get(name)
+        if part is None:
+            raise KeyError(f"keep_by_return_std: exclude_return_keys names {name!r}, which the batch does not carry")
+        sel_returns = sel_returns - torch.as_tensor(np.asarray(part, dtype=np.float64), dtype=sel_returns.dtype)
     draw = data_proto.meta_info.get("uid_draw_order") or {}
     groups: dict = {}
     for i, u in enumerate(uids):
@@ -258,7 +267,8 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
     refill = [u for u in extra if kinds[u] == "mixed"][: max(0, target - len(kept))]
     spread = {u: (float(torch.std(returns[groups[u]])) if len(groups[u]) > 1 else 0.0)
               for u in ordered if kinds[u] == "all_fail"}
-    eligible = sorted((u for u, s in spread.items() if s >= threshold), key=lambda u: (-spread[u], rank[u]))
+    sel_spread = {u: (float(torch.std(sel_returns[groups[u]])) if len(groups[u]) > 1 else 0.0) for u in spread}
+    eligible = sorted((u for u, s in sel_spread.items() if s >= threshold), key=lambda u: (-sel_spread[u], rank[u]))
     filled = eligible[: max(0, target - len(kept) - len(refill))]
     keep = kept + refill + filled
     fallback = not keep
@@ -298,6 +308,9 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
             "filter/keep/filled_adv_scale_mean": float(np.mean(list(scale.values()))) if scale else 0.0,
             "filter/keep/filled_below_floor": sum(1 for u in filled if spread[u] < floor),  # scaled down by the floor
         })
+        if kwargs.get("exclude_return_keys"):  # group G: the spread the selection read
+            metrics["filter/keep/filled_sel_std_mean"] = (float(np.mean([sel_spread[u] for u in filled]))
+                                                          if filled else 0.0)
         family = data_proto.non_tensor_batch.get("task_type")
         if family is not None:
             for fam, count in Counter(str(family[groups[u][0]]) for u in filled).items():

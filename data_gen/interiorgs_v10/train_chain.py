@@ -1399,6 +1399,7 @@ class Chain:
                               ("pointing_reward", "--pointing-reward"),  # group G of matrix v3
                               ("group_filter", "--group-filter"), ("keep_std_threshold", "--keep-std-threshold"),
                               ("keep_std_floor", "--keep-std-floor"),
+                              ("keep_std_exclude", "--keep-std-exclude"),  # group G of matrix v3
                               ("progress_version", "--progress-version"),
                               ("distance_tables", "--distance-tables"),  # round 13 (B): the optimal progress
                               ("progress_reward_scale", "--progress-reward-scale"),

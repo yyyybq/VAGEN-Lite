@@ -1201,8 +1201,9 @@ class ActiveSpatialEnv(BaseEnv):
             if weight:
                 self.reward += weight * pointing["score"]
             self._reward_trace.record("pointing", raw=pointing["score"], scale=weight, enabled=bool(weight))
-            metrics["turn_metrics"].update(pointing_score=pointing["score"], targets_ok=pointing["ok"],
-                                           targets_old=pointing["old"], targets_bad=pointing["bad"])
+            metrics["turn_metrics"].update(pointing_score=pointing["score"], pointing_applied=weight * pointing["score"],
+                                           targets_ok=pointing["ok"], targets_old=pointing["old"],
+                                           targets_bad=pointing["bad"])
             info["pointing"] = pointing
 
         # Build collision feedback message

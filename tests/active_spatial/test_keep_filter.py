@@ -72,6 +72,36 @@ class KeepByReturnStdTest(unittest.TestCase):
         self.assertEqual(float(out.batch["advantages"].min()), 1.0)
         self.assertEqual(m["filter/keep/filled_below_floor"], 0)
 
+    def test_selection_without_named_return_terms(self):
+        """Group G of matrix v3 (2026-11-06): exclude_return_keys takes the named per-episode sums off the returns
+        before the spread selects the all-fail tasks; the advantage scale keeps the full spread."""
+        import numpy as np
+
+        from vagen.custom_filter.filter import FILTER_REGISTRY
+
+        f = FILTER_REGISTRY["keep_by_return_std"]
+        mixed = ("fov_inclusion", [(1, 5.0), (0, 0.0), (1, 5.0), (0, 0.0)])
+        pointing_only = ("equidistance", [(0, 1.0), (0, 0.0), (0, 1.0), (0, 0.0)])     # spread 0.577, all of it pointing
+        dense = ("projective_relations", [(0, 0.6), (0, 0.0), (0, 0.6), (0, 0.0)])    # spread 0.346, 0.289 without it
+        pointing = np.array([0.0] * 4 + [1.0, 0.0, 1.0, 0.0] + [0.1, 0.0, 0.1, 0.0])
+
+        def run(**kw):
+            d = self.batch([mixed, pointing_only, dense])
+            d.non_tensor_batch["pointing_return"] = pointing
+            out, m = f(d, {}, target_groups=2, std_threshold=0.2, std_floor=1.0, **kw)
+            kept = list(dict.fromkeys(out.non_tensor_batch["uid"]))
+            return kept, {u: float(out.batch["advantages"][i, 0]) for i, u in enumerate(out.non_tensor_batch["uid"])}, m
+
+        kept, _, m = run()  # as before: the widest spread fills
+        self.assertEqual(sorted(kept), ["t0", "t1"])
+        self.assertNotIn("filter/keep/filled_sel_std_mean", m)
+        kept, adv, m = run(exclude_return_keys=["pointing_return"])
+        self.assertEqual(sorted(kept), ["t0", "t2"])  # the spread of pointing alone does not select
+        self.assertAlmostEqual(adv["t2"], (0.34641 + 1e-6) / (1.0 + 1e-6), places=4)  # scaled by the full spread
+        self.assertAlmostEqual(m["filter/keep/filled_sel_std_mean"], 0.28868, places=4)
+        with self.assertRaises(KeyError):
+            f(self.batch([mixed, dense]), {}, target_groups=2, std_threshold=0.2, exclude_return_keys=["missing"])
+
     def test_enough_mixed_tasks_and_fallback(self):
         from vagen.custom_filter.filter import FILTER_REGISTRY
 

@@ -24,9 +24,10 @@ def test_g_is_d_with_the_targets_format_and_the_pointing_reward():
     from vagen.envs.active_spatial.prompt import TARGET_FORMATS
 
     g, d, v = load("G"), load("D"), MP.v3_vars()
-    assert g["group"] == "G" and g["status"] == "prep" and g["model_type"] == "qwen3_vl"
+    assert g["group"] == "G" and g["model_type"] == "qwen3_vl"
     assert g["format_example"] in TARGET_FORMATS and g["output_format"] == d["output_format"]
-    assert g["rl"]["pointing_reward"] == 0.1
+    assert g["rl"]["pointing_reward"] == 0.1 and g["rl"]["keep_std_exclude"] == "pointing_return"
+    assert g["status"] == "sft" and g["format_example"] == "targets_norm1000"
     same = ("pair", "dense", "seeds", "task_pool", "rows", "exclude", "updates", "output_format", "guards", "attention")
     assert {k: g["rl"][k] for k in same} == {k: d["rl"][k] for k in same}
     assert g["sft"]["base_model"] == d["sft"]["base_model"] == v["base_qwen3"] and g["sft"]["epochs"] == d["sft"]["epochs"]
@@ -74,9 +75,14 @@ def test_g_plans_reach_the_chain(tmp_path):
         calls = {}
         chain.sh = lambda args, **k: calls.__setitem__(args[args.index("--out") + 1], args)
         chain.rl_config()
-        for args in calls.values():
+        for out, args in calls.items():
             assert args[args.index("--pointing-reward") + 1] == "0.1"
             assert args[args.index("--format-example") + 1] == g["format_example"]
+            # V4 (the dense run) selects on returns without the pointing reward; S0 has no such filter
+            has = "--keep-std-exclude" in args
+            assert has == out.endswith("d"), out
+            if has:
+                assert args[args.index("--keep-std-exclude") + 1] == "pointing_return"
     # the other cells and groups: no pointing reward, the matrix format, no pointing probe
     d = MP.plan_v3_cell_rl("D_noP0", 20261019, SHA, start, dense="registered")
     assert "pointing_reward" not in d["rl"] and d["rl"]["format_example"] == "action_names"

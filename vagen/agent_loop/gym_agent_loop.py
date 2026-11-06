@@ -71,10 +71,10 @@ def turn_has_think(info: Any) -> bool:
 
 
 def turn_pointing(info: Any) -> Dict[str, Any]:
-    """Group G of matrix v3: the turn's pointing judgment (the env's turn_metrics pointing_score, targets_bad,
-    targets_old); {} when the env does not judge a targets segment."""
+    """Group G of matrix v3: the turn's pointing judgment (the env's turn_metrics pointing_score, pointing_applied:
+    the reward it added, targets_bad, targets_old); {} when the env does not judge a targets segment."""
     tm = ((info or {}).get("metrics") or {}).get("turn_metrics") or {} if isinstance(info, dict) else {}
-    return {k: tm[k] for k in ("pointing_score", "targets_bad", "targets_old") if k in tm}
+    return {k: tm[k] for k in ("pointing_score", "pointing_applied", "targets_bad", "targets_old") if k in tm}
 
 
 class AgentData:
@@ -118,6 +118,7 @@ class AgentData:
         self.pointing_sum: float = 0.0
         self.targets_bad_turns: int = 0
         self.targets_old_turns: int = 0
+        self.pointing_return: float = 0.0  # the pointing reward the env added over the episode
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -364,6 +365,9 @@ class GymAgentLoop(AgentLoopBase):
                     "pointing_score":     agent_data.pointing_sum / max(1, agent_data.env_turns),
                     "targets_bad":        agent_data.targets_bad_turns / max(1, agent_data.env_turns),
                     "targets_old":        agent_data.targets_old_turns / max(1, agent_data.env_turns),
+                    # the episode's summed pointing reward (keep_by_return_std exclude_return_keys: V4's selection
+                    # without it, the user's choice of 2026-11-06)
+                    "pointing_return":    agent_data.pointing_return,
                 },
             },
         )
@@ -479,6 +483,7 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.pointing_sum += float(pointing.get("pointing_score", 0.0))
         agent_data.targets_bad_turns += int(bool(pointing.get("targets_bad", False)))
         agent_data.targets_old_turns += int(bool(pointing.get("targets_old", False)))
+        agent_data.pointing_return += float(pointing.get("pointing_applied", 0.0))
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))

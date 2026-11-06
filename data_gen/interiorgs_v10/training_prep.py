@@ -792,6 +792,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     filter_kwargs = None
     if group_filter not in (None, *GROUP_FILTERS):
         raise SystemExit(f"--group-filter must be one of {GROUP_FILTERS}, not {group_filter!r}")
+    if getattr(args, "keep_std_exclude", None) and group_filter != "keep_by_return_std":
+        raise SystemExit("--keep-std-exclude goes with --group-filter keep_by_return_std")
     if group_filter == "keep_by_return_std":  # round 12, the dense-reward first batch (D-keep)
         if not package:
             raise SystemExit("--group-filter keep_by_return_std fills the package's batch: it needs --opt-package")
@@ -800,6 +802,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         filter_kwargs = dict(package["filter.filter_kwargs"], std_threshold=float(args.keep_std_threshold),
                              std_floor=float(getattr(args, "keep_std_floor", None) or 0.0),
                              rows=str((out / "train.jsonl").resolve()))  # the filled tasks' d* in the metrics
+        if getattr(args, "keep_std_exclude", None):  # group G of matrix v3 (2026-11-06): the selection without them
+            filter_kwargs["exclude_return_keys"] = [k for k in str(args.keep_std_exclude).split(",") if k]
         _set(ppo, "filter.name", group_filter)
         _set(ppo, "filter.filter_kwargs", filter_kwargs)
     curriculum = None
@@ -1239,6 +1243,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="keep_by_return_std: the smallest return spread (std, n-1) of an all-fail task it takes")
     c.add_argument("--keep-std-floor", type=float, default=None,
                    help="keep_by_return_std: the filled tasks' group comparison divides by at least this (default 0)")
+    c.add_argument("--keep-std-exclude", default=None,
+                   help="keep_by_return_std (group G of matrix v3): comma-separated per-episode sums (reward_extra_info, "
+                        "e.g. pointing_return) taken off the returns before the spread selects; the advantage scale "
+                        "keeps the full spread")
     c.add_argument("--curriculum-easy-updates", type=int, default=None,
                    help="round 12 batch: the first N updates draw only tasks with d* <= --curriculum-max-dstar")
     c.add_argument("--curriculum-max-dstar", type=int, default=None, help="the easy tasks' largest d* (default 3)")

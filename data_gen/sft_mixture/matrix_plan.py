@@ -347,7 +347,10 @@ def _plan_v3(v: Dict[str, Any], n: Dict[str, Any], commit: str, dense: Any, tr: 
         p["sft_only"] = True
     else:
         p.update({
-            "rl_runs": {n["s0"]: {}, n["d"]: {"rl": v3_dense(dense, v)}},
+            # group G (the user's choice of 2026-11-06): its V4 run selects on returns without the pointing reward
+            "rl_runs": {n["s0"]: {}, n["d"]: {"rl": {**v3_dense(dense, v), **(
+                {"keep_std_exclude": str(cfg["rl"]["keep_std_exclude"])}
+                if (cfg.get("rl") or {}).get("keep_std_exclude") else {})}}},
             "diagnostics": {"failure_breakdown": True, "probes": {
                 "P1": v["p1_probe"], "P0": v["p0_probe"],
                 **({"Pg": cfg["eval"]["pg_probe"]} if (cfg.get("eval") or {}).get("pg_probe") else {})}},  # group G

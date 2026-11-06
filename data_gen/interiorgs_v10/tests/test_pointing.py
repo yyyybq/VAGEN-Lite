@@ -125,9 +125,10 @@ class ParseJudgeTest(unittest.TestCase):
     def test_agent_loop_reads_the_judgment(self):
         from vagen.agent_loop.gym_agent_loop import turn_pointing
 
-        info = {"metrics": {"turn_metrics": {"pointing_score": 0.5, "targets_bad": False, "targets_old": True,
-                                             "targets_ok": False, "action_is_valid": True}}}
-        self.assertEqual(turn_pointing(info), {"pointing_score": 0.5, "targets_bad": False, "targets_old": True})
+        info = {"metrics": {"turn_metrics": {"pointing_score": 0.5, "pointing_applied": 0.05, "targets_bad": False,
+                                             "targets_old": True, "targets_ok": False, "action_is_valid": True}}}
+        self.assertEqual(turn_pointing(info), {"pointing_score": 0.5, "pointing_applied": 0.05, "targets_bad": False,
+                                               "targets_old": True})
         self.assertEqual(turn_pointing({"metrics": {"turn_metrics": {"action_is_valid": True}}}), {})
         self.assertEqual(turn_pointing(None), {})
 
@@ -230,7 +231,7 @@ class EnvPointingTest(unittest.TestCase):
                              (1.0, True, False, False))
             self.assertEqual(info["pointing"]["truth"], truth)
             self.assertAlmostEqual(reward, base, places=9)
-            self.assertEqual(trace["components"]["pointing"]["applied"], 0.0)
+            self.assertEqual((trace["components"]["pointing"]["applied"], tm["pointing_applied"]), (0.0, 0.0))
             cases = [(0.1, right, 1.0)]
             if len(truth) == 2:  # half right: the first object as labelled, the second wrong
                 first = PT.label(truth[:1], "targets_pixel")[len("<targets>"):-len("</targets>")]
@@ -241,6 +242,7 @@ class EnvPointingTest(unittest.TestCase):
                 env, _ = self.env(row, f"judge_{weight}", prompt_format_example="targets_pixel", pointing_reward=weight)
                 reward, tm, info, trace = self.step(env, text)
                 self.assertEqual(tm["pointing_score"], score)
+                self.assertAlmostEqual(tm["pointing_applied"], weight * score, places=12)
                 self.assertAlmostEqual(reward, base + weight * score, places=9)
                 self.assertAlmostEqual(trace["components"]["pointing"]["applied"], weight * score, places=9)
                 self.assertAlmostEqual(trace["accounting"]["reconstruction_error"], 0.0, places=9)

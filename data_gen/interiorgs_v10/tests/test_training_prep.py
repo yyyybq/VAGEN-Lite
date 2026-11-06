@@ -371,6 +371,14 @@ class TrainingPrepTest(unittest.TestCase):
                          ("keep_by_return_std", 12, 0.33, 1.77))
         self.assertEqual(Path(kw["rows"]), (self.root / "rl_keep" / "train.jsonl").resolve())
         self.assertEqual((report["group_filter"], report["group_filter_kwargs"]["std_threshold"]), ("keep_by_return_std", 0.33))
+        self.assertNotIn("exclude_return_keys", kw)
+        # group G of matrix v3 (2026-11-06): the selection without the pointing reward
+        ppo, _, report = config("rl_keep_ex", standard="v10_p1_D", group_filter="keep_by_return_std",
+                                keep_std_threshold=0.33, keep_std_floor=1.0, keep_std_exclude="pointing_return")
+        self.assertEqual(ppo["filter"]["filter_kwargs"]["exclude_return_keys"], ["pointing_return"])
+        self.assertEqual(report["group_filter_kwargs"]["exclude_return_keys"], ["pointing_return"])
+        with self.assertRaises(SystemExit):  # only with keep_by_return_std
+            config("rl_keep_ex_bad", standard="v10_p1_S0", keep_std_exclude="pointing_return")
         ppo, env, report = config("rl_keep_std", standard="v10_p1_S0_keep")  # a standard names the filter
         self.assertEqual((ppo["filter"]["name"], ppo["filter"]["filter_kwargs"]["std_threshold"],
                           ppo["filter"]["filter_kwargs"]["std_floor"], report["reward_preset"]),

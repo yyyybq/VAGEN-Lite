@@ -210,7 +210,8 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # Group G of matrix v3 (the user's instruction of 2026-11-06): the weight of the pointing reward, added each turn
     # times the turn's pointing score (pointing.py: the share of the task's objects the answer's targets segment places
     # right on the frame it was given on); 0 (default): none.  With a targets format example (prompt.TARGET_FORMATS)
-    # the env judges the segment and logs it (turn_metrics pointing_score, targets_ok / _old / _bad) at any weight.
+    # the env judges the segment and logs it (turn_metrics pointing_score, pointing_applied, targets_ok / _old / _bad)
+    # at any weight.
     pointing_reward: float = 0.0
     max_consecutive_invalid_actions: int = 3  # Terminate episode after this many consecutive invalid actions
     premature_done_penalty: float = -0.3  # Penalty when 'done' is called without reaching the target
