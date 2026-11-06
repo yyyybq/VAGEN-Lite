@@ -85,3 +85,17 @@ def test_cli_writes_the_report(tmp_path):
     assert G.main(["--g", str(g), "--d", str(d), "--flag", str(flag), "--models", "B", "S", "--out", str(out)]) == 0
     rep = json.loads((out / "report.json").read_text())
     assert rep["subsets"]["without flagged"]["n"] == 3 and (out / "report.md").exists()
+
+
+def test_relabel_for_two_tiers_and_no_gc_line_without_bases(tmp_path):
+    g, d = tmp_path / "gc", tmp_path / "c"
+    for x, k in ((g, 3), (d, 1)):
+        write(x, "Q3S", [ep(i, i < k) for i in range(6)])
+        write(x, "Q3RS", [ep(i, i < k + 1) for i in range(6)])
+    out = tmp_path / "out"
+    assert G.main(["--g", str(g), "--d", str(d), "--models", "Q3S", "Q3RS", "--g-name", "(c) 档带历史",
+                   "--d-name", "(c) 档不带", "--ref-name", "(c) 档", "--title", "(g-c)", "--out", str(out)]) == 0
+    md = (out / "report.md").read_text(encoding="utf-8")
+    assert md.startswith("# (g-c)") and "(c) 档带历史减(c) 档不带" in md and "改变 (c) 档的结论" in md
+    assert "(g-c) 的条件" not in md and "N1" not in md
+    assert G.relabel("x 带减不带 带历史 不带 N1 的结论") == "x 带减不带 带历史 不带 N1 的结论"

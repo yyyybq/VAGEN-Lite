@@ -248,10 +248,11 @@ def markdown(rep: dict) -> str:
                 second.append((f"{a} − {b} {pts(p['did']['mean'])}", v))
         part = lambda xs: ("是" if any(v for _, v in xs) else "否") + "（" + "，".join(t for t, _ in xs) + "）"
         L += ["", "判定（设计第 5 节事先写定；\"回来了\"= 带历史的差和\"带减不带\"的区间都在 0 以上，"
-              "\"变了\"= \"带减不带\"的区间不含 0）：" + "；".join(rules) + "。",
-              "", "(g-c) 的条件（11-06 第 1 条，两条满足一条即交）：第一条，RS − S 带历史回到 +3 个百分点以上："
-              + part(first) + "；第二条，训练过的对底座的差变动超过 3 个百分点（\"带减不带\"的点估计）："
-              + part(second) + f"。满足：{'是' if s['gc_condition']['met'] else '否'}。", ""]
+              "\"变了\"= \"带减不带\"的区间不含 0）：" + "；".join(rules) + "。", ""]
+        if second:  # the (g-c) condition needs the bases (tier gd only)
+            L += ["(g-c) 的条件（11-06 第 1 条，两条满足一条即交）：第一条，RS − S 带历史回到 +3 个百分点以上："
+                  + part(first) + "；第二条，训练过的对底座的差变动超过 3 个百分点（\"带减不带\"的点估计）："
+                  + part(second) + f"。满足：{'是' if s['gc_condition']['met'] else '否'}。", ""]
     L += ["## 分类型（只作描述）", "", "| 模型 | 类型 | 带历史 | 不带 |", "| --- | --- | ---: | ---: |"]
     for m, t in rep["by_type"]["g"].items():
         for ty, v in sorted(t.items(), key=lambda x: str(x[0])):
@@ -272,6 +273,19 @@ def markdown(rep: dict) -> str:
     return "\n".join(L) + "\n"
 
 
+def relabel(md: str, g_name: str = "带历史", d_name: str = "不带", ref: str = "N1", title=None) -> str:
+    """The same tables for another pair of runs (e.g. tier gc against tier gd, both with history): the two sides'
+    names, whose conclusions the 'changed' columns refer to, and the title.  "带减不带" (the difference of the
+    differences) keeps its meaning: the --g side's difference minus the --d side's."""
+    if (g_name, d_name, ref, title) == ("带历史", "不带", "N1", None):
+        return md
+    md = md.replace("带减不带", "\0DID\0").replace("N1 的结论", f"{ref} 的结论").replace("N1 主表", f"{ref} 主表")
+    md = md.replace("带历史", g_name).replace("不带", d_name).replace("\0DID\0", f"{g_name}减{d_name}")
+    if title:
+        md = md.replace(md.splitlines()[0], f"# {title}", 1)
+    return md
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--g", nargs="+", required=True, help="the with-history folders (<MODEL>/episodes.jsonl)")
@@ -279,6 +293,10 @@ def main(argv=None) -> int:
     ap.add_argument("--flag", default=None, help="jsonl of the instances marked apart (instance_id)")
     ap.add_argument("--exclude", nargs="*", default=[], help="n_frames.py scan reports or id files, left out")
     ap.add_argument("--models", nargs="+", default=list(MODELS))
+    ap.add_argument("--g-name", default="带历史", help="what the --g side is called in the tables")
+    ap.add_argument("--d-name", default="不带", help="what the --d side is called in the tables")
+    ap.add_argument("--ref-name", default="N1", help="whose conclusions the 'changed' columns refer to")
+    ap.add_argument("--title", default=None)
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     flagged = {r["instance_id"] for r in R.read_jsonl(args.flag)} if args.flag else set()
@@ -286,7 +304,8 @@ def main(argv=None) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False) + "\n")
-    (out / "report.md").write_text(markdown(rep), encoding="utf-8")
+    (out / "report.md").write_text(relabel(markdown(rep), args.g_name, args.d_name, args.ref_name, args.title),
+                                   encoding="utf-8")
     print(json.dumps({sub: s["gc_condition"] for sub, s in rep["subsets"].items()}, ensure_ascii=False))
     return 0
 
