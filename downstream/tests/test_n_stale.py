@@ -74,3 +74,20 @@ def test_error_rows_and_folders_outside_the_globs_are_skipped(tmp_path):
     write_episode(tmp_path / "other" / "C", "I3", [start], [view(start)])
     res = S.scan(tmp_path, tmp_path / "out", [], folders=["keep/*"])
     assert res["episodes"] == 1
+
+
+def test_an_episode_stuck_at_one_pose_votes_once_there(tmp_path):
+    """11-06 scan: an episode blocked at one pose has many copies of the same tile there; it must not outvote the
+    healthy episodes, and once found bad it stops voting."""
+    start, step = (0.0, 0.0, 0.0), (0.3, 0.0, 0.0)
+    for m in ("A", "B"):  # two healthy runs visit the step pose
+        write_episode(tmp_path / "n1" / m, "I4", [start, step], [view(start), view(step)])
+    for m in ("C", "D"):  # two more healthy starts
+        write_episode(tmp_path / "n1" / m, "I4", [start], [view(start)])
+    # X: a noise start, then 11 turns at the step pose, every tile the same noise: one vote, not eleven
+    noise = np.full((128, 128), 9, np.uint8)
+    write_episode(tmp_path / "n1" / "X", "I4", [start] + [step] * 11, [noise] * 12)
+    S.scan(tmp_path, tmp_path / "out", [])
+    rows = {r["folder"]: r for r in map(json.loads, (tmp_path / "out/stale.jsonl").read_text().splitlines())}
+    assert set(rows) == {"n1/X"} and rows["n1/X"]["start_bad"]
+    assert rows["n1/X"]["bad_turns"] == list(range(1, 13))

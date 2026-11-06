@@ -79,18 +79,19 @@ def episodes(root: Path, robot_prefixes, folders=None):
     return index
 
 
-def judge_instance(items) -> list:
-    """items: [(folder, row, tiles)] of one camera setting and instance.  Returns per item a dict of its bad turns."""
-    at = collections.defaultdict(list)  # pose key -> [(item index, turn, tile, signature)]
-    for n, (_, row, tiles) in enumerate(items):
-        poses = [t.get("pose_before") for t in row.get("turn_log") or []]
-        for k, tile in enumerate(tiles[: len(poses)]):
-            if poses[k] is not None:
-                at[pose_key(poses[k])].append((n, k, tile, signature(tile)))
-    out = [{"bad": [], "checked": 0, "no_ref": 0, "max_diff": 0.0} for _ in items]
+def _judge(at: dict, n_items: int, exclude=frozenset(), start_only: bool = False) -> list:
+    """One pass: every tile against the consensus of the OTHER episodes at its pose, each other episode voting once
+    per pose (an episode stuck at one pose has many copies of the same tile there), episodes in `exclude` not voting.
+    start_only: judge only the turn-1 tiles."""
+    out = [{"bad": [], "checked": 0, "no_ref": 0, "max_diff": 0.0} for _ in range(n_items)]
     for entries in at.values():
+        votes = {}  # (item, signature) -> a tile, one vote per episode and signature
         for n, k, tile, sig in entries:
-            others = collections.Counter(e[3] for e in entries if e[0] != n)
+            votes.setdefault((n, sig), tile)
+        for n, k, tile, sig in entries:
+            if start_only and k != 0:
+                continue
+            others = collections.Counter(s for (m, s) in votes if m != n and m not in exclude)
             if not others:
                 out[n]["no_ref"] += 1
                 continue
@@ -98,12 +99,35 @@ def judge_instance(items) -> list:
             if support < MIN_REF:
                 out[n]["no_ref"] += 1
                 continue
-            ref = next(e[2] for e in entries if e[3] == cons and e[0] != n)
+            ref = next(t for (m, s), t in votes.items() if s == cons and m != n and m not in exclude)
             d = float(np.abs(tile - ref).mean())
             out[n]["checked"] += 1
             out[n]["max_diff"] = max(out[n]["max_diff"], d)
             if d > BAD_DIFF:
                 out[n]["bad"].append(k)
+    return out
+
+
+def judge_instance(items, rounds: int = 4) -> list:
+    """items: [(folder, row, tiles)] of one camera setting and instance.  Returns per item a dict of its bad turns.
+    First the start frames (the start pose has the most episodes, a clean majority); the episodes whose start frame
+    is bad stop voting; then every tile, again and again without the episodes found bad so far, until nothing
+    changes (at most `rounds` passes), so a few broken episodes cannot make the consensus at a pose."""
+    at = collections.defaultdict(list)  # pose key -> [(item index, turn, tile, signature)]
+    for n, (_, row, tiles) in enumerate(items):
+        poses = [t.get("pose_before") for t in row.get("turn_log") or []]
+        for k, tile in enumerate(tiles[: len(poses)]):
+            if poses[k] is not None:
+                at[pose_key(poses[k])].append((n, k, tile, signature(tile)))
+    first = _judge(at, len(items), start_only=True)
+    bad = frozenset(n for n, v in enumerate(first) if v["bad"])
+    out = _judge(at, len(items), exclude=bad)
+    for _ in range(rounds - 1):
+        now = frozenset(n for n, v in enumerate(out) if v["bad"]) | bad
+        if now == bad:
+            break
+        bad = now
+        out = _judge(at, len(items), exclude=bad)
     return out
 
 
