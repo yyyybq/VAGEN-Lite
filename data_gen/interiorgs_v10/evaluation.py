@@ -400,6 +400,9 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             seen["prompt_tokens"] = policy.last_prompt_tokens
         if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
             seen.update(entropy=round(float(policy.last_entropy), 5), tokens=int(policy.last_tokens or 0))
+            for k, v in (getattr(policy, "last_segments", None) or {}).items():  # group G: by segment
+                if v is not None:
+                    seen[k] = round(float(v), 5) if k.startswith("entropy_") else int(v)
         obs, reward, done, step_info = env.step(text)
         turns += 1
         parsed = list(step_info.get("actions") or [])
@@ -473,6 +476,40 @@ def top_logprob_entropy(positions: Sequence[Sequence[float]], temperature: float
     return sum(out) / len(out) if out else None
 
 
+def position_entropies(positions: Sequence[Sequence[float]], temperature: float) -> List[Optional[float]]:
+    """Per answer token, the entropy top_logprob_entropy averages (None for a position without log-probabilities)."""
+    t = float(temperature) if temperature and temperature > 0 else 1.0
+    out: List[Optional[float]] = []
+    for lps in positions:
+        if not lps:
+            out.append(None)
+            continue
+        z = [float(lp) / t for lp in lps]
+        m = max(z)
+        w = [math.exp(v - m) for v in z]
+        s = sum(w)
+        out.append(-sum((x / s) * math.log(x / s) for x in w if x > 0))
+    return out
+
+
+def segment_entropies(pieces: Sequence[str], entropies: Sequence[Optional[float]]) -> Dict[str, Any]:
+    """Group G of matrix v3 (the pre-launch review of 2026-11-06): an answer's token entropy split at the token that
+    holds the "<" of "<action>": the action segment is that token and the rest ("entropy_action", "tokens_action"),
+    the targets segment everything before ("entropy_targets", "tokens_targets"); token means, None for an empty
+    segment.  An answer without "<action>" has no action segment.  ``pieces``: each token's text, in order."""
+    text = "".join(pieces)
+    at = text.find("<action>")
+    ends, n = [], 0
+    for p in pieces:
+        n += len(p)
+        ends.append(n)
+    action = [e for e, end in zip(entropies, ends) if e is not None and at >= 0 and end > at]
+    before = [e for e, end in zip(entropies, ends) if e is not None and not (at >= 0 and end > at)]
+    mean = lambda xs: sum(xs) / len(xs) if xs else None  # noqa: E731
+    return {"entropy_action": mean(action), "tokens_action": len(action), "entropy_targets": mean(before),
+            "tokens_targets": len(before)}
+
+
 def cambrian_request(wrapper: Any, system: str, earlier: Sequence[Tuple[str, Any, str]], user_text: str, image: Any,
                      as_sft: bool = False) -> Dict[str, Any]:
     """The model line (2026-10-24): one Cambrian-S call as vLLM takes it -- the same chat as chat_messages, through
@@ -511,6 +548,7 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
         self.entropy = bool(entropy)  # round 12 freeze: the answers' token entropy (last_entropy, last_tokens)
         self.last_entropy: Optional[float] = None
         self.last_tokens: Optional[int] = None
+        self.last_segments: Optional[Dict[str, Any]] = None  # group G: segment_entropies of the last answer
 
     def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
                  as_sft: bool = False, seed: Optional[int] = None) -> str:
@@ -531,6 +569,14 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
             self.last_entropy = top_logprob_entropy([[lp.logprob for lp in pos.values()] for pos in steps],
                                                     self.temperature)
             self.last_tokens = len(steps)
+            # group G: the same entropies split at the action segment, from each sampled token's text
+            ids = list(out[0].outputs[0].token_ids or [])
+            pieces = [getattr((pos or {}).get(tid), "decoded_token", None) for pos, tid in zip(steps, ids)]
+            self.last_segments = None
+            if len(pieces) == len(steps) and all(isinstance(p, str) for p in pieces) and \
+                    "".join(pieces) == out[0].outputs[0].text:
+                self.last_segments = segment_entropies(
+                    pieces, position_entropies([[lp.logprob for lp in pos.values()] for pos in steps], self.temperature))
         return out[0].outputs[0].text
 
 
@@ -602,7 +648,14 @@ def token_entropy(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     tokens = sum(n for _, n in pairs)
     if not pairs or not tokens:
         return {}
-    return {"entropy": round(sum(e * n for e, n in pairs) / tokens, 5), "entropy_tokens": tokens}
+    out = {"entropy": round(sum(e * n for e, n in pairs) / tokens, 5), "entropy_tokens": tokens}
+    for part in ("action", "targets"):  # group G of matrix v3: the same by segment, when recorded
+        seg = [(float(t[f"entropy_{part}"]), int(t.get(f"tokens_{part}") or 0)) for r in rows
+               for t in (r.get("trajectory") or []) if t.get(f"entropy_{part}") is not None]
+        n = sum(k for _, k in seg)
+        if seg and n:
+            out.update({f"entropy_{part}": round(sum(e * k for e, k in seg) / n, 5), f"entropy_{part}_tokens": n})
+    return out
 
 
 def pointing_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:

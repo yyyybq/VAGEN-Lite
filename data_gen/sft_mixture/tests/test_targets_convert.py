@@ -64,3 +64,34 @@ def test_converted_rows_are_the_env_text_and_its_truth(tmp_path):
                 assert (tm["targets_ok"], tm["pointing_score"]) == (True, 1.0), answers[0]
                 for u in users[1:]:  # later turns: the format block without the example
                     assert u.endswith("You can take up to 5 actions per step.\n") and "Example:" not in u
+
+
+@pytest.mark.skipif(not ((SFT / "rows.jsonl").exists() and GS.exists()), reason="cluster data only")
+def test_occluders_follow_the_rows_structure_sign(tmp_path):
+    """A scene whose rows ask the env for structure Y sign +1 (the pre-launch review: 4 scenes would mirror their
+    walls without it): scene_occluders with the rows' sign equals the RL env's occluders, without it it differs."""
+    import numpy as np
+
+    from data_gen.interiorgs_v10 import rl_checks as RC
+    from data_gen.interiorgs_v10 import training_prep as TP
+    from vagen.envs.active_spatial import pointing as PT
+
+    scene = "0491_840935"
+    rows = [r for r in TCV.read_jsonl(SFT / "rows.jsonl") if r["scene_id"] == scene]
+    sign = PT.scene_structure_sign(rows)
+    assert sign == 1.0
+    cfg = RC.env_config(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml", "http://127.0.0.1:1/render")
+    cfg["gs_root"] = str(GS)
+    with mock.patch("vagen.envs.active_spatial.env.ActiveSpatialEnv._render_image", lambda self: FRAME.copy()):
+        env, _ = RC.make_env(rows[:1], tmp_path / "rows.jsonl", cfg)
+        env.reset(seed=0)
+        theirs = env._visibility_occluders()
+    ours, plain = PT.scene_occluders(str(GS), scene, "thick", sign), PT.scene_occluders(str(GS), scene, "thick")
+
+    def arrays(o):
+        return {k: np.asarray(v) for k, v in vars(o).items() if isinstance(v, np.ndarray)}
+
+    a, b, c = arrays(ours), arrays(theirs), arrays(plain)
+    assert a.keys() == b.keys() and all(np.array_equal(a[k], b[k]) for k in a)
+    assert not all(a[k].shape == c[k].shape and np.array_equal(a[k], c[k]) for k in a)
+

@@ -115,7 +115,8 @@ def _scene_job(args: Tuple[str, List[int]]) -> Tuple[str, List[Tuple[int, Dict[s
 
     scene, idx = args
     t0 = time.time()
-    occ = PT.scene_occluders(_INPUTS["gs_root"], scene, _INPUTS["wall_model"])
+    items = [_INPUTS["rows"][parts(_INPUTS["in"][i])[3]] for i in idx]
+    occ = PT.scene_occluders(_INPUTS["gs_root"], scene, _INPUTS["wall_model"], PT.scene_structure_sign(items))
     done, tot = [], collections.Counter()
     for i in idx:
         row = _INPUTS["in"][i]

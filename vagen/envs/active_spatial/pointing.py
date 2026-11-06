@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .prompt import SLOT_LETTERS, TARGET_FORMATS
 
 FRAME_SIZE = (256, 256)  # target_visibility.RENDER_SIZE: the frame the success metrics and the boxes use
+NEAR_M = 0.05  # target_visibility.MIN_DEPTH_M: a box with corners behind the camera is cut at this depth
 Point = Optional[Tuple[float, float]]  # None: "none"
 
 _SPECIAL = re.compile(r"<\|[^>]*\|>")
@@ -111,19 +112,77 @@ def truth(item: Dict[str, Any], c2w: Any, occ: Any) -> List[Dict[str, Any]]:
             proj = _project_object(obj, c2w, K, width, height)
             if proj.get("visible") and proj.get("bbox") is not None:
                 seen = bool(object_visibility(c2w, obj, occ, K, width, height)["visible"])
-                box = [round(float(v), 3) for v in proj["bbox"]] if seen else None
+                if seen:
+                    raw = proj["bbox"]
+                    if (_camera_corners(obj, c2w)[1][:, 2] <= 1e-6).any():  # _project_object drops such corners
+                        raw = near_clipped_box(obj, c2w, K, width, height) or raw
+                    box = [round(float(v), 3) for v in raw]
         out.append({"letter": letter, "in_view": seen, "box": box})
     return out
 
 
-def scene_occluders(gs_root: str, scene_id: str, wall_model: str = "thick") -> Any:
+def _camera_corners(obj: Dict[str, Any], c2w: Any) -> Tuple[Any, Any]:
+    """(world corners, camera-frame corners) of the object's 3D box."""
+    import numpy as np
+
+    from .visual_bbox_metrics import _bbox_corners
+
+    corners = _bbox_corners(np.asarray(obj["bbox_min"], float), np.asarray(obj["bbox_max"], float))
+    w2c = np.linalg.inv(np.asarray(c2w, float))
+    return corners, (w2c @ np.c_[corners, np.ones(len(corners))].T).T[:, :3]
+
+
+def near_clipped_box(obj: Dict[str, Any], c2w: Any, K: Any, width: int, height: int,
+                     near: float = NEAR_M) -> Optional[List[float]]:
+    """The frame box of the part of the object's 3D box in front of the plane z = ``near`` (camera frame; its corners
+    there and its 12 edges cut at that plane), clipped to the frame; None when nothing of it projects into the frame.
+    For a target that crosses the camera plane, where projecting only the front corners would leave the box of the
+    far end alone (the pre-launch review of 2026-11-06)."""
+    import numpy as np
+
+    corners, pc = _camera_corners(obj, c2w)
+    pts = [p for p in pc if p[2] >= near]
+    for i in range(len(corners)):
+        for j in range(i + 1, len(corners)):
+            if int(np.sum(np.abs(corners[i] - corners[j]) > 1e-12)) != 1:  # not an edge of the box
+                continue
+            zi, zj = float(pc[i][2]), float(pc[j][2])
+            if (zi - near) * (zj - near) < 0:
+                pts.append(pc[i] + (near - zi) / (zj - zi) * (pc[j] - pc[i]))
+    if not pts:
+        return None
+    p = np.asarray(pts, float)
+    u = K[0][0] * p[:, 0] / p[:, 2] + K[0][2]
+    v = K[1][1] * p[:, 1] / p[:, 2] + K[1][2]
+    x1, y1 = max(0.0, float(u.min())), max(0.0, float(v.min()))
+    x2, y2 = min(float(width - 1), float(u.max())), min(float(height - 1), float(v.max()))
+    return [x1, y1, x2, y2] if x2 > x1 and y2 > y1 else None
+
+
+def scene_structure_sign(items: Sequence[Dict[str, Any]]) -> Optional[float]:
+    """The structure Y sign the RL env applies to a scene: that of its rows' collision_convention with
+    requires_env_override (env.reset), None when no row asks for one; rows of one scene that disagree stop."""
+    signs = {float(c["structure_y_sign"]) for c in ((it or {}).get("collision_convention") for it in items)
+             if isinstance(c, dict) and c.get("requires_env_override")}
+    if len(signs) > 1:
+        raise ValueError(f"rows of one scene ask for different structure Y signs: {sorted(signs)}")
+    return signs.pop() if signs else None
+
+
+def scene_occluders(gs_root: str, scene_id: str, wall_model: str = "thick",
+                    structure_y_sign: Optional[float] = None) -> Any:
     """The occluders of a scene as the RL env builds them with its collision detector (env._visibility_occluders):
-    labels.json boxes and the structure walls of ``wall_model`` (the v10 env templates': "thick")."""
+    labels.json boxes and the structure walls of ``wall_model`` (the v10 env templates': "thick"), with the structure
+    Y sign the env applies to the scene when its rows ask for one (``scene_structure_sign``)."""
     from .collision_detector import create_collision_detector
     from .target_visibility import OccluderSet
 
-    detector = create_collision_detector({"wall_model": wall_model})
+    overrides = {str(scene_id): float(structure_y_sign)} if structure_y_sign is not None else None
+    detector = create_collision_detector({"wall_model": wall_model, "structure_y_sign_overrides": overrides})
     detector.load_scene_from_gs_root(gs_root, scene_id)
+    if structure_y_sign is not None and float(detector.structure_y_sign) != float(structure_y_sign):
+        raise ValueError(f"{scene_id}: the detector took structure Y sign {detector.structure_y_sign}, "
+                         f"not {structure_y_sign}")
     return OccluderSet.from_detector(detector)
 
 

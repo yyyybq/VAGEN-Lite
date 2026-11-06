@@ -122,6 +122,43 @@ class ParseJudgeTest(unittest.TestCase):
             self.assertEqual((turn["ok"], turn["error"]), (False, "no_truth"))
         self.assertEqual(PT.target_refs(item), ["the lamp", "the sofa"])
 
+    def test_truth_cuts_boxes_behind_the_camera(self):
+        """An object crossing the camera plane gets the box of its part in front of it (the far end alone before);
+        an object wholly in front keeps _project_object's box; the scene sign of a scene's rows."""
+        import numpy as np
+
+        from vagen.envs.active_spatial.target_visibility import OccluderSet, item_camera
+        from vagen.envs.active_spatial.visual_bbox_metrics import _project_object
+
+        def item(bmin, bmax):
+            return {"init_camera": {"intrinsics": [[320.0, 0.0, 320.0], [0.0, 320.0, 240.0], [0.0, 0.0, 1.0]]},
+                    "target_object": {"objects": [{"id": "7", "label": "tv", "ref": "the TV", "bbox_min": bmin,
+                                                   "bbox_max": bmax}]}}
+
+        occ = OccluderSet.from_boxes([], [])
+        c2w = np.eye(4)  # x right, y down, z forward
+        side = item([0.5, -0.5, -1.0], [2.5, 0.5, 3.0])  # beside the camera, from behind it to 3 m ahead
+        K, w, h = item_camera(side)
+        old = _project_object(side["target_object"]["objects"][0], c2w, K, w, h)["bbox"]
+        t = PT.truth(side, c2w, occ)[0]
+        self.assertTrue(t["in_view"])
+        x1, y1, x2, y2 = t["box"]
+        self.assertEqual(x2, 255.0)  # reaches the frame's edge, as the near part does
+        self.assertTrue(x1 <= old[0] + 1e-6 and y1 <= old[1] + 1e-6 and x2 >= old[2] - 1e-6 and y2 >= old[3] - 1e-6)
+        self.assertGreater((x2 - x1) * (y2 - y1), 2 * (old[2] - old[0]) * (old[3] - old[1]))
+        ahead = item([0.5, -0.5, 2.0], [2.5, 0.5, 3.0])  # wholly in front: unchanged
+        t2 = PT.truth(ahead, c2w, occ)[0]
+        b2 = _project_object(ahead["target_object"]["objects"][0], c2w, K, w, h)["bbox"]
+        self.assertTrue(t2["in_view"])
+        self.assertEqual(t2["box"], [round(float(v), 3) for v in b2])
+        rows = [{"collision_convention": {"requires_env_override": True, "structure_y_sign": 1.0}},
+                {"collision_convention": {"requires_env_override": False, "structure_y_sign": -1.0}}, {}]
+        self.assertEqual(PT.scene_structure_sign(rows), 1.0)
+        self.assertIsNone(PT.scene_structure_sign(rows[1:]))
+        with self.assertRaises(ValueError):
+            PT.scene_structure_sign(rows + [{"collision_convention": {"requires_env_override": True,
+                                                                      "structure_y_sign": -1.0}}])
+
     def test_agent_loop_reads_the_judgment(self):
         from vagen.agent_loop.gym_agent_loop import turn_pointing
 

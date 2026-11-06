@@ -52,7 +52,8 @@ _INPUTS: Dict[str, Any] = {}
 def scene_candidates(scene_id: str, cfg: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     from vagen.envs.active_spatial import pointing as PT
 
-    occ = PT.scene_occluders(cfg["gs_root"], scene_id, cfg["wall_model"])
+    items = [_INPUTS["rows"][t["source_task_id"]] for t in _INPUTS["by_scene"][scene_id]]
+    occ = PT.scene_occluders(cfg["gs_root"], scene_id, cfg["wall_model"], PT.scene_structure_sign(items))
     out: List[Dict[str, Any]] = []
     funnel: collections.Counter = collections.Counter()
     for traj in _INPUTS["by_scene"][scene_id]:

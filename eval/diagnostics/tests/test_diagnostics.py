@@ -149,6 +149,34 @@ def test_pointing_questions_are_judged():
     assert a["correct"] and a["readable"] and a["compliant"] and a["parsed"] == "121,91"
 
 
+def test_pointing_answers_in_qwen_forms():
+    """JSON grounding output, bracketed groups and loose numbers are read as the coordinates they give."""
+    box = [100.0, 80.0, 140.0, 100.0]
+    row = lambda judge: {"judge": judge, "box": box, "coords": "norm1000", "render_size": [256, 256]}  # noqa: E731
+    point = row("point")
+    j = QP.judge_pointing(point, '{"point_2d": [469, 352], "label": "lamp"}')
+    assert (j["correct"], j["read_as"]) == (True, "point_2d")
+    j = QP.judge_pointing(point, '[{"bbox_2d": [391, 313, 547, 391], "label": "lamp"}]')
+    assert (j["correct"], j["read_as"]) == (True, "bbox_2d_centre")
+    assert QP.judge_pointing(point, "1. (469, 352)")["read_as"] == "group" and QP.judge_pointing(point, "1. (469, 352)")["correct"]
+    assert QP.judge_pointing(point, "On a 0-1000 scale: (469, 352).")["correct"]
+    assert QP.judge_pointing(point, "x=469, y=352")["correct"]
+    assert not QP.judge_pointing(dict(point, coords="pixel"), "(-1, 0)")["correct"]  # off the image
+    assert QP.judge_pointing(point, "from 469-352")["parsed"] == "469,352"  # a range is no minus
+    j = QP.judge_pointing(point, "(391,313),(547,391)")  # a box's two corners to a point question: their centre
+    assert (j["correct"], j["read_as"], j["parsed"]) == (True, "corners_centre", "469,352")
+    assert not QP.judge_pointing(point, "(600,700),(700,800)")["correct"]
+    b = row("box")
+    j = QP.judge_pointing(b, '[{"bbox_2d": [391, 313, 547, 391], "label": "lamp"}]')
+    assert (j["correct"], j["read_as"]) == (True, "bbox_2d")
+    assert QP.judge_pointing(b, "x1=391, y1=313, x2=547, y2=391")["correct"]
+    assert QP.judge_pointing(b, "(391,313),(547,391)")["correct"]
+    assert QP.judge_pointing(b, "[391, 313, 547, 391]")["correct"]
+    assert not QP.judge_pointing(b, '{"point_2d": [469, 352]}')["readable"]
+    pix = dict(point, coords="pixel")
+    assert QP.judge_pointing(pix, "(120, 90)")["correct"] and QP.judge_pointing(pix, "(120, 90)")["compliant"]
+
+
 def test_rescore_follows_the_probe_relabelled_and_dropped(tmp_path):
     import argparse
     import json

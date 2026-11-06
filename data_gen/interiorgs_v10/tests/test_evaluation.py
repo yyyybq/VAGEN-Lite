@@ -495,3 +495,33 @@ class EvaluationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SegmentEntropyTest(unittest.TestCase):
+    """Group G of matrix v3: the answer's entropy split at the action segment; the whole-answer mean unchanged."""
+
+    def test_split(self):
+        from data_gen.interiorgs_v10 import evaluation as EV
+
+        lps = [[-0.01, -5.0], [-0.7, -0.7], [-0.1, -2.5], [-0.05, -3.0], [-0.2, -1.8]]
+        ents = EV.position_entropies(lps, 0.8)
+        self.assertAlmostEqual(sum(ents) / len(ents), EV.top_logprob_entropy(lps, 0.8), places=12)
+        g = EV.segment_entropies(["<targets>A: (", "469", ",352)</targets", "><", "action>move_forward|</action>"], ents)
+        self.assertEqual((g["tokens_targets"], g["tokens_action"]), (3, 2))  # the merged "><" opens the action part
+        self.assertAlmostEqual(g["entropy_action"], (ents[3] + ents[4]) / 2, places=12)
+        self.assertAlmostEqual(g["entropy_targets"], sum(ents[:3]) / 3, places=12)
+        d = EV.segment_entropies(["<action>", "move", "_forward", "|", "</action>"], ents)
+        self.assertEqual((d["tokens_action"], d["tokens_targets"], d["entropy_targets"]), (5, 0, None))
+        self.assertAlmostEqual(d["entropy_action"], EV.top_logprob_entropy(lps, 0.8), places=12)
+        none = EV.segment_entropies(["no", " action"], ents[:2])
+        self.assertEqual((none["tokens_action"], none["entropy_action"], none["tokens_targets"]), (0, None, 2))
+        rows = [{"trajectory": [{"entropy": 0.1, "tokens": 10, "entropy_action": 0.02, "tokens_action": 4,
+                                 "entropy_targets": 0.15, "tokens_targets": 6},
+                                {"entropy": 0.05, "tokens": 5, "entropy_action": 0.05, "tokens_action": 5}]}]
+        s = EV.token_entropy(rows)
+        self.assertAlmostEqual(s["entropy"], round((0.1 * 10 + 0.05 * 5) / 15, 5))
+        self.assertEqual((s["entropy_action_tokens"], s["entropy_targets_tokens"]), (9, 6))
+        self.assertAlmostEqual(s["entropy_action"], round((0.02 * 4 + 0.05 * 5) / 9, 5))
+        self.assertEqual(EV.token_entropy([{"trajectory": [{"entropy": 0.1, "tokens": 3}]}]),
+                         {"entropy": 0.1, "entropy_tokens": 3})  # older records: as before
+
