@@ -1317,6 +1317,63 @@ class ChainTest(unittest.TestCase):
             off = T.Chain({**base, "rl": {"standard": "v10_p1_S0", "guards": None}}, sleep=lambda s: None)
             self.assertIsNone(off.rl_runs()[""]["rl"]["guards"])
 
+    def test_turn_footprint_pair_plan(self):
+        """Experiment 3A (the user's decision 甲 of 2026-11-06), with this file unchanged: the pair's plan names the
+        _fp standards (the turn rule travels as a standard key: a plan rl "turn_footprint_radius" is not forwarded to
+        rl-config), V4's keys only for the dense run, the standard's chain settings apply; the evaluate step runs every
+        checkpoint on the _fp sets with the rule and, as a variant, on the old sets without it: 2 runs x 6 checkpoints
+        x 2 sets x 2 rules = 48 jobs, the options exactly as the plan gives them."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            v4 = {"progress_reward_scale": 3.3333333333333335, "group_filter": "keep_by_return_std",
+                  "keep_std_threshold": 0.3318, "keep_std_floor": 1.0}
+            new_rule = ["--format-example", "action_names", "--turn-footprint-radius", "0.25"]
+            old_rule = ["--format-example", "action_names"]
+            plan = {"tr": tmp, "sft_dir": str(root / "sft"), "endpoint": 300, "gs_root": "/ply", "rl_name": "qw3fp",
+                    "rl_start_model": "/lf_q3formal/model/checkpoint-1232",
+                    "rl": {"standard": "v10_p1_S0_fp", "seed": 20261019, "rows": "/rows.jsonl",
+                           "format_example": "action_names", "turn_footprint_radius": 0.3},
+                    "rl_runs": {"qw3fps0": {}, "qw3fpd": {"rl": {"standard": "v10_p1_Dcond_fp", **v4}}},
+                    "eval_sets": {"val_fp": str(root / "val_fp"), "test_fp": str(root / "test_fp")},
+                    "eval": {"every": 50, "options": new_rule,
+                             "extra_sets": {"val": str(root / "val"), "test": str(root / "test")},
+                             "variants": [{"suffix": "", "models": ["rl"], "sets": ["val", "test"], "options": old_rule}]}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            runs = chain.rl_runs()
+            self.assertEqual({n: (r["rl"]["renderer_workers"], r["rl"]["renderer_first"], r["rl"]["guards"]["invalid_max"])
+                              for n, r in runs.items()}, {"qw3fps0": (32, True, 0.1), "qw3fpd": (32, True, 0.1)})
+            calls = {}
+            chain.sh = lambda args, **k: calls.__setitem__(args[args.index("--out") + 1], args)
+            chain.rl_config()
+            s0, d = calls[str(root / "rl_qw3fps0")], calls[str(root / "rl_qw3fpd")]
+            self.assertEqual((s0[s0.index("--standard") + 1], d[d.index("--standard") + 1]),
+                             ("v10_p1_S0_fp", "v10_p1_Dcond_fp"))
+            for args, name in ((s0, "qw3fp_qw3fps0"), (d, "qw3fp_qw3fpd")):
+                self.assertEqual([args[args.index(f) + 1] for f in ("--seed", "--format-example", "--model", "--name")],
+                                 ["20261019", "action_names", "/lf_q3formal/model/checkpoint-1232", name])
+                self.assertNotIn("--reward-preset", args)
+                self.assertNotIn("--turn-footprint-radius", args)  # why the standards carry the rule
+            flags = ("--progress-reward-scale", "--group-filter", "--keep-std-threshold", "--keep-std-floor")
+            self.assertEqual([d[d.index(f) + 1] for f in flags], ["3.3333333333333335", "keep_by_return_std", "0.3318", "1.0"])
+            self.assertFalse([f for f in flags if f in s0])
+            # the evaluate step, with the runs' rl-config reports (the format example they trained with)
+            for name in ("qw3fps0", "qw3fpd"):
+                (root / f"rl_{name}").mkdir()
+                (root / f"rl_{name}" / "rl_config_report.json").write_text(json.dumps({"format_example": "action_names"}))
+            got = {}
+            chain.eval_jobs = lambda step, jobs: got.update(jobs)
+            chain.tables = lambda: None
+            chain.evaluate()
+            names = [f"{r}_{s:03d}" for r in ("qw3fps0", "qw3fpd") for s in range(50, 301, 50)]
+            self.assertEqual(sorted(got), sorted(f"{st}__{n}" for st in ("val_fp", "test_fp", "val", "test") for n in names))
+            for key, (folder, result, model, prompt_format, options) in got.items():
+                set_name, name = key.split("__")
+                run, step = name.rsplit("_", 1)
+                self.assertEqual((folder, result, prompt_format), (root / set_name, name, None))
+                self.assertEqual(model, str(root / f"rl_run_{run}" / "checkpoints" / f"global_step_{int(step)}" / "actor"
+                                            / "huggingface"))
+                self.assertEqual(options, new_rule if set_name.endswith("_fp") else old_rule, key)
+
     def test_eval_only_plan(self):
         """Round 12: an eval_only plan runs check_code and evaluate only, on the listed models and variants."""
         with tempfile.TemporaryDirectory() as tmp:

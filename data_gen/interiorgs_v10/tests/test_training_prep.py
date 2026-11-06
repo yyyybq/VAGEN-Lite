@@ -300,7 +300,14 @@ class TrainingPrepTest(unittest.TestCase):
 
         standards = TP.load_standards()
         self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_Dcond",
-                                             "v10_p1_S0", "v10_p1_S0_keep", "v10_p2_D", "v10_p2_S0"])
+                                             "v10_p1_Dcond_fp", "v10_p1_S0", "v10_p1_S0_fp", "v10_p1_S0_keep",
+                                             "v10_p2_D", "v10_p2_S0"])
+        # experiment 3A (the user's decision 甲 of 2026-11-06): the p1 pair with the turn-footprint rule, each its
+        # base plus turn_footprint_radius 0.25, the two differing only in the reward (as every pair)
+        for name, base in (("v10_p1_S0_fp", "v10_p1_S0"), ("v10_p1_Dcond_fp", "v10_p1_Dcond")):
+            self.assertEqual(standards[name], {**standards[base], "turn_footprint_radius": 0.25})
+        self.assertEqual({k: v for k, v in standards["v10_p1_S0_fp"].items() if k != "reward_preset"},
+                         {k: v for k, v in standards["v10_p1_Dcond_fp"].items() if k != "reward_preset"})
         for name, std in standards.items():
             self.assertLessEqual(set(std), set(TP.STANDARD_KEYS), name)
             for key in ("ppo_template", "env_template"):
@@ -383,6 +390,27 @@ class TrainingPrepTest(unittest.TestCase):
                    group_filter="keep_by_return_std", keep_std_threshold=0.3)
         with self.assertRaises(SystemExit):  # neither a template nor a standard
             config("rl_no_template")
+        # experiment 3A: the _fp standards write the turn rule into the env configs and the report names them; the
+        # rest is the base standard's (paths aside); an explicit other radius is refused
+        ppo_b, env_b, report_b = config("rl_std_s0_base", standard="v10_p1_S0", seed=20261019)
+        for name, base in (("v10_p1_S0_fp", None), ("v10_p1_Dcond_fp", "D_cond")):
+            ppo, env, report = config(f"rl_std_{name}", standard=name, seed=20261019)
+            val = yaml.safe_load((self.root / f"rl_std_{name}" / "val_env.yaml").read_text())["envs"][0]["config"]
+            self.assertEqual((env["turn_footprint_radius"], val["turn_footprint_radius"], report["turn_footprint_radius"],
+                              report["standard"]), (0.25, 0.25, 0.25, name))
+            self.assertEqual(env.get("progress_version"), "grouped_gated" if base else None)
+            self.assertEqual(ppo["data"]["seed"], 20261019)
+        ppo, env, report = config("rl_std_fp_again", standard="v10_p1_S0_fp", seed=20261019)
+        self.assertEqual({k: v for k, v in env.items() if k not in ("turn_footprint_radius", "jsonl_path")},
+                         {k: v for k, v in env_b.items() if k != "jsonl_path"})
+        self.assertEqual({k: v for k, v in report.items() if k not in ("turn_footprint_radius", "standard")},
+                         {k: v for k, v in report_b.items() if k != "standard"})
+        self.assertNotIn("turn_footprint_radius", env_b)
+        self.assertEqual((self.root / "rl_std_fp_again" / "ppo.yaml").read_text().replace("rl_std_fp_again", "rl_std_s0_base"),
+                         (self.root / "rl_std_s0_base" / "ppo.yaml").read_text())
+        with self.assertRaises(SystemExit):
+            config("rl_std_fp_other", standard="v10_p1_S0_fp", turn_footprint_radius=0.3)
+        config("rl_std_fp_same", standard="v10_p1_S0_fp", turn_footprint_radius=0.25)  # agreeing: fine
 
     def test_rl_config_curriculum(self):
         """Round 12 batch: --curriculum-easy-updates N puts the easy-first sampler into the PPO config (the first N
