@@ -74,6 +74,34 @@ structure-sign override. Remaining points:
    certificates end exactly at success and SFT turns are chunked so that the last turn ends there.
 2. See `STATUS.md` for the current list.
 
+## Experiment 3A: the turn-footprint rule (off by default)
+
+The user's decision 甲 of 2026-11-06: an in-place turn (turn_left / turn_right) is blocked where the robot base -- a
+disc of 0.25 m around the camera's ground point -- meets a wall (the thick model's slab outlines) or an object box
+reaching into 0.1-1.0 m (env setting `turn_footprint_radius`, default None = today's rule;
+`CollisionDetector.check_turn_footprint`, the arithmetic of the offline replay `turnblock_exposure.py`). A blocked
+turn takes its step, leaves the camera as it was, costs -0.15 and gets the blocked feedback, like a blocked
+translation; translations keep their rule; tasks, system prompt and d (old rule) are unchanged. With the switch on
+the env adds one turn metric, `turn_footprint_blocks`.
+
+```bash
+# RL: the pair's standards (v10_p1_S0 / v10_p1_Dcond plus turn_footprint_radius 0.25; V4 = the dense run's plan rl
+# keys as before), or the option itself; train_chain is unchanged
+python -m data_gen.interiorgs_v10.training_prep rl-config --standard v10_p1_S0_fp ...
+python -m data_gen.interiorgs_v10.training_prep rl-config ... --turn-footprint-radius 0.25
+# evaluation under the rule (recorded in model.json env_switches; keep one rule per result folder)
+python -m data_gen.interiorgs_v10.evaluation run --eval EVAL --name NAME --model MODEL --turn-footprint-radius 0.25
+# turn share, turn-blocked and translation-blocked shares: replay without rendering, each result under its own rule
+python -m data_gen.interiorgs_v10.move_metrics --result DIR [--result DIR ...] --out FILE.json --workers 4
+# d where failed episodes end (old-rule distance tables): unchanged, it replays with model.json env_switches but drops
+# keys the checkout's env lacks, so run it from a checkout with the switch and require replay_same == failed
+python -m reward.fail_end_steps --result DIR --tables TABLES --out FILE.json --workers 4
+```
+
+Tests: `tests/test_turn_footprint.py` (the switch-off golden trace recorded at 26338088,
+`tests/golden/env_trace_26338088.json`; the detector rule against the replay; the env switch) and
+`tests/test_move_metrics.py`.
+
 ## Status
 
 The current status, decisions, pre-training steps and open decisions live in **`STATUS.md`** (the

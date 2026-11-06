@@ -229,6 +229,12 @@
 
 ## 3. 现在在做的事
 
+**实验 3A：转身脚印规则（用户 2026-11-06 选甲；代码在 qwen3-main-dev，默认关）。**
+- 规则：环境开关 `turn_footprint_radius`（默认 None = 今天的规则）设成 0.25 时，原地转身（turn_left / turn_right）之前先看机器人底座（摄像机地面点周围半径 0.25 m 的圆）碰不碰墙（厚墙的板边）或高度伸进 0.1–1.0 m 的物体框（labels.json 原框，不加宽，IGNORED_LABELS 按子串去掉；`CollisionDetector.check_turn_footprint`，和离线回放 `turnblock_exposure.py` 同一套算式）。碰到就不转，这一步照算（12 个动作的上限照算），扣 −0.15，反馈和被挡的平移一样（"turn_left (blocked by tea table)"）。平移的规则不变；题目、系统提示、d（旧规则）都不变。开关打开时多一个回合指标 `turn_footprint_blocks`（concat 训练的日志不转发环境的回合指标，评测和回放工具看得到）。
+- 用法：RL 用标准 `v10_p1_S0_fp` / `v10_p1_Dcond_fp`（各是 `v10_p1_S0` / `v10_p1_Dcond` 加半径 0.25；V4 仍是密集那一个 plan rl 里的四个键），或 `rl-config --turn-footprint-radius 0.25`；train_chain 没改。评测 `evaluation.py run --turn-footprint-radius 0.25`，写进 model.json 的 `env_switches`，一个结果文件夹只放一种规则。转身占比、转身被挡占比、平移被挡占比用新工具 `python -m data_gen.interiorgs_v10.move_metrics`（每个结果按自己的规则不渲染回放，逐回合核对记录）。d 用 `reward/fail_end_steps.py`（没改）：它按 model.json 的 `env_switches` 回放，但环境配置没有的字段会被默默丢掉，所以要从有这个开关的副本跑，并要求重放一致 = 失败局数、出错 0。离线回放的暴露率 49.6% / 47.8%（SFT 第 8 个 epoch）是在没筛过的 `eval_val_v2` / `eval_test_v2` 上算的。
+- 开关关着时的核对：C1 的金标准轨迹 `tests/golden/env_trace_26338088.json`（在 26338088 上生成：S0 和 V4、两道起点在矮物体脚印里的题、三段脚本；每一步的观察文字、奖励、结束、反馈、info 的键、回合和整局指标、奖励分项、位姿）在之后每个提交上逐项相同，字段缺省和显式 None 都一样；rl-config 和评测不给这个选项时不写任何新键。开关关着时唯一会变的输出是整份配置的旧式导出：`evaluation/eval_config.py` 的 fingerprint、`scripts/active_spatial_dense_score_preflight.py`、`scripts/active_spatial_eval_sweep.py` 会多一个 `"turn_footprint_radius": null`，都不在 v10 的路上（`lenient_parse` 加进来时也一样）。
+- 提交：`d074c333`（金标准）、`56580a25`（检测器）、`7b43a22b`（环境开关）、`4cdc6297`（评测选项）、`7b030b9e`（rl-config 选项）、`c8bf09db`（标准）、`c260b374`（move_metrics）。还没上 GPU：先做 CPU 核对，再按计划跑。
+
 **第十二轮批次结束，可以开始代码整理。**（2026-10-22 19:05 UTC。冻结期的主线改动都已进 main，见 `cluster_runs/REPORT_R12_20261022.md` 第九节；代码整理期间本会话不再往 main 推送，直到它宣布完成。密集奖励第二批从副本 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-r12dense` 跑，副本和它读的主 checkout 路径见 `docs/TRAINING_LINE_DEPENDENCIES.md`。）
 
 **批次状态**（2026-10-22 18:45 UTC，最终；"等卡"指训练任务在等一整台 8 卡机器）：
@@ -389,6 +395,7 @@
 | 修正包 RL | `training_prep rl-config --opt-package p1`（单卡试跑加 `--candidates N --target-groups N --rollouts N`）；从训练日志算每 25 次的统计 `interiorgs_v10_r11_20261016/scripts/p_blocks.py TR OUT.json` |
 | 采样评测 | `evaluation.py run --samples 4 --temperature 0.8 --top-p 0.92`（训练链里是 `eval.extra_sets`） |
 | 第十一轮的分析 | `interiorgs_v10_r11_20261016/scripts/analyze_r11.py`（SFT、R-S0、R-D）、`analyze_r11p.py`（P-S0、P-D）、`diag_rl_curves.py`（训练曲线）；结果在 `interiorgs_v10_r11_20261016/analysis/` |
+| 实验 3A（转身脚印规则，默认关） | 环境 `turn_footprint_radius: 0.25`；`training_prep rl-config --standard v10_p1_S0_fp` / `v10_p1_Dcond_fp`，或 `--turn-footprint-radius 0.25`；`evaluation.py run --turn-footprint-radius 0.25`；`python -m data_gen.interiorgs_v10.move_metrics --result DIR [...] --out FILE.json --workers 4`；d：`python -m reward.fail_end_steps --result DIR --tables T --out FILE.json`（从有开关的副本跑）；测试 `tests/test_turn_footprint.py`、`tests/test_move_metrics.py` |
 
 报告（都在 `cluster_runs/`）：
 - `REPORT_REAL_20261011.md`：首次全量；
