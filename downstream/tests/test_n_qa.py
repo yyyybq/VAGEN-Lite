@@ -261,7 +261,7 @@ def test_search_keeps_every_edge_and_costs_count_to_the_nearest_success():
     assert not capped and edges[k0]["move_forward"] is None and s.pose == (0.0, 0.0, 0.0)
     assert edges[k0]["move_left"] == N.pose_key((0.0, 0.3, 0.0))
     inst = {"instance_id": "I", "start_pose": [0.0, 0.0, 0.0]}
-    r = Q.first_actions(states, edges, capped, inst, lambda pose: pose[1] >= 0.55)
+    r = Q.first_actions(states, edges, capped, inst, lambda pose: pose[1] >= 0.55, max_depth=4)
     c = r["cost"]
     assert r["start_dist"] == 2 and c["move_left"] == 2
     assert c["move_forward"] == 3 and r["blocked"] == ["move_forward"]  # a blocked first action wastes one
