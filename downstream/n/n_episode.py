@@ -182,8 +182,10 @@ def asker(port: int, host: str = "127.0.0.1"):
             send_msg(s, {"messages": messages, "images": [png_b64(i) for i in images], "max_new_tokens": max_new_tokens})
             ans = recv_msg(s)
         ask.prompt_tokens = ans.get("prompt_tokens")  # the server's count of the last prompt (None from older ones)
+        ask.error = ans.get("error")  # the server's exception text when it failed (its reply is then "")
         return ans["reply"]
     ask.prompt_tokens = None
+    ask.error = None
     return ask
 
 
@@ -218,6 +220,8 @@ def run_episode(scene, inst: dict, ask, cfg, entry: dict, history: bool = False)
         actions, err = parse(reply, cfg, allowed)
         rec = {"turn": t + 1, "reply": reply, "actions": actions, "parse_error": err, "pose_before": list(pose),
                "prompt_tokens": getattr(ask, "prompt_tokens", None)}
+        if getattr(ask, "error", None):  # a server failure (out of memory on a long history, say), not the model's
+            rec["server_error"] = ask.error
         if not actions:
             invalid += 1
             fb = "Action had no effect."

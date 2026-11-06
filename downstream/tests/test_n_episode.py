@@ -269,7 +269,8 @@ def test_history_episode_sends_every_earlier_turn_and_frame(monkeypatch):
     def ask(msgs, images, n):
         sent.append((msgs, len(images)))
         ask.prompt_tokens = 100 * len(sent)
-        return ["move_left", "nonsense", "nonsense", "nonsense"][len(sent) - 1]
+        ask.error = "OutOfMemoryError: CUDA" if len(sent) == 4 else None
+        return ["move_left", "nonsense", "nonsense", ""][len(sent) - 1]
     rec, frames = E.run_episode(FakeScene(), INST, ask, FakeCfg(), {"max_turns": 12, "response_length_per_turn": 384},
                                 history=True)
     assert rec["end"] == "invalid" and rec["turns"] == 4 and len(frames) == 4
@@ -278,6 +279,8 @@ def test_history_episode_sends_every_earlier_turn_and_frame(monkeypatch):
     assert [m["content"] for m in last if m["role"] == "assistant"] == ["move_left", "nonsense", "nonsense"]
     assert last[-1]["content"][0]["text"] == "False|Action had no effect.\n"  # the feedback of the turn before
     assert [t["prompt_tokens"] for t in rec["turn_log"]] == [100, 200, 300, 400]
+    # a server failure is kept with its turn, so it is not read as the model's own invalid answer
+    assert [t.get("server_error") for t in rec["turn_log"]] == [None, None, None, "OutOfMemoryError: CUDA"]
     sent.clear()
     E.run_episode(FakeScene(), INST, ask, FakeCfg(), {"max_turns": 12, "response_length_per_turn": 384})
     assert [len(m) for m, _ in sent] == [2, 2, 2, 2] and [k for _, k in sent] == [1, 1, 1, 1]
@@ -293,13 +296,19 @@ def test_the_client_keeps_the_servers_prompt_length():
         with conn:
             req = E.recv_msg(conn)
             E.send_msg(conn, {"reply": f"{len(req['images'])} images", "prompt_tokens": 77})
+        conn, _ = srv.accept()
+        with conn:
+            E.recv_msg(conn)
+            E.send_msg(conn, {"reply": "", "error": "RuntimeError: boom"})
     t = threading.Thread(target=serve)
     t.start()
     import numpy as np
     ask = E.asker(srv.getsockname()[1])
     assert ask.prompt_tokens is None
     assert ask(E.chat("S", "<image>"), [np.zeros((4, 4, 3), "uint8")] * 2, 8) == "2 images"
-    assert ask.prompt_tokens == 77
+    assert ask.prompt_tokens == 77 and ask.error is None
+    assert ask(E.chat("S", "<image>"), [np.zeros((4, 4, 3), "uint8")], 8) == ""
+    assert ask.error == "RuntimeError: boom" and ask.prompt_tokens is None
     t.join()
     srv.close()
 

@@ -10,8 +10,9 @@
 #   gd, gc  (the user's task book of 2026-11-06, tier g) with dialogue history (N_HISTORY=1, n_episode.py --history):
 #      gd = tier d, N1 as it is on its merged 600 instances (D_INSTANCES, default N2's instances_600.jsonl), N1's
 #      robot body, all eight models; gc = tier c again (C_INSTANCES, the camera sphere), the six models of c.
-#   dr  (tier g's check) tier d again without history on the first N3_DR_LIMIT (default 24) of D_INSTANCES, to
-#      compare with N1's recorded episodes (the same code path, greedy decoding).
+#   dr, drc  (tier g's check, run alone before gd / gc) tier d again without history on DR_INSTANCES (a subset of
+#      N1's 600, n_dr_check.py pick), all eight models; tier c again on DRC_INSTANCES (a subset of c's), the six;
+#      n_dr_check.py compare then sets them against N1's and c's recorded episodes.
 # Usage: run_n3.sh N3 MODEL C_INSTANCES E_INSTANCES [TIERS] [WORKERS]   (TIERS default "c e"; a tier the model is not
 #   in is skipped).  The Q3 models get their own validation config (N_VAL_ENV, as in N1) and run as the container's
 #   root; everything under N3/<tier>/<MODEL> is given back to its owner by run_n3_episodes.sh.
@@ -42,15 +43,20 @@ for spec in $TIERS; do
     gd) INST="${D_INSTANCES:-/mnt/umm/users/yinbaiqiao/downstream_runs/n/n2_20261103/instances_600.jsonl}"; COLL=robot ;;
     gc) [[ " S RS RD Q3S Q3RS Q3RD " == *" $MODEL "* ]] || { log "tier gc: $MODEL is not in it"; continue; }
         INST="$CI"; COLL=sphere ;;
-    dr) INST="${D_INSTANCES:-/mnt/umm/users/yinbaiqiao/downstream_runs/n/n2_20261103/instances_600.jsonl}"; COLL=robot ;;
+    dr) INST="${DR_INSTANCES:?tier dr needs DR_INSTANCES}"; COLL=robot ;;
+    drc) [[ " S RS RD Q3S Q3RS Q3RD " == *" $MODEL "* ]] || { log "tier drc: $MODEL is not in it"; continue; }
+         INST="${DRC_INSTANCES:?tier drc needs DRC_INSTANCES}"; COLL=sphere ;;
     *) log "unknown tier $t"; rc_all=2; continue ;;
   esac
   if [[ ${N3_DROP_CORRUPTED:-0} == 1 && -f $N3/$t/$MODEL/episodes.jsonl ]]; then
     log "tier $t: $("${N_VLM_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python}" "$WT/downstream/n/n_repair.py" drop --out "$N3/$t/$MODEL" --broken)"
   fi
   HIST=0; [[ $t == g* ]] && HIST=1
-  LIM=0; [[ $t == dr ]] && LIM="${N3_DR_LIMIT:-24}"
-  N_HISTORY=$HIST N3_COLLISION=$COLL bash "$WT/downstream/n/run_n3_episodes.sh" "$N3/$t/$MODEL" "$INST" "$MODEL" "$w" "$LIM"
+  mkdir -p "$N3/$t"
+  # a root job (the Q3 models) may make a tier folder first: give it and this job's log back to the owner, so the
+  # owner's jobs can add their model folders (11-06; run_n3_episodes.sh gives back only N3/<tier>/<MODEL>)
+  if [[ $(id -u) -eq 0 ]]; then chown "${OWNER_UID:-20325}:${OWNER_GID:-20325}" "$N3" "$N3/$t" "$N3/n3_$MODEL.log" 2>/dev/null; fi
+  N_HISTORY=$HIST N3_COLLISION=$COLL bash "$WT/downstream/n/run_n3_episodes.sh" "$N3/$t/$MODEL" "$INST" "$MODEL" "$w" 0
   rc=$?
   log "tier $t: rc=$rc $(grep -c '"success": true' "$N3/$t/$MODEL/episodes.jsonl" 2>/dev/null) successes of $(wc -l < "$N3/$t/$MODEL/episodes.jsonl" 2>/dev/null)"
   (( rc )) && rc_all=$rc
