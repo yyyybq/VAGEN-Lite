@@ -109,6 +109,23 @@ def test_score_and_summary():
     assert s["all"]["formats"]["letter_variant"] == 0.5
 
 
+def test_free_form_rows_are_kept_as_text():
+    """A pointing question (no options, an answer that is neither Yes nor No) is kept unjudged instead of breaking
+    the letter reader; questions with options or Yes / No are read as before."""
+    msgs = lambda gold: [{"role": "user", "content": "<image>q"}, {"role": "assistant", "content": gold}]
+    rows = [{"sample_id": "p", "qtype": "point_now", "qclass": "pointing", "family": "f", "options": [],
+             "messages": msgs("(190, 179)")},
+            {"sample_id": "y", "qtype": "t", "qclass": "state", "family": "f", "options": [], "messages": msgs("No")},
+            {"sample_id": "l", "qtype": "t", "qclass": "goal", "family": "f", "options": ["left", "right"],
+             "messages": msgs("B")}]
+    assert [QP.free_form(r) for r in rows] == [True, False, False]
+    a = QP.score(rows, ["(120, 88)", "No.", "B"])
+    assert (a[0]["output"], a[0]["readable"], a[0]["correct"], a[0]["n_options"]) == ("(120, 88)", False, False, None)
+    assert a[1]["correct"] and a[1]["compliant"] and a[2]["correct"] and a[2]["compliant"]
+    summ = QP.summary(a)
+    assert summ["qclass"]["pointing"]["unreadable"] == 1.0 and summ["all"]["chance"] is None
+
+
 def test_rescore_follows_the_probe_relabelled_and_dropped(tmp_path):
     import argparse
     import json

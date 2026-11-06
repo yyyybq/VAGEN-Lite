@@ -158,10 +158,22 @@ def parse_answer(text: str, options: Sequence[str], yes_no: bool) -> Optional[st
     return None
 
 
+def free_form(row: Dict[str, Any]) -> bool:
+    """A question answered in free form (pointing: coordinates), neither by an option letter nor by Yes / No."""
+    return not (row.get("options") or []) and row["messages"][1]["content"] not in ("Yes", "No")
+
+
 def score(rows: Sequence[Dict[str, Any]], outputs: Sequence[str]) -> List[Dict[str, Any]]:
+    """Each answer read and judged.  A free-form question (``free_form``) is kept as text, unjudged (readable and
+    correct False); its own scorer reads the output."""
     out = []
     for r, text in zip(rows, outputs):
         gold = r["messages"][1]["content"]
+        if free_form(r):
+            out.append({"sample_id": r["sample_id"], "qtype": r["qtype"], "qclass": r["qclass"], "family": r["family"],
+                        "gold": gold, "output": text, "parsed": None, "correct": False, "readable": False,
+                        "compliant": False, "format": "other", "n_options": None})
+            continue
         yes_no = gold in ("Yes", "No")
         got = parse_answer(text, r.get("options") or [], yes_no)
         out.append({"sample_id": r["sample_id"], "qtype": r["qtype"], "qclass": r["qclass"], "family": r["family"],
