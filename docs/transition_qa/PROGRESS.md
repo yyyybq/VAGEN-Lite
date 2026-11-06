@@ -2142,3 +2142,16 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
 - **等用户的**：目标格式下的熵按全部回答还是只按动作段算（采样验收 ≤ 0.06 和 RL 熵停止线一起定；预登记草案第 9 节）。验收结果出来前要定。
 - 补丁 0003 第二版（14 个文件）在 cb42874a 的干净导出上打得上，打完和 matrix-v3 `fba7057a` 逐字节相同。`test_evaluation.py`、`test_targets_convert.py` 末尾多一个空行（git 有提示，不影响），链跑完再收拾。
 - 本条用卡：分析 1 扩展 0.3、数据第二版约 0.1，11-06 推理和 CPU 任务共约 5.9 卡时；G 的 SFT 另计（估计约 55 卡时）。
+
+### 12.61 11-06 傍晚：熵只按动作段算（用户选甲）；预登记第四版定稿
+
+- **用户的决定**（11-06）：目标格式下，采样验收的熵（≤ 0.06）和 RL 的熵停止线（0.3，连续 5 次）都只按动作段算；全部回答和目标段的熵照报、不设线。
+- **cells 驱动**（`watch/m3_cells.py`，备份 `m3_cells.py.bak_20261106b`）：`PASS_RULE = {"G": "action"}`。G 验收完先出两份汇总，再按动作段那条线挑 epoch，然后停在 `picked`，不起 RL（`NO_AUTO_RL`）。
+  - 在临时目录里空跑过：验收计划用 `targets_norm1000` 和 G 的 SFT 目录；验收完直接按规则挑；没有起任何链。
+  - 14:51 UTC 停掉旧驱动、起新驱动（pid 3475354）。G 当时在 `sft` 阶段，状态文件不受影响；SFT 链（pid 3339608）照常在跑。
+- **预登记第四版定稿**（`PREREG_G_vs_D.md`，草案换成定稿）：第 9 节写明熵的规则和实现；定稿在 G 的采样验收出结果之前。
+- **RL 之前要加的**：RL 的熵停止线读动作段的熵。
+  - 代理循环按回合记下动作段的 token 位置，做法同读不出的回合（`invalid_turn_spans`、`vagen/invalid_turns.spans_mask`）；
+  - 训练器在算 `actor/entropy` 的同一处另记 `actor/entropy_action` 和 `actor/entropy_targets`；
+  - 训练链的停止线读 `guards.entropy_key`，G 配成 `actor/entropy_action`。
+  - 带测试，等 SFT 链和验收链跑完、matrix 工作树能改代码时做；没做完不起 G 的 RL。

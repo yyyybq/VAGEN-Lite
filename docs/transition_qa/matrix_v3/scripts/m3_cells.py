@@ -14,7 +14,8 @@ chain to the RL chains, unattended.
    worktree's HEAD, started; a cell without seeds (E2, E as redefined on 2026-11-03) stops at the pick.
 Group G (2026-11-06): the acceptance runs in G's own format example (targets_norm1000); after it the cell stops at
 "accepted" with both summaries (the main line's and m3_accept_g.py's: the entropy over the action segment, the
-targets' form) until the user sets its pass rule; `pick G --rule action|all` then picks, and no RL starts here.
+targets' form), then picks with its pass rule (PASS_RULE: the user's 甲 of 2026-11-06, the action segment; None would
+stop for the user and `pick G --rule action|all` pick later); no RL starts here.
 A chain that fails stops its cell (logged; nothing is restarted here).  State: <tr>_sft/cell_state.json; log:
 exps/matrix_v3/watch/cells.log.
 """
@@ -37,7 +38,7 @@ SAMPLED = ["--samples", "4", "--temperature", "0.8", "--top-p", "0.92", "--entro
 # no RL started here: a pick waits for the user (NO_AUTO_RL); a targets format's pass rule is the user's to set
 # (PASS_RULE: "action" = entropy over the action segment, "all" = over the whole answer, None = not decided yet)
 NO_AUTO_RL = {"G"}
-PASS_RULE = {"G": None}
+PASS_RULE = {"G": "action"}  # the user's 甲 of 2026-11-06: the entropy over the action segment only (also RL's stop line)
 ACCEPT_G = M3 / "watch" / "m3_accept_g.py"
 ACCEPT_POOL = "zoetrope"  # the user, 2026-11-04 (甲): a one-card job starts there on any free card, while h800 queues
                           # it behind every 8-card job submitted before it
@@ -183,12 +184,15 @@ def step(group: str) -> bool:
                                       "--out", str(out_g), *names], cwd=W, env=ENV, capture_output=True, text=True)
                 if res.returncode:
                     raise RuntimeError(f"m3_accept_g: {res.stderr[-800:]}")
+                st["stage"] = "accepted"
+                save(group, st)
                 if PASS_RULE[group] is None:
-                    st["stage"] = "accepted"
                     log(f"{group}: acceptance done ({out.name}, {out_g.name}); the pass rule for its targets format "
                         "waits for the user, then: m3_cells.py pick " + group + " --rule action|all")
-                    save(group, st)
                     return True
+                log(f"{group}: acceptance done ({out.name}, {out_g.name}); pass rule {PASS_RULE[group]} (the user)")
+                pick_targets(group, PASS_RULE[group])  # "picked" or "no_pick"; never RL here
+                return True
             scores = json.loads((tr / "progress.json").read_text())["steps"]["pick_sft"]["decision"]["scores"]
             passing = [int(k) for k in sorted(st["epochs"], key=int) if acc[f"sft_{sft_group}_e{k}_s4"].get("pass")]
             ranked = sorted(passing, key=lambda e: (-scores[f"sft_{sft_group}_e{e}"], e))
@@ -217,7 +221,7 @@ def step(group: str) -> bool:
     return st["stage"] in ("failed", "no_pick", "rl_started", "picked", "accepted")
 
 
-def pick(group: str, rule: str) -> None:
+def pick_targets(group: str, rule: str) -> None:
     """A targets-format cell after its acceptance ("accepted"): the passing epochs under the user's pass rule
     (action: entropy_action <= 0.06; all: the whole answer's entropy <= 0.06; both with unreadable turns <= 1%), the
     best on val among them (ties to the earlier); no RL started."""
@@ -266,6 +270,6 @@ if __name__ == "__main__":
     elif cmd == "watch":
         watch(args)
     elif cmd == "pick":  # group G: python m3_cells.py pick G --rule action|all
-        pick(args[0], args[args.index("--rule") + 1])
+        pick_targets(args[0], args[args.index("--rule") + 1])
     else:
         sys.exit(__doc__)
