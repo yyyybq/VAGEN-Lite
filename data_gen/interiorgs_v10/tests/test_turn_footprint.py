@@ -3,13 +3,18 @@ footprint, env setting turn_footprint_radius (default None: off, today's rule).
 
 SwitchOffGoldenTest (made on the unchanged code, qwen3-main-dev 26338088): scripted episodes in the RL env on the
 synthetic two-room scene with thick walls and a stub renderer, under the live template (rl_env_v10_S0.yaml with real
-action names: S0, and V4 = D_cond with the progress scale 10/3).  Every step's observation text, reward, end,
-feedback, info keys, turn and trajectory metrics, reward components and pose must equal golden/env_trace_26338088.json.
-The golden holds the scene files, the two task rows (both start inside a low object's footprint, where the 3A rule
-would block every turn) and the env settings, so the test does not depend on the task generator.  With the switch
-off every later commit must give the same trace.  TURN_FOOTPRINT_GOLDEN_REGEN=1 rewrites the golden (only on the
-code it is meant to record)."""
+action names: S0, and V4 = D_cond with the progress scale 10/3).  The whole of every env.reset and env.step must
+equal golden/env_trace_26338088.json: the observation (its text and every other key, the frame as mode, size and
+sha256 of the pixels), the reward, the end, every info key (feedback, parsed actions, turn and trajectory metrics,
+the whole reward trace, scores, region metrics, pose ...) and the camera's c2w; floats rounded to 1e-9, the elapsed
+time and the stub frame's image_std (a float32 statistic of the test's own frame) left out.  The stub frame is a fixed
+pattern made without a random generator, so neither its pixels nor its hash can change with NumPy.  The golden holds
+the scene files, the two task rows (both start inside a low object's footprint, where the 3A rule would block every
+turn) and the env settings, so the test does not depend on the task generator, and the commit it was recorded on
+(generated_at, checked).  With the switch off every later commit must give the same trace.
+TURN_FOOTPRINT_GOLDEN_REGEN=1 rewrites the golden (only on the code it is meant to record)."""
 
+import hashlib
 import importlib.util
 import json
 import math
@@ -26,6 +31,7 @@ HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE.parent / "configs" / "rl_env_v10_S0.yaml"
 GOLDEN = HERE / "golden" / "env_trace_26338088.json"
 REGEN = os.environ.get("TURN_FOOTPRINT_GOLDEN_REGEN") == "1"
+GOLDEN_MADE_ON = {"commit": "26338088", "tracked_changes_outside_tests": False}  # what git_head() gave at the regen
 HAS_SCIPY = importlib.util.find_spec("scipy") is not None
 BAND_M = (0.10, 1.00)  # the spec's height band (an object box reaching into it blocks a turn)
 
@@ -46,10 +52,14 @@ EPISODES = {"start": (None, SCRIPT_START), "tea_table": (TEA_TABLE, SCRIPT_TEA_T
 
 
 def stub_frame():
-    """The stub renderer's frame (the one test_env_switches.py / test_blocked_turns.py use)."""
+    """The stub renderer's frame: a fixed 256 x 256 pattern made without a random generator (so its pixels, and the
+    frame hash the golden records, cannot change with NumPy), each channel spread evenly over 0-255 like a real view
+    (its standard deviation is about 74: never a low-information frame)."""
     from PIL import Image
 
-    return Image.fromarray(np.random.default_rng(0).integers(0, 255, (256, 256, 3), dtype=np.uint8))
+    y, x = np.mgrid[0:256, 0:256]
+    rgb = np.stack([(37 * x + 101 * y) % 256, (53 * x + 17 * y + 85) % 256, (11 * x + 73 * y + 170) % 256], axis=-1)
+    return Image.fromarray(rgb.astype(np.uint8))
 
 
 def plain(x):
@@ -111,27 +121,35 @@ def write_scene(golden, root):
     return scene
 
 
+def obs_record(obs):
+    """An observation as the golden records it: every key, the images (multi_modal_data) as [mode, size, sha256 of the
+    pixels]."""
+    rec = {k: v for k, v in obs.items() if k != "multi_modal_data"}
+    rec["frames"] = [[im.mode, list(im.size), hashlib.sha256(im.tobytes()).hexdigest()]
+                     for _, images in sorted((obs.get("multi_modal_data") or {}).items()) for im in (images or [])]
+    return rec
+
+
+def info_record(info):
+    """An info dict as the golden records it: every key but episode_elapsed_seconds (the clock) and image_std (info's
+    and turn_metrics': the float32 standard deviation of the test's stub frame, not a rule of the env)."""
+    rec = {k: v for k, v in info.items() if k not in ("episode_elapsed_seconds", "image_std")}
+    if isinstance(rec.get("metrics"), dict) and isinstance(rec["metrics"].get("turn_metrics"), dict):
+        rec["metrics"] = dict(rec["metrics"], turn_metrics={k: v for k, v in rec["metrics"]["turn_metrics"].items()
+                                                            if k != "image_std"})
+    return rec
+
+
+def turn_metrics_of(rec):
+    """The turn metrics of a step_record."""
+    return rec["info"]["metrics"]["turn_metrics"]
+
+
 def step_record(env, obs, reward, done, info):
-    """What the golden compares of one env.step (episode_elapsed_seconds is left out; image_std, a float32 standard
-    deviation, rounded to 1e-4)."""
-    metrics = info.get("metrics") or {}
-    turn = dict(metrics.get("turn_metrics") or {})
-    if turn.get("image_std") is not None:
-        turn["image_std"] = round(float(turn["image_std"]), 4)
-    components = (info.get("reward_trace") or {}).get("components") or {}
-    return plain({
-        "obs_str": obs.get("obs_str"),
-        "images": sum(len(v or []) for v in (obs.get("multi_modal_data") or {}).values()),
-        "reward": reward, "done": done, "success": info.get("success"),
-        "env_step": info.get("env_step"), "termination_reason": info.get("termination_reason"),
-        "env_feedback": info.get("env_feedback"), "actions": info.get("actions"),
-        "info_keys": sorted(info),
-        "turn_metrics": turn, "traj_metrics": metrics.get("traj_metrics"),
-        "components": {k: {"applied": v.get("applied"), "scale": v.get("scale"), "events": v.get("events")}
-                       for k, v in sorted(components.items())},
-        "current_pose": info.get("current_pose"),
-        "c2w": env.view_engine.get_pose(),
-    })
+    """What the golden compares of one env.step: the whole step -- the observation (obs_record), reward, end, every
+    info key (info_record) and the camera's c2w -- JSON-plain, floats rounded to 1e-9."""
+    return plain({"obs": obs_record(obs), "reward": reward, "done": done, "info": info_record(info),
+                  "c2w": env.view_engine.get_pose()})
 
 
 def make_env(cfg, row, path):
@@ -157,8 +175,8 @@ def run_episode(cfg, row, path, xy_yaw, answers):
     """One scripted episode in a fresh env: reset, the camera moved to ``xy_yaw`` (None: the task's start), then the
     answers until the episode ends."""
     env = make_env(cfg, row, path)
-    obs, _ = env.reset(seed=0)
-    out = {"system_prompt": env.system_prompt(), "reset_obs": obs.get("obs_str")}
+    obs, info = env.reset(seed=0)
+    out = {"system_prompt": env.system_prompt(), "reset": plain({"obs": obs_record(obs), "info": info_record(info)})}
     if xy_yaw is not None:
         place(env, xy_yaw)
     out["met_at_start"] = met(env)
@@ -208,8 +226,10 @@ def build_golden(workdir):
     labels = json.loads((scene_dir / "labels.json").read_text())
     picked = [r for r in rows if low_box_at(labels, np.array(r["init_camera"]["extrinsics"], float)[:2, 3])][:2]
     golden = {"_doc": "Experiment 3A switch-off golden (tests/test_turn_footprint.py SwitchOffGoldenTest): the RL env's "
-                      "outputs on scripted episodes with turn_footprint_radius absent, recorded on the unchanged code; "
-                      "every later commit must reproduce them. TURN_FOOTPRINT_GOLDEN_REGEN=1 rewrites this file.",
+                      "whole outputs on scripted episodes with turn_footprint_radius absent (every reset and step: the "
+                      "observation text and frame hash, reward, end, every info key but the clock and the stub frame's "
+                      "image_std, the camera's c2w), recorded on the unchanged code (generated_at); every later commit "
+                      "must reproduce them. TURN_FOOTPRINT_GOLDEN_REGEN=1 rewrites this file.",
               "generated_at": git_head(),
               "scene": {"name": scene_dir.name, "labels.json": labels,
                         "structure.json": json.loads((scene_dir / "structure.json").read_text())},
@@ -248,6 +268,11 @@ class SwitchOffGoldenTest(unittest.TestCase):
         cls.patch.stop()
         cls._tmp.cleanup()
 
+    def test_the_golden_was_recorded_on_the_unchanged_code(self):
+        """The golden was made at 26338088 with no tracked change outside the tests (git_head() at the regeneration):
+        a regeneration on any later commit, or on a changed tree, fails here."""
+        self.assertEqual(self.golden["generated_at"], GOLDEN_MADE_ON)
+
     def test_settings_are_the_live_templates(self):
         """The template and the reward preset still give the settings the golden was made with (otherwise the
         golden is out of date for another reason than this switch)."""
@@ -277,17 +302,32 @@ class SwitchOffGoldenTest(unittest.TestCase):
         blocked = []
         for key, ep in self.got.items():
             self.assertFalse(ep["met_at_start"], key)
-            self.assertFalse(any(s["success"] for s in ep["steps"]), key)
+            self.assertEqual(len(ep["reset"]["obs"]["frames"]), 1, key)
             for s in ep["steps"]:
-                names = BLOCKED_RE.findall(s["env_feedback"].split("blocked: ", 1)[1]) if "blocked: " in s["env_feedback"] else []
-                self.assertEqual(len(names), s["turn_metrics"]["collision_count"], key)
+                info = s["info"]
+                self.assertFalse(info["success"], key)
+                # the whole info is recorded: the reward trace, the metrics, the pose ... but not the clock nor the
+                # stub frame's statistic; every step shows one frame
+                self.assertLessEqual({"reward_trace", "reward_trace_flat", "metrics", "current_pose", "env_feedback",
+                                      "actions", "termination_reason"}, set(info), key)
+                self.assertFalse({"episode_elapsed_seconds", "image_std"} & set(info), key)
+                self.assertNotIn("image_std", turn_metrics_of(s), key)
+                self.assertEqual(len(s["obs"]["frames"]), 1, key)
+                feedback = info["env_feedback"]
+                names = BLOCKED_RE.findall(feedback.split("blocked: ", 1)[1]) if "blocked: " in feedback else []
+                self.assertEqual(len(names), turn_metrics_of(s)["collision_count"], key)
                 blocked += [(key.split("/")[-1], n) for n in names]
             if key.endswith("/start"):
-                self.assertEqual((ep["steps"][-1]["env_step"], ep["steps"][-1]["termination_reason"]),
+                self.assertEqual((ep["steps"][-1]["info"]["env_step"], ep["steps"][-1]["info"]["termination_reason"]),
                                  (12, "max_primitive_steps"), key)
         self.assertFalse([b for b in blocked if b[1].startswith("turn_")])
         self.assertIn(("start", "move_backward"), blocked)
         self.assertIn(("west_wall", "move_forward"), blocked)
+        # the stub frame (no random generator) is the one every observation shows
+        frame = stub_frame()
+        self.assertEqual(self.got["S0/" + self.golden["rows"][0]["task_id"] + "/start"]["reset"]["obs"]["frames"][0],
+                         ["RGB", [256, 256], hashlib.sha256(frame.tobytes()).hexdigest()])
+        self.assertGreater(float(np.asarray(frame, dtype=np.float64).std()), 50.0)
 
 
 # ---------------------------------------------------------------------------
@@ -625,10 +665,10 @@ class EnvTurnFootprintTest(unittest.TestCase):
                 if runs[radius][-1]["done"]:
                     break
         self.assertEqual(len(runs[None]), len(runs[0.25]))
-        self.assertGreater(sum(s["turn_metrics"]["collision_count"] for s in runs[None]), 0)
-        self.assertFalse(any("turn_footprint_blocks" in s["turn_metrics"] for s in runs[None]))
+        self.assertGreater(sum(turn_metrics_of(s)["collision_count"] for s in runs[None]), 0)
+        self.assertFalse(any("turn_footprint_blocks" in turn_metrics_of(s) for s in runs[None]))
         for off, on in zip(runs[None], runs[0.25]):
-            self.assertEqual(on["turn_metrics"].pop("turn_footprint_blocks"), 0)
+            self.assertEqual(turn_metrics_of(on).pop("turn_footprint_blocks"), 0)
             self.assertEqual(on, off)
 
     def test_turning_in_place_until_the_action_limit(self):
