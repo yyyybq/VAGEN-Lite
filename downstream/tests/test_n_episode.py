@@ -6,6 +6,7 @@ import os
 import socket
 import sys
 import threading
+import types
 from pathlib import Path
 
 import pytest
@@ -142,6 +143,35 @@ def test_a_wall_blocks_the_feedback_says_so_and_three_bad_replies_end_it(monkeyp
     assert calls[1] == "False|3 of 4 actions executed; blocked: move_forward (blocked by wall)."
     assert rec["end"] == "invalid" and rec["invalid_turns"] == 3 and rec["turns"] == 4 and not rec["success"]
     assert calls[3] == "False|Action had no effect."
+
+
+def test_done_is_an_unknown_action_unless_the_config_enables_it(monkeypatch):
+    """2026-11-06: tier gd's Q3RS replied "done"; both evaluation configs set enable_explicit_done false, so the env
+    reads it as an unknown action name (an invalid turn), not as a move n_env cannot play."""
+    utils = types.SimpleNamespace(ACTION_SPACE_PRESETS={"strafe": {"move_forward", "turn_left", "done"}})
+    monkeypatch.setattr(N, "active_spatial", lambda name: utils)
+    off = types.SimpleNamespace(action_space="strafe", enable_explicit_done=False)
+    on = types.SimpleNamespace(action_space="strafe", enable_explicit_done=True)
+    assert E.allowed_actions(off) == {"move_forward", "turn_left"}
+    assert "done" in E.allowed_actions(on) and "done" in E.allowed_actions(types.SimpleNamespace(action_space="strafe"))
+
+
+def test_an_enabled_done_ends_the_episode_after_the_moves_before_it(monkeypatch):
+    calls = []
+    monkeypatch.setattr(E, "system_text", lambda cfg, t: "SYS")
+    monkeypatch.setattr(E, "user_text", lambda cfg, first, pose, task, fb="": f"{first}|{fb}")
+    monkeypatch.setattr(N, "box_judge", lambda item, pose: {"success": False, "metric": {"shaping_score": 0.1},
+                                                            "lateral": {}})
+    monkeypatch.setattr(N, "measurements", lambda item, j: {})
+    monkeypatch.setattr(E, "allowed_actions", lambda cfg: set(N.ACTIONS) | {"done"})
+    monkeypatch.setattr(E, "parse", lambda text, cfg, allowed: (text.split(","), ""))
+
+    def ask(msgs, images, n):
+        calls.append(1)
+        return "move_forward,done,move_forward"
+    rec, _ = E.run_episode(FakeScene(), INST, ask, FakeCfg(), {"max_turns": 12, "response_length_per_turn": 384})
+    assert rec["end"] == "done" and rec["turns"] == 1 and rec["steps"] == 1 and not rec["success"]
+    assert rec["turn_log"][0]["executed"] == ["move_forward"] and len(calls) == 1
 
 
 def test_step_budget_ends_the_episode(monkeypatch):

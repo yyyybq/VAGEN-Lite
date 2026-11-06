@@ -98,8 +98,22 @@ def user_text(cfg, first: bool, pose, task_prompt: str, feedback: str = "") -> s
 
 
 def allowed_actions(cfg) -> set:
+    """The action names the env accepts: its action_space preset, without "done" when the config has
+    enable_explicit_done false (env.py drops it the same way, so "done" reads as an unknown action name and the turn
+    is invalid).  Fixed 2026-11-06: tier gd's Q3RS once replied "done", which this list then let through and
+    n_env.apply_action could not play (ValueError: done, an error row); both evaluation configs set it false."""
     utils = N.active_spatial("utils")
-    return set(utils.ACTION_SPACE_PRESETS[cfg.action_space])
+    allowed = set(utils.ACTION_SPACE_PRESETS[cfg.action_space])
+    if not _cfg_get(cfg, "enable_explicit_done", True):
+        allowed.discard("done")
+    return allowed
+
+
+def _cfg_get(cfg, key: str, default):
+    try:
+        return cfg.get(key, default)
+    except AttributeError:
+        return getattr(cfg, key, default)
 
 
 def parse(text: str, cfg, allowed: set):
@@ -234,7 +248,11 @@ def run_episode(scene, inst: dict, ask, cfg, entry: dict, history: bool = False)
             continue
         invalid = 0
         moves, blocked, start_pose = [], [], pose
+        declared_done = False
         for a in actions:
+            if a == "done":  # only reachable when the config enables it (allowed_actions); the env ends there
+                declared_done = True
+                break
             new, hit = scene.try_action(pose, a)
             moves.append(a)
             steps += 1
@@ -255,6 +273,9 @@ def run_episode(scene, inst: dict, ask, cfg, entry: dict, history: bool = False)
         turns.append(rec)
         if success:
             end = "success"
+            break
+        if declared_done:
+            end = "done"
             break
         if steps >= budget:
             end = "steps"
