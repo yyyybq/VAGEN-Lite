@@ -43,10 +43,12 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 
 import yaml
 
-POOLS = ("P0", "P1", "P2", "P2q", "P2f", "P2f2k")
+POOLS = ("P0", "P1", "P2", "P2q", "P2f", "P2f2k", "Pg", "P2t")
 POOL_ZH = {"P0": "P0 仿 benchmark 的 QA", "P1": "P1 转移题", "P2": "P2 SFT 动作轨迹",
            "P2q": "P2q SFT 动作轨迹（新格式：真实动作名）", "P2f": "P2f 格式 SFT 的短对话（真实动作名）",
-           "P2f2k": "P2f2k 主线的格式对话（2,000 段去掉边缘场景，真实动作名）"}
+           "P2f2k": "P2f2k 主线的格式对话（2,000 段去掉边缘场景，真实动作名）",
+           # group G of matrix v3 (2026-11-06): data_gen/transition_qa/pointing_qa.py, data_gen/sft_mixture/targets_convert.py
+           "Pg": "Pg 指认题（点出 / 框出任务里的目标）", "P2t": "P2t SFT 动作轨迹（先写目标位置再动作）"}
 DATASET_INFO = {"formatting": "sharegpt",
                 "columns": {"messages": "messages", "images": "images", "videos": "videos"},
                 "tags": {"role_tag": "role", "content_tag": "content", "user_tag": "user",
@@ -104,10 +106,11 @@ def load_p0(spec: Dict[str, Any], split: str) -> List[Dict[str, Any]]:
     return out
 
 
-def load_p1(spec: Dict[str, Any], split: str) -> List[Dict[str, Any]]:
+def load_p1(spec: Dict[str, Any], split: str, name: str = "P1") -> List[Dict[str, Any]]:
+    """Question rows of the transition-question kind (P1, and Pg: the pointing questions of group G)."""
     out = []
     for r in read_jsonl(Path(spec[split])):
-        out.append(row("P1", r, r["sample_id"], r["scene"], r["qtype"],
+        out.append(row(name, r, r["sample_id"], r["scene"], r["qtype"],
                        {"qtype": r["qtype"], "qclass": r["qclass"], "family": r["family"], "task_id": r["task_id"],
                         "questions": 1}))
     return out
@@ -135,21 +138,28 @@ def load_pool(name: str, spec: Dict[str, Any], split: str, tasks: Dict[str, Dict
     if kind == "interiorgs_qa_lf":
         return load_p0(spec, split)
     if kind == "transition_qa":
-        return load_p1(spec, split)
+        return load_p1(spec, split, name)
     if kind == "sft_trajectories":
         return load_p2(spec, split, tasks, name)
     raise MixtureError(f"pool {name}: unknown kind {kind!r}")
 
 
-def check_format(name: str, split: str, rows: Sequence[Dict[str, Any]], format_example: str) -> None:
+def check_format(name: str, split: str, rows: Sequence[Dict[str, Any]], format_example: str,
+                 tasks: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
     """Action rows show the RL env's text for ``format_example``: the system prompt of their task family and, at the
-    end of each user turn, the format block (the first turn's with the example), each exactly once."""
+    end of each user turn, the format block (the first turn's with the example), each exactly once.  A targets format
+    (group G of matrix v3) names the task's objects in its block: ``tasks`` gives them (task_rows)."""
     from data_gen.interiorgs_v10.admission import load_policy
     from data_gen.interiorgs_v10.release import _format_block, protocol_system_prompt
     from data_gen.interiorgs_v10.training_prep import with_format_example
+    from vagen.envs.active_spatial.pointing import target_refs
+    from vagen.envs.active_spatial.prompt import TARGET_FORMATS, targets_format_block
 
     policy = with_format_example(load_policy(), format_example)
     blocks = {first: _format_block(policy, first) for first in (True, False)}
+    targets = format_example in TARGET_FORMATS
+    if targets and not tasks:
+        raise MixtureError(f"{name} {split}: the {format_example} format names each task's objects: give task_rows")
     system: Dict[str, str] = {}
     bad = collections.Counter()
     for r in rows:
@@ -160,6 +170,11 @@ def check_format(name: str, split: str, rows: Sequence[Dict[str, Any]], format_e
         if not msgs or msgs[0]["role"] != "system" or msgs[0]["content"] != system[family]:
             bad["system prompt"] += 1
             continue
+        if targets:
+            refs = target_refs(tasks[r["source_id"]])
+            ex = policy["sft"]["export"]
+            blocks = {first: targets_format_block(format_example, ex["max_actions_per_turn"], "|", first, refs)
+                      for first in (True, False)}
         users = [m for m in msgs if m["role"] == "user"]
         if not users or not all(m["content"].endswith("\n" + blocks[k == 0]) and m["content"].count(blocks[k == 0]) == 1
                                 for k, m in enumerate(users)):
@@ -283,8 +298,8 @@ def build(cfg: Dict[str, Any], only: Optional[Sequence[str]] = None) -> Dict[str
         if val_split != "val":
             notes.append(f"{name} 的验证行来自 {val_split} 场景（{spec.get('val_scenes_reason', '配置指定')}），不是 val 场景")
         if spec.get("format_example"):  # the text the RL env shows (Qwen3 matrix: real action names)
-            check_format(name, "train", tr, str(spec["format_example"]))
-            check_format(name, "val", va, str(spec["format_example"]))
+            check_format(name, "train", tr, str(spec["format_example"]), tasks)
+            check_format(name, "val", va, str(spec["format_example"]), tasks)
             notes.append(f"{name} 每条对话的系统提示和每个用户回合的格式行，都和 RL 环境在格式样例 "
                          f"{spec['format_example']} 下显示的逐字相同（构建时逐条核对）")
         if excluded_scenes:

@@ -370,6 +370,7 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
     item = env.current_item or {}
     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
     done, trajectory, end_reason, earlier = False, [], None, []
+    pointed: Counter = Counter()  # group G of matrix v3: the turns the env judged a targets segment in
     start = gate_summary(env._calculate_canonical_metric()) if frames is not None else None
 
     def keep(image: Any, turn: int) -> Optional[str]:
@@ -408,6 +409,10 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         collisions += blocked
         valid = bool(tm.get("action_is_valid", bool(parsed)))
         invalid += int(not valid)
+        pointing = step_info.get("pointing")  # group G of matrix v3: the targets segment's judgment
+        if pointing is not None:
+            pointed.update(turns=1, ok=int(pointing["ok"]), old=int(pointing["old"]))
+            pointed["score"] += float(pointing["score"])
         metric = env._calculate_canonical_metric()
         met = bool(metric and metric.get("success"))
         if met and not success:
@@ -417,10 +422,15 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             trajectory.append(dict(seen, answer=text, actions=[str(a) for a in parsed], valid=valid,
                                    collisions=blocked, reward=round(float(reward), 4), met=met,
                                    **gate_summary(metric)))
+            if pointing is not None:
+                trajectory[-1]["pointing"] = {k: pointing[k] for k in ("score", "ok", "error", "entries", "truth")}
     row = {"index": index, "task_id": item.get("task_id"), "scene_id": item.get("scene_id"),
            "task_type": item.get("task_type"), "d_star": int((item.get("difficulty") or {}).get("d_star", 0)),
            "success": success, "actions_to_success": actions_to_success, "turns": turns,
            "actions": attempted, "collisions": collisions, "invalid_turns": invalid}
+    if pointed:
+        row["pointing"] = {"turns": int(pointed["turns"]), "score": round(float(pointed["score"]), 4),
+                           "ok_turns": int(pointed["ok"]), "old_turns": int(pointed["old"])}
     if sample is not None:
         row["sample"] = int(sample)
     if frames is not None:
@@ -595,6 +605,18 @@ def token_entropy(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     return {"entropy": round(sum(e * n for e, n in pairs) / tokens, 5), "entropy_tokens": tokens}
 
 
+def pointing_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Group G of matrix v3: over the turns the env judged a targets segment in, the mean pointing score and the
+    shares of well-formed answers and of answers without a targets segment (the old format); {} when none was."""
+    pts = [r["pointing"] for r in rows if r.get("pointing")]
+    turns = sum(p["turns"] for p in pts)
+    if not turns:
+        return {}
+    return {"pointing_score": round(sum(p["score"] for p in pts) / turns, 4),
+            "targets_ok_rate": round(sum(p["ok_turns"] for p in pts) / turns, 4),
+            "targets_old_rate": round(sum(p["old_turns"] for p in pts) / turns, 4)}
+
+
 def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     ok = [r for r in rows if "error" not in r]
     succ = [r for r in ok if r["success"]]
@@ -628,6 +650,7 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "invalid_episode_mean": (round(sum(r["invalid_turns"] / r["turns"] for r in ok if r["turns"]) /
                                        sum(1 for r in ok if r["turns"]), 4) if any(r["turns"] for r in ok) else None),
         **token_entropy(ok),
+        **pointing_summary(ok),
         "ended_by": dict(sorted(ended.items())) if ended else None,
         # used up the action or turn limit (with or without meeting the task at the last action)
         "used_limit": sum(ended[k] for k in LIMIT_ENDS) if ended else None,
@@ -846,7 +869,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
     r.add_argument("--no-collision-end", action="store_true", help="3 blocked moves in a row no longer end the task")
     r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
-    r.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
+    r.add_argument("--format-example", default=None,
+                   choices=["placeholder", "action_names", "targets_pixel", "targets_norm1000"],
                    help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
     r.add_argument("--entropy", action="store_true",
                    help="round 12 freeze: record each answer's token entropy (top-20 log-probabilities, after the "

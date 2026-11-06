@@ -126,6 +126,29 @@ def test_free_form_rows_are_kept_as_text():
     assert summ["qclass"]["pointing"]["unreadable"] == 1.0 and summ["all"]["chance"] is None
 
 
+def test_pointing_questions_are_judged():
+    """Group G of matrix v3: a point inside the true box, a box with IoU >= 0.5, in pixels or 0-1000 coordinates."""
+    box = [100.0, 80.0, 140.0, 100.0]
+    row = lambda judge, coords="pixel": {"judge": judge, "box": box, "coords": coords, "render_size": [256, 256]}  # noqa: E731
+    assert QP.judge_pointing(row("point"), "(120,90)")["correct"]
+    assert QP.judge_pointing(row("point"), "(120,90)")["compliant"]
+    assert not QP.judge_pointing(row("point"), "(10, 10)")["correct"]
+    loose = QP.judge_pointing(row("point"), "The lamp is at (120, 90).")
+    assert loose["correct"] and loose["readable"] and not loose["compliant"]
+    assert QP.judge_pointing(row("point", "norm1000"), "(469,352)")["correct"]
+    assert not QP.judge_pointing(row("point", "norm1000"), "(120,90)")["correct"]
+    assert QP.judge_pointing(row("box"), "(100,80,140,100)")["correct"]
+    assert QP.judge_pointing(row("box"), "(105,82,140,100)")["correct"]  # IoU 0.79
+    assert not QP.judge_pointing(row("box"), "(100,80,120,90)")["correct"]  # IoU 0.25
+    assert QP.judge_pointing(row("box", "norm1000"), "(391,313,547,391)")["correct"]
+    assert not QP.judge_pointing(row("box"), "(120,90)")["readable"]
+    rows = [{"sample_id": "p", "qtype": "point_now", "qclass": "pointing", "family": "f", "options": [],
+             "messages": [{"role": "user", "content": "<image>q"}, {"role": "assistant", "content": "(120,90)"}],
+             **row("point")}]
+    a = QP.score(rows, ["(121, 91)"])[0]
+    assert a["correct"] and a["readable"] and a["compliant"] and a["parsed"] == "121,91"
+
+
 def test_rescore_follows_the_probe_relabelled_and_dropped(tmp_path):
     import argparse
     import json

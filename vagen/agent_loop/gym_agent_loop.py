@@ -70,6 +70,13 @@ def turn_has_think(info: Any) -> bool:
     return bool(tm.get("has_think", False))
 
 
+def turn_pointing(info: Any) -> Dict[str, Any]:
+    """Group G of matrix v3: the turn's pointing judgment (the env's turn_metrics pointing_score, targets_bad,
+    targets_old); {} when the env does not judge a targets segment."""
+    tm = ((info or {}).get("metrics") or {}).get("turn_metrics") or {} if isinstance(info, dict) else {}
+    return {k: tm[k] for k in ("pointing_score", "targets_bad", "targets_old") if k in tm}
+
+
 class AgentData:
     """Container for all mutable trajectory state."""
     def __init__(
@@ -107,6 +114,10 @@ class AgentData:
         self.invalid_spans: List[List[int]] = []
         self.progress_return: float = 0.0  # round 12 freeze, V8: the env's applied progress reward, summed
         self.think_turns: int = 0    # turns whose answer had thinking text (turn_metrics.has_think)
+        # group G of matrix v3: the summed pointing score, the turns with a malformed / without a targets segment
+        self.pointing_sum: float = 0.0
+        self.targets_bad_turns: int = 0
+        self.targets_old_turns: int = 0
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -347,6 +358,12 @@ class GymAgentLoop(AgentLoopBase):
                     "invalid_action":     agent_data.invalid_turns / max(1, agent_data.env_turns),
                     # the share of the episode's turns whose answer had thinking text (transition/think_rate)
                     "think_rate":         agent_data.think_turns / max(1, agent_data.env_turns),
+                    # group G of matrix v3 (2026-11-06): the episode's mean pointing score per turn and the share of
+                    # its turns with a malformed / without a targets segment; 0 when the env judges no targets
+                    # (transition/pointing_score, transition/targets_bad_rate, transition/targets_old_rate)
+                    "pointing_score":     agent_data.pointing_sum / max(1, agent_data.env_turns),
+                    "targets_bad":        agent_data.targets_bad_turns / max(1, agent_data.env_turns),
+                    "targets_old":        agent_data.targets_old_turns / max(1, agent_data.env_turns),
                 },
             },
         )
@@ -458,6 +475,10 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.invalid_turns += int(turn_invalid(info))
         agent_data.end_turn(turn_invalid(info))  # round 12 freeze (vagen/invalid_turns.py)
         agent_data.think_turns += int(turn_has_think(info))
+        pointing = turn_pointing(info)  # group G of matrix v3
+        agent_data.pointing_sum += float(pointing.get("pointing_score", 0.0))
+        agent_data.targets_bad_turns += int(bool(pointing.get("targets_bad", False)))
+        agent_data.targets_old_turns += int(bool(pointing.get("targets_old", False)))
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))

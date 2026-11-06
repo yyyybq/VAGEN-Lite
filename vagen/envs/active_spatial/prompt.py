@@ -1,6 +1,8 @@
 # Active Spatial Intelligence Environment Prompts
 # This file defines system prompts and format configurations for the active spatial navigation task.
 
+from typing import Sequence
+
 FORMAT_CONFIGS = {
     "free_think": {
         "description": "You should first give your thought process, and then your answer.",
@@ -39,24 +41,80 @@ FORMAT_CONFIGS = {
 # RL runs copied those names into their answers (cluster_runs/FORMAT_DRIFT_R12.md).  "action_names" shows real
 # action names, <action>move_forward|turn_left|</action> (move_forward alone when one action is allowed per step);
 # both exist in every action space.  The system prompt's "Response format" line shows the same.
-FORMAT_EXAMPLES = ("placeholder", "action_names")
+# Group G of matrix v3 ("point first, then act"; the user's instruction of 2026-11-06, part 4): a short targets
+# segment before the action, <targets>A: (x,y); B: (x,y)</targets><action>move_forward|turn_left|</action>: where each
+# object the task names is in the current image (A, B, ... as the format block lists them, in the task text's words),
+# or "none" for an object that is not clearly visible; the action part shows real action names as "action_names".
+# "targets_pixel": pixels of the 256 x 256 image; "targets_norm1000": 0 to 1000 across the image (Qwen-VL's grounding
+# convention).  Only with prompt_format no_think; pointing.py reads and judges the segment.
+TARGET_FORMATS = {"targets_pixel": "pixel", "targets_norm1000": "norm1000"}  # format example -> coordinates
+FORMAT_EXAMPLES = ("placeholder", "action_names") + tuple(TARGET_FORMATS)
+SLOT_LETTERS = ("A", "B", "C", "D")
+_TARGET_TEXT = {
+    "targets_pixel": {"where": "pixels of the 256 x 256 image", "example": "(120,88)",
+                      "point": "(x,y) is a pixel on the object in the 256 x 256 image, x from the left edge and y "
+                               "from the top edge"},
+    "targets_norm1000": {"where": "0 to 1000 across the image", "example": "(469,344)",
+                         "point": "(x,y) is a point on the object, x and y from 0 to 1000 across the image, x from "
+                                  "the left edge and y from the top edge"},
+}
 
 
-def action_format_line(action_sep: str = "|", max_actions: int = 5, format_example: str = "placeholder") -> str:
-    """The format line of the action tags for the format example setting."""
+def action_format_line(action_sep: str = "|", max_actions: int = 5, format_example: str = "placeholder",
+                       n_slots: int = 2) -> str:
+    """The format line of the action tags for the format example setting (a targets format: the targets segment for
+    ``n_slots`` objects first)."""
     if format_example == "placeholder":
         return f"<action>action1{action_sep}action2{action_sep}...{action_sep}</action>"
-    if format_example != "action_names":
+    if format_example not in FORMAT_EXAMPLES:
         raise ValueError(f"format example must be one of {FORMAT_EXAMPLES}, not {format_example!r}")
     names = ("move_forward", "turn_left")[: 1 if int(max_actions) <= 1 else 2]
-    return "<action>" + "".join(n + action_sep for n in names) + "</action>"
+    line = "<action>" + "".join(n + action_sep for n in names) + "</action>"
+    return targets_line(n_slots) + line if format_example in TARGET_FORMATS else line
+
+
+def targets_line(n_slots: int = 2) -> str:
+    """The targets segment of the format line: one "(x,y)" per object the task names."""
+    return "<targets>" + "; ".join(f"{s}: (x,y)" for s in SLOT_LETTERS[: max(1, int(n_slots))]) + "</targets>"
+
+
+def targets_example(format_example: str, n_slots: int = 2, action_sep: str = "|") -> str:
+    """The example answer of a targets format: A at a point, the other objects not in view."""
+    entries = ([f"A: {_TARGET_TEXT[format_example]['example']}"]
+               + [f"{s}: none" for s in SLOT_LETTERS[1: max(1, int(n_slots))]])
+    return "<targets>" + "; ".join(entries) + f"</targets><action>move_forward{action_sep}</action>"
+
+
+def targets_description(format_example: str) -> str:
+    """The system prompt's description of a targets format."""
+    return ("Before your action, give the position of each object the task names, in the order the format block "
+            f"lists them: {_TARGET_TEXT[format_example]['point']}; write none for an object you cannot see clearly.")
+
+
+def targets_format_block(format_example: str, max_actions: int = 5, action_sep: str = "|", add_example: bool = True,
+                         target_refs: Sequence[str] = ()) -> str:
+    """A user turn's format block of a targets format: the format line for the task's objects, which object each
+    letter is (the task text's words, pointing.target_refs) and, on the first turn, the example."""
+    refs = [str(r) for r in target_refs][: len(SLOT_LETTERS)]
+    n = len(refs) or 2
+    prompt = (f"Respond with the targets ({_TARGET_TEXT[format_example]['where']}), then the action:\n"
+              f"{action_format_line(action_sep, max_actions, format_example, n_slots=n)}\n")
+    if refs:
+        prompt += "; ".join(f"{s} is {r}" for s, r in zip(SLOT_LETTERS, refs)) + ".\n"
+    prompt += f"\nYou can take up to {max_actions} actions per step.\n"
+    if add_example:
+        prompt += "\nExample: " + targets_example(format_example, n, action_sep)
+    return prompt
 
 
 def _response_format(format_config, action_sep: str, max_actions: int, format_example: str) -> str:
-    """The system prompt's "Response format" text: the format's own (placeholder) or with real action names."""
+    """The system prompt's "Response format" text: the format's own (placeholder) or with real action names (a
+    targets format: the targets segment first; prompt_format no_think only)."""
     text = format_config["format"]
     if format_example == "placeholder":
         return text
+    if format_example in TARGET_FORMATS and text != "<action>...</action>":
+        raise ValueError(f"the {format_example} format example goes with prompt_format no_think only")
     return text.replace("<action>...</action>", action_format_line(action_sep, max_actions, format_example))
 
 
@@ -173,8 +231,11 @@ def system_prompt(**kwargs):
     enable_done = bool(kwargs.get("enable_explicit_done", True))
 
     format_config = FORMAT_CONFIGS.get(selected_format, FORMAT_CONFIGS["free_think"])
-    response_format = _response_format(format_config, action_sep, max_actions,
-                                       str(kwargs.get("format_example", "placeholder")))
+    format_example = str(kwargs.get("format_example", "placeholder"))
+    if format_example in TARGET_FORMATS:  # group G of matrix v3: the targets segment's description and example
+        format_config = dict(format_config, description=targets_description(format_example),
+                             example=targets_example(format_example, 2, action_sep))
+    response_format = _response_format(format_config, action_sep, max_actions, format_example)
 
     actions_block = _action_descriptions(
         max_actions=max_actions,
@@ -348,6 +409,9 @@ def format_prompt_no_think(**kwargs):
     max_actions = kwargs.get("max_actions_per_step", 5)
     action_sep = kwargs.get("action_sep", "|")
     add_example = kwargs.get("add_example", True)
+    if kwargs.get("format_example") in TARGET_FORMATS:  # group G of matrix v3: the targets segment first
+        return targets_format_block(kwargs["format_example"], max_actions, action_sep, add_example,
+                                    kwargs.get("target_refs") or ())
     action_line = action_format_line(action_sep, max_actions, kwargs.get("format_example", "placeholder"))
     
     prompt = f"""Respond with only the action:

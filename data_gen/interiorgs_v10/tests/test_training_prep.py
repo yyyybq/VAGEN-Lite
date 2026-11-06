@@ -574,6 +574,63 @@ class TrainingPrepTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             config("rl_pool_flagged", task_pool="reserve", exclude=str(flags))
 
+    def test_rl_config_targets_format_and_pointing_reward(self):
+        """Group G of matrix v3 (2026-11-06): a targets format example and --pointing-reward reach the env config and
+        the report; the SFT conversations' targets format is recognised (not taken for action_names); the pointing
+        reward needs a targets format; the RL text must be the start model's."""
+        import yaml
+
+        from vagen.envs.active_spatial import prompt as P
+
+        sft = self.root / "sft_rl_targets"
+        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
+                                    limit=0, out=str(sft)))
+        rows = [dict(r, reserve=(r["split"] == "train" and i % 2 == 1)) for i, r in enumerate(TP._jsonl(sft / "rows.jsonl"))]
+        (sft / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        template = self.root / "ppo_template_targets.yaml"
+        template.write_text(yaml.safe_dump({
+            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12},
+            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False},
+            "actor_rollout_ref": {"model": {"path": "old"}, "actor": {"ppo_mini_batch_size": 8},
+                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4, "agent": {"num_workers": 8}}},
+            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
+        formal = [r for r in rows if r["split"] == "train" and not r["reserve"]]
+        convs = {}
+        for fmt in ("action_names", "targets_pixel", "targets_norm1000"):
+            block = P.format_prompt["no_think"](max_actions_per_step=5, action_sep="|", add_example=True,
+                                                format_example=fmt, target_refs=["the lamp", "the sofa"])
+            convs[fmt] = self.root / f"sft_conv_g_{fmt}.jsonl"
+            convs[fmt].write_text("".join(json.dumps({"source_task_id": r["task_id"], "conversations": [
+                {"role": "system", "content": "s"}, {"role": "user", "content": "[Initial Observation]:\n<image>\n" + block},
+                {"role": "assistant", "content": "<action>move_forward|</action>"}]}) + "\n" for r in formal))
+            self.assertEqual(TP.sft_format_examples([convs[fmt]]), [fmt])
+
+        def config(out_name, **kw):
+            TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
+                Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
+                gs_root="/ply", model="/m", name="t", run_root=str(self.root / f"run_{out_name}"), val_limit=0,
+                trial=False, out=str(self.root / out_name), task_pool="reserve", **kw))
+            out = self.root / out_name
+            return (yaml.safe_load((out / "train_env.yaml").read_text())["envs"][0]["config"],
+                    json.loads((out / "rl_config_report.json").read_text()))
+
+        env, report = config("rl_g", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_pixel",
+                             pointing_reward=0.1)
+        self.assertEqual((env["prompt_format_example"], env["pointing_reward"]), ("targets_pixel", 0.1))
+        self.assertEqual((report["format_example"], report["pointing_reward"]), ("targets_pixel", 0.1))
+        self.assertIn("Response format: <targets>A: (x,y); B: (x,y)</targets><action>move_forward|turn_left|</action>",
+                      TP.env_system_prompt(env, "fov_inclusion"))
+        env0, report0 = config("rl_g0", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_pixel")
+        self.assertNotIn("pointing_reward", env0)
+        self.assertIsNone(report0["pointing_reward"])
+        self.assertEqual({k: v for k, v in env.items() if k not in ("pointing_reward", "jsonl_path")},
+                         {k: v for k, v in env0.items() if k != "jsonl_path"})
+        with self.assertRaises(SystemExit):  # the pointing reward needs a targets format
+            config("rl_g_names", sft_trajectories=[str(convs["action_names"])], format_example="action_names",
+                   pointing_reward=0.1)
+        with self.assertRaises(SystemExit):  # the RL text must be the start model's
+            config("rl_g_other", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_norm1000")
+
     def test_rl_config_format_example(self):
         """Round 12 freeze (the user's 3.1.1): --format-example sets the env's format line (placeholder names or
         real action names; default the SFT export's); the start model's SFT conversations must show the same text."""

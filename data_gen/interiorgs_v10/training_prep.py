@@ -571,7 +571,10 @@ def sft_format_examples(paths: Sequence[Path], max_actions: int = 5, action_sep:
             continue
         turns = json.loads(line).get("conversations") or []
         text = next((str(t.get("content", "")) for t in turns if t.get("role") == "user"), "")
-        found |= {f for f in P.FORMAT_EXAMPLES if P.action_format_line(action_sep, max_actions, f) in text}
+        targets = {f for f in P.TARGET_FORMATS  # group G of matrix v3: a targets format names itself in its header
+                   if P.targets_format_block(f, max_actions, action_sep, False).split("\n", 1)[0] in text}
+        found |= targets or {f for f in ("placeholder", "action_names")
+                             if P.action_format_line(action_sep, max_actions, f) in text}
     return sorted(found)
 
 
@@ -672,6 +675,13 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         history["env"]["lenient_parse"] = True
     if getattr(args, "invalid_penalty", None) is not None:  # round 12 freeze (3.1.3): the unreadable answer's penalty
         history["env"]["invalid_penalty_override"] = float(args.invalid_penalty)
+    if getattr(args, "pointing_reward", None) is not None:  # group G of matrix v3 (2026-11-06): the pointing reward
+        if not fmt.startswith("targets_"):
+            raise SystemExit(f"--pointing-reward needs a targets format example (--format-example targets_...), "
+                             f"not {fmt!r}")
+        history["env"]["pointing_reward"] = float(args.pointing_reward)
+    if fmt.startswith("targets_") and (int(tcfg.get("image_width", 0)), int(tcfg.get("image_height", 0))) != (256, 256):
+        raise SystemExit("a targets format example needs the 256 x 256 frames its boxes are judged on")
     history["env"].update(design_variant_overrides(args, history["env"]))
     env_paths = {}
     for split, selected in parts.items():
@@ -845,6 +855,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "model_type": getattr(args, "model_type", None), "model_type_overrides": type_overrides,
               "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
+              "pointing_reward": (float(args.pointing_reward) if getattr(args, "pointing_reward", None) is not None
+                                  else None),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
               "entropy_coeff_override": getattr(args, "entropy_coeff", None),
               "kl_loss_coef": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("kl_loss_coef"),
@@ -1148,10 +1160,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--task-pool", choices=TASK_POOLS, default=None,
                    help="round 11: the train tasks RL takes: formal (rounds 6-10, the default) or reserve (rows from sft-frames "
                         "--include-reserve; the rule since round 11: RL trains on tasks SFT never trained on)")
-    c.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
+    c.add_argument("--format-example", default=None,
+                   choices=["placeholder", "action_names", "targets_pixel", "targets_norm1000"],
                    help="round 12 freeze: the format line shows placeholder names (action1|action2|...) or real "
                         "action names; default the SFT export's (admission policy), and it must match the SFT "
-                        "conversations given with --sft-trajectories")
+                        "conversations given with --sft-trajectories; group G of matrix v3: targets_pixel / "
+                        "targets_norm1000, a targets segment before the action (prompt.TARGET_FORMATS)")
     c.add_argument("--lenient-parse", action="store_true",
                    help="round 12 freeze: the env reads an answer leniently when the strict reading finds no action "
                         "(spaces instead of underscores, the first complete action block, a missing opening tag)")
@@ -1170,6 +1184,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--invalid-penalty", type=float, default=None,
                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
+    c.add_argument("--pointing-reward", type=float, default=None,
+                   help="group G of matrix v3: the weight of the pointing reward (env pointing_reward: each turn the "
+                        "weight times the share of the task's objects the targets segment places right; needs a "
+                        "targets format example); default none; the system prompt keeps the SFT text")
     c.add_argument("--progress-version", default=None, choices=["grouped_gated", "grouped_soft", "optimal"],
                    help="round 12 freeze, dense-reward variant V3: the grouped progress with the hard gate (D_cond's) "
                         "or the soft gate (relation group times the frame group's continuous score); round 13 (B): "

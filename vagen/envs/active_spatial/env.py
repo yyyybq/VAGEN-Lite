@@ -37,7 +37,7 @@ import os
 from ._compat import BaseEnv, convert_numpy_to_PIL, PARSE_FUNC_MAP
 
 from .env_config import ActiveSpatialEnvConfig
-from .prompt import system_prompt, init_observation_template, action_template, format_prompt
+from .prompt import system_prompt, init_observation_template, action_template, format_prompt, TARGET_FORMATS
 from .utils import (
     ViewManipulator,
     count_lines,
@@ -67,6 +67,7 @@ from .visibility_checker import VisibilityChecker, VisibilityResult, create_visi
 from .canonical_camera import CANONICAL_CAMERA_H1_RESIZE_V1, build_canonical_camera
 from .canonical_task_metrics import score_canonical_task, uses_canonical_backend
 from .target_visibility import OccluderSet, new_milestones, score_with_visibility
+from .pointing import target_refs
 from .reward_trace import (
     TurnRewardTrace,
     near_reward_values,
@@ -1191,6 +1192,19 @@ class ActiveSpatialEnv(BaseEnv):
                 self.episode_done = True
                 info["early_terminated_invalid"] = True
         
+        # Group G of matrix v3 (the user's instruction of 2026-11-06, pointing.py): the answer's targets segment,
+        # judged on the frame the answer was given on (prev_E); pointing_reward times the turn's score is added (the
+        # score is 0 without an executable action or when the answer is not exactly the short structure).
+        if self._pointing_on():
+            pointing = self._pointing_turn(action_str, prev_E, bool(action_executable and strict_format_correct))
+            weight = float(self.config.get("pointing_reward", 0.0) or 0.0)
+            if weight:
+                self.reward += weight * pointing["score"]
+            self._reward_trace.record("pointing", raw=pointing["score"], scale=weight, enabled=bool(weight))
+            metrics["turn_metrics"].update(pointing_score=pointing["score"], targets_ok=pointing["ok"],
+                                           targets_old=pointing["old"], targets_bad=pointing["bad"])
+            info["pointing"] = pointing
+
         # Build collision feedback message
         if step_collisions:
             collision_msgs = [_collision_text(cr) for cr in step_collisions]
@@ -1493,6 +1507,23 @@ class ActiveSpatialEnv(BaseEnv):
                                  int(self.config.get("optimal_progress_slack", 4)))
             metric = {**metric, **opt, "shaping_score": opt["optimal_progress"], "progress_version": "optimal"}
         return metric
+
+    def _pointing_on(self) -> bool:
+        """Group G of matrix v3: the env judges the answers' targets segment (a targets format example, or a pointing
+        reward)."""
+        return (str(self.config.get("prompt_format_example", "placeholder")) in TARGET_FORMATS
+                or bool(float(self.config.get("pointing_reward", 0.0) or 0.0)))
+
+    def _pointing_turn(self, answer: str, c2w: Any, readable: bool) -> Dict[str, Any]:
+        """The turn's targets segment read and judged on the frame at ``c2w`` (pointing.judge_turn)."""
+        from . import pointing
+
+        fmt = str(self.config.get("prompt_format_example", "placeholder"))
+        if fmt not in TARGET_FORMATS:
+            raise ValueError(f"pointing_reward needs a targets format example {tuple(TARGET_FORMATS)}, not {fmt!r}")
+        item = self.current_item if isinstance(self.current_item, dict) else {}
+        occ = self._visibility_occluders() if item and uses_canonical_backend(item) else None
+        return pointing.judge_turn(answer, item, c2w, occ, fmt, readable=readable)
 
     def _visibility_occluders(self) -> OccluderSet:
         """Occluders of the current scene (labels.json boxes + structure walls), cached per scene."""
@@ -2128,6 +2159,7 @@ class ActiveSpatialEnv(BaseEnv):
             action_sep=self.config.action_sep,
             add_example=init_obs,
             format_example=self.config.get("prompt_format_example", "placeholder"),
+            target_refs=target_refs(self.current_item),  # group G of matrix v3: the objects of a targets format
         )
         obs_str += "\n" + format_prompt_text
         
@@ -2238,6 +2270,7 @@ class ActiveSpatialEnv(BaseEnv):
             action_sep=self.config.action_sep,
             add_example=init_obs,
             format_example=self.config.get("prompt_format_example", "placeholder"),
+            target_refs=target_refs(self.current_item),  # group G of matrix v3: the objects of a targets format
         )
         obs_str += "\n" + format_prompt_text
         

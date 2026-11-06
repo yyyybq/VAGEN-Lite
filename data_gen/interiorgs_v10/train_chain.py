@@ -1396,6 +1396,7 @@ class Chain:
                 args += ["--ppo-template", str(self.plan["ppo_template"])]
             for key, flag in (("standard", "--standard"), ("seed", "--seed"), ("history_mode", "--history-mode"),
                               ("format_example", "--format-example"), ("invalid_penalty", "--invalid-penalty"),
+                              ("pointing_reward", "--pointing-reward"),  # group G of matrix v3
                               ("group_filter", "--group-filter"), ("keep_std_threshold", "--keep-std-threshold"),
                               ("keep_std_floor", "--keep-std-floor"),
                               ("progress_version", "--progress-version"),
