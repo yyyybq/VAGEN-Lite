@@ -34,6 +34,7 @@ import argparse
 import collections
 import json
 import os
+import pickle
 import random
 import sys
 import time
@@ -155,6 +156,30 @@ def variant_for(scene, states: dict, order: list, inst: dict, deadline: float) -
                  "params": var["params"], "shortest_actions": var["shortest"]["actions"]}
 
 
+def states_path(out: Path, sid: str) -> Path:
+    return Path(out) / "states" / f"{sid}.pkl"
+
+
+def reach_cmd(args) -> int:
+    """The reachable-pose search alone, saved for scene_cmd (11-06: in processes that ran this search, later renders
+    were often colour noise; a fresh process that only loads the poses renders as in the evaluations)."""
+    from downstream.eval import closed_loop
+
+    closed_loop.stable_counter_regions()
+    sid = f"{args.task}_s{args.seed}"
+    path = states_path(args.out, sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    scene = N.Scene(args.task, args.seed, hide_robot=True)
+    reach = S.reachable(scene)
+    tmp = path.with_suffix(".pkl.tmp")
+    with open(tmp, "wb") as f:
+        pickle.dump(reach, f)
+    os.replace(tmp, path)
+    print(f"{sid}: {len(reach['states'])} poses, capped {reach['capped']}", flush=True)
+    sys.stdout.flush()
+    os._exit(0)  # RoboCasa's env.close() can hang for good (n_gen.scene_cmd)
+
+
 def scene_cmd(args) -> int:
     from downstream.eval import closed_loop
 
@@ -170,7 +195,13 @@ def scene_cmd(args) -> int:
     scene = None
     try:
         scene = N.Scene(args.task, args.seed, hide_robot=True)
-        reach = S.reachable(scene)
+        saved = states_path(out, sid)
+        if saved.is_file():  # the search ran in its own process (reach_cmd): no search in this rendering process
+            with open(saved, "rb") as f:
+                reach = pickle.load(f)
+            rec["states_from"] = str(saved)
+        else:
+            reach = S.reachable(scene)
         states = reach["states"]
         order = sorted(states, key=lambda k: states[k][1])
         rec.update(reachable=len(states), capped=reach["capped"], seconds_setup=round(time.time() - t0, 1))
@@ -207,13 +238,16 @@ def scene_cmd(args) -> int:
     return 0
 
 
-def collect(instances, out: Path) -> dict:
+def collect(instances, out: Path, also=()) -> dict:
+    """also: further output folders (a rerun of skipped scenes); a complete scene file there replaces the first's."""
     rows = read_instances(instances)
     scenes = {}
-    for p in sorted((Path(out) / "scenes").glob("*.json")):
-        if not p.name.endswith((".timeout.json", ".tmp")):
-            d = json.loads(p.read_text())
-            scenes[d["scene_id"]] = d
+    for k, d0 in enumerate([out, *also]):
+        for p in sorted((Path(d0) / "scenes").glob("*.json")):
+            if not p.name.endswith((".timeout.json", ".tmp")):
+                d = json.loads(p.read_text())
+                if k == 0 or d.get("complete") or d["scene_id"] not in scenes:
+                    scenes[d["scene_id"]] = d
     variants, summary = [], {t: collections.Counter() for t in RULES}
     for r in rows:
         s = scenes.get(r["scene_id"])
@@ -243,23 +277,28 @@ def collect(instances, out: Path) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("scenes", "scene", "collect"):
+    for name in ("scenes", "reach", "scene", "collect"):
         s = sub.add_parser(name)
-        s.add_argument("--instances", nargs="+", required=True, type=Path)
+        s.add_argument("--instances", nargs="+", required=name != "reach", type=Path)
         if name != "scenes":
             s.add_argument("--out", required=True, type=Path)
-        if name == "scene":
+        if name in ("scene", "reach"):
             s.add_argument("--task", required=True)
             s.add_argument("--seed", required=True, type=int)
+        if name == "scene":
             s.add_argument("--soft-limit", type=float, default=600.0)
+        if name == "collect":
+            s.add_argument("--also", nargs="*", default=[], type=Path)
     args = ap.parse_args(argv)
     if args.cmd == "scenes":
         for t, s in scene_list(read_instances(args.instances)):
             print(f"{t}:{s}")
         return 0
+    if args.cmd == "reach":
+        return reach_cmd(args)
     if args.cmd == "scene":
         return scene_cmd(args)
-    print(json.dumps(collect(args.instances, args.out)))
+    print(json.dumps(collect(args.instances, args.out, args.also)))
     return 0
 
 

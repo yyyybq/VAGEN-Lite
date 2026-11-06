@@ -163,6 +163,25 @@ def test_find_tries_only_the_given_candidates(fakes):
     assert inst is None and not tally
 
 
+def test_collect_takes_a_rerun_folder_whose_complete_scenes_win(tmp_path):
+    rows = [{"instance_id": "T_s1_screen_occupancy", "scene_id": "T_s1", "task": "T", "seed": 1,
+             "task_type": "screen_occupancy"}]
+    src = tmp_path / "inst.jsonl"
+    src.write_text(json.dumps(rows[0]) + "\n")
+    first, rerun = tmp_path / "gen", tmp_path / "gen2"
+    for d in (first, rerun):
+        (d / "scenes").mkdir(parents=True)
+    (first / "scenes" / "T_s1.json").write_text(json.dumps({"scene_id": "T_s1", "complete": False,
+                                                            "render_broken": "x", "records": []}))
+    var = {"instance_id": "T_s1_screen_occupancy_d3a"}
+    (rerun / "scenes" / "T_s1.json").write_text(json.dumps({
+        "scene_id": "T_s1", "complete": True, "variants": {"T_s1_screen_occupancy": var},
+        "records": [{"original": "T_s1_screen_occupancy", "variant": var["instance_id"]}]}))
+    assert D.collect([src], first)["variants"] == 0
+    assert D.collect([src], first, [rerun])["variants"] == 1
+    assert D.states_path(first, "T_s1") == first / "states" / "T_s1.pkl"
+
+
 def test_collect_counts_variants_and_reasons(tmp_path):
     rows = [{"instance_id": f"T_s1_{t}", "scene_id": "T_s1", "task": "T", "seed": 1, "task_type": t}
             for t in ("projective_relations", "absolute_positioning", "screen_occupancy", "equidistance")]

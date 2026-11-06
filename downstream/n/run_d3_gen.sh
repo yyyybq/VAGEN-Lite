@@ -4,6 +4,9 @@
 # job (the simulator on CPU).  Each scene in its own process with at most SCENE_TIMEOUT seconds, WORKERS at a time; a
 # scene killed at its limit (or failing) is recorded in OUT/scenes/<scene>.timeout.json and not retried.  Then
 # collect (OUT/variants.jsonl, OUT/summary.json).  Writes only under OUT; every step skips what is done.
+# The reachable-pose search runs first in its own process (OUT/states/<scene>.pkl); the scene process that renders
+# only loads it (11-06: renders after the search in the same process were often colour noise).  ALSO="DIR ..." adds
+# earlier output folders to collect (this run's complete scenes replace theirs).
 # Usage: run_d3_gen.sh OUT [WORKERS] INSTANCES.jsonl [INSTANCES.jsonl ...]
 # Environment: SCENE_TIMEOUT (default 900 s), SOFT_LIMIT (default 600 s: no new candidate after it), SCENE_SLICE
 #   "I/K": only every K-th scene from the I-th (1-based), so K jobs can share OUT.
@@ -37,12 +40,16 @@ worker() {  # worker I takes scenes I, I + WORKERS, ...
     spec="${SCENES[$j]}"; task="${spec%:*}"; seed="${spec##*:}"; sid="${task}_s${seed}"
     scene_done "$sid" && continue
     t0=$(date +%s); tries=0
+    if [[ ! -f $OUT/states/$sid.pkl ]]; then  # the pose search in its own process (d3_gen.reach_cmd)
+      sim 1 timeout -s KILL "$SCENE_TIMEOUT" "$SIM_PY" downstream/n/d3_gen.py reach --task "$task" --seed "$seed" \
+        --out "$OUT" >> "$OUT/logs/$sid.log" 2>&1
+    fi
     while :; do  # rc 3: this process's renderer drew garbage (d3_gen.RenderBroken); a new process, RENDER_TRIES in all
       tries=$((tries + 1))
       sim 1 timeout -s KILL "$SCENE_TIMEOUT" "$SIM_PY" downstream/n/d3_gen.py scene --instances "${INSTANCES[@]}" \
         --task "$task" --seed "$seed" --out "$OUT" --soft-limit "$SOFT_LIMIT" >> "$OUT/logs/$sid.log" 2>&1
       rc=$?
-      [[ $rc -eq 3 && $tries -lt ${RENDER_TRIES:-3} ]] || break
+      [[ $rc -eq 3 && $tries -lt ${RENDER_TRIES:-4} ]] || break
       echo "[d3-gen] $sid render broken (try $tries), again $(date -u +%FT%TZ)" >> "$OUT/d3_gen.log"
     done
     if [[ $rc -ne 0 ]]; then
@@ -58,5 +65,7 @@ for ((w = 0; w < WORKERS; w++)); do
 done
 wait
 log "scenes done: $(ls "$OUT"/scenes/*.json 2>/dev/null | grep -vc timeout) scene files, $(ls "$OUT"/scenes/*.timeout.json 2>/dev/null | wc -l) skipped"
-sim 1 "$SIM_PY" downstream/n/d3_gen.py collect --instances "${INSTANCES[@]}" --out "$OUT" | tee -a "$OUT/d3_gen.log"
+ALSO_DIRS=(${ALSO:-})
+sim 1 "$SIM_PY" downstream/n/d3_gen.py collect --instances "${INSTANCES[@]}" --out "$OUT" \
+  ${ALSO_DIRS[@]+--also "${ALSO_DIRS[@]}"} | tee -a "$OUT/d3_gen.log"
 log "done"
