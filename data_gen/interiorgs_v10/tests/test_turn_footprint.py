@@ -49,6 +49,11 @@ WEST_WALL = (0.30, 1.0, math.pi)
 SCRIPT_WEST_WALL = ["<action>turn_right|move_forward|</action>", "<action>move_backward|turn_left|</action>"]
 EPISODES = {"start": (None, SCRIPT_START), "tea_table": (TEA_TABLE, SCRIPT_TEA_TABLE),
             "west_wall": (WEST_WALL, SCRIPT_WEST_WALL)}
+# (not in the golden) the first row's camera inside the double bed's footprint (box 7.8-9.8 x 1.2-3.4, z 0-0.6), 0.3 m
+# from the inner face of the east wall's slab (x = 9.9), facing 120 degrees: move_right runs into the slab, the task is
+# not met, and D_cond's potential is positive there
+BED_EAST = (9.6, 1.5, math.radians(120.0))
+SOFA = (0.75, 2.6)  # inside the multi person sofa's footprint (box 0.3-1.2 x 1.5-3.7, z 0-0.9), 0.65 m from the slab
 
 
 def stub_frame():
@@ -717,6 +722,134 @@ class EnvTurnFootprintTest(unittest.TestCase):
             self.assertEqual(got["<action>turn_left|</action>"], got["<action>move_forward|</action>"], config)
             if config == "S0":
                 self.assertAlmostEqual(got["<action>turn_left|</action>"][0], -0.16, places=12)
+
+    def test_footprint_blocks_count_as_consecutive_collisions(self):
+        """(review fix 6a) Turns blocked by the footprint add up in the consecutive collision count across answers, as
+        blocked moves do, and an executed move sets it back to 0 (the template's max_consecutive_collisions 0: nothing
+        ends the episode)."""
+        env = self.at(TEA_TABLE)
+        got = []
+        for text in ("<action>turn_left|turn_left|turn_left|</action>", "<action>turn_right|turn_right|</action>",
+                     "<action>move_forward|</action>", "<action>turn_left|</action>"):  # the move stays above the table
+            _, _, done, info = env.step(text)
+            tm, traj = info["metrics"]["turn_metrics"], info["metrics"]["traj_metrics"]
+            got.append((tm["turn_footprint_blocks"], tm["collision_count"], tm["consecutive_collision_count"],
+                        info["consecutive_collision_count"], env.consecutive_collision_count,
+                        traj["max_consecutive_collisions"], traj["total_collisions"], done))
+        self.assertEqual(got, [(3, 3, 3, 3, 3, 3, 3, False), (2, 2, 5, 5, 5, 5, 5, False),
+                               (0, 0, 0, 0, 0, 5, 5, False), (1, 1, 1, 1, 1, 5, 6, False)])
+
+    def test_one_answer_with_a_footprint_blocked_turn_and_a_wall_blocked_move(self):
+        """(review fix 6b) At the west wall a turn is blocked by the footprint (the slab 0.2 m away) and move_forward by
+        today's rule (into the slab): one answer with both, in either order, gets one feedback naming both, 2
+        collisions of which 1 by the footprint, S0's two collision penalties and step penalty, and keeps the pose."""
+        for first, second in (("turn_left", "move_forward"), ("move_forward", "turn_left")):
+            env = self.at(WEST_WALL)
+            before = env.view_engine.get_pose()
+            obs, reward, done, info = env.step(f"<action>{first}|{second}|</action>")
+            tm = info["metrics"]["turn_metrics"]
+            self.assertEqual(info["env_feedback"], f"0 of 2 actions executed; blocked: {first} (blocked by wall); "
+                                                   f"{second} (blocked by wall).")
+            self.assertIn(f"Environment Feedback: {info['env_feedback']}\n", obs["obs_str"])
+            self.assertEqual((tm["collision_count"], tm["turn_footprint_blocks"], info["env_step"], done), (2, 1, 2, False))
+            collision = info["reward_trace"]["components"]["collision"]
+            self.assertEqual(collision["events"], 2)
+            self.assertAlmostEqual(collision["applied"], -0.30, places=12)
+            self.assertAlmostEqual(reward, -0.31, places=12)  # S0: two blocked actions and the step penalty
+            self.assertTrue(np.array_equal(env.view_engine.get_pose(), before))
+
+    def test_three_blocked_turns_end_the_episode_as_three_blocked_moves(self):
+        """(review fix 6c) With max_consecutive_collisions 3 (the real runs have 0), three turns blocked by the double
+        bed's footprint end the episode exactly as three moves blocked there by today's rule: the same reward and its
+        parts (consecutive_collision's -0.5 included), the termination reason, three actions taken (the fourth is not),
+        the pose unchanged; under S0 and V4."""
+        row = self.golden["rows"][0]
+        for config in ("S0", "V4"):
+            got = {}
+            for action in ("turn_left", "move_right"):
+                env = self.env(row, config, turn_footprint_radius=0.25, max_consecutive_collisions=3)
+                place(env, BED_EAST)
+                self.assertFalse(met(env))
+                before = env.view_engine.get_pose()
+                _, reward, done, info = env.step("<action>" + f"{action}|" * 4 + "</action>")
+                self.assertTrue(np.array_equal(env.view_engine.get_pose(), before), (config, action))
+                comps = info["reward_trace"]["components"]
+                got[action] = (reward, done, info["env_step"], info["termination_reason"],
+                               bool(info.get("early_terminated_collision")), info["consecutive_collision_count"],
+                               info["metrics"]["turn_metrics"]["collision_count"],
+                               {k: (v["applied"], v["events"]) for k, v in sorted(comps.items())})
+                self.assertEqual(info["metrics"]["turn_metrics"]["turn_footprint_blocks"], 3 if action == "turn_left" else 0)
+            self.assertEqual(got["turn_left"], got["move_right"], config)
+            self.assertEqual(got["turn_left"][1:7], (True, 3, "consecutive_collision", True, 3, 3), config)
+            self.assertEqual(got["turn_left"][7]["consecutive_collision"], (-0.5, 1), config)
+            self.assertAlmostEqual(got["turn_left"][0], 3 * -0.15 - 0.5, places=12)
+
+    def test_a_blocked_turn_gets_the_potential_term_of_a_blocked_move(self):
+        """(review fix 6d) V4 inside the double bed's footprint where the potential phi is positive (BED_EAST): after a
+        blocked move there (so the env's last potential is that pose's), a blocked turn and a blocked move both keep
+        the pose bit-identical and get the same, non-zero potential term scale * (gamma * phi - phi) and the same
+        reward and parts."""
+        row = self.golden["rows"][0]
+        got = {}
+        for action in ("turn_left", "move_right"):
+            env = self.at(BED_EAST, row=row, config="V4")
+            hit = env.collision_detector.check_turn_footprint(env.view_engine.get_pose()[:3, 3], 0.25)
+            self.assertEqual((hit.collision_type, hit.collision_object, hit.details["inside_object"]),
+                             ("object", "double bed", True))
+            _, _, _, info = env.step("<action>move_right|</action>")  # blocked by the slab: the pose's potential
+            self.assertEqual(info["metrics"]["turn_metrics"]["collision_count"], 1)
+            phi = env.prev_potential_score
+            before = env.view_engine.get_pose()
+            _, reward, done, info = env.step(f"<action>{action}|</action>")
+            tm = info["metrics"]["turn_metrics"]
+            self.assertTrue(np.array_equal(env.view_engine.get_pose(), before), action)
+            self.assertEqual((tm["collision_count"], tm["turn_footprint_blocks"], done),
+                             (1, int(action == "turn_left"), False))
+            comps = info["reward_trace"]["components"]
+            got[action] = (reward, {k: (v["applied"], v["events"]) for k, v in sorted(comps.items())},
+                           info["current_potential_score"], phi)
+        self.assertEqual(got["turn_left"], got["move_right"])
+        reward, comps, phi_after, phi = got["turn_left"]
+        self.assertGreater(phi, 0.3)  # 0.408 here
+        self.assertEqual(phi_after, phi)
+        cfg = self.cfgs["V4"]
+        term = cfg["potential_field_reward_scale"] * (cfg["potential_field_gamma"] * phi - phi)
+        self.assertNotEqual(term, 0.0)
+        self.assertEqual(comps["potential"][1], 1)
+        self.assertAlmostEqual(comps["potential"][0], term, places=12)
+        self.assertAlmostEqual(reward, -0.15 - 0.01 + term, places=12)
+
+    def test_one_env_follows_the_scene_of_each_reset(self):
+        """(review fix 6e) One env reset alternately on a row of the golden scene and one of a second scene (the tea
+        table renamed coffee table, the sofa moved 4 m east): at the same two points the footprint verdict and the
+        blocking object's name are always those of the scene just reset."""
+        row_a = self.golden["rows"][0]
+        name_b = self.golden["scene"]["name"] + "_b"
+        labels = json.loads(json.dumps(self.golden["scene"]["labels.json"]))
+        for obj in labels:
+            if obj["label"] == "tea table":
+                obj["label"] = "coffee table"
+            elif obj["label"] == "multi person sofa":
+                for corner in obj["bounding_box"]:
+                    corner["x"] += 4.0
+        write_scene({"scene": {"name": name_b, "labels.json": labels,
+                               "structure.json": self.golden["scene"]["structure.json"]}}, self.root / "scenes")
+        row_b = dict(row_a, scene_id=name_b, task_id=row_a["task_id"] + "_b")
+        env = self.env_over([row_a, row_b], turn_footprint_radius=0.25)
+        tea, sofa = TEA_TABLE[:2], SOFA
+        want = {0: {tea: ("blocked: turn_left (blocked by tea table).", 1),
+                    sofa: ("blocked: turn_left (blocked by multi person sofa).", 1)},
+                1: {tea: ("blocked: turn_left (blocked by coffee table).", 1), sofa: ("Action executed.", 0)}}
+        for seed in (0, 1, 0, 1, 1, 0):
+            env.reset(seed=seed)
+            self.assertEqual(env.collision_detector._current_scene_id, (row_a, row_b)[seed]["scene_id"])
+            for xy in (tea, sofa):
+                place(env, (xy[0], xy[1], 0.0))
+                self.assertFalse(met(env))
+                _, _, done, info = env.step("<action>turn_left|</action>")
+                feedback, blocks = want[seed][xy]
+                self.assertTrue(info["env_feedback"].endswith(feedback), (seed, xy, info["env_feedback"]))
+                self.assertEqual((info["metrics"]["turn_metrics"]["turn_footprint_blocks"], done), (blocks, False))
 
     def test_settings_that_cannot_apply_the_rule_are_refused(self):
         for bad in ({"turn_footprint_radius": 0.0}, {"turn_footprint_radius": -0.25},
