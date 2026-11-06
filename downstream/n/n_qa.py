@@ -609,11 +609,27 @@ def pick_samples(qs: list, n: int, seed: int = 0) -> list:
     return out
 
 
-def pick_by_kind(qs: list, counts: dict, seed: int = 0) -> list:
-    """counts {kind: n}: n questions of each kind (taken in turn from its task types), kinds in KINDS order."""
+def pick_first_action_cells(fa: list, n: int, seed: int = 0) -> list:
+    """n first_action questions taken in turn from FIRST_ACTION_CELLS (the user's decision 3 of 2026-11-06: the
+    samples show every group), within a cell in turn from its task types; an empty cell is passed over."""
+    by_cell = {c: [q for q in fa if cell_of(q["numbers"]) == c] for c in FIRST_ACTION_CELLS}
+    queues = {c: pick_samples(v, len(v), seed) for c, v in by_cell.items()}
+    out = []
+    while len(out) < n and any(queues.values()):
+        for c in FIRST_ACTION_CELLS:
+            if queues[c] and len(out) < n:
+                out.append(queues[c].pop(0))
+    return out
+
+
+def pick_by_kind(qs: list, counts: dict, seed: int = 0, cells: bool = False) -> list:
+    """counts {kind: n}: n questions of each kind (taken in turn from its task types), kinds in KINDS order;
+    cells: first_action's taken in turn from FIRST_ACTION_CELLS instead."""
     out = []
     for k in KINDS:
-        if counts.get(k):
+        if counts.get(k) and k == "first_action" and cells:
+            out += pick_first_action_cells([q for q in qs if q["kind"] == k], int(counts[k]), seed)
+        elif counts.get(k):
             out += pick_samples([q for q in qs if q["kind"] == k], int(counts[k]), seed)
     return out
 
@@ -653,17 +669,40 @@ def sample_note(q: dict) -> str:
             f"干扰项 {html.escape(n['other'])}：{why}。</p>")
 
 
+def baseline_table(qs: list) -> str:
+    """HTML: first_action's text-only baselines per stratum with the stratum's count (every question of the file,
+    not only the samples), and near_far's always-A and object-name majority."""
+    b = baselines(qs)
+    rows = []
+    for s, v in (b.get("first_action") or {}).items():
+        rows.append(f"<tr><td>{html.escape(STRATA_ZH.get(s, s))}</td><td>{v['n']}</td>"
+                    + "".join(f"<td>{100 * v[r]:.1f}%</td>" for r in BASELINE_RULES) + "</tr>")
+    out = ("<h3>第一步题：只看选项文字的基线（全部题，不只样例）</h3><div style='overflow-x:auto'><table border='1' "
+           "cellpadding='4' style='border-collapse:collapse'><tr><th>组</th><th>道数</th>"
+           + "".join(f"<th>{html.escape(z)}</th>" for z in BASELINE_ZH) + "</tr>" + "".join(rows) + "</table></div>"
+           "<p>最后一列用了仿真里起点哪些动作被挡，不是纯文字基线，只作参照。</p>")
+    for kind in ("left_right", "near_far"):
+        v = b.get(kind)
+        if v:
+            out += (f"<p>{kind}（{v['n']} 道）：总选 A {100 * v['always A']:.1f}%"
+                    + (f"；按两个物体名字多数猜（留一）{100 * v['object-name majority (leave-one-out)']:.1f}%"
+                       if "object-name majority (leave-one-out)" in v else "") + "。</p>")
+    return out
+
+
 def samples_cmd(args) -> int:
     qs = read_jsonl(args.questions)
     insts = {r["instance_id"]: r for r in read_jsonl(args.instances)}
-    picked = (pick_by_kind(qs, dict(kv.split("=") for kv in args.counts), args.seed) if args.counts
+    picked = (pick_by_kind(qs, dict(kv.split("=") for kv in args.counts), args.seed, cells=args.cells) if args.counts
               else pick_samples(qs, args.n, args.seed))
     cards = []
     view_zh = {"start": "起始画面", "shortest": "最短走法终点的画面", "best": "最好成功位姿的画面"}
     for k, q in enumerate(picked, 1):
+        group = (f"<p><b>组：{html.escape(STRATA_ZH[cell_of(q['numbers'])])}</b></p>" if q["kind"] == "first_action"
+                 else "")
         cards.append(
             f"<section><h2>{k}. {html.escape(q['kind'])} · {html.escape(q['task_type'])} · "
-            f"{html.escape(q['instance_id'])}</h2><p>画面：{view_zh.get(q.get('image_tag', 'start'), q.get('image_tag'))}</p>"
+            f"{html.escape(q['instance_id'])}</h2>{group}<p>画面：{view_zh.get(q.get('image_tag', 'start'), q.get('image_tag'))}</p>"
             f"<img src='{marked_image(q, insts[q['instance_id']])}' width='512'>"
             f"<pre>{html.escape(q['prompt'])}</pre><p><b>正确答案：{q['answer']}</b>（{html.escape(q['options']['AB'.index(q['answer'])])}）</p>"
             f"{sample_note(q)}<pre>{html.escape(json.dumps(q['numbers'], ensure_ascii=False, indent=1))}</pre></section>")
@@ -672,6 +711,7 @@ def samples_cmd(args) -> int:
             "padding:12px 0}pre{white-space:pre-wrap;background:#f6f6f6;padding:8px}</style>"
             f"<h1>N 系列问答样例（{len(picked)} 道）</h1>"
             + (Path(args.note).read_text(encoding="utf-8") if args.note else "")
+            + (baseline_table(qs) if args.baselines else "")
             + "<p>红圈：两个物体在该题所用画面上的可见像素中心（模型看到的图里没有圈）。第一步题的图是起始画面，不画圈。</p>"
             + "".join(cards))
     Path(args.out).write_text(page, encoding="utf-8")
@@ -737,13 +777,41 @@ def FIRST_ACTION_GROUPS(num: dict) -> tuple:
     return (("answer move_backward", lambda i: num[i].get("best") == "move_backward"),
             ("answer other", lambda i: num[i].get("best") != "move_backward"),
             ("distractor blocked", lambda i: num[i].get("other_kind") == "blocked"),
-            ("distractor longer", lambda i: num[i].get("other_kind") == "longer"))
+            ("distractor longer", lambda i: num[i].get("other_kind") == "longer"),
+            *[(cell, (lambda c: lambda i: cell_of(num[i]) == c)(cell)) for cell in FIRST_ACTION_CELLS])
+
+
+# the user's decision 3 of 2026-11-06: first_action is read grouped by whether the right answer is move backward and
+# by the kind of distractor (blocked at the start / at least two steps longer), and their four crossings
+FIRST_ACTION_CELLS = ("answer move_backward · distractor blocked", "answer move_backward · distractor longer",
+                      "answer other · distractor blocked", "answer other · distractor longer")
+
+
+def cell_of(numbers: dict) -> str:
+    """The question's crossing of FIRST_ACTION_CELLS (numbers: the question's numbers)."""
+    answer = "answer move_backward" if numbers.get("best") == "move_backward" else "answer other"
+    return f"{answer} · distractor {'blocked' if numbers.get('other_kind') == 'blocked' else 'longer'}"
 
 
 FIRST_ACTION_STRATA = {"all": lambda q: True,
                        "answer move_backward": lambda q: q["numbers"].get("best") == "move_backward",
                        "answer other": lambda q: q["numbers"].get("best") != "move_backward",
+                       "distractor blocked": lambda q: q["numbers"].get("other_kind") == "blocked",
+                       "distractor longer": lambda q: q["numbers"].get("other_kind") == "longer",
+                       **{c: (lambda c: lambda q: cell_of(q["numbers"]) == c)(c) for c in FIRST_ACTION_CELLS},
                        "move_backward as distractor": lambda q: q["numbers"].get("other") == "move_backward"}
+
+STRATA_ZH = {"all": "全部", "answer move_backward": "答案后退", "answer other": "答案其他",
+             "distractor blocked": "干扰项起点被挡", "distractor longer": "干扰项多走≥2步",
+             "answer move_backward · distractor blocked": "答案后退·干扰被挡",
+             "answer move_backward · distractor longer": "答案后退·干扰更长",
+             "answer other · distractor blocked": "答案其他·干扰被挡",
+             "answer other · distractor longer": "答案其他·干扰更长",
+             "move_backward as distractor": "后退是干扰项"}
+
+BASELINE_RULES = ("always A", "move backward when offered, else A", "never move forward, else A",
+                  "option-pair majority (leave-one-out)", "simulator: the option not blocked at the start, else A")
+BASELINE_ZH = ("总选 A", "有后退就选后退", "不选前进", "选项对多数（留一）", "仿真：选不被挡的（非纯文字）")
 
 
 def letter_of(q: dict, text: str):
@@ -905,28 +973,34 @@ def markdown(rep: dict) -> str:
                 cells = [f"{g[s][side]['success']}/{g[s][side]['n']}" if g[s][side]["n"] else "—"
                          for s in strata for side in ("right", "wrong")]
                 lines.append(f"| {m} | " + " | ".join(cells) + " |")
-            lines += ["", "| 模型 | 全部 | 答案后退 | 答案其他 | 后退是干扰项 | 有后退时选后退 | 有前进时选前进 |",
-                      "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+            lines += ["", "| 模型 | " + " | ".join(f"{STRATA_ZH[c]}：答对 | {STRATA_ZH[c]}：答错" for c in FIRST_ACTION_CELLS)
+                      + " |", "| --- " * (1 + 2 * len(FIRST_ACTION_CELLS)) + "|"]
+            for m, r in rep["models"].items():
+                g = (r.get(key) or {}).get("groups") or {}
+                if FIRST_ACTION_CELLS[0] not in g:
+                    continue
+                cells = [f"{g[s][side]['success']}/{g[s][side]['n']}" if g[s][side]["n"] else "—"
+                         for s in FIRST_ACTION_CELLS for side in ("right", "wrong")]
+                lines.append(f"| {m} | " + " | ".join(cells) + " |")
+            lines += ["", "| 模型 | " + " | ".join(STRATA_ZH[s] for s in FIRST_ACTION_STRATA)
+                      + " | 有后退时选后退 | 有前进时选前进 |", "| --- " + "| ---: " * (len(FIRST_ACTION_STRATA) + 2) + "|"]
             for m, r in rep["models"].items():
                 row = r.get(key) or {}
                 sa = row.get("strata_accuracy")
                 if not sa:
                     continue
                 pk = row.get("picks") or {}
-                cells = [f"{v['correct']}/{v['n']}" for v in sa.values()]
+                cells = [f"{sa[s]['correct']}/{sa[s]['n']}" for s in FIRST_ACTION_STRATA if s in sa]
                 lines.append(f"| {m} | " + " | ".join(cells) + f" | {100 * pk.get('move backward when offered', float('nan')):.1f}% | "
                              f"{100 * pk.get('move forward when offered', float('nan')):.1f}% |")
             lines.append("")
     for kind, b in (rep.get("baselines") or {}).items():
         if kind == "first_action":
             lines += ["## first_action 的基线（不看图、不读任务）", "",
-                      "| 层 | 道数 | 总选 A | 有后退就选后退 | 不选前进 | 选项对多数（留一） | 仿真：选不被挡的（非纯文字） |",
-                      "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+                      "| 层 | 道数 | " + " | ".join(BASELINE_ZH) + " |", "| --- | ---: " + "| ---: " * len(BASELINE_ZH) + "|"]
             for s, v in b.items():
-                vals = [v[k] for k in ("always A", "move backward when offered, else A", "never move forward, else A",
-                                       "option-pair majority (leave-one-out)",
-                                       "simulator: the option not blocked at the start, else A")]
-                lines.append(f"| {s} | {v['n']} | " + " | ".join(f"{100 * x:.1f}%" for x in vals) + " |")
+                vals = [v[k] for k in BASELINE_RULES]
+                lines.append(f"| {STRATA_ZH.get(s, s)} | {v['n']} | " + " | ".join(f"{100 * x:.1f}%" for x in vals) + " |")
             lines.append("")
         else:
             lines += [f"## {kind} 的基线（{b['n']} 道）", ""] + [f"- {k}：{100 * v:.1f}%" for k, v in b.items() if k != "n"] + [""]
@@ -990,6 +1064,10 @@ def main(argv=None) -> int:
     s.add_argument("--counts", nargs="*", default=None, help="KIND=N per kind (instead of --n spread over the kinds)")
     s.add_argument("--seed", type=int, default=0)
     s.add_argument("--note", default=None, help="an HTML fragment put at the top of the page (counts, caveats)")
+    s.add_argument("--cells", action="store_true",
+                   help="first_action samples taken in turn from the answer x distractor groups (FIRST_ACTION_CELLS)")
+    s.add_argument("--baselines", action="store_true",
+                   help="a table of the text-only baselines per group (every question) at the top of the page")
     s.add_argument("--out", type=Path, required=True)
     a = sub.add_parser("analyze")
     a.add_argument("--questions", type=Path, required=True)

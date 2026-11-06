@@ -486,4 +486,46 @@ def test_analyze_gives_strata_accuracy_and_pairs_within_answer_other():
     assert rep["pairs"]["strict/first_action[answer other]/M>W"] == {"n": 2, "a_succeeds_b_fails": 2,
                                                                      "b_succeeds_a_fails": 0, "p": pytest.approx(0.5)}
     md = Q.markdown(rep)
-    assert "first_action 的基线" in md and "| W | 2/4 | 2/2 | 0/2 | 0/0 |" in md
+    # strata: all, answer backward / other, distractor blocked / longer, the four crossings, backward as distractor
+    assert "first_action 的基线" in md and "| W | 2/4 | 2/2 | 0/2 | 2/4 | 0/0 | 2/2 | 0/0 | 0/2 | 0/0 | 0/0 |" in md
+    assert sa["answer other · distractor blocked"] == {"n": 2, "correct": 0}
+    g = rep["models"]["M"]["strict/first_action"]["groups"]
+    assert g["answer other · distractor blocked"]["right"] == {"n": 2, "success": 2, "max_shaping": 0.0}
+    assert "答案其他·干扰被挡：答对" in md and "| 答案其他·干扰被挡 | 2 |" in md
+
+
+def fa_cell_q(i, best, kind, task="p"):
+    return {"id": f"I{i}::first_action", "instance_id": f"I{i}", "kind": "first_action", "task_type": task, "prompt": "p",
+            "options": [Q.ACTION_TEXT[best], "move forward"], "answer": "A",
+            "numbers": {"best": best, "other": "move_forward", "other_kind": kind, "blocked": ["move_forward"]}}
+
+
+def test_first_action_samples_take_turns_over_the_answer_and_distractor_groups():
+    fa = ([fa_cell_q(k, "move_backward", "blocked") for k in range(6)]
+          + [fa_cell_q(10 + k, "move_backward", "longer") for k in range(2)]
+          + [fa_cell_q(20 + k, "turn_left", "blocked") for k in range(3)])  # no "answer other · distractor longer"
+    got = Q.pick_first_action_cells(fa, 7, seed=0)
+    cells = [Q.cell_of(q["numbers"]) for q in got]
+    assert cells[:3] == ["answer move_backward · distractor blocked", "answer move_backward · distractor longer",
+                         "answer other · distractor blocked"]
+    assert len(got) == 7 and len({q["id"] for q in got}) == 7
+    assert cells.count("answer move_backward · distractor longer") == 2  # all it has
+    qs = fa + [{"id": "L", "kind": "left_right", "task_type": "p"}]
+    by = Q.pick_by_kind(qs, {"left_right": "1", "first_action": "3"}, cells=True)
+    assert [q["kind"] for q in by] == ["left_right"] + ["first_action"] * 3
+    assert len({Q.cell_of(q["numbers"]) for q in by[1:]}) == 3
+
+
+def test_samples_page_labels_the_group_and_lists_the_baselines(tmp_path, monkeypatch):
+    fa = [fa_cell_q(0, "move_backward", "blocked"), fa_cell_q(1, "turn_left", "longer")]
+    qf, inf, out = tmp_path / "q.jsonl", tmp_path / "i.jsonl", tmp_path / "s.html"
+    Q.write_jsonl(qf, fa)
+    Q.write_jsonl(inf, [{"instance_id": "I0"}, {"instance_id": "I1"}])
+    monkeypatch.setattr(Q, "marked_image", lambda q, inst: "data:,")
+    monkeypatch.setattr(Q, "sample_note", lambda q: "")
+    args = type("A", (), dict(questions=qf, instances=inf, n=2, counts=["first_action=2"], seed=0, note=None,
+                              cells=True, baselines=True, out=out))()
+    assert Q.samples_cmd(args) == 0
+    page = out.read_text(encoding="utf-8")
+    assert "组：答案后退·干扰被挡" in page and "组：答案其他·干扰更长" in page
+    assert "只看选项文字的基线" in page and "<td>答案其他</td><td>1</td>" in page and "有后退就选后退" in page
