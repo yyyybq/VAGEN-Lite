@@ -5,6 +5,8 @@ test set with the main line's settings, handover_cells_20261104/failend_test.jso
 finished RL chain the two readings of handover_main_20261103 ("prereg": update 300, or the last checkpoint of a run
 stopped early; "best_val": the highest validation success, ties to the earlier) with their probes, updates run and
 stop reasons; the read-only weight paths.  2026-11-05: Cr's two RL chains (the user's 甲 of 11-04) added.
+2026-11-06: each run's trainer crashes, and every matrix v3 run's crashes and guard stop (the corrected count of
+PROGRESS 12.55; only fields added, the paths and the earlier fields unchanged: the external evaluation reads them).
 
     python exps/matrix_v3/watch/m3_handover_cells.py OUT_PREFIX
 """
@@ -35,6 +37,19 @@ STOP_SHORT = (("unparseable answers", "读不出的回答超过 10%"), ("image-t
 
 def stop_short(why: str) -> str:
     return next((short for key, short in STOP_SHORT if key in why), why[:60])
+
+
+def crash_table() -> list:
+    """Every matrix v3 RL run's trainer crashes and guard stop, from its chain's progress.json (2026-11-06)."""
+    out = []
+    for ch in sorted(M3.glob("m3_*_s2026*")):
+        prog = json.loads((ch / "progress.json").read_text())
+        crashes, stops = prog.get("trainer_crashes") or {}, prog.get("guard_stops") or {}
+        for run in json.loads((ch / "plan.json").read_text())["rl_runs"]:
+            cs = [{"utc": x["utc"], "job_id": x["job_id"], "crash": x.get("crash")} for x in crashes.get(run, [])]
+            out.append({"chain": ch.name, "run": run, "crashes": cs, "stop": stops.get(run),
+                        "image_token": sum("shape mismatch" in (x["crash"] or "") for x in cs)})
+    return out
 
 
 def success(folder: Path) -> float:
@@ -96,6 +111,7 @@ def main(out: str) -> None:
                 pending.append({"cell": cell, "chain": c, "state": state})
                 continue
             plan = json.loads((ch / "plan.json").read_text())
+            crashes = json.loads((ch / "progress.json").read_text()).get("trainer_crashes") or {}
             prog = (ch / "PROGRESS.md").read_text(encoding="utf-8")
             updates = {m.group(1): int(m.group(2)) for m in UPDATES.finditer(prog)}
             stops = {m.group(1): {"at": m.group(2), "why": m.group(3).strip()} for m in STOPPED.finditer(prog)}
@@ -107,7 +123,9 @@ def main(out: str) -> None:
                 best = max(ckpts, key=lambda x: (val[x[1]], -x[0]))[1]  # ties: the earlier
                 r = {"cell": cell, "chain": c, "seed": int(plan["rl"]["seed"]), "run": run,
                      "side": "V4" if run.endswith("d") else "S0", "last_update": ckpts[-1][0],
-                     "updates": updates.get(run), "stop": stops.get(run)}
+                     "updates": updates.get(run), "stop": stops.get(run),
+                     "trainer_crashes": [{"utc": x["utc"], "job_id": x["job_id"], "crash": x.get("crash")}
+                                         for x in crashes.get(run, [])]}
                 for k, n in (("prereg", ckpts[-1][1]), ("best_val", best)):
                     pj = ch / "diag" / "probe_P1" / f"{n}.jsonl"
                     r[k] = {"result": n, "test": round(success(test_set / n), 6), "val": round(val[n], 6),
@@ -138,10 +156,11 @@ def main(out: str) -> None:
                                          "(SFT picks: failend_test.json; RL prereg checkpoints: failend_rl_test.json, Cr's "
                                          "failend_cr_rl_test.json; a group's d_prereg_mean = its runs' prereg d averaged, "
                                          "the matrix summary's RL d)",
-           "sft": sft, "runs": runs, "groups": groups, "pending": pending, "weights_read_only": weights}
+           "sft": sft, "runs": runs, "groups": groups, "pending": pending, "weights_read_only": weights,
+           "trainer_crashes_matrix_v3": crash_table()}
     Path(out + ".json").write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
     pct = lambda x: f"{100 * x:.1f}"  # noqa: E731
-    md = ["# 矩阵第三版补充格：交主线的结果（2026-11-04；11-05 加了 Cr 的 RL）", "",
+    md = ["# 矩阵第三版补充格：交主线的结果（2026-11-04；11-05 加了 Cr 的 RL；11-06 加了训练任务崩溃的记录）", "",
           "主线 11-04 要的：补充格 SFT 挑点的测试集成功率、探针 goal_now / goal_after、d、采样验收；RL 的检查点路径。"
           "口径同 `handover_main_20261103`（测试集 292 道、验证集 382 道，都去掉边缘场景）。", "",
           "## SFT 挑点", "",
@@ -187,6 +206,17 @@ def main(out: str) -> None:
            for g, v in groups.items()]
     if pending:
         md += ["", "还在跑的链：" + "，".join(f"`{p['chain']}`（{p['state']}）" for p in pending) + "。"]
+    ct = doc["trainer_crashes_matrix_v3"]
+    hit = [r for r in ct if r["image_token"]]
+    md += ["", "## 训练任务崩溃（11-06 加；矩阵第三版全部 RL，各链 `progress.json` 的 `trainer_crashes`）", "",
+           f"{len(ct)} 个 RL 里，Qwen3-VL 图像 token 的形状错误一共 {sum(r['image_token'] for r in ct)} 次，出在 {len(hit)} 个 RL 上，"
+           "全是 C 配方（C、Cr）；被图像 token 崩溃线（连续 2 次就停）停下的是其中 3 个。11-05 说的\"3 个 RL、都在种子 20261021\""
+           "只数了被这条线停下的（`PROGRESS.md` 12.55 更正）。", "",
+           "| 链 | RL | 崩溃次数（其中图像 token） | 时间（UTC） | 结局 |", "| --- | --- | --- | --- | --- |"]
+    md += [f"| `{r['chain']}` | `{r['run']}` | {len(r['crashes'])}（{r['image_token']}） | "
+           + "、".join(x["utc"][5:16].replace("T", " ") for x in r["crashes"]) + " | "
+           + (stop_short(r["stop"]["reason"]) if r["stop"] else "跑满 300 次") + " |" for r in ct if r["crashes"]]
+    md += ["", "其余 RL 没有崩溃记录。"]
     md += ["", "## 权重（只读）", ""]
     md += [f"- SFT {k}：`{v}`" for k, v in weights["sft"].items()]
     md += [f"- RL `{k}`：`{v}`" for k, v in sorted(weights["rl"].items())]

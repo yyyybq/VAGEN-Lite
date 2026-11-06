@@ -1,0 +1,536 @@
+{
+ "label": "D_noP0_vs_C",
+ "probe": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_probe.jsonl",
+ "out": "analysis_20261106/supp/probe",
+ "groups": {
+  "a": {
+   "name": "D_noP0",
+   "results": [
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1s0_300",
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1d_300",
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2s0_300",
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2d_300"
+   ],
+   "seeds": [
+    {
+     "seed": "20261019",
+     "results": [
+      "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1s0_300",
+      "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1d_300"
+     ]
+    },
+    {
+     "seed": "20261021",
+     "results": [
+      "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2s0_300",
+      "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2d_300"
+     ]
+    }
+   ]
+  },
+  "b": {
+   "name": "C",
+   "results": [
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/m3cs1s0_050",
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/sft_m3c_e4",
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2s0_100",
+    "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2d_050"
+   ],
+   "seeds": [
+    {
+     "seed": "20261019",
+     "results": [
+      "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/m3cs1s0_050",
+      "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/sft_m3c_e4"
+     ]
+    },
+    {
+     "seed": "20261021",
+     "results": [
+      "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2s0_100",
+      "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2d_050"
+     ]
+    }
+   ]
+  }
+ },
+ "pairs": [
+  {
+   "pair": "20261019/S0",
+   "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1s0_300",
+   "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/m3cs1s0_050",
+   "seed": "20261019",
+   "side": "S0"
+  },
+  {
+   "pair": "20261019/D",
+   "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1d_300",
+   "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/sft_m3c_e4",
+   "seed": "20261019",
+   "side": "D"
+  },
+  {
+   "pair": "20261021/S0",
+   "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2s0_300",
+   "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2s0_100",
+   "seed": "20261021",
+   "side": "S0"
+  },
+  {
+   "pair": "20261021/D",
+   "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2d_300",
+   "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2d_050",
+   "seed": "20261021",
+   "side": "D"
+  }
+ ],
+ "rules": {
+  "alpha": 0.05,
+  "min_diff": {
+   "goal": 0.1,
+   "occlusion": 0.2
+  },
+  "reps": 2000,
+  "seed": 20261021,
+  "same_sign_over": "seeds"
+ },
+ "goal_now": {
+  "n": 176,
+  "n_by_answer": {
+   "yes": 87,
+   "no": 89
+  },
+  "per_pair": [
+   {
+    "pair": "20261019/S0",
+    "seed": "20261019",
+    "side": "S0",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1s0_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/m3cs1s0_050",
+    "n": 176,
+    "acc_a": 0.7045454545454546,
+    "acc_b": 0.5568181818181818,
+    "by_answer_a": {
+     "yes": 0.5977011494252874,
+     "no": 0.8089887640449438
+    },
+    "by_answer_b": {
+     "yes": 0.20689655172413793,
+     "no": 0.898876404494382
+    },
+    "diff": 0.14772727272727273,
+    "only_a": 46,
+    "only_b": 20,
+    "discordance": 0.375,
+    "p": 0.0018582303075658085
+   },
+   {
+    "pair": "20261019/D",
+    "seed": "20261019",
+    "side": "D",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1d_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/sft_m3c_e4",
+    "n": 176,
+    "acc_a": 0.7443181818181818,
+    "acc_b": 0.5681818181818182,
+    "by_answer_a": {
+     "yes": 0.6896551724137931,
+     "no": 0.797752808988764
+    },
+    "by_answer_b": {
+     "yes": 0.1724137931034483,
+     "no": 0.9550561797752809
+    },
+    "diff": 0.17613636363636365,
+    "only_a": 50,
+    "only_b": 19,
+    "discordance": 0.39204545454545453,
+    "p": 0.00024439701657757496
+   },
+   {
+    "pair": "20261021/S0",
+    "seed": "20261021",
+    "side": "S0",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2s0_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2s0_100",
+    "n": 176,
+    "acc_a": 0.7329545454545454,
+    "acc_b": 0.5340909090909091,
+    "by_answer_a": {
+     "yes": 0.6781609195402298,
+     "no": 0.7865168539325843
+    },
+    "by_answer_b": {
+     "yes": 0.21839080459770116,
+     "no": 0.8426966292134831
+    },
+    "diff": 0.19886363636363635,
+    "only_a": 51,
+    "only_b": 16,
+    "discordance": 0.3806818181818182,
+    "p": 2.1689238760717064e-05
+   },
+   {
+    "pair": "20261021/D",
+    "seed": "20261021",
+    "side": "D",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2d_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2d_050",
+    "n": 176,
+    "acc_a": 0.7159090909090909,
+    "acc_b": 0.5284090909090909,
+    "by_answer_a": {
+     "yes": 0.6436781609195402,
+     "no": 0.7865168539325843
+    },
+    "by_answer_b": {
+     "yes": 0.19540229885057472,
+     "no": 0.8539325842696629
+    },
+    "diff": 0.1875,
+    "only_a": 53,
+    "only_b": 20,
+    "discordance": 0.4147727272727273,
+    "p": 0.0001416370725355272
+   }
+  ],
+  "per_seed": [
+   {
+    "seed": "20261019",
+    "n": 352,
+    "diff": 0.16193181818181818,
+    "only_a": 96,
+    "only_b": 39,
+    "discordance": 0.3835227272727273,
+    "p": 1.0064989577328037e-06
+   },
+   {
+    "seed": "20261021",
+    "n": 352,
+    "diff": 0.19318181818181818,
+    "only_a": 104,
+    "only_b": 36,
+    "discordance": 0.3977272727272727,
+    "p": 7.600909757854836e-09
+   }
+  ],
+  "pooled": {
+   "n": 704,
+   "diff": 0.17755681818181818,
+   "only_a": 200,
+   "only_b": 75,
+   "discordance": 0.390625,
+   "p": 2.6965766974350935e-14,
+   "verdict": "difference",
+   "failed": [],
+   "same_sign": true
+  }
+ },
+ "goal_after": {
+  "n": 171,
+  "n_by_answer": {
+   "yes": 86,
+   "no": 85
+  },
+  "per_pair": [
+   {
+    "pair": "20261019/S0",
+    "seed": "20261019",
+    "side": "S0",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1s0_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/m3cs1s0_050",
+    "n": 171,
+    "acc_a": 0.6374269005847953,
+    "acc_b": 0.52046783625731,
+    "by_answer_a": {
+     "yes": 0.5930232558139535,
+     "no": 0.6823529411764706
+    },
+    "by_answer_b": {
+     "yes": 0.11627906976744186,
+     "no": 0.9294117647058824
+    },
+    "diff": 0.11695906432748537,
+    "only_a": 49,
+    "only_b": 29,
+    "discordance": 0.45614035087719296,
+    "p": 0.030786495821399938
+   },
+   {
+    "pair": "20261019/D",
+    "seed": "20261019",
+    "side": "D",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1d_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/sft_m3c_e4",
+    "n": 171,
+    "acc_a": 0.6081871345029239,
+    "acc_b": 0.5029239766081871,
+    "by_answer_a": {
+     "yes": 0.5581395348837209,
+     "no": 0.6588235294117647
+    },
+    "by_answer_b": {
+     "yes": 0.05813953488372093,
+     "no": 0.9529411764705882
+    },
+    "diff": 0.10526315789473684,
+    "only_a": 46,
+    "only_b": 28,
+    "discordance": 0.4327485380116959,
+    "p": 0.04739297550405179
+   },
+   {
+    "pair": "20261021/S0",
+    "seed": "20261021",
+    "side": "S0",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2s0_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2s0_100",
+    "n": 171,
+    "acc_a": 0.6198830409356725,
+    "acc_b": 0.5263157894736842,
+    "by_answer_a": {
+     "yes": 0.6046511627906976,
+     "no": 0.6352941176470588
+    },
+    "by_answer_b": {
+     "yes": 0.11627906976744186,
+     "no": 0.9411764705882353
+    },
+    "diff": 0.0935672514619883,
+    "only_a": 49,
+    "only_b": 33,
+    "discordance": 0.47953216374269003,
+    "p": 0.09703091129729906
+   },
+   {
+    "pair": "20261021/D",
+    "seed": "20261021",
+    "side": "D",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2d_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2d_050",
+    "n": 171,
+    "acc_a": 0.6081871345029239,
+    "acc_b": 0.5146198830409356,
+    "by_answer_a": {
+     "yes": 0.5465116279069767,
+     "no": 0.6705882352941176
+    },
+    "by_answer_b": {
+     "yes": 0.10465116279069768,
+     "no": 0.9294117647058824
+    },
+    "diff": 0.0935672514619883,
+    "only_a": 46,
+    "only_b": 30,
+    "discordance": 0.4444444444444444,
+    "p": 0.08464609267083592
+   }
+  ],
+  "per_seed": [
+   {
+    "seed": "20261019",
+    "n": 342,
+    "diff": 0.1111111111111111,
+    "only_a": 95,
+    "only_b": 57,
+    "discordance": 0.4444444444444444,
+    "p": 0.0025735692598787482
+   },
+   {
+    "seed": "20261021",
+    "n": 342,
+    "diff": 0.0935672514619883,
+    "only_a": 95,
+    "only_b": 63,
+    "discordance": 0.4619883040935672,
+    "p": 0.013401204087274658
+   }
+  ],
+  "pooled": {
+   "n": 684,
+   "diff": 0.1023391812865497,
+   "only_a": 190,
+   "only_b": 120,
+   "discordance": 0.45321637426900585,
+   "p": 8.342570746636886e-05,
+   "verdict": "difference",
+   "failed": [],
+   "same_sign": true
+  }
+ },
+ "occlusion": {
+  "qtypes": [
+   "occluded_now",
+   "occluded_after"
+  ],
+  "n": 91,
+  "n_by_answer": {
+   "full": 22,
+   "partial": 9,
+   "none": 60
+  },
+  "per_pair": [
+   {
+    "pair": "20261019/S0",
+    "seed": "20261019",
+    "side": "S0",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1s0_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/m3cs1s0_050",
+    "n": 91,
+    "bal_a": 0.39360269360269357,
+    "bal_b": 0.353030303030303,
+    "by_answer_a": {
+     "full": 0.13636363636363635,
+     "partial": 0.4444444444444444,
+     "none": 0.6
+    },
+    "by_answer_b": {
+     "full": 0.4090909090909091,
+     "partial": 0.0,
+     "none": 0.65
+    },
+    "diff": 0.04057239057239054,
+    "only_a": 18,
+    "only_b": 23,
+    "discordance": 0.45054945054945056,
+    "ci": [
+     -0.100513468013468,
+     0.1993560606060605
+    ],
+    "p": 0.605
+   },
+   {
+    "pair": "20261019/D",
+    "seed": "20261019",
+    "side": "D",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261019/diag/probe_P1/m3dns1d_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261019/diag/probe_P1/sft_m3c_e4",
+    "n": 91,
+    "bal_a": 0.31885521885521884,
+    "bal_b": 0.34040404040404043,
+    "by_answer_a": {
+     "full": 0.045454545454545456,
+     "partial": 0.4444444444444444,
+     "none": 0.4666666666666667
+    },
+    "by_answer_b": {
+     "full": 0.45454545454545453,
+     "partial": 0.0,
+     "none": 0.5666666666666667
+    },
+    "diff": -0.021548821548821595,
+    "only_a": 16,
+    "only_b": 27,
+    "discordance": 0.4725274725274725,
+    "ci": [
+     -0.16399410774410775,
+     0.12980639730639723
+    ],
+    "p": 0.775
+   },
+   {
+    "pair": "20261021/S0",
+    "seed": "20261021",
+    "side": "S0",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2s0_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2s0_100",
+    "n": 91,
+    "bal_a": 0.3688552188552188,
+    "bal_b": 0.3252525252525253,
+    "by_answer_a": {
+     "full": 0.045454545454545456,
+     "partial": 0.4444444444444444,
+     "none": 0.6166666666666667
+    },
+    "by_answer_b": {
+     "full": 0.4090909090909091,
+     "partial": 0.0,
+     "none": 0.5666666666666667
+    },
+    "diff": 0.04360269360269353,
+    "only_a": 23,
+    "only_b": 24,
+    "discordance": 0.5164835164835165,
+    "ci": [
+     -0.09899831649831652,
+     0.196502525252525
+    ],
+    "p": 0.559
+   },
+   {
+    "pair": "20261021/D",
+    "seed": "20261021",
+    "side": "D",
+    "a": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_dn_s20261021/diag/probe_P1/m3dns2d_300",
+    "b": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_c_s20261021/diag/probe_P1/m3cs2d_050",
+    "n": 91,
+    "bal_a": 0.43619528619528625,
+    "bal_b": 0.3156565656565657,
+    "by_answer_a": {
+     "full": 0.13636363636363635,
+     "partial": 0.5555555555555556,
+     "none": 0.6166666666666667
+    },
+    "by_answer_b": {
+     "full": 0.36363636363636365,
+     "partial": 0.0,
+     "none": 0.5833333333333334
+    },
+    "diff": 0.12053872053872056,
+    "only_a": 23,
+    "only_b": 21,
+    "discordance": 0.4835164835164835,
+    "ci": [
+     -0.033164983164983154,
+     0.27475589225589214
+    ],
+    "p": 0.128
+   }
+  ],
+  "per_seed": [
+   {
+    "seed": "20261019",
+    "n": 182,
+    "diff": 0.009511784511784471,
+    "only_a": 34,
+    "only_b": 50,
+    "discordance": 0.46153846153846156,
+    "ci": [
+     -0.11793139730639732,
+     0.14865740740740738
+    ],
+    "p": 0.898
+   },
+   {
+    "seed": "20261021",
+    "n": 182,
+    "diff": 0.08207070707070704,
+    "only_a": 46,
+    "only_b": 45,
+    "discordance": 0.5,
+    "ci": [
+     -0.05699074074074076,
+     0.22879629629629622
+    ],
+    "p": 0.259
+   }
+  ],
+  "pooled": {
+   "n": 364,
+   "diff": 0.04579124579124576,
+   "only_a": 80,
+   "only_b": 95,
+   "discordance": 0.4807692307692308,
+   "ci": [
+    -0.08090488215488213,
+    0.18249999999999994
+   ],
+   "p": 0.497,
+   "verdict": "no difference",
+   "failed": [
+    "size"
+   ],
+   "same_sign": true
+  }
+ }
+}

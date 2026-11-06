@@ -203,6 +203,7 @@
    "last_update": 300,
    "updates": 300,
    "stop": null,
+   "trainer_crashes": [],
    "prereg": {
     "result": "m3bs1s0_300",
     "test": 0.434932,
@@ -285,6 +286,7 @@
    "last_update": 300,
    "updates": 300,
    "stop": null,
+   "trainer_crashes": [],
    "prereg": {
     "result": "m3bs1d_300",
     "test": 0.452055,
@@ -367,6 +369,7 @@
    "last_update": 300,
    "updates": 300,
    "stop": null,
+   "trainer_crashes": [],
    "prereg": {
     "result": "m3dns1s0_300",
     "test": 0.520548,
@@ -449,6 +452,7 @@
    "last_update": 300,
    "updates": 300,
    "stop": null,
+   "trainer_crashes": [],
    "prereg": {
     "result": "m3dns1d_300",
     "test": 0.489726,
@@ -531,6 +535,7 @@
    "last_update": 300,
    "updates": 300,
    "stop": null,
+   "trainer_crashes": [],
    "prereg": {
     "result": "m3dns2s0_300",
     "test": 0.472603,
@@ -613,6 +618,13 @@
    "last_update": 300,
    "updates": 300,
    "stop": null,
+   "trainer_crashes": [
+    {
+     "utc": "2026-11-04T11:09:38+00:00",
+     "job_id": "pt-e718xyt1",
+     "crash": null
+    }
+   ],
    "prereg": {
     "result": "m3dns2d_300",
     "test": 0.517123,
@@ -698,6 +710,7 @@
     "at": "2026-11-05T01:00:41+00:00",
     "why": "unparseable answers 0.101 > 0.1 (mean of updates 261-270)"
    },
+   "trainer_crashes": [],
    "prereg": {
     "result": "m3crs1s0_250",
     "test": 0.520548,
@@ -782,6 +795,7 @@
     "at": "2026-11-05T01:29:09+00:00",
     "why": "unparseable answers 0.116 > 0.1 (mean of updates 277-286)"
    },
+   "trainer_crashes": [],
    "prereg": {
     "result": "m3crs1d_250",
     "test": 0.506849,
@@ -863,6 +877,7 @@
    "last_update": 300,
    "updates": 300,
    "stop": null,
+   "trainer_crashes": [],
    "prereg": {
     "result": "m3crs2s0_300",
     "test": 0.503425,
@@ -948,6 +963,18 @@
     "at": "2026-11-05T01:55:50+00:00",
     "why": "rule 91: 2 trainer attempts in a row ended with the Qwen3-VL image-token crash (last: RuntimeError: shape mismatch: value tensor of shape [3, 4820] cannot be broadcast to indexing result of shape [3, 4771])"
    },
+   "trainer_crashes": [
+    {
+     "utc": "2026-11-05T01:14:55+00:00",
+     "job_id": "pt-ckbc530b",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4805] cannot be broadcast to indexing result of shape [3, 4770]"
+    },
+    {
+     "utc": "2026-11-05T01:55:45+00:00",
+     "job_id": "pt-bq7mzcn5",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4820] cannot be broadcast to indexing result of shape [3, 4771]"
+    }
+   ],
    "prereg": {
     "result": "m3crs2d_200",
     "test": 0.486301,
@@ -1085,5 +1112,239 @@
    "m3crs2d_200": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_run_m3crs2d/checkpoints/global_step_200/actor/huggingface",
    "m3crs2d_100": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_cr_s20261021/rl_run_m3crs2d/checkpoints/global_step_100/actor/huggingface"
   }
- }
+ },
+ "trainer_crashes_matrix_v3": [
+  {
+   "chain": "m3_b_s20261019",
+   "run": "m3bs1s0",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_b_s20261019",
+   "run": "m3bs1d",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_c_s20261019",
+   "run": "m3cs1s0",
+   "crashes": [
+    {
+     "utc": "2026-11-02T20:34:42+00:00",
+     "job_id": "pt-gvuvkurx",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4774] cannot be broadcast to indexing result of shape [3, 4768]"
+    }
+   ],
+   "stop": {
+    "reason": "entropy above 0.3 in each of updates 92-96 (0.506, 0.317, 0.358, 0.465, 0.511)",
+    "utc": "2026-11-02T21:40:05+00:00"
+   },
+   "image_token": 1
+  },
+  {
+   "chain": "m3_c_s20261019",
+   "run": "m3cs1d",
+   "crashes": [
+    {
+     "utc": "2026-11-02T21:06:51+00:00",
+     "job_id": "pt-kio3zp83",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4804] cannot be broadcast to indexing result of shape [3, 4774]"
+    }
+   ],
+   "stop": {
+    "reason": "entropy above 0.3 in each of updates 43-47 (0.318, 0.426, 0.455, 0.488, 0.452)",
+    "utc": "2026-11-02T22:16:28+00:00"
+   },
+   "image_token": 1
+  },
+  {
+   "chain": "m3_c_s20261021",
+   "run": "m3cs2s0",
+   "crashes": [
+    {
+     "utc": "2026-11-02T22:16:33+00:00",
+     "job_id": "pt-9jk5sqq8",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4852] cannot be broadcast to indexing result of shape [3, 4796]"
+    },
+    {
+     "utc": "2026-11-03T01:10:30+00:00",
+     "job_id": "pt-d0zgtr74",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4816] cannot be broadcast to indexing result of shape [3, 4765]"
+    }
+   ],
+   "stop": {
+    "reason": "rule 91: 2 trainer attempts in a row ended with the Qwen3-VL image-token crash (last: RuntimeError: shape mismatch: value tensor of shape [3, 4816] cannot be broadcast to indexing result of shape [3, 4765])",
+    "utc": "2026-11-03T01:10:32+00:00"
+   },
+   "image_token": 2
+  },
+  {
+   "chain": "m3_c_s20261021",
+   "run": "m3cs2d",
+   "crashes": [
+    {
+     "utc": "2026-11-02T21:25:50+00:00",
+     "job_id": "pt-81moq8s8",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4853] cannot be broadcast to indexing result of shape [3, 4795]"
+    },
+    {
+     "utc": "2026-11-03T01:00:09+00:00",
+     "job_id": "pt-ya62i07p",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4817] cannot be broadcast to indexing result of shape [3, 4756]"
+    }
+   ],
+   "stop": {
+    "reason": "rule 91: 2 trainer attempts in a row ended with the Qwen3-VL image-token crash (last: RuntimeError: shape mismatch: value tensor of shape [3, 4817] cannot be broadcast to indexing result of shape [3, 4756])",
+    "utc": "2026-11-03T01:00:11+00:00"
+   },
+   "image_token": 2
+  },
+  {
+   "chain": "m3_cr_s20261019",
+   "run": "m3crs1s0",
+   "crashes": [],
+   "stop": {
+    "reason": "unparseable answers 0.101 > 0.1 (mean of updates 261-270)",
+    "utc": "2026-11-05T01:00:41+00:00"
+   },
+   "image_token": 0
+  },
+  {
+   "chain": "m3_cr_s20261019",
+   "run": "m3crs1d",
+   "crashes": [],
+   "stop": {
+    "reason": "unparseable answers 0.116 > 0.1 (mean of updates 277-286)",
+    "utc": "2026-11-05T01:29:09+00:00"
+   },
+   "image_token": 0
+  },
+  {
+   "chain": "m3_cr_s20261021",
+   "run": "m3crs2s0",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_cr_s20261021",
+   "run": "m3crs2d",
+   "crashes": [
+    {
+     "utc": "2026-11-05T01:14:55+00:00",
+     "job_id": "pt-ckbc530b",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4805] cannot be broadcast to indexing result of shape [3, 4770]"
+    },
+    {
+     "utc": "2026-11-05T01:55:45+00:00",
+     "job_id": "pt-bq7mzcn5",
+     "crash": "RuntimeError: shape mismatch: value tensor of shape [3, 4820] cannot be broadcast to indexing result of shape [3, 4771]"
+    }
+   ],
+   "stop": {
+    "reason": "rule 91: 2 trainer attempts in a row ended with the Qwen3-VL image-token crash (last: RuntimeError: shape mismatch: value tensor of shape [3, 4820] cannot be broadcast to indexing result of shape [3, 4771])",
+    "utc": "2026-11-05T01:55:50+00:00"
+   },
+   "image_token": 2
+  },
+  {
+   "chain": "m3_d_s20261019",
+   "run": "m3ds1s0",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_d_s20261019",
+   "run": "m3ds1d",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_d_s20261021",
+   "run": "m3ds2s0",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_d_s20261021",
+   "run": "m3ds2d",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_dn_s20261019",
+   "run": "m3dns1s0",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_dn_s20261019",
+   "run": "m3dns1d",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_dn_s20261021",
+   "run": "m3dns2s0",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_dn_s20261021",
+   "run": "m3dns2d",
+   "crashes": [
+    {
+     "utc": "2026-11-04T11:09:38+00:00",
+     "job_id": "pt-e718xyt1",
+     "crash": null
+    }
+   ],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_e_s20261019",
+   "run": "m3es1s0",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  },
+  {
+   "chain": "m3_e_s20261019",
+   "run": "m3es1d",
+   "crashes": [],
+   "stop": {
+    "reason": "entropy above 0.3 in each of updates 204-208 (0.323, 0.355, 0.360, 0.501, 0.528)",
+    "utc": "2026-11-03T01:41:03+00:00"
+   },
+   "image_token": 0
+  },
+  {
+   "chain": "m3_e_s20261021",
+   "run": "m3es2s0",
+   "crashes": [],
+   "stop": {
+    "reason": "entropy above 0.3 in each of updates 223-227 (0.358, 0.370, 0.482, 0.385, 0.459)",
+    "utc": "2026-11-03T04:12:24+00:00"
+   },
+   "image_token": 0
+  },
+  {
+   "chain": "m3_e_s20261021",
+   "run": "m3es2d",
+   "crashes": [],
+   "stop": null,
+   "image_token": 0
+  }
+ ]
 }
