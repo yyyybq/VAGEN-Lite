@@ -183,15 +183,27 @@ def build(g_dirs, d_dirs, flagged=(), exclude=(), models=MODELS) -> dict:
 
 
 def pts(x) -> str:
-    return "—" if x is None or (isinstance(x, float) and math.isnan(x)) else f"{100 * x:+.1f}"
+    if x is None or (isinstance(x, float) and math.isnan(x)):
+        return "—"
+    v = round(100 * x, 1)
+    return "0.0" if v == 0 else (f"+{v:.1f}" if v > 0 else f"−{-v:.1f}")
 
 
 def ci(c: dict) -> str:
     return f"{pts(c['mean'])}（{pts(c['low'])} 到 {pts(c['high'])}）"
 
 
+SUP = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+
+
 def pv(p) -> str:
-    return "—" if p is None or math.isnan(p) else (f"{p:.2g}" if p < 0.001 else f"{p:.3f}")
+    """p as the reports write it: 3 decimals from 0.001 up, else 2 significant digits as m×10⁻ᵏ."""
+    if p is None or math.isnan(p):
+        return "—"
+    if p >= 0.001:
+        return f"{p:.3f}"
+    m, e = f"{p:.1e}".split("e")
+    return f"{m}×10{str(int(e)).translate(SUP)}"
 
 
 def pair_zh(k: str) -> str:
@@ -203,7 +215,7 @@ def markdown(rep: dict) -> str:
     L = ["# (g) 档：带对话历史 对 不带（自动生成）", "",
          f"- 因出错，从全部模型的带、不带两边一起去掉的实例 {len(rep['left_out_for_errors'])} 个："
          + ("、".join(rep["left_out_for_errors"]) or "无") + "。",
-         f"- 按剔除清单（--exclude）从两边一起去掉的实例 {len(ex)} 个：" + ("、".join(ex) or "无") + "。",
+         f"- 按剔除清单从两边一起去掉的实例 {len(ex)} 个：" + ("、".join(ex) or "无") + "。",
          f"- 可疑场景的实例 {len(rep['flagged'])} 个：每个模型的表和配对表都另给去掉它们的版本。", ""]
     for sub, s in rep["subsets"].items():
         L += [f"## {SUBSET_ZH[sub]}（{s['n']} 个）", "", "### 每个模型：带历史 − 不带",
@@ -226,17 +238,20 @@ def markdown(rep: dict) -> str:
             a, b = k.split(" ")[0].split("-")
             verb = "回来了" if k.endswith("comes back") else "变了"
             rules.append(f"{a} − {b} {verb}：{zh[v] if verb == '回来了' else ('否' if v is False else zh[v])}")
-        gc = []
+        first, second = [], []
         for k, v in s["gc_condition"]["parts"].items():
             a, b = k.split(" ")[0].split("-")
             p = s["pairs"][f"{a}-{b}"]
             if "with history" in k:
-                gc.append(f"{a} − {b} 带历史 ≥ +3：{'是' if v else '否'}（{pts(p['with']['mean'])}）")
+                first.append((f"{a} − {b} {pts(p['with']['mean'])}", v))
             else:
-                gc.append(f"{a} − {b} 的变动超过 3（点估计）：{'是' if v else '否'}（带减不带 {pts(p['did']['mean'])}）")
-        L += ["", "判定（设计第 5 节事先写定）：" + "；".join(rules) + "。",
-              "", "(g-c) 的条件（11-06 第 1 条，两条满足一条即交）：" + "；".join(gc)
-              + f"。满足：{'是' if s['gc_condition']['met'] else '否'}。", ""]
+                second.append((f"{a} − {b} {pts(p['did']['mean'])}", v))
+        part = lambda xs: ("是" if any(v for _, v in xs) else "否") + "（" + "，".join(t for t, _ in xs) + "）"
+        L += ["", "判定（设计第 5 节事先写定；\"回来了\"= 带历史的差和\"带减不带\"的区间都在 0 以上，"
+              "\"变了\"= \"带减不带\"的区间不含 0）：" + "；".join(rules) + "。",
+              "", "(g-c) 的条件（11-06 第 1 条，两条满足一条即交）：第一条，RS − S 带历史回到 +3 个百分点以上："
+              + part(first) + "；第二条，训练过的对底座的差变动超过 3 个百分点（\"带减不带\"的点估计）："
+              + part(second) + f"。满足：{'是' if s['gc_condition']['met'] else '否'}。", ""]
     L += ["## 分类型（只作描述）", "", "| 模型 | 类型 | 带历史 | 不带 |", "| --- | --- | ---: | ---: |"]
     for m, t in rep["by_type"]["g"].items():
         for ty, v in sorted(t.items(), key=lambda x: str(x[0])):
@@ -247,7 +262,7 @@ def markdown(rep: dict) -> str:
     for m, e in rep["flagged_episodes"].items():
         c = collections.Counter((v["g"], v["d"]) for v in e.values())
         L.append(f"| {m} | {c[(True, True)]} | {c[(True, False)]} | {c[(False, True)]} | {c[(False, False)]} |")
-    L += ["", "## 每轮输入长度（词元，服务端计数，带历史；只算走到这一轮的回合）", "",
+    L += ["", "## 每轮输入长度（词元，服务端计数；带历史的全部回合，出错行除外；每轮只算走到这一轮的回合）", "",
           "| 模型 | 第 1 轮平均 | 第 6 轮平均 | 第 12 轮平均（最多） | 第 12 轮调用次数 |", "| --- | ---: | ---: | ---: | ---: |"]
     for m, t in rep["prompt_tokens"].items():
         def cell(k, mx=False):
