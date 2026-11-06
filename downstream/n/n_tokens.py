@@ -69,12 +69,14 @@ def main(argv=None) -> int:
     ap.add_argument("--instances", type=Path, nargs="+", required=True)
     ap.add_argument("--val-env", type=Path, default=E.VAL_ENV)
     ap.add_argument("--limit", type=int, default=60, help="episodes per folder (the longest first)")
+    ap.add_argument("--processor-model", default=None,
+                    help="count with another model's processor of the same family (Q3B's base folder is root-only)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
     import q0_ask
     from transformers import AutoProcessor
 
-    processor = AutoProcessor.from_pretrained(q0_ask.processor_dir(args.model))
+    processor = AutoProcessor.from_pretrained(q0_ask.processor_dir(args.processor_model or args.model))
     cfg, _ = E.upstream_config(args.val_env)
     insts = {r["instance_id"]: r for p in args.instances for r in E.load_instances([str(p)], 0)}
     by_turn = {}
@@ -89,7 +91,7 @@ def main(argv=None) -> int:
                 cell = by_turn.setdefault(t, {"without": [], "with": []})
                 cell["without"].append(count(processor, plain, 1))
                 cell["with"].append(count(processor, hist, n_img))
-    rep = dict(summarize(by_turn), model=args.model, val_env=str(args.val_env), eval=[str(d) for d in args.eval],
+    rep = dict(summarize(by_turn), model=args.model, processor_model=args.processor_model or args.model, val_env=str(args.val_env), eval=[str(d) for d in args.eval],
                limit=args.limit)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(rep, indent=1) + "\n")
