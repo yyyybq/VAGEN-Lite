@@ -52,7 +52,9 @@ def test_levels_pairs_flagged_errors_and_the_gc_condition(tmp_path):
     assert rep["flagged"] == ["I0", "I1"] and rep["flagged_episodes"]["RS"]["I0"] == {"g": True, "d": True}
     assert rep["prompt_tokens"]["B"]["12"] == {"calls": 20, "mean": 3200, "max": 3200}  # every row of B (the error is RS's)
     md = G.markdown(rep)
-    assert "去掉可疑场景的实例（17 个）" in md and "| RS-S | 19 |" in md and "(g-c) 的条件" in md
+    assert "去掉可疑场景的实例（17 个）" in md and "| RS − S | 19 |" in md and "(g-c) 的条件" in md
+    assert "RS − S 带历史 ≥ +3：是（+10.5）" in md and "RS − S 回来了：" in md and "I19" in md
+    assert "| 改变 N1 的结论（水平：区间不含 0） |" in md and "第 12 轮调用次数" in md
 
 
 def test_scene_bootstrap_keeps_a_scene_together_and_gives_a_two_sided_p():
@@ -63,7 +65,7 @@ def test_scene_bootstrap_keeps_a_scene_together_and_gives_a_two_sided_p():
     z = G.scene_boot({"x": 0, "y": 0}, {}, draws=50)
     assert z["mean"] == 0 and z["p"] == 1.0 and not z["p_floor"]
     allup = G.scene_boot({f"i{k}": 1 for k in range(6)}, {}, draws=200)  # never at or below 0: p under the resolution
-    assert allup["p_floor"] and allup["p"] == 1 / 200
+    assert allup["p_floor"] and allup["p"] == 2 / 200
     assert G.position({"low": 0.01, "high": 0.2}) == "above" and G.position({"low": -0.1, "high": 0.2}) == "across"
 
 

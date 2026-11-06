@@ -72,9 +72,9 @@ def load(dirs, models=MODELS, exclude=()) -> tuple:
 
 def scene_boot(per: dict, scenes: dict, draws: int = DRAWS, seed: int = SEED) -> dict:
     """per: {instance: value}.  The mean with a 95% interval from resampling whole scenes, and a two-sided bootstrap
-    p (twice the smaller share of resampled means on either side of 0, at most 1).  A p below the resolution
-    (1 / draws: no resampled mean on one side) is set to 1 / draws with "p_floor" true, so the Holm adjustment
-    stays an upper bound and the table prints "< 0.0005" (2,000 draws)."""
+    p (twice the smaller share of resampled means on either side of 0, at most 1).  A p of 0 (no resampled mean on one
+    side; the two-sided p moves in steps of 2 / draws) is set to 2 / draws with "p_floor" true, so the Holm
+    adjustment stays an upper bound and the table prints "< 0.001" (2,000 draws)."""
     if not per:
         return {"n": 0, "mean": math.nan, "low": math.nan, "high": math.nan, "p": math.nan}
     groups = collections.defaultdict(list)
@@ -88,7 +88,7 @@ def scene_boot(per: dict, scenes: dict, draws: int = DRAWS, seed: int = SEED) ->
     le, ge = sum(x <= 0 for x in means) / draws, sum(x >= 0 for x in means) / draws
     p = min(1.0, 2 * min(le, ge))
     return {"n": len(per), "mean": sum(per.values()) / len(per), "low": means[int(0.025 * draws)],
-            "high": means[int(0.975 * draws) - 1], "p": max(p, 1 / draws), "p_floor": p < 1 / draws}
+            "high": means[int(0.975 * draws) - 1], "p": max(p, 2 / draws), "p_floor": p < 2 / draws}
 
 
 def position(c: dict) -> str:
@@ -147,6 +147,7 @@ def build(g_dirs, d_dirs, flagged=(), exclude=(), models=MODELS) -> dict:
     gone = {i for m in models for i in g_err.get(m, []) + d_err.get(m, [])}  # out of both sides, every model
     universe = sorted({i for m in models for i in g[m]} - gone)
     rep = {"models": models, "errors": {"g": g_err, "d": d_err}, "left_out_for_errors": sorted(gone),
+           "excluded_present": sorted(set(exclude) & (set(sg) | set(sd))),
            "flagged": sorted(set(flagged) & set(universe)), "subsets": {}}
     for sub in SUBSETS:
         ids = [i for i in universe if sub == "all" or i not in set(flagged)]
@@ -193,27 +194,48 @@ def pv(p) -> str:
     return "—" if p is None or math.isnan(p) else (f"{p:.2g}" if p < 0.001 else f"{p:.3f}")
 
 
+def pair_zh(k: str) -> str:
+    return k.replace("-", " − ")
+
+
 def markdown(rep: dict) -> str:
+    ex = rep.get("excluded_present") or []
     L = ["# (g) 档：带对话历史 对 不带（自动生成）", "",
-         f"可疑场景的实例 {len(rep['flagged'])} 个，每张表都另给去掉它们的版本。"
-         f"因出错两边一起去掉的实例：{len(rep['left_out_for_errors'])} 个。", ""]
+         f"- 因出错，从全部模型的带、不带两边一起去掉的实例 {len(rep['left_out_for_errors'])} 个："
+         + ("、".join(rep["left_out_for_errors"]) or "无") + "。",
+         f"- 按剔除清单（--exclude）从两边一起去掉的实例 {len(ex)} 个：" + ("、".join(ex) or "无") + "。",
+         f"- 可疑场景的实例 {len(rep['flagged'])} 个：每个模型的表和配对表都另给去掉它们的版本。", ""]
     for sub, s in rep["subsets"].items():
         L += [f"## {SUBSET_ZH[sub]}（{s['n']} 个）", "", "### 每个模型：带历史 − 不带",
-              "", "| 模型 | 带历史 | 不带 | 差（百分点，整场景 95% 区间） | 只带历史成功 | 只不带成功 | McNemar p（未校正） |",
-              "| --- | ---: | ---: | --- | ---: | ---: | ---: |"]
+              "", "| 模型 | 带历史 | 不带 | 差（百分点，整场景 95% 区间） | 只带历史成功 | 只不带成功 | McNemar p（未校正） | 改变 N1 的结论（水平：区间不含 0） |",
+              "| --- | ---: | ---: | --- | ---: | ---: | ---: | --- |"]
         for m, v in s["levels"].items():
             L.append(f"| {m} | {100 * v['rate_a']:.1f}% | {100 * v['rate_b']:.1f}% | {ci(v['scene'])} | "
-                     f"{v['only_a']} | {v['only_b']} | {pv(v['p'])} |")
+                     f"{v['only_a']} | {v['only_b']} | {pv(v['p'])} | {'是' if s['level_changed'][m] else '否'} |")
         L += ["", "### 配对：带历史的差、不带的差、带减不带", "",
               "| 配对 | 实例 | 带历史 | 不带 | 带减不带 | 带减不带 p（重抽） | Holm | 改变 N1 的结论 |",
               "| --- | ---: | --- | --- | --- | ---: | ---: | --- |"]
         for k, p in s["pairs"].items():
             fl = p["did"].get("p_floor")
-            L.append(f"| {k} | {p['n']} | {ci(p['with'])} | {ci(p['without'])} | {ci(p['did'])} | "
+            L.append(f"| {pair_zh(k)} | {p['n']} | {ci(p['with'])} | {ci(p['without'])} | {ci(p['did'])} | "
                      f"{'< ' + pv(p['did']['p']) if fl else pv(p['did']['p'])} | "
                      f"{'≤ ' if fl else ''}{pv(p['did']['holm'])} | {'是' if p['changed'] else '否'} |")
-        L += ["", "判定：" + "；".join(f"{k}：{v}" for k, v in s["rules"].items()),
-              "", "(g-c) 的条件：" + "；".join(f"{k}：{'是' if v else '否'}" for k, v in s["gc_condition"]["parts"].items())
+        zh = {"up": "变了（变大）", "down": "变了（变小）", True: "是", False: "否"}
+        rules = []
+        for k, v in s["rules"].items():
+            a, b = k.split(" ")[0].split("-")
+            verb = "回来了" if k.endswith("comes back") else "变了"
+            rules.append(f"{a} − {b} {verb}：{zh[v] if verb == '回来了' else ('否' if v is False else zh[v])}")
+        gc = []
+        for k, v in s["gc_condition"]["parts"].items():
+            a, b = k.split(" ")[0].split("-")
+            p = s["pairs"][f"{a}-{b}"]
+            if "with history" in k:
+                gc.append(f"{a} − {b} 带历史 ≥ +3：{'是' if v else '否'}（{pts(p['with']['mean'])}）")
+            else:
+                gc.append(f"{a} − {b} 的变动超过 3（点估计）：{'是' if v else '否'}（带减不带 {pts(p['did']['mean'])}）")
+        L += ["", "判定（设计第 5 节事先写定）：" + "；".join(rules) + "。",
+              "", "(g-c) 的条件（11-06 第 1 条，两条满足一条即交）：" + "；".join(gc)
               + f"。满足：{'是' if s['gc_condition']['met'] else '否'}。", ""]
     L += ["## 分类型（只作描述）", "", "| 模型 | 类型 | 带历史 | 不带 |", "| --- | --- | ---: | ---: |"]
     for m, t in rep["by_type"]["g"].items():
@@ -225,13 +247,13 @@ def markdown(rep: dict) -> str:
     for m, e in rep["flagged_episodes"].items():
         c = collections.Counter((v["g"], v["d"]) for v in e.values())
         L.append(f"| {m} | {c[(True, True)]} | {c[(True, False)]} | {c[(False, True)]} | {c[(False, False)]} |")
-    L += ["", "## 每轮输入长度（服务端计数，带历史）", "", "| 模型 | 第 1 轮平均 | 第 6 轮平均 | 第 12 轮平均（最多） |",
-          "| --- | ---: | ---: | ---: |"]
+    L += ["", "## 每轮输入长度（词元，服务端计数，带历史；只算走到这一轮的回合）", "",
+          "| 模型 | 第 1 轮平均 | 第 6 轮平均 | 第 12 轮平均（最多） | 第 12 轮调用次数 |", "| --- | ---: | ---: | ---: | ---: |"]
     for m, t in rep["prompt_tokens"].items():
         def cell(k, mx=False):
             v = t.get(k)
             return "—" if not v else (f"{v['mean']:.0f}（{v['max']}）" if mx else f"{v['mean']:.0f}")
-        L.append(f"| {m} | {cell('1')} | {cell('6')} | {cell('12', True)} |")
+        L.append(f"| {m} | {cell('1')} | {cell('6')} | {cell('12', True)} | {(t.get('12') or {}).get('calls', 0)} |")
     return "\n".join(L) + "\n"
 
 
