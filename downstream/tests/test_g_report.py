@@ -50,7 +50,7 @@ def test_levels_pairs_flagged_errors_and_the_gc_condition(tmp_path):
     w = rep["subsets"]["without flagged"]
     assert w["n"] == 17
     assert rep["flagged"] == ["I0", "I1"] and rep["flagged_episodes"]["RS"]["I0"] == {"g": True, "d": True}
-    assert rep["prompt_tokens"]["B"]["12"] == {"calls": 19, "mean": 3200, "max": 3200}
+    assert rep["prompt_tokens"]["B"]["12"] == {"calls": 20, "mean": 3200, "max": 3200}  # every row of B (the error is RS's)
     md = G.markdown(rep)
     assert "去掉可疑场景的实例（17 个）" in md and "| RS-S | 19 |" in md and "(g-c) 的条件" in md
 
