@@ -299,6 +299,8 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         out["prompt_format_example"] = args.format_example
     if getattr(args, "lenient_parse", False):  # round 12 freeze: the lenient reading of the answers
         out["lenient_parse"] = True
+    if getattr(args, "turn_footprint_radius", None) is not None:  # experiment 3A: the robot-base turn rule
+        out["turn_footprint_radius"] = float(args.turn_footprint_radius)
     return out
 
 
@@ -853,6 +855,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "temperature), as the RL logs report it")
     r.add_argument("--lenient-parse", action="store_true",
                    help="round 12 freeze: read answers leniently when the strict reading finds no action")
+    r.add_argument("--turn-footprint-radius", type=float, default=None,
+                   help="experiment 3A (the user's decision of 2026-11-06): block in-place turns whose robot-base disc "
+                        "of this radius (m, e.g. 0.25) meets a wall or an object box reaching into 0.1-1.0 m (env "
+                        "turn_footprint_radius; default: today's rule, turns are never blocked)")
     r.add_argument("--history", action=argparse.BooleanOptionalAction, default=True,
                    help="every model call gets all earlier turns, exactly as in SFT (round-10 default; --no-history "
                         "for a single-turn input)")

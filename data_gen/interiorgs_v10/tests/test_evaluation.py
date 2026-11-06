@@ -339,6 +339,41 @@ class EvaluationTest(unittest.TestCase):
             self.assertTrue(told["collision_feedback_detail"])
             self.assertNotIn("collision_feedback_detail", plain)
 
+    def test_turn_footprint_switch(self):
+        """Experiment 3A (the user's decision 甲 of 2026-11-06): run --turn-footprint-radius R sets the env's
+        turn_footprint_radius, which cmd_run records in model.json env_switches; without the flag nothing changes."""
+        import argparse
+        import os
+        from unittest import mock
+
+        from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+
+        on = E.switch_overrides(argparse.Namespace(turn_footprint_radius=0.25))
+        self.assertEqual(on, {"turn_footprint_radius": 0.25})
+        self.assertIsInstance(on["turn_footprint_radius"], float)
+        self.assertEqual(E.switch_overrides(argparse.Namespace(turn_footprint_radius=None)), {})
+        self.assertEqual(E.switch_overrides(argparse.Namespace()), {})
+        # cmd_run keeps only the env config's fields: every switch key must be one (a misspelt key would vanish)
+        every = E.switch_overrides(argparse.Namespace(check_each_action=True, max_actions=20, no_collision_end=True,
+                                                      collision_feedback=True, format_example="action_names",
+                                                      lenient_parse=True, turn_footprint_radius=0.25))
+        self.assertLessEqual(set(every), set(ActiveSpatialEnvConfig.__dataclass_fields__))
+        configs = Path(E.__file__).with_name("configs")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"R1_RENDER_URL": "http://x/render"}):
+            tasks = Path(tmp) / "tasks.jsonl"
+            tasks.write_text("")
+            live = E.env_config(configs / "rl_env_v10_S0.yaml", tasks, "/gs", None, E.switch_overrides(argparse.Namespace()))
+            fp = E.env_config(configs / "rl_env_v10_S0.yaml", tasks, "/gs", None, on)
+            self.assertNotIn("turn_footprint_radius", live)
+            self.assertEqual(fp, dict(live, turn_footprint_radius=0.25))
+        # the run command's flag (cmd_run itself needs a GPU)
+        seen = []
+        with mock.patch.object(E, "cmd_run", side_effect=seen.append):
+            E.main(["run", "--eval", "x", "--name", "n", "--model", "m", "--turn-footprint-radius", "0.25"])
+            E.main(["run", "--eval", "x", "--name", "n", "--model", "m"])
+        self.assertEqual([a.turn_footprint_radius for a in seen], [0.25, None])
+        self.assertEqual([E.switch_overrides(a) for a in seen], [{"turn_footprint_radius": 0.25}, {}])
+
     def test_end_reasons_and_paired_comparison(self):
         def r(i, ok, end):
             return {"index": i, "task_type": "fov_inclusion", "d_star": 2, "success": ok, "actions_to_success": 2 if ok else None,
