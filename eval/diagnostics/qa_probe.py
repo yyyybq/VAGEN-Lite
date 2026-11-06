@@ -159,18 +159,50 @@ def parse_answer(text: str, options: Sequence[str], yes_no: bool) -> Optional[st
 
 
 _NUM = r"-?\d+(?:\.\d+)?"
+_COORD = r"(?<![\w.])-?\d+(?:\.\d+)?"  # a coordinate: not the digit of a name like x1; a minus right after a digit joins a range (100-200)
+
+
+def _numbers(s: str) -> List[float]:
+    return [float(v) for v in re.findall(_COORD, s)]
+
+
+def read_coordinates(text: str, n: int) -> Tuple[List[float], str]:
+    """The coordinates an answer gives for a point (n 2) or a box (n 4), and the form they were read from: a JSON-style
+    "point_2d" / "bbox_2d" list (Qwen-VL's grounding output; a point question answered with a box gives the box
+    centre), else the first bracketed group of exactly n numbers (a point question: of 4, its centre; two pairs alone,
+    a box's corners, their centre), else the first n numbers anywhere ("loose")."""
+    keyed = {k: _numbers(m.group(1)) for k in ("point_2d", "bbox_2d")
+             for m in [re.search(rf'["\']?{k}["\']?\s*:\s*\[([^\]]*)\]', text)] if m}
+    centre = lambda b: [(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0]  # noqa: E731
+    if n == 2 and len(keyed.get("point_2d", [])) >= 2:
+        return keyed["point_2d"][:2], "point_2d"
+    if len(keyed.get("bbox_2d", [])) >= 4:
+        b = keyed["bbox_2d"][:4]
+        return (centre(b), "bbox_2d_centre") if n == 2 else (b, "bbox_2d")
+    groups = [_numbers(m.group(1)) for m in re.finditer(r"[\(\[]([^\)\]]*)[\)\]]", text)]
+    if n == 2 and len(groups) == 2 and all(len(g) == 2 for g in groups):  # a box given as its two corners
+        return centre(groups[0] + groups[1]), "corners_centre"
+    for g in groups:
+        if len(g) == n:
+            return g, "group"
+    if n == 2:
+        for g in groups:
+            if len(g) == 4:
+                return centre(g), "group_box_centre"
+    return _numbers(text)[:n], "loose"
 
 
 def judge_pointing(row: Dict[str, Any], text: str) -> Dict[str, Any]:
     """A pointing question's answer (group G of matrix v3, data_gen/transition_qa/pointing_qa.py; row "judge" point or
-    box, "box" the true box in pixels of "render_size", "coords" pixel or norm1000): the first 2 / 4 numbers of the
-    answer as the point / the box in the row's coordinates; right when the point lies in the true box / the boxes'
-    IoU is at least 0.5.  {"parsed", "readable", "correct", "compliant": exactly "(x,y)" / "(x1,y1,x2,y2)"}."""
+    box, "box" the true box in pixels of "render_size", "coords" pixel or norm1000): the point / the box the answer
+    gives (read_coordinates) in the row's coordinates; right when the point lies in the true box / the boxes' IoU is
+    at least 0.5.  {"parsed", "read_as", "readable", "correct", "compliant": exactly "(x,y)" / "(x1,y1,x2,y2)"}."""
     t = _clean(text)
     n = 2 if row["judge"] == "point" else 4
-    nums = [float(v) for v in re.findall(_NUM, t)][:n]
+    nums, form = read_coordinates(t, n)
     shape = r"\(\s*" + r"\s*,\s*".join([_NUM] * n) + r"\s*\)\.?"
-    out = {"parsed": None, "readable": False, "correct": False, "compliant": re.fullmatch(shape, t) is not None}
+    out = {"parsed": None, "read_as": form, "readable": False, "correct": False,
+           "compliant": re.fullmatch(shape, t) is not None}
     if len(nums) < n:
         return out
     w, h = row.get("render_size") or (256, 256)
@@ -203,6 +235,7 @@ def score(rows: Sequence[Dict[str, Any]], outputs: Sequence[str]) -> List[Dict[s
             j = judge_pointing(r, text) if r.get("judge") in ("point", "box") else None
             out.append({"sample_id": r["sample_id"], "qtype": r["qtype"], "qclass": r["qclass"], "family": r["family"],
                         "gold": gold, "output": text, "parsed": j["parsed"] if j else None,
+                        "read_as": j["read_as"] if j else None,
                         "correct": bool(j and j["correct"]), "readable": bool(j and j["readable"]),
                         "compliant": bool(j and j["compliant"]), "format": "exact" if j and j["compliant"] else "other",
                         "n_options": None})

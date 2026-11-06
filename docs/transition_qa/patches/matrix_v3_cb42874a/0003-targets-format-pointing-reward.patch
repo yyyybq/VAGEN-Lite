@@ -1,5 +1,5 @@
 diff --git a/data_gen/interiorgs_v10/evaluation.py b/data_gen/interiorgs_v10/evaluation.py
-index cd903aa3..fc87dd1f 100644
+index cd903aa3..69ef56f5 100644
 --- a/data_gen/interiorgs_v10/evaluation.py
 +++ b/data_gen/interiorgs_v10/evaluation.py
 @@ -370,6 +370,7 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
@@ -10,7 +10,17 @@ index cd903aa3..fc87dd1f 100644
      start = gate_summary(env._calculate_canonical_metric()) if frames is not None else None
  
      def keep(image: Any, turn: int) -> Optional[str]:
-@@ -408,6 +409,10 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
+@@ -399,6 +400,9 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
+             seen["prompt_tokens"] = policy.last_prompt_tokens
+         if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
+             seen.update(entropy=round(float(policy.last_entropy), 5), tokens=int(policy.last_tokens or 0))
++            for k, v in (getattr(policy, "last_segments", None) or {}).items():  # group G: by segment
++                if v is not None:
++                    seen[k] = round(float(v), 5) if k.startswith("entropy_") else int(v)
+         obs, reward, done, step_info = env.step(text)
+         turns += 1
+         parsed = list(step_info.get("actions") or [])
+@@ -408,6 +412,10 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
          collisions += blocked
          valid = bool(tm.get("action_is_valid", bool(parsed)))
          invalid += int(not valid)
@@ -21,7 +31,7 @@ index cd903aa3..fc87dd1f 100644
          metric = env._calculate_canonical_metric()
          met = bool(metric and metric.get("success"))
          if met and not success:
-@@ -417,10 +422,15 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
+@@ -417,10 +425,15 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
              trajectory.append(dict(seen, answer=text, actions=[str(a) for a in parsed], valid=valid,
                                     collisions=blocked, reward=round(float(reward), 4), met=met,
                                     **gate_summary(metric)))
@@ -37,10 +47,85 @@ index cd903aa3..fc87dd1f 100644
      if sample is not None:
          row["sample"] = int(sample)
      if frames is not None:
-@@ -595,6 +605,18 @@ def token_entropy(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-     return {"entropy": round(sum(e * n for e, n in pairs) / tokens, 5), "entropy_tokens": tokens}
+@@ -463,6 +476,40 @@ def top_logprob_entropy(positions: Sequence[Sequence[float]], temperature: float
+     return sum(out) / len(out) if out else None
  
  
++def position_entropies(positions: Sequence[Sequence[float]], temperature: float) -> List[Optional[float]]:
++    """Per answer token, the entropy top_logprob_entropy averages (None for a position without log-probabilities)."""
++    t = float(temperature) if temperature and temperature > 0 else 1.0
++    out: List[Optional[float]] = []
++    for lps in positions:
++        if not lps:
++            out.append(None)
++            continue
++        z = [float(lp) / t for lp in lps]
++        m = max(z)
++        w = [math.exp(v - m) for v in z]
++        s = sum(w)
++        out.append(-sum((x / s) * math.log(x / s) for x in w if x > 0))
++    return out
++
++
++def segment_entropies(pieces: Sequence[str], entropies: Sequence[Optional[float]]) -> Dict[str, Any]:
++    """Group G of matrix v3 (the pre-launch review of 2026-11-06): an answer's token entropy split at the token that
++    holds the "<" of "<action>": the action segment is that token and the rest ("entropy_action", "tokens_action"),
++    the targets segment everything before ("entropy_targets", "tokens_targets"); token means, None for an empty
++    segment.  An answer without "<action>" has no action segment.  ``pieces``: each token's text, in order."""
++    text = "".join(pieces)
++    at = text.find("<action>")
++    ends, n = [], 0
++    for p in pieces:
++        n += len(p)
++        ends.append(n)
++    action = [e for e, end in zip(entropies, ends) if e is not None and at >= 0 and end > at]
++    before = [e for e, end in zip(entropies, ends) if e is not None and not (at >= 0 and end > at)]
++    mean = lambda xs: sum(xs) / len(xs) if xs else None  # noqa: E731
++    return {"entropy_action": mean(action), "tokens_action": len(action), "entropy_targets": mean(before),
++            "tokens_targets": len(before)}
++
++
+ def cambrian_request(wrapper: Any, system: str, earlier: Sequence[Tuple[str, Any, str]], user_text: str, image: Any,
+                      as_sft: bool = False) -> Dict[str, Any]:
+     """The model line (2026-10-24): one Cambrian-S call as vLLM takes it -- the same chat as chat_messages, through
+@@ -501,6 +548,7 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
+         self.entropy = bool(entropy)  # round 12 freeze: the answers' token entropy (last_entropy, last_tokens)
+         self.last_entropy: Optional[float] = None
+         self.last_tokens: Optional[int] = None
++        self.last_segments: Optional[Dict[str, Any]] = None  # group G: segment_entropies of the last answer
+ 
+     def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
+                  as_sft: bool = False, seed: Optional[int] = None) -> str:
+@@ -521,6 +569,14 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
+             self.last_entropy = top_logprob_entropy([[lp.logprob for lp in pos.values()] for pos in steps],
+                                                     self.temperature)
+             self.last_tokens = len(steps)
++            # group G: the same entropies split at the action segment, from each sampled token's text
++            ids = list(out[0].outputs[0].token_ids or [])
++            pieces = [getattr((pos or {}).get(tid), "decoded_token", None) for pos, tid in zip(steps, ids)]
++            self.last_segments = None
++            if len(pieces) == len(steps) and all(isinstance(p, str) for p in pieces) and \
++                    "".join(pieces) == out[0].outputs[0].text:
++                self.last_segments = segment_entropies(
++                    pieces, position_entropies([[lp.logprob for lp in pos.values()] for pos in steps], self.temperature))
+         return out[0].outputs[0].text
+ 
+ 
+@@ -592,7 +648,26 @@ def token_entropy(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+     tokens = sum(n for _, n in pairs)
+     if not pairs or not tokens:
+         return {}
+-    return {"entropy": round(sum(e * n for e, n in pairs) / tokens, 5), "entropy_tokens": tokens}
++    out = {"entropy": round(sum(e * n for e, n in pairs) / tokens, 5), "entropy_tokens": tokens}
++    for part in ("action", "targets"):  # group G of matrix v3: the same by segment, when recorded
++        seg = [(float(t[f"entropy_{part}"]), int(t.get(f"tokens_{part}") or 0)) for r in rows
++               for t in (r.get("trajectory") or []) if t.get(f"entropy_{part}") is not None]
++        n = sum(k for _, k in seg)
++        if seg and n:
++            out.update({f"entropy_{part}": round(sum(e * k for e, k in seg) / n, 5), f"entropy_{part}_tokens": n})
++    return out
++
++
 +def pointing_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
 +    """Group G of matrix v3: over the turns the env judged a targets segment in, the mean pointing score and the
 +    shares of well-formed answers and of answers without a targets segment (the old format); {} when none was."""
@@ -51,12 +136,10 @@ index cd903aa3..fc87dd1f 100644
 +    return {"pointing_score": round(sum(p["score"] for p in pts) / turns, 4),
 +            "targets_ok_rate": round(sum(p["ok_turns"] for p in pts) / turns, 4),
 +            "targets_old_rate": round(sum(p["old_turns"] for p in pts) / turns, 4)}
-+
-+
+ 
+ 
  def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-     ok = [r for r in rows if "error" not in r]
-     succ = [r for r in ok if r["success"]]
-@@ -628,6 +650,7 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+@@ -628,6 +703,7 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
          "invalid_episode_mean": (round(sum(r["invalid_turns"] / r["turns"] for r in ok if r["turns"]) /
                                         sum(1 for r in ok if r["turns"]), 4) if any(r["turns"] for r in ok) else None),
          **token_entropy(ok),
@@ -64,7 +147,7 @@ index cd903aa3..fc87dd1f 100644
          "ended_by": dict(sorted(ended.items())) if ended else None,
          # used up the action or turn limit (with or without meeting the task at the last action)
          "used_limit": sum(ended[k] for k in LIMIT_ENDS) if ended else None,
-@@ -846,7 +869,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+@@ -846,7 +922,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
      r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
      r.add_argument("--no-collision-end", action="store_true", help="3 blocked moves in a row no longer end the task")
      r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
@@ -74,12 +157,50 @@ index cd903aa3..fc87dd1f 100644
                     help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
      r.add_argument("--entropy", action="store_true",
                     help="round 12 freeze: record each answer's token entropy (top-20 log-probabilities, after the "
+diff --git a/data_gen/interiorgs_v10/tests/test_evaluation.py b/data_gen/interiorgs_v10/tests/test_evaluation.py
+index 1492f113..44b0b5fc 100644
+--- a/data_gen/interiorgs_v10/tests/test_evaluation.py
++++ b/data_gen/interiorgs_v10/tests/test_evaluation.py
+@@ -495,3 +495,33 @@ class EvaluationTest(unittest.TestCase):
+ 
+ if __name__ == "__main__":
+     unittest.main()
++
++
++class SegmentEntropyTest(unittest.TestCase):
++    """Group G of matrix v3: the answer's entropy split at the action segment; the whole-answer mean unchanged."""
++
++    def test_split(self):
++        from data_gen.interiorgs_v10 import evaluation as EV
++
++        lps = [[-0.01, -5.0], [-0.7, -0.7], [-0.1, -2.5], [-0.05, -3.0], [-0.2, -1.8]]
++        ents = EV.position_entropies(lps, 0.8)
++        self.assertAlmostEqual(sum(ents) / len(ents), EV.top_logprob_entropy(lps, 0.8), places=12)
++        g = EV.segment_entropies(["<targets>A: (", "469", ",352)</targets", "><", "action>move_forward|</action>"], ents)
++        self.assertEqual((g["tokens_targets"], g["tokens_action"]), (3, 2))  # the merged "><" opens the action part
++        self.assertAlmostEqual(g["entropy_action"], (ents[3] + ents[4]) / 2, places=12)
++        self.assertAlmostEqual(g["entropy_targets"], sum(ents[:3]) / 3, places=12)
++        d = EV.segment_entropies(["<action>", "move", "_forward", "|", "</action>"], ents)
++        self.assertEqual((d["tokens_action"], d["tokens_targets"], d["entropy_targets"]), (5, 0, None))
++        self.assertAlmostEqual(d["entropy_action"], EV.top_logprob_entropy(lps, 0.8), places=12)
++        none = EV.segment_entropies(["no", " action"], ents[:2])
++        self.assertEqual((none["tokens_action"], none["entropy_action"], none["tokens_targets"]), (0, None, 2))
++        rows = [{"trajectory": [{"entropy": 0.1, "tokens": 10, "entropy_action": 0.02, "tokens_action": 4,
++                                 "entropy_targets": 0.15, "tokens_targets": 6},
++                                {"entropy": 0.05, "tokens": 5, "entropy_action": 0.05, "tokens_action": 5}]}]
++        s = EV.token_entropy(rows)
++        self.assertAlmostEqual(s["entropy"], round((0.1 * 10 + 0.05 * 5) / 15, 5))
++        self.assertEqual((s["entropy_action_tokens"], s["entropy_targets_tokens"]), (9, 6))
++        self.assertAlmostEqual(s["entropy_action"], round((0.02 * 4 + 0.05 * 5) / 9, 5))
++        self.assertEqual(EV.token_entropy([{"trajectory": [{"entropy": 0.1, "tokens": 3}]}]),
++                         {"entropy": 0.1, "entropy_tokens": 3})  # older records: as before
++
 diff --git a/data_gen/interiorgs_v10/tests/test_pointing.py b/data_gen/interiorgs_v10/tests/test_pointing.py
 new file mode 100644
-index 00000000..a3bc1f5a
+index 00000000..8d477611
 --- /dev/null
 +++ b/data_gen/interiorgs_v10/tests/test_pointing.py
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,304 @@
 +"""Group G of matrix v3 ("point first, then act", the user's instruction of 2026-11-06): the targets formats, the
 +reading and judging of the targets segment (vagen/envs/active_spatial/pointing.py) and the env's pointing reward
 +(off by default: every other run keeps its prompts, rewards and metrics), on a synthetic scene with a stub
@@ -204,12 +325,50 @@ index 00000000..a3bc1f5a
 +            self.assertEqual((turn["ok"], turn["error"]), (False, "no_truth"))
 +        self.assertEqual(PT.target_refs(item), ["the lamp", "the sofa"])
 +
++    def test_truth_cuts_boxes_behind_the_camera(self):
++        """An object crossing the camera plane gets the box of its part in front of it (the far end alone before);
++        an object wholly in front keeps _project_object's box; the scene sign of a scene's rows."""
++        import numpy as np
++
++        from vagen.envs.active_spatial.target_visibility import OccluderSet, item_camera
++        from vagen.envs.active_spatial.visual_bbox_metrics import _project_object
++
++        def item(bmin, bmax):
++            return {"init_camera": {"intrinsics": [[320.0, 0.0, 320.0], [0.0, 320.0, 240.0], [0.0, 0.0, 1.0]]},
++                    "target_object": {"objects": [{"id": "7", "label": "tv", "ref": "the TV", "bbox_min": bmin,
++                                                   "bbox_max": bmax}]}}
++
++        occ = OccluderSet.from_boxes([], [])
++        c2w = np.eye(4)  # x right, y down, z forward
++        side = item([0.5, -0.5, -1.0], [2.5, 0.5, 3.0])  # beside the camera, from behind it to 3 m ahead
++        K, w, h = item_camera(side)
++        old = _project_object(side["target_object"]["objects"][0], c2w, K, w, h)["bbox"]
++        t = PT.truth(side, c2w, occ)[0]
++        self.assertTrue(t["in_view"])
++        x1, y1, x2, y2 = t["box"]
++        self.assertEqual(x2, 255.0)  # reaches the frame's edge, as the near part does
++        self.assertTrue(x1 <= old[0] + 1e-6 and y1 <= old[1] + 1e-6 and x2 >= old[2] - 1e-6 and y2 >= old[3] - 1e-6)
++        self.assertGreater((x2 - x1) * (y2 - y1), 2 * (old[2] - old[0]) * (old[3] - old[1]))
++        ahead = item([0.5, -0.5, 2.0], [2.5, 0.5, 3.0])  # wholly in front: unchanged
++        t2 = PT.truth(ahead, c2w, occ)[0]
++        b2 = _project_object(ahead["target_object"]["objects"][0], c2w, K, w, h)["bbox"]
++        self.assertTrue(t2["in_view"])
++        self.assertEqual(t2["box"], [round(float(v), 3) for v in b2])
++        rows = [{"collision_convention": {"requires_env_override": True, "structure_y_sign": 1.0}},
++                {"collision_convention": {"requires_env_override": False, "structure_y_sign": -1.0}}, {}]
++        self.assertEqual(PT.scene_structure_sign(rows), 1.0)
++        self.assertIsNone(PT.scene_structure_sign(rows[1:]))
++        with self.assertRaises(ValueError):
++            PT.scene_structure_sign(rows + [{"collision_convention": {"requires_env_override": True,
++                                                                      "structure_y_sign": -1.0}}])
++
 +    def test_agent_loop_reads_the_judgment(self):
 +        from vagen.agent_loop.gym_agent_loop import turn_pointing
 +
-+        info = {"metrics": {"turn_metrics": {"pointing_score": 0.5, "targets_bad": False, "targets_old": True,
-+                                             "targets_ok": False, "action_is_valid": True}}}
-+        self.assertEqual(turn_pointing(info), {"pointing_score": 0.5, "targets_bad": False, "targets_old": True})
++        info = {"metrics": {"turn_metrics": {"pointing_score": 0.5, "pointing_applied": 0.05, "targets_bad": False,
++                                             "targets_old": True, "targets_ok": False, "action_is_valid": True}}}
++        self.assertEqual(turn_pointing(info), {"pointing_score": 0.5, "pointing_applied": 0.05, "targets_bad": False,
++                                               "targets_old": True})
 +        self.assertEqual(turn_pointing({"metrics": {"turn_metrics": {"action_is_valid": True}}}), {})
 +        self.assertEqual(turn_pointing(None), {})
 +
@@ -312,7 +471,7 @@ index 00000000..a3bc1f5a
 +                             (1.0, True, False, False))
 +            self.assertEqual(info["pointing"]["truth"], truth)
 +            self.assertAlmostEqual(reward, base, places=9)
-+            self.assertEqual(trace["components"]["pointing"]["applied"], 0.0)
++            self.assertEqual((trace["components"]["pointing"]["applied"], tm["pointing_applied"]), (0.0, 0.0))
 +            cases = [(0.1, right, 1.0)]
 +            if len(truth) == 2:  # half right: the first object as labelled, the second wrong
 +                first = PT.label(truth[:1], "targets_pixel")[len("<targets>"):-len("</targets>")]
@@ -323,6 +482,7 @@ index 00000000..a3bc1f5a
 +                env, _ = self.env(row, f"judge_{weight}", prompt_format_example="targets_pixel", pointing_reward=weight)
 +                reward, tm, info, trace = self.step(env, text)
 +                self.assertEqual(tm["pointing_score"], score)
++                self.assertAlmostEqual(tm["pointing_applied"], weight * score, places=12)
 +                self.assertAlmostEqual(reward, base + weight * score, places=9)
 +                self.assertAlmostEqual(trace["components"]["pointing"]["applied"], weight * score, places=9)
 +                self.assertAlmostEqual(trace["accounting"]["reconstruction_error"], 0.0, places=9)
@@ -346,10 +506,25 @@ index 00000000..a3bc1f5a
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/data_gen/interiorgs_v10/tests/test_training_prep.py b/data_gen/interiorgs_v10/tests/test_training_prep.py
-index ce8dcecb..e6b39438 100644
+index ce8dcecb..afec5b20 100644
 --- a/data_gen/interiorgs_v10/tests/test_training_prep.py
 +++ b/data_gen/interiorgs_v10/tests/test_training_prep.py
-@@ -574,6 +574,63 @@ class TrainingPrepTest(unittest.TestCase):
+@@ -371,6 +371,14 @@ class TrainingPrepTest(unittest.TestCase):
+                          ("keep_by_return_std", 12, 0.33, 1.77))
+         self.assertEqual(Path(kw["rows"]), (self.root / "rl_keep" / "train.jsonl").resolve())
+         self.assertEqual((report["group_filter"], report["group_filter_kwargs"]["std_threshold"]), ("keep_by_return_std", 0.33))
++        self.assertNotIn("exclude_return_keys", kw)
++        # group G of matrix v3 (2026-11-06): the selection without the pointing reward
++        ppo, _, report = config("rl_keep_ex", standard="v10_p1_D", group_filter="keep_by_return_std",
++                                keep_std_threshold=0.33, keep_std_floor=1.0, keep_std_exclude="pointing_return")
++        self.assertEqual(ppo["filter"]["filter_kwargs"]["exclude_return_keys"], ["pointing_return"])
++        self.assertEqual(report["group_filter_kwargs"]["exclude_return_keys"], ["pointing_return"])
++        with self.assertRaises(SystemExit):  # only with keep_by_return_std
++            config("rl_keep_ex_bad", standard="v10_p1_S0", keep_std_exclude="pointing_return")
+         ppo, env, report = config("rl_keep_std", standard="v10_p1_S0_keep")  # a standard names the filter
+         self.assertEqual((ppo["filter"]["name"], ppo["filter"]["filter_kwargs"]["std_threshold"],
+                           ppo["filter"]["filter_kwargs"]["std_floor"], report["reward_preset"]),
+@@ -574,6 +582,63 @@ class TrainingPrepTest(unittest.TestCase):
          with self.assertRaises(SystemExit):
              config("rl_pool_flagged", task_pool="reserve", exclude=str(flags))
  
@@ -414,19 +589,22 @@ index ce8dcecb..e6b39438 100644
          """Round 12 freeze (the user's 3.1.1): --format-example sets the env's format line (placeholder names or
          real action names; default the SFT export's); the start model's SFT conversations must show the same text."""
 diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
-index 7f3d585d..527c3c96 100644
+index 7f3d585d..acefcba5 100644
 --- a/data_gen/interiorgs_v10/train_chain.py
 +++ b/data_gen/interiorgs_v10/train_chain.py
-@@ -1396,6 +1396,7 @@ class Chain:
+@@ -1396,8 +1396,10 @@ class Chain:
                  args += ["--ppo-template", str(self.plan["ppo_template"])]
              for key, flag in (("standard", "--standard"), ("seed", "--seed"), ("history_mode", "--history-mode"),
                                ("format_example", "--format-example"), ("invalid_penalty", "--invalid-penalty"),
 +                              ("pointing_reward", "--pointing-reward"),  # group G of matrix v3
                                ("group_filter", "--group-filter"), ("keep_std_threshold", "--keep-std-threshold"),
                                ("keep_std_floor", "--keep-std-floor"),
++                              ("keep_std_exclude", "--keep-std-exclude"),  # group G of matrix v3
                                ("progress_version", "--progress-version"),
+                               ("distance_tables", "--distance-tables"),  # round 13 (B): the optimal progress
+                               ("progress_reward_scale", "--progress-reward-scale"),
 diff --git a/data_gen/interiorgs_v10/training_prep.py b/data_gen/interiorgs_v10/training_prep.py
-index 4a1305e0..3e24e822 100644
+index 4a1305e0..248cd6f8 100644
 --- a/data_gen/interiorgs_v10/training_prep.py
 +++ b/data_gen/interiorgs_v10/training_prep.py
 @@ -571,7 +571,10 @@ def sft_format_examples(paths: Sequence[Path], max_actions: int = 5, action_sep:
@@ -455,7 +633,25 @@ index 4a1305e0..3e24e822 100644
      history["env"].update(design_variant_overrides(args, history["env"]))
      env_paths = {}
      for split, selected in parts.items():
-@@ -845,6 +855,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+@@ -782,6 +792,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+     filter_kwargs = None
+     if group_filter not in (None, *GROUP_FILTERS):
+         raise SystemExit(f"--group-filter must be one of {GROUP_FILTERS}, not {group_filter!r}")
++    if getattr(args, "keep_std_exclude", None) and group_filter != "keep_by_return_std":
++        raise SystemExit("--keep-std-exclude goes with --group-filter keep_by_return_std")
+     if group_filter == "keep_by_return_std":  # round 12, the dense-reward first batch (D-keep)
+         if not package:
+             raise SystemExit("--group-filter keep_by_return_std fills the package's batch: it needs --opt-package")
+@@ -790,6 +802,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+         filter_kwargs = dict(package["filter.filter_kwargs"], std_threshold=float(args.keep_std_threshold),
+                              std_floor=float(getattr(args, "keep_std_floor", None) or 0.0),
+                              rows=str((out / "train.jsonl").resolve()))  # the filled tasks' d* in the metrics
++        if getattr(args, "keep_std_exclude", None):  # group G of matrix v3 (2026-11-06): the selection without them
++            filter_kwargs["exclude_return_keys"] = [k for k in str(args.keep_std_exclude).split(",") if k]
+         _set(ppo, "filter.name", group_filter)
+         _set(ppo, "filter.filter_kwargs", filter_kwargs)
+     curriculum = None
+@@ -845,6 +859,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                "model_type": getattr(args, "model_type", None), "model_type_overrides": type_overrides,
                "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
                                    else float(tcfg.get("invalid_format_penalty", -0.1))),
@@ -464,7 +660,7 @@ index 4a1305e0..3e24e822 100644
                "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
                "entropy_coeff_override": getattr(args, "entropy_coeff", None),
                "kl_loss_coef": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("kl_loss_coef"),
-@@ -1148,10 +1160,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+@@ -1148,10 +1164,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
      c.add_argument("--task-pool", choices=TASK_POOLS, default=None,
                     help="round 11: the train tasks RL takes: formal (rounds 6-10, the default) or reserve (rows from sft-frames "
                          "--include-reserve; the rule since round 11: RL trains on tasks SFT never trained on)")
@@ -479,7 +675,7 @@ index 4a1305e0..3e24e822 100644
      c.add_argument("--lenient-parse", action="store_true",
                     help="round 12 freeze: the env reads an answer leniently when the strict reading finds no action "
                          "(spaces instead of underscores, the first complete action block, a missing opening tag)")
-@@ -1170,6 +1184,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+@@ -1170,6 +1188,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
      c.add_argument("--invalid-penalty", type=float, default=None,
                     help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                          "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
@@ -490,8 +686,60 @@ index 4a1305e0..3e24e822 100644
      c.add_argument("--progress-version", default=None, choices=["grouped_gated", "grouped_soft", "optimal"],
                     help="round 12 freeze, dense-reward variant V3: the grouped progress with the hard gate (D_cond's) "
                          "or the soft gate (relation group times the frame group's continuous score); round 13 (B): "
+@@ -1221,6 +1243,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+                    help="keep_by_return_std: the smallest return spread (std, n-1) of an all-fail task it takes")
+     c.add_argument("--keep-std-floor", type=float, default=None,
+                    help="keep_by_return_std: the filled tasks' group comparison divides by at least this (default 0)")
++    c.add_argument("--keep-std-exclude", default=None,
++                   help="keep_by_return_std (group G of matrix v3): comma-separated per-episode sums (reward_extra_info, "
++                        "e.g. pointing_return) taken off the returns before the spread selects; the advantage scale "
++                        "keeps the full spread")
+     c.add_argument("--curriculum-easy-updates", type=int, default=None,
+                    help="round 12 batch: the first N updates draw only tasks with d* <= --curriculum-max-dstar")
+     c.add_argument("--curriculum-max-dstar", type=int, default=None, help="the easy tasks' largest d* (default 3)")
+diff --git a/tests/active_spatial/test_keep_filter.py b/tests/active_spatial/test_keep_filter.py
+index 4871ac51..6526c0c2 100644
+--- a/tests/active_spatial/test_keep_filter.py
++++ b/tests/active_spatial/test_keep_filter.py
+@@ -72,6 +72,36 @@ class KeepByReturnStdTest(unittest.TestCase):
+         self.assertEqual(float(out.batch["advantages"].min()), 1.0)
+         self.assertEqual(m["filter/keep/filled_below_floor"], 0)
+ 
++    def test_selection_without_named_return_terms(self):
++        """Group G of matrix v3 (2026-11-06): exclude_return_keys takes the named per-episode sums off the returns
++        before the spread selects the all-fail tasks; the advantage scale keeps the full spread."""
++        import numpy as np
++
++        from vagen.custom_filter.filter import FILTER_REGISTRY
++
++        f = FILTER_REGISTRY["keep_by_return_std"]
++        mixed = ("fov_inclusion", [(1, 5.0), (0, 0.0), (1, 5.0), (0, 0.0)])
++        pointing_only = ("equidistance", [(0, 1.0), (0, 0.0), (0, 1.0), (0, 0.0)])     # spread 0.577, all of it pointing
++        dense = ("projective_relations", [(0, 0.6), (0, 0.0), (0, 0.6), (0, 0.0)])    # spread 0.346, 0.289 without it
++        pointing = np.array([0.0] * 4 + [1.0, 0.0, 1.0, 0.0] + [0.1, 0.0, 0.1, 0.0])
++
++        def run(**kw):
++            d = self.batch([mixed, pointing_only, dense])
++            d.non_tensor_batch["pointing_return"] = pointing
++            out, m = f(d, {}, target_groups=2, std_threshold=0.2, std_floor=1.0, **kw)
++            kept = list(dict.fromkeys(out.non_tensor_batch["uid"]))
++            return kept, {u: float(out.batch["advantages"][i, 0]) for i, u in enumerate(out.non_tensor_batch["uid"])}, m
++
++        kept, _, m = run()  # as before: the widest spread fills
++        self.assertEqual(sorted(kept), ["t0", "t1"])
++        self.assertNotIn("filter/keep/filled_sel_std_mean", m)
++        kept, adv, m = run(exclude_return_keys=["pointing_return"])
++        self.assertEqual(sorted(kept), ["t0", "t2"])  # the spread of pointing alone does not select
++        self.assertAlmostEqual(adv["t2"], (0.34641 + 1e-6) / (1.0 + 1e-6), places=4)  # scaled by the full spread
++        self.assertAlmostEqual(m["filter/keep/filled_sel_std_mean"], 0.28868, places=4)
++        with self.assertRaises(KeyError):
++            f(self.batch([mixed, dense]), {}, target_groups=2, std_threshold=0.2, exclude_return_keys=["missing"])
++
+     def test_enough_mixed_tasks_and_fallback(self):
+         from vagen.custom_filter.filter import FILTER_REGISTRY
+ 
 diff --git a/vagen/agent_loop/gym_agent_loop.py b/vagen/agent_loop/gym_agent_loop.py
-index bd84f272..4bc039c2 100644
+index bd84f272..f766ae28 100644
 --- a/vagen/agent_loop/gym_agent_loop.py
 +++ b/vagen/agent_loop/gym_agent_loop.py
 @@ -70,6 +70,13 @@ def turn_has_think(info: Any) -> bool:
@@ -499,16 +747,16 @@ index bd84f272..4bc039c2 100644
  
  
 +def turn_pointing(info: Any) -> Dict[str, Any]:
-+    """Group G of matrix v3: the turn's pointing judgment (the env's turn_metrics pointing_score, targets_bad,
-+    targets_old); {} when the env does not judge a targets segment."""
++    """Group G of matrix v3: the turn's pointing judgment (the env's turn_metrics pointing_score, pointing_applied:
++    the reward it added, targets_bad, targets_old); {} when the env does not judge a targets segment."""
 +    tm = ((info or {}).get("metrics") or {}).get("turn_metrics") or {} if isinstance(info, dict) else {}
-+    return {k: tm[k] for k in ("pointing_score", "targets_bad", "targets_old") if k in tm}
++    return {k: tm[k] for k in ("pointing_score", "pointing_applied", "targets_bad", "targets_old") if k in tm}
 +
 +
  class AgentData:
      """Container for all mutable trajectory state."""
      def __init__(
-@@ -107,6 +114,10 @@ class AgentData:
+@@ -107,6 +114,11 @@ class AgentData:
          self.invalid_spans: List[List[int]] = []
          self.progress_return: float = 0.0  # round 12 freeze, V8: the env's applied progress reward, summed
          self.think_turns: int = 0    # turns whose answer had thinking text (turn_metrics.has_think)
@@ -516,10 +764,11 @@ index bd84f272..4bc039c2 100644
 +        self.pointing_sum: float = 0.0
 +        self.targets_bad_turns: int = 0
 +        self.targets_old_turns: int = 0
++        self.pointing_return: float = 0.0  # the pointing reward the env added over the episode
  
          # Episode metadata – populated from env info during the episode
          # These fields are written into reward_extra_info so they appear
-@@ -347,6 +358,12 @@ class GymAgentLoop(AgentLoopBase):
+@@ -347,6 +359,15 @@ class GymAgentLoop(AgentLoopBase):
                      "invalid_action":     agent_data.invalid_turns / max(1, agent_data.env_turns),
                      # the share of the episode's turns whose answer had thinking text (transition/think_rate)
                      "think_rate":         agent_data.think_turns / max(1, agent_data.env_turns),
@@ -529,10 +778,13 @@ index bd84f272..4bc039c2 100644
 +                    "pointing_score":     agent_data.pointing_sum / max(1, agent_data.env_turns),
 +                    "targets_bad":        agent_data.targets_bad_turns / max(1, agent_data.env_turns),
 +                    "targets_old":        agent_data.targets_old_turns / max(1, agent_data.env_turns),
++                    # the episode's summed pointing reward (keep_by_return_std exclude_return_keys: V4's selection
++                    # without it, the user's choice of 2026-11-06)
++                    "pointing_return":    agent_data.pointing_return,
                  },
              },
          )
-@@ -458,6 +475,10 @@ class GymAgentLoop(AgentLoopBase):
+@@ -458,6 +479,11 @@ class GymAgentLoop(AgentLoopBase):
          agent_data.invalid_turns += int(turn_invalid(info))
          agent_data.end_turn(turn_invalid(info))  # round 12 freeze (vagen/invalid_turns.py)
          agent_data.think_turns += int(turn_has_think(info))
@@ -540,11 +792,61 @@ index bd84f272..4bc039c2 100644
 +        agent_data.pointing_sum += float(pointing.get("pointing_score", 0.0))
 +        agent_data.targets_bad_turns += int(bool(pointing.get("targets_bad", False)))
 +        agent_data.targets_old_turns += int(bool(pointing.get("targets_old", False)))
++        agent_data.pointing_return += float(pointing.get("pointing_applied", 0.0))
          # ── update episode metadata from step info ───────────────────────────
          if info:
              agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))
+diff --git a/vagen/custom_filter/filter.py b/vagen/custom_filter/filter.py
+index 1f7d8e89..515282a7 100644
+--- a/vagen/custom_filter/filter.py
++++ b/vagen/custom_filter/filter.py
+@@ -221,7 +221,10 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
+ 
+     kwargs: target_groups, std_threshold (required), std_floor (default 0: no floor), rows (optional: the run's task
+     file, for the filled tasks' minimum step count by the per-episode "task_id"), success_key (default
+-    "traj_success").  Metrics: those of mixed_outcome (filter/mixed/..., counting the mixed tasks only), and
++    "traj_success"), exclude_return_keys (optional; group G of matrix v3, the user's choice of 2026-11-06: per-episode
++    sums carried in reward_extra_info, e.g. "pointing_return", taken off the returns before the spread decides which
++    all-fail tasks are eligible and in which order, so the selection is the one without those terms; the advantage
++    scale keeps the full spread, which is what the group comparison divides by).  Metrics: those of mixed_outcome (filter/mixed/..., counting the mixed tasks only), and
+     filter/keep/: all_fail and all_fail_above_threshold (candidates), filled, kept_total, shortfall,
+     filled_std_mean / _min / _max, filled_adv_scale_mean, filled_below_floor (filled tasks whose spread is under the
+     floor, so scaled down), filled_family/<family> (count), filled_min_steps_mean.
+@@ -239,6 +242,12 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
+     success = np.asarray(data_proto.non_tensor_batch[key], dtype=float) > 0.5
+     reward_key = "token_level_rewards" if "token_level_rewards" in data_proto.batch.keys() else "token_level_scores"
+     returns = data_proto.batch[reward_key].sum(dim=-1).detach().float().cpu()
++    sel_returns = returns.clone()  # the returns the selection reads (exclude_return_keys taken off)
++    for name in [str(k) for k in (kwargs.get("exclude_return_keys") or [])]:
++        part = data_proto.non_tensor_batch.get(name)
++        if part is None:
++            raise KeyError(f"keep_by_return_std: exclude_return_keys names {name!r}, which the batch does not carry")
++        sel_returns = sel_returns - torch.as_tensor(np.asarray(part, dtype=np.float64), dtype=sel_returns.dtype)
+     draw = data_proto.meta_info.get("uid_draw_order") or {}
+     groups: dict = {}
+     for i, u in enumerate(uids):
+@@ -258,7 +267,8 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
+     refill = [u for u in extra if kinds[u] == "mixed"][: max(0, target - len(kept))]
+     spread = {u: (float(torch.std(returns[groups[u]])) if len(groups[u]) > 1 else 0.0)
+               for u in ordered if kinds[u] == "all_fail"}
+-    eligible = sorted((u for u, s in spread.items() if s >= threshold), key=lambda u: (-spread[u], rank[u]))
++    sel_spread = {u: (float(torch.std(sel_returns[groups[u]])) if len(groups[u]) > 1 else 0.0) for u in spread}
++    eligible = sorted((u for u, s in sel_spread.items() if s >= threshold), key=lambda u: (-sel_spread[u], rank[u]))
+     filled = eligible[: max(0, target - len(kept) - len(refill))]
+     keep = kept + refill + filled
+     fallback = not keep
+@@ -298,6 +308,9 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
+             "filter/keep/filled_adv_scale_mean": float(np.mean(list(scale.values()))) if scale else 0.0,
+             "filter/keep/filled_below_floor": sum(1 for u in filled if spread[u] < floor),  # scaled down by the floor
+         })
++        if kwargs.get("exclude_return_keys"):  # group G: the spread the selection read
++            metrics["filter/keep/filled_sel_std_mean"] = (float(np.mean([sel_spread[u] for u in filled]))
++                                                          if filled else 0.0)
+         family = data_proto.non_tensor_batch.get("task_type")
+         if family is not None:
+             for fam, count in Counter(str(family[groups[u][0]]) for u in filled).items():
 diff --git a/vagen/envs/active_spatial/env.py b/vagen/envs/active_spatial/env.py
-index e9371b87..84fe20d8 100644
+index e9371b87..3280c38d 100644
 --- a/vagen/envs/active_spatial/env.py
 +++ b/vagen/envs/active_spatial/env.py
 @@ -37,7 +37,7 @@ import os
@@ -564,7 +866,7 @@ index e9371b87..84fe20d8 100644
  from .reward_trace import (
      TurnRewardTrace,
      near_reward_values,
-@@ -1191,6 +1192,19 @@ class ActiveSpatialEnv(BaseEnv):
+@@ -1191,6 +1192,20 @@ class ActiveSpatialEnv(BaseEnv):
                  self.episode_done = True
                  info["early_terminated_invalid"] = True
          
@@ -577,14 +879,15 @@ index e9371b87..84fe20d8 100644
 +            if weight:
 +                self.reward += weight * pointing["score"]
 +            self._reward_trace.record("pointing", raw=pointing["score"], scale=weight, enabled=bool(weight))
-+            metrics["turn_metrics"].update(pointing_score=pointing["score"], targets_ok=pointing["ok"],
-+                                           targets_old=pointing["old"], targets_bad=pointing["bad"])
++            metrics["turn_metrics"].update(pointing_score=pointing["score"], pointing_applied=weight * pointing["score"],
++                                           targets_ok=pointing["ok"], targets_old=pointing["old"],
++                                           targets_bad=pointing["bad"])
 +            info["pointing"] = pointing
 +
          # Build collision feedback message
          if step_collisions:
              collision_msgs = [_collision_text(cr) for cr in step_collisions]
-@@ -1494,6 +1508,23 @@ class ActiveSpatialEnv(BaseEnv):
+@@ -1494,6 +1509,23 @@ class ActiveSpatialEnv(BaseEnv):
              metric = {**metric, **opt, "shaping_score": opt["optimal_progress"], "progress_version": "optimal"}
          return metric
  
@@ -608,7 +911,7 @@ index e9371b87..84fe20d8 100644
      def _visibility_occluders(self) -> OccluderSet:
          """Occluders of the current scene (labels.json boxes + structure walls), cached per scene."""
          scene_id = self.current_item.get("scene_id") if isinstance(self.current_item, dict) else None
-@@ -2128,6 +2159,7 @@ class ActiveSpatialEnv(BaseEnv):
+@@ -2128,6 +2160,7 @@ class ActiveSpatialEnv(BaseEnv):
              action_sep=self.config.action_sep,
              add_example=init_obs,
              format_example=self.config.get("prompt_format_example", "placeholder"),
@@ -616,7 +919,7 @@ index e9371b87..84fe20d8 100644
          )
          obs_str += "\n" + format_prompt_text
          
-@@ -2238,6 +2270,7 @@ class ActiveSpatialEnv(BaseEnv):
+@@ -2238,6 +2271,7 @@ class ActiveSpatialEnv(BaseEnv):
              action_sep=self.config.action_sep,
              add_example=init_obs,
              format_example=self.config.get("prompt_format_example", "placeholder"),
@@ -625,27 +928,28 @@ index e9371b87..84fe20d8 100644
          obs_str += "\n" + format_prompt_text
          
 diff --git a/vagen/envs/active_spatial/env_config.py b/vagen/envs/active_spatial/env_config.py
-index 00749a8c..49b06c28 100644
+index 00749a8c..f129612a 100644
 --- a/vagen/envs/active_spatial/env_config.py
 +++ b/vagen/envs/active_spatial/env_config.py
-@@ -207,6 +207,11 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
+@@ -207,6 +207,12 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
      # (e.g. -0.5); None (default): invalid_format_penalty.  The system prompt keeps showing invalid_format_penalty,
      # the SFT conversations' text, as it does not show the dense reward's progress term either.
      invalid_penalty_override: Optional[float] = None
 +    # Group G of matrix v3 (the user's instruction of 2026-11-06): the weight of the pointing reward, added each turn
 +    # times the turn's pointing score (pointing.py: the share of the task's objects the answer's targets segment places
 +    # right on the frame it was given on); 0 (default): none.  With a targets format example (prompt.TARGET_FORMATS)
-+    # the env judges the segment and logs it (turn_metrics pointing_score, targets_ok / _old / _bad) at any weight.
++    # the env judges the segment and logs it (turn_metrics pointing_score, pointing_applied, targets_ok / _old / _bad)
++    # at any weight.
 +    pointing_reward: float = 0.0
      max_consecutive_invalid_actions: int = 3  # Terminate episode after this many consecutive invalid actions
      premature_done_penalty: float = -0.3  # Penalty when 'done' is called without reaching the target
      
 diff --git a/vagen/envs/active_spatial/pointing.py b/vagen/envs/active_spatial/pointing.py
 new file mode 100644
-index 00000000..11cf3745
+index 00000000..5daf7b9a
 --- /dev/null
 +++ b/vagen/envs/active_spatial/pointing.py
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,253 @@
 +"""Group G of matrix v3 ("point first, then act"; the user's instruction of 2026-11-06, part 4): the targets segment
 +an answer gives before its action, the truth it is judged against, and the judgment.
 +
@@ -674,6 +978,7 @@ index 00000000..11cf3745
 +from .prompt import SLOT_LETTERS, TARGET_FORMATS
 +
 +FRAME_SIZE = (256, 256)  # target_visibility.RENDER_SIZE: the frame the success metrics and the boxes use
++NEAR_M = 0.05  # target_visibility.MIN_DEPTH_M: a box with corners behind the camera is cut at this depth
 +Point = Optional[Tuple[float, float]]  # None: "none"
 +
 +_SPECIAL = re.compile(r"<\|[^>]*\|>")
@@ -759,19 +1064,77 @@ index 00000000..11cf3745
 +            proj = _project_object(obj, c2w, K, width, height)
 +            if proj.get("visible") and proj.get("bbox") is not None:
 +                seen = bool(object_visibility(c2w, obj, occ, K, width, height)["visible"])
-+                box = [round(float(v), 3) for v in proj["bbox"]] if seen else None
++                if seen:
++                    raw = proj["bbox"]
++                    if (_camera_corners(obj, c2w)[1][:, 2] <= 1e-6).any():  # _project_object drops such corners
++                        raw = near_clipped_box(obj, c2w, K, width, height) or raw
++                    box = [round(float(v), 3) for v in raw]
 +        out.append({"letter": letter, "in_view": seen, "box": box})
 +    return out
 +
 +
-+def scene_occluders(gs_root: str, scene_id: str, wall_model: str = "thick") -> Any:
++def _camera_corners(obj: Dict[str, Any], c2w: Any) -> Tuple[Any, Any]:
++    """(world corners, camera-frame corners) of the object's 3D box."""
++    import numpy as np
++
++    from .visual_bbox_metrics import _bbox_corners
++
++    corners = _bbox_corners(np.asarray(obj["bbox_min"], float), np.asarray(obj["bbox_max"], float))
++    w2c = np.linalg.inv(np.asarray(c2w, float))
++    return corners, (w2c @ np.c_[corners, np.ones(len(corners))].T).T[:, :3]
++
++
++def near_clipped_box(obj: Dict[str, Any], c2w: Any, K: Any, width: int, height: int,
++                     near: float = NEAR_M) -> Optional[List[float]]:
++    """The frame box of the part of the object's 3D box in front of the plane z = ``near`` (camera frame; its corners
++    there and its 12 edges cut at that plane), clipped to the frame; None when nothing of it projects into the frame.
++    For a target that crosses the camera plane, where projecting only the front corners would leave the box of the
++    far end alone (the pre-launch review of 2026-11-06)."""
++    import numpy as np
++
++    corners, pc = _camera_corners(obj, c2w)
++    pts = [p for p in pc if p[2] >= near]
++    for i in range(len(corners)):
++        for j in range(i + 1, len(corners)):
++            if int(np.sum(np.abs(corners[i] - corners[j]) > 1e-12)) != 1:  # not an edge of the box
++                continue
++            zi, zj = float(pc[i][2]), float(pc[j][2])
++            if (zi - near) * (zj - near) < 0:
++                pts.append(pc[i] + (near - zi) / (zj - zi) * (pc[j] - pc[i]))
++    if not pts:
++        return None
++    p = np.asarray(pts, float)
++    u = K[0][0] * p[:, 0] / p[:, 2] + K[0][2]
++    v = K[1][1] * p[:, 1] / p[:, 2] + K[1][2]
++    x1, y1 = max(0.0, float(u.min())), max(0.0, float(v.min()))
++    x2, y2 = min(float(width - 1), float(u.max())), min(float(height - 1), float(v.max()))
++    return [x1, y1, x2, y2] if x2 > x1 and y2 > y1 else None
++
++
++def scene_structure_sign(items: Sequence[Dict[str, Any]]) -> Optional[float]:
++    """The structure Y sign the RL env applies to a scene: that of its rows' collision_convention with
++    requires_env_override (env.reset), None when no row asks for one; rows of one scene that disagree stop."""
++    signs = {float(c["structure_y_sign"]) for c in ((it or {}).get("collision_convention") for it in items)
++             if isinstance(c, dict) and c.get("requires_env_override")}
++    if len(signs) > 1:
++        raise ValueError(f"rows of one scene ask for different structure Y signs: {sorted(signs)}")
++    return signs.pop() if signs else None
++
++
++def scene_occluders(gs_root: str, scene_id: str, wall_model: str = "thick",
++                    structure_y_sign: Optional[float] = None) -> Any:
 +    """The occluders of a scene as the RL env builds them with its collision detector (env._visibility_occluders):
-+    labels.json boxes and the structure walls of ``wall_model`` (the v10 env templates': "thick")."""
++    labels.json boxes and the structure walls of ``wall_model`` (the v10 env templates': "thick"), with the structure
++    Y sign the env applies to the scene when its rows ask for one (``scene_structure_sign``)."""
 +    from .collision_detector import create_collision_detector
 +    from .target_visibility import OccluderSet
 +
-+    detector = create_collision_detector({"wall_model": wall_model})
++    overrides = {str(scene_id): float(structure_y_sign)} if structure_y_sign is not None else None
++    detector = create_collision_detector({"wall_model": wall_model, "structure_y_sign_overrides": overrides})
 +    detector.load_scene_from_gs_root(gs_root, scene_id)
++    if structure_y_sign is not None and float(detector.structure_y_sign) != float(structure_y_sign):
++        raise ValueError(f"{scene_id}: the detector took structure Y sign {detector.structure_y_sign}, "
++                         f"not {structure_y_sign}")
 +    return OccluderSet.from_detector(detector)
 +
 +

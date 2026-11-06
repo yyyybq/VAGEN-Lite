@@ -217,7 +217,7 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
 | --- | --- | --- |
 | `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
 | `0002-train-chain-diagnostics-step.patch` | 第 7 个字段：新的第 11 步 `diagnostics`，评测之后跑失败拆解（只读本链的结果）和探针（P1；P0 探针到位后同样接入）；有它时 main 的 `retain` 清理挪到它之后 | `train_chain.py`（在 0001 之上约 120 行），`tests/test_train_chain.py`（1 行：步骤多了一个），`tests/test_train_chain_matrix.py`（加 3 个测试） |
-| `matrix_v3_cb42874a/0003-targets-format-pointing-reward.patch`（2026-11-06，G 组） | 目标格式 `targets_pixel` / `targets_norm1000` 和指认奖励开关 `pointing_reward`（默认关），日志和评测的指认指标（第 8 节） | `prompt.py`、新的 `pointing.py`、`env.py`、`env_config.py`、`gym_agent_loop.py`、`ray_trainer.py`、`training_prep.py`、`train_chain.py`（1 行）、`evaluation.py`；新测试 `tests/test_pointing.py`（11 个），`tests/test_training_prep.py`（加 1 个） |
+| `matrix_v3_cb42874a/0003-targets-format-pointing-reward.patch`（2026-11-06，G 组；第二版同日下午） | 目标格式 `targets_pixel` / `targets_norm1000`、指认奖励开关 `pointing_reward`（默认关）、日志和评测的指认指标；第二版加上 V4 挑题扣掉指认奖励（`exclude_return_keys`）、真值框在相机前切开、按段记熵（第 8 节） | `prompt.py`、新的 `pointing.py`、`env.py`、`env_config.py`、`gym_agent_loop.py`、`ray_trainer.py`、`custom_filter/filter.py`、`training_prep.py`、`train_chain.py`（2 行）、`evaluation.py`；测试 `tests/test_pointing.py`（新）、`test_training_prep.py`、`test_evaluation.py`、`tests/active_spatial/test_keep_filter.py`（14 个文件） |
 
 ### 6.1 每个字段谁写、谁读
 
@@ -359,3 +359,28 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
 - `configs/matrix_v3/G.yaml`、`mixture_matrix_v3_qwen3_g_{pixel,norm1000}_20261106.yaml`、`matrix_plan` 的 G 格子：
   - 内容是 D 的登记，加上目标格式和指认奖励（两侧都加）；
   - 测试 `test_matrix_g.py`。
+
+### 8.3 上线前审查和修正（2026-11-06 下午；补丁 0003 第二版）
+
+用户 11-06 都按推荐定了 G 的四件事（批 SFT、坐标 0–1000、Pg 9,075 条、V4 挑题时扣掉指认奖励），SFT 开跑前做了一次审查：5 个只读审查员（P2t 标签、Pg 题、SFT 文字和链、挑 epoch 的规则、代码），每条发现再由两个反驳者核对，共 74 个代理。确认 15 条，有争议 1 条，驳回 5 条。
+
+- **V4 挑题扣掉指认奖励**（matrix-v3 `5322e2f8`）：`keep_by_return_std` 新参数 `exclude_return_keys`。
+  - 判断全失败任务的回报分散度、排先后时，先从每局回报里减去这些逐局和（`pointing_return`）；优势的缩放仍用完整分散度（组内比较真正除的就是它）。
+  - 环境每回合记 `pointing_applied`（这一回合加的指认奖励），代理循环逐局求和放进 `reward_extra_info`。
+  - rl-config `--keep-std-exclude`（只能和 `keep_by_return_std` 一起用），训练链传它，`matrix_plan` 只给 G 的 V4 一侧。
+- **审查后改的代码**（`e4e245c0`）：
+  - `pointing.truth`：物体的三维框有角在相机后面时，在相机前 0.05 m 处把框的 12 条棱切开再投影；原来只投前面的角，框缩到物体远端。全在相机前面的框不变。
+  - `pointing.scene_occluders` 用环境给该场景的结构方向（行里 `collision_convention` 要求覆盖时）；原来 4 个场景的墙是反的。
+  - 评测 `--entropy`：每个回答的熵再按含 `<action>` 开头 `<` 的那个 token 切成动作段、目标段两部分记下（`entropy_action`、`entropy_targets` 及各自 token 数）；全部回答的熵不变。
+  - `qa_probe.judge_pointing`：先认 JSON 的 point_2d、bbox_2d，再认括号里正好 n 个数的一组，最后才按出现顺序取数；点出题答了框（或框的两个角）取中心；`x1=` 这类名字和 `100-200` 这类区间不再读错；记下按哪种写法读的。试版 60 道的结果和原来逐题相同。
+- **数据第二版**（sco `pt-z2mthhcl`，只用 CPU；v1 留在 `*_v1_20261106`）：
+  - P2t：训练 23,719 个回合里改了 273 个，验证 844 个里改了 9 个，都是上面两项修正造成的（相机后面的框 259 个，反墙的场景 63 个，有重叠）；用户回合和系统提示一个字没变。
+  - Pg：候选的框改了 768 个（都是相机后面的），反墙的 4 个场景多出 41 个候选。为了不让新候选打乱抽题，训练题沿用 v1 的同一批 32,498 道、换上 v2 的框（`watch/pg_keep_questions.py`，572 道的框变了）；测试和探针本来就是同一批题（测试 16 道答案变了，探针没变）。
+  - 配方 G 用第二版重建：P0、P1 的行和四个旧验证集仍和 D 逐字节相同；Pg 是同一批 9,075 道题，P2t 是同一批 9,075 条轨迹。
+- **cells 驱动**（`exps/matrix_v3/watch/m3_cells.py`，不在版本库里）：
+  - 采样验收按各组自己的格式样例跑（G：`targets_norm1000`，并核对和 G 的 SFT 对话一致）；原来写死 `action_names`，G 会被按它从没训练过的提示验收。
+  - G 的验收链用 G 自己的 SFT 目录做格式核对。
+  - G 验收完停在 `accepted`：同时出主线的汇总和 `watch/m3_accept_g.py` 的汇总（动作段熵、目标段的格式和指认得分、两条及格线）；用户定了熵的算法后 `m3_cells.py pick G --rule action|all` 再挑；不会自己起 RL（`NO_AUTO_RL`）。
+- **只记下、不改的**（写进预登记草案第 1 节和 3.5、3.6）：真值框是整个三维框，约每 8–10 个点标签有 1 个落在遮挡物或背景上；none 的口径和数量；同名物体；InteriorGS 的 wardrobe 词义；指认奖励按回合发、多分回合拿得多。
+- **有争议的一条**：系统提示的格式行和示例总写两个目标。一个反驳者算小问题，另外三个算无害（有意的设计，SFT、RL、评测文字逐字相同）。没改。
+- **还没做、RL 前要做的**：RL 的熵停止线按段算（代理循环按回合的目标段记熵，约 40 行，带测试），等用户定熵的算法。

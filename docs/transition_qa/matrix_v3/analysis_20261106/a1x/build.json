@@ -1,0 +1,40 @@
+{
+ "tables": "/mnt/umm/users/yinbaiqiao/reward_runs/tables/eval_test_v2_screened",
+ "tasks": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/eval_test_v2_screened/tasks.jsonl",
+ "actions": [
+  "move_forward",
+  "move_backward",
+  "move_left",
+  "move_right",
+  "turn_left",
+  "turn_right"
+ ],
+ "models": {
+  "m3ds1s0_300": {
+   "result": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/eval_test_v2_screened/m3ds1s0_300",
+   "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1s0/checkpoints/global_step_300/actor/huggingface",
+   "probe": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/analysis_20261106/a1x/questions/m3ds1s0_300.jsonl",
+   "questions": 7620,
+   "episodes": 141,
+   "replay_same": 141,
+   "turns": 1270,
+   "turns_with_a_yes": 39,
+   "answer_no": 7575,
+   "blocked_moves": 689,
+   "answer_yes": 45
+  },
+  "m3ds1d_300": {
+   "result": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/eval_test_v2_screened/m3ds1d_300",
+   "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1d/checkpoints/global_step_300/actor/huggingface",
+   "probe": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/analysis_20261106/a1x/questions/m3ds1d_300.jsonl",
+   "questions": 8082,
+   "episodes": 145,
+   "replay_same": 145,
+   "turns": 1347,
+   "turns_with_a_yes": 42,
+   "answer_no": 8036,
+   "blocked_moves": 705,
+   "answer_yes": 46
+  }
+ }
+}

@@ -12,6 +12,9 @@ chain to the RL chains, unattended.
    none passing -> no RL, the cell stops there for the user;
 3. a pick -> one RL chain per seed of the cell (matrix_plan --start the picked checkpoint, the registered V4) at the
    worktree's HEAD, started; a cell without seeds (E2, E as redefined on 2026-11-03) stops at the pick.
+Group G (2026-11-06): the acceptance runs in G's own format example (targets_norm1000); after it the cell stops at
+"accepted" with both summaries (the main line's and m3_accept_g.py's: the entropy over the action segment, the
+targets' form) until the user sets its pass rule; `pick G --rule action|all` then picks, and no RL starts here.
 A chain that fails stops its cell (logged; nothing is restarted here).  State: <tr>_sft/cell_state.json; log:
 exps/matrix_v3/watch/cells.log.
 """
@@ -30,6 +33,12 @@ PY = "/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite/bin/python"
 ACCEPT_SET = M3 / "eval_accept_reserve200"         # the copy of the main line's set (watch/m3_accept.py)
 SUMMARY = Path("/mnt/umm/users/yinbaiqiao/VAGEN-Lite-q3dev")
 SAMPLED = ["--samples", "4", "--temperature", "0.8", "--top-p", "0.92", "--entropy", "--format-example", "action_names"]
+# group G (the pre-launch review of 2026-11-06): the sampled check in the cell's own format example (sampled()), and
+# no RL started here: a pick waits for the user (NO_AUTO_RL); a targets format's pass rule is the user's to set
+# (PASS_RULE: "action" = entropy over the action segment, "all" = over the whole answer, None = not decided yet)
+NO_AUTO_RL = {"G"}
+PASS_RULE = {"G": None}
+ACCEPT_G = M3 / "watch" / "m3_accept_g.py"
 ACCEPT_POOL = "zoetrope"  # the user, 2026-11-04 (甲): a one-card job starts there on any free card, while h800 queues
                           # it behind every 8-card job submitted before it
 LOG = M3 / "watch" / "cells.log"
@@ -77,6 +86,18 @@ def chain_state(tr: Path) -> str:
         return json.loads((tr / "progress.json").read_text()).get("state") or "?"
     except (OSError, ValueError):
         return "starting"
+
+
+def sampled(group: str, sft_dir: str) -> list:
+    """SAMPLED with the cell's own format example, which must be the one its SFT conversations show."""
+    from data_gen.interiorgs_v10.training_prep import sft_format_examples
+
+    v = MP.v3_vars()
+    fmt = MP.v3_names(group, None, v)["cfg"].get("format_example") or v["format_example"]
+    found = sft_format_examples([Path(sft_dir) / "sft_trajectories.jsonl"])
+    if found and found != [fmt]:
+        raise RuntimeError(f"{group}: the group file says {fmt}, its SFT conversations show {found}")
+    return SAMPLED[: SAMPLED.index("--format-example")] + ["--format-example", fmt]
 
 
 def sft_tr(group: str) -> Path:
@@ -129,12 +150,15 @@ def step(group: str) -> bool:
                     hashlib.sha256((ACCEPT_SET / f).read_bytes()).digest(), f
             v = MP.v3_vars()
             commit = head()
+            sft_plan = json.loads((tr / "plan.json").read_text())
+            targets = group in PASS_RULE  # a targets format: its own SFT folder for the format check
+            options = sampled(group, sft_plan["sft_dir"])
             plan = {"tr": str(tr.parent / f"{tr.name}_accept"), "commit": commit, "eval_only": True,
-                    "model_type": v["model_type"], "sft_dir": v["format_check_sft_dir"],
+                    "model_type": v["model_type"], "sft_dir": sft_plan["sft_dir"] if targets else v["format_check_sft_dir"],
                     "job_prefix": v["chain"]["job_prefix"], "pool": ACCEPT_POOL, "max_eval_jobs": 5,
                     "retries": 4, "suspended_grace_min": 10, "gpu_log": True, "eval_sets": {"accept": str(acc_set)},
                     "rl": {"rows": v["rl"]["rows"], "exclude": v["rl"]["exclude"]},
-                    "eval": {"models": {f"sft_{sft_group}_e{e}_s4": {"model": str(p), "options": SAMPLED}
+                    "eval": {"models": {f"sft_{sft_group}_e{e}_s4": {"model": str(p), "options": options}
                                         for e, p in sorted(ck.items())}},
                     "note": f"matrix v3 cell {group}: the sampled acceptance of every SFT epoch (PREREG note 6)"}
             st.update(stage="accept", accept_tr=plan["tr"], accept_pid=start_chain(plan), epochs={e: str(p) for e, p in ck.items()})
@@ -153,6 +177,18 @@ def step(group: str) -> bool:
             if res.returncode:
                 raise RuntimeError(f"accept_summary: {res.stderr[-800:]}")
             acc = json.loads(out.read_text())
+            if group in PASS_RULE:  # group G: the action-segment entropy and the targets' form, both pass lines
+                out_g = tr / "accept_summary_g.json"
+                res = subprocess.run([PY, str(ACCEPT_G), "--set", str(tr / "eval_accept_reserve200"), "--main", str(out),
+                                      "--out", str(out_g), *names], cwd=W, env=ENV, capture_output=True, text=True)
+                if res.returncode:
+                    raise RuntimeError(f"m3_accept_g: {res.stderr[-800:]}")
+                if PASS_RULE[group] is None:
+                    st["stage"] = "accepted"
+                    log(f"{group}: acceptance done ({out.name}, {out_g.name}); the pass rule for its targets format "
+                        "waits for the user, then: m3_cells.py pick " + group + " --rule action|all")
+                    save(group, st)
+                    return True
             scores = json.loads((tr / "progress.json").read_text())["steps"]["pick_sft"]["decision"]["scores"]
             passing = [int(k) for k in sorted(st["epochs"], key=int) if acc[f"sft_{sft_group}_e{k}_s4"].get("pass")]
             ranked = sorted(passing, key=lambda e: (-scores[f"sft_{sft_group}_e{e}"], e))
@@ -164,7 +200,7 @@ def step(group: str) -> bool:
                 pick = ranked[0]
                 model = st["epochs"][str(pick)] if str(pick) in st["epochs"] else st["epochs"][pick]
                 seeds = [int(x) for x in MP.v3_vars()["rl"]["seeds"]][:MP.V3_CELLS[group][1]]
-                if not seeds:                         # E2: no RL (the user, 2026-11-03)
+                if not seeds or group in NO_AUTO_RL:  # E2: no RL (the user, 2026-11-03); G: RL waits for the user
                     st.update(stage="picked", pick=pick, pick_model=model)
                     log(f"{group}: picked epoch {pick} ({model}; passing {passing}); no RL for this cell")
                     save(group, st)
@@ -178,7 +214,35 @@ def step(group: str) -> bool:
                 st.update(stage="rl_started", pick=pick, pick_model=model, rl=rl, rl_commit=commit)
                 log(f"{group}: picked epoch {pick} ({model}; passing {passing}); RL chains {[r['tr'] for r in rl.values()]}")
     save(group, st)
-    return st["stage"] in ("failed", "no_pick", "rl_started", "picked")
+    return st["stage"] in ("failed", "no_pick", "rl_started", "picked", "accepted")
+
+
+def pick(group: str, rule: str) -> None:
+    """A targets-format cell after its acceptance ("accepted"): the passing epochs under the user's pass rule
+    (action: entropy_action <= 0.06; all: the whole answer's entropy <= 0.06; both with unreadable turns <= 1%), the
+    best on val among them (ties to the earlier); no RL started."""
+    if rule not in ("action", "all"):
+        raise SystemExit("--rule action|all")
+    st = load(group)
+    if st.get("stage") != "accepted":
+        raise SystemExit(f"{group}: stage {st.get('stage')}, not accepted")
+    tr = sft_tr(group)
+    sft_group = next(iter(json.loads((tr / "plan.json").read_text())["sft_groups"]))
+    acc = json.loads((tr / "accept_summary_g.json").read_text())
+    scores = json.loads((tr / "progress.json").read_text())["steps"]["pick_sft"]["decision"]["scores"]
+    key = "pass_action" if rule == "action" else "pass_all"
+    passing = [int(k) for k in sorted(st["epochs"], key=int) if acc[f"sft_{sft_group}_e{k}_s4"].get(key)]
+    ranked = sorted(passing, key=lambda e: (-scores[f"sft_{sft_group}_e{e}"], e))
+    st.update(pass_rule=rule, passing=passing,
+              val={e: scores[f"sft_{sft_group}_e{e}"] for e in sorted(int(k) for k in st["epochs"])})
+    if not ranked:
+        st["stage"] = "no_pick"
+        log(f"{group}: no epoch passes the sampling check under rule {rule}; no RL (back to the user)")
+    else:
+        p = ranked[0]
+        st.update(stage="picked", pick=p, pick_model=st["epochs"][str(p)])
+        log(f"{group}: picked epoch {p} under rule {rule} ({st['pick_model']}; passing {passing}); RL waits for the user")
+    save(group, st)
 
 
 def watch(groups) -> None:
@@ -201,5 +265,7 @@ if __name__ == "__main__":
         start_sft(args[0])
     elif cmd == "watch":
         watch(args)
+    elif cmd == "pick":  # group G: python m3_cells.py pick G --rule action|all
+        pick(args[0], args[args.index("--rule") + 1])
     else:
         sys.exit(__doc__)

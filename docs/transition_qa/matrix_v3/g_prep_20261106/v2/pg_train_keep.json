@@ -1,0 +1,29 @@
+{
+ "note": "Pg v2's train file: v1's questions (the same sample ids, kinds and order, so the recipe draws the same 9,075) with",
+ "targets_pixel": {
+  "questions": 32498,
+  "changed_answer": 570,
+  "changed_box": 572,
+  "pg_test.jsonl": {
+   "questions": 1000,
+   "changed_answer": 16
+  },
+  "pg_probe.jsonl": {
+   "questions": 60,
+   "changed_answer": 0
+  }
+ },
+ "targets_norm1000": {
+  "questions": 32498,
+  "changed_answer": 572,
+  "changed_box": 572,
+  "pg_test.jsonl": {
+   "questions": 1000,
+   "changed_answer": 16
+  },
+  "pg_probe.jsonl": {
+   "questions": 60,
+   "changed_answer": 0
+  }
+ }
+}

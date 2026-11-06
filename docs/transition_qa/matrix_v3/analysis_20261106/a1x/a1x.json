@@ -1,0 +1,66 @@
+{
+ "m3ds1s0_300": {
+  "side": "S0",
+  "questions": 7620,
+  "readable": 7620,
+  "gold_yes": 45,
+  "gold_yes_said_yes": 10,
+  "gold_no": 7575,
+  "gold_no_said_yes": 2222,
+  "recall_yes": 0.2222,
+  "false_yes": 0.2933,
+  "near_turns": {
+   "turns": 39,
+   "said_yes_to_a_right_action": 9,
+   "said_yes_to_a_wrong_action": 31,
+   "right_yes_only": 2,
+   "right_questions": 45,
+   "right_said_yes": 10,
+   "wrong_questions": 189,
+   "wrong_said_yes": 56,
+   "chose_a_right_action_first": 0,
+   "chose_nothing_readable": 0
+  },
+  "near_knows_rate": 0.2308,
+  "near_right_yes_rate": 0.2222,
+  "near_wrong_yes_rate": 0.2963,
+  "near_sign_test": {
+   "right_more": 9,
+   "wrong_more": 24,
+   "ties": 6,
+   "p": 0.0135
+  }
+ },
+ "m3ds1d_300": {
+  "side": "V4",
+  "questions": 8082,
+  "readable": 8082,
+  "gold_yes": 46,
+  "gold_yes_said_yes": 19,
+  "gold_no": 8036,
+  "gold_no_said_yes": 2640,
+  "recall_yes": 0.413,
+  "false_yes": 0.3285,
+  "near_turns": {
+   "turns": 42,
+   "said_yes_to_a_right_action": 18,
+   "said_yes_to_a_wrong_action": 31,
+   "right_yes_only": 2,
+   "right_questions": 46,
+   "right_said_yes": 19,
+   "wrong_questions": 206,
+   "wrong_said_yes": 63,
+   "chose_a_right_action_first": 0,
+   "chose_nothing_readable": 0
+  },
+  "near_knows_rate": 0.4286,
+  "near_right_yes_rate": 0.413,
+  "near_wrong_yes_rate": 0.3058,
+  "near_sign_test": {
+   "right_more": 17,
+   "wrong_more": 15,
+   "ties": 10,
+   "p": 0.8601
+  }
+ }
+}

@@ -1,0 +1,22 @@
+{
+ "utc": "2026-11-06T12:12:34Z",
+ "from": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft_mixture_g_norm1000_20261106/G",
+ "to": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/G",
+ "commit": "fba7057a151c7c972fb27cac44642956c6d491db",
+ "files_sha256": {
+  "P0_train.jsonl": "4746ba60a3d34934c97ff1c4c8fa1677aa26a0e5c71ccde81c24240aed729f63",
+  "P0_val.jsonl": "6e4401f732d09cd17b026e6b66bb15da39b60257e84cda201806b6ddf7310d4f",
+  "P1_train.jsonl": "11209d3c57cdaa4a3ed687ada0f2b70bfda4097e32260b031b15c70d35382550",
+  "P1_val.jsonl": "d77f17943c3a1fee7fdff026e8d2fbd94dbf6ab11e68fdfb13e79adbe841fb30",
+  "P2f_val.jsonl": "b2a1ede61fc738cf84b4a24568f7ca8e6d07459dc87c114a49add65ada1e40f6",
+  "P2q_val.jsonl": "b3ea063250ae0f1977c768ea0bdd448d97a47889962fe8b267b6d1cbb09b6bc2",
+  "P2t_train.jsonl": "2178e7a2681d279489a905a58cef9d12462dd44ba1014e59d14e72fec5ff4778",
+  "P2t_val.jsonl": "1eea2bbbdf791e139b612cf6366176341ee673a996c968e0a913509e48059245",
+  "Pg_train.jsonl": "91b2f89ac627a2f392ff103eb9281065a2017bbbe875f39304747f6d1b4cfa58",
+  "Pg_val.jsonl": "d876b1c1839bb2d2168f9f475fe51313b357b675abdb3e3775d16e2b0e714dd1",
+  "dataset_info.json": "b2798c13ae1914afba451fe7ca5dc317eabac57775b8b8bc0429eea80e74f4fb",
+  "recipe.json": "adf8685e5919e9b0f374735ebcb6c4ea4ac1995a132c210a13f2b6b9de5dd5cd",
+  "train.yaml": "594f40faa7963dfe1b23a0c0b4f427b5c5997f78e02d575b1606624745ad8a43"
+ },
+ "note": "recipe G (targets_norm1000, Pg 9,075; the user's \u7532 of 2026-11-06), data files byte for byte, train.yaml with dataset_dir and output_dir changed"
+}
