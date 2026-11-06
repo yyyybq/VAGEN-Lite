@@ -177,9 +177,12 @@ def summarize(eps: List[Dict[str, Any]]) -> Dict[str, Any]:
             "collision_per_action": rate(sum(e["collisions"] for e in ok), actions),
             "collision_per_move": rate(sum(e["collisions"] for e in ok), moves),
             "turn_share": rate(sum(e["turn_actions"] for e in ok), actions),
-            "success_actions_over_dstar_mean": round(statistics.mean(eff), 3) if eff else None,
-            "success_actions_over_dstar_median": round(statistics.median(eff), 3) if eff else None,
-            "success_to_success_over_dstar_mean": round(statistics.mean(eff_hit), 3) if eff_hit else None,
+            # unrounded like the rates (2026-11-06: rounding here to 3 places and again for display put 4 cells of
+            # MIX_SCREEN_20261105 section 5.3 0.01 off); "actions" counts every action written, including those of
+            # the last turn after the success, so the record's actions_to_success gives the executed ones
+            "success_actions_over_dstar_mean": statistics.mean(eff) if eff else None,
+            "success_actions_over_dstar_median": statistics.median(eff) if eff else None,
+            "success_to_success_over_dstar_mean": statistics.mean(eff_hit) if eff_hit else None,
             "unknown_d_turns": sum(x is None for e in ok for x in e["d"][1:])}
 
 

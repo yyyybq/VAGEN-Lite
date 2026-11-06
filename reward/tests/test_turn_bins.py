@@ -57,3 +57,16 @@ def test_run_merges_sets_and_bands_by_margin():
     assert TB.table(res).count("|") > 0 and "9.33" in TB.table(res)
     with pytest.raises(SystemExit):
         TB.run(metrics, "dstar", TB.parse_bands("1-3"), 12, {"x": ["nothing@*"]}, [])
+
+
+def test_summarize_keeps_efficiency_unrounded():
+    # 2026-11-06: the efficiency means were rounded to 3 places here and again for display
+    from reward.turn_metrics import summarize
+
+    eps = [ep([3, 2, 1, 0], True, 3), ep([3, 2, 1, 1, 0], True, 3), ep([3, 2, 2, 1, 0], True, 3, task="u")]
+    for e in eps:
+        e["actions_to_success"] = 3
+    s = summarize(eps)
+    assert s["success_actions_over_dstar_mean"] == pytest.approx(11 / 9, rel=1e-12)  # (3 + 4 + 4) / 3 / 3
+    assert s["success_actions_over_dstar_median"] == pytest.approx(4 / 3, rel=1e-12)
+    assert s["success_to_success_over_dstar_mean"] == pytest.approx(1.0, rel=1e-12)
