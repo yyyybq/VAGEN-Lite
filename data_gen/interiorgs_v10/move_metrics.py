@@ -6,16 +6,19 @@ executed nor which of them were blocked (the feedback of the last turn is never 
 is replayed in the evaluation's env (the template, default configs/rl_env_v10_S0.yaml, with the result's prompt
 format and env switches from its model.json, so a result evaluated with --turn-footprint-radius is replayed under
 the turn rule): env.reset on the task's line in the tasks file (found by its task_id), one env.step per recorded
-answer, checked turn by turn against the record (task met after the turn, blocked moves: replay_same).  Per turn:
-the actions the env executed (each takes one step, so the parsed actions up to the step count; the rest of a turn
-ended by success or the action limit is not executed) and the blocked ones, named in the env's detailed feedback
-("2 of 3 actions executed; blocked: turn_left (blocked by tea table)."; a turn whose names do not add up to its
-blocked count is counted in turns_unknown).
+answer, checked turn by turn against the record (task met after the turn, blocked moves and, for a result recorded
+under the turn rule, the turns blocked by the footprint, footprint_blocks: replay_same).  Per turn: the actions the
+env executed (each takes one step, so the parsed actions up to the step count; the rest of a turn ended by success or
+the action limit is not executed) and the blocked ones, named in the env's detailed feedback ("2 of 3 actions
+executed; blocked: turn_left (blocked by tea table)."; a turn whose names do not add up to its blocked count is
+counted in turns_unknown).
 
 Per result: actions executed, the rotation (turn_left / turn_right) share, the blocked share of rotations, of
-translations and of all actions, and the rule (env_switches turn_footprint_radius, None = today's rule).  An
-env_switches key that is not an env setting of this checkout is refused (the env would drop it and replay another
-rule).  d (the remaining steps where failed episodes end) is reward/fail_end_steps.py, which replays the same way.
+translations and of all actions (over the turns whose blocked actions are known: a turn in turns_unknown is left out
+of both numerator and denominator, its actions and blocked count given apart as unknown_turn_*), and the rule
+(env_switches turn_footprint_radius, None = today's rule).  An env_switches key that is not an env setting of this
+checkout is refused (the env would drop it and replay another rule).  d (the remaining steps where failed episodes end)
+is reward/fail_end_steps.py, which replays the same way.
 
     python -m data_gen.interiorgs_v10.move_metrics --result DIR [--result DIR ...] --out FILE.json
         [--tasks FILE] [--env-template YAML] [--gs-root DIR] [--workers 4]
@@ -103,7 +106,7 @@ def worker(job: Tuple[str, str, str, str, List[Dict[str, Any]]]) -> List[Dict[st
                 raise ValueError("no trajectory recorded")
             env.reset(seed=position[r["task_id"]])
             assert env.current_item["task_id"] == r["task_id"], (env.current_item["task_id"], r["task_id"])
-            met, blocked, turns = [], [], []
+            met, blocked, footprint, turns = [], [], [], []
             for t in r["trajectory"]:
                 before = int(env._current_step)
                 _, _, done, info = env.step(t["answer"])
@@ -114,11 +117,21 @@ def worker(job: Tuple[str, str, str, str, List[Dict[str, Any]]]) -> List[Dict[st
                 metric = env._calculate_canonical_metric()
                 met.append(bool(metric and metric.get("success")))
                 blocked.append(count)
-                turns.append({"executed": executed, "blocked": names, "blocked_count": count})
+                turn = {"executed": executed, "blocked": names, "blocked_count": count}
+                # the replay's turns blocked by the footprint (the env reports them only under the turn rule)
+                footprint.append(tm.get("turn_footprint_blocks"))
+                if footprint[-1] is not None:
+                    turn["footprint_blocks"] = int(footprint[-1])
+                turns.append(turn)
                 if done:
                     break
+            # a result evaluated under the turn rule records each turn's footprint_blocks (evaluation.run_episode):
+            # the replay must block as many turns by the footprint in that turn
             rec["replay_same"] = (met == [bool(t["met"]) for t in r["trajectory"]]
-                                  and blocked == [int(t["collisions"]) for t in r["trajectory"]])
+                                  and blocked == [int(t["collisions"]) for t in r["trajectory"]]
+                                  and all(footprint[k] == int(t["footprint_blocks"])
+                                          for k, t in enumerate(r["trajectory"][:len(footprint)])
+                                          if "footprint_blocks" in t))
             rec["turns"] = turns
         except Exception as exc:
             rec["error"] = f"{type(exc).__name__}: {exc}"
@@ -127,28 +140,40 @@ def worker(job: Tuple[str, str, str, str, List[Dict[str, Any]]]) -> List[Dict[st
 
 
 def summarize(episodes: Sequence[Dict[str, Any]], rule: Optional[float] = None) -> Dict[str, Any]:
-    """Counts and shares over the replayed episodes (episodes with an error left out)."""
+    """Counts and shares over the replayed episodes (episodes with an error left out).  The rotation share is over every
+    executed action; the blocked shares (rotations, translations, all) only over the turns whose blocked actions are
+    known: a turn in turns_unknown is left out of their numerators and denominators, and its executed actions and
+    blocked count are given apart (unknown_turn_*)."""
     ok = [e for e in episodes if "error" not in e]
     turns = [t for e in ok for t in e["turns"]]
+    known = [t for t in turns if t["blocked"] is not None]
+    unknown = [t for t in turns if t["blocked"] is None]
     executed = [a for t in turns for a in t["executed"]]
-    named = [a for t in turns if t["blocked"] is not None for a in t["blocked"]]
     rotations = sum(a in ROTATIONS for a in executed)
-    translations = len(executed) - rotations
+    known_executed = [a for t in known for a in t["executed"]]
+    known_rotations = sum(a in ROTATIONS for a in known_executed)
+    named = [a for t in known for a in t["blocked"]]
     rotations_blocked = sum(a in ROTATIONS for a in named)
     translations_blocked = len(named) - rotations_blocked
-    blocked = sum(int(t["blocked_count"]) for t in turns)
+    blocked = sum(int(t["blocked_count"]) for t in known)  # = len(named): a known turn's names add up to its count
+    unknown_executed = [a for t in unknown for a in t["executed"]]
 
     def share(n: int, d: int) -> Optional[float]:
         return round(n / d, 4) if d else None
 
     return {"rule": rule, "episodes": len(episodes), "errors": len(episodes) - len(ok),
             "replay_same": sum(bool(e["replay_same"]) for e in ok), "turns": len(turns),
-            "turns_unknown": sum(t["blocked"] is None for t in turns),
+            "turns_unknown": len(unknown),
             "actions": len(executed), "rotations": rotations, "rotation_share": share(rotations, len(executed)),
-            "rotations_blocked": rotations_blocked, "rotation_blocked_share": share(rotations_blocked, rotations),
-            "translations": translations, "translations_blocked": translations_blocked,
-            "translation_blocked_share": share(translations_blocked, translations),
-            "blocked": blocked, "blocked_share": share(blocked, len(executed))}
+            "rotations_blocked": rotations_blocked,
+            "rotation_blocked_share": share(rotations_blocked, known_rotations),
+            "translations": len(executed) - rotations, "translations_blocked": translations_blocked,
+            "translation_blocked_share": share(translations_blocked, len(known_executed) - known_rotations),
+            "blocked": blocked, "blocked_share": share(blocked, len(known_executed)),
+            "unknown_turn_actions": len(unknown_executed),
+            "unknown_turn_rotations": sum(a in ROTATIONS for a in unknown_executed),
+            "unknown_turn_translations": sum(a not in ROTATIONS for a in unknown_executed),
+            "unknown_turn_blocked": sum(int(t["blocked_count"]) for t in unknown)}
 
 
 def episodes_of(result: Path) -> List[Dict[str, Any]]:
@@ -191,14 +216,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out = {k: summarize(v, rules[k]) for k, v in per.items()}
     Path(args.out).write_text(json.dumps({"env_template": str(args.env_template), "results": out,
                                           "episodes": per}, indent=1))
-    L = ["| 结果 | 规则 | 局数 | 出错 | 重放一致 | 执行的动作 | 转身占比 | 转身被挡占比 | 平移被挡占比 | 全部被挡占比 | 读不出被挡动作的轮 |",
+    L = ["| 结果 | 规则 | 局数 | 出错 | 重放一致 | 执行的动作 | 转身占比 | 转身被挡占比 | 平移被挡占比 | 全部被挡占比 | "
+         "读不出被挡动作的轮（其动作数，不计入被挡占比） |",
          "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for k, s in out.items():
         rule = f"转身脚印 {s['rule']} m" if s["rule"] is not None else "旧规则"
         L.append(f"| {Path(k).parent.name}/{Path(k).name} | {rule} | {s['episodes']} | {s['errors']} | {s['replay_same']} | "
                  f"{s['actions']} | {s['rotation_share']} | {s['rotation_blocked_share']}（{s['rotations_blocked']}） | "
                  f"{s['translation_blocked_share']}（{s['translations_blocked']}） | {s['blocked_share']} | "
-                 f"{s['turns_unknown']} |")
+                 f"{s['turns_unknown']}（{s['unknown_turn_actions']}） |")
     Path(args.out).with_suffix(".md").write_text("\n".join(L) + "\n", encoding="utf-8")
     print("\n".join(L))
     return 0

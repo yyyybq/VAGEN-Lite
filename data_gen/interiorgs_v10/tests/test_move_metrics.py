@@ -52,11 +52,26 @@ class TurnRecordTest(unittest.TestCase):
                     {"executed": ["turn_left"], "blocked": None, "blocked_count": 1},
                     {"executed": [], "blocked": [], "blocked_count": 0}]},
                {"index": 2, "error": "KeyError: 'x'"}]
+        # the rotation share is over all 8 executed actions; the blocked shares only over the known turns (7 actions:
+        # 3 rotations, 4 translations), the unknown turn's turn_left and its blocked count given apart (review fix 5b)
         self.assertEqual(MM.summarize(eps, 0.25), {
             "rule": 0.25, "episodes": 3, "errors": 1, "replay_same": 1, "turns": 5, "turns_unknown": 1,
-            "actions": 8, "rotations": 4, "rotation_share": 0.5, "rotations_blocked": 1, "rotation_blocked_share": 0.25,
-            "translations": 4, "translations_blocked": 1, "translation_blocked_share": 0.25,
-            "blocked": 3, "blocked_share": 0.375})
+            "actions": 8, "rotations": 4, "rotation_share": 0.5, "rotations_blocked": 1,
+            "rotation_blocked_share": 0.3333, "translations": 4, "translations_blocked": 1,
+            "translation_blocked_share": 0.25, "blocked": 2, "blocked_share": 0.2857,
+            "unknown_turn_actions": 1, "unknown_turn_rotations": 1, "unknown_turn_translations": 0,
+            "unknown_turn_blocked": 1})
+        # only unknown turns: no blocked share at all, everything reported apart
+        only = MM.summarize([{"index": 0, "replay_same": True, "turns": [
+            {"executed": ["move_forward", "turn_left"], "blocked": None, "blocked_count": 2}]}])
+        self.assertEqual({k: only[k] for k in ("actions", "rotation_share", "rotation_blocked_share",
+                                                "translation_blocked_share", "blocked", "blocked_share",
+                                                "unknown_turn_actions", "unknown_turn_rotations",
+                                                "unknown_turn_translations", "unknown_turn_blocked")},
+                         {"actions": 2, "rotation_share": 0.5, "rotation_blocked_share": None,
+                          "translation_blocked_share": None, "blocked": 0, "blocked_share": None,
+                          "unknown_turn_actions": 2, "unknown_turn_rotations": 1, "unknown_turn_translations": 1,
+                          "unknown_turn_blocked": 2})
         self.assertEqual(MM.summarize([])["actions"], 0)
         self.assertIsNone(MM.summarize([])["rotation_share"])
 
@@ -159,13 +174,53 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(sorted(e["index"] for e in episodes), [0, 1])
         first = next(e for e in episodes if e["index"] == 0)["turns"][0]  # above the tea table: both turns blocked
         self.assertEqual(first, {"executed": ["turn_left", "turn_left"], "blocked": ["turn_left", "turn_left"],
-                                 "blocked_count": 2})
+                                 "blocked_count": 2, "footprint_blocks": 2})
+        # the replay's footprint count per turn only under the rule
+        self.assertFalse(any("footprint_blocks" in t for e in data["episodes"][str(self.ev / "sft")] for t in e["turns"]))
+        self.assertEqual((new["unknown_turn_actions"], old["unknown_turn_actions"]), (0, 0))
         table = out.with_suffix(".md").read_text(encoding="utf-8")
         self.assertIn("| eval_set/sft_fp | 转身脚印 0.25 m | 2 | 0 | 2 |", table)
         self.assertIn("| eval_set/sft | 旧规则 | 2 | 0 | 2 |", table)
         # the worker pool gives the same numbers
         pooled, _ = self.metrics("sft_fp", workers=2)
         self.assertEqual(pooled["results"][str(self.ev / "sft_fp")], new)
+
+    def variant(self, name, rows_change=None, model_change=None):
+        """A copy of the rule-0.25 folder with its records or its model.json changed, and move_metrics' summary of it."""
+        d = self.ev / name
+        shutil.copytree(self.ev / "sft_fp", d)
+        rows = MM.episodes_of(d)
+        if rows_change is not None:
+            rows_change(rows)
+        (d / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        if model_change is not None:
+            model = json.loads((d / "model.json").read_text())
+            model_change(model)
+            (d / "model.json").write_text(json.dumps(model))
+        data, _ = self.metrics(name)
+        return data["results"][str(d)]
+
+    def test_replay_same_catches_a_changed_record(self):
+        """replay_same (review fix 5c) drops by one when one recorded turn's collisions, met or footprint_blocks is
+        changed; a result recorded under the turn rule replayed without it (turn_footprint_radius taken out of
+        model.json env_switches) replays no episode the same and blocks no turn."""
+        def bump(key, value):
+            def change(rows):
+                turn = next(r for r in rows if r["index"] == 0)["trajectory"][0]
+                turn[key] = value(turn[key])
+            return change
+
+        base = self.metrics("sft_fp")[0]["results"][str(self.ev / "sft_fp")]
+        self.assertEqual(base["replay_same"], 2)
+        for name, change in (("v_collisions", bump("collisions", lambda v: v + 1)),
+                             ("v_met", bump("met", lambda v: not v)),
+                             ("v_footprint", bump("footprint_blocks", lambda v: v - 1))):  # 2 -> 1, collisions kept
+            got = self.variant(name, rows_change=change)
+            self.assertEqual((got["episodes"], got["replay_same"]), (2, 1), name)
+        off = self.variant("v_no_rule", model_change=lambda m: m["env_switches"].pop("turn_footprint_radius"))
+        self.assertEqual((off["rule"], off["episodes"], off["errors"]), (None, 2, 0))
+        self.assertLess(off["replay_same"], off["episodes"])
+        self.assertEqual(off["rotations_blocked"], 0)
 
     def test_the_evaluation_records_footprint_blocks_only_under_the_rule(self):
         """evaluation.run_episode with the real env (review fix 3c): under the turn rule every recorded turn carries
