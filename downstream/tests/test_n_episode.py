@@ -124,6 +124,24 @@ def run(monkeypatch, replies):
     return rec, frames, calls
 
 
+def test_a_d3_variant_also_judges_the_original_question_at_the_end(monkeypatch):
+    class D3Scene(FakeScene):  # the original question is met at the start, the variant's further forward
+        def judge(self, item, pose, render=True):
+            j = super().judge(item, pose, render)
+            return {**j, "success": all(abs(v) < 1e-9 for v in pose)} if item.get("original") else j
+    run(monkeypatch, ["move_left"])  # the monkeypatches only
+    inst = {**INST, "d3": {"original_item": {"task_type": "projective_relations", "original": True}}}
+    rec, _ = E.run_episode(D3Scene(), inst, lambda m, i, n: "move_left", FakeCfg(),
+                           {"max_turns": 12, "response_length_per_turn": 384})
+    assert rec["success"] is False and rec["final_judge_original"]["success"] is False  # moved sideways
+    rec, _ = E.run_episode(D3Scene(), inst, lambda m, i, n: "turn_left,turn_right", FakeCfg(),
+                           {"max_turns": 12, "response_length_per_turn": 384})
+    assert rec["success"] is False and rec["final_judge_original"]["success"] is True
+    rec, _ = E.run_episode(FakeScene(), INST, lambda m, i, n: "move_left", FakeCfg(),
+                           {"max_turns": 12, "response_length_per_turn": 384})
+    assert "final_judge_original" not in rec
+
+
 def test_success_mid_turn_stops_the_turn(monkeypatch):
     rec, frames, calls = run(monkeypatch, ["move_forward,move_forward,turn_left"])
     assert rec["success"] and rec["end"] == "success" and rec["steps"] == 2 and rec["turns"] == 1

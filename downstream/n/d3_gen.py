@@ -102,8 +102,10 @@ def variant_for(scene, states: dict, order: list, inst: dict, deadline: float) -
     bad = scene_check(scene, inst)
     if bad:
         return None, {**rec, "reason": bad}
-    if not scene.judge(inst["item"], inst["shortest"]["pose"])["success"]:
-        return None, {**rec, "reason": "original_fails"}
+    oj = scene.judge(inst["item"], inst["shortest"]["pose"])
+    if not oj["success"]:
+        return None, {**rec, "reason": "original_fails", "box": bool(N.box_judge(inst["item"], inst["shortest"]["pose"])
+                                                                     ["success"]), "visible": oj.get("visible")}
     sid = f"{scene.task}_s{scene.seed}"
     rng = random.Random(f"{RNG_SEED}:{inst['instance_id']}")
     pre = collections.Counter()

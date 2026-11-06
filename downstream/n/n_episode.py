@@ -292,6 +292,11 @@ def run_episode(scene, inst: dict, ask, cfg, entry: dict, history: bool = False)
                            "margin": final["metric"].get("relation_margin_px"),
                            "lateral_deg": final["lateral"].get("angle_deg")},
            "turn_log": turns}
+    original = (inst.get("d3") or {}).get("original_item")
+    if original:  # D3 (a) axis (d3_gen.py): does the end pose meet the original question (a wrong-target end)?
+        oj = scene.judge(original, pose)
+        out["final_judge_original"] = {"success": oj["success"], "gates": oj["metric"].get("gates"),
+                                       "shaping_score": shaping(oj)}
     return out, frames
 
 
