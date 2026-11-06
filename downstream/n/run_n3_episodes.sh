@@ -6,7 +6,7 @@
 # checked for colour noise (n_frames.py scan: OUT/frames_scan.json).  Writes only under OUT.
 # Usage: run_n3_episodes.sh OUT INSTANCES MODEL [WORKERS] [LIMIT]
 #   N_PORT (default 5800); N_VAL_ENV: the validation config whose prompt the model sees (the Qwen3 models: their own
-#   chain's, as in N1).  The simulator runs without the Mesa shader cache (run_n2.sh says why).
+#   chain's, as in N1); N_HISTORY=1: every call carries the episode's earlier turns (n_episode.py --history, tier g).  The simulator runs without the Mesa shader cache (run_n2.sh says why).
 #   Qwen3 models: run as the container's root (their base is readable by root only); everything under OUT is given back
 #   to OWNER_UID:OWNER_GID (default 20325) when it ends.
 set -uo pipefail
@@ -37,9 +37,10 @@ for i in $(seq 1 180); do
   python3 -c 'import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(("127.0.0.1",int(sys.argv[1]))))' "$PORT" && break
   sleep 5
 done
-log "server ready ($MODEL on $PORT); collision ${N3_COLLISION:-robot}"
+log "server ready ($MODEL on $PORT); collision ${N3_COLLISION:-robot}; history ${N_HISTORY:-0}"
 VAL=()
 [[ -n ${N_VAL_ENV:-} ]] && VAL=(--val-env "$N_VAL_ENV")
+[[ ${N_HISTORY:-0} == 1 ]] && VAL+=(--history)
 sim 1 "$SIM_PY" downstream/n/n3_episode.py --collision "${N3_COLLISION:-robot}" --instances "$INST" --port "$PORT" \
   --out "$OUT" --workers "$WORKERS" --limit "$LIMIT" ${VAL[@]+"${VAL[@]}"} > "$OUT/episodes.log" 2>&1
 rc=$?

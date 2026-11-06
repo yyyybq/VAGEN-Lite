@@ -14,6 +14,11 @@ the RL env RS and RD were trained with), built with the upstream functions loade
     2026-11-05: this is not the RL models' training input.  RS, RD and the Qwen3 pair were trained with GRPO and
     concat_multi_turn, one sequence per episode, so every call saw all earlier turns, as in SFT.  The main-line
     evaluation's --no-history input is the one here: N3 tier a without history, N3_NOHIST_20261105.md.)
+  * --history (the user's task book of 2026-11-06, tier g): every call also carries the episode's earlier turns, as
+    the main line's evaluation does by default (data_gen/interiorgs_v10/evaluation.py chat_messages, --history): the
+    system prompt, then each earlier turn's user message (its frame where "<image>" stands) and the model's reply as
+    it came back (an unreadable one too), then the current user message; the images go with them in order.  The
+    user messages are built as above, so each carries the feedback of the turn before, as the env's observation does;
   * a reply is read like the env's strict parser (utils.parse_free_think, parse_actions, check_actions against the
     strafe actions; at most 5 actions); an unreadable reply executes nothing and 3 in a row end the episode;
   * the actions run one by one; a blocked one stays (feedback "<k> of <n> actions executed; blocked: <action>
@@ -130,6 +135,16 @@ def chat(system: str, user: str):
     return [{"role": "system", "content": [{"type": "text", "text": system}]}, {"role": "user", "content": parts}]
 
 
+def chat_history(system: str, earlier, user: str):
+    """--history: the system prompt, every earlier (user message, reply) of the episode, then the current user
+    message; a reply is plain assistant text, as the main line's evaluation passes it."""
+    head, current = chat(system, user)
+    middle = []
+    for u, reply in earlier:
+        middle += [chat(system, u)[1], {"role": "assistant", "content": reply}]
+    return [head, *middle, current]
+
+
 # ------------------------------------------------------------------------------------------- the socket
 def send_msg(sock, obj) -> None:
     data = json.dumps(obj).encode()
@@ -165,7 +180,10 @@ def asker(port: int, host: str = "127.0.0.1"):
     def ask(messages, images, max_new_tokens: int):
         with socket.create_connection((host, port), timeout=600) as s:
             send_msg(s, {"messages": messages, "images": [png_b64(i) for i in images], "max_new_tokens": max_new_tokens})
-            return recv_msg(s)["reply"]
+            ans = recv_msg(s)
+        ask.prompt_tokens = ans.get("prompt_tokens")  # the server's count of the last prompt (None from older ones)
+        return ans["reply"]
+    ask.prompt_tokens = None
     return ask
 
 
@@ -175,8 +193,8 @@ def shaping(j: dict) -> float:
     return float(m.get("shaping_score", m.get("score")) or 0.0)
 
 
-def run_episode(scene, inst: dict, ask, cfg, entry: dict) -> dict:
-    """One episode (see the module text); returns its record and the frames of every turn."""
+def run_episode(scene, inst: dict, ask, cfg, entry: dict, history: bool = False) -> dict:
+    """One episode (see the module text); returns its record and the frames of every turn.  history: --history."""
     item = inst["item"]
     allowed = allowed_actions(cfg)
     system = system_text(cfg, item["task_type"])
@@ -186,13 +204,20 @@ def run_episode(scene, inst: dict, ask, cfg, entry: dict) -> dict:
     pose = tuple(scene.start)
     fb, invalid, steps, success, blocked_n = "", 0, 0, False, 0
     turns, frames, end = [], [], "turns"
+    earlier = []
     best_shaping = shaping(N.box_judge(item, pose))
     for t in range(max_turns):
         img, _ = scene.render(pose)
         frames.append(img)
-        reply = ask(chat(system, user_text(cfg, t == 0, pose, item["task_description"], fb)), [img], per_turn)
+        user = user_text(cfg, t == 0, pose, item["task_description"], fb)
+        if history:
+            reply = ask(chat_history(system, earlier, user), list(frames), per_turn)
+            earlier.append((user, reply))
+        else:
+            reply = ask(chat(system, user), [img], per_turn)
         actions, err = parse(reply, cfg, allowed)
-        rec = {"turn": t + 1, "reply": reply, "actions": actions, "parse_error": err, "pose_before": list(pose)}
+        rec = {"turn": t + 1, "reply": reply, "actions": actions, "parse_error": err, "pose_before": list(pose),
+               "prompt_tokens": getattr(ask, "prompt_tokens", None)}
         if not actions:
             invalid += 1
             fb = "Action had no effect."
@@ -261,13 +286,14 @@ _W = {}
 EPISODE_TIMEOUT = 900.0
 
 
-def _init(port: int, val_env: Path = VAL_ENV):
+def _init(port: int, val_env: Path = VAL_ENV, history: bool = False):
     """In the main process, before any episode is forked: the counter-region fix, the model client, the upstream
     config (val_env), and the simulator modules imported once (the forked episodes start with them)."""
     from downstream.eval import closed_loop
 
     closed_loop.stable_counter_regions()
     _W["ask"] = asker(port)
+    _W["history"] = bool(history)
     _W["cfg"], _W["entry"] = upstream_config(Path(val_env))
     import gymnasium  # noqa: F401
     import mujoco  # noqa: F401
@@ -282,7 +308,7 @@ def _one(job):
     t0 = time.time()
     try:
         scene = N.Scene(inst["task"], inst["seed"], hide_robot=bool(inst.get("hide_robot", False)))
-        rec, frames = run_episode(scene, inst, _W["ask"], _W["cfg"], _W["entry"])
+        rec, frames = run_episode(scene, inst, _W["ask"], _W["cfg"], _W["entry"], history=_W.get("history", False))
         (Path(out) / "frames").mkdir(parents=True, exist_ok=True)
         strip_image(frames).save(Path(out) / "frames" / f"{inst_id(inst)}.png")
     except Exception as exc:
@@ -375,6 +401,8 @@ def main(argv=None) -> int:
     ap.add_argument("--timeout", type=float, default=EPISODE_TIMEOUT, help="seconds an episode may take")
     ap.add_argument("--val-env", type=Path, default=VAL_ENV,
                     help=f"the main line's validation config whose prompt the model sees (Qwen3 models: {VAL_ENV_QWEN3})")
+    ap.add_argument("--history", action="store_true",
+                    help="every call carries the episode's earlier turns (the main line's evaluation default)")
     args = ap.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -382,8 +410,9 @@ def main(argv=None) -> int:
     if (out / "episodes.jsonl").is_file():
         done = {inst_id(json.loads(x)) for x in (out / "episodes.jsonl").read_text().splitlines() if x.strip()}
     todo = [i for i in load_instances(args.instances, args.limit) if inst_id(i) not in done]
-    _init(args.port, args.val_env)
-    print(f"[n_episode] {len(todo)} episodes, prompt from {args.val_env}", flush=True)
+    _init(args.port, args.val_env, args.history)
+    print(f"[n_episode] {len(todo)} episodes, prompt from {args.val_env}, history {'on' if args.history else 'off'}",
+          flush=True)
     with open(out / "episodes.jsonl", "a") as f:
         for rec in run_all(todo, out, args.workers, args.timeout):
             f.write(json.dumps(rec, default=str) + "\n")

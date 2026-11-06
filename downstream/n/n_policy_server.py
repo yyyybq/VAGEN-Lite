@@ -5,8 +5,9 @@
     python downstream/n/n_policy_server.py --model B --port 5800 --adapter RUN/adapters/100/adapter.pt   (N2)
 
 A request is length-prefixed JSON {"messages": chat-template messages (image parts without data), "images": PNG
-base64 in order, "max_new_tokens": N}; the answer {"reply": text}: the model's chat template with the generation
-prompt, greedy decoding.  Models and processors as q0_ask.py (read by path).  One request at a time.
+base64 in order, "max_new_tokens": N}; the answer {"reply": text, "prompt_tokens": the prompt's length}: the model's
+chat template with the generation prompt, greedy decoding.  With n_episode.py --history a request carries every earlier
+turn of the episode and all of its images.  Models and processors as q0_ask.py (read by path).  One request at a time.
 --adapter (N2, the user's decision 1 of 2026-11-03): a LoRA adapter of n2_train.py added to the model's weights in
 memory after loading (n2_train.merge_adapter; nothing written).
 The matrix v3 starts of nm_starts.json (nm_starts.py, 2026-11-03) are models too, by their names there.
@@ -31,16 +32,18 @@ import q0_ask  # noqa: E402
 nm_starts.register(q0_ask)
 
 
-def answer(processor, model, req: dict) -> str:
+def answer(processor, model, req: dict) -> tuple:
+    """(the reply, the prompt's length in tokens)."""
     import torch
     from PIL import Image
 
     images = [Image.open(io.BytesIO(base64.b64decode(b))).convert("RGB") for b in req["images"]]
     text = processor.apply_chat_template(req["messages"], tokenize=False, add_generation_prompt=True)
     inputs = processor(text=[text], images=images or None, return_tensors="pt").to(model.device)
+    n_prompt = int(inputs["input_ids"].shape[1])
     with torch.no_grad():
         out = model.generate(**inputs, max_new_tokens=int(req.get("max_new_tokens", 384)), do_sample=False)
-    return processor.batch_decode(out[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
+    return processor.batch_decode(out[:, n_prompt:], skip_special_tokens=True)[0], n_prompt
 
 
 def main(argv=None) -> int:
@@ -66,7 +69,8 @@ def main(argv=None) -> int:
         with conn:
             try:
                 req = E.recv_msg(conn)
-                E.send_msg(conn, {"reply": answer(processor, model, req)})
+                reply, n_prompt = answer(processor, model, req)
+                E.send_msg(conn, {"reply": reply, "prompt_tokens": n_prompt})
                 n += 1
                 if n % 20 == 0:
                     print(f"[n_policy] {n} answers", flush=True)

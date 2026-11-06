@@ -245,3 +245,86 @@ def test_qwen3_models_get_their_chains_prompt():
     assert first_25.replace("action1|action2|...|", "move_forward|turn_left|") == first_q3  # nothing else differs
     s25, sq3 = E.system_text(cfg, "fov_inclusion"), E.system_text(q3, "fov_inclusion")
     assert "move_forward|turn_left|" in sq3 and "move_forward|turn_left|" not in s25
+
+
+def test_history_messages_follow_the_main_lines_layout():
+    msgs = E.chat_history("SYS", [("A\n<image>\nx", "<action>move_left|</action>"), ("B\n<image>\ny", "nonsense")],
+                          "C\n<image>\nz")
+    assert [m["role"] for m in msgs] == ["system", "user", "assistant", "user", "assistant", "user"]
+    assert msgs[2] == {"role": "assistant", "content": "<action>move_left|</action>"} and msgs[4]["content"] == "nonsense"
+    assert msgs[1]["content"][1] == {"type": "image"} and msgs[5]["content"][0]["text"] == "C\n"
+    assert E.chat_history("SYS", [], "C\n<image>\nz") == E.chat("SYS", "C\n<image>\nz")
+
+
+def test_history_episode_sends_every_earlier_turn_and_frame(monkeypatch):
+    sent = []
+    monkeypatch.setattr(E, "system_text", lambda cfg, t: "SYS")
+    monkeypatch.setattr(E, "user_text", lambda cfg, first, pose, task, fb="": f"{first}|{fb}\n<image>")
+    monkeypatch.setattr(E, "allowed_actions", lambda cfg: set(N.ACTIONS))
+    monkeypatch.setattr(N, "box_judge", lambda item, pose: {"success": False, "metric": {"shaping_score": 0.1},
+                                                            "lateral": {}})
+    monkeypatch.setattr(N, "measurements", lambda item, j: {})
+    monkeypatch.setattr(E, "parse", lambda text, cfg, allowed: (([text], "") if text in N.ACTIONS else ([], "bad")))
+
+    def ask(msgs, images, n):
+        sent.append((msgs, len(images)))
+        ask.prompt_tokens = 100 * len(sent)
+        return ["move_left", "nonsense", "nonsense", "nonsense"][len(sent) - 1]
+    rec, frames = E.run_episode(FakeScene(), INST, ask, FakeCfg(), {"max_turns": 12, "response_length_per_turn": 384},
+                                history=True)
+    assert rec["end"] == "invalid" and rec["turns"] == 4 and len(frames) == 4
+    assert [len(m) for m, _ in sent] == [2, 4, 6, 8] and [k for _, k in sent] == [1, 2, 3, 4]
+    last = sent[-1][0]
+    assert [m["content"] for m in last if m["role"] == "assistant"] == ["move_left", "nonsense", "nonsense"]
+    assert last[-1]["content"][0]["text"] == "False|Action had no effect.\n"  # the feedback of the turn before
+    assert [t["prompt_tokens"] for t in rec["turn_log"]] == [100, 200, 300, 400]
+    sent.clear()
+    E.run_episode(FakeScene(), INST, ask, FakeCfg(), {"max_turns": 12, "response_length_per_turn": 384})
+    assert [len(m) for m, _ in sent] == [2, 2, 2, 2] and [k for _, k in sent] == [1, 1, 1, 1]
+
+
+def test_the_client_keeps_the_servers_prompt_length():
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def serve():
+        conn, _ = srv.accept()
+        with conn:
+            req = E.recv_msg(conn)
+            E.send_msg(conn, {"reply": f"{len(req['images'])} images", "prompt_tokens": 77})
+    t = threading.Thread(target=serve)
+    t.start()
+    import numpy as np
+    ask = E.asker(srv.getsockname()[1])
+    assert ask.prompt_tokens is None
+    assert ask(E.chat("S", "<image>"), [np.zeros((4, 4, 3), "uint8")] * 2, 8) == "2 images"
+    assert ask.prompt_tokens == 77
+    t.join()
+    srv.close()
+
+
+def test_token_counter_rebuilds_the_turns_and_counts_both_ways(monkeypatch):
+    import n_tokens as T
+    monkeypatch.setattr(E, "user_text", lambda cfg, first, pose, task, fb="": f"{first}|{fb}|{pose[0]}\n<image>")
+    row = {"turn_log": [
+        {"pose_before": [0, 0, 0], "reply": "<action>move_left|</action>", "actions": ["move_left"], "feedback": "Action executed."},
+        {"pose_before": [1, 0, 0], "reply": "??", "actions": []},
+        {"pose_before": [1, 0, 0], "reply": "<action>turn_left|</action>", "actions": ["turn_left"],
+         "feedback": "1 of 1 actions executed; blocked: turn_left (blocked by wall)."}]}
+    texts = T.turn_texts({"item": {"task_description": "TASK"}}, row, cfg=None)
+    assert [u for u, _ in texts] == ["True||0\n<image>", "False|Action executed.|1\n<image>",
+                                     "False|Action had no effect.|1\n<image>"]
+
+    class Proc:
+        def apply_chat_template(self, msgs, tokenize, add_generation_prompt):
+            return "".join(p.get("text", "I") if isinstance(p, dict) else "" for m in msgs
+                           for p in (m["content"] if isinstance(m["content"], list) else [{"text": m["content"]}]))
+
+        def __call__(self, text, images, return_tensors):
+            import numpy as np
+            return {"input_ids": np.zeros((1, len(text[0]) + 10 * len(images)))}
+    sizes = [(T.count(Proc(), plain, 1), T.count(Proc(), hist, n)) for plain, hist, n in T.prompts("S", texts)]
+    assert sizes[0][0] == sizes[0][1] and all(w > p for p, w in sizes[1:])
+    summ = T.summarize({1: {"without": [5, 7], "with": [5, 7]}, 2: {"without": [6], "with": [20]}})
+    assert summ["calls"] == 3 and summ["with_max"] == 20 and summ["per_turn"]["2"]["with_mean"] == 20
