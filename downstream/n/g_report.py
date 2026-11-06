@@ -214,7 +214,7 @@ def pair_zh(k: str) -> str:
 def markdown(rep: dict) -> str:
     ex = rep.get("excluded_present") or []
     L = ["# (g) 档：带对话历史 对 不带（自动生成）", "",
-         f"- 因出错，从全部模型的带、不带两边一起去掉的实例 {len(rep['left_out_for_errors'])} 个："
+         f"- 因出错，从全部模型的带历史、不带两边一起去掉的实例 {len(rep['left_out_for_errors'])} 个："
          + ("、".join(rep["left_out_for_errors"]) or "无") + "。",
          f"- 按剔除清单从两边一起去掉的实例 {len(ex)} 个：" + ("、".join(ex) or "无") + "。",
          f"- 可疑场景的实例 {len(rep['flagged'])} 个：每个模型的表和配对表都另给去掉它们的版本。", ""]
