@@ -82,25 +82,39 @@ reaching into 0.1-1.0 m (env setting `turn_footprint_radius`, default None = tod
 `CollisionDetector.check_turn_footprint`, the arithmetic of the offline replay `turnblock_exposure.py`). A blocked
 turn takes its step, leaves the camera as it was, costs -0.15 and gets the blocked feedback, like a blocked
 translation; translations keep their rule; tasks, system prompt and d (old rule) are unchanged. With the switch on
-the env adds one turn metric, `turn_footprint_blocks`.
+the env adds one turn metric, `turn_footprint_blocks`. The evaluation records it in every turn of its rows as
+`footprint_blocks` (results.jsonl trajectories; rows under today's rule unchanged) and move_metrics checks the
+replay against it; the training logs do not carry it (the concat agent loop forwards no env turn metric), so in
+training the check is to grep the rollout text (`RUN/rollout_data`) for `turn_left (blocked by` /
+`turn_right (blocked by` (the feedback of an episode's last turn is never shown, so this undercounts). The switch
+needs the scenes: the env refuses it without `gs_root`, and `reset()` raises when the row's scene is not loaded (in
+training an exception at reset ends the trainer, which the chain resubmits; one at step would end the episode on a
+reward-0 "Environment Error" turn without stopping anything).
 
 ```bash
 # RL: the pair's standards (v10_p1_S0 / v10_p1_Dcond plus turn_footprint_radius 0.25; V4 = the dense run's plan rl
-# keys as before), or the option itself; train_chain is unchanged
+# keys as before), or the option itself (a positive finite radius; 0, NaN, inf refused, with a standard too);
+# train_chain is unchanged and forwards only its own list of plan rl keys: a plan-level rl.turn_footprint_radius is
+# silently ignored, so the 3A plan must name the standard (plan rl "standard": v10_p1_S0_fp / v10_p1_Dcond_fp), and
+# TR/rl_*/train_env.yaml must show turn_footprint_radius: 0.25 before the first update
 python -m data_gen.interiorgs_v10.training_prep rl-config --standard v10_p1_S0_fp ...
 python -m data_gen.interiorgs_v10.training_prep rl-config ... --turn-footprint-radius 0.25
-# evaluation under the rule (recorded in model.json env_switches; keep one rule per result folder)
+# evaluation under the rule (model.json env_switches): one rule per result folder (a run resuming a folder with
+# results under another rule stops) and per set (table refuses a set of mixed rules)
 python -m data_gen.interiorgs_v10.evaluation run --eval EVAL --name NAME --model MODEL --turn-footprint-radius 0.25
 # turn share, turn-blocked and translation-blocked shares: replay without rendering, each result under its own rule
+# (replay_same also compares footprint_blocks; turns whose blocked actions cannot be read are left out of the
+# blocked shares and reported apart, unknown_turn_*)
 python -m data_gen.interiorgs_v10.move_metrics --result DIR [--result DIR ...] --out FILE.json --workers 4
 # d where failed episodes end (old-rule distance tables): unchanged, it replays with model.json env_switches but drops
 # keys the checkout's env lacks, so run it from a checkout with the switch and require replay_same == failed
 python -m reward.fail_end_steps --result DIR --tables TABLES --out FILE.json --workers 4
 ```
 
-Tests: `tests/test_turn_footprint.py` (the switch-off golden trace recorded at 26338088,
-`tests/golden/env_trace_26338088.json`; the detector rule against the replay; the env switch) and
-`tests/test_move_metrics.py`.
+Tests: `tests/test_turn_footprint.py` (the switch-off golden recorded at 26338088,
+`tests/golden/env_trace_26338088.json`: the whole of every reset and step, checked against its generated_at; the
+detector rule against the replay; the env switch, its refusals and its interplay with collisions, rewards and scenes),
+`tests/test_move_metrics.py`, and the 3A parts of `tests/test_evaluation.py` and `tests/test_training_prep.py`.
 
 ## Status
 
