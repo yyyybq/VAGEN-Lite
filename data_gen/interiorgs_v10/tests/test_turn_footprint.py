@@ -290,5 +290,198 @@ class SwitchOffGoldenTest(unittest.TestCase):
         self.assertIn(("west_wall", "move_forward"), blocked)
 
 
+# ---------------------------------------------------------------------------
+# commit C2: CollisionDetector.check_turn_footprint
+# ---------------------------------------------------------------------------
+def footprint_room(root, name="fp_room", boxes=None):
+    """A 6 m x 4 m room (structure.json walls 0.2 m thick, a 1 m door in the east wall at y 1.5-2.5) with boxes for
+    the footprint rule's cases; labels.json order matters for ties."""
+    from data_gen.interiorgs_v10.testing.synthetic_scene import _box, _write
+
+    if boxes is None:
+        boxes = [("cabinet", 1.0, 1.0, 0.0, 1.6, 1.5, 0.8),           # low: blocks
+                 ("range hood", 3.0, 3.0, 2.2, 3.6, 3.5, 2.6),        # above the band
+                 ("shelf", 4.0, 0.6, 1.0, 4.4, 1.0, 1.8),             # min_z exactly 1.0: out of the band
+                 ("tray", 4.0, 2.0, 0.0, 4.4, 2.4, 0.1),              # max_z exactly 0.1: out of the band
+                 ("tv", 2.4, 0.6, 0.95, 3.0, 0.9, 1.5),               # reaches 0.05 m into the band: in
+                 ("rug", 4.6, 2.9, 0.0, 5.2, 3.4, 0.3),               # in the band, but an ignored label
+                 ("bathroom cabinet", 0.6, 3.0, 0.0, 1.1, 3.5, 0.9),  # ignored by substring ('room'): kept as is
+                 ("side table", 2.0, 2.0, 0.0, 2.2, 2.2, 0.5),
+                 ("stool", 2.5, 2.0, 0.0, 2.7, 2.2, 0.45),
+                 ("radiator", 0.0, 2.6, 0.2, 0.3, 3.0, 0.8)]          # set into the west wall's slab
+    labels = [_box("1", "floor", 0.0, 0.0, -0.02, 6.0, 4.0, 0.0)]
+    labels += [_box(str(i + 2), label, *xyz) for i, (label, *xyz) in enumerate(boxes)]
+    walls = [((0, 0), (6, 0), 0.2), ((6, 0), (6, 4), 0.2), ((6, 4), (0, 4), 0.2), ((0, 4), (0, 0), 0.2)]
+    holes = [[(5.95, 1.5), (6.05, 1.5), (6.05, 2.5), (5.95, 2.5)]]
+    return _write(Path(root) / name, labels, [("living room", [(0, 0), (6, 0), (6, 4), (0, 4)])], holes, y_sign=1.0,
+                  truth={}, walls=walls)
+
+
+def env_detector():
+    """A detector as the RL env makes it (env.py: camera radius 0.15, floor 0.3, ceiling 2.5, margin 0.05, thick)."""
+    from vagen.envs.active_spatial.collision_detector import create_collision_detector
+
+    return create_collision_detector({"camera_radius": 0.15, "floor_height": 0.3, "ceiling_height": 2.5,
+                                      "safety_margin": 0.05, "enable_object_collision": True,
+                                      "enable_boundary_collision": True, "wall_model": "thick"})
+
+
+class ReplayGeo:
+    """An inline copy of the offline replay's rule (instr_20261106 turnblock_3a/turnblock_exposure.py, Geo lines
+    35-64: the band's object rectangles and the wall segments of a loaded detector, and its clearance)."""
+
+    def __init__(self, det, zlo=0.10, zhi=1.00):
+        from vagen.envs.active_spatial.collision_detector import CollisionDetector
+
+        lo, hi = [], []
+        for ins, label, mn, mx in det.label_boxes:
+            if any(ig in label for ig in CollisionDetector.IGNORED_LABELS):
+                continue
+            if mn[2] >= zhi or mx[2] <= zlo:
+                continue
+            lo.append(mn[:2])
+            hi.append(mx[:2])
+        self.lo = np.array(lo, float).reshape(-1, 2)
+        self.hi = np.array(hi, float).reshape(-1, 2)
+        segs = det.wall_segments
+        self.a = np.array([s[0] for s in segs], float).reshape(-1, 2)
+        self.b = np.array([s[1] for s in segs], float).reshape(-1, 2)
+
+    def clearance(self, p):
+        do, dw = math.inf, math.inf
+        if len(self.lo):
+            dx = np.maximum(np.maximum(self.lo[:, 0] - p[0], 0.0), p[0] - self.hi[:, 0])
+            dy = np.maximum(np.maximum(self.lo[:, 1] - p[1], 0.0), p[1] - self.hi[:, 1])
+            do = float(np.sqrt(dx * dx + dy * dy).min())
+        if len(self.a):
+            v = self.b - self.a
+            w = p[None, :] - self.a
+            t = np.clip((w * v).sum(1) / np.maximum((v * v).sum(1), 1e-12), 0.0, 1.0)
+            proj = self.a + t[:, None] * v
+            dw = float(np.sqrt(((p[None, :] - proj) ** 2).sum(1)).min())
+        return do, dw
+
+
+class FootprintGeometryTest(unittest.TestCase):
+    """CollisionDetector.check_turn_footprint on a small scene (no env)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._tmp.name)
+        cls.scene = footprint_room(cls.root)
+        cls.det = env_detector()
+        assert cls.det.load_scene(cls.scene, scene_id=cls.scene.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def check(self, x, y, z=1.5, radius=0.25, **kw):
+        return self.det.check_turn_footprint(np.array([x, y, z]), radius, **kw)
+
+    def assert_blocked(self, res, kind, name):
+        self.assertTrue(res.has_collision)
+        self.assertEqual((res.collision_type, res.collision_object), (kind, name))
+
+    def test_the_band_and_the_label_rule(self):
+        from vagen.envs.active_spatial.collision_detector import TURN_FOOTPRINT_Z_BAND_M
+
+        self.assertEqual(TURN_FOOTPRINT_Z_BAND_M, (0.10, 1.00))
+        inside = self.check(1.3, 1.25)  # inside the cabinet's rectangle, the camera 0.7 m above its top
+        self.assert_blocked(inside, "object", "cabinet")
+        self.assertEqual((inside.distance_to_collision, inside.details["inside_object"]), (0.0, True))
+        self.assertEqual(inside.details["object_id"], "2")
+        self.assertFalse(self.det.check_collision(np.array([1.3, 1.25, 1.5])).has_collision)  # legal today
+        # 1 mm either side of 0.25 m from the cabinet's +x face (never exactly 0.25: 0.35 - 0.1 < 0.25 in float64)
+        self.assert_blocked(self.check(1.6 + 0.249, 1.25), "object", "cabinet")
+        clear = self.check(1.6 + 0.251, 1.25)
+        self.assertFalse(clear.has_collision)
+        self.assertEqual(clear.collision_type, "none")
+        self.assertAlmostEqual(clear.distance_to_collision, 0.251, places=9)
+        self.assertFalse(self.check(3.3, 3.25).has_collision)   # under the range hood
+        self.assertFalse(self.check(4.2, 0.8).has_collision)    # min_z exactly 1.0: out
+        self.assertFalse(self.check(4.2, 2.2).has_collision)    # max_z exactly 0.1: out
+        self.assert_blocked(self.check(2.7, 0.75), "object", "tv")  # 0.95-1.5 m overlaps the band
+        self.assertFalse(self.check(4.9, 3.15).has_collision)   # a rug, though 0.3 m high
+        self.assertFalse(self.check(0.85, 3.25).has_collision)  # 'bathroom cabinet' contains 'room' (kept quirk)
+        # another band (the parameter, cached apart): the hood and the shelf count
+        self.assert_blocked(self.check(3.3, 3.25, z_band=(0.10, 2.50)), "object", "range hood")
+        self.assert_blocked(self.check(4.2, 0.8, z_band=(0.10, 2.50)), "object", "shelf")
+        self.assertFalse(self.check(3.3, 3.25).has_collision)
+
+    def test_walls_doors_and_names(self):
+        wall = self.check(0.3, 1.5)  # 0.2 m from the west slab's inner face (x = 0.1)
+        self.assert_blocked(wall, "wall", "wall")
+        self.assertAlmostEqual(wall.distance_to_collision, 0.2, places=12)
+        self.assertEqual(sorted(wall.details), ["clearance", "inside_object", "object_clearance", "radius", "rule",
+                                                "wall_clearance", "wall_end", "wall_start", "z_band"])
+        self.assertEqual({tuple(wall.details["wall_start"]), tuple(wall.details["wall_end"])}, {(0.1, 0.0), (0.1, 4.0)})
+        self.assertFalse(self.det.check_collision(np.array([0.3, 1.5, 1.5])).has_collision)  # 0.2 >= 0.15: legal
+        self.assertFalse(self.check(6.0, 2.0).has_collision)  # the doorway's centre: 0.5 m from both jambs
+        self.assertTrue(self.check(6.0, 1.7).has_collision)   # 0.2 m from a jamb
+        # two objects within r: the nearer names the block
+        self.assert_blocked(self.check(2.3, 2.1), "object", "side table")
+        self.assert_blocked(self.check(2.45, 2.1), "object", "stool")
+        # an object and a wall at the same distance (0: on the slab's face, inside the radiator's box): the object
+        tie = self.check(0.1, 2.75)
+        self.assertEqual((tie.details["object_clearance"], tie.details["wall_clearance"]), (0.0, 0.0))
+        self.assert_blocked(tie, "object", "radiator")
+        # the verdict reads the ground point only
+        for z in (0.0, 1.5, 9.0):
+            self.assertEqual((self.check(1.3, 1.25, z=z).collision_object, self.check(0.3, 1.5, z=z).collision_type,
+                              self.check(3.0, 1.9, z=z).has_collision), ("cabinet", "wall", False))
+        self.assertTrue(self.check(3.0, 1.9, radius=0.35).has_collision)  # the radius is the setting's
+
+    def test_same_numbers_as_the_offline_replay(self):
+        geo = ReplayGeo(self.det)
+        rng = np.random.default_rng(20261106)
+        pts = np.column_stack([rng.uniform(-0.3, 6.3, 2000), rng.uniform(-0.3, 4.3, 2000)])
+        blocked = 0
+        for p in pts:
+            do, dw = geo.clearance(p)
+            res = self.det.check_turn_footprint(np.array([p[0], p[1], 1.5]), 0.25)
+            self.assertEqual((res.details["object_clearance"], res.details["wall_clearance"]), (do, dw))
+            self.assertEqual(res.has_collision, min(do, dw) < 0.25)
+            blocked += res.has_collision
+        self.assertTrue(200 < blocked < 1800, blocked)  # both verdicts well represented
+
+    def test_no_side_effects_and_errors(self):
+        probes = [(1.3, 1.25), (0.3, 1.5), (0.2, 1.5), (3.0, 1.9), (5.8, 2.0), (2.7, 0.75)]
+
+        def snapshot():
+            return ([id(self.det.object_boxes), id(self.det.label_boxes), id(self.det.wall_segments)],
+                    [(b.label, b.min_point.tolist(), b.max_point.tolist()) for b in self.det.object_boxes],
+                    [(i, l, mn.tolist(), mx.tolist()) for i, l, mn, mx in self.det.label_boxes],
+                    [(a.tolist(), b.tolist()) for a, b in self.det.wall_segments],
+                    [(r.has_collision, r.collision_type, r.collision_object, r.distance_to_collision)
+                     for r in (self.det.check_collision(np.array([x, y, 1.5]), previous_position=np.array([x - 0.3, y, 1.5]))
+                               for x, y in probes)])
+
+        before = snapshot()
+        for x, y in probes * 3:
+            self.check(x, y)
+        self.assertEqual(snapshot(), before)
+        for bad in (0, 0.0, -0.25, float("nan")):
+            with self.assertRaises(ValueError):
+                self.check(1.3, 1.25, radius=bad)
+        from vagen.envs.active_spatial.collision_detector import CollisionDetector
+
+        with self.assertRaises(RuntimeError):
+            CollisionDetector(wall_model="thick").check_turn_footprint(np.array([1.3, 1.25, 1.5]), 0.25)
+
+    def test_a_reload_rebuilds_the_obstacles(self):
+        det = env_detector()
+        self.assertTrue(det.load_scene(self.scene, scene_id=self.scene.name))
+        self.assertTrue(det.check_turn_footprint(np.array([1.3, 1.25, 1.5]), 0.25).has_collision)
+        other = footprint_room(self.root, "fp_room_b", boxes=[("sofa", 3.0, 1.0, 0.0, 4.0, 2.0, 0.9)])
+        self.assertTrue(det.load_scene(other, scene_id=other.name))
+        self.assertFalse(det.check_turn_footprint(np.array([1.3, 1.25, 1.5]), 0.25).has_collision)  # cabinet gone
+        res = det.check_turn_footprint(np.array([3.5, 1.5, 1.5]), 0.25)
+        self.assertEqual((res.has_collision, res.collision_object), (True, "sofa"))
+        self.assertTrue(det.load_scene(self.scene, scene_id=self.scene.name))  # and back
+        self.assertEqual(det.check_turn_footprint(np.array([1.3, 1.25, 1.5]), 0.25).collision_object, "cabinet")
+
+
 if __name__ == "__main__":
     unittest.main()

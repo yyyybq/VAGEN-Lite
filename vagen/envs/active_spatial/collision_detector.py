@@ -44,6 +44,12 @@ _HOLE_ON_WALL_SLACK_M = 0.05
 # must pass the opening on both faces (the jambs beside a door block the view).
 WALL_MODELS = ("room_edges", "thick")
 _PASSAGE_MAX_SILL_M = 0.3  # a HOLE / OPENING whose bottom is this close to the floor is a doorway without a leaf
+# Experiment 3A (the user's decision 甲 of 2026-11-06, turn-mismatch RL): an in-place turn is blocked when the robot
+# base -- a disc of radius r around the camera's ground point -- meets a wall segment or the xy rectangle of an object
+# box (labels.json, IGNORED_LABELS left out, not inflated) reaching into this band: kept iff min_z < 1.0 and
+# max_z > 0.1.  Same obstacles and arithmetic as the offline replay turnblock_exposure.py
+# (CollisionDetector.check_turn_footprint).
+TURN_FOOTPRINT_Z_BAND_M = (0.10, 1.00)
 
 
 def _wall_openings(structure: Dict[str, Any], y_sign: float, thick: bool
@@ -347,7 +353,8 @@ class CollisionDetector:
         self._label_xy_centers: List[np.ndarray] = []
         self.scene_loaded = False
         self._current_scene_id: Optional[str] = None  # Track loaded scene to avoid reloading
-    
+        self._turn_footprint_cache = None  # (sources, arrays) of check_turn_footprint, rebuilt after a scene load
+
     def load_scene(self, scene_path: Path, scene_id: Optional[str] = None) -> bool:
         """
         Load scene collision data from labels.json AND structure.json.
@@ -854,7 +861,78 @@ class CollisionDetector:
             collision_type="none",
             distance_to_collision=float('inf')
         )
-    
+
+    def _turn_footprint_arrays(self, z_low: float, z_high: float):
+        """The obstacles of check_turn_footprint: (lo, hi, names) of the band's object rectangles and (a, b, v, vv) of
+        the wall segments, built once per scene and band.  Cached against the source lists themselves (every scene
+        load assigns new label_boxes / wall_segments lists; the cache holds them, so their ids cannot be reused)."""
+        src = (self.label_boxes, self.wall_segments, len(self.label_boxes), len(self.wall_segments),
+               float(z_low), float(z_high))
+        cached = self._turn_footprint_cache
+        if cached is not None and cached[0][0] is src[0] and cached[0][1] is src[1] and cached[0][2:] == src[2:]:
+            return cached[1]
+        lo, hi, names = [], [], []
+        for ins_id, label, mn, mx in self.label_boxes:
+            if any(ignored in label for ignored in self.IGNORED_LABELS):  # the substring rule of load_scene
+                continue
+            if mn[2] >= z_high or mx[2] <= z_low:
+                continue
+            lo.append(mn[:2])
+            hi.append(mx[:2])
+            names.append((ins_id, label))
+        a = np.array([s[0] for s in self.wall_segments], float).reshape(-1, 2)
+        b = np.array([s[1] for s in self.wall_segments], float).reshape(-1, 2)
+        v = b - a
+        arrays = (np.array(lo, float).reshape(-1, 2), np.array(hi, float).reshape(-1, 2), names,
+                  a, b, v, np.maximum((v * v).sum(1), 1e-12))
+        self._turn_footprint_cache = (src, arrays)
+        return arrays
+
+    def check_turn_footprint(self, position: np.ndarray, radius: float,
+                             z_band: Tuple[float, float] = TURN_FOOTPRINT_Z_BAND_M) -> CollisionResult:
+        """Experiment 3A (env turn_footprint_radius): whether the robot base -- a disc of ``radius`` around
+        ``position``'s ground point (x, y; z and the orientation play no part) -- meets an obstacle, so an in-place
+        turn there is blocked.  Obstacles: the xy rectangles of the labels.json boxes (IGNORED_LABELS left out by
+        substring, not inflated) reaching into ``z_band`` (min_z < high and max_z > low), and the wall segments
+        (under the thick wall model the slab outlines).  Blocked iff the clearance (0 inside a rectangle) is below
+        ``radius``; the arithmetic is the offline replay's (turnblock_exposure.py Geo.clearance).  A block names the
+        nearest obstacle: an object (the first in labels.json order; an object wins a tie with a wall), else the
+        wall segment.  Nothing in the detector changes."""
+        if not self.scene_loaded:
+            raise RuntimeError("check_turn_footprint needs a loaded scene")
+        if not float(radius) > 0:
+            raise ValueError(f"radius must be positive, not {radius!r}")
+        p = np.asarray(position, dtype=np.float64)[:2]
+        lo, hi, names, a, b, v, vv = self._turn_footprint_arrays(*z_band)
+        do = dw = float("inf")
+        i_obj = i_wall = None
+        if len(lo):
+            dx = np.maximum(np.maximum(lo[:, 0] - p[0], 0.0), p[0] - hi[:, 0])
+            dy = np.maximum(np.maximum(lo[:, 1] - p[1], 0.0), p[1] - hi[:, 1])
+            d = np.sqrt(dx * dx + dy * dy)
+            i_obj = int(np.argmin(d))
+            do = float(d[i_obj])
+        if len(a):
+            w = p[None, :] - a
+            t = np.clip((w * v).sum(1) / vv, 0.0, 1.0)
+            d = np.sqrt(((p[None, :] - (a + t[:, None] * v)) ** 2).sum(1))
+            i_wall = int(np.argmin(d))
+            dw = float(d[i_wall])
+        clearance = min(do, dw)
+        details = {"rule": "turn_footprint", "radius": float(radius), "z_band": [float(z_band[0]), float(z_band[1])],
+                   "clearance": clearance, "object_clearance": do, "wall_clearance": dw, "inside_object": do <= 1e-9}
+        if not clearance < radius:
+            return CollisionResult(has_collision=False, collision_type="none", distance_to_collision=clearance,
+                                   details=details)
+        if do <= dw:
+            ins_id, label = names[i_obj]
+            details.update(object_id=ins_id, object_label=label)
+            return CollisionResult(has_collision=True, collision_type="object", collision_object=label,
+                                   distance_to_collision=do, details=details)
+        details.update(wall_start=a[i_wall].tolist(), wall_end=b[i_wall].tolist())
+        return CollisionResult(has_collision=True, collision_type="wall", collision_object="wall",
+                               distance_to_collision=dw, details=details)
+
     def get_collision_penalty(self, collision_result: CollisionResult) -> float:
         """
         Calculate collision penalty based on collision type.
