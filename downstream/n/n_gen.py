@@ -124,13 +124,15 @@ def numbers(item: dict, j: dict) -> dict:
             "shaping_score": m.get("shaping_score", m.get("score"))}
 
 
-def find(scene, states: dict, order: list, task_type: str, rng: random.Random, deadline: float, log=print):
-    """The scene's instance of one task type, or None; and the tally of candidates by outcome."""
+def find(scene, states: dict, order: list, task_type: str, rng: random.Random, deadline: float, log=print,
+         cands=None):
+    """The scene's instance of one task type, or None; and the tally of candidates by outcome.  cands (D3's variants,
+    d3_gen.py): the candidates [(entities in role order, params)] to try in that order instead of candidates()."""
     sid = f"{scene.task}_s{scene.seed}"
     tally = collections.Counter()
     tried = 0
     limit = MAX_CANDIDATES.get(task_type, DEFAULT_CANDIDATES)
-    for ents, params in candidates(task_type, scene.entities, rng):
+    for ents, params in (cands if cands is not None else candidates(task_type, scene.entities, rng)):
         if tried >= limit or time.time() > deadline:
             tally["stopped_" + ("limit" if tried >= limit else "time")] += 1
             break
