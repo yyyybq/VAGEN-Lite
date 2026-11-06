@@ -1,0 +1,49 @@
+{
+ "rules": "A swap keeps the scene, the start pose (init_camera) and the family, exchanges A and B in target_object, in the\ntarget region's parameters (projective: object_a/b_center; occlusion: object_a/b_id and _center, occluded /\noccluder) and in the text (the generator's own templates: sampling.projective_description,\nfamilies.occlusion_alignment.describe; the refs are each object's own), and recomputes the success region's\nfirst-success depth d* with the generator's exact BFS (difficulty.certify_d_star, d_max 8, as the v10 generator;\nthe certificate gives turns_audit_only).  Dropped: no success within 8 actions (the region is empty within reach),\nthe search cap hit, success already at the start (d* = 0), and for occlusion a new pair the family's rule rejects\n(new target lower than MIN_TARGET_HEIGHT_M, new occluder lower than MIN_OCCLUDER_HEIGHT_M or see-through; the\nother pair rules are symmetric).  Checks: each original's d* recomputed equals its file's, and the original's\ncertificate end pose fails the swapped task (the two regions are exclusive).",
+ "seed": 20261106,
+ "d_max": 8,
+ "splits": {
+  "val": {
+   "families": {
+    "projective_relations": 3
+   },
+   "candidates": 107,
+   "kept": 3,
+   "dropped": {
+    "unreachable_within_8": 81,
+    "new_occluder_too_low": 8,
+    "new_occluder_see_through": 15
+   },
+   "checks": {
+    "original_d_star_same": 3,
+    "original_end_fails_swap": 3
+   },
+   "target_counts": null,
+   "seconds": {
+    "total": 410.9,
+    "max": 42.8
+   }
+  },
+  "test": {
+   "families": {
+    "projective_relations": 3
+   },
+   "candidates": 81,
+   "kept": 3,
+   "dropped": {
+    "new_occluder_see_through": 18,
+    "new_occluder_too_low": 7,
+    "unreachable_within_8": 53
+   },
+   "checks": {
+    "original_d_star_same": 3,
+    "original_end_fails_swap": 3
+   },
+   "target_counts": null,
+   "seconds": {
+    "total": 172.1,
+    "max": 35.07
+   }
+  }
+ }
+}

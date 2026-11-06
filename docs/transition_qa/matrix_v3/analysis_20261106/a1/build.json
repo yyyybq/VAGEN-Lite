@@ -1,0 +1,38 @@
+{
+ "tables": "/mnt/umm/users/yinbaiqiao/reward_runs/tables/eval_test_v2_screened",
+ "tasks": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/eval_test_v2_screened/tasks.jsonl",
+ "models": {
+  "m3ds1s0_300": {
+   "result": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/eval_test_v2_screened/m3ds1s0_300",
+   "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1s0/checkpoints/global_step_300/actor/huggingface",
+   "probe": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/analysis_20261106/a1/questions/m3ds1s0_300.jsonl",
+   "questions": 2540,
+   "episodes": 141,
+   "replay_same": 141,
+   "mixed_turns": 0,
+   "turns": 1270,
+   "goal_now:no": 1270,
+   "goal_after:no": 1270,
+   "d_known": 1270,
+   "d_down": 383,
+   "d_up": 487,
+   "d_same": 400
+  },
+  "m3ds1d_300": {
+   "result": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/eval_test_v2_screened/m3ds1d_300",
+   "model": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_d_s20261019/rl_run_m3ds1d/checkpoints/global_step_300/actor/huggingface",
+   "probe": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/analysis_20261106/a1/questions/m3ds1d_300.jsonl",
+   "questions": 2694,
+   "episodes": 145,
+   "replay_same": 145,
+   "mixed_turns": 0,
+   "turns": 1347,
+   "goal_now:no": 1347,
+   "goal_after:no": 1347,
+   "d_known": 1347,
+   "d_same": 438,
+   "d_up": 447,
+   "d_down": 462
+  }
+ }
+}

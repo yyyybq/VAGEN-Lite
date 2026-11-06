@@ -1,0 +1,290 @@
+{
+ "models": {
+  "m3ds1s0_300": {
+   "all": {
+    "turns": 1270,
+    "goal_now_acc": 0.6929133858267716,
+    "goal_after_acc": 0.5708661417322834,
+    "d_known": 1270,
+    "d_up": 487,
+    "d_same": 400,
+    "d_down": 383,
+    "both_right": 576,
+    "both_right_d_up": 228,
+    "share_knows_not_acts": 0.1795275590551181,
+    "of_d_up_both_right": 0.4681724845995893,
+    "of_both_right_d_up": 0.3958333333333333
+   },
+   "by_family": {
+    "projective_relations": {
+     "turns": 272,
+     "goal_now_acc": 0.6544117647058824,
+     "goal_after_acc": 0.6213235294117647,
+     "d_known": 272,
+     "d_up": 91,
+     "d_same": 100,
+     "d_down": 81,
+     "both_right": 131,
+     "both_right_d_up": 43,
+     "share_knows_not_acts": 0.15808823529411764,
+     "of_d_up_both_right": 0.4725274725274725,
+     "of_both_right_d_up": 0.3282442748091603
+    },
+    "absolute_positioning": {
+     "turns": 116,
+     "goal_now_acc": 0.6293103448275862,
+     "goal_after_acc": 0.43103448275862066,
+     "d_known": 116,
+     "d_up": 38,
+     "d_same": 39,
+     "d_down": 39,
+     "both_right": 36,
+     "both_right_d_up": 13,
+     "share_knows_not_acts": 0.11206896551724138,
+     "of_d_up_both_right": 0.34210526315789475,
+     "of_both_right_d_up": 0.3611111111111111
+    },
+    "screen_occupancy": {
+     "turns": 163,
+     "goal_now_acc": 0.6257668711656442,
+     "goal_after_acc": 0.5214723926380368,
+     "d_known": 163,
+     "d_up": 52,
+     "d_same": 56,
+     "d_down": 55,
+     "both_right": 57,
+     "both_right_d_up": 18,
+     "share_knows_not_acts": 0.11042944785276074,
+     "of_d_up_both_right": 0.34615384615384615,
+     "of_both_right_d_up": 0.3157894736842105
+    },
+    "equidistance": {
+     "turns": 300,
+     "goal_now_acc": 0.74,
+     "goal_after_acc": 0.5433333333333333,
+     "d_known": 300,
+     "d_up": 155,
+     "d_same": 67,
+     "d_down": 78,
+     "both_right": 137,
+     "both_right_d_up": 70,
+     "share_knows_not_acts": 0.23333333333333334,
+     "of_d_up_both_right": 0.45161290322580644,
+     "of_both_right_d_up": 0.5109489051094891
+    },
+    "occlusion_alignment": {
+     "turns": 199,
+     "goal_now_acc": 0.678391959798995,
+     "goal_after_acc": 0.6130653266331658,
+     "d_known": 199,
+     "d_up": 74,
+     "d_same": 64,
+     "d_down": 61,
+     "both_right": 97,
+     "both_right_d_up": 37,
+     "share_knows_not_acts": 0.18592964824120603,
+     "of_d_up_both_right": 0.5,
+     "of_both_right_d_up": 0.38144329896907214
+    },
+    "fov_inclusion": {
+     "turns": 220,
+     "goal_now_acc": 0.7727272727272727,
+     "goal_after_acc": 0.6181818181818182,
+     "d_known": 220,
+     "d_up": 77,
+     "d_same": 74,
+     "d_down": 69,
+     "both_right": 118,
+     "both_right_d_up": 47,
+     "share_knows_not_acts": 0.21363636363636362,
+     "of_d_up_both_right": 0.6103896103896104,
+     "of_both_right_d_up": 0.3983050847457627
+    }
+   },
+   "false_yes_by_d": {
+    "goal_now/3–4": [
+     140,
+     430
+    ],
+    "goal_after/2": [
+     68,
+     145
+    ],
+    "goal_now/2": [
+     55,
+     134
+    ],
+    "goal_after/1": [
+     18,
+     42
+    ],
+    "goal_now/1": [
+     12,
+     39
+    ],
+    "goal_after/3–4": [
+     188,
+     429
+    ],
+    "goal_after/5 以上": [
+     271,
+     654
+    ],
+    "goal_now/5 以上": [
+     183,
+     667
+    ]
+   }
+  },
+  "m3ds1d_300": {
+   "all": {
+    "turns": 1347,
+    "goal_now_acc": 0.6206384558277654,
+    "goal_after_acc": 0.5642167780252413,
+    "d_known": 1347,
+    "d_up": 447,
+    "d_same": 438,
+    "d_down": 462,
+    "both_right": 568,
+    "both_right_d_up": 199,
+    "share_knows_not_acts": 0.147735708982925,
+    "of_d_up_both_right": 0.4451901565995526,
+    "of_both_right_d_up": 0.3503521126760563
+   },
+   "by_family": {
+    "projective_relations": {
+     "turns": 265,
+     "goal_now_acc": 0.5509433962264151,
+     "goal_after_acc": 0.5962264150943396,
+     "d_known": 265,
+     "d_up": 90,
+     "d_same": 84,
+     "d_down": 91,
+     "both_right": 113,
+     "both_right_d_up": 40,
+     "share_knows_not_acts": 0.1509433962264151,
+     "of_d_up_both_right": 0.4444444444444444,
+     "of_both_right_d_up": 0.35398230088495575
+    },
+    "absolute_positioning": {
+     "turns": 142,
+     "goal_now_acc": 0.4859154929577465,
+     "goal_after_acc": 0.3873239436619718,
+     "d_known": 142,
+     "d_up": 33,
+     "d_same": 51,
+     "d_down": 58,
+     "both_right": 33,
+     "both_right_d_up": 10,
+     "share_knows_not_acts": 0.07042253521126761,
+     "of_d_up_both_right": 0.30303030303030304,
+     "of_both_right_d_up": 0.30303030303030304
+    },
+    "screen_occupancy": {
+     "turns": 145,
+     "goal_now_acc": 0.496551724137931,
+     "goal_after_acc": 0.41379310344827586,
+     "d_known": 145,
+     "d_up": 40,
+     "d_same": 54,
+     "d_down": 51,
+     "both_right": 37,
+     "both_right_d_up": 10,
+     "share_knows_not_acts": 0.06896551724137931,
+     "of_d_up_both_right": 0.25,
+     "of_both_right_d_up": 0.2702702702702703
+    },
+    "equidistance": {
+     "turns": 360,
+     "goal_now_acc": 0.6527777777777778,
+     "goal_after_acc": 0.5888888888888889,
+     "d_known": 360,
+     "d_up": 143,
+     "d_same": 109,
+     "d_down": 108,
+     "both_right": 161,
+     "both_right_d_up": 63,
+     "share_knows_not_acts": 0.175,
+     "of_d_up_both_right": 0.4405594405594406,
+     "of_both_right_d_up": 0.391304347826087
+    },
+    "occlusion_alignment": {
+     "turns": 226,
+     "goal_now_acc": 0.7123893805309734,
+     "goal_after_acc": 0.6504424778761062,
+     "d_known": 226,
+     "d_up": 68,
+     "d_same": 74,
+     "d_down": 84,
+     "both_right": 120,
+     "both_right_d_up": 36,
+     "share_knows_not_acts": 0.1592920353982301,
+     "of_d_up_both_right": 0.5294117647058824,
+     "of_both_right_d_up": 0.3
+    },
+    "fov_inclusion": {
+     "turns": 209,
+     "goal_now_acc": 0.7320574162679426,
+     "goal_after_acc": 0.6124401913875598,
+     "d_known": 209,
+     "d_up": 73,
+     "d_same": 66,
+     "d_down": 70,
+     "both_right": 104,
+     "both_right_d_up": 40,
+     "share_knows_not_acts": 0.19138755980861244,
+     "of_d_up_both_right": 0.547945205479452,
+     "of_both_right_d_up": 0.38461538461538464
+    }
+   },
+   "false_yes_by_d": {
+    "goal_now/2": [
+     66,
+     135
+    ],
+    "goal_after/2": [
+     64,
+     140
+    ],
+    "goal_after/3–4": [
+     202,
+     441
+    ],
+    "goal_now/3–4": [
+     193,
+     435
+    ],
+    "goal_after/5 以上": [
+     295,
+     712
+    ],
+    "goal_now/5 以上": [
+     233,
+     737
+    ],
+    "goal_after/1": [
+     26,
+     54
+    ],
+    "goal_now/1": [
+     19,
+     40
+    ]
+   }
+  }
+ },
+ "pooled": {
+  "turns": 2617,
+  "goal_now_acc": 0.6557126480703095,
+  "goal_after_acc": 0.5674436377531524,
+  "d_known": 2617,
+  "d_up": 934,
+  "d_same": 838,
+  "d_down": 845,
+  "both_right": 1144,
+  "both_right_d_up": 427,
+  "share_knows_not_acts": 0.16316392816201758,
+  "of_d_up_both_right": 0.45717344753747324,
+  "of_both_right_d_up": 0.3732517482517482
+ }
+}
