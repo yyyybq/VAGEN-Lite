@@ -167,6 +167,16 @@ class ReplayTest(unittest.TestCase):
         pooled, _ = self.metrics("sft_fp", workers=2)
         self.assertEqual(pooled["results"][str(self.ev / "sft_fp")], new)
 
+    def test_the_evaluation_records_footprint_blocks_only_under_the_rule(self):
+        """evaluation.run_episode with the real env (review fix 3c): under the turn rule every recorded turn carries
+        footprint_blocks (the env's turn_footprint_blocks, adding up to the env's own count), under today's rule none."""
+        new, old = (MM.episodes_of(self.ev / name) for name in ("sft_fp", "sft"))
+        turns = [t for r in new for t in r["trajectory"]]
+        self.assertTrue(turns and all(type(t["footprint_blocks"]) is int for t in turns))
+        self.assertEqual(sum(t["footprint_blocks"] for t in turns), self.new["footprint_blocks"])
+        self.assertTrue(all(t["footprint_blocks"] <= t["collisions"] for t in turns))  # a blocked turn is a blocked move
+        self.assertFalse(any("footprint_blocks" in t for r in old for t in r["trajectory"]))
+
     def test_refusals(self):
         typo = self.ev / "sft_typo"
         shutil.copytree(self.ev / "sft_fp", typo)

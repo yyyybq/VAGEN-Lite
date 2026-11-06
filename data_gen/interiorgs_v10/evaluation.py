@@ -31,6 +31,11 @@ Round 12: ``top-up --eval V1 --family F --target N --split S ... --out V2`` keep
 reserve tasks of family F from the same split (not flagged by the depth check, replayed in the env: success exactly
 at d*, no collision; d* bands evened out) until V2 has N tasks of F (or the reserve runs out); ``--family-out``
 also writes F's tasks of V2 alone, to evaluate existing models on them only.
+
+Experiment 3A (2026-11-06): ``run --turn-footprint-radius R`` evaluates under the turn rule (model.json env_switches).
+One rule per result folder (a run resuming a folder with results must give its rule) and per set (``table`` refuses
+folders of different rules); under the rule each recorded turn also carries ``footprint_blocks``, its turns blocked by
+the robot-base footprint.
 """
 
 from __future__ import annotations
@@ -304,6 +309,28 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
     return out
 
 
+def folder_rule(result: Path) -> Optional[float]:
+    """Experiment 3A: the turn rule a result folder was evaluated under, its model.json env_switches
+    turn_footprint_radius (missing key or no model.json: None, today's rule)."""
+    model = Path(result) / "model.json"
+    if not model.is_file():
+        return None
+    return (json.loads(model.read_text()).get("env_switches") or {}).get("turn_footprint_radius")
+
+
+def check_resume_rule(result: Path, switches: Dict[str, Any]) -> None:
+    """Experiment 3A: one turn rule per result folder.  A run resuming a folder whose results.jsonl already has rows
+    must give the turn_footprint_radius of the folder's model.json (missing = None), else it stops before anything is
+    written; only this switch is compared, so every older folder resumes as before."""
+    results = Path(result) / "results.jsonl"
+    if not results.is_file() or not _jsonl(results, partial_ok=True):
+        return
+    before, now = folder_rule(result), switches.get("turn_footprint_radius")
+    if before != now:
+        raise SystemExit(f"{result}: its results were evaluated with turn_footprint_radius {before!r}, this run gives "
+                         f"{now!r}; one turn rule per result folder (give another --name)")
+
+
 def gate_summary(metric: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """The success conditions not met at a pose (``failed_gates``) and the 0..1 progress toward success."""
     if not metric:
@@ -416,8 +443,11 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             success, actions_to_success = True, int(env._current_step)
         end_reason = step_info.get("termination_reason", end_reason)
         if frames is not None:
+            # experiment 3A: under the turn rule (the env reports turn_footprint_blocks only then) the turn's turns
+            # blocked by the robot-base footprint; a row under today's rule gets nothing new
+            footprint = ({"footprint_blocks": int(tm["turn_footprint_blocks"])} if "turn_footprint_blocks" in tm else {})
             trajectory.append(dict(seen, answer=text, actions=[str(a) for a in parsed], valid=valid,
-                                   collisions=blocked, reward=round(float(reward), 4), met=met,
+                                   collisions=blocked, **footprint, reward=round(float(reward), 4), met=met,
                                    **gate_summary(metric)))
     row = {"index": index, "task_id": item.get("task_id"), "scene_id": item.get("scene_id"),
            "task_type": item.get("task_type"), "d_star": int((item.get("difficulty") or {}).get("d_star", 0)),
@@ -536,6 +566,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     tasks = ev / "tasks.jsonl"
     n = len(_jsonl(tasks))
     switches = switch_overrides(args)
+    check_resume_rule(out, switches)  # experiment 3A: before the env, the model and model.json
     cfg = env_config(Path(args.env_template), tasks, args.gs_root, args.prompt_format, switches)
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
     env = ActiveSpatialEnv(ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items() if k in keys}))
@@ -770,10 +801,15 @@ def cmd_compare(args: argparse.Namespace) -> None:
 def cmd_table(args: argparse.Namespace) -> None:
     ev = Path(args.eval)
     models = {}
+    rules: Dict[Any, List[str]] = {}  # experiment 3A: turn_footprint_radius -> result folders
     for d in sorted(p for p in ev.iterdir() if (p / "results.jsonl").exists()):
         rows = _jsonl(d / "results.jsonl", partial_ok=True)  # other chains' jobs may still be writing theirs
         if rows:
             models[d.name] = metrics(rows)
+            rules.setdefault(folder_rule(d), []).append(d.name)
+    if len(rules) > 1:  # experiment 3A: a table compares results under one turn rule
+        raise SystemExit(f"{ev}: its result folders were evaluated under different turn rules (turn_footprint_radius "
+                         + "; ".join(f"{k!r}: {', '.join(v)}" for k, v in rules.items()) + "); one rule per set")
     (ev / "table.json").write_text(json.dumps(models, indent=1))
     families = sorted({f for m in models.values() for f in m["success_by_family"]})
     bands = [f"{lo}-{hi}" for lo, hi in BANDS]

@@ -374,6 +374,120 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual([a.turn_footprint_radius for a in seen], [0.25, None])
         self.assertEqual([E.switch_overrides(a) for a in seen], [{"turn_footprint_radius": 0.25}, {}])
 
+    def test_one_turn_rule_per_result_folder_and_set(self):
+        """Experiment 3A (review fixes): a run resuming a result folder that already has results must give the folder's
+        turn_footprint_radius (model.json env_switches; missing = None, today's rule) or it stops before the env, the
+        model and model.json; only that switch is compared.  A set's table refuses result folders of different rules."""
+        from unittest import mock
+
+        row = {"task_type": "fov_inclusion", "d_star": 2, "success": True, "actions_to_success": 2, "turns": 1,
+               "actions": 2, "collisions": 0, "invalid_turns": 0}
+
+        def folder(root, name, switches=None, lines=None, model=True):
+            d = Path(root) / name
+            d.mkdir(parents=True)
+            (d / "results.jsonl").write_text(json.dumps(row) + "\n" if lines is None else lines)
+            if model:
+                (d / "model.json").write_text(json.dumps({"name": name, "env_switches": switches or {}}))
+            return d
+
+        on, off = {"turn_footprint_radius": 0.25}, {}
+        with tempfile.TemporaryDirectory() as tmp:
+            old = folder(tmp, "old", {"lenient_parse": True})
+            new = folder(tmp, "new", on)
+            self.assertEqual((E.folder_rule(old), E.folder_rule(new), E.folder_rule(Path(tmp) / "none")), (None, 0.25, None))
+            E.check_resume_rule(old, off)
+            E.check_resume_rule(old, {"collision_feedback_detail": True})  # another switch: not compared
+            E.check_resume_rule(new, dict(on))
+            for d, switches, names in ((old, on, ("None", "0.25")), (new, off, ("0.25", "None")),
+                                       (new, {"turn_footprint_radius": 0.3}, ("0.25", "0.3"))):
+                with self.assertRaises(SystemExit) as caught:
+                    E.check_resume_rule(d, switches)
+                message = str(caught.exception.code)
+                self.assertIn(f"turn_footprint_radius {names[0]}, this run gives {names[1]}", message)
+            # nothing to resume: any rule may start the folder
+            for empty in (folder(tmp, "empty", lines=""), folder(tmp, "half", lines=json.dumps(row)[:20]),
+                          Path(tmp) / "fresh"):
+                E.check_resume_rule(empty, on)
+                E.check_resume_rule(empty, off)
+            bare = folder(tmp, "bare", model=False)  # results without model.json: today's rule
+            E.check_resume_rule(bare, off)
+            with self.assertRaises(SystemExit):
+                E.check_resume_rule(bare, on)
+            # cmd_run stops at once: no env, no model, model.json as it was (the env module needs scipy)
+            if importlib.util.find_spec("scipy"):
+                (Path(tmp) / "tasks.jsonl").write_text(json.dumps({"task_id": "t0"}) + "\n")
+                before = (old / "model.json").read_text()
+                with mock.patch("vagen.envs.active_spatial.env.ActiveSpatialEnv", side_effect=AssertionError("env")), \
+                        mock.patch.object(E, "VllmPolicy", side_effect=AssertionError("model loaded")):
+                    with self.assertRaises(SystemExit):
+                        E.main(["run", "--eval", tmp, "--name", "old", "--model", "m", "--turn-footprint-radius", "0.25"])
+                    with self.assertRaises(SystemExit):
+                        E.main(["run", "--eval", tmp, "--name", "new", "--model", "m"])
+                self.assertEqual((old / "model.json").read_text(), before)
+        # the table: one rule per set
+        with tempfile.TemporaryDirectory() as tmp:
+            folder(tmp, "a", {})
+            folder(tmp, "b", model=False)
+            folder(tmp, "c_fp", on, lines="")  # no rows yet: not in the table, its rule not counted
+            E.cmd_table(type("A", (), {"eval": tmp})())
+            self.assertEqual(sorted(json.loads((Path(tmp) / "table.json").read_text())), ["a", "b"])
+            folder(tmp, "d_fp", on)
+            (Path(tmp) / "table.json").unlink()
+            with self.assertRaises(SystemExit) as caught:
+                E.cmd_table(type("A", (), {"eval": tmp})())
+            self.assertIn("None: a, b; 0.25: d_fp", str(caught.exception.code))
+            self.assertFalse((Path(tmp) / "table.json").exists())
+        with tempfile.TemporaryDirectory() as tmp:
+            folder(tmp, "x_fp", on)
+            folder(tmp, "y_fp", {"turn_footprint_radius": 0.25, "lenient_parse": True})
+            E.cmd_table(type("A", (), {"eval": tmp})())
+            self.assertIn("| x_fp | 1 | 1.000 |", (Path(tmp) / "table.md").read_text(encoding="utf-8"))
+
+    def test_run_episode_records_the_footprint_blocks_under_the_turn_rule(self):
+        """Experiment 3A (review fixes): when the env reports turn_footprint_blocks (only under the turn rule), each
+        recorded turn carries footprint_blocks; without it a turn's record has exactly the keys it had before."""
+        from PIL import Image
+
+        class Env:
+            current_item = {"task_id": "t1", "scene_id": "s1", "task_type": "fov_inclusion", "difficulty": {"d_star": 2}}
+            _current_step = 0
+            rule = False
+
+            def reset(self, seed):
+                return {"obs_str": "<image>", "multi_modal_data": {"<image>": [Image.new("RGB", (8, 8))]}}, {}
+
+            def system_prompt(self):
+                return "sys"
+
+            def step(self, text):
+                acts = text.split("|")
+                self._current_step += len(acts)
+                tm = {"collision_count": acts.count("turn_left"), "action_is_valid": True}
+                if self.rule:
+                    tm["turn_footprint_blocks"] = acts.count("turn_left")
+                info = {"actions": acts, "metrics": {"turn_metrics": tm}, "termination_reason": "continuing"}
+                return {"obs_str": "<image>", "multi_modal_data": {"<image>": [Image.new("RGB", (8, 8))]}}, -0.16, \
+                    self._current_step >= 4, info
+
+            def _calculate_canonical_metric(self):
+                return {"success": False, "gates": {"distance_ok": False}, "continuous_gate_progress": 0.1}
+
+        for rule in (False, True):
+            answers = iter(["turn_left|move_forward", "turn_left|turn_left"])
+            env = Env()
+            env.rule = rule
+            with tempfile.TemporaryDirectory() as tmp:
+                row = E.run_episode(env, type("P", (), {"generate": lambda self, s, u, im: next(answers)})(), 0, 12,
+                                    frames=Path(tmp) / "frames")
+            traj = row["trajectory"]
+            if rule:
+                self.assertEqual([(t["footprint_blocks"], t["collisions"]) for t in traj], [(1, 1), (2, 2)])
+                self.assertIsInstance(traj[0]["footprint_blocks"], int)
+            self.assertEqual([list(t) for t in traj], [["frame", "user", "answer", "actions", "valid", "collisions"]
+                                                       + (["footprint_blocks"] if rule else [])
+                                                       + ["reward", "met", "failed_gates", "progress"]] * 2)
+
     def test_end_reasons_and_paired_comparison(self):
         def r(i, ok, end):
             return {"index": i, "task_type": "fov_inclusion", "d_star": 2, "success": ok, "actions_to_success": 2 if ok else None,
