@@ -1,6 +1,6 @@
 # 下游具身任务线状态（唯一的状态文档）
 
-最后更新：2026-11-06 17:1x UTC（**你 11-06 的六条决定执行中**：**复现检查通过、(g-d) 跑完**（8 个任务 15:07–16:11，约 7.2 卡时；报告 [G_D_RESULTS_20261106](reports/G_D_RESULTS_20261106.md) 第二版，第二轮核查中，初步结果已在会话里告诉你：训练过的六个模型带历史都涨 +4.5 到 +8.5，对底座的差变大，RL 对 SFT 仍没测到差别）；**(g-c) 条件已满足但会超 14 卡时，等你定**；**X0 / G0 问 12 份权重完成**（[QA12_X0G0_20261106](reports/QA12_X0G0_20261106.md)，两轮核查后 16:2x 发你和主窗口）；**第 7 条样例第二版已发你，提问等你看过**；**新发现画面定格**（扫帧查不出，全部 N 系列初查 111 个失败回合，见 (g-d) 报告第 2 节，怎么处理等你定）；**"done" 动作的代码问题已修**（0ce21deb）；D1 盘点、D3 设计排在 (g)、第 7 条之后，没动；卡时已用约 9.0（含 X0 / G0 0.55））。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
+最后更新：2026-11-06 20:5x UTC（**你 20:3x 回"都按推荐"**，即 [(g-d) 报告](reports/G_D_RESULTS_20261106.md)"要你定的事"8 项都按推荐：① 主版本改为带历史，以后新矩阵起点两种输入都评（不算进 14）；② (g-c) 只交 Qwen3 一族；③ 第 7 条提问照第二版样例跑；④ 带历史表不加主线的 4 个模型；⑤ 坏画面在登录节点上按同位姿规则复查并重算受影响的评测；⑥ 补跑出错的 1 个回合；⑦ D1 盘点现在并行做；⑧ 批了克隆 VLAKit 的代码。**执行中**：Qwen3 的 drc 检查 3 个任务 20:35 交到 zoetrope（Q3RS 的任务先补跑 LoadDishwasher_s1008）；VLAKit 代码 20:4x 克隆到本机 `C:/Users/user/Desktop/code/ext/NEO`（只 VLAKit、只代码、提交 57e21d6、6.3 MB），D1 盘点在读代码；同位姿坏画面复查（`downstream/n/n_stale.py`）在登录节点上跑；已回主窗口（不加 4 个模型、主版本带历史、3A 判定线 +2.4 是不带历史口径）。卡时已用约 9.0，丙方案预计总计约 12.6。）。这里只写现在在哪一步、在跑什么、在等什么、待你决定的事、主窗口指令和暂停 / 撤回记录。各实验的进度和成功率看 [MATRIX.md](MATRIX.md)（看板每 5 分钟重写：训练、评测各一张表，另有 X 表、T 表和第二轮表）；每日汇总在 [daily/](daily/)；设计、规则、代码、路径和决定记录看 [REFERENCE.md](REFERENCE.md)（第 0 节是 10-28 任务书和 Qwen3 闸门）；评测协议（含剔除清单）看 [EVAL_PROTOCOL.md](EVAL_PROTOCOL.md)；报告在 [reports/](reports/)，最新的是 10-31 给主窗口的两页（[E3 画面尺寸问题和修法](reports/FOR_MAIN_E3_IMAGE_SIZE_20261031.md)、[问答批次](reports/FOR_MAIN_QA_20261031.md)）、[C1 短任务](reports/C1_SHORT_20261031.md)（正式任务 10:38 开跑）、[OpenDrawer 诊断](reports/OPENDRAWER_PROBE_20261031.md)、[N 冒烟](reports/N_SMOKE_20261031.md)、10-30 的 [问答批次结果](reports/QA_BATCH_RESULTS_20261030.md)（Qwen3 闸门没过）、[E3 核查（已查明原因）](reports/E3_CHECK_20261030.md)、[T2 结果](reports/T2_RESULTS_20261030.md)、10-29 晚的 [第一波诊断汇总](reports/FIRST_WAVE_SUMMARY_20261029.md)、[E3 结果](reports/E3_RESULTS_20261029.md)、[XE 结果](reports/XE_RESULTS_20261029.md)；10-28 的四份设计：[Q0 / G0](reports/Q0_G0_DESIGN_20261028.md)、[C1](reports/C1_DESIGN_20261028.md)、[N 系列](reports/N_DESIGN_20261028.md)、[X0b / 参数距离 / 线性探针 / 诊断汇总](reports/X0B_PD_LP_DESIGN_20261028.md)。
 
 ## 1. 现在在哪一步
 
@@ -118,7 +118,11 @@
 - **X1、X2、X3、X5、T5**：报告 10-29 01:3x 已交（[X1](reports/X1_RESULTS_20261029.md)、[X2](reports/X2_RESULTS_20261029.md)、[X3](reports/X3_RESULTS_20261029.md)、[X5](reports/X5_RESULTS_20261029.md)、[T5](reports/T5_RESULTS_20261029.md)）。
 - **T 系列**：T5、T2 完成；T1 推迟；T3 / T4 等路径。
 
-## 2. 在跑什么（11-06 17:1x UTC）
+## 2. 在跑什么（11-06 20:5x UTC）
+
+- **Qwen3 的 drc 检查：** 3 个单卡任务，zoetrope，20:35 交（`n3_20261103/eval_<M>_drc_job`，任务号在 `g_design_20261106/submit_drc.json`）。档位 "drc:12 drc:4"，Q3RS 前面加 "gd:4"（补跑出错的那 1 个回合）。通过标准：每个模型照旧，三个模型合计成败不同不超过 1 个（`n_dr_check.py --max-total-flips 1`）。通过了才交 (g-c) 的 3 个模型。
+- **登录节点：** 同位姿坏画面复查（1 个进程、nice 19），结果写到 `downstream_runs/n/stale_scan_20261106/`。
+- 以下是 17:1x 的记录。
 
 - **现在下游没有在跑的任务。** 复现检查 8 个、(g-d) 8 个、X0 / G0 1 个、Q3S 重问 1 个都已 SUCCEEDED。复现检查、X0 / G0、Q3S 重问的任务记录 16:0x 删了，(g-d) 8 个的记录 17:1x 删了（删前逐个确认 SUCCEEDED、退出码 0）。
 - 登录节点上做过的分析：(g-d) 报告（g_report.py）、画面定格初查（`downstream_runs/n/frozen_scan_20261106/`，1 个进程、nice 19）。
