@@ -136,6 +136,22 @@ def test_left_right_variant_and_reasons_for_none(fakes):
     assert var is None and rec["reason"] == "no_candidate" and rec["tally"]["refused:too far"] == 2
 
 
+def test_canary_tells_a_broken_renderer_from_a_changed_scene(fakes):
+    sc = FakeScene()
+    inst = original(sc, "absolute_positioning", ["a"], {"distance_m": 1.0})
+    inst["shortest"]["judge"] = {"visible": {"a": 0.02}}
+    sc.judge = lambda item, pose, render=True: {**N.box_judge(item, pose), "visible": {"a": 0.0201}}
+    assert D.canary(sc, inst) is True  # within 2%
+    sc.judge = lambda item, pose, render=True: {**N.box_judge(item, pose), "visible": {"a": 0.0}}
+    with pytest.raises(D.RenderBroken):
+        D.canary(sc, inst)
+    states = S.reachable(sc, max_depth=2)["states"]
+    with pytest.raises(D.RenderBroken):
+        D.variant_for(sc, states, sorted(states, key=lambda k: states[k][1]), inst, 1e18)
+    inst["shortest"]["pose"] = [-0.3, 0.0, 0.0]  # the box judge fails there: the scene differs, not the renderer
+    assert D.canary(sc, inst) is False
+
+
 def test_find_tries_only_the_given_candidates(fakes):
     sc = FakeScene()
     states = S.reachable(sc, max_depth=4)["states"]

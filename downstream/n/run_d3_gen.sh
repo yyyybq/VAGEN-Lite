@@ -36,10 +36,15 @@ worker() {  # worker I takes scenes I, I + WORKERS, ...
   for ((j = i; j < ${#SCENES[@]}; j += WORKERS)); do
     spec="${SCENES[$j]}"; task="${spec%:*}"; seed="${spec##*:}"; sid="${task}_s${seed}"
     scene_done "$sid" && continue
-    t0=$(date +%s)
-    sim 1 timeout -s KILL "$SCENE_TIMEOUT" "$SIM_PY" downstream/n/d3_gen.py scene --instances "${INSTANCES[@]}" \
-      --task "$task" --seed "$seed" --out "$OUT" --soft-limit "$SOFT_LIMIT" >> "$OUT/logs/$sid.log" 2>&1
-    rc=$?
+    t0=$(date +%s); tries=0
+    while :; do  # rc 3: this process's renderer drew garbage (d3_gen.RenderBroken); a new process, RENDER_TRIES in all
+      tries=$((tries + 1))
+      sim 1 timeout -s KILL "$SCENE_TIMEOUT" "$SIM_PY" downstream/n/d3_gen.py scene --instances "${INSTANCES[@]}" \
+        --task "$task" --seed "$seed" --out "$OUT" --soft-limit "$SOFT_LIMIT" >> "$OUT/logs/$sid.log" 2>&1
+      rc=$?
+      [[ $rc -eq 3 && $tries -lt ${RENDER_TRIES:-3} ]] || break
+      echo "[d3-gen] $sid render broken (try $tries), again $(date -u +%FT%TZ)" >> "$OUT/d3_gen.log"
+    done
     if [[ $rc -ne 0 ]]; then
       printf '{"task": "%s", "seed": %s, "rc": %s, "seconds": %s}\n' "$task" "$seed" "$rc" "$(( $(date +%s) - t0 ))" \
         > "$OUT/scenes/$sid.timeout.json"

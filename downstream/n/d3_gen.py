@@ -18,8 +18,11 @@ pose already passes its box judge (it could not tell the two targets apart), or 
 already succeeds; the first candidate n_gen.find solves is the variant.  Another object's order is seeded per instance
 (RNG_SEED); at most n_gen's candidate limit per instance.
 Scene check before any variant: the rebuilt scene must have the instance's start pose and its objects' boxes (else
-"scene_mismatch", no variant), and the original must still succeed at its shortest pose (full judge, rendered; else
-"original_fails").
+"scene_mismatch", no variant), and the original's box judge must still pass at its shortest pose (else
+"original_fails").  Render check (canary), before and after each variant's search: a re-render of the original's
+shortest pose must give the recorded visible shares and a success; else the process's renderer is broken (11-06: in
+some processes every frame is colour noise and stripes, as in the bad-frame check) and the scene exits with
+RC_RENDER_BROKEN, which run_d3_gen.sh retries in a new process.
 scene writes OUT/scenes/<task>_s<seed>.json after every original (per original: the variant or the reason there is
 none, and the search tally), then leaves with os._exit as n_gen does.  collect writes OUT/variants.jsonl (N1's
 instance format; instance_id = the original's + SUFFIX; "d3": the original's id, item, params and objects, the rule)
@@ -50,6 +53,8 @@ RNG_SEED = 20261106
 SUFFIX = "_d3a"
 FLIP = {"left": "right", "right": "left"}
 POSE_TOL, BOX_TOL = 1e-6, 1e-4
+VIS_TOL, VIS_REL = 1e-4, 0.02  # a re-render of the original's shortest pose must match the recorded visible shares
+RC_RENDER_BROKEN = 3
 
 
 def read_instances(paths) -> list:
@@ -91,6 +96,25 @@ def scene_check(scene, inst: dict) -> str | None:
     return None
 
 
+class RenderBroken(Exception):
+    """The renderer of this process draws garbage (11-06: colour noise and stripes from the first frame in some
+    processes on the login node, as in the bad-frame check); the scene is retried in a new process."""
+
+
+def canary(scene, inst: dict) -> bool:
+    """True if the original succeeds at its shortest pose with the recorded visible shares (a render check of this
+    process); False if its box judge fails there (the scene differs); RenderBroken if only the render differs."""
+    pose = inst["shortest"]["pose"]
+    j = scene.judge(inst["item"], pose)
+    if not N.box_judge(inst["item"], pose)["success"]:
+        return False
+    rec = (inst["shortest"].get("judge") or {}).get("visible") or {}
+    got = j.get("visible") or {}
+    if any(abs(got.get(k, 0.0) - v) > max(VIS_TOL, VIS_REL * v) for k, v in rec.items()) or not j["success"]:
+        raise RenderBroken(f"{inst['instance_id']}: visible {got} vs recorded {rec}")
+    return True
+
+
 def tells_apart(item: dict, inst: dict) -> bool:
     """False if the original's success poses already pass the candidate's box judge."""
     return not any(N.box_judge(item, inst[k]["pose"])["success"] for k in ("shortest", "best") if inst.get(k))
@@ -102,10 +126,8 @@ def variant_for(scene, states: dict, order: list, inst: dict, deadline: float) -
     bad = scene_check(scene, inst)
     if bad:
         return None, {**rec, "reason": bad}
-    oj = scene.judge(inst["item"], inst["shortest"]["pose"])
-    if not oj["success"]:
-        return None, {**rec, "reason": "original_fails", "box": bool(N.box_judge(inst["item"], inst["shortest"]["pose"])
-                                                                     ["success"]), "visible": oj.get("visible")}
+    if not canary(scene, inst):
+        return None, {**rec, "reason": "original_fails"}
     sid = f"{scene.task}_s{scene.seed}"
     rng = random.Random(f"{RNG_SEED}:{inst['instance_id']}")
     pre = collections.Counter()
@@ -122,6 +144,7 @@ def variant_for(scene, states: dict, order: list, inst: dict, deadline: float) -
         cands.append((ents, params))
     rec["candidates"] = len(cands)
     var, tally = G.find(scene, states, order, inst["task_type"], rng, deadline, cands=cands)
+    canary(scene, inst)  # the renders of the search were sound (RenderBroken otherwise)
     rec["tally"] = {**dict(pre), **dict(tally)}
     if var is None:
         return None, {**rec, "reason": "no_solvable_candidate" if cands else "no_candidate"}
@@ -163,6 +186,13 @@ def scene_cmd(args) -> int:
             G.write_json(path, rec)
             print(f"{inst['instance_id']}: {r.get('variant') or r['reason']} ({r['seconds']} s)", flush=True)
         rec["complete"] = True
+    except RenderBroken as exc:  # not complete: run_d3_gen.sh retries the scene in a new process
+        rec["render_broken"] = str(exc)[:400]
+        rec["seconds"] = round(time.time() - t0, 1)
+        G.write_json(path, rec)
+        print(f"{sid}: render broken, exit {RC_RENDER_BROKEN}", flush=True)
+        sys.stdout.flush()
+        os._exit(RC_RENDER_BROKEN)
     except Exception as exc:  # reported in the scene file, not fatal for the job
         import traceback
 
