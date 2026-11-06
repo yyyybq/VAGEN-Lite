@@ -10,6 +10,8 @@
 #   gd, gc  (the user's task book of 2026-11-06, tier g) with dialogue history (N_HISTORY=1, n_episode.py --history):
 #      gd = tier d, N1 as it is on its merged 600 instances (D_INSTANCES, default N2's instances_600.jsonl), N1's
 #      robot body, all eight models; gc = tier c again (C_INSTANCES, the camera sphere), the six models of c.
+#   dr  (tier g's check) tier d again without history on the first N3_DR_LIMIT (default 24) of D_INSTANCES, to
+#      compare with N1's recorded episodes (the same code path, greedy decoding).
 # Usage: run_n3.sh N3 MODEL C_INSTANCES E_INSTANCES [TIERS] [WORKERS]   (TIERS default "c e"; a tier the model is not
 #   in is skipped).  The Q3 models get their own validation config (N_VAL_ENV, as in N1) and run as the container's
 #   root; everything under N3/<tier>/<MODEL> is given back to its owner by run_n3_episodes.sh.
@@ -40,13 +42,15 @@ for spec in $TIERS; do
     gd) INST="${D_INSTANCES:-/mnt/umm/users/yinbaiqiao/downstream_runs/n/n2_20261103/instances_600.jsonl}"; COLL=robot ;;
     gc) [[ " S RS RD Q3S Q3RS Q3RD " == *" $MODEL "* ]] || { log "tier gc: $MODEL is not in it"; continue; }
         INST="$CI"; COLL=sphere ;;
+    dr) INST="${D_INSTANCES:-/mnt/umm/users/yinbaiqiao/downstream_runs/n/n2_20261103/instances_600.jsonl}"; COLL=robot ;;
     *) log "unknown tier $t"; rc_all=2; continue ;;
   esac
   if [[ ${N3_DROP_CORRUPTED:-0} == 1 && -f $N3/$t/$MODEL/episodes.jsonl ]]; then
     log "tier $t: $("${N_VLM_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python}" "$WT/downstream/n/n_repair.py" drop --out "$N3/$t/$MODEL" --broken)"
   fi
   HIST=0; [[ $t == g* ]] && HIST=1
-  N_HISTORY=$HIST N3_COLLISION=$COLL bash "$WT/downstream/n/run_n3_episodes.sh" "$N3/$t/$MODEL" "$INST" "$MODEL" "$w" 0
+  LIM=0; [[ $t == dr ]] && LIM="${N3_DR_LIMIT:-24}"
+  N_HISTORY=$HIST N3_COLLISION=$COLL bash "$WT/downstream/n/run_n3_episodes.sh" "$N3/$t/$MODEL" "$INST" "$MODEL" "$w" "$LIM"
   rc=$?
   log "tier $t: rc=$rc $(grep -c '"success": true' "$N3/$t/$MODEL/episodes.jsonl" 2>/dev/null) successes of $(wc -l < "$N3/$t/$MODEL/episodes.jsonl" 2>/dev/null)"
   (( rc )) && rc_all=$rc

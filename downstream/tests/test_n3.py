@@ -414,16 +414,18 @@ def test_model_job_tier_g_runs_with_history_on_d_and_c(tmp_path):
     (wt / "downstream/n").mkdir(parents=True)
     (wt / "downstream/n/run_n3.sh").write_text((ROOT / "n/run_n3.sh").read_text())
     (wt / "downstream/n/run_n3_episodes.sh").write_text(
-        'mkdir -p "$1"; echo "$1|$2|$4|$N3_COLLISION|${N_HISTORY:-}" >> "$(dirname "$(dirname "$1")")/calls"\n')
-    env = {k: v for k, v in os.environ.items() if k not in ("N_VAL_ENV", "D_INSTANCES")}
+        'mkdir -p "$1"; echo "$1|$2|$4|$5|$N3_COLLISION|${N_HISTORY:-}" >> "$(dirname "$(dirname "$1")")/calls"\n')
+    env = {k: v for k, v in os.environ.items() if k not in ("N_VAL_ENV", "D_INSTANCES", "N3_DR_LIMIT")}
     for model in ("B", "RD"):
         res = subprocess.run(["bash", str(wt / "downstream/n/run_n3.sh"), str(tmp_path / "n3"), model, "/c.jsonl",
-                              "/e.jsonl", "gd gc f"], capture_output=True, text=True,
+                              "/e.jsonl", "dr gd gc f"], capture_output=True, text=True,
                              env=dict(env, D_INSTANCES="/d600.jsonl"), timeout=60)
         assert res.returncode == 0, res.stdout + res.stderr
     n3 = str(tmp_path / "n3")
+    # dr: tier d again without history on the first 24 instances (the check against N1's recorded episodes)
     assert (tmp_path / "n3/calls").read_text().split() == [
-        f"{n3}/gd/B|/d600.jsonl|12|robot|1",
-        f"{n3}/gd/RD|/d600.jsonl|12|robot|1", f"{n3}/gc/RD|/c.jsonl|12|sphere|1", f"{n3}/f/RD|/c.jsonl|12|robot_free_turn|0"]
+        f"{n3}/dr/B|/d600.jsonl|12|24|robot|0", f"{n3}/gd/B|/d600.jsonl|12|0|robot|1",
+        f"{n3}/dr/RD|/d600.jsonl|12|24|robot|0", f"{n3}/gd/RD|/d600.jsonl|12|0|robot|1",
+        f"{n3}/gc/RD|/c.jsonl|12|0|sphere|1", f"{n3}/f/RD|/c.jsonl|12|0|robot_free_turn|0"]
     log = (tmp_path / "n3/n3_B.log").read_text()
     assert "tier gc: B is not in it" in log and "tier f: B is not in it" in log
