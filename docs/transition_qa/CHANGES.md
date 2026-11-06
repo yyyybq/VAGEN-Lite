@@ -217,6 +217,7 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
 | --- | --- | --- |
 | `0001-train-chain-matrix-fields.patch` | 第 5 节的前 6 个字段 | `train_chain.py`（约 80 行），新测试 `tests/test_train_chain_matrix.py`（6 个） |
 | `0002-train-chain-diagnostics-step.patch` | 第 7 个字段：新的第 11 步 `diagnostics`，评测之后跑失败拆解（只读本链的结果）和探针（P1；P0 探针到位后同样接入）；有它时 main 的 `retain` 清理挪到它之后 | `train_chain.py`（在 0001 之上约 120 行），`tests/test_train_chain.py`（1 行：步骤多了一个），`tests/test_train_chain_matrix.py`（加 3 个测试） |
+| `matrix_v3_cb42874a/0003-targets-format-pointing-reward.patch`（2026-11-06，G 组） | 目标格式 `targets_pixel` / `targets_norm1000` 和指认奖励开关 `pointing_reward`（默认关），日志和评测的指认指标（第 8 节） | `prompt.py`、新的 `pointing.py`、`env.py`、`env_config.py`、`gym_agent_loop.py`、`ray_trainer.py`、`training_prep.py`、`train_chain.py`（1 行）、`evaluation.py`；新测试 `tests/test_pointing.py`（11 个），`tests/test_training_prep.py`（加 1 个） |
 
 ### 6.1 每个字段谁写、谁读
 
@@ -243,6 +244,7 @@ D_noP0 组（备选）和 D 一样需要 `sft_lf_dirs`、`diagnostics_after_eval
 git apply --check docs/transition_qa/patches/0001-train-chain-matrix-fields.patch
 git apply docs/transition_qa/patches/0001-train-chain-matrix-fields.patch
 git apply docs/transition_qa/patches/0002-train-chain-diagnostics-step.patch
+git apply docs/transition_qa/patches/matrix_v3_cb42874a/0003-targets-format-pointing-reward.patch   # G 组（第 8 节）；要先合本分支
 python -m pytest -q data_gen/interiorgs_v10/tests/test_train_chain.py data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
 python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打完补丁的提交> --out <TR>/plan.json
 ```
@@ -308,3 +310,52 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
   - 每回合的上限：RL 的 `gym_agent_loop.py` 每回合限 `min(response_length_per_turn, max_response_length)`。E 的 env 配置里 `response_length_per_turn` 是 384（各组相同），所以 E 的 RL 每回合最多 384 个词元，12 回合最多 4,608，6,144 碰不到。
     - 要让 E 每回合能用剩下的预算，rl-config 得加一个每回合上限的选项（改代码）；11-03 用户定保留，不加。
 - 第 5、6 节的训练链字段和补丁第三版照样要用；qwen3-main 合进 main 后，补丁要对合并后的训练链重新核对（2026-11-01 已对 `b6606bac` 预演，见第 6 节）。
+
+## 8. G 组"先指认再动作"（2026-11-06，只做准备）：补丁 0003 和数据工具
+
+用户 2026-11-06 指令第四部分：新格式和奖励开关做成第三个训练链补丁，带测试。所有开关默认关，别的组的提示、奖励、指标都不变。G 的 SFT、RL 等用户看完分析 1、3 再批。
+
+### 8.1 补丁 0003（`patches/matrix_v3_cb42874a/0003-targets-format-pointing-reward.patch`）
+
+- **基准**：matrix-v3 `cb42874a`，也就是 qwen3-main `22a0fc62` 合进本分支、打上 0001 和 0002 之后（另有矩阵的配置）。
+  - 只打在 qwen3-main 上时，`gym_agent_loop.py` 和 `ray_trainer.py` 两处打不上：它们接在本分支加的 `think_rate` 后面。
+  - 所以顺序是先合本分支，再依次打 0001、0002、0003（第 6.2 节）。
+- **改的文件**（11 个，加 698 行、减 13 行）：
+
+  | 文件 | 改了什么 |
+  | --- | --- |
+  | `prompt.py` | 新的格式样例 `targets_pixel` / `targets_norm1000`：`<targets>A: (x,y); B: (x,y)</targets><action>…</action>`，坐标是 256 × 256 画面的像素，或者横纵都按 0–1000 计；用户回合的格式块写出 A、B 各是任务里的哪个物体（用任务原文）；系统提示只换说明、回答格式、示例三处；只能配 `no_think` |
+  | `pointing.py`（新） | 读目标段：只认短结构，前后不能有别的文字；旧格式指整段回答只有一个动作段。<br>一帧上的真值："看得清"用成功判定的同一条面可见规则，带场景遮挡物；真值框是物体三维框投到画面、再裁进画面。<br>判分：看得清的目标，点在框内得 1；看不清的目标写 none 得 1；其余得 0；取平均。<br>SFT 标签取框中心；场景遮挡物和环境同一种构造。 |
+  | `env.py`、`env_config.py` | 用了目标格式或开了指认奖励时，在回答所对的那一帧（`prev_E`）上判目标段。<br>`pointing_reward`（默认 0，即关）× 本回合得分，加在格式分支之后，记成奖励分量 `pointing`。<br>`turn_metrics` 加 `pointing_score`、`targets_ok`、`targets_old`、`targets_bad`。 |
+  | `gym_agent_loop.py`、`ray_trainer.py` | 每局的指认平均分、目标段坏了的回合比例、旧格式回合比例：`transition/pointing_score`、`transition/targets_bad_rate`、`transition/targets_old_rate` |
+  | `training_prep.py` | rl-config 收 `--format-example targets_*` 和 `--pointing-reward`；后者要配目标格式，且画面是 256 × 256。<br>SFT 对话里的目标格式按格式块第一行认出，不会当成 action_names。 |
+  | `train_chain.py` | plan 的 `rl.pointing_reward` 传给 rl-config |
+  | `evaluation.py` | `--format-example targets_*`；每回合记下指认判分，结果多三项比例 |
+  | 测试 | `tests/test_pointing.py` 11 个：<br>格式行和格式块；系统提示只改三处；解析；判分和标签；代理循环读判分；链传参数；<br>环境默认不变；格式块写出物体；在所答那一帧上判；权重 0 和 0.1 时的奖励和分量；<br>旧格式、自由文本、读不出动作。<br>`tests/test_training_prep.py` 加 1 个：rl-config 的目标格式和指认奖励。 |
+
+- **核对**：
+  - 在 `cb42874a` 的干净导出上 `git apply --check` 通过，打完后 11 个文件和 matrix-v3 `dcaa0207` 逐字节相同。
+  - matrix-v3 上环境、提示、链、混合、诊断几组测试：564 个通过、3 个跳过；新测试 12 个通过。
+- **对正在跑的链**：没有影响。旧 plan 不写 `pointing_reward`，也不写目标格式，行为不变。
+
+### 8.2 数据工具和 G 的配置（matrix-v3 `dcaa0207`、`2ab8cfc6`）
+
+这些用到补丁 0003 的 `pointing.py`，所以放在 matrix-v3，不放本分支，和其他格子的配置一样随 matrix-v3 合并。
+
+- `data_gen/transition_qa/pointing_qa.py`：指认题池 Pg。
+  - 在 SFT 轨迹的每个不同画面上，对每个看得清的任务目标出一题："点出 X"或"框出 X"，二选一按哈希定。
+  - 场景划分同 P1：训练场景出训练题；验证场景出测试题和 60 道探针，点出、框出各半，每个任务最多一题。
+  - 两种坐标格式各写一份。生成用 sco 单卡任务，只用 CPU。
+- `data_gen/sft_mixture/targets_convert.py`：P2q 转成 P2t。
+  - 每个动作前加目标段，标签取该回合所对画面上的真值（框中心，看不清写 none）。
+  - 系统提示和格式块换成 RL 环境在目标格式下显示的原文。
+  - 也转 SFT 对话文件（链拿它核对起点的格式）。
+  - 测试在真数据上核对：转出的系统提示和第一个用户回合与环境逐字相同，环境给转出的标签判 1.0 分。
+- `data_gen/sft_mixture/build.py`：认 Pg、P2t 两个池；目标格式按每条的任务核对格式块。
+- `eval/diagnostics/qa_probe.py`：
+  - 自由作答的题保留原文（11-06 小试就崩在空选项上）；
+  - 指认题判分：点在真值框内算对，框的 IoU ≥ 0.5 算对，坐标可以是像素或 0–1000。
+  - 这两处不依赖补丁，本分支也有。
+- `configs/matrix_v3/G.yaml`、`mixture_matrix_v3_qwen3_g_{pixel,norm1000}_20261106.yaml`、`matrix_plan` 的 G 格子：
+  - 内容是 D 的登记，加上目标格式和指认奖励（两侧都加）；
+  - 测试 `test_matrix_g.py`。

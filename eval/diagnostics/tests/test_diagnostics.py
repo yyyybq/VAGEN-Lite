@@ -109,6 +109,46 @@ def test_score_and_summary():
     assert s["all"]["formats"]["letter_variant"] == 0.5
 
 
+def test_free_form_rows_are_kept_as_text():
+    """A pointing question (no options, an answer that is neither Yes nor No) is kept unjudged instead of breaking
+    the letter reader; questions with options or Yes / No are read as before."""
+    msgs = lambda gold: [{"role": "user", "content": "<image>q"}, {"role": "assistant", "content": gold}]
+    rows = [{"sample_id": "p", "qtype": "point_now", "qclass": "pointing", "family": "f", "options": [],
+             "messages": msgs("(190, 179)")},
+            {"sample_id": "y", "qtype": "t", "qclass": "state", "family": "f", "options": [], "messages": msgs("No")},
+            {"sample_id": "l", "qtype": "t", "qclass": "goal", "family": "f", "options": ["left", "right"],
+             "messages": msgs("B")}]
+    assert [QP.free_form(r) for r in rows] == [True, False, False]
+    a = QP.score(rows, ["(120, 88)", "No.", "B"])
+    assert (a[0]["output"], a[0]["readable"], a[0]["correct"], a[0]["n_options"]) == ("(120, 88)", False, False, None)
+    assert a[1]["correct"] and a[1]["compliant"] and a[2]["correct"] and a[2]["compliant"]
+    summ = QP.summary(a)
+    assert summ["qclass"]["pointing"]["unreadable"] == 1.0 and summ["all"]["chance"] is None
+
+
+def test_pointing_questions_are_judged():
+    """Group G of matrix v3: a point inside the true box, a box with IoU >= 0.5, in pixels or 0-1000 coordinates."""
+    box = [100.0, 80.0, 140.0, 100.0]
+    row = lambda judge, coords="pixel": {"judge": judge, "box": box, "coords": coords, "render_size": [256, 256]}  # noqa: E731
+    assert QP.judge_pointing(row("point"), "(120,90)")["correct"]
+    assert QP.judge_pointing(row("point"), "(120,90)")["compliant"]
+    assert not QP.judge_pointing(row("point"), "(10, 10)")["correct"]
+    loose = QP.judge_pointing(row("point"), "The lamp is at (120, 90).")
+    assert loose["correct"] and loose["readable"] and not loose["compliant"]
+    assert QP.judge_pointing(row("point", "norm1000"), "(469,352)")["correct"]
+    assert not QP.judge_pointing(row("point", "norm1000"), "(120,90)")["correct"]
+    assert QP.judge_pointing(row("box"), "(100,80,140,100)")["correct"]
+    assert QP.judge_pointing(row("box"), "(105,82,140,100)")["correct"]  # IoU 0.79
+    assert not QP.judge_pointing(row("box"), "(100,80,120,90)")["correct"]  # IoU 0.25
+    assert QP.judge_pointing(row("box", "norm1000"), "(391,313,547,391)")["correct"]
+    assert not QP.judge_pointing(row("box"), "(120,90)")["readable"]
+    rows = [{"sample_id": "p", "qtype": "point_now", "qclass": "pointing", "family": "f", "options": [],
+             "messages": [{"role": "user", "content": "<image>q"}, {"role": "assistant", "content": "(120,90)"}],
+             **row("point")}]
+    a = QP.score(rows, ["(121, 91)"])[0]
+    assert a["correct"] and a["readable"] and a["compliant"] and a["parsed"] == "121,91"
+
+
 def test_rescore_follows_the_probe_relabelled_and_dropped(tmp_path):
     import argparse
     import json

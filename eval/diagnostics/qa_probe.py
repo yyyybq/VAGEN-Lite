@@ -158,10 +158,55 @@ def parse_answer(text: str, options: Sequence[str], yes_no: bool) -> Optional[st
     return None
 
 
+_NUM = r"-?\d+(?:\.\d+)?"
+
+
+def judge_pointing(row: Dict[str, Any], text: str) -> Dict[str, Any]:
+    """A pointing question's answer (group G of matrix v3, data_gen/transition_qa/pointing_qa.py; row "judge" point or
+    box, "box" the true box in pixels of "render_size", "coords" pixel or norm1000): the first 2 / 4 numbers of the
+    answer as the point / the box in the row's coordinates; right when the point lies in the true box / the boxes'
+    IoU is at least 0.5.  {"parsed", "readable", "correct", "compliant": exactly "(x,y)" / "(x1,y1,x2,y2)"}."""
+    t = _clean(text)
+    n = 2 if row["judge"] == "point" else 4
+    nums = [float(v) for v in re.findall(_NUM, t)][:n]
+    shape = r"\(\s*" + r"\s*,\s*".join([_NUM] * n) + r"\s*\)\.?"
+    out = {"parsed": None, "readable": False, "correct": False, "compliant": re.fullmatch(shape, t) is not None}
+    if len(nums) < n:
+        return out
+    w, h = row.get("render_size") or (256, 256)
+    sx, sy = (w / 1000.0, h / 1000.0) if row.get("coords") == "norm1000" else (1.0, 1.0)
+    x1, y1, x2, y2 = (float(v) for v in row["box"])
+    if n == 2:
+        x, y = nums[0] * sx, nums[1] * sy
+        correct = x1 <= x <= x2 and y1 <= y <= y2
+    else:
+        a = (min(nums[0], nums[2]) * sx, min(nums[1], nums[3]) * sy, max(nums[0], nums[2]) * sx,
+             max(nums[1], nums[3]) * sy)
+        inter = max(0.0, min(a[2], x2) - max(a[0], x1)) * max(0.0, min(a[3], y2) - max(a[1], y1))
+        union = (a[2] - a[0]) * (a[3] - a[1]) + (x2 - x1) * (y2 - y1) - inter
+        correct = union > 0 and inter / union >= 0.5
+    return dict(out, parsed=",".join(f"{v:g}" for v in nums), readable=True, correct=bool(correct))
+
+
+def free_form(row: Dict[str, Any]) -> bool:
+    """A question answered in free form (pointing: coordinates), neither by an option letter nor by Yes / No."""
+    return not (row.get("options") or []) and row["messages"][1]["content"] not in ("Yes", "No")
+
+
 def score(rows: Sequence[Dict[str, Any]], outputs: Sequence[str]) -> List[Dict[str, Any]]:
+    """Each answer read and judged.  A free-form question (``free_form``) is judged by ``judge_pointing`` when it is a
+    pointing question (row "judge" point / box), else kept as text, unjudged (readable and correct False)."""
     out = []
     for r, text in zip(rows, outputs):
         gold = r["messages"][1]["content"]
+        if free_form(r):
+            j = judge_pointing(r, text) if r.get("judge") in ("point", "box") else None
+            out.append({"sample_id": r["sample_id"], "qtype": r["qtype"], "qclass": r["qclass"], "family": r["family"],
+                        "gold": gold, "output": text, "parsed": j["parsed"] if j else None,
+                        "correct": bool(j and j["correct"]), "readable": bool(j and j["readable"]),
+                        "compliant": bool(j and j["compliant"]), "format": "exact" if j and j["compliant"] else "other",
+                        "n_options": None})
+            continue
         yes_no = gold in ("Yes", "No")
         got = parse_answer(text, r.get("options") or [], yes_no)
         out.append({"sample_id": r["sample_id"], "qtype": r["qtype"], "qclass": r["qclass"], "family": r["family"],

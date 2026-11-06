@@ -1,0 +1,22 @@
+{
+ "base_qwen3": {
+  "n": 30,
+  "parsed": 25,
+  "in_box_pixels": 0,
+  "in_box_norm1000": 18,
+  "examples": [
+   "There are none.",
+   "(256, 768)"
+  ]
+ },
+ "m3ds1s0_300": {
+  "n": 30,
+  "parsed": 23,
+  "in_box_pixels": 1,
+  "in_box_norm1000": 1,
+  "examples": [
+   "(71, 192)",
+   "0,0"
+  ]
+ }
+}

@@ -1,0 +1,980 @@
+diff --git a/data_gen/interiorgs_v10/evaluation.py b/data_gen/interiorgs_v10/evaluation.py
+index cd903aa3..fc87dd1f 100644
+--- a/data_gen/interiorgs_v10/evaluation.py
++++ b/data_gen/interiorgs_v10/evaluation.py
+@@ -370,6 +370,7 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
+     item = env.current_item or {}
+     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
+     done, trajectory, end_reason, earlier = False, [], None, []
++    pointed: Counter = Counter()  # group G of matrix v3: the turns the env judged a targets segment in
+     start = gate_summary(env._calculate_canonical_metric()) if frames is not None else None
+ 
+     def keep(image: Any, turn: int) -> Optional[str]:
+@@ -408,6 +409,10 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
+         collisions += blocked
+         valid = bool(tm.get("action_is_valid", bool(parsed)))
+         invalid += int(not valid)
++        pointing = step_info.get("pointing")  # group G of matrix v3: the targets segment's judgment
++        if pointing is not None:
++            pointed.update(turns=1, ok=int(pointing["ok"]), old=int(pointing["old"]))
++            pointed["score"] += float(pointing["score"])
+         metric = env._calculate_canonical_metric()
+         met = bool(metric and metric.get("success"))
+         if met and not success:
+@@ -417,10 +422,15 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
+             trajectory.append(dict(seen, answer=text, actions=[str(a) for a in parsed], valid=valid,
+                                    collisions=blocked, reward=round(float(reward), 4), met=met,
+                                    **gate_summary(metric)))
++            if pointing is not None:
++                trajectory[-1]["pointing"] = {k: pointing[k] for k in ("score", "ok", "error", "entries", "truth")}
+     row = {"index": index, "task_id": item.get("task_id"), "scene_id": item.get("scene_id"),
+            "task_type": item.get("task_type"), "d_star": int((item.get("difficulty") or {}).get("d_star", 0)),
+            "success": success, "actions_to_success": actions_to_success, "turns": turns,
+            "actions": attempted, "collisions": collisions, "invalid_turns": invalid}
++    if pointed:
++        row["pointing"] = {"turns": int(pointed["turns"]), "score": round(float(pointed["score"]), 4),
++                           "ok_turns": int(pointed["ok"]), "old_turns": int(pointed["old"])}
+     if sample is not None:
+         row["sample"] = int(sample)
+     if frames is not None:
+@@ -595,6 +605,18 @@ def token_entropy(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+     return {"entropy": round(sum(e * n for e, n in pairs) / tokens, 5), "entropy_tokens": tokens}
+ 
+ 
++def pointing_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
++    """Group G of matrix v3: over the turns the env judged a targets segment in, the mean pointing score and the
++    shares of well-formed answers and of answers without a targets segment (the old format); {} when none was."""
++    pts = [r["pointing"] for r in rows if r.get("pointing")]
++    turns = sum(p["turns"] for p in pts)
++    if not turns:
++        return {}
++    return {"pointing_score": round(sum(p["score"] for p in pts) / turns, 4),
++            "targets_ok_rate": round(sum(p["ok_turns"] for p in pts) / turns, 4),
++            "targets_old_rate": round(sum(p["old_turns"] for p in pts) / turns, 4)}
++
++
+ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+     ok = [r for r in rows if "error" not in r]
+     succ = [r for r in ok if r["success"]]
+@@ -628,6 +650,7 @@ def metrics(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+         "invalid_episode_mean": (round(sum(r["invalid_turns"] / r["turns"] for r in ok if r["turns"]) /
+                                        sum(1 for r in ok if r["turns"]), 4) if any(r["turns"] for r in ok) else None),
+         **token_entropy(ok),
++        **pointing_summary(ok),
+         "ended_by": dict(sorted(ended.items())) if ended else None,
+         # used up the action or turn limit (with or without meeting the task at the last action)
+         "used_limit": sum(ended[k] for k in LIMIT_ENDS) if ended else None,
+@@ -846,7 +869,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+     r.add_argument("--max-actions", type=int, default=None, help="action limit per task (template: 12); --max-turns sets the turn limit")
+     r.add_argument("--no-collision-end", action="store_true", help="3 blocked moves in a row no longer end the task")
+     r.add_argument("--collision-feedback", action="store_true", help="feedback says which moves of the turn were blocked")
+-    r.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
++    r.add_argument("--format-example", default=None,
++                   choices=["placeholder", "action_names", "targets_pixel", "targets_norm1000"],
+                    help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
+     r.add_argument("--entropy", action="store_true",
+                    help="round 12 freeze: record each answer's token entropy (top-20 log-probabilities, after the "
+diff --git a/data_gen/interiorgs_v10/tests/test_pointing.py b/data_gen/interiorgs_v10/tests/test_pointing.py
+new file mode 100644
+index 00000000..a3bc1f5a
+--- /dev/null
++++ b/data_gen/interiorgs_v10/tests/test_pointing.py
+@@ -0,0 +1,265 @@
++"""Group G of matrix v3 ("point first, then act", the user's instruction of 2026-11-06): the targets formats, the
++reading and judging of the targets segment (vagen/envs/active_spatial/pointing.py) and the env's pointing reward
++(off by default: every other run keeps its prompts, rewards and metrics), on a synthetic scene with a stub
++renderer and the live S0 template."""
++
++import tempfile
++import unittest
++from pathlib import Path
++from unittest import mock
++
++import numpy as np
++from PIL import Image
++
++from data_gen.interiorgs_v10 import rl_checks as RC
++from data_gen.interiorgs_v10 import train_chain as TCH
++from data_gen.interiorgs_v10 import training_prep as TP
++from data_gen.interiorgs_v10.run_scene import RunConfig, _jsonable, generate_scene
++from data_gen.interiorgs_v10.testing.synthetic_scene import write_synthetic_scenes
++from vagen.envs.active_spatial import pointing as PT
++from vagen.envs.active_spatial import prompt as P
++
++FRAME = Image.fromarray(np.random.default_rng(0).integers(0, 255, (256, 256, 3), dtype=np.uint8))
++ACT = "<action>turn_left|</action>"
++TRUTH = [{"letter": "A", "in_view": True, "box": [100.0, 80.0, 140.0, 100.0]},
++         {"letter": "B", "in_view": False, "box": None}]
++
++
++class FormatTest(unittest.TestCase):
++    def test_format_lines(self):
++        self.assertEqual(P.action_format_line("|", 5, "targets_pixel"),
++                         "<targets>A: (x,y); B: (x,y)</targets><action>move_forward|turn_left|</action>")
++        self.assertEqual(P.action_format_line("|", 5, "targets_norm1000", n_slots=1),
++                         "<targets>A: (x,y)</targets><action>move_forward|turn_left|</action>")
++        self.assertEqual(P.action_format_line("|", 5, "action_names"), "<action>move_forward|turn_left|</action>")
++        self.assertEqual(P.FORMAT_EXAMPLES, ("placeholder", "action_names", "targets_pixel", "targets_norm1000"))
++        with self.assertRaises(ValueError):
++            P.action_format_line("|", 5, "targets")
++
++    def test_format_blocks(self):
++        first = P.format_prompt_no_think(max_actions_per_step=5, action_sep="|", add_example=True,
++                                         format_example="targets_pixel", target_refs=["the lamp", "the sofa"])
++        self.assertEqual(first, "Respond with the targets (pixels of the 256 x 256 image), then the action:\n"
++                                "<targets>A: (x,y); B: (x,y)</targets><action>move_forward|turn_left|</action>\n"
++                                "A is the lamp; B is the sofa.\n\nYou can take up to 5 actions per step.\n\n"
++                                "Example: <targets>A: (120,88); B: none</targets><action>move_forward|</action>")
++        later = P.format_prompt_no_think(max_actions_per_step=5, action_sep="|", add_example=False,
++                                         format_example="targets_norm1000", target_refs=["the lamp"])
++        self.assertEqual(later, "Respond with the targets (0 to 1000 across the image), then the action:\n"
++                                "<targets>A: (x,y)</targets><action>move_forward|turn_left|</action>\n"
++                                "A is the lamp.\n\nYou can take up to 5 actions per step.\n")
++        for first_turn in (True, False):  # the other formats ignore the objects
++            self.assertEqual(P.format_prompt_no_think(max_actions_per_step=5, format_example="action_names",
++                                                      target_refs=["the lamp"], add_example=first_turn),
++                             P.format_prompt_no_think(max_actions_per_step=5, format_example="action_names",
++                                                      add_example=first_turn))
++
++    def test_system_prompt(self):
++        """A targets format changes the description, the response format and the example, nothing else."""
++        kw = dict(format="no_think", max_actions_per_step=5, reward_text="actual", task_type="equidistance")
++        old = P.system_prompt(format_example="action_names", **kw)
++        for fmt in P.TARGET_FORMATS:
++            new = P.system_prompt(format_example=fmt, **kw)
++            self.assertEqual(new, old.replace("You should provide only your action.", P.targets_description(fmt))
++                             .replace("Response format: <action>", "Response format: " + P.targets_line(2) + "<action>")
++                             .replace("Example:\n<action>move_forward|</action>", "Example:\n" + P.targets_example(fmt)))
++        self.assertNotIn("<targets>", old)
++        with self.assertRaises(ValueError):
++            P.system_prompt(format="free_think", format_example="targets_pixel")
++
++
++class ParseJudgeTest(unittest.TestCase):
++    def test_parse(self):
++        ok = PT.parse_targets("<targets>A: (120,88); B: none</targets>" + ACT, 2)
++        self.assertEqual((ok["ok"], ok["entries"]), (True, [(120.0, 88.0), None]))
++        loose = PT.parse_targets(" <targets> a : ( 1 , 2.5 ) ;B:NONE </targets>\n<action>turn_left|</action><|im_end|>", 2)
++        self.assertEqual((loose["ok"], loose["entries"]), (True, [(1.0, 2.5), None]))
++        bad = [("no_targets", ACT),
++               ("letters", "<targets>A: (1,2)</targets>" + ACT),
++               ("letters", "<targets>B: (1,2); A: none</targets>" + ACT),
++               ("structure", "I see the lamp. <targets>A: (1,2); B: none</targets>" + ACT),
++               ("structure", "<targets>A: (1,2); B: none</targets>" + ACT + " Done."),
++               ("structure", ACT + "<targets>A: (1,2); B: none</targets>"),
++               ("structure", "<targets>A: (1,2); B: none</targets>"),
++               ("entry", "<targets>A: near the door; B: none</targets>" + ACT),
++               ("entry", "<targets>A: (1,2); B: none;</targets>" + ACT)]
++        for error, text in bad:
++            got = PT.parse_targets(text, 2)
++            self.assertEqual((got["ok"], got["error"]), (False, error), text)
++        self.assertEqual({k: PT.parse_targets(ACT, 2)[k] for k in ("present", "action_only")},
++                         {"present": False, "action_only": True})
++        self.assertFalse(PT.parse_targets("I will turn. " + ACT, 2)["action_only"])
++        self.assertTrue(PT.parse_targets("<targets>A: (1,2)</targets>" + ACT, 1)["ok"])
++
++    def test_judge_and_label(self):
++        score = lambda entries, fmt="targets_pixel": PT.score(entries, TRUTH, fmt)  # noqa: E731
++        self.assertEqual(score([(120, 88), None]), 1.0)
++        self.assertEqual(score([(10, 10), None]), 0.5)
++        self.assertEqual(score([(120, 88), (5, 5)]), 0.5)  # a point for an object not in view
++        self.assertEqual(score([None, None]), 0.5)  # "none" for an object in view
++        self.assertEqual(score([(469, 344), None], "targets_norm1000"), 1.0)  # (120.1, 88.1) pixels
++        self.assertEqual(score([(120, 88), None], "targets_norm1000"), 0.5)  # (30.7, 22.5) pixels
++        self.assertEqual(score(None), 0.0)
++        self.assertEqual(PT.label(TRUTH, "targets_pixel"), "<targets>A: (120,90); B: none</targets>")
++        self.assertEqual(PT.label(TRUTH, "targets_norm1000"), "<targets>A: (469,352); B: none</targets>")
++        edge = [{"letter": "A", "in_view": True, "box": [10.6, 0.0, 11.4, 255.0]}]
++        for truth in (TRUTH, edge):
++            for fmt in P.TARGET_FORMATS:
++                parsed = PT.parse_targets(PT.label(truth, fmt) + ACT, len(truth))
++                self.assertTrue(parsed["ok"])
++                self.assertEqual(PT.score(parsed["entries"], truth, fmt), 1.0, (truth, fmt))
++        # a turn: ok only with a readable action; the old format is read, not a format failure
++        item = {"target_object": {"objects": [{"ref": "the lamp"}, {"ref": "the sofa"}]}}
++        with mock.patch.object(PT, "truth", lambda item, c2w, occ: TRUTH):
++            turn = PT.judge_turn("<targets>A: (120,88); B: none</targets>" + ACT, item, None, object(), "targets_pixel")
++            self.assertEqual((turn["score"], turn["ok"], turn["old"], turn["bad"]), (1.0, True, False, False))
++            turn = PT.judge_turn("<targets>A: (120,88); B: none</targets>" + ACT, item, None, object(), "targets_pixel",
++                                 readable=False)
++            self.assertEqual((turn["score"], turn["ok"], turn["bad"], turn["error"]), (0.0, False, True, "action"))
++            turn = PT.judge_turn(ACT, item, None, object(), "targets_pixel")
++            self.assertEqual((turn["score"], turn["old"], turn["bad"]), (0.0, True, False))
++            turn = PT.judge_turn("<targets>A: (120,88); B: none</targets>" + ACT, item, None, None, "targets_pixel")
++            self.assertEqual((turn["ok"], turn["error"]), (False, "no_truth"))
++        self.assertEqual(PT.target_refs(item), ["the lamp", "the sofa"])
++
++    def test_agent_loop_reads_the_judgment(self):
++        from vagen.agent_loop.gym_agent_loop import turn_pointing
++
++        info = {"metrics": {"turn_metrics": {"pointing_score": 0.5, "targets_bad": False, "targets_old": True,
++                                             "targets_ok": False, "action_is_valid": True}}}
++        self.assertEqual(turn_pointing(info), {"pointing_score": 0.5, "targets_bad": False, "targets_old": True})
++        self.assertEqual(turn_pointing({"metrics": {"turn_metrics": {"action_is_valid": True}}}), {})
++        self.assertEqual(turn_pointing(None), {})
++
++    def test_chain_passes_the_weight(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            chain = TCH.Chain({"tr": tmp, "sft_dir": str(root / "sft"), "endpoint": 300, "gs_root": "/ply",
++                               "rl": {"standard": "v10_p1_S0", "seed": 20261019, "rows": "/rows.jsonl",
++                                      "task_pool": "reserve", "format_example": "targets_pixel"},
++                               "rl_runs": {"ps0": {}}}, sleep=lambda s: None)
++            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_g_e9", "model": "/lf/e9"}
++            calls = {}
++            chain.sh = lambda args, **k: calls.__setitem__(args[args.index("--out") + 1], args)
++            chain.rl_config()
++            self.assertNotIn("--pointing-reward", calls[str(root / "rl_ps0")])
++            chain.plan["rl"]["pointing_reward"] = 0.1
++            chain.rl_config()
++            args = calls[str(root / "rl_ps0")]
++            self.assertEqual((args[args.index("--pointing-reward") + 1], args[args.index("--format-example") + 1]),
++                             ("0.1", "targets_pixel"))
++
++
++class EnvPointingTest(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls._tmp = tempfile.TemporaryDirectory()
++        cls.root = Path(cls._tmp.name)
++        paths = write_synthetic_scenes(cls.root / "scenes")
++        scene_dir = paths["two_rooms"]
++        cls.rows = _jsonable(generate_scene(scene_dir, scene_dir.name, RunConfig(target_tasks_per_scene=8)))["rows"]
++        cls.cfg = RC.env_config(Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml", "http://127.0.0.1:1/render")
++        cls.cfg["gs_root"] = str(scene_dir.parent)
++        cls.patch = mock.patch("vagen.envs.active_spatial.env.ActiveSpatialEnv._render_image", lambda self: FRAME.copy())
++        cls.patch.start()
++
++    @classmethod
++    def tearDownClass(cls):
++        cls.patch.stop()
++        cls._tmp.cleanup()
++
++    def env(self, row, name, **switches):
++        env, _ = RC.make_env([row], self.root / f"{name}.jsonl", dict(self.cfg, **switches))
++        obs, _ = env.reset(seed=0)
++        return env, obs
++
++    @staticmethod
++    def step(env, text):
++        _, reward, done, info = env.step(text)
++        trace = info.get("reward_trace") or {}
++        return float(reward), info["metrics"]["turn_metrics"], info, trace
++
++    def truth(self, env, row):
++        """The truth at the start frame, from the env and (as the SFT labels get it) from the scene files."""
++        c2w = env.view_engine.get_pose()
++        mine = PT.truth(row, c2w, PT.scene_occluders(self.cfg["gs_root"], row["scene_id"], self.cfg["wall_model"]))
++        self.assertEqual(mine, PT.truth(row, c2w, env._visibility_occluders()))
++        return mine
++
++    def rows_with(self, n_slots):
++        return [r for r in self.rows if len(PT.slot_objects(r)) == n_slots]
++
++    def test_off_by_default(self):
++        row = self.rows[0]
++        for name, fmt in (("off_names", "action_names"), ("off_placeholder", "placeholder")):
++            env, obs = self.env(row, name, prompt_format_example=fmt)
++            self.assertNotIn("<targets>", obs["obs_str"] + env.system_prompt())
++            reward, tm, info, trace = self.step(env, "<targets>A: (1,1)</targets>" + ACT)
++            self.assertTrue(tm["action_is_valid"])  # the action is read as before
++            self.assertFalse({"pointing_score", "targets_ok", "targets_old", "targets_bad"} & set(tm))
++            self.assertNotIn("pointing", info)
++            self.assertNotIn("pointing", trace.get("components") or {})
++
++    def test_prompt_names_the_objects(self):
++        for n in (1, 2):
++            rows = self.rows_with(n)
++            if not rows:
++                continue
++            env, obs = self.env(rows[0], f"prompt{n}", prompt_format_example="targets_pixel")
++            block = P.targets_format_block("targets_pixel", 5, "|", True, PT.target_refs(rows[0]))
++            self.assertTrue(obs["obs_str"].endswith("\n" + block), obs["obs_str"])
++            self.assertIn("Response format: <targets>A: (x,y); B: (x,y)</targets>", env.system_prompt())
++            obs2, _, _, _ = env.step(ACT)
++            self.assertTrue(obs2["obs_str"].endswith("\n" + P.targets_format_block("targets_pixel", 5, "|", False,
++                                                                                    PT.target_refs(rows[0]))))
++
++    def test_judged_on_the_frame_answered(self):
++        """At weight 0 the env judges and logs the segment and the reward is that of the same action without it; at
++        weight 0.1 it adds 0.1 times the score, recorded as the "pointing" component."""
++        rows = self.rows_with(2)[:2] + self.rows_with(1)[:1]
++        self.assertTrue(self.rows_with(2))
++        for row in rows:
++            base_env, _ = self.env(row, "base", prompt_format_example="action_names")
++            base, _, _, _ = self.step(base_env, ACT)
++            env, _ = self.env(row, "judge0", prompt_format_example="targets_pixel")
++            truth = self.truth(env, row)
++            self.assertTrue(any(t["in_view"] for t in truth))  # the start rule: a target identifiable at the start
++            right = PT.label(truth, "targets_pixel") + ACT
++            reward, tm, info, trace = self.step(env, right)
++            self.assertEqual((tm["pointing_score"], tm["targets_ok"], tm["targets_old"], tm["targets_bad"]),
++                             (1.0, True, False, False))
++            self.assertEqual(info["pointing"]["truth"], truth)
++            self.assertAlmostEqual(reward, base, places=9)
++            self.assertEqual(trace["components"]["pointing"]["applied"], 0.0)
++            cases = [(0.1, right, 1.0)]
++            if len(truth) == 2:  # half right: the first object as labelled, the second wrong
++                first = PT.label(truth[:1], "targets_pixel")[len("<targets>"):-len("</targets>")]
++                second = "B: (300,300)" if truth[1]["in_view"] else "B: (5,5)"
++                half = f"<targets>{first}; {second}</targets>" + ACT
++                cases += [(0.1, half, 0.5), (0.25, half, 0.5)]
++            for weight, text, score in cases:
++                env, _ = self.env(row, f"judge_{weight}", prompt_format_example="targets_pixel", pointing_reward=weight)
++                reward, tm, info, trace = self.step(env, text)
++                self.assertEqual(tm["pointing_score"], score)
++                self.assertAlmostEqual(reward, base + weight * score, places=9)
++                self.assertAlmostEqual(trace["components"]["pointing"]["applied"], weight * score, places=9)
++                self.assertAlmostEqual(trace["accounting"]["reconstruction_error"], 0.0, places=9)
++
++    def test_old_bad_and_unreadable_answers(self):
++        row = self.rows[0]
++        base_env, _ = self.env(row, "base_old", prompt_format_example="action_names")
++        base, _, _, _ = self.step(base_env, ACT)
++        cases = [(ACT, (False, True, False), base),  # the old format: read, no pointing reward
++                 ("I will turn. " + ACT, (False, False, True), base),  # free text: read, but not the short structure
++                 ("<targets>A: (1,1)</targets>", (False, False, True), None)]  # no action: the invalid penalty only
++        for text, flags, expected in cases:
++            env, _ = self.env(row, "old_bad", prompt_format_example="targets_pixel", pointing_reward=0.1)
++            reward, tm, info, trace = self.step(env, text)
++            self.assertEqual((tm["targets_ok"], tm["targets_old"], tm["targets_bad"]), flags, text)
++            self.assertEqual(tm["pointing_score"], 0.0)
++            self.assertAlmostEqual(reward, base if expected is not None else env._invalid_penalty(), places=9)
++            self.assertAlmostEqual(trace["accounting"]["reconstruction_error"], 0.0, places=9)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/data_gen/interiorgs_v10/tests/test_training_prep.py b/data_gen/interiorgs_v10/tests/test_training_prep.py
+index ce8dcecb..e6b39438 100644
+--- a/data_gen/interiorgs_v10/tests/test_training_prep.py
++++ b/data_gen/interiorgs_v10/tests/test_training_prep.py
+@@ -574,6 +574,63 @@ class TrainingPrepTest(unittest.TestCase):
+         with self.assertRaises(SystemExit):
+             config("rl_pool_flagged", task_pool="reserve", exclude=str(flags))
+ 
++    def test_rl_config_targets_format_and_pointing_reward(self):
++        """Group G of matrix v3 (2026-11-06): a targets format example and --pointing-reward reach the env config and
++        the report; the SFT conversations' targets format is recognised (not taken for action_names); the pointing
++        reward needs a targets format; the RL text must be the start model's."""
++        import yaml
++
++        from vagen.envs.active_spatial import prompt as P
++
++        sft = self.root / "sft_rl_targets"
++        TP.cmd_sft_frames(Namespace(run=str(self.run_dir), split_manifest=str(self.manifest), splits="train,val",
++                                    limit=0, out=str(sft)))
++        rows = [dict(r, reserve=(r["split"] == "train" and i % 2 == 1)) for i, r in enumerate(TP._jsonl(sft / "rows.jsonl"))]
++        (sft / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
++        template = self.root / "ppo_template_targets.yaml"
++        template.write_text(yaml.safe_dump({
++            "algorithm": {"adv_estimator": "no_concat_gae"}, "data": {"train_batch_size": 12},
++            "trainer": {"n_gpus_per_node": 8, "concat_multi_turn": False},
++            "actor_rollout_ref": {"model": {"path": "old"}, "actor": {"ppo_mini_batch_size": 8},
++                                  "rollout": {"n": 4, "tensor_model_parallel_size": 4, "agent": {"num_workers": 8}}},
++            "critic": {"model": {"path": "old", "tokenizer_path": "old"}}}))
++        formal = [r for r in rows if r["split"] == "train" and not r["reserve"]]
++        convs = {}
++        for fmt in ("action_names", "targets_pixel", "targets_norm1000"):
++            block = P.format_prompt["no_think"](max_actions_per_step=5, action_sep="|", add_example=True,
++                                                format_example=fmt, target_refs=["the lamp", "the sofa"])
++            convs[fmt] = self.root / f"sft_conv_g_{fmt}.jsonl"
++            convs[fmt].write_text("".join(json.dumps({"source_task_id": r["task_id"], "conversations": [
++                {"role": "system", "content": "s"}, {"role": "user", "content": "[Initial Observation]:\n<image>\n" + block},
++                {"role": "assistant", "content": "<action>move_forward|</action>"}]}) + "\n" for r in formal))
++            self.assertEqual(TP.sft_format_examples([convs[fmt]]), [fmt])
++
++        def config(out_name, **kw):
++            TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(
++                Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml"), ppo_template=str(template),
++                gs_root="/ply", model="/m", name="t", run_root=str(self.root / f"run_{out_name}"), val_limit=0,
++                trial=False, out=str(self.root / out_name), task_pool="reserve", **kw))
++            out = self.root / out_name
++            return (yaml.safe_load((out / "train_env.yaml").read_text())["envs"][0]["config"],
++                    json.loads((out / "rl_config_report.json").read_text()))
++
++        env, report = config("rl_g", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_pixel",
++                             pointing_reward=0.1)
++        self.assertEqual((env["prompt_format_example"], env["pointing_reward"]), ("targets_pixel", 0.1))
++        self.assertEqual((report["format_example"], report["pointing_reward"]), ("targets_pixel", 0.1))
++        self.assertIn("Response format: <targets>A: (x,y); B: (x,y)</targets><action>move_forward|turn_left|</action>",
++                      TP.env_system_prompt(env, "fov_inclusion"))
++        env0, report0 = config("rl_g0", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_pixel")
++        self.assertNotIn("pointing_reward", env0)
++        self.assertIsNone(report0["pointing_reward"])
++        self.assertEqual({k: v for k, v in env.items() if k not in ("pointing_reward", "jsonl_path")},
++                         {k: v for k, v in env0.items() if k != "jsonl_path"})
++        with self.assertRaises(SystemExit):  # the pointing reward needs a targets format
++            config("rl_g_names", sft_trajectories=[str(convs["action_names"])], format_example="action_names",
++                   pointing_reward=0.1)
++        with self.assertRaises(SystemExit):  # the RL text must be the start model's
++            config("rl_g_other", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_norm1000")
++
+     def test_rl_config_format_example(self):
+         """Round 12 freeze (the user's 3.1.1): --format-example sets the env's format line (placeholder names or
+         real action names; default the SFT export's); the start model's SFT conversations must show the same text."""
+diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
+index 7f3d585d..527c3c96 100644
+--- a/data_gen/interiorgs_v10/train_chain.py
++++ b/data_gen/interiorgs_v10/train_chain.py
+@@ -1396,6 +1396,7 @@ class Chain:
+                 args += ["--ppo-template", str(self.plan["ppo_template"])]
+             for key, flag in (("standard", "--standard"), ("seed", "--seed"), ("history_mode", "--history-mode"),
+                               ("format_example", "--format-example"), ("invalid_penalty", "--invalid-penalty"),
++                              ("pointing_reward", "--pointing-reward"),  # group G of matrix v3
+                               ("group_filter", "--group-filter"), ("keep_std_threshold", "--keep-std-threshold"),
+                               ("keep_std_floor", "--keep-std-floor"),
+                               ("progress_version", "--progress-version"),
+diff --git a/data_gen/interiorgs_v10/training_prep.py b/data_gen/interiorgs_v10/training_prep.py
+index 4a1305e0..3e24e822 100644
+--- a/data_gen/interiorgs_v10/training_prep.py
++++ b/data_gen/interiorgs_v10/training_prep.py
+@@ -571,7 +571,10 @@ def sft_format_examples(paths: Sequence[Path], max_actions: int = 5, action_sep:
+             continue
+         turns = json.loads(line).get("conversations") or []
+         text = next((str(t.get("content", "")) for t in turns if t.get("role") == "user"), "")
+-        found |= {f for f in P.FORMAT_EXAMPLES if P.action_format_line(action_sep, max_actions, f) in text}
++        targets = {f for f in P.TARGET_FORMATS  # group G of matrix v3: a targets format names itself in its header
++                   if P.targets_format_block(f, max_actions, action_sep, False).split("\n", 1)[0] in text}
++        found |= targets or {f for f in ("placeholder", "action_names")
++                             if P.action_format_line(action_sep, max_actions, f) in text}
+     return sorted(found)
+ 
+ 
+@@ -672,6 +675,13 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+         history["env"]["lenient_parse"] = True
+     if getattr(args, "invalid_penalty", None) is not None:  # round 12 freeze (3.1.3): the unreadable answer's penalty
+         history["env"]["invalid_penalty_override"] = float(args.invalid_penalty)
++    if getattr(args, "pointing_reward", None) is not None:  # group G of matrix v3 (2026-11-06): the pointing reward
++        if not fmt.startswith("targets_"):
++            raise SystemExit(f"--pointing-reward needs a targets format example (--format-example targets_...), "
++                             f"not {fmt!r}")
++        history["env"]["pointing_reward"] = float(args.pointing_reward)
++    if fmt.startswith("targets_") and (int(tcfg.get("image_width", 0)), int(tcfg.get("image_height", 0))) != (256, 256):
++        raise SystemExit("a targets format example needs the 256 x 256 frames its boxes are judged on")
+     history["env"].update(design_variant_overrides(args, history["env"]))
+     env_paths = {}
+     for split, selected in parts.items():
+@@ -845,6 +855,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+               "model_type": getattr(args, "model_type", None), "model_type_overrides": type_overrides,
+               "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
+                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
++              "pointing_reward": (float(args.pointing_reward) if getattr(args, "pointing_reward", None) is not None
++                                  else None),
+               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
+               "entropy_coeff_override": getattr(args, "entropy_coeff", None),
+               "kl_loss_coef": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("kl_loss_coef"),
+@@ -1148,10 +1160,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+     c.add_argument("--task-pool", choices=TASK_POOLS, default=None,
+                    help="round 11: the train tasks RL takes: formal (rounds 6-10, the default) or reserve (rows from sft-frames "
+                         "--include-reserve; the rule since round 11: RL trains on tasks SFT never trained on)")
+-    c.add_argument("--format-example", default=None, choices=["placeholder", "action_names"],
++    c.add_argument("--format-example", default=None,
++                   choices=["placeholder", "action_names", "targets_pixel", "targets_norm1000"],
+                    help="round 12 freeze: the format line shows placeholder names (action1|action2|...) or real "
+                         "action names; default the SFT export's (admission policy), and it must match the SFT "
+-                        "conversations given with --sft-trajectories")
++                        "conversations given with --sft-trajectories; group G of matrix v3: targets_pixel / "
++                        "targets_norm1000, a targets segment before the action (prompt.TARGET_FORMATS)")
+     c.add_argument("--lenient-parse", action="store_true",
+                    help="round 12 freeze: the env reads an answer leniently when the strict reading finds no action "
+                         "(spaces instead of underscores, the first complete action block, a missing opening tag)")
+@@ -1170,6 +1184,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+     c.add_argument("--invalid-penalty", type=float, default=None,
+                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
+                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
++    c.add_argument("--pointing-reward", type=float, default=None,
++                   help="group G of matrix v3: the weight of the pointing reward (env pointing_reward: each turn the "
++                        "weight times the share of the task's objects the targets segment places right; needs a "
++                        "targets format example); default none; the system prompt keeps the SFT text")
+     c.add_argument("--progress-version", default=None, choices=["grouped_gated", "grouped_soft", "optimal"],
+                    help="round 12 freeze, dense-reward variant V3: the grouped progress with the hard gate (D_cond's) "
+                         "or the soft gate (relation group times the frame group's continuous score); round 13 (B): "
+diff --git a/vagen/agent_loop/gym_agent_loop.py b/vagen/agent_loop/gym_agent_loop.py
+index bd84f272..4bc039c2 100644
+--- a/vagen/agent_loop/gym_agent_loop.py
++++ b/vagen/agent_loop/gym_agent_loop.py
+@@ -70,6 +70,13 @@ def turn_has_think(info: Any) -> bool:
+     return bool(tm.get("has_think", False))
+ 
+ 
++def turn_pointing(info: Any) -> Dict[str, Any]:
++    """Group G of matrix v3: the turn's pointing judgment (the env's turn_metrics pointing_score, targets_bad,
++    targets_old); {} when the env does not judge a targets segment."""
++    tm = ((info or {}).get("metrics") or {}).get("turn_metrics") or {} if isinstance(info, dict) else {}
++    return {k: tm[k] for k in ("pointing_score", "targets_bad", "targets_old") if k in tm}
++
++
+ class AgentData:
+     """Container for all mutable trajectory state."""
+     def __init__(
+@@ -107,6 +114,10 @@ class AgentData:
+         self.invalid_spans: List[List[int]] = []
+         self.progress_return: float = 0.0  # round 12 freeze, V8: the env's applied progress reward, summed
+         self.think_turns: int = 0    # turns whose answer had thinking text (turn_metrics.has_think)
++        # group G of matrix v3: the summed pointing score, the turns with a malformed / without a targets segment
++        self.pointing_sum: float = 0.0
++        self.targets_bad_turns: int = 0
++        self.targets_old_turns: int = 0
+ 
+         # Episode metadata – populated from env info during the episode
+         # These fields are written into reward_extra_info so they appear
+@@ -347,6 +358,12 @@ class GymAgentLoop(AgentLoopBase):
+                     "invalid_action":     agent_data.invalid_turns / max(1, agent_data.env_turns),
+                     # the share of the episode's turns whose answer had thinking text (transition/think_rate)
+                     "think_rate":         agent_data.think_turns / max(1, agent_data.env_turns),
++                    # group G of matrix v3 (2026-11-06): the episode's mean pointing score per turn and the share of
++                    # its turns with a malformed / without a targets segment; 0 when the env judges no targets
++                    # (transition/pointing_score, transition/targets_bad_rate, transition/targets_old_rate)
++                    "pointing_score":     agent_data.pointing_sum / max(1, agent_data.env_turns),
++                    "targets_bad":        agent_data.targets_bad_turns / max(1, agent_data.env_turns),
++                    "targets_old":        agent_data.targets_old_turns / max(1, agent_data.env_turns),
+                 },
+             },
+         )
+@@ -458,6 +475,10 @@ class GymAgentLoop(AgentLoopBase):
+         agent_data.invalid_turns += int(turn_invalid(info))
+         agent_data.end_turn(turn_invalid(info))  # round 12 freeze (vagen/invalid_turns.py)
+         agent_data.think_turns += int(turn_has_think(info))
++        pointing = turn_pointing(info)  # group G of matrix v3
++        agent_data.pointing_sum += float(pointing.get("pointing_score", 0.0))
++        agent_data.targets_bad_turns += int(bool(pointing.get("targets_bad", False)))
++        agent_data.targets_old_turns += int(bool(pointing.get("targets_old", False)))
+         # ── update episode metadata from step info ───────────────────────────
+         if info:
+             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))
+diff --git a/vagen/envs/active_spatial/env.py b/vagen/envs/active_spatial/env.py
+index e9371b87..84fe20d8 100644
+--- a/vagen/envs/active_spatial/env.py
++++ b/vagen/envs/active_spatial/env.py
+@@ -37,7 +37,7 @@ import os
+ from ._compat import BaseEnv, convert_numpy_to_PIL, PARSE_FUNC_MAP
+ 
+ from .env_config import ActiveSpatialEnvConfig
+-from .prompt import system_prompt, init_observation_template, action_template, format_prompt
++from .prompt import system_prompt, init_observation_template, action_template, format_prompt, TARGET_FORMATS
+ from .utils import (
+     ViewManipulator,
+     count_lines,
+@@ -67,6 +67,7 @@ from .visibility_checker import VisibilityChecker, VisibilityResult, create_visi
+ from .canonical_camera import CANONICAL_CAMERA_H1_RESIZE_V1, build_canonical_camera
+ from .canonical_task_metrics import score_canonical_task, uses_canonical_backend
+ from .target_visibility import OccluderSet, new_milestones, score_with_visibility
++from .pointing import target_refs
+ from .reward_trace import (
+     TurnRewardTrace,
+     near_reward_values,
+@@ -1191,6 +1192,19 @@ class ActiveSpatialEnv(BaseEnv):
+                 self.episode_done = True
+                 info["early_terminated_invalid"] = True
+         
++        # Group G of matrix v3 (the user's instruction of 2026-11-06, pointing.py): the answer's targets segment,
++        # judged on the frame the answer was given on (prev_E); pointing_reward times the turn's score is added (the
++        # score is 0 without an executable action or when the answer is not exactly the short structure).
++        if self._pointing_on():
++            pointing = self._pointing_turn(action_str, prev_E, bool(action_executable and strict_format_correct))
++            weight = float(self.config.get("pointing_reward", 0.0) or 0.0)
++            if weight:
++                self.reward += weight * pointing["score"]
++            self._reward_trace.record("pointing", raw=pointing["score"], scale=weight, enabled=bool(weight))
++            metrics["turn_metrics"].update(pointing_score=pointing["score"], targets_ok=pointing["ok"],
++                                           targets_old=pointing["old"], targets_bad=pointing["bad"])
++            info["pointing"] = pointing
++
+         # Build collision feedback message
+         if step_collisions:
+             collision_msgs = [_collision_text(cr) for cr in step_collisions]
+@@ -1494,6 +1508,23 @@ class ActiveSpatialEnv(BaseEnv):
+             metric = {**metric, **opt, "shaping_score": opt["optimal_progress"], "progress_version": "optimal"}
+         return metric
+ 
++    def _pointing_on(self) -> bool:
++        """Group G of matrix v3: the env judges the answers' targets segment (a targets format example, or a pointing
++        reward)."""
++        return (str(self.config.get("prompt_format_example", "placeholder")) in TARGET_FORMATS
++                or bool(float(self.config.get("pointing_reward", 0.0) or 0.0)))
++
++    def _pointing_turn(self, answer: str, c2w: Any, readable: bool) -> Dict[str, Any]:
++        """The turn's targets segment read and judged on the frame at ``c2w`` (pointing.judge_turn)."""
++        from . import pointing
++
++        fmt = str(self.config.get("prompt_format_example", "placeholder"))
++        if fmt not in TARGET_FORMATS:
++            raise ValueError(f"pointing_reward needs a targets format example {tuple(TARGET_FORMATS)}, not {fmt!r}")
++        item = self.current_item if isinstance(self.current_item, dict) else {}
++        occ = self._visibility_occluders() if item and uses_canonical_backend(item) else None
++        return pointing.judge_turn(answer, item, c2w, occ, fmt, readable=readable)
++
+     def _visibility_occluders(self) -> OccluderSet:
+         """Occluders of the current scene (labels.json boxes + structure walls), cached per scene."""
+         scene_id = self.current_item.get("scene_id") if isinstance(self.current_item, dict) else None
+@@ -2128,6 +2159,7 @@ class ActiveSpatialEnv(BaseEnv):
+             action_sep=self.config.action_sep,
+             add_example=init_obs,
+             format_example=self.config.get("prompt_format_example", "placeholder"),
++            target_refs=target_refs(self.current_item),  # group G of matrix v3: the objects of a targets format
+         )
+         obs_str += "\n" + format_prompt_text
+         
+@@ -2238,6 +2270,7 @@ class ActiveSpatialEnv(BaseEnv):
+             action_sep=self.config.action_sep,
+             add_example=init_obs,
+             format_example=self.config.get("prompt_format_example", "placeholder"),
++            target_refs=target_refs(self.current_item),  # group G of matrix v3: the objects of a targets format
+         )
+         obs_str += "\n" + format_prompt_text
+         
+diff --git a/vagen/envs/active_spatial/env_config.py b/vagen/envs/active_spatial/env_config.py
+index 00749a8c..49b06c28 100644
+--- a/vagen/envs/active_spatial/env_config.py
++++ b/vagen/envs/active_spatial/env_config.py
+@@ -207,6 +207,11 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
+     # (e.g. -0.5); None (default): invalid_format_penalty.  The system prompt keeps showing invalid_format_penalty,
+     # the SFT conversations' text, as it does not show the dense reward's progress term either.
+     invalid_penalty_override: Optional[float] = None
++    # Group G of matrix v3 (the user's instruction of 2026-11-06): the weight of the pointing reward, added each turn
++    # times the turn's pointing score (pointing.py: the share of the task's objects the answer's targets segment places
++    # right on the frame it was given on); 0 (default): none.  With a targets format example (prompt.TARGET_FORMATS)
++    # the env judges the segment and logs it (turn_metrics pointing_score, targets_ok / _old / _bad) at any weight.
++    pointing_reward: float = 0.0
+     max_consecutive_invalid_actions: int = 3  # Terminate episode after this many consecutive invalid actions
+     premature_done_penalty: float = -0.3  # Penalty when 'done' is called without reaching the target
+     
+diff --git a/vagen/envs/active_spatial/pointing.py b/vagen/envs/active_spatial/pointing.py
+new file mode 100644
+index 00000000..11cf3745
+--- /dev/null
++++ b/vagen/envs/active_spatial/pointing.py
+@@ -0,0 +1,194 @@
++"""Group G of matrix v3 ("point first, then act"; the user's instruction of 2026-11-06, part 4): the targets segment
++an answer gives before its action, the truth it is judged against, and the judgment.
++
++    <targets>A: (120,88); B: none</targets><action>move_forward|turn_left|</action>
++
++A, B, ... are the objects the task names (``target_object.objects``, in the order the task text names them; the
++format block of each user turn says which object each letter is, prompt.targets_format_block).  (x,y) is a point of
++the object in the frame the answer was given on: pixels of the 256 x 256 image ("targets_pixel") or 0 to 1000 across
++the image ("targets_norm1000", Qwen-VL's grounding convention); x from the left edge, y from the top edge.  "none":
++the object is not clearly visible in that frame.
++
++Truth: an object is in view when it is clearly visible by the success metrics' own rule
++(target_visibility.object_visibility, the face rule with the scene's occluders); its box is its 3D box projected
++into the frame and clipped to it (visual_bbox_metrics._project_object).  A point inside the box of an object in view
++scores 1, "none" for an object not in view scores 1, anything else 0.  A turn scores the mean over the task's
++objects, and 0 unless the whole answer is exactly the targets segment for those objects, in order, followed by the
++action segment: short structure only, no free text (the lesson of group E).  The same functions give the SFT labels
++(``label``: the centre of each box) and the RL reward (env pointing_reward times the turn's score)."""
++
++from __future__ import annotations
++
++import math
++import re
++from typing import Any, Dict, List, Optional, Sequence, Tuple
++
++from .prompt import SLOT_LETTERS, TARGET_FORMATS
++
++FRAME_SIZE = (256, 256)  # target_visibility.RENDER_SIZE: the frame the success metrics and the boxes use
++Point = Optional[Tuple[float, float]]  # None: "none"
++
++_SPECIAL = re.compile(r"<\|[^>]*\|>")
++_STRUCTURE = re.compile(r"\s*<targets>([^<]*)</targets>\s*<action>[^<]*</action>\s*", re.IGNORECASE)
++_ACTION_ONLY = re.compile(r"\s*<action>[^<]*</action>\s*", re.IGNORECASE)
++_NUM = r"(-?\d+(?:\.\d+)?)"
++_ENTRY = re.compile(rf"\s*([A-Za-z])\s*:\s*(?:\(\s*{_NUM}\s*,\s*{_NUM}\s*\)|(none))\s*", re.IGNORECASE)
++
++
++# ---------------------------------------------------------------------------
++# the task's objects
++# ---------------------------------------------------------------------------
++def slot_objects(item: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
++    """The objects the task names, in the order its text names them (target_object.objects; A, B, ...)."""
++    objs = ((item or {}).get("target_object") or {}).get("objects") or []
++    return [o for o in objs if isinstance(o, dict)][: len(SLOT_LETTERS)]
++
++
++def target_refs(item: Optional[Dict[str, Any]]) -> List[str]:
++    """The task text's words for each object (its ``ref``), as the format block lists them."""
++    return [str(o.get("ref") or ("the " + str(o.get("label") or "object"))) for o in slot_objects(item)]
++
++
++# ---------------------------------------------------------------------------
++# reading an answer
++# ---------------------------------------------------------------------------
++def parse_targets(text: Any, n_slots: int) -> Dict[str, Any]:
++    """The answer's targets segment.  {"present": the answer has a <targets> tag, "action_only": the whole answer is
++    exactly one action segment (the old format), "ok": the whole answer is exactly a targets segment for the
++    ``n_slots`` objects (letters A, B, ... in order, each "(x,y)" or "none") followed by an action segment, "entries":
++    one point or None per object when ok, "error": "" or why not ok (no_targets, structure, entry, letters)}.
++    Special tokens (<|...|>) are ignored."""
++    t = _SPECIAL.sub("", str(text or ""))
++    out = {"present": "<targets" in t.lower(), "action_only": _ACTION_ONLY.fullmatch(t) is not None, "ok": False,
++           "entries": None, "error": ""}
++    if not out["present"]:
++        return dict(out, error="no_targets")
++    m = _STRUCTURE.fullmatch(t)
++    if m is None:
++        return dict(out, error="structure")
++    letters: List[str] = []
++    entries: List[Point] = []
++    for part in m.group(1).split(";"):
++        e = _ENTRY.fullmatch(part)
++        if e is None:
++            return dict(out, error="entry")
++        letters.append(e.group(1).upper())
++        entries.append(None if e.group(4) else (float(e.group(2)), float(e.group(3))))
++    if n_slots < 1 or letters != list(SLOT_LETTERS[:n_slots]):
++        return dict(out, error="letters")
++    return dict(out, ok=True, entries=entries)
++
++
++def to_pixels(point: Point, format_example: str, size: Tuple[int, int] = FRAME_SIZE) -> Point:
++    """A point of the answer in pixels of the frame."""
++    if point is None:
++        return None
++    x, y = point
++    if TARGET_FORMATS[format_example] == "norm1000":
++        return (x * size[0] / 1000.0, y * size[1] / 1000.0)
++    return (float(x), float(y))
++
++
++# ---------------------------------------------------------------------------
++# the truth on a frame
++# ---------------------------------------------------------------------------
++def truth(item: Dict[str, Any], c2w: Any, occ: Any) -> List[Dict[str, Any]]:
++    """Per object of the task: {"letter", "in_view": clearly visible from ``c2w`` (the success metrics' face rule
++    with the occluders ``occ``), "box": [x1, y1, x2, y2] in pixels (the projected 3D box, clipped) or None}."""
++    import numpy as np
++
++    from .target_visibility import item_camera, object_visibility
++    from .visual_bbox_metrics import _project_object
++
++    K, width, height = item_camera(item)
++    if (width, height) != FRAME_SIZE:
++        raise ValueError(f"the boxes are judged on a {FRAME_SIZE} frame, the item's camera gives {(width, height)}")
++    c2w = np.asarray(c2w, float)
++    out = []
++    for letter, obj in zip(SLOT_LETTERS, slot_objects(item)):
++        seen, box = False, None
++        if "bbox_min" in obj and "bbox_max" in obj:
++            proj = _project_object(obj, c2w, K, width, height)
++            if proj.get("visible") and proj.get("bbox") is not None:
++                seen = bool(object_visibility(c2w, obj, occ, K, width, height)["visible"])
++                box = [round(float(v), 3) for v in proj["bbox"]] if seen else None
++        out.append({"letter": letter, "in_view": seen, "box": box})
++    return out
++
++
++def scene_occluders(gs_root: str, scene_id: str, wall_model: str = "thick") -> Any:
++    """The occluders of a scene as the RL env builds them with its collision detector (env._visibility_occluders):
++    labels.json boxes and the structure walls of ``wall_model`` (the v10 env templates': "thick")."""
++    from .collision_detector import create_collision_detector
++    from .target_visibility import OccluderSet
++
++    detector = create_collision_detector({"wall_model": wall_model})
++    detector.load_scene_from_gs_root(gs_root, scene_id)
++    return OccluderSet.from_detector(detector)
++
++
++# ---------------------------------------------------------------------------
++# judging, labelling
++# ---------------------------------------------------------------------------
++def hit(point: Point, t: Dict[str, Any]) -> bool:
++    """A point (pixels) inside the box of an object in view, or None for an object not in view."""
++    if not t["in_view"]:
++        return point is None
++    if point is None:
++        return False
++    x, y = point
++    x1, y1, x2, y2 = t["box"]
++    return x1 <= x <= x2 and y1 <= y <= y2
++
++
++def score(entries: Optional[Sequence[Point]], truth_rows: Sequence[Dict[str, Any]], format_example: str) -> float:
++    """The share of the task's objects the entries place right (0 without entries or truth)."""
++    if not entries or not truth_rows or len(entries) != len(truth_rows):
++        return 0.0
++    return sum(hit(to_pixels(e, format_example), t) for e, t in zip(entries, truth_rows)) / len(truth_rows)
++
++
++def judge_turn(answer: Any, item: Dict[str, Any], c2w: Any, occ: Any, format_example: str,
++               readable: bool = True) -> Dict[str, Any]:
++    """One turn: {"score", "ok": the short structure for the task's objects and a readable action, "old": exactly one
++    readable action segment, nothing else (the old format: read, not counted as a format failure), "bad": neither
++    (a format failure: a malformed segment, free text, no readable action), "error", "entries", "truth"}.  ``occ``
++    None: no truth (a row without the canonical camera), never ok."""
++    n = len(slot_objects(item))
++    parsed = parse_targets(answer, n)
++    ok = bool(parsed["ok"] and readable)
++    error = parsed["error"] or ("" if readable else "action")
++    rows: List[Dict[str, Any]] = []
++    if ok:
++        if occ is None:
++            ok, error = False, "no_truth"
++        else:
++            rows = truth(item, c2w, occ)
++    old = bool(parsed["action_only"] and readable)
++    return {"score": float(score(parsed["entries"], rows, format_example)) if ok else 0.0, "ok": ok, "old": old,
++            "bad": not ok and not old, "error": "" if ok else error, "entries": parsed["entries"], "truth": rows}
++
++
++def box_point(box: Sequence[float]) -> Tuple[int, int]:
++    """The label point of a box: its centre, rounded to whole units inside the box."""
++    def one(lo: float, hi: float) -> int:
++        c = int(round((lo + hi) / 2.0))
++        a, b = math.ceil(lo), math.floor(hi)
++        return min(max(c, a), b) if a <= b else c
++
++    return one(box[0], box[2]), one(box[1], box[3])
++
++
++def label(truth_rows: Sequence[Dict[str, Any]], format_example: str, size: Tuple[int, int] = FRAME_SIZE) -> str:
++    """The SFT label of a turn's targets segment: the centre of each box in the format's coordinates (whole units,
++    inside the box), "none" for an object not in view."""
++    sx, sy = ((1000.0 / size[0], 1000.0 / size[1]) if TARGET_FORMATS[format_example] == "norm1000" else (1.0, 1.0))
++
++    def one(t: Dict[str, Any]) -> str:
++        if not t["in_view"]:
++            return f"{t['letter']}: none"
++        x1, y1, x2, y2 = t["box"]
++        x, y = box_point([x1 * sx, y1 * sy, x2 * sx, y2 * sy])
++        return f"{t['letter']}: ({x},{y})"
++
++    return "<targets>" + "; ".join(one(t) for t in truth_rows) + "</targets>"
+diff --git a/vagen/envs/active_spatial/prompt.py b/vagen/envs/active_spatial/prompt.py
+index 02ceb749..1138c656 100644
+--- a/vagen/envs/active_spatial/prompt.py
++++ b/vagen/envs/active_spatial/prompt.py
+@@ -1,6 +1,8 @@
+ # Active Spatial Intelligence Environment Prompts
+ # This file defines system prompts and format configurations for the active spatial navigation task.
+ 
++from typing import Sequence
++
+ FORMAT_CONFIGS = {
+     "free_think": {
+         "description": "You should first give your thought process, and then your answer.",
+@@ -39,24 +41,80 @@ FORMAT_CONFIGS = {
+ # RL runs copied those names into their answers (cluster_runs/FORMAT_DRIFT_R12.md).  "action_names" shows real
+ # action names, <action>move_forward|turn_left|</action> (move_forward alone when one action is allowed per step);
+ # both exist in every action space.  The system prompt's "Response format" line shows the same.
+-FORMAT_EXAMPLES = ("placeholder", "action_names")
++# Group G of matrix v3 ("point first, then act"; the user's instruction of 2026-11-06, part 4): a short targets
++# segment before the action, <targets>A: (x,y); B: (x,y)</targets><action>move_forward|turn_left|</action>: where each
++# object the task names is in the current image (A, B, ... as the format block lists them, in the task text's words),
++# or "none" for an object that is not clearly visible; the action part shows real action names as "action_names".
++# "targets_pixel": pixels of the 256 x 256 image; "targets_norm1000": 0 to 1000 across the image (Qwen-VL's grounding
++# convention).  Only with prompt_format no_think; pointing.py reads and judges the segment.
++TARGET_FORMATS = {"targets_pixel": "pixel", "targets_norm1000": "norm1000"}  # format example -> coordinates
++FORMAT_EXAMPLES = ("placeholder", "action_names") + tuple(TARGET_FORMATS)
++SLOT_LETTERS = ("A", "B", "C", "D")
++_TARGET_TEXT = {
++    "targets_pixel": {"where": "pixels of the 256 x 256 image", "example": "(120,88)",
++                      "point": "(x,y) is a pixel on the object in the 256 x 256 image, x from the left edge and y "
++                               "from the top edge"},
++    "targets_norm1000": {"where": "0 to 1000 across the image", "example": "(469,344)",
++                         "point": "(x,y) is a point on the object, x and y from 0 to 1000 across the image, x from "
++                                  "the left edge and y from the top edge"},
++}
+ 
+ 
+-def action_format_line(action_sep: str = "|", max_actions: int = 5, format_example: str = "placeholder") -> str:
+-    """The format line of the action tags for the format example setting."""
++def action_format_line(action_sep: str = "|", max_actions: int = 5, format_example: str = "placeholder",
++                       n_slots: int = 2) -> str:
++    """The format line of the action tags for the format example setting (a targets format: the targets segment for
++    ``n_slots`` objects first)."""
+     if format_example == "placeholder":
+         return f"<action>action1{action_sep}action2{action_sep}...{action_sep}</action>"
+-    if format_example != "action_names":
++    if format_example not in FORMAT_EXAMPLES:
+         raise ValueError(f"format example must be one of {FORMAT_EXAMPLES}, not {format_example!r}")
+     names = ("move_forward", "turn_left")[: 1 if int(max_actions) <= 1 else 2]
+-    return "<action>" + "".join(n + action_sep for n in names) + "</action>"
++    line = "<action>" + "".join(n + action_sep for n in names) + "</action>"
++    return targets_line(n_slots) + line if format_example in TARGET_FORMATS else line
++
++
++def targets_line(n_slots: int = 2) -> str:
++    """The targets segment of the format line: one "(x,y)" per object the task names."""
++    return "<targets>" + "; ".join(f"{s}: (x,y)" for s in SLOT_LETTERS[: max(1, int(n_slots))]) + "</targets>"
++
++
++def targets_example(format_example: str, n_slots: int = 2, action_sep: str = "|") -> str:
++    """The example answer of a targets format: A at a point, the other objects not in view."""
++    entries = ([f"A: {_TARGET_TEXT[format_example]['example']}"]
++               + [f"{s}: none" for s in SLOT_LETTERS[1: max(1, int(n_slots))]])
++    return "<targets>" + "; ".join(entries) + f"</targets><action>move_forward{action_sep}</action>"
++
++
++def targets_description(format_example: str) -> str:
++    """The system prompt's description of a targets format."""
++    return ("Before your action, give the position of each object the task names, in the order the format block "
++            f"lists them: {_TARGET_TEXT[format_example]['point']}; write none for an object you cannot see clearly.")
++
++
++def targets_format_block(format_example: str, max_actions: int = 5, action_sep: str = "|", add_example: bool = True,
++                         target_refs: Sequence[str] = ()) -> str:
++    """A user turn's format block of a targets format: the format line for the task's objects, which object each
++    letter is (the task text's words, pointing.target_refs) and, on the first turn, the example."""
++    refs = [str(r) for r in target_refs][: len(SLOT_LETTERS)]
++    n = len(refs) or 2
++    prompt = (f"Respond with the targets ({_TARGET_TEXT[format_example]['where']}), then the action:\n"
++              f"{action_format_line(action_sep, max_actions, format_example, n_slots=n)}\n")
++    if refs:
++        prompt += "; ".join(f"{s} is {r}" for s, r in zip(SLOT_LETTERS, refs)) + ".\n"
++    prompt += f"\nYou can take up to {max_actions} actions per step.\n"
++    if add_example:
++        prompt += "\nExample: " + targets_example(format_example, n, action_sep)
++    return prompt
+ 
+ 
+ def _response_format(format_config, action_sep: str, max_actions: int, format_example: str) -> str:
+-    """The system prompt's "Response format" text: the format's own (placeholder) or with real action names."""
++    """The system prompt's "Response format" text: the format's own (placeholder) or with real action names (a
++    targets format: the targets segment first; prompt_format no_think only)."""
+     text = format_config["format"]
+     if format_example == "placeholder":
+         return text
++    if format_example in TARGET_FORMATS and text != "<action>...</action>":
++        raise ValueError(f"the {format_example} format example goes with prompt_format no_think only")
+     return text.replace("<action>...</action>", action_format_line(action_sep, max_actions, format_example))
+ 
+ 
+@@ -173,8 +231,11 @@ def system_prompt(**kwargs):
+     enable_done = bool(kwargs.get("enable_explicit_done", True))
+ 
+     format_config = FORMAT_CONFIGS.get(selected_format, FORMAT_CONFIGS["free_think"])
+-    response_format = _response_format(format_config, action_sep, max_actions,
+-                                       str(kwargs.get("format_example", "placeholder")))
++    format_example = str(kwargs.get("format_example", "placeholder"))
++    if format_example in TARGET_FORMATS:  # group G of matrix v3: the targets segment's description and example
++        format_config = dict(format_config, description=targets_description(format_example),
++                             example=targets_example(format_example, 2, action_sep))
++    response_format = _response_format(format_config, action_sep, max_actions, format_example)
+ 
+     actions_block = _action_descriptions(
+         max_actions=max_actions,
+@@ -348,6 +409,9 @@ def format_prompt_no_think(**kwargs):
+     max_actions = kwargs.get("max_actions_per_step", 5)
+     action_sep = kwargs.get("action_sep", "|")
+     add_example = kwargs.get("add_example", True)
++    if kwargs.get("format_example") in TARGET_FORMATS:  # group G of matrix v3: the targets segment first
++        return targets_format_block(kwargs["format_example"], max_actions, action_sep, add_example,
++                                    kwargs.get("target_refs") or ())
+     action_line = action_format_line(action_sep, max_actions, kwargs.get("format_example", "placeholder"))
+     
+     prompt = f"""Respond with only the action:
+diff --git a/vagen/ray_trainer.py b/vagen/ray_trainer.py
+index 9b2f0d34..60afada4 100644
+--- a/vagen/ray_trainer.py
++++ b/vagen/ray_trainer.py
+@@ -2785,6 +2785,9 @@ class RayPPOTrainer:
+                             _log_transition_metric("truncated_before_action", "transition/truncated_before_action_rate")
+                             _log_transition_metric("multiple_action_tag", "transition/multiple_action_tag_rate")
+                             _log_transition_metric("think_rate", "transition/think_rate")
++                            _log_transition_metric("pointing_score", "transition/pointing_score")  # group G of matrix v3
++                            _log_transition_metric("targets_bad", "transition/targets_bad_rate")
++                            _log_transition_metric("targets_old", "transition/targets_old_rate")
+                             _log_transition_metric("env_exception", "transition/env_exception_rate")
+                             _log_transition_metric("strict_action_tag_rate", "transition/strict_action_tag_rate")
+                             _log_transition_metric("tool_call_rate", "transition/tool_call_rate")
