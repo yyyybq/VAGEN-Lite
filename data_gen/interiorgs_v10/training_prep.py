@@ -406,7 +406,8 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
 STANDARDS_FILE = Path(__file__).with_name("configs") / "rl_standards.json"
 STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "opt_package", "reward_preset",
                  "ppo_template", "env_template", "group_filter", "keep_std_threshold", "keep_std_floor",
-                 "format_example", "lenient_parse", "invalid_penalty", "invalid_turn_nonpositive")
+                 "format_example", "lenient_parse", "invalid_penalty", "invalid_turn_nonpositive",
+                 "turn_footprint_radius")  # experiment 3A (the user's decision 甲 of 2026-11-06)
 # Round 12, the dense-reward first batch (D-keep, the user's decision of 2026-10-21): which group filter the
 # package's batch goes through.  mixed_outcome (the package's) trains only on tasks whose episodes both succeed and
 # fail; keep_by_return_std (vagen/custom_filter/filter.py) fills the places still free with all-fail tasks whose
@@ -662,6 +663,18 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         history["env"]["lenient_parse"] = True
     if getattr(args, "invalid_penalty", None) is not None:  # round 12 freeze (3.1.3): the unreadable answer's penalty
         history["env"]["invalid_penalty_override"] = float(args.invalid_penalty)
+    footprint = getattr(args, "turn_footprint_radius", None)
+    if footprint is not None:  # experiment 3A (the user's 甲 of 2026-11-06): turns blocked by the robot-base footprint
+        from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+
+        if "turn_footprint_radius" not in ActiveSpatialEnvConfig.__dataclass_fields__:
+            raise SystemExit("this checkout's env has no turn_footprint_radius: the RL env would drop it")
+        if not float(footprint) > 0:
+            raise SystemExit(f"--turn-footprint-radius must be positive, not {footprint!r}")
+        if tcfg.get("wall_model") != "thick" or not tcfg.get("enable_collision_detection", True):
+            raise SystemExit("--turn-footprint-radius needs an env template with collision detection and wall_model "
+                             f"thick ({args.env_template})")
+        history["env"]["turn_footprint_radius"] = float(footprint)
     history["env"].update(design_variant_overrides(args, history["env"]))
     env_paths = {}
     for split, selected in parts.items():
@@ -843,6 +856,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "depth_flagged_checked": len(flagged), "depth_flagged_in_train": len(flagged_in_train),
               "train_scenes": len({r["scene_id"] for r in parts["train"]}),
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
+    if footprint is not None:  # experiment 3A: only when set, so every other report stays as it was
+        report["turn_footprint_radius"] = float(footprint)
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
 
@@ -1154,6 +1169,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--invalid-penalty", type=float, default=None,
                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
+    c.add_argument("--turn-footprint-radius", type=float, default=None,
+                   help="experiment 3A (the user's decision of 2026-11-06): the env blocks an in-place turn when a "
+                        "disc of this radius (m, 0.25) around the camera's ground point meets a wall or an object box "
+                        "reaching into 0.1-1.0 m (env turn_footprint_radius; standards v10_p1_*_fp); default off")
     c.add_argument("--progress-version", default=None, choices=["grouped_gated", "grouped_soft", "optimal"],
                    help="round 12 freeze, dense-reward variant V3: the grouped progress with the hard gate (D_cond's) "
                         "or the soft gate (relation group times the frame group's continuous score); round 13 (B): "

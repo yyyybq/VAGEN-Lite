@@ -684,6 +684,46 @@ class TrainingPrepTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "needs --rollout-log-probs"):
             config("rl_logprob_tokens_alone", sft_trajectories=[str(convs["placeholder"])],
                    format_example="placeholder", logprob_tokens=True)
+        # experiment 3A (the user's decision 甲 of 2026-11-06): --turn-footprint-radius sets the env's turn rule in
+        # train_env.yaml and val_env.yaml and the report gets the value; nothing else changes (paths aside), not the
+        # system prompt, not the PPO config; without the option neither key is written
+        self.assertIn("turn_footprint_radius", TP.STANDARD_KEYS)
+        env9, report9 = config("rl_fp", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder",
+                               turn_footprint_radius=0.25)
+        val9 = yaml.safe_load((self.root / "rl_fp" / "val_env.yaml").read_text())["envs"][0]["config"]
+        self.assertEqual((env9["turn_footprint_radius"], val9["turn_footprint_radius"], report9["turn_footprint_radius"]),
+                         (0.25, 0.25, 0.25))
+        self.assertNotIn("turn_footprint_radius", env0)
+        self.assertNotIn("turn_footprint_radius", report0)
+        self.assertEqual({k: v for k, v in env9.items() if k not in ("turn_footprint_radius", "jsonl_path")},
+                         {k: v for k, v in env0.items() if k != "jsonl_path"})
+        self.assertEqual({k: v for k, v in report9.items() if k != "turn_footprint_radius"}, report0)
+        self.assertEqual((self.root / "rl_fp" / "ppo.yaml").read_text().replace("rl_fp", "rl_strict"),
+                         (self.root / "rl_strict" / "ppo.yaml").read_text())
+        for family in ("fov_inclusion", "equidistance"):
+            self.assertEqual(TP.env_system_prompt(env9, family), TP.env_system_prompt(env0, family))
+        for bad in (0.0, -0.25):
+            with self.assertRaises(SystemExit):
+                config(f"rl_fp_bad{bad}", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder",
+                       turn_footprint_radius=bad)
+        # an env template without thick walls cannot apply the rule: refused here, not at the trainer's env
+        thin = self.root / "rl_env_room_edges.yaml"
+        tdoc = yaml.safe_load((Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml").read_text())
+        tdoc["envs"][0]["config"]["wall_model"] = "room_edges"
+        thin.write_text(yaml.safe_dump(tdoc))
+        with self.assertRaisesRegex(SystemExit, "wall_model thick"):
+            TP.cmd_rl_config(Namespace(rows=str(sft / "rows.jsonl"), env_template=str(thin), ppo_template=str(template),
+                                       gs_root="/ply", model="/m", name="t", run_root=str(self.root / "run_rl_fp_thin"),
+                                       val_limit=0, trial=False, out=str(self.root / "rl_fp_thin"), task_pool="reserve",
+                                       sft_trajectories=[str(convs["placeholder"])], format_example="placeholder",
+                                       turn_footprint_radius=0.25))
+        # through a standard: filled when the command gives none, refused when it gives another value
+        args = Namespace(turn_footprint_radius=None)
+        self.assertEqual(TP.apply_standard(args, "x", {"x": {"turn_footprint_radius": 0.25}}), {"turn_footprint_radius": 0.25})
+        self.assertEqual(args.turn_footprint_radius, 0.25)
+        TP.apply_standard(Namespace(turn_footprint_radius=0.25), "x", {"x": {"turn_footprint_radius": 0.25}})
+        with self.assertRaises(SystemExit):
+            TP.apply_standard(Namespace(turn_footprint_radius=0.3), "x", {"x": {"turn_footprint_radius": 0.25}})
 
     def test_rl_config_model_type(self):
         """The model line (2026-10-24): --model-type checks the start model's type and adds the type's PPO-config
