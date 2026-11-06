@@ -144,7 +144,8 @@ def load_result(folder: Path, tasks: Dict[str, Dict[str, Any]]) -> Dict[str, Any
 
 
 def rate(a: int, b: int) -> Optional[float]:
-    return round(a / b, 4) if b else None
+    """Unrounded (the tables round once, for display; rounding here too flipped x.x5 values)."""
+    return a / b if b else None
 
 
 def success(rows: Dict[Any, Any], ids: Sequence[Any]) -> Dict[str, Any]:
@@ -223,7 +224,7 @@ def main_verdict(data: Data) -> Dict[str, Any]:
     else:
         diffs = [p["diff_raw"] for p in pairs.values()]
         raw_mean = statistics.mean(diffs)
-        mean = round(raw_mean, 2)
+        mean = raw_mean
         verdict = "pass" if raw_mean >= MAIN_MIN_MEAN and all(d > 0 for d in diffs) else "no pass"
     extra = {}
     for seed, a, b in MAIN_PAIRS:
@@ -298,7 +299,7 @@ def original_vs_perturbed(data: Data, originals: Dict[str, List[Path]]) -> Dict[
                 o = sum(orig[split_of(s)][t] for s, t in common)
                 p = sum(bool(rows[key]["success"]) for key in common)
                 return {"n": n, "original": rate(o, n), "perturbed": rate(p, n),
-                        "drop_points": round(100 * (o - p) / n, 2) if n else None,
+                        "drop_points": 100 * (o - p) / n if n else None,
                         "tasks_without_original": len(keys) - n}
 
             per[f"k{k}"] = {**stats(data.ids(k)),
@@ -387,7 +388,10 @@ def fail_end_side(data: Data, fail_end: Dict[str, Any]) -> Tuple[Dict[str, Any],
                 eps = acc.get((m, k, name), [])
                 ds = [e["d_end"] for e in eps if e["kind"] in ("d", "near")]
                 per[name] = {"failed": len(eps), "known": len(ds),
-                             "d_end_mean": round(statistics.mean(ds), 3) if ds else None,
+                             "d_end_mean": statistics.mean(ds) if ds else None,
+                             "exact": sum(bool(e.get("exact")) for e in eps if e["kind"] == "d"),
+                             "d_end_le2_exact": sum(1 for e in eps if e["kind"] == "d" and e.get("exact")
+                                                    and e["d_end"] <= 2),
                              "d_end_median": statistics.median(ds) if ds else None,
                              "d_end_le2_share": rate(sum(d <= 2 for d in ds), len(ds)),
                              "unreached": sum(e["kind"] == "unreached" for e in eps),
@@ -415,7 +419,8 @@ def markdown(res: Dict[str, Any]) -> str:
             L.append(f"| {seed} | {p['o_keep']} | {p['s0']} | 缺 | | | |")
         else:
             L.append(f"| {seed} | {p['o_keep']} | {p['s0']} | {p['n']} | {pct(p['a'])} | {pct(p['b'])} | {fmt_diff(p)} |")
-    L += ["", f"两对差的平均：{mv['mean_diff_points']}；判定：**{mv['verdict']}**（{mv['rule']}）", "",
+    mean_txt = "—" if mv["mean_diff_points"] is None else f"{mv['mean_diff_points']:+.2f}"
+    L += ["", f"两对差的平均：{mean_txt}；判定：**{mv['verdict']}**（{mv['rule']}）", "",
           "| 种子 | 各自 ≥ 5 | 退 2 步（余量 ≥ 1） | 退 2 步只看 test | 退 4 步只看 test | 余量 0 | 1–2 | 3–4 | 5+ |",
           "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for seed, e in mv["reported_besides"].items():
@@ -436,7 +441,7 @@ def markdown(res: Dict[str, Any]) -> str:
             L.append(f"| {m} | {kk} | {pct(s['val']['rate'])} | {pct(s['test']['rate'])} | {pct(s['all']['rate'])} | "
                      f"{pct(s['pool']['rate'])} | " + " | ".join(pct(s['by_band'][n]['rate']) for n in BAND_NAMES) +
                      f" | {pct(s['unreadable_turn_share'])} | {pct(o.get('original'))} | {pct(o.get('perturbed'))} | "
-                     f"{o.get('drop_points', '—')} |")
+                     f"{'—' if o.get('drop_points') is None else format(o['drop_points'], '.1f')} |")
     if res.get("original"):
         L += ["", "## 原起点对退步后，按余量分档（同题，val + test；原起点 % / 退步后 % / 题数）", "",
               "| 模型 | 档 | 余量 0 | 1–2 | 3–4 | 5+ |", "| --- | --- | --- | --- | --- | --- |"]
@@ -467,15 +472,17 @@ def markdown(res: Dict[str, Any]) -> str:
                   f"{sum(c['turns_match'] for c in checks)} 局，没重放 {sum(c['not_replayed'] for c in checks)} 局；"
                   f"缺的结果 {cov.get('missing')}，认不出的标签 {cov.get('unknown_labels')}"]
     if res.get("fail_end"):
-        L += ["", "## 失败终点剩余步数", "", "| 模型 | 档 | 余量 | 失败局 | 查得到 | 均值 | 中位 | ≤ 2 的比例 % |",
-              "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+        L += ["", "## 失败终点剩余步数（表内的值；精确的只是一部分，其余是上界）", "",
+              "| 模型 | 档 | 余量 | 失败局 | 查得到 | 其中精确 | 均值 | 中位 | ≤ 2 的比例 % | 确定 ≤ 2 的局 |",
+              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         for m, per in res["fail_end"].items():
             for kk, bands in per.items():
                 for name in BAND_NAMES + ["pool", "all"]:
                     s = bands[name]
                     if s["failed"]:
-                        L.append(f"| {m} | {kk} | {name} | {s['failed']} | {s['known']} | {s['d_end_mean']} | "
-                                 f"{s['d_end_median']} | {pct(s['d_end_le2_share'])} |")
+                        mean = "—" if s["d_end_mean"] is None else f"{s['d_end_mean']:.2f}"
+                        L.append(f"| {m} | {kk} | {name} | {s['failed']} | {s['known']} | {s['exact']} | {mean} | "
+                                 f"{s['d_end_median']} | {pct(s['d_end_le2_share'])} | {s['d_end_le2_exact']} |")
         cov = res.get("fail_end_coverage") or {}
         L += ["", f"覆盖核对：认不出的结果 {cov.get('unknown_paths')}，失败局数对不上 {cov.get('count_mismatch')}，"
                   f"没有表的题 {cov.get('no_table')}"]

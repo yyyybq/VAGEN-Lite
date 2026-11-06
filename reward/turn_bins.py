@@ -82,7 +82,7 @@ def failure_kind(e: Dict[str, Any]) -> Optional[str]:
 def band_summary(eps: List[Dict[str, Any]]) -> Dict[str, Any]:
     ok = [e for e in eps if "d" in e]
     s = summarize(eps)
-    s["episode_error_share"] = round(s["episodes_with_error"] / len(ok), 4) if ok else None
+    s["episode_error_share"] = s["episodes_with_error"] / len(ok) if ok else None  # unrounded: round once, to show
     failed = [e for e in ok if not e["success"]]
     kinds = defaultdict(int)
     for e in failed:
@@ -90,15 +90,15 @@ def band_summary(eps: List[Dict[str, Any]]) -> Dict[str, Any]:
     s["failed"] = len(failed)
     s["failed_split"] = {k: kinds.get(k, 0) for k in SPLIT}
     s["failed_split"]["not_recovered_total"] = kinds.get("not_recovered", 0) + kinds.get("not_recovered_late", 0)
-    s["failed_share"] = {k: (round(v / len(failed), 4) if failed else None) for k, v in s["failed_split"].items()}
+    s["failed_share"] = {k: (v / len(failed) if failed else None) for k, v in s["failed_split"].items()}
     s["failed_beyond_start"] = sum(1 for e in failed if e["d"] and e["d"][0] is not None and e["d"][-1] is not None
                                    and e["d"][-1] > e["d"][0])
-    s["failed_beyond_start_share"] = round(s["failed_beyond_start"] / len(failed), 4) if failed else None
+    s["failed_beyond_start_share"] = s["failed_beyond_start"] / len(failed) if failed else None
     ends = [e["d"][-1] for e in failed if e["d"] and e["d"][-1] is not None]
     closest = [min(x for x in e["d"] if x is not None) for e in failed if any(x is not None for x in e["d"])]
-    s["fail_end_mean"] = round(statistics.mean(ends), 3) if ends else None
+    s["fail_end_mean"] = statistics.mean(ends) if ends else None
     s["fail_end_median"] = statistics.median(ends) if ends else None
-    s["fail_closest_mean"] = round(statistics.mean(closest), 3) if closest else None
+    s["fail_closest_mean"] = statistics.mean(closest) if closest else None
     return s
 
 
@@ -156,7 +156,7 @@ def table(res: Dict[str, Any]) -> str:
             "无失误的成功率", "失败局", "失败：没失误", "失败：找回了、步数用完", "失败：没找回（其中最后两回合才失误）",
             "失败：终点比起点还远", "失败终点剩余（均值）", "失败局离目标最近（均值）"]
     pct = lambda x: "—" if x is None else f"{100 * x:.1f}%"  # noqa: E731
-    num = lambda x: "—" if x is None else f"{x}"  # noqa: E731
+    num = lambda x: "—" if x is None else (f"{x:.2f}" if isinstance(x, float) else f"{x}")  # noqa: E731
     L = ["| " + " | ".join(cols) + " |", "|" + " --- |" * len(cols)]
     rows = [(f"{n}（{len(g['labels'])} 个）", g) for n, g in res["groups"].items()] + list(res["labels"].items())
     for name, per in rows:

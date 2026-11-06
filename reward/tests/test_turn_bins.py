@@ -49,10 +49,11 @@ def test_run_merges_sets_and_bands_by_margin():
     assert a["all"]["replayed"] == 3 and a["replay_errors"] == 1
     assert a["0"]["failed_split"]["not_recovered_late"] == 1
     assert a["1-2"]["failed_split"]["recovered_ran_out"] == 1
-    assert a["all"]["episode_error_share"] == round(2 / 3, 4)
+    assert a["all"]["episode_error_share"] == pytest.approx(2 / 3)
     g = res["groups"]["all"]
     assert g["labels"] == ["a@50", "b@0"] and g["all"]["replayed"] == 4 and g["3-"]["failed_split"]["no_error"] == 1
-    assert g["all"]["fail_end_mean"] == round((10 + 13 + 5) / 3, 3)
-    assert g["all"]["failed_beyond_start"] == 1 and g["all"]["failed_beyond_start_share"] == round(1 / 3, 4)
+    assert g["all"]["fail_end_mean"] == pytest.approx((10 + 13 + 5) / 3)
+    assert g["all"]["failed_beyond_start"] == 1 and g["all"]["failed_beyond_start_share"] == pytest.approx(1 / 3)
+    assert TB.table(res).count("|") > 0 and "9.33" in TB.table(res)
     with pytest.raises(SystemExit):
         TB.run(metrics, "dstar", TB.parse_bands("1-3"), 12, {"x": ["nothing@*"]}, [])

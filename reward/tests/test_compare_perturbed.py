@@ -76,6 +76,15 @@ def test_pool_and_verdict(tmp_path):
     assert sec["rw_ok_250"]["k4_test"]["n"] == 9 and sec["rw_ok_250"]["k2_test"]["n"] == 2
 
 
+def test_rates_round_once(tmp_path):
+    # 98 / 568 = 17.254%: stored unrounded, printed 17.3 (rounding to 4 places first gave 0.1725 -> "17.2")
+    k4 = [(f"t{i}", 2, 4) for i in range(284)]
+    sets = make(tmp_path, {"rw_s0_150": {f"t{i}" for i in range(49)}}, k4)
+    res = CP.run(sets, {}, None, None)
+    assert res["success"]["rw_s0_150"]["k4"]["pool"]["rate"] == 98 / 568
+    assert "| rw_s0_150 | k4 | 17.3 | 17.3 | 17.3 | 17.3 |" in CP.markdown(res)
+
+
 def test_one_seed_against(tmp_path):
     k4 = [(f"t{i}", 2, 4) for i in range(1, 11)]
     solved = {"rw_ok_250": {f"t{i}" for i in range(1, 6)}, "rw_s0_150": set(),
@@ -149,7 +158,7 @@ def test_turn_and_fail_end_sides(tmp_path):
     t = res["turns"]["rw_g_250"]["k4"]
     assert t["5-"]["replayed"] == 2 and t["5-"]["back_to_original_level"] == 0.5
     assert t["0"]["back_to_original_level"] == 0.0 and t["pool"]["replayed"] == 2
-    assert t["all"]["back_to_original_level"] == round(1 / 3, 4)
+    assert t["all"]["back_to_original_level"] == pytest.approx(1 / 3)
     # every row records 5 turns: none of the three replays has 5, so none counts as matching
     assert t["replay_check"]["replayed"] == 3 and t["replay_check"]["turns_match"] == 0
     assert len(t["replay_check"]["mismatches"]) == 3

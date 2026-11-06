@@ -158,7 +158,7 @@ def summarize(eps: List[Dict[str, Any]]) -> Dict[str, Any]:
                 stall_turns += 1
                 stalls += d[t] == d[t - 1]
         with_error.append(had)
-    rate = lambda a, b: round(a / b, 4) if b else None  # noqa: E731
+    rate = lambda a, b: a / b if b else None  # noqa: E731  (unrounded: callers round once, for display)
     succ = [e for e in ok if e["success"]]
     eff = [e["actions"] / e["d_star"] for e in succ if e["d_star"] > 0]
     eff_hit = [e["actions_to_success"] / e["d_star"] for e in succ if e["d_star"] > 0 and e.get("actions_to_success")]
@@ -220,7 +220,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "collision_per_action", "turn_share", "success_actions_over_dstar_mean")
     L = ["| 结果 | 局数 | " + " | ".join(cols) + " |", "|" + " --- |" * (len(cols) + 2)]
     for lab, s in list(merged.items()) + list(out.items()):  # merged sets first, then each set
-        L.append(f"| {lab} | {s['replayed']} | " + " | ".join("—" if s[c] is None else f"{s[c]}" for c in cols) + " |")
+        L.append(f"| {lab} | {s['replayed']} | " + " | ".join(
+            "—" if s[c] is None else (f"{s[c]:.4f}" if isinstance(s[c], float) else f"{s[c]}") for c in cols) + " |")
     Path(a.out).with_suffix(".md").write_text("\n".join(L) + "\n", encoding="utf-8")
     print("\n".join(L))
 
