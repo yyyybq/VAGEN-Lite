@@ -1,5 +1,5 @@
-# Group G of matrix v3 ("point first, then act"; the user's instruction of 2026-11-06, part 4.4; prep only, the SFT
-# waits for the user, configs/matrix_v3/G.yaml): recipe G = P0 + P1 + P2t + Pg in the targets_norm1000 format.  P2t is D's P2q
+# Group G of matrix v3 ("point first, then act"; the user's instruction of 2026-11-06, part 4.4; the user approved the
+# SFT on 2026-11-06 in the 0-1000 format, so the norm1000 recipe trains; configs/matrix_v3/G.yaml): recipe G = P0 + P1 + P2t + Pg in the targets_norm1000 format.  P2t is D's P2q
 # (the same 9,075 train and 300 validation trajectories) with the targets segment before every action
 # (data_gen/sft_mixture/targets_convert.py); Pg the pointing questions on the SFT frames of the train scenes
 # (data_gen/transition_qa/pointing_qa.py).  P0 and P1 are drawn as D (draw_as D: the same rows); everything else is
@@ -56,4 +56,4 @@ recipes:
     description: G（先指认再动作，targets_norm1000）：P0 + 转移题 + 动作轨迹（每步先写目标位置）+ 指认题
     output_format: action_only
     draw_as: D   # P0 and P1: D's rows
-    pools: {P0: all, P1: 9075, P2t: all, Pg: 9075}   # Pg's count waits for the user (recommended: 9,075)
+    pools: {P0: all, P1: 9075, P2t: all, Pg: 9075}   # Pg 9,075 (the user, 2026-11-06)

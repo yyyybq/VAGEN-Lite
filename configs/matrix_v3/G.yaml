@@ -24,7 +24,7 @@ sft:
   epochs: 10
   cards: 8
   recipe: 主线 Qwen3 SFT 的配方（lf_q3formal/train.yaml：模板 qwen3_vl_nothink，学习率 1e-5 余弦，warmup 3%，每步 64 条，冻结视觉塔），同 D
-  select: 先过采样验收（后备题 200 道 × 4 次、温度 0.8；熵 ≤ 0.06、读不出 ≤ 1%），合格的 epoch 里按 val（eval_val_v2_screened，382 道，不采样）挑成功率最高的，打平取更早的；一个都不合格就报给用户（预登记第 6 条）
+  select: 先过采样验收（后备题 200 道 × 4 次、温度 0.8；熵 ≤ 0.06、读不出 ≤ 1%），合格的 epoch 里按 val（eval_val_v2_screened，382 道，不采样）挑成功率最高的，打平取更早的；一个都不合格就报给用户（预登记第 6 条）。目标格式的熵按全部回答算还是只按动作段算，等用户定（审查 2026-11-06：坐标数字会让全部回答的熵主要反映数字；评测从 e4e245c0 起两种都记）；验收完 m3_cells 停在 accepted，用户定了再 pick
 
 rl:
   start: SFT 挑出的检查点
@@ -49,7 +49,7 @@ eval:
   pg_probe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/g_prep_20261106/pg/targets_norm1000/pg_probe.jsonl   # 指认探针 60 道（验证场景，点出、框出各半）
   diagnostics:
     failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
-    qa_probe: P1 探针（838 道）和指认探针（60 道，qa_probe judge_pointing：点在框内 / 框的 IoU ≥ 0.5），SFT 各 epoch 和每个 RL 的各检查点
+    qa_probe: P1 探针（838 道）和指认探针（60 道，qa_probe judge_pointing：点在框内 / 框的 IoU ≥ 0.5），RL 的起点和每个 RL 的各检查点，用 Qwen3 的运行时（只训 SFT 的链不跑探针）
 
 chain:   # 矩阵第三版之后的格子，在 matrix-v3 上跑（用户批了以后）
   plan: matrix_plan v3 cell   # --sft-chain 写只训 SFT 的链（<tr>_sft，每个 epoch 都留）；挑出 epoch 后 --start 写每个种子的 RL 链（<tr>_s<种子>）

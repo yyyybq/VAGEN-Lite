@@ -185,7 +185,7 @@ V3_GROUPS = ("C", "D")  # the first batch (the user, 2026-11-01); B' and E later
 V3_CELLS = {"D_noP0": ("dn", 2), "B": ("b", 1),   # B': RL only when an epoch passes, one seed
             "E2": ("e2", 0),                    # E as redefined on 2026-11-03: SFT only, no RL
             "Cr": ("cr", 2),                    # C's SFT again (part C, 2026-11-03); RL from its pick, two seeds (11-04)
-            "G": ("g", 2)}                      # "point first, then act" (2026-11-06): prep only until the user approves
+            "G": ("g", 2)}                      # "point first, then act": SFT approved 2026-11-06, RL waits for the user
 # the dense side's rl until the user relays the main line's answer on its baseline: not a standard, so rl-config
 # refuses it and the chain stops at its rl_config step (SFT, its evaluation and the pick are done by then); the plan
 # is then written again with the baseline (--dense) and the chain run again, which redoes rl_config and starts both
