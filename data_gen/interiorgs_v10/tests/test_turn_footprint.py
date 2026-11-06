@@ -483,5 +483,206 @@ class FootprintGeometryTest(unittest.TestCase):
         self.assertEqual(det.check_turn_footprint(np.array([1.3, 1.25, 1.5]), 0.25).collision_object, "cabinet")
 
 
+# ---------------------------------------------------------------------------
+# commit C3: the env setting turn_footprint_radius
+# ---------------------------------------------------------------------------
+def heading_deg(c2w):
+    """The camera's forward direction as a world yaw in degrees (pitch 0 here)."""
+    return math.degrees(math.atan2(c2w[1, 2], c2w[0, 2]))
+
+
+@unittest.skipUnless(HAS_SCIPY, "the env needs scipy (the cluster env)")
+class EnvTurnFootprintTest(unittest.TestCase):
+    """The env with turn_footprint_radius 0.25 (and off) on the golden's scene and rows, live template, stub
+    renderer; the camera placed with env.view_engine.reset at poses where the task is not met."""
+
+    maxDiff = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._tmp.name)
+        cls.golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+        write_scene(cls.golden, cls.root / "scenes")
+        cls.cfgs = env_configs(cls.root / "scenes")
+        labels = cls.golden["scene"]["labels.json"]
+        cls.rows = {low_box_at(labels, np.array(r["init_camera"]["extrinsics"], float)[:2, 3]): r
+                    for r in cls.golden["rows"]}
+        cls.patch = mock.patch("vagen.envs.active_spatial.env.ActiveSpatialEnv._render_image",
+                               lambda self, frame=stub_frame(): frame.copy())
+        cls.patch.start()
+        cls.count = 0
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.patch.stop()
+        cls._tmp.cleanup()
+
+    def env(self, row=None, config="S0", **switches):
+        type(self).count += 1
+        env = make_env(dict(self.cfgs[config], **switches), row or self.golden["rows"][0],
+                       self.root / "envs" / f"e{self.count}.jsonl")
+        env.reset(seed=0)
+        return env
+
+    def at(self, xy_yaw, radius=0.25, row=None, config="S0"):
+        """A fresh env with the switch at ``radius`` (None: off) and the camera at ``xy_yaw``, where the task is not
+        met (else the probe would end the episode)."""
+        env = self.env(row, config, turn_footprint_radius=radius)
+        place(env, xy_yaw)
+        self.assertFalse(met(env), xy_yaw)
+        return env
+
+    def test_off_by_default_and_outside_the_prompt(self):
+        from vagen.envs.active_spatial.dataset_contract import PROTOCOL_KEYS
+        from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+
+        off = ActiveSpatialEnvConfig()
+        self.assertIsNone(off.turn_footprint_radius)
+        self.assertNotIn("turn_footprint_radius", PROTOCOL_KEYS)
+        self.assertNotIn("turn_footprint_radius", off.system_prompt_arguments("fov_inclusion"))
+        on = ActiveSpatialEnvConfig(turn_footprint_radius=0.25)
+        self.assertEqual((on.cache_key, on.config_id(), on.system_prompt_arguments("equidistance")),
+                         (off.cache_key, off.config_id(), off.system_prompt_arguments("equidistance")))
+        for row in self.golden["rows"]:
+            self.assertEqual(self.env(row, turn_footprint_radius=0.25).system_prompt(), self.env(row).system_prompt())
+
+    def test_the_golden_with_the_switch_given_as_none(self):
+        """The C1 golden with turn_footprint_radius=None given explicitly (SwitchOffGoldenTest: absent)."""
+        write_scene(self.golden, self.root / "none" / "scenes")
+        got = run_all(self.golden, self.root / "none", extra={"turn_footprint_radius": None})
+        self.assertEqual(got, self.golden["episodes"])
+
+    def test_a_turn_above_the_tea_table(self):
+        """Switch on: the turn is blocked (rotation bit-identical, -0.15, the detailed feedback), the move after it
+        runs along the old heading; switch off: the same turn rotates."""
+        from data_gen.interiorgs_v10 import rl_checks as RC
+
+        env = self.at(TEA_TABLE)
+        before = env.view_engine.get_pose()
+        rec = RC.step(env, "<action>turn_left|move_forward|</action>")
+        after = env.view_engine.get_pose()
+        self.assertTrue(np.array_equal(after[:3, :3], before[:3, :3]))
+        self.assertTrue(np.array_equal(after[:3, 3], before[:3, 3] + before[:3, :3] @ np.array([0.0, 0.0, 1.0]) * 0.3))
+        self.assertEqual((rec["env_step"], rec["collisions"], rec["done"]), (2, 1, False))
+        self.assertEqual(rec["components"]["collision"], {"applied": -0.15, "scale": -0.15, "events": 1})
+        self.assertAlmostEqual(rec["reward"], -0.16, places=12)  # S0: the blocked move and the step penalty
+        self.assertAlmostEqual(rec["reconstruction_error"], 0.0, places=12)
+        self.assertEqual((env.collision_count, env.last_collision_result.collision_type), (1, "object"))
+        self.assertIn("Environment Feedback: 1 of 2 actions executed; blocked: turn_left (blocked by tea table).\n",
+                      rec["obs"]["obs_str"])
+        # two more turns, still inside the footprint: both blocked, counted per turn
+        obs, _, _, info = env.step("<action>turn_right|turn_right|</action>")
+        tm = info["metrics"]["turn_metrics"]
+        self.assertEqual((tm["collision_count"], tm["turn_footprint_blocks"], info["env_step"]), (2, 2, 4))
+        self.assertEqual(info["metrics"]["traj_metrics"]["total_collisions"], 3)
+        self.assertTrue(np.array_equal(env.view_engine.get_pose(), after))
+        # switch off: it rotates 20 degrees on the spot, nothing is blocked, no new turn metric
+        off = self.at(TEA_TABLE, radius=None)
+        obs, reward, _, info = off.step("<action>turn_left|</action>")
+        pose = off.view_engine.get_pose()
+        self.assertAlmostEqual(heading_deg(pose), 20.0, places=9)
+        self.assertTrue(np.array_equal(pose[:3, 3], before[:3, 3]))
+        self.assertEqual((info["env_feedback"], info["metrics"]["turn_metrics"]["collision_count"]), ("Action executed.", 0))
+        self.assertNotIn("turn_footprint_blocks", info["metrics"]["turn_metrics"])
+
+    def test_the_wall_and_the_open_floor(self):
+        on = self.at(WEST_WALL)
+        _, _, _, info = on.step("<action>turn_left|</action>")
+        self.assertEqual(info["env_feedback"], "0 of 1 actions executed; blocked: turn_left (blocked by wall).")
+        self.assertEqual(info["metrics"]["turn_metrics"]["turn_footprint_blocks"], 1)
+        self.assertAlmostEqual(heading_deg(on.view_engine.get_pose()), 180.0, places=9)
+        off = self.at(WEST_WALL, radius=None)
+        _, _, _, info = off.step("<action>turn_left|</action>")
+        self.assertEqual(info["env_feedback"], "Action executed.")
+        self.assertAlmostEqual(heading_deg(off.view_engine.get_pose()), -160.0, places=9)
+        floor = self.at((3.0, 1.0, 0.0))  # 0.9 m from the south wall, 1.1 m from the tea table
+        _, _, _, info = floor.step("<action>turn_left|</action>")
+        self.assertEqual((info["env_feedback"], info["metrics"]["turn_metrics"]["turn_footprint_blocks"]),
+                         ("Action executed.", 0))
+        self.assertAlmostEqual(heading_deg(floor.view_engine.get_pose()), 20.0, places=9)
+        # the rule reads the position of each turn: blocked inside the tea table, free once two moves left it
+        env = self.at((3.3, 2.5, 0.0))
+        _, _, _, info = env.step("<action>turn_left|move_forward|move_forward|turn_left|</action>")
+        self.assertEqual(info["env_feedback"], "3 of 4 actions executed; blocked: turn_left (blocked by tea table).")
+        self.assertAlmostEqual(heading_deg(env.view_engine.get_pose()), 20.0, places=9)
+        self.assertAlmostEqual(env.view_engine.get_pose()[0, 3], 3.9, places=9)
+
+    def test_translations_keep_their_rule(self):
+        """From the sofa start (inside the sofa's footprint: every turn would be blocked there), answers without a
+        turn give the same outputs with the switch on and off (one move meets the west wall); only the new turn
+        metric (0) is added with the switch on."""
+        row = self.rows["multi person sofa"]
+        answers = ["<action>move_backward|move_backward|</action>", "<action>move_left|move_left|move_forward|</action>",
+                   "<action>move_right|move_right|move_right|move_right|move_right|</action>"]
+        runs = {}
+        for radius in (None, 0.25):
+            env = self.env(row, turn_footprint_radius=radius)
+            self.assertTrue(env.collision_detector.check_turn_footprint(env.view_engine.get_pose()[:3, 3], 0.25).has_collision)
+            runs[radius] = []
+            for text in answers:
+                runs[radius].append(step_record(env, *env.step(text)))
+                if runs[radius][-1]["done"]:
+                    break
+        self.assertEqual(len(runs[None]), len(runs[0.25]))
+        self.assertGreater(sum(s["turn_metrics"]["collision_count"] for s in runs[None]), 0)
+        self.assertFalse(any("turn_footprint_blocks" in s["turn_metrics"] for s in runs[None]))
+        for off, on in zip(runs[None], runs[0.25]):
+            self.assertEqual(on["turn_metrics"].pop("turn_footprint_blocks"), 0)
+            self.assertEqual(on, off)
+
+    def test_turning_in_place_until_the_action_limit(self):
+        """Three answers of five turn_left inside the footprint: 5 / 10 / 12 actions, the limit ends the episode,
+        every turn blocked, the pose never changes."""
+        env = self.at(TEA_TABLE)
+        start = env.view_engine.get_pose()
+        got = []
+        for _ in range(3):
+            obs, reward, done, info = env.step("<action>" + "turn_left|" * 5 + "</action>")
+            tm = info["metrics"]["turn_metrics"]
+            got.append((info["env_step"], done, tm["collision_count"], tm["turn_footprint_blocks"]))
+            self.assertTrue(np.array_equal(env.view_engine.get_pose(), start))
+        self.assertEqual(got, [(5, False, 5, 5), (10, False, 5, 5), (12, True, 2, 2)])
+        self.assertTrue(info.get("truncated_max_primitive_steps"))
+        self.assertEqual(info["termination_reason"], "max_primitive_steps")
+
+    def test_a_blocked_turn_earns_what_a_blocked_move_does(self):
+        """At the west wall (the turn blocked by the footprint, move_forward by today's rule): the same reward, its
+        parts and the same pose, under S0 and under V4 (whose progress term sees an unchanged pose either way)."""
+        for config in ("S0", "V4"):
+            got = {}
+            for text in ("<action>turn_left|</action>", "<action>move_forward|</action>"):
+                env = self.at(WEST_WALL, config=config)
+                before = env.view_engine.get_pose()
+                obs, reward, done, info = env.step(text)
+                self.assertTrue(np.array_equal(env.view_engine.get_pose(), before))
+                self.assertEqual((info["metrics"]["turn_metrics"]["collision_count"], done), (1, False))
+                comps = info["reward_trace"]["components"]
+                got[text] = (reward, {k: (v["applied"], v["events"]) for k, v in comps.items()},
+                             info["current_potential_score"])
+            self.assertEqual(got["<action>turn_left|</action>"], got["<action>move_forward|</action>"], config)
+            if config == "S0":
+                self.assertAlmostEqual(got["<action>turn_left|</action>"][0], -0.16, places=12)
+
+    def test_settings_that_cannot_apply_the_rule_are_refused(self):
+        for bad in ({"turn_footprint_radius": 0.0}, {"turn_footprint_radius": -0.25},
+                    {"turn_footprint_radius": 0.25, "enable_collision_detection": False},
+                    {"turn_footprint_radius": 0.25, "wall_model": "room_edges"}):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                self.env(**bad)
+
+    def test_the_trainers_env_class_passes_the_setting(self):
+        try:
+            from vagen.envs.active_spatial.active_spatial_env import ActiveSpatialGymEnv
+        except ImportError as exc:  # pragma: no cover - the trainer's package is missing here
+            self.skipTest(f"vagen.envs.gym_image_env: {exc}")
+        path = self.root / "envs" / "gym.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.golden["rows"][0]) + "\n")
+        cfg = dict(self.cfgs["S0"], turn_footprint_radius=0.25, jsonl_path=str(path))
+        self.assertEqual(ActiveSpatialGymEnv(env_config=cfg)._inner.config.turn_footprint_radius, 0.25)
+        self.assertIsNone(ActiveSpatialGymEnv(env_config=dict(cfg, turn_footprint_radius=None))._inner.config.turn_footprint_radius)
+
+
 if __name__ == "__main__":
     unittest.main()

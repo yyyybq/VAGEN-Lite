@@ -190,6 +190,13 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # executed and which were blocked ("2 of 3 actions executed; blocked: move_backward (blocked by wall).").
     # Default False: "Action executed." whenever any move took effect, the collision message only when none did.
     collision_feedback_detail: bool = False
+    # Experiment 3A (the user's decision 甲 of 2026-11-06, turn-mismatch RL), default None = off: an in-place turn
+    # (turn_left / turn_right) is blocked when a disc of this radius (m; 0.25 = the PandaOmron base half-width) around
+    # the camera's ground point meets a wall or an object box reaching into 0.1-1.0 m (CollisionDetector.
+    # check_turn_footprint, the offline replay's rule; wall_model thick).  A blocked turn takes its step, leaves the
+    # camera as it was, costs collision_penalty and is reported like a blocked move; translations keep their rule.
+    # Not shown in the system prompt, not part of the dataset protocol.
+    turn_footprint_radius: Optional[float] = None
 
     # ====== Low-Information Frame Configuration ======
     enable_low_info_frame_check: bool = True

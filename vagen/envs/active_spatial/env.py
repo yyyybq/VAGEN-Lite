@@ -187,6 +187,7 @@ class ActiveSpatialEnv(BaseEnv):
         "move_right": 8,
         "done": 9,
     }
+    TURN_ACTIONS = ("turn_left", "turn_right")  # experiment 3A: the in-place turns the footprint rule may block
     
     def __init__(self, config: ActiveSpatialEnvConfig):
         """Initialize the Active Spatial environment."""
@@ -300,6 +301,14 @@ class ActiveSpatialEnv(BaseEnv):
                 "enable_boundary_collision": True,
                 "wall_model": getattr(config, "wall_model", "room_edges"),  # round 10: "thick" for v10 data
             })
+        footprint = getattr(config, "turn_footprint_radius", None)
+        if footprint is not None:  # experiment 3A: refuse a setting that cannot apply the rule
+            if not float(footprint) > 0:
+                raise ValueError(f"turn_footprint_radius must be positive, not {footprint!r}")
+            if self.collision_detector is None:
+                raise ValueError("turn_footprint_radius needs enable_collision_detection (the scene's boxes and walls)")
+            if getattr(config, "wall_model", "room_edges") != "thick":
+                raise ValueError("turn_footprint_radius is defined on the thick walls (wall_model thick)")
         
         # Collision tracking for episode
         self.collision_count: int = 0
@@ -393,6 +402,17 @@ class ActiveSpatialEnv(BaseEnv):
         user's 3.1.3), else invalid_format_penalty (the value the system prompt shows)."""
         override = self.config.get("invalid_penalty_override", None)
         return float(self.config.invalid_format_penalty if override is None else override)
+
+    def _turn_footprint_block(self, action: str, position: np.ndarray) -> Optional[CollisionResult]:
+        """Experiment 3A (config turn_footprint_radius, default None: off): what blocks this in-place turn at
+        ``position`` (CollisionDetector.check_turn_footprint), or None (switch off, not a turn, footprint clear)."""
+        radius = getattr(self.config, "turn_footprint_radius", None)
+        if radius is None or action not in self.TURN_ACTIONS:
+            return None
+        if self.collision_detector is None or not self.collision_detector.scene_loaded:
+            raise RuntimeError("turn_footprint_radius needs the scene's collision data")
+        hit = self.collision_detector.check_turn_footprint(position, float(radius))
+        return hit if hit.has_collision else None
 
     def _strict_parse_func(self, response: str, **kwargs) -> Dict[str, Any]:
         """The strict reading (every answer before round 12's lenient switch)."""
@@ -985,6 +1005,7 @@ class ActiveSpatialEnv(BaseEnv):
         collision_suffix = ""
         turn_moves: List[str] = []  # movement/rotation actions attempted this turn, in order
         turn_blocked: List[Tuple[str, Any]] = []  # (action, collision) for the blocked ones
+        footprint_blocks = 0  # experiment 3A: turns of this step blocked by the robot-base footprint
         
         # Execute parsed actions (strict or fallback). Strictness only affects format reward.
         if action_executable:
@@ -1045,19 +1066,26 @@ class ActiveSpatialEnv(BaseEnv):
                     # Store position before action
                     pre_action_pos = self.view_engine.get_pose()[:3, 3].copy()
                     blocked = False  # this action hit something (its move was undone)
+                    # experiment 3A (turn_footprint_radius, default off): a turn whose robot-base footprint meets an
+                    # obstacle is not executed; it takes its step and is penalised and reported below like a blocked move
+                    footprint_hit = self._turn_footprint_block(action_lower, pre_action_pos)
+                    footprint_blocks += footprint_hit is not None
                     
                     # Execute action
-                    self.view_engine.step(action_lower)
+                    if footprint_hit is None:
+                        self.view_engine.step(action_lower)
                     turn_moves.append(action_lower)
                     self._current_step += 1
                     
                     # Check for collision after action
                     if self.collision_detector is not None and self.config.enable_collision_detection:
                         new_pos = self.view_engine.get_pose()[:3, 3]
-                        collision_result = self.collision_detector.check_collision(
-                            position=new_pos,
-                            previous_position=pre_action_pos
-                        )
+                        # a footprint block takes the blocked branch below (its revert rewrites the same position)
+                        collision_result = footprint_hit if footprint_hit is not None else \
+                            self.collision_detector.check_collision(
+                                position=new_pos,
+                                previous_position=pre_action_pos
+                            )
                         
                         if collision_result.has_collision:
                             blocked = True
@@ -1246,6 +1274,8 @@ class ActiveSpatialEnv(BaseEnv):
         
         # Add collision metrics
         metrics["turn_metrics"]["collision_count"] = len(step_collisions)
+        if getattr(self.config, "turn_footprint_radius", None) is not None:  # experiment 3A, only with the switch on
+            metrics["turn_metrics"]["turn_footprint_blocks"] = int(footprint_blocks)
         metrics["turn_metrics"]["consecutive_collision_count"] = self.consecutive_collision_count
         metrics["traj_metrics"]["total_collisions"] = self.collision_count
         metrics["traj_metrics"]["max_consecutive_collisions"] = self.max_consecutive_collision_count
