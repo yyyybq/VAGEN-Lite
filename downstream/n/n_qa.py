@@ -196,10 +196,19 @@ def to_goal(states: dict, edges: dict, goal) -> dict:
     return dist
 
 
-def first_actions(states: dict, edges: dict, capped: bool, inst: dict, success) -> dict:
+def exact_depth(states: dict, edges: dict, capped: bool, max_depth: int = MAX_DEPTH) -> int:
+    """Costs up to this many actions are exact (the true fewest), larger ones and None only bounds: a first action's
+    way of k + 1 actions needs the edges of poses at most k actions from the start.  Breadth first expands every pose
+    of a depth before the next, so a capped search has all poses shallower than the one it stopped in expanded;
+    an uncapped one all poses shallower than max_depth."""
+    return max((states[k][1] for k in edges), default=0) if capped else max_depth
+
+
+def first_actions(states: dict, edges: dict, capped: bool, inst: dict, success, max_depth: int = MAX_DEPTH) -> dict:
     """Per action from the start: the fewest actions to finish the instance when it is taken first (a blocked one
     leaves the robot where it is: 1 + the start's own distance); None if no pose passing success(pose) is
-    reachable through it within the search."""
+    reachable through it within the search.  exact_up_to: exact_depth (costs above it, and None, mean at least
+    exact_up_to + 1)."""
     k0 = N.pose_key(inst["start_pose"])
     goal = [k for k, (pose, _) in states.items() if success(pose)]
     dist = to_goal(states, edges, goal)
@@ -211,7 +220,7 @@ def first_actions(states: dict, edges: dict, capped: bool, inst: dict, success) 
             out[a] = None if nk not in dist else 1 + dist[nk]
     return {"instance_id": inst["instance_id"], "cost": out, "start_dist": dist.get(k0),
             "blocked": [a for a, nk in edges.get(k0, {}).items() if nk is None], "goal_poses": len(goal),
-            "poses": len(states), "capped": capped}
+            "poses": len(states), "capped": capped, "exact_up_to": exact_depth(states, edges, capped, max_depth)}
 
 
 def paths_cmd(args) -> int:
@@ -233,7 +242,8 @@ def paths_cmd(args) -> int:
             scene.close()
         for inst in group:
             rows[inst["instance_id"]] = first_actions(states, edges, capped, inst,
-                                                      lambda pose, item=inst["item"]: N.box_judge(item, pose)["success"])
+                                                      lambda pose, item=inst["item"]: N.box_judge(item, pose)["success"],
+                                                      args.max_depth)
     write_jsonl(args.out / f"{args.scene}.jsonl", [rows[i["instance_id"]] for i in insts])
     print(f"[n_qa] {args.scene}: {len(rows)} instances")
     return 0
@@ -317,10 +327,17 @@ def object_questions(inst: dict, common: dict, tag: str, rng: random.Random, ski
 
 def first_action_question(inst: dict, common: dict, p: dict, rng: random.Random, skipped):
     """first_action: an action that starts a shortest way to a box success (search's costs) against one that makes
-    the way at least 2 actions longer, reaches no success within the search, or is blocked at the start (the user's
-    task book of 2026-11-06: "干扰项取让最短走法至少多 2 步或会被挡的动作")."""
+    the way at least 2 actions longer, or is blocked at the start (the user's task book of 2026-11-06: "干扰项取让最短
+    走法至少多 2 步或会被挡的动作").  The search may be capped (p["exact_up_to"], exact_depth): a cost above it, or
+    None, only says the action needs at least exact_up_to + 1, so it is a distractor only when that bound is d + 2 or
+    more, and the question is skipped when the shortest way itself is longer than exact_up_to + 1 (then it may be
+    shorter).  A free distractor (not blocked) is taken when there is one, else a blocked one (blocked: 1 + d,
+    exact)."""
     cost = p["cost"]
     blocked = set(p.get("blocked") or [])
+    exact = p.get("exact_up_to")
+    if exact is None:  # rows written before exact_up_to: exact only when the search was not capped
+        exact = MAX_DEPTH if not p.get("capped") else 0
     known = {a: c for a, c in cost.items() if c is not None}
     if not known:
         skipped["first_action: no success reachable"] += 1
@@ -330,20 +347,29 @@ def first_action_question(inst: dict, common: dict, p: dict, rng: random.Random,
     if not optimal:
         skipped["first_action: no success reachable"] += 1
         return None
-    worse = [a for a in N.ACTIONS if a in cost and a not in optimal
-             and (cost[a] is None or cost[a] >= d + 2 or a in blocked)]
-    if not worse:
+    if d > exact + 1:
+        skipped["first_action: shortest way beyond the search's exact depth"] += 1
+        return None
+
+    def at_least(c):  # the fewest actions the action truly needs, as far as the search can tell
+        return c if c is not None and c <= exact else exact + 1
+
+    free = [a for a in N.ACTIONS if a in cost and a not in optimal and a not in blocked and at_least(cost[a]) >= d + 2]
+    stuck = [a for a in N.ACTIONS if a in blocked]
+    if not free and not stuck:
         skipped["first_action: no action clearly worse"] += 1
         return None
     recorded = ((inst.get("shortest") or {}).get("path") or [None])[0]
     best = recorded if recorded in optimal else optimal[0]
-    other = rng.choice(worse)
+    other = rng.choice(free or stuck)
     stem = (f"{CAMERA_TEXT} The robot's task: {inst['description']}\n"
             "Which action should the robot take first to finish the task in the fewest actions?")
     prompt, shown, letter = two_choice(stem, [ACTION_TEXT[best], ACTION_TEXT[other]], 0, rng)
     return dict(common, id=f"{inst['instance_id']}::first_action", kind="first_action", prompt=prompt, options=shown,
                 answer=letter, numbers={"cost": cost, "fewest": d, "optimal": optimal, "best": best, "other": other,
-                                        "blocked": p.get("blocked"), "recorded_first": recorded,
+                                        "other_kind": "blocked" if other in blocked else "longer",
+                                        "other_at_least": d + 1 if other in blocked else at_least(cost[other]),
+                                        "exact_up_to": exact, "blocked": p.get("blocked"), "recorded_first": recorded,
                                         "recorded_actions": (inst.get("shortest") or {}).get("actions")})
 
 

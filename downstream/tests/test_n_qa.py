@@ -267,8 +267,12 @@ def test_search_keeps_every_edge_and_costs_count_to_the_nearest_success():
     assert c["move_forward"] == 3 and r["blocked"] == ["move_forward"]  # a blocked first action wastes one
     assert c["move_backward"] == 3 and c["move_right"] == 4
     assert r["goal_poses"] > 0 and r["poses"] == len(states)
-    _, _, capped = Q.search(GridScene(), (0.0, 0.0, 0.0), max_depth=4, max_states=5)
-    assert capped
+    assert r["exact_up_to"] == 4  # not capped: every pose shallower than max_depth expanded
+    states, edges, capped = Q.search(GridScene(), (0.0, 0.0, 0.0), max_depth=4, max_states=5)
+    assert capped  # stopped while expanding the start: only the start's own edges are sure
+    assert Q.first_actions(states, edges, capped, inst, lambda pose: True)["exact_up_to"] == 0
+    states, edges, capped = Q.search(GridScene(), (0.0, 0.0, 0.0), max_depth=4, max_states=12)
+    assert capped and Q.exact_depth(states, edges, capped) == 1
 
 
 def test_first_action_asks_a_shortest_start_against_one_at_least_two_longer():
@@ -282,15 +286,41 @@ def test_first_action_asks_a_shortest_start_against_one_at_least_two_longer():
                                 random.Random(0), skipped)
     assert q["numbers"]["optimal"] == ["move_backward", "move_left"] and q["numbers"]["best"] == "move_left"
     assert q["options"]["AB".index(q["answer"])] == "move left"
-    # blocked at the start, 5 >= 3 + 2, or no success reachable through it
-    assert q["numbers"]["other"] in ("move_forward", "move_right", "turn_left")
+    # a free action 5 >= 3 + 2 or with no success reachable through it comes before the blocked move_forward
+    assert q["numbers"]["other"] in ("move_right", "turn_left") and q["numbers"]["other_kind"] == "longer"
     assert "in the fewest actions?" in q["prompt"]
+    picked = {Q.first_action_question(inst, {}, {"cost": cost, "blocked": ["move_forward"]}, random.Random(s),
+                                      collections.Counter())["numbers"]["other"] for s in range(20)}
+    assert picked == {"move_right", "turn_left"}
     near = dict(cost, move_right=4, turn_left=4)
     assert Q.first_action_question(inst, {}, {"cost": near}, random.Random(0), skipped) is None
     only_blocked = Q.first_action_question(inst, {}, {"cost": near, "blocked": ["move_forward"]}, random.Random(0), skipped)
     assert only_blocked["numbers"]["other"] == "move_forward"  # one step worse, but blocked (the 11-06 task book)
+    assert only_blocked["numbers"]["other_kind"] == "blocked" and only_blocked["numbers"]["other_at_least"] == 4
     assert Q.first_action_question(inst, {}, {"cost": {a: None for a in cost}}, random.Random(0), skipped) is None
     assert skipped == {"first_action: no action clearly worse": 1, "first_action: no success reachable": 1}
+
+
+def test_first_action_trusts_a_capped_search_only_up_to_its_exact_depth():
+    import collections
+    import random
+    inst = {"instance_id": "I", "description": "d", "shortest": {"path": ["move_left"] * 3, "actions": 3}}
+    cost = {"move_forward": 9, "move_backward": 6, "move_left": 3, "move_right": None, "turn_left": 5, "turn_right": 4}
+    skipped = collections.Counter()
+    # exact up to 3: 4, 5, 6, 9 and None only mean "at least 4", one short of 3 + 2
+    assert Q.first_action_question(inst, {}, {"cost": cost, "exact_up_to": 3, "capped": True},
+                                   random.Random(0), skipped) is None
+    # exact up to 4: turn_right's 4 is exact (one longer), the others at least 5
+    q = Q.first_action_question(inst, {}, {"cost": cost, "exact_up_to": 4, "capped": True}, random.Random(0), skipped)
+    assert q["numbers"]["other"] in ("move_forward", "move_backward", "move_right", "turn_left")
+    assert q["numbers"]["other_at_least"] == 5 and q["numbers"]["exact_up_to"] == 4
+    # the shortest way (3) beyond exact_up_to + 1 = 2 may itself be shorter: no question
+    assert Q.first_action_question(inst, {}, {"cost": cost, "exact_up_to": 1, "capped": True},
+                                   random.Random(0), skipped) is None
+    # a row without exact_up_to from a capped search is trusted nowhere
+    assert Q.first_action_question(inst, {}, {"cost": cost, "capped": True}, random.Random(0), skipped) is None
+    assert skipped == {"first_action: no action clearly worse": 1,
+                       "first_action: shortest way beyond the search's exact depth": 2}
 
 
 def test_samples_can_be_counted_per_kind():
