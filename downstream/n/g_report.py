@@ -279,6 +279,7 @@ def relabel(md: str, g_name: str = "带历史", d_name: str = "不带", ref: str
     differences) keeps its meaning: the --g side's difference minus the --d side's."""
     if (g_name, d_name, ref, title) == ("带历史", "不带", "N1", None):
         return md
+    sp = " " if ref.isascii() else ""  # "改变 N1 的结论" but "改变 (c) 档的结论"
     md = md.replace("带减不带", "\0DID\0").replace("N1 的结论", f"{ref}{sp}的结论").replace("N1 主表", f"{ref}{sp}主表")
     md = md.replace("带历史", g_name).replace("不带", d_name).replace("\0DID\0", f"{g_name}减{d_name}")
     if title:
