@@ -72,7 +72,9 @@ def load(dirs, models=MODELS, exclude=()) -> tuple:
 
 def scene_boot(per: dict, scenes: dict, draws: int = DRAWS, seed: int = SEED) -> dict:
     """per: {instance: value}.  The mean with a 95% interval from resampling whole scenes, and a two-sided bootstrap
-    p (twice the smaller share of resampled means on either side of 0, at most 1)."""
+    p (twice the smaller share of resampled means on either side of 0, at most 1).  A p below the resolution
+    (1 / draws: no resampled mean on one side) is set to 1 / draws with "p_floor" true, so the Holm adjustment
+    stays an upper bound and the table prints "< 0.0005" (2,000 draws)."""
     if not per:
         return {"n": 0, "mean": math.nan, "low": math.nan, "high": math.nan, "p": math.nan}
     groups = collections.defaultdict(list)
@@ -84,8 +86,9 @@ def scene_boot(per: dict, scenes: dict, draws: int = DRAWS, seed: int = SEED) ->
         means.append(sum(sum(x) for x in pick) / sum(len(x) for x in pick))
     means.sort()
     le, ge = sum(x <= 0 for x in means) / draws, sum(x >= 0 for x in means) / draws
+    p = min(1.0, 2 * min(le, ge))
     return {"n": len(per), "mean": sum(per.values()) / len(per), "low": means[int(0.025 * draws)],
-            "high": means[int(0.975 * draws) - 1], "p": min(1.0, 2 * min(le, ge))}
+            "high": means[int(0.975 * draws) - 1], "p": max(p, 1 / draws), "p_floor": p < 1 / draws}
 
 
 def position(c: dict) -> str:
@@ -205,8 +208,10 @@ def markdown(rep: dict) -> str:
               "| 配对 | 实例 | 带历史 | 不带 | 带减不带 | 带减不带 p（重抽） | Holm | 改变 N1 的结论 |",
               "| --- | ---: | --- | --- | --- | ---: | ---: | --- |"]
         for k, p in s["pairs"].items():
-            L.append(f"| {k} | {p['n']} | {ci(p['with'])} | {ci(p['without'])} | {ci(p['did'])} | {pv(p['did']['p'])} | "
-                     f"{pv(p['did']['holm'])} | {'是' if p['changed'] else '否'} |")
+            fl = p["did"].get("p_floor")
+            L.append(f"| {k} | {p['n']} | {ci(p['with'])} | {ci(p['without'])} | {ci(p['did'])} | "
+                     f"{'< ' + pv(p['did']['p']) if fl else pv(p['did']['p'])} | "
+                     f"{'≤ ' if fl else ''}{pv(p['did']['holm'])} | {'是' if p['changed'] else '否'} |")
         L += ["", "判定：" + "；".join(f"{k}：{v}" for k, v in s["rules"].items()),
               "", "(g-c) 的条件：" + "；".join(f"{k}：{'是' if v else '否'}" for k, v in s["gc_condition"]["parts"].items())
               + f"。满足：{'是' if s['gc_condition']['met'] else '否'}。", ""]

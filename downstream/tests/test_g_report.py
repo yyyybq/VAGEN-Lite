@@ -61,7 +61,9 @@ def test_scene_bootstrap_keeps_a_scene_together_and_gives_a_two_sided_p():
     assert c["mean"] == 0.5 and c["low"] in (0.0, 0.5) and c["high"] == 1.0
     assert 0 < c["p"] <= 1
     z = G.scene_boot({"x": 0, "y": 0}, {}, draws=50)
-    assert z["mean"] == 0 and z["p"] == 1.0
+    assert z["mean"] == 0 and z["p"] == 1.0 and not z["p_floor"]
+    allup = G.scene_boot({f"i{k}": 1 for k in range(6)}, {}, draws=200)  # never at or below 0: p under the resolution
+    assert allup["p_floor"] and allup["p"] == 1 / 200
     assert G.position({"low": 0.01, "high": 0.2}) == "above" and G.position({"low": -0.1, "high": 0.2}) == "across"
 
 
