@@ -309,6 +309,8 @@ class ActiveSpatialEnv(BaseEnv):
                 raise ValueError("turn_footprint_radius needs enable_collision_detection (the scene's boxes and walls)")
             if getattr(config, "wall_model", "room_edges") != "thick":
                 raise ValueError("turn_footprint_radius is defined on the thick walls (wall_model thick)")
+            if not getattr(config, "gs_root", None):  # without it reset() loads no scene: nothing to judge a turn by
+                raise ValueError("turn_footprint_radius needs gs_root (the scenes' labels.json and structure.json)")
         
         # Collision tracking for episode
         self.collision_count: int = 0
@@ -620,6 +622,13 @@ class ActiveSpatialEnv(BaseEnv):
                     if getattr(self.collision_detector, "_current_scene_id", None) == scene_id:
                         self.collision_detector._current_scene_id = None  # force reload with override
             self.collision_detector.load_scene_from_gs_root(self.config.gs_root, scene_id)
+        if getattr(self.config, "turn_footprint_radius", None) is not None and (
+                self.collision_detector is None or not self.collision_detector.scene_loaded
+                or getattr(self.collision_detector, "_current_scene_id", None) != scene_id):
+            # experiment 3A: the turn rule needs this row's scene (a failed load would leave none, or the last one);
+            # refused here, at the episode's start, rather than at its first turn (_turn_footprint_block)
+            raise RuntimeError(f"turn_footprint_radius needs the scene's collision data: scene {scene_id!r} not loaded "
+                               f"from gs_root {self.config.gs_root!r}")
         self.current_collision_convention = None
         if uses_canonical_backend(item):
             if self.collision_detector is None or not self.collision_detector.scene_loaded:

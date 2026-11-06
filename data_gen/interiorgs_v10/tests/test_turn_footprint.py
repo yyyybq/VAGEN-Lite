@@ -565,6 +565,20 @@ class EnvTurnFootprintTest(unittest.TestCase):
         env.reset(seed=0)
         return env
 
+    def env_over(self, rows, config="S0", **switches):
+        """A fresh env over ``rows`` in this order (episode i is rows[i]), not reset."""
+        from vagen.envs.active_spatial.env import ActiveSpatialEnv
+        from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+
+        type(self).count += 1
+        path = self.root / "envs" / f"e{self.count}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        cfg = dict(self.cfgs[config], **switches)
+        return ActiveSpatialEnv(ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items()
+                                                          if k in ActiveSpatialEnvConfig.__dataclass_fields__},
+                                                       jsonl_path=str(path)))
+
     def at(self, xy_yaw, radius=0.25, row=None, config="S0"):
         """A fresh env with the switch at ``radius`` (None: off) and the camera at ``xy_yaw``, where the task is not
         met (else the probe would end the episode)."""
@@ -707,9 +721,44 @@ class EnvTurnFootprintTest(unittest.TestCase):
     def test_settings_that_cannot_apply_the_rule_are_refused(self):
         for bad in ({"turn_footprint_radius": 0.0}, {"turn_footprint_radius": -0.25},
                     {"turn_footprint_radius": 0.25, "enable_collision_detection": False},
-                    {"turn_footprint_radius": 0.25, "wall_model": "room_edges"}):
+                    {"turn_footprint_radius": 0.25, "wall_model": "room_edges"},
+                    {"turn_footprint_radius": 0.25, "gs_root": ""}, {"turn_footprint_radius": 0.25, "gs_root": None}):
             with self.assertRaises(ValueError, msg=str(bad)):
                 self.env(**bad)
+        with self.assertRaisesRegex(ValueError, "needs gs_root"):
+            self.env_over(self.golden["rows"][:1], turn_footprint_radius=0.25, gs_root="")
+        # switch off, an env without scenes still builds (nothing new is refused)
+        self.assertIsNone(self.env_over(self.golden["rows"][:1], gs_root="").config.turn_footprint_radius)
+
+    def test_a_row_whose_scene_is_not_loaded_stops_the_reset(self):
+        """Switch on: env.reset refuses a row whose scene the detector has not loaded -- no such scene folder under
+        gs_root, or no scene id (the last row's scene would still be loaded) -- when the episode starts, not at its
+        first turn; the check at each turn stays as a backstop.  Switch off, nothing new is raised (the missing scene
+        fails the canonical rows' own check, as before 3A)."""
+        good = self.golden["rows"][0]
+        missing = dict(good, scene_id="synth_no_such_scene", task_id=good["task_id"] + "_missing")
+        nameless = {k: v for k, v in dict(good, task_id=good["task_id"] + "_nameless").items() if k != "scene_id"}
+        env = self.env_over([good, missing, nameless], turn_footprint_radius=0.25)
+        for seed, scene in ((1, "synth_no_such_scene"), (2, None)):
+            env.reset(seed=0)  # the good row's scene is loaded first (the nameless row would find it still there)
+            self.assertEqual((env.collision_detector.scene_loaded, env.collision_detector._current_scene_id),
+                             (True, good["scene_id"]))
+            with self.assertRaisesRegex(RuntimeError, "turn_footprint_radius needs the scene's collision data") as caught:
+                env.reset(seed=seed)
+            self.assertIn(f"scene {scene!r} not loaded", str(caught.exception))
+        # the good row loads again and its turns are judged
+        env.reset(seed=0)
+        place(env, TEA_TABLE)
+        _, _, _, info = env.step("<action>turn_left|</action>")
+        self.assertEqual(info["metrics"]["turn_metrics"]["turn_footprint_blocks"], 1)
+        # the backstop: a turn judged without the scene's collision data is refused at step time
+        env.collision_detector.scene_loaded = False
+        with self.assertRaisesRegex(RuntimeError, "turn_footprint_radius needs the scene's collision data"):
+            env.step("<action>turn_left|</action>")
+        off = self.env_over([good, missing])
+        off.reset(seed=0)
+        with self.assertRaisesRegex(RuntimeError, "R1 canonical rows require loaded collision scene data"):
+            off.reset(seed=1)
 
     def test_the_trainers_env_class_passes_the_setting(self):
         try:
