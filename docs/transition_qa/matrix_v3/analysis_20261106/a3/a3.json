@@ -1,0 +1,376 @@
+{
+ "models": {
+  "c0q3_s1s0_150": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.32,
+    "swap": 0.16,
+    "swap_minus_standard_pp": -16.0,
+    "only_standard": 7,
+    "only_swap": 3,
+    "both": 1,
+    "p_mcnemar": 0.3438
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.08,
+    "swap": 0.12,
+    "swap_minus_standard_pp": 4.0,
+    "only_standard": 2,
+    "only_swap": 3,
+    "both": 0,
+    "p_mcnemar": 1.0
+   }
+  },
+  "c0q3_s1d_300": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.4,
+    "swap": 0.24,
+    "swap_minus_standard_pp": -16.0,
+    "only_standard": 7,
+    "only_swap": 3,
+    "both": 3,
+    "p_mcnemar": 0.3438
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.12,
+    "swap": 0.16,
+    "swap_minus_standard_pp": 4.0,
+    "only_standard": 3,
+    "only_swap": 4,
+    "both": 0,
+    "p_mcnemar": 1.0
+   }
+  },
+  "m3cs1s0_050": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.2,
+    "swap": 0.08,
+    "swap_minus_standard_pp": -12.0,
+    "only_standard": 5,
+    "only_swap": 2,
+    "both": 0,
+    "p_mcnemar": 0.4531
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.08,
+    "swap": 0.12,
+    "swap_minus_standard_pp": 4.0,
+    "only_standard": 2,
+    "only_swap": 3,
+    "both": 0,
+    "p_mcnemar": 1.0
+   }
+  },
+  "sft_m3c_e4": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.24,
+    "swap": 0.12,
+    "swap_minus_standard_pp": -12.0,
+    "only_standard": 6,
+    "only_swap": 3,
+    "both": 0,
+    "p_mcnemar": 0.5078
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.0,
+    "swap": 0.08,
+    "swap_minus_standard_pp": 8.0,
+    "only_standard": 0,
+    "only_swap": 2,
+    "both": 0,
+    "p_mcnemar": 0.5
+   }
+  },
+  "m3crs1s0_250": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.28,
+    "swap": 0.2,
+    "swap_minus_standard_pp": -8.0,
+    "only_standard": 6,
+    "only_swap": 4,
+    "both": 1,
+    "p_mcnemar": 0.7539
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.08,
+    "swap": 0.2,
+    "swap_minus_standard_pp": 12.0,
+    "only_standard": 1,
+    "only_swap": 4,
+    "both": 1,
+    "p_mcnemar": 0.375
+   }
+  },
+  "m3crs1d_250": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.36,
+    "swap": 0.24,
+    "swap_minus_standard_pp": -12.0,
+    "only_standard": 6,
+    "only_swap": 3,
+    "both": 3,
+    "p_mcnemar": 0.5078
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.08,
+    "swap": 0.2,
+    "swap_minus_standard_pp": 12.0,
+    "only_standard": 2,
+    "only_swap": 5,
+    "both": 0,
+    "p_mcnemar": 0.4531
+   }
+  },
+  "m3ds1s0_300": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.24,
+    "swap": 0.2,
+    "swap_minus_standard_pp": -4.0,
+    "only_standard": 5,
+    "only_swap": 4,
+    "both": 1,
+    "p_mcnemar": 1.0
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.12,
+    "swap": 0.08,
+    "swap_minus_standard_pp": -4.0,
+    "only_standard": 3,
+    "only_swap": 2,
+    "both": 0,
+    "p_mcnemar": 1.0
+   }
+  },
+  "m3ds1d_300": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.12,
+    "swap": 0.16,
+    "swap_minus_standard_pp": 4.0,
+    "only_standard": 2,
+    "only_swap": 3,
+    "both": 1,
+    "p_mcnemar": 1.0
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.12,
+    "swap": 0.12,
+    "swap_minus_standard_pp": 0.0,
+    "only_standard": 3,
+    "only_swap": 3,
+    "both": 0,
+    "p_mcnemar": 1.0
+   }
+  },
+  "m3dns1s0_300": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.36,
+    "swap": 0.16,
+    "swap_minus_standard_pp": -20.0,
+    "only_standard": 9,
+    "only_swap": 4,
+    "both": 0,
+    "p_mcnemar": 0.2668
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.08,
+    "swap": 0.12,
+    "swap_minus_standard_pp": 4.0,
+    "only_standard": 1,
+    "only_swap": 2,
+    "both": 1,
+    "p_mcnemar": 1.0
+   }
+  },
+  "m3dns1d_300": {
+   "train": {
+    "pairs": 25,
+    "standard": 0.28,
+    "swap": 0.2,
+    "swap_minus_standard_pp": -8.0,
+    "only_standard": 7,
+    "only_swap": 5,
+    "both": 0,
+    "p_mcnemar": 0.7744
+   },
+   "val": {
+    "pairs": 25,
+    "standard": 0.12,
+    "swap": 0.24,
+    "swap_minus_standard_pp": 12.0,
+    "only_standard": 1,
+    "only_swap": 4,
+    "both": 2,
+    "p_mcnemar": 0.375
+   }
+  }
+ },
+ "groups": {
+  "C0": {
+   "train": {
+    "pairs": 50,
+    "standard": 0.36,
+    "swap": 0.2,
+    "swap_minus_standard_pp": -16.0,
+    "only_standard": 14,
+    "only_swap": 6,
+    "both": 4,
+    "p_mcnemar": null
+   },
+   "val": {
+    "pairs": 50,
+    "standard": 0.1,
+    "swap": 0.14,
+    "swap_minus_standard_pp": 4.0,
+    "only_standard": 5,
+    "only_swap": 7,
+    "both": 0,
+    "p_mcnemar": null
+   }
+  },
+  "C": {
+   "train": {
+    "pairs": 50,
+    "standard": 0.22,
+    "swap": 0.1,
+    "swap_minus_standard_pp": -12.0,
+    "only_standard": 11,
+    "only_swap": 5,
+    "both": 0,
+    "p_mcnemar": null
+   },
+   "val": {
+    "pairs": 50,
+    "standard": 0.04,
+    "swap": 0.1,
+    "swap_minus_standard_pp": 6.0,
+    "only_standard": 2,
+    "only_swap": 5,
+    "both": 0,
+    "p_mcnemar": null
+   }
+  },
+  "Cr": {
+   "train": {
+    "pairs": 50,
+    "standard": 0.32,
+    "swap": 0.22,
+    "swap_minus_standard_pp": -10.0,
+    "only_standard": 12,
+    "only_swap": 7,
+    "both": 4,
+    "p_mcnemar": null
+   },
+   "val": {
+    "pairs": 50,
+    "standard": 0.08,
+    "swap": 0.2,
+    "swap_minus_standard_pp": 12.0,
+    "only_standard": 3,
+    "only_swap": 9,
+    "both": 1,
+    "p_mcnemar": null
+   }
+  },
+  "D": {
+   "train": {
+    "pairs": 50,
+    "standard": 0.18,
+    "swap": 0.18,
+    "swap_minus_standard_pp": 0.0,
+    "only_standard": 7,
+    "only_swap": 7,
+    "both": 2,
+    "p_mcnemar": null
+   },
+   "val": {
+    "pairs": 50,
+    "standard": 0.12,
+    "swap": 0.1,
+    "swap_minus_standard_pp": -2.0,
+    "only_standard": 6,
+    "only_swap": 5,
+    "both": 0,
+    "p_mcnemar": null
+   }
+  },
+  "D_noP0": {
+   "train": {
+    "pairs": 50,
+    "standard": 0.32,
+    "swap": 0.18,
+    "swap_minus_standard_pp": -14.0,
+    "only_standard": 16,
+    "only_swap": 9,
+    "both": 0,
+    "p_mcnemar": null
+   },
+   "val": {
+    "pairs": 50,
+    "standard": 0.1,
+    "swap": 0.18,
+    "swap_minus_standard_pp": 8.0,
+    "only_standard": 2,
+    "only_swap": 6,
+    "both": 3,
+    "p_mcnemar": null
+   }
+  }
+ },
+ "all": {
+  "train": {
+   "pairs": 250,
+   "standard": 0.28,
+   "swap": 0.176,
+   "swap_minus_standard_pp": -10.4,
+   "only_standard": 60,
+   "only_swap": 34,
+   "both": 10,
+   "p_mcnemar": null
+  },
+  "val": {
+   "pairs": 250,
+   "standard": 0.088,
+   "swap": 0.144,
+   "swap_minus_standard_pp": 5.6,
+   "only_standard": 18,
+   "only_swap": 32,
+   "both": 4,
+   "p_mcnemar": null
+  }
+ },
+ "pair_sign_test": {
+  "train": {
+   "pairs": 25,
+   "swap_better": 6,
+   "standard_better": 13,
+   "ties": 6,
+   "mean_pp": -10.4,
+   "p_sign": 0.1671
+  },
+  "val": {
+   "pairs": 25,
+   "swap_better": 8,
+   "standard_better": 7,
+   "ties": 10,
+   "mean_pp": 5.6,
+   "p_sign": 1.0
+  }
+ }
+}

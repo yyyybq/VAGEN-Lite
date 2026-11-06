@@ -1,0 +1,1670 @@
+{
+ "strata": {
+  "v10_626c65bd8e8bed90051a5bb0": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_08b3a34440d4df46d4340951": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_9827289d6a097ae06de8f10b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_c64c685ec0dfbf0b0fba403b": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_68e831853420a69213fac14b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_3ad76dc9433adfd9a0522f89": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_b6e2779cd44ef8f57a8857a8": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_46498f61e2f8af3ad101edd8": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_451c0b47e4bd34496dd0b6b1": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_bd6ff8003c3cf71b17bb8fb5": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_cd4b6f59b8830f080f808885": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_dd9bba8867c5b1307d2bd08b": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_3cd4173cb2e00cb2bb5499dd": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_7fd867a0d84db3d2be8ddf03": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_9ef985230692531ee5faab6c": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_7c8bd8e11f03bda59e204bd5": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_bec149158d94d383fb79dba8": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_17603fa2db2ad7e726b5b7e9": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_f4156de0bdd227f12670173e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_08d1e102dad89f33606b116c": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_5307066a98affb65098cdef9": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_cf4c3c409235b9c190916b63": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_33dd3104b0c2a88c721d0200": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_0d835c78fb3580b026907e03": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_861477be028505a728935c3b": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_9cb494cdc16a794ffa4bbcab": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_6762486925b471a798cd724b": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_05d4314dbf0b65ee9c552529": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_024806f18d09b93a3e9d5796": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_fadfa4362700626ce575dabf": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_3317025ba649d73ebbf2de92": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_d7027618a8b36c5e55702692": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_8c08896a02dd42df8d7aa305": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_67b8dc96b53d1cc6fd42896e": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_1e1cf79b81c8de270441087b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_a524110f2861131b2750c4d4": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_c9d1ff65b399f6c9af6b11fe": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_097b6fccc4b7446ee4e42fc4": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_719ccabb4c2d29aa65a6397c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_b043b9d4ee7333298d737f18": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_019d4599e0a897505271b455": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_2657312251ab560a87277d1e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_bac4f8b13a7f5ef1570a80b4": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_6f9e0d4d3d90592b941a3d40": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_c40a0d13329eed6f1c1ad3e8": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_fac16a42fbf2ef3fe31d5486": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_abe414ea119fc6b5ddbd59ac": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_11ec137ec5b76e951bb04750": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_d95f7a7db6c2fe153b9f9a84": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_f4a730fb278790e866dd6d6a": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_a285816b1d06b2cf4e07dff1": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_f25a6160e16edcc62d23d667": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_6deb66491fa491e2d129cd5b": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_b81b2cca2a50585a320dec3a": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_4fcd760223d626a2ab2ff853": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_733b0d30c7added07af641bb": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_86ee7029e8dfa0a1c3d45059": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_4c684ee8a15f1daee0c405ee": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_314491878bdf044622ac4e20": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_e2fc1832a45c32746decbf59": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_62a6734761461170435b8923": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_3cd404270e755defb5bff238": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_b9d60d653cc059fbd59bb410": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_85f2e1e65e648191f17dc1dd": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_b4968d8ea656ace7cd583b9b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_e005c25586615e66c4d0183d": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_f880edd3855085b0b70437e3": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_f2caffa800eeebeeca0db4cb": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_7de29d6abd16d7d4ca4b7487": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_a9ffcf9f0de21ba23c0c8daa": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_7e2905715ca7e466a4ff6095": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_4aed19d42be296f36102a7ec": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_44377839f6727525825da0c5": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_8a96fb8996a13235218321d0": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_80b8d6ce88072d04dc8542fc": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_82085baef0d7d66fed7fb36e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_95f980c3770a862947d36bde": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_5a4d6bab0bdfc8404ce73dda": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_356191e0dbb3886eb2e2f877": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_36e775e71a6d35372ab2a3df": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_6cf779956f0a97658cd4225a": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_c26014bcd51561ea4eace81d": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_1f4f4b89a500d30345524ccb": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_fe83d5dbd29f5898b542a19e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_c89e3ba34cfe3f5eecf81aa0": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_59558901f1ae4689df004f48": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_8b11029aabd9f58c1da53f77": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_06a12e9d6bd5e324ddd5d5bf": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_52633508cd76b5151746d09b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_108e6ffdbb6bdc9e1dd92558": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_7bf8b36e38b7649bd5bd2a72": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_a8a61a8cd182cdcda174ae5c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_53389b56074b59fd879d2e47": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_88969c4192b66559f26e047e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_72d658d708cc94995593686a": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_d83506f08625f2b6750f4bc8": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_3bf6d519a753396e82fb4325": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_24aadf12afcaf0133d158eda": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_a19c79dd1582eb170651183d": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_023a8dbc3c3ef7ddfa4e209e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_63f24b7996f9fbb04e7c3728": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_258cd3aced66b430578f386e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_34b536a9e27beb633f72f446": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_b33e20b72a585280a2cd17d0": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_89acd2aa346266921579b821": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_07d07fb4f3e8776c02bd5d3b": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_8205ee0e7759062b780d2b1d": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_d9a1815abf130c8fa2975c81": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_8b3552a4f129618390bb7af9": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_a2f5548146f8c365cb23c450": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_113e1085cb055b82e20fbda7": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_f13bc808832fbc9b31ae7d10": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_38dbe7761e674c481934d943": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_778a338a9aa2e735b718699a": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_063d5a14bc4e9865f4815328": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_125b823e9a7a1a5fbbff6e0d": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_871472591993dc1c8bccb1ca": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_909c0339153c139bfc3ff719": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_109c3046b4aeac9d71bf716f": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_16ae9705a7abbb95748d6dbd": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_aeabf9d1bd3fe33cefe94766": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_af04bbecb1043f42e37702cc": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_6d45132785d38511d5af4859": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_2f78df9e144bc87ece0bbcd4": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_e459d43a06b7e41688f3efcb": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_54c1c4b4844ce073b49baf1c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_9ac86a3981409f376a277493": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_f7408ec148367fcd5eb22286": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_15d43c9e34d96800e7d48bf7": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_8cfa4fe295bb69146d8971f5": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_8affadd12e5b3956bfe179e1": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_f96739a6c89bd53c04b8f873": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_1c40315b8b808e29226d3d1f": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_04dc96cbd80742b813301911": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_33e2cfa03efb3884e7392cb7": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_db0d21857079ab57ecfc0bcb": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_f3b3e579bf244a84a3d1d455": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_60d9f34c0f2338f9c1df674c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_18d5b72132d9ee18857af290": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_d9fa9f0db537000e0a7f08c2": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_fb0aa0e0caaac59c0144377a": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_33fb296cf5c0629e6688481c": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_3d66f02ab2dc4d38a7d8028f": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_385faf3bb5a7f0ba74531a88": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_b48d3109736225ae415788c2": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_017a31a2f4d5866a89723193": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_9e0e4e0894c89c651285b7db": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_b5066450559e0b6f1dc19127": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_96f75042b9ff1e56def86c59": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_4efbd3c35666ae3a55cbfb89": {
+   "same": 0,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_af7610ba067d577ce7bdf353": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_5416681ead067b7b1a6cb681": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_47c60a1fca091f919b23849b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_c1309c360da5fdebbf274acb": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_a534af102a8cbf4601896a54": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_f3996cb62d615ee01067d71a": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_81c76a630d77b0b7b3e5b11c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_1835822f500f191df3e2a87b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_b2cc6f6a271ca6b716810f0c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_f3b860321d956e5a966cd285": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_315d31e407250779b405a0ac": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_a5884e76d930749267cd6992": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_ecdaf98b470703c696f27828": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_51a0d97b995c5210cb899181": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_bb7c0eab5b9252250b356efa": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_ab8ce7559e53750348180df0": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_31a152da6f21119468d89bab": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_dd1b11c0a7def0dcce6e3093": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_c98ef3bb6da088387d46cad5": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_bd4d57b1b8399ee03fb0e0e5": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_8769ec9a0386e03a8706bc85": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_cff8b16811d379bcc1c48988": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_ce0122b99de2d42ee98c1399": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_1061df418b1a1053c46880fb": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_46dd0b0037cc34379c83609b": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_52760934471b7a7e04f9b6a2": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_aa2b91e03efb60df35716d10": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_7f9d2071e74eeb70c75d07bd": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_51b1ea105a9449ca5f95deb6": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_f5137d90baf9afc3ccf63b7d": {
+   "same": 0,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_706c4ba520321e0171a46cf0": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_44133fc3693e904361c9b4cb": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_987bd246598dfb13f264c554": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_455bc9405a32f6d9cfe4d6e2": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_e9e7caa65369fde3c625bb6e": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_26af99adb7e3067fcd51ff0c": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_ada8a8be4d341f65eb21d0fa": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_2fb91927372cda3bee08547b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_a15e639aa558b863d6cb19ee": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_3d64f5e26da6397713046181": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_27f8b3f3c15e9a9b9c3a9c4b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_e086f36448410853176f84da": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_89c8451a6def878e9fde2814": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_e11872b49ebddbf09b2aa204": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_aed45130e02eac49971f1129": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_3bf775181c49655b3e1edd4d": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_2928991fa747afbe5be4e78d": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_8fe342dba7a2989fcef49933": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_b0a779d7d9c0b0cef222a1d3": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_5b2ce1de59b4e0b2f5623a49": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_0ffd25f8b00c3e2eed46e54d": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_498549e0e1165915bf83fb3b": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_3e5189c0e4b692313e3d2efd": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_df251f78f61c15143db2d5de": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_1e869f22baa0be17c8fa321a": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_c2268be7142cb48a4d2e8fa5": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_b84d763fc32d80b48dac7fb2": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_563a9a3c0e546223832a3492": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_b85d2779df787c9d6b1800ad": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_f8c8c260baa9111f773d1bfd": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_afc57cfacd0a46481ef2f3ab": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_e641359e485b1d5d3ba1a344": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_cd72d57b8093667707922b2c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_857d8469e0c0a9d29cdd4364": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_0d1f435231d3009a12cd0a27": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_7a46ce84da76c4dd3f3c2925": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_80883adb4e250ca23f4e3ff8": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_b8c7d55bc00bb97cc03c52b9": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_019f021db6336c9129caa479": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_2b78c611ae96834858d45aa5": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_451965d50a17d23363dab1dc": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "看不见"
+  },
+  "v10_4146ba4134b83fea8721c45e": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_8ef5922ded3e229111ac8d03": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_1b3d6bc59f6639102f41f8a2": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_d39c286bb41788f920625cb8": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_869b2071733e07cd08e277a5": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_83c6d886b61af76bc8efdf3f": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_51c5e6844a789bfc817b6c91": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_2f70e55009f8052004451603": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_a26655ac95839b1a8b8f6b45": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_5d24bcc2ff0cd6fc025aaedf": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_74b1f317e4d003a8b69cb095": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_acc660081cb0a58e1896745f": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_67e6fd3fbb260452fa9a06fd": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_d9ed0a3344f64d11151076b1": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_b602a85d12fa1045d3e14d59": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_fc67afa75ff870177fa10b79": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_9ce96359a0b0834460cf9206": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_597560e32681128f4210aa0c": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_151387c447640f18de43019e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_6533b12b80e523d4f686bf8c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_42fba8ce290db83849d19d0e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_5dee4c5c90936852cd99196b": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_bfe0521ef71ecbcf094c205d": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_1fd3aedeb8e5d5d69d864f5b": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_3acf60229a6fb7cd7965a516": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_90cdb45a43e078b0575b298c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_173c1a88fa9e2c970dc759df": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_89f0e72dc2b379e9e8593df5": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_2980cf9bed1365488253e7da": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_5748ffe914ba0e497047e78b": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_32d2781f4d7c843b9d9f5adc": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_07b959f2d4a064db226f63b8": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_958c022668a573f244359d50": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_a52391ac451f52ba27bab793": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_3a1ec5b12f1d7dcd50b5a843": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_02fe1aef426deca87350eae5": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_b176558e79b25586b0493a48": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_05ac1aa3a6a9607b5640b1da": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_6c81679b2342597912c3a751": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_2802b945cba5f2be51d392c7": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_15faea1570743806d4a7d725": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_4c5a305a784c06f24b5a5bd1": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_4a65d67c65cdf1676942541e": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_2e7aecdb22b8bb38a2d7a07d": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_b1838654edc02df40b2b98a0": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_2a51b6f034703e6e481be8c7": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_441796941e15713f91690489": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_5d2841b0508f6617dfd8e901": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_768fc014d5ed456ac8557c95": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_fea4d28798e561a90a585acc": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_07ac319e998d59de5eccc1d4": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_7e229e9e9f7bdb9616256411": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_bea3472a9679a0cf37595709": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_180a32aaaad27d96ee5e0e6e": {
+   "same": 1,
+   "scene_same": 2,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_307685699d41fa4197172149": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_af90f38aa4c5333906c2c119": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_8f62f9d3947e2344a4b292a1": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_c002879e0911a6998123f35d": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "大（≥ 0.05）"
+  },
+  "v10_b9b1b260a737fe4a4681dfc8": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_6459da5a7d0f61f848808fae": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_043e1292f151dce9d2cd8fb1": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_dd84eb8022454c3c427ef9b4": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_f8011ebbfd124ba13a5c5ead": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_deb9dc87bf215d030e7f291a": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  },
+  "v10_45333bf182b265a17eafae60": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_290fded453c3fdaf1a4f9043": {
+   "same": 1,
+   "scene_same": 3,
+   "area": "看不见"
+  },
+  "v10_0ee6f62c6070ea7db355c368": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_7c8e2ac0be259695970dc6c1": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "刚过门槛（< 0.01）"
+  },
+  "v10_af4e1217f112464151a46579": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_7bde42f030623f674ec1e45c": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "看不见"
+  },
+  "v10_b9b1584b9dc6e1844c91a015": {
+   "same": 1,
+   "scene_same": 1,
+   "area": "中（0.01–0.05）"
+  }
+ },
+ "tables": {
+  "same": {
+   "0": {
+    "C": [
+     2,
+     8
+    ],
+    "Cr": [
+     4,
+     8
+    ],
+    "D": [
+     4,
+     8
+    ],
+    "D_noP0": [
+     0,
+     8
+    ],
+    "B'": [
+     2,
+     4
+    ]
+   },
+   "1": {
+    "C": [
+     524,
+     1160
+    ],
+    "Cr": [
+     585,
+     1160
+    ],
+    "D": [
+     575,
+     1160
+    ],
+    "D_noP0": [
+     584,
+     1160
+    ],
+    "B'": [
+     257,
+     580
+    ]
+   }
+  },
+  "scene_same": {
+   "1": {
+    "C": [
+     303,
+     728
+    ],
+    "Cr": [
+     342,
+     728
+    ],
+    "D": [
+     344,
+     728
+    ],
+    "D_noP0": [
+     351,
+     728
+    ],
+    "B'": [
+     147,
+     364
+    ]
+   },
+   "2": {
+    "C": [
+     67,
+     120
+    ],
+    "Cr": [
+     61,
+     120
+    ],
+    "D": [
+     68,
+     120
+    ],
+    "D_noP0": [
+     63,
+     120
+    ],
+    "B'": [
+     30,
+     60
+    ]
+   },
+   "3": {
+    "C": [
+     156,
+     320
+    ],
+    "Cr": [
+     186,
+     320
+    ],
+    "D": [
+     167,
+     320
+    ],
+    "D_noP0": [
+     170,
+     320
+    ],
+    "B'": [
+     82,
+     160
+    ]
+   }
+  },
+  "area": {
+   "看不见": {
+    "C": [
+     183,
+     588
+    ],
+    "Cr": [
+     217,
+     588
+    ],
+    "D": [
+     201,
+     588
+    ],
+    "D_noP0": [
+     197,
+     588
+    ],
+    "B'": [
+     85,
+     294
+    ]
+   },
+   "刚过门槛（< 0.01）": {
+    "C": [
+     91,
+     160
+    ],
+    "Cr": [
+     90,
+     160
+    ],
+    "D": [
+     98,
+     160
+    ],
+    "D_noP0": [
+     105,
+     160
+    ],
+    "B'": [
+     44,
+     80
+    ]
+   },
+   "中（0.01–0.05）": {
+    "C": [
+     158,
+     260
+    ],
+    "Cr": [
+     173,
+     260
+    ],
+    "D": [
+     170,
+     260
+    ],
+    "D_noP0": [
+     179,
+     260
+    ],
+    "B'": [
+     79,
+     130
+    ]
+   },
+   "大（≥ 0.05）": {
+    "C": [
+     94,
+     160
+    ],
+    "Cr": [
+     109,
+     160
+    ],
+    "D": [
+     110,
+     160
+    ],
+    "D_noP0": [
+     103,
+     160
+    ],
+    "B'": [
+     51,
+     80
+    ]
+   }
+  }
+ }
+}

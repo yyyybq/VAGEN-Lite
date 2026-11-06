@@ -1,0 +1,17 @@
+{
+ "input": "/mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024/sft_trajectories.jsonl",
+ "output": "sft_trajectories.jsonl",
+ "rows": 11095,
+ "scenes": 842,
+ "formats": [
+  "targets_pixel",
+  "targets_norm1000"
+ ],
+ "turns": 28654,
+ "targets": 47954,
+ "in_view": 31265,
+ "turns_all_none": 1719,
+ "in_view_share": 0.652,
+ "turns_all_none_share": 0.06,
+ "seconds": 10.4
+}

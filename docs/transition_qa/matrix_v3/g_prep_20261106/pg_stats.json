@@ -1,0 +1,90 @@
+{
+ "seed": 20261106,
+ "funnel": {
+  "trajectories": 11095,
+  "states": 38580,
+  "targets": 63590,
+  "not_clearly_visible": 16367,
+  "candidates": 47223
+ },
+ "candidates": {
+  "train": 41676,
+  "val": 5547
+ },
+ "scene_exclusion": {
+  "file": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/configs/scene_screen/scene_exclusions_20261029.json",
+  "scenes": 128,
+  "dropped_train": 2600,
+  "dropped_val": 470
+ },
+ "probe_scenes_from": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r12_20261019/eval_val_v2/tasks.jsonl",
+ "formats": [
+  "targets_pixel",
+  "targets_norm1000"
+ ],
+ "files": {
+  "pg_train.jsonl": {
+   "questions": 32498,
+   "kind": {
+    "box": 16249,
+    "point": 16249
+   },
+   "family": {
+    "absolute_positioning": 4269,
+    "equidistance": 5615,
+    "fov_inclusion": 5407,
+    "occlusion_alignment": 1013,
+    "projective_relations": 11956,
+    "screen_occupancy": 4238
+   },
+   "slot": {
+    "A": 20401,
+    "B": 12097
+   },
+   "scenes": 689,
+   "tasks": 9020
+  },
+  "pg_test.jsonl": {
+   "questions": 1000,
+   "kind": {
+    "box": 500,
+    "point": 500
+   },
+   "family": {
+    "absolute_positioning": 130,
+    "equidistance": 192,
+    "fov_inclusion": 157,
+    "occlusion_alignment": 9,
+    "projective_relations": 382,
+    "screen_occupancy": 130
+   },
+   "slot": {
+    "A": 648,
+    "B": 352
+   },
+   "scenes": 88,
+   "tasks": 658
+  },
+  "pg_probe.jsonl": {
+   "questions": 60,
+   "kind": {
+    "box": 30,
+    "point": 30
+   },
+   "family": {
+    "absolute_positioning": 10,
+    "equidistance": 10,
+    "fov_inclusion": 10,
+    "occlusion_alignment": 10,
+    "projective_relations": 10,
+    "screen_occupancy": 10
+   },
+   "slot": {
+    "A": 43,
+    "B": 17
+   },
+   "scenes": 47,
+   "tasks": 60
+  }
+ }
+}

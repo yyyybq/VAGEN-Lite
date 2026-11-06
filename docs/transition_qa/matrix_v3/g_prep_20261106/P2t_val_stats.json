@@ -1,0 +1,17 @@
+{
+ "input": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/D/P2q_val.jsonl",
+ "output": "P2t_val.jsonl",
+ "rows": 300,
+ "scenes": 88,
+ "formats": [
+  "targets_pixel",
+  "targets_norm1000"
+ ],
+ "turns": 844,
+ "targets": 1432,
+ "in_view": 933,
+ "turns_all_none": 51,
+ "in_view_share": 0.6515,
+ "turns_all_none_share": 0.0604,
+ "seconds": 1.0
+}

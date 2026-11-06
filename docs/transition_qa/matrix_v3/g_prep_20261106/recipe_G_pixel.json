@@ -1,0 +1,82 @@
+{
+ "recipe": "G",
+ "description": "G（先指认再动作，targets_pixel）：P0 + 转移题 + 动作轨迹（每步先写目标位置）+ 指认题",
+ "counts": {
+  "P0": 10144,
+  "P1": 9075,
+  "P2t": 9075,
+  "Pg": 9075
+ },
+ "output_format": "action_only",
+ "dir": "exps/matrix_v3/sft_mixture_g_pixel_20261106/G",
+ "summary": {
+  "P0_train": {
+   "rows": 10144,
+   "questions_or_trajectories": 11458,
+   "assistant_turns": 11458,
+   "images": 22081
+  },
+  "P1_train": {
+   "rows": 9075,
+   "questions_or_trajectories": 9075,
+   "assistant_turns": 9075,
+   "images": 9981
+  },
+  "Pg_train": {
+   "rows": 9075,
+   "questions_or_trajectories": 9075,
+   "assistant_turns": 9075,
+   "images": 9075
+  },
+  "P2t_train": {
+   "rows": 9075,
+   "questions_or_trajectories": 9075,
+   "assistant_turns": 23719,
+   "images": 23719
+  },
+  "P0_val": {
+   "rows": 300,
+   "questions_or_trajectories": 333,
+   "assistant_turns": 333,
+   "images": 682
+  },
+  "P1_val": {
+   "rows": 300,
+   "questions_or_trajectories": 300,
+   "assistant_turns": 300,
+   "images": 345
+  },
+  "P2q_val": {
+   "rows": 300,
+   "questions_or_trajectories": 300,
+   "assistant_turns": 844,
+   "images": 844
+  },
+  "P2f_val": {
+   "rows": 38,
+   "questions_or_trajectories": 38,
+   "assistant_turns": 55,
+   "images": 55
+  },
+  "P2t_val": {
+   "rows": 300,
+   "questions_or_trajectories": 300,
+   "assistant_turns": 844,
+   "images": 844
+  },
+  "Pg_val": {
+   "rows": 300,
+   "questions_or_trajectories": 300,
+   "assistant_turns": 300,
+   "images": 300
+  }
+ },
+ "notes": [
+  "P2q 每条对话的系统提示和每个用户回合的格式行，都和 RL 环境在格式样例 action_names 下显示的逐字相同（构建时逐条核对）",
+  "P2f 每条对话的系统提示和每个用户回合的格式行，都和 RL 环境在格式样例 action_names 下显示的逐字相同（构建时逐条核对）",
+  "P2t 每条对话的系统提示和每个用户回合的格式行，都和 RL 环境在格式样例 targets_pixel 下显示的逐字相同（构建时逐条核对）",
+  "排除了 128 个场景（scene_exclusions_20261029.json）的行：P0 训练 735、验证 293；P1 训练 0、验证 0；P2q 训练 727、验证 124；P2f 训练 34、验证 2；Pg 训练 0、验证 0；P2t 训练 0、验证 0（上表的可用条数是排除之后的）"
+ ],
+ "config": "matrix_v3_qwen3_g_pixel_20261106",
+ "seed": 20261018
+}

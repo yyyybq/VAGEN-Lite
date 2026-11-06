@@ -79,6 +79,23 @@ def main() -> None:
         r = out["all"][s]
         lines.append(f"| **全部 10 个检查点** | {s} | {r['pairs']} | {pct(r['standard'])} | {pct(r['swap'])} | "
                      f"{r['swap_minus_standard_pp']} | {r['only_standard']} | {r['only_swap']} | {'—' if r['p_mcnemar'] is None else r['p_mcnemar']} |")
+    # the pairs are the independent units: per pair the mean over the 10 checkpoints of (swap - standard), then the
+    # sign test over the pairs (two-sided, ties left out)
+    names = [n for ns in GROUPS.values() for n in ns]
+    lines += ["", "按题配对的符号检验（每对题先对 10 个检查点取平均的“对调 − 标准”，再看 25 对里正负各几对；双侧，平的不算）：", "",
+              "| 场景 | 配对数 | 对调更好的对 | 标准更好的对 | 打平 | 每对平均差（百分点） | 符号检验 p |", "| --- | --- | --- | --- | --- | --- | --- |"]
+    out["pair_sign_test"] = {}
+    for s in SPLITS:
+        per = [pairs(n, s) for n in names]
+        diffs = [sum(int(p[i][1]) - int(p[i][0]) for p in per) / len(per) for i in range(len(per[0]))]
+        pos, neg = sum(d > 0 for d in diffs), sum(d < 0 for d in diffs)
+        p = mcnemar(neg, pos)  # the same exact binomial test on the non-tied pairs
+        out["pair_sign_test"][s] = {"pairs": len(diffs), "swap_better": pos, "standard_better": neg,
+                                    "ties": len(diffs) - pos - neg, "mean_pp": round(100 * sum(diffs) / len(diffs), 1),
+                                    "p_sign": round(p, 4)}
+        r = out["pair_sign_test"][s]
+        lines.append(f"| {s} | {r['pairs']} | {pos} | {neg} | {r['ties']} | {r['mean_pp']} | {r['p_sign']} |")
+    (A / "a3.json").write_text(json.dumps(out, indent=1))
     (A / "a3.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 
