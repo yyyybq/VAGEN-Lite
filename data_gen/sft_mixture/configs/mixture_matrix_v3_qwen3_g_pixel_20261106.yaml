@@ -1,0 +1,59 @@
+# Group G of matrix v3 ("point first, then act"; the user's instruction of 2026-11-06, part 4.4; prep only, the SFT
+# waits for the user, configs/matrix_v3/G.yaml): recipe G = P0 + P1 + P2t + Pg in the targets_pixel format.  P2t is D's P2q
+# (the same 9,075 train and 300 validation trajectories) with the targets segment before every action
+# (data_gen/sft_mixture/targets_convert.py); Pg the pointing questions on the SFT frames of the train scenes
+# (data_gen/transition_qa/pointing_qa.py).  P0 and P1 are drawn as D (draw_as D: the same rows); everything else is
+# mixture_matrix_v3_qwen3_20261102.yaml as E2 keeps it: the seed, the split, the scene exclusion, the recipe and
+# D's validation rows (300 P0, 300 P1, 300 P2q, P2f's 38), plus P2t's 300 (D's P2q validation tasks) and 300 Pg.
+name: matrix_v3_qwen3_g_pixel_20261106
+out: exps/matrix_v3/sft_mixture_g_pixel_20261106
+seed: 20261018
+split_manifest: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/split_manifest.json
+task_rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r11_20261016/sft/rows.jsonl
+exclude_scenes: configs/scene_screen/scene_exclusions_20261029.json
+base_recipe: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/train.yaml
+train_overrides:
+  num_train_epochs: 10
+pools:
+  P0:
+    kind: interiorgs_qa_lf
+    dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/interiorgs_qa_final_20261028/lf_256   # train 785 scenes, val 99
+    train: qa_train.jsonl
+    val: qa_val.jsonl
+    exclude_groups: [S7]
+  P1:   # the bank lives in the transition-qa worktree
+    kind: transition_qa
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/transition_qa_20261019b/p1_test.jsonl
+  P2q:   # validation rows only (D's validation loss)
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/trajectory_val.jsonl
+    format_example: action_names
+  P2f:   # validation rows only
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12o_20261023/lf_format/trajectory_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_r12o_20261023/lf_format/trajectory_val.jsonl
+    format_example: action_names
+  P2t:   # D's P2q with the targets segment (the env's targets_pixel text, checked row by row)
+    kind: sft_trajectories
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/g_prep_20261106/p2t/targets_pixel/P2t_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/g_prep_20261106/p2t/targets_pixel/P2t_val.jsonl
+    format_example: targets_pixel
+  Pg:   # the pointing questions (train scenes; validation: the test file of the validation scenes)
+    kind: transition_qa
+    train: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/g_prep_20261106/pg/targets_pixel/pg_train.jsonl
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/g_prep_20261106/pg/targets_pixel/pg_test.jsonl
+val:
+  P0: 300
+  P1: 300
+  P2q: 300
+  P2f: all
+  P2t: all
+  Pg: 300
+recipes:
+  G:
+    description: G（先指认再动作，targets_pixel）：P0 + 转移题 + 动作轨迹（每步先写目标位置）+ 指认题
+    output_format: action_only
+    draw_as: D   # P0 and P1: D's rows
+    pools: {P0: all, P1: 9075, P2t: all, Pg: 9075}   # Pg's count waits for the user (recommended: 9,075)

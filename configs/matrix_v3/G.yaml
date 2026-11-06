@@ -1,0 +1,64 @@
+# 矩阵第三版之后的格子 G"先指认再动作"（用户 2026-11-06 指令第四部分）：每一步动作前先写任务里各目标在画面中的位置，
+# <targets>A: (x,y); B: (x,y)</targets> 再 <action>…</action>（vagen/envs/active_spatial/pointing.py）。坐标只作 SFT 的标签和 RL 的奖励，
+# 推理时不往提示里注入任何真值。配方 G = P0 + P1 + P2t（P2q 每步加目标段）+ Pg（指认题），SFT 其余同 D；RL 两个种子各一对 S0 / V4，同 D，
+# 另加指认奖励（每回合 0.1 × 指认得分，两侧都加）。现在只做数据和格式准备：SFT、RL 等用户看完分析 1、3 再批。
+# 待用户定：坐标格式（下面填的是推荐的 0–1000；像素版的数据和配方也备好了）、Pg 的条数、V4 的回报过滤要不要扣掉指认奖励。
+# 预登记第四版草案：docs/transition_qa/PREREG_G_vs_D_draft.md（transition-qa 分支）。说明见 configs/matrix_v3/README.md。
+group: G
+name: G（先指认再动作）
+status: prep   # 只做准备（用户 2026-11-06）；SFT 和 RL 等用户批
+description: P0 + 转移题 + 动作轨迹（每步先写目标位置）+ 指认题；RL 另加指认奖励
+model_type: qwen3_vl
+format_example: targets_norm1000   # 推荐（待用户定）：0–1000 归一化坐标；另一选项 targets_pixel（256 × 256 像素）
+output_format: action_only
+
+data:
+  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_g_norm1000_20261106.yaml   # 像素版 ..._g_pixel_20261106.yaml
+  recipe: G
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft_mixture_g_norm1000_20261106/G
+  train_rows: {P0: 10144, P1: 9075, P2t: 9075, Pg: 9075}   # Pg 的条数待用户定（推荐 9,075，和 P1、P2t 同量）
+  val_rows: {P0: 300, P1: 300, P2q: 300, P2f: 38, P2t: 300, Pg: 300}
+
+sft:
+  base_model: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+  epochs: 10
+  cards: 8
+  recipe: 主线 Qwen3 SFT 的配方（lf_q3formal/train.yaml：模板 qwen3_vl_nothink，学习率 1e-5 余弦，warmup 3%，每步 64 条，冻结视觉塔），同 D
+  select: 先过采样验收（后备题 200 道 × 4 次、温度 0.8；熵 ≤ 0.06、读不出 ≤ 1%），合格的 epoch 里按 val（eval_val_v2_screened，382 道，不采样）挑成功率最高的，打平取更早的；一个都不合格就报给用户（预登记第 6 条）
+
+rl:
+  start: SFT 挑出的检查点
+  pair: {s0: v10_p1_S0, d: v10_p1_Dcond}
+  dense: {variant: V4, progress_reward_scale: 3.3333333333333335, group_filter: keep_by_return_std, keep_std_threshold: 0.3318, keep_std_floor: 1.0}   # 回报过滤是否扣掉指认奖励待用户定（0.3318 是没有指认奖励时定的）
+  pointing_reward: 0.1   # 每回合 0.1 × 指认得分（任务里每个目标：点在真值框内 1、否则 0，取平均；看不清的目标写 none 得 1），S0、V4 两侧都加（用户 2026-11-06）
+  seeds: [20261019, 20261021]
+  task_pool: reserve
+  rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl
+  exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
+  updates: 300
+  output_format: action_only
+  guards: {invalid_max: 0.10, kl_max: 1.0, entropy_max: 0.3, entropy_window: 5, vision_token_crashes: 2}
+  attention: eager
+
+eval:
+  sets:
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened
+  every: 50
+  pg_probe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/g_prep_20261106/pg/targets_norm1000/pg_probe.jsonl   # 指认探针 60 道（验证场景，点出、框出各半）
+  diagnostics:
+    failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set>
+    qa_probe: P1 探针（838 道）和指认探针（60 道，qa_probe judge_pointing：点在框内 / 框的 IoU ≥ 0.5），SFT 各 epoch 和每个 RL 的各检查点
+
+chain:   # 矩阵第三版之后的格子，在 matrix-v3 上跑（用户批了以后）
+  plan: matrix_plan v3 cell   # --sft-chain 写只训 SFT 的链（<tr>_sft，每个 epoch 都留）；挑出 epoch 后 --start 写每个种子的 RL 链（<tr>_s<种子>）
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_g
+  rl_name: v10_rl_m3_g      # 加 _sft / _s1 / _s2；RL 运行 m3gs1s0、m3gs1d、m3gs2s0、m3gs2d
+  sft_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/g_prep_20261106/sft_dir_targets_norm1000   # 新格式 SFT 目录的符号链接，加转成目标格式的 sft_trajectories.jsonl（rl-config 拿它核对起点的格式）
+  sft_groups: {m3g: sft_trajectories.jsonl}   # SFT 的结果名 sft_m3g_e<k>
+  sft_lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/G   # data.lf_dir 的复制
+  needs_chain_support:
+    sft_lf_dirs: {m3g: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/G}
+    diagnostics_after_eval: true
+
+estimate: {sft: 8 卡 10 个 epoch，37,369 条（D 的 1.32 倍；D 28,294 条用了 41.3 卡时），约 55 卡时, accept: 10 个 epoch 各一个单卡任务，约 7 卡时, evaluate: 约 30 卡时, rl: 4 个，按 D 的实际用量约 230 卡时, 合计: 约 320 卡时（Pg 9,075 条时）}

@@ -184,7 +184,8 @@ V3_GROUPS = ("C", "D")  # the first batch (the user, 2026-11-01); B' and E later
 # the cells added once matrix v3 was done (the user, 2026-11-03; exploratory): {group: (short name, seeds)}
 V3_CELLS = {"D_noP0": ("dn", 2), "B": ("b", 1),   # B': RL only when an epoch passes, one seed
             "E2": ("e2", 0),                    # E as redefined on 2026-11-03: SFT only, no RL
-            "Cr": ("cr", 2)}                    # C's SFT again (part C, 2026-11-03); RL from its pick, two seeds (11-04)
+            "Cr": ("cr", 2),                    # C's SFT again (part C, 2026-11-03); RL from its pick, two seeds (11-04)
+            "G": ("g", 2)}                      # "point first, then act" (2026-11-06): prep only until the user approves
 # the dense side's rl until the user relays the main line's answer on its baseline: not a standard, so rl-config
 # refuses it and the chain stops at its rl_config step (SFT, its evaluation and the pick are done by then); the plan
 # is then written again with the baseline (--dense) and the chain run again, which redoes rl_config and starts both
@@ -335,7 +336,11 @@ def _plan_v3(v: Dict[str, Any], n: Dict[str, Any], commit: str, dense: Any, tr: 
         "eval": {"every": v["eval"]["every"], "options": []},
         "rl": {"standard": rl["pair"]["s0"], "seed": int(v["rl"]["seeds"][(n["k"] or 1) - 1]), "task_pool": rl["task_pool"],
                "rows": rl["rows"],
-               "exclude": rl["exclude"], "format_example": v["format_example"], "guards": dict(rl["guards"]),
+               # group G (2026-11-06): its own format example (a targets format) and the pointing reward, both sides
+               "exclude": rl["exclude"], "format_example": cfg.get("format_example") or v["format_example"],
+               "guards": dict(rl["guards"]),
+               **({"pointing_reward": float(cfg["rl"]["pointing_reward"])}
+                  if (cfg.get("rl") or {}).get("pointing_reward") else {}),
                **ch["rl"]},
     })
     if sft_only:
@@ -343,7 +348,9 @@ def _plan_v3(v: Dict[str, Any], n: Dict[str, Any], commit: str, dense: Any, tr: 
     else:
         p.update({
             "rl_runs": {n["s0"]: {}, n["d"]: {"rl": v3_dense(dense, v)}},
-            "diagnostics": {"failure_breakdown": True, "probes": {"P1": v["p1_probe"], "P0": v["p0_probe"]}},
+            "diagnostics": {"failure_breakdown": True, "probes": {
+                "P1": v["p1_probe"], "P0": v["p0_probe"],
+                **({"Pg": cfg["eval"]["pg_probe"]} if (cfg.get("eval") or {}).get("pg_probe") else {})}},  # group G
             "retain": ch["retain"],
         })
     p["note"] = note
