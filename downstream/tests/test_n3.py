@@ -321,6 +321,21 @@ def test_model_job_per_tier_workers_and_dropping_corrupted_episodes(tmp_path):
     assert "tier c: nothing to play again" in (tmp_path / "n3/n3_S.log").read_text()
 
 
+def test_model_job_stops_when_the_server_never_comes_up(tmp_path):
+    """11-06: run_n3_episodes.sh exits 3 when the model server never answers; the job stops there."""
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    (wt / "downstream/n/run_n3.sh").write_text((ROOT / "n/run_n3.sh").read_text())
+    (wt / "downstream/n/run_n3_episodes.sh").write_text(
+        'echo "$1" >> "$(dirname "$(dirname "$1")")/calls"; exit 3\n')
+    env = {k: v for k, v in os.environ.items() if k not in ("N_VAL_ENV", "DR_INSTANCES")}
+    res = subprocess.run(["bash", str(wt / "downstream/n/run_n3.sh"), str(tmp_path / "n3"), "S", "/c.jsonl", "/e.jsonl",
+                          "gd:12 gd:4 gc:12"], capture_output=True, text=True, env=env, timeout=60)
+    assert res.returncode == 3
+    assert (tmp_path / "n3/calls").read_text().split() == [str(tmp_path / "n3/gd/S")]
+    assert "tier gd: the server never came up; the job stops" in (tmp_path / "n3/n3_S.log").read_text()
+
+
 def test_model_job_tier_f_runs_the_six_on_tier_c_instances_with_free_turns(tmp_path):
     """11-05 (task book item 4): tier f, tier c's instances, N1's body with turns never blocked; a tier given twice
     plays the broken episodes again at the second worker count."""

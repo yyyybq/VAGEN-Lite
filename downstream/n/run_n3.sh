@@ -67,5 +67,9 @@ for spec in $TIERS; do
   rc=$?
   log "tier $t: rc=$rc $(grep -c '"success": true' "$N3/$t/$MODEL/episodes.jsonl" 2>/dev/null) successes of $(wc -l < "$N3/$t/$MODEL/episodes.jsonl" 2>/dev/null)"
   (( rc )) && rc_all=$rc
+  if (( rc == 3 )); then  # 11-06: the model server never came up; later tiers would only wait for it again
+    log "tier $t: the server never came up; the job stops"
+    exit 3
+  fi
 done
 exit $rc_all
