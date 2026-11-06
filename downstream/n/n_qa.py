@@ -509,22 +509,36 @@ def marked_image(q: dict, inst: dict) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+def sample_note(q: dict) -> str:
+    """One line in Chinese under a first_action sample: the shortest way and why the distractor is worse."""
+    if q["kind"] != "first_action":
+        return ""
+    n = q["numbers"]
+    why = ("起点处被挡（原地不动，至少 " if n.get("other_kind") == "blocked" else "走它至少要 ") + f"{n.get('other_at_least')} 步）"
+    return (f"<p>搜索：最短 {n['fewest']} 步（搜索的步数在 {n.get('exact_up_to')} 步以内都准确）；"
+            f"最短走法的第一步可以是 {html.escape('、'.join(n['optimal']))}；"
+            f"干扰项 {html.escape(n['other'])}：{why}。</p>")
+
+
 def samples_cmd(args) -> int:
     qs = read_jsonl(args.questions)
     insts = {r["instance_id"]: r for r in read_jsonl(args.instances)}
     picked = (pick_by_kind(qs, dict(kv.split("=") for kv in args.counts), args.seed) if args.counts
               else pick_samples(qs, args.n, args.seed))
     cards = []
+    view_zh = {"start": "起始画面", "shortest": "最短走法终点的画面", "best": "最好成功位姿的画面"}
     for k, q in enumerate(picked, 1):
         cards.append(
             f"<section><h2>{k}. {html.escape(q['kind'])} · {html.escape(q['task_type'])} · "
-            f"{html.escape(q['instance_id'])}</h2><img src='{marked_image(q, insts[q['instance_id']])}' width='512'>"
+            f"{html.escape(q['instance_id'])}</h2><p>画面：{view_zh.get(q.get('image_tag', 'start'), q.get('image_tag'))}</p>"
+            f"<img src='{marked_image(q, insts[q['instance_id']])}' width='512'>"
             f"<pre>{html.escape(q['prompt'])}</pre><p><b>正确答案：{q['answer']}</b>（{html.escape(q['options']['AB'.index(q['answer'])])}）</p>"
-            f"<pre>{html.escape(json.dumps(q['numbers'], ensure_ascii=False, indent=1))}</pre></section>")
+            f"{sample_note(q)}<pre>{html.escape(json.dumps(q['numbers'], ensure_ascii=False, indent=1))}</pre></section>")
     page = ("<!doctype html><meta charset='utf-8'><title>N 系列问答样例</title>"
             "<style>body{font-family:sans-serif;max-width:900px;margin:auto;padding:16px}section{border-bottom:1px solid #ccc;"
             "padding:12px 0}pre{white-space:pre-wrap;background:#f6f6f6;padding:8px}</style>"
-            f"<h1>N 系列问答样例（{len(picked)} 道）</h1><p>红圈：两个物体在起始画面上的可见像素中心（模型看到的图里没有圈）。</p>"
+            f"<h1>N 系列问答样例（{len(picked)} 道）</h1><p>红圈：两个物体在该题所用画面上的可见像素中心（模型看到的图里没有圈）。"
+            "第一步题的图是起始画面，不画圈。</p>"
             + "".join(cards))
     Path(args.out).write_text(page, encoding="utf-8")
     write_jsonl(Path(args.out).with_suffix(".jsonl"), picked)

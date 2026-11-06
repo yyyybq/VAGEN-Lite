@@ -373,3 +373,14 @@ def test_truth_job_also_runs_the_search_mode(tmp_path):
     bad = subprocess.run(["bash", str(wt / "downstream/n/run_n_qa_truth.sh"), str(inst), str(out), "2", "30", "x"],
                          capture_output=True, text=True, env=env, timeout=60)
     assert bad.returncode == 2
+
+
+def test_sample_note_explains_the_first_action_distractor():
+    q = {"kind": "first_action", "numbers": {"fewest": 3, "exact_up_to": 5, "optimal": ["move_left", "turn_left"],
+                                             "other": "move_forward", "other_kind": "blocked", "other_at_least": 4}}
+    note = Q.sample_note(q)
+    assert "最短 3 步" in note and "5 步以内" in note and "move_left、turn_left" in note
+    assert "move_forward：起点处被挡（原地不动，至少 4 步）" in note
+    q["numbers"].update(other="move_right", other_kind="longer", other_at_least=6)
+    assert "move_right：走它至少要 6 步）" in Q.sample_note(q)
+    assert Q.sample_note({"kind": "left_right", "numbers": {}}) == ""
