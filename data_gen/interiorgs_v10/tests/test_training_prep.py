@@ -411,6 +411,18 @@ class TrainingPrepTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             config("rl_std_fp_other", standard="v10_p1_S0_fp", turn_footprint_radius=0.3)
         config("rl_std_fp_same", standard="v10_p1_S0_fp", turn_footprint_radius=0.25)  # agreeing: fine
+        # review fixes: an explicit non-positive or non-finite radius is refused before the standard is applied
+        # (apply_standard reads an explicit 0 as no option given, 0.0 == False, and would fill the _fp standard's 0.25);
+        # nothing is written
+        for bad in (0, 0.0, float("nan"), float("inf"), -0.25):
+            for std in ("v10_p1_S0_fp", "v10_p1_Dcond_fp", "v10_p1_S0"):
+                out_name = f"rl_std_bad_radius_{std}_{bad}"
+                with self.assertRaisesRegex(SystemExit, "positive finite number", msg=(std, bad)):
+                    config(out_name, standard=std, turn_footprint_radius=bad)
+                self.assertFalse((self.root / out_name).exists(), (std, bad))
+        args = Namespace(turn_footprint_radius=0.0)  # what apply_standard itself does with it (unchanged)
+        TP.apply_standard(args, "v10_p1_S0_fp")
+        self.assertEqual(args.turn_footprint_radius, 0.25)
 
     def test_rl_config_curriculum(self):
         """Round 12 batch: --curriculum-easy-updates N puts the easy-first sampler into the PPO config (the first N
@@ -730,10 +742,11 @@ class TrainingPrepTest(unittest.TestCase):
                          (self.root / "rl_strict" / "ppo.yaml").read_text())
         for family in ("fov_inclusion", "equidistance"):
             self.assertEqual(TP.env_system_prompt(env9, family), TP.env_system_prompt(env0, family))
-        for bad in (0.0, -0.25):
-            with self.assertRaises(SystemExit):
+        for bad in (0, 0.0, float("nan"), float("inf"), -0.25):  # review fixes: non-finite ones too
+            with self.assertRaisesRegex(SystemExit, "positive finite number", msg=bad):
                 config(f"rl_fp_bad{bad}", sft_trajectories=[str(convs["placeholder"])], format_example="placeholder",
                        turn_footprint_radius=bad)
+            self.assertFalse((self.root / f"rl_fp_bad{bad}").exists(), bad)
         # an env template without thick walls cannot apply the rule: refused here, not at the trainer's env
         thin = self.root / "rl_env_room_edges.yaml"
         tdoc = yaml.safe_load((Path(TP.__file__).with_name("configs") / "rl_env_v10_S0.yaml").read_text())

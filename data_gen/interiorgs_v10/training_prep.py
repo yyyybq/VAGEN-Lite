@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -595,6 +596,11 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
     from .admission import load_policy
 
     standard = getattr(args, "standard", None)
+    radius = getattr(args, "turn_footprint_radius", None)
+    if radius is not None and not (math.isfinite(float(radius)) and float(radius) > 0):
+        # experiment 3A (review fixes): refused before apply_standard, which takes an explicit 0 for no option given
+        # (0.0 == False) and would fill an _fp standard's 0.25 in its place
+        raise SystemExit(f"--turn-footprint-radius must be a positive finite number, not {radius!r}")
     if standard:  # round 12: a named standard configuration fixes the recipe's options
         apply_standard(args, standard)
     if not getattr(args, "ppo_template", None):
@@ -669,8 +675,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
 
         if "turn_footprint_radius" not in ActiveSpatialEnvConfig.__dataclass_fields__:
             raise SystemExit("this checkout's env has no turn_footprint_radius: the RL env would drop it")
-        if not float(footprint) > 0:
-            raise SystemExit(f"--turn-footprint-radius must be positive, not {footprint!r}")
+        if not (math.isfinite(float(footprint)) and float(footprint) > 0):  # e.g. a standard's own value
+            raise SystemExit(f"--turn-footprint-radius must be a positive finite number, not {footprint!r}")
         if tcfg.get("wall_model") != "thick" or not tcfg.get("enable_collision_detection", True):
             raise SystemExit("--turn-footprint-radius needs an env template with collision detection and wall_model "
                              f"thick ({args.env_template})")
