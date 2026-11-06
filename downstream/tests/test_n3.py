@@ -313,8 +313,7 @@ def test_model_job_per_tier_workers_and_dropping_corrupted_episodes(tmp_path):
     assert 'tier c: {"dropped": 2, "kept": 1}' in (tmp_path / "n3/n3_S.log").read_text()
     # a second pass with nothing dropped and every instance played loads no server (11-06)
     inst = tmp_path / "c1.jsonl"
-    inst.write_text('{"instance_id": "ok"}
-')
+    inst.write_text('{"instance_id": "ok"}\n')
     res = subprocess.run(["bash", str(wt / "downstream/n/run_n3.sh"), str(tmp_path / "n3"), "S", str(inst),
                           "/e.jsonl", "c:4"], capture_output=True, text=True, env=env, timeout=60)
     assert res.returncode == 0, res.stdout + res.stderr
