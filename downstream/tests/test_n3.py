@@ -311,6 +311,15 @@ def test_model_job_per_tier_workers_and_dropping_corrupted_episodes(tmp_path):
     assert (tmp_path / "n3/calls").read_text().split() == [f"{n3}/c/S|4|sphere", f"{n3}/e/S|12|robot"]
     assert (c / "episodes.jsonl").read_text() == '{"instance_id": "ok"}\n' and (c / "frames_corrupted/bad.0.png").exists()
     assert 'tier c: {"dropped": 2, "kept": 1}' in (tmp_path / "n3/n3_S.log").read_text()
+    # a second pass with nothing dropped and every instance played loads no server (11-06)
+    inst = tmp_path / "c1.jsonl"
+    inst.write_text('{"instance_id": "ok"}
+')
+    res = subprocess.run(["bash", str(wt / "downstream/n/run_n3.sh"), str(tmp_path / "n3"), "S", str(inst),
+                          "/e.jsonl", "c:4"], capture_output=True, text=True, env=env, timeout=60)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert (tmp_path / "n3/calls").read_text().split() == [f"{n3}/c/S|4|sphere", f"{n3}/e/S|12|robot"]
+    assert "tier c: nothing to play again" in (tmp_path / "n3/n3_S.log").read_text()
 
 
 def test_model_job_tier_f_runs_the_six_on_tier_c_instances_with_free_turns(tmp_path):

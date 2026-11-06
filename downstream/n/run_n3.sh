@@ -49,7 +49,13 @@ for spec in $TIERS; do
     *) log "unknown tier $t"; rc_all=2; continue ;;
   esac
   if [[ ${N3_DROP_CORRUPTED:-0} == 1 && -f $N3/$t/$MODEL/episodes.jsonl ]]; then
-    log "tier $t: $("${N_VLM_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python}" "$WT/downstream/n/n_repair.py" drop --out "$N3/$t/$MODEL" --broken)"
+    res=$("${N_VLM_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/starVLA/bin/python}" "$WT/downstream/n/n_repair.py" drop --out "$N3/$t/$MODEL" --broken)
+    log "tier $t: $res"
+    # 11-06: nothing dropped and every instance has its episode -> no server is loaded only to play nothing
+    if [[ $res == *'"dropped": 0,'* && -f $INST ]] && (( $(grep -c . "$N3/$t/$MODEL/episodes.jsonl") >= $(grep -c . "$INST") )); then
+      log "tier $t: nothing to play again"
+      continue
+    fi
   fi
   HIST=0; [[ $t == g* ]] && HIST=1
   mkdir -p "$N3/$t"
