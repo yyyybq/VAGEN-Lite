@@ -95,3 +95,6 @@ def test_the_check_fails_on_too_many_flips_over_all_models(tmp_path):
     (tmp_path / "dr/RD/episodes.jsonl").write_text("".join(json.dumps(r) + "\n" for r in [flipped_a] + rec[1:]))
     assert D.main(args) == 1  # 3 in all, though each model has only one
     assert json.loads((tmp_path / "out/dr_check.json").read_text())["total_success_flips"] == 3
+    (tmp_path / "dr/RD/episodes.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rec))
+    assert D.main(args + ["--max-total-flips", "1"]) == 1  # 2 in all against the cap of 1 (three models, 11-06)
+    assert "上限 1" in (tmp_path / "out/dr_check.md").read_text(encoding="utf-8")

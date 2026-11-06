@@ -118,8 +118,9 @@ def compare_model(subset: list, rerun: dict, recorded: dict, bad=(), hinted=()) 
 
 def compare_cmd(args) -> int:
     subset = [r["instance_id"] for r in read_jsonl(args.instances)]
+    cap = MAX_TOTAL_FLIPS if args.max_total_flips is None else args.max_total_flips
     rep = {"rule": (f"per model: every instance in both runs, no error, success flips <= {MAX_FLIPS}, diverged <= "
-                    f"{MAX_DIVERGED} (clean episodes); all models: success flips <= {MAX_TOTAL_FLIPS}"),
+                    f"{MAX_DIVERGED} (clean episodes); all models: success flips <= {cap}"),
            "subset": str(args.instances), "models": {}}
     for m in args.models:
         rr = Path(args.rerun) / m
@@ -133,7 +134,7 @@ def compare_cmd(args) -> int:
         rep["models"][m] = compare_model(subset, rerun, recorded, bad, hinted)
     total = sum(v["success_flips"] for v in rep["models"].values())
     rep["total_success_flips"] = total
-    rep["pass"] = all(v["pass"] for v in rep["models"].values()) and total <= MAX_TOTAL_FLIPS
+    rep["pass"] = all(v["pass"] for v in rep["models"].values()) and total <= cap
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "dr_check.json").write_text(json.dumps(rep, indent=1) + "\n")
@@ -143,7 +144,7 @@ def compare_cmd(args) -> int:
         lines.append(f"| {m} | {v['expected']} | {v['compared']} | {v['clean']} | {v['frames_bad']} | {v['frames_hinted']} | "
                      f"{len(v['absent'])} / {len(v['errors'])} | {v['success_flips']} | {v['actions_diverged']} | "
                      f"{v['replies_identical']} | {'是' if v['pass'] else '否'} |")
-    lines += ["", f"全部模型成败不同合计 {total}（上限 {MAX_TOTAL_FLIPS}）；检查{'通过' if rep['pass'] else '不通过'}。", ""]
+    lines += ["", f"全部模型成败不同合计 {total}（上限 {cap}）；检查{'通过' if rep['pass'] else '不通过'}。", ""]
     for m, v in rep["models"].items():
         for d in v["different"]:
             lines.append(f"- {m} {d['instance_id']}：第 {d['first_different_turn']} 轮起不同；成败 重跑 "
@@ -181,6 +182,8 @@ def main(argv=None) -> int:
     c.add_argument("--rerun", required=True, help="the check tier's folder (G/dr or G/drc) with <MODEL>/episodes.jsonl")
     c.add_argument("--recorded", nargs="+", required=True, help="the recorded evaluation folders with <MODEL>/")
     c.add_argument("--models", nargs="+", required=True)
+    c.add_argument("--max-total-flips", type=int, default=None,
+                   help="the all-models cap (default MAX_TOTAL_FLIPS, set for six models; the user approved 1 for three, 2026-11-06)")
     c.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     return {"pick": pick_cmd, "compare": compare_cmd}[args.cmd](args)
