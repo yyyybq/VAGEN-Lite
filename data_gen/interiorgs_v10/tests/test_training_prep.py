@@ -626,6 +626,8 @@ class TrainingPrepTest(unittest.TestCase):
                              pointing_reward=0.1)
         self.assertEqual((env["prompt_format_example"], env["pointing_reward"]), ("targets_pixel", 0.1))
         self.assertEqual((report["format_example"], report["pointing_reward"]), ("targets_pixel", 0.1))
+        self.assertTrue(report["entropy_by_segment"])
+        self.assertTrue(yaml.safe_load((self.root / "rl_g" / "ppo.yaml").read_text())["algorithm"]["entropy_by_segment"])
         self.assertIn("Response format: <targets>A: (x,y); B: (x,y)</targets><action>move_forward|turn_left|</action>",
                       TP.env_system_prompt(env, "fov_inclusion"))
         env0, report0 = config("rl_g0", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_pixel")

@@ -119,6 +119,9 @@ class AgentData:
         self.targets_bad_turns: int = 0
         self.targets_old_turns: int = 0
         self.pointing_return: float = 0.0  # the pointing reward the env added over the episode
+        # group G (vagen/segment_entropy.py): each turn's action / targets segment spans in the response positions
+        self.action_spans: List[List[int]] = []
+        self.targets_spans: List[List[int]] = []
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -225,6 +228,10 @@ class GymAgentLoop(AgentLoopBase):
         from vagen.invalid_turns import enabled as _invalid_turns_enabled
 
         cls.record_invalid_spans = _invalid_turns_enabled(config.get("algorithm", None))
+        # group G of matrix v3: the action / targets segment spans, for the entropy by segment (vagen/segment_entropy.py)
+        from vagen.segment_entropy import enabled as _segment_enabled
+
+        cls.record_segment_spans = _segment_enabled(config.get("algorithm", None))
         # round 12 freeze, variant V8: record each episode's progress return only when the switch is on
         from vagen.split_reward_adv import weight as _split_weight
 
@@ -376,6 +383,9 @@ class GymAgentLoop(AgentLoopBase):
             # lists would be broadcast into a multi-dimensional one
             output.extra_fields["invalid_turn_spans"] = {"spans": [list(s) for s in agent_data.invalid_spans
                                                                    if s[0] < self.response_length]}
+        if getattr(self, "record_segment_spans", False):  # group G (vagen/segment_entropy.py)
+            for key, spans in (("action_spans", agent_data.action_spans), ("targets_spans", agent_data.targets_spans)):
+                output.extra_fields[key] = {"spans": [list(s) for s in spans if s[0] < self.response_length]}
         if getattr(self, "record_reward_parts", False):  # round 12 freeze, V8 (vagen/split_reward_adv.py)
             output.extra_fields["reward_parts"] = {"progress": float(agent_data.progress_return)}
         return output
@@ -438,6 +448,16 @@ class GymAgentLoop(AgentLoopBase):
             logger.warning(f"In env:{agent_data.env_name}, generated response length {len(output.token_ids)} exceeds per-turn response_limit {agent_data.response_limit}")
         agent_data.prompt_ids += agent_data.response_ids
         agent_data.add_generated_turn(len(agent_data.response_ids))
+        if getattr(self, "record_segment_spans", False) and agent_data.turn_span is not None:  # group G
+            from vagen.segment_entropy import action_token_start
+
+            start, end = agent_data.turn_span
+            k = action_token_start(list(agent_data.response_ids),
+                                   lambda ids: self.tokenizer.decode(list(ids), skip_special_tokens=True))
+            if k is not None:
+                agent_data.action_spans.append([start + k, end])
+                if k > 0:
+                    agent_data.targets_spans.append([start, start + k])
         if output.log_probs:
             agent_data.response_logprobs += output.log_probs
 

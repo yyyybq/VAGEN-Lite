@@ -94,4 +94,3 @@ def test_occluders_follow_the_rows_structure_sign(tmp_path):
     a, b, c = arrays(ours), arrays(theirs), arrays(plain)
     assert a.keys() == b.keys() and all(np.array_equal(a[k], b[k]) for k in a)
     assert not all(a[k].shape == c[k].shape and np.array_equal(a[k], c[k]) for k in a)
-

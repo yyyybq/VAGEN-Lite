@@ -2615,6 +2615,10 @@ class RayPPOTrainer:
                                 loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode
                             )
                             old_log_prob_metrics = {"actor/entropy": entropy_agg.detach().item()}
+                            from vagen.segment_entropy import segment_metrics  # group G: actor/entropy_action, _targets
+
+                            old_log_prob_metrics.update(segment_metrics(entropys, response_masks, batch.non_tensor_batch,
+                                                                        loss_agg_mode, agg_loss))
                             metrics.update(old_log_prob_metrics)
                             old_log_prob.batch.pop("entropys")
                             batch = batch.union(old_log_prob)

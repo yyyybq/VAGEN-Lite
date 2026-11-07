@@ -185,7 +185,7 @@ V3_GROUPS = ("C", "D")  # the first batch (the user, 2026-11-01); B' and E later
 V3_CELLS = {"D_noP0": ("dn", 2), "B": ("b", 1),   # B': RL only when an epoch passes, one seed
             "E2": ("e2", 0),                    # E as redefined on 2026-11-03: SFT only, no RL
             "Cr": ("cr", 2),                    # C's SFT again (part C, 2026-11-03); RL from its pick, two seeds (11-04)
-            "G": ("g", 2)}                      # "point first, then act": SFT approved 2026-11-06, RL waits for the user
+            "G": ("g", 2)}                      # "point first, then act": SFT approved 2026-11-06, RL 2026-11-07 (epoch 9)
 # the dense side's rl until the user relays the main line's answer on its baseline: not a standard, so rl-config
 # refuses it and the chain stops at its rl_config step (SFT, its evaluation and the pick are done by then); the plan
 # is then written again with the baseline (--dense) and the chain run again, which redoes rl_config and starts both
@@ -338,7 +338,9 @@ def _plan_v3(v: Dict[str, Any], n: Dict[str, Any], commit: str, dense: Any, tr: 
                "rows": rl["rows"],
                # group G (2026-11-06): its own format example (a targets format) and the pointing reward, both sides
                "exclude": rl["exclude"], "format_example": cfg.get("format_example") or v["format_example"],
-               "guards": dict(rl["guards"]),
+               # group G: its stop line on the entropy over the action segment (guards entropy_key)
+               "guards": {**rl["guards"], **({"entropy_key": str(cfg["rl"]["entropy_key"])}
+                                             if (cfg.get("rl") or {}).get("entropy_key") else {})},
                **({"pointing_reward": float(cfg["rl"]["pointing_reward"])}
                   if (cfg.get("rl") or {}).get("pointing_reward") else {}),
                **ch["rl"]},

@@ -524,4 +524,3 @@ class SegmentEntropyTest(unittest.TestCase):
         self.assertAlmostEqual(s["entropy_action"], round((0.02 * 4 + 0.05 * 5) / 9, 5))
         self.assertEqual(EV.token_entropy([{"trajectory": [{"entropy": 0.1, "tokens": 3}]}]),
                          {"entropy": 0.1, "entropy_tokens": 3})  # older records: as before
-

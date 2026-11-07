@@ -401,9 +401,11 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
     ent_max = guards.get("entropy_max")  # the user's decision 99 of 2026-11-01; off unless given
     if ent_max is not None:
         ew = int(guards.get("entropy_window", 5))
-        ent = [(s, per[s]["actor/entropy"]) for s in steps[-ew:] if "actor/entropy" in per[s]]
+        ek = str(guards.get("entropy_key") or "actor/entropy")  # group G of matrix v3: actor/entropy_action
+        ent = [(s, per[s][ek]) for s in steps[-ew:] if ek in per[s]]
         if len(ent) >= ew and all(v > float(ent_max) for _, v in ent):
-            return (f"entropy above {ent_max} in each of updates {ent[0][0]}-{ent[-1][0]} ("
+            return (f"entropy{'' if ek == 'actor/entropy' else ' (' + ek + ')'} above {ent_max} in each of updates "
+                    f"{ent[0][0]}-{ent[-1][0]} ("
                     + ", ".join(f"{v:.3f}" for _, v in ent) + ")")
     return None
 

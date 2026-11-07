@@ -188,6 +188,17 @@ class ParseJudgeTest(unittest.TestCase):
                              ("0.1", "targets_pixel"))
 
 
+class EntropyStopLineTest(unittest.TestCase):
+    def test_the_stop_line_reads_the_named_entropy(self):
+        """Group G: guards entropy_key names the entropy the stop line reads (default actor/entropy)."""
+        lines = "\n".join(f"step:{s} - actor/entropy:0.2 - actor/entropy_action:0.4 - actor/kl_loss:0.01"
+                          for s in range(1, 8))
+        guards = {"entropy_max": 0.3, "entropy_window": 5, "kl_max": 1.0, "invalid_max": 1.0}
+        self.assertIsNone(TCH.guard_reason(lines, guards))
+        reason = TCH.guard_reason(lines, dict(guards, entropy_key="actor/entropy_action"))
+        self.assertTrue(reason and "actor/entropy_action" in reason and "3-7" in reason, reason)
+
+
 class EnvPointingTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -27,7 +27,8 @@ def test_g_is_d_with_the_targets_format_and_the_pointing_reward():
     assert g["group"] == "G" and g["model_type"] == "qwen3_vl"
     assert g["format_example"] in TARGET_FORMATS and g["output_format"] == d["output_format"]
     assert g["rl"]["pointing_reward"] == 0.1 and g["rl"]["keep_std_exclude"] == "pointing_return"
-    assert g["status"] == "sft" and g["format_example"] == "targets_norm1000"
+    assert g["status"] == "rl" and g["format_example"] == "targets_norm1000"
+    assert g["rl"]["entropy_key"] == "actor/entropy_action"
     same = ("pair", "dense", "seeds", "task_pool", "rows", "exclude", "updates", "output_format", "guards", "attention")
     assert {k: g["rl"][k] for k in same} == {k: d["rl"][k] for k in same}
     assert g["sft"]["base_model"] == d["sft"]["base_model"] == v["base_qwen3"] and g["sft"]["epochs"] == d["sft"]["epochs"]
@@ -67,6 +68,7 @@ def test_g_plans_reach_the_chain(tmp_path):
     for p in plans:
         assert (p["rl"]["format_example"], p["rl"]["pointing_reward"]) == (g["format_example"], 0.1)
         assert p["diagnostics"]["probes"]["Pg"] == g["eval"]["pg_probe"]
+        assert p["rl"]["guards"] == {**MP.v3_vars()["rl"]["guards"], "entropy_key": "actor/entropy_action"}
         p["tr"] = str(tmp_path / p["rl_name"])
         chain = TC.Chain(p, sleep=lambda s: None)
         runs = chain.rl_runs()
@@ -86,5 +88,5 @@ def test_g_plans_reach_the_chain(tmp_path):
     # the other cells and groups: no pointing reward, the matrix format, no pointing probe
     d = MP.plan_v3_cell_rl("D_noP0", 20261019, SHA, start, dense="registered")
     assert "pointing_reward" not in d["rl"] and d["rl"]["format_example"] == "action_names"
-    assert "Pg" not in d["diagnostics"]["probes"]
+    assert "Pg" not in d["diagnostics"]["probes"] and "entropy_key" not in d["rl"]["guards"]
     assert json.dumps(MP.plan_v3("D", 20261019, SHA)).count("pointing") == 0

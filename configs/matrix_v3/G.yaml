@@ -3,10 +3,10 @@
 # 推理时不往提示里注入任何真值。配方 G = P0 + P1 + P2t（P2q 每步加目标段）+ Pg（指认题），SFT 其余同 D；RL 两个种子各一对 S0 / V4，同 D，
 # 另加指认奖励（每回合 0.1 × 指认得分，两侧都加）。现在只做数据和格式准备：SFT、RL 等用户看完分析 1、3 再批。
 # 用户 2026-11-06 都按推荐定了：坐标 0–1000（targets_norm1000）、Pg 9,075 条、V4 挑题时扣掉指认奖励、批 SFT（RL 等挑出 epoch 再报）。
-# 预登记第四版草案：docs/transition_qa/PREREG_G_vs_D_draft.md（transition-qa 分支）。说明见 configs/matrix_v3/README.md。
+# 预登记第四版草案：docs/transition_qa/PREREG_G_vs_D.md（transition-qa 分支，2026-11-06 定稿）。说明见 configs/matrix_v3/README.md。
 group: G
 name: G（先指认再动作）
-status: sft   # 用户 2026-11-06 批了 SFT；RL 等挑出 epoch 再报用户
+status: rl   # 用户 2026-11-06 批了 SFT，2026-11-07 批了 RL（甲），从挑出的第 9 个 epoch 起
 description: P0 + 转移题 + 动作轨迹（每步先写目标位置）+ 指认题；RL 另加指认奖励
 model_type: qwen3_vl
 format_example: targets_norm1000   # 用户 2026-11-06 定：0–1000 坐标（像素版 targets_pixel 的数据和配方留着，不用）
@@ -32,6 +32,7 @@ rl:
   dense: {variant: V4, progress_reward_scale: 3.3333333333333335, group_filter: keep_by_return_std, keep_std_threshold: 0.3318, keep_std_floor: 1.0}   # 同 D；阈值 0.3318 是没有指认奖励时定的，所以挑题时扣掉指认奖励（下面的 keep_std_exclude）
   pointing_reward: 0.1   # 每回合 0.1 × 指认得分（任务里每个目标：点在真值框内 1、否则 0，取平均；看不清的目标写 none 得 1），S0、V4 两侧都加（用户 2026-11-06）
   keep_std_exclude: pointing_return   # 只在 V4 一侧：补题时算回报分散度扣掉指认奖励，挑题规则和 D 一样；优势缩放仍用完整分散度（用户 2026-11-06 选甲）
+  entropy_key: actor/entropy_action   # 熵停止线只按动作段的熵（用户 2026-11-06 选甲；vagen/segment_entropy.py）
   seeds: [20261019, 20261021]
   task_pool: reserve
   rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl

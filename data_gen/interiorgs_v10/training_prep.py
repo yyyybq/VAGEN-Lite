@@ -758,6 +758,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             _set(ppo, key, value)
     if getattr(args, "invalid_turn_nonpositive", False):  # round 12 freeze (the user's 3.2, vagen/invalid_turns.py)
         _set(ppo, "algorithm.invalid_turn_nonpositive_adv", True)
+    if fmt.startswith("targets_"):  # group G of matrix v3: the entropy by segment (vagen/segment_entropy.py)
+        _set(ppo, "algorithm.entropy_by_segment", True)
     if getattr(args, "rollout_log_probs", False):
         # the model line (2026-10-24): vLLM returns each sampled token's log-probability, so the trainer compares it
         # with its own (vagen/ray_trainer.py: training/rollout_probs_diff_*, and with VAGEN_D0_3_SMOKE_DIR a file per
@@ -854,6 +856,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "format_example": fmt, "format_example_sft": sft_formats or None,
               "lenient_parse": bool(getattr(args, "lenient_parse", False)),
               "invalid_turn_nonpositive": bool(getattr(args, "invalid_turn_nonpositive", False)),
+              "entropy_by_segment": fmt.startswith("targets_"),
               "rollout_log_probs": bool(getattr(args, "rollout_log_probs", False)),
               "logprob_tokens": bool(getattr(args, "logprob_tokens", False)),
               "model_type": getattr(args, "model_type", None), "model_type_overrides": type_overrides,
