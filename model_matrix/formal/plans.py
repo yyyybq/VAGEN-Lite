@@ -205,11 +205,15 @@ def formal_rl_plans(which: str, date: str, commit: str, start: str, variant: str
     run, so the service goes in just before the trainer instead of the trainer waiting for a running service).
     Decision 49 甲 of 2026-11-04: rl-cambrian-nfp01 the same with NFP01_ARMS (run csnfp01, tag _nfp01); decision 52
     甲: rl-cambrian-nfp01lr with NFP01LR_ARMS (run csnfp01lr, tag _nfp01lr); decision 54 丙: rl-cambrian-nfp01lrh with
-    NFP01LRH_ARMS (run csnfp01lrh, tag _nfp01lrh), ``start`` then the pretrained head's (head_start)."""
+    NFP01LRH_ARMS (run csnfp01lrh, tag _nfp01lrh), ``start`` then the pretrained head's (head_start).  Decision 56
+    甲 of 2026-11-07: ``--seed`` on these commands names another seed's chain tag _s<seed> and run cs2<arm> (rl_name
+    m_cs2nfp...), the settings the first seed's."""
     if which in NFP_DOSES:
         base, model, kind, group, prefix = FORMAL_RL["cambrian"]
         dose, arms = NFP_DOSES[which]
-        tag = f"{base}_formal_rl_{date}_nfp{dose}"
+        other = seed != 20261019  # decision 56 甲 of 2026-11-07: another seed, as rl-cambrian-s2 names it
+        tag = f"{base}_formal_rl_{date}_nfp{dose}" + (f"_s{seed}" if other else "")
+        prefix = f"{prefix}s2" if other else prefix
         plan = rl_plan(tag, model, kind, start, group, prefix, commit, variant, seed=seed, arms=(),
                        guards=NO_FILL_RULE, extra_arms=arms)
         plan["rl"]["renderer_first"] = False

@@ -284,6 +284,23 @@ class PlansTest(unittest.TestCase):
 
         self.assertEqual(NP.HEAD_SHARD, "model-nfp-head.safetensors")
 
+    def test_decision_56_nfp01lrh_another_seed(self):
+        """Decision 56 甲 of 2026-11-07: csnfp01lrh again for seed 20261021: its own chain tag and run names, the settings
+        the first seed's, so the two seeds never share a run folder or a watcher key."""
+        from model_matrix.formal import plans as P
+
+        (t1, a), = P.formal_rl_plans("rl-cambrian-nfp01lrh", "20261105", "abc", "/head/start", "V4").items()
+        (t2, b), = P.formal_rl_plans("rl-cambrian-nfp01lrh", "20261107", "abc", "/head/start", "V4", 20261021).items()
+        self.assertEqual(t2, "m_cambrian7b_formal_rl_20261107_nfp01lrh_s20261021")
+        self.assertEqual((b["run_pools"], b["rl_runs"], b["rl_name"], b["rl"]["seed"]),
+                         ({"cs2snfp01lrh": "h800"}, {"cs2snfp01lrh": a["rl_runs"]["csnfp01lrh"]}, "m_cs2nfp01lrhrl", 20261021))
+        self.assertEqual(a["rl"]["seed"], 20261019)  # the first seed's plan unchanged
+        self.assertEqual((a["rl_name"], list(a["run_pools"])), ("m_cnfp01lrhrl", ["csnfp01lrh"]))
+        for key in set(a) - {"tr", "run_pools", "rl_runs", "rl_name", "rl", "commit"}:
+            self.assertEqual(a[key], b[key], key)
+        self.assertEqual({k: v for k, v in a["rl"].items() if k != "seed"}, {k: v for k, v in b["rl"].items() if k != "seed"})
+        self.assertEqual(b["rl_start_model"], "/head/start")
+
     def test_accept_epoch_plans(self):
         from model_matrix.formal import plans as P
 
