@@ -175,6 +175,60 @@ def c_plan(root: Path, which: str) -> Dict[str, Any]:
     return p
 
 
+# experiment B (docs/reward/PREREG_P3_B.md, the user's 2026-11-07 decision 2 甲): the table's action labels
+B_TABLES = "tables/b3000"
+B_STAGES = {  # which: (chain, endpoint, {run: arm}, audit_only, evaluated, seed; None: rw_b_w2's 20261019)
+    "check": ("rw_p3b_check", 3, {"rw_dgc_s0": "s0", "rw_dgc_g": "v4"}, True, False, None),
+    "smoke": ("rw_p3b_smoke", 10, {"rw_dgs_s0": "s0", "rw_dgs_g": "v4"}, False, False, None),
+    "s0": ("rw_p3b_dg_s0", 300, {"rw_dg_s0": "s0"}, False, True, None),
+    "g": ("rw_p3b_dg_g", 300, {"rw_dg_g": "v4"}, False, True, None),
+    # the brief: "过线立刻交种子 20261021 的两臂" (controls rw_s2s0 / rw_s2g)
+    "s2s0": ("rw_p3b_s2dg_s0", 300, {"rw_s2dg_s0": "s0"}, False, True, 20261021),
+    "s2g": ("rw_p3b_s2dg_g", 300, {"rw_s2dg_g": "v4"}, False, True, 20261021),
+}
+
+
+def b_plan(root: Path, which: str, lam: float = 0.5) -> Dict[str, Any]:
+    """B's chains, copies of task B's plan rw_b_w2 as D's: the arm's own settings (S0 = rw_b_w1's rw_s0, V4 = rw_b_w2's
+    rw_g) + rl "dagger" (the tables, lam, the plan report's defaults); the check run and the smoke are not evaluated."""
+    chain, endpoint, runs, audit, evaluated, seed = B_STAGES[which]
+    w2 = _read(root / "runs" / "rw_b_w2" / "plan.json")
+    w1 = _read(root / "runs" / "rw_b_w1" / "plan.json")
+    arm_spec = {"s0": w1["rl_runs"]["rw_s0"], "v4": w2["rl_runs"]["rw_g"]}
+    p = copy.deepcopy(w2)
+    p["tr"] = str(root / "runs" / chain)
+    p["commit"] = "COMMIT_PLACEHOLDER"
+    if seed is not None:
+        p["rl"]["seed"] = int(seed)
+    p["rl_runs"] = {}
+    for name, arm in runs.items():
+        spec = copy.deepcopy(arm_spec[arm])
+        spec.setdefault("rl", {})["dagger"] = {"tables": str(root / B_TABLES), "lam": float(lam), "cap": 96,
+                                               "turns": "all", "seed": 20261019, "audit_only": audit}
+        p["rl_runs"][name] = spec
+    p.pop("run_pools", None)
+    p["rl_name"] = "rw_p3b"
+    p["endpoint"] = endpoint
+    if evaluated:
+        p["eval_sets"] = {**w2["eval_sets"], "scr59": str(root / "eval_sets" / "eval_test_v2_screened59")}
+    else:
+        p["eval_sets"] = {}
+        p.pop("select_by", None)
+        p["eval"] = {k: v for k, v in p["eval"].items() if k != "stop_invalid"}
+    changed = ["tr", "commit", "rl_runs", "run_pools (removed)", "rl_name"]
+    changed += ["rl seed"] if seed is not None else []
+    changed += ["endpoint"] if endpoint != w2["endpoint"] else []
+    changed += ["eval_sets (+ screened 59)"] if evaluated else ["eval_sets (none)", "select_by and eval stop_invalid (removed)"]
+    arms = ", ".join(f"{n} = {'S0 (rw_b_w1 rw_s0)' if a == 's0' else 'V4 (rw_b_w2 rw_g)'} + table labels"
+                     for n, a in runs.items())
+    p["note"] = (f"Reward line, phase 3, experiment B (docs/reward/PREREG_P3_B.md; the user's decision 2 甲 of "
+                 f"2026-11-07): the {which} chain: {arms} (lam {lam}, cap 96, all turns"
+                 f"{', measured and dropped: audit_only' if audit else ''}), seed {p['rl']['seed']}, {endpoint} "
+                 f"updates; a copy of task B's plan rw_b_w2 with {', '.join(changed)} and this note changed; started "
+                 f"from the frozen worktree VAGEN-Lite-reward-p3b.")
+    return p
+
+
 def scr59(root: Path, screened: Path) -> Dict[str, Any]:
     orig = root / "eval_sets" / "eval_test_v2" / "tasks.jsonl"
     with open(orig) as f:
@@ -218,6 +272,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     cc = sub.add_parser("c")
     cc.add_argument("--root", required=True)
     cc.add_argument("--which", required=True, choices=("smoke", "arm"))
+    bb = sub.add_parser("b")
+    bb.add_argument("--root", required=True)
+    bb.add_argument("--which", required=True, choices=sorted(B_STAGES))
+    bb.add_argument("--lam", type=float, default=0.5)
     s = sub.add_parser("scr59")
     s.add_argument("--root", required=True)
     s.add_argument("--screened", required=True)
@@ -235,6 +293,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             print(_write_new(Path(p["tr"]) / "plan_template.json", p))
     elif args.cmd == "c":
         p = c_plan(root, args.which)
+        print(_write_new(Path(p["tr"]) / "plan_template.json", p))
+    elif args.cmd == "b":
+        p = b_plan(root, args.which, args.lam)
         print(_write_new(Path(p["tr"]) / "plan_template.json", p))
     else:
         print(json.dumps(scr59(root, Path(args.screened)), indent=1))

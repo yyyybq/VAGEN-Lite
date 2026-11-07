@@ -89,6 +89,35 @@ def test_c_plans(tmp_path):
     assert "und_mix" not in w2["rl_runs"]["rw_g"]["rl"]  # the source plan is not touched
 
 
+def test_b_plans(tmp_path):
+    root = _root(tmp_path)
+    w2 = json.loads((root / "runs/rw_b_w2/plan.json").read_text())
+    w1 = json.loads((root / "runs/rw_b_w1/plan.json").read_text())
+    check, smoke, s0, g = (mp.b_plan(root, w) for w in ("check", "smoke", "s0", "g"))
+    assert (check["endpoint"], smoke["endpoint"], s0["endpoint"], g["endpoint"]) == (3, 10, 300, 300)
+    assert set(check["rl_runs"]) == {"rw_dgc_s0", "rw_dgc_g"} and list(g["rl_runs"]) == ["rw_dg_g"]
+    for p in (check, smoke, s0, g):
+        assert p["rl"] == w2["rl"] and "run_pools" not in p and p["commit"] == "COMMIT_PLACEHOLDER"
+        for name, spec in p["rl_runs"].items():
+            dag = spec["rl"].pop("dagger")
+            assert dag["tables"].endswith(mp.B_TABLES) and dag["lam"] == 0.5 and dag["cap"] == 96
+            assert dag["audit_only"] is (p is check)
+            want = w1["rl_runs"]["rw_s0"].get("rl", {}) if name.endswith("s0") else w2["rl_runs"]["rw_g"]["rl"]
+            assert spec["rl"] == want
+    for p in (check, smoke):
+        assert p["eval_sets"] == {} and "select_by" not in p and "stop_invalid" not in p["eval"]
+    for p in (s0, g):
+        assert "scr59" in p["eval_sets"] and p["eval"] == w2["eval"] and p["select_by"] == "val"
+        changed = {k for k in set(p) | set(w2) if p.get(k) != w2.get(k)}
+        assert changed <= {"tr", "commit", "rl_runs", "run_pools", "rl_name", "eval_sets", "note"}
+    assert mp.b_plan(root, "smoke", lam=0.25)["rl_runs"]["rw_dgs_g"]["rl"]["dagger"]["lam"] == 0.25
+    assert "dagger" not in w2["rl_runs"]["rw_g"]["rl"]
+    s2s0, s2g = mp.b_plan(root, "s2s0"), mp.b_plan(root, "s2g")
+    assert s2s0["rl"]["seed"] == s2g["rl"]["seed"] == 20261021 and list(s2g["rl_runs"]) == ["rw_s2dg_g"]
+    assert {k for k in set(s2g["rl"]) | set(w2["rl"]) if s2g["rl"].get(k) != w2["rl"].get(k)} == {"seed"}
+    assert "endpoint" not in g["note"] and "rl seed" in s2g["note"] and "rw_b_w1 rw_s0" in s0["note"]
+
+
 def test_write_refuses_and_scr59(tmp_path):
     root = _root(tmp_path)
     (root / "eval_sets/eval_test_v2").mkdir(parents=True)

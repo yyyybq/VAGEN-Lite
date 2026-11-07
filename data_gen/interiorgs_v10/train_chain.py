@@ -1254,6 +1254,9 @@ class Chain:
             if rl.get("und_mix"):  # the reward line (2026-11-05; ported 11-07): understanding batches in the update
                 value = rl["und_mix"]  # a request, or the path of a .json file holding one
                 args += ["--und-mix", value if isinstance(value, str) else json.dumps(value, sort_keys=True)]
+            if rl.get("dagger"):  # the reward line, phase 3, experiment B: the table's action labels (vagen/dagger.py)
+                value = rl["dagger"]
+                args += ["--dagger", value if isinstance(value, str) else json.dumps(value, sort_keys=True)]
             self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
 
     def rl(self) -> None:

@@ -856,6 +856,37 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         if problems:
             raise SystemExit(f"--und-mix does not work with {'; '.join(problems)}")
         _set(ppo, "actor_rollout_ref.actor.und_mix", und_mix)
+    dagger = None
+    if getattr(args, "dagger", None):  # the reward line, phase 3, experiment B: the table's action labels
+        from vagen.dagger import ppo_block as dagger_block
+
+        if und_mix:
+            raise SystemExit("--dagger and --und-mix together are not supported")
+        try:
+            dagger = dagger_block(args.dagger, model=model, run_root=run_root)
+        except (ValueError, OSError) as exc:
+            raise SystemExit(f"--dagger: {exc}")
+        actor, trainer = ppo["actor_rollout_ref"]["actor"], ppo["trainer"]
+        gpus = int(trainer.get("n_gpus_per_node", 8)) * int(trainer.get("nnodes", 1))
+        fsdp = actor.get("fsdp_config") or {}
+        problems = [p for p, bad in (
+            (f"cap {dagger['cap']} is below the {gpus} GPUs", dagger["cap"] < gpus),
+            ("the no-concat history mode (the labels need one row per episode)", not trainer.get("concat_multi_turn")),
+            ("the actor's Ulysses sequence parallelism",
+             int(actor.get("ulysses_sequence_parallel_size", 1) or 1) != 1
+             or int(fsdp.get("ulysses_sequence_parallel_size", 1) or 1) != 1),
+            ("the REMAX estimator", str((ppo.get("algorithm") or {}).get("adv_estimator")) == "remax"),
+            # the labels come from the async GymAgentLoop; old_log_probs must be the actor's recompute (the check)
+            (f"rollout mode {((ppo['actor_rollout_ref'].get('rollout') or {}).get('mode'))!r} (only async runs "
+             f"the agent loop that labels)",
+             str((ppo["actor_rollout_ref"].get("rollout") or {}).get("mode", "async")) != "async"),
+            ("rollout_correction.bypass_mode (old_log_probs would be the rollout's, not the actor's recompute)",
+             bool((((ppo.get("algorithm") or {}).get("rollout_correction")) or {}).get("bypass_mode"))),
+            ("fp16 training (a loss scaler)", str(fsdp.get("dtype", "bfloat16")) in ("float16", "fp16")),
+            (f"actor strategy {actor.get('strategy')!r}", actor.get("strategy") not in (None, "fsdp"))) if bad]
+        if problems:
+            raise SystemExit(f"--dagger does not work with {'; '.join(problems)}")
+        _set(ppo, "actor_rollout_ref.actor.dagger", dagger)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
@@ -898,6 +929,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     if und_mix:  # only with the option, so that a report without it stays as it was
         report["und_mix"] = und_mix
+    if dagger:  # the same
+        report["dagger"] = dagger
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
 
@@ -1256,6 +1289,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="the reward line (2026-11-05; ported 11-07): understanding batches in the actor's update, a "
                         "JSON object (or a .json file) with pool (python -m vagen.und_mix prepare) and optionally "
                         "interval, weight, batch_size, micro_batch_size, seed; written to actor_rollout_ref.actor.und_mix")
+    c.add_argument("--dagger", default=None,
+                   help="the reward line, phase 3, experiment B: the distance table's action labels in the actor's "
+                        "update (vagen/dagger.py), a JSON object (or a .json file) with tables and optionally lam, "
+                        "cap, turns, seed, max_per_turn, audit_only, table_cache; written to "
+                        "actor_rollout_ref.actor.dagger")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--seed", type=int, default=None,
                    help="round 12: the run's seed, the order of the tasks (data.seed); the template's otherwise")

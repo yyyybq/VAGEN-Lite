@@ -2439,6 +2439,21 @@ class RayPPOTrainer:
 
         self.global_steps = 0
 
+        # reward line, phase 3, experiment B (vagen/dagger.py): the table's action labels, off unless
+        # actor_rollout_ref.actor.dagger.enable; concat multi-turn only (one row per episode, its turns' spans)
+        from vagen.dagger import from_config as _dagger_from_config
+
+        dagger_cfg = _dagger_from_config(self.config)
+        dagger_tokens, dagger_merge = None, None
+        if dagger_cfg is not None:
+            if not self.concat_multi_turn:
+                raise ValueError("actor.dagger needs the concat multi-turn mode (trainer.concat_multi_turn)")
+            if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:  # its baseline batch would label too
+                raise ValueError("actor.dagger does not work with the REMAX estimator")
+            dagger_tokens = {name: int(self.tokenizer.convert_tokens_to_ids(tok))
+                             for name, tok in (("vision_start", "<|vision_start|>"), ("image_pad", "<|image_pad|>"))}
+            dagger_merge = int(getattr(getattr(self.processor, "image_processor", None), "merge_size", 2) or 2)
+
         # load checkpoint before doing anything
         self._load_checkpoint()
 
@@ -2494,6 +2509,9 @@ class RayPPOTrainer:
                 uid_draw_order = {str(u): i for i, u in enumerate(batch.non_tensor_batch["uid"])}
 
                 gen_batch = self._get_gen_batch(batch)
+                if dagger_cfg is not None:  # reward line, phase 3, experiment B: label the training episodes only
+                    gen_batch.non_tensor_batch["dagger_step"] = np.array([self.global_steps] * len(gen_batch),
+                                                                         dtype=object)
 
                 # pass global_steps to trace
                 gen_batch.meta_info["global_steps"] = self.global_steps
@@ -2856,7 +2874,18 @@ class RayPPOTrainer:
                         custom_train_metrics = compute_custom_metrics(batch, prefix="custom_metrics/train")
                         metrics.update(custom_train_metrics)
 
-                    
+                    # reward line, phase 3, experiment B (vagen/dagger.py): the label samples, from every candidate
+                    # episode before the group filter drops any
+                    dagger_samples = None
+                    if dagger_cfg is not None:
+                        from vagen import dagger as _dagger
+
+                        with marked_timer("dagger_build", timing_raw, color="cyan"):
+                            dagger_samples, dagger_metrics = _dagger.build_samples(
+                                batch, dagger_cfg, int(self.global_steps), self.actor_rollout_wg.world_size,
+                                dagger_tokens, dagger_merge)
+                        metrics.update(dagger_metrics)
+
                     
                     # filter the training batch for effective update (Refer to STARPO-S and DAPO)
                     pre_filter_batch = None
@@ -2989,12 +3018,18 @@ class RayPPOTrainer:
                     metrics["trainer/actor_update_skipped_by_warmup"] = float(not actor_update_ready)
                     metrics["trainer/actor_warmup_steps_effective"] = actor_warmup_steps
                     if actor_update_ready:
+                        if dagger_samples is not None:  # reward line, phase 3, experiment B: each GPU's share
+                            _dagger.attach(batch, dagger_samples, self.actor_rollout_wg.world_size,
+                                           int(self.global_steps))
                         # update actor
                         with marked_timer("update_actor", timing_raw, color="red"):
                             batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
                             _d0_13_trainer_marker("before_update_actor_call", global_step=int(self.global_steps))
                             actor_output = self.actor_rollout_wg.update_actor(batch)
                             _d0_13_trainer_marker("after_update_actor_call", global_step=int(self.global_steps))
+                        if dagger_samples is not None:
+                            _dagger.detach(batch)
+                            dagger_samples = None
                         _d0_13_trainer_marker("before_actor_metrics_reduce", global_step=int(self.global_steps))
                         actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                         _d0_13_trainer_marker(

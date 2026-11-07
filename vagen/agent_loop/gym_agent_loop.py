@@ -103,6 +103,8 @@ class AgentData:
         # reward line (2026-11-01, vagen/turn_credit.py): every turn's span, reward and progress score
         self.turn_records: List[Dict[str, Any]] = []
         self.turn_d0: Optional[int] = None  # the start pose's table distance (phase 2, the stall penalty)
+        # reward line, phase 3, experiment B (vagen/dagger.py): every turn's table judgment and label; None when off
+        self.dagger_records: Optional[List[Dict[str, Any]]] = None
 
         # Episode metadata – populated from env info during the episode
         # These fields are written into reward_extra_info so they appear
@@ -217,6 +219,10 @@ class GymAgentLoop(AgentLoopBase):
         from vagen.turn_credit import selected as _turn_credit_selected
 
         cls.record_turn_records = _turn_credit_selected(config)
+        # reward line, phase 3, experiment B: the table's action labels, only with actor.dagger.enable (vagen/dagger.py)
+        from vagen.dagger import from_config as _dagger_from_config
+
+        cls.dagger = _dagger_from_config(config)
 
         _placeholder = [{"role": "system", "content": "placeholder"}]
         if processor is not None:
@@ -291,6 +297,9 @@ class GymAgentLoop(AgentLoopBase):
             from vagen.turn_credit import reset_distance
 
             agent_data.turn_d0 = reset_distance(info)
+        # reward line, phase 3, experiment B: training episodes only (the trainer marks their batches with dagger_step)
+        if getattr(self, "dagger", None) is not None and kwargs.get("dagger_step") is not None:
+            agent_data.dagger_records = []
 
         # State machine: always GENERATE -> INTERACT, and decide termination inside INTERACT
         state = AgentState.PENDING
@@ -364,6 +373,10 @@ class GymAgentLoop(AgentLoopBase):
 
             output.extra_fields["turn_records"] = episode_record(agent_data.initial_score, agent_data.turn_records,
                                                                  self.response_length, agent_data.turn_d0)
+        if agent_data.dagger_records is not None:  # reward line, phase 3, experiment B (vagen/dagger.py)
+            from vagen.dagger import episode_field
+
+            output.extra_fields["dagger_turns"] = episode_field(agent_data.dagger_records, agent_data.task_id)
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:
@@ -442,10 +455,20 @@ class GymAgentLoop(AgentLoopBase):
         so the episode ends on an assistant turn.
         """
         action_str = agent_data.last_assistant_text or ""
+        dagger_pre = None
+        if agent_data.dagger_records is not None:  # reward line, phase 3, experiment B: the pose before the turn
+            from vagen.dagger import pre_turn
+
+            try:
+                dagger_pre = pre_turn(agent_data.env)
+            except Exception as exc:  # noqa: BLE001 - the turn is then left out of the labels
+                agent_data.dagger_records.append({"t": agent_data.env_turns, "status": "error",
+                                                  "error": f"pre_turn {type(exc).__name__}: {exc}"})
         try:
             obs, reward, done, info = await agent_data.env.step(action_str)
             # traceback
         except Exception as exc:
+            dagger_pre = None  # an env error: no judgment for this turn
             logger.error(
                 "Environment step failed in '%s' with action %r: %s",
                 agent_data.env_name,
@@ -469,6 +492,12 @@ class GymAgentLoop(AgentLoopBase):
 
             agent_data.turn_records.append(turn_record(agent_data.turn_span, reward, info, agent_data.traj_success,
                                                        not turn_invalid(info)))
+        if dagger_pre is not None:  # reward line, phase 3, experiment B: the turn judged on the table, its label
+            from vagen.dagger import after_turn
+
+            agent_data.dagger_records.append(await after_turn(
+                self.dagger, agent_data.env, dagger_pre, info, agent_data.turn_span, agent_data.response_ids,
+                self.tokenizer, agent_data.env_turns - 1))
         # ── update episode metadata from step info ───────────────────────────
         if info:
             agent_data.n_primitive_steps = int(info.get("env_step", agent_data.env_turns))

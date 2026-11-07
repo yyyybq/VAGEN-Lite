@@ -58,6 +58,13 @@ need += [p[k] for k in ("rl_start_model", "model", "gs_root", "scenes_root") if 
 need += [p["sft_dir"] + "/" + t for t in (p.get("sft_groups") or {}).values()]
 need += [r["rl"]["distance_tables"] for r in runs.values() if (r.get("rl") or {}).get("distance_tables")]
 need += [r["rl"]["und_mix"]["pool"] + "/manifest.json" for r in runs.values() if isinstance((r.get("rl") or {}).get("und_mix"), dict)]
+dag = [r["rl"]["dagger"] for r in runs.values() if isinstance((r.get("rl") or {}).get("dagger"), dict)]
+for d in dag:  # experiment B: the tables, and a worktree whose verl carries the actor's dagger hooks
+    assert any(Path(d["tables"]).glob("*.npz")), f"{d['tables']} holds no tables"
+if dag:
+    cfg_src = Path("verl/verl/workers/config/actor.py").read_text()
+    act_src = Path("verl/verl/workers/actor/dp_actor.py").read_text()
+    assert "dagger: Optional[dict]" in cfg_src and "DaggerMixer" in act_src, "this worktree's verl has no dagger hooks"
 models = (p.get("eval") or {}).get("models") or {}
 need += [m["model"] for m in models.values()] + [m["model"] + "/config.json" for m in models.values()]
 diag = p.get("diagnostics") or {}
