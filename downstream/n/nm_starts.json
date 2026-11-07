@@ -335,6 +335,30 @@
    "sft": "Q3S",
    "base": "Q3B",
    "main_name": "qrl_s2_300"
+  },
+  {
+   "name": "Q3FS",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fps0/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_qw3fps0/val_env.yaml",
+   "group": "3A",
+   "seed": 1,
+   "reward": "S0",
+   "step": 300,
+   "sft": "Q3S",
+   "base": "Q3B",
+   "main_name": "qw3fps0_300"
+  },
+  {
+   "name": "Q3FD",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fpd/checkpoints/global_step_300/actor/huggingface",
+   "val_env": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_qw3fpd/val_env.yaml",
+   "group": "3A",
+   "seed": 1,
+   "reward": "V4",
+   "step": 300,
+   "sft": "Q3S",
+   "base": "Q3B",
+   "main_name": "qw3fpd_300"
   }
  ]
 }
