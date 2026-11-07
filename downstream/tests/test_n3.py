@@ -356,6 +356,25 @@ def test_model_job_tier_f_runs_the_six_on_tier_c_instances_with_free_turns(tmp_p
     assert (tmp_path / "n3/n3_B.log").read_text().count("tier f: B is not in it") == 2
 
 
+def test_tier_f_takes_extra_models_only_when_listed(tmp_path):
+    """11-07: the main line's 3A weights (Q3FS, Q3FD) on tier f through N3_EXTRA_MODELS; without it they are refused."""
+    wt = tmp_path / "wt"
+    (wt / "downstream/n").mkdir(parents=True)
+    (wt / "downstream/n/run_n3.sh").write_text((ROOT / "n/run_n3.sh").read_text())
+    (wt / "downstream/n/run_n3_episodes.sh").write_text(
+        'mkdir -p "$1"; echo "$1|$2|$4|$N3_COLLISION|${N_VAL_ENV:-}" >> "$(dirname "$(dirname "$1")")/calls"\n')
+    env = {k: v for k, v in os.environ.items() if k not in ("N_VAL_ENV", "N3_EXTRA_MODELS")}
+    env["N_VAL_ENV_QWEN3"] = "/fs.yaml"
+    run = ["bash", str(wt / "downstream/n/run_n3.sh"), str(tmp_path / "n3"), "Q3FS", "/c.jsonl", "/e.jsonl", "f:12"]
+    assert subprocess.run(run, capture_output=True, text=True, env=env, timeout=60).returncode == 0
+    assert not (tmp_path / "n3/calls").exists()
+    assert "tier f: Q3FS is not in it" in (tmp_path / "n3/n3_Q3FS.log").read_text()
+    res = subprocess.run(run, capture_output=True, text=True, env=dict(env, N3_EXTRA_MODELS="Q3FS Q3FD"), timeout=60)
+    assert res.returncode == 0, res.stdout + res.stderr
+    n3 = str(tmp_path / "n3")
+    assert (tmp_path / "n3/calls").read_text().split() == [f"{n3}/f/Q3FS|/c.jsonl|12|robot_free_turn|/fs.yaml"]
+
+
 class TouchingScene(N3.Scene):
     """N3.Scene without the simulator: every pose touches something (as if the base stood in a counter)."""
 

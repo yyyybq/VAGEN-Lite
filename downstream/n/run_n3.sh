@@ -32,20 +32,23 @@ esac
 mkdir -p "$N3"
 log() { echo "[n3] $* $(date -u +%FT%TZ)" | tee -a "$N3/n3_$MODEL.log"; }
 rc_all=0
+# Tiers c, f, gc, drc take the six trained models; N3_EXTRA_MODELS (names of nm_starts.json, e.g. "Q3FS Q3FD", the
+# main line's 3A weights, the user's go of 2026-11-07) adds more.
+SIX=" S RS RD Q3S Q3RS Q3RD ${N3_EXTRA_MODELS:-} "
 for spec in $TIERS; do
   t="${spec%%:*}"; w="$WORKERS"
   [[ $spec == *:* ]] && w="${spec#*:}"
   case $t in
-    c) [[ " S RS RD Q3S Q3RS Q3RD " == *" $MODEL "* ]] || { log "tier c: $MODEL is not in it"; continue; }
+    c) [[ "$SIX" == *" $MODEL "* ]] || { log "tier c: $MODEL is not in it"; continue; }
        INST="$CI"; COLL=sphere ;;
     e) INST="$EI"; COLL=robot ;;
-    f) [[ " S RS RD Q3S Q3RS Q3RD " == *" $MODEL "* ]] || { log "tier f: $MODEL is not in it"; continue; }
+    f) [[ "$SIX" == *" $MODEL "* ]] || { log "tier f: $MODEL is not in it"; continue; }
        INST="$CI"; COLL=robot_free_turn ;;
     gd) INST="${D_INSTANCES:-/mnt/umm/users/yinbaiqiao/downstream_runs/n/n2_20261103/instances_600.jsonl}"; COLL=robot ;;
-    gc) [[ " S RS RD Q3S Q3RS Q3RD " == *" $MODEL "* ]] || { log "tier gc: $MODEL is not in it"; continue; }
+    gc) [[ "$SIX" == *" $MODEL "* ]] || { log "tier gc: $MODEL is not in it"; continue; }
         INST="$CI"; COLL=sphere ;;
     dr) INST="${DR_INSTANCES:?tier dr needs DR_INSTANCES}"; COLL=robot ;;
-    drc) [[ " S RS RD Q3S Q3RS Q3RD " == *" $MODEL "* ]] || { log "tier drc: $MODEL is not in it"; continue; }
+    drc) [[ "$SIX" == *" $MODEL "* ]] || { log "tier drc: $MODEL is not in it"; continue; }
          INST="${DRC_INSTANCES:?tier drc needs DRC_INSTANCES}"; COLL=sphere ;;
     *) log "unknown tier $t"; rc_all=2; continue ;;
   esac
