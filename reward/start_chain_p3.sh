@@ -57,6 +57,7 @@ need = [*p["eval_sets"].values(), p["sft_dir"]] + [rl[k] for k in ("rows", "excl
 need += [p[k] for k in ("rl_start_model", "model", "gs_root", "scenes_root") if p.get(k)]
 need += [p["sft_dir"] + "/" + t for t in (p.get("sft_groups") or {}).values()]
 need += [r["rl"]["distance_tables"] for r in runs.values() if (r.get("rl") or {}).get("distance_tables")]
+need += [r["rl"]["und_mix"]["pool"] + "/manifest.json" for r in runs.values() if isinstance((r.get("rl") or {}).get("und_mix"), dict)]
 models = (p.get("eval") or {}).get("models") or {}
 need += [m["model"] for m in models.values()] + [m["model"] + "/config.json" for m in models.values()]
 diag = p.get("diagnostics") or {}
