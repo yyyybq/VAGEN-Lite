@@ -1,6 +1,6 @@
 {
  "batch": "b39_20261107",
- "approved": "PENDING: the model line (11-07 07:1x) relays its table 1k, the user's decision 57 甲 there (\"56 甲 57 甲\"); deletion needs the user's word in the disk window",
+ "approved": "the user 2026-11-07 ~07:50 UTC in the disk window: \"甲\" (reply to the 07:2x report, whose only decision was b39; quota table 19/22 TB). = 甲: archive to AOSS first, then delete b39 as listed (the model line's table 1k, the user's \"57 甲\" there; csnfp01lrh step-200 resume state, 25 files 96.6 GB; actor/huggingface and the metadata files stay)",
  "items": [
   {
    "id": "R1-m_cambrian7b_formal_rl_20261105_nfp01lrh-csnfp01lrh-200",
