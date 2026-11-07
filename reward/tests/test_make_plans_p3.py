@@ -12,7 +12,8 @@ def _root(tmp_path):
     guards = {"kl_max": 0.2, "invalid_max": 0.1, "invalid_window": 10, "keep_fill_min": 1.0}
     base = {"tr": "x", "commit": "abc", "rl": {"standard": "v10_p1_S0", "seed": 20261019, "guards": guards},
             "eval_sets": {"val": str(tmp_path / "eval_sets/eval_val_v2"), "test": str(tmp_path / "eval_sets/eval_test_v2")},
-            "endpoint": 300, "pool": "queue", "run_pools": {"rw_g": "zoetrope"}, "rl_name": "rw_b", "note": "n"}
+            "endpoint": 300, "pool": "queue", "run_pools": {"rw_g": "zoetrope"}, "rl_name": "rw_b", "note": "n",
+            "select_by": "val", "eval": {"every": 50, "options": [], "stop_invalid": {"set": "val", "max": 0.1}}}
     v4 = {"rl": {"standard": "v10_p1_Dcond", "group_filter": "keep_by_return_std", "keep_std_threshold": 0.3318,
                  "keep_std_floor": 1.0, "progress_reward_scale": 10 / 3}}
     for name, rl_runs in (("rw_b_w2", {"rw_g": v4, "rw_ok": {"rl": {}}}), ("rw_b_w1", {"rw_s0": {}, "rw_o": {"rl": {}}})):
@@ -69,6 +70,23 @@ def test_a2_plans(tmp_path):
     assert diag["tr"].endswith("rw_p3a2_diag") and easi["tr"].endswith("rw_p3a2_easi")
     assert "downstream_qa" in diag["diagnostics"] and easi["qa_eval"]["easi"] == "easi_8"
     assert all(m["model"].endswith("/actor/huggingface") for m in diag["eval"]["models"].values())
+
+
+def test_c_plans(tmp_path):
+    root = _root(tmp_path)
+    w2 = json.loads((root / "runs/rw_b_w2/plan.json").read_text())
+    smoke, arm = mp.c_plan(root, "smoke"), mp.c_plan(root, "arm")
+    assert smoke["endpoint"] == 10 and arm["endpoint"] == 300 and list(smoke["rl_runs"]) == ["rw_mx_smoke"]
+    for p, name in ((smoke, "rw_mx_smoke"), (arm, "rw_mx_g")):
+        spec = p["rl_runs"][name]["rl"]
+        um = spec.pop("und_mix")
+        assert spec == w2["rl_runs"]["rw_g"]["rl"] and um["batch_size"] == 128 and um["pool"].endswith(mp.C_POOL)
+        assert p["rl"] == w2["rl"] and "run_pools" not in p and p["commit"] == "COMMIT_PLACEHOLDER"
+    assert "scr59" in arm["eval_sets"] and smoke["eval_sets"] == {} and "select_by" not in smoke
+    assert "stop_invalid" not in smoke["eval"] and arm["eval"] == w2["eval"] and arm["select_by"] == "val"
+    changed = {k for k in set(arm) | set(w2) if arm.get(k) != w2.get(k)}
+    assert changed <= {"tr", "commit", "rl_runs", "run_pools", "rl_name", "eval_sets", "note"}
+    assert "und_mix" not in w2["rl_runs"]["rw_g"]["rl"]  # the source plan is not touched
 
 
 def test_write_refuses_and_scr59(tmp_path):

@@ -143,6 +143,38 @@ def a2_plans(root: Path) -> Dict[str, Dict[str, Any]]:
     return {"rw_p3a2_diag": diag, "rw_p3a2_easi": easi}
 
 
+# experiment C (docs/reward/PREREG_P3_C.md, the user's 2026-11-07 decision 3): the smoke, then one V4 arm with und_mix
+C_POOL = "und_mix/pool_c0_20261107"
+
+
+def c_plan(root: Path, which: str) -> Dict[str, Any]:
+    """which: "smoke" (10 updates, run rw_mx_smoke) or "arm" (300 updates, run rw_mx_g); both = rw_g's plan + und_mix."""
+    w2 = _read(root / "runs" / "rw_b_w2" / "plan.json")
+    p = copy.deepcopy(w2)
+    spec = copy.deepcopy(w2["rl_runs"]["rw_g"])
+    spec.setdefault("rl", {})["und_mix"] = {"pool": str(root / C_POOL), "batch_size": 128}
+    name = {"smoke": "rw_mx_smoke", "arm": "rw_mx_g"}[which]
+    p["tr"] = str(root / "runs" / {"smoke": "rw_p3c_smoke", "arm": "rw_p3c_mx_g"}[which])
+    p["commit"] = "COMMIT_PLACEHOLDER"
+    p["rl_runs"] = {name: spec}
+    p.pop("run_pools", None)
+    p["rl_name"] = "rw_p3c"
+    if which == "smoke":  # no evaluation (as rw_mix_smoke): no sets, no pick, no evaluation stop rule
+        p["endpoint"] = 10
+        p["eval_sets"] = {}
+        p.pop("select_by", None)
+        p["eval"] = {k: v for k, v in p["eval"].items() if k != "stop_invalid"}
+    else:
+        p["eval_sets"] = {**w2["eval_sets"], "scr59": str(root / "eval_sets" / "eval_test_v2_screened59")}
+    p["note"] = (f"Reward line, phase 3, experiment C (docs/reward/PREREG_P3_C.md; the user's decision 3 of 2026-11-07): "
+                 f"{name} = V4 (rw_g settings) + und_mix (pool {C_POOL}, batch 128, interval 2, weight 0.1), seed "
+                 f"{p['rl']['seed']}, {p['endpoint']} updates; a copy of task B's plan rw_b_w2 with tr, commit, rl_runs, "
+                 f"run_pools (removed), rl_name, "
+                 f"{'endpoint, eval_sets (none), select_by and eval stop_invalid (removed)' if which == 'smoke' else 'eval_sets (+ screened 59)'} and this "
+                 f"note changed; started from a frozen worktree of reward-design.")
+    return p
+
+
 def scr59(root: Path, screened: Path) -> Dict[str, Any]:
     orig = root / "eval_sets" / "eval_test_v2" / "tasks.jsonl"
     with open(orig) as f:
@@ -183,6 +215,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     a.add_argument("--c0", required=True)
     a2 = sub.add_parser("a2")
     a2.add_argument("--root", required=True)
+    cc = sub.add_parser("c")
+    cc.add_argument("--root", required=True)
+    cc.add_argument("--which", required=True, choices=("smoke", "arm"))
     s = sub.add_parser("scr59")
     s.add_argument("--root", required=True)
     s.add_argument("--screened", required=True)
@@ -198,6 +233,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     elif args.cmd == "a2":
         for name, p in a2_plans(root).items():
             print(_write_new(Path(p["tr"]) / "plan_template.json", p))
+    elif args.cmd == "c":
+        p = c_plan(root, args.which)
+        print(_write_new(Path(p["tr"]) / "plan_template.json", p))
     else:
         print(json.dumps(scr59(root, Path(args.screened)), indent=1))
 
