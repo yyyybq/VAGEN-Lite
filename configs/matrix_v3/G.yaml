@@ -5,7 +5,7 @@
 # 用户 2026-11-06 都按推荐定了：坐标 0–1000（targets_norm1000）、Pg 9,075 条、V4 挑题时扣掉指认奖励、批 SFT（RL 等挑出 epoch 再报）。
 # 预登记第四版草案：docs/transition_qa/PREREG_G_vs_D.md（transition-qa 分支，2026-11-06 定稿）。说明见 configs/matrix_v3/README.md。
 group: G
-name: G（先指认再动作）
+name: G（先指认再动作）；用户 2026-11-07 起叫 G-text（坐标写进输出文字），数据和结果都在本组，不再准备新数据
 status: rl   # 用户 2026-11-06 批了 SFT，2026-11-07 批了 RL（甲），从挑出的第 9 个 epoch 起
 description: P0 + 转移题 + 动作轨迹（每步先写目标位置）+ 指认题；RL 另加指认奖励
 model_type: qwen3_vl

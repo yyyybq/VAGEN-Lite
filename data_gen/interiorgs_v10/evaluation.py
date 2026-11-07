@@ -357,7 +357,7 @@ def call_seed(base: int, index: int, sample: int, turn: int) -> int:
 
 def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None,
                 history: bool = False, as_sft: bool = False, sample: Optional[int] = None,
-                seed: Optional[int] = None) -> Dict[str, Any]:
+                seed: Optional[int] = None, self_marker: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
     """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py.
 
     With ``frames`` (round 8) the row also carries the trajectory: per turn the frame the model saw (a JPEG in
@@ -366,13 +366,16 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
     With ``history`` (round 9 switch) every model call also gets all earlier turns of the episode, as in SFT;
     with ``as_sft`` every message is passed through ``sft_text`` first.  ``sample`` / ``seed`` (round 11): the
     sample number of a sampled run and the base seed of its model calls (``call_seed``); frames are then named
-    <index>_s<sample>_<turn>.jpg."""
+    <index>_s<sample>_<turn>.jpg.  ``self_marker`` (G-oracle's self mode, the user's item 6c of 2026-11-07):
+    called as self_marker(frame, item, env) before every action call, it returns the frame the action call sees (with
+    the model's own boxes; self_marker.py) and the turn's box record."""
     obs, info = env.reset(seed=index)
     system = env.system_prompt()
     item = env.current_item or {}
     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
     done, trajectory, end_reason, earlier = False, [], None, []
     pointed: Counter = Counter()  # group G of matrix v3: the turns the env judged a targets segment in
+    marked_turns: List[List[Dict[str, Any]]] = []  # G-oracle's self mode: each turn's boxes
     start = gate_summary(env._calculate_canonical_metric()) if frames is not None else None
 
     def keep(image: Any, turn: int) -> Optional[str]:
@@ -394,10 +397,16 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             kw["as_sft"] = True
         if seed is not None:
             kw["seed"] = call_seed(seed, index, sample or 0, turns)
-        text = policy.generate(system, obs["obs_str"], images[0], **kw)
+        shown, marks = images[0], None
+        if self_marker is not None:  # G-oracle's self mode: the frame with the model's own boxes
+            shown, marks = self_marker(images[0], item, env)
+            marked_turns.append(marks)
+        text = policy.generate(system, obs["obs_str"], shown, **kw)
         if history:
-            earlier.append((obs["obs_str"], images[0], text))
-        seen = {"frame": keep(images[0], turns), "user": obs["obs_str"]}
+            earlier.append((obs["obs_str"], shown, text))
+        seen = {"frame": keep(shown, turns), "user": obs["obs_str"]}
+        if marks is not None:
+            seen["self_marks"] = marks
         if getattr(policy, "last_prompt_tokens", None) is not None:
             seen["prompt_tokens"] = policy.last_prompt_tokens
         if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
@@ -436,6 +445,10 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
     if pointed:
         row["pointing"] = {"turns": int(pointed["turns"]), "score": round(float(pointed["score"]), 4),
                            "ok_turns": int(pointed["ok"]), "old_turns": int(pointed["old"])}
+    if self_marker is not None:
+        from .self_marker import summary as _marks_summary
+
+        row["self_marker"] = _marks_summary(marked_turns)
     if sample is not None:
         row["sample"] = int(sample)
     if frames is not None:
@@ -581,6 +594,15 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
                     pieces, position_entropies([[lp.logprob for lp in pos.values()] for pos in steps], self.temperature))
         return out[0].outputs[0].text
 
+    def ask(self, question: str, image: Any) -> str:
+        """One user turn (the frame, then ``question``; no system prompt), greedy: G-oracle's self mode asks the
+        pointing pool's box question as the pointing probe does."""
+        from vllm import SamplingParams
+
+        msgs = [{"role": "user", "content": [_image_url(image), {"type": "text", "text": "\n" + question}]}]
+        out = self.llm.chat(msgs, sampling_params=SamplingParams(temperature=0.0, max_tokens=64), use_tqdm=False)
+        return out[0].outputs[0].text
+
 
 def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU and the render service
     from vagen.envs.active_spatial.env import ActiveSpatialEnv
@@ -602,6 +624,17 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                         max_images=int(args.max_turns) if args.history else 1,
                         temperature=float(args.temperature) if sampled else 0.0,
                         top_p=float(args.top_p) if sampled else 1.0, entropy=bool(getattr(args, "entropy", False)))
+    self_marker = None
+    if getattr(args, "self_marker", False):  # G-oracle's self mode (the user's item 6c of 2026-11-07)
+        if switches.get("oracle_marker"):
+            raise SystemExit("--self-marker draws the model's own boxes; it cannot go with --oracle-marker")
+        from vagen.envs.active_spatial.pointing import truth as _truth
+
+        from .self_marker import mark_turn
+
+        def self_marker(frame: Any, item: Dict[str, Any], env_: Any) -> Any:
+            rows = _truth(item, env_.view_engine.get_pose(), env_._visibility_occluders())
+            return mark_turn(policy.ask, frame, item, rows)
     (out / "model.json").write_text(json.dumps({"name": args.name, "model": args.model, "version": VERSION,
                                                 "prompt_format": cfg["prompt_format"], "greedy": not sampled,
                                                 "samples": int(args.samples) if sampled else 1,
@@ -612,6 +645,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                                                 "history": bool(args.history),
                                                 "sft_text": bool(args.sft_text),
                                                 "entropy": bool(getattr(args, "entropy", False)),
+                                                "self_marker": bool(getattr(args, "self_marker", False)),
                                                 "load_seconds": round(time.time() - t0, 1)}, indent=1))
     done = ({(r["index"], r.get("sample")) for r in _jsonl(out / "results.jsonl")}
             if (out / "results.jsonl").exists() else set())
@@ -624,7 +658,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                 try:
                     row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames",
                                       history=args.history, as_sft=args.sft_text, sample=k,
-                                      seed=int(args.sample_seed) if sampled else None)
+                                      seed=int(args.sample_seed) if sampled else None, self_marker=self_marker)
                 except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
                     row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
                     if k is not None:
@@ -927,6 +961,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--format-example", default=None,
                    choices=["placeholder", "action_names", "targets_pixel", "targets_norm1000"],
                    help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
+    r.add_argument("--self-marker", action="store_true",
+                   help="G-oracle's self mode: before each action the model boxes the task's targets (Pg's question) "
+                        "and its boxes are drawn into the frame (data_gen/interiorgs_v10/self_marker.py)")
     r.add_argument("--oracle-marker", action="store_true",
                    help="draw the task's targets' truth boxes into every frame (vagen/envs/active_spatial/oracle_marker.py)")
     r.add_argument("--entropy", action="store_true",

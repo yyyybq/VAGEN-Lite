@@ -680,6 +680,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             raise SystemExit(f"--pointing-reward needs a targets format example (--format-example targets_...), "
                              f"not {fmt!r}")
         history["env"]["pointing_reward"] = float(args.pointing_reward)
+    if getattr(args, "oracle_marker", False):  # G-oracle (the user's item 6c of 2026-11-07): truth boxes in the frames
+        if (int(tcfg.get("image_width", 0)), int(tcfg.get("image_height", 0))) != (256, 256):
+            raise SystemExit("--oracle-marker draws the boxes of the 256 x 256 frames")
+        history["env"]["oracle_marker"] = True
     if fmt.startswith("targets_") and (int(tcfg.get("image_width", 0)), int(tcfg.get("image_height", 0))) != (256, 256):
         raise SystemExit("a targets format example needs the 256 x 256 frames its boxes are judged on")
     history["env"].update(design_variant_overrides(args, history["env"]))
@@ -864,6 +868,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
               "pointing_reward": (float(args.pointing_reward) if getattr(args, "pointing_reward", None) is not None
                                   else None),
+              "oracle_marker": bool(getattr(args, "oracle_marker", False)),
               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
               "entropy_coeff_override": getattr(args, "entropy_coeff", None),
               "kl_loss_coef": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("kl_loss_coef"),
@@ -1191,6 +1196,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--invalid-penalty", type=float, default=None,
                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
+    c.add_argument("--oracle-marker", action="store_true",
+                   help="G-oracle (the user's item 6c of 2026-11-07): env oracle_marker, the task's targets' truth boxes "
+                        "drawn into every frame of the rollouts and the validation (oracle_marker.py); default off")
     c.add_argument("--pointing-reward", type=float, default=None,
                    help="group G of matrix v3: the weight of the pointing reward (env pointing_reward: each turn the "
                         "weight times the share of the task's objects the targets segment places right; needs a "

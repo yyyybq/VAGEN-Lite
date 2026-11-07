@@ -1420,6 +1420,7 @@ class Chain:
                     args += [flag, ",".join(str(x) for x in value) if isinstance(value, (list, tuple)) else str(value)]
             for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val"),
                               ("lenient_parse", "--lenient-parse"), ("invalid_turn_nonpositive", "--invalid-turn-nonpositive"),
+                              ("oracle_marker", "--oracle-marker"),  # G-oracle (the user's item 6c of 2026-11-07)
                               ("logprob_audit", "--rollout-log-probs"),  # the model line: the log-probability audit
                               ("logprob_tokens", "--logprob-tokens")):  # and its per-token files (2026-10-26)
                 if rl.get(key):

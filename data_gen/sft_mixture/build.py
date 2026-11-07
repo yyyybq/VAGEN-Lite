@@ -43,12 +43,13 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 
 import yaml
 
-POOLS = ("P0", "P1", "P2", "P2q", "P2f", "P2f2k", "Pg", "P2t")
+POOLS = ("P0", "P1", "P2", "P2q", "P2f", "P2f2k", "Pg", "P2t", "P2m")  # P2m: G-oracle (the user's item 6c of 2026-11-07)
 POOL_ZH = {"P0": "P0 仿 benchmark 的 QA", "P1": "P1 转移题", "P2": "P2 SFT 动作轨迹",
            "P2q": "P2q SFT 动作轨迹（新格式：真实动作名）", "P2f": "P2f 格式 SFT 的短对话（真实动作名）",
            "P2f2k": "P2f2k 主线的格式对话（2,000 段去掉边缘场景，真实动作名）",
            # group G of matrix v3 (2026-11-06): data_gen/transition_qa/pointing_qa.py, data_gen/sft_mixture/targets_convert.py
-           "Pg": "Pg 指认题（点出 / 框出任务里的目标）", "P2t": "P2t SFT 动作轨迹（先写目标位置再动作）"}
+           "Pg": "Pg 指认题（点出 / 框出任务里的目标）", "P2t": "P2t SFT 动作轨迹（先写目标位置再动作）",
+           "P2m": "P2m SFT 动作轨迹（画面画了任务目标的真值框）"}
 DATASET_INFO = {"formatting": "sharegpt",
                 "columns": {"messages": "messages", "images": "images", "videos": "videos"},
                 "tags": {"role_tag": "role", "content_tag": "content", "user_tag": "user",

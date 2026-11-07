@@ -1,0 +1,67 @@
+# 矩阵第三版之后的格子 G-oracle / G′"指认作中间表示"（用户 2026-11-07 补充指令第 6 项，改过的版本）：任务目标的真值框画在每一步的
+# 画面上（vagen/envs/active_spatial/oracle_marker.py：A 红、B 蓝，只画看得清的目标），文字和 D 逐字相同（action_names）。
+# 配方 Go = D 的配方（P0 + P1 + 动作轨迹）+ Pg 指认题池（点出 X、框出 X）；动作轨迹的每一步图片换成画了真值框的版本（P2m，
+# data_gen/sft_mixture/marker_convert.py），画在图上、不写进文字。RL 同 D，每一步渲染后同样画框（rl-config --oracle-marker）。
+# 评测两种模式：oracle 模式画真值框（evaluation run --oracle-marker）；self 模式先让同一个模型回答"框出 A、框出 B"，把回答画到图上
+# 再出动作（--self-marker，记录框的 IoU）。G-oracle − D 是上界，G′（self 模式）− D 是主比较；oracle 模式是推理期注入，用户豁免一次。
+# 现在只做数据准备，不花卡；SFT、RL 等用户批。预登记草案：docs/transition_qa/PREREG_Go_vs_D_draft.md（transition-qa 分支）。
+group: Go
+name: G-oracle / G′（指认作中间表示：画框）
+status: prep   # 用户 2026-11-07：只准备数据，训练等用户批
+description: D 的配方 + 指认题；动作轨迹的画面画任务目标的真值框；RL 同 D、画面同样画框；评测 oracle / self 两种模式
+model_type: qwen3_vl
+format_example: action_names
+output_format: action_only
+
+data:
+  mixture_config: data_gen/sft_mixture/configs/mixture_matrix_v3_qwen3_go_20261107.yaml
+  recipe: Go
+  lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft_mixture_go_20261107/Go
+  train_rows: {P0: 10144, P1: 9075, P2m: 9075, Pg: 9075}   # P0、P1 和 D 逐条相同；P2m 是 D 的 9,075 条 P2q 换上画框的图；Pg 和 G 同一批 9,075 道
+  val_rows: {P0: 300, P1: 300, P2q: 300, P2f: 38, P2m: 300, Pg: 300}
+
+sft:
+  base_model: /mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+  epochs: 10
+  cards: 8
+  recipe: 主线 Qwen3 SFT 的配方（lf_q3formal/train.yaml），同 D
+  select: 先过采样验收（同 D 的第 6 条，画框模式下采样），合格的 epoch 里按 val（eval_val_v2_screened，oracle 模式）挑成功率最高的，打平取更早的
+
+rl:
+  start: SFT 挑出的检查点
+  pair: {s0: v10_p1_S0, d: v10_p1_Dcond}
+  dense: {variant: V4, progress_reward_scale: 3.3333333333333335, group_filter: keep_by_return_std, keep_std_threshold: 0.3318, keep_std_floor: 1.0}   # 同 D
+  oracle_marker: true   # 每一步渲染后画任务目标的真值框（rl-config --oracle-marker）
+  seeds: [20261019, 20261021]
+  task_pool: reserve
+  rows: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/rl_rows/rows.jsonl
+  exclude: /mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_r10_20261015/depth_check/depth_check_summary.json
+  updates: 300
+  output_format: action_only
+  guards: {invalid_max: 0.10, kl_max: 1.0, entropy_max: 0.3, entropy_window: 5, vision_token_crashes: 2}
+  attention: eager
+
+eval:
+  sets:
+    val: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_val_v2_screened
+    test: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-data/exps/matrix_inputs_20261029/eval_test_v2_screened
+  every: 50
+  options: ["--oracle-marker"]   # 链里的标准评测是 oracle 模式（挑 epoch、挑检查点都按它）
+  variants:   # self 模式：挑出的 SFT 检查点和每个 RL 检查点，两个题集
+    - {suffix: _self, options: ["--format-example", "action_names", "--self-marker"], models: [sft_pick, rl]}
+  pg_probe: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/g_prep_20261106/pg/targets_norm1000/pg_probe.jsonl   # 指认探针 60 道（和 G 相同）
+  diagnostics:
+    failure_breakdown: python -m eval.diagnostics.failure_breakdown --eval <set> --out <TR>/diag/failure_<set> --wrong-target
+
+chain:   # 用户批了以后在 matrix-v3 上跑
+  plan: matrix_plan v3 cell
+  tr: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_go
+  rl_name: v10_rl_m3_go     # 加 _sft / _s1 / _s2；RL 运行 m3gos1s0、m3gos1d、m3gos2s0、m3gos2d
+  sft_dir: /mnt/umm/users/yinbaiqiao/models_runs/sft_v10_newformat_20261024   # 同 D：文字和 D 相同，rl-config 拿它核对格式行、RL 题和 SFT 题不重合
+  sft_groups: {m3go: sft_trajectories.jsonl}   # SFT 的结果名 sft_m3go_e<k>
+  sft_lf_dir: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Go   # data.lf_dir 的复制（批了以后再复制）
+  needs_chain_support:
+    sft_lf_dirs: {m3go: /mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/Go}
+    diagnostics_after_eval: true
+
+estimate: {sft: 8 卡 10 个 epoch，37,369 条（和 G 同量），约 55 卡时, accept: 约 10 卡时, evaluate: oracle 模式约 30 卡时，self 模式每步多问两道框题，约 45 卡时, rl: 4 个，按 D 的实际用量约 230 卡时, 合计: 约 370 卡时}

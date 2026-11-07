@@ -186,7 +186,8 @@ V3_GROUPS = ("C", "D")  # the first batch (the user, 2026-11-01); B' and E later
 V3_CELLS = {"D_noP0": ("dn", 2), "B": ("b", 1),   # B': RL only when an epoch passes, one seed
             "E2": ("e2", 0),                    # E as redefined on 2026-11-03: SFT only, no RL
             "Cr": ("cr", 2),                    # C's SFT again (part C, 2026-11-03); RL from its pick, two seeds (11-04)
-            "G": ("g", 2)}                      # "point first, then act": SFT approved 2026-11-06, RL 2026-11-07 (epoch 9)
+            "G": ("g", 2),                      # "point first, then act" (G-text from 2026-11-07): SFT 2026-11-06, RL 2026-11-07
+            "Go": ("go", 2)}                    # G-oracle / G' (the user's item 6c of 2026-11-07): data prep only, training waits
 # the dense side's rl until the user relays the main line's answer on its baseline: not a standard, so rl-config
 # refuses it and the chain stops at its rl_config step (SFT, its evaluation and the pick are done by then); the plan
 # is then written again with the baseline (--dense) and the chain run again, which redoes rl_config and starts both
@@ -334,7 +335,9 @@ def _plan_v3(v: Dict[str, Any], n: Dict[str, Any], commit: str, dense: Any, tr: 
         "pool": ch["pool"], "gpu_log": True, "retries": ch["retries"], "startup_retries_separate": True,
         "record_nodes": True, "suspended_grace_min": ch["suspended_grace_min"], "endpoint": rl["updates"],
         "trainer_attn": ch["trainer_attn"], "rl_name": rl_name,
-        "eval": {"every": v["eval"]["every"], "options": []},
+        # G-oracle (the user's item 6c of 2026-11-07): its evaluation options (oracle mode) and variants (self mode)
+        "eval": {"every": v["eval"]["every"], "options": list((cfg.get("eval") or {}).get("options") or []),
+                 **({"variants": [dict(x) for x in cfg["eval"]["variants"]]} if (cfg.get("eval") or {}).get("variants") else {})},
         "rl": {"standard": rl["pair"]["s0"], "seed": int(v["rl"]["seeds"][(n["k"] or 1) - 1]), "task_pool": rl["task_pool"],
                "rows": rl["rows"],
                # group G (2026-11-06): its own format example (a targets format) and the pointing reward, both sides
@@ -344,6 +347,7 @@ def _plan_v3(v: Dict[str, Any], n: Dict[str, Any], commit: str, dense: Any, tr: 
                                              if (cfg.get("rl") or {}).get("entropy_key") else {})},
                **({"pointing_reward": float(cfg["rl"]["pointing_reward"])}
                   if (cfg.get("rl") or {}).get("pointing_reward") else {}),
+               **({"oracle_marker": True} if (cfg.get("rl") or {}).get("oracle_marker") else {}),  # G-oracle
                **ch["rl"]},
     })
     if sft_only:

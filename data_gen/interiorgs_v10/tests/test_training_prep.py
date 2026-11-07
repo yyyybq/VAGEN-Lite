@@ -640,6 +640,12 @@ class TrainingPrepTest(unittest.TestCase):
                    pointing_reward=0.1)
         with self.assertRaises(SystemExit):  # the RL text must be the start model's
             config("rl_g_other", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_norm1000")
+        # G-oracle (the user's item 6c of 2026-11-07): --oracle-marker reaches the env config and the report
+        envm, reportm = config("rl_om", sft_trajectories=[str(convs["action_names"])], format_example="action_names",
+                               oracle_marker=True)
+        self.assertTrue(envm["oracle_marker"] and reportm["oracle_marker"])
+        self.assertFalse(report0["oracle_marker"])
+        self.assertNotIn("oracle_marker", env0)
 
     def test_rl_config_format_example(self):
         """Round 12 freeze (the user's 3.1.1): --format-example sets the env's format line (placeholder names or
