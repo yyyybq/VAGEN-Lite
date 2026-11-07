@@ -2325,8 +2325,11 @@ class Chain:
                 names = [n for n in models if (eval_dir / n / "results.jsonl").is_file()]
                 if not names:
                     raise ChainError(f"failure breakdown {set_name}: no results of this chain's models in {eval_dir}")
+                # the user's item 6b of 2026-11-07: the wrong-target rate and soft success (plan
+                # diagnostics.wrong_target; matrix_plan sets it for the matrix chains)
                 self.sh([py, "-m", "eval.diagnostics.failure_breakdown", "--eval", str(eval_dir),
-                         "--names", ",".join(names), "--out", str(out / f"failure_{set_name}")],
+                         "--names", ",".join(names), "--out", str(out / f"failure_{set_name}")]
+                        + (["--wrong-target"] if diag.get("wrong_target") else []),
                         log=self.tr / "logs" / f"failure_{set_name}.log")
         probes = {k: v for k, v in (diag.get("probes") or {}).items() if v}  # null: not there yet (P0)
         per_job = int(diag.get("models_per_job", DEFAULT_MODELS_PER_PROBE_JOB))

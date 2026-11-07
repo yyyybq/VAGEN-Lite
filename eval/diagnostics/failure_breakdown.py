@@ -16,6 +16,12 @@ conditions not met, ``failed_gates``).  Each episode gets one class:
 
 Writes OUT_PREFIX.json (counts per model, family and class; the single failed condition of budget_one_gate) and
 OUT_PREFIX.md (shares per family, one table per model).
+
+With ``--wrong-target`` (the user's instruction of 2026-11-07, item 6b; eval/diagnostics/wrong_target.py) each model
+also gets per family the strict and soft success (soft: at the best pose only the family's tolerance condition failed)
+and, for projective_relations and occlusion_alignment, the wrong-target rate: the failed episodes whose end or best
+pose meets the task with A and B exchanged.  It reads EVAL_DIR/tasks.jsonl and the scenes (CPU, one process);
+the per-episode judgements go to OUT_PREFIX_wrong_target.jsonl.
 """
 
 from __future__ import annotations
@@ -136,6 +142,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     ap.add_argument("--eval", required=True, help="an evaluation folder (tasks.jsonl and one folder per model)")
     ap.add_argument("--names", default="", help="comma-separated result folders (default: every folder with results)")
     ap.add_argument("--out", required=True, help="output prefix (.json and .md are added)")
+    ap.add_argument("--wrong-target", action="store_true",
+                    help="also the wrong-target rate and soft success (eval/diagnostics/wrong_target.py)")
     args = ap.parse_args(argv)
     ev = Path(args.eval)
     names = [n for n in args.names.split(",") if n] or sorted(p.parent.name for p in ev.glob("*/results.jsonl"))
@@ -143,12 +151,27 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     md = [f"# 失败拆解：{ev.name}", "",
           "每道题一个结论。\"门\"是任务成功判据里的一项条件；\"到过又走偏\"在现行规则下不会出现"
           "（每个动作后都检查成功，满足就立刻结束），这里照样统计。", ""]
+    wt_rows: List[Dict[str, Any]] = []
+    if args.wrong_target:
+        from eval.diagnostics import wrong_target as WT
+
+        tasks = {r["task_id"]: r for r in read_jsonl(ev / "tasks.jsonl")}
+        judge = WT.Judge()
     for name in names:
-        res = breakdown(read_jsonl(ev / name / "results.jsonl"))
+        episodes = read_jsonl(ev / name / "results.jsonl")
+        res = breakdown(episodes)
         out[name] = res
         md += table(name, res)
+        if args.wrong_target:
+            wt = WT.analyse(tasks, episodes, judge)
+            res["wrong_target"] = wt["families"]
+            wt_rows += [dict(r, model=name) for r in wt["episodes"]]
+            md += WT.table(wt["families"])
     Path(args.out + ".json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
     Path(args.out + ".md").write_text("\n".join(md) + "\n", encoding="utf-8")
+    if args.wrong_target:
+        Path(args.out + "_wrong_target.jsonl").write_text(
+            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in wt_rows), encoding="utf-8")
     print(json.dumps({n: out[n]["by_family"]["all"] for n in out}, indent=1))
 
 

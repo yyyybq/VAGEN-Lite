@@ -220,6 +220,23 @@ class DiagnosticsStepTest(unittest.TestCase):
             with self.assertRaises(T.ChainError):  # none of this chain's models: never every folder
                 chain.diagnostics()
 
+    def test_failure_breakdown_wrong_target_switch(self):
+        """The user's item 6b of 2026-11-07: plan diagnostics.wrong_target adds --wrong-target."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tr = root / "tr"
+            (tr / "rl_run_p1s0" / "checkpoints" / "global_step_50" / "actor" / "huggingface").mkdir(parents=True)
+            (root / "val" / "p1s0_050").mkdir(parents=True)
+            (root / "val" / "p1s0_050" / "results.jsonl").write_text("")
+            plan = {"tr": str(tr), "sft_dir": str(root), "endpoint": 50, "start_model": str(root / "start"),
+                    "eval_sets": {"val": str(root / "val")}, "rl_runs": {"p1s0": {}}, "eval": {"every": 50},
+                    "diagnostics": {"probes": {}, "wrong_target": True}}
+            chain = T.Chain(plan, sleep=lambda s: None)
+            calls = []
+            chain.sh = lambda args, **k: calls.append(args)
+            chain.diagnostics()
+            self.assertEqual(calls[0][-1], "--wrong-target")
+
     def test_not_planned(self):
         with tempfile.TemporaryDirectory() as tmp:
             chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 100}, sleep=lambda s: None)

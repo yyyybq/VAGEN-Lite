@@ -145,7 +145,7 @@ def test_chain_patch_plans():
         p = MP.plan_with_chain_patch(g)
         for dotted in MP.chain_fields(g):
             assert re.search(rf'["\']{dotted.split(".")[-1]}["\']', patch_text), (g, dotted)  # the patches read it
-        assert p["diagnostics"] == {"failure_breakdown": True, "probes": {"P1": probe, "P0": None}}, g
+        assert p["diagnostics"] == {"failure_breakdown": True, "wrong_target": True, "probes": {"P1": probe, "P0": None}}, g
     assert MP.plan_with_chain_patch("E")["start_model"] == {"from_chain": MP.plan("D")["tr"]}
     assert MP.plan_with_chain_patch("A")["start_model"].endswith("/inputs/base_7b")
     e = MP.plan_with_chain_patch("E")["rl"]

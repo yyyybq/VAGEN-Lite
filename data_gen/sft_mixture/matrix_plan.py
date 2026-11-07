@@ -119,7 +119,8 @@ def chain_fields(group: str, rl_package: Optional[str] = None) -> Dict[str, Any]
         if key == "diagnostics_after_eval":
             if not value:
                 continue
-            value = {"failure_breakdown": True, "probes": {"P1": probes.get("p1_probe"), "P0": probes.get("p0_probe")}}
+            value = {"failure_breakdown": True, "wrong_target": True,  # wrong_target: the user's 6b of 2026-11-07
+                     "probes": {"P1": probes.get("p1_probe"), "P0": probes.get("p0_probe")}}
         out[".".join(CHAIN_FIELDS[key])] = value
     return out
 
@@ -353,7 +354,7 @@ def _plan_v3(v: Dict[str, Any], n: Dict[str, Any], commit: str, dense: Any, tr: 
             "rl_runs": {n["s0"]: {}, n["d"]: {"rl": {**v3_dense(dense, v), **(
                 {"keep_std_exclude": str(cfg["rl"]["keep_std_exclude"])}
                 if (cfg.get("rl") or {}).get("keep_std_exclude") else {})}}},
-            "diagnostics": {"failure_breakdown": True, "probes": {
+            "diagnostics": {"failure_breakdown": True, "wrong_target": True, "probes": {
                 "P1": v["p1_probe"], "P0": v["p0_probe"],
                 **({"Pg": cfg["eval"]["pg_probe"]} if (cfg.get("eval") or {}).get("pg_probe") else {})}},  # group G
             "retain": ch["retain"],

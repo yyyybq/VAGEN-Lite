@@ -247,7 +247,8 @@ def test_v3_plans_for_c_and_d(vars_):
             assert (p["rl"]["rows"], p["rl"]["exclude"]) == (vars_["rl"]["rows"], vars_["rl"]["exclude"])
             assert p["eval_sets"] == vars_["chain"]["eval_sets"] and p["select_by"] == "val"
             assert p["eval"] == {"every": 50, "options": []} and p["retain"] == "best_and_last"
-            assert p["diagnostics"] == {"failure_breakdown": True, "probes": {"P1": vars_["p1_probe"], "P0": None}}
+            assert p["diagnostics"] == {"failure_breakdown": True, "wrong_target": True,
+                                        "probes": {"P1": vars_["p1_probe"], "P0": None}}
             assert p["tr"].startswith(vars_["chain"]["worktree"] + "/exps/matrix_v3/")
             assert p["sft_dir"] == vars_["format_check_sft_dir"]
             s0, d = p["rl_runs"]
