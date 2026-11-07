@@ -52,13 +52,15 @@ class TurnRecordTest(unittest.TestCase):
                     {"executed": ["turn_left"], "blocked": None, "blocked_count": 1},
                     {"executed": [], "blocked": [], "blocked_count": 0}]},
                {"index": 2, "error": "KeyError: 'x'"}]
-        # the rotation share is over all 8 executed actions; the blocked shares only over the known turns (7 actions:
-        # 3 rotations, 4 translations), the unknown turn's turn_left and its blocked count given apart (review fix 5b)
+        # the rotation share and the all-blocked share are over all 8 executed actions (3 blocked: every turn's count
+        # is recorded); the rotation / translation blocked shares only over the known turns (7 actions: 3 rotations,
+        # 4 translations), the unknown turn's turn_left and its blocked count given apart (review fix 5b; the second
+        # review: the all-blocked share stays exact)
         self.assertEqual(MM.summarize(eps, 0.25), {
             "rule": 0.25, "episodes": 3, "errors": 1, "replay_same": 1, "turns": 5, "turns_unknown": 1,
             "actions": 8, "rotations": 4, "rotation_share": 0.5, "rotations_blocked": 1,
             "rotation_blocked_share": 0.3333, "translations": 4, "translations_blocked": 1,
-            "translation_blocked_share": 0.25, "blocked": 2, "blocked_share": 0.2857,
+            "translation_blocked_share": 0.25, "blocked": 3, "blocked_share": 0.375,
             "unknown_turn_actions": 1, "unknown_turn_rotations": 1, "unknown_turn_translations": 0,
             "unknown_turn_blocked": 1})
         # only unknown turns: no blocked share at all, everything reported apart
@@ -69,7 +71,7 @@ class TurnRecordTest(unittest.TestCase):
                                                 "unknown_turn_actions", "unknown_turn_rotations",
                                                 "unknown_turn_translations", "unknown_turn_blocked")},
                          {"actions": 2, "rotation_share": 0.5, "rotation_blocked_share": None,
-                          "translation_blocked_share": None, "blocked": 0, "blocked_share": None,
+                          "translation_blocked_share": None, "blocked": 2, "blocked_share": 1.0,
                           "unknown_turn_actions": 2, "unknown_turn_rotations": 1, "unknown_turn_translations": 1,
                           "unknown_turn_blocked": 2})
         self.assertEqual(MM.summarize([])["actions"], 0)

@@ -141,9 +141,10 @@ def worker(job: Tuple[str, str, str, str, List[Dict[str, Any]]]) -> List[Dict[st
 
 def summarize(episodes: Sequence[Dict[str, Any]], rule: Optional[float] = None) -> Dict[str, Any]:
     """Counts and shares over the replayed episodes (episodes with an error left out).  The rotation share is over every
-    executed action; the blocked shares (rotations, translations, all) only over the turns whose blocked actions are
-    known: a turn in turns_unknown is left out of their numerators and denominators, and its executed actions and
-    blocked count are given apart (unknown_turn_*)."""
+    executed action, and so is the all-blocked share (every turn's blocked count is recorded, named or not); the
+    rotation and translation blocked shares only over the turns whose blocked actions are known: a turn in
+    turns_unknown is left out of their numerators and denominators, and its executed actions and blocked count are
+    given apart (unknown_turn_*)."""
     ok = [e for e in episodes if "error" not in e]
     turns = [t for e in ok for t in e["turns"]]
     known = [t for t in turns if t["blocked"] is not None]
@@ -155,7 +156,7 @@ def summarize(episodes: Sequence[Dict[str, Any]], rule: Optional[float] = None) 
     named = [a for t in known for a in t["blocked"]]
     rotations_blocked = sum(a in ROTATIONS for a in named)
     translations_blocked = len(named) - rotations_blocked
-    blocked = sum(int(t["blocked_count"]) for t in known)  # = len(named): a known turn's names add up to its count
+    blocked = sum(int(t["blocked_count"]) for t in turns)  # every turn's count is recorded, its names may not be
     unknown_executed = [a for t in unknown for a in t["executed"]]
 
     def share(n: int, d: int) -> Optional[float]:
@@ -169,7 +170,7 @@ def summarize(episodes: Sequence[Dict[str, Any]], rule: Optional[float] = None) 
             "rotation_blocked_share": share(rotations_blocked, known_rotations),
             "translations": len(executed) - rotations, "translations_blocked": translations_blocked,
             "translation_blocked_share": share(translations_blocked, len(known_executed) - known_rotations),
-            "blocked": blocked, "blocked_share": share(blocked, len(known_executed)),
+            "blocked": blocked, "blocked_share": share(blocked, len(executed)),
             "unknown_turn_actions": len(unknown_executed),
             "unknown_turn_rotations": sum(a in ROTATIONS for a in unknown_executed),
             "unknown_turn_translations": sum(a not in ROTATIONS for a in unknown_executed),
