@@ -16,11 +16,27 @@ n, unrounded), wins (only a right), losses (only b right) and the two-sided exac
 O-keep passes when the mean of its two seed differences is >= +3.0 and both are > 0.
 
     python -m reward.compare_qa --x0 X0_QUESTIONS --g0 G0_QUESTIONS --diag TR/diag --out FILE.json
+    python -m reward.compare_qa easi --root EASI_ROOT --scores EASI8_SCORE.json --out FILE.json
 
-Writes FILE.json and FILE.md.  EASI-8's per-benchmark pairing (section 2.4) is added before EASI-8's results.
+Writes FILE.json and FILE.md.
+
+EASI-8 (sections 2.2 and 2.4; written 11-07 before any phase-3 EASI result was opened):
+* the verdict reads reward/easi8_score.py's output (its "rejudged" mean per model): O-keep's extrapolation holds when
+  the mean of its two seed differences is >= +1.0 and both are > 0; V4 and O have one seed, so it cannot hold for
+  them (their differences are reported);
+* the pairing is per benchmark, question by question, from lmms-eval's per-sample files
+  (EASI_ROOT/<job>/<model>/<the one folder with *_results.json>/*_samples_*.jsonl): each question's own score under
+  the benchmark's overall metric (MMSI "average", ViewSpatial "overall_accuracy", BLINK "blink_acc", 3DSR
+  "vanilla_accuracy", EmbSpatial "embspatial_acc"; VSI-Bench "vsibench_overall": the exact match of a choice question,
+  the mean relative accuracy of a numeric one; SITE: its image and video jobs as one benchmark, the raw per-question
+  correctness "accuracy"."overall"; MindCube: re-judged by the option an answer names, as easi8_score.mindcube_lenient,
+  with the official per-question score reported too).  Wins = questions where the first model scores higher, losses
+  = where it scores lower; ties (zero differences) are left out of the two-sided exact sign test.  The eight-benchmark
+  mean gets a difference only.
 """
 
 import argparse
+import ast
 import json
 import math
 import re
@@ -180,13 +196,164 @@ def write_md(res: Dict[str, Any], path: Path) -> None:
     path.write_text("\n".join(L) + "\n")
 
 
+# ---------------------------------------------------------------- EASI-8 (sections 2.2, 2.4)
+EASI_MAIN = (("V4", "rw_g_250", S1), ("O", "rw_o_200", S1), ("O-keep s1", "rw_ok_250", S1),
+             ("O-keep s2", "rw_s2ok_250", S2))
+EASI_BENCH = ("vsi_bench", "mmsi_bench", "mindcube_tiny", "viewspatial", "site", "blink", "3dsrbench", "embspatial")
+EASI_MARGIN = 1.0
+_METRIC = {"mmsi_bench": "average", "viewspatial": "overall_accuracy", "blink": "blink_acc",
+           "3dsrbench": "vanilla_accuracy", "embspatial": "embspatial_acc", "vsi_bench": "vsibench_overall",
+           "mindcube_tiny": "overall_accuracy", "site_image": "accuracy", "site_video": "accuracy"}
+
+
+def _d(x: Any) -> Dict[str, Any]:
+    return x if isinstance(x, dict) else ast.literal_eval(str(x))
+
+
+def _item_key(job: str, row: Dict[str, Any], m: Dict[str, Any]) -> str:
+    for k in ("qid", "question_id", "id"):
+        if m.get(k) not in (None, ""):
+            return f"{job}:{m[k]}"
+    return f"{job}:{row['doc_id']}"
+
+
+def _item_score(job: str, m: Dict[str, Any]) -> float:
+    if job == "vsi_bench":  # a choice question carries "accuracy" (exact match), a numeric one "MRA:.5:.95:.05"
+        if "accuracy" in m:
+            return float(m["accuracy"])
+        mra = [v for k, v in m.items() if k.startswith("MRA")]
+        if len(mra) != 1:
+            raise SystemExit(f"VSI question {m.get('id')}: no single score field")
+        return float(mra[0])
+    if job in ("site_image", "site_video"):
+        return float(m["overall"])
+    if job in ("blink", "embspatial"):
+        return 1.0 if m["is_correct"] in (True, "True", 1, 1.0) else 0.0
+    return float(m["score"])
+
+
+def mindcube_right(row: Dict[str, Any]) -> bool:
+    """easi8_score.mindcube_lenient's judgement of one MindCube-Tiny answer (the option it names, by letter, else the
+    one option whose text it gives), per question."""
+    norm = lambda s: re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()  # noqa: E731
+    x = row.get("filtered_resps") or row.get("resps")
+    while isinstance(x, list) and x:
+        x = x[0]
+    s = re.sub(r"</?answer>", "", str(x)).strip()
+    q = row["input"].split("[Question]")[-1].strip()
+    opts = dict(re.findall(r"(?:^|\s)([A-F])\.\s(.*?)(?=\s[A-F]\.\s|$)", q, flags=re.S))
+    target = re.search(r"<answer>\s*([A-F])", str(row["target"])).group(1)
+    mm = re.match(r"^\(?([A-F])[\.\):]?(\s|$)", s)
+    if mm:
+        pred = mm.group(1)
+    else:
+        hits = [k for k, v in opts.items() if norm(v) and norm(v) == norm(s)] or \
+               [k for k, v in opts.items() if norm(v) and (norm(v) in norm(s) or norm(s) in norm(v))]
+        pred = hits[0] if len(hits) == 1 else None
+    return pred == target
+
+
+def easi_items(root: Path, job: str, name: str, rejudge: bool = True) -> Dict[str, float]:
+    """{question key: score} of one model on one EASI job (SITE's two jobs are separate here)."""
+    d = root / job / name
+    sub = [s for s in d.iterdir() if s.is_dir() and any(s.glob("*_results.json"))]
+    if len(sub) != 1:
+        raise SystemExit(f"{d}: expected one result folder, found {sub}")
+    out: Dict[str, float] = {}
+    for f in sorted(sub[0].glob("*_samples_*.jsonl")):
+        for row in _jsonl(f):
+            m = _d(row[_METRIC[job]])
+            key = _item_key(job, row, m)
+            if key in out:
+                raise SystemExit(f"{f}: question {key} twice")
+            if job == "mindcube_tiny" and rejudge:
+                out[key] = 1.0 if mindcube_right(row) else 0.0
+            else:
+                out[key] = _item_score(job, m)
+    return out
+
+
+def bench_items(root: Path, bench: str, name: str, rejudge: bool = True) -> Dict[str, float]:
+    if bench == "site":
+        return {**easi_items(root, "site_image", name), **easi_items(root, "site_video", name)}
+    return easi_items(root, bench, name, rejudge)
+
+
+def score_pair(a: Dict[str, float], b: Dict[str, float]) -> Dict[str, Any]:
+    if set(a) != set(b):
+        raise SystemExit(f"the two models cover different questions ({len(a)} vs {len(b)})")
+    w = sum(1 for k in a if a[k] > b[k])
+    l = sum(1 for k in a if a[k] < b[k])
+    n = len(a)
+    return {"n": n, "mean_a": 100 * sum(a.values()) / n, "mean_b": 100 * sum(b.values()) / n,
+            "diff_item_mean": 100 * (sum(a.values()) - sum(b.values())) / n, "wins": w, "losses": l,
+            "ties": n - w - l, "p": sign_p(w, l)}
+
+
+def easi_verdict(scores: Dict[str, Any]) -> Dict[str, Any]:
+    d = {lab: scores[a]["rejudged"] - scores[b]["rejudged"] for lab, a, b in EASI_MAIN}
+    ok = (d["O-keep s1"] + d["O-keep s2"]) / 2
+    return {"V4": {"diff": d["V4"], "holds": False, "seeds": 1, "note": "one seed: cannot hold under the brief"},
+            "O": {"diff": d["O"], "holds": False, "seeds": 1, "note": "one seed: cannot hold under the brief"},
+            "O-keep": {"diffs": [d["O-keep s1"], d["O-keep s2"]], "mean": ok, "seeds": 2,
+                       "each_ge_margin": [d["O-keep s1"] >= EASI_MARGIN, d["O-keep s2"] >= EASI_MARGIN],
+                       "holds": ok >= EASI_MARGIN and d["O-keep s1"] > 0 and d["O-keep s2"] > 0},
+            "official_diffs": {lab: scores[a]["official"] - scores[b]["official"] for lab, a, b in EASI_MAIN}}
+
+
+def run_easi(root: Path, scores_path: Path) -> Dict[str, Any]:
+    with open(scores_path) as f:
+        scores = json.load(f)
+    out: Dict[str, Any] = {"verdict": easi_verdict(scores), "pairs": {}}
+    for lab, a, b in EASI_MAIN:
+        row = {bench: score_pair(bench_items(root, bench, a), bench_items(root, bench, b)) for bench in EASI_BENCH}
+        row["mindcube_official"] = score_pair(easi_items(root, "mindcube_tiny", a, rejudge=False),
+                                              easi_items(root, "mindcube_tiny", b, rejudge=False))
+        out["pairs"][lab] = {"a": a, "b": b, "rejudged_a": scores[a]["rejudged"], "rejudged_b": scores[b]["rejudged"],
+                             "benchmarks": row}
+    return out
+
+
+def write_easi_md(res: Dict[str, Any], path: Path) -> None:
+    v = res["verdict"]
+    L = ["## EASI-8 外推（预登记 2.2，重判分）", "",
+         f"- O-keep：{v['O-keep']['diffs'][0]:+.2f} / {v['O-keep']['diffs'][1]:+.2f}，平均 {v['O-keep']['mean']:+.2f}，"
+         f"{'外推成立' if v['O-keep']['holds'] else '外推不成立'}（各自 ≥ 1：{v['O-keep']['each_ge_margin']}）",
+         f"- V4：{v['V4']['diff']:+.2f}（一个种子，按任务书的条件外推不能成立）",
+         f"- O：{v['O']['diff']:+.2f}（一个种子，按任务书的条件外推不能成立）", "",
+         "## 逐基准配对（胜 / 负 / 平；双侧精确符号检验，平的不进检验；差是逐题得分平均之差，个点）", "",
+         "| 比较 | " + " | ".join(EASI_BENCH) + " | MindCube 官方 |", "|" + " --- |" * (len(EASI_BENCH) + 2)]
+    for lab, r in res["pairs"].items():
+        cells = []
+        for k in list(EASI_BENCH) + ["mindcube_official"]:
+            c = r["benchmarks"][k]
+            cells.append(f"{c['diff_item_mean']:+.1f}（{c['wins']}/{c['losses']}/{c['ties']}，p {c['p']:.3g}）")
+        L.append(f"| {lab}（{r['a']} 对 {r['b']}，重判 {r['rejudged_a']:.2f} 对 {r['rejudged_b']:.2f}） | " + " | ".join(cells) + " |")
+    path.write_text("\n".join(L) + "\n")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
+    argv = list(argv) if argv is not None else None
+    import sys
+    args_in = argv if argv is not None else sys.argv[1:]
+    if args_in and args_in[0] == "easi":
+        ap = argparse.ArgumentParser(description="EASI-8 part of PREREG_P3_A (sections 2.2, 2.4)")
+        ap.add_argument("--root", required=True, help="the EASI result root: ROOT/<job>/<model>/")
+        ap.add_argument("--scores", required=True, help="reward/easi8_score.py's FILE.json for the six models")
+        ap.add_argument("--out", required=True)
+        a = ap.parse_args(args_in[1:])
+        res = run_easi(Path(a.root), Path(a.scores))
+        out = Path(a.out)
+        out.write_text(json.dumps(res, indent=1, ensure_ascii=False) + "\n")
+        write_easi_md(res, out.with_suffix(".md"))
+        print(out.with_suffix(".md").read_text())
+        return
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--x0", required=True)
     ap.add_argument("--g0", required=True)
     ap.add_argument("--diag", required=True, help="the diagnostics chain's TR/diag")
     ap.add_argument("--out", required=True)
-    a = ap.parse_args(argv)
+    a = ap.parse_args(args_in)
     res = run(Path(a.x0), Path(a.g0), Path(a.diag))
     out = Path(a.out)
     out.write_text(json.dumps(res, indent=1, ensure_ascii=False) + "\n")

@@ -62,6 +62,80 @@ def test_pairs_and_verdicts(tmp_path):
     assert "X0 主判据" in (tmp_path / "out.md").read_text()
 
 
+def _easi_model(root, name, right):
+    """Synthetic lmms-eval per-sample files for every EASI job; right: {job: [score per question]}."""
+    for job, scores in right.items():
+        d = root / job / name / "actor__huggingface"
+        d.mkdir(parents=True)
+        (d / "x_results.json").write_text("{}")
+        rows = []
+        for i, s in enumerate(scores):
+            r = {"doc_id": str(i), "target": "A", "filtered_resps": "A"}
+            if job == "vsi_bench":
+                r["vsibench_overall"] = ({"id": str(i), "accuracy": s} if i % 2 == 0 else
+                                         {"id": str(i), "MRA:.5:.95:.05": s})
+            elif job == "mmsi_bench":
+                r["average"] = {"question_id": i, "score": s}
+            elif job == "mindcube_tiny":
+                r["overall_accuracy"] = {"score": s}
+                r["input"] = "[Question] Which? A. red chair B. blue sofa"
+                r["target"] = "<answer>A. red chair</answer>"
+                r["filtered_resps"] = "A. red chair" if s else "blue sofa"
+            elif job == "viewspatial":
+                r["overall_accuracy"] = str({"score": s})  # stored as text in some files
+            elif job in ("site_image", "site_video"):
+                r["accuracy"] = {"overall": s, "total": 1}
+            elif job in ("blink", "embspatial"):
+                r[cq._METRIC[job]] = {"id": f"{job}_{i}", "is_correct": bool(s)}
+            elif job == "3dsrbench":
+                r["vanilla_accuracy"] = {"qid": f"Q{i}", "score": s}
+            rows.append(r)
+        (d / f"20261107_samples_{job}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
+JOBS9 = ("vsi_bench", "mmsi_bench", "mindcube_tiny", "viewspatial", "site_image", "site_video", "blink", "3dsrbench",
+         "embspatial")
+
+
+def test_easi_pairing_and_verdict(tmp_path):
+    base = {j: [1.0, 0.0, 1.0, 0.0] for j in JOBS9}
+    base["vsi_bench"] = [1.0, 0.25, 0.0, 0.5]
+    better = {j: [1.0, 1.0, 1.0, 0.0] for j in JOBS9}
+    better["vsi_bench"] = [1.0, 0.5, 0.0, 0.5]  # one numeric question higher, the rest tied
+    for m in cq.MODELS:
+        if m == cq.C0:
+            continue
+        _easi_model(tmp_path, m, better if m in ("rw_ok_250", "rw_s2ok_250") else base)
+    site = cq.bench_items(tmp_path, "site", "rw_s0_150")
+    assert len(site) == 8 and "site_image:0" in site and "site_video:0" in site
+    p = cq.score_pair(cq.bench_items(tmp_path, "vsi_bench", "rw_ok_250"), cq.bench_items(tmp_path, "vsi_bench", "rw_s0_150"))
+    assert (p["wins"], p["losses"], p["ties"]) == (1, 0, 3)
+    mc = cq.bench_items(tmp_path, "mindcube_tiny", "rw_ok_250")
+    assert sum(mc.values()) == 3  # rejudged: the named option's text counts
+    scores = {m: {"rejudged": 45.0, "official": 41.0} for m in cq.MODELS}
+    scores["rw_ok_250"]["rejudged"] = 46.5
+    scores["rw_s2ok_250"]["rejudged"] = 45.6  # +1.5 / +0.6: mean 1.05 >= 1, both > 0 -> holds
+    sp = tmp_path / "scores.json"
+    sp.write_text(json.dumps(scores))
+    res = cq.run_easi(tmp_path, sp)
+    v = res["verdict"]
+    assert v["O-keep"]["holds"] and abs(v["O-keep"]["mean"] - 1.05) < 1e-9 and v["O-keep"]["each_ge_margin"] == [True, False]
+    assert v["V4"]["holds"] is False and v["O"]["holds"] is False
+    cq.write_easi_md(res, tmp_path / "e.md")
+    assert "外推成立" in (tmp_path / "e.md").read_text()
+    scores["rw_s2ok_250"]["rejudged"] = 44.9  # second seed below: does not hold
+    sp.write_text(json.dumps(scores))
+    assert cq.run_easi(tmp_path, sp)["verdict"]["O-keep"]["holds"] is False
+
+
+def test_mindcube_rejudge_matches_easi8_score(tmp_path):
+    from reward import easi8_score
+    _easi_model(tmp_path, "m", {"mindcube_tiny": [1.0, 0.0, 1.0, 1.0, 0.0]})
+    folder = tmp_path / "mindcube_tiny" / "m" / "actor__huggingface"
+    items = cq.easi_items(tmp_path, "mindcube_tiny", "m")
+    assert abs(100 * sum(items.values()) / len(items) - easi8_score.mindcube_lenient(folder)) < 1e-9
+
+
 def test_chain_count_mismatch_stops(tmp_path):
     base = {"x0": [True, False], "g0": [True, False], "p1": [True, False]}
     _write(tmp_path, {m: base for m in cq.MODELS})
