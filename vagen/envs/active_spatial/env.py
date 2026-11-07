@@ -1509,6 +1509,17 @@ class ActiveSpatialEnv(BaseEnv):
             metric = {**metric, **opt, "shaping_score": opt["optimal_progress"], "progress_version": "optimal"}
         return metric
 
+    def _oracle_marked(self, images: List[Any]) -> List[Any]:
+        """The user's item 6 of 2026-11-07: with ``oracle_marker`` the task's targets' truth boxes are drawn into the
+        current frame (a copy; oracle_marker.py); otherwise the images unchanged."""
+        if not self.config.get("oracle_marker", False) or not images or not isinstance(self.current_item, dict):
+            return images
+        if not uses_canonical_backend(self.current_item):
+            raise ValueError("oracle_marker needs a canonical task row (the truth boxes come from its objects)")
+        from .oracle_marker import mark
+
+        return [mark(images[0], self.current_item, self.view_engine.get_pose(), self._visibility_occluders())] + list(images[1:])
+
     def _pointing_on(self) -> bool:
         """Group G of matrix v3: the env judges the answers' targets segment (a targets format example, or a pointing
         reward)."""
@@ -2178,6 +2189,7 @@ class ActiveSpatialEnv(BaseEnv):
             images.append(_PILImage.new("RGB", (w, h), color=(128, 128, 128)))
 
         self._record_image_quality(images[0] if images else None)
+        images = self._oracle_marked(images)  # the user's item 6 of 2026-11-07 (vagen/envs/active_spatial/oracle_marker.py)
 
         # Build multi-modal data
         multi_modal_data = {
@@ -2279,6 +2291,7 @@ class ActiveSpatialEnv(BaseEnv):
         images = []
         if image is not None:
             images.append(image)
+        images = self._oracle_marked(images)  # the user's item 6 of 2026-11-07 (vagen/envs/active_spatial/oracle_marker.py)
         
         # Build multi-modal data
         multi_modal_data = {

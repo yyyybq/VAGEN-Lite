@@ -213,6 +213,8 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # the env judges the segment and logs it (turn_metrics pointing_score, pointing_applied, targets_ok / _old / _bad)
     # at any weight.
     pointing_reward: float = 0.0
+    # the user's item 6 of 2026-11-07: the targets' truth boxes drawn into the frame (oracle_marker.py); default off
+    oracle_marker: bool = False
     max_consecutive_invalid_actions: int = 3  # Terminate episode after this many consecutive invalid actions
     premature_done_penalty: float = -0.3  # Penalty when 'done' is called without reaching the target
     

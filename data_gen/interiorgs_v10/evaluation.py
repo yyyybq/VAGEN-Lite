@@ -299,6 +299,8 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         out["prompt_format_example"] = args.format_example
     if getattr(args, "lenient_parse", False):  # round 12 freeze: the lenient reading of the answers
         out["lenient_parse"] = True
+    if getattr(args, "oracle_marker", False):  # the user's item 6 of 2026-11-07: truth boxes drawn into the frames
+        out["oracle_marker"] = True
     return out
 
 
@@ -925,6 +927,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--format-example", default=None,
                    choices=["placeholder", "action_names", "targets_pixel", "targets_norm1000"],
                    help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
+    r.add_argument("--oracle-marker", action="store_true",
+                   help="draw the task's targets' truth boxes into every frame (vagen/envs/active_spatial/oracle_marker.py)")
     r.add_argument("--entropy", action="store_true",
                    help="round 12 freeze: record each answer's token entropy (top-20 log-probabilities, after the "
                         "temperature), as the RL logs report it")
