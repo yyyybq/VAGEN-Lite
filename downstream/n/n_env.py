@@ -308,6 +308,26 @@ def robot_hidden(sim, model, robot_ids, hide: bool = True):
         ctx.vopt.geomgroup[HIDE_GROUP] = drawn
 
 
+def fresh_render_context(sim) -> None:
+    """Free robosuite's stale offscreen render contexts now and give the live one fresh GL objects (11-06, the D3
+    canary's colour noise; found in downstream_runs/n/d3_trial_20261106/rootcause/).  RoboCasa resets hard without
+    freeing the old MjSim (robosuite frees it only for renderer "mujoco"), so gym.make's sim and the wrapper's first
+    reset's sim each stay in a reference cycle with their MjRenderContext until Python's cyclic garbage collector runs,
+    at a moment set by the process's allocations (a pose search, a pickle load, the import order).  MjRenderContext's
+    __del__ then frees its MuJoCo GL objects in whatever OSMesa context is current -- the live one, whose framebuffer
+    and texture ids are the same numbers -- and robosuite's render never makes its own context current again, so every
+    later frame reads freed buffers (colour noise, stripes, or a frame that stops changing)."""
+    import gc
+
+    gc.collect()  # the stale contexts' __del__ runs here, before any frame of ours
+    ctx = getattr(sim, "_render_context_offscreen", None)
+    if ctx is None:
+        return
+    ctx.gl_ctx.make_current()
+    ctx.con.free()  # as robosuite's update_offscreen_size: free, then a new MjrContext in the live GL context
+    ctx._set_mujoco_context_and_buffers()
+
+
 class Scene:
     """One reset RoboCasa scene with the base, camera A and the entities (see the module text)."""
 
@@ -323,6 +343,7 @@ class Scene:
         self.env = gym.make(f"robocasa/{task}", enable_render=True, split=split, seed=seed)
         self.env.reset(seed=seed)
         self.k = self.env.unwrapped.env
+        fresh_render_context(self.k.sim)
         self.m, self.d = self.k.sim.model._model, self.k.sim.data._data
         m, d = self.m, self.d
         self.mj, self.np = mujoco, np

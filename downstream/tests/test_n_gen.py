@@ -367,3 +367,29 @@ def test_episode_loader_reads_the_smoke_parts_and_n1_instances(tmp_path):
     assert [E.inst_id(i) for i in got] == ["T_s1", "T_s1_equidistance"]
     assert got[0]["hide_robot"] is True and got[0]["task"] == "T" and got[1]["item"]["task_type"] == "equidistance"
     assert len(E.load_instances([smoke, n1], 1)) == 1
+
+
+def test_fresh_render_context_collects_stale_contexts_first_then_rebuilds_the_live_one():
+    """11-06 render fix: the stale contexts' __del__ must run before the live context gets fresh GL objects."""
+    calls = []
+
+    class Stale:  # a context in a reference cycle, freed only by the cyclic collector
+        def __init__(self):
+            self.me = self
+
+        def __del__(self):
+            calls.append("stale freed")
+
+    class Live:
+        def __init__(self):
+            self.gl_ctx = types.SimpleNamespace(make_current=lambda: calls.append("make_current"))
+            self.con = types.SimpleNamespace(free=lambda: calls.append("free"))
+
+        def _set_mujoco_context_and_buffers(self):
+            calls.append("new buffers")
+
+    Stale()
+    sim = types.SimpleNamespace(_render_context_offscreen=Live())
+    N.fresh_render_context(sim)
+    assert calls == ["stale freed", "make_current", "free", "new buffers"]
+    N.fresh_render_context(types.SimpleNamespace())  # no offscreen context: nothing to do
