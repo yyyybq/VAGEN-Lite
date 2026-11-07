@@ -2155,3 +2155,30 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - 训练器在算 `actor/entropy` 的同一处另记 `actor/entropy_action` 和 `actor/entropy_targets`；
   - 训练链的停止线读 `guards.entropy_key`，G 配成 `actor/entropy_action`。
   - 带测试，等 SFT 链和验收链跑完、matrix 工作树能改代码时做；没做完不起 G 的 RL。
+
+### 12.62 11-06 夜到 11-07 凌晨：G 的 SFT、各 epoch 评测、采样验收跑完，按动作段的熵挑出第 9 个 epoch
+
+- **SFT**（`m3_g_sft`，sco `pt-bwc68ftq`）：排队 74 分钟，13:26–20:20 UTC 跑完 10 个 epoch，约 55 卡时；各 epoch 评测约 6 卡时，采样验收约 10 卡时。跑完的任务都删了。
+- **采样验收**（200 个任务 × 4 次采样，`targets_norm1000`、G 自己的 SFT 目录）：
+  - 动作段的熵：e1–e6 是 0.085–0.136，e7 0.0602，e8 0.044，e9 0.035，e10 0.031；线是 ≤ 0.06，所以 e8、e9、e10 过线。
+  - 全部回答的熵是 0.10–0.31，按它算每个 epoch 都不过线（预登记第 9 节说的情况：坐标数字的熵压过了动作）。
+  - 读不出 ≤ 0.14%，目标段格式对的 ≥ 99.65%，指认得分约 0.71；没有照抄示例坐标的回答。
+- **挑 epoch**：cells 驱动按 `PASS_RULE` 动作段那条线，在过线的 e8–e10 里按 `eval_val_v2_screened` 挑出 **e9**（`exps/matrix_v3/sft/G/model/checkpoint-5256`），停在 `picked`，没有起 RL。
+- **SFT 阶段的成功率**（次要比较，同第三版第 2 节）：G e9 验证 41.62%、测试 45.89%；D e9 验证 43.46%、测试 40.07%；C e4 验证 41.62%、测试 38.70%。
+- 用户 11-07 回复"甲：批"：批 G 的 RL，先加熵停止线按动作段读的代码。
+
+### 12.63 11-07 上午：RL 的熵停止线按动作段读；G 的两条 RL 链开跑
+
+- **代码**（matrix-v3 `a4ec54c6`，CHANGES 8.4）：新文件 `vagen/segment_entropy.py`，开关 `algorithm.entropy_by_segment`（rl-config 对目标格式自动打开）。
+  - 代理循环按回合记下动作段、目标段的位置，训练器另记 `actor/entropy_action`、`actor/entropy_targets`。
+  - 训练链的停止线读 `guards.entropy_key`；G 的配置是 `actor/entropy_action`，别的组不变。
+  - 测试：受影响的 64 个通过；全套 645 个通过、5 个跳过，1 个失败是 `test_starvla_transfer`（这个工作树没有 `third_party/starVLA`，和改动无关）。
+- **补丁 0003 第三版**：在第二版的 14 个文件上加 `segment_entropy.py` 和它的测试，共 16 个文件（加 1,101 行、减 18 行）；第二版核对过就是 `cb42874a..fba7057a` 这 14 个文件的差；第三版在 `cb42874a` 的干净导出上 `git apply --check` 通过。
+- **G 的 RL**（`watch/m3_g_rl.py --go`，07:52 UTC；cells 状态 `rl_started`）：
+  - 两个种子各一条链 `m3_g_s20261019`、`m3_g_s20261021`，各一对 S0 / V4，从 e9 起，提交 `a4ec54c6`。
+  - 和 D 的计划逐项比过，只差批过的几项：格式 `targets_norm1000`、指认奖励 0.1、停止线读 `actor/entropy_action`、V4 挑题扣掉 `pointing_return`、Pg 探针、起点、各链自己的题集副本、池按排队短的投（D 当时改投 h800）。学习率、更新次数、KL、挑题阈值都和 D 相同。
+  - 4 个 ppo.yaml 都核对过：`entropy_by_segment: true`、`targets_norm1000`、`pointing_reward 0.1`、起点 checkpoint-5256；`exclude_return_keys: [pointing_return]` 只在两个 V4 里。
+
+  - 两个种子的 4 个训练任务都没排队就拿到卡（S0 在 zoetrope，V4 在 h800）。
+  - 第 1 次更新（3 个已出）：`actor/entropy_action` 0.037–0.043（验收时 e9 是 0.035），全部回答 0.136–0.143，目标段 0.19–0.21；指认得分 0.70；目标段格式坏的、旧格式的回合都是 0；训练成功率 S0 41.7% / 45.8%、V4 35.4%；每次更新约 222–238 秒，300 次约 19–20 小时。
+- **用卡**：按 D 的实际用量估约 230 卡时（预登记第 8 节）。

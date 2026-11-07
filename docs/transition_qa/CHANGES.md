@@ -383,4 +383,19 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
   - G 验收完停在 `accepted`：同时出主线的汇总和 `watch/m3_accept_g.py` 的汇总（动作段熵、目标段的格式和指认得分、两条及格线）；用户定了熵的算法后 `m3_cells.py pick G --rule action|all` 再挑；不会自己起 RL（`NO_AUTO_RL`）。
 - **只记下、不改的**（写进预登记草案第 1 节和 3.5、3.6）：真值框是整个三维框，约每 8–10 个点标签有 1 个落在遮挡物或背景上；none 的口径和数量；同名物体；InteriorGS 的 wardrobe 词义；指认奖励按回合发、多分回合拿得多。
 - **有争议的一条**：系统提示的格式行和示例总写两个目标。一个反驳者算小问题，另外三个算无害（有意的设计，SFT、RL、评测文字逐字相同）。没改。
-- **还没做、RL 前要做的**：RL 的熵停止线按段算（代理循环按回合的目标段记熵，约 40 行，带测试），等用户定熵的算法。
+- **还没做、RL 前要做的**：RL 的熵停止线按段算（代理循环按回合的目标段记熵，约 40 行，带测试），等用户定熵的算法。（11-07 做了，见 8.4。）
+
+### 8.4 RL 的熵停止线按动作段读（2026-11-07；补丁 0003 第三版）
+
+用户 11-06 定了目标格式下的熵只按动作段算（甲），11-07 批了 G 的 RL（"甲：批"）。RL 开跑前先加了这部分代码（matrix-v3 `a4ec54c6`）。
+
+- **`vagen/segment_entropy.py`（新）**：开关 `algorithm.entropy_by_segment`，默认关。
+  - 代理循环每生成一个回合，就找出含 `<action>` 开头 `<` 的那个 token（G 里是合并的 `><`），把从它到回合结尾的位置记成动作段，前面的记成目标段；回合里没有 `<action>` 的不记。
+  - 记法和 `invalid_turn_spans` 一样，放进 `extra_fields` 的 `action_spans`、`targets_spans`。
+  - 训练器在 `actor/entropy` 旁边另记 `actor/entropy_action`、`actor/entropy_targets`，聚合方式和 `actor/entropy` 相同（按 token 平均）。
+  - 动作段算到回合结尾，含结束符，和 `actor/entropy` 的口径一致；D 这类只答动作的回答，动作段就是全部回答。
+- **`train_chain.guard_reason`**：熵停止线读 `guards.entropy_key`，默认仍是 `actor/entropy`；停下的原因里写明读的是哪个键。
+- **`training_prep` rl-config**：目标格式（`targets_*`）自动打开开关，报告里记 `entropy_by_segment`。
+- **`matrix_plan`**：组配置里有 `rl.entropy_key` 时并进链的 `guards`；`G.yaml` 设 `actor/entropy_action`，状态改成 rl。别的组的计划一字不变（测试核对）。
+- **测试**：动作段起点（拼出来的 token 和真的 Qwen3 分词器各一个）、按段聚合、停止线读指定的键、rl-config 打开开关、G 的计划带 `entropy_key` 而 D 的不带。
+- **补丁 0003 第三版**：第二版的 14 个文件加 `vagen/segment_entropy.py` 和 `tests/active_spatial/test_segment_entropy.py`，共 16 个（加 1,101 行、减 18 行），仍以 `cb42874a` 为基准，在它的干净导出上 `git apply --check` 通过；`matrix_plan.py` 和 `G.yaml` 随 matrix-v3 合并，不在补丁里。

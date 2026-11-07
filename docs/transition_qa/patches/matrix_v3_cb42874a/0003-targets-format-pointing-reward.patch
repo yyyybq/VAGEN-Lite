@@ -158,10 +158,10 @@ index cd903aa3..69ef56f5 100644
      r.add_argument("--entropy", action="store_true",
                     help="round 12 freeze: record each answer's token entropy (top-20 log-probabilities, after the "
 diff --git a/data_gen/interiorgs_v10/tests/test_evaluation.py b/data_gen/interiorgs_v10/tests/test_evaluation.py
-index 1492f113..44b0b5fc 100644
+index 1492f113..008bc2e8 100644
 --- a/data_gen/interiorgs_v10/tests/test_evaluation.py
 +++ b/data_gen/interiorgs_v10/tests/test_evaluation.py
-@@ -495,3 +495,33 @@ class EvaluationTest(unittest.TestCase):
+@@ -495,3 +495,32 @@ class EvaluationTest(unittest.TestCase):
  
  if __name__ == "__main__":
      unittest.main()
@@ -194,13 +194,12 @@ index 1492f113..44b0b5fc 100644
 +        self.assertAlmostEqual(s["entropy_action"], round((0.02 * 4 + 0.05 * 5) / 9, 5))
 +        self.assertEqual(EV.token_entropy([{"trajectory": [{"entropy": 0.1, "tokens": 3}]}]),
 +                         {"entropy": 0.1, "entropy_tokens": 3})  # older records: as before
-+
 diff --git a/data_gen/interiorgs_v10/tests/test_pointing.py b/data_gen/interiorgs_v10/tests/test_pointing.py
 new file mode 100644
-index 00000000..8d477611
+index 00000000..0bf1ce22
 --- /dev/null
 +++ b/data_gen/interiorgs_v10/tests/test_pointing.py
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,315 @@
 +"""Group G of matrix v3 ("point first, then act", the user's instruction of 2026-11-06): the targets formats, the
 +reading and judging of the targets segment (vagen/envs/active_spatial/pointing.py) and the env's pointing reward
 +(off by default: every other run keeps its prompts, rewards and metrics), on a synthetic scene with a stub
@@ -391,6 +390,17 @@ index 00000000..8d477611
 +                             ("0.1", "targets_pixel"))
 +
 +
++class EntropyStopLineTest(unittest.TestCase):
++    def test_the_stop_line_reads_the_named_entropy(self):
++        """Group G: guards entropy_key names the entropy the stop line reads (default actor/entropy)."""
++        lines = "\n".join(f"step:{s} - actor/entropy:0.2 - actor/entropy_action:0.4 - actor/kl_loss:0.01"
++                          for s in range(1, 8))
++        guards = {"entropy_max": 0.3, "entropy_window": 5, "kl_max": 1.0, "invalid_max": 1.0}
++        self.assertIsNone(TCH.guard_reason(lines, guards))
++        reason = TCH.guard_reason(lines, dict(guards, entropy_key="actor/entropy_action"))
++        self.assertTrue(reason and "actor/entropy_action" in reason and "3-7" in reason, reason)
++
++
 +class EnvPointingTest(unittest.TestCase):
 +    @classmethod
 +    def setUpClass(cls):
@@ -506,7 +516,7 @@ index 00000000..8d477611
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/data_gen/interiorgs_v10/tests/test_training_prep.py b/data_gen/interiorgs_v10/tests/test_training_prep.py
-index ce8dcecb..afec5b20 100644
+index ce8dcecb..10c267b1 100644
 --- a/data_gen/interiorgs_v10/tests/test_training_prep.py
 +++ b/data_gen/interiorgs_v10/tests/test_training_prep.py
 @@ -371,6 +371,14 @@ class TrainingPrepTest(unittest.TestCase):
@@ -524,7 +534,7 @@ index ce8dcecb..afec5b20 100644
          ppo, env, report = config("rl_keep_std", standard="v10_p1_S0_keep")  # a standard names the filter
          self.assertEqual((ppo["filter"]["name"], ppo["filter"]["filter_kwargs"]["std_threshold"],
                            ppo["filter"]["filter_kwargs"]["std_floor"], report["reward_preset"]),
-@@ -574,6 +582,63 @@ class TrainingPrepTest(unittest.TestCase):
+@@ -574,6 +582,65 @@ class TrainingPrepTest(unittest.TestCase):
          with self.assertRaises(SystemExit):
              config("rl_pool_flagged", task_pool="reserve", exclude=str(flags))
  
@@ -572,6 +582,8 @@ index ce8dcecb..afec5b20 100644
 +                             pointing_reward=0.1)
 +        self.assertEqual((env["prompt_format_example"], env["pointing_reward"]), ("targets_pixel", 0.1))
 +        self.assertEqual((report["format_example"], report["pointing_reward"]), ("targets_pixel", 0.1))
++        self.assertTrue(report["entropy_by_segment"])
++        self.assertTrue(yaml.safe_load((self.root / "rl_g" / "ppo.yaml").read_text())["algorithm"]["entropy_by_segment"])
 +        self.assertIn("Response format: <targets>A: (x,y); B: (x,y)</targets><action>move_forward|turn_left|</action>",
 +                      TP.env_system_prompt(env, "fov_inclusion"))
 +        env0, report0 = config("rl_g0", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_pixel")
@@ -589,10 +601,24 @@ index ce8dcecb..afec5b20 100644
          """Round 12 freeze (the user's 3.1.1): --format-example sets the env's format line (placeholder names or
          real action names; default the SFT export's); the start model's SFT conversations must show the same text."""
 diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
-index 7f3d585d..acefcba5 100644
+index 7f3d585d..3840ec2b 100644
 --- a/data_gen/interiorgs_v10/train_chain.py
 +++ b/data_gen/interiorgs_v10/train_chain.py
-@@ -1396,8 +1396,10 @@ class Chain:
+@@ -401,9 +401,11 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
+     ent_max = guards.get("entropy_max")  # the user's decision 99 of 2026-11-01; off unless given
+     if ent_max is not None:
+         ew = int(guards.get("entropy_window", 5))
+-        ent = [(s, per[s]["actor/entropy"]) for s in steps[-ew:] if "actor/entropy" in per[s]]
++        ek = str(guards.get("entropy_key") or "actor/entropy")  # group G of matrix v3: actor/entropy_action
++        ent = [(s, per[s][ek]) for s in steps[-ew:] if ek in per[s]]
+         if len(ent) >= ew and all(v > float(ent_max) for _, v in ent):
+-            return (f"entropy above {ent_max} in each of updates {ent[0][0]}-{ent[-1][0]} ("
++            return (f"entropy{'' if ek == 'actor/entropy' else ' (' + ek + ')'} above {ent_max} in each of updates "
++                    f"{ent[0][0]}-{ent[-1][0]} ("
+                     + ", ".join(f"{v:.3f}" for _, v in ent) + ")")
+     return None
+ 
+@@ -1396,8 +1398,10 @@ class Chain:
                  args += ["--ppo-template", str(self.plan["ppo_template"])]
              for key, flag in (("standard", "--standard"), ("seed", "--seed"), ("history_mode", "--history-mode"),
                                ("format_example", "--format-example"), ("invalid_penalty", "--invalid-penalty"),
@@ -604,7 +630,7 @@ index 7f3d585d..acefcba5 100644
                                ("distance_tables", "--distance-tables"),  # round 13 (B): the optimal progress
                                ("progress_reward_scale", "--progress-reward-scale"),
 diff --git a/data_gen/interiorgs_v10/training_prep.py b/data_gen/interiorgs_v10/training_prep.py
-index 4a1305e0..248cd6f8 100644
+index 4a1305e0..fa8ad42c 100644
 --- a/data_gen/interiorgs_v10/training_prep.py
 +++ b/data_gen/interiorgs_v10/training_prep.py
 @@ -571,7 +571,10 @@ def sft_format_examples(paths: Sequence[Path], max_actions: int = 5, action_sep:
@@ -633,7 +659,16 @@ index 4a1305e0..248cd6f8 100644
      history["env"].update(design_variant_overrides(args, history["env"]))
      env_paths = {}
      for split, selected in parts.items():
-@@ -782,6 +792,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+@@ -748,6 +758,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+             _set(ppo, key, value)
+     if getattr(args, "invalid_turn_nonpositive", False):  # round 12 freeze (the user's 3.2, vagen/invalid_turns.py)
+         _set(ppo, "algorithm.invalid_turn_nonpositive_adv", True)
++    if fmt.startswith("targets_"):  # group G of matrix v3: the entropy by segment (vagen/segment_entropy.py)
++        _set(ppo, "algorithm.entropy_by_segment", True)
+     if getattr(args, "rollout_log_probs", False):
+         # the model line (2026-10-24): vLLM returns each sampled token's log-probability, so the trainer compares it
+         # with its own (vagen/ray_trainer.py: training/rollout_probs_diff_*, and with VAGEN_D0_3_SMOKE_DIR a file per
+@@ -782,6 +794,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
      filter_kwargs = None
      if group_filter not in (None, *GROUP_FILTERS):
          raise SystemExit(f"--group-filter must be one of {GROUP_FILTERS}, not {group_filter!r}")
@@ -642,7 +677,7 @@ index 4a1305e0..248cd6f8 100644
      if group_filter == "keep_by_return_std":  # round 12, the dense-reward first batch (D-keep)
          if not package:
              raise SystemExit("--group-filter keep_by_return_std fills the package's batch: it needs --opt-package")
-@@ -790,6 +802,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+@@ -790,6 +804,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
          filter_kwargs = dict(package["filter.filter_kwargs"], std_threshold=float(args.keep_std_threshold),
                               std_floor=float(getattr(args, "keep_std_floor", None) or 0.0),
                               rows=str((out / "train.jsonl").resolve()))  # the filled tasks' d* in the metrics
@@ -651,7 +686,13 @@ index 4a1305e0..248cd6f8 100644
          _set(ppo, "filter.name", group_filter)
          _set(ppo, "filter.filter_kwargs", filter_kwargs)
      curriculum = None
-@@ -845,6 +859,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+@@ -840,11 +856,14 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+               "format_example": fmt, "format_example_sft": sft_formats or None,
+               "lenient_parse": bool(getattr(args, "lenient_parse", False)),
+               "invalid_turn_nonpositive": bool(getattr(args, "invalid_turn_nonpositive", False)),
++              "entropy_by_segment": fmt.startswith("targets_"),
+               "rollout_log_probs": bool(getattr(args, "rollout_log_probs", False)),
+               "logprob_tokens": bool(getattr(args, "logprob_tokens", False)),
                "model_type": getattr(args, "model_type", None), "model_type_overrides": type_overrides,
                "invalid_penalty": (float(args.invalid_penalty) if getattr(args, "invalid_penalty", None) is not None
                                    else float(tcfg.get("invalid_format_penalty", -0.1))),
@@ -660,7 +701,7 @@ index 4a1305e0..248cd6f8 100644
                "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
                "entropy_coeff_override": getattr(args, "entropy_coeff", None),
                "kl_loss_coef": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("kl_loss_coef"),
-@@ -1148,10 +1164,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+@@ -1148,10 +1167,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
      c.add_argument("--task-pool", choices=TASK_POOLS, default=None,
                     help="round 11: the train tasks RL takes: formal (rounds 6-10, the default) or reserve (rows from sft-frames "
                          "--include-reserve; the rule since round 11: RL trains on tasks SFT never trained on)")
@@ -675,7 +716,7 @@ index 4a1305e0..248cd6f8 100644
      c.add_argument("--lenient-parse", action="store_true",
                     help="round 12 freeze: the env reads an answer leniently when the strict reading finds no action "
                          "(spaces instead of underscores, the first complete action block, a missing opening tag)")
-@@ -1170,6 +1188,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+@@ -1170,6 +1191,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
      c.add_argument("--invalid-penalty", type=float, default=None,
                     help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
                          "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
@@ -686,7 +727,7 @@ index 4a1305e0..248cd6f8 100644
      c.add_argument("--progress-version", default=None, choices=["grouped_gated", "grouped_soft", "optimal"],
                     help="round 12 freeze, dense-reward variant V3: the grouped progress with the hard gate (D_cond's) "
                          "or the soft gate (relation group times the frame group's continuous score); round 13 (B): "
-@@ -1221,6 +1243,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+@@ -1221,6 +1246,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="keep_by_return_std: the smallest return spread (std, n-1) of an all-fail task it takes")
      c.add_argument("--keep-std-floor", type=float, default=None,
                     help="keep_by_return_std: the filled tasks' group comparison divides by at least this (default 0)")
@@ -738,8 +779,69 @@ index 4871ac51..6526c0c2 100644
      def test_enough_mixed_tasks_and_fallback(self):
          from vagen.custom_filter.filter import FILTER_REGISTRY
  
+diff --git a/tests/active_spatial/test_segment_entropy.py b/tests/active_spatial/test_segment_entropy.py
+new file mode 100644
+index 00000000..31c6bae5
+--- /dev/null
++++ b/tests/active_spatial/test_segment_entropy.py
+@@ -0,0 +1,55 @@
++"""Group G of matrix v3: the actor entropy over the action segment (vagen/segment_entropy.py)."""
++
++import importlib.util
++from pathlib import Path
++
++import pytest
++
++from vagen import segment_entropy as SE
++
++QWEN3 = Path("/mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/"
++             "0c351dd01ed87e9c1b53cbc748cba10e6187ff3b")
++HAVE_TORCH = importlib.util.find_spec("torch") is not None
++
++
++def test_action_token_start_with_pieces():
++    pieces = ["<targets>A: (", "469", ",352)</targets", "><", "action>move_forward|", "</action>"]
++    ids = list(range(len(pieces)))
++    decode = lambda xs: "".join(pieces[i] for i in xs)  # noqa: E731
++    assert SE.action_token_start(ids, decode) == 3  # the merged "><" holds the "<" of "<action>"
++    d = ["<action>", "move", "_forward", "|", "</action>"]
++    assert SE.action_token_start(list(range(5)), lambda xs: "".join(d[i] for i in xs)) == 0
++    assert SE.action_token_start([0, 1], lambda xs: "".join(["no", " action"][i] for i in xs)) is None
++    assert SE.enabled({"entropy_by_segment": True}) and not SE.enabled({}) and not SE.enabled(None)
++
++
++@pytest.mark.skipif(not QWEN3.exists(), reason="the Qwen3 tokenizer (cluster)")
++def test_action_token_start_with_the_qwen3_tokenizer():
++    from transformers import AutoTokenizer
++
++    tok = AutoTokenizer.from_pretrained(str(QWEN3))
++    decode = lambda xs: tok.decode(list(xs), skip_special_tokens=True)  # noqa: E731
++    g = "<targets>A: (469,352); B: none</targets><action>move_forward|turn_left|</action>"
++    ids = tok(g, add_special_tokens=False)["input_ids"] + [tok.convert_tokens_to_ids("<|im_end|>")]
++    k = SE.action_token_start(ids, decode)
++    assert decode(ids[:k]).startswith("<targets>") and not decode(ids[:k]).endswith("<")
++    assert decode(ids[k:]).lstrip(">").startswith("<action>") and decode(ids[k:]).endswith("</action>")
++    d = tok("<action>move_forward|</action>", add_special_tokens=False)["input_ids"]
++    assert SE.action_token_start(d, decode) == 0
++
++
++@pytest.mark.skipif(not HAVE_TORCH, reason="torch")
++def test_segment_metrics():
++    import torch
++
++    def agg_loss(loss_mat, loss_mask, loss_agg_mode):  # token-mean, as verl's
++        return (loss_mat * loss_mask).sum() / loss_mask.sum()
++
++    ent = torch.tensor([[0.5, 0.5, 0.1, 0.1, 9.0], [0.2, 0.2, 0.2, 0.0, 0.0]])
++    mask = torch.tensor([[1, 1, 1, 1, 0], [1, 1, 1, 0, 0]], dtype=torch.float32)
++    nt = {"action_spans": [{"spans": [[2, 5]]}, {"spans": []}], "targets_spans": [{"spans": [[0, 2]]}, {"spans": [[0, 3]]}]}
++    m = SE.segment_metrics(ent, mask, nt, "token-mean", agg_loss)
++    assert m["actor/entropy_action"] == pytest.approx(0.1)  # position 4 is outside the response mask
++    assert m["actor/entropy_targets"] == pytest.approx((0.5 + 0.5 + 0.2 * 3) / 5)
++    assert SE.segment_metrics(ent, mask, {}, "token-mean", agg_loss) == {}
++    assert SE.segment_metrics(ent, mask, {"action_spans": [{"spans": []}, {"spans": []}]}, "token-mean", agg_loss) == {}
 diff --git a/vagen/agent_loop/gym_agent_loop.py b/vagen/agent_loop/gym_agent_loop.py
-index bd84f272..f766ae28 100644
+index bd84f272..eb31c65b 100644
 --- a/vagen/agent_loop/gym_agent_loop.py
 +++ b/vagen/agent_loop/gym_agent_loop.py
 @@ -70,6 +70,13 @@ def turn_has_think(info: Any) -> bool:
@@ -756,7 +858,7 @@ index bd84f272..f766ae28 100644
  class AgentData:
      """Container for all mutable trajectory state."""
      def __init__(
-@@ -107,6 +114,11 @@ class AgentData:
+@@ -107,6 +114,14 @@ class AgentData:
          self.invalid_spans: List[List[int]] = []
          self.progress_return: float = 0.0  # round 12 freeze, V8: the env's applied progress reward, summed
          self.think_turns: int = 0    # turns whose answer had thinking text (turn_metrics.has_think)
@@ -765,10 +867,24 @@ index bd84f272..f766ae28 100644
 +        self.targets_bad_turns: int = 0
 +        self.targets_old_turns: int = 0
 +        self.pointing_return: float = 0.0  # the pointing reward the env added over the episode
++        # group G (vagen/segment_entropy.py): each turn's action / targets segment spans in the response positions
++        self.action_spans: List[List[int]] = []
++        self.targets_spans: List[List[int]] = []
  
          # Episode metadata – populated from env info during the episode
          # These fields are written into reward_extra_info so they appear
-@@ -347,6 +359,15 @@ class GymAgentLoop(AgentLoopBase):
+@@ -213,6 +228,10 @@ class GymAgentLoop(AgentLoopBase):
+         from vagen.invalid_turns import enabled as _invalid_turns_enabled
+ 
+         cls.record_invalid_spans = _invalid_turns_enabled(config.get("algorithm", None))
++        # group G of matrix v3: the action / targets segment spans, for the entropy by segment (vagen/segment_entropy.py)
++        from vagen.segment_entropy import enabled as _segment_enabled
++
++        cls.record_segment_spans = _segment_enabled(config.get("algorithm", None))
+         # round 12 freeze, variant V8: record each episode's progress return only when the switch is on
+         from vagen.split_reward_adv import weight as _split_weight
+ 
+@@ -347,6 +366,15 @@ class GymAgentLoop(AgentLoopBase):
                      "invalid_action":     agent_data.invalid_turns / max(1, agent_data.env_turns),
                      # the share of the episode's turns whose answer had thinking text (transition/think_rate)
                      "think_rate":         agent_data.think_turns / max(1, agent_data.env_turns),
@@ -784,7 +900,34 @@ index bd84f272..f766ae28 100644
                  },
              },
          )
-@@ -458,6 +479,11 @@ class GymAgentLoop(AgentLoopBase):
+@@ -355,6 +383,9 @@ class GymAgentLoop(AgentLoopBase):
+             # lists would be broadcast into a multi-dimensional one
+             output.extra_fields["invalid_turn_spans"] = {"spans": [list(s) for s in agent_data.invalid_spans
+                                                                    if s[0] < self.response_length]}
++        if getattr(self, "record_segment_spans", False):  # group G (vagen/segment_entropy.py)
++            for key, spans in (("action_spans", agent_data.action_spans), ("targets_spans", agent_data.targets_spans)):
++                output.extra_fields[key] = {"spans": [list(s) for s in spans if s[0] < self.response_length]}
+         if getattr(self, "record_reward_parts", False):  # round 12 freeze, V8 (vagen/split_reward_adv.py)
+             output.extra_fields["reward_parts"] = {"progress": float(agent_data.progress_return)}
+         return output
+@@ -417,6 +448,16 @@ class GymAgentLoop(AgentLoopBase):
+             logger.warning(f"In env:{agent_data.env_name}, generated response length {len(output.token_ids)} exceeds per-turn response_limit {agent_data.response_limit}")
+         agent_data.prompt_ids += agent_data.response_ids
+         agent_data.add_generated_turn(len(agent_data.response_ids))
++        if getattr(self, "record_segment_spans", False) and agent_data.turn_span is not None:  # group G
++            from vagen.segment_entropy import action_token_start
++
++            start, end = agent_data.turn_span
++            k = action_token_start(list(agent_data.response_ids),
++                                   lambda ids: self.tokenizer.decode(list(ids), skip_special_tokens=True))
++            if k is not None:
++                agent_data.action_spans.append([start + k, end])
++                if k > 0:
++                    agent_data.targets_spans.append([start, start + k])
+         if output.log_probs:
+             agent_data.response_logprobs += output.log_probs
+ 
+@@ -458,6 +499,11 @@ class GymAgentLoop(AgentLoopBase):
          agent_data.invalid_turns += int(turn_invalid(info))
          agent_data.end_turn(turn_invalid(info))  # round 12 freeze (vagen/invalid_turns.py)
          agent_data.think_turns += int(turn_has_think(info))
@@ -1328,10 +1471,21 @@ index 02ceb749..1138c656 100644
      
      prompt = f"""Respond with only the action:
 diff --git a/vagen/ray_trainer.py b/vagen/ray_trainer.py
-index 9b2f0d34..60afada4 100644
+index 9b2f0d34..2e37c501 100644
 --- a/vagen/ray_trainer.py
 +++ b/vagen/ray_trainer.py
-@@ -2785,6 +2785,9 @@ class RayPPOTrainer:
+@@ -2615,6 +2615,10 @@ class RayPPOTrainer:
+                                 loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode
+                             )
+                             old_log_prob_metrics = {"actor/entropy": entropy_agg.detach().item()}
++                            from vagen.segment_entropy import segment_metrics  # group G: actor/entropy_action, _targets
++
++                            old_log_prob_metrics.update(segment_metrics(entropys, response_masks, batch.non_tensor_batch,
++                                                                        loss_agg_mode, agg_loss))
+                             metrics.update(old_log_prob_metrics)
+                             old_log_prob.batch.pop("entropys")
+                             batch = batch.union(old_log_prob)
+@@ -2785,6 +2789,9 @@ class RayPPOTrainer:
                              _log_transition_metric("truncated_before_action", "transition/truncated_before_action_rate")
                              _log_transition_metric("multiple_action_tag", "transition/multiple_action_tag_rate")
                              _log_transition_metric("think_rate", "transition/think_rate")
@@ -1341,3 +1495,63 @@ index 9b2f0d34..60afada4 100644
                              _log_transition_metric("env_exception", "transition/env_exception_rate")
                              _log_transition_metric("strict_action_tag_rate", "transition/strict_action_tag_rate")
                              _log_transition_metric("tool_call_rate", "transition/tool_call_rate")
+diff --git a/vagen/segment_entropy.py b/vagen/segment_entropy.py
+new file mode 100644
+index 00000000..bbd2bdd1
+--- /dev/null
++++ b/vagen/segment_entropy.py
+@@ -0,0 +1,54 @@
++"""Group G of matrix v3 (the user's 甲 of 2026-11-06, PREREG_G_vs_D section 9): the RL actor's entropy over the
++answers' action segment.  With a targets format an answer is "<targets>...</targets><action>...</action>"; the stop
++line on the entropy (guards entropy_max, 0.3 over 5 updates) reads the action segment only, as the sampling check
++does, since the coordinate digits would dominate the whole answer's mean.
++
++With the switch (PPO config ``algorithm.entropy_by_segment``, set by rl-config for a targets format; default off)
++the agent loop records per turn the response positions of the action segment (from the token holding the "<" of
++"<action>" to the turn's end) and of the targets segment before it; the trainer then logs ``actor/entropy_action``
++and ``actor/entropy_targets`` beside ``actor/entropy``, with the same aggregation."""
++
++from __future__ import annotations
++
++from typing import Any, Callable, Dict, Optional, Sequence
++
++SWITCH = "entropy_by_segment"
++
++
++def enabled(config: Any) -> bool:
++    """Whether the switch is on in an algorithm config (DictConfig, dict or dataclass; missing: off)."""
++    if config is None:
++        return False
++    getter = getattr(config, "get", None)
++    return bool(getter(SWITCH, False) if callable(getter) else getattr(config, SWITCH, False))
++
++
++def action_token_start(ids: Sequence[int], decode: Callable[[Sequence[int]], str]) -> Optional[int]:
++    """The index in a turn's generated ``ids`` of the token that holds the "<" of "<action>" in the decoded text;
++    None when the turn has no "<action>"."""
++    at = decode(list(ids)).find("<action>")
++    if at < 0:
++        return None
++    for i in range(len(ids)):
++        if len(decode(list(ids[: i + 1]))) > at:
++            return i
++    return None
++
++
++def segment_metrics(entropys: Any, response_mask: Any, non_tensor: Dict[str, Any], loss_agg_mode: str,
++                    agg_loss: Callable[..., Any]) -> Dict[str, float]:
++    """``actor/entropy_action`` / ``actor/entropy_targets``: the entropy aggregated as ``actor/entropy`` is, over the
++    response positions of the recorded spans (non_tensor "action_spans" / "targets_spans"); a key without any
++    position is left out."""
++    from vagen.invalid_turns import spans_mask
++
++    out: Dict[str, float] = {}
++    for name, key in (("action", "action_spans"), ("targets", "targets_spans")):
++        if key not in non_tensor:
++            continue
++        mask = spans_mask(list(non_tensor[key]), entropys.shape[1]).to(entropys.device) & response_mask.bool()
++        if bool(mask.any()):
++            out[f"actor/entropy_{name}"] = float(
++                agg_loss(loss_mat=entropys, loss_mask=mask.to(response_mask.dtype), loss_agg_mode=loss_agg_mode)
++                .detach().item())
++    return out
