@@ -1251,6 +1251,9 @@ class Chain:
                 if rl.get(key) is not None:  # round 11: the optimisation package; round 12 batch: easy tasks first,
                     # the entropy bonus (0 is passed too)
                     args += [flag, str(rl[key])]
+            if rl.get("und_mix"):  # the reward line (2026-11-05; ported 11-07): understanding batches in the update
+                value = rl["und_mix"]  # a request, or the path of a .json file holding one
+                args += ["--und-mix", value if isinstance(value, str) else json.dumps(value, sort_keys=True)]
             self.sh(args, log=self.tr / "logs" / f"rl_config{'_' + name if name else ''}.log")
 
     def rl(self) -> None:

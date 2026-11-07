@@ -836,6 +836,26 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             raise SystemExit(f"the {args.model_type} overrides are for the concat history mode (--history-mode concat)")
         for key, value in type_overrides.items():
             _set(ppo, key, value)
+    und_mix = None
+    if getattr(args, "und_mix", None):  # the reward line (2026-11-05; ported 11-07): understanding batches in the update
+        from vagen.und_mix import ppo_block
+
+        try:
+            und_mix = ppo_block(args.und_mix, model=model, run_root=run_root)
+        except (ValueError, OSError) as exc:
+            raise SystemExit(f"--und-mix: {exc}")
+        # what the trainer's mixer would refuse at its start, refused here before any job is submitted
+        actor, trainer = ppo["actor_rollout_ref"]["actor"], ppo["trainer"]
+        gpus = int(trainer.get("n_gpus_per_node", 8)) * int(trainer.get("nnodes", 1))
+        fsdp = actor.get("fsdp_config") or {}
+        problems = [p for p, bad in (
+            (f"batch_size {und_mix['batch_size']} does not split over {gpus} GPUs", und_mix["batch_size"] % gpus),
+            ("the actor's Ulysses sequence parallelism", int(fsdp.get("ulysses_sequence_parallel_size", 1)) != 1),
+            ("fp16 training (a loss scaler)", str(fsdp.get("dtype", "bfloat16")) in ("float16", "fp16")),
+            (f"actor strategy {actor.get('strategy')!r}", actor.get("strategy") not in (None, "fsdp"))) if bad]
+        if problems:
+            raise SystemExit(f"--und-mix does not work with {'; '.join(problems)}")
+        _set(ppo, "actor_rollout_ref.actor.und_mix", und_mix)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
@@ -876,6 +896,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "depth_flagged_checked": len(flagged), "depth_flagged_in_train": len(flagged_in_train),
               "train_scenes": len({r["scene_id"] for r in parts["train"]}),
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
+    if und_mix:  # only with the option, so that a report without it stays as it was
+        report["und_mix"] = und_mix
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
 
@@ -1230,6 +1252,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,
                    help="depth_check_summary.json: no RL train task may be among its flagged tasks")
+    c.add_argument("--und-mix", default=None,
+                   help="the reward line (2026-11-05; ported 11-07): understanding batches in the actor's update, a "
+                        "JSON object (or a .json file) with pool (python -m vagen.und_mix prepare) and optionally "
+                        "interval, weight, batch_size, micro_batch_size, seed; written to actor_rollout_ref.actor.und_mix")
     c.add_argument("--trial", action="store_true", help="one card, tiny batches (TRIAL_PPO)")
     c.add_argument("--seed", type=int, default=None,
                    help="round 12: the run's seed, the order of the tasks (data.seed); the template's otherwise")
