@@ -2178,7 +2178,6 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
   - 两个种子各一条链 `m3_g_s20261019`、`m3_g_s20261021`，各一对 S0 / V4，从 e9 起，提交 `a4ec54c6`。
   - 和 D 的计划逐项比过，只差批过的几项：格式 `targets_norm1000`、指认奖励 0.1、停止线读 `actor/entropy_action`、V4 挑题扣掉 `pointing_return`、Pg 探针、起点、各链自己的题集副本、池按排队短的投（D 当时改投 h800）。学习率、更新次数、KL、挑题阈值都和 D 相同。
   - 4 个 ppo.yaml 都核对过：`entropy_by_segment: true`、`targets_norm1000`、`pointing_reward 0.1`、起点 checkpoint-5256；`exclude_return_keys: [pointing_return]` 只在两个 V4 里。
-
   - 两个种子的 4 个训练任务都没排队就拿到卡（S0 在 zoetrope，V4 在 h800）。
   - 第 1 次更新（3 个已出）：`actor/entropy_action` 0.037–0.043（验收时 e9 是 0.035），全部回答 0.136–0.143，目标段 0.19–0.21；指认得分 0.70；目标段格式坏的、旧格式的回合都是 0；训练成功率 S0 41.7% / 45.8%、V4 35.4%；每次更新约 222–238 秒，300 次约 19–20 小时。
 - **用卡**：按 D 的实际用量估约 230 卡时（预登记第 8 节）。
