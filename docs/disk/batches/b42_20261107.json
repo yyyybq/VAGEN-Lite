@@ -1,0 +1,17 @@
+{
+ "batch": "b42_20261107",
+ "approved": "PENDING: the user 2026-11-07 ~18:5x in the disk window asked for another batch quickly (reward line submitted new jobs); this list (G SFT unpicked epochs) needs the user's word",
+ "items": [
+  {
+   "id": "P1-G-sft-unpicked",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/G/model",
+   "include": [
+    "^checkpoint-(584|1168|1752|2336|2920|3504|4088|4672|5840)/",
+    "^model-\\d+-of-\\d+\\.safetensors$",
+    "^model\\.safetensors\\.index\\.json$"
+   ],
+   "marker_name": "UNPICKED_EPOCHS_DELETED_b42.txt",
+   "marker": "Matrix v3 SFT cell G: epochs 1-8 and 10 (checkpoint-584 ... 4672, 5840) and the top-level final copy (= epoch 10) removed by the disk line, batch b42. The picked epoch 9 (checkpoint-5256) stays; the RL arms m3gs* start from it. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py (only if archived)."
+  }
+ ]
+}
