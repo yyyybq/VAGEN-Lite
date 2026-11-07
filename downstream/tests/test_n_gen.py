@@ -393,3 +393,12 @@ def test_fresh_render_context_collects_stale_contexts_first_then_rebuilds_the_li
     N.fresh_render_context(sim)
     assert calls == ["stale freed", "make_current", "free", "new buffers"]
     N.fresh_render_context(types.SimpleNamespace())  # no offscreen context: nothing to do
+
+
+def test_render_fix_switch(monkeypatch):
+    monkeypatch.delenv("N_RENDER_FIX", raising=False)
+    assert N.render_fix_on() is True
+    monkeypatch.setenv("N_RENDER_FIX", "0")
+    assert N.render_fix_on() is False
+    monkeypatch.setenv("N_RENDER_FIX", "1")
+    assert N.render_fix_on() is True

@@ -43,6 +43,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import math
+import os
 import sys
 import types
 from pathlib import Path
@@ -328,6 +329,12 @@ def fresh_render_context(sim) -> None:
     ctx._set_mujoco_context_and_buffers()
 
 
+def render_fix_on() -> bool:
+    """N_RENDER_FIX=0 leaves the renders as they were before the fix (fresh_render_context), for evaluations that are
+    compared with records made before it, until the user decides whether evaluations use it (D3 plan decision 5)."""
+    return os.environ.get("N_RENDER_FIX", "1") != "0"
+
+
 class Scene:
     """One reset RoboCasa scene with the base, camera A and the entities (see the module text)."""
 
@@ -343,7 +350,8 @@ class Scene:
         self.env = gym.make(f"robocasa/{task}", enable_render=True, split=split, seed=seed)
         self.env.reset(seed=seed)
         self.k = self.env.unwrapped.env
-        fresh_render_context(self.k.sim)
+        if render_fix_on():
+            fresh_render_context(self.k.sim)
         self.m, self.d = self.k.sim.model._model, self.k.sim.data._data
         m, d = self.m, self.d
         self.mj, self.np = mujoco, np
