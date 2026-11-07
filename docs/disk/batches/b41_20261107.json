@@ -1,0 +1,78 @@
+{
+ "batch": "b41_20261107",
+ "approved": "PENDING: the main line (主实验, 11-07 14:3x) hands over the 3A unpicked HF weights of q3fp (the user's \"删\" there); deletion needs the user's word in the disk window",
+ "items": [
+  {
+   "id": "MAIN-q3fp-hf-qw3fps0-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fps0/checkpoints/global_step_50",
+   "include": [
+    "^actor/huggingface/"
+   ],
+   "marker_name": "HF_WEIGHTS_DELETED_TO_AOSS_b41.txt",
+   "marker": "Step-50 checkpoint of the main line's finished RL run qw3fps0 (chain interiorgs_v10_train_q3fp_20261106): the actor/huggingface folder (weights, tokenizer, config; evaluated on the 705 questions and the held-out sets, not picked) archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b41 (the main line's list delete_list_q3fp_hf_unpicked_20261107.tsv, the user's \"删\" there). COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "MAIN-q3fp-hf-qw3fps0-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fps0/checkpoints/global_step_150",
+   "include": [
+    "^actor/huggingface/"
+   ],
+   "marker_name": "HF_WEIGHTS_DELETED_TO_AOSS_b41.txt",
+   "marker": "Step-150 checkpoint of the main line's finished RL run qw3fps0 (chain interiorgs_v10_train_q3fp_20261106): the actor/huggingface folder (weights, tokenizer, config; evaluated on the 705 questions and the held-out sets, not picked) archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b41 (the main line's list delete_list_q3fp_hf_unpicked_20261107.tsv, the user's \"删\" there). COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "MAIN-q3fp-hf-qw3fps0-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fps0/checkpoints/global_step_200",
+   "include": [
+    "^actor/huggingface/"
+   ],
+   "marker_name": "HF_WEIGHTS_DELETED_TO_AOSS_b41.txt",
+   "marker": "Step-200 checkpoint of the main line's finished RL run qw3fps0 (chain interiorgs_v10_train_q3fp_20261106): the actor/huggingface folder (weights, tokenizer, config; evaluated on the 705 questions and the held-out sets, not picked) archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b41 (the main line's list delete_list_q3fp_hf_unpicked_20261107.tsv, the user's \"删\" there). COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "MAIN-q3fp-hf-qw3fpd-50",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fpd/checkpoints/global_step_50",
+   "include": [
+    "^actor/huggingface/"
+   ],
+   "marker_name": "HF_WEIGHTS_DELETED_TO_AOSS_b41.txt",
+   "marker": "Step-50 checkpoint of the main line's finished RL run qw3fpd (chain interiorgs_v10_train_q3fp_20261106): the actor/huggingface folder (weights, tokenizer, config; evaluated on the 705 questions and the held-out sets, not picked) archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b41 (the main line's list delete_list_q3fp_hf_unpicked_20261107.tsv, the user's \"删\" there). COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "MAIN-q3fp-hf-qw3fpd-100",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fpd/checkpoints/global_step_100",
+   "include": [
+    "^actor/huggingface/"
+   ],
+   "marker_name": "HF_WEIGHTS_DELETED_TO_AOSS_b41.txt",
+   "marker": "Step-100 checkpoint of the main line's finished RL run qw3fpd (chain interiorgs_v10_train_q3fp_20261106): the actor/huggingface folder (weights, tokenizer, config; evaluated on the 705 questions and the held-out sets, not picked) archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b41 (the main line's list delete_list_q3fp_hf_unpicked_20261107.tsv, the user's \"删\" there). COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "MAIN-q3fp-hf-qw3fpd-150",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fpd/checkpoints/global_step_150",
+   "include": [
+    "^actor/huggingface/"
+   ],
+   "marker_name": "HF_WEIGHTS_DELETED_TO_AOSS_b41.txt",
+   "marker": "Step-150 checkpoint of the main line's finished RL run qw3fpd (chain interiorgs_v10_train_q3fp_20261106): the actor/huggingface folder (weights, tokenizer, config; evaluated on the 705 questions and the held-out sets, not picked) archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b41 (the main line's list delete_list_q3fp_hf_unpicked_20261107.tsv, the user's \"删\" there). COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "MAIN-q3fp-hf-qw3fpd-200",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fpd/checkpoints/global_step_200",
+   "include": [
+    "^actor/huggingface/"
+   ],
+   "marker_name": "HF_WEIGHTS_DELETED_TO_AOSS_b41.txt",
+   "marker": "Step-200 checkpoint of the main line's finished RL run qw3fpd (chain interiorgs_v10_train_q3fp_20261106): the actor/huggingface folder (weights, tokenizer, config; evaluated on the 705 questions and the held-out sets, not picked) archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b41 (the main line's list delete_list_q3fp_hf_unpicked_20261107.tsv, the user's \"删\" there). COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "MAIN-q3fp-hf-qw3fpd-250",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fpd/checkpoints/global_step_250",
+   "include": [
+    "^actor/huggingface/"
+   ],
+   "marker_name": "HF_WEIGHTS_DELETED_TO_AOSS_b41.txt",
+   "marker": "Step-250 checkpoint of the main line's finished RL run qw3fpd (chain interiorgs_v10_train_q3fp_20261106): the actor/huggingface folder (weights, tokenizer, config; evaluated on the 705 questions and the held-out sets, not picked) archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b41 (the main line's list delete_list_q3fp_hf_unpicked_20261107.tsv, the user's \"删\" there). COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  }
+ ]
+}
