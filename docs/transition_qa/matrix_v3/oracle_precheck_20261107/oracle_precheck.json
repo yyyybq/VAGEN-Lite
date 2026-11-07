@@ -1,0 +1,234 @@
+{
+ "om_m3ds1s0_300": {
+  "absolute_positioning": {
+   "tasks": 53,
+   "unmarked": 41,
+   "marked": 38,
+   "only_marked": 1,
+   "only_unmarked": 4,
+   "p": 0.375
+  },
+  "equidistance": {
+   "tasks": 53,
+   "unmarked": 18,
+   "marked": 16,
+   "only_marked": 4,
+   "only_unmarked": 6,
+   "p": 0.75390625
+  },
+  "fov_inclusion": {
+   "tasks": 53,
+   "unmarked": 26,
+   "marked": 23,
+   "only_marked": 2,
+   "only_unmarked": 5,
+   "p": 0.453125
+  },
+  "occlusion_alignment": {
+   "tasks": 29,
+   "unmarked": 9,
+   "marked": 10,
+   "only_marked": 3,
+   "only_unmarked": 2,
+   "p": 1.0
+  },
+  "projective_relations": {
+   "tasks": 52,
+   "unmarked": 23,
+   "marked": 23,
+   "only_marked": 4,
+   "only_unmarked": 4,
+   "p": 1.0
+  },
+  "screen_occupancy": {
+   "tasks": 52,
+   "unmarked": 34,
+   "marked": 33,
+   "only_marked": 5,
+   "only_unmarked": 6,
+   "p": 1.0
+  },
+  "合计": {
+   "tasks": 292,
+   "unmarked": 151,
+   "marked": 143,
+   "only_marked": 19,
+   "only_unmarked": 27,
+   "p": 0.3019956131896606
+  }
+ },
+ "om_m3ds1d_300": {
+  "absolute_positioning": {
+   "tasks": 53,
+   "unmarked": 38,
+   "marked": 37,
+   "only_marked": 4,
+   "only_unmarked": 5,
+   "p": 1.0
+  },
+  "equidistance": {
+   "tasks": 53,
+   "unmarked": 15,
+   "marked": 11,
+   "only_marked": 2,
+   "only_unmarked": 6,
+   "p": 0.2890625
+  },
+  "fov_inclusion": {
+   "tasks": 53,
+   "unmarked": 29,
+   "marked": 29,
+   "only_marked": 3,
+   "only_unmarked": 3,
+   "p": 1.0
+  },
+  "occlusion_alignment": {
+   "tasks": 29,
+   "unmarked": 5,
+   "marked": 8,
+   "only_marked": 4,
+   "only_unmarked": 1,
+   "p": 0.375
+  },
+  "projective_relations": {
+   "tasks": 52,
+   "unmarked": 23,
+   "marked": 21,
+   "only_marked": 1,
+   "only_unmarked": 3,
+   "p": 0.625
+  },
+  "screen_occupancy": {
+   "tasks": 52,
+   "unmarked": 37,
+   "marked": 34,
+   "only_marked": 3,
+   "only_unmarked": 6,
+   "p": 0.5078125
+  },
+  "合计": {
+   "tasks": 292,
+   "unmarked": 147,
+   "marked": 140,
+   "only_marked": 17,
+   "only_unmarked": 24,
+   "p": 0.34888887944907765
+  }
+ },
+ "om_m3crs1s0_250": {
+  "absolute_positioning": {
+   "tasks": 53,
+   "unmarked": 36,
+   "marked": 38,
+   "only_marked": 4,
+   "only_unmarked": 2,
+   "p": 0.6875
+  },
+  "equidistance": {
+   "tasks": 53,
+   "unmarked": 15,
+   "marked": 15,
+   "only_marked": 4,
+   "only_unmarked": 4,
+   "p": 1.0
+  },
+  "fov_inclusion": {
+   "tasks": 53,
+   "unmarked": 25,
+   "marked": 21,
+   "only_marked": 2,
+   "only_unmarked": 6,
+   "p": 0.2890625
+  },
+  "occlusion_alignment": {
+   "tasks": 29,
+   "unmarked": 11,
+   "marked": 4,
+   "only_marked": 0,
+   "only_unmarked": 7,
+   "p": 0.015625
+  },
+  "projective_relations": {
+   "tasks": 52,
+   "unmarked": 28,
+   "marked": 17,
+   "only_marked": 2,
+   "only_unmarked": 13,
+   "p": 0.00738525390625
+  },
+  "screen_occupancy": {
+   "tasks": 52,
+   "unmarked": 37,
+   "marked": 33,
+   "only_marked": 3,
+   "only_unmarked": 7,
+   "p": 0.34375
+  },
+  "合计": {
+   "tasks": 292,
+   "unmarked": 152,
+   "marked": 128,
+   "only_marked": 15,
+   "only_unmarked": 39,
+   "p": 0.0014962588853935088
+  }
+ },
+ "om_m3crs1d_250": {
+  "absolute_positioning": {
+   "tasks": 53,
+   "unmarked": 40,
+   "marked": 40,
+   "only_marked": 3,
+   "only_unmarked": 3,
+   "p": 1.0
+  },
+  "equidistance": {
+   "tasks": 53,
+   "unmarked": 14,
+   "marked": 21,
+   "only_marked": 10,
+   "only_unmarked": 3,
+   "p": 0.09228515625
+  },
+  "fov_inclusion": {
+   "tasks": 53,
+   "unmarked": 25,
+   "marked": 26,
+   "only_marked": 3,
+   "only_unmarked": 2,
+   "p": 1.0
+  },
+  "occlusion_alignment": {
+   "tasks": 29,
+   "unmarked": 5,
+   "marked": 7,
+   "only_marked": 5,
+   "only_unmarked": 3,
+   "p": 0.7265625
+  },
+  "projective_relations": {
+   "tasks": 52,
+   "unmarked": 29,
+   "marked": 24,
+   "only_marked": 3,
+   "only_unmarked": 8,
+   "p": 0.2265625
+  },
+  "screen_occupancy": {
+   "tasks": 52,
+   "unmarked": 35,
+   "marked": 32,
+   "only_marked": 1,
+   "only_unmarked": 4,
+   "p": 0.375
+  },
+  "合计": {
+   "tasks": 292,
+   "unmarked": 148,
+   "marked": 150,
+   "only_marked": 25,
+   "only_unmarked": 23,
+   "p": 0.8854334972865132
+  }
+ }
+}

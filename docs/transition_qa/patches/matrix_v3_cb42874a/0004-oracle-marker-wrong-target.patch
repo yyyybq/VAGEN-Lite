@@ -1,0 +1,959 @@
+diff --git a/data_gen/interiorgs_v10/evaluation.py b/data_gen/interiorgs_v10/evaluation.py
+index 69ef56f5..8f6fdf25 100644
+--- a/data_gen/interiorgs_v10/evaluation.py
++++ b/data_gen/interiorgs_v10/evaluation.py
+@@ -299,6 +299,8 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
+         out["prompt_format_example"] = args.format_example
+     if getattr(args, "lenient_parse", False):  # round 12 freeze: the lenient reading of the answers
+         out["lenient_parse"] = True
++    if getattr(args, "oracle_marker", False):  # the user's item 6 of 2026-11-07: truth boxes drawn into the frames
++        out["oracle_marker"] = True
+     return out
+ 
+ 
+@@ -355,7 +357,7 @@ def call_seed(base: int, index: int, sample: int, turn: int) -> int:
+ 
+ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None,
+                 history: bool = False, as_sft: bool = False, sample: Optional[int] = None,
+-                seed: Optional[int] = None) -> Dict[str, Any]:
++                seed: Optional[int] = None, self_marker: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
+     """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py.
+ 
+     With ``frames`` (round 8) the row also carries the trajectory: per turn the frame the model saw (a JPEG in
+@@ -364,13 +366,16 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
+     With ``history`` (round 9 switch) every model call also gets all earlier turns of the episode, as in SFT;
+     with ``as_sft`` every message is passed through ``sft_text`` first.  ``sample`` / ``seed`` (round 11): the
+     sample number of a sampled run and the base seed of its model calls (``call_seed``); frames are then named
+-    <index>_s<sample>_<turn>.jpg."""
++    <index>_s<sample>_<turn>.jpg.  ``self_marker`` (G-oracle's self mode, the user's item 6c of 2026-11-07):
++    called as self_marker(frame, item, env) before every action call, it returns the frame the action call sees (with
++    the model's own boxes; self_marker.py) and the turn's box record."""
+     obs, info = env.reset(seed=index)
+     system = env.system_prompt()
+     item = env.current_item or {}
+     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
+     done, trajectory, end_reason, earlier = False, [], None, []
+     pointed: Counter = Counter()  # group G of matrix v3: the turns the env judged a targets segment in
++    marked_turns: List[List[Dict[str, Any]]] = []  # G-oracle's self mode: each turn's boxes
+     start = gate_summary(env._calculate_canonical_metric()) if frames is not None else None
+ 
+     def keep(image: Any, turn: int) -> Optional[str]:
+@@ -392,10 +397,16 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
+             kw["as_sft"] = True
+         if seed is not None:
+             kw["seed"] = call_seed(seed, index, sample or 0, turns)
+-        text = policy.generate(system, obs["obs_str"], images[0], **kw)
++        shown, marks = images[0], None
++        if self_marker is not None:  # G-oracle's self mode: the frame with the model's own boxes
++            shown, marks = self_marker(images[0], item, env)
++            marked_turns.append(marks)
++        text = policy.generate(system, obs["obs_str"], shown, **kw)
+         if history:
+-            earlier.append((obs["obs_str"], images[0], text))
+-        seen = {"frame": keep(images[0], turns), "user": obs["obs_str"]}
++            earlier.append((obs["obs_str"], shown, text))
++        seen = {"frame": keep(shown, turns), "user": obs["obs_str"]}
++        if marks is not None:
++            seen["self_marks"] = marks
+         if getattr(policy, "last_prompt_tokens", None) is not None:
+             seen["prompt_tokens"] = policy.last_prompt_tokens
+         if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
+@@ -434,6 +445,10 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
+     if pointed:
+         row["pointing"] = {"turns": int(pointed["turns"]), "score": round(float(pointed["score"]), 4),
+                            "ok_turns": int(pointed["ok"]), "old_turns": int(pointed["old"])}
++    if self_marker is not None:
++        from .self_marker import summary as _marks_summary
++
++        row["self_marker"] = _marks_summary(marked_turns)
+     if sample is not None:
+         row["sample"] = int(sample)
+     if frames is not None:
+@@ -579,6 +594,15 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
+                     pieces, position_entropies([[lp.logprob for lp in pos.values()] for pos in steps], self.temperature))
+         return out[0].outputs[0].text
+ 
++    def ask(self, question: str, image: Any) -> str:
++        """One user turn (the frame, then ``question``; no system prompt), greedy: G-oracle's self mode asks the
++        pointing pool's box question as the pointing probe does."""
++        from vllm import SamplingParams
++
++        msgs = [{"role": "user", "content": [_image_url(image), {"type": "text", "text": "\n" + question}]}]
++        out = self.llm.chat(msgs, sampling_params=SamplingParams(temperature=0.0, max_tokens=64), use_tqdm=False)
++        return out[0].outputs[0].text
++
+ 
+ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU and the render service
+     from vagen.envs.active_spatial.env import ActiveSpatialEnv
+@@ -600,6 +624,17 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
+                         max_images=int(args.max_turns) if args.history else 1,
+                         temperature=float(args.temperature) if sampled else 0.0,
+                         top_p=float(args.top_p) if sampled else 1.0, entropy=bool(getattr(args, "entropy", False)))
++    self_marker = None
++    if getattr(args, "self_marker", False):  # G-oracle's self mode (the user's item 6c of 2026-11-07)
++        if switches.get("oracle_marker"):
++            raise SystemExit("--self-marker draws the model's own boxes; it cannot go with --oracle-marker")
++        from vagen.envs.active_spatial.pointing import truth as _truth
++
++        from .self_marker import mark_turn
++
++        def self_marker(frame: Any, item: Dict[str, Any], env_: Any) -> Any:
++            rows = _truth(item, env_.view_engine.get_pose(), env_._visibility_occluders())
++            return mark_turn(policy.ask, frame, item, rows)
+     (out / "model.json").write_text(json.dumps({"name": args.name, "model": args.model, "version": VERSION,
+                                                 "prompt_format": cfg["prompt_format"], "greedy": not sampled,
+                                                 "samples": int(args.samples) if sampled else 1,
+@@ -610,6 +645,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
+                                                 "history": bool(args.history),
+                                                 "sft_text": bool(args.sft_text),
+                                                 "entropy": bool(getattr(args, "entropy", False)),
++                                                "self_marker": bool(getattr(args, "self_marker", False)),
+                                                 "load_seconds": round(time.time() - t0, 1)}, indent=1))
+     done = ({(r["index"], r.get("sample")) for r in _jsonl(out / "results.jsonl")}
+             if (out / "results.jsonl").exists() else set())
+@@ -622,7 +658,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
+                 try:
+                     row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames",
+                                       history=args.history, as_sft=args.sft_text, sample=k,
+-                                      seed=int(args.sample_seed) if sampled else None)
++                                      seed=int(args.sample_seed) if sampled else None, self_marker=self_marker)
+                 except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
+                     row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
+                     if k is not None:
+@@ -925,6 +961,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+     r.add_argument("--format-example", default=None,
+                    choices=["placeholder", "action_names", "targets_pixel", "targets_norm1000"],
+                    help="round 12 freeze: the format line the model trained with (default the template's: placeholder)")
++    r.add_argument("--self-marker", action="store_true",
++                   help="G-oracle's self mode: before each action the model boxes the task's targets (Pg's question) "
++                        "and its boxes are drawn into the frame (data_gen/interiorgs_v10/self_marker.py)")
++    r.add_argument("--oracle-marker", action="store_true",
++                   help="draw the task's targets' truth boxes into every frame (vagen/envs/active_spatial/oracle_marker.py)")
+     r.add_argument("--entropy", action="store_true",
+                    help="round 12 freeze: record each answer's token entropy (top-20 log-probabilities, after the "
+                         "temperature), as the RL logs report it")
+diff --git a/data_gen/interiorgs_v10/self_marker.py b/data_gen/interiorgs_v10/self_marker.py
+new file mode 100644
+index 00000000..da5ec5c8
+--- /dev/null
++++ b/data_gen/interiorgs_v10/self_marker.py
+@@ -0,0 +1,70 @@
++"""Self mode of G-oracle's evaluation (the user's instruction of 2026-11-07, item 6c; ``evaluation run --self-marker``):
++before every action the same model is asked to box each target of the task, with Pg's own question ("Draw a box
++around {ref}. ...", data_gen.transition_qa.pointing_qa.QUESTION, 0-1000 coordinates; one user turn with the frame and no
++system prompt, as the pointing probe asks), its boxes are drawn into the frame in the oracle marker's style
++(oracle_marker.draw: A red, B blue), and the action call sees that frame.  An answer without four numbers draws no box
++for its target.  Each turn records the answers, the boxes read, the truth (pointing.truth) and the IoU of each box with
++its target's true box (None when the target has no true box: not clearly visible)."""
++from __future__ import annotations
++
++from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
++
++FRAME = 256.0
++
++
++def questions(item: Dict[str, Any]) -> List[Tuple[str, str]]:
++    """(letter, question) per object of the task text, A, B in the text's order."""
++    from data_gen.transition_qa.pointing_qa import QUESTION
++    from vagen.envs.active_spatial.pointing import SLOT_LETTERS, target_refs
++
++    return [(l, QUESTION[("box", "norm1000")].format(ref=ref)) for l, ref in zip(SLOT_LETTERS, target_refs(item))]
++
++
++def read_box(text: str) -> Optional[List[float]]:
++    """The box an answer gives, in the 256-frame's pixels (0-1000 coordinates scaled, corners ordered, clipped to the
++    frame); None without four numbers or with an empty box."""
++    from eval.diagnostics.qa_probe import _clean, read_coordinates
++
++    nums, _ = read_coordinates(_clean(text), 4)
++    if len(nums) < 4:
++        return None
++    s = FRAME / 1000.0
++    x1, x2 = sorted((nums[0] * s, nums[2] * s))
++    y1, y2 = sorted((nums[1] * s, nums[3] * s))
++    x1, y1, x2, y2 = (min(max(v, 0.0), FRAME) for v in (x1, y1, x2, y2))
++    return [round(x1, 3), round(y1, 3), round(x2, 3), round(y2, 3)] if x2 > x1 and y2 > y1 else None
++
++
++def iou(a: Sequence[float], b: Sequence[float]) -> float:
++    inter = max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
++    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
++    return inter / union if union > 0 else 0.0
++
++
++def mark_turn(ask: Callable[[str, Any], str], image: Any, item: Dict[str, Any], truth_rows: Sequence[Dict[str, Any]]
++              ) -> Tuple[Any, List[Dict[str, Any]]]:
++    """(the frame with the model's own boxes, per target {letter, answer, box, truth_box, iou})."""
++    from vagen.envs.active_spatial.oracle_marker import draw
++
++    truth = {r["letter"]: r.get("box") for r in truth_rows}
++    marks, rec = [], []
++    for letter, q in questions(item):
++        answer = ask(q, image)
++        box = read_box(answer)
++        tb = truth.get(letter)
++        rec.append({"letter": letter, "answer": answer, "box": box, "truth_box": tb,
++                    "iou": round(iou(box, tb), 4) if (box and tb) else (0.0 if tb else None)})
++        if box:
++            marks.append((letter, box))
++    return draw(image, marks), rec
++
++
++def summary(turns: Sequence[List[Dict[str, Any]]]) -> Dict[str, Any]:
++    """Over an episode's turns: questions, boxes read, the mean IoU and the share with IoU >= 0.5 over the targets with
++    a true box, and the boxes drawn for targets without one."""
++    recs = [r for t in turns for r in t]
++    vis = [r for r in recs if r["truth_box"]]
++    return {"questions": len(recs), "boxes": sum(r["box"] is not None for r in recs), "visible": len(vis),
++            "iou_mean": round(sum(r["iou"] for r in vis) / len(vis), 4) if vis else None,
++            "iou_ge_05": sum(r["iou"] >= 0.5 for r in vis),
++            "boxes_without_truth": sum(r["box"] is not None and not r["truth_box"] for r in recs)}
+diff --git a/data_gen/interiorgs_v10/tests/test_self_marker.py b/data_gen/interiorgs_v10/tests/test_self_marker.py
+new file mode 100644
+index 00000000..314a7284
+--- /dev/null
++++ b/data_gen/interiorgs_v10/tests/test_self_marker.py
+@@ -0,0 +1,75 @@
++"""data_gen/interiorgs_v10/self_marker.py and the self mode of evaluation.run_episode (the user's item 6c of 2026-11-07)."""
++import unittest
++
++from PIL import Image
++
++from data_gen.interiorgs_v10 import self_marker as SM
++
++ITEM = {"target_object": {"objects": [{"id": "a", "ref": "the lamp", "label": "lamp"},
++                                      {"id": "b", "ref": "the sofa", "label": "sofa"}]}}
++
++
++class SelfMarkerTest(unittest.TestCase):
++    def test_questions_are_pg_box_questions(self):
++        qs = SM.questions(ITEM)
++        self.assertEqual([l for l, _ in qs], ["A", "B"])
++        self.assertTrue(qs[0][1].startswith("Draw a box around the lamp. Answer with the coordinates (x1,y1,x2,y2)"))
++        self.assertIn("0 to 1000", qs[1][1])
++
++    def test_read_box(self):
++        self.assertEqual(SM.read_box("(100,200,300,400)"), [25.6, 51.2, 76.8, 102.4])
++        self.assertEqual(SM.read_box("(300,400,100,200)"), [25.6, 51.2, 76.8, 102.4])  # corners ordered
++        self.assertEqual(SM.read_box("(0,0,1200,500)"), [0.0, 0.0, 256.0, 128.0])  # clipped to the frame
++        self.assertIsNone(SM.read_box("none"))
++        self.assertIsNone(SM.read_box("(10,10,10,50)"))  # empty
++
++    def test_mark_turn(self):
++        img = Image.new("RGB", (256, 256), (128, 128, 128))
++        answers = {"lamp": "(100,200,300,400)", "sofa": "I cannot see it"}
++        ask = lambda q, im: next(v for k, v in answers.items() if k in q)  # noqa: E731
++        truth = [{"letter": "A", "in_view": True, "box": [25.6, 51.2, 76.8, 102.4]},
++                 {"letter": "B", "in_view": False, "box": None}]
++        shown, rec = SM.mark_turn(ask, img, ITEM, truth)
++        self.assertEqual([r["iou"] for r in rec], [1.0, None])
++        self.assertEqual(shown.getpixel((26, 80)), (230, 30, 40))  # A's box drawn
++        self.assertEqual(img.getpixel((26, 80)), (128, 128, 128))
++        s = SM.summary([rec])
++        self.assertEqual((s["questions"], s["boxes"], s["visible"], s["iou_ge_05"], s["boxes_without_truth"]), (2, 1, 1, 1, 0))
++
++    def test_run_episode_shows_the_marked_frame(self):
++        from data_gen.interiorgs_v10 import evaluation as EV
++
++        frame = Image.new("RGB", (256, 256), (0, 0, 0))
++
++        class Env:
++            current_item = {"task_id": "t", "task_type": "x", "difficulty": {"d_star": 1}}
++            _current_step = 1
++
++            def reset(self, seed):
++                return {"obs_str": "<image>", "multi_modal_data": {"<image>": [frame]}}, {}
++
++            def system_prompt(self):
++                return "s"
++
++            def step(self, text):
++                return {"obs_str": "<image>", "multi_modal_data": {"<image>": [frame]}}, 0.0, True, {"actions": ["move_forward"]}
++
++            def _calculate_canonical_metric(self):
++                return {"success": False, "gates": {"distance": False}}
++
++        seen = []
++
++        class Policy:
++            def generate(self, system, user, image, **kw):
++                seen.append(image.getpixel((0, 0)))
++                return "<action>move_forward|</action>"
++
++        marked = Image.new("RGB", (256, 256), (9, 9, 9))
++        row = EV.run_episode(Env(), Policy(), 0, 3, self_marker=lambda f, item, env: (marked, [
++            {"letter": "A", "answer": "x", "box": None, "truth_box": None, "iou": None}]))
++        self.assertEqual(seen, [(9, 9, 9)])
++        self.assertEqual(row["self_marker"]["questions"], 1)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py b/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
+index 38db8970..60668410 100644
+--- a/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
++++ b/data_gen/interiorgs_v10/tests/test_train_chain_matrix.py
+@@ -220,6 +220,23 @@ class DiagnosticsStepTest(unittest.TestCase):
+             with self.assertRaises(T.ChainError):  # none of this chain's models: never every folder
+                 chain.diagnostics()
+ 
++    def test_failure_breakdown_wrong_target_switch(self):
++        """The user's item 6b of 2026-11-07: plan diagnostics.wrong_target adds --wrong-target."""
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            tr = root / "tr"
++            (tr / "rl_run_p1s0" / "checkpoints" / "global_step_50" / "actor" / "huggingface").mkdir(parents=True)
++            (root / "val" / "p1s0_050").mkdir(parents=True)
++            (root / "val" / "p1s0_050" / "results.jsonl").write_text("")
++            plan = {"tr": str(tr), "sft_dir": str(root), "endpoint": 50, "start_model": str(root / "start"),
++                    "eval_sets": {"val": str(root / "val")}, "rl_runs": {"p1s0": {}}, "eval": {"every": 50},
++                    "diagnostics": {"probes": {}, "wrong_target": True}}
++            chain = T.Chain(plan, sleep=lambda s: None)
++            calls = []
++            chain.sh = lambda args, **k: calls.append(args)
++            chain.diagnostics()
++            self.assertEqual(calls[0][-1], "--wrong-target")
++
+     def test_not_planned(self):
+         with tempfile.TemporaryDirectory() as tmp:
+             chain = T.Chain({"tr": tmp, "sft_dir": tmp, "endpoint": 100}, sleep=lambda s: None)
+diff --git a/data_gen/interiorgs_v10/tests/test_training_prep.py b/data_gen/interiorgs_v10/tests/test_training_prep.py
+index 10c267b1..e15fad16 100644
+--- a/data_gen/interiorgs_v10/tests/test_training_prep.py
++++ b/data_gen/interiorgs_v10/tests/test_training_prep.py
+@@ -640,6 +640,12 @@ class TrainingPrepTest(unittest.TestCase):
+                    pointing_reward=0.1)
+         with self.assertRaises(SystemExit):  # the RL text must be the start model's
+             config("rl_g_other", sft_trajectories=[str(convs["targets_pixel"])], format_example="targets_norm1000")
++        # G-oracle (the user's item 6c of 2026-11-07): --oracle-marker reaches the env config and the report
++        envm, reportm = config("rl_om", sft_trajectories=[str(convs["action_names"])], format_example="action_names",
++                               oracle_marker=True)
++        self.assertTrue(envm["oracle_marker"] and reportm["oracle_marker"])
++        self.assertFalse(report0["oracle_marker"])
++        self.assertNotIn("oracle_marker", env0)
+ 
+     def test_rl_config_format_example(self):
+         """Round 12 freeze (the user's 3.1.1): --format-example sets the env's format line (placeholder names or
+diff --git a/data_gen/interiorgs_v10/train_chain.py b/data_gen/interiorgs_v10/train_chain.py
+index 3840ec2b..0f5b5d89 100644
+--- a/data_gen/interiorgs_v10/train_chain.py
++++ b/data_gen/interiorgs_v10/train_chain.py
+@@ -1420,6 +1420,7 @@ class Chain:
+                     args += [flag, ",".join(str(x) for x in value) if isinstance(value, (list, tuple)) else str(value)]
+             for key, flag in (("greedy_val", "--greedy-val"), ("no_internal_val", "--no-internal-val"),
+                               ("lenient_parse", "--lenient-parse"), ("invalid_turn_nonpositive", "--invalid-turn-nonpositive"),
++                              ("oracle_marker", "--oracle-marker"),  # G-oracle (the user's item 6c of 2026-11-07)
+                               ("logprob_audit", "--rollout-log-probs"),  # the model line: the log-probability audit
+                               ("logprob_tokens", "--logprob-tokens")):  # and its per-token files (2026-10-26)
+                 if rl.get(key):
+@@ -2325,8 +2326,11 @@ class Chain:
+                 names = [n for n in models if (eval_dir / n / "results.jsonl").is_file()]
+                 if not names:
+                     raise ChainError(f"failure breakdown {set_name}: no results of this chain's models in {eval_dir}")
++                # the user's item 6b of 2026-11-07: the wrong-target rate and soft success (plan
++                # diagnostics.wrong_target; matrix_plan sets it for the matrix chains)
+                 self.sh([py, "-m", "eval.diagnostics.failure_breakdown", "--eval", str(eval_dir),
+-                         "--names", ",".join(names), "--out", str(out / f"failure_{set_name}")],
++                         "--names", ",".join(names), "--out", str(out / f"failure_{set_name}")]
++                        + (["--wrong-target"] if diag.get("wrong_target") else []),
+                         log=self.tr / "logs" / f"failure_{set_name}.log")
+         probes = {k: v for k, v in (diag.get("probes") or {}).items() if v}  # null: not there yet (P0)
+         per_job = int(diag.get("models_per_job", DEFAULT_MODELS_PER_PROBE_JOB))
+diff --git a/data_gen/interiorgs_v10/training_prep.py b/data_gen/interiorgs_v10/training_prep.py
+index fa8ad42c..26191d51 100644
+--- a/data_gen/interiorgs_v10/training_prep.py
++++ b/data_gen/interiorgs_v10/training_prep.py
+@@ -680,6 +680,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+             raise SystemExit(f"--pointing-reward needs a targets format example (--format-example targets_...), "
+                              f"not {fmt!r}")
+         history["env"]["pointing_reward"] = float(args.pointing_reward)
++    if getattr(args, "oracle_marker", False):  # G-oracle (the user's item 6c of 2026-11-07): truth boxes in the frames
++        if (int(tcfg.get("image_width", 0)), int(tcfg.get("image_height", 0))) != (256, 256):
++            raise SystemExit("--oracle-marker draws the boxes of the 256 x 256 frames")
++        history["env"]["oracle_marker"] = True
+     if fmt.startswith("targets_") and (int(tcfg.get("image_width", 0)), int(tcfg.get("image_height", 0))) != (256, 256):
+         raise SystemExit("a targets format example needs the 256 x 256 frames its boxes are judged on")
+     history["env"].update(design_variant_overrides(args, history["env"]))
+@@ -864,6 +868,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
+                                   else float(tcfg.get("invalid_format_penalty", -0.1))),
+               "pointing_reward": (float(args.pointing_reward) if getattr(args, "pointing_reward", None) is not None
+                                   else None),
++              "oracle_marker": bool(getattr(args, "oracle_marker", False)),
+               "entropy_coeff": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("entropy_coeff"),
+               "entropy_coeff_override": getattr(args, "entropy_coeff", None),
+               "kl_loss_coef": ((ppo.get("actor_rollout_ref") or {}).get("actor") or {}).get("kl_loss_coef"),
+@@ -1191,6 +1196,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
+     c.add_argument("--invalid-penalty", type=float, default=None,
+                    help="round 12 freeze: the penalty of an answer the env reads no action in (default the env "
+                         "template's invalid_format_penalty, -0.1); the system prompt keeps the SFT text")
++    c.add_argument("--oracle-marker", action="store_true",
++                   help="G-oracle (the user's item 6c of 2026-11-07): env oracle_marker, the task's targets' truth boxes "
++                        "drawn into every frame of the rollouts and the validation (oracle_marker.py); default off")
+     c.add_argument("--pointing-reward", type=float, default=None,
+                    help="group G of matrix v3: the weight of the pointing reward (env pointing_reward: each turn the "
+                         "weight times the share of the task's objects the targets segment places right; needs a "
+diff --git a/eval/diagnostics/failure_breakdown.py b/eval/diagnostics/failure_breakdown.py
+index 036b9c57..10ff6df1 100644
+--- a/eval/diagnostics/failure_breakdown.py
++++ b/eval/diagnostics/failure_breakdown.py
+@@ -16,6 +16,12 @@ conditions not met, ``failed_gates``).  Each episode gets one class:
+ 
+ Writes OUT_PREFIX.json (counts per model, family and class; the single failed condition of budget_one_gate) and
+ OUT_PREFIX.md (shares per family, one table per model).
++
++With ``--wrong-target`` (the user's instruction of 2026-11-07, item 6b; eval/diagnostics/wrong_target.py) each model
++also gets per family the strict and soft success (soft: at the best pose only the family's tolerance condition failed)
++and, for projective_relations and occlusion_alignment, the wrong-target rate: the failed episodes whose end or best
++pose meets the task with A and B exchanged.  It reads EVAL_DIR/tasks.jsonl and the scenes (CPU, one process);
++the per-episode judgements go to OUT_PREFIX_wrong_target.jsonl.
+ """
+ 
+ from __future__ import annotations
+@@ -136,6 +142,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
+     ap.add_argument("--eval", required=True, help="an evaluation folder (tasks.jsonl and one folder per model)")
+     ap.add_argument("--names", default="", help="comma-separated result folders (default: every folder with results)")
+     ap.add_argument("--out", required=True, help="output prefix (.json and .md are added)")
++    ap.add_argument("--wrong-target", action="store_true",
++                    help="also the wrong-target rate and soft success (eval/diagnostics/wrong_target.py)")
+     args = ap.parse_args(argv)
+     ev = Path(args.eval)
+     names = [n for n in args.names.split(",") if n] or sorted(p.parent.name for p in ev.glob("*/results.jsonl"))
+@@ -143,12 +151,27 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
+     md = [f"# 失败拆解：{ev.name}", "",
+           "每道题一个结论。\"门\"是任务成功判据里的一项条件；\"到过又走偏\"在现行规则下不会出现"
+           "（每个动作后都检查成功，满足就立刻结束），这里照样统计。", ""]
++    wt_rows: List[Dict[str, Any]] = []
++    if args.wrong_target:
++        from eval.diagnostics import wrong_target as WT
++
++        tasks = {r["task_id"]: r for r in read_jsonl(ev / "tasks.jsonl")}
++        judge = WT.Judge()
+     for name in names:
+-        res = breakdown(read_jsonl(ev / name / "results.jsonl"))
++        episodes = read_jsonl(ev / name / "results.jsonl")
++        res = breakdown(episodes)
+         out[name] = res
+         md += table(name, res)
++        if args.wrong_target:
++            wt = WT.analyse(tasks, episodes, judge)
++            res["wrong_target"] = wt["families"]
++            wt_rows += [dict(r, model=name) for r in wt["episodes"]]
++            md += WT.table(wt["families"])
+     Path(args.out + ".json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+     Path(args.out + ".md").write_text("\n".join(md) + "\n", encoding="utf-8")
++    if args.wrong_target:
++        Path(args.out + "_wrong_target.jsonl").write_text(
++            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in wt_rows), encoding="utf-8")
+     print(json.dumps({n: out[n]["by_family"]["all"] for n in out}, indent=1))
+ 
+ 
+diff --git a/eval/diagnostics/tests/test_wrong_target.py b/eval/diagnostics/tests/test_wrong_target.py
+new file mode 100644
+index 00000000..14e2fb9b
+--- /dev/null
++++ b/eval/diagnostics/tests/test_wrong_target.py
+@@ -0,0 +1,64 @@
++"""eval/diagnostics/wrong_target.py (the user's item 6b of 2026-11-07)."""
++import json
++import unittest
++from pathlib import Path
++
++from eval.diagnostics import wrong_target as WT
++
++EVAL = Path("/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/m3_g_s20261019/eval_test_v2_screened")
++
++
++def ep(task_type, success, start, gates):
++    return {"task_type": task_type, "success": success, "start": {"failed_gates": start},
++            "trajectory": [{"failed_gates": g} for g in gates]}
++
++
++class WrongTargetTest(unittest.TestCase):
++    def test_best_index_and_soft_success(self):
++        e = ep("absolute_positioning", False, ["distance", "visible"], [["distance", "inside_frame"], ["distance"], ["visible"]])
++        self.assertEqual(WT.best_index(e), 1)  # ties go to the earlier turn
++        self.assertTrue(WT.soft_success(e))
++        self.assertEqual(WT.best_index(ep("x", False, ["a"], [["a", "b"]])), -1)  # the start pose
++        self.assertFalse(WT.soft_success(ep("absolute_positioning", False, ["a", "b"], [["visible"]])))
++        self.assertFalse(WT.soft_success(ep("absolute_positioning", True, [], [["distance"]])))
++        self.assertFalse(WT.soft_success(ep("fov_inclusion", False, [], [["fully_in_frame"]])))  # no tolerance condition
++        self.assertTrue(WT.soft_success(ep("projective_relations", False, ["margin", "relation"], [["margin"]])))
++
++    def test_swap_item(self):
++        a = {"id": "a", "label": "lamp", "bbox_min": [0, 0, 0], "bbox_max": [1, 1, 1.5]}
++        b = {"id": "b", "label": "sofa", "bbox_min": [2, 0, 0], "bbox_max": [3, 1, 1.0]}
++        row = {"task_id": "t", "task_type": "occlusion_alignment", "target_object": {"objects": [a, b]},
++               "target_region": {"params": {"object_a_id": "a", "object_b_id": "b", "object_a_center": [0, 0, 0],
++                                            "object_b_center": [1, 1, 1], "occluded": "a", "occluder": "b"}}}
++        s, broken = WT.swap_item(row)
++        p = s["target_region"]["params"]
++        self.assertEqual((p["occluded"], p["occluder"], p["object_a_id"], p["object_a_center"]), ("b", "a", "b", [1, 1, 1]))
++        self.assertEqual([o["id"] for o in s["target_object"]["objects"]], ["b", "a"])
++        self.assertEqual(row["target_region"]["params"]["occluded"], "a")  # the original is unchanged
++        self.assertIsInstance(broken, list)
++        with self.assertRaises(ValueError):
++            WT.swap_item(dict(row, task_type="equidistance"))
++
++    def test_mcnemar_and_indicators(self):
++        m = WT.mcnemar({"a": True, "b": True, "c": False, "d": True}, {"a": False, "b": False, "c": False, "e": True})
++        self.assertEqual((m["tasks"], m["only_first"], m["only_second"]), (3, 2, 0))
++        self.assertAlmostEqual(m["p"], 0.5)
++        self.assertEqual(WT.mcnemar({}, {})["p"], 1.0)
++        res = {"episodes": [{"task_id": "s", "success": True},
++                            {"task_id": "w", "success": False, "collisions_match": True, "gates_match": True, "wrong_target": True},
++                            {"task_id": "u", "success": False, "collisions_match": False, "gates_match": True, "wrong_target": False}]}
++        self.assertEqual(WT.indicators(res), {"s": False, "w": True})
++
++    @unittest.skipUnless((EVAL / "m3gs1d_250" / "results.jsonl").exists() and WT.GS_ROOT.exists(), "cluster data")
++    def test_replay_matches_the_recorded_episode(self):
++        tasks = {r["task_id"]: r for r in WT.read_jsonl(EVAL / "tasks.jsonl")}
++        eps = [e for e in WT.read_jsonl(EVAL / "m3gs1d_250" / "results.jsonl")
++               if e["task_type"] == "occlusion_alignment" and not e["success"]][:2]
++        res = WT.analyse(tasks, eps)
++        for r in res["episodes"]:
++            self.assertTrue(r["collisions_match"] and r["gates_match"], json.dumps(r)[:400])
++        self.assertEqual(res["families"]["occlusion_alignment"]["judged"], 2)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/eval/diagnostics/wrong_target.py b/eval/diagnostics/wrong_target.py
+new file mode 100644
+index 00000000..ce0ce784
+--- /dev/null
++++ b/eval/diagnostics/wrong_target.py
+@@ -0,0 +1,284 @@
++"""Wrong-target rate and soft success (the user's instruction of 2026-11-07, item 6b; part of the failure breakdown).
++
++For each failed evaluation episode of a family whose two roles are asymmetric (projective_relations: "A appears to the
++<relation> of B"; occlusion_alignment: "A is hidden behind B"), the episode's end pose and its best pose (the pose with
++the fewest failed success conditions, as the evaluation recorded them; ties to the earlier, the start pose included)
++are judged again by the same task with A and B exchanged (the success region of the other reading of the sentence).
++Met at either pose: the episode counts as a wrong-target episode.  The other four families have one target
++(absolute_positioning, screen_occupancy) or symmetric roles (equidistance, fov_inclusion), so they have no
++wrong-target reading.
++
++The swap exchanges A and B in target_object and in the region's parameters (projective: object_a/b_center;
++occlusion: object_a/b_id and _center, occluded / occluder), as exps/matrix_v3/watch/goal_swap.py does, but keeps every
++pair: the generator's pair rules for a new occlusion task (new target not too flat, new occluder high enough and not
++see-through) decide which tasks may be generated, not how a pose is judged; an episode whose swapped pair breaks one
++is counted and flagged (``swap_rule``).
++
++Poses are replayed from the task's init_camera with the episode's recorded actions by the generator's kinematics
++(data_gen.interiorgs_v10.difficulty.apply_action_batch) and the runtime's collision rule (a colliding move leaves the
++pose unchanged and still uses one of the 12 primitive steps; FastGeometry.transitions_legal), and judged by the env's
++own function (target_visibility.score_with_visibility with the scene's face occluders).  Checks per episode: the
++replayed collisions per turn equal the recorded ones, and the original task's failed conditions at every replayed turn
++end equal the recorded ``failed_gates``; an episode failing a check is reported and left out of the rates.
++
++Soft success (every family): not a success, and at its best pose exactly one condition failed, the family's tolerance
++condition (TOLERANCE_GATE: the distance, equal-distance, occupancy band, the projective relation's pixel margin, the
++occlusion's hidden share); fov_inclusion has no tolerance condition (its soft success is its strict success).  Strict
++success is the evaluation's own ``success``.
++"""
++from __future__ import annotations
++
++import collections
++import contextlib
++import copy
++import io
++import json
++import math
++import os
++from pathlib import Path
++from typing import Any, Dict, Iterable, List, Optional, Tuple
++
++SWAP_FAMILIES = ("projective_relations", "occlusion_alignment")
++TOLERANCE_GATE = {"absolute_positioning": "distance", "equidistance": "equidistant", "screen_occupancy": "occupancy",
++                  "projective_relations": "margin", "occlusion_alignment": "target_hidden"}
++GS_ROOT = Path(os.environ.get("VAGEN_GS_ROOT", "/mnt/umm/users/yinbaiqiao/InteriorGS_ply"))
++MAX_PRIMITIVE_STEPS = 12
++
++
++def _limit_threads() -> None:
++    for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
++        os.environ.setdefault(k, "1")
++
++
++def swap_item(row: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
++    """The task with A and B exchanged, and the generator's pair rules the swapped pair breaks (occlusion only)."""
++    objs = row["target_object"]["objects"]
++    if row["task_type"] not in SWAP_FAMILIES or len(objs) != 2:
++        raise ValueError(f"{row.get('task_id')}: no swap for {row['task_type']} with {len(objs)} objects")
++    s = copy.deepcopy(row)
++    s["target_object"]["objects"] = [s["target_object"]["objects"][1], s["target_object"]["objects"][0]]
++    p = s["target_region"]["params"]
++    p["object_a_center"], p["object_b_center"] = p["object_b_center"], p["object_a_center"]
++    broken: List[str] = []
++    if row["task_type"] == "occlusion_alignment":
++        from data_gen.interiorgs_v10.families import occlusion_alignment as OA
++
++        p["object_a_id"], p["object_b_id"] = p["object_b_id"], p["object_a_id"]
++        p["occluded"], p["occluder"] = p["occluder"], p["occluded"]
++        a, b = s["target_object"]["objects"]
++        if a["bbox_max"][2] - a["bbox_min"][2] < OA.MIN_TARGET_HEIGHT_M:
++            broken.append("new_target_too_flat")
++        if b["bbox_max"][2] - b["bbox_min"][2] < OA.MIN_OCCLUDER_HEIGHT_M:
++            broken.append("new_occluder_too_low")
++        if OA._non_occluding(b["label"]):
++            broken.append("new_occluder_see_through")
++    s["task_id"] = row["task_id"] + "_swap"
++    return s, broken
++
++
++def failed_gates(metric: Optional[Dict[str, Any]]) -> Optional[List[str]]:
++    if not metric:
++        return None
++    return sorted(k for k, v in (metric.get("gates") or {}).items() if not v)
++
++
++class Judge:
++    """Scenes, their geometry and face occluders, loaded once each."""
++
++    def __init__(self) -> None:
++        self.scenes: Dict[str, Any] = {}
++
++    def scene(self, sid: str) -> Tuple[Any, Any, Any]:
++        if sid not in self.scenes:
++            from data_gen.interiorgs_v10.difficulty import FastGeometry
++            from data_gen.interiorgs_v10.occlusion import face_occluders_for
++            from data_gen.interiorgs_v10.scene import load_scene
++
++            with contextlib.redirect_stdout(io.StringIO()):
++                sc = load_scene(GS_ROOT / sid, sid)
++            self.scenes[sid] = (sc, FastGeometry.for_scene(sc), face_occluders_for(sc))
++        return self.scenes[sid]
++
++    def metric(self, item: Dict[str, Any], c2w: Any, occluders: Any) -> Dict[str, Any]:
++        import numpy as np
++
++        from vagen.envs.active_spatial.target_visibility import score_with_visibility
++
++        return score_with_visibility(item, np.asarray(c2w, float).reshape(4, 4), occluders)
++
++    def replay(self, row: Dict[str, Any], trajectory: List[Dict[str, Any]], geom: Any) -> Tuple[List[Any], List[int]]:
++        """The pose after each turn and each turn's collisions, from init_camera and the recorded actions."""
++        import numpy as np
++
++        from data_gen.interiorgs_v10.difficulty import _split, apply_action_batch, to_c2w
++
++        P, R = _split(np.asarray(row["init_camera"]["extrinsics"], float))
++        left, poses, cols = MAX_PRIMITIVE_STEPS, [], []
++        for t in trajectory:
++            n = 0
++            for a in t.get("actions") or []:
++                if left <= 0:
++                    break
++                Pn, Rn = apply_action_batch(P, R, a)
++                left -= 1
++                if a.startswith("move_") and not bool(geom.transitions_legal(P, Pn, R)[0]):
++                    n += 1
++                    continue
++                P, R = Pn, Rn
++            poses.append(to_c2w(P, R)[0])
++            cols.append(n)
++        return poses, cols
++
++
++def soft_success(episode: Dict[str, Any]) -> bool:
++    """Not a success, and at the best pose only the family's tolerance condition failed."""
++    if episode.get("success"):
++        return False
++    gate = TOLERANCE_GATE.get(str(episode.get("task_type")))
++    states = [(episode.get("start") or {}).get("failed_gates")] + [t.get("failed_gates") for t in episode.get("trajectory") or []]
++    states = [s for s in states if s is not None]
++    if not states or gate is None:
++        return False
++    best = min(states, key=len)
++    return best == [gate]
++
++
++def best_index(episode: Dict[str, Any]) -> int:
++    """-1 for the start pose, else the turn whose end pose has the fewest failed conditions (ties to the earlier)."""
++    best, k = (episode.get("start") or {}).get("failed_gates"), -1
++    for i, t in enumerate(episode.get("trajectory") or []):
++        g = t.get("failed_gates")
++        if g is not None and (best is None or len(g) < len(best)):
++            best, k = g, i
++    return k
++
++
++def judge_episode(judge: Judge, row: Dict[str, Any], episode: Dict[str, Any]) -> Dict[str, Any]:
++    """One failed episode of a swap family: the checks, and the swapped task at the end and best poses."""
++    sc, geom, occ = judge.scene(row["scene_id"])
++    traj = episode.get("trajectory") or []
++    poses, cols = judge.replay(row, traj, geom)
++    rec_cols = [int(t.get("collisions") or 0) for t in traj]
++    gates = [failed_gates(judge.metric(row, c, occ)) for c in poses]
++    rec_gates = [t.get("failed_gates") for t in traj]
++    out: Dict[str, Any] = {"task_id": row["task_id"], "family": row["task_type"],
++                           "collisions_match": cols == rec_cols, "gates_match": gates == rec_gates}
++    if not (out["collisions_match"] and out["gates_match"]):
++        out["mismatch"] = {"turns": [i for i in range(len(traj)) if cols[i] != rec_cols[i] or gates[i] != rec_gates[i]][:5]}
++    swapped, broken = swap_item(row)
++    k = best_index(episode)
++    init = row["init_camera"]["extrinsics"]
++    end_pose = poses[-1] if poses else init
++    best_pose = init if k < 0 else poses[k]
++    m_end, m_best = judge.metric(swapped, end_pose, occ), judge.metric(swapped, best_pose, occ)
++    out.update(best_turn=k, swap_rule=broken,
++               swap_end=bool(m_end.get("success")), swap_best=bool(m_best.get("success")),
++               swap_end_failed=failed_gates(m_end), swap_best_failed=failed_gates(m_best))
++    out["wrong_target"] = out["swap_end"] or out["swap_best"]
++    out["swap_soft"] = (not out["wrong_target"]) and (failed_gates(m_best) == [TOLERANCE_GATE[row["task_type"]]]
++                                                      or failed_gates(m_end) == [TOLERANCE_GATE[row["task_type"]]])
++    return out
++
++
++def read_jsonl(path: Path) -> List[Dict[str, Any]]:
++    with open(path, encoding="utf-8") as f:
++        return [json.loads(l) for l in f if l.strip()]
++
++
++def analyse(tasks: Dict[str, Dict[str, Any]], episodes: Iterable[Dict[str, Any]], judge: Optional[Judge] = None
++            ) -> Dict[str, Any]:
++    """Per family: episodes, strict and soft successes, and for the swap families the failed episodes judged with the
++    roles exchanged (rates over the failed episodes that passed both checks)."""
++    _limit_threads()
++    judge = judge or Judge()
++    fam: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
++    per: List[Dict[str, Any]] = []
++    for e in episodes:
++        if "error" in e:
++            continue
++        f = str(e.get("task_type"))
++        for key in (f, "all"):
++            fam[key]["episodes"] += 1
++            fam[key]["strict"] += int(bool(e.get("success")))
++            fam[key]["soft_only"] += int(soft_success(e))
++        if f not in SWAP_FAMILIES:
++            continue
++        rec: Dict[str, Any] = {"task_id": e["task_id"], "family": f, "success": bool(e.get("success"))}
++        if not e.get("success"):
++            try:
++                rec.update(judge_episode(judge, tasks[e["task_id"]], e))
++            except Exception as exc:  # recorded; the rest goes on
++                rec["error"] = f"{type(exc).__name__}: {exc}"
++        per.append(rec)
++        for key in (f, "swap_families"):
++            c = fam[key]
++            c["episodes"] += int(key == "swap_families")
++            c["strict"] += int(key == "swap_families" and rec["success"])
++            if rec["success"]:
++                continue
++            c["failed"] += 1
++            if "error" in rec or not (rec.get("collisions_match") and rec.get("gates_match")):
++                c["unchecked"] += 1
++                continue
++            c["judged"] += 1
++            c["wrong_target"] += int(rec["wrong_target"])
++            c["wrong_end"] += int(rec["swap_end"])
++            c["wrong_best"] += int(rec["swap_best"])
++            c["swap_soft"] += int(rec["swap_soft"])
++            c["wrong_with_rule_broken"] += int(rec["wrong_target"] and bool(rec.get("swap_rule")))
++    summary = {}
++    for k, c in fam.items():
++        d = dict(c)
++        n = d.get("episodes", 0)
++        d["strict_rate"] = d.get("strict", 0) / n if n else None
++        d["soft_rate"] = (d.get("strict", 0) + d.get("soft_only", 0)) / n if n and k != "swap_families" else None
++        if d.get("judged"):
++            d["wrong_target_rate"] = d["wrong_target"] / d["judged"]
++        summary[k] = d
++    return {"families": summary, "episodes": per}
++
++
++FAMILY_ORDER = ("projective_relations", "absolute_positioning", "screen_occupancy", "equidistance",
++                "occlusion_alignment", "fov_inclusion")
++
++
++def _pct(x: Optional[float]) -> str:
++    return "–" if x is None else f"{100.0 * x:.1f}%"
++
++
++def table(families: Dict[str, Any]) -> List[str]:
++    """The markdown lines of one model's soft success and wrong-target rate."""
++    lines = ["严格成功 / 软成功（软：最好状态只差该族的容差那一道门）；错选目标：失败局的终点或最好状态满足 A、B 互换后的任务。", "",
++             "| 任务族 | 题数 | 严格成功 | 软成功 | 失败 | 判过 | 错选目标 | 错选率 |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
++    for f in [f for f in FAMILY_ORDER if f in families] + ["all", "swap_families"]:
++        d = families.get(f)
++        if not d:
++            continue
++        name = {"all": "合计", "swap_families": "两个可互换的族"}.get(f, f)
++        swap = f in SWAP_FAMILIES or f == "swap_families"
++        lines.append(f"| {name} | {d.get('episodes', 0)} | {_pct(d.get('strict_rate'))} | {_pct(d.get('soft_rate'))} | "
++                     + (f"{d.get('failed', 0)} | {d.get('judged', 0)} | {d.get('wrong_target', 0)} | "
++                        f"{_pct(d.get('wrong_target_rate'))} |" if swap else "– | – | – | – |"))
++    return lines + [""]
++
++
++def mcnemar(a: Dict[str, bool], b: Dict[str, bool]) -> Dict[str, Any]:
++    """Exact McNemar (two-sided binomial on the discordant tasks) of two runs' wrong-target indicators over the tasks
++    both have."""
++    keys = sorted(set(a) & set(b))
++    only_a = sum(1 for k in keys if a[k] and not b[k])
++    only_b = sum(1 for k in keys if b[k] and not a[k])
++    n = only_a + only_b
++    p = 1.0 if n == 0 else min(1.0, 2 * sum(math.comb(n, i) for i in range(0, min(only_a, only_b) + 1)) / 2 ** n)
++    return {"tasks": len(keys), "only_first": only_a, "only_second": only_b, "p": p}
++
++
++def indicators(result: Dict[str, Any]) -> Dict[str, bool]:
++    """task_id -> wrong-target episode (a success counts False; an unchecked failure is left out)."""
++    out = {}
++    for r in result["episodes"]:
++        if r["success"]:
++            out[r["task_id"]] = False
++        elif "error" not in r and r.get("collisions_match") and r.get("gates_match"):
++            out[r["task_id"]] = bool(r["wrong_target"])
++    return out
+diff --git a/tests/active_spatial/test_oracle_marker.py b/tests/active_spatial/test_oracle_marker.py
+new file mode 100644
+index 00000000..ab46c873
+--- /dev/null
++++ b/tests/active_spatial/test_oracle_marker.py
+@@ -0,0 +1,36 @@
++"""vagen/envs/active_spatial/oracle_marker.py (the user's item 6 of 2026-11-07)."""
++import argparse
++from unittest import mock
++
++from PIL import Image
++
++from vagen.envs.active_spatial import oracle_marker as OM
++
++
++def test_draw_keeps_the_original_and_uses_the_fixed_colours():
++    img = Image.new("RGB", (256, 256), (128, 128, 128))
++    out = OM.draw(img, [("A", [40, 60, 120, 200]), ("B", [150, 30, 240, 100])])
++    assert img.getpixel((40, 130)) == (128, 128, 128)  # the input is not drawn on
++    assert out.getpixel((40, 130)) == tuple(OM.STYLE["colors"]["A"])  # A's left edge
++    assert out.getpixel((239, 70)) == tuple(OM.STYLE["colors"]["B"])  # B's right edge
++    assert out.getpixel((80, 130)) == (128, 128, 128)  # inside A: only the outline
++    assert OM.draw(img, []).tobytes() == img.tobytes()
++
++
++def test_boxes_scale_to_the_image():
++    img = Image.new("RGB", (512, 512), (0, 0, 0))
++    out = OM.draw(img, [("A", [40, 60, 120, 200])])
++    assert out.getpixel((80, 260)) == tuple(OM.STYLE["colors"]["A"])  # x 40 -> 80 on a 512 image
++
++
++def test_boxes_only_clearly_visible_targets():
++    rows = [{"letter": "A", "in_view": True, "box": [1, 2, 3, 4]}, {"letter": "B", "in_view": False, "box": None}]
++    with mock.patch("vagen.envs.active_spatial.pointing.truth", return_value=rows):
++        assert OM.boxes({}, None, None) == [("A", [1, 2, 3, 4])]
++
++
++def test_evaluation_switch():
++    from data_gen.interiorgs_v10 import evaluation as EV
++
++    assert EV.switch_overrides(argparse.Namespace(oracle_marker=True))["oracle_marker"] is True
++    assert "oracle_marker" not in EV.switch_overrides(argparse.Namespace())
+diff --git a/vagen/envs/active_spatial/env.py b/vagen/envs/active_spatial/env.py
+index 3280c38d..e34d5613 100644
+--- a/vagen/envs/active_spatial/env.py
++++ b/vagen/envs/active_spatial/env.py
+@@ -1509,6 +1509,17 @@ class ActiveSpatialEnv(BaseEnv):
+             metric = {**metric, **opt, "shaping_score": opt["optimal_progress"], "progress_version": "optimal"}
+         return metric
+ 
++    def _oracle_marked(self, images: List[Any]) -> List[Any]:
++        """The user's item 6 of 2026-11-07: with ``oracle_marker`` the task's targets' truth boxes are drawn into the
++        current frame (a copy; oracle_marker.py); otherwise the images unchanged."""
++        if not self.config.get("oracle_marker", False) or not images or not isinstance(self.current_item, dict):
++            return images
++        if not uses_canonical_backend(self.current_item):
++            raise ValueError("oracle_marker needs a canonical task row (the truth boxes come from its objects)")
++        from .oracle_marker import mark
++
++        return [mark(images[0], self.current_item, self.view_engine.get_pose(), self._visibility_occluders())] + list(images[1:])
++
+     def _pointing_on(self) -> bool:
+         """Group G of matrix v3: the env judges the answers' targets segment (a targets format example, or a pointing
+         reward)."""
+@@ -2178,6 +2189,7 @@ class ActiveSpatialEnv(BaseEnv):
+             images.append(_PILImage.new("RGB", (w, h), color=(128, 128, 128)))
+ 
+         self._record_image_quality(images[0] if images else None)
++        images = self._oracle_marked(images)  # the user's item 6 of 2026-11-07 (vagen/envs/active_spatial/oracle_marker.py)
+ 
+         # Build multi-modal data
+         multi_modal_data = {
+@@ -2279,6 +2291,7 @@ class ActiveSpatialEnv(BaseEnv):
+         images = []
+         if image is not None:
+             images.append(image)
++        images = self._oracle_marked(images)  # the user's item 6 of 2026-11-07 (vagen/envs/active_spatial/oracle_marker.py)
+         
+         # Build multi-modal data
+         multi_modal_data = {
+diff --git a/vagen/envs/active_spatial/env_config.py b/vagen/envs/active_spatial/env_config.py
+index f129612a..8f0038e3 100644
+--- a/vagen/envs/active_spatial/env_config.py
++++ b/vagen/envs/active_spatial/env_config.py
+@@ -213,6 +213,8 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
+     # the env judges the segment and logs it (turn_metrics pointing_score, pointing_applied, targets_ok / _old / _bad)
+     # at any weight.
+     pointing_reward: float = 0.0
++    # the user's item 6 of 2026-11-07: the targets' truth boxes drawn into the frame (oracle_marker.py); default off
++    oracle_marker: bool = False
+     max_consecutive_invalid_actions: int = 3  # Terminate episode after this many consecutive invalid actions
+     premature_done_penalty: float = -0.3  # Penalty when 'done' is called without reaching the target
+     
+diff --git a/vagen/envs/active_spatial/oracle_marker.py b/vagen/envs/active_spatial/oracle_marker.py
+new file mode 100644
+index 00000000..6d9fd3ab
+--- /dev/null
++++ b/vagen/envs/active_spatial/oracle_marker.py
+@@ -0,0 +1,51 @@
++"""Oracle marker (the user's instruction of 2026-11-07, item 6): the task's targets' truth boxes drawn into the frame
++the model sees.  The env config switch ``oracle_marker`` (default off) turns it on for evaluation
++(``evaluation run --oracle-marker``, item 6a's check and G-oracle's oracle mode) and for RL (rl-config
++``--oracle-marker``, item 6c); the SFT frames of G-oracle are drawn by the same function.
++
++The boxes are pointing.truth's, the truth of group G's labels and pointing reward: per object of the task text (A, B
++in the text's order), the projected 3D box clipped to the frame, only when the object is clearly visible from the pose
++(the success metrics' face rule with the scene's occluders); an object not clearly visible gets no box.  The style is
++fixed (STYLE) and drawn by P0's data_gen.interiorgs_qa.draw.draw_boxes: A red, B blue, a 2 px outline on the
++256 x 256 frame, the letter on a filled tag above the box's top-left corner.  The boxes are drawn on a copy after the
++env's image-quality check, so the "nearly uniform view" stop reads the unmarked frame; success and rewards never read
++the image."""
++from __future__ import annotations
++
++from typing import Any, Dict, List, Sequence, Tuple
++
++STYLE: Dict[str, Any] = {
++    "boxes": "vagen.envs.active_spatial.pointing.truth: per object of the task text, the projected 3D box clipped to "
++             "the frame, only when the object is clearly visible (face rule with the scene's occluders)",
++    "colors": {"A": [230, 30, 40], "B": [30, 110, 230]},
++    "outline_px": "max(2, frame width // 128): 2 on the 256 x 256 frame",
++    "label": "the slot letter, white DejaVu Sans Bold max(18, width // 22) px on a tag of the box's colour above its "
++             "top-left corner (else inside or below it)",
++    "draw": "data_gen.interiorgs_qa.draw.draw_boxes",
++    "frame": [256, 256],
++}
++
++
++def boxes(item: Dict[str, Any], c2w: Any, occ: Any) -> List[Tuple[str, List[float]]]:
++    """(letter, [x1, y1, x2, y2] in the 256 x 256 frame's pixels) of the targets clearly visible from ``c2w``."""
++    from .pointing import truth
++
++    return [(r["letter"], list(r["box"])) for r in truth(item, c2w, occ) if r.get("box")]
++
++
++def draw(image: Any, marks: Sequence[Tuple[str, Sequence[float]]]) -> Any:
++    """A copy of ``image`` with ``marks`` drawn in STYLE (boxes in 256-frame pixels, scaled to the image)."""
++    from data_gen.interiorgs_qa.draw import draw_boxes
++
++    from .pointing import FRAME_SIZE
++
++    out = image.copy().convert("RGB")
++    if marks:
++        k = out.size[0] / float(FRAME_SIZE[0])
++        draw_boxes(out, [tuple(b) for _, b in marks], [l for l, _ in marks],
++                   colors=[tuple(STYLE["colors"][l]) for l, _ in marks], k=k)
++    return out
++
++
++def mark(image: Any, item: Dict[str, Any], c2w: Any, occ: Any) -> Any:
++    return draw(image, boxes(item, c2w, occ))

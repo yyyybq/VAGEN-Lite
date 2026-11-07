@@ -399,3 +399,32 @@ python -m data_gen.sft_mixture.matrix_plan --group D --chain-patch --commit <打
 - **`matrix_plan`**：组配置里有 `rl.entropy_key` 时并进链的 `guards`；`G.yaml` 设 `actor/entropy_action`，状态改成 rl。别的组的计划一字不变（测试核对）。
 - **测试**：动作段起点（拼出来的 token 和真的 Qwen3 分词器各一个）、按段聚合、停止线读指定的键、rl-config 打开开关、G 的计划带 `entropy_key` 而 D 的不带。
 - **补丁 0003 第三版**：第二版的 14 个文件加 `vagen/segment_entropy.py` 和 `tests/active_spatial/test_segment_entropy.py`，共 16 个（加 1,101 行、减 18 行），仍以 `cb42874a` 为基准，在它的干净导出上 `git apply --check` 通过；`matrix_plan.py` 和 `G.yaml` 随 matrix-v3 合并，不在补丁里。
+
+## 9. 指认作中间表示（2026-11-07，用户补充指令改过的第 6 项）
+
+三步：6a 画框预检（评测期）、6b 错选目标率（CPU，进失败拆解的标准输出）、6c G-oracle / G′ 的数据准备（不花卡，训练等用户批）。代码都在 matrix-v3，开关默认关，别的组的提示、奖励、指标、计划都不变（测试核对）。
+
+### 9.1 错选目标率和软成功（matrix-v3 `50ca6cc9`）
+
+- `eval/diagnostics/wrong_target.py`；`failure_breakdown --wrong-target` 在失败拆解里加每族的严格 / 软成功和两个可互换族的错选目标率，逐局判定写进 `<out>_wrong_target.jsonl`。
+- 判法：失败局按记录的动作从 `init_camera` 重放（`difficulty.apply_action_batch`，碰撞的移动不动位置、照样占一步，`FastGeometry.transitions_legal`），终点和最好状态用 A、B 互换后的任务重判（环境的 `score_with_visibility`，场景的面遮挡物）；重放的碰撞数或每回合失败的门和记录不一致的局单列、不算。
+- 互换同 `watch/goal_swap.py`，但不按生成器的配对规则丢题（那些规则决定能不能出题，不决定怎么判位置）；破了规则的局另计。
+- `train_chain`：计划 `diagnostics.wrong_target` 为真时给失败拆解加 `--wrong-target`；`matrix_plan` 给矩阵的链都设上。
+
+### 9.2 画框（matrix-v3 `35253da4`）
+
+- `vagen/envs/active_spatial/oracle_marker.py`；环境开关 `oracle_marker`（`env_config` 默认 False）：在画质检查之后，把任务目标的真值框画进模型看到的画面（复制一份画）。成功判定和奖励不读图。
+- 真值框 = `pointing.truth`（G 的标签和指认奖励的同一套），只画看得清的目标；画法固定（`STYLE`）：P0 的 `draw.draw_boxes`，A 红 (230,30,40)、B 蓝 (30,110,230)，线宽 max(2, 宽 // 128)，字母标签。
+- 评测 `evaluation run --oracle-marker`。
+
+### 9.3 G-oracle / G′（matrix-v3 `4bb6b2bc`、`7ad2ad6a`）
+
+- `data_gen/sft_mixture/marker_convert.py`：P2m = D 的 P2q 每一步换成画框的画面，文字逐字不变。`build.py` 认 P2m 池。
+- `data_gen/interiorgs_v10/self_marker.py` + `evaluation run --self-marker`（self 模式）：每步先用 Pg 原题让同一个模型框出各目标（一个用户回合、不带系统提示，`VllmPolicy.ask`），读出的框按画框的画法画上去再问动作；每步记回答、框、真值框、IoU，每局汇总（`self_marker`）。和 `--oracle-marker` 不能同时用。
+- rl-config `--oracle-marker`（环境配置 `oracle_marker: true`，报告记 `oracle_marker`）；`train_chain` 从计划 `rl.oracle_marker` 传；`matrix_plan` 从组配置的 `rl.oracle_marker`、`eval.options`、`eval.variants` 传（G-oracle：标准评测 oracle 模式，self 模式是评测变体）。
+- 配置 `configs/matrix_v3/Go.yaml`（状态 prep）、`mixture_matrix_v3_qwen3_go_20261107.yaml`；`V3_CELLS` 加 `Go`。`G.yaml` 的名字注明"用户 2026-11-07 起叫 G-text"。
+### 9.4 补丁 0004（`patches/matrix_v3_cb42874a/0004-oracle-marker-wrong-target.patch`）
+
+- 14 个文件（加 702 行、减 8 行）：9.1 和 9.2 的全部、9.3 里评测（`self_marker.py`、`evaluation.py`）、rl-config、训练链的改动和各自的测试；`matrix_plan.py`、`build.py`、`marker_convert.py` 和组配置随 matrix-v3 合并，不在补丁里（同 0003 的做法）。
+- 基准仍是 `cb42874a`，顺序 0001、0002、0003、0004；在 `cb42874a` 的干净导出上打完 0003 再 `git apply --check` 0004 通过。
+- `self_marker.py` 用 `data_gen/transition_qa/pointing_qa.py` 的题面（在 matrix-v3，不在补丁里），所以 self 模式要等 matrix-v3 合并。
