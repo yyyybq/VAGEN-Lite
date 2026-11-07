@@ -344,6 +344,12 @@
 - 单列（乙，可不删）：第 300 次的续训状态（FSDP 分片和 data.pt），105.2 GB；删了以后第 300 次只能评测，不能续训。
 - 执行：`nice -n 19 bash /mnt/umm/users/yinbaiqiao/reward_runs/deletions/delete_p3_run.sh rw_p3d_s2g rw_s2g /mnt/umm/users/yinbaiqiao/reward_runs/deletions/20261107_p3d_s2g_list.tsv weights|resume|all`。先查链已结束、留下的两个有权重、每行都在这个运行的检查点里，才删；记到同名 `.done.tsv`。脚本在 /tmp 的假目录上试过。
 
+**等用户批（11-07 05:0x）：rw_s3g 的删除清单** `reward_runs/deletions/20261107_p3d_s3g_list.tsv`（链评完，20 个任务都已删）。
+- 留：第 300 次的权重（验证集最好，210 / 413，也是最后一个）。
+- 要删（甲）：第 50、100、150、200、250 次的权重，5 × 35.1 = 175.4 GB。
+- 单列（乙，可不删）：第 300 次的续训状态，105.2 GB。
+- 执行同上：`delete_p3_run.sh rw_p3d_s3g rw_s3g …/20261107_p3d_s3g_list.tsv weights|resume|all`。
+
 6. **（11-07 04:2x 新增）rw_pen_s0 还跑不跑。** D 第一批三个都跑满 300 次、都不走样（`analysis/24_p3d/drift_first_wave.md`）。按预登记的定义，S0 三个种子只有 rw_s0 一个走样，V4 0 个；"S0 至少 2 个走样"不成立，所以"密集奖励防走样"的主张不成立。rw_pen_s0 只在前两条都成立时才影响结论，现在改变不了判定。
    - 甲（推荐）：不跑，省约 40–51 卡时和约 0.3 TB（配额表已读 19 TB）。D 按预登记收口：报"主张不成立"，各个运行照实报。
    - 乙：照原计划跑，只作描述："加大读不出扣分以后，种子 20261019 的 S0 还走不走样"。要等删除清单批了、配额读数回到 19 以下才交。
