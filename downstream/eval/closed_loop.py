@@ -17,6 +17,10 @@ websocket client and first makes RoboCasa's counter-region order process-indepen
 with --no-stable-regions).  Writes OUT/episodes.jsonl (one line per episode, including a fingerprint of the initial
 state and its joint positions), OUT/summary.json, and per episode an example strip OUT/frames/<task>_s<seed>.jpg
 (8 evenly spaced 128 px frames of the left agent-view camera; off with --no-frames).
+Render fix (2026-11-07, RENDER_CAUSE_20261107; the model line agreed): after the first reset each episode frees the
+stale offscreen render contexts and rebuilds the live one's buffers (downstream/n/n_env.fresh_render_context), then
+takes the first observation again, since the reset's own frame was drawn before the fix (refresh_render).  On by
+default; CLOSED_LOOP_RENDER_FIX=0 leaves the episode as before.  Each row records "render_fix".
 """
 from __future__ import annotations
 
@@ -371,6 +375,9 @@ def _run_episode(spec: dict) -> dict:
             probe.arm()
         env = gym.make(f"robocasa/{spec['task']}", enable_render=True, split=spec["split"], seed=spec["seed"])
         obs, _ = env.reset(seed=spec["seed"])
+        out["render_fix"] = RENDER_FIX
+        if RENDER_FIX:
+            obs = refresh_render(env)
         out["reset_seconds"] = round(time.monotonic() - started, 2)
         if probe:
             probe.log("reset", 0, out["reset_seconds"], env)
@@ -459,6 +466,21 @@ STALL_SECONDS = float(os.environ.get("CLOSED_LOOP_STALL_SECONDS", "600"))  # no 
 
 CLOSE_SECONDS = float(os.environ.get("CLOSED_LOOP_CLOSE_SECONDS", "120"))  # an env.close() after the episode's
 # row was saved (_save_before_close) that takes longer than this is killed and the saved row kept (2026-10-31)
+
+RENDER_FIX = os.environ.get("CLOSED_LOOP_RENDER_FIX", "1") != "0"  # 2026-11-07, see the module text
+
+
+def refresh_render(env):
+    """The render fix for a RoboCasa gym env after its reset: robosuite's stale offscreen contexts (RoboCasa resets
+    hard and leaves the old MjSim in a reference cycle) are collected now, before any frame of the episode, and the live
+    context gets fresh GL objects (n_env.fresh_render_context); the first observation is then taken again from the
+    simulator, because the one reset returned was drawn before.  Returns that observation."""
+    from downstream.n.n_env import fresh_render_context
+
+    inner = env.unwrapped  # robocasa.wrappers.gym_wrapper.RoboCasaGymEnv
+    fresh_render_context(inner.env.sim)
+    return inner.get_observation(inner.env._get_observations(force_update=True))
+
 
 PROBE_DIR = os.environ.get("CLOSED_LOOP_PROBE_DIR")  # diagnostics of a hanging episode (2026-10-30), default off
 PROBE_DUMP_SECONDS = float(os.environ.get("CLOSED_LOOP_STALL_DUMP", "120"))
