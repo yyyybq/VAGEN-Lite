@@ -60,6 +60,17 @@ def test_a_plans(tmp_path):
     assert diag["eval_only"] is True and easi["eval_only"] is True
 
 
+def test_a2_plans(tmp_path):
+    root = _root(tmp_path)
+    plans = mp.a2_plans(root)
+    diag, easi = plans["rw_p3a2_diag"], plans["rw_p3a2_easi"]
+    assert set(diag["eval"]["models"]) == set(mp.A2_CKPTS) and mp.C0_NAME not in diag["eval"]["models"]
+    assert set(easi["eval"]["models"]) == set(mp.A2_EASI) and "rw_s2s0_300" not in easi["eval"]["models"]
+    assert diag["tr"].endswith("rw_p3a2_diag") and easi["tr"].endswith("rw_p3a2_easi")
+    assert "downstream_qa" in diag["diagnostics"] and easi["qa_eval"]["easi"] == "easi_8"
+    assert all(m["model"].endswith("/actor/huggingface") for m in diag["eval"]["models"].values())
+
+
 def test_write_refuses_and_scr59(tmp_path):
     root = _root(tmp_path)
     (root / "eval_sets/eval_test_v2").mkdir(parents=True)

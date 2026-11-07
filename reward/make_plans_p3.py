@@ -14,6 +14,7 @@ rw_mix_qa_ctl), "easi" = EASI-8 for the six validation-best checkpoints (copied 
 
     python -m reward.make_plans_p3 d --root REWARD_RUNS --arm rw_s2g [--arm ...]
     python -m reward.make_plans_p3 a --root REWARD_RUNS --c0 C0_E8_CHECKPOINT
+    python -m reward.make_plans_p3 a2 --root REWARD_RUNS    # A's extension (PREREG_P3_A2): D's kept checkpoints
     python -m reward.make_plans_p3 scr59 --root REWARD_RUNS --screened SCREENED_TEST_DIR
 
 Each plan is written to ROOT/runs/<chain>/plan_template.json (refused if the file exists).  scr59 writes
@@ -117,6 +118,31 @@ def a_plans(root: Path, c0: str) -> Dict[str, Dict[str, Any]]:
     return {"rw_p3a_diag": diag, "rw_p3a_easi": e}
 
 
+# the extension of A (docs/reward/PREREG_P3_A2.md, the user's 2026-11-07): D's kept checkpoints
+A2_CKPTS = {
+    "rw_s2g_150": "rw_p3d_s2g/rl_run_rw_s2g/checkpoints/global_step_150",
+    "rw_s2g_300": "rw_p3d_s2g/rl_run_rw_s2g/checkpoints/global_step_300",
+    "rw_s3s0_300": "rw_p3d_s3s0/rl_run_rw_s3s0/checkpoints/global_step_300",
+    "rw_s3g_300": "rw_p3d_s3g/rl_run_rw_s3g/checkpoints/global_step_300",
+}
+A2_EASI = ("rw_s2g_150", "rw_s3s0_300", "rw_s3g_300")
+
+
+def a2_plans(root: Path) -> Dict[str, Dict[str, Any]]:
+    """A's two plans with D's kept checkpoints (no C0, no B checkpoints; rw_s2s0_300 is reused from A)."""
+    base = a_plans(root, "/unused")
+    runs = root / "runs"
+    models = {n: {"model": str(runs / rel / "actor" / "huggingface"), "options": []} for n, rel in A2_CKPTS.items()}
+    diag, easi = base["rw_p3a_diag"], base["rw_p3a_easi"]
+    diag.update(tr=str(runs / "rw_p3a2_diag"), eval={"models": models},
+                note="Reward line, phase 3, the extension of experiment A (docs/reward/PREREG_P3_A2.md): X0 / G0 / P1 of "
+                     "experiment D's four kept checkpoints, the same reward-mix chain and code as rw_p3a_diag.")
+    easi.update(tr=str(runs / "rw_p3a2_easi"), eval={"models": {n: models[n] for n in A2_EASI}},
+                note="Reward line, phase 3, the extension of experiment A (docs/reward/PREREG_P3_A2.md): EASI-8 of D's "
+                     "three validation-best checkpoints (rw_s2s0_300 reused from rw_p3a_easi), 27 single-card jobs.")
+    return {"rw_p3a2_diag": diag, "rw_p3a2_easi": easi}
+
+
 def scr59(root: Path, screened: Path) -> Dict[str, Any]:
     orig = root / "eval_sets" / "eval_test_v2" / "tasks.jsonl"
     with open(orig) as f:
@@ -155,6 +181,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     a = sub.add_parser("a")
     a.add_argument("--root", required=True)
     a.add_argument("--c0", required=True)
+    a2 = sub.add_parser("a2")
+    a2.add_argument("--root", required=True)
     s = sub.add_parser("scr59")
     s.add_argument("--root", required=True)
     s.add_argument("--screened", required=True)
@@ -166,6 +194,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             print(_write_new(Path(p["tr"]) / "plan_template.json", p))
     elif args.cmd == "a":
         for name, p in a_plans(root, args.c0).items():
+            print(_write_new(Path(p["tr"]) / "plan_template.json", p))
+    elif args.cmd == "a2":
+        for name, p in a2_plans(root).items():
             print(_write_new(Path(p["tr"]) / "plan_template.json", p))
     else:
         print(json.dumps(scr59(root, Path(args.screened)), indent=1))
