@@ -2232,3 +2232,14 @@ D − C、D − C0 的探针比较改由 `eval/diagnostics/qa_probe.py` 的 `com
 - **预登记**：第五版草案 `PREREG_Go_vs_D_draft.md`（第四版已经有结果，不改；理由和要用户定的事写在草案开头和第 9 节）。
 - **代码**：matrix-v3 `4bb6b2bc`（转换）、`7ad2ad6a`（self 模式、rl-config 开关、配置）；补丁 0004（CHANGES 9.4）。
 - 测试：全套 692 个通过、5 个跳过；1 个失败还是 `test_starvla_transfer`（这个工作树没有 `third_party/starVLA`）。
+
+### 12.68 11-07 晚：用户批了 Go（G-oracle）的 SFT，开跑
+
+- **配方复制**：`sft_mixture_go_20261107/Go` → `exps/matrix_v3/sft/Go`，数据文件逐字节相同，`train.yaml` 只改 `dataset_dir`、`output_dir`（记录 `sft/copied_Go_20261107.json`）。
+- **SFT 链**（`m3_cells.py start-sft Go`，提交 `7ad2ad6a`）：`exps/matrix_v3/m3_go_sft`，20:20 UTC 起，sco `pt-50c6dpiw`（8 卡）。每个 epoch 的评测按 oracle 模式（`--oracle-marker --format-example action_names`）；链自己挑出的 epoch 另跑一次 self 模式（评测变体 `_self`）。
+- **cells 驱动**（`watch/m3_cells.py`，备份 `m3_cells.py.bak_20261107`）：`NO_AUTO_RL` 加 Go；Go 的采样验收也画框（`ACCEPT_EXTRA`）。Go 只有动作段，验收的熵按全部回答算（同 D）。验收完按 oracle 模式的 val 挑 epoch，停在 `picked`，不起 RL。驱动 pid 1061947（`watch/cells_watch_go.out`）。
+- **self 模式的 GPU 冒烟**：G 的 e9（练过 Pg 的框题）在 6 道测试题（每族一道）上跑 `--self-marker`，sco `pt-rdanlbpt`（6 分钟，已删）。
+  - 6 局都跑完、没有出错；每一步都问了框题、每个回答都读出了框、IoU 都记下了，画面上画的是模型自己的框（看过三张）。
+  - G 没练过这种用法，框的 IoU 很低（6 局的平均 0–0.76），只说明流程通，不说明 Go 会怎样。
+- **预登记第五版草案**：状态改成"SFT 已批"；第 9 节第 1 条（第五版另写还是改写第四版）、第 3 条（按 oracle 还是 self 模式挑）等用户定，要在 SFT 各 epoch 的评测出结果之前定稿。
+- **估计**：SFT 约 55 卡时、7 小时（G 同量）；各 epoch 评测约 6、验收约 10。
