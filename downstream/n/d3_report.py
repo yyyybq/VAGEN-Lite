@@ -18,7 +18,7 @@ Versions (instance sets): all; without left / right; each --exclude file (instan
 exclusion version is per table, all-bad the sensitivity check, EVAL_PROTOCOL section 7); without variants near the
 threshold; without the variants whose own success poses already pass the original's box judge (both_solvable);
 without originals in the suspect scenes; without partial-scene variants; variants whose shortest path is not
-longer than the original's.
+longer than the original's, and those whose shortest path is longer.
 """
 from __future__ import annotations
 
@@ -139,6 +139,8 @@ def versions(variants: list, originals: dict, excludes: dict, both: set) -> dict
         out["no_partial_scenes"] = [i for i in ids if i not in partial]
     out["not_longer"] = [i for i in ids if i in originals
                          and len(by[i]["shortest"]["path"]) <= len(originals[i]["shortest"]["path"])]
+    out["longer"] = [i for i in ids if i in originals
+                     and len(by[i]["shortest"]["path"]) > len(originals[i]["shortest"]["path"])]
     return out
 
 

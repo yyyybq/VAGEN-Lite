@@ -51,6 +51,7 @@ def test_both_solvable_and_versions():
     assert v["minus_pertable"] == ["b", "c"] and v["no_near_threshold"] == ["a", "c"]
     assert v["no_both_solvable"] == ["a", "c"] and v["no_suspect_scenes"] == ["a", "b"]
     assert v["not_longer"] == ["b", "c"]  # a's variant (5) is longer than its original (4)
+    assert v["longer"] == ["a"]
 
 
 def test_run_end_to_end(tmp_path):
