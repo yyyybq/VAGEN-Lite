@@ -1,0 +1,28 @@
+{
+ "batch": "b40_20261107",
+ "approved": "PENDING: the main line (主实验, 11-07 09:4x) hands over the step-300 resume states of q3fp qw3fpd / qw3fps0 (the user's disk choice in the main window); deletion needs the user's word in the disk window",
+ "items": [
+  {
+   "id": "MAIN-q3fp-qw3fpd-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fpd/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^actor/fsdp_config\\.json$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED_TO_AOSS_b40.txt",
+   "marker": "Step-300 (last) checkpoint of the main line's finished RL run qw3fpd (chain interiorgs_v10_train_q3fp_20261106, 300 updates, 48 chain evaluations done): FSDP shards, optimizer, extra state, actor/fsdp_config.json and data.pt archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b40 (the main line's list delete_list_q3fp_resume300_20261107.tsv, the user's disk choice there). actor/huggingface, COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay; this checkpoint is no longer resumable. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  },
+  {
+   "id": "MAIN-q3fp-qw3fps0-300",
+   "root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3fp_20261106/rl_run_qw3fps0/checkpoints/global_step_300",
+   "include": [
+    "^actor/(model|optim|extra_state)_world_size_\\d+_rank_\\d+\\.pt$",
+    "^actor/fsdp_config\\.json$",
+    "^data\\.pt$"
+   ],
+   "marker_name": "RESUME_STATE_DELETED_TO_AOSS_b40.txt",
+   "marker": "Step-300 (last) checkpoint of the main line's finished RL run qw3fps0 (chain interiorgs_v10_train_q3fp_20261106, 300 updates, 48 chain evaluations done): FSDP shards, optimizer, extra state, actor/fsdp_config.json and data.pt archived to AOSS (vagen_lite_archive/<path under /mnt/umm/users/yinbaiqiao>) and deleted by the disk line, batch b40 (the main line's list delete_list_q3fp_resume300_20261107.tsv, the user's disk choice there). actor/huggingface, COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay; this checkpoint is no longer resumable. Restore: VAGEN-Lite-disk/disk/restore_from_aoss.py."
+  }
+ ]
+}
