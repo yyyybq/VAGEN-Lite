@@ -145,6 +145,19 @@
 - **逐个文件的清单（路径、字节数）：** `models_runs/analysis/csnfp01lr_20261104/resume_state_files.tsv`。
 - **SFT 第 5 个 epoch（`checkpoint-770/`，31.3 GB）接着留着：** 决定 54 丙的只训预测头和新 RL 臂都从它起。
 
+## 1k. 11-07 新增：csnfp01lrh 第 200 次检查点的续训状态（1 项，96.57 GB；你 11-07 选了决定 57 甲（"56 甲 57 甲"），07:12 转告磁盘线，等你在磁盘窗口确认）
+
+大小是文件字节数，单位 GB 按 10^9 算。路径都在 `/mnt/umm/users/yinbaiqiao/models_runs/` 下。
+
+| 路径 | 大小 | 是什么 |
+| --- | --- | --- |
+| `chains/m_cambrian7b_formal_rl_20261105_nfp01lrh/rl_run_csnfp01lrh/checkpoints/global_step_200/` 下的 25 个文件：`data.pt`，`actor/` 里的 `model_world_size_8_rank_{0..7}.pt`、`optim_world_size_8_rank_{0..7}.pt`、`extra_state_world_size_8_rank_{0..7}.pt` | 96.57 GB | csnfp01lrh 第 200 次的续训状态（FSDP 分片的模型、优化器等） |
+
+- **为什么用不上：** csnfp01lrh 第 238 次走样、第 242 次被停止线停下，链已完成；第 50/100/150/200 次的 705 道题和留出集预测头都评完了；决定 56 甲的新种子臂从预训练头的起点目录起训，不从这里续训。
+- **留下的：** `actor/huggingface/`（17 个文件、约 32 GB，含预测头）；4 个元数据小文件；第 50/100/150 次只剩 `actor/huggingface/`（链训练时已裁过），不在这张表里。
+- **逐个文件的清单（路径、字节数）：** `models_runs/analysis/csnfp01lrh_20261105/resume_state_files.tsv`。
+- **接着留着、不要动：** SFT 第 5 个 epoch（`checkpoint-770/`，31.3 GB）和 `models_runs/nfp_head_pretrain_20261105/full/run/`（起点目录，权重是指向 `checkpoint-770` 的链接）：新种子臂要从它起训。
+
 ## 3. 还在涨的（21:35 更新）
 
 三个 Cambrian 下游 10-29 21:17–21:21 续训：每 2.5 万步写一份 114 GB 的全状态，写完新的才删旧的，所以每次暂时多出 114 GB；每个任务另外还留 2 份中间点副本和最终权重，各约 16 GB，三个合计约 0.15 TB。本线决定 33（Cambrian 上游四个新臂）批了的话，还要再加约 1.2 TB，所以请先处理第 1 表。
