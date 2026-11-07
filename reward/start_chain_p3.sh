@@ -13,7 +13,8 @@
 # - a chain already running for TR (progress.json chain_pid alive) is refused;
 # - before submitting: the quota table (disk_runs/monitor_state.json, read at most 2 hours ago) must read below 19 TB
 #   (decision 4 option 甲 of PLAN_P3_20261106: the table prints whole TB, so a reading of 19 stops), and the disk line's
-#   stop flag must be absent;
+#   stop flag must be absent; P3_QUOTA_STOP=20 moves the stop line to a reading of 20 TB for one submission, only
+#   on the user's word (11-07 18:5x: "你先全都提交，我会接着删"); default 19;
 # - the chain is a resident process on the login node: one thread per library and nice -n 19.
 set -euo pipefail
 C=$1
@@ -92,7 +93,8 @@ last = dt.datetime.fromisoformat(mon["last_pass"].replace("Z", "+00:00"))
 last = last if last.tzinfo else last.replace(tzinfo=dt.timezone.utc)
 age = dt.datetime.now(dt.timezone.utc) - last
 assert age < dt.timedelta(hours=2), f"quota reading too old: {mon['last_pass']}"
-assert used < 19, f"quota table reads {mon['table_used']}: the stop line is a reading of 19 TB"
+stop = float(os.environ.get("P3_QUOTA_STOP", "19"))  # raised only on the user's word for one submission
+assert used < stop, f"quota table reads {mon['table_used']}: the stop line is a reading of {stop:g} TB"
 assert not (root / "disk_runs/flags/STOP_SUBMIT_DISK_LOW").exists(), "the disk line's stop flag is set"
 print("plan ok, commit", p["commit"][:8], "quota", mon["table_used"], "at", mon["last_pass"], "pool", p.get("pool"),
       "runs", {n: (r.get("rl") or {}) for n, r in runs.items()}, "seed", rl.get("seed"),
