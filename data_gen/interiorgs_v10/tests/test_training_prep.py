@@ -290,6 +290,56 @@ class TrainingPrepTest(unittest.TestCase):
         ppo, report = config("rl_nopkg")
         self.assertEqual(ppo["algorithm"]["adv_estimator"], "gae")
         self.assertIsNone(report["opt_package"])
+        # the PPO supplement (the user's decision 甲 of 2026-11-08): p1gae is p1 with GAE and the value network,
+        # which trains alone for 10 updates (verl updates the actor from update critic_warmup = 11, counting from 1)
+        self.assertEqual({k: v for k, v in TP.OPT_PACKAGES["p1gae"].items() if k not in ("adv_estimator", "critic_warmup")},
+                         TP.OPT_PACKAGES["p1"])
+        self.assertEqual((TP.OPT_PACKAGES["p1gae"]["adv_estimator"], TP.OPT_PACKAGES["p1gae"]["critic_warmup"]), ("gae", 11))
+        # p1 and p2 keep their override dicts: GRPO, no warm-up, the same keys in the same order
+        for name in ("p1", "p2"):
+            p = TP.OPT_PACKAGES[name]
+            self.assertEqual(list(TP.package_overrides(name).items()), list({
+                "algorithm.adv_estimator": "grpo", "algorithm.norm_adv_by_std_in_grpo": True,
+                "actor_rollout_ref.rollout.n": 8, "data.train_batch_size": p["candidates"],
+                "actor_rollout_ref.actor.ppo_mini_batch_size": 12, "filter.enable": True, "filter.name": "mixed_outcome",
+                "filter.filter_kwargs": {"target_groups": 12}, "actor_rollout_ref.actor.optim.lr": 2e-6,
+                "actor_rollout_ref.actor.kl_loss_coef": 0.05, "actor_rollout_ref.actor.entropy_coeff": 0.01,
+                "trainer.critic_warmup": 0}.items()), name)
+        gae = TP.package_overrides("p1gae")
+        self.assertEqual({k: v for k, v in gae.items() if k not in ("algorithm.adv_estimator", "trainer.critic_warmup")},
+                         {k: v for k, v in TP.package_overrides("p1").items()
+                          if k not in ("algorithm.adv_estimator", "trainer.critic_warmup")})
+        self.assertEqual((gae["algorithm.adv_estimator"], gae["trainer.critic_warmup"]), ("gae", 11))
+        ppo_g, report_g = config("rl_pkg_gae", opt_package="p1gae", critic_warmup=None)
+        ppo_1, report_1 = config("rl_pkg_gae_p1", opt_package="p1", critic_warmup=None)
+        self.assertEqual((ppo_g["algorithm"]["adv_estimator"], ppo_g["algorithm"]["norm_adv_by_std_in_grpo"],
+                          ppo_g["trainer"]["critic_warmup"], report_g["critic_warmup"]), ("gae", True, 11, 11))
+        self.assertEqual(ppo_g["filter"], {"enable": True, "name": "mixed_outcome", "filter_kwargs": {"target_groups": 12}})
+        self.assertTrue(ppo_g["trainer"]["concat_multi_turn"])
+        self.assertEqual((ppo_g["critic"]["model"]["path"], ppo_g["critic"]["model"]["tokenizer_path"],
+                          ppo_g["actor_rollout_ref"]["model"]["path"]), ("/m", "/m", "/m"))
+        self.assertEqual(report_g["opt_package_overrides"], gae)
+        # the rest of the PPO config is p1's (paths aside)
+        for cfg in (ppo_g, ppo_1):
+            cfg["algorithm"].pop("adv_estimator")
+            cfg["trainer"].pop("critic_warmup")
+        self.assertEqual(json.loads(json.dumps(ppo_g).replace("rl_pkg_gae", "X")),
+                         json.loads(json.dumps(ppo_1).replace("rl_pkg_gae_p1", "X")))
+        # an explicit warm-up other than the package's is refused for a GAE package (no ppo.yaml written); an equal one
+        # or none is fine; GRPO packages keep the package's 0 over an explicit warm-up (above: --critic-warmup 10)
+        for bad in (0, 10, 12):
+            with self.assertRaisesRegex(SystemExit, "critic_warmup to 11", msg=bad):
+                config(f"rl_pkg_gae_bad_{bad}", opt_package="p1gae", critic_warmup=bad)
+            self.assertFalse((self.root / f"rl_pkg_gae_bad_{bad}" / "ppo.yaml").exists())
+        ppo, _ = config("rl_pkg_gae_same", opt_package="p1gae", critic_warmup=11)
+        self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["trainer"]["critic_warmup"]), ("gae", 11))
+        # a package naming an unknown estimator is refused
+        TP.OPT_PACKAGES["_bad_estimator"] = dict(TP.OPT_PACKAGES["p1"], adv_estimator="no_concat_gae")
+        try:
+            with self.assertRaisesRegex(ValueError, "adv_estimator"):
+                TP.package_overrides("_bad_estimator")
+        finally:
+            del TP.OPT_PACKAGES["_bad_estimator"]
 
     def test_rl_config_standards_and_seed(self):
         """Round 12: named standard configurations (configs/rl_standards.json, the package with S0 and with the dense
@@ -301,7 +351,11 @@ class TrainingPrepTest(unittest.TestCase):
         standards = TP.load_standards()
         self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_Dcond",
                                              "v10_p1_Dcond_fp", "v10_p1_S0", "v10_p1_S0_fp", "v10_p1_S0_keep",
-                                             "v10_p2_D", "v10_p2_S0"])
+                                             "v10_p1gae_Dcond", "v10_p1gae_S0", "v10_p2_D", "v10_p2_S0"])
+        # the PPO supplement (the user's decision 甲 of 2026-11-08): the p1 pair with the GAE package, nothing else
+        for name, base in (("v10_p1gae_S0", "v10_p1_S0"), ("v10_p1gae_Dcond", "v10_p1_Dcond")):
+            self.assertEqual(standards[name], {**standards[base], "opt_package": "p1gae"})
+        self.assertIn("_v10_p1gae", json.loads(TP.STANDARDS_FILE.read_text(encoding="utf-8")))  # its note
         # experiment 3A (the user's decision 甲 of 2026-11-06): the p1 pair with the turn-footprint rule, each its
         # base plus turn_footprint_radius 0.25, the two differing only in the reward (as every pair)
         for name, base in (("v10_p1_S0_fp", "v10_p1_S0"), ("v10_p1_Dcond_fp", "v10_p1_Dcond")):
@@ -370,6 +424,31 @@ class TrainingPrepTest(unittest.TestCase):
         ppo, _, _ = config("rl_std_same", standard="v10_p1_S0", reward_preset="S0", save_freq=50)  # agreeing: fine
         self.assertEqual(ppo["data"]["train_batch_size"], 24)
         self.assertEqual(ppo["filter"]["name"], "mixed_outcome")
+        # the PPO supplement: the p1gae standards give the p1 standards' configs with GAE and the 10-update critic
+        # warm-up, for S0 and for V4 (D_cond + the keep filter + the progress scale); env configs identical
+        v4 = dict(group_filter="keep_by_return_std", keep_std_threshold=0.3318, keep_std_floor=1.0,
+                  progress_reward_scale=3.3333333333333335)
+        for gae_name, base_name, extra in (("v10_p1gae_S0", "v10_p1_S0", {}), ("v10_p1gae_Dcond", "v10_p1_Dcond", v4)):
+            ppo_g, env_g, report_g = config(f"rl_g_{gae_name}", standard=gae_name, seed=20261019, **extra)
+            ppo_b, env_b, report_b = config(f"rl_b_{gae_name}", standard=base_name, seed=20261019, **extra)
+            self.assertEqual((ppo_g["algorithm"]["adv_estimator"], ppo_g["trainer"]["critic_warmup"],
+                              report_g["critic_warmup"], report_g["opt_package"]), ("gae", 11, 11, "p1gae"))
+            self.assertEqual((ppo_b["algorithm"]["adv_estimator"], ppo_b["trainer"]["critic_warmup"]), ("grpo", 0))
+            self.assertEqual(ppo_g["filter"]["name"], "keep_by_return_std" if extra else "mixed_outcome")
+            self.assertEqual(ppo_g["critic"]["model"]["path"], "/m")
+            self.assertEqual({k: v for k, v in env_g.items() if k != "jsonl_path"},
+                             {k: v for k, v in env_b.items() if k != "jsonl_path"})
+            for cfg in (ppo_g, ppo_b):
+                cfg["algorithm"].pop("adv_estimator")
+                cfg["trainer"].pop("critic_warmup")
+            self.assertEqual(json.loads(json.dumps(ppo_g).replace(f"rl_g_{gae_name}", "X")),
+                             json.loads(json.dumps(ppo_b).replace(f"rl_b_{gae_name}", "X")))
+            report_g = json.loads(json.dumps(report_g).replace(f"rl_g_{gae_name}", "X"))
+            report_b = json.loads(json.dumps(report_b).replace(f"rl_b_{gae_name}", "X"))
+            differ = sorted(k for k in set(report_g) | set(report_b) if report_g.get(k) != report_b.get(k))
+            self.assertEqual(differ, ["critic_warmup", "opt_package", "opt_package_overrides", "standard"], gae_name)
+        with self.assertRaises(SystemExit):  # the standard's package fixes the warm-up
+            config("rl_g_bad_warmup", standard="v10_p1gae_S0", critic_warmup=10)
         # the dense-reward first batch: the keep_by_return_std filter with its threshold, floor and task file
         ppo, _, report = config("rl_keep", standard="v10_p1_D", group_filter="keep_by_return_std",
                                 keep_std_threshold=0.33, keep_std_floor=1.77)

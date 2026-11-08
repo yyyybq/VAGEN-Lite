@@ -393,12 +393,23 @@ TASK_POOLS = ("formal", "reserve")  # which train tasks RL takes (round 11: rese
 # Round 12, p2 (the candidate standard): p1 with 48 candidates.  With 24, P-S0 / P-D kept about 6 tasks per update
 # (about 4 dropped as all success, 5 as all failure, 3 refilled, 6 short of 12); 48 candidates fill the 12 tasks
 # (at about 25% mixed, 48 x 0.25 = 12) for twice the generation (about 4 minutes per update instead of about 2).
+# The main line's PPO supplement, p1gae (the user's decision 甲 of 2026-11-08): p1 with GAE and a value network
+# instead of GRPO; nothing else changes (rollouts, candidates, the mixed_outcome filter, lr, KL, entropy as p1).  The
+# value network is the template's critic block (started from the RL start model: lr 2e-5 constant, fp32, parameters
+# and optimizer offloaded, cliprange_value 0.5) with the template's gamma 0.95 / lam 0.95, as the round-11 R-S0 PPO.
+# critic_warmup 11: verl counts its updates from 1 and updates the actor at every update >= critic_warmup
+# (vagen/ray_trainer.py), so the value network trains alone for 10 updates and endpoint 310 gives 300 actor
+# updates.  A package's estimator and warm-up are applied with its other keys, last (package_overrides; the
+# defaults "grpo" and 0 keep p1 / p2 as they were).
 OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
     "p1": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
            "entropy_coeff": 0.01},
     "p2": {"rollouts": 8, "candidates": 48, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
            "entropy_coeff": 0.01},
+    "p1gae": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
+              "entropy_coeff": 0.01, "adv_estimator": "gae", "critic_warmup": 11},
 }
+PACKAGE_ESTIMATORS = ("grpo", "gae")  # the advantage estimators a package may name (default grpo)
 
 # Round 12 (the user's handover for the experiment matrix): named standard RL configurations, rl-config --standard
 # NAME.  Each fixes the rl-config options that make the recipe (configs/rl_standards.json); options a standard does
@@ -459,13 +470,18 @@ def package_overrides(name: str, candidates: Optional[int] = None, target_groups
             p[key] = int(value)
     if p["candidates"] < p["target_groups"]:
         raise ValueError(f"candidates ({p['candidates']}) must be at least target_groups ({p['target_groups']})")
-    return {"algorithm.adv_estimator": "grpo", "algorithm.norm_adv_by_std_in_grpo": True,
+    estimator = p.get("adv_estimator", "grpo")
+    if estimator not in PACKAGE_ESTIMATORS:
+        raise ValueError(f"package {name}: adv_estimator must be one of {PACKAGE_ESTIMATORS}, not {estimator!r}")
+    # norm_adv_by_std_in_grpo stays True: GAE ignores it
+    return {"algorithm.adv_estimator": estimator, "algorithm.norm_adv_by_std_in_grpo": True,
             "actor_rollout_ref.rollout.n": p["rollouts"], "data.train_batch_size": p["candidates"],
             "actor_rollout_ref.actor.ppo_mini_batch_size": p["target_groups"],
             "filter.enable": True, "filter.name": "mixed_outcome",
             "filter.filter_kwargs": {"target_groups": p["target_groups"]},
             "actor_rollout_ref.actor.optim.lr": p["lr"], "actor_rollout_ref.actor.kl_loss_coef": p["kl_loss_coef"],
-            "actor_rollout_ref.actor.entropy_coeff": p["entropy_coeff"], "trainer.critic_warmup": 0}
+            "actor_rollout_ref.actor.entropy_coeff": p["entropy_coeff"],
+            "trainer.critic_warmup": int(p.get("critic_warmup", 0))}
 DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
             "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,
             "enable_visibility_shaping_reward": True}
@@ -749,6 +765,15 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             raise SystemExit("the optimisation package needs the concat history mode (--history-mode concat)")
         package = package_overrides(args.opt_package, getattr(args, "candidates", None),
                                     getattr(args, "target_groups", None), getattr(args, "rollouts", None))
+        # the PPO supplement (2026-11-08): a GAE package's warm-up is part of its recipe; an explicit other
+        # --critic-warmup would be overridden without a word, so it is refused (GRPO packages keep the override)
+        warmup = getattr(args, "critic_warmup", None)
+        if (package["algorithm.adv_estimator"] == "gae" and warmup is not None
+                and int(warmup) != package["trainer.critic_warmup"]):
+            raise SystemExit(f"--opt-package {args.opt_package} sets trainer.critic_warmup to "
+                             f"{package['trainer.critic_warmup']} (the value network alone for "
+                             f"{package['trainer.critic_warmup'] - 1} updates); the command gives --critic-warmup "
+                             f"{warmup}: leave it out")
         for key, value in package.items():
             _set(ppo, key, value)
     if getattr(args, "invalid_turn_nonpositive", False):  # round 12 freeze (the user's 3.2, vagen/invalid_turns.py)
@@ -1146,7 +1171,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--no-internal-val", action="store_true", help="no validation inside training")
     c.add_argument("--opt-package", choices=sorted(OPT_PACKAGES), default=None,
                    help="round 11: the optimisation package (GRPO, mixed-outcome tasks only with refill, 8 episodes "
-                        "per task, larger learning rate, smaller KL penalty, entropy bonus)")
+                        "per task, larger learning rate, smaller KL penalty, entropy bonus); p1gae: p1 with GAE and "
+                        "the value network, which trains alone for the first 10 updates")
     c.add_argument("--candidates", type=int, default=None, help="tasks drawn per update (package default)")
     c.add_argument("--target-groups", type=int, default=None, help="tasks trained on per update (package default)")
     c.add_argument("--rollouts", type=int, default=None, help="episodes per task (package default)")

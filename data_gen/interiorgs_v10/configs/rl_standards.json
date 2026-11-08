@@ -43,5 +43,12 @@
                   "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
  "v10_p1_Dcond_fp": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
                      "opt_package": "p1", "reward_preset": "D_cond", "turn_footprint_radius": 0.25,
+                     "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "_v10_p1gae": "The main line's PPO supplement (the user's decision 甲 of 2026-11-08): the p1 pair with GAE and a value network instead of GRPO (package p1gae: the template's critic from the RL start model, lr 2e-5 constant, fp32, parameters and optimizer offloaded, cliprange_value 0.5; the template's gamma 0.95 / lam 0.95, as the round-11 R-S0 PPO; critic_warmup 11, so the value network trains alone for the first 10 updates and endpoint 310 gives 300 actor updates); everything else as v10_p1_S0 / v10_p1_Dcond. V4 = v10_p1gae_Dcond + plan rl progress_reward_scale 3.3333333333333335, group_filter keep_by_return_std, keep_std_threshold 0.3318, keep_std_floor 1.0. The plan gives no rl critic_warmup (rl-config refuses one other than the package's).",
+ "v10_p1gae_S0": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                  "opt_package": "p1gae", "reward_preset": "S0",
+                  "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p1gae_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                     "opt_package": "p1gae", "reward_preset": "D_cond",
                      "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
 }
