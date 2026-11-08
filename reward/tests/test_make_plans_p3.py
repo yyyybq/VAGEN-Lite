@@ -130,6 +130,18 @@ def test_b_plans(tmp_path):
     assert "endpoint" not in g["note"] and "rl seed" in s2g["note"] and "rw_b_w1 rw_s0" in s0["note"]
 
 
+def test_b_smoke2_is_the_smoke_with_new_chain_and_run_names(tmp_path):
+    root = _root(tmp_path)
+    smoke, smoke2 = mp.b_plan(root, "smoke", lam=0.07), mp.b_plan(root, "smoke2", lam=0.07)
+    assert smoke2["tr"] == str(root / "runs/rw_p3b_smoke2") and smoke2["endpoint"] == 10
+    assert {k for k in set(smoke) | set(smoke2) if smoke.get(k) != smoke2.get(k)} == {"tr", "rl_runs", "note"}
+    rename = {"rw_dgs2_s0": "rw_dgs_s0", "rw_dgs2_g": "rw_dgs_g"}
+    assert {rename[n]: s for n, s in smoke2["rl_runs"].items()} == smoke["rl_runs"]
+    assert smoke2["rl_runs"]["rw_dgs2_g"]["rl"]["dagger"]["lam"] == 0.07 and "lam 0.07" in smoke2["note"]
+    mp.main(["b", "--root", str(root), "--which", "smoke2", "--lam", "0.07"])
+    assert json.loads((root / "runs/rw_p3b_smoke2/plan_template.json").read_text()) == smoke2
+
+
 def test_write_refuses_and_scr59(tmp_path):
     root = _root(tmp_path)
     (root / "eval_sets/eval_test_v2").mkdir(parents=True)

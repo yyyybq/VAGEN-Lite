@@ -16,6 +16,7 @@ rw_mix_qa_ctl), "easi" = EASI-8 for the six validation-best checkpoints (copied 
     python -m reward.make_plans_p3 a --root REWARD_RUNS --c0 C0_E8_CHECKPOINT
     python -m reward.make_plans_p3 a2 --root REWARD_RUNS    # A's extension (PREREG_P3_A2): D's kept checkpoints
     python -m reward.make_plans_p3 c --root REWARD_RUNS --which easi_ctl    # C's control rw_g_300 on EASI-8
+    python -m reward.make_plans_p3 b --root REWARD_RUNS --which smoke2 --lam 0.07    # B's smoke again, another lam
     python -m reward.make_plans_p3 scr59 --root REWARD_RUNS --screened SCREENED_TEST_DIR
 
 Each plan is written to ROOT/runs/<chain>/plan_template.json (refused if the file exists).  scr59 writes
@@ -199,6 +200,8 @@ B_TABLES = "tables/b3000"
 B_STAGES = {  # which: (chain, endpoint, {run: arm}, audit_only, evaluated, seed; None: rw_b_w2's 20261019)
     "check": ("rw_p3b_check", 3, {"rw_dgc_s0": "s0", "rw_dgc_g": "v4"}, True, False, None),
     "smoke": ("rw_p3b_smoke", 10, {"rw_dgs_s0": "s0", "rw_dgs_g": "v4"}, False, False, None),
+    # the smoke again with another lam (the user's 甲 of 2026-11-08 06:0x: lam 0.07 after the gate missed at 0.035)
+    "smoke2": ("rw_p3b_smoke2", 10, {"rw_dgs2_s0": "s0", "rw_dgs2_g": "v4"}, False, False, None),
     "s0": ("rw_p3b_dg_s0", 300, {"rw_dg_s0": "s0"}, False, True, None),
     "g": ("rw_p3b_dg_g", 300, {"rw_dg_g": "v4"}, False, True, None),
     # the brief: "过线立刻交种子 20261021 的两臂" (controls rw_s2s0 / rw_s2g)
