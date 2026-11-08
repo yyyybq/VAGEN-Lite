@@ -1,5 +1,5 @@
 {
- "note": "主实验 2026-11-03 晚发的矩阵 v3 C、D、E 挑出的检查点（用户 11-03 第 3.3 条；挑法：第 300 次，被停下的用最后一个检查点；C 种子 1 的 V4 第 47 次就停了、没有检查点，主线按用户定的用 C 的 SFT 代替）\n主实验 11-04 转来的矩阵补充格（P1 交接 handover_cells_20261104）：B′、D_noP0、E2、Cr 的 SFT 挑点（先过采样验收，再按验证集挑）；B′ 种子 1、D_noP0 两个种子的 RL 按预登记口径取第 300 次。用户 11-04 晚批准提交。\n11-05：Cr 的 4 个 RL 按预登记口径（种子 1 S0、V4 第 250 次，种子 2 S0 第 300 次、V4 第 200 次，都对 Cr-SFT）；主线问答 RL 试点的两个 RL（第 300 次，从 Q3S 起步，评测用主线 Qwen3 RL 链的动作提示，对 Q3S）。用户 11-05 批准（“1 交；2 甲”）。",
+ "note": "主实验 2026-11-03 晚发的矩阵 v3 C、D、E 挑出的检查点（用户 11-03 第 3.3 条；挑法：第 300 次，被停下的用最后一个检查点；C 种子 1 的 V4 第 47 次就停了、没有检查点，主线按用户定的用 C 的 SFT 代替）\n主实验 11-04 转来的矩阵补充格（P1 交接 handover_cells_20261104）：B′、D_noP0、E2、Cr 的 SFT 挑点（先过采样验收，再按验证集挑）；B′ 种子 1、D_noP0 两个种子的 RL 按预登记口径取第 300 次。用户 11-04 晚批准提交。\n11-05：Cr 的 4 个 RL 按预登记口径（种子 1 S0、V4 第 250 次，种子 2 S0 第 300 次、V4 第 200 次，都对 Cr-SFT）；主线问答 RL 试点的两个 RL（第 300 次，从 Q3S 起步，评测用主线 Qwen3 RL 链的动作提示，对 Q3S）。用户 11-05 批准（“1 交；2 甲”）。\n11-08：主线 3B 第一格挑出的 sft_q3genc0_e8（C0 SFT 混入约 22,000 条通用 VQA，第 8 轮），主线 11-08 03:3x 请求、用户 11-08 03:4x 批两种输入都评；提示用主线 Qwen3 RL 链的 rl_q3d（主线确认）；SFT 起点无，配对对 Q3S、Q3B。",
  "starts": [
   {
    "name": "C-SFT",
@@ -371,6 +371,18 @@
    "sft": "Q3S",
    "base": "Q3B",
    "main_name": "qw3fps0_100"
+  },
+  {
+   "name": "GC0-SFT",
+   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_q3_20261027/gen3b_sft_20261107/c0g/model/checkpoint-3976",
+   "val_env": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_q3d/val_env.yaml",
+   "group": "3B",
+   "seed": null,
+   "reward": "SFT",
+   "step": 3976,
+   "sft": null,
+   "base": "Q3B",
+   "main_name": "sft_q3genc0_e8"
   }
  ]
 }
