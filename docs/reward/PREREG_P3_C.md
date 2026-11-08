@@ -67,4 +67,9 @@ RL 的每两次优化步里，有一步加一批没训过的问答（权重 0.1�
 
 ## 6. 执行说明（开跑后补，不改判据）
 
-（空）
+- **冒烟读数（11-07 21:06 训完 10 次）：** 5 次插入的 `grad_mag_share_und` 是 52.8 / 37.4 / 24.8 / 26.0 / 15.3%，中位数 26.0%，在 5%–50% 内，按第 2 节交 rw_mx_g。读不出率 0、熵 0.030、KL 0.0014。
+- **用户 11-08 的决定 3 甲：** 配额表读 19 TB，正在停交线上。这一次把停交线放到 20 TB（`P3_QUOTA_STOP=20`），交 rw_mx_g。
+- 同时交第 4 节要补的对照 rw_g_300 的 EASI-8：
+  - 计划由 `reward/make_plans_p3.py c --which easi_ctl` 生成，链 `runs/rw_p3c_easi_ctl`；
+  - 和 rw_p3a2_easi 同一条 reward-mix 链、同一份代码（0d82f467），9 个单卡任务。
+- rw_mx_g 的计划由 `make_plans_p3.py c --which arm` 生成，链 `runs/rw_p3c_mx_g`，从冻结副本 VAGEN-Lite-reward-p3run（d8080ffb）起。

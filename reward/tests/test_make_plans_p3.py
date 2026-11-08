@@ -89,6 +89,18 @@ def test_c_plans(tmp_path):
     assert "und_mix" not in w2["rl_runs"]["rw_g"]["rl"]  # the source plan is not touched
 
 
+def test_c_easi_plan_changes_only_tr_models_note(tmp_path):
+    root = _root(tmp_path)
+    ref, p = mp.a2_plans(root)["rw_p3a2_easi"], mp.c_easi_plan(root)
+    assert {k for k in set(p) | set(ref) if p.get(k) != ref.get(k)} == {"tr", "eval", "note"}
+    assert p["tr"].endswith("runs/rw_p3c_easi_ctl") and list(p["eval"]["models"]) == ["rw_g_300"]
+    m = p["eval"]["models"]["rw_g_300"]["model"]
+    assert m.startswith(str(root)) and m.endswith("rw_b_w2/rl_run_rw_g/checkpoints/global_step_300/actor/huggingface")
+    assert p["qa_eval"]["easi"] == "easi_8" and p["eval_only"] is True and p["commit"] == "COMMIT_PLACEHOLDER"
+    mp.main(["c", "--root", str(root), "--which", "easi_ctl"])
+    assert json.loads((root / "runs/rw_p3c_easi_ctl/plan_template.json").read_text()) == p
+
+
 def test_b_plans(tmp_path):
     root = _root(tmp_path)
     w2 = json.loads((root / "runs/rw_b_w2/plan.json").read_text())
