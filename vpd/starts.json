@@ -1,0 +1,56 @@
+{
+ "Q3B": {
+  "code": "qwen3vl-8B",
+  "path": "/mnt/umm/shared_model/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b",
+  "family": "qwen3",
+  "note": "raw Qwen/Qwen3-VL-8B-Instruct @0c351dd (shared_model snapshot); its blobs are root-only, so jobs that read it run as_root"
+ },
+ "Q3S": {
+  "code": "c0q3_sft_e8",
+  "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232",
+  "family": "qwen3",
+  "note": "C0 formal action SFT, epoch 8 / 1,232 steps; pre-dates the 10-29 scene exclusion (pilot start)"
+ },
+ "E2": {
+  "code": "sft_m3e2_e10",
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/E2/model/checkpoint-3010",
+  "family": "qwen3",
+  "note": "matrix-v3 cell E2 SFT, epoch 10 / 3,010 steps (pilot start)"
+ },
+ "Bp": {
+  "code": "sft_m3b_e10",
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite-matrix/exps/matrix_v3/sft/B/model/checkpoint-1870",
+  "family": "qwen3",
+  "note": "matrix-v3 cell B' SFT, epoch 10, checkpoint-1870; registry code exists but no eval view is built yet"
+ },
+ "Q3RS150": {
+  "code": "c0q3_s1s0_150",
+  "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3s0/checkpoints/global_step_150/actor/huggingface",
+  "family": "qwen3",
+  "note": "C0 action RL (stage 1, S0) global_step_150; verl HF export (float32, config attn eager); no eval view yet"
+ },
+ "Q3RD": {
+  "code": "c0q3_s1d_300",
+  "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_rl_20261026/rl_run_q3d/checkpoints/global_step_300/actor/huggingface",
+  "family": "qwen3",
+  "note": "C0 action RL (stage 1, D) global_step_300; verl HF export (float32 sub-configs, top-level attn eager); no eval view yet"
+ },
+ "QRL-s1": {
+  "code": null,
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3qarl_20261104/rl_run_qrl_s1/checkpoints/global_step_300/actor/huggingface",
+  "family": "qwen3",
+  "note": "QA RL seed 1, global_step_300; verl HF export; no registry code"
+ },
+ "QRL-s2": {
+  "code": null,
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_train_q3qarl_20261104/rl_run_qrl_s2/checkpoints/global_step_300/actor/huggingface",
+  "family": "qwen3",
+  "note": "QA RL seed 2, global_step_300; verl HF export; no registry code"
+ },
+ "QACTL": {
+  "code": null,
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_q3_20261027/qa_sft_ctrl_20261103/model/checkpoint-155",
+  "family": "qwen3",
+  "note": "QA SFT control, checkpoint-155 (UNVERIFIED as the intended weights); no registry code"
+ }
+}
