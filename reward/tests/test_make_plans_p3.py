@@ -158,6 +158,33 @@ def test_b_smoke2_is_the_smoke_with_new_chain_and_run_names(tmp_path):
     assert json.loads((root / "runs/rw_p3b_smoke2/plan_template.json").read_text()) == smoke2
 
 
+def test_b_s0_eval_plan_is_eval_only_with_the_chains_names_and_options(tmp_path):
+    root = _root(tmp_path)
+    arm = mp.b_plan(root, "s0", lam=0.07)
+    arm.update(model_type="qwen3_vl", sft_dir="/sft", retries=2, suspended_grace_min=10, job_prefix="rw", gpu_log=True,
+               max_eval_jobs=6)
+    tr = root / "runs/rw_p3b_dg_s0"
+    tr.mkdir(parents=True)
+    (tr / "plan.json").write_text(json.dumps(arm))
+    (tr / "rl_rw_dg_s0").mkdir()
+    (tr / "rl_rw_dg_s0/rl_config_report.json").write_text(json.dumps({"format_example": "action_names"}))
+    k = tr / "rl_run_rw_dg_s0/checkpoints"
+    (k / "global_step_50/actor/huggingface").mkdir(parents=True)
+    with pytest.raises(SystemExit):  # update 100 has no weights yet
+        mp.b_eval_plan(root, "s0_eval")
+    (k / "global_step_100/actor/huggingface").mkdir(parents=True)
+    p = mp.b_eval_plan(root, "s0_eval")
+    assert p["eval_only"] is True and p["tr"] == str(root / "runs/rw_p3b_dg_s0_eval")
+    assert p["commit"] == "COMMIT_PLACEHOLDER" and "rl_runs" not in p and "rl" not in p and "select_by" not in p
+    assert p["eval_sets"] == arm["eval_sets"] and "scr59" in p["eval_sets"]
+    assert p["eval"] == {"models": {
+        "rw_dg_s0_050": {"model": str(k / "global_step_50/actor/huggingface"), "options": ["--format-example", "action_names"]},
+        "rw_dg_s0_100": {"model": str(k / "global_step_100/actor/huggingface"), "options": ["--format-example", "action_names"]}}}
+    assert {x: p[x] for x in mp.B_EVAL_KEYS} == {x: arm[x] for x in mp.B_EVAL_KEYS}
+    mp.main(["b", "--root", str(root), "--which", "s0_eval"])
+    assert json.loads((root / "runs/rw_p3b_dg_s0_eval/plan_template.json").read_text()) == p
+
+
 def test_write_refuses_and_scr59(tmp_path):
     root = _root(tmp_path)
     (root / "eval_sets/eval_test_v2").mkdir(parents=True)

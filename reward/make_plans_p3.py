@@ -18,6 +18,7 @@ rw_mix_qa_ctl), "easi" = EASI-8 for the six validation-best checkpoints (copied 
     python -m reward.make_plans_p3 c --root REWARD_RUNS --which easi_ctl    # C's control rw_g_300 on EASI-8
     python -m reward.make_plans_p3 c --root REWARD_RUNS --which qa    # C's arm: X0 / G0 / P1 at 150, 300; EASI at 300
     python -m reward.make_plans_p3 b --root REWARD_RUNS --which smoke2 --lam 0.07    # B's smoke again, another lam
+    python -m reward.make_plans_p3 b --root REWARD_RUNS --which s0_eval    # B's S0 arm (failed at 146): 50 / 100 eval-only
     python -m reward.make_plans_p3 scr59 --root REWARD_RUNS --screened SCREENED_TEST_DIR
 
 Each plan is written to ROOT/runs/<chain>/plan_template.json (refused if the file exists).  scr59 writes
@@ -272,6 +273,42 @@ def b_plan(root: Path, which: str, lam: float = 0.5) -> Dict[str, Any]:
     return p
 
 
+# B's S0 arm failed at update 146 (2026-11-08 14:02: one error three times, the chain's retries spent), so PREREG_P3_B
+# section 5 "运行在第 150 次之前被停的" reads its updates 50 / 100.  Their val results are in (the chain's stop_invalid
+# evaluations), test and screened 59 are not: an eval-only chain from the arm's own plan; a result folder with done.json
+# is not evaluated again, so only the missing sets run.
+B_EVAL = {"s0_eval": ("rw_p3b_dg_s0", "rw_p3b_dg_s0_eval", "rw_dg_s0", (50, 100))}
+B_EVAL_KEYS = ("model_type", "sft_dir", "retries", "suspended_grace_min", "pool", "job_prefix", "gpu_log",
+               "max_eval_jobs", "eval_sets")
+
+
+def b_eval_plan(root: Path, which: str) -> Dict[str, Any]:
+    """An eval_only plan for a B run's checkpoints, under the names and with the options the arm's chain gives its RL
+    checkpoints (train_chain.run_eval_options: eval_options_for with the run's rl_config_report)."""
+    from data_gen.interiorgs_v10.train_chain import eval_options_for
+
+    src, chain, run, steps = B_EVAL[which]
+    tr = root / "runs" / src
+    arm = _read(tr / "plan.json")
+    rep = _read(tr / f"rl_{run}" / "rl_config_report.json")
+    opts = eval_options_for(list(arm["eval"].get("options") or []), rep.get("format_example"),
+                            bool(rep.get("lenient_parse")))
+    models = {}
+    for s in steps:
+        hf = tr / f"rl_run_{run}" / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface"
+        if not hf.is_dir():
+            raise SystemExit(f"{hf} is not a folder: no plan")
+        models[f"{run}_{s:03d}"] = {"model": str(hf), "options": opts}
+    p = {"tr": str(root / "runs" / chain), "commit": "COMMIT_PLACEHOLDER",
+         **{k: copy.deepcopy(arm[k]) for k in B_EVAL_KEYS if k in arm}, "eval_only": True, "eval": {"models": models}}
+    p["note"] = (f"Reward line, phase 3, experiment B (docs/reward/PREREG_P3_B.md section 5, a run stopped before update "
+                 f"150): {run} at updates {' / '.join(str(s) for s in steps)} on the arm's sets (val is in, so test "
+                 f"and screened 59 run), the arm's chain's evaluation options {opts}; an eval-only copy of "
+                 f"{src}'s plan ({', '.join(k for k in B_EVAL_KEYS if k in arm)}); started from the frozen worktree "
+                 f"VAGEN-Lite-reward-p3b.")
+    return p
+
+
 def scr59(root: Path, screened: Path) -> Dict[str, Any]:
     orig = root / "eval_sets" / "eval_test_v2" / "tasks.jsonl"
     with open(orig) as f:
@@ -317,7 +354,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     cc.add_argument("--which", required=True, choices=("smoke", "arm", "easi_ctl", "qa"))
     bb = sub.add_parser("b")
     bb.add_argument("--root", required=True)
-    bb.add_argument("--which", required=True, choices=sorted(B_STAGES))
+    bb.add_argument("--which", required=True, choices=sorted(B_STAGES) + sorted(B_EVAL))
     bb.add_argument("--lam", type=float, default=0.5)
     s = sub.add_parser("scr59")
     s.add_argument("--root", required=True)
@@ -342,7 +379,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             p = c_easi_plan(root) if args.which == "easi_ctl" else c_plan(root, args.which)
             print(_write_new(Path(p["tr"]) / "plan_template.json", p))
     elif args.cmd == "b":
-        p = b_plan(root, args.which, args.lam)
+        p = b_eval_plan(root, args.which) if args.which in B_EVAL else b_plan(root, args.which, args.lam)
         print(_write_new(Path(p["tr"]) / "plan_template.json", p))
     else:
         print(json.dumps(scr59(root, Path(args.screened)), indent=1))
