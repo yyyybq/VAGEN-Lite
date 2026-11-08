@@ -1,0 +1,7 @@
+# The repository root .gitignore ignores every `data/` directory. The frozen
+# split source vpd/walkerbench/data/split_city.json (sha256 41f9635a..., see
+# PREREG_WB_PILOT.md section 2.2) must be committed, so re-include that one dir.
+!/walkerbench/data/
+# Never commit bytecode from test runs.
+__pycache__/
+*.pyc
