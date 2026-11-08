@@ -16,6 +16,7 @@ rw_mix_qa_ctl), "easi" = EASI-8 for the six validation-best checkpoints (copied 
     python -m reward.make_plans_p3 a --root REWARD_RUNS --c0 C0_E8_CHECKPOINT
     python -m reward.make_plans_p3 a2 --root REWARD_RUNS    # A's extension (PREREG_P3_A2): D's kept checkpoints
     python -m reward.make_plans_p3 c --root REWARD_RUNS --which easi_ctl    # C's control rw_g_300 on EASI-8
+    python -m reward.make_plans_p3 c --root REWARD_RUNS --which qa    # C's arm: X0 / G0 / P1 at 150, 300; EASI at 300
     python -m reward.make_plans_p3 b --root REWARD_RUNS --which smoke2 --lam 0.07    # B's smoke again, another lam
     python -m reward.make_plans_p3 scr59 --root REWARD_RUNS --screened SCREENED_TEST_DIR
 
@@ -179,6 +180,26 @@ def c_plan(root: Path, which: str) -> Dict[str, Any]:
 
 # experiment C's control for the EASI-8 rejudge (PREREG_P3_C section 4): rw_g_300 has no EASI-8 result (A ran EASI-8 on the
 # validation-best six only), so it gets one, through the same chain settings as rw_p3a2_easi (reward-mix, 9 single-card jobs)
+C_QA_CKPTS = {"rw_mx_g_150": "rw_p3c_mx_g/rl_run_rw_mx_g/checkpoints/global_step_150",
+              "rw_mx_g_300": "rw_p3c_mx_g/rl_run_rw_mx_g/checkpoints/global_step_300"}
+
+
+def c_qa_plans(root: Path) -> Dict[str, Dict[str, Any]]:
+    """C section 4 on the arm: X0 / G0 / P1 at updates 150 and 300, EASI-8 at 300; rw_p3a2_diag / rw_p3a2_easi's plans
+    with only tr, eval.models and the note changed."""
+    base = a2_plans(root)
+    runs = root / "runs"
+    models = {n: {"model": str(runs / rel / "actor" / "huggingface"), "options": []} for n, rel in C_QA_CKPTS.items()}
+    diag, easi = base["rw_p3a2_diag"], base["rw_p3a2_easi"]
+    diag.update(tr=str(runs / "rw_p3c_mx_diag"), eval={"models": models},
+                note="Reward line, phase 3, experiment C (docs/reward/PREREG_P3_C.md section 4): X0 / G0 / P1 of rw_mx_g at "
+                     "updates 150 and 300, the same reward-mix chain and code as rw_p3a2_diag.")
+    easi.update(tr=str(runs / "rw_p3c_mx_easi"), eval={"models": {"rw_mx_g_300": models["rw_mx_g_300"]}},
+                note="Reward line, phase 3, experiment C (docs/reward/PREREG_P3_C.md section 4): EASI-8 of rw_mx_g at update "
+                     "300 (report only), the same reward-mix chain and code as rw_p3a2_easi, 9 single-card jobs.")
+    return {"rw_p3c_mx_diag": diag, "rw_p3c_mx_easi": easi}
+
+
 C_EASI_CKPTS = {"rw_g_300": "rw_b_w2/rl_run_rw_g/checkpoints/global_step_300"}
 
 
@@ -293,7 +314,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     a2.add_argument("--root", required=True)
     cc = sub.add_parser("c")
     cc.add_argument("--root", required=True)
-    cc.add_argument("--which", required=True, choices=("smoke", "arm", "easi_ctl"))
+    cc.add_argument("--which", required=True, choices=("smoke", "arm", "easi_ctl", "qa"))
     bb = sub.add_parser("b")
     bb.add_argument("--root", required=True)
     bb.add_argument("--which", required=True, choices=sorted(B_STAGES))
@@ -314,8 +335,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         for name, p in a2_plans(root).items():
             print(_write_new(Path(p["tr"]) / "plan_template.json", p))
     elif args.cmd == "c":
-        p = c_easi_plan(root) if args.which == "easi_ctl" else c_plan(root, args.which)
-        print(_write_new(Path(p["tr"]) / "plan_template.json", p))
+        if args.which == "qa":
+            for p in c_qa_plans(root).values():
+                print(_write_new(Path(p["tr"]) / "plan_template.json", p))
+        else:
+            p = c_easi_plan(root) if args.which == "easi_ctl" else c_plan(root, args.which)
+            print(_write_new(Path(p["tr"]) / "plan_template.json", p))
     elif args.cmd == "b":
         p = b_plan(root, args.which, args.lam)
         print(_write_new(Path(p["tr"]) / "plan_template.json", p))

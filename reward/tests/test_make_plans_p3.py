@@ -101,6 +101,22 @@ def test_c_easi_plan_changes_only_tr_models_note(tmp_path):
     assert json.loads((root / "runs/rw_p3c_easi_ctl/plan_template.json").read_text()) == p
 
 
+def test_c_qa_plans_change_only_tr_models_note(tmp_path):
+    root = _root(tmp_path)
+    a2, qa = mp.a2_plans(root), mp.c_qa_plans(root)
+    for new, old in (("rw_p3c_mx_diag", "rw_p3a2_diag"), ("rw_p3c_mx_easi", "rw_p3a2_easi")):
+        p, o = qa[new], a2[old]
+        assert {k for k in set(p) | set(o) if p.get(k) != o.get(k)} == {"tr", "eval", "note"}
+        assert p["tr"] == str(root / "runs" / new)
+    assert sorted(qa["rw_p3c_mx_diag"]["eval"]["models"]) == ["rw_mx_g_150", "rw_mx_g_300"]
+    assert list(qa["rw_p3c_mx_easi"]["eval"]["models"]) == ["rw_mx_g_300"]
+    m = qa["rw_p3c_mx_easi"]["eval"]["models"]["rw_mx_g_300"]["model"]
+    assert m == str(root / "runs/rw_p3c_mx_g/rl_run_rw_mx_g/checkpoints/global_step_300/actor/huggingface")
+    mp.main(["c", "--root", str(root), "--which", "qa"])
+    for new in qa:
+        assert json.loads((root / "runs" / new / "plan_template.json").read_text()) == qa[new]
+
+
 def test_b_plans(tmp_path):
     root = _root(tmp_path)
     w2 = json.loads((root / "runs/rw_b_w2/plan.json").read_text())
