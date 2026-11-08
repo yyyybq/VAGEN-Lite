@@ -1,0 +1,140 @@
+{
+ "base-7B": {
+  "SAT-Real": {
+   "ours": 58.0,
+   "reported": 54.7,
+   "diff": 3.3,
+   "ci95": [
+    50.0,
+    65.6
+   ],
+   "unparseable_pct": 0.0,
+   "n": 150
+  },
+  "SAT-Syn": {
+   "ours": 59.1,
+   "reported": 57.5,
+   "diff": 1.6,
+   "ci95": [
+    57.6,
+    60.6
+   ],
+   "unparseable_pct": 0.0,
+   "n": 4001
+  },
+  "ViewSpatial": {
+   "ours": 37.7,
+   "reported": 36.3,
+   "diff": 1.4,
+   "ci95": [
+    36.4,
+    38.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 5712
+  },
+  "MindCube-Tiny": {
+   "ours": 34.2,
+   "reported": 29.3,
+   "diff": 4.9,
+   "ci95": [
+    31.4,
+    37.2
+   ],
+   "unparseable_pct": 0.19,
+   "n": 1040
+  },
+  "MindCube": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSI": {
+   "ours": 37.6,
+   "reported": 37.9,
+   "diff": -0.3,
+   "ci95": [
+    36.3,
+    38.9
+   ],
+   "unparseable_pct": 0.1,
+   "n": 5130
+  },
+  "VSI 路线规划": {
+   "ours": 29.4,
+   "reported": 30.4,
+   "diff": -1.0,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSI 相对距离": {
+   "ours": 37.3,
+   "reported": 36.6,
+   "diff": 0.7,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 5130
+  },
+  "VSTI": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 相机位移": {
+   "ours": null,
+   "reported": null,
+   "diff": null,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": null
+  },
+  "VSTI 修正前": {
+   "ours": 40.1,
+   "reported": 39.0,
+   "diff": 1.1,
+   "ci95": [
+    38.9,
+    41.3
+   ],
+   "unparseable_pct": 0.0,
+   "n": 6042
+  },
+  "VSTI 修正前 相机位移": {
+   "ours": 11.7,
+   "reported": 8.6,
+   "diff": 3.1,
+   "ci95": null,
+   "unparseable_pct": null,
+   "n": 6042
+  },
+  "MMSI": {
+   "ours": 28.0,
+   "reported": 27.7,
+   "diff": 0.3,
+   "ci95": [
+    25.3,
+    30.9
+   ],
+   "unparseable_pct": 0.0,
+   "n": 1000
+  },
+  "SPBench-MV": {
+   "ours": 42.7,
+   "reported": 34.0,
+   "diff": 8.7,
+   "ci95": [
+    37.4,
+    48.2
+   ],
+   "unparseable_pct": 0.0,
+   "n": 319
+  }
+ }
+}

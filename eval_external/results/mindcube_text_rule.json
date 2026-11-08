@@ -1,0 +1,282 @@
+[
+ {
+  "model": "base-7B",
+  "bench": "MindCube",
+  "reported_overall": 29.38,
+  "n": 21154,
+  "official_acc": 29.38,
+  "rule_applied": 3,
+  "rule_applied_pct": 0.01,
+  "diagnostic_acc": 29.39
+ },
+ {
+  "model": "base-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 34.23,
+  "n": 1040,
+  "official_acc": 34.23,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 34.23
+ },
+ {
+  "model": "SI-3B",
+  "bench": "MindCube",
+  "reported_overall": 66.6,
+  "n": 21154,
+  "official_acc": 66.6,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 66.6
+ },
+ {
+  "model": "SI-3B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 60.19,
+  "n": 1040,
+  "official_acc": 60.19,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 60.19
+ },
+ {
+  "model": "SI-7B",
+  "bench": "MindCube",
+  "reported_overall": 82.79,
+  "n": 21154,
+  "official_acc": 82.79,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 82.79
+ },
+ {
+  "model": "SI-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 73.46,
+  "n": 1040,
+  "official_acc": 73.46,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 73.46
+ },
+ {
+  "model": "SenseNovaSI-7B",
+  "bench": "MindCube",
+  "reported_overall": 56.61,
+  "n": 21154,
+  "official_acc": 56.61,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 56.61
+ },
+ {
+  "model": "SenseNovaSI-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 53.75,
+  "n": 1040,
+  "official_acc": 53.75,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 53.75
+ },
+ {
+  "model": "SpaceR-7B",
+  "bench": "MindCube",
+  "reported_overall": 26.63,
+  "n": 21154,
+  "official_acc": 26.63,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 26.63
+ },
+ {
+  "model": "SpaceR-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 32.6,
+  "n": 1040,
+  "official_acc": 32.6,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 32.6
+ },
+ {
+  "model": "VST-7B-RL",
+  "bench": "MindCube",
+  "reported_overall": 37.27,
+  "n": 21154,
+  "official_acc": 37.27,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 37.27
+ },
+ {
+  "model": "VST-7B-RL",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 40.87,
+  "n": 1040,
+  "official_acc": 40.87,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 40.87
+ },
+ {
+  "model": "ViLASR-7B",
+  "bench": "MindCube",
+  "reported_overall": 30.59,
+  "n": 21154,
+  "official_acc": 30.59,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 30.59
+ },
+ {
+  "model": "ViLASR-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 35.1,
+  "n": 1040,
+  "official_acc": 35.1,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 35.1
+ },
+ {
+  "model": "VideoR1-7B",
+  "bench": "MindCube",
+  "reported_overall": 31.91,
+  "n": 21154,
+  "official_acc": 31.91,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 31.91
+ },
+ {
+  "model": "VideoR1-7B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 34.62,
+  "n": 1040,
+  "official_acc": 34.62,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 34.62
+ },
+ {
+  "model": "base-3B",
+  "bench": "MindCube",
+  "reported_overall": 39.77,
+  "n": 21154,
+  "official_acc": 39.77,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 39.77
+ },
+ {
+  "model": "base-3B",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 41.54,
+  "n": 1040,
+  "official_acc": 41.54,
+  "rule_applied": 0,
+  "rule_applied_pct": 0.0,
+  "diagnostic_acc": 41.54
+ },
+ {
+  "model": "ours-RL-150",
+  "bench": "MindCube",
+  "reported_overall": 32.62,
+  "n": 21154,
+  "official_acc": 32.62,
+  "rule_applied": 2773,
+  "rule_applied_pct": 13.11,
+  "diagnostic_acc": 35.83
+ },
+ {
+  "model": "ours-RL-150",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 31.25,
+  "n": 1040,
+  "official_acc": 31.25,
+  "rule_applied": 174,
+  "rule_applied_pct": 16.73,
+  "diagnostic_acc": 37.31
+ },
+ {
+  "model": "ours-RL-50",
+  "bench": "MindCube",
+  "reported_overall": 32.79,
+  "n": 21154,
+  "official_acc": 32.79,
+  "rule_applied": 3025,
+  "rule_applied_pct": 14.3,
+  "diagnostic_acc": 36.32
+ },
+ {
+  "model": "ours-RL-50",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 31.15,
+  "n": 1040,
+  "official_acc": 31.15,
+  "rule_applied": 186,
+  "rule_applied_pct": 17.88,
+  "diagnostic_acc": 37.31
+ },
+ {
+  "model": "ours-RL-r11",
+  "bench": "MindCube",
+  "reported_overall": 15.16,
+  "n": 21154,
+  "official_acc": 15.16,
+  "rule_applied": 14934,
+  "rule_applied_pct": 70.6,
+  "diagnostic_acc": 37.99
+ },
+ {
+  "model": "ours-RL-r11",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 13.56,
+  "n": 1040,
+  "official_acc": 13.56,
+  "rule_applied": 810,
+  "rule_applied_pct": 77.88,
+  "diagnostic_acc": 39.81
+ },
+ {
+  "model": "ours-SFT-r11",
+  "bench": "MindCube",
+  "reported_overall": 13.85,
+  "n": 21154,
+  "official_acc": 13.85,
+  "rule_applied": 15804,
+  "rule_applied_pct": 74.71,
+  "diagnostic_acc": 38.48
+ },
+ {
+  "model": "ours-SFT-r11",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 12.4,
+  "n": 1040,
+  "official_acc": 12.4,
+  "rule_applied": 842,
+  "rule_applied_pct": 80.96,
+  "diagnostic_acc": 39.13
+ },
+ {
+  "model": "ours-SFT",
+  "bench": "MindCube",
+  "reported_overall": 31.19,
+  "n": 21154,
+  "official_acc": 31.19,
+  "rule_applied": 4335,
+  "rule_applied_pct": 20.49,
+  "diagnostic_acc": 35.89
+ },
+ {
+  "model": "ours-SFT",
+  "bench": "MindCube-Tiny",
+  "reported_overall": 30.29,
+  "n": 1040,
+  "official_acc": 30.29,
+  "rule_applied": 260,
+  "rule_applied_pct": 25.0,
+  "diagnostic_acc": 37.79
+ }
+]

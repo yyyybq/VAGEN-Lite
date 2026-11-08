@@ -1,0 +1,10 @@
+# SAT-Syn: lmms-eval's own SAT task (prompt, answer extraction, scoring) on array/SAT's synthetic val split,
+# converted to the same form as SAT-Real by qa_transfer/make_sat_syn.py.  Only the data source and the task
+# name differ from tasks/sat/sat.yaml.
+include: /mnt/umm/users/yinbaiqiao/eval_external_assets/repos/lmms-eval/lmms_eval/tasks/sat/sat.yaml
+task: "sat_syn_ee"
+dataset_path: parquet
+dataset_kwargs:
+  data_files:
+    test: /mnt/umm/users/yinbaiqiao/eval_external_assets/data/sat_syn_ee/val.parquet
+test_split: test

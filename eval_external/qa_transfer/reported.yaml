@@ -1,0 +1,80 @@
+# Numbers other papers report for our model codes, used as the "reported" column of the summary tables.
+# Source: Spatial-Interactor, arXiv 2609.23038, read from the arXiv HTML tables on 2026-10-18.
+#   Table 1 (official scores, %): VSI Rel.Dist / Route / Avg, MindCube (Tiny) Avg, VSTI Displ. / Avg,
+#            SPBench-MV Avg.  VSTI there is the version before the 2026-07-13 label correction (839 displacement items).
+#   Table 3 (accuracy, %): MMSI, ViewSpatial, SAT-Real, SAT-Syn ("+ SFT + OPD" rows are the released models).
+# Keys are eval_external benchmark names plus sub-items; "VSTI-Bench-prefix" = our run on the pre-correction labels.
+source: "Spatial-Interactor (arXiv 2609.23038) Tables 1 and 3"
+models:
+  base-7B:
+    VSI-Bench: 37.9
+    VSI-Bench/route_planning: 30.4
+    VSI-Bench/object_rel_distance: 36.6
+    MindCube-Tiny: 29.3
+    VSTI-Bench-prefix: 39.0
+    VSTI-Bench-prefix/camera_displacement: 8.6
+    SPBench-MV: 34.0
+    MMSI: 27.7
+    ViewSpatial: 36.3
+    SAT-Real: 54.7
+    SAT-Syn: 57.5
+  SI-7B:
+    VSI-Bench: 49.0
+    VSI-Bench/route_planning: 34.0
+    VSI-Bench/object_rel_distance: 50.6
+    MindCube-Tiny: 74.3
+    VSTI-Bench-prefix: 49.5
+    VSTI-Bench-prefix/camera_displacement: 36.6
+    SPBench-MV: 67.6
+    MMSI: 31.2
+    ViewSpatial: 42.4
+    SAT-Real: 74.0
+    SAT-Syn: 62.5
+  base-3B:
+    VSI-Bench: 27.0
+    VSI-Bench/route_planning: 27.3
+    VSI-Bench/object_rel_distance: 33.8
+    MindCube-Tiny: 33.2
+    VSTI-Bench-prefix: 38.6
+    VSTI-Bench-prefix/camera_displacement: 15.3
+    SPBench-MV: 36.6
+    MMSI: 29.0
+    ViewSpatial: 35.6
+    SAT-Real: 56.7
+    SAT-Syn: 56.3
+  SI-3B:
+    VSI-Bench: 50.4
+    VSI-Bench/route_planning: 33.0
+    VSI-Bench/object_rel_distance: 53.0
+    MindCube-Tiny: 59.3
+    VSTI-Bench-prefix: 48.3
+    VSTI-Bench-prefix/camera_displacement: 32.4
+    SPBench-MV: 64.5
+    MMSI: 29.9
+    ViewSpatial: 44.3
+    SAT-Real: 62.0
+    SAT-Syn: 58.7
+  SpaceR-7B:
+    VSI-Bench: 44.5
+    VSI-Bench/route_planning: 31.4
+    VSI-Bench/object_rel_distance: 39.7
+    MindCube-Tiny: 29.9
+    VSTI-Bench-prefix: 43.7
+    VSTI-Bench-prefix/camera_displacement: 12.7
+    SPBench-MV: 56.9
+  VideoR1-7B:
+    VSI-Bench: 33.4
+    VSI-Bench/route_planning: 31.4
+    VSI-Bench/object_rel_distance: 36.8
+    MindCube-Tiny: 30.9
+    VSTI-Bench-prefix: 36.2
+    VSTI-Bench-prefix/camera_displacement: 5.4
+    SPBench-MV: 40.7
+  ViLASR-7B:
+    VSI-Bench: 44.6
+    VSI-Bench/route_planning: 29.9
+    VSI-Bench/object_rel_distance: 45.1
+    MindCube-Tiny: 35.1
+    VSTI-Bench-prefix: 46.2
+    VSTI-Bench-prefix/camera_displacement: 15.7
+    SPBench-MV: 57.6

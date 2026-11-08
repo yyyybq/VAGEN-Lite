@@ -1,0 +1,12 @@
+# lmms-eval's own vsibench task (tasks/vsibench/vsibench.yaml at lmms-eval 9a33763) with one change:
+# dataset_kwargs.token False instead of True.  VSI-Bench is public; token True only makes the loader demand a
+# saved Hugging Face login, and we do not send credentials to the mirror.  Prompt, scoring and data are the
+# original task's (the include below).
+dataset_name: full
+test_split: test
+task: "vsibench_ee"
+dataset_kwargs:
+  token: False
+  cache_dir: vsibench
+  video: True
+include: /mnt/umm/users/yinbaiqiao/eval_external_assets/repos/lmms-eval/lmms_eval/tasks/vsibench/_default_template_yaml

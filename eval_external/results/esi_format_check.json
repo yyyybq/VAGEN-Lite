@@ -1,0 +1,94 @@
+[
+ {
+  "model": "SI-7B",
+  "n": 20,
+  "scored": 20,
+  "invalid": 3,
+  "invalid_pct": 15.0,
+  "kinds": {
+   "action_not_offered": 3
+  },
+  "call_errors": 0
+ },
+ {
+  "model": "base-7B",
+  "n": 20,
+  "scored": 20,
+  "invalid": 1,
+  "invalid_pct": 5.0,
+  "kinds": {
+   "action_not_offered": 1
+  },
+  "call_errors": 0
+ },
+ {
+  "model": "ours-RL-150",
+  "n": 20,
+  "scored": 20,
+  "invalid": 17,
+  "invalid_pct": 85.0,
+  "kinds": {
+   "action_not_offered": 16,
+   "no_answer": 16,
+   "no_confidence": 16,
+   "no_json": 1
+  },
+  "call_errors": 0
+ },
+ {
+  "model": "ours-RL-r11-dense",
+  "n": 20,
+  "scored": 20,
+  "invalid": 20,
+  "invalid_pct": 100.0,
+  "kinds": {
+   "no_json": 11,
+   "action_not_offered": 20,
+   "no_answer": 20,
+   "no_confidence": 20
+  },
+  "call_errors": 0
+ },
+ {
+  "model": "ours-RL-r11",
+  "n": 20,
+  "scored": 20,
+  "invalid": 20,
+  "invalid_pct": 100.0,
+  "kinds": {
+   "action_not_offered": 19,
+   "no_answer": 20,
+   "no_confidence": 20,
+   "no_json": 2
+  },
+  "call_errors": 0
+ },
+ {
+  "model": "ours-SFT-r11",
+  "n": 20,
+  "scored": 20,
+  "invalid": 20,
+  "invalid_pct": 100.0,
+  "kinds": {
+   "no_json": 3,
+   "action_not_offered": 19,
+   "no_answer": 19,
+   "no_confidence": 19
+  },
+  "call_errors": 0
+ },
+ {
+  "model": "ours-SFT",
+  "n": 20,
+  "scored": 20,
+  "invalid": 16,
+  "invalid_pct": 80.0,
+  "kinds": {
+   "action_not_offered": 16,
+   "no_answer": 16,
+   "no_confidence": 16,
+   "no_json": 1
+  },
+  "call_errors": 0
+ }
+]

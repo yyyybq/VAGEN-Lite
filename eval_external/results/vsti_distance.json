@@ -1,0 +1,834 @@
+{
+ "base-3B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 903,
+   "spearman": 0.023,
+   "distinct_values": 7,
+   "top5": [
+    [
+     0.5,
+     679
+    ],
+    [
+     1.0,
+     152
+    ],
+    [
+     0.1,
+     28
+    ],
+    [
+     1.5,
+     24
+    ],
+    [
+     0.01,
+     15
+    ]
+   ],
+   "top5_share": 0.994
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 833,
+   "spearman": 0.157,
+   "distinct_values": 6,
+   "top5": [
+    [
+     1.0,
+     289
+    ],
+    [
+     0.5,
+     244
+    ],
+    [
+     1.5,
+     220
+    ],
+    [
+     10.0,
+     61
+    ],
+    [
+     0.1,
+     16
+    ]
+   ],
+   "top5_share": 0.996
+  }
+ },
+ "base-7B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 905,
+   "spearman": 0.263,
+   "distinct_values": 7,
+   "top5": [
+    [
+     1.0,
+     393
+    ],
+    [
+     0.5,
+     182
+    ],
+    [
+     2.0,
+     127
+    ],
+    [
+     1.5,
+     90
+    ],
+    [
+     3.0,
+     60
+    ]
+   ],
+   "top5_share": 0.941
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 832,
+   "spearman": 0.246,
+   "distinct_values": 11,
+   "top5": [
+    [
+     10.0,
+     451
+    ],
+    [
+     1.0,
+     235
+    ],
+    [
+     3.0,
+     59
+    ],
+    [
+     0.5,
+     33
+    ],
+    [
+     0.05,
+     26
+    ]
+   ],
+   "top5_share": 0.966
+  }
+ },
+ "ours-SFT": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 881,
+   "spearman": 0.334,
+   "distinct_values": 21,
+   "top5": [
+    [
+     0.5,
+     262
+    ],
+    [
+     0.05,
+     158
+    ],
+    [
+     0.01,
+     154
+    ],
+    [
+     0.15,
+     133
+    ],
+    [
+     0.25,
+     27
+    ]
+   ],
+   "top5_share": 0.833
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 822,
+   "spearman": 0.288,
+   "distinct_values": 37,
+   "top5": [
+    [
+     10.0,
+     369
+    ],
+    [
+     0.03,
+     85
+    ],
+    [
+     0.5,
+     76
+    ],
+    [
+     0.05,
+     67
+    ],
+    [
+     1.52,
+     40
+    ]
+   ],
+   "top5_share": 0.775
+  }
+ },
+ "ours-RL-50": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 882,
+   "spearman": 0.358,
+   "distinct_values": 22,
+   "top5": [
+    [
+     0.5,
+     233
+    ],
+    [
+     0.01,
+     168
+    ],
+    [
+     0.05,
+     157
+    ],
+    [
+     0.15,
+     130
+    ],
+    [
+     0.1,
+     30
+    ]
+   ],
+   "top5_share": 0.814
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 822,
+   "spearman": 0.275,
+   "distinct_values": 34,
+   "top5": [
+    [
+     10.0,
+     364
+    ],
+    [
+     0.03,
+     93
+    ],
+    [
+     0.5,
+     65
+    ],
+    [
+     0.05,
+     60
+    ],
+    [
+     1.52,
+     37
+    ]
+   ],
+   "top5_share": 0.753
+  }
+ },
+ "ours-RL-150": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 890,
+   "spearman": 0.344,
+   "distinct_values": 29,
+   "top5": [
+    [
+     0.5,
+     227
+    ],
+    [
+     0.01,
+     170
+    ],
+    [
+     0.15,
+     165
+    ],
+    [
+     0.05,
+     143
+    ],
+    [
+     0.1,
+     28
+    ]
+   ],
+   "top5_share": 0.824
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 825,
+   "spearman": 0.265,
+   "distinct_values": 38,
+   "top5": [
+    [
+     10.0,
+     354
+    ],
+    [
+     0.03,
+     87
+    ],
+    [
+     0.05,
+     67
+    ],
+    [
+     0.5,
+     62
+    ],
+    [
+     1.52,
+     45
+    ]
+   ],
+   "top5_share": 0.745
+  }
+ },
+ "ours-SFT-r11": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 822,
+   "spearman": 0.31,
+   "distinct_values": 29,
+   "top5": [
+    [
+     0.5,
+     398
+    ],
+    [
+     0.01,
+     96
+    ],
+    [
+     0.05,
+     92
+    ],
+    [
+     0.1,
+     80
+    ],
+    [
+     0.15,
+     35
+    ]
+   ],
+   "top5_share": 0.853
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 726,
+   "spearman": 0.298,
+   "distinct_values": 50,
+   "top5": [
+    [
+     0.5,
+     227
+    ],
+    [
+     10.0,
+     190
+    ],
+    [
+     0.05,
+     58
+    ],
+    [
+     2.0,
+     33
+    ],
+    [
+     1.0,
+     26
+    ]
+   ],
+   "top5_share": 0.736
+  }
+ },
+ "ours-RL-r11": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 753,
+   "spearman": 0.3,
+   "distinct_values": 17,
+   "top5": [
+    [
+     0.5,
+     428
+    ],
+    [
+     0.05,
+     80
+    ],
+    [
+     0.1,
+     76
+    ],
+    [
+     0.01,
+     42
+    ],
+    [
+     0.2,
+     35
+    ]
+   ],
+   "top5_share": 0.878
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 690,
+   "spearman": 0.261,
+   "distinct_values": 28,
+   "top5": [
+    [
+     10.0,
+     237
+    ],
+    [
+     0.5,
+     209
+    ],
+    [
+     1.0,
+     40
+    ],
+    [
+     2.0,
+     39
+    ],
+    [
+     20.0,
+     34
+    ]
+   ],
+   "top5_share": 0.81
+  }
+ },
+ "SI-3B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 905,
+   "spearman": 0.483,
+   "distinct_values": 15,
+   "top5": [
+    [
+     0.8,
+     301
+    ],
+    [
+     1.0,
+     295
+    ],
+    [
+     1.9,
+     63
+    ],
+    [
+     2.0,
+     58
+    ],
+    [
+     1.3,
+     49
+    ]
+   ],
+   "top5_share": 0.846
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 833,
+   "spearman": 0.416,
+   "distinct_values": 13,
+   "top5": [
+    [
+     2.0,
+     210
+    ],
+    [
+     1.9,
+     177
+    ],
+    [
+     1.0,
+     100
+    ],
+    [
+     2.9,
+     87
+    ],
+    [
+     3.0,
+     70
+    ]
+   ],
+   "top5_share": 0.773
+  }
+ },
+ "SI-7B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 905,
+   "spearman": 0.324,
+   "distinct_values": 14,
+   "top5": [
+    [
+     1.0,
+     358
+    ],
+    [
+     0.8,
+     300
+    ],
+    [
+     1.9,
+     97
+    ],
+    [
+     0.3,
+     37
+    ],
+    [
+     0.5,
+     29
+    ]
+   ],
+   "top5_share": 0.907
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 833,
+   "spearman": 0.446,
+   "distinct_values": 15,
+   "top5": [
+    [
+     1.9,
+     238
+    ],
+    [
+     1.0,
+     230
+    ],
+    [
+     0.8,
+     123
+    ],
+    [
+     2.9,
+     71
+    ],
+    [
+     1.3,
+     40
+    ]
+   ],
+   "top5_share": 0.843
+  }
+ },
+ "SpaceR-7B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 905,
+   "spearman": 0.235,
+   "distinct_values": 8,
+   "top5": [
+    [
+     1.5,
+     365
+    ],
+    [
+     2.0,
+     334
+    ],
+    [
+     2.5,
+     110
+    ],
+    [
+     1.0,
+     86
+    ],
+    [
+     5.0,
+     7
+    ]
+   ],
+   "top5_share": 0.997
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 833,
+   "spearman": 0.263,
+   "distinct_values": 8,
+   "top5": [
+    [
+     2.0,
+     323
+    ],
+    [
+     10.0,
+     255
+    ],
+    [
+     5.0,
+     123
+    ],
+    [
+     2.5,
+     67
+    ],
+    [
+     1.5,
+     40
+    ]
+   ],
+   "top5_share": 0.97
+  }
+ },
+ "VideoR1-7B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 884,
+   "spearman": 0.112,
+   "distinct_values": 5,
+   "top5": [
+    [
+     1.5,
+     847
+    ],
+    [
+     0.5,
+     15
+    ],
+    [
+     5.0,
+     13
+    ],
+    [
+     3.5,
+     5
+    ],
+    [
+     10.0,
+     4
+    ]
+   ],
+   "top5_share": 1.0
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 832,
+   "spearman": 0.251,
+   "distinct_values": 3,
+   "top5": [
+    [
+     10.0,
+     489
+    ],
+    [
+     1.5,
+     342
+    ],
+    [
+     0.5,
+     1
+    ]
+   ],
+   "top5_share": 1.0
+  }
+ },
+ "ViLASR-7B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 905,
+   "spearman": 0.307,
+   "distinct_values": 8,
+   "top5": [
+    [
+     2.1,
+     313
+    ],
+    [
+     1.2,
+     296
+    ],
+    [
+     2.8,
+     112
+    ],
+    [
+     1.8,
+     86
+    ],
+    [
+     2.5,
+     40
+    ]
+   ],
+   "top5_share": 0.936
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 833,
+   "spearman": 0.317,
+   "distinct_values": 16,
+   "top5": [
+    [
+     3.2,
+     293
+    ],
+    [
+     2.5,
+     205
+    ],
+    [
+     2.8,
+     124
+    ],
+    [
+     6.2,
+     108
+    ],
+    [
+     4.2,
+     26
+    ]
+   ],
+   "top5_share": 0.908
+  }
+ },
+ "VST-7B-RL": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 905,
+   "spearman": 0.516,
+   "distinct_values": 35,
+   "top5": [
+    [
+     2.0,
+     183
+    ],
+    [
+     1.5,
+     152
+    ],
+    [
+     1.8,
+     92
+    ],
+    [
+     2.5,
+     83
+    ],
+    [
+     2.8,
+     56
+    ]
+   ],
+   "top5_share": 0.625
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 833,
+   "spearman": 0.273,
+   "distinct_values": 28,
+   "top5": [
+    [
+     2.5,
+     132
+    ],
+    [
+     1.8,
+     114
+    ],
+    [
+     1.5,
+     105
+    ],
+    [
+     1.0,
+     99
+    ],
+    [
+     3.5,
+     92
+    ]
+   ],
+   "top5_share": 0.651
+  }
+ },
+ "SenseNovaSI-7B": {
+  "camera_obj_abs_dist": {
+   "n": 905,
+   "n_positive_number": 905,
+   "spearman": 0.524,
+   "distinct_values": 19,
+   "top5": [
+    [
+     1.0,
+     413
+    ],
+    [
+     1.1,
+     127
+    ],
+    [
+     1.2,
+     108
+    ],
+    [
+     2.0,
+     49
+    ],
+    [
+     0.8,
+     45
+    ]
+   ],
+   "top5_share": 0.82
+  },
+  "camera_displacement": {
+   "n": 833,
+   "n_positive_number": 833,
+   "spearman": 0.264,
+   "distinct_values": 16,
+   "top5": [
+    [
+     1.0,
+     344
+    ],
+    [
+     1.1,
+     236
+    ],
+    [
+     1.2,
+     97
+    ],
+    [
+     0.7,
+     43
+    ],
+    [
+     0.6,
+     42
+    ]
+   ],
+   "top5_share": 0.915
+  }
+ }
+}
