@@ -117,14 +117,25 @@ def test_criteria_doc_matches_verdict_constants():
     assert int(kv.pop("NPROC_STEPS")) == verdict.NPROC_STEPS == 150
     assert tuple(int(x) for x in kv.pop("EGL_RGBA").split(",")) == verdict.EGL_RGBA == (51, 102, 153, 255)
     assert int(kv.pop("EGL_TOL")) == verdict.EGL_TOL == 2
+    assert tuple(int(x) for x in kv.pop("EGL_DRAW_RGB").split(",")) == verdict.EGL_DRAW_RGB == (255, 0, 0)
+    assert int(kv.pop("EGL_DRAW_TOL")) == verdict.EGL_DRAW_TOL == 3
     assert not kv, kv
+    # egl_probe's own E6 rule uses the same numbers
+    assert eglp.DRAW_RGB == verdict.EGL_DRAW_RGB and eglp.DRAW_TOL == verdict.EGL_DRAW_TOL
+    assert eglp.CLEAR_RGB == verdict.EGL_RGBA[:3] and eglp.CLEAR_TOL == verdict.EGL_TOL
+    # only E6 (EGL_DRAW), not E5, carries the 'EGL benchmarks may be reconsidered' implication (deviation log)
+    row = next(ln for ln in doc.splitlines() if ln.startswith("| **EGL_DRAW**"))
+    assert "Habitat-sim" in row
+    row = next(ln for ln in doc.splitlines() if ln.startswith("| **EGL_GATE**"))
+    assert "**不能**" in row and "2026-11-09 更正" in row
+    assert "2026-11-09 UTC / EGL 结论说过头" in doc and "lavapipe 的测量作废" in doc
     # the smoke script asks thor_smoke for exactly the frozen step counts
     sm = SMOKE.read_text()
     assert f"--steps {verdict.STEPS} --gpu 0" in sm
     assert f"--steps {verdict.NPROC_STEPS} --gpu 0 --nproc {verdict.NPROC}" in sm
     assert "timeout 1800" in sm
     # the criterion names of the doc are the verdict's
-    for n in ("T0", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "E0", "E1", "E2", "E3", "E4", "E5"):
+    for n in ("T0", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "E0", "E1", "E2", "E3", "E4", "E5", "E6"):
         assert f"| {n} |" in doc, n
 
 
@@ -232,7 +243,13 @@ def make_pass(out: Path):
                                           "agg_steps_per_s": 120.0, "pass": True})
     wjson(out / "egl" / "result.json", {"num_devices": 1, "egl_version": "1.5", "EGL_VENDOR": "NVIDIA",
                                         "GL_RENDERER": "NVIDIA H800/PCIe/SSE2", "readback_px0": [51, 102, 153, 255],
-                                        "stage": "readback", "pass": True})
+                                        "stage": "draw", "pass": True, "draw_pass": True, "draw": good_draw()})
+
+
+def good_draw():
+    return {"vs_compiled": True, "fs_compiled": True, "linked": True, "vs_log": "", "fs_log": "", "link_log": "",
+            "gl_errors": [], "centre_px": [255, 0, 0, 255], "corners_px": [[51, 102, 153, 255]] * 4,
+            "red_pixels": 11800, "pass": True}
 
 
 def edit(out: Path, rel: str, fn):
@@ -251,6 +268,73 @@ def test_verdict_pass(base):
                                 "lavapipe_640x360": None}
     assert json.loads((base / "verdict.json").read_text())["TVR_GATE"] == "PASS"
     assert "TVR pilot may be planned" in v["next"]
+    assert v["EGL_DRAW"] == "PASS" and v["draw_reasons"] == [] and "may be reconsidered" in v["next"]
+    assert v["lavapipe"]["ran"] is False
+
+
+@pytest.mark.parametrize("case", ["not_run", "vs_fail", "link_fail", "gl_error", "centre", "corner",
+                                  "corners_missing", "error"])
+def test_verdict_egl_draw(base, case):
+    """E6 is its own gate (EGL_DRAW): it never moves EGL_GATE, and only its PASS reopens EGL benchmarks."""
+    make_pass(base)
+
+    def fn(d):
+        dr = d["draw"]
+        if case == "not_run":  # an egl_probe.py from before E6 (smoke_run1)
+            d.pop("draw")
+            d.pop("draw_pass")
+        elif case == "vs_fail":
+            dr.update(vs_compiled=False, vs_log="0:2(1): error: syntax error")
+        elif case == "link_fail":
+            dr["linked"] = False
+        elif case == "gl_error":
+            dr["gl_errors"] = [{"after": "draw", "error": "0x502"}]
+        elif case == "centre":
+            dr["centre_px"] = [251, 4, 0, 255]  # off by 4 in two channels: more than +-3
+        elif case == "corner":
+            dr["corners_px"] = [[51, 102, 153, 255]] * 3 + [[255, 0, 0, 255]]  # the triangle covered one corner
+        elif case == "corners_missing":
+            dr["corners_px"] = [[51, 102, 153, 255]] * 3
+        else:
+            dr.update(error="RuntimeError('no GL entry point glGenVertexArrays')", centre_px=None)
+    edit(base, "egl/result.json", fn)
+    v = verdict.verdict(str(base))
+    assert (v["TVR_GATE"], v["EGL_GATE"]) == ("PASS", "PASS"), v["reasons"]
+    assert v["EGL_DRAW"] == ("NOT_RUN" if case == "not_run" else "FAIL")
+    assert [r["name"] for r in v["criteria"]["egl_draw"] if not r["ok"]] == ["E6_draw"]
+    assert v["draw_reasons"] and v["reasons"] == []
+    assert "stay closed" in v["next"] and "may be reconsidered" not in v["next"]
+    if case == "not_run":
+        assert "until E6 passes" in v["next"]
+
+
+def test_verdict_egl_draw_boundaries(base):
+    make_pass(base)
+    edit(base, "egl/result.json", lambda d: d["draw"].update(centre_px=[252, 3, 3, 0],
+                                                             corners_px=[[53, 100, 155, 0], [49, 104, 151, 0]] * 2))
+    assert verdict.verdict(str(base))["EGL_DRAW"] == "PASS"
+
+
+def test_verdict_lavapipe_report(base):
+    make_pass(base)
+    wjson(base / "thor_lvp" / "result.json", {
+        "argv": ["thor_smoke.py", "--out", "x", "--steps", "50", "--gpu", "0", "--no-tasks", "--fail-fast"],
+        "raw": {"startup_s": 3.0, "error": "unity_fatal_signal: Caught fatal signal - signo:6"},
+        "fatal": {"reason": "fatal_signal", "t_s": 4.1, "lines": ["Caught fatal signal - signo:6"], "pids": [7]}})
+    v = verdict.verdict(str(base))
+    lv = v["lavapipe"]
+    assert lv["ran"] and lv["gpu_device_passed"] and lv["fatal"]["reason"] == "fatal_signal"
+    assert lv["error"].startswith("unity_fatal_signal") and v["steps_per_s"]["lavapipe_640x360"] is None
+    assert v["TVR_GATE"] == "PASS"  # lavapipe is reported only
+    assert lv["measured"] is False and lv["detail"] is None
+    # smoke_run1's row: --no-gpu-device, killed by the 240 s timeout before any phase-A result
+    wjson(base / "thor_lvp" / "result.json", {"argv": ["thor_smoke.py", "--steps", "50", "--no-gpu-device",
+                                                        "--no-tasks"], "pass": False, "elapsed_s": 0.0})
+    lv = verdict.verdict(str(base))["lavapipe"]
+    assert lv["gpu_device_passed"] is False and lv["measured"] is False and "before the Controller" in lv["detail"]
+    edit(base, "thor_lvp/result.json", lambda d: d.update(raw={"steps": 50, "steps_per_s": 3.5}, argv=[]))
+    lv = verdict.verdict(str(base))["lavapipe"]
+    assert lv["measured"] is True and lv["steps_per_s"] == 3.5
 
 
 def _set(rel, path, value):
@@ -660,6 +744,146 @@ def test_run_single_process(base, monkeypatch):
     a = thor.parse_args(["--out", str(base / "t2"), "--repo", str(repo), "--steps", "8"])
     res = thor.run(a, factory=lambda g: (FakeController(const=True), 2.0), env_cls=FakeEnv)
     assert not res["pass"] and len(res["tasks"]) == 2
+    # --fail-fast on a healthy run: the watch runs, never fires, the result is the same
+    a = thor.parse_args(["--out", str(base / "t3"), "--repo", str(repo), "--steps", "12", "--fail-fast"])
+    res = thor.run(a, factory=lambda g: (FakeController(), 2.0), env_cls=FakeEnv,
+                   exit_fn=lambda rc: pytest.fail("fail-fast fired on a healthy run"))
+    assert res["pass"] and "fatal" not in res and res["fail_fast"]["log"] == str(log)
+
+
+# --- thor_smoke --fail-fast watch (B2: smoke_run1's lavapipe step waited 240 s on an aborted Unity) -------------
+
+LVP_CRASH = ("Forcing GfxDevice: Vulkan\n"
+             "[Vulkan init] SelectPhysicalDevice requestedDeviceIndex=-1 xrDevice=(nil)\n"
+             "[Vulkan init] Physical Device 0x55591237f050 [0]: \"llvmpipe (LLVM 23.1.4, 256 bits)\" deviceType=4\n"
+             "[Vulkan init] Selected physical device (nil)\n"
+             "Caught fatal signal - signo:6 code:-6 errno:0 addr:0x4f6500000456\n"
+             "Obtained 26 stack frames.\n#0  0x007f5523cb418b in gsignal\n")
+
+
+def test_unity_watch_fatal_signal(base):
+    log = base / "home" / thor.PLAYER_LOG
+    log.parent.mkdir(parents=True)
+    log.write_text("an older run\nCaught fatal signal - signo:11\n")  # before the watch: never counts
+    fired = []
+    w = thor.UnityWatch(str(log), fired.append, children=lambda: [])
+    w.arm()
+    assert w.poll() is None
+    # Unity starts: it rotates Player.log (a new inode) and aborts
+    os.replace(log, log.with_name("Player-prev.log"))
+    log.write_text(LVP_CRASH)
+    info = w.poll()
+    assert info["reason"] == "fatal_signal" and fired == [info] and w.fired is info
+    assert info["lines"][0].startswith("Caught fatal signal - signo:6") and "gsignal" in info["lines"][-1]
+    assert w.poll() is None and len(fired) == 1  # fires once
+    # same file, appended: a crash written while disarmed (e.g. during a deliberate stop) is consumed, not acted on
+    log2 = base / "h2" / "Player.log"
+    log2.parent.mkdir()
+    log2.write_text("start\n")
+    fired2 = []
+    w2 = thor.UnityWatch(str(log2), fired2.append, children=lambda: [])
+    with open(log2, "a") as f:
+        f.write("Caught fatal signal - signo:15\n")
+    assert w2.poll() is None
+    w2.arm()
+    assert w2.poll() is None and fired2 == []
+    with open(log2, "a") as f:
+        f.write("Caught fatal signal - signo:6\n#0 abort\n")
+    assert w2.poll()["lines"] == ["Caught fatal signal - signo:6", "#0 abort"]
+
+
+def test_unity_watch_player_exit(base):
+    t, kids, fired = [0.0], [[]], []
+    w = thor.UnityWatch(str(base / "none.log"), fired.append, children=lambda: kids[0], grace_s=5.0,
+                        clock=lambda: t[0])
+    w.arm()
+    assert w.poll() is None  # no player yet (ai2thor still resolving the build)
+    kids[0] = [4242]
+    assert w.poll() is None
+    kids[0], t[0] = [], 1.0
+    assert w.poll() is None  # gone: the grace period starts
+    t[0] = 5.9
+    assert w.poll() is None
+    t[0] = 6.1
+    info = w.poll()
+    assert info["reason"] == "unity_exited" and info["pids"] == [4242] and fired == [info]
+    # a player that comes back inside the grace period, or is stopped while disarmed, does not fire
+    t, kids, fired = [0.0], [[7]], []
+    w = thor.UnityWatch(str(base / "none.log"), fired.append, children=lambda: kids[0], grace_s=5.0,
+                        clock=lambda: t[0])
+    w.arm()
+    w.poll()
+    kids[0], t[0] = [], 1.0
+    w.poll()
+    kids[0], t[0] = [8], 3.0
+    w.poll()
+    w.disarm()
+    kids[0], t[0] = [], 20.0
+    assert w.poll() is None and w.poll() is None and fired == []
+
+
+def test_unity_children_fake_proc(base):
+    proc = base / "proc"
+    for pid, state, ppid, cmd in ((101, "S", 999, f"/x/home/.ai2thor/releases/{BUILD_NAME}/{BUILD_NAME}\0-batchmode"),
+                                  (102, "Z", 999, f"/x/.ai2thor/releases/{BUILD_NAME}/{BUILD_NAME}"),
+                                  (103, "S", 1, f"/x/.ai2thor/releases/{BUILD_NAME}/{BUILD_NAME}"),
+                                  (104, "S", 999, "/usr/bin/vulkaninfo")):
+        (proc / str(pid)).mkdir(parents=True)
+        (proc / str(pid) / "stat").write_text(f"{pid} (thor-Cloud) {state} {ppid} 1 1 0 -1\n")
+        (proc / str(pid) / "cmdline").write_bytes(cmd.encode())
+    (proc / "self").mkdir()
+    assert thor.unity_children(999, proc=str(proc)) == [101]
+    assert thor.unity_children(999, proc=str(base / "no_proc")) == []
+
+
+def test_run_fail_fast_end_to_end(base, monkeypatch):
+    """The watch thread fires while the main thread is blocked in the Controller start-up: result.json says why,
+    Player.log is kept, exit_fn gets 3 within seconds (os._exit in the job)."""
+    import threading
+    import time as _time
+    home = base / "home"
+    log = home / thor.PLAYER_LOG
+    log.parent.mkdir(parents=True)
+    log.write_text("stale\n")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(thor, "WATCH_POLL_S", 0.02)
+    monkeypatch.setattr(thor, "unity_children", lambda *a, **k: [])
+    done, rcs = threading.Event(), []
+
+    def exit_fn(rc):
+        rcs.append(rc)
+        done.set()
+
+    def factory(gpu):
+        assert gpu == 0
+        os.replace(log, log.with_name("Player-prev.log"))
+        log.write_text(LVP_CRASH)
+        if not done.wait(10):  # stands in for ai2thor's server.receive(timeout=300)
+            raise AssertionError("the watch did not fire")
+        raise RuntimeError("controller start-up interrupted")
+
+    out = base / "ff"
+    a = thor.parse_args(["--out", str(out), "--steps", "50", "--gpu", "0", "--no-tasks", "--fail-fast"])
+    t0 = _time.time()
+    res = thor.run(a, factory=factory, exit_fn=exit_fn)
+    assert rcs == [thor.FAIL_FAST_RC] and _time.time() - t0 < 5
+    disk = json.loads((out / "result.json").read_text())
+    assert disk["fatal"]["reason"] == "fatal_signal" and disk["pass"] is False
+    assert disk["raw"]["error"].startswith("unity_fatal_signal: Caught fatal signal - signo:6")
+    assert res["raw"]["error"] == disk["raw"]["error"]  # the fatal reason is kept over the start-up exception
+    assert (out / "Player_fatal.log").read_text() == LVP_CRASH
+    # the verdict reports it as the lavapipe row (step 6 is reported only)
+    make_pass(base / "v")
+    (base / "v" / "thor_lvp").mkdir()
+    shutil.copyfile(out / "result.json", base / "v" / "thor_lvp" / "result.json")
+    lv = verdict.verdict(str(base / "v"))["lavapipe"]
+    assert lv["fatal"]["reason"] == "fatal_signal" and lv["gpu_device_passed"] is True
+    # --nproc > 1: the watch is not used (one Player.log for all players)
+    a = thor.parse_args(["--out", str(base / "np"), "--steps", "4", "--nproc", "2", "--no-tasks", "--fail-fast"])
+    from multiprocessing.pool import ThreadPool
+    monkeypatch.setattr(thor, "STAGGER_S", 0)
+    res = thor.run(a, factory=lambda g: (FakeController(), 0.1), pool_factory=ThreadPool)
+    assert res["fail_fast"].startswith("ignored") and res["pass"]
 
 
 # --- egl_probe without EGL ------------------------------------------------------------------------------------
@@ -673,6 +897,173 @@ def test_egl_probe_without_library(base):
     assert eglp.readback_ok([51, 102, 153, 255]) and eglp.readback_ok([53, 100, 151, 253])
     assert not eglp.readback_ok([48, 102, 153, 255]) and not eglp.readback_ok(None)
     assert eglp.EXPECT == verdict.EGL_RGBA
+
+
+class FakeGL:
+    """Python stand-in for the glvnd libOpenGL.so.0 that egl_probe.draw_probe calls (no driver, no EGL): it keeps
+    the clear colour, 'rasterises' the triangle egl_probe sends (pixel centres inside it become the fragment colour)
+    and serves glReadPixels into the caller's buffer.  Knobs: compile_ok / link_ok / logs, error_after_draw (a GL
+    error flag raised by glDrawArrays), frag (the colour the 'shader' writes), missing (entry points absent)."""
+
+    def __init__(self, compile_ok=True, link_ok=True, error_after_draw=None, frag=(255, 0, 0, 255), missing=()):
+        self.compile_ok, self.link_ok, self.frag = compile_ok, link_ok, frag
+        self.error_after_draw, self.flags, self.calls = error_after_draw, [], []
+        self.clear_rgba, self.verts, self.drawn, self.depth_test, self.next_id = (0, 0, 0, 0), None, False, False, 1
+        self.sources = {}
+        fns = {k: getattr(self, "_" + k) for k in (
+            "glGetError", "glCreateShader", "glShaderSource", "glCompileShader", "glGetShaderiv",
+            "glGetShaderInfoLog", "glCreateProgram", "glAttachShader", "glLinkProgram", "glGetProgramiv",
+            "glGetProgramInfoLog", "glGenVertexArrays", "glBindVertexArray", "glGenBuffers", "glBindBuffer",
+            "glBufferData", "glVertexAttribPointer", "glEnableVertexAttribArray", "glUseProgram", "glViewport",
+            "glEnable", "glDepthFunc", "glClearColor", "glClearDepth", "glClear", "glDrawArrays", "glFinish",
+            "glReadPixels")}
+        for k, f in fns.items():
+            if k not in missing:
+                # a plain function per entry point, like ctypes' (draw_probe may set restype / argtypes on it)
+                setattr(self, k, (lambda f, k: lambda *a: (self.calls.append(k), f(*a))[1])(f, k))
+
+    def _id(self):
+        self.next_id += 1
+        return self.next_id
+
+    def _glGetError(self):
+        return self.flags.pop(0) if self.flags else 0
+
+    def _glCreateShader(self, kind):
+        s = self._id()
+        self.sources[s] = kind
+        return s
+
+    def _glShaderSource(self, s, n, arr, lengths):
+        assert n == 1 and arr[0].startswith(b"#version 330 core")
+
+    def _glCompileShader(self, s):
+        pass
+
+    def _glGetShaderiv(self, s, pname, ptr):
+        log = b"" if self.compile_ok else b"0:2(1): error: syntax error"
+        ptr._obj.value = int(self.compile_ok) if pname == eglp.GL_COMPILE_STATUS else len(log) + 1 if log else 0
+
+    def _glGetShaderInfoLog(self, s, n, length, buf):
+        buf.value = b"0:2(1): error: syntax error"[:n - 1]
+
+    def _glCreateProgram(self):
+        return self._id()
+
+    def _glAttachShader(self, p, s):
+        pass
+
+    def _glLinkProgram(self, p):
+        pass
+
+    def _glGetProgramiv(self, p, pname, ptr):
+        ptr._obj.value = int(self.link_ok) if pname == eglp.GL_LINK_STATUS else 0
+
+    def _glGetProgramInfoLog(self, p, n, length, buf):
+        pass
+
+    def _glGenVertexArrays(self, n, ptr):
+        ptr._obj.value = self._id()
+
+    _glGenBuffers = _glGenVertexArrays
+
+    def _glBindVertexArray(self, v):
+        pass
+
+    def _glBindBuffer(self, target, b):
+        pass
+
+    def _glBufferData(self, target, size, data, usage):
+        import ctypes
+        self.verts = list((ctypes.c_float * (size // 4)).from_address(data.value))
+
+    def _glVertexAttribPointer(self, *a):
+        pass
+
+    def _glEnableVertexAttribArray(self, i):
+        pass
+
+    def _glUseProgram(self, p):
+        pass
+
+    def _glViewport(self, *a):
+        pass
+
+    def _glEnable(self, cap):
+        self.depth_test = self.depth_test or cap == eglp.GL_DEPTH_TEST
+
+    def _glDepthFunc(self, f):
+        pass
+
+    def _glClearColor(self, r, g, b, a):
+        self.clear_rgba = tuple(int(round(x * 255)) for x in (r, g, b, a))
+
+    def _glClearDepth(self, d):
+        pass
+
+    def _glClear(self, mask):
+        self.drawn = False
+
+    def _glDrawArrays(self, mode, first, count):
+        assert mode == eglp.GL_TRIANGLES and count == 3 and self.verts and self.depth_test
+        self.drawn = True
+        if self.error_after_draw:
+            self.flags.append(self.error_after_draw)
+
+    def _glFinish(self):
+        pass
+
+    def _glReadPixels(self, x, y, w, h, fmt, typ, ptr):
+        import ctypes
+        size = eglp.SIZE
+        p = [((self.verts[3 * k] + 1) * size / 2, (self.verts[3 * k + 1] + 1) * size / 2) for k in range(3)] \
+            if self.drawn else None
+
+        def inside(px, py):
+            if p is None:
+                return False
+            s = [(p[(k + 1) % 3][0] - p[k][0]) * (py - p[k][1]) - (p[(k + 1) % 3][1] - p[k][1]) * (px - p[k][0])
+                 for k in range(3)]
+            return all(v >= 0 for v in s) or all(v <= 0 for v in s)
+
+        out = bytearray()
+        for yy in range(h):
+            for xx in range(w):
+                out += bytes(self.frag if inside(xx + 0.5, yy + 0.5) else self.clear_rgba)
+        ctypes.memmove(ptr.value, bytes(out), len(out))
+
+
+class FakeEGL:
+    def eglGetProcAddress(self, name):
+        return None
+
+
+def test_egl_draw_probe_with_a_fake_gl(base):
+    d = eglp.draw_probe(FakeGL(), FakeEGL(), str(base))
+    assert d["pass"] and eglp.draw_ok(d), d
+    assert d["centre_px"] == [255, 0, 0, 255] and d["corners_px"] == [[51, 102, 153, 255]] * 4
+    assert d["gl_errors"] == []
+    assert d["vs_compiled"] and d["fs_compiled"] and d["linked"]
+    assert 0.15 * 256 * 256 < d["red_pixels"] < 0.25 * 256 * 256  # the triangle is 0.72 of the 4 NDC units^2 = 18%
+    assert (base / "shader_info.log").read_text().startswith("## vs_log (ok=True)")
+    assert (base / "draw.png").exists()
+    # every failure the E6 rule names
+    bad = eglp.draw_probe(FakeGL(compile_ok=False), FakeEGL(), str(base))
+    assert not bad["pass"] and bad["vs_compiled"] is False and "syntax error" in bad["vs_log"]
+    assert "centre_px" not in bad  # nothing drawn after a failed compile
+    assert "syntax error" in (base / "shader_info.log").read_text()
+    assert not eglp.draw_probe(FakeGL(link_ok=False), FakeEGL(), str(base))["pass"]
+    err = eglp.draw_probe(FakeGL(error_after_draw=0x502), FakeEGL(), str(base))
+    assert not err["pass"] and err["gl_errors"] == [{"after": "draw", "error": "0x502"}]
+    assert not eglp.draw_probe(FakeGL(frag=(51, 102, 153, 255)), FakeEGL(), str(base))["pass"]  # nothing visible
+    miss = eglp.draw_probe(FakeGL(missing=("glGenVertexArrays",)), FakeEGL(), str(base))
+    assert not miss["pass"] and "glGenVertexArrays" in miss["error"]
+    # the probe's rule and the verdict's rule agree on all of these
+    for dd in (d, bad, err, miss):
+        out = base / f"v_{uuid.uuid4().hex[:6]}"
+        make_pass(out)
+        edit(out, "egl/result.json", lambda x: x.update(draw=json.loads(json.dumps(dd))))
+        assert (verdict.verdict(str(out))["EGL_DRAW"] == "PASS") == eglp.draw_ok(dd)
 
 
 # --- stage_tvr_login.sh on fake sources -----------------------------------------------------------------------
@@ -773,16 +1164,22 @@ FAKE_PY = """#!/usr/bin/env bash
 # fake tvr-env interpreter: interpreter flags (-I -u), then the script and its args
 flags=""; while [[ $1 == -* ]]; do flags="$flags $1"; shift; done
 script=$(basename "$1"); shift
+args="$*"
 out=""; nproc=1
 while [[ $# -gt 0 ]]; do case $1 in --out) out=$2; shift 2;; --nproc) nproc=$2; shift 2;; *) shift;; esac; done
 mkdir -p "$out"
 echo "$flags" > "$out/flags.txt"
+echo "$args" > "$out/argv.txt"
 case $script in
   thor_smoke.py)
     if [[ $nproc == 4 ]]; then cp "@C@/thor4.json" "$out/result.json"
     else
       cp "@C@/thor1.json" "$out/result.json"; cp "@C@/Player.log" "$out/Player_raw.log"
       echo "${CUDA_VISIBLE_DEVICES-unset}" > "$out/cvd_seen.txt"
+      { echo "CVD=${CUDA_VISIBLE_DEVICES-unset}"; echo "VK_ICD_FILENAMES=${VK_ICD_FILENAMES-}"
+        echo "VK_DRIVER_FILES=${VK_DRIVER_FILES-}"; echo "LP_NUM_THREADS=${LP_NUM_THREADS-unset}"
+        echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH-}"; echo "HOME=$HOME"
+        echo "MAP=$(cat "$HOME/.ai2thor/cuda-vulkan-mapping.json" 2>/dev/null || echo none)"; } > "$out/env_seen.txt"
       # leave a Unity player behind, started like ai2thor does: through $HOME/.ai2thor/releases (a symlink)
       "$HOME/.ai2thor/releases/@B@/@B@" < /dev/null > /dev/null 2>&1 &
       echo $! > "$out/fake_unity.pid"
@@ -804,8 +1201,12 @@ def alive(pid):
     return st.rsplit(")", 1)[1].split()[0] != "Z"
 
 
-def fake_tree(base: Path, driver=DRV, staged=True, **cvd):
+def fake_tree(base: Path, driver=DRV, staged=True, lvp=False, **cvd):
     out = base / "vout"
+    if lvp:  # the tvr env's mesa-lavapipe ICD file (step 6 runs only when it exists)
+        icd = out / "envs" / "tvr" / "share" / "vulkan" / "icd.d" / "lvp_icd.x86_64.json"
+        icd.parent.mkdir(parents=True)
+        icd.write_text('{"ICD": {"library_path": "libvulkan_lvp.so"}}\n')
     t = out / "tvr"
     nvgl = t / f"nvgl_{DRV}"
     canned = base / "canned"
@@ -849,6 +1250,8 @@ def run_smoke(env, outdir):
     """Run tvr_smoke.sh; afterwards kill any fake player it left (whatever the test outcome) and record that in
     r.left_alive, so a test can tell whether the script's own reaper did the job."""
     r = None
+    # hermetic: a caller's LP_NUM_THREADS (e.g. a 1-core login-node test run) must not reach thor1 (2026-11-09)
+    env = {k: v for k, v in env.items() if k != "LP_NUM_THREADS"}
     try:
         r = subprocess.run(["bash", str(SMOKE), str(outdir)], env=env, capture_output=True, text=True,
                            timeout=120)
@@ -919,6 +1322,41 @@ def test_smoke_cvd_remap(base):
     assert run_smoke(env0, od0).returncode == 0
     assert json.loads((od0 / "facts.json").read_text())["cvd_remap"] is None
     assert (od0 / "thor1" / "cvd_seen.txt").read_text().strip() == "0"
+
+
+def test_smoke_lavapipe_step(base):
+    """B2: step 6 gives Unity -force-device-index 0 (CVD=0, --gpu 0, mapping {"0": 0}), the lvp ICD and envs/tvr/lib
+    first, LP_NUM_THREADS=12 and --fail-fast; never --no-gpu-device / an unset CVD (smoke_run1's abort)."""
+    env = fake_tree(base, lvp=True)
+    od = base / "smoke" / "out"
+    lvp_pid = od / "thor_lvp" / "fake_unity.pid"
+    try:
+        r = run_smoke(env, od)
+        assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
+        st = {s["name"]: s for s in steps_of(od)}
+        assert st["6-lavapipe"]["rc"] == 0 and "skipped: no lavapipe ICD" not in r.stdout
+        argv = (od / "thor_lvp" / "argv.txt").read_text().split()
+        assert "--no-gpu-device" not in argv and argv[argv.index("--gpu") + 1] == "0"
+        assert "--fail-fast" in argv and "--no-tasks" in argv and argv[argv.index("--steps") + 1] == "50"
+        seen = dict(ln.split("=", 1) for ln in (od / "thor_lvp" / "env_seen.txt").read_text().splitlines())
+        icd = base / "vout" / "envs" / "tvr" / "share" / "vulkan" / "icd.d" / "lvp_icd.x86_64.json"
+        assert seen["CVD"] == "0" and seen["VK_ICD_FILENAMES"] == seen["VK_DRIVER_FILES"] == str(icd)
+        assert seen["LP_NUM_THREADS"] == "12"
+        assert seen["LD_LIBRARY_PATH"].startswith(str(base / "vout" / "envs" / "tvr" / "lib") + ":")
+        assert Path(seen["HOME"]).resolve() == (od / "home_lvp").resolve()
+        assert json.loads(seen["MAP"]) == {"0": 0}
+        # thor1 ran on the NVIDIA ICD, its own HOME, no LP_NUM_THREADS and no pre-written mapping
+        seen1 = dict(ln.split("=", 1) for ln in (od / "thor1" / "env_seen.txt").read_text().splitlines())
+        assert seen1["VK_ICD_FILENAMES"].endswith("/vulkan/nvidia_icd.json") and seen1["LP_NUM_THREADS"] == "unset"
+        assert seen1["MAP"] == "none" and Path(seen1["HOME"]).resolve() == (od / "home").resolve()
+        v = json.loads((od / "verdict.json").read_text())
+        assert v["lavapipe"]["ran"] is True and v["steps_per_s"]["lavapipe_640x360"] == 41.2
+        # the fake player the lavapipe step left behind was reaped
+        assert not alive(int(lvp_pid.read_text()))
+        assert "lavapipe: TERM lingering Unity player(s)" in (od / "logs" / "reap.log").read_text()
+    finally:
+        if lvp_pid.exists() and alive(int(lvp_pid.read_text())):
+            os.kill(int(lvp_pid.read_text()), 9)
 
 
 def test_smoke_time_budget_fits():

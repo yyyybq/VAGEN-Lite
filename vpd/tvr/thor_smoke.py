@@ -16,11 +16,19 @@ Phase B  (unless --no-tasks) TVRBench's own ThorEnv on the first iTHOR and the f
          because it starts a second Controller.
 --nproc K runs phase A in K spawned processes on the same card (start-up staggered by 8 s, like eval_va.py's
 init_lock) and reports the aggregate steps/s.
+--fail-fast (single process only) starts a watchdog thread while a Controller is starting or stepping: it polls
+$HOME's Player.log (only what was written after the watch began, so an old crash log never counts) for Unity's
+"Caught fatal signal" line, and the Unity player PID (a child of this process whose command line names an
+.ai2thor/releases build).  A fatal-signal line, or a player seen and then gone for WATCH_EXIT_GRACE_S, writes
+result.json with 'fatal' {reason, lines, pids, t_s} and raw.error, copies Player.log to Player_fatal.log and exits
+3 at once, instead of blocking in ai2thor's server_start_timeout (300 s) or the caller's outer timeout.
+(smoke_run1, step 6: Unity aborted at SelectPhysicalDevice(-1) with SIGABRT and the harness waited 240 s.)
 
 Output: OUT/result.json, rewritten atomically (tmp + os.replace) after the start-up, every 50 steps, the end of
 phase A, the HD block, every phase-B row and every finished --nproc worker, so a kill by the outer `timeout`
 keeps everything measured so far.  Also PNGs and copies of Unity's Player.log (Player_raw / _tasks / _parallel).
-Exit 0 if this run's own pass rule holds, else 1.  The gate itself is decided by verdict.py.
+Exit 0 if this run's own pass rule holds, else 1 (3 = --fail-fast fired).  The gate itself is decided by
+verdict.py.
 """
 import argparse
 import gzip
@@ -29,6 +37,7 @@ import multiprocessing as mp
 import os
 import shutil
 import sys
+import threading
 import time
 
 import numpy as np
@@ -49,6 +58,13 @@ TASK_ACTIONS = ["MoveAhead", "RotateRight", "MoveAhead", "LookDown", "MoveLeft",
                 "RotateLeft", "MoveBack", "LookUp", "MoveRight", "RotateRight"]
 PLAYER_LOG = os.path.join(".config", "unity3d", "Allen Institute for Artificial Intelligence", "AI2-THOR",
                           "Player.log")
+# --fail-fast watchdog
+FATAL_MARK = "Caught fatal signal"
+FATAL_CONTEXT_LINES = 12  # the fatal line and the backtrace lines after it, kept in result.json
+WATCH_POLL_S = 1.0
+WATCH_EXIT_GRACE_S = 5.0  # a vanished player: wait this long for Player.log to say why before firing
+FAIL_FAST_RC = 3
+UNITY_CMD_MARK = "/.ai2thor/releases/"
 
 
 def log(*args):
@@ -98,18 +114,174 @@ def copy_player_log(out, name):
     return got
 
 
-def raw_phase(out, steps, gpu, save=True, tag="raw", factory=None, progress=None):
+def player_log_path():
+    return os.path.join(os.path.expanduser("~"), PLAYER_LOG)
+
+
+def unity_children(ppid=None, proc="/proc"):
+    """Sorted PIDs of the live (not zombie) children of `ppid` (default: this process) whose command line names an
+    AI2-THOR build (UNITY_CMD_MARK).  ai2thor starts the player with subprocess.Popen, so it is a direct child."""
+    ppid = os.getpid() if ppid is None else ppid
+    try:
+        names = os.listdir(proc)
+    except OSError:
+        return []
+    out = []
+    for n in names:
+        if not n.isdigit():
+            continue
+        try:
+            with open(os.path.join(proc, n, "stat")) as f:
+                fields = f.read().rsplit(")", 1)[1].split()
+            if int(fields[1]) != ppid or fields[0] in ("Z", "X"):
+                continue
+            with open(os.path.join(proc, n, "cmdline"), "rb") as f:
+                cmd = f.read().replace(b"\0", b" ").decode(errors="replace")
+        except (OSError, ValueError, IndexError):
+            continue
+        if UNITY_CMD_MARK in cmd:
+            out.append(int(n))
+    return sorted(out)
+
+
+class UnityWatch:
+    """The --fail-fast watchdog (see the module doc).  `on_fatal(info)` runs in the watch thread, once.
+
+    Only Player.log text written after the watch was created counts (a new inode = a rotated / new log is read from
+    its start; the same inode from the size it had).  Both signals are acted on only while armed (arm() before a
+    Controller starts, disarm() before it is stopped on purpose); text that arrives while disarmed is consumed.
+    """
+
+    def __init__(self, log_path, on_fatal, children=None, poll_s=None, grace_s=None, clock=time.time):
+        self.log_path = log_path
+        self.on_fatal = on_fatal
+        self.children = children or unity_children
+        self.poll_s = WATCH_POLL_S if poll_s is None else poll_s
+        self.grace_s = WATCH_EXIT_GRACE_S if grace_s is None else grace_s
+        self.clock = clock
+        self.t0 = clock()
+        st = self._stat()
+        self._ino, self._pos = (st[0], st[1]) if st else (None, 0)
+        self._text = ""
+        self._arm_at = 0
+        self._armed = False
+        self._seen = set()
+        self._gone_since = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self.fired = None
+        self._thread = threading.Thread(target=self._loop, name="unity-watch", daemon=True)
+
+    def _stat(self):
+        try:
+            st = os.stat(self.log_path)
+        except OSError:
+            return None
+        return st.st_ino, st.st_size
+
+    def _consume(self):
+        st = self._stat()
+        if st is None:
+            return
+        ino, size = st
+        if ino != self._ino:
+            self._ino, self._pos = ino, 0
+            self._text, self._arm_at = "", 0
+        elif size < self._pos:  # truncated in place
+            self._pos = 0
+            self._text, self._arm_at = "", 0
+        if size <= self._pos:
+            return
+        try:
+            with open(self.log_path, "rb") as f:
+                f.seek(self._pos)
+                data = f.read(size - self._pos)
+        except OSError:
+            return
+        self._pos += len(data)
+        self._text += data.decode(errors="replace")
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+
+    def arm(self):
+        with self._lock:
+            self._consume()
+            self._arm_at = len(self._text)
+            self._armed = True
+            self._seen, self._gone_since = set(), None
+
+    def disarm(self):
+        with self._lock:
+            self._armed = False
+
+    def poll(self):
+        """One check; returns the info dict when the watch fires (also stored in .fired), else None."""
+        with self._lock:
+            if self.fired is not None:
+                return None
+            self._consume()
+            if not self._armed:
+                return None
+            new = self._text[self._arm_at:]
+            info = None
+            k = new.find(FATAL_MARK)
+            if k >= 0:
+                start = new.rfind("\n", 0, k) + 1
+                lines = new[start:].splitlines()[:FATAL_CONTEXT_LINES]
+                info = {"reason": "fatal_signal", "lines": [ln[:300] for ln in lines]}
+            else:
+                kids = set(self.children())
+                self._seen |= kids
+                if self._seen and not kids:
+                    now = self.clock()
+                    if self._gone_since is None:
+                        self._gone_since = now
+                    elif now - self._gone_since >= self.grace_s:
+                        tail = [ln[:300] for ln in new.splitlines()[-FATAL_CONTEXT_LINES:]]
+                        info = {"reason": "unity_exited", "lines": tail}
+                else:
+                    self._gone_since = None
+            if info is None:
+                return None
+            info.update(pids=sorted(self._seen), t_s=round(self.clock() - self.t0, 2), log=self.log_path)
+            self.fired = info
+        self.on_fatal(info)
+        return info
+
+    def _loop(self):
+        while not self._stop.wait(self.poll_s):
+            try:
+                if self.poll() is not None:
+                    return
+            except Exception as e:  # noqa: BLE001  (a broken watch must never kill the run it watches)
+                log(f"fail-fast watch error: {e!r}")
+
+
+def raw_phase(out, steps, gpu, save=True, tag="raw", factory=None, progress=None, watch=None):
     """Phase A on FloorPlan1; `factory(gpu) -> (controller, startup_s)` is make_controller unless injected.
 
     `progress(snapshot)` is called with a copy of the result so far: phase 'started' (startup_s only),
     'stepping' (counters under 'progress'), 'steps_done' (the final 640x360 counts) and 'done'.  The gated keys
     steps / bad_frames / distinct_frames / action_success exist only from 'steps_done' on.
+    `watch` (--fail-fast, a UnityWatch) is armed from the Controller start until just before c.stop().
     """
     def checkpoint():
         if progress is not None:
             progress(dict(res))
 
-    c, t_start = (factory or make_controller)(gpu)
+    if watch is not None:
+        watch.arm()
+    try:
+        c, t_start = (factory or make_controller)(gpu)
+    except BaseException:
+        if watch is not None:
+            watch.disarm()
+        raise
     res = {"phase": "started", "startup_s": round(t_start, 2)}
     log(f"{tag}: Controller up after {t_start:.1f} s")
     checkpoint()
@@ -172,6 +344,8 @@ def raw_phase(out, steps, gpu, save=True, tag="raw", factory=None, progress=None
         res["phase"] = "done"
         checkpoint()
     finally:
+        if watch is not None:
+            watch.disarm()
         try:
             c.stop()
         except Exception as e:  # noqa: BLE001
@@ -221,10 +395,11 @@ def pick_tasks(tasks):
             next(t for t in tasks if t["scene"].startswith("procthor_"))]
 
 
-def task_phase(out, repo, gpu, env_cls=None, rows=None, progress=None):
+def task_phase(out, repo, gpu, env_cls=None, rows=None, progress=None, watch=None):
     """Phase B with TVRBench's ThorEnv (imported from the pinned repo unless `env_cls` is injected).
 
-    Rows are appended to `rows` (a new list unless given) and `progress()` is called after each one.
+    Rows are appended to `rows` (a new list unless given) and `progress()` is called after each one.  `watch`
+    (--fail-fast) is armed from the ThorEnv start until just before env.close().
     """
     rows = [] if rows is None else rows
     if env_cls is None:
@@ -235,7 +410,14 @@ def task_phase(out, repo, gpu, env_cls=None, rows=None, progress=None):
     picks = pick_tasks(tasks)
     pt_path, pt_why = procthor_file(repo)
     t0 = time.time()
-    env = env_cls(scene="FloorPlan1", width=W, height=H, gpu_device=gpu)
+    if watch is not None:
+        watch.arm()
+    try:
+        env = env_cls(scene="FloorPlan1", width=W, height=H, gpu_device=gpu)
+    except BaseException:
+        if watch is not None:
+            watch.disarm()
+        raise
     log(f"tasks: ThorEnv up after {time.time() - t0:.1f} s")
     try:
         for t in picks:
@@ -275,6 +457,8 @@ def task_phase(out, repo, gpu, env_cls=None, rows=None, progress=None):
                 if progress is not None:
                     progress()
     finally:
+        if watch is not None:
+            watch.disarm()
         env.close()
     return rows
 
@@ -300,11 +484,12 @@ def _raw_pass(r, steps):
             and (r.get("distinct_frames") or 0) >= 0.9 * steps and (r.get("action_success") or 0) >= 0.95 * steps)
 
 
-def run(a, factory=None, env_cls=None, pool_factory=None):
+def run(a, factory=None, env_cls=None, pool_factory=None, exit_fn=None):
     """All phases for parsed args `a`; returns the result dict (kept current in OUT/result.json).
 
     Test hooks: `factory` replaces make_controller (it must be picklable for the default spawn pool),
-    `env_cls` replaces TVRBench's ThorEnv, `pool_factory(n)` replaces the spawn Pool (e.g. a ThreadPool).
+    `env_cls` replaces TVRBench's ThorEnv, `pool_factory(n)` replaces the spawn Pool (e.g. a ThreadPool),
+    `exit_fn(rc)` replaces os._exit for --fail-fast (called from the watch thread).
     """
     t_run = time.time()
     os.makedirs(a.out, exist_ok=True)
@@ -313,13 +498,60 @@ def run(a, factory=None, env_cls=None, pool_factory=None):
     res = {"argv": sys.argv, "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "pass": False,
            "deadline_s": a.deadline_s,
            "env": {k: os.environ.get(k) for k in ("VK_ICD_FILENAMES", "VK_DRIVER_FILES", "LD_LIBRARY_PATH", "HOME",
-                                                  "CUDA_VISIBLE_DEVICES", "__EGL_VENDOR_LIBRARY_FILENAMES")}}
+                                                  "CUDA_VISIBLE_DEVICES", "__EGL_VENDOR_LIBRARY_FILENAMES",
+                                                  "LP_NUM_THREADS")}}
+    save_lock = threading.RLock()  # the --fail-fast watch thread writes result.json too
 
     def save():
-        res["elapsed_s"] = round(time.time() - t_run, 2)
-        write_json_atomic(path, res)
+        with save_lock:
+            res["elapsed_s"] = round(time.time() - t_run, 2)
+            write_json_atomic(path, res)
 
+    def on_fatal(info):
+        """Watch thread: record why, keep the log, end the process now (the main thread is blocked in ai2thor)."""
+        with save_lock:  # held until exit: the main thread can no longer overwrite result.json
+            res["fatal"] = info
+            res["pass"] = False
+            msg = f"unity_{info['reason']}: {(info.get('lines') or [''])[0]}"
+            raw = res.get("raw")
+            if isinstance(raw, dict) and raw.get("phase") in ("steps_done", "done"):
+                res.setdefault("tasks", []).append({"task_id": None, "dataset": None, "ok": False, "error": msg})
+            else:
+                res["raw"] = dict(raw or {}, error=msg)
+            for attempt in (0, 1):
+                try:
+                    save()
+                    break
+                except Exception as e:  # noqa: BLE001  (res changed size under json.dump: retry once)
+                    if attempt:
+                        log(f"fail-fast: result.json not written: {e!r}")
+                    time.sleep(0.1)
+            try:
+                copy_player_log(a.out, "Player_fatal")
+            except OSError as e:
+                log(f"fail-fast: Player.log not copied: {e!r}")
+            log(f"FAIL FAST after {info['t_s']} s: {msg} (pids {info['pids']})")
+            (exit_fn or os._exit)(FAIL_FAST_RC)
+
+    watch = None
+    if getattr(a, "fail_fast", False):
+        if a.nproc > 1:
+            res["fail_fast"] = "ignored: --nproc > 1 (one Player.log is shared by all players)"
+        else:
+            watch = UnityWatch(player_log_path(), on_fatal).start()
+            res["fail_fast"] = {"log": watch.log_path, "poll_s": watch.poll_s, "grace_s": watch.grace_s}
     save()
+    try:
+        _run_phases(a, res, save, gpu, factory, env_cls, pool_factory, watch, t_run)
+    finally:
+        if watch is not None:
+            watch.stop()
+    save()
+    print(json.dumps(res, indent=1, default=str)[:4000], flush=True)
+    return res
+
+
+def _run_phases(a, res, save, gpu, factory, env_cls, pool_factory, watch, t_run):
     if a.nproc > 1:
         rows = []
         res["procs"] = rows
@@ -341,9 +573,10 @@ def run(a, factory=None, env_cls=None, pool_factory=None):
             save()
 
         try:
-            res["raw"] = raw_phase(a.out, a.steps, gpu, factory=factory, progress=keep)
+            res["raw"] = raw_phase(a.out, a.steps, gpu, factory=factory, progress=keep, watch=watch)
         except Exception as e:  # noqa: BLE001
-            res["raw"] = dict(res.get("raw") or {}, error=repr(e))
+            res["raw"] = dict(res.get("raw") or {})
+            res["raw"].setdefault("error", repr(e))  # a --fail-fast error recorded first is kept
         save()
         copy_player_log(a.out, "Player_raw")
         r = res["raw"]
@@ -361,7 +594,7 @@ def run(a, factory=None, env_cls=None, pool_factory=None):
             else:
                 res["tasks"] = []
                 try:
-                    task_phase(a.out, a.repo, gpu, env_cls=env_cls, rows=res["tasks"], progress=save)
+                    task_phase(a.out, a.repo, gpu, env_cls=env_cls, rows=res["tasks"], progress=save, watch=watch)
                 except Exception as e:  # noqa: BLE001
                     res["tasks"].append({"task_id": None, "dataset": None, "ok": False, "error": repr(e)})
                 copy_player_log(a.out, "Player_tasks")
@@ -370,9 +603,8 @@ def run(a, factory=None, env_cls=None, pool_factory=None):
             res["tasks_skipped"] = [t.get("task_id") for t in res["tasks"] if t.get("skipped")]
             res["pass"] = (res["raw_pass"] and bool(tested) and res["tasks_ok"] == len(tested)
                            and all(t.get("skipped") != "time_budget" for t in res["tasks"]))
-    save()
-    print(json.dumps(res, indent=1, default=str)[:4000], flush=True)
-    return res
+    if res.get("fatal"):
+        res["pass"] = False
 
 
 def parse_args(argv=None):
@@ -381,11 +613,16 @@ def parse_args(argv=None):
     ap.add_argument("--repo")
     ap.add_argument("--steps", type=int, default=300)
     ap.add_argument("--gpu", type=int, default=0)
-    ap.add_argument("--no-gpu-device", action="store_true", help="do not pass gpu_device (skips vulkaninfo)")
+    ap.add_argument("--no-gpu-device", action="store_true",
+                    help="do not pass gpu_device (no -force-device-index; Unity 2020.3 then picks no CPU device, so "
+                         "never use this for lavapipe: smoke_run1 aborted at SelectPhysicalDevice(-1))")
     ap.add_argument("--nproc", type=int, default=1)
     ap.add_argument("--no-tasks", action="store_true")
     ap.add_argument("--deadline-s", type=float, default=None,
                     help="wall budget of this run in s; phase B is skipped if less than PHASE_B_MIN_S is left")
+    ap.add_argument("--fail-fast", action="store_true",
+                    help="single process: exit 3 as soon as Player.log shows a fatal signal or the Unity player "
+                         "dies (see the module doc)")
     return ap.parse_args(argv)
 
 

@@ -517,6 +517,23 @@ def test_download_table_matches_episodes(episodes):
         assert {e["scene_id"] for e in episodes[sp]} == {s for s, x in table.items() if x == sp}
 
 
+def test_download_loop_children_keep_off_stdin():
+    """Diagnosis 2026-11-09 B6: the per-scene loop reads the scene list on stdin (`done < <(scenes_for ...)`), so
+    the hf download and sha256sum calls inside it get </dev/null and can never swallow the remaining scenes."""
+    t = SCRIPT.read_text()
+    body = t.split('n=$(scenes_for "$set" | wc -l)', 1)[1].split('verify_all "$set"', 1)[0]
+    assert body.count('"$hf" download') == 1 and body.count("sha256sum") == 1
+    calls, cur = [], ""
+    for ln in body.splitlines():  # join backslash continuations, keep the lines that run hf / sha256sum
+        cur += ln.rstrip("\\").strip() + " "
+        if not ln.rstrip().endswith("\\"):
+            if '"$hf" download' in cur or "sha256sum" in cur:
+                calls.append(cur)
+            cur = ""
+    assert len(calls) == 2 and all("< /dev/null" in c for c in calls), calls
+    assert "done < <(scenes_for \"$set\")" in body
+
+
 def test_download_script_token_hygiene():
     t = SCRIPT.read_text()
     assert "/mnt/umm/users/yinbaiqiao/.secrets/hf_token_e3vs" in t

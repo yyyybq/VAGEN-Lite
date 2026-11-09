@@ -29,6 +29,8 @@
 # Threads: training VPD_THREADS=2 (--threads 2) with 3 loader workers; vLLM 4 (VLLMServer); 8 eval workers (B9).
 # Env: VPD_DRYRUN=1 prints the commands without running them (writes only RUN/steps.jsonl and RUN/node.txt);
 #      VPD_JOB_DEADLINE_S (default 11760 = plan est_high 3.4), VPD_MIN_STEP_S (default 60).
+#      Test hook honoured ONLY with VPD_DRYRUN=1: VPD_WB_ROOT (instead of OUT/walkerbench), so a dry run never sees
+#      (and skips on) the real pilot outputs; a real job always reads and writes OUT/walkerbench.
 
 START=${1:-}
 RUN=${2:-${RUN:-}}
@@ -55,6 +57,9 @@ MIN_STEP_S=${VPD_MIN_STEP_S:-60}
 [[ $MIN_STEP_S =~ ^[1-9][0-9]*$ ]] || { echo "VPD_MIN_STEP_S must be a positive integer" >&2; exit 2; }
 DEADLINE=$((T0 + DEADLINE_S))
 WB=$VPD_OUT/walkerbench
+if [[ $DRY == 1 && -n ${VPD_WB_ROOT:-} ]]; then
+  WB=$VPD_WB_ROOT   # test hook (dry run only)
+fi
 P=$WB/runs/pilot/$START
 AD=$P/adapters
 EV=$P/evals

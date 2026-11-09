@@ -16,8 +16,10 @@
 #   2 vulkaninfo --summary and full; cuda-vulkan-mapping decision (ai2thor native, else 1-card fallback)
 #   3 thor_smoke.py: 300 steps 640x360 + 50 at 1280x720, then TVRBench ThorEnv on the first iTHOR/ProcTHOR task
 #   4 thor_smoke.py --nproc 4 x 150 steps
-#   5 egl_probe.py
-#   6 optional: 50-step lavapipe timing (skipped when the time budget is short)
+#   5 egl_probe.py (E1-E5 context + clear readback; E6 GLSL triangle draw, reported as EGL_DRAW)
+#   6 optional: 50-step lavapipe timing (skipped when the time budget is short): CVD=0, gpu_device 0 and a
+#     pre-written cuda-vulkan-mapping {"0": 0} so Unity gets -force-device-index 0; thor_smoke --fail-fast.
+#     (Fixed 2026-11-09: smoke_run1's step 6 passed --no-gpu-device and Unity aborted, so it measured nothing.)
 #   7 verdict.py -> OUTDIR/verdict.json {TVR_GATE, EGL_GATE, reasons, caveats, steps_per_s, next}
 # Time budget (worst case, every inner cap hit; the outer cap is timeout 1800):
 #   0+1 ~10 s | 2 vulkaninfo 60+60 | 3 thor1 1020 (= 2 Controller start-ups of up to 300 s each + steps + tasks;
@@ -207,12 +209,19 @@ lavapipe() {
   lvp=$(ls "$ENV"/share/vulkan/icd.d/lvp_icd.*.json 2>/dev/null | head -1)
   [[ -n $lvp ]] || { echo "skipped: no lavapipe ICD under $ENV/share/vulkan/icd.d"; return 0; }
   (
-    # no CUDA_VISIBLE_DEVICES and no gpu_device: ai2thor would otherwise map the CUDA UUID to a Vulkan device
-    unset CUDA_VISIBLE_DEVICES
+    # Unity 2020.3 selects no CPU device by itself: without -force-device-index it aborts (smoke_run1:
+    # "SelectPhysicalDevice requestedDeviceIndex=-1" -> "Selected physical device (nil)" -> SIGABRT, and the old
+    # step then sat out its 240 s).  With the lvp ICD alone, llvmpipe is Vulkan device 0, so ai2thor must send
+    # -force-device-index 0: gpu_device=0 with CUDA_VISIBLE_DEVICES=0, and a pre-written cuda-vulkan-mapping
+    # {"0": 0} (ai2thor 5.0.0 controller.py:1030-1111 then skips its vulkaninfo / nvidia-smi UUID match, which
+    # cannot work under an lvp-only ICD list).  LP_NUM_THREADS=12 of the job's 14 vCPUs rasterise.
+    # --fail-fast: a fatal signal in Player.log or a dead player ends the step at once (exit 3).
+    export CUDA_VISIBLE_DEVICES=0
     export VK_ICD_FILENAMES=$lvp VK_DRIVER_FILES=$lvp LD_LIBRARY_PATH="$ENV/lib:$LD_LIBRARY_PATH" \
-           HOME="$OUTDIR/home_lvp"
+           HOME="$OUTDIR/home_lvp" LP_NUM_THREADS=12
     mkdir -p "$HOME/.ai2thor" && ln -sfn "$AI2THOR_HOME/.ai2thor/releases" "$HOME/.ai2thor/releases"
-    timeout 240 "$PY" -I -u "$S/thor_smoke.py" --out "$OUTDIR/thor_lvp" --steps 50 --no-gpu-device --no-tasks
+    printf '{"0": 0}\n' > "$HOME/.ai2thor/cuda-vulkan-mapping.json"
+    timeout 240 "$PY" -I -u "$S/thor_smoke.py" --out "$OUTDIR/thor_lvp" --steps 50 --gpu 0 --no-tasks --fail-fast
   ) > "$OUTDIR/logs/thor_lvp.log" 2>&1
   local rc=$?
   reap_unity lavapipe

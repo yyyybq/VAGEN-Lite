@@ -2,7 +2,7 @@
 
 Stdlib only (runs under the tvr env's python 3.10 inside the job, and under PY_EVAL in the tests).
 
-    python -I verdict.py verdict OUTDIR            # -> OUTDIR/verdict.json {TVR_GATE, EGL_GATE, reasons, ...}
+    python -I verdict.py verdict OUTDIR            # -> OUTDIR/verdict.json {TVR_GATE, EGL_GATE, EGL_DRAW, ...}
     python -I verdict.py mapping OUTDIR HOME       # cuda-vulkan-mapping decision (step 2 of tvr_smoke.sh)
 
 Inputs read from OUTDIR (all written by tvr_smoke.sh; any may be missing, which counts as a failed criterion):
@@ -36,6 +36,10 @@ NPROC = 4  # parallel processes on the one card
 NPROC_STEPS = 150  # steps per parallel process
 EGL_RGBA = (51, 102, 153, 255)  # glClearColor(0.2, 0.4, 0.6, 1.0) read back as RGBA8
 EGL_TOL = 2
+# E6 / EGL_DRAW (added 2026-11-09, SMOKE_CRITERIA.md deviation log): a GLSL 330 red triangle over the E5 clear;
+# centre pixel within +-EGL_DRAW_TOL of EGL_DRAW_RGB, all four corner pixels within +-EGL_TOL of EGL_RGBA[:3]
+EGL_DRAW_RGB = (255, 0, 0)
+EGL_DRAW_TOL = 3
 SOFTWARE_RENDERERS = ("llvmpipe", "lavapipe", "swiftshader", "softpipe")
 
 
@@ -299,10 +303,62 @@ def egl_gate(out):
     return rows
 
 
-def next_step(tvr_pass, egl_pass, rows, facts):
-    """The SMOKE_CRITERIA.md decision tree, as one line for the report (never acts by itself)."""
+def _rgb_close(px, want, tol):
+    return (isinstance(px, list) and len(px) >= 3 and all(isinstance(x, int) for x in px[:3])
+            and all(abs(x - y) <= tol for x, y in zip(px[:3], want)))
+
+
+def egl_draw_gate(out):
+    """(state, rows) of EGL_DRAW = E6: 'PASS' / 'FAIL', or 'NOT_RUN' when egl/result.json has no 'draw' block
+    (an egl_probe.py from before E6, e.g. smoke_run1).  Separate from EGL_GATE, whose E0-E5 stay as frozen."""
+    rows = []
+    e = _load(os.path.join(out, "egl", "result.json"))
+    d = e.get("draw")
+    if not isinstance(d, dict):
+        _crit(rows, "E6_draw", False, e.get("_missing") or "not run: egl/result.json has no 'draw' block (E6 is "
+                                                          "newer than this egl_probe run)")
+        return "NOT_RUN", rows
+    ok_shaders = d.get("vs_compiled") is True and d.get("fs_compiled") is True and d.get("linked") is True
+    ok_err = d.get("gl_errors") == []
+    ok_centre = _rgb_close(d.get("centre_px"), EGL_DRAW_RGB, EGL_DRAW_TOL)
+    corners = d.get("corners_px")
+    ok_corner = (isinstance(corners, list) and len(corners) == 4
+                 and all(_rgb_close(c, EGL_RGBA[:3], EGL_TOL) for c in corners))
+    _crit(rows, "E6_draw", ok_shaders and ok_err and ok_centre and ok_corner, {
+        "compiled_linked": [d.get("vs_compiled"), d.get("fs_compiled"), d.get("linked")],
+        "gl_errors": d.get("gl_errors"), "centre_px": d.get("centre_px"), "want_centre": list(EGL_DRAW_RGB),
+        "corners_px": corners, "want_corners": list(EGL_RGBA[:3]), "red_pixels": d.get("red_pixels"),
+        "error": d.get("error"), "logs": {k: (d.get(k) or "")[:300] for k in ("vs_log", "fs_log", "link_log")}})
+    return ("PASS" if rows[0]["ok"] else "FAIL"), rows
+
+
+def lavapipe_report(out):
+    """Step 6 (optional, reported only): did lavapipe run, how fast, and why it stopped."""
+    lvp = _load(os.path.join(out, "thor_lvp", "result.json"))
+    if "_missing" in lvp:
+        return {"ran": False, "detail": lvp["_missing"]}
+    raw = lvp.get("raw") if isinstance(lvp.get("raw"), dict) else {}
+    fatal = lvp.get("fatal") if isinstance(lvp.get("fatal"), dict) else None
+    detail = None
+    if not raw:
+        detail = "no phase-A result: the run ended before the Controller came up (outer timeout or kill)"
+    return {"ran": True, "measured": isinstance(raw.get("steps"), int), "detail": detail,
+            "steps": raw.get("steps"), "steps_per_s": raw.get("steps_per_s"),
+            "startup_s": raw.get("startup_s"), "bad_frames": raw.get("bad_frames"), "error": raw.get("error"),
+            "fatal": {k: fatal.get(k) for k in ("reason", "t_s", "lines")} if fatal else None,
+            "gpu_device_passed": "--no-gpu-device" not in " ".join(map(str, lvp.get("argv") or []))}
+
+
+def next_step(tvr_pass, egl_pass, rows, facts, draw_state="NOT_RUN"):
+    """The SMOKE_CRITERIA.md decision tree, as one line for the report (never acts by itself).
+
+    EGL-based benchmarks (MuJoCo / Habitat / Open3D) reopen only on EGL_DRAW (E6) PASS: EGL_GATE (E0-E5) shows an
+    EGL context, a clear and a readback, which is no rasterisation (deviation log 2026-11-09)."""
+    draw_txt = {"PASS": "EGL_DRAW pass: EGL renderers (MuJoCo / Habitat / Open3D) may be reconsidered",
+                "FAIL": "EGL_DRAW (E6 shader triangle) fails: EGL-based benchmarks stay closed",
+                "NOT_RUN": "EGL_DRAW (E6) not run: EGL-based benchmarks stay closed until E6 passes"}[draw_state]
     if tvr_pass and egl_pass:
-        return "TVR and EGL pass: the TVR pilot may be planned (new approval and budget); EGL renderers reopen"
+        return f"TVR and EGL pass: the TVR pilot may be planned (new approval and budget); {draw_txt}"
     if tvr_pass:
         return "TVR pass, EGL fail: TVR goes ahead; Habitat / EGL-based benchmarks stay closed"
     by = {r["name"]: r for r in rows}
@@ -318,12 +374,13 @@ def next_step(tvr_pass, egl_pass, rows, facts):
         return ("no NVIDIA Vulkan device although /dev/nvidia-modeset is present: overlay problem; read ldd.txt "
                 "and vulkaninfo stderr, fix the overlay on the login node, ASK USER before a resubmit")
     return ("Vulkan device present but the AI2-THOR run failed (start-up / frames / renderer / tasks / parallel): "
-            "read thor1/Player*.log and logs/; ASK USER before a resubmit (the TVR reservation is 0.5 GPU-h)")
+            "read thor1/Player*.log and logs/; ASK USER before a resubmit")
 
 
 def verdict(out):
     rows, caveats, speed = tvr_gate(out)
     erows = egl_gate(out)
+    draw_state, drows = egl_draw_gate(out)
     facts = _load(os.path.join(out, "facts.json"))
     if isinstance(facts.get("cvd_remap"), dict):
         caveats.append(f"CUDA_VISIBLE_DEVICES remapped for ai2thor: {facts['cvd_remap']}")
@@ -332,17 +389,21 @@ def verdict(out):
     v = {
         "TVR_GATE": "PASS" if tvr_pass else "FAIL",
         "EGL_GATE": "PASS" if egl_pass else "FAIL",
+        "EGL_DRAW": draw_state,
         "reasons": [f"{r['name']}: {r['detail']}" for r in rows + erows if not r["ok"]],
+        "draw_reasons": [f"{r['name']}: {r['detail']}" for r in drows if not r["ok"]],
         "caveats": caveats,
         "steps_per_s": speed,
+        "lavapipe": lavapipe_report(out),
         "facts": {k: facts.get(k) for k in ("nvidia_modeset", "dev_dri", "render_node", "cuda_visible_devices",
                                             "cvd_remap", "n_smi_gpus", "nvidia_driver_capabilities",
                                             "tmp_free_bytes", "shm_free_bytes", "cpu_max")},
-        "next": next_step(tvr_pass, egl_pass, rows, facts),
-        "criteria": {"tvr": rows, "egl": erows},
+        "next": next_step(tvr_pass, egl_pass, rows, facts, draw_state),
+        "criteria": {"tvr": rows, "egl": erows, "egl_draw": drows},
         "thresholds": {"driver": DRIVER, "gpu": GPU_NAME, "steps": STEPS, "startup_max_s": STARTUP_MAX_S,
                        "distinct_min": DISTINCT_MIN, "success_min": SUCCESS_MIN, "nproc": NPROC,
-                       "nproc_steps": NPROC_STEPS, "egl_rgba": list(EGL_RGBA), "egl_tol": EGL_TOL},
+                       "nproc_steps": NPROC_STEPS, "egl_rgba": list(EGL_RGBA), "egl_tol": EGL_TOL,
+                       "egl_draw_rgb": list(EGL_DRAW_RGB), "egl_draw_tol": EGL_DRAW_TOL},
     }
     tmp = os.path.join(out, "verdict.json.part")
     with open(tmp, "w") as f:
@@ -371,8 +432,8 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) == 2 and argv[0] == "verdict":
         v = verdict(argv[1])
-        print(json.dumps({k: v[k] for k in ("TVR_GATE", "EGL_GATE", "reasons", "caveats", "steps_per_s", "next")},
-                         indent=1, default=str))
+        print(json.dumps({k: v[k] for k in ("TVR_GATE", "EGL_GATE", "EGL_DRAW", "reasons", "draw_reasons", "caveats",
+                                            "steps_per_s", "lavapipe", "next")}, indent=1, default=str))
         return 0
     if len(argv) == 3 and argv[0] == "mapping":
         print(json.dumps(write_mapping(argv[1], argv[2]), indent=1))

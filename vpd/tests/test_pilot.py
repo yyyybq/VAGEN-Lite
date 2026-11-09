@@ -4,7 +4,9 @@ smoke verdict, B5 request building) and the payloads vpd/jobs/wb_smoke.sh, wb_pi
 
 Login node, 1 core, no GPU, no network, no sco (vpd.sco.prepare / submit / delete are replaced by fakes).
 Scratch: eval_external_assets/vpd/scratch/wbpilot/pytest_<rand>/ (env VPD_WBPILOT_TEST_DIR overrides), removed at
-teardown.
+teardown.  Hermetic: the payload dry runs get VPD_WB_ROOT = <scratch>/out/walkerbench (a hook the payloads honour
+only under VPD_DRYRUN=1), so the finished pilot under OUT is never read and never turns a step into :skip; the
+only OUT reads left are test_prereg_text_matches_the_code's hash checks of the frozen split / tier / floor files.
     PYTHONPATH=$WT OMP_NUM_THREADS=1 PY_EVAL -m pytest -q -p no:cacheprovider vpd/tests/test_pilot.py
 """
 
@@ -750,13 +752,27 @@ def test_step_cap_total(base):
 # knobs of the payloads that the caller's shell may have set (e.g. VPD_THREADS=1 in a 1-core test runner): the
 # payload tests must see the payloads' own defaults
 _PAYLOAD_KNOBS = ("VPD_THREADS", "VPD_OPTIONAL", "VPD_JOB_DEADLINE_S", "VPD_SMOKE_DEADLINE_S", "VPD_MIN_STEP_S",
-                  "VPD_MERGE_DIR", "VPD_RERUN_STALE", "VPD_RERUN_INVALID", "VPD_DRYRUN", "RUN")
+                  "VPD_MERGE_DIR", "VPD_RERUN_STALE", "VPD_RERUN_INVALID", "VPD_DRYRUN", "RUN", "VPD_WB_ROOT")
+
+
+def wb_root(cwd: Path) -> Path:
+    """The temp stand-in for OUT/walkerbench that every payload dry run gets (VPD_WB_ROOT, a dry-run-only hook):
+    the dry runs must never see the real pilot / smoke outputs under OUT, else finished steps print as :skip."""
+    return Path(cwd) / "out" / "walkerbench"
 
 
 def _bash(args, env_extra, cwd):
     env = {k: v for k, v in os.environ.items() if k not in _PAYLOAD_KNOBS}
+    env["VPD_WB_ROOT"] = str(wb_root(cwd))
     env.update(env_extra)
     return subprocess.run(["bash", *args], capture_output=True, text=True, env=env, cwd=str(cwd), timeout=300)
+
+
+def _no_real_out(res):
+    """A payload dry run under VPD_WB_ROOT names no path of the real OUT/walkerbench tree."""
+    real = str(paths.WB_OUT) + "/"
+    assert real not in res.stdout and real not in res.stderr, [ln for ln in (res.stdout + res.stderr).splitlines()
+                                                              if real in ln][:5]
 
 
 def _timeout_of(payload):
@@ -825,6 +841,9 @@ def test_pilot_start_dryrun_order(base, optional):
     res = _bash([str(JOBS_DIR / "wb_pilot_start.sh"), "Q3S", str(run)],
                 {"VPD_DRYRUN": "1", "VPD_OPTIONAL": optional, "VPD_MERGE_DIR": "/dev/shm/vpd_merged"}, base)
     assert res.returncode == 0, res.stderr + res.stdout
+    _no_real_out(res)
+    assert f"P={wb_root(base)}/runs/pilot/Q3S" in res.stdout
+    assert not wb_root(base).exists()  # the dry run creates nothing under the stand-in root either
     lines = _dry_lines(res.stdout)
     py = [ln for ln in lines if "n2_train_vpd.py" in ln or "merge.py" in ln or "run_vpd" in ln or "rm -rf" in ln]
     kinds = []
@@ -866,6 +885,7 @@ def test_pilot_start_soft_deadline(base):
     res = _bash([str(JOBS_DIR / "wb_pilot_start.sh"), "Q3S", str(run)],
                 {"VPD_DRYRUN": "1", "VPD_MERGE_DIR": "/dev/shm/vpd_merged", "VPD_JOB_DEADLINE_S": "30"}, base)
     assert res.returncode == 1, res.stderr + res.stdout
+    _no_real_out(res)
     lines = _dry_lines(res.stdout)
     assert not any("n2_train_vpd.py" in ln or "merge.py" in ln or "run_vpd" in ln for ln in lines)
     names = [json.loads(x)["name"] for x in (run / "steps.jsonl").read_text().splitlines()]
@@ -877,6 +897,57 @@ def test_pilot_start_soft_deadline(base):
         res = _bash([str(JOBS_DIR / "wb_pilot_start.sh"), "Q3S", str(run)],
                     {"VPD_DRYRUN": "1", "VPD_JOB_DEADLINE_S": bad}, base)
         assert res.returncode == 2 and "VPD_JOB_DEADLINE_S" in res.stderr
+
+
+def test_pilot_start_dryrun_resume_rules(base):
+    """The idempotency rules on a stand-in OUT (VPD_WB_ROOT): a finished raw eval and fresh merged evals are
+    skipped (no merge), a merged eval that served other weights is kept and flagged (stale), an earlier
+    results_invalid.json is kept; with VPD_RERUN_STALE=1 / VPD_RERUN_INVALID=1 both re-run with --overwrite."""
+    root = wb_root(base)
+    ev, ad = root / "runs" / "pilot" / "Q3S" / "evals", root / "runs" / "pilot" / "Q3S" / "adapters"
+    wj(ev / "pilot__Q3S__raw__640__empty" / "results.json", {"adapter": None})
+    (ad / "200").mkdir(parents=True)
+    (ad / "200" / "adapter.pt").write_bytes(b"200-v1")
+    for mode in ("empty", "off"):
+        wj(ev / f"pilot__Q3S__200__640__{mode}" / "results.json",
+           {"adapter": {"adapter_sha256": hashlib.sha256(b"200-v1").hexdigest()}})
+    (ad / "50").mkdir(parents=True)
+    (ad / "50" / "adapter.pt").write_bytes(b"50-v2")  # retrained after its eval served 50-v1
+    wj(ev / "pilot__Q3S__50__640__empty" / "results.json",
+       {"adapter": {"adapter_sha256": hashlib.sha256(b"50-v1").hexdigest()}})
+    wj(ev / "pilot__Q3S__raw__1280__empty" / "results_invalid.json", {})
+    before = sorted(str(p.relative_to(root)) for p in root.rglob("*"))
+    knobs = {"VPD_DRYRUN": "1", "VPD_MERGE_DIR": "/dev/shm/vpd_merged", "VPD_THREADS": "1"}
+    run = base / "jobs" / "wb-q3s-202611081203"
+    res = _bash([str(JOBS_DIR / "wb_pilot_start.sh"), "Q3S", str(run)], knobs, base)
+    assert res.returncode == 1, res.stderr + res.stdout
+    _no_real_out(res)
+    names = [json.loads(x)["name"] for x in (run / "steps.jsonl").read_text().splitlines()]
+    assert {"eval_raw_640_empty:skip", "eval_200_640_empty:skip", "eval_200_640_off:skip", "merge_200:skip",
+            "eval_50_640_empty:stale_kept", "merge_50:skip", "eval_raw_1280_empty:invalid_kept"} <= set(names), names
+    lines = _dry_lines(res.stdout)
+    assert not [ln for ln in lines if "merge.py" in ln or "run_vpd" in ln]
+    assert "failed steps: eval_50_640_empty eval_raw_1280_empty" in res.stdout
+    assert sorted(str(p.relative_to(root)) for p in root.rglob("*")) == before  # nothing written or removed
+    # the rerun switches (set only after the fix is logged in PREREG section 12)
+    run2 = base / "jobs" / "wb-q3s-202611081204"
+    res = _bash([str(JOBS_DIR / "wb_pilot_start.sh"), "Q3S", str(run2)],
+                dict(knobs, VPD_RERUN_STALE="1", VPD_RERUN_INVALID="1"), base)
+    assert res.returncode == 0, res.stderr + res.stdout
+    ran = [ln for ln in _dry_lines(res.stdout) if "run_vpd" in ln]
+    assert [ln.split("--run-name ")[1].split()[0] for ln in ran] == ["pilot__Q3S__50__640__empty",
+                                                                     "pilot__Q3S__raw__1280__empty"]
+    assert all(ln.endswith("--overwrite") or "--overwrite " in ln for ln in ran)
+    assert [ln for ln in _dry_lines(res.stdout) if "merge.py" in ln][0].split("/adapters/")[1].split()[0] == "50"
+
+
+def test_payload_root_hook_is_dry_run_only():
+    """VPD_WB_ROOT replaces OUT/walkerbench only under VPD_DRYRUN=1; a real job never reads it."""
+    for script in ("wb_pilot_start.sh", "wb_smoke.sh"):
+        text = (JOBS_DIR / script).read_text()
+        assert "WB=$VPD_OUT/walkerbench\nif [[ $DRY == 1 && -n ${VPD_WB_ROOT:-} ]]; then\n" in text, script
+        assert text.count("VPD_WB_ROOT") == 3, script  # header, guard, assignment
+        assert "$VPD_OUT/walkerbench/" not in text, script  # every OUT path goes through $WB
 
 
 def test_pilot_start_usage(base):
@@ -891,6 +962,8 @@ def test_smoke_dryrun(base):
     res = _bash([str(JOBS_DIR / "wb_smoke.sh"), str(run)], {"VPD_DRYRUN": "1", "VPD_MERGE_DIR": "/dev/shm/vpd_merged"},
                 base)
     assert res.returncode == 0, res.stderr + res.stdout
+    _no_real_out(res)
+    assert f"SMOKE={wb_root(base)}/runs/smoke/{run.name}" in res.stdout
     lines = _dry_lines(res.stdout)
     order = []
     for ln in lines:
@@ -915,6 +988,7 @@ def test_smoke_dryrun(base):
     steps = [json.loads(x) for x in (run / "steps.jsonl").read_text().splitlines()]
     assert [s["name"] for s in steps][-1] == "verdict" and all(s["rc"] == 0 for s in steps)
     assert not Path(paths.WB_RUNS / "smoke" / run.name).exists()  # the dry run writes nothing under OUT
+    assert not wb_root(base).exists()  # nor under the stand-in root
 
 
 def test_smoke_soft_deadline(base):

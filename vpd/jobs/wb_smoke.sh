@@ -23,6 +23,7 @@
 #   verdict        (f) PY_EVAL pilot smoke-verdict -> SMOKE/smoke_verdict.json (PASS / FAIL + measurements)
 # A soft deadline (VPD_SMOKE_DEADLINE_S, default 3120 s after start, 180 s below the outer timeout) caps every GPU
 # step with `timeout`, keeping 180 s for rm_merged + verdict.  Env: VPD_DRYRUN=1 prints the commands (RUN only).
+# Test hook honoured ONLY with VPD_DRYRUN=1: VPD_WB_ROOT (instead of OUT/walkerbench); a real job always uses OUT.
 # Threads: VPD_THREADS=2 for everything but vLLM (4, set by VLLMServer), 3 loader workers, 8 eval workers (B9).
 
 RUN=${1:-${RUN:-}}
@@ -39,8 +40,11 @@ DRY=${VPD_DRYRUN:-0}
 T0=$(date +%s)
 DEADLINE=$((T0 + ${VPD_SMOKE_DEADLINE_S:-3120}))
 RESERVE=180
-SMOKE=$VPD_OUT/walkerbench/runs/smoke/$(basename "$RUN")
 WB=$VPD_OUT/walkerbench
+if [[ $DRY == 1 && -n ${VPD_WB_ROOT:-} ]]; then
+  WB=$VPD_WB_ROOT   # test hook (dry run only)
+fi
+SMOKE=$WB/runs/smoke/$(basename "$RUN")
 TIER200=$WB/tiers/seed1001/demos_200.jsonl
 WARM=$WB/warmup/warmup20.jsonl
 FAILS=()

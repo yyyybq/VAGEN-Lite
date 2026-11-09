@@ -3,8 +3,14 @@
 # plyfile and ply_gaussian_loader through its system site packages):
 #     timeout -k 120 6900 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_prep.sh RUN
 # Prepared by the orchestrator only after the user's OK, the PREREG commit, the repo and the splat download:
-#     python -m vpd.sco prepare --run OUT/jobs/vpd-e3vs-prep --name vpd-e3vs-prep --est-gph 2.0 -- \
-#         timeout -k 120 6900 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_prep.sh OUT/jobs/vpd-e3vs-prep
+#     python -m vpd.sco prepare --run OUT/jobs/e3vs-prep-<yyyymmddHHMM> --name vpd-e3vs-prep --est-gph 2.0 -- \
+#         timeout -k 120 6900 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_prep.sh \
+#         OUT/jobs/e3vs-prep-<yyyymmddHHMM>
+# RUN is a NEW timestamped dir for every submission (README section 3: OUT/jobs/<job>-<yyyymmddHHMM>/).  vpd.sco
+# submit refuses a RUN that was submitted before ("already submitted ... prepare a new run directory", sco.py), so
+# a job cut by its timeout is resubmitted into a new RUN; it resumes from its OUTPUTS under OUT/e3vs (see RESUMES
+# below), not from the RUN dir.  With more headroom (diagnosis 2026-11-09: the 6720 s soft deadline may be tight):
+#     ... --est-gph 3.0 -- env VPD_JOB_DEADLINE_S=10320 timeout -k 120 10500 bash .../vpd/jobs/e3vs_prep.sh RUN
 # Wall-clock cap below the reservation (est-gph 2.0 = 7200 s): the outer timeout 6900 + its 120 s kill window end
 # 180 s before it (headroom for container start / teardown, which run outside the payload but are charged), and a
 # soft job deadline VPD_JOB_DEADLINE_S (default 6720 s after start): every step runs under

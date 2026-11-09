@@ -3,8 +3,12 @@
 # chowned back to 20325 at EXIT):
 #     timeout -k 120 9780 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_start.sh START RUN
 # Prepared by the orchestrator only after vpd-e3vs-prep passed (parity, occupancy validation) and the user's OK:
-#     python -m vpd.sco prepare --run OUT/jobs/vpd-e3vs-q3s --name vpd-e3vs-q3s --as-root --est-gph 2.8 -- \
-#         timeout -k 120 9780 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_start.sh Q3S OUT/jobs/vpd-e3vs-q3s
+#     python -m vpd.sco prepare --run OUT/jobs/e3vs-q3s-<yyyymmddHHMM> --name vpd-e3vs-q3s --as-root --est-gph 2.8 -- \
+#         timeout -k 120 9780 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_start.sh Q3S \
+#         OUT/jobs/e3vs-q3s-<yyyymmddHHMM>
+# RUN is a NEW timestamped dir for every submission (README section 3: OUT/jobs/<job>-<yyyymmddHHMM>/): vpd.sco
+# submit refuses a RUN that was submitted before (sco.py), so a cut job is resubmitted into a new RUN and resumes
+# from its outputs under OUT/e3vs/runs/pilot/START (adapters, evals with a results.json), not from the RUN dir.
 # Wall-clock cap below the reservation (est-gph 2.8 = 10080 s): the outer timeout 9780 + its 120 s kill window end
 # 180 s before it (headroom for container start / teardown, which run outside the payload but are charged), and a
 # soft job deadline VPD_JOB_DEADLINE_S (default 9600 s after start): every command runs under

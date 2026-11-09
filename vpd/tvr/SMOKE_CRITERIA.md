@@ -12,9 +12,10 @@
 | 闸门 | 一句话 | 过了意味着 |
 |---|---|---|
 | **TVR_GATE** | AI2-THOR 5.0.0 CloudRendering 在作业里用拷来的 595.71.05 库走 NVIDIA Vulkan 正常出图，TVRBench 自己的环境代码能载入评测题 | 可以规划 TVR 试点（要另批准和另算卡时） |
-| **EGL_GATE** | EGL 设备平台在作业里能建 NVIDIA 的 GL 上下文并正确读回像素 | MuJoCo（`MUJOCO_GL=egl`）、Habitat-sim、Open3D 无头渲染这类基准可以重新考虑 |
+| **EGL_GATE**（E0–E5） | EGL 设备平台在作业里能建 NVIDIA 的 GL 上下文，清屏后读回的像素正确 | 只说明 EGL 上下文、清屏和读回能用。清屏只是填色：没有编译着色器，也没有画三角形，**不能**据此说 EGL 类基准可行（2026-11-09 更正，见第 6 节） |
+| **EGL_DRAW**（E6，2026-11-09 加） | 在同一个 EGL 上下文里编译、链接 GLSL 330 着色器，开深度测试画一个红三角形，读回的颜色正确 | MuJoCo（`MUJOCO_GL=egl`）、Habitat-sim、Open3D 无头渲染这类基准可以重新考虑 |
 
-两个闸门不互相依赖：Vulkan 过、EGL 不过 = TVR 照常推进，Habitat 一类继续关着。闸门不比较任何模型或起点。
+三个闸门互不依赖：Vulkan 过、EGL 不过 = TVR 照常推进，Habitat 一类继续关着；EGL_GATE 过、EGL_DRAW 没过或没跑 = Habitat 一类也继续关着。闸门不比较任何模型或起点。
 
 ## 1. 冻结阈值（verdict.py 常量；测试逐项核对）
 
@@ -29,6 +30,8 @@ NPROC = 4
 NPROC_STEPS = 150
 EGL_RGBA = 51,102,153,255
 EGL_TOL = 2
+EGL_DRAW_RGB = 255,0,0
+EGL_DRAW_TOL = 3
 ```
 
 ## 2. TVR_GATE：以下全部满足才 PASS
@@ -70,11 +73,19 @@ ProcTHOR 数据的取法和 TVRBench 的 `_load_procthor_house` 一样：有 `tr
 
 数据来源：`egl/result.json`（`egl_probe.py`，只用 ctypes）。
 
+## 3b. EGL_DRAW：E6 满足才 PASS（2026-11-09 加，见第 6 节）
+
+| 编号 | 条件 |
+|---|---|
+| E6 | 在 E5 的同一个上下文里：GLSL 330 core 的顶点和片元着色器都编译成功、程序链接成功（三份 info log 存进 `egl/result.json` 的 `draw` 和 `egl/shader_info.log`）；打开深度测试（GL_LESS），清颜色 (0.2, 0.4, 0.6) 和深度 1.0，用 VBO/VAO 画一个红三角形（NDC 顶点 (−0.6,−0.6)、(0.6,−0.6)、(0,0.6)，z = 0），glFinish 后 glReadPixels：中心像素 (128,128) 每个通道和 (255, 0, 0) 差 ≤ 3，四个角上的像素每个通道和 (51, 102, 153) 差 ≤ 2，画完和读回后 glGetError 都是 0 |
+
+`verdict.json` 的 `EGL_DRAW` 取 `PASS`、`FAIL`，或 `NOT_RUN`（`egl/result.json` 里没有 `draw`，即 E6 之前的 `egl_probe.py` 跑的，比如 smoke_run1）。`NOT_RUN` 和 `FAIL` 一样，不支持重新考虑 EGL 类基准。EGL_GATE 本身（E0–E5）的定义不变。
+
 ## 4. 不过时怎么办（决策树；`verdict.json` 的 `next` 字段写同样的话）
 
-所有重投都要先问用户：TVR 的预留只有 0.5 卡时，一次 smoke 就用完。
+所有重投都要先问用户：TVR 的预留只有 0.5 卡时，一次 smoke 就用完。（2026-11-09 用户取消了卡时和磁盘上限；重投仍要先问用户。）
 
-1. **TVR 过、EGL 过**：TVR 试点可以开始规划（报告 §3.1：Q3B/Q3S/E2 × {0,100} × 2 种子，估 10–20 卡时，要另批）。EGL 类基准可以重新考虑。
+1. **TVR 过、EGL 过**：TVR 试点可以开始规划（报告 §3.1：Q3B/Q3S/E2 × {0,100} × 2 种子，估 10–20 卡时，要另批）。EGL 类基准只有在 **EGL_DRAW（E6）也过**时才可以重新考虑；E6 不过或没跑，继续关着。
 2. **TVR 过、EGL 不过**：TVR 照常推进；Habitat / EGL 类基准继续关着。
 3. **T1 不过（驱动不是 595.71.05，脚本退出码 3）**：拷来的库只配 595.71.05，那个节点用不了。问用户：换节点重投，还是放弃。
 4. **T0 不过（暂存缺件，退出码 4）**：先把 `stage_tvr_login.sh` 跑完（联网的第 4–7 步要用户点头），再问用户重投。
@@ -106,7 +117,7 @@ $PY_EVAL $WT/vpd/sco.py submit --run $OUT/jobs/tvr-smoke-<ts>     # 编排者在
 | 3 thor1 | 1020 s | 能装下两次各 300 s 的 Controller 启动（A 段 + B 段 ThorEnv）再加步数和题目；`thor_smoke.py --deadline-s 990`，剩不到 420 s 就不跑 B 段，记 `time_budget` |
 | 4 thor4 | 360 s | 4 进程，启动错开 8 s |
 | 5 egl | 90 s | |
-| 6 lavapipe | 240 s | 只有在 1500 s 前能跑完才跑 |
+| 6 lavapipe | 240 s | 只有在 1500 s 前能跑完才跑。只报告速度，不卡闸门。2026-11-09 起：`CUDA_VISIBLE_DEVICES=0`、`--gpu 0`，并预写 `cuda-vulkan-mapping.json = {"0": 0}`，让 ai2thor 给 Unity 传 `-force-device-index 0`；`LP_NUM_THREADS=12`；`thor_smoke.py --fail-fast` 一看到 Player.log 里的 "Caught fatal signal" 或 Unity 进程没了就退出（退出码 3），不再干等 240 s |
 | 7 verdict | 约 5 s | |
 
 不跑第 6 步时最坏约 1610 s，跑时最坏约 1510 s，都在 1800 s 以内。`thor_smoke.py` 每过一个阶段都原子地重写 `result.json`（启动后、每 50 步、A 段结束、1280×720 之后、每道题之后、`--nproc` 每个进程结束后），所以内层 `timeout` 杀掉进程时，已经测到的数都还在。每个 thor 步骤结束后，脚本按 `/.ai2thor/releases/<构建名>/<构建名>` 找残留的 Unity 进程，先 TERM，5 s 后还在就 KILL，写进 `logs/reap.log`。Python 都用 `-I -u` 跑，日志不缓冲。
@@ -120,3 +131,21 @@ $PY_EVAL $WT/vpd/sco.py submit --run $OUT/jobs/tvr-smoke-<ts>     # 编排者在
 ## 6. 偏差日志
 
 （冻结后若有改动，按"日期 UTC / 改了什么 / 为什么 / 是否在 submit 前"记在这里。）
+
+- **2026-11-09 UTC / EGL 结论说过头，加 E6 和 EGL_DRAW / 在 smoke_run1 之后，下一次 TVR 作业之前**
+  - 改了什么：
+    - 新增 E6（GLSL 330 着色器编译和链接 + 开深度测试画红三角形 + 读回，第 3b 节），作为单独的 `EGL_DRAW`。
+    - 第 0 节的表改成：只有 E6 过，才支持"MuJoCo / Habitat / Open3D 这类 EGL 基准可以重新考虑"；E5 过不再支持这句话。
+    - 第 1 节加两个阈值：`EGL_DRAW_RGB = 255,0,0`，`EGL_DRAW_TOL = 3`。
+    - `EGL_GATE` 的定义（E0–E5）和阈值都没动。
+  - 为什么：
+    - E5 只做了 glClear 和读回，没有编译着色器，也没有画任何图元，所以证明不了光栅化能用。Unity 用不用得上它不知道，Habitat 也一样。
+    - 11-09 给用户的回复写了"EGL 能用 → Habitat ImageNav 可以重新考虑"，这句说过头了，要撤回，等 E6 跑过再说。
+  - smoke_run1 的 `EGL_GATE PASS` 按原定义仍然成立；这次的 `EGL_DRAW` 是 `NOT_RUN`。
+- **2026-11-09 UTC / 第 6 步 lavapipe 的测量作废，修了脚本 / 不涉及闸门**
+  - smoke_run1 的第 6 步里，`tvr_smoke.sh` unset 了 `CUDA_VISIBLE_DEVICES`，又传了 `--no-gpu-device`，所以 ai2thor 没给 Unity 传 `-force-device-index`。
+  - Unity 2020.3 于是记下 `SelectPhysicalDevice requestedDeviceIndex=-1`，接着 `Selected physical device (nil)`，然后 SIGABRT（`home_lvp/.../Player.log`）。脚本又干等了 240 s（`steps.jsonl` 里 rc = 124）。
+  - 所以 lavapipe 一步都没测到。"lavapipe 会非常慢"没有依据，撤回。
+  - 现在的做法见第 5 节第 6 行：`CUDA_VISIBLE_DEVICES=0`、`--gpu 0`，预写映射文件 `{"0": 0}`，`LP_NUM_THREADS=12`，加 `--fail-fast`。
+  - `verdict.json` 新增 `lavapipe` 一块，只报告：跑没跑、步数、速度、出错原因、fatal 行。
+  - TVR_GATE FAIL（Vulkan 出黑帧）不受影响。

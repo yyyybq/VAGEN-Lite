@@ -283,14 +283,16 @@ download_set() {  # $1 = valtest | train | all
             log "[$i/$n] $split $scene already complete"
             continue
         fi
+        # children get </dev/null: this loop reads the scene list on stdin, and a child that read stdin would
+        # swallow the remaining scenes (hardening; verify_all below would also catch a skipped scene)
         for f in "$scene/$PLY" "$scene/cfg.yml"; do   # one file per call: hf_hub_download, no repo listing
             nice -n 19 "$hf" download "$DATASET" "$f" --repo-type dataset --revision "$rev" \
-                --local-dir "$DATA" --max-workers 1 --quiet > /dev/null
+                --local-dir "$DATA" --max-workers 1 --quiet > /dev/null < /dev/null
         done
         file_ok "$DATA/$scene/$PLY" "$bytes" \
             || die "$scene: PLY size $(stat -c %s "$DATA/$scene/$PLY" 2>/dev/null || echo missing) != $bytes" 5
         file_ok "$DATA/$scene/cfg.yml" - || die "$scene: cfg.yml missing" 5
-        (cd "$DATA" && nice -n 19 sha256sum "$scene/$PLY" "$scene/cfg.yml") >> "$DATA/SHA256SUMS"
+        (cd "$DATA" && nice -n 19 sha256sum "$scene/$PLY" "$scene/cfg.yml" < /dev/null) >> "$DATA/SHA256SUMS"
         log "[$i/$n] $split $scene OK ($bytes B)"
     done < <(scenes_for "$set")
     verify_all "$set"
