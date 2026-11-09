@@ -408,8 +408,15 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
            "entropy_coeff": 0.01},
     "p1gae": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
               "entropy_coeff": 0.01, "adv_estimator": "gae", "critic_warmup": 11},
+    # the main line's per-turn PPO (the user's decision 1A of 2026-11-09): p1gae with GAE over the episode's turns
+    # (vagen/turn_gae.py: each turn's env reward on that turn, the value at the turn's first token, gamma / lam
+    # counted per turn: 1.0, so the return is the undiscounted episode reward GRPO compares, and 0.95); verl starts
+    # the value network only for the estimators it knows, so the package turns it on (critic.enable)
+    "p1tgae": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
+               "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 11, "gamma": 1.0, "lam": 0.95},
 }
-PACKAGE_ESTIMATORS = ("grpo", "gae")  # the advantage estimators a package may name (default grpo)
+PACKAGE_ESTIMATORS = ("grpo", "gae", "turn_gae")  # the advantage estimators a package may name (default grpo)
+CRITIC_ESTIMATORS = ("gae", "turn_gae")  # the ones with a value network (their warm-up is part of the package)
 
 # Round 12 (the user's handover for the experiment matrix): named standard RL configurations, rl-config --standard
 # NAME.  Each fixes the rl-config options that make the recipe (configs/rl_standards.json); options a standard does
@@ -474,14 +481,19 @@ def package_overrides(name: str, candidates: Optional[int] = None, target_groups
     if estimator not in PACKAGE_ESTIMATORS:
         raise ValueError(f"package {name}: adv_estimator must be one of {PACKAGE_ESTIMATORS}, not {estimator!r}")
     # norm_adv_by_std_in_grpo stays True: GAE ignores it
-    return {"algorithm.adv_estimator": estimator, "algorithm.norm_adv_by_std_in_grpo": True,
-            "actor_rollout_ref.rollout.n": p["rollouts"], "data.train_batch_size": p["candidates"],
-            "actor_rollout_ref.actor.ppo_mini_batch_size": p["target_groups"],
-            "filter.enable": True, "filter.name": "mixed_outcome",
-            "filter.filter_kwargs": {"target_groups": p["target_groups"]},
-            "actor_rollout_ref.actor.optim.lr": p["lr"], "actor_rollout_ref.actor.kl_loss_coef": p["kl_loss_coef"],
-            "actor_rollout_ref.actor.entropy_coeff": p["entropy_coeff"],
-            "trainer.critic_warmup": int(p.get("critic_warmup", 0))}
+    out = {"algorithm.adv_estimator": estimator, "algorithm.norm_adv_by_std_in_grpo": True,
+           "actor_rollout_ref.rollout.n": p["rollouts"], "data.train_batch_size": p["candidates"],
+           "actor_rollout_ref.actor.ppo_mini_batch_size": p["target_groups"],
+           "filter.enable": True, "filter.name": "mixed_outcome",
+           "filter.filter_kwargs": {"target_groups": p["target_groups"]},
+           "actor_rollout_ref.actor.optim.lr": p["lr"], "actor_rollout_ref.actor.kl_loss_coef": p["kl_loss_coef"],
+           "actor_rollout_ref.actor.entropy_coeff": p["entropy_coeff"],
+           "trainer.critic_warmup": int(p.get("critic_warmup", 0))}
+    if estimator == "turn_gae":  # its own gamma / lam (per turn) and the value network verl would not start
+        if "gamma" not in p or "lam" not in p:
+            raise ValueError(f"package {name}: turn_gae needs its own gamma and lam (counted per turn)")
+        out.update({"algorithm.gamma": float(p["gamma"]), "algorithm.lam": float(p["lam"]), "critic.enable": True})
+    return out
 DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
             "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,
             "enable_visibility_shaping_reward": True}
@@ -768,7 +780,7 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         # the PPO supplement (2026-11-08): a GAE package's warm-up is part of its recipe; an explicit other
         # --critic-warmup would be overridden without a word, so it is refused (GRPO packages keep the override)
         warmup = getattr(args, "critic_warmup", None)
-        if (package["algorithm.adv_estimator"] == "gae" and warmup is not None
+        if (package["algorithm.adv_estimator"] in CRITIC_ESTIMATORS and warmup is not None
                 and int(warmup) != package["trainer.critic_warmup"]):
             raise SystemExit(f"--opt-package {args.opt_package} sets trainer.critic_warmup to "
                              f"{package['trainer.critic_warmup']} (the value network alone for "
@@ -847,6 +859,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                                       int(ppo["data"]["max_prompt_length"]))
         if type_overrides and not ppo["trainer"].get("concat_multi_turn"):
             raise SystemExit(f"the {args.model_type} overrides are for the concat history mode (--history-mode concat)")
+        if "trainer.agent_loop_manager" in (type_overrides or {}) and ppo["algorithm"].get("adv_estimator") == "turn_gae":
+            # the per-turn PPO's turn spans are the agent loop's (compact) response positions; this type's manager
+            # expands the image tokens afterwards and does not move them (vagen/agent_loop/cambrian_concat.py)
+            raise SystemExit(f"turn_gae is not supported with the {args.model_type} agent-loop manager")
         for key, value in type_overrides.items():
             _set(ppo, key, value)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))

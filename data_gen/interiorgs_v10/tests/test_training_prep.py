@@ -340,6 +340,42 @@ class TrainingPrepTest(unittest.TestCase):
                 TP.package_overrides("_bad_estimator")
         finally:
             del TP.OPT_PACKAGES["_bad_estimator"]
+        # the per-turn PPO (the user's decision 1A of 2026-11-09): p1tgae is p1gae with GAE over turns (turn_gae)
+        # and its per-turn gamma 1.0 / lam 0.95; its overrides are p1gae's (estimator renamed) plus gamma, lam and
+        # critic.enable (verl starts the value network only for estimators it knows), appended in that order
+        self.assertEqual({k: v for k, v in TP.OPT_PACKAGES["p1tgae"].items() if k not in ("adv_estimator", "gamma", "lam")},
+                         {k: v for k, v in TP.OPT_PACKAGES["p1gae"].items() if k != "adv_estimator"})
+        self.assertEqual(tuple(TP.OPT_PACKAGES["p1tgae"][k] for k in ("adv_estimator", "gamma", "lam")), ("turn_gae", 1.0, 0.95))
+        self.assertEqual(list(gae), list(TP.package_overrides("p1")))  # p1gae keeps p1's keys (no critic.enable)
+        tg = TP.package_overrides("p1tgae")
+        self.assertEqual(list(tg.items()),
+                         [(k, "turn_gae" if k == "algorithm.adv_estimator" else v) for k, v in gae.items()]
+                         + [("algorithm.gamma", 1.0), ("algorithm.lam", 0.95), ("critic.enable", True)])
+        ppo_t, report_t = config("rl_tg_a", opt_package="p1tgae", critic_warmup=None)
+        ppo_r, _ = config("rl_tg_b", opt_package="p1gae", critic_warmup=None)
+        self.assertEqual((ppo_t["algorithm"]["adv_estimator"], ppo_t["algorithm"]["gamma"], ppo_t["algorithm"]["lam"],
+                          ppo_t["critic"]["enable"], ppo_t["trainer"]["critic_warmup"], report_t["critic_warmup"]),
+                         ("turn_gae", 1.0, 0.95, True, 11, 11))
+        self.assertTrue(ppo_t["trainer"]["concat_multi_turn"])
+        self.assertEqual(report_t["opt_package_overrides"], tg)
+        for cfg in (ppo_t, ppo_r):  # otherwise p1gae's config (paths aside)
+            cfg["algorithm"].pop("adv_estimator")
+            for key in ("gamma", "lam"):
+                cfg["algorithm"].pop(key, None)
+            cfg["critic"].pop("enable", None)
+        self.assertEqual(json.loads(json.dumps(ppo_t).replace("rl_tg_a", "X")),
+                         json.loads(json.dumps(ppo_r).replace("rl_tg_b", "X")))
+        for bad in (0, 10):  # its warm-up is part of the recipe, as p1gae's
+            with self.assertRaisesRegex(SystemExit, "critic_warmup to 11", msg=bad):
+                config(f"rl_tg_bad_{bad}", opt_package="p1tgae", critic_warmup=bad)
+            self.assertFalse((self.root / f"rl_tg_bad_{bad}" / "ppo.yaml").exists())
+        # a turn_gae package must name its own gamma and lam (the template's are per token)
+        TP.OPT_PACKAGES["_tg_no_gamma"] = {k: v for k, v in TP.OPT_PACKAGES["p1tgae"].items() if k != "gamma"}
+        try:
+            with self.assertRaisesRegex(ValueError, "gamma"):
+                TP.package_overrides("_tg_no_gamma")
+        finally:
+            del TP.OPT_PACKAGES["_tg_no_gamma"]
 
     def test_rl_config_standards_and_seed(self):
         """Round 12: named standard configurations (configs/rl_standards.json, the package with S0 and with the dense
@@ -351,11 +387,16 @@ class TrainingPrepTest(unittest.TestCase):
         standards = TP.load_standards()
         self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_Dcond",
                                              "v10_p1_Dcond_fp", "v10_p1_S0", "v10_p1_S0_fp", "v10_p1_S0_keep",
-                                             "v10_p1gae_Dcond", "v10_p1gae_S0", "v10_p2_D", "v10_p2_S0"])
+                                             "v10_p1gae_Dcond", "v10_p1gae_S0", "v10_p1tgae_Dcond", "v10_p1tgae_S0",
+                                             "v10_p2_D", "v10_p2_S0"])
         # the PPO supplement (the user's decision 甲 of 2026-11-08): the p1 pair with the GAE package, nothing else
         for name, base in (("v10_p1gae_S0", "v10_p1_S0"), ("v10_p1gae_Dcond", "v10_p1_Dcond")):
             self.assertEqual(standards[name], {**standards[base], "opt_package": "p1gae"})
         self.assertIn("_v10_p1gae", json.loads(TP.STANDARDS_FILE.read_text(encoding="utf-8")))  # its note
+        # the per-turn PPO (the user's decision 1A of 2026-11-09): the same pair with the turn-level package
+        for name, base in (("v10_p1tgae_S0", "v10_p1_S0"), ("v10_p1tgae_Dcond", "v10_p1_Dcond")):
+            self.assertEqual(standards[name], {**standards[base], "opt_package": "p1tgae"})
+        self.assertIn("_v10_p1tgae", json.loads(TP.STANDARDS_FILE.read_text(encoding="utf-8")))
         # experiment 3A (the user's decision 甲 of 2026-11-06): the p1 pair with the turn-footprint rule, each its
         # base plus turn_footprint_radius 0.25, the two differing only in the reward (as every pair)
         for name, base in (("v10_p1_S0_fp", "v10_p1_S0"), ("v10_p1_Dcond_fp", "v10_p1_Dcond")):
@@ -449,6 +490,30 @@ class TrainingPrepTest(unittest.TestCase):
             self.assertEqual(differ, ["critic_warmup", "opt_package", "opt_package_overrides", "standard"], gae_name)
         with self.assertRaises(SystemExit):  # the standard's package fixes the warm-up
             config("rl_g_bad_warmup", standard="v10_p1gae_S0", critic_warmup=10)
+        # the per-turn PPO: the p1tgae standards give the p1gae standards' configs with turn_gae, the per-turn gamma /
+        # lam and critic.enable; env configs identical (the agent loop records the turns from the PPO config alone)
+        for tg_name, gae_name, extra in (("v10_p1tgae_S0", "v10_p1gae_S0", {}), ("v10_p1tgae_Dcond", "v10_p1gae_Dcond", v4)):
+            ppo_t, env_t, report_t = config(f"rl_t_{tg_name}", standard=tg_name, seed=20261019, **extra)
+            ppo_g, env_g, report_g = config(f"rl_u_{tg_name}", standard=gae_name, seed=20261019, **extra)
+            self.assertEqual((ppo_t["algorithm"]["adv_estimator"], ppo_t["algorithm"]["gamma"], ppo_t["algorithm"]["lam"],
+                              ppo_t["critic"]["enable"], ppo_t["trainer"]["critic_warmup"], report_t["opt_package"]),
+                             ("turn_gae", 1.0, 0.95, True, 11, "p1tgae"))
+            self.assertEqual((ppo_g["algorithm"]["gamma"], ppo_g["algorithm"]["lam"], ppo_g["critic"]["enable"]), (0.95, 0.95, None))
+            self.assertEqual(ppo_t["filter"]["name"], "keep_by_return_std" if extra else "mixed_outcome")
+            self.assertEqual({k: v for k, v in env_t.items() if k != "jsonl_path"},
+                             {k: v for k, v in env_g.items() if k != "jsonl_path"})
+            for cfg in (ppo_t, ppo_g):
+                for key in ("adv_estimator", "gamma", "lam"):
+                    cfg["algorithm"].pop(key)
+                cfg["critic"].pop("enable")
+            self.assertEqual(json.loads(json.dumps(ppo_t).replace(f"rl_t_{tg_name}", "X")),
+                             json.loads(json.dumps(ppo_g).replace(f"rl_u_{tg_name}", "X")))
+            report_t = json.loads(json.dumps(report_t).replace(f"rl_t_{tg_name}", "X"))
+            report_g = json.loads(json.dumps(report_g).replace(f"rl_u_{tg_name}", "X"))
+            differ = sorted(k for k in set(report_t) | set(report_g) if report_t.get(k) != report_g.get(k))
+            self.assertEqual(differ, ["opt_package", "opt_package_overrides", "standard"], tg_name)
+        with self.assertRaises(SystemExit):
+            config("rl_t_bad_warmup", standard="v10_p1tgae_S0", critic_warmup=10)
         # the dense-reward first batch: the keep_by_return_std filter with its threshold, floor and task file
         ppo, _, report = config("rl_keep", standard="v10_p1_D", group_filter="keep_by_return_std",
                                 keep_std_threshold=0.33, keep_std_floor=1.77)
@@ -900,6 +965,13 @@ class TrainingPrepTest(unittest.TestCase):
             config("rl_type_wrong", model_type="qwen3_vl")
         with self.assertRaisesRegex(SystemExit, "concat history mode"):
             config("rl_type_no_concat", model_type="cambrian_qwen", history_mode="none")
+        # the per-turn PPO's turn spans are compact positions the Cambrian manager does not move: refused, no file
+        # written; the Qwen types (no manager) take it
+        with self.assertRaisesRegex(SystemExit, "turn_gae is not supported"):
+            config("rl_type_cambrian_tg", model_type="cambrian_qwen", opt_package="p1tgae")
+        self.assertFalse((self.root / "rl_type_cambrian_tg" / "ppo.yaml").exists())
+        qwen_tg, _ = config("rl_type_qwen3_tg", model_type="qwen3_vl", model="/m", opt_package="p1tgae")
+        self.assertEqual(qwen_tg["algorithm"]["adv_estimator"], "turn_gae")
 
     def test_rl_config_round10_options(self):
         """History modes, the fixed validation set, greedy validation, test frequency and critic warm-up."""

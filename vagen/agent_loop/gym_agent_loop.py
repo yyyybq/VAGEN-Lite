@@ -99,6 +99,7 @@ class AgentData:
         # of every turn the env could not read
         self.turn_span: Optional[tuple] = None
         self.invalid_spans: List[List[int]] = []
+        self.turn_spans: List[List[int]] = []  # every generated turn's span, in order (vagen/turn_gae.py)
         self.progress_return: float = 0.0  # round 12 freeze, V8: the env's applied progress reward, summed
 
         # Episode metadata – populated from env info during the episode
@@ -119,6 +120,7 @@ class AgentData:
         start = len(self.response_mask)
         self.response_mask += [1] * n_tokens
         self.turn_span = (start, len(self.response_mask))
+        self.turn_spans.append([start, len(self.response_mask)])
 
     def end_turn(self, invalid: bool) -> None:
         """The env's verdict on the last generated turn: an unreadable one keeps its span."""
@@ -210,6 +212,10 @@ class GymAgentLoop(AgentLoopBase):
         from vagen.split_reward_adv import weight as _split_weight
 
         cls.record_reward_parts = _split_weight(config.get("algorithm", None)) is not None
+        # the main line's per-turn PPO (2026-11-09): each turn's span and env reward, only for the turn_gae estimator
+        from vagen.turn_gae import enabled as _turn_gae_enabled
+
+        cls.record_turn_rewards = _turn_gae_enabled(config.get("algorithm", None))
 
         _placeholder = [{"role": "system", "content": "placeholder"}]
         if processor is not None:
@@ -348,6 +354,10 @@ class GymAgentLoop(AgentLoopBase):
                                                                    if s[0] < self.response_length]}
         if getattr(self, "record_reward_parts", False):  # round 12 freeze, V8 (vagen/split_reward_adv.py)
             output.extra_fields["reward_parts"] = {"progress": float(agent_data.progress_return)}
+        if getattr(self, "record_turn_rewards", False):  # the per-turn PPO (vagen/turn_gae.py); spans unclipped:
+            from vagen.turn_gae import turn_record  # the estimator clips them and folds a cut-off turn's reward
+
+            output.extra_fields["turn_rewards"] = turn_record(agent_data.turn_spans, agent_data.env_rewards)
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:

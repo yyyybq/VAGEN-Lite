@@ -2846,8 +2846,10 @@ class RayPPOTrainer:
                         )
                         metrics.update(batch.meta_info.pop("invalid_turn_metrics", {}))  # round 12 freeze
                         metrics.update(batch.meta_info.pop("split_adv_metrics", {}))  # round 12 freeze, V8
+                        metrics.update(batch.meta_info.pop("turn_gae_metrics", {}))  # per-turn PPO (vagen/turn_gae.py)
 
-                    if self.config.algorithm.adv_estimator in ["no_concat_gae_last", "no_concat_gae_first", "no_concat_gae"]:
+                    if self.config.algorithm.adv_estimator in ["no_concat_gae_last", "no_concat_gae_first", "no_concat_gae",
+                                                               "turn_gae"]:
                         batch.batch["value_mask"] = compute_value_mask(batch)
 
                     # compute custom metrics
@@ -2859,12 +2861,21 @@ class RayPPOTrainer:
                     
                     # filter the training batch for effective update (Refer to STARPO-S and DAPO)
                     pre_filter_batch = None
+                    # the main line's per-turn PPO (vagen/turn_gae.py): its raw advantages are whitened after the
+                    # filter, over the episodes the update keeps (before any padding to the workers)
+                    turn_gae_run = str(self.config.algorithm.adv_estimator) == "turn_gae"
                     if self.config.filter.get("enable", False):
                         if self.config.trainer.get("rollout_data_dir", None):
                             pre_filter_batch = batch  # the rollout dump writes every candidate (rollout_dump_view)
                         batch.meta_info["uid_draw_order"] = uid_draw_order
+                        batch.meta_info["adv_estimator"] = str(self.config.algorithm.adv_estimator)  # keep filter
                         batch,metrics = FILTER_REGISTRY.get(self.config.filter.name)(batch, metrics,**self.config.filter.filter_kwargs)
                         batch.meta_info.pop("uid_draw_order", None)
+                        batch.meta_info.pop("adv_estimator", None)
+                        if turn_gae_run:
+                            from vagen.turn_gae import whiten as _turn_gae_whiten
+
+                            batch.batch["advantages"] = _turn_gae_whiten(batch.batch["advantages"], batch.batch["response_mask"])
                         if self.config.trainer.balance_batch:
                             # re-balance after filtering
                             divisor_size = self.actor_rollout_wg.world_size
@@ -2872,6 +2883,10 @@ class RayPPOTrainer:
                             batch, pad_size = pad_dataproto_to_divisor(batch, divisor_size)
                             print(f"After filtering: Pad {pad_size} samples to make batch size {batch_size} divisible by {divisor_size} dp_workers")
                             self._balance_batch(batch, metrics=metrics, logging_prefix="filtered_global_seqlen")
+                    elif turn_gae_run:  # no filter: the whole batch
+                        from vagen.turn_gae import whiten as _turn_gae_whiten
+
+                        batch.batch["advantages"] = _turn_gae_whiten(batch.batch["advantages"], batch.batch["response_mask"])
 
                     # Opt-in exact post-GAE/post-filter boundary for offline PPO
                     # diagnosis.  With the environment variable unset this does
@@ -3097,6 +3112,7 @@ class RayPPOTrainer:
                     "no_concat_gae_first",
                     "no_concat_gae",
                     "masked_gae",
+                    "turn_gae",  # the main line's per-turn PPO (vagen/turn_gae.py)
                 ]:
                     # These estimators use -100 sentinel returns for positions without
                     # value supervision. Raw return stats are dominated by sentinels;

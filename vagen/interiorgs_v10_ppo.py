@@ -103,8 +103,10 @@ class EndpointTrainer(RayPPOTrainer):
 
 # Round 10: the two ways an episode's earlier turns reach the model (training_prep.history_overrides).
 # Each turn a separate sample (the no-concat agent loop, its own GAE) or one sequence per episode
-# (verl's multi-turn concat mode with plain GAE); the advantage estimator must match the mode.
-MODES = {("no_concat_gae", False): "no_concat", ("gae", True): "concat", ("grpo", True): "concat"}
+# (verl's multi-turn concat mode with plain GAE); the advantage estimator must match the mode.  2026-11-09, the
+# main line's per-turn PPO: the concat mode also with turn_gae (GAE over the episode's turns, vagen/turn_gae.py).
+MODES = {("no_concat_gae", False): "no_concat", ("gae", True): "concat", ("grpo", True): "concat",
+         ("turn_gae", True): "concat"}
 
 
 def history_mode(cfg) -> str:

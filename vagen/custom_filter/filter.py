@@ -266,7 +266,10 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
         keep = list(nominal)
     index = sorted(i for u in keep for i in groups[u])
     filtered = data_proto.select_idxs(index)
-    scale = {u: (spread[u] + eps) / (max(spread[u], floor) + eps) for u in filled}
+    # the main line's per-turn PPO (vagen/turn_gae.py): the scale is a correction for GRPO's division by the group's
+    # spread, which turn_gae does not do, so its filled tasks keep their advantages (the trainer names the estimator)
+    skip_scale = str(data_proto.meta_info.get("adv_estimator") or "") == "turn_gae"
+    scale = {} if skip_scale else {u: (spread[u] + eps) / (max(spread[u], floor) + eps) for u in filled}
     if "advantages" in filtered.batch.keys():
         adv = filtered.batch["advantages"]
         if fallback:
@@ -298,6 +301,8 @@ def keep_by_return_std_filter(data_proto: DataProto, metrics, **kwargs) -> tuple
             "filter/keep/filled_adv_scale_mean": float(np.mean(list(scale.values()))) if scale else 0.0,
             "filter/keep/filled_below_floor": sum(1 for u in filled if spread[u] < floor),  # scaled down by the floor
         })
+        if skip_scale:  # only under turn_gae, so the other runs' metrics keep their keys
+            metrics["filter/keep/adv_scale_skipped"] = 1.0
         family = data_proto.non_tensor_batch.get("task_type")
         if family is not None:
             for fam, count in Counter(str(family[groups[u][0]]) for u in filled).items():

@@ -50,5 +50,12 @@
                   "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
  "v10_p1gae_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
                      "opt_package": "p1gae", "reward_preset": "D_cond",
-                     "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
+                     "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "_v10_p1tgae": "The main line's per-turn PPO (the user's decision 1A of 2026-11-09): the p1gae pair with GAE over the episode's turns instead of its tokens (package p1tgae, estimator turn_gae, vagen/turn_gae.py: each turn's env reward on that turn instead of the episode total on the last token, the value network's value at each turn's first response token, gamma 1.0 / lam 0.95 per turn, the value network trained on the turns' returns only; critic_warmup 11 and the critic block as p1gae); everything else as v10_p1_S0 / v10_p1_Dcond. V4 = v10_p1tgae_Dcond + plan rl progress_reward_scale 3.3333333333333335, group_filter keep_by_return_std, keep_std_threshold 0.3318, keep_std_floor 1.0. The plan gives no rl critic_warmup.",
+ "v10_p1tgae_S0": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                   "opt_package": "p1tgae", "reward_preset": "S0",
+                   "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p1tgae_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                      "opt_package": "p1tgae", "reward_preset": "D_cond",
+                      "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
 }
