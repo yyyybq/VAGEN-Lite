@@ -647,3 +647,32 @@ def test_node_facts(base):
     text = out.read_text()
     for sec in ("## id", "## nproc", "## cpu.max", "## df", "## free", "## nvidia-smi", "## devices"):
         assert sec in text
+
+
+def test_disk_exception(base, fake, monkeypatch):
+    out = base / "out"
+    out.mkdir()
+    monkeypatch.setattr(sco.paths, "OUT", out)
+    monkeypatch.setattr(sco, "DISK_EXCEPTION", out / "DISK_EXCEPTION.json")
+    r = prep(base, "vpd-wb-exc", est=0.5)
+    sco.STOP_FLAG.write_text('{"remaining": 1.0}')
+    text = sco.USAGE_CSV.read_text().replace(",2.0,1,", ",1.0,1,")
+    sco.USAGE_CSV.write_text(text)
+    with pytest.raises(sco.Refused, match="no user disk exception"):
+        do_submit(r)
+    sco.DISK_EXCEPTION.write_text(json.dumps({"gates": ["wb", "tvr"], "cap_gb": 10, "by": "test"}))
+    (out / "big.bin").write_bytes(b"x" * 4096)
+    assert sco.disk_exception_ok("e3vs")[0] is False
+    assert sco.disk_exception_ok("wb")[0] is True
+    monkeypatch.setattr(sco, "tree_bytes", lambda root: int(11e9))
+    assert "exception cap" in sco.disk_exception_ok("wb")[1]
+    monkeypatch.setattr(sco, "tree_bytes", lambda root: 4096)
+    flag = sco.DISK_RUNS / "FLAG_PAUSE"
+    flag.write_text("x")
+    assert sco.disk_exception_ok("wb")[0] is False
+    flag.unlink()
+    sco.USAGE_CSV.write_text(text.replace(",1.0,1,", ",0.4,1,"))
+    assert "hard floor" in sco.disk_exception_ok("wb")[1]
+    sco.USAGE_CSV.write_text(text)
+    assert fake.submits == []
+    assert do_submit(r) == "pt-fake0001"

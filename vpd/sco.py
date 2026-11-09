@@ -71,6 +71,12 @@ WARN_FLAG = DISK_RUNS / "WARN_DISK_LOW"
 USAGE_CSV = paths.USER_ROOT / "VAGEN-Lite-disk" / "docs" / "disk" / "usage.csv"
 MIN_REMAINING_TB = 1.5
 USAGE_STALE_H = 6.0
+# User decision 2026-11-09 (vpd session, answer to the disk-flag question): exception for the WalkerBench and
+# TVR gates only, hard cap 10 GB for everything this line keeps under OUT; E3VS waits for the disk line.
+# The exception lifts ONLY the STOP_SUBMIT_DISK_LOW flag and the remaining_TB < 1.5 rule; any FLAG_* file,
+# an unreadable usage.csv, or remaining_TB < EXC_HARD_FLOOR_TB still refuses.
+DISK_EXCEPTION = paths.OUT / "DISK_EXCEPTION.json"
+EXC_HARD_FLOOR_TB = 0.5
 
 TERMINAL = frozenset(sco_job.FINISHED)  # SUCCEEDED FAILED STOPPED CANCELLED
 PAGE_SIZE = 500
@@ -202,6 +208,56 @@ def disk_check() -> Tuple[bool, List[str]]:
     if t is not None and (now_utc() - t).total_seconds() > USAGE_STALE_H * 3600:
         msgs.append(f"warning: usage.csv last row is older than {USAGE_STALE_H:.0f} h")
     return ok, msgs
+
+
+def tree_bytes(root: Path) -> int:
+    """Allocated bytes under root (like du; no symlink following; unreadable entries are skipped)."""
+    total, stack = 0, [str(root)]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    try:
+                        st = e.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    total += getattr(st, "st_blocks", 0) * 512
+                    if e.is_dir(follow_symlinks=False):
+                        stack.append(e.path)
+        except OSError:
+            continue
+    return total
+
+
+def disk_exception_ok(gate: Optional[str]) -> Tuple[bool, str]:
+    """Whether the user's recorded disk exception lets a job of this gate pass a refused disk_check."""
+    if not DISK_EXCEPTION.exists():
+        return False, f"no user disk exception ({DISK_EXCEPTION})"
+    try:
+        exc = json.loads(DISK_EXCEPTION.read_text())
+        gates, cap_gb = list(exc["gates"]), float(exc["cap_gb"])
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return False, f"unreadable disk exception {DISK_EXCEPTION}: {e!r}"
+    if gate not in gates:
+        return False, f"user disk exception covers gates {gates}, not {gate!r}"
+    if DISK_RUNS.is_dir() and sorted(DISK_RUNS.glob("FLAG_*")):
+        return False, "user disk exception does not cover disk_runs/FLAG_* flags"
+    try:
+        lines = [ln for ln in USAGE_CSV.read_text().splitlines() if ln.strip()]
+        row = dict(zip([c.strip() for c in lines[0].split(",")], [c.strip() for c in lines[-1].split(",")]))
+        remaining = float(row["remaining_TB"])
+        if len(lines) < 2:
+            raise ValueError("no data row")
+    except (OSError, IndexError, KeyError, ValueError) as e:
+        return False, f"user disk exception needs a readable usage.csv: {e!r}"
+    if remaining < EXC_HARD_FLOOR_TB:
+        return False, f"disk remaining {remaining} TB < hard floor {EXC_HARD_FLOOR_TB} TB (exception void)"
+    used_gb = tree_bytes(paths.OUT) / 1e9
+    if used_gb >= cap_gb:
+        return False, f"vpd OUT uses {used_gb:.2f} GB >= exception cap {cap_gb:g} GB"
+    return True, (f"user disk exception ({exc.get('by', '?')}): gate {gate}, vpd OUT uses {used_gb:.2f} GB "
+                  f"< cap {cap_gb:g} GB, remaining {remaining} TB")
 
 
 # --- job list and states ------------------------------------------------------------------------------------
@@ -384,7 +440,10 @@ def submit(run, est_gph: Optional[float] = None, cap: Optional[float] = None, sl
         for m in msgs:
             print(f"[vpd.sco] {m}", file=sys.stderr)
         if not ok:
-            raise Refused("DISK REFUSED: " + "; ".join(msgs))
+            exc_ok, exc_msg = disk_exception_ok(gate)
+            print(f"[vpd.sco] {exc_msg}", file=sys.stderr)
+            if not exc_ok:
+                raise Refused("DISK REFUSED: " + "; ".join(msgs + [exc_msg]))
         # (b) concurrency
         page = list_page()
         if page is None:
