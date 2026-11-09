@@ -1,0 +1,22 @@
+; vpd-tvr-debug V2 vk_tri: fragment shader, SPIR-V 1.0 for Vulkan 1.0/1.1: constant opaque red at location 0.
+; Assembled on the login node: envs/tvr/bin/spirv-as --target-env vulkan1.0 tri.frag.spvasm -o tri.frag.spv
+; and checked with: envs/tvr/bin/spirv-val --target-env vulkan1.0 tri.frag.spv
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %main "main" %color
+               OpExecutionMode %main OriginUpperLeft
+               OpDecorate %color Location 0
+       %void = OpTypeVoid
+     %fnvoid = OpTypeFunction %void
+      %float = OpTypeFloat 32
+    %v4float = OpTypeVector %float 4
+    %ptr_out = OpTypePointer Output %v4float
+      %color = OpVariable %ptr_out Output
+         %f0 = OpConstant %float 0
+         %f1 = OpConstant %float 1
+        %red = OpConstantComposite %v4float %f1 %f0 %f0 %f1
+       %main = OpFunction %void None %fnvoid
+      %entry = OpLabel
+               OpStore %color %red
+               OpReturn
+               OpFunctionEnd

@@ -1,0 +1,41 @@
+; vpd-tvr-debug V2 vk_tri: vertex shader, SPIR-V 1.0 for Vulkan 1.0/1.1, no vertex buffers.
+; Vertex k of one triangle from gl_VertexIndex (NDC, y down): 0 -> (0, -0.6), 1 -> (0.6, 0.6), 2 -> (-0.6, 0.6),
+; z = 0.5, w = 1.  The centre (0, 0) is inside, the corners (+-1, +-1) are outside.
+; Assembled on the login node: envs/tvr/bin/spirv-as --target-env vulkan1.0 tri.vert.spvasm -o tri.vert.spv
+; and checked with: envs/tvr/bin/spirv-val --target-env vulkan1.0 tri.vert.spv
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Vertex %main "main" %vid %pos
+               OpDecorate %vid BuiltIn VertexIndex
+               OpDecorate %pos BuiltIn Position
+       %void = OpTypeVoid
+     %fnvoid = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %int = OpTypeInt 32 1
+       %bool = OpTypeBool
+    %v4float = OpTypeVector %float 4
+     %ptr_in = OpTypePointer Input %int
+    %ptr_out = OpTypePointer Output %v4float
+        %vid = OpVariable %ptr_in Input
+        %pos = OpVariable %ptr_out Output
+         %i0 = OpConstant %int 0
+         %i1 = OpConstant %int 1
+         %i2 = OpConstant %int 2
+         %f0 = OpConstant %float 0
+        %fp6 = OpConstant %float 0.6
+        %fm6 = OpConstant %float -0.6
+        %fz5 = OpConstant %float 0.5
+         %f1 = OpConstant %float 1
+       %main = OpFunction %void None %fnvoid
+      %entry = OpLabel
+          %v = OpLoad %int %vid
+        %is0 = OpIEqual %bool %v %i0
+        %is1 = OpIEqual %bool %v %i1
+        %is2 = OpIEqual %bool %v %i2
+        %x12 = OpSelect %float %is2 %fm6 %f0
+          %x = OpSelect %float %is1 %fp6 %x12
+          %y = OpSelect %float %is0 %fm6 %fp6
+          %p = OpCompositeConstruct %v4float %x %y %fz5 %f1
+               OpStore %pos %p
+               OpReturn
+               OpFunctionEnd
