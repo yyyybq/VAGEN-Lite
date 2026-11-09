@@ -122,7 +122,8 @@ def collect_lmms(run_dir: Path, bench: dict) -> dict:
     if task.startswith("vstibench"):
         avg5, groups = vsti_avg5(by_type)
         out["task_overall_9_types"] = overall
-        out["overall"] = avg5  # the number VLM-3R and Spatial-Interactor report
+        out["overall"] = avg5  # VLM-3R's five categories, items pooled per category (2026-11-06 review: Spatial-
+        # Interactor's rows fit the subtype mean better, rule vsti5m in paired.headline / lenient.json)
         out["subscores"].update({f"group/{g}": v for g, v in groups.items()})
     return out
 

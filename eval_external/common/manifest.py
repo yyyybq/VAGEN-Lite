@@ -63,6 +63,25 @@ def git_state(path: Path) -> dict:
     return {"path": str(path), "commit": commit, "dirty": bool(status)}
 
 
+CODE_SUFFIXES = (".py", ".yaml", ".sh")
+CODE_SKIP = ("results", "__pycache__", "step0")
+
+
+def code_hash(root: Path = EVAL_ROOT) -> dict:
+    """sha256 over the sorted 'relative path + file sha256' lines of eval_external's code files (2026-11-06): the
+    sco image has no git, so the commit read from .git cannot tell whether the tree had uncommitted changes; this
+    hash identifies the exact code that ran (compare with `python -m eval_external.common.manifest`)."""
+    import hashlib
+
+    lines = []
+    for p in sorted(root.rglob("*")):
+        rel = p.relative_to(root)
+        if not p.is_file() or p.suffix not in CODE_SUFFIXES or any(part in CODE_SKIP for part in rel.parts):
+            continue
+        lines.append(f"{rel.as_posix()} {hashlib.sha256(p.read_bytes()).hexdigest()}")
+    return {"sha256": hashlib.sha256("\n".join(lines).encode()).hexdigest(), "files": len(lines)}
+
+
 def write_manifest(run_dir: Path, *, models: list[dict], benchmark: dict, backend: dict, prompt: dict,
                    frames: int | None, decoding: dict, subset: dict | None = None, extra: dict | None = None) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -70,7 +89,7 @@ def write_manifest(run_dir: Path, *, models: list[dict], benchmark: dict, backen
         "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "host": socket.gethostname(),
         "command": sys.argv,
-        "eval_external": git_state(EVAL_ROOT),
+        "eval_external": {**git_state(EVAL_ROOT), "code": code_hash()},
         "models": models,
         "benchmark": benchmark,
         "backend": backend,
@@ -87,3 +106,7 @@ def write_manifest(run_dir: Path, *, models: list[dict], benchmark: dict, backen
         json.dump(out, f, indent=1, ensure_ascii=False)
         f.write("\n")
     return path
+
+
+if __name__ == "__main__":  # the code state of this checkout, as a manifest would record it
+    print(json.dumps({**git_state(EVAL_ROOT), "code": code_hash()}, indent=1))

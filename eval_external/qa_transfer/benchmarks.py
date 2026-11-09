@@ -123,7 +123,7 @@ BENCHMARKS = {
     },
     "VSTI-Bench": {
         "backend": "lmms_eval", "task": "vstibench_ee", "frames": 32, "items": 5736,
-        "metric": "mean over 9 question types; MCQ accuracy, numeric MRA",
+        "metric": "mean of VLM-3R's 5 categories (collect.vsti_avg5 pools each category's items; rule vsti5m averages its subtypes); MCQ accuracy, numeric MRA; the task's own 9-type mean is kept as task_overall_9_types",
         "source": {"dataset": "Journey9ni/vstibench@0903eb0 (labels after the 2026-07-13 correction)",
                    "task": "lmms_tasks/vstibench_ee/vstibench.yaml (VLM-3R's task, token off, revision pinned)"},
         "prompt": {"impl": "VLM-3R vstibench utils.vsibench_doc_to_text",
@@ -133,7 +133,7 @@ BENCHMARKS = {
     },
     "VSTI-Bench-prefix": {
         "backend": "lmms_eval", "task": "vstibench_prefix_ee", "frames": 32, "items": 6042,
-        "metric": "mean over 9 question types; MCQ accuracy, numeric MRA",
+        "metric": "mean of VLM-3R's 5 categories (collect.vsti_avg5 pools each category's items; rule vsti5m averages its subtypes); MCQ accuracy, numeric MRA; the task's own 9-type mean is kept as task_overall_9_types",
         "source": {"dataset": "Journey9ni/vstibench@27ff0a2 (labels before the correction; what Spatial-Interactor used)",
                    "task": "lmms_tasks/vstibench_ee/vstibench_prefix.yaml"},
         "prompt": {"impl": "VLM-3R vstibench utils.vsibench_doc_to_text (same as VSTI-Bench)"},
@@ -151,15 +151,23 @@ BENCHMARKS = {
         "source": {"dataset": "nv-njb/SAT@85f0ea843878d3a15e3935da7c1ede53276d171f (array/SAT test, options shuffled "
                               "once with seed 42)"},
         "prompt": {"impl": "lmms_eval/tasks/sat/utils.py sat_doc_to_text",
-                   "post": "Please answer directly with only the letter of the correct option and nothing else."},
+                   "post": "Only output the letter of the correct option and nothing else.",
+                   "note": "sat_doc_to_text writes this suffix itself and ignores the yaml post_prompt 'Please answer directly with only the letter...' (corrected 2026-11-06; earlier manifests record the unused yaml text)"},
     },
     "SAT-Real-swap": {
         # SAT-Real with each item's options in reversed order (correct letter moved accordingly); with SAT-Real
-        # it gives the circular score (right in both orders), the protocol of the SAT paper (each item twice,
-        # options swapped).  Only the option order differs from SAT-Real.
+        # it gives the SAT paper's protocol (each item in both option orders, accuracy averaged over the two), and the
+        # stricter right-in-both-orders score.  Only the option order differs from SAT-Real.
         "backend": "lmms_eval", "task": "sat_swap_ee", "frames": None, "items": 150,
         "metric": "accuracy (2 options, order reversed)",
         "source": {"dataset": "nv-njb/SAT@85f0ea8 as SAT-Real, options reversed by lmms_tasks/sat_swap_ee/utils.py"},
+        "prompt": {"impl": "lmms_eval/tasks/sat/utils.py sat_doc_to_text (same as SAT-Real)"},
+    },
+    "SAT-Syn-swap": {
+        # SAT-Syn with options reversed (2026-11-06): with SAT-Syn, the two-order average (SAT paper's protocol)
+        "backend": "lmms_eval", "task": "sat_syn_swap_ee", "frames": None, "items": 4001,
+        "metric": "accuracy (2 options, order reversed)",
+        "source": {"dataset": "SAT-Syn (array/SAT@bda5dde val, qa_transfer/make_sat_syn.py), options reversed"},
         "prompt": {"impl": "lmms_eval/tasks/sat/utils.py sat_doc_to_text (same as SAT-Real)"},
     },
 }

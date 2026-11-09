@@ -9,9 +9,12 @@ Writes OUT.md and OUT.json:
 1. Accuracy, lenient scoring (qa_transfer/lenient.py), model x benchmark.  Proportions (every benchmark scored
    right / wrong per item) carry a Wilson 95% interval; VSI-Bench and VSTI-Bench mix multiple choice with numeric
    items scored by MRA, so their headline is not a proportion and the interval is a 95% bootstrap over items
-   (resampled within question type, headline recomputed the benchmark's way).  SAT-Real circular = right in both
-   option orders (SAT-Real and SAT-Real-swap).  MindCube-Tiny = EASI's 1,040 items (the public leaderboard's set),
-   taken from the MindCube-Tiny-1050 run; MindCube-Tiny-1050 = MindCube's own 1,050.
+   (resampled within question type, headline recomputed the benchmark's way).  SAT: "单序" = lmms-eval's sat task
+   as is (one option order); "两序平均" = the mean over both option orders (SAT and SAT-*-swap), the SAT paper's
+   protocol and robust to a model's letter bias; "两序都对" = right in both orders (stricter, not the paper's).
+   VSTI: "vsti5" pools the items of each category, "vsti5m" averages each category's subtypes (fits
+   Spatial-Interactor's VSTI rows; review of 2026-11-06).  MindCube-Tiny = EASI's 1,040 items (the public
+   leaderboard's set), taken from the MindCube-Tiny-1050 run; MindCube-Tiny-1050 = MindCube's own 1,050.
 2. Format: per model x benchmark the share of answers that could not be parsed at all, and of multiple-choice
    answers parsed but wrong; plus how many answers only the lenient rule could read.
 3. Raw model against the public numbers (official scoring, the backend's own, which is what papers report).
@@ -44,35 +47,50 @@ HERE = Path(__file__).resolve().parent
 REGISTRY = HERE.parent / "adapters" / "registry_matrix_v3.yaml"
 N_BOOT = 2000
 SEED = 20261106
-SIX = ["SAT-Real", "SAT-Syn", "ViewSpatial", "MindCube", "VSI-Bench", "VSTI-Bench"]
-# (column key, label, run benchmark, item filter, sub-item)
+# (column key, label, run benchmark, item filter, sub-item, headline rule)
 COLUMNS = [
-    ("SAT-Real", "SAT-Real", "SAT-Real", None, None),
-    ("SAT-Real-circ", "SAT-Real 轮换", "SAT-Real", "circular", None),
-    ("SAT-Syn", "SAT-Syn", "SAT-Syn", None, None),
-    ("ViewSpatial", "ViewSpatial", "ViewSpatial", None, None),
-    ("MindCube-Tiny", "MindCube-Tiny (1,040)", "MindCube-Tiny-1050", "easi1040", None),
-    ("MindCube-Tiny-1050", "MindCube-Tiny (1,050)", "MindCube-Tiny-1050", None, None),
-    ("MindCube", "MindCube 全集", "MindCube", None, None),
-    ("VSI-Bench", "VSI", "VSI-Bench", None, None),
-    ("VSI-route", "VSI 路线规划", "VSI-Bench", None, "route_planning"),
-    ("VSTI-Bench", "VSTI", "VSTI-Bench", None, None),
-    ("VSTI-disp", "VSTI 相机位移", "VSTI-Bench", None, "camera_displacement"),
-    ("MMSI", "MMSI", "MMSI", None, None),
+    ("SAT-Real", "SAT-Real 单序", "SAT-Real", None, None, "items"),
+    ("SAT-Real-avg", "SAT-Real 两序平均", "SAT-Real", "avg", None, "items"),
+    ("SAT-Real-both", "SAT-Real 两序都对", "SAT-Real", "both", None, "items"),
+    ("SAT-Syn", "SAT-Syn 单序", "SAT-Syn", None, None, "items"),
+    ("SAT-Syn-avg", "SAT-Syn 两序平均", "SAT-Syn", "avg", None, "items"),
+    ("SAT-Syn-both", "SAT-Syn 两序都对", "SAT-Syn", "both", None, "items"),
+    ("ViewSpatial", "ViewSpatial", "ViewSpatial", None, None, "items"),
+    ("MindCube-Tiny", "MindCube-Tiny (1,040)", "MindCube-Tiny-1050", "easi1040", None, "items"),
+    ("MindCube-Tiny-1050", "MindCube-Tiny (1,050)", "MindCube-Tiny-1050", None, None, "items"),
+    ("MindCube", "MindCube 全集", "MindCube", None, None, "items"),
+    ("VSI-Bench", "VSI", "VSI-Bench", None, None, "vsi8"),
+    ("VSI-route", "VSI 路线规划", "VSI-Bench", None, "route_planning", "items"),
+    ("VSTI-Bench-m", "VSTI (子类平均)", "VSTI-Bench", None, None, "vsti5m"),
+    ("VSTI-Bench", "VSTI (按题合并)", "VSTI-Bench", None, None, "vsti5"),
+    ("VSTI-disp", "VSTI 相机位移", "VSTI-Bench", None, "camera_displacement", "items"),
+    ("MMSI", "MMSI", "MMSI", None, None, "items"),
 ]
-RULES = {"VSI-Bench": "vsi8", "VSTI-Bench": "vsti5", "VSTI-Bench-prefix": "vsti5"}
-# public numbers for the raw Qwen3-VL-8B-Instruct (official scoring); the first source of each is the check
+PREFIX_COLUMNS = [  # raw model only (reproduction against the papers that used the pre-correction labels)
+    ("VSTI-prefix-m", "VSTI 修正前 (子类平均)", "VSTI-Bench-prefix", None, None, "vsti5m"),
+    ("VSTI-prefix", "VSTI 修正前 (按题合并)", "VSTI-Bench-prefix", None, None, "vsti5"),
+    ("VSTI-prefix-disp", "VSTI 修正前 相机位移", "VSTI-Bench-prefix", None, "camera_displacement", "items"),
+]
+# the six benchmarks of the mean difference, with the variant chosen for SAT and VSTI (CLI --sat / --vsti)
+SIX_BASE = ["SAT-Real", "SAT-Syn", "ViewSpatial", "MindCube", "VSI-Bench", "VSTI-Bench"]
+# public numbers for the raw Qwen3-VL-8B-Instruct (official scoring of each source); every source is checked
+# against the 1.5-point rule; "*" marks the reference declared before the runs (decision 27)
 PUBLIC = {
-    "VSI-Bench": [("EASI 榜 (32 帧)", 55.29), ("Spatial-Interactor 论文", 55.7), ("EASI / SenseNova-SI 论文", 57.9),
-                  ("Qwen3-VL 技术报告", 59.4)],
-    "VSI-route": [("EASI 榜", 32.47), ("Spatial-Interactor 论文", 32.0), ("EASI / SenseNova-SI 论文", 35.05)],
-    "MMSI": [("EASI 榜", 31.1), ("Spatial-Interactor 论文", 30.8)],
-    "MindCube-Tiny": [("EASI 榜 (1,040 题)", 29.42), ("Spatial-Interactor 论文", 29.4)],
-    "ViewSpatial": [("EASI 榜", 42.2), ("Spatial-Interactor 论文", 40.3)],
-    "SAT-Real": [("Spatial-Interactor 论文", 52.7)],
-    "SAT-Syn": [("Spatial-Interactor 论文 (低于二选一的随机水平 50)", 43.6)],
-    "VSTI-Bench-prefix": [("Spatial-Interactor 论文 (修正前标签)", 43.3)],
-    "VSTI-prefix-disp": [("Spatial-Interactor 论文 (修正前标签)", 24.2)],
+    "VSI-Bench": [("EASI 榜 32 帧*", 55.29), ("Spatial-Interactor 论文 (32 帧)", 55.7),
+                  ("Ouroboros-Spatial 论文 (32 帧)", 56.5)],
+    "VSI-route": [("EASI 榜*", 32.47), ("Spatial-Interactor 论文", 32.0), ("Ouroboros-Spatial 论文", 31.4)],
+    "MMSI": [("EASI 榜*", 31.1), ("Spatial-Interactor 论文", 30.8), ("Ouroboros-Spatial 论文", 31.1)],
+    "MindCube-Tiny": [("EASI 榜 (1,040 题)*", 29.42), ("Spatial-Interactor 论文", 29.4)],
+    "ViewSpatial": [("EASI 榜*", 42.2), ("Spatial-Interactor 论文", 40.3), ("Ouroboros-Spatial 论文", 41.6)],
+    "SAT-Real": [("Spatial-Interactor 论文*", 52.7)],
+    "SAT-Real-avg": [("Spatial-Interactor 论文 (文档称两序平均)", 52.7)],
+    "SAT-Real-both": [("Spatial-Interactor 论文", 52.7)],
+    "SAT-Syn": [("Spatial-Interactor 论文* (低于二选一的随机水平 50)", 43.6)],
+    "SAT-Syn-avg": [("Spatial-Interactor 论文 (文档称两序平均)", 43.6)],
+    "SAT-Syn-both": [("Spatial-Interactor 论文", 43.6)],
+    "VSTI-prefix-m": [("Spatial-Interactor 论文*", 43.3), ("VLM² 论文 (lmms-eval, 32 帧)", 47.0)],
+    "VSTI-prefix": [("Spatial-Interactor 论文*", 43.3), ("VLM² 论文 (lmms-eval, 32 帧)", 47.0)],
+    "VSTI-prefix-disp": [("Spatial-Interactor 论文*", 24.2), ("VLM² 论文", 31.8)],
 }
 LABEL = {"qwen3vl-8B": "原始模型 Qwen3-VL-8B", "SI-7B": "Spatial-Interactor-7B (外部参照)"}
 
@@ -118,12 +136,15 @@ class Data:
         ck = (model, col[0], key)
         if ck in self.cache:
             return self.cache[ck]
-        _, _, bench, filt, sub = col
+        _, _, bench, filt, sub, _ = col
         out = None
-        if filt == "circular":
-            a, b = load_items(self.stage, model, "SAT-Real"), load_items(self.stage, model, "SAT-Real-swap")
+        if filt in ("avg", "both"):  # the two option orders of SAT (bench and bench-swap, same doc ids)
+            a, b = load_items(self.stage, model, bench), load_items(self.stage, model, f"{bench}-swap")
             if a and b:
-                out = {i: ("all", min(a[i][key], b[i][key]), True) for i in a if i in b}
+                if set(a) != set(b):
+                    raise SystemExit(f"{model} {bench}: the two orders have different items")
+                comb = (lambda x, y: (x + y) / 2) if filt == "avg" else min
+                out = {i: ("all", comb(a[i][key], b[i][key]), True) for i in a}
         else:
             src = load_items(self.stage, model, bench)
             if src is None and filt == "easi1040":  # models run on the 1,040-item table only (SI-7B, step 2)
@@ -139,7 +160,7 @@ class Data:
 
 
 def rule_of(col: tuple) -> str:
-    return "items" if col[4] is not None else RULES.get(col[2], "items")
+    return col[5]
 
 
 def score(items: dict, rule: str) -> float:
@@ -236,9 +257,24 @@ def fmt_p(p: float) -> str:
     return "<0.0001" if p < 1e-4 else f"{p:.4f}" if p < 0.01 else f"{p:.2f}"
 
 
-def build(stage: str, batches: list[int], extra: list[str]) -> dict:
+def six_keys(sat: str, vsti: str) -> list[str]:
+    """Column keys of the six benchmarks: SAT variant 'avg' (both orders, the SAT paper's protocol) or 'single';
+    VSTI rule 'm' (subtype mean) or 'pooled'."""
+    out = []
+    for b in SIX_BASE:
+        if b in ("SAT-Real", "SAT-Syn"):
+            out.append(b + ("-avg" if sat == "avg" else ""))
+        elif b == "VSTI-Bench":
+            out.append("VSTI-Bench-m" if vsti == "m" else "VSTI-Bench")
+        else:
+            out.append(b)
+    return out
+
+
+def build(stage: str, batches: list[int], extra: list[str], sat: str = "avg", vsti: str = "m") -> dict:
     reg = load_registry()
     models = [c for b in batches for c in reg["matrix"]["batches"][b]] + extra
+    six_cols = six_keys(sat, vsti)
     data = Data(stage)
     table, fmt_rows, ci_kind = {}, {}, {}
     for mdl in models:
@@ -251,9 +287,9 @@ def build(stage: str, batches: list[int], extra: list[str]) -> dict:
             ci_kind[col[0]] = kind
             off = data.items(mdl, col, "official")
             row[col[0]] = {"lenient": round(score(items, rule_of(col)), 2), "ci95": [round(lo, 1), round(hi, 1)],
-                           "official": round(score(off, rule_of(col)), 2), "n": len(items)}
-        for bench in ("SAT-Real", "SAT-Real-swap", "SAT-Syn", "ViewSpatial", "MindCube-Tiny-1050", "MindCube",
-                      "VSI-Bench", "VSTI-Bench", "MMSI", "VSTI-Bench-prefix"):
+                           "ci_kind": kind, "official": round(score(off, rule_of(col)), 2), "n": len(items)}
+        for bench in ("SAT-Real", "SAT-Real-swap", "SAT-Syn", "SAT-Syn-swap", "ViewSpatial", "MindCube-Tiny-1050",
+                      "MindCube", "VSI-Bench", "VSTI-Bench", "MMSI", "VSTI-Bench-prefix"):
             d = run_dir(stage, mdl, bench) or (run_dir(stage, mdl, "MindCube-Tiny") if bench == "MindCube-Tiny-1050"
                                                else None)
             if d is None:
@@ -261,34 +297,33 @@ def build(stage: str, batches: list[int], extra: list[str]) -> dict:
             le = json.loads((d / "lenient.json").read_text())
             frow[bench] = {"n": le["n_items"], "unparseable": le["n_unparseable"], "n_mcq": le["n_mcq"],
                            "mcq_wrong": le["n_mcq_wrong_parsed"], "status": le["status"],
+                           "truncated": le.get("n_truncated"), "rule_version": le.get("rule_version", 1),
                            "official": le["official"]["overall"], "lenient": le["lenient"]["overall"]}
-        six = [row[b]["lenient"] for b in SIX if b in row]
+        six = [row[b]["lenient"] for b in six_cols if b in row]
         row["six_mean"] = round(sum(six) / 6, 2) if len(six) == 6 else None
         table[mdl], fmt_rows[mdl] = row, frow
     raw = next(k for k, v in reg["models"].items() if v["kind"] == "raw")
     repro = {}
     if raw in table:
+        by_key = {c[0]: c for c in COLUMNS + PREFIX_COLUMNS}
         for key, refs in PUBLIC.items():
-            if key in ("VSTI-Bench-prefix", "VSTI-prefix-disp"):
-                col = ("VSTI-Bench-prefix", "", "VSTI-Bench-prefix", None,
-                       None if key == "VSTI-Bench-prefix" else "camera_displacement")
-            else:
-                col = next(c for c in COLUMNS if c[0] == key)
+            col = by_key[key]
             off = data.items(raw, col, "official")
             if not off:
                 continue
             ours = score(off, rule_of(col))
-            repro[key] = {"ours_official": round(ours, 2), "ours_lenient": round(score(data.items(raw, col), rule_of(col)), 2),
-                          "refs": [{"source": s, "value": v, "diff": round(ours - v, 2)} for s, v in refs],
-                          "over_1_5": abs(ours - refs[0][1]) > 1.5}
+            repro[key] = {"label": col[1], "n": len(off), "ours_official": round(ours, 2),
+                          "ours_lenient": round(score(data.items(raw, col), rule_of(col)), 2),
+                          "refs": [{"source": s, "value": v, "diff": round(ours - v, 2),
+                                    "over_1_5": abs(ours - v) > 1.5} for s, v in refs]}
     pairs = []
-    for effect, label, ma, mb in comparisons(reg, set(table)):
+    for effect, label_, ma, mb in comparisons(reg, set(table)):
         rows = {}
         for col in COLUMNS:
             c = compare(data, ma, mb, col)
             if c:
                 rows[col[0]] = c
-        six = [rows[b] for b in SIX if b in rows]
+        six = [rows[b] for b in six_cols if b in rows]
         avg = None
         if len(six) == 6:
             draws = sum(r["draws"] for r in six) / 6
@@ -296,9 +331,9 @@ def build(stage: str, batches: list[int], extra: list[str]) -> dict:
                    "ci95": [round(float(np.percentile(draws, 2.5)), 2), round(float(np.percentile(draws, 97.5)), 2)]}
         for r in rows.values():
             r.pop("draws")
-        pairs.append({"effect": effect, "label": label, "a": ma, "b": mb, "per_bench": rows, "six_mean": avg})
-    return {"stage": stage, "batches": batches, "models": models, "table": table, "format": fmt_rows,
-            "ci_kind": ci_kind, "repro": repro, "pairs": pairs,
+        pairs.append({"effect": effect, "label": label_, "a": ma, "b": mb, "per_bench": rows, "six_mean": avg})
+    return {"stage": stage, "batches": batches, "models": models, "six": six_cols, "table": table,
+            "format": fmt_rows, "ci_kind": ci_kind, "repro": repro, "pairs": pairs,
             "registry": {"sources": reg["sources"], "generated_utc": reg["generated_utc"]}}
 
 
@@ -314,43 +349,49 @@ def label(reg: dict, code: str) -> str:
 def markdown(res: dict) -> str:
     reg = load_registry()
     L = []
-    cols = [c for c in COLUMNS if any(c[0] in res["table"][m] for m in res["models"])]
+    have = [m for m in res["models"] if res["table"][m]]
+    cols = [c for c in COLUMNS if any(c[0] in res["table"][m] for m in have)]
+    names = {c[0]: c[1] for c in COLUMNS}
     L += ["## 1. 准确率（宽松解析，%）", "",
-          "每格：分数 [95% 区间]。区间：按对错计分的 benchmark 用 Wilson 区间；VSI 和 VSTI 含 MRA 计分的数值题，"
-          "总分不是比例，改用题目 bootstrap 区间（题型内重抽 2000 次）。六项平均 = SAT-Real、SAT-Syn、ViewSpatial、"
-          "MindCube 全集、VSI、VSTI 的平均。", "",
+          "每格：分数 [95% 区间]。按对错计分的项用 Wilson 区间；VSI、VSTI（含 MRA 计分的数值题）和 SAT 两序平均"
+          "（每题 0、0.5 或 1 分）不是比例，改用题目 bootstrap 区间（题型内重抽 2000 次）。六项平均 = "
+          + "、".join(names[k] for k in res["six"]) + " 的平均。", "",
           "| 模型 | " + " | ".join(c[1] for c in cols) + " | 六项平均 |",
           "|---|" + "---|" * (len(cols) + 1)]
-    for m in res["models"]:
+    for m in have:
         row = res["table"][m]
         cells = []
         for c in cols:
             v = row.get(c[0])
             cells.append("—" if v is None else f"{v['lenient']:.1f} [{v['ci95'][0]:.1f}, {v['ci95'][1]:.1f}]")
         L.append(f"| {label(reg, m)} | " + " | ".join(cells) + f" | {fmt(row.get('six_mean'))} |")
-    L += ["", "题数：" + "；".join(f"{c[1]} {res['table'][res['models'][0]][c[0]]['n']}" for c in cols
-                                if c[0] in res["table"][res["models"][0]]), ""]
+    first = res["table"][have[0]] if have else {}
+    L += ["", "题数：" + "；".join(f"{c[1]} {first[c[0]]['n']}" for c in cols if c[0] in first), ""]
     L += ["## 2. 格式：解析不出 vs 答错", "",
-          "每格：解析不出的回答占全部题的 % / 选择题里解析出但答错的 % ；括号里是只有宽松规则才认出的回答数"
-          "（选项原文或其他字母写法），以及官方计分 → 宽松计分。", "",
-          "| 模型 | benchmark | 题数 | 解析不出 | 答错（选择题） | 宽松才认出 | 官方 → 宽松 |", "|---|---|---|---|---|---|---|"]
-    for m in res["models"]:
+          "解析不出 = 宽松规则也读不出答案的回答，占全部题的 %（括号里是题数）；答错 = 选择题里读出了答案但答错，"
+          "占选择题的 %；宽松才认出 = 官方解析没认出、宽松规则认出的回答数（字母的其他写法 / 选项原文 / 数字），"
+          "加上官方解析从单词里误读字母、按原文改判的数；截断 = 回答长度到了上限。", "",
+          "| 模型 | benchmark | 题数 | 解析不出 | 答错（选择题） | 宽松才认出 | 截断 | 官方 → 宽松 |",
+          "|---|---|---|---|---|---|---|---|"]
+    for m in have:
         for bench, f in res["format"][m].items():
-            extra_read = f["status"].get("text", 0) + f["status"].get("letter", 0) + f["status"].get("number", 0)
+            st = f["status"]
+            extra_read = st.get("text", 0) + st.get("letter", 0) + st.get("number", 0) + st.get("text_over_official", 0)
             L.append(f"| {label(reg, m)} | {bench} | {f['n']} | {100 * f['unparseable'] / f['n']:.1f}% "
                      f"({f['unparseable']}) | {100 * f['mcq_wrong'] / max(f['n_mcq'], 1):.1f}% | {extra_read} | "
-                     f"{f['official']:.1f} → {f['lenient']:.1f} |")
+                     f"{f['truncated'] if f['truncated'] is not None else '—'} | {f['official']:.1f} → {f['lenient']:.1f} |")
     if res["repro"]:
-        L += ["", "## 3. 原始模型对公开数（官方计分）", "",
-              "| benchmark | 我们（官方计分） | 我们（宽松） | 公开数：来源 = 值（我们 − 公开） | 与第一个参照差 > 1.5？ |",
-              "|---|---|---|---|---|"]
+        L += ["", "## 3. 原始模型对公开数（官方计分，即各 benchmark 后端自己的计分）", "",
+              "\\* = 开跑前定下的参照（第 27 条）。差 = 我们 − 公开，超过 1.5 分标 **超**。", "",
+              "| 项 | 题数 | 我们（官方） | 我们（宽松） | 公开数：来源 = 值（差） |", "|---|---|---|---|---|"]
         for k, r in res["repro"].items():
-            refs = "；".join(f"{x['source']} = {x['value']}（{x['diff']:+.1f}）" for x in r["refs"])
-            L.append(f"| {k} | {r['ours_official']:.1f} | {r['ours_lenient']:.1f} | {refs} | "
-                     f"{'**是**' if r['over_1_5'] else '否'} |")
+            refs = "；".join(f"{x['source']} = {x['value']}（{x['diff']:+.1f}{' **超**' if x['over_1_5'] else ''}）"
+                            for x in r["refs"])
+            L.append(f"| {r['label']} | {r['n']} | {r['ours_official']:.1f} | {r['ours_lenient']:.1f} | {refs} |")
     if res["pairs"]:
         L += ["", "## 4. 配对比较（B − A，宽松计分，点）", "",
-              "每格：差 [95% 配对 bootstrap 区间]，McNemar p（只有 A 对 / 只有 B 对；VSI、VSTI 只算选择题）。", ""]
+              "每格：差 [95% 配对 bootstrap 区间]，McNemar p（只有 A 对 / 只有 B 对；只算两边都按对错计分的题："
+              "VSI、VSTI 只算选择题，SAT 两序平均只算两序结果一致的题）。", ""]
         bcols = [c for c in cols if any(c[0] in p["per_bench"] for p in res["pairs"])]
         L += ["| 效应 | B − A | " + " | ".join(c[1] for c in bcols) + " | 六项平均差 |",
               "|---|---|" + "---|" * (len(bcols) + 1)]
@@ -371,9 +412,11 @@ def main() -> None:
     ap.add_argument("--stage", default="mv3")
     ap.add_argument("--batches", type=int, nargs="+", default=[1])
     ap.add_argument("--extra", nargs="*", default=["SI-7B"], help="further model codes (external reference)")
+    ap.add_argument("--sat", choices=("avg", "single"), default="avg", help="SAT score in the six-benchmark mean")
+    ap.add_argument("--vsti", choices=("m", "pooled"), default="m", help="VSTI rule in the six-benchmark mean")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
-    res = build(args.stage, args.batches, args.extra)
+    res = build(args.stage, args.batches, args.extra, args.sat, args.vsti)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.with_suffix(".json").write_text(json.dumps(res, indent=1, ensure_ascii=False, default=float) + "\n")
     md = markdown(res)

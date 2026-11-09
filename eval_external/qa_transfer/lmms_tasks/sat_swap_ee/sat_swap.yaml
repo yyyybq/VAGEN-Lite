@@ -1,7 +1,7 @@
 # SAT-Real with each item's options in reversed order: lmms-eval's own SAT task (tasks/sat/sat.yaml at 9a33763:
 # data nv-njb/SAT, prompt, answer extraction, scoring) with one change, process_docs, which reverses the option list
 # and moves correct_answer_idx with it.  Together with the plain SAT-Real run (same items, original order) it gives
-# the SAT paper's circular score: an item counts as right only when both orders are answered right.
+# the SAT paper's protocol (both orders, accuracy averaged) and the stricter score right in both orders.
 include: /mnt/umm/users/yinbaiqiao/eval_external_assets/repos/lmms-eval/lmms_eval/tasks/sat/sat.yaml
 task: "sat_swap_ee"
 process_docs: !function swap_utils.process_docs

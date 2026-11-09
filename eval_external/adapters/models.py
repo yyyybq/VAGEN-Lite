@@ -14,8 +14,9 @@ ROOT/model_hashes/<code>.json and recomputed when a file's size or mtime changes
 Families (2026-11-06): qwen2_5_vl (every model up to step 2) and qwen3_vl (the matrix-v3 Qwen3-VL-8B checkpoints and
 their raw model).  A family fixes the architecture a view must have, the Python that runs it (FAMILY_PYTHON: Qwen3-VL
 needs transformers >= 4.57, which the eval-external env does not have) and whether the Qwen2.5 pixel limits are
-written into the processor files (only qwen2_5_vl; Qwen3-VL's processors keep their own files, which are the same
-for every matrix checkpoint and its raw model, and both backends resize Qwen3-VL inputs with qwen_vl_utils before
+written into the processor files (only qwen2_5_vl; Qwen3-VL's processors keep their own files, which differ byte-wise
+between the raw model and the matrix checkpoints (transformers 4.57.6 writes the defaults out) but give the same
+values for every key the raw model sets, and both backends resize Qwen3-VL inputs with qwen_vl_utils before
 the processor, do_resize False).  registry.yaml may name further registry files under `include` (the matrix-v3 list
 is written by tools/matrix_v3_registry.py from the matrix handover records).
 """

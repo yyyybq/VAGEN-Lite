@@ -82,6 +82,10 @@ def headline(rule: str, sums: dict, ns: dict):
         groups = [[t for t in types if t in sums] for types in VSTI_GROUPS.values()]
         vals = [sum(sums[t] for t in g) / sum(ns[t] for t in g) for g in groups if g]
         return sum(vals) / len(vals)
+    if rule == "vsti5m":  # 2026-11-06: each category the mean of its subtypes (fits Spatial-Interactor's VSTI rows)
+        groups = [[t for t in types if t in sums] for types in VSTI_GROUPS.values()]
+        vals = [sum(means[t] for t in g) / len(g) for g in groups if g]
+        return sum(vals) / len(vals)
     raise ValueError(rule)
 
 

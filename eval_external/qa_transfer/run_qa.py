@@ -96,6 +96,8 @@ def main() -> None:
     env["PYTHONPATH"] = os.pathsep.join(p for p in (str(WORKTREE), env.get("PYTHONPATH")) if p)
     env["EE_PIXEL_LOG"] = str(run_dir / "input_pixels.jsonl")  # every processor call's image / video grids
     (run_dir / "input_pixels.jsonl").unlink(missing_ok=True)
+    env["EE_RAW_LOG"] = str(run_dir / "raw_responses.jsonl")  # lmms-eval: every reply before task filters
+    (run_dir / "raw_responses.jsonl").unlink(missing_ok=True)
     rc = subprocess.run(cmd, cwd=str(VLMEVAL_DIR if bench["backend"] == "vlmevalkit" else LMMS_DIR),
                         env=env).returncode
     files = sorted(str(p.relative_to(run_dir)) for p in run_dir.rglob("*") if p.is_file())
