@@ -1,6 +1,6 @@
 {
  "batch": "b41_20261107",
- "approved": "PENDING: the main line (主实验, 11-07 14:3x) hands over the 3A unpicked HF weights of q3fp (the user's \"删\" there); deletion needs the user's word in the disk window",
+ "approved": "the user 2026-11-07 ~16:00 UTC in the disk window: \"甲\" (reply to the 14:5x report asking b40 + b41, 甲 = delete both, 3B waits; quota table 21/22 TB, stop flag set 14:20). = 甲: archive to AOSS first, then delete b41 as listed (the main line's list delete_list_q3fp_hf_unpicked_20261107.tsv; 8 unpicked actor/huggingface folders, 160 files 280.7 GB; COMPLETE, checkpoint_metadata.json and resolved_config.yaml stay)",
  "items": [
   {
    "id": "MAIN-q3fp-hf-qw3fps0-50",

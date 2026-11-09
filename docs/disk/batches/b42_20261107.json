@@ -1,6 +1,6 @@
 {
  "batch": "b42_20261107",
- "approved": "PENDING: the user 2026-11-07 ~18:5x in the disk window asked for another batch quickly (reward line submitted new jobs); this list (G SFT unpicked epochs) needs the user's word",
+ "approved": "the user 2026-11-07 ~19:14 UTC in the disk window: \"甲\" (reply to the 19:0x report on b42: 甲 = archive to AOSS first, then delete; quota table 19/22 TB). = 甲: archive b42 to AOSS first, then delete as listed (P1 matrix v3 SFT cell G: epochs 1-8 and 10 and the top-level final copy, 197 files 340.1 GB; the picked epoch 9 checkpoint-5256 stays)",
  "items": [
   {
    "id": "P1-G-sft-unpicked",

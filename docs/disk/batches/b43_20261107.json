@@ -1,6 +1,6 @@
 {
  "batch": "b43_20261107",
- "approved": "PENDING: the model line (11-07 19:2x) relays its table 1l, the user's decision 58 甲 there; deletion needs the user's word in the disk window",
+ "approved": "the user 2026-11-07 ~19:54 UTC in the disk window: \"b43也要删\" (reply to the 19:55 report asking b43). = delete: archive b43 to AOSS first, then delete as listed (cs2snfp01lrh step-200 resume state, 25 files 96.6 GB; actor/huggingface and the metadata files stay)",
  "items": [
   {
    "id": "R1-cs2snfp01lrh-200",

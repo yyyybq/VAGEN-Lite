@@ -1,9 +1,9 @@
 # 磁盘配额线状态（唯一的状态文档）
 
-最后更新：2026-11-07 19:55 UTC。
-- 待你批：b43，模型线第 1l 表（你在模型线对决定 58 回"甲"）：cs2snfp01lrh（csnfp01lrh 换种子 20261021 的新种子臂）第 200 次检查点的续训状态，25 个文件、96.6 GB（96,572,689,755 字节）。
-  - plan 和模型线清单 `s2_resume_state_files.tsv` 逐行相同；核查通过（`disk_runs/audit/b43/CONCLUSION.md`）：9 处引用里 8 处指 `actor/huggingface`（两个评测任务、两份结果、留出集），1 处是第 1l 表本身；35 个在跑任务、登录节点进程都不读；没有符号链接指进来。核查脚本第一次循环号写错，结果作废，已改好重跑。
-  - `actor/huggingface`（17 个文件、32.21 GB）和元数据留着；SFT checkpoint-770、`nfp_head_pretrain_20261105/full/run/` 不在这批。
+最后更新：2026-11-07 20:16 UTC。
+- 你 19:54 回"b43也要删"，b43 在登录节点 19:59–20:16 删完：cs2snfp01lrh 第 200 次的续训状态，25 个文件、96.6 GB，先传 AOSS 逐个核对，0 个不符。
+  - `actor/huggingface`（含预测头）、`actor/fsdp_config.json`、COMPLETE、checkpoint_metadata.json、resolved_config.yaml 都在；第 50/100/150 次的 HF 权重都在。目录里放了 `RESUME_STATE_DELETED_TO_AOSS_b43.txt`。这个检查点不能再续训。
+  - SFT checkpoint-770、`nfp_head_pretrain_20261105/full/run/` 没动。记录：`disk_runs/batches/b43_20261107/deleted.tsv`。
 - 你 19:14 回"甲"，b42 在登录节点 19:15–19:41 删完：P1 的 G 组 SFT 没选中的 epoch 1–8、10 和顶层终点副本，197 个文件、340.1 GB，先传 AOSS 逐个核对，0 个不符。选中的 epoch 9（`checkpoint-5256`，34.0 GB）完好。本步已腾出 b1–b42 共 20.56 TB。
 - 你 18:5x 要快速再删一批，我挑的 b42；17:09 监控已撤停止提交标志。配额表 19:4x 手动查是 19 TB，监控 19:25 那次读配额失败（偶发）。
 - 以下是 17:15 的情况。
