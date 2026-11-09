@@ -236,7 +236,8 @@ def disk_exception_ok(gate: Optional[str]) -> Tuple[bool, str]:
         return False, f"no user disk exception ({DISK_EXCEPTION})"
     try:
         exc = json.loads(DISK_EXCEPTION.read_text())
-        gates, cap_gb = list(exc["gates"]), float(exc["cap_gb"])
+        gates = list(exc["gates"])
+        cap_gb = None if exc["cap_gb"] is None else float(exc["cap_gb"])
     except (OSError, ValueError, KeyError, TypeError) as e:
         return False, f"unreadable disk exception {DISK_EXCEPTION}: {e!r}"
     if gate not in gates:
@@ -253,6 +254,9 @@ def disk_exception_ok(gate: Optional[str]) -> Tuple[bool, str]:
         return False, f"user disk exception needs a readable usage.csv: {e!r}"
     if remaining < EXC_HARD_FLOOR_TB:
         return False, f"disk remaining {remaining} TB < hard floor {EXC_HARD_FLOOR_TB} TB (exception void)"
+    if cap_gb is None:
+        return True, (f"user disk exception ({exc.get('by', '?')}): gate {gate}, no size cap, "
+                      f"remaining {remaining} TB")
     used_gb = tree_bytes(paths.OUT) / 1e9
     if used_gb >= cap_gb:
         return False, f"vpd OUT uses {used_gb:.2f} GB >= exception cap {cap_gb:g} GB"

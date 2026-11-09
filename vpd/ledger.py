@@ -39,6 +39,9 @@ from vpd import paths
 GATES = ("wb", "tvr", "e3vs")
 CAP_DEFAULT = 23.0
 RESERVE = {"tvr": 0.5, "e3vs": 10.5}  # explicit reservations; wb gets the rest of CAP (B2)
+# User 2026-11-09 (vpd session): "接下来没有卡时和磁盘的上限". When this policy file says uncapped, the
+# ledger still records every job but budget_check no longer refuses.
+POLICY = paths.OUT / "BUDGET_POLICY.json"
 EVENTS = ("submit", "uncertain", "adopt", "cleared", "end", "delete")
 LOCK_TIMEOUT_S = 120.0
 
@@ -69,6 +72,17 @@ def hours_between(start, end) -> Optional[float]:
 
 
 # --- caps ---------------------------------------------------------------------------------------------------
+
+def uncapped() -> Tuple[bool, str]:
+    """(True, who) when the user lifted the GPU-h cap (POLICY file with "gpuh_cap": null)."""
+    try:
+        pol = json.loads(POLICY.read_text())
+    except (OSError, ValueError):
+        return False, ""
+    if isinstance(pol, dict) and "gpuh_cap" in pol and pol["gpuh_cap"] is None:
+        return True, str(pol.get("by", "?"))
+    return False, ""
+
 
 def total_cap(env=None) -> float:
     env = os.environ if env is None else env
@@ -265,6 +279,9 @@ def summarise(events: Iterable[dict], cap: Optional[float] = None,
 def budget_check(events: Iterable[dict], gate: str, est_high: float, cap: Optional[float] = None,
                  elapsed: Optional[Dict[str, float]] = None) -> Tuple[bool, str]:
     """(ok, message) for submitting a new job of `gate` with estimate `est_high` (B2)."""
+    free, who = uncapped()
+    if free and cap is None and gate in GATES:
+        return True, f"budget: no cap ({who}); gate {gate} new est {float(est_high):.2f} GPU-h recorded"
     if gate not in GATES:
         return False, f"unknown gate {gate!r}; one of {GATES}"
     if est_high is None or not float(est_high) > 0:

@@ -676,3 +676,25 @@ def test_disk_exception(base, fake, monkeypatch):
     sco.USAGE_CSV.write_text(text)
     assert fake.submits == []
     assert do_submit(r) == "pt-fake0001"
+
+
+def test_no_cap_policy(base, fake, monkeypatch):
+    """User 2026-11-09: BUDGET_POLICY.json with gpuh_cap null lifts the GPU-h cap; disk exception cap_gb null."""
+    out = base / "out_nocap"
+    out.mkdir()
+    monkeypatch.setattr(ledger, "POLICY", out / "BUDGET_POLICY.json")
+    monkeypatch.setattr(sco.paths, "OUT", out)
+    monkeypatch.setattr(sco, "DISK_EXCEPTION", out / "DISK_EXCEPTION.json")
+    ok, msg = ledger.budget_check([], "tvr", 5.0)
+    assert not ok  # 5 > the 0.5 tvr reservation while capped
+    ledger.POLICY.write_text(json.dumps({"gpuh_cap": None, "by": "test"}))
+    ok, msg = ledger.budget_check([], "tvr", 5.0)
+    assert ok and "no cap" in msg
+    sco.DISK_EXCEPTION.write_text(json.dumps({"gates": ["wb", "tvr", "e3vs"], "cap_gb": None, "by": "test"}))
+    monkeypatch.setattr(sco, "tree_bytes", lambda root: int(1e15))
+    ok, msg = sco.disk_exception_ok("e3vs")
+    assert ok and "no size cap" in msg
+    flag = sco.DISK_RUNS / "FLAG_PAUSE"
+    flag.write_text("x")
+    assert sco.disk_exception_ok("e3vs")[0] is False  # other disk-line flags still refuse
+    flag.unlink()
