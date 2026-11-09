@@ -312,8 +312,13 @@ def test_validate_scene_and_pooled(box_grid):
     assert r["iphone_segments"] == 119 and r["iphone_colliding"] == 0
     assert r["viewpoints"] == 2 and r["viewpoints_inside"] == 1 and r["inside_tags"] == ["inside"]
     assert r["starts"] == {"test": {"n": 2, "inside": 0, "near": 1}, "train": {"n": 1, "inside": 0, "near": 0}}
-    # from a start within the margin every translation collides (the rotation-only case reported above)
-    assert all(box_grid(near_wall[:3, 3], G.apply_action(near_wall, a)[:3, 3]) for a in sorted(E.TRANSLATIONS))
+    # option (ii): from a start within the margin, moves away from the wall are free, moves into it collide
+    hit = [box_grid(near_wall[:3, 3], G.apply_action(near_wall, a)[:3, 3]) for a in sorted(E.TRANSLATIONS)]
+    assert any(hit) and not all(hit)
+    # the literal rule (option (i), start_skip 0) is the rotation-only case: every translation collides
+    literal = OC.Grid(box_grid.occ, voxel=box_grid.voxel, margin=box_grid.margin, extend=box_grid.extend,
+                      start_skip=0.0)
+    assert all(literal(near_wall[:3, 3], G.apply_action(near_wall, a)[:3, 3]) for a in sorted(E.TRANSLATIONS))
     ps = OC.pooled_validation({"a": r})["starts_by_split"]
     assert ps["test"]["near_frac"] == 0.5 and ps["train"]["near_frac"] == 0.0
     pooled = OC.pooled_validation({"a": r, "b": {**r, "viewpoints": 200, "viewpoints_inside": 0}})
@@ -1434,3 +1439,17 @@ def test_start_payload_keeps_going_after_a_failed_step(scratch):
 
 def test_no_bytecode_written():
     assert not list((paths.VPD_PKG / "e3vs").glob("__pycache__"))
+
+
+def test_collides_skips_the_start_margin(tmp_path):
+    """Option (ii): a start inside the dilated margin can move away, but still collides moving into the wall."""
+    g = OC.Grid(OC.pack(np.array([[0, 0, 0]])), meta={"scene_id": "skip"})
+    start = (0.07, 0.025, 0.025)  # voxel x-index 1: inside the 1-voxel margin of the occupied voxel 0
+    assert g.near_occupied(np.array([start]))[0]
+    assert not g.collides(start, (0.32, 0.025, 0.025))   # away from the wall
+    assert g.collides(start, (-0.18, 0.025, 0.025))      # through the wall
+    literal = OC.Grid(OC.pack(np.array([[0, 0, 0]])), start_skip=0.0)
+    assert literal.collides(start, (0.32, 0.025, 0.025))  # option (i) behaviour, for comparison
+    p = tmp_path / "g.npz"
+    g.save(p)
+    assert OC.Grid.load(p).start_skip == g.start_skip == OC.VOXEL_M * OC.START_SKIP_VOX

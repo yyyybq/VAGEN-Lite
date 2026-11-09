@@ -65,6 +65,10 @@ VOXEL_M = 0.05
 MIN_HITS = 3
 MARGIN_VOX = 1
 EXTEND_M = 0.05
+# Option (ii) of PREREG_E3VS section 5 (orchestrator, 2026-11-09, per the user's "其他的按你推荐"): like the
+# official check, the part of a move closer than START_SKIP_VOX voxels to its start is not tested, so a start
+# pose that lies inside the dilated margin can still move away from the obstacle.
+START_SKIP_VOX = 1
 ALPHA_MIN = 0.5
 MAX_DEPTH_M = 20.0
 IPHONE_EVERY = 5
@@ -128,13 +132,14 @@ class Grid:
     """Occupied voxels of one scene; ``grid(p0, p1)`` is the collision test (module docstring)."""
 
     def __init__(self, occ_keys, voxel: float = VOXEL_M, margin: int = MARGIN_VOX, extend: float = EXTEND_M,
-                 hits=None, meta: dict | None = None):
+                 hits=None, meta: dict | None = None, start_skip: float | None = None):
         order = np.argsort(np.asarray(occ_keys, dtype=np.int64), kind="stable")
         self.occ = np.asarray(occ_keys, dtype=np.int64)[order]
         if self.occ.size and (np.diff(self.occ) == 0).any():
             raise ValueError("duplicate occupied keys")
         self.hits = None if hits is None else np.asarray(hits)[order]
         self.voxel, self.margin, self.extend = float(voxel), int(margin), float(extend)
+        self.start_skip = self.voxel * START_SKIP_VOX if start_skip is None else float(start_skip)
         self.meta = dict(meta or {})
         self.dil = dilate(self.occ, self.margin)
         self._dilset = None  # python set for the per-call test (built on first use)
@@ -161,6 +166,8 @@ class Grid:
         v, s, seen = self.voxel, self._dilset, set()
         for i in range(n + 1):
             t = total * i / n
+            if t < self.start_skip:
+                continue
             k = _key1(math.floor((x0 + ux * t) / v), math.floor((y0 + uy * t) / v), math.floor((z0 + uz * t) / v))
             if k in seen:
                 continue
@@ -179,7 +186,8 @@ class Grid:
         np.savez_compressed(tmp, occ_keys=self.occ, hits=(np.zeros(0, np.uint16) if self.hits is None else
                                                            self.hits.astype(np.uint16)),
                             params=np.array(json.dumps({"voxel": self.voxel, "margin": self.margin,
-                                                        "extend": self.extend})),
+                                                        "extend": self.extend,
+                                                        "start_skip": self.start_skip})),
                             meta=np.array(json.dumps(self.meta)))
         os.replace(tmp, path)
         return sha256_file(path)
@@ -190,7 +198,8 @@ class Grid:
             prm = json.loads(str(z["params"]))
             hits = z["hits"]
             g = cls(z["occ_keys"], voxel=prm["voxel"], margin=prm["margin"], extend=prm["extend"],
-                    hits=hits if hits.size else None, meta=json.loads(str(z["meta"])))
+                    hits=hits if hits.size else None, meta=json.loads(str(z["meta"])),
+                    start_skip=prm.get("start_skip"))
         g.meta["path"] = str(path)
         return g
 
