@@ -1,0 +1,88 @@
+{
+  "version": "active_spatial_qa_production_v1_20261012",
+  "seed": 20261012,
+  "source_tasks": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0/frozen_v1/train.jsonl",
+  "scene_root": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/R1-clean-Projective-v0/assets/ready",
+  "scene_splits": {
+    "0267_840790": "train",
+    "0300_840573": "val",
+    "0245_841008": "test"
+  },
+  "enabled_tasks": [
+    "projective_relations",
+    "fov_inclusion"
+  ],
+  "paused_tasks": {
+    "screen_occupancy": "visible target extent versus full 3D-box projection unresolved; no reliable mask",
+    "other_tasks": "see task cards; insufficient image/history contract in this pilot"
+  },
+  "distribution": {
+    "independent_inputs_target": 60,
+    "pairs_per_task_per_scene": 5,
+    "yes_fraction": 0.5,
+    "clear_fraction": 0.7,
+    "hard_fraction": 0.3,
+    "max_observations_per_pair_per_scene": 4,
+    "max_observations_per_instance_per_scene": 10,
+    "targets_are_soft_quality_is_not": true
+  },
+  "legality": {
+    "camera_radius_m": 0.15,
+    "safety_margin_m": 0.05,
+    "min_height_m": 0.3,
+    "max_height_m": 2.5,
+    "source": "vagen/envs/active_spatial/env_config.py defaults; same rules for both branches"
+  },
+  "sampling": {
+    "grid_spacing_m": 0.8,
+    "camera_height_m": 1.5,
+    "max_grid_positions_per_goal": 80,
+    "min_target_distance_m": 1.0,
+    "max_target_distance_m": 9.0,
+    "yaw_offsets_degrees": [
+      -35,
+      -22,
+      -12,
+      0,
+      12,
+      22,
+      35
+    ]
+  },
+  "evidence": {
+    "min_target_area_ratio": 0.006,
+    "max_target_area_ratio": 0.7,
+    "min_target_side_px": 14,
+    "clear_relation_margin_px": 24,
+    "projective_min_inside": 0.94,
+    "fov_negative_inside_min": 0.4,
+    "fov_negative_inside_max": 0.8,
+    "negative_relation_max_margin_px": 6
+  },
+  "difficulty": {
+    "relation_hard_below_px": 48,
+    "fov_hard_inside_above": 0.7,
+    "basis": "Spatial separation or visible clipping; near-aligned negative candidates require RGB review. AABB center-ray flags are risks, not masks."
+  },
+  "dedup": {
+    "min_translation_m": 0.25,
+    "min_rotation_degrees": 9,
+    "exact_image_sha_required_unique": true
+  },
+  "camera": {
+    "native_resolution": [
+      640,
+      480
+    ],
+    "render_resolution": [
+      256,
+      256
+    ],
+    "contract": "canonical_camera_h1_resize_v1"
+  },
+  "review": {
+    "human_default": "pending",
+    "approved_export_requires_human": true,
+    "candidate_export_requires_assistant_image_review": true
+  }
+}
