@@ -1,0 +1,10 @@
+# SAT-Syn with each item's options in reversed order (diagnostic for the raw-model reproduction, 2026-11-06): the
+# data of sat_syn_ee.yaml, the task of tasks/sat/sat.yaml, and process_docs reversing the options as sat_swap.yaml.
+include: /mnt/umm/users/yinbaiqiao/eval_external_assets/repos/lmms-eval/lmms_eval/tasks/sat/sat.yaml
+task: "sat_syn_swap_ee"
+dataset_path: parquet
+dataset_kwargs:
+  data_files:
+    test: /mnt/umm/users/yinbaiqiao/eval_external_assets/data/sat_syn_ee/val.parquet
+test_split: test
+process_docs: !function swap_utils.process_docs
