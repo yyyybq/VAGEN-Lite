@@ -480,3 +480,11 @@ def test_smoke_off_k2_and_rescore(workdir):
               "tasks_without_log", "regex", "counts"):
         assert after[k] == before[k], k
     assert after["rescored"]["from"] == "results.json"
+
+
+def test_server_env_disables_deep_gemm(monkeypatch):
+    """wb-smoke pt-v9mmly5e: DeepGEMM's start-up warmup asserts in sco jobs; the server env must turn it off."""
+    from vpd.common import vllm_server_vpd as V
+    monkeypatch.setenv("VLLM_USE_DEEP_GEMM", "1")
+    env = V.VLLMServer.env()
+    assert env["VLLM_USE_DEEP_GEMM"] == "0" and env["VLLM_USE_FLASHINFER_SAMPLER"] == "0"

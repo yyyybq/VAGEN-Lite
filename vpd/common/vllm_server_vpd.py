@@ -152,6 +152,10 @@ class VLLMServer:
         # FlashInfer's sampler is compiled at start-up and fails without the CUDA header set-up of the training
         # scripts; with greedy decoding the sampler only takes the argmax, so PyTorch's own sampler is used.
         env["VLLM_USE_FLASHINFER_SAMPLER"] = "0"
+        # vLLM 0.11 warms up DeepGEMM at start-up when the package is importable; inside sco jobs its init asserts
+        # because no CUDA toolkit is found (no nvcc / CUDA_HOME / /usr/local/cuda), and every engine start failed
+        # (wb-smoke pt-v9mmly5e, 2026-11-09). DeepGEMM serves only block-FP8 linears; our bf16 models never use it.
+        env["VLLM_USE_DEEP_GEMM"] = "0"
         env.setdefault("NO_PROXY", "*")
         env.setdefault("no_proxy", "*")
         for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
