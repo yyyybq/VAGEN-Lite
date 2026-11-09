@@ -119,8 +119,8 @@
 |---|---|
 | `OUT/walkerbench/split/split_s2.json` | `f063f93d2705a6d0ccc87423f8aa05dd531b57be8b8fd4fe023a1079c9c8dee1` |
 | `OUT/walkerbench/tiers/order_seed1001.json` | `67707f8aefa7f3c802fd03f8f5f1f1d65d589a8ab0a948d74db34ab5ed8e8f3b` |
-| `OUT/walkerbench/demos/s2train_640x400/demos_all.jsonl` | 〔J2 后、提交前填〕 |
-| `OUT/walkerbench/warmup/warmup20.jsonl` | 〔J2 后、提交前填〕 |
+| `OUT/walkerbench/demos/s2train_640x400/demos_all.jsonl` | `5aea1bfd3d3ec9c44cefb4dbe8ef9749ef85fa613798f80335ca1732932b34b1`（J2 pt-2wvdyzmo，2026-11-09） |
+| `OUT/walkerbench/warmup/warmup20.jsonl` | `108fd60373f7d928f7b9ee2467520e9093e52aaa6843356df0d5186c3fa490b6`（J2 pt-2wvdyzmo，2026-11-09） |
 | `OUT/walkerbench/baselines/baselines_s2test.json` | `682a15ae254d3b11157fbb126c540f83d29c5dfc000778f23def3c379a97d4cd` |
 
 ---
@@ -531,7 +531,7 @@ G0 不过是工程问题，不算科学失败：修好，重跑受影响的步�
 
 ## 附 A. 登记时已知的、和报告 v2 不同的地方
 
-用户的决定是"三个闸门都跑；不做 Qwen2.5；其他按报告推荐"。下面几条是编排按"其他的按你推荐"定的（DECISIONS C 节），提交前请用户逐条确认：
+用户的决定是"三个闸门都跑；不做 Qwen2.5；其他按报告推荐"。下面几条是编排按"其他的按你推荐"定的（DECISIONS C 节）。用户 2026-11-08 的原话"其他的按你推荐"覆盖这些条目；预算按 2026-11-09 用户对磁盘例外的选择执行（WalkerBench+TVR 先跑，本线 OUT 上限 10 GB）。2026-11-09 冻结提交：
 
 1. **S2-val**：6 个城市 / 57 题，报告写的是约 4 个城市 / 约 40 题。因为 Caracas 一个城市就有 29 题，取不到约 40 题。
 2. **最高档**：483，报告写的是 540。原因是 S2-val 从训练池里切出去了，而且永远不进训练。
