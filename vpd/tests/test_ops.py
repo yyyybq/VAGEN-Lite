@@ -133,6 +133,10 @@ def fake(base, monkeypatch):
     monkeypatch.setattr(sco, "STOP_FLAG", disk / "flags" / "STOP_SUBMIT_DISK_LOW")
     monkeypatch.setattr(sco, "WARN_FLAG", disk / "WARN_DISK_LOW")
     monkeypatch.setattr(sco, "USAGE_CSV", usage)
+    # hermetic: the real OUT/BUDGET_POLICY.json and OUT/DISK_EXCEPTION.json (both caps lifted by the user on
+    # 2026-11-09) must not decide the capped-mode tests; the tests of those two files point them at their own copies
+    monkeypatch.setattr(ledger, "POLICY", base / "absent_BUDGET_POLICY.json")
+    monkeypatch.setattr(sco, "DISK_EXCEPTION", base / "absent_DISK_EXCEPTION.json")
     monkeypatch.setattr(sco, "MAX_LIVE", 4)
     monkeypatch.setattr(sco_job, "code_state", lambda wt: {"commit": "fake", "branch": "fake",
                                                            "dirty_downstream_files": []})
@@ -223,6 +227,26 @@ def test_prepare_writes_launch_and_meta(base, fake):
     assert json.loads((t / "job" / "vpd.json").read_text())["gate"] is None
     g = prep(base, "vpd-test2", est=0.1, gate="tvr")
     assert json.loads((g / "job" / "vpd.json").read_text())["gate"] == "tvr"
+
+
+def test_prepare_env_passthrough(base, fake):
+    """2026-11-09: --env KEY:VAL reaches prepared.json and sco's create command; bad values refuse."""
+    run = base / "jobs" / "envjob"
+    sco.prepare(run, "vpd-tvr-envjob", ["true"], est_gph=0.5, env=["NVIDIA_DRIVER_CAPABILITIES:all"])
+    prepared = json.loads((run / "job" / "prepared.json").read_text())
+    assert prepared["env"] == {"NVIDIA_DRIVER_CAPABILITIES": "all"}
+    assert json.loads((run / "job" / "vpd.json").read_text())["env"] == {"NVIDIA_DRIVER_CAPABILITIES": "all"}
+    assert "--env=NVIDIA_DRIVER_CAPABILITIES:all" in sco_job.create_command(run / "job", prepared)
+    plain = prep(base, "vpd-wb-noenv")
+    assert "env" not in json.loads((plain / "job" / "prepared.json").read_text())
+    for bad in (["NVIDIA_DRIVER_CAPABILITIES:compute,utility,graphics"], ["A:b:c"], ["lower:x"], ["NOVAL"],
+                ["A:1", "A:2"], [f"K{i}:v" for i in range(11)]):
+        with pytest.raises(ValueError):
+            sco.parse_env(bad)
+    assert sco.main(["prepare", "--run", str(base / "jobs" / "envcli"), "--name", "vpd-tvr-envcli",
+                     "--env", "NVIDIA_DRIVER_CAPABILITIES:all", "--", "true"]) == 0
+    assert sco.main(["prepare", "--run", str(base / "jobs" / "envbad"), "--name", "vpd-tvr-envbad",
+                     "--env", "X:a,b", "--", "true"]) == 2
 
 
 def test_prepare_refusals(base, fake):

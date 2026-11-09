@@ -96,10 +96,14 @@ def code_state(worktree: Path) -> dict:
 
 
 def create_command(job: Path, prepared: dict) -> List[str]:
-    return [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={prepared['pool']}",
-            f"--job-name=downstream-{prepared['name']}", "--priority=HIGHEST", "--quota-type=reserved",
-            f"--container-image-url={IMAGE}", f"--storage-mount={MOUNT}", "--training-framework=pytorch",
-            "--worker-nodes=1", f"--worker-spec={prepared['spec']}", f"--command=bash {job}/launch.sh"]
+    cmd = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={prepared['pool']}",
+           f"--job-name=downstream-{prepared['name']}", "--priority=HIGHEST", "--quota-type=reserved",
+           f"--container-image-url={IMAGE}", f"--storage-mount={MOUNT}", "--training-framework=pytorch",
+           "--worker-nodes=1", f"--worker-spec={prepared['spec']}", f"--command=bash {job}/launch.sh"]
+    env = prepared.get("env")  # optional container env (vpd, 2026-11-09): `sco ... --env KEY1:VAL1,KEY2:VAL2`
+    if env:
+        cmd.insert(len(cmd) - 1, "--env=" + ",".join(f"{k}:{v}" for k, v in env.items()))
+    return cmd
 
 
 def waiting_by_pool(jobs, pools=POOLS) -> dict:

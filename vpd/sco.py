@@ -139,11 +139,36 @@ def vpd_code_state() -> dict:
             "vpd_tree_sha256": digest, "vpd_files": n}
 
 
+ENV_KEY_RE = re.compile(r"[A-Z_][A-Z0-9_]{0,63}")
+ENV_VAL_RE = re.compile(r"[A-Za-z0-9_./=+-]{0,200}")  # no ',' or ':' (sco's --env separators), no spaces
+MAX_ENV = 10  # sco: at most 10 envs
+
+
+def parse_env(items) -> Dict[str, str]:
+    """['KEY:VAL', ...] -> {KEY: VAL}; refuses what sco's `--env KEY1:VAL1,KEY2:VAL2` cannot carry."""
+    env: Dict[str, str] = {}
+    for it in items or []:
+        if not isinstance(it, str) or ":" not in it:
+            raise ValueError(f"--env wants KEY:VAL, got {it!r}")
+        k, v = it.split(":", 1)
+        if not ENV_KEY_RE.fullmatch(k) or not ENV_VAL_RE.fullmatch(v):
+            raise ValueError(f"--env {it!r}: KEY [A-Z_][A-Z0-9_]*, VAL without ',', ':' or spaces")
+        if k in env:
+            raise ValueError(f"--env {k} given twice")
+        env[k] = v
+    if len(env) > MAX_ENV:
+        raise ValueError(f"at most {MAX_ENV} --env entries")
+    return env
+
+
 def prepare(run, name: str, payload: List[str], pool: str = "zoetrope", as_root: bool = False,
-            est_gph: Optional[float] = None, gate: Optional[str] = None) -> Path:
-    """sco_job.prepare(run, 1, pool, name, payload, as_root) after the vpd checks; writes RUN/job/vpd.json."""
+            est_gph: Optional[float] = None, gate: Optional[str] = None, env=None) -> Path:
+    """sco_job.prepare(run, 1, pool, name, payload, as_root) after the vpd checks; writes RUN/job/vpd.json.
+    env: optional {KEY: VAL} (or ['KEY:VAL']) for the job container, passed as `sco ... --env` (2026-11-09: the
+    TVR debug job asks for NVIDIA_DRIVER_CAPABILITIES:all; whether the platform honours it is measured in-job)."""
     run = Path(run).resolve()
     validate_name(name)
+    env = parse_env(env) if isinstance(env, (list, tuple)) else parse_env([f"{k}:{v}" for k, v in (env or {}).items()])
     inferred = ledger.gate_of(name)
     if gate is not None and gate not in ledger.GATES:
         raise ValueError(f"--gate must be one of {ledger.GATES}")
@@ -161,12 +186,19 @@ def prepare(run, name: str, payload: List[str], pool: str = "zoetrope", as_root:
     if pool == "auto":
         pool = sco_job.pick_pool()
     launch = sco_job.prepare(run, 1, pool, name, list(payload), as_root=as_root)
+    if env:
+        pp = run / "job" / "prepared.json"
+        rec = json.loads(pp.read_text())
+        rec["env"] = env
+        pp.write_text(json.dumps(rec, indent=1) + "\n")
     text = Path(launch).read_text()
     if f"cd {shlex.quote(str(WORKTREE))}\n" not in text:
         raise RuntimeError(f"{launch} does not cd into {WORKTREE}")
     meta = {"utc": ledger.iso(), "name": name, "display_name": "downstream-" + name, "gate": gate,
             "est_gph": float(est_gph) if est_gph is not None else None, "as_root": bool(as_root), "pool": pool,
             "gpus": 1, "worktree": str(WORKTREE), "vpd_code": vpd_code_state()}
+    if env:
+        meta["env"] = env
     (run / "job" / META).write_text(json.dumps(meta, indent=1) + "\n")
     return Path(launch)
 
@@ -578,6 +610,8 @@ def main(argv=None) -> int:
     ap.add_argument("--gate", choices=list(ledger.GATES))
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--force-live", action="store_true")
+    ap.add_argument("--env", action="append", default=[], metavar="KEY:VAL",
+                    help="prepare: container env for sco --env (repeatable; no ',' or ':' in VAL)")
     args = ap.parse_args(argv)
     if args.action in ("prepare", "submit", "delete", "resolve") and args.run is None:
         ap.error(f"{args.action} needs --run")
@@ -585,7 +619,8 @@ def main(argv=None) -> int:
         if args.action == "prepare":
             if not args.name:
                 ap.error("prepare needs --name")
-            print(prepare(args.run, args.name, payload, args.pool, args.as_root, args.est_gph, args.gate))
+            print(prepare(args.run, args.name, payload, args.pool, args.as_root, args.est_gph, args.gate,
+                          env=args.env))
         elif args.action == "submit":
             print(submit(args.run, args.est_gph))
         elif args.action == "status":

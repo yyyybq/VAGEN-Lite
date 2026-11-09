@@ -46,6 +46,10 @@ def test_create_command(tmp_path):
     assert "--aec2-name=zoetrope" in cmd and "--worker-spec=N4lS.Iq.I80.8" in cmd
     assert "--job-name=downstream-ds-rs-030-s1" in cmd
     assert cmd[-1] == f"--command=bash {tmp_path / 'run/job'}/launch.sh"
+    assert not any(c.startswith("--env") for c in cmd)
+    prepared["env"] = {"NVIDIA_DRIVER_CAPABILITIES": "all", "X": "1"}
+    cmd = sco_job.create_command(tmp_path / "run/job", prepared)
+    assert "--env=NVIDIA_DRIVER_CAPABILITIES:all,X:1" in cmd and cmd[-1].startswith("--command=")
 
 
 @pytest.mark.parametrize("gpus,pool,name", [(2, "h800", "abc"), (1, "other", "abc"), (1, "h800", "Bad_Name")])
