@@ -149,3 +149,19 @@ $PY_EVAL $WT/vpd/sco.py submit --run $OUT/jobs/tvr-smoke-<ts>     # 编排者在
   - 现在的做法见第 5 节第 6 行：`CUDA_VISIBLE_DEVICES=0`、`--gpu 0`，预写映射文件 `{"0": 0}`，`LP_NUM_THREADS=12`，加 `--fail-fast`。
   - `verdict.json` 新增 `lavapipe` 一块，只报告：跑没跑、步数、速度、出错原因、fatal 行。
   - TVR_GATE FAIL（Vulkan 出黑帧）不受影响。
+- **2026-11-10 UTC / TVR 试点改用 CPU 渲染（lavapipe），不再以 TVR_GATE 为前提 / 在任何用 lavapipe 渲染示范或评测的 TVR 作业 submit 之前**
+  - 改了什么：
+    - TVR 试点（示范重渲染、开发集定档位、冒烟、三个起点的试点）不走 NVIDIA Vulkan，改用 Mesa lavapipe（CPU 上的 Vulkan 实现）出图。配方在 `vpd/tvr/lvp.py`：lavapipe 的 ICD，两种 LD_LIBRARY_PATH 档案（`envlib` / `envlib+orig`，用哪种由探针定，冻结进预注册），角标字体按 sha256 固定（`BADGE_FONT_SHA256` = b184b89e3c10…）。
+    - TVR_GATE 的定义、阈值和 smoke_run1 的 FAIL 结论都不动。第 4 节第 5 条里说的"备选方案：lavapipe"就是这次走的路。
+    - T2、T6 按定义要求 NVIDIA 设备，lavapipe 下必然不过，所以不再拿来判 TVR 试点。渲染这一块改由新的 `vpd/PREREG_TVR_PILOT.md` 的 G0 机制闸门管：示范和评测用同一套 lvp 档案和同一个字体 sha256、每张 640×360 图 220 个图像 token、自己的运动学环境和 ThorEnv 在每条保留下来的重放上一致等。那份预注册在 TVR 冒烟之前冻结。
+    - 第 6 步"只报告"的 lavapipe 测速不变。
+  - 为什么：
+    - 11-09 smoke_run1：NVIDIA Vulkan 出黑帧（DEVICE_LOST），TVR_GATE FAIL。
+    - 11-10 复查（`OUT/plan/DECISIONS.md` G2、G8；两个 vpd-tvr-vkre 作业，zoetrope 和 zoe-cf-render，内核驱动都是 595.71.05，合计 0.027 卡时），两个池结果一样：
+      - 旧组合：vkWaitForFences 返回 DEVICE_LOST；
+      - 新组合（系统驱动 + 加载库 1.4.357 + 绝对路径 ICD）：vkWaitForFences 返回 VK_TIMEOUT；
+      - 不带 glvnd：vkCreateInstance 返回 INCOMPATIBLE_DRIVER；
+      - THOR：Player.log 认到 H800 的 Vulkan 渲染器，但 41 帧全黑（RGB 标准差 ≥ 2 的 0/41）；
+      - 对照组：GL 三角形和 lavapipe 都通过。
+    - 所以本轮不再走 Vulkan。用户 2026-11-10 的第三轮授权（`OUT/plan/ROUND3.md` 第 3、4 节）预先批准了"用 CPU 渲染（lavapipe）往下做，在 SMOKE_CRITERIA.md 的偏差日志和新的预注册里记清楚"，第 4 节"重投先问用户"对这些 TVR 试点作业也由那份授权覆盖。
+  - 时间顺序：lavapipe 测速和确定性探针 vpd-tvr-probe（EXPLORATORY，不出任何模型数字，只定并行数 E×L 和档案）在本条之前，于 2026-11-10 15:01Z 提交。它之后的 TVR 作业都在本条之后。
