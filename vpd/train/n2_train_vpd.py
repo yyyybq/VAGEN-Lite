@@ -335,7 +335,18 @@ def code_fingerprint(root: Path = WORKTREE) -> dict:
 
 
 def git_head(root: Path = WORKTREE) -> dict:
-    """Read-only git facts of the worktree (None where git is unavailable)."""
+    """Read-only git facts of the worktree (None where git is unavailable).  In a DECISIONS G1 code snapshot (root
+    has SNAPSHOT.json; no .git there, no git in the job image) they come from the snapshot record: its commit, and
+    vpd_dirty False (prepare refused a dirty tree); git_read says so.  Live worktree: unchanged."""
+    try:
+        from vpd import snapshot
+
+        snap = snapshot.snapshot_state(root)
+    except Exception:  # noqa: BLE001  (facts only: an unreadable record never fails a finished training)
+        snap = {"mode": "unreadable"}
+    if snap["mode"] == "snapshot":
+        return {"git_head": snap["commit"], "vpd_dirty": False, "git_read": snapshot.MARKER}
+
     def run(*a):
         try:
             r = subprocess.run(["git", "-c", "safe.directory=*", "-C", str(root), *a], capture_output=True,

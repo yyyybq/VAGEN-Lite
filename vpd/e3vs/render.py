@@ -7,7 +7,9 @@ sigmoid, scale exp, SH degree from the f_rest count, SH layout (N, K, 3); raster
 render_mode "RGB") with gsplat's default near 0.01 / far 1e10, no background; colours clamped to [0, 1] and cast
 with (x * 255).astype(uint8).  viewmat = inv(c2w), K = focal W/2, principal point at the centre.
 
-SplatRenderer does the same from ply_gaussian_loader.PLYGaussianLoader().load_ply (eval-external env): it passes
+SplatRenderer does the same from ply_gaussian_loader.PLYGaussianLoader().load_ply (the worktree-root module, which
+every code snapshot carries, vpd.snapshot.EXTRA_FILES; the eval-external env has another copy; the one imported is
+recorded as meta / parity code "ply_gaussian_loader": path, sha256): it passes
 gs_data.rotations (WXYZ) and NEVER get_rotations_xyzw() (which reorders to xyzw; that is the possible quaternion
 bug in vagen GaussianRenderer, gs_render_local.py:186, which is not used here).  render_depth uses render_mode
 "RGB+ED" (expected depth along the camera axis, alpha-normalised by gsplat) and returns (depth, alpha).
@@ -229,6 +231,23 @@ def _torch_threads():
     return torch
 
 
+_LOADER_FACTS: dict = {}
+
+
+def loader_facts() -> dict:
+    """Which ply_gaussian_loader this process imported: {"module", "path", "sha256", "in_worktree"}, from
+    Path(module.__file__) (hashed once per path).  Since the worktree-root copy is in every code snapshot
+    (vpd.snapshot.EXTRA_FILES), a job imports RUN/code/ply_gaussian_loader.py (in_worktree True) as live jobs imported
+    the worktree's; without it the eval-external site-packages copy would load (in_worktree False)."""
+    import ply_gaussian_loader as mod
+
+    p = Path(mod.__file__).resolve()
+    if str(p) not in _LOADER_FACTS:
+        _LOADER_FACTS[str(p)] = {"module": "ply_gaussian_loader", "path": str(p), "sha256": sha256_file(p),
+                                 "in_worktree": p.is_relative_to(paths.WORKTREE.resolve())}
+    return dict(_LOADER_FACTS[str(p)])
+
+
 def load_splat(ply, device: str = "cuda") -> dict:
     """Tensors of one 3DGS PLY as the official renderer builds them, read with ply_gaussian_loader.
 
@@ -284,7 +303,8 @@ class SplatRenderer:
         self.g = load_splat(self.ply, device)
         self.meta = {"renderer": "gsplat", "scene_id": scene_id, "ply": str(self.ply), "n_gaussians": self.g["n"],
                      "sh_degree": self.g["sh_degree"], "load_seconds": round(time.time() - t0, 2),
-                     "near": NEAR, "far": FAR, "packed": False, "quats": "wxyz (ply_gaussian_loader rotations)"}
+                     "near": NEAR, "far": FAR, "packed": False, "quats": "wxyz (ply_gaussian_loader rotations)",
+                     "ply_gaussian_loader": loader_facts()}
 
     def _raster(self, c2w, W: int, H: int, K, mode: str):
         import torch
@@ -518,6 +538,7 @@ def parity(scene_id: str, out_dir: Path | None = None, n_poses: int = 27, iphone
     except Exception as e:  # noqa: BLE001  (descriptive part; recorded, never fatal)
         res["iphone"] = {"error": f"{type(e).__name__}: {e}"[:500]}
     res["code"] = code_meta(Path(__file__), Path(G.__file__))
+    res["code"]["ply_gaussian_loader"] = loader_facts()  # the loader module that actually ran (path, sha256)
     res["date_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     p = out_dir / f"parity_{scene_id}.json"
     p.write_text(json.dumps(res, indent=1) + "\n")

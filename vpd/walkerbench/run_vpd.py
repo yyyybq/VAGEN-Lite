@@ -787,6 +787,18 @@ def write_run_manifest(run_dir: Path, *, task_set: str, n_tasks: int, diff: str,
                        model_dir: Path | None, adapter: dict | None, run_name: str, lean: bool, limit: int | None,
                        lenient: bool) -> Path:
     k = opts.history_turns
+    vpd_git = git_state(paths.WORKTREE)
+    # DECISIONS G1 code snapshot: RUN/code has no .git and the job image no git, so git_state reads commit None;
+    # the commit is then the snapshot's (SNAPSHOT.json, written at prepare from a clean tree).  Live: unchanged.
+    from vpd import snapshot as SNAP
+
+    try:
+        snap = SNAP.snapshot_state(paths.WORKTREE)
+    except SNAP.SnapshotError as e:  # an unreadable SNAPSHOT.json: recorded, commit left as git_state read it
+        vpd_git["snapshot_error"] = str(e)[:300]
+    else:
+        if snap["mode"] == "snapshot":
+            vpd_git.update(commit=snap["commit"], dirty=False, read=SNAP.MARKER)
     return write_manifest(
         run_dir, models=models,
         benchmark={"name": f"WalkerBench {task_set}", "items_expected": n_tasks,
@@ -813,7 +825,7 @@ def write_run_manifest(run_dir: Path, *, task_set: str, n_tasks: int, diff: str,
         decoding={"temperature": temperature, "max_tokens": opts.max_tokens,
                   "structured_outputs": opts.constrained != "off", "other": "vLLM defaults"},
         subset={"kind": "limit" if limit else "full", "limit": limit, "seed": None},
-        extra={"vpd": {"git": git_state(paths.WORKTREE), "code_sha256": code_sha256(), "run_name": run_name,
+        extra={"vpd": {"git": vpd_git, "code_sha256": code_sha256(), "run_name": run_name,
                        "task_set": task_set, "model_dir": None if model_dir is None else str(model_dir),
                        "adapter": adapter}})
 

@@ -3,7 +3,8 @@ without --no-snapshot, the payload and launch.sh rewrites, vpd.paths.WORKTREE un
 sourcing of vpd/jobs/common_env.sh, and the E3VS prereg guard inside a snapshot.
 
 Hermetic: a throw-away git repo (vpd/ with copies of __init__.py, paths.py, snapshot.py and jobs/common_env.sh, plus
-downstream/ and eval_external/ stubs) under eval_external_assets/vpd/scratch/snapshot/pytest_<rand>/ (env
+downstream/ and eval_external/ stubs and a root ply_gaussian_loader.py stub, the one EXTRA_FILES entry) under
+eval_external_assets/vpd/scratch/snapshot/pytest_<rand>/ (env
 VPD_SNAPSHOT_TEST_DIR overrides), removed at teardown.  The live worktree is never archived; sco is never called
 (sco_job.submit is not used; prepare only writes files); launch.sh runs once with a fake nvidia-smi.
     cd $WT && OMP_NUM_THREADS=1 PY_Q3 -B -m pytest -q -p no:cacheprovider vpd/tests/test_snapshot.py
@@ -64,8 +65,11 @@ echo "W=$VPD_WORKTREE"
 echo "P=$PYTHONPATH"
 echo "D=$(pwd)"
 "$TEST_PY" -B -c 'from vpd import paths; print("PW=" + str(paths.WORKTREE))'
+"$TEST_PY" -B -c 'import ply_gaussian_loader as m; print("PLY=" + m.__file__ + " " + m.LOADER)'
 echo "PRE=$(vpd_snapshot_file vpd/PREREG_E3VS_PILOT.md)"
 """
+LOADER = "ply_gaussian_loader.py"
+LOADER_TEXT = 'LOADER = "worktree-root stub"\n'
 
 
 @pytest.fixture
@@ -87,6 +91,8 @@ def repo(base):
     (r / "eval_external" / "common.py").write_text("Y = 2\n")
     (r / "docs").mkdir()
     (r / "docs" / "notes.md").write_text("outside the snapshot trees\n")
+    (r / LOADER).write_text(LOADER_TEXT)  # snapshot.EXTRA_FILES: a tracked root file
+    (r / "other_root.py").write_text("NOT_IN_THE_SNAPSHOT = 1\n")  # any other root file stays out
     git(r, "init", "-q")
     git(r, "add", "-A")
     git(r, "commit", "-q", "-m", "c1")
@@ -124,7 +130,7 @@ def at_repo(repo, monkeypatch):
 
 
 def tracked(repo: Path) -> list:
-    return sorted(git(repo, "ls-files", "--", *snapshot.TREES).splitlines())
+    return sorted(git(repo, "ls-files", "--", *snapshot.TREES, *snapshot.EXTRA_FILES).splitlines())
 
 
 # --- vpd.snapshot.create ---------------------------------------------------------------------------------------
@@ -135,12 +141,19 @@ def test_clean_tree_snapshot_contents(base, repo):
     files = sorted(str(p.relative_to(dest).as_posix()) for p in dest.rglob("*") if p.is_file())
     assert files == sorted(tracked(repo) + [snapshot.MARKER])  # docs/ (outside the trees) is not in it
     assert not (dest / ".git").exists() and not (dest / "docs").exists()
+    # the root EXTRA_FILES are in it (byte-identical), no other root file is
+    assert snapshot.EXTRA_FILES == (LOADER,) and LOADER in tracked(repo)
+    assert (dest / LOADER).read_text() == LOADER_TEXT and not (dest / "other_root.py").exists()
+    assert rec["extra_files"] == [LOADER] and rec["files"][LOADER] == git(repo, "rev-parse", f"HEAD:{LOADER}")
+    assert snapshot.summary(rec)["extra_files"] == [LOADER] and snapshot.snapshot_state(dest)["extra_files"] == [
+        LOADER]
+    assert snapshot.summary({k: v for k, v in rec.items() if k != "extra_files"})["extra_files"] == []  # older
     assert (dest / "downstream" / "tool.py").read_text() == "X = 3\n" and (dest / PREREG).read_text().endswith(
         "v2 (frozen)\n")
     on_disk = json.loads((dest / snapshot.MARKER).read_text())
     assert on_disk == rec
-    tar = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", HEAD(repo), *snapshot.TREES],
-                         capture_output=True, check=True).stdout
+    tar = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", HEAD(repo), *snapshot.TREES,
+                          *snapshot.EXTRA_FILES], capture_output=True, check=True).stdout
     assert rec["commit"] == HEAD(repo) == rec["head_after"] and rec["format"] == 1
     assert rec["trees"] == list(snapshot.TREES) and rec["n_files"] == len(tracked(repo)) == len(rec["files"])
     assert rec["tar_sha256"] == hashlib.sha256(tar).hexdigest() and rec["repo"] == str(repo)
@@ -156,11 +169,15 @@ def test_clean_tree_snapshot_contents(base, repo):
     (dest / "vpd" / "__pycache__" / "x.cpython-312.pyc").write_bytes(b"\0")
     assert snapshot.verify(dest)["ok"]
     (dest / "downstream" / "tool.py").write_text("X = 4\n")
+    (dest / LOADER).write_text("LOADER = 'edited in the job'\n")
     (dest / "eval_external" / "common.py").unlink()
     (dest / "vpd" / "new.py").write_text("")
+    (dest / "other_root.py").write_text("")
     v = snapshot.verify(dest)
-    assert not v["ok"] and v["changed"] == ["downstream/tool.py"] and v["missing"] == ["eval_external/common.py"]
-    assert v["extra"] == ["vpd/new.py"]
+    assert not v["ok"] and v["changed"] == ["downstream/tool.py", LOADER]
+    assert v["missing"] == ["eval_external/common.py"] and v["extra"] == ["other_root.py", "vpd/new.py"]
+    (dest / LOADER).unlink()
+    assert LOADER in snapshot.verify(dest)["missing"]
     with pytest.raises(snapshot.SnapshotError, match="exists"):
         snapshot.create(repo, dest)
 
@@ -180,13 +197,38 @@ def test_dirty_tree_refused(base, repo, at_repo):
         snapshot.create(repo, base / "r2" / "code")
     assert sco.main(["prepare", "--run", str(base / "r2"), "--name", "vpd-wb-dirty", "--", *payload]) == 2
     (repo / "vpd" / "jobs" / "new_job.sh").unlink()
-    # ignored files and files outside the three trees do not count
+    # a change to a root EXTRA_FILES file counts like one under the trees
+    (repo / LOADER).write_text("LOADER = 'local edit'\n")
+    with pytest.raises(snapshot.SnapshotError, match=rf"SNAPSHOT REFUSED.*ply_gaussian_loader\.py of .*M {LOADER}"):
+        snapshot.create(repo, base / "r4" / "code")
+    assert not (base / "r4").exists()
+    (repo / LOADER).write_text(LOADER_TEXT)
+    # ignored files and files outside the three trees (other root files included) do not count
     (repo / "vpd" / "__pycache__").mkdir()
     (repo / "vpd" / "__pycache__" / "paths.cpython-312.pyc").write_bytes(b"\0")
     (repo / "docs" / "scratch.md").write_text("untracked, outside the trees\n")
     (repo / "docs" / "notes.md").write_text("changed, outside the trees\n")
+    (repo / "other_root.py").write_text("changed, not an EXTRA_FILES entry\n")
+    (repo / "untracked_root.py").write_text("untracked, not an EXTRA_FILES entry\n")
     rec = snapshot.create(repo, base / "r3" / "code")
     assert rec["commit"] == HEAD(repo) and not (base / "r3" / "code" / "vpd" / "__pycache__").exists()
+    assert (base / "r3" / "code" / LOADER).read_text() == LOADER_TEXT
+
+
+def test_commit_without_an_extra_file_refused(base, repo):
+    """A commit that lacks a root EXTRA_FILES file (untracked, or deleted) is refused: the snapshot job would import
+    another copy (for ply_gaussian_loader: the eval-external site-packages one)."""
+    git(repo, "rm", "-q", "--cached", LOADER)
+    git(repo, "commit", "-q", "-m", "c4: untrack the loader")
+    with pytest.raises(snapshot.SnapshotError, match=r"\?\? ply_gaussian_loader\.py"):  # untracked: dirty first
+        snapshot.create(repo, base / "r1" / "code")
+    (repo / LOADER).unlink()
+    with pytest.raises(snapshot.SnapshotError, match=r"has no tracked file \['ply_gaussian_loader\.py'\]"):
+        snapshot.create(repo, base / "r2" / "code")
+    assert not (base / "r1").exists() and not (base / "r2").exists()
+    # without the extra file the trees alone still snapshot (the default list is what prepare uses)
+    rec = snapshot.create(repo, base / "r3" / "code", extra_files=())
+    assert rec["extra_files"] == [] and LOADER not in rec["files"]
 
 
 # --- vpd.sco prepare -------------------------------------------------------------------------------------------
@@ -212,11 +254,15 @@ def test_prepare_payload_and_launch_rewrite(base, at_repo):
     assert meta["payload_rewrites"] == [[payload[7], want[7]], [payload[9], want[9]]]
     text = launch.read_text()
     lines = text.splitlines()
-    assert f"cd {repo}" not in lines and lines.count(f"cd {code} && [[ -f SNAPSHOT.json ]] || "
-                                                     f"{{ echo \"[launch] no code snapshot at \"{code} >&2; "
-                                                     f"exit 97; }}") == 1
+    assert f"cd {repo}" not in lines and lines.count(f"cd {code}") == 1
     assert f"export VPD_WORKTREE={code} PYTHONPATH={code}" in lines
-    assert text.index("export VPD_WORKTREE") < text.index("exec > >(tee")
+    # the snapshot check is the line right after `exec > >(tee -a worker.log) 2>&1` (its message reaches the log)
+    check = (f"[[ -f {code}/SNAPSHOT.json && $PWD -ef {code} ]] || {{ echo \"[launch] no code snapshot at \"{code} "
+             f">&2; echo 97 > {run.resolve() / 'job' / 'exit_code'}; exit 97; }}")
+    tee = [i for i, ln in enumerate(lines) if ln.startswith("exec > >(tee -a ")]
+    assert len(tee) == 1 and lines[tee[0] + 1] == check and lines.count(check) == 1
+    assert lines.index(f"export VPD_WORKTREE={code} PYTHONPATH={code}") < lines.index(f"cd {code}") < tee[0]
+    assert tee[0] + 1 < min(i for i, ln in enumerate(lines) if "[launch] host=" in ln)
     # the payload line (sco_job quotes it) is the rewritten one; the only worktree path left is the owner wrapper
     assert " ".join(want) in text
     assert text.replace(str(repo / sco_job.RUN_AS_OWNER), "").count(str(repo)) == 0
@@ -240,13 +286,26 @@ def test_launch_runs_the_snapshot(base, at_repo):
     r = subprocess.run(["bash", str(launch)], capture_output=True, text=True, env=env, timeout=120)
     log = (run / "job" / "worker.log").read_text()
     assert (run / "job" / "exit_code").read_text().strip() == "0", log + r.stderr
-    for line in (f"W={code}", f"P={code}", f"D={code}", f"PW={code}", f"PRE={C2(repo)}"):
+    for line in (f"W={code}", f"P={code}", f"D={code}", f"PW={code}", f"PRE={C2(repo)}",
+                 f"PLY={code / LOADER} worktree-root stub"):  # the snapshot's root loader, as live jobs had
         assert line in log.splitlines(), (line, log)
     assert "LIVE" not in log and "checked by git_show" in log
-    # a launch.sh whose snapshot is gone stops before the payload
+    # a launch.sh whose snapshot is gone stops before the payload: logged in worker.log, exit code 97 in job/
     shutil.move(str(code), str(run / "code_moved"))
+    (run / "job" / "exit_code").unlink()
     r = subprocess.run(["bash", str(launch)], capture_output=True, text=True, env=env, timeout=60)
-    assert r.returncode == 97 and "no code snapshot" in r.stderr
+    log2 = (run / "job" / "worker.log").read_text()[len(log):]
+    assert r.returncode == 97 and (run / "job" / "exit_code").read_text().strip() == "97", (r.stdout, r.stderr)
+    assert f"[launch] no code snapshot at {code}" in log2 and "[launch] host=" not in log2, log2
+    # the same when the directory is there but SNAPSHOT.json is not
+    shutil.move(str(run / "code_moved"), str(code))
+    (code / snapshot.MARKER).unlink()
+    (run / "job" / "exit_code").unlink()
+    n = len((run / "job" / "worker.log").read_text())
+    r = subprocess.run(["bash", str(launch)], capture_output=True, text=True, env=env, timeout=60)
+    log3 = (run / "job" / "worker.log").read_text()[n:]
+    assert r.returncode == 97 and (run / "job" / "exit_code").read_text().strip() == "97", (r.stdout, r.stderr)
+    assert "no code snapshot" in log3 and "PLY=" not in log3, log3
 
 
 def test_prepare_refusals_with_snapshot(base, at_repo):
@@ -263,6 +322,22 @@ def test_prepare_refusals_with_snapshot(base, at_repo):
         with pytest.raises(ValueError, match=msg):
             sco.prepare(run, "vpd-wb-bad", payload, est_gph=0.1)
         assert not (run / "code").exists() and not (run / "job" / "vpd.json").exists()
+    # a --env value that mentions the worktree (same path-boundary rule): the payload would source live files
+    for i, val in enumerate((f"{repo}/vpd/jobs/common_env.sh", str(repo))):
+        run = base / "jobs" / f"badenv{i}"
+        with pytest.raises(ValueError, match="--env VPD_COMMON_ENV.*mentions the worktree"):
+            sco.prepare(run, "vpd-tvr-badenv", ["true"], est_gph=0.1, env=[f"VPD_COMMON_ENV:{val}"])
+        assert not (run / "code").exists() and not (run / "job").exists()
+    assert sco.main(["prepare", "--run", str(base / "jobs" / "badenv_cli"), "--name", "vpd-tvr-badenv",
+                     "--env", f"VPD_COMMON_ENV:{repo}/vpd/jobs/common_env.sh", "--", "true"]) == 2
+    # a sibling path is not the worktree; and with --no-snapshot (live code anyway) the value is passed through
+    ok = base / "jobs" / "okenv"
+    sco.prepare(ok, "vpd-tvr-okenv", ["true"], est_gph=0.1, env=[f"X_DIR:{repo}2/x"])
+    assert json.loads((ok / "job" / "prepared.json").read_text())["env"] == {"X_DIR": f"{repo}2/x"}
+    live = base / "jobs" / "liveenv"
+    sco.prepare(live, "vpd-tvr-liveenv", ["true"], est_gph=0.1, env=[f"VPD_COMMON_ENV:{repo}/vpd/jobs/common_env.sh"],
+                snapshot_code=False)
+    assert json.loads((live / "job" / "prepared.json").read_text())["env"]["VPD_COMMON_ENV"].startswith(str(repo))
     with pytest.raises(ValueError, match="inside the worktree"):
         sco.prepare(repo / "vpd" / "run", "vpd-wb-in", ["true"], est_gph=0.1)
     # a submitted RUN is never re-prepared, and neither is a prepared one

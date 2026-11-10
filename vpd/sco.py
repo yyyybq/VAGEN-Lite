@@ -14,15 +14,18 @@
 sco_job is imported from VAGEN-Lite-vpd/downstream.  Display names are "downstream-" + NAME with NAME matching
 ^vpd-[a-z0-9-]+$ (never "ev...": the downstream watcher claims downstream-ev*).  One card per job.
 
-Code snapshots (DECISIONS G1, 2026-11-10; on by default): prepare refuses unless vpd/, downstream/ and
-eval_external/ have no uncommitted or untracked (non-ignored) files, then extracts `git archive HEAD` of those trees
-into RUN/code with RUN/code/SNAPSHOT.json (vpd.snapshot).  Every payload arg that starts with the worktree path is
-rewritten to the same path under RUN/code (an arg that only contains it is refused), and launch.sh exports
-VPD_WORKTREE=RUN/code PYTHONPATH=RUN/code and cds into RUN/code, so the job never reads the live worktree's code (the
-one exception: the non-root owner wrapper examples/train/active_spatial/sco_run_as_artifact_owner.sh, outside the
-snapshot trees).  prepared.json carries the rewritten payload, worktree = RUN/code and code_snapshot; vpd.json the
-snapshot summary and the rewrites.  --no-snapshot (tests / emergencies only) keeps the live worktree and is recorded
-in vpd.json ("no_snapshot": true).
+Code snapshots (DECISIONS G1, 2026-11-10; on by default): prepare refuses unless vpd/, downstream/,
+eval_external/ and the root file ply_gaussian_loader.py (vpd.snapshot.EXTRA_FILES) have no uncommitted or untracked
+(non-ignored) files, then extracts `git archive HEAD` of them into RUN/code with RUN/code/SNAPSHOT.json
+(vpd.snapshot).  Every payload arg that starts with the worktree path is rewritten to the same path under RUN/code
+(an arg that only contains it is refused, and so is a --env value that mentions it), and launch.sh exports
+VPD_WORKTREE=RUN/code PYTHONPATH=RUN/code and cds into RUN/code; right after its `exec > >(tee worker.log)` line it
+stops with exit 97 (written to job/exit_code, the message in worker.log) unless RUN/code/SNAPSHOT.json exists and is
+the cwd's.  So the job never reads the live worktree's code (the one exception: the non-root owner wrapper
+examples/train/active_spatial/sco_run_as_artifact_owner.sh, outside the snapshot).  prepared.json carries the
+rewritten payload, worktree = RUN/code and code_snapshot; vpd.json the snapshot summary and the rewrites.
+--no-snapshot (tests / emergencies only) keeps the live worktree and is recorded in vpd.json ("no_snapshot": true);
+E3VS jobs cannot run that way (their prereg guard needs git outside a snapshot, and the job image has none).
 Pools (G7): sco_job.POOLS (h800, zoetrope) plus EXTRA_POOLS (zoe-cf-render), which only an explicit --pool names.
 
 submit refuses (exit 2) unless, in this order:
@@ -40,7 +43,10 @@ CANCELLED) with `sco acp jobs delete` (no stop), or records a NOT_FOUND job whos
 a live job only with --force-live (sco_job.delete: stop + delete).  The end time and the actual GPU-h
 (sco start_time -> complete_time, else the worker.log [launch] span) go to the ledger.  A force-deleted job that
 never started (both checks in a waiting state without start_time, no [launch] line in worker.log) is charged
-0.0 GPU-h, gph_source "never_started" (G7); any other force-deleted job without a start time keeps its estimate.
+0.0 GPU-h, gph_source "never_started" (G7), but only when the delete demonstrably worked: sco_job.delete reported
+"delete rc=0", or a re-check after it sees a terminal state or a NOT_FOUND the job list confirms.  Otherwise (a
+failed stop / delete could still let it get cards), and for any other force-deleted job without a start time, the
+estimate stays charged (gph null, "unknown_charged_est").
 """
 
 from __future__ import annotations
@@ -220,24 +226,39 @@ def snapshot_payload(payload: List[str], code: Path) -> Tuple[List[str], List[Li
         else:
             if not os.path.lexists(new):
                 raise ValueError(f"payload arg {a!r}: {new} is not in the code snapshot (uncommitted, ignored, or "
-                                 f"outside {'/, '.join(snapshot.TREES)}/)")
+                                 f"outside {snapshot.where()})")
             rewrites.append([a, new])
         out.append(new)
     return out, rewrites
 
 
+EXIT_CODE_LINE = "echo $rc > "  # sco_job.launch_script's last line: echo $rc > RUN/job/exit_code
+
+
 def snapshot_launch(text: str, code: Path, commit: str) -> str:
-    """sco_job's launch.sh with its one `cd WORKTREE` line replaced by the snapshot exports + cd RUN/code."""
+    """sco_job's launch.sh with its one `cd WORKTREE` line replaced by the snapshot exports + `cd RUN/code`, and the
+    snapshot check inserted right after the `exec > >(tee -a worker.log) 2>&1` line, so a missing snapshot (or a
+    failed cd) is logged in worker.log and leaves exit code 97 in job/exit_code, as any payload failure would."""
     lines = text.splitlines(keepends=True)
     want = f"cd {shlex.quote(str(WORKTREE))}\n"
     cds = [i for i, ln in enumerate(lines) if ln.startswith("cd ")]
     if [lines[i] for i in cds] != [want]:
         raise RuntimeError(f"launch.sh: expected exactly one line {want!r}, found {[lines[i] for i in cds]}")
+    tees = [i for i, ln in enumerate(lines) if ln.startswith("exec > >(tee ")]
+    if len(tees) != 1 or tees[0] < cds[0]:
+        raise RuntimeError(f"launch.sh: expected one `exec > >(tee ...)` line after the cd, found {len(tees)}")
+    ecs = [ln for ln in lines if ln.startswith(EXIT_CODE_LINE)]
+    if len(ecs) != 1:
+        raise RuntimeError(f"launch.sh: expected one {EXIT_CODE_LINE!r}... line, found {len(ecs)}")
+    exit_file = ecs[0][len(EXIT_CODE_LINE):].strip()  # as sco_job quoted it
     q = shlex.quote(str(code))
     lines[cds[0]] = (
         f"# vpd.sco code snapshot of {commit} (DECISIONS G1): this job runs {code}, never the live worktree\n"
         f"export VPD_WORKTREE={q} PYTHONPATH={q}\n"
-        f"cd {q} && [[ -f {snapshot.MARKER} ]] || {{ echo \"[launch] no code snapshot at \"{q} >&2; exit 97; }}\n")
+        f"cd {q}\n")
+    lines[tees[0]] += (
+        f"[[ -f {shlex.quote(str(Path(code) / snapshot.MARKER))} && $PWD -ef {q} ]] || "
+        f"{{ echo \"[launch] no code snapshot at \"{q} >&2; echo 97 > {exit_file}; exit 97; }}\n")
     new = "".join(lines)
     rest = new.replace(shlex.quote(str(WORKTREE / sco_job.RUN_AS_OWNER)), "")  # the owner wrapper (non-root)
     left = [p for p in _wt_prefixes() if _mentions(rest, p)]
@@ -257,6 +278,12 @@ def prepare(run, name: str, payload: List[str], pool: str = "zoetrope", as_root:
     run = Path(run).resolve()
     validate_name(name)
     env = parse_env(env) if isinstance(env, (list, tuple)) else parse_env([f"{k}:{v}" for k, v in (env or {}).items()])
+    if snapshot_code:  # same path-boundary rule as the payload args: e.g. VPD_COMMON_ENV:WT/vpd/jobs/common_env.sh
+        for k, v in env.items():  # would make a snapshot job source live worktree files
+            hit = [p for p in _wt_prefixes() if _mentions(v, p)]
+            if hit:
+                raise ValueError(f"--env {k}:{v} mentions the worktree {hit[0]}: a code-snapshot job must not read "
+                                 "the live worktree (pass paths as payload args, which prepare rewrites to RUN/code)")
     inferred = ledger.gate_of(name)
     if gate is not None and gate not in ledger.GATES:
         raise ValueError(f"--gate must be one of {ledger.GATES}")
@@ -681,6 +708,23 @@ def _sco_delete(job_id: str) -> Tuple[int, str]:
     return res.returncode, (res.stdout.strip() + " " + res.stderr.strip()).strip()
 
 
+DELETE_RC_RE = re.compile(r"\bdelete rc=(-?\d+)\b")  # sco_job.delete: "<pt>: delete rc=<rc> <stdout> <stderr>"
+
+
+def delete_confirmed(job: dict, out: str) -> Tuple[bool, str]:
+    """(True, how) if a forced stop + delete demonstrably worked: sco_job.delete reported `delete rc=0`, or a
+    re-check now sees a terminal state or a NOT_FOUND that the job list confirms; else (False, what was seen)."""
+    m = DELETE_RC_RE.search(out or "")
+    if m and int(m.group(1)) == 0:
+        return True, "delete rc=0"
+    obs = observe(job, list_page())
+    s = obs.get("state")
+    if s in TERMINAL or (s == "NOT_FOUND" and obs.get("absent")):
+        return True, f"re-checked after the delete: {s}"
+    return False, (f"delete rc={m.group(1) if m else '?'}; re-checked after the delete: {s}"
+                   + (" (absence not confirmed)" if s == "NOT_FOUND" else ""))
+
+
 def delete(run, force_live: bool = False, sleep=time.sleep) -> str:
     run = Path(run).resolve()
     receipt = run / "job" / "submission.json"
@@ -716,16 +760,21 @@ def delete(run, force_live: bool = False, sleep=time.sleep) -> str:
         obs2 = dict(obs2, end_time=ledger.iso())
         if not ended_in_ledger:
             started = obs2.get("start_time") or obs1.get("start_time")
+            extra = {}
             if started:
                 obs2["start_time"] = started
                 gph, src = round(elapsed_gph(job, obs2), 4), "sco_start_to_force_delete"
             elif s1 in WAITING and s2 in WAITING and not ledger.worker_log_started(run / "job" / "worker.log"):
-                gph, src = 0.0, "never_started"  # G7: still waiting for cards, the container never ran
+                # G7: still waiting for cards, the container never ran: 0.0 only if the delete demonstrably worked
+                # (a failed stop / delete could still let it get cards later)
+                ok, how = delete_confirmed(job, out)
+                gph, src = (0.0, "never_started") if ok else (None, "unknown_charged_est")
+                extra["delete_check"] = how
             else:
                 gph, src = None, "unknown_charged_est"  # unreadable / ambiguous: charged its estimate
             ledger.append({"event": "end", "run": str(run), "pt_id": pt, "state": f"FORCED_FROM_{s2}",
                            "start_time": obs2.get("start_time"), "end_time": obs2["end_time"],
-                           "gph": gph, "gph_source": src})
+                           "gph": gph, "gph_source": src, **extra})
         ledger.append({"event": "delete", "run": str(run), "pt_id": pt, "at": ledger.iso(), "rc": None,
                        "state": f"FORCED_FROM_{s2}", "detail": out})
         return out
@@ -746,7 +795,8 @@ def main(argv=None) -> int:
     ap.add_argument("--as-root", action="store_true")
     ap.add_argument("--no-snapshot", action="store_true",
                     help="prepare: run the live worktree instead of a code snapshot (tests / emergencies only; "
-                         "recorded in vpd.json)")
+                         "recorded in vpd.json).  E3VS jobs cannot run this way: outside a snapshot their prereg "
+                         "guard needs git, which the job image lacks")
     ap.add_argument("--est-gph", type=float)
     ap.add_argument("--gate", choices=list(ledger.GATES))
     ap.add_argument("--all", action="store_true")

@@ -408,6 +408,27 @@ class FakeServer:
 # provenance and audits
 # ------------------------------------------------------------------------------------------------------------
 def git_facts() -> dict:
+    """Read-only git facts of paths.WORKTREE.  In a DECISIONS G1 code snapshot (SNAPSHOT.json; no .git, no git in
+    the job image): commit = the snapshot's, vpd_status [] (prepare refused a dirty tree), and prereg_commit from
+    $RUN/prereg_commit.txt when the job's prereg guard wrote it (else as git read it, None); read says so.  Live
+    worktree: unchanged."""
+    from vpd import snapshot
+
+    try:
+        snap = snapshot.snapshot_state(paths.WORKTREE)
+    except snapshot.SnapshotError:  # an unreadable record: the live path below (facts None in a job)
+        snap = {"mode": "unreadable"}
+    if snap["mode"] == "snapshot":
+        pre, src = None, None
+        run = os.environ.get("RUN")
+        f = Path(run) / "prereg_commit.txt" if run else None
+        if f is not None and f.is_file():
+            c = f.read_text().strip()
+            if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", c):
+                pre, src = c, str(f)
+        return {"commit": snap["commit"], "vpd_status": [], "prereg_commit": pre, "read": snapshot.MARKER,
+                "prereg_commit_from": src}
+
     def g(*a):
         try:
             r = subprocess.run(["git", "--no-optional-locks", "-c", "safe.directory=*", "-C", str(paths.WORKTREE),

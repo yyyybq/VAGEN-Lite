@@ -2,11 +2,17 @@
 live worktree, so code edits made while it runs (three lines share the worktree) cannot change what it executes.
 
 `vpd.sco prepare` calls create(WORKTREE, RUN/code).  It refuses unless
-    git status --porcelain --untracked-files=all -- vpd downstream eval_external
-is empty (ignored files such as __pycache__ do not count), extracts `git archive <HEAD> vpd downstream eval_external`
-into RUN/code, checks every extracted file against its git blob id, and writes RUN/code/SNAPSHOT.json:
-    {"format": 1, "commit", "utc", "trees", "n_files", "tar_sha256", "repo" (the worktree it came from), "branch",
-     "head_after", "files": {relpath: git blob id}, "pinned": {relpath: {"blob", "last_commit"}}}
+    git status --porcelain --untracked-files=all -- vpd downstream eval_external ply_gaussian_loader.py
+is empty (ignored files such as __pycache__ do not count), extracts
+`git archive <HEAD> vpd downstream eval_external ply_gaussian_loader.py` into RUN/code, checks every extracted file
+against its git blob id, and writes RUN/code/SNAPSHOT.json:
+    {"format": 1, "commit", "utc", "trees", "extra_files", "n_files", "tar_sha256", "repo" (the worktree it came
+     from), "branch", "head_after", "files": {relpath: git blob id}, "pinned": {relpath: {"blob", "last_commit"}}}
+EXTRA_FILES are tracked files at the worktree root that job code imports: ply_gaussian_loader.py
+(vpd/e3vs/render.py `from ply_gaussian_loader import PLYGaussianLoader`).  Live jobs (cwd = PYTHONPATH = the
+worktree) imported the worktree's copy; with it in the snapshot, a snapshot job (PYTHONPATH = RUN/code) imports the
+same bytes instead of falling through to the eval-external site-packages copy (review_infra, 2026-11-10).  A commit
+without one of them is refused.  "extra_files" is additive (format stays 1): a record without the key has none.
 "pinned" covers the frozen documents (vpd/**/PREREG_*.md, vpd/**/SMOKE_CRITERIA.md); last_commit is
 `git log -1 --format=%H <commit> -- relpath`, recorded at prepare time because the job image has no git binary
 (downstream/sco_job.py; the in-job git facts of every vpd job so far are None).
@@ -43,6 +49,7 @@ from typing import Dict, List, Optional, Tuple
 from vpd import paths
 
 TREES = ("vpd", "downstream", "eval_external")
+EXTRA_FILES = ("ply_gaussian_loader.py",)  # tracked root files that job code imports (module docstring)
 MARKER = "SNAPSHOT.json"
 FORMAT = 1
 PINNED_RE = re.compile(r"^vpd/(?:.+/)?(?:PREREG_[^/]*\.md|SMOKE_CRITERIA\.md)$")
@@ -91,14 +98,19 @@ def _git(repo, *args: str, exe: Optional[str] = None, raw: bool = False):
 
 # --- create (login node, vpd.sco prepare) ---------------------------------------------------------------------
 
-def dirty_files(worktree, trees=TREES) -> List[str]:
-    """Porcelain lines of tracked changes and untracked, non-ignored files under the trees."""
-    out = _git(worktree, "status", "--porcelain", "--untracked-files=all", "--", *trees)
+def where(trees=TREES, extra_files=EXTRA_FILES) -> str:
+    """'vpd/, downstream/, eval_external/, ply_gaussian_loader.py': what a snapshot holds, for messages."""
+    return ", ".join([t + "/" for t in trees] + list(extra_files))
+
+
+def dirty_files(worktree, trees=TREES, extra_files=EXTRA_FILES) -> List[str]:
+    """Porcelain lines of tracked changes and untracked, non-ignored files under the trees and of the extra files."""
+    out = _git(worktree, "status", "--porcelain", "--untracked-files=all", "--", *trees, *extra_files)
     return [ln for ln in out.splitlines() if ln.strip()]
 
 
-def _ls_tree(worktree, commit: str, trees) -> Dict[str, str]:
-    out = _git(worktree, "ls-tree", "-r", "-z", "--full-tree", commit, "--", *trees)
+def _ls_tree(worktree, commit: str, trees, extra_files=()) -> Dict[str, str]:
+    out = _git(worktree, "ls-tree", "-r", "-z", "--full-tree", commit, "--", *trees, *extra_files)
     files, odd = {}, []
     for ent in out.split("\0"):
         if not ent:
@@ -115,16 +127,20 @@ def _ls_tree(worktree, commit: str, trees) -> Dict[str, str]:
     missing = [t for t in trees if not any(p.startswith(t + "/") for p in files)]
     if missing:
         raise SnapshotError(f"SNAPSHOT REFUSED: {commit[:12]} has no files under {missing}")
+    missing = [f for f in extra_files if f not in files]
+    if missing:
+        raise SnapshotError(f"SNAPSHOT REFUSED: {commit[:12]} has no tracked file {missing} (EXTRA_FILES)")
     return files
 
 
-def _extract(tar_bytes: bytes, dest: Path, trees) -> int:
+def _extract(tar_bytes: bytes, dest: Path, trees, extra_files=()) -> int:
     """Extract the archive into dest (data filter where available); returns the number of regular files."""
     with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:") as tf:
         members = tf.getmembers()
         for m in members:
             parts = Path(m.name).parts
-            if (not parts or parts[0] not in trees or ".." in parts or Path(m.name).is_absolute()
+            inside = bool(parts) and (parts[0] in trees or (m.name in extra_files and m.isfile()))
+            if (not inside or ".." in parts or Path(m.name).is_absolute()
                     or not (m.isfile() or m.isdir())):
                 raise SnapshotError(f"unexpected archive member {m.name!r} (type {m.type!r})")
         if hasattr(tarfile, "data_filter"):
@@ -134,11 +150,12 @@ def _extract(tar_bytes: bytes, dest: Path, trees) -> int:
         return sum(1 for m in members if m.isfile())
 
 
-def create(worktree, dest, trees=TREES) -> dict:
-    """Snapshot `trees` of the worktree's HEAD into dest (which must not exist); returns the SNAPSHOT.json record.
-    Raises SnapshotError (dirty tree, no git, odd entries, bytes that do not match their blob ids)."""
+def create(worktree, dest, trees=TREES, extra_files=EXTRA_FILES) -> dict:
+    """Snapshot `trees` and `extra_files` of the worktree's HEAD into dest (which must not exist); returns the
+    SNAPSHOT.json record.  Raises SnapshotError (dirty tree, no git, odd entries, a missing extra file, bytes that
+    do not match their blob ids)."""
     worktree, dest = Path(worktree), Path(dest)
-    trees = tuple(trees)
+    trees, extra_files = tuple(trees), tuple(extra_files)
     partial = dest.with_name(dest.name + ".partial")
     for p in (dest, partial):
         if p.exists() or p.is_symlink():
@@ -147,20 +164,20 @@ def create(worktree, dest, trees=TREES) -> dict:
     if Path(top).resolve() != worktree.resolve():
         raise SnapshotError(f"{worktree} is not the top level of its git worktree ({top})")
     commit = _git(worktree, "rev-parse", "--verify", "HEAD^{commit}").strip()
-    dirty = dirty_files(worktree, trees)
+    dirty = dirty_files(worktree, trees, extra_files)
     if dirty:
         more = f" ... ({len(dirty)} in all)" if len(dirty) > 20 else ""
-        raise SnapshotError(f"SNAPSHOT REFUSED: uncommitted or untracked files under {'/, '.join(trees)}/ of "
+        raise SnapshotError(f"SNAPSHOT REFUSED: uncommitted or untracked files in {where(trees, extra_files)} of "
                             f"{worktree}; commit them first (--no-snapshot is for tests and emergencies only): "
                             + "; ".join(dirty[:20]) + more)
-    files = _ls_tree(worktree, commit, trees)
-    tar_bytes = _git(worktree, "archive", "--format=tar", commit, *trees, raw=True)
-    rec = {"format": FORMAT, "commit": commit, "utc": utc(), "trees": list(trees), "n_files": None,
-           "tar_sha256": hashlib.sha256(tar_bytes).hexdigest(), "repo": str(worktree), "branch": None,
-           "head_after": None, "files": files, "pinned": {}}
+    files = _ls_tree(worktree, commit, trees, extra_files)
+    tar_bytes = _git(worktree, "archive", "--format=tar", commit, *trees, *extra_files, raw=True)
+    rec = {"format": FORMAT, "commit": commit, "utc": utc(), "trees": list(trees), "extra_files": list(extra_files),
+           "n_files": None, "tar_sha256": hashlib.sha256(tar_bytes).hexdigest(), "repo": str(worktree),
+           "branch": None, "head_after": None, "files": files, "pinned": {}}
     partial.mkdir(parents=True)
     try:
-        n = _extract(tar_bytes, partial, trees)
+        n = _extract(tar_bytes, partial, trees, extra_files)
         if n != len(files):
             raise SnapshotError(f"git archive gave {n} files, git ls-tree {len(files)}")
         bad = [rel for rel, obj in files.items()
@@ -189,6 +206,7 @@ def summary(rec: dict) -> dict:
     """The part of a SNAPSHOT.json record that goes into vpd.json / prepared.json (no per-file map)."""
     out = {k: rec.get(k) for k in ("format", "commit", "utc", "trees", "n_files", "tar_sha256", "repo", "branch",
                                    "head_after")}
+    out["extra_files"] = list(rec.get("extra_files") or [])
     out["pinned"] = {rel: p.get("last_commit") for rel, p in (rec.get("pinned") or {}).items()}
     return out
 
@@ -233,7 +251,8 @@ def _walk_files(root: Path):
 
 
 def verify(root=None) -> dict:
-    """{"ok", "root", "commit", "checked", "changed", "missing", "extra"} of a code snapshot against its record."""
+    """{"ok", "root", "commit", "checked", "changed", "missing", "extra"} of a code snapshot against its record
+    (every recorded file, the EXTRA_FILES at the snapshot root included; any other file is "extra")."""
     root = _root(root)
     rec = read_marker(root)
     if rec is None:

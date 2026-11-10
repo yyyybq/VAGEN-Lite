@@ -31,7 +31,15 @@
 | `__init__.py`、`paths.py` | OUT 的目录常量、各解释器路径 | WP-CORE |
 | `starts.json`、`starts.py` | 起点表（名字 → 评测 view 代码、checkpoint 路径），加载时断言注意力实现 | WP-CORE |
 | `sco.py`、`ledger.py` | 包装 `downstream/sco_job.py` 的 sco 工具，带作业台账和按闸门预留的预算检查 | WP-OPS |
-| `snapshot.py` | 作业代码快照：prepare 时建 `RUN/code` 和 `SNAPSHOT.json`；作业里核对文件（第 7 节） | infra（第三轮） |
+| `snapshot.py` | 作业代码快照：prepare 时建 `RUN/code` 和 `SNAPSHOT.json`（三个目录加根目录的 `ply_gaussian_loader.py`）；作业里核对文件（第 7 节） | infra（第三轮） |
+| `EXPLORATORY_WB_VARIANTS.md` | WalkerBench 限量探索（DECISIONS G4）的说明：开发集、选择规则、变体清单。探索性质，不是闸门 | wbvar（第三轮） |
+| `walkerbench/variants.py`、`walkerbench/odometer.py` | 变体探索：建 s2dev74 和 s2sel 两个题集；V0、V1T、V2、V4、V5 的训练数据；初始化和适配器核对；分析；expect。`odometer.py` 生成里程计那一行（V1、V1T、V2 用） | wbvar（第三轮） |
+| `jobs/wb_variants.sh` | sco 作业脚本：`wb_variants.sh VARIANT RUN [BASE]`（作业 vpd-wb-v0v1，先重建 G6 的那一条示范；vpd-wb-v1t、vpd-wb-v2；之后的 V5、V4）。输出只在 `OUT/walkerbench/runs/explore/wbv/` | wbvar（第三轮） |
+| `walkerbench/perc.py` | 感知零样本（G5）：建 perc294 题集并核对；评测包装，每个起点参数完全相同；分析；expect。题集在 `OUT/walkerbench/perception/perc294/`，输出在 `OUT/walkerbench/runs/explore/perc/` | perc（第三轮） |
+| `jobs/wb_perc.sh` | sco 作业脚本：`wb_perc.sh RUN`（作业 vpd-wb-perc，以 root 跑，Q3B、Q3S、E2 依次评测） | perc（第三轮） |
+| `tvr/lvp.py`、`tvr/probe_lvp.py` | TVR 的 lavapipe（CPU Vulkan）渲染：`lvp.py` 从零建 worker 环境、从只读仓库加载 TVRBench、字体规则、角标遮罩；`probe_lvp.py` 测吞吐网格和确定性，并和公开样本比对（G3） | tvrprobe（第三轮） |
+| `jobs/tvr_probe.sh` | sco 作业脚本：`tvr_probe.sh RUN`（作业 vpd-tvr-probe，闸门 tvr，非 root，只用 CPU 渲染） | tvrprobe（第三轮） |
+| `tvr/vk_recheck.sh`、`tvr/vkre.py` | NVIDIA Vulkan 复查（G2）：作业脚本 `vk_recheck.sh OUTDIR`（作业 vpd-tvr-vkre，系统驱动 + 加载库 1.4.357 + 绝对路径 ICD 的几种变体，加对照），`vkre.py` 汇总并写 expect。不影响冻结的 TVR 冒烟判定 | vkre（第三轮） |
 | `jobs/common_env.sh`、`jobs/preflight.sh` | 作业脚本的公共开头（线程数、离线开关、chown 陷阱、节点信息）和开跑前检查 | WP-OPS |
 | `jobs/wb_demos.sh` | sco 作业脚本：渲染示范、生成热身集、生成档位 | WP-WBDEMO |
 | `jobs/wb_smoke.sh`、`jobs/wb_pilot_start.sh` | sco 作业脚本：WalkerBench smoke 和每个起点的试点 | WP-WBPILOT |
@@ -40,16 +48,20 @@
 | `walkerbench/history.py` | 干净的 K 轮历史窗口，训练和评测共用 | WP-CORE |
 | `walkerbench/action_regex.py` | 约束解码用的每步正则 | WP-CORE |
 | `walkerbench/data/split_city.json` | 冻结的城市切分源清单（sha256 已登记） | WP-WBDATA |
-| `walkerbench/split.py`、`tiers.py`、`baselines.py` | 生成 S2 切分；生成嵌套档位顺序；在 179 题上跑 STOP0、FWD、ODO 和专家 | WP-WBDATA |
+| `walkerbench/split.py`、`tiers.py`、`baselines.py` | 生成 S2 切分；生成嵌套档位顺序；在 179 题上跑 STOP0、FWD、ODO 和专家。第三轮 B1：`baselines.rm_expert` 把朝向折回 [0, 360)（G6） | WP-WBDATA；wbtrain（第三轮） |
 | `walkerbench/demos.py`、`warmup.py` | RM 专家示范（640x400 真实渲染）；20 段格式热身 | WP-WBDEMO |
 | `walkerbench/run_vpd.py`、`smoke_vpd.py` | 评测副本（约束解码、渲染尺寸、K 窗口、合并模型）；假服务器冒烟 | WP-WBEVAL |
 | `walkerbench/pilot.py`、`pilot_gate.py` | 试点编排（plan / prepare / submit / status / collect / delete / budget）；闸门判定 | WP-WBPILOT |
 | `common/vllm_server_vpd.py` | vLLM 服务副本：可指定模型目录、结构化输出、图像像素上限。WalkerBench 和 E3VS 共用 | WP-WBEVAL |
-| `train/n2_train_vpd.py` | 训练脚本，由 `downstream/n/n2_train.py` 改来 | WP-TRAIN |
+| `train/n2_train_vpd.py` | 训练脚本，由 `downstream/n/n2_train.py` 改来。第三轮加了每条回复可选的 `loss_weight`（G4 的 V5） | WP-TRAIN；wbtrain（第三轮） |
 | `train/parity_check.py`、`train/merge.py`、`train/wb_train_probe.py` | 两个环境的处理器一致性检查；合并到作业本地盘；长序列吞吐探针 | WP-TRAIN |
 | `tvr/` | TVR 冒烟：登录节点准备脚本、冒烟作业、Vulkan/EGL 探针、判定脚本、`SMOKE_CRITERIA.md` | WP-TVR |
 | `e3vs/` | E3VS 相关代码（几何、BFS 示范、盲下限、下载脚本、`USER_STEPS.md`、渲染、占据栅格、SFT 数据、闭环评测、汇总） | WP-E3VS-A、WP-E3VS-B |
 | `tests/` | 每个工作包的 pytest。在登录节点上单核、不用 GPU 就能跑 | 各工作包 |
+| `tests/test_snapshot.py`、`tests/test_snapshot_facts.py` | 代码快照（建快照、prepare 改写、launch.sh、作业里的核对）；快照里的 git 事实（评测 manifest、训练 meta、E3VS 评测）和 E3VS 记下的加载器 | infra（第三轮） |
+| `tests/test_wb_variants.py`、`tests/test_perc.py` | WalkerBench 变体探索；感知零样本 | wbvar、perc（第三轮） |
+| `tests/test_tvr_probe.py`、`tests/test_vk_recheck.py` | lavapipe 探针；NVIDIA Vulkan 复查 | tvrprobe、vkre（第三轮） |
+| `tests/test_train_weights.py` | 训练脚本的按回复 loss_weight（G4 的 V5） | wbtrain（第三轮） |
 
 ## 3. OUT 目录
 
@@ -66,7 +78,12 @@
 | `walkerbench/tiers/` | 每个种子一份 `order_seed<种子>.json`，以及 `seed<种子>/demos_<N>.jsonl`；种子有 1001（试点）和 1、2、3（确认轮） |
 | `walkerbench/runs/smoke/` | smoke 作业的输出和 `smoke_verdict.json` |
 | `walkerbench/runs/pilot/<起点>/` | 适配器 `adapters/{0W,50,200}/` 和评测结果 `evals/pilot__<起点>__<档>__<分辨率>__<解码>/` |
-| `walkerbench/runs/pilot/` | `GATE.json` 和 `GATE.md` 也放这里 |
+| `walkerbench/runs/pilot/` | `GATE.json` 和 `GATE.md` 也放这里。探索性的输出一律不放这里 |
+| `walkerbench/split/s2dev74/`、`walkerbench/split/s2sel/` | 变体探索的开发集（74 题）和选择集 SEL（s2val + s2dev74 = 131 题）：带 sha 核对的任务副本和 `selection.json`（G4） |
+| `walkerbench/runs/explore/wbv/` | WalkerBench 变体探索的输出（探索性质，G4） |
+| `walkerbench/demos/s2train_640x400_B1_vis0578/` | G6 重建的那一条示范（wb_variants 作业 A 写；冻结的示范目录不动） |
+| `walkerbench/perception/perc294/` | 感知零样本的题集：`tasks/`（294 个 sha 核对过的副本）和 `selection.json`（G5） |
+| `walkerbench/runs/explore/perc/` | 感知零样本的输出（探索性质，单独计卡时，不算进 WalkerBench 的 30 卡时） |
 | `tvr/` | 图形库副本（nvgl_595.71.05）、AI2-THOR 的 HOME、TVRBench 仓库、冒烟输出 |
 | `envs/tvr` | TVR 的 conda 环境（要用户批准后才建） |
 | `e3vs/` | `repo/`、`data/`、`occ/`、`bfs/`、`sft/`、`parity/`、`runs/` |
@@ -123,6 +140,8 @@
    - 默认投 zoetrope；zoetrope 的单卡作业开始排队时，可以改投 h800，哪个排队短投哪个。
    - `--pool zoe-cf-render`（2026-11-10，DECISIONS G7）只能显式指定，`--pool auto` 永远不会选它；规格同样是 N4lS.Iq.I80.1。有没有配额要投了才知道。
    - 用 `--force-live` 删掉一个从没开始的作业（两次查询都在排队、没有 start_time、worker.log 里没有 `[launch]` 行），台账记 0 卡时，`gph_source` 为 `never_started`。
+     - 前提是删除确实生效：`sco_job.delete` 报了 `delete rc=0`，或者删完再查一次，看到终止状态或作业列表确认的 NOT_FOUND。
+     - 否则（stop 或 delete 失败，作业以后还可能拿到卡）照旧按估计记（`unknown_charged_est`）。台账的 end 事件里 `delete_check` 记了判断依据。
    - 只通过 `vpd/sco.py` 提交。
 2. **命名**：显示名一律是 `downstream-vpd-<作业>`。例如：
    - downstream-vpd-tvr-smoke
@@ -152,18 +171,32 @@
 作业跑的是提交时冻结的一份代码，不是 worktree 本身。这样作业在跑的时候，别的线改 worktree 里的文件也影响不到它。
 
 1. **prepare 时**（默认开启）：
-   - `git status --porcelain --untracked-files=all -- vpd downstream eval_external` 不为空就拒绝。被忽略的文件（`__pycache__` 等）不算。先提交，再 prepare。
-   - 把 HEAD 的这三个目录用 `git archive` 解到 `RUN/code`，逐个文件核对 git blob。
-   - 写 `RUN/code/SNAPSHOT.json`：commit、utc、trees、n_files、tar_sha256、来源 worktree、每个文件的 blob，以及冻结文档（`PREREG_*.md`、`SMOKE_CRITERIA.md`）最后一次改动的提交。`RUN/job/vpd.json` 和 prepared.json 里也记一份摘要。
+   - `git status --porcelain --untracked-files=all -- vpd downstream eval_external ply_gaussian_loader.py` 不为空就拒绝。被忽略的文件（`__pycache__` 等）不算。先提交，再 prepare。
+   - 把 HEAD 的这三个目录，加上根目录的 `ply_gaussian_loader.py`（`snapshot.EXTRA_FILES`），用 `git archive` 解到 `RUN/code`，逐个文件核对 git blob。HEAD 里没有这个文件也拒绝。
+     - 为什么要带它：`vpd/e3vs/render.py` 要 `from ply_gaussian_loader import PLYGaussianLoader`。以前的作业直接跑 worktree，导入的是 worktree 根目录那一份；快照里没有它的话，作业会退到 eval-external 环境 site-packages 里的另一份（两份只在压缩 PLY 的解码上不同）。
+     - E3VS 的渲染记录（`SplatRenderer.meta`、parity 的 `code`）里有 `ply_gaussian_loader`：实际导入的模块路径和 sha256，`in_worktree` 表示是不是快照（worktree）里那一份。
+   - 写 `RUN/code/SNAPSHOT.json`：commit、utc、trees、extra_files、n_files、tar_sha256、来源 worktree、每个文件的 blob，以及冻结文档（`PREREG_*.md`、`SMOKE_CRITERIA.md`）最后一次改动的提交。`RUN/job/vpd.json` 和 prepared.json 里也记一份摘要。
+     - `extra_files` 是后加的键，格式号仍是 1；以前的快照没有这个键，表示没有额外文件。
 2. **payload**：以 worktree 路径开头的参数，一律改写成 `RUN/code` 下的同一路径。所以 prepare 命令里照旧写 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/...`。
    - 只是"包含" worktree 路径的参数（比如 `KEY=/…/VAGEN-Lite-vpd/…`、`bash -c` 字符串）会被拒绝。
-   - 改写后的路径在快照里不存在（没提交、被忽略、不在这三个目录里）也拒绝。
+   - 改写后的路径在快照里不存在（没提交、被忽略、不在快照里）也拒绝。
+   - `--env` 的值里提到 worktree 路径（同样按路径边界判断，比如 `VPD_COMMON_ENV:/…/VAGEN-Lite-vpd/vpd/jobs/common_env.sh`）也拒绝，否则作业会去读 worktree 里的文件。`--no-snapshot` 时不查。
 3. **launch.sh**：导出 `VPD_WORKTREE=RUN/code` 和 `PYTHONPATH=RUN/code`，再 cd 进 `RUN/code`。
+   - 紧跟在 `exec > >(tee -a worker.log) 2>&1` 那一行后面检查：`RUN/code/SNAPSHOT.json` 必须存在，当前目录必须就是 `RUN/code`。不满足就把原因写进 worker.log，`job/exit_code` 写 97，然后以 97 退出。
    - `vpd.paths.WORKTREE` 跟着 `VPD_WORKTREE` 走；`jobs/common_env.sh` 没有这个变量时，取它自己所在的那棵树。
    - 新的作业脚本按约定这样开头：`source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"`，然后 `cd "$VPD_WORKTREE"`。代码里不再写死 worktree 路径。
    - 例外：非 root 作业的属主包装脚本 `examples/train/active_spatial/sco_run_as_artifact_owner.sh` 不在这三个目录里，仍从 worktree 调用（本线不改它）。
 4. **作业里的 git 检查**：快照里没有 `.git`，作业镜像里也没有 git。E3VS 的 PREREG 检查改用 `vpd_snapshot_file`（`python -m vpd.snapshot file <路径>`）：
    - 作业里的副本必须等于快照提交里的文件：先比 blob；有 git 时再和真实 worktree 的 `git show <commit>:<路径>` 比；
    - 输出最后一次改动它的提交，和以前 `git log -1` 的结果一样。
-5. **其他**：`python -m vpd.snapshot verify` 核对整个快照没有被改动。`--no-snapshot` 只给测试和应急用，会记在 vpd.json 里（`"no_snapshot": true`）。
-6. **代码指纹**：快照不改变代码指纹（训练的 CODE_FILES、评测的 code_sha256），因为字节一样。不过这次改动本身改了 `vpd/paths.py`，而它在 CODE_FILES 里，所以训练代码指纹会变一次。
+   - 记录用的 git 事实在快照里改从 `SNAPSHOT.json` 取（直接跑 worktree 时不变）：
+     - WalkerBench 评测 manifest 的 `extra.vpd.git`：commit 取快照的提交，dirty 为 false，`read` 为 `SNAPSHOT.json`。所以 `smoke_vpd.py` 的 manifest_fields 检查（commit 不能为空）在快照作业里也能过。
+     - 训练 meta.json 的 `git_head` 取快照的提交，`vpd_dirty` 为 false，`git_read` 为 `SNAPSHOT.json`。
+     - E3VS 评测 manifest 的 `git`：commit 取快照的提交；`prereg_commit` 取作业写的 `$RUN/prereg_commit.txt`，没有就是 null。
+     - 还没改的：E3VS `code_meta` 的 `worktree_head`（在 `vpd/e3vs/__init__.py` 里）在快照里仍是 null。
+5. **其他**：`python -m vpd.snapshot verify` 核对整个快照没有被改动（根目录的 `ply_gaussian_loader.py` 也在内）。`--no-snapshot` 只给测试和应急用，会记在 vpd.json 里（`"no_snapshot": true`）。
+   - **E3VS 作业不能用 `--no-snapshot` 跑。** 不在快照里时，prereg 检查（`e3vs_prep.sh` 的 `prereg_guard`、`e3vs_start.sh` 的 `guard`）要用 git，可作业镜像里没有 git，所以检查一定不过，作业会在开头停下。
+6. **代码指纹**：快照不改变代码指纹（训练的 CODE_FILES、评测的 code_sha256），因为字节一样。不过改快照机制时改到的文件会让指纹变：
+   - 第三轮第一批改了 `vpd/paths.py` 和 `train/n2_train_vpd.py`，都在训练的 CODE_FILES 里，训练指纹从 `63a3a8b92ce7`（试点的适配器）变成 `9b2d44d2a0c6`（提交 ca803a48）。
+   - 第三轮 1b 改了 `train/n2_train_vpd.py` 的 `git_head`，训练指纹又变一次，变成 `0865dd75f1ee`（按 `code_fingerprint` 同样的算法算的）。还没有适配器是用新代码训的。
+   - 评测的 code_sha256 包括 `walkerbench/run_vpd.py` 本身，所以 1b 之后的评测 manifest 里它的 sha256 也不同。这个值只记录；检查只要求它不为空，没有哪个检查拿它和已有输出比。

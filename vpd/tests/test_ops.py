@@ -73,6 +73,8 @@ class FakeSco:
         self.status_fail = set()
         self.extra_list = []
         self.uncertain_next = False
+        self.force_delete_rc = 0  # rc of the forced delete; != 0: stop + delete fail and the job stays
+        self.force_delete_out = None  # an output format without "delete rc=" (forces the re-check path)
 
     # sco_job.submit
     def submit(self, run):
@@ -123,10 +125,15 @@ class FakeSco:
         return 0, "deleted"
 
     def force_delete(self, run):
+        """sco_job.delete: stop + delete; returns "<pt>: delete rc=<rc> <stdout> <stderr>" as the real one does."""
         pt = json.loads((Path(run) / "job/submission.json").read_text())["job_id"]
         self.stopped.append(pt)
-        self.jobs.pop(pt, None)
-        return f"{pt}: stop+delete"
+        if self.force_delete_rc == 0:
+            self.jobs.pop(pt, None)
+        if self.force_delete_out is not None:
+            return self.force_delete_out.format(pt=pt)
+        return f"{pt}: delete rc={self.force_delete_rc} {'deleted' if self.force_delete_rc == 0 else ''} " \
+               f"{'' if self.force_delete_rc == 0 else 'Error: permission denied'}"
 
     def set(self, pt, state, start=None, end=None):
         j = self.jobs[pt]
@@ -228,9 +235,16 @@ def test_prepare_writes_launch_and_meta(base, fake):
     code = run.resolve() / "code"
     launch = (run / "job" / "launch.sh").read_text()
     # the job runs its code snapshot RUN/code (DECISIONS G1), never the live worktree
-    assert f"cd {paths.WORKTREE}\n" not in launch and f"\ncd {code} && [[ -f SNAPSHOT.json ]] || " in launch
+    assert f"cd {paths.WORKTREE}\n" not in launch and f"\ncd {code}\n" in launch
     assert f"\nexport VPD_WORKTREE={code} PYTHONPATH={code}\n" in launch
-    assert launch.index("export VPD_WORKTREE") < launch.index(f"cd {code}") < launch.index("exec > >(tee")
+    # the snapshot check is the line right after the tee, so its failure reaches worker.log and job/exit_code
+    check = (f"[[ -f {code}/SNAPSHOT.json && $PWD -ef {code} ]] || {{ echo \"[launch] no code snapshot at \"{code} "
+             f">&2; echo 97 > {run.resolve() / 'job' / 'exit_code'}; exit 97; }}")
+    lines = launch.splitlines()
+    tee = [i for i, ln in enumerate(lines) if ln.startswith("exec > >(tee -a ")]
+    assert len(tee) == 1 and lines[tee[0] + 1] == check and lines.count(check) == 1
+    assert launch.index("export VPD_WORKTREE") < launch.index(f"cd {code}") < launch.index("exec > >(tee") \
+        < launch.index(check) < launch.index("[launch] host=")
     assert f" {code}/vpd/jobs/payload.sh x\n" in launch and f"{JOBS_DIR}/payload.sh" not in launch
     assert sco_job.RUN_AS_OWNER in launch  # non-root: payload runs as the file owner
     meta = json.loads((run / "job" / "vpd.json").read_text())
@@ -249,7 +263,7 @@ def test_prepare_writes_launch_and_meta(base, fake):
 
     root_run = prep(base, "vpd-wb-q3b", est=3.4, as_root=True, pool="auto")
     text = (root_run / "job" / "launch.sh").read_text()
-    assert sco_job.RUN_AS_OWNER not in text and f"\ncd {root_run.resolve() / 'code'} && " in text
+    assert sco_job.RUN_AS_OWNER not in text and f"\ncd {root_run.resolve() / 'code'}\n" in text
     assert str(paths.WORKTREE) not in text
     prepared = json.loads((root_run / "job" / "prepared.json").read_text())
     assert prepared["as_root"] is True and prepared["pool"] == "h800"  # pick_pool fake
@@ -652,7 +666,7 @@ def test_force_delete_never_started(base, fake):
     sco.delete(runs[0], force_live=True, sleep=clock.sleep)
     end = [e for e in ledger.read() if e["run"] == str(runs[0].resolve()) and e["event"] == "end"][0]
     assert end["gph"] == 0.0 and end["gph_source"] == "never_started" and end["state"] == "FORCED_FROM_QUEUEING"
-    assert end["start_time"] is None and fake.stopped == [pts[0]]
+    assert end["start_time"] is None and fake.stopped == [pts[0]] and end["delete_check"] == "delete rc=0"
     assert ledger.summarise(ledger.read())["by_gate"]["tvr"]["spent"] == 0.0  # not the 0.1 estimate
     # a [launch] line in worker.log: the container ran, so the estimate stays charged
     (runs[1] / "job" / "worker.log").write_text("[launch] host=h date=2026-11-10T08:00:00Z uid=20325\n")
@@ -665,6 +679,44 @@ def test_force_delete_never_started(base, fake):
     end = [e for e in ledger.read() if e["run"] == str(runs[2].resolve()) and e["event"] == "end"][0]
     assert end["gph"] is None and end["gph_source"] == "unknown_charged_est"
     assert ledger.summarise(ledger.read())["by_gate"]["tvr"]["spent"] == 0.2
+
+
+def _end_event(run: Path) -> dict:
+    ends = [e for e in ledger.read() if e["run"] == str(run.resolve()) and e["event"] == "end"]
+    assert len(ends) == 1, ends
+    return ends[0]
+
+
+def test_force_delete_never_started_needs_a_working_delete(base, fake):
+    """review_infra nit (2026-11-10): 0.0 GPU-h (never_started) only when the forced delete demonstrably worked
+    (`delete rc=0`, or a re-check after it sees the job terminal / confirmed gone); a failed stop + delete keeps the
+    estimate charged, since the job could still get cards."""
+    clock = Clock()
+    runs = [prep(base, f"vpd-tvr-nd{i}", est=0.1) for i in range(3)]
+    pts = [do_submit(r, clock) for r in runs]
+    # (a) the delete fails (rc 1) and the re-check still sees the job queued: the estimate stays charged
+    fake.force_delete_rc = 1
+    out = sco.delete(runs[0], force_live=True, sleep=clock.sleep)
+    assert "delete rc=1" in out and fake.jobs[pts[0]]["state"] == "QUEUEING" and fake.stopped == [pts[0]]
+    end = _end_event(runs[0])
+    assert end["gph"] is None and end["gph_source"] == "unknown_charged_est" and end["state"] == "FORCED_FROM_QUEUEING"
+    assert end["delete_check"] == "delete rc=1; re-checked after the delete: QUEUEING"
+    # (b) no rc in the output, but the re-check finds the job gone and the job list confirms it: never_started
+    fake.force_delete_rc, fake.force_delete_out = 0, "{pt}: stopped and removed"
+    sco.delete(runs[1], force_live=True, sleep=clock.sleep)
+    end = _end_event(runs[1])
+    assert end["gph"] == 0.0 and end["gph_source"] == "never_started"
+    assert end["delete_check"] == "re-checked after the delete: NOT_FOUND"
+    # (c) no rc and an unreadable job list: the NOT_FOUND is not confirmed, so the estimate stays charged
+    fake.list_ok = False
+    sco.delete(runs[2], force_live=True, sleep=clock.sleep)
+    end = _end_event(runs[2])
+    assert end["gph"] is None and end["gph_source"] == "unknown_charged_est"
+    assert end["delete_check"] == "delete rc=?; re-checked after the delete: NOT_FOUND (absence not confirmed)"
+    assert sco.delete_confirmed({"run": str(runs[2]), "pt_id": pts[2], "status": "submitted"},
+                                f"{pts[2]}: delete rc=0 ok") == (True, "delete rc=0")
+    fake.list_ok = True
+    assert abs(ledger.summarise(ledger.read())["by_gate"]["tvr"]["spent"] - 0.2) < 1e-9
 
 
 # --- misc ---------------------------------------------------------------------------------------------------
@@ -701,7 +753,7 @@ def test_cli_prepare_and_errors(base, fake, capsys):
     run = base / "jobs" / "cli"
     assert sco.main(["prepare", "--run", str(run), "--name", "vpd-test", "--", "echo", "hi"]) == 0
     text = (run / "job" / "launch.sh").read_text()
-    assert f"\ncd {run.resolve() / 'code'} && " in text and f"\ncd {paths.WORKTREE}\n" not in text
+    assert f"\ncd {run.resolve() / 'code'}\n" in text and f"\ncd {paths.WORKTREE}\n" not in text
     # --no-snapshot (tests / emergencies): the live worktree, recorded in vpd.json
     live = base / "jobs" / "cli_live"
     assert sco.main(["prepare", "--run", str(live), "--name", "vpd-test", "--no-snapshot", "--", "echo", "hi"]) == 0
