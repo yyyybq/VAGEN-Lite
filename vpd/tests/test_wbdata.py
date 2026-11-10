@@ -363,3 +363,28 @@ def test_frozen_baselines():
     assert (b["floors"]["pooled_F"]["k"], b["floors"]["pooled_F"]["n"]) == (27, 179)
     hs = json.loads((paths.WB_BASELINES / "hard_subsets.json").read_text())
     assert hs["baselines_sha256"] == S.sha256_file(p)
+
+
+# ---------------------------------------------------------------- B1: rm_expert heading wrap (round 3) -------------
+# From OUT/scratch/impl-fixes-tests/proposed_B1/vpd/tests/test_wbdata_B1_addendum.py, importing the module normally.
+
+import re  # noqa: E402
+
+from vpd.walkerbench import action_regex as AR  # noqa: E402
+
+
+def test_rm_expert_wraps_heading():
+    """B1: ROTATION headings are always in [0, 360) and pass action_regex's HEAD range (vis_0578: -164.8)."""
+    head = re.compile(r"(" + AR.HEAD + r")(\.[0-9])?")
+    for raw, want in ((-164.8, 195.2), (-0.04, 0.0), (359.97, 0.0), (360.0, 0.0), (720.25, 0.2), (100.04, 100.0),
+                      (195.2, 195.2), (0.0, 0.0), (-360.0, 0.0)):
+        got = B.wrap_heading(raw)
+        assert got == want and 0.0 <= got < 360.0, (raw, got)
+        assert head.fullmatch(f"{got:.1f}"), (raw, got)
+    # through rm_expert, as in the vis_0578 demo (the next pano at -164.8 deg)
+    s = _session(["a", "b"], "a", 30.0)
+    m = [{"id": 1, "pano_id": "b", "heading": -164.8}]
+    assert B.rm_expert(s, lambda: m, set()) == {"type": "rotation", "heading": 195.2, "pitch": 0, "reason": ""}
+    # the relative-angle test (rotate when > 45 deg off) is unchanged by the wrap
+    s = _session(["a", "b"], "a", 200.0)
+    assert B.rm_expert(s, lambda: m, set())["type"] == "move"  # 195.2 vs 200: 4.8 deg off

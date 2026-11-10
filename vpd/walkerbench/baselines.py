@@ -108,8 +108,16 @@ def rm_expert(session, get_moves, rotated: set, path: list[str] | None = None) -
     rel = min(rel, 360 - rel)
     if rel > ROT_THRESHOLD_DEG and idx not in rotated:
         rotated.add(idx)
-        return {"type": "rotation", "heading": round(m["heading"], 1), "pitch": 0, "reason": ""}
+        return {"type": "rotation", "heading": wrap_heading(m["heading"]), "pitch": 0, "reason": ""}
     return {"type": "move", "move_id": m["id"], "reason": ""}
+
+
+def wrap_heading(h: float) -> float:
+    """A move heading as a ROTATION argument: one decimal, always in [0, 360) (action_regex.HEAD's range).
+    The engine's move headings can be negative (vis_0578: -164.8, which dropped that val demo on regex_mismatch);
+    360.0 after rounding (e.g. 359.97) maps to 0.0."""
+    r = round(h % 360, 1)
+    return 0.0 if r >= 360.0 else r
 
 
 def blind_action(mode: str, session, moves: list[dict], st: dict) -> dict:

@@ -39,6 +39,14 @@ Changes against n2_train.py:
     image grids (--expect-grid 24x40 asserts [1,24,40] per image) and the span check; dry_run.json carries, for the
     first 3 demos, the sha256 of the rendered chat text, input_ids, labels and pixel_values (and per-prefix prompt
     token counts) for vpd/train/parity_check.py.
+11. Optional loss weights (round 3, 2026-11-10; off unless the data carries them).  An assistant message may carry a
+    float "loss_weight" >= 0; a demo may carry a record-level "loss_weight" used for its replies without one; absent
+    = 1.0.  A demo whose replies all weigh exactly 1.0 trains on the unweighted code path above, operation for
+    operation (tests: vpd/tests/test_train_weights.py, against the trainer at commit 68db16b4).  Any other demo:
+    loss = sum over its reply tokens of w * CE / sum of w (each reply span's tokens, its <|im_end|> included, carry
+    that reply's weight; all its samples together); weight-0 replies are left unlabelled, and a --history-k window
+    whose trained reply weighs 0 is not run.  meta / dry_run.json 'loss_weights': the weight counts; a weighted run
+    also logs loss_unweighted (the plain CE mean over the w > 0 tokens) and reply_weight per optimizer step.
 Save format unchanged: OUT/adapter.pt ({module: {"A", "B"}} float32), OUT/meta.json, OUT/log.jsonl.
 """
 from __future__ import annotations
@@ -52,6 +60,7 @@ import random
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent  # WORKTREE/vpd/train
@@ -74,6 +83,7 @@ PARITY_DEMOS = 3
 REPLY_START = "<|im_start|>assistant\n"
 END = "<|im_end|>"
 IMAGE = "<image>"
+LOSS_WEIGHT = "loss_weight"  # optional, per assistant message or per demo (docstring item 11)
 # files whose bytes define the training code (B7: pilot_gate asserts equal code_sha256 across starts)
 CODE_FILES = ("vpd/train/n2_train_vpd.py", "downstream/train/lora.py", "vpd/starts.py", "vpd/starts.json",
               "vpd/paths.py", "vpd/walkerbench/history.py")
@@ -105,25 +115,27 @@ def image_slots(messages: list) -> tuple[list, int]:
 
 
 def samples(rec: dict, history_k: int = 0, blind: bool = False) -> list:
-    """The training samples of one demo: [{"messages", "images", "target": "all"|"last", "turn"}].
+    """The training samples of one demo: [{"messages", "images", "target": "all"|"last", "turn", "weights"}].
 
     history_k 0: the whole conversation, every reply trained.  history_k K > 0: one sample per assistant turn i, the
     clean window history.window(messages[:i], K) + messages[i], only the last reply trained, only the images of the
-    window's user turns.  blind: '<image>' removed from every message and no images."""
+    window's user turns.  blind: '<image>' removed from every message and no images.  weights: the loss weight of
+    each trained reply, in order (reply_weights)."""
     msgs = rec["messages"]
     imgs = list(rec.get("images") or [])
     slots, n = image_slots(msgs)
     if n != len(imgs):
         raise ValueError(f"{rec.get('id')}: {n} '<image>' placeholders for {len(imgs)} images")
+    rw = reply_weights(rec)
     if history_k == 0:
-        out = [{"messages": list(msgs), "images": imgs, "target": "all", "turn": None}]
+        out = [{"messages": list(msgs), "images": imgs, "target": "all", "turn": None, "weights": list(rw.values())}]
     else:
         pos = {id(m): j for j, m in enumerate(msgs)}
         out = []
         for ctx, i in history.train_windows(msgs, history_k):
             kept = [pos[id(m)] for m in ctx] + [i]
             out.append({"messages": [msgs[j] for j in kept], "images": [imgs[s] for j in kept for s in slots[j]],
-                        "target": "last", "turn": i})
+                        "target": "last", "turn": i, "weights": [rw[i]]})
     if blind:
         for s in out:
             s["messages"] = [dict(m, content=m["content"].replace(IMAGE, "")) for m in s["messages"]]
@@ -178,6 +190,80 @@ def check_spans(rec_id, messages: list, spans: list) -> None:
     turns = sum(m["role"] == "assistant" for m in messages)
     if len(spans) != turns:
         raise ValueError(f"{rec_id}: {len(spans)} reply spans for {turns} assistant turns")
+
+
+# ------------------------------------------------------------------------------------------ loss weights
+def _weight(v, where: str) -> float:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise ValueError(f"{where}: {LOSS_WEIGHT} must be a number, got {v!r}")
+    w = float(v)
+    if not math.isfinite(w) or w < 0:
+        raise ValueError(f"{where}: {LOSS_WEIGHT} must be finite and >= 0, got {v!r}")
+    return 0.0 if w == 0 else w  # -0.0 -> 0.0
+
+
+def reply_weights(rec: dict) -> dict:
+    """{message index: loss weight} of every assistant message of a demo, in message order: the message's own
+    "loss_weight", else the demo's "loss_weight", else 1.0.  Weights are finite numbers >= 0; only assistant
+    messages may carry one; a demo with replies needs at least one weight > 0."""
+    rid = rec.get("id")
+    default = _weight(rec[LOSS_WEIGHT], f"{rid}") if LOSS_WEIGHT in rec else 1.0
+    out = {}
+    for j, m in enumerate(rec["messages"]):
+        if m.get("role") != "assistant":
+            if LOSS_WEIGHT in m:
+                raise ValueError(f"{rid}: message {j} ({m.get('role')}) has a {LOSS_WEIGHT}; only replies may")
+            continue
+        out[j] = _weight(m[LOSS_WEIGHT], f"{rid} message {j}") if LOSS_WEIGHT in m else default
+    if out and not any(w > 0 for w in out.values()):
+        raise ValueError(f"{rid}: every reply has {LOSS_WEIGHT} 0")
+    return out
+
+
+def is_uniform(weights) -> bool:
+    """True iff every weight is exactly 1.0 (such a demo trains on the unweighted code path)."""
+    return all(w == 1.0 for w in weights)
+
+
+def span_weights(labels, spans: list, sample: dict) -> dict:
+    """The weighted form of one encoded sample: each trained reply span's tokens carry that reply's weight
+    (sample["weights"], in span order), at the label positions; a weight-0 span is unlabelled (-100), so the lm_head
+    never runs on it.  {"labels", "weights" (float32, labels' shape, 0 off the labelled tokens), "weight_sum"
+    (sum of w over the labelled tokens), "reply_tokens" (labelled tokens), "masked_tokens"}."""
+    import torch
+
+    trained = spans if sample["target"] == "all" else spans[-1:]
+    ws = list(sample["weights"])
+    if len(ws) != len(trained):
+        raise ValueError(f"{len(ws)} reply weights for {len(trained)} trained reply spans")
+    lab = labels.clone()
+    wt = torch.zeros(labels.shape, dtype=torch.float32)
+    total, masked = 0.0, 0
+    for (a, b), w in zip(trained, ws):
+        if w > 0:
+            wt[0, a:b] = w
+            total += w * (b - a)
+        else:
+            lab[0, a:b] = -100
+            masked += b - a
+    return {"labels": lab, "weights": wt, "weight_sum": total, "reply_tokens": int((lab != -100).sum()),
+            "masked_tokens": masked}
+
+
+def weight_stats(records: list) -> dict:
+    """The loss-weight facts of a demo file (validates every weight): meta / dry_run.json 'loss_weights'."""
+    by, weighted = Counter(), 0
+    for rec in records:
+        ws = list(reply_weights(rec).values())
+        weighted += not is_uniform(ws)
+        by.update(ws)
+    n = sum(by.values())
+    return {"mode": "weighted" if weighted else "uniform", "demos": len(records), "demos_weighted": weighted,
+            "replies": n, "replies_by_weight": {str(w): by[w] for w in sorted(by)},
+            "zero_weight_replies": by.get(0.0, 0),
+            "reply_weight_mean": (sum(w * c for w, c in by.items()) / n) if n else None,
+            "rule": "per demo: sum(w * CE) / sum(w) over its reply tokens; w = the reply's loss_weight, else the "
+                    "demo's, else 1.0; weight-0 replies unlabelled; all-1.0 demos on the unweighted path"}
 
 
 def lr_at(step: int, total: int, lr: float = LR, warmup: float = WARMUP) -> float:
@@ -345,10 +431,69 @@ def response_loss(model, inputs, labels, reduction: str = "mean"):
     return F.cross_entropy(out.logits[0].float(), labels[0, idx + 1], reduction=reduction)
 
 
+def weighted_response_loss(model, inputs, labels, weights):
+    """(sum of w * CE, sum of CE) over the reply tokens: response_loss(reduction='none') on the same positions, each
+    token's CE times weights[0, p + 1] (span_weights' tensor, aligned with labels)."""
+    ce = response_loss(model, inputs, labels, reduction="none")
+    idx = (labels[0, 1:] != -100).nonzero().squeeze(1)
+    w = weights.to(device=ce.device, dtype=ce.dtype)[0, idx + 1]
+    return (ce * w).sum(), ce.detach().sum()
+
+
+def demo_step(model, item: dict, accum: int, device_type: str) -> dict:
+    """Forward and backward of one encoded demo (one micro-step); returns its numbers for the log.
+
+    Unweighted demo (item["weighted"] false; all its reply weights 1.0): the trainer's code before loss weights,
+    operation for operation (n2_train_vpd.py at 68db16b4, the loop body of train()): per sample ce_sum =
+    response_loss(reduction='sum'), backward of ce_sum / n_reply / accum, loss = sum(ce_sum) / n_reply.
+    Weighted demo: W = sum of w over the labelled tokens of all its samples; per sample with a positive weight,
+    backward of sum(w * CE) / W / accum; a sample whose weight sum is 0 is not run; loss = sum(w * CE) / W,
+    loss_unweighted = sum(CE) / (labelled tokens)."""
+    import torch
+
+    encs = item["encs"]
+    if not item.get("weighted"):
+        n_reply = sum(e["reply_tokens"] for e in encs)
+        demo_ce = 0.0
+        tokens, max_len = 0, 0
+        for e in encs:
+            inputs = {kk: v.to(model.device) for kk, v in e["inputs"].items()}
+            labels = e["labels"].to(model.device)
+            with torch.autocast(device_type, dtype=torch.bfloat16):
+                ce_sum = response_loss(model, inputs, labels, reduction="sum")
+            (ce_sum / n_reply / accum).backward()
+            demo_ce += float(ce_sum.detach())
+            tokens += e["tokens"]
+            max_len = max(max_len, e["tokens"])
+        loss = demo_ce / n_reply
+        return {"loss": loss, "loss_unweighted": loss, "weight": float(n_reply), "reply_tokens": n_reply,
+                "tokens": tokens, "max_len": max_len, "masked_tokens": 0, "samples_not_run": 0}
+    run = [e for e in encs if e["weight_sum"] > 0]
+    big_w = sum(e["weight_sum"] for e in run)
+    n_reply = sum(e["reply_tokens"] for e in run)
+    if not run or big_w <= 0 or n_reply <= 0:
+        raise ValueError(f"{item.get('id')}: no reply with a positive loss weight")
+    wce, ce_all, tokens, max_len = 0.0, 0.0, 0, 0
+    for e in run:
+        inputs = {kk: v.to(model.device) for kk, v in e["inputs"].items()}
+        labels = e["labels"].to(model.device)
+        with torch.autocast(device_type, dtype=torch.bfloat16):
+            wsum, csum = weighted_response_loss(model, inputs, labels, e["weights"])
+        (wsum / big_w / accum).backward()
+        wce += float(wsum.detach())
+        ce_all += float(csum)
+        tokens += e["tokens"]
+        max_len = max(max_len, e["tokens"])
+    return {"loss": wce / big_w, "loss_unweighted": ce_all / n_reply, "weight": big_w, "reply_tokens": n_reply,
+            "tokens": tokens, "max_len": max_len, "masked_tokens": sum(e["masked_tokens"] for e in encs),
+            "samples_not_run": len(encs) - len(run)}
+
+
 # ------------------------------------------------------------------------------------------------- data
 class DemoData:
     """Map-style dataset over (epoch, record index) keys: one item = one demo, already encoded (all its samples).
-    Runs in the DataLoader workers; an over-long demo comes back as {"skip": tokens}."""
+    Runs in the DataLoader workers; an over-long demo comes back as {"skip": tokens}.  item["weighted"]: some reply
+    weight of the demo is not 1.0; its encs then carry span_weights' labels, weights and sums."""
 
     def __init__(self, processor, records: list, history_k: int = 0, blind: bool = False,
                  max_seq_tokens: int = MAX_SEQ_TOKENS):
@@ -361,16 +506,20 @@ class DemoData:
     def __getitem__(self, key):
         epoch, k = key
         rec = self.records[k]
+        smp = samples(rec, self.history_k, self.blind)
+        weighted = not is_uniform(w for s in smp for w in s["weights"])
         encs = []
-        for s in samples(rec, self.history_k, self.blind):
+        for s in smp:
             inputs, labels, spans, _ = encode(self.processor, s)
             check_spans(rec.get("id"), s["messages"], spans)
             n = int(inputs["input_ids"].shape[1])
             if n > self.max_seq_tokens:
                 return {"key": key, "id": rec.get("id"), "skip": n, "encs": []}
-            encs.append({"inputs": dict(inputs), "labels": labels, "tokens": n,
-                         "reply_tokens": int((labels != -100).sum())})
-        return {"key": key, "id": rec.get("id"), "skip": None, "encs": encs}
+            e = {"inputs": dict(inputs), "labels": labels, "tokens": n, "reply_tokens": int((labels != -100).sum())}
+            if weighted:
+                e.update(span_weights(labels, spans, s))
+            encs.append(e)
+        return {"key": key, "id": rec.get("id"), "skip": None, "encs": encs, "weighted": weighted}
 
 
 def _identity(x):
@@ -547,7 +696,9 @@ def dry_run(args, records: list) -> int:
            "max_seq_tokens": args.max_seq_tokens, "conversations": len(records),
            "tokens_max": max(lens), "tokens_mean": sum(lens) / len(lens), "trained_tokens": sum(replies),
            "over_limit": {d["id"]: d["over_limit"] for d in per if d["over_limit"]},
-           "per_conversation": per, "parity": parity, "versions": versions(), **code_fingerprint()}
+           "per_conversation": per, "parity": parity,
+           "loss_weights": getattr(args, "loss_weights", None) or weight_stats(records),
+           "versions": versions(), **code_fingerprint()}
     (args.out / "dry_run.json").write_text(json.dumps(rep, indent=1) + "\n")
     print(json.dumps({k: rep[k] for k in ("start", "conversations", "tokens_max", "tokens_mean", "trained_tokens",
                                           "processor_dir", "max_pixels")}), flush=True)
@@ -588,8 +739,12 @@ def train(args, records: list) -> int:
     total = int(math.ceil(len(records) * epochs / args.accum))
     keys = epoch_keys(len(records), epochs, args.seed)
     ds = DemoData(processor, records, args.history_k, args.blind, args.max_seq_tokens)
+    wstats = getattr(args, "loss_weights", None) or weight_stats(records)
+    weighted_run = wstats["mode"] == "weighted"
     step, micro, acc, acc_n, losses = 0, 0, 0.0, 0, []
     step_tok, step_reply, step_wait, tok_total, reply_total, max_len = 0, 0, 0.0, 0, 0, 0
+    step_unw, step_weight = 0.0, 0.0  # logged in weighted runs only
+    wtot = {"reply_weight_total": 0.0, "masked_reply_tokens_total": 0, "samples_not_run": 0}
     skipped, peaks = [], []
     log = open(args.out / "log.jsonl", "w")
     if cuda:
@@ -598,7 +753,7 @@ def train(args, records: list) -> int:
     device_type = "cuda" if cuda else "cpu"
 
     def optimizer_step(epoch):
-        nonlocal step, acc, acc_n, step_tok, step_reply, step_wait, t_step
+        nonlocal step, acc, acc_n, step_tok, step_reply, step_wait, t_step, step_unw, step_weight
         lr = lr_at(step, total, args.lr)
         for g in opt.param_groups:
             g["lr"] = lr
@@ -613,12 +768,16 @@ def train(args, records: list) -> int:
                "reply_tokens": step_reply, "seconds": round(now - t1, 1), "step_seconds": round(now - t_step, 2),
                "wait_seconds": round(step_wait, 2),
                "max_memory_allocated_gib": None if peak is None else round(peak, 3)}
+        if weighted_run:
+            rec["loss_unweighted"] = round(step_unw / acc_n, 5)
+            rec["reply_weight"] = round(step_weight, 4)
         log.write(json.dumps(rec) + "\n")
         log.flush()
         losses.append(rec["loss"])
         if cuda:
             torch.cuda.reset_peak_memory_stats()
         step, acc, acc_n, step_tok, step_reply, step_wait, t_step = step + 1, 0.0, 0, 0, 0, 0.0, now
+        step_unw, step_weight = 0.0, 0.0
         if step % 10 == 0 or step == total:
             print(f"[n2_train_vpd] step {step}/{total} loss {rec['loss']:.4f} ({rec['seconds']} s, "
                   f"{rec['tokens']} tok in {rec['step_seconds']} s)", flush=True)
@@ -633,21 +792,17 @@ def train(args, records: list) -> int:
             print(f"[n2_train_vpd] skipped {item['id']} ({item['skip']} tokens > {args.max_seq_tokens})", flush=True)
             t_wait = time.time()
             continue
-        n_reply = sum(e["reply_tokens"] for e in item["encs"])
-        demo_ce = 0.0
-        for e in item["encs"]:
-            inputs = {kk: v.to(model.device) for kk, v in e["inputs"].items()}
-            labels = e["labels"].to(model.device)
-            with torch.autocast(device_type, dtype=torch.bfloat16):
-                ce_sum = response_loss(model, inputs, labels, reduction="sum")
-            (ce_sum / n_reply / args.accum).backward()
-            demo_ce += float(ce_sum.detach())
-            step_tok += e["tokens"]
-            max_len = max(max_len, e["tokens"])
-        tok_total += sum(e["tokens"] for e in item["encs"])
-        reply_total += n_reply
-        step_reply += n_reply
-        acc, acc_n = acc + demo_ce / n_reply, acc_n + 1
+        r = demo_step(model, item, args.accum, device_type)
+        step_tok += r["tokens"]
+        max_len = max(max_len, r["max_len"])
+        tok_total += r["tokens"]
+        reply_total += r["reply_tokens"]
+        step_reply += r["reply_tokens"]
+        acc, acc_n = acc + r["loss"], acc_n + 1
+        step_unw, step_weight = step_unw + r["loss_unweighted"], step_weight + r["weight"]
+        wtot["reply_weight_total"] += r["weight"]
+        wtot["masked_reply_tokens_total"] += r["masked_tokens"]
+        wtot["samples_not_run"] += r["samples_not_run"]
         micro += 1
         if micro % args.accum == 0:
             optimizer_step(epoch)
@@ -677,6 +832,9 @@ def train(args, records: list) -> int:
             "tokens_per_s": round(tok_total / train_s, 1) if train_s > 0 else None,
             "load_seconds": round(load_s, 1), "train_seconds": round(train_s, 1),
             "peak_mem_gib": round(max(peaks), 2) if (cuda and peaks) else None,
+            "loss_weights": {**wstats, "reply_weight_total": round(wtot["reply_weight_total"], 4),
+                             "masked_reply_tokens_total": wtot["masked_reply_tokens_total"],
+                             "samples_not_run": wtot["samples_not_run"]},
             "versions": versions(), **code_fingerprint(), **git_head()}
     (args.out / "meta.json").write_text(json.dumps(meta, indent=1) + "\n")
     print(f"[n2_train_vpd] done: {step} steps in {train_s:.0f} s, loss {meta['loss_first']} -> {meta['loss_last']}, "
@@ -723,6 +881,7 @@ def main(argv=None) -> int:
     records = load_records(args.data, args.limit)
     if not records:
         raise SystemExit(f"{args.data}: no conversations")
+    args.loss_weights = weight_stats(records)  # validates every loss_weight before any model is loaded
     args.out.mkdir(parents=True, exist_ok=True)
     return dry_run(args, records) if args.dry_run else train(args, records)
 
