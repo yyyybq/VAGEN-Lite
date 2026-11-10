@@ -29,7 +29,7 @@
 # Python runs as `-I -u`: -I ignores PYTHON* variables, so -u is what makes the logs unbuffered.
 # Test overrides: VPD_COMMON_ENV, VPD_TVR_OUT, VPD_TVR_PY, VPD_TVR_VERDICT_PY, VPD_TVR_DRIVER_FILE,
 #   VPD_TVR_REAP_WAIT (tenths of a second between TERM and KILL, default 50).
-source "${VPD_COMMON_ENV:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/common_env.sh}"
+source "${VPD_COMMON_ENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../jobs" && pwd)/common_env.sh}"
 set +e   # common_env sets -euo pipefail; keep -u and pipefail, but run every step
 
 [[ $# -eq 1 ]] || { echo "usage: $0 OUTDIR" >&2; exit 2; }

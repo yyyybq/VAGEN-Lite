@@ -43,7 +43,7 @@
 # Test overrides: VPD_COMMON_ENV, VPD_TVR_OUT, VPD_TVR_PY (probe interpreter), VPD_TVR_TOOL_PY (bookkeeping
 #   interpreter), VPD_TVR_O3D_PY, VPD_TVR_SYS_LIB, VPD_TVR_VK_SYS_DIRS, VPD_TVR_EGL_SYS_DIRS, VPD_TVR_DEV_DIR,
 #   VPD_TVR_DRIVER_FILE, VPD_TVR_REAP_WAIT, VPD_TVR_RESERVE_S, VPD_TVR_MIN_VARIANT_S.
-source "${VPD_COMMON_ENV:-/mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/common_env.sh}"
+source "${VPD_COMMON_ENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../jobs" && pwd)/common_env.sh}"
 set +e   # common_env sets -euo pipefail; keep -u and pipefail, but run every variant
 
 [[ $# -eq 1 ]] || { echo "usage: $0 OUTDIR" >&2; exit 2; }

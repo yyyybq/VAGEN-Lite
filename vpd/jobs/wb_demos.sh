@@ -23,7 +23,7 @@ fi
 export RUN
 export VPD_THREADS=1
 # shellcheck source=common_env.sh
-source /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/common_env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 
 NSHARD=${VPD_DEMO_SHARDS:-8}
 [[ $NSHARD =~ ^[1-9][0-9]*$ ]] || { echo "VPD_DEMO_SHARDS must be a positive integer" >&2; exit 2; }

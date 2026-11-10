@@ -10,6 +10,10 @@ The ledger is append-only JSON lines, one event per line, written under an exclu
     {"event": "end",       "run", "pt_id", "state", "start_time", "end_time", "gph", "gph_source"}
     {"event": "delete",    "run", "pt_id", "at", "rc"}
 
+gph_source of an end: sco_start_to_complete | worker_log | sco_start_to_force_delete (measured);
+never_started (a force-deleted job that never got cards: gph 0.0, DECISIONS G7 2026-11-10);
+unknown_charged_est (gph null: charged the estimate).
+
 Budget rule (B2, hard): a new job of gate g may be submitted only if
     spent_g(ended jobs, actual GPU-h) + committed_g(open jobs) + est_high(new) <= cap_g
 and the same holds summed over all gates against CAP, where an open job (submitted or uncertain, no "end"
@@ -335,6 +339,15 @@ def worker_log_span(log: Path) -> Optional[Tuple[str, str]]:
     if not a or not b:
         return None
     return a[0], b[-1]
+
+
+def worker_log_started(log: Path) -> bool:
+    """True if RUN/job/worker.log has a '[launch] host=... date=' line (the container ran launch.sh)."""
+    try:
+        text = Path(log).read_text(errors="replace")
+    except OSError:
+        return False
+    return bool(_LAUNCH_START.search(text))
 
 
 def main(argv=None) -> int:

@@ -21,7 +21,8 @@
 # that tier's eval is skipped); the job then exits 1 without RUN/DONE.  A step whose output exists is skipped, so a
 # resubmitted job resumes: finished adapters and every eval with a results.json are not redone; each eval session
 # that is redone pays its vLLM start (~0.03-0.05 GPU-h) and its 21 test PLY + grid loads again.
-#   guard       PREREG_E3VS_PILOT.md committed and clean; prep finished (OUT/e3vs/PREP_DONE), occupancy validation
+#   guard       PREREG_E3VS_PILOT.md committed and clean (from a code snapshot RUN/code: the job's copy equals the file
+#               of the snapshot's commit, vpd_snapshot_file); prep finished (OUT/e3vs/PREP_DONE), occupancy validation
 #               and every parity file pass, the SFT files exist; a job-local merge base with >= 40 GiB free
 #               (DECISIONS B11: /tmp/vpd_merged, else /dev/shm/vpd_merged; chosen once, before any training)
 #   gsplat      copy OUT/e3vs/torch_ext (the prep job's build) to job-local $TORCH_EXTENSIONS_DIR, then the B18 probe
@@ -64,7 +65,7 @@ fi
 [[ $START =~ ^(Q3B|Q3S|E2)$ ]] || { echo "e3vs_start.sh: the pilot starts are Q3B, Q3S, E2 (got '$START')" >&2; exit 2; }
 export RUN
 # shellcheck source=common_env.sh
-source /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/common_env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 unset VPD_E3VS_REPO
 
 DRY=${VPD_DRYRUN:-0}
@@ -195,8 +196,15 @@ x() {  # run under the deadline, or print under VPD_DRYRUN=1 (VPD_DRY_FAIL=STEP,
 
 guard() {
   local c s bad=0
-  c=$(git -c safe.directory='*' -C "$VPD_WORKTREE" log -1 --format=%H -- vpd/PREREG_E3VS_PILOT.md 2>/dev/null || true)
-  s=$(git --no-optional-locks -c safe.directory='*' -C "$VPD_WORKTREE" status --porcelain -- vpd/PREREG_E3VS_PILOT.md 2>/dev/null || echo "??")
+  if [[ -e $VPD_WORKTREE/SNAPSHOT.json ]]; then
+    # code snapshot (vpd.sco prepare, DECISIONS G1): no .git here; the job's copy must be the committed file of the
+    # snapshot's commit (blob id; git show against the real worktree when git exists); c = its last commit
+    c=$(vpd_snapshot_file vpd/PREREG_E3VS_PILOT.md) || c=
+    s=
+  else
+    c=$(git -c safe.directory='*' -C "$VPD_WORKTREE" log -1 --format=%H -- vpd/PREREG_E3VS_PILOT.md 2>/dev/null || true)
+    s=$(git --no-optional-locks -c safe.directory='*' -C "$VPD_WORKTREE" status --porcelain -- vpd/PREREG_E3VS_PILOT.md 2>/dev/null || echo "??")
+  fi
   if [[ -z $c || -n $s ]]; then
     echo "[e3vs] vpd/PREREG_E3VS_PILOT.md is not committed or has local changes" >&2
     bad=1

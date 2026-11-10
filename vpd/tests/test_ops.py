@@ -1,7 +1,8 @@
-"""Tests of WP-OPS: vpd.sco (name rules, prepare, submit guards, delete rules), vpd.ledger (accounting, budget,
-atomic append) and the shell prelude vpd/jobs/common_env.sh (+ syntax of preflight.sh).
+"""Tests of WP-OPS: vpd.sco (name rules, prepare, pools, submit guards, delete rules), vpd.ledger (accounting,
+budget, atomic append) and the shell prelude vpd/jobs/common_env.sh (+ syntax of preflight.sh).
 
-Login node, 1 core, no network, no sco: every sco call is replaced by a fake.  Scratch lives under
+Login node, 1 core, no network, no sco: every sco call is replaced by a fake, and so is the code snapshot of
+prepare (vpd.snapshot.create; the real one is tested on a temp git repo in test_snapshot.py).  Scratch lives under
 eval_external_assets/vpd/scratch/ops/pytest_<rand>/ (env VPD_OPS_TEST_DIR overrides) and is removed at teardown.
     PYTHONPATH=$WT OMP_NUM_THREADS=1 PY_EVAL -m pytest -q -p no:cacheprovider vpd/tests/test_ops.py
 """
@@ -19,11 +20,26 @@ from pathlib import Path
 
 import pytest
 
-from vpd import ledger, paths, sco
+from vpd import ledger, paths, sco, snapshot
 
 sco_job = sco.sco_job
 JOBS_DIR = paths.VPD_PKG / "jobs"
 T0 = datetime.datetime(2026, 11, 8, 12, 0, 0, tzinfo=datetime.timezone.utc)
+FAKE_COMMIT = "f" * 40
+
+
+def fake_snapshot(worktree, dest, trees=snapshot.TREES):
+    """Stands in for vpd.snapshot.create: RUN/code with SNAPSHOT.json and the placeholder payload script."""
+    dest = Path(dest)
+    if dest.exists():
+        raise snapshot.SnapshotError(f"{dest} exists: prepare a new run directory")
+    (dest / "vpd" / "jobs").mkdir(parents=True)
+    (dest / "vpd" / "jobs" / "payload.sh").write_bytes(b"true\n")
+    rec = {"format": 1, "commit": FAKE_COMMIT, "utc": iso(T0), "trees": list(trees), "n_files": 1,
+           "tar_sha256": "0" * 64, "repo": str(worktree), "branch": "fake", "head_after": FAKE_COMMIT,
+           "files": {"vpd/jobs/payload.sh": snapshot.blob_id(b"true\n")}, "pinned": {}}
+    (dest / snapshot.MARKER).write_text(json.dumps(rec))
+    return rec
 
 
 def iso(t):
@@ -142,6 +158,7 @@ def fake(base, monkeypatch):
                                                            "dirty_downstream_files": []})
     monkeypatch.setattr(sco, "vpd_code_state", lambda: {"commit": "fake", "vpd_status": [],
                                                         "vpd_tree_sha256": "0" * 64, "vpd_files": 0})
+    monkeypatch.setattr(snapshot, "create", fake_snapshot)  # hermetic: never archives the live worktree
     monkeypatch.setattr(sco_job, "submit", f.submit)
     monkeypatch.setattr(sco_job, "status", f.status)
     monkeypatch.setattr(sco_job, "delete", f.force_delete)
@@ -208,18 +225,32 @@ def test_gate_of_and_caps(monkeypatch):
 
 def test_prepare_writes_launch_and_meta(base, fake):
     run = prep(base, "vpd-wb-smoke", est=0.8)
+    code = run.resolve() / "code"
     launch = (run / "job" / "launch.sh").read_text()
-    assert "cd /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd\n" in launch
+    # the job runs its code snapshot RUN/code (DECISIONS G1), never the live worktree
+    assert f"cd {paths.WORKTREE}\n" not in launch and f"\ncd {code} && [[ -f SNAPSHOT.json ]] || " in launch
+    assert f"\nexport VPD_WORKTREE={code} PYTHONPATH={code}\n" in launch
+    assert launch.index("export VPD_WORKTREE") < launch.index(f"cd {code}") < launch.index("exec > >(tee")
+    assert f" {code}/vpd/jobs/payload.sh x\n" in launch and f"{JOBS_DIR}/payload.sh" not in launch
     assert sco_job.RUN_AS_OWNER in launch  # non-root: payload runs as the file owner
     meta = json.loads((run / "job" / "vpd.json").read_text())
     assert meta["gate"] == "wb" and meta["est_gph"] == 0.8 and meta["display_name"] == "downstream-vpd-wb-smoke"
     assert meta["gpus"] == 1 and meta["as_root"] is False and meta["vpd_code"]["vpd_tree_sha256"] == "0" * 64
+    assert meta["no_snapshot"] is False and meta["snapshot"]["commit"] == FAKE_COMMIT
+    assert meta["code_dir"] == str(code) and meta["worktree"] == str(paths.WORKTREE)
+    assert meta["payload_rewrites"] == [[str(JOBS_DIR / "payload.sh"), str(code / "vpd/jobs/payload.sh")]]
     prepared = json.loads((run / "job" / "prepared.json").read_text())
     assert prepared["spec"] == "N4lS.Iq.I80.1" and prepared["pool"] == "zoetrope" and "as_root" not in prepared
+    # prepared.json agrees with launch.sh
+    assert prepared["payload"] == ["bash", str(code / "vpd/jobs/payload.sh"), "x"]
+    assert prepared["payload_as_given"] == ["bash", str(JOBS_DIR / "payload.sh"), "x"]
+    assert prepared["worktree"] == str(code) and prepared["source_worktree"] == str(sco_job.WORKTREE)
+    assert prepared["code_snapshot"]["commit"] == FAKE_COMMIT and "files" not in prepared["code_snapshot"]
 
     root_run = prep(base, "vpd-wb-q3b", est=3.4, as_root=True, pool="auto")
     text = (root_run / "job" / "launch.sh").read_text()
-    assert sco_job.RUN_AS_OWNER not in text and "cd /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd\n" in text
+    assert sco_job.RUN_AS_OWNER not in text and f"\ncd {root_run.resolve() / 'code'} && " in text
+    assert str(paths.WORKTREE) not in text
     prepared = json.loads((root_run / "job" / "prepared.json").read_text())
     assert prepared["as_root"] is True and prepared["pool"] == "h800"  # pick_pool fake
 
@@ -263,6 +294,52 @@ def test_prepare_refusals(base, fake):
         sco.prepare(run, "vpd-wb-self", ["bash", str(run / "job" / "launch.sh")], est_gph=1)
     with pytest.raises(ValueError):
         sco.prepare(base / "jobs" / "p", "vpd-wb-p", ["true"], pool="nowhere", est_gph=1)
+    # payload args that would run live worktree code, or point at a file the snapshot lacks
+    for i, bad in enumerate((["env", f"VPD_COMMON_ENV={JOBS_DIR}/common_env.sh", "true"],
+                             ["bash", "-c", f"cd {paths.WORKTREE} && true"],
+                             ["bash", str(JOBS_DIR / "not_committed.sh")])):
+        r = base / "jobs" / f"bad{i}"
+        with pytest.raises(ValueError, match="worktree|not in the code snapshot"):
+            sco.prepare(r, "vpd-wb-bad", bad, est_gph=1)
+        assert not (r / "code").exists()  # the snapshot of a refused prepare is removed
+    # a sibling worktree name is not the worktree (path-boundary match)
+    sib = base / "jobs" / "sib"
+    sco.prepare(sib, "vpd-wb-sib", ["echo", f"{paths.WORKTREE}2/x"], est_gph=1)
+    assert json.loads((sib / "job" / "prepared.json").read_text())["payload"] == ["echo", f"{paths.WORKTREE}2/x"]
+    # one snapshot per RUN: a prepared RUN is not prepared again
+    with pytest.raises(ValueError, match="prepared before"):
+        sco.prepare(sib, "vpd-wb-sib", ["true"], est_gph=1)
+
+
+def test_prepare_extra_pool(base, fake, monkeypatch):
+    """G7 (2026-11-10): zoe-cf-render only when named; sco gets --aec2-name=zoe-cf-render, spec N4lS.Iq.I80.1."""
+    assert sco.EXTRA_POOLS == ("zoe-cf-render",) and "zoe-cf-render" not in sco_job.POOLS
+    assert sco.POOL_CHOICES == tuple(sco_job.POOLS) + ("zoe-cf-render",)
+    run = prep(base, "vpd-tvr-vkre-cf", est=0.25, pool="zoe-cf-render")
+    prepared = json.loads((run / "job" / "prepared.json").read_text())
+    assert prepared["pool"] == "zoe-cf-render" and prepared["spec"] == "N4lS.Iq.I80.1"
+    assert prepared["pool_via"] == "vpd.sco EXTRA_POOLS"
+    cmd = sco_job.create_command(run / "job", prepared)
+    assert "--aec2-name=zoe-cf-render" in cmd and "--worker-spec=N4lS.Iq.I80.1" in cmd
+    assert json.loads((run / "job" / "vpd.json").read_text())["pool"] == "zoe-cf-render"
+    # auto asks sco_job.pick_pool over sco_job.POOLS only, so it can never return an EXTRA pool
+    seen = []
+
+    def pick(pools=sco_job.POOLS):
+        seen.append(tuple(pools))
+        return sco_job.POOLS[-1]
+
+    monkeypatch.setattr(sco_job, "pick_pool", pick)
+    a = prep(base, "vpd-tvr-auto", est=0.25, pool="auto")
+    assert seen == [tuple(sco_job.POOLS)]
+    assert json.loads((a / "job" / "prepared.json").read_text())["pool"] in sco_job.POOLS
+    assert "pool_via" not in json.loads((a / "job" / "prepared.json").read_text())
+    # the CLI offers it; an unknown pool is an argparse error
+    assert sco.main(["prepare", "--run", str(base / "jobs" / "cfcli"), "--name", "vpd-tvr-cfcli",
+                     "--pool", "zoe-cf-render", "--", "true"]) == 0
+    with pytest.raises(SystemExit):
+        sco.main(["prepare", "--run", str(base / "jobs" / "nope"), "--name", "vpd-tvr-nope", "--pool", "nowhere",
+                  "--", "true"])
 
 
 # --- ledger -------------------------------------------------------------------------------------------------
@@ -565,6 +642,31 @@ def test_delete_rules(base, fake):
         sco.delete(base / "jobs" / "none", sleep=clock.sleep)
 
 
+def test_force_delete_never_started(base, fake):
+    """G7 (2026-11-10): a force-deleted job that never got cards is charged 0.0 GPU-h (gph_source never_started),
+    not its estimate; one whose container ran, or whose state is unreadable, is not."""
+    clock = Clock()
+    runs = [prep(base, f"vpd-tvr-ns{i}", est=0.1) for i in range(3)]  # 0.3 <= the 0.5 tvr cap
+    pts = [do_submit(r, clock) for r in runs]
+    assert all(fake.jobs[p]["state"] == "QUEUEING" and fake.jobs[p]["start_time"] is None for p in pts)
+    sco.delete(runs[0], force_live=True, sleep=clock.sleep)
+    end = [e for e in ledger.read() if e["run"] == str(runs[0].resolve()) and e["event"] == "end"][0]
+    assert end["gph"] == 0.0 and end["gph_source"] == "never_started" and end["state"] == "FORCED_FROM_QUEUEING"
+    assert end["start_time"] is None and fake.stopped == [pts[0]]
+    assert ledger.summarise(ledger.read())["by_gate"]["tvr"]["spent"] == 0.0  # not the 0.1 estimate
+    # a [launch] line in worker.log: the container ran, so the estimate stays charged
+    (runs[1] / "job" / "worker.log").write_text("[launch] host=h date=2026-11-10T08:00:00Z uid=20325\n")
+    sco.delete(runs[1], force_live=True, sleep=clock.sleep)
+    end = [e for e in ledger.read() if e["run"] == str(runs[1].resolve()) and e["event"] == "end"][0]
+    assert end["gph"] is None and end["gph_source"] == "unknown_charged_est"
+    # an unreadable state (NOT_FOUND the list does not confirm) is not "never started"
+    fake.status_fail.add(pts[2])
+    sco.delete(runs[2], force_live=True, sleep=clock.sleep)
+    end = [e for e in ledger.read() if e["run"] == str(runs[2].resolve()) and e["event"] == "end"][0]
+    assert end["gph"] is None and end["gph_source"] == "unknown_charged_est"
+    assert ledger.summarise(ledger.read())["by_gate"]["tvr"]["spent"] == 0.2
+
+
 # --- misc ---------------------------------------------------------------------------------------------------
 
 def test_vpd_tree_digest(base):
@@ -598,7 +700,16 @@ def test_live_vpd_from_list_and_absent():
 def test_cli_prepare_and_errors(base, fake, capsys):
     run = base / "jobs" / "cli"
     assert sco.main(["prepare", "--run", str(run), "--name", "vpd-test", "--", "echo", "hi"]) == 0
-    assert "cd /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd" in (run / "job" / "launch.sh").read_text()
+    text = (run / "job" / "launch.sh").read_text()
+    assert f"\ncd {run.resolve() / 'code'} && " in text and f"\ncd {paths.WORKTREE}\n" not in text
+    # --no-snapshot (tests / emergencies): the live worktree, recorded in vpd.json
+    live = base / "jobs" / "cli_live"
+    assert sco.main(["prepare", "--run", str(live), "--name", "vpd-test", "--no-snapshot", "--", "echo", "hi"]) == 0
+    assert "LIVE worktree" in capsys.readouterr().err
+    assert f"\ncd {paths.WORKTREE}\n" in (live / "job" / "launch.sh").read_text() and not (live / "code").exists()
+    meta = json.loads((live / "job" / "vpd.json").read_text())
+    assert meta["no_snapshot"] is True and meta["snapshot"] is None and meta["code_dir"] is None
+    assert json.loads((live / "job" / "prepared.json").read_text())["no_snapshot"] is True
     assert sco.main(["prepare", "--run", str(base / "jobs" / "bad"), "--name", "ev-x", "--", "echo"]) == 2
     assert sco.main(["budget"]) == 0
     assert '"by_gate"' in capsys.readouterr().out
@@ -629,7 +740,7 @@ def test_common_env_exports_and_steps(base):
     run = base / "run"
     res = _bash('echo "T=$OMP_NUM_THREADS/$MKL_NUM_THREADS/$OPENBLAS_NUM_THREADS/$NUMEXPR_NUM_THREADS"\n'
                 'echo "E=$TOKENIZERS_PARALLELISM/$HF_HUB_OFFLINE/$TRANSFORMERS_OFFLINE/$PYTHONDONTWRITEBYTECODE"\n'
-                'echo "P=$PYTHONPATH"\n'
+                'echo "P=$PYTHONPATH"\necho "W=$VPD_WORKTREE"\n'
                 'vpd_threads 4; echo "V=$OMP_NUM_THREADS/$NUMEXPR_NUM_THREADS/$VPD_THREADS"\n'
                 'echo "S=$-"\n'
                 'vpd_step ok_step true\n'
@@ -638,7 +749,9 @@ def test_common_env_exports_and_steps(base):
                 'vpd_chown_trap "$RUN"; echo chown_ok\n', run)
     assert res.returncode == 0, res.stderr
     out = res.stdout
-    assert "T=2/2/2/2" in out and "E=false/1/1/1" in out and "P=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd" in out
+    assert "T=2/2/2/2" in out and "E=false/1/1/1" in out
+    # VPD_WORKTREE unset: the tree common_env.sh lives in (the worktree here; RUN/code in a snapshot job)
+    assert f"P={paths.WORKTREE}\n" in out and f"W={paths.WORKTREE}\n" in out
     assert "V=4/4/4" in out and "rc=7" in out and "badname=2" in out and "chown_ok" in out
     flags = [ln for ln in out.splitlines() if ln.startswith("S=")][0]
     assert "e" in flags and "u" in flags

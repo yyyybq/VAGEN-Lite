@@ -18,6 +18,7 @@
   - `downstream/` 和 `eval_external/` 只读导入，不改。要改的文件就拷一份到 `vpd/` 里改，文件头写明来源路径和提交号 `bf4b2553`。
 - **输出目录**：`/mnt/umm/users/yinbaiqiao/eval_external_assets/vpd/`，下文记作 OUT。
 - **运行方式**：每个 vpd 进程的 PYTHONPATH 都设成 worktree 根目录，工作目录也是 worktree 根目录。
+  - sco 作业不直接跑 worktree，而是跑提交时的代码快照 `RUN/code`（见第 7 节）。
   - 不要从 VAGEN-Lite-downstream 或 VAGEN-Lite-eval 导入任何东西：那是别的窗口正在改的 worktree。
 
 ## 2. vpd/ 目录
@@ -30,6 +31,7 @@
 | `__init__.py`、`paths.py` | OUT 的目录常量、各解释器路径 | WP-CORE |
 | `starts.json`、`starts.py` | 起点表（名字 → 评测 view 代码、checkpoint 路径），加载时断言注意力实现 | WP-CORE |
 | `sco.py`、`ledger.py` | 包装 `downstream/sco_job.py` 的 sco 工具，带作业台账和按闸门预留的预算检查 | WP-OPS |
+| `snapshot.py` | 作业代码快照：prepare 时建 `RUN/code` 和 `SNAPSHOT.json`；作业里核对文件（第 7 节） | infra（第三轮） |
 | `jobs/common_env.sh`、`jobs/preflight.sh` | 作业脚本的公共开头（线程数、离线开关、chown 陷阱、节点信息）和开跑前检查 | WP-OPS |
 | `jobs/wb_demos.sh` | sco 作业脚本：渲染示范、生成热身集、生成档位 | WP-WBDEMO |
 | `jobs/wb_smoke.sh`、`jobs/wb_pilot_start.sh` | sco 作业脚本：WalkerBench smoke 和每个起点的试点 | WP-WBPILOT |
@@ -56,7 +58,7 @@
 | `plan/` | 计划、决定、审查、调查记录，以及从登录节点 /tmp 拷来的原型（`plan/login_tmp/`） |
 | `scratch/<标签>/` | 各工作包自己的临时目录。只能删自己建的东西，绝不用 /tmp |
 | `ledger.jsonl` | 每个 sco 作业一行：名字、pt 编号、开始和结束时间、卡时 |
-| `jobs/<作业名>-<yyyymmddHHMM>/` | 每个 sco 作业的 RUN 目录（作业文件、worker.log、node.txt、prepared.json、steps.jsonl） |
+| `jobs/<作业名>-<yyyymmddHHMM>/` | 每个 sco 作业的 RUN 目录（作业文件、worker.log、node.txt、prepared.json、steps.jsonl），以及代码快照 `code/` |
 | `walkerbench/split/` | `split_s2.json`、`expert_splice.json`，以及 `s2test/`、`s2val/`、`s2train/` 三个部分，每个部分下有 `tasks/` 和 `selection.json` |
 | `walkerbench/baselines/` | `baselines_s2test.json`（逐题结果、按类型的下限、合并下限 F）、`hard_subsets.json` |
 | `walkerbench/demos/s2train_640x400/` | `demos_all.jsonl`、`images/<stem>/turn_XX.jpg`、`manifest.json`、`DONE` |
@@ -119,6 +121,8 @@
 
 1. **GPU 任务一律用 sco 提交。** 每个作业 1 张 H800，规格 N4lS.Iq.I80.1（14 vCPU、240 GB 内存），镜像 wc-dev:260617。
    - 默认投 zoetrope；zoetrope 的单卡作业开始排队时，可以改投 h800，哪个排队短投哪个。
+   - `--pool zoe-cf-render`（2026-11-10，DECISIONS G7）只能显式指定，`--pool auto` 永远不会选它；规格同样是 N4lS.Iq.I80.1。有没有配额要投了才知道。
+   - 用 `--force-live` 删掉一个从没开始的作业（两次查询都在排队、没有 start_time、worker.log 里没有 `[launch]` 行），台账记 0 卡时，`gph_source` 为 `never_started`。
    - 只通过 `vpd/sco.py` 提交。
 2. **命名**：显示名一律是 `downstream-vpd-<作业>`。例如：
    - downstream-vpd-tvr-smoke
@@ -142,3 +146,24 @@
    - 台账写入是原子的（加锁文件）。超预算时，先去掉可选的评测。
 7. **跑完就删**：作业跑完、`collect` 核对了预期输出以后，删掉作业记录。删之前再查一次状态。
 8. **出处**：每个作业的 prepared.json 都记代码的 git sha 和 PREREG 的提交 sha。WalkerBench 的三个试点作业，要等 smoke 作业判 PASS、PREREG_WB_PILOT.md 已提交之后才能准备。
+
+## 7. 代码快照（2026-11-10，DECISIONS G1）
+
+作业跑的是提交时冻结的一份代码，不是 worktree 本身。这样作业在跑的时候，别的线改 worktree 里的文件也影响不到它。
+
+1. **prepare 时**（默认开启）：
+   - `git status --porcelain --untracked-files=all -- vpd downstream eval_external` 不为空就拒绝。被忽略的文件（`__pycache__` 等）不算。先提交，再 prepare。
+   - 把 HEAD 的这三个目录用 `git archive` 解到 `RUN/code`，逐个文件核对 git blob。
+   - 写 `RUN/code/SNAPSHOT.json`：commit、utc、trees、n_files、tar_sha256、来源 worktree、每个文件的 blob，以及冻结文档（`PREREG_*.md`、`SMOKE_CRITERIA.md`）最后一次改动的提交。`RUN/job/vpd.json` 和 prepared.json 里也记一份摘要。
+2. **payload**：以 worktree 路径开头的参数，一律改写成 `RUN/code` 下的同一路径。所以 prepare 命令里照旧写 `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/...`。
+   - 只是"包含" worktree 路径的参数（比如 `KEY=/…/VAGEN-Lite-vpd/…`、`bash -c` 字符串）会被拒绝。
+   - 改写后的路径在快照里不存在（没提交、被忽略、不在这三个目录里）也拒绝。
+3. **launch.sh**：导出 `VPD_WORKTREE=RUN/code` 和 `PYTHONPATH=RUN/code`，再 cd 进 `RUN/code`。
+   - `vpd.paths.WORKTREE` 跟着 `VPD_WORKTREE` 走；`jobs/common_env.sh` 没有这个变量时，取它自己所在的那棵树。
+   - 新的作业脚本按约定这样开头：`source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"`，然后 `cd "$VPD_WORKTREE"`。代码里不再写死 worktree 路径。
+   - 例外：非 root 作业的属主包装脚本 `examples/train/active_spatial/sco_run_as_artifact_owner.sh` 不在这三个目录里，仍从 worktree 调用（本线不改它）。
+4. **作业里的 git 检查**：快照里没有 `.git`，作业镜像里也没有 git。E3VS 的 PREREG 检查改用 `vpd_snapshot_file`（`python -m vpd.snapshot file <路径>`）：
+   - 作业里的副本必须等于快照提交里的文件：先比 blob；有 git 时再和真实 worktree 的 `git show <commit>:<路径>` 比；
+   - 输出最后一次改动它的提交，和以前 `git log -1` 的结果一样。
+5. **其他**：`python -m vpd.snapshot verify` 核对整个快照没有被改动。`--no-snapshot` 只给测试和应急用，会记在 vpd.json 里（`"no_snapshot": true`）。
+6. **代码指纹**：快照不改变代码指纹（训练的 CODE_FILES、评测的 code_sha256），因为字节一样。不过这次改动本身改了 `vpd/paths.py`，而它在 CODE_FILES 里，所以训练代码指纹会变一次。

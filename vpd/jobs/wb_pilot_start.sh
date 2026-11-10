@@ -45,7 +45,7 @@ fi
 export RUN START
 export VPD_THREADS=${VPD_THREADS:-2}
 # shellcheck source=common_env.sh
-source /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/common_env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 
 DRY=${VPD_DRYRUN:-0}
 OPT=${VPD_OPTIONAL:-0}

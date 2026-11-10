@@ -5,7 +5,7 @@
 # Runs one python process at a time with 1 thread, under nice 19.  Writes nothing.
 set -uo pipefail
 
-WORKTREE=/mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd
+WORKTREE=${VPD_WORKTREE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}   # default: the tree of this script
 PY=${VPD_PREFLIGHT_PY:-/mnt/umm/users/yinbaiqiao/.conda/envs/eval-external/bin/python}
 MAX_CORES=${VPD_PREFLIGHT_MAX_CORES:-8}   # DECISIONS A6: wait when more than 8 of 14 cores are in use
 CPU_STAT=/sys/fs/cgroup/cpu.stat

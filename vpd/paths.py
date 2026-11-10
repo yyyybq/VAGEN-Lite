@@ -2,16 +2,33 @@
 
 Pure constants (stdlib only), importable from every interpreter (starVLA py3.10, eval-external py3.12).
 Nothing here creates directories; callers mkdir what they write.
+WORKTREE follows env VPD_WORKTREE when it is set (an absolute path of a tree with vpd/): an sco job runs from its
+code snapshot RUN/code (DECISIONS G1; launch.sh and jobs/common_env.sh export it), so every code path below points
+into the snapshot.  Unset or empty: the git worktree GIT_WORKTREE.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 USER_ROOT = Path("/mnt/umm/users/yinbaiqiao")
 
 # --- code ---------------------------------------------------------------------------------------------------
-WORKTREE = USER_ROOT / "VAGEN-Lite-vpd"  # branch viewpoint-downstream; new code only under vpd/
+GIT_WORKTREE = USER_ROOT / "VAGEN-Lite-vpd"  # branch viewpoint-downstream; new code only under vpd/
+
+
+def _worktree() -> Path:
+    raw = os.environ.get("VPD_WORKTREE") or ""
+    if not raw:
+        return GIT_WORKTREE
+    p = Path(raw)
+    if not p.is_absolute() or not (p / "vpd").is_dir():
+        raise RuntimeError(f"VPD_WORKTREE={raw!r} must be an absolute path of a code tree that contains vpd/")
+    return p
+
+
+WORKTREE = _worktree()  # the code this process runs: GIT_WORKTREE, or a job's snapshot RUN/code
 VPD_PKG = WORKTREE / "vpd"
 DOWNSTREAM = WORKTREE / "downstream"  # read-only imports (sco_job.py, n/n2_train.py, train/lora.py, x/q0_ask.py)
 EVAL_EXTERNAL = WORKTREE / "eval_external"  # read-only imports (adapters, closed_loop)

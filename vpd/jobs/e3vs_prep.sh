@@ -20,6 +20,8 @@
 # step it cut; the first failure ends the job, later steps are not run: each step needs the one before).  The job
 # RESUMES: a resubmission skips every step whose outputs exist and are valid for the current inputs:
 #   guard         vpd/PREREG_E3VS_PILOT.md committed and clean (PREREG header); its commit -> RUN/prereg_commit.txt
+#                 (from a code snapshot RUN/code: the job's copy equals the file of the snapshot's commit,
+#                 vpd_snapshot_file; the commit is the one that last changed it, as `git log -1` gave before)
 #   inputs        render --check-inputs: pinned repo at OUT/e3vs/repo/E3VS-BENCH + all 99 PLYs
 #   gsplat_probe  render --probe -> OUT/e3vs/parity/gsplat_probe_prep.json (B18: JIT or not, seconds; always run)
 #   parity        render --parity $VPD_PARITY_SCENE -> OUT/e3vs/parity/parity_<scene>.json; min PSNR >= 40 or stop
@@ -59,7 +61,7 @@ if [[ -z $RUN ]]; then
 fi
 export RUN
 # shellcheck source=common_env.sh
-source /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/common_env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 unset VPD_E3VS_REPO   # production reads the pinned checkout at OUT/e3vs/repo/E3VS-BENCH only
 
 DRY=${VPD_DRYRUN:-0}
@@ -169,8 +171,15 @@ json_pass() {  # FILE: exit 0 when the JSON file has "pass": true
 
 prereg_guard() {
   local c s
-  c=$(git -c safe.directory='*' -C "$VPD_WORKTREE" log -1 --format=%H -- vpd/PREREG_E3VS_PILOT.md 2>/dev/null || true)
-  s=$(git --no-optional-locks -c safe.directory='*' -C "$VPD_WORKTREE" status --porcelain -- vpd/PREREG_E3VS_PILOT.md 2>/dev/null || echo "??")
+  if [[ -e $VPD_WORKTREE/SNAPSHOT.json ]]; then
+    # code snapshot (vpd.sco prepare, DECISIONS G1): no .git here; the job's copy must be the committed file of the
+    # snapshot's commit (blob id; git show against the real worktree when git exists); c = its last commit
+    c=$(vpd_snapshot_file vpd/PREREG_E3VS_PILOT.md) || c=
+    s=
+  else
+    c=$(git -c safe.directory='*' -C "$VPD_WORKTREE" log -1 --format=%H -- vpd/PREREG_E3VS_PILOT.md 2>/dev/null || true)
+    s=$(git --no-optional-locks -c safe.directory='*' -C "$VPD_WORKTREE" status --porcelain -- vpd/PREREG_E3VS_PILOT.md 2>/dev/null || echo "??")
+  fi
   if [[ -z $c || -n $s ]]; then
     echo "[e3vs] vpd/PREREG_E3VS_PILOT.md is not committed or has local changes (commit '${c}', status '${s}')" >&2
     [[ $DRY == 1 ]] && { echo "[dry] guard would stop the job here"; return 0; }

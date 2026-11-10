@@ -1,7 +1,8 @@
 """sco jobs of the VPD line: a guarded wrapper around downstream/sco_job.py of THIS worktree.
 
-    python -m vpd.sco prepare --run RUN --name vpd-wb-smoke [--pool zoetrope|h800|auto] [--as-root]
-                              [--est-gph 0.8] [--gate wb] -- bash vpd/jobs/wb_smoke.sh ARGS
+    python -m vpd.sco prepare --run RUN --name vpd-wb-smoke [--pool zoetrope|h800|zoe-cf-render|auto] [--as-root]
+                              [--est-gph 0.8] [--gate wb] [--no-snapshot]
+                              -- bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/wb_smoke.sh ARGS
     python -m vpd.sco submit  --run RUN [--est-gph X]
     python -m vpd.sco status  [--all]
     python -m vpd.sco delete  --run RUN [--force-live]
@@ -10,9 +11,19 @@
     python -m vpd.sco queue                      # live downstream-vpd-* jobs of user yinbaiqiao (one list page)
     python -m vpd.sco disk                       # the disk check of submit (a); exit 1 when it refuses
 
-sco_job is imported from VAGEN-Lite-vpd/downstream, so launch.sh cds into VAGEN-Lite-vpd.  Display names are
-"downstream-" + NAME with NAME matching ^vpd-[a-z0-9-]+$ (never "ev...": the downstream watcher claims
-downstream-ev*).  One card per job.
+sco_job is imported from VAGEN-Lite-vpd/downstream.  Display names are "downstream-" + NAME with NAME matching
+^vpd-[a-z0-9-]+$ (never "ev...": the downstream watcher claims downstream-ev*).  One card per job.
+
+Code snapshots (DECISIONS G1, 2026-11-10; on by default): prepare refuses unless vpd/, downstream/ and
+eval_external/ have no uncommitted or untracked (non-ignored) files, then extracts `git archive HEAD` of those trees
+into RUN/code with RUN/code/SNAPSHOT.json (vpd.snapshot).  Every payload arg that starts with the worktree path is
+rewritten to the same path under RUN/code (an arg that only contains it is refused), and launch.sh exports
+VPD_WORKTREE=RUN/code PYTHONPATH=RUN/code and cds into RUN/code, so the job never reads the live worktree's code (the
+one exception: the non-root owner wrapper examples/train/active_spatial/sco_run_as_artifact_owner.sh, outside the
+snapshot trees).  prepared.json carries the rewritten payload, worktree = RUN/code and code_snapshot; vpd.json the
+snapshot summary and the rewrites.  --no-snapshot (tests / emergencies only) keeps the live worktree and is recorded
+in vpd.json ("no_snapshot": true).
+Pools (G7): sco_job.POOLS (h800, zoetrope) plus EXTRA_POOLS (zoe-cf-render), which only an explicit --pool names.
 
 submit refuses (exit 2) unless, in this order:
   (a) disk: no disk_runs/FLAG_*, no disk_runs/flags/STOP_SUBMIT_DISK_LOW, and the last row of
@@ -27,7 +38,9 @@ live), submit.log is printed, and nothing is retried: use `resolve`.
 delete re-checks the state twice (2 s apart) and deletes only a terminal job (SUCCEEDED, FAILED, STOPPED,
 CANCELLED) with `sco acp jobs delete` (no stop), or records a NOT_FOUND job whose absence the job list confirms;
 a live job only with --force-live (sco_job.delete: stop + delete).  The end time and the actual GPU-h
-(sco start_time -> complete_time, else the worker.log [launch] span) go to the ledger.
+(sco start_time -> complete_time, else the worker.log [launch] span) go to the ledger.  A force-deleted job that
+never started (both checks in a waiting state without start_time, no [launch] line in worker.log) is charged
+0.0 GPU-h, gph_source "never_started" (G7); any other force-deleted job without a start time keeps its estimate.
 """
 
 from __future__ import annotations
@@ -39,13 +52,14 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from vpd import ledger, paths
+from vpd import ledger, paths, snapshot
 
 WORKTREE = paths.WORKTREE
 _DS = str(paths.DOWNSTREAM)
@@ -79,8 +93,17 @@ DISK_EXCEPTION = paths.OUT / "DISK_EXCEPTION.json"
 EXC_HARD_FLOOR_TB = 0.5
 
 TERMINAL = frozenset(sco_job.FINISHED)  # SUCCEEDED FAILED STOPPED CANCELLED
+WAITING = frozenset(sco_job.WAITING_STATES)  # created, no cards yet
 PAGE_SIZE = 500
 META = "vpd.json"
+CODE_DIR = "code"  # RUN/code: the job's code snapshot (DECISIONS G1)
+# G7 (2026-11-10, ROUND3 section 4: "Vulkan 复查作业，以及为换机器池做的代码改动"): pools besides sco_job.POOLS.
+# Explicit only (`--pool auto` never picks one).  sco_job.prepare accepts only its own POOLS, so prepare() rewrites
+# prepared.json["pool"], which sco_job.create_command passes as --aec2-name; the spec stays sco_job.SPECS[1]
+# (N4lS.Iq.I80.1, listed by `sco aec2 clusters list-workerspec` for zoe-cf-render).  Whether we have quota there is
+# unknown until a job schedules (vulkan_recheck 2026-11-10).
+EXTRA_POOLS = ("zoe-cf-render",)
+POOL_CHOICES = tuple(sco_job.POOLS) + EXTRA_POOLS
 
 
 class Refused(SystemExit):
@@ -132,7 +155,14 @@ def vpd_tree_digest(root: Path = paths.VPD_PKG) -> Tuple[str, int]:
 
 
 def vpd_code_state() -> dict:
-    """HEAD, the porcelain status of vpd/ (untracked included) and a digest of the vpd/ tree at prepare time."""
+    """HEAD, the porcelain status of vpd/ (untracked included) and a digest of the vpd/ tree at prepare time.
+    In a job that runs from a code snapshot (no .git, no git binary) the commit is the snapshot's (SNAPSHOT.json)
+    and the status is empty by construction (prepare refused a dirty tree)."""
+    snap = snapshot.snapshot_state(WORKTREE)
+    if snap["mode"] == "snapshot":
+        digest, n = vpd_tree_digest(WORKTREE / "vpd")
+        return {"commit": snap["commit"], "vpd_status": [], "vpd_tree_sha256": digest, "vpd_files": n,
+                "snapshot": snap}
     dirty = _git("status", "--porcelain", "--", "vpd")
     digest, n = vpd_tree_digest()
     return {"commit": _git("rev-parse", "HEAD"), "vpd_status": dirty.splitlines() if dirty else [],
@@ -161,11 +191,69 @@ def parse_env(items) -> Dict[str, str]:
     return env
 
 
+def _wt_prefixes() -> List[str]:
+    """The worktree path as given and resolved (longest first)."""
+    return sorted({str(WORKTREE), str(WORKTREE.resolve())}, key=len, reverse=True)
+
+
+def _mentions(text: str, prefix: str) -> bool:
+    """True if text contains the path prefix at a path boundary (not e.g. VAGEN-Lite-vpd2)."""
+    return re.search(re.escape(prefix) + r"(?=/|$|[\s'\";:,)])", text) is not None
+
+
+def snapshot_payload(payload: List[str], code: Path) -> Tuple[List[str], List[List[str]]]:
+    """(payload with every arg that starts with the worktree path moved under code, [[old, new], ...]).
+    An arg that mentions the worktree elsewhere (KEY=/WT/..., a bash -c string) would run live code: refused.
+    A rewritten path must exist in the snapshot (else it is uncommitted, ignored or outside the snapshot trees)."""
+    out, rewrites = [], []
+    for a in payload:
+        new = a
+        for p in _wt_prefixes():
+            if a == p or a.startswith(p + "/"):
+                new = str(code) + a[len(p):]
+                break
+        if new == a:
+            hit = [p for p in _wt_prefixes() if _mentions(a, p)]
+            if hit:
+                raise ValueError(f"payload arg {a!r} mentions the worktree {hit[0]} but does not start with it: "
+                                 "give the path as its own argument (prepare rewrites it to RUN/code)")
+        else:
+            if not os.path.lexists(new):
+                raise ValueError(f"payload arg {a!r}: {new} is not in the code snapshot (uncommitted, ignored, or "
+                                 f"outside {'/, '.join(snapshot.TREES)}/)")
+            rewrites.append([a, new])
+        out.append(new)
+    return out, rewrites
+
+
+def snapshot_launch(text: str, code: Path, commit: str) -> str:
+    """sco_job's launch.sh with its one `cd WORKTREE` line replaced by the snapshot exports + cd RUN/code."""
+    lines = text.splitlines(keepends=True)
+    want = f"cd {shlex.quote(str(WORKTREE))}\n"
+    cds = [i for i, ln in enumerate(lines) if ln.startswith("cd ")]
+    if [lines[i] for i in cds] != [want]:
+        raise RuntimeError(f"launch.sh: expected exactly one line {want!r}, found {[lines[i] for i in cds]}")
+    q = shlex.quote(str(code))
+    lines[cds[0]] = (
+        f"# vpd.sco code snapshot of {commit} (DECISIONS G1): this job runs {code}, never the live worktree\n"
+        f"export VPD_WORKTREE={q} PYTHONPATH={q}\n"
+        f"cd {q} && [[ -f {snapshot.MARKER} ]] || {{ echo \"[launch] no code snapshot at \"{q} >&2; exit 97; }}\n")
+    new = "".join(lines)
+    rest = new.replace(shlex.quote(str(WORKTREE / sco_job.RUN_AS_OWNER)), "")  # the owner wrapper (non-root)
+    left = [p for p in _wt_prefixes() if _mentions(rest, p)]
+    if left:
+        raise RuntimeError(f"launch.sh still refers to the live worktree {left[0]} after the snapshot rewrite")
+    return new
+
+
 def prepare(run, name: str, payload: List[str], pool: str = "zoetrope", as_root: bool = False,
-            est_gph: Optional[float] = None, gate: Optional[str] = None, env=None) -> Path:
+            est_gph: Optional[float] = None, gate: Optional[str] = None, env=None, snapshot_code: bool = True) -> Path:
     """sco_job.prepare(run, 1, pool, name, payload, as_root) after the vpd checks; writes RUN/job/vpd.json.
     env: optional {KEY: VAL} (or ['KEY:VAL']) for the job container, passed as `sco ... --env` (2026-11-09: the
-    TVR debug job asks for NVIDIA_DRIVER_CAPABILITIES:all; whether the platform honours it is measured in-job)."""
+    TVR debug job asks for NVIDIA_DRIVER_CAPABILITIES:all; whether the platform honours it is measured in-job).
+    pool: sco_job.POOLS, EXTRA_POOLS (explicit only) or "auto" (sco_job.pick_pool over sco_job.POOLS).
+    snapshot_code (default True; CLI --no-snapshot sets False): the job runs from the code snapshot RUN/code
+    (module docstring); refused (Refused) unless the snapshot trees are clean."""
     run = Path(run).resolve()
     validate_name(name)
     env = parse_env(env) if isinstance(env, (list, tuple)) else parse_env([f"{k}:{v}" for k, v in (env or {}).items()])
@@ -180,23 +268,67 @@ def prepare(run, name: str, payload: List[str], pool: str = "zoetrope", as_root:
     if not payload:
         raise ValueError("give the payload command after --")
     launch_target = (run / "job" / "launch.sh")
-    for a in payload:
-        if a and ("launch.sh" in a) and Path(a).resolve() == launch_target:
-            raise ValueError("the payload must not be RUN/job/launch.sh itself (self-exec trap)")
+
+    def no_self_exec(args):
+        for a in args:
+            if a and ("launch.sh" in a) and Path(a).resolve() == launch_target:
+                raise ValueError("the payload must not be RUN/job/launch.sh itself (self-exec trap)")
+
+    no_self_exec(payload)
     if pool == "auto":
-        pool = sco_job.pick_pool()
-    launch = sco_job.prepare(run, 1, pool, name, list(payload), as_root=as_root)
-    if env:
+        pool = sco_job.pick_pool()  # sco_job.POOLS only: an EXTRA_POOLS pool is never chosen automatically
+    if pool not in POOL_CHOICES:
+        raise ValueError(f"pool must be one of {POOL_CHOICES} or auto, got {pool!r}")
+    if (run / "job" / "submission.json").exists():
+        raise FileExistsError(f"{run / 'job'} was already submitted; use a new run directory")
+    code = run / CODE_DIR
+    snap, rewrites, job_payload = None, [], list(payload)
+    if snapshot_code:
+        if (run / "job" / "launch.sh").exists() or (run / "job" / META).exists():
+            raise ValueError(f"{run} was prepared before: use a new run directory")
+        for p in _wt_prefixes():
+            if str(run) == p or str(run).startswith(p + "/"):
+                raise ValueError(f"RUN {run} is inside the worktree {p}")
+        try:
+            snap = snapshot.create(WORKTREE, code)
+        except snapshot.SnapshotError as e:
+            raise Refused(str(e)) from None
+    try:
+        if snapshot_code:
+            job_payload, rewrites = snapshot_payload(list(payload), code)
+            no_self_exec(job_payload)
+        launch = sco_job.prepare(run, 1, pool if pool in sco_job.POOLS else sco_job.POOLS[0], name, job_payload,
+                                 as_root=as_root)
         pp = run / "job" / "prepared.json"
         rec = json.loads(pp.read_text())
-        rec["env"] = env
+        if env:
+            rec["env"] = env
+        if pool not in sco_job.POOLS:
+            rec["pool"] = pool  # -> sco --aec2-name=<pool>; spec unchanged
+            rec["pool_via"] = "vpd.sco EXTRA_POOLS"
+        text = Path(launch).read_text()
+        if snapshot_code:
+            Path(launch).write_text(snapshot_launch(text, code, snap["commit"]))
+            rec["source_worktree"] = rec.get("worktree")
+            rec["worktree"] = str(code)  # what launch.sh cds into
+            rec["code_snapshot"] = dict(snapshot.summary(snap), path=str(code / snapshot.MARKER))
+            if rewrites:
+                rec["payload_as_given"] = list(payload)
+        else:
+            if f"cd {shlex.quote(str(WORKTREE))}\n" not in text:
+                raise RuntimeError(f"{launch} does not cd into {WORKTREE}")
+            rec["code_snapshot"] = None
+            rec["no_snapshot"] = True
         pp.write_text(json.dumps(rec, indent=1) + "\n")
-    text = Path(launch).read_text()
-    if f"cd {shlex.quote(str(WORKTREE))}\n" not in text:
-        raise RuntimeError(f"{launch} does not cd into {WORKTREE}")
+    except BaseException:
+        if snap is not None:
+            shutil.rmtree(code, ignore_errors=True)  # the snapshot this call made; the job was never prepared
+        raise
     meta = {"utc": ledger.iso(), "name": name, "display_name": "downstream-" + name, "gate": gate,
             "est_gph": float(est_gph) if est_gph is not None else None, "as_root": bool(as_root), "pool": pool,
-            "gpus": 1, "worktree": str(WORKTREE), "vpd_code": vpd_code_state()}
+            "gpus": 1, "worktree": str(WORKTREE), "vpd_code": vpd_code_state(),
+            "snapshot": dict(snapshot.summary(snap), path=str(code / snapshot.MARKER)) if snap else None,
+            "code_dir": str(code) if snap else None, "payload_rewrites": rewrites, "no_snapshot": not snapshot_code}
     if env:
         meta["env"] = env
     (run / "job" / META).write_text(json.dumps(meta, indent=1) + "\n")
@@ -583,12 +715,17 @@ def delete(run, force_live: bool = False, sleep=time.sleep) -> str:
         out = sco_job.delete(run)  # stop + delete
         obs2 = dict(obs2, end_time=ledger.iso())
         if not ended_in_ledger:
-            gph = round(elapsed_gph(job, obs2), 4)
+            started = obs2.get("start_time") or obs1.get("start_time")
+            if started:
+                obs2["start_time"] = started
+                gph, src = round(elapsed_gph(job, obs2), 4), "sco_start_to_force_delete"
+            elif s1 in WAITING and s2 in WAITING and not ledger.worker_log_started(run / "job" / "worker.log"):
+                gph, src = 0.0, "never_started"  # G7: still waiting for cards, the container never ran
+            else:
+                gph, src = None, "unknown_charged_est"  # unreadable / ambiguous: charged its estimate
             ledger.append({"event": "end", "run": str(run), "pt_id": pt, "state": f"FORCED_FROM_{s2}",
                            "start_time": obs2.get("start_time"), "end_time": obs2["end_time"],
-                           "gph": gph if obs2.get("start_time") else None,
-                           "gph_source": "sco_start_to_force_delete" if obs2.get("start_time") else
-                           "unknown_charged_est"})
+                           "gph": gph, "gph_source": src})
         ledger.append({"event": "delete", "run": str(run), "pt_id": pt, "at": ledger.iso(), "rc": None,
                        "state": f"FORCED_FROM_{s2}", "detail": out})
         return out
@@ -604,8 +741,12 @@ def main(argv=None) -> int:
     ap.add_argument("action", choices=["prepare", "submit", "status", "delete", "resolve", "budget", "queue", "disk"])
     ap.add_argument("--run", type=Path)
     ap.add_argument("--name")
-    ap.add_argument("--pool", default="zoetrope", choices=list(sco_job.POOLS) + ["auto"])
+    ap.add_argument("--pool", default="zoetrope", choices=list(POOL_CHOICES) + ["auto"],
+                    help="auto picks among sco_job.POOLS only; EXTRA_POOLS must be named")
     ap.add_argument("--as-root", action="store_true")
+    ap.add_argument("--no-snapshot", action="store_true",
+                    help="prepare: run the live worktree instead of a code snapshot (tests / emergencies only; "
+                         "recorded in vpd.json)")
     ap.add_argument("--est-gph", type=float)
     ap.add_argument("--gate", choices=list(ledger.GATES))
     ap.add_argument("--all", action="store_true")
@@ -619,8 +760,11 @@ def main(argv=None) -> int:
         if args.action == "prepare":
             if not args.name:
                 ap.error("prepare needs --name")
+            if args.no_snapshot:
+                print("[vpd.sco] --no-snapshot: the job will run the LIVE worktree code (recorded in vpd.json)",
+                      file=sys.stderr)
             print(prepare(args.run, args.name, payload, args.pool, args.as_root, args.est_gph, args.gate,
-                          env=args.env))
+                          env=args.env, snapshot_code=not args.no_snapshot))
         elif args.action == "submit":
             print(submit(args.run, args.est_gph))
         elif args.action == "status":
