@@ -22,11 +22,21 @@
 # written under runs/pilot/ (X there is refused).  The variant writes only X/<VARIANT>/ (+ X/V1/, X/floors/, X/b1/
 # and the B1 demos dir for V0; X/analysis/ for every job).
 # Idempotent: data is written once (a different existing file is refused); an adapter is skipped when
-# `variants adapter-ok` passes (exit 3 = trained with other code: the job stops, nothing overwritten); an eval is
-# skipped when results.json exists (merged: `pilot eval-ok DIR --adapter DIR` = it served the adapter.pt on disk;
-# stale evals are flagged and kept unless VPD_RERUN_STALE=1, results_invalid.json kept unless VPD_RERUN_INVALID=1).
-# A failed step does not stop the others.  Exit 1 if any step failed; RUN/DONE only when every step passed.  The
-# last steps are `variants analyze` (numbers only) and `variants expect --check` (RUN/expect.txt).
+# `variants adapter-ok` passes (exit 3 = trained with other code: not retrained and not evaluated, nothing
+# overwritten); an eval is skipped when results.json exists (merged: `pilot eval-ok DIR --adapter DIR` = it served
+# the adapter.pt on disk; stale evals are flagged and kept unless VPD_RERUN_STALE=1, results_invalid.json kept
+# unless VPD_RERUN_INVALID=1).  B1: a B1 out dir without its shard manifest (a cut render; our own generated dir) is
+# moved aside to <B1_OUT>.partial-<UTC> and rebuilt; a B1 out dir that is, holds or lies in the frozen
+# demos/s2train_640x400 is refused.
+# init-check: the pilot 0W (sha prefix, finished); V5 also a trainer that reads loss_weight; V5 / V4 also the current
+# trainer code_sha256 == that of X/V0/adapter and X/BASE/adapter where they exist (exit 4 = other code: no training,
+# step train_V:code_differs).
+# A failed step never ends the payload: every block of the step list runs through `part` (an `||` context, so
+# `set -e` cannot fire), each failure is a steps.jsonl line (rc != 0) and a FAILS entry, and the steps that do not
+# need the failed output still run (the raw probes, evals of adapters that exist, analyze, expect).  Exit 3 if an
+# adapter was trained with other code, else 1 if any step failed, else 0.  RUN/DONE (a stale one is removed at the
+# start) only when every step passed, which includes `variants expect --check` (RUN/expect.txt, 0 missing).  The
+# last steps are `variants analyze` (numbers only) and `variants expect --check`.
 # Threads: training 2 (--threads) + 3 loader workers; vLLM 4 (VLLMServer); 8 eval workers; CPU steps VPD_THREADS.
 # Env: VPD_DRYRUN=1 prints the commands (writes only RUN/{steps.jsonl,node.txt,df_end.txt}); VPD_JOB_DEADLINE_S,
 #      VPD_MIN_STEP_S (60), VPD_MERGE_DIR (default /tmp or /dev/shm with >= 40 GB free).
@@ -64,7 +74,9 @@ WB=$VPD_OUT/walkerbench
 X=${VPD_WBV_ROOT:-$WB/runs/explore/wbv/$START}
 P=${VPD_WBV_PILOT:-$WB/runs/pilot/$START}
 B1_OUT=${VPD_WBV_B1_OUT:-$WB/demos/s2train_640x400_B1_vis0578}
+B1_OUT=${B1_OUT%/}
 B1_STEM=vis_0578_target_20260127_1951_33
+FROZEN_DEMOS_DIR=$WB/demos/s2train_640x400  # never written, moved or removed here (G6)
 case "$(realpath -m -- "$X")/" in
   "$(realpath -m -- "$WB/runs/pilot")"/*)
     echo "[wb_variants] refusing X=$X: under runs/pilot (the pilot's outputs are read only)" >&2; exit 2 ;;
@@ -85,6 +97,7 @@ FAILS=()
 mkdir -p "$RUN"
 cd "$VPD_WORKTREE"
 if [[ $DRY != 1 ]]; then
+  rm -f -- "$RUN/DONE"  # DONE describes this run only
   mkdir -p "$VX" "$X/analysis"
   OWN=("$RUN" "$VX" "$X/analysis")
   if [[ $VARIANT == V0 ]]; then
@@ -115,6 +128,26 @@ x() {  # run, or print under VPD_DRYRUN=1
 }
 
 left() { echo $((DEADLINE - $(date +%s))); }
+
+# part FUNC ARGS...: one block of the step list.  FUNC runs in an `||` context, so neither its non-zero return nor a
+# failing command inside it can end the payload under `set -e`; every block records its own failures (a vpd_step line
+# with rc != 0 and a FAILS entry), and one that returns non-zero without having recorded any gets FUNC:failed.
+part() {
+  local n=${#FAILS[@]} rc=0
+  "$@" || rc=$?
+  if ((rc != 0 && ${#FAILS[@]} == n)); then
+    vpd_step "$1:failed" false || true
+    FAILS+=("$1")
+  fi
+  return 0
+}
+
+same_or_nested() {  # A B: true when A and B are one directory or one holds the other (realpath -m)
+  local a b
+  a=$(realpath -m -- "$1")
+  b=$(realpath -m -- "$2")
+  [[ $a == "$b" || $a == "$b"/* || $b == "$a"/* ]]
+}
 
 # timed NAME CMD...: vpd_step NAME under the soft deadline; NAME:no_time when fewer than MIN_STEP_S seconds are left
 timed() {
@@ -151,6 +184,12 @@ safe_rm_merged() {  # only job-local merged folders
 
 # ------------------------------------------------------------------ B1 (G6): the one dropped val demo, rebuilt
 b1_rebuild() {
+  if same_or_nested "$B1_OUT" "$FROZEN_DEMOS_DIR"; then
+    echo "[wb_variants] refusing B1 out dir $B1_OUT: it is, holds or lies in the frozen $FROZEN_DEMOS_DIR" >&2
+    vpd_step "b1:frozen_dir_refused" false || true
+    FAILS+=(b1)
+    return 1
+  fi
   if [[ $DRY != 1 ]] && "$PY_EVAL" "${VAR[@]}" b1 --stage done --x "$X" --out-dir "$B1_OUT" >/dev/null; then
     vpd_step "b1:skip" true
     return 0
@@ -160,6 +199,22 @@ b1_rebuild() {
   if [[ -f $B1_OUT/shards/shard0of1.json ]]; then
     vpd_step "b1_render:skip" true
   else
+    if [[ -e $B1_OUT || -L $B1_OUT ]]; then
+      # a cut render left our own dir without its shard manifest (demos.py would refuse its images): move it aside
+      local aside
+      aside="$B1_OUT.partial-$(date -u +%Y%m%dT%H%M%SZ)"
+      if [[ -e $aside || -L $aside ]]; then
+        echo "[wb_variants] $aside exists: the partial B1 dir is not moved" >&2
+        vpd_step "b1_partial_aside:exists" false || true
+        FAILS+=(b1_partial_aside)
+        return 1
+      fi
+      echo "[wb_variants] $B1_OUT has no shards/shard0of1.json (a cut render): moving it to $aside" >&2
+      vpd_step b1_partial_aside x mv -T -- "$B1_OUT" "$aside" || { FAILS+=(b1_partial_aside); return 1; }
+      if [[ $DRY != 1 && $(id -u) -eq 0 ]]; then
+        vpd_on_exit "chown -R ${VPD_JOB_UID}:${VPD_JOB_UID} $(printf '%q' "$aside") || true"
+      fi
+    fi
     timed b1_render "$PY_EVAL" -m vpd.walkerbench.demos --stems "$B1_STEM" --out "$B1_OUT" --work "$RUN/b1_work" \
       --strict || { FAILS+=(b1_render); return 1; }
   fi
@@ -179,15 +234,27 @@ floors() {  # STOP0 / FWD / ODO / RM on s2sel (CPU, rendering stubbed); skipped 
 }
 
 INIT_OK=0
-init_check() {
-  local extra=()
-  [[ $VARIANT == V5 || ( $VARIANT == V4 && $BASE == V5 ) ]] && extra=(--need-loss-weight)
-  if vpd_step init_check x "$PY_EVAL" "${VAR[@]}" init-check --init "$INIT" ${extra[@]+"${extra[@]}"}; then
+INIT_RC=0
+init_check() {  # exit 0 ok; 4 V5 / V4: the current trainer code differs from V0's / BASE's adapter; else 1
+  local extra=() rc=0
+  if [[ $VARIANT == V5 || ( $VARIANT == V4 && $BASE == V5 ) ]]; then
+    extra=(--need-loss-weight)
+  fi
+  vpd_step init_check x "$PY_EVAL" "${VAR[@]}" init-check --init "$INIT" --variant "$VARIANT" \
+    ${BASEARG[@]+"${BASEARG[@]}"} --x "$X" ${extra[@]+"${extra[@]}"} || rc=$?
+  INIT_RC=$rc
+  if ((rc == 0)); then
     INIT_OK=1
+    return 0
+  fi
+  if ((rc == 4)); then
+    echo "[wb_variants] init-check refused $VARIANT: the current trainer code_sha256 differs from the one X/V0 (or" \
+         "X/$BASE) was trained with, so $VARIANT would not be comparable; no training (see its problems above)" >&2
   else
     echo "[wb_variants] init-check failed: $INIT is not the pilot's 0W (or V5's trainer lacks loss_weight); no training" >&2
-    FAILS+=(init_check)
   fi
+  FAILS+=(init_check)
+  return 1
 }
 
 # adapter_state -> 0 complete, 1 (re)train, 3 trained with other code
@@ -199,10 +266,15 @@ adapter_state() {
 }
 
 TRAIN_OK=0
+CODE_MISMATCH=0
 train() {
   local st=0
   if ((INIT_OK != 1)); then
-    vpd_step "train_$VARIANT:no_init" false || true
+    if ((INIT_RC == 4)); then
+      vpd_step "train_$VARIANT:code_differs" false || true
+    else
+      vpd_step "train_$VARIANT:no_init" false || true
+    fi
     FAILS+=("train_$VARIANT")
     return 1
   fi
@@ -218,9 +290,12 @@ train() {
     return 0
   fi
   if ((st == 3)); then
-    echo "[wb_variants] $AD was trained with other code: stopping (nothing overwritten)" >&2
+    echo "[wb_variants] $AD was trained with other code: not retrained and not evaluated (nothing overwritten);" \
+         "the independent steps still run and the job exits 3" >&2
     vpd_step "train_$VARIANT:code_mismatch" false || true
-    exit 3
+    FAILS+=("train_$VARIANT")
+    CODE_MISMATCH=1
+    return 1
   fi
   if timed "train_$VARIANT" "$PY_TRAIN" vpd/train/n2_train_vpd.py --start "$START" --data "$DATA" --init-adapter "$INIT" \
       --out "$AD" --epochs "$EPOCHS" --seed 1001 --phase "wbv_$VARIANT" --threads "$VPD_THREADS" --num-workers 3; then
@@ -355,66 +430,100 @@ merged_evals() {  # SPEC...: merge X/<VARIANT>/adapter, the evals on the merged 
   vpd_step "rm_merged_$VARIANT" safe_rm_merged "$local_dir" || FAILS+=("rm_merged_$VARIANT")
 }
 
+variant_evals() {  # 4 the variant's own evals (mode from `variants eval-mode`: one source with the data manifest)
+  local mode cmode odo specs
+  if ! mode=$("$PY_EVAL" "${VAR[@]}" eval-mode --variant "$VARIANT" ${BASEARG[@]+"${BASEARG[@]}"} --x "$X"); then
+    echo "[wb_variants] eval-mode failed for $VARIANT ${BASE:-}" >&2
+    vpd_step "eval_mode:failed" false || true
+    FAILS+=(eval_mode)
+    return 1
+  fi
+  read -r cmode odo <<< "${mode:-x x}"
+  if ! [[ $cmode =~ ^(empty|short|off)$ && $odo =~ ^(off|line)$ ]]; then
+    echo "[wb_variants] eval-mode printed '$mode' for $VARIANT ${BASE:-}: no evals" >&2
+    vpd_step "eval_mode:invalid" false || true
+    FAILS+=(eval_mode)
+    return 1
+  fi
+  specs=("$VARIANT:s2sel:$cmode:$odo" "$VARIANT:s2sel:$cmode:$odo:blind")
+  if [[ $VARIANT == V0 ]]; then
+    specs+=("V1:s2sel:empty:line")  # V1 probe: V0 merged + the eval-time odometer line
+  fi
+  merged_evals "${specs[@]}"
+}
+
+raw_probes() {  # 5 V1 raw probes (job A): no adapter needed, so they run whatever happened to the training
+  local spec rc=0
+  for spec in V1:s2sel:off:off V1:s2sel:off:line V1:s2sel:empty:off; do
+    evalrun raw "$spec" || rc=1
+  done
+  return "$rc"
+}
+
+EXPECT_OK=0
+expect_list() {  # 6b RUN/expect.txt; EXPECT_OK=1 only when nothing is missing
+  if [[ $DRY == 1 ]]; then
+    echo "[dry] $PY_EVAL ${VAR[*]} expect --variant $VARIANT ${BASE:+--base $BASE} --x $X --b1-out $B1_OUT --check > $RUN/expect.txt"
+    EXPECT_OK=1
+    return 0
+  fi
+  if vpd_step expect bash -c "$(printf '%q ' "$PY_EVAL" "${VAR[@]}" expect --variant "$VARIANT" \
+      ${BASEARG[@]+"${BASEARG[@]}"} --x "$X" --b1-out "$B1_OUT" --check) > $(printf '%q' "$RUN/expect.txt")"; then
+    EXPECT_OK=1
+  else
+    FAILS+=(expect)
+    return 1
+  fi
+}
+
 echo "[wb_variants] start $(date -u +%FT%TZ) VARIANT=$VARIANT BASE=${BASE:-none} START=$START RUN=$RUN X=$X P=$P" \
      "dry=$DRY deadline=${DEADLINE_S}s (EXPLORATORY: numbers only, no gate decided here)"
-vpd_node_facts "$RUN/node.txt"
+vpd_node_facts "$RUN/node.txt" || true
+MISSING=()
 for f in "$INIT/adapter.pt" "$WB/split/split_s2.json" "$WB/tiers/order_seed1001.json" "$WB/tiers/seed1001/demos_all.jsonl"; do
-  if [[ ! -f $f ]]; then
-    echo "[wb_variants] missing $f" >&2
-    [[ $DRY == 1 ]] || exit 2
-  fi
+  [[ -f $f ]] || MISSING+=("$f")
 done
+if ((${#MISSING[@]})); then  # recorded, not fatal: the steps that need them fail on their own, the rest still run
+  echo "[wb_variants] missing ${MISSING[*]}" >&2
+  if [[ $DRY != 1 ]]; then
+    vpd_step "inputs:missing" false || true
+    FAILS+=(inputs)
+  fi
+fi
 export VPD_MERGE_DIR=${VPD_MERGE_DIR:-$(pick_merge_dir)}
 echo "[wb_variants] VPD_MERGE_DIR=${VPD_MERGE_DIR:-<none with 40 GB free>}"
 if [[ -n $VPD_MERGE_DIR && $DRY != 1 ]]; then  # a timeout must not leave merged weights on the node
   vpd_on_exit "d='$VPD_MERGE_DIR/wbv__${START}__$VARIANT'; case \$d in /tmp/vpd_merged/?*|/dev/shm/vpd_merged/?*) rm -rf -- \"\$d\";; esac"
 fi
 
+# The step list.  Every block goes through `part`: a failure is recorded and the next block still runs.
 # 0 the B1 single-demo rebuild, first (job A only; G6)
 if [[ $VARIANT == V0 ]]; then
-  b1_rebuild || true
+  part b1_rebuild
 fi
 # 1 task sets (verified; created if missing) and X dirs
 vpd_step setup x "$PY_EVAL" "${VAR[@]}" setup --x "$X" || FAILS+=(setup)
 # 2 floors on s2sel (job A; V5 / V4 only if still missing)
 if [[ $VARIANT == V0 || $VARIANT == V5 || $VARIANT == V4 ]]; then
-  floors
+  part floors
 fi
 # 3 data, init check, training
 vpd_step "data_$VARIANT" x "$PY_EVAL" "${VAR[@]}" data --variant "$VARIANT" ${BASEARG[@]+"${BASEARG[@]}"} --x "$X" \
   || FAILS+=("data_$VARIANT")
-init_check
-train
-# 4 the variant's own evals (mode from `variants eval-mode`: one source with the data manifest)
-if ! MODE=$("$PY_EVAL" "${VAR[@]}" eval-mode --variant "$VARIANT" ${BASEARG[@]+"${BASEARG[@]}"} --x "$X"); then
-  echo "[wb_variants] eval-mode failed for $VARIANT ${BASE:-}" >&2
-  vpd_step "eval_mode:failed" false || true
-  FAILS+=(eval_mode)
-  MODE=""
-fi
-read -r CMODE ODO <<< "${MODE:-x x}"
-if [[ $CMODE =~ ^(empty|short|off)$ && $ODO =~ ^(off|line)$ ]]; then
-  SPECS=("$VARIANT:s2sel:$CMODE:$ODO" "$VARIANT:s2sel:$CMODE:$ODO:blind")
-  [[ $VARIANT == V0 ]] && SPECS+=("V1:s2sel:empty:line")  # V1 probe: V0 merged + the eval-time odometer line
-  merged_evals "${SPECS[@]}" || true
-fi
-# 5 V1 raw probes (job A)
+part init_check
+part train
+# 4 the variant's own evals (+ the V1 merged probe in job A); skipped and recorded when there is no adapter
+part variant_evals
+# 5 the raw probes (job A)
 if [[ $VARIANT == V0 ]]; then
-  for spec in V1:s2sel:off:off V1:s2sel:off:line V1:s2sel:empty:off; do
-    evalrun raw "$spec" || true
-  done
+  part raw_probes
 fi
 # 6 numbers (no verdict) and the expect list
 vpd_step analyze x "$PY_EVAL" "${VAR[@]}" analyze --x "$X" || FAILS+=(analyze)
-if [[ $DRY == 1 ]]; then
-  echo "[dry] $PY_EVAL ${VAR[*]} expect --variant $VARIANT ${BASE:+--base $BASE} --x $X --b1-out $B1_OUT --check > $RUN/expect.txt"
-else
-  vpd_step expect bash -c "$(printf '%q ' "$PY_EVAL" "${VAR[@]}" expect --variant "$VARIANT" ${BASEARG[@]+"${BASEARG[@]}"} --x "$X" --b1-out "$B1_OUT" --check) > $(printf '%q' "$RUN/expect.txt")" \
-    || FAILS+=(expect)
-fi
+part expect_list
 
 df -h / /tmp /dev/shm > "$RUN/df_end.txt" 2>&1 || true
-if ((${#FAILS[@]} == 0)); then
+if ((${#FAILS[@]} == 0 && EXPECT_OK == 1)); then  # the whole step list ran and passed, expect included
   if [[ $DRY == 1 ]]; then
     echo "[dry] date -u > $RUN/DONE"
   else
@@ -422,4 +531,7 @@ if ((${#FAILS[@]} == 0)); then
   fi
 fi
 echo "[wb_variants] done $(date -u +%FT%TZ) VARIANT=$VARIANT; failed steps: ${FAILS[*]:-none}"
+if ((CODE_MISMATCH)); then
+  exit 3
+fi
 ((${#FAILS[@]} == 0))

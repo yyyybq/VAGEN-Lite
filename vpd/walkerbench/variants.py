@@ -13,14 +13,18 @@ Login node (PY_EVAL, 1 core, nice -n 19):
     python -m vpd.walkerbench.variants data --variant V5 --base V0|V1T|V2  # + per-reply loss_weight
     python -m vpd.walkerbench.variants data --variant V4 --base V0|V1T|V2|V5   # byte copy (trained 10 epochs)
     python -m vpd.walkerbench.variants analyze           # -> X/analysis/ANALYZE.json, REPORT_EXPLORATORY.md
+                                                         #    (+ consistency of the adapters' code / init, problems)
     python -m vpd.walkerbench.variants expect --variant V [--base B] [--check]   # outputs to verify before delete
 In-job (vpd/jobs/wb_variants.sh VARIANT RUN [BASE]):
     PY_EVAL -m ... b1 --stage precheck|before|after|done   # G6 single-demo rebuild checks (job A, first)
     PY_EVAL -m ... floors --out X/floors/floors_s2sel.json --logs X/floors/logs --work RUN/floors_work
-    PY_EVAL -m ... init-check [--need-loss-weight]       # pilot 0W adapter.pt sha256 5cdbfd4366a3 (no code equality)
+    PY_EVAL -m ... init-check --variant V [--base B] [--need-loss-weight]   # pilot 0W adapter.pt sha256
+                   # 5cdbfd4366a3 (no code equality with the pilot); V5 / V4: the current trainer code_sha256 must
+                   # equal X/V0's and X/BASE's adapter (exit 4 when it differs: no training), else exit 1 / 0
     PY_EVAL -m ... adapter-ok --variant V [--base B]     # exit 0 complete, 1 (re)train, 3 trained with other code
     PY_EVAL -m ... eval-mode --variant V [--base B]      # "CONSTRAINED ODOMETER" of the variant's evals
-    PY_Q3   -m ... eval [--odometer off|line] <run_vpd args>   # run_vpd.main + s2dev74/s2sel + odometer hook
+    PY_Q3   -m ... eval [--odometer off|line] <run_vpd args>   # run_vpd.main + s2dev74/s2sel + odometer hook; exit 1
+                   # and results.json -> results_invalid.json when the hook did not act as asked (odometer_check)
 
 Task sets (DECISIONS G4(a)): s2dev74 = continue the frozen md5(city) order of split_s2.json after the 6 s2val cities
 and take whole train-rest cities until >= 60 tasks (Yokohama, Johannesburg, Curitiba, Sao Paulo, Chicago: 74 tasks,
@@ -43,6 +47,7 @@ import math
 import os
 import re
 import shutil
+import socket
 import sys
 import uuid
 from collections import Counter, OrderedDict, defaultdict
@@ -113,9 +118,37 @@ EVAL_NAME_RE = re.compile(r"^wbv__(?P<start>[A-Za-z0-9]+)__(?P<model>[A-Za-z0-9]
 
 
 # ------------------------------------------------------------------------------------------------- utilities
-utc, sha256_file, read_json, read_jsonl, write_json, write_text, rate = (L.utc, L.sha256_file, L.read_json,
-                                                                         L.read_jsonl, L.write_json, L.write_text,
-                                                                         L.rate)
+utc, sha256_file, read_json, read_jsonl, rate = L.utc, L.sha256_file, L.read_json, L.read_jsonl, L.rate
+
+
+def _host_tag() -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", socket.gethostname() or "host")[:40] or "host"
+
+
+def tmp_sibling(path) -> Path:
+    """A temp name next to PATH that no other writer uses: jobs in separate containers share the file system and
+    have small, similar PIDs (learn483's '<file>.tmp<pid>' could collide), so hostname + pid + random."""
+    path = Path(path)
+    return path.with_name(f".{path.name}.tmp-{_host_tag()}-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+
+
+def write_text(p, text: str) -> Path:
+    """Atomic write (a unique temp sibling, then os.replace)."""
+    p = Path(p)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = tmp_sibling(p)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, p)
+    finally:
+        if tmp.exists():
+            tmp.unlink()  # this call's own temp file (only when the replace did not happen)
+    return p
+
+
+def write_json(p, obj) -> Path:
+    """learn483.write_json's bytes (indent 1, default=str, trailing newline) through write_text's unique temp."""
+    return write_text(p, json.dumps(obj, indent=1, default=str) + "\n")
 
 
 def sha256_text(text: str) -> str:
@@ -174,10 +207,7 @@ def _write_if_new(path: Path, text: str) -> str:
             return "same"
         raise SystemExit(f"[variants] {path} exists with different content (nothing overwritten; remove it by hand "
                          "only if no adapter was trained on it)")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    write_text(path, text)
     return "wrote"
 
 
@@ -283,7 +313,7 @@ def build_split(dest: Path, plan: dict, src_tasks: Path) -> dict:
             raise SystemExit(f"[variants] {dest} exists but differs (nothing overwritten): " + "; ".join(probs))
         return {"state": "verified", "dir": str(dest), **plan["counts"]}
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.parent / f".{dest.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:6]}"
+    tmp = tmp_sibling(dest)
     (tmp / "tasks").mkdir(parents=True)
     try:
         for f, sha in plan["files"].items():
@@ -529,13 +559,58 @@ def eval_args(mode: tuple) -> list:
 
 
 # ------------------------------------------------------------------------------------------------- checks
+CODE_REF_VARIANTS = ("V5", "V4")  # trained later, from newer snapshots: their code must equal V0's / BASE's
+INIT_RC_CODE_DIFFERS = 4  # `init-check` exit code when only / also the code-reference check failed
+
+
+def trainer_code_sha256() -> str:
+    from vpd.train import n2_train_vpd as T
+
+    return T.code_fingerprint()["code_sha256"]
+
+
+def code_reference(x: Path, base: str | None = None) -> OrderedDict:
+    """{variant: adapter code_sha256} of X/V0 and X/BASE where X/<V>/adapter/meta.json exists: the trained variants a
+    V5 / V4 run is compared with."""
+    refs = OrderedDict()
+    for v in ("V0", base):
+        if v and v not in refs:
+            meta = read_json(vdir(x, v) / "adapter" / "meta.json")
+            if meta:
+                refs[v] = meta.get("code_sha256")
+    return refs
+
+
 def init_check(init_dir: Path = INIT, expect_sha: str = INIT_SHA_PREFIX, need_loss_weight: bool = False,
-               trainer: Path | None = None) -> tuple:
+               trainer: Path | None = None, variant: str | None = None, x: Path | None = None,
+               base: str | None = None, current_code: str | None = None) -> tuple:
     """The pilot's Q3B 0W, read only: adapter.pt sha256 prefix, finished, start Q3B.  No trainer-code equality with
     the pilot (the trainer may have changed since: wbtrain's per-reply loss_weight).  With need_loss_weight (V5),
-    the trainer must read the per-message 'loss_weight' field (else V5 would silently train unweighted)."""
+    the trainer must read the per-message 'loss_weight' field (else V5 would silently train unweighted).  For V5 /
+    V4 (CODE_REF_VARIANTS) the current trainer code_sha256 (n2_train_vpd.code_fingerprint; current_code for tests)
+    must equal X/V0/adapter/meta.json's and X/BASE/adapter/meta.json's where they exist (facts['code_differs']):
+    a variant trained with other code is not comparable with V0-V2."""
     init_dir = Path(init_dir)
     probs, facts = [], {}
+    if variant in CODE_REF_VARIANTS:
+        refs = code_reference(Path(x or X_ROOT), base)
+        facts["code_reference"] = dict(refs)
+        if refs:
+            try:
+                cur = current_code or trainer_code_sha256()
+            except Exception as e:  # noqa: BLE001 - recorded as the reason
+                cur = None
+                probs.append(f"refusing to train {variant}: the trainer code fingerprint failed "
+                             f"({type(e).__name__}: {e})"[:400])
+            facts["trainer_code_sha256"] = cur
+            bad = OrderedDict((v, c) for v, c in refs.items() if c != cur)
+            facts["code_differs"] = bool(bad) and cur is not None
+            if facts["code_differs"]:
+                probs.append(f"refusing to train {variant}: the current trainer code_sha256 {str(cur)[:12]} differs "
+                             "from " + ", ".join(f"X/{v}/adapter/meta.json code_sha256 {str(c)[:12]}"
+                                                 for v, c in bad.items())
+                             + " (variants trained with other code are not comparable; run every variant job on one "
+                               "trainer commit)")
     pt = init_dir / "adapter.pt"
     facts["init_sha256"] = sha256_file(pt) if pt.is_file() else None
     if not facts["init_sha256"] or not facts["init_sha256"].startswith(expect_sha):
@@ -790,7 +865,29 @@ def split_eval_argv(argv: list) -> tuple:
     return mode, out
 
 
+def odometer_problem(mode: str, counts: dict) -> str | None:
+    """Why an eval's odometer hook did not do what --odometer asked (None when it did): 'line' needs at least one user
+    turn with the line (R.COUNTS['odometer_lines'] > 0), 'off' none."""
+    n = int((counts or {}).get("odometer_lines") or 0)
+    if mode == "line" and n == 0:
+        return "--odometer line, but no user turn carried the odometer line (odometer_lines == 0)"
+    if mode == "off" and n > 0:
+        return f"--odometer off, but {n} user turns carried the odometer line"
+    return None
+
+
+def _stat_key(p: Path):
+    try:
+        st = Path(p).stat()
+    except OSError:
+        return None
+    return st.st_ino, st.st_mtime_ns, st.st_size
+
+
 def cmd_eval(argv: list) -> int:
+    """run_vpd.main with the task sets and the odometer hook.  An eval whose hook did not act as asked fails (rc 1):
+    its results.json becomes results_invalid.json (run_vpd's invalid-run name, so the payload keeps it flagged and
+    `expect` counts it missing) and explore.json records why."""
     mode, rest = split_eval_argv(list(argv))
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--run-dir", type=Path)
@@ -809,6 +906,8 @@ def cmd_eval(argv: list) -> int:
     refuse_pilot(run_dir)
     refuse_s2test(a.task_set, TASK_SETS.get(a.task_set) or (paths.WB_S2VAL_TASKS if a.task_set == "s2val" else None))
     R = register_task_sets()
+    res_p = run_dir / "results.json"
+    res_before = _stat_key(res_p)  # an earlier run's file is never judged (or moved) by this call
     undo = install_odometer(R, mode)
     rc = 1
     try:
@@ -820,13 +919,24 @@ def cmd_eval(argv: list) -> int:
             print(e.code, file=sys.stderr)
     finally:
         undo()
-        if run_dir.is_dir():
+        counts = {k: R.COUNTS.get(k, 0) for k in ("odometer_lines", "odometer_moves_added")}
+        check = {"ok": True}
+        res_now = _stat_key(res_p)
+        if res_now not in (None, res_before):  # this call scored the run: the hook must have acted as asked
+            prob = odometer_problem(mode, counts)
+            if prob:
+                os.replace(res_p, run_dir / "results_invalid.json")
+                check = {"ok": False, "problem": prob, "results_json_moved_to": "results_invalid.json"}
+                print(f"[variants] eval {run_dir.name}: {prob}; results.json moved to results_invalid.json",
+                      file=sys.stderr)
+                rc = rc or 1
+        earlier_untouched = res_before is not None and res_now == res_before  # e.g. run_vpd refused: no --overwrite
+        if run_dir.is_dir() and not earlier_untouched:  # the earlier run's explore.json stays with its results.json
             write_json(run_dir / "explore.json", {"schema": SCHEMA + ":eval", "exploratory": True, "utc": utc(),
                                                   "wrapper": "python -m vpd.walkerbench.variants eval",
                                                   "odometer": mode, "argv": list(argv), "rc": rc,
                                                   "task_sets_added": {k: str(v) for k, v in TASK_SETS.items()},
-                                                  "odometer_counts": {k: R.COUNTS.get(k, 0) for k in
-                                                                      ("odometer_lines", "odometer_moves_added")},
+                                                  "odometer_counts": counts, "odometer_check": check,
                                                   "code": code_state()})
     return rc
 
@@ -928,6 +1038,34 @@ def thought_stats(d: Path, rows: dict, tasks: dict) -> dict:
             "rule": "THOUGHT == odometer.thought format; truth = shown distances of the executed MOVEs before the step"}
 
 
+def consistency(x: Path) -> OrderedDict:
+    """One trainer code and one init for every trained variant (X/<V>/adapter/meta.json): the distinct adapter
+    code_sha256 and init_adapter sha256 values with the variants holding each, and a problems entry for each field
+    with more than one value (the variants are then not comparable)."""
+    per = OrderedDict()
+    for v in TRAINED:
+        meta = read_json(vdir(x, v) / "adapter" / "meta.json")
+        if not meta:
+            continue
+        steps, planned = meta.get("optimizer_steps"), meta.get("optimizer_steps_planned")
+        per[v] = OrderedDict([("code_sha256", meta.get("code_sha256")),
+                              ("init_adapter_sha256", (meta.get("init_adapter") or {}).get("sha256")),
+                              ("finished", bool(steps) and steps == planned)])
+    out = OrderedDict([("rule", "every trained variant: one adapter code_sha256 and one init_adapter sha256"),
+                       ("variants", per)])
+    probs = []
+    for field, label in (("code_sha256", "adapter code_sha256"), ("init_adapter_sha256", "init_adapter sha256")):
+        vals = OrderedDict()
+        for v, row in per.items():
+            vals.setdefault(row[field], []).append(v)
+        out["distinct_" + field] = [OrderedDict([("value", k), ("variants", vs)]) for k, vs in vals.items()]
+        if len(vals) > 1:
+            probs.append(f"{len(vals)} distinct {label} values across the trained variants: "
+                         + "; ".join(f"{str(k)[:12]} ({', '.join(vs)})" for k, vs in vals.items()))
+    out["problems"] = probs
+    return out
+
+
 def analyze(x: Path = X_ROOT, sel_dir: Path = S2SEL_DIR, db=L.CACHE_DB) -> dict:
     from vpd.walkerbench.pilot_gate import wilson_lb  # the frozen formula (PREREG_WB_PILOT section 9)
 
@@ -954,7 +1092,7 @@ def analyze(x: Path = X_ROOT, sel_dir: Path = S2SEL_DIR, db=L.CACHE_DB) -> dict:
     if fsub.get("SEL"):
         sel_floor = {"nav": fsub["SEL"].get("ODO", {}).get("nav"), "vis": fsub["SEL"].get("FWD", {}).get("vis")}
     doc["floors"]["g4_floor"] = {"nav": "ODO", "vis": "FWD", "SEL": sel_floor}
-    rows_of = {}
+    rows_of, problems = {}, []
     for owner, d, g in eval_dirs(x):
         key = f"{owner}/{d.name}"
         res = read_json(d / "results.json")
@@ -964,10 +1102,18 @@ def analyze(x: Path = X_ROOT, sel_dir: Path = S2SEL_DIR, db=L.CACHE_DB) -> dict:
                          ("blind", bool(g["blind"]))])
         if res is None:
             e["state"] = "invalid" if (d / "results_invalid.json").exists() else "no results.json"
+            if (ex.get("odometer_check") or {}).get("ok") is False:
+                e["invalid_reason"] = ex["odometer_check"].get("problem")
             doc["evals"][key] = e
             continue
         if ex.get("odometer") not in (None, e["odometer"]):
             e["odometer_mismatch"] = ex.get("odometer")
+            problems.append(f"eval {key}: explore.json says --odometer {ex.get('odometer')}, its name says "
+                            f"{e['odometer']}")
+        prob = odometer_problem(e["odometer"], ex.get("odometer_counts") or {})
+        if prob:  # an eval scored before cmd_eval checked the hook, or written by hand
+            e["odometer_problem"] = prob
+            problems.append(f"eval {key}: {prob}")
         rows = per_task_rows(d)
         rows_of[key] = rows
         e.update(state="ok", adapter_sha256=(res.get("adapter") or {}).get("adapter_sha256"),
@@ -1032,6 +1178,8 @@ def analyze(x: Path = X_ROOT, sel_dir: Path = S2SEL_DIR, db=L.CACHE_DB) -> dict:
     doc["g4h_inputs"] = {"best_nav_k_SEL": max(navs) if navs else None,
                          "vis_image_vs_blind_discordance": {v: (vd["g4g"]["vis"].get("A3_paired") or {})
                                                             for v, vd in doc["variants"].items() if vd.get("g4g")}}
+    doc["consistency"] = consistency(x)
+    doc["problems"] = doc["consistency"]["problems"] + problems
     out = x / "analysis"
     write_json(out / "ANALYZE.json", doc)
     write_text(out / "REPORT_EXPLORATORY.md", report_md(doc))
@@ -1053,6 +1201,15 @@ def report_md(doc: dict) -> str:
     L_ = ["# WalkerBench limited exploration (EXPLORATORY)", "",
           f"Generated {doc['utc']}. Q3B only; SEL = s2val + s2dev74. Numbers only: no gate is decided here and s2test "
           "is never used (DECISIONS G4).", ""]
+    if doc.get("problems"):
+        L_ += ["## Problems", ""] + [f"- {p}" for p in doc["problems"]] + [""]
+    cons = doc.get("consistency") or {}
+    if cons.get("variants"):
+        L_ += ["## Consistency (trained variants)", "", "| field | value | variants |", "|---|---|---|"]
+        for field in ("code_sha256", "init_adapter_sha256"):
+            for row in cons.get("distinct_" + field) or []:
+                L_.append(f"| {field} | {str(row['value'])[:12]} | {', '.join(row['variants'])} |")
+        L_.append("")
     fs = (doc.get("floors") or {}).get("subsets") or {}
     if fs:
         L_ += ["## Floors (in-job recompute, rendering stubbed)", "", "| subset | policy | nav | vis |", "|---|---|---|---|"]
@@ -1129,10 +1286,13 @@ def main(argv=None) -> int:
     p.add_argument("--logs", type=Path, required=True)
     p.add_argument("--work", type=Path, required=True, help="sandbox parent (removed)")
     p.add_argument("--tasks", default=None, help="comma-separated stems (subset; tests)")
-    p = sub.add_parser("init-check")
+    p = sub.add_parser("init-check", help="exit 0 ok, 4 V5 / V4 trainer code differs from V0's / BASE's, 1 else")
     p.add_argument("--init", type=Path, default=INIT)
     p.add_argument("--expect-sha", default=INIT_SHA_PREFIX)
     p.add_argument("--need-loss-weight", action="store_true")
+    p.add_argument("--variant", choices=TRAINED, default=None)
+    p.add_argument("--base", default=None)
+    p.add_argument("--x", type=Path, default=X_ROOT)
     for nm in ("adapter-ok", "eval-mode"):
         p = sub.add_parser(nm)
         p.add_argument("--variant", choices=TRAINED, required=True)
@@ -1163,8 +1323,13 @@ def main(argv=None) -> int:
         rep = floors(args.out, args.logs, args.work, stems=stems)
         print(json.dumps(rep, default=str))
     elif args.cmd == "init-check":
-        probs, facts = init_check(args.init, args.expect_sha, args.need_loss_weight)
+        probs, facts = init_check(args.init, args.expect_sha, args.need_loss_weight, variant=args.variant, x=args.x,
+                                  base=args.base)
         print(json.dumps({"ok": not probs, "problems": probs, **facts}))
+        for pr in probs:
+            print(f"[variants] init-check: {pr}", file=sys.stderr)
+        if facts.get("code_differs"):
+            return INIT_RC_CODE_DIFFERS
         return 1 if probs else 0
     elif args.cmd == "adapter-ok":
         eval_mode(args.variant, args.base, args.x)  # the base must be consistent
@@ -1202,6 +1367,8 @@ def main(argv=None) -> int:
             if e.get("state") == "ok":
                 t = e["table"]["SEL"]
                 print(f"  {k:60s} SEL nav {_k(t['nav'])} vis {_k(t['vis'])}")
+        for pr in doc["problems"]:
+            print(f"[variants] analyze problem: {pr}")
     elif args.cmd == "expect":
         missing = 0
         for pth in expected_outputs(args.variant, args.base, args.x, args.b1_out):

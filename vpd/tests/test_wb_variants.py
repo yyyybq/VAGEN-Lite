@@ -4,7 +4,9 @@ vpd/walkerbench/variants.py and vpd/jobs/wb_variants.sh.
 Hermetic: fakes for the agent, the trainer outputs and the evals; no GPU, no network, no rendering, no model.  Some
 tests read real files read-only and fast (split_s2.json, the s2train task JSONs copied into a temp dir by setup, the
 first demos of tiers/seed1001/demos_all.jsonl, the stock prompt code in the WalkerBench checkout); they skip when a
-file is missing.  The payload is only run with VPD_DRYRUN=1 (it then prints its commands).
+file is missing.  The payload runs with VPD_DRYRUN=1 (it then prints its commands) and, for its failure handling,
+non-dry from a temp code tree whose common_env.sh shim sources the real one and then points PY_EVAL / PY_Q3 /
+PY_TRAIN at a fake interpreter (a bash script that logs and answers each call) and VPD_OUT at a temp dir.
     cd /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd && env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
       NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false PYTHONDONTWRITEBYTECODE=1 nice -n 19 \
       $PY_Q3 -B -m pytest -q -p no:cacheprovider --basetemp=$SCRATCH/pt vpd/tests/test_wb_variants.py
@@ -16,6 +18,9 @@ import ast
 import json
 import os
 import re
+import shlex
+import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -398,6 +403,72 @@ def test_split_eval_argv():
             V.split_eval_argv(bad)
 
 
+def test_cmd_eval_fails_when_the_odometer_hook_did_not_act(tmp_path, monkeypatch):
+    """--odometer line with 0 odometer lines (or off with some) fails: rc 1, results.json -> results_invalid.json,
+    explore.json says why.  An earlier run's results.json is never judged, moved or re-described."""
+    need(V.SPLIT_S2)
+
+    def fake_main_with(n_lines):
+        def fake_main(argv):
+            d = Path(argv[argv.index("--out-root") + 1]) / argv[argv.index("--run-name") + 1]
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "results.json").write_text("{}\n")  # run_vpd.finalize of a valid run
+            R.COUNTS["odometer_lines"] += n_lines
+        return fake_main
+
+    for mode, n, ok in (("line", 0, False), ("line", 3, True), ("off", 2, False), ("off", 0, True)):
+        R.COUNTS.clear()
+        monkeypatch.setattr(R, "main", fake_main_with(n))
+        name = f"e_{mode}_{n}"
+        rc = V.cmd_eval(["--odometer", mode, "--model", "Q3B", "--task-set", "s2sel", "--run-name", name,
+                         "--out-root", str(tmp_path)])
+        d = tmp_path / name
+        ex = json.loads((d / "explore.json").read_text())
+        assert (rc == 0) is ok and ex["rc"] == rc and ex["odometer_check"]["ok"] is ok, (mode, n)
+        assert ex["odometer_counts"]["odometer_lines"] == n
+        assert (d / "results.json").exists() is ok and (d / "results_invalid.json").exists() is (not ok)
+        if not ok:
+            assert ex["odometer_check"]["results_json_moved_to"] == "results_invalid.json"
+    assert V.odometer_problem("line", {}) and V.odometer_problem("off", {}) is None
+    # run_vpd refuses an existing run (no --overwrite): the earlier results.json and explore.json stay as they were
+    d = tmp_path / "e_line_0"
+    (d / "results_invalid.json").rename(d / "results.json")
+    before = {p.name: p.read_bytes() for p in d.iterdir()}
+
+    def refuse(argv):
+        raise SystemExit(f"{d / 'results.json'} exists; pass --overwrite to replace this run")
+
+    R.COUNTS.clear()
+    monkeypatch.setattr(R, "main", refuse)
+    assert V.cmd_eval(["--odometer", "line", "--model", "Q3B", "--task-set", "s2sel", "--run-name", "e_line_0",
+                       "--out-root", str(tmp_path)]) == 1
+    assert {p.name: p.read_bytes() for p in d.iterdir()} == before
+
+
+def test_atomic_writes_use_unique_temp_names(tmp_path, monkeypatch):
+    p = tmp_path / "analysis" / "ANALYZE.json"
+    t1, t2 = V.tmp_sibling(p), V.tmp_sibling(p)
+    host = re.sub(r"[^A-Za-z0-9_.-]", "_", socket.gethostname())[:40]
+    assert t1 != t2 and t1.parent == p.parent and t1.name.startswith(f".ANALYZE.json.tmp-{host}-{os.getpid()}-")
+    V.write_json(p, {"b": [1, 2], "u": "é"})
+    q = tmp_path / "L.json"
+    L.write_json(q, {"b": [1, 2], "u": "é"})
+    assert p.read_bytes() == q.read_bytes()  # learn483.write_json's bytes
+    assert sorted(x.name for x in p.parent.iterdir()) == ["ANALYZE.json"]
+    V.write_text(p.with_name("R.md"), "x\n")
+    assert p.with_name("R.md").read_text(encoding="utf-8") == "x\n"
+
+    def boom(src, dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(V.os, "replace", boom)
+    with pytest.raises(OSError):
+        V.write_text(p, "new")
+    monkeypatch.undo()
+    assert json.loads(p.read_text()) == {"b": [1, 2], "u": "é"}
+    assert sorted(x.name for x in p.parent.iterdir()) == ["ANALYZE.json", "R.md"]  # no temp file left behind
+
+
 # ------------------------------------------------------------------------------------------ data writer
 def _syn_user(moves, step, stated=True):
     mv = "\n".join(f"  {i}: {d}" + (f" ({x:.1f}m)" if x else "") for i, d, x in moves)
@@ -571,6 +642,43 @@ def test_init_check_and_adapter_check(tmp_path, monkeypatch):
     assert V.adapter_check("V1T", x, init)[0] == 0
 
 
+def test_init_check_code_reference_for_v5_v4(tmp_path, monkeypatch):
+    """V5 / V4 refuse to train when the current trainer code_sha256 differs from X/V0's or X/BASE's adapter."""
+    init = tmp_path / "0W"
+    init.mkdir()
+    (init / "adapter.pt").write_bytes(b"init")
+    (init / "meta.json").write_text(json.dumps({"start": "Q3B", "optimizer_steps": 30, "optimizer_steps_planned": 30}))
+    pre = L.sha256_file(init / "adapter.pt")[:12]
+    x = tmp_path / "X"
+
+    def meta(v, code):
+        (x / v / "adapter").mkdir(parents=True, exist_ok=True)
+        (x / v / "adapter" / "meta.json").write_text(json.dumps({"code_sha256": code}))
+
+    probs, facts = V.init_check(init, pre, variant="V5", x=x, base="V1T", current_code="c1")
+    assert probs == [] and facts["code_reference"] == {}  # no V0 (nor V1T) adapter yet: nothing to compare with
+    meta("V0", "c1")
+    assert V.init_check(init, pre, variant="V5", x=x, base="V1T", current_code="c1")[0] == []
+    probs, facts = V.init_check(init, pre, variant="V4", x=x, base="V1T", current_code="c2")
+    assert facts["code_differs"] is True and len(probs) == 1
+    assert "refusing to train V4" in probs[0] and "X/V0/adapter/meta.json code_sha256 c1" in probs[0]
+    meta("V1T", "c3")  # the base trained with other code than V0
+    probs, facts = V.init_check(init, pre, variant="V5", x=x, base="V1T", current_code="c1")
+    assert facts["code_differs"] and "X/V1T/adapter" in probs[0] and "X/V0/" not in probs[0]
+    assert facts["code_reference"] == {"V0": "c1", "V1T": "c3"}
+    for v in ("V0", "V1T", "V2"):  # trained together from one commit: no reference check
+        assert V.init_check(init, pre, variant=v, x=x, current_code="zz")[0] == []
+    # the CLI: exit 4 when the code differs (the payload records train_V:code_differs), 0 when it is equal
+    monkeypatch.setattr(V, "trainer_code_sha256", lambda: "c3")
+    cli = ["init-check", "--init", str(init), "--expect-sha", pre, "--x", str(x)]
+    assert V.main(cli + ["--variant", "V5", "--base", "V1T"]) == V.INIT_RC_CODE_DIFFERS == 4
+    meta("V0", "c3")
+    assert V.main(cli + ["--variant", "V5", "--base", "V1T"]) == 0
+    assert V.main(cli + ["--variant", "V4", "--base", "V5", "--expect-sha", "ffffffffffff"]) == 1  # other problem
+    monkeypatch.setattr(V, "trainer_code_sha256", lambda: "c9")
+    assert V.main(cli + ["--variant", "V4", "--base", "V5", "--expect-sha", "ffffffffffff"]) == 4
+
+
 def test_real_pilot_0W_init_check():
     pt = need(V.INIT / "adapter.pt")
     if not os.access(pt, os.R_OK):
@@ -672,7 +780,21 @@ def test_analyze_synthetic(tmp_path):
           {**{s: int(i == 0) for i, s in enumerate(navs)}, **{s: int(i < 2) for i, s in enumerate(viss)}},
           results={"adapter": {"adapter_sha256": "a"}, "blind": True})
     _eval(x / "V1" / "evals" / V.eval_name("raw", "s2sel", "off", "line"), {s: 0 for s in navs + viss},
-          explore={"odometer": "line"})
+          explore={"odometer": "line", "odometer_counts": {"odometer_lines": 40, "odometer_moves_added": 12}})
+    # an odometer eval whose hook never inserted the line (scored before the check existed): flagged
+    _eval(x / "V1" / "evals" / V.eval_name("V0", "s2sel", "empty", "line"), {s: 0 for s in navs + viss},
+          explore={"odometer": "line", "odometer_counts": {"odometer_lines": 0, "odometer_moves_added": 0}})
+    # one cmd_eval failed on the hook check: results_invalid.json, with the reason in explore.json
+    dinv = x / "V1" / "evals" / V.eval_name("raw", "s2sel", "empty")
+    dinv.mkdir(parents=True)
+    (dinv / "results_invalid.json").write_text("{}")
+    (dinv / "explore.json").write_text(json.dumps({"odometer": "off", "odometer_check": {"ok": False, "problem": "p"}}))
+    # trained variants: V0 and V2 from one init but with two trainer codes
+    for v, code in (("V0", "c1" * 32), ("V2", "c2" * 32)):
+        (x / v / "adapter").mkdir(parents=True)
+        (x / v / "adapter" / "meta.json").write_text(json.dumps({
+            "code_sha256": code, "init_adapter": {"sha256": "i1" * 32}, "optimizer_steps": 5,
+            "optimizer_steps_planned": 5}))
     (x / "V1T" / "evals" / V.eval_name("V1T", "s2sel", "empty", "line")).mkdir(parents=True)  # no results yet
     # V2 short eval with one logged nav episode for the THOUGHT odometer stats
     d2 = x / "V2" / "evals" / V.eval_name("V2", "s2sel", "short")
@@ -708,9 +830,31 @@ def test_analyze_synthetic(tmp_path):
     assert th["calls"] == 3 and th["format_ok"]["k"] == 2 and th["walked_exact_0.05"]["k"] == 1
     assert th["walked_abs_err_max"] == 0.6 and th["nav_stated_matches_task"]["k"] == 2
     assert doc["g4h_inputs"]["best_nav_k_SEL"] == 8
+    # consistency: the distinct adapter code_sha256 / init_adapter sha256 across the trained variants
+    cons = doc["consistency"]
+    assert list(cons["variants"]) == ["V0", "V2"] and cons["variants"]["V0"]["finished"] is True
+    assert cons["distinct_code_sha256"] == [{"value": "c1" * 32, "variants": ["V0"]},
+                                            {"value": "c2" * 32, "variants": ["V2"]}]
+    assert cons["distinct_init_adapter_sha256"] == [{"value": "i1" * 32, "variants": ["V0", "V2"]}]
+    assert len(cons["problems"]) == 1 and "2 distinct adapter code_sha256" in cons["problems"][0]
+    assert "c1c1c1c1c1c1 (V0)" in cons["problems"][0] and "c2c2c2c2c2c2 (V2)" in cons["problems"][0]
+    # odometer: the line eval without lines is flagged, the counted one is not, the failed one shows its reason
+    bad = doc["evals"]["V1/" + V.eval_name("V0", "s2sel", "empty", "line")]
+    assert bad["state"] == "ok" and "odometer_lines == 0" in bad["odometer_problem"]
+    assert "odometer_problem" not in doc["evals"]["V1/" + V.eval_name("raw", "s2sel", "off", "line")]
+    inv = doc["evals"]["V1/" + V.eval_name("raw", "s2sel", "empty")]
+    assert inv["state"] == "invalid" and inv["invalid_reason"] == "p"
+    assert doc["problems"] == cons["problems"] + [
+        f"eval V1/{V.eval_name('V0', 's2sel', 'empty', 'line')}: " + bad["odometer_problem"]]
     md = (x / "analysis" / "REPORT_EXPLORATORY.md").read_text(encoding="utf-8")
     assert "EXPLORATORY" in md and "Numbers only" in md and json.loads((x / "analysis" / "ANALYZE.json").read_text())[
         "exploratory"] is True
+    assert "## Problems" in md and "## Consistency (trained variants)" in md and "| code_sha256 | c2c2c2c2c2c2 | V2 |" in md
+    # no consistency problem with one code and one init
+    (x / "V2" / "adapter" / "meta.json").write_text(json.dumps({"code_sha256": "c1" * 32,
+                                                                "init_adapter": {"sha256": "i1" * 32}}))
+    assert V.analyze(x, sel, db)["consistency"]["problems"] == []
+    assert sorted(p.name for p in (x / "analysis").iterdir()) == ["ANALYZE.json", "REPORT_EXPLORATORY.md"]
 
 
 # ------------------------------------------------------------------------------------------ payload (dry run)
@@ -858,3 +1002,153 @@ def test_payload_refusals_and_deadline(tmp_path):
     names = [json.loads(s)["name"] for s in (run / "steps.jsonl").read_text().splitlines()]
     assert {"b1_render:no_time", "train_V0:no_time", "eval_V1_raw_s2sel_off:no_time"} <= set(names)
     assert "merge_V0:no_adapter" in names and not (run / "DONE").exists()
+
+
+# ------------------------------------------------------------------------------------------ payload (non-dry, fakes)
+FAKE_PY = r"""#!/usr/bin/env bash
+# fake PY_EVAL / PY_Q3 / PY_TRAIN of the non-dry payload tests: log the call, answer it, touch nothing else
+printf '%s\n' "$*" >> "$FAKE_LOG"
+a=" $* "
+case $a in
+  *" vpd.walkerbench.variants init-check "*)
+    echo '{"ok": false, "problems": ["fake init-check"]}'; exit "${FAKE_INIT_RC:-0}" ;;
+  *" vpd.walkerbench.variants adapter-ok "*) exit "${FAKE_ADAPTER_RC:-1}" ;;
+  *" vpd.walkerbench.variants b1 "*"--stage done "*) exit 1 ;;
+  *" vpd.walkerbench.variants eval-mode "*) echo "${FAKE_MODE:-empty off}" ;;
+  *" vpd.walkerbench.variants expect "*) echo "[variants] fake expect"; exit "${FAKE_EXPECT_RC:-1}" ;;
+esac
+exit 0
+"""
+
+
+def _fake_tree(tmp_path: Path, data_variant: str | None = None):
+    """A temp code tree holding a byte copy of the payload and a common_env.sh shim (the real prelude, then fake
+    interpreters and VPD_OUT = tmp_path/OUT with the payload's input files; X/<data_variant>/data/train.jsonl as the
+    fake data step would have left it); returns (payload, env, WB)."""
+    if data_variant:
+        (tmp_path / "X" / data_variant / "data").mkdir(parents=True)
+        (tmp_path / "X" / data_variant / "data" / "train.jsonl").write_text("{}\n")
+    jobs = tmp_path / "code" / "vpd" / "jobs"
+    jobs.mkdir(parents=True)
+    shutil.copyfile(PAYLOAD, jobs / "wb_variants.sh")
+    fake = tmp_path / "fakepy"
+    fake.write_text(FAKE_PY)
+    fake.chmod(0o755)
+    wb = tmp_path / "OUT" / "walkerbench"
+    for rel in ("split/split_s2.json", "tiers/order_seed1001.json", "tiers/seed1001/demos_all.jsonl"):
+        (wb / rel).parent.mkdir(parents=True, exist_ok=True)
+        (wb / rel).write_text("{}\n")
+    (tmp_path / "P" / "adapters" / "0W").mkdir(parents=True)
+    (tmp_path / "P" / "adapters" / "0W" / "adapter.pt").write_bytes(b"0W")
+    q = shlex.quote
+    (jobs / "common_env.sh").write_text(
+        "# test shim: the real prelude, then fake interpreters and a temp OUT\n"
+        f"source {q(str(PAYLOAD.parent / 'common_env.sh'))}\n"
+        f"export VPD_OUT={q(str(tmp_path / 'OUT'))} PY_EVAL={q(str(fake))} PY_Q3={q(str(fake))} "
+        f"PY_TRAIN={q(str(fake))}\n")
+    env = {"VPD_WORKTREE": str(tmp_path / "code"), "VPD_WBV_ROOT": str(tmp_path / "X"),
+           "VPD_WBV_PILOT": str(tmp_path / "P"), "VPD_WBV_B1_OUT": str(tmp_path / "B1"),
+           "VPD_MERGE_DIR": str(tmp_path / "merged"),  # not a /tmp|/dev/shm vpd_merged dir: nothing is ever removed
+           "FAKE_LOG": str(tmp_path / "fake.log")}
+    return jobs / "wb_variants.sh", env, wb
+
+
+def _steps(run: Path) -> list:
+    return [json.loads(s) for s in (run / "steps.jsonl").read_text().splitlines()]
+
+
+@pytest.mark.parametrize("variant,base,fake,rc_want,train_step", [
+    ("V0", "", {"FAKE_INIT_RC": "1"}, 1, ("train_V0:no_init", "init_check", 1)),
+    ("V5", "V1T", {"FAKE_INIT_RC": "4", "FAKE_MODE": "empty line"}, 1, ("train_V5:code_differs", "init_check", 4)),
+    ("V0", "", {"FAKE_INIT_RC": "0", "FAKE_ADAPTER_RC": "3"}, 3, ("train_V0:code_mismatch", "init_check", 0)),
+])
+def test_payload_failed_step_does_not_end_the_payload(tmp_path, variant, base, fake, rc_want, train_step):
+    """No adapter (init-check refused, or trained with other code): the training and merged-eval failures are
+    recorded and every independent step still runs: the raw probes (job A), analyze and expect; no RUN/DONE (a stale
+    one is removed); exit 1, or 3 for an adapter trained with other code."""
+    payload, env, _ = _fake_tree(tmp_path, variant)
+    run = tmp_path / "jobs" / f"wb-{variant.lower()}-202611100002"
+    run.mkdir(parents=True)
+    (run / "DONE").write_text("stale\n")
+    res = _bash([str(payload), variant, str(run)] + ([base] if base else []), dict(env, **fake), tmp_path)
+    assert res.returncode == rc_want, res.stderr + res.stdout
+    steps = _steps(run)
+    names = [s["name"] for s in steps]
+    rc = {s["name"]: s["rc"] for s in steps}
+    tstep, istep, irc = train_step
+    assert rc[istep] == irc and rc[tstep] == 1 and rc[f"merge_{variant}:no_adapter"] == 1
+    assert names.index(istep) < names.index(tstep) < names.index("analyze") < names.index("expect")
+    assert names[-2:] == ["analyze", "expect"] and rc["analyze"] == 0 and rc["expect"] == 1
+    assert rc["setup"] == 0 and rc[f"data_{variant}"] == 0
+    raw = ["eval_V1_raw_s2sel_off", "eval_V1_raw_s2sel_off_odo", "eval_V1_raw_s2sel_empty"]
+    if variant == "V0":
+        assert [n for n in names if n.startswith("eval_V1_raw")] == raw and all(rc[n] == 0 for n in raw)
+        assert names.index(tstep) < names.index(raw[0]) and names[0] == "b1_precheck"
+        assert all(rc[n] == 0 for n in ("b1_precheck", "b1_before", "b1_render", "b1_merge", "b1_after"))
+    else:
+        assert not any(n.startswith(("eval_V1", "b1")) for n in names) and rc["floors_s2sel"] == 0
+    assert not (run / "DONE").exists() and (run / "expect.txt").read_text() == "[variants] fake expect\n"
+    log = (tmp_path / "fake.log").read_text()
+    assert "n2_train_vpd.py" not in log and "merge.py" not in log  # no training, no merge
+    if variant == "V5":
+        assert "init-check --init" in log and "--variant V5 --base V1T" in log and "--need-loss-weight" in log
+        assert "init-check refused V5" in res.stderr
+    assert "failed steps: none" not in res.stdout
+    assert not (tmp_path / "merged").exists()
+
+
+def test_payload_done_only_when_every_step_and_expect_passed(tmp_path):
+    """V1T with a finished adapter and fresh evals: every step passes and expect passes -> RUN/DONE, exit 0."""
+    payload, env, _ = _fake_tree(tmp_path, "V1T")
+    for blind in (False, True):
+        d = tmp_path / "X" / "V1T" / "evals" / V.eval_name("V1T", "s2sel", "empty", "line", blind)
+        d.mkdir(parents=True)
+        (d / "results.json").write_text("{}\n")
+    run = tmp_path / "jobs" / "wb-v1t-202611100003"
+    fake = {"FAKE_INIT_RC": "0", "FAKE_ADAPTER_RC": "0", "FAKE_MODE": "empty line", "FAKE_EXPECT_RC": "0"}
+    res = _bash([str(payload), "V1T", str(run)], dict(env, **fake), tmp_path)
+    assert res.returncode == 0, res.stderr + res.stdout
+    names = [s["name"] for s in _steps(run)]
+    assert names == ["setup", "data_V1T", "init_check", "train_V1T:skip", "eval_V1T_V1T_s2sel_empty_odo:skip",
+                     "eval_V1T_V1T_s2sel_empty_odo_blind:skip", "merge_V1T:skip", "analyze", "expect"]
+    assert all(s["rc"] == 0 for s in _steps(run)) and (run / "DONE").exists()
+    # the same run with a failing expect list: no DONE (the earlier one is removed), exit 1
+    res = _bash([str(payload), "V1T", str(run)], dict(env, **dict(fake, FAKE_EXPECT_RC="1")), tmp_path)
+    assert res.returncode == 1 and not (run / "DONE").exists()
+
+
+def test_payload_b1_partial_dir_aside_and_frozen_guard(tmp_path):
+    payload, env, wb = _fake_tree(tmp_path)
+    fake = {"FAKE_INIT_RC": "1"}
+    # a cut render: B1 out dir with images but without shards/shard0of1.json -> moved aside, then re-rendered
+    img = tmp_path / "B1" / "images" / V.B1_STEM / "turn_00.jpg"
+    img.parent.mkdir(parents=True)
+    img.write_bytes(b"j")
+    run = tmp_path / "jobs" / "wb-v0v1-202611100004"
+    _bash([str(payload), "V0", str(run)], dict(env, **fake), tmp_path)
+    names = [s["name"] for s in _steps(run)]
+    assert names[:4] == ["b1_precheck", "b1_before", "b1_partial_aside", "b1_render"]
+    assert all(s["rc"] == 0 for s in _steps(run)[:6])
+    aside = sorted(tmp_path.glob("B1.partial-*"))
+    assert len(aside) == 1 and re.fullmatch(r"B1\.partial-\d{8}T\d{6}Z", aside[0].name)
+    assert (aside[0] / "images" / V.B1_STEM / "turn_00.jpg").read_bytes() == b"j" and not (tmp_path / "B1").exists()
+    # a complete render (its shard manifest exists) is not moved
+    (tmp_path / "B1" / "shards").mkdir(parents=True)
+    (tmp_path / "B1" / "shards" / "shard0of1.json").write_text("{}")
+    run2 = tmp_path / "jobs" / "wb-v0v1-202611100005"
+    _bash([str(payload), "V0", str(run2)], dict(env, **fake), tmp_path)
+    assert [s["name"] for s in _steps(run2)][:3] == ["b1_precheck", "b1_before", "b1_render:skip"]
+    assert len(list(tmp_path.glob("B1.partial-*"))) == 1 and (tmp_path / "B1" / "shards").is_dir()
+    # the frozen demos dir (or a dir holding it, or one inside it) is never used as the B1 out dir
+    frozen = wb / "demos" / "s2train_640x400"
+    (frozen / "images").mkdir(parents=True)
+    (frozen / "demos_all.jsonl").write_text("frozen\n")
+    for i, b1 in enumerate((frozen, wb / "demos", frozen / "images" / "x")):
+        r = tmp_path / "jobs" / f"wb-v0v1-20261110001{i}"
+        res = _bash([str(payload), "V0", str(r)], dict(env, VPD_WBV_B1_OUT=str(b1) + "/", **fake), tmp_path)
+        steps = _steps(r)
+        assert steps[0]["name"] == "b1:frozen_dir_refused" and steps[0]["rc"] == 1, res.stderr
+        assert not any(s["name"].startswith("b1_") for s in steps) and "refusing B1 out dir" in res.stderr
+        assert [s["name"] for s in steps][1] == "setup" and "expect" in [s["name"] for s in steps]
+    assert sorted(p.name for p in frozen.iterdir()) == ["demos_all.jsonl", "images"]
+    assert (frozen / "demos_all.jsonl").read_text() == "frozen\n" and not list(wb.glob("demos/*.partial-*"))
