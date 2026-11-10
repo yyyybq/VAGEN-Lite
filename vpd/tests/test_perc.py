@@ -1,8 +1,10 @@
 """Tests of the EXPLORATORY perception zero-shot package (DECISIONS G5): vpd/walkerbench/perc.py, vpd/jobs/wb_perc.sh.
 
 Hermetic: a fake WalkerBench checkout and panorama dir under tmp_path for the task-set build / verify / refusals, a
-fake run_vpd module for the eval wrapper, synthetic run dirs (results.json, per_task.jsonl, logs, calls.jsonl) for
-the analysis, and the payload in VPD_DRYRUN=1 mode.  No GPU, no model, no network, no rendering.  Two read-only checks
+fake run_vpd module for the eval wrapper (with the job guard's test override VPD_PERC_TEST_ALLOW_LIVE=1, or a fake
+code snapshot), the run-dir lock under tmp_path, synthetic run dirs (results.json, per_task.jsonl, timestamped logs,
+calls.jsonl) for the analysis (incl. the inferred end_max_time class and the timing stats), and the payload in
+VPD_DRYRUN=1 mode (incl. the optional start list).  No GPU, no model, no network, no rendering.  Two read-only checks
 look at the real checkout (the 104 / 107 / 83 inventory) and at the built OUT perc294 dir; they skip when absent.
     cd $WT && env OMP_NUM_THREADS=1 ... nice -n 19 $PY_Q3 -B -m pytest -q -p no:cacheprovider --basetemp=<dir> \
         vpd/tests/test_perc.py
@@ -10,6 +12,7 @@ look at the real checkout (the 104 / 107 / 83 inventory) and at the built OUT pe
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import subprocess
@@ -52,8 +55,10 @@ SMALL = {"angle": 2, "dis": 2, "height": 2}
 
 def _task(stem: str, spawn: str) -> bytes:
     t = stem.split("_", 1)[0]
-    return json.dumps({"task_id": stem, "task_type": t, "spawn_pano_id": spawn,
-                       "max_steps": None if t == "height" else 20}, indent=1).encode()
+    task = {"task_id": stem, "task_type": t, "spawn_pano_id": spawn, "max_steps": None if t == "height" else 20}
+    if t == "height":
+        task["max_time_seconds"] = 180  # as every real height task (upstream)
+    return json.dumps(task, indent=1).encode()
 
 
 def fake_repo(base: Path, full=FULL, standard=STANDARD, panos=PANOS_PRESENT) -> tuple:
@@ -200,15 +205,24 @@ def test_real_checkout_inventory():
 
 
 # ------------------------------------------------------------------------------------------ eval wrapper
-def test_cmd_eval_with_a_fake_run_vpd(tmp_path):
-    repo, pdir, dest = built_set(tmp_path)
-    root = tmp_path / "R"
-    seen = []
+@pytest.fixture
+def in_job(tmp_path, monkeypatch):
+    """The eval guard's test override and a job RUN dir (what wb_perc.sh exports in a job)."""
+    run = tmp_path / "jobs" / "wb-perc-test"
+    run.mkdir(parents=True)
+    monkeypatch.setenv(P.ALLOW_LIVE_ENV, "1")
+    monkeypatch.setenv("RUN", str(run))
+    monkeypatch.delenv(P.TAKEOVER_ENV, raising=False)
+    return run
 
+
+def _fake_run_vpd(seen: list, dest: Path, check=None):
     def fake_main(argv):
         seen.append(list(argv))
         a = {argv[i]: argv[i + 1] for i in range(len(argv) - 1) if argv[i].startswith("--")}
         assert R.TASK_SETS["perc294"] == dest / "tasks"
+        if check is not None:
+            check(argv)
         d = Path(a["--out-root"]) / a["--run-name"]
         d.mkdir(parents=True, exist_ok=True)
         (d / "results.json").write_text("{}")
@@ -216,15 +230,35 @@ def test_cmd_eval_with_a_fake_run_vpd(tmp_path):
             raise SystemExit("invalid run: fake")
 
     R = types.SimpleNamespace(TASK_SETS={"s2test": Path("/x")}, main=fake_main, code_sha256=lambda: {"run_vpd": "ab"})
+    return R
+
+
+def test_cmd_eval_with_a_fake_run_vpd(tmp_path, in_job):
+    repo, pdir, dest = built_set(tmp_path)
+    root = tmp_path / "R"
+    seen, held = [], []
+
+    def lock_held(argv):  # while run_vpd runs, this start's lock is held by this RUN
+        start = argv[argv.index("--model") + 1]
+        held.append(json.loads(P.lock_path(start, root).read_text()))
+
+    R = _fake_run_vpd(seen, dest, lock_held)
     rc = P.cmd_eval(["--start", "Q3S", "--root", str(root)], R, dest, repo, pdir, SMALL)
     assert rc == 0 and seen[0] == P.protocol_argv("Q3S", root)
+    h = held[0]
+    assert (h["run"], h["start"], h["pid"], h["took_over"]) == (str(in_job), "Q3S", os.getpid(), None)
+    assert h["host"] and h["utc"].endswith("Z") and h["token"]
+    assert not P.lock_path("Q3S", root).exists()  # released
     ex = json.loads((P.run_dir_of("Q3S", root) / "explore.json").read_text())
     assert ex["label"] == "EXPLORATORY" and ex["exploratory"] and ex["rc"] == 0 and ex["start"] == "Q3S"
     assert ex["run_vpd_argv"] == P.protocol_argv("Q3S", root) and ex["code"]["run_vpd"] == "ab"
     assert ex["selection_sha256"] == P.sha256_file(dest / "selection.json")
+    assert ex["run"] == str(in_job) and ex["code_snapshot"]["override"] == f"{P.ALLOW_LIVE_ENV}=1"
+    assert ex["lock"]["path"] == str(P.lock_path("Q3S", root)) and ex["lock"]["took_over"] is None
     rc = P.cmd_eval(["--start", "E2", "--root", str(root), "--overwrite"], R, dest, repo, pdir, SMALL)
     assert rc == 1 and seen[-1][-1] == "--overwrite"
     assert json.loads((P.run_dir_of("E2", root) / "explore.json").read_text())["rc"] == 1
+    assert not P.lock_path("E2", root).exists()  # released after a failed run too
     with pytest.raises(SystemExit):
         P.cmd_eval(["--start", "Q3RD", "--root", str(root)], R, dest, repo, pdir, SMALL)
     with pytest.raises(SystemExit, match="read only"):
@@ -237,6 +271,107 @@ def test_cmd_eval_with_a_fake_run_vpd(tmp_path):
     R.TASK_SETS["perc294"] = Path("/elsewhere")
     with pytest.raises(SystemExit, match="expected"):
         P.register_task_sets(R, dest / "tasks")
+
+
+def _snapshot_root(base: Path, record=None) -> Path:
+    root = base / "RUN" / "code"
+    (root / "vpd").mkdir(parents=True)
+    if record is not None:
+        (root / "SNAPSHOT.json").write_text(record if isinstance(record, str) else json.dumps(record))
+    return root
+
+
+def test_eval_refused_outside_a_job(tmp_path, monkeypatch):
+    """perc eval starts vLLM: refused unless the code is a job's snapshot (or the tests' explicit override)."""
+    repo, pdir, dest = built_set(tmp_path)
+    root, seen = tmp_path / "R", []
+    R = _fake_run_vpd(seen, dest)
+    argv = ["--start", "Q3B", "--root", str(root)]
+    for k in (P.ALLOW_LIVE_ENV, P.TAKEOVER_ENV, "RUN"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(paths, "WORKTREE", _snapshot_root(tmp_path / "live"))  # a live tree: no SNAPSHOT.json
+    with pytest.raises(SystemExit, match="not inside a job"):
+        P.cmd_eval(argv, R, dest, repo, pdir, SMALL)
+    monkeypatch.setenv(P.ALLOW_LIVE_ENV, "0")  # only "1" overrides
+    with pytest.raises(SystemExit, match="not inside a job"):
+        P.cmd_eval(argv, R, dest, repo, pdir, SMALL)
+    monkeypatch.delenv(P.ALLOW_LIVE_ENV)
+    monkeypatch.setattr(paths, "WORKTREE", _snapshot_root(tmp_path / "bad", "not json"))
+    with pytest.raises(SystemExit, match="mode 'unreadable'"):
+        P.cmd_eval(argv, R, dest, repo, pdir, SMALL)
+    assert seen == [] and not root.exists()  # nothing ran, nothing written
+    snap = _snapshot_root(tmp_path / "job", {"format": 1, "commit": "c0ffee" * 6 + "abcd", "utc": "x", "files": {}})
+    monkeypatch.setattr(paths, "WORKTREE", snap)
+    with pytest.raises(SystemExit, match="env RUN"):  # a snapshot, but no RUN
+        P.cmd_eval(argv, R, dest, repo, pdir, SMALL)
+    monkeypatch.setenv("RUN", "relative/run")
+    with pytest.raises(SystemExit, match="env RUN"):
+        P.cmd_eval(argv, R, dest, repo, pdir, SMALL)
+    assert seen == []
+    run = tmp_path / "RUN"
+    monkeypatch.setenv("RUN", str(run))
+    assert P.cmd_eval(argv, R, dest, repo, pdir, SMALL) == 0 and len(seen) == 1
+    ex = json.loads((P.run_dir_of("Q3B", root) / "explore.json").read_text())
+    assert ex["code_snapshot"] == {"mode": "snapshot", "root": str(snap), "commit": "c0ffee" * 6 + "abcd", "utc": "x"}
+    assert ex["run"] == str(run)
+
+
+def test_run_dir_lock_rules(tmp_path, monkeypatch):
+    monkeypatch.delenv(P.TAKEOVER_ENV, raising=False)
+    lp = P.lock_path("E2", tmp_path / "R")
+    run_a, run_b = tmp_path / "jobs" / "A", tmp_path / "jobs" / "B"
+    a = P.acquire_lock(lp, run_a, "E2")
+    on_disk = json.loads(lp.read_text())
+    assert {k: on_disk[k] for k in ("host", "pid", "utc", "run", "start")} == \
+        {k: a[k] for k in ("host", "pid", "utc", "run", "start")} and on_disk["run"] == str(run_a)
+    with pytest.raises(SystemExit, match="neither DONE nor job/exit_code"):  # A still runs
+        P.acquire_lock(lp, run_b, "E2")
+    assert json.loads(lp.read_text())["token"] == a["token"]  # untouched
+    a2 = P.acquire_lock(lp, run_a, "E2")  # the same RUN takes over its own earlier lock
+    assert a2["took_over"]["reason"].startswith("same RUN") and a2["took_over"]["holder"]["token"] == a["token"]
+    assert P.release_lock(a) is False and lp.exists()  # not ours any more
+    for marker in ("DONE", "job/exit_code"):  # the holder's RUN finished: taken over without the override
+        (run_a / marker).parent.mkdir(parents=True, exist_ok=True)
+        (run_a / marker).write_text("x\n")
+        b = P.acquire_lock(lp, run_b, "E2")
+        assert b["took_over"]["reason"].startswith("the holder's RUN has finished")
+        assert json.loads(lp.read_text())["took_over"]["holder"]["run"] == str(run_a)
+        assert P.release_lock(b) is True and not lp.exists()
+        (run_a / marker).unlink()
+        P.acquire_lock(lp, run_a, "E2")
+    monkeypatch.setenv(P.TAKEOVER_ENV, "1")  # the operator saw A's job terminal (no marker)
+    b = P.acquire_lock(lp, run_b, "E2")
+    assert b["took_over"]["reason"] == f"{P.TAKEOVER_ENV}=1" and json.loads(lp.read_text())["run"] == str(run_b)
+    assert P.release_lock(b) and not list(lp.parent.glob(P.LOCK_NAME + "*"))  # no files left beside it
+    monkeypatch.delenv(P.TAKEOVER_ENV)
+    lp.write_text("garbage")  # an unreadable lock refuses unless overridden
+    with pytest.raises(SystemExit, match="unreadable lock: True"):
+        P.acquire_lock(lp, run_b, "E2")
+    monkeypatch.setenv(P.TAKEOVER_ENV, "1")
+    assert P.acquire_lock(lp, run_b, "E2")["took_over"]["holder"] is None
+
+
+def test_eval_refused_while_another_job_holds_the_start(tmp_path, in_job):
+    repo, pdir, dest = built_set(tmp_path)
+    root, seen = tmp_path / "R", []
+    R = _fake_run_vpd(seen, dest)
+    other = tmp_path / "jobs" / "wb-perc-first"
+    P.acquire_lock(P.lock_path("E2", root), other, "E2")
+    with pytest.raises(SystemExit, match="held by RUN"):
+        P.cmd_eval(["--start", "E2", "--root", str(root)], R, dest, repo, pdir, SMALL)
+    assert seen == [] and not P.run_dir_of("E2", root).exists()
+    assert P.cmd_eval(["--start", "Q3B", "--root", str(root)], R, dest, repo, pdir, SMALL) == 0  # other starts: free
+    (other / "job").mkdir(parents=True)
+    (other / "job" / "exit_code").write_text("124\n")  # the first job ended (outer timeout)
+    assert P.cmd_eval(["--start", "E2", "--root", str(root)], R, dest, repo, pdir, SMALL) == 0
+    ex = json.loads((P.run_dir_of("E2", root) / "explore.json").read_text())
+    assert ex["lock"]["took_over"]["holder"]["run"] == str(other) and not P.lock_path("E2", root).exists()
+
+
+def test_protocol_keys_are_run_vpd_result_meta_keys():
+    """protocol_problems reads only keys run_vpd copies into results.json (guards against run_vpd drifting)."""
+    R = run_vpd()
+    assert set(P.protocol_want("Q3B")) <= set(R.RESULT_META_KEYS)
 
 
 def test_registration_in_the_real_run_vpd(tmp_path):
@@ -283,27 +418,44 @@ OUTCOMES = {
 }
 
 
-def fake_run(root: Path, start: str, R, *, constrained="off", workers=8, invalid=False, tamper=None) -> Path:
+T0 = datetime.datetime(2026, 11, 10, 12, 0, 0)
+STEP_S = {"angle": 2.0, "dis": 1.0, "height": 10.0}  # seconds between logged steps, per type (or per stem)
+BASE_TOKENS = {"angle": 30, "dis": 40, "height": 60}  # completion_tokens of step i: base + i; 1024 when cut
+
+
+def _events(stem: str, steps: list, dt: float, start_ts: str | None = None) -> list:
+    ev = [{"event": "session_start", "task_id": stem, "timestamp": start_ts or T0.strftime("%Y%m%d_%H%M%S")}]
+    ev += [{"event": "action", "step": i + 1, "timestamp": (T0 + datetime.timedelta(seconds=dt * (i + 1))).isoformat(),
+            "action": a, "reason": r} for i, (a, r) in enumerate(steps)]
+    return ev
+
+
+def fake_run(root: Path, start: str, R, *, constrained="off", workers=8, invalid=False, tamper=None,
+             outcomes=OUTCOMES, step_s=None) -> Path:
     d = P.run_dir_of(start, root)
     logs = d / "WalkerBench" / "logs"
     logs.mkdir(parents=True)
+    step_s = {**STEP_S, **(step_s or {})}
     rows, calls, per_type = [], [], {t: {"n": 0, "success": 0} for t in P.TYPES}
     tot = {k: 0 for k in ("steps_logged", "parse_valid_steps", "repaired_steps", "unparseable_steps")}
-    for stem, (succ, steps) in OUTCOMES.items():
+    for stem, (succ, steps) in outcomes.items():
         t = stem.split("_", 1)[0]
         per_type[t]["n"] += 1
         per_type[t]["success"] += succ
         log = None
         if steps is not None:
             log = f"{start}_{stem}_x.jsonl"
-            ev = [{"event": "session_start", "task_id": stem}]
-            ev += [{"event": "action", "step": i + 1, "action": a, "reason": r} for i, (a, r) in enumerate(steps)]
+            ev = _events(stem, steps, step_s.get(stem, step_s[t]))
             (logs / log).write_text("".join(json.dumps(e) + "\n" for e in ev))
             st = R.step_stats(ev)
             for k in tot:
                 tot[k] += st[k]
-            calls += [{"task": stem, "step": i + 1, "finish_reason": "length" if t == "height" and i == 0 else "stop"}
-                      for i in range(len(steps))]
+            for i in range(len(steps)):
+                cut = t == "height" and i == 0
+                calls.append({"task": stem, "step": i + 1, "finish_reason": "length" if cut else "stop",
+                              "completion_tokens": 1024 if cut else BASE_TOKENS[t] + i})
+            if stem == "dis_0002_d":
+                calls.append({"task": stem, "step": len(steps) + 1, "error": "boom"})  # no answer, no tokens
         rows.append({"stem": stem, "kind": t, "success": succ, "log": log, "has_log": log is not None})
     (d / "per_task.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     (d / "calls.jsonl").write_text("".join(json.dumps(c) + "\n" for c in calls))
@@ -348,16 +500,29 @@ def test_analyze_synthetic(tmp_path):
     assert [(s["standard20"][t]["k"], s["standard20"][t]["n"]) for t in P.TYPES] == [(1, 1), (0, 1), (0, 1)]
     assert s["perc294"]["angle"]["wilson95"] == [round(x, 4) for x in P.wilson(1, 2)]
     e = a["ends"]
-    assert dict(e["angle"]) == {"end_stop_number": 1, "end_stop_no_number": 1, "end_cap": 0, "end_crash": 0,
-                                "end_other": 0, "no_log": 0}
+    assert dict(e["angle"]) == {"end_stop_number": 1, "end_stop_no_number": 1, "end_cap": 0, "end_max_time": 0,
+                                "end_crash": 0, "end_other": 0, "no_log": 0}
     assert (e["dis"]["end_cap"], e["dis"]["end_crash"]) == (1, 1)
-    assert (e["height"]["end_stop_number"], e["height"]["no_log"]) == (1, 1)
+    assert (e["height"]["end_stop_number"], e["height"]["no_log"], e["height"]["end_max_time"]) == (1, 1, 0)
     st = a["steps"]
     assert (st["angle"]["steps_logged"], st["angle"]["repaired_steps"], st["angle"]["parse_valid_steps"]) == (4, 1, 3)
     assert (st["dis"]["steps_logged"], st["dis"]["invalid_move_crash_steps"]) == (22, 1)
     assert (st["height"]["unparseable_steps"], st["height"]["parse_valid_pct"], st["height"]["mean_steps"]) \
         == (1, 66.67, 3.0)
     assert a["calls"]["height"] == {"calls": 3, "errors": 0, "finish_length": 1}
+    assert a["calls"]["dis"] == {"calls": 23, "errors": 1, "finish_length": 0}
+    tm = a["timing"]
+    assert tm["angle"]["completion_tokens"] == {"n": 4, "mean": 30.5, "p95": 31.0, "max": 31.0}
+    assert tm["dis"]["completion_tokens"]["n"] == 22  # the error call has no tokens
+    assert tm["height"]["completion_tokens"] == {"n": 3, "mean": 382.3, "p95": 1024.0, "max": 1024.0}
+    assert tm["angle"]["step_seconds"] == {"n": 4, "mean": 2.0, "p95": 2.0, "max": 2.0}
+    assert tm["dis"]["episode_seconds"] == {"n": 2, "mean": 11.0, "p95": 20.0, "max": 20.0}
+    assert tm["height"]["episode_seconds"]["n"] == 1 and tm["height"]["step_seconds"]["mean"] == 10.0
+    assert [tm[t]["max_time_seconds"] for t in P.TYPES] == [[None], [None], [180]]
+    assert all(tm[t]["episodes_without_timestamps"] == 0 for t in P.TYPES)
+    assert doc["task_set"]["max_time_seconds"] == {"angle": {"None": 2}, "dis": {"None": 2}, "height": {"180": 2}}
+    assert "推断" in doc["rules"]["end_max_time"] and "wall-clock" in doc["rules"]["height_time_limit"]
+    assert a["produced_by"] == {"run": None, "utc": None, "rc": None, "snapshot_commit": None, "perc_py_sha256": None}
     assert a["totals"]["image_tokens_per_image"] == [242] and a["totals"]["server_ready_seconds"] == 90.0
     assert doc["starts"]["E2"] == {"run_dir": str(P.run_dir_of("E2", root)), "run_name": P.run_name("E2"),
                                    "state": "missing"}
@@ -370,6 +535,8 @@ def test_analyze_synthetic(tmp_path):
     md = (root / "REPORT_EXPLORATORY.md").read_text(encoding="utf-8")
     assert md.startswith("# EXPLORATORY") and "39.0%" in md and "| Q3B | ok | 1/2 (50.0%" in md
     assert "| E2 | 缺 |" in md and "没有闸门" in md
+    assert "限时结束（推断）" in md and "| Q3B | height | 3 | 382.3 | 1024.0 | 10.0 | 10.0 | 30.0 | 30.0 | 30.0 | 180 |" in md
+    assert "180 秒限时是从会话开始算的墙钟时间" in md and "取决于解码速度和同一个 vLLM 服务器上的并发" in md
     lines, bad = P.expect(root, dest)
     assert bad == sum(1 for ln in lines if not ln.startswith("ok")) and bad >= 5  # E2's 4 files + PERC.json E2
     assert any(ln.startswith("PROBLEM PERC.json E2") for ln in lines)
@@ -409,9 +576,61 @@ def test_analyze_flags_protocol_and_consistency_problems(tmp_path):
         P.analyze(P.PILOT_ROOT / "x", dest, R=R, write=False)
 
 
+def test_episode_end_max_time_rule_and_helpers():
+    """end_max_time (推断): last action a MOVE, fewer steps than the cap, the task has a limit, last stamp - start
+    stamp >= the limit; STOP / crash / cap come first; no limit, a non-MOVE last action or a missing stamp -> other."""
+    R = run_vpd()
+    mv, rot = (_mv(), ""), ({"type": "rotation", "heading": 90.0, "pitch": 0}, "")
+    crash = (_mv(), "MOVE(7) [vpd: invalid_move_crash] bad id")
+
+    def ev(steps, dt, **kw):
+        return _events("height_x", steps, dt, **kw)
+
+    assert P.episode_end(ev([mv, mv], 90.0), 30, R, 180) == "end_max_time"  # exactly 180 s
+    assert P.episode_end(ev([mv, mv], 89.95), 30, R, 180) == "end_other"  # 179.9 s
+    assert P.episode_end(ev([mv, mv], 100.0), 30, R, None) == "end_other"  # no limit (angle / dis)
+    assert P.episode_end(ev([mv, mv], 100.0), 2, R, 180) == "end_cap"  # at the cap
+    assert P.episode_end(ev([mv, rot], 100.0), 30, R, 180) == "end_other"  # the engine checks only after a MOVE
+    assert P.episode_end(ev([mv, (_stop("12 m"), "")], 100.0), 30, R, 180) == "end_stop_number"
+    assert P.episode_end(ev([mv, crash], 100.0), 30, R, 180) == "end_crash"
+    assert P.episode_end(ev([mv, mv], 100.0, start_ts="2026-11-10T12:00:00"), 30, R, 180) == "end_other"  # format
+    no_ts = ev([mv, mv], 100.0)
+    no_ts[-1]["timestamp"] = ""
+    assert P.episode_end(no_ts, 30, R, 180) == "end_other" and P.action_elapsed(no_ts) is None
+    assert P.episode_end(ev([], 1.0), 30, R, 180) == "end_other"
+    assert P.action_elapsed(ev([mv, mv], 1.5)) == [1.5, 3.0] and P.action_elapsed(ev([], 1.0)) == []
+    aware = ev([mv], 1.0)
+    aware[-1]["timestamp"] = "2026-11-10T12:03:20+00:00"
+    assert P.action_elapsed(aware) is None
+    assert P.action_elapsed([{"event": "action", "timestamp": "2026-11-10T12:00:01"}]) is None  # no session_start
+    assert P.dist([]) == {"n": 0, "mean": None, "p95": None, "max": None}
+    assert P.dist(range(1, 21)) == {"n": 20, "mean": 10.5, "p95": 19.0, "max": 20.0}  # nearest rank
+    assert P.dist([5]) == {"n": 1, "mean": 5.0, "p95": 5.0, "max": 5.0}
+
+
+def test_analyze_infers_end_max_time_for_height_only(tmp_path):
+    R = run_vpd()
+    _, _, dest = built_set(tmp_path)
+    root = tmp_path / "R"
+    outcomes = dict(OUTCOMES)
+    outcomes["height_0002_h"] = (0, [(_mv(), ""), (_mv(), "")])  # 2 x 95 s: last MOVE at 190 s
+    outcomes["dis_0002_d"] = (0, [(_mv(), ""), (_mv(), "")])  # 200 s, but dis has no time limit
+    fake_run(root, "Q3B", R, outcomes=outcomes, step_s={"height_0002_h": 95.0, "dis_0002_d": 100.0})
+    a = P.analyze(root, dest, R=R)["starts"]["Q3B"]
+    assert a["consistent"] and a["protocol_ok"], a["consistency_problems"]
+    e = a["ends"]
+    assert (e["height"]["end_max_time"], e["height"]["end_stop_number"], e["height"]["no_log"]) == (1, 1, 0)
+    assert (e["dis"]["end_max_time"], e["dis"]["end_other"], e["dis"]["end_cap"]) == (0, 1, 1)
+    tm = a["timing"]["height"]
+    assert tm["step_seconds"] == {"n": 5, "mean": 44.0, "p95": 95.0, "max": 95.0}
+    assert tm["episode_seconds"] == {"n": 2, "mean": 110.0, "p95": 190.0, "max": 190.0}
+    md = (root / "REPORT_EXPLORATORY.md").read_text(encoding="utf-8")
+    assert "| Q3B | height | 5 | 80.0 | 0 | 1 | 0 | 1 | 0 | 0 | 1 | 0 | 0 | 2 |" in md
+
+
 # ------------------------------------------------------------------------------------------ payload
 _KNOBS = ("VPD_THREADS", "VPD_JOB_DEADLINE_S", "VPD_MIN_STEP_S", "VPD_TAIL_RESERVE_S", "VPD_RERUN_INVALID",
-          "VPD_DRYRUN", "RUN", "VPD_PERC_ROOT", "RESERVE")
+          "VPD_DRYRUN", "RUN", "VPD_PERC_ROOT", "RESERVE", "VPD_PERC_TAKEOVER", "VPD_PERC_TEST_ALLOW_LIVE")
 
 
 def _bash(args, env_extra, cwd):
@@ -443,11 +662,12 @@ def test_payload_dryrun_order_and_flags(tmp_path):
         "build --check", f"eval --start Q3B --root {root}", f"eval --start Q3S --root {root}",
         f"eval --start E2 --root {root}", f"analyze --root {root}",
         f"expect --root {root} --check --out {run}/expect.txt"]
-    assert all(ln.startswith("timeout -k 30 ") and 0 < int(ln.split()[3]) <= 5280 for ln in perc)
-    assert all(int(ln.split()[3]) <= 5280 - 120 for ln in perc if " eval " in ln)  # the tail reserve
+    assert all(ln.startswith("timeout -k 30 ") and 6720 - 60 < int(ln.split()[3]) <= 6720 for ln in perc
+               if " eval " not in ln)  # the soft deadline: est 2.0 GPU-h -> outer 6900 s, soft 6720 s
+    assert all(6720 - 120 - 60 < int(ln.split()[3]) <= 6720 - 120 for ln in perc if " eval " in ln)  # tail reserve
     assert all(str(paths.PY_Q3) in ln for ln in perc if " eval " in ln)
     assert all(str(paths.PY_EVAL) in ln for ln in perc if " eval " not in ln)
-    assert "deadline=5280s" in res.stdout and "EXPLORATORY" in res.stdout
+    assert "deadline=6720s" in res.stdout and "EXPLORATORY" in res.stdout and "starts=Q3B Q3S E2" in res.stdout
     assert [s["name"] for s in _steps(run)] == ["check_set", "eval_Q3B", "eval_Q3S", "eval_E2", "analyze", "expect"]
     assert all(s["rc"] == 0 for s in _steps(run))
     assert sorted(p.name for p in run.iterdir()) == ["df_end.txt", "node.txt", "steps.jsonl"]
@@ -474,6 +694,42 @@ def test_payload_skip_invalid_and_rerun(tmp_path):
     assert len(e2) == 1 and e2[0].endswith(f"eval --start E2 --root {root} --overwrite")
 
 
+def test_payload_start_list(tmp_path):
+    """wb_perc.sh RUN [START ...]: a targeted resubmission runs only the listed starts, in the fixed order; analyze and
+    expect still cover all three starts (they read R/<START>/evals of whichever job produced them)."""
+    root = tmp_path / "R"
+    env = {"VPD_DRYRUN": "1", "VPD_PERC_ROOT": str(root)}
+    run = tmp_path / "jobs" / "wb-perc-202611100010"
+    res = _bash([str(PAYLOAD), str(run), "E2"], env, tmp_path)
+    assert res.returncode == 0, res.stderr + res.stdout
+    perc = [ln.split("-m vpd.walkerbench.perc ", 1)[1] for ln in _dry(res.stdout) if "-m vpd.walkerbench.perc " in ln]
+    assert perc == ["build --check", f"eval --start E2 --root {root}", f"analyze --root {root}",
+                    f"expect --root {root} --check --out {run}/expect.txt"]
+    assert [(s["name"], s["rc"]) for s in _steps(run)] == [
+        ("check_set", 0), ("eval_Q3B:not_listed", 0), ("eval_Q3S:not_listed", 0), ("eval_E2", 0), ("analyze", 0),
+        ("expect", 0)]
+    assert "starts=E2 " in res.stdout and f"[dry] date -u > {run}/DONE" in res.stdout
+    run2 = tmp_path / "jobs" / "wb-perc-202611100011"  # given out of order: still Q3B before E2
+    res = _bash([str(PAYLOAD), str(run2), "E2", "Q3B"], {**env, "VPD_PERC_TAKEOVER": "1"}, tmp_path)
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert [ln.split("--start ", 1)[1].split()[0] for ln in _dry(res.stdout) if " eval --start " in ln] == ["Q3B", "E2"]
+    assert [s["name"] for s in _steps(run2)][1:4] == ["eval_Q3B", "eval_Q3S:not_listed", "eval_E2"]
+    assert "takeover=1" in res.stdout
+    d = P.run_dir_of("E2", root)  # a listed start that already finished is skipped
+    d.mkdir(parents=True)
+    (d / "results.json").write_text("{}")
+    run3 = tmp_path / "jobs" / "wb-perc-202611100012"
+    res = _bash([str(PAYLOAD), str(run3), "E2"], env, tmp_path)
+    assert res.returncode == 0 and not any(" eval --start " in ln for ln in _dry(res.stdout))
+    assert [s["name"] for s in _steps(run3)][1:4] == ["eval_Q3B:not_listed", "eval_Q3S:not_listed", "eval_E2:skip"]
+    for args, msg in ((["Q3RD"], "must be one of"), (["E2", "E2"], "given twice"), (["q3b"], "must be one of")):
+        r = _bash([str(PAYLOAD), str(tmp_path / "jobs" / "bad"), *args], env, tmp_path)
+        assert r.returncode == 2 and msg in r.stderr and "usage" in r.stderr
+    r = _bash([str(PAYLOAD), "E2"], {**env, "RUN": str(run)}, tmp_path)  # RUN must come first
+    assert r.returncode == 2 and "absolute path" in r.stderr
+    assert not (tmp_path / "jobs" / "bad").exists()
+
+
 def test_payload_soft_deadline_and_refusals(tmp_path):
     run, root = tmp_path / "jobs" / "wb-perc-202611100003", tmp_path / "R"
     env = {"VPD_DRYRUN": "1", "VPD_PERC_ROOT": str(root)}
@@ -482,6 +738,11 @@ def test_payload_soft_deadline_and_refusals(tmp_path):
     names = [s["name"] for s in _steps(run)]
     assert names == ["check_set:no_time", "eval_Q3B:no_set", "eval_Q3S:no_set", "eval_E2:no_set", "analyze:no_time",
                      "expect:no_time"]
+    run1 = tmp_path / "jobs" / "wb-perc-202611100006"  # with a start list: the unlisted starts are not_listed
+    res = _bash([str(PAYLOAD), str(run1), "Q3S"], {**env, "VPD_JOB_DEADLINE_S": "30"}, tmp_path)
+    assert res.returncode == 1 and [s["name"] for s in _steps(run1)] == [
+        "check_set:no_time", "eval_Q3B:not_listed", "eval_Q3S:no_set", "eval_E2:not_listed", "analyze:no_time",
+        "expect:no_time"]
     run2 = tmp_path / "jobs" / "wb-perc-202611100005"  # time for check_set / analyze / expect, not for an eval
     res = _bash([str(PAYLOAD), str(run2)], {**env, "VPD_JOB_DEADLINE_S": "150"}, tmp_path)
     assert res.returncode == 1, res.stderr + res.stdout
