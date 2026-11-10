@@ -7,37 +7,59 @@ on the login node (they start Unity); `expect` and the pure functions are login-
 
     python -s -u -m vpd.tvr.probe_lvp run --out RUN/out --deadline-s S     (the parent; cwd = the worktree)
     python -s -m vpd.tvr.probe_lvp expect --out RUN/out                    (checks the outputs -> expect.json)
+    python -s -m vpd.tvr.probe_lvp recommend --out RUN/out [--max-el N] [--max-cores X] [--write F]
+                                            (recomputes both recommendations from summary.json; stdlib only)
 
 Phases of `run` (each guarded by the soft deadline; summary.json is rewritten after every phase and grid cell):
-  P0 preflight  lavapipe ICD (lvp.check_icd), badge font (lvp.font_status), the public sample's SHA256SUMS,
-                task files, ProcTHOR houses (one pass over train.jsonl.gz -> out/houses/<scene>.json).
-  P1 compare + determinism, one worker at L = P1_L (12):
+  P0 preflight  lavapipe ICD (lvp.check_icd), the pinned badge font (lvp.font_status), the public sample's
+                SHA256SUMS, task files, ProcTHOR houses (one pass over train.jsonl.gz -> out/houses/<scene>.json).
+  P1 compare + determinism, one worker at L = P1_L (12).  The first worker's start-up fixes the LD_LIBRARY_PATH
+     profile: lvp profile "envlib" first; only if that worker cannot start, one retry with "envlib+orig" (the
+     measured profile); every later worker uses the profile that worked (summary.lvp_profile,
+     summary.workers[].env_profile).  Then, in this order:
+     (f) FIRST, right after the start-up: the 2 public sample trajectories replayed through TVRBench's
+         ThorViewEnv (_sync_reset/_sync_step, i.e. the eval code path): our CURRENT/TARGET PNGs, the valid-actions
+         text of every turn and every action's success; then compared with the public PNGs (MAE, max |d|, PSNR,
+         SSIM, badge masked) plus controls (pose-shifted pairs, a repeat render), and the frozen rule of G3(d)
+         applied: same rendering iff PSNR >= 40 dB AND SSIM >= 0.99 on every compared frame, with SSIM =
+         skimage's returned mssim (frame_metrics);
+     (e) the badge geometry burn_label draws with the font rule in force;
      (b) frame sha256 of fixed probe poses (render by Teleport) on FloorPlan1 and the first ProcTHOR eval house;
          two different action paths to one pose (A = RotateRight, RotateLeft, Move; B = Move, LookDown, LookUp;
-         C = direct Teleport; A repeated); a reload of each scene (frames and GetReachablePositions again);
-     (e) the badge geometry burn_label draws with the font rule in force;
-     (f) the 2 public sample trajectories replayed through TVRBench's ThorViewEnv (_sync_reset/_sync_step, i.e.
-         the eval code path): our CURRENT/TARGET PNGs, the valid-actions text of every turn and every action's
-         success; then compared with the public PNGs (MAE, max |d|, PSNR, SSIM, badge masked) plus controls
-         (pose-shifted pairs, a repeat render), and the frozen rule of G3(d) applied:
-         same rendering iff PSNR >= 40 dB AND SSIM >= 0.99 on every compared frame;
+         C = direct Teleport; A repeated); a reload of each scene (frames and GetReachablePositions again).
+         Each of (e), the path test of a scene and the reload test of a scene is guarded: a worker error is
+         recorded (summary.errors; the test counts as unmeasured) and P1 goes on with a live worker;
      and the grid cell (E=1, L=12) on both grid scenes.
   P2 grid (a), part 1: the L = REACH_L (1) group of the grid.  E parallel envs x L lavapipe threads, STEPS steps
                 per env on each grid scene: aggregate steps/s, p50/p95 step latency, cgroup cpu.stat deltas, bad
                 frames.  A step = one Controller step (an action drawn from the valid ones) + burn_label + PNG
                 encode + the next valid list, as one eval turn costs an env worker (the target image is assumed
                 cached by the harness).  Controller start-ups are serialised (eval_va's init_lock).  New workers
-                render the probe poses too (determinism across L values and across processes).
+                render the probe poses too, all at once (determinism across L values and across processes).
   P3 reach (d)  on the pool P2 left (6 workers at L=1, so no extra start-ups): GetReachablePositions of all SFT
                 and eval scenes (SFT first), each scene loaded twice in two different workers ->
-                out/reach/<scene>.json {loads, equal_raw, equal_xz, positions}.
-  P4 grid (a), part 2: the other L groups in GRID_DEFAULT order (2, 3, 4) with the time left, so what a short
-                deadline cuts is the end of the L=4 group (its E=3 cell, E*L 12, is not eligible anyway).
+                out/reach/<scene>.json {loads (with call_pose, the agent pose at the call), equal_raw, equal_xz,
+                positions}.
+  P4 grid (a), part 2: the other L groups with the time left.
+  Cell order (cell_order, P2 and P4 alike): likely-best first, so a short deadline cuts the least useful cells:
+     tier 1  eligible cells with HI_EL (6) <= E*L <= MAX_EL_RECOMMEND (11): more of the CPU budget in use;
+     tier 2  the other eligible cells (E*L < 6);
+     tier 3  the cells with E*L > 11 (never eligible), last.
+     Within a tier: L groups in grid order, the L the previous tier ended on first (no extra pool switch), and E
+     descending in each group (the pool is started once at its largest E, then reused).  Default P4 order
+     (E, L): (5,2) (4,2) (3,2) (3,3) (2,3) (2,4) | (1,4) (2,2) (1,2) (1,3) | (4,3) (6,2) (3,4); P2: (6,1) then
+     (4,1) (3,1) (2,1) (1,1).
   (c) load times come from every load of P1-P4.
 Output: out/summary.json (schema SCHEMA, label EXPLORATORY), out/reach/, out/compare/<task>/, out/houses/,
-out/homes/w<id>_L<L>/ (per-worker HOME with Unity's Player.log), out/logs/worker_*.log.
-Recommended E x L = the complete cell with E*L <= MAX_EL_RECOMMEND (11: >= 3 vCPU stay for vLLM + harness) and
-the highest harmonic mean over the two grid scenes of the aggregate steps/s (ties: fewer threads).
+out/homes/w<id>_L<L>/ (per-worker HOME with Unity's Player.log; summary.homes = its size), out/logs/worker_*.log.
+Two recommendations (recommendations(summary), a pure function of summary.json; `recommend` recomputes them):
+  recommended           the complete cell with E*L <= MAX_EL_RECOMMEND (11: >= 3 vCPU stay for vLLM + harness)
+                        and the highest harmonic mean over the two grid scenes of the aggregate steps/s (ties: fewer
+                        threads);
+  recommended_measured  the same over the complete cells whose MEASURED cgroup cores (max over the two grid scenes
+                        of the cell's cpu.stat delta) <= MAX_CORES_RECOMMEND (11); each env also costs its Unity
+                        main/render thread and the Python worker, which E*L ignores (ties: fewer cores).
+  Both report cores per env (cgroup cores / E, and per process: Unity + worker CPU seconds / wall).
 
 Worker protocol: the parent writes one JSON command per line to the worker's --cmd-fd and reads one JSON reply
 per line from --reply-fd (stdin is /dev/null, stdout/stderr go to the worker log, so nothing ai2thor or Unity
@@ -74,7 +96,7 @@ PURPOSE = ("TVR lavapipe probe (DECISIONS G3): CPU-render throughput grid, per-p
            "times, reachable-set dumps, badge font, public-image comparison. Measurement only; no gate.")
 
 # --- plan -----------------------------------------------------------------------------------------------------
-# L -> E values.  The L = REACH_L group runs first (P2), the others after the reach dumps (P4) in this order.
+# L -> E values.  The L = REACH_L group runs first (P2), the others after the reach dumps (P4), each in cell_order.
 # E*L <= 12 (2 of 14 vCPU kept for Unity main threads / the parent); (5, 2) is added because it is eligible
 # (10 <= 11).  (1, 12) runs in P1.
 GRID_DEFAULT: Dict[int, Tuple[int, ...]] = {1: (1, 2, 3, 4, 6), 2: (1, 2, 3, 4, 5, 6), 3: (1, 2, 3, 4), 4: (1, 2, 3)}
@@ -82,6 +104,8 @@ P1_L = 12
 STEPS = 100
 PHASES = ("p0_preflight", "p1_compare_det", "p2_grid", "p3_reach", "p4_grid")
 MAX_EL_RECOMMEND = 11
+MAX_CORES_RECOMMEND = 11.0
+HI_EL = 6  # cell_order tier 1 starts here
 MAX_EL = 12
 REACH_L, REACH_E = 1, 6
 REACH_MIN_WORKERS = 3  # reuse the pool left by the grid when it has at least this many live workers
@@ -156,6 +180,20 @@ def write_json_atomic(path, obj) -> None:
     os.replace(tmp, path)
 
 
+def dir_size(d) -> Dict[str, Any]:
+    """{dir, bytes, files} of a directory tree (symlinks are neither followed nor counted beyond themselves)."""
+    d = Path(d)
+    tot = n = 0
+    for root, _dirs, files in os.walk(d):
+        for name in files:
+            try:
+                tot += os.lstat(os.path.join(root, name)).st_size
+                n += 1
+            except OSError:
+                continue
+    return {"dir": str(d), "bytes": tot, "files": n}
+
+
 def fnum(x: Any) -> float:
     """A metric from a JSON file back to float ('inf' -> inf)."""
     if isinstance(x, str):
@@ -200,13 +238,22 @@ def badge_mask(h: int = lvp.H, w: int = lvp.W, x0: int = lvp.BADGE_X0, y1: int =
     return m
 
 
+SSIM_DEFINITION = ("ssim = the mssim RETURNED by skimage.metrics.structural_similarity(public, ours', "
+                   "channel_axis=2, data_range=255, full=True) with its default 7x7 window, where ours' = our frame "
+                   "with the badge pixels (x >= %d, y <= %d) set to the public frame's; skimage averages its SSIM "
+                   "map over every pixel and channel after cropping (win_size-1)//2 = 3 px at each border (the "
+                   "badge region, equal by construction, is inside that average).  The G3(d) rule uses this ssim.  "
+                   "ssim_map_mean_unmasked = the mean of the full map (no crop) over the unmasked pixels, reported "
+                   "only." % (lvp.BADGE_X0, lvp.BADGE_Y1))
+
+
 def frame_metrics(a, b, mask=None, ssim_fn: Optional[Callable] = None) -> Dict[str, Any]:
-    """MAE, max |d|, share of pixels with any channel |d| > 8, PSNR (dB, inf if equal) and SSIM of two RGB uint8
-    frames over the pixels outside `mask`.
+    """MAE, max |d|, share of pixels with any channel |d| > 8, PSNR (dB, inf if equal) of two RGB uint8 frames over
+    the pixels outside `mask`, and SSIM two ways (SSIM_DEFINITION).
 
     The masked pixels of b are first set to a's, so the SSIM windows that overlap the mask see no badge
-    difference; SSIM = the mean of skimage's SSIM map (channel_axis=2, data_range=255, default 7x7 window) over
-    the unmasked pixels and the 3 channels.
+    difference.  "ssim" (the rule metric) is skimage's returned mssim; "ssim_map_mean_unmasked" is the mean of
+    skimage's full SSIM map over the unmasked pixels and the 3 channels.
     """
     import numpy as np
 
@@ -225,17 +272,17 @@ def frame_metrics(a, b, mask=None, ssim_fn: Optional[Callable] = None) -> Dict[s
     psnr = math.inf if mse == 0.0 else 10.0 * math.log10(255.0 ** 2 / mse)
     if ssim_fn is None:
         from skimage.metrics import structural_similarity as ssim_fn
-    _, smap = ssim_fn(a, b, channel_axis=2, data_range=255, full=True)
+    mssim, smap = ssim_fn(a, b, channel_axis=2, data_range=255, full=True)
     smap = np.asarray(smap, dtype=np.float64)
-    ssim = float(smap[keep].mean()) if dk.size else 1.0
+    ssim_unmasked = float(smap[keep].mean()) if dk.size else 1.0
     return {"mae": round(float(dk.mean()) if dk.size else 0.0, 5), "max_abs": int(dk.max()) if dk.size else 0,
             "frac_gt8": round(float((dk.max(axis=1) > 8).mean()) if dk.size else 0.0, 6),
-            "psnr_db": psnr if math.isinf(psnr) else round(psnr, 3), "ssim": round(ssim, 6),
-            "identical": bool(mse == 0.0)}
+            "psnr_db": psnr if math.isinf(psnr) else round(psnr, 3), "ssim": round(float(mssim), 6),
+            "ssim_map_mean_unmasked": round(ssim_unmasked, 6), "identical": bool(mse == 0.0)}
 
 
 def passes_rule(m: Mapping[str, Any]) -> bool:
-    """The frozen G3(d) per-frame rule."""
+    """The frozen G3(d) per-frame rule (ssim = skimage's returned mssim, SSIM_DEFINITION)."""
     if "error" in m:
         return False
     return fnum(m["psnr_db"]) >= PSNR_MIN_DB and fnum(m["ssim"]) >= SSIM_MIN
@@ -405,10 +452,14 @@ def compare_verdict(tasks: Mapping[str, Mapping[str, Any]], n_expected: int) -> 
         sep = min(same_psnr) > max(sh_psnr)
     return {
         "rule": (f"same rendering iff PSNR >= {PSNR_MIN_DB:g} dB AND SSIM >= {SSIM_MIN:g} on every compared frame "
-                 f"(badge x >= {lvp.BADGE_X0}, y <= {lvp.BADGE_Y1} masked; DECISIONS G3(d), frozen before looking)"),
+                 f"(badge x >= {lvp.BADGE_X0}, y <= {lvp.BADGE_Y1} masked; SSIM = skimage's returned mssim, see "
+                 f"ssim_definition; DECISIONS G3(d), frozen before looking)"),
+        "ssim_definition": SSIM_DEFINITION,
         "verdict": verdict, "n_expected": n_expected, "n_compared": len(comp), "n_pass": len(comp) - len(fails),
         "min_psnr_db": min(same_psnr) if same_psnr else None,
         "min_ssim": min(fnum(f["ssim"]) for f in comp) if comp else None,
+        "min_ssim_map_mean_unmasked": (min(fnum(f["ssim_map_mean_unmasked"]) for f in comp)
+                                       if comp and all("ssim_map_mean_unmasked" in f for f in comp) else None),
         "max_abs_max": max(int(f["max_abs"]) for f in comp) if comp else None,
         "mae_mean": round(sum(float(f["mae"]) for f in comp) / len(comp), 5) if comp else None,
         "controls": {
@@ -469,13 +520,44 @@ def parse_grid(spec: str) -> Dict[int, Tuple[int, ...]]:
     return out
 
 
+def cell_order(groups: Mapping[int, Sequence[int]], *, hi_el: int = HI_EL,
+               max_el: int = MAX_EL_RECOMMEND) -> List[Tuple[int, int]]:
+    """The (L, E) cells of `groups` (L -> E values) in run order, likely-best first (module doc): tier 1 eligible
+    with E*L >= hi_el, tier 2 the other eligible cells, tier 3 E*L > max_el; within a tier the L groups in
+    `groups` order with the L the previous tier ended on moved first, E descending (duplicates dropped)."""
+    tiers = (lambda el: hi_el <= el <= max_el, lambda el: el < hi_el, lambda el: el > max_el)
+    order: List[Tuple[int, int]] = []
+    cur: Optional[int] = None
+    for in_tier in tiers:
+        by_l = {L: sorted({int(E) for E in Es if in_tier(int(E) * int(L))}, reverse=True)
+                for L, Es in groups.items()}
+        ls = [L for L in groups if by_l[L]]
+        if cur in ls:
+            ls.remove(cur)
+            ls.insert(0, cur)
+        for L in ls:
+            order += [(int(L), E) for E in by_l[L]]
+            cur = L
+    return order
+
+
 def cell_ok(c: Mapping[str, Any]) -> bool:
     return bool(c.get("ok")) and not c.get("skipped")
 
 
+def _env_cores(e: Mapping[str, Any]) -> Optional[float]:
+    """Cores one env used during its steps: (Unity + worker CPU seconds) / its wall (None when not measured)."""
+    u, w, t = e.get("unity_cpu_s"), e.get("worker_cpu_s"), e.get("wall_s")
+    if u is None or w is None or not t:
+        return None
+    return (float(u) + float(w)) / float(t)
+
+
 def grid_table(cells: Sequence[Mapping[str, Any]], scenes: Sequence[str]) -> List[Dict[str, Any]]:
     """One row per (E, L): the per-scene aggregate steps/s and their harmonic mean (None unless every scene's
-    cell is complete)."""
+    cell is complete), the per-scene cgroup cores, cores_max (max over the scenes; None unless every scene's
+    cell has it), cores_per_env = cores_max / E and proc_cores_per_env (mean over the envs of every scene of
+    (Unity + worker CPU s) / wall)."""
     by: Dict[Tuple[int, int], Dict[str, Mapping[str, Any]]] = {}
     for c in cells:
         if c.get("skipped"):
@@ -484,14 +566,30 @@ def grid_table(cells: Sequence[Mapping[str, Any]], scenes: Sequence[str]) -> Lis
     rows = []
     for (E, L), cs in by.items():
         per = {s: (cs[s]["agg_steps_per_s"] if s in cs and cell_ok(cs[s]) else None) for s in scenes}
-        ok = all(v for v in per.values())
+        ok = bool(per) and all(v for v in per.values())
         hm = round(len(per) / sum(1.0 / v for v in per.values()), 3) if ok else None
+        cores = {s: (cs[s].get("cpu") or {}).get("cores") for s in scenes if s in cs}
+        cmax = (max(float(cores[s]) for s in scenes)
+                if scenes and all(cores.get(s) is not None for s in scenes) else None)
+        env_c = [x for s in scenes if s in cs for x in (_env_cores(e) for e in cs[s].get("per_env") or [])
+                 if x is not None]
         rows.append({"E": E, "L": L, "EL": E * L, "agg_steps_per_s": per, "hmean_steps_per_s": hm, "ok": ok,
                      "p50_ms": {s: cs[s].get("p50_ms") for s in scenes if s in cs},
                      "p95_ms": {s: cs[s].get("p95_ms") for s in scenes if s in cs},
-                     "cores": {s: (cs[s].get("cpu") or {}).get("cores") for s in scenes if s in cs}})
+                     "cores": cores, "cores_max": None if cmax is None else round(cmax, 3),
+                     "cores_per_env": None if cmax is None else round(cmax / E, 3),
+                     "proc_cores_per_env": round(sum(env_c) / len(env_c), 3) if env_c else None,
+                     "idle_workers": {s: cs[s].get("idle_workers") for s in scenes if s in cs}})
     rows.sort(key=lambda r: (r["L"], r["E"]))
     return rows
+
+
+def _pick(r: Mapping[str, Any]) -> Dict[str, Any]:
+    return {k: r.get(k) for k in ("E", "L", "EL", "hmean_steps_per_s", "agg_steps_per_s", "cores", "cores_max",
+                                  "cores_per_env", "proc_cores_per_env")}
+
+
+ENV_ONLY_NOTE = "env-only throughput; with vLLM in the loop envs wait on the model, which favours more envs"
 
 
 def recommend(rows: Sequence[Mapping[str, Any]], max_el: int = MAX_EL_RECOMMEND) -> Dict[str, Any]:
@@ -502,9 +600,46 @@ def recommend(rows: Sequence[Mapping[str, Any]], max_el: int = MAX_EL_RECOMMEND)
     if not elig:
         return {"E": None, "L": None, "rule": rule, "why": "no complete eligible cell", "n_eligible": 0}
     best = max(elig, key=lambda r: (r["hmean_steps_per_s"], -r["EL"]))
-    return {"E": best["E"], "L": best["L"], "EL": best["EL"], "hmean_steps_per_s": best["hmean_steps_per_s"],
-            "agg_steps_per_s": best["agg_steps_per_s"], "rule": rule, "n_eligible": len(elig),
-            "note": "env-only throughput; with vLLM in the loop envs wait on the model, which favours more envs"}
+    return dict(_pick(best), rule=rule, n_eligible=len(elig), note=ENV_ONLY_NOTE)
+
+
+def recommend_measured(rows: Sequence[Mapping[str, Any]],
+                       max_cores: float = MAX_CORES_RECOMMEND) -> Dict[str, Any]:
+    """Max harmonic-mean aggregate steps/s among complete (E, L) whose measured cgroup cores (cores_max: max over
+    the grid scenes) <= max_cores; ties -> fewer cores, then smaller E*L."""
+    measured = [r for r in rows if r["ok"] and r.get("cores_max") is not None]
+    elig = [r for r in measured if float(r["cores_max"]) <= float(max_cores)]
+    rule = (f"max harmonic mean (over the grid scenes) of aggregate steps/s among complete cells whose measured "
+            f"cgroup cores (max over the grid scenes of the cell's cpu.stat usage delta / wall) <= {max_cores:g} "
+            f"(>= 3 of 14 vCPU left for vLLM + harness, counting each env's Unity main/render thread and Python "
+            f"worker too); ties -> fewer cores, then smaller E*L")
+    extra = {"rule": rule, "n_eligible": len(elig), "n_complete_measured": len(measured),
+             "n_complete_unmeasured": sum(1 for r in rows if r["ok"] and r.get("cores_max") is None),
+             "note": ENV_ONLY_NOTE + "; cores include idle pool workers (grid_table idle_workers), so smaller-E "
+                                     "cells of a larger pool are counted conservatively"}
+    if not elig:
+        return dict({"E": None, "L": None, "why": "no complete cell within the measured-core budget"}, **extra)
+    best = max(elig, key=lambda r: (r["hmean_steps_per_s"], -float(r["cores_max"]), -r["EL"]))
+    return dict(_pick(best), **extra)
+
+
+def recommendations(summary: Mapping[str, Any], max_el: Optional[int] = None,
+                    max_cores: Optional[float] = None) -> Dict[str, Any]:
+    """Both recommendations and the grid table from a summary.json dict (pure; stdlib only).  The limits default
+    to the summary's plan (else MAX_EL_RECOMMEND / MAX_CORES_RECOMMEND)."""
+    plan = summary.get("plan") or {}
+    max_el = int(plan.get("max_el_recommend", MAX_EL_RECOMMEND) if max_el is None else max_el)
+    max_cores = float(plan.get("max_cores_recommend", MAX_CORES_RECOMMEND) if max_cores is None else max_cores)
+    cells = list(summary.get("grid_cells") or [])
+    scenes = list((summary.get("scenes") or {}).get("grid") or [])
+    if not scenes:
+        scenes = list(dict.fromkeys(c["scene"] for c in cells if c.get("scene")))
+    rows = grid_table(cells, scenes) if scenes else []
+    return {"grid_table": rows, "recommended": recommend(rows, max_el),
+            "recommended_measured": recommend_measured(rows, max_cores),
+            "cores_per_env": {f"E{r['E']}xL{r['L']}": {"cgroup": r["cores_per_env"], "proc": r["proc_cores_per_env"]}
+                              for r in rows if r["ok"]},
+            "limits": {"max_el": max_el, "max_cores": max_cores}}
 
 
 def summarize_det(rows: Sequence[Mapping[str, Any]], path_tests: Mapping[str, Any],
@@ -525,10 +660,14 @@ def summarize_det(rows: Sequence[Mapping[str, Any]], path_tests: Mapping[str, An
         rel = [p for p in pred_rows if len(p[key]) > 1]
         return None if not rel else all(p["equal"] for p in rel)
 
+    def measured_all(tests):  # a test whose equal is None (no valid move, a worker error) is unmeasured
+        vals = [t.get("equal") for t in tests.values() if t.get("equal") is not None]
+        return None if not vals else all(v is True for v in vals)
+
     across_L = flag(per_pose, "Ls")
     across_proc = flag(per_pose, "workers")
-    paths_eq = None if not path_tests else all(t.get("equal") is True for t in path_tests.values())
-    reload_eq = None if not reload_tests else all(t.get("equal") is True for t in reload_tests.values())
+    paths_eq = measured_all(path_tests)
+    reload_eq = measured_all(reload_tests)
     reach_eq = None if not reach_reload else all(v is True for v in reach_reload.values())
     flags = {"equal_across_L": across_L, "equal_across_processes": across_proc, "equal_across_paths": paths_eq,
              "equal_after_reload": reload_eq, "reach_equal_after_reload": reach_eq,
@@ -630,6 +769,7 @@ class Worker:
         te = self.env._env
         te._reachable_positions = None  # ThorEnv caches: force a fresh GetReachablePositions
         te._reachable_set = None
+        out["call_pose"] = te.get_state()  # GetReachablePositions floods from the agent's position (inference)
         t0 = time.perf_counter()
         pos = te.get_reachable_positions()
         out["reach_s"] = round(time.perf_counter() - t0, 3)
@@ -779,9 +919,10 @@ def worker_main(a) -> int:
 
     try:
         _, tv = lvp.import_tvrbench(a.repo)
-        font = lvp.font_status()
-        mode = lvp.install_font_rule(tv, font, allow_missing=True)
-        w = Worker(tv, wid=a.wid, houses_dir=a.houses, procthor_dir=a.procthor_dir, font=font, font_mode=mode)
+        # the probe masks badges, so a missing / other font is reported (summary.font.ok false), not fatal
+        font = lvp.install_font_rule(tv, allow_missing=True)
+        w = Worker(tv, wid=a.wid, houses_dir=a.houses, procthor_dir=a.procthor_dir, font=font,
+                   font_mode=font["mode"])
         send(dict(w.start(), id=0, ok=True))
     except BaseException as e:  # noqa: BLE001
         send({"id": 0, "ok": False, "error": repr(e), "tb": traceback.format_exc()[-3000:]})
@@ -816,6 +957,7 @@ class SubprocessHandle:
         self.scene: Optional[str] = None
         self.probed: set = set()
         self.alive = True
+        self.unity_pid: Optional[int] = None
         cr, cw = os.pipe()
         rr, rw = os.pipe()
         self._log = open(log_path, "ab")
@@ -917,6 +1059,7 @@ class LocalHandle:
         self.scene: Optional[str] = None
         self.probed: set = set()
         self.alive = True
+        self.unity_pid: Optional[int] = None
         self.pid = os.getpid()
         self._next = 0
         self._replies: Dict[int, Dict[str, Any]] = {}
@@ -943,7 +1086,9 @@ class LocalHandle:
 
 
 class SubprocessSpawner:
-    """spawn(wid, L) -> (handle, ready reply): a worker process with lvp.worker_env and its own HOME."""
+    """spawn(wid, L, profile) -> (handle, ready reply): a worker process with lvp.worker_env(profile=...) and its
+    own HOME.  The reply also carries env_profile and spawn_env (the render-relevant environment it was given),
+    also when the start-up failed."""
 
     def __init__(self, out, *, py: str = sys.executable, repo=lvp.TVR_REPO, houses_dir=None,
                  procthor_dir=lvp.PROCTHOR_DIR, code_root=None, base_env: Optional[Mapping[str, str]] = None,
@@ -955,10 +1100,10 @@ class SubprocessSpawner:
         self.startup_timeout = startup_timeout
         self.tvr_env, self.releases = Path(tvr_env), releases
 
-    def __call__(self, wid: int, L: int):
+    def __call__(self, wid: int, L: int, profile: str = lvp.LVP_PROFILES[0]):
         home = self.out / "homes" / f"w{wid:02d}_L{L}"
         lvp.prepare_home(home, releases=self.releases)
-        env = lvp.worker_env(self.base_env, lp_threads=L, home=home, tvr_env=self.tvr_env)
+        env = lvp.worker_env(self.base_env, lp_threads=L, home=home, tvr_env=self.tvr_env, profile=profile)
         pp = [p for p in self.base_env.get("PYTHONPATH", "").split(os.pathsep) if p and p != str(self.code_root)]
         env["PYTHONPATH"] = os.pathsep.join([str(self.code_root)] + pp)
         argv = [self.py, "-s", "-u", "-m", "vpd.tvr.probe_lvp", "worker", "--wid", str(wid), "--repo",
@@ -967,7 +1112,7 @@ class SubprocessSpawner:
             argv += ["--houses", str(self.houses_dir)]
         (self.out / "logs").mkdir(parents=True, exist_ok=True)
         h = SubprocessHandle(wid, L, argv, env, self.code_root, self.out / "logs" / f"worker_w{wid:02d}_L{L}.log")
-        r = h.wait(0, self.startup_timeout)
+        r = dict(h.wait(0, self.startup_timeout), env_profile=profile, spawn_env=lvp.env_summary(env))
         if not r.get("ok"):
             h.kill()
         return h, r
@@ -979,18 +1124,27 @@ class PoolError(RuntimeError):
 
 
 class Probe:
-    """Phases P0-P3 (module doc).  `spawner(wid, L) -> (handle, ready)`; clocks injectable for tests."""
+    """Phases P0-P4 (module doc).  `spawner(wid, L, profile) -> (handle, ready)`; clocks injectable for tests.
+    `font` / `font_sha256` are the pinned badge font the workers install (lvp.install_font_rule)."""
 
     def __init__(self, out, *, deadline_s: float, spawner, grid: Optional[Mapping[int, Sequence[int]]] = None,
                  steps: int = STEPS, p1_l: int = P1_L, repo=lvp.TVR_REPO, tasks_dir=None, sample_dir=SAMPLE_DIR,
                  sft_train=SFT_TRAIN, procthor_src=lvp.PROCTHOR_TRAIN, icd=lvp.LVP_ICD,
                  sample_tasks: Sequence[str] = SAMPLE_TASKS, reach_scenes: Optional[Sequence[str]] = None,
                  cpu_stat=lvp.CPU_STAT, cpu_max=lvp.CPU_MAX, clock=time.monotonic, wall=time.time,
-                 sleep=time.sleep):
+                 sleep=time.sleep, font=lvp.BADGE_FONT, font_sha256: str = lvp.BADGE_FONT_SHA256):
         self.out = Path(out)
         self.deadline_s = float(deadline_s)
         self.spawner = spawner
         self.grid = dict(GRID_DEFAULT if grid is None else grid)
+        self.font, self.font_sha256 = font, font_sha256
+        # LD_LIBRARY_PATH profile: decided by the first worker's start-up (spawn)
+        self.lvp_profile: Optional[str] = None
+        self.profile_next = lvp.LVP_PROFILES[0]
+        self.profile_retried = False
+        self.profile_attempts: List[Dict[str, Any]] = []
+        self.p2_cells = cell_order({L: E for L, E in self.grid.items() if L == REACH_L})
+        self.p4_cells = cell_order({L: E for L, E in self.grid.items() if L != REACH_L})
         self.steps, self.p1_l = int(steps), int(p1_l)
         self.repo = Path(repo)
         self.tasks_dir = Path(tasks_dir) if tasks_dir is not None else self.repo / "data" / "tasks"
@@ -1025,8 +1179,11 @@ class Probe:
         self.res: Dict[str, Any] = {
             "schema": SCHEMA, "label": LABEL, "purpose": PURPOSE, "utc_start": utc(), "deadline_s": self.deadline_s,
             "plan": {"grid": {str(k): list(v) for k, v in self.grid.items()}, "p1_cell": [1, self.p1_l],
+                     "order_EL": {"p2": [[E, L] for L, E in self.p2_cells], "p4": [[E, L] for L, E in self.p4_cells]},
                      "steps_per_env": self.steps, "settings": lvp.EVAL_SETTINGS,
-                     "max_el_recommend": MAX_EL_RECOMMEND, "reach_pool": [REACH_E, REACH_L]},
+                     "max_el_recommend": MAX_EL_RECOMMEND, "max_cores_recommend": MAX_CORES_RECOMMEND,
+                     "hi_el": HI_EL, "reach_pool": [REACH_E, REACH_L], "lvp_profiles": lvp.LVP_PROFILE_DOC,
+                     "badge_font": {"path": str(font), "sha256": font_sha256}},
             "phases": {}, "errors": [], "workers": []}
 
     # -- bookkeeping
@@ -1059,21 +1216,60 @@ class Probe:
         self.res["phases"][name] = {"status": st, "secs": round(self.clock() - t, 2)}
         self.save()
 
+    def guarded(self, where: str, fn: Callable[[], Any], on_error: Optional[Callable[[str], None]] = None) -> None:
+        """Run one P1 sub-test; a PoolError is recorded (errors[], `on_error(repr)`) and the phase goes on."""
+        try:
+            fn()
+        except PoolError as e:
+            self.err(where, repr(e))
+            if on_error is not None:
+                on_error(repr(e))
+
     # -- workers
-    def spawn(self, L: int):
-        if self.left() < STARTUP_EST_S + SUMMARY_RESERVE_S:
-            raise PoolError("no time to start a worker")
+    def _spawn_once(self, L: int, profile: str):
         wid = self.next_wid
         self.next_wid += 1
         t = self.clock()
-        h, ready = self.spawner(wid, L)
+        h, ready = self.spawner(wid, L, profile)
         info = {"wid": wid, "L": L, "ok": bool(ready.get("ok")), "spawn_s": round(self.clock() - t, 2),
-                **{k: ready.get(k) for k in ("startup_s", "pid", "lp", "env", "font", "font_mode", "settings",
-                                             "unity", "error")}}
+                "env_profile": profile,
+                **{k: ready.get(k) for k in ("startup_s", "pid", "lp", "env", "spawn_env", "font", "font_mode",
+                                             "settings", "unity", "error")}}
         self.res["workers"].append(info)
+        return h, ready, info
+
+    def spawn(self, L: int):
+        """Start one worker.  The LD_LIBRARY_PATH profile: until a worker has started, lvp.LVP_PROFILES[0]; if
+        that first start-up fails, ONE retry with LVP_PROFILES[1] (the measured profile), which every later
+        worker then uses unless the first one worked (summary.lvp_profile)."""
+        if self.left() < STARTUP_EST_S + SUMMARY_RESERVE_S:
+            raise PoolError("no time to start a worker")
+        prof = self.lvp_profile or self.profile_next
+        h, ready, info = self._spawn_once(L, prof)
+        first_sequence = self.lvp_profile is None and not self.profile_retried
+        if first_sequence:
+            self.profile_attempts.append({k: info.get(k) for k in ("wid", "L", "env_profile", "ok", "error")})
+        if not ready.get("ok") and first_sequence and len(lvp.LVP_PROFILES) > 1:
+            self.profile_retried = True
+            self.profile_next = lvp.LVP_PROFILES[1]
+            self.err("spawn.profile", f"worker {info['wid']} did not start with lavapipe profile {prof}: "
+                                      f"{ready.get('error')}; retrying once with {self.profile_next}")
+            if self.left() >= STARTUP_EST_S + SUMMARY_RESERVE_S:
+                h, ready, info = self._spawn_once(L, self.profile_next)
+                self.profile_attempts.append({k: info.get(k) for k in ("wid", "L", "env_profile", "ok", "error")})
+        if ready.get("ok") and self.lvp_profile is None:
+            self.lvp_profile = prof = info["env_profile"]
+            env = ready.get("env") or ready.get("spawn_env") or {}
+            self.res["lvp_profile"] = {
+                "profile": prof, "LD_LIBRARY_PATH": env.get("LD_LIBRARY_PATH"), "doc": lvp.LVP_PROFILE_DOC[prof],
+                "first_try": lvp.LVP_PROFILES[0], "retried": self.profile_retried,
+                "attempts": self.profile_attempts,
+                "freeze": "the demo replay and eval build their workers with lvp.worker_env(profile=<profile>)"}
         if not ready.get("ok"):
-            raise PoolError(f"worker {wid} (L={L}) did not start: {ready.get('error')}")
+            raise PoolError(f"worker {info['wid']} (L={L}, profile {info['env_profile']}) did not start: "
+                            f"{ready.get('error')}")
         h.scene = ready.get("scene")
+        h.unity_pid = (ready.get("unity") or {}).get("pid")
         return h
 
     def stop_pool(self, graceful: bool = True) -> None:
@@ -1129,21 +1325,53 @@ class Probe:
             out.append(r)
         return out
 
+    @staticmethod
+    def idle_cpu_s(hs: Sequence[Any]) -> Optional[float]:
+        """CPU seconds so far of the workers `hs` (worker process + its Unity player, from /proc); None when there
+        is none or any process is unreadable."""
+        if not hs:
+            return None
+        tot = 0.0
+        for h in hs:
+            upid = getattr(h, "unity_pid", None)
+            if not upid:
+                return None
+            for pid in (h.pid, upid):
+                c = proc_info(pid).get("cpu_s")
+                if c is None:
+                    return None
+                tot += c
+        return tot
+
     # -- scenes, probe poses
     def load_on(self, hs: Sequence[Any], scene: str, force: bool = False, phase: str = "") -> None:
+        """Load `scene` on the workers of `hs` that do not have it (all at once), then render the probe poses on
+        every worker of `hs` that has not rendered them in this scene yet, also all at once (call_many)."""
         need = [h for h in hs if force or h.scene != scene]
+        bad = []
         if need:
             rs = self.call_many(need, [{"op": "load", "scene": scene}] * len(need), LOAD_TIMEOUT_S)
             for h, r in zip(need, rs):
                 if not r.get("ok"):
-                    raise PoolError(f"w{h.wid} load {scene}: {r.get('error')}")
+                    bad.append(f"w{h.wid} load {scene}: {r.get('error')}")
+                    continue
                 h.scene = scene
                 self.load_rows.append({"scene": scene, "kind": lvp.scene_kind(scene), "wid": h.wid, "L": h.L,
                                        "load_s": r["load_s"], "concurrent": len(need), "phase": phase})
-        for h in hs:
-            if scene not in h.probed:
-                self.render_probes(h, scene, tag="first")
+        if bad:
+            raise PoolError("; ".join(bad))
+        todo = [h for h in hs if scene not in h.probed]
+        if todo:
+            poses = self.ensure_probe_poses(todo[0], scene)
+            rs = self.call_many(todo, [{"op": "render", "poses": poses}] * len(todo), CMD_TIMEOUT_S)
+            for h, r in zip(todo, rs):
+                if not r.get("ok"):
+                    bad.append(f"w{h.wid} render {scene}: {r.get('error')}")
+                    continue
+                self.probe_rows(h, scene, r["frames"], tag="first")
                 h.probed.add(scene)
+        if bad:
+            raise PoolError("; ".join(bad))
 
     def ensure_probe_poses(self, h, scene: str) -> List[Dict[str, Any]]:
         if scene not in self.probe_poses:
@@ -1151,20 +1379,23 @@ class Probe:
             t = self.eval_task_by_scene.get(scene)
             extra = [t["start"], t["target"]] if t is not None else []
             self.probe_poses[scene] = pick_probe_poses(r["positions"], PROBE_K, extra)
-            self.first_reach.setdefault(scene, {k: r[k] for k in ("n", "sha256_raw", "sha256_xz")})
+            self.first_reach.setdefault(scene, {k: r.get(k) for k in ("n", "sha256_raw", "sha256_xz", "call_pose")})
         return self.probe_poses[scene]
 
-    def render_probes(self, h, scene: str, tag: str) -> List[Dict[str, Any]]:
-        poses = self.ensure_probe_poses(h, scene)
-        r = self.call(h, {"op": "render", "poses": poses})
+    def probe_rows(self, h, scene: str, frames: Sequence[Mapping[str, Any]], tag: str) -> List[Dict[str, Any]]:
         rows = []
-        for i, f in enumerate(r["frames"]):
+        for i, f in enumerate(frames):
             row = {"scene": scene, "pose": i, "L": h.L, "wid": h.wid, "tag": tag, "sha256": f.get("sha256"),
                    "std": f.get("std"), "error": f.get("error")}
             rows.append(row)
             if tag == "first":
                 self.det_rows.append(row)
         return rows
+
+    def render_probes(self, h, scene: str, tag: str) -> List[Dict[str, Any]]:
+        poses = self.ensure_probe_poses(h, scene)
+        r = self.call(h, {"op": "render", "poses": poses})
+        return self.probe_rows(h, scene, r["frames"], tag)
 
     # -- P0
     def p0_preflight(self) -> None:
@@ -1177,7 +1408,7 @@ class Probe:
                      "snapshot": json.loads(snap.read_text()) if snap.is_file() else None,
                      "VPD_WORKTREE": os.environ.get("VPD_WORKTREE")}
         r["icd"] = lvp.check_icd(self.icd)
-        r["font"] = {"parent": lvp.font_status()}
+        r["font"] = {"parent": lvp.font_status(self.font, self.font_sha256)}
         r["sample"] = verify_sample(self.sample_dir)
         sft = lvp.load_tasks("sft", self.tasks_dir)
         ev = lvp.load_tasks("eval", self.tasks_dir)
@@ -1212,27 +1443,49 @@ class Probe:
             self.err("p0.icd", r["icd"]["why"])
 
     # -- P1
+    def p1_worker(self):
+        """The live P1 worker (L = p1_l); a dead one is replaced (one more start-up)."""
+        return self.ensure_pool(self.p1_l, 1)[0]
+
     def p1_compare_det(self) -> None:
-        [h] = self.ensure_pool(self.p1_l, 1)
-        for scene in self.grid_scenes:
-            self.load_on([h], scene, force=True, phase="p1")
-            self.path_tests[scene] = self.path_test(h, scene)
-        for scene in self.grid_scenes:  # reload each scene (another scene was loaded in between)
-            self.load_on([h], scene, force=True, phase="p1_reload")
-            rr = self.call(h, {"op": "reach", "scene": scene, "load": False})
-            fr = self.first_reach.get(scene, {})
-            self.reach_reload[scene] = (rr["sha256_raw"] == fr.get("sha256_raw"))
-            rows = self.render_probes(h, scene, tag="reload")
-            first = {d["pose"]: d["sha256"] for d in self.det_rows if d["scene"] == scene and d["wid"] == h.wid}
-            eq = [bool(r["sha256"]) and r["sha256"] == first.get(r["pose"]) for r in rows]
-            self.reload_tests[scene] = {"n": len(eq), "equal": bool(eq) and all(eq), "per_pose": eq}
-        b = self.call(h, {"op": "badge"})
-        self.res["font"]["badge_tvrbench_burn_label"] = {k: b.get(k) for k in ("font_mode", "CURRENT", "TARGET")}
+        self.p1_worker()  # the start-up (fixes the lvp profile); without a worker P1 has nothing to measure
+        self.compare_public()  # G3(d) first: no determinism-test error can cost the comparison
         self.save()
-        self.compare_public(h)
+        self.guarded("p1.badge", self.p1_badge)
+        for scene in self.grid_scenes:
+            self.guarded(f"p1.path.{scene}", lambda s=scene: self.p1_path(s),
+                         lambda e, s=scene: self.path_tests.__setitem__(s, {"equal": None, "error": e}))
+        for scene in self.grid_scenes:  # reload each scene (another scene was loaded in between)
+            self.guarded(f"p1.reload.{scene}", lambda s=scene: self.p1_reload(s),
+                         lambda e, s=scene: self.reload_tests.__setitem__(s, {"equal": None, "error": e}))
         self.save()
         for k, scene in enumerate(self.grid_scenes):
             self.grid_step(self.p1_l, 1, scene, k, reserve=SUMMARY_RESERVE_S)
+
+    def p1_badge(self) -> None:
+        b = self.call(self.p1_worker(), {"op": "badge"})
+        self.res["font"]["badge_tvrbench_burn_label"] = {k: b.get(k) for k in ("font_mode", "CURRENT", "TARGET")}
+
+    def p1_path(self, scene: str) -> None:
+        h = self.p1_worker()
+        self.load_on([h], scene, force=True, phase="p1")
+        self.path_tests[scene] = self.path_test(h, scene)
+
+    def p1_reload(self, scene: str) -> None:
+        h = self.p1_worker()
+        first = {d["pose"]: d["sha256"] for d in self.det_rows
+                 if d["scene"] == scene and d["wid"] == h.wid and d["tag"] == "first"}
+        if not first:  # e.g. the worker was replaced after its path test: no reload to compare with
+            self.reload_tests[scene] = {"equal": None, "why": f"w{h.wid} has no first render of {scene}"}
+            return
+        self.load_on([h], scene, force=True, phase="p1_reload")
+        rr = self.call(h, {"op": "reach", "scene": scene, "load": False})
+        fr = self.first_reach.get(scene, {})
+        self.reach_reload[scene] = (rr["sha256_raw"] == fr.get("sha256_raw"))
+        rows = self.render_probes(h, scene, tag="reload")
+        eq = [bool(r["sha256"]) and r["sha256"] == first.get(r["pose"]) for r in rows]
+        self.reload_tests[scene] = {"n": len(eq), "equal": bool(eq) and all(eq), "per_pose": eq,
+                                    "call_pose": rr.get("call_pose")}
 
     def path_test(self, h, scene: str) -> Dict[str, Any]:
         for i, S in enumerate(self.probe_poses[scene]):
@@ -1254,7 +1507,8 @@ class Probe:
                     "equal": len(set(shas.values())) == 1 and ra["state"] == rb["state"]}
         return {"equal": None, "error": "no probe pose with a valid move"}
 
-    def compare_public(self, h) -> None:
+    def compare_public(self) -> None:
+        """(f): replay the public sample tasks on the P1 worker (a live one per task) and apply G3(d)."""
         tasks = {}
         n_expected = 0
         for tid in self.sample_tasks:
@@ -1267,6 +1521,7 @@ class Probe:
             try:
                 if task is None:
                     raise PoolError(f"{tid} not in sft.json")
+                h = self.p1_worker()
                 rep = self.call(h, {"op": "replay", "task": task, "actions": traj["actions"], "save_dir": str(ours)},
                                 REPLAY_TIMEOUT_S)
                 self.load_rows.append({"scene": task["scene"], "kind": lvp.scene_kind(task["scene"]), "wid": h.wid,
@@ -1304,6 +1559,10 @@ class Probe:
         try:
             hs = self.ensure_pool(L, E)
             self.load_on(hs, scene, phase=f"grid_E{E}_L{L}")
+            # live workers of the pool that do not step in this cell (smaller E than the pool): they stay in the
+            # cgroup, so their CPU is recorded next to the cell's cgroup cores
+            idle = [h for h in self.pool if h.alive and h not in hs]
+            cell["idle_workers"] = len(idle)
             poses = self.probe_poses[scene]
             go_at = self.wall() + self.go_delay_s
             cmds = [{"op": "steps", "n": self.steps, "go_at": go_at, "seed": 1000 * k + h.wid,
@@ -1312,6 +1571,7 @@ class Probe:
             while self.wall() < go_at:
                 self.sleep(min(0.02, max(0.0, go_at - self.wall())))
             a = lvp.read_cpu_stat(self.cpu_stat)
+            idle_a = self.idle_cpu_s(idle)
             end = self.clock() + self.bounded(self.steps * 3.0 + 60.0)
             reps = []
             for h, cid in zip(hs, ids):
@@ -1321,7 +1581,10 @@ class Probe:
                 reps.append(r)
             t_b = self.wall()
             b = lvp.read_cpu_stat(self.cpu_stat)
+            idle_b = self.idle_cpu_s(idle)
             cell["cpu"] = lvp.cpu_delta(a, b, t_b - go_at)
+            cell["cpu"]["idle_workers_cpu_s"] = (round(idle_b - idle_a, 3)
+                                                 if (idle and idle_a is not None and idle_b is not None) else None)
             bad = [r for r in reps if not r.get("ok")]
             if bad:
                 cell["error"] = "; ".join(f"{r.get('error')}" for r in bad)[:1000]
@@ -1338,7 +1601,8 @@ class Probe:
                             bad_frames=sum(r["bad_frames"] for r in good))
                 self.cell_wall[(L, scene)] = max(self.cell_wall.get((L, scene), 0.0), wall)
             cell["per_env"] = [{"wid": h.wid, "ok": bool(r.get("ok")), "error": r.get("error"),
-                                **({"steps_per_s": round(r["n"] / max(r["wall_s"], 1e-9), 3),
+                                **({"steps_per_s": round(r["n"] / max(r["wall_s"], 1e-9), 3), "wall_s": r["wall_s"],
+                                    "cores": (None if _env_cores(r) is None else round(_env_cores(r), 3)),
                                     "p50_ms": round(percentile(r["lat_ms"], 50), 2),
                                     "p95_ms": round(percentile(r["lat_ms"], 95), 2), "n_ok": r["n_ok"],
                                     "bad_frames": r["bad_frames"], "unity_cpu_s": r.get("unity_cpu_s"),
@@ -1363,15 +1627,21 @@ class Probe:
             self.cells.append(self.run_cell(L, E, scene, k))
         self.save()
 
-    def p2_grid(self, groups: Mapping[int, Sequence[int]], reserve: float, k0: int) -> None:
-        """Grid cells of `groups` (L -> E values) in order; scenes zig-zag so a pool keeps its loaded scene."""
+    def p2_grid(self, cells: Sequence[Tuple[int, int]], reserve: float, k0: int) -> None:
+        """Grid cells (L, E) in the given order (cell_order).  A cell on the same L as the one before starts on
+        the scene that one ended on (its pool has it loaded); a new pool starts on the first grid scene."""
         k = k0
-        for L, Es in groups.items():
-            for j, E in enumerate(Es):
-                scenes = self.grid_scenes if j % 2 == 0 else list(reversed(self.grid_scenes))
-                for scene in scenes:
-                    k += 1
-                    self.grid_step(L, E, scene, k, reserve=reserve)
+        prev: Optional[Tuple[int, str]] = None
+        for L, E in cells:
+            scenes = list(self.grid_scenes)
+            if prev is not None and prev[0] == L and prev[1] in scenes:
+                scenes.remove(prev[1])
+                scenes.insert(0, prev[1])
+            for scene in scenes:
+                k += 1
+                self.grid_step(L, E, scene, k, reserve=reserve)
+            if scenes:
+                prev = (L, scenes[-1])
 
     # -- reach
     def p3_reach(self) -> None:
@@ -1432,7 +1702,7 @@ class Probe:
                     h.scene = s
                     loads[s][n] = {"wid": h.wid, "L": h.L, "load_s": r["load_s"], "reach_s": r["reach_s"],
                                    "n": r["n"], "sha256_raw": r["sha256_raw"], "sha256_xz": r["sha256_xz"],
-                                   "positions": r["positions"]}
+                                   "call_pose": r.get("call_pose"), "positions": r["positions"]}
                     self.load_rows.append({"scene": s, "kind": lvp.scene_kind(s), "wid": h.wid, "L": h.L,
                                            "load_s": r["load_s"], "concurrent": conc, "phase": "reach"})
                 else:
@@ -1471,8 +1741,15 @@ class Probe:
     # -- the end
     def finish(self) -> None:
         r = self.res
-        r["grid_table"] = grid_table(self.cells, self.grid_scenes) if self.grid_scenes else []
-        r["recommended"] = recommend(r["grid_table"])
+        r["grid_cells"] = self.cells
+        rec = recommendations(r)
+        r["grid_table"] = rec["grid_table"]
+        r["recommended"] = rec["recommended"]
+        r["recommended_measured"] = rec["recommended_measured"]
+        r["cores_per_env"] = rec["cores_per_env"]
+        if "lvp_profile" not in r:
+            r["lvp_profile"] = {"profile": None, "first_try": lvp.LVP_PROFILES[0], "retried": self.profile_retried,
+                                "attempts": self.profile_attempts, "why": "no worker started"}
         rep = None
         cmp_ = r.get("compare")
         if cmp_:
@@ -1493,21 +1770,26 @@ class Probe:
         r["load_times"] = {"by_kind": {k: dist(v) for k, v in kinds.items()},
                            "serial_by_kind": {k: dist(v) for k, v in serial.items()}, "rows": self.load_rows,
                            "startup_s": dist([w["startup_s"] for w in r["workers"] if w.get("startup_s")])}
-        fm = sorted({str(w.get("font_mode")) for w in r["workers"] if w.get("ok")})
-        r.setdefault("font", {})["worker_modes"] = fm
-        r["font"]["ok"] = fm == ["system"] or fm == ["fallback"]
+        started = [w for w in r["workers"] if w.get("ok")]
+        fm = sorted({str(w.get("font_mode")) for w in started})
+        shas = sorted({str((w.get("font") or {}).get("sha256")) for w in started})
+        f = r.setdefault("font", {})
+        f.update(path=str(self.font), expected_sha256=self.font_sha256,
+                 sha256=((f.get("parent") or {}).get("sha256")), worker_modes=fm, worker_sha256=shas,
+                 rule="burn_label always uses the pinned badge font (lvp.install_font_rule; demos and eval refuse "
+                      "any other bytes)")
+        f["ok"] = bool(started) and fm == ["pinned"] and shas == [self.font_sha256]
+        r["homes"] = dir_size(self.out / "homes")
         r["utc_end"] = utc()
 
     def run(self) -> Dict[str, Any]:
         try:
             self.phase("p0_preflight", self.p0_preflight)
             if self.ready_to_render:
-                first = {L: E for L, E in self.grid.items() if L == REACH_L}
-                rest = {L: E for L, E in self.grid.items() if L != REACH_L}
                 self.phase("p1_compare_det", self.p1_compare_det)
-                self.phase("p2_grid", lambda: self.p2_grid(first, REACH_RESERVE_S + SUMMARY_RESERVE_S, 100))
+                self.phase("p2_grid", lambda: self.p2_grid(self.p2_cells, REACH_RESERVE_S + SUMMARY_RESERVE_S, 100))
                 self.phase("p3_reach", self.p3_reach)
-                self.phase("p4_grid", lambda: self.p2_grid(rest, SUMMARY_RESERVE_S, 200))
+                self.phase("p4_grid", lambda: self.p2_grid(self.p4_cells, SUMMARY_RESERVE_S, 200))
         except Terminated:
             self.res["terminated"] = utc()
             self.stop_pool(graceful=False)
@@ -1550,12 +1832,22 @@ def expect(out) -> Dict[str, Any]:
         rec = s.get("recommended") or {}
         item("recommended", isinstance(rec.get("E"), int) and isinstance(rec.get("L"), int),
              [rec.get("E"), rec.get("L")])
+        recm = s.get("recommended_measured") or {}
+        item("recommended_measured", isinstance(recm.get("E"), int) and isinstance(recm.get("L"), int),
+             [recm.get("E"), recm.get("L"), recm.get("cores_max")], required=False)
+        prof = (s.get("lvp_profile") or {}).get("profile")
+        item("lvp_profile", prof in lvp.LVP_PROFILES, prof)
         cells = s.get("grid_cells") or []
+        max_el = int((s.get("plan") or {}).get("max_el_recommend", MAX_EL_RECOMMEND))
         item("grid.cells_ok", any(x.get("ok") for x in cells),
              f"{sum(bool(x.get('ok')) for x in cells)}/{len(cells)} ok, "
              f"{sum(bool(x.get('skipped')) for x in cells)} skipped")
+        item("grid.no_eligible_skipped",
+             not any(x.get("skipped") and int(x["E"]) * int(x["L"]) <= max_el for x in cells),
+             [f"E{x['E']}xL{x['L']} {x['scene']}" for x in cells
+              if x.get("skipped") and int(x["E"]) * int(x["L"]) <= max_el])
         item("grid.no_skipped", not any(x.get("skipped") for x in cells),
-             [f"E{x['E']}xL{x['L']} {x['scene']}" for x in cells if x.get("skipped")])
+             [f"E{x['E']}xL{x['L']} {x['scene']}" for x in cells if x.get("skipped")], required=False)
         item("grid.all_cells_ok", all(x.get("ok") for x in cells),
              [f"E{x['E']}xL{x['L']} {x['scene']}: {x.get('error')}" for x in cells
               if not x.get("ok") and not x.get("skipped")], required=False)
@@ -1566,7 +1858,9 @@ def expect(out) -> Dict[str, Any]:
         files = sorted((out / "reach").glob("*.json")) if (out / "reach").is_dir() else []
         item("reach.files", planned and len(files) == planned, f"{len(files)}/{planned}")
         item("reach.both_loads", planned and rch.get("both_loads") == planned, f"{rch.get('both_loads')}/{planned}")
-        item("font.ok", (s.get("font") or {}).get("ok"), (s.get("font") or {}).get("worker_modes"))
+        fo = s.get("font") or {}
+        item("font.ok", fo.get("ok"), {"modes": fo.get("worker_modes"), "sha256": fo.get("worker_sha256"),
+                                       "expected": fo.get("expected_sha256")})
         comp_dir = out / "compare"
         n_png = len(list(comp_dir.glob("*/*.png"))) if comp_dir.is_dir() else 0
         item("compare.pngs", n_png >= 31, n_png, required=False)  # 25 steps + 2 targets + 4 repeat renders
@@ -1604,6 +1898,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     w.add_argument("--houses", default=None)
     e = sub.add_parser("expect")
     e.add_argument("--out", required=True)
+    rc = sub.add_parser("recommend", help="recompute recommended / recommended_measured from out/summary.json")
+    rc.add_argument("--out", required=True)
+    rc.add_argument("--max-el", type=int, default=None, help="default: the summary's plan (11)")
+    rc.add_argument("--max-cores", type=float, default=None, help="default: the summary's plan (11)")
+    rc.add_argument("--write", default=None, help="also write the result to this JSON file (never summary.json)")
     a = ap.parse_args(argv)
     if a.cmd == "worker":
         return worker_main(a)
@@ -1611,6 +1910,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         doc = expect(a.out)
         print(json.dumps({"ok": doc["ok"], "missing_required": doc["missing_required"]}), flush=True)
         return 0 if doc["ok"] else 1
+    if a.cmd == "recommend":
+        src = Path(a.out) / "summary.json"
+        try:
+            summary = json.loads(src.read_text())
+        except (OSError, ValueError) as ex:
+            print(f"cannot read {src}: {ex!r}", file=sys.stderr)
+            return 1
+        doc = dict(recommendations(summary, a.max_el, a.max_cores), source=str(src), utc=utc())
+        if a.write:
+            if Path(a.write).resolve() == src.resolve():
+                print("refusing to overwrite summary.json", file=sys.stderr)
+                return 2
+            write_json_atomic(a.write, doc)
+        print(json.dumps(jsafe({k: doc[k] for k in ("recommended", "recommended_measured", "cores_per_env",
+                                                     "limits")}), indent=1), flush=True)
+        return 0
     out = Path(a.out)
     if (out / "summary.json").exists():
         print(f"refusing: {out}/summary.json exists; give a new --out", file=sys.stderr)

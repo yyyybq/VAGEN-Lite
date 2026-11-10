@@ -5,14 +5,20 @@
 # Runs vpd/tvr/probe_lvp.py under the TVR env python (3.10, ai2thor 5.0.0); read its module doc for the phases.
 #
 #   RUN=$VPD_OUT/jobs/tvr-probe-$(date -u +%Y%m%d%H%M)
-#   $PY_EVAL -m vpd.sco prepare --run $RUN --name vpd-tvr-probe --gate tvr --est-gph 0.6 -- \
-#       env VPD_JOB_DEADLINE_S=1920 timeout -k 60 2040 \
+#   $PY_EVAL -m vpd.sco prepare --run $RUN --name vpd-tvr-probe --gate tvr --est-gph 1.0 -- \
+#       env VPD_JOB_DEADLINE_S=3360 timeout -k 60 3480 \
 #       bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/tvr_probe.sh $RUN
 #   $PY_EVAL -m vpd.sco submit --run $RUN
-# Wall clock: the outer timeout 2040 s + its 60 s kill window = 35 min, inside est-gph 0.6 (36 min); the soft job
-# deadline VPD_JOB_DEADLINE_S (default 1920 s after start) ends the probe RESERVE_S (90 s) early so reap and
+# Wall clock: the outer timeout 3480 s + its 60 s kill window = 59 min, inside est-gph 1.0 (60 min); the soft job
+# deadline VPD_JOB_DEADLINE_S (default 3360 s after start) ends the probe RESERVE_S (90 s) early so reap and
 # expect still run.  probe_lvp guards every phase / grid cell / reach load by that deadline and skips what does
-# not fit (recorded as skipped: no_time), so the job always writes its summary.
+# not fit (recorded as skipped: no_time), so the job always writes its summary.  Budget (a rough model of the
+# probe's real order, anchored on the one measured lavapipe point, 141.8 ms/step at L=12; INFERENCE, lavapipe
+# below L=12 never ran): the default grid needs about 2000 / 2700 / 3900 s (optimistic / central / pessimistic),
+# without the three E*L = 12 cells about 1650 / 2250 / 3200 s.  0.6 GPU-h (1830 s of probe time) would cut
+# eligible cells even in the central case; with 1.0 GPU-h the probe gets 3270 s.  The cells run likely-best
+# first (probe_lvp cell_order), so a short run cuts the E*L = 12 cells first.  The ledger charges the measured
+# run time, not the estimate.
 #
 # Steps (vpd_step -> RUN/steps.jsonl; a failed step never stops the later ones):
 #   node    vpd_node_facts -> RUN/node.txt
@@ -24,7 +30,10 @@
 #   RUN/DONE              written only when expect passed
 #   RUN/out/expect.json   ok true (re-check on the login node: $PY_EVAL -m vpd.tvr.probe_lvp expect --out RUN/out)
 #   RUN/out/summary.json  schema vpd.tvr.probe_lvp/1, label EXPLORATORY: grid_cells, grid_table, recommended
-#                         {E, L}, determinism, load_times, reach, font, compare {verdict, frames, controls, turns}
+#                         {E, L} (E*L <= 11), recommended_measured {E, L} (measured cgroup cores <= 11),
+#                         cores_per_env, lvp_profile, determinism, load_times, reach, font {path, sha256, ok},
+#                         compare {verdict, frames, controls, turns}
+#                         (recompute both recommendations: $PY_EVAL -m vpd.tvr.probe_lvp recommend --out RUN/out)
 #   RUN/out/reach/<scene>.json  one per SFT + eval scene (120), each loaded twice
 #   RUN/out/compare/<task>/     our PNGs of the 2 public sample tasks (31 files)
 # Exit: 0 when summary.json exists (whatever expect said), 2 on a bad call / reused RUN, 5 without a summary,
@@ -39,6 +48,9 @@ if [[ -z $RUN || $# -ne 1 ]]; then
   exit 2
 fi
 export RUN
+# the container's LD_LIBRARY_PATH before anything here changes it (set, maybe empty): lvp's measured profile
+# "envlib+orig" appends it, as debug_job.sh's ORIG_LD (used only if the first worker fails under "envlib")
+export VPD_TVR_ORIG_LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
 # shellcheck source=common_env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 cd "$VPD_WORKTREE" || exit 2
@@ -53,7 +65,7 @@ mkdir -p "$OUT/logs" || exit 2
 vpd_chown_trap "$RUN"   # no-op: this job runs non-root
 
 T0=$(date +%s)
-DEADLINE_S=${VPD_JOB_DEADLINE_S:-1920}
+DEADLINE_S=${VPD_JOB_DEADLINE_S:-3360}
 [[ $DEADLINE_S =~ ^[1-9][0-9]*$ ]] || { echo "VPD_JOB_DEADLINE_S must be a positive integer" >&2; exit 2; }
 RESERVE_S=90
 MIN_PROBE_S=300

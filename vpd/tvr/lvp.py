@@ -6,12 +6,18 @@ lavapipe, 640x360, quality Ultra, antiAliasing 4, fov 60, as in the official eva
 2026-11-10).  Never run any of the env/controller factories on the login node: they start Unity.
 
 Pieces (pure functions unless noted, so they are unit-testable without ai2thor):
-  worker_env(base, lp_threads=L, home=H)   the environment dict of ONE THOR worker process:
+  worker_env(base, lp_threads=L, home=H, profile=P)   the environment dict of ONE THOR worker process:
         - unsets every VK_* / __EGL_VENDOR_LIBRARY_* / __NV_* / __GL_* / __GLX_* / MESA_* / GALLIUM_* / LP_* /
           ACTIVESPATIAL_* variable, LD_PRELOAD, DISPLAY, XDG_DATA_HOME, XDG_CONFIG_HOME;
         - VK_ICD_FILENAMES = VK_DRIVER_FILES = <TVR env>/share/vulkan/icd.d/lvp_icd.x86_64.json (image loader
           1.2.131 reads the first name, the env loader 1.4.357 the second);
-        - LD_LIBRARY_PATH = <TVR env>/lib exactly (this drops the NVGL overlay and every other entry);
+        - LD_LIBRARY_PATH by the profile P (LVP_PROFILES, recorded as VPD_LVP_PROFILE):
+            "envlib"       <TVR env>/lib exactly (the brief's profile; drops the NVGL overlay and every other entry;
+                           first run by the TVR probe);
+            "envlib+orig"  <TVR env>/lib + the container's original LD_LIBRARY_PATH (the profile of every measured
+                           lavapipe run: debug_job.sh prof_lvpforced (v10) and tvr_smoke.sh's lavapipe step).
+          The TVR probe tries "envlib" and, only if its first worker cannot start, "envlib+orig" once; its
+          summary.lvp_profile names the profile that worked, and the demo replay and eval freeze that one;
         - CUDA_VISIBLE_DEVICES = 0 for THOR workers only (thor=True).  With gpu_device 0 and the pre-written
           cuda-vulkan-mapping {"0": 0}, ai2thor passes -force-device-index 0, and Vulkan device 0 is llvmpipe
           (the only ICD); Unity 2020.3 aborts without a device index (smoke_run1);
@@ -22,13 +28,15 @@ Pieces (pure functions unless noted, so they are unit-testable without ai2thor):
   prepare_home(H)          (writes) H/.ai2thor/releases -> OUT/tvr/ai2thor_home/.ai2thor/releases and
                            H/.ai2thor/cuda-vulkan-mapping.json = {"0": 0}.
   check_icd()              the lavapipe ICD JSON exists and names an existing absolute library_path.
-  font_status() / install_font_rule(tv, status)
+  font_status() / install_font_rule(tv, font=BADGE_FONT, expected_sha256=BADGE_FONT_SHA256, allow_missing=False)
         TVRBench's burn_label hard-codes /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf and silently falls
-        back to ImageFont.load_default() (a different badge).  The rule, identical for demos and eval:
-          system font present  -> TVRBench's burn_label unchanged ("system");
-          else the TVR env's matplotlib DejaVuSans-Bold.ttf present -> thor_view_env's ImageFont is replaced by
-               a shim that redirects exactly that path to the matplotlib copy ("fallback");
-          else refuse ("missing"), unless allow_missing (the probe only: badges are masked when comparing).
+        back to ImageFont.load_default() (a different badge); the system copy also differs between images (the
+        login node's is not the matplotlib copy's bytes).  The rule, identical for demos and eval: the badge font
+        is ALWAYS the TVR env's matplotlib DejaVuSans-Bold.ttf (BADGE_FONT, the same bytes on every node through
+        the shared FS), pinned by sha256 (BADGE_FONT_SHA256).  install_font_rule replaces thor_view_env's ImageFont
+        by a shim that redirects exactly TVRBench's hard-coded path to BADGE_FONT, whether or not the system font
+        exists ("pinned").  A missing BADGE_FONT or one whose sha256 differs is refused, unless allow_missing (the
+        probe only: badges are masked when comparing; it then reports "missing" / "mismatch").
   import_tvrbench(repo)    (imports) tvrbench.env.thor_env and tvrbench.online_rl.thor_view_env of the pinned repo.
   view_env_config() / make_view_env(tv) / make_thor_env(te)
         TVRBench's ThorViewEnv / ThorEnv with the official eval settings: 640x360, fov 60, quality Ultra,
@@ -72,8 +80,11 @@ TASKS_DIR = TVR_REPO / "data" / "tasks"
 PROCTHOR_DIR = TVR_REPO / "data" / "procthor-10k"
 PROCTHOR_TRAIN = PROCTHOR_DIR / "train.jsonl.gz"
 SYSTEM_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"  # hard-coded in TVRBench burn_label
-FALLBACK_FONT = TVR_ENV / "lib" / "python3.10" / "site-packages" / "matplotlib" / "mpl-data" / "fonts" / "ttf" / \
+# THE badge font of demos and eval: the TVR env's matplotlib 3.10.9 copy (704128 B; sha256 checked 2026-11-10 on
+# the login node; the system copy there is another file, aa2ebed7..., 705684 B)
+BADGE_FONT = TVR_ENV / "lib" / "python3.10" / "site-packages" / "matplotlib" / "mpl-data" / "fonts" / "ttf" / \
     "DejaVuSans-Bold.ttf"
+BADGE_FONT_SHA256 = "b184b89e3c1075f22f6b71575b6fc20d4972b3cfd3b23322ca6fd596dcaef167"
 CUDA_VULKAN_MAPPING = {"0": 0}
 PLAYER_LOG_REL = Path(".config") / "unity3d" / "Allen Institute for Artificial Intelligence" / "AI2-THOR" / \
     "Player.log"
@@ -93,6 +104,14 @@ STRIP_PREFIXES = ("VK_", "__EGL_VENDOR_LIBRARY_", "__NV_", "__GL_", "__GLX_", "M
 STRIP_EXACT = frozenset({"LD_PRELOAD", "LD_LIBRARY_PATH", "DISPLAY", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
                          "XDG_CACHE_HOME", "HOME"})
 THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")
+# LD_LIBRARY_PATH profiles (module doc), in the order the probe tries them
+LVP_PROFILES = ("envlib", "envlib+orig")
+LVP_PROFILE_DOC = {"envlib": "<TVR env>/lib only",
+                   "envlib+orig": "<TVR env>/lib + the container's original LD_LIBRARY_PATH (measured profile: "
+                                  "debug_job.sh prof_lvpforced v10, tvr_smoke.sh lavapipe step)"}
+# the payload exports the container's LD_LIBRARY_PATH under this name before it changes anything (set, maybe empty);
+# without it, base LD_LIBRARY_PATH is taken
+ORIG_LD_VAR = "VPD_TVR_ORIG_LD_LIBRARY_PATH"
 
 
 def _positive_int(x: Any) -> bool:
@@ -106,14 +125,34 @@ def stripped(key: str, thor: bool = True) -> bool:
     return thor and key == "CUDA_VISIBLE_DEVICES"
 
 
+def original_ld_library_path(base: Mapping[str, str]) -> str:
+    """The container's LD_LIBRARY_PATH as the payload saw it at its start (ORIG_LD_VAR when set, even if empty)."""
+    if ORIG_LD_VAR in base:
+        return base[ORIG_LD_VAR]
+    return base.get("LD_LIBRARY_PATH", "")
+
+
+def ld_library_path(profile: str, base: Mapping[str, str], tvr_env=TVR_ENV) -> str:
+    """LD_LIBRARY_PATH of a worker under `profile` (LVP_PROFILES); empty entries (= the cwd) and repeats of
+    <TVR env>/lib are dropped from the original value."""
+    lib = str(Path(tvr_env) / "lib")
+    if profile == "envlib":
+        return lib
+    if profile == "envlib+orig":
+        rest = [p for p in original_ld_library_path(base).split(":") if p and p != lib]
+        return ":".join([lib] + rest)
+    raise ValueError(f"unknown lavapipe profile {profile!r} (one of {LVP_PROFILES})")
+
+
 def worker_env(base: Mapping[str, str], *, lp_threads: int, home, thor: bool = True, tvr_env=TVR_ENV,
-               icd=None) -> Dict[str, str]:
+               icd=None, profile: str = LVP_PROFILES[0]) -> Dict[str, str]:
     """The environment of one lavapipe worker process (see the module doc).  `base` is not modified."""
     if not _positive_int(lp_threads):
         raise ValueError(f"lp_threads must be a positive int (LP_NUM_THREADS is required), got {lp_threads!r}")
     if home is None or str(home) == "":
         raise ValueError("home is required (one HOME per worker)")
     tvr_env = Path(tvr_env)
+    ld = ld_library_path(profile, base, tvr_env)
     icd = Path(icd) if icd is not None else tvr_env / "share" / "vulkan" / "icd.d" / LVP_ICD_NAME
     env = {k: v for k, v in base.items() if not stripped(k, thor)}
     bin_dir = str(tvr_env / "bin")
@@ -121,7 +160,8 @@ def worker_env(base: Mapping[str, str], *, lp_threads: int, home, thor: bool = T
     env.update({
         "VK_ICD_FILENAMES": str(icd),
         "VK_DRIVER_FILES": str(icd),
-        "LD_LIBRARY_PATH": str(tvr_env / "lib"),
+        "LD_LIBRARY_PATH": ld,
+        "VPD_LVP_PROFILE": profile,
         "LP_NUM_THREADS": str(lp_threads),
         "HOME": str(home),
         "XDG_CACHE_HOME": str(Path(home) / ".cache"),
@@ -140,8 +180,9 @@ def worker_env(base: Mapping[str, str], *, lp_threads: int, home, thor: bool = T
 
 def env_summary(env: Mapping[str, str]) -> Dict[str, Optional[str]]:
     """The render-relevant part of a worker environment (for result files)."""
-    keys = ("VK_ICD_FILENAMES", "VK_DRIVER_FILES", "LD_LIBRARY_PATH", "LP_NUM_THREADS", "CUDA_VISIBLE_DEVICES",
-            "HOME", "OMP_NUM_THREADS", "ACTIVESPATIAL_USE_X11", "__EGL_VENDOR_LIBRARY_FILENAMES", "DISPLAY")
+    keys = ("VK_ICD_FILENAMES", "VK_DRIVER_FILES", "LD_LIBRARY_PATH", "VPD_LVP_PROFILE", "LP_NUM_THREADS",
+            "CUDA_VISIBLE_DEVICES", "HOME", "OMP_NUM_THREADS", "ACTIVESPATIAL_USE_X11",
+            "__EGL_VENDOR_LIBRARY_FILENAMES", "DISPLAY")
     return {k: env.get(k) for k in keys}
 
 
@@ -198,15 +239,25 @@ def _sha256_file(p) -> Optional[str]:
         return None
 
 
-def font_status(system=SYSTEM_FONT, fallback=FALLBACK_FONT) -> Dict[str, Any]:
-    """Which DejaVuSans-Bold the badge will use, by the rule of the module doc (mode system/fallback/missing)."""
-    sp, fp = os.path.isfile(system), os.path.isfile(fallback)
-    st = {"system": str(system), "system_present": sp, "system_sha256": _sha256_file(system) if sp else None,
-          "fallback": str(fallback), "fallback_present": fp,
-          "fallback_sha256": _sha256_file(fallback) if fp else None}
-    st["same_bytes"] = bool(sp and fp and st["system_sha256"] == st["fallback_sha256"])
-    st["mode"] = "system" if sp else ("fallback" if fp else "missing")
-    return st
+def font_status(font=BADGE_FONT, expected_sha256: Optional[str] = BADGE_FONT_SHA256,
+                system=SYSTEM_FONT) -> Dict[str, Any]:
+    """The pinned badge font: {path, present, bytes, sha256, expected_sha256, sha256_ok, mode} with mode
+    "pinned" (present, sha256 == expected), "mismatch" (present, other bytes) or "missing"; plus the system copy
+    (system_present / system_sha256), recorded only, never used."""
+    present = os.path.isfile(font)
+    sha = _sha256_file(font) if present else None
+    size = None
+    if present:
+        try:
+            size = os.path.getsize(font)
+        except OSError:
+            size = None
+    ok = bool(sha is not None and expected_sha256 and sha == expected_sha256)
+    sp = os.path.isfile(system)
+    return {"path": str(font), "present": present, "bytes": size, "sha256": sha,
+            "expected_sha256": expected_sha256, "sha256_ok": ok,
+            "mode": "pinned" if ok else ("mismatch" if sha is not None else "missing"),
+            "system": str(system), "system_present": sp, "system_sha256": _sha256_file(system) if sp else None}
 
 
 class FontRedirect:
@@ -225,21 +276,33 @@ class FontRedirect:
         return getattr(self._real, name)
 
 
-def install_font_rule(tv_module, status: Mapping[str, Any], *, allow_missing: bool = False) -> str:
-    """Apply the badge-font rule to an imported thor_view_env module; returns the mode used."""
-    mode = status.get("mode")
-    if mode == "system":
-        return "system"
-    if mode == "fallback":
+def install_font_rule(tv_module, *, font=BADGE_FONT, expected_sha256: str = BADGE_FONT_SHA256,
+                      allow_missing: bool = False) -> Dict[str, Any]:
+    """Apply the badge-font rule (module doc) to an imported thor_view_env module; returns font_status() plus
+    `installed` (whether burn_label now loads `font`).
+
+    The redirect of TVRBench's hard-coded SYSTEM_FONT path to `font` is installed whenever `font` exists, also
+    when the system font is present.  mode "pinned" = installed and sha256 == expected_sha256.  Any other mode
+    raises RuntimeError unless allow_missing (the probe only, which masks badges): "mismatch" keeps the redirect
+    (the file at `font` is used and its sha256 is reported), "missing" installs nothing.
+    """
+    if not expected_sha256:
+        raise ValueError("expected_sha256 is required (the badge font is pinned by sha256)")
+    st = font_status(font, expected_sha256)
+    mode = st["mode"]
+    if mode != "pinned" and not allow_missing:
+        what = (f"has sha256 {st['sha256']}, expected {expected_sha256}" if mode == "mismatch" else "is missing")
+        raise RuntimeError(f"badge font {font} {what}: demos and eval must burn the badge with the pinned "
+                           f"DejaVuSans-Bold.ttf (TVRBench would otherwise use whatever font the image has); "
+                           f"refusing")
+    st["installed"] = False
+    if mode in ("pinned", "mismatch"):
         real = tv_module.ImageFont
         if isinstance(real, FontRedirect):
             real = real._real
-        tv_module.ImageFont = FontRedirect(real, status.get("system", SYSTEM_FONT), status["fallback"])
-        return "fallback"
-    if allow_missing:
-        return "missing"
-    raise RuntimeError("no DejaVuSans-Bold.ttf (system copy or TVR env matplotlib copy): TVRBench's burn_label "
-                       "would fall back to ImageFont.load_default() and change the badge; refusing")
+        tv_module.ImageFont = FontRedirect(real, SYSTEM_FONT, str(font))
+        st["installed"] = True
+    return st
 
 
 # --- TVRBench imports and factories -------------------------------------------------------------------------------
