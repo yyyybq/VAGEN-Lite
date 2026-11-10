@@ -1210,6 +1210,8 @@ def compute_valid_return_metrics(data: DataProto, ignore_value: float = -100.0) 
                 "critic/values/valid_mean": torch.mean(valid_values).detach().item(),
                 "critic/values/valid_min": torch.min(valid_values).detach().item(),
                 "critic/values/valid_max": torch.max(valid_values).detach().item(),
+                # the critic pilot (2026-11-10): the predictions' spread (a value network stuck near a constant has ~0)
+                "critic/values/valid_std": torch.std(valid_values.float(), unbiased=False).detach().item(),
                 "critic/values/mae_valid": torch.mean(value_error.abs()).detach().item(),
                 "critic/values/rmse_valid": torch.sqrt(torch.mean(value_error.square())).detach().item(),
                 "critic/values/explained_var_valid": (

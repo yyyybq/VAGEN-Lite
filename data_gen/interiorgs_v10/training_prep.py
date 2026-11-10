@@ -414,7 +414,19 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
     # the value network only for the estimators it knows, so the package turns it on (critic.enable)
     "p1tgae": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
                "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 11, "gamma": 1.0, "lam": 0.95},
+    # the critic pilot (the user's supplement of 2026-11-10, section 2): p1tgae's value network did not learn (its
+    # explained variance at the turns' first tokens stayed about 0 over 300 updates), so this package changes its four
+    # settings and nothing else: critic lr 2e-5 -> 5e-5 (critic.optim.lr), no value clipping (critic.cliprange_value
+    # NO_VALUE_CLIP: verl's clip_by_value leaves every prediction inside so wide a range, so the loss is the plain
+    # squared error), two passes of the value network over each update's batch (critic.ppo_epochs 2; the actor keeps
+    # its one) and critic_warmup 30 (the value network alone for 29 updates).  A new package, default off: p1tgae and
+    # the standards naming it keep their configs
+    "p1tgae_c": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
+                 "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0, "lam": 0.95,
+                 "critic_lr": 5e-5, "critic_value_clip": False, "critic_ppo_epochs": 2},
 }
+NO_VALUE_CLIP = 1.0e6  # critic.cliprange_value of a package without value clipping (far beyond any return)
+CRITIC_KEYS = ("critic_lr", "critic_value_clip", "critic_ppo_epochs")  # a package's value-network settings
 PACKAGE_ESTIMATORS = ("grpo", "gae", "turn_gae")  # the advantage estimators a package may name (default grpo)
 CRITIC_ESTIMATORS = ("gae", "turn_gae")  # the ones with a value network (their warm-up is part of the package)
 
@@ -493,6 +505,23 @@ def package_overrides(name: str, candidates: Optional[int] = None, target_groups
         if "gamma" not in p or "lam" not in p:
             raise ValueError(f"package {name}: turn_gae needs its own gamma and lam (counted per turn)")
         out.update({"algorithm.gamma": float(p["gamma"]), "algorithm.lam": float(p["lam"]), "critic.enable": True})
+    named = [k for k in CRITIC_KEYS if k in p]  # the critic pilot (2026-11-10): the value network's own settings
+    if named and estimator not in CRITIC_ESTIMATORS:
+        raise ValueError(f"package {name}: {named} set the value network, which {estimator!r} does not have")
+    if "critic_lr" in p:
+        if isinstance(p["critic_lr"], bool) or not float(p["critic_lr"]) > 0:
+            raise ValueError(f"package {name}: critic_lr must be positive, not {p['critic_lr']!r}")
+        out["critic.optim.lr"] = float(p["critic_lr"])
+    if "critic_value_clip" in p:  # only turning the clip off is a setting (the template's 0.5 is the default)
+        if p["critic_value_clip"] is not False:
+            raise ValueError(f"package {name}: critic_value_clip can only be False (no value clipping), "
+                             f"not {p['critic_value_clip']!r}")
+        out["critic.cliprange_value"] = NO_VALUE_CLIP
+    if "critic_ppo_epochs" in p:
+        epochs = p["critic_ppo_epochs"]
+        if isinstance(epochs, bool) or not isinstance(epochs, int) or epochs < 1:
+            raise ValueError(f"package {name}: critic_ppo_epochs must be a whole number >= 1, not {epochs!r}")
+        out["critic.ppo_epochs"] = int(epochs)
     return out
 DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
             "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,

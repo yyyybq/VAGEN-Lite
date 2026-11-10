@@ -211,3 +211,36 @@ def test_runner_accepts_the_concat_mode_only():
     assert history_mode(cfg("gae", True)) == "concat" and history_mode(cfg("grpo", True)) == "concat"
     with pytest.raises(ValueError):
         history_mode(cfg("turn_gae", False))
+
+
+def test_critic_pilot_value_loss_unclipped():
+    """The critic pilot (package p1tgae_c, the user's supplement of 2026-11-10): with its cliprange_value verl's
+    value loss is the plain squared error (no prediction clipped); the template's 0.5 does clip."""
+    from verl.trainer.ppo.core_algos import compute_value_loss
+    from data_gen.interiorgs_v10.training_prep import NO_VALUE_CLIP
+
+    g = torch.Generator().manual_seed(0)
+    vpreds, values, returns = (torch.randn(3, 5, generator=g) * 6.0 for _ in range(3))
+    mask = torch.ones(3, 5)
+    mask[0, 3:] = 0
+    loss, clipfrac = compute_value_loss(vpreds, returns, values, mask, cliprange_value=NO_VALUE_CLIP)
+    expected = 0.5 * (((vpreds - returns) ** 2) * mask).sum() / mask.sum()
+    assert float(loss) == pytest.approx(float(expected), rel=1e-6)
+    assert float(clipfrac) == 0.0
+    _, clipfrac_template = compute_value_loss(vpreds, returns, values, mask, cliprange_value=0.5)
+    assert float(clipfrac_template) > 0.0
+
+
+def test_valid_value_std_metric():
+    """The critic pilot: the valid-position metrics give the values' spread at the supervised (anchor) positions only,
+    not at the sentinel ones."""
+    from verl import DataProto
+    from vagen.ray_trainer import compute_valid_return_metrics
+
+    returns = torch.tensor([[1.0, TG.IGNORE_VALUE, 3.0], [TG.IGNORE_VALUE, 2.0, TG.IGNORE_VALUE]])
+    values = torch.tensor([[0.5, 9.0, 2.5], [7.0, 1.5, -7.0]])
+    data = DataProto.from_dict(tensors={"returns": returns, "values": values, "response_mask": torch.ones(2, 3)})
+    m = compute_valid_return_metrics(data, ignore_value=TG.IGNORE_VALUE)
+    valid = torch.tensor([0.5, 2.5, 1.5])
+    assert m["critic/values/valid_std"] == pytest.approx(float(valid.std(unbiased=False)))
+    assert m["critic/values/valid_mean"] == pytest.approx(float(valid.mean()))

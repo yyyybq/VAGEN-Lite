@@ -376,6 +376,56 @@ class TrainingPrepTest(unittest.TestCase):
                 TP.package_overrides("_tg_no_gamma")
         finally:
             del TP.OPT_PACKAGES["_tg_no_gamma"]
+        # the critic pilot (the user's supplement of 2026-11-10, section 2): p1tgae_c is p1tgae with the value network's
+        # four settings changed (critic lr 5e-5, no value clipping, two critic passes, warm-up 30); its overrides are
+        # p1tgae's (warm-up 30) plus the three critic keys, appended; p1tgae's own overrides are unchanged
+        pilot = ("critic_warmup",) + TP.CRITIC_KEYS
+        self.assertEqual({k: v for k, v in TP.OPT_PACKAGES["p1tgae_c"].items() if k not in pilot},
+                         {k: v for k, v in TP.OPT_PACKAGES["p1tgae"].items() if k != "critic_warmup"})
+        self.assertEqual(tuple(TP.OPT_PACKAGES["p1tgae_c"][k] for k in pilot), (30, 5e-5, False, 2))
+        self.assertFalse(any(k in TP.OPT_PACKAGES[n] for n in ("p1", "p2", "p1gae", "p1tgae") for k in TP.CRITIC_KEYS))
+        self.assertEqual(list(TP.package_overrides("p1tgae").items()), list(tg.items()))
+        tgc = TP.package_overrides("p1tgae_c")
+        self.assertEqual(list(tgc.items()),
+                         [(k, 30 if k == "trainer.critic_warmup" else v) for k, v in tg.items()]
+                         + [("critic.optim.lr", 5e-5), ("critic.cliprange_value", TP.NO_VALUE_CLIP),
+                            ("critic.ppo_epochs", 2)])
+        ppo_c, report_c = config("rl_tgc_a", opt_package="p1tgae_c", critic_warmup=None)
+        ppo_t2, _ = config("rl_tgc_b", opt_package="p1tgae", critic_warmup=None)
+        self.assertEqual((ppo_c["critic"]["optim"]["lr"], ppo_c["critic"]["cliprange_value"], ppo_c["critic"]["ppo_epochs"],
+                          ppo_c["trainer"]["critic_warmup"], report_c["critic_warmup"]),
+                         (5e-5, TP.NO_VALUE_CLIP, 2, 30, 30))
+        # this test's template has no critic optimiser, clip or passes: p1tgae adds none of them, p1tgae_c only its three
+        # (test_rl_config_standards_and_seed checks the repository template's critic)
+        self.assertEqual(sorted(ppo_t2["critic"]), ["enable", "model"])
+        self.assertEqual(sorted(ppo_c["critic"]), ["cliprange_value", "enable", "model", "optim", "ppo_epochs"])
+        self.assertEqual(ppo_c["critic"]["optim"], {"lr": 5e-5})
+        self.assertEqual(ppo_t2["trainer"]["critic_warmup"], 11)
+        self.assertNotIn("ppo_epochs", ppo_c["actor_rollout_ref"]["actor"])  # the actor's passes are not touched
+        self.assertEqual(report_c["opt_package_overrides"], tgc)
+        for key in ("optim", "cliprange_value", "ppo_epochs"):  # otherwise p1tgae's config (paths aside)
+            ppo_c["critic"].pop(key)
+        for cfg in (ppo_c, ppo_t2):
+            cfg["trainer"].pop("critic_warmup")
+        self.assertEqual(json.loads(json.dumps(ppo_c).replace("rl_tgc_a", "X")),
+                         json.loads(json.dumps(ppo_t2).replace("rl_tgc_b", "X")))
+        for bad in (0, 11):  # its warm-up is part of the recipe
+            with self.assertRaisesRegex(SystemExit, "critic_warmup to 30", msg=bad):
+                config(f"rl_tgc_bad_{bad}", opt_package="p1tgae_c", critic_warmup=bad)
+            self.assertFalse((self.root / f"rl_tgc_bad_{bad}" / "ppo.yaml").exists())
+        # the critic keys need a value network, the clip can only be turned off, the passes are a whole number >= 1
+        for name, pkg, pattern in (("_grpo_critic", dict(TP.OPT_PACKAGES["p1"], critic_lr=5e-5), "value network"),
+                                   ("_tgc_clip", dict(TP.OPT_PACKAGES["p1tgae_c"], critic_value_clip=0.2), "only be False"),
+                                   ("_tgc_clip_true", dict(TP.OPT_PACKAGES["p1tgae_c"], critic_value_clip=True), "only be False"),
+                                   ("_tgc_epochs", dict(TP.OPT_PACKAGES["p1tgae_c"], critic_ppo_epochs=0), "whole number"),
+                                   ("_tgc_epochs_f", dict(TP.OPT_PACKAGES["p1tgae_c"], critic_ppo_epochs=1.5), "whole number"),
+                                   ("_tgc_lr", dict(TP.OPT_PACKAGES["p1tgae_c"], critic_lr=0.0), "positive")):
+            TP.OPT_PACKAGES[name] = pkg
+            try:
+                with self.assertRaisesRegex(ValueError, pattern, msg=name):
+                    TP.package_overrides(name)
+            finally:
+                del TP.OPT_PACKAGES[name]
 
     def test_rl_config_standards_and_seed(self):
         """Round 12: named standard configurations (configs/rl_standards.json, the package with S0 and with the dense
@@ -388,6 +438,7 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_Dcond",
                                              "v10_p1_Dcond_fp", "v10_p1_S0", "v10_p1_S0_fp", "v10_p1_S0_keep",
                                              "v10_p1gae_Dcond", "v10_p1gae_S0", "v10_p1tgae_Dcond", "v10_p1tgae_S0",
+                                             "v10_p1tgaec_Dcond", "v10_p1tgaec_S0",
                                              "v10_p2_D", "v10_p2_S0"])
         # the PPO supplement (the user's decision 甲 of 2026-11-08): the p1 pair with the GAE package, nothing else
         for name, base in (("v10_p1gae_S0", "v10_p1_S0"), ("v10_p1gae_Dcond", "v10_p1_Dcond")):
@@ -397,6 +448,10 @@ class TrainingPrepTest(unittest.TestCase):
         for name, base in (("v10_p1tgae_S0", "v10_p1_S0"), ("v10_p1tgae_Dcond", "v10_p1_Dcond")):
             self.assertEqual(standards[name], {**standards[base], "opt_package": "p1tgae"})
         self.assertIn("_v10_p1tgae", json.loads(TP.STANDARDS_FILE.read_text(encoding="utf-8")))
+        # the critic pilot (2026-11-10): the same pair with package p1tgae_c
+        for name, base in (("v10_p1tgaec_S0", "v10_p1_S0"), ("v10_p1tgaec_Dcond", "v10_p1_Dcond")):
+            self.assertEqual(standards[name], {**standards[base], "opt_package": "p1tgae_c"})
+        self.assertIn("_v10_p1tgaec", json.loads(TP.STANDARDS_FILE.read_text(encoding="utf-8")))
         # experiment 3A (the user's decision 甲 of 2026-11-06): the p1 pair with the turn-footprint rule, each its
         # base plus turn_footprint_radius 0.25, the two differing only in the reward (as every pair)
         for name, base in (("v10_p1_S0_fp", "v10_p1_S0"), ("v10_p1_Dcond_fp", "v10_p1_Dcond")):
@@ -437,6 +492,26 @@ class TrainingPrepTest(unittest.TestCase):
                     yaml.safe_load((self.root / out_name / "train_env.yaml").read_text())["envs"][0]["config"],
                     json.loads((self.root / out_name / "rl_config_report.json").read_text()))
 
+        # the critic pilot (2026-11-10) on the repository template: v10_p1tgaec_Dcond gives v10_p1tgae_Dcond's config
+        # with the value network's lr 5e-5 (template 2e-5), cliprange_value NO_VALUE_CLIP (template 0.5), two critic
+        # passes (template: the actor's) and warm-up 30 (p1tgae 11); the actor keeps its one pass
+        ppo_tc, env_tc, report_tc = config("rl_std_tgc", standard="v10_p1tgaec_Dcond", seed=7)
+        ppo_tt, env_tt, _ = config("rl_std_tgt", standard="v10_p1tgae_Dcond", seed=7)
+        pilot_keys = {("critic", "optim", "lr"): (5e-5, 2e-5), ("critic", "cliprange_value"): (TP.NO_VALUE_CLIP, 0.5),
+                      ("critic", "ppo_epochs"): (2, "${oc.select:actor_rollout_ref.actor.ppo_epochs,1}"),
+                      ("trainer", "critic_warmup"): (30, 11)}
+        for path, (want_c, want_t) in pilot_keys.items():
+            node_c, node_t = ppo_tc, ppo_tt
+            for k in path[:-1]:
+                node_c, node_t = node_c[k], node_t[k]
+            self.assertEqual((node_c.pop(path[-1]), node_t.pop(path[-1])), (want_c, want_t), msg=path)
+        self.assertEqual((ppo_tc["actor_rollout_ref"]["actor"]["ppo_epochs"], ppo_tt["actor_rollout_ref"]["actor"]["ppo_epochs"]), (1, 1))
+        self.assertEqual(json.loads(json.dumps(ppo_tc).replace("rl_std_tgc", "X")),
+                         json.loads(json.dumps(ppo_tt).replace("rl_std_tgt", "X")))
+        self.assertEqual(json.loads(json.dumps(env_tc).replace("rl_std_tgc", "X")),
+                         json.loads(json.dumps(env_tt).replace("rl_std_tgt", "X")))  # the env is the same
+        self.assertEqual((report_tc["standard"], report_tc["opt_package"], report_tc["critic_warmup"]),
+                         ("v10_p1tgaec_Dcond", "p1tgae_c", 30))
         ppo, env, report = config("rl_std_d", standard="v10_p1_D", seed=7)
         a = ppo["actor_rollout_ref"]
         self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["data"]["train_batch_size"], a["rollout"]["n"],

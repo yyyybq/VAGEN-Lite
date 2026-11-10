@@ -57,5 +57,12 @@
                    "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
  "v10_p1tgae_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
                       "opt_package": "p1tgae", "reward_preset": "D_cond",
-                      "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
+                      "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "_v10_p1tgaec": "The critic pilot (the user's supplement of 2026-11-10, section 2): the p1tgae pair with package p1tgae_c (the value network's lr 5e-5, no value clipping, two critic passes per update, critic_warmup 30; nothing else changes). V4 = v10_p1tgaec_Dcond with C0's four V4 keys, as qw3tgd.",
+ "v10_p1tgaec_S0": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                    "opt_package": "p1tgae_c", "reward_preset": "S0",
+                    "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p1tgaec_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                       "opt_package": "p1tgae_c", "reward_preset": "D_cond",
+                       "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
 }
