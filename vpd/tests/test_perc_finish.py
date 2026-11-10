@@ -42,7 +42,16 @@ def R(monkeypatch):
         pytest.skip(f"run_vpd not importable here: {e}")
     monkeypatch.setattr(run_vpd.score, "__defaults__", (None, None, None))  # no real hard_subsets / split files
     monkeypatch.delitem(sys.modules, F.EV_MODULE, raising=False)
-    return run_vpd
+    # finish() refuses when a WalkerBench `engine` package from another copy is already imported (one start per
+    # process).  Earlier tests in the same pytest process (the WB floors tests) import one, so hide it for this test,
+    # drop the engine modules the test itself imports, and put the hidden ones back afterwards.
+    saved = {k: m for k, m in sys.modules.items() if k == "engine" or k.startswith("engine.")}
+    for k in saved:
+        del sys.modules[k]
+    yield run_vpd
+    for k in [k for k in sys.modules if k == "engine" or k.startswith("engine.")]:
+        del sys.modules[k]
+    sys.modules.update(saved)
 
 
 # ------------------------------------------------------------------------------------------ fake evaluator
