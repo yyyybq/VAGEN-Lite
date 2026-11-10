@@ -21,7 +21,9 @@ eval guards (it starts vLLM):
   start, token}; removed when the eval returns.  An existing lock is taken over when it names this same RUN, or when
   its RUN has finished (RUN/DONE, or RUN/job/exit_code written by launch.sh after the payload exited, also after a
   timeout).  Otherwise eval is refused, unless env VPD_PERC_TAKEOVER=1: set it only on a resubmission after the
-  first job has reached a terminal state (`vpd.sco status`) without writing either marker (deleted job, lost node).
+  first job has reached a terminal state (`vpd.sco status`) without writing either marker (deleted job, lost node);
+- right after taking the lock: a run dir that already holds results.json (exit 0) or results_invalid.json (exit 1)
+  is not re-run and its explore.json is not rewritten unless --overwrite is given (run_vpd would refuse it anyway).
 
 Task set perc294 = OUT/walkerbench/perception/perc294/{tasks/, selection.json}:
 - sources: tasks/full and tasks/standard of the WalkerBench checkout (paths.REPO_WB @ b197f51), files angle_* / dis_* /
@@ -492,6 +494,12 @@ def release_lock(lock: dict) -> bool:
     return False
 
 
+def finished_result(run_dir) -> str | None:
+    """"results.json" or "results_invalid.json" when run_dir holds that finished run (run_vpd's own refusal rule
+    without --overwrite), else None."""
+    return next((n for n in ("results.json", "results_invalid.json") if (Path(run_dir) / n).exists()), None)
+
+
 def cmd_eval(argv: list, run_vpd=None, perc_dir=PERC_DIR, repo=paths.REPO_WB, panos=paths.PANOS,
              expected=EXPECTED) -> int:
     ap = argparse.ArgumentParser(prog="python -m vpd.walkerbench.perc eval")
@@ -513,6 +521,13 @@ def cmd_eval(argv: list, run_vpd=None, perc_dir=PERC_DIR, repo=paths.REPO_WB, pa
     lock = acquire_lock(lock_path(a.start, root), run, a.start)
     rc = 1
     try:
+        # checked under the lock: a run finished meanwhile (e.g. by another job, after the payload's own skip check)
+        # is left exactly as it is, explore.json included, unless --overwrite (run_vpd would refuse it anyway)
+        done = finished_result(run_dir)
+        if done is not None and not a.overwrite:
+            print(f"[perc] {run_dir / done} exists: {a.start} has a finished run, not re-run, explore.json left "
+                  f"untouched (--overwrite replaces the run)", file=sys.stderr)
+            return 0 if done == "results.json" else 1
         try:
             R.main(rv)
             rc = 0

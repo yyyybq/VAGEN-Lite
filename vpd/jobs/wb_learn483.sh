@@ -36,8 +36,10 @@
 # an eval when results.json exists (merged: `pilot eval-ok DIR --adapter DIR` = it served the adapter.pt now on
 # disk; stale evals are flagged and kept unless VPD_RERUN_STALE=1, results_invalid.json kept unless
 # VPD_RERUN_INVALID=1); the probe skips finished (adapter, set) files and resumes a cut set at the next demo.  A
-# failed step does not stop the others; a 483A/483B trained with other code (adapter-ok exit 3) stops the job (nothing
-# overwritten).  Exit 1 if any step failed; RUN/DONE only when every step passed.
+# failed step does not stop the others: every block of the step list runs through `part` (an `||` context, so
+# `set -e` cannot fire; e.g. a failed init-check records train_483A:no_init and the floors, raw evals and probe still
+# run).  A 483A/483B trained with other code (adapter-ok exit 3) stops the job (nothing overwritten).  Exit 1 if any
+# step failed; RUN/DONE only when every step passed.
 # Threads: training 2 (--threads 2) + 3 loader workers; vLLM 4 (VLLMServer); 8 eval workers; TF probe 2 + 3 workers.
 # Env: VPD_DRYRUN=1 prints the commands (writes only RUN/{steps.jsonl,node.txt,df_end.txt}); VPD_JOB_DEADLINE_S
 #      (default 15720), VPD_MIN_STEP_S (60), VPD_MERGE_DIR (default /tmp or /dev/shm with >= 40 GB free).
@@ -116,6 +118,20 @@ timed() {
     return 1
   fi
   vpd_step "$name" x timeout -k 30 "$t" "$@"
+}
+
+# part FUNC ARGS...: one block of the step list (wb_variants.sh's helper).  FUNC runs in an `||` context, so neither
+# its non-zero return nor a failing command inside it can end the payload under `set -e`; every block records its own
+# failures (a vpd_step line with rc != 0 and a FAILS entry), and one that returns non-zero without having recorded any
+# gets FUNC:failed.
+part() {
+  local n=${#FAILS[@]} rc=0
+  "$@" || rc=$?
+  if ((rc != 0 && ${#FAILS[@]} == n)); then
+    vpd_step "$1:failed" false || true
+    FAILS+=("$1")
+  fi
+  return 0
 }
 
 pick_merge_dir() {  # /tmp if >= 40 GB free, else /dev/shm (DECISIONS B11); empty if neither
@@ -382,17 +398,17 @@ fi
 vpd_step setup x "$PY_EVAL" "${L483[@]}" setup --x "$X" || FAILS+=(setup)
 if [[ $ARM == A ]]; then
   # 1 floors on the two new sets (s2test's are baselines/baselines_s2test.json)
-  floors s2val
-  floors s2in50
+  part floors s2val
+  part floors s2in50
   # 2 the user-requested training
-  init_check
-  check_pilot_adapter 0W
-  check_pilot_adapter 50 "$INIT"
-  check_pilot_adapter 200 "$INIT"
-  train 483A auto
+  part init_check
+  part check_pilot_adapter 0W
+  part check_pilot_adapter 50 "$INIT"
+  part check_pilot_adapter 200 "$INIT"
+  part train 483A auto
   # 3 483A closed loop (X1 first), then the merge parity
-  merged_evals 483A "$XAD/483A" s2test:640:empty s2test:640:empty:blind s2val:640:empty s2in50:640:empty \
-    s2test:640:empty:rep2 || true
+  part merged_evals 483A "$XAD/483A" s2test:640:empty s2test:640:empty:blind s2val:640:empty s2in50:640:empty \
+    s2test:640:empty:rep2
   # 4 teacher-forced probe
   TFA=()
   [[ -n ${OK[483A]:-} ]] && TFA+=("483A=$XAD/483A")
@@ -400,20 +416,20 @@ if [[ $ARM == A ]]; then
   [[ -n ${OK[0W]:-} ]] && TFA+=("0W=$PAD/0W")
   [[ -n ${OK[50]:-} ]] && TFA+=("50=$PAD/50")
   [[ -n ${OK[200]:-} ]] && TFA+=("200=$PAD/200")
-  tf_step tf_A "${TFA[@]}" || true
+  part tf_step tf_A "${TFA[@]}"
   # 5-6 the pilot's tiers on the new sets
-  merged_evals 200 "$PAD/200" s2val:640:empty s2in50:640:empty || true
-  merged_evals 50 "$PAD/50" s2in50:640:empty || true
+  part merged_evals 200 "$PAD/200" s2val:640:empty s2in50:640:empty
+  part merged_evals 50 "$PAD/50" s2in50:640:empty
   # 7 raw
   for spec in s2val:640:empty s2in50:640:empty s2test:640:off s2test:1280:off; do
-    evalrun raw "$spec" || true
+    part evalrun raw "$spec"
   done
 else
-  init_check
-  train 483B 10
-  merged_evals 483B "$XAD/483B" s2test:640:empty s2val:640:empty s2in50:640:empty || true
+  part init_check
+  part train 483B 10
+  part merged_evals 483B "$XAD/483B" s2test:640:empty s2val:640:empty s2in50:640:empty
   if [[ -n ${OK[483B]:-} ]]; then
-    tf_step tf_B "483B=$XAD/483B" || true
+    part tf_step tf_B "483B=$XAD/483B"
   else
     vpd_step "tf_B:no_adapter" false || true
     FAILS+=(tf_B)

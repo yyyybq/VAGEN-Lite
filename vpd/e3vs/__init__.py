@@ -192,10 +192,27 @@ def thread_env(n: int = 1) -> dict:
             "TOKENIZERS_PARALLELISM": "false"}
 
 
+def _snapshot_commit(root: Path) -> str | None:
+    """The commit of a job's code snapshot (vpd.snapshot, RUN/code/SNAPSHOT.json), None when root is not one."""
+    from vpd import snapshot
+
+    try:
+        st = snapshot.snapshot_state(root)
+    except snapshot.SnapshotError:
+        return None
+    return st.get("commit") if st.get("mode") == "snapshot" else None
+
+
 def code_meta(*files: Path) -> dict:
-    """sha256 of the given source files plus the worktree HEAD (read from .git, no git command)."""
-    return {
-        "worktree_head": repo_commit(paths.WORKTREE),
-        "files": {str(Path(f).relative_to(paths.WORKTREE)) if str(f).startswith(str(paths.WORKTREE)) else str(f):
-                  sha256_file(Path(f)) for f in files},
-    }
+    """sha256 of the given source files plus the worktree HEAD (read from .git, no git command).  In a sco job the
+    code is the snapshot RUN/code, which has no .git: worktree_head is then the snapshot's commit and
+    worktree_head_source is "snapshot"."""
+    head = repo_commit(paths.WORKTREE)
+    meta = {"worktree_head": head}
+    if head is None:
+        snap = _snapshot_commit(paths.WORKTREE)
+        if snap is not None:
+            meta = {"worktree_head": snap, "worktree_head_source": "snapshot"}
+    meta["files"] = {str(Path(f).relative_to(paths.WORKTREE)) if str(f).startswith(str(paths.WORKTREE)) else str(f):
+                     sha256_file(Path(f)) for f in files}
+    return meta

@@ -44,9 +44,11 @@ a live job only with --force-live (sco_job.delete: stop + delete).  The end time
 (sco start_time -> complete_time, else the worker.log [launch] span) go to the ledger.  A force-deleted job that
 never started (both checks in a waiting state without start_time, no [launch] line in worker.log) is charged
 0.0 GPU-h, gph_source "never_started" (G7), but only when the delete demonstrably worked: sco_job.delete reported
-"delete rc=0", or a re-check after it sees a terminal state or a NOT_FOUND the job list confirms.  Otherwise (a
-failed stop / delete could still let it get cards), and for any other force-deleted job without a start time, the
-estimate stays charged (gph null, "unknown_charged_est").
+"delete rc=0", or a re-check after it sees a terminal state without a start_time or a NOT_FOUND the job list
+confirms.  Otherwise (a failed stop / delete could still let it get cards; a terminal re-check WITH a start_time: it
+got cards after the second check), and for any other force-deleted job without a start time, the estimate stays
+charged (gph null, "unknown_charged_est").  The forced delete event records the rc parsed from sco_job.delete's
+output ("delete rc=<rc>"; null when absent).
 """
 
 from __future__ import annotations
@@ -711,17 +713,27 @@ def _sco_delete(job_id: str) -> Tuple[int, str]:
 DELETE_RC_RE = re.compile(r"\bdelete rc=(-?\d+)\b")  # sco_job.delete: "<pt>: delete rc=<rc> <stdout> <stderr>"
 
 
-def delete_confirmed(job: dict, out: str) -> Tuple[bool, str]:
-    """(True, how) if a forced stop + delete demonstrably worked: sco_job.delete reported `delete rc=0`, or a
-    re-check now sees a terminal state or a NOT_FOUND that the job list confirms; else (False, what was seen)."""
+def delete_rc(out: str) -> Optional[int]:
+    """The rc that sco_job.delete reported ("delete rc=<rc>"), None when its output does not carry one."""
     m = DELETE_RC_RE.search(out or "")
-    if m and int(m.group(1)) == 0:
+    return int(m.group(1)) if m else None
+
+
+def delete_confirmed(job: dict, out: str) -> Tuple[bool, str]:
+    """(True, how) if a forced stop + delete of a never-started job demonstrably worked: sco_job.delete reported
+    `delete rc=0`, or a re-check now sees a terminal state WITHOUT a start_time or a NOT_FOUND that the job list
+    confirms; else (False, what was seen).  A terminal re-check that carries a start_time means the job got cards
+    after the second observe, so it is not "never started" (its estimate stays charged)."""
+    rc = delete_rc(out)
+    if rc == 0:
         return True, "delete rc=0"
     obs = observe(job, list_page())
     s = obs.get("state")
-    if s in TERMINAL or (s == "NOT_FOUND" and obs.get("absent")):
+    started = obs.get("start_time")
+    if (s in TERMINAL and not started) or (s == "NOT_FOUND" and obs.get("absent")):
         return True, f"re-checked after the delete: {s}"
-    return False, (f"delete rc={m.group(1) if m else '?'}; re-checked after the delete: {s}"
+    return False, (f"delete rc={'?' if rc is None else rc}; re-checked after the delete: {s}"
+                   + (f" with start_time {started}" if s in TERMINAL and started else "")
                    + (" (absence not confirmed)" if s == "NOT_FOUND" else ""))
 
 
@@ -775,7 +787,7 @@ def delete(run, force_live: bool = False, sleep=time.sleep) -> str:
             ledger.append({"event": "end", "run": str(run), "pt_id": pt, "state": f"FORCED_FROM_{s2}",
                            "start_time": obs2.get("start_time"), "end_time": obs2["end_time"],
                            "gph": gph, "gph_source": src, **extra})
-        ledger.append({"event": "delete", "run": str(run), "pt_id": pt, "at": ledger.iso(), "rc": None,
+        ledger.append({"event": "delete", "run": str(run), "pt_id": pt, "at": ledger.iso(), "rc": delete_rc(out),
                        "state": f"FORCED_FROM_{s2}", "detail": out})
         return out
 

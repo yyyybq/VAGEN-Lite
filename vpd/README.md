@@ -36,8 +36,47 @@
 | `walkerbench/variants.py`、`walkerbench/odometer.py` | 变体探索：建 s2dev74 和 s2sel 两个题集；V0、V1T、V2、V4、V5 的训练数据；初始化和适配器核对；分析；expect。`odometer.py` 生成里程计那一行（V1、V1T、V2 用） | wbvar（第三轮） |
 | `jobs/wb_variants.sh` | sco 作业脚本：`wb_variants.sh VARIANT RUN [BASE]`（作业 vpd-wb-v0v1，先重建 G6 的那一条示范；vpd-wb-v1t、vpd-wb-v2；之后的 V5、V4）。输出只在 `OUT/walkerbench/runs/explore/wbv/` | wbvar（第三轮） |
 | `walkerbench/perc.py` | 感知零样本（G5）：建 perc294 题集并核对；评测包装，每个起点参数完全相同；分析；expect。题集在 `OUT/walkerbench/perception/perc294/`，输出在 `OUT/walkerbench/runs/explore/perc/` | perc（第三轮） |
-| `jobs/wb_perc.sh` | sco 作业脚本：`wb_perc.sh RUN`（作业 vpd-wb-perc，以 root 跑，Q3B、Q3S、E2 依次评测） | perc（第三轮） |
+| `jobs/wb_perc.sh` | sco 作业脚本：`wb_perc.sh RUN [START ...]`（作业 vpd-wb-perc，以 root 跑；不给 START 时 Q3B、Q3S、E2 依次评测，给了就只跑列出的起点，顺序仍固定，没列出的记 `eval_<START>:not_listed`） | perc（第三轮） |
+| `R/<起点>/evals/perc_eval.lock`（R = `OUT/walkerbench/runs/explore/perc`） | perc eval 的每起点运行目录锁（O_EXCL 建，记 host、pid、utc、RUN、token），评测返回时删掉。别的 RUN 持有、且那个 RUN 既没有 DONE 也没有 `job/exit_code` 时拒绝评测。拿到锁后先看运行目录：已有 results.json（返回 0）或 results_invalid.json（返回 1）且没给 `--overwrite` 时不再跑，explore.json 也不重写（1c） | perc（第三轮）；wave1c |
+| 环境变量 `VPD_PERC_TAKEOVER`、`VPD_PERC_TEST_ALLOW_LIVE` | `VPD_PERC_TAKEOVER=1`：接管上面那把锁，只在第一个作业已经终止（`vpd.sco status`）却没留下 DONE 或 `job/exit_code` 时重投用（wb_perc.sh 会传下去）。`VPD_PERC_TEST_ALLOW_LIVE=1`：只给封闭测试用，让 perc eval 在代码快照之外也能跑（登录节点上绝不设） | perc（第三轮） |
+| `EXPLORATORY_WB_LEARN483.md` | WalkerBench 可学性探索（用户 2026-11-09 的要求：只用 Q3B，在全部 483 道训练题上微调，不做判断）的说明。探索性质，不是闸门 | wb483（第三轮） |
+| `walkerbench/learn483.py` | 483 题探索：建 s2in50 题集、下限、init-check、评测包装（运行时注册 s2in50）、teacher-forced 探针和合并一致性、分析、expect | wb483（第三轮） |
+| `jobs/wb_learn483.sh` | sco 作业脚本：`wb_learn483.sh A\|B RUN`（作业 vpd-wb-x483a、vpd-wb-x483b，以 root 跑）。输出只在 `OUT/walkerbench/runs/explore/x483/Q3B/`。步骤表的每一块都经过 `part`，init-check 或训练失败只记下来，后面的步骤照跑（1c） | wb483（第三轮）；wave1c |
+| `tests/test_learn483.py` | 483 题探索的测试（解析、探针数字、题集、作业脚本的空跑） | wb483（第三轮） |
 | `tvr/lvp.py`、`tvr/probe_lvp.py` | TVR 的 lavapipe（CPU Vulkan）渲染：`lvp.py` 从零建 worker 环境、从只读仓库加载 TVRBench、字体规则、角标遮罩；`probe_lvp.py` 测吞吐网格和确定性，并和公开样本比对（G3） | tvrprobe（第三轮） |
+| `python -m vpd.tvr.probe_lvp recommend --out RUN/out` | 只用标准库，从探针的 `summary.json` 重算两个推荐：`recommended`（E×L ≤ 11，TVR 试点用的是这个）和 `recommended_measured`（实测 cgroup 核数 ≤ 11，只记录） | tvrprobe（第三轮） |
+| `tvr/pilot_cfg.py` | TVR 试点的冻结常量（动作、正则、渲染、协议、档位、配方、闸门、功效、预算），所有 TVR 模块都从这里取；`missing(job)` 列出某个作业还缺的测量值；py3.10 和 py3.12 都能导入 | prereg（第三轮第二批） |
+| `PREREG_TVR_PILOT.md` | TVR 试点的事先登记（中文），里面的 TVR_FROZEN 块必须和 `pilot_cfg.FROZEN` 完全一致 | prereg（第三轮第二批） |
+| `common/power_sim.py` | A4 的功效模拟：带种子方差的场景聚类 t 检验 + Holm，输出 `POWER.json` | prereg（第三轮第二批） |
+| `tvr/tvr_text.py` | TVRBench 系统提示、每步用户文本、动作解析的逐字副本（不导入 ai2thor），带对固定源码的 ast 核对 | tvrdata（第三轮第二批） |
+| `tvr/tasks.py` | 读 sft/eval/rl 任务；按哈希选 dev200；命名题集；公开动作序列；0W 池和嵌套档位；专家中位长度 | tvrdata（第三轮第二批） |
+| `tvr/kin_env.py` | 运动学环境：和 ThorEnv 相同的转移、可走集合、合法动作列表和用户文本，不渲染 | tvrdata（第三轮第二批） |
+| `tvr/bfs.py` | 在冻结可走集合的位姿图上做 BFS，得到每题最短非 Stop 步数（SPL 的 opt） | tvrdata（第三轮第二批） |
+| `tvr/floors.py` | 盲下限 F：STOP0、固定动作 k 次后 Stop、按种子的随机策略，取三者最大 | tvrdata（第三轮第二批） |
+| `tvr/reach.py` | ProcTHOR 房子文件；每题起点位姿的可走集合，两次独立加载（A、B），冻结 A；`ReachIndex` | tvrdata（第三轮第二批） |
+| `tvr/demos.py` | 从公开动作序列的 THOR 回放生成示范（保留规则、丢弃原因、kin 核对、记录格式 6.5） | tvrdata（第三轮第二批） |
+| `tests/tvr_fakes.py` | 共用测试工具：假 ai2thor、假任务和网格、假帧、假 TVR 目录树 | tvrdata（第三轮第二批） |
+| `tests/test_tvr_data.py` | tvrdata 各模块的测试 | tvrdata（第三轮第二批） |
+| `tvr/thor_worker.py` | THOR worker 进程（TVR_PY）和父进程一侧的池：重置时注入冻结可走集合、走一步、出 PNG | tvreval（第三轮第二批） |
+| `tvr/run_tvr.py` | TVR 评测和回放的总控：`eval`（c、u、blind 三个解码臂）、`replay`、`rescore`；断点续跑、截止时间、快速关停 | tvreval（第三轮第二批） |
+| `tvr/score_tvr.py` | 打分：SR 和 Wilson 区间、SPL、within1、停止率、场景自助法；`official` 用 eval_va 的 aggregate 对照 | tvreval（第三轮第二批） |
+| `tvr/parity_tvr.py` | vLLM 提示 token 数和训练 dry run 的一致性检查（PNG data URL） | tvreval（第三轮第二批） |
+| `tvr/fake_server.py` | 测试用的假 OpenAI 接口服务器（按策略回复，确定性的 usage） | tvreval（第三轮第二批） |
+| `tvr/render_parity.py` | 渲染一致性按容差判（PSNR ≥ 40 dB 且 SSIM ≥ 0.99，状态、合法动作、用户文本、action_success 必须完全相同）；smoke 和每个评测作业的渲染金丝雀用它 | tvreval（第三轮第二批） |
+| `tests/test_tvr_eval.py` | tvreval 各模块的测试 | tvreval（第三轮第二批） |
+| `tvr/pilot_tvr.py` | TVR 试点编排（plan / prepare / submit / status / collect / delete / budget / expect / smoke-verdict / cal-decide），含本轮 200 卡时的预算拒绝 | tvrjobs（第三轮第二批） |
+| `tvr/gate_tvr.py` | TVR 闸门判定 → `GATE.json`、`GATE.md`；从 trajectory.json 独立重数 k/n；不算起点之间的差 | tvrjobs（第三轮第二批） |
+| `tvr/recheck_tvr.py` | 独立重算（不导入 tvrdata 的模块）：下限 F 和逐题计数 | tvrjobs（第三轮第二批） |
+| `tvr/merge_parity.py` | 合并权重和 LoRA 的 teacher-forced 一致性（平均 \|dCE\| ≤ 0.005，回复 argmax 一致率 ≥ 0.99），每个合并评测都跑 | tvrjobs（第三轮第二批） |
+| `jobs/tvr_data.sh` | sco 作业脚本：`tvr_data.sh RUN`（作业 vpd-tvr-data，非 root）：dev200、房子、可走集合、回放、示范、档位、BFS、下限 | tvrjobs（第三轮第二批） |
+| `jobs/tvr_cal.sh` | sco 作业脚本：`tvr_cal.sh RUN`（作业 vpd-tvr-cal，以 root 跑，只用 Q3B、只在 dev200 上，探索性质）：机制检查、渲染金丝雀、0W/100/ALL 训练和评测、cal-decide | tvrjobs（第三轮第二批） |
+| `jobs/tvr_cal400.sh` | sco 作业脚本：`tvr_cal400.sh RUN`（作业 vpd-tvr-cal400，只在 cal_decision.train_400 时跑）：400 档训练和评测 | tvrjobs（第三轮第二批） |
+| `jobs/tvr_mech_smoke.sh` | sco 作业脚本：`tvr_mech_smoke.sh RUN`（作业 vpd-tvr-msmoke，以 root 跑）：三个原始起点的机制冒烟，不算 SR；root 回放的渲染一致性 | tvrjobs（第三轮第二批） |
+| `jobs/tvr_train.sh` | sco 作业脚本：`tvr_train.sh START RUN`（作业 vpd-tvr-train-<s>）：0W、100、TOP 档训练（Q3B 还有种子 1002 的复制） | tvrjobs（第三轮第二批） |
+| `jobs/tvr_eval.sh` | sco 作业脚本：`tvr_eval.sh START top\|low RUN`（作业 vpd-tvr-eval-<s>-top、-low）：金丝雀、合并、合并一致性、评测、official | tvrjobs（第三轮第二批） |
+| `tests/test_tvr_jobs.py`、`tests/test_tvr_integration.py` | tvrjobs 的测试（作业脚本命令清单、prepare 守卫、闸门）；全链路集成测试（假 TVR 目录树） | tvrjobs（第三轮第二批） |
+| `tests/test_tvr_prereg.py`、`tests/test_power_sim.py` | 事先登记块 == `pilot_cfg.FROZEN`、`missing()` 语义；功效模拟 | prereg（第三轮第二批） |
+| `tests/test_wave1c.py` | 第三轮 1c 的几处小修：perc 已完成的运行不重写 explore.json、wb_learn483.sh 的 `part`、E3VS `code_meta` 在快照里的 `worktree_head`、强删时复查看到 start_time 不记 0 卡时；本 README 覆盖第二批的每个文件 | wave1c（第三轮第二批） |
 | `jobs/tvr_probe.sh` | sco 作业脚本：`tvr_probe.sh RUN`（作业 vpd-tvr-probe，闸门 tvr，非 root，只用 CPU 渲染） | tvrprobe（第三轮） |
 | `tvr/vk_recheck.sh`、`tvr/vkre.py` | NVIDIA Vulkan 复查（G2）：作业脚本 `vk_recheck.sh OUTDIR`（作业 vpd-tvr-vkre，系统驱动 + 加载库 1.4.357 + 绝对路径 ICD 的几种变体，加对照），`vkre.py` 汇总并写 expect。不影响冻结的 TVR 冒烟判定 | vkre（第三轮） |
 | `jobs/common_env.sh`、`jobs/preflight.sh` | 作业脚本的公共开头（线程数、离线开关、chown 陷阱、节点信息）和开跑前检查 | WP-OPS |
@@ -84,7 +123,19 @@
 | `walkerbench/demos/s2train_640x400_B1_vis0578/` | G6 重建的那一条示范（wb_variants 作业 A 写；冻结的示范目录不动） |
 | `walkerbench/perception/perc294/` | 感知零样本的题集：`tasks/`（294 个 sha 核对过的副本）和 `selection.json`（G5） |
 | `walkerbench/runs/explore/perc/` | 感知零样本的输出（探索性质，单独计卡时，不算进 WalkerBench 的 30 卡时） |
-| `tvr/` | 图形库副本（nvgl_595.71.05）、AI2-THOR 的 HOME、TVRBench 仓库、冒烟输出 |
+| `tvr/` | 图形库副本（nvgl_595.71.05）、AI2-THOR 的 HOME、TVRBench 仓库（`repos/TVRBench`，只读）、公开数据的元文件（`hf_meta/tvr-sft-va/sft_train.json`）、冒烟输出 |
+| `tvr/split/dev200/` | `selection.json`：从 rl.json 按哈希选的 200 道开发题（每类 50，每个场景-类别最多 2 道），以及 smoke8、smoke4 |
+| `tvr/houses/` | 每个 ProcTHOR 场景一份 `<场景>.json`（train.jsonl 那一行原文）和 `houses.json`（来源和 sha256） |
+| `tvr/reach/v1/` | `scenes/<场景>.json`（每题起点位姿的可走集合，A、B 两次加载）、`index.json`（冻结值 = A 的摘要）、`DONE` |
+| `tvr/replay/sft1600_lvp/` | 1,600 条公开动作序列的 THOR 回放（run_tvr 的运行目录：protocol、manifest、`tasks/<任务>/trajectory.json`、results.json） |
+| `tvr/demos/sft1600_lvp/` | 训练示范：`demos_all.jsonl`、`images/<任务>/step_XX.png` 和 `target.png`、`dropped.json`、`kin_check.json`、`images_sha256.json`（只核对文件完整性）、`manifest.json`、`DONE` |
+| `tvr/tiers/v1/` | `warmup0w20.jsonl`、`demos_100.jsonl`、`demos_400.jsonl`、`demos_ALL.jsonl`、`parity3.jsonl`、`order.json`、`manifest.json`（档位嵌套，和 0W 不相交） |
+| `tvr/bfs/` | `<题集>_opt.json`：每题在冻结可走集合上的 BFS 最短步数、是否可达 |
+| `tvr/floors/` | `floors_eval500.json`、`floors_dev200.json`：三种盲策略的成功率和下限 F |
+| `tvr/runs/explore/cal/Q3B/` | 校准作业的输出（探索性质，只用 Q3B、只在 dev200 上）：`dry/`、`shake/`、`canary/`、`adapters/`、`evals/`、`cal_decision.json`；`futility_override.json` 只由编排在用户决定后写 |
+| `tvr/runs/smoke/<RUN 名>/` | 机制冒烟的输出和 `smoke_verdict.json`（不算 SR） |
+| `tvr/runs/pilot/<起点>/` | 试点的 `adapters/<档>/`、`evals/pilot__<起点>__<档>__<臂>/`、`parity/merge_<档>.json`、`canary/<作业>/render_parity.json` |
+| `tvr/runs/pilot/` | `GATE.json`、`GATE.md`（gate_tvr），以及 `POWER.json`（power_sim，只在 G0-G3 通过后） |
 | `envs/tvr` | TVR 的 conda 环境（要用户批准后才建） |
 | `e3vs/` | `repo/`、`data/`、`occ/`、`bfs/`、`sft/`、`parity/`、`runs/` |
 
@@ -140,8 +191,8 @@
    - 默认投 zoetrope；zoetrope 的单卡作业开始排队时，可以改投 h800，哪个排队短投哪个。
    - `--pool zoe-cf-render`（2026-11-10，DECISIONS G7）只能显式指定，`--pool auto` 永远不会选它；规格同样是 N4lS.Iq.I80.1。有没有配额要投了才知道。
    - 用 `--force-live` 删掉一个从没开始的作业（两次查询都在排队、没有 start_time、worker.log 里没有 `[launch]` 行），台账记 0 卡时，`gph_source` 为 `never_started`。
-     - 前提是删除确实生效：`sco_job.delete` 报了 `delete rc=0`，或者删完再查一次，看到终止状态或作业列表确认的 NOT_FOUND。
-     - 否则（stop 或 delete 失败，作业以后还可能拿到卡）照旧按估计记（`unknown_charged_est`）。台账的 end 事件里 `delete_check` 记了判断依据。
+     - 前提是删除确实生效：`sco_job.delete` 报了 `delete rc=0`，或者删完再查一次，看到没有 start_time 的终止状态或作业列表确认的 NOT_FOUND。
+     - 否则（stop 或 delete 失败，作业以后还可能拿到卡；或者复查看到的终止状态带 start_time，说明第二次查询之后它拿到过卡）照旧按估计记（`unknown_charged_est`）。台账的 end 事件里 `delete_check` 记了判断依据，强删的 delete 事件里 `rc` 是从 `sco_job.delete` 输出里解析出的返回码（没有就是 null）。
    - 只通过 `vpd/sco.py` 提交。
 2. **命名**：显示名一律是 `downstream-vpd-<作业>`。例如：
    - downstream-vpd-tvr-smoke
@@ -193,7 +244,7 @@
      - WalkerBench 评测 manifest 的 `extra.vpd.git`：commit 取快照的提交，dirty 为 false，`read` 为 `SNAPSHOT.json`。所以 `smoke_vpd.py` 的 manifest_fields 检查（commit 不能为空）在快照作业里也能过。
      - 训练 meta.json 的 `git_head` 取快照的提交，`vpd_dirty` 为 false，`git_read` 为 `SNAPSHOT.json`。
      - E3VS 评测 manifest 的 `git`：commit 取快照的提交；`prereg_commit` 取作业写的 `$RUN/prereg_commit.txt`，没有就是 null。
-     - 还没改的：E3VS `code_meta` 的 `worktree_head`（在 `vpd/e3vs/__init__.py` 里）在快照里仍是 null。
+     - E3VS `code_meta`（`vpd/e3vs/__init__.py`）的 `worktree_head`：读不到 `.git` 而且是快照时，取快照的提交，并加 `"worktree_head_source": "snapshot"`（第三轮 1c；以前在快照里是 null）。没有哪个 E3VS 汇总拿 `code_meta` 在起点之间比。
 5. **其他**：`python -m vpd.snapshot verify` 核对整个快照没有被改动（根目录的 `ply_gaussian_loader.py` 也在内）。`--no-snapshot` 只给测试和应急用，会记在 vpd.json 里（`"no_snapshot": true`）。
    - **E3VS 作业不能用 `--no-snapshot` 跑。** 不在快照里时，prereg 检查（`e3vs_prep.sh` 的 `prereg_guard`、`e3vs_start.sh` 的 `guard`）要用 git，可作业镜像里没有 git，所以检查一定不过，作业会在开头停下。
 6. **代码指纹**：快照不改变代码指纹（训练的 CODE_FILES、评测的 code_sha256），因为字节一样。不过改快照机制时改到的文件会让指纹变：
