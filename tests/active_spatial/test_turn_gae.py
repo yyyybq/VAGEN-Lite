@@ -294,7 +294,7 @@ def test_critic_update_batch_all_candidates():
 def test_critic_overfit_steps_of():
     """The critic overfit check (package p1tgae_c2_ofit, the user's supplement of 2026-11-11, item 2): off unless
     trainer.critic_overfit_steps is set; on, it needs the value network and every-candidate batch, N >= 2 and N
-    within the training steps."""
+    equal to the training steps (the endpoint)."""
     from omegaconf import OmegaConf
 
     from vagen.ray_trainer import critic_overfit_steps_of
@@ -304,7 +304,6 @@ def test_critic_overfit_steps_of():
 
     assert critic_overfit_steps_of(cfg(), True, 700) == 0              # absent: off (every other package)
     assert critic_overfit_steps_of(cfg(critic_overfit_steps=0), False, 700) == 0
-    assert critic_overfit_steps_of(cfg(critic_overfit_steps=50, critic_all_candidates=True), True, 700) == 50
     assert critic_overfit_steps_of(cfg(critic_overfit_steps=50, critic_all_candidates=True), True, 50) == 50
     for trainer, use_critic, total, pattern in (
             ({"critic_overfit_steps": 1, "critic_all_candidates": True}, True, 700, "whole number >= 2"),
@@ -312,7 +311,8 @@ def test_critic_overfit_steps_of():
             ({"critic_overfit_steps": 2.5, "critic_all_candidates": True}, True, 700, "whole number >= 2"),
             ({"critic_overfit_steps": 50, "critic_all_candidates": True}, False, 700, "value network"),
             ({"critic_overfit_steps": 50}, True, 700, "critic_all_candidates"),
-            ({"critic_overfit_steps": 50, "critic_all_candidates": True}, True, 40, "beyond")):
+            ({"critic_overfit_steps": 50, "critic_all_candidates": True}, True, 40, "must equal"),
+            ({"critic_overfit_steps": 50, "critic_all_candidates": True}, True, 700, "must equal")):
         with pytest.raises(ValueError, match=pattern):
             critic_overfit_steps_of(cfg(**trainer), use_critic, total)
 

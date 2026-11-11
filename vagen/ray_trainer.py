@@ -1260,8 +1260,9 @@ def critic_overfit_steps_of(config, use_critic: bool, total_training_steps: int)
         raise ValueError("trainer.critic_overfit_steps needs a value network (critic)")
     if not bool(config.trainer.get("critic_all_candidates", False)):
         raise ValueError("trainer.critic_overfit_steps needs trainer.critic_all_candidates (the fixed batch)")
-    if steps > int(total_training_steps):
-        raise ValueError(f"trainer.critic_overfit_steps {steps} is beyond the {total_training_steps} training steps")
+    if steps != int(total_training_steps):  # the run must end with the endpoint checkpoint after update N
+        raise ValueError(f"trainer.critic_overfit_steps {steps} must equal the {total_training_steps} training steps "
+                         "(the endpoint)")
     return int(steps)
 
 
@@ -2499,9 +2500,12 @@ class RayPPOTrainer:
             if last:
                 with marked_timer("values_final", timing_raw, color="cyan"):
                     fixed.batch["values"] = self.critic_wg.compute_values(fixed).batch["values"]
-                metrics.update(critic_overfit_readings(fixed, n_rows, "critic/overfit/final/"))
-            save_freq = int(self.config.trainer.save_freq)
-            if last or (save_freq > 0 and self.global_steps % save_freq == 0):
+                final = critic_overfit_readings(fixed, n_rows, "critic/overfit/final/")
+                metrics.update(final)
+                # printed before the checkpoint, so a failed save cannot lose the judgment reading
+                print("critic overfit final (before the checkpoint): "
+                      + " ".join(f"{k}:{v}" for k, v in sorted(final.items())), flush=True)
+            if last:  # only the endpoint checkpoint (the chain needs it; no intermediate saves in this mode)
                 self._hf_upload_manager.flush()
                 with marked_timer("save_checkpoint", timing_raw, color="green"):
                     self._save_checkpoint()
@@ -2561,6 +2565,9 @@ class RayPPOTrainer:
         # the critic overfit check (package p1tgae_c2_ofit; 0 = off): update 1 as usual, then the value network only
         overfit_steps = critic_overfit_steps_of(self.config, self.use_critic, self.total_training_steps)
         self._overfit_batch = None  # (the fixed batch, its rows before the padding), set by update 1
+        if overfit_steps and self.global_steps != 1:  # resumed from a checkpoint: update 1's batch is not saved
+            raise RuntimeError("the critic overfit check cannot resume (update 1's fixed batch is not in the "
+                               f"checkpoint; the run would start at update {self.global_steps}): start a new run")
 
         prev_step_profile = False
         curr_step_profile = (
