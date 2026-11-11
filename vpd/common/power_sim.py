@@ -569,7 +569,8 @@ def persistence_hat(y1: list, y2: list, others: list, sigma_used: float, cluster
     mean SRs (exactly in that model; under clipping see persistence_check with offsets).  The wave-2 estimator used
     H = m / (m - 1) mean_i p_i (1 - p_i), half the mean between-start discordance, which moved with the start SRs
     (about +-0.1 at 5 pp).  No difference between starts is formed; POWER.json gives no start's SR level and no
-    between-start difference (module docstring, Separation).
+    between-start difference in closed form (module docstring, Separation, which also states the inferred
+    statistical prediction).
         D      = mean_i (y1_i - y2_i)^2                                  (discordance of the pair)
         kappa  = shift_gap(dbar, S, sigma_used), m2 = shift_m2(...)      (E[|r1 - r2|], E[(r1 - r2)^2] | the pair)
         l_i    = (y1_i + y2_i) / 2, L = mean_i l_i                       (the pair's SR level)
@@ -581,7 +582,8 @@ def persistence_hat(y1: list, y2: list, others: list, sigma_used: float, cluster
         lam_range[1] (conservative).
     se: scene-cluster delta-method SE of lambda_hat over the task sampling only (kappa, m2 fixed; B linearized with
     the plain V; reported only; the independent wave-2b check found it 0.83-1.18 x the empirical SD of lambda_hat in
-    the registered model, 0.69-1.50 x over all its rows: start offsets, p profiles, forced sigma_used)."""
+    the registered model, 0.69-1.50 x over all its rows, which add start mean / scale differences, task biases and
+    forced sigma_used)."""
     margin = registered_margin() if margin is None else float(margin)
     n = len(y1)
     if n < 3 or n != len(y2):

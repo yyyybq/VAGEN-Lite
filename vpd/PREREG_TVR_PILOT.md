@@ -1,12 +1,13 @@
 # TVR 试点闸门：事先登记（PREREG_TVR_PILOT）
 
-- 状态：**草稿 — 数据作业之后填 data.*，校准之后填 n_top 和 eval_envs，填完的那次提交即冻结，必须在冒烟（msmoke）之前。**
+- 状态：**已冻结**（2026-11-11，填 `tiers.n_top` = ALL、确认 `render.eval_envs` = 5 的那次提交，见下面"冻结"一条；`data.*` 在 f393095e 填好）。冻结以后的任何改动只能记进第 17 节的偏差日志。冻结前这里写的是："草稿 — 数据作业之后填 data.*，校准之后填 n_top 和 eval_envs，填完的那次提交即冻结，必须在冒烟（msmoke）之前。"
   - 本文件可以先以草稿提交（例如填 `render.*` 的那次），草稿提交不算冻结：只要第 0.1 节的块里还有"待填"的键，`pilot_cfg.missing()` 就不为空，`pilot_tvr prepare` 就拒绝准备冒烟、训练和评测作业。
   - 冻结 = 填完 `data.*`、`tiers.n_top` 并确认 `render.eval_envs` 的那次提交（git commit，分支 viewpoint-downstream）。冻结以后的任何改动只能记进第 17 节的偏差日志。
 - 草稿写于 2026-11-10 16:46 UTC（`date -u`，集群登录节点；wave 2 的 prereg 包）。写的时候还没有任何 TVR 模型输出（DECISIONS G10、G12）。
 - wave 2b 修订写于 2026-11-10 20:5x–21:1x UTC（`date -u`，集群登录节点；DECISIONS G13）：确认检验改为终点层面的种子感知检验、A4 的一类错误和功效分别在 ρ = 0 / 1 和 ρ = 0.5 下判、备用设计改为两档种子 1–2、功效模型加任务持续性 λ、校准作业要求全部 `data.*`（附 A：O25）。修订时仍然没有任何 TVR 模型输出（数据作业 tvr-data 在跑，它不读 `power`）。
 - wave 2b 第二轮修订写于 2026-11-10 23:4x UTC（`date -u`，集群登录节点；wave-2b 核查之后，冻结之前）：任务持续性 λ 的估计改为不随起点均值变的单因子估计（第 12 节第 7 条；原来的估计其实是起点之间不一致率的一半，起点差 5 个百分点就偏约 ±0.1）；登记 `power.backend` = numpy；第 13 节补登 `gate_tvr` / `pilot_tvr` 在 wave 2b 新加的 G0、冒烟和 A4 条件；第 7 节补 O9 备用值尝试失败后的重判。仍然没有任何 TVR 模型输出。λ 估计的改动要编排在 DECISIONS 里补一条 G13 的修订（G13 原文写"不看起点之间的离散"）。
-- wave 2c 修订写于 2026-11-11 01:3x–02:1x UTC（`date -u`，集群登录节点；wave-2b 的独立统计核查之后，冻结之前；DECISIONS G14 说的"核查结果进 G14 补记，实质性的偏松偏差在冻结前加保守的调整"）：λ_used 改为 clip(λ̂ + 0.03, 0, 1)（登记的余量 `power.persistence.margin`，第 12 节第 7 条）；POWER.json 删掉能用闭式还原起点 SR 水平的中间量（以及能从 λ̂ 和 `sigma` 块精确算出、写了只是重复的几个），并写明它给什么、不给什么（第 12 节第 6 条），schema 升到 `vpd.power_sim.tvr/3`；加只报告的设计行 `power.reported_designs`（每个起点 4 个、5 个种子，以及 δ = 0.10）；按核查改了 λ 阈值、功效曲线和第 12 节第 7 条未核实的第 2 条（原来写反了方向）。开始写的时候（01:32Z 的 `ls`）`CAL/Q3B` 和 `P/<起点>` 都是空目录；02:1x 时校准作业已开始在 `CAL/Q3B` 下写文件（0W 训练日志、渲染金丝雀、raw 模型的 shake 评测），本修订只列过文件名，没有读其中任何结果；这里的设计选择（余量、POWER.json 的白名单、只报告的设计行）在那之前就由编排按合成 p 的核查定了。`P` 下没有试点评测，也没有 POWER.json；核查的数都来自合成 p。这些改动要编排记进 DECISIONS（G14 的补记）。按 wave-2c 审查意见的两轮返修写于 2026-11-11 05:4x–08:4x UTC（`date -u`，集群登录节点）：改了文字、数字的舍入和出处、未核实第 2 条补的一种情形、测试，另给只报告的 4、5 个种子设计加了族错误率行（`reported_designs.type1`，第 12 节第 6 条），余量、白名单和判定规则没变。出处（编排 2026-11-11 07:30Z 核对）：写 wave 2c 的两段时间（01:3x–02:1x、05:4x–08:4x）里校准都还没有评测输出（`CAL/evals` 是空的；第一个校准作业在 train_ALL 时因账号磁盘配额死掉，没到评测；第二个 05:39Z 提交，07:30Z 时还在训 ALL，评测在训完之后）；唯一存在的模型输出是 shake 机制检查（raw Q3B，smoke4；编排只读了机制字段，没读成功字段）；wave 2c 的全部改动只依据 statcheck 的合成数据（文中另引的 wave-2c 审查和返修的数也都来自合成根）。
+- wave 2c 修订写于 2026-11-11 01:3x–02:1x UTC（`date -u`，集群登录节点；wave-2b 的独立统计核查之后，冻结之前；DECISIONS G14 说的"核查结果进 G14 补记，实质性的偏松偏差在冻结前加保守的调整"）：λ_used 改为 clip(λ̂ + 0.03, 0, 1)（登记的余量 `power.persistence.margin`，第 12 节第 7 条）；POWER.json 删掉能用闭式还原起点 SR 水平的中间量（以及能从 λ̂ 和 `sigma` 块精确算出、写了只是重复的几个），并写明它给什么、不给什么（第 12 节第 6 条），schema 升到 `vpd.power_sim.tvr/3`；加只报告的设计行 `power.reported_designs`（每个起点 4 个、5 个种子，以及 δ = 0.10）；按核查改了 λ 阈值、功效曲线和第 12 节第 7 条未核实的第 2 条（原来写反了方向）。开始写的时候（01:32Z 的 `ls`）`CAL` 和 `P/<起点>` 都是空目录；02:1x 时校准作业已开始在 `CAL` 下写文件（0W 训练日志、渲染金丝雀、raw 模型的 shake 机制检查），本修订只列过文件名，没有读其中任何结果；这里的设计选择（余量、POWER.json 的白名单、只报告的设计行）在那之前就由编排按合成 p 的核查定了。`P` 下没有试点评测，也没有 POWER.json；核查的数都来自合成 p。这些改动要编排记进 DECISIONS（G14 的补记）。按 wave-2c 审查意见的两轮返修写于 2026-11-11 05:4x–08:3x UTC（`date -u`，集群登录节点；第二轮的改动 08:35Z 装进暂存树）：改了文字、数字的舍入和出处、未核实第 2 条补的一种情形、测试，另给只报告的 4、5 个种子设计加了族错误率行（`reported_designs.type1`，第 12 节第 6 条），余量、白名单和判定规则没变；另写明 A4 不过以后用户选的只报告设计也要满足登记的一类错误界（第 12 节第 6 条、第 13 节 A4）。第二轮的三个评审和整合在 08:3x–11:2x UTC 只读、只测暂存树的副本。出处（编排 2026-11-11 07:30Z 核对，冻结时补正）：第一段（01:3x–02:1x）里校准还没有评测输出；07:30Z 核对时 `CAL/evals` 是空的（第一个校准作业在 train_ALL 时因账号磁盘配额死掉，没到评测；第二个 05:39Z 提交，07:30Z 时还在训 ALL）。第二段的后半，校准评测 07:36Z 起开跑（results.json：ALL 08:07Z、0W 08:35Z、100 09:11Z）；第二轮返修、评审和整合的 5 个代理都没有读过 `OUT/tvr/runs`、校准作业目录或账本（编排扫过它们全部 465 次工具调用的输入，不算每个代理交结果的那一次；它们跑的测试和脚本只用合成根和临时目录，推断），编排 09:16Z 才第一次读校准结果，那时第二轮的改动已经装好，到冻结提交之前没再改（冻结提交又改了其中几处文字：本条的时间和出处、第 12 节第 6、7 条、`power_sim.persistence_hat` 的文档字符串和 `test_power_sim` 的两处注释，依据是合成根、评审结果和代理的工具调用记录，不是校准；冻结提交按校准写的内容只在状态行、下一条、第 0.1、3.2、7、9.3、16 节、O10、O20 和 `pilot_cfg.py` 的 `n_top` 值及两处注释，见下一条）。在那之前读过的模型输出只有 shake 机制检查（raw Q3B，smoke4；编排只读了机制字段，没读成功字段）和第一个校准作业 ALL 训练日志的末尾几行（05:39Z，训练步的 loss、学习率、token 数和耗时，没有成功率）；wave 2c 的全部改动只依据 statcheck 的合成数据（文中另引的 wave-2c 审查和返修的数也都来自合成根）。
+- 冻结（本提交；文字写于 2026-11-11 11:3x–13:1x UTC，`date -u`，集群登录节点，12:2x 起的几次改动是按冻结前的两轮审查 wf_4ef19a45-066、wf_3156edf1-709 的补改；校准 tvr-cal pt-js5w1gsc 09:14Z 结束之后、冒烟之前）：`tiers.n_top` 按第 7 节的规则填 ALL（第 0.1 节的块只变了这一个叶子），`render.eval_envs` 按 Q3B dev200 评测的测速确认 5（第 7 节"校准结果"；编排按 2026-11-10 的授权自定，DECISIONS G14a）。本提交新写了第 7 节的"校准结果"一条（三档 k/n、无望停止、测速、O9 的备用值没用、按第 16 节推出的 est_high），并随之改了状态行、第 0.1 节表里 `tiers.n_top`、`render.eval_envs` 两行和表头、第 3.2 节表里 `render.eval_envs` 一行和测速、第 7 节的"待填"、第 9.3 节的服务、第 16 节的预期值、O10、O20，以及 `pilot_cfg.py` 的两处注释（eval_envs、n_top）。同一个提交还改了 wave-2c 第二轮评审和冻结前审查指出的文字问题：上一条的时间、出处和几处措辞（含补记第二轮写明的只报告设计的一类错误界）、第 12 节第 6、7 条的几处说明和出处、`power_sim.persistence_hat` 文档字符串的两处、`test_power_sim` 的两处注释，并让 `test_tvr_prereg` 的断言改判冻结后的状态。没有改任何判定规则、阈值、登记的数或代码逻辑（`.py` 文件里除了 `n_top` 的值只改了注释和文档字符串，测试只有 `test_tvr_prereg` 的断言按冻结后的状态改了）。校准只用了 Q3B 一个起点的绝对数（分离规则）。
 - 本文件提交的 git sha 记进每个试点作业的 `prepared.json`，以及 `OUT/tvr/runs/pilot/GATE.json` 的 `prereg_commit`。
 - 守门规则（`vpd/tvr/pilot_tvr.py prepare`，契约 5.3.1）：准备 tvr-msmoke、tvr-train-*、tvr-eval-* 之前，必须同时满足：
   1. 本文件已提交，并且没有未提交的改动（`git log -1 -- vpd/PREREG_TVR_PILOT.md` 不为空，`git status --porcelain -- vpd/PREREG_TVR_PILOT.md` 为空；只查本文件）；
@@ -19,10 +20,10 @@
   作业开头的 guard 步骤（`pilot_tvr guard`）在作业里把第 2–6 条再查一遍；第 1 条在作业里由 `prereg_committed` 步骤对代码快照查（`vpd_snapshot_file`，快照里没有 git）。
 - 依据（按优先级）：
   1. 用户第三轮说明 `OUT/plan/ROUND3.md` 第 2–6 节（下称"简报"）；
-  2. `OUT/plan/DECISIONS.md` 的 G1–G3、G10（a–j）、G11（探针结果）、G12（采用 wave-2 契约）、G13（wave-2 核查后的决定：确认检验、A4 的 ρ 规则、备用设计、任务持续性）、G14（wave 2b 并入、G13 的 λ 估计修订、`data.*` 填值、tvr-cal；它说独立统计核查的结果进 G14 的补记，wave 2c 据此修订），以及沿用自 WalkerBench 的 B3、B4、B5、B7、B9、B10、B16；
+  2. `OUT/plan/DECISIONS.md` 的 G1–G3、G10（a–j）、G11（探针结果）、G12（采用 wave-2 契约）、G13（wave-2 核查后的决定：确认检验、A4 的 ρ 规则、备用设计、任务持续性）、G14（wave 2b 并入、G13 的 λ 估计修订、`data.*` 填值、tvr-cal；它说独立统计核查的结果进 G14 的补记，wave 2c 据此修订）、G14a（G14 的补记：wave 2c、校准结果和冻结），以及沿用自 WalkerBench 的 B3、B4、B5、B7、B9、B10、B16；
   3. wave-2 接口契约 `OUT/scratch/orch/r3/wave2/contract/CONTRACT_wave2.md` 第 2 版（sha256 前缀 3fa721c558be，下称"契约"）；
   4. 探针作业 vpd-tvr-probe（pt-s9d5txr3）的 `OUT/jobs/tvr-probe-202611101501/out/summary.json`。
-- 写法：数字后面括号里是出处。没核实的标"未核实"，推断标"推断"。编排按 2026-11-10 的授权自定的设计选择（简报第 4 节）都注明 DECISIONS 的条目（G10、G12、G13、G14）。
+- 写法：数字后面括号里是出处。没核实的标"未核实"，推断标"推断"。编排按 2026-11-10 的授权自定的设计选择（简报第 4 节）都注明 DECISIONS 的条目（G10、G12、G13、G14、G14a）。
 - 文中路径的简写：
   - `OUT` = `/mnt/umm/users/yinbaiqiao/eval_external_assets/vpd`；
   - `WT` = `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd`（worktree；作业从 `RUN/code` 快照跑，DECISIONS G1）；
@@ -464,7 +465,7 @@
    "ALL"
   ],
   "calibration_extra": "400",
-  "n_top": null,
+  "n_top": "ALL",
   "replicate": {
    "seed": 1002,
    "start": "Q3B",
@@ -510,7 +511,7 @@
 | `power` | 12、15 | `budget` | 16 |
 | `data` | 2、5、11 | | |
 
-块里值为 `null`（Python 的 None）的键，以及暂定值：
+块里冻结前值为 `null`（Python 的 None）的键，以及冻结前暂定、校准后确认的值（冻结时要填的都已填好；还是 `null` 的只有两个可选键）：
 
 | 键 | 现在 | 谁、什么时候填 | 来源 |
 |---|---|---|---|
@@ -527,8 +528,8 @@
 | `data.floors_eval500_sha256` | 已填：`5cc85b245c32…`（tvr-data-202611102015） | 编排 | `OUT/tvr/floors/floors_eval500.json` |
 | `data.F_eval500` | 已填：`0.0`（tvr-data-202611102015） | 编排 | `floors_eval500.json` 的 `F.rate` |
 | `data.F_source` | 已填：`stop0`（tvr-data-202611102015） | 编排 | `floors_eval500.json` 的 `F.source` |
-| `tiers.n_top` | 待填：校准之后（"ALL" 或 "400"） | 编排（`cal_decision.json`） | 第 7 节的规则 |
-| `render.eval_envs` | 已填 5（**暂定**，= `render.replay_envs`）；校准之后确认或改，冻结前 | 编排（只用 Q3B 的校准测速） | 第 3 节 |
+| `tiers.n_top` | 已填 "ALL"（校准：Q3B ALL 档 dev200 85/200 = 0.425 ≤ 0.70；第 7 节"校准结果"） | 编排（`cal_decision.json`） | 第 7 节的规则 |
+| `render.eval_envs` | 已填 5，校准后确认（Q3B dev200 图像臂评测步速最低 5.20 步/秒，高于 4 步/秒；第 7 节"校准结果"） | 编排（只用 Q3B 的校准测速） | 第 3 节 |
 | `public.hf_revision` | `null`，未核实；允许保持 `null`（`pilot_cfg.OPTIONAL_NONE`） | — | 第 2 节 |
 | `protocol.chat_template_kwargs` | `null`，**按设计**：我们不发送 chat_template_kwargs（`OPTIONAL_NONE`） | — | 第 9 节 |
 
@@ -628,7 +629,7 @@
 | `render.lvp_profile` | `envlib`（LD_LIBRARY_PATH 只放 TVR 环境的 lib；第一次就起来，没重试） | `summary.lvp_profile` |
 | `render.lp_threads` | 2（每个 Unity 进程的 lavapipe 线程数 L） | `summary.recommended.L` |
 | `render.replay_envs` | 5（重放和可达集合导出的并行环境数 E） | `summary.recommended.E` |
-| `render.eval_envs` | 5，**暂定**（= replay_envs）；校准后确认或改 | 契约 O10 |
+| `render.eval_envs` | 5（= replay_envs；校准后确认，第 7 节"校准结果"） | 契约 O10 |
 | `render.recommended_measured` | [6, 2]，只记录、不采用 | `summary.recommended_measured` |
 | `render.compare_verdict` | `same_rendering` | `summary.compare.verdict` |
 | `render.deterministic` | false | `summary.determinism.deterministic` |
@@ -637,7 +638,7 @@
 - **两条推荐**（探针 grid，env-only，每个环境 100 步；编排按 grid_cells 独立复算一致，`scratch/orch/r3/jobs2/probe_facts.md`）：
   - `recommended` = E 5 × L 2（规则 E×L ≤ 11，给 vLLM 和主进程留 ≥ 3 核）：调和平均 9.168 步/秒，实测 cgroup 核数最多 8.584。**采用**（`render.recommendation_field` = `summary.recommended`；run_tvr 的保护也按 E×L ≤ 11）。
   - `recommended_measured` = E 6 × L 2（规则：实测核数 ≤ 11）：11.274 步/秒，10.372 核。只记录。
-  - 每步约 0.8–1.0 个核·秒（契约 F4 的表）。有 vLLM 在环路里时，每步多等 0.2–0.4 秒模型，所以评测的总速率预计 5.5–7 步/秒（推断，校准实测）。
+  - 每步约 0.8–1.0 个核·秒（契约 F4 的表）。有 vLLM 在环路里时，每步多等 0.2–0.4 秒模型，所以评测的总速率预计 5.5–7 步/秒（推断，校准实测）；校准的 dev200 评测实测 5.20–6.48 步/秒（第 7 节"校准结果"）。
 - **公开图比对**（DECISIONS G3(d)，规则在看图之前定好）：两条公开样本任务的 27 帧全部通过，最小 PSNR 44.713 dB、最小 SSIM 0.993125（SSIM 定义见 `probe_lvp.SSIM_DEFINITION`，徽标区域 x ≥ 536、y ≤ 31 遮住），判为 `same_rendering`；对照组（位姿错开一步）最大 PSNR 23.2 dB，说明这个度量分得开位姿。**即便判为相同，我们仍然只用自己渲染的图训练**，示范和评测用同一个渲染器（简报第 3 节 TVR）。
 - **渲染不是逐位可复现的**（`summary.determinism`，契约 F4）：
   - deterministic = false；跨进程、跨 L、跨动作路径、重载场景之后，帧的 sha256 都可能不同（equal_across_processes / equal_across_L / equal_across_paths / equal_after_reload 全为 false）；只有同一进程、同一位姿、中间不动时重渲一次是逐位相同的（repeat_render_identical = true）。
@@ -727,10 +728,17 @@
 - **校准**（G10(e)；契约 7.2；EXPLORATORY，只用 Q3B、只在 dev200、种子 1001）：
   - 训 0W、100、ALL，在 dev200 上用主协议（c 臂）各评一次；
   - `N_top` = **ALL**，如果 Q3B 的 ALL 档 dev200 成功率 ≤ 70%（`tiers.all_dev_sr_max` = 0.70；**等于 0.70 时取 ALL**）；否则 N_top = **400**，并且另跑校准作业 tvr-cal400（训 400 档、在 dev200 上评）；
-  - 结果写进 `CAL/cal_decision.json`，编排把 `tiers.n_top` 填进第 0.1 节：**待填：校准之后**。
+  - 结果写进 `CAL/cal_decision.json`，编排把 `tiers.n_top` 填进第 0.1 节：**已填 ALL**（下面"校准结果"）。
   - 校准的其他数字**都不用来改配方**。只有两样用于工程：(1) `render.eval_envs` 可以在冻结前按 Q3B 的测速确认或改（例如带 vLLM 的总速率低于 4 步/秒时）；(2) 训练和评测作业的 est_high 按校准的 Q3B 实测推出（第 16 节）。
   - 校准同时是机制排查：raw Q3B 的 c、blind 臂在 smoke4 上只跑机制（不出成功率），第一次以 root 起 max_model_len 32768 / max_images 96 的 vLLM 服务；起不来就按登记的备用值 128000 重试一次，并在冻结前记第 17 节（附 A：O9）。只有**这一次**尝试里服务确实没起来（run_tvr 退出码 1、这次新写了 `<前缀>__server_error.json`、没有一个臂出结果）才换备用值；拒绝（退出码 2）、超时、TERM 或 THOR 失败都不换。备用值的那次尝试本身没成功（没写下 `CAL/shake/fallback_used.json`）时，校准作业重跑会先把那次尝试留下的 c、blind 臂目录和第一次的 server_error 副本改名为 `<名>.prev-<UTC>`，再从冻结的 max_model_len 起、按同一条规则重新判（`vpd/jobs/tvr_cal.sh` 的 shake）。
 - **无望停止**（附 A：O21）：`cal_decision.futility` = Q3B 最高档（ALL；N_top = 400 时在 cal400 之后按 400 档重判）dev200 c 臂的 Wilson 95% 下界 ≤ dev200 的盲下限 F（`floors_dev200.json`）。为真时编排不准备冒烟和训练作业，报告并问用户；`pilot_tvr` 只有在用户决定后由编排写下 `CAL/futility_override.json` 时才放行。这一步只看 Q3B、和起点无关，符合分离规则。
+- **校准结果**（tvr-cal pt-js5w1gsc，2026-11-11 09:14Z SUCCEEDED；0W、100 两个适配器和 raw 的 shake 是第一个校准作业 tvr-cal-202611110140（pt-zroa15mv，同一个代码快照 f393095e，02:1x–02:3x；02:52Z 在 train_ALL 时因账号磁盘配额 FAILED）的输出，这次跳过了重训（steps.jsonl：train_0W:skip、train_100:skip）和 shake（steps.jsonl 里 1 秒；worker.log：c、blind 两个臂 complete … skipped，复用已有结果），自己训 ALL、跑三次 dev200 评测；EXPLORATORY，只有 Q3B、dev200、c 臂、种子 1001；`CAL/cal_decision.json` 记的 results_sha256 是 ebdb3db109b6…；编排用独立脚本从 per_task.jsonl 重数过，一致，`OUT/scratch/orch/r3/calcheck/indep_cal.out`）：
+  - 0W 1/200、100 12/200、ALL 85/200（0.425，Wilson 95% 0.359–0.494）。ALL ≤ 0.70，所以 N_top = **ALL**，不跑 tvr-cal400；
+  - 无望停止为假：ALL 档 Wilson 下界 0.359 > dev200 盲下限 F = 0.005（`floors_dev200.json`，sha256 dc123c1c9059…）；
+  - dev200 图像臂评测的步速 6.48 / 5.46 / 5.20 步/秒（0W / 100 / ALL，`results.perf.steps_per_s`），都高于 4 步/秒，所以 `render.eval_envs` 确认 5，不改（raw Q3B 的 shake c 臂只有 smoke4 的 4 题、42.5 秒，2.84 步/秒，题太少（4 题少于 5 个并行环境，测不出稳态速率，推断），不算测速；第 16 节的 R 也只取 dev200 评测）；
+  - 服务按冻结的 max_model_len 32768 起来了（第一个作业的 shake 和这次的三次 dev200 评测，`settings.max_model_len_used` 都是 32768；最长提示 20,280 token、每次请求最多 80 张图），没有 `CAL/shake/fallback_used.json`，O9 的备用值没用；
+  - 按第 16 节推出的 est_high（`pilot_tvr.est_high`，向上取到 0.001 h；输入：适配器 meta 的 train_seconds + load_seconds 0W 336.7 + 55.7、100 405.5 + 57.7、ALL 6440.3 + 65.4；R = 5.199，blind 臂 16.161（shake 的 blind 臂，smoke4 的 4 题；blind 臂没有 dev200 评测，第 16 节的规则就取它），vllm_ready_s 最大 505.2，merge 186，parity 156；mean_steps_per_task 34.27 / 34.15 / 27.915（0W / 100 / ALL），steps_high 都取上限 17,500）：train Q3S、E2 2.759 h，Q3B 3.068 h；eval top 3.027 h（每个起点），low 2.491 h（Q3B 3.662 h）；都 ≤ 5.5。按这些值第 16 节的试点预留是 35.3 卡时（第 16 节写的预期 33.0；附 A O20 写的"最坏约 3.1 h"，推出的最大是 Q3B low 的 3.662 h）；
+  - 这些是 Q3B 一个起点的绝对数，只用于 N_top、eval_envs、无望停止和 est_high（第 16 节），不用来改配方。
 - 0 档：试点**不跑** raw 评测（附 A：O11）；曲线的 0 点是 0W。
 
 ---
@@ -812,7 +820,7 @@ success = stopped and is_exact(final_pose, target)
 - `VLLMServer(code, max_images=96, max_model_len=32768, gpu_memory_utilization=0.85)`，其余全用默认：xgrammar 结构化输出后端、`--seed 0`、`--generation-config vllm`、`--enforce-eager`、`--mm-processor-kwargs` 带 `max_pixels` 和 `size.longest_edge` = 1,024,000（DECISIONS B16），前缀缓存保持 vLLM 默认（开）（`protocol.server`）。
 - 版本（`protocol.versions`）：vllm 0.11.0、xgrammar 0.1.25、transformers 4.57.6（服务）/ 4.57.0（训练）、ai2thor 5.0.0。每次评测的 results.json 记录实际版本，G0 第 10 条核对。
 - 最坏的请求：40 个 user 轮、80 张图、20,280 个提示 token（iTHOR 上限 30 时 15,270），在 32,768 以内（契约 F5）。max_images 96 留了 16 张余量（critic：默认的 80 正好卡满）。
-- 32768 / 96 张图的服务能不能起来，未核实（低风险）；校准第一次起；起不来就用登记的备用值 `protocol.max_model_len_fallback` = 128000，冻结前记第 17 节，之后所有试点评测都用它（附 A：O9）。
+- 32768 / 96 张图的服务能不能起来，登记时未核实（低风险；校准里起来了，O9 的备用值没用，第 7 节"校准结果"）；校准第一次起；起不来就用登记的备用值 `protocol.max_model_len_fallback` = 128000，冻结前记第 17 节，之后所有试点评测都用它（附 A：O9）。
 - 一次 vLLM 会话服务一个起点一个档位的所有臂；图像臂共用一个 E × L 的 THOR 池；blind 臂在图像臂之后跑。
 
 ### 9.4 每个起点的试点评测（契约 7.5；附 A：O6、O20）
@@ -894,10 +902,10 @@ success = stopped and is_exact(final_pose, target)
    - **一类错误**（门槛 `power.type1_max` = 0.06，2,000 次时蒙特卡洛标准误约 0.005）= 两个对比效应都为 0 时，Holm 至少拒绝一个（任一方向）的模拟所占比例（族错误率，比单个对比的拒绝率更严；定义由 DECISIONS G13 确认）。**判的值 = σ_used、λ_used 下 ρ = 0 和 ρ = 1 两格里较大的那个**。各对比不校正的拒绝率也报。
    - **为什么功效在 ρ = 0.5 判**（stats:a4）：ρ = 1 时 A4 不可能过（σ 的下限 0.03 上功效已是 0.69）；ρ = 0 是乐观的一端，忽略了促成这次修改的共用 0W_s；终点检验的功效对 ρ 近乎线性（λ = 0 时 0.905、0.864、0.813、0.747、0.694，ρ = 0、0.25、0.5、0.75、1，推断），所以 ρ = 0.5 大约是 ρ 在 [0, 1] 上均匀时的平均功效。
    - **登记的备用设计**（第 15 节第 9 条）= 主设计，但两档都只用种子 1–2（`power.fallback.seeds`；两档配对，所以同一个检验能用，df 6），同样的网格和判定规则，表名 `fallback_seeds_1_2`，判定写进 `fallback_pass`。
-   - **只报告的设计行**（`power.reported_designs`，wave 2c；POWER.json 的 `reported_designs` 块，`role` = `reported`，`gated` 为 false；判定从不读它，放在 `tables` 外面，所以 `verdicts`、`pass`、`fallback_pass` 和不加这些行时逐位相同）：给 A4 不过时由用户定方向用。都在 σ_used、λ_used、ρ = 0.5（`power.reported_designs.tier_corr`）下，2,000 次、种子 0，同一个检验，报两个对比的 Holm 功效（同"功效"的数法）和蒙特卡洛标准误：主设计每个起点 4 个种子（两档都用种子 1–4，配对；`main_seeds_4`，df 18）和 5 个种子（种子 1–5；`main_seeds_5`，df 24），δ = 0.08；主设计 3 个种子、δ = 0.10（`main_delta_10pp`，df 12；就是 `tables.main` 里 `power` 行 δ = 0.10 那一格）。df = 起点数 × (n_s − 1)。**一类错误行**（wave 2c 第二轮；`power.reported_designs.type1`，POWER.json 的 `reported_designs.type1`，同样只报告、`gated` 为 false、在 `tables` 外面，判定不读）：`main_seeds_4` 和 `main_seeds_5` 在 δ = 0、ρ = 0 和 ρ = 1（`power.reported_designs.type1.tier_corr`）、σ_used、λ_used 下，2,000 次、种子 0，同一个检验，报两个对比的 Holm 族错误率（同"一类错误"的数法：至少拒绝一个，任一方向）和它的蒙特卡洛标准误 √(f(1 − f)/2000)，另报每个设计两格里较大的那个（`by_design.<设计>.type1`，取法同 A4）和它是否 ≤ `power.type1_max`（`within_type1_max`）。`main_delta_10pp` 不需要一类错误行：δ = 0 时它就是主设计，它的族错误率就是 `tables.main` 的 `type1` 行。A4 不过以后用户要是选了一个只报告的设计，这个设计在这些行里也必须满足登记的一类错误界（两格里较大的 ≤ 0.06）。例（推断：wave-2c fixer 的合成 500 题根，`OUT/scratch/orch/r3/wave2c/fix/scripts/fx_time.py` 写的：80 个场景，Beta(0.6, 1.4) 的 p，Q3S、E2 在 logit 尺度上比 Q3B 高 0.6、低 0.2；λ̂ = 0.020、λ_used = 0.050，σ_used = 0.03）：主设计 Q3S − E2 / Q3RD − mean(QRL) 0.792 / 0.900（A4 不过），4 个种子 0.930 / 0.976，5 个种子 0.972 / 0.995，δ = 0.10 时 0.935 / 0.987（`OUT/scratch/orch/r3/wave2c/fix/out/log_time_new.txt`；本轮在同一个根上重算，数字相同）；族错误率 ρ = 0 / 1 时 4 个种子 0.0465 / 0.0425，5 个种子 0.046 / 0.0595（蒙特卡洛标准误 0.0045–0.0053；5 个种子 ρ = 1 那格离 0.06 不到一个蒙特卡洛标准误；`OUT/scratch/orch/r3/wave2c/refix2/logs/time_new.txt`）。
+   - **只报告的设计行**（`power.reported_designs`，wave 2c；POWER.json 的 `reported_designs` 块，`role` = `reported`，`gated` 为 false；判定从不读它，放在 `tables` 外面，所以 `verdicts`、`pass`、`fallback_pass` 和不加这些行时逐位相同）：给 A4 不过时由用户定方向用。都在 σ_used、λ_used、ρ = 0.5（`power.reported_designs.tier_corr`）下，2,000 次、种子 0，同一个检验，报两个对比的 Holm 功效（同"功效"的数法）和蒙特卡洛标准误：主设计每个起点 4 个种子（两档都用种子 1–4，配对；`main_seeds_4`，df 18）和 5 个种子（种子 1–5；`main_seeds_5`，df 24），δ = 0.08；主设计 3 个种子、δ = 0.10（`main_delta_10pp`，df 12；就是 `tables.main` 里 `power` 行 δ = 0.10 那一格）。df = 起点数 × (n_s − 1)。**一类错误行**（wave 2c 第二轮；`power.reported_designs.type1`，POWER.json 的 `reported_designs.type1`，同样只报告、`gated` 为 false、在 `tables` 外面，判定不读）：`main_seeds_4` 和 `main_seeds_5` 在 δ = 0、ρ = 0 和 ρ = 1（`power.reported_designs.type1.tier_corr`）、σ_used、λ_used 下，2,000 次、种子 0，同一个检验，报两个对比的 Holm 族错误率（同"一类错误"的数法：至少拒绝一个，任一方向）和它的蒙特卡洛标准误 √(f(1 − f)/2000)，另报每个设计两格里较大的那个（`by_design.<设计>.type1`，取法同 A4）和它是否 ≤ `power.type1_max`（`within_type1_max`）。`main_delta_10pp` 不需要一类错误行：δ = 0 时它就是主设计，它的族错误率就是 `tables.main` 的 `type1` 行。A4 不过以后用户要是选了一个只报告的设计，这个设计在这些行里也必须满足登记的一类错误界（两格里较大的 ≤ 0.06）。例（推断：wave-2c fixer 的合成 500 题根，`OUT/scratch/orch/r3/wave2c/fix/scripts/fx_time.py` 写的：80 个场景，Beta(0.6, 1.4) 的 p，Q3S、E2 在 logit 尺度上比 Q3B 高 0.6、低 0.2；λ̂ = 0.020、λ_used = 0.050，σ_used = 0.03）：主设计 Q3S − E2 / Q3RD − mean(QRL) 0.792 / 0.900（A4 不过），4 个种子 0.930 / 0.976，5 个种子 0.972 / 0.995，δ = 0.10 时 0.935 / 0.987（`OUT/scratch/orch/r3/wave2c/fix/out/log_time_new.txt`；本轮在同一个根上重算，数字相同）；族错误率 ρ = 0 / 1 时 4 个种子 0.0465 / 0.0425，5 个种子 0.046 / 0.0595（蒙特卡洛标准误 0.0045–0.0053；5 个种子 ρ = 1 那格离 0.06 不到一个蒙特卡洛标准误；`OUT/scratch/orch/r3/wave2c/refix2/logs/time_new.txt`）。0.0595 大概是偏高的一次抽样（推断）：wave-2c 第二轮统计评审在同一个根上用 20,000 次、另一个种子（20261111）重算，主设计和 4、5 个种子在 ρ = 0 / 1 下都在 0.045–0.048（蒙特卡洛标准误约 0.0015；`OUT/scratch/orch/r3/wave2c/review/stats_r2/out/indep_root_new.json` 的 big 块）。登记的 2,000 次下，一类错误接近 0.06 的设计过不过界会受蒙特卡洛噪声左右（推断）。
    - 输出 `P/POWER.json`（schema `vpd.power_sim.tvr/3`）：输入文件的 sha256、p 的汇总（只按档，不按起点）、σ（Q3B 种子重复的 seed_diff_mean、S、σ̂、σ_used）、λ（第 7 条，`persistence`）、全表（`tables.main`、`tables.fallback_seeds_1_2`，每行带 `tier_corr`、`persistence`、`role`、`mc_se_power`）、判定（`verdicts.<设计>`：`type1`、`type1_by_rho`、`power_at_primary`、`power_tier_corr`、`power_by_rho`、`mc_se_power_at_primary`、`pass`），以及 `sensitivity_superseded_test` 和 `reported_designs`（含一类错误行 `reported_designs.type1`；都只报告）。`registered` 抄录所用的 `test`、`test_def`、`seed_model`、`tier_corr`、`fallback`、`persistence`、`reported_designs`、`n_sims_registered`、`n_sims_used`、`backend`（本次实际用的后端）、`allow_no_replicate`、`type1_definition`。`inputs.pilot_cfg_json_sha256` = sha256(pilot_cfg.as_json(所用 cfg))，`inputs.pilot_cfg_py_sha256` = pilot_cfg.py 文件的 sha256（GATE.json 的 `pilot_cfg_sha256` 是后者）。
    - **POWER.json 给什么、不给什么**（wave 2c；`power_sim` 模块说明的 Separation 一段）：POWER.json 不给任何起点的 SR 水平（任何档、任何种子），也不给任何能只从 POWER.json 用闭式算出起点之间 SR 差的值；给的是 Q3B 种子重复的起点内种子差统计（`sigma` 块的 seed_diff_mean、S、σ̂²、σ̂、σ_used：同一个起点两个种子之差，不是水平；保留，核对 σ_used 要用）和三个起点汇总的 p（`p_summary`，按档）；每个起点的绝对数只在闸门报告（GATE.json / GATE.md 的 k/n）里。wave 2b 的 POWER.json（schema /2）不满足这一条：独立核查（statcheck `diag_leak.json`）用 `persistence` 块的 level（Q3B 那对种子的平均 SR）、`sigma` 块和 `p_summary` 精确还原了 SR(Q3B, 100, s1001) − mean(SR(Q3S, 100), SR(E2, 100)) = 1.5 × (level + seed_diff_mean/2 − p_summary["100"].mean)；只删 level 不够，因为 L(1 − L) = B + V，而 B 能从 λ̂ 和 `sigma` 块（D = (n − 1)·S + d²，κ、m2 由 d、S、σ_used 算出）精确倒推，所以去偏的 V 能精确还原 L（V_plain 只能近似）。闭式之所以被挡住，是因为 level、V 和 V_plain 都不写进 POWER.json。B、R、D、κ、m2 也不写，但不是因为它们能还原水平：它们能从 λ̂ 和 `sigma` 块精确算出，写了只是重复。没有 V 时 L 没有闭式解：V ≥ 0 只给出 L(1 − L) ≥ B，即 L 在 [L_min, 1 − L_min] 里，L_min = (1 − √(1 − 4B))/2；L（< 1/2 时）到下界的距离是 (√((1 − 2L)² + 4V) − (1 − 2L))/2，V 小时约 V/(1 − 2L)，所以这个区间多宽由 V 定（推断）。wave-2c 泄漏审查在两个合成根上算过这个界（`OUT/scratch/orch/r3/wave2c/review/leak/out/result_attack.json` 的 `route3_B_bound_on_L`）：statcheck 的 leak_root 上是 [0.232, 0.768]（真 L = 0.395），审查自己的 root2 上是 [0.188, 0.812]（真 L = 0.428），都宽得没有用处。**统计上的预测（推断）**：这不等于 POWER.json 里没有一点关于起点差的信息。用 λ̂、se、`sigma` 块和 `p_summary` 在合成试点上拟合的模型能在统计上预测 SR(Q3B, 100) − mean(SR(Q3S, 100), SR(E2, 100))：wave-2c 泄漏审查（`OUT/scratch/orch/r3/wave2c/review/leak/out/result_mc_narrow.json`：8,000 个合成试点，七成拟合、三成留出，二次项 OLS）里留出样本的 R² ≈ 0.39，差的绝对值 ≥ 5 个百分点时符号对约 84%（起点偏移更散的先验，同一目录的 `result_mc_wide2.json`：0.36、78%）。这不是闭式解；它给的比闸门报告已经打印的每个起点的绝对数（简报允许）少；而且 POWER.json 只在试点之后（冻结之后）才写。现在 `persistence` 块只有白名单里的键（`power_sim.PERSISTENCE_KEYS`）：lambda_hat、se、lambda_used、margin、n、n_pooled、range、rule、sigma_used、replicate_missing、check（`persistence_check` 在汇总的 p 上的模拟结果，没有按起点的值），λ̂ 识别不了或缺种子重复时另有 note（缺种子重复时没有 n、n_pooled 和 check）；`run_tvr` 写之前检查这个白名单，多一个键就拒绝（ValueError）。其余各块：`tables`、`verdicts`、`sensitivity_superseded_test`、`reported_designs` 都是从汇总的 p 模拟的起点，只依赖 p_i、σ_used、λ_used；`registered` 是登记常量；`inputs` 是路径、文件 sha256 和题数。测试 `test_power_json_gives_no_start_level_and_no_between_start_difference` 在 run_tvr 的真实路径上确认这两条还原路线都算不出来，并且除了模拟块、登记常量、输入哈希和 seed_diff_mean，POWER.json 里没有一个数等于某个起点的 SR、这对种子的水平或起点之间的差。
-   - 运行方式（登录节点，1 核；用户的登录节点规则）：`env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 nice -n 19 PY_EVAL -m vpd.common.power_sim tvr --pilot-root P --out P/POWER.json`。模块被导入时也把这四个变量默认设成 1（调用方已设的不改），numpy 路径不调用 BLAS（整组求和用 reduceat），所以在 gate_tvr 里进程内调用也不会开线程池。合成的 500 题根上整张表（两个设计、2,000 次，含 400 次的 λ 核对）在 1 核上约 40 秒；wave 2c 加了只报告的设计行以后，同一个根（上面"例"里 `fx_time.py` 的合成 500 题根）上 `run_tvr` 从 37.1 秒变成 42.8 秒（量的是 `run_tvr`，1 核，2,000 次，登录节点；`OUT/scratch/orch/r3/wave2c/fix/out/log_time_base.txt`、`log_time_new.txt`），第二轮加了一类错误行以后是 44.7 秒（同样的量法，`OUT/scratch/orch/r3/wave2c/refix2/logs/time_new.txt`；只差文档字符串的前一版代码另量一次 46.6 秒，同目录 `time_new_draft_code.txt`，数字逐位相同）。`gate_tvr --power` 只在测试的小合成根上量过（`test_tvr_integration` 的 pipe fixture：8 题、2 个场景，2,000 次，1 核）：带 `--power` 的闸门 8.8 秒，不带 4.3 秒，同一个根上直接跑 `run_tvr` 3.8 秒（`OUT/scratch/orch/r3/wave2c/refix2/logs/gate_time.json`）；500 题的根上 `gate_tvr --power` 约等于 `run_tvr` 的时间加闸门本身读写文件的时间（推断）。
+   - 运行方式（登录节点，1 核；用户的登录节点规则）：`env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 nice -n 19 PY_EVAL -m vpd.common.power_sim tvr --pilot-root P --out P/POWER.json`。模块被导入时也把这四个变量默认设成 1（调用方已设的不改），numpy 路径不调用 BLAS（整组求和用 reduceat），所以在 gate_tvr 里进程内调用也不会开线程池。合成的 500 题根上整张表（两个设计、2,000 次，含 400 次的 λ 核对）在 1 核上约 40 秒（wave 2b 写的，没留出处；wave 2c 在上面"例"里 `fx_time.py` 的根上量的是 37.1 秒）；wave 2c 加了只报告的设计行以后，同一个根（上面"例"里 `fx_time.py` 的合成 500 题根）上 `run_tvr` 从 37.1 秒变成 42.8 秒（量的是 `run_tvr`，1 核，2,000 次，登录节点；`OUT/scratch/orch/r3/wave2c/fix/out/log_time_base.txt`、`log_time_new.txt`），第二轮加了一类错误行以后是 44.7 秒（同样的量法，`OUT/scratch/orch/r3/wave2c/refix2/logs/time_new.txt`；只差文档字符串的前一版代码另量一次 46.6 秒，同目录 `time_new_draft_code.txt`，数字逐位相同）。`gate_tvr --power` 的路径只在测试的小合成根上量过（进程内调用 `gate_tvr.evaluate(..., power=True)`，不是命令行；`test_tvr_integration` 的 pipe fixture：8 题、2 个场景，2,000 次，1 核）：带 `--power` 的闸门 8.8 秒，不带 4.3 秒，同一个根上直接跑 `run_tvr` 3.8 秒（`OUT/scratch/orch/r3/wave2c/refix2/logs/gate_time.json`）；500 题的根上 `gate_tvr --power` 约等于 `run_tvr` 的时间加闸门本身读写文件的时间（推断）。
 7. **任务持续性 λ**（`power.persistence`；`power_sim` 的 `persistence_hat`、`shift_gap`、`shift_m2`、`persistence_check`；附 A：O25；wave-2 核查 stats:a4 的 should 项；估计在 wave-2b 核查后改过，见下）：
    - 问题：如果第 6 条的模型让每个 (起点, 种子, 档, 题) 的结果都在汇总的 p_i 附近独立抽，就等于假设"同一个起点不同种子在同一道题上的结果，和不同起点之间一样不相关"。微调后的起点往往对某道题所有种子都会、或者都不会；这部分持续的差在 3 个种子 × 2 档上平均不掉，全进 CR1，所以不加这一项时 A4 的功效偏乐观（检验本身仍然有效，CR1 量的是真实的 Var(d_i)）。
    - 模型（`power.seed_model`）：每个起点每道题一个均匀数 V_{S,i}，这个起点的所有种子和**两档**共用（只是比"两档各自独立的持续性"保守；同一个种子的两档之间的持续性可能比不同种子之间更强，见下面未核实的第 4 条）；每个结果 y = 1[W < q]，q = clip(p_i(T) + c, 0, 1)，W 以 √λ 的概率取 V_{S,i}，否则取新的均匀数。于是 y 的边际仍是 Bernoulli(q)，同一起点同一道题的两个结果（不同种子或不同档，q 相同）的协方差是 λ·q(1 − q)：λ 就是起点内一道题结果的组内相关。不同起点之间独立。λ = 0 时和原来的抽法逐位相同。
@@ -908,7 +916,7 @@ success = stopped and is_exact(final_pose, target)
      - 模型里，给定这对种子实现的偏移 r1、r2（不截断时），E[D] = (1 − λ)·R + λ·|r1 − r2|，R = 2B + (r1 − r2)²/2（B 取这对种子的平均水平 L，所以没有 O(σ) 的项；两个偏移让所有题朝同一方向动，持续部分的不一致率正好是 |r1 − r2|）；
      - κ = E[|r1 − r2| | d, S]（`shift_gap`）、m2 = E[(r1 − r2)² | d, S] = a² + v（`shift_m2`）：在登记的种子模型 r1 − r2 ~ N(0, 2σ_used²) 和 d | (r1 − r2) ~ N(r1 − r2, S) 下的后验，b = 2σ_used² / (2σ_used² + S)，a = b·d，v = b·S，κ = √v · √(2/π) · exp(−a²/(2v)) + a · (1 − 2Φ(−a/√v))（d、S、σ_used 同第 5 条）；R = 2B + m2/2；
      - **λ̂ = (R − D) / (R − κ)**；**λ_used = clip(λ̂ + 0.03, 0, 1)**（0.03 = `power.persistence.margin`，登记的余量，见下面"余量"；`power.persistence.range`、`rule`；`power_sim.lambda_used_rule`）；C(y_a, y_b) ≤ 0（全样本或去掉任一场景后）或 R ≤ κ 时 λ 识别不了，取 1（保守，不加余量）；种子重复缺失（只在 `--allow-no-replicate` 时允许）也取 1（同以前，取范围上端）。POWER.json 记下 λ̂、`margin` 和 λ_used。
-     - 另报按场景整组的 delta 法标准误（`persistence.se`，只算题目抽样）。独立核查里它大致对：登记的模型下是 λ̂ 经验标准差的 0.83–1.18 倍；把 statcheck 的所有行（起点偏移、各种 p 形状、人为定的 σ_used）都算上是 0.69–1.50 倍（推断，statcheck `summary.json`、`est_*.json` 的 mean_delta_se / sd_hat；本轮重算：`OUT/scratch/orch/r3/wave2c/refix2/logs/se_ratio.txt`）。
+     - 另报按场景整组的 delta 法标准误（`persistence.se`，只算题目抽样）。独立核查里它大致对：登记的模型下是 λ̂ 经验标准差的 0.83–1.18 倍；把 statcheck 的所有行都算上是 0.69–1.50 倍（推断；这些行在登记模型的 p 形状之外还有起点之间的差（均值和尺度）、逐题偏向和人为定的 σ_used，最小的 0.69 来自人为定 σ_used 的一行，最大的 1.50 来自起点均值偏移的一行；statcheck `summary.json`、`est_*.json` 的 mean_delta_se / sd_hat；本轮重算：`OUT/scratch/orch/r3/wave2c/refix2/logs/se_ratio.txt`）。
      - **余量**（wave 2c；编排按独立核查的建议定，DECISIONS G14 的补记）：λ̂ 剩下的偏松偏差（λ̂ 平均偏低，λ_used 偏低，功效被高估，A4 可能误过）在登记的模型下某些 p 形状上是 −0.012 到 −0.020，在最坏的起点偏移情形下到 −0.036（推断，statcheck：合成 p 上的模拟）；这和 A4 的决定窗口一样大（σ_used = 0.03 时 λ 约 0.005–0.01 起功效就低于 0.80，见下面"说清楚"）。所以 λ_used 在截断之前先加 0.03。加了以后，按登记的 σ_used 规则核查过的每一格里调整后估计的平均都 ≥ λ − 0.006（推断，statcheck；最低的一格是有起点偏移的 −0.036 + 0.03）。核查里另有把 σ_used 人为定为 0.01、真 σ = 0.03 的格不满足这一条（到 −0.024，λ = 0.8），这种 σ_used 按登记的 σ_used = max(0.03, σ̂)（第 5 条）不会出现。A4 因此更难过，这要分开看。真 λ = 0 时这是真正的代价：那里的真功效 0.813 ≥ 0.80（`power_curve.json`），A4 通过的概率却从约 0.5 降到约 0.34–0.44。λ = 0.1 / 0.2 时真功效是 0.767 / 0.748 < 0.80（`power_curve.json`），那里 A4 通过就是误过；通过的概率从 0.14–0.24 / 0.03–0.08 降到 0.10–0.18 / 0.02–0.06，正是余量要的效果，不是代价（statcheck `tables.txt` 的 OC 表：P(λ_used ≤ 0.01)，λ_used ≤ 0.01 近似 A4 通过；四种 p 形状，σ = 0.03 和 0.05；推断；本轮重算：`OUT/scratch/orch/r3/wave2c/refix2/logs/se_ratio.txt`，λ = 0 时 0.341–0.435 按四舍五入写成 0.34–0.44，0.435 = 870/2000）。`persistence.check.result` 另报 `margin` 和 `bias_used` = λ_used 的平均 − λ（含余量和截断）。
      - **为什么改**（wave-2b 核查 review stats，`identity.txt`、`maineffect*.json`）：wave 2 登记的估计用 H = m/(m − 1)·mean_i p_i(1 − p_i) 当参照（p_i = 三个起点的平均）。这个 H 恰好等于三对起点之间逐题不一致率平均的一半（恒等式，数值差 0.0），期望里还含三个起点 SR 的方差，而且 D 是在 Q3B 自己的水平上；所以它其实是"起点之间对起点之内"的估计，随起点之间的差变：Q3B 是最好的起点、差 5 个百分点时 λ̂ 偏约 −0.10（λ_used 偏低，功效被高估，A4 可能误过），Q3B 最差时偏 +0.06 到 +0.31。这违反了 G13 "A 类判据不看起点之间的差"的本意，冻结前改掉；新的估计仍然不算起点差，只在协方差里把各起点的均值约掉。
    - 模拟核对（推断：`persistence_check`：数据按登记的模型抽，再走 run_tvr 的同一条估计路径；500 题 80 个场景，3 个试点起点，σ = 0.03；review stats 的同一种合成 p 的 100 档（三分之一的格点，偏向 0 和 1）、连续的 Beta(0.6, 1.4) p 和更居中的 Beta(2, 3) p；这一组是 wave 2b 的数，λ_used 都是不加余量的 clip(λ̂, 0, 1)）：
@@ -1045,11 +1053,11 @@ G0–G3 都过以后才跑第 12 节第 6 条的功效模拟（检验 = 第 12 �
 - **每个作业的超时**（契约 5.3.1；照 WalkerBench 的规则，在 pilot_tvr 里重写，用 `vpd.walkerbench.pilot` 的常量）：外层 `timeout` = floor(est_high × 3600) − HEADROOM_S（300 秒）；作业自己的软截止 = 外层 − SOFT_RESERVE_S（180 秒）；kill 窗口 60 秒（数据、冒烟）或 120 秒（其他）；外层 < MIN_OUTER_S（600 秒）就拒绝；est_high > `budget.job_est_high_max_h`（5.5 h）就拒绝，停下问，从不悄悄放大。
 - **固定的 est_high**（契约第 7 节）：tvr-data 2.5（外层 8,700 / 软 8,520）；tvr-cal 5.5（19,500 / 19,320）；tvr-cal400 1.5（5,100 / 4,920）；tvr-msmoke 1.0（3,300 / 3,120）。
 - **训练和评测的 est_high 由校准的 Q3B 实测推出**（和起点无关）：
-  - train-<s>：est_high = 1.3 × (本作业各档的 [校准 meta 的 train_seconds + load_seconds] 之和) / 3600 + 0.1；每档取校准里同一档 Q3B 适配器的值（0W_s1002 / 100_s1002 用校准的 0W / 100；N_top = 400 用 cal400 的 meta）。预计 ALL 约 3.0 h（Q3B 带种子重复约 3.3），400 约 1.25（Q3B 约 1.55）。
+  - train-<s>：est_high = 1.3 × (本作业各档的 [校准 meta 的 train_seconds + load_seconds] 之和) / 3600 + 0.1；每档取校准里同一档 Q3B 适配器的值（0W_s1002 / 100_s1002 用校准的 0W / 100；N_top = 400 用 cal400 的 meta）。预计 ALL 约 3.0 h（Q3B 带种子重复约 3.3；校准后推出 2.759 / 3.068，第 7 节"校准结果"），400 约 1.25（Q3B 约 1.55）。
   - eval-<s>-top / -low：est_high = Σ_本作业的评测 [vllm_ready_s_max + steps_high / R + merge_s + parity_s] / 3600 + 0.15；R = 校准里图像臂评测 `results.perf.steps_per_s` 的最小值（blind 臂用冒烟排查里 blind 的步速），merge_s / parity_s = 校准里合并 / 合并检查秒数的最大值，steps_high = min(eval500 的上限总和 17,500, 1.5 × 500 × 校准 dev200 同档的 mean_steps_per_task)（0W → 校准 0W，100 → 校准 100，TOP → 校准 TOP；u 臂用 TOP；100s1002 → 校准 100）。推出来 > 5.5 h 就拒绝，停下问。
 - **账本**：每个作业的卡时记进 `OUT/ledger.jsonl`（vpd.sco）。
 - **本轮 200 卡时上限**（简报第 2 节 C、第 5 节）：本轮已用 = 账本累计 − `budget.round_baseline_gpuh`（8.8404，本轮开始时的累计）。`pilot_tvr prepare` 在 本轮已用 + 账本里在跑 / 已提交作业的 est_high 之和 + 新作业的 est_high > `budget.round_cap_gpuh`（200）时拒绝（退出码 2），打印这三个数并记进 `RUN/prepared.json["round_budget"]`。原因：`ledger.budget_check` 在 BUDGET_POLICY.json 没设上限时总是放行（契约 P-S6）。到了 200 就停下，给用户总报告。
-- **试点预留**（契约 7.6，est_high；训练和评测是预期值）：数据 2.5 + 校准 5.5（+ cal400 1.5）+ 冒烟 1.0 + 训练约 3.0 × 3（+0.3）+ 评测 top 约 2.4 × 3 + low 约 2.2 × 3（Q3B +0.9）≈ 33.0 卡时（N_top = ALL；预期实际 21–27）；N_top = 400 约 29。2026-11-10 16:08Z 本轮已用 1.883 卡时，另有在跑作业的 est_high 6.3（ROUND3）。
+- **试点预留**（契约 7.6，est_high；训练和评测是预期值）：数据 2.5 + 校准 5.5（+ cal400 1.5）+ 冒烟 1.0 + 训练约 3.0 × 3（+0.3）+ 评测 top 约 2.4 × 3 + low 约 2.2 × 3（Q3B +0.9）≈ 33.0 卡时（N_top = ALL；预期实际 21–27；训练和评测换成校准后按第 16 节推出的 est_high（合计 26.3）时预留是 35.3，见第 7 节"校准结果"）；N_top = 400 约 29。2026-11-10 16:08Z 本轮已用 1.883 卡时，另有在跑作业的 est_high 6.3（ROUND3）。
 - **确认轮**：第 15 节第 9 条的 100 卡时规则。
 
 ---
@@ -1082,7 +1090,7 @@ O1–O24 是 wave-2 契约第 10 节的开放决定，编排按 2026-11-10 的�
 - **O7** 所有模型作业都以 root 跑；渲染一致性按容差规则对照非 root 的数据作业重放（第 13 节 G0 第 15 条）。
 - **O8** 校准的 Q3B 适配器**不**复用到试点：试点的所有适配器都由冻结后的作业在同样的守门规则下产出（第 6 节）。
 - **O9** vLLM 32768 / 96 张图起不来时的登记备用值 max_model_len 128000，冻结前记偏差（第 9.3 节）。
-- **O10** E × L：重放和可达集合导出用 summary.recommended（5 × 2）；图像臂评测用同一个 L，E = `render.eval_envs`（暂定 5），校准后按 Q3B 测速确认或改，冻结前定（第 3.2 节）。
+- **O10** E × L：重放和可达集合导出用 summary.recommended（5 × 2）；图像臂评测用同一个 L，E = `render.eval_envs` = 5（校准后按 Q3B 测速确认，第 7 节"校准结果"；第 3.2 节）。
 - **O11** 试点不跑 raw（未微调）评测（第 7 节）。
 - **O12** 冻结集合里目标不可达的题留在所有分母里（官方协议），在 bfs 的 n_infeasible 里计数并报告；eval500 上预计 0（第 10 节）。
 - **O13** 种子重复训自己的 0W（seed 1002），不复用 seed 1001 的 0W（第 6 节）。
@@ -1091,7 +1099,7 @@ O1–O24 是 wave-2 契约第 10 节的开放决定，编排按 2026-11-10 的�
 - **O16** 数据作业只用 CPU，但跑在 GPU 池上（GPU 空闲，约 1.5 卡时记账）；没有已知的纯 CPU 池（第 16 节）。
 - **O17** 下限细节：固定策略 k = 0..39、"k + 1 > cap 永远停不下来"；随机策略走类别公开专家长度的 median_low 步后停；平手规则（第 11 节）。
 - **O18** 不约束的 u 臂 max_tokens 64（eval_va 默认），c 和 blind 臂 16（第 9.2 节）。
-- **O20** 评测**总是**拆成 -top 和 -low 两个作业（一条代码路径；每个作业最坏约 3.1 h）（第 9.4 节）。
+- **O20** 评测**总是**拆成 -top 和 -low 两个作业（一条代码路径；每个作业最坏约 3.1 h，校准后推出的最大值是 Q3B low 的 3.662 h，第 7 节"校准结果"）（第 9.4 节）。
 - **O21** 校准之后的无望停止：Q3B 最高档 dev 的 Wilson 下界 ≤ dev 盲下限时先问用户（第 7 节）。
 - **O22** 校准和每个试点评测作业开头都跑渲染金丝雀（第 9.4 节；lavapipe 是 CPU JIT，换节点的 CPU 可能改变帧）。
 - **O23** kin-on-eval 的容差：valid 列表不一致 0 次（硬性），位姿 / 成功不一致 ≤ 每次评测 1% 的任务（第 13 节 G0 第 6 条）。

@@ -1155,8 +1155,8 @@ def test_run_tvr_applies_the_registered_margin(tmp_path):
 
 def test_power_json_persistence_keys_are_whitelisted(tmp_path):
     """R1 (wave 2c): POWER.json["persistence"] holds exactly the whitelisted keys -- none of persistence_hat's
-    intermediates (level = the replicate start's SR, V / V_plain rebuild it, B / R / D / kappa / m2 follow from
-    lambda_hat and the sigma block) -- on the
+    intermediates (level = the replicate start's SR; V rebuilds it exactly, V_plain approximately; B / R / D /
+    kappa / m2 only repeat what lambda_hat and the sigma block give) -- on the
     estimated, the undefined and the no-replicate paths; its check block holds only simulation results at the
     pooled p; run_tvr refuses to emit anything else."""
     _write_pilot(tmp_path / "p")
@@ -1412,7 +1412,8 @@ def test_reported_designs_type1_rows(tmp_path, monkeypatch):
         assert b["type1_by_rho"] == {str(s["tier_corr"]): s["fwer"] for s in rows}
         assert b["type1"] == max(s["fwer"] for s in rows) and b["within_type1_max"] == (b["type1"] <= 0.06)
     assert set(t1["by_design"]) == set(reg["type1"]["designs"])
-    # the registered n_sims / seed rule of the other rows, and the main design's null cells are not re-drawn
+    # the registered n_sims / seed rule of the other rows (the 4- and 5-seed delta-0 cells; the main design's
+    # own null cells are not checked here)
     nulls = [c for c in calls if c["delta"] == 0 and len(c["seeds"]["100"]) in (4, 5)]
     assert sorted((len(c["seeds"]["100"]), c["tier_corr"]) for c in nulls) == [(4, 0.0), (4, 1.0), (5, 0.0), (5, 1.0)]
     assert all(c["n_sims"] == 40 and c["seed"] == cfg["power"]["seed"] and c["persistence"] == lam

@@ -114,10 +114,12 @@ def test_every_none_is_documented_as_tbd():
     # (data job, calibration) shrink this set
     allowed = {f"data.{x}" for x in F["data"]} | {"tiers.n_top", "public.hf_revision", "protocol.chat_template_kwargs"}
     assert set(_none_keys()) <= allowed
-    # before the calibration, the provisional eval_envs is marked as such
+    # eval_envs is marked 暂定 before the calibration and no longer after the freeze
     assert any("`render.eval_envs`" in ln for ln in lines)
     if F["tiers"]["n_top"] is None:
         assert any("`render.eval_envs`" in ln and "暂定" in ln for ln in lines)
+    else:   # confirmed at the freeze (section 7, calibration result)
+        assert not any("`render.eval_envs`" in ln and "暂定" in ln for ln in lines)
 
 
 def test_prereg_mentions_every_top_level_key():
@@ -634,8 +636,10 @@ def test_pilot_cfg_imports_under_tvr_py():
 # --------------------------------------------------------------------------------------------- prereg structure
 def test_prereg_header_and_sections():
     t = _text()
-    assert ("状态：**草稿 — 数据作业之后填 data.*，校准之后填 n_top 和 eval_envs，填完的那次提交即冻结，"
-            "必须在冒烟（msmoke）之前。**") in t
+    # frozen (DECISIONS G14a): the status line says so and keeps the draft wording it replaced
+    assert "状态：**已冻结**" in t and ("冻结前这里写的是：\"草稿 — 数据作业之后填 data.*，校准之后填 n_top 和 "
+                                     "eval_envs，填完的那次提交即冻结，必须在冒烟（msmoke）之前。\"") in t
+    assert C.n_top() == "ALL" and all(C.missing(j) == [] for j in C.REQUIRED)   # nothing left to fill
     heads = [ln for ln in t.splitlines() if ln.startswith("## ")]
     nums = [re.match(r"## (\d+)\. ", h).group(1) for h in heads if re.match(r"## (\d+)\. ", h)]
     assert nums == [str(i) for i in range(18)], nums

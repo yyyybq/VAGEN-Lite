@@ -50,8 +50,8 @@ FROZEN = {
                "lvp_profile": "envlib",      # probe summary.lvp_profile.profile (first try, no retry)
                "lp_threads": 2,              # probe summary.recommended.L
                "replay_envs": 5,             # probe summary.recommended.E; replay and reach dumps
-               "eval_envs": 5,               # E for image arms; = replay_envs PROVISIONALLY (before the cal job),
-                                             # confirmed or changed after it (Q3B-only), before the freeze
+               "eval_envs": 5,               # E for image arms; confirmed after the cal job (Q3B-only: dev200
+                                             # image-arm eval steps/s 5.20-6.48 > 4; tvr-cal pt-js5w1gsc)
                "recommendation_field": "summary.recommended",   # E*L <= 11 rule; recommended_measured recorded only
                "recommended_measured": [6, 2],  # [E, L] of summary.recommended_measured (record only)
                "probe_run": "OUT/jobs/tvr-probe-202611101501",
@@ -82,7 +82,7 @@ FROZEN = {
     "zero_w": {"per_category": 5, "n": 20, "expected_epochs": 12, "expected_optimizer_steps": 30},
     "dev": {"per_category": 50, "max_per_scene_category": 2, "n": 200, "source": "rl.json", "smoke_per_category": 2},
     "tiers": {"calibration": ["0W", "100", "ALL"], "calibration_extra": "400", "all_dev_sr_max": 0.70,
-              "n_top": None,                 # "ALL" or "400" (calibration rule, G10(e))
+              "n_top": "ALL",                # calibration rule (G10(e)): CAL/cal_decision.json, tvr-cal pt-js5w1gsc
               "replicate": {"start": "Q3B", "tier": "100", "seed": 1002}},
     "recipe": {"rank": 16, "alpha": 32.0, "dropout": 0.05, "lr": 1e-4, "accum": 8, "warmup": 0.03, "epochs": "auto",
                "epochs_rule": "max(3, ceil(240/N))", "history_k": 0, "max_seq_tokens": 40000, "attn": "sdpa",
