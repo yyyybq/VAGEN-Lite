@@ -83,6 +83,20 @@ def test_check_prereg_reports_differences(tmp_path):
     p.write_text(t.replace("```json", "```", 1), encoding="utf-8")
     assert "no ```json fence" in C.check_prereg(p)[0]
     assert C.check_prereg(tmp_path / "absent.md")
+    # type-only differences and one-sided keys count (a plain != would miss them)
+    p.write_text(t.replace('"rank": 16', '"rank": 16.0'), encoding="utf-8")
+    diff = C.check_prereg(p)
+    assert len(diff) == 1 and diff[0].startswith("recipe.rank")
+    p.write_text(t.replace('"holm": true', '"holm": 1'), encoding="utf-8")
+    assert [d.split(":")[0] for d in C.check_prereg(p)] == ["power.holm"]
+    p.write_text(t.replace(' "seed": 1001,\n', ' "seed": 1001,\n "extra_key": null,\n'), encoding="utf-8")
+    assert [d.split(":")[0] for d in C.check_prereg(p)] == ["extra_key"]
+    p.write_text(t.replace('  "hf_revision": null,\n', ''), encoding="utf-8")
+    assert [d.split(":")[0] for d in C.check_prereg(p)] == ["public.hf_revision"]
+    # against a given cfg (pilot_tvr's test path)
+    cfg = copy.deepcopy(F)
+    cfg["render"]["lp_threads"] = 3
+    assert [d.split(":")[0] for d in C.check_prereg(PREREG, cfg)] == ["render.lp_threads"]
 
 
 # --------------------------------------------------------------------------------------------- None keys documented
@@ -141,6 +155,20 @@ def test_missing_after_the_probe_fill():
     assert C.missing("tvr-data", cfg) == []
     assert C.missing("tvr-cal", cfg) == sorted(k for k in C.REQUIRED["tvr-cal"] if k.startswith("data."))
     assert C.missing("tvr-cal400", cfg) == sorted(k for k in C.REQUIRED["tvr-cal400"] if k.startswith("data."))
+    # the calibration jobs need EVERY data.* key (one fill commit after the data job; K and the drop list are
+    # registered before any training, G10(a)): a single missing data key blocks them
+    every = sorted(f"data.{k}" for k in F["data"])
+    for job in ("tvr-cal", "tvr-cal400"):
+        assert C.missing(job, cfg) == every, job
+        assert {k for k in C.REQUIRED[job] if k.startswith("data.")} == set(every), job
+    filled = _filled()
+    for key in ("kept", "dropped", "F_eval500", "F_source", "houses_sha256", "replay_manifest_sha256"):
+        one = copy.deepcopy(filled)
+        one["data"][key] = None
+        assert C.missing("tvr-cal", one) == [f"data.{key}"] == C.missing("tvr-cal400", one), key
+    zero = copy.deepcopy(filled)
+    zero["data"].update(F_eval500=0.0, dropped=0)     # a filled 0 is not missing
+    assert C.missing("tvr-cal", zero) == []
     for job in ("tvr-msmoke", "tvr-train", "tvr-eval", "tvr-train-q3s", "tvr-eval-e2-top", "tvr-eval-q3b-low"):
         m = C.missing(job, cfg)
         assert m == sorted({f"data.{k}" for k in F["data"]} | {"tiers.n_top"}), job
@@ -212,6 +240,104 @@ def test_constants_consistent():
     assert F["power"]["seed_sd"]["a_priori"] == 0.03 and F["power"]["outcome"]["min_effect"] == 0.05
     assert F["budget"]["round_cap_gpuh"] == 200.0 and F["budget"]["round_baseline_gpuh"] == 8.8404
     json.loads(C.as_json())
+
+
+def test_power_registration_g13():
+    """DECISIONS G13 (wave 2b, before the freeze): the endpoint-level test, the tier_corr cells of A4, the balanced
+    fallback and the task-persistence term; the unchanged A4 numbers."""
+    pw = F["power"]
+    assert pw["test"] == "seed_aware_endpoint_t"
+    for s in ("sigma2_E_hat", "seeds paired across tiers", "df = n_starts * (n_seeds - 1) (12; fallback 6)",
+              "2 for Q3S-E2", "1.5 for Q3RD-mean(QRL)"):
+        assert s in pw["test_def"], s
+    assert "sqrt(rho) z_Ss + sqrt(1 - rho) z_SsT" in pw["seed_model"] and "sqrt(lambda)" in pw["seed_model"]
+    assert pw["tier_corr"] == {"type1": [0.0, 1.0], "power": 0.5, "reported": [0.0, 1.0]}
+    assert pw["fallback"]["seeds"] == {"100": [1, 2], "TOP": [1, 2]}
+    assert pw["fallback"]["seeds"]["100"] == pw["fallback"]["seeds"]["TOP"]          # paired: the test needs it
+    assert set(pw["fallback"]["seeds"]["TOP"]) < set(pw["design"]["seeds"]["TOP"])
+    pe = pw["persistence"]
+    assert set(pe) == {"source", "estimator", "range", "rule", "sensitivity", "check_reps"}
+    assert pe["range"] == [0.0, 1.0] and pe["sensitivity"] == [0.0, 0.8] and pe["check_reps"] == 400
+    # wave-2b refix: the reference is invariant to the start mean SRs (one-factor covariances, jackknifed); the
+    # wave-2 H = m / (m - 1) mean p (1 - p) (half the between-start discordance) is gone
+    assert "only through covariances over tasks" in pe["source"] and "no between-start difference" in pe["source"]
+    assert "never a difference or dispersion" not in pe["source"]
+    for s in ("V = the delete-one-scene jackknife", "C(l, y_a) C(l, y_b) / C(y_a, y_b)", "B = L (1 - L) - V",
+              "R = 2 B + m2 / 2", "lambda_hat = (R - D) / (R - kappa)"):
+        assert s in pe["estimator"], s
+    assert "m / (m - 1)" not in pe["estimator"] and "R <= kappa" in pe["rule"]
+    # the simulation backend is registered (the python and numpy streams differ)
+    assert pw["backend"] == "numpy"
+    # unchanged by G13
+    assert (pw["type1_max"], pw["target_power"], pw["primary_delta"], pw["n_sims"], pw["alpha"]) == \
+        (0.06, 0.80, 0.08, 2000, 0.05)
+    assert pw["power_counts"] == "Holm-rejected AND treated better, other contrast at effect 0"
+    # no start name in the registered strings POWER.json copies outside the whitelisted test_def
+    for key in ("seed_model", "fallback", "persistence", "tier_corr"):
+        assert not any(s in json.dumps(pw[key]) for s in F["starts"]), key
+
+
+def test_prereg_a4_text_matches_the_registration():
+    t = _text()
+    prose = _prose()
+    assert "我的建议" not in t
+    s0 = prose.split("## 0.", 1)[1].split("### 0.1", 1)[0]
+    a4_row = next(ln for ln in s0.splitlines() if ln.startswith("| **A4**"))
+    for w in ("ρ = 0.5", "ρ = 0 和 ρ = 1", "0.80", "0.06", "λ_used", "终点层面"):
+        assert w in a4_row, w
+    s12 = prose.split("## 12.", 1)[1].split("## 13.", 1)[0]
+    for w in ("seed_aware_endpoint_t", "seed_var_endpoint", "df = 起点数 × (n_s − 1) = 12", "备用设计 6",
+              "`power.tier_corr`", "`power.persistence`", "persistence_hat", "persistence_check", "λ_used",
+              "fallback_seeds_1_2", "power_insufficient", "sensitivity_superseded_test", "不插补"):
+        assert w in s12, w
+    s13 = prose.split("## 13.", 1)[1].split("## 14.", 1)[0]
+    a4 = s13.split("### A4", 1)[1].split("### 决策表", 1)[0]
+    for w in ("ρ = 0.5", "ρ = 0 和 ρ = 1", "λ_used", "σ_used", "≤ 0.06", "≥ 0.80"):
+        assert w in a4, w
+    assert "G0、G2" in s13.split("### G0", 1)[0]          # the replicate is checked by G0 and G2, feeds only A4
+    s15 = prose.split("## 15.", 1)[1].split("## 16.", 1)[0]
+    for w in ("终点层面", "df 12", "df 6", "fallback_pass", "两档都只用种子 1–2"):
+        assert w in s15, w
+    assert "冻结前由编排定" not in s15
+
+
+def test_prereg_registers_the_wave2b_gate_conditions():
+    """The conditions gate_tvr / pilot_tvr judge since wave 2b are registered text (review prereg wave 2b): the
+    section-0 guard (n_top == cal_decision.json, data, futility), the O9 re-decision, A4 never reading an
+    allow_no_replicate POWER.json, the per-worker renderer checks (G0(4), smoke), the code rule (G0(5)), the *_used
+    settings (G0(10)), n_top (G0(13)) and the A4 pending conditions."""
+    prose = _prose()
+    s0 = prose.split("## 0.", 1)[0]
+    for w in ("CAL/cal_decision.json", "with_400", "n_top_problems", "data_problems", "futility_override.json",
+              "pilot_tvr guard", "prereg_committed"):
+        assert w in s0, w
+    s7 = prose.split("## 7.", 1)[1].split("## 8.", 1)[0]
+    for w in ("fallback_used.json", ".prev-<UTC>", "重新判"):
+        assert w in s7, w
+    s12 = prose.split("## 12.", 1)[1].split("## 13.", 1)[0]
+    i5 = s12.split("\n5. ", 1)[1].split("\n6. ", 1)[0]
+    assert "从不读这样的 POWER.json" in i5 and "pending" in i5 and "incomplete" in i5
+    assert "第 17 节的偏差" not in i5                      # --allow-no-replicate is not a usable A4 path
+    for w in ("`power.backend`", "registered.backend", "vpd.power_sim.tvr/2", "shift_m2"):
+        assert w in s12, w
+    s13 = prose.split("## 13.", 1)[1].split("## 14.", 1)[0]
+    g0 = s13.split("### G0", 1)[1].split("### 冒烟", 1)[0]
+    item = {int(ln.split(".", 1)[0]): ln for ln in g0.splitlines() if re.match(r"\d+\. ", ln)}
+    for w in ("workers_ok", "system_prompt_ok", "tvrbench_files_ok", "pinned", "worker_problems"):
+        assert w in item[4], w
+    for w in ("0W_s1002", "code_fingerprint.code_sha256", "只管评测"):
+        assert w in item[5], w
+    for w in ("max_tokens_used", "regex_used", "blind_concurrency_used", "request_fields", "max_model_len_used",
+              "fallback_used.json"):
+        assert w in item[10], w
+    assert "CAL/cal_decision.json" in item[13] and "with_400" in item[13]
+    assert "CAL/cal_decision.json" in s13.split("### G0", 1)[0]          # the read list
+    smoke = s13.split("### 冒烟", 1)[1].split("### 无望停止", 1)[0]
+    assert "workers_ok" in smoke and "worker_problems" in smoke
+    a4 = s13.split("### A4", 1)[1].split("### 决策表", 1)[0]
+    for w in ("power_stale", "power_unregistered", "n_sims_used", "allow_no_replicate", "replicate_missing",
+              "registered.backend", "pilot_cfg_json_sha256", "incomplete"):
+        assert w in a4, w
 
 
 def test_render_filled_from_the_probe():
@@ -326,8 +452,11 @@ def test_prereg_header_and_sections():
 def test_appendix_lists_every_adopted_o_item():
     t = _text()
     app = t.split("## 附 A.", 1)[1]
-    for i in list(range(1, 19)) + list(range(20, 25)):
+    for i in list(range(1, 19)) + list(range(20, 26)):
         assert re.search(rf"\*\*O{i}\*\*", app), f"O{i}"
+    o25 = app.split("**O25**", 1)[1].split("\n- **", 1)[0]
+    for w in ("seed_aware_endpoint_t", "ρ = 0", "ρ = 0.5", "种子 1–2", "λ", "G13"):
+        assert w in o25, w
     assert "O19" in app and "不在本文件里" in app
     assert not re.search(r"\*\*O19\*\*", app)
 
@@ -336,11 +465,12 @@ def test_deviation_log_seed_entries():
     t = _text()
     log = t.split("## 17. 偏差日志", 1)[1].split("## 附 A.", 1)[0]
     rows = [ln for ln in log.splitlines() if ln.startswith("| ") and not ln.startswith("| 日期") and "---" not in ln]
-    assert len(rows) >= 5      # the five seed entries; later deviations are appended
+    assert len(rows) >= 6      # the six seed entries; later deviations are appended
     seeds = [lambda r: "lavapipe" in r and "用户（2026-11-10" in r and "不用 NVIDIA" in r,
              lambda r: "逐位可复现" in r and "容差" in r,
              lambda r: "可达集合" in r and "O1" in r,
              lambda r: "合并 = LoRA" in r and "O2" in r,
+             lambda r: "终点层面" in r and "O25" in r and "DECISIONS G13" in r and "编排" in r,
              lambda r: "128000" in r and "O9" in r]
     for i, ok in enumerate(seeds):
         assert any(ok(r) for r in rows), f"seed entry {i}"

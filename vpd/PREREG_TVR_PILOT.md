@@ -4,18 +4,24 @@
   - 本文件可以先以草稿提交（例如填 `render.*` 的那次），草稿提交不算冻结：只要第 0.1 节的块里还有"待填"的键，`pilot_cfg.missing()` 就不为空，`pilot_tvr prepare` 就拒绝准备冒烟、训练和评测作业。
   - 冻结 = 填完 `data.*`、`tiers.n_top` 并确认 `render.eval_envs` 的那次提交（git commit，分支 viewpoint-downstream）。冻结以后的任何改动只能记进第 17 节的偏差日志。
 - 草稿写于 2026-11-10 16:46 UTC（`date -u`，集群登录节点；wave 2 的 prereg 包）。写的时候还没有任何 TVR 模型输出（DECISIONS G10、G12）。
+- wave 2b 修订写于 2026-11-10 20:5x–21:1x UTC（`date -u`，集群登录节点；DECISIONS G13）：确认检验改为终点层面的种子感知检验、A4 的一类错误和功效分别在 ρ = 0 / 1 和 ρ = 0.5 下判、备用设计改为两档种子 1–2、功效模型加任务持续性 λ、校准作业要求全部 `data.*`（附 A：O25）。修订时仍然没有任何 TVR 模型输出（数据作业 tvr-data 在跑，它不读 `power`）。
+- wave 2b 第二轮修订写于 2026-11-10 23:4x UTC（`date -u`，集群登录节点；wave-2b 核查之后，冻结之前）：任务持续性 λ 的估计改为不随起点均值变的单因子估计（第 12 节第 7 条；原来的估计其实是起点之间不一致率的一半，起点差 5 个百分点就偏约 ±0.1）；登记 `power.backend` = numpy；第 13 节补登 `gate_tvr` / `pilot_tvr` 在 wave 2b 新加的 G0、冒烟和 A4 条件；第 7 节补 O9 备用值尝试失败后的重判。仍然没有任何 TVR 模型输出。λ 估计的改动要编排在 DECISIONS 里补一条 G13 的修订（G13 原文写"不看起点之间的离散"）。
 - 本文件提交的 git sha 记进每个试点作业的 `prepared.json`，以及 `OUT/tvr/runs/pilot/GATE.json` 的 `prereg_commit`。
 - 守门规则（`vpd/tvr/pilot_tvr.py prepare`，契约 5.3.1）：准备 tvr-msmoke、tvr-train-*、tvr-eval-* 之前，必须同时满足：
   1. 本文件已提交，并且没有未提交的改动（`git log -1 -- vpd/PREREG_TVR_PILOT.md` 不为空，`git status --porcelain -- vpd/PREREG_TVR_PILOT.md` 为空；只查本文件）；
   2. `pilot_cfg.check_prereg(<本文件>) == []`：第 0.1 节 `TVR_FROZEN` 块解析出的 JSON 和 `vpd/tvr/pilot_cfg.py` 的 `FROZEN` 逐键相等（同一个解析器，`vpd/tests/test_tvr_prereg.py` 也用它）；
   3. `pilot_cfg.missing(<作业>) == []`；
-  4. 训练和评测作业另外要求最新的 `smoke_verdict.json` 为 PASS（第 13 节）。
+  4. 训练和评测作业另外要求最新的 `smoke_verdict.json` 为 PASS（第 13 节）；
+  5. `tiers.n_top`（手填）等于 `CAL/cal_decision.json` 的 `n_top`（校准规则的输出；N_top = 400 时还要 `with_400` 为真，即 tvr-cal400 之后又跑过 cal-decide；`pilot_tvr.n_top_problems`），并且每个 `data.*` 等于盘上的文件（sha，以及 F、K、剔除数；`pilot_tvr.data_problems`）；
+  6. 冒烟和训练作业另外要求 `cal_decision.futility` 为假，或者有用户决定后编排写下的 `CAL/futility_override.json`（第 7 节）。
+
+  作业开头的 guard 步骤（`pilot_tvr guard`）在作业里把第 2–6 条再查一遍；第 1 条在作业里由 `prereg_committed` 步骤对代码快照查（`vpd_snapshot_file`，快照里没有 git）。
 - 依据（按优先级）：
   1. 用户第三轮说明 `OUT/plan/ROUND3.md` 第 2–6 节（下称"简报"）；
-  2. `OUT/plan/DECISIONS.md` 的 G1–G3、G10（a–j）、G11（探针结果）、G12（采用 wave-2 契约），以及沿用自 WalkerBench 的 B3、B4、B5、B7、B9、B10、B16；
+  2. `OUT/plan/DECISIONS.md` 的 G1–G3、G10（a–j）、G11（探针结果）、G12（采用 wave-2 契约）、G13（wave-2 核查后的决定：确认检验、A4 的 ρ 规则、备用设计、任务持续性），以及沿用自 WalkerBench 的 B3、B4、B5、B7、B9、B10、B16；
   3. wave-2 接口契约 `OUT/scratch/orch/r3/wave2/contract/CONTRACT_wave2.md` 第 2 版（sha256 前缀 3fa721c558be，下称"契约"）；
   4. 探针作业 vpd-tvr-probe（pt-s9d5txr3）的 `OUT/jobs/tvr-probe-202611101501/out/summary.json`。
-- 写法：数字后面括号里是出处。没核实的标"未核实"，推断标"推断"。"我的建议"表示编排按 2026-11-10 的授权自定的设计选择（简报第 4 节）。
+- 写法：数字后面括号里是出处。没核实的标"未核实"，推断标"推断"。编排按 2026-11-10 的授权自定的设计选择（简报第 4 节）都注明 DECISIONS 的条目（G10、G12、G13）。
 - 文中路径的简写：
   - `OUT` = `/mnt/umm/users/yinbaiqiao/eval_external_assets/vpd`；
   - `WT` = `/mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd`（worktree；作业从 `RUN/code` 快照跑，DECISIONS G1）；
@@ -36,10 +42,11 @@
 | **G2** 格式 | 约束解码下格式全对 | 每个起点的每次 c 臂和 blind 臂评测：100% 回复 `re.fullmatch` 正则，没有日志的题为 0 | 先按 G0 查实现；不是实现问题就不进确认轮，交用户 |
 | **G3** 没饱和 | 最高档没有贴近专家 | 每个起点最高档 c 臂成功率 **≤ 80%**（≤ 400/500），点估计 | 判为"已饱和"，**不自动下移档位**，交用户 |
 | **A3** 用到了图（只报告） | 给图比不给图好 | 同一适配器、同 500 题：最高档 c 臂对 blind 臂，精确双侧二项检验；b > c 且 p < 0.05 记为"给图更好" | 只报告，不卡闸门（简报第 2 节 A3："E3VS 和 TVR 只报告"） |
-| **A4** 有量程 | 登记效应量下功效够 | G0–G3 都过以后才跑：`power_sim`，两个对比在 sigma_used 下，8 个百分点时 Holm 功效 ≥ 0.80，且模拟一类错误 ≤ 0.06 | "功效不够"，不进确认轮，交用户 |
+| **A4** 有量程 | 登记效应量下功效够 | G0–G3 都过以后才跑：`power_sim`（终点层面的种子感知整组 t 检验；模型含任务持续性 λ_used），在 σ_used、λ_used、两档种子偏移相关 ρ = 0.5 下，两个对比 8 个百分点时 Holm 功效 ≥ 0.80，且 ρ = 0 和 ρ = 1 下模拟的族错误率都 ≤ 0.06 | "功效不够"（`power_insufficient`），不进确认轮，交用户。加了任务持续性以后这个结果很可能出现（第 12 节第 7 条） |
 
 其他规则：
-- 试点用种子 **1001**（同时管数据顺序和训练）。确认轮用种子 1、2、3。另有 Q3B 的种子重复（seed 1002，0W + 100 档），只用来估种子方差（附 A：O4）。
+- 试点用种子 **1001**（同时管数据顺序和训练）。确认轮用种子 1、2、3。另有 Q3B 的种子重复（seed 1002，0W + 100 档），只用来估种子方差和任务持续性 λ（附 A：O4、O25）。
+- A4 的功效模型含任务持续性 λ（同一个起点对同一道题，不同种子往往同样会或同样不会；第 12 节第 7 条）。按合成 p 的核对，σ_used = 0.03 时 λ 只要大于约 0.02，Q3S − E2 的功效就低于 0.80，A4 判 `power_insufficient`，交用户定（推断）。这是登记时就说明的可能结果，不是闸门出错。λ̂ 的标准差约 0.1（第 12 节第 7 条），所以 λ 接近 0 时 A4 的结果主要由估计噪声决定：真 λ = 0 时 λ̂ > 0.02 的概率约 0.4（正态近似），λ_used 因为截在 0 平均约 0.04（推断，review stats）。
 - 试点数据不进确认分析（pilot data are excluded from the confirmatory analysis）。唯一的例外是第 12、13 节的功效模拟：它用试点的逐题成功率**决定要不要上确认轮**，不当作证据。
 - 试点三个起点的数字只列绝对值，不算差，不拿来挑任务（简报第 3 节"调配方和比较起点要分开"）。
 - 校准（只用 Q3B、只在 dev200 上）之后有一道**无望停止**：Q3B 最高档 dev200 c 臂的 Wilson 下界 ≤ dev200 的盲下限时，不准备冒烟和训练，先问用户（第 7、13 节；附 A：O21）。
@@ -131,6 +138,7 @@
  },
  "power": {
   "alpha": 0.05,
+  "backend": "numpy",
   "deltas": [
    0.05,
    0.08,
@@ -182,6 +190,19 @@
    ]
   },
   "effect_model": "realized SR shift delta per tier, mapped to a pre-clip shift by calibrate_shift",
+  "fallback": {
+   "rule": "if est_high > 100 GPU-h: fallback iff fallback_pass, else stop and ask",
+   "seeds": {
+    "100": [
+     1,
+     2
+    ],
+    "TOP": [
+     1,
+     2
+    ]
+   }
+  },
   "holm": true,
   "n_sims": 2000,
   "outcome": {
@@ -192,10 +213,24 @@
    "support": "Holm-rejected with the treated start better"
   },
   "p_source": "per task and tier: mean over the three pilot starts' primary-arm outcomes",
+  "persistence": {
+   "check_reps": 400,
+   "estimator": "D = mean_i (y1_i - y2_i)^2; kappa = E[|r1 - r2| | dbar, S] under r1 - r2 ~ N(0, 2 sigma_used^2), dbar ~ N(r1 - r2, S) (dbar, S, sigma_used as seed_sd): b = 2 sigma_used^2 / (2 sigma_used^2 + S), a = b dbar, v = b S, kappa = sqrt(v) sqrt(2 / pi) exp(-a^2 / (2 v)) + a (1 - 2 Phi(-a / sqrt(v))); m2 = E[(r1 - r2)^2 | dbar, S] = a^2 + v; l_i = (y1_i + y2_i) / 2, L = mean_i l_i; y_a, y_b = the other two pilot starts' rows; C = covariance over tasks (ddof 1); V = the delete-one-scene jackknife (G V - (G - 1) mean_g V_-g) of C(l, y_a) C(l, y_b) / C(y_a, y_b); B = L (1 - L) - V; R = 2 B + m2 / 2; lambda_hat = (R - D) / (R - kappa)",
+   "range": [
+    0.0,
+    1.0
+   ],
+   "rule": "lambda_used = clip(lambda_hat, range); lambda_hat undefined (C(y_a, y_b) <= 0 in the full or a delete-one-scene sample, or R <= kappa) or replicate missing -> range[1]",
+   "sensitivity": [
+    0.0,
+    0.8
+   ],
+   "source": "the seed replicate (tiers.replicate: seed 1001 vs its replicate seed, same start, replicate tier, c arm, same tasks); the other pilot starts' c-arm outcomes at that tier (seed 1001) only through covariances over tasks, for the spread of the task pattern at the replicate start's scale (one-factor model: every start its own mean and scale; lambda_hat is invariant to start mean SRs; no between-start difference is computed)"
+  },
   "power_counts": "Holm-rejected AND treated better, other contrast at effect 0",
   "primary_delta": 0.08,
   "seed": 0,
-  "seed_model": "realized-scale shift r ~ N(0, sigma^2) per (start, tier, seed), mapped by calibrate_shift",
+  "seed_model": "realized-scale shift r_SsT = sigma * (sqrt(rho) z_Ss + sqrt(1 - rho) z_SsT), z iid N(0, 1), per (start, seed, tier); rho = tier_corr (same seed id across tiers); mapped by calibrate_shift; y = 1[W < clip(p_i(T) + c, 0, 1)], W = V_Si (one uniform per start and task, shared by its seeds and both tiers) with probability sqrt(lambda), else a fresh uniform; lambda = persistence lambda_used",
   "seed_sd": {
    "a_priori": 0.03,
    "estimator": "e_i = y1_i - y2_i; d = mean e; S = sum (e_i - d)^2 / (n (n - 1)); sigma_hat = sqrt(max(0, (d^2 - S) / 2)); sigma_used = max(0.03, sigma_hat)",
@@ -205,8 +240,19 @@
    ]
   },
   "target_power": 0.8,
-  "test": "seed_aware_cluster_t",
-  "test_def": "D = mean_i d_i (per-task endpoint differences); V = CR1 scene-cluster var of mean(d) + k_contrast * sum_T w_T^2 * sigma2_hat / n_seeds_T; sigma2_hat = max(0, mean over (start, tier) cells of [var_s(SR_s) - mean_i var_s(y_si) / n]) (ddof 1); t reference, df = n_cells * (n_seeds - 1); two-sided; k = sum of squared contrast coefficients (2 for Q3S-E2, 1.5 for Q3RD-mean(QRL))",
+  "test": "seed_aware_endpoint_t",
+  "test_def": "D = mean_i d_i (per-task endpoint differences; e_Si = sum_T w_T mean_s y_SsTi, seeds paired across tiers); V = CR1 scene-cluster var of mean(d) + k_contrast * sigma2_E_hat / n_seeds; sigma2_E_hat = max(0, mean over starts of [var_s(E_s) - mean_i var_s(e_si) / n]) (ddof 1; e_si = sum_T w_T y_sTi, E_s = mean_i e_si); t reference, df = n_starts * (n_seeds - 1) (12; fallback 6); two-sided; k = sum of squared contrast coefficients (2 for Q3S-E2, 1.5 for Q3RD-mean(QRL))",
+  "tier_corr": {
+   "power": 0.5,
+   "reported": [
+    0.0,
+    1.0
+   ],
+   "type1": [
+    0.0,
+    1.0
+   ]
+  },
   "type1_max": 0.06
  },
  "protocol": {
@@ -417,7 +463,7 @@
 | `public.hf_revision` | `null`，未核实；允许保持 `null`（`pilot_cfg.OPTIONAL_NONE`） | — | 第 2 节 |
 | `protocol.chat_template_kwargs` | `null`，**按设计**：我们不发送 chat_template_kwargs（`OPTIONAL_NONE`） | — | 第 9 节 |
 
-`render.*` 的其余各项已在探针之后填好（第 3 节）。`data.*` 填写时要用 `sha256sum` 在登录节点复核文件，再提交。
+`render.*` 的其余各项已在探针之后填好（第 3 节）。`data.*` 填写时要用 `sha256sum` 在登录节点复核文件，再提交。13 个 `data.*` 在数据作业之后**一次提交**填完；校准作业 tvr-cal、tvr-cal400 要求全部 13 个都已填（`pilot_cfg.REQUIRED`；G10(a) 要求 K 和剔除名单在任何训练之前登记，而校准就要训 Q3B）。
 
 ---
 
@@ -614,7 +660,7 @@
   - `N_top` = **ALL**，如果 Q3B 的 ALL 档 dev200 成功率 ≤ 70%（`tiers.all_dev_sr_max` = 0.70；**等于 0.70 时取 ALL**）；否则 N_top = **400**，并且另跑校准作业 tvr-cal400（训 400 档、在 dev200 上评）；
   - 结果写进 `CAL/cal_decision.json`，编排把 `tiers.n_top` 填进第 0.1 节：**待填：校准之后**。
   - 校准的其他数字**都不用来改配方**。只有两样用于工程：(1) `render.eval_envs` 可以在冻结前按 Q3B 的测速确认或改（例如带 vLLM 的总速率低于 4 步/秒时）；(2) 训练和评测作业的 est_high 按校准的 Q3B 实测推出（第 16 节）。
-  - 校准同时是机制排查：raw Q3B 的 c、blind 臂在 smoke4 上只跑机制（不出成功率），第一次以 root 起 max_model_len 32768 / max_images 96 的 vLLM 服务；起不来就按登记的备用值 128000 重试一次，并在冻结前记第 17 节（附 A：O9）。
+  - 校准同时是机制排查：raw Q3B 的 c、blind 臂在 smoke4 上只跑机制（不出成功率），第一次以 root 起 max_model_len 32768 / max_images 96 的 vLLM 服务；起不来就按登记的备用值 128000 重试一次，并在冻结前记第 17 节（附 A：O9）。只有**这一次**尝试里服务确实没起来（run_tvr 退出码 1、这次新写了 `<前缀>__server_error.json`、没有一个臂出结果）才换备用值；拒绝（退出码 2）、超时、TERM 或 THOR 失败都不换。备用值的那次尝试本身没成功（没写下 `CAL/shake/fallback_used.json`）时，校准作业重跑会先把那次尝试留下的 c、blind 臂目录和第一次的 server_error 副本改名为 `<名>.prev-<UTC>`，再从冻结的 max_model_len 起、按同一条规则重新判（`vpd/jobs/tvr_cal.sh` 的 shake）。
 - **无望停止**（附 A：O21）：`cal_decision.futility` = Q3B 最高档（ALL；N_top = 400 时在 cal400 之后按 400 档重判）dev200 c 臂的 Wilson 95% 下界 ≤ dev200 的盲下限 F（`floors_dev200.json`）。为真时编排不准备冒烟和训练作业，报告并问用户；`pilot_tvr` 只有在用户决定后由编排写下 `CAL/futility_override.json` 时才放行。这一步只看 Q3B、和起点无关，符合分离规则。
 - 0 档：试点**不跑** raw 评测（附 A：O11）；曲线的 0 点是 0W。
 
@@ -711,7 +757,7 @@ success = stopped and is_exact(final_pose, target)
 | 3 | -top | N_top 档 | c | **G1、G3、A3、A4**；G0、G2 |
 | 4 | -top | N_top 档 | u | 次要：解析有效率（只报告）；G0 |
 | 5 | -top | N_top 档 | blind | A3（只报告）；G2 |
-| 6（只 Q3B） | -low | 100 档 seed 1002（100s1002） | c | 种子重复：只用来估 sigma（第 12 节）；G0 |
+| 6（只 Q3B） | -low | 100 档 seed 1002（100s1002） | c | 种子重复：只用来估 σ 和任务持续性 λ（第 12 节第 5、7 条），结果只进 A4；G0、G2 |
 
 - 评测集：eval.json 全部 500 题（DECISIONS G3(f)、G10(h)），不加 `--limit`。
 - 每个评测作业开头先跑渲染金丝雀（sft2 重放 + `render_parity`，对照数据作业的重放），不过就不跑这个作业的评测（附 A：O22）。
@@ -720,7 +766,7 @@ success = stopped and is_exact(final_pose, target)
 
 ### 9.5 可复现性说明
 
-逐题结果只能复现到两种噪声以内：(1) vLLM 服务的非确定性（E 个并发的贪心序列不是 batch-invariant 的）；(2) 渲染的非确定性（第 3.2 节）。断点续跑的评测按原样接受。种子重复估出的 sigma 也包含这部分服务噪声（契约 8.4，E-N2）。
+逐题结果只能复现到两种噪声以内：(1) vLLM 服务的非确定性（E 个并发的贪心序列不是 batch-invariant 的）；(2) 渲染的非确定性（第 3.2 节）。断点续跑的评测按原样接受。种子重复估出的 sigma 也包含这部分服务噪声（契约 8.4，E-N2）；估出的任务持续性 λ 也一样（这部分噪声让两个种子的逐题结果更不一致，λ 偏低一点；确认轮的种子之间同样有这部分噪声，推断）。
 
 ---
 
@@ -760,45 +806,81 @@ success = stopped and is_exact(final_pose, target)
    - 例（critic 手算）：下限或 0W 为 1/500 时，要 ≥ 3/500 才能过（3/500 的下界 0.00204，2/500 的是 0.0011）；为 0/500 时 1/500 就够。
 2. **A3 的配对精确检验**：同一适配器、同 500 题，b = 只有给图时成功的题数，c = 只有不给图时成功的题数；p = min(1, 2·P(X ≤ min(b, c)))，X ~ Bin(b + c, 1/2)；b + c = 0 时 p = 1。"给图更好" = b > c 且 p < 0.05。例：c = 0 要 b ≥ 6，c = 1 要 b ≥ 8，c = 2 要 b ≥ 10（prereg_confirm 的 stats_plan.py）。只报告。
 3. **按场景整组的 bootstrap**（`bootstrap`）：把这次运行的场景有放回地重抽 10,000 次（random.Random(0)），SR = 抽中场景的成功数 / 题数，95% 百分位区间；**只作描述**。
-4. **种子感知的场景整组 t 检验**（`power.test` = seed_aware_cluster_t；`vpd/common/power_sim.py` 的 `seed_aware_test`；A4 和确认轮共用这一个检验）：
-   - 每个起点每道题的终点 = Σ_T w_T · mean_s y_{s,i}（档 T ∈ {100, TOP}，权重各 0.5，s 为种子）；d_i = 处理起点的终点 − 对照起点（或两个对照的平均）的终点；D = mean_i d_i。
-   - V = mean(d) 的 CR1 场景整组方差（G/(G−1) · Σ_g(Σ_{i∈g}(d_i − D))² / n²，eval500 有 80 个场景）**加上**种子分量 k · Σ_T w_T² · σ̂² / n_seeds_T。k = 对比系数的平方和：Q3S − E2 是 2，Q3RD − mean(QRL-s1, QRL-s2) 是 1.5。
-   - σ̂² = max(0, 各 (起点, 档) 格的 [var_s(SR_s) − mean_i var_s(y_si) / n] 的平均)（ddof 1），df = Σ_格 (n_seeds − 1)（6 个起点 × 2 档 × 3 个种子时为 24）；σ̂² 从（模拟的或真实的）种子里估，从不用真实的 sigma。
-   - t = D / √V，参照 t 分布、自由度 df，双侧；两个对比做 Holm（α = 0.05，依次和 0.025、0.05 比）；95% 区间 = D ± t_{0.975, df} √V。
+4. **终点层面的种子感知场景整组 t 检验**（`power.test` = seed_aware_endpoint_t；`vpd/common/power_sim.py` 的 `seed_aware_endpoint_test` 和 `seed_var_endpoint`；A4 和确认轮共用这一个检验；DECISIONS G13）：
+   - 每个起点 S、种子 s、每道题 i：e_{S,s,i} = Σ_T w_T · y_{S,s,T,i}（档 T ∈ {100, TOP}，权重各 0.5；两档按同一个种子配对）；起点的终点 e_{S,i} = mean_s e_{S,s,i}；d_i = 处理起点的终点 − 对照起点（或两个对照的平均）的终点；D = mean_i d_i。
+   - V = mean(d) 的 CR1 场景整组方差（G/(G−1) · Σ_g(Σ_{i∈g}(d_i − D))² / n²，eval500 有 80 个场景）**加上**种子分量 k · σ̂_E² / n_s。k = 对比系数的平方和：Q3S − E2 是 2，Q3RD − mean(QRL-s1, QRL-s2) 是 1.5。
+   - σ̂_E² = max(0, 各起点 [var_s(E_{S,s}) − mean_i var_s(e_{S,s,i}) / n] 的平均)（ddof 1；E_{S,s} = mean_i e_{S,s,i}），df = 起点数 × (n_s − 1) = 12（6 个起点 × 3 个配对种子；备用设计 6）；σ̂_E² 从（模拟的或真实的）种子里估，从不用真实的 sigma。
+   - t = D / √V，参照 t 分布、自由度 df，双侧；两个对比做 Holm（α = 0.05，依次和 0.025、0.05 比）；95% 区间 = D ± t_{0.975, df} √V。自由度不用 Satterthwaite（核对里族错误率 0.05–0.065，偏松）。
+   - 每个 (起点, 种子, 档) 的 500 题 c 臂评测都必须在；缺了就补跑，不插补。
    - 为什么要加种子分量（crit-protocol 的必改项，arch-rev 复核）：一个起点在某档某种子上整体偏高或偏低，对所有题都一样，不会出现在按题的残差里；只用场景整组方差的配对检验会严重偏松。arch-rev 的复现（seedaware_sim.py，1,000 次，5 个起点的合成 p）：朴素检验的一类错误在 σ = 0.03 时 0.44–0.46、σ = 0.05 时 0.60；种子感知检验用正态参照 0.059–0.070，用 t 参照（那里 df 20）0.045–0.058；σ̂ 的平均 0.0292（真值 0.03）和 0.0492（真值 0.05）。
-   - **登记的局限（种子在两档之间独立）**：种子分量 k · Σ_T w_T² · σ̂² / n_seeds_T 和模拟的 `power.seed_model` 都假设同一个 (起点, 种子) 在 100 档和 TOP 档上的偏移互相独立。确认轮里两档共用同一个种子的 0W_s 初始化、数据顺序和训练种子（第 15 节第 3 条），两档的偏移很可能正相关；相关系数为 ρ 时，一个起点终点的种子方差是 σ²/n_s · (w₁² + w₂² + 2ρ·w₁w₂)，ρ = 1 时是登记值的 2 倍，名义 5% 的检验会偏松。A4 的一类错误模拟用的是同一个假设，所以测不出这一点。本包的核对（推断：合成 p，同下一条的登记设计，500 题 80 个场景，每格 2,000 次）：ρ = 1 时登记检验的族错误率 σ = 0.03 时 0.17、σ = 0.05 时 0.19（单个对比 0.13–0.16）；终点层面变体（见下）在 ρ = 0 和 ρ = 1 下都是 0.044–0.047。功效（8 个百分点，Q3S − E2 / Q3RD − mean(QRL)）：σ = 0.03、ρ = 0 时终点变体 0.91 / 0.97（登记检验 0.94 / 0.98）；ρ = 1 时终点变体 0.69 / 0.81，这是 ρ = 1 下的真实功效（登记检验那时报的 0.89 / 0.95 因为偏松而不可信）。因此 `POWER.json["sensitivity_tier_corr"]` **只报告、不卡闸门**：在 σ_used、主设计下，把两档偏移设成完全相关（`tier_corr` = 1）重新模拟登记检验的一类错误和 8 个百分点时的功效；同时报一个**未登记**的终点层面变体（`seed_aware_endpoint_t`：每个起点每个种子先算终点 E_s = Σ_T w_T · SR_{s,T}，σ̂_E² = max(0, 各起点 [var_s(E_s) − mean_i var_s(e_si) / n] 的平均)，V_seed = k · σ̂_E² / n_s，df = 起点数 × (n_s − 1) = 12；它自动包含两档之间的协方差）在 ρ = 0 和 ρ = 1 下的同样两个数。冻结前由编排决定：保留登记方法（并接受这条局限），还是改用终点层面的估计（要改契约 8.3 和 `power.test_def`、`power.seed_model`）。**未核实**：真实的两档相关有多大，试点里测不出来（试点每档只有 Q3B 的一个种子重复）。
-   - 本包的核对（推断：合成 p，不是试点数据；`power_sim` 在登录节点 1 核跑，2,000 次）：登记的设计、500 题 80 个场景、合成 p（平均 0.30 / 0.38）：σ = 0.03 时种子感知检验的族错误率 0.045，8 个百分点时功效 0.94（Q3S − E2）/ 0.98（Q3RD − mean(QRL)）；σ = 0.05 时 0.58 / 0.73。玩具设计（5 个起点）上朴素检验的族错误率在 σ = 0.03 时 0.36、σ = 0.05 时 0.62。
-5. **种子 SD**（`power.seed_sd`；附 A：O4）：Q3B 100 档 c 臂 seed 1001 对 seed 1002，同 500 题：e_i = y1_i − y2_i，d = mean e，S = Σ(e_i − d)² / (n(n−1))，σ̂ = √max(0, (d² − S)/2)（实现 SR 尺度），**σ_used = max(0.03, σ̂)**。这是同一个起点两个种子之间的差，不是起点之间的差。种子重复是 O4 规定必跑的：`P/Q3B/evals/pilot__Q3B__100s1002__c/per_task.jsonl` 不在、或者它的题目和三个起点汇总的题目不一致时，`power_sim` 拒绝（退出码 2）；只有显式给 `--allow-no-replicate`（`run_tvr(allow_no_replicate=True)`）才用 σ_used = 0.03，这一选择写进 POWER.json（`registered.allow_no_replicate`、`sigma.replicate_missing`），并且算第 17 节的偏差。
+   - **为什么用终点层面**（wave-2 核查 stats:a4；DECISIONS G13）：确认轮里同一个 (起点, 种子) 的 100 档和 TOP 档共用 0W_s 初始化、数据顺序和训练种子（第 15 节第 3 条），两档的偏移很可能正相关。原来登记的按 (起点, 档) 格估种子方差的版本（seed_aware_cluster_t，df 24）假设两档独立：相关系数为 ρ 时一个起点终点的种子方差是 σ²/n_s · (w₁² + w₂² + 2ρ·w₁w₂)，ρ = 1 时是它假设值的 2 倍。核对（推断：合成 p，500 题 80 个场景，每格 2,000 次）：旧检验的族错误率在 ρ = 0 / 0.5 / 1 时是 0.044 / 0.111 / 0.174（σ = 0.03），σ = 0.05、ρ = 1 时 0.20；终点层面的检验在三个 ρ 和两个 σ 下都是 0.045–0.051，因为每个起点每个种子的终点里已经含了两档之间的协方差（`seed_var_endpoint` 的恒等式，`test_endpoint_identity`）。代价是 ρ = 0 时约 3 个百分点的功效（df 12 而不是 24）。旧检验作废，只留在 POWER.json 的 `sensitivity_superseded_test` 里（两个设计、ρ = 0 和 1，只报告，不卡闸门）。
+   - **未核实**：真实的两档相关有多大，试点里测不出来（试点每档只有 Q3B 的一个种子重复），所以 A4 的一类错误在 ρ = 0 和 ρ = 1 两端都判，功效在中间的 ρ = 0.5 判（第 6 条）。
+   - 本包的核对（推断：合成 p，不是试点数据；`power_sim` 在登录节点 1 核跑，每格 2,000 次，λ = 0）：主设计、σ = 0.03 时终点检验的族错误率 0.045（ρ = 0）/ 0.044（ρ = 1）；8 个百分点时功效 Q3S − E2 / Q3RD − mean(QRL) = 0.91 / 0.97（ρ = 0）、0.81 / 0.90（ρ = 0.5）、0.69 / 0.81（ρ = 1）；σ = 0.05、ρ = 0.5 时约 0.39 / 0.51（stats:a4）。玩具设计（5 个起点）上朴素检验的族错误率在 σ = 0.03 时 0.36、σ = 0.05 时 0.62。
+5. **种子 SD**（`power.seed_sd`；附 A：O4）：Q3B 100 档 c 臂 seed 1001 对 seed 1002，同 500 题：e_i = y1_i − y2_i，d = mean e，S = Σ(e_i − d)² / (n(n−1))，σ̂ = √max(0, (d² − S)/2)（实现 SR 尺度），**σ_used = max(0.03, σ̂)**。这是同一个起点两个种子之间的差，不是起点之间的差。种子重复是 O4 规定必跑的：`P/Q3B/evals/pilot__Q3B__100s1002__c/per_task.jsonl` 不在、或者它的题目和三个起点汇总的题目不一致时，`power_sim` 拒绝（退出码 2）；只有显式给 `--allow-no-replicate`（`run_tvr(allow_no_replicate=True)`）才用 σ_used = 0.03，这时第 7 条的 λ_used 取登记范围的上端 1（保守），这一选择写进 POWER.json（`registered.allow_no_replicate`、`sigma.replicate_missing`、`persistence.replicate_missing`）。**`gate_tvr` 从不读这样的 POWER.json**：这三个字段任一表示没有种子重复时 A4 记 pending，决定是 `incomplete`（第 13 节 A4）；缺种子重复本来就让 G0 第 1 条判"缺评测"。没有种子重复时还要不要判 A4、怎么判，由用户定，记第 17 节。同一个种子重复也是第 7 条任务持续性 λ 的数据来源（种子之间的不一致率）。
 6. **功效模拟**（A4；`power_sim tvr`，契约 8.3）：
    - p_i(T) = 三个试点起点在档 T（100、N_top）上主臂结果的平均（按起点取平均，不算起点差；`power.p_source`）；场景是整组单位。
-   - 每次模拟里，对 design.starts 的 6 个起点和每个 (档 T, 种子 s)：抽实现 SR 尺度的种子偏移 r ~ N(0, σ²)，用 calibrate_shift（[−1, 1] 上 2,001 个格点的 r(c) = mean(clip(p + c, 0, 1)) − mean(p) 的线性插值反函数）换成截断前的偏移 c；被检验对比的处理起点用 calibrate_shift(r + δ)（每档期望的 SR 增益都是 δ）；y_i ~ Bernoulli(clip(p_i(T) + c, 0, 1))。
-   - 网格：δ ∈ {0, 0.05, 0.08, 0.10}（`power.deltas`；0 = 模拟一类错误），σ ∈ {σ_used, 0.03, 0.05}（0.05 是敏感性行，只报告），每格 2,000 次，种子 0；同一格的各块共用随机数（common random numbers）。
-   - **功效** = 在 Holm 之后被拒绝、**并且处理起点更好**的模拟所占的比例，另一个对比的效应设为 0（保守；`power.power_counts`）。
-   - **一类错误**（门槛 `power.type1_max` = 0.06，2,000 次时蒙特卡洛标准误约 0.005）= 两个对比效应都为 0 时，Holm 至少拒绝一个（任一方向）的模拟所占比例（族错误率；我的建议：比单个对比的拒绝率更严）。各对比不校正的拒绝率也报。
-   - 另算登记的备用设计（最高档只用种子 1–2，第 15 节），写在同一个 POWER.json 里（`fallback_pass`）。
-   - 输出 `P/POWER.json`：输入文件的 sha256、p 的汇总（只按档，不按起点）、σ（σ̂、σ_used）、全表、判定，以及第 4 条的 `sensitivity_tier_corr`（只报告）。`inputs.pilot_cfg_json_sha256` = sha256(pilot_cfg.as_json(所用 cfg))，`inputs.pilot_cfg_py_sha256` = pilot_cfg.py 文件的 sha256（GATE.json 的 `pilot_cfg_sha256` 是后者）。
-   - 运行方式（登录节点，1 核；用户的登录节点规则）：`env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 nice -n 19 PY_EVAL -m vpd.common.power_sim tvr --pilot-root P --out P/POWER.json`。模块被导入时也把这四个变量默认设成 1（调用方已设的不改），numpy 路径不调用 BLAS（整组求和用 reduceat），所以在 gate_tvr 里进程内调用也不会开线程池。
+   - 每次模拟里，对 design.starts 的 6 个起点和每个 (种子 s, 档 T)：抽实现 SR 尺度的种子偏移 r_{S,s,T} = σ(√ρ · z_{S,s} + √(1 − ρ) · z_{S,s,T})（z 独立标准正态；z_{S,s} 是同一个种子两档共用的部分，ρ = 两档偏移的相关，`power.tier_corr`；`power.seed_model`），用 calibrate_shift（[−1, 1] 上 2,001 个格点的 r(c) = mean(clip(p + c, 0, 1)) − mean(p) 的线性插值反函数）换成截断前的偏移 c；被检验对比的处理起点用 calibrate_shift(r + δ)（每档期望的 SR 增益都是 δ）；y_i = 1[W_i < clip(p_i(T) + c, 0, 1)]，W_i 按第 7 条的任务持续性抽（λ = 0 时就是独立的 Bernoulli，和原来逐位相同）。
+   - 网格（每个设计、每个 σ ∈ {σ_used, 0.03, 0.05}，都在 λ_used 下；POWER.json 每行的 `role`）：δ = 0 在 ρ = 0 和 ρ = 1（`type1`）；δ ∈ {0.05, 0.08, 0.10}（`power.deltas`）在 ρ = 0.5（`power`）；δ = 0.08 再在 ρ = 0 和 ρ = 1 各算一次（`reported`，只报告）。另有任务持续性的敏感性行（`sensitivity_persistence`：σ_used，λ ∈ {0, 0.8}，δ = 0 在 ρ = 0、1，δ = 0.08 在 ρ = 0.5；只报告）。0.05 的 σ 行也只报告。每格 2,000 次，种子 0，后端 numpy（`power.backend`）；同一格的各块共用随机数（common random numbers）。后端也要登记：`power_sim` 的 python 和 numpy 两个后端抽的随机数流不同，同一个种子只有和后端一起才确定结果（玩具设计上同种子两个后端的功效 0.325 / 0.433 对 0.392 / 0.342，review tvrjobs `rv_check.json`），而 A4 本身在 1 个蒙特卡洛标准误附近，换后端就可能翻转判定。`run_tvr` 默认用 `power.backend`，`--backend` 和 `--n-sims` 一样只供测试，实际用的值记进 `registered.backend`；numpy 导入不了时 `run_tvr` 拒绝（ValueError），不悄悄换成 python。每个功效另报蒙特卡洛标准误 √(p(1 − p)/2000)（`mc_se_power`；功效 0.8 附近约 0.009，所以 0.80 上下一个标准误以内的判定是靠运气的，阈值照登记不变）。
+   - **功效** = 在 Holm 之后被拒绝、**并且处理起点更好**的模拟所占的比例，另一个对比的效应设为 0（保守；`power.power_counts`）。判的是 σ_used、λ_used、ρ = 0.5、δ = 0.08 那一格；ρ = 0 和 ρ = 1 的功效只报告。
+   - **一类错误**（门槛 `power.type1_max` = 0.06，2,000 次时蒙特卡洛标准误约 0.005）= 两个对比效应都为 0 时，Holm 至少拒绝一个（任一方向）的模拟所占比例（族错误率，比单个对比的拒绝率更严；定义由 DECISIONS G13 确认）。**判的值 = σ_used、λ_used 下 ρ = 0 和 ρ = 1 两格里较大的那个**。各对比不校正的拒绝率也报。
+   - **为什么功效在 ρ = 0.5 判**（stats:a4）：ρ = 1 时 A4 不可能过（σ 的下限 0.03 上功效已是 0.69）；ρ = 0 是乐观的一端，忽略了促成这次修改的共用 0W_s；终点检验的功效对 ρ 近乎线性（λ = 0 时 0.905、0.864、0.813、0.747、0.694，ρ = 0、0.25、0.5、0.75、1，推断），所以 ρ = 0.5 大约是 ρ 在 [0, 1] 上均匀时的平均功效。
+   - **登记的备用设计**（第 15 节第 9 条）= 主设计，但两档都只用种子 1–2（`power.fallback.seeds`；两档配对，所以同一个检验能用，df 6），同样的网格和判定规则，表名 `fallback_seeds_1_2`，判定写进 `fallback_pass`。
+   - 输出 `P/POWER.json`（schema `vpd.power_sim.tvr/2`）：输入文件的 sha256、p 的汇总（只按档，不按起点）、σ（σ̂、σ_used）、λ（第 7 条，`persistence`）、全表（`tables.main`、`tables.fallback_seeds_1_2`，每行带 `tier_corr`、`persistence`、`role`、`mc_se_power`）、判定（`verdicts.<设计>`：`type1`、`type1_by_rho`、`power_at_primary`、`power_tier_corr`、`power_by_rho`、`mc_se_power_at_primary`、`pass`），以及 `sensitivity_superseded_test`（只报告）。`registered` 抄录所用的 `test`、`test_def`、`seed_model`、`tier_corr`、`fallback`、`persistence`、`n_sims_registered`、`n_sims_used`、`backend`（本次实际用的后端）、`allow_no_replicate`、`type1_definition`。`inputs.pilot_cfg_json_sha256` = sha256(pilot_cfg.as_json(所用 cfg))，`inputs.pilot_cfg_py_sha256` = pilot_cfg.py 文件的 sha256（GATE.json 的 `pilot_cfg_sha256` 是后者）。
+   - 运行方式（登录节点，1 核；用户的登录节点规则）：`env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 nice -n 19 PY_EVAL -m vpd.common.power_sim tvr --pilot-root P --out P/POWER.json`。模块被导入时也把这四个变量默认设成 1（调用方已设的不改），numpy 路径不调用 BLAS（整组求和用 reduceat），所以在 gate_tvr 里进程内调用也不会开线程池。合成的 500 题根上整张表（两个设计、2,000 次，含 400 次的 λ 核对）在 1 核上约 40 秒。
+7. **任务持续性 λ**（`power.persistence`；`power_sim` 的 `persistence_hat`、`shift_gap`、`shift_m2`、`persistence_check`；附 A：O25；wave-2 核查 stats:a4 的 should 项；估计在 wave-2b 核查后改过，见下）：
+   - 问题：如果第 6 条的模型让每个 (起点, 种子, 档, 题) 的结果都在汇总的 p_i 附近独立抽，就等于假设"同一个起点不同种子在同一道题上的结果，和不同起点之间一样不相关"。微调后的起点往往对某道题所有种子都会、或者都不会；这部分持续的差在 3 个种子 × 2 档上平均不掉，全进 CR1，所以不加这一项时 A4 的功效偏乐观（检验本身仍然有效，CR1 量的是真实的 Var(d_i)）。
+   - 模型（`power.seed_model`）：每个起点每道题一个均匀数 V_{S,i}，这个起点的所有种子和**两档**共用（只是比"两档各自独立的持续性"保守；同一个种子的两档之间的持续性可能比不同种子之间更强，见下面未核实的第 4 条）；每个结果 y = 1[W < q]，q = clip(p_i(T) + c, 0, 1)，W 以 √λ 的概率取 V_{S,i}，否则取新的均匀数。于是 y 的边际仍是 Bernoulli(q)，同一起点同一道题的两个结果（不同种子或不同档，q 相同）的协方差是 λ·q(1 − q)：λ 就是起点内一道题结果的组内相关。不同起点之间独立。λ = 0 时和原来的抽法逐位相同。
+   - 估计（Q3B 种子重复，同 500 题，y1 = seed 1001、y2 = seed 1002；另外两个试点起点 Q3S、E2 的 100 档 c 臂结果 y_a、y_b **只通过逐题结果的协方差**进来；不算、不报任何起点之间的差，POWER.json 里没有按起点的数）：
+     - D = mean_i (y1_i − y2_i)²（两个种子逐题不一致的比例）；
+     - 参照：同一个起点两个**没有**持续性的种子在同样的水平和逐题难度分布下的不一致率。设 q_i 是 Q3B 在题 i 上的成功概率，B = mean_i q_i(1 − q_i) = L(1 − L) − V，L = mean_i l_i，l_i = (y1_i + y2_i)/2（这对种子自己的水平），V = var_i(q_i)；
+     - V 用单因子模型从协方差取（每个起点对同一个逐题难度模式有自己的均值和尺度，q_{S,i} = a_S + b_S·f_i）：C(l, y_a) = b·b_a·var(f)，C(y_a, y_b) = b_a·b_b·var(f)，所以 V = C(l, y_a)·C(l, y_b) / C(y_a, y_b)（C = 跨题的协方差，ddof 1）；再用按场景去一的 jackknife 去掉这个比值的偏差（V_jk = G·V − (G − 1)·mean_g V_{−g}，G = 80 个场景；不去时 λ = 0 处 λ̂ 偏约 −0.03）。各起点的均值（以及尺度）在这里约掉，所以 λ̂ 不随起点之间 SR 的差变；
+     - 模型里，给定这对种子实现的偏移 r1、r2（不截断时），E[D] = (1 − λ)·R + λ·|r1 − r2|，R = 2B + (r1 − r2)²/2（B 取这对种子的平均水平 L，所以没有 O(σ) 的项；两个偏移让所有题朝同一方向动，持续部分的不一致率正好是 |r1 − r2|）；
+     - κ = E[|r1 − r2| | d, S]（`shift_gap`）、m2 = E[(r1 − r2)² | d, S] = a² + v（`shift_m2`）：在登记的种子模型 r1 − r2 ~ N(0, 2σ_used²) 和 d | (r1 − r2) ~ N(r1 − r2, S) 下的后验，b = 2σ_used² / (2σ_used² + S)，a = b·d，v = b·S，κ = √v · √(2/π) · exp(−a²/(2v)) + a · (1 − 2Φ(−a/√v))（d、S、σ_used 同第 5 条）；R = 2B + m2/2；
+     - **λ̂ = (R − D) / (R − κ)**；**λ_used = clip(λ̂, 0, 1)**（`power.persistence.range`、`rule`）；C(y_a, y_b) ≤ 0（全样本或去掉任一场景后）或 R ≤ κ 时 λ 识别不了，取 1（保守）；种子重复缺失（只在 `--allow-no-replicate` 时允许）也取 1。
+     - 另报按场景整组的 delta 法标准误（`persistence.se`，只算题目抽样，偏小）。
+     - **为什么改**（wave-2b 核查 review stats，`identity.txt`、`maineffect*.json`）：wave 2 登记的估计用 H = m/(m − 1)·mean_i p_i(1 − p_i) 当参照（p_i = 三个起点的平均）。这个 H 恰好等于三对起点之间逐题不一致率平均的一半（恒等式，数值差 0.0），期望里还含三个起点 SR 的方差，而且 D 是在 Q3B 自己的水平上；所以它其实是"起点之间对起点之内"的估计，随起点之间的差变：Q3B 是最好的起点、差 5 个百分点时 λ̂ 偏约 −0.10（λ_used 偏低，功效被高估，A4 可能误过），Q3B 最差时偏 +0.06 到 +0.31。这违反了 G13 "A 类判据不看起点之间的差"的本意，冻结前改掉；新的估计仍然不算起点差，只在协方差里把各起点的均值约掉。
+   - 模拟核对（推断：`persistence_check`：数据按登记的模型抽，再走 run_tvr 的同一条估计路径；500 题 80 个场景，3 个试点起点，σ = 0.03；review stats 的同一种合成 p 的 100 档（三分之一的格点，偏向 0 和 1）、连续的 Beta(0.6, 1.4) p 和更居中的 Beta(2, 3) p）：
+     - 起点之间没有差时（每格 2,000 次）：λ = 0 / 0.3 / 0.6 / 0.9 的 λ̂ 平均偏差 −0.016 / −0.012 / −0.005 / −0.003（连续 p：−0.015 / −0.006 / −0.002 / −0.002；蒙特卡洛标准误 0.001–0.003），λ̂ 标准差 0.13 / 0.11 / 0.08 / 0.04（连续 p：0.11 / 0.10 / 0.07 / 0.04；wave 2 的估计 0.12 / 0.10 / 0.08 / 0.04）。偏差是比值估计剩下的二阶项，在标准差的 13% 以内；λ = 0 时 λ_used（截在 0）的平均 0.04。σ = 0.05 时偏差 −0.022 到 −0.008（连续 p：−0.017 到 −0.006），λ_used 的平均 0.04 / 0.28 / 0.59 / 0.89；那时 A4 本来就过不了（σ_used ≥ 0.05）。
+     - 起点之间有差时（`persistence_check(offsets=…)`，按实现 SR 尺度的偏移经 calibrate_shift 加到各起点，Q3B 最好、居中、最差，±5 和 ±10 个百分点，13 种组合 × 3 种 p，λ = 0 和 0.3，每格 1,000 次，同一组随机数）：新估计的 λ̂ 平均偏差都在 −0.025 到 +0.017 之间（λ = 0.3 时 λ_used 的偏差 −0.010 到 +0.017），wave 2 的估计在同样的数据上 −0.17 到 +0.31。代价是标准差大 5–45%（例如 Beta(2, 3) p 上 0.09 对 0.07，三分之一格点的 p、Q3B 居中 ±10 个百分点时 0.14 对 0.10）。
+     - 同一份固定数据上只让一个非重复起点多会 k 道题（随机把 k 道失败改成成功，review stats 的做法）时，新估计的变化是噪声（k = 10 / 25 / 50：+0.05 / +0.02 / −0.08，方向不定），wave 2 的估计一直往上（+0.01 / +0.07 / +0.12）。用同一组均匀数把 E2 的 100 档结果按更高的阈值取（加性的起点差，E2 多会约 6% 的题，2,000 题，Q3B 的两个文件不变；`test_run_tvr_lambda_ignores_a_better_start` 的构造），20 个种子上新估计的变化平均 −0.005、标准差 0.017，wave 2 的估计平均 +0.064（最小 +0.032）。
+     - 另一组同样的核对（wave 2，σ = 0.02–0.03）：κ 用 √max(0, d² − S) 时偏差 −0.001 到 −0.009，用 |d| 时 −0.005 到 +0.008；后验均值在 σ_used 等于真 σ 时最准，真 σ 小于 σ_used 时略偏高（保守），所以登记的是后验均值。λ̂ 的标准差约 0.1，对应功效约 ±0.03（推断）。run_tvr 每次也在试点自己的 p_i(100)、λ_used、σ_used 下跑 400 次这个核对（起点之间没有差），写进 `persistence.check`（只报告；从 p̂ 再模拟一次会让方差再缩一次，所以那里的标准差偏大）。
+     - 需要有逐题难度的差别：所有题难度几乎一样时（C(y_a, y_b) 接近 0）λ̂ 识别不了，取 1（保守）。TVR 的四类题难度差得很多（第 13 节 G3 的论文数字 82.4 / 68.8 / 27.2 / 24.8），预计不会碰到（推断）。
+   - **对 A4 的影响**（推断：合成 p，σ = 0.03，ρ = 0.5，每格 2,000 次；Q3S − E2 / Q3RD − mean(QRL)）：
+
+     | λ | 0 | 0.05 | 0.1 | 0.2 | 0.4 | 0.6 | 0.8 |
+     |---|---|---|---|---|---|---|---|
+     | 主设计功效 | 0.81 / 0.90 | 0.78 / 0.89 | 0.77 / 0.88 | 0.75 / 0.86 | 0.70 / 0.82 | 0.64 / 0.78 | 0.60 / 0.74 |
+     | 备用设计功效 | 0.50 / 0.64 | — | — | 0.45 / 0.58 | 0.41 / 0.53 | 0.39 / 0.50 | 0.35 / 0.45 |
+
+     族错误率随 λ 下降（主设计，ρ = 0 / ρ = 1：λ = 0 时 0.045 / 0.044，λ = 0.4 时 0.035 / 0.042，λ = 0.8 时 0.025 / 0.026），一类错误仍受控。原因（review stats `vdecomp.json`，零模拟 2,000 次）：V 仍然无偏（Var(D)/E[V] = 0.97–1.05，λ = 0 和 0.8、ρ = 0 和 1），但 CR1 在 V 里的份额随 λ 从 0.23 升到 0.54（ρ = 0）、从 0.13 升到 0.38（ρ = 1），V 的 Satterthwaite 自由度从约 20 升到 47（ρ = 1：16 到 29），而检验固定用 df 12（t 临界值 2.18，对 2.01–2.05）；所以有持续性时检验偏保守（族错误率约 0.03），少一点功效，一类错误仍然有效。不改规则。一个按模型抽的合成试点（真 λ = 0.5，σ = 0.03）上，run_tvr 估出 λ̂ = 0.47（scene 整组 SE 0.10；wave 2 的估计在同一份数据上是 0.56），主设计功效 0.74 / 0.86，判 `power_insufficient`。
+   - **说清楚**：按这个核对，σ_used = 0.03 时 λ̂ 只要大于约 0.02，Q3S − E2 在 ρ = 0.5 的功效就低于 0.80，A4 判 `power_insufficient`（第 13 节决策表：不进确认轮，交用户定）。λ̂ 的标准差约 0.11–0.13，所以真 λ 接近 0 时 A4 主要由估计噪声决定：真 λ = 0 时 λ̂ > 0.02 的概率约 0.4（正态近似），截在 0 让 λ_used 平均偏高约 0.04；λ_used = 0 时功效 0.81（种子 0）/ 0.80（种子 1），本身就在门槛上（review stats，推断）。真实的微调起点 λ 多半明显大于 0（未核实），所以加了这一项以后 A4 很可能过不了；这是功效模型变诚实的结果，不是闸门出错。到时候由用户定的方向（只列出来，推断）：更多种子（例如每个起点 5 个种子：λ = 0.4 时功效约 0.89 / 0.96，λ = 0 时 0.97 / 0.99，df 24；卡时约多 2/3，会超过第 15 节的 100 卡时规则）、更大的登记效应量、或者不把 TVR 当尺子。
+   - **未核实**：
+     1. λ 只从 Q3B 的 100 档估，假设其他起点、TOP 档和确认轮的起点持续性一样。
+     2. 单因子假设：各起点只在同一个逐题难度模式的均值和尺度上不同。均值和尺度的差（包括截断造成的压缩）上面核对过；超出这个模型的、起点特有的逐题偏向，Q3B 自己的那部分按定义就算持续性（λ̂ 照样把它算进去），但 Q3S 和 E2 共有、Q3B 没有的偏向会让 V 偏大、λ̂ 偏低（偏松），反过来偏高；大小未核实。
+     3. 模型把汇总的 p_i 当真值：p_i 是 3 个结果的平均，mean p_i(1 − p_i) 平均只有真实 Bernoulli 方差的 2/3，p_i 为 0 或 1 的题在模拟里没有方差，这是 `power.p_source` 原有的、偏乐观的一处，本轮没改（影响大小未核实）。
+     4. 同一个种子两档之间的持续性：模型让一个起点里任何两个结果（不同种子，或者同一个种子的 100 和 TOP）共用同一个 λ。种子重复（seed 1001 对 1002，各自的 0W）只量得到**不同种子之间**的持续性；确认轮里同一个种子的 100 和 TOP 适配器共用 0W_s 和数据顺序，逐题的一致可能更高，种子重复识别不了。按 review stats 的核对（`crosstier.json`：给同一个种子的两档另加一个共用的均匀数；2,000 次，σ = 0.03，ρ = 0.5），Q3S − E2 的功效偏乐观：不同种子之间 0.2、同种子两档之间 0.2 / 0.4 / 0.5 时 0.755 / 0.737 / 0.724；不同种子之间 0、同种子两档之间 0.3 / 0.6 时从 0.789 降到 0.773 / 0.745。也就是同种子两档多出 0.2–0.6 的持续性约损失 0.02–0.04 的功效；族错误率不受影响（0.037–0.047）。不改规则，也不加敏感性行。
+     5. 两个 QRL 起点：第 15 节第 5 条把 QRL-s1 和 QRL-s2 当作两个 RL 种子的重复，但模型给每个起点独立的 V。两个 QRL 起点共有持续的逐题偏向时（review stats `qrl.json`：第 6 个起点用第 5 个的 V），Q3RD − mean(QRL) 的功效从 0.854 降到 0.837（λ = 0.2）、0.809 到 0.780（0.4）、0.725 到 0.667（0.8），即偏乐观 0.02–0.06；现在起约束作用的是 Q3S − E2，所以不影响 A4 的判定；族错误率不变。
 
 ---
 
 ## 13. 闸门规则（契约 8.1）
 
-所有规则都和结果无关，由 `vpd/tvr/gate_tvr.py` 判定。它读：`P/<起点>/evals/pilot__<起点>__{0W, 100, N_top}__c`、`pilot__<起点>__<N_top>__u`、`pilot__<起点>__<N_top>__blind`（以及 `pilot__Q3B__100s1002__c`，只给功效用）；适配器的 meta.json；每次合并评测的 `P/<起点>/parity/merge_<档>.json`；`P/<起点>/canary/*/render_parity.json`；最新的 `smoke_verdict.json`（和 `SM/replay2/render_parity.json`）；demos 的 manifest、kin_check、dropped.json；`tiers/v1/manifest.json`；`floors_eval500.json`；pilot_cfg。写出 `P/GATE.json` 和 `P/GATE.md`：只有绝对数字、Wilson 区间、下限和判定，**不计算起点之间的差**（GATE.json 带 `"note": "no between-start differences are computed"`）。
+所有规则都和结果无关，由 `vpd/tvr/gate_tvr.py` 判定。它读：`P/<起点>/evals/pilot__<起点>__{0W, 100, N_top}__c`、`pilot__<起点>__<N_top>__u`、`pilot__<起点>__<N_top>__blind`（以及 `pilot__Q3B__100s1002__c`：G0、G2 照样检查它，它的结果只进 A4）；适配器的 meta.json；每次合并评测的 `P/<起点>/parity/merge_<档>.json`；`P/<起点>/canary/*/render_parity.json`；最新的 `smoke_verdict.json`（和 `SM/replay2/render_parity.json`）；demos 的 manifest、kin_check、dropped.json；`tiers/v1/manifest.json`；`floors_eval500.json`；`CAL/cal_decision.json`（G0 第 13 条）和 `CAL/shake/fallback_used.json`（有的话，G0 第 10 条）；`P/POWER.json`（A4）；pilot_cfg。写出 `P/GATE.json` 和 `P/GATE.md`：只有绝对数字、Wilson 区间、下限和判定，**不计算起点之间的差**（GATE.json 带 `"note": "no between-start differences are computed"`）。
 
 ### G0 机制（全部满足）
 1. 每次列出的评测有效（results.json）：500 题，0 缺。
 2. 模板：冒烟的 B5 在线 vLLM 比对和 parity_check 每个起点都 PASS；每次图像评测的运行内提示 token 比对相等。
 3. 每张图 222 token（网格 [1, 22, 40]）：每次 dry run 和每次图像评测的 token 审计。
-4. 渲染器：重放 manifest 和每次图像评测里，档案、字体 sha、L 等于 `render.*`；重放的 E 等于 `render.replay_envs`，每次图像评测的 E 等于 `render.eval_envs`（各自对照自己的键）。
-5. 代码：三个起点的 0W 共用一个 code_sha256，以 `0865dd75f1ee` 开头；100 档和最高档从本起点的 0W 开始（init sha）；所有评测用同一个评测框架 code_sha256。
+4. 渲染器：重放和每次图像评测的 results.json 的 `renderer` 块里，档案、字体 sha、L 等于 `render.*`；重放的 E 等于 `render.replay_envs`，每次图像评测的 E 等于 `render.eval_envs`（各自对照自己的键）。这几个值是框架的请求；另外 `renderer.workers_ok` 必须为真，并且**每个** worker 自己的 ready 回复（`renderer.workers`）：档案 == `render.lvp_profile`、L == `render.lp_threads`、字体 mode 为 pinned 且 sha == `render.badge_font_sha256`、`system_prompt_ok` 和 `tvrbench_files_ok` 为真（系统提示和 TVRBench 文件的 sha 等于冻结值）（`pilot_tvr.worker_problems`）。
+5. 代码：三个起点的 0W 共用一个 code_sha256，以 `0865dd75f1ee` 开头；100 档和最高档从本起点的 0W 开始（init sha），它们的 code_sha256 等于本起点 0W 的（种子重复的 0W_s1002 和 100s1002 也对照 Q3B 的 0W）；每次评测的 `results.code_sha256` == `results.code_fingerprint.code_sha256`，所有评测用同一个评测框架 code_sha256。这条"同一个框架"只管评测：数据作业的重放在评测之前跑，可以带更早的 run_tvr 指纹，不参与比较。
 6. kin_env = ThorEnv：每条保留的重放上完全一致（`kin_equal_all_kept`，硬性）；图像臂评测的任务上，`valid_list` 类不一致为 0（注入失效），位姿 / 成功类不一致的任务 ≤ 每次评测任务数的 1%（`gates.kin_eval`；附 A：O23）；所有计数和前几个不一致都报。
 7. 合并 = LoRA：**每次**合并试点评测（0W、100、最高档，以及 Q3B 的 100s1002）都做 teacher-forced 检查，在 0W 池的 20 条示范上：平均 |ΔCE| ≤ 0.005，回复 argmax 一致率 ≥ 0.99（`gates.merge_parity`；WalkerBench x483 的参考值 0.00072 / 344 of 345；附 A：O2）。
 8. 每次合并评测用的是盘上现在的 adapter.pt（sha 相等）。
 9. 注意力 sdpa（adapter meta 的 attn_sites），训练 meta 和 vLLM mm kwargs 里 max_pixels = 1,024,000。
-10. 评测设置等于 `protocol`（results.settings），包括 blind_concurrency、server 块（enforce_eager、seed 0、generation_config vllm、xgrammar）和 versions 块（对照 results.server）；max_model_len 等于 `protocol.max_model_len`，或者在冻结前已登记 O9 偏差时**每次**评测都等于备用值。
+10. 评测设置等于 `protocol`（results.settings），包括 blind_concurrency、server 块（enforce_eager、seed 0、generation_config vllm、xgrammar；max_images）和 versions 块（对照 results.server）。results.settings 本身是从 `protocol` 抄的，所以另外按臂判 run_tvr 记下的**本次实际值**：`max_tokens_used` == `protocol.max_tokens[臂]`，`regex_used` == `protocol.regex`（c、blind 臂；u 臂为 null），`blind_concurrency_used` == `protocol.blind_concurrency`（blind 臂；其他为 null），`request_fields` 等于登记的请求字段（c、blind 臂另有 structured_outputs）（`gate_tvr.used_settings`）。max_model_len：所有评测服务的值相同，并且等于 `protocol.max_model_len`，或者在冻结前已登记 O9 偏差（第 17 节保留行里写了 `CAL/shake/fallback_used.json` 的 sha256，`gate_tvr.o9_fallback`）时**每次**评测都等于备用值；没登记却有这个文件、或者登记了却按 32768 跑，都不过；每次评测的 `settings.max_model_len_used` 等于服务实际的值。
 11. 每道评测题用的都是冻结集合（每题的 reach digest 等于 index）。
 12. TVRBench 自己的 `eval_va.aggregate()` 在每次评测的轨迹上给出和 score_tvr 相同的成功率（official_check 相等；证明轨迹格式对）。
-13. 适配器来源（对应 PREREG_WB_PILOT G0 第 6 条）：每个适配器 meta 的起点 == S，种子 == 登记值（1001；种子重复 1002），阶段 == 档位标签，优化步 == 计划步，data_sha256 == tiers/v1/manifest 里那个档文件的 sha，并且那个 manifest 的 sha == `data.tiers_manifest_sha256`。
+13. 适配器来源（对应 PREREG_WB_PILOT G0 第 6 条）：每个适配器 meta 的起点 == S，种子 == 登记值（1001；种子重复 1002），阶段 == 档位标签，优化步 == 计划步，data_sha256 == tiers/v1/manifest 里那个档文件的 sha，并且那个 manifest 的 sha == `data.tiers_manifest_sha256`；训练和判的最高档就是校准规则的输出：`tiers.n_top` == `CAL/cal_decision.json` 的 `n_top`（N_top = 400 时 `with_400` 为真；`pilot_tvr.n_top_problems`，文件缺了算缺）。
 14. 下限文件有效（对应 WalkerBench 第 8 条）：sha == `data.floors_eval500_sha256`，warnings == []，F == `data.F_eval500`。
 15. 渲染一致（简报 A1"训练和评测的渲染一致"）：冒烟里以 root 跑的 sft2 重放、每个试点评测作业的金丝雀，都按冻结的容差规则对照数据作业的重放通过（第 3.2 节），并且 states / valid / user 文本 / action_success 完全相等。
 16. 示范重放（简报 A1"示范能重放成功"）：重放的 results.json 有效、1,600 条轨迹都在；K ≥ 1,520；每条剔除都有 G10(a) 的原因。
@@ -809,7 +891,7 @@ success = stopped and is_exact(final_pose, target)
 G0 不过是工程问题，不算科学失败：修好，重跑受影响的步骤，在第 17 节记一条。
 
 ### 冒烟（tvr-msmoke；契约 7.3）
-每个起点在 dev 的 smoke8 上跑 raw 模型的 c、u、blind 三臂，**只看机制**：轨迹里的 `result.success` 写成 null，不算也不报成功率（附 A：O14）。`smoke_verdict.json` PASS 当且仅当每个起点：dry run 网格都是 [1, 22, 40]、每图 222 token；parity_check PASS；vllm_parity 相等；每个臂的运行有效、0 缺题，c 和 blind 100% 正则匹配；u 臂跑了（解析率报告，不判）；运行内提示比对相等、token 审计 222；worker 的档案、字体 sha、L 等于冻结值；并且 `SM/replay2/render_parity.json` 通过（以 root 渲染对照非 root 的数据作业，容差规则，不比 sha）。smoke-verdict 从不读成功字段（有测试）。
+每个起点在 dev 的 smoke8 上跑 raw 模型的 c、u、blind 三臂，**只看机制**：轨迹里的 `result.success` 写成 null，不算也不报成功率（附 A：O14）。`smoke_verdict.json` PASS 当且仅当每个起点：dry run 网格都是 [1, 22, 40]、每图 222 token；parity_check PASS；vllm_parity 相等；每个臂的运行有效、0 缺题，c 和 blind 100% 正则匹配；u 臂跑了（解析率报告，不判）；运行内提示比对相等、token 审计 222；c、u 臂 `renderer` 块的档案、字体 sha、L 等于冻结值，`renderer.workers_ok` 为真，并且每个 worker 自己的 ready 回复满足 G0 第 4 条同样的检查（档案、L、字体 pinned 且 sha 相等、`system_prompt_ok`、`tvrbench_files_ok`；`pilot_tvr.worker_problems`）；并且 `SM/replay2/render_parity.json` 通过（以 root 渲染对照非 root 的数据作业，容差规则，不比 sha）。smoke-verdict 从不读成功字段（有测试）。
 
 ### 无望停止（校准之后，只用 Q3B；第 7 节）
 `cal_decision.futility` 为真时，编排不准备冒烟和训练作业，报告并问用户。
@@ -828,7 +910,13 @@ G0 不过是工程问题，不算科学失败：修好，重跑受影响的步�
 每个起点：最高档 c 对最高档 blind，同 500 题，第 12 节第 2 条的精确检验；报 b、c、p 和"images_better_p_lt_0.05"。不卡闸门（简报第 2 节 A3）。文字里的"Valid actions"行含碰撞信息、不含目标信息，所以预计差别大（推断，prereg_confirm）。
 
 ### A4 有量程
-G0–G3 都过以后才跑第 12 节第 6 条的功效模拟；通过当且仅当：在 σ_used 下，两个对比 8 个百分点时的 Holm 功效（只数处理起点更好的拒绝）都 ≥ 0.80，**并且** δ = 0 时模拟的一类错误（族错误率）≤ 0.06。G0–G3 没全过时 A4 记 "pending"。
+G0–G3 都过以后才跑第 12 节第 6 条的功效模拟（检验 = 第 12 节第 4 条的终点层面种子感知检验；任务持续性 = 第 7 条的 λ_used）；通过当且仅当：在 σ_used、λ_used 下，ρ = 0.5 时两个对比 8 个百分点的 Holm 功效（只数处理起点更好的拒绝）都 ≥ 0.80，**并且** δ = 0 时 ρ = 0 和 ρ = 1 的模拟族错误率都 ≤ 0.06（取两者中较大的判）。ρ = 0 和 ρ = 1 的功效、σ = 0.05 的行、λ 的敏感性行和作废的旧检验都只报告。A4 记 "pending"（决定是 `incomplete`，不判过或不过）的情形：
+- G0–G3 没全过；
+- `power_sim` 失败（`gate_tvr --power` 时）；
+- POWER.json 过期（`gate_tvr.power_stale`）：它记的某个 per_task.jsonl 的 sha256 变了，A4 要的某个 per_task.jsonl（三个起点的 100、N_top 档 c 臂和 100s1002）不在它的输入里，或者 `inputs.pilot_cfg_json_sha256` ≠ sha256(现在的 pilot_cfg.as_json())；
+- POWER.json 不是按登记设置算的（`gate_tvr.power_unregistered`）：没有 `registered` 块；`registered.test` ≠ `power.test`；`registered.n_sims_registered` 或 `n_sims_used` ≠ `power.n_sims`（`--n-sims` 只供测试）；`registered.tier_corr`、`fallback`、`persistence` 和 `power.*` 不同；`registered.allow_no_replicate` 不是 false；`sigma.replicate_missing` 或 `persistence.replicate_missing` 不是 false（缺种子重复）；`registered.backend` ≠ `power.backend`（numpy；第 12 节第 6 条）。
+
+  只有不是 pending 的 POWER.json 才按它的 `pass` 判过或不过。登记的备用设计（两档种子 1–2）按同样的规则判，结果是 `fallback_pass`（只在第 15 节第 9 条用）。按第 12 节第 7 条的核对，λ 稍大于 0 时 A4 就会判"功效不够"，交用户定。
 
 ### 决策表
 
@@ -866,7 +954,7 @@ G0–G3 都过以后才跑第 12 节第 6 条的功效模拟；通过当且仅�
 3. **种子**：两档都用种子 1、2、3。每个 (起点, 种子 s) 先训一个 0W_s（种子 s），作为该种子各档的初始化。只评 0W 种子 1（每起点一次，描述用的锚点，不进终点）。
 4. **终点**：每个起点、每道题 Σ_T w_T · mean_s y_{s,i}；500 题 c 臂（主协议，同第 9 节）。
 5. **对比**：(a) **Q3S − E2**；(b) **Q3RD − mean(QRL-s1, QRL-s2)**（两个 QRL 种子当作重复）。Holm，一族两个检验，双侧 α = 0.05。
-6. **检验**：第 12 节第 4 条的种子感知场景整组 t 检验就是**唯一的确认检验**；σ̂² 从确认轮自己的 6 个起点 × 2 档 × 3 个种子里估（df 24）。场景 bootstrap 只作描述。登记的局限：这个种子分量假设同一 (起点, 种子) 两档的偏移独立，而第 3 条让两档共用 0W_s 和种子，偏移可能正相关、检验可能偏松（第 12 节第 4 条；试点的 `sensitivity_tier_corr` 报出 ρ = 1 时的一类错误）。改不改成终点层面的种子方差估计，冻结前由编排定；冻结后不能再改。
+6. **检验**：第 12 节第 4 条的终点层面种子感知场景整组 t 检验（`seed_aware_endpoint_t`）就是**唯一的确认检验**；σ̂_E² 从确认轮自己的 6 个起点 × 3 个配对种子的终点里估（df 12；备用设计 df 6），所以第 3 条让两档共用 0W_s 和种子造成的两档相关已经含在里面（DECISIONS G13）。每个 (起点, 种子, 档) 的 500 题 c 臂评测都必须在，缺了补跑，不插补。场景 bootstrap 只作描述。冻结后不能再改。
 7. **结论三选一**（`power.outcome`，min_effect = 0.05 = 登记的最小效应量）：
    - 某个对比"支持" = Holm 拒绝，并且处理起点更好；
    - "不支持" = Holm 拒绝但处理起点更差，**或者** 95% t 区间的上界 < 0.05；
@@ -874,7 +962,7 @@ G0–G3 都过以后才跑第 12 节第 6 条的功效模拟；通过当且仅�
    - 总体：**支持** 当且仅当至少一个对比支持、并且没有一个对比被 Holm 反方向拒绝；**不支持** 当且仅当两个对比都不支持；其他为 **无定论**。
    - 实现：`vpd/common/power_sim.py` 的 `confirmatory_outcome`。
 8. **卡时估计**（契约 O5，推断）：每个 (起点, 种子) 训练 0W 0.13 + 100 0.15 + ALL 约 2.1 h ≈ 2.4 h，18 个 ≈ 43 卡时；评测 100 c + ALL c 含合并、合并检查、vLLM 启动约 1.0–1.2 h，约 20 卡时；0W 种子 1 的评测约 3。合计中值约 66，预期 55–75，**est_high 约 85**（TOP = ALL）；TOP = 400 时约 35–40。
-9. **100 卡时规则**（简报第 4 节"预估不超过 100 卡时就直接开跑，同时发消息告诉我。超过就停下等我"）：确认轮开跑前，用试点实测重算 est_high（第 16 节的公式）。≤ 100 就开跑并通知用户；> 100 时，用登记的**备用设计**——TOP 档只用种子 1–2（权重不变，约省 15 卡时），前提是 POWER.json 里备用设计也过了 A4（`fallback_pass`）；备用设计仍 > 100，或者备用设计没过 A4，就停下问用户。
+9. **100 卡时规则**（简报第 4 节"预估不超过 100 卡时就直接开跑，同时发消息告诉我。超过就停下等我"）：确认轮开跑前，用试点实测重算 est_high（第 16 节的公式）。≤ 100 就开跑并通知用户；> 100 时，用登记的**备用设计**——两档都只用种子 1–2（每个起点不训、不评种子 3 的 0W_3、100_3、TOP_3；权重不变；推断约省 21 卡时），检验同第 6 条（df 6），前提是 POWER.json 里备用设计也过了 A4（`fallback_pass`）；备用设计仍 > 100，或者备用设计没过 A4，就停下问用户。按合成 p 的核对，σ ≥ 0.03 时备用设计的功效约 0.50 / 0.64（ρ = 0.5、λ = 0），λ > 0 时更低（第 12 节第 7 条），预计过不了 A4，所以 est_high > 100 实际上就是停下问用户（推断）。
 10. 试点数据不进确认分析（第 0 节）；试点的适配器不复用。
 
 ---
@@ -895,7 +983,7 @@ G0–G3 都过以后才跑第 12 节第 6 条的功效模拟；通过当且仅�
 
 ## 17. 偏差日志
 
-登记时只有下面几条种子条目。种子条目是冻结**之前**的设计选择：第 1 条由用户批准，第 2–4 条由编排按 2026-11-10 的授权（DECISIONS G12）记下，第 5 条只在用了时记。冻结**之后**的每条偏差，批准人只能是用户本人，并且要在本线窗口里确认（同 PREREG_WB_PILOT 第 12 节）；第 14 节第 2 条的纯工程修复例外（先写"待用户事后确认"）。
+登记时只有下面几条种子条目。种子条目是冻结**之前**的设计选择：第 1 条由用户批准，第 2–4 条由编排按 2026-11-10 的授权（DECISIONS G12）记下，第 5 条由编排按同一授权（DECISIONS G13）记下，第 6 条只在用了时记。冻结**之后**的每条偏差，批准人只能是用户本人，并且要在本线窗口里确认（同 PREREG_WB_PILOT 第 12 节）；第 14 节第 2 条的纯工程修复例外（先写"待用户事后确认"）。
 
 | 日期（UTC） | 改了什么 | 为什么 | 批准人 |
 |---|---|---|---|
@@ -903,19 +991,20 @@ G0–G3 都过以后才跑第 12 节第 6 条的功效模拟；通过当且仅�
 | 2026-11-10 | lavapipe 的帧不是逐位可复现的（跨进程、跨 L、跨路径、重载后都可能不同）：渲染一致性改按容差规则判（PSNR ≥ 40 dB 且 SSIM ≥ 0.99，加上 states / valid / user 文本 / action_success 完全相等），帧的 sha256 只作文件完整性记录；不用帧缓存；重放和评测用同一个 L 和档案 | 探针实测 deterministic false（第 3.2 节，契约 F4、P-M1）；按 sha 判会让冒烟按构造失败 | 编排（2026-11-10 的授权，DECISIONS G12）；属于简报第 4 节批准的 CPU 渲染偏差的执行细节 |
 | 2026-11-10 | 可达集合：冻结的按任务、在起点位姿取的集合，在数据作业里取一次，注入到重放和每个评测臂（附 A：O1） | 官方的值依赖任务顺序和起点位姿（契约 F1、F2）；G10 没说评测用哪个集合 | 编排（DECISIONS G12） |
 | 2026-11-10 | 合并 = LoRA 的检查加到**每次**合并试点评测（0W、100、最高档、100s1002），进 G0（附 A：O2） | 简报 A1 要求"合并后的模型和 LoRA 一致"；G10(g) 的 G0 漏了 | 编排（DECISIONS G12） |
+| 2026-11-10 | 确认检验改为终点层面的种子方差（`seed_aware_endpoint_t`，df 12）；A4 的一类错误在 ρ = 0、1 判，功效在 ρ = 0.5 判；备用设计改为两档种子 1–2（df 6）；功效模型加任务持续性 λ（Q3B 种子重复的逐题不一致率，对照别的试点起点逐题结果的协方差给出的、同一水平下没有持续性的不一致率；对起点均值不变，wave 2b 第二轮修订；`power.backend` = numpy 也登记）；校准作业要求全部 `data.*`（附 A：O25） | wave-2 核查（stats:a4、xcut:protocol）：原检验假设两档偏移独立，ρ = 1 时族错误率 0.17–0.20；原备用设计（只 TOP 用种子 1–2）两档不配对，终点检验用不了；功效模型忽略起点内持续的逐题差，A4 功效偏乐观；校准要训练，K 和剔除名单必须先登记。修订时还没有任何 TVR 模型输出 | 编排（2026-11-10 的授权，DECISIONS G13） |
 | （备用，只在用了时记） | max_model_len 改用 128000（O9） | 校准排查时 32768 / 96 张图的服务起不来；必须在冻结前记，之后每次试点评测都用 | — |
 
 ---
 
 ## 附 A. 和 DECISIONS G10 不同、或 G10 没规定的地方（采用的 O 项）
 
-都是 wave-2 契约第 10 节的开放决定，编排按 2026-11-10 的授权照契约的推荐采用（DECISIONS G12，"编排按 2026-11-10 的授权自定"），冻结前可逆：
+O1–O24 是 wave-2 契约第 10 节的开放决定，编排按 2026-11-10 的授权照契约的推荐采用（DECISIONS G12，"编排按 2026-11-10 的授权自定"）；O25 是 wave-2 核查之后编排按同一授权做的决定（DECISIONS G13）。都在冻结前可逆：
 
 - **O1** 可达集合：冻结的按任务起点位姿集合，数据作业里取，注入重放和每个评测臂；kin_env、BFS、下限、blind 臂用同一个；现场集合照样记录；G0 加 "kin_env == ThorEnv（评测任务上）"（第 3.4 节、第 13 节 G0 第 6、11 条）。G10 没规定评测用哪个集合，这是缺陷修正。
 - **O2** 合并 = LoRA 的 teacher-forced 检查加进 G0，每次合并试点评测都做（G0 第 7 条）。
 - **O3** "220 个 image token"：每帧 220 个 `<|image_pad|>` = B4 口径下的 222（prod(grid)/4 + 2）；两个数都登记，检查用 222（第 10 节）。
-- **O4** 种子方差：Q3B 种子重复（0W + 100，seed 1002，500 题 c），σ_used = max(0.03, 实现尺度的估计)（第 12 节第 5 条）。
-- **O5** 确认轮设计现在登记：6 个起点、{100, TOP}、种子 1–3、权重 0.5 / 0.5、0W_s 每种子训、只评 0W 种子 1、种子感知整组 t + Holm、三分结论、备用设计（第 15 节）。
+- **O4** 种子方差：Q3B 种子重复（0W + 100，seed 1002，500 题 c），σ_used = max(0.03, 实现尺度的估计)（第 12 节第 5 条）；同一个重复也估任务持续性 λ（O25）。
+- **O5** 确认轮设计现在登记：6 个起点、{100, TOP}、种子 1–3、权重 0.5 / 0.5、0W_s 每种子训、只评 0W 种子 1、种子感知整组 t + Holm、三分结论、备用设计（第 15 节；检验和备用设计按 O25 改过）。
 - **O6** 每个起点一个训练作业 + 评测作业（不是一个作业跑完）（第 9.4 节）。
 - **O7** 所有模型作业都以 root 跑；渲染一致性按容差规则对照非 root 的数据作业重放（第 13 节 G0 第 15 条）。
 - **O8** 校准的 Q3B 适配器**不**复用到试点：试点的所有适配器都由冻结后的作业在同样的守门规则下产出（第 6 节）。
@@ -934,6 +1023,7 @@ G0–G3 都过以后才跑第 12 节第 6 条的功效模拟；通过当且仅�
 - **O22** 校准和每个试点评测作业开头都跑渲染金丝雀（第 9.4 节；lavapipe 是 CPU JIT，换节点的 CPU 可能改变帧）。
 - **O23** kin-on-eval 的容差：valid 列表不一致 0 次（硬性），位姿 / 成功不一致 ≤ 每次评测 1% 的任务（第 13 节 G0 第 6 条）。
 - **O24** 确认轮"不支持"的门槛 min_effect = 0.05（最小的登记效应量）（第 15 节第 7 条）。
+- **O25**（DECISIONS G13；wave-2 核查 stats:a4 和 xcut:protocol 之后、冻结之前）A4 和确认检验：(a) 唯一的确认检验改为终点层面的种子感知整组 t 检验（`seed_aware_endpoint_t`，df = 起点数 × (n_s − 1) = 12）；原来按 (起点, 档) 格估种子方差的版本（df 24）假设两档偏移独立，ρ = 1 时族错误率 0.17–0.20，作废，只作敏感性报告；(b) A4 的一类错误在 ρ = 0 和 ρ = 1 下判（取较大的 ≤ 0.06），功效在 ρ = 0.5 下判（ρ = 0、1 只报告）；族错误率的定义确认；(c) 备用设计改为两档都只用种子 1–2（配对，同一检验，df 6）；(d) 功效模型加任务持续性 λ：Q3B 种子重复两个种子的逐题不一致率，对照同一水平下没有持续性时的不一致率；后者的逐题难度分散 V 用种子重复的平均行和另外两个试点起点逐题结果的协方差按单因子模型取（每个起点有自己的均值和尺度，按场景去一的 jackknife 去偏），所以 λ̂ 不随起点之间 SR 的差变，也不算、不报起点之间的差（wave-2b 核查 review stats 发现 wave 2 登记的参照 H 等于起点之间不一致率的一半，起点差 5 个百分点时 λ̂ 就偏约 ±0.1；第二轮修订改掉，要编排补一条 G13 修订）；λ_used = clip(λ̂, 0, 1)，λ = 0 和 0.8 的敏感性行只报告；(e) 校准作业 tvr-cal、tvr-cal400 要求全部 13 个 `data.*` 已填；(f) `power.backend` = numpy 登记（两个后端的随机数流不同），POWER.json 的 schema 升到 `vpd.power_sim.tvr/2`（第 0.1 节，第 12 节第 4–7 条，第 13 节 A4，第 15 节第 6、9 条）。
 
 不在本文件里的：O19（冻结的 WalkerBench 确认轮统计方法没考虑训练种子方差）要改的是已冻结预注册的统计方法，按简报第 5 节由用户定；它不挡 TVR，本文件不涉及 `PREREG_WB_PILOT.md` 的任何统计。
 

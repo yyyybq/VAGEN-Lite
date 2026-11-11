@@ -96,14 +96,46 @@ FROZEN = {
               "futility": "Q3B ALL (or 400) dev200 c Wilson LB <= floors_dev200 F -> stop and ask the user"},
     "bootstrap": {"resamples": 10000, "seed": 0, "cluster": "scene", "use": "descriptive only"},
     "power": {"deltas": [0.05, 0.08, 0.10], "primary_delta": 0.08, "target_power": 0.80, "alpha": 0.05,
-              "holm": True, "n_sims": 2000, "seed": 0, "test": "seed_aware_cluster_t",
-              "test_def": "D = mean_i d_i (per-task endpoint differences); V = CR1 scene-cluster var of mean(d) + "
-                          "k_contrast * sum_T w_T^2 * sigma2_hat / n_seeds_T; sigma2_hat = max(0, mean over "
-                          "(start, tier) cells of [var_s(SR_s) - mean_i var_s(y_si) / n]) (ddof 1); "
-                          "t reference, df = n_cells * (n_seeds - 1); two-sided; k = sum of squared contrast "
-                          "coefficients (2 for Q3S-E2, 1.5 for Q3RD-mean(QRL))",
+              "holm": True, "n_sims": 2000, "seed": 0, "test": "seed_aware_endpoint_t",   # DECISIONS G13
+              # the python and numpy backends of power_sim draw different random streams: seed 0 and n_sims pin
+              # the result only with the backend (POWER.json registered.backend records the one used)
+              "backend": "numpy",
+              "test_def": "D = mean_i d_i (per-task endpoint differences; e_Si = sum_T w_T mean_s y_SsTi, seeds "
+                          "paired across tiers); V = CR1 scene-cluster var of mean(d) + k_contrast * sigma2_E_hat / "
+                          "n_seeds; sigma2_E_hat = max(0, mean over starts of [var_s(E_s) - mean_i var_s(e_si) / n]) "
+                          "(ddof 1; e_si = sum_T w_T y_sTi, E_s = mean_i e_si); t reference, df = n_starts * "
+                          "(n_seeds - 1) (12; fallback 6); two-sided; k = sum of squared contrast coefficients "
+                          "(2 for Q3S-E2, 1.5 for Q3RD-mean(QRL))",
               "effect_model": "realized SR shift delta per tier, mapped to a pre-clip shift by calibrate_shift",
-              "seed_model": "realized-scale shift r ~ N(0, sigma^2) per (start, tier, seed), mapped by calibrate_shift",
+              "seed_model": "realized-scale shift r_SsT = sigma * (sqrt(rho) z_Ss + sqrt(1 - rho) z_SsT), z iid "
+                            "N(0, 1), per (start, seed, tier); rho = tier_corr (same seed id across tiers); mapped "
+                            "by calibrate_shift; y = 1[W < clip(p_i(T) + c, 0, 1)], W = V_Si (one uniform per start "
+                            "and task, shared by its seeds and both tiers) with probability sqrt(lambda), else a "
+                            "fresh uniform; lambda = persistence lambda_used",
+              "tier_corr": {"type1": [0.0, 1.0], "power": 0.5, "reported": [0.0, 1.0]},
+              "fallback": {"seeds": {"100": [1, 2], "TOP": [1, 2]},
+                           "rule": "if est_high > 100 GPU-h: fallback iff fallback_pass, else stop and ask"},
+              "persistence": {"source": "the seed replicate (tiers.replicate: seed 1001 vs its replicate seed, same "
+                                        "start, replicate tier, c arm, same tasks); the other pilot starts' c-arm "
+                                        "outcomes at that tier (seed 1001) only through covariances over tasks, "
+                                        "for the spread of the task pattern at the replicate start's scale "
+                                        "(one-factor model: every start its own mean and scale; lambda_hat is "
+                                        "invariant to start mean SRs; no between-start difference is computed)",
+                              "estimator": "D = mean_i (y1_i - y2_i)^2; kappa = E[|r1 - r2| | dbar, S] under "
+                                           "r1 - r2 ~ N(0, 2 sigma_used^2), dbar ~ N(r1 - r2, S) (dbar, S, "
+                                           "sigma_used as seed_sd): b = 2 sigma_used^2 / (2 sigma_used^2 + S), "
+                                           "a = b dbar, v = b S, kappa = sqrt(v) sqrt(2 / pi) exp(-a^2 / (2 v)) + "
+                                           "a (1 - 2 Phi(-a / sqrt(v))); m2 = E[(r1 - r2)^2 | dbar, S] = a^2 + v; "
+                                           "l_i = (y1_i + y2_i) / 2, L = mean_i l_i; y_a, y_b = the other two "
+                                           "pilot starts' rows; C = covariance over tasks (ddof 1); V = the "
+                                           "delete-one-scene jackknife (G V - (G - 1) mean_g V_-g) of "
+                                           "C(l, y_a) C(l, y_b) / C(y_a, y_b); B = L (1 - L) - V; R = 2 B + m2 / 2; "
+                                           "lambda_hat = (R - D) / (R - kappa)",
+                              "range": [0.0, 1.0],
+                              "rule": "lambda_used = clip(lambda_hat, range); lambda_hat undefined (C(y_a, y_b) <= 0 "
+                                      "in the full or a delete-one-scene sample, or R <= kappa) or replicate missing "
+                                      "-> range[1]",
+                              "sensitivity": [0.0, 0.8], "check_reps": 400},
               "power_counts": "Holm-rejected AND treated better, other contrast at effect 0",
               "type1_max": 0.06,
               "seed_sd": {"mode": "replicate_max_a_priori", "a_priori": 0.03, "sensitivity": [0.05],
@@ -126,15 +158,14 @@ FROZEN = {
              "floors_eval500_sha256": None, "F_eval500": None, "F_source": None},
 }
 
-# keys (dotted) that must be non-None before pilot_tvr prepares a job
+# keys (dotted) that must be non-None before pilot_tvr prepares a job.  The calibration jobs need EVERY data.* key:
+# the orchestrator fills them all in one commit after the data job, and G10(a) registers K and the drop list before
+# any training (the calibration trains Q3B).
+_DATA_KEYS = [f"data.{k}" for k in FROZEN["data"]]
 REQUIRED = {
     "tvr-data": ["render.lvp_profile", "render.lp_threads", "render.replay_envs", "render.probe_run"],
-    "tvr-cal": ["render.lvp_profile", "render.lp_threads", "render.replay_envs", "render.eval_envs",
-                "data.dev_selection_sha256", "data.reach_index_sha256", "data.demos_all_sha256",
-                "data.tiers_manifest_sha256", "data.bfs_dev200_sha256"],
-    "tvr-cal400": ["render.lvp_profile", "render.lp_threads", "render.replay_envs", "render.eval_envs",
-                   "data.dev_selection_sha256", "data.reach_index_sha256", "data.demos_all_sha256",
-                   "data.tiers_manifest_sha256", "data.bfs_dev200_sha256"],
+    "tvr-cal": ["render.lvp_profile", "render.lp_threads", "render.replay_envs", "render.eval_envs"] + _DATA_KEYS,
+    "tvr-cal400": ["render.lvp_profile", "render.lp_threads", "render.replay_envs", "render.eval_envs"] + _DATA_KEYS,
     "tvr-msmoke": "ALL",            # every None above must be filled (prereg frozen)
     "tvr-train": "ALL",
     "tvr-eval": "ALL",              # tvr-eval-<s>-top and tvr-eval-<s>-low map here
@@ -226,13 +257,24 @@ def prereg_block(path) -> dict:
     return json.loads(m.group(1))
 
 
-def check_prereg(path) -> list:
-    """[] iff the prereg block equals FROZEN (tuples compared as lists); else human-readable differences."""
-    want = json.loads(json.dumps(FROZEN))
+def check_prereg(path, cfg=None) -> list:
+    """[] iff the prereg block equals FROZEN (or the given cfg; tuples compared as lists); else human-readable
+    differences.  A leaf on one side only (also a null against an absent key) and a type-only difference (32 vs
+    32.0, false vs 0) count: leaves are compared by their JSON text, and the whole dumps must be equal."""
+    want = json.loads(json.dumps(FROZEN if cfg is None else cfg))
     try:
         got = prereg_block(path)
     except (OSError, ValueError) as e:
         return [str(e)]
     a, b = dict(_leaves(want)), dict(_leaves(got))
-    out = [f"{k}: prereg {b.get(k)!r} != pilot_cfg {a.get(k)!r}" for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
+    out = []
+    for k in sorted(set(a) | set(b)):
+        if k not in b:
+            out.append(f"{k}: absent from the prereg block (pilot_cfg {a[k]!r})")
+        elif k not in a:
+            out.append(f"{k}: prereg {b[k]!r} is not a pilot_cfg key")
+        elif json.dumps(a[k], sort_keys=True) != json.dumps(b[k], sort_keys=True):
+            out.append(f"{k}: prereg {b[k]!r} != pilot_cfg {a[k]!r}")
+    if not out and json.dumps(want, sort_keys=True) != json.dumps(got, sort_keys=True):
+        out.append("prereg block != pilot_cfg FROZEN (structure, e.g. an empty object)")
     return out
