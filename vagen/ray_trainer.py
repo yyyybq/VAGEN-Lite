@@ -1243,6 +1243,36 @@ def compute_valid_return_metrics(data: DataProto, ignore_value: float = -100.0) 
     return metrics
 
 
+def critic_overfit_steps_of(config, use_critic: bool, total_training_steps: int) -> int:
+    """trainer.critic_overfit_steps (package p1tgae_c2_ofit, the critic overfit check of the user's supplement of
+    2026-11-11, item 2): 0 = off (every other package).  On (N >= 2): the trainer's first update runs as usual up to
+    the value-network update, whose batch (every candidate, trainer.critic_all_candidates) is kept fixed with its
+    step-1 returns as the targets; updates 2..N train only the value network on that batch (no rollout, reward,
+    advantage or filter, no actor update in any update of this mode), and the run ends after update N with the
+    endpoint checkpoint.  The judgment reading is critic/overfit/final/values/explained_var_valid, taken on the fixed batch
+    after the N-th update."""
+    steps = config.trainer.get("critic_overfit_steps", 0)
+    if steps is None or steps == 0:
+        return 0
+    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 2:
+        raise ValueError(f"trainer.critic_overfit_steps must be 0 (off) or a whole number >= 2, not {steps!r}")
+    if not use_critic:
+        raise ValueError("trainer.critic_overfit_steps needs a value network (critic)")
+    if not bool(config.trainer.get("critic_all_candidates", False)):
+        raise ValueError("trainer.critic_overfit_steps needs trainer.critic_all_candidates (the fixed batch)")
+    if steps > int(total_training_steps):
+        raise ValueError(f"trainer.critic_overfit_steps {steps} is beyond the {total_training_steps} training steps")
+    return int(steps)
+
+
+def critic_overfit_readings(fixed: DataProto, n_rows: int, prefix: str) -> dict[str, float]:
+    """The value network's readings (compute_valid_return_metrics, without the advantages) on the overfit check's
+    fixed batch, its padding rows (copies added for the workers) left out, renamed critic/... -> prefix..."""
+    rows = fixed if n_rows == len(fixed) else fixed.select_idxs(torch.arange(n_rows))
+    return {prefix + k[len("critic/"):]: v for k, v in compute_valid_return_metrics(rows).items()
+            if k.startswith("critic/") and not k.startswith("critic/advantages/")}
+
+
 _ACTION_TAG_RE = re.compile(r"<action>(.*?)</action>", re.IGNORECASE | re.DOTALL)
 
 
@@ -2443,6 +2473,46 @@ class RayPPOTrainer:
         )
         metrics.update(global_balance_stats)
 
+    def _critic_overfit_update(self, logger, overfit_steps: int, epoch: int) -> bool:
+        """One update 2..N of the critic overfit check (critic_overfit_steps_of): on the fixed batch of update 1, the
+        value network's predictions before this update (critic/all/* as p1tgae_c2 logs them, and the same readings as
+        critic/overfit/*), then one value-network update (the package's passes and mini-batches); no rollout, no
+        actor update.  After update N the predictions once more (critic/overfit/final/*: the judgment reading, after
+        N updates), the endpoint checkpoint, and True (the run ends)."""
+        fixed, n_rows = self._overfit_batch
+        metrics: dict = {}
+        timing_raw: dict = {}
+        last = self.global_steps >= overfit_steps
+        with marked_timer("step", timing_raw):
+            with marked_timer("values", timing_raw, color="cyan"):
+                fixed.batch["values"] = self.critic_wg.compute_values(fixed).batch["values"]
+            readings = critic_overfit_readings(fixed, n_rows, "critic/")
+            metrics.update({"critic/all/" + k[len("critic/"):]: v for k, v in readings.items()})
+            metrics.update({"critic/overfit/" + k[len("critic/"):]: v for k, v in readings.items()})
+            with marked_timer("update_critic", timing_raw, color="pink"):
+                critic_output = self.critic_wg.update_critic(fixed)
+            metrics.update(reduce_metrics(critic_output.meta_info["metrics"]))
+            if "critic/vf_loss" in metrics:
+                metrics["critic/value_loss"] = metrics["critic/vf_loss"]
+            if "critic/vpred_mean" in metrics:
+                metrics["critic/pred/mean"] = metrics["critic/vpred_mean"]
+            if last:
+                with marked_timer("values_final", timing_raw, color="cyan"):
+                    fixed.batch["values"] = self.critic_wg.compute_values(fixed).batch["values"]
+                metrics.update(critic_overfit_readings(fixed, n_rows, "critic/overfit/final/"))
+            save_freq = int(self.config.trainer.save_freq)
+            if last or (save_freq > 0 and self.global_steps % save_freq == 0):
+                self._hf_upload_manager.flush()
+                with marked_timer("save_checkpoint", timing_raw, color="green"):
+                    self._save_checkpoint()
+        metrics.update({"training/global_step": self.global_steps, "training/epoch": epoch,
+                        "trainer/actor_update_performed": 0.0, "critic/update_batch_size": len(fixed),
+                        "critic/overfit/rows": n_rows})
+        metrics.update({f"timing_s/{k}": v for k, v in timing_raw.items()})
+        logger.log(data=metrics, step=self.global_steps)
+        self.global_steps += 1
+        return last
+
     def fit(self):
         """
         The training loop of PPO.
@@ -2488,6 +2558,9 @@ class RayPPOTrainer:
         self.global_steps += 1
         last_val_metrics = None
         self.max_steps_duration = 0
+        # the critic overfit check (package p1tgae_c2_ofit; 0 = off): update 1 as usual, then the value network only
+        overfit_steps = critic_overfit_steps_of(self.config, self.use_critic, self.total_training_steps)
+        self._overfit_batch = None  # (the fixed batch, its rows before the padding), set by update 1
 
         prev_step_profile = False
         curr_step_profile = (
@@ -2501,6 +2574,16 @@ class RayPPOTrainer:
             for batch_dict in self.train_dataloader:
                 metrics = {}
                 timing_raw = {}
+
+                if overfit_steps and self._overfit_batch is not None:  # updates 2..N of the overfit check
+                    done = self._critic_overfit_update(logger, overfit_steps, epoch)
+                    progress_bar.update(1)
+                    if done:
+                        progress_bar.close()
+                        self._flush_image_dumps()
+                        self._hf_upload_manager.flush()
+                        return
+                    continue
 
                 with marked_timer("start_profile", timing_raw):
                     self._start_profiling(
@@ -3017,14 +3100,20 @@ class RayPPOTrainer:
                         with marked_timer("update_critic", timing_raw, color="pink"):
                             critic_batch, critic_rows_out = critic_update_batch(batch, pre_filter_batch,
                                                                                 critic_all_candidates)
+                            critic_pad = 0
                             if critic_all_candidates:  # p1tgae_c2: every candidate, padded to the workers
                                 if critic_batch is not batch:
                                     for key in ("uid_draw_order", "adv_estimator"):
                                         critic_batch.meta_info.pop(key, None)
-                                    critic_batch, _ = pad_dataproto_to_divisor(critic_batch, self.critic_wg.world_size)
+                                    critic_batch, critic_pad = pad_dataproto_to_divisor(critic_batch, self.critic_wg.world_size)
                                 metrics["critic/update_batch_size"] = len(critic_batch)
                                 metrics["critic/update_rows_without_target"] = critic_rows_out
+                            if overfit_steps and (critic_batch is batch or pre_filter_batch is None):
+                                raise RuntimeError("critic overfit check: no candidate batch to keep fixed "
+                                                   "(no row has a value target, or the filter is off)")
                             critic_output = self.critic_wg.update_critic(critic_batch)
+                            if overfit_steps:  # the overfit check keeps this batch (and its returns) fixed
+                                self._overfit_batch = (critic_batch, len(critic_batch) - critic_pad)
                         critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
                         metrics.update(critic_output_metrics)
                         if "critic/vf_loss" in metrics:
@@ -3034,7 +3123,7 @@ class RayPPOTrainer:
 
                     # Critic warmup should only delay actor updates when a critic is actually used.
                     actor_warmup_steps = int(self.config.trainer.critic_warmup) if self.use_critic else 0
-                    actor_update_ready = actor_warmup_steps <= self.global_steps
+                    actor_update_ready = actor_warmup_steps <= self.global_steps and not overfit_steps
                     metrics["trainer/actor_update_performed"] = float(actor_update_ready)
                     metrics["trainer/actor_update_skipped_by_warmup"] = float(not actor_update_ready)
                     metrics["trainer/actor_warmup_steps_effective"] = actor_warmup_steps

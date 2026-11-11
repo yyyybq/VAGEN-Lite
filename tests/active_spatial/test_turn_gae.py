@@ -289,3 +289,121 @@ def test_critic_update_batch_all_candidates():
     none = DataProto.from_dict(tensors={k: v.clone() for k, v in tensors.items()}, non_tensors=dict(non))
     none.batch["returns"][:] = TG.IGNORE_VALUE
     assert critic_update_batch(kept, none, True) == (kept, 6)   # no target anywhere: the actor's batch
+
+
+def test_critic_overfit_steps_of():
+    """The critic overfit check (package p1tgae_c2_ofit, the user's supplement of 2026-11-11, item 2): off unless
+    trainer.critic_overfit_steps is set; on, it needs the value network and every-candidate batch, N >= 2 and N
+    within the training steps."""
+    from omegaconf import OmegaConf
+
+    from vagen.ray_trainer import critic_overfit_steps_of
+
+    def cfg(**trainer):
+        return OmegaConf.create({"trainer": trainer})
+
+    assert critic_overfit_steps_of(cfg(), True, 700) == 0              # absent: off (every other package)
+    assert critic_overfit_steps_of(cfg(critic_overfit_steps=0), False, 700) == 0
+    assert critic_overfit_steps_of(cfg(critic_overfit_steps=50, critic_all_candidates=True), True, 700) == 50
+    assert critic_overfit_steps_of(cfg(critic_overfit_steps=50, critic_all_candidates=True), True, 50) == 50
+    for trainer, use_critic, total, pattern in (
+            ({"critic_overfit_steps": 1, "critic_all_candidates": True}, True, 700, "whole number >= 2"),
+            ({"critic_overfit_steps": True, "critic_all_candidates": True}, True, 700, "whole number >= 2"),
+            ({"critic_overfit_steps": 2.5, "critic_all_candidates": True}, True, 700, "whole number >= 2"),
+            ({"critic_overfit_steps": 50, "critic_all_candidates": True}, False, 700, "value network"),
+            ({"critic_overfit_steps": 50}, True, 700, "critic_all_candidates"),
+            ({"critic_overfit_steps": 50, "critic_all_candidates": True}, True, 40, "beyond")):
+        with pytest.raises(ValueError, match=pattern):
+            critic_overfit_steps_of(cfg(**trainer), use_critic, total)
+
+
+def _overfit_fixed(n_rows=6, pad_to=8):
+    """A fixed batch of n_rows episodes (3 positions, the value target at each first position), padded with copies
+    of the first rows to pad_to as the trainer pads it for the workers."""
+    from verl import DataProto
+    from verl.protocol import pad_dataproto_to_divisor
+
+    returns = torch.full((n_rows, 3), TG.IGNORE_VALUE)
+    returns[:, 0] = torch.arange(n_rows, dtype=torch.float32)
+    tensors = {"returns": returns, "response_mask": torch.ones(n_rows, 3), "values": torch.zeros(n_rows, 3),
+               "advantages": torch.ones(n_rows, 3)}
+    data = DataProto.from_dict(tensors=tensors, non_tensors={"uid": np.array([f"u{i}" for i in range(n_rows)], dtype=object)})
+    padded, pad = pad_dataproto_to_divisor(data, pad_to)
+    assert len(padded) == pad_to and pad == pad_to - n_rows
+    return padded, len(padded) - pad
+
+
+def test_critic_overfit_readings():
+    """The readings on the fixed batch leave the padding rows out, carry the asked prefix and no advantages."""
+    from vagen.ray_trainer import compute_valid_return_metrics, critic_overfit_readings
+
+    fixed, n = _overfit_fixed()
+    fixed.batch["values"] = fixed.batch["returns"].clamp(min=0) * (fixed.batch["returns"] != TG.IGNORE_VALUE)
+    m = critic_overfit_readings(fixed, n, "critic/overfit/")
+    assert m["critic/overfit/returns/valid_count"] == 6                # not 8: the two padding copies left out
+    assert m["critic/overfit/values/explained_var_valid"] == pytest.approx(1.0, abs=1e-4)
+    assert m["critic/overfit/values/rmse_valid"] == pytest.approx(0.0, abs=1e-6)
+    assert not any("advantages" in k for k in m) and all(k.startswith("critic/overfit/") for k in m)
+    with_pad = compute_valid_return_metrics(fixed)
+    assert with_pad["critic/returns/valid_count"] == 8                 # the padded batch itself would count them
+    m_np = critic_overfit_readings(fixed, len(fixed), "critic/")       # no padding: the batch itself
+    assert m_np["critic/returns/valid_count"] == 8
+
+
+def test_critic_overfit_update_driver():
+    """Updates 2..N of the overfit check on stand-in workers: each update reads the predictions before it, then one
+    value-network update on the very fixed batch; no actor call; after update N one more reading (final), the
+    endpoint checkpoint (once, with save_freq 50) and True.  The logged lines carry no key the chain's NaN guard
+    reads (train_chain.GUARD_NAN_KEYS), and guard_reason finds no reason to stop."""
+    from types import SimpleNamespace
+
+    from omegaconf import OmegaConf
+    from verl import DataProto
+
+    from vagen.ray_trainer import RayPPOTrainer
+
+    fixed, n = _overfit_fixed()
+    target = fixed.batch["returns"].clone()
+
+    class Critic:
+        def __init__(self):
+            self.level, self.updates, self.seen = 0.0, 0, []
+
+        def compute_values(self, data):  # predictions move toward the targets with each update
+            self.seen.append(data)
+            v = torch.where(target != TG.IGNORE_VALUE, target * self.level, torch.zeros_like(target))
+            return DataProto.from_dict(tensors={"values": v})
+
+        def update_critic(self, data):
+            self.seen.append(data)
+            self.updates += 1
+            self.level = min(1.0, self.level + 0.5)
+            out = DataProto.from_dict(tensors={"x": torch.zeros(1)})
+            out.meta_info["metrics"] = {"critic/vf_loss": [1.0 - self.level], "critic/vpred_mean": [self.level]}
+            return out
+
+    saves, logged = [], []
+    fake = SimpleNamespace(_overfit_batch=(fixed, n), global_steps=2, critic_wg=Critic(),
+                           config=OmegaConf.create({"trainer": {"save_freq": 50}}),
+                           _hf_upload_manager=SimpleNamespace(flush=lambda: None),
+                           _save_checkpoint=lambda: saves.append(fake.global_steps),
+                           actor_rollout_wg=None)  # any actor call would fail
+    logger = SimpleNamespace(log=lambda data, step: logged.append((step, dict(data))))
+    done = [RayPPOTrainer._critic_overfit_update(fake, logger, 3, 0) for _ in range(2)]
+    assert done == [False, True] and fake.global_steps == 4 and fake.critic_wg.updates == 2
+    assert all(d is fixed for d in fake.critic_wg.seen)                # always the very fixed batch
+    assert saves == [3] and [s for s, _ in logged] == [2, 3]
+    m2, m3 = logged[0][1], logged[1][1]
+    assert m2["critic/all/values/explained_var_valid"] == m2["critic/overfit/values/explained_var_valid"]
+    assert m2["critic/overfit/returns/valid_count"] == 6 and m2["critic/overfit/rows"] == 6
+    assert m2["critic/update_batch_size"] == 8 and m2["trainer/actor_update_performed"] == 0.0
+    assert "critic/overfit/final/values/explained_var_valid" not in m2
+    assert m3["critic/overfit/values/explained_var_valid"] == pytest.approx(1.0 - 0.25, abs=1e-3)  # before update 3
+    assert m3["critic/overfit/final/values/explained_var_valid"] == pytest.approx(1.0, abs=1e-4)          # after it
+    assert m3["critic/overfit/final/values/rmse_valid"] == pytest.approx(0.0, abs=1e-6)
+    assert not any(k.startswith("actor/") for _, m in logged for k in m)
+    from data_gen.interiorgs_v10 import train_chain as TC
+
+    assert not any(k in m for _, m in logged for k in TC.GUARD_NAN_KEYS)
+    text = "\n".join(f"step:{s} - " + " - ".join(f"{k}:{v}" for k, v in m.items()) for s, m in logged)
+    assert TC.guard_reason(text, {"kl_max": 0.2, "invalid_max": 0.1, "entropy_max": 0.3, "keep_fill_min": 1}) is None

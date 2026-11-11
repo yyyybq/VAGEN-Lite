@@ -461,6 +461,35 @@ class TrainingPrepTest(unittest.TestCase):
                     TP.package_overrides(name)
             finally:
                 del TP.OPT_PACKAGES[name]
+        # the critic overfit check (the user's supplement of 2026-11-11, item 2): p1tgae_c2_ofit is p1tgae_c2 plus
+        # critic_overfit_steps 50; its overrides are p1tgae_c2's plus one key, appended; no other package has it
+        self.assertEqual({k: v for k, v in TP.OPT_PACKAGES["p1tgae_c2_ofit"].items() if k not in TP.CRITIC_CHECK_KEYS},
+                         TP.OPT_PACKAGES["p1tgae_c2"])
+        self.assertEqual(TP.OPT_PACKAGES["p1tgae_c2_ofit"]["critic_overfit_steps"], 50)
+        self.assertEqual([n for n, pk in TP.OPT_PACKAGES.items() if any(k in pk for k in TP.CRITIC_CHECK_KEYS)],
+                         ["p1tgae_c2_ofit"])
+        self.assertEqual(list(TP.package_overrides("p1tgae_c2_ofit").items()),
+                         list(tgc2.items()) + [("trainer.critic_overfit_steps", 50)])
+        ppo_o, report_o = config("rl_tgco_a", opt_package="p1tgae_c2_ofit", critic_warmup=None)
+        ppo_c2b, _ = config("rl_tgco_b", opt_package="p1tgae_c2", critic_warmup=None)
+        self.assertEqual((ppo_o["trainer"].pop("critic_overfit_steps"), "critic_overfit_steps" in ppo_c2b["trainer"]),
+                         (50, False))
+        self.assertEqual(json.loads(json.dumps(ppo_o).replace("rl_tgco_a", "X")),
+                         json.loads(json.dumps(ppo_c2b).replace("rl_tgco_b", "X")))
+        self.assertEqual(report_o["opt_package_overrides"], TP.package_overrides("p1tgae_c2_ofit"))
+        # a whole number >= 2; it needs the every-candidate batch; GRPO has no critic
+        for name, pkg, pattern in (("_ofit_one", dict(TP.OPT_PACKAGES["p1tgae_c2_ofit"], critic_overfit_steps=1), "whole number"),
+                                   ("_ofit_bool", dict(TP.OPT_PACKAGES["p1tgae_c2_ofit"], critic_overfit_steps=True), "whole number"),
+                                   ("_ofit_frac", dict(TP.OPT_PACKAGES["p1tgae_c2_ofit"], critic_overfit_steps=2.5), "whole number"),
+                                   ("_ofit_nobatch", {k: v for k, v in TP.OPT_PACKAGES["p1tgae_c2_ofit"].items()
+                                                      if k != "critic_all_candidates"}, "critic_all_candidates"),
+                                   ("_grpo_ofit", dict(TP.OPT_PACKAGES["p1"], critic_overfit_steps=50), "value network")):
+            TP.OPT_PACKAGES[name] = pkg
+            try:
+                with self.assertRaisesRegex(ValueError, pattern, msg=name):
+                    TP.package_overrides(name)
+            finally:
+                del TP.OPT_PACKAGES[name]
 
     def test_rl_config_standards_and_seed(self):
         """Round 12: named standard configurations (configs/rl_standards.json, the package with S0 and with the dense
@@ -473,7 +502,7 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(sorted(standards), ["v10_p1_D", "v10_p1_D_keep_100", "v10_p1_D_keep_177", "v10_p1_Dcond",
                                              "v10_p1_Dcond_fp", "v10_p1_S0", "v10_p1_S0_fp", "v10_p1_S0_keep",
                                              "v10_p1gae_Dcond", "v10_p1gae_S0", "v10_p1tgae_Dcond", "v10_p1tgae_S0",
-                                             "v10_p1tgaec2_Dcond", "v10_p1tgaec2_S0",
+                                             "v10_p1tgaec2_Dcond", "v10_p1tgaec2_S0", "v10_p1tgaec2ofit_Dcond",
                                              "v10_p1tgaec_Dcond", "v10_p1tgaec_S0",
                                              "v10_p2_D", "v10_p2_S0"])
         # the PPO supplement (the user's decision 甲 of 2026-11-08): the p1 pair with the GAE package, nothing else
@@ -492,6 +521,8 @@ class TrainingPrepTest(unittest.TestCase):
         for name, base in (("v10_p1tgaec2_S0", "v10_p1_S0"), ("v10_p1tgaec2_Dcond", "v10_p1_Dcond")):
             self.assertEqual(standards[name], {**standards[base], "opt_package": "p1tgae_c2"})
         self.assertIn("_v10_p1tgaec2", json.loads(TP.STANDARDS_FILE.read_text(encoding="utf-8")))
+        self.assertEqual(standards["v10_p1tgaec2ofit_Dcond"], {**standards["v10_p1_Dcond"], "opt_package": "p1tgae_c2_ofit"})
+        self.assertIn("_v10_p1tgaec2ofit", json.loads(TP.STANDARDS_FILE.read_text(encoding="utf-8")))
         # experiment 3A (the user's decision 甲 of 2026-11-06): the p1 pair with the turn-footprint rule, each its
         # base plus turn_footprint_radius 0.25, the two differing only in the reward (as every pair)
         for name, base in (("v10_p1_S0_fp", "v10_p1_S0"), ("v10_p1_Dcond_fp", "v10_p1_Dcond")):
@@ -568,6 +599,17 @@ class TrainingPrepTest(unittest.TestCase):
                          json.loads(json.dumps(env_c1).replace("rl_std_tgc1", "X")))
         self.assertEqual((report_c2["standard"], report_c2["opt_package"], report_c2["critic_warmup"]),
                          ("v10_p1tgaec2_Dcond", "p1tgae_c2", 30))
+        # the critic overfit check (2026-11-11) on the repository template: v10_p1tgaec2ofit_Dcond gives
+        # v10_p1tgaec2_Dcond's config with trainer.critic_overfit_steps 50 (absent before); the env is the same
+        ppo_o, env_o, report_o = config("rl_std_tgco", standard="v10_p1tgaec2ofit_Dcond", seed=7)
+        ppo_c2, env_c2, _ = config("rl_std_tgc2", standard="v10_p1tgaec2_Dcond", seed=7)
+        self.assertEqual((ppo_o["trainer"].pop("critic_overfit_steps"), "critic_overfit_steps" in ppo_c2["trainer"]),
+                         (50, False))
+        self.assertEqual(json.loads(json.dumps(ppo_o).replace("rl_std_tgco", "X")),
+                         json.loads(json.dumps(ppo_c2).replace("rl_std_tgc2", "X")))
+        self.assertEqual(json.loads(json.dumps(env_o).replace("rl_std_tgco", "X")),
+                         json.loads(json.dumps(env_c2).replace("rl_std_tgc2", "X")))
+        self.assertEqual((report_o["standard"], report_o["opt_package"]), ("v10_p1tgaec2ofit_Dcond", "p1tgae_c2_ofit"))
         ppo, env, report = config("rl_std_d", standard="v10_p1_D", seed=7)
         a = ppo["actor_rollout_ref"]
         self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["data"]["train_batch_size"], a["rollout"]["n"],

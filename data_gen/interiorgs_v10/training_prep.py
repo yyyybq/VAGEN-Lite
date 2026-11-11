@@ -433,10 +433,20 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
                   "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0, "lam": 0.95,
                   "critic_lr": 5e-5, "critic_value_clip": False, "critic_ppo_epochs": 2,
                   "critic_all_candidates": True, "critic_mini_batch_groups": 3},
+    # the critic overfit check (the user's supplement of 2026-11-11, item 2, after p1tgae_c2 failed level 1a too):
+    # p1tgae_c2 with trainer.critic_overfit_steps 50: the trainer's first update runs as p1tgae_c2's, and its value-
+    # network batch (every candidate, 192) is kept fixed; updates 2-50 train only the value network on that batch
+    # (no new rollouts, no actor update: the actor is never updated in this mode), logging the readings on it at
+    # every update and once more after the 50th (critic/overfit/final/*).  A diagnostic, not a training recipe
+    "p1tgae_c2_ofit": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
+                       "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0,
+                       "lam": 0.95, "critic_lr": 5e-5, "critic_value_clip": False, "critic_ppo_epochs": 2,
+                       "critic_all_candidates": True, "critic_mini_batch_groups": 3, "critic_overfit_steps": 50},
 }
 NO_VALUE_CLIP = 1.0e6  # critic.cliprange_value of a package without value clipping (far beyond any return)
 CRITIC_KEYS = ("critic_lr", "critic_value_clip", "critic_ppo_epochs")  # a package's value-network settings
 CRITIC_BATCH_KEYS = ("critic_all_candidates", "critic_mini_batch_groups")  # the value network's data (p1tgae_c2)
+CRITIC_CHECK_KEYS = ("critic_overfit_steps",)  # the critic overfit check (p1tgae_c2_ofit)
 PACKAGE_ESTIMATORS = ("grpo", "gae", "turn_gae")  # the advantage estimators a package may name (default grpo)
 CRITIC_ESTIMATORS = ("gae", "turn_gae")  # the ones with a value network (their warm-up is part of the package)
 
@@ -515,7 +525,7 @@ def package_overrides(name: str, candidates: Optional[int] = None, target_groups
         if "gamma" not in p or "lam" not in p:
             raise ValueError(f"package {name}: turn_gae needs its own gamma and lam (counted per turn)")
         out.update({"algorithm.gamma": float(p["gamma"]), "algorithm.lam": float(p["lam"]), "critic.enable": True})
-    named = [k for k in CRITIC_KEYS + CRITIC_BATCH_KEYS if k in p]  # the critic pilot (2026-11-10): the value network's own settings
+    named = [k for k in CRITIC_KEYS + CRITIC_BATCH_KEYS + CRITIC_CHECK_KEYS if k in p]  # the critic pilot (2026-11-10): the value network's own settings
     if named and estimator not in CRITIC_ESTIMATORS:
         raise ValueError(f"package {name}: {named} set the value network, which {estimator!r} does not have")
     if "critic_lr" in p:
@@ -542,6 +552,14 @@ def package_overrides(name: str, candidates: Optional[int] = None, target_groups
             raise ValueError(f"package {name}: critic_mini_batch_groups must be a whole number >= 1 dividing the "
                              f"{p['candidates']} candidates, not {groups!r}")
         out["critic.ppo_mini_batch_size"] = int(groups)
+    if "critic_overfit_steps" in p:  # the overfit check, 2026-11-11: on the fixed batch of every candidate only
+        steps = p["critic_overfit_steps"]
+        if isinstance(steps, bool) or not isinstance(steps, int) or steps < 2:
+            raise ValueError(f"package {name}: critic_overfit_steps must be a whole number >= 2, not {steps!r}")
+        if p.get("critic_all_candidates") is not True:
+            raise ValueError(f"package {name}: critic_overfit_steps needs critic_all_candidates (the fixed batch is "
+                             "every candidate)")
+        out["trainer.critic_overfit_steps"] = int(steps)
     return out
 DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
             "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,
