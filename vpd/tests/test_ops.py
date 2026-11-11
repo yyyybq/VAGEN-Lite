@@ -792,6 +792,7 @@ def test_common_env_exports_and_steps(base):
     run = base / "run"
     res = _bash('echo "T=$OMP_NUM_THREADS/$MKL_NUM_THREADS/$OPENBLAS_NUM_THREADS/$NUMEXPR_NUM_THREADS"\n'
                 'echo "E=$TOKENIZERS_PARALLELISM/$HF_HUB_OFFLINE/$TRANSFORMERS_OFFLINE/$PYTHONDONTWRITEBYTECODE"\n'
+                'echo "U=$VLLM_NO_USAGE_STATS/$DO_NOT_TRACK"\n'
                 'echo "P=$PYTHONPATH"\necho "W=$VPD_WORKTREE"\n'
                 'vpd_threads 4; echo "V=$OMP_NUM_THREADS/$NUMEXPR_NUM_THREADS/$VPD_THREADS"\n'
                 'echo "S=$-"\n'
@@ -802,6 +803,7 @@ def test_common_env_exports_and_steps(base):
     assert res.returncode == 0, res.stderr
     out = res.stdout
     assert "T=2/2/2/2" in out and "E=false/1/1/1" in out
+    assert "U=1/1" in out  # vLLM usage stats off (DECISIONS G14a)
     # VPD_WORKTREE unset: the tree common_env.sh lives in (the worktree here; RUN/code in a snapshot job)
     assert f"P={paths.WORKTREE}\n" in out and f"W={paths.WORKTREE}\n" in out
     assert "V=4/4/4" in out and "rc=7" in out and "badname=2" in out and "chown_ok" in out

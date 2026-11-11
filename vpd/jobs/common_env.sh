@@ -4,7 +4,8 @@
 #     cd "$VPD_WORKTREE"
 #
 # Sets strict mode, per-process thread caps (VPD_THREADS, default 2 = DECISIONS B9; vLLM processes call
-# `vpd_threads 4`), offline HF, no bytecode, VPD_WORKTREE and PYTHONPATH = that tree only, and defines:
+# `vpd_threads 4`), offline HF, no bytecode, no vLLM usage stats, VPD_WORKTREE and PYTHONPATH = that tree
+# only, and defines:
 #   vpd_threads N            re-export OMP/MKL/OPENBLAS/NUMEXPR_NUM_THREADS=N (and VPD_THREADS)
 #   vpd_on_exit CMD          add CMD to the EXIT handler (handlers run in order; the exit code is kept)
 #   vpd_chown_trap DIR...    as root only: chown -R 20325:20325 DIR... at EXIT
@@ -22,6 +23,8 @@ export VPD_THREADS="${VPD_THREADS:-2}"
 export OMP_NUM_THREADS="$VPD_THREADS" MKL_NUM_THREADS="$VPD_THREADS" \
        OPENBLAS_NUM_THREADS="$VPD_THREADS" NUMEXPR_NUM_THREADS="$VPD_THREADS"
 export TOKENIZERS_PARALLELISM=false HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
+# vLLM reports usage stats to stats.vllm.ai by default; VLLMServer passes os.environ on (DECISIONS G14a)
+export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1
 VPD_WORKTREE="${VPD_WORKTREE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 [[ $VPD_WORKTREE == /* && -d $VPD_WORKTREE/vpd ]] || {
   echo "[vpd] VPD_WORKTREE='$VPD_WORKTREE' is not an absolute path of a code tree with vpd/" >&2
