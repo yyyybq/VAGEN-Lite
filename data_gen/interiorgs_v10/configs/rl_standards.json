@@ -64,5 +64,12 @@
                     "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
  "v10_p1tgaec_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
                        "opt_package": "p1tgae_c", "reward_preset": "D_cond",
-                       "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
+                       "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "_v10_p1tgaec2": "Fallback (a) of PPO_REPORT appendix A (the user's decision of 2026-11-11): the p1tgaec pair with package p1tgae_c2 (the value network updates on every candidate episode before the group filter, in mini-batches of 3 groups; nothing else changes). V4 = v10_p1tgaec2_Dcond with C0's four V4 keys, as qw3tgcd.",
+ "v10_p1tgaec2_S0": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                     "opt_package": "p1tgae_c2", "reward_preset": "S0",
+                     "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p1tgaec2_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                        "opt_package": "p1tgae_c2", "reward_preset": "D_cond",
+                        "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
 }

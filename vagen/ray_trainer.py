@@ -1166,6 +1166,28 @@ def rollout_dump_view(batch: DataProto, pre_filter_batch, reward_extra_infos_dic
     return pre_filter_batch, extras
 
 
+def critic_update_batch(batch: DataProto, pre_filter_batch, all_candidates: bool,
+                        ignore_value: float = -100.0) -> tuple[DataProto, int]:
+    """The batch the value network updates on, and how many candidate rows were left out.  Off (every package but
+    p1tgae_c2): the batch the actor updates on, as before (0 left out).  On (trainer.critic_all_candidates, package
+    p1tgae_c2, fallback (a) of PPO_REPORT appendix A, the user's decision of 2026-11-11): every candidate episode
+    before the group filter, the all-success and all-fail groups too, each with its own per-turn returns (computed
+    before the filter; a position is a value target where its return is not the ignore sentinel, which is what
+    verl's dp_critic checks).  A row with no target at all (an episode with no generated turn) is left out: verl
+    raises on a micro-batch without one, and the filter used to drop such rows with their all-fail group.  If no
+    row had a target, the actor's batch.  The actor's batch and its whitened advantages are not touched."""
+    if not all_candidates or pre_filter_batch is None:
+        return batch, 0
+    valid = (compute_value_mask(pre_filter_batch, ignore_value=ignore_value).bool()
+             & pre_filter_batch.batch["response_mask"].bool()).any(dim=-1)
+    n_out = int((~valid).sum().item())
+    if n_out == 0:
+        return pre_filter_batch, 0
+    if n_out == len(pre_filter_batch):
+        return batch, n_out
+    return pre_filter_batch.select_idxs(torch.nonzero(valid, as_tuple=False).flatten()), n_out
+
+
 def compute_valid_return_metrics(data: DataProto, ignore_value: float = -100.0) -> dict[str, float]:
     """Log return stats on real value-supervision positions only."""
     if "returns" not in data.batch or "response_mask" not in data.batch:
@@ -2866,8 +2888,11 @@ class RayPPOTrainer:
                     # the main line's per-turn PPO (vagen/turn_gae.py): its raw advantages are whitened after the
                     # filter, over the episodes the update keeps (before any padding to the workers)
                     turn_gae_run = str(self.config.algorithm.adv_estimator) == "turn_gae"
+                    critic_all_candidates = bool(self.config.trainer.get("critic_all_candidates", False))
+                    if critic_all_candidates and not self.use_critic:
+                        raise ValueError("trainer.critic_all_candidates needs a value network (critic)")
                     if self.config.filter.get("enable", False):
-                        if self.config.trainer.get("rollout_data_dir", None):
+                        if self.config.trainer.get("rollout_data_dir", None) or critic_all_candidates:
                             pre_filter_batch = batch  # the rollout dump writes every candidate (rollout_dump_view)
                         batch.meta_info["uid_draw_order"] = uid_draw_order
                         batch.meta_info["adv_estimator"] = str(self.config.algorithm.adv_estimator)  # keep filter
@@ -2990,7 +3015,16 @@ class RayPPOTrainer:
                     # update critic
                     if self.use_critic:
                         with marked_timer("update_critic", timing_raw, color="pink"):
-                            critic_output = self.critic_wg.update_critic(batch)
+                            critic_batch, critic_rows_out = critic_update_batch(batch, pre_filter_batch,
+                                                                                critic_all_candidates)
+                            if critic_all_candidates:  # p1tgae_c2: every candidate, padded to the workers
+                                if critic_batch is not batch:
+                                    for key in ("uid_draw_order", "adv_estimator"):
+                                        critic_batch.meta_info.pop(key, None)
+                                    critic_batch, _ = pad_dataproto_to_divisor(critic_batch, self.critic_wg.world_size)
+                                metrics["critic/update_batch_size"] = len(critic_batch)
+                                metrics["critic/update_rows_without_target"] = critic_rows_out
+                            critic_output = self.critic_wg.update_critic(critic_batch)
                         critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
                         metrics.update(critic_output_metrics)
                         if "critic/vf_loss" in metrics:
@@ -3131,6 +3165,10 @@ class RayPPOTrainer:
                         data_metrics.pop(key, None)
                 metrics.update(data_metrics)
                 metrics.update(compute_valid_return_metrics(batch))
+                if critic_all_candidates and pre_filter_batch is not None:  # p1tgae_c2: the same readings, every candidate
+                    metrics.update({"critic/all/" + k[len("critic/"):]: v  # (not the advantages: raw there, whitened here)
+                                    for k, v in compute_valid_return_metrics(pre_filter_batch).items()
+                                    if k.startswith("critic/") and not k.startswith("critic/advantages/")})
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
                 # TODO: implement actual tflpo and theoretical tflpo
                 n_gpus = self.resource_pool_manager.get_n_gpus()

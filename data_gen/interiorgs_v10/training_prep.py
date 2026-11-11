@@ -424,9 +424,19 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
     "p1tgae_c": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
                  "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0, "lam": 0.95,
                  "critic_lr": 5e-5, "critic_value_clip": False, "critic_ppo_epochs": 2},
+    # fallback (a) of PPO_REPORT appendix A (the user's decision of 2026-11-11, after p1tgae_c failed level 1a):
+    # p1tgae_c with the value network's data and steps changed and nothing else: it updates on every candidate
+    # episode before the group filter (trainer.critic_all_candidates: 192, the all-success and all-fail groups too,
+    # against about 56 kept), in mini-batches of 3 groups (critic.ppo_mini_batch_size 3: 8 optimiser steps a pass,
+    # 16 an update with its two passes).  The actor's batch, filter, whitening, rewards and stop lines are p1tgae_c's
+    "p1tgae_c2": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
+                  "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0, "lam": 0.95,
+                  "critic_lr": 5e-5, "critic_value_clip": False, "critic_ppo_epochs": 2,
+                  "critic_all_candidates": True, "critic_mini_batch_groups": 3},
 }
 NO_VALUE_CLIP = 1.0e6  # critic.cliprange_value of a package without value clipping (far beyond any return)
 CRITIC_KEYS = ("critic_lr", "critic_value_clip", "critic_ppo_epochs")  # a package's value-network settings
+CRITIC_BATCH_KEYS = ("critic_all_candidates", "critic_mini_batch_groups")  # the value network's data (p1tgae_c2)
 PACKAGE_ESTIMATORS = ("grpo", "gae", "turn_gae")  # the advantage estimators a package may name (default grpo)
 CRITIC_ESTIMATORS = ("gae", "turn_gae")  # the ones with a value network (their warm-up is part of the package)
 
@@ -505,7 +515,7 @@ def package_overrides(name: str, candidates: Optional[int] = None, target_groups
         if "gamma" not in p or "lam" not in p:
             raise ValueError(f"package {name}: turn_gae needs its own gamma and lam (counted per turn)")
         out.update({"algorithm.gamma": float(p["gamma"]), "algorithm.lam": float(p["lam"]), "critic.enable": True})
-    named = [k for k in CRITIC_KEYS if k in p]  # the critic pilot (2026-11-10): the value network's own settings
+    named = [k for k in CRITIC_KEYS + CRITIC_BATCH_KEYS if k in p]  # the critic pilot (2026-11-10): the value network's own settings
     if named and estimator not in CRITIC_ESTIMATORS:
         raise ValueError(f"package {name}: {named} set the value network, which {estimator!r} does not have")
     if "critic_lr" in p:
@@ -522,6 +532,16 @@ def package_overrides(name: str, candidates: Optional[int] = None, target_groups
         if isinstance(epochs, bool) or not isinstance(epochs, int) or epochs < 1:
             raise ValueError(f"package {name}: critic_ppo_epochs must be a whole number >= 1, not {epochs!r}")
         out["critic.ppo_epochs"] = int(epochs)
+    if "critic_all_candidates" in p:  # fallback (a), 2026-11-11: only turning it on is a setting (off is the default)
+        if p["critic_all_candidates"] is not True:
+            raise ValueError(f"package {name}: critic_all_candidates can only be True, not {p['critic_all_candidates']!r}")
+        out["trainer.critic_all_candidates"] = True
+    if "critic_mini_batch_groups" in p:  # in groups (verl multiplies by the rollouts and divides by the cards)
+        groups = p["critic_mini_batch_groups"]
+        if isinstance(groups, bool) or not isinstance(groups, int) or groups < 1 or p["candidates"] % groups:
+            raise ValueError(f"package {name}: critic_mini_batch_groups must be a whole number >= 1 dividing the "
+                             f"{p['candidates']} candidates, not {groups!r}")
+        out["critic.ppo_mini_batch_size"] = int(groups)
     return out
 DENSE_S5 = {"enable_potential_shaping_reward": True, "potential_field_gamma": 0.99,
             "enable_near_success_reward": True, "near_success_bonus": 0.5, "near_success_threshold": 0.55,

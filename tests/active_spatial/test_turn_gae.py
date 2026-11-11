@@ -244,3 +244,48 @@ def test_valid_value_std_metric():
     valid = torch.tensor([0.5, 2.5, 1.5])
     assert m["critic/values/valid_std"] == pytest.approx(float(valid.std(unbiased=False)))
     assert m["critic/values/valid_mean"] == pytest.approx(float(valid.mean()))
+
+
+def test_critic_update_batch_all_candidates():
+    """Fallback (a) (package p1tgae_c2, the user's decision of 2026-11-11): off, the value network updates on the actor's
+    (filtered) batch, the very object; on, on every candidate before the filter - the dropped groups with their own
+    returns, the sentinel positions as they were - while the actor's batch and its advantages are untouched."""
+    from verl import DataProto
+
+    from vagen.custom_filter.filter import keep_by_return_std_filter
+    from vagen.ray_trainer import critic_update_batch, compute_valid_return_metrics
+
+    # three tasks of 2 episodes: "a" mixed (kept), "b" all-fail and "c" all-success (dropped by a 1-group target)
+    rewards = torch.zeros(6, 3)
+    rewards[:, 2] = torch.tensor([5.0, 0.0, 0.0, 0.0, 5.0, 5.0])
+    returns = torch.full((6, 3), TG.IGNORE_VALUE)
+    returns[:, 0] = rewards[:, 2]  # the anchor at each episode's first token
+    values = torch.full((6, 3), 1.0)
+    tensors = {"token_level_rewards": rewards, "advantages": torch.randn(6, 3, generator=torch.Generator().manual_seed(1)),
+               "response_mask": torch.ones(6, 3), "returns": returns, "values": values}
+    non = {"uid": np.array(["a", "a", "b", "b", "c", "c"], dtype=object), "traj_success": rewards[:, 2].numpy() > 0}
+    full = DataProto.from_dict(tensors={k: v.clone() for k, v in tensors.items()}, non_tensors=dict(non))
+    full.meta_info["adv_estimator"] = "turn_gae"
+    kept, _ = keep_by_return_std_filter(full, {}, target_groups=1, std_threshold=0.1, std_floor=1.0)
+    adv_before = kept.batch["advantages"].clone()
+    assert len(kept) == 2 and set(kept.non_tensor_batch["uid"]) == {"a"}
+    assert critic_update_batch(kept, full, False) == (kept, 0)  # off: as before, the very object
+    assert critic_update_batch(kept, None, True) == (kept, 0)   # no pre-filter batch (no filter): the batch itself
+    chosen, out = critic_update_batch(kept, full, True)
+    assert chosen is full and len(chosen) == 6 and out == 0
+    assert torch.equal(chosen.batch["returns"], returns)       # dropped groups' returns, sentinels unchanged
+    assert int((chosen.batch["returns"] != TG.IGNORE_VALUE).sum()) == 6
+    assert torch.equal(kept.batch["advantages"], adv_before)   # the actor's batch is not touched
+    m_all, m_kept = compute_valid_return_metrics(chosen), compute_valid_return_metrics(kept)
+    assert (m_all["critic/returns/valid_count"], m_kept["critic/returns/valid_count"]) == (6, 2)
+    # the reviewers' case: a row with no value target (no generated turn: all sentinel) is left out, counted; verl's
+    # dp_critic would raise on it; the other rows keep their order and returns
+    no_target = DataProto.from_dict(tensors={k: v.clone() for k, v in tensors.items()}, non_tensors=dict(non))
+    no_target.batch["returns"][3] = TG.IGNORE_VALUE
+    chosen, out = critic_update_batch(kept, no_target, True)
+    assert out == 1 and len(chosen) == 5 and list(chosen.non_tensor_batch["uid"]) == ["a", "a", "b", "c", "c"]
+    assert int((chosen.batch["returns"] != TG.IGNORE_VALUE).sum()) == 5
+    assert torch.equal(chosen.batch["returns"], torch.cat([returns[:3], returns[4:]]))
+    none = DataProto.from_dict(tensors={k: v.clone() for k, v in tensors.items()}, non_tensors=dict(non))
+    none.batch["returns"][:] = TG.IGNORE_VALUE
+    assert critic_update_batch(kept, none, True) == (kept, 6)   # no target anywhere: the actor's batch
