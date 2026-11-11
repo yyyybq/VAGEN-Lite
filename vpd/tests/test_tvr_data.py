@@ -968,6 +968,9 @@ def test_reach_dump_cli_with_stub_pool(tmp_path, tvb, monkeypatch):
                                                     fail=made.get("fail")), n_envs)
 
         def start(self):
+            made["started"] = made.get("started", 0) + 1
+            if made.get("start_error"):
+                raise RuntimeError("fake: worker 0 did not start twice")  # as ThorPool's PoolError
             return self.ready()
 
     stub = types.ModuleType("vpd.tvr.thor_worker")
@@ -993,6 +996,18 @@ def test_reach_dump_cli_with_stub_pool(tmp_path, tvb, monkeypatch):
     assert made["pool"].closed is False  # complete: normal close
     assert reach.check(out)["complete"] and json.loads((out / "dump_last.json").read_text())["complete"]
     opts = ["--envs", "2", "--lp", "2", "--profile", "envlib"]
+    # a rerun over a complete dump starts no worker, so a failing start-up cannot fail the step: rc 0, index kept
+    b = (out / "index.json").read_bytes()
+    made.update(start_error=True, started=0)
+    assert reach.main(base(out) + opts) == 0 and made["started"] == 0
+    assert (out / "index.json").read_bytes() == b
+    last = json.loads((out / "dump_last.json").read_text())
+    assert last["complete"] and last["written"] == [] and len(last["skipped"]) == 3
+    (out / "scenes" / "FloorPlan22.json").unlink()  # one scene left: the pool is started (and here fails: rc 1)
+    assert reach.main(base(out) + opts) == 1 and made["started"] == 1
+    assert not (out / "scenes" / "FloorPlan22.json").exists()
+    made["start_error"] = False
+    assert reach.main(base(out) + opts) == 0 and made["started"] == 2 and reach.check(out)["complete"]
 
     # deadline in the middle of a pass: rc 4, fast close, no restart, dump_last.json written
     monkeypatch.setattr(reach, "NO_NEW_PASS_S", 0.3)
@@ -1058,6 +1073,51 @@ def test_reach_dump_deadline_mid_pass_no_restart(tmp_path, tvb, monkeypatch):
 
 
 @needs_repo
+def test_reach_dump_restart_near_the_deadline(tmp_path, tvb, monkeypatch):
+    """A restart starts only with NO_NEW_PASS_S + the pool's startup_timeout seconds left (else the worker is retired
+    and the scene fails, deadline_hit); a restart that runs into the deadline gives no retry and no requeue, and
+    deadline_hit is set by that worker itself (the others may have left take() already: rc 4, not 1)."""
+    w = _reach_world(tmp_path, tvb)
+    monkeypatch.setattr(reach, "NO_NEW_PASS_S", 0.3)
+    w0_no_load = lambda wk, c: wk.wid == 0 and c["op"] == "load"  # noqa: E731
+
+    def run(pool, name, deadline_s):
+        t0 = time.monotonic()
+        res = reach.dump(["eval500"], tmp_path / name, pool, deadline=t0 + deadline_s, tasks_dir=w.tree["tasks_dir"],
+                         log=lambda *a: None)
+        assert time.monotonic() - t0 < deadline_s + 5
+        assert not res["complete"] and res["failed"] == ["FloorPlan22"] and res["deadline_hit"]
+        assert res["requeued"] == [] and not (tmp_path / name / "index.json").exists()
+        return res
+
+    # 10 s left < 0.3 + startup_timeout 30: the restart is not even tried; worker 0 is retired
+    pool = MiniPool(lambda wid: MiniWorker(w.tv, wid, w.houses, w.tree["procthor_dir"], fail=w0_no_load), 2)
+    pool.startup_timeout = 30.0
+    res = run(pool, "n1", 10.0)
+    assert pool.restarts == [] and res["retired"] == [0]
+    assert any(e["error"] == reach.NO_TIME and e["wid"] == 0 for e in res["errors"])
+
+    class SlowRestart(MiniPool):  # the restart takes 1.6 s: it ends inside the last NO_NEW_PASS_S seconds
+        ok = False
+
+        def restart(self, wid):
+            self.restarts.append(wid)
+            time.sleep(1.6)
+            if not self.ok:
+                return {"ok": False, "error": "cannot restart"}
+            self._spawn(wid)
+            return {"ok": True, "wid": wid}
+
+    for ok in (False, True):
+        pool = SlowRestart(lambda wid: MiniWorker(w.tv, wid, w.houses, w.tree["procthor_dir"], fail=w0_no_load), 2)
+        pool.ok, pool.startup_timeout = ok, 0.1
+        res = run(pool, f"s{int(ok)}", 1.4)
+        assert pool.restarts == [0]
+        assert res["retired"] == ([] if ok else [0])
+        assert pool.w[0][0].calls == ([] if ok else [("load", "FloorPlan22")])  # no retry on the fresh worker
+
+
+@needs_repo
 def test_reach_dump_on_real_thorpool_failed_restart(tmp_path, tvb):
     """reach.dump on tvreval's REAL thor_worker.ThorPool (local_factory Workers on the fake ai2thor): worker 0
     cannot load and its restart fails -> it is retired after one pass, its pass is requeued, the dump completes."""
@@ -1097,6 +1157,74 @@ def test_reach_dump_on_real_thorpool_failed_restart(tmp_path, tvb):
     assert reach.check(out)["complete"]
     ix = json.loads((out / "index.json").read_text())
     assert ix["call_pose_mismatch"] == [] and all(e["call_pose_ok"] is True for e in ix["tasks"].values())
+
+
+@needs_repo
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_reach_dump_harness_error_on_real_thorpool(tmp_path, tvb):
+    """reach.dump on tvreval's REAL thor_worker.ThorPool (local_factory Workers on the fake ai2thor), 3 workers, no
+    deadline.  An error in the harness while a pass runs fails that pass and its scene, and the dump RETURNS (take()
+    waits while a pass is 'taken': a dead worker thread used to hold its pass forever): (1) a reply whose positions
+    lack x (KeyError in reach.digest), (2) a worker thread that ends on a BaseException (SystemExit raised through
+    ThorPool.call), (3) a scene file that cannot be written.  A rerun then dumps only the failed scene."""
+    w = _reach_world(tmp_path, tvb)
+    from vpd.tvr import thor_worker
+
+    font = lvp.install_font_rule(w.tv, allow_missing=True)
+    mode = {}
+
+    class BadReply(thor_worker.Worker):
+        def op_reach_task(self, cmd):
+            out = super().op_reach_task(cmd)
+            if cmd["task"]["scene"] == "FloorPlan22":
+                if mode.get("exit"):
+                    raise SystemExit(3)
+                if mode.get("no_x"):
+                    out["positions"] = [{k: v for k, v in q.items() if k != "x"} for q in out["positions"]]
+            return out
+
+    def mk(wid):
+        return BadReply(w.tv, wid=wid, houses_dir=w.houses, procthor_dir=w.tree["procthor_dir"], font=font,
+                        environ={"OMP_NUM_THREADS": "1", "LP_NUM_THREADS": "1", "VPD_LVP_PROFILE": "envlib"})
+
+    def run(out, start=True):
+        pool = thor_worker.ThorPool(3, 1, "envlib", out_dir=tmp_path / "pool", houses_dir=w.houses, local_factory=mk)
+        if start:
+            pool.start()
+        box = {}
+        th = threading.Thread(target=lambda: box.update(res=reach.dump(
+            ["sft1600", "eval500"], out, pool, tasks_dir=w.tree["tasks_dir"], log=lambda *a: None)), daemon=True)
+        th.start()
+        th.join(60)
+        pool.close(fast=True)
+        assert not th.is_alive(), "reach.dump did not return"
+        return box["res"]
+
+    def failed_fp22(res, out, why):
+        assert not res["complete"] and res["failed"] == ["FloorPlan22"] and not res["deadline_hit"], res
+        assert res["written"] == ["FloorPlan21", "procthor_00004"] and res["index"] is None
+        assert res["retired"] == [] and res["requeued"] == []
+        assert any(e["scene"] == "FloorPlan22" and why in e["error"] for e in res["errors"]), res["errors"]
+        assert not (out / "index.json").exists() and not (out / "DONE").exists()
+
+    out = tmp_path / "h1"
+    mode["no_x"] = True
+    failed_fp22(run(out), out, "harness: KeyError('x')")
+    mode.clear()
+    res = run(out)  # resume: only the failed scene is dumped again
+    assert res["complete"] and res["written"] == ["FloorPlan22"] and len(res["skipped"]) == 2
+    assert reach.check(out)["complete"]
+    res = run(out, start=False)  # nothing left: an unstarted pool is enough (cmd_dump starts none then)
+    assert res["complete"] and res["written"] == [] and res["index"]["kept_existing_index"]
+
+    out = tmp_path / "h2"
+    mode["exit"] = True
+    failed_fp22(run(out), out, "the worker thread ended during the pass")
+    mode.clear()
+
+    out = tmp_path / "h3"
+    (out / "scenes" / "FloorPlan22.json").mkdir(parents=True)  # os.replace onto a directory fails
+    failed_fp22(run(out), out, "finish: IsADirectoryError")
 
 
 # ================================================================================================================
@@ -1271,6 +1399,26 @@ def test_demos_build_drop_reasons_records_and_idempotence(tmp_path, tvb):
     # rerun: identical -> no-op
     mt = (out / "manifest.json").stat().st_mtime_ns
     assert demos.main(_build_args(w, out)) == 0 and (out / "manifest.json").stat().st_mtime_ns == mt
+    # a re-rendered replay (new PNG bytes under the same names, recorded in the new trajectory) leaves
+    # demos_all.jsonl identical; images_sha256.json differs -> refused, nothing rewritten
+    from PIL import Image
+
+    tp = w.run / "tasks" / "ithor_FloorPlan31_easy_t00_s00" / "trajectory.json"
+    img0 = w.images / "ithor_FloorPlan31_easy_t00_s00" / "step_00.png"
+    raw_tj, raw_img = tp.read_bytes(), img0.read_bytes()
+    with Image.open(img0) as im:
+        im.load()
+        im.save(img0, format="PNG", compress_level=1)
+    assert img0.read_bytes() != raw_img
+    tj = json.loads(raw_tj)
+    tj["vpd"]["images"][0]["cur_sha256"] = hashlib.sha256(img0.read_bytes()).hexdigest()
+    T.write_json(tp, tj)
+    ims_b = (out / "images_sha256.json").read_bytes()
+    assert demos.main(_build_args(w, out)) == 2 and (out / "manifest.json").stat().st_mtime_ns == mt
+    assert (out / "images_sha256.json").read_bytes() == ims_b and demos.main(["check", "--out", str(out)]) == 1
+    tp.write_bytes(raw_tj)
+    img0.write_bytes(raw_img)
+    assert demos.main(_build_args(w, out)) == 0 and demos.main(["check", "--out", str(out)]) == 0
     # a different result over a DONE dir is refused
     tp = w.run / "tasks" / "ithor_FloorPlan31_easy_t00_s00" / "trajectory.json"
     tj = json.loads(tp.read_text())

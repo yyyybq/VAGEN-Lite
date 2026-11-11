@@ -29,8 +29,8 @@ replay's own obs_str k (never rebuilt), assistant k = "Action: <a_k>".  One json
 
 Outputs: demos_all.jsonl (kept, sft.json order), dropped.json [{"task_id", "reason", "detail"}], kin_check.json,
 images_sha256.json (every PNG of every replayed task: a FILE-INTEGRITY record only, never compared with another
-render, F4), manifest.json, DONE.  An existing DONE dir with an identical demos_all.jsonl is a no-op (exit 0); a
-different one is refused (exit 2).
+render, F4), manifest.json, DONE.  An existing DONE dir whose demos_all.jsonl, dropped.json, kin_check.json and
+images_sha256.json are identical to the rebuilt ones is a no-op (exit 0); any difference is refused (exit 2).
 
 CLI (PY_Q3, 1 core, stdlib):
   python -B -m vpd.tvr.demos build --replay OUT/tvr/replay/sft1600_lvp --images OUT/tvr/demos/sft1600_lvp/images
@@ -305,11 +305,13 @@ def cmd_build(a) -> int:
         print(f"[demos] refusing: {e}")
         return 2
     if (out / "DONE").is_file():
-        old = out / "demos_all.jsonl"
-        if old.is_file() and old.read_bytes() == b["files"]["demos_all.jsonl"]:
-            print(f"[demos] {out}: DONE with an identical demos_all.jsonl: no-op")
+        # all four data files: demos_all.jsonl names the images but holds no sha256, so a re-rendered replay (new
+        # PNG bytes under the same names) shows only in images_sha256.json
+        differ = [n for n, data in b["files"].items() if not (out / n).is_file() or (out / n).read_bytes() != data]
+        if not differ:
+            print(f"[demos] {out}: DONE with identical {', '.join(b['files'])}: no-op")
             return 0
-        print(f"[demos] refusing: {out} is DONE with a different demos_all.jsonl")
+        print(f"[demos] refusing: {out} is DONE with a different {', '.join(differ)}")
         return 2
     for n, data in b["files"].items():
         T.write_bytes_atomic(out / n, data)

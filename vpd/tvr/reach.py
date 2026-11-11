@@ -12,7 +12,10 @@ every scene of the requested sets is complete; an identical existing index.json 
 Failures: a failed pass gets a fresh worker (ThorPool.restart) and one retry; a second failure fails the scene.  A
 worker whose restart fails (ThorPool.restart returns ok False, or a stand-in raises) is retired, and when that
 happened before the pass's retry the pass goes back to the queue for another worker (the A/B rule still holds).
-After the deadline (fewer than NO_NEW_PASS_S seconds left) no restart, retry or new pass starts.
+After the deadline (fewer than NO_NEW_PASS_S seconds left) no restart, retry or new pass starts; a restart starts
+only with at least NO_NEW_PASS_S + the pool's startup_timeout seconds left (restarts are serialized), else the
+worker is retired and the scene fails (deadline).  An unexpected error in the harness while it runs a pass (e.g. a
+malformed reply) fails that pass and its scene (recorded in errors); the thread goes on with the next pass.
 call_pose (the worker's pose at the GetReachablePositions call) is compared with task.start and recorded
 (call_pose_ok; index.json call_pose_mismatch); not a gate.
 
@@ -24,6 +27,7 @@ CLI (PY_Q3 parent; the workers are TVR_PY thor_worker processes, tvreval's ThorP
   python -B -m vpd.tvr.reach dump --task-sets sft1600,eval500,dev200 --out OUT/tvr/reach/v1 --envs E --lp L
          --profile P --houses OUT/tvr/houses --deadline-s S       (exit 0 complete, 4 incomplete (deadline),
                                                                     1 error, 143 SIGTERM)
+      (no THOR worker is started when every scene file is already complete: only index.json / DONE are written)
   python -B -m vpd.tvr.reach check --out OUT/tvr/reach/v1          (exit 0 iff complete)
 
 Python 3.10 and 3.12, stdlib only at import time (thor_worker is imported inside the dump CLI only).
@@ -49,6 +53,8 @@ INDEX_SCHEMA = SCHEMA  # index.json carries the module schema too (CONTRACT 6.3)
 DEFAULT_ROOT = paths.TVR_OUT / "reach" / "v1"
 DEFAULT_TIMEOUTS = {"load": 240.0, "reach_task": 240.0, "reset": 240.0, "step": 120.0}  # = thor_worker.TIMEOUTS
 NO_NEW_PASS_S = 60.0  # no pass starts when fewer seconds than this remain before the deadline
+STARTUP_S = 150.0  # = thor_worker.STARTUP_TIMEOUT_S: a restart's bound when the pool has no startup_timeout
+NO_TIME = "no restart: too close to the deadline"
 MAX_EL = 11  # E x L rule of the probe's summary.recommended (CONTRACT F4)
 
 
@@ -163,6 +169,8 @@ class _Dump:
         self.requeued: List[Dict] = []
         self.n_todo = 0
         self.t0 = time.monotonic()
+        self.restart_lock = threading.Lock()
+        self.restart_s = float(getattr(pool, "startup_timeout", STARTUP_S))
 
     # time
     def left(self) -> float:
@@ -198,18 +206,25 @@ class _Dump:
 
     def restart(self, wid: int) -> Optional[str]:
         """A fresh worker in slot `wid`: None on success, else why.  ThorPool.restart returns the ready reply (ok
-        False when the new start-up failed, the slot is then empty); a stand-in may raise instead."""
-        try:
-            rr = self.pool.restart(wid)
-        except Exception as e:  # noqa: BLE001
-            return f"restart: {e!r}"
+        False when the new start-up failed, the slot is then empty); a stand-in may raise instead.  Restarts run one
+        at a time (as ThorPool's start-up lock does), and the time left is judged when it is this one's turn: with
+        fewer than NO_NEW_PASS_S + restart_s seconds left none starts (NO_TIME), so a restart ends before the
+        deadline's last NO_NEW_PASS_S seconds."""
+        with self.restart_lock:
+            if self.left() < NO_NEW_PASS_S + self.restart_s:
+                return NO_TIME
+            try:
+                rr = self.pool.restart(wid)
+            except Exception as e:  # noqa: BLE001
+                return f"restart: {e!r}"
         if not isinstance(rr, dict) or rr.get("ok") is not True:
             return f"restart: {rr.get('error') if isinstance(rr, dict) else repr(rr)}"
         return None
 
     def run_pass(self, wid: int, scene: str, p: str):
         """(result or None, requeue).  requeue is True when the pass failed once and its worker could not be
-        restarted for the retry: the worker is retired and another worker may run the pass."""
+        restarted for the retry: the worker is retired and another worker may run the pass (not when the restart
+        was skipped or ended too close to the deadline: then deadline_hit)."""
         ids = sorted(t["task_id"] for t in self.by_scene[scene])
         if p == "B":
             ids = ids[::-1]
@@ -229,7 +244,13 @@ class _Dump:
                 self.errors.append({"scene": scene, "pass": p, "wid": wid, "error": why})
                 self.log(f"[reach] w{wid} retired: {why}")
                 self.dead.add(wid)  # this worker takes no further pass
+                if attempt == 1 and (why == NO_TIME or self.left() < NO_NEW_PASS_S):
+                    self.deadline_hit = True  # the retry is lost to the deadline (no other worker would start it)
+                    return None, False
                 return None, attempt == 1
+            if attempt == 1 and self.left() < NO_NEW_PASS_S:  # the restart ran into the deadline: no retry
+                self.deadline_hit = True
+                return None, False
         return None, False
 
     def _one_pass(self, wid, scene, p, ids, tasks):
@@ -280,6 +301,13 @@ class _Dump:
         self.log(f"[reach] {k}/{self.n_todo} {scene}: {len(tasks)} tasks, A w{a['wid']} B w{b['wid']}, "
                  f"stable {doc['stable']}, {time.monotonic() - self.t0:.0f} s")
 
+    def _fail(self, it) -> None:
+        """Under the lock: pass `it` failed; the scene cannot complete, so its other pass is not run either."""
+        it[2] = "failed"
+        for other in self.items:
+            if other[0] == it[0] and other[2] is None:
+                other[2] = "failed"
+
     def worker(self, wid: int) -> None:
         try:
             while True:
@@ -287,7 +315,12 @@ class _Dump:
                 if it is None:
                     return
                 scene, p = it[0], it[1]
-                res, requeue = self.run_pass(wid, scene, p)
+                try:
+                    res, requeue = self.run_pass(wid, scene, p)
+                except Exception as e:  # noqa: BLE001  harness error (e.g. a reply without x / z): the pass fails
+                    self.errors.append({"scene": scene, "pass": p, "wid": wid, "error": f"harness: {e!r}"})
+                    self.log(f"[reach] {scene} pass {p} on w{wid}: harness error {e!r}")
+                    res, requeue = None, False
                 with self.lock:
                     both = False
                     if res is not None:
@@ -299,17 +332,27 @@ class _Dump:
                         self.assigned.get(scene, {}).pop(p, None)
                         self.requeued.append({"scene": scene, "pass": p, "wid": wid})
                     else:
-                        it[2] = "failed"
-                        for other in self.items:  # the scene cannot complete: do not run its other pass
-                            if other[0] == scene and other[2] is None:
-                                other[2] = "failed"
+                        self._fail(it)
                     self.lock.notify_all()
                 if both:
-                    self.finish_scene(scene)
+                    try:
+                        self.finish_scene(scene)
+                    except Exception as e:  # noqa: BLE001  e.g. the scene file cannot be written
+                        self.errors.append({"scene": scene, "wid": wid, "error": f"finish: {e!r}"})
+                        self.log(f"[reach] {scene}: cannot finish the scene: {e!r}")
+                        with self.lock:
+                            for x in self.items:
+                                if x[0] == scene:
+                                    x[2] = "failed"
                 if wid in self.dead:
                     return
         finally:
             with self.lock:
+                for x in self.items:  # a pass this thread still holds (it ended on an unexpected error) fails, so
+                    if x[2] == "taken" and self.assigned.get(x[0], {}).get(x[1]) == wid:  # take() stops waiting
+                        self.errors.append({"scene": x[0], "pass": x[1], "wid": wid,
+                                            "error": "harness: the worker thread ended during the pass"})
+                        self._fail(x)
                 self.live -= 1
                 self.lock.notify_all()
 
@@ -368,20 +411,28 @@ def write_index(by_set, out: Path) -> Dict:
     return {"index_sha256": T.sha256_file(p), "kept_existing_index": keep}
 
 
-def dump(task_sets: Sequence[str], out, pool, deadline: Optional[float] = None, *, root=None, tasks_dir=None,
-         timeouts: Optional[Mapping[str, float]] = None, log: Callable[..., None] = print) -> Dict:
-    """The dump procedure (module doc).  `pool` is a started thor_worker.ThorPool (or a stand-in with call /
-    restart / ready); `deadline` is a time.monotonic() value (None: none).  Returns {"complete", "deadline_hit",
-    "scenes", "skipped", "written", "failed", "errors", "index"}."""
-    out = Path(out)
+def _plan(task_sets: Sequence[str], out: Path, root=None, tasks_dir=None):
+    """(by_set, by_scene {scene: {task_id: task}}, order, todo): the scenes of the sets in dump order and those
+    without a complete scene file."""
     by_set = {n: T.task_set(n, root, tasks_dir) for n in task_sets}
     by_scene: Dict[str, Dict[str, Dict]] = {}
     for ts in by_set.values():
         for t in ts:
             by_scene.setdefault(t["scene"], {})[t["task_id"]] = t
-    by_scene_l = {s: list(v.values()) for s, v in by_scene.items()}
-    order = _scene_order(by_scene_l)
+    order = _scene_order({s: list(v.values()) for s, v in by_scene.items()})
     todo = [s for s in order if not scene_complete(out / "scenes" / f"{s}.json", by_scene[s])]
+    return by_set, by_scene, order, todo
+
+
+def dump(task_sets: Sequence[str], out, pool, deadline: Optional[float] = None, *, root=None, tasks_dir=None,
+         timeouts: Optional[Mapping[str, float]] = None, log: Callable[..., None] = print) -> Dict:
+    """The dump procedure (module doc).  `pool` is a started thor_worker.ThorPool (or a stand-in with call /
+    restart / ready; with nothing left to dump it is not used beyond ready(), so it may be unstarted); `deadline`
+    is a time.monotonic() value (None: none).  Returns {"complete", "deadline_hit", "scenes", "skipped",
+    "written", "failed", "errors", "retired", "requeued", "index"}."""
+    out = Path(out)
+    by_set, by_scene, order, todo = _plan(task_sets, out, root, tasks_dir)
+    by_scene_l = {s: list(v.values()) for s, v in by_scene.items()}
     skipped = [s for s in order if s not in todo]
     wids = _worker_ids(pool)
     if todo and len(wids) < 2:
@@ -459,9 +510,12 @@ def cmd_dump(a) -> int:
     fast = False
     try:
         try:
-            pool.start()
-            res = dump(T.parse_sets(a.task_sets), out, pool, deadline, root=a.tvr_out, tasks_dir=a.tasks_dir,
-                       timeouts=timeouts)
+            sets = T.parse_sets(a.task_sets)
+            if _plan(sets, out, a.tvr_out, a.tasks_dir)[3]:
+                pool.start()
+            else:  # a rerun after a complete dump: no THOR worker start (that could only fail the step)
+                print("[reach] every scene file is complete: no THOR worker started")
+            res = dump(sets, out, pool, deadline, root=a.tvr_out, tasks_dir=a.tasks_dir, timeouts=timeouts)
             fast = res["deadline_hit"]
         except Terminated:
             print("[reach] terminated: fast shutdown")
