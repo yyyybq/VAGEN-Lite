@@ -955,7 +955,7 @@ success = stopped and is_exact(final_pose, target)
 4. 渲染器：重放和每次图像评测的 results.json 的 `renderer` 块里，档案、字体 sha、L 等于 `render.*`；重放的 E 等于 `render.replay_envs`，每次图像评测的 E 等于 `render.eval_envs`（各自对照自己的键）。这几个值是框架的请求；另外 `renderer.workers_ok` 必须为真，并且**每个** worker 自己的 ready 回复（`renderer.workers`）：档案 == `render.lvp_profile`、L == `render.lp_threads`、字体 mode 为 pinned 且 sha == `render.badge_font_sha256`、`system_prompt_ok` 和 `tvrbench_files_ok` 为真（系统提示和 TVRBench 文件的 sha 等于冻结值）（`pilot_tvr.worker_problems`）。
 5. 代码：三个起点的 0W 共用一个 code_sha256，以 `0865dd75f1ee` 开头；100 档和最高档从本起点的 0W 开始（init sha），它们的 code_sha256 等于本起点 0W 的（种子重复的 0W_s1002 和 100s1002 也对照 Q3B 的 0W）；每次评测的 `results.code_sha256` == `results.code_fingerprint.code_sha256`，所有评测用同一个评测框架 code_sha256。这条"同一个框架"只管评测：数据作业的重放在评测之前跑，可以带更早的 run_tvr 指纹，不参与比较。
 6. kin_env = ThorEnv：每条保留的重放上完全一致（`kin_equal_all_kept`，硬性）；图像臂评测的任务上，`valid_list` 类不一致为 0（注入失效），位姿 / 成功类不一致的任务 ≤ 每次评测任务数的 1%（`gates.kin_eval`；附 A：O23）；所有计数和前几个不一致都报。
-7. 合并 = LoRA：**每次**合并试点评测（0W、100、最高档，以及 Q3B 的 100s1002）都做 teacher-forced 检查，在 0W 池的 20 条示范上：平均 |ΔCE| ≤ 0.005，回复 argmax 一致率 ≥ 0.99（`gates.merge_parity`；WalkerBench x483 的参考值 0.00072 / 344 of 345；附 A：O2）。
+7. 合并 = LoRA：**每次**合并试点评测（0W、100、最高档，以及 Q3B 的 100s1002）都做 teacher-forced 检查，在 0W 池的 20 条示范上：平均 |ΔCE| ≤ 0.005，回复 argmax 一致率 ≥ 0.99（`gates.merge_parity`；WalkerBench x483 的参考值 0.00072 / 344 of 345；附 A：O2）（2026-11-11 起按第 17 节的偏差改为只检查合并是否正确：服务的权重和合并公式逐位相同、fp32 合并误差 ≤ 1e-4、模块集合一致；这里的 bf16 数照报不判）。
 8. 每次合并评测用的是盘上现在的 adapter.pt（sha 相等）。
 9. 注意力 sdpa（adapter meta 的 attn_sites），训练 meta 和 vLLM mm kwargs 里 max_pixels = 1,024,000。
 10. 评测设置等于 `protocol`（results.settings），包括 blind_concurrency、server 块（enforce_eager、seed 0、generation_config vllm、xgrammar；max_images）和 versions 块（对照 results.server）。results.settings 本身是从 `protocol` 抄的，所以另外按臂判 run_tvr 记下的**本次实际值**：`max_tokens_used` == `protocol.max_tokens[臂]`，`regex_used` == `protocol.regex`（c、blind 臂；u 臂为 null），`blind_concurrency_used` == `protocol.blind_concurrency`（blind 臂；其他为 null），`request_fields` 等于登记的请求字段（c、blind 臂另有 structured_outputs）（`gate_tvr.used_settings`）。max_model_len：所有评测服务的值相同，并且等于 `protocol.max_model_len`，或者在冻结前已登记 O9 偏差（第 17 节保留行里写了 `CAL/shake/fallback_used.json` 的 sha256，`gate_tvr.o9_fallback`）时**每次**评测都等于备用值；没登记却有这个文件、或者登记了却按 32768 跑，都不过；每次评测的 `settings.max_model_len_used` 等于服务实际的值。
@@ -997,7 +997,7 @@ G0–G3 都过以后才跑第 12 节第 6 条的功效模拟（检验 = 第 12 �
 - POWER.json 过期（`gate_tvr.power_stale`）：它记的某个 per_task.jsonl 的 sha256 变了，A4 要的某个 per_task.jsonl（三个起点的 100、N_top 档 c 臂和 100s1002）不在它的输入里，或者 `inputs.pilot_cfg_json_sha256` ≠ sha256(现在的 pilot_cfg.as_json())；
 - POWER.json 不是按登记设置算的（`gate_tvr.power_unregistered`）：没有 `registered` 块；`registered.test` ≠ `power.test`；`registered.n_sims_registered` 或 `n_sims_used` ≠ `power.n_sims`（`--n-sims` 只供测试）；`registered.tier_corr`、`fallback`、`persistence` 和 `power.*` 不同；`registered.allow_no_replicate` 不是 false；`sigma.replicate_missing` 或 `persistence.replicate_missing` 不是 false（缺种子重复）；`registered.backend` ≠ `power.backend`（numpy；第 12 节第 6 条）。
 
-  只有不是 pending 的 POWER.json 才按它的 `pass` 判过或不过。登记的备用设计（两档种子 1–2）按同样的规则判，结果是 `fallback_pass`（只在第 15 节第 9 条用）。按第 12 节第 7 条的核对，λ 稍大于 0 时 A4 就会判"功效不够"，交用户定。
+  只有不是 pending 的 POWER.json 才按它的 `pass` 判过或不过。登记的备用设计（两档种子 1–2）按同样的规则判，结果是 `fallback_pass`（只在第 15 节第 9 条用）。按第 12 节第 7 条的核对，λ 稍大于 0 时 A4 就会判"功效不够"，交用户定。（2026-11-11 起，A4 不过时的走法由用户预先授权，见第 17 节）
 
 ### 决策表
 
@@ -1011,7 +1011,7 @@ G0–G3 都过以后才跑第 12 节第 6 条的功效模拟（检验 = 第 12 �
 | 过 | 过 | 过 | 过 | 过 | `ruler`：TVR 是合格的尺子。按第 15、16 节估确认轮卡时，≤ 100 卡时就开跑并通知用户，> 100 就停下问 |
 | 缺评测 | | | | | `incomplete`（gate_tvr 退出码 3） |
 
-- 几条同时不过时全部列出。A3 不进决策表。决定里从来没有起点差。
+- 几条同时不过时全部列出。A3 不进决策表。决定里从来没有起点差。第 17 节 2026-11-11 登记的 Q3S − Q3B、Q3S − E2 比较只报告，在闸门和功效之后单独算，也不进决策表。
 
 ---
 
@@ -1074,6 +1074,9 @@ G0–G3 都过以后才跑第 12 节第 6 条的功效模拟（检验 = 第 12 �
 | 2026-11-10 | 合并 = LoRA 的检查加到**每次**合并试点评测（0W、100、最高档、100s1002），进 G0（附 A：O2） | 简报 A1 要求"合并后的模型和 LoRA 一致"；G10(g) 的 G0 漏了 | 编排（DECISIONS G12） |
 | 2026-11-10 | 确认检验改为终点层面的种子方差（`seed_aware_endpoint_t`，df 12）；A4 的一类错误在 ρ = 0、1 判，功效在 ρ = 0.5 判；备用设计改为两档种子 1–2（df 6）；功效模型加任务持续性 λ（Q3B 种子重复的逐题不一致率，对照别的试点起点逐题结果的协方差给出的、同一水平下没有持续性的不一致率；对起点均值不变，wave 2b 第二轮修订；`power.backend` = numpy 也登记）；校准作业要求全部 `data.*`（附 A：O25）；wave 2c（2026-11-11 写入）：λ_used = clip(λ̂ + 0.03, 0, 1)（登记的余量），POWER.json 不给起点的 SR 水平（schema /3），加只报告的设计行（4、5 个种子，δ = 0.10；4、5 个种子另报族错误率） | wave-2 核查（stats:a4、xcut:protocol）：原检验假设两档偏移独立，ρ = 1 时族错误率 0.17–0.20；原备用设计（只 TOP 用种子 1–2）两档不配对，终点检验用不了；功效模型忽略起点内持续的逐题差，A4 功效偏乐观；校准要训练，K 和剔除名单必须先登记。修订时还没有任何 TVR 模型输出。wave 2c 的依据是 wave-2b 的独立统计核查：λ̂ 剩下的偏松偏差（到 −0.036）和 A4 的决定窗口一样大；wave 2b 的 POWER.json 能还原 Q3B 对另外两个起点的 SR 差；核查时（2026-11-11 00:5x–01:2x UTC，statcheck 输出文件的时间）盘上仍没有 TVR 模型输出，核查只用合成 p | 编排（2026-11-10 的授权，DECISIONS G13；wave 2c 记进 G14 的补记） |
 | （备用，只在用了时记） | max_model_len 改用 128000（O9） | 校准排查时 32768 / 96 张图的服务起不来；必须在冻结前记，之后每次试点评测都用 | — |
+| 2026-11-11 | G0 第 7 条改为只检查合并是否正确。对每次合并试点评测用到的适配器（0W、100、最高档，以及 Q3B 的 100s1002）：(i) 服务的权重和合并公式逐位相同：用同一个 `vpd/train/merge.py` 重做合并，每个合并模块等于 `n2_train_vpd.merge_adapter` 的结果，适配器以外的张量等于检查点的 bf16，没有多的或少的键（诊断的 served_ok）；(ii) fp32 合并误差 ≤ 1e-4：fp32 下合并的模型 MF 对训练出的函数 T，在 0W 池同样 20 条示范、267 条回复上 teacher-forced 的平均绝对 ΔCE；(iii) 模块集合一致：lora.wrap 包的 = 适配器的 = merge.py 合并的（252 个）。原来的 bf16 比较 U−M（平均绝对 ΔCE ≤ 0.005、回复一致率 ≥ 0.99，`gates.merge_parity`）照报，不判。证据是诊断作业 `vpd-tvr-mpdiag`（EXPLORATORY）的输出：Q3B 0W、Q3S ALL、E2 ALL 在 `OUT/tvr/runs/explore/mpdiag/r3-202611111828`，其余 7 个适配器补跑；`gate_tvr` 的 G0 第 7 条按这三项判。现有评测都保留。`pilot_cfg.py` 不改（它在评测框架的指纹里），1e-4 写在 `gate_tvr.py` | 诊断（pt-6kl8ci5s，0.669 卡时）：合并代码正确（三个适配器 T−MF 为 1e-6 到 2e-6，服务权重逐位等于公式，模块 252 = 252）；训练器自己的 bf16 前向离训练出的函数就有 0.008–0.010（平均绝对 ΔCE），已超过 0.005，原阈值低于 bf16 的数值噪声，没有纯工程修法；ALL 档的合并模型和训练器的前向一样准（Q3S、E2 判 noise），Q3B 0W 判 inconclusive（bf16 只存下约 74% 的小增量，所以 0W 档服务的模型带的增量比训练出的少，每个起点同样服务）。决定时没有人读过任何评测的成功率（DECISIONS G15a、G16） | 用户（2026-11-11，本线窗口） |
+| 2026-11-11 | 登记主报告的比较 Q3S − Q3B（只报告，不进闸门、决策表和 A4）：对每一档（0W、100、最高档 ALL）的每个臂（0W、100 档只有 c 臂；ALL 档 c、u、blind 三个臂，共 5 格），两个起点 seed 1001 的同一批 500 道评测题按 task_id 配对，成功取轨迹的 `result.success`（同 G0 第 17 条的口径）；报两边的 k/n 和 Wilson 95% 区间、只有 Q3S 成功的题数 b、只有 Q3B 成功的题数 c、第 12 节第 2 条的双侧精确检验 p。Q3S − E2 同样 5 格照报，作补充（看起作用的是动作训练，还是见过我们的场景）。参照行：Q3B 100 档 seed 1001 对 seed 1002，同法（看同一个起点两个种子之间差多少）。不做多重比较校正。这些 p 只算了题目抽样，没算训练种子之间的波动（每个起点每档只有一个种子；第 12 节第 4 条在合成设计上的核对：只算题目抽样的检验在种子 SD 0.03 时名义 0.05 的一类错误约 0.44–0.46），所以偏乐观，只作描述，不是确认轮的结论（推断）。计算顺序：GATE.json、POWER.json 写完之后，由单独的脚本算，另一个独立脚本复算；GATE.json 仍然不算起点之间的差 | 本线的成功标准是在非我们的任务上验证在我们任务上训过的权重有效；写入时没有人读过任何评测的成功率 | 用户（2026-11-11，本线窗口）；配对检验沿用第 12 节第 2 条，参照行、计算顺序和"偏乐观"的说明是编排按用户的决定补的细节（只报告） |
+| 2026-11-11 | A4 不过时的预先授权：闸门判 `power_insufficient`（G0–G3 都过、A4 不过）时不停下问用户，按 POWER.json `reported_designs` 里每个起点 4 个和 5 个种子的设计行（`main_seeds_4`、`main_seeds_5`：σ_used、λ_used、ρ = 0.5、δ = 0.08、Holm、只数处理起点更好的拒绝），选两个对比的功效都 ≥ 0.80、并且 `reported_designs.type1` 里同一设计 ρ = 0 和 ρ = 1 两格较大的族错误率 ≤ 0.06（第 13 节 A4 已要求）的最少种子数；两个都不满足就停下问用户。按第 15、16 节的规则估这个种子数下确认轮的总卡时，≤ 60 卡时就直接开跑并通知用户，> 60 卡时停下问。加种子的做法和冻结块的确认轮一致（起点、档、配方、检验、Holm、结果规则都不变，两档用同一组种子 1–n 配对，df = 6 × (n − 1)），只改种子数；用的时候在本节另记一条 | 用户事先定好 A4 不过时的走法 | 用户（2026-11-11，本线窗口） |
 
 ---
 
