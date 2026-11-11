@@ -11,8 +11,10 @@ RUN/tasks/<task_id>/trajectory.json for every task of the set and writes RUN/per
   scene-cluster bootstrap 95% percentile CI of SR (10,000 resamples, random.Random(0); descriptive only);
   spl_official = "eval_va _spl with our BFS opt (Stop counted in steps)" (descriptive).
 valid iff every task of the set has a trajectory, the server was alive at the end, 0 API errors and 0 task
-failures (regex mismatches are gate G2, not validity).  Under mechanism_only (the smoke) SR / SPL / within1 /
-stop / reached / bootstrap / final-error fields are withheld ("withheld": "mechanism smoke").
+failures (regex mismatches are gate G2, not validity), and - an image arm or the replay whose meta carries a
+renderer block - some THOR worker's ready reply is in that block (renderer_measured).  Under mechanism_only (the
+smoke) SR / SPL / within1 / stop / reached / bootstrap / final-error fields are withheld ("withheld": "mechanism
+smoke").
 
 CLI (bash payloads):
     PY_Q3 -B -m vpd.tvr.score_tvr official --run-dir D --served CODE --bfs OUT/tvr/bfs/<set>_opt.json
@@ -43,6 +45,14 @@ SPL_OFFICIAL_LABEL = "eval_va _spl with our BFS opt (Stop counted in steps)"
 RESULT_FILES = ("results.json", "results_invalid.json", "results_partial.json")
 MECH_COLUMNS = ("task_id", "category", "scene", "num_steps", "n_nonstop", "n_blocked", "n_unparseable",
                 "regex_mismatch")
+RENDER_ARMS = ("c", "u", "replay")  # rendered by THOR workers: a valid result needs their measured renderer
+
+
+def renderer_measured(renderer) -> bool:
+    """run_tvr's renderer block holds some worker's ready reply (a ready reply always carries the worker's pid; a
+    failed start-up reply has none; no pool start-up -> workers [])."""
+    ws = renderer.get("workers") if isinstance(renderer, dict) else None
+    return isinstance(ws, list) and any(isinstance(w, dict) and w.get("pid") is not None for w in ws)
 
 
 def utc() -> str:
@@ -186,7 +196,8 @@ def score_run(run_dir, *, task_ids: List[str], bfs_table: Optional[dict], reach_
     """Score RUN/tasks/*/trajectory.json of `task_ids`; write per_task.jsonl and the result file; (results, valid).
     bfs_table None (the replay, scored before the data job's bfs step): opt / spl / spl_official are null.
     partial (soft deadline): results_partial.json, never results.json.  A valid results.json already on disk is
-    never overwritten unless overwrite_valid (rescore)."""
+    never overwritten unless overwrite_valid (rescore).  arm in RENDER_ARMS and meta["renderer"] present: valid also
+    needs renderer_measured (recorded as "renderer_measured")."""
     run_dir = Path(run_dir)
     if (run_dir / "results.json").exists() and not overwrite_valid:  # before any write (per_task.jsonl too)
         raise RuntimeError(f"{run_dir}/results.json exists: a valid result is never overwritten")
@@ -210,7 +221,11 @@ def score_run(run_dir, *, task_ids: List[str], bfs_table: Optional[dict], reach_
     task_failures = meta.get("task_failures") or 0
     task_failures = len(task_failures) if isinstance(task_failures, (list, tuple)) else int(task_failures)
     alive = bool(meta.get("server_alive_at_end", True))
-    valid = (not missing) and alive and api_errors == 0 and task_failures == 0 and not partial
+    # gate G0(4) judges the renderer block, and a valid results.json is never overwritten: without a measured
+    # renderer the arm is invalid (or partial), so a later --resume redoes the finalize with a started pool
+    rend_check = arm in RENDER_ARMS and "renderer" in meta
+    rend_ok = renderer_measured(meta["renderer"]) if rend_check else True
+    valid = (not missing) and alive and api_errors == 0 and task_failures == 0 and rend_ok and not partial
     comp: Dict[str, Any] = {
         "schema": SCHEMA, "arm": arm, "n_tasks": n_tasks, "n_scored": len(rows), "valid": valid,
         "partial": bool(partial), "tasks_missing": missing,
@@ -226,6 +241,8 @@ def score_run(run_dir, *, task_ids: List[str], bfs_table: Optional[dict], reach_
         "denominators": {"overall": "n_tasks (a missing task counts as a failure)",
                          "by_category": "n = the scored tasks of the category"},
         "utc_scored": utc()}
+    if rend_check:
+        comp["renderer_measured"] = rend_ok
     if mechanism_only:
         comp["withheld"] = WITHHELD
     else:

@@ -838,13 +838,21 @@ def write_public(w, path):
     return path
 
 
-def run_replay(w, run, images, *extra, deadline=None):
+def run_replay(w, run, images, *extra, deadline=None, ctl=None, worker_cls=None, pools=None):
+    """cmd_replay of sft2 on the fake world (local workers); `pools` (a list) collects the ThorPool it made."""
     pub = write_public(w, w.tvr_out / "sft_train.json")
     a = run_tvr.build_parser().parse_args(
         ["replay", "--task-set", "sft2", "--public", str(pub), "--run-dir", str(run), "--images-dir", str(images),
          "--envs", "1", "--lp", "2", "--profile", "envlib", "--tvr-out", str(w.tvr_out), "--tasks-dir",
          str(w.tasks_dir), "--reach", str(w.reach), "--houses", str(w.houses), *extra])
-    return run_tvr.cmd_replay(a, ctl=run_tvr.Ctl(deadline), pool_factory=local_pool(w))
+    factory = local_pool(w, worker_cls)
+
+    def keep(*args):
+        pool = factory(*args)
+        if pools is not None:
+            pools.append(pool)
+        return pool
+    return run_tvr.cmd_replay(a, ctl=ctl or run_tvr.Ctl(deadline), pool_factory=keep)
 
 
 @needs_repo
@@ -940,34 +948,52 @@ def test_render_parity_rule_on_synthetic_frames(tmp_path):
     assert rc == 2 and json.loads(out.read_text())["pass"] is False
 
 
-def test_render_parity_thresholds_at_the_boundary(tmp_path):
-    """The frozen rule's numbers are really applied: PSNR 40 dB (a uniform +2 / +3 brightness shift on mid-range
-    frames: about 42.1 / 38.6 dB, SSIM above 0.99 for both) and SSIM 0.99 (sigma-1.5 noise: PSNR about 44.6 dB but
-    SSIM below 0.99 on the flat blocks)."""
+def test_render_parity_thresholds_at_the_boundary(tmp_path, monkeypatch):
+    """The frozen rule's numbers are really applied, each side pinned between a passing and a failing pair:
+    PSNR 40 dB (a uniform +2 / +3 brightness shift on mid-range frames: about 42.1 / 38.6 dB, SSIM above 0.99 for
+    both) and SSIM 0.99 (rounded Gaussian noise at about 48-49 dB: sigma 0.9 gives SSIM about 0.9912, sigma 1.0
+    about 0.9894, sigma 1.5 about 0.978, from the flat blocks).  render_parity applies two copies of the rule:
+    pilot_cfg render.consistency_rule and probe_lvp.passes_rule (the frozen G3(d) constants).  Each copy is also
+    checked ALONE (the other one switched off), so a wrong threshold in either (e.g. SSIM 0.95) fails this test."""
     assert pilot_cfg.FROZEN["render"]["consistency_rule"]["psnr_min_db"] == 40.0
     assert pilot_cfg.FROZEN["render"]["consistency_rule"]["ssim_min"] == 0.99
     tid = "t1"
     frames = [(40 + blocky(i).astype(np.int32) * 175 // 255).astype(np.uint8) for i in range(2)]
     ref = mini_replay(tmp_path / "ref", tid, frames)
 
-    def check(name, new_frames):
-        new = mini_replay(tmp_path / name, tid, new_frames)
-        out = tmp_path / f"{name}.json"
+    def noisy(sigma):
+        rng = np.random.default_rng(7)
+        return [np.clip(f + np.rint(rng.normal(0.0, sigma, f.shape)), 0, 255).astype(np.uint8) for f in frames]
+
+    # name: (frames, passes, (psnr lo, hi), (ssim lo, hi)) - every frame of the pair inside both ranges
+    cases = {"plus2": ([f + 2 for f in frames], True, (41.5, 42.5), (0.99, 1.0001)),
+             "plus3": ([f + 3 for f in frames], False, (38.0, 39.0), (0.99, 1.0001)),
+             "s090": (noisy(0.9), True, (45.0, 52.0), (0.990, 0.9925)),
+             "s100": (noisy(1.0), False, (45.0, 52.0), (0.988, 0.990)),
+             "s150": (noisy(1.5), False, (42.0, 52.0), (0.95, 0.99))}
+    for name, (new_frames, *_rest) in cases.items():
+        mini_replay(tmp_path / name, tid, new_frames)
+
+    def check(name):
+        new, out = tmp_path / name, tmp_path / f"{name}.json"
         rc = render_parity.main(["--replay", str(new), "--ref", str(ref), "--ref-images", str(ref / "imgs"),
                                  "--images", str(new / "imgs"), "--task-set", f"ids:{tid}", "--out", str(out)])
         return rc, json.loads(out.read_text())
 
-    rc, d = check("plus2", [f + 2 for f in frames])
-    assert 41.5 < d["min_psnr_db"] < 42.5 and d["min_ssim"] >= 0.99, d["frames"]
-    assert rc == 0 and d["pass"]
-    rc, d = check("plus3", [f + 3 for f in frames])
-    assert 38.0 < d["min_psnr_db"] < 39.0 and d["min_ssim"] >= 0.99, d["frames"]
-    assert rc == 1 and not d["pass"] and d["n_pass"] == 0
-    rng = np.random.default_rng(7)
-    noisy = [np.clip(f + np.rint(rng.normal(0.0, 1.5, f.shape)), 0, 255).astype(np.uint8) for f in frames]
-    rc, d = check("ssim", noisy)
-    assert min(probe_lvp.fnum(f["psnr_db"]) for f in d["frames"]) > 42.0 and d["min_ssim"] < 0.99, d["frames"]
-    assert rc == 1 and not d["pass"] and d["n_pass"] == 0
+    for only in ("both", "pilot_cfg", "probe_lvp"):
+        with monkeypatch.context() as mp:
+            if only == "pilot_cfg":  # probe_lvp.passes_rule off: render_parity's own pilot_cfg rule decides
+                mp.setattr(probe_lvp, "PSNR_MIN_DB", 0.0)
+                mp.setattr(probe_lvp, "SSIM_MIN", 0.0)
+            elif only == "probe_lvp":  # the pilot_cfg rule off: probe_lvp.passes_rule decides
+                mp.setattr(render_parity, "rule", lambda: {"psnr_min_db": 0.0, "ssim_min": 0.0})
+            for name, (_f, ok, (p0, p1), (s0, s1)) in cases.items():
+                rc, d = check(name)
+                ps = [probe_lvp.fnum(f["psnr_db"]) for f in d["frames"]]
+                ss = [probe_lvp.fnum(f["ssim"]) for f in d["frames"]]
+                assert len(ps) == 2 and all(p0 < p < p1 for p in ps) and all(s0 <= s < s1 for s in ss), \
+                    (only, name, d["frames"])
+                assert (rc, d["pass"], d["n_pass"]) == ((0, True, 2) if ok else (1, False, 0)), (only, name)
 
 
 @needs_repo
@@ -1078,6 +1104,16 @@ def test_score_run_metrics(tmp_path):
             (r2 / "tasks" / tid / "trajectory.json").write_text((run / "tasks" / tid / "trajectory.json").read_text())
         _, v = score_tvr.score_run(r2, task_ids=ids, bfs_table=None, reach_index=None, arm="c", meta=meta)
         assert not v and (r2 / "results_invalid.json").exists()
+    # a renderer block in the meta: an image arm / the replay needs a worker ready reply (pid); the blind arm none
+    for arm, rend, ok in (("c", {"workers": []}, False), ("replay", {"workers": [{"pid": None, "profile": None}]}, False),
+                          ("u", {"workers": [{"pid": 7}]}, True), ("blind", {"none": "kin_env (no rendering)"}, True)):
+        r3 = tmp_path / f"rend_{arm}"
+        (r3 / "tasks" / "a").mkdir(parents=True)
+        (r3 / "tasks" / "a" / "trajectory.json").write_text((run / "tasks" / "a" / "trajectory.json").read_text())
+        res3, v = score_tvr.score_run(r3, task_ids=["a"], bfs_table=None, reach_index=None, arm=arm,
+                                      meta={"renderer": rend})
+        assert v is ok and (r3 / ("results.json" if ok else "results_invalid.json")).exists(), arm
+        assert res3.get("renderer_measured") == (None if arm == "blind" else ok), arm
     _, v = score_tvr.score_run(run, task_ids=["a"], bfs_table=None, reach_index=None, arm="c", meta={}, partial=True,
                                overwrite_valid=True)
     assert not v and (run / "results_partial.json").exists() and not (run / "results.json").exists()
@@ -1249,6 +1285,112 @@ def test_eval_deadline_between_arms_is_partial(world, tmp_path, monkeypatch):
 
 
 @needs_repo
+def test_replay_deadline_during_pool_start_then_resume(world, tmp_path, monkeypatch):
+    """cmd_replay (the data job's replay step): the soft deadline passes inside pool.start() -> rc 4 and
+    results_partial.json; a --resume with time replays every task -> rc 0, results.json, resumed_from, perf."""
+    monkeypatch.setattr(run_tvr, "NEW_TASK_MIN_S", 0.0)
+    ctl = run_tvr.Ctl(2.0)
+    left = []
+
+    class Slow(thor_worker.Worker):
+        def start(self):
+            left.append(ctl.left())
+            time.sleep(2.5)
+            return super().start()
+
+    run, img, pools = tmp_path / "replay", tmp_path / "images", []
+    t0 = time.monotonic()
+    assert run_replay(world, run, img, ctl=ctl, worker_cls=Slow, pools=pools) == 4
+    assert time.monotonic() - t0 < 30 and len(left) == 1 and left[0] > 0  # pool.start() began before the deadline
+    assert [x["ok"] for x in pools[0].history] == [True] and pools[0].closed
+    part = json.loads((run / "results_partial.json").read_text())
+    assert part["partial"] is True and part["valid"] is False and part["deadline"]["hit"] is True
+    assert sorted(part["tasks_missing"]) == sorted(run_tvr.SFT2) and not (run / "results.json").exists()
+    assert not list((run / "tasks").glob("*/trajectory.json"))
+    monkeypatch.setattr(run_tvr, "NEW_TASK_MIN_S", 150.0)
+    assert run_replay(world, run, img, "--resume") == 0
+    res = json.loads((run / "results.json").read_text())
+    assert res["valid"] and res["tasks_missing"] == [] and not (run / "results_partial.json").exists()
+    assert res["resumed_from"]["file"] == "results_partial.json" and res["resumed_from"]["deadline"]["hit"] is True
+    assert res["resumed_from"]["tasks_missing"] == 2
+    segs = jl(run / "perf_parts.jsonl")  # the partial process ran nothing: no segment
+    assert res["perf"]["segments"] == len(segs) == 1 and res["perf"]["steps"] == segs[0]["steps"] == 8
+    assert res["renderer_measured"] is True and len(res["renderer"]["workers"]) == 1
+
+
+@needs_repo
+def test_replay_no_pool_start_near_deadline(world, tmp_path):
+    run, img, pools = tmp_path / "replay", tmp_path / "images", []
+    assert run_replay(world, run, img, deadline=100.0, pools=pools) == 4  # < 150 s left: no start-up, no task
+    assert pools[0].history == [] and not list((run / "tasks").glob("*/trajectory.json"))
+    part = json.loads((run / "results_partial.json").read_text())
+    assert part["deadline"] == {"hit": False, "new_tasks_stopped": True} and len(part["tasks_missing"]) == 2
+    assert part["renderer"]["workers"] == [] and part["renderer_measured"] is False
+
+
+@needs_repo
+def test_replay_resume_near_deadline_is_never_valid_without_a_renderer(world, tmp_path):
+    """Every trajectory on disk but no result file (a kill during finalize), then --resume with < 150 s left: the
+    pool is not started, so the replay is PARTIAL (rc 4), never a valid results.json with an empty renderer block
+    (gate G0(4) would reject it for good); a --resume with time starts the pool, runs no task, finalizes valid."""
+    run, img = tmp_path / "replay", tmp_path / "images"
+    assert run_replay(world, run, img) == 0
+    (run / "results.json").unlink()
+    mt = {t: (run / "tasks" / t / "trajectory.json").stat().st_mtime_ns for t in run_tvr.SFT2}
+    assert run_replay(world, run, img, "--resume", deadline=100.0) == 4
+    part = json.loads((run / "results_partial.json").read_text())
+    assert not (run / "results.json").exists() and part["partial"] is True and part["tasks_missing"] == []
+    assert part["renderer"]["workers"] == [] and part["renderer_measured"] is False
+    assert part["deadline"]["new_tasks_stopped"] is True
+    assert run_replay(world, run, img, "--resume") == 0
+    res = json.loads((run / "results.json").read_text())
+    assert res["valid"] and res["renderer_measured"] is True and res["renderer"]["n_workers_live"] == 1
+    assert [x["pid"] for x in res["renderer"]["workers"]] == [os.getpid()]  # the local worker's ready reply
+    assert res["resumed_from"]["file"] == "results_partial.json"
+    assert {t: (run / "tasks" / t / "trajectory.json").stat().st_mtime_ns for t in run_tvr.SFT2} == mt
+
+
+@needs_repo
+def test_replay_pool_failure_with_every_trajectory_is_invalid(world, tmp_path):
+    """No deadline, every trajectory on disk, but the pool does not start: invalid (rc 1), also after a rescore;
+    a later --resume with a working pool finalizes valid."""
+    class NoStart(thor_worker.Worker):
+        def start(self):
+            raise RuntimeError("no worker")
+
+    run, img = tmp_path / "replay", tmp_path / "images"
+    assert run_replay(world, run, img) == 0
+    (run / "results.json").unlink()
+    assert run_replay(world, run, img, "--resume", worker_cls=NoStart) == 1
+    inv = json.loads((run / "results_invalid.json").read_text())
+    assert inv["tasks_missing"] == [] and inv["partial"] is False and inv["renderer_measured"] is False
+    assert inv["renderer"]["workers"] and all(x["pid"] is None for x in inv["renderer"]["workers"])
+    a = run_tvr.build_parser().parse_args(["rescore", "--run-dir", str(run), "--tvr-out", str(world.tvr_out)])
+    assert run_tvr.cmd_rescore(a) == 1  # the copied meta keeps the renderer block, so the rule holds
+    assert (run / "results_invalid.json").exists() and not (run / "results.json").exists()
+    assert run_replay(world, run, img, "--resume") == 0
+    res = json.loads((run / "results.json").read_text())
+    assert res["renderer_measured"] is True and res["resumed_from"]["file"] == "results_invalid.json"
+
+
+@needs_repo
+def test_eval_resume_near_deadline_is_never_valid_without_a_renderer(world, tmp_path):
+    out = tmp_path / "evals"
+    rc, _ = run_eval(world, out)
+    assert rc == 0
+    run = rd(out, "c")
+    (run / "results.json").unlink()
+    rc, srv = run_eval(world, out, "--resume", deadline=100.0)
+    assert rc == 4 and srv.n_chat == 0
+    part = json.loads((run / "results_partial.json").read_text())
+    assert part["tasks_missing"] == [] and part["renderer"]["workers"] == [] and part["renderer_measured"] is False
+    rc, srv = run_eval(world, out, "--resume")
+    assert rc == 0 and srv.n_chat == 0
+    res = json.loads((run / "results.json").read_text())
+    assert res["valid"] and res["renderer_measured"] is True and len(res["renderer"]["workers"]) == 2
+
+
+@needs_repo
 def test_eval_server_death_ends_the_run_fast(world, tmp_path):
     out = tmp_path / "evals"
     srv = fake_server.FakeServer(model=SERVED)
@@ -1295,6 +1437,9 @@ def test_eval_dead_slot_requeues_with_its_attempt_count(world, tmp_path):
     assert rc == 0 and crashed["n"] == 1 and starts["n"] == 3
     res = json.loads((rd(out, "c") / "results.json").read_text())
     assert res["valid"] and res["tasks_missing"] == [] and res["renderer"]["n_workers_live"] == 1
+    # attempt 1's error of the requeued task is recorded, but it is not a task failure
+    assert [(r["task_id"], r["attempt"]) for r in res["requeued_tasks"]] == [(bad, 1)] and res["task_failures"] == 0
+    assert "one-off crash" in res["requeued_tasks"][0]["error"]
     trs = {t["task_id"]: traj(rd(out, "c"), t["task_id"]) for t in EVAL_TASKS}
     assert trs[bad]["vpd"]["attempt"] == 2  # attempt 2 on the other slot, not a fresh attempt 1
     assert len({tr["vpd"]["worker"] for tr in trs.values()}) == 1

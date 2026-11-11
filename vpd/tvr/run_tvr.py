@@ -33,6 +33,8 @@ results_partial.json.  Resume: protocol.json must be equal; finished tasks (same
 complete arm is reported and skipped (rc 0); a valid results.json is never overwritten.  Every pending arm gets a
 result file: an arm with missing tasks after the soft deadline passed (anywhere: server / pool start-up, an earlier
 arm's finalize, inside the arm) is partial; after the model server died, the remaining arms are not run (invalid).
+An image arm / the replay is never valid without a measured renderer (a worker ready reply of this process; the
+pool is not started with fewer than NEW_TASK_MIN_S left): partial near the deadline, else invalid.
 Exit: 0 every arm valid, 1 some arm invalid, 2 refused, 4 incomplete (deadline), 143 SIGTERM.
 Never run eval / replay on the login node with real workers or a real server (Unity, GPU).
 """
@@ -473,6 +475,7 @@ class ArmRun:
         self.lock = threading.Lock()
         self.api_errors = 0
         self.failures: List[Dict[str, Any]] = []
+        self.requeued: List[Dict[str, Any]] = []  # attempt-1 errors of tasks requeued to another slot (no failure)
         self.steps = 0
         self.max_images = 0
         self.max_prompt = 0
@@ -1053,7 +1056,8 @@ class Harness:
     def task_with_retry(self, ar: ArmRun, task, *, wid: Optional[int], client, first_attempt: int = 1) -> str:
         """'ok' | 'failed' | 'abandoned' | 'server_dead' | 'slot_dead' (image arms: the worker could not be
         restarted after the last attempt) | 'slot_dead_retry' (... after attempt 1: the task is requeued for
-        attempt 2 on another slot).  At most 2 attempts in total, also across slots (first_attempt)."""
+        attempt 2 on another slot; attempt 1's error goes to ar.requeued -> results requeued_tasks, not a task
+        failure).  At most 2 attempts in total, also across slots (first_attempt)."""
         tid = task["task_id"]
         for attempt in range(int(first_attempt), 3):
             try:
@@ -1089,6 +1093,9 @@ class Harness:
                     self._fail(ar, tid, e, attempt)
                     return "slot_dead" if slot_dead else "failed"
                 if slot_dead:
+                    with ar.lock:
+                        ar.requeued.append({"task_id": tid, "attempt": attempt, "wid": wid, "error": str(e)[:1000],
+                                            "utc": utc()})
                     return "slot_dead_retry"
         return "failed"
 
@@ -1123,7 +1130,9 @@ class Harness:
                 with cv:
                     q.insert(0, rest)
                     cv.notify_all()
-            log(f"{ar.name}: worker slot {wid} is dead ({why}); {len(rest)} tasks requeued")
+            what = (f"slot thread {wid} exits ({why})" if why == "harness error"
+                    else f"worker slot {wid} is dead ({why})")
+            log(f"{ar.name}: {what}; {len(rest)} tasks requeued")
 
         def slot(wid: int) -> None:
             client = None if replay else ChatClient(base_url, self.ctl, alive=self.server_alive)
@@ -1288,6 +1297,11 @@ class Harness:
                 "workers_ok": ok, "workers": workers,
                 "start_history": (self.pool.history if self.pool is not None else [])}
 
+    def renderer_ready(self, ar: ArmRun) -> bool:
+        """The blind arm needs no renderer; an image arm / the replay needs a measured one (score_tvr's rule on the
+        renderer block finalize writes)."""
+        return ar.arm not in score_tvr.RENDER_ARMS or score_tvr.renderer_measured(self._renderer(ar))
+
     def _kin_reach(self, ar: ArmRun) -> Tuple[Optional[dict], dict]:
         kin = {"tasks_equal": 0, "tasks_unequal": 0, "valid_list_mismatches": 0, "pose_or_success_mismatches": 0,
                "first": []}
@@ -1430,7 +1444,8 @@ class Harness:
                 "server": server, "code_fingerprint": self.code, "code_sha256": self.code["code_sha256"],
                 "protocol_sha256": ar.protocol_sha, "wall_seconds": round(ar.wall, 3), "calls": n_calls,
                 "api_errors": ar.api_errors, "task_failures": len(ar.failures), "failed_tasks": ar.failures,
-                "server_alive_at_end": alive, "perf": perf, "bfs_path": self.bfs_path, "deadline_s": self.deadline_s,
+                "requeued_tasks": ar.requeued, "server_alive_at_end": alive, "perf": perf, "bfs_path": self.bfs_path,
+                "deadline_s": self.deadline_s,
                 "deadline": {"hit": self.ctl.deadline_hit, "new_tasks_stopped": self.ctl.new_tasks_stopped},
                 "server_dead": self.server_dead, "utc_end": utc()}
         prev = self.resumed_from(ar)
@@ -1552,12 +1567,14 @@ def exit_code(results: List[Tuple[bool, bool]], ctl: Ctl, n_pending: Optional[in
 def deadline_partial(ar: ArmRun, ctl: Ctl, h: "Harness") -> bool:
     """An arm is PARTIAL (results_partial.json, exit 4) when the soft deadline passed or new tasks were stopped
     near it - whether inside the arm's threads or before / between arms (server or pool start-up, an earlier arm's
-    finalize) - and some of its tasks have no trajectory.  A dead server makes the arm invalid, not partial."""
+    finalize) - and some of its tasks have no trajectory, or (image arm / replay) its renderer was not measured (no
+    pool start-up near the deadline, also when every trajectory is on disk: a --resume after a kill during
+    finalize).  A dead server makes the arm invalid, not partial."""
     if ctl.left() <= 0 and not ctl.terminated:
         ctl.deadline_hit = True
     if h.server_dead or not (ctl.deadline_hit or ctl.new_tasks_stopped):
         return False
-    return len(ar.done_ids()) < len(ar.task_ids)
+    return len(ar.done_ids()) < len(ar.task_ids) or not h.renderer_ready(ar)
 
 
 def mark_near_deadline(ar: ArmRun, ctl: Ctl) -> None:
@@ -1695,6 +1712,9 @@ def cmd_eval(a, *, ctl: Optional[Ctl] = None, pool_factory: Optional[Callable] =
                 pool.start()
             except thor_worker.PoolError as e:
                 log(f"THOR pool did not start: {e}")
+        elif img_pending:  # the image arms are not run and, without a measured renderer, cannot be valid
+            ctl.new_tasks_stopped = True
+            log(f"no THOR pool start-up: {ctl.left():.0f} s left (< {NEW_TASK_MIN_S:.0f} s)")
         # every pending arm is finalized (a result file each), also when it cannot run: the deadline passed / new
         # tasks were stopped (-> results_partial.json) or the server died in an earlier arm (-> results_invalid)
         for ar in pending:
@@ -1768,6 +1788,9 @@ def cmd_replay(a, *, ctl: Optional[Ctl] = None, pool_factory: Optional[Callable]
                 pool.start()
             except thor_worker.PoolError as e:
                 log(f"THOR pool did not start: {e}")
+        else:  # nothing is replayed and, without a measured renderer, the replay cannot be valid
+            ctl.new_tasks_stopped = True
+            log(f"no THOR pool start-up: {ctl.left():.0f} s left (< {NEW_TASK_MIN_S:.0f} s)")
         mark_near_deadline(ar, ctl)
         h.write_manifest(ar)
         if ctl.stopped() or ctl.new_tasks_stopped:
