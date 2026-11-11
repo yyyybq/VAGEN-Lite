@@ -140,8 +140,8 @@ def test_recheck_equals_the_data_jobs_floors():
 # three starts (0W c, 100 c, ALL c,u,blind, Q3B 100s1002 c) -> score_tvr official -> an sft2 canary replay in a second
 # process + render_parity -> pilot root -> gate_tvr -> power_sim on the produced per_task.jsonl files.
 # Faked (they need a GPU, the trainer or vLLM): the adapters' meta.json / adapter.pt, the merge-parity files, the smoke
-# verdict; FakeServer's manifest is the one run_tvr.start_server's (unstarted) VLLMServer records, and the version
-# block is pinned to the frozen versions (the test interpreter's packages are not the served ones; the fake ai2thor has
+# verdict, the calibration's Q3B ALL dev200 result (the real cal-decide writes cal_decision.json from it); FakeServer's
+# manifest is the one run_tvr.start_server's (unstarted) VLLMServer records, and the version block is pinned to the frozen versions (the test interpreter's packages are not the served ones; the fake ai2thor has
 # no version).  Scale stand-ins (monkeypatched, visible): EVAL500_N 8, PUBLIC_N 9, gates.min_kept 8, the tier files
 # of 100 -> demos_4.jsonl (tiers --sizes 4, --zero-w-per-category 1), power.n_sims 40.
 # ================================================================================================================
@@ -349,6 +349,12 @@ def pipe(tmp_path_factory):
         cfg["gates"]["min_kept"] = len(SFT) - 1
         cfg["power"]["n_sims"] = 40
         w.cfg = cfg
+        # the calibration decision n_top is filled from (cal-decide on a stand-in Q3B ALL dev200 result: the cal job
+        # needs the trainer and vLLM) against this tree's floors_dev200.json
+        _wj(L.cal_eval("ALL") / "results.json", {"valid": True, "n_tasks": 200, "sr": {"k": 100, "n": 200},
+                                                 "fake": "the calibration eval needs the trainer and vLLM"})
+        w.cal_decision = PT.cal_decide(L.cal, L, cfg)
+        assert w.cal_decision["n_top"] == cfg["tiers"]["n_top"]
         tman = json.loads((L.tiers / "manifest.json").read_text())
         mp.setitem(PT.TIER_FILE, "100", TIER_FILES_FAKE["100"])
         mp.setitem(PT.TIER_FILE, "100_s1002", TIER_FILES_FAKE["100_s1002"])
@@ -448,6 +454,9 @@ def test_pipeline_data_products(pipe):
     rep = json.loads((L.replay / "results.json").read_text())
     assert rep["valid"] and rep["n_tasks"] == len(SFT) and rep["renderer"]["envs"] == pilot_cfg.FROZEN["render"][
         "replay_envs"]
+    # the workers' own ready replies, which G0(4) judges (pilot_tvr.worker_problems), are in run_tvr's replay result
+    assert rep["renderer"]["workers_ok"] is True and PT.worker_problems(rep["renderer"]) == []
+    assert {w["font_mode"] for w in rep["renderer"]["workers"]} == {"pinned"}
     # recheck_tvr's independent floors == floors.py's file (G0(17) on the integration tree)
     fl = json.loads((L.floors / "floors_eval500.json").read_text())
     assert RC.compare_floors(RC.floors(L.reach, pipe.td, pipe.pub), fl) == []
@@ -486,16 +495,33 @@ def test_pipeline_gate_and_power_sim(pipe, monkeypatch):
     assert rep["recheck"]["counts_equal"] is True and rep["recheck"]["floors_equal"] is True
     assert rep["A3"]["per_start"]["Q3B"]["b"] == 0 and rep["A3"]["per_start"]["Q3B"]["p"] == 1.0
     rep = _gate(pipe, monkeypatch, power=True)
-    pw = json.loads((L.pilot_root / "POWER.json").read_text())
+    pf = L.pilot_root / "POWER.json"
+    pw = json.loads(pf.read_text())
     assert isinstance(pw["pass"], bool) and pw["registered"]["n_sims_used"] == 40
     assert rep["A4"]["status"] == ("pass" if pw["pass"] else "fail")
     assert rep["decision"] == ("ruler" if pw["pass"] else "power_insufficient")
-    again = _gate(pipe, monkeypatch)  # the POWER.json just written is current
+    # the POWER.json power_sim wrote is current and made at the registered settings (the fields gate_tvr reads)
+    assert G.power_unregistered(pw, pipe.cfg) == [] and pw["registered"]["test"] == "seed_aware_endpoint_t"
+    assert pw["sigma"]["replicate_missing"] is False and pw["persistence"]["replicate_missing"] is False
+    again = _gate(pipe, monkeypatch)
     assert again["A4"]["status"] == rep["A4"]["status"] and again["A4"]["note"] is None
+    assert again["A4"]["power"] == G.a4_summary(pw) and again["A4"]["power"]["lambda_used"] == \
+        pw["persistence"]["lambda_used"] and again["A4"]["power"]["type1"] == pw["verdicts"]["main"]["type1"]
     direct = power_sim.run_tvr(L.pilot_root, cfg=pipe.cfg, out=pipe.tmp / "POWER2.json")
     assert direct["pass"] == pw["pass"] and direct["inputs"]["files_sha256"] == pw["inputs"]["files_sha256"]
     md = G.render_md(rep)
     assert "不算起点之间的差" in md and f"| Q3B | ALL | c | 是 | {TOP_K}/{len(EVAL)}" in md
+    # not at the registered settings (power_sim's own writer, current inputs and cfg): A4 pending, never read
+    try:
+        for kw, needle in (({"n_sims": 20}, "registered.n_sims_used 20 != power.n_sims 40"),
+                           ({"allow_no_replicate": True}, "registered.allow_no_replicate True")):
+            power_sim.run_tvr(L.pilot_root, cfg=pipe.cfg, out=pf, **kw)
+            bad = _gate(pipe, monkeypatch)
+            assert bad["A4"]["status"] == "pending" and bad["decision"] == "incomplete", kw
+            assert needle in bad["A4"]["note"] and bad["A4"]["power"] is None, bad["A4"]
+    finally:
+        _gate(pipe, monkeypatch, power=True)  # the registered POWER.json again
+    assert _gate(pipe, monkeypatch)["A4"]["status"] == rep["A4"]["status"]
 
 
 def test_pipeline_gate_catches_a_doctored_real_result(pipe, monkeypatch, tmp_path):

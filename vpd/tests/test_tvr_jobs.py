@@ -370,6 +370,12 @@ def test_check_prereg_uses_the_single_parser(tmp_path, monkeypatch):
     assert PT.check_prereg(cfg) == []
     cfg2 = filled_cfg("400")
     assert any("tiers.n_top" in d for d in PT.check_prereg(cfg2))
+    # pilot_cfg.check_prereg's comparison (also with a test cfg): a type-only difference and a key on one side count
+    cfg3 = filled_cfg()
+    cfg3["power"]["n_sims"] = 2000.0
+    cfg3["gates"]["extra"] = None
+    diffs = PT.check_prereg(cfg3)
+    assert any(d.startswith("power.n_sims") for d in diffs) and any(d.startswith("gates.extra") for d in diffs), diffs
 
 
 def test_prepare_train_needs_smoke_pass_and_derives_est(lay):
@@ -456,6 +462,72 @@ def test_submit_rechecks_prereg_commit(lay, monkeypatch):
     assert PT.submit("tvr-msmoke", L=lay, cfg=cfg, events=[]) == "pt-fake1"
 
 
+def test_prepare_refuses_n_top_other_than_the_calibration_decision(lay):
+    """tiers.n_top (filled by hand) must be cal_decision.json's n_top (with_400 for 400): msmoke / train / eval."""
+    cfg = filled_cfg("ALL")
+    build_data(lay, cfg)
+    build_cal(lay)
+    verdict(lay)
+    build_adapters(lay, "E2", cfg)
+    wj(lay.cal_decision, {"n_top": "400", "train_400": True, "futility": False, "with_400": True})
+    for job in ("tvr-msmoke", "tvr-train-e2", "tvr-eval-e2-low"):
+        with pytest.raises(PT.Refused, match=r"tiers.n_top 'ALL' != .*cal_decision.json n_top '400'"):
+            PT.prepare(job, L=lay, cfg=cfg, events=[])
+    cfg4 = filled_cfg("400")
+    build_data(lay, cfg4)
+    wj(lay.cal_decision, {"n_top": "400", "train_400": True, "futility": None, "with_400": False})
+    probs = PT.prerequisites("tvr-eval-q3s-top", lay, cfg4)
+    assert any("with_400 False" in b for b in probs), probs
+    lay.cal_decision.unlink()
+    assert any("has no calibration decision" in b for b in PT.prerequisites("tvr-train-q3s", lay, cfg4))
+    # an unfilled n_top is reported by missing() only
+    unfilled = filled_cfg()
+    unfilled["tiers"]["n_top"] = None
+    assert PT.n_top_problems(lay, unfilled) == []
+    wj(lay.cal_decision, {"n_top": "ALL", "train_400": False, "futility": False, "with_400": False})
+    assert PT.n_top_problems(lay, cfg) == [] and not [b for b in PT.prerequisites("tvr-msmoke", lay, cfg)
+                                                      if "n_top" in b]
+    assert not lay.calls["prepare"]
+
+
+def test_data_fill_prints_the_13_values(lay, capsys):
+    cfg = filled_cfg()
+    with pytest.raises(PT.Refused, match="has no DONE"):
+        PT.data_fill(lay)
+    build_data(lay, cfg)
+    run = PT.done_run("tvr-data", lay)
+    with pytest.raises(PT.Refused, match="expect.json is not ok"):
+        PT.data_fill(lay)
+    wj(run / "expect.json", {"ok": True, "failed": []})
+    rep = PT.data_fill(lay)
+    assert list(rep["data"]) == list(pilot_cfg.FROZEN["data"]) and rep["problems"] == []
+    assert rep["data"] == cfg["data"]  # build_data filled cfg from the same files
+    assert PT.LAYOUT is lay and PT.main(["data-fill"]) == 0
+    assert json.loads(capsys.readouterr().out)["data"]["kept"] == 1599
+    lay.data_file("bfs_dev200_sha256").unlink()
+    assert PT.main(["data-fill"]) == 2
+
+
+def test_guard_data_needs_the_probe_summary(lay, monkeypatch, tmp_path):
+    from vpd.tvr import lvp
+
+    cfg = filled_cfg()
+    font = tmp_path / "font.ttf"
+    font.write_bytes(b"font")
+    cfg["tvrbench"]["files_sha256"] = {}
+    cfg["render"]["badge_font_sha256"] = fsha(font)
+    cfg["render"]["probe_run"] = "OUT/jobs/tvr-probe-202611101501"
+    monkeypatch.setattr(lvp, "BADGE_FONT", str(font))
+    monkeypatch.setattr(PT, "prerequisites", lambda job, L=None, cfg=None, in_job=False: [])
+    run = lay.jobs / "tvr-data-202611111111"
+    run.mkdir(parents=True)
+    rep = PT.guard("tvr-data", run, lay, cfg)
+    assert not rep["ok"] and any("summary.json: missing" in b for b in rep["problems"]), rep
+    summ = wj(lay.jobs / "tvr-probe-202611101501" / "out" / "summary.json", {"recommended": {"E": 5, "L": 2}})
+    cfg["render"]["probe_summary_sha256"] = fsha(summ)
+    assert PT.guard("tvr-data", run, lay, cfg)["ok"]
+
+
 # ------------------------------------------------------------------------------------------ cal-decide
 def _cal_results(L, tier, k, n=200):
     wj(L.cal_eval(tier) / "results.json", {"valid": True, "n_tasks": n, "tasks_missing": [], "sr": {"k": k, "n": n}})
@@ -491,6 +563,16 @@ def test_cal_decide_futility_and_400_redecision(lay):
 
 
 # ------------------------------------------------------------------------------------------ smoke verdict
+def renderer_block(cfg: dict, envs: int = 5, n_workers: int = 2) -> dict:
+    """run_tvr's results.renderer (Harness._renderer): the harness's request plus each worker's ready reply."""
+    font = cfg["render"]["badge_font_sha256"]
+    return {"profile": "envlib", "font_sha256": font, "lp": 2, "envs": envs, "n_workers_live": n_workers,
+            "workers_ok": True,
+            "workers": [{"wid": w, "profile": "envlib", "lp": "2", "font_mode": "pinned", "font_sha256": font,
+                         "pid": 100 + w, "system_prompt_ok": True, "tvrbench_files_ok": True}
+                        for w in range(n_workers)]}
+
+
 def build_smoke(sm: Path, cfg: dict) -> None:
     for s in pilot_cfg.STARTS:
         wj(sm / s / "dry" / "dry_run.json", {"per_conversation": [
@@ -506,8 +588,7 @@ def build_smoke(sm: Path, cfg: dict) -> None:
             if a != "blind":
                 r["audit"] = {"prompt_parity": {"equal": True},
                               "image_tokens": {"tokens_per_image": [222], "grid_set": [[1, 22, 40]], "n": 30}}
-                r["renderer"] = {"profile": "envlib", "font_sha256": cfg["render"]["badge_font_sha256"], "lp": 2,
-                                 "envs": 5}
+                r["renderer"] = renderer_block(cfg)
             wj(ev / f"smoke__{s}__raw__{a}" / "results.json", r)
             for i in range(8):
                 wj(ev / f"smoke__{s}__raw__{a}" / "tasks" / f"t{i}" / "trajectory.json",
@@ -532,6 +613,15 @@ def test_smoke_verdict_pass_and_each_failure(lay):
         (sm / "Q3S" / "evals" / "smoke__Q3S__raw__c" / "results.json",
          lambda r: r["audit"]["image_tokens"].update(tokens_per_image=[220]), "audit_Q3S"),
         (sm / "E2" / "evals" / "smoke__E2__raw__u" / "results.json", lambda r: r["renderer"].update(lp=4),
+         "renderer_E2"),
+        # the workers' own ready replies (not the harness's request): workers_ok, the font, the pinned files / prompt
+        (sm / "Q3S" / "evals" / "smoke__Q3S__raw__c" / "results.json", lambda r: r["renderer"].update(workers_ok=False),
+         "renderer_Q3S"),
+        (sm / "Q3B" / "evals" / "smoke__Q3B__raw__u" / "results.json",
+         lambda r: r["renderer"]["workers"][1].update(font_mode="system"), "renderer_Q3B"),
+        (sm / "E2" / "evals" / "smoke__E2__raw__c" / "results.json",
+         lambda r: r["renderer"]["workers"][0].update(tvrbench_files_ok=False), "renderer_E2"),
+        (sm / "E2" / "evals" / "smoke__E2__raw__c" / "results.json", lambda r: r["renderer"].update(workers=[]),
          "renderer_E2"),
         (sm / "E2" / "dry" / "dry_run.json", lambda r: r["per_conversation"][0].update(grid_set=[[1, 24, 40]]),
          "dry_E2"),
@@ -760,6 +850,64 @@ def test_recheck_floors_and_imports_in_a_fresh_process(tmp_path):
                              src, re.M), mod
 
 
+FLOOR_CASES = [(0, 3, [3, 3, 3], 500), (0, 3, [0, 1, 8], 500), (0, 0, [0, 0, 0], 500), (2, 2, [2, 2, 2], 500),
+               (0, 3, [3, 3, 4], 500), (0, 4, [3, 3, 3], 500), (1, 0, [1, 1, 1], 500), (0, 7, [7, 7, 7], 300),
+               (0, 1, [1, 1, 1], 7)]
+
+
+def _floors_py_choice(monkeypatch, k0, fe, ks, n):
+    """floors.py's own F / source (floors_doc, as of 11f6d852) on given component counts: its component functions
+    are stubbed, its max / tie code runs as written."""
+    from fractions import Fraction
+
+    from vpd.tvr import floors as FLR
+
+    monkeypatch.setattr(FLR, "stop0", lambda tl: {"k": k0, "n": n, "rate": k0 / n})
+    monkeypatch.setattr(FLR, "fixed_table", lambda tl, ri: {"MoveAhead:1": 1})
+    monkeypatch.setattr(FLR, "choose_fixed", lambda tab: ("MoveAhead", 1, 1))
+    monkeypatch.setattr(FLR, "fixed_score", lambda tl, ri, a, k: fe)
+    monkeypatch.setattr(FLR, "random_floor", lambda tl, ri, med: {"k": list(ks), "mean_rate": sum(ks) / (3 * n),
+                                                                   "_frac": Fraction(sum(ks), 3 * n)})
+    task = {"task_id": "t", "start": {"position": _pos(0.0, 0.0), "rotation_y": 0.0, "horizon": 0.0},
+            "target": {"position": _pos(0.0, 0.25), "rotation_y": 0.0, "horizon": 0.0}}
+
+    class RI:
+        sha256 = "r" * 64
+
+        @staticmethod
+        def reach(tid):
+            return frozenset({(0.0, 0.0)})
+
+    doc = FLR.floors_doc("eval500", [task] * n, [task], RI(), {})
+    return doc["F"]["source"], doc["F"]["rate"]
+
+
+@pytest.mark.parametrize("k0,fe,ks,n", FLOOR_CASES)
+def test_recheck_floor_source_is_exact_like_floors_py(monkeypatch, k0, fe, ks, n):
+    """F.source by exact fractions with floors.py's tie rule (first of stop0, fixed, random): a random mean that ties
+    the fixed rate is 'fixed' (a float mean of the seed rates can be one ulp above it)."""
+    src, F = RC.choose_floor(k0, fe, ks, n)
+    assert (src, float(F)) == _floors_py_choice(monkeypatch, k0, fe, ks, n)
+    if (k0, fe, ks, n) == (0, 3, [3, 3, 3], 500):
+        assert src == "fixed" and sum(k / n for k in ks) / 3 > fe / n  # the float rule the recheck used before
+    if (k0, fe, ks, n) == (0, 3, [0, 1, 8], 500):
+        assert src == "fixed" and sum(k / n for k in ks) / 3 > fe / n
+
+
+def test_recheck_floors_uses_the_exact_choice(tmp_path, monkeypatch):
+    """RC.floors routes its components through choose_floor and writes floors.py's float fields (F.rate, mean_rate)."""
+    f = build_fake_tvr(tmp_path)
+    seen = []
+    real = RC.choose_floor
+    monkeypatch.setattr(RC, "choose_floor", lambda *a: seen.append(a) or real(*a))
+    rep = RC.floors(f["reach"], f["tasks_dir"], f["public"])
+    (k0, fe, ks, n), = seen
+    assert (k0, fe, list(ks), n) == (rep["stop0"]["k"], rep["fixed"]["eval"]["k"], rep["random"]["k"], rep["n"])
+    src, F = real(k0, fe, ks, n)
+    assert rep["F"] == {"rate": float(F), "source": src, "k_equiv": math.ceil(F * n)}
+    assert rep["random"]["mean_rate"] == sum(ks) / (len(ks) * n)
+
+
 def test_recheck_counts(tmp_path):
     run = tmp_path / "run"
     for i, (ds, diff, ok) in enumerate((("ithor", "easy", True), ("ithor", "hard", False), ("procthor", "hard", True))):
@@ -775,6 +923,18 @@ N_EVAL = 8
 SUCC = {"0W__c": 0, "100__c": 3, "ALL__c": 6, "ALL__u": 5, "ALL__blind": 0, "100s1002__c": 3}
 
 
+REQUEST_KEYS = ["max_tokens", "messages", "model", "temperature", "top_k", "top_p"]
+
+
+def _settings(proto: dict, arm: str, mml: int = 32768) -> dict:
+    """run_tvr's results.settings (Harness.settings): the protocol block plus the values this run used."""
+    rx = arm in ("c", "blind")
+    return dict(proto, arm=arm, max_tokens_used={"c": 16, "u": 64, "blind": 16}[arm], max_model_len_used=mml,
+                regex_used=pilot_cfg.REGEX if rx else None, blind_concurrency_used=16 if arm == "blind" else None,
+                envs=None if arm == "blind" else 5, lp=None if arm == "blind" else 2,
+                request_fields=sorted(REQUEST_KEYS + (["structured_outputs"] if rx else [])))
+
+
 def _results(cfg, s, key, n, k_by_cat, adapter_sha):
     tier, arm = key.split("__")
     proto = json.loads(json.dumps(cfg["protocol"]))
@@ -784,7 +944,7 @@ def _results(cfg, s, key, n, k_by_cat, adapter_sha):
          "invalid": {"regex_mismatch": 0 if arm != "u" else None, "replies": 40, "unparseable_steps": 0,
                      "blocked_steps": 2},
          "kin": {"tasks_equal": n, "tasks_unequal": 0, "valid_list_mismatches": 0, "pose_or_success_mismatches": 0},
-         "settings": dict(proto, max_model_len_used=32768),
+         "settings": _settings(proto, arm),
          # run_tvr's layout: server = {manifest: VLLMServer.manifest(), versions, max_model_len, ready_s, ...}
          "server": {"manifest": {"cfg": {"enforce_eager": True, "seed": 0, "max_images": 96, "max_model_len": 32768},
                                  "cmd": ["python", "-m", "vllm.entrypoints.openai.api_server", "--generation-config",
@@ -802,16 +962,26 @@ def _results(cfg, s, key, n, k_by_cat, adapter_sha):
     if arm != "blind":
         r["audit"] = {"prompt_parity": {"equal": True}, "image_tokens": {"tokens_per_image": [222],
                                                                           "grid_set": [[1, 22, 40]]}}
-        r["renderer"] = {"profile": "envlib", "font_sha256": cfg["render"]["badge_font_sha256"], "lp": 2, "envs": 5}
+        r["renderer"] = renderer_block(cfg)
     return r
 
 
 def write_power(L: PT.Layout, cfg: dict, ok: bool = True) -> Path:
-    """A POWER.json that is current for this pilot root (the inputs power_sim records: per_task shas, pilot_cfg sha)."""
+    """A POWER.json that is current for this pilot root and made at the registered settings, in power_sim.run_tvr's
+    layout (the inputs it records: per_task shas, pilot_cfg sha; registered, sigma, persistence, verdicts); the
+    real writer runs in test_a4_reads_the_power_json_power_sim_writes and the integration pipeline."""
     files = {str(p): fsha(p) for p in sorted(L.pilot_root.glob("*/evals/pilot__*__c/per_task.jsonl"))
              if p.parent.name.split("__")[2] in ("100", pilot_cfg.n_top(cfg), "100s1002")}
-    return wj(L.pilot_root / "POWER.json", {"pass": ok, "inputs": {
-        "files_sha256": files, "pilot_cfg_json_sha256": sha(pilot_cfg.as_json(cfg).encode())}})
+    p = json.loads(json.dumps(cfg["power"]))
+    return wj(L.pilot_root / "POWER.json", {
+        "schema": "vpd.power_sim.tvr/2", "pass": ok, "fallback_pass": False,
+        "registered": {"test": p["test"], "tier_corr": p["tier_corr"], "fallback": p["fallback"],
+                       "persistence": p["persistence"], "n_sims_registered": p["n_sims"], "n_sims_used": p["n_sims"],
+                       "seed": p["seed"], "backend": p["backend"], "allow_no_replicate": False},
+        "sigma": {"sigma_hat": 0.01, "sigma_used": 0.03, "replicate_missing": False},
+        "persistence": {"lambda_hat": 0.0, "lambda_used": 0.0, "replicate_missing": False},
+        "verdicts": {"main": {"type1": 0.05, "type1_ok": True, "power_ok": ok, "power_tier_corr": 0.5, "pass": ok}},
+        "inputs": {"files_sha256": files, "pilot_cfg_json_sha256": sha(pilot_cfg.as_json(cfg).encode())}})
 
 
 def make_gate_root(tmp_path, monkeypatch, per_task: bool = True):
@@ -835,9 +1005,9 @@ def make_gate_root(tmp_path, monkeypatch, per_task: bool = True):
                        F_source=fl["F"]["source"])
     wj(L.demos / "manifest.json", {"kept": 1599, "dropped": 1, "kin_equal_all_kept": True})
     wj(L.demos / "dropped.json", [{"task_id": "x", "reason": "move_failed@3", "detail": "blocked"}])
-    wj(L.replay / "results.json", {"valid": True, "n_tasks": 1600, "tasks_missing": [],
-                                   "renderer": {"profile": "envlib", "font_sha256": cfg["render"]["badge_font_sha256"],
-                                                "lp": 2, "envs": 5}})
+    wj(L.replay / "results.json", {"valid": True, "n_tasks": 1600, "tasks_missing": [], "code_sha256": "o" * 64,
+                                   "renderer": renderer_block(cfg, n_workers=5)})
+    wj(L.cal_decision, {"n_top": "ALL", "train_400": False, "futility": False, "with_400": False})
     sv = wj(L.smoke_root / "tvr-msmoke-202611110000" / "smoke_verdict.json", {"verdict": "PASS", "checks": [
         {"name": f"{n}_{s}", "ok": True, "detail": None} for s in pilot_cfg.STARTS
         for n in ("dry", "hfparity", "vllm_parity")]})
@@ -1063,6 +1233,91 @@ def test_g0_other_items_fail_on_their_own(gate_root):
     assert _item(run_gate(gate_root), "code")["ok"] is False
 
 
+def _cases_fail_alone(gate_root, cases):
+    for path, fn, name, needle in cases:
+        orig = path.read_text()
+        _edit(path, fn)
+        rep = run_gate(gate_root)
+        _only_fail(rep, name)
+        probs = _item(rep, name)["detail"]["problems"]
+        assert any(needle in b for b in probs), (name, needle, probs)
+        path.write_text(orig)
+
+
+def test_g0_4_judges_the_workers_ready_replies(gate_root):
+    """G0(4): renderer.workers_ok and each worker's own reply (profile, L, pinned font, system prompt, TVRBench
+    files), in the data job's replay and every image eval; the harness's own profile / lp alone are not enough."""
+    L, cfg, sv, _ = gate_root
+    ev = L.eval_dir("Q3S", "ALL", "u") / "results.json"
+    _cases_fail_alone(gate_root, [
+        (ev, lambda r: r["renderer"].update(workers_ok=False), "renderer", "workers_ok False"),
+        (ev, lambda r: r["renderer"]["workers"][1].update(font_mode="system"), "renderer", "'font_mode': 'system'"),
+        (ev, lambda r: r["renderer"]["workers"][0].update(system_prompt_ok=False), "renderer", "system_prompt_ok"),
+        (ev, lambda r: r["renderer"]["workers"][0].update(lp="4"), "renderer", "'lp': '4'"),
+        (ev, lambda r: r["renderer"].update(workers=[]), "renderer", "no worker ready reply"),
+        (L.replay / "results.json", lambda r: r["renderer"]["workers"][3].update(tvrbench_files_ok=False), "renderer",
+         "'wid': 3"),
+        (L.replay / "results.json", lambda r: r["renderer"].pop("workers_ok"), "renderer",
+         "replay: renderer workers_ok"),
+    ])
+    # the blind arm renders nothing and is not judged here
+    _edit(L.eval_dir("Q3S", "ALL", "blind") / "results.json", lambda r: r.update(renderer={"none": "kin_env"}))
+    assert _item(run_gate(gate_root), "renderer")["ok"] is True
+
+
+def test_g0_10_checks_the_values_each_run_used(gate_root):
+    """G0(10): settings.*_used / request_fields (run_tvr.settings) against the protocol, per arm; results.settings'
+    copy of the protocol block alone is equal by construction."""
+    L, cfg, sv, _ = gate_root
+    c, u, b = (L.eval_dir("E2", "ALL", a) / "results.json" for a in ("c", "u", "blind"))
+    _cases_fail_alone(gate_root, [
+        (c, lambda r: r["settings"].update(max_tokens_used=64), "settings", "max_tokens_used 64 != 16"),
+        (u, lambda r: r["settings"].update(regex_used=pilot_cfg.REGEX), "settings", "regex_used"),
+        (c, lambda r: r["settings"].update(regex_used=None), "settings", "regex_used None"),
+        (b, lambda r: r["settings"].update(blind_concurrency_used=8), "settings", "blind_concurrency_used 8 != 16"),
+        (u, lambda r: r["settings"].update(blind_concurrency_used=16), "settings", "blind_concurrency_used 16 != None"),
+        (c, lambda r: r["settings"]["request_fields"].remove("structured_outputs"), "settings", "request_fields"),
+        (u, lambda r: r["settings"]["request_fields"].append("seed"), "settings", "request_fields"),
+        (b, lambda r: r["settings"].update(arm="c"), "settings", "settings.arm 'c' != 'blind'"),
+        (L.eval_dir("Q3B", "100s1002", "c") / "results.json", lambda r: r["settings"].update(max_model_len_used=128000),
+         "settings", "max_model_len_used 128000 != the served max_model_len 32768"),
+    ])
+    _edit(u, lambda r: r["settings"].pop("request_fields"))
+    rep = run_gate(gate_root)
+    it = _item(rep, "settings")
+    assert it["ok"] is None and any("settings.request_fields" in m for m in it["detail"]["missing"])
+    assert rep["decision"] == "incomplete"
+
+
+def test_g0_13_n_top_is_the_calibration_decision(gate_root):
+    L, cfg, sv, _ = gate_root
+    wj(L.cal_decision, {"n_top": "400", "train_400": True, "futility": False, "with_400": True})
+    rep = run_gate(gate_root)
+    _only_fail(rep, "adapter_provenance")
+    assert any("tiers.n_top 'ALL' != " in b for b in _item(rep, "adapter_provenance")["detail"]["problems"])
+    L.cal_decision.unlink()
+    rep = run_gate(gate_root)
+    assert _item(rep, "adapter_provenance")["ok"] is None and rep["decision"] == "incomplete"
+
+
+def test_g0_5_replicate_zero_w_code_and_harness_fingerprint(gate_root):
+    """G0(5): 0W_s1002 (no init) is compared with its start's 0W too; a missing code_fingerprint is incomplete; the
+    data job's replay (older run_tvr code, here another sha) is not part of the one-harness rule."""
+    L, cfg, sv, _ = gate_root
+    assert json.loads((L.replay / "results.json").read_text())["code_sha256"] != "h" * 64
+    assert _item(run_gate(gate_root), "code")["ok"] is True
+    m = L.adapter("Q3B", "0W_s1002") / "meta.json"
+    orig = m.read_text()
+    _edit(m, lambda x: x.update(code_sha256="0865dd75f1ee" + "1" * 52))
+    rep = run_gate(gate_root)
+    _only_fail(rep, "code")
+    assert any("Q3B/0W_s1002: code sha" in b for b in _item(rep, "code")["detail"]["problems"])
+    m.write_text(orig)
+    _edit(L.eval_dir("E2", "0W", "c") / "results.json", lambda r: r.pop("code_fingerprint"))
+    it = _item(run_gate(gate_root), "code")
+    assert it["ok"] is None and it["detail"]["missing"] == ["E2/0W__c: results.code_fingerprint.code_sha256"]
+
+
 def test_gate_reads_the_run_tvr_layout_and_missing_fields_are_incomplete(gate_root):
     """results.code is the served code string (not a fingerprint) and the server block nests the VLLMServer manifest;
     a results.json without the manifest / code_sha256 is incomplete, never a pass."""
@@ -1079,8 +1334,8 @@ def test_gate_reads_the_run_tvr_layout_and_missing_fields_are_incomplete(gate_ro
 
 def test_o9_fallback_must_be_registered_before_the_freeze(gate_root, monkeypatch, tmp_path):
     L, cfg, sv, _ = gate_root
-    for p in L.pilot_root.glob("*/evals/*/results.json"):
-        _edit(p, lambda r: r["server"].update(max_model_len=128000))
+    for p in L.pilot_root.glob("*/evals/*/results.json"):  # run_tvr --max-model-len 128000: server and settings
+        _edit(p, lambda r: (r["server"].update(max_model_len=128000), r["settings"].update(max_model_len_used=128000)))
     pre = tmp_path / "PREREG_TVR_PILOT.md"
     # the prereg names O9 and 128000 by design: that alone registers nothing
     pre.write_text("17 偏差日志\n- O9：若服务起不来，max_model_len 回退到 128000\n", encoding="utf-8")
@@ -1106,7 +1361,7 @@ def test_o9_fallback_must_be_registered_before_the_freeze(gate_root, monkeypatch
     assert rep["decision"] == "ruler" and _item(rep, "settings")["detail"]["facts"]["o9_fallback"]["registered"]
     # a registered fallback, but the evals ran at the frozen 32768
     for p in L.pilot_root.glob("*/evals/*/results.json"):
-        _edit(p, lambda r: r["server"].update(max_model_len=32768))
+        _edit(p, lambda r: (r["server"].update(max_model_len=32768), r["settings"].update(max_model_len_used=32768)))
     rep = run_gate(gate_root)
     _only_fail(rep, "settings")
     assert any("fallback_used.json exists" in b for b in _item(rep, "settings")["detail"]["problems"])
@@ -1164,6 +1419,83 @@ def test_g1_g2_g3_a4_decisions(gate_root):
     cfg["power"]["n_sims"] = 2000
     wj(L.pilot_root / "POWER.json", {"pass": True})
     assert run_gate(gate_root)["A4"]["status"] == "pending"
+
+
+def test_a4_reads_only_a_power_json_made_at_the_registered_settings(gate_root):
+    L, cfg, sv, _ = gate_root
+    pf = L.pilot_root / "POWER.json"
+    rep = run_gate(gate_root)
+    assert rep["A4"]["status"] == "pass" and rep["A4"]["note"] is None
+    assert rep["A4"]["power"] == {"pass": True, "fallback_pass": False, "type1": 0.05, "type1_ok": True,
+                                  "power_ok": True, "power_tier_corr": 0.5, "sigma_used": 0.03, "lambda_used": 0.0,
+                                  "n_sims_used": 2000}
+    orig = pf.read_text()
+    for fn, needle in (
+            (lambda d: d["registered"].update(n_sims_used=40), "registered.n_sims_used 40 != power.n_sims 2000"),
+            (lambda d: d["registered"].update(n_sims_registered=200), "registered.n_sims_registered 200"),
+            (lambda d: d["registered"].update(test="seed_aware_cluster_t"), "registered.test 'seed_aware_cluster_t'"),
+            (lambda d: d["registered"].update(allow_no_replicate=True), "registered.allow_no_replicate True"),
+            (lambda d: d["sigma"].update(replicate_missing=True), "sigma.replicate_missing True"),
+            (lambda d: d["persistence"].pop("replicate_missing"), "persistence.replicate_missing None"),
+            (lambda d: d["registered"]["tier_corr"].update(power=0.0), "registered.tier_corr != power.tier_corr"),
+            (lambda d: d["registered"]["fallback"]["seeds"].update(TOP=[1]), "registered.fallback"),
+            (lambda d: d["registered"]["persistence"].update(range=[0.0, 0.5]), "registered.persistence"),
+            (lambda d: d.pop("registered"), "no registered block")):
+        d = json.loads(orig)
+        fn(d)
+        wj(pf, d)
+        rep = run_gate(gate_root)
+        assert rep["A4"]["status"] == "pending" and rep["decision"] == "incomplete", needle
+        assert rep["A4"]["note"].startswith("POWER.json not made at the registered settings") and \
+            needle in rep["A4"]["note"], (needle, rep["A4"]["note"])
+        assert rep["A4"]["power"] is None
+    assert "not made at the registered settings" in G.render_md(rep)
+    pf.write_text(orig)
+    assert run_gate(gate_root)["decision"] == "ruler"
+    # the rule text comes from pilot_cfg power.*
+    assert rep["A4"]["rule"] == ("after G0-G3 pass: power_sim (seed_aware_endpoint_t, Holm): power >= 0.8 at 8 pp for "
+                                 "both contrasts at tier_corr 0.5, sigma_used, lambda_used; family-wise type-I <= "
+                                 "0.06 at tier_corr 0.0 and 1.0 (the max)")
+    cfg["power"]["tier_corr"]["type1"] = [0.0, 0.5, 1.0]
+    assert "tier_corr 0.0 and 0.5 and 1.0" in G.a4_rule(cfg)
+
+
+def test_a4_reads_the_power_json_power_sim_writes(gate_root):
+    """The real writer (power_sim.run_tvr) on the fake pilot root: current and registered (the default backend,
+    power.backend numpy) -> A4 is its pass; the test-only --n-sims or backend override, or allow_no_replicate ->
+    pending."""
+    from vpd.common import power_sim
+
+    L, cfg, sv, _ = gate_root
+    cfg["power"]["n_sims"] = 20  # the registered value of this test cfg (the run is the registered one)
+    pf = L.pilot_root / "POWER.json"
+    pw = power_sim.run_tvr(L.pilot_root, cfg=cfg, out=pf)
+    assert pw["registered"]["backend"] == cfg["power"]["backend"] == "numpy"
+    assert G.power_unregistered(pw, cfg) == [] and G.power_stale(pw, cfg, []) == []
+    rep = run_gate(gate_root)
+    assert rep["A4"]["status"] == ("pass" if pw["pass"] else "fail") and rep["A4"]["note"] is None
+    assert rep["A4"]["power"]["n_sims_used"] == 20 and rep["A4"]["power"]["lambda_used"] == \
+        pw["persistence"]["lambda_used"]
+    power_sim.run_tvr(L.pilot_root, cfg=cfg, out=pf, n_sims=10)
+    rep = run_gate(gate_root)
+    assert rep["A4"]["status"] == "pending" and "registered.n_sims_used 10 != power.n_sims 20" in rep["A4"]["note"]
+    power_sim.run_tvr(L.pilot_root, cfg=cfg, out=pf, allow_no_replicate=True)
+    rep = run_gate(gate_root)
+    assert rep["A4"]["status"] == "pending" and "allow_no_replicate True" in rep["A4"]["note"]
+    # an explicit (test-only) backend is recorded as used and is not the registered run
+    pw = power_sim.run_tvr(L.pilot_root, cfg=cfg, out=pf, backend="python")
+    want = "registered.backend 'python' != power.backend 'numpy'"
+    assert pw["registered"]["backend"] == "python" and G.power_unregistered(pw, cfg) == [want]
+    rep = run_gate(gate_root)
+    assert rep["A4"]["status"] == "pending" and want in rep["A4"]["note"]
+
+
+def test_a3_alpha_from_pilot_cfg(gate_root):
+    L, cfg, sv, _ = gate_root
+    assert run_gate(gate_root)["A3"]["per_start"]["Q3S"]["images_better_p_lt_0.05"] is True  # p 0.03125
+    cfg["gates"]["mcnemar_alpha"] = 0.01
+    a3 = run_gate(gate_root)["A3"]
+    assert a3["per_start"]["Q3S"]["images_better_p_lt_0.05"] is False and "p < 0.01" in a3["rule"]
 
 
 def test_gate_incomplete_exit_3(gate_root, monkeypatch):
@@ -1587,6 +1919,56 @@ def test_nondry_cal_old_server_error_does_not_trigger_o9(tmp_path):
     assert not any(s["name"].startswith("shake_fallback") for s in _steps(run))
 
 
+def test_nondry_cal_failed_fallback_is_decided_again_on_the_rerun(tmp_path):
+    """The O9 fallback attempt itself fails (rc 4): no fallback_used.json, the mechanism stop.  Its arm dirs hold the
+    fallback's protocol; the next cal run moves them and the first attempt's copy aside and decides again (here the
+    server starts at the frozen value: no fallback, DONE)."""
+    payload, env = fake_tree(tmp_path, "tvr_cal.sh")
+    shake = tmp_path / "OUT" / "tvr" / "runs" / "explore" / "cal" / "Q3B" / "shake"
+    run = tmp_path / "OUT" / "jobs" / "tvr-cal-202611110006"
+    res = _bash([str(payload), str(run)], dict(env, FAKE_SHAKE_RC="1", FAKE_SHAKE_SERVER_ERROR="1",
+                                               FAKE_FAIL="--max-model-len 128000", FAKE_FAIL_RC="4"), tmp_path)
+    assert res.returncode == 1 and not (run / "DONE").exists()
+    st = [(s["name"], s["rc"]) for s in _steps(run)]
+    assert ("shake", 1) in st and ("shake_fallback", 4) in st and ("after_mechanism:stopped", 1) in st
+    keep = shake / "server_error_first_attempt.json"
+    assert keep.is_file() and not (shake / "fallback_used.json").exists()
+    for a in ("c", "blind"):  # what the failed fallback attempt of run_tvr left (its protocol)
+        wj(shake / f"calshake__Q3B__raw__{a}" / "protocol.json", {"max_model_len_used": 128000})
+    (tmp_path / "fake.log").write_text("")
+    run2 = tmp_path / "OUT" / "jobs" / "tvr-cal-202611110007"
+    res = _bash([str(payload), str(run2)], env, tmp_path)
+    assert res.returncode == 0, res.stderr + res.stdout
+    names = [s["name"] for s in _steps(run2)]
+    assert names.index("shake_aside:calshake__Q3B__raw__c") < names.index("shake")
+    assert {"shake_aside:calshake__Q3B__raw__blind", "shake_aside:server_error_first_attempt.json"} <= set(names)
+    assert not keep.exists() and len(list(shake.glob("server_error_first_attempt.json.prev-*"))) == 1
+    prev = sorted(shake.glob("calshake__Q3B__raw__c.prev-*"))
+    assert len(prev) == 1 and json.loads((prev[0] / "protocol.json").read_text())["max_model_len_used"] == 128000
+    assert not (shake / "fallback_used.json").exists() and "--max-model-len" not in (tmp_path / "fake.log").read_text()
+    assert (run2 / "DONE").exists() and PT.steps_check("tvr-cal", run2)["ok"]
+    # a third run: nothing to move aside any more
+    run3 = tmp_path / "OUT" / "jobs" / "tvr-cal-202611110008"
+    assert _bash([str(payload), str(run3)], env, tmp_path).returncode == 0
+    assert not any(s["name"].startswith("shake_aside") for s in _steps(run3))
+
+
+def test_nondry_canary_kept_when_there_is_no_time_to_render(tmp_path):
+    """A rerun without the time to render a canary (canary_replay:no_time) keeps the earlier canary in place (the
+    one the existing evals were made under) instead of moving it aside and leaving canary/<part> empty."""
+    payload, env = fake_tree(tmp_path, "tvr_eval.sh")
+    P = tmp_path / "OUT" / "tvr" / "runs" / "pilot" / "Q3S"
+    old = wj(P / "canary" / "top" / "render_parity.json", {"pass": True, "node": "an earlier run's node"})
+    run = tmp_path / "OUT" / "jobs" / "tvr-eval-q3s-top-202611110400"
+    res = _bash([str(payload), "Q3S", "top", str(run)],
+                dict(env, FAKE_ADAPTER_RC="0", VPD_JOB_DEADLINE_S="250", VPD_MIN_STEP_S="60"), tmp_path)
+    assert res.returncode == 1 and not (run / "DONE").exists()
+    names = [s["name"] for s in _steps(run)]
+    assert "canary_replay:no_time" in names and "canary_aside" not in names and "eval_ALL:canary_failed" in names
+    assert old.is_file() and json.loads(old.read_text())["node"] and not list((P / "canary").glob("top.prev-*"))
+    assert "replay --task-set sft2" not in (tmp_path / "fake.log").read_text()
+
+
 def test_nondry_code_mismatch_stops_with_exit_3(tmp_path):
     payload, env = fake_tree(tmp_path, "tvr_train.sh")
     run = tmp_path / "OUT" / "jobs" / "tvr-train-q3s-202611110000"
@@ -1673,6 +2055,7 @@ def test_nondry_term_reaps_cleans_merged_and_exits_143(tmp_path):
     if not os.access("/dev/shm", os.W_OK):
         pytest.skip("/dev/shm not writable here")
     merged = Path(env["VPD_MERGE_DIR"]) / "pilot__Q3S__ALL"
+    shm_root_existed = merged.parent.parent.exists()  # /dev/shm/vpd_merged on this host
     try:
         run = tmp_path / "OUT" / "jobs" / "tvr-eval-q3s-top-202611110200"
         e = {k: v for k, v in os.environ.items() if k not in _KNOBS}
@@ -1693,16 +2076,22 @@ def test_nondry_term_reaps_cleans_merged_and_exits_143(tmp_path):
         assert not merged.exists()
     finally:
         shutil.rmtree(merged.parent, ignore_errors=True)
+        if not shm_root_existed:  # the test created it: leave the host's /dev/shm as it was
+            try:
+                merged.parent.parent.rmdir()
+            except OSError:
+                pass
 
 
 def test_nondry_deadline_rc4_then_no_time(tmp_path):
     """run_tvr stopping at its deadline (exit 4) is a failed step; the next session has no time left (:no_time); no
-    DONE.  Soft deadline 310 s: the canary needs >= 300 s (240 THOR reserve + 60), the 0W eval sleeps 10 s."""
+    DONE.  Soft deadline 310 s: the canary needs >= 300 s (240 THOR reserve + 60), the 0W eval sleeps 12 s (so at
+    most 298 s are left for the 100 eval even when every other step takes no time)."""
     payload, env = fake_tree(tmp_path, "tvr_eval.sh")
     run = tmp_path / "OUT" / "jobs" / "tvr-eval-q3s-low-202611110300"
     res = _bash([str(payload), "Q3S", "low", str(run)],
                 dict(env, FAKE_ADAPTER_RC="0", VPD_JOB_DEADLINE_S="310", VPD_MIN_STEP_S="60",
-                     FAKE_SLEEP_ON="--tier 0W --arms", FAKE_SLEEP_S="10", FAKE_FAIL="--tier 0W --arms",
+                     FAKE_SLEEP_ON="--tier 0W --arms", FAKE_SLEEP_S="12", FAKE_FAIL="--tier 0W --arms",
                      FAKE_FAIL_RC="4"), tmp_path)
     assert res.returncode == 1 and not (run / "DONE").exists()
     st = {s["name"]: s["rc"] for s in _steps(run)}

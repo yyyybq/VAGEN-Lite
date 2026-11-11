@@ -27,6 +27,7 @@ import math
 import os
 import random
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 from vpd.tvr import pilot_cfg
@@ -236,19 +237,24 @@ def floors(reach_dir, tasks_dir, public_path, task_set: str = "eval500") -> dict
         ks.append(k)
     n = len(ev)
     rates = [k / n for k in ks]
-    mean_rate = sum(rates) / len(rates)
-    comps = [("stop0", k0 / n), ("fixed", fe / n), ("random", mean_rate)]
-    src, F = comps[0]
-    for name, r in comps[1:]:
-        if r > F:
-            src, F = name, r
+    src, F = choose_floor(k0, fe, ks, n)
     return {"schema": SCHEMA_FLOORS, "task_set": task_set, "n": n, "reach_index_sha256": idx_sha,
             "stop0": rate_block(k0, n),
             "fixed": {"chosen": {"action": fa, "k": fk}, "sft": {"k": fs, "n": len(sft)},
                       "eval": rate_block(fe, n), "table_sft": table},
-            "random": {"medians": med, "seeds": seeds, "k": ks, "rates": rates, "mean_rate": mean_rate},
-            "F": {"rate": F, "source": src, "k_equiv": int(math.ceil(F * n - 1e-12))},
+            "random": {"medians": med, "seeds": seeds, "k": ks, "rates": rates,
+                       "mean_rate": float(Fraction(sum(ks), len(ks) * n))},
+            "F": {"rate": float(F), "source": src, "k_equiv": int(math.ceil(F * n))},
             "warnings": warnings, "recheck": "vpd.tvr.recheck_tvr (independent of tvrdata)"}
+
+
+def choose_floor(k0: int, k_fixed: int, ks: list, n: int) -> tuple:
+    """(source, F as a Fraction): F = max(k0 / n, k_fixed / n, sum(ks) / (len(ks) n)) compared EXACTLY; ties -> the
+    first of (stop0, fixed, random) (contract 5.1.5).  Floats only for the output (a float mean of the seed rates can
+    exceed an equal fixed rate by one ulp)."""
+    comps = [("stop0", Fraction(k0, n)), ("fixed", Fraction(k_fixed, n)), ("random", Fraction(sum(ks), len(ks) * n))]
+    F = max(f for _, f in comps)
+    return next(name for name, f in comps if f == F), F
 
 
 RATE_TOL = 1e-12  # rates are k/n floats; the k counts are compared exactly

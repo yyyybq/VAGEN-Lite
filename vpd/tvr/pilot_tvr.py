@@ -7,6 +7,7 @@
     PY_EVAL -m vpd.tvr.pilot_tvr collect JOB
     PY_EVAL -m vpd.tvr.pilot_tvr delete JOB [--allow-incomplete]
     PY_EVAL -m vpd.tvr.pilot_tvr budget
+    PY_EVAL -m vpd.tvr.pilot_tvr data-fill        # the 13 data.* values from the data job's files (read only)
   in-job helpers (pure; called by vpd/jobs/tvr_*.sh):
     ... pilot_tvr expect JOB --run RUN            # RUN/expect.json; exit 0 iff every expected item holds
     ... pilot_tvr smoke-verdict --smoke DIR       # DIR/smoke_verdict.json (mechanism only, never an SR)
@@ -47,10 +48,11 @@ Round budget (brief 2C / 5: 200 GPU-h ends the round; ledger.budget_check is unc
 Guards (prepare and submit; in-job again by `guard`, where the prereg's committed state comes from the snapshot):
   every job: pilot_cfg.missing(job) == []; the values the payloads spell out (PAYLOAD_CONSTANTS: seeds, replicate,
   merge-parity n, grid, workers) == pilot_cfg; the trainer fingerprint prefix (n2_train_vpd.code_fingerprint()) ==
-  recipe.trainer_code_sha256_prefix.  tvr-cal: the data job DONE and every filled data.* sha == the file on disk.
-  tvr-cal400: the cal job DONE and cal_decision.train_400.  tvr-msmoke / train / eval: vpd/PREREG_TVR_PILOT.md
-  committed and clean (git log -1 / status --porcelain on that file only) and pilot_cfg.check_prereg(<it>) == [];
-  data shas.  train / eval: the newest smoke_verdict.json PASS.  msmoke / train: cal_decision.futility is false, or
+  recipe.trainer_code_sha256_prefix.  tvr-cal: the data job DONE, every data.* filled (pilot_cfg REQUIRED) and each
+  sha == the file on disk.  tvr-cal400: the cal job DONE and cal_decision.train_400.  tvr-msmoke / train / eval:
+  vpd/PREREG_TVR_PILOT.md committed and clean (git log -1 / status --porcelain on that file only) and
+  pilot_cfg.check_prereg(<it>) == []; data shas; tiers.n_top == CAL/cal_decision.json n_top (with_400 true for 400;
+  n_top_problems).  train / eval: the newest smoke_verdict.json PASS.  msmoke / train: cal_decision.futility false, or
   OUT/tvr/runs/explore/cal/Q3B/futility_override.json exists (the orchestrator writes it only after the user
   decided, section 8.1).  eval-<s>-*: the train-<s> adapters adapter-ok with the right init.
 Shared parents: before vsco.prepare of ANY job, prepare creates OUT/tvr/runs, runs/explore/cal/Q3B, runs/smoke,
@@ -369,17 +371,9 @@ def prereg_problems(in_job: bool = False, cfg=None) -> List[str]:
 
 
 def check_prereg(cfg=None) -> List[str]:
-    """pilot_cfg.check_prereg on the prereg of this code tree (the single parser test_tvr_prereg uses).  With a
-    test cfg the comparison is against that cfg."""
-    if cfg is None:
-        return pilot_cfg.check_prereg(prereg_path())
-    want = json.loads(json.dumps(cfg))
-    try:
-        got = pilot_cfg.prereg_block(prereg_path())
-    except (OSError, ValueError) as e:
-        return [str(e)]
-    a, b = dict(pilot_cfg._leaves(want)), dict(pilot_cfg._leaves(got))
-    return [f"{k}: prereg {b.get(k)!r} != cfg {a.get(k)!r}" for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
+    """pilot_cfg.check_prereg on the prereg of this code tree (the single parser and comparison test_tvr_prereg
+    uses).  With a test cfg the comparison is against that cfg."""
+    return pilot_cfg.check_prereg(prereg_path(), cfg)
 
 
 def smoke_verdicts(L: Layout = None) -> List[Path]:
@@ -408,6 +402,23 @@ def futility_problems(L: Layout) -> List[str]:
     return []
 
 
+def n_top_problems(L: Layout, cfg=None) -> List[str]:
+    """pilot_cfg tiers.n_top (filled by hand) == CAL/cal_decision.json n_top, the registered calibration rule's
+    output; for 400 also with_400 true (cal-decide after tvr-cal400).  [] while n_top is unfilled (missing() says
+    so)."""
+    top = pilot_cfg.get("tiers.n_top", cfg)
+    if top not in ("ALL", "400"):
+        return []
+    d = read_json(L.cal_decision)
+    if d is None:
+        return [f"no {L.cal_decision} (job tvr-cal; cal-decide): tiers.n_top {top!r} has no calibration decision"]
+    if d.get("n_top") != top:
+        return [f"tiers.n_top {top!r} != {L.cal_decision} n_top {d.get('n_top')!r}"]
+    if top == "400" and d.get("with_400") is not True:
+        return [f"tiers.n_top '400' but {L.cal_decision} with_400 {d.get('with_400')!r} (job tvr-cal400, cal-decide)"]
+    return []
+
+
 def data_problems(L: Layout, cfg=None) -> List[str]:
     """Every filled data.* sha256 equals its file on disk; F_eval500 / F_source / kept / dropped equal the files."""
     bad = []
@@ -430,6 +441,36 @@ def data_problems(L: Layout, cfg=None) -> List[str]:
         if want is not None and want != man.get(key):
             bad.append(f"data.{key} {want!r} != demos manifest {man.get(key)!r}")
     return bad
+
+
+def data_fill(L: Layout = None) -> dict:
+    """The 13 data.* values the orchestrator fills (pilot_cfg FROZEN and the prereg block, one commit) from the data
+    job's files: the sha256 of each DATA_FILES file, kept / dropped from the demos manifest, F_eval500 / F_source
+    from floors_eval500.json F.  Read only.  Refused unless the newest tvr-data run has DONE and an ok expect.json;
+    "problems" = data_problems with these values (expected [])."""
+    L = L or LAYOUT
+    run = latest_run("tvr-data", L=L)
+    if run is None or not (run / "DONE").is_file():
+        raise Refused(f"the newest tvr-data run {run} has no DONE")
+    exp = read_json(run / "expect.json") or {}
+    if exp.get("ok") is not True:
+        raise Refused(f"{run}/expect.json is not ok (failed {exp.get('failed')})")
+    vals = {}
+    for key in DATA_FILES:
+        p = L.data_file(key)
+        if not p.is_file():
+            raise Refused(f"{p} missing")
+        vals[key] = sha256_file(p)
+    man = read_json(L.demos / "manifest.json") or {}
+    F = (read_json(L.floors / "floors_eval500.json") or {}).get("F") or {}
+    vals.update(kept=man.get("kept"), dropped=man.get("dropped"), F_eval500=F.get("rate"), F_source=F.get("source"))
+    data = {k: vals.get(k) for k in pilot_cfg.FROZEN["data"]}  # pilot_cfg's key order
+    absent = [k for k, v in data.items() if v is None]
+    if absent:
+        raise Refused(f"data.* not derivable from the data job's files: {absent}")
+    cfg = json.loads(json.dumps(pilot_cfg.FROZEN))
+    cfg["data"].update(data)
+    return {"run": str(run), "data": data, "problems": data_problems(L, cfg)}
 
 
 def trainer_prefix() -> str:
@@ -496,6 +537,7 @@ def prerequisites(job: str, L: Layout = None, cfg=None, in_job: bool = False) ->
     elif kind in ("msmoke", "train", "eval"):
         bad += prereg_problems(in_job, cfg)
         bad += data_problems(L, cfg)
+        bad += n_top_problems(L, cfg)
         if kind in ("msmoke", "train"):
             bad += futility_problems(L)
         if kind in ("train", "eval"):
@@ -1082,7 +1124,9 @@ def guard(job: str, run: Path, L: Layout = None, cfg=None) -> dict:
             sp = Path(str(pr).replace("OUT/", str(L.root) + "/", 1)) / "out" / "summary.json"
             got = sha256_file(sp) if sp.is_file() else None
             facts["probe_summary"] = {"path": str(sp), "sha256": got}
-            if got is not None and got != want:
+            if got is None:
+                bad.append(f"{sp}: missing (render.* was filled from it)")
+            elif got != want:
                 bad.append(f"{sp}: sha256 {got[:12]} != render.probe_summary_sha256 {want[:12]}")
     rep = {"job": job, "run": str(run), "utc": utc(), "ok": not bad, "problems": bad, "facts": facts}
     write_json(Path(run) / "guard.json", rep)
@@ -1108,6 +1152,29 @@ def dry_grid_ok(dry: dict, cfg=None) -> Tuple[bool, dict]:
     tok = grid[0] * grid[1] * grid[2] // 4 + 2
     ok = bool(per) and not bad and tok == want_tok
     return ok, {"conversations": len(per), "grid": grid, "tokens_per_image": tok, "bad": bad[:5]}
+
+
+def worker_problems(rr, cfg=None) -> List[dict]:
+    """[] iff run_tvr's renderer block has workers_ok true and EVERY worker's own ready reply (renderer.workers) has
+    profile == render.lvp_profile, L == render.lp_threads, the pinned font (mode "pinned", sha ==
+    render.badge_font_sha256), the pinned system prompt and the pinned TVRBench files (system_prompt_ok,
+    tvrbench_files_ok); else what is wrong, per worker.  The block's own profile / lp are the harness's request,
+    not what the workers ran (gate G0(4), smoke-verdict renderer_<S>)."""
+    rr = rr if isinstance(rr, dict) else {}
+    want = {"profile": pilot_cfg.get("render.lvp_profile", cfg), "lp": str(pilot_cfg.get("render.lp_threads", cfg)),
+            "font_mode": "pinned", "font_sha256": pilot_cfg.get("render.badge_font_sha256", cfg),
+            "system_prompt_ok": True, "tvrbench_files_ok": True}
+    ws = rr.get("workers")
+    out = [] if isinstance(ws, list) and ws else [{"workers": "no worker ready reply"}]
+    for w in ws if isinstance(ws, list) else []:
+        w = w if isinstance(w, dict) else {}
+        got = dict({k: w.get(k) for k in want}, lp=str(w.get("lp")))
+        wrong = {k: got[k] for k in want if got[k] != want[k]}
+        if wrong:
+            out.append({"wid": w.get("wid"), **wrong})
+    if rr.get("workers_ok") is not True and not out:
+        out.append({"workers_ok": rr.get("workers_ok")})
+    return out
 
 
 def smoke_verdict(smoke: Path, L: Layout = None, cfg=None) -> dict:
@@ -1168,8 +1235,9 @@ def smoke_verdict(smoke: Path, L: Layout = None, cfg=None) -> dict:
         for a in IMAGE_ARMS:
             rr = (res[a] or {}).get("renderer") or {}
             got = {"profile": rr.get("profile"), "font_sha256": rr.get("font_sha256"), "lp": rr.get("lp")}
-            if got != {"profile": prof, "font_sha256": font, "lp": lp} or prof is None or lp is None:
-                bad.append({a: got})
+            wp = worker_problems(rr, cfg)
+            if got != {"profile": prof, "font_sha256": font, "lp": lp} or prof is None or lp is None or wp:
+                bad.append({a: dict(got, workers_ok=rr.get("workers_ok"), workers=wp[:5])})
         checks.append(_chk(f"renderer_{s}", not bad, bad))
         measured[s] = {a: {k: ((res[a] or {}).get("perf") or {}).get(k) for k in (
             "steps_per_s", "vllm_ready_s", "max_images_per_request", "max_prompt_tokens", "cgroup_cores_max")}
@@ -1260,6 +1328,7 @@ def main(argv=None) -> int:
     p.add_argument("job", choices=sorted(JOBS))
     p.add_argument("--allow-incomplete", action="store_true")
     sub.add_parser("budget")
+    sub.add_parser("data-fill")
     for name in ("expect", "guard"):
         p = sub.add_parser(name)
         p.add_argument("job", choices=sorted(JOBS))
@@ -1294,6 +1363,10 @@ def main(argv=None) -> int:
             print(delete(args.job, args.allow_incomplete))
         elif args.cmd == "budget":
             print(json.dumps(budget(), indent=1, default=str))
+        elif args.cmd == "data-fill":
+            rep = data_fill()
+            print(json.dumps(rep, indent=1))
+            return 0 if not rep["problems"] else 1
         elif args.cmd == "expect":
             rep = expect(args.job, args.run)
             print(json.dumps({"ok": rep["ok"], "failed": rep["failed"]}))

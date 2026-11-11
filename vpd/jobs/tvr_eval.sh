@@ -388,10 +388,11 @@ session() {
 # canary DIR: run_tvr replay sft2 into DIR (as this job's user and node), then the frozen tolerance check against the
 # data job's replay (TVR_PY render_parity, 5.2.6); CANARY_OK=0 on any failure (the job's evals are then not run).
 # The canary is always rendered by THIS run: an earlier run's DIR is moved aside to DIR.prev-<UTC> first (a resubmitted
-# job may land on another node, and --resume would skip a complete replay and recheck the old frames, O22).
+# job may land on another node, and --resume would skip a complete replay and recheck the old frames, O22).  Only when
+# this run has the time to render it (timed_thor's test): otherwise DIR stays (canary_replay:no_time, no eval runs).
 canary() {
   local d=$1
-  if [[ $DRY != 1 && -d $d && -n $(ls -A -- "$d" 2> /dev/null) ]]; then
+  if [[ $DRY != 1 && -d $d && -n $(ls -A -- "$d" 2> /dev/null) ]] && (($(left) - THOR_RESERVE_S >= MIN_STEP_S)); then
     if ! vpd_step canary_aside mv -T -- "$d" "$d.prev-$(date -u +%Y%m%dT%H%M%SZ)"; then
       FAILS+=(canary_aside)
       CANARY_OK=0

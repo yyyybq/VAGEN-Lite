@@ -12,22 +12,30 @@ G0 (all 17 items must hold; any missing input = incomplete):
    2 templates             smoke B5 (vllm_parity_S) + parity_check (hfparity_S) PASS; every image eval's prompt parity
    3 image_tokens          222 tokens / grid [1,22,40]: smoke dry runs and every image eval's token audit
    4 renderer              profile, font sha, L == render.* in the replay and every image eval; E == replay_envs
-                           (replay) / eval_envs (image evals)
+                           (replay) / eval_envs (image evals); renderer.workers_ok is True and every worker's own
+                           ready reply has profile / L == render.*, the pinned font, the pinned system prompt and
+                           TVRBench files (pilot_tvr.worker_problems)
    5 code                  the three starts' 0W share one code_sha256 starting with the frozen prefix; 100 / TOP from
-                           their own 0W (100_s1002 from 0W_s1002); one harness code_sha256 (results.code_sha256 ==
-                           code_fingerprint.code_sha256) across all evals
+                           their own 0W (100_s1002 from 0W_s1002; 0W_s1002 with the code of its start's 0W); one
+                           harness code_sha256 (results.code_sha256 == code_fingerprint.code_sha256) across all evals
+                           (the evals only: the data job's replay may come from older run_tvr code)
    6 kin                   kin_equal_all_kept (demos) AND per image eval 0 valid-list mismatches and kin-unequal tasks
                            <= gates.kin_eval.task_mismatch_max_frac of its tasks
    7 merge_parity          P/S/parity/merge_<tier>.json pass (and of the adapter.pt now on disk) for EVERY merged eval
    8 served_adapter        every merged eval served the adapter.pt now on disk
    9 attn_pixels           sdpa at every attention site of every adapter; max_pixels in training and in vLLM
-  10 settings              results.settings == pilot_cfg protocol; server block (results.server.manifest: cfg, cmd,
-                           extra_args) and versions; max_model_len (== the frozen value with no fallback_used.json, or
-                           == the O9 fallback in EVERY eval when it is registered: o9_fallback())
+  10 settings              results.settings == pilot_cfg protocol and the per-run values run_tvr records:
+                           max_tokens_used == protocol.max_tokens[arm], regex_used (protocol.regex for c / blind, None
+                           for u), blind_concurrency_used (protocol.blind_concurrency for blind, else None),
+                           request_fields == the registered body keys, max_model_len_used == the judged max_model_len;
+                           server block (results.server.manifest: cfg, cmd, extra_args) and versions; max_model_len
+                           (== the frozen value with no fallback_used.json, or == the O9 fallback in EVERY eval when it
+                           is registered: o9_fallback())
   11 reach_frozen          every eval task's trajectory reach_digest == reach/v1/index.json
   12 official_aggregate    TVRBench eval_va.aggregate() SR == ours (official_check.json equal) for every eval
   13 adapter_provenance    meta start / seed / phase / optimizer_steps == planned / data_sha256 == tiers manifest,
-                           whose sha == data.tiers_manifest_sha256
+                           whose sha == data.tiers_manifest_sha256; tiers.n_top == CAL/cal_decision.json n_top (the
+                           calibration rule's output; with_400 True for 400: pilot_tvr.n_top_problems)
   14 floors_file           floors_eval500.json sha == data.floors_eval500_sha256, warnings [], F == data.F_eval500
   15 render_consistency    the smoke's root sft2 replay and every eval job's canary pass the tolerance rule
   16 demos_replay          the replay valid with 1,600 trajectories; kept >= gates.min_kept; every drop listed with a
@@ -39,9 +47,12 @@ G1 learnable: some start has wilson_lb(k_TOP_c, 500) > max(F, that start's 0W c 
 G2 format: every c and blind eval: 0 regex mismatches over > 0 replies, 500 trajectories, none missing.
 G3 not saturated: every start's TOP c rate <= gates.saturation.
 A3 report only: per start TOP c vs TOP blind on the same tasks: b (only with images), c (only without), exact
-   two-sided binomial p = min(1, 2 P(X <= min(b, c))), X ~ Bin(b + c, 1/2); "images_better_p_lt_0.05".
+   two-sided binomial p = min(1, 2 P(X <= min(b, c))), X ~ Bin(b + c, 1/2); "images_better_p_lt_0.05" (b > c and
+   p < gates.mcnemar_alpha).
 A4: pending until G0-G3 pass; then POWER.json (vpd.common.power_sim tvr; --power runs it): pass / fail; a POWER.json
-   whose input shas / pilot_cfg sha no longer match (power_stale) is pending.
+   whose input shas / pilot_cfg sha no longer match (power_stale) or that was not made at the registered settings
+   (power_unregistered: registered.test, n_sims, tier_corr, fallback, persistence, backend == pilot_cfg power.*,
+   no allow_no_replicate, the replicate present) is pending.
 decision: ruler | not_a_ruler (G1 or G3 fail) | engineering (G0 or G2 fail) | power_insufficient | incomplete.
 Every number is an absolute per start; nothing here computes or prints a difference between starts.
 """
@@ -207,6 +218,20 @@ def o9_fallback(L: pilot_tvr.Layout, value) -> dict:
     return out
 
 
+# the request body keys (CONTRACT 4.6; run_tvr's docstring and Convo): + structured_outputs on the regex arms
+REQUEST_FIELDS = ("model", "messages", "temperature", "top_p", "max_tokens", "top_k")
+REGEX_ARMS = ("c", "blind")
+
+
+def used_settings(arm: str, proto: dict) -> dict:
+    """The per-run values run_tvr records in results.settings (Harness.settings: arm, *_used, request_fields) as the
+    protocol registers them for `arm`; max_model_len_used is judged against the served value in G0(10)."""
+    rx = arm in REGEX_ARMS
+    return {"arm": arm, "max_tokens_used": proto["max_tokens"][arm], "regex_used": proto["regex"] if rx else None,
+            "blind_concurrency_used": proto["blind_concurrency"] if arm == "blind" else None,
+            "request_fields": sorted(REQUEST_FIELDS + (("structured_outputs",) if rx else ()))}
+
+
 def eval_list(s: str, cfg=None) -> List[tuple]:
     top = pilot_cfg.n_top(cfg)
     out = [("0W", "c"), ("100", "c"), (top, "c"), (top, "u"), (top, "blind")]
@@ -269,6 +294,10 @@ def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr
         got = {k: (rr or {}).get(k) for k in want}
         if got != want or None in want.values():
             bad.append(f"{where}: renderer {got} != {want}")
+        # the profile / lp above are the harness's request; the workers' own ready replies are judged here
+        wp = pilot_tvr.worker_problems(rr, cfg)
+        if wp:
+            bad.append(f"{where}: renderer workers_ok {(rr or {}).get('workers_ok')!r}; {wp}"[:600])
 
     if rp is None:
         miss.append(f"{L.replay}/results.json")
@@ -290,32 +319,33 @@ def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr
             continue
         zero[s] = m0.get("code_sha256")
         for tier, init in pilot_tvr.train_tiers(s, cfg):
-            if init is None:
+            if tier == "0W":
                 continue
             m = read_json(L.adapter(s, tier) / "meta.json")
-            sha0 = sha256_file(L.adapter(s, init) / "adapter.pt")
+            sha0 = None if init is None else sha256_file(L.adapter(s, init) / "adapter.pt")
             if m is None:
                 miss.append(f"{s}/adapters/{tier}/meta.json")
-            elif sha0 is None or (m.get("init_adapter") or {}).get("sha256") != sha0:
+            elif init is not None and (sha0 is None or (m.get("init_adapter") or {}).get("sha256") != sha0):
                 bad.append(f"{s}/{tier}: init {str((m.get('init_adapter') or {}).get('sha256'))[:12]} != "
                            f"{init}/adapter.pt {str(sha0)[:12]}")
-            elif m.get("code_sha256") != zero[s]:
+            elif m.get("code_sha256") != zero[s]:  # 100 / TOP and the replicate's own 0W_s1002
                 bad.append(f"{s}/{tier}: code sha differs from this start's 0W")
     if len(zero) == len(starts):
         vals = set(zero.values())
         if len(vals) != 1 or None in vals or not str(next(iter(vals))).startswith(prefix):
             bad.append(f"0W code_sha256 {sorted(str(v)[:12] for v in vals)} (want one value starting {prefix})")
     # the harness fingerprint: run_tvr's top-level results.code_sha256 (== code_fingerprint.code_sha256); results.code
-    # is the served start code (a string), not a fingerprint
+    # is the served start code (a string), not a fingerprint.  The evals only (PREREG 13 G0(5)): the data job's
+    # replay was made before the evals and may carry an older run_tvr fingerprint.
     harness = set()
     for e in all_ev:
         if not e.present:
             continue
         h, hf = e.r("code_sha256"), e.r("code_fingerprint", "code_sha256")
-        if h is None:
-            miss.append(f"{e.s}/{e.key}: results.code_sha256")
+        if h is None or hf is None:
+            miss.append(f"{e.s}/{e.key}: results." + ("code_sha256" if h is None else "code_fingerprint.code_sha256"))
             continue
-        if hf is not None and hf != h:
+        if hf != h:
             bad.append(f"{e.s}/{e.key}: code_sha256 {str(h)[:12]} != code_fingerprint {str(hf)[:12]}")
         harness.add(h)
     if len(harness) > 1:
@@ -405,7 +435,7 @@ def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr
     pro = _plain(proto)
     srv = pro["server"]
     vers = pro["versions"]
-    mml_used = {}
+    mml_used, mml_set = {}, {}
     for e in all_ev:
         if not e.present:
             continue
@@ -419,6 +449,14 @@ def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr
                 continue
             if st.get(k) != v:
                 bad.append(f"{e.s}/{e.key}: settings.{k} {st.get(k)!r} != {v!r}")
+        # results.settings starts as a copy of protocol (run_tvr.settings), so the keys above are equal by
+        # construction; the values this run actually used are run_tvr's *_used fields and request_fields
+        for k, v in used_settings(e.arm, pro).items():
+            if k not in st:
+                miss.append(f"{e.s}/{e.key}: settings.{k}")
+            elif st[k] != v:
+                bad.append(f"{e.s}/{e.key}: settings.{k} {st[k]!r} != {v!r}")
+        mml_set[f"{e.s}/{e.key}"] = st.get("max_model_len_used")
         # run_tvr: results.server = {manifest: VLLMServer.manifest() (cfg, cmd, extra_args, mm_processor_kwargs, ...),
         # versions, max_model_len, ready_s, served_model_name}
         sv_ = e.r("server", default={})
@@ -461,6 +499,11 @@ def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr
                 bad.append(f"max_model_len {v} != {pro['max_model_len']}")
             elif fb["file_sha256"] is not None:
                 bad.append(f"{fb['file']} exists (the cal used the O9 fallback) but the evals ran at {v}")
+            for key, u in sorted(mml_set.items()):  # the harness's own record == the judged (served) value
+                if u is None:
+                    miss.append(f"{key}: settings.max_model_len_used")
+                elif u != v:
+                    bad.append(f"{key}: settings.max_model_len_used {u!r} != the served max_model_len {v!r}")
     items.append(_item("settings", bad, miss, {"max_model_len": sorted(map(str, vals)),
                                                "o9_fallback": {k: fb[k] for k in ("file", "file_sha256", "registered")}}))
 
@@ -521,6 +564,11 @@ def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr
     elif sha256_file(tman_p) != want_m:
         bad.append(f"tiers manifest sha {str(sha256_file(tman_p))[:12]} != data.tiers_manifest_sha256 "
                    f"{str(want_m)[:12]}")
+    # the top tier trained and judged (pilot_cfg tiers.n_top, filled by hand) is the calibration rule's output
+    if not L.cal_decision.is_file():
+        miss.append(str(L.cal_decision))
+    else:
+        bad += pilot_tvr.n_top_problems(L, cfg)
     seed0, rep = int(pilot_cfg.SEED), pilot_tvr.replicate(cfg)
     for s in starts:
         for tier, _ in pilot_tvr.train_tiers(s, cfg):
@@ -659,6 +707,58 @@ def power_stale(pw: dict, cfg, expected_inputs: List[str]) -> List[str]:
     return out
 
 
+def _js(x) -> str:
+    return json.dumps(x, sort_keys=True)
+
+
+def power_unregistered(pw: dict, cfg) -> List[str]:
+    """Why a POWER.json was not made at the registered settings ([] = it was): power_sim's registered block is
+    present and records the registered test, n_sims (registered and used; the CLI's --n-sims is for tests only),
+    tier_corr, fallback, persistence and backend of pilot_cfg power.*, no allow_no_replicate, and the seed
+    replicate was read (sigma.replicate_missing and persistence.replicate_missing False)."""
+    p = _plain(pilot_cfg.get("power", cfg))
+    reg = pw.get("registered")
+    if not isinstance(reg, dict):
+        return ["no registered block"]
+    out = []
+    if reg.get("test") != p["test"]:
+        out.append(f"registered.test {reg.get('test')!r} != power.test {p['test']!r}")
+    for k in ("n_sims_registered", "n_sims_used"):
+        if _js(reg.get(k)) != _js(p["n_sims"]):
+            out.append(f"registered.{k} {reg.get(k)!r} != power.n_sims {p['n_sims']}")
+    if reg.get("allow_no_replicate") is not False:
+        out.append(f"registered.allow_no_replicate {reg.get('allow_no_replicate')!r} (want false)")
+    for blk in ("sigma", "persistence"):
+        if (pw.get(blk) or {}).get("replicate_missing") is not False:
+            out.append(f"{blk}.replicate_missing {(pw.get(blk) or {}).get('replicate_missing')!r} (want false)")
+    for k in ("tier_corr", "fallback", "persistence"):
+        if _js(reg.get(k)) != _js(p.get(k)):
+            out.append(f"registered.{k} != power.{k}")
+    # the backend this run used (PREREG 12.6: seed and n_sims pin the result only together with the backend)
+    if reg.get("backend") != p.get("backend"):
+        out.append(f"registered.backend {reg.get('backend')!r} != power.backend {p.get('backend')!r}")
+    return out
+
+
+def a4_rule(cfg) -> str:
+    p = pilot_cfg.get("power", cfg)
+    tc = p["tier_corr"]
+    return (f"after G0-G3 pass: power_sim ({p['test']}, Holm): power >= {p['target_power']} at "
+            f"{100 * float(p['primary_delta']):g} pp for both contrasts at tier_corr {tc['power']}, sigma_used, "
+            f"lambda_used; family-wise type-I <= {p['type1_max']} at tier_corr "
+            f"{' and '.join(str(r) for r in tc['type1'])} (the max)")
+
+
+def a4_summary(pw: dict) -> dict:
+    """The main design's verdict as GATE.json records it (no per-contrast numbers)."""
+    v = (pw.get("verdicts") or {}).get("main") or {}
+    return {"pass": pw.get("pass"), "fallback_pass": pw.get("fallback_pass"), "type1": v.get("type1"),
+            "type1_ok": v.get("type1_ok"), "power_ok": v.get("power_ok"), "power_tier_corr": v.get("power_tier_corr"),
+            "sigma_used": (pw.get("sigma") or {}).get("sigma_used"),
+            "lambda_used": (pw.get("persistence") or {}).get("lambda_used"),
+            "n_sims_used": (pw.get("registered") or {}).get("n_sims_used")}
+
+
 # --- evaluate ---------------------------------------------------------------------------------------------------
 
 def evaluate(pilot_root: Path = None, starts=STARTS, L: pilot_tvr.Layout = None, cfg=None,
@@ -759,6 +859,7 @@ def evaluate(pilot_root: Path = None, starts=STARTS, L: pilot_tvr.Layout = None,
 
     # A3 (report only): images vs no images, same adapter, same tasks
     a3 = {}
+    alpha3 = float(pilot_cfg.get("gates.mcnemar_alpha", cfg))
     for s in starts:
         ec, eb = evals[s].get(f"{top}__c"), evals[s].get(f"{top}__blind")
         if not (ec and eb and ec.present and eb.present):
@@ -769,9 +870,10 @@ def evaluate(pilot_root: Path = None, starts=STARTS, L: pilot_tvr.Layout = None,
         b = sum(1 for t in common if sc[t] and not sb[t])
         c = sum(1 for t in common if sb[t] and not sc[t])
         p = binom_two_sided(b, c)
-        a3[s] = {"b": b, "c": c, "n_paired": len(common), "p": p, "images_better_p_lt_0.05": bool(b > c and p < 0.05)}
-    A3 = {"report_only": True, "rule": "exact two-sided binomial on the discordant pairs (TOP c vs TOP blind)",
-          "per_start": a3}
+        a3[s] = {"b": b, "c": c, "n_paired": len(common), "p": p,
+                 "images_better_p_lt_0.05": bool(b > c and p < alpha3)}
+    A3 = {"report_only": True, "rule": "exact two-sided binomial on the discordant pairs (TOP c vs TOP blind); "
+          f"images better: b > c and p < {alpha3} (gates.mcnemar_alpha)", "per_start": a3}
 
     # A4
     pf = root / "POWER.json"
@@ -796,12 +898,16 @@ def evaluate(pilot_root: Path = None, starts=STARTS, L: pilot_tvr.Layout = None,
             if stale:
                 a4_note = "stale POWER.json: " + "; ".join(stale[:3])
                 pw = None
+        unreg = power_unregistered(pw, cfg) if pw is not None else []
+        if unreg:
+            a4_note = "POWER.json not made at the registered settings: " + "; ".join(unreg[:3])
+            pw = None
         a4 = "pending" if pw is None else ("pass" if pw.get("pass") is True else "fail")
     else:
+        pw = None
         a4 = "pending"
-    A4 = {"status": a4, "power_file": str(pf), "note": a4_note,
-          "rule": "after G0-G3 pass: power_sim (seed-aware cluster t, Holm) "
-          "power >= 0.80 at 8 pp for both contrasts and simulated type-I <= power.type1_max"}
+    A4 = {"status": a4, "power_file": str(pf), "note": a4_note, "rule": a4_rule(cfg),
+          "power": None if pw is None else a4_summary(pw)}
 
     if g0 == "fail" or g2 == "fail":
         decision = "engineering"
@@ -911,7 +1017,11 @@ def render_md(rep: dict) -> str:
     badg2 = [c for c in rep["G2"]["checks"] if c["ok"] is not True]
     L.append("全部约束解码和不给图的评测：正则 100% 匹配，无缺日志的题。" if not badg2 else
              "；".join(f"{c['name']} {'不过' if c['ok'] is False else '缺'}" for c in badg2))
-    L += ["", f"A4 功效：{_st(rep['A4']['status'])}（{rep['A4']['power_file']}）。", "",
+    a4, pw = rep["A4"], rep["A4"].get("power") or {}
+    extra = "" if not pw else (f"；族错误率 {pw.get('type1')}，σ_used {pw.get('sigma_used')}，"
+                               f"λ_used {pw.get('lambda_used')}，备用设计 fallback_pass {pw.get('fallback_pass')}")
+    L += ["", f"A4 功效：{_st(a4['status'])}（{a4['power_file']}）{extra}"
+          f"{'；' + str(a4['note']) if a4.get('note') else ''}。", "",
           "说明：试点数据（种子 1001）不进确认分析，只用于功效决定；不约束解码（u 臂）只作描述。", ""]
     return "\n".join(L)
 

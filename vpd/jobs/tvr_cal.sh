@@ -377,10 +377,11 @@ session() {
 # canary DIR: run_tvr replay sft2 into DIR (as this job's user and node), then the frozen tolerance check against the
 # data job's replay (TVR_PY render_parity, 5.2.6); CANARY_OK=0 on any failure (the job's evals are then not run).
 # The canary is always rendered by THIS run: an earlier run's DIR is moved aside to DIR.prev-<UTC> first (a resubmitted
-# job may land on another node, and --resume would skip a complete replay and recheck the old frames, O22).
+# job may land on another node, and --resume would skip a complete replay and recheck the old frames, O22).  Only when
+# this run has the time to render it (timed_thor's test): otherwise DIR stays (canary_replay:no_time, no eval runs).
 canary() {
   local d=$1
-  if [[ $DRY != 1 && -d $d && -n $(ls -A -- "$d" 2> /dev/null) ]]; then
+  if [[ $DRY != 1 && -d $d && -n $(ls -A -- "$d" 2> /dev/null) ]] && (($(left) - THOR_RESERVE_S >= MIN_STEP_S)); then
     if ! vpd_step canary_aside mv -T -- "$d" "$d.prev-$(date -u +%Y%m%dT%H%M%SZ)"; then
       FAILS+=(canary_aside)
       CANARY_OK=0
@@ -459,18 +460,30 @@ server_failed_since() {  # FILE T0: run_tvr wrote its <prefix>__server_error.jso
 # 2b the shakedown: raw Q3B, c + blind on smoke4, mechanism only (success withheld), B5 parity; the O9 retry only when
 # THIS attempt's server refused to start: run_tvr exit 1 with <prefix>__server_error.json written now (it writes that
 # file exactly when VLLMServer.__enter__ fails) and no arm scored; a refusal (2), a timeout, a TERM or a THOR failure
-# never switches the pilot to the fallback
+# never switches the pilot to the fallback.  A fallback attempt of an earlier run that did not succeed (the first
+# attempt's copy kept, no fallback_used.json) left its arm dirs at the fallback's protocol, which a --resume at the
+# frozen max_model_len refuses (rc 2): they and the copy are moved aside to <name>.prev-<UTC> first, and this run
+# decides again by the same rule
 shake() {
   local args=("$PY_Q3" -B -m vpd.tvr.run_tvr eval --start "$START" --tier raw --arms c,blind --task-set smoke4
               --name-prefix calshake --out-root "$CAL/shake" --mechanism-only --vllm-parity "$CAL/dry/dry_run.json")
   local rc=0 t0 se=$CAL/shake/calshake__${START}__raw__server_error.json
+  local keep=$CAL/shake/server_error_first_attempt.json d utc
+  if [[ $DRY != 1 && -f $keep ]] && ((${#MML[@]} == 0)); then
+    utc=$(date -u +%Y%m%dT%H%M%SZ)
+    for d in "$CAL/shake/calshake__${START}__raw__c" "$CAL/shake/calshake__${START}__raw__blind" "$keep"; do
+      if [[ -e $d ]] && ! vpd_step "shake_aside:${d##*/}" mv -T -- "$d" "$d.prev-$utc"; then
+        FAILS+=(shake)
+        return 1
+      fi
+    done
+  fi
   t0=$(date +%s)
   timed_thor shake "${args[@]}" ${MML[@]+"${MML[@]}"} --resume || rc=$?
   reap shake
   ((rc == 0)) && return 0
   if ((${#MML[@]} == 0 && rc == 1)) && server_failed_since "$se" "$t0" && nothing_scored; then
     echo "[$TAG] the vLLM server did not start (rc $rc, $se): retrying once with --max-model-len $FB (O9)" >&2
-    local keep=$CAL/shake/server_error_first_attempt.json
     cp -f -- "$se" "$keep" || true
     if timed_thor shake_fallback "${args[@]}" --max-model-len "$FB"; then
       MML=(--max-model-len "$FB")
