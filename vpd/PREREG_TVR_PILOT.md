@@ -89,19 +89,19 @@
   ]
  },
  "data": {
-  "F_eval500": null,
-  "F_source": null,
-  "bfs_dev200_sha256": null,
-  "bfs_eval500_sha256": null,
-  "demos_all_sha256": null,
-  "dev_selection_sha256": null,
-  "dropped": null,
-  "floors_eval500_sha256": null,
-  "houses_sha256": null,
-  "kept": null,
-  "reach_index_sha256": null,
-  "replay_manifest_sha256": null,
-  "tiers_manifest_sha256": null
+  "F_eval500": 0.0,
+  "F_source": "stop0",
+  "bfs_dev200_sha256": "82184d170faa38652118990b84a3c8553a999f576047c2c4fd4d0bbc9502efb6",
+  "bfs_eval500_sha256": "0e1b0bb865e937bc4a2179f9741742379d403c0784cda92696d1458780f6bb0e",
+  "demos_all_sha256": "cf2f702c84bfba042233fc5921ac5a4b5442093735455c46cb945f460b76b897",
+  "dev_selection_sha256": "75e64d97e5864d9780c1d925d561e4ccc1e0d126013f946a86679ee87087641e",
+  "dropped": 5,
+  "floors_eval500_sha256": "5cc85b245c32073b5bd91ff7ddd19342d9491dc6c0502200ca47648f123c4210",
+  "houses_sha256": "231089c1b508d0b29ea3f88356639889c3f59f71cfa1477163c4d305c63480ea",
+  "kept": 1595,
+  "reach_index_sha256": "73dd8ab6d18fd07427109f72c69bfb41301a056fcc0722bcdef16b264adbc5ac",
+  "replay_manifest_sha256": "9f826c0421d2d5eb5defc5c2496776baeefcf083b2610d3f253a3afaa880484f",
+  "tiers_manifest_sha256": "91f1321db81285a4f8dd7424d3ae4864a6b3961dfc7f3cae8cf837396476122a"
  },
  "dev": {
   "max_per_scene_category": 2,
@@ -445,19 +445,19 @@
 
 | 键 | 现在 | 谁、什么时候填 | 来源 |
 |---|---|---|---|
-| `data.dev_selection_sha256` | 待填：数据作业之后 | 编排（契约 7.1 之后） | `OUT/tvr/split/dev200/selection.json` 的 sha256 |
-| `data.houses_sha256` | 待填：数据作业之后 | 编排 | `OUT/tvr/houses/houses.json` |
-| `data.reach_index_sha256` | 待填：数据作业之后 | 编排 | `OUT/tvr/reach/v1/index.json` |
-| `data.replay_manifest_sha256` | 待填：数据作业之后 | 编排 | `OUT/tvr/replay/sft1600_lvp/manifest.json` |
-| `data.demos_all_sha256` | 待填：数据作业之后 | 编排 | `OUT/tvr/demos/sft1600_lvp/demos_all.jsonl`（= 其 manifest 的 `demos_all_sha256`） |
-| `data.kept` | 待填：数据作业之后 | 编排 | demos manifest 的 `kept`（保留的示范条数 K） |
-| `data.dropped` | 待填：数据作业之后 | 编排 | demos manifest 的 `dropped`（剔除条数；名单在 `dropped.json`） |
-| `data.tiers_manifest_sha256` | 待填：数据作业之后 | 编排 | `OUT/tvr/tiers/v1/manifest.json` |
-| `data.bfs_eval500_sha256` | 待填：数据作业之后 | 编排 | `OUT/tvr/bfs/eval500_opt.json` |
-| `data.bfs_dev200_sha256` | 待填：数据作业之后 | 编排 | `OUT/tvr/bfs/dev200_opt.json` |
-| `data.floors_eval500_sha256` | 待填：数据作业之后 | 编排 | `OUT/tvr/floors/floors_eval500.json` |
-| `data.F_eval500` | 待填：数据作业之后 | 编排 | `floors_eval500.json` 的 `F.rate` |
-| `data.F_source` | 待填：数据作业之后 | 编排 | `floors_eval500.json` 的 `F.source` |
+| `data.dev_selection_sha256` | 已填：`75e64d97e586…`（tvr-data-202611102015） | 编排（契约 7.1 之后） | `OUT/tvr/split/dev200/selection.json` 的 sha256 |
+| `data.houses_sha256` | 已填：`231089c1b508…`（tvr-data-202611102015） | 编排 | `OUT/tvr/houses/houses.json` |
+| `data.reach_index_sha256` | 已填：`73dd8ab6d18f…`（tvr-data-202611102015） | 编排 | `OUT/tvr/reach/v1/index.json` |
+| `data.replay_manifest_sha256` | 已填：`9f826c0421d2…`（tvr-data-202611102015） | 编排 | `OUT/tvr/replay/sft1600_lvp/manifest.json` |
+| `data.demos_all_sha256` | 已填：`cf2f702c84bf…`（tvr-data-202611102015） | 编排 | `OUT/tvr/demos/sft1600_lvp/demos_all.jsonl`（= 其 manifest 的 `demos_all_sha256`） |
+| `data.kept` | 已填：`1595`（tvr-data-202611102015） | 编排 | demos manifest 的 `kept`（保留的示范条数 K） |
+| `data.dropped` | 已填：`5`（tvr-data-202611102015） | 编排 | demos manifest 的 `dropped`（剔除条数；名单在 `dropped.json`） |
+| `data.tiers_manifest_sha256` | 已填：`91f1321db812…`（tvr-data-202611102015） | 编排 | `OUT/tvr/tiers/v1/manifest.json` |
+| `data.bfs_eval500_sha256` | 已填：`0e1b0bb865e9…`（tvr-data-202611102015） | 编排 | `OUT/tvr/bfs/eval500_opt.json` |
+| `data.bfs_dev200_sha256` | 已填：`82184d170faa…`（tvr-data-202611102015） | 编排 | `OUT/tvr/bfs/dev200_opt.json` |
+| `data.floors_eval500_sha256` | 已填：`5cc85b245c32…`（tvr-data-202611102015） | 编排 | `OUT/tvr/floors/floors_eval500.json` |
+| `data.F_eval500` | 已填：`0.0`（tvr-data-202611102015） | 编排 | `floors_eval500.json` 的 `F.rate` |
+| `data.F_source` | 已填：`stop0`（tvr-data-202611102015） | 编排 | `floors_eval500.json` 的 `F.source` |
 | `tiers.n_top` | 待填：校准之后（"ALL" 或 "400"） | 编排（`cal_decision.json`） | 第 7 节的规则 |
 | `render.eval_envs` | 已填 5（**暂定**，= `render.replay_envs`）；校准之后确认或改，冻结前 | 编排（只用 Q3B 的校准测速） | 第 3 节 |
 | `public.hf_revision` | `null`，未核实；允许保持 `null`（`pilot_cfg.OPTIONAL_NONE`） | — | 第 2 节 |
@@ -517,7 +517,7 @@
 ### 2.3 TVR-dev（`dev`）
 
 - 规则（DECISIONS G10(d)，契约 5.1.2）：从 rl.json 抽 200 题，每类 50 题；每类内按 sha256("tvr-dev-v1|" + task_id) 升序依次取，同一类里同一场景最多 2 题；输出顺序 SR-easy、SR-hard、LR-easy、LR-hard 四块，每块内按哈希序。选中的场景若在 sft 或 eval 里就报错（不会发生，断言）。
-- 记录：`OUT/tvr/split/dev200/selection.json`（rl.json 的 sha256、200 个 id、每类 50、场景计数、smoke8 / smoke4）。sha256 → `data.dev_selection_sha256`（待填）。
+- 记录：`OUT/tvr/split/dev200/selection.json`（rl.json 的 sha256、200 个 id、每类 50、场景计数、smoke8 / smoke4）。sha256 → `data.dev_selection_sha256`（已填）。
 - 冒烟子集：smoke8 = 每类 dev 顺序的前 2 题；smoke4 = 每类前 1 题（`dev.smoke_per_category` = 2）。sft2 = 探针用过的两条公开样本任务 `ithor_FloorPlan11_easy_t00_s00`、`procthor_procthor_09990_hard_t19_s01`，只用于渲染一致性的金丝雀。
 - dev200 只用于校准（第 7 节），**从不用于试点闸门**。
 
@@ -527,15 +527,15 @@
 
 | 文件 | 键 | sha256 |
 |---|---|---|
-| `OUT/tvr/split/dev200/selection.json` | `data.dev_selection_sha256` | 待填：数据作业之后 |
-| `OUT/tvr/houses/houses.json` | `data.houses_sha256` | 待填：数据作业之后 |
-| `OUT/tvr/reach/v1/index.json` | `data.reach_index_sha256` | 待填：数据作业之后 |
-| `OUT/tvr/replay/sft1600_lvp/manifest.json` | `data.replay_manifest_sha256` | 待填：数据作业之后 |
-| `OUT/tvr/demos/sft1600_lvp/demos_all.jsonl` | `data.demos_all_sha256` | 待填：数据作业之后 |
-| `OUT/tvr/tiers/v1/manifest.json` | `data.tiers_manifest_sha256` | 待填：数据作业之后 |
-| `OUT/tvr/bfs/eval500_opt.json` | `data.bfs_eval500_sha256` | 待填：数据作业之后 |
-| `OUT/tvr/bfs/dev200_opt.json` | `data.bfs_dev200_sha256` | 待填：数据作业之后 |
-| `OUT/tvr/floors/floors_eval500.json` | `data.floors_eval500_sha256` | 待填：数据作业之后 |
+| `OUT/tvr/split/dev200/selection.json` | `data.dev_selection_sha256` | `75e64d97e5864d9780c1d925d561e4ccc1e0d126013f946a86679ee87087641e` |
+| `OUT/tvr/houses/houses.json` | `data.houses_sha256` | `231089c1b508d0b29ea3f88356639889c3f59f71cfa1477163c4d305c63480ea` |
+| `OUT/tvr/reach/v1/index.json` | `data.reach_index_sha256` | `73dd8ab6d18fd07427109f72c69bfb41301a056fcc0722bcdef16b264adbc5ac` |
+| `OUT/tvr/replay/sft1600_lvp/manifest.json` | `data.replay_manifest_sha256` | `9f826c0421d2d5eb5defc5c2496776baeefcf083b2610d3f253a3afaa880484f` |
+| `OUT/tvr/demos/sft1600_lvp/demos_all.jsonl` | `data.demos_all_sha256` | `cf2f702c84bfba042233fc5921ac5a4b5442093735455c46cb945f460b76b897` |
+| `OUT/tvr/tiers/v1/manifest.json` | `data.tiers_manifest_sha256` | `91f1321db81285a4f8dd7424d3ae4864a6b3961dfc7f3cae8cf837396476122a` |
+| `OUT/tvr/bfs/eval500_opt.json` | `data.bfs_eval500_sha256` | `0e1b0bb865e937bc4a2179f9741742379d403c0784cda92696d1458780f6bb0e` |
+| `OUT/tvr/bfs/dev200_opt.json` | `data.bfs_dev200_sha256` | `82184d170faa38652118990b84a3c8553a999f576047c2c4fd4d0bbc9502efb6` |
+| `OUT/tvr/floors/floors_eval500.json` | `data.floors_eval500_sha256` | `5cc85b245c32073b5bd91ff7ddd19342d9491dc6c0502200ca47648f123c4210` |
 
 **登记以后不再重新生成这些文件**（数据作业对相同输出是幂等的，对不同输出拒绝覆盖，契约 7.1）。要改就是偏差，记第 17 节。
 
@@ -631,11 +631,11 @@
 - **剔除原因**（取第一个不满足的，只有语义原因）：`move_failed@k`、`pose_mismatch@k`、`no_stop`、`stop_not_last`、`final_not_target`。每条剔除连同原因和细节写进 `OUT/tvr/demos/sft1600_lvp/dropped.json`。
 - **基础设施故障不是剔除原因**：重放目录没有有效的 `results.json`（或少任何一条轨迹）时，`demos build` 拒绝运行、什么都不写。
 - **K 的下限**：保留条数 K ≥ `gates.min_kept` = 1,520（1,600 的 95%）。数据作业的 expect 步骤和 G0 第 16 条都查。预计 K = 1,600（第 3.4 节，推断）。
-- **K 和剔除名单**：待填：数据作业之后、任何训练之前填进第 0.1 节（`data.kept`、`data.dropped`）并在本节写明。
+- **K 和剔除名单**（已填，数据作业 tvr-data-202611102015，任何训练之前）：K = 1,595（`data.kept`），剔除 5 条（`data.dropped`），都在 procthor_01401、原因都是 move_failed，名单在 `OUT/tvr/demos/sft1600_lvp/dropped.json`：`procthor_procthor_01401_easy_t02_s00`（move_failed@6）、`procthor_procthor_01401_easy_t02_s01`（@7）、`procthor_procthor_01401_easy_t09_s01`（@7）、`procthor_procthor_01401_hard_t19_s00`（@8）、`procthor_procthor_01401_hard_t19_s01`（@10）。按类别保留 SR-easy 400、SR-hard 400、LR-easy 397、LR-hard 398。独立复算（只读原始文件）给出同样的 K、名单和档位集合。
 - **重算的 "Valid actions" 行**：公开数据里有 54 个回合（9 条轨迹，场景 FloorPlan325 和 procthor_01401），专家走的 Move 不在同回合自己的合法动作行里，其中 12 个回合行里一个 Move 都没有（critic，va_check.py）。按出生位姿集合重算，142 个回合的合法动作行和公开的不同（第 3.4 节）。我们的示范一律用我们重算的行，所以训练文本和评测时的文本逐字节相同。
 - **kin 检查**（G0 第 6 条，不是剔除原因）：纯运动学环境 kin_env（`vpd/tvr/kin_env.py`，规则逐条照 thor_env.py:131-142、220-333、402-435）用同一个冻结集合、同样的动作，必须每一步给出相同的位姿、action_success、合法动作行和 user 文本；`kin_check.json` 列出所有不一致，`kin_equal_all_kept` 必须为 true。
 - **格式**（契约 6.5，n2_train_vpd 的输入）：`{"id", "category", "dataset", "scene", "n_turns", "messages": [system, user, assistant, …], "images": [绝对路径]}`；每个动作一个 user 轮，user 文本 = 重放的 obs_str（含两个 `<image>`），每轮两张图 [step_k, target]；最后一条 assistant 是 `Action: Stop`；没有 loss_weight。
-- `demos_all.jsonl` 按 sft.json 的顺序；sha256 → `data.demos_all_sha256`（待填）。
+- `demos_all.jsonl` 按 sft.json 的顺序；sha256 → `data.demos_all_sha256`（已填）。
 
 ---
 
@@ -794,7 +794,7 @@ success = stopped and is_exact(final_pose, target)
 3. **RAND**：对种子 s ∈ {0, 1, 2} 和每道题，rng = random.Random(f"tvr-floor-rand-v1|{s}|{task_id}")；m = 该类公开专家非 Stop 动作数的 statistics.median_low（1,600 条公开序列）；走 m 步，每步从当前合法的非 Stop 动作里均匀抽一个；然后 Stop。每个种子一个成功率，取 3 个的平均。
 - **F** = max(STOP0, FIX 在 eval500 上, RAND 平均)；`F_source` 记是哪一个；也报等价成功数 ceil(F × 500)。
 - 无碰撞的几何估计（EXPLORATORY，不是闸门下限）：长度 ≤ 3 的固定序列里训练集选出的 (MoveRight, LookDown) 在 eval 上 1/500（prereg_confirm 的 tvr_floor_nocoll.py）。所以 F 预计接近 0（推断），这也是 G1 另加"高于本起点 0W"的原因（DECISIONS G10(f)，critic C5）。
-- 数值：`data.F_eval500` / `data.F_source`：**待填：数据作业之后**。文件 `OUT/tvr/floors/floors_eval500.json` 的 `warnings` 必须为空列表（G0 第 14 条）。
+- 数值：`data.F_eval500` / `data.F_source`：**已填：0.0 / stop0**（数据作业 tvr-data-202611102015；`recheck_tvr` 独立复算相同）。文件 `OUT/tvr/floors/floors_eval500.json` 的 `warnings` 必须为空列表（G0 第 14 条）。
 - dev200 的下限（`floors_dev200.json`）只给校准和无望停止用。
 - **独立复算**（简报第 6 节）：`vpd/tvr/recheck_tvr.py floors` 只按本节和第 3.4 节的文字重写转移规则、合法动作行、冻结集合（按 digest 从 reach/v1 场景文件读）、专家中位数和三个下限策略，不导入 kin_env、floors、bfs、tasks、score_tvr；`gate_tvr` 要求它的 F、F 来源和三个分量逐项等于 floors_eval500.json（G0 第 17 条）。
 

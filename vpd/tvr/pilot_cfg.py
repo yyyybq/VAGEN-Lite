@@ -152,10 +152,20 @@ FROZEN = {
                                      "不支持 iff both no_support; else 无定论"},
               "p_source": "per task and tier: mean over the three pilot starts' primary-arm outcomes"},
     "budget": {"round_baseline_gpuh": 8.8404, "round_cap_gpuh": 200.0, "job_est_high_max_h": 5.5},
-    "data": {"dev_selection_sha256": None, "houses_sha256": None, "reach_index_sha256": None,
-             "replay_manifest_sha256": None, "demos_all_sha256": None, "kept": None, "dropped": None,
-             "tiers_manifest_sha256": None, "bfs_eval500_sha256": None, "bfs_dev200_sha256": None,
-             "floors_eval500_sha256": None, "F_eval500": None, "F_source": None},
+    # filled from the data job tvr-data-202611102015 (pt-r68pzbpm; round 3, DECISIONS G14); sha256 of OUT/tvr/<file>
+    "data": {"dev_selection_sha256": "75e64d97e5864d9780c1d925d561e4ccc1e0d126013f946a86679ee87087641e",
+             "houses_sha256": "231089c1b508d0b29ea3f88356639889c3f59f71cfa1477163c4d305c63480ea",
+             "reach_index_sha256": "73dd8ab6d18fd07427109f72c69bfb41301a056fcc0722bcdef16b264adbc5ac",
+             "replay_manifest_sha256": "9f826c0421d2d5eb5defc5c2496776baeefcf083b2610d3f253a3afaa880484f",
+             "demos_all_sha256": "cf2f702c84bfba042233fc5921ac5a4b5442093735455c46cb945f460b76b897",
+             "kept": 1595,
+             "dropped": 5,
+             "tiers_manifest_sha256": "91f1321db81285a4f8dd7424d3ae4864a6b3961dfc7f3cae8cf837396476122a",
+             "bfs_eval500_sha256": "0e1b0bb865e937bc4a2179f9741742379d403c0784cda92696d1458780f6bb0e",
+             "bfs_dev200_sha256": "82184d170faa38652118990b84a3c8553a999f576047c2c4fd4d0bbc9502efb6",
+             "floors_eval500_sha256": "5cc85b245c32073b5bd91ff7ddd19342d9491dc6c0502200ca47648f123c4210",
+             "F_eval500": 0.0,
+             "F_source": "stop0"},
 }
 
 # keys (dotted) that must be non-None before pilot_tvr prepares a job.  The calibration jobs need EVERY data.* key:
