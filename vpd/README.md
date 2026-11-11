@@ -65,7 +65,8 @@
 | `tvr/render_parity.py` | 渲染一致性按容差判（PSNR ≥ 40 dB 且 SSIM ≥ 0.99，状态、合法动作、用户文本、action_success 必须完全相同）；smoke 和每个评测作业的渲染金丝雀用它 | tvreval（第三轮第二批） |
 | `tests/test_tvr_eval.py` | tvreval 各模块的测试 | tvreval（第三轮第二批） |
 | `tvr/pilot_tvr.py` | TVR 试点编排（plan / prepare / submit / status / collect / delete / budget / expect / smoke-verdict / cal-decide），含本轮 200 卡时的预算拒绝 | tvrjobs（第三轮第二批） |
-| `tvr/gate_tvr.py` | TVR 闸门判定 → `GATE.json`、`GATE.md`；从 trajectory.json 独立重数 k/n；不算起点之间的差 | tvrjobs（第三轮第二批） |
+| `tvr/gate_tvr.py` | TVR 闸门判定 → `GATE.json`、`GATE.md`；从 trajectory.json 独立重数 k/n；不算起点之间的差；G0 第 7 条自 2026-11-11 起只判合并是否正确（`merge_correctness.json` 登记的诊断报告，T−MF ≤ 1e-4），bf16 的 U−M 只报告（预注册第 17 节） | tvrjobs（第三轮第二批）；第三轮 G16 |
+| `tvr/compare_tvr.py` | 登记的只报告比较（预注册第 17 节 2026-11-11）：Q3S − Q3B（主报告）、Q3S − E2（补充）每格成对 b、c、精确 p，各起点 k/n 和 Wilson，参照行 Q3B 100 种子 1001 对 1002 → `COMPARE.json`、`COMPARE.md`；GATE.json、POWER.json 写完才算 | 第三轮 G16 |
 | `tvr/recheck_tvr.py` | 独立重算（不导入 tvrdata 的模块）：下限 F 和逐题计数 | tvrjobs（第三轮第二批） |
 | `tvr/merge_parity.py` | 合并权重和 LoRA 的 teacher-forced 一致性（平均 \|dCE\| ≤ 0.005，回复 argmax 一致率 ≥ 0.99），每个合并评测都跑 | tvrjobs（第三轮第二批） |
 | `jobs/tvr_data.sh` | sco 作业脚本：`tvr_data.sh RUN`（作业 vpd-tvr-data，非 root）：dev200、房子、可走集合、回放、示范、档位、BFS、下限 | tvrjobs（第三轮第二批） |
@@ -135,7 +136,7 @@
 | `tvr/runs/explore/cal/Q3B/` | 校准作业的输出（探索性质，只用 Q3B、只在 dev200 上）：`dry/`、`shake/`、`canary/`、`adapters/`、`evals/`、`cal_decision.json`；`futility_override.json` 只由编排在用户决定后写 |
 | `tvr/runs/smoke/<RUN 名>/` | 机制冒烟的输出和 `smoke_verdict.json`（不算 SR） |
 | `tvr/runs/pilot/<起点>/` | 试点的 `adapters/<档>/`、`evals/pilot__<起点>__<档>__<臂>/`、`parity/merge_<档>.json`、`canary/<作业>/render_parity.json` |
-| `tvr/runs/pilot/` | `GATE.json`、`GATE.md`（gate_tvr），以及 `POWER.json`（power_sim，只在 G0-G3 通过后） |
+| `tvr/runs/pilot/` | `GATE.json`、`GATE.md`（gate_tvr），以及 `POWER.json`（power_sim，只在 G0-G3 通过后）；`merge_correctness.json`（编排写的合并正确性报告登记表，G0 第 7 条读）；`COMPARE.json`、`COMPARE.md`（compare_tvr，在 GATE、POWER 之后） |
 | `envs/tvr` | TVR 的 conda 环境（要用户批准后才建） |
 | `e3vs/` | `repo/`、`data/`、`occ/`、`bfs/`、`sft/`、`parity/`、`runs/` |
 
