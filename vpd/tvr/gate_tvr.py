@@ -21,7 +21,16 @@ G0 (all 17 items must hold; any missing input = incomplete):
                            (the evals only: the data job's replay may come from older run_tvr code)
    6 kin                   kin_equal_all_kept (demos) AND per image eval 0 valid-list mismatches and kin-unequal tasks
                            <= gates.kin_eval.task_mismatch_max_frac of its tasks
-   7 merge_parity          P/S/parity/merge_<tier>.json pass (and of the adapter.pt now on disk) for EVERY merged eval
+   7 merge_parity          merge CORRECTNESS (PREREG section 17, row 2026-11-11): for EVERY merged eval (S, tier)
+                           exactly one entry of the merge-correctness reports registered in P/merge_correctness.json
+                           (mp_diag.json files, sha256-pinned) for start S and adapter dir EVAL_ADAPTER[tier]
+                           (100s1002 -> 100_s1002) with adapter_sha256 == the adapter.pt on disk (G0(8)'s sha);
+                           gate_reproduction.ok, its gate block and the diagnostic's own U-M (pairs["U-M"], exactly:
+                           mean_abs_dce, replies_agreeing, n_replies) == P/S/parity/merge_<tier>.json (whose
+                           adapter_sha256 is that sha); served_ok; T-MF mean |dCE| <= MERGE_MF_MAX_MEAN_ABS_DCE on
+                           the parity json's replies, none dropped; module sets equal (wrapped == merge keys, 0
+                           differences both ways).  The bf16 U-M numbers and gates.merge_parity are reported, not
+                           gated (GATE.json merge_bf16_reported)
    8 served_adapter        every merged eval served the adapter.pt now on disk
    9 attn_pixels           sdpa at every attention site of every adapter; max_pixels in training and in vLLM
   10 settings              results.settings == pilot_cfg protocol and the per-run values run_tvr records:
@@ -79,6 +88,21 @@ G0_ITEMS = ("evals_valid", "templates", "image_tokens", "renderer", "code", "kin
             "attn_pixels", "settings", "reach_frozen", "official_aggregate", "adapter_provenance", "floors_file",
             "render_consistency", "demos_replay", "independent_recompute")
 NOTE = "no between-start differences are computed"
+
+# G0(7) since 2026-11-11 (PREREG_TVR_PILOT.md section 17, row "G0 第 7 条改为只检查合并是否正确", item (ii): "fp32 合并误差
+# <= 1e-4"; approved by the user, DECISIONS G16): the fp32-merged model MF against the trained function T, mean |dCE|
+# over the 0W pool's 20 demos.  pilot_cfg.py is in the run_tvr harness fingerprint and stays unchanged, so the
+# constant lives here.
+MERGE_MF_MAX_MEAN_ABS_DCE = 1e-4
+MC_REGISTRY = "merge_correctness.json"               # P/merge_correctness.json, written by the orchestrator
+MC_REGISTRY_SCHEMA = "vpd.tvr.merge_correctness_registry/1"
+MP_DIAG_REPORT_SCHEMA = "vpd.tvr.mp_diag/1:report"   # the EXPLORATORY diagnostic vpd-tvr-mpdiag's mp_diag.json
+MC_SECTION17 = "PREREG_TVR_PILOT.md section 17, 2026-11-11: G0 item 7 = merge correctness only"
+# the diagnostic's own U-M must equal the eval job's parity json EXACTLY (DECISIONS G16: "same mean |dCE| and the same
+# agreeing count on 267 replies"); mp_diag's gate_reproduction.ok allows |d mean| <= 1e-6, so it alone is not enough
+MC_REPRO_KEYS = ("mean_abs_dce", "replies_agreeing", "n_replies")
+BF16_NOTE = ("reported, not gated: the bf16 U-M merge parity (gates.merge_parity) since PREREG section 17, "
+             "2026-11-11")
 
 
 def read_json(p) -> Optional[dict]:
@@ -241,6 +265,149 @@ def eval_list(s: str, cfg=None) -> List[tuple]:
     return out
 
 
+# --- G0(7): merge correctness ----------------------------------------------------------------------------------
+
+def load_mc_registry(root: Path) -> tuple:
+    """(entries, problems) of the merge-correctness registry P/merge_correctness.json
+    {"schema": MC_REGISTRY_SCHEMA, "reports": [{"path": <mp_diag.json>, "sha256": <hex>}, ...]}.  An entry is one
+    adapter of a registered report whose file sha256 equals the registry's: {"report", "key", "diag", "weights"}.
+    A report whose sha256 differs (or that is missing, unreadable or of another schema) contributes no entry and
+    is a problem; so is a missing or malformed registry (never an exception)."""
+    p = Path(root) / MC_REGISTRY
+    reg = read_json(p)
+    if not isinstance(reg, dict):
+        return [], [f"no merge-correctness registry {p} (missing or not json)"]
+    probs = []
+    if reg.get("schema") != MC_REGISTRY_SCHEMA:
+        probs.append(f"{p.name}: schema {reg.get('schema')!r} != {MC_REGISTRY_SCHEMA!r}")
+    reports = reg.get("reports")
+    if not isinstance(reports, list) or not reports:
+        return [], probs + [f"{p.name}: no reports listed"]
+    entries, seen = [], set()
+    for i, r in enumerate(reports):
+        path, want = (r.get("path"), r.get("sha256")) if isinstance(r, dict) else (None, None)
+        if not isinstance(path, str) or not isinstance(want, str):
+            probs.append(f"{p.name}: reports[{i}] is not {{path, sha256}}")
+            continue
+        if path in seen:
+            probs.append(f"{p.name}: report {path} listed twice")
+            continue
+        seen.add(path)
+        got = sha256_file(path)
+        if got is None:
+            probs.append(f"{p.name}: report {path} missing")
+            continue
+        if got != want:
+            probs.append(f"{p.name}: report {path} sha256 {got[:12]} != registered {want[:12]}")
+            continue
+        doc = read_json(path)
+        if not isinstance(doc, dict) or doc.get("schema") != MP_DIAG_REPORT_SCHEMA or \
+                not isinstance(doc.get("adapters"), dict):
+            probs.append(f"{p.name}: report {path} is not a {MP_DIAG_REPORT_SCHEMA} file with adapters")
+            continue
+        for key, a in sorted(doc["adapters"].items()):
+            a = a if isinstance(a, dict) else {}
+            entries.append({"report": path, "key": key, "diag": a.get("diag") if isinstance(a.get("diag"), dict)
+                            else None, "weights": a.get("weights") if isinstance(a.get("weights"), dict) else None})
+    return entries, probs
+
+
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _same(a, b) -> bool:
+    """Exact equality of two json numbers (no tolerance; None, bools and non-finite values never count)."""
+    return _num(a) and _num(b) and a == b
+
+
+def merge_correct(s: str, tier: str, entries: List[dict], disk_sha: str, parity: dict) -> tuple:
+    """(problems, facts) of G0(7) for the merged eval (s, eval tier `tier`) whose adapter.pt on disk has sha256
+    disk_sha and whose eval job wrote the parity json `parity` (P/s/parity/merge_<tier>.json)."""
+    ad = pilot_tvr.EVAL_ADAPTER[tier]  # the diagnostic names the adapter dir: 100s1002 -> 100_s1002
+    where = f"{s}/{tier}" + ("" if ad == tier else f" (adapter {ad})")
+    hits = [e for e in entries if e["diag"] is not None and e["diag"].get("start") == s and e["diag"].get("tier") == ad]
+    if not hits:
+        return [f"{where}: no merge-correctness report entry with start {s}, tier {ad}"], None
+    if len(hits) > 1:
+        return [f"{where}: {len(hits)} merge-correctness report entries with start {s}, tier {ad} (want exactly one): "
+                + ", ".join(f"{e['report']}#{e['key']}" for e in hits)], None
+    e = hits[0]
+    d, w = e["diag"], e["weights"] or {}
+    pairs = d.get("pairs") if isinstance(d.get("pairs"), dict) else {}
+    mf = pairs.get("T-MF") if isinstance(pairs.get("T-MF"), dict) else {}
+    um = pairs.get("U-M") if isinstance(pairs.get("U-M"), dict) else None
+    gr = d.get("gate_reproduction") if isinstance(d.get("gate_reproduction"), dict) else {}
+    mods = ((d.get("facts") or {}).get("modules")) if isinstance(d.get("facts"), dict) else None
+    mods = mods if isinstance(mods, dict) else {}
+    um_exact = um is not None and all(_same(um.get(k), parity.get(k)) for k in MC_REPRO_KEYS)
+    facts = {"report": e["report"], "key": e["key"], "adapter_sha256": d.get("adapter_sha256"),
+             "gate_reproduction_ok": gr.get("ok"), "u_m_equals_parity_json": um_exact,
+             "u_m": None if um is None else {k: um.get(k) for k in MC_REPRO_KEYS}, "served_ok": w.get("served_ok"),
+             "t_mf_mean_abs_dce": mf.get("mean_abs_dce"), "t_mf_n_replies": mf.get("n_replies"),
+             "t_mf_demos_dropped": mf.get("demos_dropped"), "max_t_mf_mean_abs_dce": MERGE_MF_MAX_MEAN_ABS_DCE,
+             "modules": {k: mods.get(k) for k in ("wrapped", "merge_keys", "n_merged_not_wrapped",
+                                                  "n_wrapped_not_merged")}}
+    bad = []
+    if d.get("adapter_sha256") != disk_sha:
+        bad.append(f"{where}: report adapter_sha256 {str(d.get('adapter_sha256'))[:12]} != the served adapter.pt "
+                   f"{disk_sha[:12]}")
+    if w.get("adapter_sha256") != disk_sha:
+        bad.append(f"{where}: report weights adapter_sha256 {str(w.get('adapter_sha256'))[:12]} != the served "
+                   f"adapter.pt {disk_sha[:12]}")
+    # (link) the diagnostic's U-M reproduces this eval job's own parity json exactly (DECISIONS G16), so its re-merged
+    # folder is the served one: its own U-M numbers are compared here with no tolerance, on top of its verdict
+    # gate_reproduction.ok (which allows 1e-6) and the copy of the parity json that verdict was taken against
+    if um is None:
+        bad.append(f"{where}: no U-M pair in the report (the diagnostic's U-M must reproduce merge_{tier}.json)")
+    else:
+        for k in MC_REPRO_KEYS:
+            if not _same(um.get(k), parity.get(k)):
+                bad.append(f"{where}: U-M {k} {um.get(k)!r} != merge_{tier}.json {parity.get(k)!r} (the "
+                           "diagnostic's U-M does not reproduce the eval job's parity json exactly)")
+    if gr.get("ok") is not True:
+        bad.append(f"{where}: gate_reproduction.ok {gr.get('ok')!r} (the diagnostic's U-M does not reproduce "
+                   f"merge_{tier}.json)")
+    else:
+        g = gr.get("gate") if isinstance(gr.get("gate"), dict) else {}
+        for k in ("mean_abs_dce", "replies_agreeing", "n_replies"):
+            if g.get(k) is None or g.get(k) != parity.get(k):
+                bad.append(f"{where}: gate_reproduction.gate.{k} {g.get(k)!r} != merge_{tier}.json {parity.get(k)!r} "
+                           "(not the parity json the eval job wrote)")
+    # (i) the served weights equal the merge formula bit for bit
+    if w.get("served_ok") is not True:
+        bad.append(f"{where}: served_ok {w.get('served_ok')!r} (the served weights are not merge_adapter's result)")
+    # (ii) fp32 merge error
+    v = mf.get("mean_abs_dce")
+    if not _num(v):
+        bad.append(f"{where}: no T-MF mean_abs_dce")
+    elif v > MERGE_MF_MAX_MEAN_ABS_DCE:
+        bad.append(f"{where}: T-MF mean |dCE| {v:.3g} > {MERGE_MF_MAX_MEAN_ABS_DCE:g}")
+    if mf and (mf.get("demos_dropped") != 0 or mf.get("n_replies") != parity.get("n_replies")):
+        bad.append(f"{where}: T-MF on {mf.get('n_replies')} replies, {mf.get('demos_dropped')} demos dropped (want "
+                   f"merge_{tier}.json's {parity.get('n_replies')}, none dropped)")
+    # (iii) module sets
+    wr, mk = mods.get("wrapped"), mods.get("merge_keys")
+    if not (isinstance(wr, int) and isinstance(mk, int) and wr == mk and wr > 0 and
+            mods.get("n_merged_not_wrapped") == 0 and mods.get("n_wrapped_not_merged") == 0):
+        bad.append(f"{where}: module sets wrapped {wr!r}, merge keys {mk!r}, merged-not-wrapped "
+                   f"{mods.get('n_merged_not_wrapped')!r}, wrapped-not-merged {mods.get('n_wrapped_not_merged')!r}")
+    return bad, facts
+
+
+def bf16_reported(parity: Optional[dict], cfg) -> dict:
+    """The old bf16 U-M numbers of one merged eval and gates.merge_parity's thresholds (report only)."""
+    th = pilot_cfg.get("gates.merge_parity", cfg)
+    p = parity or {}
+    m, a = p.get("mean_abs_dce"), p.get("reply_agreement")
+    within = None if not (_num(m) and _num(a)) else bool(m <= float(th["max_mean_abs_dce"]) and
+                                                          a >= float(th["min_reply_agreement"]))
+    return {"mean_abs_dce": m, "reply_agreement": a, "replies_agreeing": p.get("replies_agreeing"),
+            "n_replies": p.get("n_replies"), "max_mean_abs_dce": th["max_mean_abs_dce"],
+            "min_reply_agreement": th["min_reply_agreement"], "within_bf16_thresholds": within,
+            "parity_json_pass": p.get("pass"), "gated": False}
+
+
 # --- G0 -----------------------------------------------------------------------------------------------------------
 
 def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr.Layout, cfg, sv: Optional[dict],
@@ -378,8 +545,11 @@ def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr
             bad.append(f"{e.s}/{e.key}: {un}/{n} kin-unequal tasks > {frac}")
     items.append(_item("kin", bad, miss, kin_facts))
 
-    # 7 merge parity, 8 served adapter
+    # 7 merge correctness (PREREG section 17, 2026-11-11; the bf16 U-M is reported, not gated), 8 served adapter
     bad, miss, bad8, miss8 = [], [], [], []
+    mc_entries, mc_probs = load_mc_registry(root)
+    bad += mc_probs
+    mc_facts, bf16 = {}, {}
     for s in starts:
         seen = set()
         for e in evals[s].values():
@@ -387,11 +557,21 @@ def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr
             if e.tier not in seen:
                 seen.add(e.tier)
                 p = L.parity(s, e.tier)
-                rc, msg = pilot_tvr.parity_state(p, ad)
-                if not p.is_file():
+                par = read_json(p)
+                par = par if isinstance(par, dict) else None
+                disk7 = sha256_file(ad / "adapter.pt")
+                bf16[f"{s}/{e.tier}"] = bf16_reported(par, cfg)
+                if par is None:
                     miss.append(f"{s}: {p.name}")
-                elif rc != 0:
-                    bad.append(f"{s}: {msg}")
+                elif disk7 is None:
+                    miss.append(f"{s}/{e.tier}: {ad}/adapter.pt")
+                else:
+                    if par.get("adapter_sha256") != disk7:
+                        bad.append(f"{s}: {p.name} adapter sha {str(par.get('adapter_sha256'))[:12]} != "
+                                   f"{ad.name}/adapter.pt {disk7[:12]}")
+                    probs7, f7 = merge_correct(s, e.tier, mc_entries, disk7, par)
+                    bad += probs7
+                    mc_facts[f"{s}/{e.tier}"] = f7
             if not e.present:
                 continue
             disk = sha256_file(ad / "adapter.pt")
@@ -400,8 +580,12 @@ def g0_items(root: Path, evals: Dict[str, Dict[str, Eval]], starts, L: pilot_tvr
                 miss8.append(f"{s}/{e.key}: {ad}/adapter.pt")
             elif served != disk:
                 bad8.append(f"{s}/{e.key}: served {str(served)[:12]} != {ad.name}/adapter.pt {disk[:12]}")
-    items.append(_item("merge_parity", bad, miss))
+    items.append(_item("merge_parity", bad, miss, {
+        "rule": MC_SECTION17, "registry": str(Path(root) / MC_REGISTRY), "registry_sha256":
+        sha256_file(Path(root) / MC_REGISTRY), "max_t_mf_mean_abs_dce": MERGE_MF_MAX_MEAN_ABS_DCE,
+        "per_eval": mc_facts}))
     items.append(_item("served_adapter", bad8, miss8))
+    recorded["merge_bf16_reported"] = {"note": BF16_NOTE, "per_eval": bf16}
 
     # 9 attention and pixels
     bad, miss = [], []
@@ -933,7 +1117,8 @@ def evaluate(pilot_root: Path = None, starts=STARTS, L: pilot_tvr.Layout = None,
                                       "random": (fl.get("random") or {}).get("mean_rate")}},
             "smoke_verdict": None if smoke_verdict_path is None else str(smoke_verdict_path),
             "starts": out_starts, "G0": {"ok": {"pass": True, "fail": False}.get(g0), "status": g0, "items": items},
-            "G1": G1, "G2": G2, "G3": G3, "recheck": recheck, "A3": A3, "A4": A4, "recorded": recorded,
+            "G1": G1, "G2": G2, "G3": G3, "recheck": recheck, "A3": A3, "A4": A4,
+            "reported_not_gated": {"merge_bf16": recorded.pop("merge_bf16_reported")}, "recorded": recorded,
             "decision": decision, "note": NOTE}
 
 
@@ -1013,6 +1198,30 @@ def render_md(rep: dict) -> str:
         d = it["detail"]
         txt = "；".join((d.get("problems") or [])[:3] + [f"缺 {m}" for m in (d.get("missing") or [])[:3]])
         L.append(f"| {i} | {it['name']} | {res} | {txt[:300]} |")
+    mc = next((it for it in rep["G0"]["items"] if it["name"] == "merge_parity"), None)
+    per = (((mc or {}).get("detail") or {}).get("facts") or {}).get("per_eval") or {}
+    L += ["", f"## G0 第 7 条：合并是否正确（第 17 节 2026-11-11；T−MF 门槛 {MERGE_MF_MAX_MEAN_ABS_DCE:g}）", "",
+          "| 评测 | 诊断条目 | 复现 parity json（ok / U−M 逐值相等） | served_ok | T−MF 平均 \\|ΔCE\\| | 模块 包的/合并的 |",
+          "|---|---|---|---|---|---|"]
+    for key, f in per.items():
+        if not f:
+            L.append(f"| {key} | 无（见问题） | | | | |")
+            continue
+        md_ = f.get("modules") or {}
+        v = f.get("t_mf_mean_abs_dce")
+        L.append(f"| {key} | {Path(str(f['report'])).parent.name}#{f['key']} | {f.get('gate_reproduction_ok')} / "
+                 f"{f.get('u_m_equals_parity_json')} | {f.get('served_ok')} | {'—' if not _num(v) else f'{v:.3g}'} | "
+                 f"{md_.get('wrapped')}/"
+                 f"{md_.get('merge_keys')} |")
+    b16 = rep["reported_not_gated"]["merge_bf16"]
+    L += ["", "## reported, not gated：bf16 合并一致性 U−M（原 `gates.merge_parity`，只报告，不判）", "",
+          f"{b16['note']}", "", "| 评测 | 平均 \\|ΔCE\\| | 回复一致率 | 一致/回复 | 原门槛（≤ / ≥） | 在原门槛内 |",
+          "|---|---|---|---|---|---|"]
+    for key, r in b16["per_eval"].items():
+        m, a = r.get("mean_abs_dce"), r.get("reply_agreement")
+        L.append(f"| {key} | {'—' if not _num(m) else f'{m:.5f}'} | {'—' if not _num(a) else f'{a:.4f}'} | "
+                 f"{r.get('replies_agreeing')}/{r.get('n_replies')} | {r['max_mean_abs_dce']} / "
+                 f"{r['min_reply_agreement']} | {r.get('within_bf16_thresholds')} |")
     L += ["", "## G2 格式", ""]
     badg2 = [c for c in rep["G2"]["checks"] if c["ok"] is not True]
     L.append("全部约束解码和不给图的评测：正则 100% 匹配，无缺日志的题。" if not badg2 else

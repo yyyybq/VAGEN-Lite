@@ -985,6 +985,64 @@ def write_power(L: PT.Layout, cfg: dict, ok: bool = True) -> Path:
         "inputs": {"files_sha256": files, "pilot_cfg_json_sha256": sha(pilot_cfg.as_json(cfg).encode())}})
 
 
+MC_REPLIES, MC_DEMOS = 267, 20
+
+
+def fake_parity(adapter_dir: Path, mean: float = 0.0133, agreeing: int = 254) -> dict:
+    """An eval job's P/S/parity/merge_<tier>.json (merge_parity.py's layout): by default a bf16 U-M OUTSIDE the old
+    gates.merge_parity thresholds (pass False), which G0(7) reports and no longer gates (PREREG section 17)."""
+    return {"schema": "vpd.tvr.merge_parity/1", "mean_abs_dce": mean, "max_abs_dce": 0.2,
+            "reply_agreement": agreeing / MC_REPLIES, "n_replies": MC_REPLIES, "n_demos": MC_DEMOS,
+            "replies_agreeing": agreeing, "thresholds": {"max_mean_abs_dce": 0.005, "min_reply_agreement": 0.99},
+            "pass": bool(mean <= 0.005 and agreeing / MC_REPLIES >= 0.99), "adapter": str(adapter_dir),
+            "adapter_sha256": fsha(Path(adapter_dir) / "adapter.pt")}
+
+
+def fake_mp_entry(s: str, ad_name: str, adapter_sha: str, parity: dict, t_mf: float = 1.7e-6) -> dict:
+    """One adapter of the diagnostic's mp_diag.json (vpd-tvr-mpdiag report layout: diag, weights, verdict)."""
+    um = {k: parity.get(k) for k in ("mean_abs_dce", "max_abs_dce", "reply_agreement", "replies_agreeing",
+                                     "n_replies", "n_demos")}
+    return {"diag": {"schema": "vpd.tvr.mp_diag/1", "start": s, "tier": ad_name, "adapter_sha256": adapter_sha,
+                     "pairs": {"U-M": dict(um, demos_dropped=0),
+                               "T-MF": {"mean_abs_dce": t_mf, "max_abs_dce": 1e-5, "reply_agreement": 1.0,
+                                        "replies_agreeing": MC_REPLIES, "n_replies": MC_REPLIES, "n_demos": MC_DEMOS,
+                                        "demos_dropped": 0}},
+                     "gate_reproduction": {"ok": True, "same_agreement_count": True, "d_mean_abs_dce": 0.0,
+                                           "ours": dict(um), "gate": dict(um)},
+                     "facts": {"modules": {"wrapped": 252, "merge_keys": 252, "merged_not_wrapped": [],
+                                           "wrapped_not_merged": [], "n_merged_not_wrapped": 0,
+                                           "n_wrapped_not_merged": 0}}},
+            "weights": {"schema": "vpd.tvr.mp_diag/1:weights", "start": s, "adapter_sha256": adapter_sha,
+                        "served_ok": True, "merged_modules_checked": 252, "adapter_modules": 252},
+            "verdict": {"deciding": "TB", "decision": "noise"}}
+
+
+def write_registry(L: PT.Layout, reports) -> Path:
+    """P/merge_correctness.json (the orchestrator's registry) pinning the sha256 of each report file."""
+    return wj(L.pilot_root / G.MC_REGISTRY, {"schema": G.MC_REGISTRY_SCHEMA, "reports": [
+        {"path": str(p), "sha256": fsha(p)} for p in reports]})
+
+
+def write_merge_correctness(L: PT.Layout, cfg: dict, starts=pilot_cfg.STARTS) -> list:
+    """Two mp_diag.json reports (like the real r3 run: Q3B 0W, Q3S ALL, E2 ALL first; the other 7 adapters in a
+    second run) covering every merged pilot eval, built from each eval's parity json, plus the registry."""
+    first = {("Q3B", "0W"), ("Q3S", "ALL"), ("E2", "ALL")}
+    docs = [{}, {}]
+    for s in starts:
+        for tier in dict.fromkeys(t for t, _ in G.eval_list(s, cfg)):
+            ad = PT.EVAL_ADAPTER[tier]
+            par = json.loads(L.parity(s, tier).read_text())
+            e = fake_mp_entry(s, ad, fsha(L.adapter(s, ad) / "adapter.pt"), par)
+            docs[0 if (s, ad) in first else 1][f"{s}_{ad}"] = e
+    out = []
+    for i, d in enumerate(docs):
+        p = wj(L.runs / "explore" / "mpdiag" / f"r{i + 1}" / "mp_diag.json",
+               {"schema": G.MP_DIAG_REPORT_SCHEMA, "order": list(d), "adapters": d})
+        out.append(p)
+    write_registry(L, out)
+    return out
+
+
 def make_gate_root(tmp_path, monkeypatch, per_task: bool = True):
     """A complete, consistent fake pilot (3 starts, N_top ALL, 8 eval tasks) in run_tvr's results.json layout: every
     gate passes.  Each eval also gets its per_task.jsonl (6.4 columns; power_sim's input, POWER.json's shas)."""
@@ -1020,7 +1078,7 @@ def make_gate_root(tmp_path, monkeypatch, per_task: bool = True):
         for tier, arm in G.eval_list(s, cfg):
             key = f"{tier}__{arm}"
             ad = L.adapter(s, PT.EVAL_ADAPTER[tier])
-            wj(L.parity(s, tier), {"pass": True, "adapter_sha256": fsha(ad / "adapter.pt")})
+            wj(L.parity(s, tier), fake_parity(ad))
             d = L.eval_dir(s, tier, arm)
             k = SUCC[key]
             k_by = {c: 0 for c in CATS}
@@ -1037,6 +1095,7 @@ def make_gate_root(tmp_path, monkeypatch, per_task: bool = True):
                 (d / "per_task.jsonl").write_text("".join(json.dumps(
                     {"task_id": t["task_id"], "category": pilot_cfg.category_of(t), "scene": t["scene"],
                      "success": int(i < k), "stopped": True}) + "\n" for i, t in enumerate(f["eval"])))
+    write_merge_correctness(L, cfg)
     write_power(L, cfg, True)
     rargs = {"tasks_dir": f["tasks_dir"], "public_path": f["public"]}
     return L, cfg, sv, rargs
@@ -1208,7 +1267,9 @@ def test_g0_other_items_fail_on_their_own(gate_root):
          lambda r: r["server"]["manifest"]["cfg"].update(enforce_eager=False), "settings"),
         (L.eval_dir("Q3S", "100", "c") / "results.json",
          lambda r: r["server"]["manifest"].update(extra_args=[]), "settings"),
-        (L.parity("E2", "100"), lambda r: r.update(**{"pass": False}), "merge_parity"),
+        # G0(7) since PREREG section 17 (2026-11-11): a parity json of another adapter fails it, its pass field does
+        # not (test_tvr_gate_merge.py has every merge-correctness reason)
+        (L.parity("E2", "100"), lambda r: r.update(adapter_sha256="0" * 64), "merge_parity"),
         (L.eval_dir("E2", "0W", "c") / "results.json", lambda r: r["adapter"].update(adapter_sha256="0" * 64),
          "served_adapter"),
         (L.adapter("Q3S", "ALL") / "meta.json", lambda m: m["attn_sites"].update(x="eager"), "attn_pixels"),

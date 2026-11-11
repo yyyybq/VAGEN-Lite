@@ -386,8 +386,10 @@ def pipe(tmp_path_factory):
                      str(L.reach), "--houses", str(T / "houses"), "--bfs", str(L.bfs / "eval500_opt.json")])
                 srv = ManifestFakeServer(vman, policy="stop_at", stop_after=STOP_AFTER[tier], model=served)
                 assert run_tvr.cmd_eval(ea, pool_factory=factory, server_factory=lambda: srv) == 0, (s, tier)
-                _wj(L.parity(s, tier), {"pass": True, "adapter_sha256": _sha(ad / "adapter.pt"), "mean_abs_dce": 0.0,
-                                        "reply_agreement": 1.0, "fake": "merge parity needs the GPU / PY_TRAIN"})
+                _wj(L.parity(s, tier), dict(TJ.fake_parity(ad), fake="merge parity needs the GPU / PY_TRAIN"))
+        # G0(7) (PREREG section 17, 2026-11-11): the merge-correctness reports (mp_diag.json of the diagnostic,
+        # which needs the GPU / PY_TRAIN: faked) and the registry P/merge_correctness.json pinning their sha256
+        TJ.write_merge_correctness(L, cfg)
         # TVRBench's own aggregate on every eval dir (the TVR env python is the test interpreter + the fake ai2thor)
         mp.setenv("PYTHONPATH", os.pathsep.join([str(w.fake), str(paths.WORKTREE)]))
         for d in sorted(L.pilot_root.glob("*/evals/pilot__*")):
