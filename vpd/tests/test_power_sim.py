@@ -5,7 +5,9 @@ hand case, Holm, the realized-scale shift mapping, the seed-variance estimators,
 seed-aware t tests near alpha while the naive cluster z (no seed component) is inflated, the registered endpoint test
 under correlated tier shifts, the task-persistence draws and estimator (recovers lambda in the model at the pilot's
 n; does not move with the start mean SRs, where the wave-2 estimator did), run_tvr's grid and verdict on the
-registered cells, and the registered backend.  Login node, 1 core:
+registered cells, and the registered backend.  Wave 2c: the registered lambda margin (clip edges), the POWER.json
+persistence whitelist, the statcheck reconstruction of a between-start difference failing on the real run_tvr path,
+and the report-only design rows.  Login node, 1 core:
     cd TREE && OMP_NUM_THREADS=1 PY_Q3 -B -m pytest -q -p no:cacheprovider vpd/tests/test_power_sim.py
 """
 from __future__ import annotations
@@ -571,7 +573,8 @@ def test_persistence_hat_hand_case():
         assert r["D"] == pytest.approx(D) and r["level"] == pytest.approx(L) and r["kappa"] == pytest.approx(kappa)
         assert r["m2"] == pytest.approx(m2) and r["B"] == pytest.approx(B) and r["R"] == pytest.approx(R)
         assert r["lambda_hat"] == pytest.approx((R - D) / (R - kappa))
-        assert r["lambda_used"] == min(1.0, max(0.0, r["lambda_hat"])) and r["sigma_used"] == 0.03
+        assert r["lambda_used"] == min(1.0, max(0.0, r["lambda_hat"] + 0.03)) and r["sigma_used"] == 0.03
+        assert r["margin"] == 0.03
         assert r["n"] == 10 and r["n_pooled"] == 3 and r["se"] > 0
     # identical seeds: D = 0, dbar = S = 0 -> kappa = m2 = 0 -> lambda_hat = 1
     assert PS.persistence_hat(y1, y1, [ya, yb], 0.03)["lambda_hat"] == pytest.approx(1.0)
@@ -595,6 +598,44 @@ def test_persistence_hat_hand_case():
     num = sum(x * x * math.exp(-(x - a_) ** 2 / (2 * v_)) for x in xs) / sum(math.exp(-(x - a_) ** 2 / (2 * v_))
                                                                        for x in xs)
     assert PS.shift_m2(d, S, 0.03) == pytest.approx(num, rel=1e-3)
+
+
+def test_lambda_used_margin_and_clip_edges(tmp_path):
+    """wave 2c (independent statistics check): lambda_used = clip(lambda_hat + power.persistence.margin, range), the
+    registered margin 0.03; the clip edges at both ends; undefined -> range[1]; persistence_hat applies the
+    registered margin by default and an explicit one when given."""
+    assert pilot_cfg.FROZEN["power"]["persistence"]["margin"] == 0.03 == PS.registered_margin()
+    rule = PS.lambda_used_rule
+    assert rule(0.5, 0.03) == pytest.approx(0.53) and rule(0.0, 0.03) == pytest.approx(0.03)
+    assert rule(-0.01, 0.03) == pytest.approx(0.02)          # a slightly negative estimate is lifted above 0
+    assert rule(-0.03, 0.03) == 0.0 and rule(-0.2, 0.03) == 0.0 and rule(-1.5, 0.03) == 0.0   # lower clip
+    assert rule(0.98, 0.03) == 1.0 and rule(1.0, 0.03) == 1.0 and rule(1.4, 0.03) == 1.0       # upper clip
+    assert rule(0.96, 0.03) == pytest.approx(0.99)
+    assert rule(None, 0.03) == 1.0 and rule(None, 0.03, (0.0, 0.6)) == 0.6                     # undefined
+    assert rule(0.55, 0.03, (0.0, 0.5)) == 0.5 and rule(0.2, 0.0) == 0.2
+    # persistence_hat on the fake pilot's replicate pair (lambda_hat about 0.44): the margin is applied
+    _write_pilot(tmp_path / "p")
+    y1, y2, others, cl = _rep_and_others(tmp_path / "p")
+    su = PS.seed_sd(y1, y2, 0.03)["sigma_used"]
+    r = PS.persistence_hat(y1, y2, others, su, cl)
+    assert 0.0 < r["lambda_hat"] < 0.97 and r["margin"] == 0.03
+    assert r["lambda_used"] == pytest.approx(r["lambda_hat"] + 0.03)
+    for m in (0.0, 0.1, 0.9):
+        rm = PS.persistence_hat(y1, y2, others, su, cl, margin=m)
+        assert rm["lambda_hat"] == r["lambda_hat"] and rm["margin"] == m
+        assert rm["lambda_used"] == pytest.approx(min(1.0, r["lambda_hat"] + m))
+    # the clip edges on real estimates: identical seeds (lambda_hat 1) and a strongly negative lambda_hat
+    ya, yb = [1, 1, 1, 0, 0, 0, 1, 0, 1, 0], [1, 1, 0, 1, 0, 0, 1, 0, 1, 1]
+    z = [1, 1, 1, 0, 0, 0, 0, 0, 1, 0]
+    assert PS.persistence_hat(z, z, [ya, yb], 0.03)["lambda_used"] == 1.0
+    neg = PS.persistence_hat([1, 0, 1, 0, 1, 0], [0, 1, 0, 1, 0, 1], [[1, 0, 1, 0, 1, 0], [1, 1, 0, 0, 1, 0]], 0.03)
+    assert neg["lambda_hat"] < -0.03 and neg["lambda_used"] == 0.0
+    # persistence_check uses the same rule: bias_used includes the margin
+    pb, scl = synth_p()
+    c0 = PS.persistence_check(pb["100"], scl, 0.0, 0.03, 40, seed=2, margin=0.0)
+    c3 = PS.persistence_check(pb["100"], scl, 0.0, 0.03, 40, seed=2)
+    assert c3["margin"] == 0.03 and c0["margin"] == 0.0 and c3["mean_hat"] == c0["mean_hat"]
+    assert c3["bias_used"] == pytest.approx(c3["mean_used"] - 0.0) and c3["mean_used"] > c0["mean_used"]
 
 
 def _old_lambda(y1, y2, others, su):
@@ -776,17 +817,20 @@ def test_run_tvr_end_to_end(tmp_path):
     assert set(v["power_at_primary"]) == {"Q3S - E2", "Q3RD - mean(QRL-s1, QRL-s2)"}
     assert reg["allow_no_replicate"] is False and s["replicate_missing"] is False
     assert reg["backend"] == "numpy" == pw["backend"] and {r["backend"] for r in disk["tables"]["main"]} == {"numpy"}
-    assert disk["schema"] == "vpd.power_sim.tvr/2"
+    assert disk["schema"] == "vpd.power_sim.tvr/3"
     # persistence: the replicate pair against the other two pilot starts' tier-100 rows (covariances only); the
-    # reported simulation check ran
+    # reported simulation check ran; only the whitelisted keys (no level / V / B / R / D / kappa / m2)
     pe = disk["persistence"]
     assert pe["replicate_missing"] is False and pe["n"] == 40 and pe["n_pooled"] == 3
-    assert pe["lambda_used"] == (1.0 if pe["lambda_hat"] is None else min(1.0, max(0.0, pe["lambda_hat"])))
+    assert pe["lambda_used"] == (1.0 if pe["lambda_hat"] is None else
+                                 min(1.0, max(0.0, pe["lambda_hat"] + pw["persistence"]["margin"])))
     assert pe["check"]["gated"] is False and pe["check"]["result"]["n_reps"] == pw["persistence"]["check_reps"]
+    assert set(pe) <= PS.PERSISTENCE_KEYS and pe["margin"] == pw["persistence"]["margin"]
     y1, y2, others, cl = _rep_and_others(tmp_path / "pilot")
     want = PS.persistence_hat(y1, y2, others, s["sigma_used"], cl)
-    for k in ("n", "D", "level", "V_plain", "V", "B", "R", "kappa", "m2", "lambda_hat", "se", "lambda_used"):
+    for k in ("n", "n_pooled", "sigma_used", "range", "lambda_hat", "se", "margin", "lambda_used"):
         assert pe[k] == want[k], k                  # json round-trips floats exactly
+    assert disk["reported_designs"]["gated"] is False and len(disk["reported_designs"]["rows"]) == 3
     # provenance names: the json sha of the cfg used and the pilot_cfg.py file sha (GATE.json's pilot_cfg_sha256)
     assert disk["inputs"]["pilot_cfg_json_sha256"] == PS.hashlib.sha256(pilot_cfg.as_json(_cfg()).encode()).hexdigest()
     assert disk["inputs"]["pilot_cfg_py_sha256"] == PS.sha256_file(pilot_cfg.__file__)
@@ -910,7 +954,11 @@ def test_run_tvr_fallback_paired(tmp_path, monkeypatch):
     res = PS.run_tvr(tmp_path / "p", cfg=_cfg(), n_sims=10, backend="numpy")
     assert pilot_cfg.FROZEN["power"]["fallback"]["seeds"] == {"100": [1, 2], "TOP": [1, 2]}
     assert {"100": [1, 2], "TOP": [1, 2]} in seen and {"100": [1, 2, 3], "TOP": [1, 2, 3]} in seen
-    assert all(s in ({"100": [1, 2], "TOP": [1, 2]}, {"100": [1, 2, 3], "TOP": [1, 2, 3]}) for s in seen)
+    # plus the report-only designs (4 and 5 seeds per start, paired; reported_designs)
+    rep_seeds = [d["seeds"] for d in pilot_cfg.FROZEN["power"]["reported_designs"]["designs"].values()]
+    assert {"100": [1, 2, 3, 4], "TOP": [1, 2, 3, 4]} in seen
+    assert {"100": [1, 2, 3, 4, 5], "TOP": [1, 2, 3, 4, 5]} in seen
+    assert all(s in [{"100": [1, 2], "TOP": [1, 2]}, {"100": [1, 2, 3], "TOP": [1, 2, 3]}] + rep_seeds for s in seen)
     assert {r["df"] for r in res["tables"]["fallback_seeds_1_2"]} == {6}
     assert isinstance(res["fallback_pass"], bool)
     unpaired = toy_design()
@@ -933,7 +981,7 @@ def test_run_tvr_ignores_differences_between_starts(tmp_path):
     b = PS.run_tvr(tmp_path / "a", cfg=_cfg(), n_sims=20, backend="numpy")
     assert a["inputs"]["files_sha256"] != b["inputs"]["files_sha256"]
     for key in ("sigma", "persistence", "tables", "verdicts", "sensitivity_superseded_test", "p_summary", "pass",
-                "fallback_pass"):
+                "fallback_pass", "reported_designs"):
         assert a[key] == b[key], key
 
 
@@ -1022,6 +1070,7 @@ def test_run_tvr_replicate_required_and_refusals(tmp_path):
     assert res["registered"]["allow_no_replicate"] is True
     assert res["persistence"]["replicate_missing"] is True and res["persistence"]["lambda_hat"] is None
     assert res["persistence"]["lambda_used"] == pilot_cfg.FROZEN["power"]["persistence"]["range"][1]
+    assert res["persistence"]["margin"] == 0.03 and set(res["persistence"]) <= PS.PERSISTENCE_KEYS
     # n_top not frozen -> refused
     with pytest.raises(ValueError):
         PS.run_tvr(tmp_path / "p", cfg=copy.deepcopy(pilot_cfg.FROZEN) | {"tiers": {**pilot_cfg.FROZEN["tiers"],
@@ -1039,6 +1088,362 @@ def test_run_tvr_replicate_required_and_refusals(tmp_path):
     f.write_text("\n".join(f.read_text().splitlines()[1:]) + "\n")
     with pytest.raises(ValueError, match="replicate"):
         PS.run_tvr(tmp_path / "q", cfg=_cfg(), n_sims=5)
+
+
+# --------------------------------------------------------------------------------------------- wave 2c
+PERSISTENCE_WHITELIST = {"replicate_missing", "lambda_hat", "se", "lambda_used", "margin", "n", "n_pooled", "range",
+                         "rule", "sigma_used", "check"}          # + "note" when lambda_hat is undefined / no replicate
+CHECK_RESULT_WHITELIST = {"lambda_true", "sigma", "n_reps", "n_pooled", "offsets", "n_tasks", "seed", "margin",
+                          "mean_hat", "bias", "sd_hat", "mc_se", "mean_se", "mean_used", "bias_used", "n_undefined"}
+LEVEL_KEYS = ("level", "V", "V_plain", "B", "R", "D", "kappa", "m2")
+
+
+def test_run_tvr_applies_the_registered_margin(tmp_path):
+    """R2 (wave 2c): POWER.json's lambda_used = clip(lambda_hat + power.persistence.margin, range), recorded with the
+    margin and the rule; every gated and reported row runs at that lambda_used; the reported check of the estimator
+    runs at it and its bias_used includes the margin; the cfg's margin is the one used and registered.persistence
+    records it (gate_tvr.power_unregistered compares registered.persistence with power.persistence, both from cfg)."""
+    _write_pilot(tmp_path / "p")
+    cfg = _cfg()
+    cfg["power"]["persistence"]["check_reps"] = 3
+    res = PS.run_tvr(tmp_path / "p", cfg=cfg, n_sims=5, backend="numpy")
+    pe = res["persistence"]
+    assert pe["margin"] == 0.03 and 0.0 < pe["lambda_hat"] < 0.97
+    assert pe["lambda_used"] == pytest.approx(pe["lambda_hat"] + 0.03)
+    assert pe["lambda_used"] == PS.lambda_used_rule(pe["lambda_hat"], 0.03, pe["range"])
+    assert pe["rule"] == cfg["power"]["persistence"]["rule"] and "clip(lambda_hat + margin, range)" in pe["rule"]
+    lam = pe["lambda_used"]
+    assert {r["persistence"] for t in res["tables"].values() for r in t if r["role"] != "sensitivity_persistence"} \
+        == {lam}
+    assert res["verdicts"]["main"]["persistence"] == lam == res["reported_designs"]["persistence"]
+    chk = pe["check"]["result"]
+    assert chk["lambda_true"] == lam and chk["margin"] == 0.03
+    assert chk["bias_used"] == pytest.approx(chk["mean_used"] - lam)
+    assert res["registered"]["persistence"] == cfg["power"]["persistence"]
+    # gate_tvr.power_unregistered: registered.persistence (margin included) against cfg power.persistence
+    from vpd.tvr import gate_tvr
+    want = "registered.persistence != power.persistence"
+    assert want not in gate_tvr.power_unregistered(json.loads(json.dumps(res)), cfg)
+    bad = json.loads(json.dumps(res))
+    bad["registered"]["persistence"]["margin"] = 0.0
+    assert want in gate_tvr.power_unregistered(bad, cfg)
+    cfg2 = copy.deepcopy(cfg)
+    cfg2["power"]["persistence"]["margin"] = 0.1
+    res2 = PS.run_tvr(tmp_path / "p", cfg=cfg2, n_sims=5, backend="numpy")
+    assert res2["persistence"]["lambda_hat"] == pe["lambda_hat"]
+    assert res2["persistence"]["lambda_used"] == pytest.approx(pe["lambda_hat"] + 0.1)
+    assert res2["persistence"]["margin"] == 0.1 == res2["registered"]["persistence"]["margin"]
+    # the cfg's margin also reaches the reported check (_persistence passes it to persistence_check; without it the
+    # check would fall back to the registered 0.03): its result records 0.1 and bias_used is the margin-0.1 one
+    chk2 = res2["persistence"]["check"]["result"]
+    lam2 = res2["persistence"]["lambda_used"]
+    assert chk2["margin"] == 0.1 and chk2["lambda_true"] == lam2
+    assert chk2["bias_used"] == pytest.approx(chk2["mean_used"] - lam2)
+    p_by_tier, scl, _, _ = PS.pooled_p(tmp_path / "p", list(cfg["starts"]), {"100": "100", "TOP": "ALL"})
+    kw = dict(n_pooled=3, a_priori=0.03, lam_range=(0.0, 1.0))
+    sig2, reps2, seed2 = res2["sigma"]["sigma_used"], cfg2["power"]["persistence"]["check_reps"], cfg2["power"]["seed"]
+    want01 = PS.persistence_check(p_by_tier["100"], scl, lam2, sig2, reps2, seed2, margin=0.1, **kw)
+    want003 = PS.persistence_check(p_by_tier["100"], scl, lam2, sig2, reps2, seed2, margin=0.03, **kw)
+    assert chk2 == want01
+    assert want003["mean_hat"] == want01["mean_hat"] and want003["bias_used"] != want01["bias_used"]
+    assert chk2["bias_used"] == want01["bias_used"] != want003["bias_used"]
+    # undefined lambda_hat (fake pilot seed 1: a covariance <= 0) -> the range's upper end, no margin arithmetic
+    _write_pilot(tmp_path / "u", seed=1)
+    u = PS.run_tvr(tmp_path / "u", cfg=cfg, n_sims=5, backend="numpy")["persistence"]
+    assert u["lambda_hat"] is None and u["lambda_used"] == 1.0 and u["margin"] == 0.03 and "note" in u
+
+
+def test_power_json_persistence_keys_are_whitelisted(tmp_path):
+    """R1 (wave 2c): POWER.json["persistence"] holds exactly the whitelisted keys -- none of persistence_hat's
+    intermediates (level = the replicate start's SR, V / V_plain rebuild it, B / R / D / kappa / m2 follow from
+    lambda_hat and the sigma block) -- on the
+    estimated, the undefined and the no-replicate paths; its check block holds only simulation results at the
+    pooled p; run_tvr refuses to emit anything else."""
+    _write_pilot(tmp_path / "p")
+    cfg = _cfg()
+    cfg["power"]["persistence"]["check_reps"] = 3
+    out = tmp_path / "POWER.json"
+    PS.run_tvr(tmp_path / "p", cfg=cfg, out=out, n_sims=5, backend="numpy")
+    pe = json.loads(out.read_text(encoding="utf-8"))["persistence"]
+    assert set(pe) == PERSISTENCE_WHITELIST
+    assert not any(k in pe for k in LEVEL_KEYS)
+    assert set(pe["check"]) == {"gated", "note", "result"} and set(pe["check"]["result"]) == CHECK_RESULT_WHITELIST
+    assert PS.PERSISTENCE_KEYS == PERSISTENCE_WHITELIST | {"note"}
+    assert PS.CHECK_RESULT_KEYS == CHECK_RESULT_WHITELIST
+    _write_pilot(tmp_path / "u", seed=1)                                   # lambda_hat undefined
+    pu = PS.run_tvr(tmp_path / "u", cfg=cfg, n_sims=5, backend="numpy")["persistence"]
+    assert set(pu) == PERSISTENCE_WHITELIST | {"note"}
+    pp = PS.run_tvr(tmp_path / "p", cfg=cfg, n_sims=5, backend="python")["persistence"]   # no check run
+    assert set(pp) == PERSISTENCE_WHITELIST and pp["check"]["result"] is None
+    _write_pilot(tmp_path / "norep", replicate=False)
+    pn = PS.run_tvr(tmp_path / "norep", cfg=cfg, n_sims=5, backend="numpy", allow_no_replicate=True)["persistence"]
+    assert set(pn) <= PERSISTENCE_WHITELIST | {"note"} and pn["lambda_used"] == 1.0
+    for k in LEVEL_KEYS:
+        with pytest.raises(ValueError, match="whitelist"):
+            PS._public_persistence(dict(pe, **{k: 0.3}))
+    with pytest.raises(ValueError, match="whitelist"):
+        PS._public_persistence(dict(pe, check=dict(pe["check"], result=dict(pe["check"]["result"], level=0.3))))
+
+
+def _leak_root(root, n=137, n_scenes=12, seed=21):
+    """A pilot root with distinct start SRs at both tiers (Q3S about +12 pp and E2 about -6 pp against Q3B, additive
+    on one task pattern), Q3B's replicate an independent draw.  n is prime, so no start SR (k / n), pair level or
+    difference equals a power fraction (k / 23) or a registered constant."""
+    rng = random.Random(seed)
+    base = [rng.betavariate(0.6, 1.4) for _ in range(n)]
+    scenes = [f"scene{i % n_scenes:02d}" for i in range(n)]
+    rows = {}
+    for S, a in (("Q3B", 0.0), ("Q3S", 0.12), ("E2", -0.06)):
+        for tier, extra in (("100", 0.0), ("ALL", 0.1)):
+            rows[(S, tier)] = [int(rng.random() < min(1.0, max(0.0, p + a + extra))) for p in base]
+    rows[("Q3B", "100s1002")] = [int(rng.random() < p) for p in base]
+    _write_rows(root, rows, scenes)
+    return rows
+
+
+def _statcheck_routes(pj):
+    """The wave-2b statcheck reconstruction (OUT/scratch/orch/r3/wave2b/statcheck/scripts/sc_diag.py, cmd_leak): two
+    closed-form routes from a POWER.json alone to SR(Q3B, 100, s1001) - mean(SR(Q3S, 100), SR(E2, 100)).  Each
+    raises KeyError when POWER.json lacks a value it needs."""
+    pers, sig, ps = pj["persistence"], pj["sigma"], pj["p_summary"]
+
+    def via_level():
+        sr = pers["level"] + sig["seed_diff_mean"] / 2.0
+        return sr - (3.0 * ps["100"]["mean"] - sr) / 2.0
+
+    def via_v():        # without level: L (1 - L) = B + V, and B follows from lambda_hat and the sigma block
+        n = sig["n"]
+        D = (n - 1) * sig["S"] + sig["seed_diff_mean"] ** 2
+        kap = PS.shift_gap(sig["seed_diff_mean"], sig["S"], sig["sigma_used"])
+        m2 = PS.shift_m2(sig["seed_diff_mean"], sig["S"], sig["sigma_used"])
+        lam = pers["lambda_hat"]
+        B = ((D - lam * kap) / (1.0 - lam) - m2 / 2.0) / 2.0
+        LL = B + pers["V"]
+        sr = (1.0 - math.sqrt(max(0.0, 1.0 - 4.0 * LL))) / 2.0 + sig["seed_diff_mean"] / 2.0
+        return sr - (3.0 * ps["100"]["mean"] - sr) / 2.0
+
+    return via_level, via_v
+
+
+def _numbers(o, path=()):
+    if isinstance(o, dict):
+        for k, x in o.items():
+            yield from _numbers(x, path + (k,))
+    elif isinstance(o, list):
+        for x in o:
+            yield from _numbers(x, path)
+    elif isinstance(o, (int, float)) and not isinstance(o, bool):
+        yield path, float(o)
+
+
+def test_power_json_gives_no_start_level_and_no_between_start_difference(tmp_path):
+    """R1 (wave 2c), on the real run_tvr path (a pilot root with distinct start SRs): the wave-2b statcheck
+    reconstruction of SR(Q3B, 100, s1001) - mean(SR(Q3S, 100), SR(E2, 100)) cannot be evaluated from POWER.json
+    (both routes need a value it no longer has; fed persistence_hat's in-memory level or V they give the true
+    difference, so the routes are live), and no number in POWER.json outside the registered constants and the input
+    hashes equals a start's SR (any tier or seed), the replicate pair's level, or a between-start difference."""
+    root = tmp_path / "p"
+    rows = _leak_root(root)
+    n = len(rows[("Q3B", "100")])
+    sr = {k: sum(v) / n for k, v in rows.items()}
+    target = sr[("Q3B", "100")] - (sr[("Q3S", "100")] + sr[("E2", "100")]) / 2.0
+    cfg = _cfg()
+    cfg["power"]["persistence"]["check_reps"] = 5
+    out = tmp_path / "POWER.json"
+    PS.run_tvr(root, cfg=cfg, out=out, n_sims=23, backend="numpy")
+    disk = json.loads(out.read_text(encoding="utf-8"))
+    assert disk["persistence"]["lambda_hat"] is not None and abs(target) > 0.01
+    via_level, via_v = _statcheck_routes(disk)
+    for route in (via_level, via_v):
+        with pytest.raises(KeyError):
+            route()
+    y1, y2, others, cl = _rep_and_others(root)
+    full = PS.persistence_hat(y1, y2, others, disk["sigma"]["sigma_used"], cl)
+    assert full["lambda_hat"] == disk["persistence"]["lambda_hat"] and full["level"] < 0.5
+    leaky = {k: dict(disk, persistence=dict(disk["persistence"], **{k: full[k]})) for k in ("level", "V")}
+    assert _statcheck_routes(leaky["level"])[0]() == pytest.approx(target, abs=1e-9)
+    assert _statcheck_routes(leaky["V"])[1]() == pytest.approx(target, abs=1e-9)
+    # no start level and no between-start difference anywhere outside registered.* (constants) and inputs.*
+    forbidden = set(sr.values()) | {full["level"]}
+    for tier in ("100", "ALL"):
+        lv = {("Q3B", "s1001"): sr[("Q3B", tier)], ("Q3S", ""): sr[("Q3S", tier)], ("E2", ""): sr[("E2", tier)]}
+        if tier == "100":
+            lv[("Q3B", "s1002")] = sr[("Q3B", "100s1002")]
+        for a, va in lv.items():
+            for b, vb in lv.items():
+                if a[0] != b[0]:                         # Q3B seed 1001 vs 1002 is within-start (sigma block)
+                    forbidden.add(va - vb)
+            rest = [lv[(S, "")] if S != "Q3B" else lv[("Q3B", "s1001")] for S in ("Q3B", "Q3S", "E2") if S != a[0]]
+            forbidden |= {va - sum(rest) / 2.0, sum(rest) / 2.0 - va}
+    forbidden.discard(0.0)
+    assert target in forbidden
+    # scanned: every number but the registered constants, the input hashes, the simulation blocks (simulated starts
+    # drawn from the pooled p: their rational values can meet a k / n by chance; covered by the invariance below)
+    # and sigma.seed_diff_mean (Q3B seed 1001 minus seed 1002: a within-start difference, reported by design)
+    skip = {("registered",), ("inputs",), ("tables",), ("verdicts",), ("sensitivity_superseded_test",),
+            ("reported_designs",)}
+    nums = [(p, x) for p, x in _numbers(disk) if p[:1] not in skip and p != ("sigma", "seed_diff_mean")]
+    assert any(p[:1] == ("persistence",) for p, _ in nums) and any(p[:1] == ("p_summary",) for p, _ in nums)
+    hits = [(p, x) for p, x in nums if any(abs(x - v) < 1e-12 for v in forbidden)]
+    assert not hits, hits[:5]
+    # the simulation blocks (and everything else) see the starts only through the pooled p: swapping Q3B's and
+    # Q3S's top-tier files changes Q3B - mean(others) at TOP and leaves POWER.json unchanged but for its inputs
+    fb, fs = (PS.eval_dir(root, s, "ALL") / "per_task.jsonl" for s in ("Q3B", "Q3S"))
+    tb, ts = fb.read_text(), fs.read_text()
+    fb.write_text(ts)
+    fs.write_text(tb)
+    assert sum(rows[("Q3B", "ALL")]) != sum(rows[("Q3S", "ALL")])
+    swapped = PS.run_tvr(root, cfg=cfg, n_sims=23, backend="numpy")
+    for key in set(disk) - {"utc", "inputs"}:
+        assert json.loads(json.dumps(swapped[key])) == disk[key], key
+
+
+def test_power_sim_docstrings_state_the_exact_separation_property():
+    """R1 (wave 2c): no power_sim docstring repeats the false wave-2b claim that POWER.json has nothing per start
+    (it reports Q3B's within-start seed-difference statistics and lambda_hat); the module docstring and
+    persistence_hat state the exact property: no start's SR level and no between-start difference."""
+    docs = {"module": PS.__doc__, "persistence_hat": PS.persistence_hat.__doc__, "run_tvr": PS.run_tvr.__doc__,
+            "_persistence": PS._persistence.__doc__, "_public_persistence": PS._public_persistence.__doc__}
+    flat = {k: " ".join((v or "").split()) for k, v in docs.items()}
+    for k, d in flat.items():
+        for bad in ("no per-start value", "nothing per start"):      # wave 2b: "Nothing per start is reported"
+            assert bad not in d.lower(), (k, bad)
+    assert "it gives no start's SR level" in flat["module"] and "seed_diff_mean" in flat["module"]
+    assert "POWER.json gives no start's SR level and no between-start difference" in flat["persistence_hat"]
+
+
+def test_reported_designs_rows_and_unchanged_verdicts(tmp_path, monkeypatch):
+    """R3 (wave 2c): POWER.json reported_designs (role "reported", never gated): Holm power of both contrasts with
+    its MC SE for the main design with 4 and 5 seeds per start at both tiers (delta 0.08; df 18, 24) and with 3
+    seeds at delta 0.10 (df 12; the main table's own cell), at sigma_used, lambda_used, tier_corr 0.5.  Without them
+    every table, verdict and pass is identical, and a reported design with power 0 does not fail A4."""
+    _write_pilot(tmp_path / "p")
+    cfg = _cfg()
+    cfg["power"]["persistence"]["check_reps"] = 3
+    reg = pilot_cfg.FROZEN["power"]["reported_designs"]
+    assert reg["tier_corr"] == 0.5 and list(reg["designs"]) == ["main_seeds_4", "main_seeds_5", "main_delta_10pp"]
+    res = PS.run_tvr(tmp_path / "p", cfg=cfg, n_sims=30, backend="numpy")
+    rd = res["reported_designs"]
+    assert rd["gated"] is False and rd["role"] == "reported" and res["registered"]["reported_designs"] == reg
+    assert rd["tier_corr"] == 0.5 and rd["sigma"] == res["sigma"]["sigma_used"]
+    assert rd["persistence"] == res["persistence"]["lambda_used"]
+    summ = {s["design"]: s for s in rd["summary"]}
+    assert [(summ[k]["seeds_per_start"], summ[k]["delta"], summ[k]["df"]) for k in reg["designs"]] == \
+        [(4, 0.08, 18), (5, 0.08, 24), (3, 0.10, 12)]          # df = n_starts (n_seeds - 1), 6 starts
+    names = {PS.contrast_name(c[0], c[1]) for c in pilot_cfg.FROZEN["power"]["design"]["contrasts"]}
+    for s in rd["summary"]:
+        assert s["tier_corr"] == 0.5 and s["sigma"] == res["sigma"]["sigma_used"]
+        assert s["persistence"] == res["persistence"]["lambda_used"] and s["test"] == "seed_aware_endpoint_t"
+        assert set(s["power"]) == names == set(s["mc_se_power"]) and s["n_sims"] == 30
+        assert all(s["mc_se_power"][k] == pytest.approx(math.sqrt(v * (1 - v) / 30)) for k, v in s["power"].items())
+    assert [r["design"] for r in rd["rows"]] == list(reg["designs"]) and {r["role"] for r in rd["rows"]} == {"reported"}
+    cell = [r for r in res["tables"]["main"] if r["role"] == "power" and r["delta"] == 0.10
+            and r["sigma_label"] == "used" and r["tier_corr"] == 0.5]
+    assert len(cell) == 1 and summ["main_delta_10pp"]["power"] == cell[0]["power"]
+    # never gated: without the reported designs nothing else in POWER.json changes
+    cfg0 = copy.deepcopy(cfg)
+    cfg0["power"]["reported_designs"]["designs"] = {}
+    cfg0["power"]["reported_designs"]["type1"]["designs"] = []
+    res0 = PS.run_tvr(tmp_path / "p", cfg=cfg0, n_sims=30, backend="numpy")
+    assert res0["reported_designs"]["summary"] == [] and res0["reported_designs"]["rows"] == []
+    assert res0["reported_designs"]["type1"]["rows"] == [] and res0["reported_designs"]["type1"]["by_design"] == {}
+    for key in ("tables", "verdicts", "pass", "fallback_pass", "sensitivity_superseded_test", "persistence", "sigma",
+                "p_summary"):
+        assert res0[key] == res[key], key
+    # a reported design at power 0 (fake simulate: 0.0 for any seed count but 3 and 2) leaves A4 passing
+    calls = []
+    fake = _fake_sim(calls, fwer_at={0.0: 0.01, 1.0: 0.02}, power_at={0.5: 0.85, 0.0: 0.9, 1.0: 0.9})
+
+    def sim(p_by_tier, clusters, design, delta, *a, **kw):
+        r = fake(p_by_tier, clusters, design, delta, *a, **kw)
+        if len(design["seeds"]["100"]) not in (2, 3) and delta:
+            r["power"] = {k: 0.0 for k in r["power"]}
+        return r
+
+    monkeypatch.setattr(PS, "simulate", sim)
+    f = PS.run_tvr(tmp_path / "p", cfg=cfg, n_sims=7)
+    assert f["pass"] is True and f["verdicts"]["main"]["power_ok"] is True
+    assert [s["power"] for s in f["reported_designs"]["summary"][:2]] == [{k: 0.0 for k in names}] * 2
+
+
+def test_reported_designs_type1_rows(tmp_path, monkeypatch):
+    """Q4 (wave 2c round 2): POWER.json reported_designs.type1 (report only, gated false): for main_seeds_4 and
+    main_seeds_5 (power.reported_designs.type1), delta 0 at tier_corr 0 and 1, sigma_used, lambda_used, n_sims and
+    the registered seed: FWER over both contrasts (the gated type-I definition, the main design's Holm test) and its
+    binomial MC SE, both in [0, 1]; per design the max over the rhos against type1_max.  main_delta_10pp has none
+    (at delta 0 it is the main design).  Every verdict equals the one computed without reported_designs, also when a
+    reported design's FWER is far above type1_max."""
+    _write_pilot(tmp_path / "p")
+    cfg = _cfg()
+    cfg["power"]["persistence"]["check_reps"] = 3
+    reg = pilot_cfg.FROZEN["power"]["reported_designs"]
+    assert reg["type1"] == {"designs": ["main_seeds_4", "main_seeds_5"], "tier_corr": [0.0, 1.0]}
+    assert set(reg["type1"]["designs"]) < set(reg["designs"]) and "main_delta_10pp" not in reg["type1"]["designs"]
+    calls = []
+    real = PS.simulate
+
+    def spy(p_by_tier, clusters, design, delta, sigma, n_sims, seed, **kw):
+        calls.append({"seeds": copy.deepcopy(design["seeds"]), "delta": delta, "n_sims": n_sims, "seed": seed,
+                      "tier_corr": kw.get("tier_corr"), "persistence": kw.get("persistence"), "test": kw.get("test")})
+        return real(p_by_tier, clusters, design, delta, sigma, n_sims, seed, **kw)
+
+    monkeypatch.setattr(PS, "simulate", spy)
+    out = tmp_path / "POWER.json"
+    res = PS.run_tvr(tmp_path / "p", cfg=cfg, out=out, n_sims=40, backend="numpy")
+    disk = json.loads(out.read_text(encoding="utf-8"))
+    t1 = disk["reported_designs"]["type1"]
+    lam, sig = disk["persistence"]["lambda_used"], disk["sigma"]["sigma_used"]
+    assert t1["gated"] is False and t1["role"] == "reported" and t1["delta"] == 0.0 and t1["tier_corr"] == [0.0, 1.0]
+    assert t1["sigma"] == sig and t1["persistence"] == lam and t1["type1_max"] == 0.06
+    assert disk["registered"]["reported_designs"]["type1"] == reg["type1"]
+    assert [(s["design"], s["tier_corr"]) for s in t1["summary"]] == [
+        ("main_seeds_4", 0.0), ("main_seeds_4", 1.0), ("main_seeds_5", 0.0), ("main_seeds_5", 1.0)]
+    assert [s["df"] for s in t1["summary"]] == [18, 18, 24, 24] and [r["design"] for r in t1["rows"]] == \
+        [s["design"] for s in t1["summary"]]
+    for s, r in zip(t1["summary"], t1["rows"]):
+        assert s["delta"] == 0.0 == r["delta"] and s["sigma"] == sig and s["persistence"] == lam
+        assert s["test"] == "seed_aware_endpoint_t" and s["n_sims"] == 40 and r["role"] == "reported"
+        assert 0.0 <= s["fwer"] <= 1.0 and 0.0 <= s["mc_se_fwer"] <= 1.0 and s["fwer"] == r["fwer"]
+        assert s["mc_se_fwer"] == pytest.approx(math.sqrt(s["fwer"] * (1.0 - s["fwer"]) / 40))
+        assert set(s["type1_by_contrast"]) == set(disk["verdicts"]["main"]["power_at_primary"])
+    for name in reg["type1"]["designs"]:
+        rows = [s for s in t1["summary"] if s["design"] == name]
+        b = t1["by_design"][name]
+        assert b["type1_by_rho"] == {str(s["tier_corr"]): s["fwer"] for s in rows}
+        assert b["type1"] == max(s["fwer"] for s in rows) and b["within_type1_max"] == (b["type1"] <= 0.06)
+    assert set(t1["by_design"]) == set(reg["type1"]["designs"])
+    # the registered n_sims / seed rule of the other rows, and the main design's null cells are not re-drawn
+    nulls = [c for c in calls if c["delta"] == 0 and len(c["seeds"]["100"]) in (4, 5)]
+    assert sorted((len(c["seeds"]["100"]), c["tier_corr"]) for c in nulls) == [(4, 0.0), (4, 1.0), (5, 0.0), (5, 1.0)]
+    assert all(c["n_sims"] == 40 and c["seed"] == cfg["power"]["seed"] and c["persistence"] == lam
+               and c["test"] == cfg["power"]["test"] for c in nulls)
+    # never gated: without reported_designs every verdict (and every table) is the same
+    cfg0 = copy.deepcopy(cfg)
+    cfg0["power"]["reported_designs"]["designs"] = {}
+    cfg0["power"]["reported_designs"]["type1"]["designs"] = []
+    res0 = PS.run_tvr(tmp_path / "p", cfg=cfg0, n_sims=40, backend="numpy")
+    assert res0["verdicts"] == res["verdicts"] and res0["tables"] == res["tables"]
+    assert (res0["pass"], res0["fallback_pass"]) == (res["pass"], res["fallback_pass"])
+    # a reported design with FWER 0.5 (fake simulate) leaves A4 passing; its by_design says it misses type1_max
+    fake = _fake_sim([], fwer_at={0.0: 0.01, 1.0: 0.02}, power_at={0.5: 0.85, 0.0: 0.9, 1.0: 0.9})
+
+    def sim(p_by_tier, clusters, design, delta, *a, **kw):
+        r = fake(p_by_tier, clusters, design, delta, *a, **kw)
+        if len(design["seeds"]["100"]) not in (2, 3) and not delta:
+            r["fwer"] = 0.5
+        return r
+
+    monkeypatch.setattr(PS, "simulate", sim)
+    f = PS.run_tvr(tmp_path / "p", cfg=cfg, n_sims=7)
+    f0 = PS.run_tvr(tmp_path / "p", cfg=cfg0, n_sims=7)
+    assert f["pass"] is True and f["verdicts"] == f0["verdicts"] and f["verdicts"]["main"]["type1"] == 0.02
+    assert {b["type1"] for b in f["reported_designs"]["type1"]["by_design"].values()} == {0.5}
+    assert not any(b["within_type1_max"] for b in f["reported_designs"]["type1"]["by_design"].values())
+    # a type1 design that is not a reported design is a registration error
+    bad = copy.deepcopy(cfg)
+    bad["power"]["reported_designs"]["type1"]["designs"] = ["main_seeds_9"]
+    with pytest.raises(ValueError, match="reported_designs.type1"):
+        PS.run_tvr(tmp_path / "p", cfg=bad, n_sims=7)
 
 
 def test_cli_exit_codes(tmp_path, monkeypatch, capsys):

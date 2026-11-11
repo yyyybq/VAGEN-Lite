@@ -974,12 +974,13 @@ def write_power(L: PT.Layout, cfg: dict, ok: bool = True) -> Path:
              if p.parent.name.split("__")[2] in ("100", pilot_cfg.n_top(cfg), "100s1002")}
     p = json.loads(json.dumps(cfg["power"]))
     return wj(L.pilot_root / "POWER.json", {
-        "schema": "vpd.power_sim.tvr/2", "pass": ok, "fallback_pass": False,
+        "schema": "vpd.power_sim.tvr/3", "pass": ok, "fallback_pass": False,
         "registered": {"test": p["test"], "tier_corr": p["tier_corr"], "fallback": p["fallback"],
                        "persistence": p["persistence"], "n_sims_registered": p["n_sims"], "n_sims_used": p["n_sims"],
                        "seed": p["seed"], "backend": p["backend"], "allow_no_replicate": False},
         "sigma": {"sigma_hat": 0.01, "sigma_used": 0.03, "replicate_missing": False},
-        "persistence": {"lambda_hat": 0.0, "lambda_used": 0.0, "replicate_missing": False},
+        # /3 layout: lambda_used = clip(lambda_hat + margin, 0, 1); no level / V / B / R / D (PERSISTENCE_KEYS)
+        "persistence": {"lambda_hat": -0.03, "margin": 0.03, "lambda_used": 0.0, "replicate_missing": False},
         "verdicts": {"main": {"type1": 0.05, "type1_ok": True, "power_ok": ok, "power_tier_corr": 0.5, "pass": ok}},
         "inputs": {"files_sha256": files, "pilot_cfg_json_sha256": sha(pilot_cfg.as_json(cfg).encode())}})
 

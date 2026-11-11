@@ -28,7 +28,9 @@ Registered model (frozen in pilot_cfg.FROZEN["power"]; DECISIONS G13 amended it 
   lambda = persistence_hat: the Q3B seed pair's discordance against the no-persistence discordance at the pair's
   own SR level and task spread; the spread comes from covariances over tasks between the pilot starts' tier-100
   rows under a one-factor model (every start its own mean and scale), so start mean SRs cancel; lambda 0 draws
-  exactly as before.
+  exactly as before.  lambda_used = clip(lambda_hat + power.persistence.margin (0.03), range) (wave 2c: the
+  registered allowance for the estimator's residual liberal bias); range[1] when lambda_hat is undefined or the
+  replicate is missing.
 - Endpoint per start and task = sum_T w_T * mean_s y_{s,i}.  d_i = treated endpoint - mean of the controls'.
 - TEST (A4 and the confirmatory analysis) = seed_aware_endpoint_t (seed_aware_endpoint_test): V = CR1 scene-cluster
   variance of mean(d) + k_contrast * sigma2_E_hat / n_seeds, sigma2_E_hat = seed_var_endpoint of the per-seed
@@ -44,11 +46,34 @@ Registered model (frozen in pilot_cfg.FROZEN["power"]; DECISIONS G13 amended it 
   and lambda_used <= type1_max; power at primary_delta, tier_corr power.tier_corr.power (0.5), sigma_used and
   lambda_used >= target_power for both contrasts.  Fallback design = the main design with power.fallback.seeds
   (seeds 1-2 at BOTH tiers), same test, same rules -> fallback_pass.
+- Report only (wave 2c; POWER.json reported_designs, role "reported"; never gated, the verdicts never read it):
+  power.reported_designs = the main design with 4 and with 5 seeds per start at both tiers (delta 0.08) and with
+  3 seeds at delta 0.10, at sigma_used, lambda_used and tier_corr 0.5: Holm power of both contrasts and its MC SE;
+  and (reported_designs.type1, wave 2c round 2) for the designs of power.reported_designs.type1 (4 and 5 seeds) the
+  type-I rows at delta 0, tier_corr 0 and 1, sigma_used, lambda_used: FWER over both contrasts (the main design's
+  Holm rule) and its MC SE.  The 3-seed delta-0.10 design has none: at delta 0 it is the main design.
 
-Nothing here computes or prints a difference between real pilot starts: run_tvr pools the three starts by a mean;
-the only real comparison is between two SEEDS of the same start (Q3B 100, seed 1001 vs 1002); persistence_hat
-reads the other starts' rows only through covariances over tasks (lambda_hat is invariant to each start's mean SR;
-POWER.json has no per-start value).
+Separation.  Nothing here computes or prints a difference between real pilot starts: run_tvr pools the three
+starts by a mean; the only real comparison is between two SEEDS of the same start (Q3B 100, seed 1001 vs 1002);
+persistence_hat reads the other starts' rows only through covariances over tasks (lambda_hat is invariant to each
+start's mean SR).  The exact property of POWER.json (wave 2c): it gives no start's SR level (at any tier or seed)
+and no value from which a difference in SR between starts follows in closed form from POWER.json alone; Q3B's
+within-start seed-difference statistics (the sigma block: seed_diff_mean, S, sigma2_hat, sigma_hat, sigma_used;
+kept: they are needed to audit sigma_used) and the pooled p (p_summary, by tier) are reported; per-start absolute
+numbers are only in the gate report (GATE.json / GATE.md k/n).  The persistence block is a whitelist
+(PERSISTENCE_KEYS; _public_persistence).  Why: with persistence_hat's level (the pair's mean SR),
+1.5 (level + seed_diff_mean / 2 - p_summary["100"].mean) is exactly SR(Q3B, 100, s1001) - mean(SR(Q3S, 100),
+SR(E2, 100)) (wave-2b statcheck, diag_leak.json); without level the same follows from L (1 - L) = B + V, because B
+follows exactly from lambda_hat and the sigma block (the jackknifed V rebuilds L exactly, V_plain approximately).
+So the closed form is blocked by not writing level, V and V_plain.  B, R, D, kappa and m2 are not written either,
+but only because they follow exactly from lambda_hat and the sigma block (they would repeat it); without V,
+V >= 0 only bounds L (1 - L) >= B.
+Inferred (not a closed form; wave-2c leak review, OUT/scratch/orch/r3/wave2c/review/leak/out/result_mc_narrow.json):
+a degree-2 OLS fit on 8000 synthetic pilots predicts SR(Q3B, 100) - mean(SR(Q3S, 100), SR(E2, 100)) from
+lambda_hat, se, the sigma block and p_summary with held-out R^2 about 0.39, and gets its sign right in about 84%
+of the held-out pilots where its absolute value is >= 5 pp (wider start offsets, result_mc_wide2.json: 0.36 and
+78%).  That is statistical, less than the per-start absolutes the gate report already prints (which the brief
+allows), and POWER.json is written only after the pilot, i.e. after the freeze.
 """
 from __future__ import annotations
 
@@ -76,7 +101,19 @@ from vpd.tvr import pilot_cfg  # noqa: E402
 # /2 (wave 2b): tables.fallback_seeds_1_2, sensitivity_superseded_test, the persistence block, registered.tier_corr /
 # fallback / persistence / backend and the verdict fields type1_by_rho, power_tier_corr, power_by_rho,
 # mc_se_power_at_primary
-SCHEMA = "vpd.power_sim.tvr/2"
+# /3 (wave 2c; no /2 POWER.json was ever made from pilot data): the persistence block is the PERSISTENCE_KEYS
+# whitelist with margin (level, V and V_plain not written: they rebuild Q3B's SR level in closed form; B, R, D,
+# kappa and m2 not written only because they follow exactly from lambda_hat and the sigma block);
+# persistence.check.result has margin and bias_used; reported_designs (round 2, before any /3 POWER.json from pilot
+# data: reported_designs.type1); registered.reported_designs
+SCHEMA = "vpd.power_sim.tvr/3"
+# POWER.json["persistence"] keys (everything else persistence_hat returns stays in memory); check.result keys
+PERSISTENCE_KEYS = frozenset({"replicate_missing", "lambda_hat", "se", "lambda_used", "margin", "n", "n_pooled",
+                              "range", "rule", "sigma_used", "check", "note"})
+CHECK_KEYS = frozenset({"gated", "note", "result"})
+CHECK_RESULT_KEYS = frozenset({"lambda_true", "sigma", "n_reps", "n_pooled", "offsets", "n_tasks", "seed", "margin",
+                               "mean_hat", "bias", "sd_hat", "mc_se", "mean_se", "mean_used", "bias_used",
+                               "n_undefined"})
 # seed_aware_endpoint_t: the registered test (DECISIONS G13); seed_aware_cluster_t: superseded (assumes independent
 # tier shifts), regression tests and a gated:false sensitivity block only; naive_cluster_z: regression test only
 TESTS = ("seed_aware_cluster_t", "naive_cluster_z", "seed_aware_endpoint_t")
@@ -494,13 +531,33 @@ def _factor_v(lev: list, oth: list, groups: list) -> tuple:
     return V, G * V - (G - 1) * sum(loo) / G
 
 
+def registered_margin(cfg=None) -> float:
+    """power.persistence.margin of cfg (None = pilot_cfg.FROZEN, read at call time)."""
+    return float((pilot_cfg.FROZEN if cfg is None else cfg)["power"]["persistence"]["margin"])
+
+
+def lambda_used_rule(lambda_hat, margin: float, lam_range=(0.0, 1.0)) -> float:
+    """The registered rule (power.persistence.rule; wave 2c): clip(lambda_hat + margin, lam_range); lambda_hat None
+    (undefined) -> lam_range[1] (conservative; also what run_tvr uses when the replicate is missing)."""
+    lo, hi = float(lam_range[0]), float(lam_range[1])
+    if lambda_hat is None:
+        return hi
+    return min(hi, max(lo, float(lambda_hat) + float(margin)))
+
+
 def persistence_hat(y1: list, y2: list, others: list, sigma_used: float, clusters=None,
-                    lam_range=(0.0, 1.0)) -> dict:
+                    lam_range=(0.0, 1.0), margin=None) -> dict:
     """Task persistence lambda (registered, PREREG 12 item 7; DECISIONS G13 and its wave-2b amendment) from the seed
     replicate.  y1 / y2 = two seeds of the SAME start on the same tasks at the replicate tier (Q3B 100 c, seed 1001 /
     1002); others = the other pilot starts' outcomes at that tier (>= 2 rows, seed 1001, tasks aligned);
     sigma_used = seed_sd's (from the same pair and the a priori value); clusters = the tasks' scenes (the jackknife
-    and SE unit; None = every task its own).
+    and SE unit; None = every task its own); margin = the registered allowance added before clipping (None =
+    pilot_cfg.FROZEN power.persistence.margin, 0.03; wave 2c).
+    The returned dict holds intermediates (level, V, V_plain, B, R, D, kappa, m2) for tests and in-memory checks
+    only; run_tvr writes only PERSISTENCE_KEYS (_public_persistence; module docstring, Separation): level is the
+    replicate start's SR and V rebuilds it exactly (L (1 - L) = B + V, B exactly from lambda_hat and the sigma
+    block; V_plain approximately), so those are not written; B, R, D, kappa and m2 are not written only because they
+    follow exactly from lambda_hat and the sigma block.
     Model (simulate): lambda = intraclass correlation of a task's outcomes inside a start.  The pair's discordance D
     is compared with R, the discordance two seeds WITHOUT persistence would have at the pair's own SR level L and
     task spread: R = 2 B + (r1 - r2)^2 / 2, B = mean_i q_i (1 - q_i) = L (1 - L) - V, V = var_i(q) of the replicate
@@ -511,18 +568,21 @@ def persistence_hat(y1: list, y2: list, others: list, sigma_used: float, cluster
     (the plain ratio overstates V: lambda_hat about -0.03 at lambda 0).  So lambda_hat does not move with the start
     mean SRs (exactly in that model; under clipping see persistence_check with offsets).  The wave-2 estimator used
     H = m / (m - 1) mean_i p_i (1 - p_i), half the mean between-start discordance, which moved with the start SRs
-    (about +-0.1 at 5 pp).  Nothing per start is reported, no difference between starts is formed.
+    (about +-0.1 at 5 pp).  No difference between starts is formed; POWER.json gives no start's SR level and no
+    between-start difference (module docstring, Separation).
         D      = mean_i (y1_i - y2_i)^2                                  (discordance of the pair)
         kappa  = shift_gap(dbar, S, sigma_used), m2 = shift_m2(...)      (E[|r1 - r2|], E[(r1 - r2)^2] | the pair)
         l_i    = (y1_i + y2_i) / 2, L = mean_i l_i                       (the pair's SR level)
         V      = _factor_v jackknife of sum_{a<b} C(l, y_a) C(l, y_b) / sum_{a<b} C(y_a, y_b)   (one pair for the
                  three pilot starts; C = covariance over tasks, ddof 1; delete-one-scene)
         B      = L (1 - L) - V;  R = 2 B + m2 / 2
-        lambda_hat = (R - D) / (R - kappa); lambda_used = clip(lambda_hat, lam_range);
+        lambda_hat = (R - D) / (R - kappa); lambda_used = clip(lambda_hat + margin, lam_range) (lambda_used_rule);
         a covariance denominator <= 0 (full or delete-one-scene) or R <= kappa -> lambda_hat None and lambda_used =
         lam_range[1] (conservative).
     se: scene-cluster delta-method SE of lambda_hat over the task sampling only (kappa, m2 fixed; B linearized with
-    the plain V; reported only; the seed-shift noise makes the true spread larger, see persistence_check's sd_hat)."""
+    the plain V; reported only; the independent wave-2b check found it 0.83-1.18 x the empirical SD of lambda_hat in
+    the registered model, 0.69-1.50 x over all its rows: start offsets, p profiles, forced sigma_used)."""
+    margin = registered_margin() if margin is None else float(margin)
     n = len(y1)
     if n < 3 or n != len(y2):
         raise ValueError("y1 and y2 must have equal length >= 3")
@@ -547,7 +607,7 @@ def persistence_hat(y1: list, y2: list, others: list, sigma_used: float, cluster
     V_plain, V = _factor_v(lev, oth, list(groups.values()))
     out = {"n": n, "n_pooled": k + 1, "D": D, "level": L, "V_plain": V_plain, "V": V, "B": None, "R": None,
            "kappa": kappa, "m2": m2, "sigma_used": float(sigma_used), "range": [lo, hi], "lambda_hat": None,
-           "se": None, "lambda_used": hi}
+           "se": None, "margin": margin, "lambda_used": lambda_used_rule(None, margin, (lo, hi))}
     if V is None:
         out["note"] = ("a covariance C(y_a, y_b) <= 0 (full or delete-one-scene): the task pattern is not identified "
                        "-> lambda_used = range upper end")
@@ -586,7 +646,7 @@ def persistence_hat(y1: list, y2: list, others: list, sigma_used: float, cluster
     if G >= 2:
         out["se"] = math.sqrt(G / (G - 1) * sum(s * s for s in sums.values())) / n
     out["lambda_hat"] = lam
-    out["lambda_used"] = min(hi, max(lo, lam))
+    out["lambda_used"] = lambda_used_rule(lam, margin, (lo, hi))
     return out
 
 
@@ -893,19 +953,22 @@ def _tally(cnt, pv, Ds, names, alpha) -> None:
 
 def persistence_check(p_rep: list, clusters, lam: float, sigma: float, n_reps: int, seed: int, *,
                       n_pooled: int = 3, a_priori: float = 0.03, chunk: int = 250, m_table: int = 2001,
-                      lam_range=(0.0, 1.0), offsets=None) -> dict:
+                      lam_range=(0.0, 1.0), offsets=None, margin=None) -> dict:
     """Simulation check of persistence_hat in the registered model (numpy; the draws of simulate, _draw_start_np):
     n_pooled pilot starts at the replicate tier with true p = p_rep, task persistence lam and seed SD sigma; the first
     start also has the replicate seed (the same persistent V, an independent shift).  offsets (default all 0): a
     realized SR offset per pooled start (the first is the replicate start), added to its seed shifts before
     calibrate_shift -- start main effects, which the registered estimator must not see.  Per replicate:
     sigma_used = seed_sd(first seed, replicate seed, a_priori), then persistence_hat(first seed, replicate seed, the
-    other starts' seeds, sigma_used), exactly as run_tvr.  Returns the mean / SD / MC SE of lambda_hat (unclipped,
-    over the replicates where it is defined), the mean scene-cluster SE, the mean lambda_used and the number of
+    other starts' seeds, sigma_used, margin), exactly as run_tvr (margin None = the registered
+    power.persistence.margin).  Returns the mean / SD / MC SE of lambda_hat (unclipped, no margin, over the
+    replicates where it is defined; bias = mean_hat - lam), the mean scene-cluster SE, the mean lambda_used and
+    bias_used = mean_used - lam (lambda_used includes the margin and the clip), the margin and the number of
     replicates where lambda_hat is undefined.  offsets all 0 draw exactly as before."""
     np = _np()
     if np is None:
         raise RuntimeError("persistence_check needs numpy")
+    margin = registered_margin() if margin is None else float(margin)
     if n_reps < 2:
         raise ValueError("n_reps >= 2")
     off = [0.0] * n_pooled if offsets is None else [float(x) for x in offsets]
@@ -925,7 +988,7 @@ def persistence_check(p_rep: list, clusters, lam: float, sigma: float, n_reps: i
         for b in range(B):
             y1, y2 = rep[b, 0].astype(int).tolist(), rep[b, 1].astype(int).tolist()
             r = persistence_hat(y1, y2, [o[b].astype(int).tolist() for o in others],
-                                seed_sd(y1, y2, a_priori)["sigma_used"], clusters, lam_range)
+                                seed_sd(y1, y2, a_priori)["sigma_used"], clusters, lam_range, margin)
             used.append(r["lambda_used"])
             if r["lambda_hat"] is None:
                 undefined += 1
@@ -937,12 +1000,13 @@ def persistence_check(p_rep: list, clusters, lam: float, sigma: float, n_reps: i
     k = len(hats)
     mean = sum(hats) / k if k else None
     sd = math.sqrt(sum((x - mean) ** 2 for x in hats) / (k - 1)) if k > 1 else None
+    mean_used = sum(used) / len(used)
     return {"lambda_true": float(lam), "sigma": float(sigma), "n_reps": n_reps, "n_pooled": n_pooled,
-            "offsets": off, "n_tasks": len(p_rep), "seed": seed, "mean_hat": mean,
+            "offsets": off, "n_tasks": len(p_rep), "seed": seed, "margin": margin, "mean_hat": mean,
             "bias": None if mean is None else mean - lam,
             "sd_hat": sd, "mc_se": None if sd is None else sd / math.sqrt(k),
-            "mean_se": sum(ses) / len(ses) if ses else None, "mean_used": sum(used) / len(used),
-            "n_undefined": undefined}
+            "mean_se": sum(ses) / len(ses) if ses else None, "mean_used": mean_used,
+            "bias_used": mean_used - float(lam), "n_undefined": undefined}
 
 
 # --------------------------------------------------------------------------------------------- TVR pilot inputs
@@ -1030,28 +1094,53 @@ def _sensitivity_superseded(p_by_tier, clusters, designs, sigma, lam, pw, ns, ba
             "summary": summ, "rows": rows}
 
 
+def _public_persistence(block: dict) -> dict:
+    """The persistence block as POWER.json holds it: ValueError unless its keys are within PERSISTENCE_KEYS and its
+    check within CHECK_KEYS / CHECK_RESULT_KEYS (module docstring, Separation: no start's SR level and nothing that
+    rebuilds one in closed form)."""
+    extra = sorted(set(block) - PERSISTENCE_KEYS)
+    chk = block.get("check")
+    if chk is not None:
+        extra += [f"check.{k}" for k in sorted(set(chk) - CHECK_KEYS)]
+        extra += [f"check.result.{k}" for k in sorted(set(chk.get("result") or {}) - CHECK_RESULT_KEYS)]
+    if extra:
+        raise ValueError(f"persistence block keys outside the POWER.json whitelist: {extra}")
+    return block
+
+
 def _persistence(pw, sd, y1, y2, others, p_rep, clusters, backend) -> dict:
-    """POWER.json["persistence"]: lambda from the seed replicate (persistence_hat, registered rule; others = the
-    other pilot starts' rows at the replicate tier) and a reported simulation check of the estimator at the pooled
-    p of the replicate tier (lambda_used, sigma_used)."""
+    """POWER.json["persistence"]: lambda from the seed replicate (persistence_hat, registered rule with
+    power.persistence.margin; others = the other pilot starts' rows at the replicate tier) and a reported simulation
+    check of the estimator at the pooled p of the replicate tier (lambda_used, sigma_used).  Only PERSISTENCE_KEYS:
+    persistence_hat's level / V / V_plain / B / R / D / kappa / m2 stay in memory.  level and V (exactly; V_plain
+    approximately) rebuild Q3B's SR level, and with p_summary a between-start difference, so they are not written;
+    B / R / D / kappa / m2 are not written only because they follow exactly from lambda_hat and the sigma block
+    (module docstring, Separation)."""
     reg = pw["persistence"]
     lam_range = (float(reg["range"][0]), float(reg["range"][1]))
+    margin = float(reg["margin"])
     if y1 is None:
-        return {"replicate_missing": True, "lambda_hat": None, "se": None, "lambda_used": lam_range[1],
-                "range": list(lam_range),
-                "note": "replicate absent (allow_no_replicate): lambda_used = range upper end (conservative)"}
-    est = persistence_hat(y1, y2, others, sd["sigma_used"], clusters, lam_range)
-    est["replicate_missing"] = False
-    est["rule"] = reg["rule"]
+        return _public_persistence({
+            "replicate_missing": True, "lambda_hat": None, "se": None,
+            "lambda_used": lambda_used_rule(None, margin, lam_range), "margin": margin, "range": list(lam_range),
+            "rule": reg["rule"], "sigma_used": float(sd["sigma_used"]),
+            "note": "replicate absent (allow_no_replicate): lambda_used = range upper end (conservative)"})
+    est = persistence_hat(y1, y2, others, sd["sigma_used"], clusters, lam_range, margin)
+    out = {k: est[k] for k in ("n", "n_pooled", "sigma_used", "range", "lambda_hat", "se", "margin", "lambda_used")}
+    if "note" in est:
+        out["note"] = est["note"]
+    out["replicate_missing"] = False
+    out["rule"] = reg["rule"]
     chk = None
     if backend == "numpy":
         chk = persistence_check(p_rep, clusters, est["lambda_used"], sd["sigma_used"], int(reg["check_reps"]),
                                 int(pw["seed"]), n_pooled=len(others) + 1, a_priori=float(pw["seed_sd"]["a_priori"]),
-                                lam_range=lam_range)
-    est["check"] = {"gated": False, "note": "persistence_hat on data simulated from the registered model at the pooled "
+                                lam_range=lam_range, margin=margin)
+    out["check"] = {"gated": False, "note": "persistence_hat on data simulated from the registered model at the pooled "
                                             "p of the replicate tier (lambda_used, sigma_used): bias = mean_hat - "
-                                            "lambda_true", "result": chk}
-    return est
+                                            "lambda_true (lambda_hat, no margin); bias_used = mean_used - lambda_true "
+                                            "(lambda_used: margin and clip included)", "result": chk}
+    return _public_persistence(out)
 
 
 def run_backend(pw: dict, backend=None) -> str:
@@ -1078,7 +1167,16 @@ def run_tvr(pilot_root, cfg=None, out=None, *, n_sims=None, backend=None,
     delta of power.deltas at tier_corr.power; role "reported" = primary delta at every rho of tier_corr.reported.
     Role "sensitivity_persistence" (sigma_used): delta 0 at the type-I rhos and the primary delta at the power rho,
     for every lambda of power.persistence.sensitivity.  Only sigma_used / lambda_used rows of roles type1 and power
-    enter the verdict."""
+    enter the verdict.  reported_designs (role "reported"; never gated, outside tables, the verdicts never read it):
+    every design of power.reported_designs (power.design with those seeds) at its delta, sigma_used, lambda_used and
+    power.reported_designs.tier_corr; reported_designs.type1 (same role, never gated): for every design named in
+    power.reported_designs.type1.designs, delta 0 at every rho of power.reported_designs.type1.tier_corr (0 and 1),
+    sigma_used, lambda_used -> FWER (>= 1 Holm rejection, either direction; the gated type-I definition) with its
+    binomial MC SE, and per design the max over those rhos against power.type1_max (report only: what a design the
+    user picks after an A4 failure must meet).  simulate draws from its own seed per call, so these rows do not
+    change any other row; identical calls are computed once (a design equal to power.design reuses the main table's
+    cell).  POWER.json gives no start's SR level and no between-start difference in closed form (module docstring,
+    Separation)."""
     if cfg is None:
         cfg = pilot_cfg.FROZEN
     pw = cfg["power"]
@@ -1138,17 +1236,71 @@ def run_tvr(pilot_root, cfg=None, out=None, *, n_sims=None, backend=None,
     fallback = copy.deepcopy(main)
     fallback["seeds"] = copy.deepcopy(pw["fallback"]["seeds"])
     designs = {"main": main, "fallback_seeds_1_2": fallback}
+    done = {}   # (design json, sigma, delta, rho, lambda) -> simulate result (deterministic: seed per call)
+
+    def sim(des, sig, dl, rho, lv):
+        key = (json.dumps(des, sort_keys=True), round(sig, 12), dl, rho, lv)
+        if key not in done:
+            done[key] = simulate(p_by_tier, clusters, des, dl, sig, ns, int(pw["seed"]), alpha=float(pw["alpha"]),
+                                 test=pw["test"], backend=backend, tier_corr=rho, persistence=lv)
+        return done[key]
+
     tables = {}
     for dname, des in designs.items():
-        rows = []
-        done = {}
-        for label, sig, dl, rho, lv, role in cells:
-            key = (round(sig, 12), dl, rho, lv)
-            if key not in done:
-                done[key] = simulate(p_by_tier, clusters, des, dl, sig, ns, int(pw["seed"]), alpha=float(pw["alpha"]),
-                                     test=pw["test"], backend=backend, tier_corr=rho, persistence=lv)
-            rows.append(dict(done[key], sigma_label=label, role=role))
-        tables[dname] = rows
+        tables[dname] = [dict(sim(des, sig, dl, rho, lv), sigma_label=label, role=role)
+                         for label, sig, dl, rho, lv, role in cells]
+    rd = pw["reported_designs"]
+    rd_rho = float(rd["tier_corr"])
+    rd_rows, rd_summ = [], []
+    for rname, spec in rd["designs"].items():
+        des = copy.deepcopy(main)
+        des["seeds"] = copy.deepcopy(spec["seeds"])
+        r = dict(sim(des, sd["sigma_used"], float(spec["delta"]), rd_rho, lam), design=rname, sigma_label="used",
+                 role="reported")
+        n_s = sorted({len(v) for v in des["seeds"].values()})
+        rd_rows.append(r)
+        rd_summ.append({"design": rname, "seeds_per_start": n_s[0] if len(n_s) == 1 else n_s,
+                        "delta": r["delta"], "tier_corr": r["tier_corr"], "sigma": r["sigma"],
+                        "persistence": r["persistence"], "test": r["test"], "df": r["df"], "n_sims": r["n_sims"],
+                        "power": r["power"], "mc_se_power": r["mc_se_power"]})
+    reported = {"gated": False, "role": "reported", "use": rd["use"], "tier_corr": rd_rho,
+                "sigma": sd["sigma_used"], "persistence": lam,
+                "note": "power.design with other seeds per start (both tiers, paired; df = n_starts (n_seeds - 1)) "
+                        "or another delta, at sigma_used, lambda_used; Holm power counts as in tables (treated "
+                        "better, other contrast at effect 0); simulated starts from the pooled p only",
+                "summary": rd_summ, "rows": rd_rows}
+    # report-only type-I rows of the reported designs (wave 2c round 2): delta 0, FWER as the gated type-I counts it
+    rt = rd["type1"]
+    rt_rho = [float(x) for x in rt["tier_corr"]]
+    t1_max = float(pw["type1_max"])
+    rt_rows, rt_summ, rt_by = [], [], {}
+    for rname in rt["designs"]:
+        if rname not in rd["designs"]:
+            raise ValueError(f"power.reported_designs.type1: {rname!r} is not in power.reported_designs.designs")
+        des = copy.deepcopy(main)
+        des["seeds"] = copy.deepcopy(rd["designs"][rname]["seeds"])
+        n_s = sorted({len(v) for v in des["seeds"].values()})
+        by_rho = {}
+        for rho in rt_rho:
+            r = dict(sim(des, sd["sigma_used"], 0.0, rho, lam), design=rname, sigma_label="used", role="reported")
+            f = float(r["fwer"])
+            se_f = math.sqrt(f * (1.0 - f) / r["n_sims"])
+            rt_rows.append(r)
+            rt_summ.append({"design": rname, "seeds_per_start": n_s[0] if len(n_s) == 1 else n_s, "delta": 0.0,
+                            "tier_corr": r["tier_corr"], "sigma": r["sigma"], "persistence": r["persistence"],
+                            "test": r["test"], "df": r["df"], "n_sims": r["n_sims"], "fwer": f, "mc_se_fwer": se_f,
+                            "type1_by_contrast": r.get("type1_by_contrast")})
+            by_rho[str(r["tier_corr"])] = f
+        mx = max(by_rho.values()) if by_rho else None
+        rt_by[rname] = {"type1": mx, "type1_by_rho": by_rho, "within_type1_max": mx is not None and mx <= t1_max}
+    reported["type1"] = {"gated": False, "role": "reported", "delta": 0.0, "tier_corr": rt_rho,
+                         "sigma": sd["sigma_used"], "persistence": lam, "type1_max": t1_max,
+                         "note": "report only (never gated; the verdicts do not read it): delta 0, FWER = fraction of "
+                                 "null simulations with >= 1 Holm rejection (either direction), as the gated type-I; "
+                                 "mc_se_fwer = sqrt(fwer (1 - fwer) / n_sims); by_design.type1 = max over tier_corr; "
+                                 "a reported design picked after an A4 failure must meet type1_max here (PREREG 13 "
+                                 "A4); the delta-0.10 design is the main design at delta 0 (tables.main type1 rows)",
+                         "by_design": rt_by, "summary": rt_summ, "rows": rt_rows}
 
     def verdict(rows):
         gated = [r for r in rows if r["sigma_label"] == "used" and r["persistence"] == lam]
@@ -1174,6 +1326,7 @@ def run_tvr(pilot_root, cfg=None, out=None, *, n_sims=None, backend=None,
                               "gated value = max over power.tier_corr.type1",
                           "tier_corr": copy.deepcopy(pw["tier_corr"]), "fallback": copy.deepcopy(pw["fallback"]),
                           "persistence": copy.deepcopy(pw["persistence"]),
+                          "reported_designs": copy.deepcopy(pw["reported_designs"]),
                           "n_sims_registered": pw["n_sims"], "n_sims_used": ns, "seed": pw["seed"],
                           # the backend THIS run used (the random stream depends on it); A4 needs power.backend
                           "backend": backend, "allow_no_replicate": bool(allow_no_replicate)},
@@ -1190,8 +1343,14 @@ def run_tvr(pilot_root, cfg=None, out=None, *, n_sims=None, backend=None,
            "verdicts": {k: verdict(v) for k, v in tables.items()},
            "sensitivity_superseded_test": _sensitivity_superseded(p_by_tier, clusters, designs, sd["sigma_used"], lam,
                                                                   pw, ns, backend),
-           "note": "p_i pools the three pilot starts by a mean; lambda reads the other starts only through "
-                   "covariances over tasks (invariant to start mean SRs); no between-start difference is computed"}
+           "reported_designs": reported,
+           "note": "POWER.json gives no start's SR level and no between-start difference in closed form (statistical "
+                   "prediction from lambda_hat, se and sigma: PREREG 12.6, inferred); Q3B's within-start "
+                   "seed-difference statistics (sigma) and the pooled p (p_summary; p_i = mean over the three pilot "
+                   "starts) are reported; per-start absolutes are in the gate report.  lambda reads the other starts "
+                   "only through covariances over tasks (invariant to start mean SRs); no between-start difference "
+                   "is computed"}
+    res["persistence"] = _public_persistence(res["persistence"])
     res["pass"] = res["verdicts"]["main"]["pass"]
     res["fallback_pass"] = res["verdicts"]["fallback_seeds_1_2"]["pass"]
     if out is not None:

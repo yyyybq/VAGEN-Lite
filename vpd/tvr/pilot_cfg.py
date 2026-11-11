@@ -132,10 +132,33 @@ FROZEN = {
                                            "C(l, y_a) C(l, y_b) / C(y_a, y_b); B = L (1 - L) - V; R = 2 B + m2 / 2; "
                                            "lambda_hat = (R - D) / (R - kappa)",
                               "range": [0.0, 1.0],
-                              "rule": "lambda_used = clip(lambda_hat, range); lambda_hat undefined (C(y_a, y_b) <= 0 "
-                                      "in the full or a delete-one-scene sample, or R <= kappa) or replicate missing "
-                                      "-> range[1]",
+                              # wave 2c (independent statistics check, before the freeze): a registered conservative
+                              # allowance for the estimator's residual liberal bias (-0.012..-0.020 in the registered
+                              # model on some p shapes, down to -0.036 under start offsets; the A4 decision window is
+                              # lambda about 0.005-0.01); PREREG 12 item 7
+                              "margin": 0.03,
+                              "rule": "lambda_used = clip(lambda_hat + margin, range) (margin = the registered "
+                                      "allowance for the residual liberal bias of lambda_hat); lambda_hat undefined "
+                                      "(C(y_a, y_b) <= 0 in the full or a delete-one-scene sample, or R <= kappa) or "
+                                      "replicate missing -> range[1]",
                               "sensitivity": [0.0, 0.8], "check_reps": 400},
+              # wave 2c: report-only rows of POWER.json (reported_designs; role "reported"), so the user can decide
+              # when A4 fails; never gated, the verdicts never read them.  Each = power.design with these seeds at
+              # both tiers (paired; same test, df = n_starts * (n_seeds - 1)), at sigma_used, lambda_used, this
+              # tier_corr, power.n_sims, power.seed; Holm power of both contrasts with its MC SE.  type1 (wave 2c
+              # round 2; same rules, report only): the designs named there at delta 0 and these tier_corr, FWER over
+              # both contrasts (the gated type-I definition) with its MC SE; main_delta_10pp has none (at delta 0 it
+              # is the main design, whose type-I rows are in tables.main)
+              "reported_designs": {"use": "report only: never gated, the verdicts do not read them",
+                                   "tier_corr": 0.5,
+                                   "designs": {"main_seeds_4": {"seeds": {"100": [1, 2, 3, 4], "TOP": [1, 2, 3, 4]},
+                                                                "delta": 0.08},
+                                               "main_seeds_5": {"seeds": {"100": [1, 2, 3, 4, 5],
+                                                                          "TOP": [1, 2, 3, 4, 5]},
+                                                                "delta": 0.08},
+                                               "main_delta_10pp": {"seeds": {"100": [1, 2, 3], "TOP": [1, 2, 3]},
+                                                                   "delta": 0.10}},
+                                   "type1": {"designs": ["main_seeds_4", "main_seeds_5"], "tier_corr": [0.0, 1.0]}},
               "power_counts": "Holm-rejected AND treated better, other contrast at effect 0",
               "type1_max": 0.06,
               "seed_sd": {"mode": "replicate_max_a_priori", "a_priori": 0.03, "sensitivity": [0.05],
