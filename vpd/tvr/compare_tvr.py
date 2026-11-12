@@ -102,8 +102,10 @@ def reference(cfg=None) -> dict:
             "second": {"tier": f"{rep['tier']}s{rep['seed']}", "seed": int(rep["seed"])}}
 
 
-def eval_dir(root: Path, s: str, tier: str, arm: str) -> Path:
-    return Path(root) / s / "evals" / f"pilot__{s}__{tier}__{arm}"
+def eval_dir(root: Path, s: str, tier: str, arm: str, prefix: str = "pilot") -> Path:
+    """ROOT/<S>/evals/<prefix>__<S>__<tier>__<arm>; prefix pilot (this comparison), xrl (vpd.tvr.compare_rl's RL
+    sides under OUT/tvr/runs/explore/rl)."""
+    return Path(root) / s / "evals" / f"{prefix}__{s}__{tier}__{arm}"
 
 
 def prereg_row(text: str) -> Optional[str]:
@@ -134,11 +136,12 @@ def registered_tasks(tasks_dir: Path) -> dict:
 
 # --- one eval ---------------------------------------------------------------------------------------------------
 
-def read_side(root: Path, s: str, tier: str, arm: str, registered: set, z: float, cats: dict = None) -> dict:
+def read_side(root: Path, s: str, tier: str, arm: str, registered: set, z: float, cats: dict = None,
+              prefix: str = "pilot") -> dict:
     """One eval's successes from its trajectories, its input shas and the cross-checks; usable iff its trajectories
     are exactly the registered tasks, one file each, with a bool result.success.  cats: task_id -> category of the
-    registered tasks (results.json by_category cross-check)."""
-    d = eval_dir(root, s, tier, arm)
+    registered tasks (results.json by_category cross-check).  prefix: the eval dir prefix (eval_dir)."""
+    d = eval_dir(root, s, tier, arm, prefix)
     out = {"start": s, "tier": tier, "arm": arm, "dir": str(d), "problems": [], "usable": False}
     td = d / "tasks"
     files = sorted(td.glob("*/trajectory.json")) if td.is_dir() else []
