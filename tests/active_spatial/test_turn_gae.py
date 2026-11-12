@@ -407,3 +407,112 @@ def test_critic_overfit_update_driver():
     assert not any(k in m for _, m in logged for k in TC.GUARD_NAN_KEYS)
     text = "\n".join(f"step:{s} - " + " - ".join(f"{k}:{v}" for k, v in m.items()) for s, m in logged)
     assert TC.guard_reason(text, {"kl_max": 0.2, "invalid_max": 0.1, "entropy_max": 0.3, "keep_fill_min": 1}) is None
+
+
+def test_critic_replay_updates_of():
+    """The critic replay pilot (package p1tgae_c2_rb, the user's supplement of 2026-11-12, item 4): off unless
+    trainer.critic_replay_updates is set; on, a whole number >= 1 with the value network and the every-candidate
+    batch, and not with the overfit check."""
+    from omegaconf import OmegaConf
+
+    from vagen.ray_trainer import critic_replay_updates_of
+
+    def cfg(**trainer):
+        return OmegaConf.create({"trainer": trainer})
+
+    assert critic_replay_updates_of(cfg(), True) == 0                       # absent: off (every other package)
+    assert critic_replay_updates_of(cfg(critic_replay_updates=0), False) == 0
+    assert critic_replay_updates_of(cfg(critic_replay_updates=8, critic_all_candidates=True), True) == 8
+    assert critic_replay_updates_of(cfg(critic_replay_updates=1, critic_all_candidates=True), True) == 1
+    for trainer, use_critic, pattern in (
+            ({"critic_replay_updates": -1, "critic_all_candidates": True}, True, "whole number >= 1"),
+            ({"critic_replay_updates": True, "critic_all_candidates": True}, True, "whole number >= 1"),
+            ({"critic_replay_updates": 2.5, "critic_all_candidates": True}, True, "whole number >= 1"),
+            ({"critic_replay_updates": 8, "critic_all_candidates": True}, False, "value network"),
+            ({"critic_replay_updates": 8}, True, "critic_all_candidates"),
+            ({"critic_replay_updates": 8, "critic_all_candidates": True, "critic_overfit_steps": 50}, True, "combined")):
+        with pytest.raises(ValueError, match=pattern):
+            critic_replay_updates_of(cfg(**trainer), use_critic)
+
+
+def _replay_batch(n_rows, base, width=3):
+    """One update's value-network batch: n_rows episodes, returns base + row at each first position, the keys verl's
+    critic reads plus some it does not (advantages, uid), a multi-modal entry per row and a meta_info."""
+    from verl import DataProto
+
+    returns = torch.full((n_rows, width), TG.IGNORE_VALUE)
+    returns[:, 0] = base + torch.arange(n_rows, dtype=torch.float32)
+    tensors = {"input_ids": torch.full((n_rows, 2 * width), int(base)), "responses": torch.ones(n_rows, width, dtype=torch.long),
+               "response_mask": torch.ones(n_rows, width), "attention_mask": torch.ones(n_rows, 2 * width, dtype=torch.long),
+               "position_ids": torch.zeros(n_rows, 2 * width, dtype=torch.long), "values": torch.zeros(n_rows, width),
+               "returns": returns, "advantages": torch.ones(n_rows, width)}
+    non = {"uid": np.array([f"b{base}_{i}" for i in range(n_rows)], dtype=object),
+           "multi_modal_inputs": np.array([{"pixel_values": torch.full((1, 2), base)} for _ in range(n_rows)], dtype=object)}
+    data = DataProto.from_dict(tensors=tensors, non_tensors=non)
+    data.meta_info.update({"global_token_num": [999] * n_rows, "temperature": 1.0})
+    return data
+
+
+def test_critic_replay_entry_and_batch():
+    """The buffer keeps only what verl's critic reads, as copies; the replay batch is the kept batches oldest first,
+    padded once to the workers, with the update's meta_info and the token counts of the rows sent."""
+    from vagen.ray_trainer import CRITIC_REPLAY_BATCH_KEYS, critic_replay_batch, critic_replay_entry
+
+    a, b = _replay_batch(5, 0.0), _replay_batch(6, 100.0)
+    ea = critic_replay_entry(a)
+    assert sorted(ea.batch.keys()) == sorted(CRITIC_REPLAY_BATCH_KEYS)        # not the advantages
+    assert list(ea.non_tensor_batch) == ["multi_modal_inputs"] and ea.meta_info == {}
+    a.batch["returns"][0, 0] = -7.0                                           # a later change to the update's batch ...
+    assert ea.batch["returns"][0, 0] == 0.0                                   # ... does not reach the kept targets
+    eb = critic_replay_entry(b)
+    merged, rows, pad = critic_replay_batch([ea, eb], b.meta_info, 8)
+    assert (rows, pad, len(merged)) == (11, 5, 16)
+    first = merged.batch["returns"][:, 0]
+    assert torch.equal(first[:11], torch.cat([torch.arange(5.0), 100.0 + torch.arange(6.0)]))   # oldest first
+    assert torch.equal(first[11:], torch.arange(5.0))                         # the padding: copies of the first rows
+    assert len(merged.non_tensor_batch["multi_modal_inputs"]) == 16
+    assert merged.meta_info["temperature"] == 1.0 and "metrics" not in merged.meta_info
+    assert merged.meta_info["global_token_num"] == [6] * 16                   # the rows sent, not the update's 999s
+    assert b.meta_info["global_token_num"] == [999] * 6                       # the update's own meta_info untouched
+    one, rows1, pad1 = critic_replay_batch([eb], b.meta_info, 2)              # one batch, no padding needed
+    assert (rows1, pad1, len(one)) == (6, 0, 6) and torch.equal(one.batch["returns"], eb.batch["returns"])
+    assert one.batch["returns"].data_ptr() != eb.batch["returns"].data_ptr()  # a copy, the buffer is not shared
+
+
+def test_critic_replay_buffer_rolls():
+    """The trainer's buffer step on stand-in workers: K = 3 holds the last three updates' batches (this one included),
+    the oldest out first; the readings count the updates held, the rows before the padding, this update's rows, the
+    padding and the update the buffer started at."""
+    from types import SimpleNamespace
+
+    from vagen.ray_trainer import RayPPOTrainer
+
+    fake = SimpleNamespace(_critic_replay=[], _critic_replay_start=1, critic_wg=SimpleNamespace(world_size=4))
+    sizes, seen = [5, 6, 7, 8, 3], []
+    for step, n in enumerate(sizes):
+        batch = _replay_batch(n, 100.0 * step)
+        merged, pad, m = RayPPOTrainer._critic_replay_batch(fake, batch, 3)
+        held = sizes[max(0, step - 2):step + 1]
+        assert m["critic/replay/updates_held"] == len(held) and m["critic/replay/rows"] == sum(held)
+        assert m["critic/replay/current_rows"] == n and m["critic/replay/start_update"] == 1
+        assert len(merged) % 4 == 0 and pad == m["critic/replay/pad_rows"] == len(merged) - sum(held)
+        seen.append(sorted({int(v) // 100 for v in merged.batch["returns"][:, 0].tolist()}))
+    assert seen == [[0], [0, 1], [0, 1, 2], [1, 2, 3], [2, 3, 4]]
+    assert len(fake._critic_replay) == 3
+
+
+def test_critic_replay_fit_wiring():
+    """The fit loop's wiring (read from the source: the loop needs Ray workers): the replay batch replaces only the
+    padding of the every-candidate batch, the switch is read once, a resumed run goes on with an empty buffer, and
+    with the switch off the value-network update is p1tgae_c2's line for line."""
+    import inspect
+
+    from vagen.ray_trainer import RayPPOTrainer
+
+    src = inspect.getsource(RayPPOTrainer.fit)
+    assert src.count("critic_replay_updates_of(") == 1 and src.count("self._critic_replay_batch(") == 1
+    assert "self._critic_replay = []" in src and "self._critic_replay_start = self.global_steps" in src
+    assert "critic replay: resumed at update" in src and "cannot resume" in src  # (the latter: the overfit check's)
+    i = src.index("if replay_updates:  # p1tgae_c2_rb")
+    j = src.index("critic_batch, critic_pad = pad_dataproto_to_divisor(critic_batch, self.critic_wg.world_size)")
+    assert i < j and "else:" in src[i:j]

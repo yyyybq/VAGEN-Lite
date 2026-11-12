@@ -1274,6 +1274,59 @@ def critic_overfit_readings(fixed: DataProto, n_rows: int, prefix: str) -> dict[
             if k.startswith("critic/") and not k.startswith("critic/advantages/")}
 
 
+def critic_replay_updates_of(config, use_critic: bool) -> int:
+    """trainer.critic_replay_updates K (package p1tgae_c2_rb, the critic replay pilot of the user's supplement of
+    2026-11-12, item 4): 0 = off (every other package).  On (K >= 1): every update the value network trains on the
+    value-network batches (every candidate, trainer.critic_all_candidates) of the last K updates, this one included,
+    concatenated oldest first: critic.ppo_epochs passes over the whole buffer.  Each kept batch keeps the returns of
+    its own update as its targets (they are not recomputed with the current value network).  The buffer is not in the
+    checkpoint: a resumed run starts with an empty buffer (critic/replay/start_update).  It fills during the
+    critic_warmup updates too.  The actor, its batch, the filter and the advantages are p1tgae_c2's."""
+    k = config.trainer.get("critic_replay_updates", 0)
+    if k is None or k == 0:
+        return 0
+    if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+        raise ValueError(f"trainer.critic_replay_updates must be 0 (off) or a whole number >= 1, not {k!r}")
+    if not use_critic:
+        raise ValueError("trainer.critic_replay_updates needs a value network (critic)")
+    if not bool(config.trainer.get("critic_all_candidates", False)):
+        raise ValueError("trainer.critic_replay_updates needs trainer.critic_all_candidates (the buffer keeps every "
+                         "candidate)")
+    if config.trainer.get("critic_overfit_steps", 0):
+        raise ValueError("trainer.critic_replay_updates cannot be combined with trainer.critic_overfit_steps")
+    return int(k)
+
+
+# what verl's dp_critic.update_critic selects of the batch it is given (the rest is not read by the value network)
+CRITIC_REPLAY_BATCH_KEYS = ("input_ids", "responses", "response_mask", "attention_mask", "position_ids", "values",
+                            "returns")
+CRITIC_REPLAY_NON_TENSOR_KEYS = ("multi_modal_inputs",)
+
+
+def critic_replay_entry(critic_batch: DataProto) -> DataProto:
+    """What the replay buffer keeps of one update's value-network batch (before the padding to the workers): only the
+    keys verl's dp_critic.update_critic reads (the driver's memory), the tensors cloned (nothing later in the update
+    changes the kept targets), no meta_info."""
+    keys = [k for k in CRITIC_REPLAY_BATCH_KEYS if k in critic_batch.batch.keys()]
+    kept = critic_batch.select(batch_keys=keys)
+    non = {k: v.copy() for k, v in critic_batch.non_tensor_batch.items() if k in CRITIC_REPLAY_NON_TENSOR_KEYS}
+    return DataProto(batch=kept.batch.clone(), non_tensor_batch=non, meta_info={})
+
+
+def critic_replay_batch(buffer, meta_info: dict, divisor: int) -> tuple[DataProto, int, int]:
+    """The value network's batch of a replay update: the buffer's batches (critic_replay_entry) concatenated, oldest
+    first, padded once to the workers (pad_dataproto_to_divisor: copies of the first rows, as every padded batch);
+    meta_info the update's own without its metrics, with global_token_num (verl's MFU reading) over the rows sent.
+    Returns the batch, its rows before the padding and the padding rows."""
+    merged = DataProto.concat(list(buffer))
+    rows = len(merged)
+    padded, pad = pad_dataproto_to_divisor(merged, divisor)
+    padded.meta_info = {k: v for k, v in meta_info.items() if k not in ("metrics", "global_token_num")}
+    if "attention_mask" in padded.batch.keys():
+        padded.meta_info["global_token_num"] = torch.sum(padded.batch["attention_mask"], dim=-1).tolist()
+    return padded, rows, pad
+
+
 _ACTION_TAG_RE = re.compile(r"<action>(.*?)</action>", re.IGNORECASE | re.DOTALL)
 
 
@@ -2517,6 +2570,17 @@ class RayPPOTrainer:
         self.global_steps += 1
         return last
 
+    def _critic_replay_batch(self, critic_batch: DataProto, replay_updates: int) -> tuple[DataProto, int, dict]:
+        """The critic replay pilot (critic_replay_updates_of): keep this update's value-network batch (every candidate,
+        before the padding) in the buffer of the last replay_updates updates and give the buffer's batch for the
+        value-network update (critic_replay_batch), its padding rows and the readings critic/replay/*."""
+        self._critic_replay.append(critic_replay_entry(critic_batch))
+        del self._critic_replay[:-replay_updates]  # the oldest out
+        merged, rows, pad = critic_replay_batch(self._critic_replay, critic_batch.meta_info, self.critic_wg.world_size)
+        return merged, pad, {"critic/replay/updates_held": len(self._critic_replay), "critic/replay/rows": rows,
+                             "critic/replay/current_rows": len(critic_batch), "critic/replay/pad_rows": pad,
+                             "critic/replay/start_update": self._critic_replay_start}
+
     def fit(self):
         """
         The training loop of PPO.
@@ -2568,6 +2632,14 @@ class RayPPOTrainer:
         if overfit_steps and self.global_steps != 1:  # resumed from a checkpoint: update 1's batch is not saved
             raise RuntimeError("the critic overfit check cannot resume (update 1's fixed batch is not in the "
                                f"checkpoint; the run would start at update {self.global_steps}): start a new run")
+        # the critic replay pilot (package p1tgae_c2_rb; 0 = off): the value network trains on the last K updates' batches
+        replay_updates = critic_replay_updates_of(self.config, self.use_critic)
+        self._critic_replay = []  # the buffer (critic_replay_entry), oldest first; not in the checkpoint
+        self._critic_replay_start = self.global_steps  # 1, or the update a resumed run starts at (an empty buffer)
+        if replay_updates and self.global_steps != 1:  # the chain resumes a crashed trainer: go on, the buffer refills
+            print(f"critic replay: resumed at update {self.global_steps} with an empty buffer (the buffer is not in the "
+                  f"checkpoint); it holds {replay_updates} updates again from update "
+                  f"{self.global_steps + replay_updates - 1}", flush=True)
 
         prev_step_profile = False
         curr_step_profile = (
@@ -3112,9 +3184,17 @@ class RayPPOTrainer:
                                 if critic_batch is not batch:
                                     for key in ("uid_draw_order", "adv_estimator"):
                                         critic_batch.meta_info.pop(key, None)
-                                    critic_batch, critic_pad = pad_dataproto_to_divisor(critic_batch, self.critic_wg.world_size)
+                                    if replay_updates:  # p1tgae_c2_rb: the last K updates' batches, this one included
+                                        critic_batch, critic_pad, replay_metrics = self._critic_replay_batch(
+                                            critic_batch, replay_updates)
+                                        metrics.update(replay_metrics)
+                                    else:
+                                        critic_batch, critic_pad = pad_dataproto_to_divisor(critic_batch, self.critic_wg.world_size)
                                 metrics["critic/update_batch_size"] = len(critic_batch)
                                 metrics["critic/update_rows_without_target"] = critic_rows_out
+                            if replay_updates and "critic/replay/rows" not in metrics:
+                                raise RuntimeError("critic replay: no candidate batch to keep (no row has a value "
+                                                   "target, or the filter is off)")
                             if overfit_steps and (critic_batch is batch or pre_filter_batch is None):
                                 raise RuntimeError("critic overfit check: no candidate batch to keep fixed "
                                                    "(no row has a value target, or the filter is off)")
