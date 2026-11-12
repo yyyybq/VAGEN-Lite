@@ -470,19 +470,23 @@ class TrainingPrepTest(unittest.TestCase):
                          ["p1tgae_c2_ofit"])
         self.assertEqual(list(TP.package_overrides("p1tgae_c2_ofit").items()),
                          list(tgc2.items()) + [("trainer.critic_overfit_steps", 50)])
-        # the critic replay pilot (the user's supplement of 2026-11-12, item 4): p1tgae_c2_rb is p1tgae_c2 plus
-        # critic_replay_updates 8; its overrides are p1tgae_c2's plus one key, appended; no other package has it
-        self.assertEqual({k: v for k, v in TP.OPT_PACKAGES["p1tgae_c2_rb"].items() if k not in TP.CRITIC_REPLAY_KEYS},
-                         TP.OPT_PACKAGES["p1tgae_c2"])
-        self.assertEqual(TP.OPT_PACKAGES["p1tgae_c2_rb"]["critic_replay_updates"], 8)
+        # the critic replay pilot (the user's supplement of 2026-11-12, item 4; option 1 of the same day): p1tgae_c2_rb
+        # is p1tgae_c2 with exactly two keys changed: critic_replay_updates 8 (new) and critic_ppo_epochs 1 (c2: 2); its
+        # overrides are p1tgae_c2's with critic.ppo_epochs 1 in place plus one key, appended; no other package has it
+        rb, c2 = TP.OPT_PACKAGES["p1tgae_c2_rb"], TP.OPT_PACKAGES["p1tgae_c2"]
+        self.assertEqual(sorted(k for k in set(rb) | set(c2) if rb.get(k) != c2.get(k)),
+                         ["critic_ppo_epochs", "critic_replay_updates"])
+        self.assertEqual((rb["critic_replay_updates"], rb["critic_ppo_epochs"], c2["critic_ppo_epochs"]), (8, 1, 2))
         self.assertEqual([n for n, pk in TP.OPT_PACKAGES.items() if any(k in pk for k in TP.CRITIC_REPLAY_KEYS)],
                          ["p1tgae_c2_rb"])
         self.assertEqual(list(TP.package_overrides("p1tgae_c2_rb").items()),
-                         list(tgc2.items()) + [("trainer.critic_replay_updates", 8)])
+                         [(k, 1 if k == "critic.ppo_epochs" else v) for k, v in tgc2.items()]
+                         + [("trainer.critic_replay_updates", 8)])
         ppo_r, report_r = config("rl_tgcr_a", opt_package="p1tgae_c2_rb", critic_warmup=None)
         ppo_c2r, _ = config("rl_tgcr_b", opt_package="p1tgae_c2", critic_warmup=None)
         self.assertEqual((ppo_r["trainer"].pop("critic_replay_updates"), "critic_replay_updates" in ppo_c2r["trainer"]),
                          (8, False))
+        self.assertEqual((ppo_r["critic"].pop("ppo_epochs"), ppo_c2r["critic"].pop("ppo_epochs")), (1, 2))
         self.assertEqual(json.loads(json.dumps(ppo_r).replace("rl_tgcr_a", "X")),
                          json.loads(json.dumps(ppo_c2r).replace("rl_tgcr_b", "X")))
         self.assertEqual(report_r["opt_package_overrides"], TP.package_overrides("p1tgae_c2_rb"))
@@ -644,11 +648,13 @@ class TrainingPrepTest(unittest.TestCase):
                          json.loads(json.dumps(env_c2).replace("rl_std_tgc2", "X")))
         self.assertEqual((report_o["standard"], report_o["opt_package"]), ("v10_p1tgaec2ofit_Dcond", "p1tgae_c2_ofit"))
         # the critic replay pilot (2026-11-12) on the repository template: v10_p1tgaec2rb_Dcond gives
-        # v10_p1tgaec2_Dcond's config with trainer.critic_replay_updates 8 (absent before); the env is the same
+        # v10_p1tgaec2_Dcond's config with exactly trainer.critic_replay_updates 8 (absent before) and
+        # critic.ppo_epochs 1 (2 before); the env is the same
         ppo_r, env_r, report_r = config("rl_std_tgcr", standard="v10_p1tgaec2rb_Dcond", seed=7)
         ppo_c2, env_c2, _ = config("rl_std_tgc2", standard="v10_p1tgaec2_Dcond", seed=7)
         self.assertEqual((ppo_r["trainer"].pop("critic_replay_updates"), "critic_replay_updates" in ppo_c2["trainer"]),
                          (8, False))
+        self.assertEqual((ppo_r["critic"].pop("ppo_epochs"), ppo_c2["critic"].pop("ppo_epochs")), (1, 2))
         self.assertEqual(json.loads(json.dumps(ppo_r).replace("rl_std_tgcr", "X")),
                          json.loads(json.dumps(ppo_c2).replace("rl_std_tgc2", "X")))
         self.assertEqual(json.loads(json.dumps(env_r).replace("rl_std_tgcr", "X")),

@@ -410,29 +410,38 @@ def test_critic_overfit_update_driver():
 
 
 def test_critic_replay_updates_of():
-    """The critic replay pilot (package p1tgae_c2_rb, the user's supplement of 2026-11-12, item 4): off unless
-    trainer.critic_replay_updates is set; on, a whole number >= 1 with the value network and the every-candidate
-    batch, and not with the overfit check."""
+    """The critic replay pilot (package p1tgae_c2_rb, the user's supplement of 2026-11-12, item 4): off when
+    trainer.critic_replay_updates is absent, None or the integer 0; the type is checked first (a bool, a float or a
+    negative number is refused, False and 0.0 too); on, a whole number >= 1 with the value network, the
+    every-candidate batch and the group filter, and not with the overfit check."""
     from omegaconf import OmegaConf
 
     from vagen.ray_trainer import critic_replay_updates_of
 
-    def cfg(**trainer):
-        return OmegaConf.create({"trainer": trainer})
+    def cfg(filter_enable=True, **trainer):
+        return OmegaConf.create({"trainer": trainer, "filter": {"enable": filter_enable}})
 
+    on = {"critic_all_candidates": True}
     assert critic_replay_updates_of(cfg(), True) == 0                       # absent: off (every other package)
+    assert critic_replay_updates_of(OmegaConf.create({"trainer": {}}), False) == 0   # no filter section, off: fine
+    assert critic_replay_updates_of(cfg(critic_replay_updates=None), True) == 0
     assert critic_replay_updates_of(cfg(critic_replay_updates=0), False) == 0
-    assert critic_replay_updates_of(cfg(critic_replay_updates=8, critic_all_candidates=True), True) == 8
-    assert critic_replay_updates_of(cfg(critic_replay_updates=1, critic_all_candidates=True), True) == 1
-    for trainer, use_critic, pattern in (
-            ({"critic_replay_updates": -1, "critic_all_candidates": True}, True, "whole number >= 1"),
-            ({"critic_replay_updates": True, "critic_all_candidates": True}, True, "whole number >= 1"),
-            ({"critic_replay_updates": 2.5, "critic_all_candidates": True}, True, "whole number >= 1"),
-            ({"critic_replay_updates": 8, "critic_all_candidates": True}, False, "value network"),
-            ({"critic_replay_updates": 8}, True, "critic_all_candidates"),
-            ({"critic_replay_updates": 8, "critic_all_candidates": True, "critic_overfit_steps": 50}, True, "combined")):
+    assert critic_replay_updates_of(cfg(filter_enable=False, critic_replay_updates=0), False) == 0
+    assert critic_replay_updates_of(cfg(critic_replay_updates=8, **on), True) == 8
+    assert critic_replay_updates_of(cfg(critic_replay_updates=1, **on), True) == 1
+    for config, use_critic, pattern in (
+            (cfg(critic_replay_updates=-1, **on), True, "whole number >= 1"),
+            (cfg(critic_replay_updates=True, **on), True, "whole number >= 1"),
+            (cfg(critic_replay_updates=False, **on), True, "whole number >= 1"),   # the type first: not "off"
+            (cfg(critic_replay_updates=0.0, **on), True, "whole number >= 1"),
+            (cfg(critic_replay_updates=2.5, **on), True, "whole number >= 1"),
+            (cfg(critic_replay_updates=8, **on), False, "value network"),
+            (cfg(critic_replay_updates=8), True, "critic_all_candidates"),
+            (cfg(critic_replay_updates=8, critic_overfit_steps=50, **on), True, "combined"),
+            (cfg(filter_enable=False, critic_replay_updates=8, **on), True, "filter.enable"),
+            (OmegaConf.create({"trainer": {"critic_replay_updates": 8, **on}}), True, "filter.enable")):
         with pytest.raises(ValueError, match=pattern):
-            critic_replay_updates_of(cfg(**trainer), use_critic)
+            critic_replay_updates_of(config, use_critic)
 
 
 def _replay_batch(n_rows, base, width=3):
@@ -442,12 +451,16 @@ def _replay_batch(n_rows, base, width=3):
 
     returns = torch.full((n_rows, width), TG.IGNORE_VALUE)
     returns[:, 0] = base + torch.arange(n_rows, dtype=torch.float32)
+    attention = torch.ones(n_rows, 2 * width, dtype=torch.long)
+    for i in range(n_rows):  # rows of different lengths (left padding)
+        attention[i, : i % 3] = 0
     tensors = {"input_ids": torch.full((n_rows, 2 * width), int(base)), "responses": torch.ones(n_rows, width, dtype=torch.long),
-               "response_mask": torch.ones(n_rows, width), "attention_mask": torch.ones(n_rows, 2 * width, dtype=torch.long),
+               "response_mask": torch.ones(n_rows, width), "attention_mask": attention,
                "position_ids": torch.zeros(n_rows, 2 * width, dtype=torch.long), "values": torch.zeros(n_rows, width),
                "returns": returns, "advantages": torch.ones(n_rows, width)}
     non = {"uid": np.array([f"b{base}_{i}" for i in range(n_rows)], dtype=object),
-           "multi_modal_inputs": np.array([{"pixel_values": torch.full((1, 2), base)} for _ in range(n_rows)], dtype=object)}
+           "multi_modal_inputs": np.array([{"pixel_values": torch.full((1, 2), base + i)} for i in range(n_rows)],
+                                          dtype=object)}
     data = DataProto.from_dict(tensors=tensors, non_tensors=non)
     data.meta_info.update({"global_token_num": [999] * n_rows, "temperature": 1.0})
     return data
@@ -472,11 +485,48 @@ def test_critic_replay_entry_and_batch():
     assert torch.equal(first[11:], torch.arange(5.0))                         # the padding: copies of the first rows
     assert len(merged.non_tensor_batch["multi_modal_inputs"]) == 16
     assert merged.meta_info["temperature"] == 1.0 and "metrics" not in merged.meta_info
-    assert merged.meta_info["global_token_num"] == [6] * 16                   # the rows sent, not the update's 999s
+    assert merged.meta_info["global_token_num"] == torch.sum(merged.batch["attention_mask"], dim=-1).tolist()
+    assert merged.meta_info["global_token_num"][:6] == [6, 5, 4, 6, 5] + [6]   # the rows sent, not the update's 999s
     assert b.meta_info["global_token_num"] == [999] * 6                       # the update's own meta_info untouched
     one, rows1, pad1 = critic_replay_batch([eb], b.meta_info, 2)              # one batch, no padding needed
     assert (rows1, pad1, len(one)) == (6, 0, 6) and torch.equal(one.batch["returns"], eb.batch["returns"])
-    assert one.batch["returns"].data_ptr() != eb.batch["returns"].data_ptr()  # a copy, the buffer is not shared
+
+
+def test_critic_replay_refusals():
+    """A value-network batch without one of the keys verl's critic reads is refused (not skipped), and so is a buffer
+    whose kept batches carry different non-tensor keys."""
+    from vagen.ray_trainer import critic_replay_batch, critic_replay_entry
+
+    a = _replay_batch(4, 0.0)
+    a.batch.pop("position_ids")
+    with pytest.raises(ValueError, match="position_ids"):
+        critic_replay_entry(a)
+    b, c = critic_replay_entry(_replay_batch(4, 0.0)), _replay_batch(4, 100.0)
+    c.non_tensor_batch.pop("multi_modal_inputs")
+    with pytest.raises(ValueError, match="different non-tensor keys"):
+        critic_replay_batch([b, critic_replay_entry(c)], {}, 4)
+
+
+def test_critic_replay_k1_is_the_padded_batch():
+    """K = 1: the replay batch is the update's own batch (the keys verl's critic reads) padded to the workers as
+    p1tgae_c2 pads it - the same rows, tensors, multi-modal entries and padding - with global_token_num over the rows
+    sent."""
+    from verl.protocol import pad_dataproto_to_divisor
+
+    from vagen.ray_trainer import CRITIC_REPLAY_BATCH_KEYS, critic_replay_batch, critic_replay_entry
+
+    b = _replay_batch(6, 100.0)
+    ref, ref_pad = pad_dataproto_to_divisor(
+        b.select(batch_keys=list(CRITIC_REPLAY_BATCH_KEYS), non_tensor_batch_keys=["multi_modal_inputs"]), 4)
+    got, rows, pad = critic_replay_batch([critic_replay_entry(b)], b.meta_info, 4)
+    assert (rows, pad, len(got)) == (6, ref_pad, len(ref)) == (6, 2, 8)
+    assert sorted(got.batch.keys()) == sorted(ref.batch.keys()) == sorted(CRITIC_REPLAY_BATCH_KEYS)
+    assert all(torch.equal(got.batch[k], ref.batch[k]) for k in CRITIC_REPLAY_BATCH_KEYS)
+    assert list(got.non_tensor_batch) == list(ref.non_tensor_batch) == ["multi_modal_inputs"]
+    assert all(torch.equal(x["pixel_values"], y["pixel_values"])
+               for x, y in zip(got.non_tensor_batch["multi_modal_inputs"], ref.non_tensor_batch["multi_modal_inputs"]))
+    assert got.meta_info["global_token_num"] == torch.sum(ref.batch["attention_mask"], dim=-1).tolist()
+    assert got.meta_info["temperature"] == 1.0
 
 
 def test_critic_replay_buffer_rolls():

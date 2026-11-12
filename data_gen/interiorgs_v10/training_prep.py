@@ -442,13 +442,15 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
                        "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0,
                        "lam": 0.95, "critic_lr": 5e-5, "critic_value_clip": False, "critic_ppo_epochs": 2,
                        "critic_all_candidates": True, "critic_mini_batch_groups": 3, "critic_overfit_steps": 50},
-    # the critic replay pilot (the user's supplement of 2026-11-12, item 4: "critic 不再修" lifted for this one time):
-    # p1tgae_c2 with trainer.critic_replay_updates 8: every update the value network trains its two passes on the
-    # every-candidate batches of the last 8 updates (this one included, each with the returns of its own update)
-    # instead of this update's alone.  The actor, its batch, the filter, whitening, rewards and stop lines are p1tgae_c2's
+    # the critic replay pilot (the user's supplement of 2026-11-12, item 4: "critic 不再修" lifted for this one time;
+    # the user's choice of the same day, option 1: 8 updates, one pass): p1tgae_c2 with trainer.critic_replay_updates 8
+    # and critic.ppo_epochs 1 (p1tgae_c2: 2): every update the value network trains one pass on the every-candidate
+    # batches of the last 8 updates (this one included, each with the returns of its own update) instead of two passes
+    # on this update's alone, so each episode gets 8 passes over its life (p1tgae_c2: 2).  The actor, its batch, the
+    # filter, whitening, rewards and stop lines are p1tgae_c2's
     "p1tgae_c2_rb": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
                      "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0,
-                     "lam": 0.95, "critic_lr": 5e-5, "critic_value_clip": False, "critic_ppo_epochs": 2,
+                     "lam": 0.95, "critic_lr": 5e-5, "critic_value_clip": False, "critic_ppo_epochs": 1,
                      "critic_all_candidates": True, "critic_mini_batch_groups": 3, "critic_replay_updates": 8},
 }
 NO_VALUE_CLIP = 1.0e6  # critic.cliprange_value of a package without value clipping (far beyond any return)

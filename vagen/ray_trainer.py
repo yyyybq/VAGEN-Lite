@@ -1276,17 +1276,29 @@ def critic_overfit_readings(fixed: DataProto, n_rows: int, prefix: str) -> dict[
 
 def critic_replay_updates_of(config, use_critic: bool) -> int:
     """trainer.critic_replay_updates K (package p1tgae_c2_rb, the critic replay pilot of the user's supplement of
-    2026-11-12, item 4): 0 = off (every other package).  On (K >= 1): every update the value network trains on the
-    value-network batches (every candidate, trainer.critic_all_candidates) of the last K updates, this one included,
-    concatenated oldest first: critic.ppo_epochs passes over the whole buffer.  Each kept batch keeps the returns of
-    its own update as its targets (they are not recomputed with the current value network).  The buffer is not in the
-    checkpoint: a resumed run starts with an empty buffer (critic/replay/start_update).  It fills during the
-    critic_warmup updates too.  The actor, its batch, the filter and the advantages are p1tgae_c2's."""
-    k = config.trainer.get("critic_replay_updates", 0)
-    if k is None or k == 0:
+    2026-11-12, item 4; the user's choice of the same day: K 8, one pass): absent or 0 = off (every other package).
+    On (K >= 1): every update the value network trains on the value-network batches (every candidate,
+    trainer.critic_all_candidates) of the last K updates, this one included, concatenated oldest first:
+    critic.ppo_epochs passes over the whole buffer.  Each kept batch keeps the returns of its own update as its
+    targets (they are not recomputed with the current value network).  The buffer is not in the checkpoint: a resumed
+    run starts with an empty buffer (critic/replay/start_update).  It fills during the critic_warmup updates too.  The
+    actor, its batch, the filter and the advantages are p1tgae_c2's.
+
+    Readings in this mode: critic/update_batch_size is the padded buffer's size, and verl's own readings of the
+    value-network update (critic/vf_loss, critic/grad_norm, critic/explained_var_valid, critic/mae_valid,
+    critic/rmse_valid, ...) cover the whole buffer; the level-1a reading (critic/values/explained_var_valid, the
+    filtered batch, before the update) and critic/all/* (this update's every-candidate batch) are unchanged.  Value
+    clipping would compare with the kept batches' own stale predictions; the package has none (critic.cliprange_value
+    NO_VALUE_CLIP), and nothing here refuses it.  Checked at the start of fit, before the first rollout: the value
+    network, the every-candidate batch, the group filter (the every-candidate batch is the batch before it) and not
+    the overfit check."""
+    k = config.trainer.get("critic_replay_updates", None)
+    if k is None:
         return 0
-    if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+    if isinstance(k, bool) or not isinstance(k, int) or k < 0:
         raise ValueError(f"trainer.critic_replay_updates must be 0 (off) or a whole number >= 1, not {k!r}")
+    if k == 0:
+        return 0
     if not use_critic:
         raise ValueError("trainer.critic_replay_updates needs a value network (critic)")
     if not bool(config.trainer.get("critic_all_candidates", False)):
@@ -1294,6 +1306,10 @@ def critic_replay_updates_of(config, use_critic: bool) -> int:
                          "candidate)")
     if config.trainer.get("critic_overfit_steps", 0):
         raise ValueError("trainer.critic_replay_updates cannot be combined with trainer.critic_overfit_steps")
+    group_filter = config.get("filter", None)
+    if group_filter is None or not bool(group_filter.get("enable", False)):
+        raise ValueError("trainer.critic_replay_updates needs the group filter (filter.enable): the every-candidate "
+                         "batch it keeps is the batch before the filter")
     return int(k)
 
 
@@ -1305,10 +1321,14 @@ CRITIC_REPLAY_NON_TENSOR_KEYS = ("multi_modal_inputs",)
 
 def critic_replay_entry(critic_batch: DataProto) -> DataProto:
     """What the replay buffer keeps of one update's value-network batch (before the padding to the workers): only the
-    keys verl's dp_critic.update_critic reads (the driver's memory), the tensors cloned (nothing later in the update
-    changes the kept targets), no meta_info."""
-    keys = [k for k in CRITIC_REPLAY_BATCH_KEYS if k in critic_batch.batch.keys()]
-    kept = critic_batch.select(batch_keys=keys)
+    keys verl's dp_critic.update_critic reads (the driver's memory), no meta_info.  The TensorDict is cloned (nothing
+    later in the update changes the kept targets); the multi_modal_inputs object array is copied shallowly: its
+    per-row dicts and pixel tensors are shared with that update's batch, which only reads them.  A batch without one
+    of the tensor keys is refused (verl's critic would select it)."""
+    missing = [k for k in CRITIC_REPLAY_BATCH_KEYS if k not in critic_batch.batch.keys()]
+    if missing:
+        raise ValueError(f"critic replay: the value-network batch has no {missing}")
+    kept = critic_batch.select(batch_keys=list(CRITIC_REPLAY_BATCH_KEYS))
     non = {k: v.copy() for k, v in critic_batch.non_tensor_batch.items() if k in CRITIC_REPLAY_NON_TENSOR_KEYS}
     return DataProto(batch=kept.batch.clone(), non_tensor_batch=non, meta_info={})
 
@@ -1317,8 +1337,13 @@ def critic_replay_batch(buffer, meta_info: dict, divisor: int) -> tuple[DataProt
     """The value network's batch of a replay update: the buffer's batches (critic_replay_entry) concatenated, oldest
     first, padded once to the workers (pad_dataproto_to_divisor: copies of the first rows, as every padded batch);
     meta_info the update's own without its metrics, with global_token_num (verl's MFU reading) over the rows sent.
-    Returns the batch, its rows before the padding and the padding rows."""
-    merged = DataProto.concat(list(buffer))
+    Returns the batch, its rows before the padding and the padding rows.  Every kept batch must carry the same
+    non-tensor keys (the first update's)."""
+    buffer = list(buffer)
+    keys = [sorted(e.non_tensor_batch) for e in buffer]
+    if any(k != keys[0] for k in keys):
+        raise ValueError(f"critic replay: the kept batches carry different non-tensor keys: {keys}")
+    merged = DataProto.concat(buffer)
     rows = len(merged)
     padded, pad = pad_dataproto_to_divisor(merged, divisor)
     padded.meta_info = {k: v for k, v in meta_info.items() if k not in ("metrics", "global_token_num")}

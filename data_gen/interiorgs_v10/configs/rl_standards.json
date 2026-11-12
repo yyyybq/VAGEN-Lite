@@ -76,7 +76,7 @@
  "v10_p1tgaec2ofit_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
                             "opt_package": "p1tgae_c2_ofit", "reward_preset": "D_cond",
                             "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
- "_v10_p1tgaec2rb": "The critic replay pilot (the user's supplement of 2026-11-12, item 4): v10_p1tgaec2_Dcond with package p1tgae_c2_rb (every update the value network trains its two passes on the every-candidate batches of the last 8 updates, this one included, each with the returns of its own update). Verdict as level 1a: filtered-batch critic/values/explained_var_valid mean > 0.3 over updates 76-90 and over 91-100. One V4 run, seed 20261019, from C0 SFT e8, as qw3tgc2d.",
+ "_v10_p1tgaec2rb": "The critic replay pilot (the user's supplement of 2026-11-12, item 4): v10_p1tgaec2_Dcond with package p1tgae_c2_rb (the user's choice of 2026-11-12, option 1: every update the value network trains one pass on the every-candidate batches of the last 8 updates, this one included, each with the returns of its own update; p1tgae_c2 trains two passes on this update's alone; each episode gets 8 passes over its life against 2). Verdict as level 1a: filtered-batch critic/values/explained_var_valid mean > 0.3 over updates 76-90 and over 91-100. One V4 run, seed 20261019, from C0 SFT e8, as qw3tgc2d.",
  "v10_p1tgaec2rb_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
                           "opt_package": "p1tgae_c2_rb", "reward_preset": "D_cond",
                           "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
