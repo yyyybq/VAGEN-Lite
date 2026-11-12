@@ -1,16 +1,17 @@
 """TVR pilot orchestration (CONTRACT_wave2 sections 5.3.1, 7; DECISIONS G3, G10; mirrors vpd/walkerbench/pilot.py).
 
-    PY_EVAL -m vpd.tvr.pilot_tvr plan
+    PY_EVAL -m vpd.tvr.pilot_tvr plan [--explore]   # --explore: the EXPLORATORY RL jobs (XJOBS) and the block budget
     PY_EVAL -m vpd.tvr.pilot_tvr prepare JOB [--pool zoetrope|h800|auto] [--new]
     PY_EVAL -m vpd.tvr.pilot_tvr submit JOB
-    PY_EVAL -m vpd.tvr.pilot_tvr status
+    PY_EVAL -m vpd.tvr.pilot_tvr status [--explore]
     PY_EVAL -m vpd.tvr.pilot_tvr collect JOB
     PY_EVAL -m vpd.tvr.pilot_tvr delete JOB [--allow-incomplete]
-    PY_EVAL -m vpd.tvr.pilot_tvr budget
+    PY_EVAL -m vpd.tvr.pilot_tvr budget [--explore]
     PY_EVAL -m vpd.tvr.pilot_tvr data-fill        # the 13 data.* values from the data job's files (read only)
   in-job helpers (pure; called by vpd/jobs/tvr_*.sh):
     ... pilot_tvr expect JOB --run RUN            # RUN/expect.json; exit 0 iff every expected item holds
     ... pilot_tvr smoke-verdict --smoke DIR       # DIR/smoke_verdict.json (mechanism only, never an SR)
+    ... pilot_tvr xsmoke-verdict --smoke DIR      # the explore smoke's DIR/smoke_verdict.json (mechanism only)
     ... pilot_tvr cal-decide --cal-root DIR       # DIR/cal_decision.json (EXPLORATORY, Q3B only, dev200 only)
     ... pilot_tvr guard JOB --run RUN             # the job's guard step (RUN/guard.json); exit 0 ok, 2 refused
     ... pilot_tvr cfg KEY [KEY ...]               # pilot_cfg values for the payload; exit 2 if one is None
@@ -57,6 +58,29 @@ Guards (prepare and submit; in-job again by `guard`, where the prereg's committe
   decided, section 8.1).  eval-<s>-*: the train-<s> adapters adapter-ok with the right init.
 Shared parents: before vsco.prepare of ANY job, prepare creates OUT/tvr/runs, runs/explore/cal/Q3B, runs/smoke,
 runs/pilot and runs/pilot/<S> as the login user, so an as_root job never creates (and owns) them.
+
+EXPLORATORY RL starts (PREREG_TVR_PILOT.md section 17, row 2026-11-12; DECISIONS G18): EXPLORE_STARTS = (Q3RD,
+Q3RS150) through the same recipe (seed 1001, tiers/v1, 0W warm-up, N_top, eval500, frozen protocol, the section-16
+est_high and timeout rules, as_root, zoetrope), outputs under OUT/tvr/runs/explore/rl/<S> (adapters/, evals/
+xrl__<S>__<tier>__<arm>, parity/, canary/), never runs/pilot.  Not gated: outside the decision table, A4 and the
+confirmatory round.  Separate job table XJOBS (JOBS, and every pilot job's payload, guard and expect, are unchanged;
+`plan`, `status` and `budget` show the explore jobs only with --explore):
+    tvr-xsmoke            as_root   tvr_xsmoke.sh RUN                       est_high 1.2 (constant, XEST_HIGH)
+    tvr-xtrain-<s>        as_root   VPD_TVR_ROOT=explore/rl tvr_train.sh START RUN       est_high DERIVED (as train)
+    tvr-xeval-<s>-top|low as_root   VPD_TVR_ROOT=explore/rl tvr_eval.sh START top|low RUN est_high DERIVED (as eval)
+Explore payload: `env VPD_JOB_DEADLINE_S=<soft> [VPD_TVR_ROOT=explore/rl] timeout -k <kill> <outer> bash ...`.
+Explore guards (prepare, submit, in-job `guard`): as the pilot's (missing(), PAYLOAD_CONSTANTS, the trainer prefix,
+the prereg committed and clean and its block == pilot_cfg, the data shas incl. the tiers manifest, n_top, futility)
+plus: the start in EXPLORE_STARTS with a registry code, its checkpoint dir present and its processor read from that
+dir (no eval view, DECISIONS G18); the run_tvr harness code_sha256 starts with HARNESS_SHA256_PREFIX; exactly one
+section-17 row of 2026-11-12 in the prereg (XROW_NEEDLE); the tier files the job reads == tiers/v1/manifest.json
+files; train / eval: the newest explore smoke verdict (runs/explore/rl/smoke/<RUN>/smoke_verdict.json) PASS; eval:
+the xtrain adapters adapter-ok with the right init, meta start / seed 1001 / phase / data_sha256 (= the manifest's).
+Block budget (DECISIONS G18, the user's cap of this block): prepare / submit refuse (exit 2) when (ledger total
+spent - BLOCK_BASELINE_GPUH) + the est of the open ledger jobs + the new est_high > BLOCK_CAP_GPUH, printing the
+three numbers (RUN/prepared.json["block_budget"]); the round-200 check above applies too.  Merge parity in the
+explore evals is report only (DECISIONS G16 (1)): its json must exist for the served adapter; its pass is recorded,
+not judged (steps_check excuses merge_parity_<x> followed by merge_parity_<x>:report_only).
 """
 
 from __future__ import annotations
@@ -64,6 +88,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import fractions
+import hashlib
 import json
 import math
 import os
@@ -119,6 +144,23 @@ DATA_FILES = {  # pilot_cfg data.<key> -> the file it is the sha256 of (relative
     "bfs_eval500_sha256": "bfs/eval500_opt.json", "bfs_dev200_sha256": "bfs/dev200_opt.json",
     "floors_eval500_sha256": "floors/floors_eval500.json"}
 DROP_REASONS = ("move_failed", "pose_mismatch", "no_stop", "stop_not_last", "final_not_target")
+
+# EXPLORATORY RL starts (PREREG section 17, row 2026-11-12; DECISIONS G18); see the module docstring
+EXPLORE_STARTS = ("Q3RD", "Q3RS150")
+XRL_ROOT = "explore/rl"      # the explore payloads' VPD_TVR_ROOT: outputs under OUT/tvr/runs/explore/rl/<S>
+XRL_PREFIX = "xrl"           # explore eval dirs <root>/<S>/evals/xrl__<S>__<tier>__<arm>
+HARNESS_SHA256_PREFIX = "64edd575f36b"   # run_tvr.code_sha256() of the pilot evals (the registered harness)
+XROW_DATE = "2026-11-12"
+XROW_NEEDLE = "两个 RL 起点按试点完全相同的配方训练和评测"
+BLOCK_BASELINE_GPUH = 48.5136   # ledger total spent when this block started (DECISIONS G18)
+BLOCK_CAP_GPUH = 25.0           # the user's cap of this block (DECISIONS G18): above it, stop and ask
+# tvr-xsmoke (both starts, one job): per start ~1,290 s typical (bf16 load + save 150, dry 45, HF parity 45, raw
+# session 330, train 110, merge 150, merge parity 160, merged smoke4 session 300; tvr-msmoke / tvr-cal step times),
+# ~1,815 s with the calibration's slowest vLLM start (505 s) and merge (186 s): 2 x 1,815 s + 300 + 180 -> 1.2 GPU-h
+XEST_HIGH = {"tvr-xsmoke": 1.2}
+XSMOKE_LIMIT, XSMOKE_EPOCHS = 16, 1   # the smoke trains the first 16 0W demos for one epoch (the trainer has no step
+XSMOKE_STEPS = 2                      # cap): ceil(16 x 1 / 8) = 2 optimizer steps
+XSMOKE_RAW_SET, XSMOKE_MERGED_SET = "smoke8", "smoke4"
 
 
 class Refused(SystemExit):
@@ -201,6 +243,40 @@ class Layout:
     def canary(self, s: str, part: str) -> Path:
         return self.start_dir(s) / "canary" / part / "render_parity.json"
 
+    # EXPLORATORY RL starts (runs/explore/rl; never runs/pilot)
+    @property
+    def xroot(self) -> Path:
+        return self.runs / "explore" / "rl"
+
+    @property
+    def xsmoke_root(self) -> Path:
+        return self.xroot / "smoke"
+
+    def x_shared_parents(self) -> List[Path]:
+        return [self.runs, self.runs / "explore", self.xroot, self.xsmoke_root] + [self.xroot / s
+                                                                                   for s in EXPLORE_STARTS]
+
+    def xsmoke_dir(self, run) -> Path:
+        return self.xsmoke_root / Path(run).name
+
+    def xstart_dir(self, s: str) -> Path:
+        return self.xroot / s
+
+    def xadapter(self, s: str, tier: str) -> Path:
+        return self.xstart_dir(s) / "adapters" / tier
+
+    def xeval_name(self, s: str, tier: str, arm: str) -> str:
+        return f"{XRL_PREFIX}__{s}__{tier}__{arm}"
+
+    def xeval_dir(self, s: str, tier: str, arm: str) -> Path:
+        return self.xstart_dir(s) / "evals" / self.xeval_name(s, tier, arm)
+
+    def xparity(self, s: str, tier: str) -> Path:
+        return self.xstart_dir(s) / "parity" / f"merge_{tier}.json"
+
+    def xcanary(self, s: str, part: str) -> Path:
+        return self.xstart_dir(s) / "canary" / part / "render_parity.json"
+
 
 LAYOUT = Layout()
 
@@ -228,9 +304,30 @@ def _jobs() -> Dict[str, dict]:
 JOBS = _jobs()
 
 
+def _xjobs() -> Dict[str, dict]:
+    """The EXPLORATORY RL jobs (DECISIONS G18); "base" = the pilot_cfg REQUIRED entry missing() checks."""
+    j = {"tvr-xsmoke": {"name": "vpd-tvr-xsmoke", "script": "tvr_xsmoke.sh", "as_root": True, "kind": "xsmoke",
+                        "start": None, "part": None, "base": "tvr-msmoke"}}
+    for s in EXPLORE_STARTS:
+        sl = s.lower()
+        j[f"tvr-xtrain-{sl}"] = {"name": f"vpd-tvr-xtrain-{sl}", "script": "tvr_train.sh", "as_root": True,
+                                 "kind": "xtrain", "start": s, "part": None, "base": "tvr-train"}
+        for part in ("top", "low"):
+            j[f"tvr-xeval-{sl}-{part}"] = {"name": f"vpd-tvr-xeval-{sl}-{part}", "script": "tvr_eval.sh",
+                                           "as_root": True, "kind": "xeval", "start": s, "part": part,
+                                           "base": "tvr-eval"}
+    return j
+
+
+XJOBS = _xjobs()
+KILL_S["tvr-xsmoke"] = 60  # a smoke (PREREG section 16: kill window 60 s for data and smoke jobs)
+
+
 def job_spec(job: str) -> dict:
+    if job in XJOBS:
+        return XJOBS[job]
     if job not in JOBS:
-        raise Refused(f"unknown job {job!r}; one of {sorted(JOBS)}")
+        raise Refused(f"unknown job {job!r}; one of {sorted(JOBS)} or the explore jobs {sorted(XJOBS)}")
     return JOBS[job]
 
 
@@ -262,8 +359,11 @@ def payload_for(job: str, run, est_high: float, cfg=None) -> List[str]:
         args.append(spec["start"])
     if spec["part"]:
         args.append(spec["part"])
-    return (["env", f"VPD_JOB_DEADLINE_S={t['soft_deadline_s']}", "timeout", "-k", str(t["kill_s"]),
-             str(t["outer_s"]), "bash", str(JOBS_DIR / spec["script"])] + args + [str(run)])
+    env = ["env", f"VPD_JOB_DEADLINE_S={t['soft_deadline_s']}"]
+    if spec["kind"] in ("xtrain", "xeval"):  # the explore output root of tvr_train.sh / tvr_eval.sh
+        env.append(f"VPD_TVR_ROOT={XRL_ROOT}")
+    return (env + ["timeout", "-k", str(t["kill_s"]),
+                   str(t["outer_s"]), "bash", str(JOBS_DIR / spec["script"])] + args + [str(run)])
 
 
 # --- runs ---------------------------------------------------------------------------------------------------
@@ -518,6 +618,8 @@ def adapters_problems(start: str, L: Layout, cfg=None) -> List[str]:
 def prerequisites(job: str, L: Layout = None, cfg=None, in_job: bool = False) -> List[str]:
     """Problems that block preparing / submitting `job` (in_job: the job's own guard step); [] = ready."""
     L = L or LAYOUT
+    if job in XJOBS:
+        return x_prerequisites(job, L, cfg, in_job)
     spec = job_spec(job)
     kind = spec["kind"]
     bad = [f"pilot_cfg value missing for {job}: {k}" for k in pilot_cfg.missing(job, cfg)]
@@ -653,7 +755,9 @@ def est_high(job: str, L: Layout = None, cfg=None) -> dict:
     spec = job_spec(job)
     if job in EST_HIGH:
         return {"est_high": EST_HIGH[job], "rule": "constant (CONTRACT 7)"}
-    if spec["kind"] == "train":
+    if job in XEST_HIGH:
+        return {"est_high": XEST_HIGH[job], "rule": "constant (explore smoke; pilot_tvr XEST_HIGH)"}
+    if spec["kind"] in ("train", "xtrain"):  # the explore starts: the same start-independent section-16 rules
         return derived_train(spec["start"], L, cfg)
     return derived_eval(spec["start"], spec["part"], L, cfg)
 
@@ -689,6 +793,8 @@ def prepare(job: str, pool: str = "zoetrope", new: bool = False, now=None, L: La
     from vpd import sco as vsco
 
     L = L or LAYOUT
+    if job in XJOBS:
+        return x_prepare(job, pool, new, now, L, cfg, events)
     spec = job_spec(job)
     parents = make_shared_parents(L)  # as the login user, before anything else (CONTRACT 5.3.1, E-M3)
     last = latest_run(job, L=L)
@@ -735,6 +841,8 @@ def submit(job: str, L: Layout = None, cfg=None, events=None) -> str:
     from vpd import sco as vsco
 
     L = L or LAYOUT
+    if job in XJOBS:
+        return x_submit(job, L, cfg, events)
     spec = job_spec(job)
     run = latest_run(job, ("prepared",), L)
     if run is None:
@@ -800,13 +908,13 @@ def delete(job: str, allow_incomplete: bool = False, L: Layout = None) -> str:
     return vsco.delete(run)
 
 
-def status(L: Layout = None) -> dict:
+def status(L: Layout = None, explore: bool = False) -> dict:
     from vpd import sco as vsco
 
     L = L or LAYOUT
     st = vsco.status(include_ended=True)
     runs = {}
-    for job in JOBS:
+    for job in (XJOBS if explore else JOBS):
         r = latest_run(job, L=L)
         if r is None:
             runs[job] = None
@@ -819,31 +927,42 @@ def status(L: Layout = None) -> dict:
             "runs": runs, "budget_tvr": st["budget"]["by_gate"][GATE]}
 
 
-def budget(L: Layout = None, cfg=None, events=None) -> dict:
+def budget(L: Layout = None, cfg=None, events=None, explore: bool = False) -> dict:
     from vpd import ledger
 
     L = L or LAYOUT
     events = ledger.read() if events is None else events
     rows = {}
-    for job in JOBS:
+    for job in (XJOBS if explore else JOBS):
         try:
             rows[job] = est_high(job, L, cfg)["est_high"]
         except (Refused, ValueError, KeyError) as e:
             rows[job] = f"not derivable yet: {getattr(e, 'message', e)}"[:200]
-    return {"round_budget": round_budget(0.0, events, cfg), "est_high": rows, "ledger": ledger.summarise(events)}
+    out = {"round_budget": round_budget(0.0, events, cfg), "est_high": rows, "ledger": ledger.summarise(events)}
+    if explore:
+        out["block_budget"] = block_budget(0.0, events)
+        out["est_high_total"] = round(sum(v for v in rows.values() if isinstance(v, float)), 3)
+    return out
 
 
-def plan(L: Layout = None, cfg=None, out=None) -> dict:
+def plan(L: Layout = None, cfg=None, out=None, explore: bool = False) -> dict:
     L = L or LAYOUT
     out = out or sys.stdout
     p = lambda *a: print(*a, file=out)  # noqa: E731
-    p(f"VPD TVR pilot plan ({utc()}); n_top {pilot_cfg.get('tiers.n_top', cfg)!r}")
+    if explore:
+        p(f"VPD TVR EXPLORATORY RL plan ({utc()}; PREREG section 17, {XROW_DATE}; DECISIONS G18); starts "
+          f"{list(EXPLORE_STARTS)}, outputs {L.xroot}; n_top {pilot_cfg.get('tiers.n_top', cfg)!r}")
+    else:
+        p(f"VPD TVR pilot plan ({utc()}); n_top {pilot_cfg.get('tiers.n_top', cfg)!r}")
     rows = {}
-    for job, spec in JOBS.items():
+    for job, spec in (XJOBS if explore else JOBS).items():
         try:
             e = est_high(job, L, cfg)
             pay = " ".join(payload_for(job, L.jobs / f"{job}-<yyyymmddHHMM>", e["est_high"], cfg))
             est = f"est_high {e['est_high']:.2f} GPU-h ({e['rule'][:60]})"
+            if explore:
+                t = job_timeouts(job, e["est_high"], cfg)
+                est += f", outer {t['outer_s']} s, soft {t['soft_deadline_s']} s, kill {t['kill_s']} s"
         except (Refused, ValueError, KeyError) as err:
             pay, est = "-", f"est_high not derivable yet ({str(getattr(err, 'message', err))[:120]})"
         last = latest_run(job, L=L)
@@ -861,6 +980,10 @@ def plan(L: Layout = None, cfg=None, out=None) -> dict:
         rb = round_budget(0.0, None, cfg)
         p(f"\nround budget: used {rb['round_used']:.2f} + open {rb['open_est']:.2f} = {rb['total']:.2f} of "
           f"{rb['cap']:.0f} GPU-h")
+        if explore:
+            bb = block_budget(0.0, None)
+            p(f"block budget: used {bb['block_used']:.4f} (ledger {bb['ledger_spent']:.4f} - {bb['baseline']}) + open "
+              f"{bb['open_est']:.2f} = {bb['total']:.2f} of {bb['cap']} GPU-h")
     except Exception as e:  # noqa: BLE001  (an unreadable ledger must not hide the plan)
         p(f"\nround budget: unreadable ({e!r})")
     return rows
@@ -888,6 +1011,8 @@ def read_steps(run: Path) -> List[dict]:
 
 
 def required_steps(job: str, cfg=None) -> List[str]:
+    if job in XJOBS:
+        return x_required_steps(job, cfg)
     spec = job_spec(job)
     kind, s = spec["kind"], spec["start"]
     if kind == "data":
@@ -918,15 +1043,20 @@ def required_steps(job: str, cfg=None) -> List[str]:
 
 
 def steps_check(job: str, run: Path, cfg=None) -> dict:
-    """Every recorded step rc 0 (a failed X is excused by a later X_fallback with rc 0, the cal's O9 retry) and every
-    required step recorded (NAME or NAME:<suffix>, e.g. NAME:skip)."""
+    """Every recorded step rc 0 (a failed X is excused by a later X_fallback with rc 0, the cal's O9 retry; in an
+    explore job a failed merge_parity_X by a later merge_parity_X:report_only with rc 0, the report-only merge parity
+    of DECISIONS G16 (1)) and every required step recorded (NAME or NAME:<suffix>, e.g. NAME:skip)."""
     steps = read_steps(run)
     names = [str(s.get("name")) for s in steps]
     failed = []
+    explore = job in XJOBS
     for i, s in enumerate(steps):
         if s.get("rc") != 0:
             n = str(s.get("name"))
             if any(str(t.get("name")) == n + "_fallback" and t.get("rc") == 0 for t in steps[i + 1:]):
+                continue
+            if explore and n.startswith("merge_parity_") and ":" not in n and any(
+                    str(t.get("name")) == n + ":report_only" and t.get("rc") == 0 for t in steps[i + 1:]):
                 continue
             failed.append(n)
     absent = [r for r in required_steps(job, cfg)
@@ -975,6 +1105,8 @@ def expect_items(job: str, run: Path, L: Layout = None, cfg=None, files_only: bo
     name a file (for collect)."""
     L = L or LAYOUT
     run = Path(run)
+    if job in XJOBS:
+        return x_expect_items(job, run, L, cfg, files_only)
     spec = job_spec(job)
     kind, s, part = spec["kind"], spec["start"], spec["part"]
     out: List[dict] = []
@@ -1101,6 +1233,8 @@ def guard(job: str, run: Path, L: Layout = None, cfg=None) -> dict:
     L = L or LAYOUT
     bad = prerequisites(job, L, cfg, in_job=True)
     facts = {}
+    if job in XJOBS:
+        facts.update(x_facts())
     if job_spec(job)["kind"] == "data":
         repo = paths.TVR_REPO
         for rel, want in pilot_cfg.get("tvrbench.files_sha256", cfg).items():
@@ -1311,29 +1445,517 @@ def cal_decide(cal_root: Path, L: Layout = None, cfg=None, floors_path: Optional
     return out
 
 
+# --- EXPLORATORY RL starts (PREREG section 17, row 2026-11-12; DECISIONS G18) ------------------------------------
+
+def harness_sha256() -> str:
+    from vpd.tvr import run_tvr
+
+    return run_tvr.code_sha256()["code_sha256"]
+
+
+def harness_problems() -> List[str]:
+    got = harness_sha256()
+    return [] if got.startswith(HARNESS_SHA256_PREFIX) else [
+        f"run_tvr harness code_sha256 {got[:12]} != the pilot evals' {HARNESS_SHA256_PREFIX} (a run_tvr CODE_FILE "
+        "changed: the explore evals would not use the registered harness)"]
+
+
+def x_start_problems(s: str) -> List[str]:
+    """An explore start: in EXPLORE_STARTS (never a pilot start), a registry code, its checkpoint dir, and the
+    processor read from that dir (no eval view: DECISIONS G18 registered the checkpoint's processor files)."""
+    from vpd import starts
+
+    if s not in EXPLORE_STARTS or s in STARTS:
+        return [f"start {s!r} is not one of the explore starts {list(EXPLORE_STARTS)}"]
+    try:
+        e = starts.resolve(s)
+    except KeyError as err:
+        return [f"start {s}: {err}"]
+    bad = []
+    if not e.get("code"):
+        bad.append(f"start {s}: no registry code in vpd/starts.json (the served model name)")
+    ck = Path(e["path"])
+    if not os.path.lexists(ck / "config.json"):
+        bad.append(f"start {s}: {ck}/config.json missing")
+    pdir = Path(starts.processor_dir(s))
+    if pdir != ck:
+        bad.append(f"start {s}: the processor would be read from {pdir}, not the checkpoint dir {ck} (DECISIONS G18 "
+                   "registered the checkpoint's processor files; an eval view was built since?): stop and ask")
+    return bad
+
+
+def xrow(text: str) -> Optional[str]:
+    """The single section-17 row of 2026-11-12 registering the explore RL starts (None unless exactly one)."""
+    rows = [ln for ln in text.splitlines() if ln.startswith(f"| {XROW_DATE} |") and XROW_NEEDLE in ln]
+    return rows[0] if len(rows) == 1 else None
+
+
+def xrow_problems() -> List[str]:
+    try:
+        text = prereg_path().read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    return [] if xrow(text) is not None else [
+        f"{PREREG} has no single section-17 row '| {XROW_DATE} | ... {XROW_NEEDLE} ...' (the registration of the "
+        "explore RL starts)"]
+
+
+def tier_manifest_files(L: Layout) -> dict:
+    return (read_json(L.tiers / "manifest.json") or {}).get("files") or {}
+
+
+def tier_file_problems(L: Layout, names) -> List[str]:
+    """Every tier file the job reads == its sha256 in tiers/v1/manifest.json (whose own sha256 is
+    data.tiers_manifest_sha256, checked by data_problems)."""
+    files = tier_manifest_files(L)
+    bad = []
+    for name in names:
+        p = L.tiers / name
+        want, got = files.get(name), (sha256_file(p) if p.is_file() else None)
+        if want is None or got != want:
+            bad.append(f"{p}: sha256 {str(got)[:12]} != tiers manifest {str(want)[:12]}")
+    return bad
+
+
+def x_adapter_check(s: str, tier: str, init: Optional[str], L: Layout, cfg=None,
+                    adapter_root: Optional[Path] = None) -> Tuple[int, str]:
+    """adapter_check of an explore adapter (complete, current trainer code, from INIT/adapter.pt as it is now) plus its
+    meta: start, seed 1001, phase, data_sha256 == the tiers manifest's (L.tiers); 0W from the fresh LoRA, 100 / TOP
+    from this start's 0W.  Adapters under adapter_root/<S>/adapters (default L.xroot).  (0, ok) or (rc, why)."""
+    ar = Path(adapter_root) if adapter_root is not None else L.xroot
+    d = ar / s / "adapters" / tier
+    rc, msg = adapter_check(d, None if init is None else ar / s / "adapters" / init)
+    if rc != 0:
+        return rc, msg
+    m = read_json(d / "meta.json") or {}
+    want = {"start": s, "seed": int(pilot_cfg.SEED), "phase": PHASE[tier],
+            "data_sha256": tier_manifest_files(L).get(TIER_FILE[tier])}
+    bad = [f"meta {k} {m.get(k)!r} != {v!r}" for k, v in want.items() if m.get(k) != v or v is None]
+    ia = m.get("init_adapter")
+    if init is None and ia is not None:
+        bad.append(f"init_adapter {(ia or {}).get('dir')!r}, but {tier} starts from the fresh LoRA")
+    if init is not None and (ia or {}).get("start") != s:
+        bad.append(f"init_adapter start {(ia or {}).get('start')!r} != {s!r}")
+    return (1, f"{d}: " + "; ".join(bad)) if bad else (0, msg)
+
+
+def x_adapters_problems(s: str, L: Layout, cfg=None) -> List[str]:
+    bad = []
+    for tier, init in train_tiers(s, cfg):
+        rc, msg = x_adapter_check(s, tier, init, L, cfg)
+        if rc != 0:
+            bad.append(f"adapter {s}/{tier}: {msg}")
+    return bad
+
+
+def xsmoke_verdicts(L: Layout = None) -> List[Path]:
+    L = L or LAYOUT
+    if not L.xsmoke_root.is_dir():
+        return []
+    return sorted((p / "smoke_verdict.json" for p in L.xsmoke_root.iterdir()
+                   if (m := STAMP_RE.match(p.name)) and m.group("job") == "tvr-xsmoke"
+                   and (p / "smoke_verdict.json").is_file()), key=lambda p: p.parent.name)
+
+
+def latest_xverdict(L: Layout = None) -> Tuple[Optional[Path], Optional[dict]]:
+    vs = xsmoke_verdicts(L)
+    return (vs[-1], read_json(vs[-1])) if vs else (None, None)
+
+
+def x_prerequisites(job: str, L: Layout = None, cfg=None, in_job: bool = False) -> List[str]:
+    """Problems that block an explore job (see the module docstring); [] = ready."""
+    L = L or LAYOUT
+    spec = XJOBS[job]
+    kind, s = spec["kind"], spec["start"]
+    bad = [f"pilot_cfg value missing for {job}: {k}" for k in pilot_cfg.missing(spec["base"], cfg)]
+    bad += payload_constant_problems(cfg)
+    bad += trainer_problems(cfg)
+    bad += harness_problems()
+    for st in ([s] if s else list(EXPLORE_STARTS)):
+        bad += x_start_problems(st)
+    bad += prereg_problems(in_job, cfg)
+    bad += xrow_problems()
+    bad += data_problems(L, cfg)
+    bad += n_top_problems(L, cfg)
+    if kind in ("xsmoke", "xtrain"):
+        bad += futility_problems(L)
+    if any(b.startswith("pilot_cfg value missing") for b in bad):
+        return bad
+    if kind == "xsmoke":
+        bad += tier_file_problems(L, ("parity3.jsonl", TIER_FILE["0W"]))
+    else:
+        bad += tier_file_problems(L, [TIER_FILE[t] for t, _ in train_tiers(s, cfg)])
+    if kind in ("xtrain", "xeval"):
+        vp, v = latest_xverdict(L)
+        if v is None:
+            bad.append(f"no smoke_verdict.json under {L.xsmoke_root} (job tvr-xsmoke)")
+        elif v.get("verdict") != "PASS":
+            bad.append(f"{vp}: verdict {v.get('verdict')!r}, not PASS ({', '.join(v.get('failed') or [])})")
+    if kind == "xeval":
+        bad += x_adapters_problems(s, L, cfg)
+    return bad
+
+
+def block_budget(new_est: float, events=None) -> dict:
+    """This block's spend (DECISIONS G18): (ledger total spent - BLOCK_BASELINE_GPUH) + est of the open ledger jobs +
+    new <= BLOCK_CAP_GPUH."""
+    from vpd import ledger
+
+    events = ledger.read() if events is None else events
+    spent = float(ledger.summarise(events)["total"]["spent"])
+    open_est = sum(float(j.get("est") or 0.0) for j in ledger.fold(events).values() if ledger.is_open(j))
+    used = spent - BLOCK_BASELINE_GPUH
+    total = used + open_est + float(new_est)
+    return {"ledger_spent": round(spent, 4), "baseline": BLOCK_BASELINE_GPUH, "block_used": round(used, 4),
+            "open_est": round(open_est, 4), "new_est_high": round(float(new_est), 4), "total": round(total, 4),
+            "cap": BLOCK_CAP_GPUH, "ok": total <= BLOCK_CAP_GPUH + 1e-9}
+
+
+def make_x_shared_parents(L: Layout) -> List[str]:
+    out = []
+    for d in L.x_shared_parents():
+        d.mkdir(parents=True, exist_ok=True)
+        out.append(str(d))
+    return out
+
+
+def x_facts() -> dict:
+    from vpd.train import n2_train_vpd as T
+
+    try:
+        row = xrow(prereg_path().read_text(encoding="utf-8"))
+    except OSError:
+        row = None
+    return {"explore": True, "harness_code_sha256": harness_sha256(),
+            "trainer_code_sha256": T.code_fingerprint()["code_sha256"],
+            "prereg_row_sha256": None if row is None else hashlib.sha256(row.encode()).hexdigest()}
+
+
+def _budget_checks(job: str, hi: float, events, cfg) -> Tuple[dict, dict]:
+    from vpd import ledger
+
+    events = ledger.read() if events is None else events
+    rb = round_budget(hi, events, cfg)
+    print(f"[pilot_tvr] round budget: used {rb['round_used']:.2f} + open {rb['open_est']:.2f} + new "
+          f"{rb['new_est_high']:.2f} = {rb['total']:.2f} GPU-h vs cap {rb['cap']:.0f}", file=sys.stderr)
+    bb = block_budget(hi, events)
+    print(f"[pilot_tvr] block budget: used {bb['block_used']:.4f} + open {bb['open_est']:.4f} + new "
+          f"{bb['new_est_high']:.4f} = {bb['total']:.4f} GPU-h vs cap {bb['cap']}", file=sys.stderr)
+    if not rb["ok"]:
+        raise Refused(f"ROUND BUDGET: round_used {rb['round_used']:.2f} + open {rb['open_est']:.2f} + new "
+                      f"{rb['new_est_high']:.2f} = {rb['total']:.2f} > {rb['cap']} GPU-h (brief 2C: the round stops)")
+    if not bb["ok"]:
+        raise Refused(f"BLOCK BUDGET: block_used {bb['block_used']:.4f} + open {bb['open_est']:.4f} + new "
+                      f"{bb['new_est_high']:.4f} = {bb['total']:.4f} > {bb['cap']} GPU-h (DECISIONS G18: the "
+                      f"user's cap of this block; {job} not prepared: stop and ask)")
+    return rb, bb
+
+
+def x_prepare(job: str, pool: str = "zoetrope", new: bool = False, now=None, L: Layout = None, cfg=None,
+              events=None) -> Path:
+    from vpd import sco as vsco
+
+    L = L or LAYOUT
+    spec = XJOBS[job]
+    parents = make_x_shared_parents(L)  # as the login user, before anything else (never runs/pilot)
+    last = latest_run(job, L=L)
+    if last is not None:
+        st = run_state(last)
+        if st == "prepared" and not new:
+            raise Refused(f"{last} is prepared and not submitted: submit it, or pass --new for another run dir")
+        if st == "uncertain":
+            raise Refused(f"{last}: an earlier create is uncertain; run `python -m vpd.sco resolve --run {last}`")
+    led = job_in_ledger(job, events)
+    if led is not None and led.get("status") in ("submitted", "uncertain"):
+        raise Refused(f"{job} is open in the ledger ({led.get('pt_id')}, {led['run']})")
+    bad = x_prerequisites(job, L, cfg)
+    if bad:
+        raise Refused(f"{job} not ready:\n  - " + "\n  - ".join(bad))
+    est = est_high(job, L, cfg)
+    hi = est["est_high"]
+    t = job_timeouts(job, hi, cfg)
+    rb, bb = _budget_checks(job, hi, events, cfg)
+    run = L.jobs / f"{job}-{stamp(now)}"
+    if run.exists():
+        raise Refused(f"{run} exists (prepared twice in one minute?)")
+    payload = payload_for(job, run, hi, cfg)
+    info = {"job": job, "utc": utc(), "exploratory": True, "est": est, "est_high": hi, "timeouts": t,
+            "payload": payload, "round_budget": rb, "block_budget": bb, "shared_parents": parents,
+            "as_root": spec["as_root"], "pool": pool, "prereg": prereg_state(), "facts": x_facts()}
+    if spec["kind"] in ("xtrain", "xeval"):
+        vp, v = latest_xverdict(L)
+        info["smoke_verdict"] = {"path": str(vp), "sha256": sha256_file(vp), "verdict": v.get("verdict")}
+    if L.cal_decision.is_file():
+        info["cal_decision"] = {"path": str(L.cal_decision), "sha256": sha256_file(L.cal_decision)}
+    launch = vsco.prepare(run, spec["name"], payload, pool=pool, as_root=spec["as_root"], est_gph=hi, gate=GATE)
+    write_json(run / "prepared.json", info)
+    return Path(launch)
+
+
+def x_submit(job: str, L: Layout = None, cfg=None, events=None) -> str:
+    from vpd import sco as vsco
+
+    L = L or LAYOUT
+    run = latest_run(job, ("prepared",), L)
+    if run is None:
+        raise Refused(f"no prepared, unsubmitted run of {job}: run `pilot_tvr prepare {job}` first")
+    newer = latest_run(job, L=L)
+    if newer != run:
+        raise Refused(f"the newest run of {job} is {newer} ({run_state(newer)}), not the prepared {run}")
+    bad = x_prerequisites(job, L, cfg)
+    if bad:
+        raise Refused(f"{job} not ready:\n  - " + "\n  - ".join(bad))
+    info = read_json(run / "prepared.json") or {}
+    ps = prereg_state()
+    if (info.get("prereg") or {}).get("commit") != ps["commit"]:
+        raise Refused(f"{PREREG} commit changed since prepare ({(info.get('prereg') or {}).get('commit')} -> "
+                      f"{ps['commit']}): prepare again")
+    _budget_checks(job, float(info.get("est_high") or 0.0), events, cfg)
+    return vsco.submit(run)
+
+
+def x_required_steps(job: str, cfg=None) -> List[str]:
+    spec = XJOBS[job]
+    kind, s = spec["kind"], spec["start"]
+    if kind == "xsmoke":
+        out = ["guard", "prereg_committed", "merge_disk"]
+        for st in EXPLORE_STARTS:
+            out += [f"{x}_{st}" for x in ("load", "dry", "hfparity", "session", "train", "merge", "merge_parity",
+                                          "eval")]
+        return out + ["verdict"]
+    if kind == "xtrain":
+        return ["guard", "prereg_committed"] + [f"train_{t}" for t, _ in train_tiers(s, cfg)]
+    out = ["guard", "prereg_committed", "merge_disk", "canary_replay", "canary_parity"]
+    tiers = []
+    for tier, _arm in eval_plan(s, spec["part"], cfg):
+        if tier not in tiers:
+            tiers.append(tier)
+    for tier in tiers:
+        out += [f"merge_{tier}", f"merge_parity_{tier}", f"eval_{tier}"]
+    return out + [f"official_{tier}_{arm}" for tier, arm in eval_plan(s, spec["part"], cfg)]
+
+
+def x_parity_reported(path: Path, adapter_dir: Path) -> Tuple[bool, dict]:
+    """The explore merge parity (report only, DECISIONS G16 (1)): ok iff its json exists for the adapter as it is now
+    (parity_state 0 or 4); its pass and numbers are recorded, not judged."""
+    rc, msg = parity_state(path, adapter_dir)
+    rep = read_json(path) or {}
+    return rc in (0, 4), {"parity_ok_rc": rc, "msg": msg, "pass_reported_not_judged": rep.get("pass"),
+                          "mean_abs_dce": rep.get("mean_abs_dce"), "reply_agreement": rep.get("reply_agreement"),
+                          "n_replies": rep.get("n_replies"), "n_demos": rep.get("n_demos")}
+
+
+def x_expect_items(job: str, run: Path, L: Layout, cfg=None, files_only: bool = False) -> List[dict]:
+    spec = XJOBS[job]
+    kind, s, part = spec["kind"], spec["start"], spec["part"]
+    out: List[dict] = []
+    if kind == "xsmoke":
+        v = read_json(L.xsmoke_dir(run) / "smoke_verdict.json")
+        out.append(_chk("smoke_verdict", bool(v) and v.get("verdict") == "PASS",
+                        None if not v else {"verdict": v.get("verdict"), "failed": v.get("failed")},
+                        L.xsmoke_dir(run) / "smoke_verdict.json"))
+    elif kind == "xtrain":
+        for tier, init in train_tiers(s, cfg):
+            if files_only:
+                out.append(_chk(f"adapter_{tier}", True, None, L.xadapter(s, tier) / "adapter.pt"))
+                continue
+            rc, msg = x_adapter_check(s, tier, init, L, cfg)
+            out.append(_chk(f"adapter_{tier}", rc == 0, msg, L.xadapter(s, tier) / "adapter.pt"))
+    else:  # xeval
+        ok, det = _rp_pass(L.xcanary(s, part))
+        out.append(_chk(f"canary_{part}", ok, det, L.xcanary(s, part)))
+        seen = []
+        for tier, arm in eval_plan(s, part, cfg):
+            ad = L.xadapter(s, EVAL_ADAPTER[tier])
+            if tier not in seen:
+                seen.append(tier)
+                ok, det = x_parity_reported(L.xparity(s, tier), ad)
+                out.append(_chk(f"merge_parity_{tier}", ok, det, L.xparity(s, tier)))
+            d = L.xeval_dir(s, tier, arm)
+            ok, det = _valid_results(d, EVAL500_N)
+            if ok and not files_only:
+                rc, msg = eval_check(d, ad)
+                ok, det = rc == 0, dict(det, adapter=msg)
+            out.append(_chk(f"eval_{tier}_{arm}", ok, det, d / "results.json"))
+            oc = read_json(d / "official_check.json")
+            out.append(_chk(f"official_{tier}_{arm}", bool(oc) and oc.get("equal") is True, oc,
+                            d / "official_check.json"))
+    if files_only:
+        return [c for c in out if c.get("path")]
+    return out
+
+
+# --- explore smoke verdict (in-job; mechanism only, never a success field) --------------------------------------
+
+def _session_checks(ev: Path, name: str, arms, n: int, cfg=None) -> Tuple[List[Tuple[str, bool, object]], dict]:
+    """The pilot smoke's mechanism checks of one run_tvr session (smoke_verdict's runs / regex / u_arm / audit /
+    renderer) on EV/<name>__<arm>; [(check, ok, detail)], measured perf.  Reads only valid, n_tasks, tasks_missing,
+    invalid, audit, renderer, perf."""
+    grid = list(pilot_cfg.get("protocol.image_grid", cfg))
+    tok = int(pilot_cfg.get("protocol.image_tokens", cfg))
+    prof = pilot_cfg.get("render.lvp_profile", cfg)
+    font = pilot_cfg.get("render.badge_font_sha256", cfg)
+    lp = pilot_cfg.get("render.lp_threads", cfg)
+    res = {a: _results(ev / f"{name}__{a}") for a in arms}
+    out = []
+    bad = []
+    for a, r in res.items():
+        if r is None:
+            bad.append(f"{a}: no results.json")
+        elif r.get("valid") is not True or r.get("tasks_missing") or r.get("n_tasks") != n:
+            bad.append(f"{a}: valid {r.get('valid')}, n_tasks {r.get('n_tasks')}, missing "
+                       f"{(r.get('tasks_missing') or [])[:3]}")
+    out.append(("runs", not bad, bad))
+    bad = []
+    for a in [x for x in arms if x in ("c", "blind")]:
+        inv = (res[a] or {}).get("invalid") or {}
+        if not (inv.get("regex_mismatch") == 0 and (inv.get("replies") or 0) > 0):
+            bad.append({a: {"regex_mismatch": inv.get("regex_mismatch"), "replies": inv.get("replies")}})
+    out.append(("regex", not bad, bad))
+    if "u" in arms:
+        inv_u = (res["u"] or {}).get("invalid") or {}
+        rate = None
+        if inv_u.get("replies"):
+            rate = round(1 - (inv_u.get("unparseable_steps") or 0) / inv_u["replies"], 4)
+        out.append(("u_arm", res["u"] is not None, {"parse_rate": rate, "judged": False}))
+    bad = []
+    for a in [x for x in arms if x in IMAGE_ARMS]:
+        au = (res[a] or {}).get("audit") or {}
+        pp = (au.get("prompt_parity") or {}).get("equal")
+        it = au.get("image_tokens") or {}
+        tpi = it.get("tokens_per_image")
+        tpi = list(tpi) if isinstance(tpi, (list, tuple)) else [tpi]
+        gs = [list(g) for g in it.get("grid_set") or []]
+        if pp is not True or tpi != [tok] or gs != [grid]:
+            bad.append({a: {"prompt_parity": pp, "tokens_per_image": tpi, "grid_set": gs}})
+    out.append(("audit", not bad, bad))
+    bad = []
+    for a in [x for x in arms if x in IMAGE_ARMS]:
+        rr = (res[a] or {}).get("renderer") or {}
+        got = {"profile": rr.get("profile"), "font_sha256": rr.get("font_sha256"), "lp": rr.get("lp")}
+        wp = worker_problems(rr, cfg)
+        if got != {"profile": prof, "font_sha256": font, "lp": lp} or prof is None or lp is None or wp:
+            bad.append({a: dict(got, workers_ok=rr.get("workers_ok"), workers=wp[:5])})
+    out.append(("renderer", not bad, bad))
+    bad = [{a: str((r or {}).get("code_sha256"))[:12]} for a, r in res.items()
+           if not str((r or {}).get("code_sha256") or "").startswith(HARNESS_SHA256_PREFIX)]
+    out.append(("harness", not bad, bad or HARNESS_SHA256_PREFIX))
+    measured = {a: {k: ((res[a] or {}).get("perf") or {}).get(k) for k in (
+        "steps_per_s", "vllm_ready_s", "max_images_per_request", "max_prompt_tokens", "cgroup_cores_max")}
+        for a in arms}
+    return out, {"res": res, "measured": measured}
+
+
+def _finite(x) -> bool:
+    return _num(x) is not None
+
+
+def xsmoke_verdict(smoke: Path, L: Layout = None, cfg=None) -> dict:
+    """SMOKE/smoke_verdict.json of tvr-xsmoke (EXPLORATORY; DECISIONS G18): PASS iff every mechanism check passes.
+    Per explore start S (SMOKE/S/): load (the bf16 conversion of the trainer's loader, load/load.json), dry run (grid
+    [1,22,40], 222 tokens per image), HF parity, vLLM prompt parity and the pilot smoke's session checks on the raw
+    start (smoke8: c, u, blind), the smoke training (meta: XSMOKE_STEPS optimizer steps of the first XSMOKE_LIMIT 0W
+    demos, seed 1001, current trainer code, the manifest's 0W sha), the merge (merge_parity's record of
+    vpd_merge.json: every wrapped module merged, from this adapter), merge parity (report only: it ran on this
+    adapter; its pass is recorded, never judged), and the merged smoke4 c session (vLLM prompt parity, session
+    checks, the served adapter).  Never reads a success / SR field (run_tvr --mechanism-only also nulls them)."""
+    L = L or LAYOUT
+    smoke = Path(smoke)
+    checks, measured = [], {}
+    raw_n = len(pilot_cfg.CATEGORIES) * int(pilot_cfg.get("dev.smoke_per_category", cfg))
+    merged_n = SHAKE_N
+    prefix = pilot_cfg.get("recipe.trainer_code_sha256_prefix", cfg)
+    w0 = tier_manifest_files(L).get(TIER_FILE["0W"])
+    for s in EXPLORE_STARTS:
+        sd = smoke / s
+        ld = read_json(sd / "load" / "load.json")
+        checks.append(_chk(f"load_{s}", bool(ld) and ld.get("ok") is True, None if not ld else {
+            k: ld.get(k) for k in ("ok", "problems", "dtype", "attn_sites", "processor_dir", "checkpoint_dtypes",
+                                   "tensor_checks_ok", "seconds")}))
+        dry = read_json(sd / "dry" / "dry_run.json")
+        ok, det = (False, "missing") if dry is None else dry_grid_ok(dry, cfg)
+        checks.append(_chk(f"dry_{s}", ok, det))
+        par = read_json(sd / "dry" / "parity.json")
+        checks.append(_chk(f"hfparity_{s}", bool(par) and par.get("verdict") == "PASS",
+                           None if not par else {"verdict": par.get("verdict"), "problems": par.get("problems")}))
+        ev = sd / "evals"
+        vp = read_json(ev / f"smoke__{s}__raw__vllm_parity.json")
+        checks.append(_chk(f"vllm_parity_{s}", bool(vp) and vp.get("equal") is True,
+                           None if not vp else {"equal": vp.get("equal"), "n": vp.get("n")}))
+        raw, rinfo = _session_checks(ev, f"smoke__{s}__raw", ARMS_TOP, raw_n, cfg)
+        for name, ok, det in raw:
+            checks.append(_chk(f"{name}_{s}", ok, det))
+        ad = sd / "adapters" / "0W"
+        m = read_json(ad / "meta.json")
+        sha = sha256_file(ad / "adapter.pt") if (ad / "adapter.pt").is_file() else None
+        want = {"start": s, "seed": int(pilot_cfg.SEED), "phase": "0W", "optimizer_steps": XSMOKE_STEPS,
+                "optimizer_steps_planned": XSMOKE_STEPS, "conversations": XSMOKE_LIMIT, "epochs": XSMOKE_EPOCHS,
+                "data_sha256": w0, "attn": "sdpa", "init_adapter": None}
+        got = {k: (m or {}).get(k) for k in want}
+        tok = bool(m) and sha is not None and got == want and w0 is not None and str(
+            (m or {}).get("code_sha256") or "").startswith(prefix) and _finite((m or {}).get("loss_first")) and \
+            _finite((m or {}).get("loss_last"))
+        checks.append(_chk(f"train_{s}", tok, dict(got, adapter_sha256=sha, code_sha256=str(
+            (m or {}).get("code_sha256"))[:12], loss_finite=bool(m) and _finite(m.get("loss_first"))
+            and _finite(m.get("loss_last")))))
+        pj = sd / "parity" / "merge_0W.json"
+        pr = read_json(pj) or {}
+        mg = pr.get("merged") if isinstance(pr.get("merged"), dict) else {}
+        wrapped = ((m or {}).get("lora") or {}).get("wrapped")
+        mok = bool(mg) and sha is not None and mg.get("adapter_sha256") == sha and mg.get("start") == s and \
+            isinstance(wrapped, int) and mg.get("merged") == wrapped
+        checks.append(_chk(f"merge_{s}", mok, {"merged": mg.get("merged"), "wrapped": wrapped,
+                                                "adapter_sha256_equal": mg.get("adapter_sha256") == sha if mg else None,
+                                                "processor_src": mg.get("processor_src")}))
+        pok, pdet = x_parity_reported(pj, ad)
+        pok = pok and pr.get("n_demos") == int(pilot_cfg.get("gates.merge_parity.n_demos", cfg)) and \
+            _finite(pr.get("mean_abs_dce"))
+        checks.append(_chk(f"merge_parity_{s}", pok, pdet))
+        vm = read_json(ev / f"xsmoke__{s}__0W__vllm_parity.json")
+        checks.append(_chk(f"merged_vllm_parity_{s}", bool(vm) and vm.get("equal") is True,
+                           None if not vm else {"equal": vm.get("equal"), "n": vm.get("n")}))
+        mc, minfo = _session_checks(ev, f"xsmoke__{s}__0W", ("c",), merged_n, cfg)
+        for name, ok, det in mc:
+            checks.append(_chk(f"merged_{name}_{s}", ok, det))
+        served = ((minfo["res"].get("c") or {}).get("adapter") or {}).get("adapter_sha256")
+        checks.append(_chk(f"merged_served_{s}", sha is not None and served == sha,
+                           {"served_adapter_sha256": served, "adapter_sha256": sha}))
+        measured[s] = {"raw": rinfo["measured"], "merged": minfo["measured"]}
+    failed = [c["name"] for c in checks if not c["ok"]]
+    v = {"schema": "vpd.tvr.xsmoke_verdict/1", "exploratory": True, "utc": utc(), "smoke": str(smoke),
+         "starts": list(EXPLORE_STARTS), "verdict": "PASS" if not failed else "FAIL", "failed": failed,
+         "checks": checks, "measured": measured,
+         "note": "mechanism only: no success rate is read or reported; merge parity is reported, not judged"}
+    write_json(smoke / "smoke_verdict.json", v)
+    return v
+
+
 # --- CLI ----------------------------------------------------------------------------------------------------
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("plan")
+    all_jobs = sorted(JOBS) + sorted(XJOBS)  # the explore jobs (DECISIONS G18) after the pilot's
+    sub.add_parser("plan").add_argument("--explore", action="store_true", help="the EXPLORATORY RL jobs (XJOBS)")
     p = sub.add_parser("prepare")
-    p.add_argument("job", choices=sorted(JOBS))
+    p.add_argument("job", choices=all_jobs)
     p.add_argument("--pool", default="zoetrope", choices=("zoetrope", "h800", "auto"))
     p.add_argument("--new", action="store_true")
     for name in ("submit", "collect"):
-        sub.add_parser(name).add_argument("job", choices=sorted(JOBS))
-    sub.add_parser("status")
+        sub.add_parser(name).add_argument("job", choices=all_jobs)
+    sub.add_parser("status").add_argument("--explore", action="store_true")
     p = sub.add_parser("delete")
-    p.add_argument("job", choices=sorted(JOBS))
+    p.add_argument("job", choices=all_jobs)
     p.add_argument("--allow-incomplete", action="store_true")
-    sub.add_parser("budget")
+    sub.add_parser("budget").add_argument("--explore", action="store_true")
     sub.add_parser("data-fill")
     for name in ("expect", "guard"):
         p = sub.add_parser(name)
-        p.add_argument("job", choices=sorted(JOBS))
+        p.add_argument("job", choices=all_jobs)
         p.add_argument("--run", type=Path, required=True)
     p = sub.add_parser("smoke-verdict")
+    p.add_argument("--smoke", type=Path, required=True)
+    p = sub.add_parser("xsmoke-verdict")
     p.add_argument("--smoke", type=Path, required=True)
     p = sub.add_parser("cal-decide")
     p.add_argument("--cal-root", type=Path, required=True)
@@ -1341,20 +1963,20 @@ def main(argv=None) -> int:
     p = sub.add_parser("cfg")
     p.add_argument("keys", nargs="+")
     p = sub.add_parser("served")
-    p.add_argument("start", choices=STARTS)
+    p.add_argument("start", choices=STARTS + EXPLORE_STARTS)
     p = sub.add_parser("parity-ok")
     p.add_argument("file", type=Path)
     p.add_argument("--adapter", type=Path, required=True)
     args = ap.parse_args(argv)
     try:
         if args.cmd == "plan":
-            plan()
+            plan(explore=args.explore)
         elif args.cmd == "prepare":
             print(prepare(args.job, args.pool, args.new))
         elif args.cmd == "submit":
             print(submit(args.job))
         elif args.cmd == "status":
-            print(json.dumps(status(), indent=1, default=str))
+            print(json.dumps(status(explore=args.explore), indent=1, default=str))
         elif args.cmd == "collect":
             rep = collect(args.job)
             print(json.dumps({k: rep[k] for k in rep if k != "expected"}, indent=1, default=str))
@@ -1362,7 +1984,7 @@ def main(argv=None) -> int:
         elif args.cmd == "delete":
             print(delete(args.job, args.allow_incomplete))
         elif args.cmd == "budget":
-            print(json.dumps(budget(), indent=1, default=str))
+            print(json.dumps(budget(explore=args.explore), indent=1, default=str))
         elif args.cmd == "data-fill":
             rep = data_fill()
             print(json.dumps(rep, indent=1))
@@ -1379,6 +2001,10 @@ def main(argv=None) -> int:
             return 0 if rep["ok"] else 2
         elif args.cmd == "smoke-verdict":
             v = smoke_verdict(args.smoke)
+            print(json.dumps({"verdict": v["verdict"], "failed": v["failed"]}))
+            return 0 if v["verdict"] == "PASS" else 1
+        elif args.cmd == "xsmoke-verdict":
+            v = xsmoke_verdict(args.smoke)
             print(json.dumps({"verdict": v["verdict"], "failed": v["failed"]}))
             return 0 if v["verdict"] == "PASS" else 1
         elif args.cmd == "cal-decide":
