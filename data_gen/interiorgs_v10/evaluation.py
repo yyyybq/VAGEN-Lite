@@ -36,6 +36,12 @@ Experiment 3A (2026-11-06): ``run --turn-footprint-radius R`` evaluates under th
 One rule per result folder (a run resuming a folder with results must give its rule) and per set (``table`` refuses
 folders of different rules); under the rule each recorded turn also carries ``footprint_blocks``, its turns blocked by
 the robot-base footprint.
+
+Grounding probe (the user's supplement of 2026-11-12, item 5): ``run --grounding-probe`` appends the probe instruction
+to every user turn (state the bearing and distance of the task's first object before the action), the env reads the
+answer without its ``<state>`` line, and each row carries ``grounding_turns`` (every turn's statement scored against the
+truth at the pose its frame was rendered from) and ``grounding`` (the episode's shares); grounding_probe.py has the
+definitions and the ``summary``.  One mode per result folder (model.json ``grounding_probe``); off, nothing changes.
 """
 
 from __future__ import annotations
@@ -331,6 +337,20 @@ def check_resume_rule(result: Path, switches: Dict[str, Any]) -> None:
                          f"{now!r}; one turn rule per result folder (give another --name)")
 
 
+def check_resume_probe(result: Path, on: bool) -> None:
+    """Grounding probe (2026-11-12, item 5): one mode per result folder.  A run resuming a folder whose results.jsonl
+    already has rows must give the mode of the folder's model.json (missing key: not a probe run), else it stops before
+    anything is written."""
+    results = Path(result) / "results.jsonl"
+    if not results.is_file() or not _jsonl(results, partial_ok=True):
+        return
+    model = Path(result) / "model.json"
+    before = bool(json.loads(model.read_text()).get("grounding_probe")) if model.is_file() else False
+    if before != bool(on):
+        raise SystemExit(f"{result}: its results were evaluated with grounding_probe {before}, this run gives {bool(on)};"
+                         " one mode per result folder (give another --name)")
+
+
 def gate_summary(metric: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """The success conditions not met at a pose (``failed_gates``) and the 0..1 progress toward success."""
     if not metric:
@@ -384,7 +404,7 @@ def call_seed(base: int, index: int, sample: int, turn: int) -> int:
 
 def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None,
                 history: bool = False, as_sft: bool = False, sample: Optional[int] = None,
-                seed: Optional[int] = None) -> Dict[str, Any]:
+                seed: Optional[int] = None, grounding: bool = False) -> Dict[str, Any]:
     """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py.
 
     With ``frames`` (round 8) the row also carries the trajectory: per turn the frame the model saw (a JPEG in
@@ -393,12 +413,16 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
     With ``history`` (round 9 switch) every model call also gets all earlier turns of the episode, as in SFT;
     with ``as_sft`` every message is passed through ``sft_text`` first.  ``sample`` / ``seed`` (round 11): the
     sample number of a sampled run and the base seed of its model calls (``call_seed``); frames are then named
-    <index>_s<sample>_<turn>.jpg."""
+    <index>_s<sample>_<turn>.jpg.  ``grounding`` (2026-11-12, item 5): the grounding probe (grounding_probe.py); the
+    user text the model saw (the probe instruction appended) is what the history and the trajectory keep."""
     obs, info = env.reset(seed=index)
     system = env.system_prompt()
     item = env.current_item or {}
     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
     done, trajectory, end_reason, earlier = False, [], None, []
+    probe_turns: List[Dict[str, Any]] = []
+    if grounding:
+        from data_gen.interiorgs_v10 import grounding_probe
     start = gate_summary(env._calculate_canonical_metric()) if frames is not None else None
 
     def keep(image: Any, turn: int) -> Optional[str]:
@@ -420,15 +444,21 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             kw["as_sft"] = True
         if seed is not None:
             kw["seed"] = call_seed(seed, index, sample or 0, turns)
-        text = policy.generate(system, obs["obs_str"], images[0], **kw)
+        user_text = obs["obs_str"]
+        if grounding:  # the truth at the pose this frame was rendered from, before the action moves the camera
+            truth = grounding_probe.truth(item, env.view_engine.get_pose())
+            user_text += grounding_probe.instruction(item)
+        text = policy.generate(system, user_text, images[0], **kw)
         if history:
-            earlier.append((obs["obs_str"], images[0], text))
-        seen = {"frame": keep(images[0], turns), "user": obs["obs_str"]}
+            earlier.append((user_text, images[0], text))
+        seen = {"frame": keep(images[0], turns), "user": user_text}
         if getattr(policy, "last_prompt_tokens", None) is not None:
             seen["prompt_tokens"] = policy.last_prompt_tokens
         if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
             seen.update(entropy=round(float(policy.last_entropy), 5), tokens=int(policy.last_tokens or 0))
-        obs, reward, done, step_info = env.step(text)
+        obs, reward, done, step_info = env.step(grounding_probe.answer_part(text) if grounding else text)
+        if grounding:
+            probe_turns.append(grounding_probe.score(text, truth, turns))
         turns += 1
         parsed = list(step_info.get("actions") or [])
         tm = (step_info.get("metrics") or {}).get("turn_metrics") or {}
@@ -455,6 +485,8 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
            "actions": attempted, "collisions": collisions, "invalid_turns": invalid}
     if sample is not None:
         row["sample"] = int(sample)
+    if grounding:
+        row.update(grounding_turns=probe_turns, grounding=grounding_probe.episode_summary(probe_turns))
     if frames is not None:
         last = _images(obs)
         row.update(task_description=item.get("task_description"), start=start, trajectory=trajectory,
@@ -567,6 +599,13 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     n = len(_jsonl(tasks))
     switches = switch_overrides(args)
     check_resume_rule(out, switches)  # experiment 3A: before the env, the model and model.json
+    probe = bool(getattr(args, "grounding_probe", False))
+    check_resume_probe(out, probe)  # 2026-11-12, item 5
+    probe_key: Dict[str, Any] = {}
+    if probe:
+        from data_gen.interiorgs_v10 import grounding_probe
+
+        probe_key = {"grounding_probe": grounding_probe.VERSION}
     cfg = env_config(Path(args.env_template), tasks, args.gs_root, args.prompt_format, switches)
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
     env = ActiveSpatialEnv(ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items() if k in keys}))
@@ -587,7 +626,8 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                                                 "history": bool(args.history),
                                                 "sft_text": bool(args.sft_text),
                                                 "entropy": bool(getattr(args, "entropy", False)),
-                                                "load_seconds": round(time.time() - t0, 1)}, indent=1))
+                                                "load_seconds": round(time.time() - t0, 1), **probe_key},
+                                               indent=1))
     done = ({(r["index"], r.get("sample")) for r in _jsonl(out / "results.jsonl")}
             if (out / "results.jsonl").exists() else set())
     samples = list(range(int(args.samples))) if sampled else [None]
@@ -599,7 +639,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                 try:
                     row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames",
                                       history=args.history, as_sft=args.sft_text, sample=k,
-                                      seed=int(args.sample_seed) if sampled else None)
+                                      seed=int(args.sample_seed) if sampled else None, grounding=probe)
                 except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
                     row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
                     if k is not None:
@@ -907,6 +947,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r.add_argument("--sft-text", action="store_true",
                    help="messages as the SFT data of rounds 6-9 had them (leading/trailing whitespace stripped); the "
                         "round-10 export keeps the env's text, so this is only for models of those rounds")
+    r.add_argument("--grounding-probe", action="store_true",
+                   help="the user's supplement of 2026-11-12, item 5: every turn the model first states the bearing and "
+                        "distance of the task's first object (<state>bearing=B; distance=D</state>), scored against "
+                        "the env's truth (grounding_probe.py); the action is read as before")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     m = sub.add_parser("terminal", help="round 12 batch: end progress, conditions met at the end, collision rate")
