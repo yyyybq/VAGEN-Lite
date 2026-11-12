@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # sco payload of jobs vpd-tvr-eval-<s>-top and vpd-tvr-eval-<s>-low (CONTRACT_wave2 7.5; DECISIONS G10(g)(h); O2, O20,
 # O22): the pilot evals of one start on all 500 eval.json tasks, always split in two jobs that may run in parallel
-# after train-<s>.  as_root, one H800, gate tvr, from pilot_tvr.py:
+# after train-<s>; with VPD_TVR_ROOT=explore/rl (below) the EXPLORATORY jobs vpd-tvr-xeval-<q3rd|q3rs150>-<part>
+# (DECISIONS G18).  as_root, one H800, gate tvr, from pilot_tvr.py:
 #     env VPD_JOB_DEADLINE_S=<soft> timeout -k 120 <outer> bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/tvr_eval.sh START top|low RUN
 # (outer / soft from the est_high DERIVED from the calibration, 5.3.1; refused above 5.5 h.)  P = OUT/tvr/runs/pilot/START.
 #   node, prereg_committed, guard (pilot_tvr guard tvr-eval-<s>-<part>: prereg, smoke PASS, missing() == [], data
@@ -26,13 +27,36 @@
 # CPU: vLLM 4 + harness 1 + E x L THOR workers (image arms); the blind arm 16 harness threads, no THOR.
 # Deadlines: soft VPD_JOB_DEADLINE_S (default 8160); `timeout -k 30 <left>`; THOR / vLLM --deadline-s <left - 240>.
 # Env: VPD_DRYRUN=1 prints the commands; test hooks honoured ONLY with VPD_DRYRUN=1: VPD_TVR_OUT, VPD_DRY_NTOP (ALL).
+# VPD_TVR_ROOT (DECISIONS G18): the output root under OUT/tvr/runs.  Unset or "pilot": the pilot jobs as above
+# (START Q3B Q3S E2, job tvr-eval-<s>-<part>, P = runs/pilot/START, eval prefix pilot; a failed merge parity is a
+# failure).  "explore/rl": the EXPLORATORY RL starts (START Q3RD Q3RS150, job tvr-xeval-<s>-<part>, P =
+# runs/explore/rl/START, eval dirs P/evals/xrl__<S>__<tier>__<arm>, merged folders VPD_MERGE_DIR/xrl__<S>__<tier>; the
+# same canary, merge, merge parity, eval, official and expect steps; merge parity is REPORT ONLY (DECISIONS G16 (1)):
+# a json of the served adapter that says FAILED is recorded as merge_parity_<tier>:report_only, rc 0, while a crash
+# or a missing json is still a failure).  Any other value: exit 2.
 
 START=${1:-}
 PART=${2:-}
 RUN=${3:-}
-case $START in
-  Q3B|Q3S|E2) ;;
-  *) echo "usage: tvr_eval.sh START top|low RUN   (START: Q3B Q3S E2)" >&2; exit 2 ;;
+TVR_ROOT=${VPD_TVR_ROOT:-pilot}
+case $TVR_ROOT in
+  pilot)
+    case $START in
+      Q3B|Q3S|E2) ;;
+      *) echo "usage: tvr_eval.sh START top|low RUN   (START: Q3B Q3S E2)" >&2; exit 2 ;;
+    esac
+    JOB=tvr-eval-${START,,}-$PART
+    PREFIX=pilot
+    PARITY_GATED=1 ;;
+  explore/rl)
+    case $START in
+      Q3RD|Q3RS150) ;;
+      *) echo "usage: VPD_TVR_ROOT=explore/rl tvr_eval.sh START top|low RUN   (START: Q3RD Q3RS150)" >&2; exit 2 ;;
+    esac
+    JOB=tvr-xeval-${START,,}-$PART
+    PREFIX=xrl
+    PARITY_GATED=0 ;;
+  *) echo "VPD_TVR_ROOT must be pilot or explore/rl, got '$TVR_ROOT'" >&2; exit 2 ;;
 esac
 case $PART in
   top|low) ;;
@@ -42,7 +66,6 @@ if [[ -z $RUN || $# -ne 3 ]]; then
   echo "usage: tvr_eval.sh START top|low RUN" >&2
   exit 2
 fi
-JOB=tvr-eval-${START,,}-$PART
 TAG=tvr_eval
 NEED_PREREG=1
 DEF_DEADLINE=8160
@@ -79,11 +102,10 @@ FB=?
 mkdir -p "$RUN/logs"
 cd "$VPD_WORKTREE"
 [[ $DRY == 1 ]] || rm -f -- "$RUN/DONE"  # DONE describes this run only
-P=$TVR/runs/pilot/$START
+P=$TVR/runs/$TVR_ROOT/$START
 AD=$P/adapters
 PARITY_DIR=$P/parity
 OUTROOT=$P/evals
-PREFIX=pilot
 TASKSET=eval500
 REPLICATE_START=Q3B   # pilot_cfg tiers.replicate (start Q3B, tier 100, seed 1002): eval label 100s1002
 REPLICATE_SEED=1002
@@ -103,7 +125,8 @@ if [[ $DRY != 1 ]]; then
   vpd_chown_trap "$RUN" "$P/evals" "$P/parity" "$P/canary"   # never P or runs/pilot (shared parents)
 fi
 
-# ---- helpers (identical in tvr_cal.sh, tvr_cal400.sh, tvr_mech_smoke.sh, tvr_train.sh, tvr_eval.sh) ----
+# ---- helpers (identical in tvr_cal.sh, tvr_cal400.sh, tvr_mech_smoke.sh, tvr_train.sh, tvr_eval.sh; except that
+# tvr_eval.sh adds parity_failed_kept / parity_step_failed, which its session() calls for the merge parity) ----
 x() { if [[ $DRY == 1 ]]; then echo "[dry] $*"; else "$@"; fi; }
 left() { echo $((DEADLINE - $(date +%s))); }
 # part FUNC ARGS...: one block; a failure is recorded (vpd_step line rc != 0 and a FAILS entry) and never ends the
@@ -296,6 +319,29 @@ parity_state() {
 
 MML=()
 CANARY_OK=1
+# merge parity failures (tvr_eval.sh only; session() below calls them).  PARITY_GATED=1 (pilot): a failure, as
+# before.  PARITY_GATED=0 (explore, DECISIONS G16 (1): the bf16 U-M is reported, not gated): a json of THIS adapter
+# that says FAILED (parity-ok 4) is recorded as merge_parity_<tier>:report_only (rc 0); a crash or a missing json /
+# one of another adapter (parity-ok 1) is still a failure.
+parity_failed_kept() {  # TIER: a current json says FAILED and is not rerun
+  if ((PARITY_GATED == 0)); then
+    vpd_step "merge_parity_$1:report_only" true
+    return 0
+  fi
+  vpd_step "merge_parity_$1:failed_kept" false || true
+  FAILS+=("merge_parity_$1")
+}
+parity_step_failed() {  # TIER FILE ADAPTER_DIR: the merge_parity step exited non-zero
+  local st=0
+  if ((PARITY_GATED == 0)); then
+    parity_state "$2" "$3" || st=$?
+    if ((st == 4)); then
+      vpd_step "merge_parity_$1:report_only" true
+      return 0
+    fi
+  fi
+  FAILS+=("merge_parity_$1")
+}
 # session TIER ADAPTER_LABEL PARITY(0|1) ARMS [RUN_TVR ARGS...]: merge AD/ADAPTER_LABEL on job-local disk, merge parity
 # (PARITY=1; PY_TRAIN, before vLLM), ONE run_tvr session for ARMS on the merged folder (--resume; the full arm list
 # always), remove the folder.  Fresh evals (and a current merge parity) are skipped; a stale eval is kept and flagged
@@ -340,8 +386,7 @@ session() {
   if ((todo == 0 && pst != 1)); then
     vpd_step "merge_$tier:skip" true
     if ((want_parity && pst == 4)); then
-      vpd_step "merge_parity_$tier:failed_kept" false || true
-      FAILS+=("merge_parity_$tier")
+      parity_failed_kept "$tier"
     elif ((want_parity)); then
       vpd_step "merge_parity_$tier:skip" true
     fi
@@ -367,10 +412,10 @@ session() {
   fi
   if ((want_parity && pst == 1)); then
     timed "merge_parity_$tier" "$PY_TRAIN" -B -m vpd.tvr.merge_parity --start "$START" --adapter "$addir" \
-      --merged "$local_dir" --demos "$TIERS/warmup0w20.jsonl" --n 20 --out "$pfile" || FAILS+=("merge_parity_$tier")
+      --merged "$local_dir" --demos "$TIERS/warmup0w20.jsonl" --n 20 --out "$pfile" \
+      || parity_step_failed "$tier" "$pfile" "$addir"
   elif ((want_parity && pst == 4)); then
-    vpd_step "merge_parity_$tier:failed_kept" false || true
-    FAILS+=("merge_parity_$tier")
+    parity_failed_kept "$tier"
   elif ((want_parity)); then
     vpd_step "merge_parity_$tier:skip" true
   fi

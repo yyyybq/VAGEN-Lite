@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # sco payload of jobs vpd-tvr-train-q3b / -q3s / -e2 (CONTRACT_wave2 7.4; DECISIONS G10(b)(c)(i)): the pilot adapters
-# of one start, after the prereg is frozen and the smoke passed.  as_root, one H800, gate tvr, from pilot_tvr.py:
+# of one start, after the prereg is frozen and the smoke passed; with VPD_TVR_ROOT=explore/rl (below) the EXPLORATORY
+# jobs vpd-tvr-xtrain-q3rd / -q3rs150 (DECISIONS G18).  as_root, one H800, gate tvr, from pilot_tvr.py:
 #     env VPD_JOB_DEADLINE_S=<soft> timeout -k 120 <outer> bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/tvr_train.sh START RUN
 # (outer / soft from the est_high DERIVED from the calibration, 5.3.1; e.g. N_top ALL 3.0 -> 10500 / 10320.)
 # P = OUT/tvr/runs/pilot/START (made by pilot_tvr prepare as the login user).  Steps:
@@ -17,18 +18,33 @@
 # stops, nothing overwritten, exit 3).  As root, RUN and P/adapters are chowned to 20325 at EXIT (never P itself).
 # Deadlines: soft VPD_JOB_DEADLINE_S (default 10320); every training under `timeout -k 30 <left>`.
 # Env: VPD_DRYRUN=1 prints the commands; test hooks honoured ONLY with VPD_DRYRUN=1: VPD_TVR_OUT, VPD_DRY_NTOP (ALL).
+# VPD_TVR_ROOT (DECISIONS G18): the output root under OUT/tvr/runs.  Unset or "pilot": the pilot jobs as above
+# (START Q3B Q3S E2, job tvr-train-<s>, P = runs/pilot/START).  "explore/rl": the EXPLORATORY RL starts (START Q3RD
+# Q3RS150, job tvr-xtrain-<s>, P = runs/explore/rl/START; the same steps, data, seed and flags; pilot_tvr's explore
+# payload sets it).  Any other value: exit 2.
 
 START=${1:-}
 RUN=${2:-}
-case $START in
-  Q3B|Q3S|E2) ;;
-  *) echo "usage: tvr_train.sh START RUN   (START: Q3B Q3S E2)" >&2; exit 2 ;;
+TVR_ROOT=${VPD_TVR_ROOT:-pilot}
+case $TVR_ROOT in
+  pilot)
+    case $START in
+      Q3B|Q3S|E2) ;;
+      *) echo "usage: tvr_train.sh START RUN   (START: Q3B Q3S E2)" >&2; exit 2 ;;
+    esac
+    JOB=tvr-train-${START,,} ;;
+  explore/rl)
+    case $START in
+      Q3RD|Q3RS150) ;;
+      *) echo "usage: VPD_TVR_ROOT=explore/rl tvr_train.sh START RUN   (START: Q3RD Q3RS150)" >&2; exit 2 ;;
+    esac
+    JOB=tvr-xtrain-${START,,} ;;
+  *) echo "VPD_TVR_ROOT must be pilot or explore/rl, got '$TVR_ROOT'" >&2; exit 2 ;;
 esac
 if [[ -z $RUN || $# -ne 2 ]]; then
   echo "usage: tvr_train.sh START RUN" >&2
   exit 2
 fi
-JOB=tvr-train-${START,,}
 TAG=tvr_train
 NEED_PREREG=1
 DEF_DEADLINE=10320
@@ -65,7 +81,7 @@ FB=?
 mkdir -p "$RUN/logs"
 cd "$VPD_WORKTREE"
 [[ $DRY == 1 ]] || rm -f -- "$RUN/DONE"  # DONE describes this run only
-P=$TVR/runs/pilot/$START
+P=$TVR/runs/$TVR_ROOT/$START
 AD=$P/adapters
 PARITY_DIR=""
 OUTROOT=""
