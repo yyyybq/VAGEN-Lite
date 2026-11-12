@@ -6,25 +6,35 @@ stop conditions and the action reading are unchanged.
     python -m data_gen.interiorgs_v10.evaluation run ... --grounding-probe    # results rows carry "grounding_turns"
     python -m data_gen.interiorgs_v10.grounding_probe summary --result EVAL/NAME [--result ...] --out FILE.json
 
-The statement (one line before the action, the instruction appended to every user turn):
+The statement (one line before the action; the instruction, ``instruction``, is appended to every user turn):
 
-    <state>bearing=B; distance=D</state>
+    <state>bearing=<B>; distance=<D></state>
 
 * **Object:** object A, the first object of ``target_object.objects`` (the one the task names first; the role
-  letter "a" of canonical_task_metrics_v2), named in the instruction by its reference text (``ref``).
+  letter "a" of canonical_task_metrics_v2, matched by ``object_a_id`` when the task has one), named in the
+  instruction by its reference text (``ref``).
 * **Bearing B** (front / left / right / back): the horizontal angle from the camera's facing direction (the c2w
   +Z column, the direction move_forward moves; projected onto the floor) to the object's centre, positive to the
-  camera's right (+X column).  Four 90-degree sectors: front |a| <= 45 (the camera's horizontal field of view is
-  90 degrees), right 45 < a <= 135, left -135 <= a < -45, back otherwise.  Within ``BEARING_TOL_DEG`` of a sector
-  boundary either neighbouring sector counts as right.  "behind" is read as back, "ahead" as front.
-* **Distance D** (metres): the horizontal distance from the camera to the object's AABB footprint (0 inside it),
-  the definition the tasks use ("measured to its nearest side", canonical_task_metrics_v2.footprint_distance).
-  Right when |D - truth| <= max(``DIST_TOL_FLOOR_M``, ``DIST_TOL_REL`` x truth).
+  camera's right (+X column).  Four sectors, as the instruction defines them: front |a| <= 45 (the camera's
+  horizontal field of view is 90 degrees), right 45 < a <= 135, left -135 <= a < -45, back otherwise.  Within
+  ``BEARING_TOL_DEG`` of a sector boundary either neighbouring sector counts as right; with the camera inside the
+  object's footprint (distance 0) any bearing does.  Read as front: "front", "in front", "forward", "ahead",
+  "straight ahead"; as back: "back", "behind".
+* **Distance D** (metres; "cm" is divided by 100, a comma decimal is read): the horizontal distance from the camera
+  to the object's AABB footprint (0 inside it), the definition the tasks use ("measured to its nearest side",
+  canonical_task_metrics_v2.footprint_distance).  Right when |D - truth| <= max(``DIST_TOL_FLOOR_M``,
+  ``DIST_TOL_REL`` x truth).
 * **Distance condition** (absolute_positioning only, the one family whose success has a distance band): the band
   of the stated D and of the true distance relative to the task's distance and the success gate's tolerance
   (max(0.25 m, 10%), ABS_TOL_*): too_close / ok / too_far; right when the two bands are the same.
 * A missing or unreadable statement scores every field as wrong; the action is read as before (``answer_part``
   takes the first ``<state>...</state>`` out of the answer before the env reads it).
+
+The summary (review of 2026-11-12): successful episodes are short and end with the object in view and near, so even
+a constant answer correlates with success.  Every reading is therefore reported next to the same reading of constant
+answers on the same turns (``BASELINE_*``: each bearing; distances of 0.5-3 m, the turns' median true distance, and
+for absolute_positioning the task's required distance; for the condition also each band), with the best of them and
+the model's excess over it.
 """
 
 from __future__ import annotations
@@ -35,7 +45,7 @@ import math
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -44,11 +54,16 @@ BEARINGS = ("front", "right", "back", "left")
 BEARING_TOL_DEG = 10.0
 DIST_TOL_FLOOR_M = 0.3
 DIST_TOL_REL = 0.25
-SYNONYMS = {"front": "front", "ahead": "front", "back": "back", "behind": "back", "left": "left", "right": "right"}
+SYNONYMS = {"front": "front", "in front": "front", "forward": "front", "ahead": "front", "straight ahead": "front",
+            "back": "back", "behind": "back", "left": "left", "right": "right"}
+BANDS = ("too_close", "ok", "too_far")
+BASELINE_DISTANCES_M = (0.5, 1.0, 1.5, 2.0, 3.0)
+FIELDS = ("bearing_ok", "distance_ok", "condition_ok", "both_ok")
 
-_STATE = re.compile(r"<state>(.*?)</state>", re.S | re.I)
-_BEARING = re.compile(r"bearing\s*[=:]\s*([a-z][a-z_-]*)", re.I)  # "front-left" etc. read as unreadable
-_DISTANCE = re.compile(r"distance\s*[=:]\s*([0-9]+(?:\.[0-9]+)?|\.[0-9]+)\s*(?:m|meters?|metres?)?\b", re.I)
+_STATE = re.compile(r"<\s*state\s*>(.*?)<\s*/\s*state\s*>", re.S | re.I)
+_BEARING = re.compile(r"bearing\s*[=:]\s*([a-z][a-z _-]*?)\s*(?=[;,|]|distance\b|$)", re.S | re.I)
+_DISTANCE = re.compile(r"distance\s*[=:]\s*(\d+(?:[.,]\d+)?|[.,]\d+)\s*(cm|centimet(?:er|re)s?|m|met(?:er|re)s?)?"
+                       r"(?![a-z])", re.I)
 
 
 # ---------------------------------------------------------------------------
@@ -77,14 +92,19 @@ def object_ref(item: Dict[str, Any]) -> str:
 def instruction(item: Dict[str, Any]) -> str:
     """The text appended to every user turn of a probe run."""
     return ("\n\nBefore the action, first write one line in this form:\n"
-            "<state>bearing=B; distance=D</state>\n"
-            f"B is where {object_ref(item)} is now, relative to the direction you face: front, left, right or back. "
-            "D is its horizontal distance from you in meters, to its nearest side (for example 1.5). "
+            "<state>bearing=<B>; distance=<D></state>\n"
+            f"<B> is where {object_ref(item)} is now: front (within 45 degrees of straight ahead, inside your view), "
+            "left or right (45 to 135 degrees to that side), or back (otherwise).\n"
+            "<D> is its horizontal distance from you in meters, to its nearest side, as a number.\n"
             "Then write the action as above.")
 
 
+def _bearing_word(text: str) -> Optional[str]:
+    return SYNONYMS.get(re.sub(r"[\s_-]+", " ", text.strip().lower()))
+
+
 def parse_statement(answer: str) -> Dict[str, Any]:
-    """{"present": a <state> block was found, "bearing": front/right/back/left or None, "distance": float or None}
+    """{"present": a <state> block was found, "bearing": front/right/back/left or None, "distance": metres or None}
     from the first <state>...</state> of the answer."""
     m = _STATE.search(answer or "")
     if not m:
@@ -92,8 +112,12 @@ def parse_statement(answer: str) -> Dict[str, Any]:
     body = m.group(1)
     b = _BEARING.search(body)
     d = _DISTANCE.search(body)
-    bearing = SYNONYMS.get(b.group(1).lower()) if b else None
-    return {"present": True, "bearing": bearing, "distance": float(d.group(1)) if d else None}
+    distance = None
+    if d:
+        distance = float(d.group(1).replace(",", "."))
+        if d.group(2) and d.group(2).lower().startswith("c"):
+            distance /= 100.0
+    return {"present": True, "bearing": _bearing_word(b.group(1)) if b else None, "distance": distance}
 
 
 def answer_part(answer: str) -> str:
@@ -102,7 +126,7 @@ def answer_part(answer: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# the ground truth
+# the ground truth and the scoring
 # ---------------------------------------------------------------------------
 def footprint_distance(x: float, y: float, obj: Dict[str, Any]) -> float:
     from vagen.envs.active_spatial.canonical_task_metrics_v2 import footprint_distance as fd
@@ -136,9 +160,10 @@ def sector(angle: float) -> str:
 
 
 def accepted_bearings(angle: Optional[float]) -> List[str]:
-    """The sector of the angle, and its neighbour within BEARING_TOL_DEG of a boundary."""
+    """The sector of the angle, and its neighbour within BEARING_TOL_DEG of a boundary; every bearing when there is
+    no angle (the object's centre straight above or below the camera)."""
     if angle is None:
-        return []
+        return list(BEARINGS)
     out = {sector(angle), sector(angle - BEARING_TOL_DEG), sector(angle + BEARING_TOL_DEG)}
     return [b for b in BEARINGS if b in out]
 
@@ -157,6 +182,10 @@ def abs_tolerance(required: float) -> float:
     return float(max(ABS_TOL_FLOOR_M, ABS_TOL_REL * required))
 
 
+def distance_right(stated: Optional[float], true: float) -> bool:
+    return stated is not None and abs(float(stated) - float(true)) <= max(DIST_TOL_FLOOR_M, DIST_TOL_REL * float(true))
+
+
 def truth(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
     """The ground truth at a pose (c2w, the env's view_engine.get_pose())."""
     obj = object_a(item)
@@ -170,7 +199,9 @@ def truth(item: Dict[str, Any], c2w: Any) -> Dict[str, Any]:
     dist = footprint_distance(x, y, obj)
     out: Dict[str, Any] = {"bearing_deg": None if angle is None else round(angle, 2),
                            "bearing": None if angle is None else sector(angle),
-                           "bearing_accepted": accepted_bearings(angle), "distance_m": round(dist, 4)}
+                           # inside the footprint the object is all around: any bearing is right
+                           "bearing_accepted": list(BEARINGS) if dist <= 0.0 else accepted_bearings(angle),
+                           "distance_m": round(dist, 4)}
     if item.get("task_type") == "absolute_positioning":
         params = ((item.get("target_region") or {}).get("params")) or {}
         required = params.get("distance_m")
@@ -186,9 +217,8 @@ def score(answer: str, gt: Dict[str, Any], turn: int) -> Dict[str, Any]:
     st = parse_statement(answer)
     rec: Dict[str, Any] = {"turn": int(turn), "present": st["present"], "stated_bearing": st["bearing"],
                            "stated_distance": st["distance"], "truth": gt,
-                           "bearing_ok": bool(st["bearing"] is not None and st["bearing"] in gt["bearing_accepted"])}
-    tol = max(DIST_TOL_FLOOR_M, DIST_TOL_REL * float(gt["distance_m"]))
-    rec["distance_ok"] = bool(st["distance"] is not None and abs(st["distance"] - float(gt["distance_m"])) <= tol)
+                           "bearing_ok": bool(st["bearing"] is not None and st["bearing"] in gt["bearing_accepted"]),
+                           "distance_ok": distance_right(st["distance"], gt["distance_m"])}
     if "condition" in gt:
         stated = (None if st["distance"] is None else
                   distance_band(st["distance"], float(gt["required_m"]), float(gt["tolerance_m"])))
@@ -209,13 +239,83 @@ def episode_summary(turns: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# summary
+# the constant-answer baselines
 # ---------------------------------------------------------------------------
-FIELDS = ("present", "bearing_ok", "distance_ok", "both_ok", "condition_ok")
+def baseline_marks(gt: Dict[str, Any], median_m: float) -> Dict[str, Dict[str, bool]]:
+    """Per field, whether each constant answer would be right at this truth: each bearing; the distances
+    BASELINE_DISTANCES_M, the turns' median true distance ("median") and the task's required distance ("echo
+    required", absolute_positioning only: elsewhere it has no answer and is wrong); for the condition also each band
+    ("band ...").  "both" pairs every bearing with every distance answer."""
+    d = float(gt["distance_m"])
+    answers: Dict[str, Optional[float]] = {f"{c:g} m": c for c in BASELINE_DISTANCES_M}
+    answers["median"] = float(median_m)
+    answers["echo required"] = gt.get("required_m")
+    bearing = {b: b in gt["bearing_accepted"] for b in BEARINGS}
+    distance = {n: distance_right(v, d) for n, v in answers.items()}
+    marks = {"bearing_ok": bearing, "distance_ok": distance,
+             "both_ok": {f"{b} / {n}": bearing[b] and distance[n] for b in BEARINGS for n in answers}}
+    if "condition" in gt:
+        req, tol = float(gt["required_m"]), float(gt["tolerance_m"])
+        cond = {n: v is not None and distance_band(float(v), req, tol) == gt["condition"] for n, v in answers.items()}
+        cond.update({f"band {b}": b == gt["condition"] for b in BANDS})
+        marks["condition_ok"] = cond
+    return marks
+
+
+Pair = Tuple[Dict[str, Any], Dict[str, Dict[str, bool]]]  # (a turn's record, its baseline marks)
+
+READABLE: Dict[str, Callable[[Dict[str, Any]], bool]] = {
+    "bearing_ok": lambda t: t.get("stated_bearing") is not None,
+    "distance_ok": lambda t: t.get("stated_distance") is not None,
+    "condition_ok": lambda t: t.get("stated_distance") is not None,
+    "both_ok": lambda t: t.get("stated_bearing") is not None and t.get("stated_distance") is not None,
+}
 
 
 def _rate(values: Sequence[bool]) -> Optional[float]:
     return round(sum(bool(v) for v in values) / len(values), 4) if values else None
+
+
+def _mean(values: Sequence[float]) -> Optional[float]:
+    return round(sum(values) / len(values), 4) if values else None
+
+
+def _best(model: Optional[float], base: Dict[str, Optional[float]], key: str = "best_baseline") -> Dict[str, Any]:
+    """The model's value, the best baseline (highest; ties: the first name in sorted order) and the excess."""
+    known = {n: v for n, v in base.items() if v is not None}
+    if not known:
+        return {"value": model, key: None, key + "_name": None, "excess": None}
+    name = max(sorted(known), key=lambda n: known[n])
+    excess = None if model is None else round(model - known[name], 4)
+    return {"value": model, key: known[name], key + "_name": name, "excess": excess}
+
+
+def _reading(pairs: Sequence[Pair], field: str) -> Dict[str, Any]:
+    """Accuracy of the field over the turns that have it, and the constant answers' accuracy on the same turns."""
+    sel = [(t, m) for t, m in pairs if field in t]
+    if not sel:
+        return {"n": 0, "value": None}
+    names = sorted(sel[0][1][field])
+    return {"n": len(sel), **_best(_rate([t[field] for t, _ in sel]),
+                                   {n: _rate([m[field][n] for _, m in sel]) for n in names})}
+
+
+def _readings(pairs: Sequence[Pair]) -> Dict[str, Any]:
+    return {"n": len(pairs), "present": _rate([t["present"] for t, _ in pairs]),
+            **{f: _reading(pairs, f) for f in FIELDS}}
+
+
+def _episode_mean(eps: Sequence[Tuple[Dict[str, Any], List[Pair]]], field: str) -> Dict[str, Any]:
+    """The mean over episodes of each episode's share of right turns, model and constant answers."""
+    shares, base = [], defaultdict(list)
+    for _, pairs in eps:
+        sel = [(t, m) for t, m in pairs if field in t]
+        if not sel:
+            continue
+        shares.append(sum(bool(t[field]) for t, _ in sel) / len(sel))
+        for n in sel[0][1][field]:
+            base[n].append(sum(bool(m[field][n]) for _, m in sel) / len(sel))
+    return {"episodes": len(shares), **_best(_mean(shares), {n: _mean(v) for n, v in base.items()})}
 
 
 def _pearson(xs: Sequence[float], ys: Sequence[float]) -> Optional[float]:
@@ -231,8 +331,23 @@ def _pearson(xs: Sequence[float], ys: Sequence[float]) -> Optional[float]:
     return round(sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / (sx * sy), 4)
 
 
+def _correlation(eps: Sequence[Tuple[Dict[str, Any], List[Pair]]], field: str) -> Dict[str, Any]:
+    """Point-biserial correlation of each episode's share of right turns with its success; the constant answers'
+    correlations on the same episodes (they are not 0: successful episodes are short and end near the object)."""
+    xs, ys, base = [], [], defaultdict(list)
+    for row, pairs in eps:
+        sel = [(t, m) for t, m in pairs if field in t]
+        if not sel:
+            continue
+        ys.append(1.0 if row["success"] else 0.0)
+        xs.append(sum(bool(t[field]) for t, _ in sel) / len(sel))
+        for n in sel[0][1][field]:
+            base[n].append(sum(bool(m[field][n]) for _, m in sel) / len(sel))
+    return {"episodes": len(xs), **_best(_pearson(xs, ys), {n: _pearson(v, ys) for n, v in base.items()})}
+
+
 def _two_by_two(first_ok: Sequence[bool], success: Sequence[bool]) -> Dict[str, Any]:
-    """Success when the first turn's statement is right / wrong, and the phi coefficient."""
+    """Success when the first turn's statement is right / wrong, and the phi coefficient (None without spread)."""
     a = sum(1 for f, s in zip(first_ok, success) if f and s)
     b = sum(1 for f, s in zip(first_ok, success) if f and not s)
     c = sum(1 for f, s in zip(first_ok, success) if not f and s)
@@ -243,61 +358,60 @@ def _two_by_two(first_ok: Sequence[bool], success: Sequence[bool]) -> Dict[str, 
             "phi": round((a * d - b * c) / den, 4) if den else None}
 
 
-def baselines(truths: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """What a constant answer would score on the same turns: bearing always "front" (the start pose has the object in
-    front in about 3 of 4 tasks), distance always the turns' median true distance (an oracle constant), the
-    absolute_positioning condition always its most common band."""
-    if not truths:
-        return {}
-    dists = sorted(float(t["distance_m"]) for t in truths)
-    med = dists[len(dists) // 2] if len(dists) % 2 else 0.5 * (dists[len(dists) // 2 - 1] + dists[len(dists) // 2])
-    out: Dict[str, Any] = {
-        "bearing_front": _rate(["front" in t["bearing_accepted"] for t in truths]),
-        "distance_median_m": round(med, 4),
-        "distance_median": _rate([abs(med - d) <= max(DIST_TOL_FLOOR_M, DIST_TOL_REL * d) for d in dists])}
-    conds = [t["condition"] for t in truths if "condition" in t]
-    if conds:
-        top = max(sorted(set(conds)), key=conds.count)
-        out.update(condition_majority=top, condition_majority_share=_rate([c == top for c in conds]))
-    return out
+def _first_turn(eps: Sequence[Tuple[Dict[str, Any], List[Pair]]], field: str) -> Dict[str, Any]:
+    firsts = [(pairs[0], bool(row["success"])) for row, pairs in eps if pairs and field in pairs[0][0]]
+    if not firsts:
+        return {"episodes": 0}
+    succ = [s for _, s in firsts]
+    model = _two_by_two([bool(t[field]) for (t, _), _ in firsts], succ)
+    base = {n: _two_by_two([bool(m[field][n]) for (_, m), _ in firsts], succ)["phi"] for n in firsts[0][0][1][field]}
+    best = _best(model["phi"], base, key="best_baseline_phi")
+    return {"episodes": len(firsts), **model, "best_baseline_phi": best["best_baseline_phi"],
+            "best_baseline_phi_name": best["best_baseline_phi_name"], "excess_phi": best["excess"]}
+
+
+def _median(values: Sequence[float]) -> float:
+    v = sorted(values)
+    return v[len(v) // 2] if len(v) % 2 else 0.5 * (v[len(v) // 2 - 1] + v[len(v) // 2])
 
 
 def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """Accuracy per field (over turns), per turn index, per family, split by episode success; the correlation of each
-    episode's share of right statements with its success (point-biserial), and success by the first turn's
-    statement (2 x 2, phi)."""
-    eps = [r for r in rows if "error" not in r and "grounding_turns" in r]
-    turns = [t for r in eps for t in r["grounding_turns"]]
-    out: Dict[str, Any] = {"version": VERSION, "episodes": len(eps), "turns": len(turns),
-                           "success": _rate([r["success"] for r in eps])}
-    out["accuracy"] = {k: _rate([t[k] for t in turns if k in t]) for k in FIELDS}
-    out["baselines"] = baselines([t["truth"] for t in turns if "truth" in t])
-    by_turn: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
-    by_family: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for r in eps:
-        for t in r["grounding_turns"]:
-            by_turn[int(t["turn"])].append(t)
-            by_family[str(r.get("task_type"))].append(t)
-    out["by_turn"] = {str(i): {"n": len(ts), **{k: _rate([t[k] for t in ts if k in t]) for k in FIELDS[:4]}}
-                      for i, ts in sorted(by_turn.items())}
-    out["by_family"] = {f: {"n": len(ts), **{k: _rate([t[k] for t in ts if k in t]) for k in FIELDS}}
-                        for f, ts in sorted(by_family.items())}
-    split = {}
-    for name, keep in (("success", True), ("failure", False)):
-        ts = [t for r in eps if bool(r["success"]) is keep for t in r["grounding_turns"]]
-        split[name] = {"episodes": sum(1 for r in eps if bool(r["success"]) is keep), "turns": len(ts),
-                       **{k: _rate([t[k] for t in ts if k in t]) for k in FIELDS}}
-    out["by_outcome"] = split
-    ys = [1.0 if r["success"] else 0.0 for r in eps if r["grounding_turns"]]
-    corr = {}
-    for k in ("bearing_ok", "distance_ok", "both_ok"):
-        xs = [sum(bool(t[k]) for t in r["grounding_turns"]) / len(r["grounding_turns"]) for r in eps
-              if r["grounding_turns"]]
-        corr[k] = _pearson(xs, ys)
-    out["episode_share_vs_success"] = corr
-    firsts = [(r["grounding_turns"][0], bool(r["success"])) for r in eps if r["grounding_turns"]]
-    out["first_turn_vs_success"] = {k: _two_by_two([bool(f[k]) for f, _ in firsts], [s for _, s in firsts])
-                                    for k in ("bearing_ok", "distance_ok", "both_ok")}
+    """Every reading of the statements next to the constant answers' reading on the same turns or episodes:
+    accuracy over all turns (an unreadable statement is wrong), over the turns whose statement could be read, the
+    per-episode mean; per turn index, per family, per outcome; each episode's share of right turns against its
+    success (point-biserial) and success by the first turn's statement (2 x 2, phi), overall and per family."""
+    eps_rows = [r for r in rows if "error" not in r and r.get("grounding_turns")]
+    truths = [t["truth"] for r in eps_rows for t in r["grounding_turns"]]
+    median_m = round(_median([float(t["distance_m"]) for t in truths]), 4) if truths else 0.0
+    eps = [(r, [(t, baseline_marks(t["truth"], median_m)) for t in r["grounding_turns"]]) for r in eps_rows]
+    pairs = [p for _, ps in eps for p in ps]
+    out: Dict[str, Any] = {
+        "version": VERSION, "episodes": len(eps), "turns": len(pairs),
+        "success": _rate([r["success"] for r, _ in eps]),
+        "baseline_answers": {"bearing": list(BEARINGS), "distance_m": list(BASELINE_DISTANCES_M),
+                             "median_m": median_m, "echo_required": "absolute_positioning: the task's distance",
+                             "condition_bands": list(BANDS)},
+        "present": _rate([t["present"] for t, _ in pairs]),
+        "readable": {f: _rate([READABLE[f](t) for t, _ in pairs]) for f in ("bearing_ok", "distance_ok")},
+        "accuracy": {f: _reading(pairs, f) for f in FIELDS},
+        "accuracy_readable": {f: _reading([(t, m) for t, m in pairs if READABLE[f](t)], f) for f in FIELDS},
+        "accuracy_episode_mean": {f: _episode_mean(eps, f) for f in FIELDS},
+        "episode_share_vs_success": {f: _correlation(eps, f) for f in FIELDS},
+        "first_turn_vs_success": {f: _first_turn(eps, f) for f in FIELDS},
+    }
+    by_turn: Dict[int, List[Pair]] = defaultdict(list)
+    for t, m in pairs:
+        by_turn[int(t["turn"])].append((t, m))
+    out["by_turn"] = {str(i): _readings(ps) for i, ps in sorted(by_turn.items())}
+    fams: Dict[str, list] = defaultdict(list)
+    for r, ps in eps:
+        fams[str(r.get("task_type"))].append((r, ps))
+    out["by_family"] = {f: {"episodes": len(fe), **_readings([p for _, ps in fe for p in ps]),
+                            "first_turn_vs_success": {k: _first_turn(fe, k) for k in FIELDS}}
+                        for f, fe in sorted(fams.items())}
+    out["by_outcome"] = {name: {"episodes": sum(1 for r, _ in eps if bool(r["success"]) is keep),
+                                **_readings([p for r, ps in eps if bool(r["success"]) is keep for p in ps])}
+                         for name, keep in (("success", True), ("failure", False))}
     return out
 
 
@@ -328,7 +442,7 @@ def cmd_summary(args: argparse.Namespace) -> None:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("summary", help="statement accuracy and its relation to success, per result folder")
+    s = sub.add_parser("summary", help="statement accuracy and its relation to success, next to constant answers")
     s.add_argument("--result", required=True, action="append", help="a probe run's result folder (repeatable)")
     s.add_argument("--out", default=None, help="JSON file")
     args = p.parse_args(argv)

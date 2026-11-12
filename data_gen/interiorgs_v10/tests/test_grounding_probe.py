@@ -1,11 +1,16 @@
-"""grounding_probe.py and evaluation.run_episode's --grounding-probe (the user's supplement of 2026-11-12, item 5)."""
+"""grounding_probe.py and evaluation's --grounding-probe (the user's supplement of 2026-11-12, item 5)."""
 
+import dataclasses
 import json
 import math
+import os
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 
@@ -30,6 +35,8 @@ ITEM = {"task_id": "v10_90d6bf453173b12783d99329", "scene_id": "0339_840404", "t
                                      "object_a_id": "145", "object_a_center": AC["center"]}},
         "target_object": {"objects": [AC]}}
 START = np.array(ITEM["init_camera"]["extrinsics"])
+MODEL_KEYS = {"name", "model", "version", "prompt_format", "greedy", "samples", "temperature", "top_p", "sample_seed",
+              "env_switches", "max_turns", "history", "sft_text", "entropy", "load_seconds"}  # model.json before item 5
 
 
 def facing_x(x=0.0, y=0.0):
@@ -49,33 +56,49 @@ class StatementTest(unittest.TestCase):
                          {"present": True, "bearing": "front", "distance": 1.5})
         self.assertEqual(p("<STATE> Bearing: Behind , distance = 2 m </STATE><action>turn_left|</action>"),
                          {"present": True, "bearing": "back", "distance": 2.0})
-        self.assertEqual(p("<state>bearing=ahead; distance=0.75 meters</state>")["bearing"], "front")
+        for word in ("in front", "forward", "straight ahead", "ahead", "In_Front"):
+            self.assertEqual(p(f"<state>bearing={word}; distance=0.75 meters</state>")["bearing"], "front", word)
+        self.assertEqual(p("< state >bearing=left;distance=150 cm< /state >"),
+                         {"present": True, "bearing": "left", "distance": 1.5})  # whitespace in the tags, cm
+        self.assertEqual(p("<state>bearing=right; distance=1,25m</state>")["distance"], 1.25)  # comma decimal
+        self.assertEqual(p("<state>bearing=right distance=2metres</state>"),
+                         {"present": True, "bearing": "right", "distance": 2.0})
         self.assertEqual(p("<state>bearing=front-left; distance=.5</state>"),
                          {"present": True, "bearing": None, "distance": 0.5})  # not one of the four: unreadable
+        self.assertEqual(p("<state>bearing=<B>; distance=<D></state>"),  # the placeholders copied
+                         {"present": True, "bearing": None, "distance": None})
         self.assertEqual(p("<state>bearing=left</state>"), {"present": True, "bearing": "left", "distance": None})
         self.assertEqual(p("<action>move_forward|</action>"), {"present": False, "bearing": None, "distance": None})
         self.assertEqual(p("<state>bearing=left; distance=1"), {"present": False, "bearing": None, "distance": None})
         self.assertEqual(p(None)["present"], False)
-        # the first block counts
         self.assertEqual(p("<state>bearing=left; distance=1</state><state>bearing=right; distance=9</state>")
-                         ["bearing"], "left")
+                         ["bearing"], "left")  # the first block counts
 
     def test_answer_part_keeps_the_action_reading(self):
         from vagen.envs.active_spatial.utils import parse_free_think
 
         a = "<state>bearing=front; distance=1.5</state>\n<action>move_backward|move_backward|</action>"
         self.assertEqual(G.answer_part(a), "\n<action>move_backward|move_backward|</action>")
-        self.assertEqual(parse_free_think(G.answer_part(a)), parse_free_think("<action>move_backward|move_backward|</action>"))
+        self.assertEqual(parse_free_think(G.answer_part(a)),
+                         parse_free_think("<action>move_backward|move_backward|</action>"))
+        self.assertEqual(G.answer_part("< state>x</state >\n<action>turn_left|</action>"), "\n<action>turn_left|</action>")
         plain = "<action>turn_left|</action>"
         self.assertEqual(G.answer_part(plain), plain)  # no statement: unchanged
         bad = "<state>bearing=<action>turn_left|</action></state><action>move_forward|</action>"
         self.assertEqual(parse_free_think(G.answer_part(bad))["actions_blob"], "move_forward|")  # only the action part
 
-    def test_instruction_names_object_a(self):
+    def test_instruction(self):
         text = G.instruction(ITEM)
-        self.assertTrue(text.startswith("\n\nBefore the action"))
-        self.assertIn("<state>bearing=B; distance=D</state>", text)
-        self.assertIn("B is where the standing air conditioner is now", text)
+        self.assertEqual(text, (
+            "\n\nBefore the action, first write one line in this form:\n"
+            "<state>bearing=<B>; distance=<D></state>\n"
+            "<B> is where the standing air conditioner is now: front (within 45 degrees of straight ahead, inside "
+            "your view), left or right (45 to 135 degrees to that side), or back (otherwise).\n"
+            "<D> is its horizontal distance from you in meters, to its nearest side, as a number.\n"
+            "Then write the action as above."))
+        import re
+
+        self.assertEqual(re.findall(r"\d+(?:\.\d+)?", text), ["45", "45", "135"])  # no numeric example
         two = {"target_region": {"params": {"object_a_id": "2"}},
                "target_object": {"objects": [box(0, 0, oid="1", ref="the first"), box(1, 1, oid="2", ref="the second")]}}
         self.assertEqual(G.object_ref(two), "the second")  # object_a_id wins over the order
@@ -96,7 +119,7 @@ class TruthTest(unittest.TestCase):
         self.assertEqual(G.accepted_bearings(56.0), ["right"])
         self.assertEqual(G.accepted_bearings(140.0), ["right", "back"])
         self.assertEqual(G.accepted_bearings(-50.0), ["front", "left"])
-        self.assertEqual(G.accepted_bearings(None), [])
+        self.assertEqual(G.accepted_bearings(None), list(G.BEARINGS))  # no angle: any bearing
 
     def test_bearing_geometry(self):
         pose = facing_x()
@@ -120,8 +143,7 @@ class TruthTest(unittest.TestCase):
 
         ctx = _Context(ITEM, START)
         for dx, dy in ((1.0, 0.3), (1.0, -0.3), (0.5, 0.4), (0.8, -0.6), (1.2, 0.0)):
-            fwd, right = START[:3, 2], START[:3, 0]
-            p = START[:3, 3] + dx * fwd + dy * right
+            p = START[:3, 3] + dx * START[:3, 2] + dy * START[:3, 0]
             angle = G.bearing_angle(START, p)
             u = float(ctx.uv(ctx.to_camera(np.array([p])))[0][0])
             self.assertEqual(angle > 1e-9, u > ctx.K[0, 2] + 1e-6, (dx, dy, angle, u))
@@ -133,18 +155,20 @@ class TruthTest(unittest.TestCase):
         self.assertAlmostEqual(gt["distance_m"], math.hypot(-1.1043389702580089 + 1.8489284025897093,
                                                             -2.76611938717639 + 3.119246516083379), places=3)
         self.assertEqual((gt["required_m"], gt["tolerance_m"], gt["condition"]), (1.5, 0.25, "too_close"))
-        # the same distance the success metric measures
         from vagen.envs.active_spatial.canonical_task_metrics_v2 import judge_absolute_positioning
 
         self.assertAlmostEqual(judge_absolute_positioning(ITEM, START)["distance_m"], gt["distance_m"], places=3)
 
-    def test_truth_other_family_has_no_condition(self):
+    def test_truth_other_family_and_inside_the_footprint(self):
         item = {"task_type": "fov_inclusion", "target_object": {"objects": [box(3.0, 0.0), box(0.0, -3.0, oid="2")]}}
         gt = G.truth(item, facing_x())
-        self.assertEqual((gt["bearing"], gt["distance_m"]), ("front", 2.9))
+        self.assertEqual((gt["bearing"], gt["bearing_accepted"], gt["distance_m"]), ("front", ["front"], 2.9))
         self.assertNotIn("condition", gt)
-        inside = G.truth({"task_type": "fov_inclusion", "target_object": {"objects": [box(0.05, 0.0)]}}, facing_x())
-        self.assertEqual(inside["distance_m"], 0.0)  # inside the footprint
+        # the camera inside the footprint (off the centre, so the angle exists): any bearing is right
+        inside = G.truth({"task_type": "fov_inclusion", "target_object": {"objects": [box(0.05, 0.05)]}}, facing_x())
+        self.assertEqual((inside["distance_m"], inside["bearing_accepted"]), (0.0, list(G.BEARINGS)))
+        self.assertTrue(G.score("<state>bearing=back; distance=0</state>", inside, 0)["both_ok"])
+        self.assertFalse(G.score("<state>distance=0</state>", inside, 0)["bearing_ok"])  # unreadable is still wrong
 
 
 class ScoreTest(unittest.TestCase):
@@ -159,8 +183,7 @@ class ScoreTest(unittest.TestCase):
         r = G.score("<action>move_backward|</action>", gt, 1)  # no statement: every field wrong
         self.assertEqual((r["present"], r["bearing_ok"], r["distance_ok"], r["both_ok"], r["condition_ok"]),
                          (False, False, False, False, False))
-        # the distance tolerance: max(0.3 m, 25%)
-        far = {"bearing_accepted": ["front"], "distance_m": 4.0}
+        far = {"bearing_accepted": ["front"], "distance_m": 4.0}  # the tolerance: max(0.3 m, 25%)
         self.assertTrue(G.score("<state>bearing=front; distance=5.0</state>", far, 0)["distance_ok"])
         self.assertFalse(G.score("<state>bearing=front; distance=5.01</state>", far, 0)["distance_ok"])
         near = {"bearing_accepted": ["front"], "distance_m": 0.4}
@@ -168,112 +191,170 @@ class ScoreTest(unittest.TestCase):
         self.assertFalse(G.score("<state>bearing=front; distance=0.75</state>", near, 0)["distance_ok"])
         self.assertNotIn("condition_ok", G.score("<state>bearing=front; distance=0.15</state>", near, 0))
 
-    def test_summary(self):
-        def turn(t, b, d):
-            return {"turn": t, "present": True, "bearing_ok": b, "distance_ok": d, "both_ok": b and d}
+    def test_baseline_marks(self):
+        gt = {"bearing_accepted": ["front", "right"], "distance_m": 1.4, "required_m": 1.5, "tolerance_m": 0.25,
+              "condition": "ok"}
+        m = G.baseline_marks(gt, 2.0)
+        self.assertEqual(m["bearing_ok"], {"front": True, "right": True, "back": False, "left": False})
+        self.assertEqual({n for n, v in m["distance_ok"].items() if v}, {"1.5 m", "echo required"})  # tol 0.35 m
+        self.assertTrue(m["condition_ok"]["echo required"] and m["condition_ok"]["band ok"])
+        self.assertFalse(m["condition_ok"]["median"])  # 2.0 m is too far for 1.5 +- 0.25
+        self.assertTrue(m["both_ok"]["right / 1.5 m"])
+        other = G.baseline_marks({"bearing_accepted": ["left"], "distance_m": 1.4}, 2.0)
+        self.assertFalse(other["distance_ok"]["echo required"])  # no required distance: no answer
+        self.assertNotIn("condition_ok", other)
 
-        rows = [{"index": 0, "task_type": "a", "success": True, "grounding_turns": [turn(0, True, True), turn(1, True, False)]},
-                {"index": 1, "task_type": "a", "success": True, "grounding_turns": [turn(0, True, True)]},
-                {"index": 2, "task_type": "b", "success": False, "grounding_turns": [turn(0, False, False), turn(1, True, False)]},
-                {"index": 3, "task_type": "b", "success": False, "grounding_turns": [turn(0, False, True)]},
+
+def _row(i, success, turns, family="absolute_positioning"):
+    return {"index": i, "task_type": family, "success": success,
+            "grounding_turns": [G.score(a, gt, k) for k, (a, gt) in enumerate(turns)]}
+
+
+GT_A = {"bearing": "front", "bearing_accepted": ["front"], "distance_m": 1.0, "required_m": 1.5, "tolerance_m": 0.25,
+        "condition": "too_close"}
+GT_B = {"bearing": "left", "bearing_accepted": ["left"], "distance_m": 3.0, "required_m": 1.5, "tolerance_m": 0.25,
+        "condition": "too_far"}
+
+
+class SummaryTest(unittest.TestCase):
+    def rows(self):
+        st = "<state>bearing={}; distance={}</state><action>move_forward|</action>".format
+        return [_row(0, True, [(st("front", 1.0), GT_A)]),
+                _row(1, True, [(st("front", 1.1), GT_A)]),
+                _row(2, False, [(st("front", 1.0), GT_B), (st("left", 3.0), GT_B)]),
+                _row(3, False, [("<action>move_forward|</action>", GT_B)]),
                 {"index": 4, "error": "RuntimeError: x"}]
-        s = G.summarize(rows)
-        self.assertEqual((s["episodes"], s["turns"], s["success"]), (4, 6, 0.5))
-        self.assertEqual(s["accuracy"]["bearing_ok"], round(4 / 6, 4))
-        self.assertIsNone(s["accuracy"]["condition_ok"])
-        self.assertEqual(s["by_turn"]["1"], {"n": 2, "present": 1.0, "bearing_ok": 1.0, "distance_ok": 0.0, "both_ok": 0.0})
-        self.assertEqual(s["by_outcome"]["success"]["bearing_ok"], 1.0)
-        self.assertEqual(s["by_outcome"]["failure"]["turns"], 3)
-        self.assertEqual(s["first_turn_vs_success"]["bearing_ok"],
-                         {"right_n": 2, "right_success": 1.0, "wrong_n": 2, "wrong_success": 0.0, "phi": 1.0})
-        self.assertGreater(s["episode_share_vs_success"]["bearing_ok"], 0.8)
-        self.assertEqual(s["by_family"]["b"]["n"], 3)
-        self.assertEqual(s["baselines"], {})  # no truth recorded in these rows
 
-    def test_baselines(self):
-        tr = [{"bearing_accepted": ["front"], "distance_m": 1.0, "condition": "too_close"},
-              {"bearing_accepted": ["front", "right"], "distance_m": 2.0, "condition": "too_close"},
-              {"bearing_accepted": ["left"], "distance_m": 4.0, "condition": "ok"},
-              {"bearing_accepted": ["back"], "distance_m": 8.0}]
-        b = G.baselines(tr)
-        self.assertEqual((b["bearing_front"], b["distance_median_m"]), (0.5, 3.0))
-        self.assertEqual(b["distance_median"], 0.25)  # 3.0 is within 25% of 4.0 only
-        self.assertEqual((b["condition_majority"], b["condition_majority_share"]), ("too_close", 0.6667))
+    def test_readings_next_to_the_constant_answers(self):
+        s = G.summarize(self.rows())
+        self.assertEqual((s["episodes"], s["turns"], s["success"], s["present"]), (4, 5, 0.5, 0.8))
+        self.assertEqual(s["baseline_answers"]["median_m"], 3.0)
+        acc = s["accuracy"]["bearing_ok"]  # 3/5; "left" also gets 3/5 on these turns
+        self.assertEqual((acc["value"], acc["best_baseline"], acc["best_baseline_name"], acc["excess"]),
+                         (0.6, 0.6, "left", 0.0))
+        rd = s["accuracy_readable"]["bearing_ok"]  # 3 of the 4 readable turns; a constant gets 2 of them
+        self.assertEqual((rd["n"], rd["value"], rd["best_baseline"], rd["excess"]), (4, 0.75, 0.5, 0.25))
+        em = s["accuracy_episode_mean"]["bearing_ok"]  # shares 1, 1, 0.5, 0
+        self.assertEqual((em["value"], em["best_baseline"], em["excess"]), (0.625, 0.5, 0.125))
+        cond = s["accuracy"]["condition_ok"]
+        self.assertEqual((cond["value"], cond["best_baseline"], cond["excess"]), (0.6, 0.6, 0.0))
+        # the confound: a constant "front" is right exactly on the successful episodes' first turns
+        ft = s["first_turn_vs_success"]["bearing_ok"]
+        self.assertEqual((ft["phi"], ft["best_baseline_phi"], ft["best_baseline_phi_name"], ft["excess_phi"]),
+                         (1.0, 1.0, "front", 0.0))
+        corr = s["episode_share_vs_success"]["bearing_ok"]
+        self.assertEqual((corr["best_baseline"], corr["best_baseline_name"]), (1.0, "front"))
+        self.assertLess(corr["excess"], 0.0)
+        self.assertIn("condition_ok", s["episode_share_vs_success"])
+        self.assertEqual(s["by_turn"]["1"]["condition_ok"]["value"], 1.0)  # condition_ok per turn index
+        self.assertEqual(s["by_turn"]["1"]["n"], 1)
+        fam = s["by_family"]["absolute_positioning"]
+        self.assertEqual((fam["episodes"], fam["n"], fam["first_turn_vs_success"]["condition_ok"]["phi"]), (4, 5, 1.0))
+        self.assertEqual(fam["bearing_ok"]["best_baseline"], 0.6)  # per-family baselines
+        self.assertEqual((s["by_outcome"]["failure"]["n"], s["by_outcome"]["success"]["bearing_ok"]["value"]), (3, 1.0))
+
+    def test_family_without_spread(self):
+        st = "<state>bearing=front; distance=1.0</state>"
+        gt = dict(GT_A)
+        gt.pop("condition"), gt.pop("required_m"), gt.pop("tolerance_m")
+        s = G.summarize([_row(0, True, [(st, gt)], "fov_inclusion"), _row(1, True, [(st, gt)], "fov_inclusion")])
+        ft = s["by_family"]["fov_inclusion"]["first_turn_vs_success"]
+        self.assertIsNone(ft["bearing_ok"]["phi"])  # every episode succeeded
+        self.assertEqual(ft["condition_ok"], {"episodes": 0})
+        self.assertEqual(s["accuracy"]["condition_ok"], {"n": 0, "value": None})
+        self.assertEqual(G.summarize([])["turns"], 0)
 
     def test_summary_cli(self):
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "m_grd"
             res.mkdir()
-            row = {"index": 0, "task_type": "a", "success": True,
-                   "grounding_turns": [{"turn": 0, "present": True, "bearing_ok": True, "distance_ok": False,
-                                        "both_ok": False}]}
-            (res / "results.jsonl").write_text(json.dumps(row) + "\n{\"partial")
+            rows = self.rows()[:2]
+            (res / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows) + "{\"partial")
             G.main(["summary", "--result", str(res), "--out", str(Path(tmp) / "s.json")])
             s = json.loads((Path(tmp) / "s.json").read_text())
-        self.assertEqual((s["m_grd"]["episodes"], s["m_grd"]["accuracy"]["bearing_ok"]), (1, 1.0))
+            self.assertEqual((s["m_grd"]["episodes"], s["m_grd"]["accuracy"]["bearing_ok"]["value"]), (2, 1.0))
+            (res / "results.jsonl").write_text("{\"partial\n" + json.dumps(rows[0]) + "\n")
+            with self.assertRaises(json.JSONDecodeError):  # only the last line may be partial
+                G.main(["summary", "--result", str(res)])
+
+
+class _Frame:  # a frame that can be saved as a JPEG
+    def convert(self, mode):
+        from PIL import Image
+
+        return Image.new(mode, (4, 4))
+
+
+def make_env():
+    class Env:
+        current_item = ITEM
+        _current_step = 0
+
+        def __init__(self, cfg=None):
+            self.view_engine = SimpleNamespace(get_pose=lambda: self.pose.copy())
+            self.pose = START.copy()
+            self.read = []
+
+        def reset(self, seed):
+            self._current_step, self.pose = 0, START.copy()
+            return {"obs_str": "<image>\nturn 0", "multi_modal_data": {"<image>": [_Frame()]}}, {}
+
+        def system_prompt(self):
+            return "sys"
+
+        def step(self, text):
+            self.read.append(text)
+            self._current_step += 1
+            self.pose[:3, 3] -= 0.25 * self.pose[:3, 2]  # move_backward: the next frame's pose
+            obs = {"obs_str": f"<image>\nturn {self._current_step}", "multi_modal_data": {"<image>": [_Frame()]}}
+            return obs, -0.01, self._current_step >= 2, {"actions": ["move_backward"], "metrics": {}}
+
+        def _calculate_canonical_metric(self):
+            return {"success": self._current_step >= 2}
+
+    return Env
+
+
+def make_policy(answers, calls):
+    class Policy:
+        last_prompt_tokens = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        def generate(self, system, user_text, image, earlier=()):
+            calls.append((user_text, [(u, a) for u, _, a in earlier]))
+            return answers[(len(calls) - 1) % len(answers)]
+
+    return Policy
+
+
+STATED = ["<state>bearing=front; distance=0.8</state>\n<action>move_backward|</action>",
+          "<action>move_backward|</action>"]
 
 
 class RunEpisodeTest(unittest.TestCase):
-    """The switch in evaluation.run_episode; off, the calls and the row are exactly as before."""
-
-    def make_env(self):
-        class Env:
-            current_item = ITEM
-            _current_step = 0
-
-            def __init__(self):
-                self.view_engine = SimpleNamespace(get_pose=lambda: self.pose.copy())
-                self.pose = START.copy()
-                self.read = []
-
-            def reset(self, seed):
-                return {"obs_str": "<image>\nturn 0", "multi_modal_data": {"<image>": ["frame0"]}}, {}
-
-            def system_prompt(self):
-                return "sys"
-
-            def step(self, text):
-                self.read.append(text)
-                self._current_step += 1
-                self.pose[:3, 3] -= 0.25 * self.pose[:3, 2]  # move_backward: the next frame's pose
-                obs = {"obs_str": f"<image>\nturn {self._current_step}",
-                       "multi_modal_data": {"<image>": [f"frame{self._current_step}"]}}
-                return obs, -0.01, self._current_step >= 2, {"actions": ["move_backward"], "metrics": {}}
-
-            def _calculate_canonical_metric(self):
-                return {"success": self._current_step >= 2}
-
-        return Env()
-
-    def make_policy(self, answers):
-        calls = []
-
-        class Policy:
-            def generate(self, system, user_text, image, earlier=()):
-                calls.append((user_text, list(earlier)))
-                return answers[len(calls) - 1]
-
-        return Policy(), calls
+    """The switch in evaluation.run_episode; off, the calls and the row are exactly as before, even when the answers
+    carry <state> lines."""
 
     def test_off_is_unchanged(self):
-        env = self.make_env()
-        policy, calls = self.make_policy(["<action>move_backward|</action>"] * 2)
-        row = E.run_episode(env, policy, 0, 12, history=True)
+        env, calls = make_env()(), []
+        with tempfile.TemporaryDirectory() as tmp:
+            row = E.run_episode(env, make_policy(STATED, calls)(), 0, 12, history=True, frames=Path(tmp) / "frames")
         self.assertEqual([c[0] for c in calls], ["<image>\nturn 0", "<image>\nturn 1"])
-        self.assertEqual(env.read, ["<action>move_backward|</action>"] * 2)
-        self.assertEqual(calls[1][1], [("<image>\nturn 0", "frame0", "<action>move_backward|</action>")])
-        self.assertEqual(set(row), {"index", "task_id", "scene_id", "task_type", "d_star", "success",
-                                    "actions_to_success", "turns", "actions", "collisions", "invalid_turns"})
+        self.assertEqual(env.read, STATED)  # the <state> line reaches the env unchanged
+        self.assertEqual(calls[1][1], [("<image>\nturn 0", STATED[0])])
+        self.assertEqual([t["user"] for t in row["trajectory"]], ["<image>\nturn 0", "<image>\nturn 1"])
+        self.assertEqual([t["answer"] for t in row["trajectory"]], STATED)
+        self.assertFalse({"grounding", "grounding_turns"} & set(row))
+        self.assertFalse(any("grounding" in t for t in row["trajectory"]))
 
     def test_on(self):
-        env = self.make_env()
-        answers = ["<state>bearing=front; distance=0.8</state>\n<action>move_backward|</action>",
-                   "<action>move_backward|</action>"]
-        policy, calls = self.make_policy(answers)
-        row = E.run_episode(env, policy, 0, 12, history=True, grounding=True)
+        env, calls = make_env()(), []
+        row = E.run_episode(env, make_policy(STATED, calls)(), 0, 12, history=True, grounding=True)
         probe = G.instruction(ITEM)
         self.assertEqual([c[0] for c in calls], ["<image>\nturn 0" + probe, "<image>\nturn 1" + probe])
-        self.assertEqual(calls[1][1], [("<image>\nturn 0" + probe, "frame0", answers[0])])  # history: what it saw
+        self.assertEqual(calls[1][1], [("<image>\nturn 0" + probe, STATED[0])])  # history: what it saw
         self.assertEqual(env.read, ["\n<action>move_backward|</action>", "<action>move_backward|</action>"])
         t0, t1 = row["grounding_turns"]
         self.assertEqual((t0["turn"], t0["bearing_ok"], t0["distance_ok"], t0["condition_ok"]), (0, True, True, True))
@@ -288,25 +369,71 @@ class RunEpisodeTest(unittest.TestCase):
     def test_resume_rule(self):
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp)
-            E.check_resume_probe(res, True)  # no results yet: either mode
+            E.check_resume_probe(res, G.VERSION)  # no results yet: any
             (res / "results.jsonl").write_text(json.dumps({"index": 0}) + "\n")
-            E.check_resume_probe(res, False)  # no model.json: not a probe run
+            E.check_resume_probe(res, None)  # no model.json: not a probe run
             with self.assertRaises(SystemExit):
-                E.check_resume_probe(res, True)
+                E.check_resume_probe(res, G.VERSION)
             (res / "model.json").write_text(json.dumps({"grounding_probe": G.VERSION}))
-            E.check_resume_probe(res, True)
-            with self.assertRaises(SystemExit):
-                E.check_resume_probe(res, False)
+            E.check_resume_probe(res, G.VERSION)
+            for other in (None, "grounding_probe_v0"):
+                with self.assertRaises(SystemExit):
+                    E.check_resume_probe(res, other)
 
     def test_option(self):
-        from unittest import mock
-
         seen = []
         base = ["run", "--eval", "e", "--name", "n", "--model", "m"]
         with mock.patch.object(E, "cmd_run", lambda a: seen.append(a.grounding_probe)):
             E.main(base)
             E.main(base + ["--grounding-probe"])
         self.assertEqual(seen, [False, True])
+
+
+class CmdRunTest(unittest.TestCase):
+    """`evaluation run` end to end with a scripted env and policy: model.json, results and what the env reads."""
+
+    def run_cmd(self, tmp, name, opts):
+        @dataclasses.dataclass
+        class Cfg:
+            jsonl_path: str = ""
+            prompt_format: str = ""
+
+        Env, calls = make_env(), []
+        envs = []
+
+        def build(cfg):
+            envs.append(Env(cfg))
+            return envs[-1]
+
+        env_mod = types.ModuleType("vagen.envs.active_spatial.env")
+        env_mod.ActiveSpatialEnv = build
+        cfg_mod = types.ModuleType("vagen.envs.active_spatial.env_config")
+        cfg_mod.ActiveSpatialEnvConfig = Cfg
+        ev = Path(tmp)
+        (ev / "tasks.jsonl").write_text(json.dumps(ITEM) + "\n")
+        with mock.patch.dict(sys.modules, {env_mod.__name__: env_mod, cfg_mod.__name__: cfg_mod}), \
+                mock.patch.object(E, "VllmPolicy", make_policy(STATED, calls)), \
+                mock.patch.dict(os.environ, {"R1_RENDER_URL": "http://scripted.invalid"}):
+            E.main(["run", "--eval", str(ev), "--name", name, "--model", "/m", *opts])
+        out = ev / name
+        rows = [json.loads(l) for l in (out / "results.jsonl").read_text().splitlines()]
+        return json.loads((out / "model.json").read_text()), rows, envs[-1].read, calls
+
+    def test_off_and_on(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model, rows, read, calls = self.run_cmd(tmp, "plain", ["--format-example", "action_names"])
+            self.assertEqual(set(model), MODEL_KEYS)
+            self.assertEqual(read, STATED)
+            self.assertEqual([t["user"] for t in rows[0]["trajectory"]], ["<image>\nturn 0", "<image>\nturn 1"])
+            self.assertFalse({"grounding", "grounding_turns"} & set(rows[0]))
+            model, rows, read, calls = self.run_cmd(tmp, "probe", ["--format-example", "action_names",
+                                                                   "--grounding-probe"])
+            self.assertEqual(set(model), MODEL_KEYS | {"grounding_probe"})
+            self.assertEqual(model["grounding_probe"], G.VERSION)
+            self.assertEqual(read, [G.answer_part(a) for a in STATED])
+            self.assertEqual(len(rows[0]["grounding_turns"]), rows[0]["turns"])
+            with self.assertRaises(SystemExit):  # the plain folder cannot be resumed as a probe run
+                self.run_cmd(tmp, "plain", ["--grounding-probe"])
 
 
 if __name__ == "__main__":

@@ -41,7 +41,8 @@ Grounding probe (the user's supplement of 2026-11-12, item 5): ``run --grounding
 to every user turn (state the bearing and distance of the task's first object before the action), the env reads the
 answer without its ``<state>`` line, and each row carries ``grounding_turns`` (every turn's statement scored against the
 truth at the pose its frame was rendered from) and ``grounding`` (the episode's shares); grounding_probe.py has the
-definitions and the ``summary``.  One mode per result folder (model.json ``grounding_probe``); off, nothing changes.
+definitions and the ``summary``.  One probe version per result folder (model.json ``grounding_probe``); off,
+nothing changes.
 """
 
 from __future__ import annotations
@@ -337,18 +338,18 @@ def check_resume_rule(result: Path, switches: Dict[str, Any]) -> None:
                          f"{now!r}; one turn rule per result folder (give another --name)")
 
 
-def check_resume_probe(result: Path, on: bool) -> None:
-    """Grounding probe (2026-11-12, item 5): one mode per result folder.  A run resuming a folder whose results.jsonl
-    already has rows must give the mode of the folder's model.json (missing key: not a probe run), else it stops before
-    anything is written."""
+def check_resume_probe(result: Path, version: Optional[str]) -> None:
+    """Grounding probe (2026-11-12, item 5): one probe version per result folder.  A run resuming a folder whose
+    results.jsonl already has rows must give the probe version of the folder's model.json (``version`` None and a
+    missing key: not a probe run), else it stops before anything is written."""
     results = Path(result) / "results.jsonl"
     if not results.is_file() or not _jsonl(results, partial_ok=True):
         return
     model = Path(result) / "model.json"
-    before = bool(json.loads(model.read_text()).get("grounding_probe")) if model.is_file() else False
-    if before != bool(on):
-        raise SystemExit(f"{result}: its results were evaluated with grounding_probe {before}, this run gives {bool(on)};"
-                         " one mode per result folder (give another --name)")
+    before = json.loads(model.read_text()).get("grounding_probe") if model.is_file() else None
+    if before != version:
+        raise SystemExit(f"{result}: its results were evaluated with grounding_probe {before!r}, this run gives "
+                         f"{version!r}; one probe version per result folder (give another --name)")
 
 
 def gate_summary(metric: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -600,12 +601,12 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     switches = switch_overrides(args)
     check_resume_rule(out, switches)  # experiment 3A: before the env, the model and model.json
     probe = bool(getattr(args, "grounding_probe", False))
-    check_resume_probe(out, probe)  # 2026-11-12, item 5
     probe_key: Dict[str, Any] = {}
     if probe:
         from data_gen.interiorgs_v10 import grounding_probe
 
         probe_key = {"grounding_probe": grounding_probe.VERSION}
+    check_resume_probe(out, probe_key.get("grounding_probe"))  # 2026-11-12, item 5
     cfg = env_config(Path(args.env_template), tasks, args.gs_root, args.prompt_format, switches)
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
     env = ActiveSpatialEnv(ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items() if k in keys}))
