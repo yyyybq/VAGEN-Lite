@@ -249,6 +249,11 @@ PY
 
 gsplat_env() {
   export CUDA_HOME=${CUDA_HOME:-$ENV_PREFIX}
+  # conda CUDA keeps headers / libs in targets/x86_64-linux/include and lib, not include / lib64 (the only dirs
+  # torch cpp_extension adds): without these g++ missed cuda_runtime_api.h (J5 2026-11-12, DECISIONS G19a)
+  [[ -d $CUDA_HOME/targets/x86_64-linux/include ]] && \
+    export CPATH="$CUDA_HOME/targets/x86_64-linux/include${CPATH:+:$CPATH}"
+  export LIBRARY_PATH="$CUDA_HOME/lib:$CUDA_HOME/targets/x86_64-linux/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
   export PATH="$ENV_PREFIX/bin:$PATH"
   [[ -x $ENV_PREFIX/bin/x86_64-conda-linux-gnu-gcc ]] && export CC=${CC:-$ENV_PREFIX/bin/x86_64-conda-linux-gnu-gcc}
   [[ -x $ENV_PREFIX/bin/x86_64-conda-linux-gnu-g++ ]] && export CXX=${CXX:-$ENV_PREFIX/bin/x86_64-conda-linux-gnu-g++}
