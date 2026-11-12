@@ -329,8 +329,9 @@ def make_policy(answers, calls, side_calls=None):
 
         def side_generate(self, system, user_text, image, earlier=(), as_sft=False, prefix="", stop="", max_tokens=0):
             if side_calls is not None:
-                side_calls.append((user_text, [(u, a) for u, _, a in earlier], prefix, stop, max_tokens))
-            return {"text": "front; distance=0.8</state>", "finish": "stop", "prompt_tokens": 99}
+                side_calls.append((user_text, [(u, a) for u, _, a in earlier], prefix, stop, max_tokens, as_sft))
+            return {"text": "=front; distance=0.8</state>", "finish": "stop", "stop_reason": "</state>",
+                    "prompt_tokens": 99}
 
     return Policy
 
@@ -456,7 +457,10 @@ class CmdRunTest(unittest.TestCase):
             self.assertEqual((read1, calls1), (read0, calls0))  # the action stream and what the env reads
             self.assertEqual([strip(r) for r in side], plain)  # results: only the probe fields differ
             self.assertEqual(side[0]["grounding"]["version"], G.VERSION_SIDE)
-            self.assertEqual(side[0]["grounding_turns"][0]["side_output"], "front; distance=0.8</state>")
+            self.assertEqual((side[0]["grounding"]["present"], side[0]["grounding"]["parsed"]), (None, 1.0))
+            t0 = side[0]["grounding_turns"][0]
+            self.assertEqual((t0["side_output"], t0["side_stop_reason"], t0["bearing_ok"]),
+                             ("=front; distance=0.8</state>", "</state>", True))
             self.assertEqual(
                 sorted(p.name for p in (Path(tmp) / "side" / "frames").iterdir()),
                 sorted(p.name for p in (Path(tmp) / "plain" / "frames").iterdir()))
@@ -472,32 +476,64 @@ class CmdRunTest(unittest.TestCase):
             self.assertIn("not supported for cambrian_qwen", str(ctx.exception))
             self.assertFalse((Path(tmp) / "cam" / "model.json").exists())
 
+    def test_side_mode_sft_text(self):
+        """--sft-text with --grounding-side: the side call gets as_sft as the action call does."""
+        Env, calls, side_calls = make_env(), [], []
+
+        class Policy(make_policy(STATED, calls, side_calls)):
+            def generate(self, system, user_text, image, earlier=(), as_sft=False):
+                calls.append(as_sft)
+                return STATED[1]
+
+        @dataclasses.dataclass
+        class Cfg:
+            jsonl_path: str = ""
+            prompt_format: str = ""
+
+        env_mod = types.ModuleType("vagen.envs.active_spatial.env")
+        env_mod.ActiveSpatialEnv = Env
+        cfg_mod = types.ModuleType("vagen.envs.active_spatial.env_config")
+        cfg_mod.ActiveSpatialEnvConfig = Cfg
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "tasks.jsonl").write_text(json.dumps(ITEM) + "\n")
+            with mock.patch.dict(sys.modules, {env_mod.__name__: env_mod, cfg_mod.__name__: cfg_mod}), \
+                    mock.patch.object(E, "VllmPolicy", Policy), \
+                    mock.patch.dict(os.environ, {"R1_RENDER_URL": "http://scripted.invalid"}):
+                E.main(["run", "--eval", tmp, "--name", "s", "--model", "/m", "--sft-text", "--grounding-side"])
+        self.assertEqual(calls, [True, True])
+        self.assertEqual([c[-1] for c in side_calls], [True, True])
+
 
 class SideEpisodeTest(unittest.TestCase):
     """v2 in run_episode: the action calls are exactly the plain run's (a policy that samples from its own RNG gives the
     same answers with the side calls on), the side calls see the action call's history and never enter it."""
 
-    def policy(self):
+    def policy(self, fail_at=None):
         import random
 
         class RngPolicy:
             last_prompt_tokens = None
 
-            def __init__(self):
-                self.rng, self.calls, self.side_calls = random.Random(7), [], []
+            def __init__(self, fail_at=None):
+                self.rng, self.calls, self.side_calls, self.images, self.fail_at = random.Random(7), [], [], [], fail_at
 
-            def generate(self, system, user_text, image, earlier=(), seed=None):
-                self.calls.append((system, user_text, [(u, a) for u, _, a in earlier], seed))
+            def generate(self, system, user_text, image, earlier=(), seed=None, as_sft=False):
+                self.calls.append((system, user_text, [(u, a) for u, _, a in earlier], seed, as_sft))
+                self.images.append(image)
                 return f"<action>{self.rng.choice(['move_backward', 'turn_left', 'move_forward'])}|</action>"
 
             def side_generate(self, system, user_text, image, earlier=(), as_sft=False, prefix="", stop="",
                               max_tokens=0):
                 self.side_calls.append(dict(system=system, user=user_text, earlier=[(u, a) for u, _, a in earlier],
-                                            prefix=prefix, stop=stop, max_tokens=max_tokens, image=image))
-                return {"text": ["right; distance=1,5 m", "front; distance=0.8</state>"][(len(self.side_calls) - 1) % 2],
-                        "finish": "length", "prompt_tokens": 7, "layout_ok": True, "shared_tokens": 5}
+                                            prefix=prefix, stop=stop, max_tokens=max_tokens, image=image,
+                                            as_sft=as_sft))
+                if len(self.side_calls) - 1 == self.fail_at:
+                    raise RuntimeError("side call failed")
+                return {"text": ["=right; distance=1,5 m", "=front; distance=0.8</state>"][(len(self.side_calls) - 1) % 2],
+                        "finish": "length", "stop_reason": None, "prompt_tokens": 7, "layout_ok": True,
+                        "shared_tokens": 5, "shared_expected": 6, "shared_ok": True}
 
-        return RngPolicy()
+        return RngPolicy(fail_at)
 
     def env(self):
         Env = make_env()
@@ -528,31 +564,60 @@ class SideEpisodeTest(unittest.TestCase):
         self.assertEqual(len(p1.side_calls), row1["turns"])
         probe = G.side_question(ITEM)
         for k, side in enumerate(p1.side_calls):
-            system, user, earlier, _ = p1.calls[k]
+            system, user, earlier = p1.calls[k][:3]
             self.assertEqual((side["system"], side["user"], side["earlier"]), (system, user + probe, earlier))
             self.assertEqual((side["prefix"], side["stop"], side["max_tokens"]),
                              (G.SIDE_PREFIX, G.SIDE_STOP, G.SIDE_MAX_TOKENS))
-        for _, _, earlier, _ in p1.calls:  # the side questions and answers never enter the history
+        for earlier in (c[2] for c in p1.calls):  # the side questions and answers never enter the history
             self.assertFalse(any("Question" in u or "<state>" in a for u, a in earlier))
         t = row1["grounding_turns"]
         self.assertEqual(t[0]["truth"], G.truth(ITEM, START))
-        self.assertEqual((t[0]["side_output"], t[0]["stated_bearing"], t[0]["stated_distance"], t[0]["side_finish"]),
-                         ("right; distance=1,5 m", "right", 1.5, "length"))
-        self.assertEqual((t[1]["bearing_ok"], t[1]["side_layout_ok"], t[1]["side_prompt_tokens"]), (True, True, 7))
+        self.assertEqual((t[0]["side_output"], t[0]["stated_bearing"], t[0]["stated_distance"], t[0]["side_finish"],
+                          t[0]["side_stop_reason"]), ("=right; distance=1,5 m", "right", 1.5, "length", None))
+        self.assertEqual((t[1]["bearing_ok"], t[1]["side_layout_ok"], t[1]["side_prompt_tokens"],
+                          t[1]["side_shared_tokens"], t[1]["side_shared_expected"], t[1]["side_shared_ok"]),
+                         (True, True, 7, 5, 6, True))
         self.assertEqual(row1["grounding"]["version"], G.VERSION_SIDE)
+        self.assertEqual([s["image"] for s in p1.side_calls], p1.images)  # the action call's frame object
+        self.assertTrue(all(s["image"] is im for s, im in zip(p1.side_calls, p1.images)))
         with self.assertRaises(ValueError):
             E.run_episode(self.env(), self.policy(), 0, 12, grounding=True, grounding_side=True)
 
+    def test_failed_side_call_costs_only_its_turn(self):
+        env0, p0 = self.env(), self.policy()
+        row0 = E.run_episode(env0, p0, 0, 12, history=True)
+        env1, p1 = self.env(), self.policy(fail_at=1)
+        row1 = E.run_episode(env1, p1, 0, 12, history=True, grounding_side=True, as_sft=True)
+        self.assertEqual([c[:4] for c in p1.calls], [c[:4] for c in p0.calls])  # the action stream goes on
+        self.assertEqual(env1.read, env0.read)
+        self.assertEqual({k: v for k, v in row1.items() if k not in ("grounding", "grounding_turns")}, row0)
+        t = row1["grounding_turns"]
+        self.assertEqual(len(t), row1["turns"])
+        self.assertEqual((t[1]["side_error"], t[1]["side_output"], t[1]["bearing_ok"], t[1]["both_ok"]),
+                         ("RuntimeError: side call failed", None, False, False))
+        self.assertNotIn("side_error", t[0])
+        self.assertEqual([s["as_sft"] for s in p1.side_calls], [True] * row1["turns"])  # as the action calls
+        s = G.summarize([row1])
+        self.assertEqual((s["present"], s["side"]["errors"], s["side"]["turns"]), (None, 0.25, 4))
+        self.assertEqual(s["by_turn"]["1"]["present"], None)
+
     def test_side_text(self):
-        self.assertEqual(G.side_text("front; distance=1.5</state>"), "<state>bearing=front; distance=1.5</state>")
-        self.assertEqual(G.side_text("left; distance=2"), "<state>bearing=left; distance=2</state>")  # closed
-        self.assertEqual(G.parse_statement(G.side_text("in front; distance=150cm")),
+        self.assertEqual(G.SIDE_PREFIX, "<state>bearing")
+        self.assertEqual(G.side_text("=front; distance=1.5</state>"), "<state>bearing=front; distance=1.5</state>")
+        self.assertEqual(G.side_text("=left; distance=2"), "<state>bearing=left; distance=2</state>")  # closed
+        self.assertEqual(G.parse_statement(G.side_text(": in front; distance=150cm")),
                          {"present": True, "bearing": "front", "distance": 1.5})
+        self.assertEqual(G.parse_statement(G.side_text("front; distance=1"))["bearing"], None)  # no "=": unreadable
         self.assertEqual(G.parse_statement(G.side_text(""))["bearing"], None)
         self.assertEqual(G.layout_check([1, 9, 2, 3], [1, 9, 8, 9, 2, 3, 5, 6], [5, 6], 9),
-                         {"layout_ok": True, "shared_tokens": 2})
+                         {"layout_ok": True, "shared_tokens": 2, "shared_expected": 1, "shared_ok": False})
+        self.assertTrue(G.layout_check([1, 4, 9, 2, 3], [1, 4, 8, 9, 2, 3, 5, 6], [5, 6], 9)["shared_ok"])
+        self.assertFalse(G.layout_check([1, 4, 4, 4, 9, 2], [1, 8, 9, 2, 5, 6], [5, 6], 9)["shared_ok"])
         self.assertFalse(G.layout_check([1, 9, 2, 3], [1, 9, 2, 4, 5, 6], [5, 6], 9)["layout_ok"])
         self.assertFalse(G.layout_check([1, 2, 3], [1, 2, 3, 5, 6], [5, 6], 9)["layout_ok"])  # no end token
+        rec = G.side_error_record("RuntimeError: x", GT_A, 2)
+        self.assertEqual((rec["turn"], rec["side_error"], rec["present"], rec["condition_ok"]),
+                         (2, "RuntimeError: x", False, False))
         text = G.side_question(ITEM)
         self.assertTrue(text.startswith("\n\nQuestion (answer it, no action this time): where is the standing air "
                                         "conditioner now?\n"))
@@ -598,7 +663,8 @@ class SidePolicyTest(unittest.TestCase):
             def generate(self, prompts, sampling_params=None, use_tqdm=False):
                 seen.append((prompts[0], sampling_params))
                 return [SimpleNamespace(prompt_token_ids=prompts[0]["prompt_token_ids"],
-                                        outputs=[SimpleNamespace(text=texts[len(seen) - 1], finish_reason="stop")])]
+                                        outputs=[SimpleNamespace(text=texts[len(seen) - 1], finish_reason="stop",
+                                                                 stop_reason="</state>")])]
 
             def chat(self, messages, sampling_params=None, use_tqdm=False):
                 return self.generate(self.preprocess_chat(messages), sampling_params=sampling_params)
@@ -610,7 +676,7 @@ class SidePolicyTest(unittest.TestCase):
 
         vllm = types.ModuleType("vllm")
         vllm.SamplingParams = lambda **k: SimpleNamespace(**k)
-        llm, seen = self.fake_llm(["<action>move_backward|</action>", "front; distance=1.5</state>"])
+        llm, seen = self.fake_llm(["<action>move_backward|</action>", "=front; distance=1.5</state>"])
         policy = E.VllmPolicy.__new__(E.VllmPolicy)
         policy.llm, policy.cambrian, policy.temperature, policy.top_p, policy.entropy = llm, None, 0.0, 1.0, False
         policy.last_prompt_tokens = policy.last_entropy = policy.last_tokens = policy.last_prompt_ids = None
@@ -645,37 +711,83 @@ class SidePolicyTest(unittest.TestCase):
                           side_params.include_stop_str_in_output, getattr(side_params, "seed", None)),
                          (0.0, G.SIDE_MAX_TOKENS, [G.SIDE_STOP], True, None))
         self.assertEqual(act_params.stop, ["</action>"])  # the action call: the plain sampling options
-        self.assertEqual((side["text"], side["finish"], side["layout_ok"]), ("front; distance=1.5</state>", "stop", True))
+        self.assertEqual((side["text"], side["finish"], side["stop_reason"], side["layout_ok"], side["shared_ok"]),
+                         ("=front; distance=1.5</state>", "stop", "</state>", True, True))
         self.assertEqual(side["prompt_tokens"], len(side_prompt["prompt_token_ids"]))
         self.assertGreater(side["shared_tokens"], len(self.tok.encode(head, add_special_tokens=False)))
+        self.assertEqual(side["shared_expected"], len(act_prompt["prompt_token_ids"]) - 5)  # less the generation prompt
         self.assertEqual(policy.last_prompt_tokens, tokens_after_action)  # the action call's reading stays
+        rec = G.side_record(side, G.truth(ITEM, START), 0)
+        self.assertEqual((rec["stated_bearing"], rec["stated_distance"], rec["side_stop_reason"], rec["side_shared_ok"]),
+                         ("front", 1.5, "</state>", True))
+
+    def test_prefix_is_a_natural_start(self):
+        """Every answer, tokenised as the model would write it, begins with the prefix's own tokens: the prefix ends
+        before the "=" ("=back" is one token here, "=" + front / left / right are two)."""
+        pre = self.tok.encode(G.SIDE_PREFIX, add_special_tokens=False)
+        gen = "<|im_start|>assistant\n"
+        in_place = self.tok.encode(gen + G.SIDE_PREFIX, add_special_tokens=False)
+        self.assertEqual(in_place, self.tok.encode(gen, add_special_tokens=False) + pre)
+        for word in ("front", "left", "right", "back"):
+            answer = f"<state>bearing={word}; distance=1.5</state>"
+            ids = self.tok.encode(answer, add_special_tokens=False)
+            self.assertEqual(ids[: len(pre)], pre, word)
+            self.assertEqual(self.tok.encode(gen + answer, add_special_tokens=False)[: len(in_place)], in_place, word)
+            self.assertEqual(self.tok.decode(ids[len(pre):]), answer[len(G.SIDE_PREFIX):], word)
 
 
 class SummaryKeyTest(unittest.TestCase):
-    def test_keys_by_set_and_merge(self):
+    def make(self, root, set_name, n, model="/models/q3d_300", version=G.VERSION_SIDE):
         st = "<state>bearing=front; distance=1.0</state>"
+        res = Path(root) / set_name / "m_grd"
+        res.mkdir(parents=True)
+        rows = [_row(i, i % 2 == 0, [(st, GT_A)]) for i in range(n)]
+        for r in rows:
+            r["grounding"] = {"version": version}
+            r["grounding_turns"][0].update(side_output="=front; distance=1.0</state>", side_finish="stop",
+                                           side_stop_reason="</state>", side_prompt_tokens=10, side_layout_ok=True,
+                                           side_shared_ok=True)
+        (res / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        (res / "model.json").write_text(json.dumps({"name": "m_grd", "model": model, "grounding_probe": version}))
+        return str(res)
+
+    def test_keys_by_set_and_merge(self):
         with tempfile.TemporaryDirectory() as tmp:
-            folders = []
-            for set_name, n in (("eval_val_v2", 3), ("eval_test_v2", 2)):
-                res = Path(tmp) / set_name / "m_grd"
-                res.mkdir(parents=True)
-                rows = [_row(i, i % 2 == 0, [(st, GT_A)]) for i in range(n)]
-                for r in rows:
-                    r["grounding_turns"][0].update(side_output="front; distance=1.0</state>", side_finish="stop",
-                                                   side_prompt_tokens=10, side_layout_ok=True)
-                (res / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-                folders.append(str(res))
+            folders = [self.make(tmp, "eval_val_v2", 3), self.make(tmp, "eval_test_v2", 2)]
             out = Path(tmp) / "s.json"
             G.main(["summary", "--result", folders[0], "--result", folders[1], "--out", str(out)])
             s = json.loads(out.read_text())
             self.assertEqual({k: v["episodes"] for k, v in s.items()}, {"eval_val_v2/m_grd": 3, "eval_test_v2/m_grd": 2})
             G.main(["summary", "--result", folders[0], "--result", folders[1], "--merge-name", "--out", str(out)])
             s = json.loads(out.read_text())
-            self.assertEqual((list(s), s["m_grd"]["episodes"], len(s["m_grd"]["results"])), (["m_grd"], 5, 2))
-            self.assertEqual((s["m_grd"]["side"]["parsed"], s["m_grd"]["side"]["layout_ok"],
-                              s["m_grd"]["side"]["finish"]), (1.0, 1.0, {"stop": 5}))
+            m = s["m_grd"]
+            self.assertEqual((list(s), m["episodes"], len(m["results"]), m["versions"]), (["m_grd"], 5, 2, [G.VERSION_SIDE]))
+            self.assertEqual((m["present"], m["parsed"], m["side"]["parsed"], m["side"]["layout_ok"],
+                              m["side"]["shared_ok"], m["side"]["finish"], m["side"]["stop_reason"], m["side"]["errors"]),
+                             (None, 1.0, 1.0, 1.0, 1.0, {"stop": 5}, {"</state>": 5}, 0.0))
             with self.assertRaises(SystemExit):  # the same key twice without --merge-name
                 G.main(["summary", "--result", folders[0], "--result", folders[0]])
+            # result_key resolves the path: "." and ".." give the real names
+            cwd = os.getcwd()
+            try:
+                os.chdir(folders[0])
+                self.assertEqual(G.result_key(Path("."), False), "eval_val_v2/m_grd")
+                self.assertEqual(G.result_key(Path("../m_grd"), True), "m_grd")
+            finally:
+                os.chdir(cwd)
+
+    def test_merge_refusals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            val = self.make(tmp, "eval_val_v2", 2)
+            same_path = str(Path(val) / ".." / "m_grd")  # the same folder by another spelling
+            other_root = self.make(Path(tmp) / "elsewhere", "eval_val_v2", 2)  # the same SET/NAME
+            other_model = self.make(tmp, "eval_test_v2", 2, model="/models/qw3tgd_310")
+            other_version = self.make(Path(tmp) / "v1", "eval_test_v2", 2, version=G.VERSION)
+            for second, why in ((same_path, "the same result folder twice"), (other_root, "the same SET/NAME"),
+                                (other_model, "differ in model.json"), (other_version, "differ in model.json")):
+                with self.subTest(why=why), self.assertRaises(SystemExit) as ctx:
+                    G.main(["summary", "--merge-name", "--result", val, "--result", second])
+                self.assertIn(why, str(ctx.exception))
 
 
 if __name__ == "__main__":

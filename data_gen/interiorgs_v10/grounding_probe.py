@@ -44,7 +44,10 @@ The summary (review of 2026-11-12): successful episodes are short and end with t
 a constant answer correlates with success.  Every reading is therefore reported next to the same reading of constant
 answers on the same turns (``BASELINE_*``: each bearing; distances of 0.5-3 m, the turns' median true distance, and
 for absolute_positioning the task's required distance; for the condition also each band), with the best of them and
-the model's excess over it.
+the model's excess over it.  In v2 ``present`` is None (the prefix writes the <state> block): the headline readings are
+``parsed`` (both fields could be read) and the ``side`` block (each field's readable share, failed side calls, how
+the calls ended).  ``summary`` keys results by SET/NAME; ``--merge-name`` merges a name's folders (one model, one probe
+version, no folder twice).
 """
 
 from __future__ import annotations
@@ -63,7 +66,10 @@ VERSION = "grounding_probe_v1"
 # v2 (the user's choice of 2026-11-12, after v1 got no readable statement: the trained models write only actions): a
 # side call per turn whose assistant reply is prefilled with SIDE_PREFIX; the action call is the plain evaluation's
 VERSION_SIDE = "grounding_probe_v2_side"
-SIDE_PREFIX = "<state>bearing="
+# without the "=": in this tokenizer "=back" is one token while front / left / right are "=" + the word, so a prefix
+# ending in "=" would force a lone "=" and make "back" a split the model never writes; the parser takes "=" or ":"
+SIDE_PREFIX = "<state>bearing"
+SHARED_SLACK = 2  # layout check: user-text tokens at the question's boundary may tokenise differently (".\n\n")
 SIDE_STOP = "</state>"
 SIDE_MAX_TOKENS = 24  # "straight ahead; distance=12.75 m</state>" is 14 tokens
 BEARINGS = ("front", "right", "back", "left")
@@ -145,7 +151,9 @@ def prefixed_prompt(prompt: Dict[str, Any], tokenizer: Any, prefix: str) -> Tupl
 def layout_check(action_ids: Sequence[int], side_ids: Sequence[int], prefix_ids: Sequence[int],
                  end_id: int) -> Dict[str, Any]:
     """v2, recorded per turn: the side prompt ends with the action prompt's generation prompt (its tokens from the
-    user turn's end-of-turn token on) and then the prefix; and how many leading tokens the two prompts share."""
+    user turn's end-of-turn token on) and then the prefix (layout_ok); how many leading tokens the two prompts share,
+    and whether that is the action prompt up to its user text's end, less at most SHARED_SLACK boundary tokens
+    (shared_ok: the question is appended to the user text and changes nothing before it)."""
     action_ids, side_ids, prefix_ids = list(action_ids), list(side_ids), list(prefix_ids)
     last = max((i for i, t in enumerate(action_ids) if t == end_id), default=None)
     tail = action_ids[last:] if last is not None else []
@@ -156,7 +164,32 @@ def layout_check(action_ids: Sequence[int], side_ids: Sequence[int], prefix_ids:
         if a != b:
             break
         shared += 1
-    return {"layout_ok": ok, "shared_tokens": shared}
+    expected = len(action_ids) - len(tail)
+    return {"layout_ok": ok, "shared_tokens": shared, "shared_expected": expected,
+            "shared_ok": bool(tail) and expected - SHARED_SLACK <= shared <= expected}
+
+
+def side_record(side: Dict[str, Any], gt: Dict[str, Any], turn: int) -> Dict[str, Any]:
+    """v2: a turn's record from the policy's side call (side_generate's result)."""
+    rec = score(side_text(side["text"]), gt, turn)
+    rec.update(side_output=side["text"], side_finish=side.get("finish"), side_stop_reason=side.get("stop_reason"),
+               side_prompt_tokens=side.get("prompt_tokens"))
+    for key in ("layout_ok", "shared_ok"):
+        if key in side:
+            rec["side_" + key] = bool(side[key])
+    for key in ("shared_tokens", "shared_expected"):
+        if key in side:
+            rec["side_" + key] = side[key]
+    return rec
+
+
+def side_error_record(error: str, gt: Dict[str, Any], turn: int) -> Dict[str, Any]:
+    """v2: a turn whose side call failed: no statement (every field wrong); the episode goes on."""
+    return dict(score("", gt, turn), side_output=None, side_error=str(error))
+
+
+def is_side(turn: Dict[str, Any]) -> bool:
+    return "side_output" in turn or "side_error" in turn
 
 
 def _bearing_word(text: str) -> Optional[str]:
@@ -289,9 +322,16 @@ def score(answer: str, gt: Dict[str, Any], turn: int) -> Dict[str, Any]:
 
 
 def episode_summary(turns: Sequence[Dict[str, Any]], version: str = VERSION) -> Dict[str, Any]:
+    """The episode's shares.  ``present`` (a <state> block was written) is v1's; in v2 the prefix writes it, so it is
+    None there and ``parsed`` (both fields could be read) is the reading."""
     n = len(turns)
     share = lambda k: (round(sum(bool(t.get(k)) for t in turns) / n, 4) if n else None)  # noqa: E731
-    out = {"version": version, "turns": n, "present": share("present"), "bearing_ok": share("bearing_ok"),
+    if version == VERSION_SIDE:
+        parsed = sum(t.get("stated_bearing") is not None and t.get("stated_distance") is not None for t in turns)
+        head = {"present": None, "parsed": round(parsed / n, 4) if n else None}
+    else:  # v1: exactly as v1 wrote it
+        head = {"present": share("present")}
+    out = {"version": version, "turns": n, **head, "bearing_ok": share("bearing_ok"),
            "distance_ok": share("distance_ok"), "both_ok": share("both_ok")}
     if any("condition_ok" in t for t in turns):
         out["condition_ok"] = share("condition_ok")
@@ -360,8 +400,18 @@ def _reading(pairs: Sequence[Pair], field: str) -> Dict[str, Any]:
                                    {n: _rate([m[field][n] for _, m in sel]) for n in names})}
 
 
+def _present(pairs: Sequence[Pair]) -> Optional[float]:
+    """The share of v1 turns with a <state> block (None without v1 turns: in v2 the prefix writes it)."""
+    return _rate([t["present"] for t, _ in pairs if not is_side(t)])
+
+
+def _parsed(pairs: Sequence[Pair]) -> Optional[float]:
+    """The share of turns whose statement gave both fields (v2's headline reading)."""
+    return _rate([READABLE["both_ok"](t) for t, _ in pairs])
+
+
 def _readings(pairs: Sequence[Pair]) -> Dict[str, Any]:
-    return {"n": len(pairs), "present": _rate([t["present"] for t, _ in pairs]),
+    return {"n": len(pairs), "present": _present(pairs), "parsed": _parsed(pairs),
             **{f: _reading(pairs, f) for f in FIELDS}}
 
 
@@ -452,7 +502,7 @@ def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "baseline_answers": {"bearing": list(BEARINGS), "distance_m": list(BASELINE_DISTANCES_M),
                              "median_m": median_m, "echo_required": "absolute_positioning: the task's distance",
                              "condition_bands": list(BANDS)},
-        "present": _rate([t["present"] for t, _ in pairs]),
+        "present": _present(pairs), "parsed": _parsed(pairs),
         "readable": {f: _rate([READABLE[f](t) for t, _ in pairs]) for f in ("bearing_ok", "distance_ok")},
         "accuracy": {f: _reading(pairs, f) for f in FIELDS},
         "accuracy_readable": {f: _reading([(t, m) for t, m in pairs if READABLE[f](t)], f) for f in FIELDS},
@@ -460,16 +510,19 @@ def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "episode_share_vs_success": {f: _correlation(eps, f) for f in FIELDS},
         "first_turn_vs_success": {f: _first_turn(eps, f) for f in FIELDS},
     }
-    side = [t for t, _ in pairs if "side_output" in t]
-    if side:  # v2: how the side calls ended and how many of them could be read
+    side = [t for t, _ in pairs if is_side(t)]
+    if side:  # v2 (the headline readings: parsed and the fields' readable shares): how the side calls ended
         out["side"] = {
             "turns": len(side),
             "parsed": _rate([READABLE["both_ok"](t) for t in side]),
             "bearing_readable": _rate([READABLE["bearing_ok"](t) for t in side]),
             "distance_readable": _rate([READABLE["distance_ok"](t) for t in side]),
-            "closed": _rate([bool(_CLOSE.search(t["side_output"] or "")) for t in side]),
+            "errors": _rate(["side_error" in t for t in side]),
+            "closed": _rate([bool(_CLOSE.search(t.get("side_output") or "")) for t in side]),
             "finish": dict(sorted(Counter(str(t.get("side_finish")) for t in side).items())),
+            "stop_reason": dict(sorted(Counter(str(t.get("side_stop_reason")) for t in side).items())),
             "layout_ok": _rate([t["side_layout_ok"] for t in side if "side_layout_ok" in t]),
+            "shared_ok": _rate([t["side_shared_ok"] for t in side if "side_shared_ok" in t]),
             "prompt_tokens_mean": _mean([float(t["side_prompt_tokens"]) for t in side
                                          if t.get("side_prompt_tokens") is not None])}
     by_turn: Dict[int, List[Pair]] = defaultdict(list)
@@ -501,19 +554,40 @@ def _jsonl(path: Path) -> List[Dict[str, Any]]:
 
 
 def result_key(result: Path, merge_name: bool) -> str:
-    """The summary's key of a result folder: "SET/NAME" (its evaluation set's folder and its own; the same model on
-    val and test are two keys), or with --merge-name only NAME (the folders of one name are summarised together)."""
-    return result.name if merge_name else f"{result.parent.name}/{result.name}"
+    """The summary's key of a result folder (its resolved path, so "." or ".." give the real names): "SET/NAME" (its
+    evaluation set's folder and its own; the same model on val and test are two keys), or with --merge-name only NAME
+    (the folders of one name are summarised together)."""
+    res = Path(result).resolve()
+    return res.name if merge_name else f"{res.parent.name}/{res.name}"
+
+
+def _model_info(result: Path) -> Tuple[Optional[str], Optional[str]]:
+    """(model.json "model", "grounding_probe") of a result folder; (None, None) without a model.json."""
+    path = Path(result) / "model.json"
+    if not path.is_file():
+        return None, None
+    model = json.loads(path.read_text())
+    return model.get("model"), model.get("grounding_probe")
 
 
 def cmd_summary(args: argparse.Namespace) -> None:
     groups: Dict[str, List[Path]] = defaultdict(list)
     for result in args.result:
-        res = Path(result)
+        res = Path(result).resolve()
         key = result_key(res, bool(args.merge_name))
         if not args.merge_name and groups.get(key):
             raise SystemExit(f"two result folders give the key {key}: {groups[key][0]} and {res}")
         groups[key].append(res)
+    for key, folders in groups.items():  # a merged group: distinct folders of one model and one probe version
+        if len(set(folders)) < len(folders):
+            raise SystemExit(f"{key}: the same result folder twice")
+        set_names = [result_key(res, False) for res in folders]
+        if len(set(set_names)) < len(set_names):
+            raise SystemExit(f"{key}: two folders of the same SET/NAME: {sorted(set_names)}")
+        infos = {res: _model_info(res) for res in folders}
+        if len(set(infos.values())) > 1:
+            raise SystemExit(f"{key}: the folders differ in model.json model / grounding_probe: "
+                             + "; ".join(f"{res}: {info}" for res, info in infos.items()))
     out = {}
     for key, folders in groups.items():
         out[key] = summarize([r for res in folders for r in _jsonl(res / "results.jsonl")])

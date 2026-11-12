@@ -44,8 +44,8 @@ truth at the pose its frame was rendered from) and ``grounding`` (the episode's 
 definitions and the ``summary``.  One probe version per result folder (model.json ``grounding_probe``); off,
 nothing changes.  ``run --grounding-side`` (v2, the user's choice of 2026-11-12: the trained models wrote no readable
 statement under v1): the action call is the plain run's, unchanged; after it, on the same frame, a separate greedy side
-call with the assistant reply prefilled (``<state>bearing=``) asks for the statement (grounding_probe.py, v2); the
-side calls never enter the history.  Qwen models only (the side call needs an assistant prefix in the chat prompt).
+call with the assistant reply prefilled (``<state>bearing``) asks for the statement (grounding_probe.py, v2); the
+side calls never enter the history, and a failed side call costs only that turn's statement (``side_error``).  Qwen models only (the side call needs an assistant prefix in the chat prompt).
 """
 
 from __future__ import annotations
@@ -467,16 +467,15 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
             seen.update(entropy=round(float(policy.last_entropy), 5), tokens=int(policy.last_tokens or 0))
         if grounding_side:  # v2: the same frame, the action call's earlier turns (kw), the plain user text + question
-            side = policy.side_generate(system, user_text + grounding_probe.side_question(item), images[0],
-                                        earlier=kw.get("earlier", []), as_sft=bool(kw.get("as_sft", False)),
-                                        prefix=grounding_probe.SIDE_PREFIX, stop=grounding_probe.SIDE_STOP,
-                                        max_tokens=grounding_probe.SIDE_MAX_TOKENS)
-            rec = grounding_probe.score(grounding_probe.side_text(side["text"]), truth, turns)
-            rec.update(side_output=side["text"], side_finish=side.get("finish"),
-                       side_prompt_tokens=side.get("prompt_tokens"))
-            if "layout_ok" in side:
-                rec.update(side_layout_ok=bool(side["layout_ok"]), side_shared_tokens=side.get("shared_tokens"))
-            probe_turns.append(rec)
+            try:
+                side = policy.side_generate(system, user_text + grounding_probe.side_question(item), images[0],
+                                            earlier=kw.get("earlier", []), as_sft=bool(kw.get("as_sft", False)),
+                                            prefix=grounding_probe.SIDE_PREFIX, stop=grounding_probe.SIDE_STOP,
+                                            max_tokens=grounding_probe.SIDE_MAX_TOKENS)
+            except Exception as exc:  # the turn's statement is lost (scored wrong); the action stream goes on
+                probe_turns.append(grounding_probe.side_error_record(f"{type(exc).__name__}: {exc}", truth, turns))
+            else:
+                probe_turns.append(grounding_probe.side_record(side, truth, turns))
         obs, reward, done, step_info = env.step(grounding_probe.answer_part(text) if grounding else text)
         if grounding:
             probe_turns.append(grounding_probe.score(text, truth, turns))
@@ -636,6 +635,8 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
         out = self.llm.generate([prompt], sampling_params=params, use_tqdm=False)
         side_ids = list(out[0].prompt_token_ids)
         result = {"text": out[0].outputs[0].text, "finish": out[0].outputs[0].finish_reason,
+                  # the stop string or token that ended it (None: the token limit or the end-of-sequence token)
+                  "stop_reason": getattr(out[0].outputs[0], "stop_reason", None),
                   "prompt_tokens": len(side_ids)}
         if self.last_prompt_ids is not None:
             end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")  # the Qwen chat templates' end of a turn
@@ -1026,7 +1027,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "the env's truth (grounding_probe.py); the action is read as before")
     r.add_argument("--grounding-side", action="store_true",
                    help="grounding probe v2 (2026-11-12): the action call is the plain run's; after it a separate "
-                        "greedy call on the same frame, the reply prefilled with <state>bearing=, asks for the "
+                        "greedy call on the same frame, the reply prefilled with <state>bearing, asks for the "
                         "statement (grounding_probe.py); the side calls never enter the history")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
