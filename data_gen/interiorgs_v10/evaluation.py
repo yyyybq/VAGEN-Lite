@@ -42,7 +42,10 @@ to every user turn (state the bearing and distance of the task's first object be
 answer without its ``<state>`` line, and each row carries ``grounding_turns`` (every turn's statement scored against the
 truth at the pose its frame was rendered from) and ``grounding`` (the episode's shares); grounding_probe.py has the
 definitions and the ``summary``.  One probe version per result folder (model.json ``grounding_probe``); off,
-nothing changes.
+nothing changes.  ``run --grounding-side`` (v2, the user's choice of 2026-11-12: the trained models wrote no readable
+statement under v1): the action call is the plain run's, unchanged; after it, on the same frame, a separate greedy side
+call with the assistant reply prefilled (``<state>bearing=``) asks for the statement (grounding_probe.py, v2); the
+side calls never enter the history.  Qwen models only (the side call needs an assistant prefix in the chat prompt).
 """
 
 from __future__ import annotations
@@ -405,7 +408,7 @@ def call_seed(base: int, index: int, sample: int, turn: int) -> int:
 
 def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None,
                 history: bool = False, as_sft: bool = False, sample: Optional[int] = None,
-                seed: Optional[int] = None, grounding: bool = False) -> Dict[str, Any]:
+                seed: Optional[int] = None, grounding: bool = False, grounding_side: bool = False) -> Dict[str, Any]:
     """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py.
 
     With ``frames`` (round 8) the row also carries the trajectory: per turn the frame the model saw (a JPEG in
@@ -415,14 +418,18 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
     with ``as_sft`` every message is passed through ``sft_text`` first.  ``sample`` / ``seed`` (round 11): the
     sample number of a sampled run and the base seed of its model calls (``call_seed``); frames are then named
     <index>_s<sample>_<turn>.jpg.  ``grounding`` (2026-11-12, item 5): the grounding probe (grounding_probe.py); the
-    user text the model saw (the probe instruction appended) is what the history and the trajectory keep."""
+    user text the model saw (the probe instruction appended) is what the history and the trajectory keep.
+    ``grounding_side`` (v2): the action call is unchanged; after it, before the env moves the camera, the policy's
+    side_generate asks for the statement on the same frame with the same earlier turns (never added to them)."""
     obs, info = env.reset(seed=index)
     system = env.system_prompt()
     item = env.current_item or {}
     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
     done, trajectory, end_reason, earlier = False, [], None, []
     probe_turns: List[Dict[str, Any]] = []
-    if grounding:
+    if grounding and grounding_side:
+        raise ValueError("one grounding probe per run: grounding (v1) or grounding_side (v2)")
+    if grounding or grounding_side:
         from data_gen.interiorgs_v10 import grounding_probe
     start = gate_summary(env._calculate_canonical_metric()) if frames is not None else None
 
@@ -449,6 +456,8 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         if grounding:  # the truth at the pose this frame was rendered from, before the action moves the camera
             truth = grounding_probe.truth(item, env.view_engine.get_pose())
             user_text += grounding_probe.instruction(item)
+        if grounding_side:  # v2: the truth at this frame's pose (the side call comes after the action call)
+            truth = grounding_probe.truth(item, env.view_engine.get_pose())
         text = policy.generate(system, user_text, images[0], **kw)
         if history:
             earlier.append((user_text, images[0], text))
@@ -457,6 +466,17 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             seen["prompt_tokens"] = policy.last_prompt_tokens
         if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
             seen.update(entropy=round(float(policy.last_entropy), 5), tokens=int(policy.last_tokens or 0))
+        if grounding_side:  # v2: the same frame, the action call's earlier turns (kw), the plain user text + question
+            side = policy.side_generate(system, user_text + grounding_probe.side_question(item), images[0],
+                                        earlier=kw.get("earlier", []), as_sft=bool(kw.get("as_sft", False)),
+                                        prefix=grounding_probe.SIDE_PREFIX, stop=grounding_probe.SIDE_STOP,
+                                        max_tokens=grounding_probe.SIDE_MAX_TOKENS)
+            rec = grounding_probe.score(grounding_probe.side_text(side["text"]), truth, turns)
+            rec.update(side_output=side["text"], side_finish=side.get("finish"),
+                       side_prompt_tokens=side.get("prompt_tokens"))
+            if "layout_ok" in side:
+                rec.update(side_layout_ok=bool(side["layout_ok"]), side_shared_tokens=side.get("shared_tokens"))
+            probe_turns.append(rec)
         obs, reward, done, step_info = env.step(grounding_probe.answer_part(text) if grounding else text)
         if grounding:
             probe_turns.append(grounding_probe.score(text, truth, turns))
@@ -486,8 +506,9 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
            "actions": attempted, "collisions": collisions, "invalid_turns": invalid}
     if sample is not None:
         row["sample"] = int(sample)
-    if grounding:
-        row.update(grounding_turns=probe_turns, grounding=grounding_probe.episode_summary(probe_turns))
+    if grounding or grounding_side:
+        version = grounding_probe.VERSION_SIDE if grounding_side else grounding_probe.VERSION
+        row.update(grounding_turns=probe_turns, grounding=grounding_probe.episode_summary(probe_turns, version))
     if frames is not None:
         last = _images(obs)
         row.update(task_description=item.get("task_description"), start=start, trajectory=trajectory,
@@ -566,6 +587,7 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
         self.entropy = bool(entropy)  # round 12 freeze: the answers' token entropy (last_entropy, last_tokens)
         self.last_entropy: Optional[float] = None
         self.last_tokens: Optional[int] = None
+        self.last_prompt_ids: Optional[List[int]] = None  # grounding probe v2: the layout check of the side call
 
     def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
                  as_sft: bool = False, seed: Optional[int] = None) -> str:
@@ -581,12 +603,54 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
             out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft),
                                 sampling_params=params, use_tqdm=False)
         self.last_prompt_tokens = len(out[0].prompt_token_ids)
+        self.last_prompt_ids = list(out[0].prompt_token_ids)
         if self.entropy:
             steps = out[0].outputs[0].logprobs or []
             self.last_entropy = top_logprob_entropy([[lp.logprob for lp in pos.values()] for pos in steps],
                                                     self.temperature)
             self.last_tokens = len(steps)
         return out[0].outputs[0].text
+
+    def side_generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
+                      as_sft: bool = False, prefix: str = "", stop: str = "</state>",
+                      max_tokens: int = 24) -> Dict[str, Any]:
+        """Grounding probe v2: one greedy call whose assistant reply starts with ``prefix``.  The chat is built as
+        generate builds it (chat_messages, then LLM.preprocess_chat: the code LLM.chat runs, the chat template with
+        its generation prompt) and the prefix's tokens are appended after the generation prompt
+        (grounding_probe.prefixed_prompt), so no end-of-turn token follows the prefix.  Greedy without a seed: the
+        action calls' sampling seeds are per request and their own.  Leaves last_prompt_tokens / last_entropy (the
+        action call's) as they are.  Returns the completion, how it ended, the prompt's tokens and the layout check
+        against the last action call's prompt."""
+        if self.cambrian is not None:
+            raise RuntimeError("the grounding side call needs an assistant prefix in the chat prompt; the Cambrian "
+                               "path (cambrian_request) has none")
+        from vllm import SamplingParams
+
+        from data_gen.interiorgs_v10 import grounding_probe
+
+        params = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=int(max_tokens), stop=[stop],
+                                include_stop_str_in_output=True)
+        tokenizer = self.llm.get_tokenizer()
+        prompt = self.llm.preprocess_chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft))[0]
+        prompt, prefix_ids = grounding_probe.prefixed_prompt(prompt, tokenizer, prefix)
+        out = self.llm.generate([prompt], sampling_params=params, use_tqdm=False)
+        side_ids = list(out[0].prompt_token_ids)
+        result = {"text": out[0].outputs[0].text, "finish": out[0].outputs[0].finish_reason,
+                  "prompt_tokens": len(side_ids)}
+        if self.last_prompt_ids is not None:
+            end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")  # the Qwen chat templates' end of a turn
+            result.update(grounding_probe.layout_check(self.last_prompt_ids, side_ids, prefix_ids, end_id))
+        return result
+
+
+def check_side_support(model: str) -> None:
+    """Grounding probe v2: the side call needs an assistant prefix in the chat prompt, which only the chat path (the
+    Qwen models) has; a Cambrian model is refused before anything starts."""
+    from vagen.models.model_types import of_checkpoint
+
+    if of_checkpoint(model) == "cambrian_qwen":
+        raise SystemExit(f"{model}: --grounding-side is not supported for cambrian_qwen (its prompt is built by "
+                         "cambrian_request, without an assistant prefix)")
 
 
 def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU and the render service
@@ -601,11 +665,16 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     switches = switch_overrides(args)
     check_resume_rule(out, switches)  # experiment 3A: before the env, the model and model.json
     probe = bool(getattr(args, "grounding_probe", False))
+    side = bool(getattr(args, "grounding_side", False))  # grounding probe v2
+    if probe and side:
+        raise SystemExit("--grounding-probe and --grounding-side: one grounding probe per run")
     probe_key: Dict[str, Any] = {}
-    if probe:
+    if probe or side:
         from data_gen.interiorgs_v10 import grounding_probe
 
-        probe_key = {"grounding_probe": grounding_probe.VERSION}
+        probe_key = {"grounding_probe": grounding_probe.VERSION_SIDE if side else grounding_probe.VERSION}
+    if side:
+        check_side_support(args.model)
     check_resume_probe(out, probe_key.get("grounding_probe"))  # 2026-11-12, item 5
     cfg = env_config(Path(args.env_template), tasks, args.gs_root, args.prompt_format, switches)
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
@@ -617,6 +686,8 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                         max_images=int(args.max_turns) if args.history else 1,
                         temperature=float(args.temperature) if sampled else 0.0,
                         top_p=float(args.top_p) if sampled else 1.0, entropy=bool(getattr(args, "entropy", False)))
+    if side and hasattr(policy, "llm") and not hasattr(policy.llm, "preprocess_chat"):
+        raise SystemExit("--grounding-side needs vLLM's LLM.preprocess_chat (vLLM 0.11)")
     (out / "model.json").write_text(json.dumps({"name": args.name, "model": args.model, "version": VERSION,
                                                 "prompt_format": cfg["prompt_format"], "greedy": not sampled,
                                                 "samples": int(args.samples) if sampled else 1,
@@ -640,7 +711,8 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                 try:
                     row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames",
                                       history=args.history, as_sft=args.sft_text, sample=k,
-                                      seed=int(args.sample_seed) if sampled else None, grounding=probe)
+                                      seed=int(args.sample_seed) if sampled else None, grounding=probe,
+                                      grounding_side=side)
                 except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
                     row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
                     if k is not None:
@@ -952,6 +1024,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="the user's supplement of 2026-11-12, item 5: every turn the model first states the bearing and "
                         "distance of the task's first object (<state>bearing=B; distance=D</state>), scored against "
                         "the env's truth (grounding_probe.py); the action is read as before")
+    r.add_argument("--grounding-side", action="store_true",
+                   help="grounding probe v2 (2026-11-12): the action call is the plain run's; after it a separate "
+                        "greedy call on the same frame, the reply prefilled with <state>bearing=, asks for the "
+                        "statement (grounding_probe.py); the side calls never enter the history")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     m = sub.add_parser("terminal", help="round 12 batch: end progress, conditions met at the end, collision rate")

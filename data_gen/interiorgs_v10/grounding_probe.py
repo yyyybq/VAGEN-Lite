@@ -30,6 +30,16 @@ The statement (one line before the action; the instruction, ``instruction``, is 
 * A missing or unreadable statement scores every field as wrong; the action is read as before (``answer_part``
   takes the first ``<state>...</state>`` out of the answer before the env reads it).
 
+v2, the side call (``run --grounding-side``, VERSION_SIDE; the user's choice of 2026-11-12 after v1, whose
+statements no trained model wrote readably): the action call is the plain evaluation's call, unchanged (no probe text;
+the action stream is the plain run's).  After it, on the same frame and before the env moves the camera, a separate
+greedy call gets the same system prompt and the same earlier turns (plain texts and answers; side calls never enter
+the history), the plain user text plus ``side_question``, and an assistant reply prefilled with ``SIDE_PREFIX``
+(``prefixed_prompt``: the prefix's tokens after the chat template's generation prompt); it stops at ``SIDE_STOP``
+or after ``SIDE_MAX_TOKENS``.  ``side_text`` (prefix + completion, closed when it was not) is scored as above.  Each
+turn also records the raw completion, how it ended, the side prompt's tokens and the layout check (``layout_check``:
+the side prompt is the action prompt's generation prompt followed by the prefix).
+
 The summary (review of 2026-11-12): successful episodes are short and end with the object in view and near, so even
 a constant answer correlates with success.  Every reading is therefore reported next to the same reading of constant
 answers on the same turns (``BASELINE_*``: each bearing; distances of 0.5-3 m, the turns' median true distance, and
@@ -43,13 +53,19 @@ import argparse
 import json
 import math
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 VERSION = "grounding_probe_v1"
+# v2 (the user's choice of 2026-11-12, after v1 got no readable statement: the trained models write only actions): a
+# side call per turn whose assistant reply is prefilled with SIDE_PREFIX; the action call is the plain evaluation's
+VERSION_SIDE = "grounding_probe_v2_side"
+SIDE_PREFIX = "<state>bearing="
+SIDE_STOP = "</state>"
+SIDE_MAX_TOKENS = 24  # "straight ahead; distance=12.75 m</state>" is 14 tokens
 BEARINGS = ("front", "right", "back", "left")
 BEARING_TOL_DEG = 10.0
 DIST_TOL_FLOOR_M = 0.3
@@ -97,6 +113,50 @@ def instruction(item: Dict[str, Any]) -> str:
             "left or right (45 to 135 degrees to that side), or back (otherwise).\n"
             "<D> is its horizontal distance from you in meters, to its nearest side, as a number.\n"
             "Then write the action as above.")
+
+
+def side_question(item: Dict[str, Any]) -> str:
+    """v2: the text appended to the plain user turn in the side call (the action call never sees it)."""
+    return ("\n\nQuestion (answer it, no action this time): where is " + object_ref(item) + " now?\n"
+            "Answer in one line: <state>bearing=<B>; distance=<D></state>\n"
+            "<B> is front (within 45 degrees of straight ahead, inside your view), left or right (45 to 135 degrees "
+            "to that side), or back (otherwise).\n"
+            "<D> is its horizontal distance from you in meters, to its nearest side, as a number.")
+
+
+_CLOSE = re.compile(r"<\s*/\s*state\s*>", re.I)
+
+
+def side_text(completion: str) -> str:
+    """v2: the statement as it is scored: the prefix, the completion, and the closing tag when the completion ended
+    without it (the model's end of turn or the token limit)."""
+    text = SIDE_PREFIX + (completion or "")
+    return text if _CLOSE.search(completion or "") else text + SIDE_STOP
+
+
+def prefixed_prompt(prompt: Dict[str, Any], tokenizer: Any, prefix: str) -> Tuple[Dict[str, Any], List[int]]:
+    """v2: a chat prompt (vLLM's LLM.preprocess_chat, the code LLM.chat runs: the chat template with the generation
+    prompt, then token ids) with the prefix's tokens appended after the generation prompt; no end-of-turn token
+    follows the prefix.  Returns the new prompt and the prefix's ids."""
+    ids = list(tokenizer.encode(prefix, add_special_tokens=False))
+    return dict(prompt, prompt_token_ids=list(prompt["prompt_token_ids"]) + ids), ids
+
+
+def layout_check(action_ids: Sequence[int], side_ids: Sequence[int], prefix_ids: Sequence[int],
+                 end_id: int) -> Dict[str, Any]:
+    """v2, recorded per turn: the side prompt ends with the action prompt's generation prompt (its tokens from the
+    user turn's end-of-turn token on) and then the prefix; and how many leading tokens the two prompts share."""
+    action_ids, side_ids, prefix_ids = list(action_ids), list(side_ids), list(prefix_ids)
+    last = max((i for i, t in enumerate(action_ids) if t == end_id), default=None)
+    tail = action_ids[last:] if last is not None else []
+    body = side_ids[: len(side_ids) - len(prefix_ids)]
+    ok = bool(tail) and side_ids[len(body):] == prefix_ids and body[len(body) - len(tail):] == tail
+    shared = 0
+    for a, b in zip(action_ids, side_ids):
+        if a != b:
+            break
+        shared += 1
+    return {"layout_ok": ok, "shared_tokens": shared}
 
 
 def _bearing_word(text: str) -> Optional[str]:
@@ -228,10 +288,10 @@ def score(answer: str, gt: Dict[str, Any], turn: int) -> Dict[str, Any]:
     return rec
 
 
-def episode_summary(turns: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+def episode_summary(turns: Sequence[Dict[str, Any]], version: str = VERSION) -> Dict[str, Any]:
     n = len(turns)
     share = lambda k: (round(sum(bool(t.get(k)) for t in turns) / n, 4) if n else None)  # noqa: E731
-    out = {"version": VERSION, "turns": n, "present": share("present"), "bearing_ok": share("bearing_ok"),
+    out = {"version": version, "turns": n, "present": share("present"), "bearing_ok": share("bearing_ok"),
            "distance_ok": share("distance_ok"), "both_ok": share("both_ok")}
     if any("condition_ok" in t for t in turns):
         out["condition_ok"] = share("condition_ok")
@@ -386,7 +446,8 @@ def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     eps = [(r, [(t, baseline_marks(t["truth"], median_m)) for t in r["grounding_turns"]]) for r in eps_rows]
     pairs = [p for _, ps in eps for p in ps]
     out: Dict[str, Any] = {
-        "version": VERSION, "episodes": len(eps), "turns": len(pairs),
+        "versions": sorted({str((r.get("grounding") or {}).get("version", VERSION)) for r in eps_rows}),
+        "episodes": len(eps), "turns": len(pairs),
         "success": _rate([r["success"] for r, _ in eps]),
         "baseline_answers": {"bearing": list(BEARINGS), "distance_m": list(BASELINE_DISTANCES_M),
                              "median_m": median_m, "echo_required": "absolute_positioning: the task's distance",
@@ -399,6 +460,18 @@ def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "episode_share_vs_success": {f: _correlation(eps, f) for f in FIELDS},
         "first_turn_vs_success": {f: _first_turn(eps, f) for f in FIELDS},
     }
+    side = [t for t, _ in pairs if "side_output" in t]
+    if side:  # v2: how the side calls ended and how many of them could be read
+        out["side"] = {
+            "turns": len(side),
+            "parsed": _rate([READABLE["both_ok"](t) for t in side]),
+            "bearing_readable": _rate([READABLE["bearing_ok"](t) for t in side]),
+            "distance_readable": _rate([READABLE["distance_ok"](t) for t in side]),
+            "closed": _rate([bool(_CLOSE.search(t["side_output"] or "")) for t in side]),
+            "finish": dict(sorted(Counter(str(t.get("side_finish")) for t in side).items())),
+            "layout_ok": _rate([t["side_layout_ok"] for t in side if "side_layout_ok" in t]),
+            "prompt_tokens_mean": _mean([float(t["side_prompt_tokens"]) for t in side
+                                         if t.get("side_prompt_tokens") is not None])}
     by_turn: Dict[int, List[Pair]] = defaultdict(list)
     for t, m in pairs:
         by_turn[int(t["turn"])].append((t, m))
@@ -427,12 +500,24 @@ def _jsonl(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def result_key(result: Path, merge_name: bool) -> str:
+    """The summary's key of a result folder: "SET/NAME" (its evaluation set's folder and its own; the same model on
+    val and test are two keys), or with --merge-name only NAME (the folders of one name are summarised together)."""
+    return result.name if merge_name else f"{result.parent.name}/{result.name}"
+
+
 def cmd_summary(args: argparse.Namespace) -> None:
-    out = {}
+    groups: Dict[str, List[Path]] = defaultdict(list)
     for result in args.result:
         res = Path(result)
-        out[res.name] = summarize(_jsonl(res / "results.jsonl"))
-        out[res.name]["result"] = str(res)
+        key = result_key(res, bool(args.merge_name))
+        if not args.merge_name and groups.get(key):
+            raise SystemExit(f"two result folders give the key {key}: {groups[key][0]} and {res}")
+        groups[key].append(res)
+    out = {}
+    for key, folders in groups.items():
+        out[key] = summarize([r for res in folders for r in _jsonl(res / "results.jsonl")])
+        out[key]["results"] = [str(res) for res in folders]
     text = json.dumps(out, indent=1, sort_keys=True)
     if args.out:
         Path(args.out).write_text(text + "\n")
@@ -445,6 +530,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s = sub.add_parser("summary", help="statement accuracy and its relation to success, next to constant answers")
     s.add_argument("--result", required=True, action="append", help="a probe run's result folder (repeatable)")
     s.add_argument("--out", default=None, help="JSON file")
+    s.add_argument("--merge-name", action="store_true",
+                   help="summarise the folders of one name together (e.g. a model's val and test); default: one key "
+                        "per SET/NAME")
     args = p.parse_args(argv)
     {"summary": cmd_summary}[args.cmd](args)
     return 0
