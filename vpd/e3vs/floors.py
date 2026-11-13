@@ -12,7 +12,7 @@ Choice: the highest train success; ties -> the shorter sequence -> the earlier o
 Pre-registered gate floor (DECISIONS B8, PREREG_E3VS_PILOT): "the train-chosen fixed action sequence's test
 success under the frozen collision model".  Run without collision this reproduces the survey: (move_up,
 look_down) train 16.1%, val 10.8%, test 14.1%.  The frozen floor comes from the e3vs-prep job with
-``--collides <occupancy factory>``.
+``--collides vpd.e3vs.mesh_collision:load_collider --tag mesh`` (floors_mesh.json; the official mesh model).
 
 Output (``--out``, default OUT/e3vs/floors/floors_<tag>.json): the choice with k/n/rate/Wilson 95% per split,
 the train top 10, reference sequences, the per-episode test and val outcomes of the chosen sequence, inputs and

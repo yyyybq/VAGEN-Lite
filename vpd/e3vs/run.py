@@ -10,13 +10,15 @@ vLLM sees the free memory it asks for.  --base-url uses an already running serve
 built-in FakeServer (tests and login smoke; no model).
 
 --mode u,c runs both decoding modes of the same weights in ONE server session: the episodes of both modes go
-through one pool, scene-major (scene, mode, episode), so each scene's PLY and grid are loaded once for both; each
+through one pool, scene-major (scene, mode, episode), so each scene's PLY and mesh are loaded once for both; each
 mode still gets its own run dir, manifest, audit and results (identical to two single-mode runs but for timing).
 Scene objects (renderer, collider) live in a refcounted cache: an episode holds its scene's objects from its
 first to its last decision, a scene with an episode in flight is never evicted, and at most SCENE_CACHE idle
 scenes stay resident; so a scene-major run loads every scene exactly once (manifest scene_loads).
-Preflight, before any server starts: with the frozen collider every scene needs its occupancy grid, with gsplat
-every scene needs a non-empty PLY; otherwise the run is refused (SystemExit), no GPU time is spent.
+Preflight, before any server starts: with the frozen collider the mesh validation (OUT/e3vs/mesh_val/
+validation.json) must pass and every scene needs its collision mesh with the validated sha256 (a mesh set other
+than the validated one is refused), with gsplat every scene needs a non-empty PLY; otherwise the run is refused
+(SystemExit), no GPU time is spent.
 SIGTERM (the payload's step timeout) aborts promptly: queued episodes are cancelled, running ones stop at their
 next decision, the vLLM server is shut down, the process exits 143, no results.json is written.
 
@@ -25,9 +27,10 @@ decision t renders the current pose (512x512 PNG), sends [system, user(text + im
 make_sft.Prompts, no history), greedy, max_tokens 128.  The reply is parsed with the official lenient parser
 (agents/base_agent.py _parse_response_to_action, non-think: "action: <name>" in the last 5 lines, then anywhere,
 then 'stop' / an action name in the last 200 characters, else move_forward with error=True; an empty reply is
-stop with error=True as agents/qwen.py).  A move whose segment collides under the frozen occupancy model
-(--collides, default vpd.e3vs.occupancy:load_collider) is skipped: the pose stays, the step is consumed and the
-next prompt says "Collision occurred".  Rotations are never tested (the official ray of a rotation has length 0).
+stop with error=True as agents/qwen.py).  A move whose segment collides under the frozen collision model, the
+official E3VS Collisions on the ScanNet++ mesh (--collides, default vpd.e3vs.mesh_collision:load_collider), is
+skipped: the pose stays, the step is consumed and the next prompt says "Collision occurred".  Rotations are never
+tested (the official ray of a rotation has length 0).
 Modes: u = unconstrained (PRIMARY, B12); c = constrained, every request carries
 extra_body {"structured_outputs": {"regex": make_sft.REGEX}} (THOUGHT empty; the E2 mechanism check).  Both modes
 record per decision: lenient action and error flag, strict regex fullmatch, collision, finish reason, tokens.
@@ -35,7 +38,8 @@ record per decision: lenient action and error flag, strict regex fullmatch, coll
 RUN dir (--run-dir, else --out-root/<pilot__START__TIER__MODE>): episodes.jsonl (one line per finished episode:
 poses, actions, collisions, parse flags, replies), prompt_dump.jsonl (the first 3 calls of the first episode,
 images as paths), images/ (the PNGs of the first --save-images episodes), manifest.json (git, E3VS commit
-bb7e603c + episode md5s, PLY sha256 and occupancy sha256 per scene, prompt template sha256, decoding, server,
+bb7e603c + episode md5s, PLY sha256 and mesh sha256 per scene, the collision model (official file sha256,
+tolerance, the validated mesh_set_sha256), prompt template sha256, decoding, server,
 adapter, gsplat version + the job's B18 probe (--gsplat-probe, else $VPD_GSPLAT_PROBE), scene load counts and
 seconds), audit.json (image tokens from the processor's image_grid_thw; HF vs server prompt tokens, B4/B5), and
 results.json from vpd.e3vs.summary.score (results_invalid.json when an episode is missing or failed).  An
@@ -71,11 +75,12 @@ from vpd.e3vs import ACTIONS, MAX_DECISIONS, TRANSLATIONS, check_repo, code_meta
     sha256_file
 from vpd.e3vs import geometry as G
 from vpd.e3vs import make_sft as M
+from vpd.e3vs import mesh_collision as MC
 
 TIERS = ("raw", "0W", "100")
 MODES = ("u", "c")
 MODE_NAMES = {"u": "unconstrained (primary)", "c": "constrained (secondary, E2 mechanism check)"}
-DEFAULT_COLLIDES = "vpd.e3vs.occupancy:load_collider"
+DEFAULT_COLLIDES = MC.FACTORY  # vpd.e3vs.mesh_collision:load_collider
 MAX_TOKENS = 128  # official max_output_tokens (single_frame.yaml)
 CONCURRENCY = 24
 SCENE_CACHE = 2  # idle scenes kept resident (scenes with an episode in flight are never evicted); scene-major
@@ -517,31 +522,57 @@ def select_episodes(split: str, repo: Path, limit: int | None, ids: str | None) 
 
 
 def scene_provenance(scenes, renderer: str, collides: str | None) -> dict:
-    from vpd.e3vs import occupancy as OC
     from vpd.e3vs import render as RD
 
+    val = MC.load_validation() if collides == DEFAULT_COLLIDES else None
+    vsc = (val or {}).get("scenes") or {}
     out = {}
     for s in sorted(set(scenes)):
-        e = {"ply_sha256": None, "ply_present": None, "occ_sha256": None, "occ_path": None}
+        e = {"ply_sha256": None, "ply_present": None, "mesh_path": None, "mesh_sha256": None,
+             "mesh_validated_sha256": None}
         if renderer == "gsplat":
             p = RD.ply_path(s)
             e["ply_present"] = p.is_file() and p.stat().st_size > 0
             e["ply_sha256"] = RD.ply_sha256(s) if e["ply_present"] else None
         if collides == DEFAULT_COLLIDES:
-            p = OC.occ_path(s)
-            e["occ_path"] = str(p)
-            e["occ_sha256"] = sha256_file(p) if p.is_file() else None
+            p = MC.mesh_path(s)
+            e["mesh_path"] = str(p)
+            e["mesh_sha256"] = MC.mesh_file_sha256(p) if p.is_file() else None  # re-hashed; load_collider reuses it
+            e["mesh_validated_sha256"] = (vsc.get(s) or {}).get("sha256")
         out[s] = e
     return out
 
 
-def preflight(prov: dict, renderer: str, collides: str | None) -> list[str]:
+def collision_provenance(collides: str | None) -> dict | None:
+    """The frozen collision model of the manifest: official code facts, tolerance, the validation and its key."""
+    if collides != DEFAULT_COLLIDES:
+        return None
+    vp = MC.validation_path()
+    val = MC.load_validation()
+    return {"factory": MC.FACTORY, "official_file": str(MC.METRICS_REL), "official_sha256": MC.METRICS_SHA256,
+            "official_class": MC.OFFICIAL_CLASS, "tolerance_m": MC.TOLERANCE_M, "in_obstacle_m": MC.IN_OBSTACLE_M,
+            "validation": str(vp), "validation_pass": None if val is None else val.get("pass"),
+            "validation_problems": None if val is None else MC.definition_problems(val),
+            "mesh_set_sha256": None if val is None else val.get("mesh_set_sha256"),
+            "validation_official": None if val is None else val.get("official")}
+
+
+def preflight(prov: dict, renderer: str, collides: str | None, coll: dict | None = None) -> list[str]:
     """Problems that would make every episode of a scene fail; checked before any server starts."""
     bad = []
     if collides == DEFAULT_COLLIDES:
-        miss = [s for s, e in prov.items() if e["occ_sha256"] is None]
+        coll = coll or {}
+        if coll.get("validation_pass") is not True or coll.get("validation_problems"):
+            bad.append(f"no passing mesh validation of this collision model ({coll.get('validation')}: pass "
+                       f"{coll.get('validation_pass')!r}, {coll.get('validation_problems')}; e3vs-prep mesh_val)")
+        miss = [s for s, e in prov.items() if e["mesh_sha256"] is None]
         if miss:
-            bad.append(f"{len(miss)} scenes without an occupancy grid (e.g. {miss[:3]}; e3vs-prep builds them)")
+            bad.append(f"{len(miss)} scenes without a collision mesh (e.g. {miss[:3]}; the user downloads them, "
+                       "mesh_verify)")
+        other = [s for s, e in prov.items() if e["mesh_sha256"] and e["mesh_sha256"] != e["mesh_validated_sha256"]]
+        if other:
+            bad.append(f"{len(other)} scenes whose mesh is not the validated one (e.g. {other[:3]}; the mesh set "
+                       "key differs from the validation's)")
     if renderer == "gsplat":
         miss = [s for s, e in prov.items() if not e["ply_present"]]
         if miss:
@@ -641,8 +672,8 @@ def main(argv=None) -> int:
     ap.add_argument("--base-url", default=None, help="use a running OpenAI-compatible server")
     ap.add_argument("--fake-server", action="store_true", help="built-in fake server (no model)")
     ap.add_argument("--audit-processor", default="auto", help="'auto' (model dir or the start's), a dir, or ''")
-    ap.add_argument("--floors", type=Path, default=None, help="default OUT/e3vs/floors/floors_occ.json if present")
-    ap.add_argument("--opt-len", type=Path, default=None, help="default OUT/e3vs/bfs/occ/<split>/opt_len.json")
+    ap.add_argument("--floors", type=Path, default=None, help="default OUT/e3vs/floors/floors_mesh.json if present")
+    ap.add_argument("--opt-len", type=Path, default=None, help="default OUT/e3vs/bfs/mesh/<split>/opt_len.json")
     ap.add_argument("--gsplat-probe", type=Path, default=None,
                     help="the job's B18 probe JSON (default $VPD_GSPLAT_PROBE), copied into manifest.gsplat")
     ap.add_argument("--gpu-memory-utilization", type=float, default=SERVER_OVERRIDES["gpu_memory_utilization"])
@@ -657,7 +688,8 @@ def main(argv=None) -> int:
     from vpd.e3vs.bfs_demos import load_collider_factory
 
     if a.collides == "none" and a.renderer != "fake":
-        raise SystemExit("--collides none is for the fake renderer only (the pilot uses the frozen occupancy model)")
+        raise SystemExit("--collides none is for the fake renderer only (the pilot uses the frozen mesh collision "
+                         "model)")
     if a.adapter_meta is not None and a.model_dir is None:
         raise SystemExit("--adapter-meta needs --model-dir (the merged weights it describes)")
     if a.run_dir is not None and len(modes) > 1:
@@ -679,7 +711,8 @@ def main(argv=None) -> int:
     eps = select_episodes(a.split, repo, a.limit, a.episodes)
     collides = None if a.collides == "none" else a.collides
     prov = scene_provenance([e["scene_id"] for e in eps], a.renderer, collides)
-    bad = preflight(prov, a.renderer, collides)
+    coll = collision_provenance(collides)
+    bad = preflight(prov, a.renderer, collides, coll)
     if bad:
         raise SystemExit("preflight refused (no server started): " + "; ".join(bad))
     prompts = M.Prompts(repo)
@@ -689,13 +722,13 @@ def main(argv=None) -> int:
     base = {
         "start": a.start, "code": info["code"], "tier": a.tier, "split": a.split, "n_episodes": len(eps),
         "episode_indices": [e["episode_index"] for e in eps] if (a.limit or a.episodes) else "all",
-        "prompt": prompts.meta(), "renderer": a.renderer, "collides": collides, "scenes": prov,
+        "prompt": prompts.meta(), "renderer": a.renderer, "collides": collides, "collision": coll, "scenes": prov,
         "gsplat": gsplat_facts(a.renderer, probe),
         "e3vs": {**e3vs, "pinned_commit": paths.E3VS_COMMIT}, "model_dir": None if a.model_dir is None else
         str(a.model_dir), "adapter": adapter_info(a.adapter_meta, a.start), "concurrency": a.concurrency,
         "session": {"modes": modes, "evals": [names[m] for m in modes]},
         "git": git_facts(), "code": code_meta(Path(__file__), Path(M.__file__), Path(RD.__file__),
-                                              Path(S.__file__), Path(G.__file__)),
+                                              Path(S.__file__), Path(G.__file__), Path(MC.__file__)),
         "argv": sys.argv[1:] if argv is None else list(argv),
         "date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "uid": os.getuid()}
     manifests = {}
@@ -754,7 +787,8 @@ def main(argv=None) -> int:
     loads = {"renderers": renderers.stats(), "colliders": None if colliders is None else colliders.stats()}
     for m in modes:
         manifests[m].update(server_alive_at_end=alive, wall_seconds=wall,
-                            n_failed=sum(r["status"] != "ok" for r in recs[m]), scene_loads=loads)
+                            n_failed=sum(r["status"] != "ok" for r in recs[m]), scene_loads=loads,
+                            collision_loaded=MC.loaded_official() if collides == DEFAULT_COLLIDES else None)
         if fake is not None:
             manifests[m]["fake_server_problems"] = fake.problems
     write_manifests()
@@ -767,8 +801,8 @@ def main(argv=None) -> int:
             starts.processor_dir(a.start)
     elif a.audit_processor:
         audit_dir = Path(a.audit_processor)
-    floors = a.floors or (paths.E3VS_OUT / "floors" / "floors_occ.json")
-    opt = a.opt_len or (paths.E3VS_BFS / "occ" / a.split / "opt_len.json")
+    floors = a.floors or (paths.E3VS_OUT / "floors" / f"floors_{MC.TAG}.json")
+    opt = a.opt_len or (paths.E3VS_BFS / MC.TAG / a.split / "opt_len.json")
     all_valid = True
     for m in modes:
         rd = run_dirs[m]

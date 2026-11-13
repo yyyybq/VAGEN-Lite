@@ -1,5 +1,6 @@
-"""WP-E3VS-B tests: renderer helpers, occupancy collision model, SFT builder, closed loop (fake renderer + fake
-server), summary and gate, the two sco payloads.  No GPU, no gsplat rendering, no model weights.
+"""WP-E3VS-B tests: renderer helpers, the (superseded, kept) occupancy collision model, SFT builder, closed loop
+(fake renderer + fake server), summary and gate, the two sco payloads.  No GPU, no gsplat rendering, no model
+weights.  The official mesh collision model (mesh_collision.py) has its own file, test_e3vs_mesh_collision.py.
 
 Login node, 1 core:  OMP_NUM_THREADS=1 ... nice -n 19 PY_Q3 -B -m pytest -q -p no:cacheprovider
 vpd/tests/test_e3vs_loop.py
@@ -41,6 +42,8 @@ import vpd.e3vs as E  # noqa: E402
 from vpd.e3vs import bfs_demos as B  # noqa: E402
 from vpd.e3vs import geometry as G  # noqa: E402
 from vpd.e3vs import make_sft as M  # noqa: E402
+from vpd.e3vs import mesh_collision as MC  # noqa: E402
+from vpd.e3vs import mesh_verify as MV  # noqa: E402
 from vpd.e3vs import occupancy as OC  # noqa: E402
 from vpd.e3vs import render as RD  # noqa: E402
 from vpd.e3vs import run as RU  # noqa: E402
@@ -884,17 +887,44 @@ def test_session_u_and_c_shares_server_and_scene_loads(scratch, val_eps):
         assert man["gsplat"] is None  # fake renderer
 
 
+def fake_mesh_validation(shas: dict, ok: bool = True) -> dict:
+    """A validation.json that mesh_collision.check / load_collider / the gate accept (pass, definition, key)."""
+    return {"pass": ok, "scenes": {s: {"sha256": h} for s, h in shas.items()},
+            "mesh_set_sha256": MV.mesh_set_sha256(shas), "tolerance_m": MC.TOLERANCE_M,
+            "in_obstacle_m": MC.IN_OBSTACLE_M, "pooled": {"threshold": MC.VALID_MAX_FRAC},
+            "official": {"sha256": MC.METRICS_SHA256, "commit": E.E3VS_COMMIT}}
+
+
 @needs_repo
 def test_run_preflight_refuses_before_any_server(scratch, monkeypatch):
-    monkeypatch.setenv("VPD_E3VS_OCC_DIR", str(scratch / "no_grids_here"))
+    """Data-independent: a tmp data root without meshes, mesh validation or PLYs (the real ones may exist)."""
+    empty = scratch / "preflight_data"
+    monkeypatch.setenv("VPD_E3VS_MESH_ROOT", str(empty / "mesh_dl"))
+    monkeypatch.setenv("VPD_E3VS_MESH_MANIFEST", str(empty / "mesh_manifest.json"))
+    monkeypatch.setenv("VPD_E3VS_MESH_VAL_DIR", str(empty / "mesh_val"))
+    monkeypatch.setattr(RD.paths, "E3VS_DATA", empty / "data")  # RD.ply_path / ply_sha256 read it at call time
     rd = scratch / "preflight"
     base = ["--start", "Q3S", "--tier", "raw", "--mode", "u", "--split", "val", "--limit", "2", "--fake-server",
             "--run-dir", str(rd), "--repo", str(REPO), "--audit-processor", ""]
-    with pytest.raises(SystemExit, match="occupancy grid"):
-        RU.main(base + ["--renderer", "fake"])  # default collider = the frozen occupancy model
+    with pytest.raises(SystemExit, match="without a collision mesh") as ei:
+        RU.main(base + ["--renderer", "fake"])  # default collider = the frozen mesh model
+    assert "no passing mesh validation" in str(ei.value)
     with pytest.raises(SystemExit, match="PLY"):
         RU.main(base + ["--renderer", "gsplat"])
     assert not rd.exists()  # refused before anything was written or started
+    # meshes present but not the validated ones: refused too (the mesh set key differs)
+    eps = RU.select_episodes("val", REPO, 2, None)
+    shas = {}
+    for s in sorted({e["scene_id"] for e in eps}):
+        p = MC.mesh_path(s)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"not the validated mesh " + s.encode())
+        shas[s] = "0" * 64
+    (empty / "mesh_val").mkdir(parents=True)
+    MC.validation_path().write_text(json.dumps(fake_mesh_validation(shas)))
+    with pytest.raises(SystemExit, match="not the validated one"):
+        RU.main(base + ["--renderer", "fake"])
+    assert not rd.exists()
 
 
 def test_gsplat_facts_copy_the_probe(scratch):
@@ -1040,14 +1070,14 @@ def test_scene_bootstrap():
     assert S.scene_bootstrap(["a"] * 4, [True] * 4, 100)["ci95"] == [1.0, 1.0]
 
 
-GRIDS = {"sc1": "a" * 64, "sc2": "b" * 64}
+MESHES = {"sc1": "a" * 64, "sc2": "b" * 64}
 
 
 SYS_SHA = "p" * 64
 
 
 def _gate_tree(root: Path, rate_u=0.3, regex_c=1.0, sha=("s", "s", "s"), n=377, lo=0.25, parity_equal=True):
-    key = OC.grids_key(GRIDS)
+    key = MV.mesh_set_sha256(MESHES)
     for s, cs in zip(S.PILOT_STARTS, sha):
         ad = root / "pilot" / s / "adapters"
         pts = {}
@@ -1068,13 +1098,13 @@ def _gate_tree(root: Path, rate_u=0.3, regex_c=1.0, sha=("s", "s", "s"), n=377, 
             (d / "audit.json").write_text(json.dumps({"tokens_per_image": [258],
                                                       "prompt_parity": {"n": 3, "equal": parity_equal}}))
             (d / "manifest.json").write_text(json.dumps({"collides": S.FROZEN_COLLIDES, "scenes": {
-                sc: {"occ_sha256": h} for sc, h in GRIDS.items()}, "prompt": {"system_sha256": SYS_SHA},
+                sc: {"mesh_sha256": h} for sc, h in MESHES.items()}, "collision": {"mesh_set_sha256": key},
+                "prompt": {"system_sha256": SYS_SHA},
                 "adapter": None if tier == "raw" else {"meta": str(ad / tier / "meta.json"),
                                                        "adapter_sha256": pts[tier]}}))
     (root / "parity").mkdir(exist_ok=True)
     (root / "parity" / "parity_x.json").write_text(json.dumps({"pass": True, "official": {"min_psnr": 100.0}}))
-    (root / "validation.json").write_text(json.dumps({"pass": True, "grids_sha256": key, "scenes": {
-        sc: {"sha256": h} for sc, h in GRIDS.items()}}))
+    (root / "validation.json").write_text(json.dumps(fake_mesh_validation(MESHES)))
     (root / "floors.json").write_text(json.dumps({"collides": S.FROZEN_COLLIDES,
                                                   "gate_floor": {"rate": 0.141, "k": 53, "n": 377, "seq": []}}))
     (root / "prep_state").mkdir(exist_ok=True)
@@ -1102,7 +1132,9 @@ def test_gate_rules(scratch):
     g = _gate(root)
     assert all(g[k]["pass"] for k in ("E0", "E1", "E2", "E3")) and g["decision"].startswith("E0-E3 pass")
     assert g["prompt_parity_all_equal"] is True and len(g["audit"]) == 12
-    assert g["provenance"]["sft_system_sha256"] == [SYS_SHA] and g["provenance"]["sft_stamp"] == OC.grids_key(GRIDS)
+    assert g["provenance"]["sft_system_sha256"] == [SYS_SHA]
+    assert g["provenance"]["sft_stamp"] == MV.mesh_set_sha256(MESHES)
+    assert S.FROZEN_COLLIDES == "vpd.e3vs.mesh_collision:load_collider"
     assert set(g["provenance"]["adapter_sha256"]) == set(S.PILOT_STARTS)
     r2 = scratch / "gate_e2"
     _gate_tree(r2, regex_c=0.999)
@@ -1133,9 +1165,15 @@ def _patch_manifest(d: Path, **kv):
     (d / "manifest.json").write_text(json.dumps(m))
 
 
+def _patch_validation(root: Path, **kv):
+    v = json.loads((root / "validation.json").read_text())
+    v.update(kv)
+    (root / "validation.json").write_text(json.dumps(v))
+
+
 def test_gate_e0_audit_and_collision_provenance(scratch):
     """B4: a missing / failed / empty audit fails E0; B8: the floor and every eval must use the frozen collider on
-    the validated grids."""
+    the validated meshes (the official mesh model since the PREREG section-16 row of 2026-11-12)."""
     d = lambda root: S.eval_dir(root / "pilot", "Q3S", "100", "u")  # noqa: E731
     cases = {
         "no_audit": (lambda r: (d(r) / "audit.json").unlink(), "no audit.json"),
@@ -1149,12 +1187,21 @@ def test_gate_e0_audit_and_collision_provenance(scratch):
             {"collides": None, "gate_floor": {"rate": 0.141, "k": 53, "n": 377, "seq": []}})), "not the frozen"),
         "floor_stamp": (lambda r: (r / "prep_state" / "floors").write_text("other\n"), "not stamped"),
         "floor_nostamp": (lambda r: (r / "prep_state" / "floors").unlink(), "not stamped"),
-        "eval_grid": (lambda r: (d(r) / "manifest.json").write_text(json.dumps(
-            {"collides": S.FROZEN_COLLIDES, "scenes": {"sc1": {"occ_sha256": "c" * 64},
-                                                       "sc2": {"occ_sha256": GRIDS["sc2"]}}})),
-                      "validated occupancy grids"),
+        "eval_mesh": (lambda r: (d(r) / "manifest.json").write_text(json.dumps(
+            {"collides": S.FROZEN_COLLIDES, "scenes": {"sc1": {"mesh_sha256": "c" * 64},
+                                                       "sc2": {"mesh_sha256": MESHES["sc2"]}}})),
+                      "validated collision meshes"),
+        "eval_mesh_set": (lambda r: _patch_manifest(d(r), collision={"mesh_set_sha256": "k" * 64}),
+                          "eval mesh set"),
+        "eval_old_occ": (lambda r: _patch_manifest(d(r), collides="vpd.e3vs.occupancy:load_collider"),
+                         "not the frozen vpd.e3vs.mesh_collision:load_collider"),
         "eval_collider": (lambda r: (d(r) / "manifest.json").write_text(json.dumps(
             {"collides": None, "scenes": {}})), "collider None"),
+        "val_failed": (lambda r: _patch_validation(r, **{"pass": False}), "validation missing or failed"),
+        "val_missing": (lambda r: (r / "validation.json").unlink(), "validation missing or failed"),
+        "val_other_code": (lambda r: _patch_validation(r, official={"sha256": "x", "commit": E.E3VS_COMMIT}),
+                           "not a validation of the frozen collision model"),
+        "val_tolerance": (lambda r: _patch_validation(r, tolerance_m=0.05), "not a validation of the frozen"),
         "eval_nomanifest": (lambda r: (d(r) / "manifest.json").unlink(), "no manifest.json"),
         # provenance of the weights and of the SFT data
         "adapter_changed": (lambda r: (r / "pilot" / "Q3S" / "adapters" / "100" / "adapter.pt").write_bytes(b"new"),

@@ -519,5 +519,65 @@ def test_validation_fails_on_a_viewpoint_in_obstacle(backend, tmp_path):
     assert res2["pass"] and res2["warnings"] and "AABB" in res2["warnings"][0]
 
 
+# ------------------------------------------------------------------------------------------------------------
+# one collision object for the three call sites: BFS demos, the blind floor, the closed loop
+# ------------------------------------------------------------------------------------------------------------
+@needs_repo
+def test_three_call_sites_use_the_validated_mesh(backend, tmp_path, monkeypatch):
+    from vpd.e3vs import run as RU
+    from vpd.e3vs import summary as S
+
+    eps = {sp: E.load_episodes(sp, REPO) for sp in E.SPLITS}
+    first = {sp: eps[sp][0] for sp in E.SPLITS}
+    cubes = {}
+    for ep in first.values():  # a 0.2 m cube shell around each first start: every translation from it collides
+        p = ep["start_c2w"][:3, 3]
+        cubes[ep["scene_id"]] = [(tuple(p - 0.1), tuple(p + 0.1))]
+    root, man = _mesh_tree(tmp_path, cubes, backend.scene)
+    out = tmp_path / "val"
+    scenes = sorted(cubes)
+    iphone = {s: np.array([look_c2w(np.array(cubes[s][0][0]) + [3.0 + 0.1 * i, 0.0, 0.0], [1, 0, 0])
+                           for i in range(5)]) for s in scenes}
+    all_eps = [e for sp in E.SPLITS for e in eps[sp] if e["scene_id"] in cubes]
+    res = MC.validate(scenes, all_eps, out, man, root, iphone=iphone, repo=REPO, convention="opencv")
+    assert res["pass"], res["pooled"]
+    assert all(res["pooled"]["starts_by_split"][sp]["all_blocked"] >= 1 for sp in E.SPLITS)
+    for k, val in (("VPD_E3VS_MESH_ROOT", root), ("VPD_E3VS_MESH_MANIFEST", man), ("VPD_E3VS_MESH_VAL_DIR", out)):
+        monkeypatch.setenv(k, str(val))
+    key = MC.check(scenes)["mesh_set_sha256"]  # env-located files
+    assert key == res["mesh_set_sha256"]
+    # 1. BFS demos: from the boxed-in first val start only rotations are edges
+    summ = B.run("val", out=tmp_path / "bfs", limit=1, collides=MC.FACTORY, tag="mesh", repo=REPO, quiet=True)
+    assert summ["collides"] == MC.FACTORY and summ["n_episodes"] == 1
+    rec = json.loads((tmp_path / "bfs" / "records.jsonl").read_text().splitlines()[0])
+    assert rec["status"] in ("unreachable", "reached") and rec["n_states"] <= 100
+    assert not any(a.startswith("move_") for a in rec["actions"] or [])
+    # 2. the blind floor: under the mesh, every sequence from the first starts behaves as with every move blocked
+    fl = F.run(out=tmp_path / "floors_mesh.json", collides=MC.FACTORY, tag="mesh", repo=REPO, limit=1, quiet=True)
+    assert fl["collides"] == MC.FACTORY and fl["gate_floor"]["n"] == 1
+    seqs = F.sequences()
+    for ep in first.values():
+        col = MC.load_collider(ep["scene_id"])
+        assert np.array_equal(F.episode_hits(ep, seqs, col), F.episode_hits(ep, seqs, lambda a, b: True))
+    # 3. the closed loop (fake renderer + fake server; default collider = the frozen mesh model)
+    rd = tmp_path / "run"
+    rc = RU.main(["--start", "Q3S", "--tier", "raw", "--mode", "u", "--split", "val", "--episodes",
+                  str(first["val"]["episode_index"]), "--renderer", "fake", "--fake-server", "--run-dir", str(rd),
+                  "--audit-processor", "", "--repo", str(REPO), "--floors", str(tmp_path / "floors_mesh.json")])
+    assert rc == 0
+    m = json.loads((rd / "manifest.json").read_text())
+    assert m["collides"] == MC.FACTORY == S.FROZEN_COLLIDES and m["collision"]["mesh_set_sha256"] == key
+    sid = first["val"]["scene_id"]
+    assert m["scenes"][sid]["mesh_sha256"] == m["scenes"][sid]["mesh_validated_sha256"] == res["scenes"][sid]["sha256"]
+    assert m["collision_loaded"] and m["collision_loaded"][0]["sha256"] == MC.METRICS_SHA256
+    lg = json.loads((rd / "episodes.jsonl").read_text().splitlines()[0])
+    assert [s["action"] for s in lg["steps"]] == ["move_forward", "turn_left", "look_down", "move_up", "stop"]
+    assert [s["collision"] for s in lg["steps"]] == [True, False, False, True, False]
+    assert m["scene_loads"]["colliders"]["n_loads"] == 1
+    # the gate's manifest test accepts it on these meshes, and refuses another mesh set
+    assert S._manifest_problem(m, {s: r["sha256"] for s, r in res["scenes"].items()}, key) is None
+    assert "mesh set" in S._manifest_problem(m, {s: r["sha256"] for s, r in res["scenes"].items()}, "0" * 64)
+
+
 def test_no_bytecode_written():
     assert not list((paths.VPD_PKG / "e3vs").glob("__pycache__"))

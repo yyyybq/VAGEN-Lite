@@ -376,14 +376,14 @@ def build_tier(out: Path, seed: int, n: int, prompts: Prompts, renderers: SceneR
 
 
 def default_pool() -> Path:
-    return paths.E3VS_BFS / "occ" / "train" / "demo_pool.jsonl"
+    return paths.E3VS_BFS / "mesh" / "train" / "demo_pool.jsonl"  # the prep job's --tag mesh (mesh_collision.TAG)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cmd", choices=("warmup", "order", "tier", "all"))
     ap.add_argument("--out", type=Path, default=None, help="default OUT/e3vs/sft")
-    ap.add_argument("--pool", type=Path, default=None, help="default OUT/e3vs/bfs/occ/train/demo_pool.jsonl")
+    ap.add_argument("--pool", type=Path, default=None, help="default OUT/e3vs/bfs/mesh/train/demo_pool.jsonl")
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--tiers", default=",".join(map(str, DEFAULT_TIERS)), help="comma list, e.g. 100")
     ap.add_argument("--renderer", default="gsplat", choices=("gsplat", "fake"))

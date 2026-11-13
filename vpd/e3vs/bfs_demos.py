@@ -15,7 +15,8 @@ val 218/231 reached, 13 capped, median 3; test 355/377, 22 capped; train 1,344/1
   - success = geometry.success (0.25 m AND <= 20 deg to any answerable viewpoint).
 
 Collision is pluggable: ``--collides MODULE:FUNC`` names a factory ``FUNC(scene_id) -> collides(p0, p1)``
-(e.g. the occupancy model of WP-E3VS-B).  A translation whose segment collides is not an edge (the official
+(the pilot: vpd.e3vs.mesh_collision:load_collider, the official mesh model; the occupancy grid of WP-E3VS-B
+until 2026-11-12).  A translation whose segment collides is not an edge (the official
 restrict_collision rule skips it, so it never helps a shortest path); rotations never collide.  The default is
 no collision; that run must reproduce the survey numbers above.
 

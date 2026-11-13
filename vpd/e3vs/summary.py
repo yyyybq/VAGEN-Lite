@@ -15,18 +15,21 @@ score(run_dir) reads RUN/episodes.jsonl + RUN/manifest.json and the split's epis
 Writes RUN/results.json (or results_invalid.json) and RUN/per_episode.jsonl.
 
 gate(root) for the pilot (OUT/e3vs/runs/pilot/<START>/evals/pilot__<START>__<tier>__<mode>/results.json):
-  E0 mechanism: parity (every OUT/e3vs/parity/parity_*.json min PSNR >= 40), occupancy validation pass, all 12
-     required evals valid with all 377 test episodes, every one with an audit.json whose image tokens are
-     exactly [258] (a missing / failed / empty audit is an E0 problem, B4), every one run with the frozen
-     collider on the validated grids (manifest collides == vpd.e3vs.occupancy:load_collider and each scene's
-     occ_sha256 == validation.json's), the floor computed under the frozen collider (floors_occ.json collides)
-     on the validated grids (OUT/e3vs/prep_state/floors == validation.json grids_sha256, stamped by the prep
-     job), and the 0W adapters' code_sha256 equal across starts.  Provenance (provenance()): every 0W / 100
-     eval's adapter_sha256 == that start's adapters/<tier>/adapter.pt (raw: no adapter), the 100 adapter
-     initialised from this start's 0W (meta init_adapter.sha256), the SFT data stamped with the validated grids
-     (prep_state/sft == grids_sha256), and the SFT manifests' prompt system_sha256 == every eval's.
-     HF-vs-server prompt-token parity (audit prompt_parity, B5) is reported per eval, descriptively;
-  E1 learnable: at least one start's 100/u Wilson lower bound > the floor rate (floors_occ.json gate_floor);
+  E0 mechanism: parity (every OUT/e3vs/parity/parity_*.json min PSNR >= 40), the collision-model validation
+     passes (OUT/e3vs/mesh_val/validation.json, the official mesh model since the PREREG section-16 row of
+     2026-11-12; the occupancy grid before), all 12 required evals valid with all 377 test episodes, every one
+     with an audit.json whose image tokens are exactly [258] (a missing / failed / empty audit is an E0 problem,
+     B4), every one run with the frozen collider on the validated meshes (manifest collides ==
+     vpd.e3vs.mesh_collision:load_collider, each scene's mesh_sha256 == validation.json's, and the manifest's
+     collision.mesh_set_sha256 == validation.json's), the floor computed under the frozen collider
+     (floors_mesh.json collides) on the validated meshes (OUT/e3vs/prep_state/floors == validation.json
+     mesh_set_sha256, stamped by the prep job), and the 0W adapters' code_sha256 equal across starts.
+     Provenance (provenance()): every 0W / 100 eval's adapter_sha256 == that start's adapters/<tier>/adapter.pt
+     (raw: no adapter), the 100 adapter initialised from this start's 0W (meta init_adapter.sha256), the SFT data
+     stamped with the validated meshes (prep_state/sft == mesh_set_sha256), and the SFT manifests' prompt
+     system_sha256 == every eval's.  HF-vs-server prompt-token parity (audit prompt_parity, B5) is reported per
+     eval, descriptively;
+  E1 learnable: at least one start's 100/u Wilson lower bound > the floor rate (floors_mesh.json gate_floor);
   E2 format: every start's 100/c run has regex-valid 100% and 0 episodes without a log;
   E3 not saturated: every start's 100/u success < 0.85.
 The gate never compares starts.  Unconstrained parse rates are descriptive (B3).
@@ -49,6 +52,7 @@ import numpy as np
 from vpd import paths
 from vpd.e3vs import EPISODE_COUNTS, load_episodes, repo_dir, sha256_file
 from vpd.e3vs import geometry as G
+from vpd.e3vs import mesh_collision as MC
 from vpd.e3vs.floors import wilson
 
 N_BOOT = 10_000
@@ -58,7 +62,7 @@ PILOT_STARTS = ("Q3B", "Q3S", "E2")
 REQUIRED_EVALS = (("raw", "u"), ("0W", "u"), ("100", "u"), ("100", "c"))
 PARITY_MIN_PSNR = 40.0
 EXPECTED_IMAGE_TOKENS = 258
-FROZEN_COLLIDES = "vpd.e3vs.occupancy:load_collider"
+FROZEN_COLLIDES = MC.FACTORY  # vpd.e3vs.mesh_collision:load_collider (vpd.e3vs.occupancy:load_collider before)
 PILOT_SEED = 1001
 PILOT_TIER = "100"
 
@@ -231,15 +235,18 @@ def _audit_problem(au) -> str | None:
     return None
 
 
-def _manifest_problem(man, grid_sha: dict) -> str | None:
+def _manifest_problem(man, mesh_sha: dict, key: str | None) -> str | None:
     if man is None:
         return "no manifest.json"
     if man.get("collides") != FROZEN_COLLIDES:
         return f"collider {man.get('collides')!r}, not the frozen {FROZEN_COLLIDES}"
     sc = man.get("scenes") or {}
-    bad = sorted(s for s, e in sc.items() if not e.get("occ_sha256") or e.get("occ_sha256") != grid_sha.get(s))
+    bad = sorted(s for s, e in sc.items() if not e.get("mesh_sha256") or e.get("mesh_sha256") != mesh_sha.get(s))
     if not sc or bad:
-        return f"{len(bad)} of {len(sc)} scenes not on the validated occupancy grids (e.g. {bad[:3]})"
+        return f"{len(bad)} of {len(sc)} scenes not on the validated collision meshes (e.g. {bad[:3]})"
+    got = (man.get("collision") or {}).get("mesh_set_sha256")
+    if not key or got != key:
+        return f"eval mesh set {got!r} != the validated mesh_set_sha256 {key!r}"
     return None
 
 
@@ -248,7 +255,7 @@ def provenance(root: Path, starts, manifests: dict, sft_dir: Path, prep_state: P
     """E0 provenance of the trained and evaluated weights and of the SFT data:
     - each 0W / 100 eval's manifest adapter_sha256 == this start's adapters/<tier>/adapter.pt; raw evals no adapter;
     - adapters/100/meta.json init_adapter.sha256 == this start's adapters/0W/adapter.pt;
-    - OUT/e3vs/prep_state/sft (the prep job's stamp) == validation.json grids_sha256;
+    - OUT/e3vs/prep_state/sft (the prep job's stamp) == validation.json mesh_set_sha256;
     - the SFT manifests' prompt system_sha256 (warm-up and demos_100) == every eval manifest's.
     `manifests` maps (start, tier, mode) -> the eval manifest (None = not loaded / missing).  Returns
     (problems, descriptive facts)."""
@@ -256,9 +263,9 @@ def provenance(root: Path, starts, manifests: dict, sft_dir: Path, prep_state: P
     stamp = Path(prep_state) / "sft"
     key = stamp.read_text().strip() if stamp.is_file() else None
     facts["sft_stamp"] = key
-    if not key or not val or key != val.get("grids_sha256"):
-        probs.append(f"SFT data not stamped with the validated grids ({stamp}: {key!r} vs validation "
-                     f"{(val or {}).get('grids_sha256')!r})")
+    if not key or not val or key != val.get("mesh_set_sha256"):
+        probs.append(f"SFT data not stamped with the validated meshes ({stamp}: {key!r} vs validation "
+                     f"{(val or {}).get('mesh_set_sha256')!r})")
     sft_sys = set()
     for f in (Path(sft_dir) / "warmup_manifest.json",
               Path(sft_dir) / f"seed{PILOT_SEED}" / f"demos_{PILOT_TIER}_manifest.json"):
@@ -301,14 +308,15 @@ def gate(root: Path | None = None, starts=PILOT_STARTS, floors: Path | None = No
          validation: Path | None = None, n_test: int = EPISODE_COUNTS["test"], prep_state: Path | None = None,
          sft_dir: Path | None = None) -> dict:
     root = Path(root) if root else paths.E3VS_RUNS / "pilot"
-    floors = Path(floors) if floors else paths.E3VS_OUT / "floors" / "floors_occ.json"
+    floors = Path(floors) if floors else paths.E3VS_OUT / "floors" / f"floors_{MC.TAG}.json"
     parity_dir = Path(parity_dir) if parity_dir else paths.E3VS_PARITY
-    validation = Path(validation) if validation else paths.E3VS_OCC / "validation.json"
+    validation = Path(validation) if validation else MC.validation_path()
     prep_state = Path(prep_state) if prep_state else paths.E3VS_OUT / "prep_state"
     sft_dir = Path(sft_dir) if sft_dir else paths.E3VS_SFT
     fl = load_floor(floors)
     val = _load(validation)
-    grid_sha = {s: r.get("sha256") for s, r in ((val or {}).get("scenes") or {}).items()}
+    mesh_sha = {s: r.get("sha256") for s, r in ((val or {}).get("scenes") or {}).items()}
+    val_key = (val or {}).get("mesh_set_sha256")
     runs, e0, audits, mans = {}, [], {}, {}
     for s in starts:
         for tier, mode in REQUIRED_EVALS:
@@ -329,7 +337,7 @@ def gate(root: Path | None = None, starts=PILOT_STARTS, floors: Path | None = No
                                               "prompt_parity_equal": pp.get("equal"), "prompt_parity_n": pp.get("n")}
             if r is not None:
                 mans[(s, tier, mode)] = _load(d / "manifest.json")
-                prob = _manifest_problem(mans[(s, tier, mode)], grid_sha)
+                prob = _manifest_problem(mans[(s, tier, mode)], mesh_sha, val_key)
                 if prob:
                     e0.append(f"{tag}: {prob}")
     par = sorted(parity_dir.glob("parity_*.json")) if parity_dir.is_dir() else []
@@ -339,8 +347,11 @@ def gate(root: Path | None = None, starts=PILOT_STARTS, floors: Path | None = No
         x = json.loads(p.read_text())
         if not x.get("pass"):
             e0.append(f"{p.name}: min PSNR {(x.get('official') or {}).get('min_psnr')} < {PARITY_MIN_PSNR}")
-    if not val or not val.get("pass"):
-        e0.append(f"occupancy validation missing or failed ({validation})")
+    if not val or val.get("pass") is not True:
+        e0.append(f"collision-model (mesh) validation missing or failed ({validation})")
+    elif MC.definition_problems(val):
+        e0.append(f"{validation} is not a validation of the frozen collision model: "
+                  f"{'; '.join(MC.definition_problems(val))}")
     shas = {s: (_load(root / s / "adapters" / "0W" / "meta.json") or {}).get("code_sha256") for s in starts}
     if None in shas.values() or len(set(shas.values())) != 1:
         e0.append(f"0W code_sha256 not equal across starts: {shas}")
@@ -351,9 +362,9 @@ def gate(root: Path | None = None, starts=PILOT_STARTS, floors: Path | None = No
             e0.append(f"floor computed with collider {fl.get('collides')!r}, not the frozen {FROZEN_COLLIDES} (B8)")
         stamp = prep_state / "floors"
         key = stamp.read_text().strip() if stamp.is_file() else None
-        if not key or not val or key != val.get("grids_sha256"):
-            e0.append(f"floor not stamped with the validated grids ({stamp}: {key!r} vs validation "
-                      f"{(val or {}).get('grids_sha256')!r})")
+        if not key or not val or key != val.get("mesh_set_sha256"):
+            e0.append(f"floor not stamped with the validated meshes ({stamp}: {key!r} vs validation "
+                      f"{(val or {}).get('mesh_set_sha256')!r})")
     prov_probs, prov = provenance(root, starts, mans, sft_dir, prep_state, val)
     e0 += prov_probs
 
