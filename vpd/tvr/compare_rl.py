@@ -28,7 +28,10 @@ evals (Q3RD, Q3RS150 x the 5 cells) has a results.json with valid true, n_tasks 
 mechanism_only false, its own start / tier / arm, the registered harness (code_sha256 starting with
 pilot_tvr.HARNESS_SHA256_PREFIX) and an official_check.json with equal true; it served the explore adapter as it is on
 disk (eval-ok), and that adapter is complete with seed 1001 and the right init chain (pilot_tvr.x_adapter_check:
-start, seed, phase, data_sha256 == the tiers manifest's, current trainer code).
+start, seed, phase, data_sha256 == the tiers manifest's, the RL starts' registered trainer code: recipe prefix
+0865dd75f1ee, also on a tree whose starts.json has the Q3SG entry, DECISIONS G20).
+validate, side_root, crosscheck and start_table take the start lists as arguments (defaults: this comparison's);
+vpd.tvr.compare_q3sg (row 2026-11-13) reuses them for Q3SG.  COMPARE_RL's output does not depend on that.
 """
 
 from __future__ import annotations
@@ -48,7 +51,7 @@ from vpd.walkerbench.pilot import eval_check
 SCHEMA = "vpd.tvr.compare_rl/1"
 ROW_DATE = pilot_tvr.XROW_DATE
 ROW_NEEDLE = pilot_tvr.XROW_NEEDLE
-RL_STARTS = pilot_tvr.EXPLORE_STARTS
+RL_STARTS = pilot_tvr.RL_STARTS  # not EXPLORE_STARTS: that also holds Q3SG (row 2026-11-13, compare_q3sg)
 COMPARISONS = (("Q3RD", "Q3B", "primary"), ("Q3RS150", "Q3B", "primary"), ("Q3RD", "Q3S", "supplement"),
                ("Q3RS150", "Q3S", "supplement"))
 FIVE_STARTS = ("Q3B", "Q3S", "E2", "Q3RD", "Q3RS150")
@@ -64,19 +67,20 @@ def label(s: str) -> str:
     return LABEL.get(s, s)
 
 
-def side_root(s: str, explore_root: Path, pilot_root: Path) -> tuple:
-    """(root, eval dir prefix) of a start's evals: the RL starts from the explore root (xrl), the others from the
-    pilot (pilot)."""
-    return (Path(explore_root), pilot_tvr.XRL_PREFIX) if s in RL_STARTS else (Path(pilot_root), "pilot")
+def side_root(s: str, explore_root: Path, pilot_root: Path, explore_starts=RL_STARTS) -> tuple:
+    """(root, eval dir prefix) of a start's evals: the explore starts (default the RL starts) from the explore root
+    (xrl), the others from the pilot (pilot)."""
+    return (Path(explore_root), pilot_tvr.XRL_PREFIX) if s in explore_starts else (Path(pilot_root), "pilot")
 
 
-def validate(explore_root: Path, L: pilot_tvr.Layout = None, cfg=None) -> dict:
-    """The 10 explore evals and their adapters (module docstring); {"ok", "problems", "evals": {key: facts}}."""
+def validate(explore_root: Path, L: pilot_tvr.Layout = None, cfg=None, starts=RL_STARTS) -> dict:
+    """The explore evals of STARTS (default the RL starts: 10 evals) and their adapters (module docstring); {"ok",
+    "problems", "evals": {key: facts}}."""
     L = L or pilot_tvr.LAYOUT
     root = Path(explore_root)
     problems, evals = [], {}
     eval_adapter = pilot_tvr.EVAL_ADAPTER
-    for s in RL_STARTS:
+    for s in starts:
         for tier, init in pilot_tvr.train_tiers(s, cfg):
             rc, msg = pilot_tvr.x_adapter_check(s, tier, init, L, cfg, adapter_root=root)
             if rc != 0:
@@ -156,25 +160,7 @@ def compare(explore_root: Path = None, pilot_root: Path = None, cfg=None, tasks_
     for s in FIVE_STARTS:  # E2: absolute k/n only (its sides are read here, no comparison uses them)
         for tier, arm in C.cells(cfg):
             side(s, tier, arm)
-    five = []
-    for tier, arm in C.cells(cfg):
-        for s in FIVE_STARTS:
-            sd = sides[f"{s}/{tier}__{arm}"]
-            five.append(dict({"start": s, "label": label(s), "tier": tier, "arm": arm, "source":
-                              "explore" if s in RL_STARTS else "pilot", "results_file": sd["results_file"]},
-                             **({"usable": True, "k": sd["k"], "n": sd["n"], "rate": sd["rate"],
-                                 "wilson95": sd["wilson95"]} if sd["usable"] else
-                                {"usable": False, "problems": sd["problems"]})))
-    mism, unknown, unknown_used = [], [], []
-    for key, sd in sides.items():
-        for name, c in sd["crosscheck"].items():
-            if c.get("ok") is False:
-                mism.append({"eval": key, "eval_dir": Path(sd["dir"]).name, "check": name,
-                             **{k: v for k, v in c.items() if k != "ok"}})
-            elif c.get("ok") is None:
-                unknown.append(f"{key}: {name}: {c.get('why')} ({Path(sd['dir']).name})")
-                if sd["usable"]:
-                    unknown_used.append(unknown[-1])
+    five = start_table(sides, C.cells(cfg), FIVE_STARTS)
     missing = [f"{name} {ck}" for name, comp in comps.items() for ck, c in comp["cells"].items() if c["missing"]]
     missing += [f"five-start table {r['start']} {r['tier']}__{r['arm']}" for r in five if not r["usable"]]
     harness = sorted({str((pilot_tvr.read_json(Path(sd["dir"]) / "results.json") or {}).get("code_sha256"))
@@ -186,10 +172,39 @@ def compare(explore_root: Path = None, pilot_root: Path = None, cfg=None, tasks_
             "validation": val, "harness_code_sha256": harness, "registered_tasks": reg,
             "cells": [f"{t}__{a}" for t, a in C.cells(cfg)], "comparisons": comps, "five_starts": list(FIVE_STARTS),
             "five_start_table": five, "inputs": {sd["dir"]: sd["inputs"] for sd in sides.values()},
-            "trajectories_digest_rule": C.TRAJ_DIGEST_RULE,
-            "crosscheck": {"ok": not mism, "mismatches": mism, "not_checked": unknown,
-                           "used_sides_all_checked": not unknown_used},
+            "trajectories_digest_rule": C.TRAJ_DIGEST_RULE, "crosscheck": crosscheck(sides),
             "missing_cells": missing}
+
+
+def start_table(sides: Dict[str, dict], cells, starts, explore_starts=RL_STARTS) -> list:
+    """k/n and Wilson of every start of STARTS on every cell (cell-major), from the sides already read; source
+    explore for the starts in explore_starts (default the RL starts), else pilot."""
+    rows = []
+    for tier, arm in cells:
+        for s in starts:
+            sd = sides[f"{s}/{tier}__{arm}"]
+            rows.append(dict({"start": s, "label": label(s), "tier": tier, "arm": arm, "source":
+                              "explore" if s in explore_starts else "pilot", "results_file": sd["results_file"]},
+                             **({"usable": True, "k": sd["k"], "n": sd["n"], "rate": sd["rate"],
+                                 "wilson95": sd["wilson95"]} if sd["usable"] else
+                                {"usable": False, "problems": sd["problems"]})))
+    return rows
+
+
+def crosscheck(sides: Dict[str, dict]) -> dict:
+    """The cross-checks of every side read (compare_tvr.read_side): mismatches (named "S/tier__arm" and by the eval dir
+    name), checks that could not be made, and whether every usable side (whose numbers enter a cell) was checked."""
+    mism, unknown, unknown_used = [], [], []
+    for key, sd in sides.items():
+        for name, c in sd["crosscheck"].items():
+            if c.get("ok") is False:
+                mism.append({"eval": key, "eval_dir": Path(sd["dir"]).name, "check": name,
+                             **{k: v for k, v in c.items() if k != "ok"}})
+            elif c.get("ok") is None:
+                unknown.append(f"{key}: {name}: {c.get('why')} ({Path(sd['dir']).name})")
+                if sd["usable"]:
+                    unknown_used.append(unknown[-1])
+    return {"ok": not mism, "mismatches": mism, "not_checked": unknown, "used_sides_all_checked": not unknown_used}
 
 
 # --- COMPARE_RL.md ------------------------------------------------------------------------------------------------
