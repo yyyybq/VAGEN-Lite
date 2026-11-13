@@ -62,11 +62,12 @@ Open3D 0.19.0 is installed (user approved 2026-11-13) in O3D_DIR = OUT/envs/e3vs
 E3VS jobs' PY_Q3 calls that need it get O3D_DIR appended to their PYTHONPATH (validate, bfs_demos, floors, run,
 smoke); run.py removes it from the environment of the vLLM server it starts.  `o3d-check` refuses a top-level
 module in O3D_DIR that PY_Q3 can import itself (it would be shadowed).  open3d is imported lazily (never at module
-import), a missing open3d raises Open3DMissing.  Embree / TBB sizes its thread pool from the CPU affinity, so every
-process that builds ray-casting scenes is pinned: validate, smoke and floors to one CPU (pin_one_cpu), each BFS
-worker to one CPU (round robin, bfs_demos), the tests at import.  Env overrides for tests and job dry runs (the
-jobs unset them in production): VPD_E3VS_MESH_ROOT (the mesh_dl dir), VPD_E3VS_MESH_MANIFEST,
-VPD_E3VS_MESH_VAL_DIR.
+import), a missing open3d raises Open3DMissing.  Embree / TBB sizes its thread pool from the CPU affinity, so the
+single-process collider users are pinned to one CPU each: validate, floors and smoke (pin_one_cpu), and each BFS
+worker (round robin, bfs_demos); the tests pin themselves at import.  run.py's closed loop is NOT pinned (it
+starts the vLLM server and is multi-threaded): its per-eval scene builds run inside the job's CPU quota.  Env
+overrides for tests and job dry runs (the jobs unset them in production): VPD_E3VS_MESH_ROOT (the mesh_dl dir),
+VPD_E3VS_MESH_MANIFEST, VPD_E3VS_MESH_VAL_DIR.
 
 CLI:
     python -m vpd.e3vs.mesh_collision validate --scenes all|train|val|test|ID,ID [--out DIR] [--convention auto]
@@ -75,8 +76,10 @@ CLI:
     python -m vpd.e3vs.mesh_collision ack-frame --note TEXT [--out DIR]   # only after the user's decision
     python -m vpd.e3vs.mesh_collision o3d-check [--dir O3D_DIR]
 validate exits RC_PASS 0; RC_GATE 1 (a gating metric >= 1 %: stop and ask the user); RC_REFUSED 2 (mesh inputs
-refused, nothing written); RC_ERROR 3 (any other error, no validation result, nothing written); RC_FRAME 4 (gating
-passed, possible frame mismatch: stop and ask the user).  A gating failure wins over a frame warning.
+refused, nothing written); RC_ERROR 3 (any other error, no validation result, nothing written: also a bad command
+line or an unknown scene id); RC_FRAME 4 (gating passed, possible frame mismatch: stop and ask the user).  A gating
+failure wins over a frame warning.  Every eval manifest (run.py "collision") records frame_ok, the frame warnings,
+the suspect scenes and any ack-frame record (note, date, sha256); the gate shows them in its E0 facts.
 """
 
 from __future__ import annotations
@@ -405,6 +408,24 @@ def frame_problems(v: dict, directory: Path | None = None) -> list[str]:
         return []
     return [f"possible frame mismatch not acknowledged ({len(v.get('frame_warnings') or [])} frame warnings; "
             f"stop and ask the user; after the user's decision: python -m vpd.e3vs.mesh_collision ack-frame)"]
+
+
+def frame_facts(v: dict | None, directory: Path | None = None) -> dict | None:
+    """Descriptive frame facts of a validation (eval manifests, the gate's E0 facts): frame_ok, the warnings, the
+    suspect scenes, and the ack-frame record if one exists (note, date, sha256 of the file, whether it covers
+    this validation)."""
+    if v is None:
+        return None
+    ap = frame_ack_path(directory)
+    ack = None
+    if ap.is_file():
+        rec = json.loads(ap.read_text())
+        ack = {"path": str(ap), "sha256": sha256_file(ap), "note": rec.get("note"), "date_utc": rec.get("date_utc"),
+               "covers": rec.get("mesh_set_sha256") == v.get("mesh_set_sha256")
+               and rec.get("frame_warnings") == v.get("frame_warnings")}
+    sus = ((v.get("pooled") or {}).get("frame") or {}).get("suspect_scenes") or []
+    return {"frame_ok": v.get("frame_ok"), "frame_warnings": v.get("frame_warnings"),
+            "suspect_scenes": [x.get("scene_id") for x in sus], "ack": ack}
 
 
 def ack_frame(note: str, directory: Path | None = None) -> dict:
@@ -742,6 +763,11 @@ def smoke(split: str = "test", imports=("torch", "gsplat"), repo: Path | None = 
     for m in imports:
         mod = importlib.import_module(m)
         mods[m] = getattr(mod, "__version__", None)
+    cuda = None
+    torch = sys.modules.get("torch")
+    if torch is not None and torch.cuda.is_available():  # CUDA up before the collider, as in run.py
+        torch.cuda.init()
+        cuda = torch.cuda.get_device_name(0)
     eps = load_episodes(split, Path(repo) if repo else None)
     sid = sorted({e["scene_id"] for e in eps})[0]
     ep = min((e for e in eps if e["scene_id"] == sid), key=lambda e: e["episode_index"])
@@ -751,7 +777,7 @@ def smoke(split: str = "test", imports=("torch", "gsplat"), repo: Path | None = 
     p1 = p0 + SMOKE_SEGMENT_M * c[:3, 2] / np.linalg.norm(c[:3, 2])
     hit = col(p0, p1)
     return {"scene_id": sid, "episode_index": ep["episode_index"], "segment": [p0.tolist(), p1.tolist()],
-            "collides": bool(hit), "imports": mods, "official": col.meta["official"],
+            "collides": bool(hit), "imports": mods, "cuda_device": cuda, "official": col.meta["official"],
             "mesh_sha256": col.meta["mesh_sha256"], "seconds": round(time.time() - t0, 2)}
 
 
@@ -829,7 +855,14 @@ def main(argv=None) -> int:
     ap.add_argument("--note", default="", help="ack-frame: who decided, what, when")
     ap.add_argument("--dir", type=Path, default=O3D_DIR, help="o3d-check: the open3d dir")
     ap.add_argument("--repo", type=Path, default=None)
-    a = ap.parse_args(argv)
+    try:
+        a = ap.parse_args(argv)
+    except SystemExit as e:  # a bad command line is an error without a result (rc 3), not argparse's 2
+        if e.code in (0, None):  # --help
+            raise
+        cmdline = argv if argv is not None else sys.argv[1:]
+        print(f"[mesh_collision] ERROR, bad command line (rc {RC_ERROR}): {cmdline}", file=sys.stderr)
+        return RC_ERROR
     if a.cmd == "o3d-check":
         probs = o3d_shadow_problems(a.dir)
         names = o3d_top_names(a.dir)
@@ -858,7 +891,7 @@ def main(argv=None) -> int:
             repo = Path(a.repo) if a.repo else repo_dir()
             episodes = [e for sp in SPLITS for e in load_episodes(sp, repo)]
             scenes = scene_list(a.scenes, episodes)
-        except Exception as e:  # noqa: BLE001
+        except (Exception, SystemExit) as e:  # noqa: BLE001  (scene_list's SystemExit: unknown scene ids)
             what = "no validation result" if a.cmd == "validate" else "no check result"
             print(f"[mesh_collision] ERROR, {what} (rc {RC_ERROR}): {type(e).__name__}: {e}", file=sys.stderr)
             return RC_ERROR

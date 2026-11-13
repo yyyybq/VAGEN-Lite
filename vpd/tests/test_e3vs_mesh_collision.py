@@ -628,7 +628,7 @@ def test_validate_check_and_factory(backend, tmp_path, monkeypatch):
 
 
 @needs_repo
-def test_validation_fails_on_a_viewpoint_in_obstacle(backend, tmp_path):
+def test_validation_fails_on_a_viewpoint_in_obstacle(backend, tmp_path, monkeypatch):
     """A template viewpoint on a mesh surface counts as in obstacle; 1 of a few viewpoints is >= 1 %: no pass."""
     root, man = _mesh_tree(tmp_path, {"s1": [ROOM, PILLAR]}, backend.scene)
     eps = _episodes("s1", STARTS, goal_on_pillar=True)
@@ -653,9 +653,20 @@ def test_validation_fails_on_a_viewpoint_in_obstacle(backend, tmp_path):
     assert MC.main(["ack-frame", "--out", str(d2), "--note", "user 2026-11-13: frames checked (test)"]) == 0
     assert MC.check(["s1"], d2, man, root)["ok"] and not MC.record_problems(json.loads(
         MC.validation_path(d2).read_text()), d2)
+    # S2: the eval manifest's collision block records the frame facts and the ack (note, date, sha256)
+    from vpd.e3vs import run as RU
+
+    monkeypatch.setenv("VPD_E3VS_MESH_VAL_DIR", str(d2))
+    coll = RU.collision_provenance(RU.DEFAULT_COLLIDES)
+    fr = coll["frame"]
+    assert fr["frame_ok"] is False and fr["frame_warnings"] == res2["frame_warnings"] and fr["suspect_scenes"] == ["s1"]
+    assert fr["ack"]["note"] == "user 2026-11-13: frames checked (test)" and fr["ack"]["covers"]
+    assert fr["ack"]["sha256"] == E.sha256_file(MC.frame_ack_path(d2)) and not coll["validation_problems"]
+    assert RU.collision_provenance("vpd.tests.x:y") is None
     ack = json.loads(MC.frame_ack_path(d2).read_text())
     MC.frame_ack_path(d2).write_text(json.dumps({**ack, "frame_warnings": ["another warning"]}))
     assert not MC.check(["s1"], d2, man, root)["ok"]  # an ack covers exactly the warnings it was given for
+    assert RU.collision_provenance(RU.DEFAULT_COLLIDES)["frame"]["ack"]["covers"] is False
 
 
 @needs_repo
@@ -714,12 +725,27 @@ def test_validate_cli_exit_codes_and_smoke(backend, tmp_path, monkeypatch, capsy
     assert MC.main(["smoke", "--split", "test", "--imports", "json", "--repo", str(REPO)]) == 0
     sm = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert sm["scene_id"] == sid and sm["collides"] is False and list(sm["imports"]) == ["json"]
+    assert sm["cuda_device"] is None  # no GPU visible here (CUDA_VISIBLE_DEVICES=''); the job inits CUDA first
     assert sm["official"]["open3d_version"] == MC.O3D_VERSION and sm["mesh_sha256"] == v0["scenes"][sid]["sha256"]
     monkeypatch.setenv("VPD_E3VS_MESH_VAL_DIR", str(out))  # a frame-stopped validation: the smoke refuses
     assert MC.main(["smoke", "--split", "test", "--imports", "", "--repo", str(REPO)]) == MC.RC_ERROR
     assert "SMOKE FAILED" in capsys.readouterr().err
     monkeypatch.setenv("VPD_E3VS_MESH_VAL_DIR", str(out0))
     assert MC.main(["smoke", "--split", "test", "--imports", "no_such_module_vpd", "--repo", str(REPO)]) == 3
+
+
+def test_cli_errors_are_rc3(capsys):
+    """N1: a bad command line and an unknown scene id are errors without a result (rc 3), not argparse's 2 / 1."""
+    assert MC.main(["validate", "--no-such-flag"]) == MC.RC_ERROR
+    assert MC.main(["frobnicate"]) == MC.RC_ERROR
+    assert MC.main(["smoke", "--split", "nosplit"]) == MC.RC_ERROR
+    assert "bad command line" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as ei:
+        MC.main(["--help"])
+    assert ei.value.code == 0
+    if REPO is not None:
+        assert MC.main(["validate", "--scenes", "no_such_scene_x", "--repo", str(REPO)]) == MC.RC_ERROR
+        assert "unknown scenes" in capsys.readouterr().err
 
 
 # prefork / worker pinning probes (bfs_demos --collides vpd.tests.test_e3vs_mesh_collision:probe_factory)
@@ -846,6 +872,7 @@ def test_three_call_sites_use_the_validated_mesh(backend, tmp_path, monkeypatch)
     sid = first["val"]["scene_id"]
     assert m["scenes"][sid]["mesh_sha256"] == m["scenes"][sid]["mesh_validated_sha256"] == res["scenes"][sid]["sha256"]
     assert m["collision_loaded"] and m["collision_loaded"][0]["sha256"] == MC.METRICS_SHA256
+    assert m["collision"]["frame"]["frame_ok"] is True and m["collision"]["frame"]["ack"] is None
     lg = json.loads((rd / "episodes.jsonl").read_text().splitlines()[0])
     assert [s["action"] for s in lg["steps"]] == ["move_forward", "turn_left", "look_down", "move_up", "stop"]
     assert [s["collision"] for s in lg["steps"]] == [True, False, False, True, False]

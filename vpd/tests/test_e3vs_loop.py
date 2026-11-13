@@ -1166,6 +1166,31 @@ def _patch_manifest(d: Path, **kv):
     (d / "manifest.json").write_text(json.dumps(m))
 
 
+def test_gate_reports_the_frame_facts(scratch):
+    """S2: the frame facts of the validation and of every eval manifest (frame_ok, warnings, suspect scenes, an
+    ack-frame record: note, date, sha256) are in E0.facts, descriptively: never an E0 condition."""
+    root = scratch / "gate_frame_ok"
+    _gate_tree(root)
+    fr = _gate(root)["E0"]["facts"]["collision_frame"]
+    assert fr["validation"]["frame_ok"] is True and fr["validation"]["ack"] is None and fr["eval_ack_sha256"] == []
+    assert len(fr["evals"]) == 12
+    rf = scratch / "gate_frame_ack"
+    _gate_tree(rf)
+    _patch_validation(rf, frame_ok=False, frame_warnings=["pooled: only 50.0% of the iPhone camera centres ..."])
+    MC.ack_frame("user 2026-11-13: the iPhone poses are in the mesh frame (test)", rf)  # rf/frame_ack.json
+    facts = MC.frame_facts(json.loads((rf / "validation.json").read_text()), rf)
+    assert facts["ack"]["covers"] and facts["ack"]["sha256"] == E.sha256_file(rf / "frame_ack.json")
+    key = MV.mesh_set_sha256(MESHES)
+    for s in S.PILOT_STARTS:
+        for tier, mode in S.REQUIRED_EVALS:
+            _patch_manifest(S.eval_dir(rf / "pilot", s, tier, mode), collision={"mesh_set_sha256": key, "frame": facts})
+    g = _gate(rf)
+    assert g["E0"]["pass"], g["E0"]["problems"]  # descriptive only
+    fr = g["E0"]["facts"]["collision_frame"]
+    assert fr["validation"]["frame_ok"] is False and fr["validation"]["ack"]["note"].startswith("user 2026-11-13")
+    assert fr["eval_ack_sha256"] == [facts["ack"]["sha256"]] and all(f["ack"]["covers"] for f in fr["evals"].values())
+
+
 def _patch_validation(root: Path, **kv):
     v = json.loads((root / "validation.json").read_text())
     v.update(kv)

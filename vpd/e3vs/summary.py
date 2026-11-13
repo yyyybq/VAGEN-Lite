@@ -28,7 +28,8 @@ gate(root) for the pilot (OUT/e3vs/runs/pilot/<START>/evals/pilot__<START>__<tie
      (raw: no adapter), the 100 adapter initialised from this start's 0W (meta init_adapter.sha256), the SFT data
      stamped with the validated meshes (prep_state/sft == mesh_set_sha256), and the SFT manifests' prompt
      system_sha256 == every eval's.  HF-vs-server prompt-token parity (audit prompt_parity, B5) is reported per
-     eval, descriptively;
+     eval, descriptively; so are, in E0.facts.collision_frame, the frame facts (frame_ok, warnings, suspect scenes,
+     any ack-frame record: note, date, sha256) of the validation and of every eval manifest (not a condition);
   E1 learnable: at least one start's 100/u Wilson lower bound > the floor rate (floors_mesh.json gate_floor);
   E2 format: every start's 100/c run has regex-valid 100% and 0 episodes without a log;
   E3 not saturated: every start's 100/u success < 0.85.
@@ -385,7 +386,13 @@ def gate(root: Path | None = None, starts=PILOT_STARTS, floors: Path | None = No
                or per[s]["100c"]["episodes_without_log"] != 0 or per[s]["100c"]["episodes_failed"] != 0]
     e3_fail = [s for s in starts if not per[s]["100u"] or per[s]["100u"]["rate"] is None
                or per[s]["100u"]["rate"] >= SATURATION]
-    res = {"E0": {"pass": not e0, "problems": e0},
+    # descriptive only (not an E0 condition): the frame facts of the validation and of each eval manifest
+    frame = {"validation": MC.frame_facts(val, Path(validation).parent),
+             "evals": {f"{s}__{t}__{m}": ((man or {}).get("collision") or {}).get("frame")
+                       for (s, t, m), man in sorted(mans.items())}}
+    acks = {k: (f or {}).get("ack") for k, f in frame["evals"].items()}
+    frame["eval_ack_sha256"] = sorted({a["sha256"] for a in acks.values() if a})
+    res = {"E0": {"pass": not e0, "problems": e0, "facts": {"collision_frame": frame}},
            "E1": {"pass": bool(e1), "starts_above_floor": e1, "floor": fl},
            "E2": {"pass": not e2_fail, "failing_starts": e2_fail},
            "E3": {"pass": not e3_fail, "failing_starts": e3_fail, "threshold": SATURATION},

@@ -554,7 +554,8 @@ def collision_provenance(collides: str | None) -> dict | None:
             "validation": str(vp), "validation_pass": None if val is None else val.get("pass"),
             "validation_problems": None if val is None else MC.record_problems(val),
             "mesh_set_sha256": None if val is None else val.get("mesh_set_sha256"),
-            "validation_official": None if val is None else val.get("official")}
+            "validation_official": None if val is None else val.get("official"),
+            "frame": MC.frame_facts(val)}  # descriptive: frame_ok, warnings, suspect scenes, any ack-frame record
 
 
 def preflight(prov: dict, renderer: str, collides: str | None, coll: dict | None = None) -> list[str]:
