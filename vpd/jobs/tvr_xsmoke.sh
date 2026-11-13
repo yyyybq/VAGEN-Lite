@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # sco payload of job vpd-tvr-xsmoke (EXPLORATORY; PREREG_TVR_PILOT.md section 17, row 2026-11-12; DECISIONS G18): the
-# GPU smoke of the RL starts Q3RD and Q3RS150 (one job, both starts) before tvr-xtrain-<s>.  Mechanism only: dev tasks
+# GPU smoke of the RL starts Q3RD and Q3RS150 (one job, both starts) before tvr-xtrain-<s> (and of Q3SG alone, job
+# vpd-tvr-xsmoke-q3sg, below).  Mechanism only: dev tasks
 # (smoke8 / smoke4), never eval500, no success rate anywhere (run_tvr --mechanism-only nulls result.success;
 # xsmoke-verdict never reads a success field).  as_root, one H800, gate tvr, from pilot_tvr.py:
 #     env VPD_JOB_DEADLINE_S=3840 timeout -k 60 4020 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/tvr_xsmoke.sh RUN
+# Start list (PREREG section 17, row 2026-11-13; DECISIONS G20): `tvr_xsmoke.sh [STARTS] RUN`, STARTS one of the
+# registered lists: Q3RD,Q3RS150 (the default when omitted: job vpd-tvr-xsmoke, the commands above unchanged) or Q3SG
+# (job vpd-tvr-xsmoke-q3sg, the third explore start alone; the same steps per start):
+#     env VPD_JOB_DEADLINE_S=2040 timeout -k 60 2220 bash WT/vpd/jobs/tvr_xsmoke.sh Q3SG RUN
+# Any other list: exit 2.  The job name goes to `pilot_tvr guard / expect JOB` and (Q3SG) `xsmoke-verdict --job JOB`.
 # SM = OUT/tvr/runs/explore/rl/smoke/<RUN name> (runs/explore/rl/smoke is made by pilot_tvr prepare as the login user).
-# Steps: node, prereg_committed (vpd_snapshot_file vpd/PREREG_TVR_PILOT.md), guard (pilot_tvr guard tvr-xsmoke: the
-# explore guards), merge_disk; per start S in Q3RD Q3RS150 (each a `part`; a failure never skips the other start):
+# Steps: node, prereg_committed (vpd_snapshot_file vpd/PREREG_TVR_PILOT.md), guard (pilot_tvr guard JOB: the
+# explore guards), merge_disk; per start S of the list (Q3RD Q3RS150, or Q3SG; each a `part`; a failure never skips
+# the other start):
 #   load_S          PY_Q3 -m vpd.tvr.raw_bf16: the checkpoint as the trainer loads it (vpd.starts.load_model: float32
 #                   -> bf16, sdpa asserted) saved like merge.py's folder on job-local disk -> SM/S/load/load.json
 #   dry_S           PY_TRAIN n2_train_vpd.py --dry-run --limit 3 --expect-grid 22x40 on tiers/v1/parity3.jsonl
@@ -23,22 +30,32 @@
 #   eval_S          run_tvr eval --tier 0W --arms c --task-set smoke4 --name-prefix xsmoke --model-dir <merged>
 #                   --adapter-meta SM/S/adapters/0W/meta.json --mechanism-only --vllm-parity SM/S/dry/dry_run.json; reap;
 #                   rm_merged_S
-#   verdict         pilot_tvr xsmoke-verdict --smoke SM -> SM/smoke_verdict.json (PASS iff every mechanism check passes)
-#   expect          pilot_tvr expect tvr-xsmoke -> RUN/expect.json; RUN/DONE only if every step passed (verdict PASS)
+#   verdict         pilot_tvr xsmoke-verdict --smoke SM [--job JOB] -> SM/smoke_verdict.json (PASS iff every mechanism
+#                   check passes; "starts" = the list)
+#   expect          pilot_tvr expect JOB -> RUN/expect.json; RUN/DONE only if every step passed (verdict PASS)
 # No replay2 / render_parity step: every explore eval job renders its own canary (O22) before any eval.  As root, RUN
 # and SM are chowned to 20325 at EXIT; the bf16 and merged folders (job-local only) are removed after use and at EXIT.
 # The O9 fallback (CAL/shake/fallback_used.json) applies.  Deadlines: soft VPD_JOB_DEADLINE_S (default 3840);
 # `timeout -k 30 <left>`; THOR / vLLM --deadline-s <left - 240>.
 # Env: VPD_DRYRUN=1 prints the commands; test hooks honoured ONLY with VPD_DRYRUN=1: VPD_TVR_OUT.  VPD_TVR_PY (tests).
 
-RUN=${1:-}
-if [[ -z $RUN || $# -ne 1 ]]; then
-  echo "usage: tvr_xsmoke.sh RUN" >&2
+case $# in
+  1) XLIST=Q3RD,Q3RS150; RUN=$1 ;;  # the default: both RL starts (job tvr-xsmoke)
+  2) XLIST=$1; RUN=$2 ;;
+  *) XLIST=""; RUN="" ;;
+esac
+case $XLIST in
+  Q3RD,Q3RS150) JOB=tvr-xsmoke ;;  # pilot_tvr XJOBS[JOB]["starts"], in this order
+  Q3SG) JOB=tvr-xsmoke-q3sg ;;
+  *) JOB="" ;;
+esac
+if [[ -z $RUN || -z $JOB ]]; then
+  echo "usage: tvr_xsmoke.sh [Q3RD,Q3RS150|Q3SG] RUN   (default Q3RD,Q3RS150)" >&2
   exit 2
 fi
-JOB=tvr-xsmoke
+IFS=, read -r -a XSTARTS <<< "$XLIST"
 TAG=tvr_xsmoke
-START=Q3RD
+START=${XSTARTS[0]}
 NEED_PREREG=1
 DEF_DEADLINE=3840
 export RUN
@@ -75,7 +92,8 @@ mkdir -p "$RUN/logs"
 cd "$VPD_WORKTREE"
 [[ $DRY == 1 ]] || rm -f -- "$RUN/DONE"  # DONE describes this run only
 SM=$TVR/runs/explore/rl/smoke/$(basename "$RUN")
-XSTARTS=(Q3RD Q3RS150)  # pilot_tvr EXPLORE_STARTS, in this order
+VERDICT_ARGS=()  # tvr-xsmoke: none (its command unchanged)
+[[ $JOB == tvr-xsmoke ]] || VERDICT_ARGS=(--job "$JOB")
 AD=""
 PARITY_DIR=""
 OUTROOT=""
@@ -508,7 +526,8 @@ if ((GUARD_OK == 1)); then
   for S in "${XSTARTS[@]}"; do
     part xsmoke_start "$S"
   done
-  part step verdict plain "$PY_EVAL" -m vpd.tvr.pilot_tvr xsmoke-verdict --smoke "$SM"
+  part step verdict plain "$PY_EVAL" -m vpd.tvr.pilot_tvr xsmoke-verdict --smoke "$SM" \
+    ${VERDICT_ARGS[@]+"${VERDICT_ARGS[@]}"}
 else
   vpd_step steps:guard_failed false || true
 fi

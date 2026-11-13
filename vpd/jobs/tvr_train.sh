@@ -21,7 +21,8 @@
 # VPD_TVR_ROOT (DECISIONS G18): the output root under OUT/tvr/runs.  Unset or "pilot": the pilot jobs as above
 # (START Q3B Q3S E2, job tvr-train-<s>, P = runs/pilot/START).  "explore/rl": the EXPLORATORY RL starts (START Q3RD
 # Q3RS150, job tvr-xtrain-<s>, P = runs/explore/rl/START; the same steps, data, seed and flags; pilot_tvr's explore
-# payload sets it).  Any other value: exit 2.
+# payload sets it).  Any other value: exit 2.  The third explore start Q3SG (PREREG section 17, row 2026-11-13;
+# DECISIONS G20) runs under explore/rl the same way (job tvr-xtrain-q3sg, P = runs/explore/rl/Q3SG).
 
 START=${1:-}
 RUN=${2:-}
@@ -35,8 +36,8 @@ case $TVR_ROOT in
     JOB=tvr-train-${START,,} ;;
   explore/rl)
     case $START in
-      Q3RD|Q3RS150) ;;
-      *) echo "usage: VPD_TVR_ROOT=explore/rl tvr_train.sh START RUN   (START: Q3RD Q3RS150)" >&2; exit 2 ;;
+      Q3RD|Q3RS150|Q3SG) ;;
+      *) echo "usage: VPD_TVR_ROOT=explore/rl tvr_train.sh START RUN   (START: Q3RD Q3RS150 Q3SG)" >&2; exit 2 ;;
     esac
     JOB=tvr-xtrain-${START,,} ;;
   *) echo "VPD_TVR_ROOT must be pilot or explore/rl, got '$TVR_ROOT'" >&2; exit 2 ;;
