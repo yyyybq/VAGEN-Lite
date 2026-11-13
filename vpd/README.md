@@ -89,7 +89,7 @@
 | `jobs/common_env.sh`、`jobs/preflight.sh` | 作业脚本的公共开头（线程数、离线开关、chown 陷阱、节点信息）和开跑前检查 | WP-OPS |
 | `jobs/wb_demos.sh` | sco 作业脚本：渲染示范、生成热身集、生成档位 | WP-WBDEMO |
 | `jobs/wb_smoke.sh`、`jobs/wb_pilot_start.sh` | sco 作业脚本：WalkerBench smoke 和每个起点的试点 | WP-WBPILOT |
-| `jobs/e3vs_prep.sh`、`jobs/e3vs_start.sh` | sco 作业脚本：E3VS 准备和每个起点的试点。2026-11-12 起碰撞模型是官方 mesh：准备作业的 `mesh_val` 一步（原 `occupancy`）验证 99 个 mesh，不过就停（退出码 1 闸门指标不过、2 输入被拒、3 出错没有结果、4 可能是坐标系不一致，都停下问用户）；KEY 是 99 个 mesh 的 `mesh_set_sha256`；新 RUN 里 gsplat_probe、parity 按已有输出跳过；起点作业在 gsplat 之后、训练之前做一次碰撞模型冒烟（`mesh_collision smoke`）；只有要用碰撞模型的 PY_Q3 调用（mesh_val、BFS、下限、冒烟、run.py）才把 `envs/e3vs-o3d` 接在 PYTHONPATH 后面，run.py 不把它传给 vLLM 服务 | WP-E3VS-B；meshcm（第三轮） |
+| `jobs/e3vs_prep.sh`、`jobs/e3vs_start.sh` | sco 作业脚本：E3VS 准备和每个起点的试点。2026-11-12 起碰撞模型是官方 mesh：准备作业的 `mesh_val` 一步（原 `occupancy`）验证 99 个 mesh（2026-11-13 起是 `OUT/e3vs/mesh` 里语义版 mesh 的副本，结果写 `OUT/e3vs/mesh/validation.json`），不过就停（退出码 1 闸门指标不过、2 输入被拒、3 出错没有结果、4 可能是坐标系不一致，都停下问用户）；KEY 是 99 个 mesh 的 `mesh_set_sha256`；新 RUN 里 gsplat_probe、parity 按已有输出跳过；起点作业在 gsplat 之后、训练之前做一次碰撞模型冒烟（`mesh_collision smoke`）；只有要用碰撞模型的 PY_Q3 调用（mesh_val、BFS、下限、冒烟、run.py）才把 `envs/e3vs-o3d` 接在 PYTHONPATH 后面，run.py 不把它传给 vLLM 服务 | WP-E3VS-B；meshcm（第三轮） |
 | `walkerbench/sandbox.py` | 唯一的 WalkerBench 运行副本 helper：改渲染尺寸、全景目录、任务目录 | WP-CORE |
 | `walkerbench/history.py` | 干净的 K 轮历史窗口，训练和评测共用 | WP-CORE |
 | `walkerbench/action_regex.py` | 约束解码用的每步正则 | WP-CORE |
@@ -102,8 +102,8 @@
 | `train/n2_train_vpd.py` | 训练脚本，由 `downstream/n/n2_train.py` 改来。第三轮加了每条回复可选的 `loss_weight`（G4 的 V5） | WP-TRAIN；wbtrain（第三轮） |
 | `train/parity_check.py`、`train/merge.py`、`train/wb_train_probe.py` | 两个环境的处理器一致性检查；合并到作业本地盘；长序列吞吐探针 | WP-TRAIN |
 | `tvr/` | TVR 冒烟：登录节点准备脚本、冒烟作业、Vulkan/EGL 探针、判定脚本、`SMOKE_CRITERIA.md` | WP-TVR |
-| `e3vs/` | E3VS 相关代码（几何、BFS 示范、盲下限、下载脚本、`USER_STEPS.md`、渲染、碰撞模型、SFT 数据、闭环评测、汇总）。碰撞模型 2026-11-12 起是 `mesh_collision.py`：按文件路径执行固定版本仓库里官方的 `e3vs/eval/metrics.py` `Collisions`（ScanNet++ `mesh_aligned_0.05.ply` + Open3D 光线投射，容差 1e-4 m），BFS 示范、盲走下限、闭环评测共用；`mesh_verify.py` 校验用户下载的 mesh；占据栅格 `occupancy.py` 留作记录，作业不再用 | WP-E3VS-A、WP-E3VS-B；meshcm（第三轮） |
-| `tests/test_e3vs_mesh_collision.py` | E3VS 官方 mesh 碰撞模型：官方文件的版本和 sha256、规则 (ii) 的官方语义（两端只有 1e-4 m 容差）、"在障碍里"、验证和拒绝、check、工厂，以及三处共用同一个碰撞对象。open3d 没装时用一个替身跑官方代码；装了以后同样的用例再用真库跑一遍 | meshcm（第三轮） |
+| `e3vs/` | E3VS 相关代码（几何、BFS 示范、盲下限、下载脚本、`USER_STEPS.md`、渲染、碰撞模型、SFT 数据、闭环评测、汇总）。碰撞模型 2026-11-12 起是 `mesh_collision.py`：按文件路径执行固定版本仓库里官方的 `e3vs/eval/metrics.py` `Collisions`（ScanNet++ mesh + Open3D 光线投射，容差 1e-4 m；2026-11-13 起用用户下载的语义版 `mesh_aligned_0.05_semantic.ply`，只用几何，官方读入代码不改），BFS 示范、盲走下限、闭环评测共用；`mesh_verify.py` 校验 `OUT/e3vs/mesh` 里的副本（每个的 sha256 等于 `mesh_dl` 里用户下载的原文件；场景表 = splat 数据目录的目录列表），写 `mesh/MANIFEST.json`；`MANIFEST.json`、`validation.json` 和评测 manifest 的 `code.e3vs_files` 记下 E3VS 代码（`e3vs/*.py`、`jobs/e3vs_*.sh`）的 sha256，只记录；占据栅格 `occupancy.py` 留作记录，作业不再用 | WP-E3VS-A、WP-E3VS-B；meshcm（第三轮） |
+| `tests/test_e3vs_mesh_collision.py` | E3VS 官方 mesh 碰撞模型：官方文件的版本和 sha256、规则 (ii) 的官方语义（两端只有 1e-4 m 容差）、"在障碍里"、验证和拒绝、check、工厂，以及三处共用同一个碰撞对象。open3d 没装时用一个替身跑官方代码；装了以后同样的用例再用真库跑一遍。测试 mesh 按真实语义版文件的格式写（多 rgb 和 label 列）；官方读入的顶点和三角形等于夹具的 xyz 和面，官方检查和只有几何的同一份 mesh 结果相同 | meshcm（第三轮） |
 | `tests/` | 每个工作包的 pytest。在登录节点上单核、不用 GPU 就能跑 | 各工作包 |
 | `tests/test_snapshot.py`、`tests/test_snapshot_facts.py` | 代码快照（建快照、prepare 改写、launch.sh、作业里的核对）；快照里的 git 事实（评测 manifest、训练 meta、E3VS 评测）和 E3VS 记下的加载器 | infra（第三轮） |
 | `tests/test_wb_variants.py`、`tests/test_perc.py` | WalkerBench 变体探索；感知零样本 | wbvar、perc（第三轮） |
@@ -150,7 +150,7 @@
 | `tvr/runs/explore/mpdiag/` | 合并正确性诊断（vpd-tvr-mpdiag，探索性质）的报告，每次一个 `<RUN 名>/`（`mp_diag.json`、`mp_diag.md`） |
 | `envs/tvr` | TVR 的 conda 环境（要用户批准后才建） |
 | `envs/e3vs-o3d` | E3VS 碰撞模型用的 open3d 0.19.0（官方固定的版本；`pip --target`，用户 2026-11-13 批准后已装）。只有 E3VS 两个作业里要用碰撞模型的 PY_Q3 调用把它接在 PYTHONPATH 后面；`mesh_collision o3d-check` 拒绝其中任何一个 PY_Q3 自己也能导入的顶层模块 |
-| `e3vs/` | `repo/`、`data/`、`mesh_dl/`（用户下载的 ScanNet++ mesh）、`mesh_manifest.json`、`mesh_sha256.txt`（mesh_verify）、`mesh_val/validation.json`（碰撞模型验证）、`parity/`、`torch_ext/`、`prep_state/`、`bfs/mesh/`、`floors/floors_mesh.json`、`sft/`、`runs/`；`occ/` 是 2026-11-12 没通过验证的占据栅格，留作记录 |
+| `e3vs/` | `repo/`、`data/`、`mesh_dl/`（用户下载的 ScanNet++ mesh，语义版；用户的数据，不写不动）、`mesh/`（碰撞模型读的副本 `<scene>/scans/mesh_aligned_0.05_semantic.ply`，加上 `MANIFEST.json`、`mesh_sha256.txt`（mesh_verify）、`validation.json`（碰撞模型验证）、`frame_ack.json`（只在用户决定后才有））、`parity/`、`torch_ext/`、`prep_state/`、`bfs/mesh/`、`floors/floors_mesh.json`、`sft/`、`runs/`；`occ/` 是 2026-11-12 没通过验证的占据栅格，留作记录 |
 
 合并后的权重**不进** OUT，也不进 /mnt/umm 的任何地方：
 - 只写作业本地盘：`/tmp` 剩余 ≥ 40 GB 时用 `/tmp`，否则 `/dev/shm` 剩余 ≥ 40 GB 时用 `/dev/shm`，都不够就报错。
