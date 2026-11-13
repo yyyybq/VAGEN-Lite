@@ -195,6 +195,18 @@ def test_constants_and_job_paths():
     assert "e3vs-o3d" not in (paths.VPD_PKG / "paths.py").read_text()
 
 
+def test_jobs_append_the_open3d_dir():
+    """Only the two E3VS jobs put O3D_DIR on PYTHONPATH (appended, after the code tree), and both name the
+    module's path."""
+    out = re.search(r"^export VPD_OUT=(\S+)$", (JOBS / "common_env.sh").read_text(), re.M).group(1)
+    assert Path(out) == paths.OUT
+    for job in ("e3vs_prep.sh", "e3vs_start.sh"):
+        t = (JOBS / job).read_text()
+        assert "\nO3D_DIR=$VPD_OUT/envs/e3vs-o3d\n" in t and 'export PYTHONPATH="$PYTHONPATH:$O3D_DIR"' in t, job
+        assert "vpd.e3vs.occupancy" not in t, job
+    assert not any("e3vs-o3d" in j.read_text() for j in sorted(JOBS.glob("*.sh")) if not j.name.startswith("e3vs_"))
+
+
 def test_importing_the_code_does_not_import_open3d():
     code = ("import sys, vpd.e3vs.mesh_collision, vpd.e3vs.run, vpd.e3vs.summary, vpd.e3vs.bfs_demos, "
             "vpd.e3vs.floors; print('open3d' in sys.modules)")

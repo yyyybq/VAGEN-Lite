@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # sco payload of job vpd-e3vs-prep (non-root; one card for gsplat; PY_Q3 = eval-external-q3, which has gsplat 1.5.3,
-# plyfile and ply_gaussian_loader through its system site packages):
+# plyfile and ply_gaussian_loader through its system site packages; open3d for the official collision model comes
+# from O3D_DIR = OUT/envs/e3vs-o3d, appended to PYTHONPATH here and in e3vs_start.sh only):
 #     timeout -k 120 6900 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_prep.sh RUN
 # Prepared by the orchestrator only after the user's OK, the PREREG commit, the repo and the splat download:
 #     python -m vpd.sco prepare --run OUT/jobs/e3vs-prep-<yyyymmddHHMM> --name vpd-e3vs-prep --est-gph 2.0 -- \
@@ -23,32 +24,36 @@
 #                 (from a code snapshot RUN/code: the job's copy equals the file of the snapshot's commit,
 #                 vpd_snapshot_file; the commit is the one that last changed it, as `git log -1` gave before)
 #   inputs        render --check-inputs: pinned repo at OUT/e3vs/repo/E3VS-BENCH + all 99 PLYs
-#   gsplat_probe  render --probe -> OUT/e3vs/parity/gsplat_probe_prep.json (B18: JIT or not, seconds; always run)
+#   gsplat_probe  render --probe -> OUT/e3vs/parity/gsplat_probe_prep.json (B18: JIT or not, seconds).  Skipped
+#                 when that file says the extension loaded and the built OUT/e3vs/torch_ext/gsplat_cuda/
+#                 gsplat_cuda.so is still there (user 2026-11-12: a new RUN skips it by resume; the start jobs run
+#                 their own probe for the eval manifests)
 #   parity        render --parity $VPD_PARITY_SCENE -> OUT/e3vs/parity/parity_<scene>.json; min PSNR >= 40 or stop
 #                 (skipped when that file has pass true)
-#   occupancy     occupancy build --scenes all --validate --resume -> OUT/e3vs/occ/<scene>.npz + validation.json;
-#                 pass or stop (a validation failure is handed to the user: PREREG section 5 allows one threshold
-#                 change).  Skipped when `occupancy check --scenes all` passes (validation pass, every npz
-#                 unchanged); --resume keeps the scenes already built with the same settings.
-#                 KEY = validation.json grids_sha256, the identity of the validated grids.
-#                 The iPhone convention is --convention auto = the parity file's iPhone 'best'; when the parity
-#                 run's iPhone part errored (no 'best'), the build refuses and the job stops (to the user: rerun
-#                 parity, or choose --convention explicitly).  validation.json records iphone_convention.
-#   bfs_<split>   bfs_demos --split S --procs $VPD_PREP_PROCS --collides vpd.e3vs.occupancy:load_collider --tag occ
-#                 (1 thread per process) -> OUT/e3vs/bfs/occ/<split>/  (train: demo_pool.jsonl; val/test: opt_len)
-#   floors        floors --collides vpd.e3vs.occupancy:load_collider --tag occ -> OUT/e3vs/floors/floors_occ.json
-#                 (the frozen gate floor = its gate_floor.rate, DECISIONS B8)
+#   mesh_val      mesh_collision validate --scenes all -> OUT/e3vs/mesh_val/validation.json: the official E3VS
+#                 Collisions (Open3D ray casting) on the 99 user-downloaded ScanNet++ meshes (PREREG section 16,
+#                 user 2026-11-12).  Refused (exit 2) when OUT/e3vs/mesh_manifest.json (mesh_verify) is missing or
+#                 not ok or a mesh sha256 differs; a gating metric >= 1 % (iPhone segments colliding, template
+#                 viewpoints in obstacle) exits 1: the job STOPS and the user decides.  Skipped when
+#                 `mesh_collision check --scenes all` passes (validation pass, same definition, every mesh
+#                 unchanged, key == the manifest's).  KEY = mesh_set_sha256 of the 99 meshes.
+#                 (Until 2026-11-12 this step was "occupancy", the splat occupancy grid of occupancy.py.)
+#   bfs_<split>   bfs_demos --split S --procs $VPD_PREP_PROCS --collides vpd.e3vs.mesh_collision:load_collider
+#                 --tag mesh (1 thread per process) -> OUT/e3vs/bfs/mesh/<split>/ (train: demo_pool.jsonl;
+#                 val/test: opt_len)
+#   floors        floors --collides vpd.e3vs.mesh_collision:load_collider --tag mesh ->
+#                 OUT/e3vs/floors/floors_mesh.json (the frozen gate floor = its gate_floor.rate, DECISIONS B8)
 #   sft           make_sft all --seed 1001 --tiers 100 --overwrite -> OUT/e3vs/sft/{warmup20.jsonl,
 #                 order_seed1001.json, seed1001/demos_100.jsonl, images/}
 #                 bfs_*, floors and sft each write OUT/e3vs/prep_state/<step> = KEY when they succeed and are
-#                 skipped when that stamp equals the current KEY and their output exists (new grids = rerun).
-#                 The gate (summary gate, E0) requires prep_state/floors and prep_state/sft == grids_sha256.
+#                 skipped when that stamp equals the current KEY and their output exists (other meshes = rerun).
+#                 The gate (summary gate, E0) requires prep_state/floors and prep_state/sft == mesh_set_sha256.
 #   DONE          OUT/e3vs/PREP_DONE and RUN/DONE
 # Env: VPD_DRYRUN=1 prints the commands (guard and inputs are evaluated but do not stop the dry run);
 #      VPD_PREP_PROCS (default 12), VPD_PARITY_SCENE (default 00dd871005, the first val scene),
 #      VPD_JOB_DEADLINE_S (default 6720), VPD_MIN_STEP_S (default 60).
-#      Test hooks honoured ONLY with VPD_DRYRUN=1: VPD_E3VS_ROOT (instead of OUT/e3vs), VPD_PREP_SCENES (instead
-#      of all, for the occupancy check).
+#      Test hooks honoured ONLY with VPD_DRYRUN=1: VPD_E3VS_ROOT (instead of OUT/e3vs: parity, torch_ext, meshes,
+#      manifest, mesh_val, outputs), VPD_PREP_SCENES (instead of all, for the mesh check).
 # gsplat JIT (B18): CUDA_HOME / PATH / CC / CXX point at the eval-external env (nvcc + conda gcc);
 # TORCH_EXTENSIONS_DIR = OUT/e3vs/torch_ext so the start jobs can copy the built extension instead of rebuilding.
 # A SIGTERM / SIGINT / SIGHUP (sco delete, the outer timeout) is forwarded to the running step's process group;
@@ -76,21 +81,34 @@ RESERVE=60
 [[ $MIN_STEP_S =~ ^[0-9]+$ ]] || { echo "VPD_MIN_STEP_S must be a non-negative integer" >&2; exit 2; }
 DEADLINE=$((T0 + DEADLINE_S))
 E3VS=$VPD_OUT/e3vs
-OCC_SCENES=all
+MESH_SCENES=all
+unset VPD_E3VS_OCC_DIR  # the occupancy grid is not used any more
 if [[ $DRY == 1 ]]; then
   if [[ -n ${VPD_E3VS_ROOT:-} ]]; then
     E3VS=$VPD_E3VS_ROOT
-    export VPD_E3VS_OCC_DIR=$E3VS/occ
+    export VPD_E3VS_MESH_ROOT=$E3VS/mesh_dl VPD_E3VS_MESH_MANIFEST=$E3VS/mesh_manifest.json
+    export VPD_E3VS_MESH_VAL_DIR=$E3VS/mesh_val
   fi
-  OCC_SCENES=${VPD_PREP_SCENES:-all}
+  MESH_SCENES=${VPD_PREP_SCENES:-all}
 else
-  unset VPD_E3VS_OCC_DIR   # production: the grids at OUT/e3vs/occ only
+  unset VPD_E3VS_MESH_ROOT VPD_E3VS_MESH_MANIFEST VPD_E3VS_MESH_VAL_DIR  # production: OUT/e3vs only
 fi
 STATE=$E3VS/prep_state
 PY=$PY_Q3
-COLL=vpd.e3vs.occupancy:load_collider
+COLL=vpd.e3vs.mesh_collision:load_collider
+TAG=mesh
 ENV_PREFIX=$(dirname "$(dirname "$PY_EVAL")")
 KEY=
+# open3d for the official collision model (== vpd.e3vs.mesh_collision.O3D_DIR; test_e3vs_mesh_collision checks).
+# Appended: PYTHONPATH still starts with the code tree.  A numpy / torch copy in it would shadow the env's.
+O3D_DIR=$VPD_OUT/envs/e3vs-o3d
+for d in numpy torch; do
+  if [[ -e $O3D_DIR/$d ]]; then
+    echo "[e3vs] $O3D_DIR/$d would shadow PY_Q3's $d (install open3d there with --no-deps)" >&2
+    exit 2
+  fi
+done
+export PYTHONPATH="$PYTHONPATH:$O3D_DIR"
 
 mkdir -p "$RUN"
 cd "$VPD_WORKTREE"
@@ -213,46 +231,62 @@ gsplat_env() {
   return 0
 }
 
+probe_ok() {  # the prep probe says the extension loaded, and the build it made is still in torch_ext
+  local f=$E3VS/parity/gsplat_probe_prep.json
+  [[ -s $f && -s $E3VS/torch_ext/gsplat_cuda/gsplat_cuda.so ]] || return 1
+  "$PY" -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1])).get("extension_loaded") is True else 1)' "$f"
+}
+
+probe_step() {
+  if probe_ok; then skip gsplat_probe; return 0; fi
+  x "$PY" -m vpd.e3vs.render --probe --out "$E3VS/parity/gsplat_probe_prep.json"
+}
+
 parity_step() {
   if json_pass "$E3VS/parity/parity_$SCENE.json"; then skip parity; return 0; fi
   x "$PY" -m vpd.e3vs.render --parity "$SCENE"
 }
 
-occ_key() {  # prints validation.json grids_sha256 when the validated grids are all unchanged
-  "$PY" -m vpd.e3vs.occupancy check --scenes "$OCC_SCENES" 2>/dev/null | tail -n 1
+mesh_key() {  # prints validation.json mesh_set_sha256 when the validation passes and every mesh is unchanged
+  "$PY" -m vpd.e3vs.mesh_collision check --scenes "$MESH_SCENES" 2>/dev/null | tail -n 1
 }
 
-occupancy_step() {
-  local k
-  k=$(occ_key || true)
+mesh_step() {
+  local k rc=0
+  k=$(mesh_key || true)
   if [[ -n $k ]]; then
     KEY=$k
-    skip occupancy
+    skip mesh_val
     return 0
   fi
-  x "$PY" -m vpd.e3vs.occupancy build --scenes all --validate --resume || return $?
+  x "$PY" -m vpd.e3vs.mesh_collision validate --scenes all || rc=$?
+  if ((rc)); then
+    echo "[e3vs] mesh validation failed (rc $rc; 1 = a gating metric >= 1 %, 2 = mesh inputs refused): the job" \
+         "stops here; to the user (PREREG_E3VS_PILOT section 5, user 2026-11-12)" >&2
+    return "$rc"
+  fi
   if [[ $DRY == 1 ]]; then
     KEY=dry
     return 0
   fi
-  KEY=$(occ_key || true)
-  [[ -n $KEY ]] || { echo "[e3vs] occupancy check failed after the build" >&2; return 1; }
+  KEY=$(mesh_key || true)
+  [[ -n $KEY ]] || { echo "[e3vs] mesh check failed after the validation" >&2; return 1; }
 }
 
 bfs_split() {  # 1 thread per process, $PROCS processes
   local sp=$1
-  if stamped "bfs_$sp" "$E3VS/bfs/occ/$sp/summary.json" "$E3VS/bfs/occ/$sp/opt_len.json"; then
+  if stamped "bfs_$sp" "$E3VS/bfs/$TAG/$sp/summary.json" "$E3VS/bfs/$TAG/$sp/opt_len.json"; then
     skip "bfs_$sp"
     return 0
   fi
   OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
-    x "$PY" -m vpd.e3vs.bfs_demos --split "$sp" --procs "$PROCS" --collides "$COLL" --tag occ || return $?
+    x "$PY" -m vpd.e3vs.bfs_demos --split "$sp" --procs "$PROCS" --collides "$COLL" --tag "$TAG" || return $?
   stamp "bfs_$sp"
 }
 
 floors_step() {
-  if stamped floors "$E3VS/floors/floors_occ.json"; then skip floors; return 0; fi
-  x "$PY" -m vpd.e3vs.floors --collides "$COLL" --tag occ || return $?
+  if stamped floors "$E3VS/floors/floors_$TAG.json"; then skip floors; return 0; fi
+  x "$PY" -m vpd.e3vs.floors --collides "$COLL" --tag "$TAG" || return $?
   stamp floors
 }
 
@@ -270,9 +304,9 @@ vpd_node_facts "$RUN/node.txt"
 gsplat_env
 step guard prereg_guard
 step inputs check_inputs
-step gsplat_probe x "$PY" -m vpd.e3vs.render --probe --out "$E3VS/parity/gsplat_probe_prep.json"
+step gsplat_probe probe_step
 step parity parity_step
-step occupancy occupancy_step
+step mesh_val mesh_step
 for SP in train val test; do
   step "bfs_$SP" bfs_split "$SP"
 done

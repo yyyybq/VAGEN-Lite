@@ -1242,7 +1242,8 @@ def test_job_scripts_parse(name):
 def _dry(script: str, args: list[str], run: Path, **extra) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if k not in ("RUN", "VPD_E3VS_REPO", "VPD_E3VS_OCC_DIR", "VPD_MERGE_DIR",
                                                             "VPD_FAKE_FREE_GIB", "VPD_DRY_FAIL",
-                                                            "VPD_JOB_DEADLINE_S")}
+                                                            "VPD_JOB_DEADLINE_S", "VPD_E3VS_MESH_ROOT",
+                                                            "VPD_E3VS_MESH_MANIFEST", "VPD_E3VS_MESH_VAL_DIR")}
     env.update(VPD_DRYRUN="1", PYTHONDONTWRITEBYTECODE="1", **extra)
     return subprocess.run(["bash", str(JOBS / script), *args, str(run)], capture_output=True, text=True, env=env,
                           timeout=300)
@@ -1301,17 +1302,21 @@ def _dry_cmds(out: str) -> list[str]:
 
 
 def test_prep_payload_dry_run(scratch):
+    """Data-independent: an empty E3VS root (nothing to resume), so every step's command is printed."""
     run = scratch / "prep_run"
-    r = _dry("e3vs_prep.sh", [], run)
+    root = scratch / "prep_dry_e3vs"
+    root.mkdir()
+    r = _dry("e3vs_prep.sh", [], run, VPD_E3VS_ROOT=str(root))
     assert r.returncode == 0, r.stdout + r.stderr
     cmds = _dry_cmds(r.stdout)
-    want = ["-m vpd.e3vs.render --probe --out " + str(paths.E3VS_OUT / "parity" / "gsplat_probe_prep.json"),
+    want = ["-m vpd.e3vs.render --probe --out " + str(root / "parity" / "gsplat_probe_prep.json"),
             "-m vpd.e3vs.render --parity 00dd871005",
-            "-m vpd.e3vs.occupancy build --scenes all --validate --resume",
-            "-m vpd.e3vs.bfs_demos --split train --procs 12 --collides vpd.e3vs.occupancy:load_collider --tag occ",
+            "-m vpd.e3vs.mesh_collision validate --scenes all",
+            "-m vpd.e3vs.bfs_demos --split train --procs 12 --collides vpd.e3vs.mesh_collision:load_collider "
+            "--tag mesh",
             "-m vpd.e3vs.bfs_demos --split val --procs 12",
             "-m vpd.e3vs.bfs_demos --split test --procs 12",
-            "-m vpd.e3vs.floors --collides vpd.e3vs.occupancy:load_collider --tag occ",
+            "-m vpd.e3vs.floors --collides vpd.e3vs.mesh_collision:load_collider --tag mesh",
             "-m vpd.e3vs.make_sft all --seed 1001 --tiers 100 --overwrite"]
     pos = []
     for w in want:
@@ -1323,31 +1328,51 @@ def test_prep_payload_dry_run(scratch):
     assert [c.split()[1].split("/")[-1] for c in cmds if c.startswith("stamp ")] == \
         ["bfs_train", "bfs_val", "bfs_test", "floors", "sft"]
     steps = [json.loads(x) for x in open(run / "steps.jsonl")]
-    assert [s["name"] for s in steps] == ["guard", "inputs", "gsplat_probe", "parity", "occupancy", "bfs_train",
+    assert [s["name"] for s in steps] == ["guard", "inputs", "gsplat_probe", "parity", "mesh_val", "bfs_train",
                                           "bfs_val", "bfs_test", "floors", "sft"]
     assert all(s["rc"] == 0 for s in steps) and not (paths.E3VS_OUT / "PREP_DONE").exists()
+    assert not any("occupancy" in c for c in cmds) and not list(root.iterdir())  # a dry run writes nothing there
+    text = (JOBS / "e3vs_prep.sh").read_text()
+    assert "unset VPD_E3VS_MESH_ROOT VPD_E3VS_MESH_MANIFEST VPD_E3VS_MESH_VAL_DIR" in text  # production: OUT only
     # 2.0 GPU-h = 7200 s: outer 6900 + kill 120 ends 180 s early (container start / teardown headroom)
     assert "deadline=6720s" in r.stdout and "timeout -k 120 6900 bash" in (JOBS / "e3vs_prep.sh").read_text()
     assert "7080" not in (JOBS / "e3vs_prep.sh").read_text()
 
 
+def _mesh_root(root: Path, sids) -> str:
+    """Synthetic mesh files + a mesh_verify manifest + a passing validation.json under root; returns the key."""
+    from vpd.tests.test_e3vs_mesh_verify import write_ply
+
+    for s in sids:
+        write_ply(MC.mesh_path(s, root / "mesh_dl"))
+    ids = root / "ids.txt"
+    ids.write_text("".join(f"{s}\n" for s in sids))
+    man = MV.verify(root / "mesh_dl", ids, root, expected=list(sids))
+    assert man["ok"], man["problems"]
+    shas = {s: r["sha256"] for s, r in man["scenes"].items()}
+    (root / "mesh_val").mkdir(parents=True, exist_ok=True)
+    (root / "mesh_val" / "validation.json").write_text(json.dumps(fake_mesh_validation(shas)))
+    return man["mesh_set_sha256"]
+
+
 def test_prep_payload_resumes(scratch):
-    """A resubmitted prep job skips the steps whose outputs are current; a new KEY (other grids) reruns them."""
+    """A resubmitted prep job (a NEW RUN) skips the steps whose outputs are current, gsplat_probe and parity
+    included; another mesh set (a new KEY) reruns the mesh validation and everything after it."""
     root = scratch / "prep_resume_e3vs"
     sid = "00dd871005"
-    g = OC.Grid(OC.pack(np.array([[0, 0, 0], [1, 2, 3]])), meta={"scene_id": sid})
-    sha = g.save(OC.occ_path(sid, root / "occ"))
-    key = OC.grids_key({sid: sha})
-    (root / "occ" / "validation.json").write_text(json.dumps({"pass": True, "scenes": {sid: {"sha256": sha}},
-                                                              "grids_sha256": key}))
+    key = _mesh_root(root, [sid])
+    assert key == MV.mesh_set_sha256({sid: E.sha256_file(MC.mesh_path(sid, root / "mesh_dl"))})
     (root / "parity").mkdir(parents=True)
     (root / "parity" / f"parity_{sid}.json").write_text(json.dumps({"pass": True}))
+    (root / "parity" / "gsplat_probe_prep.json").write_text(json.dumps({"extension_loaded": True}))
+    (root / "torch_ext" / "gsplat_cuda").mkdir(parents=True)
+    (root / "torch_ext" / "gsplat_cuda" / "gsplat_cuda.so").write_bytes(b"\x7fELF")
     for sp in ("train", "val", "test"):
-        (root / "bfs" / "occ" / sp).mkdir(parents=True)
+        (root / "bfs" / "mesh" / sp).mkdir(parents=True)
         for f in ("summary.json", "opt_len.json"):
-            (root / "bfs" / "occ" / sp / f).write_text("{}")
+            (root / "bfs" / "mesh" / sp / f).write_text("{}")
     (root / "floors").mkdir()
-    (root / "floors" / "floors_occ.json").write_text("{}")
+    (root / "floors" / "floors_mesh.json").write_text("{}")
     (root / "sft" / "seed1001").mkdir(parents=True)
     for f in ("warmup20.jsonl", "order_seed1001.json", "seed1001/demos_100.jsonl"):
         (root / "sft" / f).write_text("{}\n")
@@ -1358,26 +1383,53 @@ def test_prep_payload_resumes(scratch):
     r = _dry("e3vs_prep.sh", [], scratch / "prep_resume_run1", **env)
     assert r.returncode == 0, r.stdout + r.stderr
     cmds = _dry_cmds(r.stdout)
-    assert not any(w in c for c in cmds for w in ("--parity", "occupancy build", "bfs_demos", "floors", "make_sft",
-                                                  "stamp "))
+    assert not any(w in c for c in cmds for w in ("--probe", "--parity", "mesh_collision validate", "bfs_demos",
+                                                  "floors", "make_sft", "stamp "))
     assert all(f"{s}: outputs exist and are current, skipped" in r.stdout for s in
-               ("parity", "occupancy", "bfs_train", "bfs_val", "bfs_test", "floors", "sft"))
-    assert any("--probe" in c for c in cmds)  # the B18 probe always runs
-    # a floors stamp from other grids: only floors reruns
+               ("gsplat_probe", "parity", "mesh_val", "bfs_train", "bfs_val", "bfs_test", "floors", "sft"))
+    # the probe reruns when its build is gone, or when the probe file says the extension did not load
+    (root / "torch_ext" / "gsplat_cuda" / "gsplat_cuda.so").unlink()
+    r1b = _dry("e3vs_prep.sh", [], scratch / "prep_resume_run1b", **env)
+    assert [c for c in _dry_cmds(r1b.stdout) if "--probe --out " + str(root / "parity") in c]
+    (root / "torch_ext" / "gsplat_cuda" / "gsplat_cuda.so").write_bytes(b"\x7fELF")
+    (root / "parity" / "gsplat_probe_prep.json").write_text(json.dumps({"extension_loaded": False}))
+    r1c = _dry("e3vs_prep.sh", [], scratch / "prep_resume_run1c", **env)
+    assert [c for c in _dry_cmds(r1c.stdout) if "--probe" in c]
+    (root / "parity" / "gsplat_probe_prep.json").write_text(json.dumps({"extension_loaded": True}))
+    # a floors stamp from other meshes: only floors reruns
     (root / "prep_state" / "floors").write_text("other\n")
     r2 = _dry("e3vs_prep.sh", [], scratch / "prep_resume_run2", **env)
     cmds2 = _dry_cmds(r2.stdout)
     assert [c for c in cmds2 if "-m vpd.e3vs.floors" in c] and not any("bfs_demos" in c or "make_sft" in c
                                                                        for c in cmds2)
-    # a changed grid: occupancy check fails, the build runs (resume), and everything after it reruns
-    with open(OC.occ_path(sid, root / "occ"), "ab") as f:
+    # a changed mesh: the mesh check fails, the validation runs, and everything after it reruns
+    with open(MC.mesh_path(sid, root / "mesh_dl"), "ab") as f:
         f.write(b"x")
     r3 = _dry("e3vs_prep.sh", [], scratch / "prep_resume_run3", **env)
     cmds3 = _dry_cmds(r3.stdout)
-    for w in ("occupancy build --scenes all --validate --resume", "bfs_demos --split train", "-m vpd.e3vs.floors",
+    for w in ("mesh_collision validate --scenes all", "bfs_demos --split train", "-m vpd.e3vs.floors",
               "make_sft all"):
         assert any(w in c for c in cmds3), (w, cmds3)
-    assert not any("--parity" in c for c in cmds3)
+    assert not any("--parity" in c or "--probe" in c for c in cmds3)
+
+
+def test_prep_payload_stops_on_a_failed_mesh_validation(scratch):
+    """'验证不过就停下问我': a validate exit 1 (gating metric >= 1 %) or 2 (refused) ends the job, nothing after it
+    runs, no PREP_DONE."""
+    run = scratch / "prep_meshfail"
+    root = scratch / "prep_meshfail_e3vs"
+    root.mkdir()
+    text = (JOBS / "e3vs_prep.sh").read_text()
+    body = text[text.index("mesh_step() {"):text.index("bfs_split() {")]
+    assert 'x "$PY" -m vpd.e3vs.mesh_collision validate --scenes all || rc=$?' in body
+    for rc in (1, 2):
+        stub = scratch / f"x_rc{rc}.sh"  # the step's command fails like validate would
+        stub.write_text(f"DRY=0\nKEY=\nE3VS={root}\nMESH_SCENES=all\nPY=false\nskip() {{ :; }}\n"
+                        f"x() {{ return {rc}; }}\nmesh_key() {{ :; }}\n" + body + "mesh_step; echo rc=$?\n")
+        r = subprocess.run(["bash", str(stub)], capture_output=True, text=True, timeout=60)
+        assert f"rc={rc}" in r.stdout and "the job stops here; to the user" in r.stderr, (r.stdout, r.stderr)
+    # the payload calls the step at top level under set -e: a failing step ends the job
+    assert "\nstep mesh_val mesh_step\n" in text and "set -euo pipefail" in (JOBS / "common_env.sh").read_text()
 
 
 ROOMY = {"VPD_FAKE_FREE_GIB": "/tmp=100,/dev/shm=100"}

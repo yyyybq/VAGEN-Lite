@@ -2,7 +2,7 @@
 # sco payload of jobs vpd-e3vs-q3b / vpd-e3vs-q3s / vpd-e3vs-e2 (AS ROOT: the Q3B blobs are root-only; outputs are
 # chowned back to 20325 at EXIT):
 #     timeout -k 120 9780 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_start.sh START RUN
-# Prepared by the orchestrator only after vpd-e3vs-prep passed (parity, occupancy validation) and the user's OK:
+# Prepared by the orchestrator only after vpd-e3vs-prep passed (parity, mesh validation) and the user's OK:
 #     python -m vpd.sco prepare --run OUT/jobs/e3vs-q3s-<yyyymmddHHMM> --name vpd-e3vs-q3s --as-root --est-gph 2.8 -- \
 #         timeout -k 120 9780 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_start.sh Q3S \
 #         OUT/jobs/e3vs-q3s-<yyyymmddHHMM>
@@ -20,11 +20,16 @@
 # on with what does not depend on it (train_0W failed: no train_100, no 0W / 100 evals; train_100 or merge failed:
 # that tier's eval is skipped); the job then exits 1 without RUN/DONE.  A step whose output exists is skipped, so a
 # resubmitted job resumes: finished adapters and every eval with a results.json are not redone; each eval session
-# that is redone pays its vLLM start (~0.03-0.05 GPU-h) and its 21 test PLY + grid loads again.
+# that is redone pays its vLLM start (~0.03-0.05 GPU-h) and its 21 test PLY + mesh loads again.
 #   guard       PREREG_E3VS_PILOT.md committed and clean (from a code snapshot RUN/code: the job's copy equals the file
-#               of the snapshot's commit, vpd_snapshot_file); prep finished (OUT/e3vs/PREP_DONE), occupancy validation
-#               and every parity file pass, the SFT files exist; a job-local merge base with >= 40 GiB free
-#               (DECISIONS B11: /tmp/vpd_merged, else /dev/shm/vpd_merged; chosen once, before any training)
+#               of the snapshot's commit, vpd_snapshot_file); prep finished (OUT/e3vs/PREP_DONE), the mesh validation
+#               (OUT/e3vs/mesh_val/validation.json) and every parity file pass, the SFT and floor files exist;
+#               `mesh_collision check --scenes all` passes (same definition, every mesh unchanged, key == the
+#               manifest's) and its mesh_set_sha256 == the prep stamps prep_state/floors and prep_state/sft (the
+#               key J5 validated and built the floor and the demos with; any other mesh set is refused); a
+#               job-local merge base with >= 40 GiB free (DECISIONS B11: /tmp/vpd_merged, else /dev/shm/vpd_merged;
+#               chosen once, before any training).  open3d (the official collision model) comes from O3D_DIR =
+#               OUT/envs/e3vs-o3d, appended to PYTHONPATH; run.py re-checks every test scene's mesh sha256.
 #   gsplat      copy OUT/e3vs/torch_ext (the prep job's build) to job-local $TORCH_EXTENSIONS_DIR, then the B18 probe
 #               -> RUN/gsplat_probe.json (as root: does gsplat rebuild, how long); every eval copies it into its
 #               manifest (run.py --gsplat-probe)
@@ -53,7 +58,7 @@
 # Cost model (estimate, unmeasured until the prep job reports PLY load times; GPU-h per start job):
 #   setup + probe 0.05, train 0W 0.1, train 100 0.2-0.3, 2 CPU merges 0.1-0.2, raw/u 0.35-0.55 (never-stop raw
 #   models: 377 x 25 decisions), 0W/u 0.25-0.45, 100/u+c one session 0.25-0.45; each eval adds a vLLM start
-#   (~0.03-0.05) and 21 test PLY + grid loads (once per eval thanks to the refcounted cache) -> 1.3-2.2 vs the
+#   (~0.03-0.05) and 21 test PLY + mesh loads (once per eval thanks to the refcounted cache) -> 1.3-2.2 vs the
 #   2.8 reservation.
 
 START=${1:-}
@@ -67,6 +72,17 @@ export RUN
 # shellcheck source=common_env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 unset VPD_E3VS_REPO
+unset VPD_E3VS_OCC_DIR VPD_E3VS_MESH_ROOT VPD_E3VS_MESH_MANIFEST VPD_E3VS_MESH_VAL_DIR  # OUT/e3vs only
+# open3d for the official collision model (== vpd.e3vs.mesh_collision.O3D_DIR; test_e3vs_mesh_collision checks).
+# Appended: PYTHONPATH still starts with the code tree.  A numpy / torch copy in it would shadow the env's.
+O3D_DIR=$VPD_OUT/envs/e3vs-o3d
+for d in numpy torch; do
+  if [[ -e $O3D_DIR/$d ]]; then
+    echo "[e3vs] $O3D_DIR/$d would shadow PY_Q3's $d (install open3d there with --no-deps)" >&2
+    exit 2
+  fi
+done
+export PYTHONPATH="$PYTHONPATH:$O3D_DIR"
 
 DRY=${VPD_DRYRUN:-0}
 OPTIONAL=${VPD_OPTIONAL:-0}
@@ -211,23 +227,41 @@ guard() {
   else
     echo "$c" > "$RUN/prereg_commit.txt"
   fi
-  for f in "$E3VS/PREP_DONE" "$SFT/warmup20.jsonl" "$SFT/seed$SEED/demos_100.jsonl" "$E3VS/floors/floors_occ.json" \
-           "$E3VS/occ/validation.json"; do
+  for f in "$E3VS/PREP_DONE" "$SFT/warmup20.jsonl" "$SFT/seed$SEED/demos_100.jsonl" "$E3VS/floors/floors_mesh.json" \
+           "$E3VS/mesh_val/validation.json"; do
     [[ -s $f ]] || { echo "[e3vs] missing $f" >&2; bad=1; }
   done
   if ! "$PY_Q3" - "$E3VS" <<'PY'
 import json, sys
 from pathlib import Path
 e3 = Path(sys.argv[1])
-v = e3 / "occ" / "validation.json"
+v = e3 / "mesh_val" / "validation.json"
 ok = v.exists() and json.loads(v.read_text()).get("pass") is True
 par = sorted((e3 / "parity").glob("parity_*.json"))
 ok = ok and bool(par) and all(json.loads(p.read_text()).get("pass") is True for p in par)
-print(f"[e3vs] occupancy validation + parity pass: {ok}")
+print(f"[e3vs] mesh validation + parity pass: {ok}")
 sys.exit(0 if ok else 1)
 PY
   then
     bad=1
+  fi
+  # the mesh set key: the current meshes are the validated ones, and the floor / demos were built on them
+  local key st k
+  key=$("$PY_Q3" -m vpd.e3vs.mesh_collision check --scenes all | tail -n 1) || key=
+  if [[ -z $key ]]; then
+    echo "[e3vs] mesh check failed (python -m vpd.e3vs.mesh_collision check --scenes all)" >&2
+    bad=1
+  else
+    for st in floors sft; do
+      k=$(cat "$E3VS/prep_state/$st" 2>/dev/null || true)
+      if [[ $k != "$key" ]]; then
+        echo "[e3vs] prep_state/$st '${k}' != the validated mesh set $key: refusing" >&2
+        bad=1
+      fi
+    done
+    if [[ $bad == 0 ]]; then
+      echo "[e3vs] mesh set $key (validated; floor and SFT stamped with it)"
+    fi
   fi
   # B11, before any GPU time is spent: a merge that is still needed has a job-local base with >= 40 GiB
   # shellcheck disable=SC2086
